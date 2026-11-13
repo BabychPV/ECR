@@ -205,6 +205,21 @@ export function buildIssueCauses(rows: UnmatchedRows, tables: readonly DocumentT
   return [...causes.values()].map(freeze).sort((a, b) => order[a.kind] - order[b.kind]);
 }
 
+/**
+ * ✎ B78 F13 P3-3: сервер віддає не більше `CalculationIssuesDto.MaxFormulaErrors` записів, а `formulaErrorTotal` —
+ * УСІ видимі комірки. Записи покривають комірки так: власна помилка — 1 + її не оновлені залежні, «не оновлено» з
+ * прихованим коренем — `dependentCount`. Без стелі сума дорівнює `formulaErrorTotal`; менша — частину записів відкинуто,
+ * і лічильники причин — нижня межа («N+»).
+ */
+export function formulaErrorsTruncated(rows: UnmatchedRows): boolean {
+  const represented = rows.formulaErrors.reduce(
+    (sum, error) => sum + (error.kind === 'Error' ? 1 + error.dependentCount : Math.max(1, error.dependentCount)),
+    0,
+  );
+
+  return (rows.formulaErrorTotal ?? 0) > represented;
+}
+
 /** Перші `limit` назв через кому і «…», якщо є ще. */
 export function namesOf(names: readonly string[], limit = 3): string {
   const shown = names.slice(0, limit).join(', ');

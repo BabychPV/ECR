@@ -7,7 +7,13 @@ import { formatPeriodKey } from '@/shared/format/periodKey';
 import { language, t } from '@/shared/i18n';
 import { FormulaErrorsBanner } from './FormulaErrorsBanner';
 import { UnmatchedRowsBanner, plural } from './UnmatchedRowsBanner';
-import { buildIssueCauses, namesOf, type IssueCause, type IssueTarget } from './calculationIssuesPanelModel';
+import {
+  buildIssueCauses,
+  formulaErrorsTruncated,
+  namesOf,
+  type IssueCause,
+  type IssueTarget,
+} from './calculationIssuesPanelModel';
 import type { UnmatchedRows } from './useUnmatchedRows';
 
 interface CalculationIssuesPanelProps {
@@ -27,15 +33,18 @@ interface CalculationIssuesPanelProps {
   readonly narrow?: boolean;
 }
 
-/** «N клітинок» мовою інтерфейсу (`Intl.PluralRules`; ключі літералами — сторож каталогу). */
-function cellsText(count: number): string {
+/**
+ * «N клітинок» мовою інтерфейсу (`Intl.PluralRules`; ключі літералами — сторож каталогу). ✎ F13 P3-3: `atLeast` —
+ * перелік обрізано сервером, кількість — нижня межа: «N+ cells» (форма множини).
+ */
+function cellsText(count: number, atLeast = false): string {
   let category: string;
   try {
-    category = new Intl.PluralRules(language() === 'kz' ? 'kk' : language()).select(count);
+    category = atLeast ? 'other' : new Intl.PluralRules(language() === 'kz' ? 'kk' : language()).select(count);
   } catch {
     category = count === 1 ? 'one' : 'other';
   }
-  const params = { count: String(count) };
+  const params = { count: atLeast ? `${String(count)}+` : String(count) };
   if (category === 'one') return t('document.calcIssues.cells.one', params);
   if (category === 'few') return t('document.calcIssues.cells.few', params);
 
@@ -114,6 +123,7 @@ export function CalculationIssuesPanel({
   if (causes.length === 0) return null;
 
   const blocking = rows.formulaErrors.length > 0;
+  const truncated = formulaErrorsTruncated(rows);
   const period = formatPeriodKey(periodKey);
   const detailsId = 'document-calc-issues-details';
 
@@ -158,7 +168,9 @@ export function CalculationIssuesPanel({
         {causes.map((cause) => {
           const title = causeTitle(cause);
           const detail = causeDetail(cause);
-          const badge = cause.unit === 'cells' ? cellsText(cause.count) : plural('document.unmatchedRows.rows', cause.count);
+          const atLeast = cause.unit === 'cells' && truncated;
+          const badge =
+            cause.unit === 'cells' ? cellsText(cause.count, atLeast) : plural('document.unmatchedRows.rows', cause.count);
 
           return (
             <Group
@@ -177,6 +189,7 @@ export function CalculationIssuesPanel({
                 miw={88}
                 style={{ flexShrink: 0 }}
                 data-testid="document-calc-issue-count"
+                data-at-least={atLeast ? 'true' : undefined}
               >
                 {badge}
               </Badge>

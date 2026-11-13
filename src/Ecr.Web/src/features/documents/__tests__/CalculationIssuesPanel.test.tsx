@@ -172,6 +172,32 @@ describe('CalculationIssuesPanel (B78)', () => {
     expect(screen.queryByTestId('document-calc-issue-hse400-missing')).toBeNull();
   });
 
+  it('✎ F13 P3-3: сервер обрізав перелік (formulaErrorTotal більший за покриті записами комірки) — бейдж «N+»', () => {
+    show(
+      rowsOf({
+        formulaErrors: [hse400(1, 'Density', 'Gas density', 'Diesel'), { ...hse400(2, 'Density', 'Gas density', 'Diesel'), dependentCount: 1 }],
+        formulaErrorTotal: 1200,
+      }),
+    );
+
+    const badge = screen.getByTestId('document-calc-issue-count');
+    expect(badge.getAttribute('data-at-least')).toBe('true');
+    expect(badge.textContent).toContain('document.calcIssues.cells.other (count=3+)');
+  });
+
+  it('✎ F13 P3-3: перелік повний (сума записів = formulaErrorTotal) — точна кількість без «+»', () => {
+    show(
+      rowsOf({
+        formulaErrors: [hse400(1, 'Density', 'Gas density', 'Diesel'), { ...hse400(2, 'Density', 'Gas density', 'Diesel'), dependentCount: 1 }],
+        formulaErrorTotal: 3,
+      }),
+    );
+
+    const badge = screen.getByTestId('document-calc-issue-count');
+    expect(badge.getAttribute('data-at-least')).toBeNull();
+    expect(badge.textContent).toContain('(count=3)');
+  });
+
   it('рядки поза розрахунком — причина «рядки», інформаційний тон, «Показати рядки» відкриває перший', async () => {
     const onOpenCell = show(rowsOf({ issues: [issue(1, 2), issue(1, 5)] }));
 
