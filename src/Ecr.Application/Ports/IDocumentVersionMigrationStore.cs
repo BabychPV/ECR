@@ -182,6 +182,16 @@ public interface IDocumentVersionMigrationStore
     public Task<int> CountSheetCopiesAsync(int projectId, IReadOnlyCollection<int> sheetDefIds, CancellationToken ct);
 
     /// <summary>
+    /// D-10-b: скільки передач зрізу (<c>doc.EditAssignment</c>) проєкту, які перенос перейменував би з таблиці
+    /// <c>X</c> на <c>Y</c> (пункти <c>Renamed</c> мапи), дали б ключ зрізу, що в документі вже зайнятий (наявна
+    /// передача під <c>Y</c>) — запис упав би на <c>UQ_EditAssignment</c>. Без мапи перейменувань — 0 без звернення.
+    /// </summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="plan">План переносу (пункти перейменування й «з місяця»).</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<int> CountAssignmentRenameConflictsAsync(int projectId, VersionMigrationPlan plan, CancellationToken ct);
+
+    /// <summary>
     /// Скільки АКТИВНИХ прив'язок методологій до колонок вихідної версії не переїде: колонка не має
     /// відповідника в цільовій версії (<paramref name="columnMap"/>) або на відповідній колонці немає
     /// активної прив'язки тієї ж методології й виходу (D-13).

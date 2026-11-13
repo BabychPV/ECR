@@ -164,6 +164,9 @@ public sealed partial class DocumentVersionMigrationTests
         public Task<int> CountSheetCopiesAsync(int projectId, IReadOnlyCollection<int> sheetDefIds, CancellationToken ct)
             => inner.CountSheetCopiesAsync(projectId, sheetDefIds, ct);
 
+        public Task<int> CountAssignmentRenameConflictsAsync(int projectId, VersionMigrationPlan plan, CancellationToken ct)
+            => inner.CountAssignmentRenameConflictsAsync(projectId, plan, ct);
+
         public Task<int> CountUnmappedBindingsAsync(
             int sourceVersionId, IReadOnlyDictionary<int, int> columnMap, CancellationToken ct)
             => inner.CountUnmappedBindingsAsync(sourceVersionId, columnMap, ct);
