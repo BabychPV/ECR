@@ -124,6 +124,7 @@ public sealed class OutboundConnectionPolicyTests
         OwnDb("src/Ecr.Infrastructure/Localization/UiStringCatalogStore.cs", 10),
         OwnDb("src/Ecr.Infrastructure/Persistence/ConsistencyIssueReader.cs", 2),
         OwnDb("src/Ecr.Infrastructure/Persistence/AuditReader.cs", 12),        // +1: підсумок журналу (UI-38 C2); +3: підрахунок безпеки/погодження для стелі експорту, журнал погодження
+        OwnDb("src/Ecr.Infrastructure/Persistence/AuditReader.Lineage.cs", 1), // B49: значок поза вікном з родоводом колонки (база застосунку)
         OwnDb("src/Ecr.Infrastructure/Persistence/AuditWriter.cs", 1),
         OwnDb("src/Ecr.Infrastructure/Persistence/RowChangeAudit.cs", 1),      // журнал рядків: читання журналу аркуша
         OwnDb("src/Ecr.Infrastructure/Persistence/RuleCoverageReader.cs", 1),
