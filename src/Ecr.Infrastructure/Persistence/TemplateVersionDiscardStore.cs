@@ -29,12 +29,16 @@ public sealed class TemplateVersionDiscardStore(EcrDbContext db) : ITemplateVers
         "cfg.TableRelationDef", "cfg.PeriodAccessRuleDef", "cfg.CalculationBinding", "cfg.PermitSheetBinding",
         "cfg.PermitSheetBindingColumn", "cfg.ConditionalFormatRule", "cfg.SheetGroupRule", "cfg.HeaderFieldDef",
         "cfg.StyleDef", "sec.ResourceGrant",
+
+        // Land-year L0 (таблиця з PT01): псевдоніми аргументів методологій на місячні колонки — конфігурація версії.
+        "cfg.MonthInputAlias",
     };
 
     /// <summary>Таблиці поза конфігурацією версії: рядок, що посилається на версію, — відмова.</summary>
     public static readonly IReadOnlySet<string> UsageTables = new HashSet<string>(StringComparer.Ordinal)
     {
         "doc.Project", "doc.ProjectTemplateVersion", "cfg.TemplateVersion", "wf.ApprovalRoute",
+        "doc.ProjectTemplate",   // B74 PT01: версія — чинна версія шаблону в проєкті
         "calc.SubmissionSnapshot", "doc.DocumentSheet", "wf.ApprovalEvent", "wf.ApprovalState",
         "ext.LegacySheetMapping", "doc.TableInstance", "arc.TableInstance", "ext.LegacyTableMapping",
         "ext.RowWindowMap", "ext.SourceEventMap", "doc.DocumentHeaderValue",
@@ -79,6 +83,8 @@ public sealed class TemplateVersionDiscardStore(EcrDbContext db) : ITemplateVers
 
         INSERT @out SELECT N'doc.Project', COUNT(*) FROM doc.Project WHERE TemplateVersionId = @v;
         INSERT @out SELECT N'doc.ProjectTemplateVersion', COUNT(*) FROM doc.ProjectTemplateVersion WHERE TemplateVersionId = @v;
+        -- B74 PT01: версія, що є чинною версією шаблону в проєкті, використовується (FK_ProjectTemplate_TemplateVersion).
+        INSERT @out SELECT N'doc.ProjectTemplate', COUNT(*) FROM doc.ProjectTemplate WHERE CurrentTemplateVersionId = @v;
         INSERT @out SELECT N'cfg.TemplateVersion', COUNT(*) FROM cfg.TemplateVersion WHERE ClonedFromVersionId = @v;
         INSERT @out SELECT N'wf.ApprovalRoute', COUNT(*) FROM wf.ApprovalRoute WHERE TemplateVersionId = @v;
         INSERT @out SELECT N'calc.SubmissionSnapshot', COUNT(*) FROM calc.SubmissionSnapshot
@@ -140,6 +146,8 @@ public sealed class TemplateVersionDiscardStore(EcrDbContext db) : ITemplateVers
             WHERE TemplateVersionId = @v OR SheetDefId IN (SELECT Id FROM @S)
                OR TableDefId IN (SELECT Id FROM @T) OR SourceColumnDefId IN (SELECT Id FROM @C);
         INSERT @out VALUES (N'cfg.PeriodAccessRuleDef', @@ROWCOUNT);
+        DELETE FROM cfg.MonthInputAlias WHERE TableDefId IN (SELECT Id FROM @T) OR ColumnDefId IN (SELECT Id FROM @C);
+        INSERT @out VALUES (N'cfg.MonthInputAlias', @@ROWCOUNT);
         DELETE FROM cfg.CalculationBinding WHERE TableDefId IN (SELECT Id FROM @T) OR ColumnDefId IN (SELECT Id FROM @C);
         INSERT @out VALUES (N'cfg.CalculationBinding', @@ROWCOUNT);
         DELETE FROM cfg.PermitSheetBindingColumn WHERE BindingId IN (SELECT Id FROM @B) OR SheetColumnDefId IN (SELECT Id FROM @C);

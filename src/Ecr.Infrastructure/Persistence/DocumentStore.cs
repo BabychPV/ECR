@@ -1271,6 +1271,15 @@ public sealed class DocumentStore(
             .ConfigureAwait(false);
 
     /// <inheritdoc />
+    public async Task<int?> FindTemplateIdOfVersionAsync(int templateVersionId, CancellationToken ct)
+        => await db.TemplateVersions
+            .AsNoTracking()
+            .Where(v => v.Id == templateVersionId)
+            .Select(v => (int?)v.TemplateId)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
     /// <remarks>
     /// ⚠ Той самий блок, що й <c>DocumentVersionMigrationStore.LockProjectVersionAsync</c>:
     /// <c>UPDLOCK, HOLDLOCK, ROWLOCK</c> на рядку <c>doc.Project</c>. Версія читається цим самим
