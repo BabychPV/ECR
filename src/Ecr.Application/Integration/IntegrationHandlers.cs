@@ -506,8 +506,8 @@ public sealed class ListJobsHandler(
 }
 
 /// <summary>
-/// Ручний перезапуск проваленої фонової задачі. Право <c>System.ViewHealth</c>
-/// — або автор ВЛАСНОЇ задачі (директива №11, T10 #40; UX-09).
+/// Ручний перезапуск проваленої фонової задачі. Чужу чи системну — право <c>System.RunJob</c>
+/// (S-2, D-496); свою — автор (з <c>System.ViewHealth</c> або за L1-19; директива №11, T10 #40; UX-09).
 /// </summary>
 /// <remarks>
 /// ⛔ До цього обробника провалену задачу МІГ повторити лише автоматичний
@@ -529,8 +529,7 @@ public sealed class ListJobsHandler(
 /// без небезпечного <c>System.RunJob</c> і його обов'язкової причини. Тепер ці дві дії вимагають
 /// свого права від КОЖНОГО, хто повторює (<see cref="DangerousActionPermission"/>), а кожен
 /// повтор лягає в <c>aud.SecurityEvent</c> (<see cref="RestartedEventType"/>): хто повторив,
-/// чию задачу. Межа контракту §9 (<c>System.ViewHealth</c> для чужої задачі) не змінена —
-/// звуження до <c>System.RunJob</c> лишається рішенням людини.
+/// чию задачу. ✎ S-2 (рішення PO 11.11, D-496): для чужої чи системної задачі — <c>System.RunJob</c>.
 /// </para>
 /// </remarks>
 public sealed class RestartJobHandler(
@@ -577,44 +576,43 @@ public sealed class RestartJobHandler(
                 });
         }
 
-        // Автор повторює СВОЮ задачу без `System.ViewHealth` (UX-09, «Мої
-        // задачі»); чужу чи системну (автор `null`) — лише з правом.
+        // ⛔ S-2 (рішення PO 11.11, D-496): ЧУЖУ чи системну (автор `null`) задачу повторює лише носій
+        // `System.RunJob` (вбудований `SystemAdministrator` — із сіду `FP:sysadmin-rights`). СВОЮ — як і раніше:
+        // з `System.ViewHealth` або за L1-19 (`MayRepeatOwnAsync`: право на саму дію ще за автором; UX-09).
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
 
         var ownerId = await jobs.GetCreatedByUserIdAsync(jobId, ct).ConfigureAwait(false);
+        var own = ownerId is { } owner && owner == userId;
 
-        if (PermissionCheck.IsGranted(profile, GetJobStatusHandler.Permission))
+        var allowed = own
+            ? PermissionCheck.IsGranted(profile, GetJobStatusHandler.Permission)
+              || await MayRepeatOwnAsync(profile, jobId, status.DocumentId, ct).ConfigureAwait(false)
+            : PermissionCheck.IsGranted(profile, CancelJobHandler.ForeignJobPermission);
+
+        if (!allowed)
         {
-            // ⛔ R9-F3 / F3-02: збір, синк подій і перевірка узгодженості прав під час виконання не
-            // перевіряють — право на саму дію потрібне й власникові `System.ViewHealth`.
-            if (DangerousActionPermission(jobId) is { } required && !PermissionCheck.IsGranted(profile, required))
-            {
-                throw new AccessDeniedException(
-                    "ECR-AUTH-0403", $"Потрібне право {required}.",
-                    new Dictionary<string, object?>
-                    {
-                        ["messageKey"] = "err.ECR-AUTH-0403.permission",
-                        ["permission"] = required,
-                    });
-            }
+            // L1-19: відмова автору — та сама, що для чужої задачі: нічого про цільовий документ чи право на дію.
+            var required = own ? GetJobStatusHandler.Permission : CancelJobHandler.ForeignJobPermission;
+            throw new AccessDeniedException(
+                "ECR-AUTH-0403", $"Потрібне право {required}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-AUTH-0403.jobNotYours",
+                    ["permission"] = required,
+                });
         }
-        else
+
+        // ⛔ R9-F3 / F3-02: збір, синк подій і перевірка узгодженості прав під час виконання не
+        // перевіряють — право на саму дію потрібне від КОЖНОГО, хто повторює (і від носія `System.RunJob`).
+        if (DangerousActionPermission(jobId) is { } action && !PermissionCheck.IsGranted(profile, action))
         {
-            // L1-19: автор повторює лише те, на що право ЩЕ за ним (збір, синк подій та
-            // перевірка узгодженості прав під час виконання не перевіряють). Відмова —
-            // та сама, що для чужої задачі: нічого про цільовий документ чи право.
-            if (ownerId is null
-                || ownerId.Value != userId
-                || !await MayRepeatOwnAsync(profile, jobId, status.DocumentId, ct).ConfigureAwait(false))
-            {
-                throw new AccessDeniedException(
-                    "ECR-AUTH-0403", $"Потрібне право {GetJobStatusHandler.Permission}.",
-                    new Dictionary<string, object?>
-                    {
-                        ["messageKey"] = "err.ECR-AUTH-0403.jobNotYours",
-                        ["permission"] = GetJobStatusHandler.Permission,
-                    });
-            }
+            throw new AccessDeniedException(
+                "ECR-AUTH-0403", $"Потрібне право {action}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-AUTH-0403.permission",
+                    ["permission"] = action,
+                });
         }
 
         if (!string.Equals(status.State, "Failed", StringComparison.Ordinal))
@@ -699,8 +697,8 @@ public sealed class RestartJobHandler(
     /// </summary>
     /// <remarks>
     /// ⚠ Експорт та імпорт права перевіряють самі під час виконання — для них перевірки
-    /// тут немає. Невідомий тип — закрито: повторити його може лише власник
-    /// <c>System.ViewHealth</c>. Типи без документа й проєкту в стані (імпакт довідника,
+    /// тут немає. Невідомий тип — закрито: свою задачу невідомого типу автор повторює лише з
+    /// <c>System.ViewHealth</c>; чужу — лише носій <c>System.RunJob</c> (S-2). Типи без документа й проєкту в стані (імпакт довідника,
     /// скан сиріт) теж закриті: проєктне право без проєкту дало б «будь-де».
     /// </remarks>
     private async Task<bool> MayRepeatOwnAsync(
@@ -740,8 +738,8 @@ public sealed class RestartJobHandler(
 }
 
 /// <summary>
-/// Скасування фонової задачі. Право <c>System.ViewHealth</c> — або автор
-/// ВЛАСНОЇ задачі (Q-156, та сама межа, що в <see cref="GetJobStatusHandler"/>).
+/// Скасування фонової задачі. Чужу чи системну задачу — право <c>System.RunJob</c> (S-2, D-496); свою —
+/// автор без права (Q-156).
 /// </summary>
 /// <remarks>
 /// ⛔ До цього обробника довгу задачу не можна було зупинити НІЯК. Річний
@@ -752,12 +750,9 @@ public sealed class RestartJobHandler(
 /// оголошений у контракті §9, а сторож «жоден маршрут поза контрактом»
 /// блокуючий; тепер оголошений.
 /// <para>
-/// ⚠ Межа права — ТА САМА, що в <see cref="GetJobStatusHandler"/>, а не та, що
-/// в <see cref="RestartJobHandler"/>. Перезапуск — втручання в чергу системи
-/// (хтось полагодив причину провалу й вирішує за всіх, що спробувати варто);
-/// скасування ВЛАСНОЇ задачі — відмова від роботи, яку ти сам і замовив.
-/// Вимагати на неї <c>System.ViewHealth</c> означало б: оператор запустив
-/// двадцятихвилинний перерахунок помилково і не має способу його спинити.
+/// ⚠ Межа для ЧУЖОЇ задачі — <c>System.RunJob</c> (S-2, рішення PO 11.11): перегляд
+/// (<c>System.ViewHealth</c>) не змінює стан чужої роботи. Свою задачу автор скасовує без права —
+/// інакше помилково запущений двадцятихвилинний перерахунок нічим не спинити.
 /// </para>
 /// <para>
 /// ⚠ Скасування — ПРОХАННЯ, не вбивство: задача бачить
@@ -775,8 +770,8 @@ public sealed class CancelJobHandler(
 {
     /// <summary>Тип події журналу безпеки: скасування задачі.</summary>
     /// <remarks>
-    /// ⛔ R9-F3 / F3-02: власник <c>System.ViewHealth</c> (і «Аудитор») скасовує чужі задачі за
-    /// контрактом §9, але доти без жодного сліду — хто зупинив чужий перерахунок чи збір.
+    /// ⛔ R9-F3 / F3-02: власник <c>System.RunJob</c> скасовує чужі задачі (S-2),
+    /// але доти без жодного сліду — хто зупинив чужий перерахунок чи збір.
     /// </remarks>
     public const string CancelledEventType = "JobCancelled";
 
@@ -790,6 +785,13 @@ public sealed class CancelJobHandler(
     /// сусіднього обробника.
     /// </remarks>
     public const string NotActiveErrorCode = ErrorCodes.JobStateConflict;
+
+    /// <summary>
+    /// Право скасувати чи повторити ЧУЖУ або системну задачу (S-2, рішення PO 11.11, D-496): каталог — «Запуск і
+    /// скасування фонових задач». Вбудований <c>SystemAdministrator</c> має його з сіду (<c>FP:sysadmin-rights</c>,
+    /// D-388), тож «або роль адміністратора» окремої гілки не потребує (перевірка ролі — архітектурне правило 7).
+    /// </summary>
+    public const string ForeignJobPermission = Consistency.RunConsistencyCheckHandler.Permission; // "System.RunJob"
 
     /// <summary>Стани, у яких задачу ще є що скасовувати.</summary>
     /// <remarks>
@@ -805,7 +807,7 @@ public sealed class CancelJobHandler(
     /// <param name="jobId">Ідентифікатор задачі.</param>
     /// <param name="ct">Скасування самого запиту (не задачі).</param>
     /// <exception cref="NotFoundException">Задачі з таким ідентифікатором немає.</exception>
-    /// <exception cref="AccessDeniedException">Чужа задача без <c>System.ViewHealth</c>.</exception>
+    /// <exception cref="AccessDeniedException">Чужа чи системна задача без <c>System.RunJob</c>.</exception>
     /// <exception cref="BusinessRuleException">Задача вже в термінальному стані.</exception>
     public async Task HandleAsync(string jobId, CancellationToken ct)
     {
@@ -843,22 +845,19 @@ public sealed class CancelJobHandler(
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
         var ownerId = await jobs.GetCreatedByUserIdAsync(jobId, ct).ConfigureAwait(false);
 
-        if (!PermissionCheck.IsGranted(profile, GetJobStatusHandler.Permission))
+        // ⛔ S-2 (рішення PO 11.11, D-496): автор скасовує СВОЮ задачу без жодного права (Q-156); ЧУЖУ чи системну —
+        // лише носій `System.RunJob`. Безпечне `System.ViewHealth` («Аудитор», адміністратори шаблонів і періодів) —
+        // лише перегляд. ⚠ `null` (системна задача за розкладом) автором не є нікому — тест на це є.
+        var own = ownerId is { } owner && owner == userId;
+        if (!own && !PermissionCheck.IsGranted(profile, ForeignJobPermission))
         {
-            // Автор скасовує СВОЮ задачу без `System.ViewHealth`; чужу — ні.
-            // ⚠ `null` (системна задача за розкладом) автором не є нікому:
-            // порівняння з `int?` дало б `false`, але покладатися тут на
-            // семантику `Nullable` мовчки — не варто, і тест на це є.
-            if (ownerId is null || ownerId.Value != userId)
-            {
-                throw new AccessDeniedException(
-                    "ECR-AUTH-0403", $"Потрібне право {GetJobStatusHandler.Permission}.",
-                    new Dictionary<string, object?>
-                    {
-                        ["messageKey"] = "err.ECR-AUTH-0403.jobNotYours",
-                        ["permission"] = GetJobStatusHandler.Permission,
-                    });
-            }
+            throw new AccessDeniedException(
+                "ECR-AUTH-0403", $"Потрібне право {ForeignJobPermission}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-AUTH-0403.jobNotYours",
+                    ["permission"] = ForeignJobPermission,
+                });
         }
 
         // ⚠ Стан перевіряється ПІСЛЯ права: «задача вже завершилась» — це

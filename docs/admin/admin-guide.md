@@ -119,7 +119,7 @@ Known limitations (не цього циклу): (а) заборона, дода�
 | `Security.ViewAudit` | | журнал аудиту, `/admin/audit` | Auditor, SysAdm |
 | `Security.Simulate` | так | перегляд системи очима іншого користувача | SysAdm |
 | `System.ViewHealth` | | стан, задачі, узгодженість (`/admin/health`, `/admin/jobs`, `/admin/consistency`) | TemplateAdm, PeriodAdm, Auditor, SysAdm |
-| `System.RunJob` | так | ручний запуск системних задач, зокрема перевірки узгодженості | SysAdm |
+| `System.RunJob` | так | ручний запуск системних задач, зокрема перевірки узгодженості; скасування й повтор ЧУЖИХ і системних задач (S-2, D-496) | SysAdm |
 | `System.ManageLocalization` | | рядки інтерфейсу, `/admin/ui-strings` | SysAdm |
 | `System.ManageNotifications` | так | SMTP (панель «SMTP (outgoing mail)»), канали, правила й журнал доставок сповіщень, `/admin/notifications`; керує адресатами, паролем SMTP і секретами каналів | SysAdm |
 
@@ -893,8 +893,8 @@ SQL-запитом DBA.
 |---|---|---|
 | Перелік | `GET /api/v1/jobs?state&code&mine&limit` | `System.ViewHealth`; із `mine=true` — будь-хто, для своїх |
 | Одна задача | `GET /api/v1/jobs/{jobId}` | те саме |
-| Повтор | `POST /api/v1/jobs/{jobId}/restart` (202) | `System.ViewHealth` або автор задачі |
-| Скасування | `POST /api/v1/jobs/{jobId}/cancel` (202) | те саме |
+| Повтор | `POST /api/v1/jobs/{jobId}/restart` (202) | чужу чи системну — `System.RunJob` (є в `SystemAdministrator`); свою — автор |
+| Скасування | `POST /api/v1/jobs/{jobId}/cancel` (202) | чужу чи системну — `System.RunJob`; свою — автор |
 
 Ідентифікатор задачі має вигляд `IRecalculationJob-<guid>` або, для задачі на конкретну
 ціль, `IRecalculationJob~<ціль>~<guid>`; тик розкладу — `<Тип>:<відбиток>`

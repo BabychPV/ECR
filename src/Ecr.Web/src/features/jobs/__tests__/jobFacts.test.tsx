@@ -69,7 +69,9 @@ function mockFetch(status: unknown, rows: unknown[]): void {
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
-      const body = /\/api\/v1\/jobs\/[^/?]+/.test(url) ? status : rows;
+      // S-2 (`D-496`): сторінка читає профіль `/api/v1/me` (право `System.RunJob`, власність задачі).
+      const me = { userId: 7, userName: 'tester', permissions: ['System.ViewHealth'], denies: [], grants: {}, isSimulation: false, language: 'uk', mustChangePassword: false };
+      const body = url.endsWith('/api/v1/me') ? me : /\/api\/v1\/jobs\/[^/?]+/.test(url) ? status : rows;
 
       return new Response(JSON.stringify(body), {
         status: 200,

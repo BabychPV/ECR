@@ -4937,8 +4937,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/jobs?mine=true` | — (власні задачі) | 5 |
 | `GET` | `/api/v1/jobs/summary` | `System.ViewHealth` (або `mine=true` — власні задачі) | 5 |
 | `GET` | `/api/v1/jobs/{jobId}` | `System.ViewHealth` | 5 |
-| `POST` | `/api/v1/jobs/{jobId}/restart` | `System.ViewHealth` | 5 |
-| `POST` | `/api/v1/jobs/{jobId}/cancel` | `System.ViewHealth` | 5 |
+| `POST` | `/api/v1/jobs/{jobId}/restart` | `System.RunJob` (чужа чи системна задача, S-2/D-496; свою — автор з `System.ViewHealth` або за L1-19; повтор збору/синку — ще `Integration.Manage`) | 5 |
+| `POST` | `/api/v1/jobs/{jobId}/cancel` | `System.RunJob` (чужа чи системна задача, S-2/D-496; свою — автор без права, Q-156) | 5 |
 | `GET` | `/api/v1/sources` | `Integration.Manage` | 5 |
 | `POST` | `/api/v1/sources` | `Integration.Manage` | 7 |
 | `PUT` | `/api/v1/sources/{id}/registry` | `Integration.Manage` | 7 |

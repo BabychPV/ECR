@@ -160,8 +160,8 @@ export function useCancelJob(
 /**
  * Просить сервер повторити провалену задачу (UX-09).
  *
- * ⛔ Директива №11, T10 #40. Право `System.ViewHealth` — АБО автор ВЛАСНОЇ
- * задачі (`JobsController.Restart`, `RestartJobHandler`). Клієнт рішення не
+ * ⛔ Директива №11, T10 #40. Чужу чи системну задачу — право `System.RunJob`
+ * (S-2, `D-496`); свою — автор (`JobsController.Restart`, `RestartJobHandler`). Клієнт рішення не
  * дублює — але вже НЕ тому, що не може: комітом `a08ac58b` (22.09.2026)
  * `createdByUserId` додано і до `JobStatus`, і до `JobSummary`. Кнопку й далі
  * ховає той, хто її показує (`JobFacts.canRestartJob`/`JobRetry`) за
