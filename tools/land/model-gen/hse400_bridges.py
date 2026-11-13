@@ -293,19 +293,52 @@ def _apply_stream_aliases(out, sources, af_attrs):
 # складу -> continue). На T3_00 ці колонки вже ЄСТЬ як ручні Decimal (EXTRA у gen_ecr_model.py), тому apply() їх не бачить
 # (він працює лише зі списком unresolved). Нових колонок не додаємо - аргументи методології зв'язуються за кодом
 # колонки: наявну колонку лише перетипуємо Decimal -> Formula на тому самому місці.
+#
+# ✎ B89 (рішення людини 13.11, відповідь старої системи): ці чотири властивості читає ЛИШЕ C05_05 «Boilers – Gas»; рідке
+# паливо (дизель, гас, бензин) потоку HSE400 не має і в C05_05 не потрапляє (правило застосовності ECW_C05_05 -
+# лише газові палива, Build-LandTemplate.ps1 $rules). Для нього клітинки «не застосовується» - ПОРОЖНЬО без #N/A, подання
+# не блокують. Тому для T3_00 перехоплюється лише промах СЛОВНИКА ПОТОКІВ (паливо - не потік HSE400 -> NULL, а
+# REGFIND складу з NULL-частиною ключа дає NULL); газ без запису складу за місяць лишається #N/A. Охорона
+# `<назва палива> = NULL ? NULL :` обчислює назву Lookup ПОЗА IFERROR: її помилка (#REF невидимого запису) не ховається.
+# 'liquidFuels' - коди записів списку палива, яких немає в словнику потоків; генератор звіряє цей список (новий газ без
+# потоку був би тихо порожнім - зупиняємося).
 EXISTING_INPUT_BRIDGES = {
     'T3_00': {
         'source': ('Land_TypeFuel', 'Lookup'),
         'args': ['Density', 'FuelLowerHeating', 'MercaptanSulphurContent', 'H2Smass'],
         'evidence': 'ECW_C05_05.cs:73-130',
+        'fuelRegistry': 'LAND_STATIONARY_TYPE_OF_FUEL',
+        'liquidFuels': ['DIESEL', 'GASOLINE', 'KEROSENEJETFUEL'],
     },
 }
 
 
-def apply_existing_inputs(out):
+def _key(text):
+    """Канонічний текстовий ключ без регістру (як RegistryKeyNormalizer: обрізка, згортання пробілів, регістр)."""
+    return ' '.join((text or '').split()).upper()
+
+
+def not_applicable_composition_expression(stream_expr, indicator):
+    """B89: міст складу, де паливо поза словником потоків HSE400 дає NULL («не застосовується»), а не #N/A."""
+    stream = "REGFIELD(IFERROR(REGFIND('%s', %s), NULL), 'PREFIX')" % (STREAM_REGISTRY, stream_expr)
+    return "%s = NULL ? NULL : REGFIELD(REGFIND('%s', [Period].Year, [Period].Sequence, %s, '%s'), 'VALUE')" % (
+        stream_expr, COMPOSITION_REGISTRY, stream, indicator)
+
+
+def _check_liquid_fuels(registries, tcode, spec):
+    fuels = registries.get(spec['fuelRegistry'], {}).get('entries', [])
+    streams = {_key(e['fields']['TEXT']) for e in registries[STREAM_REGISTRY]['entries']}
+    missing = sorted(e['code'] for e in fuels if _key(e['name']) not in streams)
+    if not fuels or missing != sorted(spec['liquidFuels']):
+        raise SystemExit('hse400: %s: поза словником потоків %s, очікувалось рідке паливо %s'
+                         % (tcode, missing, sorted(spec['liquidFuels'])))
+
+
+def apply_existing_inputs(out, registries):
     """Перетипує наявні ручні Decimal-колонки в мости HSE400 (EXISTING_INPUT_BRIDGES). Повертає кількість колонок.
 
     Викликається ПІСЛЯ apply() (довідники LAND_HSE400_* уже в registries) і ДО округлення precision/scale 34/16.
+    B89: для таблиць із 'liquidFuels' міст - not_applicable_composition_expression (рідке паливо - порожньо).
     """
     by_code = {}
     for s_ in out['sheets']:
@@ -320,13 +353,17 @@ def apply_existing_inputs(out):
         if name not in cols or cols[name]['dataType'] != kind:
             raise SystemExit('hse400: %s: колонка-джерело потоку %s (%s) відсутня' % (tcode, name, kind))
         stream_expr = '[%s]' % name if kind == 'String' else "REGFIELD([%s], 'NAME')" % name
+        liquid = 'liquidFuels' in spec
+        if liquid:
+            _check_liquid_fuels(registries, tcode, spec)
+        build = not_applicable_composition_expression if liquid else composition_expression
         for arg in spec['args']:
             c = cols.get(arg)
             if c is None or c['dataType'] != 'Decimal':
                 raise SystemExit('hse400: %s: очікувалась ручна Decimal-колонка %s' % (tcode, arg))
             c['dataType'] = 'Formula'
             c['readOnly'] = True
-            c['expression'] = composition_expression(stream_expr, INDICATOR_OF_ARG[arg])
+            c['expression'] = build(stream_expr, INDICATOR_OF_ARG[arg])
             c['headerEn'] = '%s (argument bridge: HSE400 composition)' % arg
             c['ecrAdded'] = ('bridge: methodology argument %s = %s[%s] by period and stream (HSE400, %s)'
                              % (arg, COMPOSITION_REGISTRY, INDICATOR_OF_ARG[arg], spec['evidence']))
@@ -341,8 +378,16 @@ def apply_existing_inputs(out):
     for tcode, spec in EXISTING_INPUT_BRIDGES.items():
         hse['streamSourceColumn'][tcode] = spec['source'][0]
     hse['streamSourceColumn'] = dict(sorted(hse['streamSourceColumn'].items()))
-    hse['existingInputBridges'] = {t: {'arguments': s['args'], 'streamSourceColumn': s['source'][0],
-                                       'evidence': s['evidence']} for t, s in sorted(EXISTING_INPUT_BRIDGES.items())}
+    hse['existingInputBridges'] = {t: dict({'arguments': s['args'], 'streamSourceColumn': s['source'][0],
+                                            'evidence': s['evidence']},
+                                           **({'notApplicable': {
+                                               'fuelRegistry': s['fuelRegistry'], 'liquidFuels': s['liquidFuels'],
+                                               'rule': 'B89 (human 13.11): fuel not in ' + STREAM_REGISTRY + ' (liquid: '
+                                                       'diesel, kerosene, gasoline) -> empty without error, does not '
+                                                       'block submit (only ECW_C05_05 reads these, gas fuels only); gas '
+                                                       'stream without a composition record -> #N/A as before'}}
+                                              if 'liquidFuels' in s else {}))
+                                   for t, s in sorted(EXISTING_INPUT_BRIDGES.items())}
     print('hse400 existing-input bridges: columns %d' % changed)
     return changed
 
