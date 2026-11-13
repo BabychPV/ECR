@@ -161,6 +161,26 @@ public sealed class EditAssignmentTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public void RenameTable_перераховує_ключ_зрізу_і_зберігає_решту_селекторів()
+    {
+        // D-10: перенос версії з мапою X → Y.
+        var assignment = new EditAssignment(
+            documentId: 7, EditAssignmentSlice.Create("F1", "x1", null, 202601), isExclusive: true,
+            delegatedByUserId: 10, handoffId: Guid.NewGuid(), createdByUserId: 10, utcNow: T0);
+
+        assignment.RenameTable("y2", T1);
+
+        Assert.Equal("y2", assignment.TableCode);
+        Assert.Equal("S=F1|T=Y2|M=*|P=202601", assignment.SliceKey);
+        Assert.Equal(T1, assignment.ModifiedAt);
+        Assert.True(assignment.IsExclusive);
+
+        // Зріз без таблиці перейменовувати нічого.
+        Assert.Throws<InvalidOperationException>(() => Create().RenameTable("y2", T1));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
     public void Прибрання_виконавця_і_набір_із_лімітами()
     {
         var assignment = Create(1, 2);

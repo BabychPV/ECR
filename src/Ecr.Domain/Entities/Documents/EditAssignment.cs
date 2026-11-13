@@ -373,6 +373,26 @@ public sealed class EditAssignment : Entity<long>
         Touch(byUserId, utcNow);
     }
 
+    /// <summary>
+    /// D-10: таблицю зрізу перейменовано переносом версії (мапа перейменування <c>X → Y</c>). Ключ зрізу рахує лише
+    /// домен (<see cref="EditAssignmentSlice.Key"/>), тож і перерахунок — тут, не в SQL.
+    /// </summary>
+    /// <param name="toTableCode">Новий код таблиці.</param>
+    /// <param name="utcNow">Момент переносу.</param>
+    /// <exception cref="InvalidOperationException">Зріз без таблиці (перейменовувати нічого).</exception>
+    public void RenameTable(string toTableCode, DateTime utcNow)
+    {
+        if (TableCode is null)
+        {
+            throw new InvalidOperationException("Зріз не адресує таблицю: перейменовувати нічого.");
+        }
+
+        var slice = EditAssignmentSlice.Create(SheetCode, toTableCode, MonthNumber, PeriodKeyValue);
+        TableCode = slice.TableCode;
+        SliceKey = KeyOf(slice, Level);
+        ModifiedAt = utcNow;
+    }
+
     /// <summary>Фіксує, що склад застосовано з набору (знімок назви); <c>null</c> — склад вибрано вручну.</summary>
     public void MarkAppliedSet(int? setId, string? setName)
     {

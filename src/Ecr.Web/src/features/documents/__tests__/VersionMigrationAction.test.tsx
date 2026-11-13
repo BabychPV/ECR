@@ -439,6 +439,16 @@ describe('useVersionMigrationAction', () => {
     expect(screen.queryByText('mappingsNotMapped')).toBeNull();
   });
 
+  it('причина sheetCopiesNotMapped показується підписом каталогу, а не сирим кодом (D-6)', async () => {
+    show(['Template.Edit'], report({ canApply: false, refusals: ['sheetCopiesNotMapped'] }));
+    await openAndPickTarget();
+
+    fireEvent.click(screen.getByTestId('migrate-dry-run'));
+
+    await screen.findByText('⟦documents.migrateRefusalSheetCopiesNotMapped⟧');
+    expect(screen.queryByText('sheetCopiesNotMapped')).toBeNull();
+  });
+
   it('попередження про інші проєкти на старій версії є, коли їх більше нуля, і не блокує перенос (D-1b P2-3)', async () => {
     show(['Template.Edit'], report({ canApply: true, otherProjectsOnSourceVersion: 2, otherDocumentsOnSourceVersion: 5 }));
     await openAndPickTarget();

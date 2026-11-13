@@ -210,6 +210,203 @@ PRINT CONCAT(N'period0-supersede: ', @@ROWCOUNT, N' rows');
 GO
 -- COLL:period0-supersede ── кінець секції ─────────────────────────────────────
 
+-- MIGR:permit-history-repair ── Історія дозволів, яку перенос версії до D-7 лишив на Id старої версії ──
+-- ⛔ Одноразове виправлення ДАНИХ, ідемпотентне (аудит 2026-11, D-7). До фіксу D-7 перенос проєкту на нову
+-- версію шаблону перемаплював комірки, екземпляри й шапку, а `doc.PermitSegment` і `doc.CellPermitPart` лишав на
+-- `TableDefId`/`ColumnDefId`/`HeaderFieldDefId` ВИХІДНОЇ версії: читачі (`PermitHistoryStore`) шукають за Id
+-- поточної версії й історії дозволів не бачать.
+--
+-- Відповідник шукається ЗА КОДАМИ (аркуш + таблиця + колонка; поле шапки) у версії того самого шаблону:
+--   • сегменти (рядкові й шапки) — у поточній версії проєкту (`doc.Project.TemplateVersionId`), як і D-7, що
+--     перемаплює сегменти й у режимі «з місяця»;
+--   • частини місяця — у версії, що діє для ПЕРІОДУ частини (`doc.ProjectTemplateVersion`, RPT-STABLE Part B; без
+--     рядків — версія проєкту), і лише коли в документа за цей період/копію екземпляр таблиці стоїть на НОВІЙ
+--     таблиці, а на старій — немає (період «з місяця» до X лишається на старих Id разом зі своїм екземпляром).
+--
+-- ⚠ Консервативно: рядок без відповідника (таблицю/колонку/поле прибрано або перейменовано мапою), рядок, чиє
+-- місце вже зайняте (історію додали заново після переносу), і кілька старих рядків на одне нове місце — НЕ
+-- чіпаються і НЕ видаляються; їх кількість іде в журнал старту, а кожен — у журнал узгодженості (крок 4). Проєкт під маркером переносу (`migratingTo`) — не
+-- чіпається. Після виправлення рядок адресує версію, з якою звіряється умова, тож другий і кожен наступний запуск
+-- змінює 0 рядків (сід виконується на кожному старті, `StartupSequence`).
+-- Як перевірити руками й що робити з лишком — docs/admin/operations-runbook.md, «Історія дозволів після переносу».
+SET ANSI_NULLS ON;
+SET QUOTED_IDENTIFIER ON;
+GO
+
+DECLARE @changed int = 0;
+DECLARE @left int = 0;
+
+-- 1. Рядкові сегменти.
+WITH c AS (
+    SELECT g.Id, nt.Id AS NewTableId, nc.Id AS NewColumnId,
+           COUNT(*) OVER (PARTITION BY g.DocumentId, nt.Id, g.SheetCopyId, g.RowKey, nc.Id, g.ValidFrom) AS SameTarget
+    FROM   doc.PermitSegment AS g
+    JOIN   doc.Document AS d          ON d.Id = g.DocumentId
+    JOIN   doc.Project AS pr          ON pr.Id = d.ProjectId
+    JOIN   cfg.TableDef AS ot         ON ot.Id = g.TableDefId
+    JOIN   cfg.SheetDef AS os         ON os.Id = ot.SheetDefId
+    JOIN   cfg.ColumnDef AS oc        ON oc.Id = g.ColumnDefId AND oc.TableDefId = ot.Id
+    JOIN   cfg.TemplateVersion AS ov  ON ov.Id = os.TemplateVersionId
+    JOIN   cfg.TemplateVersion AS pv  ON pv.Id = pr.TemplateVersionId AND pv.TemplateId = ov.TemplateId
+    JOIN   cfg.SheetDef AS ns         ON ns.TemplateVersionId = pv.Id AND ns.IsDeleted = 0
+                                     AND ns.Code = os.Code COLLATE Latin1_General_100_BIN2
+    JOIN   cfg.TableDef AS nt         ON nt.SheetDefId = ns.Id AND nt.IsDeleted = 0
+                                     AND nt.Code = ot.Code COLLATE Latin1_General_100_BIN2
+    JOIN   cfg.ColumnDef AS nc        ON nc.TableDefId = nt.Id AND nc.IsDeleted = 0
+                                     AND nc.Code = oc.Code COLLATE Latin1_General_100_BIN2
+    WHERE  os.TemplateVersionId <> pr.TemplateVersionId
+      AND  ISNULL(CASE WHEN ISJSON(pr.ExternalSettingsJson) = 1
+                       THEN JSON_VALUE(pr.ExternalSettingsJson, '$.migratingTo') END, N'') = N''
+)
+UPDATE g
+SET    g.TableDefId = c.NewTableId, g.ColumnDefId = c.NewColumnId
+FROM   doc.PermitSegment AS g
+JOIN   c ON c.Id = g.Id
+WHERE  c.SameTarget = 1
+  AND  NOT EXISTS (SELECT 1 FROM doc.PermitSegment AS x
+                   WHERE  x.DocumentId = g.DocumentId AND x.TableDefId = c.NewTableId AND x.RowKey = g.RowKey
+                     AND  x.ColumnDefId = c.NewColumnId AND x.ValidFrom = g.ValidFrom
+                     AND  (x.SheetCopyId = g.SheetCopyId OR (x.SheetCopyId IS NULL AND g.SheetCopyId IS NULL)));
+SET @changed += @@ROWCOUNT;
+
+-- 2. Сегменти шапки.
+WITH c AS (
+    SELECT g.Id, nh.Id AS NewFieldId,
+           COUNT(*) OVER (PARTITION BY g.DocumentId, nh.Id, g.ValidFrom) AS SameTarget
+    FROM   doc.PermitSegment AS g
+    JOIN   doc.Document AS d          ON d.Id = g.DocumentId
+    JOIN   doc.Project AS pr          ON pr.Id = d.ProjectId
+    JOIN   cfg.HeaderFieldDef AS oh   ON oh.Id = g.HeaderFieldDefId
+    JOIN   cfg.TemplateVersion AS ov  ON ov.Id = oh.TemplateVersionId
+    JOIN   cfg.TemplateVersion AS pv  ON pv.Id = pr.TemplateVersionId AND pv.TemplateId = ov.TemplateId
+    JOIN   cfg.HeaderFieldDef AS nh   ON nh.TemplateVersionId = pv.Id AND nh.IsDeleted = 0
+                                     AND nh.Code = oh.Code COLLATE Latin1_General_100_BIN2
+    WHERE  oh.TemplateVersionId <> pr.TemplateVersionId
+      AND  ISNULL(CASE WHEN ISJSON(pr.ExternalSettingsJson) = 1
+                       THEN JSON_VALUE(pr.ExternalSettingsJson, '$.migratingTo') END, N'') = N''
+)
+UPDATE g
+SET    g.HeaderFieldDefId = c.NewFieldId
+FROM   doc.PermitSegment AS g
+JOIN   c ON c.Id = g.Id
+WHERE  c.SameTarget = 1
+  AND  NOT EXISTS (SELECT 1 FROM doc.PermitSegment AS x
+                   WHERE  x.DocumentId = g.DocumentId AND x.HeaderFieldDefId = c.NewFieldId AND x.ValidFrom = g.ValidFrom);
+SET @changed += @@ROWCOUNT;
+
+-- 3. Частини місяця (партиціоновані: PeriodKey у кожній умові).
+WITH c AS (
+    SELECT p.PeriodKey, p.Id, nt.Id AS NewTableId, nc.Id AS NewColumnId,
+           MIN(p.ColumnDefId) OVER (PARTITION BY p.PeriodKey, p.DocumentId, nt.Id, p.SheetCopyId, p.RowKey, nc.Id) AS MinSource,
+           MAX(p.ColumnDefId) OVER (PARTITION BY p.PeriodKey, p.DocumentId, nt.Id, p.SheetCopyId, p.RowKey, nc.Id) AS MaxSource
+    FROM   doc.CellPermitPart AS p
+    JOIN   doc.Document AS d          ON d.Id = p.DocumentId
+    JOIN   doc.Project AS pr          ON pr.Id = d.ProjectId
+    OUTER APPLY (SELECT TOP (1) v.TemplateVersionId
+                 FROM   doc.ProjectTemplateVersion AS v
+                 WHERE  v.ProjectId = pr.Id AND v.FromPeriodKey <= p.PeriodKey
+                 ORDER  BY v.FromPeriodKey DESC) AS ev
+    JOIN   cfg.TableDef AS ot         ON ot.Id = p.TableDefId
+    JOIN   cfg.SheetDef AS os         ON os.Id = ot.SheetDefId
+    JOIN   cfg.ColumnDef AS oc        ON oc.Id = p.ColumnDefId AND oc.TableDefId = ot.Id
+    JOIN   cfg.TemplateVersion AS ov  ON ov.Id = os.TemplateVersionId
+    JOIN   cfg.TemplateVersion AS pv  ON pv.Id = COALESCE(ev.TemplateVersionId, pr.TemplateVersionId)
+                                     AND pv.TemplateId = ov.TemplateId
+    JOIN   cfg.SheetDef AS ns         ON ns.TemplateVersionId = pv.Id AND ns.IsDeleted = 0
+                                     AND ns.Code = os.Code COLLATE Latin1_General_100_BIN2
+    JOIN   cfg.TableDef AS nt         ON nt.SheetDefId = ns.Id AND nt.IsDeleted = 0
+                                     AND nt.Code = ot.Code COLLATE Latin1_General_100_BIN2
+    JOIN   cfg.ColumnDef AS nc        ON nc.TableDefId = nt.Id AND nc.IsDeleted = 0
+                                     AND nc.Code = oc.Code COLLATE Latin1_General_100_BIN2
+    WHERE  os.TemplateVersionId <> pv.Id
+      AND  ISNULL(CASE WHEN ISJSON(pr.ExternalSettingsJson) = 1
+                       THEN JSON_VALUE(pr.ExternalSettingsJson, '$.migratingTo') END, N'') = N''
+      AND  NOT EXISTS (SELECT 1 FROM doc.TableInstance AS i
+                       WHERE  i.PeriodKey = p.PeriodKey AND i.DocumentId = p.DocumentId AND i.TableDefId = p.TableDefId
+                         AND  (i.SheetCopyId = p.SheetCopyId OR (i.SheetCopyId IS NULL AND p.SheetCopyId IS NULL)))
+      AND  EXISTS (SELECT 1 FROM doc.TableInstance AS i
+                   WHERE  i.PeriodKey = p.PeriodKey AND i.DocumentId = p.DocumentId AND i.TableDefId = nt.Id
+                     AND  (i.SheetCopyId = p.SheetCopyId OR (i.SheetCopyId IS NULL AND p.SheetCopyId IS NULL)))
+)
+UPDATE p
+SET    p.TableDefId = c.NewTableId, p.ColumnDefId = c.NewColumnId
+FROM   doc.CellPermitPart AS p
+JOIN   c ON c.PeriodKey = p.PeriodKey AND c.Id = p.Id
+WHERE  c.MinSource = c.MaxSource
+  AND  NOT EXISTS (SELECT 1 FROM doc.CellPermitPart AS x
+                   WHERE  x.PeriodKey = p.PeriodKey AND x.DocumentId = p.DocumentId AND x.TableDefId = c.NewTableId
+                     AND  x.RowKey = p.RowKey AND x.ColumnDefId = c.NewColumnId
+                     AND  (x.SheetCopyId = p.SheetCopyId OR (x.SheetCopyId IS NULL AND p.SheetCopyId IS NULL)));
+SET @changed += @@ROWCOUNT;
+
+-- 4. Лишок — рядки, яких скрипт не чіпав: сегменти не на версії проєкту; частини не на версії свого періоду, у
+-- яких за цей період/копію немає екземпляра їхньої (старої) таблиці. ⛔ Не видаляються й не вгадуються (рішення
+-- координатора 12.11): кожен — знахідка `PERMIT_HISTORY_STALE_VERSION` у журналі узгодженості (`aud.ConsistencyIssue`,
+-- той самий журнал, що й нічна перевірка; екран «Узгодженість»), і їх кількість — у журнал старту. Повторний старт
+-- нової знахідки не додає, доки є відкрита на той самий рядок (`ResolvedAt IS NULL`).
+DECLARE @stale TABLE (EntityType nvarchar(64) NOT NULL, EntityId bigint NOT NULL, PeriodKey int NULL,
+                      DocumentId bigint NOT NULL, DetailsJson nvarchar(max) NOT NULL,
+                      PRIMARY KEY (EntityType, EntityId));
+
+INSERT @stale (EntityType, EntityId, PeriodKey, DocumentId, DetailsJson)
+SELECT N'doc.PermitSegment', g.Id, NULL, g.DocumentId,
+       CONCAT(N'{"documentId":', g.DocumentId, N',"tableDefId":', g.TableDefId, N',"columnDefId":', g.ColumnDefId,
+              N',"projectVersionId":', pr.TemplateVersionId, N',"rowVersionId":', s.TemplateVersionId, N'}')
+FROM   doc.PermitSegment AS g
+JOIN   doc.Document AS d   ON d.Id = g.DocumentId
+JOIN   doc.Project AS pr   ON pr.Id = d.ProjectId
+JOIN   cfg.TableDef AS t   ON t.Id = g.TableDefId
+JOIN   cfg.SheetDef AS s   ON s.Id = t.SheetDefId
+WHERE  s.TemplateVersionId <> pr.TemplateVersionId;
+
+INSERT @stale (EntityType, EntityId, PeriodKey, DocumentId, DetailsJson)
+SELECT N'doc.PermitSegment', g.Id, NULL, g.DocumentId,
+       CONCAT(N'{"documentId":', g.DocumentId, N',"headerFieldDefId":', g.HeaderFieldDefId,
+              N',"projectVersionId":', pr.TemplateVersionId, N',"rowVersionId":', h.TemplateVersionId, N'}')
+FROM   doc.PermitSegment AS g
+JOIN   doc.Document AS d        ON d.Id = g.DocumentId
+JOIN   doc.Project AS pr        ON pr.Id = d.ProjectId
+JOIN   cfg.HeaderFieldDef AS h  ON h.Id = g.HeaderFieldDefId
+WHERE  h.TemplateVersionId <> pr.TemplateVersionId;
+
+INSERT @stale (EntityType, EntityId, PeriodKey, DocumentId, DetailsJson)
+SELECT N'doc.CellPermitPart', p.Id, p.PeriodKey, p.DocumentId,
+       CONCAT(N'{"documentId":', p.DocumentId, N',"periodKey":', p.PeriodKey, N',"tableDefId":', p.TableDefId,
+              N',"columnDefId":', p.ColumnDefId, N',"partNo":', p.PartNo,
+              N',"periodVersionId":', COALESCE(ev.TemplateVersionId, pr.TemplateVersionId), N',"rowVersionId":', s.TemplateVersionId, N'}')
+FROM   doc.CellPermitPart AS p
+JOIN   doc.Document AS d   ON d.Id = p.DocumentId
+JOIN   doc.Project AS pr   ON pr.Id = d.ProjectId
+JOIN   cfg.TableDef AS t   ON t.Id = p.TableDefId
+JOIN   cfg.SheetDef AS s   ON s.Id = t.SheetDefId
+OUTER APPLY (SELECT TOP (1) v.TemplateVersionId
+             FROM   doc.ProjectTemplateVersion AS v
+             WHERE  v.ProjectId = pr.Id AND v.FromPeriodKey <= p.PeriodKey
+             ORDER  BY v.FromPeriodKey DESC) AS ev
+WHERE  s.TemplateVersionId <> COALESCE(ev.TemplateVersionId, pr.TemplateVersionId)
+  AND  NOT EXISTS (SELECT 1 FROM doc.TableInstance AS i
+                   WHERE  i.PeriodKey = p.PeriodKey AND i.DocumentId = p.DocumentId AND i.TableDefId = p.TableDefId
+                     AND  (i.SheetCopyId = p.SheetCopyId OR (i.SheetCopyId IS NULL AND p.SheetCopyId IS NULL)));
+
+SET @left = (SELECT COUNT(*) FROM @stale);
+
+INSERT INTO aud.ConsistencyIssue (DetectedAt, Severity, RuleCode, EntityType, EntityId, Message, DetailsJson, PeriodKey)
+SELECT SYSUTCDATETIME(), 2, N'PERMIT_HISTORY_STALE_VERSION', x.EntityType, x.EntityId,
+       CONCAT(N'Історія дозволів документа ', x.DocumentId,
+              N' лишилась на таблиці/колонці/полі шапки іншої версії шаблону, ніж версія проєкту (перенос до D-7), ',
+              N'і відповідника за кодом немає. Рядок не змінено й не видалено: додайте історію заново або видаліть рядок ',
+              N'(runbook, розділ 16.2).'),
+       x.DetailsJson, x.PeriodKey
+FROM   @stale AS x
+WHERE  NOT EXISTS (SELECT 1 FROM aud.ConsistencyIssue AS c
+                   WHERE  c.RuleCode = N'PERMIT_HISTORY_STALE_VERSION' AND c.EntityType = x.EntityType
+                     AND  c.EntityId = x.EntityId AND c.ResolvedAt IS NULL
+                     AND  (c.PeriodKey = x.PeriodKey OR (c.PeriodKey IS NULL AND x.PeriodKey IS NULL)));
+
+PRINT CONCAT(N'permit-history-repair: ', @changed, N' rows; left unmatched: ', @left);
+GO
+-- MIGR:permit-history-repair ── кінець секції ───────────────────────────────
+
 -- FP:sysadmin-rights ── Системний адміністратор: адмін-права керування (рішення людини 2026-10-11) ──
 -- ✎ Прохід «від першого обличчя» (FIRST-PERSON-2026-10-11, P2-2): вбудований `SystemAdministrator`
 -- («усе, крім небезпечного») не бачив Security, Mapping, Pipeline, Notifications, Campaign і не
