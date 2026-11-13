@@ -393,6 +393,15 @@ public sealed class UndoHeaderPermitHandler(
         }
 
         var last = segments[^1];
+
+        // ⛔ C-9: як для рядка (`RowHasPartsOfAsync`) — місяць, уже поділений із цим дозволом, не скасовується мовчки:
+        // частини лишилися б і зарахувалися б як поділ для наступного дозволу того самого місяця.
+        var monthKey = (last.ValidFrom.Year * 100) + last.ValidFrom.Month;
+        if (await HasPartsOfAsync(store, documentId, monthKey, last.RegistryEntryId, ct).ConfigureAwait(false))
+        {
+            throw PermitHistoryRules.NothingToUndo();
+        }
+
         var previousId = segments.Count > 1 ? segments[^2].RegistryEntryId : header.BaseEntryId;
         var entries = (await registries.FindEntriesByIdsAsync([previousId, last.RegistryEntryId], ct).ConfigureAwait(false))
             .ToDictionary(e => e.Id);
@@ -403,6 +412,13 @@ public sealed class UndoHeaderPermitHandler(
             PermitHistoryRules.EnsureUnchanged(
                 segments.Select(s => s.Id),
                 await store.LockHeaderSegmentsAsync(documentId, header.Field.Id, innerCt).ConfigureAwait(false));
+
+            // C-9 + D-1: частини — повторно ПІД замком шапки (поділ бере той самий замок, див. SaveCellSplitsHandler).
+            if (await HasPartsOfAsync(store, documentId, monthKey, last.RegistryEntryId, innerCt).ConfigureAwait(false))
+            {
+                throw PermitHistoryRules.NothingToUndo();
+            }
+
             store.Remove(last);
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
             await audit.WriteStructureChangeAsync(
@@ -417,6 +433,11 @@ public sealed class UndoHeaderPermitHandler(
         return await PermitHistoryReader.HeaderAsync(store, registries, documentId, header.Field, header.BaseEntryId, currentUser.Language, ct)
             .ConfigureAwait(false);
     }
+
+    private static async Task<bool> HasPartsOfAsync(
+        IPermitHistoryStore store, long documentId, int monthKey, long registryEntryId, CancellationToken ct)
+        => (await store.PartsAsync(documentId, [monthKey], ct).ConfigureAwait(false))
+            .Any(p => p.RegistryEntryId == registryEntryId);
 }
 
 /// <summary>
