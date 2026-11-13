@@ -1,0 +1,80 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+/**
+ * ✎ B78 F13 P3-2: «Відкрити HSE400» шукає документ за КОДОМ ШАБЛОНУ проєкту (часова шкала версій), спершу в
+ * проєкті поточного документа, а не перший збіг пошуку «HSE400» за назвою.
+ */
+
+const apiFetch = vi.fn();
+const listDocuments = vi.fn();
+const fetchAllProjects = vi.fn();
+
+vi.mock('@/api/client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/client')>();
+  return { ...actual, apiFetch: (path: string) => apiFetch(path) as unknown };
+});
+vi.mock('@/features/documents/api', () => ({ listDocuments: (params: unknown) => listDocuments(params) as unknown }));
+vi.mock('@/features/projects/allProjects', () => ({ fetchAllProjects: () => fetchAllProjects() as unknown }));
+
+const { findHse400Document } = await import('@/features/documents/findHse400Document');
+const { EcrApiError } = await import('@/api/client');
+
+function timeline(projectId: number, code: string, fromPeriodKey = 202601) {
+  return { projectId, currentVersionId: 1, items: [{ fromPeriodKey, templateCode: code, templateVersionId: 1, version: '1.0' }] };
+}
+
+function page(...ids: number[]) {
+  return { items: ids.map((id) => ({ id })), nextCursor: null, totalCount: ids.length };
+}
+
+describe('findHse400Document (B78 F13 P3-2)', () => {
+  beforeEach(() => {
+    apiFetch.mockReset();
+    listDocuments.mockReset();
+    fetchAllProjects.mockReset();
+  });
+
+  it('проєкт із шаблоном HSE400 — його документ року; Land і «HSE400» в іншому шаблоні пропущено', async () => {
+    fetchAllProjects.mockResolvedValue({ items: [{ id: 1 }, { id: 3 }, { id: 2 }, { id: 4 }], nextCursor: null, totalCount: 4 });
+    apiFetch.mockImplementation((path: string) => {
+      if (path.endsWith('/1/template-versions')) return Promise.resolve(timeline(1, 'LAND_UI'));
+      if (path.endsWith('/3/template-versions')) return Promise.resolve(timeline(3, 'HSE400_COPY'));
+      if (path.endsWith('/2/template-versions')) return Promise.resolve(timeline(2, 'HSE400'));
+      // Невидимий проєкт — пропуск, а не відмова всього пошуку.
+      return Promise.reject(new EcrApiError({ status: 404, title: 'Not found' } as never));
+    });
+    listDocuments.mockResolvedValue(page(77));
+
+    await expect(findHse400Document(1, 2026, 96)).resolves.toBe(77);
+    expect(listDocuments).toHaveBeenCalledTimes(1);
+    expect(listDocuments).toHaveBeenCalledWith({ periodKey: null, year: 2026, projectId: 2 });
+  });
+
+  it('спершу проєкт поточного документа; сам поточний документ не відкривається', async () => {
+    fetchAllProjects.mockResolvedValue({ items: [{ id: 2 }, { id: 5 }], nextCursor: null, totalCount: 2 });
+    apiFetch.mockImplementation((path: string) =>
+      Promise.resolve(timeline(path.includes('/5/') ? 5 : 2, 'HSE400')),
+    );
+    listDocuments.mockImplementation((params: { projectId: number }) =>
+      Promise.resolve(params.projectId === 5 ? page(96, 55) : page(11)),
+    );
+
+    await expect(findHse400Document(5, 2026, 96)).resolves.toBe(55);
+    expect(listDocuments.mock.calls[0]?.[0]).toMatchObject({ projectId: 5 });
+  });
+
+  it('шаблон HSE400 у проєкті почав діяти лише після року — не той рік; немає — null', async () => {
+    fetchAllProjects.mockResolvedValue({ items: [{ id: 2 }], nextCursor: null, totalCount: 1 });
+    apiFetch.mockResolvedValue(timeline(2, 'HSE400', 202701));
+
+    await expect(findHse400Document(null, 2026, 96)).resolves.toBeNull();
+    expect(listDocuments).not.toHaveBeenCalled();
+  });
+
+  it('відмова API (не 403/404) — виняток для панелі', async () => {
+    fetchAllProjects.mockResolvedValue({ items: [{ id: 2 }], nextCursor: null, totalCount: 1 });
+    apiFetch.mockRejectedValue(new EcrApiError({ status: 500, title: 'Boom' } as never));
+
+    await expect(findHse400Document(null, 2026, 96)).rejects.toBeInstanceOf(EcrApiError);
+  });
+});

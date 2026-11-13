@@ -61,6 +61,8 @@ interface UnmatchedRowsBannerProps {
   readonly onOpenRow: (tableInstanceId: number, rowKey: string, columnCode: string | null) => void;
   /** Вузький екран (документ лише для читання): дія підказки — відкрити документ ширше, а не F9 (UAT 08.11). */
   readonly narrow?: boolean;
+  /** ✎ B78: вміст у «Технічних деталях» панелі проблем розрахунку — без власного банера й згортання. */
+  readonly embedded?: boolean;
 }
 
 /**
@@ -76,7 +78,14 @@ interface UnmatchedRowsBannerProps {
  * ⚠ Попередня згортна панель AN-69 (`CalculationIssuesPanel`, жовта, лише активний аркуш) показувала ТІ САМІ рядки
  * вдруге іншим тоном — її замінено цим банером; позначки в дереві таблиць лишились.
  */
-export function UnmatchedRowsBanner({ userId, rows, tables, onOpenRow, narrow = false }: UnmatchedRowsBannerProps): JSX.Element | null {
+export function UnmatchedRowsBanner({
+  userId,
+  rows,
+  tables,
+  onOpenRow,
+  narrow = false,
+  embedded = false,
+}: UnmatchedRowsBannerProps): JSX.Element | null {
   const groups = useMemo(
     () => groupUnmatchedRows(rows.issues, tables, rows.hints),
     [rows.issues, tables, rows.hints],
@@ -94,6 +103,123 @@ export function UnmatchedRowsBanner({ userId, rows, tables, onOpenRow, narrow = 
     writeCollapsed(storageKey, next);
   };
   const bodyId = 'document-unmatched-rows-body';
+
+  const body = (
+    <>
+      {groups.some((group) => !group.rejected) && (
+        <Text size="sm" mt="xs" data-testid="document-unmatched-rows-hint">
+          {t(narrow ? 'document.unmatchedRows.hintNarrow' : 'document.unmatchedRows.hint')}
+        </Text>
+      )}
+      {groups.some((group) => group.rejected && !group.missingInputs) && (
+        <Text size="sm" mt="xs" data-testid="document-rejected-rows-hint">
+          {t('document.rejectedRows.hint')}
+        </Text>
+      )}
+      {groups.some((group) => group.missingInputs) && (
+        <Text size="sm" mt="xs" data-testid="document-missing-input-rows-hint">
+          {t('document.missingInputRows.hint')}
+        </Text>
+      )}
+      <Stack
+        role="list"
+        gap="xs"
+        mt="xs"
+        aria-label={t('calculationIssues.listLabel')}
+      >
+        {(allGroups ? groups : groups.slice(0, GroupsShown)).map((group) => {
+          const shown = group.rows.slice(0, RowLinksPerTable);
+          const more = group.rows.length - shown.length;
+          const table = group.sheetName.length > 0 ? `${group.sheetName} · ${group.tableName}` : group.tableName;
+
+          return (
+            <div role="listitem" key={group.key} data-testid="document-unmatched-rows-group">
+              <Text size="sm" span fw={500}>
+                {group.missingInputs
+                  ? t('document.missingInputRows.group', { table, rows: plural('document.unmatchedRows.rows', group.rows.length) })
+                  : group.rejected
+                    ? t('document.rejectedRows.group', { table, rows: plural('document.unmatchedRows.rows', group.rows.length) })
+                    : t('document.unmatchedRows.group', { table, rows: plural('document.unmatchedRows.rows', group.rows.length) })}
+              </Text>
+              {group.hint === null && group.methodologyCode !== null && (
+                <Text size="xs" span>
+                  {` · ${group.methodologyCode}`}
+                </Text>
+              )}
+              {group.hint !== null && <AllowedValues hint={group.hint} />}
+              <Group gap="xs" wrap="wrap">
+                {shown.map((row, index) => {
+                  const label = rowLabel(row, group.rejected);
+                  const tableInstanceId = group.tableInstanceId;
+                  // ✎ Свіжий погляд 08.11: посилання розділені видимою « · », інакше «Row 2: «Coal» Row 3: «Oil»» читається однією фразою.
+                  const separator =
+                    index > 0 ? (
+                      <Text span size="sm" aria-hidden="true">
+                        ·
+                      </Text>
+                    ) : null;
+
+                  return tableInstanceId === null ? (
+                    <Fragment key={row.rowKey}>
+                      {separator}
+                      <Text size="sm" span>
+                        {label}
+                      </Text>
+                    </Fragment>
+                  ) : (
+                    <Fragment key={row.rowKey}>
+                    {separator}
+                    <Anchor
+                      component="button"
+                      type="button"
+                      size="sm"
+                      data-testid={group.rejected ? 'document-rejected-row-link' : 'document-unmatched-row-link'}
+                      data-row-key={row.rowKey}
+                      aria-label={`${table} · ${label}`}
+                      onClick={() =>
+                        onOpenRow(tableInstanceId, row.rowKey, row.missingColumns.find((c) => c.column)?.code ?? null)
+                      }
+                    >
+                      {label}
+                    </Anchor>
+                    </Fragment>
+                  );
+                })}
+                {more > 0 && (
+                  <Text size="sm" span>
+                    {t('document.unmatchedRows.more', { count: String(more) })}
+                  </Text>
+                )}
+              </Group>
+            </div>
+          );
+        })}
+      </Stack>
+      {!allGroups && groups.length > GroupsShown && (
+        <Button
+          variant="subtle"
+          size="xs"
+          mt="xs"
+          onClick={() => setAllGroups(true)}
+          data-testid="document-unmatched-rows-all-tables"
+        >
+          {t('document.unmatchedRows.showAllTables', { count: String(groups.length) })}
+        </Button>
+      )}
+    </>
+  );
+
+  // ✎ B78: у панелі «Проблеми розрахунку» — лише вміст, у згорнутих «Технічних деталях» (без власного банера).
+  if (embedded) {
+    return (
+      <div data-testid="document-unmatched-rows">
+        <Text size="sm" fw={600} data-testid="document-unmatched-rows-title">
+          {t('document.unmatchedRows.title')}
+        </Text>
+        {body}
+      </div>
+    );
+  }
 
   return (
     // ✎ fg6 (людина 08.11): інформаційний банер компактний - один рядок підсумку (назва · кількість · час), підказка
@@ -130,106 +256,7 @@ export function UnmatchedRowsBanner({ userId, rows, tables, onOpenRow, narrow = 
       </Group>
 
       <Collapse in={!collapsed} id={bodyId}>
-        {groups.some((group) => !group.rejected) && (
-          <Text size="sm" mt="xs" data-testid="document-unmatched-rows-hint">
-            {t(narrow ? 'document.unmatchedRows.hintNarrow' : 'document.unmatchedRows.hint')}
-          </Text>
-        )}
-        {groups.some((group) => group.rejected && !group.missingInputs) && (
-          <Text size="sm" mt="xs" data-testid="document-rejected-rows-hint">
-            {t('document.rejectedRows.hint')}
-          </Text>
-        )}
-        {groups.some((group) => group.missingInputs) && (
-          <Text size="sm" mt="xs" data-testid="document-missing-input-rows-hint">
-            {t('document.missingInputRows.hint')}
-          </Text>
-        )}
-        <Stack
-          role="list"
-          gap="xs"
-          mt="xs"
-          aria-label={t('calculationIssues.listLabel')}
-        >
-          {(allGroups ? groups : groups.slice(0, GroupsShown)).map((group) => {
-            const shown = group.rows.slice(0, RowLinksPerTable);
-            const more = group.rows.length - shown.length;
-            const table = group.sheetName.length > 0 ? `${group.sheetName} · ${group.tableName}` : group.tableName;
-
-            return (
-              <div role="listitem" key={group.key} data-testid="document-unmatched-rows-group">
-                <Text size="sm" span fw={500}>
-                  {group.missingInputs
-                    ? t('document.missingInputRows.group', { table, rows: plural('document.unmatchedRows.rows', group.rows.length) })
-                    : group.rejected
-                      ? t('document.rejectedRows.group', { table, rows: plural('document.unmatchedRows.rows', group.rows.length) })
-                      : t('document.unmatchedRows.group', { table, rows: plural('document.unmatchedRows.rows', group.rows.length) })}
-                </Text>
-                {group.hint === null && group.methodologyCode !== null && (
-                  <Text size="xs" span>
-                    {` · ${group.methodologyCode}`}
-                  </Text>
-                )}
-                {group.hint !== null && <AllowedValues hint={group.hint} />}
-                <Group gap="xs" wrap="wrap">
-                  {shown.map((row, index) => {
-                    const label = rowLabel(row, group.rejected);
-                    const tableInstanceId = group.tableInstanceId;
-                    // ✎ Свіжий погляд 08.11: посилання розділені видимою « · », інакше «Row 2: «Coal» Row 3: «Oil»» читається однією фразою.
-                    const separator =
-                      index > 0 ? (
-                        <Text span size="sm" aria-hidden="true">
-                          ·
-                        </Text>
-                      ) : null;
-
-                    return tableInstanceId === null ? (
-                      <Fragment key={row.rowKey}>
-                        {separator}
-                        <Text size="sm" span>
-                          {label}
-                        </Text>
-                      </Fragment>
-                    ) : (
-                      <Fragment key={row.rowKey}>
-                      {separator}
-                      <Anchor
-                        component="button"
-                        type="button"
-                        size="sm"
-                        data-testid={group.rejected ? 'document-rejected-row-link' : 'document-unmatched-row-link'}
-                        data-row-key={row.rowKey}
-                        aria-label={`${table} · ${label}`}
-                        onClick={() =>
-                          onOpenRow(tableInstanceId, row.rowKey, row.missingColumns.find((c) => c.column)?.code ?? null)
-                        }
-                      >
-                        {label}
-                      </Anchor>
-                      </Fragment>
-                    );
-                  })}
-                  {more > 0 && (
-                    <Text size="sm" span>
-                      {t('document.unmatchedRows.more', { count: String(more) })}
-                    </Text>
-                  )}
-                </Group>
-              </div>
-            );
-          })}
-        </Stack>
-        {!allGroups && groups.length > GroupsShown && (
-          <Button
-            variant="subtle"
-            size="xs"
-            mt="xs"
-            onClick={() => setAllGroups(true)}
-            data-testid="document-unmatched-rows-all-tables"
-          >
-            {t('document.unmatchedRows.showAllTables', { count: String(groups.length) })}
-          </Button>
-        )}
+        {body}
       </Collapse>
     </Alert>
   );

@@ -6,7 +6,7 @@ import { validationCheckedAt } from '@/features/documents/inspector/validationCh
 import { Alert, Button, Code, Group, Skeleton, Stack, Tabs, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ServiceStatePage } from '@/app/ServiceStatePage';
 import { problemText } from '@/shared/ui/problemText';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
@@ -157,12 +157,10 @@ const DocumentActionBar = lazy(async () => ({ default: (await loadDocumentAction
 const ExecutorStrip = lazy(async () => ({
   default: (await import('@/features/editAssignments/ExecutorStrip')).ExecutorStrip,
 }));
-const UnmatchedRowsBanner = lazy(async () => ({
-  default: (await import('@/features/documents/UnmatchedRowsBanner')).UnmatchedRowsBanner,
-}));
-// ✎ C-1 (D-475): лінивий, як банер рядків без правила — бюджет маршруту 250 КБ (D-132).
-const FormulaErrorsBanner = lazy(async () => ({
-  default: (await import('@/features/documents/FormulaErrorsBanner')).FormulaErrorsBanner,
+// ✎ B78: ОДНА панель «Проблеми розрахунку» замість банерів «Formula errors» і «Some rows are not included» — лінива,
+// як були вони (бюджет маршруту 250 КБ, D-132).
+const CalculationIssuesPanel = lazy(async () => ({
+  default: (await import('@/features/documents/CalculationIssuesPanel')).CalculationIssuesPanel,
 }));
 
 // Місце банера перерахунку проєкту (lane A) — за `import()`, як на Documents: хук опитування задач і модель
@@ -518,6 +516,7 @@ export function DocumentPage(): JSX.Element {
       revealRow(tableInstanceId, rowKey, columnCode),
     [revealRow],
   );
+  const navigate = useNavigate();
 
   useEffect(
     () =>
@@ -582,6 +581,17 @@ export function DocumentPage(): JSX.Element {
   const loadedProjectId = summary.data?.projectId ?? baseSummary.data?.projectId;
   if (loadedProjectId !== undefined) knownProject.current = { documentId, projectId: loadedProjectId };
   const projectId = knownProject.current?.documentId === documentId ? knownProject.current.projectId : null;
+
+  // ✎ B78 F13 P3-2: «Відкрити HSE400» — документ року в проєкті з шаблоном HSE400 (спершу цей проєкт); немає — `false`
+  // (панель так і каже), відмова API — виняток (панель показує помилку). За `import()` — бюджет маршруту D-132.
+  const openHse400 = useCallback(async (): Promise<boolean> => {
+    const { findHse400Document } = await import('@/features/documents/findHse400Document');
+    const found = await findHse400Document(projectId, Math.trunc(periodKey / 100), documentId);
+    if (found === null) return false;
+    void navigate(`/documents/${String(found)}?periodKey=${String(periodKey)}`);
+
+    return true;
+  }, [documentId, navigate, periodKey, projectId]);
 
   const projects = useQuery({
     queryKey: queryKeys.projects.all(),
@@ -933,26 +943,16 @@ export function DocumentPage(): JSX.Element {
         </Suspense>
       )}
 
-      {/* ✎ C-1 (D-475): помилки формул — ПЕРЕД рядками без правила: вони блокують подання. */}
-      {unmatchedRows.formulaErrors.length > 0 && (
+      {/* ✎ B78: помилки формул (C-1, блокують подання) і рядки поза розрахунком — одна панель, рядок на причину. */}
+      {(unmatchedRows.formulaErrors.length > 0 || unmatchedRows.issues.length > 0) && (
         <Suspense fallback={null}>
-          <FormulaErrorsBanner
+          <CalculationIssuesPanel
             userId={session.data?.userId}
-            errors={unmatchedRows.formulaErrors}
-            total={unmatchedRows.formulaErrorTotal}
-            tables={tables.data ?? []}
-            onOpenCell={openUnmatchedRow}
-          />
-        </Suspense>
-      )}
-
-      {unmatchedRows.issues.length > 0 && (
-        <Suspense fallback={null}>
-          <UnmatchedRowsBanner
-            userId={session.data?.userId}
+            periodKey={periodKey}
             rows={unmatchedRows}
             tables={tables.data ?? []}
-            onOpenRow={openUnmatchedRow}
+            onOpenCell={openUnmatchedRow}
+            onOpenHse400={openHse400}
             narrow={narrow}
           />
         </Suspense>

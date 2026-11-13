@@ -31,6 +31,18 @@ public interface IFormulaErrorStore
     /// <param name="ct">Токен скасування.</param>
     public Task<IReadOnlyList<FormulaErrorView>> ListAsync(
         long documentId, int periodKey, long? sheetCopyId, CancellationToken ct);
+
+    /// <summary>
+    /// ✎ B78: назви записів довідника для входів помилки, що є значеннями довідникових колонок («Diesel», а не «37») —
+    /// ОДНИМ запитом. Пара не з довідникової колонки чи невідомий запис — відсутня у відповіді.
+    /// </summary>
+    /// <param name="refs">Пари (колонка входу, Id запису довідника).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>Реалізація за замовчуванням (тестові двійники) — без назв: панель показує значення як є.</remarks>
+    public Task<IReadOnlyDictionary<(int ColumnDefId, long EntryId), LocalizedText>> LookupNamesAsync(
+        IReadOnlyCollection<(int ColumnDefId, long EntryId)> refs, CancellationToken ct)
+        => Task.FromResult<IReadOnlyDictionary<(int ColumnDefId, long EntryId), LocalizedText>>(
+            new Dictionary<(int ColumnDefId, long EntryId), LocalizedText>());
 }
 
 /// <summary>✎ C-1: рядок стану помилки формули (для читання й запису).</summary>
@@ -66,7 +78,10 @@ public sealed record FormulaErrorRow(
 /// <param name="TableCode">Код таблиці.</param>
 /// <param name="ColumnCode">Код колонки.</param>
 /// <param name="ColumnHeaderL10n">Заголовок колонки.</param>
-/// <param name="RowOrdinal">Порядковий номер рядка (<c>doc.TableRow.Ordinal</c>).</param>
+/// <param name="RowOrdinal">
+/// Номер рядка, як його бачить сітка: позиція з 1 у порядку зрізу (Ordinal опису рядка шаблону, далі
+/// <c>TableRow.Id</c>). ✎ B78: не <c>doc.TableRow.Ordinal</c> — у динамічних таблицях він однаковий (0) у всіх рядків.
+/// </param>
 /// <param name="Formula">Вираз формули; <c>null</c> — формули вже немає.</param>
 /// <param name="SourceTableCode">Код таблиці джерела (Blocked).</param>
 /// <param name="SourceColumnCode">Код колонки джерела (Blocked).</param>

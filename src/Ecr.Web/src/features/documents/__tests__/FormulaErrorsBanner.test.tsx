@@ -90,6 +90,36 @@ describe('FormulaErrorsBanner (C-1)', () => {
     expect(onOpenCell).toHaveBeenCalledWith(101, 'R7', 'D');
   });
 
+  it('✎ B78: та сама помилка в кількох рядках — один рядок банера з номерами рядків і кількістю', async () => {
+    // Land doc 96: «Gas density» з тим самим паливом (#N/A довідника) у рядках 1 і 2, інше паливо — у рядку 3.
+    const density = (row: number, fuel: string): FormulaErrorIssue => ({
+      ...Own,
+      rowKey: `LTD-A0${String(row)}`,
+      rowNumber: row,
+      columnCode: 'Density',
+      columnHeaderL10n: { values: { en: 'Gas density' } },
+      errorCode: '#N/A',
+      formula: 'LAND_HSE400_COMPOSITION([Land_TypeFuel])',
+      inputs: [{ tableCode: 'T1', rowKey: `LTD-A0${String(row)}`, columnCode: 'Land_TypeFuel', periodOffset: 0, value: fuel }],
+      dependentCount: 0,
+      since: `2026-11-1${String(row)}T10:00:00Z`,
+    });
+    const onOpenCell = show([density(1, '37'), density(2, '37'), density(3, '36')]);
+
+    const lines = screen.getAllByTestId('document-formula-error');
+    expect(lines).toHaveLength(2);
+    expect(lines[0]!.getAttribute('data-cells')).toBe('2');
+    expect(lines[0]!.textContent).toContain('document.formulaErrors.cellRows (column=Gas density, rows=1, 2, count=2)');
+    expect(lines[0]!.textContent).toContain('inputs=Land_TypeFuel=37');
+    expect(lines[1]!.textContent).toContain('document.formulaErrors.cell (column=Gas density, row=3)');
+    expect(lines[1]!.textContent).not.toContain('row=0');
+    // Лічильник — комірки, а не рядки банера.
+    expect(screen.getByTestId('document-formula-errors-summary').textContent).toContain('count=3');
+
+    await userEvent.click(screen.getAllByTestId('document-formula-error-open')[0]!);
+    expect(onOpenCell).toHaveBeenCalledWith(101, 'LTD-A01', 'Density');
+  });
+
   it('без помилок банера немає', () => {
     show([]);
 
