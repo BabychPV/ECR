@@ -115,6 +115,29 @@ describe('findHse400Document (B78 F13 P3-2)', () => {
     await expect(findHse400Document(5, 2026, 96, 202605)).resolves.toBe(40);
   });
 
+  // ✎ B93 (b): не N паралельних запитів на клік — проєкт документа сам, решта порціями до першого збігу.
+  it('HSE400 у проєкті документа — один запит шкали, без переліку проєктів', async () => {
+    apiFetch.mockResolvedValue(timeline(5, 'HSE400'));
+    listDocuments.mockResolvedValue(page(55));
+
+    await expect(findHse400Document(5, 2026, 96)).resolves.toBe(55);
+    expect(apiFetch).toHaveBeenCalledTimes(1);
+    expect(fetchAllProjects).not.toHaveBeenCalled();
+  });
+
+  it('решта проєктів — порціями по 4 до першого збігу, а не всі одразу', async () => {
+    const ids = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    fetchAllProjects.mockResolvedValue({ items: ids.map((id) => ({ id })), nextCursor: null, totalCount: ids.length });
+    apiFetch.mockImplementation((path: string) =>
+      Promise.resolve(path.endsWith('/3/template-versions') ? timeline(3, 'HSE400') : timeline(0, 'LAND_UI')),
+    );
+    listDocuments.mockResolvedValue(page(33));
+
+    await expect(findHse400Document(1, 2026, 96)).resolves.toBe(33);
+    // Проєкт документа (1) + перша порція (2, 3, 4, 5); 6…10 не запитуються.
+    expect(apiFetch).toHaveBeenCalledTimes(5);
+  });
+
   it('відмова API (не 403/404) — виняток для панелі', async () => {
     fetchAllProjects.mockResolvedValue({ items: [{ id: 2 }], nextCursor: null, totalCount: 1 });
     apiFetch.mockRejectedValue(new EcrApiError({ status: 500, title: 'Boom' } as never));
