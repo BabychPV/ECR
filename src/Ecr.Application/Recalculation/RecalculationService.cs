@@ -275,6 +275,11 @@ public sealed class RecalculationService(
     /// <param name="ct">Токен скасування.</param>
     /// <param name="changedColumns">Куди скласти колонки, змінені цим прогоном (для наступного fan-out).</param>
     /// <param name="shared">L2: спільні читання проходу; <c>null</c> — читати напряму.</param>
+    /// <param name="annualPeriods">
+    /// ✎ LAND-YEAR B58: період-читач — ЗАКРИТИЙ якір річної розкладки у відкритому році (вирішує
+    /// <c>CrossPeriodFanOut.ClosedAnchorYearAsync</c>): прогін пише лише не-місячні цілі під агрегатом року, як прогін B24
+    /// (<see cref="RecalculateAllAsync"/>). Значення — ключі місяців року; <c>null</c> — звичайний читач.
+    /// </param>
     /// <returns>Скільки комірок перераховано.</returns>
     /// <remarks>
     /// ⛔ Це G2 із дизайну WW-03: залежність із ненульовим зсувом не входить у зворотний індекс
@@ -287,7 +292,8 @@ public sealed class RecalculationService(
     public async Task<int> RecalculateFromOtherPeriodsAsync(
         long documentId, PeriodKey periodKey, IReadOnlyCollection<CrossPeriodSource> sources, CancellationToken ct,
         HashSet<(int TableDefId, int ColumnDefId)>? changedColumns = null,
-        RecalculationSharedLoad? shared = null)
+        RecalculationSharedLoad? shared = null,
+        IReadOnlyList<int>? annualPeriods = null)
     {
         ArgumentNullException.ThrowIfNull(sources);
 
@@ -305,7 +311,7 @@ public sealed class RecalculationService(
         {
             written += await RunAsync(
                     representative, dirty: null, ct, sheetDefId: null, heldSheet: null, instances,
-                    changedColumns, sources, shared: shared)
+                    changedColumns, sources, shared: shared, annualPeriods: annualPeriods)
                 .ConfigureAwait(false);
         }
 
