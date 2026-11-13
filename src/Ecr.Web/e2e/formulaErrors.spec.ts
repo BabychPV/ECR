@@ -279,19 +279,38 @@ test('C-1 formula errors (помилка формули): value kept, dependents
   expect(blockedBody).toContain('ECR-SUB-4221');
   expect(blockedBody).toContain('FORMULA-ERROR');
 
-  // 3. Клієнт: позначки комірок і банер з переходом до комірки.
+  // 3. Клієнт: позначки комірок і ✎ B78 панель «Проблеми розрахунку» — рядок на причину, формула лише в деталях.
   await page.goto(`/documents/${String(arranged.documentId)}?periodKey=${String(arranged.periodKey)}`);
-  const banner = page.getByTestId('document-formula-errors');
-  await expect(banner).toBeVisible({ timeout: 60_000 });
-  await expect(banner).toContainText('Formula errors');
+  const panel = page.getByTestId('document-calc-issues');
+  await expect(panel).toBeVisible({ timeout: 60_000 });
+  await expect(panel).toHaveAttribute('data-blocking', 'true');
+  await expect(page.getByTestId('document-calc-issues-title')).toContainText('submit is blocked');
+  const cause = page.getByTestId('document-calc-issue');
+  await expect(cause).toHaveCount(1);
+  await expect(cause).toHaveAttribute('data-kind', 'formula');
+  await expect(page.getByTestId('document-calc-issue-title')).toContainText('Formula error: division by zero (#DIV/0)');
+  // Корінь C і не оновлена D — дві комірки.
+  await expect(page.getByTestId('document-calc-issue-count')).toContainText('2 cells');
+  await expect(page.getByTestId('document-calc-issue-open-hse400'), 'HSE400 тут ні до чого').toHaveCount(0);
+  const details = page.getByTestId('document-calc-issues-details-toggle');
+  await expect(details).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByTestId('document-formula-error')).toBeHidden();
+  await expect(page.locator('[data-calc-error="Error"]')).toHaveCount(1, { timeout: 60_000 });
+  await expect(page.locator('[data-calc-error="Blocked"]')).toHaveCount(1);
+  // Знімок панелі й сітки — вкладення звіту Playwright (артефакт CI e2e-stand) для огляду зручності.
+  await testInfo.attach('calc-issues-panel', { body: await page.screenshot(), contentType: 'image/png' });
+
+  // Технічні деталі: формула, входи, справжній номер рядка (B78: не «row 0»).
+  await details.click();
+  await expect(details).toHaveAttribute('aria-expanded', 'true');
   await expect(page.getByTestId('document-formula-error')).toHaveCount(1);
   await expect(page.getByTestId('document-formula-error')).toContainText('1 dependent cell(s) not updated');
   await expect(page.getByTestId('document-formula-error')).toContainText('C, row 1');
-  await expect(page.locator('[data-calc-error="Error"]')).toHaveCount(1, { timeout: 60_000 });
-  await expect(page.locator('[data-calc-error="Blocked"]')).toHaveCount(1);
-  // Знімок банера й сітки — вкладення звіту Playwright (артефакт CI e2e-stand) для огляду зручності.
-  await testInfo.attach('formula-errors-panel', { body: await page.screenshot(), contentType: 'image/png' });
-  await page.getByTestId('document-formula-error-open').first().click();
+  await expect(page.getByTestId('document-formula-error')).toContainText('[A] / [B]');
+  await testInfo.attach('calc-issues-details', { body: await page.screenshot(), contentType: 'image/png' });
+
+  // «Показати клітинки» — перехід до комірки причини.
+  await page.getByTestId('document-calc-issue-show').click();
   await expect(page.locator('.ecr-cell-nav-target'), 'підсвічена комірка').toHaveCount(1, { timeout: 30_000 });
 
   // 4. Виправлення: B = 2 → D = 5*2 + 2 = 12, позначки й група зникають, у журналі — усунення, подання проходить.

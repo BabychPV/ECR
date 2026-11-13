@@ -378,13 +378,18 @@ async function runScenario(page: Page, browser: Browser, created: { roleId: numb
     }
   });
   await page.reload();
-  const banner = page.getByTestId('document-unmatched-rows');
-  await expect(banner).toBeVisible({ timeout: 60_000 });
-  await expect(page.getByTestId('document-unmatched-rows-summary')).toContainText('Not calculated: 1 row in 1 table');
-  const toggle = page.getByTestId('document-unmatched-rows-toggle');
+  // ✎ B78: одна панель «Проблеми розрахунку» — причина «немає входних даних» рядком з бейджем; перелік — у деталях.
+  const panel = page.getByTestId('document-calc-issues');
+  await expect(panel).toBeVisible({ timeout: 60_000 });
+  const cause = page.getByTestId('document-calc-issue');
+  await expect(cause).toHaveCount(1);
+  await expect(cause).toHaveAttribute('data-kind', 'missingInputs');
+  await expect(page.getByTestId('document-calc-issue-title')).toContainText('1 row not calculated: input data are missing');
+  const toggle = page.getByTestId('document-calc-issues-details-toggle');
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
 
+  const banner = page.getByTestId('document-unmatched-rows');
   const group = banner.getByTestId('document-unmatched-rows-group');
   await expect(group).toHaveCount(1);
   await expect(group).toContainText('Sheet 1 · Calculated table — 1 row: input data missing');
