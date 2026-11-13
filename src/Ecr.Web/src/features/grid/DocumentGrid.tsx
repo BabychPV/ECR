@@ -1349,15 +1349,27 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   // ✎ 12.11 (людина): місяць кожної місячної колонки — Issues називає закриті місяці рядка назвами.
   const columnMonths = useMonthColumnMonths(documentId, sheetDefId, periodKey, tableDefId, sheetCopyId);
 
+  // ✎ B51 (3): назва запису довідника — для назви рядка без підпису (динамічна таблиця: «Type of equipment»).
+  const lookupLabel = useCallback(
+    (registryId: number, id: number): string | undefined => {
+      const listed = lookupEntriesByRegistryId.get(registryId)?.find((entry) => entry.id === id);
+      if (listed !== undefined) return listed.display || listed.code;
+      const detail = unlistedDetailsByRegistryId.get(registryId)?.get(id);
+
+      return detail === undefined ? undefined : localized(detail.displayL10n) || detail.code;
+    },
+    [lookupEntriesByRegistryId, unlistedDetailsByRegistryId],
+  );
+
   useEffect(() => {
     if (fullSlice === undefined) return undefined;
     publishTableAttention(
       tableInstanceId,
-      tableAttentionOf(fullSlice, rowLookupProblems, rowWarnings, tableDefId, columnMonths),
+      tableAttentionOf(fullSlice, rowLookupProblems, rowWarnings, tableDefId, columnMonths, lookupLabel),
     );
 
     return () => publishTableAttention(tableInstanceId, null);
-  }, [fullSlice, tableInstanceId, rowLookupProblems, rowWarnings, tableDefId, columnMonths]);
+  }, [fullSlice, tableInstanceId, rowLookupProblems, rowWarnings, tableDefId, columnMonths, lookupLabel]);
 
   /*
    * ⚠ `X-13`: довідники, що ЩЕ ЇДУТЬ. Редактор такої колонки показує

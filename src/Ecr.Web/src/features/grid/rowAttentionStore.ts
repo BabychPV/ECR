@@ -111,6 +111,22 @@ export function attentionRowCount(all: readonly TableAttention[], periodKey: num
   return attentionForPeriod(all, periodKey).reduce((sum, table) => sum + table.rows.length, 0);
 }
 
+/**
+ * ✎ B51 (2): число в заголовку розділу «Rows that need attention» — РЯДКИ, про які розділ: з утраченим посиланням або
+ * попередженням (як `attentionRowCount`) і рядки з закритими місяцями, без повторів (рядок і з посиланням, і в
+ * закритому місяці — один рядок). Було «0» над п'ятьма пунктами закритих місяців. Рядок стану лишається на
+ * `attentionRowCount`: у закритому місяці закриті ВСІ рядки, і «49 rows need attention» там лише шум.
+ */
+export function attentionSectionCount(all: readonly TableAttention[], periodKey: number): number {
+  const rows = new Set<string>();
+  for (const table of attentionForPeriod(all, periodKey)) {
+    for (const row of table.rows) rows.add(`${String(table.tableInstanceId)}:${row.rowKey}`);
+    for (const row of table.lockedRows ?? []) rows.add(`${String(table.tableInstanceId)}:${row.rowKey}`);
+  }
+
+  return rows.size;
+}
+
 export function useTableAttention(): readonly TableAttention[] {
   return useSyncExternalStore(subscribe, () => snapshot, () => snapshot);
 }

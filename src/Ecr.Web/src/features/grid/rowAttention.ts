@@ -69,13 +69,54 @@ export interface ColumnMonth {
 
 const NoColumnMonths: ReadonlyMap<string, ColumnMonth> = new Map();
 
+/** Назва запису довідника за довідником і id; `undefined` — невідома (перелік ще не прийшов). */
+export type LookupLabelOf = (registryId: number, id: number) => string | undefined;
+
+/**
+ * ✎ B51 (3): колонки, що описують рядок динамічної таблиці, у порядку пріоритету: опис («Description of equipment»),
+ * потім тип («Type of equipment»). Заголовки — мовою читача, тож і ru/kz. Підпису шаблону в динамічного рядка немає.
+ */
+const DescriptiveHeaders: readonly RegExp[] = [/descr|опис|сипаттама/i, /\btype\b|(^|\s)тип|түр/i];
+
+/** Текст комірки для назви: рядок — як є; довідник — назва запису; інше (числа, дати, id без назви) — ні. */
+function cellName(column: TableSliceDto['columns'][number], raw: unknown, lookupLabel: LookupLabelOf | undefined): string {
+  if (column.dataType === 'String') return typeof raw === 'string' ? raw.trim() : '';
+  if (column.dataType !== 'Lookup' || column.lookupRegistryDefId === null || lookupLabel === undefined) return '';
+  const id = typeof raw === 'number' ? raw : typeof raw === 'string' && raw.trim() !== '' ? Number(raw) : Number.NaN;
+
+  return Number.isInteger(id) ? (lookupLabel(column.lookupRegistryDefId, id)?.trim() ?? '') : '';
+}
+
+/**
+ * Назва рядка для пункту в Issues: підпис шаблону; немає — перша непорожня описова колонка (опис, далі тип);
+ * немає й її — `null` (речення лишає код рядка).
+ */
+function rowNameOf(slice: TableSliceDto, row: TableSliceDto['rows'][number], lookupLabel: LookupLabelOf | undefined): string | null {
+  const label = row.label?.trim() ?? '';
+  if (label !== '' && label !== row.rowKey) return label;
+
+  for (const pattern of DescriptiveHeaders) {
+    for (const column of slice.columns) {
+      if (!pattern.test(column.header || column.code)) continue;
+      const name = cellName(column, row.cells[column.code], lookupLabel);
+      if (name !== '' && name !== row.rowKey) return name;
+    }
+  }
+
+  return null;
+}
+
 /**
  * ✎ 12.11 (людина, doc 96 жовтень 2026, T3_00): закриті місяці — ПО РЯДКУ, назвою рядка й назвами місяців, а не
  * одним реченням на таблицю з сирими заголовками колонок («Running hours per month (hour)–Gas consumption (Sm3),
  * January. RH during exceeding–…»). Місяць колонки — з `monthOf` (стан місячних колонок аркуша, уже на клієнті);
  * колонка не місячна — місяць самого зрізу. Рядки без закритих комірок — не пункт.
  */
-export function lockedRowsOf(slice: TableSliceDto, monthOf: ReadonlyMap<string, ColumnMonth> = NoColumnMonths): LockedRowItem[] {
+export function lockedRowsOf(
+  slice: TableSliceDto,
+  monthOf: ReadonlyMap<string, ColumnMonth> = NoColumnMonths,
+  lookupLabel?: LookupLabelOf,
+): LockedRowItem[] {
   const own: ColumnMonth = { monthNumber: slice.periodKey % 100, periodKey: slice.periodKey };
   const items: LockedRowItem[] = [];
   for (const row of slice.rows) {
@@ -88,13 +129,12 @@ export function lockedRowsOf(slice: TableSliceDto, monthOf: ReadonlyMap<string, 
       if (month.monthNumber >= 1 && month.monthNumber <= 12) months.set(month.periodKey, month.monthNumber);
     }
     const periodKeys = [...months.keys()].sort((a, b) => a - b);
-    const label = row.label?.trim() ?? '';
     items.push({
       key: `${String(slice.tableInstanceId)}:${row.rowKey}:locked`,
       tableInstanceId: slice.tableInstanceId,
       periodKey: slice.periodKey,
       rowKey: row.rowKey,
-      rowName: label === '' || label === row.rowKey ? null : label,
+      rowName: rowNameOf(slice, row, lookupLabel),
       months: [...new Set(periodKeys.map((key) => months.get(key) ?? 0))],
       periodKeys,
       columns: describeColumns(slice, codes) ?? '',
@@ -265,6 +305,7 @@ const bySlice = new WeakMap<
     warnings: ReadonlyMap<string, string>;
     tableDefId: number | undefined;
     monthOf: ReadonlyMap<string, ColumnMonth>;
+    lookupLabel: LookupLabelOf | undefined;
     value: TableAttention;
   }
 >();
@@ -280,13 +321,15 @@ export function tableAttentionOf(
   warnings: ReadonlyMap<string, string> = NoWarnings,
   tableDefId?: number,
   monthOf: ReadonlyMap<string, ColumnMonth> = NoColumnMonths,
+  lookupLabel?: LookupLabelOf,
 ): TableAttention {
   const cached = bySlice.get(slice);
   if (
     cached?.problems === problems &&
     cached.warnings === warnings &&
     cached.tableDefId === tableDefId &&
-    cached.monthOf === monthOf
+    cached.monthOf === monthOf &&
+    cached.lookupLabel === lookupLabel
   ) {
     return cached.value;
   }
@@ -321,9 +364,9 @@ export function tableAttentionOf(
     periodKey: slice.periodKey,
     rows,
     lockedMonths: describeColumns(slice, lockedColumnsOf(slice)),
-    lockedRows: lockedRowsOf(slice, monthOf),
+    lockedRows: lockedRowsOf(slice, monthOf, lookupLabel),
   };
-  bySlice.set(slice, { problems, warnings, tableDefId, monthOf, value });
+  bySlice.set(slice, { problems, warnings, tableDefId, monthOf, lookupLabel, value });
 
   return value;
 }
