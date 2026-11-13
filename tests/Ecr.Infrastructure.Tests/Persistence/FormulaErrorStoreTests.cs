@@ -170,6 +170,47 @@ public sealed class FormulaErrorStoreTests(SqlServerFixture sql)
         Assert.Equal([(doc.RowIds[3], 1), (doc.RowIds[0], 4)], rows.Select(r => (r.Row.TableRowId, r.RowOrdinal)));
     }
 
+    /// <summary>
+    /// ✎ B78: назва запису — лише для колонки, що посилається САМЕ на довідник запису; той самий Id у числовій колонці
+    /// назвою не стає. Один запит.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Назви_записів_лише_для_довідникової_колонки_входу()
+    {
+        var doc = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(periodKey: 202704);
+        long entryId;
+        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            var registry = new Ecr.Domain.Entities.Configuration.RegistryDef(
+                EcrCode.Create($"FUEL_B78_{doc.TableDefId}"), Text("Fuels"), isTemporal: false);
+            db.RegistryDefs.Add(registry);
+            await db.SaveChangesAsync();
+            var entry = new Ecr.Domain.Entities.Dictionaries.RegistryEntry(registry.Id, EcrCode.Create("F37"), Text("Diesel"));
+            db.RegistryEntries.Add(entry);
+            await db.SaveChangesAsync();
+            entryId = entry.Id;
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE cfg.ColumnDef SET LookupRegistryDefId = {registry.Id} WHERE Id = {doc.ColumnDefIds[0]};");
+        }
+
+        await using var reader = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
+        using var counter = new SqlClientCommandCounter(new CommandTally());
+        counter.Tally.Reset();
+
+        var names = await new FormulaErrorStore(reader).LookupNamesAsync(
+            [(doc.ColumnDefIds[0], entryId), (doc.ColumnDefIds[1], entryId)], CancellationToken.None);
+
+        counter.AssertObserved();
+        Assert.Equal(1, counter.Tally.Snapshot().Total);
+        var only = Assert.Single(names);
+        Assert.Equal((doc.ColumnDefIds[0], entryId), only.Key);
+        Assert.Equal("Diesel", only.Value.Get("en"));
+    }
+
+    private static LocalizedText Text(string en) => new(new Dictionary<string, string> { ["en"] = en });
+
     private static FormulaErrorRow Row(TestDocument doc, int row, string kind, string code)
         => new(
             doc.DocumentId, doc.PeriodKey.Value, doc.TableInstanceId, doc.TableDefId, null, doc.RowIds[row], $"R{row + 1}",

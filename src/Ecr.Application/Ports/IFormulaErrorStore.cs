@@ -31,6 +31,18 @@ public interface IFormulaErrorStore
     /// <param name="ct">Токен скасування.</param>
     public Task<IReadOnlyList<FormulaErrorView>> ListAsync(
         long documentId, int periodKey, long? sheetCopyId, CancellationToken ct);
+
+    /// <summary>
+    /// ✎ B78: назви записів довідника для входів помилки, що є значеннями довідникових колонок («Diesel», а не «37») —
+    /// ОДНИМ запитом. Пара не з довідникової колонки чи невідомий запис — відсутня у відповіді.
+    /// </summary>
+    /// <param name="refs">Пари (колонка входу, Id запису довідника).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>Реалізація за замовчуванням (тестові двійники) — без назв: панель показує значення як є.</remarks>
+    public Task<IReadOnlyDictionary<(int ColumnDefId, long EntryId), LocalizedText>> LookupNamesAsync(
+        IReadOnlyCollection<(int ColumnDefId, long EntryId)> refs, CancellationToken ct)
+        => Task.FromResult<IReadOnlyDictionary<(int ColumnDefId, long EntryId), LocalizedText>>(
+            new Dictionary<(int ColumnDefId, long EntryId), LocalizedText>());
 }
 
 /// <summary>✎ C-1: рядок стану помилки формули (для читання й запису).</summary>

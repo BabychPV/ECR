@@ -73,6 +73,39 @@ public sealed class FormulaErrorStore(EcrDbContext db) : IFormulaErrorStore
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<(int ColumnDefId, long EntryId), LocalizedText>> LookupNamesAsync(
+        IReadOnlyCollection<(int ColumnDefId, long EntryId)> refs, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(refs);
+        var result = new Dictionary<(int ColumnDefId, long EntryId), LocalizedText>();
+        if (refs.Count == 0)
+        {
+            return result;
+        }
+
+        var columnIds = refs.Select(r => r.ColumnDefId).Distinct().ToList();
+        var entryIds = refs.Select(r => r.EntryId).Distinct().ToList();
+
+        // ✎ B78: запис має належати САМЕ довіднику колонки входу — «37» числової колонки записом не є.
+        var rows = await (
+                from c in db.ColumnDefs.AsNoTracking()
+                where columnIds.Contains(c.Id) && c.LookupRegistryDefId != null
+                join e in db.RegistryEntries.AsNoTracking() on c.LookupRegistryDefId equals (int?)e.RegistryDefId
+                where entryIds.Contains(e.Id)
+                select new { ColumnId = c.Id, EntryId = e.Id, e.DisplayL10n })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var wanted = refs.ToHashSet();
+        foreach (var row in rows.Where(r => wanted.Contains((r.ColumnId, r.EntryId))))
+        {
+            result[(row.ColumnId, row.EntryId)] = row.DisplayL10n;
+        }
+
+        return result;
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<FormulaErrorView>> ListAsync(
         long documentId, int periodKey, long? sheetCopyId, CancellationToken ct)
         => await (

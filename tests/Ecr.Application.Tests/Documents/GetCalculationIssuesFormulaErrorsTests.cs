@@ -90,7 +90,35 @@ public sealed class GetCalculationIssuesFormulaErrorsTests
         Assert.Equal(2_003, result.FormulaErrorTotal);
     }
 
-    private static GetCalculationIssuesHandler Arrange(bool deny, int blockedRows = 0)
+    /// <summary>
+    /// ✎ B78 (людина 13.11: «назви палива, а не 36/37/39»): значення довідникової колонки входу — назва запису мовою
+    /// користувача; числове значення, якого сховище назвою не підтвердило (B=0), лишається як є.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Значення_довідникової_колонки_входу_назвою_запису()
+    {
+        IFormulaErrorStore? store = null;
+        var handler = Arrange(deny: false, configure: (errors, a) =>
+        {
+            store = errors;
+            errors.LookupNamesAsync(Arg.Any<IReadOnlyCollection<(int ColumnDefId, long EntryId)>>(), Arg.Any<CancellationToken>())
+                .Returns(new Dictionary<(int ColumnDefId, long EntryId), LocalizedText>
+                {
+                    [(a, 10)] = new(new Dictionary<string, string> { ["en"] = "Diesel", ["ru"] = "Дизель" }),
+                });
+        });
+
+        var result = await handler.HandleAsync(Document, Period, null, CancellationToken.None);
+
+        var own = Assert.Single(result.FormulaErrors!, e => e.ColumnCode == "C");
+        Assert.Equal(["A=Diesel", "B=0", "X=5"], own.Inputs!.Select(i => $"{i.ColumnCode}={i.Value}").ToList());
+        await store!.Received(1).LookupNamesAsync(
+            Arg.Any<IReadOnlyCollection<(int ColumnDefId, long EntryId)>>(), Arg.Any<CancellationToken>());
+    }
+
+    private static GetCalculationIssuesHandler Arrange(
+        bool deny, int blockedRows = 0, Action<IFormulaErrorStore, int>? configure = null)
     {
         var template = new TemplateBuilder();
         var visibleSheet = template.Sheet("S1");
@@ -138,6 +166,7 @@ public sealed class GetCalculationIssuesFormulaErrorsTests
             View(Row(t2.Id, x.Id, FormulaError.ErrorKind, null, null, null), "T2", "X", "1/0", null, null),
         ];
         errors.ListAsync(Document, Period, null, Arg.Any<CancellationToken>()).Returns(views);
+        configure?.Invoke(errors, a.Id);
 
         var user = Substitute.For<ICurrentUser>();
         user.UserId.Returns(9);
