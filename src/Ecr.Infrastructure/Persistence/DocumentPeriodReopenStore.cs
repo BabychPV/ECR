@@ -28,6 +28,7 @@ public sealed class DocumentPeriodReopenStore(EcrDbContext db) : IDocumentPeriod
                     project.Id,
                     project.Code,
                     project.Status,
+                    project.IsArchiving,
                     // Версія ПЕРІОДУ (шкала версій проєкту), а не чинна: журнал описує зміну саме цього місяця.
                     TemplateVersionId = EcrDbContext.VersionOf(project.Id, periodKey),
                     project.TimeZoneId,
@@ -59,7 +60,7 @@ public sealed class DocumentPeriodReopenStore(EcrDbContext db) : IDocumentPeriod
                 : row.Period.State;
 
         return new DocumentPeriodFacts(
-            row.Id, row.Code, row.Status, row.TemplateVersionId, row.TimeZoneId, row.BusinessKey, state);
+            row.Id, row.Code, row.Status, row.TemplateVersionId, row.TimeZoneId, row.BusinessKey, state, row.IsArchiving);
     }
 
     /// <inheritdoc />

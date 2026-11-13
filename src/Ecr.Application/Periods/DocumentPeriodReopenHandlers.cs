@@ -290,7 +290,8 @@ public sealed class OpenDocumentPeriodReopenHandler(
             return DocumentReopenDenial.NoPermission;
         }
 
-        if (facts.ProjectStatus == ProjectStatus.Archived)
+        // ⛔ B69 (G3): і поки триває архівація — інакше виняток, відкритий посеред переносу, переживав би його.
+        if (facts.ProjectStatus == ProjectStatus.Archived || facts.IsArchiving)
         {
             return DocumentReopenDenial.ProjectArchived;
         }
