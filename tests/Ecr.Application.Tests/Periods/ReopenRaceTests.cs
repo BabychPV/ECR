@@ -285,6 +285,9 @@ public sealed class ReopenRaceTests(SqlServerFixture sql)
         public Task<PeriodState> EffectivePeriodStateAsync(Period period, DateTime utcNow, CancellationToken ct)
             => inner.EffectivePeriodStateAsync(period, utcNow, ct);
 
+        public Task<bool> IsDocumentProjectArchivedOrArchivingAsync(long documentId, CancellationToken ct)
+            => inner.IsDocumentProjectArchivedOrArchivingAsync(documentId, ct);
+
         public Task<Ecr.Domain.Entities.Workflow.ApprovalState> GetOrCreateAsync(
             long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
             => inner.GetOrCreateAsync(documentId, sheetDefId, periodKey, ct);

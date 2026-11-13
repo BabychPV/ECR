@@ -54,6 +54,14 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
             .AnyAsync(x => x.DocumentId == documentId && x.PeriodKeyValue == key && x.ClosedAt == null && x.OpenUntil > utcNow, ct);
     }
 
+    /// <inheritdoc />
+    public Task<bool> IsDocumentProjectArchivedOrArchivingAsync(long documentId, CancellationToken ct)
+        => (from document in db.Documents.AsNoTracking()
+            where document.Id == documentId
+            join project in db.Projects.AsNoTracking() on document.ProjectId equals project.Id
+            select project)
+            .AnyAsync(p => p.Status == Domain.Enums.ProjectStatus.Archived || p.IsArchiving, ct);
+
     /// <summary>Порожній набір версій методологій для зрізу без розрахунків.</summary>
     /// <remarks>
     /// Колонка <c>NOT NULL</c> навмисно: «версій не було» і «версії не

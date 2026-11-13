@@ -74,6 +74,7 @@ public sealed record ProjectDocumentReopenItem(
 /// <param name="TimeZoneId">Пояс майданчика (IANA).</param>
 /// <param name="BusinessKey">Номер документа — для журналу.</param>
 /// <param name="PeriodState">Ефективний стан місяця БЕЗ винятку; <c>null</c> — місяця в календарі проєкту немає.</param>
+/// <param name="IsArchiving">B69 (G3): триває архівація проєкту — виняток не відкривається, як і в архівованому.</param>
 public sealed record DocumentPeriodFacts(
     int ProjectId,
     string ProjectCode,
@@ -81,7 +82,8 @@ public sealed record DocumentPeriodFacts(
     int TemplateVersionId,
     string TimeZoneId,
     string BusinessKey,
-    PeriodState? PeriodState);
+    PeriodState? PeriodState,
+    bool IsArchiving = false);
 
 /// <summary>Діючий виняток документа за місяць.</summary>
 /// <param name="Id">Ідентифікатор винятку.</param>

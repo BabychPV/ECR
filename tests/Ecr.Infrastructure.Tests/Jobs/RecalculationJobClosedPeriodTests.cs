@@ -353,6 +353,56 @@ public sealed class RecalculationJobClosedPeriodTests(SqlServerFixture sql)
         Assert.Equal("err.ECR-CALC-4221.periodClosed", error.Details?["messageKey"]);
     }
 
+    /// <remarks>
+    /// B69 (G1): виняток «місяць відкрито для документа», що пережив архівацію, не пускає перерахунок в архівований
+    /// проєкт — ні названим періодом, ні роком. Червоне без фіксу: прибрати перевірку проєкту в
+    /// <c>RecalculationJob.RefusedPeriodsAsync</c> — виняток піднімає місяць до Grace, і прогін пише (як у
+    /// <see cref="Місяць_відкритий_лише_для_документа_перераховується_для_нього"/>).
+    /// </remarks>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "B69-G1")]
+    public async Task Архівований_проєкт_із_винятком_документа_не_перераховується(bool namedPeriod)
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var document = await builder.BuildAsync();
+
+        await CloseAsync(builder, document.ProjectId, document.PeriodKey.Value);
+        await ReopenForDocumentAsync(builder, document.DocumentId, document.PeriodKey.Value);
+        await ArchiveAsync(builder, document.ProjectId);
+        Arrange(document);
+
+        await using var db = builder.CreateContext();
+        var thrown = await Record.ExceptionAsync(() => Job(db).ExecuteAsync(
+            new RecalculationRequest(
+                document.ProjectId, document.DocumentId, namedPeriod ? (int?)document.PeriodKey.Value : null, TriggeredByUserId: 7),
+            NoOpProgress.Instance, CancellationToken.None));
+
+        Assert.Empty(AppliedOrEmpty());
+        var error = Assert.IsType<BusinessRuleException>(thrown);
+        Assert.Equal("ECR-CALC-4221", error.ErrorCode);
+        Assert.Equal("err.ECR-CALC-4221.projectArchived", error.Details?["messageKey"]);
+    }
+
+    /// <summary>Активує проєкт, закриває всі його періоди й архівує (шлях D-123), без перевірки винятків документа.</summary>
+    private static async Task ArchiveAsync(TestDocumentBuilder builder, int projectId)
+    {
+        await using var db = builder.CreateContext();
+        var now = DateTime.UtcNow;
+        var project = await db.Projects.Include(p => p.Periods).SingleAsync(p => p.Id == projectId);
+        project.Activate(now);
+        foreach (var period in project.Periods)
+        {
+            period.AdvanceTo(PeriodState.Closed, now);
+        }
+
+        project.Archive(now);
+        await db.SaveChangesAsync();
+    }
+
     /// <summary>Діючий виняток «місяць відкрито для документа» на три доби (автор — новий користувач).</summary>
     private static async Task ReopenForDocumentAsync(TestDocumentBuilder builder, long documentId, int periodKey)
     {

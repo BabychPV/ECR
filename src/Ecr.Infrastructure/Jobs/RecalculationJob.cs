@@ -1293,6 +1293,21 @@ public sealed partial class RecalculationJob(
     private async Task GuardCompletionAsync(
         int projectId, int period, IReadOnlyList<SheetGuard> guards, bool writeSubmitted, CancellationToken ct)
     {
+        // ⛔ B69: архівація могла початися, поки прогін рахував, — перемикання в архівованому проєкті не відбувається.
+        var project = await db.Projects
+            .AsNoTracking()
+            .Where(p => p.Id == projectId)
+            .Select(p => new { p.Status, p.IsArchiving })
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+        if (project is not null
+            && RecalculationWritePolicy.CheckProject(project.Status, project.IsArchiving) is var projectDenial
+            && projectDenial != RecalculationWriteDenial.None)
+        {
+            throw RecalculationWritePolicy.Reject(
+                projectDenial, period, guards.Count > 0 ? (object?)guards[0].DocumentId : null);
+        }
+
         // ⛔ X6-01: стан — ЕФЕКТИВНИЙ (F-08), а не збережений: прогін, що завершується між
         // `ComputedCloseAt` і найближчою годинною задачею станів, інакше перемикав актуальність
         // у вже закритому періоді без погодження S1.
@@ -1409,6 +1424,22 @@ public sealed partial class RecalculationJob(
     private async Task<IReadOnlySet<int>> RefusedPeriodsAsync(
         RecalculationRequest request, CancellationToken ct)
     {
+        // ⛔ B69: архівований (чи той, що архівується) проєкт — відмова цілим прогоном, і роком, і названим періодом. Нижче
+        // виняток «місяць відкрито для документа» піднімає закритий місяць до Grace; виняток, що пережив архівацію,
+        // інакше пускав прогін писати в архівований проєкт.
+        var archived = await db.Documents
+            .AsNoTracking()
+            .Where(d => d.Id == request.DocumentId)
+            .Join(db.Projects.AsNoTracking(), d => d.ProjectId, p => p.Id, (d, p) => new { p.Status, p.IsArchiving })
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+        if (archived is not null
+            && RecalculationWritePolicy.CheckProject(archived.Status, archived.IsArchiving) is var projectDenial
+            && projectDenial != RecalculationWriteDenial.None)
+        {
+            throw RecalculationWritePolicy.Reject(projectDenial, request.PeriodKey ?? 0, request.DocumentId);
+        }
+
         // ⛔ X6-01: ефективний стан (F-08) — те саме правило, що й у `GuardCompletionAsync`
         // і в рішенні про запис; інакше прогін, допущений тут за збереженим `Grace`, падав би
         // на перемиканні за ефективним `Closed` і повторювався до годинної задачі станів.

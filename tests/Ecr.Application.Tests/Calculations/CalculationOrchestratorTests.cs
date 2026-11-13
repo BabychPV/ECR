@@ -179,6 +179,33 @@ public sealed class CalculationOrchestratorTests
         Assert.Equal("job-1", jobId);
     }
 
+    /// <remarks>
+    /// B69 (G1): архівований проєкт не перераховується ні названим періодом, ні роком — задача в чергу не стає. Червоне
+    /// без фіксу: період тут <c>Grace</c> (як після винятку документа), і обробник ставив задачу.
+    /// </remarks>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Finding", "B69-G1")]
+    public async Task Архівований_проєкт_не_перераховується_ні_періодом_ні_роком()
+    {
+        _periods.IsProjectArchivedOrArchivingAsync(Project, Arg.Any<CancellationToken>()).Returns(true);
+        States(PeriodState.Grace);
+        _periods.GetPeriodStatesAsync(Project, null, Arg.Any<CancellationToken>())
+                .Returns(new List<PeriodStateRef> { new(Period, PeriodState.Grace) });
+
+        foreach (var key in new int?[] { Period, null })
+        {
+            var error = await Assert.ThrowsAsync<BusinessRuleException>(
+                () => Handler().RequestAsync(Project, key, CancellationToken.None));
+
+            Assert.Equal("ECR-CALC-4221", error.ErrorCode);
+            Assert.Equal("err.ECR-CALC-4221.projectArchived", error.Details?["messageKey"]);
+            Assert.Equal(nameof(RecalculationWriteDenial.ProjectArchived), error.Details?["denial"]);
+        }
+
+        await _jobs.DidNotReceive().EnqueueCoalescedAsync<IRecalculationJob>(
+            Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>());
+    }
+
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
     [Trait("Requirement", "ФВ-9.17")]
     public async Task Поданий_аркуш_більше_не_відмовляє_перерахунку_проєкту()

@@ -192,6 +192,14 @@ public sealed class RecalculateDocumentHandler(
             }
         }
 
+        // ⛔ B69: архівований проєкт — відмова до будь-якого стану періоду. `FindPeriodStateAsync` піднімає закритий місяць
+        // до Grace за винятком «відкрито для документа», і виняток, що пережив архівацію, інакше ставив задачу в чергу.
+        if (await periods.IsDocumentProjectArchivedOrArchivingAsync(documentId, ct).ConfigureAwait(false))
+        {
+            throw Calculations.RecalculationWritePolicy.Reject(
+                Calculations.RecalculationWriteDenial.ProjectArchived, periodKey.Value, documentId);
+        }
+
         // ⛔ Стан періоду і робочого процесу — ДО черги (ФВ-9.7, ФВ-9.17).
         // ✎ 07.11 (D-468): закритий період не перераховується жодним маршрутом — шлях один, Reopen.
         var state = await periods

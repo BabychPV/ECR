@@ -134,6 +134,55 @@ public sealed class OrphanScannerProjectPeriodTests(SqlServerFixture sql)
         Assert.True(await OrphanedAsync(check, closed));
     }
 
+    /// <summary>
+    /// B69 (G2): рядок закритого періоду АРХІВОВАНОГО проєкту прохід не чіпає — ані ознаки, ані версії рядка, хоч
+    /// запис і нечинний. Контроль у тому самому проході: такий самий рядок неархівованого проєкту позначається.
+    /// </summary>
+    /// <remarks>
+    /// Червоне без фіксу: прибрати умову проєкту в <c>OrphanScanner.NextBatchAsync</c> — рядок архіву стає сиротою
+    /// (як у <see cref="Рядок_закритого_періоду_з_нечинним_записом_позначається"/>), версія рядка змінюється.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "B69-G2")]
+    public async Task Рядок_архівованого_проєкту_прохід_не_чіпає()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var archived = await builder.BuildAsync(periodKey: 202601, rowCount: 1, ct: CancellationToken.None);
+        var control = await builder.BuildAsync(periodKey: 202601, rowCount: 1, ct: CancellationToken.None);
+
+        await using var db = Context();
+        await OpenAsync(db, archived.ProjectId, control.ProjectId);
+
+        var closedAt = new DateTime(2026, 2, 10, 0, 0, 0, DateTimeKind.Utc);
+        foreach (var period in await db.Periods
+                     .Where(p => p.ProjectId == archived.ProjectId || p.ProjectId == control.ProjectId)
+                     .ToListAsync(CancellationToken.None))
+        {
+            period.TransitionTo(PeriodState.Closed, closedAt);
+        }
+
+        var project = await db.Projects.SingleAsync(p => p.Id == archived.ProjectId, CancellationToken.None);
+        project.Activate(closedAt);
+        project.Archive(closedAt);
+        await db.SaveChangesAsync(CancellationToken.None);
+
+        // Запис нечинний у січні для обох — чинний лише з червня.
+        var entry = await EntryAsync(db, new DateOnly(2026, 6, 1), null);
+        await ReferenceAsync(db, archived, entry.Id);
+        await ReferenceAsync(db, control, entry.Id);
+
+        var versionBefore = await RowVersionAsync(db, archived);
+
+        await ScanAsync();
+
+        await using var check = Context();
+        Assert.True(await OrphanedAsync(check, control));
+        Assert.False(await OrphanedAsync(check, archived));
+        Assert.Equal(versionBefore, await RowVersionAsync(check, archived));
+    }
+
     private static async Task OpenAsync(EcrDbContext db, params int[] projectIds)
     {
         foreach (var projectId in projectIds)

@@ -171,6 +171,43 @@ public sealed class ProjectDocumentReopensTests
         await audit.DidNotReceiveWithAnyArgs().WriteStructureChangeAsync(default!, default);
     }
 
+    /// <remarks>
+    /// B69 (G3): поки триває архівація проєкту, місяць для документа не відкривається — та сама відмова, що й в
+    /// архівованому. Червоне без фіксу: <c>DenialOf</c> дивився лише <c>Archived</c> — виняток додавався. Контроль: ті
+    /// самі факти без архівації — виняток додається.
+    /// </remarks>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Finding", "B69-G3")]
+    public async Task Під_час_архівації_місяць_для_документа_не_відкривається(bool archiving)
+    {
+        var store = Substitute.For<IDocumentPeriodReopenStore>();
+        store.GetFactsAsync(VisibleDocumentId, PeriodKey, Now, Arg.Any<CancellationToken>())
+            .Returns(new DocumentPeriodFacts(
+                ProjectId, "PRJ", ProjectStatus.Active, 1, "UTC", "DOC-1", PeriodState.Closed, IsArchiving: archiving));
+        store.FindOpenAsync(VisibleDocumentId, PeriodKey, Arg.Any<CancellationToken>()).Returns((DocumentPeriodReopen?)null);
+
+        var handler = new OpenDocumentPeriodReopenHandler(
+            store, Access(withReopen: true), Uow(), Substitute.For<IAuditWriter>(), User(), new TestClock(Now));
+
+        if (archiving)
+        {
+            var error = await Assert.ThrowsAsync<BusinessRuleException>(
+                () => handler.HandleAsync(VisibleDocumentId, PeriodKey, "Лист №19", Now.AddHours(5), CancellationToken.None));
+
+            Assert.Equal("ECR-PRD-0409", error.ErrorCode);
+            Assert.Equal("err.ECR-PRD-0409.projectArchived", error.Details!["messageKey"]);
+            store.DidNotReceiveWithAnyArgs().Add(default!);
+        }
+        else
+        {
+            await handler.HandleAsync(VisibleDocumentId, PeriodKey, "Лист №19", Now.AddHours(5), CancellationToken.None);
+            store.Received(1).Add(Arg.Any<DocumentPeriodReopen>());
+        }
+    }
+
     // ── Підготовка ──────────────────────────────────────────────────────
 
     /// <summary>Сховище: факти закритого місяця і (за наявності) незакритий виняток.</summary>

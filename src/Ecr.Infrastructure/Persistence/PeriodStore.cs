@@ -240,4 +240,21 @@ public sealed class PeriodStore(EcrDbContext db, Ecr.Domain.Abstractions.IClock?
                      && !(a.Status == Ecr.Domain.Enums.DocumentStatus.Approved && a.ApprovedAt >= a.ReopenedAt),
                 ct)
             .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public Task<bool> IsProjectArchivedOrArchivingAsync(int projectId, CancellationToken ct)
+        => db.Projects
+            .AsNoTracking()
+            .AnyAsync(
+                p => p.Id == projectId
+                     && (p.Status == Ecr.Domain.Enums.ProjectStatus.Archived || p.IsArchiving),
+                ct);
+
+    /// <inheritdoc />
+    public Task<bool> IsDocumentProjectArchivedOrArchivingAsync(long documentId, CancellationToken ct)
+        => (from document in db.Documents.AsNoTracking()
+            where document.Id == documentId
+            join project in db.Projects.AsNoTracking() on document.ProjectId equals project.Id
+            select project)
+            .AnyAsync(p => p.Status == Ecr.Domain.Enums.ProjectStatus.Archived || p.IsArchiving, ct);
 }
