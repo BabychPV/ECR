@@ -80,6 +80,10 @@ public static class NightlyCatchUp
     }
 
     /// <summary>Ставить у чергу пропущені задачі; повертає їхні коди.</summary>
+    /// <exception cref="InvalidOperationException">
+    /// Постановка хоч однієї задачі не вдалася — після спроби поставити ВСІ інші; повідомлення називає невдалі й
+    /// поставлені.
+    /// </exception>
     /// <param name="lastRuns">Остання відмітка старту за кодом задачі (<see cref="LastRunsAsync"/>).</param>
     /// <param name="scheduler">Планувальник.</param>
     /// <param name="utcNow">Тепер.</param>
@@ -97,17 +101,47 @@ public static class NightlyCatchUp
             .Where(code => lastRuns.TryGetValue(code, out var last) && utcNow - last > MaxAge)
             .ToList();
 
+        // ⛔ Live 13.11 (приймання): збій постановки ОДНІЄЇ задачі обривав foreach, і решта — перевірка узгодженості
+        // стоїть останньою — не наздоганялась ніколи. Тепер кожна ставиться окремо; невдалі збираються й після
+        // проходу всього переліку повертаються одним винятком (його пише в журнал RecurringScheduleService).
+        // Скасування не ковтається.
+        List<string>? failures = null;
+        var enqueued = new List<string>(missed.Count);
         foreach (var code in missed)
         {
-            await EnqueueAsync(code, scheduler, ct).ConfigureAwait(false);
+            try
+            {
+                await EnqueueAsync(code, scheduler, ct).ConfigureAwait(false);
+                enqueued.Add(code);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                (failures ??= []).Add($"{code}: {ex.Message}");
+            }
+        }
+
+        if (failures is not null)
+        {
+            throw new InvalidOperationException(
+                $"Не поставлено: {string.Join("; ", failures)}. "
+                + $"Поставлено: {(enqueued.Count > 0 ? string.Join(", ", enqueued) : "нічого")}.");
         }
 
         return missed;
     }
 
+    /// <summary>Ціль постановки наздоганяння (<see cref="IBackgroundJobScheduler.EnqueueCoalescedAsync{TJob}"/>).</summary>
+    /// <remarks>
+    /// ⛔ Live 13.11 (приймання): ціль була <c>nightly-catch-up:{код}</c>, і ідентифікатор задачі Quartz
+    /// (<c>{Тип}~{ціль}~{Guid N}</c>) для <c>SubmissionSnapshotRetentionJob</c> виходив 110 символів при
+    /// <c>itg.JobProgress.JobId nvarchar(100)</c> — SqlException. Код задачі в цілі зайвий: тип задачі вже стоїть
+    /// у префіксі ідентифікатора, і коалесценція йде за парою «тип + ціль». Найдовший тип переліку (30) дає 80.
+    /// </remarks>
+    private const string TargetKey = "nightly-catch-up";
+
     private static Task<string> EnqueueAsync(string code, IBackgroundJobScheduler scheduler, CancellationToken ct)
     {
-        var key = "nightly-catch-up:" + code;
+        const string key = TargetKey;
 
         return code switch
         {

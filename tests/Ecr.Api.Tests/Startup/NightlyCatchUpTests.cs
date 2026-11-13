@@ -1,7 +1,10 @@
 // tests/Ecr.Api.Tests/Startup/NightlyCatchUpTests.cs
 using Ecr.Api.Startup;
 using Ecr.Application.Ports;
+using Ecr.Domain.Entities.Integration;
 using Ecr.Infrastructure.Jobs;
+using Ecr.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using NSubstitute;
 using Xunit;
@@ -37,7 +40,7 @@ public sealed class NightlyCatchUpTests
 
         Assert.Equal([ConsistencyCheckJob.Code], missed);
         await scheduler.Received(1).EnqueueCoalescedAsync<ConsistencyCheckJob>(
-            "nightly-catch-up:" + ConsistencyCheckJob.Code, null, Arg.Any<CancellationToken>());
+            "nightly-catch-up", null, Arg.Any<CancellationToken>());
         await scheduler.DidNotReceive().EnqueueCoalescedAsync<SupersededResultsSweepJob>(
             Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>());
     }
@@ -57,6 +60,87 @@ public sealed class NightlyCatchUpTests
         Assert.Equal(SupersededResultsSweepJob.Code, missed[0]);
         Assert.Equal(ConsistencyCheckJob.Code, missed[^1]);
     }
+
+    [Fact]
+    public async Task Ідентифікатор_кожної_задачі_наздоганяння_вміщається_в_колонки_JobProgress()
+    {
+        // ⛔ Live 13.11 (приймання): «SubmissionSnapshotRetentionJob~nightly-catch-up:submission-snapshot-retention~<guid>»
+        // = 110 символів при itg.JobProgress.JobId nvarchar(100) — SqlException, і решта переліку не ставилась.
+        // Довжини — з моделі EF (не з числа в тесті): звузять колонку — тест почервоніє.
+        using var db = ModelOnlyContext();
+        var entity = db.Model.FindEntityType(typeof(JobProgress))!;
+        var jobIdMax = entity.FindProperty(nameof(JobProgress.JobId))!.GetMaxLength()!.Value;
+        var targetKeyMax = entity.FindProperty(nameof(JobProgress.TargetKey))!.GetMaxLength()!.Value;
+
+        var scheduler = Substitute.For<IBackgroundJobScheduler>();
+        var lastRuns = NightlyCatchUp.Codes.ToDictionary(code => code, _ => Now.AddDays(-3), StringComparer.Ordinal);
+
+        await NightlyCatchUp.EnqueueMissedAsync(lastRuns, scheduler, Now, CancellationToken.None);
+
+        var calls = scheduler.ReceivedCalls()
+            .Where(c => c.GetMethodInfo().Name == nameof(IBackgroundJobScheduler.EnqueueCoalescedAsync))
+            .Select(c => (Type: c.GetMethodInfo().GetGenericArguments()[0].Name, Key: (string)c.GetArguments()[0]!))
+            .ToList();
+        Assert.Equal(NightlyCatchUp.Codes.Count, calls.Count);
+
+        foreach (var (type, key) in calls)
+        {
+            // Форма QuartzJobScheduler.TargetPrefixOf + Guid("N") (CoalesceAsync): {Тип}~{ціль}~{32 hex}.
+            var quartzJobId = $"{type}~{key.Replace('~', '_')}~{Guid.NewGuid():N}";
+            // Форма DbBackgroundJobScheduler.TargetKeyOf: {Тип}~{ціль}.
+            var dbTargetKey = $"{type}~{key.Replace('~', '_')}";
+
+            Assert.True(
+                quartzJobId.Length <= jobIdMax,
+                $"JobId {quartzJobId} — {quartzJobId.Length} символів, колонка JobProgress.JobId — {jobIdMax}.");
+            Assert.True(
+                dbTargetKey.Length <= targetKeyMax,
+                $"TargetKey {dbTargetKey} — {dbTargetKey.Length} символів, колонка JobProgress.TargetKey — {targetKeyMax}.");
+        }
+    }
+
+    [Fact]
+    public async Task Збій_постановки_однієї_задачі_не_зупиняє_решту()
+    {
+        // ⛔ Live 13.11: виняток постановки SubmissionSnapshotRetentionJob обривав цикл, і перевірка узгодженості
+        // (остання в переліку) не наздоганялась. Тепер решта ставиться, а збій повертається одним винятком.
+        var scheduler = Substitute.For<IBackgroundJobScheduler>();
+        scheduler.EnqueueCoalescedAsync<SubmissionSnapshotRetentionJob>(
+                Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
+            .Returns(Task.FromException<string>(new InvalidOperationException("String or binary data would be truncated")));
+        var lastRuns = NightlyCatchUp.Codes.ToDictionary(code => code, _ => Now.AddDays(-3), StringComparer.Ordinal);
+
+        var error = await Record.ExceptionAsync(
+            () => NightlyCatchUp.EnqueueMissedAsync(lastRuns, scheduler, Now, CancellationToken.None));
+
+        await scheduler.Received(1).EnqueueCoalescedAsync<ConsistencyCheckJob>(
+            Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>());
+        await scheduler.Received(1).EnqueueCoalescedAsync<SupersededResultsSweepJob>(
+            Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>());
+        Assert.NotNull(error);
+        Assert.Contains(SubmissionSnapshotRetentionJob.Code, error.Message, StringComparison.Ordinal);
+        Assert.Contains("truncated", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Скасування_не_ковтається()
+    {
+        var scheduler = Substitute.For<IBackgroundJobScheduler>();
+        scheduler.EnqueueCoalescedAsync<SupersededResultsSweepJob>(
+                Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
+            .Returns(Task.FromException<string>(new OperationCanceledException()));
+        var lastRuns = NightlyCatchUp.Codes.ToDictionary(code => code, _ => Now.AddDays(-3), StringComparer.Ordinal);
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => NightlyCatchUp.EnqueueMissedAsync(lastRuns, scheduler, Now, CancellationToken.None));
+        await scheduler.DidNotReceive().EnqueueCoalescedAsync<ConsistencyCheckJob>(
+            Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>());
+    }
+
+    private static EcrDbContext ModelOnlyContext()
+        => new(new DbContextOptionsBuilder<EcrDbContext>()
+            .UseSqlServer("Server=(model-only-does-not-connect);Database=Ecr;Trusted_Connection=True")
+            .Options);
 
     [Fact]
     public async Task Задача_без_жодної_відмітки_не_наздоганяється()
