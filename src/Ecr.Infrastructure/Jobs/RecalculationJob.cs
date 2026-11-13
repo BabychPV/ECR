@@ -96,6 +96,12 @@ public sealed partial class RecalculationJob(
         Message = "RecalculationJob: документ {DocumentId}: через спільну методологію перераховано прив'язок поза областю/пропущених аркушів: {Count}.")]
     private static partial void LogRecomputedOutsideScope(ILogger logger, long documentId, int count);
 
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "RecalculationJob: перерахунок проєкту {ProjectId}: проєкт архівований або архівується — документ {DocumentId} "
+                  + "пропущено (B69/B81: архівні дані не перераховуються).")]
+    private static partial void LogArchivedProjectSkipped(ILogger logger, int projectId, long documentId);
+
     /// <summary>Стеля прив'язок на прогін: методологій у системі — десятки.</summary>
     private const int MaxBindings = 5_000;
 
@@ -779,9 +785,22 @@ public sealed partial class RecalculationJob(
             // ✎ UAT-recalc-ux: документ, у якому за названий період подано/затверджено ВСЕ, не ставиться — дочірня
             // задача відмовила б 4221 і зробила б перерахунок проєкту «з помилками», хоча пропуск поданих аркушів —
             // штатна поведінка. Те саме рішення, що й на шляху запису (`RefusedPeriodsAsync`).
-            if (child.PeriodKey is not null && await FullySubmittedAsync(child, ct).ConfigureAwait(false))
+            //
+            // ⛔ B81 (F13 #877): той самий виклик для АРХІВОВАНОГО проєкту кидав `ProjectArchived` (B69) — і валив
+            // БАТЬКІВСЬКУ задачу посеред розкладу, хоча відмова тут штатна: архівні дані не перераховуються. Тепер
+            // документ пропускається з рядком журналу, а батько завершується «розкладено N».
+            if (child.PeriodKey is not null)
             {
-                continue;
+                var skip = await FanOutSkipAsync(child, ct).ConfigureAwait(false);
+                if (skip == RecalculationWriteDenial.ProjectArchived && logger is not null)
+                {
+                    LogArchivedProjectSkipped(logger, request.ProjectId, documentId);
+                }
+
+                if (skip != RecalculationWriteDenial.None)
+                {
+                    continue;
+                }
             }
 
             enqueued++;
@@ -889,20 +908,26 @@ public sealed partial class RecalculationJob(
         return (skipped, recalculated);
     }
 
-    /// <summary>Чи в названому періоді документа подано/затверджено все (рахувати нічого).</summary>
-    private async Task<bool> FullySubmittedAsync(RecalculationRequest child, CancellationToken ct)
+    /// <summary>
+    /// Чи пропустити документ у розкладі проєкту: у названому періоді подано/затверджено все (рахувати нічого) або
+    /// проєкт архівований чи архівується (B81) — <see cref="RecalculationWriteDenial.None"/>, якщо ставити.
+    /// </summary>
+    private async Task<RecalculationWriteDenial> FanOutSkipAsync(RecalculationRequest child, CancellationToken ct)
     {
         try
         {
             _ = await RefusedPeriodsAsync(child, ct).ConfigureAwait(false);
-            return false;
+            return RecalculationWriteDenial.None;
         }
         catch (Ecr.Application.Errors.BusinessRuleException refused)
             when (refused.Details is { } details
                   && details.TryGetValue("denial", out var denial)
-                  && denial as string == nameof(RecalculationWriteDenial.SheetsSubmitted))
+                  && (denial as string == nameof(RecalculationWriteDenial.SheetsSubmitted)
+                      || denial as string == nameof(RecalculationWriteDenial.ProjectArchived)))
         {
-            return true;
+            return denial as string == nameof(RecalculationWriteDenial.ProjectArchived)
+                ? RecalculationWriteDenial.ProjectArchived
+                : RecalculationWriteDenial.SheetsSubmitted;
         }
     }
 
