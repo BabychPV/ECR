@@ -262,6 +262,49 @@ public sealed class DocumentHeaderPatchTests(SqlServerFixture sql)
         Assert.Equal("ECR-HDR-0422", problem.GetProperty("errorCode").GetString());
     }
 
+    /// <summary>
+    /// B35 W-2: відповідь <c>PATCH</c> справжнім HTTP несе поставлені задачі перерахунку з періодами (серед них —
+    /// відкритий період документа), а повтор того самого значення — порожній перелік; <c>GET</c> — <c>null</c>.
+    /// </summary>
+    /// <remarks>Доти поле в контракті було відсутнє, і клієнт не знав, коли перечитати формули над <c>HDR.*</c>.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task B35_PATCH_шапки_повертає_поставлені_задачі_перерахунку()
+    {
+        var s = await ArrangeAsync(openPeriods: true).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var initial = await VersionAsync(client, app, s.DocumentId).ConfigureAwait(true);
+        var first = await PatchAsync(client, s.DocumentId, "Tengiz", initial).ConfigureAwait(true);
+        var firstBody = await first.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.True(first.StatusCode == HttpStatusCode.OK, $"{first.StatusCode}: {firstBody}\n{app.ErrorsText}");
+
+        var root = JsonDocument.Parse(firstBody).RootElement;
+        var jobs = root.GetProperty("recalculationJobs").EnumerateArray().ToList();
+        Assert.NotEmpty(jobs);
+        Assert.All(jobs, job => Assert.False(string.IsNullOrWhiteSpace(job.GetProperty("jobId").GetString())));
+        var periods = jobs.Select(job => job.GetProperty("periodKey").GetInt32()).ToList();
+        Assert.Equal(periods.Count, periods.Distinct().Count());
+        Assert.Contains(s.PeriodKey, periods);
+
+        // Те саме значення ще раз — нічого не змінилося, нічого не поставлено: порожній перелік, не null.
+        var again = await PatchAsync(client, s.DocumentId, "Tengiz", root.GetProperty("version").GetString())
+            .ConfigureAwait(true);
+        var againBody = await again.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.True(again.StatusCode == HttpStatusCode.OK, $"{again.StatusCode}: {againBody}\n{app.ErrorsText}");
+        Assert.Empty(JsonDocument.Parse(againBody).RootElement.GetProperty("recalculationJobs").EnumerateArray());
+
+        var get = await client.GetAsync(HeaderUri(s.DocumentId)).ConfigureAwait(true);
+        var getBody = await get.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.True(
+            !JsonDocument.Parse(getBody).RootElement.TryGetProperty("recalculationJobs", out var onGet)
+            || onGet.ValueKind == JsonValueKind.Null,
+            $"GET не ставить задач: {getBody}");
+    }
+
     private static Uri HeaderUri(long documentId)
         => new($"/api/v1/documents/{documentId.ToString(CultureInfo.InvariantCulture)}/header", UriKind.Relative);
 
@@ -326,7 +369,7 @@ public sealed class DocumentHeaderPatchTests(SqlServerFixture sql)
 
     /// <summary>Документ із полем шапки <c>AREA</c>, користувач із <c>Document.View</c> і грантом Write.</summary>
     private async Task<Scenario> ArrangeAsync(
-        DocumentStatus? sheetStatus = null, bool closeAllPeriods = false, string? initialArea = null)
+        DocumentStatus? sheetStatus = null, bool closeAllPeriods = false, string? initialArea = null, bool openPeriods = false)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var document = await builder.BuildAsync(columnCount: 1, rowCount: 1).ConfigureAwait(false);
@@ -366,6 +409,15 @@ public sealed class DocumentHeaderPatchTests(SqlServerFixture sql)
             }
         }
 
+        // B35: перерахунок не ставиться на запланований (Scheduled) період — для перевірки задач період відкрито.
+        if (openPeriods)
+        {
+            foreach (var period in await db.Periods.Where(p => p.ProjectId == document.ProjectId).ToListAsync().ConfigureAwait(false))
+            {
+                period.AdvanceTo(PeriodState.Open, at);
+            }
+        }
+
         var userName = $"hdr_{Guid.NewGuid():N}"[..20];
         var user = new User(userName, userName, AuthProvider.Local);
         user.SetPassword(new PasswordHasher().Hash(Password));
@@ -384,8 +436,8 @@ public sealed class DocumentHeaderPatchTests(SqlServerFixture sql)
         db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Project, document.ProjectId, GrantLevel.Write));
         await db.SaveChangesAsync().ConfigureAwait(false);
 
-        return new Scenario(document.DocumentId, area.Id, userName, user.Id);
+        return new Scenario(document.DocumentId, area.Id, userName, user.Id, document.PeriodKey.Value);
     }
 
-    private sealed record Scenario(long DocumentId, int AreaFieldId, string UserName, int UserId);
+    private sealed record Scenario(long DocumentId, int AreaFieldId, string UserName, int UserId, int PeriodKey);
 }

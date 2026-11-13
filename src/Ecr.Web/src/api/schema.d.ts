@@ -31549,6 +31549,10 @@ export interface components {
         DocumentHeaderDto: {
             /** @description Поля в порядку `Ordinal`. */
             fields: components["schemas"]["DocumentHeaderFieldDto"][];
+            /** @description B35 W-2: задачі перерахунку, поставлені ЦІЄЮ правкою шапки (`PATCH`) — по одній на кожен період, куди
+             *     перерахунок має право писати (річний документ HSE401 — до 12). Порожньо — правка нічого не змінила або писати
+             *     нікуди; `null` — відповідь `GET` (читання задач не ставить). */
+            recalculationJobs?: null | components["schemas"]["HeaderRecalculationJobDto"][];
             /** @description Версія значень шапки — її клієнт повертає в `baseVersion` наступного
              *     `PATCH`. Виводиться зі ЗНАЧЕНЬ (хеш), а не з колонки: у
              *     `doc.DocumentHeaderValue` немає власного `rowversion`, а
@@ -33142,6 +33146,16 @@ export interface components {
             fieldCode: string;
             /** @description The history, base permit first. */
             permits: components["schemas"]["PermitHistoryItemDto"][];
+        };
+        /** @description Задача перерахунку, поставлена правкою шапки (B35 W-2). */
+        HeaderRecalculationJobDto: {
+            /** @description Задача: `GET /jobs/{jobId}` (у шляху — `encodeURIComponent`, id містить `#`). */
+            jobId: string;
+            /**
+             * Format: int32
+             * @description Період задачі (`yyyyMM`); перерахунок адресує пару документ × період.
+             */
+            periodKey: number;
         };
         /** @description Where the header block is. */
         HeaderSpec: {
