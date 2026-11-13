@@ -30,18 +30,24 @@ public sealed partial class DocumentStaleResultsStoreTests
     {
         var (db, chain) = await YearChainAsync(TemplateLayout.YearWithMonthColumns);
         await using var _ = db;
+        try
+        {
+            var version = await VersionAsync(db);
+            await MonthRunAsync(db, chain, version, YearMonth, Now);
+            Assert.False((await CardAsync(db, chain, YearAnchor)).ResultsStale);
 
-        var version = await VersionAsync(db);
-        await MonthRunAsync(db, chain, version, YearMonth, Now);
-        Assert.False((await CardAsync(db, chain, YearAnchor)).ResultsStale);
+            var editedAt = Now.AddHours(1);
+            await EditAsync(chain.DocumentId, YearMonth, chain.ColumnDefIds[1], editedAt);
 
-        var editedAt = Now.AddHours(1);
-        await EditAsync(chain.DocumentId, YearMonth, chain.ColumnDefIds[1], editedAt);
-
-        var card = await CardAsync(db, chain, YearAnchor);
-        Assert.True(card.ResultsStale);
-        Assert.True(Math.Abs((card.ResultsStaleSince!.Value - editedAt).TotalSeconds) < 1, $"{card.ResultsStaleSince:O}");
-        Assert.Equal(DateTimeKind.Utc, card.ResultsStaleSince.Value.Kind);
+            var card = await CardAsync(db, chain, YearAnchor);
+            Assert.True(card.ResultsStale);
+            Assert.True(Math.Abs((card.ResultsStaleSince!.Value - editedAt).TotalSeconds) < 1, $"{card.ResultsStaleSince:O}");
+            Assert.Equal(DateTimeKind.Utc, card.ResultsStaleSince.Value.Kind);
+        }
+        finally
+        {
+            await ReleaseMonthRunsAsync(db, chain);
+        }
     }
 
     /// <summary>Контроль: версія <c>PerMonthCopies</c> — картка періоду судить лише свій період, як доти.</summary>
@@ -53,14 +59,33 @@ public sealed partial class DocumentStaleResultsStoreTests
     {
         var (db, chain) = await YearChainAsync(TemplateLayout.PerMonthCopies);
         await using var _ = db;
+        try
+        {
+            var version = await VersionAsync(db);
+            await MonthRunAsync(db, chain, version, YearMonth, Now);
+            await EditAsync(chain.DocumentId, YearMonth, chain.ColumnDefIds[1], Now.AddHours(1));
 
-        var version = await VersionAsync(db);
-        await MonthRunAsync(db, chain, version, YearMonth, Now);
-        await EditAsync(chain.DocumentId, YearMonth, chain.ColumnDefIds[1], Now.AddHours(1));
-
-        Assert.False((await CardAsync(db, chain, YearAnchor)).ResultsStale);
-        Assert.True((await CardAsync(db, chain, YearMonth)).ResultsStale);
+            Assert.False((await CardAsync(db, chain, YearAnchor)).ResultsStale);
+            Assert.True((await CardAsync(db, chain, YearMonth)).ResultsStale);
+        }
+        finally
+        {
+            await ReleaseMonthRunsAsync(db, chain);
+        }
     }
+
+    /// <summary>
+    /// Ізоляція: актуальний прогін МІСЯЦЯ (202609) цього тесту не лишається в спільній базі колекції «SqlServer».
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Прогрів карти застарілості (<c>StaleMapWarmer.HotPeriodsAsync</c>) бере ДВА найновіші періоди з актуальним
+    /// прогоном по ВСІЙ базі. Лишений тут актуальний 202609 разом із 202602 від <c>DocumentYearStaleResultsStoreTests</c>
+    /// витісняв 202601 тестів прогріву (<c>Прогрів_…</c>, CI 43411406990, core-persistence) — їхні підрахунки залежали
+    /// від порядку класів. Прогін знімається з актуальних (Superseded), а не видаляється: результати тесту йому не потрібні.
+    /// </remarks>
+    private static async Task ReleaseMonthRunsAsync(EcrDbContext db, TestDocument chain)
+        => await db.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE calc.CalculationRun SET Status = N'Superseded' WHERE ProjectId = {chain.ProjectId} AND PeriodKey = {YearMonth} AND Status = N'Current';");
 
     private async Task<(EcrDbContext Db, TestDocument Chain)> YearChainAsync(TemplateLayout layout)
     {
