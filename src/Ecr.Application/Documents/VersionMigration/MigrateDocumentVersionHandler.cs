@@ -1163,7 +1163,7 @@ public sealed class MigrateDocumentVersionHandler(
             await MigrationReportViews
                 .EnqueueAsync(
                     jobs, reportViewStatus, log, target.TemplateId, target.Id, planned.Plan.ColumnRenames.Count,
-                    profile.UserId, CancellationToken.None)
+                    profile.UserId, currentUser.CorrelationId, CancellationToken.None)
                 .ConfigureAwait(false);
         }
 
