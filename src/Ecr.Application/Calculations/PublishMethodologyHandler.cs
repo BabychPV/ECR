@@ -139,7 +139,7 @@ public sealed class PublishMethodologyHandler(
         // Зелений тест — не прапорець, а факт: усі випадки золотого набору
         // зійшлися в межах допуску (ФВ-9.12, ФВ-13.7).
         var verdicts = await JudgeAsync(methodology, version, testCases, ct).ConfigureAwait(false);
-        var greenTest = GoldenSet.IsGreen(verdicts);
+        var greenTest = GoldenSet.IsGreen(verdicts, testCases);
 
         // ⛔ Відмова через золотий набір називає КОЖНУ розбіжність поіменно:
         // випадок, вихід, речовину й обидва числа. Домен теж її не пропустить
@@ -1130,7 +1130,7 @@ public sealed class PublishMethodologyHandler(
     /// ⚠ Вираз, який не розбирається, ребер не дає: синтаксис — не предмет
     /// цього методу. Опублікуватися така версія однаково не зможе, бо
     /// порожній або червоний золотий набір публікацію не пропускає
-    /// (<see cref="GoldenSet.IsGreen"/>).
+    /// (<see cref="GoldenSet.IsGreen(IReadOnlyList{TestCaseVerdict}, IReadOnlyList{MethodologyTestCase})"/>).
     /// </remarks>
     private FormulaResolution Resolve(
         MethodologyFormula formula,
@@ -1514,6 +1514,23 @@ public sealed class PublishMethodologyHandler(
                 {
                     ["messageKey"] = "err.ECR-CALC-0422.goldenSetEmpty",
                     ["version"] = version.Version,
+                });
+        }
+
+        // ⛔ B21: усі вердикти зелені, а набір червоний — значить, жоден випадок нічого не очікує
+        // (`GoldenSet.IsGreen(verdicts, testCases)`). Це той самий «нічого не перевірено», що й
+        // порожній набір, тому той самий ключ каталогу; текст і `tests` називають випадки.
+        if (GoldenSet.IsGreen(verdicts))
+        {
+            var codes = string.Join(", ", verdicts.Select(v => v.Code));
+            throw new BusinessRuleException(
+                "ECR-CALC-0422",
+                $"Публікацію версії {version.Version} відхилено: {codes}: {GoldenSet.NoExpectationsReason}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.goldenSetEmpty",
+                    ["version"] = version.Version,
+                    ["tests"] = codes,
                 });
         }
 

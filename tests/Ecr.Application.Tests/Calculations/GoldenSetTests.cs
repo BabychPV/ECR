@@ -246,6 +246,45 @@ public sealed class GoldenSetTests
         Assert.Equal($"$.{key}", error.Details!["reason"]);
     }
 
+    /// <remarks>
+    /// B21: цикл <c>Judge</c> іде по очікуваннях, тож набір, де жоден випадок нічого не очікує
+    /// (<c>expectedJson = {}</c>), був зеленим за БУДЬ-ЯКОГО виходу — і за валідного числа, і за порожнього
+    /// (0 результатів, усі кроки #VALUE, як live C11_01 V5 PARITY_1). Мутація: прибрати
+    /// <c>ChecksAnything</c> з <c>IsGreen(verdicts, testCases)</c> — обидва випадки зелені, тест червоний.
+    /// </remarks>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-9.12")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void B21_набір_без_жодного_очікування_не_зелений(bool engineProducedValues)
+    {
+        var empty = TestCase(new Dictionary<string, decimal>(), 0m);
+        var output = engineProducedValues ? Output(1m) : new CalculationOutput(1, null, [], []);
+
+        var verdict = GoldenSet.Judge(empty, output);
+
+        Assert.Empty(verdict.Mismatches);
+        Assert.False(GoldenSet.ChecksAnything([empty]));
+        Assert.False(GoldenSet.IsGreen([verdict], [empty]));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-9.12")]
+    public void B21_випадок_без_очікувань_поруч_зі_справжнім_законний()
+    {
+        // ⚠ Друга половина правила (S-26): випадок без очікувань існує заради входу — трейс ділення на нуль,
+        // число якого законно різне в Legacy (0) і Strict (немає). Блокувати через нього весь набір означало б,
+        // що версію неможливо перевести в Strict. Набір зелений, бо справжній випадок щось перевіряє.
+        var real = TestCase(expected: 1m, tolerance: 0m);
+        var inputOnly = TestCase(new Dictionary<string, decimal>(), 0m);
+        var verdicts = new[] { GoldenSet.Judge(real, Output(1m)), GoldenSet.Judge(inputOnly, Output(1m)) };
+
+        Assert.True(GoldenSet.IsGreen(verdicts, [real, inputOnly]));
+        Assert.Empty(GoldenSet.Divergences(verdicts));
+    }
+
     private static MethodologyTestCase TestCase(decimal expected, decimal tolerance)
         => TestCase(new Dictionary<string, decimal> { ["gsec"] = expected }, tolerance);
 

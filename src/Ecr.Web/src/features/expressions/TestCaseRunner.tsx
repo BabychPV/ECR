@@ -101,7 +101,13 @@ function Verdicts({ result }: { readonly result: SimulationResultDto }): JSX.Ele
             <Table.Tr key={verdict.code}>
               <Table.Td>{verdict.code}</Table.Td>
               <Table.Td colSpan={4}>
-                <Badge color="statusSuccess">{t('expressions.testsGreen')}</Badge>
+                {/* ⛔ B21: колір — з вердикту сервера, а не з довжини переліку
+                    розбіжностей: «розбіжностей немає» і «зелений» — різні твердження. */}
+                {verdict.isGreen ? (
+                  <Badge color="statusSuccess">{t('expressions.testsGreen')}</Badge>
+                ) : (
+                  <Badge color="statusError">{t('expressions.testsRed')}</Badge>
+                )}
               </Table.Td>
             </Table.Tr>
           ) : (
