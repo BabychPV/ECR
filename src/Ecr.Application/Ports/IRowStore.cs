@@ -350,8 +350,13 @@ public interface IRowStore
 /// Копія аркуша (<c>doc.DocumentSheet.Id</c>); <c>null</c> — оригінал (RS). ⚠ Перелік екземплярів документа містить
 /// і копії (оригінали першими): споживач, що ключує за <c>TableDefId</c>, мусить відібрати свою копію.
 /// </param>
+/// <param name="HasFormulaErrors">
+/// ✎ C-1: в екземплярі є рядки <c>calc.FormulaError</c> (EXISTS у тому самому запиті екземплярів); <c>false</c> — читати
+/// стан не треба.
+/// </param>
 public sealed record TableInstanceRef(
-    long TableInstanceId, long DocumentId, int TableDefId, int TemplateVersionId, int PeriodKey, long? SheetCopyId = null);
+    long TableInstanceId, long DocumentId, int TableDefId, int TemplateVersionId, int PeriodKey, long? SheetCopyId = null,
+    bool HasFormulaErrors = false);
 
 /// <summary>Живий рядок екземпляра для видалення (D3).</summary>
 /// <param name="Id"><c>TableRow.Id</c>.</param>

@@ -377,12 +377,13 @@ public sealed class SubmitApproveTests
     private Ecr.Application.Reporting.ReportSnapshotSync Reports()
         => new(_reportSnapshots, _documents);
 
-    private SubmitSheetHandler Submit(SheetWorkflowNotifier? notifier = null)
+    private SubmitSheetHandler Submit(
+        SheetWorkflowNotifier? notifier = null, Ecr.Application.Recalculation.ISubmitRecalculation? recalculation = null)
         => new(_cells, _rows, _workflow, _documents, _metadata, _access,
                new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
                _headers,
                Reports(), _uow, _user, _clock, Substitute.For<ISheetEditGate>(),
-               NSubstitute.Substitute.For<Ecr.Application.Recalculation.ISubmitRecalculation>(),
+               recalculation ?? NSubstitute.Substitute.For<Ecr.Application.Recalculation.ISubmitRecalculation>(),
                _methodologies,
                _versions,
                _registries,
@@ -541,6 +542,36 @@ public sealed class SubmitApproveTests
         Assert.Equal("err.ECR-ACCS-0403.approveDenied", error.Details!["messageKey"]);
         Assert.Equal(DocumentStatus.Submitted, _sheets[Water].Status);
         await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// ✎ C-1 (D-475; PO 12.11, дослівно: «якщо є помилки то затвердити теж не можна»): помилка формули аркуша блокує
+    /// й ЗАТВЕРДЖЕННЯ — 422 <c>ECR-SUB-4221</c> з <c>FORMULA-ERROR</c>, аркуш лишається <c>Submitted</c>. Без перевірки
+    /// на шляху затвердження аркуш ставав <c>Approved</c>.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public async Task Помилка_формули_блокує_затвердження()
+    {
+        _sheets[Water].Submit(userId: 999, Now);
+        var recalculation = Substitute.For<Ecr.Application.Recalculation.ISubmitRecalculation>();
+        recalculation
+            .RecalculateSheetForSubmitAsync(Document, Water, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>(), Arg.Any<long?>())
+            .Returns([
+                new Ecr.Application.Recalculation.FormulaErrorCell(
+                    3, null, "7001001", 11, "Error", "#DIV/0", null, null, null, null),
+            ]);
+        var refresh = new ApprovalSnapshotRefresh(
+            Substitute.For<ISheetEditGate>(), _cells, _rows, _documents, _metadata, _headers, _workflow, recalculation);
+        var handler = new ApproveSheetHandler(_workflow, _access, Reports(), _uow, _user, _clock, _audit, _documents, refresh);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => handler.HandleAsync(Document, Water, Period, approved: true, reason: null, CancellationToken.None));
+
+        Assert.Equal("ECR-SUB-4221", error.ErrorCode);
+        Assert.Equal(ApproveSheetHandler.FormulaErrorsMessageKey, error.Details!["messageKey"]);
+        Assert.Contains("FORMULA-ERROR", System.Text.Json.JsonSerializer.Serialize(error.Details), StringComparison.Ordinal);
+        Assert.Equal(DocumentStatus.Submitted, _sheets[Water].Status);
     }
 
     [Fact]
@@ -893,6 +924,34 @@ public sealed class SubmitApproveTests
         Assert.DoesNotContain("CAP", body, StringComparison.Ordinal);
         Assert.DoesNotContain("Volume", body, StringComparison.Ordinal);
         Assert.DoesNotContain("7001001", body, StringComparison.Ordinal);
+        Assert.Equal(DocumentStatus.Draft, _sheets[Water].Status);
+    }
+
+    /// <summary>
+    /// ✎ C-1 (рішення PO 11.11 п. 5, D-475): комірка аркуша з помилкою формули (результат прогону під блокуванням
+    /// подання) блокує подання тим самим шляхом, що PERMIT-SPLIT: <c>ECR-SUB-4221 validationBlocked</c> з
+    /// <c>FORMULA-ERROR</c>; стан аркуша не змінюється. Без C-1c подання проходило.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Помилка_формули_блокує_подання()
+    {
+        var recalculation = Substitute.For<Ecr.Application.Recalculation.ISubmitRecalculation>();
+        recalculation
+            .RecalculateSheetForSubmitAsync(Document, Water, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>(), Arg.Any<long?>())
+            .Returns([
+                new Ecr.Application.Recalculation.FormulaErrorCell(
+                    3, null, "7001001", 11, "Error", "#DIV/0", null, null, null, null),
+            ]);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Submit(recalculation: recalculation).HandleAsync(Document, Water, Period, CancellationToken.None));
+
+        Assert.Equal("ECR-SUB-4221", error.ErrorCode);
+        Assert.Equal("err.ECR-SUB-4221.validationBlocked", error.Details!["messageKey"]);
+        var body = System.Text.Json.JsonSerializer.Serialize(error.Details);
+        Assert.Contains("FORMULA-ERROR", body, StringComparison.Ordinal);
+        Assert.Contains("#DIV/0", body, StringComparison.Ordinal);
         Assert.Equal(DocumentStatus.Draft, _sheets[Water].Status);
     }
 

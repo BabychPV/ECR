@@ -17,7 +17,7 @@ describe('UnmatchedRowsBanner — доступність', { timeout: 120_000 },
         <Shell colorScheme={colorScheme}>
           <UnmatchedRowsBanner
             userId={undefined}
-            rows={{ issues: [...many, issue(2, 1), issue(7, 1)], hints: [], finishedAt: '2026-11-08T10:00:00Z' }}
+            rows={{ issues: [...many, issue(2, 1), issue(7, 1)], hints: [], finishedAt: '2026-11-08T10:00:00Z', formulaErrors: [] }}
             tables={[table(1, '9.01 Unit 400'), table(2, '9.03 Unit 430')]}
             onOpenRow={() => {}}
           />

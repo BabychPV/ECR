@@ -1,0 +1,101 @@
+-- D475:formula-errors ── ru/kz: помилка формули — блок подання, позначки сітки, група «Помилки формул», журнал (C-1, D-475); власна порція ──
+-- ⚠ kz — робочий переклад, на звірку термінологу.
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'validation.formula.error', N'ru', N'{column}: ошибка формулы {code} — значение не пересчитано (оставлено последнее правильное). Подача заблокирована, пока формула не рассчитается.'),
+    (N'validation.formula.error', N'kz', N'{column}: формула қатесі {code} — мән қайта есептелмеді (соңғы дұрыс мән қалдырылды). Формула есептелмейінше тапсыру бұғатталған.'),
+    (N'validation.formula.blocked', N'ru', N'{column}: не обновлено из-за ошибки формулы в {source}. Подача заблокирована до исправления.'),
+    (N'validation.formula.blocked', N'kz', N'{column}: {source} ішіндегі формула қатесіне байланысты жаңартылмады. Түзетілгенше тапсыру бұғатталған.'),
+    (N'audit.originLabel.CalcError', N'ru', N'Ошибка расчёта'),
+    (N'audit.originLabel.CalcError', N'kz', N'Есептеу қатесі'),
+    (N'audit.originLabel.CalcErrorResolved', N'ru', N'Ошибка расчёта устранена'),
+    (N'audit.originLabel.CalcErrorResolved', N'kz', N'Есептеу қатесі жойылды'),
+    (N'grid.calcError.error', N'ru', N'Ошибка расчёта: {cause} · с {when}. Показано последнее правильное значение.'),
+    (N'grid.calcError.error', N'kz', N'Есептеу қатесі: {cause} · {when} бастап. Соңғы дұрыс мән көрсетілген.'),
+    (N'grid.calcError.blocked', N'ru', N'Не обновлено из-за ошибки в {source} · с {when}. Показано последнее правильное значение.'),
+    (N'grid.calcError.blocked', N'kz', N'{source} ішіндегі қатеге байланысты жаңартылмады · {when} бастап. Соңғы дұрыс мән көрсетілген.'),
+    (N'grid.calcError.blockedHidden', N'ru', N'Не обновлено из-за ошибки в другой ячейке · с {when}.'),
+    (N'grid.calcError.blockedHidden', N'kz', N'Басқа ұяшықтағы қатеге байланысты жаңартылмады · {when} бастап.'),
+    (N'grid.calcError.cause.divideByZero', N'ru', N'деление на ноль (#DIV/0)'),
+    (N'grid.calcError.cause.divideByZero', N'kz', N'нөлге бөлу (#DIV/0)'),
+    (N'grid.calcError.cause.badReference', N'ru', N'нет ссылки или записи справочника (#REF)'),
+    (N'grid.calcError.cause.badReference', N'kz', N'сілтеме немесе анықтамалық жазбасы жоқ (#REF)'),
+    (N'grid.calcError.cause.badValue', N'ru', N'значение неверного типа (#VALUE)'),
+    (N'grid.calcError.cause.badValue', N'kz', N'мән түрі қате (#VALUE)'),
+    (N'grid.calcError.cause.badUnit', N'ru', N'невозможен перевод единиц (#UNIT)'),
+    (N'grid.calcError.cause.badUnit', N'kz', N'бірліктерді түрлендіру мүмкін емес (#UNIT)'),
+    (N'grid.calcError.cause.budget', N'ru', N'формула слишком сложна для одного расчёта (#BUDGET)'),
+    (N'grid.calcError.cause.budget', N'kz', N'формула бір есептеу үшін тым күрделі (#BUDGET)'),
+    (N'grid.calcError.cause.notAvailable', N'ru', N'нет подходящего значения (#N/A)'),
+    (N'grid.calcError.cause.notAvailable', N'kz', N'сәйкес мән жоқ (#N/A)'),
+    (N'grid.calcError.cause.multipleMatches', N'ru', N'несколько подходящих значений (#MULTI)'),
+    (N'grid.calcError.cause.multipleMatches', N'kz', N'бірнеше сәйкес мән (#MULTI)'),
+    (N'grid.calcError.cause.other', N'ru', N'ошибка {code}'),
+    (N'grid.calcError.cause.other', N'kz', N'қате {code}'),
+    (N'document.formulaErrors.title', N'ru', N'Ошибки формул'),
+    (N'document.formulaErrors.title', N'kz', N'Формула қателері'),
+    (N'document.formulaErrors.summary', N'ru', N'Не пересчитано ячеек: {count} · подача заблокирована'),
+    (N'document.formulaErrors.summary', N'kz', N'Қайта есептелмеген ұяшықтар: {count} · тапсыру бұғатталған'),
+    (N'document.formulaErrors.cell', N'ru', N'{column}, строка {row}'),
+    (N'document.formulaErrors.cell', N'kz', N'{column}, {row}-жол'),
+    (N'document.formulaErrors.blockedBy', N'ru', N'не обновлено — ошибка в {source}'),
+    (N'document.formulaErrors.blockedBy', N'kz', N'жаңартылмады — {source} ішінде қате'),
+    (N'document.formulaErrors.blockedHidden', N'ru', N'не обновлено — ошибка в другой ячейке'),
+    (N'document.formulaErrors.blockedHidden', N'kz', N'жаңартылмады — басқа ұяшықта қате'),
+    (N'document.formulaErrors.formula', N'ru', N'Формула: {formula}'),
+    (N'document.formulaErrors.formula', N'kz', N'Формула: {formula}'),
+    (N'document.formulaErrors.inputs', N'ru', N'Входные значения: {inputs}'),
+    (N'document.formulaErrors.inputs', N'kz', N'Кіріс мәндері: {inputs}'),
+    (N'document.formulaErrors.since', N'ru', N'с {when}'),
+    (N'document.formulaErrors.since', N'kz', N'{when} бастап'),
+    (N'document.formulaErrors.open', N'ru', N'Перейти к ячейке'),
+    (N'document.formulaErrors.open', N'kz', N'Ұяшыққа өту'),
+    (N'document.formulaErrors.cellNamed', N'ru', N'{column}, {row}'),
+    (N'document.formulaErrors.cellNamed', N'kz', N'{column}, {row}'),
+    (N'document.formulaErrors.dependents', N'ru', N'зависимых ячеек не обновлено: {count}'),
+    (N'document.formulaErrors.dependents', N'kz', N'жаңартылмаған тәуелді ұяшықтар: {count}'),
+    (N'document.formulaErrors.blockedCells', N'ru', N'{cell} и другие ячейки, всего: {count}'),
+    (N'document.formulaErrors.blockedCells', N'kz', N'{cell} және басқа ұяшықтар, барлығы: {count}'),
+    (N'err.ECR-SUB-4221.formulaErrorsApprove', N'ru', N'Лист нельзя утвердить: есть ошибки формул (ячеек: {messageCount}). Верните лист на исправление или исправьте входные данные.'),
+    (N'err.ECR-SUB-4221.formulaErrorsApprove', N'kz', N'Парақты бекітуге болмайды: формула қателері бар ({messageCount} ұяшық). Парақты түзетуге қайтарыңыз немесе кіріс мәндерін түзетіңіз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- D475:formula-errors ── кінець секції ──
+-- D475:formula-errors ── en: помилка формули (C-1, D-475): блок подання, сітка, панель проблем, журнал; ru/kz — порцією D475:formula-errors вище ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'validation.formula.error', N'en', N'{column}: formula error {code} — the value was not recalculated (the last correct value is kept). Submit is blocked until the formula calculates.', 1),
+    (N'validation.formula.blocked', N'en', N'{column}: not updated because of a formula error in {source}. Submit is blocked until it is fixed.', 1),
+    (N'audit.originLabel.CalcError', N'en', N'Calculation error', 1),
+    (N'audit.originLabel.CalcErrorResolved', N'en', N'Calculation error resolved', 1),
+    (N'grid.calcError.error', N'en', N'Calculation error: {cause} · since {when}. The value shown is the last correct one.', 1),
+    (N'grid.calcError.blocked', N'en', N'Not updated because of an error in {source} · since {when}. The value shown is the last correct one.', 1),
+    (N'grid.calcError.blockedHidden', N'en', N'Not updated because of an error in another cell · since {when}.', 1),
+    (N'grid.calcError.cause.divideByZero', N'en', N'division by zero (#DIV/0)', 1),
+    (N'grid.calcError.cause.badReference', N'en', N'missing reference or registry entry (#REF)', 1),
+    (N'grid.calcError.cause.badValue', N'en', N'value of a wrong type (#VALUE)', 1),
+    (N'grid.calcError.cause.badUnit', N'en', N'unit conversion is impossible (#UNIT)', 1),
+    (N'grid.calcError.cause.budget', N'en', N'the formula is too complex for one calculation (#BUDGET)', 1),
+    (N'grid.calcError.cause.notAvailable', N'en', N'no matching value (#N/A)', 1),
+    (N'grid.calcError.cause.multipleMatches', N'en', N'several matching values (#MULTI)', 1),
+    (N'grid.calcError.cause.other', N'en', N'error {code}', 1),
+    (N'document.formulaErrors.title', N'en', N'Formula errors', 1),
+    (N'document.formulaErrors.summary', N'en', N'{count} cell(s) not recalculated · Submit is blocked', 1),
+    (N'document.formulaErrors.cell', N'en', N'{column}, row {row}', 1),
+    (N'document.formulaErrors.blockedBy', N'en', N'not updated — error in {source}', 1),
+    (N'document.formulaErrors.blockedHidden', N'en', N'not updated — error in another cell', 1),
+    (N'document.formulaErrors.formula', N'en', N'Formula: {formula}', 1),
+    (N'document.formulaErrors.inputs', N'en', N'Inputs: {inputs}', 1),
+    (N'document.formulaErrors.since', N'en', N'since {when}', 1),
+    (N'document.formulaErrors.open', N'en', N'Go to cell', 1),
+    (N'document.formulaErrors.cellNamed', N'en', N'{column}, {row}', 1),
+    (N'document.formulaErrors.dependents', N'en', N'{count} dependent cell(s) not updated', 1),
+    (N'document.formulaErrors.blockedCells', N'en', N'{cell} and other cells, {count} in total', 1),
+    (N'err.ECR-SUB-4221.formulaErrorsApprove', N'en', N'The sheet cannot be approved: there are formula errors ({messageCount} cell(s)). Return the sheet for correction or fix the inputs.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- D475:formula-errors ── кінець секції ──

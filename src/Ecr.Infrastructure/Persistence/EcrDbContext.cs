@@ -203,6 +203,9 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     /// <summary>Поточні проблеми розрахунку (AN-69): лише останній прохід.</summary>
     public DbSet<CalculationIssue> CalculationIssues => Set<CalculationIssue>();
 
+    /// <summary>✎ C-1: поточний стан помилок формул.</summary>
+    public DbSet<FormulaError> FormulaErrors => Set<FormulaError>();
+
     // rpt
     public DbSet<ReportDef> ReportDefs => Set<ReportDef>();
     public DbSet<ReportVersion> ReportVersions => Set<ReportVersion>();

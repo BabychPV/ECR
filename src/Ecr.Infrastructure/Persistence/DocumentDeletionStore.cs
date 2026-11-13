@@ -262,6 +262,9 @@ public sealed class DocumentDeletionStore(EcrDbContext db) : IDocumentDeletionSt
         }
 
         await db.CalculationIssues.Where(i => i.DocumentId == documentId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+
+        // ✎ C-1: стан помилок формул документа.
+        await db.FormulaErrors.Where(e => e.DocumentId == documentId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
         await db.DocumentIndexValues.Where(v => v.DocumentId == documentId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
         await db.ValidationResults.Where(v => v.DocumentId == documentId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
         await db.DocumentHeaderValues.Where(v => v.DocumentId == documentId).ExecuteDeleteAsync(ct).ConfigureAwait(false);

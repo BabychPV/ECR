@@ -26,7 +26,7 @@ import { testTheme } from '@/test/render';
  */
 
 function rows(issues: UnmatchedRows['issues'], finishedAt: string | null = null): UnmatchedRows {
-  return { issues, hints: [], finishedAt };
+  return { issues, hints: [], finishedAt, formulaErrors: [] };
 }
 
 function show(value: UnmatchedRows, onOpenRow = vi.fn(), userId: number | undefined = 7, narrow = false) {
@@ -321,6 +321,7 @@ describe('UnmatchedRowsBanner', () => {
   it('b3: допустимі значення правил - перші 8 у тексті, решта за кнопкою «+N»; рядок - з поточним значенням', async () => {
     const codes = Array.from({ length: AllowedValuesShown + 3 }, (_, i) => `09${String(i).padStart(2, '0')}`);
     show({
+      formulaErrors: [],
       issues: [issue(1, 1, { rowKey: 'S01', currentValues: ['Sample A-0'] }), issue(1, 2, { rowKey: 'S02', currentValues: [''] })],
       hints: [
         {

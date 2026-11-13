@@ -63,6 +63,10 @@ public sealed partial class DenyLeakGuardTests
         ["src/Ecr.Application/Validation/RelationCheckRunner.cs"] = "виробник: зв'язки Check (джерело — правило 1)",
         ["src/Ecr.Application/Validation/PermitCoverageIssues.cs"] =
             "виробник (rule h4): дозвіл рядка/шапки не покриває місяців з даними; адреса — таблиця/рядок/колонка дозволу, назовні лише через ValidateDocumentHandler (HiddenValidationIssues.ForViewer)",
+        ["src/Ecr.Application/Validation/FormulaErrorIssues.cs"] =
+            "виробник (C-1, D-475): помилка формули комірки; джерело «не оновлено» — SourceTableDefId/SourceColumnCode; назовні лише через SubmitSheetHandler і ValidateDocumentHandler (HiddenValidationIssues.ForViewer)",
+        ["src/Ecr.Application/Workflow/ApprovalSnapshotRefresh.cs"] =
+            "виробник (C-1, D-475, PO 12.11): повідомлення FORMULA-ERROR для блоку затвердження; назовні лише через ApproveSheetHandler (HiddenValidationIssues.ForViewer)",
         ["src/Ecr.Application/Calculations/CheckEvaluator.cs"] = "виробник: текст звірки, SourceTableDefId",
         ["src/Ecr.Application/Validation/ValidationMessageTemplates.cs"] =
             "шаблони й Localize: працює над УЖЕ відфільтрованим списком (GetValidationResultHandler маскує до Localize; доказ — T1_01_Check_з_ключем_…)",
@@ -137,7 +141,7 @@ public sealed partial class DenyLeakGuardTests
         ["src/Ecr.Application/Workflow/SubmitSheetHandler.cs | текст | emptyCodes.Count"] =
             (1, "D-PS: число порожніх обов'язкових полів шапки, не колонка і не значення"),
         ["src/Ecr.Application/Documents/GetTableSliceHandler.cs | текст | code"] =
-            (3, "ключ «рядок:колонка» лише для колонок, що пройшли CanReadColumn (причини/підтвердження — у SlicePermissionMaps); CELL-STYLE L3b — оформлення комірок лише видимих колонок відповіді; D-461 — ручні значення лише видимих колонок відповіді"),
+            (4, "ключ «рядок:колонка» лише для колонок, що пройшли CanReadColumn (причини/підтвердження — у SlicePermissionMaps); CELL-STYLE L3b — оформлення комірок лише видимих колонок відповіді; D-461 — ручні значення лише видимих колонок відповіді; ✎ C-1 (D-475) — стан помилок формул лише видимих колонок відповіді, джерело — лише видиме (CanReadTable/CanReadColumn)"),
         ["src/Ecr.Application/Documents/SlicePermissionMaps.cs | текст | code"] =
             (2, "перф зрізу: ключ «рядок:колонка» причин/підтверджень, винесений з GetTableSliceHandler; лише колонки, що пройшли CanReadColumn (S6)"),
         ["src/Ecr.Application/Documents/CellStyleAccessPolicy.cs | текст | cell.ColumnCode"] =

@@ -62,7 +62,11 @@ public sealed class RecalculationService(
 
     // SHEETNAME(): назви груп і копії аркушів документа — читаються лише коли формула версії згадує SHEETNAME
     // (`SheetDisplayNames.MayUse`). Необов'язковий: без нього SHEETNAME() дає назву аркуша шаблону.
-    IDocumentSheetCopyStore? sheetCopies = null) : ISubmitRecalculation
+    IDocumentSheetCopyStore? sheetCopies = null,
+
+    // ✎ C-1 (D-475): стан помилок формул. Необов'язковий: прямі `new RecalculationService(...)` у тестах його не
+    // передають (тоді стан не читається й не пишеться, але залежні від помилки однаково не перераховуються).
+    IFormulaErrorStore? formulaErrors = null) : ISubmitRecalculation
 {
     /// <summary>
     /// LP-40: джерела знімків довідників цього екземпляра сервісу (скоуп = один прогін задачі чи запит):
@@ -379,11 +383,24 @@ public sealed class RecalculationService(
         => RecalculateDocumentAsync(
             documentId, periodKey, sheetDefId, heldSheet: (sheetDefId, sheetCopyId), ScopeFilter.Of(sheetCopyId), ct);
 
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<FormulaErrorCell>> RecalculateSheetForSubmitAsync(
+        long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct, long? sheetCopyId = null)
+    {
+        var errors = new List<FormulaErrorCell>();
+        await RecalculateDocumentAsync(
+                documentId, periodKey, sheetDefId, heldSheet: (sheetDefId, sheetCopyId), ScopeFilter.Of(sheetCopyId), ct,
+                errorSink: errors)
+            .ConfigureAwait(false);
+        return errors;
+    }
+
     /// <summary>Спільне тіло повного прогону документа (або одного аркуша).</summary>
     private async Task<int> RecalculateDocumentAsync(
         long documentId, PeriodKey periodKey, int? sheetDefId, (int SheetDefId, long? CopyId)? heldSheet,
         ScopeFilter scopes, CancellationToken ct,
-        HashSet<(int TableDefId, int ColumnDefId)>? changedColumns = null, bool writeSubmitted = false)
+        HashSet<(int TableDefId, int ColumnDefId)>? changedColumns = null, bool writeSubmitted = false,
+        List<FormulaErrorCell>? errorSink = null)
     {
         var instances = await rowStore
             .GetTableInstancesAsync(documentId, periodKey, ct)
@@ -402,7 +419,8 @@ public sealed class RecalculationService(
         foreach (var (representative, _) in ScopeRepresentatives(instances, scopes))
         {
             written += await RunAsync(
-                    representative, dirty: null, ct, sheetDefId, heldSheet, instances, changedColumns, writeSubmitted: writeSubmitted)
+                    representative, dirty: null, ct, sheetDefId, heldSheet, instances, changedColumns, writeSubmitted: writeSubmitted,
+                    errorSink: errorSink)
                 .ConfigureAwait(false);
         }
 
@@ -439,6 +457,7 @@ public sealed class RecalculationService(
     /// <param name="inputColumns">Q-17: куди скласти колонки насіння (введені, не похідні); <c>null</c> — не збирати.</param>
     /// <param name="shared">L2: спільні читання проходу (екземпляри, залежності); <c>null</c> — читати напряму.</param>
     /// <param name="writeSubmitted">✎ UAT-recalc-ux: писати й ПОДАНІ аркуші (ручний перерахунок, <c>RecalculationJob.WritesSubmitted</c>); затверджені — ніколи.</param>
+    /// <param name="errorSink">✎ C-1: куди скласти комірки аркуша (<paramref name="sheetDefId"/>) з помилкою формули; <c>null</c> — не збирати.</param>
     private async Task<int> RunAsync(
         TableInstanceRef instance, DirtySet? dirty, CancellationToken ct, int? sheetDefId = null,
         (int SheetDefId, long? CopyId)? heldSheet = null, IReadOnlyList<TableInstanceRef>? knownInstances = null,
@@ -446,7 +465,8 @@ public sealed class RecalculationService(
         IReadOnlyCollection<CrossPeriodSource>? crossPeriodSources = null,
         IReadOnlySet<int>? approverEditSheets = null,
         HashSet<(int TableDefId, int ColumnDefId)>? inputColumns = null,
-        RecalculationSharedLoad? shared = null, bool writeSubmitted = false)
+        RecalculationSharedLoad? shared = null, bool writeSubmitted = false,
+        List<FormulaErrorCell>? errorSink = null)
     {
         var periodKey = new PeriodKey(instance.PeriodKey);
 
@@ -717,8 +737,19 @@ public sealed class RecalculationService(
         // WW-03: які інші періоди читають вирази цілей (відносні зсуви й `[Period:#k]`).
         var periodReads = RecalculationReadScope.PeriodReferences(parsed.Values.Select(p => p.Root));
 
+        // ✎ C-1 (D-475): стан помилок формул. Прапорець — із запиту екземплярів (`TableInstanceRef.HasFormulaErrors`,
+        // EXISTS у тій самій команді); без помилок — нуль звернень (храповик FormulaJobFixedCostTests).
+        var errors = new FormulaErrorTracker();
+        var flagged = instances.Where(i => i.HasFormulaErrors).Select(i => i.TableInstanceId).ToList();
+        IReadOnlyList<FormulaErrorRow> persisted = formulaErrors is not null && flagged.Count > 0
+            ? await formulaErrors.ReadInstancesAsync(flagged, periodKey, ct).ConfigureAwait(false)
+            : [];
+        errors.Seed(persisted, offset: 0);
+        var loadExtras = new PeriodLoadExtras();
+
         var (values, stored) = await LoadValuesAsync(
-            instance, scope, (instances, rowIdsBatch), periodReads, ct, copyScope).ConfigureAwait(false);
+            instance, scope, (instances, rowIdsBatch), periodReads, ct, copyScope, loadExtras).ConfigureAwait(false);
+        await SeedNeighbourErrorsAsync(errors, loadExtras, periodKey, ct).ConfigureAwait(false);
 
         // ⛔ Знімок довідника одиниць передається В КОНТЕКСТ, а не читається
         // ним самим: `IEvaluationContext.Convert` — синхронний метод діалекту
@@ -785,7 +816,11 @@ public sealed class RecalculationService(
                 formulaDependencies: dependencies,
                 logger: logger,
                 registries: templateRegistries,
-                sheetNames: sheetNames);
+                sheetNames: sheetNames)
+            {
+                // ✎ C-1: недовірені комірки прогону — читання такої комірки не дає цілі перерахуватися.
+                Blocked = errors.Blocked,
+            };
 
         var context = NewContext(registryFields);
 
@@ -855,7 +890,7 @@ public sealed class RecalculationService(
 
                 Evaluate(
                     owner.Table, owner.Formula, expression, rows, rowFilter,
-                    periodKey, context, values, stored, sink,
+                    periodKey, context, values, stored, sink, errors, tables,
                     foreignByTable?.GetValueOrDefault(owner.Table.Id), overridden,
                     ownedElsewhere?.GetValueOrDefault(owner.Table.Id));
             }
@@ -971,7 +1006,8 @@ public sealed class RecalculationService(
                         instance, extraScope, (instances, rowIdsBatch),
                         RecalculationReadScope.PeriodReferences(
                             cascadeTargets.Where(parsed.ContainsKey).Select(id => parsed[id].Root)),
-                        ct, copyScope).ConfigureAwait(false);
+                        ct, copyScope, loadExtras).ConfigureAwait(false);
+                    await SeedNeighbourErrorsAsync(errors, loadExtras, periodKey, ct).ConfigureAwait(false);
                     foreach (var (key, value) in extraValues)
                     {
                         values.TryAdd(key, value);
@@ -1000,7 +1036,24 @@ public sealed class RecalculationService(
         }
 
         var written = byInstance.Values.Sum(cells => cells.Count);
-        if (written == 0)
+
+        // ✎ C-1: комірки аркуша з помилкою — викликачу подання (RecalculateSheetForSubmitAsync), навіть коли нічого
+        // не пишеться (та сама помилка, що вже збережена).
+        errorSink?.AddRange(errors.Outcomes.Values
+            .Where(o => o.Kind is not null
+                        && (sheetDefId is null || (tables.TryGetValue(o.TableDefId, out var errorTable) && errorTable.SheetDefId == sheetDefId)))
+            .Select(o => new FormulaErrorCell(
+                o.TableDefId, instances.FirstOrDefault(i => i.TableDefId == o.TableDefId)?.SheetCopyId, o.RowKey,
+                o.Address.ColumnDefId, o.Kind!, o.ErrorCode!, o.Source?.PeriodKey, o.Source?.TableDefId,
+                o.Source?.RowKey, o.Source?.ColumnDefId)));
+
+        var errorDelta = formulaErrors is null
+            ? FormulaErrorDelta.Empty
+            : FormulaErrorDelta.Build(
+                errors, persisted, instance.DocumentId, instanceByTable, instances,
+                fullRun: dirty is null && crossPeriodSources is null,
+                targetFormulas: targets.ToHashSet(), liveFormulas: formulas.Keys.ToHashSet(), now: clock.UtcNow);
+        if (written == 0 && errorDelta.IsEmpty)
         {
             return 0;
         }
@@ -1034,7 +1087,8 @@ public sealed class RecalculationService(
         // Аркуш кожного екземпляра, у який цей прогін пише: ключ блокування
         // «документ × аркуш × період» (`ISheetEditGate`).
         var sheetOfInstance = instances
-            .Where(t => byInstance.ContainsKey(t.TableInstanceId) && tables.ContainsKey(t.TableDefId))
+            .Where(t => (byInstance.ContainsKey(t.TableInstanceId) || errorDelta.Instances.Contains(t.TableInstanceId))
+                        && tables.ContainsKey(t.TableDefId))
             .ToDictionary(t => t.TableInstanceId, t => (tables[t.TableDefId].SheetDefId, t.SheetCopyId));
 
         // ⚠ Рахується ВСЕРЕДИНІ транзакції: аркуш, поданий, поки прогін рахував,
@@ -1124,10 +1178,87 @@ public sealed class RecalculationService(
                     .ConfigureAwait(false);
             }
 
+            // ✎ C-1 (D-475): стан помилок і події журналу — лише для аркушів, у які прогін пише (поданий/затверджений
+            // аркуш не чіпається, як і його значення), тим самим комітом, що й значення.
+            if (!errorDelta.IsEmpty)
+            {
+                await ApplyFormulaErrorsAsync(errorDelta, instance.DocumentId, stored, sheetOfInstance, writable, now, token)
+                    .ConfigureAwait(false);
+            }
+
             await uow.SaveChangesAsync(token).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 
         return applied;
+    }
+
+    /// <summary>✎ C-1 (далі C-5, C-11): що завантажувач періодів бере й віддає понад значення комірок.</summary>
+    private sealed class PeriodLoadExtras
+    {
+        /// <summary>C-1: екземпляри ІНШИХ періодів (зсув ≠ 0) з тієї самої версії, що мають стан помилок формул.</summary>
+        public List<(int Offset, long TableInstanceId)> ErrorInstances { get; } = [];
+    }
+
+    /// <summary>
+    /// ✎ C-1: засіває стан помилок сусідніх періодів, які прочитав завантажувач (їхні комірки з помилкою — «недовірені»
+    /// для читачів цього прогону). Один запит на зсув і лише коли такі екземпляри є.
+    /// </summary>
+    private async Task SeedNeighbourErrorsAsync(
+        FormulaErrorTracker errors, PeriodLoadExtras extras, PeriodKey periodKey, CancellationToken ct)
+    {
+        if (formulaErrors is not null)
+        {
+            foreach (var group in extras.ErrorInstances.GroupBy(e => e.Offset))
+            {
+                var neighbour = await formulaErrors.ReadInstancesAsync(
+                        [.. group.Select(e => e.TableInstanceId).Distinct()], new PeriodKey(periodKey.Value + group.Key), ct)
+                    .ConfigureAwait(false);
+                errors.Seed(neighbour, group.Key);
+            }
+        }
+
+        extras.ErrorInstances.Clear();
+    }
+
+    /// <summary>
+    /// ✎ C-1 (D-475): пише різницю стану помилок формул і події журналу <c>CalcError</c>/<c>CalcErrorResolved</c> —
+    /// лише для екземплярів аркушів, у які прогін пише. Значення комірки подія не змінює (<c>OldValue = NewValue</c>).
+    /// </summary>
+    private async Task ApplyFormulaErrorsAsync(
+        FormulaErrorDelta delta, long documentId, Dictionary<CellKey, CellValueData> stored,
+        Dictionary<long, (int SheetDefId, long? SheetCopyId)> sheetOfInstance,
+        IReadOnlySet<(int SheetDefId, long? CopyId)> writable, DateTime now, CancellationToken ct)
+    {
+        bool Writable(long instanceId)
+            => sheetOfInstance.TryGetValue(instanceId, out var sheetKey) && writable.Contains(sheetKey);
+
+        await formulaErrors!.ApplyAsync(
+                [.. delta.Upserts.Where(u => Writable(u.TableInstanceId))],
+                [.. delta.Deletes.Where(d => Writable(d.TableInstanceId)).Select(d => d.Address)],
+                ct)
+            .ConfigureAwait(false);
+
+        var events = delta.Events.Where(e => Writable(e.Row.TableInstanceId)).ToList();
+        if (events.Count == 0)
+        {
+            return;
+        }
+
+        await audit.WriteCellChangesAsync(
+                [.. events.Select(e =>
+                {
+                    var current = stored.TryGetValue(new CellKey(0, e.Row.TableDefId, e.Row.RowKey, e.Row.ColumnDefId), out var cell)
+                        ? Describe(cell)
+                        : null;
+                    return new CellChangeRecord(
+                        now, e.Row.Address, documentId, e.Row.RowKey,
+                        OldValue: current, NewValue: current, SystemUserId,
+                        Origin: e.Resolved ? Documents.CellChangeOrigins.CalcErrorResolved : Documents.CellChangeOrigins.CalcError,
+                        IsLateEdit: false, CorrelationId: null,
+                        Reason: FormulaErrorAuditReason.Of(e.Row, e.Resolved));
+                })],
+                ct)
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -1364,6 +1495,8 @@ public sealed class RecalculationService(
         Dictionary<CellKey, Ecr.Expressions.Evaluation.ExpressionValue> values,
         Dictionary<CellKey, CellValueData> stored,
         Dictionary<CellAddress, CellRecord> upserts,
+        FormulaErrorTracker errors,
+        IReadOnlyDictionary<int, Domain.Entities.Configuration.TableDef> tablesForInputs,
         HashSet<int>? foreignColumns = null,
         IReadOnlySet<CellAddress>? overridden = null,
         HashSet<int>? ownedElsewhere = null)
@@ -1393,8 +1526,14 @@ public sealed class RecalculationService(
             // ✎ D-461: ОДНЕ правило «введене людиною в ціль формули не перезаписується» на два випадки — Q-17.3
             // (введена комірка власника в колонці з чужим власником) і ручне значення замість формули
             // (`doc.CellFormulaOverride`). Перевірка — O(1) за вже прочитаними наборами, без запитів на комірку.
+            var targetKey = new CellKey(0, table.Id, rowKey, columnDefId);
+            var targetAddress = new CellAddress(periodKey, rowId, columnDefId);
+
             if (IsManualTarget(table.Id, rowKey, rowId, columnDefId, periodKey, stored, foreignColumns, overridden))
             {
+                // ✎ C-1: ручне значення — не результат формули; стан помилки цієї комірки (якщо був) знімається.
+                errors.Blocked.Remove(targetKey);
+                errors.Ok(targetKey, targetAddress, table.Id, rowKey, formula.Id);
                 continue;
             }
 
@@ -1402,15 +1541,41 @@ public sealed class RecalculationService(
             context.CurrentRowKey = rowKey;
             context.CurrentColumnDefId = columnDefId;
 
+            // ✎ C-1: ціль рахується заново — її попередній стан (помилка чи «не оновлено») більше не діє. Порядок
+            // обчислення топологічний, тож джерела цієї цілі вже переоцінені в цьому прогоні.
+            errors.Blocked.Remove(targetKey);
+            context.BeginCell();
+
             var result = formulaEngine.Evaluate(parsed, context);
+
+            // ✎ C-1 (рішення PO 11.11, D-475): формула прочитала комірку з помилкою (чи «не оновлену через помилку») —
+            // ціль НЕ перераховується від неї: лишається останнє збережене значення, як після транзакції, що не відбулася.
+            if (context.BlockedRead is { } source)
+            {
+                upserts.Remove(targetAddress);
+                errors.Block(targetKey, targetAddress, table.Id, rowKey, formula.Id, source);
+                continue;
+            }
 
             // ⛔ Помилка обчислення НЕ записується як значення. `#REF` у
             // комірці — це не число, і покласти його в `ValueNumeric`
             // означало б або нуль, або текст у числовій колонці.
+            // ✎ C-1: і старе число НЕ стирається — «нічого не оновлено»; помилка йде в стан прогону, залежні формули
+            // бачать її через `Blocked`. Входи — повторним обчисленням зі збором читань (лише на помилці).
             if (result.Value.IsError)
             {
+                upserts.Remove(targetAddress);
+                context.BeginTrace();
+                _ = formulaEngine.Evaluate(parsed, context);
+                errors.Fail(
+                    targetKey, targetAddress, table.Id, rowKey, formula.Id,
+                    result.Value.ErrorCode ?? Ecr.Expressions.ExpressionErrors.BadValue,
+                    FormulaErrorInputs.Format(context.EndTrace(), tablesForInputs));
                 continue;
             }
+
+            // ✎ C-1: формула порахувалася — стан помилки комірки (якщо був) знімається, хоч би що далі (Null, тип).
+            errors.Ok(targetKey, targetAddress, table.Id, rowKey, formula.Id);
 
             // ⛔ ПРИЙМАЛЬНА RC14 P2-D: `Null` (вхід стерто: `NULL * x = Null`) раніше
             // теж пропускався — і обчислене значення, що лежало в комірці,
@@ -1785,6 +1950,7 @@ public sealed class RecalculationService(
     /// </param>
     /// <param name="ct">Токен скасування.</param>
     /// <param name="copyScope">RS: вид копії для ІНШИХ періодів (та сама копія); <c>null</c> — оригінали.</param>
+    /// <param name="extras">✎ C-1: куди скласти екземпляри сусідніх періодів зі станом помилок; <c>null</c> — не збирати.</param>
     private async Task<(
         Dictionary<CellKey, Ecr.Expressions.Evaluation.ExpressionValue> Values,
         Dictionary<CellKey, CellValueData> Stored)> LoadValuesAsync(
@@ -1794,7 +1960,8 @@ public sealed class RecalculationService(
             IReadOnlyDictionary<long, IReadOnlyDictionary<string, long>> RowIds) current,
         (HashSet<int> Offsets, HashSet<int> Absolutes)? periodReads,
         CancellationToken ct,
-        CopyScope? copyScope = null)
+        CopyScope? copyScope = null,
+        PeriodLoadExtras? extras = null)
     {
         var values = new Dictionary<CellKey, Ecr.Expressions.Evaluation.ExpressionValue>();
 
@@ -1864,7 +2031,7 @@ public sealed class RecalculationService(
             await LoadPeriodAsync(
                     values, stored: null, instance.DocumentId, new PeriodKey(periodKey.Value + offset), offset,
                     scope.TableDefIds, ct, known: null, currentVersionId: instance.TemplateVersionId,
-                    copyScope: copyScope)
+                    copyScope: copyScope, extras: extras)
                 .ConfigureAwait(false);
         }
 
@@ -1953,6 +2120,7 @@ public sealed class RecalculationService(
     /// за кодами в її таблиці/колонки; <c>null</c> - без розвʼязання (поточний період).
     /// </param>
     /// <param name="copyScope">RS: вид копії (її таблиці — зі своїх екземплярів); <c>null</c> — лише оригінали.</param>
+    /// <param name="extras">✎ C-1: куди скласти екземпляри сусідніх періодів зі станом помилок; <c>null</c> — не збирати.</param>
     private async Task LoadPeriodAsync(
         Dictionary<CellKey, Ecr.Expressions.Evaluation.ExpressionValue> values,
         Dictionary<CellKey, CellValueData>? stored,
@@ -1964,7 +2132,8 @@ public sealed class RecalculationService(
         (IReadOnlyList<TableInstanceRef> Instances,
             IReadOnlyDictionary<long, IReadOnlyDictionary<string, long>> RowIds)? known = null,
         int? currentVersionId = null,
-        CopyScope? copyScope = null)
+        CopyScope? copyScope = null,
+        PeriodLoadExtras? extras = null)
     {
         var all = known?.Instances
                   ?? await rowStore.GetTableInstancesAsync(documentId, periodKey, ct).ConfigureAwait(false);
@@ -1995,6 +2164,15 @@ public sealed class RecalculationService(
         IReadOnlyList<TableInstanceRef> instances = tableDefIds is null
             ? all
             : [.. all.Where(t => tableDefIds.Contains(t.TableDefId))];
+
+        // ✎ C-1: сусідній період — його комірки з помилкою теж «недовірені» для читачів цього прогону. Екземпляр ІНШОЇ
+        // версії (перекладений RPT-STABLE) не засівається: коди його колонок інші (рідкісний випадок, «Ризики» C-1).
+        if (offset != 0 && extras is not null)
+        {
+            extras.ErrorInstances.AddRange(instances
+                .Where(t => t.HasFormulaErrors && (translations is null || !translations.ContainsKey(t.TableInstanceId)))
+                .Select(t => (offset, t.TableInstanceId)));
+        }
 
         if (instances.Count == 0)
         {
@@ -2335,6 +2513,9 @@ public sealed class RecalculationPlan
 
         list.Add(formulaDefId);
     }
+
+    /// <summary>Кількість ребер «комірка → формула» (діагностика розміру плану; тест P-2).</summary>
+    internal int CellEdgeCount => _byCell.Values.Sum(list => list.Count);
 
     /// <summary>Формула залежить від результату іншої формули.</summary>
     public void DependsOnFormula(int formulaDefId, int dependsOnFormulaDefId)

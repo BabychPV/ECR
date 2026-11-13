@@ -51,6 +51,7 @@ public sealed class RowLocalPreviewTests
         var rate = builder.Column(_table, "Rate", CellDataType.Formula);
         var nonLocal = builder.Column(_table, "NonLocal", CellDataType.Formula);
         var afterNonLocal = builder.Column(_table, "AfterNonLocal", CellDataType.Formula);
+        var rateDoubled = builder.Column(_table, "RateDoubled", CellDataType.Formula);
         builder.Row(_table, "R1", 1);
 
         Order(builder.Formula(_table, "REGFIELD([Code], 'Limit')", column: component), 0);
@@ -58,6 +59,7 @@ public sealed class RowLocalPreviewTests
         Order(builder.Formula(_table, "[A] / IF([B] = NULL, [Period].Days, [B])", column: rate), 2);
         Order(builder.Formula(_table, "[A] + HDR.Train", column: nonLocal), 3);
         Order(builder.Formula(_table, "[NonLocal] * 2", column: afterNonLocal), 4);
+        Order(builder.Formula(_table, "[Rate] * 2", column: rateDoubled), 5);
 
         _metadata.GetAsync(Version, Arg.Any<CancellationToken>()).Returns(builder.Build());
         _instance = new TableInstanceRef(TableInstance, DocumentId, _table.Id, Version, Period.Value);
@@ -131,6 +133,23 @@ public sealed class RowLocalPreviewTests
 
         Assert.DoesNotContain(computed!, c => c.ColumnCode == "Component");
         Assert.Equal(25m, ValueOf(computed!, "Doubled"));
+    }
+
+    /// <summary>
+    /// ✎ C-1 (D-475): помилка формули в перегляді не дає значення ні самій комірці, ні тим, що її читають, — як фонова
+    /// задача («нічого не оновлено»). До C-1 залежна бачила порожнє (<c>values.Remove</c>) і перегляд «очищав» її.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public async Task Помилка_в_перегляді_не_дає_значень_ні_собі_ні_залежним()
+    {
+        Store(ColumnId("B"), new CellValueData { ValueNumeric = 0m });
+        Store(ColumnId("Rate"), new CellValueData { ValueNumeric = 2m, IsCalculated = true });
+        Store(ColumnId("RateDoubled"), new CellValueData { ValueNumeric = 4m, IsCalculated = true });
+
+        var computed = await PreviewAsync();
+
+        Assert.DoesNotContain(computed!, c => c.ColumnCode is "Rate" or "RateDoubled");
     }
 
     [Fact]

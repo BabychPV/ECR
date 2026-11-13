@@ -85,7 +85,10 @@ public sealed class RowStore(
                     select new TableInstanceRef(
                         instance.Id, instance.DocumentId, instance.TableDefId,
                         EcrDbContext.VersionOf(project.Id, instance.PeriodKeyValue), instance.PeriodKeyValue,
-                        instance.SheetCopyId),
+                        instance.SheetCopyId,
+
+                        // ✎ C-1: прапорець «є стан помилок формул» — EXISTS у тій самій команді (нуль нових звернень).
+                        db.FormulaErrors.Any(e => e.PeriodKey == instance.PeriodKeyValue && e.TableInstanceId == instance.Id)),
                 r => r.TableInstanceId,
                 ct).ConfigureAwait(false))
             .ToDictionary(r => r.TableInstanceId);
@@ -429,7 +432,7 @@ public sealed class RowStore(
                             FROM arc.AuditCellChange a
                             WHERE a.DocumentId = {documentId} AND a.TableRowId = {rowId} AND a.PeriodKey = {periodKey.Value}
                         ) u
-                        WHERE u.Origin <> {CellChangeOrigins.Recalculation}
+                        WHERE u.Origin NOT IN ({CellChangeOrigins.Recalculation}, {CellChangeOrigins.CalcError}, {CellChangeOrigins.CalcErrorResolved})
                     ) x
                     WHERE x.Rn = 1 AND x.Origin IN ({CellChangeOrigins.Integration}, {CellChangeOrigins.Permit})
                     """)
@@ -441,7 +444,7 @@ public sealed class RowStore(
                                ROW_NUMBER() OVER (PARTITION BY c.ColumnDefId ORDER BY c.ChangedAt DESC, c.Id DESC) AS Rn
                         FROM aud.CellChange c
                         WHERE c.DocumentId = {documentId} AND c.TableRowId = {rowId} AND c.PeriodKey = {periodKey.Value}
-                          AND c.Origin <> {CellChangeOrigins.Recalculation}
+                          AND c.Origin NOT IN ({CellChangeOrigins.Recalculation}, {CellChangeOrigins.CalcError}, {CellChangeOrigins.CalcErrorResolved})
                     ) x
                     WHERE x.Rn = 1 AND x.Origin IN ({CellChangeOrigins.Integration}, {CellChangeOrigins.Permit})
                     """);
@@ -796,7 +799,10 @@ public sealed class RowStore(
             .Join(db.Projects, x => x.ProjectId, p => p.Id,
                   (x, p) => new TableInstanceRef(
                       x.t.Id, x.t.DocumentId, x.t.TableDefId, EcrDbContext.VersionOf(p.Id, x.t.PeriodKeyValue), x.t.PeriodKeyValue,
-                      x.t.SheetCopyId))
+                      x.t.SheetCopyId,
+
+                      // ✎ C-1: прапорець «є стан помилок формул» — EXISTS у тій самій команді.
+                      db.FormulaErrors.Any(e => e.PeriodKey == x.t.PeriodKeyValue && e.TableInstanceId == x.t.Id)))
             .Take(MaxTableInstances)
             .ToListAsync(ct)
             .ConfigureAwait(false);

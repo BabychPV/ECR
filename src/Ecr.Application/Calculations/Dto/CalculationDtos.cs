@@ -110,9 +110,57 @@ public sealed record CalculationRunStatusDto(long? RunId, DateTime? FinishedAt, 
 /// допустимі комбінації значень. Таблиці немає — підказки немає (правил з колонками цієї таблиці немає, чинної версії
 /// немає або хоч одна колонка прихована від читача).
 /// </param>
+/// <param name="FormulaErrors">
+/// ✎ C-1 (D-475): група «Помилки формул» — ОДИН запис на КОРІНЬ помилки (власна помилка комірки) з кількістю
+/// залежних комірок, «не оновлених» через нього (самі залежні позначає сітка, не панель). Залежні, чий корінь у
+/// переліку не показаний (закритий читачеві, інший період чи копія), — один запис на таке джерело. Не більше
+/// <see cref="MaxFormulaErrors"/> записів; <c>null</c> — помилок немає.
+/// </param>
+/// <param name="FormulaErrorTotal">✎ C-1: скільки видимих комірок з помилкою (корені й залежні) всього; <c>null</c> — помилок немає.</param>
 public sealed record CalculationIssuesDto(
     IReadOnlyList<CalculationIssueDto> Items,
-    IReadOnlyList<CalculationIssueTableHintDto>? Tables = null);
+    IReadOnlyList<CalculationIssueTableHintDto>? Tables = null,
+    IReadOnlyList<FormulaErrorIssueDto>? FormulaErrors = null,
+    int? FormulaErrorTotal = null)
+{
+    /// <summary>✎ C-1: стеля групи «Помилки формул» у відповіді (~150 КБ на найгірший рядок).</summary>
+    public const int MaxFormulaErrors = 500;
+}
+
+/// <summary>✎ C-1 (D-475): запис групи «Помилки формул» — корінь помилки (або джерело «не оновлено», якого не видно).</summary>
+/// <param name="TableCode">Код таблиці.</param>
+/// <param name="SheetCopyId">Копія аркуша; <c>null</c> — оригінал.</param>
+/// <param name="RowKey">Ключ рядка.</param>
+/// <param name="RowNumber">Порядковий номер рядка (<c>doc.TableRow.Ordinal</c>) — для підпису «Рядок N».</param>
+/// <param name="RowLabelL10n">Назва фіксованого рядка шаблону; <c>null</c> — динамічний рядок (підпис «Рядок N»).</param>
+/// <param name="ColumnCode">Код колонки.</param>
+/// <param name="ColumnHeaderL10n">Заголовок колонки.</param>
+/// <param name="Kind">
+/// <c>Error</c> — власна помилка комірки (корінь); <c>Blocked</c> — комірки, не оновлені через помилку в
+/// <paramref name="Source"/>, корінь якої в переліку не показаний (адреса — перша з таких комірок).
+/// </param>
+/// <param name="ErrorCode">Код помилки (для Blocked — код кореня).</param>
+/// <param name="Formula">Вираз формули; <c>null</c> — хоч один вхід читачеві закритий.</param>
+/// <param name="Inputs">Вхідні значення, що дали помилку (лише видимі колонки); <c>null</c> — для Blocked.</param>
+/// <param name="Source">Комірка-причина для Blocked; <c>null</c> — для Error або джерело закрите.</param>
+/// <param name="Since">Відколи (UTC).</param>
+/// <param name="DependentCount">
+/// Error — скільки видимих комірок не оновлено через цей корінь; Blocked — скільки видимих комірок не оновлено через
+/// <paramref name="Source"/> (включно з адресою запису).
+/// </param>
+public sealed record FormulaErrorIssueDto(
+    string TableCode, long? SheetCopyId, string RowKey, int RowNumber, LocalizedText? RowLabelL10n,
+    string ColumnCode, LocalizedText ColumnHeaderL10n, string Kind, string ErrorCode, string? Formula,
+    IReadOnlyList<FormulaErrorInputDto>? Inputs, Documents.Dto.FormulaErrorSourceDto? Source, DateTime Since,
+    int DependentCount);
+
+/// <summary>✎ C-1 (D-475): вхідне значення помилки формули.</summary>
+/// <param name="TableCode">Код таблиці.</param>
+/// <param name="RowKey">Ключ рядка.</param>
+/// <param name="ColumnCode">Код колонки.</param>
+/// <param name="PeriodOffset">0 — поточний період; −1 — попередній тощо.</param>
+/// <param name="Value">Значення текстом (інваріантна культура); <c>null</c> — порожньо.</param>
+public sealed record FormulaErrorInputDto(string TableCode, string RowKey, string ColumnCode, int PeriodOffset, string? Value);
 
 /// <summary>Що приймають правила методологій таблиці (UAT 08.11 b3).</summary>
 /// <param name="TableCode">Код таблиці шаблону.</param>

@@ -70,6 +70,10 @@ namespace Ecr.Application.Documents;
 /// ✎ D-461: позначки «ручне значення замість формули» (<see cref="FormulaOverrideSliceDto"/>). <c>null</c> — лише тести,
 /// що конструюють обробник вручну (тоді ручних значень у відповіді немає).
 /// </param>
+/// <param name="formulaErrors">
+/// ✎ C-1 (D-475): стан помилок формул (<see cref="TableSliceDto.CalcErrors"/>). <c>null</c> — тести, що конструюють
+/// обробник вручну (тоді позначок у відповіді немає).
+/// </param>
 public sealed class GetTableSliceHandler(
     IRowStore rowStore,
     ICellStore cellStore,
@@ -90,7 +94,8 @@ public sealed class GetTableSliceHandler(
     Microsoft.Extensions.Logging.ILogger<Calculations.CalculatedCellOverlay>? overlayLog = null,
     Permits.Groups.IPermitGroupResolver? groups = null,
     IMonthColumnRouter? monthRouter = null,
-    IFormulaOverrideStore? formulaOverrides = null)
+    IFormulaOverrideStore? formulaOverrides = null,
+    IFormulaErrorStore? formulaErrors = null)
 {
     /// <summary>
     /// Q-17: колонки таблиці з іншим власником, період якого НЕ в області ролі читача (<c>InPeriod(власник)</c>).
@@ -484,13 +489,58 @@ public sealed class GetTableSliceHandler(
                 table, tableInstanceId, instance.PeriodKey, keyById, columns, profile, anyPeriodScope.ProjectId, ct)
             .ConfigureAwait(false);
 
+        // ✎ C-1 (D-475): позначки помилок формул — лише коли екземпляр їх має (прапорець із запиту екземпляра).
+        var calcErrors = instance.HasFormulaErrors && formulaErrors is not null
+            ? await CalcErrorsAsync(tableInstanceId, instance.PeriodKey, keyById, columns, readable, snapshot, ct)
+                .ConfigureAwait(false)
+            : null;
+
         return new TableSliceDto(
             tableInstanceId, instance.PeriodKey, columns, rows, permissions, confirmations, formats, outOfWindow,
             userStyles, StyleOf(styleById, table.HeaderStyleId), styleAccess)
         {
             HeaderGroups = headerGroups,
             FormulaOverride = formulaOverride,
+            CalcErrors = calcErrors,
         };
+    }
+
+    /// <summary>
+    /// ✎ C-1 (D-475): стан помилок формул видимих комірок зрізу; джерело «не оновлено» — лише якщо читач бачить його
+    /// таблицю й колонку (S6). ОДИН запит, лише з прапорцем екземпляра.
+    /// </summary>
+    private async Task<IReadOnlyDictionary<string, CellCalcErrorDto>?> CalcErrorsAsync(
+        long tableInstanceId, int periodKey, Dictionary<long, string> keyById, List<ColumnDto> columns,
+        DocumentReadScope readable, Domain.Entities.Configuration.TemplateVersionSnapshot snapshot, CancellationToken ct)
+    {
+        var rows = await formulaErrors!
+            .ReadInstancesAsync([tableInstanceId], new Domain.ValueObjects.PeriodKey(periodKey), ct)
+            .ConfigureAwait(false);
+        var visibleCodeById = columns.ToDictionary(c => c.Id, c => c.Code);
+        var result = new Dictionary<string, CellCalcErrorDto>(StringComparer.Ordinal);
+        foreach (var row in rows)
+        {
+            if (!keyById.TryGetValue(row.TableRowId, out var rowKey) || !visibleCodeById.TryGetValue(row.ColumnDefId, out var code))
+            {
+                continue;
+            }
+
+            FormulaErrorSourceDto? source = null;
+            if (row.Kind == Domain.Entities.Calculations.FormulaError.BlockedKind
+                && row.SourceTableDefId is { } sourceTableId && row.SourceColumnDefId is { } sourceColumnId
+                && readable.CanReadTable(sourceTableId) && readable.CanReadColumn(sourceColumnId)
+                && snapshot.Sheets.SelectMany(s => s.Tables).FirstOrDefault(t => t.Id == sourceTableId) is { } sourceTable
+                && sourceTable.Columns.FirstOrDefault(c => c.Id == sourceColumnId) is { } sourceColumn)
+            {
+                source = new FormulaErrorSourceDto(
+                    sourceTable.Code, row.SourceRowKey ?? string.Empty, sourceColumn.Code,
+                    row.SourcePeriodKey == periodKey ? null : row.SourcePeriodKey);
+            }
+
+            result[$"{rowKey}:{code}"] = new CellCalcErrorDto(row.Kind, row.ErrorCode, row.Since, source);
+        }
+
+        return result.Count == 0 ? null : result;
     }
 
     /// <summary>

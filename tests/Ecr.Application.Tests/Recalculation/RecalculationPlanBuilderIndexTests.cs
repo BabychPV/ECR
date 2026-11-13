@@ -55,7 +55,8 @@ public sealed class RecalculationPlanBuilderIndexTests
                 {
                     var address = new CellAddress(Period, rowId, columnId);
                     var expectedDependents = expected.DependentsOf(address);
-                    Assert.Equal(expectedDependents, actual.DependentsOf(address));
+                    // P-2: множина, а не порядок — єдиний споживач (`RecalculationService.Plan`) кладе її в HashSet.
+                    Assert.Equal(expectedDependents.ToHashSet(), actual.DependentsOf(address).ToHashSet());
                     edges += expectedDependents.Count;
                 }
             }
@@ -100,6 +101,42 @@ public sealed class RecalculationPlanBuilderIndexTests
         {
             Assert.Equal(expected.DependentsOfFormula(formulaId), actual.DependentsOfFormula(formulaId));
         }
+    }
+
+    /// <summary>
+    /// P-2 (аудит 2026-11-10): залежність від усієї колонки (без рядка) — ОДНЕ колонкове ребро, а не ребро на кожен
+    /// живий рядок таблиці; множина залежних та сама, включно з адресою рядка, якого в плані немає (D3).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Залежність_від_усієї_колонки_не_дає_ребра_на_кожен_рядок()
+    {
+        const int rows = 5_000;
+        var builder = new TemplateBuilder();
+        var sheet = builder.Sheet("S");
+        var table = builder.Table(sheet, "T", TableRowMode.Dynamic, TableLayoutKind.PerPeriodInstance);
+        var input = builder.Column(table, "A");
+        var total = builder.Column(table, "TOTAL", CellDataType.Formula);
+        var formula = builder.Formula(table, "1", FormulaScope.Column, total);
+        var snapshot = builder.Build();
+
+        var keys = new Dictionary<string, long>(StringComparer.Ordinal);
+        for (var r = 0; r < rows; r++)
+        {
+            keys[$"R{r}"] = r + 1;
+        }
+
+        var dependencies = new List<FormulaDependency>
+        {
+            FormulaDependency.ForFormula(formula.Id, dependsOnKind: 0, table.Id, rowKey: null, input.Id, null, null, 0),
+        };
+
+        var plan = RecalculationPlanBuilder.Build(
+            snapshot, dependencies, new Dictionary<int, IReadOnlyDictionary<string, long>> { [table.Id] = keys }, Period);
+
+        Assert.Equal(0, plan.CellEdgeCount);
+        Assert.Contains(formula.Id, plan.DependentsOf(new CellAddress(Period, 4321, input.Id)));
+        Assert.Contains(formula.Id, plan.DependentsOf(new CellAddress(Period, 99_999, input.Id)));
     }
 
     /// <summary>

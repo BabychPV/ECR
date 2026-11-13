@@ -63,6 +63,12 @@ public static class ValidationMessageTemplates
     /// <summary>Feature (j) j3: a month shared by two permits of the row holds one value — must be split; blocks Submit.</summary>
     public const string PermitSplitNeeded = "validation.permit.splitNeeded";
 
+    /// <summary>✎ C-1 (D-475): власна помилка формули комірки — блокує подання.</summary>
+    public const string FormulaError = "validation.formula.error";
+
+    /// <summary>✎ C-1 (D-475): комірка не оновлена через помилку в іншій — блокує подання.</summary>
+    public const string FormulaErrorBlocked = "validation.formula.blocked";
+
     /// <summary>
     /// Human 08.11 («Попередження», F13-p210): the row's permit does not cover months holding only CALCULATED values — a
     /// non-blocking Warning; the fix is the permit, not the values (calculated values cannot be cleared).
@@ -99,6 +105,14 @@ public static class ValidationMessageTemplates
             "Permit {permit} (column \"{column}\") is valid {validity} and does not cover the month with calculated values: {months}. Saving and submitting are allowed. Pick a permit valid in that month or extend the permit's validity.",
             "Разрешение {permit} (колонка «{column}») действует {validity} и не покрывает месяц с вычисленными значениями: {months}. Сохранение и подача разрешены. Выберите разрешение, действующее в этом месяце, или продлите срок действия разрешения.",
             "{permit} рұқсаты («{column}» бағаны) {validity} аралығында жарамды және есептелген мәндері бар айды қамтымайды: {months}. Сақтауға және тапсыруға болады. Осы айда жарамды рұқсатты таңдаңыз немесе рұқсаттың жарамдылық мерзімін ұзартыңыз."),
+        [FormulaError] = (
+            "{column}: formula error {code} — the value was not recalculated (the last correct value is kept). Submit is blocked until the formula calculates.",
+            "{column}: ошибка формулы {code} — значение не пересчитано (оставлено последнее правильное). Подача заблокирована, пока формула не рассчитается.",
+            "{column}: формула қатесі {code} — мән қайта есептелмеді (соңғы дұрыс мән қалдырылды). Формула есептелмейінше тапсыру бұғатталған."),
+        [FormulaErrorBlocked] = (
+            "{column}: not updated because of a formula error in {source}. Submit is blocked until it is fixed.",
+            "{column}: не обновлено из-за ошибки формулы в {source}. Подача заблокирована до исправления.",
+            "{column}: {source} ішіндегі формула қатесіне байланысты жаңартылмады. Түзетілгенше тапсыру бұғатталған."),
         [PermitSplitNeeded] = (
             "{month} ({column}): the month is shared by permits {permits}, but holds one value. Split the month — enter the part for each permit; Submit is blocked until then.",
             "{month} ({column}): месяц разделён между разрешениями {permits}, но введено одно значение. Разделите месяц — введите часть для каждого разрешения; до этого подача заблокирована.",

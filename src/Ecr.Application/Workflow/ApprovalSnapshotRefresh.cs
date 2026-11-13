@@ -40,8 +40,62 @@ public sealed class ApprovalSnapshotRefresh(
     IMetadataCache metadata,
     IDocumentHeaderStore headers,
     IWorkflowStore workflow,
-    Recalculation.ISubmitRecalculation recalculation)
+    Recalculation.ISubmitRecalculation recalculation,
+
+    // ✎ C-1 (D-475, PO 12.11 «якщо є помилки то затвердити теж не можна»): стан помилок формул аркуша для блоку
+    // затвердження. `null` — тестові фабрики без сховища (блоку немає).
+    IFormulaErrorStore? formulaErrors = null)
 {
+    /// <summary>✎ C-1: екземпляри й знімок, прочитані <see cref="RefreshAsync"/> (нуль повторних звернень).</summary>
+    private IReadOnlyList<TableInstanceRef>? _sheetInstances;
+
+    private Domain.Entities.Configuration.TemplateVersionSnapshot? _snapshot;
+
+    /// <summary>✎ C-1: комірки з помилкою з перерахунку, якщо <see cref="RefreshAsync"/> перерахував аркуш.</summary>
+    private IReadOnlyList<Recalculation.FormulaErrorCell>? _recalculatedErrors;
+
+    /// <summary>
+    /// ✎ C-1 (D-475, PO 12.11): повідомлення <c>FORMULA-ERROR</c> для комірок аркуша з помилкою формули чи «не
+    /// оновлених через помилку» — вони блокують ЗАТВЕРДЖЕННЯ так само, як подання. Кличеться ПІСЛЯ
+    /// <see cref="RefreshAsync"/> у тій самій транзакції: якщо аркуш перераховано, береться результат прогону, інакше —
+    /// збережений стан, і лише коли екземпляр аркуша має прапорець (без помилок — нуль звернень).
+    /// </summary>
+    /// <param name="sheetDefId">Аркуш.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="language">Мова запасного тексту.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task<IReadOnlyList<Validation.ValidationMessage>> FormulaErrorMessagesAsync(
+        int sheetDefId, PeriodKey periodKey, string language, CancellationToken ct)
+    {
+        if (_snapshot is null || _sheetInstances is null)
+        {
+            return [];
+        }
+
+        var tables = _snapshot.Sheets.SelectMany(s => s.Tables).ToDictionary(t => t.Id);
+        var cells = _recalculatedErrors;
+        if (cells is null)
+        {
+            var sheetTables = _snapshot.Sheets.Where(s => s.Id == sheetDefId).SelectMany(s => s.Tables).Select(t => t.Id).ToHashSet();
+            var flagged = _sheetInstances
+                .Where(i => i.HasFormulaErrors && sheetTables.Contains(i.TableDefId))
+                .ToList();
+            if (formulaErrors is null || flagged.Count == 0)
+            {
+                return [];
+            }
+
+            var rows = await formulaErrors
+                .ReadInstancesAsync([.. flagged.Select(i => i.TableInstanceId)], periodKey, ct)
+                .ConfigureAwait(false);
+            cells = [.. rows.Select(r => new Recalculation.FormulaErrorCell(
+                r.TableDefId, r.SheetCopyId, r.RowKey, r.ColumnDefId, r.Kind, r.ErrorCode,
+                r.SourcePeriodKey, r.SourceTableDefId, r.SourceRowKey, r.SourceColumnDefId))];
+        }
+
+        return Validation.FormulaErrorIssues.Messages(cells, tables, language);
+    }
+
     /// <summary>
     /// Блокування під затвердження: структура документа (спільно) → шапка (спільно) → аркуш (ВИНЯТКОВО) —
     /// той самий порядок, що в подання (<see cref="ISheetEditGate"/>). Лише всередині транзакції, першою дією.
@@ -83,6 +137,9 @@ public sealed class ApprovalSnapshotRefresh(
         // RS: таблиці цього аркуша — лише своєї копії (див. SubmissionPayloadSource.ForSheetCopy).
         var instances = SubmissionPayloadSource.ForSheetCopy(
             allInstances, snapshot.Sheets.FirstOrDefault(s => s.Id == sheetDefId), sheetCopyId);
+        _sheetInstances = instances;
+        _snapshot = snapshot;
+        _recalculatedErrors = null;
 
         var sheetTables = snapshot.Sheets
             .Where(s => s.Id == sheetDefId)
@@ -123,8 +180,9 @@ public sealed class ApprovalSnapshotRefresh(
         }
 
         // ⛔ RS: рахується «вид» своєї копії (оригінал для sheetCopyId = null).
-        await recalculation
-            .RecalculateSheetUnderSubmitLockAsync(documentId, sheetDefId, periodKey, ct, sheetCopyId)
+        // ✎ C-1: прогін повертає й комірки аркуша з помилкою — вони блокують затвердження (FormulaErrorMessagesAsync).
+        _recalculatedErrors = await recalculation
+            .RecalculateSheetForSubmitAsync(documentId, sheetDefId, periodKey, ct, sheetCopyId)
             .ConfigureAwait(false);
 
         var payload = await SubmissionPayloadSource

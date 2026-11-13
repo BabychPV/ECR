@@ -196,7 +196,8 @@ public sealed class AuditWriter(EcrDbContext db, StaleCountsEpoch? staleEpoch = 
         staleEpoch?.MarkDirty(
             db,
             changes
-                .Where(c => c.Origin != CellChangeOrigins.Recalculation)
+                // ✎ C-1: подія помилки розрахунку значення не змінює — документ «брудним» не робить.
+                .Where(c => !CellChangeOrigins.IsNotInput(c.Origin))
                 .Select(c => (c.Address.PeriodKey.Value, c.DocumentId)));
     }
 

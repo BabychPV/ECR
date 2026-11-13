@@ -295,16 +295,19 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
                    COUNT_BIG(CASE WHEN Origin = N'Recalculation' THEN 1 END)
             """;
 
-        var hot = select + "\n  FROM aud.CellChange\n WHERE " + where + "\n GROUP BY ColumnDefId;";
+        // ✎ C-1 (D-475): лічильник рахує зміни ЗНАЧЕНЬ — події помилки розрахунку значення не змінюють. Сама вкладка
+        // Cell changes (`ReadCellChangesAsync`) їх показує.
+        const string valueChangesOnly = " AND Origin NOT IN (N'CalcError', N'CalcErrorResolved')";
+        var hot = select + "\n  FROM aud.CellChange\n WHERE (" + where + ")" + valueChangesOnly + "\n GROUP BY ColumnDefId;";
         if (!withArchive)
         {
             return hot;
         }
 
         var archive = select + "\n"
-            + "  FROM (SELECT ColumnDefId, ChangedAt, Origin FROM aud.CellChange WHERE " + where + "\n"
+            + "  FROM (SELECT ColumnDefId, ChangedAt, Origin FROM aud.CellChange WHERE (" + where + ")" + valueChangesOnly + "\n"
             + "        UNION ALL\n"
-            + "        SELECT ColumnDefId, ChangedAt, Origin FROM arc.AuditCellChange WHERE " + where + ") AS x\n"
+            + "        SELECT ColumnDefId, ChangedAt, Origin FROM arc.AuditCellChange WHERE (" + where + ")" + valueChangesOnly + ") AS x\n"
             + " GROUP BY ColumnDefId;";
 
         return WithArchiveProbe(hot, archive);
