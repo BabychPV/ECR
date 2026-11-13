@@ -33,6 +33,10 @@ public sealed class ArchiveProjectTests
     {
         _clock.UtcNow.Returns(Now);
         _user.UserId.Returns(9);
+
+        // B81: перелік винятків і позначка Archived — у транзакції; підміна виконує тіло так, як справжня одиниця роботи.
+        _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.ArgAt<Func<CancellationToken, Task>>(0)(call.ArgAt<CancellationToken>(1)));
         // ⚠ Грант на 10 — дефолтний Id `ProjectBuilder.Project()`.
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
             .Returns(new AccessBuilder { UserId = 9 }
@@ -185,6 +189,67 @@ public sealed class ArchiveProjectTests
         await new ArchiveProjectHandler(_periods, _access, _user, _uow, _clock, none)
             .HandleAsync(project.Id, CancellationToken.None);
 
+        Assert.Equal(ProjectStatus.Archived, project.Status);
+    }
+
+    /// <remarks>
+    /// B81 (G3, F13 #877): перелік діючих винятків і позначка Archived — в одній транзакції ПІСЛЯ UPDLOCK кожного
+    /// рядка періоду проєкту (той самий замок, під яким `OpenDocumentPeriodReopenHandler` перечитує стан). Без замка
+    /// перелік, знятий до коміту паралельного відкриття, пропускав виняток. Детерміновано: фіксується порядок дій
+    /// усередині тіла транзакції. Червоне без фіксу: замків немає, перелік і збереження — поза транзакцією.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Finding", "B81-G3")]
+    public async Task Перелік_винятків_і_архівація_під_замком_усіх_періодів_у_транзакції()
+    {
+        var project = ArrangeClosed();
+        var steps = new List<string>();
+        var inTransaction = false;
+
+        _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(async call =>
+            {
+                inTransaction = true;
+                try
+                {
+                    await call.ArgAt<Func<CancellationToken, Task>>(0)(call.ArgAt<CancellationToken>(1));
+                }
+                finally
+                {
+                    inTransaction = false;
+                }
+            });
+        _periods.LockAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                steps.Add($"lock:{call.ArgAt<int>(0)}:{inTransaction}");
+                return Task.FromResult<Period?>(null);
+            });
+
+        IReadOnlyList<ProjectDocumentReopenItem> empty = [];
+        var reopens = Substitute.For<IDocumentPeriodReopenStore>();
+        reopens.ListActiveForProjectAsync(project.Id, Now, Arg.Any<CancellationToken>())
+            .Returns(_ =>
+            {
+                steps.Add($"list:{inTransaction}");
+                return Task.FromResult(empty);
+            });
+        _uow.SaveChangesAsync(Arg.Any<CancellationToken>())
+            .Returns(_ =>
+            {
+                steps.Add($"save:{inTransaction}");
+                return Task.FromResult(1);
+            });
+
+        await new ArchiveProjectHandler(_periods, _access, _user, _uow, _clock, reopens)
+            .HandleAsync(project.Id, CancellationToken.None);
+
+        var expected = project.Periods.OrderBy(p => p.Id).Select(p => $"lock:{p.Id}:True").ToList();
+        expected.Add("list:True");
+        expected.Add("save:True");
+        Assert.Equal(expected, steps);
+        Assert.NotEmpty(project.Periods);
         Assert.Equal(ProjectStatus.Archived, project.Status);
     }
 }

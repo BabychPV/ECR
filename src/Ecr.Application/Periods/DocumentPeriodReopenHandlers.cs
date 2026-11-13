@@ -130,32 +130,7 @@ public sealed class OpenDocumentPeriodReopenHandler(
 
         PermissionCheck.RequireIn(profile, Permission, facts.ProjectId);
 
-        switch (DenialOf(profile, facts))
-        {
-            case DocumentReopenDenial.ProjectArchived:
-                throw new BusinessRuleException(
-                    "ECR-PRD-0409", "Проєкт архівований: місяці в ньому не відкриваються.",
-                    new Dictionary<string, object?>
-                    {
-                        ["messageKey"] = "err.ECR-PRD-0409.projectArchived",
-                        ["projectCode"] = facts.ProjectCode,
-                    });
-
-            case DocumentReopenDenial.PeriodMissing:
-                throw Projects.ProjectVisibility.PeriodNotFound(periodKey);
-
-            case DocumentReopenDenial.PeriodNotClosed:
-                throw new BusinessRuleException(
-                    "ECR-PRD-0409", $"Місяць {periodKey} не закритий: відкривати нічого.",
-                    new Dictionary<string, object?>
-                    {
-                        ["messageKey"] = "err.ECR-PRD-0409.reopenOnlyClosed",
-                        ["state"] = facts.PeriodState?.ToString(),
-                    });
-
-            default:
-                break;
-        }
+        ThrowIfDenied(DenialOf(profile, facts), facts, periodKey);
 
         var deadline = openUntil ?? ReopenPeriodHandler.EndOfSiteDay(now, facts.TimeZoneId);
         DocumentPeriodReopen? opened = null;
@@ -170,6 +145,14 @@ public sealed class OpenDocumentPeriodReopenHandler(
                 _ = await workflow.LockPeriodAsync(documentId, new Ecr.Domain.ValueObjects.PeriodKey(periodKey), innerCt)
                     .ConfigureAwait(false);
             }
+
+            // ⛔ B81 (G3, F13 #877): факти перечитуються ПІСЛЯ замка. Перевірка вище бачила стан до транзакції: архівація
+            // проєкту (`ArchiveProjectHandler`, той самий замок рядків періодів), закомічена між нею і замком, лишалася
+            // непоміченою, і виняток відкривався в уже архівованому проєкті. Під замком перечитаний стан — останній
+            // закомічений, і рішення приймається за ним.
+            var locked = await store.GetFactsAsync(documentId, periodKey, now, innerCt).ConfigureAwait(false)
+                         ?? throw DocumentVisibility.NotFound(documentId);
+            ThrowIfDenied(DenialOf(profile, locked), locked, periodKey);
 
             // ⚠ Унікальний фільтрований індекс тримає «один незакритий на документ × місяць»: попередній закривається
             // ОКРЕМИМ збереженням до вставки нового, інакше порядок команд пакета міг би зіткнутися з індексом.
@@ -215,6 +198,40 @@ public sealed class OpenDocumentPeriodReopenHandler(
 
         return new DocumentPeriodReopenView(
             opened!.Id, periodKey, opened.OpenUntil, opened.Reason, userId, OpenedByName: null, opened.OpenedAt);
+    }
+
+    /// <summary>Відмова відкриття за рішенням <see cref="DenialOf"/>; <c>null</c> — нічого.</summary>
+    /// <param name="denial">Рішення.</param>
+    /// <param name="facts">Факти, за якими його прийнято.</param>
+    /// <param name="periodKey">Місяць.</param>
+    private static void ThrowIfDenied(DocumentReopenDenial? denial, DocumentPeriodFacts facts, int periodKey)
+    {
+        switch (denial)
+        {
+            case DocumentReopenDenial.ProjectArchived:
+                throw new BusinessRuleException(
+                    "ECR-PRD-0409", "Проєкт архівований: місяці в ньому не відкриваються.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-PRD-0409.projectArchived",
+                        ["projectCode"] = facts.ProjectCode,
+                    });
+
+            case DocumentReopenDenial.PeriodMissing:
+                throw Projects.ProjectVisibility.PeriodNotFound(periodKey);
+
+            case DocumentReopenDenial.PeriodNotClosed:
+                throw new BusinessRuleException(
+                    "ECR-PRD-0409", $"Місяць {periodKey} не закритий: відкривати нічого.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-PRD-0409.reopenOnlyClosed",
+                        ["state"] = facts.PeriodState?.ToString(),
+                    });
+
+            default:
+                break;
+        }
     }
 
     /// <summary>

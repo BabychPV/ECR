@@ -208,6 +208,35 @@ public sealed class ProjectDocumentReopensTests
         }
     }
 
+    /// <remarks>
+    /// B81 (G3, F13 #877): архівація проєкту, закомічена між перевіркою фактів і замком періоду, — відкриття під замком
+    /// бачить її і відмовляє. Детерміновано: перше читання фактів (до транзакції) — Active, друге (під замком) — Archived,
+    /// як і буває, коли `ArchiveProjectHandler` комітить у проміжку. Червоне без фіксу: факти читалися один раз до
+    /// транзакції — виняток додавався в уже архівований проєкт.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Finding", "B81-G3")]
+    public async Task Архівація_між_перевіркою_і_замком_періоду_не_пропускає_виняток()
+    {
+        var store = Substitute.For<IDocumentPeriodReopenStore>();
+        store.GetFactsAsync(VisibleDocumentId, PeriodKey, Now, Arg.Any<CancellationToken>())
+            .Returns(
+                new DocumentPeriodFacts(ProjectId, "PRJ", ProjectStatus.Active, 1, "UTC", "DOC-1", PeriodState.Closed),
+                new DocumentPeriodFacts(ProjectId, "PRJ", ProjectStatus.Archived, 1, "UTC", "DOC-1", PeriodState.Closed));
+        store.FindOpenAsync(VisibleDocumentId, PeriodKey, Arg.Any<CancellationToken>()).Returns((DocumentPeriodReopen?)null);
+        var uow = Uow();
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => new OpenDocumentPeriodReopenHandler(
+                    store, Access(withReopen: true), uow, Substitute.For<IAuditWriter>(), User(), new TestClock(Now))
+                .HandleAsync(VisibleDocumentId, PeriodKey, "Лист №20", Now.AddHours(5), CancellationToken.None));
+
+        Assert.Equal("err.ECR-PRD-0409.projectArchived", error.Details!["messageKey"]);
+        store.DidNotReceiveWithAnyArgs().Add(default!);
+        await uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
     // ── Підготовка ──────────────────────────────────────────────────────
 
     /// <summary>Сховище: факти закритого місяця і (за наявності) незакритий виняток.</summary>
