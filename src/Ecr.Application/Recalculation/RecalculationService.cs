@@ -558,8 +558,7 @@ public sealed class RecalculationService(
                 {
                     changedColumns?.Add((seedTable, seed.ColumnDefId));
                     inputColumns?.Add((seedTable, seed.ColumnDefId));
-                }
-            }
+                }            }
         }
 
         // ⛔ Q-2xx (аудит фази 3, звітність): аудит записується за КЛЮЧЕМ
@@ -827,6 +826,9 @@ public sealed class RecalculationService(
             {
                 // ✎ C-1: недовірені комірки прогону — читання такої комірки не дає цілі перерахуватися.
                 Blocked = errors.Blocked,
+
+                // ✎ C-11: рядки сусідніх періодів для предиката зі зсувом.
+                OtherPeriodRows = loadExtras.OtherPeriodRows,
             };
 
         var context = NewContext(registryFields);
@@ -1207,6 +1209,12 @@ public sealed class RecalculationService(
 
         /// <summary>✎ C-5: дефолти колонок версії прогону — значення комірок, яких немає (поточний і сусідні періоди).</summary>
         public ColumnDefaultSet Defaults { get; init; } = ColumnDefaultSet.Empty;
+
+        /// <summary>
+        /// ✎ C-11: рядки сусідніх періодів (зсув, таблиця версії прогону) — джерело рядків предиката зі зсувом.
+        /// Посилання на вже прочитані словники, без копій; каскад Rollup доповнює той самий об'єкт.
+        /// </summary>
+        public Dictionary<(int PeriodOffset, int TableDefId), IReadOnlyDictionary<string, long>> OtherPeriodRows { get; } = [];
     }
 
     /// <summary>
@@ -2207,6 +2215,13 @@ public sealed class RecalculationService(
                 ? foundKeys
                 : new Dictionary<string, long>(StringComparer.Ordinal);
             var byId = keys.ToDictionary(pair => pair.Value, pair => pair.Key);
+
+            // ✎ C-11 (рішення PO 11.11): рядки ЗСУНУТОГО періоду — джерело рядків предиката `[Period:-n].[T].[WHERE …]`
+            // (умова й значення — на рядках того періоду). Нуль нових звернень: ключі вже прочитано вище для значень.
+            if (offset != 0 && extras is not null)
+            {
+                extras.OtherPeriodRows[(offset, table.TableDefId)] = keys;
+            }
 
             var cells = cellsBatch.TryGetValue(table.TableInstanceId, out var foundCells)
                 ? foundCells
