@@ -102,6 +102,21 @@ export function installTruncationTooltip(root: HTMLElement): () => void {
   let pending: { cell: Element; target: Element } | null = null;
   let shown: Shown | null = null;
   let lastPointerDown = Number.NEGATIVE_INFINITY;
+  /**
+   * Де вказівник був у ОСТАННІЙ події миші. ⛔ Браузер шле `pointerover`/`pointerout` і НЕРУХОМІЙ миші, коли під нею
+   * змінюється розмітка (перехід фокуса з клавіатури перемальовує комірку/шапку під курсором). Така подія — не рух, і
+   * підказку, показану фокусом із клавіатури, вона не ховає (e2e `gridTooltip.spec.ts`: стрілка після кліку — підказка
+   * з'являлась і за ~3 мс зникала від `pointerover` на `header-content` під курсором).
+   */
+  let lastPointer: { x: number; y: number } | null = null;
+
+  const pointerMoved = (event: Event): boolean => {
+    const { clientX: x, clientY: y } = event as MouseEvent;
+    const moved = lastPointer === null || lastPointer.x !== x || lastPointer.y !== y;
+    lastPointer = { x, y };
+
+    return moved;
+  };
 
   const cellOf = (target: EventTarget | null): Element | null => {
     if (!(target instanceof Element)) return null;
@@ -225,6 +240,8 @@ export function installTruncationTooltip(root: HTMLElement): () => void {
 
   const onPointerOver = (event: Event): void => {
     if ((event as PointerEvent).pointerType === 'touch') return;
+    // Підказку з клавіатури тримає лише справжній рух миші, а не перемальована під нерухомим курсором розмітка.
+    if (!pointerMoved(event) && shown !== null && shown.via === 'focus') return;
     const target = event.target;
     const cell = cellOf(target);
 
@@ -258,7 +275,8 @@ export function installTruncationTooltip(root: HTMLElement): () => void {
     if (shown !== null && shown.via === 'pointer' && shown.cell === cell) hide();
   };
 
-  const onPointerDown = (): void => {
+  const onPointerDown = (event: Event): void => {
+    pointerMoved(event);
     lastPointerDown = Date.now();
     hide();
   };

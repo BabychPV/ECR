@@ -165,6 +165,35 @@ describe('truncationTooltip · клавіатура і приховування'
     expect(visibleTip()).toBeNull();
   });
 
+  it('підказку з клавіатури не ховає pointerover нерухомої миші (перемальована під курсором розмітка); справжній рух — ховає', () => {
+    // ⛔ Мутація: прибрати перевірку `pointerMoved` в `onPointerOver` — червоне (e2e gridTooltip.spec.ts: стрілка після
+    // кліку, підказка зникала за ~3 мс від `pointerover` на `header-content` під нерухомим курсором).
+    const clicked = cell('C1');
+    const value = size(cell('Very long value of the cell'), 400, 100);
+    const headerContent = document.createElement('div');
+    headerContent.className = 'header-content';
+    root.appendChild(headerContent);
+    cleanup = installTruncationTooltip(root);
+
+    const at = { clientX: 120, clientY: 64 };
+    clicked.dispatchEvent(new MouseEvent('pointerover', { bubbles: true, ...at }));
+    clicked.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, ...at }));
+    vi.advanceTimersByTime(600);
+
+    value.focus();
+    expect(visibleTip()?.textContent).toBe('Very long value of the cell');
+
+    // Курсор на місці, під ним змінилася розмітка — браузер шле boundary-події з тими самими координатами.
+    clicked.dispatchEvent(new MouseEvent('pointerout', { bubbles: true, relatedTarget: headerContent, ...at }));
+    headerContent.dispatchEvent(new MouseEvent('pointerover', { bubbles: true, relatedTarget: clicked, ...at }));
+    vi.advanceTimersByTime(TruncationTooltipDelayMs * 2);
+    expect(visibleTip()?.textContent).toBe('Very long value of the cell');
+
+    // Миша справді рушила — підказка фокуса поступається наведенню.
+    headerContent.dispatchEvent(new MouseEvent('pointerover', { bubbles: true, clientX: 300, clientY: 64 }));
+    expect(visibleTip()).toBeNull();
+  });
+
   it('Escape ховає підказку', () => {
     const value = size(cell('Very long value of the cell'), 400, 100);
     cleanup = installTruncationTooltip(root);
