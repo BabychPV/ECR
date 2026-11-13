@@ -336,17 +336,13 @@ public sealed partial class DocumentVersionMigrationStore(
     /// документом × кодом (без аркуша й періоду) — переїжджає цілим. Передача з ЯВНИМ періодом до «з місяця» лишається
     /// на <c>X</c>: ці періоди лишились на старій версії (та сама межа, що в <c>WorkflowSql</c>). Код, який мапа веде в
     /// РІЗНІ цілі на різних аркушах, у чаті не перейменовується (чат аркуша не знає). Ключ зрізу рахує лише домен
-    /// (<see cref="Domain.Entities.Documents.EditAssignment.RenameTable"/>). Колізія з наявною передачею під <c>Y</c> —
-    /// 2601 на <c>UQ_EditAssignment</c>, відкат усього переносу (явна відмова, не тиха втрата ексклюзивності).
+    /// (<see cref="Domain.Entities.Documents.EditAssignment.RenameTable"/>). Колізію з наявною передачею під <c>Y</c>
+    /// (2601 на <c>UQ_EditAssignment</c>) план відмовляє заздалегідь (<see cref="CountAssignmentRenameConflictsAsync"/>,
+    /// D-10-b); якщо вона все ж виникла між планом і записом — 2601 і відкат усього переносу.
     /// </remarks>
     private async Task RenameTableCodesAsync(int projectId, VersionMigrationPlan plan, DateTime now, CancellationToken ct)
     {
-        var renames = plan.Items
-            .Where(i => i.Kind == "Renamed" && i.Field == "Code" && i.OldValue is not null && i.NewValue is not null
-                        && i.Path.Count(c => c == '.') == 1)
-            .Select(i => (Sheet: i.Path[..i.Path.IndexOf('.', StringComparison.Ordinal)], From: i.OldValue!, To: i.NewValue!))
-            .Distinct()
-            .ToList();
+        var renames = TableCodeRenames(plan);
         if (renames.Count == 0)
         {
             return;
@@ -386,25 +382,15 @@ public sealed partial class DocumentVersionMigrationStore(
         }
 
         // Передачі: один запит на всі пари мапи (без N+1), точна пара «аркуш + таблиця» — у пам'яті.
-        var sheetCodes = renames.Select(r => r.Sheet).Distinct().ToList();
-        var fromCodes = renames.Select(r => r.From).Distinct().ToList();
-        var fromPeriod = plan.FromPeriodKey;
-        var candidates = await db.EditAssignments
-            .Where(a => a.SheetCode != null && sheetCodes.Contains(a.SheetCode)
-                        && a.TableCode != null && fromCodes.Contains(a.TableCode)
-                        && (a.PeriodKeyValue == null || a.PeriodKeyValue >= fromPeriod)
-                        && db.Documents.Any(d => d.Id == a.DocumentId && d.ProjectId == projectId))
+        var candidates = await RenamedAssignmentsQuery(projectId, renames, plan.FromPeriodKey)
             .ToListAsync(ct).ConfigureAwait(false);
 
         var changed = false;
         foreach (var assignment in candidates)
         {
-            var target = renames.FirstOrDefault(r =>
-                string.Equals(r.Sheet, assignment.SheetCode, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(r.From, assignment.TableCode, StringComparison.OrdinalIgnoreCase));
-            if (target.To is not null)
+            if (RenameTargetOf(renames, assignment.SheetCode, assignment.TableCode) is { } to)
             {
-                assignment.RenameTable(target.To, now);
+                assignment.RenameTable(to, now);
                 changed = true;
             }
         }
@@ -414,6 +400,86 @@ public sealed partial class DocumentVersionMigrationStore(
             await db.SaveChangesAsync(ct).ConfigureAwait(false);
         }
     }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Ті самі кандидати, що перейменує <see cref="RenameTableCodesAsync"/> (аркуш + таблиця з мапи, період від
+    /// «з місяця»), новий ключ зрізу — доменом (<see cref="Domain.Entities.Documents.EditAssignment.KeyOf"/>), без
+    /// зміни сутностей. Конфлікт — новий ключ уже є в документі під ІНШОЮ передачею (будь-якою, і такою, що теж
+    /// переїжджає: обмін X ↔ Y так само впав би на 2601) або два кандидати дають один ключ.
+    /// </remarks>
+    public async Task<int> CountAssignmentRenameConflictsAsync(int projectId, VersionMigrationPlan plan, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        var renames = TableCodeRenames(plan);
+        if (renames.Count == 0)
+        {
+            return 0;
+        }
+
+        var candidates = await RenamedAssignmentsQuery(projectId, renames, plan.FromPeriodKey)
+            .AsNoTracking()
+            .Select(a => new { a.Id, a.DocumentId, a.SheetCode, a.TableCode, a.MonthNumber, a.PeriodKeyValue, a.Level })
+            .ToListAsync(ct).ConfigureAwait(false);
+        var moved = candidates
+            .Select(a => (a.Id, a.DocumentId, To: RenameTargetOf(renames, a.SheetCode, a.TableCode), a.SheetCode, a.MonthNumber, a.PeriodKeyValue, a.Level))
+            .Where(a => a.To is not null)
+            .Select(a => (a.Id, a.DocumentId, Key: Domain.Entities.Documents.EditAssignment.KeyOf(
+                Domain.Entities.Documents.EditAssignmentSlice.Create(a.SheetCode, a.To, a.MonthNumber, a.PeriodKeyValue), a.Level)))
+            .ToList();
+        if (moved.Count == 0)
+        {
+            return 0;
+        }
+
+        var documentIds = moved.Select(m => m.DocumentId).Distinct().ToList();
+        var newKeys = moved.Select(m => m.Key).Distinct().ToList();
+        var occupied = await db.EditAssignments.AsNoTracking()
+            .Where(a => documentIds.Contains(a.DocumentId) && newKeys.Contains(a.SliceKey))
+            .Select(a => new { a.Id, a.DocumentId, a.SliceKey })
+            .ToListAsync(ct).ConfigureAwait(false);
+
+        // ⚠ SliceKey порівнюється без урахування регістру — як і UQ_EditAssignment під типовою колацією бази.
+        var taken = occupied
+            .Select(o => (o.Id, o.DocumentId, Key: o.SliceKey.ToUpperInvariant()))
+            .ToList();
+        var collidesWithExisting = moved.Count(m =>
+            taken.Any(t => t.DocumentId == m.DocumentId && t.Id != m.Id
+                           && string.Equals(t.Key, m.Key.ToUpperInvariant(), StringComparison.Ordinal)));
+        var duplicatesAmongMoved = moved
+            .GroupBy(m => (m.DocumentId, Key: m.Key.ToUpperInvariant()))
+            .Where(g => g.Count() > 1)
+            .Sum(g => g.Count() - 1);
+        return collidesWithExisting + duplicatesAmongMoved;
+    }
+
+    /// <summary>D-10: пари «аркуш, X → Y» з пунктів <c>Renamed</c> плану (код таблиці; шлях <c>SHEET.TABLE</c>).</summary>
+    private static List<(string Sheet, string From, string To)> TableCodeRenames(VersionMigrationPlan plan)
+        => plan.Items
+            .Where(i => i.Kind == "Renamed" && i.Field == "Code" && i.OldValue is not null && i.NewValue is not null
+                        && i.Path.Count(c => c == '.') == 1)
+            .Select(i => (Sheet: i.Path[..i.Path.IndexOf('.', StringComparison.Ordinal)], From: i.OldValue!, To: i.NewValue!))
+            .Distinct()
+            .ToList();
+
+    /// <summary>Передачі проєкту, яких торкається мапа: аркуш і таблиця з мапи, період — від «з місяця» або будь-який.</summary>
+    private IQueryable<Domain.Entities.Documents.EditAssignment> RenamedAssignmentsQuery(
+        int projectId, List<(string Sheet, string From, string To)> renames, int fromPeriod)
+    {
+        var sheetCodes = renames.Select(r => r.Sheet).Distinct().ToList();
+        var fromCodes = renames.Select(r => r.From).Distinct().ToList();
+        return db.EditAssignments
+            .Where(a => a.SheetCode != null && sheetCodes.Contains(a.SheetCode)
+                        && a.TableCode != null && fromCodes.Contains(a.TableCode)
+                        && (a.PeriodKeyValue == null || a.PeriodKeyValue >= fromPeriod)
+                        && db.Documents.Any(d => d.Id == a.DocumentId && d.ProjectId == projectId));
+    }
+
+    /// <summary>Новий код таблиці для точної пари «аркуш + таблиця»; <c>null</c> — пари в мапі немає.</summary>
+    private static string? RenameTargetOf(List<(string Sheet, string From, string To)> renames, string? sheetCode, string? tableCode)
+        => renames.FirstOrDefault(r =>
+            string.Equals(r.Sheet, sheetCode, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(r.From, tableCode, StringComparison.OrdinalIgnoreCase)).To;
 
     /// <summary>Відбиток мапи переносу (колонки, рядки, таблиці, аркуші, шапка, нові рядки, Lookup) - для звірки при відновленні.</summary>
     private static string PlanHash(VersionMigrationPlan plan)
