@@ -2074,7 +2074,6 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'workflow.approved',               N'en', N'The sheet has been approved.', 1),
     (N'workflow.rejected',               N'en', N'The sheet has been returned to the author.', 1),
     (N'workflow.reopened',               N'en', N'The sheet is editable again.', 1),
-    (N'workflow.recalcQueued',           N'en', N'Recalculation queued as job {job}.', 1),
     (N'workflow.recalcSkipsSubmitted',   N'en', N'Submitted and approved sheets are skipped.', 1),
 
     -- ⛔ Відгук на «Перерахувати» (директива №09 `W8` п.7). Доти було рівно
