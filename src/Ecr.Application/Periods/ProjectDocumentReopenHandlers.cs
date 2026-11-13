@@ -75,7 +75,11 @@ public sealed class CloseDocumentPeriodReopenHandler(
     IUnitOfWork uow,
     IAuditWriter audit,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+
+    // ✎ D-2 (аудит 2026-11): замок рядка періоду, той самий, що бере повернення аркуша (ClosedPeriodGuard);
+    // `null` — тестові фабрики без сховища процесу (без замка, як доти).
+    IWorkflowStore? workflow = null)
 {
     /// <summary>Закриває виняток документа за місяць.</summary>
     /// <param name="documentId">Документ.</param>
@@ -96,6 +100,15 @@ public sealed class CloseDocumentPeriodReopenHandler(
 
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            // ⛔ D-2: той самий UPDLOCK на doc.Period, що бере повернення аркуша (ClosedPeriodGuard): закриття винятку
+            // чекає Recall/Reopen, що вже його перевірили, а наступний бачить виняток закритим. Без рядка періоду
+            // `LockPeriodAsync` кидає NotFound — закриття лишається 204-no-op, тож замок лише коли місяць є.
+            if (workflow is not null && facts.PeriodState is not null)
+            {
+                _ = await workflow.LockPeriodAsync(documentId, new Ecr.Domain.ValueObjects.PeriodKey(periodKey), innerCt)
+                    .ConfigureAwait(false);
+            }
+
             var open = await store.FindOpenAsync(documentId, periodKey, innerCt).ConfigureAwait(false);
             if (open is null)
             {

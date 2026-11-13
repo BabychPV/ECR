@@ -110,17 +110,7 @@ public sealed class ReopenDocumentHandler(
                                           .ConfigureAwait(false);
         if (!reopenDecision.IsAllowed)
         {
-            throw new AccessDeniedException(
-                "ECR-ACCS-0403",
-                $"Повернення аркуша {sheetDefId} у роботу відхилено: {reopenDecision.Reason}.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-ACCS-0403.reopenDenied",
-                    ["sheetDefId"] = sheetDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["reason"] = reopenDecision.Reason.ToString(),
-                    // PM-PASS-A-P3 п.7a: ключ каталогу, як у Approve/Submit - `detail` локалізується, а не сире ім'я enum.
-                    ["reasonKey"] = $"deny.{reopenDecision.Reason}",
-                });
+            throw ReopenDenied(sheetDefId, reopenDecision);
         }
 
         // ⛔ Блокування періоду, перевірка стану і запис — В ОДНІЙ транзакції
@@ -145,6 +135,18 @@ public sealed class ReopenDocumentHandler(
             var state = await workflow
                 .GetOrCreateOfAsync(documentId, sheetDefId, key, sheetCopyId, innerCt)
                 .ConfigureAwait(false);
+
+            // ⛔ C-8 (аудит 2026-11; як R5-W1 / W1-05 у Approve): роль кроку (P2-4/D-454) — ПІСЛЯ читання стану, у
+            // тій самій транзакції. Рішення до транзакції лишається швидкою відмовою, але між ним і читанням стану
+            // інший погоджувач міг закомітити крок N → N+1; тоді повернення в роботу роллю кроку N скасувало б
+            // чужий підпис. Коміт до читання — рішення бачить новий крок і відмовляє; після — RowVersion (409).
+            var inner = await access.CanReopenOfAsync(profile, documentId, sheetDefId, key, sheetCopyId, innerCt)
+                .ConfigureAwait(false);
+            if (!inner.IsAllowed)
+            {
+                throw ReopenDenied(sheetDefId, inner);
+            }
+
             var fromStatus = state.Status;
             var now = clock.UtcNow;
             state.Reopen(userId, reason, now);
@@ -189,4 +191,18 @@ public sealed class ReopenDocumentHandler(
                 .ConfigureAwait(false);
         }
     }
+
+    /// <summary>Відмова рішення про повернення — та сама до транзакції й у ній (C-8).</summary>
+    private static AccessDeniedException ReopenDenied(int sheetDefId, EditDecision decision)
+        => new AccessDeniedException(
+            "ECR-ACCS-0403",
+            $"Повернення аркуша {sheetDefId} у роботу відхилено: {decision.Reason}.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-ACCS-0403.reopenDenied",
+                ["sheetDefId"] = sheetDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["reason"] = decision.Reason.ToString(),
+                // PM-PASS-A-P3 п.7a: ключ каталогу, як у Approve/Submit - `detail` локалізується, а не сире ім'я enum.
+                ["reasonKey"] = $"deny.{decision.Reason}",
+            });
 }

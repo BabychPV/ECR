@@ -191,6 +191,11 @@ public sealed class SimulationAwareAccessDecisionService(
         => inner.CanApproveAsync(profile, documentId, sheetDefId, periodKey, ct);
 
     /// <inheritdoc />
+    public Task<bool> HasSubmitGrantAsync(
+        AccessProfile profile, long documentId, int sheetDefId, PeriodKey periodKey, long? sheetCopyId, CancellationToken ct)
+        => inner.HasSubmitGrantAsync(profile, documentId, sheetDefId, periodKey, sheetCopyId, ct);
+
+    /// <inheritdoc />
     public Task<EditDecision> CanReopenAsync(
         AccessProfile profile, long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
         => inner.CanReopenAsync(profile, documentId, sheetDefId, periodKey, ct);

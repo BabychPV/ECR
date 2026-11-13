@@ -98,7 +98,10 @@ public sealed class OpenDocumentPeriodReopenHandler(
     IUnitOfWork uow,
     IAuditWriter audit,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+
+    // ✎ D-2 (аудит 2026-11): замок рядка періоду (як ClosedPeriodGuard); `null` — тестові фабрики (без замка, як доти).
+    IWorkflowStore? workflow = null)
 {
     /// <summary>Право дії — те саме, що відкриває період цілком.</summary>
     public const string Permission = ReopenPeriodHandler.Permission;
@@ -159,6 +162,15 @@ public sealed class OpenDocumentPeriodReopenHandler(
 
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            // ⛔ D-2: UPDLOCK на рядку періоду ПЕРШИМ — серіалізує заміну винятку з паралельним відкриттям (інакше обидва
+            // бачать FindOpenAsync == null, другий падає на UQ_DocumentPeriodReopen_Active → 500) і з поверненням аркуша.
+            // Період тут існує: DenialOf уже відхилив PeriodMissing.
+            if (workflow is not null)
+            {
+                _ = await workflow.LockPeriodAsync(documentId, new Ecr.Domain.ValueObjects.PeriodKey(periodKey), innerCt)
+                    .ConfigureAwait(false);
+            }
+
             // ⚠ Унікальний фільтрований індекс тримає «один незакритий на документ × місяць»: попередній закривається
             // ОКРЕМИМ збереженням до вставки нового, інакше порядок команд пакета міг би зіткнутися з індексом.
             var previous = await store.FindOpenAsync(documentId, periodKey, innerCt).ConfigureAwait(false);

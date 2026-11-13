@@ -184,6 +184,23 @@ public sealed partial class WorkflowTransactionTests
         access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
               .Returns(EditDecision.Allow());
 
+        // ✎ C-7: повноваження подання вирішує служба (повний контекст — у AccessDecisionService, його тести —
+        // RecallScopedGrantTests); тут — те саме правило D-285 над проєктом, предмет цього файлу — авторство й стан.
+        access.HasSubmitGrantAsync(
+                  Arg.Any<AccessProfile>(), world.DocumentId, Arg.Any<int>(), Arg.Any<Ecr.Domain.ValueObjects.PeriodKey>(),
+                  Arg.Any<long?>(), Arg.Any<CancellationToken>())
+              .Returns(call =>
+              {
+                  var profile = call.ArgAt<AccessProfile>(0);
+                  return !profile.IsSimulation
+                         && EditRules.MeetsSubmit(
+                             profile,
+                             world.ProjectId,
+                             EditRules.Effective(
+                                 profile,
+                                 new CellAccessContext { ProjectId = world.ProjectId, SheetDefId = call.ArgAt<int>(2) }));
+              });
+
         var user = Substitute.For<ICurrentUser>();
         user.UserId.Returns(userId);
 

@@ -54,7 +54,11 @@ public sealed class ListDocumentVersionsHandler(
     GetDocumentHandler getDocument,
     IDocumentVersionStore versions,
     Security.IAccessDecisionService access,
-    Common.ICurrentUser currentUser)
+    Common.ICurrentUser currentUser,
+
+    // ✎ V-2: переклад аркуша зрізу, знятого до переносу проєкту; `null` — тестові фабрики (переклад вимкнено).
+    IMetadataCache? metadata = null,
+    IDocumentStore? documents = null)
 {
     /// <summary>Право — те саме, що й перегляд документа.</summary>
     public const string Permission = ListDocumentsHandler.Permission;
@@ -78,12 +82,33 @@ public sealed class ListDocumentVersionsHandler(
         var readable = (await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false)).InPeriod(key);
 
         var list = await versions.ListAsync(documentId, key, MaxVersions, ct).ConfigureAwait(false);
-        return list
-            .Where(v => readable.CanReadSheet(v.SheetDefId))
-            .Select(v => new DocumentVersionDto(
-                v.Id, v.SheetDefId, v.PeriodKey, v.SubmittedAt,
-                v.SubmittedByDisplayName ?? "#" + v.SubmittedByUserId.ToString(CultureInfo.InvariantCulture)))
-            .ToList();
+
+        // ⛔ V-2 (аудит 2026-11): зріз до переносу проєкту — на аркуші СТАРОЇ версії; межі читання й клієнт знають
+        // аркуші поточної. Переклад за кодом аркуша; знімки — з кешу (одна-дві версії на перелік).
+        var currentVersionId = metadata is null || documents is null
+            ? 0
+            : await DocumentPeriodVersion.GetAsync(documents, documentId, key.Value, ct).ConfigureAwait(false);
+        var current = currentVersionId == 0 ? null : await metadata!.GetAsync(currentVersionId, ct).ConfigureAwait(false);
+
+        var result = new List<DocumentVersionDto>(list.Count);
+        foreach (var v in list)
+        {
+            var sheet = v.SheetDefId;
+            if (current is not null && v.TemplateVersionId > 0 && v.TemplateVersionId != currentVersionId)
+            {
+                var source = await metadata!.GetAsync(v.TemplateVersionId, ct).ConfigureAwait(false);
+                sheet = SubmissionSnapshotTranslation.Sheet(v.SheetDefId, source, current) ?? v.SheetDefId;
+            }
+
+            if (readable.CanReadSheet(sheet))
+            {
+                result.Add(new DocumentVersionDto(
+                    v.Id, sheet, v.PeriodKey, v.SubmittedAt,
+                    v.SubmittedByDisplayName ?? "#" + v.SubmittedByUserId.ToString(CultureInfo.InvariantCulture)));
+            }
+        }
+
+        return result;
     }
 }
 
@@ -148,8 +173,8 @@ public sealed class CompareDocumentVersionsHandler(
                 throw Invalid("err.ECR-DOC-0422.comparePeriods", "Версії належать різним періодам.");
             }
 
-            newerCells = SubmissionPayload.Read(newer.PayloadJson);
-            newerHeader = SubmissionPayload.ReadHeader(newer.PayloadJson);
+            newerCells = newer.Cells;
+            newerHeader = newer.Header;
         }
         else
         {
@@ -170,8 +195,8 @@ public sealed class CompareDocumentVersionsHandler(
 
         return await DiffAsync(
             documentId, key, from, toId, columnScope, ownerBlocked,
-            SubmissionPayload.Read(older.PayloadJson), newerCells,
-            SubmissionPayload.ReadHeader(older.PayloadJson), newerHeader,
+            older.Cells, newerCells,
+            older.Header, newerHeader,
             ct).ConfigureAwait(false);
     }
 
@@ -349,25 +374,47 @@ public sealed class CompareDocumentVersionsHandler(
     /// ⛔ L1-18 (R-2): версія аркуша, закритого від читача, — той самий 404, що й неіснуюча
     /// (інакше `from`/`to` був би оракулом існування id). Перевірка — ДО будь-якого читання вмісту.
     /// </remarks>
-    private async Task<DocumentVersionPayload> LoadAsync(
+    private async Task<LoadedVersion> LoadAsync(
         long documentId, long versionId, Security.DocumentReadScope readable, CancellationToken ct)
     {
         var found = await versions.FindAsync(documentId, versionId, ct).ConfigureAwait(false);
-        if (found is null || !readable.InPeriod(new PeriodKey(found.PeriodKey)).CanReadSheet(found.SheetDefId))
+        if (found is not null)
         {
-            throw new NotFoundException(
-                "ECR-DOC-0404",
-                $"Версії {versionId} документа {documentId} немає.",
-                new Dictionary<string, object?>(StringComparer.Ordinal)
-                {
-                    ["messageKey"] = "err.ECR-DOC-0404.version",
-                    ["versionId"] = versionId.ToString(CultureInfo.InvariantCulture),
-                    ["documentId"] = documentId.ToString(CultureInfo.InvariantCulture),
-                });
+            // ⛔ V-2 (аудит 2026-11): зріз до переносу проєкту — на аркуші й колонках СТАРОЇ версії; межі читання й
+            // живі дані — на версії документа в періоді. Переклад за кодами, інакше старі Id «невидимі» (порівняння
+            // мовчить про зміни або показує кожну комірку як нову).
+            var currentVersionId = await DocumentPeriodVersion.GetAsync(documents, documentId, found.PeriodKey, ct)
+                .ConfigureAwait(false);
+            var current = await metadata.GetAsync(currentVersionId, ct).ConfigureAwait(false);
+            var source = found.TemplateVersionId > 0 && found.TemplateVersionId != currentVersionId
+                ? await metadata.GetAsync(found.TemplateVersionId, ct).ConfigureAwait(false)
+                : current;
+            var sheetDefId = SubmissionSnapshotTranslation.Sheet(found.SheetDefId, source, current) ?? found.SheetDefId;
+            if (readable.InPeriod(new PeriodKey(found.PeriodKey)).CanReadSheet(sheetDefId))
+            {
+                return new LoadedVersion(
+                    found.PeriodKey,
+                    SubmissionSnapshotTranslation.Cells(SubmissionPayload.Read(found.PayloadJson), source, current),
+                    SubmissionPayload.ReadHeader(found.PayloadJson));
+            }
         }
 
-        return found;
+        throw new NotFoundException(
+            "ECR-DOC-0404",
+            $"Версії {versionId} документа {documentId} немає.",
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["messageKey"] = "err.ECR-DOC-0404.version",
+                ["versionId"] = versionId.ToString(CultureInfo.InvariantCulture),
+                ["documentId"] = documentId.ToString(CultureInfo.InvariantCulture),
+            });
     }
+
+    /// <summary>V-2: зріз, перекладений на версію документа в його періоді (колонки й аркуш — за кодами).</summary>
+    private sealed record LoadedVersion(
+        int PeriodKey,
+        IReadOnlyList<SubmissionPayloadCell> Cells,
+        IReadOnlyDictionary<string, SubmissionPayloadHeaderValue> Header);
 
     private static BusinessRuleException Invalid(string messageKey, string message)
         => new("ECR-DOC-0422", message, new Dictionary<string, object?>(StringComparer.Ordinal) { ["messageKey"] = messageKey });

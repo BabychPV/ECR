@@ -2791,6 +2791,31 @@ public sealed class AccessDecisionService(
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ C-7 (аудит 2026-11): те саме збагачення умов, що в <see cref="CanSubmitCoreAsync"/> (код аркуша, участь,
+    /// період з <see cref="BuildContextAsync"/>), але без стану аркуша — відкликається поданий аркуш. Вікно доступу
+    /// не рахується: відкликання не пише даних (як і доти).
+    /// </remarks>
+    public async Task<bool> HasSubmitGrantAsync(
+        AccessProfile profile, long documentId, int sheetDefId, PeriodKey periodKey, long? sheetCopyId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        if (profile.IsSimulation)
+        {
+            return false;
+        }
+
+        var context = await BuildContextAsync(
+                documentId, periodKey, sheetDefId, columnDefId: 0, evaluateAccessWindow: false, ct, sheetCopyId)
+            .ConfigureAwait(false);
+        context = await WithSheetCodeAsync(profile, documentId, context, ct).ConfigureAwait(false);
+        context = await WithParticipationAsync(profile, documentId, context, ct).ConfigureAwait(false);
+
+        return EditRules.MeetsSubmit(
+            profile, context.ProjectId, EditRules.Effective(profile, context with { TableDefId = 0, ColumnDefId = 0 }));
+    }
+
+    /// <inheritdoc />
     public Task<EditDecision> CanApproveAsync(
         AccessProfile profile, long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
         => CanApproveCoreAsync(profile, documentId, sheetDefId, periodKey, null, ct);
