@@ -66,11 +66,15 @@ test.describe('FLERT: «Синхронізувати зараз» і стан с
         { timeout: 120_000 },
       )
       .toBe(true);
-    // ⚠ Без урахування регістру: після P3 #841 (c) прогін при вимкненому синку — «skipped — sync is off», без окремого
-    // рядка «Sync is off — nothing was read.»; про вимкнений синк каже «Daily sync is off …».
-    await expect(panel).toContainText(/sync is off|синхронизация выключена|синхрондау өшірулі/i, { timeout: 30_000 });
     // P3 F13 #841 (c): прогін при вимкненому синку — «пропущено», а не «succeeded» поруч із «Sync is off».
-    await expect(panel).toContainText(/skipped — sync is off|пропущена — синхронизация выключена|өткізіп жіберілді/);
+    // ⛔ B76: саме ЦЕЙ рядок чекає, поки смуга перечитає стан. Сервер закінчує прогін за 1–3 с, а смуга опитує раз на
+    // FlertSyncPollMs (5 с); загальне «sync is off» збігалося одразу з рядком «Daily sync is off …», тож його 30 с
+    // нічого не чекали, а тут лишалося типові 5 с — і на завантаженому раннері смуга ще показувала «Not synchronized yet».
+    await expect(panel).toContainText(/skipped — sync is off|пропущена — синхронизация выключена|өткізіп жіберілді/, {
+      timeout: 30_000,
+    });
+    // Про вимкнений щоденний синк — окремий рядок «Daily sync is off …» (без урахування регістру).
+    await expect(panel).toContainText(/sync is off|синхронизация выключена|синхрондау өшірулі/i);
     await expect(panel).not.toContainText(/succeeded|успешно|сәтті/);
   });
 
