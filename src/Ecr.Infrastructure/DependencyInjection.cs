@@ -185,7 +185,11 @@ public static class DependencyInjection
         services.AddScoped<IMethodologyVersionDeletionStore, MethodologyVersionDeletionStore>();
         services.AddScoped<ITemplateVersionDiscardStore, TemplateVersionDiscardStore>();
         services.AddScoped<IConstantStore, ConstantStore>();
+        services.AddSingleton<CalculationYearResultsCache>(); // CRY03: власне сховище зі стелею, сирі факти до звуження
         services.AddScoped<ICalculationResultStore, CalculationResultStore>();
+
+        // CALC-RESULTS: огляд року читає той самий екземпляр сховища (правило актуального прогону — одне).
+        services.AddScoped<ICalculationYearReader>(sp => (CalculationResultStore)sp.GetRequiredService<ICalculationResultStore>());
         services.AddScoped<ICalculationIssueStore, CalculationIssueStore>();
         services.AddScoped<IFormulaErrorStore, FormulaErrorStore>(); // ✎ C-1: стан помилок формул
         services.AddScoped<ICalculationBindingStore, CalculationBindingStore>();

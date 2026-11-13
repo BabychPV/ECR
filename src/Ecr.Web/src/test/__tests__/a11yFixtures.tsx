@@ -6,6 +6,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { act } from '@testing-library/react';
 import { mantineProviderProps } from '@/shared/theme/provider';
 import { readSeedEnCatalog } from '@/test/seedSql';
+import { yearFixtureFor } from '@/features/calcResults/__tests__/fixture';
 
 /**
  * Спільні прилади для розбитого набору перевірки доступності (`ФВ-14.16`,
@@ -913,6 +914,8 @@ export function emptyBodyFor(url: string): unknown {
     };
   }
 
+  // CALC-RESULTS: огляд року — зведення й сторінки таблиць справжньої форми (місяці, групи, обидва види виходів).
+  if (url.includes('/calculation-results/year')) return yearFixtureFor(url);
   if (url.includes('/calculation-results')) return [];
 
   // ⛔ НЕ порожній зріз — див. `DocumentSliceFixture`: порожній означав, що

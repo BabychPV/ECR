@@ -1,0 +1,177 @@
+/* «Calculation results» за рік (макет docs/design/hybrid/calc-results/screen-calc-results.js). Кольори — лише токени. */
+.ecr-cr-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  color: var(--ecr-muted);
+  font-size: 12px;
+}
+.ecr-cr-legend .ecr-cr-sw {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin-right: 4px;
+  vertical-align: middle;
+  border: 1px solid var(--ecr-border);
+  border-radius: 2px;
+}
+.ecr-cr-sw--stale { background: var(--ecr-warning-soft); }
+.ecr-cr-sw--none { background: var(--ecr-sunken); }
+.ecr-cr-sw--pick { background: var(--ecr-accent-soft); border-color: var(--ecr-accent); }
+
+.ecr-cr-wrap {
+  position: relative;
+  overflow: auto;
+  height: calc(100vh - 330px);
+  min-height: 320px;
+  background: var(--ecr-surface);
+  border: 1px solid var(--ecr-border);
+}
+.ecr-cr-wrap:focus-visible { outline: 2px solid var(--ecr-focus); outline-offset: -2px; }
+
+.ecr-cr-grid {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+  min-width: 100%;
+  color: var(--ecr-text);
+}
+.ecr-cr-grid th,
+.ecr-cr-grid td {
+  height: 32px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--ecr-grid-line);
+  border-right: 1px solid var(--ecr-grid-line);
+  white-space: nowrap;
+}
+.ecr-cr-grid thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  height: 44px;
+  background: var(--ecr-sunken);
+  font-weight: 500;
+  text-align: right;
+  border-bottom: 1px solid var(--ecr-border-strong);
+}
+.ecr-cr-grid thead th.ecr-cr-out { left: 0; z-index: 5; text-align: left; min-width: 320px; max-width: 320px; }
+.ecr-cr-grid thead th.ecr-cr-unit { left: 320px; z-index: 5; text-align: left; min-width: 84px; border-right: 1px solid var(--ecr-border-strong); }
+.ecr-cr-grid thead th.ecr-cr-m { min-width: 96px; padding: 0; }
+.ecr-cr-grid thead th.ecr-cr-m--stale { background: var(--ecr-warning-soft); }
+.ecr-cr-grid thead th.ecr-cr-m--pick { background: var(--ecr-accent-soft); box-shadow: inset 0 -2px 0 var(--ecr-accent); }
+.ecr-cr-mh {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 2px;
+  width: 100%;
+  height: 100%;
+  padding: 0 8px;
+  border: 0;
+  background: transparent;
+  color: var(--ecr-text);
+  font: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+.ecr-cr-mh:hover { background: var(--ecr-hover); }
+.ecr-cr-mh:focus-visible { outline: 2px solid var(--ecr-focus); outline-offset: -2px; }
+.ecr-cr-mh small { font-size: 11px; font-weight: 400; color: var(--ecr-muted); }
+.ecr-cr-m--stale .ecr-cr-mh small { color: var(--ecr-warning); }
+.ecr-cr-grid thead th.ecr-cr-tot { min-width: 130px; border-left: 1px solid var(--ecr-border-strong); }
+.ecr-cr-grid thead th small { display: block; font-size: 11px; font-weight: 400; color: var(--ecr-muted); }
+
+.ecr-cr-grid tbody th {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  min-width: 320px;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: var(--ecr-surface);
+  text-align: left;
+  font-weight: 400;
+}
+.ecr-cr-grid tbody td.ecr-cr-unit {
+  position: sticky;
+  left: 320px;
+  z-index: 2;
+  min-width: 84px;
+  background: var(--ecr-surface);
+  color: var(--ecr-muted);
+  border-right: 1px solid var(--ecr-border-strong);
+}
+.ecr-cr-band th { background: var(--ecr-sunken) !important; max-width: none !important; overflow: visible !important; }
+.ecr-cr-band td { background: var(--ecr-sunken); border-right: 0; }
+.ecr-cr-band--0 th { font-weight: 600; }
+.ecr-cr-band--1 th { font-weight: 600; padding-left: 20px; }
+.ecr-cr-band--2 th { padding-left: 32px; }
+.ecr-cr-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ecr-text);
+  font: inherit;
+  cursor: pointer;
+}
+.ecr-cr-toggle:focus-visible { outline: 2px solid var(--ecr-focus); outline-offset: 2px; }
+.ecr-cr-toggle[aria-expanded='true'] > svg { transform: rotate(90deg); }
+.ecr-cr-code { font-family: var(--mantine-font-family-monospace); font-size: 12px; padding: 0 4px; border: 1px solid var(--ecr-border); border-radius: 4px; }
+.ecr-cr-muted { color: var(--ecr-muted); }
+.ecr-cr-out th { padding-left: 48px !important; }
+/* Рядок «ще» таблиці, сторінки якої завантажено не всі: та сама висота, що й рядок виходу (віртуалізація). */
+.ecr-cr-more th { padding-left: 48px !important; max-width: none !important; overflow: visible !important; font-weight: 400; }
+.ecr-cr-more .ecr-cr-toggle { color: var(--ecr-link, var(--ecr-text)); text-decoration: underline; }
+
+.ecr-cr-v { padding: 0 !important; text-align: right; }
+.ecr-cr-vb {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  border: 0;
+  background: transparent;
+  color: var(--ecr-text);
+  font: 400 13px/1 var(--mantine-font-family-monospace);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.ecr-cr-vb:hover { background: var(--ecr-hover); }
+.ecr-cr-vb:focus-visible { outline: 2px solid var(--ecr-focus); outline-offset: -2px; }
+.ecr-cr-v--stale { background: var(--ecr-warning-soft); }
+.ecr-cr-v--none { background: var(--ecr-sunken); color: var(--ecr-faint); }
+.ecr-cr-v--pick { box-shadow: inset 2px 0 0 var(--ecr-accent), inset -2px 0 0 var(--ecr-accent); }
+.ecr-cr-tot {
+  text-align: right;
+  font: 500 13px/1 var(--mantine-font-family-monospace);
+  font-variant-numeric: tabular-nums;
+  border-left: 1px solid var(--ecr-border-strong);
+  background: var(--ecr-cell-calculated-bg);
+}
+.ecr-cr-tot--na { color: var(--ecr-muted); font-family: inherit; font-weight: 400; }
+.ecr-cr-tot small { margin-left: 4px; color: var(--ecr-muted); font: 400 11px/1 var(--mantine-font-family); }
+.ecr-cr-tot--warn small { color: var(--ecr-warning); }
+
+.ecr-cr-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--ecr-border);
+  border-top: 0;
+  background: var(--ecr-sunken);
+  color: var(--ecr-muted);
+  font-size: 12px;
+}
+.ecr-cr-foot .ecr-cr-sp { flex: 1; }

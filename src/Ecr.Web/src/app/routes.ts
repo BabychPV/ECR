@@ -733,6 +733,17 @@ export const routes = {
       crumb: { ancestorIds: ['home'], resolveParam: 'id', resolveWith: 'documentKey', trailWith: 'documentSheet', omitGroup: true },
     },
   },
+  documentResults: {
+    id: 'document-results',
+    // CALC-RESULTS: усі розраховані числа документа за рік, місяці поруч.
+    path: '/documents/:id/results',
+    handle: {
+      labelKey: 'calcResults.title',
+      permission: 'Calculation.View',
+      numericParams: ['id'],
+      crumb: { ancestorIds: ['home', 'document-detail'], omitGroup: true },
+    },
+  },
 } as const satisfies Record<string, RouteEntry>;
 
 /** Усі записи реєстру як масив (порядок — порядок оголошення вище). */

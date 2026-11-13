@@ -1,13 +1,17 @@
 import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter } from 'react-router-dom';
 import { CalculationResultsPanel } from '@/features/methodologies/CalculationResultsPanel';
 import { testTheme } from '@/test/render';
 
 /**
- * D-401: результати двох таблиць з однаковим RowKey — два окремі рядки панелі з колонкою
- * «Таблиця» (екземпляр), а не один; NULL (результат до D-401) показується прочерком.
+ * ✎ 12.11 (живий прохід координатора): блок під аркушами друкував ГОЛИЙ ідентифікатор екземпляра таблиці (56724…) у
+ * колонці «Table» і числа трьох аркушів одним переліком. Перелік-дубль прибрано на користь огляду «усі місяці»
+ * (`/documents/:id/results`, назви аркушів і таблиць по таблицях); блок дає лічильник і перехід туди.
+ *
+ * Мутація: повернути перелік з `tableInstanceId` — перший тест червоний (ідентифікатор і число на екрані).
  */
 
 function json(body: unknown): Response {
@@ -31,47 +35,52 @@ function result(value: string, tableInstanceId: number | null): Record<string, u
   };
 }
 
-function show(rows: unknown[]): void {
+function show(rows: unknown[], inRouter: boolean): void {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input).split('?')[0] ?? '';
-
-      if (path.endsWith('/api/v1/units')) {
-        return json([{ id: 8, code: 't', nameL10n: { values: {} } }]);
-      }
-
       return path.endsWith('/calculation-results') ? json(rows) : json(null);
     }),
   );
 
-  render(
-    <MantineProvider theme={testTheme}>
-      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-        <CalculationResultsPanel documentId={19} periodKey={202609} />
-      </QueryClientProvider>
-    </MantineProvider>,
+  const panel = (
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <CalculationResultsPanel documentId={19} periodKey={202609} />
+    </QueryClientProvider>
   );
+  render(<MantineProvider theme={testTheme}>{inRouter ? <MemoryRouter>{panel}</MemoryRouter> : panel}</MantineProvider>);
 }
 
-describe('CalculationResultsPanel — екземпляр таблиці (D-401)', () => {
-  // ✎ ui-sheet-bottom: блок за замовчуванням згорнуто — ці тести перевіряють ВМІСТ, тож розгортають його вибором людини.
-beforeEach(() => {
-  window.localStorage.setItem('ecr.calcResults.collapsed', '0');
-});
-
-afterEach(() => {
-    vi.unstubAllGlobals();
+describe('CalculationResultsPanel — без переліку з ідентифікаторами таблиць (12.11)', () => {
+  // Блок за замовчуванням згорнуто — тести перевіряють ВМІСТ, тож розгортають його вибором людини.
+  beforeEach(() => {
+    window.localStorage.setItem('ecr.calcResults.collapsed', '0');
   });
 
-  it('два результати з однаковим RowKey різних таблиць — два рядки зі своєю таблицею', async () => {
-    show([result('10', 11), result('20', 12), result('5', null)]);
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    window.localStorage.clear();
+  });
 
-    await waitFor(() => expect(document.querySelectorAll('tbody tr')).toHaveLength(3));
+  it('ні ідентифікатора екземпляра, ні переліку чисел — лише лічильник і перехід до огляду року з місяцем', async () => {
+    show([result('10.5', 56724), result('20.25', 56725), result('5', null)], true);
 
-    const cells = Array.from(document.querySelectorAll('td[data-result-table]')).map((c) => c.textContent);
-    expect(cells).toEqual(['11', '12', '—']);
-    expect(screen.getByText('10')).toBeTruthy();
-    expect(screen.getByText('20')).toBeTruthy();
+    const link = await screen.findByTestId('calc-results-open-year');
+    expect(link.getAttribute('href')).toBe('/documents/19/results?year=2026&month=9');
+    expect(screen.getByTestId('calc-results-count').textContent).toBe('· 3');
+
+    const body = document.getElementById('ecr-calc-results-body')?.textContent ?? '';
+    expect(body).not.toContain('56724');
+    expect(body).not.toContain('10.5');
+    expect(document.querySelector('table')).toBeNull();
+  });
+
+  it('поза роутером (ізольована панель) — звичайне посилання на ту саму адресу', async () => {
+    show([result('1', 56724)], false);
+
+    const link = await screen.findByTestId('calc-results-open-year');
+    expect(link.tagName.toLowerCase()).toBe('a');
+    expect(link.getAttribute('href')).toBe('/documents/19/results?year=2026&month=9');
   });
 });

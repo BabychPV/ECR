@@ -83,7 +83,7 @@ describe('CalculationResultsPanel: згортання і ліниве заван
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
     expect(resultCalls).toBe(0);
     expect(screen.queryByTestId('calc-results-count')).toBeNull();
-    expect(screen.queryByText('A')).toBeNull();
+    expect(screen.queryByTestId('calc-results-open-year')).toBeNull();
   });
 
   it('розгортання — рівно один запит; лічильник береться з відповіді; вибір пам’ятається', async () => {
@@ -94,7 +94,7 @@ describe('CalculationResultsPanel: згортання і ліниве заван
     fireEvent.click(toggle);
 
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
-    expect(await screen.findByText('A')).toBeTruthy();
+    expect(await screen.findByTestId('calc-results-open-year')).toBeTruthy();
     await waitFor(() => {
       expect(screen.getByTestId('calc-results-count').textContent).toContain('2');
     });
@@ -153,7 +153,7 @@ describe('CalculationResultsPanel: згортання і ліниве заван
     mockServer([row('A')]);
     show();
 
-    expect(await screen.findByText('A')).toBeTruthy();
+    expect(await screen.findByTestId('calc-results-open-year')).toBeTruthy();
     expect(resultCalls).toBe(1);
   });
 });
