@@ -559,7 +559,8 @@ LandHse400CompositionRegistryTests (Infrastructure, реальний SQL).
   довідник `LAND_NAE_GROUP` (ключ `NAE_NORMALIZED`, поля `POWER_GROUP` Decimal і `CATEGORY1`). Записи ГЕНЕРУЮТЬСЯ з C#
   (`model-gen/extract_nae_groups.py <docs/source> af-land-nae-groups.json`, далі `run-model-gen.ps1`); прод не читається.
   Міст: `REGFIELD(REGFIND('LAND_NAE_GROUP', [<колонка NAE>]), 'POWER_GROUP' | 'CATEGORY1')`; немає запису -> `#N/A` ->
-  рядок без результату (стара: «Error Power value» / «Error category1 - NAE», `continue`). Нормалізація NAE: у `C11_11_02`
+  рядок без результату (стара: «Error Power value» / «Error category1 - NAE», `continue`). ✎ B88 (людина 13.11): Category1 -
+  `REGFIELD(IFERROR(REGFIND(...), NULL), 'CATEGORY1')`, NAE поза групами - порожньо без помилки. Нормалізація NAE: у `C11_11_02`
   пробіли знімаються, у `C11_03` - ні; діалект шаблонів не має заміни тексту, тому для Category1 є обидва написання
   (`0788(001)` і `0788 (001)`), а краї й послідовності пробілів знімає сам REGFIND. Довідник на наявних стендах заводить
   `Import-LandNaeGroup.ps1` (`-DryRun`, `-ConfirmStand`; повтор - 0 змін), на свіжих - `-Stage Registries`.
