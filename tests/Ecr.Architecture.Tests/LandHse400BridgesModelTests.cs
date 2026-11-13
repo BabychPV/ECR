@@ -163,9 +163,12 @@ public sealed class LandHse400BridgesModelTests
             var c = cols[arg];
             Assert.Equal("Formula", c.GetProperty("dataType").GetString());
             Assert.True(c.GetProperty("readOnly").GetBoolean(), arg);
+            // B89 (рішення людини 13.11): рідке паливо (поза словником потоків) - порожньо без #N/A; перехоплено лише
+            // промах словника потоків, назва Lookup обчислюється поза IFERROR (охорона), склад газу без запису - #N/A.
             Assert.Equal(
-                "REGFIELD(REGFIND('LAND_HSE400_COMPOSITION', [Period].Year, [Period].Sequence, "
-                + "REGFIELD(REGFIND('LAND_HSE400_STREAM', REGFIELD([Land_TypeFuel], 'NAME')), 'PREFIX'), '"
+                "REGFIELD([Land_TypeFuel], 'NAME') = NULL ? NULL : "
+                + "REGFIELD(REGFIND('LAND_HSE400_COMPOSITION', [Period].Year, [Period].Sequence, "
+                + "REGFIELD(IFERROR(REGFIND('LAND_HSE400_STREAM', REGFIELD([Land_TypeFuel], 'NAME')), NULL), 'PREFIX'), '"
                 + indicator + "'), 'VALUE')",
                 c.GetProperty("expression").GetString());
             Assert.Equal(34, c.GetProperty("precision").GetInt32());
@@ -180,6 +183,13 @@ public sealed class LandHse400BridgesModelTests
         Assert.Equal(
             "Land_TypeFuel",
             bridges.GetProperty("hse400").GetProperty("streamSourceColumn").GetProperty("T3_00").GetString());
+
+        // B89: список рідкого палива, для якого клітинки «не застосовується», записаний у моделі (генератор його звіряє).
+        var na = bridges.GetProperty("hse400").GetProperty("existingInputBridges").GetProperty("T3_00").GetProperty("notApplicable");
+        Assert.Equal("LAND_STATIONARY_TYPE_OF_FUEL", na.GetProperty("fuelRegistry").GetString());
+        Assert.Equal(
+            ["DIESEL", "GASOLINE", "KEROSENEJETFUEL"],
+            na.GetProperty("liquidFuels").EnumerateArray().Select(x => x.GetString()!).ToArray());
     }
 
     [Fact]
