@@ -1014,6 +1014,34 @@ public sealed class ArchiveProjectHandler(
         // перевірка вище його не бачила, а виняток далі піднімав місяць до Grace для перерахунку й Recall в АРХІВОВАНОМУ
         // проєкті. Відмова, а не тихе закриття винятків: їх відкрили свідомо (з причиною) під виправлення даних, і
         // архівація посеред виправлення — рішення людини, яка спершу закриває винятки чи чекає їхнього строку.
+        //
+        // ⛔ B81 (G3, F13 #877): перелік винятків і позначка Archived — в ОДНІЙ транзакції під UPDLOCK рядків періодів
+        // проєкту. Відкриття винятку (`OpenDocumentPeriodReopenHandler`) бере той самий замок рядка свого періоду і вже
+        // під ним перечитує стан проєкту, тож дві дії серіалізуються: або виняток закомічено до переліку (і архівація
+        // відмовляє), або Archived закомічено до перечитування (і відмовляє відкриття). Без замка перелік, знятий до
+        // коміту паралельного відкриття, пропускав виняток, і той переживав архівацію.
+        await uow.ExecuteInTransactionAsync(async innerCt =>
+        {
+            // ⚠ Порядок замків — за Id: дві архівації одного проєкту не зустрічаються навхрест.
+            foreach (var period in project.Periods.OrderBy(p => p.Id))
+            {
+                _ = await periods.LockAsync(period.Id, innerCt).ConfigureAwait(false);
+            }
+
+            await RefuseActiveDocumentReopensAsync(projectId, now, innerCt).ConfigureAwait(false);
+
+            project.Archive(now);
+
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>B69 (G1): діючі винятки документів проєкту — відмова з переліком місяців.</summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="now">Момент.</param>
+    /// <param name="ct">Скасування.</param>
+    private async Task RefuseActiveDocumentReopensAsync(int projectId, DateTime now, CancellationToken ct)
+    {
         if (documentReopens is not null)
         {
             var reopens = await documentReopens.ListActiveForProjectAsync(projectId, now, ct).ConfigureAwait(false);
@@ -1036,10 +1064,6 @@ public sealed class ArchiveProjectHandler(
                     });
             }
         }
-
-        project.Archive(now);
-
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 }
 
