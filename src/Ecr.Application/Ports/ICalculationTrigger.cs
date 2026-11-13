@@ -49,7 +49,7 @@ public interface ICalculationTrigger
     /// <param name="ct">Токен скасування.</param>
     /// <returns>
     /// Ідентифікатор поставленої задачі; <c>null</c> — задачу не поставлено: період
-    /// не знайдено, він ще <c>Scheduled</c>, закритий або затверджено всі аркуші.
+    /// не знайдено, він ще <c>Scheduled</c>, закритий, проєкт архівований (B97) або затверджено всі аркуші.
     /// </returns>
     public Task<string?> RequestAsync(long documentId, PeriodKey periodKey, CancellationToken ct);
 
@@ -61,7 +61,8 @@ public interface ICalculationTrigger
     /// <param name="periodKey">Період.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>
-    /// Ідентифікатор задачі; <c>null</c> — період не знайдено, <c>Scheduled</c>, закритий або затверджено всі аркуші.
+    /// Ідентифікатор задачі; <c>null</c> — період не знайдено, <c>Scheduled</c>, закритий, проєкт архівований (B97)
+    /// або затверджено всі аркуші.
     /// </returns>
     /// <remarks>Типова реалізація — як <see cref="RequestAsync"/> (для фейків тестів); справжня — <c>CalculationTrigger</c>.</remarks>
     public Task<string?> RequestDependentsAsync(long documentId, PeriodKey periodKey, CancellationToken ct)

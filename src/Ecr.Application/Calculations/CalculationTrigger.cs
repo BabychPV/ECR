@@ -124,18 +124,29 @@ public sealed class CalculationTrigger(
             $"{RecalculateDocumentHandler.TargetOf(documentId, periodKey)}-auto");
 
     /// <summary>
-    /// Чи є що перераховувати без людини: період відомий, не <c>Scheduled</c> і не закритий, і хоч один аркуш складу
-    /// (оригінал чи копія) ще не затверджений.
+    /// Чи є що перераховувати без людини: період відомий, не <c>Scheduled</c> і не закритий, проєкт не архівований і не
+    /// архівується, і хоч один аркуш складу (оригінал чи копія) ще не затверджений.
     /// </summary>
     /// <remarks>
     /// ⛔ Тут правило не гейт (гейт — у <c>RecalculationJob</c>), а відмова ставити задачу, яка однаково відмовила б:
-    /// інакше кожен пізній збір за закритий період лишав би в журналі задач провалений перерахунок.
+    /// інакше кожен пізній збір за закритий період чи в архівованому проєкті лишав би в журналі задач провалений
+    /// перерахунок.
+    /// <para>
+    /// ⛔ B97: архівований (чи той, що архівується) проєкт — та сама перевірка B69, що в кнопки
+    /// (<c>RecalculateDocumentHandler</c>) і в задачі: виняток «місяць відкрито для документа», що пережив архівацію,
+    /// піднімає закритий місяць до <c>Grace</c>, тож самого стану періоду не досить.
+    /// </para>
     /// </remarks>
     private async Task<bool> WritableAsync(long documentId, PeriodKey periodKey, CancellationToken ct)
     {
         var state = await periods.FindPeriodStateAsync(documentId, periodKey.Value, ct).ConfigureAwait(false);
         if (state is not { } periodState || periodState == PeriodState.Scheduled
             || RecalculationWritePolicy.Check(periodState, hasSubmittedSheets: false) != RecalculationWriteDenial.None)
+        {
+            return false;
+        }
+
+        if (await periods.IsDocumentProjectArchivedOrArchivingAsync(documentId, ct).ConfigureAwait(false))
         {
             return false;
         }

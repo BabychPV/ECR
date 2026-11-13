@@ -266,6 +266,35 @@ public sealed class CalculationTriggerTests
         Assert.Equal(expectQueued, jobId is not null);
     }
 
+    /// <summary>
+    /// ⛔ B97 (F13 batch-5): документ АРХІВОВАНОГО (чи того, що архівується) проєкту не ставиться ні автоперерахунком
+    /// збору, ні перерахунком залежних — навіть коли виняток «місяць відкрито для документа» тримає період у
+    /// <c>Grace</c>. Доти задача ставилась і відмовлялась уже в <c>RecalculationJob</c> (B69).
+    /// </summary>
+    /// <remarks>⛔ ДОКАЗ (локально): прибрати перевірку <c>IsDocumentProjectArchivedOrArchivingAsync</c> у тригері — задачу поставлено, червоний.</remarks>
+    [Theory]
+    [InlineData(false, PeriodState.Open)]
+    [InlineData(false, PeriodState.Grace)]
+    [InlineData(true, PeriodState.Open)]
+    [InlineData(true, PeriodState.Grace)]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "B97")]
+    public async Task Архівований_проєкт_нуль_задач(bool dependents, PeriodState state)
+    {
+        State(state);
+        Sheets(Draft(1));
+        _periods.IsDocumentProjectArchivedOrArchivingAsync(DocumentId, Arg.Any<CancellationToken>()).Returns(true);
+
+        var trigger = Trigger();
+        var jobId = dependents
+            ? await trigger.RequestDependentsAsync(DocumentId, Period, CancellationToken.None)
+            : await trigger.RequestAsync(DocumentId, Period, CancellationToken.None);
+
+        Assert.Null(jobId);
+        await _jobs.DidNotReceiveWithAnyArgs().EnqueueCoalescedAsync<IRecalculationJob>(
+            default!, default, default, default);
+    }
+
     [Theory]
     [InlineData(PeriodState.Closed)]
     [InlineData(PeriodState.Scheduled)]
