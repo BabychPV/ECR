@@ -1394,13 +1394,24 @@ public sealed class MigrateDocumentVersionHandler(
         return new RangeInfo(effective <= periodKeys[0] ? 0 : effective, effective, warnings);
     }
 
-    private static IReadOnlyList<(int FromColumnDefId, int ToColumnDefId)> RenamePairs(
+    /// <summary>
+    /// RPT-STABLE Part B + R-2: пари «колонка → колонка» для <c>cfg.ColumnRename</c>: змінився код КОЛОНКИ або код ТАБЛИЦІ
+    /// (таблицю перейменовано мапою) — тоді й колонки з тим самим кодом, щоб стабільна вʼюха й міжперіодні формули знайшли
+    /// відповідник.
+    /// </summary>
+    internal static IReadOnlyList<(int FromColumnDefId, int ToColumnDefId)> RenamePairs(
         VersionMigrationPlan plan, TemplateVersionSnapshot from, TemplateVersionSnapshot to)
-        => [.. plan.Columns
+    {
+        var fromTables = from.Sheets.SelectMany(s => s.Tables).ToDictionary(t => t.Id, t => t.Code);
+        var toTables = to.Sheets.SelectMany(s => s.Tables).ToDictionary(t => t.Id, t => t.Code);
+        return [.. plan.Columns
             .Where(c => from.ColumnsById.TryGetValue(c.SourceColumnDefId, out var f)
                         && to.ColumnsById.TryGetValue(c.TargetColumnDefId, out var t)
-                        && !string.Equals(f.Code, t.Code, StringComparison.Ordinal))
+                        && (!string.Equals(f.Code, t.Code, StringComparison.Ordinal)
+                            || (fromTables.TryGetValue(f.TableDefId, out var ft) && toTables.TryGetValue(t.TableDefId, out var tt)
+                                && !string.Equals(ft, tt, StringComparison.Ordinal))))
             .Select(c => (c.SourceColumnDefId, c.TargetColumnDefId))];
+    }
 
     /// <summary>RPT-STABLE B2: позначки ручних значень лише в періодах, які перенос зачіпає (0 - усі).</summary>
     private static IReadOnlyList<ProjectFormulaOverride> InScope(IReadOnlyList<ProjectFormulaOverride> marks, int fromPeriodKey)

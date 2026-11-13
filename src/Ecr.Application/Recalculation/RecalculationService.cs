@@ -2185,6 +2185,15 @@ public sealed class RecalculationService(
                 .Where(s => !s.IsDeleted && string.Equals(s.Code, source.Sheet.Code, StringComparison.Ordinal))
                 .SelectMany(s => s.Tables)
                 .FirstOrDefault(t => !t.IsDeleted && string.Equals(t.Code, source.Table.Code, StringComparison.Ordinal));
+
+            // R-2: таблицю перейменовано переносом — відповідник за збереженою мапою колонок (будь-яка колонка таблиці).
+            target ??= source.Table.Columns
+                .Select(c => forward.TryGetValue(c.Id, out var n) || backward.TryGetValue(c.Id, out n) ? n : (int?)null)
+                .Where(n => n is not null && current.ColumnsById.ContainsKey(n.Value))
+                .Select(n => current.ColumnsById[n!.Value].TableDefId)
+                .Distinct()
+                .Select(id => current.Sheets.SelectMany(s => s.Tables).FirstOrDefault(t => t.Id == id && !t.IsDeleted))
+                .FirstOrDefault(t => t is not null);
             if (target is null)
             {
                 continue;

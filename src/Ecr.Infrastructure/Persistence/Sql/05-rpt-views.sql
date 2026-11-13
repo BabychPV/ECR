@@ -948,6 +948,30 @@ BEGIN
         FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 2, N'');
     DELETE FROM @groups WHERE ViewName IN (SELECT Name FROM @clashNames);
 
+    -- R-2: groups of one template linked by the rename map (a table renamed by a version migration): transitive closure.
+    -- Every name of the class reads the tables of the whole class, like the column aliases below do for columns.
+    DECLARE @glink TABLE (GroupId int NOT NULL, Other int NOT NULL, PRIMARY KEY (GroupId, Other));
+    INSERT INTO @glink (GroupId, Other)
+    SELECT DISTINCT ga.GroupId, gb.GroupId
+      FROM cfg.ColumnRename AS rr
+      JOIN cfg.ColumnDef AS ca ON ca.Id = rr.FromColumnDefId
+      JOIN cfg.ColumnDef AS cb ON cb.Id = rr.ToColumnDefId
+      JOIN @gt AS ga ON ga.TableDefId = ca.TableDefId
+      JOIN @gt AS gb ON gb.TableDefId = cb.TableDefId
+     WHERE ga.GroupId <> gb.GroupId AND ga.TemplateId = gb.TemplateId;
+    INSERT INTO @glink (GroupId, Other)
+    SELECT l.Other, l.GroupId FROM @glink AS l
+     WHERE NOT EXISTS (SELECT 1 FROM @glink AS z WHERE z.GroupId = l.Other AND z.Other = l.GroupId);
+    WHILE 1 = 1
+    BEGIN
+        INSERT INTO @glink (GroupId, Other)
+        SELECT DISTINCT x.GroupId, y.Other FROM @glink AS x JOIN @glink AS y ON y.GroupId = x.Other
+         WHERE x.GroupId <> y.Other AND NOT EXISTS (SELECT 1 FROM @glink AS z WHERE z.GroupId = x.GroupId AND z.Other = y.Other);
+        IF @@ROWCOUNT = 0 BREAK;
+    END
+    -- R-2: the tables of the current group AND of the groups linked to it.
+    DECLARE @gx TABLE (TableDefId int NOT NULL PRIMARY KEY);
+
     IF @OnlyIfChanged = 1 AND @TemplateVersionId IS NULL
        AND @fp = (SELECT CONVERT(varchar(64), ep.value) FROM sys.extended_properties AS ep
                    WHERE ep.class = 3 AND ep.major_id = SCHEMA_ID(N'rpt') AND ep.minor_id = 0 AND ep.name = @fpName)
@@ -1003,27 +1027,31 @@ BEGIN
         DELETE FROM @slot;
         DELETE FROM @ci;
         DELETE FROM @cols;
+        DELETE FROM @gx;
+        INSERT INTO @gx (TableDefId)
+        SELECT x.TableDefId FROM @gt AS x
+         WHERE x.GroupId = @g OR x.GroupId IN (SELECT l.Other FROM @glink AS l WHERE l.GroupId = @g);
 
-        SET @tids = STUFF((SELECT N',' + CAST(TableDefId AS nvarchar(10)) FROM @gt WHERE GroupId = @g ORDER BY TableDefId
+        SET @tids = STUFF((SELECT N',' + CAST(TableDefId AS nvarchar(10)) FROM @gt WHERE TableDefId IN (SELECT TableDefId FROM @gx) ORDER BY TableDefId
                            FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 1, N'');
         SET @sheetCase = N'CASE ti.TableDefId' + (SELECT N' WHEN ' + CAST(TableDefId AS nvarchar(10)) + N' THEN ' + CAST(SheetDefId AS nvarchar(10))
-                           FROM @gt WHERE GroupId = @g ORDER BY TableDefId FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)') + N' END';
+                           FROM @gt WHERE TableDefId IN (SELECT TableDefId FROM @gx) ORDER BY TableDefId FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)') + N' END';
         SET @verCase = N'CAST(CASE ti.TableDefId' + (SELECT N' WHEN ' + CAST(TableDefId AS nvarchar(10)) + N' THEN N' + QUOTENAME(VersionText, '''')
-                           FROM @gt WHERE GroupId = @g ORDER BY TableDefId FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)') + N' END AS nvarchar(20))';
+                           FROM @gt WHERE TableDefId IN (SELECT TableDefId FROM @gx) ORDER BY TableDefId FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)') + N' END AS nvarchar(20))';
 
         -- Month routing needs the MonthsInColumns layout (0) in EVERY version of the table.
         -- D-474: and at least one routed version (flag ON = all versions; flag OFF = versions with Layout = 1). Flag ON or no
         -- Layout = 1 version: exactly as before D-474.
-        SET @routedGroup = CASE WHEN EXISTS (SELECT 1 FROM @gt WHERE GroupId = @g AND Routed = 1)
-                                 AND NOT EXISTS (SELECT 1 FROM @gt WHERE GroupId = @g AND LayoutKind <> 0) THEN 1 ELSE 0 END;
+        SET @routedGroup = CASE WHEN EXISTS (SELECT 1 FROM @gt WHERE TableDefId IN (SELECT TableDefId FROM @gx) AND Routed = 1)
+                                 AND NOT EXISTS (SELECT 1 FROM @gt WHERE TableDefId IN (SELECT TableDefId FROM @gx) AND LayoutKind <> 0) THEN 1 ELSE 0 END;
         -- D-474: mixed group (some versions not routed) - owner values (fam) only for the rows of the routed versions; a row of a
         -- non-routed version keeps its own copy even when the same document has a routed-version instance in that year.
-        SET @routedTids = STUFF((SELECT N',' + CAST(TableDefId AS nvarchar(10)) FROM @gt WHERE GroupId = @g AND Routed = 1 ORDER BY TableDefId
+        SET @routedTids = STUFF((SELECT N',' + CAST(TableDefId AS nvarchar(10)) FROM @gt WHERE TableDefId IN (SELECT TableDefId FROM @gx) AND Routed = 1 ORDER BY TableDefId
                                  FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 1, N'');
-        SET @mixedGuard = CASE WHEN @routedGroup = 1 AND EXISTS (SELECT 1 FROM @gt WHERE GroupId = @g AND Routed = 0)
+        SET @mixedGuard = CASE WHEN @routedGroup = 1 AND EXISTS (SELECT 1 FROM @gt WHERE TableDefId IN (SELECT TableDefId FROM @gx) AND Routed = 0)
                                THEN N' AND ti.TableDefId IN (' + @routedTids + N')' ELSE N'' END;
         SET @rvPred = CASE WHEN EXISTS (SELECT 1 FROM cfg.CalculationBinding AS cb JOIN @gt AS x ON x.TableDefId = cb.TableDefId
-                                         WHERE x.GroupId = @g AND cb.IsActive = 1 AND REPLACE(cb.MatchJson, CHAR(32), N'') <> N'{}') THEN 1 ELSE 0 END;
+                                         WHERE x.TableDefId IN (SELECT TableDefId FROM @gx) AND cb.IsActive = 1 AND REPLACE(cb.MatchJson, CHAR(32), N'') <> N'{}') THEN 1 ELSE 0 END;
         SET @rvRef = CASE WHEN @rvPred = 0 THEN N'r' ELSE N'rv' END;
 
         INSERT INTO @ci (ColId, Code, DataType, Fam, IsMonth, MonthNo, Ord, Routed)
@@ -1032,7 +1060,7 @@ BEGIN
                cd.IsMonthColumn, cd.MonthNumber,
                CAST(x.TemplateVersionId AS bigint) * 4294967296 + cd.Id, x.Routed
           FROM cfg.ColumnDef AS cd JOIN @gt AS x ON x.TableDefId = cd.TableDefId
-         WHERE x.GroupId = @g AND cd.IsDeleted = 0;
+         WHERE x.TableDefId IN (SELECT TableDefId FROM @gx) AND cd.IsDeleted = 0;
         INSERT INTO @cols (Code, FirstOrd) SELECT Code, MIN(Ord) FROM @ci GROUP BY Code ORDER BY MIN(Ord);
 
         DELETE FROM @alias;
@@ -1340,7 +1368,7 @@ JOIN doc.Project       AS p ON p.Id = d.ProjectId' + @rowApply END;
         SET @sheetNameCase = N'CASE ti.TableDefId' + (SELECT N' WHEN ' + CAST(x.TableDefId AS nvarchar(10)) + N' THEN N'''
                                     + REPLACE(COALESCE(JSON_VALUE(sn.NameL10n, N'$.en'), sn.Code), N'''', N'''''') + N''''
                            FROM @gt AS x JOIN cfg.SheetDef AS sn ON sn.Id = x.SheetDefId
-                           WHERE x.GroupId = @g ORDER BY x.TableDefId FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)') + N' END';
+                           WHERE x.TableDefId IN (SELECT TableDefId FROM @gx) ORDER BY x.TableDefId FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)') + N' END';
         SET @copyCols = CONCAT(N',
        CAST(COALESCE(dsh.CopyOrdinal, 1) AS smallint) AS _SheetCopyOrdinal,
        (SELECT CONCAT(COALESCE(JSON_VALUE(MAX(CASE WHEN g.CopyOfId IS NULL THEN g.NameOverrideL10n END), N''$.en''), ', @sheetNameCase, N'),
