@@ -85,7 +85,7 @@ public sealed class RecalculationJobTests(SqlServerFixture sql)
         var rows = Substitute.For<IRowStore>();
         rows.GetTableInstancesAsync(Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
             .Throws(new InvalidOperationException(
-                "Формули не перерахувалися: Server=db01;User Id=svc;Password=Secret123;Database=Ecr "
+                "Формули не перерахувалися: Server=sqlq-db01;User Id=svc;Password=Secret123;Database=Ecr "
                 + @"C:\Users\svc\app\secret.cfg SELECT * FROM sec.User https://pi01.internal:5450/piwebapi"));
 
         await using var db = builder.CreateContext();
@@ -111,7 +111,7 @@ public sealed class RecalculationJobTests(SqlServerFixture sql)
         // `ex.Message` у `RecalculationJob` — тест червоний.
         Assert.Contains("ECR-SYS-0500", run.ErrorMessage, StringComparison.Ordinal);
         Assert.Contains("correlation", run.ErrorMessage, StringComparison.Ordinal);
-        foreach (var secret in new[] { "Secret123", "db01", "secret.cfg", "sec.User", "pi01.internal" })
+        foreach (var secret in new[] { "Secret123", "sqlq-db01", "secret.cfg", "sec.User", "pi01.internal" })
         {
             Assert.DoesNotContain(secret, run.ErrorMessage, StringComparison.Ordinal);
         }
