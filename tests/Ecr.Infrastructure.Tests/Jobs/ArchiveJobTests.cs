@@ -424,6 +424,59 @@ public sealed class ArchiveJobTests(SqlServerFixture sql)
         Assert.Equal("Failed", run.Status);
     }
 
+    /// <summary>
+    /// R-6 / D-23 (аудит 2026-11): звірка перед <c>TRUNCATE</c> порівнює й ВМІСТ (контрольна сума), а не лише
+    /// кількість і числову суму. Зміна прапора рядка між копією і знищенням більше не губиться.
+    /// </summary>
+    /// <remarks>
+    /// Проміжок відтворюється тим самим прийомом, що й у тесті вище: тригер на журналі прогону спрацьовує після
+    /// копії періоду й до <c>TRUNCATE</c>. Він міняє лише <c>IsOrphaned</c> — так, як це робить нічний сканер сиріт, —
+    /// тож ні кількість рядків, ні сума комірок не змінюються.
+    /// Мутація: прибрати з умови порівняння <c>@gapSrcRowChk</c>/<c>@gapDstRowChk</c> — прогін <c>Completed</c>,
+    /// в архіві <c>IsOrphaned = 0</c>, тест червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "R-6")]
+    public async Task Зміна_прапора_рядка_між_звіркою_і_TRUNCATE_не_дає_звітувати_Completed()
+    {
+        const int period = 202701;
+        var doc = await DocumentAsync(period);
+        await CellAsync(doc, 5m);
+
+        var rowsBefore = await CountAsync("doc.TableRow", period);
+
+        await ExecuteAsync($"""
+            CREATE TRIGGER itg.TR_ArchiveGapFlag ON itg.ArchiveRun AFTER UPDATE AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (SELECT 1 FROM inserted
+                            WHERE Status = N'Running'
+                              AND LastDonePeriodKey = {period})
+                    UPDATE doc.TableRow SET IsOrphaned = 1
+                     WHERE PeriodKey = {period} AND Id = {doc.RowIds[0]} AND IsOrphaned = 0;
+            END
+            """);
+
+        try
+        {
+            await Assert.ThrowsAsync<SqlException>(() => ArchiveAsync(doc.ProjectId, period, period));
+        }
+        finally
+        {
+            await ExecuteAsync("DROP TRIGGER itg.TR_ArchiveGapFlag;");
+        }
+
+        // ⛔ Джерело ціле разом зі зміненим прапором; прогін не звітує Completed.
+        Assert.Equal(rowsBefore, await CountAsync("doc.TableRow", period));
+        Assert.Equal(1, await ScalarAsync<int>(
+            $"SELECT CAST(IsOrphaned AS int) FROM doc.TableRow WHERE PeriodKey = {period} AND Id = {doc.RowIds[0]}"));
+
+        var run = await LastRunAsync(doc.ProjectId);
+        Assert.Equal("Failed", run.Status);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]

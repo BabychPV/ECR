@@ -347,6 +347,154 @@ public sealed class RestoreYearTests(SqlServerFixture sql)
         Assert.Null(await Json(overrides, "arc"));
     }
 
+    /// <summary>
+    /// D-12 (аудит 2026-11): частини місяця звіряються при розархівації так само, як комірки, — за логічним ключем і
+    /// ТОТОЖНИМ значенням. Гарячий рядок із тим самим ключем, але іншим значенням більше не замінює архівний мовчки.
+    /// </summary>
+    /// <remarks>
+    /// Мутація: прибрати з кроку 2 <c>usp_RestoreYear</c> умову <c>@srcParts &lt;&gt; @dstParts</c> — розархівація
+    /// проходить, архівне значення частини втрачено, тест червоний.
+    /// ⚠ Період 202712 спільний з тестами вище; усі асерти звужені до рядків цього документа, і тест лишає період
+    /// розархівованим (як і сусіди).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "D-12")]
+    public async Task Розбіжність_частини_місяця_зупиняє_розархівацію_і_зберігає_архів()
+    {
+        const int period = 202712;
+        var doc = await DocumentAsync(period);
+        await CellAsync(doc, 0, 1, 12m);
+        var entryId = await PermitEntryAsync();
+        await PartsAsync(doc, period, entryId);
+
+        await ArchiveAsync(doc.ProjectId, period, period);
+        Assert.Equal(2, await PartCountAsync("arc", period, doc));
+
+        // Гарячий рядок із тим самим логічним ключем (PartNo = 1), але іншим значенням: вставка кроку 1 його пропускає.
+        await ExecuteAsync($"""
+            INSERT INTO doc.CellPermitPart
+                (PeriodKey, DocumentId, TableDefId, SheetCopyId, RowKey, ColumnDefId, PartNo, RegistryEntryId, DayFrom, DayTo, ValueNumeric)
+            VALUES ({period}, {doc.DocumentId}, {doc.TableDefId}, NULL, N'R1', {doc.ColumnDefIds[1]}, 1, {entryId}, '2027-12-01', '2027-12-14', 9.9);
+            """);
+
+        var error = await Assert.ThrowsAsync<SqlException>(() => RestoreAsync(doc.ProjectId, period, period));
+        Assert.Equal(50011, error.Number);
+
+        // ⛔ Архів цілий: обидві частини з первинними значеннями.
+        Assert.Equal(2, await PartCountAsync("arc", period, doc));
+        Assert.Equal(12m, await ScalarAsync<decimal>(
+            $"SELECT SUM(ValueNumeric) FROM arc.CellPermitPart WHERE PeriodKey = {period} AND DocumentId = {doc.DocumentId}"));
+
+        // Причину усунено — повтор проходить і повертає архівні значення.
+        await ExecuteAsync(
+            $"DELETE FROM doc.CellPermitPart WHERE PeriodKey = {period} AND DocumentId = {doc.DocumentId}");
+        await RestoreAsync(doc.ProjectId, period, period);
+
+        Assert.Equal(2, await PartCountAsync("doc", period, doc));
+        Assert.Equal(0, await PartCountAsync("arc", period, doc));
+        Assert.Equal(12m, await ScalarAsync<decimal>(
+            $"SELECT SUM(ValueNumeric) FROM doc.CellPermitPart WHERE PeriodKey = {period} AND DocumentId = {doc.DocumentId}"));
+
+        await DropPartsAsync(doc, period);
+    }
+
+    /// <summary>
+    /// D-12 (аудит 2026-11): відкат невдалої розархівації (Z6-01) прибирає й відновлені частини місяця. Доти вони
+    /// лишалися сиротами в гарячих партиціях заархівованого року.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Збій — на вставці СТИЛІВ: вона йде ПІСЛЯ вставки частин (кожна — окремий оператор без спільної транзакції),
+    /// тож на момент збою частини вже закомічено в <c>doc.*</c>.
+    /// Мутація: прибрати з <c>CATCH</c> <c>usp_RestoreYear</c> оператор <c>DELETE p FROM doc.CellPermitPart</c> —
+    /// у гарячій схемі лишаються дві частини, тест червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "D-12")]
+    public async Task Відкат_невдалої_розархівації_прибирає_відновлені_частини_місяця()
+    {
+        const int period = 202712;
+        var doc = await DocumentAsync(period);
+        await CellAsync(doc, 0, 1, 12m);
+        var entryId = await PermitEntryAsync();
+        await PartsAsync(doc, period, entryId);
+        await ExecuteAsync($"""
+            INSERT INTO doc.CellStyle
+                (PeriodKey, TableRowId, ColumnDefId, BackgroundHex, ForegroundHex, IsBold, UpdatedAt, UpdatedByUserId)
+            VALUES ({period}, {doc.RowIds[0]}, {doc.ColumnDefIds[1]}, '#D12D12', NULL, 0, '2027-12-06T10:00:00', 1);
+            """);
+
+        await ArchiveAsync(doc.ProjectId, period, period);
+        Assert.Equal(0, await PartCountAsync("doc", period, doc));
+
+        await ExecuteAsync($"""
+            CREATE TRIGGER doc.TR_RestoreFailAfterParts ON doc.CellStyle AFTER INSERT AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (SELECT 1 FROM inserted WHERE PeriodKey = {period} AND TableRowId = {doc.RowIds[0]})
+                    THROW 50998, N'Штучний збій після вставки частин (тест D-12).', 1;
+            END
+            """);
+
+        try
+        {
+            await Assert.ThrowsAsync<SqlException>(() => RestoreAsync(doc.ProjectId, period, period));
+        }
+        finally
+        {
+            await ExecuteAsync("DROP TRIGGER doc.TR_RestoreFailAfterParts;");
+        }
+
+        // ⛔ D-12: частини прибрано разом з екземпляром; архів цілий.
+        Assert.Equal(0, await PartCountAsync("doc", period, doc));
+        Assert.Equal(2, await PartCountAsync("arc", period, doc));
+        Assert.Equal(0, await ScalarAsync<int>(
+            $"SELECT COUNT(*) FROM doc.TableInstance WHERE PeriodKey = {period} AND Id = {doc.TableInstanceId}"));
+
+        // Повтор після усунення причини повертає частини.
+        await RestoreAsync(doc.ProjectId, period, period);
+        Assert.Equal(2, await PartCountAsync("doc", period, doc));
+        Assert.Equal(0, await PartCountAsync("arc", period, doc));
+
+        await DropPartsAsync(doc, period);
+    }
+
+    /// <summary>
+    /// Прибирає частини цього документа з гарячої схеми: тест «Архівація_і_розархівація_переносять_частини…» у тому
+    /// самому періоді рахує частини періоду ЦІЛКОМ, а процедури переносять партицію разом із чужими документами.
+    /// </summary>
+    private Task DropPartsAsync(TestDocument doc, int period)
+        => ExecuteAsync($"DELETE FROM doc.CellPermitPart WHERE PeriodKey = {period} AND DocumentId = {doc.DocumentId}");
+
+    private async Task<long> PermitEntryAsync()
+    {
+        await using var db = sql.CreateContext();
+        var text = new Ecr.Domain.ValueObjects.LocalizedText(new Dictionary<string, string> { ["en"] = "Permit" });
+        var registry = new Ecr.Domain.Entities.Configuration.RegistryDef(
+            Ecr.Domain.ValueObjects.EcrCode.Create($"PRM_D12{Guid.NewGuid():N}"[..20].ToUpperInvariant()), text, isTemporal: true);
+        db.RegistryDefs.Add(registry);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+        var entry = new Ecr.Domain.Entities.Dictionaries.RegistryEntry(registry.Id, Ecr.Domain.ValueObjects.EcrCode.Create("A"), text);
+        db.RegistryEntries.Add(entry);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+        return entry.Id;
+    }
+
+    private Task PartsAsync(TestDocument doc, int period, long entryId)
+        => ExecuteAsync($"""
+            INSERT INTO doc.CellPermitPart
+                (PeriodKey, DocumentId, TableDefId, SheetCopyId, RowKey, ColumnDefId, PartNo, RegistryEntryId, DayFrom, DayTo, ValueNumeric)
+            VALUES ({period}, {doc.DocumentId}, {doc.TableDefId}, NULL, N'R1', {doc.ColumnDefIds[1]}, 1, {entryId}, '2027-12-01', '2027-12-14', 5.5),
+                   ({period}, {doc.DocumentId}, {doc.TableDefId}, NULL, N'R1', {doc.ColumnDefIds[1]}, 2, {entryId}, '2027-12-15', '2027-12-31', 6.5);
+            """);
+
+    private Task<int> PartCountAsync(string schema, int period, TestDocument doc)
+        => ScalarAsync<int>(
+            $"SELECT COUNT(*) FROM {schema}.CellPermitPart WHERE PeriodKey = {period} AND DocumentId = {doc.DocumentId}");
+
     private async Task<bool> OrphanAsync(int period, long rowId)
         => await ScalarAsync<int>(
             $"SELECT CAST(IsOrphaned AS int) FROM doc.TableRow WHERE PeriodKey = {period} AND Id = {rowId}")

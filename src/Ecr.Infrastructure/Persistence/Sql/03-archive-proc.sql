@@ -549,12 +549,20 @@ BEGIN
         DECLARE @gapSrcSum decimal(38,16), @gapDstSum decimal(38,16);
         DECLARE @gapSrcRows bigint, @gapDstRows bigint;
         DECLARE @gapSrcInst bigint, @gapDstInst bigint;
+        -- ⛔ R-6 / D-23 (аудит 2026-11): третя сума — ВМІСТ (рядки, дати, Id довідника, прапори), а не лише кількість
+        --    і числова сума. Доти зміна ValueString/ValueDate/ValueRegistryEntryId/ValueBool або прапора рядка
+        --    (IsOrphaned від нічного сканера) між копією і TRUNCATE не міняла ні кількості, ні суми, і TRUNCATE її нищив.
+        --    Переліки колонок у doc.* і arc.* ОДНАКОВІ, типи теж (12-archive-tables.sql), тож суми порівнювані.
+        DECLARE @gapSrcChk int, @gapDstChk int, @gapSrcRowChk int, @gapDstRowChk int;
 
-        SELECT @gapSrcCells = COUNT_BIG(*), @gapSrcSum = ISNULL(SUM(ValueNumeric), 0)
+        SELECT @gapSrcCells = COUNT_BIG(*), @gapSrcSum = ISNULL(SUM(ValueNumeric), 0),
+               @gapSrcChk = CHECKSUM_AGG(BINARY_CHECKSUM(TableRowId, ColumnDefId, TableDefId, ValueString, ValueNumeric, ValueDate,
+                                                         ValueBool, ValueRegistryEntryId, ValueUnitId, IsCalculated, IsEmpty))
         FROM doc.CellValue WITH (TABLOCKX)
         WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
 
-        SELECT @gapSrcRows = COUNT_BIG(*)
+        SELECT @gapSrcRows = COUNT_BIG(*),
+               @gapSrcRowChk = CHECKSUM_AGG(BINARY_CHECKSUM(Id, TableInstanceId, RowKey, RowDefId, Ordinal, IsDeleted, IsOrphaned))
         FROM doc.TableRow WITH (TABLOCKX)
         WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
 
@@ -562,11 +570,14 @@ BEGIN
         FROM doc.TableInstance WITH (TABLOCKX)
         WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
 
-        SELECT @gapDstCells = COUNT_BIG(*), @gapDstSum = ISNULL(SUM(ValueNumeric), 0)
+        SELECT @gapDstCells = COUNT_BIG(*), @gapDstSum = ISNULL(SUM(ValueNumeric), 0),
+               @gapDstChk = CHECKSUM_AGG(BINARY_CHECKSUM(TableRowId, ColumnDefId, TableDefId, ValueString, ValueNumeric, ValueDate,
+                                                         ValueBool, ValueRegistryEntryId, ValueUnitId, IsCalculated, IsEmpty))
         FROM arc.CellValue
         WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
 
-        SELECT @gapDstRows = COUNT_BIG(*)
+        SELECT @gapDstRows = COUNT_BIG(*),
+               @gapDstRowChk = CHECKSUM_AGG(BINARY_CHECKSUM(Id, TableInstanceId, RowKey, RowDefId, Ordinal, IsDeleted, IsOrphaned))
         FROM arc.TableRow
         WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
 
@@ -600,6 +611,7 @@ BEGIN
 
         IF @gapSrcCells <> @gapDstCells OR @gapSrcSum <> @gapDstSum
            OR @gapSrcRows <> @gapDstRows OR @gapSrcInst <> @gapDstInst
+           OR ISNULL(@gapSrcChk, 0) <> ISNULL(@gapDstChk, 0) OR ISNULL(@gapSrcRowChk, 0) <> ISNULL(@gapDstRowChk, 0)
            OR @gapSrcParts <> @gapDstParts
            OR @gapSrcStyles <> @gapDstStyles OR @gapSrcOverrides <> @gapDstOverrides
         BEGIN
@@ -751,6 +763,7 @@ BEGIN
     DECLARE @srcCells bigint, @srcSum decimal(38,16), @srcRows bigint, @srcInst bigint;
     DECLARE @dstCells bigint, @dstSum decimal(38,16), @dstRows bigint, @dstInst bigint;
     DECLARE @srcStyles bigint, @dstStyles bigint, @srcOverrides bigint, @dstOverrides bigint;
+    DECLARE @srcParts bigint, @dstParts bigint;  -- D-12
     DECLARE @lastRow bigint, @lastCol int, @hiRow bigint, @hiCol int;
     DECLARE @lastId bigint, @hiId bigint;
 
@@ -1050,9 +1063,24 @@ BEGIN
               ON d.PeriodKey = a.PeriodKey AND d.TableRowId = a.TableRowId AND d.ColumnDefId = a.ColumnDefId
             WHERE a.PeriodKey = @k;
 
+            -- ⛔ D-12 (аудит 2026-11): частини місяця — за логічним ключем архіву і ТОТОЖНИМ значенням (як комірки).
+            --    Доти частини були єдиною таблицею arc.*, яку розархівація не звіряла: гарячий рядок із тим самим
+            --    ключем, але іншим значенням тихо замінював архівний (вставка кроку 1 іде з NOT EXISTS).
+            SELECT @srcParts = COUNT_BIG(*) FROM arc.CellPermitPart WHERE PeriodKey = @k;
+            SELECT @dstParts = COUNT_BIG(*)
+            FROM arc.CellPermitPart AS a
+            JOIN doc.CellPermitPart AS d
+              ON d.PeriodKey = a.PeriodKey AND d.DocumentId = a.DocumentId AND d.TableDefId = a.TableDefId
+             AND (d.SheetCopyId = a.SheetCopyId OR (d.SheetCopyId IS NULL AND a.SheetCopyId IS NULL))
+             AND d.RowKey = a.RowKey AND d.ColumnDefId = a.ColumnDefId AND d.PartNo = a.PartNo
+             AND EXISTS (SELECT a.RegistryEntryId, a.DayFrom, a.DayTo, a.ValueNumeric
+                         INTERSECT SELECT d.RegistryEntryId, d.DayFrom, d.DayTo, d.ValueNumeric)
+            WHERE a.PeriodKey = @k;
+
             IF @srcCells <> @dstCells OR @srcSum <> @dstSum
                OR @srcRows <> @dstRows OR @srcInst <> @dstInst
                OR @srcStyles <> @dstStyles OR @srcOverrides <> @dstOverrides
+               OR @srcParts <> @dstParts
                 THROW 50011, N'Розбіжність кількості рядків або сум при розархівації.', 1;
 
             SET @moved = @moved + @srcCells + @srcRows + @srcInst;
@@ -1208,6 +1236,24 @@ BEGIN
 
                 DELETE FROM @undo WHERE PeriodKey = @uPk AND Id = @uId;
             END;
+
+            -- ⛔ D-12 (аудит 2026-11): відновлені частини місяця з ТОТОЖНИМ двійником в arc.* (архів тут цілий), яким
+            --    уже не лишилося гарячого екземпляра тієї ж таблиці документа × копії в цьому періоді. Доти відкат
+            --    Z6-01 прибирав стилі, override, комірки, рядки й екземпляри, а частини лишав сиротами в гарячих
+            --    партиціях заархівованого року.
+            DELETE p
+            FROM doc.CellPermitPart AS p
+            WHERE p.PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey
+              AND EXISTS (SELECT 1 FROM arc.CellPermitPart AS a
+                           WHERE a.PeriodKey = p.PeriodKey AND a.DocumentId = p.DocumentId AND a.TableDefId = p.TableDefId
+                             AND (a.SheetCopyId = p.SheetCopyId OR (a.SheetCopyId IS NULL AND p.SheetCopyId IS NULL))
+                             AND a.RowKey = p.RowKey AND a.ColumnDefId = p.ColumnDefId AND a.PartNo = p.PartNo
+                             AND EXISTS (SELECT a.RegistryEntryId, a.DayFrom, a.DayTo, a.ValueNumeric
+                                         INTERSECT SELECT p.RegistryEntryId, p.DayFrom, p.DayTo, p.ValueNumeric))
+              AND NOT EXISTS (SELECT 1 FROM doc.TableInstance AS i
+                               WHERE i.PeriodKey = p.PeriodKey AND i.DocumentId = p.DocumentId
+                                 AND i.TableDefId = p.TableDefId
+                                 AND (i.SheetCopyId = p.SheetCopyId OR (i.SheetCopyId IS NULL AND p.SheetCopyId IS NULL)));
 
             IF @undoInst > 0 OR @undoKept > 0
                 SET @undoNote = N' | Часткову копію прибрано з doc.* (Z6-01): екземплярів '
