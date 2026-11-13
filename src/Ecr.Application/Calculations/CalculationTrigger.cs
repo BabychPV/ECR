@@ -30,13 +30,18 @@ namespace Ecr.Application.Calculations;
 /// повертає наявну (Quartz). Лок документа (<c>ecr:recalc:doc:{id}</c>) бере сама
 /// задача <see cref="IRecalculationJob"/> — тригер його не чіпає.
 /// </para>
+/// <para>
+/// ⛔ B97 (F13 batch-5): сховища складу документа й копій аркушів — ОБОВ'ЯЗКОВІ. Доти вони були необов'язкові, і
+/// без реєстрації склад документа «невідомий»: повністю затверджений документ із копіями аркушів ставився в чергу й
+/// відмовлявся вже в задачі. Обов'язковий параметр ламає збірку чи резолюцію контейнера, а не мовчить.
+/// </para>
 /// </remarks>
 public sealed class CalculationTrigger(
     IBackgroundJobScheduler jobs,
     IPeriodStore periods,
     IWorkflowStore workflow,
-    IDocumentStore? documents = null,
-    IDocumentSheetCopyStore? sheetCopies = null) : ICalculationTrigger
+    IDocumentStore documents,
+    IDocumentSheetCopyStore sheetCopies) : ICalculationTrigger
 {
     /// <inheritdoc />
     public bool EnlistsInCallerTransaction => jobs.EnlistsInCallerTransaction;
@@ -149,19 +154,15 @@ public sealed class CalculationTrigger(
         bool Approved(int sheetId, long? copyId) => sheets.Any(s =>
             s.SheetDefId == sheetId && s.SheetCopyId == copyId && s.Status == DocumentStatus.Approved);
 
-        var included = documents is null
-            ? []
-            : await documents.GetIncludedSheetIdsAsync(documentId, ct).ConfigureAwait(false);
+        var included = await documents.GetIncludedSheetIdsAsync(documentId, ct).ConfigureAwait(false);
 
         if (included.Count == 0)
         {
             return sheets.Count > 0 && sheets.All(s => s.Status == DocumentStatus.Approved);
         }
 
-        var copiesBySheet = sheetCopies is null
-            ? new Dictionary<int, IReadOnlyList<SheetCopyOrdinal>>()
-            : (await sheetCopies.ListGroupsAsync(documentId, ct).ConfigureAwait(false))
-                .ToDictionary(g => g.SheetDefId, g => g.Copies);
+        var copiesBySheet = (await sheetCopies.ListGroupsAsync(documentId, ct).ConfigureAwait(false))
+            .ToDictionary(g => g.SheetDefId, g => g.Copies);
 
         return included.All(sheetId => Approved(sheetId, null)
             && (copiesBySheet.GetValueOrDefault(sheetId) ?? []).All(c => Approved(sheetId, c.SheetCopyId)));

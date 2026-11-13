@@ -95,6 +95,10 @@ public sealed class ChildCompositionTests
         Assert.NotNull(sp.GetRequiredService<IJobProgressStore>());
         Assert.NotNull(sp.GetRequiredService<JobLeaseContext>());
 
+        // ⛔ B97: тригер автоперерахунку з ОБОВ'ЯЗКОВИМИ сховищами складу й копій аркушів резолвиться у складанні воркера
+        // (без них повністю затверджений документ із копіями ставився б у чергу й відмовлявся вже в задачі).
+        Assert.IsType<Ecr.Application.Calculations.CalculationTrigger>(sp.GetRequiredService<ICalculationTrigger>());
+
         // ПРД-13: дочірній процес теж міряє бюджет — саме воркер виконує перерахунок у режимі Worker;
         // без цього реєстрація в Api була б єдиною, а вимір — порожнім у найважливішому режимі.
         Assert.NotNull(sp.GetRequiredService<RecalculationBudgetMonitor>());

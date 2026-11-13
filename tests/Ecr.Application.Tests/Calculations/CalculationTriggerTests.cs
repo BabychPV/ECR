@@ -24,6 +24,7 @@ public sealed class CalculationTriggerTests
     private const long DocumentId = 4501;
     private static readonly PeriodKey Period = new(202601);
     private static readonly int[] IncludedThree = [1, 2, 3];
+    private static readonly int[] IncludedOne = [1];
 
     private readonly IBackgroundJobScheduler _jobs = Substitute.For<IBackgroundJobScheduler>();
     private readonly IPeriodStore _periods = Substitute.For<IPeriodStore>();
@@ -230,6 +231,39 @@ public sealed class CalculationTriggerTests
         var jobId = await Trigger().RequestDependentsAsync(DocumentId, Period, CancellationToken.None);
 
         Assert.Equal("IRecalculationJob~auto", jobId);
+    }
+
+    /// <summary>
+    /// ⛔ B97 (F13 batch-5): затверджений оригінал аркуша з НЕзатвердженою копією (RS) — є що рахувати; затверджені
+    /// оригінал і копія — «нічого», задача не ставиться (доти без зареєстрованих сховищ складу вона ставилась і
+    /// відмовлялась уже в задачі).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ ДОКАЗ (локально): у <c>AllApprovedAsync</c> ігнорувати копії (порожній <c>copiesBySheet</c>) — «чернеткова
+    /// копія» дає <c>null</c>, червоний.
+    /// </remarks>
+    [Theory]
+    [InlineData(false, false, true)]
+    [InlineData(false, true, false)]
+    [InlineData(true, false, true)]
+    [InlineData(true, true, false)]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "B97")]
+    public async Task Копія_аркуша_рахується_окремо_від_оригіналу(bool dependents, bool copyApproved, bool expectQueued)
+    {
+        const long copyId = 77;
+        State(PeriodState.Open);
+        _documents.GetIncludedSheetIdsAsync(DocumentId, Arg.Any<CancellationToken>()).Returns(IncludedOne);
+        _sheetCopies.ListGroupsAsync(DocumentId, Arg.Any<CancellationToken>())
+            .Returns(new[] { new SheetCopyGroupInfo(1, null, [new SheetCopyOrdinal(copyId, 2)]) });
+        Sheets(Approved(1), copyApproved ? Approved(1, copyId) : Submitted(1, copyId));
+
+        var trigger = Trigger();
+        var jobId = dependents
+            ? await trigger.RequestDependentsAsync(DocumentId, Period, CancellationToken.None)
+            : await trigger.RequestAsync(DocumentId, Period, CancellationToken.None);
+
+        Assert.Equal(expectQueued, jobId is not null);
     }
 
     [Theory]

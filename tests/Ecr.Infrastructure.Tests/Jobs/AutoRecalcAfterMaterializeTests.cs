@@ -253,6 +253,11 @@ public sealed class AutoRecalcAfterMaterializeTests(SqlServerFixture sql) : IAsy
         var registration = Assert.Single(services, d => d.ServiceType == typeof(ICalculationTrigger));
         Assert.Equal(typeof(CalculationTrigger), registration.ImplementationType);
         Assert.Equal(ServiceLifetime.Scoped, registration.Lifetime);
+
+        // ⛔ B97: склад документа й копії аркушів — обов'язкові залежності тригера; Api і воркер (і дочірній) складають
+        // контейнер тим самим `AddEcrInfrastructure`, тож без цих реєстрацій тригер не резолвився б узагалі.
+        Assert.Contains(services, d => d.ServiceType == typeof(IDocumentStore));
+        Assert.Contains(services, d => d.ServiceType == typeof(IDocumentSheetCopyStore));
     }
 
     private async Task<(EcrDbContext Db, TestDocument Chain)> OpenChainAsync()
