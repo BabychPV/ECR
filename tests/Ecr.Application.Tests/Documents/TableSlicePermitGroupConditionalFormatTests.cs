@@ -18,8 +18,9 @@ namespace Ecr.Application.Tests.Documents;
 /// а прихований реєстр групи записів не має - без розгортання складу правило «номер = N100» не спрацьовувало б ніколи.
 /// </summary>
 /// <remarks>
-/// Мутація: у <c>GetTableSliceHandler</c> повернути <c>registries.ListEntriesAsync(registryId)</c> без
-/// <c>LookupTargetEntries.ListAsync</c> - тест групи червоний; Land-колонка (звичайна ціль) читає рівно свій реєстр.
+/// Мутація: у <c>GetTableSliceHandler</c> звузити ціль до <c>e.RegistryDefId == registryId</c> без складу групи
+/// (<c>ExpandRegistryIds</c>) - тест групи червоний; Land-колонка (звичайна ціль) бере записи рівно свого реєстру.
+/// ✎ P-8: записи читаються за Id із комірок зрізу (<c>FindEntriesByIdsAsync</c>), а не переліком реєстру.
 /// </remarks>
 public sealed class TableSlicePermitGroupConditionalFormatTests
 {
@@ -80,10 +81,10 @@ public sealed class TableSlicePermitGroupConditionalFormatTests
         _registries.FindDefinitionByIdAsync(MemberRegistry, Arg.Any<CancellationToken>()).Returns(member);
         var entry = new RegistryEntry(MemberRegistry, EcrCode.Create("N100"), Text("N100"));
         SetId(entry, MemberEntry);
-        _registries.ListEntriesAsync(MemberRegistry, Arg.Any<CancellationToken>())
-                   .Returns(Task.FromResult<IReadOnlyList<RegistryEntry>>([entry]));
-        _registries.ListEntriesAsync(GroupRegistry, Arg.Any<CancellationToken>())
-                   .Returns(Task.FromResult<IReadOnlyList<RegistryEntry>>([]));
+        // P-8: зріз питає лише записи, що стоять у його комірках (за Id), а не перелік усього реєстру.
+        _registries.FindEntriesByIdsAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
+                   .Returns(call => Task.FromResult<IReadOnlyList<RegistryEntry>>(
+                       call.Arg<IReadOnlyCollection<long>>().Contains(MemberEntry) ? [entry] : []));
     }
 
     [Fact]

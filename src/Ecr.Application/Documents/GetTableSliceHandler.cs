@@ -741,12 +741,35 @@ public sealed class GetTableSliceHandler(
             {
                 if (visible.TryGetValue(reference, out var source) && source.LookupRegistryDefId is { } registryId)
                 {
-                    // Permits PRMG: ціль-група - записи реєстрів-членів; правило порівнює КОД (номер) запису.
-                    var entries = await Permits.Groups.LookupTargetEntries.ListAsync(registries, groups, registryId, ct)
-                        .ConfigureAwait(false);
+                    // ⛔ P-8 (аудит 2026-11-10): читаються лише записи, що СТОЯТЬ у комірках цього зрізу (≤ рядків), а не
+                    // весь реєстр (до 50 000 записів з DisplayL10n; для групи дозволів — усі реєстри-члени) на кожен GET.
+                    var ids = rows
+                        .Select(r => r.Cells.TryGetValue(reference, out var v) ? v : null)
+                        .OfType<long>()
+                        .Distinct()
+                        .ToList();
+                    if (ids.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    if (groups is not null)
+                    {
+                        await groups.EnsureFreshAsync(ct).ConfigureAwait(false);
+                    }
+
+                    // Permits PRMG: ціль-група - записи реєстрів-членів; правило порівнює КОД (номер) запису. Межа та сама,
+                    // що була в `LookupTargetEntries.ListAsync`: лише записи цілі колонки — її реєстру або складу її групи
+                    // (`ExpandRegistryIds`, а не `Accepts`: неактивна група нових значень не приймає, але наявні комірки
+                    // й далі порівнюються за кодом).
+                    var targets = groups is not null && groups.IsGroup(registryId)
+                        ? groups.ExpandRegistryIds(registryId).ToHashSet()
+                        : [registryId];
+                    var entries = await registries.FindEntriesByIdsAsync(ids, ct).ConfigureAwait(false);
                     codeByColumn[reference] = entries
-                        .GroupBy(e => e.Entry.Id)
-                        .ToDictionary(g => g.Key, g => g.First().Entry.Code);
+                        .Where(e => targets.Contains(e.RegistryDefId))
+                        .GroupBy(e => e.Id)
+                        .ToDictionary(g => g.Key, g => g.First().Code);
                 }
             }
         }
