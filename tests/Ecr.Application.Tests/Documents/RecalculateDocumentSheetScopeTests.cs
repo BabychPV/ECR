@@ -289,7 +289,9 @@ public sealed class RecalculateDocumentSheetScopeTests
 
     private static Fixture Arrange(
         int? submittedSheet, int? hiddenSheet, PeriodState periodState = PeriodState.Open, int? alsoSubmittedSheet = null,
-        bool approved = false, long? copyOfSheet3 = null, bool copyApproved = false)
+        bool approved = false, long? copyOfSheet3 = null, bool copyApproved = false,
+        ITemplateLayoutRegistry? layouts = null, Action<IPeriodStore>? configurePeriods = null,
+        IProjectVersionTimeline? timeline = null)
     {
         var builder = new AccessBuilder { UserId = 9 }
             .Permission(RecalculateDocumentHandler.Permission)
@@ -319,6 +321,7 @@ public sealed class RecalculateDocumentSheetScopeTests
 
         var periods = Substitute.For<IPeriodStore>();
         periods.FindPeriodStateAsync(Document, Period, Arg.Any<CancellationToken>()).Returns((PeriodState?)periodState);
+        configurePeriods?.Invoke(periods);
 
         var states = new List<ApprovalState>();
         if (submittedSheet is { } submitted)
@@ -371,7 +374,99 @@ public sealed class RecalculateDocumentSheetScopeTests
                 Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
             .Returns("job-1");
 
-        return new Fixture(new RecalculateDocumentHandler(jobs, access, user, documents, periods, workflow, copies), jobs, workflow);
+        return new Fixture(
+            new RecalculateDocumentHandler(jobs, access, user, documents, periods, workflow, copies, layouts, timeline), jobs, workflow);
+    }
+
+    /// <summary>
+    /// ✎ LAND-YEAR B24 (D-NEW-3): закритий ЯКІР (найменший ключ календаря року, тут 202610) річної розкладки у
+    /// відкритому році — кнопка «Перерахувати» ставить задачу (вона пише не-місячне під агрегатом), а не 4221.
+    /// </summary>
+    /// <remarks>⛔ Мутація: <c>ClosedYearAnchorWritesAsync</c> → <c>false</c> — 4221 periodClosed, тест червоніє.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "D-474")]
+    public async Task B24_закритий_якір_річної_розкладки_у_відкритому_році_ставиться_в_чергу()
+    {
+        var fixture = ArrangeYear(yearLayout: true, PeriodState.Closed, PeriodState.Open, PeriodState.Open);
+
+        var jobId = await fixture.Handler.HandleAsync(Document, new PeriodKey(Period), sheetDefId: null, CancellationToken.None);
+
+        Assert.Equal("job-1", jobId);
+    }
+
+    /// <summary>Контроль: версія <c>PerMonthCopies</c> — закритий місяць відмовляє, як доти.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "D-474")]
+    public async Task B24_контроль_PerMonthCopies_закритий_місяць_відмовляє()
+    {
+        var fixture = ArrangeYear(yearLayout: false, PeriodState.Closed, PeriodState.Open, PeriodState.Open);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => fixture.Handler.HandleAsync(Document, new PeriodKey(Period), sheetDefId: null, CancellationToken.None));
+
+        Assert.Equal("err.ECR-CALC-4221.periodClosed", error.Details?["messageKey"]);
+    }
+
+    /// <summary>Контроль: річна розкладка, але закритий увесь рік — відмова, як доти.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "D-474")]
+    public async Task B24_контроль_закритий_увесь_рік_відмовляє()
+    {
+        var fixture = ArrangeYear(yearLayout: true, PeriodState.Closed, PeriodState.Closed, PeriodState.Closed);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => fixture.Handler.HandleAsync(Document, new PeriodKey(Period), sheetDefId: null, CancellationToken.None));
+
+        Assert.Equal("err.ECR-CALC-4221.periodClosed", error.Details?["messageKey"]);
+    }
+
+    /// <summary>Контроль: закритий місяць, що НЕ якір року (є раніший 202609), — відмова, як доти.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "D-474")]
+    public async Task B24_контроль_закритий_не_якір_відмовляє()
+    {
+        var fixture = ArrangeYear(yearLayout: true, PeriodState.Closed, PeriodState.Open, PeriodState.Open, earlier: true);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => fixture.Handler.HandleAsync(Document, new PeriodKey(Period), sheetDefId: null, CancellationToken.None));
+
+        Assert.Equal("err.ECR-CALC-4221.periodClosed", error.Details?["messageKey"]);
+    }
+
+    /// <summary>
+    /// Календар року проєкту: <see cref="Period"/> (202610) і два наступні місяці зі станами; <paramref name="earlier"/> —
+    /// ще й відкритий 202609 (тоді якір — він).
+    /// </summary>
+    private static Fixture ArrangeYear(
+        bool yearLayout, PeriodState anchor, PeriodState november, PeriodState december, bool earlier = false)
+    {
+        var layouts = Substitute.For<ITemplateLayoutRegistry>();
+        layouts.HasAny.Returns(true);
+        layouts.IsYearVersion(7).Returns(yearLayout);
+
+        var timeline = Substitute.For<IProjectVersionTimeline>();
+        timeline.VersionOfAsync(AccessBuilder.ProjectId, Period, Arg.Any<CancellationToken>()).Returns(7);
+
+        return Arrange(
+            submittedSheet: null, hiddenSheet: null, periodState: anchor, layouts: layouts, timeline: timeline,
+            configurePeriods: periods =>
+            {
+                var calendar = new List<PeriodStateRef>();
+                if (earlier)
+                {
+                    calendar.Add(new PeriodStateRef(202609, PeriodState.Open));
+                }
+
+                calendar.Add(new PeriodStateRef(Period, anchor));
+                calendar.Add(new PeriodStateRef(202611, november));
+                calendar.Add(new PeriodStateRef(202612, december));
+                periods.GetPeriodStatesAsync(AccessBuilder.ProjectId, null, Arg.Any<CancellationToken>())
+                       .Returns((IReadOnlyList<PeriodStateRef>)calendar);
+            });
     }
 
     private static TemplateVersionSnapshot SnapshotOfTwoSheets()
