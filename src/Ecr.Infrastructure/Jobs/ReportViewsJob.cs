@@ -39,6 +39,16 @@ public sealed class ReportViewsJob(
 
         var task = Parse(payload);
 
+        // ✎ P-4b P3: усі шаблони (старт застосунку) — одна генерація по всіх, лише якщо входи змінилися, зі стелею команди
+        // ReportViewGenerator.AllTemplatesTimeoutSeconds. Позначки «оновлюються» шаблонів не чіпає (ключ — шаблон).
+        if (task.AllTemplates)
+        {
+            await progress.ReportAsync(0, "all templates (only if changed)", ct).ConfigureAwait(false);
+            await generator.GenerateAllAsync(onlyIfChanged: true, ct).ConfigureAwait(false);
+            await progress.ReportAsync(100, null, ct).ConfigureAwait(false);
+            return;
+        }
+
         // ⚠ Покоління позначки і набір версій — ДО запиту версій: публікація, що закомітилась після цього рядка, ставить
         // новіше покоління, свою версію в набір і злитий повтор, тож Settled нижче картку «оновлюються» не зніме, доки повтор
         // (що забере її версію) не відпрацює.
@@ -161,8 +171,51 @@ public sealed class ReportViewsJob(
 
         var json = payload as string ?? System.Text.Json.JsonSerializer.Serialize(payload);
 
-        return System.Text.Json.JsonSerializer.Deserialize<ReportViewsTask>(json, Options) is { TemplateId: > 0 } task
+        var task = System.Text.Json.JsonSerializer.Deserialize<ReportViewsTask>(json, Options);
+        return task is { TemplateId: > 0 } || task is { AllTemplates: true }
             ? task
             : throw new InvalidOperationException("Завдання перегенерації вʼюх не розбирається: немає шаблону.");
+    }
+
+    /// <summary>
+    /// ✎ P-4b P3: крок старту «4b» — ставить задачу «усі шаблони, лише змінене» (ціль <see cref="ReportViewsTarget.All"/>,
+    /// злиття) замість синхронної генерації в послідовності старту (F13: на великому бекапі вона впала на стелі 300 с, а
+    /// картка лишалась Degraded назавжди).
+    /// </summary>
+    /// <param name="jobs">Планувальник; <c>null</c> — немає (усічений хост) → синхронно, як до P-4b.</param>
+    /// <param name="generator">Генератор (лише для шляху без планувальника).</param>
+    /// <param name="status">Стан картки <c>reportviews</c>: збій постановки — збій прогону по всіх.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <returns><c>true</c> — задачу поставлено.</returns>
+    /// <remarks>
+    /// ⚠ Збій постановки НЕ переходить у синхронну генерацію (вона й тримала б старт до пів години) — він на картці
+    /// (ключ прогону по всіх; знімає його наступний успішний прогін по всіх) і в журналі викликача (виняток не кидається).
+    /// Тестам і smoke вʼюхи одразу після старту не потрібні: <c>git grep</c> по tools, tests, e2e — жоден не читає
+    /// <c>rpt.v_*</c>, створені стартом (тести інфраструктури кличуть генератор/процедуру самі).
+    /// </remarks>
+    public static async Task<bool> QueueAllOnStartupAsync(
+        IBackgroundJobScheduler? jobs, IReportViewGenerator generator, IReportViewStatus? status, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(generator);
+        if (jobs is null)
+        {
+            await generator.GenerateAllAsync(onlyIfChanged: true, ct).ConfigureAwait(false);
+            return false;
+        }
+
+        try
+        {
+            await jobs
+                .EnqueueCoalescedAsync<IReportViewsJob>(ReportViewsTarget.All, new ReportViewsTask(0, AllTemplates: true), ct)
+                .ConfigureAwait(false);
+            return true;
+        }
+#pragma warning disable CA1031 // Найкраще зусилля: вʼюхи потрібні SSRS, а не старту застосунку.
+        catch (Exception ex) when (ex is not OperationCanceledException)
+#pragma warning restore CA1031
+        {
+            status?.Failed(new ReportViewFailure(null, 0, "Report view regeneration was not queued at startup: " + ex.Message));
+            return false;
+        }
     }
 }

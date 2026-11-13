@@ -52,6 +52,30 @@ public sealed partial class ReportViewGenerator(
     public Task GenerateStableViewsAsync(int templateId, int anchorVersionId, CancellationToken ct)
         => RunAsync(anchorVersionId, templateViews: false, stableViews: true, stableTemplateId: templateId, onlyIfChanged: false, ct);
 
+    /// <inheritdoc />
+    public Task GenerateAllAsync(bool onlyIfChanged, CancellationToken ct)
+        => RunAsync(null, templateViews: true, stableViews: true, stableTemplateId: null, onlyIfChanged, ct);
+
+    /// <summary>
+    /// ✎ P-4b P3: стеля команди прогону по ВСІХ шаблонах, секунди. F13 на великому бекапі: генерація на старті впала на
+    /// 300 с; тепер вона — у фоновій задачі (<see cref="ReportViewsTarget.All"/>) і нікого не тримає, тож стеля довга.
+    /// </summary>
+    public const int AllTemplatesTimeoutSeconds = 1800;
+
+    /// <summary>
+    /// ✎ P-4b P3: стеля команд генерації. Усі шаблони (<paramref name="templateVersionId"/> = <c>null</c>) — не менше
+    /// <see cref="AllTemplatesTimeoutSeconds"/>; одна версія з маршрутизацією місяців — <see cref="RoutedGenerationTimeoutSeconds"/>;
+    /// інакше — таймаут контексту без змін.
+    /// </summary>
+    /// <param name="templateVersionId">Версія або <c>null</c> — усі.</param>
+    /// <param name="anyRouting">Чи увімкнено маршрутизацію місяців.</param>
+    /// <param name="current">Поточний таймаут контексту (<c>null</c> — типовий провайдера).</param>
+    /// <returns>Таймаут для команд; <c>null</c> — не змінювати.</returns>
+    public static int? CommandTimeoutFor(int? templateVersionId, bool anyRouting, int? current)
+        => templateVersionId is null
+            ? Math.Max(current ?? 0, AllTemplatesTimeoutSeconds)
+            : anyRouting ? RoutedGenerationTimeoutSeconds : current;
+
     /// <summary>Спільний прогін: <c>_vN</c> і/або стабільні вʼюхи, з фіксацією збою/успіху для картки <c>reportviews</c>.</summary>
     /// <param name="templateVersionId">Версія (для стабільних — опорна версія шаблону) або <c>null</c> — усі.</param>
     /// <param name="templateViews">Чи кликати <c>rpt.usp_GenerateTemplateViews</c>.</param>
@@ -68,13 +92,15 @@ public sealed partial class ReportViewGenerator(
         // Контекст scoped і може жити далі (публікація версії), тож попереднє значення повертається.
         // ✎ D-474: у процедуру йде лише спадковий прапор «усі версії»; версії з розкладкою YearWithMonthColumns
         // процедура впізнає сама (cfg.TemplateVersion.Layout). Стеля команди — за будь-якої маршрутизації.
+        // ✎ P-4b P3: прогін по всіх шаблонах — стеля AllTemplatesTimeoutSeconds (CommandTimeoutFor).
         var routed = monthRouter is { AllVersions: true };
         var anyRouting = monthRouter is { Enabled: true };
         var previousTimeout = db.Database.GetCommandTimeout();
-        var changeTimeout = anyRouting;
+        var timeout = CommandTimeoutFor(templateVersionId, anyRouting, previousTimeout);
+        var changeTimeout = timeout != previousTimeout;
         if (changeTimeout)
         {
-            db.Database.SetCommandTimeout(RoutedGenerationTimeoutSeconds);
+            db.Database.SetCommandTimeout(timeout);
         }
 
         try

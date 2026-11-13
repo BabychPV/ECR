@@ -39,4 +39,11 @@ public interface IReportViewGenerator
     /// <param name="ct">Скасування.</param>
     /// <remarks>Типова реалізація нічого не робить: типова <see cref="GenerateVersionViewsAsync"/> уже будує й стабільні.</remarks>
     public Task GenerateStableViewsAsync(int templateId, int anchorVersionId, CancellationToken ct) => Task.CompletedTask;
+
+    /// <summary>
+    /// ✎ P-4b P3: усі шаблони (старт застосунку, задача з ціллю <see cref="ReportViewsTarget.All"/>).
+    /// </summary>
+    /// <param name="onlyIfChanged">Пропустити, якщо входи вʼюх не змінилися з останньої успішної повної генерації.</param>
+    /// <param name="ct">Скасування.</param>
+    public Task GenerateAllAsync(bool onlyIfChanged, CancellationToken ct) => GenerateAsync(null, ct);
 }

@@ -119,33 +119,7 @@ public static partial class StartupSequence
 
         Lap(logger, lap, "4c аргументи методологій");
 
-        // 4b) Вʼюхи сирих даних rpt.v_* для SSRS (ФВ-10.2, ФВ-10.4) по
-        //     кожній таблиці опублікованих версій шаблонів. ⚠ ПІСЛЯ seed і на
-        //     кожному старті: так вʼюхи отримують і версії, опубліковані до
-        //     появи генератора, і база після оновлення. Процедура ідемпотентна —
-        //     незмінні вʼюхи не чіпає. ⚠ Відмова — попередження, а не зупинка
-        //     старту: вʼюхи потрібні SSRS, а не застосунку.
-        try
-        {
-            // AN-155d: на старті — лише якщо входи вʼюх змінилися з останньої успішної повної генерації (інакше 12–20 с
-            // марної роботи на кожен старт). Публікація версії викликає інтерфейс як раніше — завжди повна генерація.
-            var generator = scope.ServiceProvider.GetRequiredService<IReportViewGenerator>();
-            if (generator is Ecr.Infrastructure.Reporting.ReportViewGenerator startupGenerator)
-            {
-                await startupGenerator.GenerateAsync(templateVersionId: null, onlyIfChanged: true, CancellationToken.None)
-                    .ConfigureAwait(false);
-            }
-            else
-            {
-                await generator.GenerateAsync(templateVersionId: null, CancellationToken.None).ConfigureAwait(false);
-            }
-        }
-        catch (SqlException ex)
-        {
-            LogReportViewsFailed(logger, ex.Message);
-        }
-
-        Lap(logger, lap, "4b вʼюхи rpt.v_*");
+        // 4b) ✎ P-4b P3: вʼюхи rpt.v_* — тепер ПІСЛЯ кроку 5 (покинуті задачі), див. нижче.
 
         // 4a) Bootstrap-адміністратор. ⛔ Крок був ОГОЛОШЕНИЙ (обробник є,
         //     зареєстрований, покритий тестами) і НЕ ВИКЛИКАВСЯ (`A7-10`):
@@ -237,6 +211,37 @@ public static partial class StartupSequence
         }
 
         Lap(logger, lap, "5 покинуті задачі");
+
+        // 4b) Вʼюхи сирих даних rpt.v_* для SSRS (ФВ-10.2, ФВ-10.4) по
+        //     кожній таблиці опублікованих версій шаблонів. ⚠ ПІСЛЯ seed і на
+        //     кожному старті: так вʼюхи отримують і версії, опубліковані до
+        //     появи генератора, і база після оновлення. Процедура ідемпотентна —
+        //     незмінні вʼюхи не чіпає. ⚠ Відмова — попередження, а не зупинка
+        //     старту: вʼюхи потрібні SSRS, а не застосунку.
+        // ✎ P-4b P3 (F13 на великому бекапі: тут синхронна генерація по всіх впала на стелі 300 с, а картка `reportviews`
+        //     лишалась Degraded назавжди): старт лише СТАВИТЬ фонову задачу «усі шаблони, лише змінене» (ціль
+        //     ReportViewsTarget.All, стеля команди 1800 с) і йде далі. AN-155d (лише якщо входи змінилися) — у задачі.
+        //     ⚠ ПІСЛЯ кроку 5: щойно поставлена задача не потрапляє в прохід покинутих задач.
+        try
+        {
+            var scheduler = scope.ServiceProvider.GetService<IBackgroundJobScheduler>();
+            var queued = await Infrastructure.Jobs.ReportViewsJob.QueueAllOnStartupAsync(
+                    scheduler,
+                    scope.ServiceProvider.GetRequiredService<IReportViewGenerator>(),
+                    scope.ServiceProvider.GetService<IReportViewStatus>(),
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+            if (!queued && scheduler is not null)
+            {
+                LogReportViewsFailed(logger, "background regeneration was not queued (see the reportviews health card)");
+            }
+        }
+        catch (SqlException ex)
+        {
+            LogReportViewsFailed(logger, ex.Message);
+        }
+
+        Lap(logger, lap, "4b вʼюхи rpt.v_* (постановка)");
 
         // ⚠ Запас партицій окремим кроком тут більше не рахується: його
         //    попередження дає `SchemaValidator` на кроці 3 (одне джерело).
