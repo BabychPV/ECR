@@ -123,20 +123,35 @@ public sealed class SystemHealthFactsTests(SqlServerFixture sql)
     [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Лічильники_ростуть_рівно_на_заведені_дані()
     {
-        using var app = new EcrApiFactory(sql);
-        using var client = await SystemHealthControllerTests.SignedInAsync(sql, app, ViewHealth);
+        // B94: факти рахують УСІ рядки бази (jobs, sources), а не лише заведені тестом. На спільній базі колекції між
+        // двома читаннями зрушували чужі рядки - задачі попередніх тестів, які дограє Quartz, спільний для процесу, і
+        // прибиральник покинутих задач хоста: «рівно +1» хибно червонів (jobs.running +0). Тому - ВЛАСНА база
+        // (як «/health/ready зелений» у HealthTests): у ній немає нічиїх рядків, крім заведених тут і стартових.
+        var database = SqlServerFixture.WithOwnDatabase("_hfacts");
+        await database.InitializeAsync();
+        try
+        {
+            await CountersGrowExactlyOnSeededDataAsync(database);
+        }
+        finally
+        {
+            await database.DisposeAsync();
+        }
+    }
+
+    private static readonly string[] Counters = ["jobs.running", "jobs.failed24h", "sources.active", "sources.failed", "sources.gaps"];
+
+    private static async Task CountersGrowExactlyOnSeededDataAsync(SqlServerFixture database)
+    {
+        using var app = new EcrApiFactory(database);
+        using var client = await SystemHealthControllerTests.SignedInAsync(database, app, ViewHealth);
 
         var before = await ReadFactsAsync(client, app);
 
         var tag = Guid.NewGuid().ToString("N")[..8];
         var now = DateTime.UtcNow;
-        int dataSourceId;
-        int sourceEntityId;
-        string runningJobId = $"hf-run-{tag}";
-        string failedJobId = $"hf-fail-{tag}";
-        string oldFailedJobId = $"hf-old-{tag}";
 
-        await using (var db = sql.CreateContext())
+        await using (var db = database.CreateContext())
         {
             var dataSource = new DataSource(
                 EcrCode.Create($"Hf{tag}"),
@@ -146,12 +161,10 @@ public sealed class SystemHealthFactsTests(SqlServerFixture sql)
                 "secret");
             db.DataSources.Add(dataSource);
             await db.SaveChangesAsync();
-            dataSourceId = dataSource.Id;
 
             var entity = new SourceEntity(dataSource.Id, $"Hf{tag}", RegistrySourceKind.External);
             db.SourceEntities.Add(entity);
             await db.SaveChangesAsync();
-            sourceEntityId = entity.Id;
 
             // Останній запуск сутності — провал → активне джерело «з помилкою».
             var run = new CollectionRun(entity.Id, now.AddHours(-2), now.AddHours(-1), false, null, now.AddMinutes(-5));
@@ -162,52 +175,39 @@ public sealed class SystemHealthFactsTests(SqlServerFixture sql)
             db.CollectionCoverages.Add(CollectionCoverage.Skipped(
                 entity.Id, 202601, CollectionCoverage.SkippedPointCeiling, "ceiling", now));
 
-            db.JobProgresses.Add(new JobProgress(runningJobId, "hf.test", now));
+            db.JobProgresses.Add(new JobProgress($"hf-run-{tag}", "hf.test", now));
 
-            var failed = new JobProgress(failedJobId, "hf.test", now);
+            var failed = new JobProgress($"hf-fail-{tag}", "hf.test", now);
             failed.Finish("Failed", "boom", now);
             db.JobProgresses.Add(failed);
 
-            // Провал дворічної давності не входить у «за добу».
-            var old = new JobProgress(oldFailedJobId, "hf.test", now.AddDays(-3));
+            // Провал триденної давності не входить у «за добу».
+            var old = new JobProgress($"hf-old-{tag}", "hf.test", now.AddDays(-3));
             old.Finish("Failed", "boom", now.AddDays(-3));
             db.JobProgresses.Add(old);
 
             await db.SaveChangesAsync();
         }
 
-        try
+        // Факти кешуються на хост (знімок 30 с, sources.failed 60 с): `before` їх уже закешував, а дані
+        // щойно змінено — скидаємо кеш хоста, а не вимикаємо його в продукті.
+        app.Services.GetRequiredService<HealthCountCache>().Invalidate();
+
+        var after = await ReadFactsAsync(client, app);
+
+        int Delta(string block, string field)
+            => after.GetProperty(block).GetProperty(field).GetInt32()
+               - before.GetProperty(block).GetProperty(field).GetInt32();
+
+        foreach (var counter in Counters)
         {
-            // sources.failed кешується на 60 с (на хост): `before` його уже закешував, а дані
-            // щойно змінено — скидаємо кеш хоста, а не вимикаємо його в продукті.
-            app.Services.GetRequiredService<HealthCountCache>().Invalidate();
-
-            var after = await ReadFactsAsync(client, app);
-
-            int Delta(string block, string field)
-                => after.GetProperty(block).GetProperty(field).GetInt32()
-                   - before.GetProperty(block).GetProperty(field).GetInt32();
-
-            Assert.Equal(1, Delta("jobs", "running"));
-            Assert.Equal(1, Delta("jobs", "failed24h"));
-            Assert.Equal(1, Delta("sources", "active"));
-            Assert.Equal(1, Delta("sources", "failed"));
-            Assert.Equal(1, Delta("sources", "gaps"));
-
-            var lastError = after.GetProperty("about").GetProperty("lastErrorAt").GetDateTimeOffset().UtcDateTime;
-            Assert.True(lastError >= now.AddSeconds(-5), $"lastErrorAt {lastError:O} < {now:O}");
+            var block = counter[..counter.IndexOf('.', StringComparison.Ordinal)];
+            var field = counter[(block.Length + 1)..];
+            Assert.True(Delta(block, field) == 1, $"{counter}: +{Delta(block, field)} замість +1");
         }
-        finally
-        {
-            await using var db = sql.CreateContext();
-            await db.CollectionCoverages.Where(c => c.SourceEntityId == sourceEntityId).ExecuteDeleteAsync();
-            await db.CollectionRuns.Where(r => r.SourceEntityId == sourceEntityId).ExecuteDeleteAsync();
-            await db.SourceEntities.Where(e => e.Id == sourceEntityId).ExecuteDeleteAsync();
-            await db.DataSources.Where(s => s.Id == dataSourceId).ExecuteDeleteAsync();
-            await db.JobProgresses
-                .Where(p => p.JobId == runningJobId || p.JobId == failedJobId || p.JobId == oldFailedJobId)
-                .ExecuteDeleteAsync();
-        }
+
+        var lastError = after.GetProperty("about").GetProperty("lastErrorAt").GetDateTimeOffset().UtcDateTime;
+        Assert.True(lastError >= now.AddSeconds(-5), $"lastErrorAt {lastError:O} < {now:O}");
     }
 
     [Fact]
