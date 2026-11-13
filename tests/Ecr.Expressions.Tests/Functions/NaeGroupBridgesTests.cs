@@ -17,7 +17,8 @@ namespace Ecr.Expressions.Tests.Functions;
 /// </summary>
 /// <remarks>
 /// Доводяться правила старої системи: група потужності (<c>ECW_C11_03</c>, лише 9a_17) і <c>Category1</c>
-/// (<c>ECW_C11_11_02</c>, NAE зі знятими пробілами); невідомий NAE - <c>#N/A</c> (рядок пропущено), а не 0.
+/// (<c>ECW_C11_11_02</c>, NAE зі знятими пробілами); невідомий NAE для групи потужності - <c>#N/A</c> (рядок пропущено),
+/// а не 0; для <c>Category1</c> - порожньо без помилки (B88, рішення людини 13.11).
 /// Мутаційні докази (лише цей клас): у <c>nae_group_bridges.py</c> прибрати запис із пробілом перед дужкою
 /// (<c>_spaced</c>) і перегенерувати модель — червоніє <see cref="NAE_з_пробілом_перед_дужкою_знаходить_ту_саму_групу"/>;
 /// поміняти місцями дві групи потужності в <c>af-land-nae-groups.json</c> — червоніє
@@ -59,9 +60,9 @@ public sealed class NaeGroupBridgesTests
         Assert.Equal("0560", Eval(expression, snapshot, "0903").Value);
         Assert.Equal("0793", Eval(expression, snapshot, "0883").Value);
 
-        // Невідомий NAE: «Error category1 - NAE», рядок пропущено -> #N/A.
-        Assert.Equal(ExpressionErrors.NotAvailable, Eval(expression, snapshot, "0788(002)").ErrorCode);
-        Assert.Equal(ExpressionErrors.NotAvailable, Eval(expression, snapshot, "9999").ErrorCode);
+        // B88: невідомий NAE - порожньо без помилки (стара система показує порожньо; C11_11_02 такий рядок не рахує).
+        Assert.True(Eval(expression, snapshot, "0788(002)").IsNull);
+        Assert.True(Eval(expression, snapshot, "9999").IsNull);
 
         // NAE зі словника потужності (C11_03): Category1 немає - порожньо, аргумент не обчислено, рядок без результату.
         Assert.True(Eval(expression, snapshot, "0114").IsNull);
@@ -145,12 +146,45 @@ public sealed class NaeGroupBridgesTests
         var snapshot = Arrange();
         var expression = Bridge("T9_01", "Category1");
 
-        // Пробіл усередині 4-значного коду рушій не знімає (стара система знімає): #N/A, рядок без результату.
-        Assert.Equal(ExpressionErrors.NotAvailable, Eval(expression, snapshot, "07 88").ErrorCode);
-        Assert.Equal(ExpressionErrors.NotAvailable, Eval(expression, snapshot, "0788 (0 01)").ErrorCode);
+        // Пробіл усередині 4-значного коду рушій не знімає (стара система знімає): запису немає - порожньо (B88), не група.
+        Assert.True(Eval(expression, snapshot, "07 88").IsNull);
+        Assert.True(Eval(expression, snapshot, "0788 (0 01)").IsNull);
 
         // Інший код у дужках - не з довідника.
-        Assert.Equal(ExpressionErrors.NotAvailable, Eval(expression, snapshot, "0788 ( 002 )").ErrorCode);
+        Assert.True(Eval(expression, snapshot, "0788 ( 002 )").IsNull);
+    }
+
+    /// <summary>
+    /// B88 (рішення людини 13.11): Category1 для NAE ПОЗА групами <c>LAND_NAE_GROUP</c> - порожньо БЕЗ помилки (комірка не
+    /// блокує подання). Реальний випадок doc 96: T9_07 LTD-A18 (0880), T9_08 LTD-A19 (0900(002)), T9a_19 LTD-A26 (6400).
+    /// На main до фіксу міст давав <c>#N/A</c> (червоніє). Контроль: NAE у групі дає свою групу (0883 -> 0793, єдиний, для
+    /// якого C11_11_02 справді читає Category1), а Land_Power для невідомого NAE лишається <c>#N/A</c> (не змінено).
+    /// </summary>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [InlineData("T9_07", "0880")]
+    [InlineData("T9_08", "0900(002)")]
+    [InlineData("T9a_19", "6400")]
+    public void Category1_для_NAE_поза_групами_порожньо_без_помилки(string table, string nae)
+    {
+        var snapshot = Arrange();
+        var expression = Bridge(table, "Category1");
+
+        var value = Eval(expression, snapshot, nae);
+        Assert.False(value.IsError, $"{table} {nae}: {value.ErrorCode}");
+        Assert.True(value.IsNull);
+
+        // Контроль: NAE у групі - та сама таблиця, справжня група.
+        Assert.Equal("0793", Eval(expression, snapshot, "0883").Value);
+        Assert.Equal("0788", Eval(expression, snapshot, "0788 (001)").Value);
+
+        // Порожній NAE - порожньо, як і раніше.
+        var inner = new TestEvaluationContext();
+        inner.SetCell("S", "T", string.Empty, NaeColumn(expression), ExpressionValue.Null);
+        Assert.True(Expr.Eval(expression, snapshot.Attach(inner), ExpressionDialect.Template).IsNull);
+
+        // Land_Power (C11_03) не змінено: той самий NAE поза довідником - #N/A, рядок без результату.
+        Assert.Equal(ExpressionErrors.NotAvailable, Eval(Bridge("T9a_17", "Land_Power"), snapshot, nae).ErrorCode);
     }
 
     [Fact]

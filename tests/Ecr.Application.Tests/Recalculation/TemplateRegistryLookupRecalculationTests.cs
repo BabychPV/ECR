@@ -89,6 +89,31 @@ public sealed class TemplateRegistryLookupRecalculationTests
         Assert.All(Applied(), r => Assert.Equal("Cat-1", r.Value.ValueString));
     }
 
+    /// <summary>
+    /// B88: міст Category1 моделі Land - <c>REGFIELD(IFERROR(REGFIND(…), NULL), 'CATEGORY1')</c>. IFERROR не ховає
+    /// проводку знімка: REGFIND під IFERROR бачить сканер REG*-форм, тож відомий NAE дає групу (без знімка був би #REF,
+    /// перехоплений у порожнечу, і тут записано 0); невідомий NAE - порожньо, нічого не пишеться.
+    /// </summary>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [InlineData("NAE-1", 2)]
+    [InlineData("0880", 0)]
+    public async Task Міст_Category1_під_IFERROR_бачить_знімок_а_невідомий_NAE_порожній(string nae, int expectedWritten)
+    {
+        _naeText = nae;
+        Arrange(
+            new Dictionary<string, string> { ["Nae"] = "REGFIELD(IFERROR(REGFIND('LAND_NAE_GROUP',[IDCodeNAEProject]), NULL),'CATEGORY1')" },
+            Snapshot(visibleFrom: null));
+
+        var written = await Service().RecalculateAllAsync(DocumentId, Period, CancellationToken.None);
+
+        Assert.Equal(expectedWritten, written);
+        if (expectedWritten > 0)
+        {
+            Assert.All(Applied(), r => Assert.Equal("Cat-1", r.Value.ValueString));
+        }
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     public async Task Знімок_будується_на_останній_день_періоду()
