@@ -23,7 +23,8 @@ public sealed class GetCellChangesHandler(
     ICurrentUser currentUser,
     TimeProvider? clock = null,
     IMonthColumnRouter? monthRouter = null,
-    IMetadataCache? metadata = null)
+    IMetadataCache? metadata = null,
+    IColumnPathMapper? columns = null)
 {
     /// <summary>Право, без якого ЗАГАЛЬНИЙ журнал не віддається.</summary>
     public const string Permission = "Security.ViewAudit";
@@ -108,10 +109,9 @@ public sealed class GetCellChangesHandler(
         }
 
         // ⛔ R-11: видимі колонки йдуть у запит — TOP, курсор і nextCursor рахуються вже по видимих.
-        if (readable is not null)
-        {
-            filter = filter with { VisibleColumnIds = readable.VisibleColumnIds() };
-        }
+        // V-4: разом з їхніми Id у версіях шаблону до переносу проєкту.
+        IReadOnlySet<int>? visibleSet;
+        (filter, visibleSet) = await WithVisibleLineageAsync(filter, readable, ct).ConfigureAwait(false);
 
         // Q-17: історія комірки, якою володіє інший екземпляр (не-місячна колонка — якір року), читається там,
         // куди PATCH її пише (`RouteForeignOwnersAsync`). Лише звужує: межі читання вище вже застосовані.
@@ -127,16 +127,17 @@ public sealed class GetCellChangesHandler(
         {
             var counts = await audit.CountCellChangesByColumnAsync(filter, TodayStart(), ct).ConfigureAwait(false);
             total = (int)Math.Min(
-                counts.Where(c => readable is null || readable.CanReadColumn(c.ColumnDefId)).Sum(c => c.Total), int.MaxValue);
+                counts.Where(c => visibleSet is null || visibleSet.Contains(c.ColumnDefId)).Sum(c => c.Total), int.MaxValue);
         }
 
         // ⚠ Страхувальний другий рубіж: основний відсів уже в SQL (VisibleColumnIds), тож тут нічого не
         // відкидається; фільтр лишено на випадок читача порту, що фільтр не застосував.
-        var visible = readable is null
+        // V-4: той самий набір, що пішов у SQL (видимі + їхній родовід), а не лише колонки поточної версії.
+        var shown = visibleSet is null
             ? result.Items
-            : [.. result.Items.Where(c => readable.CanReadColumn(c.ColumnDefId))];
+            : [.. result.Items.Where(c => visibleSet.Contains(c.ColumnDefId))];
 
-        return result with { Items = visible, TotalCount = total };
+        return result with { Items = shown, TotalCount = total };
     }
 
     /// <summary>Підсумок журналу за вікном (UI-38, C2): ті самі права, вікно й видимість, що й у <see cref="HandleAsync"/>.</summary>
@@ -157,10 +158,8 @@ public sealed class GetCellChangesHandler(
             return new CellChangeSummaryView(0, 0, 0, 0);
         }
 
-        if (readable is not null)
-        {
-            filter = filter with { VisibleColumnIds = readable.VisibleColumnIds() };
-        }
+        IReadOnlySet<int>? visibleSet;
+        (filter, visibleSet) = await WithVisibleLineageAsync(filter, readable, ct).ConfigureAwait(false);
 
         (filter, empty) = await RouteToOwnerPeriodAsync(filter, readable, ct).ConfigureAwait(false);
         if (empty)
@@ -169,7 +168,7 @@ public sealed class GetCellChangesHandler(
         }
 
         var counts = await audit.CountCellChangesByColumnAsync(filter, TodayStart(), ct).ConfigureAwait(false);
-        var seen = counts.Where(c => readable is null || readable.CanReadColumn(c.ColumnDefId)).ToList();
+        var seen = counts.Where(c => visibleSet is null || visibleSet.Contains(c.ColumnDefId)).ToList();
 
         return new CellChangeSummaryView(
             seen.Sum(c => c.Total), seen.Sum(c => c.Today), seen.Sum(c => c.ByImport), seen.Sum(c => c.ByRecalculation));
@@ -194,6 +193,57 @@ public sealed class GetCellChangesHandler(
     }
 
     private DateTime TodayStart() => (clock ?? TimeProvider.System).GetUtcNow().UtcDateTime.Date;
+
+    /// <summary>
+    /// R-11 + V-4: межі читання в запит — видимі колонки поточної версії документа РАЗОМ з Id тих самих колонок у
+    /// версіях шаблону до переносу проєкту (<see cref="IColumnPathMapper.LineageAsync"/>), бо <c>aud.CellChange</c>
+    /// незмінний і лишається на старих Id.
+    /// </summary>
+    /// <returns>Фільтр із межами і той самий набір для страхувального відсіву; <c>null</c> — меж немає (наскрізний журнал).</returns>
+    /// <remarks>
+    /// <para>
+    /// ⛔ Родовід розширюється ЛИШЕ від колонок, які читач БАЧИТЬ у поточній версії: колонка під Deny свого
+    /// родоводу не дає, тож її правки до переносу так само приховані, як і після. Колонка з тим самим кодом в іншій
+    /// таблиці чи аркуші в родовід не входить (шлях «аркуш → таблиця → колонка», а не код).
+    /// </para>
+    /// <para>
+    /// Історія ОДНІЄЇ комірки (інспектор, найчастіший запит): родовід лише її колонки (її видимість уже перевірена в
+    /// <see cref="AuthorizeAsync"/>), а не всіх видимих колонок документа; <see cref="CellChangeFilter.ColumnLineage"/>
+    /// перетворює рівність <c>ColumnDefId</c> на <c>IN</c> по родоводу.
+    /// </para>
+    /// </remarks>
+    private async Task<(CellChangeFilter Filter, IReadOnlySet<int>? Visible)> WithVisibleLineageAsync(
+        CellChangeFilter filter, DocumentReadScope? readable, CancellationToken ct)
+    {
+        if (readable is null)
+        {
+            // Наскрізний журнал без документа (Security.ViewAudit, Q-177): меж читання немає, адреси комірки теж.
+            return (filter, null);
+        }
+
+        if (columns is null)
+        {
+            var plain = readable.VisibleColumnIds();
+            return (filter with { VisibleColumnIds = plain }, plain.ToHashSet());
+        }
+
+        if (filter.IsSingleCell)
+        {
+            var cell = filter.ColumnDefId!.Value;
+            var lineage = (await columns.LineageAsync([cell], ct).ConfigureAwait(false)).GetValueOrDefault(cell) ?? [cell];
+            return (filter with { VisibleColumnIds = lineage, ColumnLineage = lineage }, lineage.ToHashSet());
+        }
+
+        var visible = readable.VisibleColumnIds();
+        if (visible.Count == 0)
+        {
+            return (filter with { VisibleColumnIds = visible }, new HashSet<int>());
+        }
+
+        var lineages = await columns.LineageAsync(visible, ct).ConfigureAwait(false);
+        IReadOnlyList<int> widened = [.. visible.Concat(lineages.Values.SelectMany(v => v)).Distinct().Order()];
+        return (filter with { VisibleColumnIds = widened }, widened.ToHashSet());
+    }
 
     /// <summary>
     /// Q-17: історія ОДНІЄЇ комірки таблиці «місяці в колонках», переглянутої в періоді, що не володіє колонкою, —

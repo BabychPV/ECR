@@ -32,4 +32,18 @@ public interface IColumnPathMapper
     /// <returns>Таблиця → версія шаблону; невідомої таблиці в результаті немає.</returns>
     public Task<IReadOnlyDictionary<int, int>> GetTemplateVersionsOfTablesAsync(
         IReadOnlyCollection<int> tableDefIds, CancellationToken ct);
+
+    /// <summary>
+    /// V-4: «родовід» колонок — Id ТІЄЇ САМОЇ колонки (шлях «аркуш → таблиця → колонка») в усіх версіях її шаблону
+    /// плюс джерела пар <c>cfg.ColumnRename</c>, що ведуть у будь-який із них (транзитивно). Для читачів журналу
+    /// <c>aud.CellChange</c>, який після переносу проєкту лишається на Id старої версії (журнал незмінний).
+    /// </summary>
+    /// <param name="columnIds">Колонки (зазвичай — видимі колонки поточної версії документа).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>
+    /// Для кожної названої колонки — непорожній перелік, що містить і її саму (невідомий Id — лише він сам).
+    /// Колонка з тим самим кодом в ІНШІЙ таблиці чи аркуші в родовід не входить.
+    /// </returns>
+    public Task<IReadOnlyDictionary<int, IReadOnlyList<int>>> LineageAsync(
+        IReadOnlyCollection<int> columnIds, CancellationToken ct);
 }

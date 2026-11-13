@@ -78,4 +78,9 @@ internal sealed class PrefetchedColumnMapper : IColumnPathMapper
     public Task<IReadOnlyDictionary<int, int>> GetTemplateVersionsOfTablesAsync(
         IReadOnlyCollection<int> tableDefIds, CancellationToken ct)
         => _inner.GetTemplateVersionsOfTablesAsync(tableDefIds, ct);
+
+    /// <inheritdoc />
+    public Task<IReadOnlyDictionary<int, IReadOnlyList<int>>> LineageAsync(
+        IReadOnlyCollection<int> columnIds, CancellationToken ct)
+        => _inner.LineageAsync(columnIds, ct);
 }
