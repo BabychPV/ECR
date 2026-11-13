@@ -33,8 +33,10 @@ public interface IExportStore
     /// <param name="content">Вміст книги.</param>
     /// <param name="lifetime">Скільки живе.</param>
     /// <param name="ct">Скасування.</param>
+    /// <param name="fileBaseName">X-1: основа імені файлу без розширення; <c>null</c> — ім'я за id документа.</param>
     public Task SaveAsync(
-        string exportId, long documentId, int ownerUserId, byte[] content, TimeSpan lifetime, CancellationToken ct);
+        string exportId, long documentId, int ownerUserId, byte[] content, TimeSpan lifetime, CancellationToken ct,
+        string? fileBaseName = null);
 
     /// <summary>Читає книгу; <c>null</c> — її немає або строк вийшов.</summary>
     /// <param name="exportId">Ключ експорту.</param>
@@ -46,4 +48,5 @@ public interface IExportStore
 /// <param name="DocumentId">Документ — потрібен для перевірки гранта при завантаженні (Q-180).</param>
 /// <param name="OwnerUserId">Хто замовив — єдиний, кому книга віддається (S6).</param>
 /// <param name="Content">Вміст книги.</param>
-public sealed record ExportedBook(long DocumentId, int OwnerUserId, byte[] Content);
+/// <param name="FileBaseName">X-1: основа імені файлу; <c>null</c> — завдання до X-1.</param>
+public sealed record ExportedBook(long DocumentId, int OwnerUserId, byte[] Content, string? FileBaseName = null);

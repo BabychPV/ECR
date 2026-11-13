@@ -125,8 +125,13 @@ public sealed class ExportSnapshotHandler(
                 ct)
             .ConfigureAwait(false);
 
+        // X-8 (рішення PO 11.11): ім'я за правилом X-1 — назва звіту мовою користувача, код, період; id лишається.
+        var facts = await snapshots.FindNameFactsAsync(snapshotId, ct).ConfigureAwait(false);
         return new SnapshotExport(
-            string.Create(CultureInfo.InvariantCulture, $"snapshot-{snapshotId}.xlsx"), content);
+            ExportFileName.ForSnapshot(
+                facts?.ReportCode, facts?.ReportName.Get(currentUser.Language), facts?.PeriodKey,
+                facts?.PeriodKind?.ToString(), snapshotId) + ".xlsx",
+            content);
     }
 
     /// <summary>Сторінка рядків; зріз, що зник між викликами, — той самий 404.</summary>

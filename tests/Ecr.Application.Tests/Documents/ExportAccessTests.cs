@@ -127,6 +127,40 @@ public sealed class ExportAccessTests
         Assert.Equal("job-2", jobId);
     }
 
+    /// <summary>
+    /// X-1 (аудит 2026-11): замовлення рахує людське ім'я файлу — назва мовою замовника, File Number, період — і
+    /// везе його в завданні; без цього завантаження називало файл `document-{id}-{GUID}`.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Завдання_несе_людське_ім_я_файлу()
+    {
+        _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), DocumentId, Arg.Any<CancellationToken>())
+            .Returns(EditDecision.Allow());
+        _access.ReadScopeAsync(Arg.Any<AccessProfile>(), DocumentId, Arg.Any<CancellationToken>())
+            .Returns(ReadScopes.Everything(new Domain.Entities.Configuration.TemplateVersionSnapshot(
+                1, 0, [], new Dictionary<int, Domain.Entities.Configuration.ColumnDef>(),
+                new Dictionary<(int, string), Domain.Entities.Configuration.RowDef>())));
+        _jobs.EnqueueAsync<IExcelExportJob>(Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
+            .Returns("job-3");
+
+        var documents = Substitute.For<IDocumentStore>();
+        documents.FindAsync(DocumentId, Arg.Any<PeriodKeyFilter>(), Arg.Any<CancellationToken>())
+            .Returns(new DocumentSummary(
+                DocumentId, 1, "LAND-0007", DateTime.UtcNow, 0, new Dictionary<string, string>(),
+                new Domain.ValueObjects.LocalizedText(new Dictionary<string, string> { ["en"] = "Tengiz" }),
+                PeriodKind: "Monthly"));
+
+        await Handler(documents).HandleAsync(DocumentId, Options(), CancellationToken.None);
+
+        await _jobs.Received(1).EnqueueAsync<IExcelExportJob>(
+            Arg.Is<object?>(p => NamedFile(p, "Tengiz (LAND-0007) 2026-01")),
+            Arg.Any<CancellationToken>(), Arg.Any<int?>());
+    }
+
+    private static bool NamedFile(object? payload, string expected)
+        => payload is ExcelExportTask task && string.Equals(task.FileBaseName, expected, StringComparison.Ordinal);
+
     private void Allow(AccessProfile reader)
     {
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(reader);
@@ -192,8 +226,10 @@ public sealed class ExportAccessTests
     private static bool ServerScoped(object? payload)
         => payload is ExcelExportTask { Options: { HiddenTableDefIds: { Count: 0 }, HiddenColumnDefIds: { Count: 0 } } };
 
-    private ExportDocumentHandler Handler()
-        => new(_jobs, _access, _user, Substitute.For<IAuditWriter>(), Substitute.For<Ecr.Domain.Abstractions.IClock>());
+    private ExportDocumentHandler Handler(IDocumentStore? documents = null)
+        => new(
+            _jobs, _access, _user, Substitute.For<IAuditWriter>(), Substitute.For<Ecr.Domain.Abstractions.IClock>(),
+            documents: documents);
 
     private static ExcelExportOptions Options()
         => new(IncludeFormulas: false, IncludeStyles: false, Language: "en", PeriodKey: 202601);

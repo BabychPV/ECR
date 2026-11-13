@@ -32,7 +32,9 @@ public sealed class ExportDocumentHandler(
     // ✎ Q-17: колонки з іншим власником, період якого поза областю ролі замовника, не вивантажуються (як приховані).
     // Необов'язкові лише заради тестів, що конструюють обробник вручну.
     IMetadataCache? metadata = null,
-    IMonthColumnRouter? monthRouter = null)
+    IMonthColumnRouter? monthRouter = null,
+    // X-1 (аудит 2026-11): назва, File Number і періодичність — для людського імені файлу. `null` — ім'я за id.
+    IDocumentStore? documents = null)
 {
     /// <summary>Право на експорт (`02-contracts.md` §9).</summary>
     public const string Permission = "Document.Export";
@@ -108,6 +110,15 @@ public sealed class ExportDocumentHandler(
         // постановки, а задача має знати, куди класти результат, до запуску.
         var exportId = Guid.NewGuid().ToString("N");
 
+        // X-1: ім'я файлу — ТУТ, бо тут відомі документ, період і мова замовника; задача і завантаження їх не мають.
+        string? fileBaseName = null;
+        if (documents is not null
+            && await documents.FindAsync(documentId, new PeriodKeyFilter(null), ct).ConfigureAwait(false) is { } summary)
+        {
+            fileBaseName = ExportFileName.ForDocument(
+                summary.BusinessKey, summary.NameL10n?.Get(options.Language), options.PeriodKey, summary.PeriodKind);
+        }
+
         // ⚠ `createdByUserId` — щоб автор прочитав стан ВЛАСНОЇ задачі без
         // System.ViewHealth (Q-156). CSV/JSON ідуть ТІЄЮ САМОЮ задачею, що й
         // xlsx: той самий прогрес, `exportId` і завантаження.
@@ -118,7 +129,7 @@ public sealed class ExportDocumentHandler(
 
         var jobId = await jobs
             .EnqueueAsync<IExcelExportJob>(
-                new ExcelExportTask(documentId, options, exportId, normalized, requestedBy), ct, currentUser.UserId)
+                new ExcelExportTask(documentId, options, exportId, normalized, requestedBy, fileBaseName), ct, currentUser.UserId)
             .ConfigureAwait(false);
 
         // ⚠ ПІСЛЯ постановки: запис «експорт замовлено» без задачі в черзі
@@ -157,9 +168,12 @@ public sealed class ExportDocumentHandler(
 /// поставленому до цієї правки; така задача відмовляє, а не кладе файл,
 /// який не має власника.
 /// </param>
+/// <param name="FileBaseName">
+/// X-1: основа імені файлу без розширення (<see cref="ExportFileName.ForDocument"/>); <c>null</c> — завдання до X-1.
+/// </param>
 public sealed record ExcelExportTask(
     long DocumentId, ExcelExportOptions Options, string ExportId, string? Format = DocumentExportFormat.Xlsx,
-    int? RequestedByUserId = null)
+    int? RequestedByUserId = null, string? FileBaseName = null)
 {
     /// <summary>
     /// Книга огляду «Calculation results — усі місяці року» замість книги документа; <c>null</c> — експорт документа.

@@ -80,7 +80,7 @@ public sealed class DownloadExportAccessTests
 
         var result = await Handler().HandleAsync(ExportId, CancellationToken.None);
 
-        Assert.Equal(content, result);
+        Assert.Equal(content, result.Content);
     }
 
     /// <summary>
