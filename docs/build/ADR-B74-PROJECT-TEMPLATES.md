@@ -48,6 +48,28 @@ UI only; does not meet the requirement).
 | P5 | Consistency checks, reports (rpt views already derive the version from `TableDefId`), tools | rpt/consistency tests |
 | P6 | New site-year projects; move tool for LANDUI2026 after Land-under-year; drop `Project.TemplateVersionId`, `FK_Project_TV`, the compatibility path | guard allowlist empty |
 
+## Coordinator answers on the PT01 design (13.11)
+
+- **Q2 `Document.TemplateId`**: NULL in PT01 (NULL = the project's primary template) plus an idempotent repair block in
+  `Sql/seed/99-epilogue.sql`. It becomes NOT NULL in P6.
+- **Q3 L0 alias write path**: a bulk `PUT /template-versions/{id}/month-input-aliases`, for draft versions only. This is a
+  contract change, so it ships in the separate L0 code step with the `openapi.snapshot.json`/`schema.d.ts` regen, not in the
+  PT01 migration commit. PT01 only creates the `cfg.MonthInputAlias` table.
+- **Q1 PeriodKind per template**: OPEN (the human is being asked). PT01 does NOT add `ProjectTemplate.PeriodKind`.
+
+### PeriodKind extensibility (so that Q1 needs no re-keying)
+
+If the answer is «per template», it is additive:
+- **Column**: `doc.ProjectTemplate.PeriodKind tinyint NULL` (NULL = `Project.PeriodKind`). `doc.ProjectTemplate` is keyed by a
+  surrogate `Id` plus `UQ_ProjectTemplate (ProjectId, TemplateId)`, so the column changes no key.
+- **Timeline**: `doc.ProjectTemplateVersion` is keyed `(ProjectId, TemplateId, FromPeriodKey)`. `FromPeriodKey` is then
+  read in that template's period kind, and the key stays as it is.
+- **Periods**: `doc.Period` is unique per `(ProjectId, PeriodKey)` (`UQ_Period`,
+  `Configurations/DocumentConfiguration.cs:145-146`), and a Yearly key equals the Monthly January key
+  (`src/Ecr.Domain/ValueObjects/PeriodKey.cs:82-84`). Per-template kinds therefore need a `PeriodKind tinyint NOT NULL
+  DEFAULT <project kind>` on `doc.Period`, with `UQ_Period` widened to `(ProjectId, PeriodKind, PeriodKey)`. That re-keys
+  `doc.Period`, not anything that PT01 adds.
+
 ## Consequences
 
 - Until P2 closes, `doc.fn_VersionOf(project, period)` keeps its signature and answers for the project's primary template
