@@ -3388,13 +3388,35 @@ public interface IReportViewGenerator
 Збій: `50422` (таблиця > 250 колонок), `50409` (зіткнення імен вʼюх);
 повтор — старт застосунку або `EXEC rpt.usp_GenerateTemplateViews`.
 
+✎ P-4b (D-479): після публікації вʼюхи будує фонова задача `IReportViewsJob`; поки вона чекає чи йде, картка
+каже «оновлюються» (`Pending`/`PendingTemplates`, Healthy). Позначка має покоління: задача читає його на старті
+(`PendingGeneration`) і знімає позначку (`Settled`), лише якщо за прогін не з'явилась новіша (тоді в черзі злитий
+повтор). Члени P-4b мають порожню реалізацію за замовчуванням.
+
 ```csharp
 public interface IReportViewStatus
 {
     public void Failed(ReportViewFailure failure);
     public void Succeeded(int? templateVersionId);
     public IReadOnlyList<ReportViewFailure> Snapshot();
+    public long Pending(int templateId) => 0;
+    public long PendingGeneration(int templateId) => 0;
+    public void Settled(int templateId, long generation) { }
+    public IReadOnlyList<int> PendingTemplates() => [];
 }
+```
+
+#### `IReportViewsJob`
+
+✎ P-4b (D-479): перегенерація вʼюх SSRS шаблону у фоні після публікації його версії. Ставиться ЗЛИТТЯМ на шаблон
+(`EnqueueCoalescedAsync`, ціль `ReportViewsTarget.Of(templateId)` = `template{id}`, payload `ReportViewsTask(TemplateId)`);
+бере всі опубліковані й застарілі версії шаблону (`Status IN (1, 2)`, як процедура) і кличе той самий
+`IReportViewGenerator`. Збій однієї версії не зупиняє решту; перший кидається — задача `Failed`, повтор — «Restart».
+Лейн Default (процес Api, спільний `IReportViewStatus`). Підпис у переліку задач — `jobs.kind.reportViews`.
+
+```csharp
+public interface IReportViewsJob : IBackgroundJob;
+public sealed record ReportViewsTask(int TemplateId);
 ```
 
 #### `IResourceNameResolver`

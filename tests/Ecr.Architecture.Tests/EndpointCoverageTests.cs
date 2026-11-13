@@ -431,6 +431,9 @@ public sealed partial class EndpointCoverageTests
                 "jobs.kind.consistencyCheck", "jobs.kind.orphanScan", "jobs.kind.registryImpactRecalculation",
                 "jobs.kind.migrateDocumentVersion", "jobs.kind.outboxFlush", "jobs.kind.flertCompositionSync",
 
+                // P-4b (D-479): вʼюхи SSRS після публікації — фонова задача злиття на шаблон.
+                "jobs.kind.reportViews",
+
                 // FP-7: повторювані задачі конкретного класу (`typeof(TJob).FullName`).
                 "jobs.kind.archive", "jobs.kind.notification", "jobs.kind.partitionCheck",
                 "jobs.kind.periodState", "jobs.kind.registrySync", "jobs.kind.reportRetention",
