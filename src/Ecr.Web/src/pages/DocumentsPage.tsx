@@ -12,7 +12,7 @@ import {
   Text,
   VisuallyHidden,
 } from '@mantine/core';
-import { useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { listDocuments, listDocumentTemplateVersions, type DocumentListPage } from '@/features/documents/api';
 import { DocumentListFilterBar } from '@/features/documents/DocumentListFilterBar';
@@ -115,7 +115,11 @@ export function DocumentsPage(): JSX.Element {
   const [urlYear] = useUrlNumber('year');
   const thisYear = new Date().getFullYear();
   const year = urlYear ?? (legacyPeriodKey !== null ? Math.trunc(legacyPeriodKey / 100) : thisYear);
-  const [cursor] = useUrlState('cursor');
+  /*
+   * ✎ B36 (аудит W-3, Q8 дефолт A): курсора в адресі більше НЕМАЄ — «Load more» дописує сторінки в кеш
+   * (`useInfiniteQuery`), а курсор сам по собі не відтворює вже показаних рядків над ним. Стара адреса з `?cursor=`
+   * (закладка до B36) його ігнорує й відкриває першу сторінку; фільтри/рік і далі знімають його з адреси.
+   */
   // `UI-40`: подання — в адресі (`?view=board`, як у макеті), щоб посилання відкривало дошку.
   const [viewParam] = useUrlState('view');
   const view = parseDocumentsView(viewParam);
@@ -148,12 +152,18 @@ export function DocumentsPage(): JSX.Element {
   // Версії - масив; у ключ кешу іде рядок, щоб новий масив з тими ж версіями не давав новий запит.
   const versionsKey = filters.versions.join(',');
 
-  const query = useQuery({
+  /*
+   * ✎ B36: сторінки накопичуються під ОДНИМ ключем фільтрів — зміна фільтра/року дає новий ключ, тобто перелік знову
+   * з першої сторінки. ⚠ На місці колишнього `cursor` — мітка `'pages'`: форма даних (`{ pages, pageParams }`) інша,
+   * ніж у звичайного запиту, і ключ не має збігтися ні з чим, що читає `['documents', …]` як одну сторінку.
+   * Префікс `'documents'` лишається — інвалідації (`['documents']`) оновлюють і цей перелік.
+   */
+  const query = useInfiniteQuery({
     queryKey: [
       'documents',
       null,
       year,
-      cursor,
+      'pages',
       filters.state,
       filters.mine,
       filters.hasLateEdits,
@@ -165,11 +175,13 @@ export function DocumentsPage(): JSX.Element {
       versionsKey,
       filters.versionSort,
     ],
-    queryFn: () =>
+    initialPageParam: null as string | null,
+    getNextPageParam: (last: DocumentListPage) => last.nextCursor ?? undefined,
+    queryFn: ({ pageParam }) =>
       listDocuments({
         periodKey: null,
         year,
-        cursor,
+        cursor: pageParam,
         state: filters.state,
         mine: filters.mine,
         ownerUserId: filters.owner,
@@ -182,6 +194,17 @@ export function DocumentsPage(): JSX.Element {
         projectId: filters.projectId,
       }),
   });
+  // Усі завантажені сторінки — одним переліком: рядки підряд, `nextCursor` — останньої сторінки.
+  const pages = query.data?.pages ?? [];
+  const lastPage = pages.at(-1);
+  const list: DocumentListPage | undefined =
+    lastPage === undefined
+      ? undefined
+      : {
+          items: pages.flatMap((page) => page.items),
+          nextCursor: lastPage.nextCursor ?? null,
+          totalCount: lastPage.totalCount ?? null,
+        };
 
   // Варіанти фільтра «Version»: усі версії видимих документів (за проєктом і періодом), а не лише сторінки.
   const versionOptionsQuery = useQuery({
@@ -389,13 +412,13 @@ export function DocumentsPage(): JSX.Element {
         // Варіанти — УСІ версії видимих документів (`GET /documents/template-versions`); обрані, яких сервер уже не
         // віддає, лишаються (їх є чим зняти). Поки відповіді немає (або вона відмовила) — версії поточної сторінки.
         versionOptions={mergeVersionOptions(
-          versionOptionsQuery.data?.versions ?? distinctVersions(query.data?.items ?? []),
+          versionOptionsQuery.data?.versions ?? distinctVersions(list?.items ?? []),
           filters.versions,
         )}
-        staleOnPage={query.data?.items.filter((d) => d.resultsStale === true).length ?? 0}
+        staleOnPage={list?.items.filter((d) => d.resultsStale === true).length ?? 0}
         // ✎ D-450: під фільтром за людиною кожен рядок сторінки — її документ, тож ім'я вже є без окремого запиту.
         ownerName={
-          query.data?.items.find((d) => filters.owner !== null && d.ownerUserId === filters.owner)?.ownerDisplayName ??
+          list?.items.find((d) => filters.owner !== null && d.ownerUserId === filters.owner)?.ownerDisplayName ??
           undefined
         }
       >
@@ -442,8 +465,9 @@ export function DocumentsPage(): JSX.Element {
        */}
       <AsyncBoundary<DocumentListPage>
         isPending={query.isPending}
-        error={query.error}
-        data={query.data}
+        // ⚠ Відмова ДОЗАВАНТАЖЕННЯ не ховає вже показані рядки: її видно під ними, біля «Load more».
+        error={query.isFetchNextPageError ? null : query.error}
+        data={list}
         isEmpty={(page) => page.items.length === 0}
         emptyTitle={
           filters.active
@@ -671,8 +695,19 @@ export function DocumentsPage(): JSX.Element {
 
             {/* ⚠ Курсорна пагінація, а не offset: за місяць у проєкті тисячі
                 документів, і сторінка 200 через OFFSET сканує все, що до неї. */}
-            {page.nextCursor !== null && (
-              <Button mt="md" variant="default" onClick={() => setUrlParams({ cursor: page.nextCursor })}>
+            {/* ✎ B36: «Load more» ДОПИСУЄ наступну сторінку під уже показані рядки (`fetchNextPage`), а не
+                замінює їх. */}
+            {query.isFetchNextPageError && (
+              <ErrorAlert error={query.error} onRetry={() => void query.fetchNextPage()} />
+            )}
+            {page.nextCursor !== null && page.nextCursor !== undefined && (
+              <Button
+                mt="md"
+                variant="default"
+                loading={query.isFetchingNextPage}
+                onClick={() => void query.fetchNextPage()}
+                data-documents-more=""
+              >
                 {t('documents.more')}
               </Button>
             )}
@@ -694,8 +729,8 @@ export function DocumentsPage(): JSX.Element {
               const calendar = calendarOf(projectId);
               return calendar === undefined ? undefined : (calendar.periods.find((p) => p.isCurrent)?.periodKey ?? null);
             }}
-            document={query.data?.items.find((item) => String(item.id) === quickLookId)}
-            listReady={query.data !== undefined}
+            document={list?.items.find((item) => String(item.id) === quickLookId)}
+            listReady={list !== undefined}
             onClose={() => {
               // Після зняття шторки — фокус назад на «око» (KIT §5; «Аудит»: e2e -Grep "модальний").
               const opener = quickLookOpener.current;
