@@ -394,6 +394,9 @@ public sealed partial class DocumentVersionMigrationTests(SqlServerFixture sql)
         /// <summary>Інший код таблиці (<c>…_NEW</c>) і інший код колонки C2 (<c>C2X_…</c>).</summary>
         TableAndColumnRenamed,
 
+        /// <summary>V-5: та сама таблиця (код не змінюється), лише колонка C2 має інший код (<c>C2X_…</c>).</summary>
+        ColumnRenamed,
+
         /// <summary>LP-29: C2 була Decimal 28/12, у цілі — 34/16 (розширення).</summary>
         C2PrecisionWidened,
 
@@ -566,7 +569,7 @@ public sealed partial class DocumentVersionMigrationTests(SqlServerFixture sql)
         void Column(string code, int ordinal, CellDataType type)
         {
             // ⚠ Ключ словника — логічне ім'я (C2); код у цільовій версії може відрізнятися (C2X_…).
-            var codePrefix = code == "C2" && target == Target.TableAndColumnRenamed ? "C2X" : code;
+            var codePrefix = code == "C2" && (target is Target.TableAndColumnRenamed or Target.ColumnRenamed) ? "C2X" : code;
             var column = new ColumnDef(table.Id, EcrCode.Create($"{codePrefix}_{tag}"), Name($"{code} relabelled"), ordinal, type);
             columns[code] = column;
             db.ColumnDefs.Add(column);
