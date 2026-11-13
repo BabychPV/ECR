@@ -620,7 +620,7 @@ public sealed partial class MessageKeyRatchetTests
     /// <c>new BusinessRuleException(</c> тут такий, — а таких пояснень у
     /// цьому коді повно.
     /// </remarks>
-    private static string MaskComments(string text)
+    internal static string MaskComments(string text)
     {
         var chars = text.ToCharArray();
 
@@ -664,7 +664,7 @@ public sealed partial class MessageKeyRatchetTests
     /// (<c>@"…"</c>), сирого (<c>"""…"""</c>) та інтерпольованого (дірки
     /// <c>{…}</c> із вкладеними лапками).
     /// </summary>
-    private static int SkipLiteral(string text, int quote)
+    internal static int SkipLiteral(string text, int quote)
     {
         if (text[quote] == '\'')
         {
