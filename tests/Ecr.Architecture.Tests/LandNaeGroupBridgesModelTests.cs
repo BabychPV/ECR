@@ -265,7 +265,8 @@ public sealed class LandNaeGroupBridgesModelTests
             Assert.Equal("Formula", category.GetProperty("dataType").GetString());
             Assert.True(category.GetProperty("readOnly").GetBoolean());
             Assert.Equal(
-                $"REGFIELD(REGFIND('LAND_NAE_GROUP', [{nae}]), 'CATEGORY1')",
+                // B88 (рішення людини 13.11): NAE поза групами - порожньо без помилки; перехоплено лише REGFIND, не REGFIELD.
+                $"REGFIELD(IFERROR(REGFIND('LAND_NAE_GROUP', [{nae}]), NULL), 'CATEGORY1')",
                 category.GetProperty("expression").GetString());
             Assert.Null(Unresolved(model, table, "Category1"));
         }

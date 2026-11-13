@@ -1,6 +1,7 @@
-import { lazy, Suspense, useEffect, useRef, useState, type ComponentProps, type JSX } from 'react';
-import { Button, Divider, Text } from '@mantine/core';
+import { lazy, Suspense, useContext, useEffect, useRef, useState, type ComponentProps, type JSX } from 'react';
+import { Anchor, Button, Divider, Stack, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
+import { UNSAFE_NavigationContext, type Navigator } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { apiFetch, EcrApiError } from '@/api/client';
@@ -19,13 +20,12 @@ import { useStatusStale } from './statusStale';
 import { can, useSession, type MeDto } from '@/shared/session/useSession';
 import { LazyConfirmModal, LazyReasonModal } from './lazyDialogs';
 import { Hint } from '@/shared/ui/Hint';
-import { showApiError, showDone, showWarning } from '@/shared/ui/notify';
+import { notificationCloseButtonProps, showApiError, showDone, showWarning } from '@/shared/ui/notify';
 import { useApproverEditAvailability, useRecallAvailability, useSubmissionTarget, type RecallSheetRequest } from './api';
 import { outcomeOf, pollInterval } from './jobFollow';
 import { useSettledAction } from '@/features/grid/settleEdits';
 import { isRecalculateKey, isTypingOrDialogTarget } from '@/features/grid/shortcutKey';
 import { useNarrowScreen } from '@/shared/narrowScreen';
-import { humanizeJobId } from './jobLabel';
 import type { RecalcRequestOutcome } from './RecalcSkippedList';
 import { isAllowed, type WorkflowAction } from './transitions';
 import { editsDeferToServer, isEditable } from './sheetEditability';
@@ -60,6 +60,53 @@ function showSheetError(error: unknown, sheetName: string | null): void {
     (module) => module.showSheetError(error, sheetName),
     () => showApiError(error),
   );
+}
+
+/**
+ * B46(2), живий прохід W15s: тост F9 / «Recalculate» показував сирий ідентифікатор задачі
+ * («… as job Recalculation-doc96-p202610-s218-…» — `humanizeJobId` такого вигляду не впізнає).
+ * Тепер — лише «перерахунок аркуша в черзі»; хід задачі й так видно на кнопці аркуша (опитування
+ * `GET /jobs/{id}` нижче) і в шухляді «My tasks» (усі ролі, `mine=true`).
+ *
+ * Шлях до самої задачі — посилання на `/admin/jobs?id=<сирий jobId>` (той самий, що в тості збору
+ * `SourcesPage`), і ЛИШЕ з `System.ViewHealth`: маршрут `/admin/jobs` закритий цим правом
+ * (`routes.ts`), без нього посилання вело б у 403.
+ *
+ * ⚠ Тости живуть поза `RouterProvider` (`App.tsx`), тож `Link` у тості без контексту: перехід —
+ * навігатором роутера, захопленим тут. Поза роутером (ізольовані тести, `DocumentActionBar`) —
+ * звичайне посилання з тією самою адресою.
+ */
+function showSheetRecalcQueued(jobId: string, mayOpenJob: boolean, navigator: Navigator | null): void {
+  const message = t('workflow.sheetRecalcQueued');
+
+  if (!mayOpenJob) {
+    showDone(message);
+    return;
+  }
+
+  const to = `/admin/jobs?id=${encodeURIComponent(jobId)}`;
+  const id = notifications.show({
+    color: 'statusSuccess',
+    closeButtonProps: notificationCloseButtonProps,
+    message: (
+      <Stack gap="xs">
+        <Text size="sm">{message}</Text>
+        <Anchor
+          href={to}
+          size="sm"
+          onClick={(event) => {
+            notifications.hide(id);
+            if (navigator === null) return;
+
+            event.preventDefault();
+            navigator.push(to);
+          }}
+        >
+          {t('registries.impact.openJob')}
+        </Anchor>
+      </Stack>
+    ),
+  });
 }
 
 /** Аркуш, над яким виконуються дії робочого процесу. */
@@ -426,6 +473,10 @@ export function useSheetActions({
   const queryClient = useQueryClient();
   const session = useSession();
 
+  // B46(2): навігатор роутера для посилання в тості; поза роутером контексту немає (`null`), і це не помилка.
+  const routing = useContext(UNSAFE_NavigationContext) as { navigator: Navigator } | null;
+  const routerNavigator = routing?.navigator ?? null;
+
   // Знімок адреси цього рендеру: те, що оператор бачить у мить кліку (N3-01).
   const here: ActionTarget = { sheetDefId, periodKey, sheetName, sheetCopyId };
 
@@ -640,11 +691,9 @@ export function useSheetActions({
       // ⚠ Адреса фіксується САМЕ ТУТ — у мить, коли задача стала в чергу, — і
       // далі не змінюється, хай оператор ходить по періодах скільки хоче.
       setRecalc({ jobId: job.jobId, documentId, sheetDefId: at.sheetDefId, periodKey: at.periodKey });
-      // ⛔ Аудит-пас 8, lane6, п.8: людський вигляд у ТОСТІ, `jobId` у стані
-      // (`setRecalcJobId`) — і, отже, в запиті опитування нижче — не
-      // змінюється.
-      // ✎ UAT-recalc-ux: «подані пропускаються» більше не правда — пропускаються лише затверджені.
-      showDone(t('workflow.recalcQueued', { job: humanizeJobId(job.jobId) }));
+      // ⛔ B46(2): у ТОСТІ ідентифікатора задачі немає зовсім (сирий `Recalculation-doc96-…` бачила людина);
+      // `jobId` у стані — і, отже, в запиті опитування нижче — не змінюється.
+      showSheetRecalcQueued(job.jobId, can(session.data, 'System.ViewHealth'), routerNavigator);
     },
     onError: (error, at) => showSheetError(error, at.sheetName),
   });

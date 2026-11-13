@@ -4,7 +4,7 @@ import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { queryKeys } from '@/api/queryKeys';
 import { DocumentHeaderPanel } from '@/features/documents/DocumentHeaderPanel';
-import { RecalculationPollMs } from '@/features/grid/useCellPatch';
+import { RecalculationPollMs, isFollowedJob } from '@/features/grid/useCellPatch';
 import { testTheme } from '@/test/render';
 
 /**
@@ -121,7 +121,29 @@ function recalcStatus(): string | null {
   return document.querySelector('[data-recalc-status]')?.getAttribute('data-recalc-status') ?? null;
 }
 
-afterEach(() => {
+/**
+ * B91: слідкувачі (`activeFollowers`) — стан МОДУЛЯ з ключем `документ:період`. Тест, що лишив задачу `Running`
+ * (тест «статус… періоду сторінки»), лишає й живого слідкувача з ВЛАСНИМ `QueryClient`; наступний тест із тим самим
+ * документом і періодом лише перемикав його на свою задачу, і зрізи перечитувались у чужому клієнті (червоне під
+ * `--sequence.shuffle`, сіди 27060 і 3). Тому після кожного тесту всі опитані задачі завершуються, і чекаємо, доки
+ * слідкувачі відпустять ключі.
+ */
+async function drainFollowers(): Promise<void> {
+  const ids = [...new Set(jobRequests)];
+  if (ids.length === 0) return;
+  for (const id of ids) jobStates.set(id, { state: 'Succeeded', writtenCount: 0 });
+  await waitFor(async () => {
+    if (vi.isFakeTimers()) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(RecalculationPollMs + 100);
+      });
+    }
+    expect(ids.filter((id) => isFollowedJob(id))).toEqual([]);
+  });
+}
+
+afterEach(async () => {
+  await drainFollowers();
   vi.useRealTimers();
   vi.unstubAllGlobals();
   jobStates.clear();

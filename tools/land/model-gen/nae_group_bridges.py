@@ -10,7 +10,8 @@
      af-land-nae-groups.json), а не вводяться руками й не беруться з прода. Міст - Formula-колонка з кодом аргументу:
          REGFIELD(REGFIND('LAND_NAE_GROUP', [<колонка NAE таблиці>]), 'POWER_GROUP' | 'CATEGORY1')
      NAE немає в довіднику -> REGFIND дає #N/A -> аргумент не обчислено -> рядок без результату (стара система:
-     `Error Power value` / `Error category1 - NAE` і `continue`).
+     `Error Power value` / `Error category1 - NAE` і `continue`). ✎ B88 (рішення людини 13.11): для Category1 - ПОРОЖНЬО
+     без помилки (`REGFIELD(IFERROR(REGFIND(...), NULL), 'CATEGORY1')`), комірка не блокує подання; Land_Power - як було.
      Нормалізація NAE. У C11_11_02 NAE береться ЗІ ЗНЯТИМИ пробілами (`.Replace(" ", "")`), у C11_03 - сирим
      (`naeNumberObj.ToString()`, без жодної нормалізації). Діалект шаблонів не має функції заміни тексту (є лише
      CONVERT/SUM/.../IF/IFERROR/REG*), тому нормалізація виразом неможлива: у довідник пишуться ВСІ 8 написань ключа з дужками -
@@ -121,7 +122,15 @@ def registry(entries):
 
 
 def nae_expression(field, nae_column):
-    return "REGFIELD(REGFIND('%s', [%s]), '%s')" % (REGISTRY, nae_column, field)
+    """Міст за NAE. B88 (рішення людини 13.11): Category1 для NAE поза групами - ПОРОЖНЬО без помилки (стара система
+    показує порожньо; C11_11_02 рядок без групи не рахує - правило категорії дає порожній ключ). Тому для CATEGORY1
+    промах пошуку перехоплюється IFERROR лише навколо REGFIND (IFNA/ISNA у діалекті шаблонів немає) і дає NULL - той
+    самий шлях, що «запис є, поля немає» (REGFIELD(NULL) = NULL); помилка самого REGFIELD (поле) не ховається.
+    POWER_GROUP (Land_Power, C11_03) - без змін: невідомий NAE лишається #N/A."""
+    lookup = "REGFIND('%s', [%s])" % (REGISTRY, nae_column)
+    if field == 'CATEGORY1':
+        lookup = 'IFERROR(%s, NULL)' % lookup
+    return "REGFIELD(%s, '%s')" % (lookup, field)
 
 
 def mass_fraction_fragment(codes):
@@ -278,8 +287,10 @@ def apply(out, registries, af_attrs):
         'powerTables': power_tables,
         'category1Tables': cat_tables,
         'entries': len(entries),
-        'rule': 'NAE not in LAND_NAE_GROUP (or the group field empty) -> #N/A / empty -> argument not computed -> row has '
-                'no result (legacy: Error Power value / Error category1 - NAE, continue)',
+        'rule': 'Land_Power: NAE not in LAND_NAE_GROUP (or the group field empty) -> #N/A / empty -> argument not computed '
+                '-> row has no result (legacy: Error Power value, continue). Category1 (B88, human 13.11): NAE not in '
+                'LAND_NAE_GROUP -> empty without error (IFERROR around REGFIND only -> NULL), does not block submit; '
+                'ECW_C11_11_02 does not compute such rows anyway (category rule gives an empty key outside groupNAE)',
         'normalization': 'dialect of templates has no text replace: keys with parentheses are stored in all 8 '
                          'spellings with at most one space before "(", after "(" and before ")" (Category1; legacy '
                          'strips every space); REGFIND trims, collapses space runs and ignores case itself; a space '
