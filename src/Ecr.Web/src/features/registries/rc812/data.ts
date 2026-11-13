@@ -16,12 +16,18 @@ import { getRegistryRows, type RegistryRow } from '@/features/registries/rows/ap
 export const rowsKey = (code: string, asOf: string | null, q: string, asOfUtc: string | null = null) =>
   ['registries', 'rows', code, asOf ?? '', q, asOfUtc ?? ''] as const;
 
-/** Опис довідника — той самий ключ і запит, що в конструкторі: кеш спільний. */
-export function useRegistryDefinition(code: string) {
+/**
+ * Опис довідника — той самий ключ і запит, що в конструкторі: кеш спільний.
+ *
+ * `enabled = false` — не питати сервер про довідник, якого напевно немає (дзеркало FLERT до першого синку, P3 F13
+ * #841): інакше кожне відкриття сторінки лишало `404` у консолі браузера.
+ */
+export function useRegistryDefinition(code: string, enabled = true) {
   return useQuery({
     queryKey: queryKeys.registries.definition(code),
     queryFn: () => apiFetch<RegistryDefinitionDto>(`/api/v1/registries/${encodeURIComponent(code)}/definition`),
     refetchOnWindowFocus: false,
+    enabled,
   });
 }
 

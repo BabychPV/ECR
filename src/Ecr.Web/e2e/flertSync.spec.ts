@@ -66,6 +66,46 @@ test.describe('FLERT: «Синхронізувати зараз» і стан с
         { timeout: 120_000 },
       )
       .toBe(true);
-    await expect(panel).toContainText(/Sync is off|Синхронизация выключена|Синхрондау өшірулі/, { timeout: 30_000 });
+    // ⚠ Без урахування регістру: після P3 #841 (c) прогін при вимкненому синку — «skipped — sync is off», без окремого
+    // рядка «Sync is off — nothing was read.»; про вимкнений синк каже «Daily sync is off …».
+    await expect(panel).toContainText(/sync is off|синхронизация выключена|синхрондау өшірулі/i, { timeout: 30_000 });
+    // P3 F13 #841 (c): прогін при вимкненому синку — «пропущено», а не «succeeded» поруч із «Sync is off».
+    await expect(panel).toContainText(/skipped — sync is off|пропущена — синхронизация выключена|өткізіп жіберілді/);
+    await expect(panel).not.toContainText(/succeeded|успешно|сәтті/);
+  });
+
+  test('дзеркало до першого синку: без 404 у браузері, читабельна шапка, посилання на конструктор', async ({ page }) => {
+    test.setTimeout(120_000);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await signIn(page);
+
+    // Свіжий стенд дзеркала GAS_COMPOSITION не має (його заводить лише увімкнений синк); якщо хтось завів — нема що
+    // перевіряти тут.
+    const existing = await page.request.get('/api/v1/registries/GAS_COMPOSITION/definition');
+    test.skip(existing.status() !== 404, 'GAS_COMPOSITION уже існує на стенді — нейтрального стану немає.');
+
+    const notFound: string[] = [];
+    page.on('response', (response) => {
+      if (response.status() === 404 && response.url().includes('/api/v1/registries/GAS_COMPOSITION')) {
+        notFound.push(response.url());
+      }
+    });
+
+    await page.goto('/admin/registries/GAS_COMPOSITION/entries');
+    const pending = page.getByTestId('flert-mirror-pending');
+    await expect(pending).toBeVisible({ timeout: 30_000 });
+
+    // (d) адміністратор має `Registry.EditDefinition` — посилання на конструктор у нейтральній смузі.
+    const designer = pending.getByRole('link', { name: /Registry designer|Конструктор справочника|Анықтамалық конструкторы/i });
+    await expect(designer).toBeVisible();
+    await expect(designer).toHaveAttribute('href', '/admin/registries');
+
+    // (b) код у шапці — один раз і без лічильника «0».
+    const header = page.locator('main').getByRole('heading', { level: 1 });
+    await expect(header).toHaveText('GAS_COMPOSITION');
+
+    // (a) сторінка не питає опису довідника, якого немає в переліку.
+    await page.waitForLoadState('networkidle');
+    expect(notFound, `404 на сторінці дзеркала: ${notFound.join(', ')}`).toEqual([]);
   });
 });

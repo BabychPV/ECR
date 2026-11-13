@@ -36,7 +36,8 @@ namespace Ecr.Infrastructure.Jobs;
 /// </list>
 /// ⚠ Одночасний другий прогін (розклад + майбутня кнопка) — <see cref="JobDeferredException"/> за applock-ом.
 /// <para>
-/// ⚠ Перерахунок залежних документів після зміни (F6) і кнопка «Синхронізувати» (F3) — наступні кроки.
+/// ⚠ Перерахунок залежних документів після зміни — F6, <see cref="FlertSyncDependentsTrigger"/> за ключем
+/// <c>Flert:Sync:RecalculateDependents</c> (типово вимкнено).
 /// </para>
 /// </remarks>
 public sealed class FlertCompositionSyncJob(
@@ -83,6 +84,17 @@ public sealed class FlertCompositionSyncJob(
                 .ConfigureAwait(false);
             run.Complete(outcome.Status, outcome.ToJson(), clock.UtcNow);
             await db.SaveChangesAsync(ct).ConfigureAwait(false);
+
+            // F6: змінене дзеркало — перерахунок залежних документів відкритих періодів (типово вимкнено).
+            if (FlertSyncDependentsTrigger.IsEnabled(configuration) && outcome.Counts is { AnyChange: true })
+            {
+                await using var scope = scopes.CreateAsyncScope();
+                await ActivatorUtilities
+                    .CreateInstance<FlertSyncDependentsTrigger>(scope.ServiceProvider, true)
+                    .OnSyncedAsync(outcome, Codes, ct)
+                    .ConfigureAwait(false);
+            }
+
             await progress.ReportAsync(100, null, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException and not JobDeferredException)

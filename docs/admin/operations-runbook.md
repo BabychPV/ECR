@@ -312,6 +312,7 @@ ORDER BY [Ts];
 | `Flert:Sync:DataSourceCode` | ні | `FLERT` | Значення на старті не перевіряється. |
 | `Flert:Sync:Enabled` | ні | `false` | `true` або `false`. |
 | `Flert:Sync:MaxDeactivatePercent` | ні | `10` | Ціле число, не менше 0. |
+| `Flert:Sync:RecalculateDependents` | ні | `false` | `true` або `false`. |
 | `Health:RawDataPointWarnRows` | ні | `20000000` | Ціле число, не менше 0. |
 | `Health:WarmupOnStart` | ні | `true` | `true` або `false`. |
 | `Integration:AfTimeZoneId` | ні | — | Формат перевіряється на старті (див. текст відмови служби). |

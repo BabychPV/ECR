@@ -114,6 +114,10 @@ export function FlertSyncPanel({ registryCode }: { readonly registryCode: string
   const lines: string[] = [];
   if (run === null || run === undefined) {
     lines.push(t('flert.sync.never'));
+  } else if (run.reason === 'disabled') {
+    // P3 F13 #841 (c): прогін при вимкненому синку журнал пише як `Succeeded`, і смуга казала «succeeded» поруч із
+    // «Sync is off». Такий прогін нічого не читав: стан — «пропущено», без нульових лічильників і без повтору причини.
+    lines.push(t('flert.sync.lastRun', { time: formatDateTime(run.startedAt), status: t('flert.sync.status.skipped') }));
   } else {
     lines.push(t('flert.sync.lastRun', { time: formatDateTime(run.startedAt), status: statusText(run.status) }));
     lines.push(

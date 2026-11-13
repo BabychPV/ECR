@@ -41,45 +41,51 @@ const notFound = (code: string): Response =>
     404,
   );
 
+const Designer = Catalog['registries.constructor'];
+
 /** Перелік довідників без дзеркал FLERT; опис і рядки будь-якого довідника — 404, як на стенді до першого синку. */
-function serve(): void {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.includes('/ui-strings/')) return json({ languageCode: 'en', revision: 1, strings: Catalog });
-      if (url.includes('/api/v1/me')) {
-        return json({
-          denies: [],
-          grants: {},
-          isSimulation: false,
-          language: 'en',
-          mustChangePassword: false,
-          permissions: ['Registry.View', 'Registry.EditData', 'Registry.EditDefinition'],
-          simulatedForUserId: null,
-          userId: 1,
-          userName: 'tester',
-        });
-      }
-      const missing = /\/api\/v1\/registries\/([^/?]+)\//.exec(url);
-      if (missing !== null) return notFound(decodeURIComponent(missing[1]!));
-      if (url.endsWith('/api/v1/registries')) {
-        return json([
-          {
-            id: 68,
-            code: 'AIR_AREA',
-            nameL10n: { values: { en: 'Air permit areas' } },
-            fields: [],
-            isTemporal: false,
-            isHierarchical: false,
-            sourceKind: 'Local',
-          },
-        ]);
-      }
-      return json(null);
-    }),
-  );
+function serve(
+  permissions: readonly string[] = ['Registry.View', 'Registry.EditData', 'Registry.EditDefinition'],
+): ReturnType<typeof vi.fn> {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes('/ui-strings/')) return json({ languageCode: 'en', revision: 1, strings: Catalog });
+    if (url.includes('/api/v1/me')) {
+      return json({
+        denies: [],
+        grants: {},
+        isSimulation: false,
+        language: 'en',
+        mustChangePassword: false,
+        permissions,
+        simulatedForUserId: null,
+        userId: 1,
+        userName: 'tester',
+      });
+    }
+    const missing = /\/api\/v1\/registries\/([^/?]+)\//.exec(url);
+    if (missing !== null) return notFound(decodeURIComponent(missing[1]!));
+    if (url.endsWith('/api/v1/registries')) {
+      return json([
+        {
+          id: 68,
+          code: 'AIR_AREA',
+          nameL10n: { values: { en: 'Air permit areas' } },
+          fields: [],
+          isTemporal: false,
+          isHierarchical: false,
+          sourceKind: 'Local',
+        },
+      ]);
+    }
+    return json(null);
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  return fetchMock;
 }
+
+/** Шляхи всіх запитів сторінки до цього моменту. */
+const requested = (fetchMock: ReturnType<typeof vi.fn>): string[] => fetchMock.mock.calls.map((call) => String(call[0]));
 
 function show(code: string): QueryClient {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -135,5 +141,57 @@ describe('D-476: дзеркало FLERT до першого синку', () => {
     expect((await screen.findByRole('alert')).textContent).toContain('ECR-REG-0404');
     expect(screen.queryByText(Pending!)).toBeNull();
     expect(await screen.findByRole('button', { name: NewEntry! })).toBeTruthy();
+  });
+
+  /**
+   * P3 F13 #841 (a): до першого синку сторінка питала опис і отримувала `404` у консолі браузера.
+   * ⛔ Доказ: повернути `useRegistryDefinition(code)` без `enabled` у `RegistryDataPage.tsx` — червоний.
+   */
+  it('(a) опис дзеркала, якого немає в переліку, не запитується — жодного 404', async () => {
+    const fetchMock = serve();
+    await loadCatalog('en', 'private');
+    show('STREAM');
+
+    expect(await screen.findByText(Pending!)).toBeTruthy();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(requested(fetchMock).filter((url) => url.includes('/api/v1/registries/STREAM'))).toEqual([]);
+  });
+
+  /** ⛔ Доказ (b): повернути незмінні `badge`/`count` у шапці — «STREAM STREAM 0» повертається, тест червоний. */
+  it('(b) шапка називає код один раз і без лічильника 0', async () => {
+    serve();
+    await loadCatalog('en', 'private');
+    show('STREAM');
+
+    expect(await screen.findByText(Pending!)).toBeTruthy();
+    expect(screen.getAllByText('STREAM')).toHaveLength(1);
+    expect(screen.queryByText('0')).toBeNull();
+  });
+
+  /** ⛔ Доказ (d): прибрати `Anchor` із нейтральної смуги — перший тест червоний; прибрати `canDesign` — другий. */
+  it('(d) з правом на конструктор — посилання «Registry designer» на сторінку довідників', async () => {
+    serve();
+    await loadCatalog('en', 'private');
+    const client = show('STREAM_CASE');
+
+    await waitFor(() => expect(client.getQueryData(MeQueryKey)).toBeDefined());
+    const link = await screen.findByRole('link', { name: Designer! });
+    expect(link.getAttribute('href')).toBe('/admin/registries');
+    expect(screen.getByTestId('flert-mirror-pending').contains(link)).toBe(true);
+  });
+
+  it('(d) без права на конструктор — посилання немає', async () => {
+    serve(['Registry.View']);
+    await loadCatalog('en', 'private');
+    const client = show('STREAM_CASE');
+
+    expect(await screen.findByText(Pending!)).toBeTruthy();
+    await waitFor(() => expect(client.getQueryData(MeQueryKey)).toBeDefined());
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.queryByRole('link', { name: Designer! })).toBeNull();
   });
 });
