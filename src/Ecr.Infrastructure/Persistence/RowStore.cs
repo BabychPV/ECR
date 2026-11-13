@@ -84,7 +84,11 @@ public sealed class RowStore(
                     join project in db.Projects.AsNoTracking() on document.ProjectId equals project.Id
                     select new TableInstanceRef(
                         instance.Id, instance.DocumentId, instance.TableDefId,
-                        EcrDbContext.VersionOf(project.Id, instance.PeriodKeyValue), instance.PeriodKeyValue,
+                        // ✎ B74 P2: шкала шаблону документа напряму; NULL TemplateId — основний шаблон (як досі).
+                        document.TemplateId == null
+                            ? EcrDbContext.VersionOf(document.ProjectId, instance.PeriodKeyValue)
+                            : EcrDbContext.TemplateVersionOf(document.ProjectId, document.TemplateId.Value, instance.PeriodKeyValue),
+                        instance.PeriodKeyValue,
                         instance.SheetCopyId,
 
                         // ✎ C-1: прапорець «є стан помилок формул» — EXISTS у тій самій команді (нуль нових звернень).
@@ -795,10 +799,15 @@ public sealed class RowStore(
         var hot = await TableInstancesQuery(db, documentId, periodKey)
             .OrderBy(t => t.SheetCopyId)
             .ThenBy(t => t.Id)
-            .Join(db.Documents, t => t.DocumentId, d => d.Id, (t, d) => new { t, d.ProjectId })
+            .Join(db.Documents, t => t.DocumentId, d => d.Id, (t, d) => new { t, d.ProjectId, d.TemplateId })
             .Join(db.Projects, x => x.ProjectId, p => p.Id,
                   (x, p) => new TableInstanceRef(
-                      x.t.Id, x.t.DocumentId, x.t.TableDefId, EcrDbContext.VersionOf(p.Id, x.t.PeriodKeyValue), x.t.PeriodKeyValue,
+                      x.t.Id, x.t.DocumentId, x.t.TableDefId,
+                      // ✎ B74 P2: шкала шаблону документа напряму; NULL TemplateId — основний шаблон (як досі).
+                      x.TemplateId == null
+                          ? EcrDbContext.VersionOf(x.ProjectId, x.t.PeriodKeyValue)
+                          : EcrDbContext.TemplateVersionOf(x.ProjectId, x.TemplateId.Value, x.t.PeriodKeyValue),
+                      x.t.PeriodKeyValue,
                       x.t.SheetCopyId,
 
                       // ✎ C-1: прапорець «є стан помилок формул» — EXISTS у тій самій команді.
@@ -908,7 +917,10 @@ public sealed class RowStore(
                     // RS: рядок копії має той самий SheetDefId, що й оригінал; копія — це Id рядка складу.
                     CopyId = s.CopyOfId == null ? (long?)null : s.Id,
                     PeriodVersion = db.Documents.Where(d => d.Id == documentId)
-                        .Select(d => EcrDbContext.VersionOf(d.ProjectId, period)).FirstOrDefault(),
+                        // ✎ B74 P2: шкала шаблону документа напряму; NULL TemplateId — основний шаблон (як досі).
+                        .Select(d => d.TemplateId == null
+                            ? EcrDbContext.VersionOf(d.ProjectId, period)
+                            : EcrDbContext.TemplateVersionOf(d.ProjectId, d.TemplateId.Value, period)).FirstOrDefault(),
                 })
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -1210,7 +1222,15 @@ public sealed class RowStore(
                 join d in db.Documents.AsNoTracking() on t.DocumentId equals d.Id
                 join p in db.Projects.AsNoTracking() on d.ProjectId equals p.Id
                 orderby t.PeriodKeyValue
-                select new { t.Id, t.DocumentId, t.TableDefId, TemplateVersionId = EcrDbContext.VersionOf(p.Id, t.PeriodKeyValue), t.PeriodKeyValue })
+                select new
+                {
+                    t.Id, t.DocumentId, t.TableDefId,
+                    // ✎ B74 P2: шкала шаблону документа напряму; NULL TemplateId — основний шаблон (як досі).
+                    TemplateVersionId = d.TemplateId == null
+                        ? EcrDbContext.VersionOf(d.ProjectId, t.PeriodKeyValue)
+                        : EcrDbContext.TemplateVersionOf(d.ProjectId, d.TemplateId.Value, t.PeriodKeyValue),
+                    t.PeriodKeyValue,
+                })
             .ToListAsync(ct)
             .ConfigureAwait(false);
 

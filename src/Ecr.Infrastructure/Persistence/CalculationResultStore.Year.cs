@@ -210,9 +210,14 @@ public sealed partial class CalculationResultStore : ICalculationYearReader
         }
 
         var keys = List(periodKeys.Distinct().Order());
+
+        // ✎ B74 P2: версія — шкали ШАБЛОНУ документа напряму (без вкладеної UDF doc.fn_VersionOf, R1: +10.6 мс без
+        // inlining); NULL TemplateId (рядок старої збірки до ремонту) — той самий виклик, що й досі (основний шаблон).
         var sql = $"""
             SELECT x.TableInstanceId, x.DocumentId, x.TableDefId,
-                   doc.fn_VersionOf(d.ProjectId, x.PeriodKey) AS TemplateVersionId, x.PeriodKey, x.SheetCopyId,
+                   CASE WHEN d.TemplateId IS NULL THEN doc.fn_VersionOf(d.ProjectId, x.PeriodKey)
+                        ELSE doc.fn_TemplateVersionOf(d.ProjectId, d.TemplateId, x.PeriodKey) END AS TemplateVersionId,
+                   x.PeriodKey, x.SheetCopyId,
                    x.HasFormulaErrors
               FROM (SELECT ti.Id AS TableInstanceId, ti.DocumentId, ti.TableDefId, ti.PeriodKey, ti.SheetCopyId,
                            -- ✎ C-1: той самий прапорець, що й у RowStore (EXISTS у calc.FormulaError).

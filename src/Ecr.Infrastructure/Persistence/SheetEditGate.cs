@@ -294,7 +294,9 @@ public sealed class SheetEditGate(EcrDbContext db, SheetEditGatePolicy? policy =
                                        @LockOwner = 'Transaction', @LockTimeout = @LockTimeout;
             SET @Result = @code;
             IF @code >= 0 AND @DocumentId IS NOT NULL
-                SELECT @Version = CASE WHEN @PeriodKey IS NULL THEN p.TemplateVersionId ELSE doc.fn_VersionOf(p.Id, @PeriodKey) END,
+                SELECT @Version = CASE WHEN @PeriodKey IS NULL THEN p.TemplateVersionId
+                                       WHEN d.TemplateId IS NULL THEN doc.fn_VersionOf(d.ProjectId, @PeriodKey)
+                                       ELSE doc.fn_TemplateVersionOf(d.ProjectId, d.TemplateId, @PeriodKey) END,
                        @Migrating = CASE WHEN p.ExternalSettingsJson LIKE '%"migratingTo"%' THEN 1 ELSE 0 END
                 FROM   doc.Document d
                 JOIN   doc.Project  p ON p.Id = d.ProjectId

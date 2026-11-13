@@ -324,7 +324,10 @@ public sealed partial class PeriodStateJob(
                         d.BusinessKey,
 
                         // Версія ПЕРІОДУ винятку (шкала версій проєкту), а не чинна версія проєкту.
-                        TemplateVersionId = EcrDbContext.VersionOf(p.Id, x.PeriodKeyValue),
+                        // ✎ B74 P2: шкала шаблону документа напряму; NULL TemplateId — основний шаблон (як досі).
+                        TemplateVersionId = d.TemplateId == null
+                            ? EcrDbContext.VersionOf(d.ProjectId, x.PeriodKeyValue)
+                            : EcrDbContext.TemplateVersionOf(d.ProjectId, d.TemplateId.Value, x.PeriodKeyValue),
                     })
                 .Take(MaxExpiredDocumentReopens)
                 .ToListAsync(innerCt)
