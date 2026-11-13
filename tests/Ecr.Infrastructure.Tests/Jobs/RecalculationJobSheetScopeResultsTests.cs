@@ -448,6 +448,59 @@ public sealed class RecalculationJobSheetScopeResultsTests(SqlServerFixture sql)
         Assert.Equal(["A|2001", "B|1001"], await ShapeAsync(arranged));
     }
 
+    /// <summary>
+    /// ⛔ B63: системний перерахунок ЗАЛЕЖНИХ (RT-25, HSE400 3b, FLERT F6 — <c>RecalculateSubmitted</c>, без людини)
+    /// перераховує поданий аркуш тим самим механізмом, що й ручний: журнал <c>RecalculatedAfterSubmission</c> і позначка.
+    /// </summary>
+    /// <remarks>⛔ ДОКАЗ (локально): <c>WritesSubmitted</c> без <c>RecalculateSubmitted</c> — B лишається 1001, червоний.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "B63")]
+    public async Task Перерахунок_залежних_без_людини_перераховує_поданий_із_журналом_і_позначкою()
+    {
+        var arranged = await ArrangeAsync(submitSecondSheet: false);
+        await RunJobAsync(arranged, SheetRequest(arranged, sheetDefId: null), label: 1_000m);
+        await SubmitOnlyAsync(arranged, arranged.SecondSheetId, Now.AddMinutes(-5));
+
+        await using (var auditDb = arranged.Builder.CreateContext())
+        {
+            await RunJobAsync(
+                arranged,
+                SheetRequest(arranged, sheetDefId: null) with { TriggeredByUserId = null, RecalculateSubmitted = true },
+                label: 2_000m,
+                audit: new AuditWriter(auditDb));
+        }
+
+        Assert.Equal(["A|2001", "B|2001"], await ShapeAsync(arranged));
+        Assert.Equal(1, await SheetLogCountAsync(arranged, arranged.SecondSheetId, RecalculationSkips.AuditRecalculatedAfterSubmission));
+        Assert.Equal("-,marked", await MarksAsync(arranged));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "B63")]
+    public async Task Перерахунок_залежних_без_людини_затверджений_пропускає_із_журналом()
+    {
+        var arranged = await ArrangeAsync(submitSecondSheet: false);
+        await RunJobAsync(arranged, SheetRequest(arranged, sheetDefId: null), label: 1_000m);
+        await SubmitSecondSheetAsync(arranged);
+
+        await using (var auditDb = arranged.Builder.CreateContext())
+        {
+            await RunJobAsync(
+                arranged,
+                SheetRequest(arranged, sheetDefId: null) with { TriggeredByUserId = null, RecalculateSubmitted = true },
+                label: 2_000m,
+                audit: new AuditWriter(auditDb));
+        }
+
+        Assert.Equal(["A|2001", "B|1001"], await ShapeAsync(arranged));
+        Assert.Equal(1, await SheetLogCountAsync(arranged, arranged.SecondSheetId, RecalculationSkips.AuditSkippedApproved));
+        Assert.Equal("-,-", await MarksAsync(arranged));
+    }
+
     private static async Task SubmitOnlyAsync(Arranged arranged, int sheetDefId, DateTime at)
     {
         await using var db = arranged.Builder.CreateContext();

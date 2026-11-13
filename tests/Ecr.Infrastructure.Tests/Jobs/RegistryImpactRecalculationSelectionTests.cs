@@ -45,7 +45,7 @@ public sealed class RegistryImpactRecalculationSelectionTests
                 [Row(Chosen, 202601), Row(Chosen, 202601, "M2"), Row(Chosen, 202602)]));
 
         var trigger = Substitute.For<ICalculationTrigger>();
-        trigger.RequestAsync(Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+        trigger.RequestDependentsAsync(Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<string?>("recalc-1"));
 
         var progress = Substitute.For<IJobProgress>();
@@ -58,9 +58,9 @@ public sealed class RegistryImpactRecalculationSelectionTests
 
         // ⛔ МУТАЦІЙНИЙ ДОКАЗ: повернути в задачу `ListImpactedAsync(…, projectIds: null, MaxRows, …)` →
         // вибраного документа в першій тисячі немає, `queued = 0`, `gone = 1`, червоний.
-        await trigger.Received(1).RequestAsync(Chosen, new PeriodKey(202601), Arg.Any<CancellationToken>());
-        await trigger.Received(1).RequestAsync(Chosen, new PeriodKey(202602), Arg.Any<CancellationToken>());
-        await trigger.DidNotReceive().RequestAsync(
+        await trigger.Received(1).RequestDependentsAsync(Chosen, new PeriodKey(202601), Arg.Any<CancellationToken>());
+        await trigger.Received(1).RequestDependentsAsync(Chosen, new PeriodKey(202602), Arg.Any<CancellationToken>());
+        await trigger.DidNotReceive().RequestDependentsAsync(
             Arg.Is<long>(id => id != Chosen), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
 
         Assert.NotNull(done);

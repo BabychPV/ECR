@@ -21,7 +21,7 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 /// <remarks>
 /// Мутаційні докази: прибрати <c>wanted.Contains</c> → <see cref="Тригер_лише_для_названих_документів"/> червоний;
 /// набір з payload без звірки зі сховищем → <see cref="Закритий_період_не_ставиться_навіть_з_payload"/> червоний;
-/// прибрати try/catch навколо <c>RequestAsync</c> → <see cref="Збій_одного_документа_не_перериває_решту_і_видно_у_завершенні"/>
+/// прибрати try/catch навколо <c>RequestDependentsAsync</c> → <see cref="Збій_одного_документа_не_перериває_решту_і_видно_у_завершенні"/>
 /// червоний (другий документ не ставиться); прибрати <c>LogRequestFailed</c> або <c>InnerException</c> →
 /// <see cref="Збій_постановки_журналюється_з_причиною_і_рахується_окремо_від_пропущених"/> червоний;
 /// повернути <c>skipped = targets − queued</c> → він же червоний (провалений рахується «пропущеним»).
@@ -45,8 +45,8 @@ public sealed class RegistryImpactRecalculationJobTests(SqlServerFixture sql)
 
         await RunAsync(trigger, registryId, first.DocumentId);
 
-        await trigger.Received(1).RequestAsync(first.DocumentId, first.PeriodKey, Arg.Any<CancellationToken>());
-        await trigger.DidNotReceive().RequestAsync(second.DocumentId, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
+        await trigger.Received(1).RequestDependentsAsync(first.DocumentId, first.PeriodKey, Arg.Any<CancellationToken>());
+        await trigger.DidNotReceive().RequestDependentsAsync(second.DocumentId, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -60,7 +60,7 @@ public sealed class RegistryImpactRecalculationJobTests(SqlServerFixture sql)
 
         await RunAsync(trigger, registryId, closed.DocumentId);
 
-        await trigger.DidNotReceiveWithAnyArgs().RequestAsync(default, default, default);
+        await trigger.DidNotReceiveWithAnyArgs().RequestDependentsAsync(default, default, default);
     }
 
     [Fact]
@@ -72,13 +72,13 @@ public sealed class RegistryImpactRecalculationJobTests(SqlServerFixture sql)
         var first = await ArrangeDocumentAsync(registryId, PeriodState.Open);
         var second = await ArrangeDocumentAsync(registryId, PeriodState.Open);
         var trigger = Trigger();
-        trigger.RequestAsync(first.DocumentId, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+        trigger.RequestDependentsAsync(first.DocumentId, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
             .Returns<Task<string?>>(_ => throw new InvalidOperationException("boom"));
 
         var act = () => RunAsync(trigger, registryId, first.DocumentId, second.DocumentId);
 
         await Assert.ThrowsAsync<InvalidOperationException>(act);
-        await trigger.Received(1).RequestAsync(second.DocumentId, second.PeriodKey, Arg.Any<CancellationToken>());
+        await trigger.Received(1).RequestDependentsAsync(second.DocumentId, second.PeriodKey, Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -91,7 +91,7 @@ public sealed class RegistryImpactRecalculationJobTests(SqlServerFixture sql)
         var second = await ArrangeDocumentAsync(registryId, PeriodState.Open);
         var trigger = Trigger();
         var boom = new InvalidOperationException("boom");
-        trigger.RequestAsync(first.DocumentId, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+        trigger.RequestDependentsAsync(first.DocumentId, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
             .Returns<Task<string?>>(_ => throw boom);
         var logger = new ListLogger();
         var progress = Substitute.For<IJobProgress>();
@@ -122,7 +122,7 @@ public sealed class RegistryImpactRecalculationJobTests(SqlServerFixture sql)
     private static ICalculationTrigger Trigger()
     {
         var trigger = Substitute.For<ICalculationTrigger>();
-        trigger.RequestAsync(Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+        trigger.RequestDependentsAsync(Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<string?>("recalc-1"));
         return trigger;
     }
