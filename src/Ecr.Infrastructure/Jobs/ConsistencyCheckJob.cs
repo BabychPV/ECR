@@ -2,6 +2,7 @@ using System.Globalization;
 using Ecr.Application.Ports;
 using Ecr.Application.Registries;
 using Ecr.Domain.Abstractions;
+using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Entities.Integration;
 using Ecr.Domain.Enums;
 using Ecr.Infrastructure.Persistence;
@@ -38,6 +39,55 @@ public sealed class ConsistencyCheckJob(
 {
     /// <summary>Код правила: рядки результатів/кроків/входів прогонів, що не <c>Current</c>/<c>Running</c> (Q-17).</summary>
     public const string NonCurrentRunRowsRule = "NON_CURRENT_RUN_ROWS";
+
+    /// <summary>Код правила: комірка посилається на відсутній запис довідника.</summary>
+    public const string OrphanedCellRule = "ORPHANED_CELL";
+
+    /// <summary>Код правила: рядок посилається на відсутній екземпляр таблиці.</summary>
+    public const string BrokenFkRule = "BROKEN_FK";
+
+    /// <summary>Код правила: контрольні суми прогону архівації не збіглися.</summary>
+    public const string ArchiveChecksumRule = "ARCHIVE_CHECKSUM";
+
+    /// <summary>Код правила: колонка <c>Calculated</c> без жодного джерела значення.</summary>
+    public const string UnboundCalculatedRule = "UNBOUND_CALCULATED_COLUMN";
+
+    /// <summary>Код правила: колонка <c>Formula</c> опублікованої версії без джерела значення.</summary>
+    public const string UnsourcedFormulaRule = "UNSOURCED_FORMULA_COLUMN";
+
+    /// <summary>Префікс ключа каталогу тексту знахідки; повний ключ — префікс + код правила.</summary>
+    /// <remarks>
+    /// ⛔ Текст знахідки — КОНВЕРТ <see cref="JobProgressMessageEnvelope"/> (<c>{"k":…,"p":{…}}</c>), той самий, що й
+    /// у <c>itg.JobProgress.Message</c>: мови читача задача не знає, а готове українське речення на англійському
+    /// інтерфейсі читалося як дефект (аудит live 12.11). Клієнт (<c>consistencyFindingText.ts</c>) перекладає ключ;
+    /// старі рядки (не конверт) показує як є. Підстановки — людські значення (коди таблиці/колонки, період), тож
+    /// пошук журналу за кодом таблиці й далі знаходить знахідку.
+    /// </remarks>
+    public const string FindingKeyPrefix = "consistency.finding.";
+
+    /// <summary>Скільки символів сирої суми архіву лишається в підстановці.</summary>
+    private const int ChecksumParamMaxLength = 300;
+
+    /// <summary>
+    /// Межа запасу після прогону прибирання для <see cref="NonCurrentRunRowsRule"/>, коли прибирання ще не
+    /// виконувалося жодного разу.
+    /// </summary>
+    public static readonly TimeSpan NonCurrentGrace = TimeSpan.FromMinutes(10);
+
+    /// <summary>Текст знахідки: конверт ключа каталогу з підстановками.</summary>
+    /// <param name="ruleCode">Код правила.</param>
+    /// <param name="parameters">Підстановки <c>{name}</c>.</param>
+    /// <returns>Закодований конверт.</returns>
+    public static string FindingText(string ruleCode, params (string Name, object Value)[] parameters)
+    {
+        var values = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (name, value) in parameters)
+        {
+            values[name] = Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty;
+        }
+
+        return JobProgressMessageCodec.Encode(new JobProgressMessageEnvelope(FindingKeyPrefix + ruleCode, values));
+    }
 
     /// <summary>Код задачі в журналі обслуговування.</summary>
     public static string Code => "consistency-check";
@@ -144,19 +194,41 @@ public sealed class ConsistencyCheckJob(
         // додали б, крім другого читання.
         var periodKeys = await PeriodKeysAsync(ct).ConfigureAwait(false);
 
+        // ⛔ Знімок (рішення людини 12.11: «перевірка узгодженості — перевірка на момент часу»; аудит live 12.11:
+        // 260 відкритих знахідок, жодна не правдива тижнями — MERGE лише вставляв). Знахідки правила, яке прохід
+        // ПЕРЕВІРИВ ПОВНІСТЮ, ЗАМІНЮЮТЬСЯ його результатом: неправдиві видаляються, правдиві лишаються з моментом першого
+        // виявлення, нові додаються. Пропущене правило (прибирання вимкнено) чи обрізане стелею (`MaxIssues`,
+        // `MaxPeriods`) нічого не доводить про знахідки, яких не побачило, — його рядки не чіпаються. Область — пара
+        // (RuleCode, EntityType): `ARCHIVE_CHECKSUM` з `EntityType = 'Period'` пише процедура архівації
+        // (`03-archive-proc.sql`), а не ця задача, і видаляти їх вона не має права.
+        var evaluated = new List<(string RuleCode, string EntityType)>();
+        var periodsComplete = periodKeys.Count < MaxPeriods;
+
+        void Collect(List<ConsistencyIssue> found, string ruleCode, string entityType, bool complete)
+        {
+            issues.AddRange(found);
+            if (complete && found.Count < MaxIssues)
+            {
+                evaluated.Add((ruleCode, entityType));
+            }
+        }
+
         await progress.ReportKeyAsync(10, "jobs.consistencyOrphanedCells", ct).ConfigureAwait(false);
-        issues.AddRange(await OrphanedCellsAsync(periodKeys, ct).ConfigureAwait(false));
+        Collect(await OrphanedCellsAsync(periodKeys, ct).ConfigureAwait(false), OrphanedCellRule, "doc.CellValue", periodsComplete);
 
         await progress.ReportKeyAsync(40, "jobs.consistencyBrokenRefs", ct).ConfigureAwait(false);
-        issues.AddRange(await BrokenReferencesAsync(periodKeys, ct).ConfigureAwait(false));
+        Collect(await BrokenReferencesAsync(periodKeys, ct).ConfigureAwait(false), BrokenFkRule, "doc.TableRow", periodsComplete);
 
         await progress.ReportKeyAsync(60, "jobs.consistencyArchiveCheck", ct).ConfigureAwait(false);
-        issues.AddRange(await ArchiveChecksumsAsync(ct).ConfigureAwait(false));
+        var archive = await ArchiveChecksumsAsync(ct).ConfigureAwait(false);
+        Collect(archive.Issues, ArchiveChecksumRule, "itg.ArchiveRun", archive.Complete);
 
         await progress.ReportKeyAsync(70, "jobs.consistencyUnboundCalculated", ct).ConfigureAwait(false);
-        issues.AddRange(await UnboundCalculatedColumnsAsync(ct).ConfigureAwait(false));
-        issues.AddRange(await UnsourcedFormulaColumnsAsync(ct).ConfigureAwait(false));
-        issues.AddRange(await NonCurrentRunRowsAsync(periodKeys, ct).ConfigureAwait(false));
+        Collect(await UnboundCalculatedColumnsAsync(ct).ConfigureAwait(false), UnboundCalculatedRule, "cfg.ColumnDef", true);
+        Collect(await UnsourcedFormulaColumnsAsync(ct).ConfigureAwait(false), UnsourcedFormulaRule, "cfg.ColumnDef", true);
+
+        var nonCurrent = await NonCurrentRunRowsAsync(periodKeys, ct).ConfigureAwait(false);
+        Collect(nonCurrent.Issues, NonCurrentRunRowsRule, "calc.CalculationRun", nonCurrent.Evaluated && periodsComplete);
 
         // ⚠ Перерахунок ознаки IsOrphaned — В ОБИДВА боки (ФВ-8.13a). Задача
         // симетрична: те, що ставить ознаку, її ж і знімає. Асиметрія тут не
@@ -166,6 +238,7 @@ public sealed class ConsistencyCheckJob(
         var rescanned = await scanner.ScanAllAsync(ct).ConfigureAwait(false);
 
         await WriteIssuesAsync(issues, ct).ConfigureAwait(false);
+        var removed = await DeleteVanishedAsync(issues, evaluated, run.StartedAt, ct).ConfigureAwait(false);
 
         // ⚠ Метрика — ЗА РІЗНОВИДОМ (RuleCode), а не одним сумарним числом
         // (директива №11, T10 #41): "ORPHANED_CELL" росте поступово (хтось
@@ -187,7 +260,7 @@ public sealed class ConsistencyCheckJob(
             // `orphanFlagsChanged` описує однаковим нулем і здорову систему, і
             // сканер, що стоїть; деталі прогону — єдине місце, де цю різницю
             // взагалі можна побачити постфактум.
-            $"{{\"issues\":{issues.Count},\"orphanFlagsChanged\":{rescanned.Changed},"
+            $"{{\"issues\":{issues.Count},\"removed\":{removed},\"orphanFlagsChanged\":{rescanned.Changed},"
             + $"\"orphanRowsExamined\":{rescanned.ExaminedRows},"
             + $"\"orphanScanCycles\":{rescanned.CyclesCompleted}}}",
             clock.UtcNow);
@@ -293,12 +366,12 @@ public sealed class ConsistencyCheckJob(
             var found = await query.Take(budget).ToListAsync(ct).ConfigureAwait(false);
 
             issues.AddRange(found.ConvertAll(f => new ConsistencyIssue(
-                "ORPHANED_CELL",
+                OrphanedCellRule,
                 Severity: 2,
                 "doc.CellValue",
                 f.TableRowId,
-                $"Комірка рядка {f.TableRowId} періоду {f.PeriodKey} посилається на запис довідника "
-                + $"{f.RegistryEntryId}, якого не існує.",
+                FindingText(
+                    OrphanedCellRule, ("rowId", f.TableRowId), ("period", f.PeriodKey), ("entryId", f.RegistryEntryId)),
                 f.PeriodKey)));
         }
 
@@ -342,12 +415,11 @@ public sealed class ConsistencyCheckJob(
             var found = await query.Take(budget).ToListAsync(ct).ConfigureAwait(false);
 
             issues.AddRange(found.ConvertAll(f => new ConsistencyIssue(
-                "BROKEN_FK",
+                BrokenFkRule,
                 Severity: 3,
                 "doc.TableRow",
                 f.RowId,
-                $"Рядок {f.RowId} посилається на екземпляр таблиці {f.TableInstanceId} "
-                + $"періоду {f.PeriodKey}, якого не існує.",
+                FindingText(BrokenFkRule, ("rowId", f.RowId), ("instanceId", f.TableInstanceId), ("period", f.PeriodKey)),
                 f.PeriodKey)));
         }
 
@@ -363,7 +435,11 @@ public sealed class ConsistencyCheckJob(
     /// <c>CHECKSUM_AGG</c>, <c>SUM</c>) записав сам прогін архівації — тут
     /// перевіряється, що вони збіглися і що прогін дійшов до кінця.
     /// </remarks>
-    private async Task<List<ConsistencyIssue>> ArchiveChecksumsAsync(CancellationToken ct)
+    /// <returns>
+    /// Знахідки й ознака повноти: <c>false</c>, коли прогонів не менше за стелю — старіші за неї не звірено, і
+    /// закривати їхні знахідки не можна.
+    /// </returns>
+    private async Task<(List<ConsistencyIssue> Issues, bool Complete)> ArchiveChecksumsAsync(CancellationToken ct)
     {
         var runs = await db.ArchiveRuns
             .AsNoTracking()
@@ -384,16 +460,20 @@ public sealed class ConsistencyCheckJob(
             if (!string.Equals(run.SourceJson, run.TargetJson, StringComparison.Ordinal))
             {
                 issues.Add(new ConsistencyIssue(
-                    "ARCHIVE_CHECKSUM",
+                    ArchiveChecksumRule,
                     Severity: 3,
                     "itg.ArchiveRun",
                     run.Id,
-                    $"Контрольні суми прогону архівації {run.Id} не збіглися: "
-                    + $"джерело {run.SourceJson ?? "—"}, архів {run.TargetJson ?? "—"}."));
+                    // ⚠ Суми — сирий JSON довільної довжини; конверт мусить уміститися в `Message` nvarchar(2000).
+                    FindingText(
+                        ArchiveChecksumRule,
+                        ("runId", run.Id),
+                        ("source", JobProgressMessageCodec.Shorten(run.SourceJson ?? "—", ChecksumParamMaxLength)),
+                        ("target", JobProgressMessageCodec.Shorten(run.TargetJson ?? "—", ChecksumParamMaxLength)))));
             }
         }
 
-        return issues;
+        return (issues, runs.Count < MaxIssues);
     }
 
     /// <summary>
@@ -453,6 +533,10 @@ public sealed class ConsistencyCheckJob(
     /// перевіряє окремий <see cref="UnsourcedFormulaColumnsAsync"/> з власним
     /// кодом правила, бо джерел у нього два (прив'язка АБО формула шаблону) і
     /// межа — стан версії, а не проєкту (HSE301 C5c).
+    ///
+    /// ⛔ Формула шаблону на колонці — теж джерело (аудит live 12.11): колонку, яку заповнює формула шаблону, правило
+    /// не має називати «порожньою клітинкою». Визначення джерела — те саме, що в <see cref="UnsourcedFormulaColumnsAsync"/>
+    /// і <c>PublishChecks.CheckComputedColumns</c>: не видалена формула цієї таблиці на цій колонці АБО активна прив'язка.
     /// </remarks>
     private async Task<List<ConsistencyIssue>> UnboundCalculatedColumnsAsync(CancellationToken ct)
     {
@@ -468,6 +552,8 @@ public sealed class ConsistencyCheckJob(
             where column.DataType == CellDataType.Calculated
                   && !column.IsDeleted && !table.IsDeleted && !sheet.IsDeleted
                   && liveVersions.Contains(sheet.TemplateVersionId)
+                  && !db.FormulaDefs.Any(f =>
+                      f.TableDefId == column.TableDefId && f.ColumnDefId == column.Id && !f.IsDeleted)
                   && !db.CalculationBindings.Any(b => b.ColumnDefId == column.Id && b.IsActive)
             orderby column.Id
             select new UnboundColumnRow(column.Id, table.Code, column.Code, sheet.TemplateVersionId);
@@ -475,7 +561,7 @@ public sealed class ConsistencyCheckJob(
         var found = await query.Take(MaxIssues).ToListAsync(ct).ConfigureAwait(false);
 
         return found.ConvertAll(f => new ConsistencyIssue(
-            "UNBOUND_CALCULATED_COLUMN",
+            UnboundCalculatedRule,
             // ⚠ Вага 2, як і в осиротілої комірки: дані не зіпсовані — їх
             // просто НЕМАЄ там, де форма обіцяє число. Вага 3 стоїть за
             // станами, де система суперечить сама собі (розбіжність сум
@@ -483,22 +569,14 @@ public sealed class ConsistencyCheckJob(
             Severity: 2,
             "cfg.ColumnDef",
             f.ColumnDefId,
-            // Названо КОНКРЕТНУ колонку і рівно ту дію, яка лишається: шукати
+            // Названо КОНКРЕТНУ колонку (`{table}.{column}`) і рівно ту дію, яка лишається: шукати
             // винуватця серед сотень колонок версії руками — не діагностика.
-            // ⚠ Подвійні дужки в маршруті — літерали `{id}`/`{outputCode}`:
-            // саме так виглядає шлях, який має відкрити методолог.
-            string.Format(
-                CultureInfo.InvariantCulture,
-                "Колонка {0}.{1} (версія шаблону {2}) має тип Calculated, тобто значення для неї "
-                + "пише методологія, але жодної чинної прив'язки виходу до неї немає: перерахунок "
-                + "для цієї колонки не робить нічого — мовчки, без помилки, — і оператор бачить "
-                + "порожню клітинку, яку не має права заповнити. Прив'яжіть вихід методології до "
-                + "цієї колонки (PUT /api/v1/methodologies/{{id}}/bindings/{3}/{{outputCode}}) або "
-                + "увімкніть наявну прив'язку, якщо її вимкнено.",
-                f.TableCode,
-                f.ColumnCode,
-                f.TemplateVersionId,
-                f.ColumnDefId)));
+            FindingText(
+                UnboundCalculatedRule,
+                ("table", f.TableCode),
+                ("column", f.ColumnCode),
+                ("version", f.TemplateVersionId),
+                ("columnId", f.ColumnDefId))));
     }
 
     /// <summary>
@@ -546,24 +624,18 @@ public sealed class ConsistencyCheckJob(
         var found = await query.Take(MaxIssues).ToListAsync(ct).ConfigureAwait(false);
 
         return found.ConvertAll(f => new ConsistencyIssue(
-            "UNSOURCED_FORMULA_COLUMN",
+            UnsourcedFormulaRule,
             // ⚠ Вага 2 — з тієї ж причини, що й у `UNBOUND_CALCULATED_COLUMN`:
             // дані не зіпсовані, їх просто немає там, де форма обіцяє число.
             Severity: 2,
             "cfg.ColumnDef",
             f.ColumnDefId,
-            string.Format(
-                CultureInfo.InvariantCulture,
-                "Колонка {0}.{1} (версія шаблону {2}) має тип Formula, але в опублікованій версії "
-                + "немає ні формули шаблону на цій колонці, ні чинної прив'язки виходу методології: "
-                + "перерахунок для неї не робить нічого, і оператор бачить порожню клітинку, яку не "
-                + "має права заповнити. Публікація й відв'язка такого стану не пропускають, тож дані "
-                + "потрапили в базу в обхід них. Прив'яжіть вихід методології до колонки {3} або "
-                + "виправте структуру новою версією шаблону.",
-                f.TableCode,
-                f.ColumnCode,
-                f.TemplateVersionId,
-                f.ColumnDefId)));
+            FindingText(
+                UnsourcedFormulaRule,
+                ("table", f.TableCode),
+                ("column", f.ColumnCode),
+                ("version", f.TemplateVersionId),
+                ("columnId", f.ColumnDefId))));
     }
 
     /// <summary>
@@ -576,15 +648,34 @@ public sealed class ConsistencyCheckJob(
     /// проходу <c>SupersededResultsSweepJob</c> - нуль; ненульове означає, що швидкий шлях/прохід недопрацював. Одна
     /// знахідка на «таблиця × період» (`EntityId` = період), кількість - у тексті. Партиція 0 (прогін без періоду)
     /// перевіряється теж: доти рядки нульового періоду лишалися «історією» (HSE301).
+    /// <para>
+    /// ⛔ Лічаться лише рядки прогонів, які стали неактуальними ДО старту останнього завершеного проходу прибирання
+    /// (або понад <see cref="NonCurrentGrace"/> тому, якщо проходу ще не було). Аудит live 12.11: 30.10 перевірка й
+    /// прибирання стартували одним cron за 10 мс одна від одної, перевірка порахувала рядки, які прибирання саме
+    /// видаляло, і записала сім знахідок, неправдивих уже за секунду. Так само ручний запуск посеред перерахунку
+    /// бачив щойно витіснений прогін, чиї рядки швидкий шлях прибирає після коміту. Рядок, якого прибирання ще НЕ
+    /// МАЛО шансу побачити, — не порушення.
+    /// </para>
+    /// <para>
+    /// ⚠ Моменту витіснення в схемі немає (`SupersededAt` — міграція, якої тут свідомо немає), тому — консервативна
+    /// оцінка зверху: прогін витісняє лише новіший прогін того самого проєкту й періоду в момент свого завершення
+    /// (<c>CalculationResultStore</c>: <c>Id &lt;</c> свого, той самий <c>ProjectId</c>/<c>PeriodKey</c>). Якщо жоден
+    /// новіший не завершився після межі й сам прогін завершився до неї — він був неактуальним уже на старті
+    /// проходу. Ціна оцінки — пізніше на добу, а не хибна тривога: пропущене сьогодні правило знайде наступна ніч.
+    /// </para>
     /// </remarks>
-    private async Task<List<ConsistencyIssue>> NonCurrentRunRowsAsync(
+    /// <returns>Знахідки й ознака <c>Evaluated</c>: <c>false</c> — правило пропущено (прибирання вимкнено).</returns>
+    private async Task<(List<ConsistencyIssue> Issues, bool Evaluated)> NonCurrentRunRowsAsync(
         IReadOnlyList<int> periodKeys, CancellationToken ct)
     {
         var issues = new List<ConsistencyIssue>();
         if (!Persistence.SupersededPurgeOptions.Read(configuration).Enabled)
         {
-            return issues;
+            return (issues, false);
         }
+
+        var cutoff = await NonCurrentCutoffAsync(ct).ConfigureAwait(false);
+        var settled = SettledNonCurrentRuns(cutoff);
 
         foreach (var periodKey in periodKeys.Append(0).Distinct())
         {
@@ -594,23 +685,14 @@ public sealed class ConsistencyCheckJob(
                 break;
             }
 
-            var results = await (
-                    from row in db.CalculationResults.AsNoTracking()
-                    join run in db.CalculationRuns.AsNoTracking() on row.CalculationRunId equals run.Id
-                    where row.PeriodKey == periodKey && run.Status != "Current" && run.Status != "Running"
-                    select row.Id)
+            var results = await db.CalculationResults.AsNoTracking()
+                .Where(row => row.PeriodKey == periodKey && settled.Contains(row.CalculationRunId))
                 .LongCountAsync(ct).ConfigureAwait(false);
-            var steps = await (
-                    from row in db.CalculationSteps.AsNoTracking()
-                    join run in db.CalculationRuns.AsNoTracking() on row.CalculationRunId equals run.Id
-                    where row.PeriodKey == periodKey && run.Status != "Current" && run.Status != "Running"
-                    select row.Id)
+            var steps = await db.CalculationSteps.AsNoTracking()
+                .Where(row => row.PeriodKey == periodKey && settled.Contains(row.CalculationRunId))
                 .LongCountAsync(ct).ConfigureAwait(false);
-            var inputs = await (
-                    from row in db.CalculationInputs.AsNoTracking()
-                    join run in db.CalculationRuns.AsNoTracking() on row.CalculationRunId equals run.Id
-                    where row.PeriodKey == periodKey && run.Status != "Current" && run.Status != "Running"
-                    select row.Id)
+            var inputs = await db.CalculationInputs.AsNoTracking()
+                .Where(row => row.PeriodKey == periodKey && settled.Contains(row.CalculationRunId))
                 .LongCountAsync(ct).ConfigureAwait(false);
 
             if (results + steps + inputs == 0)
@@ -623,20 +705,48 @@ public sealed class ConsistencyCheckJob(
                 Severity: 2,
                 "calc.CalculationRun",
                 periodKey,
-                string.Format(
-                    CultureInfo.InvariantCulture,
-                    "У періоді {0} лишилися рядки прогонів, які не Current/Running: результатів {1}, кроків {2}, входів {3}. "
-                    + "Рішення людини 28.10: зберігається лише останній розрахунок; доїсть задача superseded-results-sweep "
-                    + "(Calculations:SupersededPurge:DeleteEnabled=true).",
-                    periodKey,
-                    results,
-                    steps,
-                    inputs),
+                FindingText(
+                    NonCurrentRunRowsRule,
+                    ("period", periodKey),
+                    ("results", results),
+                    ("steps", steps),
+                    ("inputs", inputs)),
                 periodKey));
         }
 
-        return issues;
+        return (issues, true);
     }
+
+    /// <summary>
+    /// Межа «прибирання вже мало шанс»: старт останнього успішного проходу <c>superseded-results-sweep</c>, а без
+    /// нього — <see cref="NonCurrentGrace"/> тому.
+    /// </summary>
+    private async Task<DateTime> NonCurrentCutoffAsync(CancellationToken ct)
+    {
+        var sweepCode = SupersededResultsSweepJob.Code;
+        var lastSweep = await db.MaintenanceRuns
+            .AsNoTracking()
+            .Where(r => r.JobCode == sweepCode && r.Status == "Succeeded" && r.FinishedAt != null)
+            .OrderByDescending(r => r.StartedAt)
+            .Select(r => (DateTime?)r.StartedAt)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        return lastSweep ?? clock.UtcNow - NonCurrentGrace;
+    }
+
+    /// <summary>Прогони, неактуальні вже на момент <paramref name="cutoff"/> (див. <see cref="NonCurrentRunRowsAsync"/>).</summary>
+    private IQueryable<long> SettledNonCurrentRuns(DateTime cutoff)
+        => from run in db.CalculationRuns.AsNoTracking()
+           where run.Status != CalculationRun.CurrentStatus && run.Status != "Running"
+                 && (run.FinishedAt ?? run.StartedAt) < cutoff
+                 && !db.CalculationRuns.Any(newer =>
+                     newer.ProjectId == run.ProjectId
+                     && newer.PeriodKey == run.PeriodKey
+                     && newer.Id > run.Id
+                     && newer.FinishedAt != null
+                     && newer.FinishedAt >= cutoff)
+           select run.Id;
 
     /// <summary>
     /// Записує знахідки, не плодячи дублікатів.
@@ -668,7 +778,14 @@ public sealed class ConsistencyCheckJob(
         // НЕЗАКРИТИХ знахідок, лише пакетна умова замість запиту на рядок.
         var now = clock.UtcNow;
 
-        foreach (var chunk in issues.Chunk(IssueChunkSize))
+        // ⚠ Одна знахідка на трійку: `WHEN MATCHED THEN UPDATE` нижче падає (Msg 8672), якщо джерело двічі зачіпає той
+        // самий рядок цілі, — а дві осиротілі комірки одного рядка дають саме дві однакові трійки.
+        var distinct = issues
+            .GroupBy(i => (i.RuleCode, i.EntityType, i.EntityId))
+            .Select(g => g.First())
+            .ToList();
+
+        foreach (var chunk in distinct.Chunk(IssueChunkSize))
         {
             var parameters = new List<SqlParameter>(chunk.Length * 7);
             var values = new System.Text.StringBuilder();
@@ -711,6 +828,11 @@ public sealed class ConsistencyCheckJob(
                 "AND target.EntityType = source.EntityType\n" +
                 "AND target.EntityId = source.EntityId\n" +
                 "AND target.ResolvedAt IS NULL\n" +
+                // ⚠ Відкрита знахідка, яку прохід побачив знову, отримує ТЕПЕРІШНІЙ текст (кількості рядків NON_CURRENT
+                // змінюються; старий український текст стає конвертом каталогу). `DetectedAt` — момент ПЕРШОГО
+                // виявлення, і його оновлення приховало б вік проблеми.
+                "WHEN MATCHED THEN UPDATE SET\n" +
+                "    Message = source.Message, Severity = source.Severity, PeriodKey = source.PeriodKey\n" +
                 "WHEN NOT MATCHED THEN INSERT\n" +
                 "    (DetectedAt, Severity, RuleCode, EntityType, EntityId, Message, PeriodKey)\n" +
                 "    VALUES (source.DetectedAt, source.Severity, source.RuleCode,\n" +
@@ -718,6 +840,71 @@ public sealed class ConsistencyCheckJob(
 
             await db.Database.ExecuteSqlRawAsync(sql, parameters.ToArray(), ct).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// Видаляє знахідки повністю перевірених областей, яких цей прохід НЕ знайшов (знімок на момент перевірки).
+    /// </summary>
+    /// <param name="issues">Знахідки цього проходу.</param>
+    /// <param name="evaluated">Області (RuleCode, EntityType), перевірені повністю.</param>
+    /// <param name="runStartedAt">Старт цього проходу.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <returns>Скільки знахідок видалено.</returns>
+    /// <remarks>
+    /// ⛔ Рішення людини 12.11: «система має реально показувати проблеми, а коли вони зникають — видаляти
+    /// повідомлення; узгодженість — це перевірка на момент часу». Аудит live 12.11: журнал показував 260 відкритих
+    /// знахідок, а нічні проходи тижнями писали <c>"issues":0</c> — умова зникла, а знахідка лишалася назавжди.
+    /// Тому неправдива знахідка ВИДАЛЯЄТЬСЯ (а не позначається <c>ResolvedAt</c>); так само йдуть і закриті рядки
+    /// області — у знімку їм місця немає.
+    /// <para>
+    /// ⚠ Не видаляється знахідка, виявлена ПІСЛЯ старту цього проходу (<c>DetectedAt &gt;= runStartedAt</c>): її міг
+    /// записати паралельний прохід (нічний і ручний), що бачив новіші дані, ніж цей.
+    /// </para>
+    /// <para>
+    /// ⚠ Один запит на прохід — обидва переліки йдуть JSON-масивами через <c>OPENJSON</c>, без межі 2100 параметрів.
+    /// <c>aud.ConsistencyIssue</c> — журнал знахідок, а не журнал аудиту (<c>11-audit-tables.sql</c>: таблиця не
+    /// входить у незмінні), тож видалення з неї дозволене.
+    /// </para>
+    /// </remarks>
+    private async Task<int> DeleteVanishedAsync(
+        IReadOnlyList<ConsistencyIssue> issues,
+        List<(string RuleCode, string EntityType)> evaluated,
+        DateTime runStartedAt,
+        CancellationToken ct)
+    {
+        if (evaluated.Count == 0)
+        {
+            return 0;
+        }
+
+        var scopes = System.Text.Json.JsonSerializer.Serialize(
+            evaluated.Select(e => new { r = e.RuleCode, t = e.EntityType }));
+        var found = System.Text.Json.JsonSerializer.Serialize(
+            issues.Select(i => new { r = i.RuleCode, t = i.EntityType, id = i.EntityId }));
+
+        const string sql = """
+            DELETE target
+              FROM aud.ConsistencyIssue AS target
+              JOIN OPENJSON(@scopes) WITH (r nvarchar(64) '$.r', t nvarchar(64) '$.t') AS scope
+                ON scope.r = target.RuleCode AND scope.t = target.EntityType
+             WHERE target.DetectedAt < @runStartedAt
+               AND (target.ResolvedAt IS NOT NULL
+                    OR NOT EXISTS (
+                       SELECT 1
+                         FROM OPENJSON(@found) WITH (r nvarchar(64) '$.r', t nvarchar(64) '$.t', id bigint '$.id') AS f
+                        WHERE f.r = target.RuleCode AND f.t = target.EntityType AND f.id = target.EntityId));
+            """;
+
+        return await db.Database
+            .ExecuteSqlRawAsync(
+                sql,
+                [
+                    new SqlParameter("@runStartedAt", System.Data.SqlDbType.DateTime2) { Value = runStartedAt },
+                    new SqlParameter("@scopes", System.Data.SqlDbType.NVarChar, -1) { Value = scopes },
+                    new SqlParameter("@found", System.Data.SqlDbType.NVarChar, -1) { Value = found },
+                ],
+                ct)
+            .ConfigureAwait(false);
     }
 
     /// <summary>Знахідка перевірки.</summary>

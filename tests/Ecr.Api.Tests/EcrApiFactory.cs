@@ -154,6 +154,11 @@ public sealed class EcrApiFactory(
         builder.UseEnvironment("Development");
         builder.UseSetting("Health:WarmupOnStart", "false");
         builder.UseSetting("Documents:StaleMapWarm:Enabled", "false");
+
+        // ⛔ Наздоганяння нічних задач (`NightlyCatchUp`) — вимкнено: журнал обслуговування спільної бази колекції пишуть
+        // інші тести старими годинниками, і кожен старт хоста ставив би справжні нічні задачі проти чужих даних — той
+        // самий клас, що й cron-вето нижче (`RecurringTriggerVeto`).
+        builder.UseSetting(Ecr.Api.Startup.NightlyCatchUp.EnabledKey, "false");
         builder.ConfigureLogging(logging =>
         {
             // ⛔ Типові постачальники прибираються ЦІЛКОМ, і головний тут —

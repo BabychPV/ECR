@@ -196,7 +196,43 @@ public sealed class ConsistencyCheckJobDetectionTests(SqlServerFixture sql)
         // ⚠ Названо КОНКРЕТНУ колонку у формі `{tableCode}.{columnCode}`:
         // «у версії є проблеми» змусило б конфігуратора шукати винуватця серед
         // сотень колонок руками — саме те, чого уникає `ECR-TMPL-4227`.
-        Assert.Contains($"{tableCode}.{columnCode}", issue.Value.Message, StringComparison.Ordinal);
+        // ✎ Аудит live 12.11: текст — конверт каталогу (`consistency.finding.*`), коди таблиці й колонки — підстановки.
+        AssertFinding(issue.Value.Message, "UNBOUND_CALCULATED_COLUMN", tableCode, columnCode);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Колонка_Calculated_із_формулою_шаблону_знахідки_не_дає()
+    {
+        // ⛔ Аудит live 12.11: формула шаблону на колонці — теж джерело значення (те саме визначення, що в
+        // `UnsourcedFormulaColumnsAsync` і `PublishChecks.CheckComputedColumns`). Колонку, яку заповнює формула,
+        // правило не має називати «порожньою клітинкою». RED до фіксу: правило дивилося лише на прив'язки.
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await builder.BuildAsync(rowCount: 1, ct: CancellationToken.None);
+
+        var (columnId, _, _) = await AddCalculatedColumnAsync(builder, doc);
+
+        await using (var db = builder.CreateContext())
+        {
+            var formula = new FormulaDef(doc.TableDefId, FormulaScope.Column, "1", ExpressionDialect.Template);
+            formula.AssignColumn(columnId);
+            db.FormulaDefs.Add(formula);
+            await db.SaveChangesAsync(CancellationToken.None);
+        }
+
+        await RunJobAsync();
+
+        Assert.Null(await FindIssueAsync("UNBOUND_CALCULATED_COLUMN", "cfg.ColumnDef", columnId));
+    }
+
+    /// <summary>Текст знахідки — конверт ключа <c>consistency.finding.&lt;RULE&gt;</c> із кодами таблиці й колонки.</summary>
+    private static void AssertFinding(string message, string ruleCode, string tableCode, string columnCode)
+    {
+        Assert.True(JobProgressMessageCodec.TryDecode(message, out var envelope), $"Не конверт: {message}");
+        Assert.Equal(ConsistencyCheckJob.FindingKeyPrefix + ruleCode, envelope.Key);
+        Assert.Equal(tableCode, envelope.Params!["table"]);
+        Assert.Equal(columnCode, envelope.Params!["column"]);
     }
 
     [Fact]
@@ -257,7 +293,7 @@ public sealed class ConsistencyCheckJobDetectionTests(SqlServerFixture sql)
 
         Assert.NotNull(issue);
         Assert.Equal(2, issue.Value.Severity);
-        Assert.Contains($"{tableCode}.{columnCode}", issue.Value.Message, StringComparison.Ordinal);
+        AssertFinding(issue.Value.Message, "UNSOURCED_FORMULA_COLUMN", tableCode, columnCode);
 
         // ⚠ Вид знахідки — свій, а не `Calculated`-ний: у колонки Formula два
         // джерела, і змішати їх в одному коді означало б плутати поради.

@@ -35,7 +35,7 @@ const requested: string[] = [];
 /** Розклад за вагою, як його рахує СЕРВЕР по всьому журналу (LS-E). */
 const Totals = { errors: 12, warnings: 4, info: 1 };
 
-function respondWith(page: unknown, permissions: string[] = []): void {
+function respondWith(page: unknown, permissions: string[] = [], jobs: Record<string, unknown[]> = {}): void {
   requested.length = 0;
   vi.stubGlobal(
     'fetch',
@@ -46,7 +46,9 @@ function respondWith(page: unknown, permissions: string[] = []): void {
         ? { permissions }
         : url.includes('/consistency/summary')
           ? { ...Totals, total: 17, lastDetectedAt: '2026-10-05T21:00:00Z' }
-          : page;
+          : url.includes('/api/v1/jobs?')
+            ? (Object.entries(jobs).find(([code]) => url.includes(encodeURIComponent(code)))?.[1] ?? [])
+            : page;
       return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }),
   );
@@ -170,30 +172,49 @@ describe('ConsistencyIssuesPage на шаблоні переліку (UI-20)', (
   });
 });
 
-describe('стан знахідки виглядом StatusBadge (звірка batch-4 з макетом, п.20)', () => {
-  it('звичайний регістр, нейтральний тон без помаранчевого тла, ширина не нижче тексту', async () => {
+describe('журнал — знімок на момент перевірки (рішення людини 12.11)', () => {
+  it('без стану «відкрито/розв’язано» і без перемикача «лише нерозв’язані»', async () => {
+    // ⛔ Неправдиву знахідку перевірка ВИДАЛЯЄ, тож стан рядка й перемикач нічого не відрізняють.
     respondWith({ items: Findings, nextCursor: null, totalCount: 17, totals: Totals });
     show();
 
     await screen.findByText('Знахідка 1');
-    const open = document.querySelectorAll<HTMLElement>('[data-issue-state="open"]');
-    const resolved = document.querySelectorAll<HTMLElement>('[data-issue-state="resolved"]');
-    expect(open).toHaveLength(4);
-    expect(resolved).toHaveLength(1);
+    expect(document.querySelector('[data-issue-state]')).toBeNull();
+    expect(screen.queryByText('⟦consistency.state⟧')).toBeNull();
+    expect(screen.queryByRole('checkbox', { name: '⟦consistency.openOnly⟧' })).toBeNull();
+  });
 
-    for (const badge of [...open, ...resolved]) {
-      expect(badge.style.textTransform).toBe('none');
-      expect(badge.style.width).toBe('max-content');
-      // ⛔ Не `statusWarning`: вагу несе колонка Severity, стан «відкрито» — нейтральний (KIT §1.3).
-      expect(badge.getAttribute('style') ?? '').not.toMatch(/warning/i);
-    }
+  it('момент останньої успішної перевірки — свіжіший із нічного й ручного прогону', async () => {
+    respondWith({ items: Findings, nextCursor: null, totalCount: 17, totals: Totals }, [], {
+      'Ecr.Infrastructure.Jobs.ConsistencyCheckJob': [{ updatedAt: '2026-11-11T00:15:01Z' }],
+      'Ecr.Application.Ports.IConsistencyCheckJob': [{ updatedAt: '2026-11-12T13:01:45Z' }],
+    });
+    show();
+
+    const line = await waitFor(() => {
+      const found = document.querySelector<HTMLElement>('[data-last-check]');
+      expect(found).not.toBeNull();
+      return found as HTMLElement;
+    });
+    expect(line.textContent).toContain('⟦consistency.lastCheck⟧');
+    expect(requested.some((url) => url.includes('state=Succeeded') && url.includes('IConsistencyCheckJob'))).toBe(true);
+    // Свіжіший — ручний 12.11, а не нічний 11.11.
+    expect(line.querySelector('time')?.getAttribute('datetime')).toBe('2026-11-12T13:01:45Z');
+  });
+
+  it('успішних прогонів у записах немає — рядка немає, а не вигаданий час', async () => {
+    respondWith({ items: Findings, nextCursor: null, totalCount: 17, totals: Totals });
+    show();
+
+    await screen.findByText('Знахідка 1');
+    expect(document.querySelector('[data-last-check]')).toBeNull();
   });
 });
 
 describe('«Скинути фільтри» у порожньому переліку (N4)', () => {
-  it('скидає вагу, код правила і «показати розв’язані» разом, а не лише вагу', async () => {
+  it('скидає вагу і код правила разом, а не лише вагу', async () => {
     respondWith({ items: [], nextCursor: null, totalCount: 0, totals: Totals });
-    show('/admin/consistency?severity=Error&ruleCode=ZZ&showResolved=1');
+    show('/admin/consistency?severity=Error&ruleCode=ZZ');
 
     const clear = await waitFor(() => {
       const found = document.querySelector<HTMLElement>('[data-table-clear-filters="true"]');
@@ -206,7 +227,6 @@ describe('«Скинути фільтри» у порожньому перелі
     await waitFor(() => {
       expect(location).not.toContain('severity');
       expect(location).not.toContain('ruleCode');
-      expect(location).not.toContain('showResolved');
     });
   });
 

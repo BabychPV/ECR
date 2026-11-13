@@ -1,5 +1,6 @@
 // tests/Ecr.Infrastructure.Tests/Jobs/SupersededResultsSweepJobTests.cs
 using Ecr.Application.Ports;
+using Ecr.Domain.Entities.Integration;
 using Ecr.Infrastructure.Jobs;
 using Ecr.Infrastructure.Persistence;
 using Ecr.Infrastructure.Tests.Persistence;
@@ -240,34 +241,75 @@ public sealed class SupersededResultsSweepJobTests(SweepDatabase database) : ICl
     {
         var data = await ArrangeAsync(202608);
 
-        async Task<bool> HasIssueAsync(bool enabled)
-        {
-            await using (var db = data.Stand.Builder.CreateContext())
-            {
-                var configuration = new ConfigurationBuilder()
-                    .AddInMemoryCollection(new Dictionary<string, string?>
-                    {
-                        [SupersededPurgeOptions.EnabledKey] = enabled ? "true" : "false",
-                    })
-                    .Build();
-                var job = new ConsistencyCheckJob(
-                    db, Substitute.For<IOrphanScanner>(), new TestClock(T0), Substitute.For<IConsistencyMetrics>(),
-                    configuration);
-                await job.ExecuteAsync(null, Substitute.For<IJobProgress>(), CancellationToken.None);
-            }
+        // ✎ Аудит live 12.11: правило лічить лише рядки прогонів, неактуальних уже на старті останнього успішного
+        // прибирання (див. `ConsistencyCheckJob.NonCurrentRunRowsAsync`). Тож щоб правило мало що доводити, у журналі
+        // має бути завершене прибирання ПІСЛЯ прогонів цього стенду (T0…T0+3h) — інакше тест перевіряв би не правило,
+        // а годинник. Без цього рядка тест і на старому коді, і на новому залежав би від сусідніх тестів класу.
+        await AddCompletedSweepAsync(data.Stand, T0.AddDays(1));
 
-            await using var verify = data.Stand.Builder.CreateContext();
-            return await verify.Database
-                .SqlQuery<int>($"""
-                    SELECT COUNT(*) AS Value FROM aud.ConsistencyIssue
-                     WHERE RuleCode = {ConsistencyCheckJob.NonCurrentRunRowsRule} AND EntityId = {data.Stand.Period}
-                       AND ResolvedAt IS NULL
-                    """)
-                .SingleAsync() > 0;
+        Assert.False(await HasNonCurrentIssueAsync(data.Stand, purgeEnabled: false));
+        Assert.True(await HasNonCurrentIssueAsync(data.Stand, purgeEnabled: true));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Перевірка_узгодженості_не_лічить_прогони_витіснені_після_останнього_прибирання()
+    {
+        // ⛔ Аудит live 12.11: 30.10 перевірка й прибирання стартували одним cron за 10 мс, і перевірка порахувала
+        // рядки, які прибирання саме видаляло, — сім знахідок, неправдивих уже за секунду. Так само ручний запуск
+        // посеред перерахунку бачив щойно витіснений прогін. Рядок, якого прибирання ще не мало шансу побачити, —
+        // не порушення. RED до фіксу: знахідка з'являлась і тут.
+        var data = await ArrangeAsync(202609);
+
+        // Прибирання пройшло, а ПІСЛЯ нього новіший прогін того самого проєкту й періоду витіснив попередні.
+        await AddCompletedSweepAsync(data.Stand, T0.AddDays(20));
+        await AddRunWithRowsAsync(data.Stand, "Superseded", T0.AddDays(30), 1, 1, 1, documentScoped: false);
+
+        Assert.False(await HasNonCurrentIssueAsync(data.Stand, purgeEnabled: true));
+
+        // Зворотний бік: щойно прибирання пройшло вже ПІСЛЯ витіснення, ті самі рядки — справжня знахідка.
+        await AddCompletedSweepAsync(data.Stand, T0.AddDays(40));
+        Assert.True(await HasNonCurrentIssueAsync(data.Stand, purgeEnabled: true));
+    }
+
+    /// <summary>Запускає перевірку узгодженості й каже, чи є ВІДКРИТА знахідка NON_CURRENT_RUN_ROWS періоду стенду.</summary>
+    /// <param name="stand">Стенд.</param>
+    /// <param name="purgeEnabled">Значення <c>Calculations:SupersededPurge:Enabled</c>.</param>
+    private static async Task<bool> HasNonCurrentIssueAsync(PurgeStand stand, bool purgeEnabled)
+    {
+        await using (var db = stand.Builder.CreateContext())
+        {
+            var configuration = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    [SupersededPurgeOptions.EnabledKey] = purgeEnabled ? "true" : "false",
+                })
+                .Build();
+            var job = new ConsistencyCheckJob(
+                db, Substitute.For<IOrphanScanner>(), new TestClock(T0.AddDays(60)), Substitute.For<IConsistencyMetrics>(),
+                configuration);
+            await job.ExecuteAsync(null, Substitute.For<IJobProgress>(), CancellationToken.None);
         }
 
-        Assert.False(await HasIssueAsync(enabled: false));
-        Assert.True(await HasIssueAsync(enabled: true));
+        await using var verify = stand.Builder.CreateContext();
+        return await verify.Database
+            .SqlQuery<int>($"""
+                SELECT COUNT(*) AS Value FROM aud.ConsistencyIssue
+                 WHERE RuleCode = {ConsistencyCheckJob.NonCurrentRunRowsRule} AND EntityId = {stand.Period}
+                   AND ResolvedAt IS NULL
+                """)
+            .SingleAsync() > 0;
+    }
+
+    /// <summary>Записує в журнал обслуговування завершений успішний прохід прибирання, що стартував <paramref name="at"/>.</summary>
+    private static async Task AddCompletedSweepAsync(PurgeStand stand, DateTime at)
+    {
+        await using var db = stand.Builder.CreateContext();
+        var run = new MaintenanceRun(SupersededResultsSweepJob.Code, at);
+        run.Complete("Succeeded", "{}", at.AddMinutes(1));
+        db.MaintenanceRuns.Add(run);
+        await db.SaveChangesAsync();
     }
 
     private async Task<SupersededSweepOutcome> RunAsync(

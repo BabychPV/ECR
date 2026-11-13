@@ -292,6 +292,8 @@ public sealed class DataProtectionProductionStartupTests(SqlServerFixture sql)
             builder.ConfigureLogging(logging => logging.ClearProviders());
 
             // Розклади стоять, але не спрацьовують (RecurringTriggerVeto, як у EcrApiFactory).
+            // Наздоганяння нічних задач вимкнено з тієї ж причини, що й cron (`NightlyCatchUp`, як у EcrApiFactory).
+            builder.UseSetting(Ecr.Api.Startup.NightlyCatchUp.EnabledKey, "false");
             builder.ConfigureTestServices(RecurringTriggerVeto.Register);
         }
     }

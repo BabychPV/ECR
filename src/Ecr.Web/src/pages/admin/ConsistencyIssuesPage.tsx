@@ -1,9 +1,11 @@
 import { lazy, Suspense, useState, type JSX } from 'react';
-import { Badge, Button, Checkbox, Group, Text, UnstyledButton } from '@mantine/core';
+import { Badge, Button, Group, Text, UnstyledButton } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { ConsistencyIssue, ConsistencyIssuePage } from '@/api/types';
 import type { components } from '@/api/schema';
+import { consistencyFindingText } from '@/features/consistency/consistencyFindingText';
+import { useLastConsistencyCheck } from '@/features/consistency/lastCheck';
 import {
   ConsistencyIssuesKey,
   RunConsistencyPermission,
@@ -17,7 +19,7 @@ import { ErrorAlert, TechnicalDetails } from '@/shared/ui/ErrorAlert';
 import { FilterBar } from '@/shared/ui/FilterBar';
 import { ListPage } from '@/shared/ui/ListPage';
 import type { StatItem, StatStripItems } from '@/shared/ui/StatStrip';
-import { StatusBadge, badgeLook } from '@/shared/ui/StatusBadge';
+import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { TwoLine } from '@/shared/ui/TwoLine';
 import { useDebouncedFilter, useFilterCursor } from '@/shared/ui/useDebouncedFilter';
@@ -64,11 +66,9 @@ export function issuePanelId(issueId: number): string {
  * бази руками. Лічильник без переліку відповідає на «скільки», а діяти можна
  * лише за відповіддю на «де».
  *
- * ⚠ Текст знахідки (`message`) — УКРАЇНСЬКИЙ і показується як є. Його пише
- * `ConsistencyCheckJob`, а механізм каталогу рядків існує для відмов API
- * (`err.*`), не для цього журналу. Рішення свідоме: підпис колонки
- * (`consistency.messageLanguage`) каже це прямо на екрані, щоб український
- * рядок в англійському інтерфейсі не читався як дефект локалізації.
+ * ⚠ Текст знахідки (`message`) — конверт ключа каталогу `consistency.finding.*`, який перекладає
+ * `consistencyFindingText` (аудит live 12.11). Старі знахідки (готове українське речення) показуються як є, і лише
+ * під ними лишається підпис `consistency.messageLanguage`.
  *
  * ⚠ UI-20 (макет `screens-ops.js` `/admin/consistency`, KIT.md §3): шаблон
  * переліку — пояснення під заголовком, головна дія «Run check now», смуга за
@@ -80,12 +80,16 @@ export function issuePanelId(issueId: number): string {
  */
 export function ConsistencyIssuesPage(): JSX.Element {
   const [ruleCode] = useUrlState('ruleCode');
-  const [showResolved, setShowResolved] = useUrlState('showResolved');
+
   const [severity, setSeverity] = useUrlState('severity');
   const setParams = useUrlParamsSetter();
   const [panel, setPanel] = useDetailPanel();
 
-  const openOnly = showResolved !== '1';
+  // ⛔ Рішення людини 12.11: журнал — знімок на момент перевірки; неправдиву знахідку перевірка ВИДАЛЯЄ, а не
+  // закриває. Перемикач «лише нерозв'язані» більше нічого не відрізняє — його прибрано, запит лишається `openOnly=true`
+  // (контракт той самий; закритих рядків задача не пише).
+  const openOnly = true;
+  const lastCheck = useLastConsistencyCheck();
   const rule = ruleCode ?? '';
   // ⛔ Код правила набирається з клавіатури — у запит після паузи, а не на
   // кожну літеру (той самий дефект, що в журналі змін, `useDebouncedFilter`).
@@ -147,7 +151,7 @@ export function ConsistencyIssuesPage(): JSX.Element {
 
   const severityFilter = severityCode === undefined ? null : severity;
   const shown = items;
-  const filtered = severityFilter !== null || appliedRule.length > 0 || !openOnly;
+  const filtered = severityFilter !== null || appliedRule.length > 0;
 
   const openIssue = items?.find((issue) => issuePanelId(issue.id) === panel);
 
@@ -157,7 +161,7 @@ export function ConsistencyIssuesPage(): JSX.Element {
       label: t('consistency.severity'),
       sortValue: (issue) => -issue.severity,
       render: (issue) => (
-        <StatusBadge kind="severity" state={severityState(issue.severity)} quiet={issue.resolvedAt !== null} />
+        <StatusBadge kind="severity" state={severityState(issue.severity)} />
       ),
     },
     {
@@ -182,7 +186,7 @@ export function ConsistencyIssuesPage(): JSX.Element {
                 setPanel(issuePanelId(issue.id));
               }}
             >
-              {issue.message}
+              {consistencyFindingText(issue.message).text}
             </UnstyledButton>
           }
           secondary={<span data-allow-dotted>{issue.ruleCode}</span>}
@@ -208,12 +212,7 @@ export function ConsistencyIssuesPage(): JSX.Element {
       label: t('consistency.when'),
       render: (issue) => <Timestamp value={issue.detectedAt} />,
     },
-    {
-      key: 'state',
-      label: t('consistency.state'),
-      sortValue: (issue) => (issue.resolvedAt === null ? 0 : 1),
-      render: (issue) => <IssueStateBadge resolved={issue.resolvedAt !== null} />,
-    },
+
   ];
 
   return (
@@ -241,15 +240,6 @@ export function ConsistencyIssuesPage(): JSX.Element {
            */
           search={{ param: 'ruleCode', label: t('consistency.rule'), placeholder: t('consistency.ruleHint') }}
           clearLabel={t('filters.clear')}
-          right={
-            <Checkbox
-              label={t('consistency.openOnly')}
-              checked={openOnly}
-              onChange={(event) => {
-                setShowResolved(event.currentTarget.checked ? null : '1');
-              }}
-            />
-          }
         />
       }
       table={
@@ -258,6 +248,12 @@ export function ConsistencyIssuesPage(): JSX.Element {
               а не тост, що зникає. */}
           <ErrorAlert error={run.startError} />
           <RunStatus run={run} />
+          {/* Знімок — на який момент (рішення людини 12.11). Немає успішного прогону в записах — рядка немає. */}
+          {lastCheck !== null && (
+            <Text size="xs" c="dimmed" mb="xs" data-last-check>
+              {t('consistency.lastCheck')} <Timestamp value={lastCheck} />
+            </Text>
+          )}
 
           <DataTable<ConsistencyIssue>
             columns={columns}
@@ -272,7 +268,7 @@ export function ConsistencyIssuesPage(): JSX.Element {
             noMatchTitle={t('consistency.noMatch')}
             // N4: скидаються ВСІ три фільтри, що роблять перелік порожнім (вага, код правила, «лише нерозв'язані»), а не
             // лише вага: кнопка при `?ruleCode=…` раніше не з'являлась, а при вазі лишала решту.
-            onClearFilters={filtered ? () => setParams({ severity: null, ruleCode: null, showResolved: null }) : undefined}
+            onClearFilters={filtered ? () => setParams({ severity: null, ruleCode: null }) : undefined}
             clearFiltersLabel={t('filters.clear')}
             onRowClick={(issue) => setPanel(issuePanelId(issue.id))}
             selectedKey={openIssue === undefined ? undefined : String(openIssue.id)}
@@ -296,8 +292,8 @@ export function ConsistencyIssuesPage(): JSX.Element {
             }
       }
     >
-      {/* Мова тексту знахідки — під таблицею, поки рядки є. */}
-      {items !== undefined && items.length > 0 && (
+      {/* Мова тексту знахідки — під таблицею, лише поки серед рядків є НЕперекладені (записані до каталогу). */}
+      {items !== undefined && items.some((issue) => !consistencyFindingText(issue.message).translated) && (
         <Text size="xs" c="dimmed">
           {t('consistency.messageLanguage')}
         </Text>
@@ -391,43 +387,4 @@ export function severityState(severity: ConsistencyIssue['severity']): 'Info' | 
     default:
       return 'Error';
   }
-}
-
-/**
- * Стан знахідки: «Open» / «Resolved» — виглядом `StatusBadge` (UI-27): звичайний регістр, вага
- * 500, тонка рамка, без заливки.
- *
- * ⚠ Звірка batch-4 з макетом (п.20): тут стояв помаранчевий капітельний `Badge` («UNRESOLVED»),
- * обрізаний на 500 px до «UN…». Макет — нейтральний «○ Open»: колір у таблиці лише там, де щось
- * не так (KIT §1.3), а вагу проблеми вже несе колонка Severity. Різновиду `consistency` у
- * `StatusBadge` немає (знадобились би нові ключі `status.consistency.*` у сіді), тому підписи —
- * наявні `consistency.open/resolved`, а тон і токени — з набору (`badgeLook`).
- */
-function IssueStateBadge({ resolved }: { readonly resolved: boolean }): JSX.Element {
-  const look = badgeLook(resolved ? 'muted' : 'neutral');
-
-  return (
-    <Badge
-      size="sm"
-      variant="transparent"
-      miw="fit-content"
-      radius="xs"
-      c={look.text}
-      bg={look.bg}
-      styles={{
-        root: {
-          height: 20,
-          border: `1px solid ${look.border}`,
-          textTransform: 'none',
-          letterSpacing: 'normal',
-          fontWeight: 500,
-          fontSize: 'var(--mantine-font-size-xs)',
-        },
-      }}
-      style={{ width: 'max-content' }}
-      data-issue-state={resolved ? 'resolved' : 'open'}
-    >
-      {t(resolved ? 'consistency.resolved' : 'consistency.open')}
-    </Badge>
-  );
 }
