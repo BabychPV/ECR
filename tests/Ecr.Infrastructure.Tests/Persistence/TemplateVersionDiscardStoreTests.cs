@@ -183,6 +183,59 @@ public sealed class TemplateVersionDiscardStoreTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Finding", "TMPL-DISCARD")]
+    [Trait("Decision", "B74")]
+    public async Task Версія_що_є_чинною_лише_в_doc_ProjectTemplate_використовується_і_не_відкидається()
+    {
+        // B74 PT01: єдине посилання на чернетку — рядок doc.ProjectTemplate (чинна версія шаблону в проєкті). Без
+        // рядка doc.ProjectTemplate в UsageSql перелік порожній, і відкидання впало б на FK (547) замість відмови.
+        var ct = CancellationToken.None;
+        var (builder, doc, draftId) = await DraftCloneWithRichStructureAsync(ct);
+
+        await using var db = builder.CreateContext();
+        var templateId = await db.TemplateVersions.AsNoTracking()
+            .Where(v => v.Id == draftId).Select(v => v.TemplateId).SingleAsync(ct);
+        var before = await db.ProjectTemplates.AsNoTracking()
+            .Where(t => t.ProjectId == doc.ProjectId && t.TemplateId == templateId)
+            .Select(t => (int?)t.CurrentTemplateVersionId).SingleOrDefaultAsync(ct);
+
+        await db.Database.ExecuteSqlAsync($"""
+            IF EXISTS (SELECT 1 FROM doc.ProjectTemplate WHERE ProjectId = {doc.ProjectId} AND TemplateId = {templateId})
+                UPDATE doc.ProjectTemplate SET CurrentTemplateVersionId = {draftId}
+                WHERE ProjectId = {doc.ProjectId} AND TemplateId = {templateId};
+            ELSE
+                INSERT doc.ProjectTemplate (ProjectId, TemplateId, CurrentTemplateVersionId)
+                VALUES ({doc.ProjectId}, {templateId}, {draftId});
+            """, ct);
+
+        try
+        {
+            var usages = await new TemplateVersionDiscardStore(db).FindUsagesAsync(draftId, ct);
+            Assert.Equal(1, usages.GetValueOrDefault("doc.ProjectTemplate"));
+            Assert.Single(usages);
+        }
+        finally
+        {
+            // Спільна тестова база: повертаємо рядок проєкту як було.
+            if (before is { } previous)
+            {
+                await db.Database.ExecuteSqlAsync($"""
+                    UPDATE doc.ProjectTemplate SET CurrentTemplateVersionId = {previous}
+                    WHERE ProjectId = {doc.ProjectId} AND TemplateId = {templateId};
+                    """, ct);
+            }
+            else
+            {
+                await db.Database.ExecuteSqlAsync($"""
+                    DELETE FROM doc.ProjectTemplate WHERE ProjectId = {doc.ProjectId} AND TemplateId = {templateId};
+                    """, ct);
+            }
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "TMPL-DISCARD")]
     public async Task Кожен_FK_під_структурою_версії_покритий_каскадом_або_переліком_використань()
     {
         // Обхід графа FK від cfg.TemplateVersion лише крізь таблиці, які каскад видаляє: кожна таблиця, що на

@@ -517,3 +517,21 @@ BEGIN
 END
 GO
 -- TC:discuss ── кінець секції ──
+
+-- B74:project-templates ── ремонт подвійного запису PT01 (ADR docs/build/ADR-B74-PROJECT-TEMPLATES.md, Q2) ──
+-- ⚠ Ідемпотентно на кожен старт. Обробники пишуть doc.ProjectTemplate і doc.Document.TemplateId самі; ця секція лише
+-- доповнює рядки, створені повз них (фікстури EF, DBA, старий білд у вікні відкату): основний шаблон проєкту = шаблон
+-- Project.TemplateVersionId. Секція зникає в P6 разом із колонкою. Сід іде після міграцій, тож PT01 уже застосована.
+INSERT INTO doc.ProjectTemplate (ProjectId, TemplateId, CurrentTemplateVersionId)
+SELECT p.Id, v.TemplateId, p.TemplateVersionId
+FROM doc.Project AS p
+JOIN cfg.TemplateVersion AS v ON v.Id = p.TemplateVersionId
+WHERE NOT EXISTS (SELECT 1 FROM doc.ProjectTemplate AS x WHERE x.ProjectId = p.Id AND x.TemplateId = v.TemplateId);
+
+UPDATE d SET TemplateId = v.TemplateId
+FROM doc.Document AS d
+JOIN doc.Project AS p ON p.Id = d.ProjectId
+JOIN cfg.TemplateVersion AS v ON v.Id = p.TemplateVersionId
+WHERE d.TemplateId IS NULL;
+GO
+-- B74:project-templates ── кінець секції ──

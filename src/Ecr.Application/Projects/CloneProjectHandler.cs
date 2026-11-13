@@ -134,6 +134,13 @@ public sealed class CloneProjectHandler(
                 // додавати вже відстежувану (і відкочену) сутність удруге.
                 var clone = Build();
 
+                // ✎ B74 P1 (подвійний запис): шаблони джерела з їхніми чинними версіями (FindProjectAsync їх завантажує).
+                // Джерело без рядків doc.ProjectTemplate (до ремонту) дає клон без них - доповнить блок ремонту 99-epilogue.sql.
+                foreach (var template in source.Templates)
+                {
+                    clone.AttachTemplate(template.TemplateId, template.CurrentTemplateVersionId);
+                }
+
                 // ⚠ Періоди НЕ копіюються: їх будує PeriodCalendar за датами нового
                 // проєкту. Скопійовані, вони принесли б із собою стани і межі старого
                 // року — включно з Closed, який зробив би новий проєкт мертвим.

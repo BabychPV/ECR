@@ -190,7 +190,12 @@ public sealed class CreateDocumentHandler(
                         var businessKey = await documents
                             .NextBusinessKeyAsync(projectId, versionId, innerCt).ConfigureAwait(false);
 
-                        document = new Document(projectId, businessKey, userId, now);
+                        // ✎ B74 P1: шаблон документа пишеться одразу — з РЯДКА версії (cfg.TemplateVersion.TemplateId,
+                        // та сама пара, яку тримають FK шкали), під тим самим блоком проєкту. NULL лише в рядках повз
+                        // цей шлях — їх доповнює ремонт 99-epilogue.sql.
+                        var templateId = await documents
+                            .FindTemplateIdOfVersionAsync(versionId, innerCt).ConfigureAwait(false);
+                        document = new Document(projectId, businessKey, userId, now, templateId);
 
                         // ⚠ Ім'я — опційне, ПОРУЧ із BusinessKey, не замість нього: механізм
                         // технічного ключа тут не змінюється (директива "людське ім'я

@@ -592,6 +592,15 @@ public interface IDocumentStore
     /// </remarks>
     public Task<int?> FindProjectTemplateVersionIdAsync(int projectId, CancellationToken ct);
 
+    /// <summary>B74 PT01: шаблон версії з рядка <c>cfg.TemplateVersion</c>; <c>null</c> — версії немає.</summary>
+    /// <remarks>
+    /// ⚠ Саме рядок версії, а не сутність шаблону з іншого шляху: <c>doc.Document.TemplateId</c> і шкала тримаються
+    /// FK на ту саму пару (версія, шаблон), тож джерело істини одне.
+    /// </remarks>
+    /// <param name="templateVersionId">Версія.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<int?> FindTemplateIdOfVersionAsync(int templateVersionId, CancellationToken ct);
+
     /// <summary>
     /// Версія шаблону ПРОЄКТУ, прочитана ПІД блоком його рядка до кінця транзакції; <c>null</c> —
     /// проєкту немає.

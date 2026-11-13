@@ -950,8 +950,10 @@ namespace Ecr.Application.Ports;
 
 /// <summary>
 /// Часова шкала версій шаблону проєкту: ЄДИНА відповідь «яка версія діє за період».
-/// Рядок шкали — <c>doc.ProjectTemplateVersion(ProjectId, FromPeriodKey, TemplateVersionId)</c>;
-/// версія періоду = найбільший <c>FromPeriodKey ≤ periodKey</c> (SQL-відповідник — <c>doc.fn_VersionOf</c>).
+/// Рядок шкали — <c>doc.ProjectTemplateVersion(ProjectId, TemplateId, FromPeriodKey, TemplateVersionId)</c>
+/// (✎ B74 PT01: шкала на пару проєкт × шаблон, PK (ProjectId, TemplateId, FromPeriodKey));
+/// версія періоду = найбільший <c>FromPeriodKey ≤ periodKey</c> (SQL-відповідник — <c>doc.fn_VersionOf</c> для основного
+/// шаблону проєкту, <c>doc.fn_TemplateVersionOf(project, template, period)</c> — для явного шаблону).
 /// <c>Project.TemplateVersionId</c> — «чинна/остання» версія для НОВИХ періодів.
 /// </summary>
 public interface IProjectVersionTimeline

@@ -561,9 +561,13 @@ public sealed class CreateProjectHandler(
 
         // ⛔ D-474 (4): річний проєкт має ОДИН період на рік, а розкладка «копія на місяць» вимагає дванадцяти —
         // місячні копії не мали б куди лягти. Відмова тут, а не порожній документ потім.
-        if (periodKind == PeriodKind.Yearly && templateVersions is not null)
+        // ✎ B74 PT01: версія потрібна й для шаблону проєкту (doc.ProjectTemplate), тож читається для будь-якої періодичності.
+        var version = templateVersions is null
+            ? null
+            : await templateVersions.FindAsync(templateVersionId, ct).ConfigureAwait(false);
+
+        if (periodKind == PeriodKind.Yearly)
         {
-            var version = await templateVersions.FindAsync(templateVersionId, ct).ConfigureAwait(false);
             if (version is { Layout: TemplateLayout.PerMonthCopies })
             {
                 throw new BusinessRuleException(
@@ -623,6 +627,14 @@ public sealed class CreateProjectHandler(
                 // Будується всередині: повтор транзакції стратегією не має
                 // додавати вже відстежувану (і відкочену) сутність удруге.
                 var project = Build();
+
+                // ✎ B74 P1 (подвійний запис): основний шаблон проєкту - той самий коміт, що й проєкт. Без сховища версій
+                // (прямий конструктор у тестах) рядок доповнить блок ремонту 99-epilogue.sql.
+                if (version is not null)
+                {
+                    project.AttachTemplate(version.TemplateId, templateVersionId);
+                }
+
                 await periods.AddProjectAsync(project, token).ConfigureAwait(false);
                 await uow.SaveChangesAsync(token).ConfigureAwait(false);
                 return project.Id;

@@ -33,6 +33,9 @@ public sealed class PeriodStore(EcrDbContext db, Ecr.Domain.Abstractions.IClock?
         // порожня колекція означала б «періодів немає» — тобто побудову
         // дублікатів на кожному виклику.
         await db.Entry(project).Collection(p => p.Periods).LoadAsync(ct).ConfigureAwait(false);
+
+        // B74: шаблони проєкту (клон копіює їх; AttachTemplate звіряє повтор за завантаженою навігацією).
+        await db.Entry(project).Collection(p => p.Templates).LoadAsync(ct).ConfigureAwait(false);
         return project;
     }
 

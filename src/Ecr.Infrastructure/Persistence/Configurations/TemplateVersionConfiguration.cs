@@ -18,6 +18,9 @@ public sealed class TemplateVersionConfiguration : IEntityTypeConfiguration<Temp
             "Status <> 1 OR (PublishedAt IS NOT NULL AND PublishedByUserId IS NOT NULL)"));
         builder.HasKey(x => x.Id);
 
+        // ✎ B74 PT01: ціль складених FK «версія належить шаблону» (doc.ProjectTemplate, doc.ProjectTemplateVersion).
+        builder.HasAlternateKey(x => new { x.Id, x.TemplateId }).HasName("AK_TemplateVersion_Id_Template");
+
         builder.Property(x => x.Version).HasMaxLength(20).IsRequired();
         builder.Property(x => x.Status).HasConversion<byte>();
 

@@ -11,9 +11,18 @@ public sealed class Document : Entity<long>
 
     private Document() { }
 
-    public Document(int projectId, string businessKey, int createdByUserId, DateTime utcNow)
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="businessKey">Бізнес-ключ.</param>
+    /// <param name="createdByUserId">Автор.</param>
+    /// <param name="utcNow">Момент створення.</param>
+    /// <param name="templateId">
+    /// B74 P1: шаблон документа; <c>null</c> - основний шаблон проєкту (шаблон <c>Project.TemplateVersionId</c>). Обов'язковим
+    /// стає в P3, NOT NULL - у P6 (ADR B74, Q2); до того порожні значення доповнює блок ремонту <c>99-epilogue.sql</c>.
+    /// </param>
+    public Document(int projectId, string businessKey, int createdByUserId, DateTime utcNow, int? templateId = null)
     {
         ProjectId = projectId;
+        TemplateId = templateId;
         BusinessKey = businessKey;
         CreatedAt = utcNow;
         CreatedByUserId = createdByUserId;
@@ -22,6 +31,9 @@ public sealed class Document : Entity<long>
     }
 
     public int ProjectId { get; private set; }
+
+    /// <summary>B74: шаблон документа (<c>cfg.Template.Id</c>); <c>null</c> - основний шаблон проєкту.</summary>
+    public int? TemplateId { get; private set; }
 
     /// <summary>Складається зі значень колонок із <c>IsBusinessKey</c>.</summary>
     public string BusinessKey { get; private set; } = null!;

@@ -33,7 +33,7 @@ public static class ServiceAccountGrants
     ];
 
     /// <summary>Скалярні функції, які застосунок викликає у власних запитах (не через вʼюху) — право <c>EXECUTE</c>.</summary>
-    public static readonly IReadOnlyList<string> Functions = ["doc.fn_VersionOf"];
+    public static readonly IReadOnlyList<string> Functions = ["doc.fn_VersionOf", "doc.fn_TemplateVersionOf"];
 
     /// <summary>
     /// R-5: схеми, запис у які службі ЗАБОРОНЕНО поверх <c>db_datawriter</c>: архів пишуть лише процедури

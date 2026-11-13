@@ -1499,6 +1499,44 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Ecr.Domain.Entities.Configuration.MonthInputAlias", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Alias")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<int>("ColumnDefId")
+                        .HasColumnType("int");
+
+                    b.Property<byte>("MonthNumber")
+                        .HasColumnType("tinyint");
+
+                    b.Property<int>("TableDefId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id")
+                        .HasName("PK_MonthInputAlias");
+
+                    b.HasIndex("ColumnDefId")
+                        .HasDatabaseName("IX_MonthInputAlias_Column");
+
+                    b.HasIndex("TableDefId", "Alias", "MonthNumber")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_MonthInputAlias");
+
+                    b.ToTable("MonthInputAlias", "cfg", t =>
+                        {
+                            t.HasCheckConstraint("CK_MonthInputAlias_Month", "MonthNumber BETWEEN 1 AND 12");
+                        });
+                });
+
             modelBuilder.Entity("Ecr.Domain.Entities.Configuration.PeriodAccessRuleDef", b =>
                 {
                     b.Property<int>("Id")
@@ -2772,6 +2810,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasAlternateKey("Id", "TemplateId")
+                        .HasName("AK_TemplateVersion_Id_Template");
+
                     b.HasIndex("TemplateId", "Version")
                         .IsUnique()
                         .HasDatabaseName("UQ_TemplateVersion");
@@ -3389,12 +3430,18 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("rowversion");
 
+                    b.Property<int?>("TemplateId")
+                        .HasColumnType("int");
+
                     b.HasKey("Id");
 
                     b.HasIndex("CreatedByUserId")
                         .HasDatabaseName("IX_Document_CreatedByUserId");
 
                     SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("CreatedByUserId"), new[] { "ProjectId" });
+
+                    b.HasIndex("TemplateId")
+                        .HasDatabaseName("IX_Document_Template");
 
                     b.HasIndex("ProjectId", "BusinessKey")
                         .IsUnique()
@@ -4100,9 +4147,45 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Ecr.Domain.Entities.Documents.ProjectTemplate", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("CurrentTemplateVersionId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ProjectId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("TemplateId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id")
+                        .HasName("PK_ProjectTemplate");
+
+                    b.HasIndex("TemplateId")
+                        .HasDatabaseName("IX_ProjectTemplate_Template");
+
+                    b.HasIndex("CurrentTemplateVersionId", "TemplateId")
+                        .HasDatabaseName("IX_ProjectTemplate_CurrentVersion");
+
+                    b.HasIndex("ProjectId", "TemplateId")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_ProjectTemplate");
+
+                    b.ToTable("ProjectTemplate", "doc");
+                });
+
             modelBuilder.Entity("Ecr.Domain.Entities.Documents.ProjectTemplateVersion", b =>
                 {
                     b.Property<int>("ProjectId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("TemplateId")
                         .HasColumnType("int");
 
                     b.Property<int>("FromPeriodKey")
@@ -4111,10 +4194,13 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.Property<int>("TemplateVersionId")
                         .HasColumnType("int");
 
-                    b.HasKey("ProjectId", "FromPeriodKey")
+                    b.HasKey("ProjectId", "TemplateId", "FromPeriodKey")
                         .HasName("PK_ProjectTemplateVersion");
 
-                    b.HasIndex("TemplateVersionId")
+                    b.HasIndex("TemplateId")
+                        .HasDatabaseName("IX_ProjectTemplateVersion_Template");
+
+                    b.HasIndex("TemplateVersionId", "TemplateId")
                         .HasDatabaseName("IX_ProjectTemplateVersion_TemplateVersion");
 
                     b.ToTable("ProjectTemplateVersion", "doc");
@@ -7348,6 +7434,23 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasConstraintName("FK_HeaderFieldDef_Version");
                 });
 
+            modelBuilder.Entity("Ecr.Domain.Entities.Configuration.MonthInputAlias", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Configuration.ColumnDef", null)
+                        .WithMany()
+                        .HasForeignKey("ColumnDefId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_MonthInputAlias_Column");
+
+                    b.HasOne("Ecr.Domain.Entities.Configuration.TableDef", null)
+                        .WithMany()
+                        .HasForeignKey("TableDefId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_MonthInputAlias_Table");
+                });
+
             modelBuilder.Entity("Ecr.Domain.Entities.Configuration.PeriodAccessRuleDef", b =>
                 {
                     b.HasOne("Ecr.Domain.Entities.Configuration.SheetDef", null)
@@ -7891,6 +7994,12 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("FK_Document_Project");
+
+                    b.HasOne("Ecr.Domain.Entities.Configuration.Template", null)
+                        .WithMany()
+                        .HasForeignKey("TemplateId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_Document_Template");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Documents.DocumentHeaderValue", b =>
@@ -8122,6 +8231,31 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasConstraintName("FK_Project_TV");
                 });
 
+            modelBuilder.Entity("Ecr.Domain.Entities.Documents.ProjectTemplate", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Documents.Project", null)
+                        .WithMany("Templates")
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_ProjectTemplate_Project");
+
+                    b.HasOne("Ecr.Domain.Entities.Configuration.Template", null)
+                        .WithMany()
+                        .HasForeignKey("TemplateId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_ProjectTemplate_Template");
+
+                    b.HasOne("Ecr.Domain.Entities.Configuration.TemplateVersion", null)
+                        .WithMany()
+                        .HasForeignKey("CurrentTemplateVersionId", "TemplateId")
+                        .HasPrincipalKey("Id", "TemplateId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_ProjectTemplate_TemplateVersion");
+                });
+
             modelBuilder.Entity("Ecr.Domain.Entities.Documents.ProjectTemplateVersion", b =>
                 {
                     b.HasOne("Ecr.Domain.Entities.Documents.Project", null)
@@ -8131,9 +8265,17 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasConstraintName("FK_ProjectTemplateVersion_Project");
 
+                    b.HasOne("Ecr.Domain.Entities.Configuration.Template", null)
+                        .WithMany()
+                        .HasForeignKey("TemplateId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_ProjectTemplateVersion_Template");
+
                     b.HasOne("Ecr.Domain.Entities.Configuration.TemplateVersion", null)
                         .WithMany()
-                        .HasForeignKey("TemplateVersionId")
+                        .HasForeignKey("TemplateVersionId", "TemplateId")
+                        .HasPrincipalKey("Id", "TemplateId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("FK_ProjectTemplateVersion_TemplateVersion");
@@ -8926,6 +9068,8 @@ namespace Ecr.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("Ecr.Domain.Entities.Documents.Project", b =>
                 {
                     b.Navigation("Periods");
+
+                    b.Navigation("Templates");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.External.RowWindowMap", b =>
