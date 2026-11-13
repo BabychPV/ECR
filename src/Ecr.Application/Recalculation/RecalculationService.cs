@@ -626,6 +626,13 @@ public sealed class RecalculationService(
             ownedElsewhere = AnnualOnlyBlocked(ownedElsewhere, instances, tables);
         }
 
+        // ✎ LAND-YEAR B60: прогін ВІДКРИТОГО якоря річної розкладки — не-місячні цілі пишуться під АГРЕГАТНИМ станом
+        // аркуша за місяцями року (як PATCH не-місячної колонки), а місячні C_M01 — під станом аркуша самого січня.
+        // Роутер і календар уже в кеші scope (ForeignColumnsByTableAsync вище) — нових запитів тут немає.
+        var openAnchorYear = annualPeriods is null && copyScope is null && ownedElsewhere is not null
+            ? await OpenAnchorYearAsync(instance, periodKey, ct).ConfigureAwait(false)
+            : null;
+
         List<int> targets;
 
         if (crossPeriodSources is not null)
@@ -1125,7 +1132,13 @@ public sealed class RecalculationService(
             .FindPeriodStateAsync(instance.DocumentId, periodKey.Value, ct)
             .ConfigureAwait(false);
         // WW-03 (рішення людини 13.10, п. 6): похідна зміна від правки ІНШОГО місяця — не «пізня».
-        var isLateEdit = periodState == Domain.Enums.PeriodState.Grace && crossPeriodSources is null;
+        // ✎ LAND-YEAR B60: прогін закритого якоря пише лише не-місячне — «пізня» за річним правилом (агрегат місяців,
+        // AnnualPeriodRule.IsLate, як PATCH не-місячної колонки), а не за станом самого якоря (Closed → ніколи).
+        var isLateEdit = crossPeriodSources is null
+                         && (annualPeriods is { Count: > 0 }
+                             ? Security.AnnualPeriodRule.IsLate(
+                                 await YearStatesAsync(instance.DocumentId, annualPeriods, ct).ConfigureAwait(false))
+                             : periodState == Domain.Enums.PeriodState.Grace);
 
         // ⛔ Q-2xx (аудит фази 3, звітність). До цього рядка формули шаблону
         // писалися в `doc.CellValue` ЧЕРЕЗ `cellStore.ApplyAsync` без жодного
@@ -1181,9 +1194,16 @@ public sealed class RecalculationService(
                 instance.TemplateVersionId,
                 instance.DocumentId);
 
+            // ✎ LAND-YEAR B60: аркуші відкритого якоря, у які прогін пише не-місячне, — ще й агрегатний стан (окремий набір).
+            var annualSheets = openAnchorYear is null
+                ? null
+                : AnnualTargetSheets(byInstance, sheetOfInstance, instances, tables);
+            var annualWritable = annualSheets is { Count: > 0 } ? new HashSet<(int SheetDefId, long? CopyId)>() : null;
+
             var writable = await EnterSheetsAsync(
                     instance.DocumentId, periodKey, sheetOfInstance.Values, heldSheet, token, approverEditSheets, writeSubmitted,
-                    annualPeriods)
+                    annualPeriods,
+                    annualWritable is null ? null : (openAnchorYear!, annualSheets!, annualWritable))
                 .ConfigureAwait(false);
 
             // ⛔ O2 (ФВ-9.8, замір I2). Доти тіло нижче виконувалося НА КОЖЕН
@@ -1202,7 +1222,30 @@ public sealed class RecalculationService(
                 // зрізі подання й не змінюються (ФВ-9.17, `RecalculationWritePolicy`):
                 // шлях змінити подане — Reopen. Екземпляр без відомого аркуша не
                 // пишеться з тієї самої причини — перевірити його нема чим.
-                if (!sheetOfInstance.TryGetValue(target, out var sheetKey) || !writable.Contains(sheetKey))
+                if (!sheetOfInstance.TryGetValue(target, out var sheetKey))
+                {
+                    continue;
+                }
+
+                // ✎ LAND-YEAR B60: аркуш відкритого якоря з не-місячними цілями — кожна комірка під своїм станом:
+                // не-місячна маршрутизованої таблиці — агрегат року, решта (C_M01, таблиці поза маршрутизацією) — січень.
+                if (annualWritable is not null && annualSheets!.Contains(sheetKey))
+                {
+                    var annualColumns = NonMonthRoutedColumns(target, instances, tables);
+                    var allowed = cells.Values
+                        .Where(c => annualColumns.Contains(c.Address.ColumnDefId)
+                            ? annualWritable.Contains(sheetKey)
+                            : writable.Contains(sheetKey))
+                        .ToList();
+                    if (allowed.Count > 0)
+                    {
+                        batch.Add((target, allowed));
+                    }
+
+                    continue;
+                }
+
+                if (!writable.Contains(sheetKey))
                 {
                     continue;
                 }
@@ -1507,14 +1550,26 @@ public sealed class RecalculationService(
     /// не-місячних колонок), під спільними блокуваннями ВСІХ місяців аркуша за зростанням ключа (як у PATCH);
     /// <c>null</c> — стан аркуша періоду прогону, як доти.
     /// </param>
+    /// <param name="openAnchor">
+    /// ✎ LAND-YEAR B60: прогін ВІДКРИТОГО якоря річної розкладки — місяці року, аркуші з не-місячними цілями і куди
+    /// скласти ті з них, що пишуться за АГРЕГАТОМ (<see cref="Security.AnnualPeriodRule.AggregateStatus"/>, як PATCH);
+    /// повернений набір для цих аркушів — за станом самого періоду прогону (місячні цілі). <c>null</c> — як доти.
+    /// </param>
     private async Task<IReadOnlySet<(int SheetDefId, long? CopyId)>> EnterSheetsAsync(
         long documentId, PeriodKey periodKey, IEnumerable<(int SheetDefId, long? CopyId)> sheets,
         (int SheetDefId, long? CopyId)? heldSheet, CancellationToken ct,
         IReadOnlySet<int>? approverEditSheets = null, bool writeSubmitted = false,
-        IReadOnlyList<int>? annualPeriods = null)
+        IReadOnlyList<int>? annualPeriods = null,
+        (IReadOnlyList<int> Months, IReadOnlySet<(int SheetDefId, long? CopyId)> Sheets,
+            HashSet<(int SheetDefId, long? CopyId)> Writable)? openAnchor = null)
     {
         var writable = new HashSet<(int SheetDefId, long? CopyId)>();
         var holdsAny = false;
+
+        bool Writable(Domain.Enums.DocumentStatus status, int sheetDefId)
+            => status is not (Domain.Enums.DocumentStatus.Submitted or Domain.Enums.DocumentStatus.Approved)
+               || (status == Domain.Enums.DocumentStatus.Submitted
+                   && (writeSubmitted || approverEditSheets?.Contains(sheetDefId) == true));
 
         // RS: ключ блокування — (аркуш, копія); копії йдуть після оригіналу свого аркуша за зростанням Id.
         foreach (var sheet in sheets.Distinct().OrderBy(s => s.SheetDefId).ThenBy(s => s.CopyId ?? 0))
@@ -1545,6 +1600,30 @@ public sealed class RecalculationService(
 
                 status = Security.AnnualPeriodRule.AggregateStatus(statuses);
             }
+            else if (openAnchor is { } anchorYear && copyId is null && anchorYear.Sheets.Contains(sheet))
+            {
+                // ✎ LAND-YEAR B60: відкритий якір — блокування всіх місяців аркуша за зростанням (як PATCH не-місячної
+                // колонки); стан для місячних цілей — сам період прогону, для не-місячних — агрегат.
+                var statuses = new List<Domain.Enums.DocumentStatus>(anchorYear.Months.Count);
+                status = Domain.Enums.DocumentStatus.Draft;
+                foreach (var month in anchorYear.Months.Append(periodKey.Value).Distinct().Order())
+                {
+                    var monthStatus = holdsAny
+                        ? await sheetGate.EnterEditNoWaitAsync(documentId, sheetDefId, new PeriodKey(month), ct).ConfigureAwait(false)
+                        : await sheetGate.EnterEditAsync(documentId, sheetDefId, new PeriodKey(month), ct).ConfigureAwait(false);
+                    holdsAny = true;
+                    statuses.Add(monthStatus);
+                    if (month == periodKey.Value)
+                    {
+                        status = monthStatus;
+                    }
+                }
+
+                if (Writable(Security.AnnualPeriodRule.AggregateStatus(statuses), sheetDefId))
+                {
+                    anchorYear.Writable.Add(sheet);
+                }
+            }
             else
             {
                 status = (holdsAny, copyId) switch
@@ -1560,8 +1639,7 @@ public sealed class RecalculationService(
 
             // ✎ UAT-recalc-ux (слово людини 07.11: «тільки погоджені не мають перераховуватися»): ЯВНИЙ повний
             // перерахунок (`RecalculationJob`, `writeSubmitted`) пише й поданий аркуш; затверджений — ніколи.
-            if (status is not (Domain.Enums.DocumentStatus.Submitted or Domain.Enums.DocumentStatus.Approved)
-                || (status == Domain.Enums.DocumentStatus.Submitted && (writeSubmitted || approverEditSheets?.Contains(sheetDefId) == true)))
+            if (Writable(status, sheetDefId))
             {
                 writable.Add(sheet);
             }
@@ -1951,6 +2029,99 @@ public sealed class RecalculationService(
         }
 
         return (result, computed);
+    }
+
+    /// <summary>
+    /// ✎ LAND-YEAR B60: місяці року, якщо період прогону — ЯКІР року документа річної розкладки
+    /// (<see cref="IMonthColumnRouter.RoutesComputedVersion"/>); інакше <c>null</c>.
+    /// </summary>
+    /// <param name="instance">Представник прогону (версія шаблону, документ).</param>
+    /// <param name="periodKey">Період прогону.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>Документ і календар року — з кешу роутера (їх уже прочитав <see cref="ForeignColumnsByTableAsync"/>).</remarks>
+    private async Task<IReadOnlyList<int>?> OpenAnchorYearAsync(
+        TableInstanceRef instance, PeriodKey periodKey, CancellationToken ct)
+    {
+        if (monthRouter is not { Enabled: true }
+            || !monthRouter.RoutesComputedVersion(instance.TemplateVersionId)
+            || await monthRouter.GetDocumentAsync(instance.DocumentId, ct).ConfigureAwait(false) is not { } routed
+            || await monthRouter.AnchorOfAsync(routed.ProjectId, periodKey.Year, ct).ConfigureAwait(false) != periodKey)
+        {
+            return null;
+        }
+
+        var months = await monthRouter.YearPeriodKeysAsync(routed.ProjectId, periodKey.Year, ct).ConfigureAwait(false);
+        return months.Count > 1 ? months : null;
+    }
+
+    /// <summary>✎ LAND-YEAR B60: ефективні стани місяців року (з винятком документа) — вхід річного правила «пізньої» правки.</summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="months">Ключі місяців року.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>Лише прогін закритого якоря (B24/B58): ≤ 12 запитів на прогін, не гарячий шлях правки.</remarks>
+    private async Task<List<Domain.Enums.PeriodState>> YearStatesAsync(
+        long documentId, IReadOnlyList<int> months, CancellationToken ct)
+    {
+        var states = new List<Domain.Enums.PeriodState>(months.Count);
+        foreach (var month in months.Distinct().Order())
+        {
+            if (await periods.FindPeriodStateAsync(documentId, month, ct).ConfigureAwait(false) is { } state)
+            {
+                states.Add(state);
+            }
+        }
+
+        return states;
+    }
+
+    /// <summary>
+    /// ✎ LAND-YEAR B60: аркуші (оригінали) прогону відкритого якоря, у які він пише хоч одну НЕ-місячну колонку
+    /// маршрутизованої таблиці — їм потрібен ще й агрегатний стан.
+    /// </summary>
+    /// <param name="byInstance">Що пише прогін: екземпляр → комірки.</param>
+    /// <param name="sheetOfInstance">Аркуш кожного екземпляра запису.</param>
+    /// <param name="instances">Екземпляри виду прогону.</param>
+    /// <param name="tables">Таблиці знімка.</param>
+    private HashSet<(int SheetDefId, long? CopyId)> AnnualTargetSheets(
+        Dictionary<long, Dictionary<CellAddress, CellRecord>> byInstance,
+        Dictionary<long, (int SheetDefId, long? SheetCopyId)> sheetOfInstance,
+        IReadOnlyList<TableInstanceRef> instances,
+        Dictionary<int, Domain.Entities.Configuration.TableDef> tables)
+    {
+        var result = new HashSet<(int SheetDefId, long? CopyId)>();
+        foreach (var (target, cells) in byInstance)
+        {
+            if (cells.Count == 0 || !sheetOfInstance.TryGetValue(target, out var sheet) || sheet.SheetCopyId is not null)
+            {
+                continue;
+            }
+
+            var annual = NonMonthRoutedColumns(target, instances, tables);
+            if (annual.Count > 0 && cells.Keys.Any(a => annual.Contains(a.ColumnDefId)))
+            {
+                result.Add(sheet);
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>✎ LAND-YEAR B60: не-місячні колонки таблиці екземпляра, якщо вона маршрутизована; інакше порожньо.</summary>
+    /// <param name="tableInstanceId">Екземпляр.</param>
+    /// <param name="instances">Екземпляри виду прогону.</param>
+    /// <param name="tables">Таблиці знімка.</param>
+    private HashSet<int> NonMonthRoutedColumns(
+        long tableInstanceId,
+        IReadOnlyList<TableInstanceRef> instances,
+        Dictionary<int, Domain.Entities.Configuration.TableDef> tables)
+    {
+        var tableDefId = instances.FirstOrDefault(i => i.TableInstanceId == tableInstanceId)?.TableDefId;
+        return tableDefId is { } id
+               && tables.TryGetValue(id, out var table)
+               && monthRouter is { Enabled: true }
+               && monthRouter.AppliesToTable(table)
+            ? [.. table.Columns.Where(c => !c.IsDeleted && !c.IsMonthColumn).Select(c => c.Id)]
+            : [];
     }
 
     /// <summary>

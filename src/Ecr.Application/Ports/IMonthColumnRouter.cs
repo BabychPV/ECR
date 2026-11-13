@@ -91,6 +91,16 @@ public interface IMonthColumnRouter
     public Task<PeriodKey?> AnchorOfAsync(int projectId, int year, CancellationToken ct);
 
     /// <summary>
+    /// ✎ LAND-YEAR B60: ключі календаря проєкту в році за зростанням (той самий кешований календар, що
+    /// <see cref="AnchorOfAsync"/>); порожньо — роутер вимкнено або у році немає жодного рядка періоду.
+    /// </summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="year">Рік.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<int>> YearPeriodKeysAsync(int projectId, int year, CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<int>>([]);
+
+    /// <summary>
     /// Період-власник введеної комірки колонки <paramref name="column"/> для екземпляра перегляду.
     /// </summary>
     /// <param name="document">Документ (див. <see cref="GetDocumentAsync"/>).</param>
