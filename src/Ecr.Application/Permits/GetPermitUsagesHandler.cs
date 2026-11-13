@@ -80,7 +80,43 @@ public sealed class GetPermitUsagesHandler(
             return new PermitUsageDto(permitId, 0, 0, false, []);
         }
 
-        return await permits.FindUsagesAsync(permitId, projects, periodKey, limit ?? DefaultLimit, ct).ConfigureAwait(false);
+        var usage = await permits.FindUsagesAsync(permitId, projects, periodKey, limit ?? DefaultLimit, ct).ConfigureAwait(false);
+        return await WithoutHiddenCellsAsync(profile, usage, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// ⛔ S-4: місце комірки поза межами читання документа (Deny, D-214, період) не називається — те саме рішення, що й зріз.
+    /// Поля шапки лишаються: шапку бачить кожен, хто бачить документ.
+    /// </summary>
+    private async Task<PermitUsageDto> WithoutHiddenCellsAsync(
+        Security.AccessProfile profile, PermitUsageDto usage, CancellationToken ct)
+    {
+        var scopes = new Dictionary<long, Security.DocumentReadScope>();
+        var kept = new List<PermitUsageItemDto>(usage.Items.Count);
+
+        foreach (var item in usage.Items)
+        {
+            if (!string.Equals(item.Kind, PermitUsageKinds.Cell, StringComparison.Ordinal))
+            {
+                kept.Add(item);
+                continue;
+            }
+
+            if (!scopes.TryGetValue(item.DocumentId, out var scope))
+            {
+                scope = await access.ReadScopeAsync(profile, item.DocumentId, ct).ConfigureAwait(false);
+                scopes[item.DocumentId] = scope;
+            }
+
+            if (item.TableCode is { } table && item.PeriodKey is { } period
+                && scope.CanReadColumnCodeIn(table, item.FieldCode, new PeriodKey(period)))
+            {
+                kept.Add(item);
+            }
+        }
+
+        var removed = usage.Items.Count - kept.Count;
+        return removed == 0 ? usage : usage with { LinkCount = Math.Max(0, usage.LinkCount - removed), Items = kept };
     }
 
     private static BusinessRuleException Invalid(string messageKey, string message)

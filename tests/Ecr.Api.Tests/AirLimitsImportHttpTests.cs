@@ -1536,6 +1536,80 @@ public sealed class AirLimitsImportHttpTests(SqlServerFixture sql, ITestOutputHe
         Assert.All(await db.RegistryEntryKeys.AsNoTracking().Where(k => k.RegistryEntryId == nodeId).ToListAsync(), k => Assert.False(k.IsLive));
     }
 
+    /// <summary>
+    /// ⛔ S-5 (аудит 2026-11-10, правило C4): «де використано» вузла НАЕ називає дозвіл (номер, строки) лише тому, хто
+    /// читає реєстр шапки дозволу. Той самий запит, той самий вузол; відрізняються лише право/грант/заборона на реєстр шапки.
+    /// </summary>
+    /// <remarks>
+    /// Доказ без мутації доступу: до фіксу обробник перевіряв лише запитаний довідник (дерево НАЕ), і читач із Deny на
+    /// реєстр шапки та читач із грантом лише на дерево отримували <c>permitNumber</c> — тест падав на «дозвіл з реєстру,
+    /// який читач не бачить».
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "C4")]
+    public async Task WhereUsed__names_a_permit_only_to_a_reader_of_the_permit_header_registry()
+    {
+        await PrepareAsync();
+        using var app = new EcrApiFactory(sql);
+        using var admin = await SignedInAsync(app, Admin);
+        var region = NewRegion();
+        var permitId = await NewPermitAsync(admin, app);
+        var small = Small(Synthetic.Bytes, 40);
+        await ApplyBytesAsync(app, admin, permitId, small, new { region, area = "OFFSHORE", resolutions = await ResolveAsync(app, admin, permitId, region, "OFFSHORE", small) });
+        var nodeId = (await CardAsync(app, admin, permitId)).GetProperty("sources")[0].GetProperty("naeEntryId").GetInt64();
+        var refs = new Uri($"/api/v1/registries/{NaeTreeSchema.RegistryCode}/entries/{nodeId}/references", UriKind.Relative);
+
+        int headerRegistryId;
+        int naeRegistryId;
+        await using (var db = new EcrDbContext(Options()))
+        {
+            headerRegistryId = await db.RegistryEntries.AsNoTracking().Where(e => e.Id == permitId).Select(e => e.RegistryDefId).SingleAsync();
+            naeRegistryId = await db.RegistryDefs.AsNoTracking().Where(d => d.Code == NaeTreeSchema.RegistryCode).Select(d => d.Id).SingleAsync();
+        }
+
+        // Контроль 1: право Registry.View без заборон — дозвіл названо.
+        using (var viewer = await SignedInAsync(app, "Registry.View"))
+        {
+            AssertNamesPermit(await ReadAsync(app, await viewer.GetAsync(refs)), permitId);
+        }
+
+        // Той самий читач + Deny на реєстр шапки дозволу: вузол НАЕ читається (200), але дозволу в ньому немає.
+        using (var denied = await SignedWithGrantsAsync(app, ["Registry.View"], (naeRegistryId, false), (headerRegistryId, true)))
+        {
+            AssertNoPermit(await ReadAsync(app, await denied.GetAsync(refs)), permitId);
+        }
+
+        // Контроль 2: без права, ресурсні гранти Read на дерево НАЕ і на реєстр шапки — дозвіл названо.
+        using (var granted = await SignedWithGrantsAsync(app, [], (naeRegistryId, false), (headerRegistryId, false)))
+        {
+            AssertNamesPermit(await ReadAsync(app, await granted.GetAsync(refs)), permitId);
+        }
+
+        // Грант лише на дерево НАЕ (реєстр шапки не відкрито): вузол читається, дозвіл — ні.
+        using (var treeOnly = await SignedWithGrantsAsync(app, [], (naeRegistryId, false)))
+        {
+            AssertNoPermit(await ReadAsync(app, await treeOnly.GetAsync(refs)), permitId);
+        }
+
+        static void AssertNamesPermit(JsonElement body, long permitId)
+        {
+            var use = Assert.Single(body.GetProperty("items").EnumerateArray());
+            Assert.Equal(permitId, use.GetProperty("permitId").GetInt64());
+            Assert.Equal(1, body.GetProperty("total").GetInt32());
+        }
+
+        static void AssertNoPermit(JsonElement body, long permitId)
+        {
+            Assert.True(
+                body.GetProperty("items").GetArrayLength() == 0,
+                $"дозвіл з реєстру, який читач не бачить, потрапив у «де використано»: {body}");
+            Assert.Equal(0, body.GetProperty("total").GetInt32());
+            Assert.DoesNotContain(permitId.ToString(CultureInfo.InvariantCulture), body.GetProperty("items").GetRawText(), StringComparison.Ordinal);
+        }
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
@@ -1697,6 +1771,39 @@ public sealed class AirLimitsImportHttpTests(SqlServerFixture sql, ITestOutputHe
 
         var client = app.CreateClient();
         client.Timeout = TimeSpan.FromMinutes(15);
+        var login = await client.PostAsJsonAsync(new Uri("/api/v1/login/local", UriKind.Relative), new { userName = name, password = Password });
+        Assert.True(login.IsSuccessStatusCode, $"{login.StatusCode}: {app.ErrorsText}");
+        return client;
+    }
+
+    /// <summary>S-5: користувач із правами <paramref name="permissions"/> і ресурсними грантами Read (або Deny) на довідники.</summary>
+    private async Task<HttpClient> SignedWithGrantsAsync(
+        EcrApiFactory app, string[] permissions, params (int RegistryDefId, bool Deny)[] grants)
+    {
+        var name = $"air_{Guid.NewGuid():N}"[..20];
+        await using (var db = new EcrDbContext(Options()))
+        {
+            var user = new User(name, name, AuthProvider.Local);
+            user.SetPassword(new PasswordHasher().Hash(Password));
+            db.Users.Add(user);
+            var role = new Role(EcrCode.Create($"R{Guid.NewGuid():N}"[..12]), new LocalizedText(new Dictionary<string, string> { ["en"] = "S-5 reader" }));
+            db.Roles.Add(role);
+            await db.SaveChangesAsync();
+            foreach (var permission in permissions)
+            {
+                db.RolePermissions.Add(new RolePermission(role.Id, permission));
+            }
+
+            foreach (var (registryDefId, deny) in grants)
+            {
+                db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Registry, registryDefId, GrantLevel.Read, isDeny: deny));
+            }
+
+            db.RoleAssignments.Add(new RoleAssignment(role.Id, user.Id, principalSid: null));
+            await db.SaveChangesAsync();
+        }
+
+        var client = app.CreateClient();
         var login = await client.PostAsJsonAsync(new Uri("/api/v1/login/local", UriKind.Relative), new { userName = name, password = Password });
         Assert.True(login.IsSuccessStatusCode, $"{login.StatusCode}: {app.ErrorsText}");
         return client;

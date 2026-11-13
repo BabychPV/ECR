@@ -168,6 +168,15 @@ public sealed class PermitBindingPreviewTests(SqlServerFixture sql)
             new CellRecord(new CellAddress(periodKey, 500, doc.ColumnDefIds[1]), doc.TableDefId, new CellValueData { ValueNumeric = 999m }),
         ]);
 
+        // S-1: факти накладаються в межах читання; тут — читач без заборон (самі межі доводить PermitBindingPreviewReadScopeTests).
+        var snapshot = Ecr.Application.Templates.PublishChecks.Snapshot(await read.Store.GetWithStructureAsync(doc.TemplateVersionId, default));
+        var readerProfile = new AccessBuilder { UserId = read.Types.UserId }
+            .Permission("Document.View")
+            .Grant(ResourceKind.Project, AccessBuilder.ProjectId, GrantLevel.Read)
+            .Build();
+        read.Types.Access.ReadScopeAsync(Arg.Any<AccessProfile>(), documentId, Arg.Any<CancellationToken>())
+            .Returns(DocumentReadScope.For(readerProfile, AccessBuilder.ProjectId, snapshot));
+
         var preview = await read.Preview.HandleAsync(
             doc.TemplateVersionId, $"B{_tag}", new PermitPreviewQuery(documentId, 202606, null, null, null), default);
 

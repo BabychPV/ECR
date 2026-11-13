@@ -4954,7 +4954,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/registries/{code}/entries/{id}/retire` | `Registry.EditData` або грант `Write` на довідник | 8 |
 | `POST` | `/api/v1/registries/{code}/entries/{id}/unretire` | `Registry.EditData` або грант `Write` на довідник | 8 |
 | `DELETE` | `/api/v1/registries/{code}/entries/{id}/purge` | `Registry.EditData` або грант `Write` на довідник | 8 |
-| `GET` | `/api/v1/registries/{code}/entries/{id}/references` | `Registry.View` або грант `Read` на довідник | 8 |
+| `GET` | `/api/v1/registries/{code}/entries/{id}/references` | `Registry.View` або грант `Read` на довідник; дозволи — лише з реєстрів шапки, які читач бачить (S-5, C4) | 8 |
 | `POST` | `/api/v1/nae-tree/af-import` | `Registry.EditDefinition` + `Registry.EditData` | 8 |
 | `POST` | `/api/v1/nae-tree/roots` | `Registry.EditData`; +`Registry.EditDefinition` і `Registry.Publish`, коли довідник створюється | 8 |
 | `POST` | `/api/v1/nae-tree/seed-roots` | `Registry.EditData`; +`Registry.EditDefinition` і `Registry.Publish`, коли довідник створюється | 8 |
@@ -5002,12 +5002,12 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/template-versions/{id}/permit-bindings/{code}` | `Template.View` | 7 |
 | `PUT` | `/api/v1/template-versions/{id}/permit-bindings/{code}` | `Template.Edit` | 7 |
 | `DELETE` | `/api/v1/template-versions/{id}/permit-bindings/{code}` | `Template.Edit` | 7 |
-| `GET` | `/api/v1/template-versions/{id}/permit-bindings/{code}/preview?documentId=&periodKey=&facilityName=&periodEnd=&permitEntryId=` | `Template.View` (+ `Document.View` з `documentId`) | 7 |
+| `GET` | `/api/v1/template-versions/{id}/permit-bindings/{code}/preview?documentId=&periodKey=&facilityName=&periodEnd=&permitEntryId=` | `Template.View` (+ `Document.View` з `documentId`); фактичні комірки — лише таблиці/колонки в межах читання (S6, D-214), приховані колонки не накладаються (S-1); колонка таблиці «місяці в колонках» з іншим власником — лише коли область ролі містить період власника, як у зрізі (B44, Q-17) | 7 |
 | `POST` | `/api/v1/documents/{documentId}/permit-bindings/{code}/refresh?periodKey=` | — (через `IAccessDecisionService`, як `POST …/rows`) | 7 |
 | `GET` | `/api/v1/permits?type=&status=&q=&asOf=&limit=&cursor=` | `Registry.View` | 8 |
 | `POST` | `/api/v1/permits` | `Registry.EditData` | 8 |
 | `GET` | `/api/v1/permits/{id}?asOf=` | `Registry.View` | 8 |
-| `GET` | `/api/v1/permits/{id}/usages?periodKey=&limit=` | `Registry.View` (+ `Document.View` у проєкті документа: чужі документи не рахуються) | 8 |
+| `GET` | `/api/v1/permits/{id}/usages?periodKey=&limit=` | `Registry.View` (+ `Document.View` у проєкті документа: чужі документи не рахуються); комірки поза межами читання документа (S6, D-214) не віддаються, `linkCount` зменшується на сховані з поточної сторінки (S-4) | 8 |
 | `PUT` | `/api/v1/permits/{id}` | `Registry.EditData` | 8 |
 | `DELETE` | `/api/v1/permits/{id}` | `Registry.EditData` | 8 |
 | `POST` | `/api/v1/permits/{id}/activate` | `Registry.EditData` | 8 |

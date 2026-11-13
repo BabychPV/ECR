@@ -608,7 +608,7 @@ public sealed class GetRegistryEntryReferencesHandler(
         ArgumentException.ThrowIfNullOrWhiteSpace(registryCode);
 
         var lookup = new RegistryLookup(registries, registryCode);
-        await RegistryAccess.RequireAsync(access, currentUser, Permission, GrantLevel.Read, lookup, ct).ConfigureAwait(false);
+        var profile = await RegistryAccess.RequireAsync(access, currentUser, Permission, GrantLevel.Read, lookup, ct).ConfigureAwait(false);
         var definition = await lookup.RequireAsync(ct).ConfigureAwait(false);
 
         var entry = await registries.FindEntryAsync(entryId, ct).ConfigureAwait(false);
@@ -618,6 +618,32 @@ public sealed class GetRegistryEntryReferencesHandler(
         }
 
         var items = await reader.ListAsync(definition.Id, entryId, ct).ConfigureAwait(false);
-        return new RegistryEntryReferencesDto(definition.Code, entryId, items, items.Count);
+
+        // ⛔ S-5 (C4): дозвіл — запис ІНШОГО довідника (шапка дозволу); його номер і строки — лише тому, хто той довідник
+        // читає (те саме правило, що PermitRegistryReadGuard). Рішення — одне на довідник шапки, не на дозвіл.
+        var visible = new List<RegistryEntryReferenceDto>(items.Count);
+        var readable = new Dictionary<int, bool>();
+        foreach (var item in items)
+        {
+            var permit = await registries.FindEntryAsync(item.PermitId, ct).ConfigureAwait(false);
+            if (permit is null)
+            {
+                continue;
+            }
+
+            if (!readable.TryGetValue(permit.RegistryDefId, out var canRead))
+            {
+                canRead = !RegistryAccess.IsDenied(profile, permit.RegistryDefId)
+                          && RegistryAccess.CanAccess(profile, Permission, GrantLevel.Read, permit.RegistryDefId);
+                readable[permit.RegistryDefId] = canRead;
+            }
+
+            if (canRead)
+            {
+                visible.Add(item);
+            }
+        }
+
+        return new RegistryEntryReferencesDto(definition.Code, entryId, visible, visible.Count);
     }
 }
