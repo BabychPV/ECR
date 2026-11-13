@@ -287,11 +287,41 @@ public sealed class RecalculateDocumentSheetScopeTests
             RecalculateDocumentHandler.ScopedTargetOf(Document, period, 12));
     }
 
+    /// <remarks>
+    /// B81 (F13 #877): запобіжник B69 в обробнику не мав модульного тесту. Архівований (чи той, що архівується) проєкт —
+    /// відмова <c>err.ECR-CALC-4221.projectArchived</c> ДО стану періоду, і нічого не ставиться в чергу, навіть коли
+    /// місяць відкритий (виняток «відкрито для документа» піднімає закритий місяць до Grace). Мутація: прибрати перевірку
+    /// <c>IsDocumentProjectArchivedOrArchivingAsync</c> в <c>RecalculateDocumentHandler</c> — задача ставиться, червоний.
+    /// Контроль: той самий документ без архівації ставиться в чергу.
+    /// </remarks>
+    [Theory]
+    [InlineData(null)]
+    [InlineData(3)]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "B81-4")]
+    public async Task Архівований_проєкт_відхиляється_до_стану_періоду_і_нічого_не_ставить_у_чергу(int? sheetDefId)
+    {
+        var fixture = Arrange(submittedSheet: null, hiddenSheet: null, periodState: PeriodState.Grace, projectArchived: true);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => fixture.Handler.HandleAsync(Document, new PeriodKey(Period), sheetDefId, CancellationToken.None));
+
+        Assert.Equal("ECR-CALC-4221", error.ErrorCode);
+        Assert.Equal("err.ECR-CALC-4221.projectArchived", error.Details?["messageKey"]);
+        await fixture.Jobs.DidNotReceiveWithAnyArgs()
+            .EnqueueCoalescedAsync<IRecalculationJob>(default!, default, default);
+        await fixture.Jobs.DidNotReceiveWithAnyArgs()
+            .EnqueueExclusiveAsync<IRecalculationJob>(default!, default, default);
+
+        var control = Arrange(submittedSheet: null, hiddenSheet: null, periodState: PeriodState.Grace);
+        Assert.Equal("job-1", await control.Handler.HandleAsync(Document, new PeriodKey(Period), sheetDefId, CancellationToken.None));
+    }
+
     private static Fixture Arrange(
         int? submittedSheet, int? hiddenSheet, PeriodState periodState = PeriodState.Open, int? alsoSubmittedSheet = null,
         bool approved = false, long? copyOfSheet3 = null, bool copyApproved = false,
         ITemplateLayoutRegistry? layouts = null, Action<IPeriodStore>? configurePeriods = null,
-        IProjectVersionTimeline? timeline = null)
+        IProjectVersionTimeline? timeline = null, bool projectArchived = false)
     {
         var builder = new AccessBuilder { UserId = 9 }
             .Permission(RecalculateDocumentHandler.Permission)
@@ -321,6 +351,7 @@ public sealed class RecalculateDocumentSheetScopeTests
 
         var periods = Substitute.For<IPeriodStore>();
         periods.FindPeriodStateAsync(Document, Period, Arg.Any<CancellationToken>()).Returns((PeriodState?)periodState);
+        periods.IsDocumentProjectArchivedOrArchivingAsync(Document, Arg.Any<CancellationToken>()).Returns(projectArchived);
         configurePeriods?.Invoke(periods);
 
         var states = new List<ApprovalState>();
