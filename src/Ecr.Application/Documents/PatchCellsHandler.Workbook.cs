@@ -320,10 +320,9 @@ public sealed partial class PatchCellsHandler
                 .ConfigureAwait(false);
         }
 
-        var toWrite = active.SelectMany(x => AddressesToWrite(x.Planned)).ToList();
-        var previous = toWrite.Count == 0
-            ? new Dictionary<CellAddress, CellValueData>()
-            : await cellStore.ReadCellsAsync(toWrite, ct).ConfigureAwait(false);
+        // ✎ LAND-YEAR G6: те саме читання «попереднього», що й поштучний шлях (річна розкладка — у власника).
+        var previous = await ReadPreviousValuesAsync([.. active.Select(x => (x.Context, x.Planned))], ct)
+            .ConfigureAwait(false);
 
         await EnsureWorkbookReferencesAsync(active, previous, Bounds, ct).ConfigureAwait(false);
 

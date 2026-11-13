@@ -24,7 +24,11 @@ public sealed class RecalculateDocumentHandler(
     IWorkflowStore workflow,
     // ✎ F13 p218: копії аркушів (RS) — «рахувати нічого» лише коли затверджені оригінал І всі копії аркуша. Необов'язковий
     // заради тестів, що конструюють обробник вручну (без нього копій немає — як і доти).
-    IDocumentSheetCopyStore? sheetCopies = null)
+    IDocumentSheetCopyStore? sheetCopies = null,
+    // ✎ LAND-YEAR B24: розкладки версій (в пам'яті) і версія періоду — закритий якір річної розкладки у відкритому році не
+    // відмовляє. Без них (тести, що конструюють обробник вручну) — відмова, як доти.
+    ITemplateLayoutRegistry? layouts = null,
+    IProjectVersionTimeline? timeline = null)
 {
     /// <summary>Право на перерахунок СВОГО документа: лише читання (`02-contracts.md` §9).</summary>
     /// <remarks>
@@ -272,7 +276,12 @@ public sealed class RecalculateDocumentHandler(
             var denial = Calculations.RecalculationWritePolicy.Check(
                 periodState, hasSubmittedSheets: false);
 
-            if (denial != Calculations.RecalculationWriteDenial.None)
+            // ✎ LAND-YEAR B24 (D-NEW-3): закритий ЯКІР річної розкладки у відкритому році — не відмова: задача пише
+            // не-місячні цілі під агрегатом року (`RecalculationJob.AnnualOnlyAnchorsAsync` — справжній гейт, за
+            // ефективними станами й винятками документа; тут — швидка оцінка за збереженими станами).
+            if (denial != Calculations.RecalculationWriteDenial.None
+                && !(denial == Calculations.RecalculationWriteDenial.PeriodClosed
+                     && await ClosedYearAnchorWritesAsync(documentId, periodKey, ct).ConfigureAwait(false)))
             {
                 throw Calculations.RecalculationWritePolicy.Reject(denial, periodKey.Value, documentId);
             }
@@ -334,6 +343,35 @@ public sealed class RecalculateDocumentHandler(
                 .ConfigureAwait(false);
 
         return new Calculations.RecalculationRequestOutcome(jobId, skipped, truncated);
+    }
+
+    /// <summary>
+    /// ✎ LAND-YEAR B24: закритий <paramref name="periodKey"/> — якір року (найменший ключ календаря року) документа
+    /// річної розкладки, а рік ще не закритий (<see cref="Security.AnnualPeriodRule.AnchorWritesAnnualTargets"/>).
+    /// </summary>
+    /// <remarks>
+    /// Без реєстру розкладок (чи жодної річної версії) — <c>false</c> без жодного запиту (відмова, як доти). Версія — ПЕРІОДУ
+    /// (<see cref="IProjectVersionTimeline"/>), не «чинна» проєкту. Запити — лише на шляху відмови закритим періодом:
+    /// проєкт документа (кеш доступу), версія періоду (кеш шкали), стани періодів проєкту.
+    /// </remarks>
+    private async Task<bool> ClosedYearAnchorWritesAsync(long documentId, PeriodKey periodKey, CancellationToken ct)
+    {
+        if (layouts is not { HasAny: true }
+            || timeline is null
+            || await access.DocumentProjectIdAsync(documentId, ct).ConfigureAwait(false) is not { } projectId
+            || !layouts.IsYearVersion(await timeline.VersionOfAsync(projectId, periodKey.Value, ct).ConfigureAwait(false)))
+        {
+            return false;
+        }
+
+        var year = (await periods.GetPeriodStatesAsync(projectId, periodKey: null, ct).ConfigureAwait(false))
+            .Where(p => p.PeriodKey / 100 == periodKey.Year)
+            .ToList();
+
+        return year.Count > 0
+               && year.Min(p => p.PeriodKey) == periodKey.Value
+               && Security.AnnualPeriodRule.AnchorWritesAnnualTargets(
+                   Domain.Enums.PeriodState.Closed, year.Select(p => p.State));
     }
 
     /// <summary>Право, що дає витіснення виконуваного перерахунку того самого документа.</summary>

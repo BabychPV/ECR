@@ -193,7 +193,7 @@ public sealed partial class PatchCellsHandler(
         // ⚠ `C7`: старі значення читаються ДО перевірки посилань, а не після:
         // «те саме значення, що вже стоїть» пропускається без відмови, і
         // питати про це сховище вдруге, по комірці, немає потреби.
-        var previous = await ReadPreviousValuesAsync(changes, ct).ConfigureAwait(false);
+        var previous = await ReadPreviousValuesAsync([(context, changes)], ct).ConfigureAwait(false);
         await EnsureManualTextMatchesFormulaAsync(context, changes, previous, ct).ConfigureAwait(false);
         await EnsureRegistryReferencesExistAsync(context, changes, previous, ct).ConfigureAwait(false);
         await EnsurePermitValidityCoversDataAsync(context, changes, previous, ct).ConfigureAwait(false);
@@ -2644,15 +2644,46 @@ public sealed partial class PatchCellsHandler(
     /// ⚠ Один запит на батч, не на комірку: адреси відомі всі одразу
     /// (<c>ICellStore.ReadCellsAsync</c>), і бюджет 300 мс на 100 комірок
     /// інакше не витримати.
+    /// <para>
+    /// ✎ LAND-YEAR G6 (D-NEW-2, «лише річна розкладка»): у версії <c>YearWithMonthColumns</c>
+    /// (<see cref="IMonthColumnRouter.RoutesComputedVersion"/>) «попереднє» колонки з чужим власником (місячна <c>M09</c>
+    /// у річному перегляді — власник 202609) береться у ВЛАСНИКА за <c>RowKey</c> — те саме, що бачить сітка й куди ляже
+    /// запис (<see cref="PlanOwnerBaselineAsync"/>/<see cref="ReadRequiredInputBaselineAsync"/>). Інакше <c>C7</c>
+    /// («той самий вимкнений запис, що вже стоїть, проходить») і D-461 (текст замість числової формули) судили б за
+    /// порожньою або застарілою фізичною коміркою перегляду. Версії <c>PerMonthCopies</c> під прапором Q-17 — фізично,
+    /// як і доти: план власників коштує 1–14 запитів на PATCH, і D-NEW-2 обмежує його річною розкладкою.
+    /// </para>
     /// </remarks>
     private async Task<IReadOnlyDictionary<CellAddress, CellValueData>> ReadPreviousValuesAsync(
-        CellChangeLists changes, CancellationToken ct)
+        IReadOnlyList<(RequestContext Context, CellChangeLists Changes)> items, CancellationToken ct)
     {
-        var addressesToWrite = AddressesToWrite(changes);
-        return addressesToWrite.Count == 0
-            ? new Dictionary<CellAddress, CellValueData>()
-            : (IReadOnlyDictionary<CellAddress, CellValueData>)await cellStore
-                .ReadCellsAsync(addressesToWrite, ct).ConfigureAwait(false);
+        var addressesToWrite = items.SelectMany(x => AddressesToWrite(x.Changes)).ToList();
+        if (addressesToWrite.Count == 0)
+        {
+            return new Dictionary<CellAddress, CellValueData>();
+        }
+
+        var yearItems = monthRouter is { Enabled: true } router
+            ? items.Where(x => router.RoutesComputedVersion(x.Context.Instance.TemplateVersionId)).ToList()
+            : [];
+        if (yearItems.Count == 0)
+        {
+            return await cellStore.ReadCellsAsync(addressesToWrite, ct).ConfigureAwait(false);
+        }
+
+        var ownerPlan = await PlanOwnerBaselineAsync(
+                [.. yearItems.Select(x => (
+                    x.Context, x.Changes,
+                    (IReadOnlyCollection<int>)[.. AddressesToWrite(x.Changes).Select(a => a.ColumnDefId).Distinct()]))],
+                ct)
+            .ConfigureAwait(false);
+        var logical = await ReadRequiredInputBaselineAsync(addressesToWrite, ownerPlan, ct).ConfigureAwait(false);
+
+        // Лише наявні адреси запису: тимчасові адреси нових рядків попереднього значення не мають (`DAT-04` п. 1).
+        var requested = addressesToWrite.ToHashSet();
+        return logical
+            .Where(pair => requested.Contains(pair.Key))
+            .ToDictionary(pair => pair.Key, pair => pair.Value);
     }
 
     /// <summary>Наявні комірки, чиє старе значення потрібне аудиту й <c>C7</c>.</summary>

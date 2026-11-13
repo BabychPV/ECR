@@ -285,7 +285,23 @@ public sealed partial class RecalculationJob(
                 // Обробник документа перевіряє те саме ще й до черги, але це
                 // швидка відмова заради людини (422 замість «jobId, який
                 // нічого не зробить»), а не другий гейт.
-                var refused = await RefusedPeriodsAsync(docRequest, ct).ConfigureAwait(false);
+                // ✎ LAND-YEAR B24 (D-NEW-3): закритий якір річної розкладки у відкритому році — НЕ відмова, а прогін лише
+                // не-місячних цілей під агрегатом року (ключ — якір, значення — місяці року); методологій за ним немає.
+                var annualOnly = new Dictionary<int, IReadOnlyList<int>>();
+                var refused = await RefusedPeriodsAsync(docRequest, ct, annualOnly).ConfigureAwait(false);
+
+                // Названий період, створений наперед (вище), — закритий якір: прогону методологій за ним не буде, а
+                // завершити його означало б зробити порожній прогін актуальним і сховати результати закритого місяця.
+                // Свіжий прогін без жодного результату прибирається (кілька документів — він міг бути вже спільним).
+                if (request.PeriodKey is { } namedAnchor
+                    && documentIds.Count == 1
+                    && annualOnly.ContainsKey(namedAnchor)
+                    && periodRuns.TryGetValue(namedAnchor, out var unusedRun))
+                {
+                    periodRuns.Remove(namedAnchor);
+                    db.CalculationRuns.Remove(unusedRun.Run);
+                    await db.SaveChangesAsync(ct).ConfigureAwait(false);
+                }
 
                 // ⚠ Один документ — той самий діапазон 0…100, що й завжди
                 // (i=0, Count=1 дає floor=0, ceiling=100): жодна наявна
@@ -323,7 +339,12 @@ public sealed partial class RecalculationJob(
                 // нижче (див. коментар біля виклику оркестратора).
                 var periods = await ScopePeriodsAsync(docRequest, refused, ct).ConfigureAwait(false);
 
-                var cells = await FormulasAsync(docRequest, periods, ct).ConfigureAwait(false);
+                var cells = await FormulasAsync(docRequest, periods, ct, annualOnly).ConfigureAwait(false);
+
+                // ✎ LAND-YEAR B24: методології закритого якоря не рахуються (результати — місяця, а він закритий).
+                IReadOnlyList<int> methodologyScope = annualOnly.Count == 0
+                    ? periods
+                    : [.. periods.Where(p => !annualOnly.ContainsKey(p))];
 
                 await progress
                     .ReportAsync(
@@ -351,7 +372,7 @@ public sealed partial class RecalculationJob(
                     LogSkippedSheets(logger, documentId, skippedPairs);
                 }
 
-                var bindingPlan = await BindingsAsync(docRequest, periods, skippedSheets, ct).ConfigureAwait(false);
+                var bindingPlan = await BindingsAsync(docRequest, methodologyScope, skippedSheets, ct).ConfigureAwait(false);
                 var bindingsByPeriod = bindingPlan.Bindings;
                 if (logger is not null && bindingPlan.RecomputedOnInactive > 0)
                 {
@@ -423,9 +444,9 @@ public sealed partial class RecalculationJob(
                 // періоди це екземпляри таблиць. Підставити туди нуль і був
                 // початковий дефект.
                 var methodologyPeriods = request.PeriodKey is { } namedPeriod
-                    ? (IReadOnlyList<int>)[namedPeriod]
-                    : periods;
-                scopeByDocument[documentId] = [.. periods.Union(methodologyPeriods)];
+                    ? (annualOnly.ContainsKey(namedPeriod) ? [] : (IReadOnlyList<int>)[namedPeriod])
+                    : methodologyScope;
+                scopeByDocument[documentId] = [.. methodologyScope.Union(methodologyPeriods)];
 
                 // ⛔ RC14 (приймальна №10, P2-4) + RC15 (P2-C): прогін області аркуша чи документа з пропущеними
                 // аркушами стає актуальним для ВСЬОГО документа й періоду, тож результати методологій, яких він
@@ -924,8 +945,10 @@ public sealed partial class RecalculationJob(
     /// <param name="request">Завдання перерахунку.</param>
     /// <param name="periods">Періоди в скоупі запису, за зростанням.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="annualOnly">✎ LAND-YEAR B24: закриті якорі річної розкладки → місяці їхнього року (лише не-місячні цілі).</param>
     private async Task<int> FormulasAsync(
-        RecalculationRequest request, IReadOnlyList<int> periods, CancellationToken ct)
+        RecalculationRequest request, IReadOnlyList<int> periods, CancellationToken ct,
+        IReadOnlyDictionary<int, IReadOnlyList<int>>? annualOnly = null)
     {
         var written = 0;
         var changedByPeriod = new Dictionary<int, HashSet<(int TableDefId, int ColumnDefId)>>();
@@ -938,7 +961,8 @@ public sealed partial class RecalculationJob(
             written += await formulas
                 .RecalculateAllAsync(
                     request.DocumentId, new PeriodKey(period), ct, request.SheetDefId, changed,
-                    writeSubmitted: WritesSubmitted(request))
+                    writeSubmitted: WritesSubmitted(request),
+                    annualPeriods: annualOnly?.GetValueOrDefault(period))
                 .ConfigureAwait(false);
         }
 
@@ -1421,8 +1445,13 @@ public sealed partial class RecalculationJob(
     /// документа того ж проєкту було б ширше за правило (ФВ-9.17 — про зріз,
     /// а зріз належить аркушу документа).
     /// </remarks>
+    /// <param name="annualOnly">
+    /// ✎ LAND-YEAR B24 (D-NEW-3): куди скласти закриті якорі річної розкладки у відкритому році (якір → місяці року) —
+    /// вони НЕ відмовляють і не вилучаються, а рахуються лише не-місячними цілями під агрегатом року
+    /// (<see cref="AnnualOnlyAnchorsAsync"/>); <c>null</c> — не збирати (рішення те саме).
+    /// </param>
     private async Task<IReadOnlySet<int>> RefusedPeriodsAsync(
-        RecalculationRequest request, CancellationToken ct)
+        RecalculationRequest request, CancellationToken ct, Dictionary<int, IReadOnlyList<int>>? annualOnly = null)
     {
         // ⛔ B69: архівований (чи той, що архівується) проєкт — відмова цілим прогоном, і роком, і названим періодом. Нижче
         // виняток «місяць відкрито для документа» піднімає закритий місяць до Grace; виняток, що пережив архівацію,
@@ -1498,8 +1527,19 @@ public sealed partial class RecalculationJob(
 
         var refused = new HashSet<int>();
 
+        // ✎ LAND-YEAR B24: лише коли серед станів є закритий місяць (інакше — жодного нового запиту).
+        var anchors = states.Exists(s => s.State == Domain.Enums.PeriodState.Closed)
+            ? await AnnualOnlyAnchorsAsync(request, states, ct).ConfigureAwait(false)
+            : new Dictionary<int, IReadOnlyList<int>>();
+
         foreach (var period in states)
         {
+            if (anchors.TryGetValue(period.PeriodKeyValue, out var yearKeys))
+            {
+                annualOnly?.TryAdd(period.PeriodKeyValue, yearKeys);
+                continue;
+            }
+
             var denial = RecalculationWritePolicy.Check(
                 period.State, submittedKeys.Contains(period.PeriodKeyValue));
 
@@ -1522,6 +1562,89 @@ public sealed partial class RecalculationJob(
         // `ECR-PRD-0404`), і підміняти його чужим кодом означало б сховати
         // справжню причину за правдоподібною.
         return refused;
+    }
+
+    /// <summary>
+    /// ✎ LAND-YEAR B24 (L1b, D-NEW-3 «так»): закриті місяці документа, які є ЯКОРЕМ року річної розкладки
+    /// (<c>YearWithMonthColumns</c>) у ще не закритому році (<see cref="Ecr.Application.Security.AnnualPeriodRule.AnchorWritesAnnualTargets"/>), —
+    /// якір → ключі всіх місяців календаря року (для агрегатного стану аркуша під час запису).
+    /// </summary>
+    /// <param name="request">Завдання (документ).</param>
+    /// <param name="states">Ефективні стани періодів скоупу (з винятком документа).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// <para>
+    /// Не-місячні колонки маршрутизованих таблиць належать якорю, але їхній «річний контекст» — агрегат місяців
+    /// (<see cref="Ecr.Application.Security.AnnualPeriodRule"/>, те саме правило, що в PATCH і доступі). Доти закритий січень відмовляв увесь
+    /// перерахунок якоря, і річні підсумки (не-місячні формули над C_Mm) лишались застарілими до кінця року.
+    /// </para>
+    /// <para>
+    /// ⛔ Лише річна розкладка: версії <c>PerMonthCopies</c> (зокрема Land 1.0.16.0) — відмова закритим місяцем, як доти.
+    /// Запити — лише коли серед станів є закритий місяць: 1 (проєкт документа) + на рік: календар, розкладка версії
+    /// якоря (лише коли якір закритий) і ≤ 1 винятки документа.
+    /// </para>
+    /// </remarks>
+    private async Task<Dictionary<int, IReadOnlyList<int>>> AnnualOnlyAnchorsAsync(
+        RecalculationRequest request, List<PeriodStateRow> states, CancellationToken ct)
+    {
+        var result = new Dictionary<int, IReadOnlyList<int>>();
+        var closed = states
+            .Where(s => s.State == Domain.Enums.PeriodState.Closed)
+            .Select(s => s.PeriodKeyValue)
+            .ToHashSet();
+        if (closed.Count == 0)
+        {
+            return result;
+        }
+
+        var document = await (
+                from d in db.Documents.AsNoTracking()
+                where d.Id == request.DocumentId
+                join p in db.Projects.AsNoTracking() on d.ProjectId equals p.Id
+                select new { ProjectId = p.Id, p.PeriodKind })
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+        if (document is null || document.PeriodKind != Domain.Enums.PeriodKind.Monthly)
+        {
+            return result;
+        }
+
+        HashSet<(long DocumentId, int PeriodKey)>? reopened = null;
+        foreach (var year in closed.Select(k => k / 100).Distinct().Order())
+        {
+            var yearStates = await EffectiveStatesAsync(PeriodCalendar.YearPeriods(db, document.ProjectId, year), ct)
+                .ConfigureAwait(false);
+            if (PeriodCalendar.AnchorOf(yearStates.Select(s => s.PeriodKeyValue)) is not { } anchor
+                || !closed.Contains(anchor))
+            {
+                continue;
+            }
+
+            // Розкладка версії ПЕРІОДУ-якоря (шкала версій проєкту, doc.fn_VersionOf), а не «чинної» версії проєкту.
+            var layout = await db.TemplateVersions
+                .AsNoTracking()
+                .Where(v => v.Id == EcrDbContext.VersionOf(document.ProjectId, anchor))
+                .Select(v => (Domain.Enums.TemplateLayout?)v.Layout)
+                .FirstOrDefaultAsync(ct)
+                .ConfigureAwait(false);
+            if (layout != Domain.Enums.TemplateLayout.YearWithMonthColumns)
+            {
+                continue;
+            }
+
+            reopened ??= await ReopenedPeriodsAsync([request.DocumentId], null, ct).ConfigureAwait(false);
+            var effective = yearStates
+                .Select(s => Domain.Services.DocumentPeriodReopenRule.Apply(
+                    s.State, reopened.Contains((request.DocumentId, s.PeriodKeyValue))))
+                .ToList();
+
+            if (Ecr.Application.Security.AnnualPeriodRule.AnchorWritesAnnualTargets(Domain.Enums.PeriodState.Closed, effective))
+            {
+                result[anchor] = [.. yearStates.Select(s => s.PeriodKeyValue).Order()];
+            }
+        }
+
+        return result;
     }
 
     /// <summary>

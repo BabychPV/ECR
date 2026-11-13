@@ -91,4 +91,17 @@ public static class AnnualPeriodRule
     /// </summary>
     /// <param name="states">Ефективні стани місяців календаря.</param>
     public static bool IsLate(IEnumerable<PeriodState> states) => AggregateState(states) == PeriodState.Grace;
+
+    /// <summary>
+    /// ✎ LAND-YEAR B24 (L1b, D-NEW-3 «так»): чи пише перерахунок ЯКОРЯ року річної розкладки (<c>YearWithMonthColumns</c>)
+    /// не-місячні цілі, коли сам місяць якоря закритий: так, якщо рік (агрегат місяців) ще не закритий.
+    /// </summary>
+    /// <param name="anchorState">Ефективний стан місяця-якоря (з урахуванням винятку документа).</param>
+    /// <param name="yearStates">Ефективні стани всіх місяців календаря року.</param>
+    /// <remarks>
+    /// Місячні цілі якоря (<c>C_M01</c>) і далі підлягають стану свого місяця — їх такий прогін не пише. Відкритий якір —
+    /// звичайний прогін періоду (<c>false</c>): правило стосується лише закритого якоря у відкритому році.
+    /// </remarks>
+    public static bool AnchorWritesAnnualTargets(PeriodState anchorState, IEnumerable<PeriodState> yearStates)
+        => anchorState == PeriodState.Closed && AggregateState(yearStates) != PeriodState.Closed;
 }
