@@ -132,13 +132,61 @@ public sealed class ReferenceResolver(TemplateVersionSnapshot snapshot)
         return field;
     }
 
+    /// <summary>
+    /// ✎ B13 (аудит P-1): плаский перелік таблиць знімка й індекси за Id і кодом — будуються ОДИН раз на резолвер
+    /// (знімок незмінний, D-16), а не на кожне посилання. Доти <see cref="FindTable"/> на кожне посилання робив
+    /// <c>SelectMany(...).ToList()</c> по всіх аркушах і таблицях версії, а потім лінійний пошук за кодом — на
+    /// шаблоні Land (сотні таблиць) і тисячах посилань це квадратична робота в кожному прогоні формул.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Порядок кандидатів за кодом — порядок знімка (як і доти): <see cref="FindTable"/> бере перший. Перший за Id —
+    /// теж перший у знімку. Гонитва при першому зверненні безпечна: обидва потоки збудують той самий незмінний індекс.
+    /// </remarks>
+    private TableIndex Tables => _tables ??= TableIndex.Build(snapshot);
+
+    private TableIndex? _tables;
+
+    private sealed class TableIndex(
+        Dictionary<int, (SheetDef Sheet, TableDef Table)> byId,
+        Dictionary<string, List<(SheetDef Sheet, TableDef Table)>> byCode)
+    {
+        public static TableIndex Build(TemplateVersionSnapshot snapshot)
+        {
+            var byId = new Dictionary<int, (SheetDef Sheet, TableDef Table)>();
+            var byCode = new Dictionary<string, List<(SheetDef Sheet, TableDef Table)>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var sheet in snapshot.Sheets)
+            {
+                foreach (var table in sheet.Tables)
+                {
+                    byId.TryAdd(table.Id, (sheet, table));
+                    if (!byCode.TryGetValue(table.Code, out var list))
+                    {
+                        byCode[table.Code] = list = [];
+                    }
+
+                    list.Add((sheet, table));
+                }
+            }
+
+            return new TableIndex(byId, byCode);
+        }
+
+        public (SheetDef? Sheet, TableDef? Table) ById(int tableDefId)
+            => byId.TryGetValue(tableDefId, out var entry) ? entry : default;
+
+        public List<(SheetDef Sheet, TableDef Table)> ByCode(string code)
+            => byCode.TryGetValue(code, out var list) ? list : None;
+
+        private static readonly List<(SheetDef Sheet, TableDef Table)> None = [];
+    }
+
     private TableDef? FindTable(CellReferenceNode node, int currentTableDefId, List<ExpressionDiagnostic>? diagnostics)
     {
-        var tables = snapshot.Sheets.SelectMany(s => s.Tables.Select(t => (Sheet: s, Table: t))).ToList();
+        var tables = Tables;
 
         if (node.TableCode is null)
         {
-            var own = tables.FirstOrDefault(x => x.Table.Id == currentTableDefId).Table;
+            var own = tables.ById(currentTableDefId).Table;
             if (own is null)
             {
                 Report(diagnostics, node,
@@ -150,28 +198,26 @@ public sealed class ReferenceResolver(TemplateVersionSnapshot snapshot)
             return own;
         }
 
-        var candidates = tables
-            .Where(x => string.Equals(x.Table.Code, node.TableCode, StringComparison.OrdinalIgnoreCase))
-            .ToList();
+        IEnumerable<(SheetDef Sheet, TableDef Table)> candidates = tables.ByCode(node.TableCode);
 
         if (node.SheetCode is { } sheetCode)
         {
             candidates = candidates
-                .Where(x => string.Equals(x.Sheet.Code, sheetCode, StringComparison.OrdinalIgnoreCase))
-                .ToList();
+                .Where(x => string.Equals(x.Sheet.Code, sheetCode, StringComparison.OrdinalIgnoreCase));
         }
         else
         {
             // Без коду аркуша шукаємо в ТОМУ САМОМУ аркуші, де живе формула:
             // [Main].[…] означає «таблиця Main тут», а не «будь-яка Main».
-            var ownSheet = tables.FirstOrDefault(x => x.Table.Id == currentTableDefId).Sheet;
+            var ownSheet = tables.ById(currentTableDefId).Sheet;
             if (ownSheet is not null)
             {
-                candidates = candidates.Where(x => x.Sheet.Id == ownSheet.Id).ToList();
+                candidates = candidates.Where(x => x.Sheet.Id == ownSheet.Id);
             }
         }
 
-        if (candidates.Count == 0)
+        var found = candidates.Select(x => x.Table).FirstOrDefault();
+        if (found is null)
         {
             Report(diagnostics, node,
                 "expr.ref.unknownTable", DiagnosticParams.Of(("sheet", node.SheetCode ?? "…"), ("table", node.TableCode)),
@@ -179,7 +225,7 @@ public sealed class ReferenceResolver(TemplateVersionSnapshot snapshot)
             return null;
         }
 
-        return candidates[0].Table;
+        return found;
     }
 
     private static int? ResolveColumn(
