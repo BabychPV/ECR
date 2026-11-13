@@ -228,12 +228,14 @@ internal sealed class CalculationRejectionReasons(
                 }
 
                 // Логічна розкладка, як MonthRoutedCellStore: фізичне введене значення чужої колонки затінене власником,
-                // обчислене зі значенням — лишається й приховує власника.
+                // обчислене зі значенням — лишається й приховує власника. ✎ LAND-YEAR L1: чужа ОБЧИСЛЮВАНА колонка
+                // версії YearWithMonthColumns затінена ЦІЛКОМ — застаріла обчислена копія перегляду власника не приховує.
                 foreach (var address in addresses)
                 {
                     if (read.TryGetValue(address, out var value)
                         && (!owners.Shadowed.Contains(address.ColumnDefId)
-                            || (value.IsCalculated && MethodologyRuleMatcher.Text(value) is not null)))
+                            || (value.IsCalculated && !owners.FullyShadowed.Contains(address.ColumnDefId)
+                                && MethodologyRuleMatcher.Text(value) is not null)))
                     {
                         cells[address] = value;
                     }
@@ -470,8 +472,14 @@ internal sealed class CalculationRejectionReasons(
     /// <summary>Q-17: як читати логічні значення рядків однієї таблиці.</summary>
     /// <param name="Shadowed">Колонки з іншим власником: їхнє введене фізичне значення в екземплярі перегляду затінене.</param>
     /// <param name="ByRow">Рядок перегляду → пари (адреса у власника, логічна адреса) — лише видимих читачеві колонок.</param>
+    /// <param name="FullyShadowed">
+    /// ✎ LAND-YEAR L1: з <paramref name="Shadowed"/> — обчислювані колонки версії, де <see cref="IMonthColumnRouter.RoutesComputedVersion"/>:
+    /// затінене ВСЕ, і обчислена копія перегляду теж (як <c>MonthRoutedCellStore</c>); значення — лише з власника.
+    /// </param>
     private sealed record OwnerReadPlan(
-        IReadOnlySet<int> Shadowed, IReadOnlyDictionary<long, List<(CellAddress Owner, CellAddress Logical)>> ByRow);
+        IReadOnlySet<int> Shadowed,
+        IReadOnlyDictionary<long, List<(CellAddress Owner, CellAddress Logical)>> ByRow,
+        IReadOnlySet<int> FullyShadowed);
 
     /// <summary>
     /// Q-17 (G5): план логічного читання таблиці «місяці в колонках» у періоді, що не володіє частиною колонок
@@ -551,7 +559,11 @@ internal sealed class CalculationRejectionReasons(
             }
         }
 
-        return new OwnerReadPlan(foreign.Select(f => f.Column.Id).ToHashSet(), byRow);
+        var routesComputed = monthRouter.RoutesComputedVersion(document.TemplateVersionId);
+        return new OwnerReadPlan(
+            foreign.Select(f => f.Column.Id).ToHashSet(),
+            byRow,
+            routesComputed ? foreign.Where(f => f.Column.IsComputed).Select(f => f.Column.Id).ToHashSet() : []);
     }
 
     /// <summary>
