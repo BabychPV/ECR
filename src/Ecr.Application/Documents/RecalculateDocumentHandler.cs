@@ -321,14 +321,31 @@ public sealed class RecalculateDocumentHandler(
         // `Calculation.Recalculate`. Виконавець із самим `Document.View` ставить без витіснення
         // (Coalesced): інакше будь-хто з читанням у циклі POST обривав би чужий довгий
         // перерахунок (DoS). Його перерахунок усе одно відбудеться після наявного.
-        var payload = new
-        {
-            DocumentId = documentId,
-            PeriodKey = periodKey.Value,
-            TriggeredByUserId = currentUser.UserId,
-            SheetDefId = sheetDefId,
-        };
-        var target = ScopedTargetOf(documentId, periodKey, sheetDefId);
+        // ✎ LAND-YEAR B59: документ РІЧНОЇ розкладки — «Перерахувати» розходиться на всі місяці року (одна задача
+        // «увесь рік», звужена до цього календарного року: `RecalculationRequest.Year`). Прогін одного місяця писав би
+        // лише цілі, якими той володіє (якір — не-місячне + C_M01), і решта C_Mm лишалась би застарілою. Гейт стану на
+        // шляху запису — той самий (`RecalculationJob.RefusedPeriodsAsync`: закриті місяці вилучаються, закритий якір —
+        // лише не-місячне, B24). Поза річною розкладкою — названий період, як доти.
+        var year = await YearLayoutYearAsync(documentId, periodKey, ct).ConfigureAwait(false);
+        object payload = year is { } scopeYear
+            ? new
+            {
+                DocumentId = documentId,
+                PeriodKey = (int?)null,
+                Year = scopeYear,
+                TriggeredByUserId = currentUser.UserId,
+                SheetDefId = sheetDefId,
+            }
+            : new
+            {
+                DocumentId = documentId,
+                PeriodKey = periodKey.Value,
+                TriggeredByUserId = currentUser.UserId,
+                SheetDefId = sheetDefId,
+            };
+        var target = year is { } targetYear
+            ? YearScopedTargetOf(documentId, targetYear, sheetDefId)
+            : ScopedTargetOf(documentId, periodKey, sheetDefId);
         var projectId = await access.DocumentProjectIdAsync(documentId, ct).ConfigureAwait(false);
         var mayPreempt = projectId is { } pid
             ? Security.PermissionCheck.IsGrantedIn(profile, PreemptPermission, pid)
@@ -372,6 +389,47 @@ public sealed class RecalculateDocumentHandler(
                && year.Min(p => p.PeriodKey) == periodKey.Value
                && Security.AnnualPeriodRule.AnchorWritesAnnualTargets(
                    Domain.Enums.PeriodState.Closed, year.Select(p => p.State));
+    }
+
+    /// <summary>
+    /// ✎ LAND-YEAR B59: рік <paramref name="periodKey"/>, якщо версія ПЕРІОДУ (<see cref="IProjectVersionTimeline"/>) має
+    /// річну розкладку (<c>YearWithMonthColumns</c>); інакше <c>null</c>.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період кнопки.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>Без реєстру розкладок (чи жодної річної версії) — <c>null</c> без жодного запиту.</remarks>
+    private async Task<int?> YearLayoutYearAsync(long documentId, PeriodKey periodKey, CancellationToken ct)
+    {
+        if (layouts is not { HasAny: true }
+            || timeline is null
+            || await access.DocumentProjectIdAsync(documentId, ct).ConfigureAwait(false) is not { } projectId)
+        {
+            return null;
+        }
+
+        return layouts.IsYearVersion(await timeline.VersionOfAsync(projectId, periodKey.Value, ct).ConfigureAwait(false))
+            ? periodKey.Year
+            : null;
+    }
+
+    /// <summary>
+    /// ✎ LAND-YEAR B59: ціль перерахунку документа річної розкладки за календарний рік (з областю аркуша чи без).
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="year">Рік.</param>
+    /// <param name="sheetDefId">Аркуш області; <c>null</c> — увесь документ.</param>
+    /// <returns>
+    /// <c>doc{id}-y{year}</c> (+ <c>-s{sheet}</c>): окремо від нічної <see cref="YearTargetOf"/> (усі роки) і від
+    /// цілей одного періоду — злиття постановок не поглинає запит іншої області чи іншого обсягу.
+    /// </returns>
+    public static string YearScopedTargetOf(long documentId, int year, int? sheetDefId)
+    {
+        var target = string.Create(
+            System.Globalization.CultureInfo.InvariantCulture, $"doc{documentId}-y{year}");
+        return sheetDefId is { } sheet
+            ? string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{target}-s{sheet}")
+            : target;
     }
 
     /// <summary>Право, що дає витіснення виконуваного перерахунку того самого документа.</summary>
