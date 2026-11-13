@@ -194,7 +194,14 @@ BEGIN
 
     -- Позначка «архівується» — теж на всіх: дані сусіда зараз переїжджають
     -- так само, як і свої.
-    UPDATE doc.Project SET IsArchiving = 1 WHERE Id IN (SELECT ProjectId FROM @Runs);
+    --
+    -- ⚠ B81 (F13 #877): але НЕ на активних (Status = 1). Активний сусід у діапазоні архівації неможливий —
+    --    ЗАПОБІЖНИК 1 вище відмовляє (50012) ще до цього рядка, — тож фільтр тут захист у глибину: позначка
+    --    «архівується» на активному проєкті хибно показувала б «проєкт архівований» і блокувала правки, поки
+    --    триває прогін. Звужувати до одного @ProjectId не можна: дані неактивних сусідів спільної партиції
+    --    переїжджають так само, і правка в них посеред переносу загубилася б.
+    UPDATE doc.Project SET IsArchiving = 1
+     WHERE Id IN (SELECT ProjectId FROM @Runs) AND Status <> 1;
 
     BEGIN TRY
 
@@ -658,7 +665,62 @@ BEGIN
         THROW;
     END CATCH;
 
-    UPDATE itg.ArchiveRun SET Status = N'Completed', FinishedAt = SYSUTCDATETIME()
+    ------------------------------------------------------------------------
+    -- B70. ЕТАЛОН АРХІВУ — відбиток кожного періоду діапазону в момент архівації.
+    --
+    -- ⛔ Слово людини: «заархівовані дані не мають змінюватися; від адміна SQL ніщо не захищає». Застосунок архів не
+    --    пише (B69), але пряма правка `arc.*` у SQL доти лишалася непоміченою: нічна перевірка звіряла лише суми
+    --    журналу, яких процедура навіть не записувала. Тепер `ConsistencyCheckJob` перераховує той самий відбиток
+    --    (`arc.ArchiveRowHash`, 12) і порівнює з цим еталоном — знахідка `ARCHIVE_CHECKSUM`, сутність `arc.Period`.
+    --
+    -- ⚠ Еталон — у ТИХ САМИХ колонках `itg.ArchiveRun.ChecksumSourceJson`/`ChecksumTargetJson` (жодної міграції), і
+    --    в обох однаковий: наявне правило «суми джерела й цілі різні» (сутність `itg.ArchiveRun`) мовчить, а затерте
+    --    одне з двох — уже знахідка того правила. Запис для КОЖНОГО періоду діапазону, порожній теж (c = 0): «запису
+    --    про період немає» означає «еталона немає», а не «період був порожній».
+    --
+    -- ⚠ Після `COMMIT`, а не в транзакції кроку 2: там Sch-M на гарячих таблицях, і повторне читання архіву лише
+    --    подовжило б вікно блокування. Архів тут уже остаточний — пише в нього лише ця процедура.
+    --
+    -- ⛔ Збій обчислення НЕ робить прогін `Failed`: дані вже перенесено, а `ArchiveAwareCellReader` вирішує «читати з
+    --    архіву» саме за `Completed` — позначка збою сховала б рік від читачів. Еталон лишається NULL, нічна перевірка
+    --    запише його сама (`baseline`) і скаже про це в підсумку прогону; причина — у `ErrorMessage`.
+    ------------------------------------------------------------------------
+    DECLARE @fingerprint nvarchar(max), @fingerprintError nvarchar(400);
+
+    BEGIN TRY
+        WITH k AS (
+            SELECT TOP (@periods) @FromPeriodKey - 1 + ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS p
+              FROM sys.all_objects),
+        agg AS (
+            SELECT h.PeriodKey, h.Kind, COUNT_BIG(*) AS n, SUM(CAST(h.RowHash AS decimal(38,0))) AS s
+              FROM arc.ArchiveRowHash AS h
+             WHERE h.PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey
+             GROUP BY h.PeriodKey, h.Kind)
+        SELECT @fingerprint = (
+            SELECT 1 AS v, N'archive' AS origin,
+                   (SELECT k.p,
+                           ISNULL(c.n, 0) AS c, ISNULL(CONVERT(varchar(40), c.s), '0') AS ch,
+                           ISNULL(r.n, 0) AS r, ISNULL(CONVERT(varchar(40), r.s), '0') AS rh,
+                           ISNULL(i.n, 0) AS i, ISNULL(CONVERT(varchar(40), i.s), '0') AS ih
+                      FROM k
+                      LEFT JOIN agg AS c ON c.PeriodKey = k.p AND c.Kind = 1
+                      LEFT JOIN agg AS r ON r.PeriodKey = k.p AND r.Kind = 2
+                      LEFT JOIN agg AS i ON i.PeriodKey = k.p AND i.Kind = 3
+                     ORDER BY k.p
+                     FOR JSON PATH) AS periods
+            FOR JSON PATH, WITHOUT_ARRAY_WRAPPER);
+    END TRY
+    BEGIN CATCH
+        SELECT @fingerprint = NULL,
+               @fingerprintError = N'Еталон архіву (B70) не записано: ' + LEFT(ERROR_MESSAGE(), 300)
+                                 + N'. Нічна перевірка узгодженості запише його сама.';
+    END CATCH;
+
+    UPDATE itg.ArchiveRun
+       SET Status = N'Completed', FinishedAt = SYSUTCDATETIME(),
+           ChecksumSourceJson = @fingerprint, ChecksumTargetJson = @fingerprint,
+           ErrorMessage = CASE WHEN @fingerprintError IS NULL THEN ErrorMessage
+                               ELSE LEFT(ISNULL(ErrorMessage + N' | ', N'') + @fingerprintError, 2000) END
      WHERE Id IN (SELECT RunId FROM @Runs);
     UPDATE doc.Project SET IsArchiving = 0 WHERE Id IN (SELECT ProjectId FROM @Runs);
 END;
@@ -739,7 +801,13 @@ BEGIN
            WHERE t.PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey) AS x
     WHERE x.ProjectId <> @ProjectId;
 
-    UPDATE doc.Project SET IsArchiving = 1 WHERE Id IN (SELECT ProjectId FROM @Runs);
+    -- ⛔ B81 (F13 #877): позначка «архівується» — лише на НЕактивних проєктах (Status <> 1). Журнал вище свідомо пише
+    --    всіх із `doc.Period` діапазону, а запобіжника, як у `usp_ArchiveYear`, тут немає: активний сусід, що завів
+    --    документи в той самий ключ періоду, отримував хибне «проєкт архівований» і блокування правок на весь прогін, хоча
+    --    його гарячі рядки повернення не чіпає (вставки — лише ключів, яких у `doc.*` немає). Неактивних не звужуємо до
+    --    @ProjectId: їхні дані повертаються так само, і правка посеред повернення загубилася б.
+    UPDATE doc.Project SET IsArchiving = 1
+     WHERE Id IN (SELECT ProjectId FROM @Runs) AND Status <> 1;
 
     BEGIN TRY
 

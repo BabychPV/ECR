@@ -850,10 +850,10 @@ public sealed partial class DocumentStaleResultsStoreTests(SqlServerFixture sql)
     }
 
     /// <summary>Два застарілі документи (A, B), один свіжий; спільні кеш, годинник і епоха процесу.</summary>
-    private async Task<MapRig> RigAsync()
+    private async Task<MapRig> RigAsync(int periodKey = 202601)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
-        var chain = await builder.BuildAsync(ct: CancellationToken.None);
+        var chain = await builder.BuildAsync(periodKey, ct: CancellationToken.None);
         var period = chain.PeriodKey.Value;
         await using var db = builder.CreateContext();
 

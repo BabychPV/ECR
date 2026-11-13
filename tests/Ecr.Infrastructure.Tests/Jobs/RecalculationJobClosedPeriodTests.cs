@@ -387,6 +387,46 @@ public sealed class RecalculationJobClosedPeriodTests(SqlServerFixture sql)
         Assert.Equal("err.ECR-CALC-4221.projectArchived", error.Details?["messageKey"]);
     }
 
+    /// <remarks>
+    /// B81 (F13 #877): розклад ПРОЄКТУ з названим періодом на архівованому проєкті пропускає документи (рядок журналу)
+    /// і завершується, а не валить батьківську задачу винятком <c>ProjectArchived</c>. Червоне без фіксу: перевірка
+    /// «усе подано» пропускала далі лише <c>SheetsSubmitted</c>, і відмова B69 виходила з <c>ExecuteAsync</c>.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "B81-4")]
+    public async Task Розклад_проєкту_з_періодом_на_архівованому_проєкті_пропускає_документи_а_не_падає()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var document = await builder.BuildAsync();
+        await ArchiveAsync(builder, document.ProjectId);
+        Arrange(document);
+
+        var scheduler = Substitute.For<IBackgroundJobScheduler>();
+        var reported = new List<string?>();
+        var progress = Substitute.For<IJobProgress>();
+        progress.ReportAsync(Arg.Any<int>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                reported.Add(call.ArgAt<string?>(1));
+                return Task.CompletedTask;
+            });
+
+        await using var db = builder.CreateContext();
+        var job = new RecalculationJob(
+            db, new StubRunner(), RunHandler(), Formulas(), new TestClock(DateTime.UtcNow), jobs: scheduler);
+
+        await job.ExecuteAsync(
+            new RecalculationRequest(document.ProjectId, DocumentId: 0, document.PeriodKey.Value, TriggeredByUserId: 7),
+            progress, CancellationToken.None);
+
+        await scheduler.DidNotReceiveWithAnyArgs()
+            .EnqueueCoalescedAsync<IRecalculationJob>(default!, default, default);
+        Assert.Contains(reported, m => m is not null && m.Contains("jobs.recalcFannedOut", StringComparison.Ordinal));
+        Assert.Empty(AppliedOrEmpty());
+    }
+
     /// <summary>Активує проєкт, закриває всі його періоди й архівує (шлях D-123), без перевірки винятків документа.</summary>
     private static async Task ArchiveAsync(TestDocumentBuilder builder, int projectId)
     {

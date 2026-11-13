@@ -283,14 +283,14 @@ public sealed partial class DocumentVersionMigrationTests
     [Trait("Requirement", "RPT-STABLE")]
     public async Task Після_переносу_з_місяця_правка_комірки_працює_в_обох_періодах_кожен_на_своїй_версії()
     {
-        var s = await ArrangeAsync(Target.AddsC4Only, extraPermission: "Document.View", periodKey: 202609).ConfigureAwait(true);
-        var months = await AddMonthsAsync(s, 202610).ConfigureAwait(true);
-        await OpenForEditingAsync(s).ConfigureAwait(true);   // активує проєкт і відкриває 202609
+        var s = await ArrangeAsync(Target.AddsC4Only, extraPermission: "Document.View", periodKey: 209909).ConfigureAwait(true);
+        var months = await AddMonthsAsync(s, 209910).ConfigureAwait(true);
+        await OpenForEditingAsync(s).ConfigureAwait(true);   // активує проєкт і відкриває 209909
         await using (var db0 = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
         {
             var policy = await db0.PeriodPolicies.FirstAsync().ConfigureAwait(true);
             var october = await db0.Periods
-                .FirstAsync(p => p.ProjectId == s.Doc.ProjectId && p.PeriodKeyValue == 202610).ConfigureAwait(true);
+                .FirstAsync(p => p.ProjectId == s.Doc.ProjectId && p.PeriodKeyValue == 209910).ConfigureAwait(true);
             october.RecomputeBoundaries(policy, AtyrauZone);
             october.AdvanceTo(PeriodState.Open, DateTime.UtcNow);
             await db0.SaveChangesAsync().ConfigureAwait(true);
@@ -299,15 +299,15 @@ public sealed partial class DocumentVersionMigrationTests
         using var flag = FromMonthOn();
         using var app = new EcrApiFactory(sql);
         using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
-        var moved = await PostRangeAsync(client, s, dryRun: false, "FromMonth", 202610).ConfigureAwait(true);
+        var moved = await PostRangeAsync(client, s, dryRun: false, "FromMonth", 209910).ConfigureAwait(true);
         Assert.True(moved.StatusCode == HttpStatusCode.OK, $"{moved.StatusCode}: {await moved.Content.ReadAsStringAsync().ConfigureAwait(true)} {app.ErrorsText}");
         await Task.Delay(TimeSpan.FromSeconds(2.5)).ConfigureAwait(true);   // кеш маркерів міграції
 
         var c1 = $"C1_{s.Tag}";
         foreach (var (instanceId, period, expectedColumn, expectedTable) in new[]
                  {
-                     (s.Doc.TableInstanceId, 202609, s.Doc.ColumnDefIds[0], s.Doc.TableDefId),
-                     (months[0].TableInstanceId, 202610, s.TargetColumns["C1"], s.TargetTableDefId),
+                     (s.Doc.TableInstanceId, 209909, s.Doc.ColumnDefIds[0], s.Doc.TableDefId),
+                     (months[0].TableInstanceId, 209910, s.TargetColumns["C1"], s.TargetTableDefId),
                  })
         {
             using var slice = await client.GetAsync(new Uri($"/api/v1/documents/{s.Doc.DocumentId}/tables/{instanceId}", UriKind.Relative))
@@ -475,9 +475,9 @@ public sealed partial class DocumentVersionMigrationTests
     [Trait("Requirement", "RPT-STABLE")]
     public async Task Старий_період_після_переносу_з_місяця_подається_перераховується_й_експортується_на_старій_версії()
     {
-        var s = await ArrangeAsync(Target.AddsC4Only, extraPermission: "Document.View", periodKey: 202609).ConfigureAwait(true);
-        await AddMonthsAsync(s, 202610).ConfigureAwait(true);
-        await OpenForEditingAsync(s).ConfigureAwait(true);   // активує проєкт і відкриває 202609
+        var s = await ArrangeAsync(Target.AddsC4Only, extraPermission: "Document.View", periodKey: 209909).ConfigureAwait(true);
+        await AddMonthsAsync(s, 209910).ConfigureAwait(true);
+        await OpenForEditingAsync(s).ConfigureAwait(true);   // активує проєкт і відкриває 209909
         await using (var db0 = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
         {
             var roleId = await db0.RoleAssignments.Where(a => a.UserId == s.UserId).Select(a => a.RoleId).FirstAsync().ConfigureAwait(true);
@@ -488,13 +488,13 @@ public sealed partial class DocumentVersionMigrationTests
         using var flag = FromMonthOn();
         using var app = new EcrApiFactory(sql);
         using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
-        var moved = await PostRangeAsync(client, s, dryRun: false, "FromMonth", 202610).ConfigureAwait(true);
+        var moved = await PostRangeAsync(client, s, dryRun: false, "FromMonth", 209910).ConfigureAwait(true);
         Assert.True(moved.StatusCode == HttpStatusCode.OK, $"{moved.StatusCode}: {await moved.Content.ReadAsStringAsync().ConfigureAwait(true)} {app.ErrorsText}");
         await Task.Delay(TimeSpan.FromSeconds(2.5)).ConfigureAwait(true);   // кеш маркерів міграції
 
         // Перерахунок старого періоду - на старій версії, задача завершується успіхом.
         using (var recalc = await client.PostAsJsonAsync(
-                   new Uri($"/api/v1/documents/{s.Doc.DocumentId}/recalculate", UriKind.Relative), new { periodKey = 202609 })
+                   new Uri($"/api/v1/documents/{s.Doc.DocumentId}/recalculate", UriKind.Relative), new { periodKey = 209909 })
                .ConfigureAwait(true))
         {
             var body = await recalc.Content.ReadAsStringAsync().ConfigureAwait(true);
@@ -506,7 +506,7 @@ public sealed partial class DocumentVersionMigrationTests
         // Експорт старого періоду - книга будується (структура старої версії).
         using (var export = await client.PostAsJsonAsync(
                    new Uri($"/api/v1/documents/{s.Doc.DocumentId}/export", UriKind.Relative),
-                   new { periodKey = 202609, includeFormulas = false, includeStyles = false, language = "en" })
+                   new { periodKey = 209909, includeFormulas = false, includeStyles = false, language = "en" })
                .ConfigureAwait(true))
         {
             var body = await export.Content.ReadAsStringAsync().ConfigureAwait(true);
@@ -518,7 +518,7 @@ public sealed partial class DocumentVersionMigrationTests
         // Подання старого аркуша (старий SheetDefId) - проходить, стан на СТАРОМУ аркуші.
         using (var submit = await client.PostAsJsonAsync(
                    new Uri($"/api/v1/documents/{s.Doc.DocumentId}/submit", UriKind.Relative),
-                   new { sheetDefId = s.Doc.SheetDefId, periodKey = 202609, acknowledgeWarnings = true })
+                   new { sheetDefId = s.Doc.SheetDefId, periodKey = 209909, acknowledgeWarnings = true })
                .ConfigureAwait(true))
         {
             var body = await submit.Content.ReadAsStringAsync().ConfigureAwait(true);
@@ -527,7 +527,7 @@ public sealed partial class DocumentVersionMigrationTests
 
         await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
         var state = await db.ApprovalStates.AsNoTracking()
-            .SingleAsync(a => a.DocumentId == s.Doc.DocumentId && a.PeriodKey == 202609).ConfigureAwait(true);
+            .SingleAsync(a => a.DocumentId == s.Doc.DocumentId && a.PeriodKey == 209909).ConfigureAwait(true);
         Assert.Equal(s.Doc.SheetDefId, state.SheetDefId);
         Assert.Equal(DocumentStatus.Submitted, state.Status);
     }

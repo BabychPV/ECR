@@ -25,10 +25,10 @@ public sealed partial class DocumentStaleResultsStoreTests
         MovableClock Clock, StaleCountsEpoch Epoch, SwrProbe Probe);
 
     /// <summary>Період із <paramref name="documents"/> документами в одному прогоні проєкту; кожен парний відредаговано після нього.</summary>
-    private async Task<SwitchRig> SwitchRigAsync(int documents)
+    private async Task<SwitchRig> SwitchRigAsync(int documents, int periodKey = 202601)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
-        var chain = await builder.BuildAsync(ct: CancellationToken.None);
+        var chain = await builder.BuildAsync(periodKey, ct: CancellationToken.None);
         var period = chain.PeriodKey!.Value;
         await using var db = builder.CreateContext();
 
@@ -225,37 +225,78 @@ public sealed partial class DocumentStaleResultsStoreTests
     [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Перемикання_прогону_читає_менше_за_повне_завантаження()
     {
-        var r = await SwitchRigAsync(150);
+        // Власний період: карта, відбиток і набір прогонів періоду - лише дані цього тесту, а не спільної бази.
+        var r = await SwitchRigAsync(150, OwnPeriod);
         using var _ = r.Cache;
         await AssertCacheEqualsFreshAsync(r);
 
-        // Одне з'єднання - одна сесія: лічильник читань сесії міряє саме ці команди.
-        await using var db = InterceptedContext(r.Probe, r.Epoch);
-        await db.Database.OpenConnectionAsync();
+        // B92: не сирі logical reads сесії - вони залежать від плану, статистики й чужих даних спільної бази
+        // (виміряно: повне завантаження 622 читань на чистій базі, 20-37 після чужого проєкту того ж періоду,
+        // 1736 у CI). Міряється те, від чого залежить ціна: які команди точкового шляху йдуть по ВАЖКИХ таблицях
+        // (результати розрахунку, журнал правок) і скільки документів вони охоплюють.
+        var recorder = new HeavyCommandRecorder();
+        var options = new DbContextOptionsBuilder<EcrDbContext>()
+            .UseSqlServer(sql.ConnectionString).AddInterceptors(r.Probe, recorder, r.Epoch);
+        await using var db = new EcrDbContext(options.Options);
         var map = CachedMap(r, db);
 
         await SwitchDocumentRunAsync(r, r.Docs[0], Now.AddHours(2));
-        var beforeScoped = await SessionReadsAsync(db);
+        recorder.Clear();
         var scoped = (await map.GetAsync(r.Period, [null], CancellationToken.None))[0]!;
-        var scopedReads = await SessionReadsAsync(db) - beforeScoped;
+        var scopedHeavy = recorder.Snapshot();
         Assert.False(scoped.ContainsKey(r.Docs[0]));
 
-        var fullDb = r.Builder.CreateContext();
-        await using var _f = fullDb;
-        await fullDb.Database.OpenConnectionAsync();
-        var beforeFull = await SessionReadsAsync(fullDb);
-        var full = await new StaleResultsMapCache(fullDb, null, null, null).GetAsync(r.Period, [null], CancellationToken.None);
-        Assert.NotNull(full[0]);
-        var fullReads = await SessionReadsAsync(fullDb) - beforeFull;
+        await using var fullDb = r.Builder.CreateContext();
+        var full = (await new StaleResultsMapCache(fullDb, null, null, null).GetAsync(r.Period, [null], CancellationToken.None))[0];
+        Assert.NotNull(full);
 
+        // Точковий шлях: жодного повного запиту карти, рівно ОДИН запит по важких таблицях - накладка, прив'язана
+        // лише до документа перемкнутого прогону (1 зі 150). Повне завантаження перечитує весь період.
         Assert.Equal(1, r.Probe.Maps);
-        Assert.True(scopedReads * 2 < fullReads, $"точкове оновлення {scopedReads} читань, повне {fullReads}");
+        var delta = Assert.Single(scopedHeavy);
+        Assert.Contains(StaleResultsMapCache.DeltaTag, delta.Text, StringComparison.Ordinal);
+        Assert.Equal([r.Docs[0]], delta.Numbers);
+
+        // Результат точкового шляху - той самий, що й повного: 74 застарілі документи власного періоду (кожен парний
+        // зі 150 відредаговано після прогону, документ 0 щойно перераховано), а перечитано один.
+        Assert.Equal(full.OrderBy(p => p.Key).Select(p => (p.Key, p.Value)), scoped.OrderBy(p => p.Key).Select(p => (p.Key, p.Value)));
+        Assert.Equal(r.Docs.Where((_, i) => i % 2 == 0).Skip(1).Order(), full.Keys.Order());
     }
 
-    private static async Task<long> SessionReadsAsync(EcrDbContext db)
+    /// <summary>Період, який не бере жоден інший тест (B92: лише власні дані).</summary>
+    private const int OwnPeriod = 209912;
+
+    /// <summary>Записує команди, що читають важкі таблиці карти (<c>calc.CalculationResult</c>, <c>aud.CellChange</c>), і числа в їхніх параметрах.</summary>
+    private sealed class HeavyCommandRecorder : Microsoft.EntityFrameworkCore.Diagnostics.DbCommandInterceptor
     {
-        await using var command = db.Database.GetDbConnection().CreateCommand();
-        command.CommandText = "SELECT CAST(logical_reads AS bigint) FROM sys.dm_exec_sessions WHERE session_id = @@SPID";
-        return Convert.ToInt64(await command.ExecuteScalarAsync(), System.Globalization.CultureInfo.InvariantCulture);
+        private readonly System.Collections.Concurrent.ConcurrentQueue<(string Text, long[] Numbers)> commands = new();
+
+        public void Clear() => commands.Clear();
+
+        public IReadOnlyList<(string Text, long[] Numbers)> Snapshot() => [.. commands];
+
+        public override ValueTask<Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<System.Data.Common.DbDataReader>> ReaderExecutingAsync(
+            System.Data.Common.DbCommand command,
+            Microsoft.EntityFrameworkCore.Diagnostics.CommandEventData eventData,
+            Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<System.Data.Common.DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (command.CommandText.Contains("calc.CalculationResult", StringComparison.OrdinalIgnoreCase)
+                || command.CommandText.Contains("aud.CellChange", StringComparison.OrdinalIgnoreCase))
+            {
+                // Числа з параметрів колекції документів (`ids.Contains(...)` у StaleResultsMapCache): і поштучних
+                // (@ids1, @ids2...), і одного JSON-параметра. Інші параметри (період, TOP) - не документи.
+                var numbers = command.Parameters.Cast<System.Data.Common.DbParameter>()
+                    .Where(p => p.ParameterName.Contains("ids", StringComparison.OrdinalIgnoreCase))
+                    .SelectMany(p => System.Text.RegularExpressions.Regex.Matches(
+                        Convert.ToString(p.Value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty, @"\d{1,18}"))
+                    .Select(m => long.Parse(m.Value, System.Globalization.CultureInfo.InvariantCulture))
+                    .Distinct()
+                    .ToArray();
+                commands.Enqueue((command.CommandText, numbers));
+            }
+
+            return ValueTask.FromResult(result);
+        }
     }
 }

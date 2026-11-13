@@ -29,12 +29,21 @@ namespace Ecr.Application.Documents.SheetChanges;
 /// змінених рядків. Масова власна правка (імпорт сотень рядків), серед якої загубилася чужа правка СТАРІШОГО рядка,
 /// цього опитування банера не дасть — прийнята межа, бо інакше одне опитування після імпорту читало б журнал усіх
 /// змінених рядків.
+///
+/// ⛔ Q-17 (LAND-YEAR G4): у таблиці «місяці в колонках» колонку з іншим власником (не-місячна — якір року, M{m} —
+/// період m) PATCH пише в екземпляр ВЛАСНИКА, тож правка з іншого місяця не торкалася жодного рядка екземпляра перегляду і
+/// банер мовчав. Проба тоді йде ще й по екземплярах власників тих колонок, які читач бачить на логічній адресі І в
+/// періоді-власнику (D-214) — ТІЄЮ САМОЮ однією командою (<see cref="ISheetChangeStore.ProbeOwnersAsync"/>); колонки,
+/// закриті в періоді-власнику, у авторстві рахуються схованими. Маршрутизація вимкнена, копія аркуша або чужих колонок
+/// немає — проба й кількість звернень як були.
 /// </remarks>
 public sealed class GetSheetChangesHandler(
     IAccessDecisionService access,
     ICurrentUser currentUser,
     ISheetChangeStore store,
-    IClock clock)
+    IClock clock,
+    IMonthColumnRouter? monthRouter = null,
+    IMetadataCache? metadata = null)
 {
     /// <summary>Право — те саме, що на читання документа (`02-contracts.md` §9).</summary>
     public const string Permission = "Document.View";
@@ -64,7 +73,8 @@ public sealed class GetSheetChangesHandler(
             .RequireInAnyProjectAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
         await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, Permission, ct).ConfigureAwait(false);
 
-        var readable = (await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false)).InPeriod(key);
+        var anyPeriod = await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
+        var readable = anyPeriod.InPeriod(key);
         var view = readable.VisibleTablesOfSheet(sheetDefId) ?? throw NotFound(documentId);
 
         var now = clock.UtcNow;
@@ -79,20 +89,34 @@ public sealed class GetSheetChangesHandler(
             return Unchanged(await store.CurrentMarkerAsync(ct).ConfigureAwait(false), now, status, statusChanged);
         }
 
-        var probe = await store
-            .ProbeAsync(
-                documentId, periodKey, [.. view.Tables.Keys.Order()], previous.Value.Version, SampledRowsPerTable, ct, sheetCopyId)
-            .ConfigureAwait(false);
+        // Q-17 (G4): екземпляри власників колонок, видимих на логічній адресі й у періоді-власнику.
+        var owners = sheetCopyId is null
+            ? await OwnerTargetsAsync(anyPeriod, documentId, key, view.Tables.Keys, view.HiddenColumnIds, ct).ConfigureAwait(false)
+            : null;
+
+        var probe = owners is null
+            ? await store
+                .ProbeAsync(
+                    documentId, periodKey, [.. view.Tables.Keys.Order()], previous.Value.Version, SampledRowsPerTable, ct,
+                    sheetCopyId)
+                .ConfigureAwait(false)
+            : await store
+                .ProbeOwnersAsync(documentId, periodKey, owners.Value.Targets, previous.Value.Version, SampledRowsPerTable, ct)
+                .ConfigureAwait(false);
 
         if (probe.Rows.Count == 0)
         {
             return Unchanged(probe.Marker, now, status, statusChanged);
         }
 
+        IReadOnlyList<int> hidden = owners is { Blocked.Count: > 0 } o
+            ? [.. view.HiddenColumnIds.Concat(o.Blocked).Distinct()]
+            : view.HiddenColumnIds;
+
         var issued = previous.Value.IssuedAtUtc < now ? previous.Value.IssuedAtUtc : now;
         var attribution = await store
             .AttributeAsync(
-                documentId, [.. probe.Rows.Select(r => r.TableRowId).Distinct()], view.HiddenColumnIds,
+                documentId, [.. probe.Rows.Select(r => r.TableRowId).Distinct()], hidden,
                 issued - AttributionSlack, currentUser.UserId!.Value, ct)
             .ConfigureAwait(false);
 
@@ -124,6 +148,85 @@ public sealed class GetSheetChangesHandler(
             status.Status,
             Revision(status.Revision),
             statusChanged);
+    }
+
+    /// <summary>
+    /// Q-17 (G4): цілі проби — видимі таблиці аркуша в періоді перегляду плюс екземпляри періодів-власників колонок, які
+    /// читач бачить на логічній адресі (не сховані) І в періоді-власнику (D-214, як <c>OwnerScopeMask</c>); закриті у
+    /// власника — <c>Blocked</c> (для авторства вони сховані). <c>null</c> — власників немає: стара проба без змін.
+    /// </summary>
+    /// <remarks>
+    /// Власник — ТОЙ САМИЙ <see cref="IMonthColumnRouter.ForeignColumnsAsync"/>, за яким пише PATCH. Маршрутизація
+    /// вимкнена — <c>null</c> без звернень до бази.
+    /// </remarks>
+    private async Task<(IReadOnlyList<SheetProbeTarget> Targets, IReadOnlyList<int> Blocked)?> OwnerTargetsAsync(
+        DocumentReadScope anyPeriod,
+        long documentId,
+        PeriodKey viewPeriod,
+        IEnumerable<int> visibleTableIds,
+        IReadOnlyList<int> hiddenColumnIds,
+        CancellationToken ct)
+    {
+        if (monthRouter is not { Enabled: true } || metadata is null)
+        {
+            return null;
+        }
+
+        var document = await monthRouter.GetDocumentAsync(documentId, ct).ConfigureAwait(false);
+        if (document is null)
+        {
+            return null;
+        }
+
+        var snapshot = await metadata.GetAsync(document.TemplateVersionId, ct).ConfigureAwait(false);
+        var tablesById = snapshot.Sheets.SelectMany(s => s.Tables).GroupBy(t => t.Id).ToDictionary(g => g.Key, g => g.First());
+        var hidden = hiddenColumnIds.ToHashSet();
+        var tableIds = visibleTableIds.Order().ToList();
+
+        var owners = new SortedSet<(int Period, int Table)>();
+        var blocked = new HashSet<int>();
+        var scopeByOwner = new Dictionary<PeriodKey, DocumentReadScope>();
+        foreach (var tableId in tableIds)
+        {
+            if (!tablesById.TryGetValue(tableId, out var table) || !monthRouter.AppliesToTable(table))
+            {
+                continue;
+            }
+
+            foreach (var foreign in await monthRouter.ForeignColumnsAsync(document, table, viewPeriod, ct).ConfigureAwait(false))
+            {
+                if (foreign.OwnerPeriod == viewPeriod || hidden.Contains(foreign.Column.Id))
+                {
+                    continue;
+                }
+
+                if (!scopeByOwner.TryGetValue(foreign.OwnerPeriod, out var ownerScope))
+                {
+                    scopeByOwner[foreign.OwnerPeriod] = ownerScope = anyPeriod.InPeriod(foreign.OwnerPeriod);
+                }
+
+                if (ownerScope.CanReadColumn(foreign.Column.Id))
+                {
+                    owners.Add((foreign.OwnerPeriod.Value, table.Id));
+                }
+                else
+                {
+                    blocked.Add(foreign.Column.Id);
+                }
+            }
+        }
+
+        if (owners.Count == 0)
+        {
+            return null;
+        }
+
+        return (
+            [
+                .. tableIds.Select(t => new SheetProbeTarget(viewPeriod.Value, t)),
+                .. owners.Select(o => new SheetProbeTarget(o.Period, o.Table)),
+            ],
+            [.. blocked.Order()]);
     }
 
     private static SheetChangesDto Unchanged(ulong marker, DateTime now, SheetStatusSnapshot status, bool statusChanged)
