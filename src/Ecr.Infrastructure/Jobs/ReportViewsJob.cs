@@ -3,6 +3,7 @@ using Ecr.Application.Ports;
 using Ecr.Domain.Enums;
 using Ecr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Ecr.Infrastructure.Jobs;
 
@@ -25,7 +26,7 @@ namespace Ecr.Infrastructure.Jobs;
 /// (<see cref="IReportViewStatus.Settled"/>) — якщо за прогін не з'явилась новіша позначка (тоді чекає злитий повтор,
 /// і знімає вже він).
 /// </remarks>
-public sealed class ReportViewsJob(
+public sealed partial class ReportViewsJob(
     EcrDbContext db,
     IReportViewGenerator generator,
     IReportViewStatus? status = null) : IReportViewsJob
@@ -193,8 +194,20 @@ public sealed class ReportViewsJob(
     /// Тестам і smoke вʼюхи одразу після старту не потрібні: <c>git grep</c> по tools, tests, e2e — жоден не читає
     /// <c>rpt.v_*</c>, створені стартом (тести інфраструктури кличуть генератор/процедуру самі).
     /// </remarks>
-    public static async Task<bool> QueueAllOnStartupAsync(
+    public static Task<bool> QueueAllOnStartupAsync(
         IBackgroundJobScheduler? jobs, IReportViewGenerator generator, IReportViewStatus? status, CancellationToken ct)
+        => QueueAllOnStartupAsync(jobs, generator, status, logger: null, ct);
+
+    /// <summary>Те саме, з журналом: збій постановки — Warning із повним винятком і кореляцією картки.</summary>
+    /// <param name="jobs">Планувальник; <c>null</c> — немає (усічений хост) → синхронно, як до P-4b.</param>
+    /// <param name="generator">Генератор (лише для шляху без планувальника).</param>
+    /// <param name="status">Стан картки <c>reportviews</c>: збій постановки — збій прогону по всіх.</param>
+    /// <param name="logger">Журнал старту; <c>null</c> — без запису.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <returns><c>true</c> — задачу поставлено.</returns>
+    public static async Task<bool> QueueAllOnStartupAsync(
+        IBackgroundJobScheduler? jobs, IReportViewGenerator generator, IReportViewStatus? status, ILogger? logger,
+        CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(generator);
         if (jobs is null)
@@ -214,8 +227,21 @@ public sealed class ReportViewsJob(
         catch (Exception ex) when (ex is not OperationCanceledException)
 #pragma warning restore CA1031
         {
-            status?.Failed(new ReportViewFailure(null, 0, "Report view regeneration was not queued at startup: " + ex.Message));
+            // ⛔ SEC (TIER2, F13 #872 delta P2): картку читає анонімний /health/ready — сирий ex.Message туди не йде
+            // (ReportViewQueueFailure); повний виняток — у Warning під тією самою кореляцією (старт — поза запитом).
+            var correlation = ReportViewQueueFailure.Correlation(null);
+            status?.Failed(ReportViewQueueFailure.Of(null, ex, "Report view regeneration was not queued at startup.", correlation));
+            if (logger is not null)
+            {
+                LogNotQueuedAtStartup(logger, ex, correlation);
+            }
+
             return false;
         }
     }
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "ReportViewsJob: перегенерацію вʼюх rpt.* на старті не поставлено; кореляція {CorrelationId}. Повтор — перезапуск або EXEC rpt.usp_GenerateStableViews.")]
+    private static partial void LogNotQueuedAtStartup(ILogger logger, Exception exception, string correlationId);
 }
