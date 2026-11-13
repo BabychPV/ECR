@@ -200,7 +200,12 @@ public sealed class ReportsController(
         // ⚠ Потік, а не байти: вміст лежить у тимчасовому файлі, і `FileResult`
         // закриває його сам після відправки — разом із самим файлом
         // (`FileOptions.DeleteOnClose`).
-        return File(book.Content, SnapshotExport.ContentType, book.FileName);
+        // ✎ X-8/X-1: `filename*=UTF-8''…` (повне ім'я) + ASCII `filename`; `File` без імені заголовка не пише.
+        var fallbackName = string.Create(System.Globalization.CultureInfo.InvariantCulture, $"snapshot-{id}");
+        Response.Headers.ContentDisposition =
+            ExportAttachment.Header(Path.GetFileNameWithoutExtension(book.FileName), fallbackName, "xlsx");
+
+        return File(book.Content, SnapshotExport.ContentType);
     }
 
     /// <summary>

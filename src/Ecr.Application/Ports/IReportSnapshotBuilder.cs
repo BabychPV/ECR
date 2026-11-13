@@ -93,6 +93,14 @@ public interface IReportSnapshotBuilder
     public Task<int?> FindProjectIdAsync(long snapshotId, CancellationToken ct);
 
     /// <summary>
+    /// X-8 (аудит 2026-11): код і назва звіту, період і періодичність проєкту зрізу — для імені файлу;
+    /// <c>null</c> — зрізу немає.
+    /// </summary>
+    /// <param name="snapshotId">Зріз.</param>
+    /// <param name="ct">Скасування.</param>
+    public Task<SnapshotNameFacts?> FindNameFactsAsync(long snapshotId, CancellationToken ct);
+
+    /// <summary>
     /// Перераховує контрольну суму ЗБЕРЕЖЕНОГО вмісту тим самим алгоритмом,
     /// що й побудова, і віддає її поруч зі збереженою. Нічого не змінює.
     /// </summary>
@@ -253,3 +261,11 @@ public sealed record ReportSnapshotSummary(
     /// </remarks>
     public bool IsStale { get; init; }
 }
+
+/// <summary>Факти для імені файлу зрізу (аудит 2026-11, X-8).</summary>
+/// <param name="ReportCode">Код звіту.</param>
+/// <param name="ReportName">Назва звіту всіма мовами.</param>
+/// <param name="PeriodKey">Період зрізу; <c>null</c> — річний зріз без періоду.</param>
+/// <param name="PeriodKind">Періодичність проєкту зрізу.</param>
+public sealed record SnapshotNameFacts(
+    string ReportCode, Ecr.Domain.ValueObjects.LocalizedText ReportName, int? PeriodKey, Ecr.Domain.Enums.PeriodKind? PeriodKind);

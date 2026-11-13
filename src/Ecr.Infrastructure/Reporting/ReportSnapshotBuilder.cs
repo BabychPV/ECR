@@ -594,6 +594,17 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
             .ConfigureAwait(false);
 
     /// <inheritdoc />
+    public async Task<SnapshotNameFacts?> FindNameFactsAsync(long snapshotId, CancellationToken ct)
+        => await (from s in db.ReportSnapshots.AsNoTracking()
+                  join v in db.ReportVersions.AsNoTracking() on s.ReportVersionId equals v.Id
+                  join d in db.ReportDefs.AsNoTracking() on v.ReportDefId equals d.Id
+                  join p in db.Projects.AsNoTracking() on s.ProjectId equals p.Id
+                  where s.Id == snapshotId
+                  select new SnapshotNameFacts(d.Code, d.NameL10n, s.PeriodKey, (Ecr.Domain.Enums.PeriodKind?)p.PeriodKind))
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
     public async Task<SnapshotHashes?> VerifyAsync(long snapshotId, CancellationToken ct)
     {
         var stored = await db.ReportSnapshots

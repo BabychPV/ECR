@@ -49,7 +49,7 @@ public sealed class DownloadExportHandler(
     /// <summary>Тип події в <c>aud.SecurityEvent</c>.</summary>
     public const string EventType = "DocumentExportDownloaded";
 
-    /// <summary>Читає готову книгу.</summary>
+    /// <summary>Читає готову книгу разом із документом і основою імені файлу (X-1).</summary>
     /// <param name="exportId">Ключ експорту з прогресу задачі.</param>
     /// <param name="ct">Скасування.</param>
     /// <exception cref="NotFoundException">
@@ -59,7 +59,7 @@ public sealed class DownloadExportHandler(
     /// <exception cref="AccessDeniedException">
     /// Немає гранта на документ, з якого побудована книга — <c>ECR-AUTH-0403</c>.
     /// </exception>
-    public async Task<byte[]> HandleAsync(string exportId, CancellationToken ct)
+    public async Task<ExportedBook> HandleAsync(string exportId, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(exportId);
 
@@ -116,6 +116,6 @@ public sealed class DownloadExportHandler(
                 currentUser.CorrelationId),
             ct).ConfigureAwait(false);
 
-        return book.Content;
+        return book;
     }
 }

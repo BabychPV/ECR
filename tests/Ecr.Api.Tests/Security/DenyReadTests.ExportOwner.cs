@@ -55,6 +55,43 @@ public sealed partial class DenyReadTests
         }
     }
 
+    /// <summary>
+    /// X-1 (аудит 2026-11): файл експорту має людське ім'я з періодом, а не `document-{id}-{exportId}`; повне ім'я —
+    /// у <c>filename*</c> (RFC 5987), у <c>filename</c> — лише друковані ASCII-символи.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Файл_експорту_має_людське_ім_я_з_періодом_а_не_ключ_сховища()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var reader = await SignedInAsync(app, s.Reader).ConfigureAwait(true);
+
+        var exportId = await OrderExportAsync(app, reader, s).ConfigureAwait(true);
+
+        using var response = await reader
+            .GetAsync(new Uri($"/api/v1/documents/{s.Doc.DocumentId}/export/{exportId}", UriKind.Relative))
+            .ConfigureAwait(true);
+        Assert.True(response.StatusCode == HttpStatusCode.OK, $"{response.StatusCode}: {app.ErrorsText}");
+
+        var disposition = response.Content.Headers.ContentDisposition;
+        Assert.NotNull(disposition);
+        Assert.Equal("attachment", disposition.DispositionType);
+
+        var full = disposition.FileNameStar;
+        Assert.NotNull(full);
+        Assert.DoesNotContain(exportId, full, StringComparison.OrdinalIgnoreCase);
+        Assert.Matches(@"^.+ (\d{4}-\d{2}|Q\d \d{4}|\d{4}|\d{4}-P\d{2})\.xlsx$", full);
+
+        var ascii = disposition.FileName?.Trim('"');
+        Assert.NotNull(ascii);
+        Assert.DoesNotContain(exportId, ascii, StringComparison.OrdinalIgnoreCase);
+        Assert.EndsWith(".xlsx", ascii, StringComparison.Ordinal);
+        Assert.All(ascii, symbol => Assert.InRange(symbol, ' ', '~'));
+    }
+
     /// <summary>Замовляє експорт xlsx і чекає на його <c>exportId</c>.</summary>
     private static async Task<string> OrderExportAsync(EcrApiFactory app, HttpClient client, Scenario s)
     {
