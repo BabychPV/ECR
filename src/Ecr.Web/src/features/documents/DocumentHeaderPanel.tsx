@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import {
   Alert,
+  Badge,
   Button,
   Checkbox,
   Collapse,
@@ -20,6 +21,7 @@ import { queryKeys } from '@/api/queryKeys';
 import type { components } from '@/api/schema';
 import type { RegistryEntryDto, UnitRef } from '@/api/types';
 import { coerce } from '@/features/grid/edits';
+import { followRecalculation, useRecalculationStatus } from '@/features/grid/useCellPatch';
 import { cellText, sameCellValue, sameDateValue } from '@/features/grid/cellValue';
 import { can, useSession } from '@/shared/session/useSession';
 import { lookupCellDisplay } from '@/features/grid/LookupCellEditor';
@@ -74,6 +76,23 @@ import {
 type DocumentHeaderDto = components['schemas']['DocumentHeaderDto'];
 type DocumentHeaderField = components['schemas']['DocumentHeaderFieldDto'];
 type PatchHeaderField = components['schemas']['PatchHeaderField'];
+type HeaderRecalculationJob = components['schemas']['HeaderRecalculationJobDto'];
+
+/**
+ * B35 W-2: за якою з поставлених правкою шапки задач показувати статус «перераховується / перераховано».
+ * Задача періоду, який показує сторінка; без нього (чи без задачі на нього) — остання поставлена: правка шапки
+ * перераховує всі відкриті періоди документа (річний HSE401 — до 12), а рядок статусу один.
+ * `null` — нічого не поставлено, і статус попередньої правки гасне (як у сітці, `BE-05`).
+ */
+function shownRecalculationJob(
+  jobs: readonly HeaderRecalculationJob[] | null | undefined,
+  periodKey: number | undefined,
+): string | null {
+  const usable = (jobs ?? []).filter((job) => job.jobId.length > 0);
+  const own = periodKey === undefined ? undefined : usable.find((job) => job.periodKey === periodKey);
+
+  return (own ?? usable.at(-1))?.jobId ?? null;
+}
 
 /** Скільки пунктів Lookup-поля шапки показується одночасно (C1-04). */
 const LookupOptionsLimit = 50;
@@ -617,12 +636,26 @@ export function DocumentHeaderPanel({
     setHeaderConflict([]);
   }
 
+  /*
+   * ⛔ B35 W-2: правка шапки ставить перерахунок кожного відкритого періоду (`HDR.*` читають формули), а
+   * відповідь доти про задачі мовчала — обчислені комірки на екрані лишалися старими до F9. Тепер кожну задачу
+   * веде той самий фоновий слідкувач, що й після правки комірки чи імпорту (`followRecalculation`, N-1, W-1): по
+   * завершенні він перечитує зрізи записаних періодів (`settleRecalculation`) — і переживає розмонтування панелі.
+   * Рядок статусу — `useRecalculationStatus` (ключі `grid.recalculat…`, як у сітки), без власного таймера.
+   */
+  const [recalculationJobId, setRecalculationJobId] = useState<string | null>(null);
+  const recalc = useRecalculationStatus(recalculationJobId);
+
   const save = useMutation({
     mutationFn: (fields: readonly PatchHeaderField[]) =>
       patchDocumentHeader(documentId, fields, seed?.dto.version ?? header.data?.version ?? ''),
     onSuccess: (result) => {
       queryClient.setQueryData(['document-header', documentId], result);
       adopt(result);
+      for (const job of result.recalculationJobs ?? []) {
+        if (job.jobId.length > 0) followRecalculation(queryClient, job.jobId, documentId, job.periodKey);
+      }
+      setRecalculationJobId(shownRecalculationJob(result.recalculationJobs, periodKey));
       showDone(t('document.header.saved'));
     },
     onError: async (error) => {
@@ -963,6 +996,23 @@ export function DocumentHeaderPanel({
             <Button variant="default" disabled={save.isPending} onClick={resetDraft}>
               {t('common.cancel')}
             </Button>
+          )}
+
+          {/* B35 W-2: той самий статус-рядок перерахунку, що в сітці (`DocumentGrid`, `BE-05`). */}
+          {recalc.outcome === 'running' && (
+            <Text size="xs" c="dimmed" role="status" aria-live="polite" data-recalc-status="running">
+              {t('grid.recalculating')}
+            </Text>
+          )}
+          {recalc.outcome === 'succeeded' && recalc.finishedAt !== null && (
+            <Text size="xs" c="dimmed" role="status" aria-live="polite" data-recalc-status="succeeded">
+              {t('grid.recalculated', { time: recalc.finishedAt })}
+            </Text>
+          )}
+          {recalc.outcome === 'failed' && (
+            <Badge color="statusWarning" variant="light" role="alert" data-recalc-status="failed">
+              {t('grid.recalcFailed')}
+            </Badge>
           )}
         </Group>
       )}
