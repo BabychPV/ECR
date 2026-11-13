@@ -82,7 +82,7 @@ public sealed class AutoRecalcAfterMaterializeTests(SqlServerFixture sql) : IAsy
         var keys = await KeysAsync(quartz);
         var key = Assert.Single(keys);
         Assert.StartsWith(
-            $"IRecalculationJob~{RecalculateDocumentHandler.TargetOf(chain.DocumentId, chain.PeriodKey)}~",
+            $"IRecalculationJob~{CalculationTrigger.AutoTargetOf(chain.DocumentId, chain.PeriodKey)}~",
             key,
             StringComparison.Ordinal);
     }
@@ -110,10 +110,65 @@ public sealed class AutoRecalcAfterMaterializeTests(SqlServerFixture sql) : IAsy
         // наступна витісняє вже запущений перерахунок — гарячий документ так
         // і не дораховується. Тут `Received(1)` червоний.
         await jobs.Received(1).EnqueueCoalescedAsync<IRecalculationJob>(
-            RecalculateDocumentHandler.TargetOf(chain.DocumentId, chain.PeriodKey),
+            CalculationTrigger.AutoTargetOf(chain.DocumentId, chain.PeriodKey),
             Arg.Any<object?>(), Arg.Any<CancellationToken>(), null);
         await jobs.DidNotReceiveWithAnyArgs().EnqueueAsync<IRecalculationJob>(default, default, default);
         await jobs.DidNotReceiveWithAnyArgs().EnqueueExclusiveAsync<IRecalculationJob>(default!, default, default, default);
+    }
+
+    /// <summary>
+    /// ⛔ B83 (слово людини 07.11: «тільки погоджені не мають перераховуватися»): збір PI у документ, чий аркуш ПОДАНО,
+    /// ставить перерахунок — з позначкою поданих (задача пише поданий журналом і позначкою); документ, де затверджено
+    /// все, — ні. Справжні сховища періодів, робочого процесу й складу.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ ДОКАЗ (локально): повернути в <c>CalculationTrigger.RequestAsync</c> стару відмову «будь-який поданий чи
+    /// затверджений аркуш» — поданий документ нуль задач, червоний.
+    /// </remarks>
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "B83")]
+    public async Task Збір_у_документ_із_поданим_аркушем_ставить_перерахунок_з_позначкою_поданих(bool approve, bool expectQueued)
+    {
+        var (db, chain) = await OpenChainAsync();
+        await using var _ = db;
+
+        var approval = new Ecr.Domain.Entities.Workflow.ApprovalState(chain.DocumentId, chain.SheetDefId, chain.PeriodKey.Value);
+        approval.Submit(userId: 5, Now);
+        if (approve)
+        {
+            approval.Approve(userId: 6, Now);
+        }
+
+        db.ApprovalStates.Add(approval);
+        await db.SaveChangesAsync(CancellationToken.None);
+
+        var entity = await ArrangeEntityAsync(db, chain, [chain.RowIds[0]]);
+
+        var jobs = Substitute.For<IBackgroundJobScheduler>();
+        object? payload = null;
+        jobs.EnqueueCoalescedAsync<IRecalculationJob>(
+                Arg.Any<string>(), Arg.Do<object?>(p => payload = p), Arg.Any<CancellationToken>(), Arg.Any<int?>())
+            .Returns("IRecalculationJob~collected");
+        var job = new MaterializeCollectedDataJob(
+            db, RecordingPatcher(), Substitute.For<ICoverageJournal>(), Actor(db), Trigger(db, jobs));
+
+        await job.ExecuteAsync(MaterializeFor(entity, chain), Substitute.For<IJobProgress>(), CancellationToken.None);
+
+        if (!expectQueued)
+        {
+            await jobs.DidNotReceiveWithAnyArgs().EnqueueCoalescedAsync<IRecalculationJob>(default!, default, default, default);
+            return;
+        }
+
+        await jobs.Received(1).EnqueueCoalescedAsync<IRecalculationJob>(
+            CalculationTrigger.AutoTargetOf(chain.DocumentId, chain.PeriodKey),
+            Arg.Any<object?>(), Arg.Any<CancellationToken>(), null);
+        var json = System.Text.Json.JsonSerializer.Serialize(payload, System.Text.Json.JsonSerializerOptions.Web);
+        Assert.Contains("\"recalculateSubmitted\":true", json, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -237,7 +292,7 @@ public sealed class AutoRecalcAfterMaterializeTests(SqlServerFixture sql) : IAsy
 
     /// <summary>Тригер на справжніх сховищах періодів і робочого процесу — як у контейнері.</summary>
     private static CalculationTrigger Trigger(EcrDbContext db, IBackgroundJobScheduler jobs)
-        => new(jobs, new PeriodStore(db), new WorkflowStore(db));
+        => new(jobs, new PeriodStore(db), new WorkflowStore(db), new DocumentStore(db), new DocumentSheetCopyStore(db));
 
     /// <summary>
     /// Сутність із матеріалізованими мапінгами: поле на кожен рядок, числова

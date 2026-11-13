@@ -1677,12 +1677,13 @@ public sealed partial class RecalculationJob(
     /// (<c>TriggeredByUserId</c> заданий: кнопка проєкту чи документа, і дочірні задачі розкладу проєкту).
     /// </summary>
     /// <remarks>
-    /// ⚠ Нічний розклад і автотригери (<c>TriggeredByUserId = null</c>) поданих аркушів не чіпають: інакше кожна ніч
+    /// ⚠ Нічний розклад (<c>TriggeredByUserId = null</c>, без <c>RecalculateSubmitted</c>) поданих аркушів не чіпає: інакше кожна ніч
     /// ставила б позначку «перераховано після подання» на всі подані аркуші, і позначка перестала б щось означати.
     /// <para>
     /// ⛔ B63: перерахунок ЗАЛЕЖНИХ від зміненого довідника чи документа-джерела (<c>RecalculateSubmitted</c>, ставить
     /// <c>CalculationTrigger.RequestDependentsAsync</c>) — теж пише подані, з тим самим журналом і позначкою: їхні числа
     /// справді змінилися, і погоджувач мусить це бачити (слово людини 07.11: «тільки погоджені не мають перераховуватися»).
+    /// ✎ B83: так само автоперерахунок після збору PI і синхронізації подій (<c>CalculationTrigger.RequestAsync</c>).
     /// </para>
     /// </remarks>
     internal static bool WritesSubmitted(RecalculationRequest request)
@@ -2212,7 +2213,8 @@ public sealed partial class RecalculationJob(
 /// </param>
 /// <param name="RecalculateSubmitted">
 /// ✎ B63: системний перерахунок залежних (RT-25, HSE400 3b, FLERT F6) пише й подані аркуші (журнал + позначка);
-/// затверджені — ніколи. <c>false</c> — без людини подані не чіпаються (нічний розклад, автоперерахунок збору).
+/// затверджені — ніколи. ✎ B83: так само автоперерахунок збору PI і синхронізації подій (<c>CalculationTrigger.RequestAsync</c>).
+/// <c>false</c> — без людини подані не чіпаються (нічний розклад).
 /// </param>
 public sealed record RecalculationRequest(
     int ProjectId,

@@ -12,10 +12,10 @@ namespace Ecr.Application.Ports;
 /// <c>MaterializeCollectedDataJob</c> (A4), далі <c>RowWindowFetchJob</c> (A1) і
 /// синхронізація подій (A5b).
 /// <para>
-/// ⚠ Власної дедуплікації тригер НЕ має: задача ставиться тим самим маркером
-/// (<see cref="IRecalculationJob"/>) і з тією самою ціллю
-/// (<c>RecalculateDocumentHandler.TargetOf</c>), що й кнопка «Перерахувати» та
-/// правка шапки, а дублікати зливає сама черга без витіснення
+/// ⚠ Власної дедуплікації тригер НЕ має: задача ставиться маркером
+/// (<see cref="IRecalculationJob"/>) зі сталою ціллю на «документ × період»
+/// (✎ B83: своєю, <c>CalculationTrigger.AutoTargetOf</c>, а не ціллю кнопки — щоб злиття
+/// не губило позначку поданих), а дублікати зливає сама черга без витіснення
 /// (<see cref="IBackgroundJobScheduler.EnqueueCoalescedAsync{TJob}"/>): виконувана
 /// задача не переривається, нова стає ПІСЛЯ неї.
 /// </para>
@@ -40,14 +40,16 @@ public interface ICalculationTrigger
     /// </remarks>
     public bool EnlistsInCallerTransaction => false;
 
-    /// <summary>Ставить перерахунок документа за період, якщо в період можна писати.</summary>
+    /// <summary>
+    /// Ставить перерахунок документа за період після збору PI чи синхронізації подій, якщо в період можна писати.
+    /// ✎ B83: як і залежні (B63) — пропускаються лише затверджені аркуші, подані перераховуються з позначкою.
+    /// </summary>
     /// <param name="documentId">Документ, у комірки якого записано нові дані.</param>
     /// <param name="periodKey">Період запису.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>
     /// Ідентифікатор поставленої задачі; <c>null</c> — задачу не поставлено: період
-    /// не знайдено, він ще <c>Scheduled</c>, закритий або має поданий аркуш
-    /// (<c>RecalculationWritePolicy</c>).
+    /// не знайдено, він ще <c>Scheduled</c>, закритий або затверджено всі аркуші.
     /// </returns>
     public Task<string?> RequestAsync(long documentId, PeriodKey periodKey, CancellationToken ct);
 
