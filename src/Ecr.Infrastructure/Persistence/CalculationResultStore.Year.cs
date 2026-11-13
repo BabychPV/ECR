@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Enums;
@@ -212,12 +212,19 @@ public sealed partial class CalculationResultStore : ICalculationYearReader
         var keys = List(periodKeys.Distinct().Order());
         var sql = $"""
             SELECT x.TableInstanceId, x.DocumentId, x.TableDefId,
-                   doc.fn_VersionOf(d.ProjectId, x.PeriodKey) AS TemplateVersionId, x.PeriodKey, x.SheetCopyId
-              FROM (SELECT ti.Id AS TableInstanceId, ti.DocumentId, ti.TableDefId, ti.PeriodKey, ti.SheetCopyId
+                   doc.fn_VersionOf(d.ProjectId, x.PeriodKey) AS TemplateVersionId, x.PeriodKey, x.SheetCopyId,
+                   x.HasFormulaErrors
+              FROM (SELECT ti.Id AS TableInstanceId, ti.DocumentId, ti.TableDefId, ti.PeriodKey, ti.SheetCopyId,
+                           -- ✎ C-1: той самий прапорець, що й у RowStore (EXISTS у calc.FormulaError).
+                           CAST(CASE WHEN EXISTS (SELECT 1
+                                                    FROM calc.FormulaError AS fe
+                                                   WHERE fe.PeriodKey = ti.PeriodKey AND fe.TableInstanceId = ti.Id)
+                                     THEN 1 ELSE 0 END AS bit) AS HasFormulaErrors
                       FROM doc.TableInstance AS ti {InstanceSeek}
                      WHERE ti.PeriodKey IN ({keys}) AND ti.DocumentId = @documentId
                     UNION ALL
-                    SELECT a.Id, a.DocumentId, a.TableDefId, a.PeriodKey, a.SheetCopyId
+                    -- ✎ C-1: архівний період стану помилок формул не має (як ArchiveAwareCellReader).
+                    SELECT a.Id, a.DocumentId, a.TableDefId, a.PeriodKey, a.SheetCopyId, CAST(0 AS bit)
                       FROM arc.TableInstance AS a
                      WHERE a.PeriodKey IN ({keys}) AND a.DocumentId = @documentId
                        AND NOT EXISTS (SELECT 1
