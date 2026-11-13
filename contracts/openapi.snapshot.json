@@ -27627,6 +27627,14 @@
             "format": "date",
             "type": "string"
           },
+          "monthTo": {
+            "description": "✎ C-10: останній день одиниці, коли вона довша за місяць (квартал/рік); `null` — місяць.",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "parts": {
             "description": "The parts the month splits into.",
             "items": {

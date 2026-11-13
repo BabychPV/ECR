@@ -457,14 +457,25 @@ public sealed partial class PatchCellsHandler
         }
 
         var year = context.PeriodKey.Year;
-        DateOnly MonthOf(int columnId)
-            => monthOf.TryGetValue(columnId, out var m) ? new DateOnly(year, m, 1) : new DateOnly(year, context.PeriodKey.Sequence, 1);
+
+        // ✎ C-10 (рішення PO 11.11): колонка без місяця ділиться за періодом комірки (квартал/рік), не за «місяцем» із
+        // Sequence (PeriodKey.cs: для квартального проєкту 202602 — другий квартал). Межі — лише коли є така колонка
+        // (місячна таблиця межі не читає).
+        var bounds = monthOf.Count > 0
+            ? null
+            : await periods.FindPeriodBoundsAsync(context.Instance.DocumentId, context.PeriodKey.Value, ct).ConfigureAwait(false);
+        Permits.History.PermitSplitUnit UnitOf(int columnId)
+            => monthOf.TryGetValue(columnId, out var m)
+                ? Permits.History.PermitSplitUnit.Month(new DateOnly(year, m, 1))
+                : bounds is not null
+                    ? Permits.History.PermitSplitUnit.OfPeriod(context.PeriodKey, bounds)
+                    : Permits.History.PermitSplitUnit.Month(new DateOnly(year, context.PeriodKey.Sequence, 1));
 
         var hits = writes
-            .Select(w => (Write: w, Month: MonthOf(w.Address.ColumnDefId),
+            .Select(w => (Write: w, Unit: UnitOf(w.Address.ColumnDefId),
                           History: history.FirstOrDefault(h => h.Key.RowId == w.Address.TableRowId
-                              && Permits.History.PermitTimeline.SharedMonths(
-                                  Permits.History.PermitHistoryCoverage.SpansOf(0, h.Value)).Contains(MonthOf(w.Address.ColumnDefId)))))
+                              && Permits.History.PermitTimeline.IsShared(
+                                  Permits.History.PermitHistoryCoverage.SpansOf(0, h.Value), UnitOf(w.Address.ColumnDefId)))))
             .Where(h => h.History.Value is not null)
             .ToList();
         if (hits.Count == 0)
@@ -477,7 +488,7 @@ public sealed partial class PatchCellsHandler
         var baseId = await BasePermitOfAsync(context, changes, first.Write.Address.TableRowId, first.History.Key.ColumnId, ct)
             .ConfigureAwait(false);
         var spans = Permits.History.PermitHistoryCoverage.SpansOf(baseId, first.History.Value);
-        var inMonth = Permits.History.PermitTimeline.InMonth(spans, first.Month);
+        var inMonth = Permits.History.PermitTimeline.InUnit(spans, first.Unit);
         var entries = (await registries.FindEntriesByIdsAsync([.. inMonth.Select(s => s.EntryId).Distinct()], ct).ConfigureAwait(false))
             .ToDictionary(e => e.Id);
         var language = currentUser.Language;
@@ -509,13 +520,13 @@ public sealed partial class PatchCellsHandler
 
         throw new BusinessRuleException(
             ErrorCodes.CellSplitRequired,
-            $"Місяць {first.Month:MM.yyyy} рядка ділиться між дозволами ({permits}) — введіть частину для кожного дозволу.",
+            $"Період {first.Unit.Label} рядка ділиться між дозволами ({permits}) — введіть частину для кожного дозволу.",
             new Dictionary<string, object?>
             {
                 ["messageKey"] = "err.ECR-CELL-4225.splitRequired",
                 ["row"] = rowName,
                 ["rowKey"] = firstKey,
-                ["month"] = first.Month.ToString("MM.yyyy", CultureInfo.InvariantCulture),
+                ["month"] = first.Unit.Label,
                 ["permits"] = permits,
                 ["cellCount"] = marked.Count.ToString(CultureInfo.InvariantCulture),
                 ["cells"] = marked,
@@ -558,9 +569,10 @@ public sealed partial class PatchCellsHandler
                 continue;
             }
 
-            var month = monthOf.TryGetValue(address.ColumnDefId, out var m) ? m : context.PeriodKey.Sequence;
+            // ✎ C-10: ключ частин колонки без місяця — сам PeriodKey комірки (= YYYYMM у місячному проєкті, як досі).
+            var partKey = monthOf.TryGetValue(address.ColumnDefId, out var m) ? (year * 100) + m : context.PeriodKey.Value;
             var parts = await permitHistory.CellPartsAsync(
-                    (year * 100) + month, context.Instance.DocumentId, context.Instance.TableDefId, context.Instance.SheetCopyId,
+                    partKey, context.Instance.DocumentId, context.Instance.TableDefId, context.Instance.SheetCopyId,
                     rowKey, address.ColumnDefId, ct)
                 .ConfigureAwait(false);
             foreach (var part in parts)

@@ -41253,6 +41253,11 @@ export interface components {
              * @description First day of the month.
              */
             month: string;
+            /**
+             * Format: date
+             * @description ✎ C-10: останній день одиниці, коли вона довша за місяць (квартал/рік); `null` — місяць.
+             */
+            monthTo?: null | string;
             /** @description The parts the month splits into. */
             parts: components["schemas"]["PermitPartSpanDto"][];
         };

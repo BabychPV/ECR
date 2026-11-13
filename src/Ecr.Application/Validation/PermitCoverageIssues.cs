@@ -107,7 +107,7 @@ public static class PermitCoverageIssues
         if (history is not null)
         {
             messages.AddRange(await HeaderSplitFindingsAsync(
-                    history, registries, cells, rows, headers, tables, permitColumnsOf, documentId, instances, periodKey, language, ct)
+                    history, registries, cells, rows, headers, periods, tables, permitColumnsOf, documentId, instances, periodKey, language, ct)
                 .ConfigureAwait(false));
         }
 
@@ -190,6 +190,7 @@ public static class PermitCoverageIssues
                     documentId,
                     [.. segmentsOf.Values
                         .SelectMany(s => s.Where(x => x.ValidFrom.Day > 1).Select(x => (x.ValidFrom.Year * 100) + x.ValidFrom.Month))
+                        .Append(periodKey.Value)   // ✎ C-10: ключ частин колонки без місяця в квартальному/річному проєкті — сам PeriodKey.
                         .Distinct()],
                     ct)
                 .ConfigureAwait(false);
@@ -228,7 +229,7 @@ public static class PermitCoverageIssues
                 {
                     messages.AddRange(HistoryFindings(
                         table, instance, rowKey, column, entryId, segments, entries, parts, rowCells, months, calculatedOnly,
-                        periodKey, language));
+                        periodKey, bounds, language));
                     continue;
                 }
 
@@ -283,6 +284,7 @@ public static class PermitCoverageIssues
         IReadOnlyList<DateOnly> months,
         IReadOnlyList<DateOnly> calculatedOnly,
         PeriodKey periodKey,
+        PeriodBounds? bounds,
         string language)
     {
         var messages = new List<ValidationMessage>();
@@ -307,15 +309,15 @@ public static class PermitCoverageIssues
             }
         }
 
-        foreach (var month in Permits.History.PermitTimeline.SharedMonths(spans))
+        foreach (var unit in Permits.History.PermitHistoryReader.SplitUnits(table, periodKey, bounds, spans))
         {
-            var inMonth = Permits.History.PermitTimeline.InMonth(spans, month);
-            var monthKey = (month.Year * 100) + month.Month;
+            var inMonth = Permits.History.PermitTimeline.InUnit(spans, unit);
+            var monthKey = unit.PartKey;
             var permits = string.Join(" / ", inMonth.Select(s => entries.TryGetValue(s.EntryId, out var e)
                 ? (e.DisplayL10n.Get("en") is { Length: > 0 } shown ? shown : e.Code.ToString())
                 : "…"));
-            foreach (var cell in Permits.History.PermitHistoryReader.DataCellsInMonth(
-                         table, periodKey, rowCells, new HashSet<int> { column.Id }, month))
+            foreach (var cell in Permits.History.PermitHistoryReader.DataCellsInUnit(
+                         table, periodKey, rowCells, new HashSet<int> { column.Id }, unit))
             {
                 var cellParts = parts
                     .Where(p => p.PeriodKeyValue == monthKey && p.TableDefId == table.Id && p.SheetCopyId == instance.SheetCopyId
@@ -328,7 +330,7 @@ public static class PermitCoverageIssues
 
                 var parameters = new Dictionary<string, string>(StringComparer.Ordinal)
                 {
-                    ["month"] = month.ToString("MM.yyyy", System.Globalization.CultureInfo.InvariantCulture),
+                    ["month"] = unit.Label,
                     ["column"] = cell.HeaderL10n.Get("en") ?? cell.Code,
                     ["permits"] = permits,
                 };
@@ -359,6 +361,7 @@ public static class PermitCoverageIssues
         ICellStore cells,
         IRowStore rows,
         IDocumentHeaderStore headers,
+        IPeriodStore periods,
         Dictionary<int, TableDef> tables,
         Dictionary<int, List<ColumnDef>> permitColumnsOf,
         long documentId,
@@ -392,14 +395,22 @@ public static class PermitCoverageIssues
 
         var spans = Permits.History.PermitHistoryCoverage.SpansOf(baseId, segments);
         var shared = Permits.History.PermitTimeline.SharedMonths(spans);
-        if (shared.Count == 0)
+
+        // ✎ C-10: межі потрібні лише коли є таблиця без місячних колонок (одиниця = період комірки).
+        var bounds = relying.Any(i => PermitMonthCoverage.MonthColumns(tables[i.TableDefId]).Count == 0)
+            ? await periods.FindPeriodBoundsAsync(documentId, periodKey.Value, ct).ConfigureAwait(false)
+            : null;
+        if (shared.Count == 0
+            && (bounds is null || !Permits.History.PermitTimeline.IsShared(spans, Permits.History.PermitSplitUnit.OfPeriod(periodKey, bounds))))
         {
             return [];
         }
 
         var entries = (await registries.FindEntriesByIdsAsync([.. spans.Select(s => s.EntryId).Distinct()], ct).ConfigureAwait(false))
             .ToDictionary(e => e.Id);
-        var parts = await history.PartsAsync(documentId, [.. shared.Select(m => (m.Year * 100) + m.Month)], ct).ConfigureAwait(false);
+        var parts = await history
+            .PartsAsync(documentId, [.. shared.Select(m => (m.Year * 100) + m.Month).Append(periodKey.Value).Distinct()], ct)
+            .ConfigureAwait(false);
         var ids = relying.ConvertAll(i => i.TableInstanceId);
         var slices = await cells.ReadSlicesAsync(ids, periodKey, ct).ConfigureAwait(false);
         var keys = await rows.GetRowIdsBatchAsync(ids, periodKey, ct).ConfigureAwait(false);
@@ -417,15 +428,15 @@ public static class PermitCoverageIssues
                 }
 
                 var byColumn = rowCells.ToDictionary(c => c.Address.ColumnDefId, c => c.Value);
-                foreach (var month in shared)
+                foreach (var unit in Permits.History.PermitHistoryReader.SplitUnits(table, periodKey, bounds, spans))
                 {
-                    var inMonth = Permits.History.PermitTimeline.InMonth(spans, month);
-                    var monthKey = (month.Year * 100) + month.Month;
+                    var inMonth = Permits.History.PermitTimeline.InUnit(spans, unit);
+                    var monthKey = unit.PartKey;
                     var permits = string.Join(" / ", inMonth.Select(s => entries.TryGetValue(s.EntryId, out var e)
                         ? (e.DisplayL10n.Get("en") is { Length: > 0 } shown ? shown : e.Code.ToString())
                         : "…"));
-                    foreach (var cell in Permits.History.PermitHistoryReader.DataCellsInMonth(
-                                 table, periodKey, byColumn, new HashSet<int>(), month))
+                    foreach (var cell in Permits.History.PermitHistoryReader.DataCellsInUnit(
+                                 table, periodKey, byColumn, new HashSet<int>(), unit))
                     {
                         var cellParts = parts
                             .Where(p => p.PeriodKeyValue == monthKey && p.TableDefId == table.Id && p.SheetCopyId == instance.SheetCopyId
@@ -438,7 +449,7 @@ public static class PermitCoverageIssues
 
                         var parameters = new Dictionary<string, string>(StringComparer.Ordinal)
                         {
-                            ["month"] = month.ToString("MM.yyyy", System.Globalization.CultureInfo.InvariantCulture),
+                            ["month"] = unit.Label,
                             ["column"] = cell.HeaderL10n.Get("en") ?? cell.Code,
                             ["permits"] = permits,
                         };

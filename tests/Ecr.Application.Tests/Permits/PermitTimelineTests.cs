@@ -1,5 +1,7 @@
 // tests/Ecr.Application.Tests/Permits/PermitTimelineTests.cs
 using Ecr.Application.Permits.History;
+using Ecr.Application.Ports;
+using Ecr.Domain.ValueObjects;
 using Ecr.TestKit;
 using Xunit;
 
@@ -11,6 +13,77 @@ namespace Ecr.Application.Tests.Permits;
 public sealed class PermitTimelineTests
 {
     private static DateOnly D(int month, int day) => new(2026, month, day);
+
+    /// <summary>Q2 2026 у проєкті з кварталами: ключ 202602 — другий КВАРТАЛ, а не лютий.</summary>
+    private static PermitSplitUnit Q2() => PermitSplitUnit.OfPeriod(new PeriodKey(202602), new PeriodBounds(D(4, 1), D(6, 30)));
+
+    private static IEnumerable<IReadOnlyList<PermitSpan>> Histories() =>
+    [
+        PermitTimeline.Spans(1, []),
+        PermitTimeline.Spans(1, [(D(2, 15), 2)]),
+        PermitTimeline.Spans(1, [(D(2, 1), 2)]),
+        PermitTimeline.Spans(1, [(D(2, 15), 2), (D(2, 20), 3), (D(4, 10), 4)]),
+        PermitTimeline.Spans(1, [(D(1, 31), 2), (D(3, 1), 3), (D(3, 31), 4)]),
+    ];
+
+    /// <summary>C-10: для календарного місяця нова одиниця дає те саме, що колишні <c>InMonth</c> і <c>SharedMonths</c>.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Finding", "C-10")]
+    public void Одиниця_місяць_дорівнює_InMonth_і_SharedMonths()
+    {
+        foreach (var spans in Histories())
+        {
+            for (var m = 1; m <= 6; m++)
+            {
+                var unit = PermitSplitUnit.Month(D(m, 17));
+                Assert.Equal(D(m, 1), unit.First);
+                Assert.Equal(new DateOnly(2026, m, 1).AddMonths(1).AddDays(-1), unit.Last);
+                Assert.Equal(202600 + m, unit.PartKey);
+                Assert.Equal(PermitTimeline.InMonth(spans, D(m, 1)), PermitTimeline.InUnit(spans, unit));
+                Assert.Equal(PermitTimeline.SharedMonths(spans).Contains(D(m, 1)), PermitTimeline.IsShared(spans, unit));
+            }
+        }
+    }
+
+    /// <summary>C-10: квартал ділиться зміною ВСЕРЕДИНІ, не ділиться зміною поза ним чи з його першого дня.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Finding", "C-10")]
+    public void Квартал_ділиться_зміною_всередині_і_не_ділиться_зміною_поза()
+    {
+        var q2 = Q2();
+        Assert.Equal((D(4, 1), D(6, 30), 202602), (q2.First, q2.Last, q2.PartKey));
+        Assert.False(q2.IsSingleMonth);
+        Assert.Equal("04.2026–06.2026", q2.Label);
+
+        var inside = PermitTimeline.Spans(1, [(D(5, 15), 2)]);
+        Assert.True(PermitTimeline.IsShared(inside, q2));
+        Assert.Equal(2, PermitTimeline.InUnit(inside, q2).Count);
+
+        // Зміна 15.02 — «лютий» за Sequence, але Q2 вона не стосується: одна чинна історія.
+        var outside = PermitTimeline.Spans(1, [(D(2, 15), 2)]);
+        Assert.False(PermitTimeline.IsShared(outside, q2));
+        Assert.Single(PermitTimeline.InUnit(outside, q2));
+
+        var firstDay = PermitTimeline.Spans(1, [(D(4, 1), 2)]);
+        Assert.False(PermitTimeline.IsShared(firstDay, q2));
+    }
+
+    /// <summary>C-10: місячний період (також з обрізаним початком проєкту) дає ту саму одиницю, що й місяць.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Finding", "C-10")]
+    public void Місячний_період_дає_ту_саму_одиницю_що_місяць()
+    {
+        var february = PermitSplitUnit.OfPeriod(new PeriodKey(202602), new PeriodBounds(D(2, 1), D(2, 28)));
+        Assert.Equal(PermitSplitUnit.Month(D(2, 1)), february);
+        Assert.True(february.IsSingleMonth);
+        Assert.Equal("02.2026", february.Label);
+
+        var truncated = PermitSplitUnit.OfPeriod(new PeriodKey(202601), new PeriodBounds(D(1, 15), D(1, 31)));
+        Assert.Equal(PermitSplitUnit.Month(D(1, 1)), truncated);
+    }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]

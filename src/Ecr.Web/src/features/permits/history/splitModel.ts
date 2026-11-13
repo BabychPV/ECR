@@ -1,5 +1,6 @@
 import { EcrApiError } from '@/api/client';
 import type { components } from '@/api/schema';
+import { formatMonthYear } from '@/shared/format/period';
 import type { DocumentPermitHistory, RowPermitHistory } from './api';
 
 /**
@@ -125,6 +126,16 @@ export function dayCount(from: string, to: string): number {
 /** `{ year, month }` of a `yyyy-MM-01` month. */
 export function monthOf(month: string): { year: number; month: number } {
   return { year: Number(month.slice(0, 4)), month: Number(month.slice(5, 7)) };
+}
+
+/** ✎ C-10: підпис одиниці поділу — місяць або «квітень 2026 – червень 2026» для кварталу/року (`monthTo`). */
+export function splitUnitLabel(month: Pick<SplitMonth, 'month' | 'monthTo'>): string {
+  const from = monthOf(month.month);
+  const fromLabel = formatMonthYear(from.year, from.month);
+  if (month.monthTo === null || month.monthTo === undefined) return fromLabel;
+  const to = monthOf(month.monthTo);
+
+  return to.year === from.year && to.month === from.month ? fromLabel : `${fromLabel} – ${formatMonthYear(to.year, to.month)}`;
 }
 
 /** One line of the permit cell's history: the permit and the dates it holds for this row. */

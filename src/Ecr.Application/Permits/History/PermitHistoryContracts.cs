@@ -50,8 +50,10 @@ public sealed record PermitPartSpanDto(int PartNo, long RegistryEntryId, string 
 /// <param name="ColumnCodes">Cells of the row with entered data in that month that are not split yet.</param>
 /// <param name="Parts">The parts the month splits into.</param>
 /// <param name="Cells">The month cells of the row: current total and the entered parts (pre-fill of the split dialog).</param>
+/// <param name="MonthTo">✎ C-10: останній день одиниці, коли вона довша за місяць (квартал/рік); <c>null</c> — місяць.</param>
 public sealed record SplitMonthDto(
-    DateOnly Month, IReadOnlyList<string> ColumnCodes, IReadOnlyList<PermitPartSpanDto> Parts, IReadOnlyList<CellSplitValueDto> Cells);
+    DateOnly Month, IReadOnlyList<string> ColumnCodes, IReadOnlyList<PermitPartSpanDto> Parts, IReadOnlyList<CellSplitValueDto> Cells,
+    DateOnly? MonthTo = null);
 
 /// <summary>One month cell of a shared month.</summary>
 /// <param name="ColumnCode">The month column.</param>

@@ -1645,8 +1645,8 @@ GO
 --     ValidFrom <= цього дня, інакше базовий дозвіл (значення комірки дозволу / поля шапки). Обчислені комірки не діляться
 --     ніколи — так само дозвіл останнього дня.
 -- Гарантія: SUM(ValueNumeric) у межах комірки = значення комірки (поділена — сума частин), без подвоєння.
--- Місяць комірки — як у застосунку (`SaveCellSplitsHandler`): рік із PeriodKey комірки, місяць — MonthNumber колонки, інакше
--- номер періоду. За Q-17 (@MonthRouting) місячні комірки лежать в екземплярі свого місяця: адреса частин і історії — логічна
+-- Одиниця поділу — як у застосунку (`SaveCellSplitsHandler`, C-10): рік із PeriodKey комірки, місяць — MonthNumber колонки;
+-- колонка без місяця — сам період комірки (ключ частин — PeriodKey). За Q-17 (@MonthRouting) місячні комірки лежать в екземплярі свого місяця: адреса частин і історії — логічна
 -- (документ, таблиця, копія аркуша, RowKey), тож базовий дозвіл шукається спершу в тому самому рядку, далі — у рядку з тим
 -- самим RowKey в інших екземплярах того ж року (найпізніший період).
 -- ✎ R-1 (D-498): гаряча гілка UNION ALL архівна (`arc.*`), колонка `IsArchived` останньою; архівна гілка — дослівно гаряча
@@ -1683,12 +1683,21 @@ LEFT JOIN wf.ApprovalState  AS a  ON a.DocumentId = d.Id AND a.SheetDefId = sd.I
                                  AND (a.SheetCopyId = ti.SheetCopyId OR (a.SheetCopyId IS NULL AND ti.SheetCopyId IS NULL))
 LEFT JOIN doc.DocumentSheet AS dsh ON dsh.Id = ti.SheetCopyId
 LEFT JOIN doc.Period        AS per ON per.ProjectId = d.ProjectId AND per.PeriodKey = cv.PeriodKey
--- Місяць комірки (NULL — номер поза 1..12: лише кінець періоду, без поділу).
-CROSS APPLY (SELECT CASE WHEN COALESCE(cd.MonthNumber, cv.PeriodKey % 100) BETWEEN 1 AND 12
-                         THEN DATEFROMPARTS(cv.PeriodKey / 100, COALESCE(cd.MonthNumber, cv.PeriodKey % 100), 1) END AS MonthStart) AS mo
+-- Одиниця поділу комірки. ✎ C-10 (рішення PO 11.11): місячна колонка — свій місяць (як було); колонка без місяця — сам
+-- період комірки цілими місяцями (квартал/рік; у місячному проєкті — той самий місяць), ключ частин — PeriodKey комірки.
+-- NULL — одиниці немає (номер місяця поза 1..12 і період невідомий): лише кінець періоду, без поділу.
+CROSS APPLY (SELECT CASE WHEN cd.MonthNumber IS NOT NULL
+                         THEN CASE WHEN cd.MonthNumber BETWEEN 1 AND 12 THEN DATEFROMPARTS(cv.PeriodKey / 100, cd.MonthNumber, 1) END
+                         WHEN per.PeriodStart IS NOT NULL
+                         THEN DATEFROMPARTS(YEAR(per.PeriodStart), MONTH(per.PeriodStart), 1)
+                         WHEN cv.PeriodKey % 100 BETWEEN 1 AND 12
+                         THEN DATEFROMPARTS(cv.PeriodKey / 100, cv.PeriodKey % 100, 1) END AS MonthStart) AS mo
 CROSS APPLY (SELECT CASE WHEN cd.MonthNumber IS NOT NULL THEN EOMONTH(mo.MonthStart)
                          ELSE COALESCE(per.PeriodEnd, EOMONTH(mo.MonthStart)) END AS AsOf,
-                    YEAR(mo.MonthStart) * 100 + MONTH(mo.MonthStart) AS MonthKey) AS dt
+                    CASE WHEN cd.MonthNumber IS NOT NULL OR per.PeriodEnd IS NULL THEN EOMONTH(mo.MonthStart)
+                         ELSE EOMONTH(per.PeriodEnd) END AS UnitEnd,
+                    CASE WHEN cd.MonthNumber IS NOT NULL THEN YEAR(mo.MonthStart) * 100 + MONTH(mo.MonthStart)
+                         ELSE cv.PeriodKey END AS MonthKey) AS dt
 -- Колонка дозволу рядка: та, що має історію для цього рядка, інакше перша за порядком.
 OUTER APPLY (SELECT TOP (1) pc.Id AS ColumnDefId
                FROM cfg.ColumnDef AS pc
@@ -1741,7 +1750,7 @@ OUTER APPLY (SELECT CASE WHEN cv.IsCalculated = 0 AND mo.MonthStart IS NOT NULL 
                          THEN 1 ELSE 0 END AS IsSplit, x.Spans
                FROM (SELECT 1 + COUNT(*) AS Spans
                        FROM doc.PermitSegment AS s
-                      WHERE s.DocumentId = d.Id AND s.ValidFrom > mo.MonthStart AND s.ValidFrom <= EOMONTH(mo.MonthStart)
+                      WHERE s.DocumentId = d.Id AND s.ValidFrom > mo.MonthStart AND s.ValidFrom <= dt.UnitEnd
                         AND ((rp.ColumnDefId IS NOT NULL AND s.TableDefId = td.Id AND s.ColumnDefId = rp.ColumnDefId
                               AND s.RowKey = r.RowKey
                               AND (s.SheetCopyId = ti.SheetCopyId OR (s.SheetCopyId IS NULL AND ti.SheetCopyId IS NULL)))
@@ -1785,12 +1794,21 @@ LEFT JOIN wf.ApprovalState  AS a  ON a.DocumentId = d.Id AND a.SheetDefId = sd.I
                                  AND (a.SheetCopyId = ti.SheetCopyId OR (a.SheetCopyId IS NULL AND ti.SheetCopyId IS NULL))
 LEFT JOIN doc.DocumentSheet AS dsh ON dsh.Id = ti.SheetCopyId
 LEFT JOIN doc.Period        AS per ON per.ProjectId = d.ProjectId AND per.PeriodKey = cv.PeriodKey
--- Місяць комірки (NULL — номер поза 1..12: лише кінець періоду, без поділу).
-CROSS APPLY (SELECT CASE WHEN COALESCE(cd.MonthNumber, cv.PeriodKey % 100) BETWEEN 1 AND 12
-                         THEN DATEFROMPARTS(cv.PeriodKey / 100, COALESCE(cd.MonthNumber, cv.PeriodKey % 100), 1) END AS MonthStart) AS mo
+-- Одиниця поділу комірки. ✎ C-10 (рішення PO 11.11): місячна колонка — свій місяць (як було); колонка без місяця — сам
+-- період комірки цілими місяцями (квартал/рік; у місячному проєкті — той самий місяць), ключ частин — PeriodKey комірки.
+-- NULL — одиниці немає (номер місяця поза 1..12 і період невідомий): лише кінець періоду, без поділу.
+CROSS APPLY (SELECT CASE WHEN cd.MonthNumber IS NOT NULL
+                         THEN CASE WHEN cd.MonthNumber BETWEEN 1 AND 12 THEN DATEFROMPARTS(cv.PeriodKey / 100, cd.MonthNumber, 1) END
+                         WHEN per.PeriodStart IS NOT NULL
+                         THEN DATEFROMPARTS(YEAR(per.PeriodStart), MONTH(per.PeriodStart), 1)
+                         WHEN cv.PeriodKey % 100 BETWEEN 1 AND 12
+                         THEN DATEFROMPARTS(cv.PeriodKey / 100, cv.PeriodKey % 100, 1) END AS MonthStart) AS mo
 CROSS APPLY (SELECT CASE WHEN cd.MonthNumber IS NOT NULL THEN EOMONTH(mo.MonthStart)
                          ELSE COALESCE(per.PeriodEnd, EOMONTH(mo.MonthStart)) END AS AsOf,
-                    YEAR(mo.MonthStart) * 100 + MONTH(mo.MonthStart) AS MonthKey) AS dt
+                    CASE WHEN cd.MonthNumber IS NOT NULL OR per.PeriodEnd IS NULL THEN EOMONTH(mo.MonthStart)
+                         ELSE EOMONTH(per.PeriodEnd) END AS UnitEnd,
+                    CASE WHEN cd.MonthNumber IS NOT NULL THEN YEAR(mo.MonthStart) * 100 + MONTH(mo.MonthStart)
+                         ELSE cv.PeriodKey END AS MonthKey) AS dt
 -- Колонка дозволу рядка: та, що має історію для цього рядка, інакше перша за порядком.
 OUTER APPLY (SELECT TOP (1) pc.Id AS ColumnDefId
                FROM cfg.ColumnDef AS pc
@@ -1843,7 +1861,7 @@ OUTER APPLY (SELECT CASE WHEN cv.IsCalculated = 0 AND mo.MonthStart IS NOT NULL 
                          THEN 1 ELSE 0 END AS IsSplit, x.Spans
                FROM (SELECT 1 + COUNT(*) AS Spans
                        FROM doc.PermitSegment AS s
-                      WHERE s.DocumentId = d.Id AND s.ValidFrom > mo.MonthStart AND s.ValidFrom <= EOMONTH(mo.MonthStart)
+                      WHERE s.DocumentId = d.Id AND s.ValidFrom > mo.MonthStart AND s.ValidFrom <= dt.UnitEnd
                         AND ((rp.ColumnDefId IS NOT NULL AND s.TableDefId = td.Id AND s.ColumnDefId = rp.ColumnDefId
                               AND s.RowKey = r.RowKey
                               AND (s.SheetCopyId = ti.SheetCopyId OR (s.SheetCopyId IS NULL AND ti.SheetCopyId IS NULL)))

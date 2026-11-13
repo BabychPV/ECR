@@ -274,6 +274,60 @@ public sealed class DocumentCellsByPermitViewTests(SqlServerFixture sql)
         Assert.Equal(3m, (decimal)row[1]!);
     }
 
+    /// <summary>
+    /// C-10 (аудит 2026-11, рішення PO 11.11): у квартальному проєкті колонка БЕЗ місяця ділиться за періодом комірки, а не
+    /// за «місяцем» із <c>PeriodKey.Sequence</c>: зміна дозволу 15.02 усередині Q1 (202601 = 01.01–31.03) ділить комірку Q1,
+    /// частини лежать за ключем <c>PeriodKey</c> комірки (202601); зміна 15.05 (поза кварталом) не ділить, дозвіл — чинний
+    /// в останній день кварталу.
+    /// </summary>
+    /// <remarks>
+    /// Червоне до C-10: одиниця — січень (Sequence 1), зміна 15.02 її не ділить — один рядок на цілу комірку (дозвіл B), а не
+    /// дві частини (A 4 + B 6).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "C-10")]
+    public async Task Квартальна_комірка_без_місяця_ділиться_за_періодом_комірки_а_частини_лежать_за_PeriodKey()
+    {
+        var tag = Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
+        var kit = await BuildAsync(tag);
+        long a = kit.A, b = kit.B;
+        await QueryAsync(
+            "UPDATE p SET PeriodEnd = '2026-03-31' FROM doc.Period AS p JOIN doc.Document AS d ON d.ProjectId = p.ProjectId "
+            + $"WHERE d.Id = {kit.DocumentId} AND p.PeriodKey = {Period}; SELECT 1;");
+
+        // R6: B з 15.02 (усередині Q1) — комірка Q поділена 4 (A: 01.01–14.02) + 6 (B: 15.02–31.03), ключ частин = 202601.
+        var r6 = await RowAsync(kit, kit.T, "R6", 6);
+        await CellAsync(kit.T, r6, kit.Col["PERMIT"], permit: a);
+        await CellAsync(kit.T, r6, kit.Col["Q"], 10m);
+        await SegmentAsync(kit, kit.T, "R6", new DateOnly(2026, 2, 15), b);
+        await PartsAsync(kit, kit.T, "R6", kit.Col["Q"], Period,
+            (a, new DateOnly(2026, 1, 1), new DateOnly(2026, 2, 14), 4m), (b, new DateOnly(2026, 2, 15), new DateOnly(2026, 3, 31), 6m));
+
+        // R7: B з 15.05 (поза Q1) — квартал не ділиться, дозвіл на 31.03 — A.
+        var r7 = await RowAsync(kit, kit.T, "R7", 7);
+        await CellAsync(kit.T, r7, kit.Col["PERMIT"], permit: a);
+        await CellAsync(kit.T, r7, kit.Col["Q"], 5m);
+        await SegmentAsync(kit, kit.T, "R7", new DateOnly(2026, 5, 15), b);
+
+        var rows = (await QueryAsync(
+                "SELECT RowKey, PermitId, IsPart, PartNo, ValueNumeric FROM rpt.v_DocumentCellsByPermit "
+                + $"WHERE DocumentId = {kit.DocumentId} AND ColumnCode = N'Q' ORDER BY RowKey, PartNo"))
+            .Select(r => (
+                Row: (string)r[0]!, Permit: Convert.ToInt64(r[1], CultureInfo.InvariantCulture), IsPart: (bool)r[2]!,
+                PartNo: r[3] is null ? (int?)null : Convert.ToInt32(r[3], CultureInfo.InvariantCulture), Value: (decimal)r[4]!))
+            .ToList();
+
+        Assert.Equal(
+            [
+                ("R6", a, true, (int?)1, 4m),
+                ("R6", b, true, 2, 6m),
+                ("R7", a, false, null, 5m),
+            ],
+            rows);
+    }
+
     // ── helpers ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
     private sealed record Kit(
@@ -326,6 +380,7 @@ public sealed class DocumentCellsByPermitViewTests(SqlServerFixture sql)
             cols[$"M0{m}"] = Month(t.Id, m, m);
         }
 
+        cols["Q"] = new ColumnDef(t.Id, EcrCode.Create("Q"), Name("Q"), 20, CellDataType.Decimal);   // C-10: колонка БЕЗ місяця
         cols["H.M02"] = Month(h.Id, 2, 1);
         cols["H.M03"] = Month(h.Id, 3, 2);
         db.ColumnDefs.AddRange(cols.Values);

@@ -3,7 +3,6 @@ import { Alert, Button, Group, Modal, Stack, Text, TextInput } from '@mantine/co
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { decimalTextOf } from '@/features/grid/rounding';
 import { formatDecimal } from '@/shared/format/number';
-import { formatMonthYear } from '@/shared/format/period';
 import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import {
@@ -11,7 +10,7 @@ import {
   dayMonth,
   dottedDate,
   initialParts,
-  monthOf,
+  splitUnitLabel,
   totalOfParts,
   type SplitCellMark,
 } from './splitModel';
@@ -61,8 +60,7 @@ export function CellSplitDialog({ target, mark, historyPending, rowLabel, unit, 
   const invalid = values.map((text, index) => text.trim().length > 0 && parsed[index] === null);
   const total = totalOfParts(parsed);
 
-  const { year, month } = mark === null ? { year: 0, month: 0 } : monthOf(mark.month.month);
-  const monthLabel = formatMonthYear(year, month);
+  const monthLabel = mark === null ? '' : splitUnitLabel(mark.month);
   const changedOn = parts[1]?.dayFrom;
   const wasSingle = mark !== null && !mark.isSplit && (mark.cell?.parts ?? []).every((part) => part === null) ? initial[0] : null;
 

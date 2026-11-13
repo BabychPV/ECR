@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { EcrApiError } from '@/api/client';
+import { formatMonthYear } from '@/shared/format/period';
 import {
   addDecimals,
   dayCount,
@@ -8,6 +9,7 @@ import {
   permitGapOf,
   permitGridMarksOf,
   splitRefusalOf,
+  splitUnitLabel,
   totalOfParts,
 } from '../splitModel';
 import { historyOf, seaWaterRow } from './historyFixture';
@@ -19,6 +21,18 @@ import { historyOf, seaWaterRow } from './historyFixture';
 function problem(errorCode: string, extensions2: Record<string, unknown>): EcrApiError {
   return new EcrApiError({ title: 't', status: 422, errorCode, correlationId: 'c', extensions2 });
 }
+
+describe('splitUnitLabel', () => {
+  it('C-10: місяць без monthTo — підпис місяця, як було', () => {
+    expect(splitUnitLabel({ month: '2026-02-01' })).toBe(formatMonthYear(2026, 2));
+    expect(splitUnitLabel({ month: '2026-02-01', monthTo: null })).toBe(formatMonthYear(2026, 2));
+    expect(splitUnitLabel({ month: '2026-02-01', monthTo: '2026-02-28' })).toBe(formatMonthYear(2026, 2));
+  });
+
+  it('C-10: квартал/рік — «перший місяць – останній місяць»', () => {
+    expect(splitUnitLabel({ month: '2026-04-01', monthTo: '2026-06-30' })).toBe(`${formatMonthYear(2026, 4)} – ${formatMonthYear(2026, 6)}`);
+  });
+});
 
 describe('permitGridMarksOf', () => {
   it('marks the shared month cell of THIS table instance as needing a split, and keeps the row history', () => {
