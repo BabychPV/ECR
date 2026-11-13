@@ -2,6 +2,7 @@ using System.Text.Json;
 using Ecr.Application.Audit;
 using Ecr.Application.Common;
 using Ecr.Application.Ports;
+using Ecr.Application.Security;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
@@ -40,6 +41,7 @@ public sealed class AuditExportMonthRoutedTests(SqlServerFixture sql)
     private const int Oct = MonthRoutedReadWorld.Oct;
     private const int Jan = MonthRoutedReadWorld.Jan;
     private const int Nov = MonthRoutedReadWorld.Nov;
+    private const int Mar = 202603;
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage6)]
@@ -85,6 +87,39 @@ public sealed class AuditExportMonthRoutedTests(SqlServerFixture sql)
         Assert.DoesNotContain(denied, r => r.ColumnDefId == world.Plain);
         Assert.Contains(denied, r => r.ColumnDefId == world.Month(11) && r.PeriodKey == Nov);
         Assert.Equal(allowedTotal - 1, deniedTotal);
+    }
+
+    /// <summary>
+    /// D-214 (межа періоду-ВЛАСНИКА): читач бачить PLAIN у жовтні, але роль, звужена січнем (якір — власник PLAIN), її
+    /// забороняє — у CSV жовтня рядка з якоря немає, підсумок менший на нього. Контроль — та сама заборона, звужена
+    /// березнем, — рядок є.
+    /// </summary>
+    /// <remarks>
+    /// Диференційно: профілі однакові, різниться лише період шару; передумову перевіряють справжні межі читання. Без
+    /// межі D-214 в <c>OwnerPeriodColumns.CollectAsync</c> пара (202601, PLAIN) пішла б у сторінку й підрахунок.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "Q-17")]
+    [Trait("Decision", "D-214")]
+    public async Task Межа_D214_власника_ховає_правку_з_якоря_в_експорті_диференційно()
+    {
+        using var world = await MonthRoutedReadWorld.ArrangeAsync(sql.ConnectionString);
+        await world.PatchAsync(Author, Oct, ("PLAIN", 7m), ("M11", 5m));
+
+        var denied = world.DeniedInPeriod(Reader(world), world.Plain, Jan);
+        var control = world.DeniedInPeriod(Reader(world), world.Plain, Mar);
+        Assert.Equal((true, false), await world.ColumnReadableAsync(denied, world.Plain, Oct, Jan));
+        Assert.Equal((true, true), await world.ColumnReadableAsync(control, world.Plain, Oct, Jan));
+
+        var (shownTotal, shown) = await ExportAsync(world, Oct, control, []);
+        var (hiddenTotal, hidden) = await ExportAsync(world, Oct, denied, []);
+
+        Assert.Contains(shown, r => r.ColumnDefId == world.Plain && r.PeriodKey == Jan);
+        Assert.DoesNotContain(hidden, r => r.ColumnDefId == world.Plain);
+        Assert.Contains(hidden, r => r.ColumnDefId == world.Month(11) && r.PeriodKey == Nov);
+        Assert.Equal(shownTotal - 1, hiddenTotal);
     }
 
     /// <summary>Контроль: маршрутизація вимкнена — експорт фізичний, як був, і в порт іде фільтр без пар власників.</summary>
@@ -189,14 +224,19 @@ public sealed class AuditExportMonthRoutedTests(SqlServerFixture sql)
     private static AccessBuilder Reader(MonthRoutedReadWorld world)
         => world.Profile(Author, GetCellChangesHandler.Permission);
 
-    private static async Task<(int Total, List<CellChangeView> Rows)> ExportAsync(
+    private static Task<(int Total, List<CellChangeView> Rows)> ExportAsync(
         MonthRoutedReadWorld world, int periodKey, AccessBuilder reader, List<SecurityEventRecord> events,
+        List<CellChangeFilter>? filters = null)
+        => ExportAsync(world, periodKey, reader.Build(), events, filters);
+
+    private static async Task<(int Total, List<CellChangeView> Rows)> ExportAsync(
+        MonthRoutedReadWorld world, int periodKey, AccessProfile reader, List<SecurityEventRecord> events,
         List<CellChangeFilter>? filters = null)
     {
         await using var db = world.CreateContext();
         var router = world.Router(db);
         var metadata = world.Metadata(db);
-        var access = world.Access(db, reader.Build(), metadata, router);
+        var access = world.Access(db, reader, metadata, router);
         var user = MonthRoutedReadWorld.User(Author);
 
         // Порт журналу — справжній; обгортка лише записує фільтри.

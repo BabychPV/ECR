@@ -1,5 +1,6 @@
 using Ecr.Application.Documents.SheetChanges;
 using Ecr.Application.Ports;
+using Ecr.Application.Security;
 using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
 using NSubstitute;
@@ -35,6 +36,7 @@ public sealed class SheetChangesMonthRoutedTests(SqlServerFixture sql)
     private const int Oct = MonthRoutedReadWorld.Oct;
     private const int Jan = MonthRoutedReadWorld.Jan;
     private const int Nov = MonthRoutedReadWorld.Nov;
+    private const int Mar = 202603;
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage6)]
@@ -68,6 +70,44 @@ public sealed class SheetChangesMonthRoutedTests(SqlServerFixture sql)
     }
 
     /// <summary>
+    /// D-214 (межа періоду-ВЛАСНИКА): глядач бачить PLAIN у жовтні, але роль, звужена січнем (якір — власник PLAIN), її
+    /// забороняє — чужа правка PLAIN у якорі банер жовтня НЕ будить і автора не називає. Контроль — та сама заборона,
+    /// звужена березнем, — банер з автором.
+    /// </summary>
+    /// <remarks>
+    /// Диференційно: профілі однакові, різниться лише період шару; передумову перевіряють справжні межі читання. Без
+    /// межі D-214 в <c>GetSheetChangesHandler.OwnerTargetsAsync</c> PLAIN не потрапила б у сховані для авторства — і
+    /// банер прокинувся б.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "Q-17")]
+    [Trait("Decision", "D-214")]
+    public async Task Межа_D214_власника_глушить_банер_диференційно()
+    {
+        using var world = await MonthRoutedReadWorld.ArrangeAsync(sql.ConnectionString);
+
+        var denied = world.DeniedInPeriod(world.Profile(Viewer, GetSheetChangesHandler.Permission), world.Plain, Jan);
+        var control = world.DeniedInPeriod(world.Profile(Viewer, GetSheetChangesHandler.Permission), world.Plain, Mar);
+        Assert.Equal((true, false), await world.ColumnReadableAsync(denied, world.Plain, Oct, Jan));
+        Assert.Equal((true, true), await world.ColumnReadableAsync(control, world.Plain, Oct, Jan));
+
+        var deniedFirst = await PollAsync(world, since: null, viewer: denied);
+        var controlFirst = await PollAsync(world, since: null, viewer: control);
+
+        await world.PatchAsync(Other, Jan, ("PLAIN", 7m));
+
+        var shown = await PollAsync(world, controlFirst.Marker, viewer: control);
+        var hidden = await PollAsync(world, deniedFirst.Marker, viewer: denied);
+
+        Assert.True(shown.Changed);
+        Assert.Equal(Other, shown.LastChangedByUserId);
+        Assert.False(hidden.Changed);
+        Assert.Null(hidden.LastChangedByUserId);
+    }
+
+    /// <summary>
     /// Контроль: маршрутизація вимкнена — правка в екземплярі січня жовтня не стосується (банера немає, як і було), а
     /// сховище отримує ту саму єдину пробу періоду перегляду, без проби власників.
     /// </summary>
@@ -89,12 +129,14 @@ public sealed class SheetChangesMonthRoutedTests(SqlServerFixture sql)
         Assert.Equal(["Status", "Probe"], calls);
     }
 
-    private static async Task<SheetChangesDto> PollAsync(MonthRoutedReadWorld world, string? since, List<string>? calls = null)
+    private static async Task<SheetChangesDto> PollAsync(
+        MonthRoutedReadWorld world, string? since, List<string>? calls = null, AccessProfile? viewer = null)
     {
         await using var db = world.CreateContext();
         var router = world.Router(db);
         var metadata = world.Metadata(db);
-        var access = world.Access(db, world.Profile(Viewer, GetSheetChangesHandler.Permission).Build(), metadata, router);
+        var access = world.Access(
+            db, viewer ?? world.Profile(Viewer, GetSheetChangesHandler.Permission).Build(), metadata, router);
 
         // Сховище — справжнє; обгортка лише записує, які звернення були.
         var real = new SheetChangeStore(db);
