@@ -19,6 +19,19 @@ Describe 'HSE400 model' {
             if ($msg -notlike "*$Expect*") { throw "Відмова не про те: $msg" }
         }
     }
+    It 'конструктор задає розкладку YearWithMonthColumns у чернетці ДО публікації (D-474 (4), річний проєкт)' {
+        # Без розкладки POST /projects (річний HSE400_2026/GOLD) -> 422 err.ECR-TMPL-0422.yearlyProjectNeedsYearLayout (W15t, 13.11).
+        $p = (Resolve-Path (Join-Path $PSScriptRoot '../hse400/Build-Hse400Template.ps1')).Path
+        $src = [IO.File]::ReadAllText($p, [Text.Encoding]::UTF8)
+        $code = ($src -split "`n" | Where-Object { $_.TrimStart() -notlike '#*' }) -join "`n"
+        if ($code -notmatch "\`$hse400Layout\s*=\s*'YearWithMonthColumns'") { throw 'немає $hse400Layout = YearWithMonthColumns' }
+        $put = $code.IndexOf('template-versions/{0}/layout')
+        $pub = $code.IndexOf('template-versions/{0}/publish')
+        if ($put -lt 0) { throw 'немає PUT …/layout' }
+        if ($pub -lt 0) { throw 'немає POST …/publish' }
+        if ($put -gt $pub) { throw 'PUT …/layout стоїть ПІСЛЯ публікації' }
+        if ($code -notmatch '\$pub\.layout') { throw 'опубліковану версію з іншою розкладкою не відхилено' }
+    }
     It 'чинна модель проходить перевірку' {
         $m = Read-Hse400Model
         if (@($m.tables).Count -ne 6) { throw "таблиць $(@($m.tables).Count)" }

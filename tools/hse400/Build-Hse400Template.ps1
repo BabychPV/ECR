@@ -256,6 +256,7 @@ if ($PreviewOnly) {
 }
 
 # ---------- шаблон ----------
+$hse400Layout = 'YearWithMonthColumns'
 if ($Stage -in 'Template', 'All') {
     $oneId = Find-Hse400UnitId $units
     Write-Hse400Log "Одиниця 'one' є (id $oneId)."
@@ -273,6 +274,8 @@ if ($Stage -in 'Template', 'All') {
         $vid = Get-Hse400Id $pub 'id'
         $bad = @(Test-Hse400Structure -Structure (Get-Hse400Structure $vid) -Model $model)
         if ($bad.Count) { throw ("Версію $tplVersion (id $vid) опубліковано зі структурою, якої модуль не прийме: " + ($bad -join '; ') + '. Опубліковану версію не змінюю: підніміть template.version у hse400-model.json.') }
+        # D-474 (4): річний проєкт HSE400 приймає лише розкладку «рік, місяці в колонках»; опубліковану не змінити.
+        if ([string]$pub.layout -and [string]$pub.layout -ne $hse400Layout) { throw ("Версію $tplVersion (id $vid) опубліковано з розкладкою $($pub.layout): річний проєкт її не прийме (err.ECR-TMPL-0422.yearlyProjectNeedsYearLayout). Опубліковану версію не змінюю: підніміть template.version у hse400-model.json.") }
         Write-Hse400Log "Версію $tplVersion уже опубліковано (id $vid), структура відповідає модулю."
     }
     else {
@@ -305,6 +308,10 @@ if ($Stage -in 'Template', 'All') {
         }
         $bad = @(Test-Hse400Structure -Structure (Get-Hse400Structure $vid) -Model $model)
         if ($bad.Count) { throw ("Чернетка $vid після запису не відповідає модулю: " + ($bad -join '; ') + '. Не публікую.') }
+        # D-474 (4): річний проєкт приймає лише версію «рік, місяці в колонках» — розкладку задаємо в чернетці, до публікації
+        # (без цього POST /projects -> 422 err.ECR-TMPL-0422.yearlyProjectNeedsYearLayout; так само в Build-Hse401Template.ps1).
+        Invoke-Hse400Ok -Method PUT -Path ("/api/v1/template-versions/{0}/layout" -f $vid) -Body @{ layout = $hse400Layout } | Out-Null
+        Write-Hse400Log "Розкладка чернетки: $hse400Layout."
         Invoke-Hse400Ok -Method POST -Path ("/api/v1/template-versions/{0}/publish" -f $vid) -Body @{ reason = "HSE400 $tplVersion" } | Out-Null
         Write-Hse400Log "Версію $tplVersion опубліковано."
     }
