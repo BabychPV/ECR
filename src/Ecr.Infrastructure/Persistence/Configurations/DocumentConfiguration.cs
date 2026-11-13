@@ -73,6 +73,7 @@ public sealed class ProjectConfiguration : IEntityTypeConfiguration<Project>
         builder.Property(x => x.CurrentPeriodMode).HasDefaultValueSql("0", "DF_Project_CPMode").ValueGeneratedNever();
         builder.Property(x => x.IsArchiving).HasDefaultValue(false, "DF_Project_Arch");
         builder.Navigation(x => x.Periods).UsePropertyAccessMode(PropertyAccessMode.Field);
+        builder.Navigation(x => x.Templates).UsePropertyAccessMode(PropertyAccessMode.Field);
 
         // ⛔ Q-222: були в 02a-db-schema.md (FK_Project_TV/_Policy/
         // _CurrentPeriod), ніколи не потрапили в цю конфігурацію.
@@ -190,6 +191,13 @@ public sealed class DocumentConfiguration : IEntityTypeConfiguration<Document>
                .WithMany()
                .HasForeignKey(x => x.ProjectId)
                .HasConstraintName("FK_Document_Project");
+
+        // ✎ B74 PT01: шаблон документа; NULL - основний шаблон проєкту (NOT NULL і FK на doc.ProjectTemplate - P6).
+        builder.HasOne<Domain.Entities.Configuration.Template>()
+               .WithMany()
+               .HasForeignKey(x => x.TemplateId)
+               .HasConstraintName("FK_Document_Template");
+        builder.HasIndex(x => x.TemplateId).HasDatabaseName("IX_Document_Template");
 
         builder.Navigation(x => x.Sheets).UsePropertyAccessMode(PropertyAccessMode.Field);
 

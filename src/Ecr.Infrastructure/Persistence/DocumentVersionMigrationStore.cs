@@ -2128,24 +2128,35 @@ public sealed partial class DocumentVersionMigrationStore(
         -- лишає ОДИН рядок - нову версію з першого періоду.
         DECLARE @firstPeriod int = (SELECT MIN(PeriodKey) FROM doc.Period WHERE ProjectId = @projectId);
         DECLARE @oldVersion int = (SELECT TemplateVersionId FROM doc.Project WHERE Id = @projectId);
+        -- ✎ B74 PT01: шкала на пару (проєкт, шаблон). Перенос лише в межах шаблону (обробник відмовляє іншому шаблону),
+        -- тож шаблон старої і нової версії один.
+        DECLARE @targetTemplate int = (SELECT TemplateId FROM cfg.TemplateVersion WHERE Id = @targetVersionId);
         IF @firstPeriod IS NOT NULL
         BEGIN
             IF @fromPeriod = 0 OR @fromPeriod <= @firstPeriod
             BEGIN
-                DELETE FROM doc.ProjectTemplateVersion WHERE ProjectId = @projectId;
-                INSERT doc.ProjectTemplateVersion (ProjectId, FromPeriodKey, TemplateVersionId)
-                VALUES (@projectId, @firstPeriod, @targetVersionId);
+                DELETE FROM doc.ProjectTemplateVersion WHERE ProjectId = @projectId AND TemplateId = @targetTemplate;
+                INSERT doc.ProjectTemplateVersion (ProjectId, TemplateId, FromPeriodKey, TemplateVersionId)
+                VALUES (@projectId, @targetTemplate, @firstPeriod, @targetVersionId);
             END
             ELSE
             BEGIN
-                IF NOT EXISTS (SELECT 1 FROM doc.ProjectTemplateVersion WHERE ProjectId = @projectId)
-                    INSERT doc.ProjectTemplateVersion (ProjectId, FromPeriodKey, TemplateVersionId)
-                    VALUES (@projectId, @firstPeriod, @oldVersion);
-                DELETE FROM doc.ProjectTemplateVersion WHERE ProjectId = @projectId AND FromPeriodKey >= @fromPeriod;
-                INSERT doc.ProjectTemplateVersion (ProjectId, FromPeriodKey, TemplateVersionId)
-                VALUES (@projectId, @fromPeriod, @targetVersionId);
+                IF NOT EXISTS (SELECT 1 FROM doc.ProjectTemplateVersion WHERE ProjectId = @projectId AND TemplateId = @targetTemplate)
+                    INSERT doc.ProjectTemplateVersion (ProjectId, TemplateId, FromPeriodKey, TemplateVersionId)
+                    VALUES (@projectId, @targetTemplate, @firstPeriod, @oldVersion);
+                DELETE FROM doc.ProjectTemplateVersion
+                WHERE  ProjectId = @projectId AND TemplateId = @targetTemplate AND FromPeriodKey >= @fromPeriod;
+                INSERT doc.ProjectTemplateVersion (ProjectId, TemplateId, FromPeriodKey, TemplateVersionId)
+                VALUES (@projectId, @targetTemplate, @fromPeriod, @targetVersionId);
             END
         END
+
+        -- ✎ B74 P1 (подвійний запис): чинна версія шаблону в проєкті - той самий пакет, що й Project нижче.
+        UPDATE doc.ProjectTemplate SET CurrentTemplateVersionId = @targetVersionId
+        WHERE  ProjectId = @projectId AND TemplateId = @targetTemplate;
+        IF @@ROWCOUNT = 0
+            INSERT doc.ProjectTemplate (ProjectId, TemplateId, CurrentTemplateVersionId)
+            VALUES (@projectId, @targetTemplate, @targetVersionId);
 
         -- 7. Нарешті — версія проєкту.
         -- ⛔ Маркер «міграція в процесі» (`migratingTo`) знімається ТІЄЮ САМОЮ командою, що перемикає версію: інакше

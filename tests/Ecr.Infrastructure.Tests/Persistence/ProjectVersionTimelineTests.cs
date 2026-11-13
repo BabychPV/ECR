@@ -65,12 +65,13 @@ public sealed class ProjectVersionTimelineTests(SqlServerFixture sql)
         await AssertParityAsync(projectId, [202601, 202606, 202612], expected: v3);
 
         // Шкала v1 (з січня), v2 (з квітня), v3 (з жовтня).
+        var templateId = await TemplateOfAsync(v1);
         await using (var db = sql.CreateContext())
         {
             db.ProjectTemplateVersions.AddRange(
-                new ProjectTemplateVersion(projectId, 202601, v1),
-                new ProjectTemplateVersion(projectId, 202604, v2),
-                new ProjectTemplateVersion(projectId, 202610, v3));
+                new ProjectTemplateVersion(projectId, templateId, 202601, v1),
+                new ProjectTemplateVersion(projectId, templateId, 202604, v2),
+                new ProjectTemplateVersion(projectId, templateId, 202610, v3));
             await db.SaveChangesAsync();
         }
 
@@ -98,13 +99,22 @@ public sealed class ProjectVersionTimelineTests(SqlServerFixture sql)
 
         Assert.Equal(v2, await timeline.VersionOfAsync(projectId, 202605, CancellationToken.None));   // кешовано: шкали немає
 
-        db.ProjectTemplateVersions.AddRange(new ProjectTemplateVersion(projectId, 202601, v1), new ProjectTemplateVersion(projectId, 202604, v2));
+        var templateId = await TemplateOfAsync(v1);
+        db.ProjectTemplateVersions.AddRange(
+            new ProjectTemplateVersion(projectId, templateId, 202601, v1), new ProjectTemplateVersion(projectId, templateId, 202604, v2));
         await db.SaveChangesAsync();
 
         Assert.Equal(v2, await timeline.VersionOfAsync(projectId, 202602, CancellationToken.None));          // кеш ще старий
         Assert.Equal(v1, await timeline.VersionOfFreshAsync(projectId, 202602, CancellationToken.None));     // писар бачить одразу
         timeline.Invalidate(projectId);
         Assert.Equal(v1, await timeline.VersionOfAsync(projectId, 202602, CancellationToken.None));
+    }
+
+    /// <summary>Шаблон версії (B74 PT01: рядок шкали несе TemplateId).</summary>
+    private async Task<int> TemplateOfAsync(int versionId)
+    {
+        await using var db = sql.CreateContext();
+        return await db.TemplateVersions.Where(v => v.Id == versionId).Select(v => v.TemplateId).SingleAsync();
     }
 
     private async Task AssertParityAsync(int projectId, int[] periods, int expected)

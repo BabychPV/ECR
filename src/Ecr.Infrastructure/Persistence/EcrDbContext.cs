@@ -101,6 +101,23 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     /// <param name="periodKey">Період.</param>
     public static int VersionOf(int projectId, int periodKey)
         => throw new NotSupportedException("EcrDbContext.VersionOf можна викликати лише всередині LINQ-запиту.");
+
+    /// <summary>Шаблони проєкту з чинною версією кожного (B74 PT01).</summary>
+    public DbSet<ProjectTemplate> ProjectTemplates => Set<ProjectTemplate>();
+
+    /// <summary>Псевдоніми аргументів методологій на місячні колонки (Land-year L0, таблиця з PT01).</summary>
+    public DbSet<MonthInputAlias> MonthInputAliases => Set<MonthInputAlias>();
+
+    /// <summary>
+    /// Версія шаблону <paramref name="templateId"/> проєкту за період (SQL: <c>doc.fn_TemplateVersionOf</c>, B74 PT01) —
+    /// для запитів-приєднань. Поза запитом кидає.
+    /// </summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="templateId">Шаблон.</param>
+    /// <param name="periodKey">Період.</param>
+    public static int TemplateVersionOf(int projectId, int templateId, int periodKey)
+        => throw new NotSupportedException("EcrDbContext.TemplateVersionOf можна викликати лише всередині LINQ-запиту.");
+
     public DbSet<PeriodPolicy> PeriodPolicies => Set<PeriodPolicy>();
     public DbSet<Period> Periods => Set<Period>();
     public DbSet<Document> Documents => Set<Document>();
@@ -291,6 +308,10 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
         // (скалярна функція, створена міграцією; паритет зі C# доводить `ProjectVersionTimelineTests`).
         modelBuilder.HasDbFunction(typeof(EcrDbContext).GetMethod(nameof(VersionOf), [typeof(int), typeof(int)])!)
             .HasSchema("doc").HasName("fn_VersionOf");
+
+        // ✎ B74 PT01: та сама шкала, але для пари (проєкт, шаблон); doc.fn_VersionOf — шлях сумісності через неї.
+        modelBuilder.HasDbFunction(typeof(EcrDbContext).GetMethod(nameof(TemplateVersionOf), [typeof(int), typeof(int), typeof(int)])!)
+            .HasSchema("doc").HasName("fn_TemplateVersionOf");
 
         // ⚠ Конфігурація тут, а не в `Configurations/`: сутність чужа (її
         // оголошує пакет DataProtection), і єдине, що ми про неї вирішуємо, —

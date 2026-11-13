@@ -190,7 +190,8 @@ public sealed class CreateDocumentHandler(
                         var businessKey = await documents
                             .NextBusinessKeyAsync(projectId, versionId, innerCt).ConfigureAwait(false);
 
-                        document = new Document(projectId, businessKey, userId, now);
+                        // ✎ B74 P1: шаблон документа пишеться одразу (NULL лише в рядках повз цей шлях).
+                        document = new Document(projectId, businessKey, userId, now, template.Id);
 
                         // ⚠ Ім'я — опційне, ПОРУЧ із BusinessKey, не замість нього: механізм
                         // технічного ключа тут не змінюється (директива "людське ім'я

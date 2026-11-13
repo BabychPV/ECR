@@ -9,6 +9,7 @@ namespace Ecr.Domain.Entities.Documents;
 public sealed class Project : Entity<int>
 {
     private readonly List<Period> _periods = [];
+    private readonly List<ProjectTemplate> _templates = [];
 
     private Project() { }
 
@@ -131,6 +132,30 @@ public sealed class Project : Entity<int>
     public int? ClosedByUserId { get; private set; }
 
     public IReadOnlyList<Period> Periods => _periods;
+
+    /// <summary>B74: шаблони проєкту (<c>doc.ProjectTemplate</c>); навігація, завантажується явно.</summary>
+    public IReadOnlyList<ProjectTemplate> Templates => _templates;
+
+    /// <summary>
+    /// B74 P1: приєднує шаблон до проєкту з чинною версією (подвійний запис поруч із <c>TemplateVersionId</c>).
+    /// </summary>
+    /// <param name="templateId">Шаблон (<c>cfg.Template.Id</c>).</param>
+    /// <param name="currentTemplateVersionId">Чинна версія цього шаблону.</param>
+    /// <remarks>
+    /// ⚠ Версію передає викликач, а не береться з поля проєкту: сторож B74 не пускає нових читань поля, а в P3 шаблон
+    /// приєднуватиметься з власною версією. Повторне приєднання того самого шаблону ігнорується (у межах завантаженої
+    /// навігації; унікальність тримає <c>UQ_ProjectTemplate</c>). Налаштувань шаблону в проєкті (робочий процес,
+    /// блокування рядків власника - B75) тут свідомо немає: вони лягатимуть колонками <c>doc.ProjectTemplate</c>.
+    /// </remarks>
+    public void AttachTemplate(int templateId, int currentTemplateVersionId)
+    {
+        if (_templates.Exists(t => t.TemplateId == templateId))
+        {
+            return;
+        }
+
+        _templates.Add(new ProjectTemplate(Id, templateId, currentTemplateVersionId));
+    }
 
     /// <summary>
     /// Переводить проєкт із <c>Draft</c> у <c>Active</c>.

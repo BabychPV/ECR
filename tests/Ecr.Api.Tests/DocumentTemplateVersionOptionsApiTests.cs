@@ -212,8 +212,8 @@ public sealed class DocumentTemplateVersionOptionsApiTests(SqlServerFixture sql)
         var later = new TemplateVersion(b.TemplateId, VersionBLater, 1, now);
         db.TemplateVersions.Add(later);
         await db.SaveChangesAsync().ConfigureAwait(false);
-        db.ProjectTemplateVersions.Add(new ProjectTemplateVersion(b.ProjectId, 200001, b.TemplateVersionId));
-        db.ProjectTemplateVersions.Add(new ProjectTemplateVersion(b.ProjectId, 202602, later.Id));
+        db.ProjectTemplateVersions.Add(new ProjectTemplateVersion(b.ProjectId, b.TemplateId, 200001, b.TemplateVersionId));
+        db.ProjectTemplateVersions.Add(new ProjectTemplateVersion(b.ProjectId, b.TemplateId, 202602, later.Id));
         db.Periods.Add(new Period(b.ProjectId, new PeriodKey(202602), 2, new DateOnly(2026, 2, 1), new DateOnly(2026, 2, 28)));
         await db.SaveChangesAsync().ConfigureAwait(false);
 

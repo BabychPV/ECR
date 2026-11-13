@@ -106,6 +106,7 @@ public sealed class ProjectStore(EcrDbContext db) : IProjectStore
                   WHERE r.ProjectId = {projectId};
                  DELETE FROM wf.ApprovalRoute WHERE ProjectId = {projectId};
                  DELETE FROM doc.ProjectTemplateVersion WHERE ProjectId = {projectId};
+                 DELETE FROM doc.ProjectTemplate WHERE ProjectId = {projectId};
                  DELETE FROM doc.Period WHERE ProjectId = {projectId};
                  DELETE FROM sec.ResourceGrant WHERE ResourceKind = {(int)Domain.Enums.ResourceKind.Project} AND ResourceId = {projectId};
                  DELETE FROM doc.Project WHERE Id = {projectId};
