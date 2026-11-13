@@ -85,6 +85,9 @@ public sealed class SubmitSheetHandler(
     // months block Submit (PERMIT-SPLIT). `null` (direct constructor in tests) — no history.
     IPermitHistoryStore? permitHistory = null)
 {
+    /// <summary>✎ C-5: дефолти колонок версії для незаповнених комірок (02b §6.3), як у «Перевірити».</summary>
+    private readonly Recalculation.ColumnDefaultValues columnDefaults = new(metadata, registries);
+
     /// <summary>
     /// Ключ тексту відмови подання з причиною <c>InsufficientGrantLevel</c> (D-285):
     /// називає й право <c>Document.Submit</c>, на відміну від загального <c>deny.InsufficientGrantLevel</c>.
@@ -575,14 +578,19 @@ public sealed class SubmitSheetHandler(
 
         var rowIdsByTable = new Dictionary<int, IReadOnlyDictionary<string, long>>();
 
+        // ✎ C-5 (рішення PO 11.11): правила й «обов'язкове заповнено» бачать дефолт незаповненої комірки — як формули.
+        var defaults = toValidate.Count > 0
+            ? await columnDefaults.ForVersionAsync(templateVersionId, ct).ConfigureAwait(false)
+            : Recalculation.ColumnDefaultSet.Empty;
+
         foreach (var (instance, table, requiredColumns) in toValidate)
         {
-            var cells = cellsByInstance.TryGetValue(instance.TableInstanceId, out var slice)
-                ? slice
-                : [];
             var rowIds = rowIdsByInstance.TryGetValue(instance.TableInstanceId, out var ids)
                 ? ids
                 : new Dictionary<string, long>(StringComparer.Ordinal);
+            var cells = defaults.Complete(
+                cellsByInstance.TryGetValue(instance.TableInstanceId, out var slice) ? slice : [],
+                table.Id, rowIds, key);
             rowIdsByTable[table.Id] = rowIds;
 
             if (table.ValidationRules.Count > 0)

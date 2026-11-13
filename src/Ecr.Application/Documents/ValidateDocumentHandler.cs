@@ -38,6 +38,9 @@ public sealed class ValidateDocumentHandler(
     // ✎ C-1 (D-475): збережений стан помилок формул — «Перевірити» показує те, що заблокує подання. `null` (тести) — вимкнено.
     IFormulaErrorStore? formulaErrors = null)
 {
+    /// <summary>✎ C-5: дефолти колонок версії для незаповнених комірок (02b §6.3).</summary>
+    private readonly Recalculation.ColumnDefaultValues columnDefaults = new(metadata, registries);
+
     /// <summary>Виконує валідацію всіх аркушів документа за період.</summary>
     /// <param name="documentId">Документ.</param>
     /// <param name="periodKey">Період.</param>
@@ -123,12 +126,16 @@ public sealed class ValidateDocumentHandler(
 
         foreach (var (instance, table, snapshot) in toValidate)
         {
-            var cells = cellsByInstance.TryGetValue(instance.TableInstanceId, out var found)
-                ? found
-                : [];
             var rowIds = rowIdsByInstance.TryGetValue(instance.TableInstanceId, out var foundRows)
                 ? foundRows
                 : new Dictionary<string, long>(StringComparer.Ordinal);
+
+            // ✎ C-5 (рішення PO 11.11, 02b §6.3): правила рядка/таблиці й «обов'язкове заповнено» бачать дефолт
+            // незаповненої комірки — той самий, що формули. Явна порожнеча лишається порожньою.
+            var cells = (await columnDefaults.ForVersionAsync(instance.TemplateVersionId, ct).ConfigureAwait(false))
+                .Complete(
+                    cellsByInstance.TryGetValue(instance.TableInstanceId, out var found) ? found : [],
+                    table.Id, rowIds, periodKey);
 
             if (table.ValidationRules.Count > 0)
             {

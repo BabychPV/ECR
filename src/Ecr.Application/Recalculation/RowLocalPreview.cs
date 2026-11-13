@@ -102,6 +102,20 @@ public sealed class RowLocalPreview(
                 = CellValueMapping.ToExpressionValue(cell, ExpressionValue.Null);
         }
 
+        // ✎ C-5 (рішення PO 11.11): дефолти колонок для відредагованих рядків — так само, як фоновий перерахунок
+        // (RecalculationService.LoadPeriodAsync), інакше перегляд і сервер дали б різні числа. ДО REGFIELD: Lookup-дефолт
+        // дає полям довідника свій запис.
+        var defaults = await new ColumnDefaultValues(metadata, registryStore)
+            .ForVersionAsync(instance.TemplateVersionId, ct).ConfigureAwait(false);
+        foreach (var (columnId, value) in defaults.Of(table.Id))
+        {
+            var asValue = CellValueMapping.ToExpressionValue(value, ExpressionValue.Null);
+            foreach (var rowKey in editedRows.Keys)
+            {
+                values.TryAdd(new CellKey(0, table.Id, rowKey, columnId), asValue);
+            }
+        }
+
         var registryFields = await RegistryFieldsAsync(table, previewable, editedRows, values, ct)
             .ConfigureAwait(false);
 
