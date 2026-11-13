@@ -115,6 +115,11 @@ public sealed class FormulaRecalculationJob(
         var writtenPeriods = new SortedSet<int>();
         JobDeferredException? deferral = null;
 
+        // ⛔ D-8: відкладені періоди проходу. Повтор задачі виконує ПОЧАТКОВИЙ payload (лише насіння), а читачі, знайдені
+        // в цьому прогоні, жили тільки в `work`: на повторі насіннєвий період уже записаний, похідні не змінюються, і
+        // читач похідної колонки більше не знаходився — значення лишалось застарілим без жодної помилки.
+        var postponed = new List<(int Slot, PeriodWork Item)>();
+
         // L2: спільні читання проходу — екземпляри/залежності не перечитуються на кожен період і ланку.
         using var shared = recalculation.NewSharedLoad();
 
@@ -173,6 +178,7 @@ public sealed class FormulaRecalculationJob(
                 // L2: інші періоди проходу це не зупиняє — вони дораховуються, а задача відкладається в кінці
                 // (повторний прохід по вже порахованих нічого не пише).
                 deferral ??= new JobDeferredException(RecalculationDocumentLock.DeferDelay, busy.Message);
+                postponed.Add((slot, item));
                 db.ChangeTracker.Clear();
                 continue;
             }
@@ -185,6 +191,7 @@ public sealed class FormulaRecalculationJob(
                     RecalculationDocumentLock.LockWaitDeferDelay(documentId),
                     "Document data is busy with a long operation; recalculation deferred.",
                     RecalculationDocumentLock.Resource(documentId));
+                postponed.Add((slot, item));
                 db.ChangeTracker.Clear();
                 continue;
             }
@@ -224,6 +231,9 @@ public sealed class FormulaRecalculationJob(
 
         if (deferral is not null)
         {
+            // ⛔ D-8: повтор отримає ЛИШЕ початковий payload; джерела відкладених періодів-читачів — окремою постановкою
+            // (злиттям на ту саму ціль документа, тож дублікати зливаються й з самою відкладеною задачею).
+            await RequeueSourcesAsync(documentId, postponed, ct).ConfigureAwait(false);
             throw deferral;
         }
 
@@ -287,6 +297,22 @@ public sealed class FormulaRecalculationJob(
         }
 
         return [.. scopes.Values.Where(s => s.InstanceId != 0)];
+    }
+
+    /// <summary>D-8: ставить у чергу періоди-читачі відкладеної задачі разом із уже знайденими джерелами.</summary>
+    private async Task RequeueSourcesAsync(
+        long documentId, IEnumerable<(int Slot, PeriodWork Item)> pending, CancellationToken ct)
+    {
+        if (fanOut is null || documentId == 0)
+        {
+            return;
+        }
+
+        foreach (var (slot, item) in pending.Where(p => p.Item.Sources.Count > 0))
+        {
+            await fanOut.EnqueueSourcesAsync(documentId, new PeriodKey(slot), item.Sources, item.Hops, ct)
+                .ConfigureAwait(false);
+        }
     }
 
     /// <summary>Стеля проходів одного запуску: (ланки ланцюжка + 1) × періоди року + запас; страховка від циклу.</summary>
