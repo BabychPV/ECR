@@ -251,6 +251,37 @@ function LoginAs([string]$u) {
     if (-not $Acc.ContainsKey($u)) { throw "Немає пароля акаунта $u у $AccountsFile (спершу -Stage Accounts)." }
     Connect-Ecr -BaseUrl $BaseUrl -User $u -Password (ConvertTo-SecureString $Acc[$u] -AsPlainText -Force)
 }
+# B98(1): на живому стенді -Stage Template (і будь-який етап, крім Accounts/YearMonths) входить під -BuildUser, але
+# облікових записів не створює і -AccountsFile не пише - це робить лише етап Accounts (і лише для land-owner,
+# land-reviewer, ...). Тож без рядка -BuildUser у -AccountsFile прогін упав би на першому LoginAs посеред етапу. Чиста
+# функція (Pester: tools/tests/Land-BuildUser.Tests.ps1): $null - усе гаразд, інакше текст відмови; пароль не друкує.
+function Get-BuildUserCredentialGap {
+    param([string[]]$Stages, [string]$User, [hashtable]$Accounts, [string]$AccountsPath, [bool]$FileExists, [string[]]$CreatedUsers)
+    $login = @($Stages | Where-Object { $_ -ne 'YearMonths' -and $_ -ne 'Accounts' })
+    if ($login.Count -eq 0) { return $null }
+    if ($Accounts.ContainsKey($User)) { return $null }
+    $withAccounts = ($Stages -contains 'All') -or ($Stages -contains 'Accounts')
+    if ($withAccounts -and ($CreatedUsers -contains $User)) { return $null }
+    $why = if (-not $FileExists) { "файла -AccountsFile '$AccountsPath' немає" } else { "у -AccountsFile '$AccountsPath' немає рядка для '$User'" }
+    $creator = if ($withAccounts) { "етап Accounts створює лише $($CreatedUsers -join ', '), а не '$User'" } else { 'етапи без -Stage Accounts облікових записів не створюють і -AccountsFile не пишуть' }
+    return ("-BuildUser '$User': $why; $creator (етапи: $($Stages -join ', ')). На живому стенді вкажіть НАЯВНИЙ постійний " +
+        "обліковий запис із правами на шаблони/довідники/методології: -BuildUser <ім'я> -AccountsFile <файл поза репозиторієм>, " +
+        "рядок файла - «<ім'я><TAB><пароль>[<TAB><роль>]» (див. tools/land/README.md, «Обліковий запис збірки на живому стенді»). " +
+        'Скрипт облікових записів для цього не створює і паролів не друкує.')
+}
+$Users = @(
+    @{ u = 'land-owner'; role = 'LandOwner'; pre = 'Own' },
+    @{ u = 'land-reviewer'; role = 'LandOwner'; pre = 'Rev' },
+    @{ u = 'land-entry'; role = 'LandDataEntry'; pre = 'Ent' },
+    @{ u = 'land-approver'; role = 'LandApprover'; pre = 'Apr' },
+    @{ u = 'land-viewer'; role = 'Viewer'; pre = 'Vwr' },
+    @{ u = 'land-restricted'; role = 'LandRestricted'; pre = 'Rst' }
+)
+$buildUserGap = Get-BuildUserCredentialGap -Stages $Stage -User $BuildUser -Accounts $Acc -AccountsPath $AccountsFile `
+    -FileExists (Test-Path -LiteralPath $AccountsFile) -CreatedUsers @($Users | ForEach-Object { $_.u })
+if ($buildUserGap) {
+    if ($DryRun) { Log "DryRun: WARN - звичайний прогін відмовив би тут: $buildUserGap" } else { throw $buildUserGap }
+}
 
 # ---------- модель ----------
 Log "Модель: $modelFile"
@@ -311,14 +342,7 @@ $RolePerms = @{
     LandApprover  = @('Document.View', 'Document.Export', 'Document.Reopen', 'Template.View', 'Registry.View', 'Calculation.View')
     LandRestricted = @('Document.View', 'Document.Create', 'Document.Export', 'Template.View', 'Registry.View')
 }
-$Users = @(
-    @{ u = 'land-owner'; role = 'LandOwner'; pre = 'Own' },
-    @{ u = 'land-reviewer'; role = 'LandOwner'; pre = 'Rev' },
-    @{ u = 'land-entry'; role = 'LandDataEntry'; pre = 'Ent' },
-    @{ u = 'land-approver'; role = 'LandApprover'; pre = 'Apr' },
-    @{ u = 'land-viewer'; role = 'Viewer'; pre = 'Vwr' },
-    @{ u = 'land-restricted'; role = 'LandRestricted'; pre = 'Rst' }
-)
+# $Users (хто створюється етапом Accounts) - вище, у розділі «акаунти»: його читає й перевірка -BuildUser (B98).
 function Stage-Accounts {
     Log '== Accounts =='
     if (-not $Acc.ContainsKey('bootstrap')) {
