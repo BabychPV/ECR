@@ -80,7 +80,8 @@ public sealed class GetCalculationIssuesHandler(
             : await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
 
         var visible = rows.Where(r => readable.CanReadTable(r.TableDefId)).ToList();
-        var (formulaErrorItems, visibleErrorCount) = FormulaErrorsOf(errorRows, readable);
+        var names = await LookupNamesAsync(errorRows, ct).ConfigureAwait(false);
+        var (formulaErrorItems, visibleErrorCount) = FormulaErrorsOf(errorRows, readable, names, currentUser.Language);
 
         // Підказка «що приймають правила» — лише рядкам без правила: відхиленому рядку (і рядку без входів, AN-164)
         // правило вже підійшло.
@@ -129,8 +130,18 @@ public sealed class GetCalculationIssuesHandler(
     /// джерело не віддаються (S6).
     /// </summary>
     private static (IReadOnlyList<FormulaErrorIssueDto>? Items, int Total) FormulaErrorsOf(
-        IReadOnlyList<FormulaErrorView> rows, DocumentReadScope readable)
+        IReadOnlyList<FormulaErrorView> rows, DocumentReadScope readable,
+        IReadOnlyDictionary<(int ColumnDefId, long EntryId), LocalizedText> names, string language)
     {
+        // ✎ B78: значення довідникової колонки — назвою запису мовою користувача («Diesel», а не «37»).
+        string? ValueOf(Recalculation.FormulaErrorInputRecord input)
+            => input.Value is { } raw
+               && long.TryParse(raw, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var id)
+               && names.TryGetValue((input.ColumnDefId, id), out var name)
+               && (name.Get(language) ?? name.Get("en")) is { Length: > 0 } text
+                ? text
+                : input.Value;
+
         var visible = rows
             .Where(v => readable.CanReadTable(v.Row.TableDefId) && readable.CanReadColumn(v.Row.ColumnDefId))
             .ToList();
@@ -187,10 +198,35 @@ public sealed class GetCalculationIssuesHandler(
                 isError
                     ? [.. inputs.Where(i => CanSee(i.TableDefId, i.ColumnDefId))
                         .Select(i => new FormulaErrorInputDto(
-                            i.TableCode ?? string.Empty, i.RowKey, i.ColumnCode ?? string.Empty, i.PeriodOffset, i.Value))]
+                            i.TableCode ?? string.Empty, i.RowKey, i.ColumnCode ?? string.Empty, i.PeriodOffset, ValueOf(i)))]
                     : null,
                 source, v.Row.Since, dependentCount);
         })], visible.Count);
+    }
+
+    /// <summary>
+    /// ✎ B78: назви записів довідника для цілочисельних входів власних помилок — один запит на відповідь; без сховища
+    /// чи без таких входів — без запиту.
+    /// </summary>
+    private async Task<IReadOnlyDictionary<(int ColumnDefId, long EntryId), LocalizedText>> LookupNamesAsync(
+        IReadOnlyList<FormulaErrorView> rows, CancellationToken ct)
+    {
+        var refs = new HashSet<(int ColumnDefId, long EntryId)>();
+        foreach (var row in rows.Where(r => r.Row.Kind == Domain.Entities.Calculations.FormulaError.ErrorKind))
+        {
+            foreach (var input in Recalculation.FormulaErrorInputs.Parse(row.Row.InputsJson))
+            {
+                if (input.Value is { } raw
+                    && long.TryParse(raw, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var id))
+                {
+                    refs.Add((input.ColumnDefId, id));
+                }
+            }
+        }
+
+        return formulaErrors is null || refs.Count == 0
+            ? new Dictionary<(int ColumnDefId, long EntryId), LocalizedText>()
+            : await formulaErrors.LookupNamesAsync(refs, ct).ConfigureAwait(false);
     }
 
     /// <summary>
