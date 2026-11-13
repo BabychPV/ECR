@@ -1,8 +1,8 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
-import { Button, Group, Stack, Text, TextInput, VisuallyHidden } from '@mantine/core';
+import { Anchor, Button, Group, Stack, Text, TextInput, VisuallyHidden } from '@mantine/core';
 import { useDebouncedValue } from '@mantine/hooks';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { EcrApiError } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import { isExternalRegistry, isFlertMirrorCode } from '@/features/registries/externalRegistry';
@@ -77,8 +77,11 @@ export function RegistryDataPage(): JSX.Element {
   const queryClient = useQueryClient();
   const session = useSession();
   const list = useRegistryList();
-  const definition = useRegistryDefinition(code);
   const registry = list.data?.find((r) => r.code === code);
+  // P3 F13 #841: дзеркало FLERT до першого синку не існує — спершу перелік, і лише якщо довідник у ньому є, опис.
+  // Інакше кожне відкриття давало `404` у консолі браузера на запиті, відповідь якого відома наперед.
+  const mirrorCode = isFlertMirrorCode(code);
+  const definition = useRegistryDefinition(code, !mirrorCode || (list.isSuccess && registry !== undefined));
   const temporal = definition.data?.isTemporal ?? registry?.isTemporal ?? false;
 
   const [asOfParam, setAsOf] = useUrlState('asOf');
@@ -113,7 +116,10 @@ export function RegistryDataPage(): JSX.Element {
   // До нього довідника немає — це очікуваний стан, а не помилка: нейтральний текст замість червоного «не знайдено»
   // і жодного «New entry» (ECR тримає лише копію, master — FLERT).
   const definitionMissing = definition.error instanceof EcrApiError && definition.error.problem.status === 404;
-  const mirrorNotSynced = isFlertMirrorCode(code) && ((list.isSuccess && registry === undefined) || definitionMissing);
+  const mirrorNotSynced = mirrorCode && ((list.isSuccess && registry === undefined) || definitionMissing);
+  // P3 F13 #841 (d): з нейтральної сторінки — посилання на конструктор довідників, якщо людині він відкритий
+  // (те саме право, що `mayView` у `RegistryConstructorPage`).
+  const canDesign = can(session.data, 'Registry.EditDefinition');
   const readOnly =
     simulation || !can(session.data, 'Registry.EditData') || isExternalRegistry(registry) || mirrorNotSynced;
   const manualCode = definition.data?.codeMode !== 'Auto';
@@ -342,12 +348,21 @@ export function RegistryDataPage(): JSX.Element {
 
   return (
     <Stack gap="md">
+      {/*
+       * P3 F13 #841 (b): довідника ще немає — назва дорівнює коду, і шапка читалась «STREAM STREAM 0». Код — один раз,
+       * без лічильника (0 записів у неіснуючому довіднику нічого не означає) і без конструктора цього коду (його
+       * сторінка — той самий 404).
+       */}
       <PageHeader
         title={name}
-        badge={<Text size="sm" ff="monospace" c="dimmed">{code}</Text>}
-        count={totalCount}
+        badge={name === code ? undefined : <Text size="sm" ff="monospace" c="dimmed">{code}</Text>}
+        count={mirrorNotSynced ? undefined : totalCount}
         back={{ label: t('registries.data.back'), href: `/admin/registries?code=${encodeURIComponent(code)}` }}
-        secondary={[{ label: t('registries.constructor'), href: `/admin/registries/${encodeURIComponent(code)}/definition` }]}
+        secondary={
+          mirrorNotSynced
+            ? []
+            : [{ label: t('registries.constructor'), href: `/admin/registries/${encodeURIComponent(code)}/definition` }]
+        }
         primary={
           readOnly
             ? undefined
@@ -383,7 +398,23 @@ export function RegistryDataPage(): JSX.Element {
       )}
 
       {mirrorNotSynced ? (
-        <Banner tone="info" testId="flert-mirror-pending" text={t('flert.mirror.pending')} />
+        <Banner
+          tone="info"
+          testId="flert-mirror-pending"
+          text={
+            <span>
+              {t('flert.mirror.pending')}
+              {canDesign && (
+                <>
+                  {' '}
+                  <Anchor component={Link} to="/admin/registries" data-testid="flert-mirror-designer">
+                    {t('registries.constructor')}
+                  </Anchor>
+                </>
+              )}
+            </span>
+          }
+        />
       ) : (
         <>
           <Group gap="sm" align="end" justify="space-between">
