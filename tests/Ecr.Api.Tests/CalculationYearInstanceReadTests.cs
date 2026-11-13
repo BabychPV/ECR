@@ -68,6 +68,8 @@ public sealed class CalculationYearInstanceReadTests(SqlServerFixture sql)
         // (гарячий), травень (лише архів).
         Assert.Equal([202601, 202603, 202605], expected.Select(i => i.PeriodKey).Distinct());
         Assert.DoesNotContain(expected, i => i.TableInstanceId == s.ArchivedJanuaryTwinId);
+        // ✎ C-1: січневий гарячий екземпляр має помилку формули — прапорець мусить збігтися з поштучним читанням.
+        Assert.Single(expected, i => i.HasFormulaErrors);
         Assert.Equal(expected, actual);
     }
 
@@ -164,9 +166,17 @@ public sealed class CalculationYearInstanceReadTests(SqlServerFixture sql)
                    (202601, {archived + 1}, {b.DocumentId}, {b.TableDefId}, {Now}, {Now})
             """).ConfigureAwait(false);
 
-        var rowKeys = await db.TableRows.AsNoTracking()
+        var tableRows = await db.TableRows.AsNoTracking()
             .Where(r => r.PeriodKeyValue == b.PeriodKey.Value && r.TableInstanceId == b.TableInstanceId)
-            .OrderBy(r => r.Ordinal).Select(r => r.RowKeyValue).ToListAsync().ConfigureAwait(false);
+            .OrderBy(r => r.Ordinal).Select(r => new { r.Id, r.RowKeyValue }).ToListAsync().ConfigureAwait(false);
+        var rowKeys = tableRows.Select(r => r.RowKeyValue).ToList();
+
+        // ✎ C-1: збережена помилка формули на січневому гарячому екземплярі (HasFormulaErrors = true).
+        db.FormulaErrors.Add(new FormulaError(
+            b.DocumentId, b.PeriodKey.Value, b.TableInstanceId, b.TableDefId, sheetCopyId: null,
+            tableRows[0].Id, tableRows[0].RowKeyValue, b.ColumnDefIds[1], formulaDefId: 1, FormulaError.ErrorKind,
+            "#DIV/0", inputsJson: null, sourcePeriodKey: null, sourceTableDefId: null, sourceRowKey: null,
+            sourceColumnDefId: null, Now));
 
         db.DocumentSheets.Add(new DocumentSheet(b.DocumentId, b.SheetDefId));
         var methodology = new Methodology(EcrCode.Create($"CYI{tag}"), Name("Combustion"));
