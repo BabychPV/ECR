@@ -185,6 +185,9 @@ public static partial class EcrConfigurationValidation
 
         // D-476: синк складу газу FLERT; «ture» інакше мовчки лишав би синк вимкненим.
         Ecr.Infrastructure.Jobs.FlertCompositionSyncOptions.EnabledKey,
+
+        // FLERT F6: після синку зі змінами — перерахунок залежних документів відкритих періодів (типово вимкнено).
+        Ecr.Infrastructure.Jobs.FlertSyncDependentsTrigger.EnabledKey,
     ];
 
     /// <summary>Ключі з переліком допустимих значень (без урахування регістру).</summary>
