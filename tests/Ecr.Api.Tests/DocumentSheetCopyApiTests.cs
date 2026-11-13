@@ -4,6 +4,8 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Ecr.Application.Documents;
+using Ecr.Domain.Entities.Configuration;
+using Ecr.Domain.Entities.Dictionaries;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Entities.Workflow;
@@ -255,6 +257,79 @@ public sealed class DocumentSheetCopyApiTests(SqlServerFixture sql)
             .ConfigureAwait(true);
         Assert.False(edit.GetProperty("canApproverEdit").GetBoolean());
     }
+    /// <summary>
+    /// D-3 (аудит 2026-11-10, L5): видалення копії прибирає й історію дозволів копії (<c>doc.PermitSegment</c>,
+    /// <c>doc.CellPermitPart</c>) — зовнішнього ключа на копію немає, сироти лишались би. Історія іншої копії — цілою.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Мутація (локально, не комітиться): прибрати блок D-3 з <c>DocumentSheetCopyStore.DeleteCopyAsync</c> — червоніє.
+    /// Історія пишеться напряму (не через <c>SaveCellSplits</c>): перевіряється каскад видалення, а не побудова поділу.
+    /// Частини копії лежать у двох періодах — доводить, що періоди беруться з самих частин.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "D-3")]
+    public async Task DeleteCopy_removes_permit_history_of_the_copy()
+    {
+        var s = await ArrangeAsync(DocumentSheetCopyHandler.Permission).ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+        var two = await PostCopyAsync(client, s).ConfigureAwait(true);
+        var three = await PostCopyAsync(client, s).ConfigureAwait(true);
+
+        var now = new DateTime(2026, 3, 1, 9, 0, 0, DateTimeKind.Utc);
+        var permitFrom = new DateOnly(2026, 3, 15);
+        await using (var arrange = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            var tableDefId = await arrange.TableDefs.Where(t => t.SheetDefId == s.SheetDefId)
+                .Select(t => t.Id).FirstAsync().ConfigureAwait(true);
+            var columnDefId = await arrange.ColumnDefs.Where(c => c.TableDefId == tableDefId)
+                .Select(c => c.Id).FirstAsync().ConfigureAwait(true);
+            var userId = await arrange.Users.Where(u => u.UserName == s.UserName).Select(u => u.Id).SingleAsync().ConfigureAwait(true);
+
+            var registry = new RegistryDef(
+                EcrCode.Create($"PRMD3_{Guid.NewGuid():N}"[..20]),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "Permit D-3" }),
+                isTemporal: true);
+            arrange.RegistryDefs.Add(registry);
+            await arrange.SaveChangesAsync().ConfigureAwait(true);
+            var entry = new RegistryEntry(
+                registry.Id, EcrCode.Create("D3ENTRY"), new LocalizedText(new Dictionary<string, string> { ["en"] = "D3" }));
+            entry.SetValidity(new DateOnly(2026, 1, 1), new DateOnly(2027, 1, 1));
+            arrange.RegistryEntries.Add(entry);
+            await arrange.SaveChangesAsync().ConfigureAwait(true);
+
+            foreach (var copyId in new[] { two.SheetCopyId, three.SheetCopyId })
+            {
+                arrange.PermitSegments.Add(PermitSegment.ForRow(
+                    s.DocumentId, tableDefId, copyId, "r1", columnDefId, permitFrom, entry.Id, userId, now));
+                foreach (var period in new[] { 202603, 202604 })
+                {
+                    arrange.CellPermitParts.Add(new CellPermitPart(
+                        period, s.DocumentId, tableDefId, copyId, "r1", columnDefId, 1, entry.Id,
+                        new DateOnly(2026, 3, 1), new DateOnly(2026, 3, 14), 5m));
+                    arrange.CellPermitParts.Add(new CellPermitPart(
+                        period, s.DocumentId, tableDefId, copyId, "r1", columnDefId, 2, entry.Id,
+                        permitFrom, new DateOnly(2026, 3, 31), 6m));
+                }
+            }
+
+            await arrange.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        var removed = await client.DeleteAsync(new Uri(
+            $"/api/v1/documents/{s.DocumentId.ToString(CultureInfo.InvariantCulture)}/sheet-copies/{two.SheetCopyId.ToString(CultureInfo.InvariantCulture)}",
+            UriKind.Relative)).ConfigureAwait(true);
+        Assert.True(removed.StatusCode == HttpStatusCode.NoContent, $"{removed.StatusCode}: {app.ErrorsText}");
+
+        await using var verify = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
+        Assert.Equal(0, await verify.PermitSegments.CountAsync(x => x.SheetCopyId == two.SheetCopyId).ConfigureAwait(true));
+        Assert.Equal(0, await verify.CellPermitParts.CountAsync(x => x.SheetCopyId == two.SheetCopyId).ConfigureAwait(true));
+        Assert.Equal(1, await verify.PermitSegments.CountAsync(x => x.SheetCopyId == three.SheetCopyId).ConfigureAwait(true));
+        Assert.Equal(4, await verify.CellPermitParts.CountAsync(x => x.SheetCopyId == three.SheetCopyId).ConfigureAwait(true));
+    }
+
     private static async Task<(HttpStatusCode Status, long SheetCopyId, int Ordinal)> PostCopyAsync(
         HttpClient client, Scenario s)
     {
