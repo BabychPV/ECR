@@ -48,8 +48,10 @@ GO
 -- «фільтр у вʼюсі» (ФВ-10.11), яке стосувалося зрізів rpt.ReportSnapshot, —
 -- їхня вʼюха вище фільтр тримає.
 --
--- ⚠ Лише ЖИВІ дані `doc.*`: роки, винесені в архів (`arc.usp_ArchiveYear`),
--- сюди не потрапляють.
+-- ✎ R-1 (рішення PO 11.11, D-498): гаряча гілка (`doc.*`, IsArchived = 0) UNION ALL архівна (`arc.*`, IsArchived = 1) —
+-- лише екземпляри, яких немає в `doc.*` (проміжні стани архівації/повернення: гаряча копія має перевагу, як F-13).
+-- Архівна гілка — ДОСЛІВНО гаряча із заміною `doc.CellValue`/`doc.TableRow`/`doc.TableInstance` на `arc.*` (сторож
+-- ReportArchiveBranchTests). Колонка IsArchived — останньою.
 CREATE OR ALTER VIEW rpt.v_DocumentCells
 AS
 SELECT p.Id AS ProjectId, p.Code AS ProjectCode,
@@ -72,7 +74,8 @@ SELECT p.Id AS ProjectId, p.Code AS ProjectCode,
                                JSON_VALUE(sd.NameL10n, N'$.en'), sd.Code),
                       CASE WHEN ti.SheetCopyId IS NOT NULL OR MAX(CASE WHEN g.CopyOfId IS NOT NULL THEN 1 ELSE 0 END) = 1
                            THEN CONCAT(N' ', COALESCE(dsh.CopyOrdinal, 1)) ELSE N'' END)
-        FROM doc.DocumentSheet AS g WHERE g.DocumentId = d.Id AND g.SheetDefId = sd.Id) AS SheetDisplayName
+        FROM doc.DocumentSheet AS g WHERE g.DocumentId = d.Id AND g.SheetDefId = sd.Id) AS SheetDisplayName,
+       CAST(0 AS bit) AS IsArchived
 FROM doc.CellValue          AS cv
 JOIN doc.TableRow           AS r  ON r.PeriodKey = cv.PeriodKey AND r.Id = cv.TableRowId AND r.IsDeleted = 0
 JOIN doc.TableInstance      AS ti ON ti.PeriodKey = r.PeriodKey AND ti.Id = r.TableInstanceId
@@ -88,7 +91,47 @@ LEFT JOIN uom.Unit          AS cu ON cu.Id = cd.UnitId
 LEFT JOIN wf.ApprovalState  AS a  ON a.DocumentId = d.Id AND a.SheetDefId = sd.Id AND a.PeriodKey = cv.PeriodKey
                                  AND (a.SheetCopyId = ti.SheetCopyId OR (a.SheetCopyId IS NULL AND ti.SheetCopyId IS NULL))
 LEFT JOIN doc.DocumentSheet AS dsh ON dsh.Id = ti.SheetCopyId
-WHERE cv.IsEmpty = 0;
+WHERE cv.IsEmpty = 0
+UNION ALL
+SELECT p.Id AS ProjectId, p.Code AS ProjectCode,
+       t.Code AS TemplateCode, tv.[Version] AS TemplateVersion,
+       d.Id AS DocumentId, d.BusinessKey AS DocumentKey,
+       cv.PeriodKey,
+       sd.Code AS SheetCode, td.Code AS TableCode,
+       r.Id AS RowId, r.RowKey, r.Ordinal AS RowOrdinal,
+       cd.Code AS ColumnCode, cd.DataType,
+       cv.ValueString, cv.ValueNumeric, cv.ValueDate, cv.ValueBool,
+       cv.ValueRegistryEntryId, cv.ValueUnitId, vu.Code AS ValueUnitCode,
+       cu.Code AS ColumnUnitCode,
+       cv.IsCalculated,
+       CAST(COALESCE(a.Status, 0) AS tinyint) AS Status,
+       -- ⛔ RS (копії аркушів, людина 03.11): SheetCopyOrdinal — номер у групі (1 — оригінал, 2… — копія); SheetDisplayName —
+       -- «<Назва> N»: назва групи (в документі або з шаблону, мова en, інакше код аркуша), з номером лише коли в групі є
+       -- копії. Стан подання й дані копії — окремі від оригінала (SheetCopyId на екземплярі й на стані).
+       CAST(COALESCE(dsh.CopyOrdinal, 1) AS smallint) AS SheetCopyOrdinal,
+       (SELECT CONCAT(COALESCE(JSON_VALUE(MAX(CASE WHEN g.CopyOfId IS NULL THEN g.NameOverrideL10n END), N'$.en'),
+                               JSON_VALUE(sd.NameL10n, N'$.en'), sd.Code),
+                      CASE WHEN ti.SheetCopyId IS NOT NULL OR MAX(CASE WHEN g.CopyOfId IS NOT NULL THEN 1 ELSE 0 END) = 1
+                           THEN CONCAT(N' ', COALESCE(dsh.CopyOrdinal, 1)) ELSE N'' END)
+        FROM doc.DocumentSheet AS g WHERE g.DocumentId = d.Id AND g.SheetDefId = sd.Id) AS SheetDisplayName,
+       CAST(1 AS bit) AS IsArchived
+FROM arc.CellValue          AS cv
+JOIN arc.TableRow           AS r  ON r.PeriodKey = cv.PeriodKey AND r.Id = cv.TableRowId AND r.IsDeleted = 0
+JOIN arc.TableInstance      AS ti ON ti.PeriodKey = r.PeriodKey AND ti.Id = r.TableInstanceId
+JOIN doc.Document           AS d  ON d.Id = ti.DocumentId
+JOIN doc.Project            AS p  ON p.Id = d.ProjectId
+JOIN cfg.ColumnDef          AS cd ON cd.Id = cv.ColumnDefId
+JOIN cfg.TableDef           AS td ON td.Id = ti.TableDefId
+JOIN cfg.SheetDef           AS sd ON sd.Id = td.SheetDefId
+JOIN cfg.TemplateVersion    AS tv ON tv.Id = sd.TemplateVersionId
+JOIN cfg.Template           AS t  ON t.Id = tv.TemplateId
+LEFT JOIN uom.Unit          AS vu ON vu.Id = cv.ValueUnitId
+LEFT JOIN uom.Unit          AS cu ON cu.Id = cd.UnitId
+LEFT JOIN wf.ApprovalState  AS a  ON a.DocumentId = d.Id AND a.SheetDefId = sd.Id AND a.PeriodKey = cv.PeriodKey
+                                 AND (a.SheetCopyId = ti.SheetCopyId OR (a.SheetCopyId IS NULL AND ti.SheetCopyId IS NULL))
+LEFT JOIN doc.DocumentSheet AS dsh ON dsh.Id = ti.SheetCopyId
+WHERE cv.IsEmpty = 0
+  AND NOT EXISTS (SELECT 1 FROM doc.TableInstance AS hot WHERE hot.PeriodKey = ti.PeriodKey AND hot.Id = ti.Id);
 GO
 
 -- Q-17.slotmap (P3, ON <= 1,2x OFF): READ MODEL слотів вʼюх із маршрутизацією місяців (@MonthRouting = 1). Рядок = (вʼюха,
@@ -855,7 +898,9 @@ GO
 --                  (every value converted to text); the proc returns a Warning for it; such a column is not month-routed and
 --                  not overlaid with methodology results;
 --   * limits     : more than 1000 columns (SQL Server view limit 1024) -> 50422 for that table, the others are generated;
---   * names      : a stable name equal to another stable name or to any _vN name is NOT generated (50409 at the end).
+--   * names      : a stable name equal to another stable name or to any _vN name is NOT generated (50409 at the end);
+--   * archive    : R-1 (D-498) - UNION ALL over arc.* for the instances absent from doc.* (_IsArchived = 1, last column);
+--                  the hot copy wins. The _vN views stay "live data only" (table-count limit of a query).
 -- Idempotent: the text is a pure function of the structure; an equal existing view is left alone (Unchanged).
 -- Result set: ViewName, Action (Created / Altered / Unchanged), Warning (nullable).
 -- AN-155d: @OnlyIfChanged = 1 — як у rpt.usp_GenerateTemplateViews (власна розширена властивість `ecr.stableviews.fingerprint`);
@@ -948,6 +993,30 @@ BEGIN
         FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 2, N'');
     DELETE FROM @groups WHERE ViewName IN (SELECT Name FROM @clashNames);
 
+    -- R-2: groups of one template linked by the rename map (a table renamed by a version migration): transitive closure.
+    -- Every name of the class reads the tables of the whole class, like the column aliases below do for columns.
+    DECLARE @glink TABLE (GroupId int NOT NULL, Other int NOT NULL, PRIMARY KEY (GroupId, Other));
+    INSERT INTO @glink (GroupId, Other)
+    SELECT DISTINCT ga.GroupId, gb.GroupId
+      FROM cfg.ColumnRename AS rr
+      JOIN cfg.ColumnDef AS ca ON ca.Id = rr.FromColumnDefId
+      JOIN cfg.ColumnDef AS cb ON cb.Id = rr.ToColumnDefId
+      JOIN @gt AS ga ON ga.TableDefId = ca.TableDefId
+      JOIN @gt AS gb ON gb.TableDefId = cb.TableDefId
+     WHERE ga.GroupId <> gb.GroupId AND ga.TemplateId = gb.TemplateId;
+    INSERT INTO @glink (GroupId, Other)
+    SELECT l.Other, l.GroupId FROM @glink AS l
+     WHERE NOT EXISTS (SELECT 1 FROM @glink AS z WHERE z.GroupId = l.Other AND z.Other = l.GroupId);
+    WHILE 1 = 1
+    BEGIN
+        INSERT INTO @glink (GroupId, Other)
+        SELECT DISTINCT x.GroupId, y.Other FROM @glink AS x JOIN @glink AS y ON y.GroupId = x.Other
+         WHERE x.GroupId <> y.Other AND NOT EXISTS (SELECT 1 FROM @glink AS z WHERE z.GroupId = x.GroupId AND z.Other = y.Other);
+        IF @@ROWCOUNT = 0 BREAK;
+    END
+    -- R-2: the tables of the current group AND of the groups linked to it.
+    DECLARE @gx TABLE (TableDefId int NOT NULL PRIMARY KEY);
+
     IF @OnlyIfChanged = 1 AND @TemplateVersionId IS NULL
        AND @fp = (SELECT CONVERT(varchar(64), ep.value) FROM sys.extended_properties AS ep
                    WHERE ep.class = 3 AND ep.major_id = SCHEMA_ID(N'rpt') AND ep.minor_id = 0 AND ep.name = @fpName)
@@ -964,6 +1033,8 @@ BEGIN
 
     DECLARE @g int, @header nvarchar(400), @view sysname, @tids nvarchar(max), @sheetCase nvarchar(max), @verCase nvarchar(max);
     DECLARE @select nvarchar(max), @selectText nvarchar(max), @joins nvarchar(max), @sql nvarchar(max), @existing nvarchar(max), @message nvarchar(2048);
+    -- R-1 (D-498): shared SELECT head and FROM..WHERE tail; the archive tail is the same text with three tables replaced by arc.*.
+    DECLARE @selHead nvarchar(max), @tail nvarchar(max), @tailArc nvarchar(max);
     DECLARE @marker nvarchar(64) = N'-- Згенеровано rpt.usp_GenerateStableViews';
     DECLARE @failure nvarchar(2048), @warning nvarchar(2000);
     DECLARE @seq int, @colCode nvarchar(64), @colType tinyint, @isMonth bit, @monthNo tinyint, @conflict bit, @ids nvarchar(max), @pred nvarchar(max);
@@ -1003,27 +1074,31 @@ BEGIN
         DELETE FROM @slot;
         DELETE FROM @ci;
         DELETE FROM @cols;
+        DELETE FROM @gx;
+        INSERT INTO @gx (TableDefId)
+        SELECT x.TableDefId FROM @gt AS x
+         WHERE x.GroupId = @g OR x.GroupId IN (SELECT l.Other FROM @glink AS l WHERE l.GroupId = @g);
 
-        SET @tids = STUFF((SELECT N',' + CAST(TableDefId AS nvarchar(10)) FROM @gt WHERE GroupId = @g ORDER BY TableDefId
+        SET @tids = STUFF((SELECT N',' + CAST(TableDefId AS nvarchar(10)) FROM @gt WHERE TableDefId IN (SELECT TableDefId FROM @gx) ORDER BY TableDefId
                            FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 1, N'');
         SET @sheetCase = N'CASE ti.TableDefId' + (SELECT N' WHEN ' + CAST(TableDefId AS nvarchar(10)) + N' THEN ' + CAST(SheetDefId AS nvarchar(10))
-                           FROM @gt WHERE GroupId = @g ORDER BY TableDefId FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)') + N' END';
+                           FROM @gt WHERE TableDefId IN (SELECT TableDefId FROM @gx) ORDER BY TableDefId FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)') + N' END';
         SET @verCase = N'CAST(CASE ti.TableDefId' + (SELECT N' WHEN ' + CAST(TableDefId AS nvarchar(10)) + N' THEN N' + QUOTENAME(VersionText, '''')
-                           FROM @gt WHERE GroupId = @g ORDER BY TableDefId FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)') + N' END AS nvarchar(20))';
+                           FROM @gt WHERE TableDefId IN (SELECT TableDefId FROM @gx) ORDER BY TableDefId FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)') + N' END AS nvarchar(20))';
 
         -- Month routing needs the MonthsInColumns layout (0) in EVERY version of the table.
         -- D-474: and at least one routed version (flag ON = all versions; flag OFF = versions with Layout = 1). Flag ON or no
         -- Layout = 1 version: exactly as before D-474.
-        SET @routedGroup = CASE WHEN EXISTS (SELECT 1 FROM @gt WHERE GroupId = @g AND Routed = 1)
-                                 AND NOT EXISTS (SELECT 1 FROM @gt WHERE GroupId = @g AND LayoutKind <> 0) THEN 1 ELSE 0 END;
+        SET @routedGroup = CASE WHEN EXISTS (SELECT 1 FROM @gt WHERE TableDefId IN (SELECT TableDefId FROM @gx) AND Routed = 1)
+                                 AND NOT EXISTS (SELECT 1 FROM @gt WHERE TableDefId IN (SELECT TableDefId FROM @gx) AND LayoutKind <> 0) THEN 1 ELSE 0 END;
         -- D-474: mixed group (some versions not routed) - owner values (fam) only for the rows of the routed versions; a row of a
         -- non-routed version keeps its own copy even when the same document has a routed-version instance in that year.
-        SET @routedTids = STUFF((SELECT N',' + CAST(TableDefId AS nvarchar(10)) FROM @gt WHERE GroupId = @g AND Routed = 1 ORDER BY TableDefId
+        SET @routedTids = STUFF((SELECT N',' + CAST(TableDefId AS nvarchar(10)) FROM @gt WHERE TableDefId IN (SELECT TableDefId FROM @gx) AND Routed = 1 ORDER BY TableDefId
                                  FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 1, N'');
-        SET @mixedGuard = CASE WHEN @routedGroup = 1 AND EXISTS (SELECT 1 FROM @gt WHERE GroupId = @g AND Routed = 0)
+        SET @mixedGuard = CASE WHEN @routedGroup = 1 AND EXISTS (SELECT 1 FROM @gt WHERE TableDefId IN (SELECT TableDefId FROM @gx) AND Routed = 0)
                                THEN N' AND ti.TableDefId IN (' + @routedTids + N')' ELSE N'' END;
         SET @rvPred = CASE WHEN EXISTS (SELECT 1 FROM cfg.CalculationBinding AS cb JOIN @gt AS x ON x.TableDefId = cb.TableDefId
-                                         WHERE x.GroupId = @g AND cb.IsActive = 1 AND REPLACE(cb.MatchJson, CHAR(32), N'') <> N'{}') THEN 1 ELSE 0 END;
+                                         WHERE x.TableDefId IN (SELECT TableDefId FROM @gx) AND cb.IsActive = 1 AND REPLACE(cb.MatchJson, CHAR(32), N'') <> N'{}') THEN 1 ELSE 0 END;
         SET @rvRef = CASE WHEN @rvPred = 0 THEN N'r' ELSE N'rv' END;
 
         INSERT INTO @ci (ColId, Code, DataType, Fam, IsMonth, MonthNo, Ord, Routed)
@@ -1032,7 +1107,7 @@ BEGIN
                cd.IsMonthColumn, cd.MonthNumber,
                CAST(x.TemplateVersionId AS bigint) * 4294967296 + cd.Id, x.Routed
           FROM cfg.ColumnDef AS cd JOIN @gt AS x ON x.TableDefId = cd.TableDefId
-         WHERE x.GroupId = @g AND cd.IsDeleted = 0;
+         WHERE x.TableDefId IN (SELECT TableDefId FROM @gx) AND cd.IsDeleted = 0;
         INSERT INTO @cols (Code, FirstOrd) SELECT Code, MIN(Ord) FROM @ci GROUP BY Code ORDER BY MIN(Ord);
 
         DELETE FROM @alias;
@@ -1340,7 +1415,7 @@ JOIN doc.Project       AS p ON p.Id = d.ProjectId' + @rowApply END;
         SET @sheetNameCase = N'CASE ti.TableDefId' + (SELECT N' WHEN ' + CAST(x.TableDefId AS nvarchar(10)) + N' THEN N'''
                                     + REPLACE(COALESCE(JSON_VALUE(sn.NameL10n, N'$.en'), sn.Code), N'''', N'''''') + N''''
                            FROM @gt AS x JOIN cfg.SheetDef AS sn ON sn.Id = x.SheetDefId
-                           WHERE x.GroupId = @g ORDER BY x.TableDefId FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)') + N' END';
+                           WHERE x.TableDefId IN (SELECT TableDefId FROM @gx) ORDER BY x.TableDefId FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)') + N' END';
         SET @copyCols = CONCAT(N',
        CAST(COALESCE(dsh.CopyOrdinal, 1) AS smallint) AS _SheetCopyOrdinal,
        (SELECT CONCAT(COALESCE(JSON_VALUE(MAX(CASE WHEN g.CopyOfId IS NULL THEN g.NameOverrideL10n END), N''$.en''), ', @sheetNameCase, N'),
@@ -1348,22 +1423,41 @@ JOIN doc.Project       AS p ON p.Id = d.ProjectId' + @rowApply END;
                            THEN CONCAT(N'' '', COALESCE(dsh.CopyOrdinal, 1)) ELSE N'''' END)
         FROM doc.DocumentSheet AS g WHERE g.DocumentId = d.Id AND g.SheetDefId = ', @sheetCase, N') AS _SheetDisplayName');
 
-        SET @sql = CONCAT(
-N'CREATE OR ALTER VIEW rpt.', QUOTENAME(@view), N'
-AS
-', @marker, N': ', @header, N'. Не редагувати руками.
-SELECT p.Id AS _ProjectId, p.Code AS _ProjectCode,
+        SET @selHead = CONCAT(
+N'SELECT p.Id AS _ProjectId, p.Code AS _ProjectCode,
        d.Id AS _DocumentId, d.BusinessKey AS _DocumentKey,
        ', @pkExpr, N' AS _PeriodKey,
        CAST(COALESCE(a.Status, 0) AS tinyint) AS _Status,
        r.Id AS _RowId, r.RowKey AS _RowKey, r.Ordinal AS _RowOrdinal,
-       ', @verCase, N' AS _TemplateVersion', @select, @copyCols, N'
+       ', @verCase, N' AS _TemplateVersion', @select, @copyCols, N',
+       CAST(');
+        SET @tail = CONCAT(N' AS bit) AS _IsArchived
 ', @fromSql, N'
 LEFT JOIN wf.ApprovalState AS a ON a.DocumentId = d.Id AND a.SheetDefId = ', @sheetCase,
 N' AND a.PeriodKey = ti.PeriodKey
                                AND (a.SheetCopyId = ti.SheetCopyId OR (a.SheetCopyId IS NULL AND ti.SheetCopyId IS NULL))
 LEFT JOIN doc.DocumentSheet AS dsh ON dsh.Id = ti.SheetCopyId', @joins, N'
-WHERE ti.TableDefId IN (', @tids, N');');
+WHERE ti.TableDefId IN (', @tids, N')');
+        -- R-1 (D-498): the replacement touches the tail only (FROM/JOIN/APPLY/WHERE). It holds no literals with names (view names
+        -- in @vnLit are sanitised to [A-Za-z0-9_]), so REPLACE changes table names only. doc.Document, doc.Project, doc.Period,
+        -- doc.DocumentSheet, wf.*, calc.*, cfg.*, rpt.ViewSlot are not archived (03-archive-proc.sql). The archive branch takes
+        -- only the instances absent from doc.* (intermediate archive/restore states: the hot copy wins, like F-13).
+        -- AN-163 seeks doc.CellValue through its clustered B-tree (FORCESEEK); arc.CellValue is a clustered columnstore, where
+        -- that hint is an error ("cannot be used with the column store index"), so the archive tail drops it.
+        SET @tailArc = REPLACE(REPLACE(REPLACE(REPLACE(@tail,
+                           N' WITH (FORCESEEK (1 (PeriodKey, TableRowId)))', N''),
+                           N'doc.TableInstance', N'arc.TableInstance'),
+                           N'doc.TableRow', N'arc.TableRow'),
+                           N'doc.CellValue', N'arc.CellValue')
+                     + N'
+  AND NOT EXISTS (SELECT 1 FROM doc.TableInstance AS hot WHERE hot.PeriodKey = ti.PeriodKey AND hot.Id = ti.Id)';
+        SET @sql = CONCAT(
+N'CREATE OR ALTER VIEW rpt.', QUOTENAME(@view), N'
+AS
+', @marker, N': ', @header, N'. Не редагувати руками.
+', @selHead, N'0', @tail, N'
+UNION ALL
+', @selHead, N'1', @tailArc, N';');
 
         SET @warning = CASE WHEN @conflictCodes = N'' THEN NULL
                             ELSE LEFT(CONCAT(N'type conflict across versions, exposed as nvarchar: ', @conflictCodes), 2000) END;
@@ -1555,7 +1649,9 @@ GO
 -- номер періоду. За Q-17 (@MonthRouting) місячні комірки лежать в екземплярі свого місяця: адреса частин і історії — логічна
 -- (документ, таблиця, копія аркуша, RowKey), тож базовий дозвіл шукається спершу в тому самому рядку, далі — у рядку з тим
 -- самим RowKey в інших екземплярах того ж року (найпізніший період).
--- ⚠ Лише живі дані `doc.*`; Status — колонка, як у rpt.v_DocumentCells. PermitSource: 'row' | 'header'.
+-- ✎ R-1 (D-498): гаряча гілка UNION ALL архівна (`arc.*`), колонка `IsArchived` останньою; архівна гілка — дослівно гаряча
+-- із заміною `doc.CellValue`/`doc.TableRow`/`doc.TableInstance`/`doc.CellPermitPart` на `arc.*` (сторож
+-- ReportArchiveBranchTests). Status — колонка, як у rpt.v_DocumentCells. PermitSource: 'row' | 'header'.
 CREATE OR ALTER VIEW rpt.v_DocumentCellsByPermit
 AS
 SELECT p.Id AS ProjectId, p.Code AS ProjectCode,
@@ -1573,7 +1669,8 @@ SELECT p.Id AS ProjectId, p.Code AS ProjectCode,
        pp.PartNo, pp.DayFrom, pp.DayTo,
        CASE WHEN sp.IsSplit = 1 THEN pp.ValueNumeric ELSE cv.ValueNumeric END AS ValueNumeric,
        cv.IsCalculated,
-       CAST(COALESCE(a.Status, 0) AS tinyint) AS Status
+       CAST(COALESCE(a.Status, 0) AS tinyint) AS Status,
+       CAST(0 AS bit) AS IsArchived
 FROM doc.CellValue          AS cv
 JOIN doc.TableRow           AS r  ON r.PeriodKey = cv.PeriodKey AND r.Id = cv.TableRowId AND r.IsDeleted = 0
 JOIN doc.TableInstance      AS ti ON ti.PeriodKey = r.PeriodKey AND ti.Id = r.TableInstanceId
@@ -1657,7 +1754,148 @@ OUTER APPLY (SELECT q.PartNo, q.RegistryEntryId, q.DayFrom, q.DayTo, q.ValueNume
                 AND q.RowKey = r.RowKey AND q.ColumnDefId = cv.ColumnDefId AND q.PartNo <= sp.Spans) AS pp
 LEFT JOIN dic.RegistryEntry AS pe ON pe.Id = CASE WHEN sp.IsSplit = 1 THEN pp.RegistryEntryId ELSE COALESCE(sg.RegistryEntryId, bs.BaseId) END
 WHERE cv.IsEmpty = 0 AND cv.ValueNumeric IS NOT NULL
-  AND (rp.ColumnDefId IS NOT NULL OR hp.HeaderFieldDefId IS NOT NULL);
+  AND (rp.ColumnDefId IS NOT NULL OR hp.HeaderFieldDefId IS NOT NULL)
+UNION ALL
+SELECT p.Id AS ProjectId, p.Code AS ProjectCode,
+       d.Id AS DocumentId, d.BusinessKey AS DocumentKey,
+       cv.PeriodKey,
+       sd.Code AS SheetCode, CAST(COALESCE(dsh.CopyOrdinal, 1) AS smallint) AS SheetCopyOrdinal, td.Code AS TableCode,
+       r.Id AS RowId, r.RowKey,
+       cd.Code AS ColumnCode, cd.MonthNumber,
+       CASE WHEN sp.IsSplit = 1 THEN pp.RegistryEntryId ELSE COALESCE(sg.RegistryEntryId, bs.BaseId) END AS PermitId,
+       -- F13 p220 j5: the permit NUMBER as people know it (the entry's display, as the app names permits), not the
+       -- registry code E000…; PermitId keeps the entry id.
+       COALESCE(NULLIF(JSON_VALUE(pe.DisplayL10n, N'$.en'), N''), pe.Code) AS PermitCode,
+       CAST(CASE WHEN rp.ColumnDefId IS NOT NULL THEN N'row' ELSE N'header' END AS nvarchar(6)) AS PermitSource,
+       CAST(COALESCE(sp.IsSplit, 0) AS bit) AS IsPart,
+       pp.PartNo, pp.DayFrom, pp.DayTo,
+       CASE WHEN sp.IsSplit = 1 THEN pp.ValueNumeric ELSE cv.ValueNumeric END AS ValueNumeric,
+       cv.IsCalculated,
+       CAST(COALESCE(a.Status, 0) AS tinyint) AS Status,
+       CAST(1 AS bit) AS IsArchived
+FROM arc.CellValue          AS cv
+JOIN arc.TableRow           AS r  ON r.PeriodKey = cv.PeriodKey AND r.Id = cv.TableRowId AND r.IsDeleted = 0
+JOIN arc.TableInstance      AS ti ON ti.PeriodKey = r.PeriodKey AND ti.Id = r.TableInstanceId
+JOIN doc.Document           AS d  ON d.Id = ti.DocumentId
+JOIN doc.Project            AS p  ON p.Id = d.ProjectId
+JOIN cfg.ColumnDef          AS cd ON cd.Id = cv.ColumnDefId AND cd.DataType IN (1, 2)
+JOIN cfg.TableDef           AS td ON td.Id = ti.TableDefId
+JOIN cfg.SheetDef           AS sd ON sd.Id = td.SheetDefId
+LEFT JOIN wf.ApprovalState  AS a  ON a.DocumentId = d.Id AND a.SheetDefId = sd.Id AND a.PeriodKey = cv.PeriodKey
+                                 AND (a.SheetCopyId = ti.SheetCopyId OR (a.SheetCopyId IS NULL AND ti.SheetCopyId IS NULL))
+LEFT JOIN doc.DocumentSheet AS dsh ON dsh.Id = ti.SheetCopyId
+LEFT JOIN doc.Period        AS per ON per.ProjectId = d.ProjectId AND per.PeriodKey = cv.PeriodKey
+-- Місяць комірки (NULL — номер поза 1..12: лише кінець періоду, без поділу).
+CROSS APPLY (SELECT CASE WHEN COALESCE(cd.MonthNumber, cv.PeriodKey % 100) BETWEEN 1 AND 12
+                         THEN DATEFROMPARTS(cv.PeriodKey / 100, COALESCE(cd.MonthNumber, cv.PeriodKey % 100), 1) END AS MonthStart) AS mo
+CROSS APPLY (SELECT CASE WHEN cd.MonthNumber IS NOT NULL THEN EOMONTH(mo.MonthStart)
+                         ELSE COALESCE(per.PeriodEnd, EOMONTH(mo.MonthStart)) END AS AsOf,
+                    YEAR(mo.MonthStart) * 100 + MONTH(mo.MonthStart) AS MonthKey) AS dt
+-- Колонка дозволу рядка: та, що має історію для цього рядка, інакше перша за порядком.
+OUTER APPLY (SELECT TOP (1) pc.Id AS ColumnDefId
+               FROM cfg.ColumnDef AS pc
+              WHERE pc.TableDefId = td.Id AND pc.IsDeleted = 0 AND pc.DataType = 5
+                AND (pc.LookupRegistryDefId IN (SELECT t.HeaderRegistryDefId FROM cfg.PermitTypeDef AS t WHERE t.Status = 1)
+                     OR pc.LookupRegistryDefId IN (SELECT g.RegistryDefId FROM cfg.PermitGroup AS g))
+              ORDER BY CASE WHEN EXISTS (SELECT 1 FROM doc.PermitSegment AS s
+                                          WHERE s.DocumentId = d.Id AND s.TableDefId = td.Id AND s.ColumnDefId = pc.Id
+                                            AND s.RowKey = r.RowKey
+                                            AND (s.SheetCopyId = ti.SheetCopyId OR (s.SheetCopyId IS NULL AND ti.SheetCopyId IS NULL)))
+                            THEN 0 ELSE 1 END, pc.Ordinal, pc.Id) AS rp
+-- Поле дозволу шапки — лише для таблиць БЕЗ колонки дозволу рядка: з історією, інакше перше за порядком.
+OUTER APPLY (SELECT TOP (1) hf.Id AS HeaderFieldDefId, hv.ValueRegistryEntryId
+               FROM doc.DocumentHeaderValue AS hv
+               JOIN cfg.HeaderFieldDef AS hf ON hf.Id = hv.HeaderFieldDefId AND hf.IsDeleted = 0
+              WHERE rp.ColumnDefId IS NULL AND hv.DocumentId = d.Id AND hv.IsEmpty = 0 AND hv.ValueRegistryEntryId IS NOT NULL
+                AND (hf.LookupRegistryDefId IN (SELECT t.HeaderRegistryDefId FROM cfg.PermitTypeDef AS t WHERE t.Status = 1)
+                     OR hf.LookupRegistryDefId IN (SELECT g.RegistryDefId FROM cfg.PermitGroup AS g))
+              ORDER BY CASE WHEN EXISTS (SELECT 1 FROM doc.PermitSegment AS s
+                                          WHERE s.DocumentId = d.Id AND s.HeaderFieldDefId = hf.Id) THEN 0 ELSE 1 END,
+                       hf.Ordinal, hf.Id) AS hp
+-- Базовий дозвіл: комірка дозволу того самого рядка, інакше рядка з тим самим RowKey в іншому екземплярі року (Q-17).
+CROSS APPLY (SELECT CASE WHEN rp.ColumnDefId IS NULL THEN hp.ValueRegistryEntryId ELSE (
+             SELECT TOP (1) b.ValueRegistryEntryId
+               FROM arc.TableInstance AS bi
+               JOIN arc.TableRow AS br ON br.PeriodKey = bi.PeriodKey AND br.TableInstanceId = bi.Id AND br.RowKey = r.RowKey
+                                      AND br.IsDeleted = 0
+               JOIN arc.CellValue AS b ON b.PeriodKey = br.PeriodKey AND b.TableRowId = br.Id AND b.ColumnDefId = rp.ColumnDefId
+                                      AND b.IsEmpty = 0 AND b.ValueRegistryEntryId IS NOT NULL
+              WHERE bi.DocumentId = d.Id AND bi.TableDefId = td.Id
+                AND bi.PeriodKey BETWEEN (cv.PeriodKey / 100) * 100 AND (cv.PeriodKey / 100) * 100 + 99
+                AND (bi.SheetCopyId = ti.SheetCopyId OR (bi.SheetCopyId IS NULL AND ti.SheetCopyId IS NULL))
+              ORDER BY CASE WHEN br.Id = r.Id AND br.PeriodKey = r.PeriodKey THEN 0 ELSE 1 END, bi.PeriodKey DESC) END AS BaseId) AS bs
+-- Дозвіл, чинний в останній день місяця/періоду (найпізніша зміна історії з ValidFrom <= AsOf).
+OUTER APPLY (SELECT TOP (1) s.RegistryEntryId
+               FROM doc.PermitSegment AS s
+              WHERE s.DocumentId = d.Id AND s.ValidFrom <= dt.AsOf
+                AND ((rp.ColumnDefId IS NOT NULL AND s.TableDefId = td.Id AND s.ColumnDefId = rp.ColumnDefId AND s.RowKey = r.RowKey
+                      AND (s.SheetCopyId = ti.SheetCopyId OR (s.SheetCopyId IS NULL AND ti.SheetCopyId IS NULL)))
+                     OR (rp.ColumnDefId IS NULL AND s.HeaderFieldDefId = hp.HeaderFieldDefId))
+              ORDER BY s.ValidFrom DESC) AS sg
+-- Поділ: дозволів у місяці = 1 + змін історії з датою всередині місяця (зміна з 1-го місяць не ділить); комірку поділено,
+-- коли кожна з цих частин має значення (як `PermitHistoryReader.IsSplit`). Обчислені комірки не діляться.
+OUTER APPLY (SELECT CASE WHEN cv.IsCalculated = 0 AND mo.MonthStart IS NOT NULL AND x.Spans >= 2
+                          AND (SELECT COUNT(q.ValueNumeric)
+                                 FROM arc.CellPermitPart AS q
+                                WHERE q.PeriodKey = dt.MonthKey AND q.DocumentId = d.Id AND q.TableDefId = td.Id
+                                  AND (q.SheetCopyId = ti.SheetCopyId OR (q.SheetCopyId IS NULL AND ti.SheetCopyId IS NULL))
+                                  AND q.RowKey = r.RowKey AND q.ColumnDefId = cv.ColumnDefId AND q.PartNo <= x.Spans) = x.Spans
+                         THEN 1 ELSE 0 END AS IsSplit, x.Spans
+               FROM (SELECT 1 + COUNT(*) AS Spans
+                       FROM doc.PermitSegment AS s
+                      WHERE s.DocumentId = d.Id AND s.ValidFrom > mo.MonthStart AND s.ValidFrom <= EOMONTH(mo.MonthStart)
+                        AND ((rp.ColumnDefId IS NOT NULL AND s.TableDefId = td.Id AND s.ColumnDefId = rp.ColumnDefId
+                              AND s.RowKey = r.RowKey
+                              AND (s.SheetCopyId = ti.SheetCopyId OR (s.SheetCopyId IS NULL AND ti.SheetCopyId IS NULL)))
+                             OR (rp.ColumnDefId IS NULL AND s.HeaderFieldDefId = hp.HeaderFieldDefId))) AS x) AS sp
+-- Частини поділеної комірки (для неподіленої — один порожній рядок OUTER APPLY: комірка цілою).
+OUTER APPLY (SELECT q.PartNo, q.RegistryEntryId, q.DayFrom, q.DayTo, q.ValueNumeric
+               FROM arc.CellPermitPart AS q
+              WHERE sp.IsSplit = 1 AND q.PeriodKey = dt.MonthKey AND q.DocumentId = d.Id AND q.TableDefId = td.Id
+                AND (q.SheetCopyId = ti.SheetCopyId OR (q.SheetCopyId IS NULL AND ti.SheetCopyId IS NULL))
+                AND q.RowKey = r.RowKey AND q.ColumnDefId = cv.ColumnDefId AND q.PartNo <= sp.Spans) AS pp
+LEFT JOIN dic.RegistryEntry AS pe ON pe.Id = CASE WHEN sp.IsSplit = 1 THEN pp.RegistryEntryId ELSE COALESCE(sg.RegistryEntryId, bs.BaseId) END
+WHERE cv.IsEmpty = 0 AND cv.ValueNumeric IS NOT NULL
+  AND (rp.ColumnDefId IS NOT NULL OR hp.HeaderFieldDefId IS NOT NULL)
+  AND NOT EXISTS (SELECT 1 FROM doc.TableInstance AS hot WHERE hot.PeriodKey = ti.PeriodKey AND hot.Id = ti.Id);
+GO
+
+-- R-4 (аудит 2026-11): розшифрування Id для SSRS (rpt_reader бачить лише rpt.*): записи довідників, одиниці, підписи
+-- колонок опублікованих версій. Мови — ключі LocalizedText (en/ru/kz, як у сіді); логічно видалені записи довідників
+-- НЕ відсіюються (на них можуть посилатися старі комірки), а віддаються колонкою IsDeleted.
+CREATE OR ALTER VIEW rpt.v_RegistryEntry
+AS
+SELECT e.Id AS EntryId, d.Code AS RegistryCode, e.Code AS EntryCode,
+       JSON_VALUE(e.DisplayL10n, N'$.en') AS Name_en,
+       JSON_VALUE(e.DisplayL10n, N'$.ru') AS Name_ru,
+       JSON_VALUE(e.DisplayL10n, N'$.kz') AS Name_kz,
+       e.ParentEntryId, e.ValidFrom, e.ValidTo, e.IsActive, e.IsDeleted
+  FROM dic.RegistryEntry AS e
+  JOIN cfg.RegistryDef   AS d ON d.Id = e.RegistryDefId;
+GO
+CREATE OR ALTER VIEW rpt.v_Unit
+AS
+SELECT u.Id AS UnitId, u.Code AS UnitCode,
+       JSON_VALUE(u.SymbolL10n, N'$.en') AS Symbol_en, JSON_VALUE(u.SymbolL10n, N'$.ru') AS Symbol_ru,
+       JSON_VALUE(u.SymbolL10n, N'$.kz') AS Symbol_kz,
+       JSON_VALUE(u.NameL10n, N'$.en') AS Name_en, JSON_VALUE(u.NameL10n, N'$.ru') AS Name_ru,
+       JSON_VALUE(u.NameL10n, N'$.kz') AS Name_kz
+  FROM uom.Unit AS u;
+GO
+CREATE OR ALTER VIEW rpt.v_TemplateColumn
+AS
+SELECT t.Code AS TemplateCode, tv.[Version] AS TemplateVersion, sd.Code AS SheetCode, td.Code AS TableCode,
+       cd.Code AS ColumnCode, cd.DataType, cd.Ordinal, cd.LookupRegistryDefId, cd.UnitId,
+       JSON_VALUE(sd.NameL10n, N'$.en') AS SheetName_en, JSON_VALUE(sd.NameL10n, N'$.ru') AS SheetName_ru,
+       JSON_VALUE(sd.NameL10n, N'$.kz') AS SheetName_kz,
+       JSON_VALUE(cd.HeaderL10n, N'$.en') AS Header_en, JSON_VALUE(cd.HeaderL10n, N'$.ru') AS Header_ru,
+       JSON_VALUE(cd.HeaderL10n, N'$.kz') AS Header_kz
+  FROM cfg.ColumnDef       AS cd
+  JOIN cfg.TableDef        AS td ON td.Id = cd.TableDefId AND td.IsDeleted = 0
+  JOIN cfg.SheetDef        AS sd ON sd.Id = td.SheetDefId AND sd.IsDeleted = 0
+  JOIN cfg.TemplateVersion AS tv ON tv.Id = sd.TemplateVersionId AND tv.Status IN (1, 2)
+  JOIN cfg.Template        AS t  ON t.Id = tv.TemplateId
+ WHERE cd.IsDeleted = 0;
 GO
 
 -- ⛔ Право читання для ОБЛІКОВОГО ЗАПИСУ SSRS — роль бази `rpt_reader`:

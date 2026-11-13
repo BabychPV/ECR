@@ -1,4 +1,4 @@
-import { lazy, Suspense, useRef, useState, type JSX } from 'react';
+import { lazy, Suspense, useMemo, useRef, useState, type JSX } from 'react';
 import {
   ActionIcon,
   Box,
@@ -29,6 +29,8 @@ import { StaleResultsMark, StaleResultsUndeterminedMark } from '@/features/docum
 import { DocumentYearStrip, DocumentYearStripHeader, DocumentYearStripLegend } from '@/features/documents/DocumentYearStrip';
 import { calendarYears, yearsWithProjects } from '@/features/projects/projectYear';
 import { CollapsibleNote } from '@/features/common/CollapsibleNote';
+import { InfiniteListFooter } from '@/features/common/infiniteList/InfiniteListFooter';
+import { mergePages, nextCursorOf } from '@/features/common/infiniteList/mergePages';
 import type { PeriodCalendarDto } from '@/api/types';
 import { useCalendarsOf } from '@/features/projects/projectCalendars';
 import { statusKey } from '@/shared/ui/StatusBadge';
@@ -158,25 +160,29 @@ export function DocumentsPage(): JSX.Element {
    * ніж у звичайного запиту, і ключ не має збігтися ні з чим, що читає `['documents', …]` як одну сторінку.
    * Префікс `'documents'` лишається — інвалідації (`['documents']`) оновлюють і цей перелік.
    */
+  const listKey = [
+    'documents',
+    null,
+    year,
+    'pages',
+    filters.state,
+    filters.mine,
+    filters.hasLateEdits,
+    filters.hasReopenedMonths,
+    filters.resultsStale,
+    appliedQ,
+    filters.projectId,
+    filters.owner,
+    versionsKey,
+    filters.versionSort,
+  ] as const;
   const query = useInfiniteQuery({
-    queryKey: [
-      'documents',
-      null,
-      year,
-      'pages',
-      filters.state,
-      filters.mine,
-      filters.hasLateEdits,
-      filters.hasReopenedMonths,
-      filters.resultsStale,
-      appliedQ,
-      filters.projectId,
-      filters.owner,
-      versionsKey,
-      filters.versionSort,
-    ],
+    queryKey: listKey,
     initialPageParam: null as string | null,
-    getNextPageParam: (last: DocumentListPage) => last.nextCursor ?? undefined,
+    getNextPageParam: (last: DocumentListPage, _pages, lastParam: string | null) => nextCursorOf(last, lastParam),
+    // ✎ W-3a: повернення у вкладку перечитує ВСІ довантажені сторінки підряд — лише поки сторінка одна; мутації й далі
+    // інвалідують.
+    refetchOnWindowFocus: (q) => (q.state.data?.pages.length ?? 0) <= 1,
     queryFn: ({ pageParam }) =>
       listDocuments({
         periodKey: null,
@@ -194,17 +200,9 @@ export function DocumentsPage(): JSX.Element {
         projectId: filters.projectId,
       }),
   });
-  // Усі завантажені сторінки — одним переліком: рядки підряд, `nextCursor` — останньої сторінки.
-  const pages = query.data?.pages ?? [];
-  const lastPage = pages.at(-1);
-  const list: DocumentListPage | undefined =
-    lastPage === undefined
-      ? undefined
-      : {
-          items: pages.flatMap((page) => page.items),
-          nextCursor: lastPage.nextCursor ?? null,
-          totalCount: lastPage.totalCount ?? null,
-        };
+  // Довантажені сторінки як одна: без дублів за `id` (документ, що змінив групу версії між сторінками, —
+  // `DocumentStore.cs:474-485`); `nextCursor` — останньої сторінки, `totalCount` — першої.
+  const list = useMemo(() => mergePages(query.data?.pages, (document) => document.id), [query.data]);
 
   // Варіанти фільтра «Version»: усі версії видимих документів (за проєктом і періодом), а не лише сторінки.
   const versionOptionsQuery = useQuery({
@@ -468,7 +466,9 @@ export function DocumentsPage(): JSX.Element {
         // ⚠ Відмова ДОЗАВАНТАЖЕННЯ не ховає вже показані рядки: її видно під ними, біля «Load more».
         error={query.isFetchNextPageError ? null : query.error}
         data={list}
-        isEmpty={(page) => page.items.length === 0}
+        // ⚠ Порожньо — лише коли й далі нічого: після відсіву видимості (`DocumentQueryHandlers.cs:229-245`) сторінка може
+        // бути порожньою при `nextCursor` — тоді добирає підвал, а не стан «документів немає».
+        isEmpty={(page) => page.items.length === 0 && page.nextCursor === null}
         emptyTitle={
           filters.active
             ? t('documents.noMatch')
@@ -695,22 +695,14 @@ export function DocumentsPage(): JSX.Element {
 
             {/* ⚠ Курсорна пагінація, а не offset: за місяць у проєкті тисячі
                 документів, і сторінка 200 через OFFSET сканує все, що до неї. */}
-            {/* ✎ B36: «Load more» ДОПИСУЄ наступну сторінку під уже показані рядки (`fetchNextPage`), а не
-                замінює їх. */}
-            {query.isFetchNextPageError && (
-              <ErrorAlert error={query.error} onRetry={() => void query.fetchNextPage()} />
-            )}
-            {page.nextCursor !== null && page.nextCursor !== undefined && (
-              <Button
-                mt="md"
-                variant="default"
-                loading={query.isFetchingNextPage}
-                onClick={() => void query.fetchNextPage()}
-                data-documents-more=""
-              >
-                {t('documents.more')}
-              </Button>
-            )}
+            {/* ✎ W-3a: наступна сторінка ДОПИСУЄТЬСЯ — сама при прокрутці до кінця або коли рядки не заповнюють вікно;
+                кнопка лишається для клавіатури й середовищ без `IntersectionObserver`. */}
+            <InfiniteListFooter
+              key={JSON.stringify(listKey)}
+              pager={query}
+              shown={page.items.length}
+              total={page.totalCount}
+            />
           </>
           );
         }}

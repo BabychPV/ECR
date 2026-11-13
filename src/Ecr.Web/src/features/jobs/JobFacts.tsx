@@ -129,19 +129,36 @@ export function jobAuthor(name: string | null | undefined): string {
 }
 
 /**
+ * Право скасувати чи повторити ЧУЖУ або системну задачу (S-2 аудиту 2026-11, `D-496`) — те саме, що
+ * `CancelJobHandler.ForeignJobPermission` на сервері. `System.ViewHealth` дає лише перегляд.
+ */
+export const ForeignJobPermission = 'System.RunJob';
+
+/**
+ * Чи задача — власна для цього користувача. Системна (`createdByUserId` — `null`) не є власною нікому;
+ * невідомий користувач (профіль ще летить) — теж: кнопка з'явиться, коли профіль прийде.
+ */
+export function isOwnJobOf(
+  createdByUserId: number | null | undefined,
+  userId: number | undefined,
+): boolean {
+  return createdByUserId !== null && createdByUserId !== undefined && createdByUserId === userId;
+}
+
+/**
  * Чи показувати «Повторити» (UX-09, директива №11, T10 #40): лише `Failed`,
- * і лише власнику ВЛАСНОЇ задачі АБО праву `System.ViewHealth`.
+ * і лише власнику ВЛАСНОЇ задачі АБО праву `System.RunJob` (S-2, `D-496`).
  *
  * ⛔ Чиста функція, окремо від компонента, саме заради мутаційного доказу:
- * «чужа задача без ViewHealth» і «не-Failed стан» перевіряються без монтування
+ * «чужа задача без RunJob» і «не-Failed стан» перевіряються без монтування
  * дерева й без заглушки мережі під `/restart`.
  */
 export function canRestartJob(
   state: string,
   isOwnJob: boolean,
-  hasViewHealth: boolean,
+  hasRunJob: boolean,
 ): boolean {
-  return state === 'Failed' && (isOwnJob || hasViewHealth);
+  return state === 'Failed' && (isOwnJob || hasRunJob);
 }
 
 /**
@@ -155,12 +172,9 @@ export function canRestartJob(
  * обидва наявні місця виклику вже знають власність із власного контексту
  * без порівняння id — у шухляді «My tasks» перелік звужено сервером до
  * `mine=true` (`Q-156`, `MyTasksDrawer.tsx` передає `isOwnJob` буквально
- * `true`), а на `/admin/jobs` видимість і так гейтується правом
- * `System.ViewHealth` (`JobsPage.tsx` передає `isOwnJob` буквально `false`,
- * `hasViewHealth` — `true`). Автоматичне порівняння тут нічого не додало б
- * цим двом викликачам і ризикувало б непомітно змінити поведінку
- * `RecentJobs`, де показ «Повторити» НАВМИСНО не обмежений власністю —
- * дивись коментар біля `isOwnJob={false}` у `JobsPage.tsx`. Сервер
+ * `true`), а `/admin/jobs` показує й чужі задачі, тож порівнює сам
+ * (`isOwnJobOf` із сеансом) і передає `hasRunJob` з профілю: після S-2
+ * (`D-496`) `System.ViewHealth` цього екрана дає лише перегляд. Сервер
  * (`RestartJobHandler`) усе одно перевіряє власника заново під час запиту —
  * `403` (`err.ECR-AUTH-0403.jobNotYours`), якщо виклик (чи майбутній третій
  * викликач, який передасть прапорець неправильно) помилиться.
@@ -173,18 +187,19 @@ export function JobRetry({
   jobId,
   state,
   isOwnJob,
-  hasViewHealth,
+  hasRunJob,
   onRestarted,
 }: {
   readonly jobId: string;
   readonly state: string;
   readonly isOwnJob: boolean;
-  readonly hasViewHealth: boolean;
+  /** Чи має користувач `System.RunJob` — право на чужу чи системну задачу (S-2). */
+  readonly hasRunJob: boolean;
   readonly onRestarted?: () => void;
 }): JSX.Element | null {
   const restart = useRestartJob(onRestarted);
 
-  if (!canRestartJob(state, isOwnJob, hasViewHealth)) return null;
+  if (!canRestartJob(state, isOwnJob, hasRunJob)) return null;
 
   return (
     <Button

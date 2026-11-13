@@ -973,7 +973,8 @@ namespace Ecr.Application.Ports;
 
 /// <summary>
 /// Збережена мапа перейменування колонок між версіями шаблону (<c>cfg.ColumnRename</c>): псевдонім для вʼюх SSRS
-/// і міжперіодних формул на межі версій. Пишеться переносом версії з <c>tableRenames</c>.
+/// і міжперіодних формул на межі версій. Пишеться переносом версії з <c>tableRenames</c>: пари колонок, що змінили
+/// код, і пари всіх колонок таблиці, чий код змінено мапою (R-2).
 /// </summary>
 public interface IColumnRenameMap
 {
@@ -4207,7 +4208,12 @@ public interface IValidationResultStore
 (лише додані колонки/таблиці/аркуші, розширення Precision/Scale, презентація) — статус, значення й журнал
 погодження лишаються, звіт каже скільки: `lockedSheetsCarried`; якщо зачіпає (втрата/видалення, звуження чи зміна
 типу, нові рядки фіксованої таблиці, перейменування) — `409 ECR-DOC-0409` (`migrateSheetsLocked`) з
-`lockedSheetsAffected` і переліком `lockedSheetItems` (код аркуша, період, статус; без імен і значень). Формульні
+`lockedSheetsAffected` і переліком `lockedSheetItems` (код аркуша, період, статус; без імен і значень).
+✎ V-7 (рішення PO 11.11, `D-497`): ручне значення замість формули (D-461), якого формула цільової версії не дозволяє,
+на поданому/затвердженому аркуші — окрема відмова `lockedOverridesLost` → `409 ECR-DOC-0409`
+(`migrateLockedOverrides`), звіт `lockedOverridesLost` (кількість позначок) і `lockedOverrideItems` (код аркуша,
+період, статус; ≤ 200), без значень; після повернення аркуша в роботу перенос знімає позначку, як для решти D-461.
+Формульні
 колонки перенесених аркушів не перераховуються до повернення аркуша в роботу. Ціль не опублікована,
 з іншого шаблону чи та сама — `422 ECR-TMPL-0422`. Подія — `aud.SecurityEvent`
 (`DocumentVersionMigrated`). Сигнатури — у `src/Ecr.Application/Ports/IDocumentVersionMigrationStore.cs`.
@@ -4525,6 +4531,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `err.ECR-REQ-0422.condFormatIfMatch` | 422 | `PUT …/conditional-formats` без `If-Match` (зміну випадку «змінили між читанням і записом» дає `ECR-TMPL-0409 condFormatChanged`) |
 | `err.ECR-DOC-0409.migrateProjectArchived` | 409 | перенос документів на нову версію шаблону: проєкт в архіві (ФВ-7.5) |
 | `err.ECR-DOC-0409.migrateSheetsLocked` | 409 | перенос версії зачепив би подані/затверджені аркуші (LP-32; решта поданих переноситься без змін) |
+| `err.ECR-DOC-0409.migrateLockedOverrides` | 409 | ✎ V-7: перенос версії зняв би ручні значення замість формул (D-461) на поданих/затверджених аркушах (`lockedOverrides`, `lockedOverrideSheets`, `lockedOverrideItems` — `SHEET\|період\|статус`); спершу повернути аркуші в роботу |
 | `err.ECR-SCHM-0422.migrateDataLoss` | 422 | перенос версії в режимі `Safe` втратив би дані |
 | `err.ECR-SCHM-0422.migrateGrantsNotMapped` | 422 | на аркуші/таблиці/колонці, якої в новій версії за кодом нема, стоїть будь-який грант: заборона або звужувальний дозвіл (`refusals` має `grantsNotMapped`); звіт сухого прогону й `details` несуть необов'язкове `blockedGrantCount` — лише кількість таких грантів (без переліку ресурсів/ролей; відсутнє, коли блокування немає) |
 | `err.ECR-SCHM-0422.migrateMappingsNotMapped` | 422 | D-1 (RC20): АКТИВНИЙ мапінг збору (`ext.EntityFieldMap`) вказує на колонку вихідної версії, якої немає в цільовій (`refusals` має `mappingsNotMapped`; `details.mappingsUnmapped` — кількість, `details.mappingColumns` — до 10 шляхів `SHEET.TABLE.COLUMN`, без джерела й поля). Мапінги з відповідником за кодами переносяться на колонки цільової версії автоматично в тій самій транзакції (фонова задача — так само); призупинений мапінг без відповідника не блокує й лишається. Звіт переносу і сухого прогону несе `mappingsRemapped`, `mappingsUnmapped`, `mappingsUnmappedKeys`; повідомлення `jobs.migrateDone` — параметри `mappingsRemapped`, `mappingsUnmapped`. D-1b: ті самі правила й ті самі поля звіту для мапінгів подій джерела (`ext.SourceEventMap`/`SourceEventFieldMap`, лише документи цього проєкту; ключ `events SHEET.TABLE`) і прив'язок вікна (`ext.RowWindowMap`; ключ `window SHEET.TABLE.COLUMN`, провенанс `ext.RowWindowValue` проєкту переїжджає на нові колонки); мапінг, чиє цільове місце в цільовій версії вже зайнято (`UQ_SourceEventMap`, `UQ_RowWindowMap_Target`), вважається «без відповідника». Для ВСІХ трьох видів мапінгів «без відповідника» також означає: режим рядків таблиці в цільовій версії інший, ніж у вихідній (збір, події, вікно); для мапінгу збору — `TargetRowKey` вказує на рядок фіксованої таблиці (`RowMode = Fixed`), якого немає в цільовій таблиці. Призупинений мапінг у таких випадках не переноситься (лишається на колонці вихідної версії) і не блокує |
@@ -4937,8 +4944,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/jobs?mine=true` | — (власні задачі) | 5 |
 | `GET` | `/api/v1/jobs/summary` | `System.ViewHealth` (або `mine=true` — власні задачі) | 5 |
 | `GET` | `/api/v1/jobs/{jobId}` | `System.ViewHealth` | 5 |
-| `POST` | `/api/v1/jobs/{jobId}/restart` | `System.ViewHealth` | 5 |
-| `POST` | `/api/v1/jobs/{jobId}/cancel` | `System.ViewHealth` | 5 |
+| `POST` | `/api/v1/jobs/{jobId}/restart` | `System.RunJob` (чужа чи системна задача, S-2/D-496; свою — автор з `System.ViewHealth` або за L1-19; повтор збору/синку — ще `Integration.Manage`) | 5 |
+| `POST` | `/api/v1/jobs/{jobId}/cancel` | `System.RunJob` (чужа чи системна задача, S-2/D-496; свою — автор без права, Q-156) | 5 |
 | `GET` | `/api/v1/sources` | `Integration.Manage` | 5 |
 | `POST` | `/api/v1/sources` | `Integration.Manage` | 7 |
 | `PUT` | `/api/v1/sources/{id}/registry` | `Integration.Manage` | 7 |

@@ -32188,6 +32188,16 @@ export interface components {
              *     ⛔ Лише кількість.
              */
             lockedDocumentCount?: null | number;
+            /** @description ✎ V-7: ці подані/затверджені пари «аркуш × період» (bool LockedSheetItem.Affected = `true`), не більше
+             *     `MaxLockedItems`; `null` — таких немає. ⛔ Лише коди аркушів, періоди й статуси. */
+            lockedOverrideItems?: null | components["schemas"]["LockedSheetItem"][];
+            /**
+             * Format: int32
+             * @description ✎ V-7 (рішення PO 11.11): скільки ручних значень замість формул (D-461), яких формула цільової версії не дозволяє,
+             *     лежить на ПОДАНИХ або ЗАТВЕРДЖЕНИХ аркушах. Більше нуля — відмова `lockedOverridesLost` (`409 ECR-DOC-0409`,
+             *     `migrateLockedOverrides`), доки аркуші не повернуть у роботу. `null` — таких немає.
+             */
+            lockedOverridesLost?: null | number;
             /** @description LP-32: перелік поданих/затверджених пар (спершу зачеплені), не більше `MaxLockedItems`; `null` — таких
              *     аркушів немає. ⛔ Без імен користувачів і значень — лише код аркуша, період, статус. */
             lockedSheetItems?: null | components["schemas"]["LockedSheetItem"][];

@@ -67,7 +67,7 @@ public sealed class JobCancelTests
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     public async Task Скасування_задачі_що_виконується_дає_202_і_далі_стан_Cancelled()
     {
-        WithHealthPermission(Stranger);
+        WithForeignJobPermission(Stranger);
 
         var accepted = Assert.IsType<AcceptedResult>(
             await Controller().Cancel(JobId, CancellationToken.None));
@@ -90,7 +90,7 @@ public sealed class JobCancelTests
     public async Task Успішну_задачу_скасувати_не_можна()
     {
         _state = "Succeeded";
-        WithHealthPermission(Stranger);
+        WithForeignJobPermission(Stranger);
 
         var conflict = await Assert.ThrowsAsync<BusinessRuleException>(
             () => Handler().HandleAsync(JobId, CancellationToken.None));
@@ -112,7 +112,7 @@ public sealed class JobCancelTests
         Assert.Equal(CancelJobHandler.NotActiveErrorCode, code);
     }
 
-    /// <summary>Чужу задачу без <c>System.ViewHealth</c> не скасувати.</summary>
+    /// <summary>Чужу задачу без права не скасувати (після S-2 потрібне <c>System.RunJob</c>).</summary>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     public async Task Чужу_задачу_без_ViewHealth_скасувати_не_можна()
@@ -168,6 +168,44 @@ public sealed class JobCancelTests
     }
 
     /// <summary>
+    /// S-2 (аудит 2026-11, рішення PO 11.11): чужу чи системну задачу скасовує лише носій <c>System.RunJob</c>;
+    /// безпечне <c>System.ViewHealth</c> («Аудитор», адміністратори шаблонів і періодів) — лише перегляд; свою задачу
+    /// автор скасовує без жодного права.
+    /// </summary>
+    /// <remarks>
+    /// Без виправлення рядки «<c>System.ViewHealth</c>, чужа» і «<c>System.ViewHealth</c>, системна» червоні: стара
+    /// гілка <c>IsGranted(ViewHealth)</c> пропускала скасування.
+    /// </remarks>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "S-2")]
+    [InlineData("System.ViewHealth", Author, false)]
+    [InlineData("System.ViewHealth", null, false)]
+    [InlineData("System.ViewHealth,System.RunJob", Author, true)]
+    [InlineData("System.RunJob", null, true)]
+    [InlineData("", Stranger, true)]
+    [InlineData("System.ViewHealth", Stranger, true)]
+    public async Task Матриця_права_скасування_чужої_системної_і_своєї_задачі(string permissions, int? owner, bool allowed)
+    {
+        WithPermissions(Stranger, permissions);
+        _jobs.GetCreatedByUserIdAsync(JobId, Arg.Any<CancellationToken>()).Returns(owner);
+
+        if (allowed)
+        {
+            Assert.IsType<AcceptedResult>(await Controller().Cancel(JobId, CancellationToken.None));
+            await _jobs.Received(1).CancelAsync(JobId, Arg.Any<CancellationToken>());
+            return;
+        }
+
+        var denied = await Assert.ThrowsAsync<AccessDeniedException>(
+            () => Controller().Cancel(JobId, CancellationToken.None));
+
+        Assert.Equal("err.ECR-AUTH-0403.jobNotYours", denied.Details!["messageKey"]);
+        Assert.Equal(CancelJobHandler.ForeignJobPermission, denied.Details!["permission"]);
+        await _jobs.DidNotReceive().CancelAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
     /// Невідома задача — <c>404</c>, і саме ДО перевірки права: інакше
     /// «задачі немає» ховалося б за «немає права» (той самий порядок, що
     /// Q-179/Q-180).
@@ -188,7 +226,7 @@ public sealed class JobCancelTests
     }
 
     /// <summary>
-    /// R9-F3 / F3-02: скасування чужої задачі власником <c>System.ViewHealth</c> лишає слід у
+    /// R9-F3 / F3-02: скасування чужої задачі власником <c>System.RunJob</c> (S-2) лишає слід у
     /// <c>aud.SecurityEvent</c> — хто зупинив і чию задачу.
     /// </summary>
     /// <remarks>Мутація: прибрати запис <c>JobCancelled</c> у <c>CancelJobHandler</c> — червоніє.</remarks>
@@ -196,7 +234,7 @@ public sealed class JobCancelTests
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     public async Task Скасування_чужої_задачі_пише_подію_JobCancelled()
     {
-        WithHealthPermission(Stranger);
+        WithForeignJobPermission(Stranger);
         _jobs.GetCreatedByUserIdAsync(JobId, Arg.Any<CancellationToken>()).Returns(Author);
 
         await Handler().HandleAsync(JobId, CancellationToken.None);
@@ -210,13 +248,26 @@ public sealed class JobCancelTests
             Arg.Any<CancellationToken>());
     }
 
-    private void WithHealthPermission(int userId)
+    /// <summary>S-2: носій <c>System.RunJob</c> — єдиний, хто скасовує чужу чи системну задачу.</summary>
+    private void WithForeignJobPermission(int userId)
     {
         _user.UserId.Returns(userId);
         _access.BuildProfileAsync(userId, Arg.Any<CancellationToken>())
             .Returns(new AccessBuilder { UserId = userId }
-                .Permission(GetJobStatusHandler.Permission)
+                .Permission(CancelJobHandler.ForeignJobPermission)
                 .Build());
+    }
+
+    private void WithPermissions(int userId, string permissions)
+    {
+        _user.UserId.Returns(userId);
+        var builder = new AccessBuilder { UserId = userId };
+        foreach (var permission in permissions.Split(',', StringSplitOptions.RemoveEmptyEntries))
+        {
+            builder.Permission(permission);
+        }
+
+        _access.BuildProfileAsync(userId, Arg.Any<CancellationToken>()).Returns(builder.Build());
     }
 
     private void WithoutPermission(int userId)

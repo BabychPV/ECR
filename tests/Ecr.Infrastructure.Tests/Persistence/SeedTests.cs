@@ -517,6 +517,29 @@ public sealed class SeedTests(SqlServerFixture sql)
     }
 
     /// <summary>
+    /// S-2 (аудит 2026-11, рішення PO 11.11, <c>D-496</c>): скасувати чи повторити ЧУЖУ або системну фонову задачу
+    /// може лише носій <c>System.RunJob</c>. Серед вбудованих ролей це право має рівно одна —
+    /// <c>SystemAdministrator</c>: саме тому «або роль адміністратора» з рішення PO окремої перевірки ролі в коді
+    /// не потребує. Якщо сід видасть право ще комусь (наприклад, «Аудитору»), звуження S-2 мовчки зникне.
+    /// </summary>
+    /// <remarks>Мутація: додати <c>System.RunJob</c> будь-якій іншій вбудованій ролі в сіді — червоніє.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "S-2")]
+    public async Task System_RunJob_серед_вбудованих_ролей_має_лише_SystemAdministrator()
+    {
+        Assert.Equal(
+            "SystemAdministrator",
+            await StringAsync("""
+                SELECT STRING_AGG(r.Code, N',') WITHIN GROUP (ORDER BY r.Code)
+                FROM sec.RolePermission AS rp
+                JOIN sec.Role AS r ON r.Id = rp.RoleId AND r.IsBuiltIn = 1
+                WHERE rp.PermissionCode = N'System.RunJob'
+                """));
+    }
+
+    /// <summary>
     /// Адмін-права керування, видані SystemAdministrator секцією <c>FP:sysadmin-rights</c> (рішення
     /// людини 2026-10-11). Перелік дзеркалить MERGE сіду; сторож нижче звіряє його з каталогом.
     /// </summary>

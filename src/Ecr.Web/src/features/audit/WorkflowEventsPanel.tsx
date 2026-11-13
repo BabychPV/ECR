@@ -1,11 +1,13 @@
 import { useMemo, type JSX } from 'react';
-import { Badge, Button, Select, Table, Text } from '@mantine/core';
+import { Badge, Select, Table, Text } from '@mantine/core';
 import {
   fetchWorkflowExport,
-  useWorkflowEvents,
   workflowEventsQuery,
   type WorkflowEventPage,
 } from '@/features/audit/api';
+import { useWorkflowEventPages } from '@/features/audit/journalPages';
+import { InfiniteListFooter } from '@/features/common/infiniteList/InfiniteListFooter';
+import { mergePages } from '@/features/common/infiniteList/mergePages';
 import { AuditExportButton } from '@/features/audit/AuditExportButton';
 import { useAuditSort } from '@/features/audit/auditSort';
 import { authorName, useAuthorOptions } from '@/features/audit/authorOptions';
@@ -13,7 +15,7 @@ import { SortableTh } from '@/features/audit/SortableTh';
 import { FilterHints, FilterRow, readerOnlyDescription } from '@/shared/ui/FilterBar';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { Timestamp } from '@/shared/ui/Timestamp';
-import { useDebouncedFilter, useFilterCursor } from '@/shared/ui/useDebouncedFilter';
+import { useDebouncedFilter } from '@/shared/ui/useDebouncedFilter';
 import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 import { humanizeIdentifier } from './auditLabels';
@@ -66,15 +68,16 @@ export function WorkflowEventsPanel({ from, to }: { from: string; to: string }):
   const [sort, setSort] = useAuditSort();
 
   const applied = { from, to, action: appliedAction, changedByUserId: appliedChangedBy, sort, limit: 100 };
-  const [cursor, setCursor] = useFilterCursor(workflowEventsQuery(applied));
-
-  const events = useWorkflowEvents({ ...applied, cursor });
+  // ✎ W-3f: курсор — параметр сторінки `useInfiniteQuery`; ключ — застосований фільтр без курсора.
+  const listKey = workflowEventsQuery(applied);
+  const events = useWorkflowEventPages(applied);
+  const eventPage = useMemo(() => mergePages(events.data?.pages), [events.data]);
   const authored = useMemo(
     () =>
-      (events.data?.items ?? [])
+      (eventPage?.items ?? [])
         .filter((e) => e.changedByUserId !== null)
         .map((e) => ({ changedByUserId: e.changedByUserId ?? 0, changedByDisplayName: e.changedByDisplayName })),
-    [events.data],
+    [eventPage],
   );
   const authorOptions = useAuthorOptions(authored, changedBy);
 
@@ -122,8 +125,8 @@ export function WorkflowEventsPanel({ from, to }: { from: string; to: string }):
 
       <AsyncBoundary<WorkflowEventPage>
         isPending={events.isPending}
-        error={events.error}
-        data={events.data}
+        error={events.isFetchNextPageError ? null : events.error}
+        data={eventPage}
         isEmpty={(page) => page.items.length === 0}
         emptyTitle={t('audit.workflowEmpty')}
         emptyHint={t('audit.emptyHint')}
@@ -189,11 +192,8 @@ export function WorkflowEventsPanel({ from, to }: { from: string; to: string }):
               </Table.Tbody>
             </Table>
 
-            {page.nextCursor !== null && (
-              <Button mt="md" variant="default" onClick={() => setCursor(page.nextCursor)}>
-                {t('documents.more')}
-              </Button>
-            )}
+            {/* ✎ W-3f: сторінки ДОПИСУЮТЬСЯ прокруткою (`InfiniteListFooter`). */}
+            <InfiniteListFooter key={listKey} pager={events} shown={page.items.length} total={page.totalCount} />
           </>
         )}
       </AsyncBoundary>

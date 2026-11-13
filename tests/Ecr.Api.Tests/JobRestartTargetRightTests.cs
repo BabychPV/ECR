@@ -133,21 +133,20 @@ public sealed class JobRestartTargetRightTests
     }
 
     /// <summary>
-    /// R9-F3 / F3-02: <c>System.ViewHealth</c> (безпечне право, є й в «Аудитора») не замінює
-    /// небезпечного права на саму дію: чужий збір чи синк — лише з <c>Integration.Manage</c>,
-    /// перевірку узгодженості — лише з <c>System.RunJob</c>.
+    /// R9-F3 / F3-02 + S-2: право на чужу задачу (<c>System.RunJob</c>) не замінює небезпечного права на саму
+    /// дію: чужий збір чи синк — лише з <c>Integration.Manage</c>. (Перевірка узгодженості тут не перелічена:
+    /// <c>System.RunJob</c> і є її правом на дію.)
     /// </summary>
-    /// <remarks>Мутація: прибрати перевірку <c>DangerousActionPermission</c> у гілці ViewHealth — червоніє.</remarks>
+    /// <remarks>Мутація: прибрати перевірку <c>DangerousActionPermission</c> після дозволу — червоніє.</remarks>
     [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [InlineData("ICollectionJob", "Integration.Manage")]
     [InlineData("ISourceEventSyncJob", "Integration.Manage")]
-    [InlineData("IConsistencyCheckJob", "System.RunJob")]
-    public async Task З_ViewHealth_чужий_збір_і_перевірку_без_права_на_дію_не_повторити(string code, string required)
+    public async Task З_RunJob_чужий_збір_і_синк_без_Integration_Manage_не_повторити(string code, string required)
     {
         var jobId = Failed(code);
         _jobs.GetCreatedByUserIdAsync(jobId, Arg.Any<CancellationToken>()).Returns(Stranger);
-        SignedIn("System.ViewHealth");
+        SignedIn("System.RunJob");
 
         var denied = await Assert.ThrowsAsync<AccessDeniedException>(
             () => Controller().Restart(jobId, CancellationToken.None));
@@ -164,11 +163,11 @@ public sealed class JobRestartTargetRightTests
     /// </summary>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    public async Task З_ViewHealth_і_Integration_Manage_чужий_збір_повторюється_і_лишає_слід()
+    public async Task З_RunJob_і_Integration_Manage_чужий_збір_повторюється_і_лишає_слід()
     {
         var jobId = Failed("ICollectionJob");
         _jobs.GetCreatedByUserIdAsync(jobId, Arg.Any<CancellationToken>()).Returns(Stranger);
-        SignedIn("System.ViewHealth", "Integration.Manage");
+        SignedIn("System.RunJob", "Integration.Manage");
 
         Assert.IsType<AcceptedResult>(await Controller().Restart(jobId, CancellationToken.None));
 

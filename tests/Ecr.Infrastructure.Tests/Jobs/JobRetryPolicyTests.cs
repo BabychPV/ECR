@@ -104,7 +104,11 @@ public sealed class JobRetryPolicyTests
     [Fact]
     public void Відмова_переносу_версії_за_станом_не_повторюється_і_має_код_DOC_0409()
     {
-        foreach (var key in new[] { "err.ECR-DOC-0409.migrateSheetsLocked", "err.ECR-DOC-0409.migrateProjectArchived" })
+        foreach (var key in new[]
+                 {
+                     "err.ECR-DOC-0409.migrateSheetsLocked", "err.ECR-DOC-0409.migrateProjectArchived",
+                     "err.ECR-DOC-0409.migrateLockedOverrides", // V-7
+                 })
         {
             var refusal = new ConcurrencyConflictException(
                 ErrorCodes.DocumentSubmitted,

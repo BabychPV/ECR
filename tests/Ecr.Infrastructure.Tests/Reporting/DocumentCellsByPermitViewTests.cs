@@ -125,6 +125,105 @@ public sealed class DocumentCellsByPermitViewTests(SqlServerFixture sql)
     }
 
     /// <summary>
+    /// R-1 (аудит 2026-11, рішення PO 11.11): заархівований екземпляр видно у <c>rpt.v_DocumentCellsByPermit</c> тими
+    /// самими рядками (дозвіл, значення, частини місяця) з <c>IsArchived = 1</c>; поки екземпляр лежить в обох схемах
+    /// (проміжний стан архівації чи повернення) — рівно раз, гарячою копією.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Архівація ОДНОГО екземпляра імітується копією рядків (період спільний з іншими тестами — процедура з
+    /// <c>TRUNCATE</c> партиції тут не годиться); наприкінці рядки з <c>arc.*</c> прибираються. Без архівної гілки вʼюхи
+    /// після видалення гарячих рядків — 0 рядків; без <c>NOT EXISTS</c> у стані «обидві схеми» рядків удвічі більше.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "R-1")]
+    public async Task Заархівований_екземпляр_видно_з_IsArchived_і_без_дублів()
+    {
+        var tag = Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
+        var kit = await BuildAsync(tag);
+        long a = kit.A, b = kit.B;
+
+        // R1: базовий A, B з 15.03; березень 12 поділено 5.5 (A) + 6.5 (B); лютий 4 (A).
+        var r1 = await RowAsync(kit, kit.T, "R1", 1);
+        await CellAsync(kit.T, r1, kit.Col["PERMIT"], permit: a);
+        await CellAsync(kit.T, r1, kit.Col["M02"], 4m);
+        await CellAsync(kit.T, r1, kit.Col["M03"], 12m);
+        await SegmentAsync(kit, kit.T, "R1", new DateOnly(2026, 3, 15), b);
+        await PartsAsync(kit, kit.T, "R1", kit.Col["M03"], 202603,
+            (a, new DateOnly(2026, 3, 1), new DateOnly(2026, 3, 14), 5.5m), (b, new DateOnly(2026, 3, 15), new DateOnly(2026, 3, 31), 6.5m));
+
+        async Task<List<(string Col, long Permit, bool IsPart, int? PartNo, decimal Value, bool Archived)>> ReadAsync()
+            => (await QueryAsync(
+                    "SELECT ColumnCode, PermitId, IsPart, PartNo, ValueNumeric, IsArchived "
+                    + $"FROM rpt.v_DocumentCellsByPermit WHERE DocumentId = {kit.DocumentId} ORDER BY ColumnCode, PartNo"))
+                .Select(r => (
+                    (string)r[0]!, Convert.ToInt64(r[1], CultureInfo.InvariantCulture), (bool)r[2]!,
+                    r[3] is null ? (int?)null : Convert.ToInt32(r[3], CultureInfo.InvariantCulture), (decimal)r[4]!, (bool)r[5]!))
+                .ToList();
+
+        List<(string, long, bool, int?, decimal, bool)> Expected(bool archived) =>
+        [
+            ("M02", a, false, null, 4m, archived),
+            ("M03", a, true, 1, 5.5m, archived),
+            ("M03", b, true, 2, 6.5m, archived),
+        ];
+
+        Assert.Equal(Expected(archived: false), await ReadAsync());
+
+        var instances = $"SELECT i.Id FROM doc.TableInstance AS i WHERE i.DocumentId = {kit.DocumentId}";
+        var archivedInstances = $"SELECT i.Id FROM arc.TableInstance AS i WHERE i.DocumentId = {kit.DocumentId}";
+        try
+        {
+            // Копія в архів тими самими Id (як крок 1 arc.usp_ArchiveYear): екземпляр в ОБОХ схемах — рядки рівно раз, гарячі.
+            await QueryAsync($"""
+                INSERT INTO arc.TableInstance (PeriodKey, Id, DocumentId, TableDefId, CreatedAt, ModifiedAt, SheetCopyId)
+                SELECT i.PeriodKey, i.Id, i.DocumentId, i.TableDefId, i.CreatedAt, i.ModifiedAt, i.SheetCopyId
+                  FROM doc.TableInstance AS i WHERE i.DocumentId = {kit.DocumentId};
+                INSERT INTO arc.TableRow (PeriodKey, Id, TableInstanceId, RowKey, RowDefId, Ordinal, IsDeleted, ModifiedAt, IsOrphaned)
+                SELECT r.PeriodKey, r.Id, r.TableInstanceId, r.RowKey, r.RowDefId, r.Ordinal, r.IsDeleted, r.ModifiedAt, r.IsOrphaned
+                  FROM doc.TableRow AS r WHERE r.TableInstanceId IN ({instances});
+                INSERT INTO arc.CellValue (PeriodKey, TableRowId, ColumnDefId, TableDefId, ValueString, ValueNumeric, ValueDate,
+                                           ValueBool, ValueRegistryEntryId, ValueUnitId, IsCalculated, IsEmpty)
+                SELECT c.PeriodKey, c.TableRowId, c.ColumnDefId, c.TableDefId, c.ValueString, c.ValueNumeric, c.ValueDate,
+                       c.ValueBool, c.ValueRegistryEntryId, c.ValueUnitId, c.IsCalculated, c.IsEmpty
+                  FROM doc.CellValue AS c
+                 WHERE c.TableRowId IN (SELECT r.Id FROM doc.TableRow AS r WHERE r.TableInstanceId IN ({instances}));
+                INSERT INTO arc.CellPermitPart (PeriodKey, Id, DocumentId, TableDefId, SheetCopyId, RowKey, ColumnDefId, PartNo,
+                                                RegistryEntryId, DayFrom, DayTo, ValueNumeric)
+                SELECT q.PeriodKey, q.Id, q.DocumentId, q.TableDefId, q.SheetCopyId, q.RowKey, q.ColumnDefId, q.PartNo,
+                       q.RegistryEntryId, q.DayFrom, q.DayTo, q.ValueNumeric
+                  FROM doc.CellPermitPart AS q WHERE q.DocumentId = {kit.DocumentId};
+                SELECT 1;
+                """);
+            Assert.Equal(Expected(archived: false), await ReadAsync());
+
+            // Гарячих рядків більше немає (як після TRUNCATE партицій) — ті самі рядки з архіву.
+            await QueryAsync($"""
+                DELETE FROM doc.CellPermitPart WHERE DocumentId = {kit.DocumentId};
+                DELETE c FROM doc.CellValue AS c
+                 WHERE c.TableRowId IN (SELECT r.Id FROM doc.TableRow AS r WHERE r.TableInstanceId IN ({instances}));
+                DELETE FROM doc.TableRow WHERE TableInstanceId IN ({instances});
+                DELETE FROM doc.TableInstance WHERE DocumentId = {kit.DocumentId};
+                SELECT 1;
+                """);
+            Assert.Equal(Expected(archived: true), await ReadAsync());
+        }
+        finally
+        {
+            // Архівні рядки цього тесту не мають лишатися тестам архіву/повернення (ті рахують партицію цілком).
+            await QueryAsync($"""
+                DELETE FROM arc.CellPermitPart WHERE DocumentId = {kit.DocumentId};
+                DELETE c FROM arc.CellValue AS c
+                 WHERE c.TableRowId IN (SELECT r.Id FROM arc.TableRow AS r WHERE r.TableInstanceId IN ({archivedInstances}));
+                DELETE FROM arc.TableRow WHERE TableInstanceId IN ({archivedInstances});
+                DELETE FROM arc.TableInstance WHERE DocumentId = {kit.DocumentId};
+                SELECT 1;
+                """);
+        }
+    }
+
+    /// <summary>
     /// Q-17 month routing: the March cell of R5 lives in ANOTHER instance of the year (period 202602) whose row has no permit
     /// cell — the base permit comes from the same RowKey in the 202601 instance; B is in force only from 15.03, so the routed
     /// February value is the base permit A (only the fallback can find it).

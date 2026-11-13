@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { MantineProvider } from '@mantine/core';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { createQueryClient } from '@/app/queryClient';
-import { VersionMigrationDialog, itemKindText } from '@/features/documents/VersionMigrationDialog';
+import { VersionMigrationDialog, itemKindText, refusalText } from '@/features/documents/VersionMigrationDialog';
 import { testTheme } from '@/test/render';
 
 /**
@@ -14,6 +14,9 @@ import { testTheme } from '@/test/render';
  * ⚠ Сервер підмінено на рівні `fetch` (як `VersionMigrationDialog.backup.test.tsx`).
  */
 let lostFormulaOverrides: number | null = null;
+
+/** ✎ V-7: позначки на поданих/затверджених аркушах — відмова `lockedOverridesLost` (рішення PO 11.11). */
+let lockedOverridesLost: number | null = null;
 
 function report(): Record<string, unknown> {
   return {
@@ -27,8 +30,13 @@ function report(): Record<string, unknown> {
     mode: 'Safe',
     dryRun: true,
     applied: false,
-    canApply: true,
-    refusals: [],
+    canApply: lockedOverridesLost === null,
+    refusals: lockedOverridesLost === null ? [] : ['lockedOverridesLost'],
+    lockedOverridesLost,
+    lockedOverrideItems:
+      lockedOverridesLost === null
+        ? null
+        : [{ documentId: 42, sheetCode: 'S1', periodKey: 202601, status: 'Approved', affected: true }],
     transferredValues: 10,
     lostValues: 0,
     guardedValues: 0,
@@ -84,12 +92,17 @@ async function openAndDryRun(): Promise<void> {
   fireEvent.click(select);
   fireEvent.click(await screen.findByRole('option', { name: '2.0' }));
   fireEvent.click(screen.getByTestId('migrate-dry-run'));
-  await screen.findByText('⟦documents.migrateCanApply⟧');
+  if (lockedOverridesLost === null) {
+    await screen.findByText('⟦documents.migrateCanApply⟧');
+  } else {
+    await waitFor(() => expect(document.querySelector('[data-migrate-refused]')).not.toBeNull());
+  }
 }
 
 afterEach(() => {
   vi.unstubAllGlobals();
   lostFormulaOverrides = null;
+  lockedOverridesLost = null;
 });
 
 describe('VersionMigrationDialog: ручні значення замість формул, що не переїдуть (D-461)', () => {
@@ -117,5 +130,31 @@ describe('VersionMigrationDialog: ручні значення замість ф�
     await openAndDryRun();
 
     expect(document.querySelector('[data-migrate-lost-formula-overrides]')).toBeNull();
+    expect(document.querySelector('[data-migrate-locked-overrides]')).toBeNull();
+  });
+
+  it('V-7: refusalText знає причину lockedOverridesLost', () => {
+    // ⛔ Мутація: приберіть `case 'lockedOverridesLost'` — у діалозі буде сирий код причини замість тексту.
+    expect(refusalText('lockedOverridesLost')).toBe('⟦documents.migrateRefusalLockedOverrides⟧');
+  });
+
+  it('V-7: позначки на затвердженому аркуші — причина відмови й перелік аркушів; застосувати не можна', async () => {
+    lostFormulaOverrides = 1;
+    lockedOverridesLost = 1;
+    await openAndDryRun();
+
+    const refused = document.querySelector('[data-migrate-refused]') as HTMLElement;
+    expect(within(refused).getByText('⟦documents.migrateRefusalLockedOverrides⟧')).toBeTruthy();
+
+    const block = refused.querySelector('[data-migrate-locked-overrides]') as HTMLElement;
+    expect(block).not.toBeNull();
+    expect(within(block).getByText('⟦documents.migrateLockedOverrides (count=1)⟧')).toBeTruthy();
+    expect(
+      within(block).getByText('⟦documents.migrateLockedItem (sheet=S1, period=202601, status=Approved)⟧'),
+    ).toBeTruthy();
+
+    // Це інша причина, ніж «план зачіпає аркуш» (`sheetsLocked`): того блоку немає.
+    expect(refused.querySelector('[data-migrate-locked-affected]')).toBeNull();
+    expect((screen.getByTestId('migrate-apply') as HTMLButtonElement).disabled).toBe(true);
   });
 });

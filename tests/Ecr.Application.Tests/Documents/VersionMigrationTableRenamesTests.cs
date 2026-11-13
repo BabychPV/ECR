@@ -68,6 +68,35 @@ public sealed class VersionMigrationTableRenamesTests
         Assert.DoesNotContain(plan.Items, i => i.Kind == "Added");
     }
 
+    /// <summary>
+    /// R-2 (аудит 2026-11): таблицю перейменовано мапою — у <c>cfg.ColumnRename</c> ідуть пари ВСІХ її колонок, і з тим
+    /// самим кодом теж: за ними стабільна вʼюха SSRS і міжперіодні формули знаходять таблицю-відповідник.
+    /// </summary>
+    /// <remarks>Без виправлення порожньо: пари бралися лише для колонок, що змінили власний код.</remarks>
+    [Fact]
+    [Trait("Requirement", "ФВ-7.5")]
+    [Trait("Finding", "R-2")]
+    public void RenamePairs_для_перейменованої_таблиці_включає_колонки_з_тим_самим_кодом()
+    {
+        var from = WithColumns(Version(1, Table("T9a_03", 100, ("A", 101), ("B", 102)), Table("KEEP", 110, ("A", 111))));
+        var to = WithColumns(Version(2, Table("T9a_17a", 200, ("A", 201), ("B", 202)), Table("KEEP", 210, ("A", 211))));
+
+        var plan = VersionMigrationPlanner.Plan(
+            from, to, [new(101, null, 3), new(102, null, 2), new(111, null, 1)], Empty,
+            [new VersionMigrationTableRename("T9a_03", "T9a_17a")]);
+
+        // Таблиця KEEP коду не міняла — її колонка в мапу не йде.
+        Assert.Equal(
+            [(101, 201), (102, 202)],
+            MigrateDocumentVersionHandler.RenamePairs(plan, from, to).OrderBy(p => p.FromColumnDefId).ToList());
+    }
+
+    private static TemplateVersionSnapshot WithColumns(TemplateVersionSnapshot version)
+        => version with
+        {
+            ColumnsById = version.Sheets.SelectMany(s => s.Tables).SelectMany(t => t.Columns).ToDictionary(c => c.Id),
+        };
+
     [Fact]
     [Trait("Requirement", "ФВ-7.5")]
     public void Мапа_з_аркушем_діє_лише_на_цьому_аркуші()

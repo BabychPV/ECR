@@ -36,6 +36,9 @@ export function refusalText(reason: string): string {
       return t('documents.migrateRefusalGuarded');
     case 'sheetsLocked':
       return t('documents.migrateRefusalSheetsLocked');
+    // ✎ V-7: ручні значення (D-461) на поданих/затверджених аркушах, яких ціль не дозволяє.
+    case 'lockedOverridesLost':
+      return t('documents.migrateRefusalLockedOverrides');
     case 'projectArchived':
       return t('documents.migrateRefusalArchived');
     case 'grantsNotMapped':
@@ -561,6 +564,20 @@ function MigrationReport({ report }: { readonly report: VersionMigrationReport }
                       })}
                     </Text>
                   ))}
+              </Stack>
+            )}
+            {(report.lockedOverridesLost ?? 0) > 0 && (
+              <Stack gap="xs" data-migrate-locked-overrides="">
+                <Text size="sm">{t('documents.migrateLockedOverrides', { count: report.lockedOverridesLost ?? 0 })}</Text>
+                {(report.lockedOverrideItems ?? []).slice(0, ShownItems).map((item) => (
+                  <Text size="xs" key={`o|${String(item.documentId)}|${item.sheetCode}|${String(item.periodKey)}`}>
+                    {t('documents.migrateLockedItem', {
+                      sheet: item.sheetCode,
+                      period: item.periodKey,
+                      status: item.status,
+                    })}
+                  </Text>
+                ))}
               </Stack>
             )}
             {report.blockedGrantCount !== null && report.blockedGrantCount !== undefined && report.blockedGrantCount > 0 && (

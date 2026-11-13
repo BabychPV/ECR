@@ -83,12 +83,39 @@ public sealed class JobRestartOwnerTests
         await _jobs.DidNotReceive().RestartAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
 
-    [Fact]
+    /// <summary>
+    /// S-2 (аудит 2026-11, рішення PO 11.11): безпечне <c>System.ViewHealth</c> — лише перегляд; чужу чи системну
+    /// провалену задачу воно не повторює.
+    /// </summary>
+    /// <remarks>Без виправлення червоний: стара гілка <c>IsGranted(ViewHealth)</c> повторювала будь-яку задачу.</remarks>
+    [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    public async Task З_ViewHealth_повторюється_будь_яка_задача_навіть_системна()
+    [Trait("Finding", "S-2")]
+    [InlineData(Author)]
+    [InlineData(null)]
+    public async Task З_ViewHealth_без_RunJob_чужу_і_системну_не_повторити(int? owner)
     {
         SignedIn(Stranger, GetJobStatusHandler.Permission);
-        _jobs.GetCreatedByUserIdAsync(JobId, Arg.Any<CancellationToken>()).Returns((int?)null);
+        _jobs.GetCreatedByUserIdAsync(JobId, Arg.Any<CancellationToken>()).Returns(owner);
+
+        var denied = await Assert.ThrowsAsync<AccessDeniedException>(
+            () => Controller().Restart(JobId, CancellationToken.None));
+
+        Assert.Equal("err.ECR-AUTH-0403.jobNotYours", denied.Details?["messageKey"]);
+        Assert.Equal("System.RunJob", denied.Details?["permission"]);
+        await _jobs.DidNotReceive().RestartAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>S-2: носій <c>System.RunJob</c> повторює чужу й системну задачу.</summary>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "S-2")]
+    [InlineData(Author)]
+    [InlineData(null)]
+    public async Task З_RunJob_повторюється_чужа_і_системна(int? owner)
+    {
+        SignedIn(Stranger, CancelJobHandler.ForeignJobPermission);
+        _jobs.GetCreatedByUserIdAsync(JobId, Arg.Any<CancellationToken>()).Returns(owner);
 
         Assert.IsType<AcceptedResult>(await Controller().Restart(JobId, CancellationToken.None));
         await _jobs.Received(1).RestartAsync(JobId, Arg.Any<CancellationToken>());

@@ -61,7 +61,7 @@ public sealed partial class ReportViewStableTests(SqlServerFixture sql)
         // Крок 1: лише v1 - стабільна вʼюха = v1; службові колонки + _TemplateVersion + A, B.
         Assert.Equal(
             ["_ProjectId", "_ProjectCode", "_DocumentId", "_DocumentKey", "_PeriodKey", "_Status", "_RowId", "_RowKey", "_RowOrdinal",
-             "_TemplateVersion", "A", "B", "_SheetCopyOrdinal", "_SheetDisplayName"],
+             "_TemplateVersion", "A", "B", "_SheetCopyOrdinal", "_SheetDisplayName", "_IsArchived"],
             await ColumnNamesAsync(stable));
         var v1Definition = await DefinitionAsync(v1View);
 
@@ -100,7 +100,7 @@ public sealed partial class ReportViewStableTests(SqlServerFixture sql)
             (int)(await ScalarRowsAsync(
                 $"SELECT COUNT(*) FROM rpt.[{stable}] WHERE _ProjectId = {p1.ProjectId} AND _TemplateVersion = N'2' AND _PeriodKey BETWEEN 202611 AND 202611"))[0][0]!);
         Assert.Equal(
-            ab.Length + 13,
+            ab.Length + 14,
             (await ScalarRowsAsync($"SELECT TOP 1 * FROM rpt.[{stable}]"))[0].Length);
 
         // Крок 4: v3 ПРИБИРАЄ B і додає аркуш S2: стара колонка B лишається (NULL для нових рядків), для S2 зʼявляється своя вʼюха,
@@ -223,7 +223,7 @@ public sealed partial class ReportViewStableTests(SqlServerFixture sql)
 
         await ExecStableAsync(built.VersionId);
         var stable = StableName(tpl, "S", "T");
-        Assert.Equal(300, (await ColumnNamesAsync(stable)).Count - 12);
+        Assert.Equal(300, (await ColumnNamesAsync(stable)).Count - 13);   // 13 службових: R-1 додала _IsArchived
         var row = (await RowsAsync(stable, p.ProjectId, "C1", "C2", "C300"))[0];
         Assert.Equal((1m, (decimal?)null, 300m), ((decimal)row[0]!, (decimal?)row[1], (decimal)row[2]!));
 
@@ -469,10 +469,10 @@ public sealed partial class ReportViewStableTests(SqlServerFixture sql)
                 (int)(await ScalarRowsAsync("SELECT COUNT(*) FROM sys.procedures WHERE name = N'usp_GenerateStableViews' AND schema_id = SCHEMA_ID(N'rpt')"))[0][0]!);
 
             await GenerateAsync(v1.VersionId);
-            Assert.Equal(["_ProjectId", "_ProjectCode", "_DocumentId", "_DocumentKey", "_PeriodKey", "_Status", "_RowId", "_RowKey", "_RowOrdinal", "_TemplateVersion", "A", "_SheetCopyOrdinal", "_SheetDisplayName"],
+            Assert.Equal(["_ProjectId", "_ProjectCode", "_DocumentId", "_DocumentKey", "_PeriodKey", "_Status", "_RowId", "_RowKey", "_RowOrdinal", "_TemplateVersion", "A", "_SheetCopyOrdinal", "_SheetDisplayName", "_IsArchived"],
                 await ColumnNamesAsync(stable));
             await GenerateAsync(v1.VersionId);   // idempotent re-run
-            Assert.Equal(13, (await ColumnNamesAsync(stable)).Count);
+            Assert.Equal(14, (await ColumnNamesAsync(stable)).Count);
         }
         finally
         {
@@ -546,6 +546,59 @@ public sealed partial class ReportViewStableTests(SqlServerFixture sql)
         Assert.Equal(["OLD", "KEEP", "NEW"], await UserColumnsAsync(stable));   // за першою появою
 
         // Ідемпотентність і без побічних ефектів на _vN.
+        Assert.All(await ExecStableAsync(v2.VersionId), r => Assert.Equal("Unchanged", r.Action));
+    }
+
+    /// <summary>
+    /// R-2 (аудит 2026-11): таблицю перейменовано переносом версії (<c>tableRenames</c>) — за мапою колонок
+    /// (<c>cfg.ColumnRename</c>) обидві назви стабільної вʼюхи віддають дані обох версій, як для перейменованої колонки.
+    /// </summary>
+    /// <remarks>
+    /// Без зміни процедури (<c>@glink</c>/<c>@gx</c>) стара назва веде лише таблицю старих версій: після мапи
+    /// <c>v_T_S_OLD</c> і далі віддає лише 202609, тест червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "RPT-STABLE")]
+    [Trait("Finding", "R-2")]
+    public async Task Перейменована_таблиця_за_мапою_видна_під_обома_іменами()
+    {
+        var (templateId, tpl) = await NewTemplateAsync();
+        var v1 = (await AddVersionAsync(templateId, "1", [new("S", "OLD", [("X", CellDataType.Decimal)])]))["S/OLD"];
+        var v2 = (await AddVersionAsync(templateId, "2", [new("S", "NEW", [("X", CellDataType.Decimal)])]))["S/NEW"];
+        var p = await NewProjectAsync(v1.VersionId, 202609, 202610);
+        await SeedAsync(p, 202609, v1, ("R1", 1, new() { ["X"] = 5m }));
+        await SeedAsync(p, 202610, v2, ("R1", 1, new() { ["X"] = 7m }));
+
+        await GenerateAsync(v1.VersionId);
+        await GenerateAsync(v2.VersionId);
+        var oldName = StableName(tpl, "S", "OLD");
+        var newName = StableName(tpl, "S", "NEW");
+
+        async Task<List<(int Period, decimal? X)>> ReadAsync(string view)
+            => (await RowsAsync(view, p.ProjectId, "_PeriodKey", "X")).Select(r => ((int)r[0]!, (decimal?)r[1])).ToList();
+
+        // Без мапи: кожна назва — лише свої версії.
+        Assert.Equal([(202609, (decimal?)5m)], await ReadAsync(oldName));
+        Assert.Equal([(202610, (decimal?)7m)], await ReadAsync(newName));
+
+        // Мапа, яку пише перенос із tableRenames: пара колонок з ТИМ САМИМ кодом, але різних таблиць.
+        await using (var db = sql.CreateContext())
+        {
+            db.ColumnRenames.Add(new ColumnRename(v1.Cols["X"], v2.Cols["X"]));
+            await db.SaveChangesAsync();
+        }
+
+        var again = await ExecStableAsync(v2.VersionId);
+        Assert.Contains(again, r => r.View == oldName && r.Action != "Unchanged");
+        Assert.Contains(again, r => r.View == newName && r.Action != "Unchanged");
+
+        List<(int, decimal?)> both = [(202609, 5m), (202610, 7m)];
+        Assert.Equal(both, await ReadAsync(oldName));
+        Assert.Equal(both, await ReadAsync(newName));
+        Assert.Equal(["X"], await UserColumnsAsync(oldName));
+
         Assert.All(await ExecStableAsync(v2.VersionId), r => Assert.Equal("Unchanged", r.Action));
     }
 

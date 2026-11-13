@@ -67,7 +67,7 @@ export function RecalcFailedDocuments({
             jobId={job.jobId}
             state={job.state}
             isOwnJob
-            hasViewHealth={false}
+            hasRunJob={false}
             onRestarted={() => void queryClient.invalidateQueries({ queryKey: ['jobs'] })}
           />
         </Group>

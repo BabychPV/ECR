@@ -11,10 +11,11 @@ import { projectsQuery } from '@/features/projects/allProjects';
 import { isProjectRecalculation, progressOf, projectRecalcTitle, recalcProgressText } from '@/features/recalc/recalcProgress';
 import { permissionLabel } from '@/features/security/permissionLabel';
 import { useJobsSummary } from '@/features/jobs/useJobsSummary';
-import { JobAttempt, JobResultLink, JobRetry, jobAuthor } from '@/features/jobs/JobFacts';
+import { ForeignJobPermission, JobAttempt, JobResultLink, JobRetry, isOwnJobOf, jobAuthor } from '@/features/jobs/JobFacts';
 import { badgeStateOf } from '@/features/workflow/jobFollow';
 import { humanizeJobId, jobKindLabel, rawJobId } from '@/features/workflow/jobLabel';
 import { formatDecimal } from '@/shared/format';
+import { can, useSession } from '@/shared/session/useSession';
 import { t } from '@/shared/i18n';
 import { DataTable, type DataTableColumn } from '@/shared/ui/DataTable';
 import { useDetailPanel } from '@/shared/ui/DetailDrawer';
@@ -51,6 +52,15 @@ const CancellableStates: readonly string[] = ['Queued', 'Running'];
 /** Чи можна ще просити задачу зупинитися. */
 export function isCancellable(state: string): boolean {
   return CancellableStates.includes(state);
+}
+
+/**
+ * Чи показувати «Скасувати» (S-2 аудиту 2026-11, `D-496`): задача ще активна, і вона або власна, або в
+ * користувача є `System.RunJob`. Чужу задачу з самим `System.ViewHealth` сервер відхилить `403`
+ * (`CancelJobHandler`) — кнопки, яка не працює, бути не має.
+ */
+export function canCancelJob(state: string, isOwnJob: boolean, hasRunJob: boolean): boolean {
+  return isCancellable(state) && (isOwnJob || hasRunJob);
 }
 
 /**
@@ -236,6 +246,12 @@ export function JobsPage(): JSX.Element {
   const openBadge = detail.data ?? summary;
   const documentId = detail.data?.documentId ?? summary?.documentId ?? null;
   const resultUrl = detail.data?.resultUrl ?? summary?.resultUrl ?? null;
+
+  // ⛔ S-2 (`D-496`): екран відкриває `System.ViewHealth`, але це право — лише перегляд. Скасувати чи повторити
+  // можна власну задачу або будь-яку — з `System.RunJob`; сервер перевіряє те саме (`403` на чужу).
+  const me = useSession().data;
+  const hasRunJob = can(me, ForeignJobPermission);
+  const ownJob = isOwnJobOf(detail.data?.createdByUserId ?? summary?.createdByUserId, me?.userId);
 
   const columns: readonly DataTableColumn<JobSummary>[] = [
     {
@@ -436,24 +452,24 @@ export function JobsPage(): JSX.Element {
                     )}
                     <JobResultLink resultUrl={resultUrl} />
                     {/* ⛔ Лише `Queued`/`Running`: термінальній задачі скасовувати
-                        нічого, і сервер відповів би `409` (`ECR-JOB-0409`). */}
-                    {isCancellable(openState) && (
+                        нічого, і сервер відповів би `409` (`ECR-JOB-0409`). Чужу — лише
+                        з `System.RunJob` (S-2): інакше `403`. */}
+                    {canCancelJob(openState, ownJob, hasRunJob) && (
                       <Button variant="outline" color="statusError" onClick={() => setConfirming({ jobId: panel })}>
                         {t('jobs.cancel')}
                       </Button>
                     )}
                     {/*
-                     * ⛔ `hasViewHealth` — буквально `true`: маршрут `/admin/jobs`
-                     * вимагає `System.ViewHealth` (`routes.ts`), тож кожен, хто
-                     * бачить шторку, право має. `isOwnJob` — `false` буквально:
-                     * перелік може містити чужі задачі, і `true` тут було б
-                     * вигадкою. Сервер перевіряє власника сам (`403`).
+                     * ⛔ S-2 (`D-496`): `System.ViewHealth`, яке відкриває маршрут
+                     * `/admin/jobs`, повтору чужої задачі вже НЕ дає — потрібне
+                     * `System.RunJob`. Власність — порівнянням автора з сеансом
+                     * (`isOwnJobOf`); сервер перевіряє те саме сам (`403`).
                      */}
                     <JobRetry
                       jobId={panel}
                       state={openState}
-                      isOwnJob={false}
-                      hasViewHealth
+                      isOwnJob={ownJob}
+                      hasRunJob={hasRunJob}
                       onRestarted={() => {
                         void queryClient.invalidateQueries({ queryKey: ['jobs'] });
                         void queryClient.invalidateQueries({ queryKey: ['jobs-summary'] });
