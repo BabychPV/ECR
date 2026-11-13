@@ -108,18 +108,19 @@ public sealed partial class PublishTemplateVersionHandler(
     /// <remarks>
     /// ⚠ Злиття, а не витіснення (<c>EnqueueExclusiveAsync</c>): автоматична постановка не перериває прогін, що вже йде, —
     /// друга публікація того самого шаблону ставить ще один прогін ПІСЛЯ нього (черга в базі) або зливається з тим, що
-    /// чекає. Задача бере всі опубліковані версії шаблону, тож злиття не губить жодної.
+    /// чекає. ✎ P-4b P2: версія йде в набір, що чекає (<see cref="IReportViewStatus.Pending(int, int)"/>), і задача забирає
+    /// весь набір — злиття не губить жодної, а старих версій задача не перебудовує.
     /// ⚠ Збій ПОСТАНОВКИ не відкочує вже закомічену публікацію: він — на картці <c>reportviews</c> і в журналі;
     /// відновлення — старт застосунку (перегенерує вʼюхи, чиї входи змінилися) або <c>EXEC rpt.usp_GenerateTemplateViews</c>.
     /// </remarks>
     private async Task QueueViewsAsync(int templateId, int templateVersionId, int userId, CancellationToken ct)
     {
-        var generation = viewStatus?.Pending(templateId) ?? 0;
+        var generation = viewStatus?.Pending(templateId, templateVersionId) ?? 0;
         try
         {
             await jobs!
                 .EnqueueCoalescedAsync<IReportViewsJob>(
-                    ReportViewsTarget.Of(templateId), new ReportViewsTask(templateId), ct, userId)
+                    ReportViewsTarget.Of(templateId), new ReportViewsTask(templateId, templateVersionId), ct, userId)
                 .ConfigureAwait(false);
         }
 #pragma warning disable CA1031 // Найкраще зусилля: збій постановки не має ламати вже закомічену публікацію.

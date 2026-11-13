@@ -7,9 +7,13 @@ namespace Ecr.Infrastructure.Reporting;
 public sealed class ReportViewStatus : IReportViewStatus
 {
     private readonly object _gate = new();
-    private readonly Dictionary<int, ReportViewFailure> _failures = [];
+    // ✎ P-4b P3: ключ — (стабільні вʼюхи?, id): (false, версія) — _vN/повна генерація версії, (false, 0) — прогін по всіх,
+    // (true, шаблон) — стабільні вʼюхи шаблону. Що який успіх знімає — IReportViewStatus (remarks).
+    private readonly Dictionary<(bool Stable, int Id), ReportViewFailure> _failures = [];
     // ✎ P-4b: шаблон → покоління останньої позначки «оновлюються»; лічильник наскрізний (монотонний).
     private readonly Dictionary<int, long> _pending = [];
+    // ✎ P-4b P2: шаблон → версії, що чекають _vN (переживає злиття задач; забирає задача на старті).
+    private readonly Dictionary<int, SortedSet<int>> _waiting = [];
     private long _sequence;
 
     /// <inheritdoc />
@@ -20,6 +24,35 @@ public sealed class ReportViewStatus : IReportViewStatus
             var generation = ++_sequence;
             _pending[templateId] = generation;
             return generation;
+        }
+    }
+
+    /// <inheritdoc />
+    public long Pending(int templateId, int templateVersionId)
+    {
+        lock (_gate)
+        {
+            AddWaiting(templateId, [templateVersionId]);
+            return Pending(templateId);
+        }
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<int> DrainWaitingVersions(int templateId)
+    {
+        lock (_gate)
+        {
+            return _waiting.Remove(templateId, out var versions) ? [.. versions] : [];
+        }
+    }
+
+    /// <inheritdoc />
+    public void RequeueWaitingVersions(int templateId, IEnumerable<int> templateVersionIds)
+    {
+        ArgumentNullException.ThrowIfNull(templateVersionIds);
+        lock (_gate)
+        {
+            AddWaiting(templateId, templateVersionIds);
         }
     }
 
@@ -60,7 +93,7 @@ public sealed class ReportViewStatus : IReportViewStatus
         ArgumentNullException.ThrowIfNull(failure);
         lock (_gate)
         {
-            _failures[failure.TemplateVersionId ?? 0] = failure;
+            _failures[failure.StableTemplateId is { } templateId ? (true, templateId) : (false, failure.TemplateVersionId ?? 0)] = failure;
         }
     }
 
@@ -75,8 +108,17 @@ public sealed class ReportViewStatus : IReportViewStatus
             }
             else
             {
-                _failures.Remove(templateVersionId.Value);
+                _failures.Remove((false, templateVersionId.Value));
             }
+        }
+    }
+
+    /// <inheritdoc />
+    public void StableSucceeded(int templateId)
+    {
+        lock (_gate)
+        {
+            _failures.Remove((true, templateId));
         }
     }
 
@@ -86,6 +128,21 @@ public sealed class ReportViewStatus : IReportViewStatus
         lock (_gate)
         {
             return [.. _failures.Values];
+        }
+    }
+
+    private void AddWaiting(int templateId, IEnumerable<int> templateVersionIds)
+    {
+        if (!_waiting.TryGetValue(templateId, out var versions))
+        {
+            versions = [];
+            _waiting[templateId] = versions;
+        }
+
+        versions.UnionWith(templateVersionIds);
+        if (versions.Count == 0)
+        {
+            _waiting.Remove(templateId);
         }
     }
 }

@@ -11,14 +11,19 @@ namespace Ecr.Infrastructure.Jobs;
 /// тим самим <see cref="IReportViewGenerator"/> (ті самі процедури), що доти кликала публікація в HTTP-запиті.
 /// </summary>
 /// <remarks>
-/// ⛔ Ставиться ЗЛИТТЯМ на шаблон (<see cref="ReportViewsTarget"/>), тож payload визначається ціллю: задача бере ВСІ
-/// опубліковані й застарілі версії шаблону, а не версію, що її поставила, — злиття двох публікацій не губить вʼюх жодної.
+/// ⛔ P-4b P2 (F13 на великому бекапі: 25 версій — 42 хв, ~4 хв на версію, і злитий повтор стартував одразу): задача НЕ бере
+/// всіх версій шаблону. <c>_vN</c> будуються лише для версій, що чекають (<see cref="IReportViewStatus.DrainWaitingVersions"/> —
+/// набір наповнює публікація і він переживає злиття: payload, який злиття замінило, не губить своєї версії) і версії з
+/// payload; лише ті з них, що ще Published/Deprecated у цьому шаблоні. Набір порожній (рестарт застосунку, старий payload) —
+/// лише поточна Published версія. Стабільні вʼюхи шаблону (процедура з версією перебудовує їх для всього шаблону) — ОДИН
+/// раз наприкінці прогону, а не на кожну версію.
 /// ⚠ Блоку версії задача не бере й нічого не пише в <c>cfg.*</c>: публікація, правка чернетки чи друга публікація
 /// того самого шаблону під час прогону не чекають на неї.
 /// ⚠ Збій видно двічі: генератор фіксує причину для картки <c>reportviews</c> (<see cref="IReportViewStatus"/>), а
-/// задача кидає далі — у черзі вона <c>Failed</c> з причиною, і її можна повторити («Restart»). Картка «оновлюються»
-/// знімається в будь-якому разі (<see cref="IReportViewStatus.Settled"/>) — якщо за прогін не з'явилась новіша
-/// позначка (тоді чекає злитий повтор, і знімає вже він).
+/// задача кидає далі — у черзі вона <c>Failed</c> з причиною, і її можна повторити («Restart»): забрані версії
+/// повертаються в набір, тож повтор збудує їх знову. Картка «оновлюються» знімається в будь-якому разі
+/// (<see cref="IReportViewStatus.Settled"/>) — якщо за прогін не з'явилась новіша позначка (тоді чекає злитий повтор,
+/// і знімає вже він).
 /// </remarks>
 public sealed class ReportViewsJob(
     EcrDbContext db,
@@ -34,41 +39,39 @@ public sealed class ReportViewsJob(
 
         var task = Parse(payload);
 
-        // ⚠ Покоління позначки — ДО запиту версій: публікація, що закомітилась після цього рядка, ставить новіше
-        // покоління і злитий повтор, тож Settled нижче картку «оновлюються» не зніме, доки повтор не відпрацює.
+        // ⚠ Покоління позначки і набір версій — ДО запиту версій: публікація, що закомітилась після цього рядка, ставить
+        // новіше покоління, свою версію в набір і злитий повтор, тож Settled нижче картку «оновлюються» не зніме, доки повтор
+        // (що забере її версію) не відпрацює.
         var generation = status?.PendingGeneration(task.TemplateId) ?? 0;
+        var drained = status?.DrainWaitingVersions(task.TemplateId) ?? [];
+        var completed = false;
         try
         {
-            var versionIds = await db.TemplateVersions
-                .AsNoTracking()
-                // ⚠ Published і Deprecated — ті самі статуси, що бере процедура (05-rpt-views.sql: Status IN (1, 2), «застаріла
-                // версія вʼюх НЕ втрачає»): версія, яку наступна публікація встигла зробити Deprecated до старту задачі, свої
-                // вʼюхи однаково отримує. Процедура ідемпотентна (однаковий текст — без ALTER), тож повтор для старих версій дешевий.
-                .Where(v => v.TemplateId == task.TemplateId
-                    && (v.Status == TemplateVersionStatus.Published || v.Status == TemplateVersionStatus.Deprecated))
-                .OrderBy(v => v.Id)
-                .Select(v => v.Id)
-                .ToListAsync(ct)
-                .ConfigureAwait(false);
+            var versionIds = await VersionsAsync(task, drained, ct).ConfigureAwait(false);
 
-            // ⚠ Збій однієї версії не відміняє решти (одна задовга таблиця не лишає без вʼюх інші версії), але перший
-            // кидається наприкінці — задача стає Failed, а не тихо Succeeded.
+            // ⚠ Збій однієї версії не відміняє решти (одна задовга таблиця не лишає без вʼюх інші версії) і стабільних вʼюх,
+            // але перший кидається наприкінці — задача стає Failed, а не тихо Succeeded.
             Exception? first = null;
+            var steps = versionIds.Count + 1;
             for (var i = 0; i < versionIds.Count; i++)
             {
+                var versionId = versionIds[i];
                 await progress
-                    .ReportAsync(i * 100 / versionIds.Count, $"template {task.TemplateId}, version {versionIds[i]}", ct)
+                    .ReportAsync(i * 100 / steps, $"template {task.TemplateId}, version {versionId}", ct)
                     .ConfigureAwait(false);
-                try
-                {
-                    await generator.GenerateAsync(versionIds[i], ct).ConfigureAwait(false);
-                }
-#pragma warning disable CA1031 // Решта версій генерується далі; перша помилка кидається після циклу.
-                catch (Exception ex) when (ex is not OperationCanceledException)
-#pragma warning restore CA1031
-                {
-                    first ??= ex;
-                }
+                var failed = await TryAsync(() => generator.GenerateVersionViewsAsync(versionId, ct)).ConfigureAwait(false);
+                first ??= failed;
+            }
+
+            if (versionIds.Count > 0)
+            {
+                await progress
+                    .ReportAsync(versionIds.Count * 100 / steps, $"template {task.TemplateId}, stable views", ct)
+                    .ConfigureAwait(false);
+                // Опорна версія — будь-яка версія шаблону (процедура бере її шаблон); найновіша з прогону.
+                var failed = await TryAsync(() => generator.GenerateStableViewsAsync(task.TemplateId, versionIds[^1], ct))
+                    .ConfigureAwait(false);
+                first ??= failed;
             }
 
             if (first is not null)
@@ -77,10 +80,74 @@ public sealed class ReportViewsJob(
             }
 
             await progress.ReportAsync(100, null, ct).ConfigureAwait(false);
+            completed = true;
         }
         finally
         {
+            if (!completed && drained.Count > 0)
+            {
+                status?.RequeueWaitingVersions(task.TemplateId, drained);
+            }
+
             status?.Settled(task.TemplateId, generation);
+        }
+    }
+
+    /// <summary>
+    /// Версії прогону: (набір, що чекав) ∪ (версія з payload), лише Published/Deprecated цього шаблону — ті самі статуси, що
+    /// бере процедура (05-rpt-views.sql: Status IN (1, 2), «застаріла версія вʼюх НЕ втрачає»); порожньо — поточна Published.
+    /// </summary>
+    private async Task<List<int>> VersionsAsync(ReportViewsTask task, IReadOnlyList<int> drained, CancellationToken ct)
+    {
+        var wanted = new HashSet<int>(drained);
+        if (task.TemplateVersionId is { } fromPayload)
+        {
+            wanted.Add(fromPayload);
+        }
+
+        var live = db.TemplateVersions
+            .AsNoTracking()
+            .Where(v => v.TemplateId == task.TemplateId
+                && (v.Status == TemplateVersionStatus.Published || v.Status == TemplateVersionStatus.Deprecated));
+
+        if (wanted.Count > 0)
+        {
+            var ids = wanted.ToList();
+            var found = await live
+                .Where(v => ids.Contains(v.Id))
+                .OrderBy(v => v.Id)
+                .Select(v => v.Id)
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+            if (found.Count > 0)
+            {
+                return found;
+            }
+        }
+
+        // ⚠ Нічого не чекало (рестарт застосунку стер набір у памʼяті, payload без версії) — лише поточна опублікована, а
+        // НЕ всі версії: вʼюхи старих версій уже є (процедура ідемпотентна, але кожна версія коштує хвилини).
+        return await live
+            .Where(v => v.Status == TemplateVersionStatus.Published)
+            .OrderByDescending(v => v.Id)
+            .Select(v => v.Id)
+            .Take(1)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+    }
+
+    private static async Task<Exception?> TryAsync(Func<Task> step)
+    {
+        try
+        {
+            await step().ConfigureAwait(false);
+            return null;
+        }
+#pragma warning disable CA1031 // Решта кроків іде далі; перша помилка кидається після них.
+        catch (Exception ex) when (ex is not OperationCanceledException)
+#pragma warning restore CA1031
+        {
+            return ex;
         }
     }
 

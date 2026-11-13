@@ -19,4 +19,24 @@ public interface IReportViewGenerator
     /// <param name="templateVersionId">Версія шаблону; <c>null</c> — усі опубліковані.</param>
     /// <param name="ct">Скасування.</param>
     public Task GenerateAsync(int? templateVersionId, CancellationToken ct);
+
+    /// <summary>
+    /// ✎ P-4b P2: лише вʼюхи <c>_vN</c> однієї версії (<c>rpt.usp_GenerateTemplateViews</c>), без стабільних вʼюх шаблону.
+    /// </summary>
+    /// <param name="templateVersionId">Версія шаблону.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <remarks>
+    /// ⛔ Стабільні вʼюхи (<c>rpt.usp_GenerateStableViews</c>) з версією перебудовують УСІ вʼюхи шаблону по всіх його
+    /// версіях — задача шаблону кличе їх ОДИН раз (<see cref="GenerateStableViewsAsync"/>), а не на кожну версію
+    /// (F13 на великому бекапі: 25 версій — 42 хв, ~4 хв на версію). Типова реалізація — повна генерація версії (обидві
+    /// процедури): для реалізацій без поділу це надлишково, але не губить вʼюх.
+    /// </remarks>
+    public Task GenerateVersionViewsAsync(int templateVersionId, CancellationToken ct) => GenerateAsync(templateVersionId, ct);
+
+    /// <summary>✎ P-4b P2: лише стабільні вʼюхи шаблону (без версії) — один виклик на прогін задачі шаблону.</summary>
+    /// <param name="templateId">Шаблон (ключ збою на картці <c>reportviews</c>).</param>
+    /// <param name="anchorVersionId">Будь-яка опублікована/застаріла версія цього шаблону — параметр процедури.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <remarks>Типова реалізація нічого не робить: типова <see cref="GenerateVersionViewsAsync"/> уже будує й стабільні.</remarks>
+    public Task GenerateStableViewsAsync(int templateId, int anchorVersionId, CancellationToken ct) => Task.CompletedTask;
 }

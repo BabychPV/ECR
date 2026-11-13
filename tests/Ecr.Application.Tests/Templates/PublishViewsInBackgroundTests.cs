@@ -27,8 +27,8 @@ namespace Ecr.Application.Tests.Templates;
 /// </summary>
 /// <remarks>
 /// Мутації: повернути в <c>PublishAsync</c> синхронний <c>GenerateViewsBestEffortAsync</c> за наявної черги — перший тест
-/// червоний (генератор викликано, задачі немає); задача бере лише версію з payload, а не всі опубліковані версії
-/// шаблону — тест двох версій червоний; прибрати <c>Settled</c> з <c>finally</c> задачі — тест збою червоний (картка
+/// червоний (генератор викликано, задачі немає); задача бере лише версію з payload, а не набір версій, що чекають
+/// (✎ P-4b P2, <see cref="ReportViewsJobScopeTests"/>) — тест двох версій червоний; прибрати <c>Settled</c> з <c>finally</c> задачі — тест збою червоний (картка
 /// лишається «оновлюються»).
 /// </remarks>
 [Collection("SqlServer")]
@@ -126,10 +126,14 @@ public sealed class PublishViewsInBackgroundTests(SqlServerFixture sql, ITestOut
 
         // Публікація не відкочена; причина — на картці; «оновлюються» знято; задачу можна повторити (вона ідемпотентна).
         Assert.Equal((byte)TemplateVersionStatus.Published, await VersionStatusAsync(versionId));
-        var failure = Assert.Single(status.Snapshot());
-        Assert.Equal(50422, failure.Code);
-        Assert.Equal(versionId, failure.TemplateVersionId);
+        // ✎ P-4b P2: _vN і стабільні вʼюхи — окремі виклики з окремими ключами збою; обидва впираються в ту саму таблицю.
+        var failures = status.Snapshot();
+        Assert.All(failures, f => Assert.Equal(50422, f.Code));
+        Assert.Contains(failures, f => f.TemplateVersionId == versionId && f.StableTemplateId is null);
         Assert.Empty(status.PendingTemplates());
+
+        // ✎ P-4b P2: забрана версія повернулась у набір — «Restart» задачі збудує саме її, а не всі версії шаблону.
+        Assert.Equal([versionId], status.DrainWaitingVersions(templateId));
     }
 
     /// <summary>
@@ -156,7 +160,7 @@ public sealed class PublishViewsInBackgroundTests(SqlServerFixture sql, ITestOut
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var blocking = Substitute.For<IReportViewGenerator>();
-        blocking.GenerateAsync(Arg.Any<int?>(), Arg.Any<CancellationToken>()).Returns(async _ =>
+        blocking.GenerateVersionViewsAsync(Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(async _ =>
         {
             entered.TrySetResult();
             await release.Task;

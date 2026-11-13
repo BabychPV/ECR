@@ -41,7 +41,26 @@ public sealed partial class ReportViewGenerator(
     /// колонки, прив'язки, прапор, текст процедур) з відбитком останньої успішної повної генерації й пропускають роботу,
     /// якщо нічого не змінилося. Публікація версії і DBA — завжди повна генерація (<c>false</c>).
     /// </summary>
-    public async Task GenerateAsync(int? templateVersionId, bool onlyIfChanged, CancellationToken ct)
+    public Task GenerateAsync(int? templateVersionId, bool onlyIfChanged, CancellationToken ct)
+        => RunAsync(templateVersionId, templateViews: true, stableViews: true, stableTemplateId: null, onlyIfChanged, ct);
+
+    /// <inheritdoc />
+    public Task GenerateVersionViewsAsync(int templateVersionId, CancellationToken ct)
+        => RunAsync(templateVersionId, templateViews: true, stableViews: false, stableTemplateId: null, onlyIfChanged: false, ct);
+
+    /// <inheritdoc />
+    public Task GenerateStableViewsAsync(int templateId, int anchorVersionId, CancellationToken ct)
+        => RunAsync(anchorVersionId, templateViews: false, stableViews: true, stableTemplateId: templateId, onlyIfChanged: false, ct);
+
+    /// <summary>Спільний прогін: <c>_vN</c> і/або стабільні вʼюхи, з фіксацією збою/успіху для картки <c>reportviews</c>.</summary>
+    /// <param name="templateVersionId">Версія (для стабільних — опорна версія шаблону) або <c>null</c> — усі.</param>
+    /// <param name="templateViews">Чи кликати <c>rpt.usp_GenerateTemplateViews</c>.</param>
+    /// <param name="stableViews">Чи кликати <c>rpt.usp_GenerateStableViews</c>.</param>
+    /// <param name="stableTemplateId">Не <c>null</c> — виклик ЛИШЕ стабільних вʼюх цього шаблону (окремий ключ збою).</param>
+    /// <param name="onlyIfChanged">AN-155d.</param>
+    /// <param name="ct">Скасування.</param>
+    private async Task RunAsync(
+        int? templateVersionId, bool templateViews, bool stableViews, int? stableTemplateId, bool onlyIfChanged, CancellationToken ct)
     {
         // ✎ Q-17 (QA3 D5): холодна генерація З прапором (~600 в'юх з приєднаннями власників) на живій базі може тривати
         // понад 60 с (41 с у тихій системі, 60 с — стеля команди за конкуренції) → SqlException, `reportviews` = Degraded.
@@ -52,7 +71,8 @@ public sealed partial class ReportViewGenerator(
         var routed = monthRouter is { AllVersions: true };
         var anyRouting = monthRouter is { Enabled: true };
         var previousTimeout = db.Database.GetCommandTimeout();
-        if (anyRouting)
+        var changeTimeout = anyRouting;
+        if (changeTimeout)
         {
             db.Database.SetCommandTimeout(RoutedGenerationTimeoutSeconds);
         }
@@ -62,36 +82,42 @@ public sealed partial class ReportViewGenerator(
             // ✎ RPT-STABLE: спершу _vN (без змін), потім стабільні вʼюхи без версії. Збій першого не відміняє другого
             // (одна задовга таблиця не лишає без вʼюх решту), але перша помилка кидається викликачу.
             SqlException? first = null;
-            try
+            if (templateViews)
             {
-                await db.Database.ExecuteSqlRawAsync(
-                    "EXEC rpt.usp_GenerateTemplateViews @TemplateVersionId, @MonthRouting, @OnlyIfChanged",
-                    [
-                        new SqlParameter("@TemplateVersionId", System.Data.SqlDbType.Int)
-                        {
-                            Value = (object?)templateVersionId ?? DBNull.Value,
-                        },
-                        new SqlParameter("@MonthRouting", System.Data.SqlDbType.Bit) { Value = routed },
-                        new SqlParameter("@OnlyIfChanged", System.Data.SqlDbType.Bit) { Value = onlyIfChanged },
-                    ],
-                    ct).ConfigureAwait(false);
-            }
-            catch (SqlException ex)
-            {
-                first = ex;
-            }
-
-            try
-            {
-                var skipped = await GenerateStableAsync(templateVersionId, routed, onlyIfChanged, ct).ConfigureAwait(false);
-                if (logger is not null && onlyIfChanged)
+                try
                 {
-                    LogStartupViews(logger, skipped ? "пропущено: входи не змінилися" : "перегенеровано");
+                    await db.Database.ExecuteSqlRawAsync(
+                        "EXEC rpt.usp_GenerateTemplateViews @TemplateVersionId, @MonthRouting, @OnlyIfChanged",
+                        [
+                            new SqlParameter("@TemplateVersionId", System.Data.SqlDbType.Int)
+                            {
+                                Value = (object?)templateVersionId ?? DBNull.Value,
+                            },
+                            new SqlParameter("@MonthRouting", System.Data.SqlDbType.Bit) { Value = routed },
+                            new SqlParameter("@OnlyIfChanged", System.Data.SqlDbType.Bit) { Value = onlyIfChanged },
+                        ],
+                        ct).ConfigureAwait(false);
+                }
+                catch (SqlException ex)
+                {
+                    first = ex;
                 }
             }
-            catch (SqlException ex)
+
+            if (stableViews)
             {
-                first ??= ex;
+                try
+                {
+                    var skipped = await GenerateStableAsync(templateVersionId, routed, onlyIfChanged, ct).ConfigureAwait(false);
+                    if (logger is not null && onlyIfChanged)
+                    {
+                        LogStartupViews(logger, skipped ? "пропущено: входи не змінилися" : "перегенеровано");
+                    }
+                }
+                catch (SqlException ex)
+                {
+                    first ??= ex;
+                }
             }
 
             if (first is not null)
@@ -116,18 +142,25 @@ public sealed partial class ReportViewGenerator(
                 LogGenerationFailed(logger, templateVersionId, ex.Number, correlationId, ex);
             }
 
-            status?.Failed(new ReportViewFailure(templateVersionId, ex.Number, SafeMessage(ex, correlationId)));
+            status?.Failed(new ReportViewFailure(templateVersionId, ex.Number, SafeMessage(ex, correlationId), stableTemplateId));
             throw;
         }
         finally
         {
-            if (anyRouting)
+            if (changeTimeout)
             {
                 db.Database.SetCommandTimeout(previousTimeout);
             }
         }
 
-        status?.Succeeded(templateVersionId);
+        if (stableTemplateId is { } templateId)
+        {
+            status?.StableSucceeded(templateId);
+        }
+        else
+        {
+            status?.Succeeded(templateVersionId);
+        }
     }
 
     /// <summary>
