@@ -483,3 +483,56 @@ BEGIN
     THROW 50060, N'Архів arc.AuditPublicationEvent незмінний: UPDATE і DELETE заборонені (ФВ-5.21).', 1;
 END;
 GO
+
+-- B70 (слово людини: «заархівовані дані не мають змінюватися»; «від адміна SQL ніщо не захищає»): ВІДБИТОК рядка
+-- архіву табличних даних. Застосунок архів не пише (B69); ця в'юха дає ВИЯВЛЕННЯ прямої правки в SQL.
+--
+-- ⚠ Один вираз на обидва боки: `arc.usp_ArchiveYear` (03) записує з неї еталон у `itg.ArchiveRun` у момент
+--    архівації, а `ConsistencyCheckJob` (ARCHIVE_CHECKSUM, сутність `arc.Period`) рахує з неї поточний стан і
+--    звіряє. Два окремі вирази розійшлися б від першої ж правки одного з них — і кожен архів став би «зміненим».
+--
+-- ⚠ Хеш — перші 8 байт SHA2_256 серіалізації рядка; агрегат — СУМА (decimal(38,0)) по періоду, а не XOR
+--    (`CHECKSUM_AGG`): у XOR два однакові рядки взаємознищуються, а `BINARY_CHECKSUM` має відомі колізії на
+--    рядкових значеннях. Сума 64-бітних хешів не залежить від порядку (columnstore не має порядку) і змінюється від
+--    будь-якої правки значення, вставки чи видалення рядка з імовірністю колізії ~2^-64. Ключ рядка входить у
+--    серіалізацію: обмін значеннями між двома комірками теж видно.
+--
+-- ⚠ Серіалізація однозначна: рядки — з префіксом довжини в байтах (роздільник усередині тексту не зсуває полів),
+--    NULL — окремий маркер `~`, а не порожній рядок, дати — стиль 126, числа — CONVERT повного масштабу.
+--
+-- ⛔ Лише читання: в'юха не пише в arc.* (сторож B69), а служба читає її через db_datareader — нового GRANT не треба.
+CREATE OR ALTER VIEW arc.ArchiveRowHash
+AS
+SELECT CAST(1 AS tinyint) AS Kind,
+       c.PeriodKey,
+       CAST(SUBSTRING(HASHBYTES('SHA2_256', CONCAT(
+           c.TableRowId, N'|', c.ColumnDefId, N'|', c.TableDefId, N'|',
+           CASE WHEN c.ValueString IS NULL THEN N'~'
+                ELSE CONCAT(DATALENGTH(c.ValueString), N':', c.ValueString) END, N'|',
+           ISNULL(CONVERT(nvarchar(60), c.ValueNumeric), N'~'), N'|',
+           ISNULL(CONVERT(nvarchar(30), c.ValueDate, 126), N'~'), N'|',
+           ISNULL(CONVERT(nvarchar(1), c.ValueBool), N'~'), N'|',
+           ISNULL(CONVERT(nvarchar(12), c.ValueRegistryEntryId), N'~'), N'|',
+           ISNULL(CONVERT(nvarchar(12), c.ValueUnitId), N'~'), N'|',
+           c.IsCalculated, N'|', c.IsEmpty)), 1, 8) AS bigint) AS RowHash
+  FROM arc.CellValue AS c
+UNION ALL
+SELECT CAST(2 AS tinyint),
+       r.PeriodKey,
+       CAST(SUBSTRING(HASHBYTES('SHA2_256', CONCAT(
+           r.Id, N'|', r.TableInstanceId, N'|',
+           DATALENGTH(r.RowKey), N':', r.RowKey, N'|',
+           ISNULL(CONVERT(nvarchar(12), r.RowDefId), N'~'), N'|',
+           r.Ordinal, N'|', r.IsDeleted, N'|', r.IsOrphaned, N'|',
+           CONVERT(nvarchar(30), r.ModifiedAt, 126))), 1, 8) AS bigint)
+  FROM arc.TableRow AS r
+UNION ALL
+SELECT CAST(3 AS tinyint),
+       t.PeriodKey,
+       CAST(SUBSTRING(HASHBYTES('SHA2_256', CONCAT(
+           t.Id, N'|', t.DocumentId, N'|', t.TableDefId, N'|',
+           CONVERT(nvarchar(30), t.CreatedAt, 126), N'|',
+           CONVERT(nvarchar(30), t.ModifiedAt, 126), N'|',
+           ISNULL(CONVERT(nvarchar(20), t.SheetCopyId), N'~'))), 1, 8) AS bigint)
+  FROM arc.TableInstance AS t;
+GO

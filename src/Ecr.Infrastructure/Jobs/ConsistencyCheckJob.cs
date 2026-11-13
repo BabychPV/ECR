@@ -223,6 +223,10 @@ public sealed class ConsistencyCheckJob(
         var archive = await ArchiveChecksumsAsync(ct).ConfigureAwait(false);
         Collect(archive.Issues, ArchiveChecksumRule, "itg.ArchiveRun", archive.Complete);
 
+        // B70: пряма правка архіву в SQL — те саме правило ARCHIVE_CHECKSUM, своя сутність (`arc.Period`).
+        var tamper = await new ArchiveTamperCheck(db).RunAsync(clock.UtcNow, ArchiveTamperCheck.Budget, ct).ConfigureAwait(false);
+        Collect(TamperIssues(tamper), ArchiveChecksumRule, ArchiveTamperCheck.EntityType, tamper.Complete);
+
         await progress.ReportKeyAsync(70, "jobs.consistencyUnboundCalculated", ct).ConfigureAwait(false);
         Collect(await UnboundCalculatedColumnsAsync(ct).ConfigureAwait(false), UnboundCalculatedRule, "cfg.ColumnDef", true);
         Collect(await UnsourcedFormulaColumnsAsync(ct).ConfigureAwait(false), UnsourcedFormulaRule, "cfg.ColumnDef", true);
@@ -262,7 +266,13 @@ public sealed class ConsistencyCheckJob(
             // взагалі можна побачити постфактум.
             $"{{\"issues\":{issues.Count},\"removed\":{removed},\"orphanFlagsChanged\":{rescanned.Changed},"
             + $"\"orphanRowsExamined\":{rescanned.ExaminedRows},"
-            + $"\"orphanScanCycles\":{rescanned.CyclesCompleted}}}",
+            + $"\"orphanScanCycles\":{rescanned.CyclesCompleted},"
+            // B70: скільки заархівованих періодів звірено з еталоном, скільки отримали БАЗОВИЙ еталон зараз (архів до
+            // B70 — звіряти ще нема з чим) і скільки лишилися без еталона.
+            + $"\"archivePeriodsVerified\":{tamper.Verified},"
+            + $"\"archiveBaselinesRecorded\":{tamper.BaselinesRecorded},"
+            + $"\"archiveNoReference\":{tamper.NoReference},"
+            + $"\"archiveCheckComplete\":{(tamper.Complete ? "true" : "false")}}}",
             clock.UtcNow);
 
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -475,6 +485,30 @@ public sealed class ConsistencyCheckJob(
 
         return (issues, runs.Count < MaxIssues);
     }
+
+    /// <summary>Знахідки B70: архів періоду не збігається з еталоном, записаним під час архівації.</summary>
+    /// <param name="result">Підсумок <see cref="ArchiveTamperCheck"/>.</param>
+    /// <returns>Знахідка на період, вага 3 — система суперечить сама собі, як і розбіжність сум архівації.</returns>
+    private static List<ConsistencyIssue> TamperIssues(ArchiveTamperResult result)
+        => result.Tampers
+            .Take(MaxIssues)
+            .Select(t => new ConsistencyIssue(
+                ArchiveChecksumRule,
+                Severity: 3,
+                ArchiveTamperCheck.EntityType,
+                t.PeriodKey,
+                FindingText(
+                    ArchiveTamperCheck.FindingKey,
+                    ("period", t.PeriodKey),
+                    ("runId", t.RunId),
+                    ("cellsThen", t.Recorded.C),
+                    ("cellsNow", t.Current.C),
+                    ("rowsThen", t.Recorded.R),
+                    ("rowsNow", t.Current.R),
+                    ("instancesThen", t.Recorded.I),
+                    ("instancesNow", t.Current.I)),
+                t.PeriodKey))
+            .ToList();
 
     /// <summary>
     /// Колонки типу <c>Calculated</c>, до яких не веде жодна ЧИННА прив'язка
