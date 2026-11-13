@@ -66,7 +66,9 @@ test.describe('FLERT: «Синхронізувати зараз» і стан с
         { timeout: 120_000 },
       )
       .toBe(true);
-    await expect(panel).toContainText(/Sync is off|Синхронизация выключена|Синхрондау өшірулі/, { timeout: 30_000 });
+    // ⚠ Без урахування регістру: після P3 #841 (c) прогін при вимкненому синку — «skipped — sync is off», без окремого
+    // рядка «Sync is off — nothing was read.»; про вимкнений синк каже «Daily sync is off …».
+    await expect(panel).toContainText(/sync is off|синхронизация выключена|синхрондау өшірулі/i, { timeout: 30_000 });
     // P3 F13 #841 (c): прогін при вимкненому синку — «пропущено», а не «succeeded» поруч із «Sync is off».
     await expect(panel).toContainText(/skipped — sync is off|пропущена — синхронизация выключена|өткізіп жіберілді/);
     await expect(panel).not.toContainText(/succeeded|успешно|сәтті/);
