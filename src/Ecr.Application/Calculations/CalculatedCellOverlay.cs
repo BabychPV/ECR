@@ -84,12 +84,15 @@ public sealed partial class CalculatedCellOverlay(
         IReadOnlyList<CalculationResultRow> current;
         if (results is ICurrentResultFilterReader narrow)
         {
+            // ✎ LAND-YEAR L2b: колонки з чужим власником читаються з періоду-власника — у вибірку періоду перегляду не йдуть.
             var wanted = withCalculated
-                .SelectMany(t => t.CalculatedColumnIds.Select(c => (t.TableDefId, ColumnDefId: c)))
+                .SelectMany(t => t.CalculatedColumnIds
+                    .Where(c => t.CalculatedOwnerPeriods?.ContainsKey(c) != true)
+                    .Select(c => (t.TableDefId, ColumnDefId: c)))
                 .ToHashSet();
             var used = bindings.Where(b => wanted.Contains((b.TableDefId, b.ColumnDefId))).ToList();
 
-            current = await narrow
+            current = used.Count == 0 ? [] : await narrow
                 .ReadCurrentMatchingAsync(
                     documentId,
                     periodKey,
@@ -105,7 +108,11 @@ public sealed partial class CalculatedCellOverlay(
             current = await results.ReadCurrentAsync(documentId, periodKey, ct).ConfigureAwait(false);
         }
 
-        if (current.Count == 0)
+        // ✎ LAND-YEAR L2b: колонки з чужим власником (місячна m версії YearWithMonthColumns → період m) — числа актуальних
+        // прогонів періодів-власників і їхніх екземплярів цієї таблиці.
+        var owners = await OwnerResultsAsync(documentId, withCalculated, ct).ConfigureAwait(false);
+
+        if (current.Count == 0 && owners.Results.Count == 0)
         {
             return output;
         }
@@ -114,6 +121,9 @@ public sealed partial class CalculatedCellOverlay(
         var byRow = current
             .Where(r => r.SourceRowKey is not null)
             .ToLookup(r => (Row: r.SourceRowKey!, Output: r.OutputCode.ToUpperInvariant()));
+        var byOwnerRow = owners.Results
+            .Where(r => r.SourceRowKey is not null)
+            .ToLookup(r => (Period: r.PeriodKey, Row: r.SourceRowKey!, Output: r.OutputCode.ToUpperInvariant()));
 
         var key = new PeriodKey(periodKey);
         var ambiguous = 0;
@@ -166,10 +176,26 @@ public sealed partial class CalculatedCellOverlay(
                     // B — без екземпляра (прогони до D-401) → тимчасове правило нижче;
                     // C — чужий екземпляр → ігноруємо. Є хоч одне A — B не береться: прогін
                     // з екземпляром точніший за застарілий.
-                    var candidates = byRow[(rowKey, binding.OutputCode.ToUpperInvariant())]
-                        .Where(r => binding.VersionIds.Contains(r.MethodologyVersionId))
-                        .ToList();
-                    var values = candidates.Where(r => r.TableInstanceId == table.TableInstanceId).ToList();
+                    // ✎ LAND-YEAR L2b: колонка з чужим власником — числа періоду-власника, «свій» екземпляр — екземпляр
+                    // власника цієї таблиці; числа періоду перегляду їй не належать (інакше M09 показала б жовтень).
+                    List<CalculationResultRow> candidates;
+                    long? ownInstance = table.TableInstanceId;
+                    if (table.CalculatedOwnerPeriods?.TryGetValue(binding.ColumnDefId, out var ownerPeriod) == true)
+                    {
+                        ownInstance = owners.InstanceOf(ownerPeriod, table.TableDefId);
+                        candidates = [.. byOwnerRow[(ownerPeriod, rowKey, binding.OutputCode.ToUpperInvariant())]
+                            .Where(r => binding.VersionIds.Contains(r.MethodologyVersionId))
+                            .Select(r => new CalculationResultRow(
+                                r.MethodologyVersionId, r.SourceRowKey, r.OutputCode, r.Value, r.UnitId, r.SubstanceEntryId,
+                                r.TableInstanceId))];
+                    }
+                    else
+                    {
+                        candidates = [.. byRow[(rowKey, binding.OutputCode.ToUpperInvariant())]
+                            .Where(r => binding.VersionIds.Contains(r.MethodologyVersionId))];
+                    }
+
+                    var values = candidates.Where(r => ownInstance is not null && r.TableInstanceId == ownInstance).ToList();
                     if (values.Count == 0)
                     {
                         values = [.. candidates.Where(r => r.TableInstanceId is null)];
@@ -236,6 +262,63 @@ public sealed partial class CalculatedCellOverlay(
         }
 
         return output;
+    }
+
+    /// <summary>
+    /// ✎ LAND-YEAR L2b: числа актуальних прогонів періодів-власників колонок <c>Calculated</c> з чужим власником
+    /// (<see cref="OverlayTable.CalculatedOwnerPeriods"/>) — один набір запитів на всі таблиці виклику
+    /// (<see cref="ICalculationYearReader"/>: екземпляри документа за періоди-власники, далі числа лише екземплярів-власників
+    /// цих таблиць і числа без екземпляра).
+    /// </summary>
+    /// <remarks>
+    /// Немає колонок із чужим власником (усі версії, крім YearWithMonthColumns) — жодного запиту. Сховище без читача року
+    /// (тест-подвійник) — порожньо: такі колонки лишаються без числа, а не з числом періоду перегляду.
+    /// </remarks>
+    private async Task<OwnerResults> OwnerResultsAsync(
+        long documentId, IReadOnlyList<OverlayTable> tables, CancellationToken ct)
+    {
+        var foreign = tables.Where(t => t.CalculatedOwnerPeriods is { Count: > 0 }).ToList();
+        if (foreign.Count == 0 || results is not ICalculationYearReader year)
+        {
+            return OwnerResults.Empty;
+        }
+
+        var periods = foreign.SelectMany(t => t.CalculatedOwnerPeriods!.Values).Distinct().Order().ToList();
+        var tableDefIds = foreign.Select(t => t.TableDefId).ToHashSet();
+
+        // Оригінальний екземпляр таблиці в кожному періоді-власнику (копії аркушів власниками не бувають).
+        var instances = new Dictionary<(int PeriodKey, int TableDefId), long>();
+        foreach (var instance in await year.ReadTableInstancesAsync(documentId, periods, ct).ConfigureAwait(false))
+        {
+            if (instance.SheetCopyId is null && tableDefIds.Contains(instance.TableDefId))
+            {
+                instances.TryAdd((instance.PeriodKey, instance.TableDefId), instance.TableInstanceId);
+            }
+        }
+
+        if (instances.Count == 0)
+        {
+            return new OwnerResults([], instances);
+        }
+
+        var facts = await year
+            .ReadYearAsync(
+                new CalculationYearReadRequest(
+                    documentId, periods, [.. instances.Values], [], IncludeRows: false, SliceResults: true, Aggregate: false),
+                ct)
+            .ConfigureAwait(false);
+
+        return new OwnerResults(facts.Results, instances);
+    }
+
+    /// <summary>Числа періодів-власників і екземпляри-власники таблиць.</summary>
+    private sealed record OwnerResults(
+        IReadOnlyList<YearResult> Results, IReadOnlyDictionary<(int PeriodKey, int TableDefId), long> Instances)
+    {
+        public static OwnerResults Empty { get; } = new([], new Dictionary<(int PeriodKey, int TableDefId), long>());
+
+        public long? InstanceOf(int periodKey, int tableDefId)
+            => Instances.TryGetValue((periodKey, tableDefId), out var id) ? id : null;
     }
 
     /// <summary>
@@ -320,9 +403,15 @@ public sealed partial class CalculatedCellOverlay(
 /// <param name="RowIdsByKey">Рядки екземпляра: <c>RowKey</c> → <c>TableRowId</c>.</param>
 /// <param name="Cells">Комірки, прочитані зі сховища.</param>
 /// <param name="CalculatedColumnIds">Не видалені колонки типу <c>Calculated</c>.</param>
+/// <param name="CalculatedOwnerPeriods">
+/// ✎ LAND-YEAR L2b: колонки <c>Calculated</c> з ЧУЖИМ власником → період-власник (версія YearWithMonthColumns: місячна
+/// колонка m → період m, <see cref="IMonthColumnRouter.ForeignColumnsAsync"/>). Число такої колонки — з актуального
+/// прогону періоду-власника і його екземпляра цієї таблиці. <c>null</c>/порожньо — усі колонки свої (як до L2).
+/// </param>
 public sealed record OverlayTable(
     long TableInstanceId,
     int TableDefId,
     IReadOnlyDictionary<string, long> RowIdsByKey,
     IReadOnlyList<CellRecord> Cells,
-    IReadOnlySet<int> CalculatedColumnIds);
+    IReadOnlySet<int> CalculatedColumnIds,
+    IReadOnlyDictionary<int, int>? CalculatedOwnerPeriods = null);

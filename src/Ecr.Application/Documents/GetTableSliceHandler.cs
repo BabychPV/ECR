@@ -108,6 +108,42 @@ public sealed class GetTableSliceHandler(
         long documentId, Domain.Entities.Configuration.TableDef table, int viewPeriod, DocumentReadScope anyPeriod, CancellationToken ct)
         => MonthOwnerReadScope.BlockedColumnsAsync(monthRouter, documentId, table, viewPeriod, anyPeriod, ct);
 
+    /// <summary>
+    /// ✎ LAND-YEAR L2b: колонки <c>Calculated</c> з чужим власником (лише версія YearWithMonthColumns — місячна m → період m)
+    /// і їхні періоди-власники для накладення результатів методологій (<see cref="Calculations.OverlayTable.CalculatedOwnerPeriods"/>).
+    /// </summary>
+    /// <remarks>
+    /// Роутер вимкнено, версія іншої розкладки, таблиця поза маршрутизацією або копія аркуша — <c>null</c> БЕЗ звернень до
+    /// бази (як і до L2: числа періоду перегляду). Доступ до періоду-власника тут не вирішується — комірки колонок, власник
+    /// яких поза областю ролі читача, маскує <see cref="OwnerBlockedColumnsAsync"/> далі, після накладення.
+    /// </remarks>
+    private async Task<IReadOnlyDictionary<int, int>?> CalculatedOwnerPeriodsAsync(
+        long documentId, TableInstanceRef instance, Domain.Entities.Configuration.TableDef table,
+        HashSet<int> calculated, CancellationToken ct)
+    {
+        if (monthRouter is not { Enabled: true }
+            || instance.SheetCopyId is not null
+            || !monthRouter.RoutesComputedVersion(instance.TemplateVersionId)
+            || !monthRouter.AppliesToTable(table))
+        {
+            return null;
+        }
+
+        var routing = await monthRouter.GetDocumentAsync(documentId, ct).ConfigureAwait(false);
+        if (routing is null)
+        {
+            return null;
+        }
+
+        var foreign = await monthRouter
+            .ForeignColumnsAsync(routing, table, new Domain.ValueObjects.PeriodKey(instance.PeriodKey), ct)
+            .ConfigureAwait(false);
+        var owners = foreign
+            .Where(f => calculated.Contains(f.Column.Id))
+            .ToDictionary(f => f.Column.Id, f => f.OwnerPeriod.Value);
+        return owners.Count == 0 ? null : owners;
+    }
+
     private readonly MethodologyRequiredColumnsCache _required = new(memory);
 
     /// <summary>
@@ -258,11 +294,12 @@ public sealed class GetTableSliceHandler(
 
         if (results is not null && calculated.Count > 0)
         {
+            var owners = await CalculatedOwnerPeriodsAsync(documentId, instance, table, calculated, ct).ConfigureAwait(false);
             var overlaid = await new Calculations.CalculatedCellOverlay(methodologies, results, overlayLog)
                 .ApplyAsync(
                     documentId,
                     instance.PeriodKey,
-                    [new Calculations.OverlayTable(tableInstanceId, table.Id, rowIds, cells, calculated)],
+                    [new Calculations.OverlayTable(tableInstanceId, table.Id, rowIds, cells, calculated, owners)],
                     ct)
                 .ConfigureAwait(false);
 
