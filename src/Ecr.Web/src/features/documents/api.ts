@@ -160,6 +160,13 @@ interface DocumentListParams {
   templateVersions?: readonly string[];
   /** Колонка «Version»: сортування за версією (`sort=templateVersion` / `sort=-templateVersion`); `null` — за Id. */
   versionSort?: VersionSort | null;
+  /**
+   * ✎ B109: лише документи, чия версія шаблону, чинна в періоді / році, — шаблону з цим кодом (`templateCode=HSE400`);
+   * невідомий код — порожній перелік. Порожньо — без фільтра.
+   */
+  templateCode?: string | null;
+  /** Розмір сторінки; без нього — 50 (стеля сервера — 500). */
+  limit?: number;
 }
 
 /**
@@ -170,7 +177,7 @@ interface DocumentListParams {
  * `hasLateEdits` іде в запит лише коли `true`.
  */
 export function listDocuments(params: DocumentListParams): Promise<DocumentListPage> {
-  const query = new URLSearchParams({ limit: '50' });
+  const query = new URLSearchParams({ limit: String(params.limit ?? 50) });
   if (params.periodKey !== null) query.set('periodKey', String(params.periodKey));
   else if (params.year) query.set('year', String(params.year));
   if (params.cursor) query.set('cursor', params.cursor);
@@ -188,6 +195,7 @@ export function listDocuments(params: DocumentListParams): Promise<DocumentListP
   if (templateVersions !== null) query.set('templateVersions', templateVersions);
   const sort = versionSortParam(params.versionSort ?? null);
   if (sort !== null) query.set('sort', sort);
+  if (params.templateCode) query.set('templateCode', params.templateCode);
 
   return apiFetch<DocumentListPage>(`/api/v1/documents?${query.toString()}`);
 }

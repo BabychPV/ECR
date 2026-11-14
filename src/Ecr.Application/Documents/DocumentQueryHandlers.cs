@@ -162,10 +162,25 @@ public sealed class ListDocumentsHandler(
     /// за рік або за будь-який місяць); <c>null</c> — без фільтра. Рядки переліку завжди несуть `reopenedPeriods`.
     /// </summary>
     /// <inheritdoc cref="HandleAsync(int?, int?, string?, bool, bool?, string?, bool?, string?, int?, string?, string?, CursorRequest, CancellationToken)"/>
-    public async Task<PagedResult<DocumentSummary>> HandleAsync(
+    public Task<PagedResult<DocumentSummary>> HandleAsync(
         int? projectId, int? periodKey, string? state, bool mine, bool? hasLateEdits,
         string? query, bool? resultsStale, string? staleBy, int? ownerUserId,
         string? sort, string? templateVersions, int? year, bool? hasReopenedMonths, CursorRequest page, CancellationToken ct)
+        => HandleAsync(
+            projectId, periodKey, state, mine, hasLateEdits, query, resultsStale, staleBy, ownerUserId, sort, templateVersions,
+            year, hasReopenedMonths, templateCode: null, page, ct);
+
+    /// <summary>
+    /// ✎ B109: те саме з фільтром за кодом шаблону — <paramref name="templateCode"/> лишає документи, чия версія шаблону,
+    /// чинна в періоді (без періоду — в році <paramref name="year"/>, без обох — поточна), належить шаблону з цим кодом.
+    /// Порожньо — без фільтра; невідомий код — порожній перелік, не помилка. Межа видимості — та сама, що й без фільтра.
+    /// </summary>
+    /// <inheritdoc cref="HandleAsync(int?, int?, string?, bool, bool?, string?, bool?, string?, int?, string?, string?, CursorRequest, CancellationToken)"/>
+    public async Task<PagedResult<DocumentSummary>> HandleAsync(
+        int? projectId, int? periodKey, string? state, bool mine, bool? hasLateEdits,
+        string? query, bool? resultsStale, string? staleBy, int? ownerUserId,
+        string? sort, string? templateVersions, int? year, bool? hasReopenedMonths, string? templateCode,
+        CursorRequest page, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(page);
 
@@ -195,7 +210,8 @@ public sealed class ListDocumentsHandler(
             partly ? null : ParseState(state, stateScope), mine ? profile.UserId : null, hasLateEdits, Query: NormalizeQuery(query),
             ResultsStale: resultsStale, StaleByUserId: staleByMe ? profile.UserId : null, OwnerUserId: ownerUserId,
             TemplateVersions: versions, VersionSort: versionSort, PartlySubmitted: partly, Year: year,
-            HasReopenedMonths: hasReopenedMonths);
+            HasReopenedMonths: hasReopenedMonths,
+            TemplateCode: string.IsNullOrWhiteSpace(templateCode) ? null : templateCode.Trim());
 
         // ⛔ Родина REQ, а не CELL (`P-25`, рядок 1): хибний `limit` — це
         // помилка параметра запиту, і показувати її в обробнику помилок

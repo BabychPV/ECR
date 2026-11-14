@@ -292,6 +292,14 @@ public sealed record DocumentSheetState(
 /// межею видимості (підзапит <c>IN</c>), а не постфільтром.
 /// </param>
 /// <param name="AsOfUtc">Момент, на який виняток «діє» (для тестів строку); <c>null</c> — годинник сховища.</param>
+/// <param name="TemplateCode">
+/// ✎ B109: лише документи, чия версія шаблону — шаблону з цим кодом (<c>cfg.Template.Code</c>, точний збіг за колацією
+/// бази). Версія — ЧИННА в періоді: за період, без нього за рік (<paramref name="Year"/>, остання версія шкали з
+/// <c>fromPeriodKey</c> ≤ кінця року), без обох — поточна; шкала — шаблону документа (<c>fn_TemplateVersionOf</c>), документ
+/// без шаблону — основного шаблону проєкту (<c>fn_VersionOf</c>, D-502). Невідомий код — порожній перелік, не помилка.
+/// Діє ЗАПИТОМ до <c>Take</c>, поруч із межею видимості (підзапит у тому самому запиті сторінки, без додаткових звернень).
+/// <c>null</c> — без фільтра.
+/// </param>
 public readonly record struct DocumentListFilter(
     DocumentStatus? State, int? MineUserId, bool? HasLateEdits = null,
     IReadOnlyCollection<(int ProjectId, int Id)>? HiddenSheetDefIds = null,
@@ -309,7 +317,8 @@ public readonly record struct DocumentListFilter(
     int? Year = null,
     int? ReaderUserId = null,
     bool? HasReopenedMonths = null,
-    DateTime? AsOfUtc = null);
+    DateTime? AsOfUtc = null,
+    string? TemplateCode = null);
 
 /// <summary>Напрямок сортування переліку документів за версією шаблону.</summary>
 public enum DocumentVersionSort

@@ -2931,6 +2931,7 @@ export interface paths {
                     templateVersions?: string;
                     year?: number;
                     hasReopenedMonths?: boolean;
+                    templateCode?: string;
                 };
                 header?: never;
                 path?: never;

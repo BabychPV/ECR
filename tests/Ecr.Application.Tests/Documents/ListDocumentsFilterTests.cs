@@ -118,6 +118,29 @@ public sealed class ListDocumentsFilterTests
             Arg.Any<CursorRequest>(), Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>());
     }
 
+    /// <summary>
+    /// ✎ B109: код шаблону доходить до сховища обрізаним; порожній — відсутній фільтр (не «шаблон з порожнім кодом»).
+    /// Мутаційний доказ (локально): обробник не передає <c>TemplateCode</c> — червоний для «HSE400».
+    /// </summary>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [InlineData(" HSE400 ", "HSE400")]
+    [InlineData("NOPE", "NOPE")]
+    [InlineData("  ", null)]
+    [InlineData(null, null)]
+    public async Task Код_шаблону_доходить_до_сховища_обрізаним_а_порожній_стає_відсутнім(string? templateCode, string? expected)
+    {
+        await Handler().HandleAsync(
+            null, periodKey: null, state: null, mine: false, hasLateEdits: null, query: null, resultsStale: null, staleBy: null,
+            ownerUserId: null, sort: null, templateVersions: null, year: 2026, hasReopenedMonths: null, templateCode,
+            new CursorRequest(50), default);
+
+        await _documents.Received(1).ListAsync(
+            Arg.Any<int?>(), Arg.Any<PeriodKeyFilter>(),
+            new DocumentListFilter(null, null, null, Year: 2026, ReaderUserId: UserId, TemplateCode: expected),
+            Arg.Any<CursorRequest>(), Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>());
+    }
+
     [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage6)]
     [InlineData("Closed")]

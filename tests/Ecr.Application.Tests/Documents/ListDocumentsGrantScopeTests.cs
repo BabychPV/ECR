@@ -114,6 +114,32 @@ public sealed class ListDocumentsGrantScopeTests
         Assert.Equal("c1", result.NextCursor);
     }
 
+    /// <summary>
+    /// ✎ B109: фільтр за кодом шаблону («Відкрити HSE400», один запит) іде ТІЄЮ САМОЮ межею, що й перелік без нього:
+    /// заборонений проєкт поза межею запиту, а документ забороненого проєкту, який сховище все ж повернуло (збіг коду),
+    /// не проходить постфільтр. Мутаційний доказ (локально): обробник не передає <c>TemplateCode</c> у фільтр — червоний.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public async Task Фільтр_за_кодом_шаблону_не_відкриває_документ_забороненого_проєкту()
+    {
+        Page(new PagedResult<DocumentSummary>([Doc(1, Mine), Doc(2, Foreign)], NextCursor: null, TotalCount: null));
+
+        var result = await Handler().HandleAsync(
+            projectId: null, periodKey: null, state: null, mine: false, hasLateEdits: null, query: null, resultsStale: null,
+            staleBy: null, ownerUserId: null, sort: null, templateVersions: null, year: 2026, hasReopenedMonths: null,
+            templateCode: "HSE400", new CursorRequest(Limit: 50), default);
+
+        Assert.Equal([1L], result.Items.Select(d => d.Id));
+        await _documents.Received(1).ListAsync(
+            Arg.Any<int?>(),
+            Arg.Any<PeriodKeyFilter>(),
+            Arg.Is<DocumentListFilter>(f => f.TemplateCode == "HSE400" && f.Year == 2026),
+            Arg.Any<CursorRequest>(),
+            Arg.Is<IReadOnlyCollection<int>?>(ids => ids != null && ids.Count == 1 && ids.Contains(Mine)),
+            Arg.Any<CancellationToken>());
+    }
+
     private ListDocumentsHandler Handler() => new(_documents, _access, _user, Substitute.For<IDocumentListSummaryStore>());
 
     private void Page(PagedResult<DocumentSummary> result)
