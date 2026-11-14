@@ -49,8 +49,47 @@ public sealed class TemplateVersionsController(
     DeletePeriodAccessRuleHandler deletePeriodAccessRule,
     DiscardTemplateVersionHandler discard,
     SetTemplateLayoutHandler setLayout,
+    MonthInputAliasesHandler monthInputAliases,
     Ecr.Api.Auth.CurrentUser currentUser) : ControllerBase
 {
+    /// <summary>
+    /// ✎ LAND-YEAR L0b: псевдоніми місячних входів методологій версії (<c>cfg.MonthInputAlias</c>). Право
+    /// <c>Template.View</c>.
+    /// </summary>
+    /// <param name="id">Версія.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpGet("month-input-aliases")]
+    [ProducesResponseType<MonthInputAliasesDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<MonthInputAliasesDto>> GetMonthInputAliases(int id, CancellationToken ct)
+        => Ok(await monthInputAliases.GetAsync(id, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// ✎ LAND-YEAR L0b (ADR-B74 Q3): замінює ВЕСЬ набір псевдонімів місячних входів методологій чернетки. Право
+    /// <c>Template.Edit</c>.
+    /// </summary>
+    /// <param name="id">Версія-чернетка.</param>
+    /// <param name="request">Повний новий набір (порожній — прибрати всі).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// Опублікована/застаріла версія — <c>409 ECR-TMPL-0409</c>. Набір перевіряється правилами публікації: ціль — жива
+    /// місячна колонка тієї самої таблиці з тим самим місяцем, ім'я не збігається з кодом колонки, версія
+    /// <c>YearWithMonthColumns</c>, таблиця <c>MonthsInColumns</c>; невідома адреса чи дублікат — теж. Будь-яка хиба —
+    /// <c>422 ECR-TMPL-0422</c> (<c>monthInputAliasInvalid</c>), нічого не записано.
+    /// </remarks>
+    [HttpPut("month-input-aliases")]
+    [ProducesResponseType<MonthInputAliasesDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<MonthInputAliasesDto>> ReplaceMonthInputAliases(
+        int id, [FromBody] ReplaceMonthInputAliasesRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        return Ok(await monthInputAliases.ReplaceAsync(id, request.Items ?? [], ct).ConfigureAwait(false));
+    }
+
     /// <summary>
     /// D-474: задає розкладку чернетки — копія документа на місяць або рік із місяцями в колонках.
     /// Право <c>Template.Edit</c>.

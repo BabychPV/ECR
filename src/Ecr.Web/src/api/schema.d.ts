@@ -6064,12 +6064,17 @@ export interface paths {
          * Поточні проблеми розрахунку документа за період і копію аркуша: рядки без правила (AN-69). Право `Document.View`.
          * @description ⚠ Лише поточні проблеми останнього проходу; без `sheetCopyId` — оригінал аркуша. Рядки схованих таблиць
          *     у відповіді відсутні; невидимий документ — 404.
+         *
+         *     ✎ LAND-YEAR L6: документ річної розкладки — кожен рядок несе `monthNumber` (місяць прогону); з
+         *     `year=true` — проблеми всіх місяців року періоду разом (межі читання — свого місяця). Інша розкладка —
+         *     `monthNumber = null`, прапор нічого не змінює.
          */
         get: {
             parameters: {
                 query?: {
                     periodKey?: number;
                     sheetCopyId?: number;
+                    year?: boolean;
                 };
                 header?: never;
                 path: {
@@ -7274,6 +7279,9 @@ export interface paths {
                     limit?: number;
                     /** @description Курсор наступної сторінки. */
                     cursor?: string;
+                    /** @description ✎ LAND-YEAR L6: документ річної розкладки — журнал усіх місяців року періоду, злитий за часом; рядок несе свій
+                     *     `periodKey`. Інша розкладка — як без прапора. */
+                    year?: boolean;
                 };
                 header?: never;
                 path: {
@@ -7929,6 +7937,9 @@ export interface paths {
                 query?: {
                     /** @description Період. */
                     periodKey?: number;
+                    /** @description ✎ LAND-YEAR L6: документ річної розкладки — останні результати всіх місяців року періоду разом, кожне зауваження з
+                     *     `periodKey` прогону, що його дав; інша розкладка — один період. */
+                    year?: boolean;
                 };
                 header?: never;
                 path: {
@@ -8029,6 +8040,9 @@ export interface paths {
                     periodKey?: number;
                     /** @description Копія аркуша (RS); без нього - оригінал (для журналу - лише події оригіналів). */
                     sheetCopyId?: number;
+                    /** @description ✎ LAND-YEAR L6: документ річної розкладки — події всіх місяців року періоду, кожна з `periodKey`; інша
+                     *     розкладка — як без прапора. */
+                    year?: boolean;
                 };
                 header?: never;
                 path: {
@@ -24120,6 +24134,131 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/template-versions/{id}/month-input-aliases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** ✎ LAND-YEAR L0b: псевдоніми місячних входів методологій версії (`cfg.MonthInputAlias`). Право
+         *     `Template.View`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Версія. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MonthInputAliasesDto"];
+                        "text/json": components["schemas"]["MonthInputAliasesDto"];
+                        "text/plain": components["schemas"]["MonthInputAliasesDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        /**
+         * ✎ LAND-YEAR L0b (ADR-B74 Q3): замінює ВЕСЬ набір псевдонімів місячних входів методологій чернетки. Право
+         *     `Template.Edit`.
+         * @description Опублікована/застаріла версія — `409 ECR-TMPL-0409`. Набір перевіряється правилами публікації: ціль — жива
+         *     місячна колонка тієї самої таблиці з тим самим місяцем, ім'я не збігається з кодом колонки, версія
+         *     `YearWithMonthColumns`, таблиця `MonthsInColumns`; невідома адреса чи дублікат — теж. Будь-яка хиба —
+         *     `422 ECR-TMPL-0422` (`monthInputAliasInvalid`), нічого не записано.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Версія-чернетка. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["ReplaceMonthInputAliasesRequest"];
+                    "application/json": components["schemas"]["ReplaceMonthInputAliasesRequest"];
+                    "text/json": components["schemas"]["ReplaceMonthInputAliasesRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MonthInputAliasesDto"];
+                        "text/json": components["schemas"]["MonthInputAliasesDto"];
+                        "text/plain": components["schemas"]["MonthInputAliasesDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/template-versions/{id}/period-access-rules": {
         parameters: {
             query?: never;
@@ -29311,6 +29450,13 @@ export interface components {
             kind: string;
             /** @description Методологія прив'язки таблиці; `null` — невідома. */
             methodologyCode: null | string;
+            /**
+             * Format: int32
+             * @description ✎ LAND-YEAR L6: місяць (1..12) періоду прогону, якому належить проблема, — лише документ річної розкладки
+             *     (`YearWithMonthColumns`): рядок річного аркуша один, а прогони методологій — по місяцях. `null` — інша
+             *     розкладка.
+             */
+            monthNumber?: null | number;
             /** @description Публічний ключ рядка. */
             rowKey: string;
             /**
@@ -32894,6 +33040,12 @@ export interface components {
             /** @description `Error` — власна помилка комірки (корінь); `Blocked` — комірки, не оновлені через помилку в
              *             Source, корінь якої в переліку не показаний (адреса — перша з таких комірок). */
             kind: string;
+            /**
+             * Format: int32
+             * @description ✎ LAND-YEAR L6: місяць (1..12) періоду, у якому лежить помилка, — лише документ річної розкладки
+             *     (`YearWithMonthColumns`); `null` — інша розкладка.
+             */
+            monthNumber?: null | number;
             /** @description Ключ рядка. */
             rowKey: string;
             rowLabelL10n: null | components["schemas"]["LocalizedText"];
@@ -34827,6 +34979,58 @@ export interface components {
              * @description Таблиця.
              */
             tableDefId: number;
+        };
+        /** @description Псевдонім місячного входу у відповіді. */
+        MonthInputAliasDto: {
+            /** @description Ім'я аргументу. */
+            alias: string;
+            /** @description Код цільової колонки. */
+            columnCode: string;
+            /**
+             * Format: int32
+             * @description Цільова колонка.
+             */
+            columnDefId: number;
+            /**
+             * Format: int32
+             * @description Місяць 1..12.
+             */
+            monthNumber: number;
+            /** @description Код аркуша. */
+            sheetCode: string;
+            /** @description Код таблиці. */
+            tableCode: string;
+            /**
+             * Format: int32
+             * @description Таблиця.
+             */
+            tableDefId: number;
+        };
+        /** @description Псевдонім місячного входу методології в запиті `PUT …/month-input-aliases` — адреса кодами. */
+        MonthInputAliasInput: {
+            /** @description Ім'я аргументу методології (колишній код селектора / формули). */
+            alias: string;
+            /** @description Код місячної колонки тієї самої таблиці з тим самим місяцем. */
+            columnCode: string;
+            /**
+             * Format: int32
+             * @description Місяць 1..12.
+             */
+            monthNumber: number;
+            /** @description Код аркуша. */
+            sheetCode: string;
+            /** @description Код таблиці (у межах аркуша). */
+            tableCode: string;
+        };
+        /** @description Набір псевдонімів місячних входів версії. */
+        MonthInputAliasesDto: {
+            /** @description Псевдоніми в порядку аркуш → таблиця → ім'я → місяць. */
+            items: components["schemas"]["MonthInputAliasDto"][];
+            /**
+             * Format: int32
+             * @description Версія.
+             */
+            templateVersionId: number;
         };
         /** @description Move an entry (re-parent and/or re-level and/or re-order). */
         MoveRegistryEntryRequest: {
@@ -38708,6 +38912,11 @@ export interface components {
              * @description Нова ревізія (ключ кешу метаданих).
              */
             presentationRevision: number;
+        };
+        /** @description Тіло `PUT /template-versions/{id}/month-input-aliases`: ПОВНИЙ набір псевдонімів версії. */
+        ReplaceMonthInputAliasesRequest: {
+            /** @description Псевдоніми; порожній перелік — прибрати всі. */
+            items: components["schemas"]["MonthInputAliasInput"][];
         };
         /** @description Тіло заміни секрету. */
         ReplaceNotificationChannelSecretRequest: {
@@ -42997,6 +43206,12 @@ export interface components {
             displayCode?: null | string;
             /** @description Текст, уже локалізований. */
             message: string;
+            /**
+             * Format: int32
+             * @description ✎ LAND-YEAR L6: лише `GET …/validation?year=true` — період прогону перевірки, що дав зауваження (місяць року);
+             *     `null` — відповідь одного періоду.
+             */
+            periodKey?: null | number;
             /** @description Рядок; `null` — зауваження до таблиці. */
             rowKey: null | string;
             /** @description Код правила. */
@@ -43046,6 +43261,8 @@ export interface components {
              *     Issues без цього моменту не каже, КОЛИ саме «нічого не знайдено».
              */
             validatedAt?: null | string;
+            /** @description ✎ LAND-YEAR L6: лише `year=true` — місяці року, які перевіряли (за зростанням); `null` — один період. */
+            validatedPeriods?: null | number[];
         };
         /** @description Правило валідації для відповіді API. */
         ValidationRuleDto: {
@@ -43195,6 +43412,11 @@ export interface components {
             byDisplayName: string;
             /** @description Стан до дії (`DocumentStatus`). */
             fromState: string;
+            /**
+             * Format: int32
+             * @description ✎ LAND-YEAR L6: лише `year=true` — період (місяць року) події; `null` — відповідь одного періоду.
+             */
+            periodKey?: null | number;
             /** @description Причина відхилення або повернення в роботу. */
             reason: null | string;
             /** @description Код аркуша. */

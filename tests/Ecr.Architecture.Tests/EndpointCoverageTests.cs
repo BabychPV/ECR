@@ -1386,6 +1386,13 @@ public sealed partial class EndpointCoverageTests
         // ⚠ Звільнення тимчасове: прибрати в тому ж коміті, що додає виклик у `features/templates` (імпорт пачкою).
         "PUT /api/v1/template-versions/{p}/tables/{p}/columns",
 
+        // LAND-YEAR L0b (ADR-B74 Q3): псевдоніми місячних входів методологій заводить скрипт розгортання шаблону
+        // (`tools/land/Build-LandTemplate.ps1 -Stage YearMonths`, Land 1.0.17) і звіряє `Verify-LandTemplate.ps1`; екрана
+        // псевдонімів у конструкторі шаблону ще немає. ⚠ Звільнення тимчасове: прибрати в тому ж коміті, що додає виклик у
+        // `features/templates`.
+        "GET /api/v1/template-versions/{p}/month-input-aliases",
+        "PUT /api/v1/template-versions/{p}/month-input-aliases",
+
         // D1: авторство формули комірки (Cell) йде з API/скрипта побудови шаблону
         // (tools/land/Build-LandTemplate.ps1); екрана редактора комірочних формул ще немає.
         // ⚠ Звільнення тимчасове: прибрати в тому ж коміті, що додає виклик у `features/templates`.

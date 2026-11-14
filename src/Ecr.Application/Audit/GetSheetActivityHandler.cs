@@ -54,9 +54,14 @@ public sealed class GetSheetActivityHandler(
     /// <param name="limit">Розмір сторінки; <c>0</c> - 50; більше за 100 - 422.</param>
     /// <param name="cursor">Курсор наступної сторінки.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="year">
+    /// ✎ LAND-YEAR L6: документ річної розкладки — журнал УСІХ місяців року періоду, злитий за часом (рядок несе свій
+    /// період). Межі кожного місяця — СВОЇ (D-214): колонки, таблиці й аркуш, які читач бачить саме в тому місяці. Інша
+    /// розкладка — як без прапора.
+    /// </param>
     public async Task<SheetActivityPage> HandleAsync(
         long documentId, int sheetDefId, int periodKey, int? byUserId, bool includeSystem, int limit, string? cursor,
-        CancellationToken ct)
+        CancellationToken ct, bool year = false)
     {
         var key = PeriodKey.Parse(periodKey);
         var size = limit == 0 ? DefaultLimit : limit;
@@ -98,6 +103,18 @@ public sealed class GetSheetActivityHandler(
             .CollectAsync(monthRouter, metadata, anyPeriod, documentId, key, columns, ct, sheetDefId: sheetDefId)
             .ConfigureAwait(false);
 
+        // ✎ LAND-YEAR L6: річний режим — інші місяці року парами «період → колонки, видимі В ТОМУ місяці» в тому самому
+        // запиті журналу правок; журнал процесу й рядків — по місяцях зі своїми межами.
+        IReadOnlyList<SheetActivityPeriod>? yearPeriods = null;
+        IReadOnlyList<int>? otherPeriods = null;
+        var months = year
+            ? await YearDocumentPeriods.ResolveAsync(monthRouter, documentId, key, ct).ConfigureAwait(false)
+            : null;
+        if (months is not null)
+        {
+            (owners, otherPeriods, yearPeriods) = YearScopes(anyPeriod, sheetDefId, periodKey, months, columns, owners);
+        }
+
         // ✎ B73 (V-4 для журналу аркуша): `aud.CellChange` незмінний і після переносу проєкту лишається на Id колонок
         // старої версії — межі журналу = видимі колонки поточної версії РАЗОМ з їхнім родоводом (і в парах власників).
         (columns, owners) = await WithLineageAsync(columns, owners, ct).ConfigureAwait(false);
@@ -105,12 +122,70 @@ public sealed class GetSheetActivityHandler(
         // ✎ B102: так само `aud.RowChange` лишається на TableDefId старої версії — межі журналу рядків = видимі таблиці
         // РАЗОМ з їхнім родоводом (лише від уже видимих: схована таблиця не дає й свого родоводу).
         tables = await WithTableLineageAsync(tables, ct).ConfigureAwait(false);
+        if (yearPeriods is not null)
+        {
+            var widened = new List<SheetActivityPeriod>(yearPeriods.Count);
+            foreach (var p in yearPeriods)
+            {
+                widened.Add(p with { VisibleTableIds = await WithTableLineageAsync(p.VisibleTableIds, ct).ConfigureAwait(false) });
+            }
+
+            yearPeriods = widened;
+        }
 
         return await query
             .ReadAsync(
-                new SheetActivityScope(documentId, periodKey, sheetCode, columns, byUserId, includeSystem, tables, owners),
+                new SheetActivityScope(documentId, periodKey, sheetCode, columns, byUserId, includeSystem, tables, owners)
+                {
+                    YearPeriods = yearPeriods,
+                    OtherPeriodKeys = otherPeriods,
+                },
                 size, cursor, ct)
             .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// ✎ LAND-YEAR L6: межі інших місяців року — кожен своїми межами читання (<c>InPeriod(m)</c>, D-214): аркуш, закритий
+    /// у місяці, не дає ні правок, ні подій, ні рядків цього місяця.
+    /// </summary>
+    /// <remarks>
+    /// Місяць, де читач бачить усі колонки перегляду (звичайний випадок), — одним ключем періоду
+    /// (<see cref="Ports.CellChangeFilter.OtherPeriodKeys"/>; видимі колонки перегляду діють і на нього); місяць із вужчими
+    /// межами — парами «місяць → колонки, видимі в ньому» (на T9_07 ≈ 590 колонок пари множили б JSON-параметр).
+    /// </remarks>
+    private static (IReadOnlyList<Ports.CellChangeOwnerColumns>? Owners, IReadOnlyList<int>? OtherPeriods,
+        IReadOnlyList<SheetActivityPeriod> Periods) YearScopes(
+        DocumentReadScope anyPeriod, int sheetDefId, int viewPeriod, IReadOnlyList<int> months,
+        IReadOnlyList<int> viewColumns, IReadOnlyList<Ports.CellChangeOwnerColumns>? owners)
+    {
+        var pairs = owners?.ToList() ?? [];
+        var whole = new List<int>();
+        var periods = new List<SheetActivityPeriod>(months.Count);
+        foreach (var month in months.Where(m => m != viewPeriod))
+        {
+            var readable = anyPeriod.InPeriod(new PeriodKey(month));
+            if (readable.SheetCodeOf(sheetDefId) is not { } monthSheet || !readable.CanReadSheetCode(monthSheet))
+            {
+                continue;
+            }
+
+            if (readable.VisibleColumnIdsOfSheet(sheetDefId) is { Count: > 0 } monthColumns)
+            {
+                var set = monthColumns.ToHashSet();
+                if (viewColumns.All(set.Contains))
+                {
+                    whole.Add(month);
+                }
+                else
+                {
+                    pairs.Add(new Ports.CellChangeOwnerColumns(month, monthColumns));
+                }
+            }
+
+            periods.Add(new SheetActivityPeriod(month, readable.VisibleTableIdsOfSheet(sheetDefId) ?? []));
+        }
+
+        return (pairs.Count == 0 ? null : pairs, whole.Count == 0 ? null : whole, periods);
     }
 
     /// <summary>

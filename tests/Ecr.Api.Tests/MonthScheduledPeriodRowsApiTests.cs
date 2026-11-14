@@ -341,7 +341,32 @@ public sealed class MonthScheduledPeriodRowsApiTests(SqlServerFixture sql, ITest
     public async Task GET_слайса_при_OFF_має_те_саме_число_команд_що_до_HU16()
     {
         var s = await ArrangeAsync(scope: null, addOpenInstance: true).ConfigureAwait(true);
-        var (app, client) = await BootAsync(s, flag: false, measured: true).ConfigureAwait(true);
+        // «OFF» = прапор вимкнено І жодної версії YearWithMonthColumns (D-474). Реєстр розкладок читається зі СПІЛЬНОЇ
+        // тестової бази на старті процесу, а річні версії інших тестів шарду там лишаються - тоді роутер вмикається
+        // (+1 читання doc.TableInstance) і число залежить від порядку тестів (CI 43594816074, api-3: 33 замість 32).
+        // Тому реєстр тут - порожній: число міряє рівно той стан, що й до HU-16.
+        Environment.SetEnvironmentVariable(FlagVariable, "false");
+        EcrApiFactory factory;
+        Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program> app;
+        HttpClient client;
+        try
+        {
+            factory = new EcrApiFactory(sql, stampCacheSeconds: 300, revisionWindow: TimeSpan.FromMinutes(5));
+            app = factory.WithWebHostBuilder(b => b.ConfigureTestServices(
+                services => services.AddSingleton<Ecr.Application.Ports.ITemplateLayoutRegistry>(new EmptyLayoutRegistry())));
+            app.Server.PreserveExecutionContext = true;
+            client = app.CreateClient();
+            var login = await client.PostAsJsonAsync(
+                new Uri("/api/v1/login/local", UriKind.Relative),
+                new { userName = s.UserName, password = Password }).ConfigureAwait(true);
+            Assert.True(login.IsSuccessStatusCode, $"Вхід {s.UserName}: {login.StatusCode}: {factory.ErrorsText}");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(FlagVariable, null);
+        }
+
+        using var _f = factory;
         using var _ = app;
         using var __ = client;
         using var counter = NewCounter(out var texts);
@@ -356,6 +381,18 @@ public sealed class MonthScheduledPeriodRowsApiTests(SqlServerFixture sql, ITest
         output.WriteLine(sched.Format());
         Assert.Equal(OffOpenCommands, open.Total);
         Assert.Equal(OffScheduledCommands, sched.Total);
+    }
+
+    /// <summary>Реєстр без річних версій (D-474 вимкнено) - незалежно від того, що лишили в базі інші тести.</summary>
+    private sealed class EmptyLayoutRegistry : Ecr.Application.Ports.ITemplateLayoutRegistry
+    {
+        public bool HasAny => false;
+
+        public bool IsYearVersion(int templateVersionId) => false;
+
+        public bool IsYearSheet(int sheetDefId) => false;
+
+        public Task RefreshAsync(CancellationToken ct) => Task.CompletedTask;
     }
 
     /// <summary>Число команд OFF, знято на c1ea1cbf8 (до HU-16) тим самим сценарієм.</summary>

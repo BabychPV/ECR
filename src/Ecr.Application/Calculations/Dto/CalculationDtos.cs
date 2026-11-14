@@ -148,11 +148,15 @@ public sealed record CalculationIssuesDto(
 /// Error — скільки видимих комірок не оновлено через цей корінь; Blocked — скільки видимих комірок не оновлено через
 /// <paramref name="Source"/> (включно з адресою запису).
 /// </param>
+/// <param name="MonthNumber">
+/// ✎ LAND-YEAR L6: місяць (1..12) періоду, у якому лежить помилка, — лише документ річної розкладки
+/// (<c>YearWithMonthColumns</c>); <c>null</c> — інша розкладка.
+/// </param>
 public sealed record FormulaErrorIssueDto(
     string TableCode, long? SheetCopyId, string RowKey, int RowNumber, LocalizedText? RowLabelL10n,
     string ColumnCode, LocalizedText ColumnHeaderL10n, string Kind, string ErrorCode, string? Formula,
     IReadOnlyList<FormulaErrorInputDto>? Inputs, Documents.Dto.FormulaErrorSourceDto? Source, DateTime Since,
-    int DependentCount);
+    int DependentCount, int? MonthNumber = null);
 
 /// <summary>✎ C-1 (D-475): вхідне значення помилки формули.</summary>
 /// <param name="TableCode">Код таблиці.</param>
@@ -216,6 +220,11 @@ public sealed record CalculationIssueColumnDto(string Code, LocalizedText NameL1
 /// <c>CategoryRuleRejected</c> — ті, що читає правило категорії; для <c>MissingInputs</c> — ті, що читають формули версії),
 /// у порядку колонок таблиці; <c>null</c> — назвати не вдалося або колонка прихована від читача.
 /// </param>
+/// <param name="MonthNumber">
+/// ✎ LAND-YEAR L6: місяць (1..12) періоду прогону, якому належить проблема, — лише документ річної розкладки
+/// (<c>YearWithMonthColumns</c>): рядок річного аркуша один, а прогони методологій — по місяцях. <c>null</c> — інша
+/// розкладка.
+/// </param>
 public sealed record CalculationIssueDto(
     string TableCode,
     long? SheetCopyId,
@@ -226,4 +235,5 @@ public sealed record CalculationIssueDto(
     DateTime DetectedAt,
     IReadOnlyList<string>? CurrentValues = null,
     string? RuleCode = null,
-    IReadOnlyList<CalculationIssueColumnDto>? Columns = null);
+    IReadOnlyList<CalculationIssueColumnDto>? Columns = null,
+    int? MonthNumber = null);

@@ -18,6 +18,9 @@ namespace Ecr.Application.Workflow;
 /// <param name="StepOrdinal">Крок маршруту, якщо маршрут є.</param>
 /// <param name="ApprovedBySubmitter">Погодження виконав той самий користувач, що й подання перед ним: позначка «погоджено автором подання» (<c>D-440</c>).</param>
 /// <param name="SheetCopyId">RS: копія аркуша, якої стосується подія; <c>null</c> — оригінал (код аркуша в копії той самий).</param>
+/// <param name="PeriodKey">
+/// ✎ LAND-YEAR L6: лише <c>year=true</c> — період (місяць року) події; <c>null</c> — відповідь одного періоду.
+/// </param>
 public sealed record WorkflowEventDto(
     string SheetCode,
     string FromState,
@@ -28,7 +31,8 @@ public sealed record WorkflowEventDto(
     string? Reason,
     int? StepOrdinal,
     bool ApprovedBySubmitter,
-    long? SheetCopyId = null);
+    long? SheetCopyId = null,
+    int? PeriodKey = null);
 
 /// <summary>
 /// Журнал переходів документа за період. Право <c>Document.View</c>.
@@ -46,7 +50,8 @@ public sealed class GetWorkflowHistoryHandler(
     GetDocumentHandler getDocument,
     IWorkflowStore workflow,
     Security.IAccessDecisionService access,
-    Common.ICurrentUser currentUser)
+    Common.ICurrentUser currentUser,
+    IMonthColumnRouter? monthRouter = null)
 {
     /// <summary>Право читання журналу — те саме, що й читання документа.</summary>
     /// <remarks>
@@ -68,8 +73,13 @@ public sealed class GetWorkflowHistoryHandler(
     /// <param name="periodKey">Період.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <param name="sheetCopyId">Копія аркуша (RS); <c>null</c> — лише події оригіналів, НЕ всі.</param>
+    /// <param name="year">
+    /// ✎ LAND-YEAR L6: документ річної розкладки — події ВСІХ місяців року періоду разом (подання й погодження йдуть по
+    /// місяцях, а документ один), найновіші перші, кожна з періодом; межі читання — свого місяця (D-214). Стеля та сама
+    /// (<see cref="MaxEvents"/>). Інша розкладка — як без прапора.
+    /// </param>
     public async Task<IReadOnlyList<WorkflowEventDto>> HandleAsync(
-        long documentId, int periodKey, CancellationToken ct, long? sheetCopyId = null)
+        long documentId, int periodKey, CancellationToken ct, long? sheetCopyId = null, bool year = false)
     {
         var key = PeriodKey.Parse(periodKey);
 
@@ -84,6 +94,14 @@ public sealed class GetWorkflowHistoryHandler(
                     ["messageKey"] = "err.ECR-DOC-0404.document",
                     ["documentId"] = documentId.ToString(CultureInfo.InvariantCulture),
                 });
+        }
+
+        var months = year
+            ? await YearDocumentPeriods.ResolveAsync(monthRouter, documentId, key, ct).ConfigureAwait(false)
+            : null;
+        if (months is not null)
+        {
+            return await YearAsync(documentId, document.ProjectId, months, sheetCopyId, ct).ConfigureAwait(false);
         }
 
         var events = await workflow.GetHistoryAsync(documentId, key, MaxEvents, ct, sheetCopyId).ConfigureAwait(false);
@@ -115,6 +133,61 @@ public sealed class GetWorkflowHistoryHandler(
                 e.ApprovedBySubmitter,
                 e.SheetCopyId))
             .ToList();
+    }
+
+    /// <summary>
+    /// ✎ LAND-YEAR L6: події всіх місяців року — кожен місяць своїм читанням і СВОЇМИ межами читання (D-214: роль,
+    /// обмежена періодами, не бачить подій поза ними), разом за часом, не більше <see cref="MaxEvents"/>.
+    /// </summary>
+    private async Task<IReadOnlyList<WorkflowEventDto>> YearAsync(
+        long documentId, int projectId, IReadOnlyList<int> months, long? sheetCopyId, CancellationToken ct)
+    {
+        var all = new List<(int Period, ApprovalEventRecord Event)>();
+        foreach (var month in months)
+        {
+            var events = await workflow.GetHistoryAsync(documentId, new PeriodKey(month), MaxEvents, ct, sheetCopyId)
+                .ConfigureAwait(false);
+            all.AddRange(events.Select(e => (month, e)));
+        }
+
+        if (all.Count == 0)
+        {
+            return [];
+        }
+
+        var profile = await Security.PermissionCheck
+            .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
+            .ConfigureAwait(false);
+        await Documents.DocumentVisibility
+            .RequireInDocumentAsync(access, profile, documentId, projectId, Permission, ct).ConfigureAwait(false);
+        var anyPeriod = await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
+        var scopes = new Dictionary<int, Security.DocumentReadScope>();
+
+        return [.. all
+            .Where(x =>
+            {
+                if (!scopes.TryGetValue(x.Period, out var readable))
+                {
+                    scopes[x.Period] = readable = anyPeriod.InPeriod(new PeriodKey(x.Period));
+                }
+
+                return readable.CanReadSheetCode(x.Event.SheetCode);
+            })
+            .OrderByDescending(x => x.Event.At)
+            .ThenByDescending(x => x.Event.Id)
+            .Take(MaxEvents)
+            .Select(x => new WorkflowEventDto(
+                x.Event.SheetCode,
+                x.Event.FromStatus.ToString(),
+                x.Event.ToStatus.ToString(),
+                x.Event.Action.ToString(),
+                ActorName(x.Event),
+                x.Event.At,
+                x.Event.Reason,
+                x.Event.StepOrdinal,
+                x.Event.ApprovedBySubmitter,
+                x.Event.SheetCopyId,
+                x.Period))];
     }
 
     /// <remarks>

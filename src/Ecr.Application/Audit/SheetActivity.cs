@@ -107,7 +107,25 @@ public static class SheetActivityKinds
 public sealed record SheetActivityScope(
     long DocumentId, int PeriodKey, string SheetCode, IReadOnlyList<int> VisibleColumnIds, int? ByUserId = null,
     bool IncludeSystem = false, IReadOnlyList<int>? VisibleTableIds = null,
-    IReadOnlyList<CellChangeOwnerColumns>? OwnerPeriodColumns = null);
+    IReadOnlyList<CellChangeOwnerColumns>? OwnerPeriodColumns = null)
+{
+    /// <summary>
+    /// ✎ LAND-YEAR L6: інші місяці року (річний журнал), у яких аркуш читачеві відкритий, — з таблицями, видимими В ТОМУ
+    /// місяці; журнал процесу й рядків читається й по них. <c>null</c> — лише період перегляду.
+    /// </summary>
+    public IReadOnlyList<SheetActivityPeriod>? YearPeriods { get; init; }
+
+    /// <summary>
+    /// ✎ LAND-YEAR L6: місяці року, правки яких беруться в межах <see cref="VisibleColumnIds"/> (читач бачить у них усі
+    /// колонки перегляду) — <see cref="CellChangeFilter.OtherPeriodKeys"/>. <c>null</c> — немає.
+    /// </summary>
+    public IReadOnlyList<int>? OtherPeriodKeys { get; init; }
+}
+
+/// <summary>✎ LAND-YEAR L6: місяць річного журналу аркуша з його межами.</summary>
+/// <param name="PeriodKey">Період місяця.</param>
+/// <param name="VisibleTableIds">Таблиці аркуша, видимі читачеві в цьому місяці (межі журналу рядків).</param>
+public sealed record SheetActivityPeriod(int PeriodKey, IReadOnlyList<int> VisibleTableIds);
 
 /// <summary>
 /// Спільний шар читання журналу дій на аркуші: злиття трьох джерел в один потік, найновіші перші.
@@ -200,7 +218,8 @@ public sealed class SheetActivityQuery(
             PeriodKey: scope.PeriodKey,
             HumanOnly: !scope.IncludeSystem,
             Sort: AuditSort.ChangedAtDesc,
-            OwnerPeriodColumns: scope.OwnerPeriodColumns);
+            OwnerPeriodColumns: scope.OwnerPeriodColumns,
+            OtherPeriodKeys: scope.OtherPeriodKeys);
 
         // Курсор читача журналу правок — пара (At, Id) «строго після» в порядку DESC. Після рядка процесу (тег 1)
         // правки того ж At вже видано (тег 0 раніше за тег 1), тож Id = 0 дає «At строго менший».
@@ -227,8 +246,21 @@ public sealed class SheetActivityQuery(
     private async Task<IReadOnlyList<Row>> ReadWorkflowAsync(
         SheetActivityScope scope, (DateTime At, int Tag, long Id)? after, CancellationToken ct)
     {
+        // ✎ LAND-YEAR L6: річний журнал — події кожного місяця, де аркуш читачеві відкритий (YearPeriods уже звужені).
+        var rows = new List<Row>(await ReadWorkflowOfAsync(scope, scope.PeriodKey, after, ct).ConfigureAwait(false));
+        foreach (var period in scope.YearPeriods ?? [])
+        {
+            rows.AddRange(await ReadWorkflowOfAsync(scope, period.PeriodKey, after, ct).ConfigureAwait(false));
+        }
+
+        return rows;
+    }
+
+    private async Task<IReadOnlyList<Row>> ReadWorkflowOfAsync(
+        SheetActivityScope scope, int periodKey, (DateTime At, int Tag, long Id)? after, CancellationToken ct)
+    {
         var events = await workflow.GetHistoryAsync(
-            scope.DocumentId, new PeriodKey(scope.PeriodKey), WorkflowCap, ct).ConfigureAwait(false);
+            scope.DocumentId, new PeriodKey(periodKey), WorkflowCap, ct).ConfigureAwait(false);
 
         return [.. events
             .Where(e => string.Equals(e.SheetCode, scope.SheetCode, StringComparison.Ordinal))
@@ -239,7 +271,7 @@ public sealed class SheetActivityQuery(
             .Select(e => new Row(e.At, WorkflowTag, e.Id, new SheetActivityItem(
                 SheetActivityKinds.Workflow, e.At,
                 e.ByUserId is null ? SystemActor : e.ByDisplayName ?? "#" + e.ByUserId.Value.ToString(CultureInfo.InvariantCulture),
-                Origin: null, scope.PeriodKey, RowKey: null, RowLabelL10n: null, ColumnDefId: null, ColumnCode: null,
+                Origin: null, periodKey, RowKey: null, RowLabelL10n: null, ColumnDefId: null, ColumnCode: null,
                 ColumnHeaderL10n: null, ColumnDataType: null, TableCode: null, TableNameL10n: null, OldValue: null,
                 NewValue: null, e.Action.ToString(), e.FromStatus.ToString(), e.ToStatus.ToString(), e.Reason)))];
     }
@@ -255,7 +287,23 @@ public sealed class SheetActivityQuery(
     private async Task<IReadOnlyList<Row>> ReadRowsAsync(
         SheetActivityScope scope, int limit, (DateTime At, int Tag, long Id)? after, CancellationToken ct)
     {
-        if (rowChanges is null || scope.VisibleTableIds is not { Count: > 0 } tables)
+        // ✎ LAND-YEAR L6: річний журнал — рядки кожного місяця з таблицями, видимими В ТОМУ місяці.
+        var rows = new List<Row>(await ReadRowsOfAsync(scope, scope.PeriodKey, scope.VisibleTableIds, limit, after, ct)
+            .ConfigureAwait(false));
+        foreach (var period in scope.YearPeriods ?? [])
+        {
+            rows.AddRange(await ReadRowsOfAsync(scope, period.PeriodKey, period.VisibleTableIds, limit, after, ct)
+                .ConfigureAwait(false));
+        }
+
+        return rows;
+    }
+
+    private async Task<IReadOnlyList<Row>> ReadRowsOfAsync(
+        SheetActivityScope scope, int periodKey, IReadOnlyList<int>? visibleTables, int limit,
+        (DateTime At, int Tag, long Id)? after, CancellationToken ct)
+    {
+        if (rowChanges is null || visibleTables is not { Count: > 0 } tables)
         {
             return [];
         }
@@ -266,7 +314,7 @@ public sealed class SheetActivityQuery(
         var items = await rowChanges
             .ReadRowChangesAsync(
                 new RowChangeFilter(
-                    now - CellWindow, now.AddDays(1), scope.DocumentId, scope.PeriodKey, tables, scope.ByUserId,
+                    now - CellWindow, now.AddDays(1), scope.DocumentId, periodKey, tables, scope.ByUserId,
                     HumanOnly: !scope.IncludeSystem),
                 limit + 1,
                 position,

@@ -337,11 +337,39 @@ public sealed class DocumentsController(
     /// <param name="id">Документ.</param>
     /// <param name="periodKey">Період.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="year">
+    /// ✎ LAND-YEAR L6: документ річної розкладки — останні результати всіх місяців року періоду разом, кожне зауваження з
+    /// <c>periodKey</c> прогону, що його дав; інша розкладка — один період.
+    /// </param>
     [HttpGet("{id:long}/validation")]
     [ProducesResponseType<ValidationResultResponse>(StatusCodes.Status200OK)]
     public async Task<IActionResult> LastValidation(
-        long id, [FromQuery] int periodKey, CancellationToken ct)
+        long id, [FromQuery] int periodKey, CancellationToken ct, [FromQuery] bool year = false)
     {
+        // ✎ LAND-YEAR L6: `year=true` — останні результати всіх місяців року (документ річної розкладки), кожне
+        // зауваження з `periodKey` прогону; інша розкладка — один період, зауваження з цим періодом.
+        if (year)
+        {
+            var yearResult = await validationResult
+                .ReadYearAsync(id, PeriodKey.Parse(periodKey), ct)
+                .ConfigureAwait(false);
+            if (yearResult is null)
+            {
+                return Ok(new ValidationResultResponse(id, periodKey, [], Validated: false));
+            }
+
+            return Ok(new ValidationResultResponse(
+                id,
+                periodKey,
+                [.. yearResult.Messages.Select(p => new ValidationFindingDto(
+                    p.Message.Severity.ToString(), p.Message.RuleCode, p.Message.Message,
+                    p.Message.TableDefId, p.Message.RowKey, p.Message.ColumnCode, p.Message.BlocksSave,
+                    ValidationFindingDto.DisplayCodeOf(p.Message.RuleCode), p.PeriodKey))],
+                Validated: true,
+                ValidatedAt: DateTime.SpecifyKind(yearResult.RunAt, DateTimeKind.Utc),
+                ValidatedPeriods: yearResult.ValidatedPeriods));
+        }
+
         var stored = await validationResult
             .ReadAsync(id, PeriodKey.Parse(periodKey), ct)
             .ConfigureAwait(false);
@@ -773,12 +801,17 @@ public sealed class DocumentsController(
     /// <remarks>
     /// ⚠ Лише поточні проблеми останнього проходу; без <c>sheetCopyId</c> — оригінал аркуша. Рядки схованих таблиць
     /// у відповіді відсутні; невидимий документ — 404.
+    ///
+    /// ✎ LAND-YEAR L6: документ річної розкладки — кожен рядок несе <c>monthNumber</c> (місяць прогону); з
+    /// <c>year=true</c> — проблеми всіх місяців року періоду разом (межі читання — свого місяця). Інша розкладка —
+    /// <c>monthNumber = null</c>, прапор нічого не змінює.
     /// </remarks>
     [HttpGet("{id:long}/calculation-issues")]
     [ProducesResponseType<Ecr.Application.Calculations.Dto.CalculationIssuesDto>(StatusCodes.Status200OK)]
     public async Task<IActionResult> CalculationIssues(
-        long id, [FromQuery] int periodKey, [FromQuery] long? sheetCopyId, CancellationToken ct)
-        => Ok(await calculationIssues.HandleAsync(id, periodKey, sheetCopyId, ct).ConfigureAwait(false));
+        long id, [FromQuery] int periodKey, [FromQuery] long? sheetCopyId, CancellationToken ct,
+        [FromQuery] bool year = false)
+        => Ok(await calculationIssues.HandleAsync(id, periodKey, sheetCopyId, ct, year).ConfigureAwait(false));
 
     /// <summary>Експорт у <c>.xlsx</c>. Право <c>Document.Export</c>.</summary>
     [HttpPost("{id:long}/export")]
@@ -1104,12 +1137,16 @@ public sealed record ImportApplyRequest(
 /// ✎ UAT 08.11 (d4): коли виконано перевірку (UTC); <c>null</c> — перевірку ще не запускали. Порожній перелік
 /// Issues без цього моменту не каже, КОЛИ саме «нічого не знайдено».
 /// </param>
+/// <param name="ValidatedPeriods">
+/// ✎ LAND-YEAR L6: лише <c>year=true</c> — місяці року, які перевіряли (за зростанням); <c>null</c> — один період.
+/// </param>
 public sealed record ValidationResultResponse(
     long DocumentId,
     int PeriodKey,
     IReadOnlyList<ValidationFindingDto> Messages,
     bool Validated,
-    DateTime? ValidatedAt = null);
+    DateTime? ValidatedAt = null,
+    IReadOnlyList<int>? ValidatedPeriods = null);
 
 /// <summary>Одне зауваження перевірки.</summary>
 /// <param name="Severity">Рівень: <c>Error</c>, <c>Warning</c>, <c>Info</c>.</param>
@@ -1135,9 +1172,13 @@ public sealed record ValidationResultResponse(
 /// ⛔ <c>RuleCode</c> НЕ змінюється: за ним <c>GetValidationResultHandler</c> зіставляє збережені знахідки
 /// із зв'язками, а клієнт — адресу знахідки.
 /// </param>
+/// <param name="PeriodKey">
+/// ✎ LAND-YEAR L6: лише <c>GET …/validation?year=true</c> — період прогону перевірки, що дав зауваження (місяць року);
+/// <c>null</c> — відповідь одного періоду.
+/// </param>
 public sealed record ValidationFindingDto(
     string Severity, string RuleCode, string Message, int TableDefId, string? RowKey, string? ColumnCode, bool BlocksSave,
-    string? DisplayCode = null)
+    string? DisplayCode = null, int? PeriodKey = null)
 {
     private const string RelationPrefix = "REL-";
 

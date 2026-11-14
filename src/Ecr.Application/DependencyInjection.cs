@@ -88,6 +88,7 @@ public static class DependencyInjection
 
         // D-474: розкладка версії (копія на місяць | рік із місяцями в колонках).
         services.AddScoped<SetTemplateLayoutHandler>();
+        services.AddScoped<MonthInputAliasesHandler>();
 
         // Другий вертикальний зріз — таблиця на аркуші (W5.1), той самий патерн.
         services.AddScoped<SaveTableDefHandler>();

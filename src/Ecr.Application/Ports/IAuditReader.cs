@@ -180,6 +180,12 @@ public sealed record StructureChangeView(
 /// гілки. <c>null</c> або порожньо — умова періоду дослівно як була. Перелік складає обробник ПІСЛЯ меж читання (логічна
 /// адреса + межа D-214 періоду-власника), порт його не розширює.
 /// </param>
+/// <param name="OtherPeriodKeys">
+/// ✎ LAND-YEAR L6 (річний журнал аркуша): інші періоди (місяці року), зміни яких беруться разом з
+/// <paramref name="PeriodKey"/> — лише ті, де читач бачить УСІ колонки <paramref name="VisibleColumnIds"/> (обробник
+/// перевіряє межі кожного місяця; місяць із вужчими межами йде парами <paramref name="OwnerPeriodColumns"/>). Діє лише
+/// разом із <paramref name="PeriodKey"/>; <c>null</c> або порожньо — як без нього.
+/// </param>
 public sealed record CellChangeFilter(
     DateTime From,
     DateTime To,
@@ -195,7 +201,8 @@ public sealed record CellChangeFilter(
     bool HumanOnly = false,
     AuditSort Sort = AuditSort.ChangedAtDesc,
     IReadOnlyList<int>? ColumnLineage = null,
-    IReadOnlyList<CellChangeOwnerColumns>? OwnerPeriodColumns = null)
+    IReadOnlyList<CellChangeOwnerColumns>? OwnerPeriodColumns = null,
+    IReadOnlyList<int>? OtherPeriodKeys = null)
 {
     /// <summary>Фільтр адресує РІВНО ОДНУ комірку — документ, рядок і колонку.</summary>
     /// <remarks>

@@ -362,6 +362,17 @@ public interface ITemplateVersionStore
     /// <returns>Псевдоніми в порядку Id.</returns>
     public Task<IReadOnlyList<Domain.Entities.Configuration.MonthInputAlias>> ListMonthInputAliasesAsync(
         int templateVersionId, CancellationToken ct);
+
+    /// <summary>
+    /// ✎ LAND-YEAR L0b: замінює ВЕСЬ набір псевдонімів місячних входів версії (<c>PUT …/month-input-aliases</c>):
+    /// наявні видаляються одразу (у поточній транзакції), нові додаються до контексту — зберігає <c>SaveChanges</c>
+    /// викликача.
+    /// </summary>
+    /// <param name="templateVersionId">Версія-чернетка.</param>
+    /// <param name="aliases">Новий набір (уже перевірений).</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task ReplaceMonthInputAliasesAsync(
+        int templateVersionId, IReadOnlyList<Domain.Entities.Configuration.MonthInputAlias> aliases, CancellationToken ct);
 }
 
 /// <summary>✎ R-3: тип колонки опублікованої/застарілої версії шаблону (вхід перевірки родини типу при публікації).</summary>

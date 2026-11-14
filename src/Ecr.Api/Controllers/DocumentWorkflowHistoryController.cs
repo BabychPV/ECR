@@ -42,12 +42,17 @@ public sealed class DocumentWorkflowHistoryController(
     /// <param name="periodKey">Період.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <param name="sheetCopyId">Копія аркуша (RS); без нього - оригінал (для журналу - лише події оригіналів).</param>
+    /// <param name="year">
+    /// ✎ LAND-YEAR L6: документ річної розкладки — події всіх місяців року періоду, кожна з <c>periodKey</c>; інша
+    /// розкладка — як без прапора.
+    /// </param>
     [HttpGet("{id:long}/workflow/history")]
     [ProducesResponseType<IReadOnlyList<WorkflowEventDto>>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> History(
-        long id, [FromQuery] int periodKey, CancellationToken ct, [FromQuery] long? sheetCopyId = null)
-        => Ok(await history.HandleAsync(id, periodKey, ct, sheetCopyId).ConfigureAwait(false));
+        long id, [FromQuery] int periodKey, CancellationToken ct, [FromQuery] long? sheetCopyId = null,
+        [FromQuery] bool year = false)
+        => Ok(await history.HandleAsync(id, periodKey, ct, sheetCopyId, year).ConfigureAwait(false));
 
     /// <summary>
     /// Журнал дій на аркуші за період (панель History): правки значень людьми (сітка, імпорт, правка погоджувача)
@@ -62,14 +67,18 @@ public sealed class DocumentWorkflowHistoryController(
     /// <param name="limit">Розмір сторінки; <c>0</c> - 50.</param>
     /// <param name="cursor">Курсор наступної сторінки.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="year">
+    /// ✎ LAND-YEAR L6: документ річної розкладки — журнал усіх місяців року періоду, злитий за часом; рядок несе свій
+    /// <c>periodKey</c>. Інша розкладка — як без прапора.
+    /// </param>
     [HttpGet("{id:long}/sheets/{sheetDefId:int}/activity")]
     [ProducesResponseType<Ecr.Application.Audit.SheetActivityPage>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> SheetActivity(
         long id, int sheetDefId, [FromQuery] int periodKey, [FromQuery] int? author, [FromQuery] bool includeSystem,
-        [FromQuery] int limit, [FromQuery] string? cursor, CancellationToken ct)
-        => Ok(await sheetActivity.HandleAsync(id, sheetDefId, periodKey, author, includeSystem, limit, cursor, ct).ConfigureAwait(false));
+        [FromQuery] int limit, [FromQuery] string? cursor, CancellationToken ct, [FromQuery] bool year = false)
+        => Ok(await sheetActivity.HandleAsync(id, sheetDefId, periodKey, author, includeSystem, limit, cursor, ct, year).ConfigureAwait(false));
 
     /// <summary>
     /// Відкликання поданого аркуша автором: <c>Submitted → Draft</c> з причиною.
