@@ -534,7 +534,45 @@ SELECT CAST(3 AS tinyint),
            CONVERT(nvarchar(30), t.CreatedAt, 126), N'|',
            CONVERT(nvarchar(30), t.ModifiedAt, 126), N'|',
            ISNULL(CONVERT(nvarchar(20), t.SheetCopyId), N'~'))), 1, 8) AS bigint)
-  FROM arc.TableInstance AS t;
+  FROM arc.TableInstance AS t
+-- B87 (борг B70): частини місяця між дозволами, стилі комірок і ручні перевизначення формул теж переїжджають в архів
+-- (`usp_ArchiveYear`) і так само не мають змінюватися. ⛔ Вирази Kind 1–3 вище НЕ ЗМІНЮВАТИ: на живих базах уже лежать
+-- еталони, пораховані ними, і будь-яка правка серіалізації зробила б «зміненим» кожен заархівований рік. Нові види лише
+-- ДОПИСУЮТЬСЯ; еталон без них (архів до B87) звіряється лише за Kind 1–3 (`ArchiveTamperCheck`).
+UNION ALL
+SELECT CAST(4 AS tinyint),
+       pp.PeriodKey,
+       CAST(SUBSTRING(HASHBYTES('SHA2_256', CONCAT(
+           pp.Id, N'|', pp.DocumentId, N'|', pp.TableDefId, N'|',
+           ISNULL(CONVERT(nvarchar(20), pp.SheetCopyId), N'~'), N'|',
+           DATALENGTH(pp.RowKey), N':', pp.RowKey, N'|',
+           pp.ColumnDefId, N'|', pp.PartNo, N'|', pp.RegistryEntryId, N'|',
+           CONVERT(nvarchar(10), pp.DayFrom, 23), N'|',
+           CONVERT(nvarchar(10), pp.DayTo, 23), N'|',
+           ISNULL(CONVERT(nvarchar(60), pp.ValueNumeric), N'~'))), 1, 8) AS bigint)
+  FROM arc.CellPermitPart AS pp
+UNION ALL
+SELECT CAST(5 AS tinyint),
+       s.PeriodKey,
+       CAST(SUBSTRING(HASHBYTES('SHA2_256', CONCAT(
+           s.TableRowId, N'|', s.ColumnDefId, N'|',
+           CASE WHEN s.BackgroundHex IS NULL THEN N'~'
+                ELSE CONCAT(DATALENGTH(s.BackgroundHex), N':', s.BackgroundHex) END, N'|',
+           CASE WHEN s.ForegroundHex IS NULL THEN N'~'
+                ELSE CONCAT(DATALENGTH(s.ForegroundHex), N':', s.ForegroundHex) END, N'|',
+           s.IsBold, N'|',
+           CONVERT(nvarchar(30), s.UpdatedAt, 126), N'|',
+           s.UpdatedByUserId)), 1, 8) AS bigint)
+  FROM arc.CellStyle AS s
+UNION ALL
+SELECT CAST(6 AS tinyint),
+       o.PeriodKey,
+       CAST(SUBSTRING(HASHBYTES('SHA2_256', CONCAT(
+           o.TableRowId, N'|', o.ColumnDefId, N'|', o.TableInstanceId, N'|',
+           DATALENGTH(o.Reason), N':', o.Reason, N'|',
+           CONVERT(nvarchar(30), o.SetAt, 126), N'|',
+           o.SetByUserId)), 1, 8) AS bigint)
+  FROM arc.CellFormulaOverride AS o;
 GO
 
 -- R-1 (audit 2026-11, D-498): the SSRS views (05-rpt-views.sql) read archived years from arc.* with the same per-row

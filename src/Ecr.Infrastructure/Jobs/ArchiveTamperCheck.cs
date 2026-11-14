@@ -8,8 +8,8 @@ using Microsoft.EntityFrameworkCore;
 namespace Ecr.Infrastructure.Jobs;
 
 /// <summary>
-/// B70: виявлення прямої правки архіву табличних даних (<c>arc.CellValue</c>, <c>arc.TableRow</c>,
-/// <c>arc.TableInstance</c>) — звірка поточного відбитка кожного заархівованого періоду з еталоном, який записала
+/// B70/B87: виявлення прямої правки архіву табличних даних (<c>arc.CellValue</c>, <c>arc.TableRow</c>,
+/// <c>arc.TableInstance</c>, <c>arc.CellPermitPart</c>, <c>arc.CellStyle</c>, <c>arc.CellFormulaOverride</c>) — звірка поточного відбитка кожного заархівованого періоду з еталоном, який записала
 /// <c>arc.usp_ArchiveYear</c> у момент архівації.
 /// </summary>
 /// <remarks>
@@ -35,6 +35,14 @@ namespace Ecr.Infrastructure.Jobs;
 /// каже про це в підсумку прогону (<c>archiveBaselinesRecorded</c>). Зміна між архівацією і першим проходом після
 /// оновлення так не виявиться — це названа ціна шляху оновлення; альтернатива (вічна знахідка «немає еталона» на
 /// кожен старий рік) перетворила б журнал на шум, у якому справжня знахідка тоне (ФВ-7.7).
+/// </para>
+/// <para>
+/// B87 (борг B70): відбиток покриває й <c>arc.CellPermitPart</c>, <c>arc.CellStyle</c>, <c>arc.CellFormulaOverride</c>
+/// (види 4–6 в'юхи). ⛔ Еталон, записаний ДО B87, цих видів не має — його звіряють лише за комірками, рядками й
+/// екземплярами (<see cref="PeriodPrint.SameData"/>), інакше оновлення дало б хибну знахідку на кожен рік зі стилями чи
+/// частинами. Якщо старий еталон збігся, прохід ДОПОВНЮЄ його новими видами з поточного стану (ціна та сама, що в
+/// базового еталона вище) і каже про це в підсумку (<c>archiveReferencesExtended</c>); наступна правка нових видів —
+/// уже знахідка.
 /// </para>
 /// <para>
 /// ⚠ Бюджет часу на прохід (<see cref="Budget"/>) і ротація початку за днем: рік прод-обсягу (~108 млн комірок)
@@ -69,7 +77,11 @@ internal sealed class ArchiveTamperCheck(EcrDbContext db)
     private const string StatusRunning = "Running";
     private const string OriginBaseline = "baseline";
 
-    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    // ⚠ Поля B87 відсутні в записах еталона до B87 — і такими лишаються, коли прохід переписує документ прогону.
+    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
+    {
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+    };
 
     /// <summary>Перевіряє заархівовані періоди в межах бюджету.</summary>
     /// <param name="utcNow">Момент проходу (ротація початку за днем).</param>
@@ -93,7 +105,8 @@ internal sealed class ArchiveTamperCheck(EcrDbContext db)
         var plan = Plan(runs, ref complete);
 
         var tampers = new List<ArchiveTamper>();
-        var baselines = new Dictionary<long, (RunRow Run, List<PeriodPrint> Entries)>();
+        // Що дописати в еталон прогону: базові відбитки (еталона немає) і доповнення B87 (еталон до B87 збігся).
+        var writes = new Dictionary<long, PendingWrite>();
         var verified = 0;
         var noReference = 0;
 
@@ -119,18 +132,18 @@ internal sealed class ArchiveTamperCheck(EcrDbContext db)
             {
                 if (!reference.Entry.SameData(current))
                 {
-                    tampers.Add(new ArchiveTamper(period.PeriodKey, reference.RunId, reference.Entry, current));
+                    tampers.Add(new ArchiveTamper(period.PeriodKey, reference.Run.Id, reference.Entry, current));
+                }
+                else if (!reference.Entry.CoversAllKinds)
+                {
+                    // B87: еталон до B87 (лише комірки, рядки, екземпляри) збігся — доповнюємо його частинами місяця,
+                    // стилями й перевизначеннями з поточного стану, як базовий еталон B70; далі їхня правка — знахідка.
+                    Pending(reference.Run).Extensions.Add(current);
                 }
             }
             else if (period.BaselineRun is { } target)
             {
-                if (!baselines.TryGetValue(target.Id, out var pending))
-                {
-                    pending = (target, []);
-                    baselines[target.Id] = pending;
-                }
-
-                pending.Entries.Add(current);
+                Pending(target).Baselines.Add(current);
             }
             else
             {
@@ -138,13 +151,29 @@ internal sealed class ArchiveTamperCheck(EcrDbContext db)
             }
         }
 
-        var recorded = 0;
-        foreach (var (run, entries) in baselines.Values)
+        var recordedBaselines = 0;
+        var recordedExtensions = 0;
+        foreach (var pending in writes.Values)
         {
-            recorded += await RecordBaselineAsync(run, entries, ct).ConfigureAwait(false);
+            if (await RecordAsync(pending.Run, [.. pending.Baselines, .. pending.Extensions], ct).ConfigureAwait(false))
+            {
+                recordedBaselines += pending.Baselines.Count;
+                recordedExtensions += pending.Extensions.Count;
+            }
         }
 
-        return new ArchiveTamperResult(tampers, complete, verified, recorded, noReference);
+        return new ArchiveTamperResult(tampers, complete, verified, recordedBaselines, noReference, recordedExtensions);
+
+        PendingWrite Pending(RunRow run)
+        {
+            if (!writes.TryGetValue(run.Id, out var pending))
+            {
+                pending = new PendingWrite(run, [], []);
+                writes[run.Id] = pending;
+            }
+
+            return pending;
+        }
     }
 
     /// <summary>Заархівовані періоди з їхнім еталоном (або прогоном, куди записати базовий), за зростанням ключа.</summary>
@@ -205,7 +234,7 @@ internal sealed class ArchiveTamperCheck(EcrDbContext db)
                 var entry = doc.Periods?.Find(p => p.P == key);
                 if (entry is not null)
                 {
-                    reference = new Reference(run.Id, entry);
+                    reference = new Reference(run, entry);
                     break;
                 }
 
@@ -263,12 +292,30 @@ internal sealed class ArchiveTamperCheck(EcrDbContext db)
         var cells = Part(1);
         var rows = Part(2);
         var instances = Part(3);
+        var permitParts = Part(4);
+        var styles = Part(5);
+        var overrides = Part(6);
 
-        return new PeriodPrint(periodKey, cells.Total, cells.Digest, rows.Total, rows.Digest, instances.Total, instances.Digest);
+        return new PeriodPrint(periodKey, cells.Total, cells.Digest, rows.Total, rows.Digest, instances.Total, instances.Digest)
+        {
+            Pp = permitParts.Total,
+            Pph = permitParts.Digest,
+            S = styles.Total,
+            Sh = styles.Digest,
+            O = overrides.Total,
+            Oh = overrides.Digest,
+        };
     }
 
-    /// <summary>Записує базовий еталон у прогін (лише якщо поля не змінилися з моменту читання).</summary>
-    private async Task<int> RecordBaselineAsync(RunRow run, List<PeriodPrint> entries, CancellationToken ct)
+    /// <summary>
+    /// Дописує відбитки періодів у еталон прогону — базові (еталона не було) і доповнення B87 (лише якщо поля не
+    /// змінилися з моменту читання).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Походження еталона зберігається: доповнений еталон процедури лишається <c>archive</c>, новий — <c>baseline</c>.
+    /// Записи інших періодів переносяться як є; поля B87, яких у них немає, не дописуються (<c>null</c> не пишеться).
+    /// </remarks>
+    private async Task<bool> RecordAsync(RunRow run, List<PeriodPrint> entries, CancellationToken ct)
     {
         var existing = Parse(run);
         var periods = existing?.Periods?.ToList() ?? [];
@@ -276,7 +323,7 @@ internal sealed class ArchiveTamperCheck(EcrDbContext db)
         periods.AddRange(entries);
         periods.Sort((a, b) => a.P.CompareTo(b.P));
 
-        var json = JsonSerializer.Serialize(new FingerprintDoc(1, OriginBaseline, periods), Json);
+        var json = JsonSerializer.Serialize(new FingerprintDoc(1, existing?.Origin ?? OriginBaseline, periods), Json);
 
         // ⚠ Оптимістична умова: паралельний прохід (нічний і ручний) або нова архівація могли записати своє — тоді
         // цей запис не перетирає чужого, а наступний прохід прочитає свіжий стан.
@@ -300,13 +347,15 @@ internal sealed class ArchiveTamperCheck(EcrDbContext db)
                 ct)
             .ConfigureAwait(false);
 
-        return updated == 1 ? entries.Count : 0;
+        return updated == 1;
     }
 
     private sealed record RunRow(
         long Id, string Direction, string Status, int FromPeriodKey, int ToPeriodKey, string? SourceJson, string? TargetJson);
 
-    private sealed record Reference(long RunId, PeriodPrint Entry);
+    private sealed record Reference(RunRow Run, PeriodPrint Entry);
+
+    private sealed record PendingWrite(RunRow Run, List<PeriodPrint> Baselines, List<PeriodPrint> Extensions);
 
     private sealed record PlannedPeriod(int PeriodKey, Reference? Reference, RunRow? BaselineRun);
 
@@ -323,16 +372,58 @@ internal sealed class ArchiveTamperCheck(EcrDbContext db)
 /// <param name="Rh">Сума хешів рядків.</param>
 /// <param name="I">Кількість екземплярів таблиць.</param>
 /// <param name="Ih">Сума хешів екземплярів.</param>
+/// <remarks>
+/// B87: частини місяця між дозволами (<see cref="Pp"/>), стилі комірок (<see cref="S"/>) і ручні перевизначення формул
+/// (<see cref="O"/>) — необов'язкові поля. ⛔ Еталон архіву до B87 їх не має, і це не «змінено»: такий запис звіряється
+/// лише за комірками, рядками й екземплярами — інакше після оновлення КОЖЕН рік, де є стилі чи частини, дав би хибну
+/// знахідку найвищої ваги. Поточний відбиток (<c>ArchiveTamperCheck.CurrentAsync</c>) і еталон процедури після B87
+/// мають їх завжди (порожні — 0).
+/// </remarks>
 internal sealed record PeriodPrint(int P, long C, string Ch, long R, string Rh, long I, string Ih)
 {
-    /// <summary>Ті самі дані (період не порівнюється — його задає ключ пошуку).</summary>
-    /// <param name="other">Інший відбиток.</param>
+    /// <summary>Кількість частин місяця (<c>arc.CellPermitPart</c>); <c>null</c> — еталон до B87.</summary>
+    public long? Pp { get; init; }
+
+    /// <summary>Сума хешів частин місяця.</summary>
+    public string? Pph { get; init; }
+
+    /// <summary>Кількість стилів комірок (<c>arc.CellStyle</c>); <c>null</c> — еталон до B87.</summary>
+    public long? S { get; init; }
+
+    /// <summary>Сума хешів стилів.</summary>
+    public string? Sh { get; init; }
+
+    /// <summary>Кількість ручних перевизначень формул (<c>arc.CellFormulaOverride</c>); <c>null</c> — еталон до B87.</summary>
+    public long? O { get; init; }
+
+    /// <summary>Сума хешів перевизначень.</summary>
+    public string? Oh { get; init; }
+
+    /// <summary>Чи несе відбиток усі види B87 (інакше це еталон до B87, який варто доповнити).</summary>
+    public bool CoversAllKinds => Covers(Pp, Pph) && Covers(S, Sh) && Covers(O, Oh);
+
+    /// <summary>
+    /// Ті самі дані (період не порівнюється — його задає ключ пошуку). Викликається на ЕТАЛОНІ: вид B87, якого еталон не
+    /// має, не порівнюється.
+    /// </summary>
+    /// <param name="other">Поточний відбиток.</param>
     /// <returns><c>true</c>, якщо кількості й суми хешів збігаються.</returns>
     public bool SameData(PeriodPrint other)
         => C == other.C && R == other.R && I == other.I
            && string.Equals(Ch, other.Ch, StringComparison.Ordinal)
            && string.Equals(Rh, other.Rh, StringComparison.Ordinal)
-           && string.Equals(Ih, other.Ih, StringComparison.Ordinal);
+           && string.Equals(Ih, other.Ih, StringComparison.Ordinal)
+           && SameKind(Pp, Pph, other.Pp, other.Pph)
+           && SameKind(S, Sh, other.S, other.Sh)
+           && SameKind(O, Oh, other.O, other.Oh);
+
+    private static bool Covers(long? count, string? digest) => count is not null || digest is not null;
+
+    // ⚠ Вид є в еталоні, якщо записано хоч одне з двох полів; тоді відсутнє друге — розбіжність, а не пропуск.
+    private static bool SameKind(long? count, string? digest, long? otherCount, string? otherDigest)
+        => !Covers(count, digest)
+           || ((count ?? -1) == (otherCount ?? 0)
+               && string.Equals(digest ?? string.Empty, otherDigest ?? "0", StringComparison.Ordinal));
 }
 
 /// <summary>Розбіжність архіву періоду з еталоном.</summary>
@@ -348,5 +439,13 @@ internal sealed record ArchiveTamper(int PeriodKey, long RunId, PeriodPrint Reco
 /// <param name="Verified">Скільки періодів перераховано.</param>
 /// <param name="BaselinesRecorded">Скільки періодів отримали базовий еталон у цьому проході.</param>
 /// <param name="NoReference">Скільки періодів лишилися без еталона (нема куди записати).</param>
+/// <param name="ReferencesExtended">
+/// B87: скільки еталонів до B87 доповнено частинами місяця, стилями й перевизначеннями в цьому проході.
+/// </param>
 internal sealed record ArchiveTamperResult(
-    IReadOnlyList<ArchiveTamper> Tampers, bool Complete, int Verified, int BaselinesRecorded, int NoReference);
+    IReadOnlyList<ArchiveTamper> Tampers,
+    bool Complete,
+    int Verified,
+    int BaselinesRecorded,
+    int NoReference,
+    int ReferencesExtended);

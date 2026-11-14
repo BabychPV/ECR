@@ -272,6 +272,8 @@ public sealed class ConsistencyCheckJob(
             + $"\"archivePeriodsVerified\":{tamper.Verified},"
             + $"\"archiveBaselinesRecorded\":{tamper.BaselinesRecorded},"
             + $"\"archiveNoReference\":{tamper.NoReference},"
+            // B87: скільки еталонів до B87 доповнено частинами місяця, стилями й перевизначеннями формул.
+            + $"\"archiveReferencesExtended\":{tamper.ReferencesExtended},"
             + $"\"archiveCheckComplete\":{(tamper.Complete ? "true" : "false")}}}",
             clock.UtcNow);
 

@@ -713,11 +713,20 @@ BEGIN
                    (SELECT k.p,
                            ISNULL(c.n, 0) AS c, ISNULL(CONVERT(varchar(40), c.s), '0') AS ch,
                            ISNULL(r.n, 0) AS r, ISNULL(CONVERT(varchar(40), r.s), '0') AS rh,
-                           ISNULL(i.n, 0) AS i, ISNULL(CONVERT(varchar(40), i.s), '0') AS ih
+                           ISNULL(i.n, 0) AS i, ISNULL(CONVERT(varchar(40), i.s), '0') AS ih,
+                           -- B87: частини місяця між дозволами (pp), стилі (s), ручні перевизначення формул (o).
+                           -- ⚠ Пишуться ЗАВЖДИ (порожні — 0): еталон без цих полів — це архів до B87, і перевірка
+                           --    звіряє його лише за c/r/i (`ArchiveTamperCheck`), а не вважає зміненим.
+                           ISNULL(pp.n, 0) AS pp, ISNULL(CONVERT(varchar(40), pp.s), '0') AS pph,
+                           ISNULL(st.n, 0) AS s, ISNULL(CONVERT(varchar(40), st.s), '0') AS sh,
+                           ISNULL(fo.n, 0) AS o, ISNULL(CONVERT(varchar(40), fo.s), '0') AS oh
                       FROM k
                       LEFT JOIN agg AS c ON c.PeriodKey = k.p AND c.Kind = 1
                       LEFT JOIN agg AS r ON r.PeriodKey = k.p AND r.Kind = 2
                       LEFT JOIN agg AS i ON i.PeriodKey = k.p AND i.Kind = 3
+                      LEFT JOIN agg AS pp ON pp.PeriodKey = k.p AND pp.Kind = 4
+                      LEFT JOIN agg AS st ON st.PeriodKey = k.p AND st.Kind = 5
+                      LEFT JOIN agg AS fo ON fo.PeriodKey = k.p AND fo.Kind = 6
                      ORDER BY k.p
                      FOR JSON PATH) AS periods
             FOR JSON PATH, WITHOUT_ARRAY_WRAPPER);
