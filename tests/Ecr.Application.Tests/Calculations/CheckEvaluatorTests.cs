@@ -201,13 +201,14 @@ public sealed class CheckEvaluatorTests
     private static readonly PeriodKey Period = PeriodKey.Parse(202601);
 
     private static World Build(string? mapJson, bool active = true, TableRelationKind kind = TableRelationKind.Check,
-        decimal sourceFact = 10m, decimal targetTotal = 10.4m)
+        decimal? sourceFact = 10m, decimal targetTotal = 10.4m, string? factDefault = null)
     {
         var b = new TemplateBuilder { TemplateVersionId = 7 };
         var sheet = b.Sheet("S");
         var src = b.Table(sheet, "SRC");
         var tgt = b.Table(sheet, "TGT");
         var srcFact = b.Column(src, "Fact");
+        srcFact.SetPresentation(factDefault, null, null);
         var srcUnit = b.Column(src, "Unit", CellDataType.String);
         var tgtTotal = b.Column(tgt, "Total");
         var tgtUnit = b.Column(tgt, "Unit", CellDataType.String);
@@ -242,7 +243,9 @@ public sealed class CheckEvaluatorTests
         cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Period, Arg.Any<CancellationToken>())
             .Returns(new Dictionary<long, IReadOnlyList<CellRecord>>
             {
-                [100] = new[] { Num(1001, srcFact.Id, src.Id, sourceFact), Str(1001, srcUnit.Id, src.Id, "U") },
+                [100] = sourceFact is { } fact
+                    ? new[] { Num(1001, srcFact.Id, src.Id, fact), Str(1001, srcUnit.Id, src.Id, "U") }
+                    : new[] { Str(1001, srcUnit.Id, src.Id, "U") },
                 [200] = new[] { Num(2001, tgtTotal.Id, tgt.Id, targetTotal), Str(2001, tgtUnit.Id, tgt.Id, "U") },
             });
 
@@ -252,8 +255,10 @@ public sealed class CheckEvaluatorTests
         return new World { Store = store, Cells = cells, Rows = rows, Metadata = metadata, Instances = [srcInstance, tgtInstance] };
     }
 
-    private static Task<IReadOnlyList<ValidationMessage>> Run(World w, string lang = "en")
-        => RelationCheckRunner.RunAsync(w.Store, w.Cells, w.Rows, w.Metadata, w.Instances, Period, lang, CancellationToken.None);
+    private static Task<IReadOnlyList<ValidationMessage>> Run(World w, string lang = "en", bool withDefaults = false)
+        => RelationCheckRunner.RunAsync(
+            w.Store, w.Cells, w.Rows, w.Metadata, w.Instances, Period, lang, CancellationToken.None,
+            withDefaults ? new Ecr.Application.Recalculation.ColumnDefaultValues(w.Metadata, Substitute.For<IRegistryStore>()) : null);
 
     private const string Block = """{"left":"Fact","right":"Total","tolerance":"0.1","toleranceKind":"abs","severity":"Block"}""";
 
@@ -265,6 +270,21 @@ public sealed class CheckEvaluatorTests
         Assert.Equal("R1", m.RowKey);
         Assert.Equal("Total", m.ColumnCode);
     }
+
+    [Fact]
+    [Trait("Requirement", "C-5")]
+    public async Task Runner_порівнює_дефолт_незаповненої_комірки_джерела()
+    {
+        // Fact не заповнено, DefaultValue = 10, Total = 10.4 → відхилення 0.4 > 0.1. Мутація: прибрати Complete — порожньо.
+        var m = Assert.Single(await Run(Build(Block, sourceFact: null, factDefault: "10"), withDefaults: true));
+
+        Assert.Equal(ValidationSeverity.Error, m.Severity);
+    }
+
+    [Fact]
+    [Trait("Requirement", "C-5")]
+    public async Task Runner_без_дефолту_порожня_комірка_не_порівнюється()
+        => Assert.Empty(await Run(Build(Block, sourceFact: null, factDefault: "10")));
 
     [Fact]
     public async Task Runner_нічого_не_віддає_в_межах_допуску()

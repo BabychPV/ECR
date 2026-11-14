@@ -138,6 +138,22 @@ public sealed class CrossPeriodRecalculationTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "C-11")]
+    public async Task Видалений_рядок_потрапляє_в_змінені_колонки()
+    {
+        // C-11 крок 5: насіння видаленого рядка (його вже немає серед живих) теж будить читачів інших періодів.
+        Arrange("[C1] * 2", Cell, 0);
+        var dirty = new DirtySet();
+        dirty.Add(new CellAddress(Key(5), RowId + 7_000, _inputColumn));
+        var changed = new HashSet<(int TableDefId, int ColumnDefId)>();
+
+        await Service().RecalculateAsync(Instance(5), dirty, CancellationToken.None, changed);
+
+        Assert.Contains((_table.Id, _inputColumn), changed);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait("Requirement", "WW-03")]
     public async Task Зміна_періоду_3_перераховує_формулу_періоду_5_що_читає_його()
     {

@@ -82,7 +82,8 @@ public interface IRelationRecalculator
 public sealed partial class RelationRecalculator(
     ITemplateVersionStore? store = null,
     ICellStore? cellStore = null,
-    ILogger<RelationRecalculator>? logger = null) : IRelationRecalculator
+    ILogger<RelationRecalculator>? logger = null,
+    ColumnDefaultValues? defaults = null) : IRelationRecalculator
 {
     /// <inheritdoc />
     public async Task<IReadOnlyList<RelationCellWrite>> ComputeForDocumentAsync(RelationRunInput input, CancellationToken ct)
@@ -138,6 +139,11 @@ public sealed partial class RelationRecalculator(
         var stored = new Dictionary<CellAddress, CellValueData>();
         var instanceOfRow = new Dictionary<(int TableDefId, string RowKey), (long InstanceId, long RowId)>();
 
+        // ✎ C-5 (рішення PO 11.11, 02b §6.3): агрегат Rollup бачить дефолт незаповненої комірки джерела й приймача.
+        var defaultSet = defaults is null
+            ? ColumnDefaultSet.Empty
+            : await defaults.ForVersionAsync(input.TemplateVersionId, ct).ConfigureAwait(false);
+
         foreach (var instance in wanted)
         {
             var rowIds = input.RowIdsByInstance.TryGetValue(instance.TableInstanceId, out var found)
@@ -152,9 +158,10 @@ public sealed partial class RelationRecalculator(
             }
 
             // Значення ПІСЛЯ формул документа: ще не записані результати перекривають збережені.
-            var effective = cells.Where(c => !input.Pending.ContainsKey(c.Address))
+            IReadOnlyList<CellRecord> effective = cells.Where(c => !input.Pending.ContainsKey(c.Address))
                 .Concat(input.Pending.Values.Where(p => rowIdSet.Contains(p.Address.TableRowId)))
                 .ToList();
+            effective = defaultSet.Complete(effective, instance.TableDefId, rowIds, input.PeriodKey);
 
             if (!rowsByTable.TryGetValue(instance.TableDefId, out var list))
             {

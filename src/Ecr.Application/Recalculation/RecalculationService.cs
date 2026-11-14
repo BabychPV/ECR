@@ -585,7 +585,15 @@ public sealed class RecalculationService(
                 {
                     changedColumns?.Add((seedTable, seed.ColumnDefId));
                     inputColumns?.Add((seedTable, seed.ColumnDefId));
-                }            }
+                }
+                else if (snapshot.ColumnsById.TryGetValue(seed.ColumnDefId, out var seedColumn))
+                {
+                    // ✎ C-11 (крок 5): насіння ВИДАЛЕНОГО рядка (DeleteRowHandler сіє всі колонки рядка) — рядка вже немає
+                    // серед живих, але читачі інших періодів (предикат зі зсувом) мають перерахуватися. `inputColumns` не
+                    // чіпаємо: це правило Q-17 для ВВЕДЕНИХ значень власника.
+                    changedColumns?.Add((seedColumn.TableDefId, seed.ColumnDefId));
+                }
+            }
         }
 
         // ⛔ Q-2xx (аудит фази 3, звітність): аудит записується за КЛЮЧЕМ

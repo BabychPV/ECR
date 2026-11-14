@@ -2,6 +2,7 @@
 using System.Globalization;
 using Ecr.Application.Calculations;
 using Ecr.Application.Ports;
+using Ecr.Application.Recalculation;
 using Ecr.Application.Templates;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
@@ -29,7 +30,8 @@ public static class RelationCheckRunner
         IReadOnlyList<TableInstanceRef> instances,
         PeriodKey periodKey,
         string language,
-        CancellationToken ct)
+        CancellationToken ct,
+        ColumnDefaultValues? defaults = null)
     {
         var messages = new List<ValidationMessage>();
 
@@ -64,15 +66,23 @@ public static class RelationCheckRunner
             var cells = await cellStore.ReadSlicesAsync(ids, periodKey, ct).ConfigureAwait(false);
             var rowIds = await rowStore.GetRowIdsBatchAsync(ids, periodKey, ct).ConfigureAwait(false);
 
+            // ✎ C-5 (рішення PO 11.11, 02b §6.3): Check порівнює значення з дефолтом незаповнених комірок, як формули.
+            var defaultSet = defaults is null
+                ? ColumnDefaultSet.Empty
+                : await defaults.ForVersionAsync(versionId, ct).ConfigureAwait(false);
+
             var rowsByTable = new Dictionary<int, List<RelationRow>>();
             foreach (var instance in wanted)
             {
+                var instanceRowIds = rowIds.TryGetValue(instance.TableInstanceId, out var instanceRows)
+                    ? instanceRows
+                    : new Dictionary<string, long>(StringComparer.Ordinal);
                 var rows = BuildRows(
                     snapshot,
-                    cells.TryGetValue(instance.TableInstanceId, out var instanceCells) ? instanceCells : [],
-                    rowIds.TryGetValue(instance.TableInstanceId, out var instanceRows)
-                        ? instanceRows
-                        : new Dictionary<string, long>(StringComparer.Ordinal));
+                    defaultSet.Complete(
+                        cells.TryGetValue(instance.TableInstanceId, out var instanceCells) ? instanceCells : [],
+                        instance.TableDefId, instanceRowIds, periodKey),
+                    instanceRowIds);
 
                 if (!rowsByTable.TryGetValue(instance.TableDefId, out var list))
                 {
