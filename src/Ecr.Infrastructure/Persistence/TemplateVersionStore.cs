@@ -1432,6 +1432,27 @@ public sealed partial class TemplateVersionStore(EcrDbContext db, IMetadataCache
             .ConfigureAwait(false);
 
     /// <inheritdoc />
+    public async Task ReplaceMonthInputAliasesAsync(
+        int templateVersionId, IReadOnlyList<MonthInputAlias> aliases, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(aliases);
+
+        // ⚠ Видалення — одразу (ExecuteDelete у поточній транзакції), а не RemoveRange: новий набір може містити той самий
+        // ключ UQ_MonthInputAlias (таблиця, ім'я, місяць), і порядок DELETE/INSERT одного SaveChanges тоді не гарантований.
+        var tableIds =
+            from t in db.TableDefs
+            join s in db.SheetDefs on t.SheetDefId equals s.Id
+            where s.TemplateVersionId == templateVersionId
+            select t.Id;
+        await db.MonthInputAliases
+            .Where(a => tableIds.Contains(a.TableDefId))
+            .ExecuteDeleteAsync(ct)
+            .ConfigureAwait(false);
+
+        db.MonthInputAliases.AddRange(aliases);
+    }
+
+    /// <inheritdoc />
     public async Task<int> ApplyPresentationAsync(
         int templateVersionId, IReadOnlyList<PresentationChange> changes, CancellationToken ct)
     {

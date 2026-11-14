@@ -2533,6 +2533,12 @@ public interface IDocumentStore
 версія `YearWithMonthColumns`, таблиця `MonthsInColumns`; інакше `ECR-TMPL-0422`,
 `messageKey = err.ECR-TMPL-0422.monthInputAliasInvalid` (аргументи `tableCode`, `count`, `aliases`). Клон версії
 копіює псевдоніми на таблиці й колонки клону за кодами.
+✎ LAND-YEAR L0b: `GET /api/v1/template-versions/{id}/month-input-aliases` (`Template.View`) →
+`MonthInputAliasesDto { templateVersionId, items[{ sheetCode, tableCode, tableDefId, alias, monthNumber, columnCode,
+columnDefId }] }`; `PUT` того самого шляху (`Template.Edit`, тіло `{ items[{ sheetCode, tableCode, alias, monthNumber,
+columnCode }] }`) ЗАМІНЮЄ весь набір чернетки (порожній перелік — прибрати всі). Опублікована/застаріла версія —
+`409 ECR-TMPL-0409`; невідома адреса, дублікат (таблиця, ім'я без регістру, місяць), ім'я > 64 знаків, місяць поза
+1..12 або правила публікації вище — `422 ECR-TMPL-0422` `monthInputAliasInvalid`, нічого не записано.
 
 #### `IDocumentDeletionStore`
 
