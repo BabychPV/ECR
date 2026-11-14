@@ -1051,10 +1051,15 @@ public sealed partial class RecalculationJob(
     internal async Task<IReadOnlyList<int>> ScopePeriodsAsync(
         RecalculationRequest request, IReadOnlySet<int> refused, CancellationToken ct)
     {
+        // ✎ LAND-YEAR B59: «увесь рік» кнопки річного документа — лише ключі свого календарного року.
+        var fromKey = request.FromKey;
+        var toKey = request.ToKey;
+
         Task<List<int>> ScopesAsync(IQueryable<Ecr.Domain.Entities.Documents.TableInstance> instances)
         {
             var scopesQuery = instances
-                .Where(i => request.PeriodKey == null || i.PeriodKeyValue == request.PeriodKey);
+                .Where(i => request.PeriodKey == null || i.PeriodKeyValue == request.PeriodKey)
+                .Where(i => i.PeriodKeyValue >= fromKey && i.PeriodKeyValue <= toKey);
 
             if (request.SheetDefId is { } scopeSheetId)
             {
@@ -1497,9 +1502,13 @@ public sealed partial class RecalculationJob(
         // ⛔ X6-01: ефективний стан (F-08) — те саме правило, що й у `GuardCompletionAsync`
         // і в рішенні про запис; інакше прогін, допущений тут за збереженим `Grace`, падав би
         // на перемиканні за ефективним `Closed` і повторювався до годинної задачі станів.
+        // ✎ LAND-YEAR B59: рік кнопки річного документа звужує й стани (решта років у скоуп не потрапляє).
+        var fromKey = request.FromKey;
+        var toKey = request.ToKey;
         var states = await EffectiveStatesAsync(
                 db.Periods.Where(p => db.Documents.Any(d => d.Id == request.DocumentId && d.ProjectId == p.ProjectId)
-                                      && (request.PeriodKey == null || p.PeriodKeyValue == request.PeriodKey)),
+                                      && (request.PeriodKey == null || p.PeriodKeyValue == request.PeriodKey)
+                                      && p.PeriodKeyValue >= fromKey && p.PeriodKeyValue <= toKey),
                 ct)
             .ConfigureAwait(false);
 
@@ -1697,10 +1706,13 @@ public sealed partial class RecalculationJob(
         RecalculationRequest request, CancellationToken ct)
     {
         var writeSubmitted = WritesSubmitted(request);
+        var fromKey = request.FromKey;
+        var toKey = request.ToKey;
         var rows = await db.ApprovalStates
             .AsNoTracking()
             .Where(s => s.DocumentId == request.DocumentId
                         && (request.PeriodKey == null || s.PeriodKey == request.PeriodKey)
+                        && s.PeriodKey >= fromKey && s.PeriodKey <= toKey
                         && (request.SheetDefId == null || s.SheetDefId == request.SheetDefId)
                         && ((s.Status == Domain.Enums.DocumentStatus.Submitted && !writeSubmitted)
                             || s.Status == Domain.Enums.DocumentStatus.Approved))
@@ -2216,6 +2228,10 @@ public sealed partial class RecalculationJob(
 /// затверджені — ніколи. ✎ B83: так само автоперерахунок збору PI і синхронізації подій (<c>CalculationTrigger.RequestAsync</c>).
 /// <c>false</c> — без людини подані не чіпаються (нічний розклад).
 /// </param>
+/// <param name="Year">
+/// ✎ LAND-YEAR B59: лише з <paramref name="PeriodKey"/> = <c>null</c> — «увесь рік», звужений до ЦЬОГО календарного року
+/// (кнопка «Перерахувати» документа річної розкладки: усі 12 місяців). <c>null</c> — усі періоди документа (нічний розклад).
+/// </param>
 public sealed record RecalculationRequest(
     int ProjectId,
     long DocumentId,
@@ -2223,4 +2239,12 @@ public sealed record RecalculationRequest(
     int? TriggeredByUserId,
     int? SheetDefId = null,
     string? FanOutParentJobId = null,
-    bool RecalculateSubmitted = false);
+    bool RecalculateSubmitted = false,
+    int? Year = null)
+{
+    /// <summary>✎ B59: нижня межа ключа періоду скоупу (включно); без року — <see cref="int.MinValue"/>.</summary>
+    internal int FromKey => PeriodKey is null && Year is { } y ? y * 100 : int.MinValue;
+
+    /// <summary>✎ B59: верхня межа ключа періоду скоупу (включно); без року — <see cref="int.MaxValue"/>.</summary>
+    internal int ToKey => PeriodKey is null && Year is { } y ? (y * 100) + 99 : int.MaxValue;
+}

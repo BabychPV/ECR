@@ -236,6 +236,10 @@ internal sealed class FormulaErrorDelta
     /// <summary>Змін стану немає.</summary>
     public bool IsEmpty => Upserts.Count == 0 && Deletes.Count == 0;
 
+    /// <summary>✎ B103: комірки (екземпляр, колонка), чий стан помилки змінюється, — для вибору стану аркуша на комірку.</summary>
+    public IEnumerable<(long TableInstanceId, int ColumnDefId)> Cells()
+        => Upserts.Concat(Deletes).Select(r => (r.TableInstanceId, r.ColumnDefId));
+
     /// <summary>Різниця «підсумок прогону − збережений стан».</summary>
     /// <param name="tracker">Підсумок прогону.</param>
     /// <param name="persisted">Збережений стан екземплярів прогону (поточний період).</param>

@@ -469,6 +469,73 @@ public sealed class RecalculateDocumentSheetScopeTests
     }
 
     /// <summary>
+    /// ✎ LAND-YEAR B59: «Перерахувати» документа річної розкладки — одна задача «увесь рік», звужена до календарного року
+    /// періоду (<c>PeriodKey = null</c>, <c>Year</c>), на власну ціль <see cref="RecalculateDocumentHandler.YearScopedTargetOf"/>:
+    /// прогін одного місяця писав би лише цілі, якими той володіє, і решта C_Mm лишалась би застарілою.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Червоне без фіксу: <c>YearLayoutYearAsync</c> → <c>null</c> — payload несе <c>PeriodKey = 202610</c>, тест червоніє;
+    /// контроль (PerMonthCopies) — зелений в обох випадках. Без годинника: обробник не читає «зараз».
+    /// </remarks>
+    [Theory]
+    [InlineData(null)]
+    [InlineData(3)]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "D-474")]
+    public async Task B59_річний_документ_перераховує_увесь_рік_однією_задачею(int? sheetDefId)
+    {
+        var fixture = ArrangeYear(yearLayout: true, PeriodState.Open, PeriodState.Open, PeriodState.Open);
+
+        await fixture.Handler.HandleAsync(Document, new PeriodKey(Period), sheetDefId, CancellationToken.None);
+
+        var (target, payload) = SingleEnqueued(fixture);
+        Assert.Equal(RecalculateDocumentHandler.YearScopedTargetOf(Document, Period / 100, sheetDefId), target);
+        Assert.Null(Property(payload, "PeriodKey"));
+        Assert.Equal(Period / 100, Property(payload, "Year"));
+        Assert.Equal(sheetDefId, Property(payload, "SheetDefId"));
+    }
+
+    /// <summary>Контроль B59: версія <c>PerMonthCopies</c> — названий період і його ціль, як доти.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "D-474")]
+    public async Task B59_контроль_PerMonthCopies_перераховує_названий_період()
+    {
+        var fixture = ArrangeYear(yearLayout: false, PeriodState.Open, PeriodState.Open, PeriodState.Open);
+
+        await fixture.Handler.HandleAsync(Document, new PeriodKey(Period), sheetDefId: null, CancellationToken.None);
+
+        var (target, payload) = SingleEnqueued(fixture);
+        Assert.Equal(RecalculateDocumentHandler.TargetOf(Document, new PeriodKey(Period)), target);
+        Assert.Equal(Period, Property(payload, "PeriodKey"));
+        Assert.Null(payload.GetType().GetProperty("Year"));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "D-474")]
+    public void B59_річна_ціль_відрізняється_від_нічної_і_від_цілі_періоду()
+    {
+        var year = RecalculateDocumentHandler.YearScopedTargetOf(Document, 2099, null);
+
+        Assert.NotEqual(RecalculateDocumentHandler.YearTargetOf(Document), year);
+        Assert.NotEqual(RecalculateDocumentHandler.TargetOf(Document, new PeriodKey(209901)), year);
+        Assert.NotEqual(year, RecalculateDocumentHandler.YearScopedTargetOf(Document, 2099, 1));
+    }
+
+    private static (string Target, object Payload) SingleEnqueued(Fixture fixture)
+    {
+        var call = Assert.Single(fixture.Jobs.ReceivedCalls(), c =>
+            c.GetMethodInfo().Name is nameof(IBackgroundJobScheduler.EnqueueCoalescedAsync)
+                or nameof(IBackgroundJobScheduler.EnqueueExclusiveAsync));
+        var args = call.GetArguments();
+        return ((string)args[0]!, args[1]!);
+    }
+
+    private static object? Property(object payload, string name)
+        => payload.GetType().GetProperty(name)?.GetValue(payload);
+
+    /// <summary>
     /// Календар року проєкту: <see cref="Period"/> (202610) і два наступні місяці зі станами; <paramref name="earlier"/> —
     /// ще й відкритий 202609 (тоді якір — він).
     /// </summary>

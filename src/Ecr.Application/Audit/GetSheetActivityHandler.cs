@@ -31,7 +31,9 @@ public sealed class GetSheetActivityHandler(
     Security.IAccessDecisionService access,
     Common.ICurrentUser currentUser,
     Ports.IMonthColumnRouter? monthRouter = null,
-    Ports.IMetadataCache? metadata = null)
+    Ports.IMetadataCache? metadata = null,
+    // ✎ B73: родовід колонок через перенос версії (як V-4 у GetCellChangesHandler). Без нього — як доти.
+    Ports.IColumnPathMapper? columnPaths = null)
 {
     /// <summary>Право читання журналу аркуша - те саме, що й читання документа.</summary>
     /// <remarks>Названо тут, бо статичний сторож читає тіло класу й за впровадженим обробником не ходить.</remarks>
@@ -96,11 +98,65 @@ public sealed class GetSheetActivityHandler(
             .CollectAsync(monthRouter, metadata, anyPeriod, documentId, key, columns, ct, sheetDefId: sheetDefId)
             .ConfigureAwait(false);
 
+        // ✎ B73 (V-4 для журналу аркуша): `aud.CellChange` незмінний і після переносу проєкту лишається на Id колонок
+        // старої версії — межі журналу = видимі колонки поточної версії РАЗОМ з їхнім родоводом (і в парах власників).
+        (columns, owners) = await WithLineageAsync(columns, owners, ct).ConfigureAwait(false);
+
+        // ✎ B102: так само `aud.RowChange` лишається на TableDefId старої версії — межі журналу рядків = видимі таблиці
+        // РАЗОМ з їхнім родоводом (лише від уже видимих: схована таблиця не дає й свого родоводу).
+        tables = await WithTableLineageAsync(tables, ct).ConfigureAwait(false);
+
         return await query
             .ReadAsync(
                 new SheetActivityScope(documentId, periodKey, sheetCode, columns, byUserId, includeSystem, tables, owners),
                 size, cursor, ct)
             .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// ✎ B73: видимі колонки аркуша й колонки пар «період-власник» — разом з Id тих самих колонок у інших версіях шаблону
+    /// (<see cref="Ports.IColumnPathMapper.LineageAsync"/>, ОДИН виклик на запит).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Лише розширення від ВЖЕ видимих: колонка під Deny (чи поза межею D-214 власника) у <paramref name="columns"/> /
+    /// <paramref name="owners"/> не потрапила, тож і її родоводу немає — правки до переносу так само приховані.
+    /// Без маппера чи без інших версій — набори дослівно як були.
+    /// </remarks>
+    private async Task<(IReadOnlyList<int> Columns, IReadOnlyList<Ports.CellChangeOwnerColumns>? Owners)> WithLineageAsync(
+        IReadOnlyList<int> columns, IReadOnlyList<Ports.CellChangeOwnerColumns>? owners, CancellationToken ct)
+    {
+        if (columnPaths is null || columns.Count == 0)
+        {
+            return (columns, owners);
+        }
+
+        var lineage = await columnPaths.LineageAsync(columns, ct).ConfigureAwait(false);
+
+        IReadOnlyList<int> Widen(IEnumerable<int> ids)
+            => [.. ids.SelectMany(id => lineage.GetValueOrDefault(id) ?? [id]).Distinct().Order()];
+
+        var widened = Widen(columns);
+        var widenedOwners = owners is null
+            ? null
+            : (IReadOnlyList<Ports.CellChangeOwnerColumns>)[.. owners.Select(o => o with { ColumnDefIds = Widen(o.ColumnDefIds) })];
+
+        return (widened, widenedOwners);
+    }
+
+    /// <summary>
+    /// ✎ B102: видимі таблиці аркуша разом з Id тих самих таблиць у інших версіях шаблону
+    /// (<see cref="Ports.IColumnPathMapper.TableLineageAsync"/>, ОДИН виклик на запит).
+    /// </summary>
+    /// <remarks>⛔ Лише розширення від ВЖЕ видимих (Deny таблиці відсікає до родоводу). Без маппера — як було.</remarks>
+    private async Task<IReadOnlyList<int>> WithTableLineageAsync(IReadOnlyList<int> tables, CancellationToken ct)
+    {
+        if (columnPaths is null || tables.Count == 0)
+        {
+            return tables;
+        }
+
+        var lineage = await columnPaths.TableLineageAsync(tables, ct).ConfigureAwait(false);
+        return [.. tables.SelectMany(id => lineage.GetValueOrDefault(id) ?? [id]).Distinct().Order()];
     }
 
     private static NotFoundException NotFound(long documentId)

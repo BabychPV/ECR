@@ -176,6 +176,81 @@ public sealed class ColumnPathMapper(EcrDbContext db) : IColumnPathMapper
         return result.ToDictionary(p => p.Key, p => (IReadOnlyList<int>)[.. p.Value.Order()]);
     }
 
+    /// <summary>
+    /// ✎ B102: ОДИН запит на раунд — шлях «аркуш → таблиця» кожної названої таблиці й Id того самого шляху в усіх версіях
+    /// її шаблону, разом із таблицями-джерелами пар <c>cfg.ColumnRename</c>, що ведуть у колонки будь-якої з них.
+    /// </summary>
+    /// <remarks>
+    /// Те саме джерело ідентичності, що <see cref="LineageSql"/>: код аркуша + код таблиці в межах шаблону, а
+    /// перейменування таблиці при переносі збережене лише як пари колонок (<c>VersionMigrationRenames</c> → <c>ColumnRename</c>),
+    /// тож джерело — таблиця колонки <c>FromColumnDefId</c>. Пошуки за <c>UQ_SheetDef</c>, <c>UQ_TableDef</c>,
+    /// <c>UQ_ColumnDef</c> (за <c>TableDefId</c>) і <c>IX_ColumnRename_To</c>.
+    /// </remarks>
+    private const string TableLineageSql = """
+        SELECT t.Id AS SourceId, t2.Id AS LinkedId, rf.FromTableId AS RenamedFromId
+          FROM OPENJSON(@ids) AS j
+          JOIN cfg.TableDef AS t ON t.Id = CAST(j.[value] AS int)
+          JOIN cfg.SheetDef AS s ON s.Id = t.SheetDefId
+          JOIN cfg.TemplateVersion AS v ON v.Id = s.TemplateVersionId
+          JOIN cfg.TemplateVersion AS v2 ON v2.TemplateId = v.TemplateId
+          JOIN cfg.SheetDef AS s2 ON s2.TemplateVersionId = v2.Id AND s2.Code = s.Code
+          JOIN cfg.TableDef AS t2 ON t2.SheetDefId = s2.Id AND t2.Code = t.Code
+          OUTER APPLY (SELECT DISTINCT cf.TableDefId AS FromTableId
+                         FROM cfg.ColumnDef AS c2
+                         JOIN cfg.ColumnRename AS r ON r.ToColumnDefId = c2.Id
+                         JOIN cfg.ColumnDef AS cf ON cf.Id = r.FromColumnDefId
+                        WHERE c2.TableDefId = t2.Id AND cf.TableDefId <> t2.Id) AS rf
+        """;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Як <see cref="LineageAsync"/>: без перейменувань — один запит; кожна таблиця-джерело перейменування додає раунд
+    /// (її власний шлях у інших версіях і перейменування, що ведуть у неї).
+    /// </remarks>
+    public async Task<IReadOnlyDictionary<int, IReadOnlyList<int>>> TableLineageAsync(
+        IReadOnlyCollection<int> tableIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(tableIds);
+
+        var result = new Dictionary<int, HashSet<int>>();
+        foreach (var id in tableIds)
+        {
+            result.TryAdd(id, [id]);
+        }
+
+        var frontier = result.Keys.ToDictionary(id => id, id => new HashSet<int> { id });
+        for (var round = 0; round < MaxLineageRounds && frontier.Count > 0; round++)
+        {
+            var json = "[" + string.Join(",", frontier.Keys.Select(v => v.ToString(CultureInfo.InvariantCulture))) + "]";
+            var rows = await db.Database
+                .SqlQueryRaw<LineageRow>(TableLineageSql, new SqlParameter("@ids", SqlDbType.NVarChar, -1) { Value = json })
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+
+            var next = new Dictionary<int, HashSet<int>>();
+            foreach (var row in rows)
+            {
+                foreach (var owner in frontier[row.SourceId])
+                {
+                    result[owner].Add(row.LinkedId);
+                    if (row.RenamedFromId is { } from && result[owner].Add(from))
+                    {
+                        if (!next.TryGetValue(from, out var owners))
+                        {
+                            next[from] = owners = [];
+                        }
+
+                        owners.Add(owner);
+                    }
+                }
+            }
+
+            frontier = next;
+        }
+
+        return result.ToDictionary(p => p.Key, p => (IReadOnlyList<int>)[.. p.Value.Order()]);
+    }
+
     /// <summary>Рядок <see cref="LineageSql"/>; імена колонок — імена властивостей.</summary>
     /// <param name="SourceId">Названа (або розгортувана) колонка.</param>
     /// <param name="LinkedId">Колонка того самого шляху в одній з версій шаблону (включно з нею самою).</param>

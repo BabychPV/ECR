@@ -206,6 +206,18 @@ public sealed class MonthColumnRouter : IMonthColumnRouter
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<int>> YearPeriodKeysAsync(int projectId, int year, CancellationToken ct)
+    {
+        if (!Enabled)
+        {
+            return [];
+        }
+
+        var calendar = await CalendarAsync(projectId, year, ct).ConfigureAwait(false);
+        return [.. calendar.Keys.Order()];
+    }
+
+    /// <inheritdoc />
     public async Task<PeriodKey> OwnerPeriodAsync(
         MonthRoutingDocument document, TableDef table, ColumnDef column, PeriodKey viewPeriod, CancellationToken ct)
     {
