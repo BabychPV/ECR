@@ -242,6 +242,12 @@ public sealed class EcrApiFactory(
             // і RecurringTriggersInTestHostTests.
             RecurringTriggerVeto.Register(services);
 
+            // ⛔ B121: реєстр розкладок закріплюється ДО ExtraServices — тест може перекрити і його.
+            if (LayoutRegistry is { } layouts)
+            {
+                services.AddSingleton(layouts);
+            }
+
             ExtraServices?.Invoke(services);
         });
     }
@@ -263,6 +269,15 @@ public sealed class EcrApiFactory(
     /// резолвер груп не кличе.
     /// </summary>
     public Action<IServiceCollection>? ExtraServices { get; init; }
+
+    /// <summary>
+    /// Закріплений реєстр розкладок версій (D-474) замість того, що читає спільну базу колекції; <c>null</c> — справжній.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ B121: тести з точною кількістю звернень до БД ставлять <see cref="EmptyLayoutRegistry.Instance"/> — інакше
+    /// річні версії, які лишили інші тести шарду, вмикають роутер місячних колонок і змінюють число від порядку тестів.
+    /// </remarks>
+    public Ecr.Application.Ports.ITemplateLayoutRegistry? LayoutRegistry { get; init; }
 
     /// <summary>Каталог джерела з однієї позиції; у мережу не ходить.</summary>
     /// <param name="calls">Куди записати адресу спроби.</param>

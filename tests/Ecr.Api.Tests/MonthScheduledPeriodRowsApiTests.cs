@@ -353,7 +353,7 @@ public sealed class MonthScheduledPeriodRowsApiTests(SqlServerFixture sql, ITest
         {
             factory = new EcrApiFactory(sql, stampCacheSeconds: 300, revisionWindow: TimeSpan.FromMinutes(5));
             app = factory.WithWebHostBuilder(b => b.ConfigureTestServices(
-                services => services.AddSingleton<Ecr.Application.Ports.ITemplateLayoutRegistry>(new EmptyLayoutRegistry())));
+                services => services.AddSingleton<Ecr.Application.Ports.ITemplateLayoutRegistry>(EmptyLayoutRegistry.Instance)));
             app.Server.PreserveExecutionContext = true;
             client = app.CreateClient();
             var login = await client.PostAsJsonAsync(
@@ -381,18 +381,6 @@ public sealed class MonthScheduledPeriodRowsApiTests(SqlServerFixture sql, ITest
         output.WriteLine(sched.Format());
         Assert.Equal(OffOpenCommands, open.Total);
         Assert.Equal(OffScheduledCommands, sched.Total);
-    }
-
-    /// <summary>Реєстр без річних версій (D-474 вимкнено) - незалежно від того, що лишили в базі інші тести.</summary>
-    private sealed class EmptyLayoutRegistry : Ecr.Application.Ports.ITemplateLayoutRegistry
-    {
-        public bool HasAny => false;
-
-        public bool IsYearVersion(int templateVersionId) => false;
-
-        public bool IsYearSheet(int sheetDefId) => false;
-
-        public Task RefreshAsync(CancellationToken ct) => Task.CompletedTask;
     }
 
     /// <summary>Число команд OFF, знято на c1ea1cbf8 (до HU-16) тим самим сценарієм.</summary>
