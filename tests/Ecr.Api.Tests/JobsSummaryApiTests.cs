@@ -84,8 +84,28 @@ public sealed class JobsSummaryApiTests(SqlServerFixture sql) : IAsyncLifetime
     [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Без_mine_і_без_права_відмова_а_не_нулі_і_власні_входять_у_загальну_суму()
     {
-        using var app = new EcrApiFactory(sql);
-        var (stranger, strangerId) = await SignedInAsync(app).ConfigureAwait(true);
+        // B112 (урок B94b): загальна черга рахує УСІ рядки itg.JobProgress. Старт хоста ставить фонову задачу
+        // IReportViewsJob (ReportViewsJob.QueueAllOnStartupAsync): під навантаженням вона ще Queued на `before` і вже
+        // взята воркером на `after` — «+1 наших мінус 1 стартова» = рівність. На спільній базі колекції так само
+        // зсуваються чужі рядки. Тому - ВЛАСНА база (як SystemHealthFactsTests) і `before` лише після того, як у ній не
+        // лишилось незавершених задач.
+        var database = SqlServerFixture.WithOwnDatabase("_jsum");
+        await database.InitializeAsync().ConfigureAwait(true);
+        try
+        {
+            await QueueGrowsExactlyByOwnJobAsync(database).ConfigureAwait(true);
+        }
+        finally
+        {
+            await database.DisposeAsync().ConfigureAwait(true);
+        }
+    }
+
+    private static async Task QueueGrowsExactlyByOwnJobAsync(SqlServerFixture database)
+    {
+        var connectionString = database.ConnectionString;
+        using var app = new EcrApiFactory(database);
+        var (stranger, strangerId) = await SignedInAsync(app, connectionString).ConfigureAwait(true);
         using var _s = stranger;
 
         // ⛔ 403, а не нулі: «задач немає» і «вам їх не показують» — різні відповіді.
@@ -103,17 +123,20 @@ public sealed class JobsSummaryApiTests(SqlServerFixture sql) : IAsyncLifetime
         Assert.True(own.IsSuccessStatusCode, $"{own.StatusCode}: {app.ErrorsText}");
 
         // Адміністратор: до і після власної задачі в черзі загальна черга зростає рівно на неї.
-        var (admin, _) = await SignedInAsync(app, ViewHealth).ConfigureAwait(true);
+        var (admin, _) = await SignedInAsync(app, connectionString, ViewHealth).ConfigureAwait(true);
         using var _a = admin;
 
+        await JobQueueWait.WaitForNoUnfinishedJobsAsync(database).ConfigureAwait(true);
+
         var before = await GetAsync(admin, "/api/v1/jobs/summary").ConfigureAwait(true);
-        await AddJobAsync(strangerId, "Queued", DateTime.UtcNow.AddMinutes(-1), 0, attempt: null)
+        await AddJobAsync(connectionString, strangerId, "Queued", DateTime.UtcNow.AddMinutes(-1), 0, attempt: null)
             .ConfigureAwait(true);
         var after = await GetAsync(admin, "/api/v1/jobs/summary").ConfigureAwait(true);
 
-        Assert.Equal(
-            before.GetProperty("queued").GetInt32() + 1,
-            after.GetProperty("queued").GetInt32());
+        var jobs = await JobQueueWait.DescribeJobsAsync(database).ConfigureAwait(true);
+        Assert.True(
+            before.GetProperty("queued").GetInt32() + 1 == after.GetProperty("queued").GetInt32(),
+            $"queued: {before.GetProperty("queued").GetInt32()} -> {after.GetProperty("queued").GetInt32()} замість +1; задачі бази: {jobs}");
     }
 
     private static async Task<JsonElement> GetAsync(HttpClient client, string path)
@@ -130,10 +153,14 @@ public sealed class JobsSummaryApiTests(SqlServerFixture sql) : IAsyncLifetime
     /// Рядок прогресу в потрібному стані. <paramref name="latencyMs"/> — різниця між
     /// постановкою (<paramref name="at"/>) і стартом.
     /// </summary>
-    private async Task AddJobAsync(int userId, string state, DateTime at, int latencyMs, int? attempt)
+    private Task AddJobAsync(int userId, string state, DateTime at, int latencyMs, int? attempt)
+        => AddJobAsync(sql.ConnectionString, userId, state, at, latencyMs, attempt);
+
+    private static async Task AddJobAsync(
+        string connectionString, int userId, string state, DateTime at, int latencyMs, int? attempt)
     {
         await using var db = new EcrDbContext(
-            new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).Options);
+            new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(connectionString).Options);
 
         var job = new JobProgress($"jsum-{Guid.NewGuid():N}", ProbeCode, at, userId);
         job.Queue(at);
@@ -154,14 +181,17 @@ public sealed class JobsSummaryApiTests(SqlServerFixture sql) : IAsyncLifetime
         await db.SaveChangesAsync().ConfigureAwait(false);
     }
 
-    private async Task<(HttpClient Client, int UserId)> SignedInAsync(
-        EcrApiFactory app, params string[] permissions)
+    private Task<(HttpClient Client, int UserId)> SignedInAsync(EcrApiFactory app, params string[] permissions)
+        => SignedInAsync(app, sql.ConnectionString, permissions);
+
+    private static async Task<(HttpClient Client, int UserId)> SignedInAsync(
+        EcrApiFactory app, string connectionString, params string[] permissions)
     {
         var name = $"jsum_{Guid.NewGuid():N}"[..20];
         int userId;
 
         await using (var db = new EcrDbContext(
-            new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).Options))
+            new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(connectionString).Options))
         {
             var user = new User(name, name, AuthProvider.Local);
             user.SetPassword(new PasswordHasher().Hash(Password));

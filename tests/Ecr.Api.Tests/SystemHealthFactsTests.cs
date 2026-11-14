@@ -139,26 +139,6 @@ public sealed class SystemHealthFactsTests(SqlServerFixture sql)
         }
     }
 
-    private static async Task WaitForNoUnfinishedJobsAsync(SqlServerFixture database)
-    {
-        var deadline = DateTime.UtcNow.AddMinutes(3);
-        while (true)
-        {
-            await using var db = database.CreateContext();
-            var unfinished = await db.JobProgresses.AsNoTracking()
-                .Where(p => p.State == "Queued" || p.State == "Running")
-                .Select(p => p.JobCode + "=" + p.State)
-                .ToListAsync();
-            if (unfinished.Count == 0)
-            {
-                return;
-            }
-
-            Assert.True(DateTime.UtcNow < deadline, $"задачі власної бази не завершились: {string.Join("; ", unfinished)}");
-            await Task.Delay(200);
-        }
-    }
-
     private static readonly string[] Counters = ["jobs.running", "jobs.failed24h", "sources.active", "sources.failed", "sources.gaps"];
 
     private static async Task CountersGrowExactlyOnSeededDataAsync(SqlServerFixture database)
@@ -170,7 +150,7 @@ public sealed class SystemHealthFactsTests(SqlServerFixture sql)
         // jobs.running вона потрапляє, поки виконується. Під навантаженням CI вона ще Running на `before` і вже
         // Succeeded на `after`: +1 наших мінус 1 стартова = «+0 замість +1». Тому `before` читається лише тоді, коли
         // у власній базі не лишилось незавершених задач (стан, а не таймінг: межа — лише запобіжник від зависання).
-        await WaitForNoUnfinishedJobsAsync(database);
+        await JobQueueWait.WaitForNoUnfinishedJobsAsync(database);
 
         var before = await ReadFactsAsync(client, app);
 
@@ -225,14 +205,7 @@ public sealed class SystemHealthFactsTests(SqlServerFixture sql)
             => after.GetProperty(block).GetProperty(field).GetInt32()
                - before.GetProperty(block).GetProperty(field).GetInt32();
 
-        string jobs;
-        await using (var db = database.CreateContext())
-        {
-            jobs = string.Join("; ", await db.JobProgresses.AsNoTracking()
-                .OrderBy(p => p.JobId)
-                .Select(p => p.JobCode + "=" + p.State)
-                .ToListAsync());
-        }
+        var jobs = await JobQueueWait.DescribeJobsAsync(database);
 
         foreach (var counter in Counters)
         {
