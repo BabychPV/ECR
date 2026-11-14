@@ -1,4 +1,4 @@
-using Ecr.Application.Errors;
+﻿using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
@@ -2505,7 +2505,7 @@ public sealed class AccessDecisionService(
     /// <remarks>
     /// ⛔ Перший аркуш — рівно <see cref="BuildContextAsync"/>, як і доти. Для
     /// решти від нього відрізняються ЛИШЕ два поля — <c>SheetDefId</c> і
-    /// <c>SheetStatus</c> (<c>columnDefId: 0</c>, вікно доступу не рахується:
+    /// <c>SheetStatus</c> (умови про аркуш, без колонки й вікна доступу:
     /// жодне інше поле від аркуша не залежить), тож вони беруться одним
     /// запитом до <c>wf.ApprovalState</c> з тим самим фільтром і тим самим
     /// правилом «немає рядка — <c>Draft</c>».
@@ -2514,8 +2514,7 @@ public sealed class AccessDecisionService(
         long documentId, PeriodKey periodKey, IReadOnlyList<SheetKey> sheets, CancellationToken ct)
     {
         var first = await BuildContextAsync(
-                documentId, periodKey, sheets[0].SheetDefId, columnDefId: 0,
-                evaluateAccessWindow: false, ct, sheets[0].SheetCopyId)
+                documentId, periodKey, sheets[0].SheetDefId, ct, sheets[0].SheetCopyId)
             .ConfigureAwait(false);
 
         var result = new Dictionary<SheetKey, CellAccessContext>(sheets.Count) { [sheets[0]] = first };
@@ -2766,7 +2765,7 @@ public sealed class AccessDecisionService(
         ArgumentNullException.ThrowIfNull(profile);
 
         var context = await BuildContextAsync(
-                documentId, periodKey, sheetDefId, columnDefId: 0, evaluateAccessWindow: true, ct, sheetCopyId)
+                documentId, periodKey, sheetDefId, ct, sheetCopyId)
             .ConfigureAwait(false);
         context = await WithSheetCodeAsync(profile, documentId, context, ct).ConfigureAwait(false);
         context = await WithParticipationAsync(profile, documentId, context, ct).ConfigureAwait(false);
@@ -2806,7 +2805,7 @@ public sealed class AccessDecisionService(
         }
 
         var context = await BuildContextAsync(
-                documentId, periodKey, sheetDefId, columnDefId: 0, evaluateAccessWindow: false, ct, sheetCopyId)
+                documentId, periodKey, sheetDefId, ct, sheetCopyId)
             .ConfigureAwait(false);
         context = await WithSheetCodeAsync(profile, documentId, context, ct).ConfigureAwait(false);
         context = await WithParticipationAsync(profile, documentId, context, ct).ConfigureAwait(false);
@@ -2858,7 +2857,7 @@ public sealed class AccessDecisionService(
         }
 
         var shared = await BuildContextAsync(
-                documentId, periodKey, sheetDefId, columnDefId: 0, evaluateAccessWindow: true, ct, sheetCopyId)
+                documentId, periodKey, sheetDefId, ct, sheetCopyId)
             .ConfigureAwait(false);
 
         var contexts = new CellAccessContext[profiles.Count];
@@ -3002,7 +3001,7 @@ public sealed class AccessDecisionService(
         ArgumentNullException.ThrowIfNull(profile);
 
         var context = await BuildContextAsync(
-                documentId, periodKey, sheetDefId, columnDefId: 0, evaluateAccessWindow: true, ct, sheetCopyId)
+                documentId, periodKey, sheetDefId, ct, sheetCopyId)
             .ConfigureAwait(false);
         context = await WithSheetCodeAsync(profile, documentId, context, ct).ConfigureAwait(false);
         context = await WithParticipationAsync(profile, documentId, context, ct).ConfigureAwait(false);
@@ -3125,17 +3124,10 @@ public sealed class AccessDecisionService(
     /// <param name="documentId">Документ.</param>
     /// <param name="periodKey">Період.</param>
     /// <param name="sheetDefId">Аркуш; <c>null</c> — рішення не про аркуш.</param>
-    /// <param name="columnDefId">Колонка; <c>0</c> — рішення не про комірку.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <param name="sheetCopyId">Копія аркуша (RS) для стану; <c>null</c> — оригінал.</param>
-    /// <param name="evaluateAccessWindow">
-    /// Чи рахувати спрощене вікно доступу тут. <c>false</c> — виклик робить це
-    /// сам через <see cref="PeriodAccessRules"/>, маючи повні факти (рядок,
-    /// колонка, роль), а не лише аркуш і таблицю.
-    /// </param>
     private async Task<CellAccessContext> BuildContextAsync(
-        long documentId, PeriodKey periodKey, int? sheetDefId, int columnDefId,
-        bool evaluateAccessWindow, CancellationToken ct, long? sheetCopyId = null)
+        long documentId, PeriodKey periodKey, int? sheetDefId, CancellationToken ct, long? sheetCopyId = null)
     {
         // ⚠ `WR-04` п. 5: документ, проєкт, період і стан аркуша — ОДНИМ
         // запитом. Доти це були чотири окремі звернення з тим самим ключем
@@ -3159,12 +3151,6 @@ public sealed class AccessDecisionService(
                     d.ProjectId,
                     p.Status,
                     p.IsArchiving,
-
-                    // ✎ RPT-STABLE Part B: структура рішення - версія ПЕРІОДУ (шкала), не чинна версія проєкту.
-                    // ✎ B74 P2: шкала шаблону документа напряму; NULL TemplateId — основний шаблон (як досі).
-                    TemplateVersionId = d.TemplateId == null
-                        ? EcrDbContext.VersionOf(d.ProjectId, periodValue)
-                        : EcrDbContext.TemplateVersionOf(d.ProjectId, d.TemplateId.Value, periodValue),
 
                     // ⚠ ФВ-1.8: річне вікно — з того самого рядка проєкту, без
                     // окремого звернення (храповик `PatchCellsQueryCountTests`).
@@ -3237,53 +3223,29 @@ public sealed class AccessDecisionService(
 
         var sheetStatus = sheetDefId is null ? null : state.SheetStatus;
 
-        // ⚠ Метадані читаються ЛИШЕ коли рішення справді про комірку.
-        // Подання і затвердження до колонок не звертаються, і зайвий похід у
-        // кеш шаблону тут не просто марний — він робить рішення про доступ
-        // залежним від того, чи завантажується структура, якої це рішення не
-        // стосується.
-        ColumnDef? column = null;
-        var tableDefId = 0;
-        var effectiveSheet = sheetDefId ?? 0;
-        string? sheetCode = null;
-
-        if (columnDefId != 0)
-        {
-            var snapshot = await metadata.GetAsync(state.TemplateVersionId, ct).ConfigureAwait(false);
-            column = snapshot.ColumnsById.TryGetValue(columnDefId, out var found) ? found : null;
-            tableDefId = column?.TableDefId ?? 0;
-            effectiveSheet = sheetDefId ?? SheetOf(snapshot, tableDefId);
-            sheetCode = SheetCodeOf(snapshot, effectiveSheet);
-        }
-
-        var outOfWindow = evaluateAccessWindow
-                          && period is not null
-                          && await OutOfWindowAsync(
-                              state.TemplateVersionId, effectiveSheet, tableDefId, period.Sequence, ct)
-                              .ConfigureAwait(false);
-
+        // ⛔ B100 (рішення людини 13.11, «варіант 1»): вікно доступу (ФВ-2.16) діє ЛИШЕ на введення/правку.
+        // Подання, затвердження й reopen його не враховують, тож тут воно не рахується: правку комірки вирішує
+        // `PeriodAccessRules.Evaluate` у `Decide` (зріз), а `OutOfAccessWindow` цих умов завжди `false`.
+        // Рішення тут — про аркуш, не про комірку: колонки й таблиці немає, знімок шаблону не читається.
         return new CellAccessContext(
             state.ProjectId,
-            effectiveSheet,
-            tableDefId,
-            columnDefId,
+            sheetDefId ?? 0,
+            TableDefId: 0,
+            ColumnDefId: 0,
 
             // Відсутній період трактується як Scheduled: «періоду ще немає» і
             // «період не відкрито» для користувача — та сама відмова.
             state.Status,
             state.IsArchiving,
             periodState,
-            outOfWindow,
+            OutOfAccessWindow: false,
             sheetStatus ?? DocumentStatus.Draft,
-            column?.IsComputed ?? false,
-            column?.IsReadOnly ?? false,
+            ColumnIsComputed: false,
+            ColumnIsReadOnly: false,
             RowIsReadOnly: false)
         {
-            // ⚠ D-214: період рішення відомий завжди; код аркуша — там, де знімок
-            // уже прочитано (рішення про комірку). Подання й затвердження
-            // добирають його самі (`WithSheetCodeAsync`) і лише тоді, коли він
-            // комусь потрібен.
-            SheetCode = sheetCode,
+            // ⚠ D-214: період рішення відомий завжди; код аркуша подання й затвердження
+            // добирають самі (`WithSheetCodeAsync`) і лише тоді, коли він комусь потрібен.
             Period = periodKey,
             HasEditAssignments = state.HasAssignments,
             SheetCopyId = sheetCopyId,
@@ -3450,44 +3412,6 @@ public sealed class AccessDecisionService(
         }
 
         return 0;
-    }
-
-    /// <summary>Чи виходить номер періоду за вікно доступу аркуша (ФВ-2.16).</summary>
-    /// <remarks>
-    /// ⚠ Береться ЛИШЕ вид <c>EditablePeriodOnly</c> і лише з блокувальною
-    /// поведінкою. Решта п'яти видів говорить про рядок, колонку або довідник,
-    /// а тут відомі тільки аркуш і таблиця: застосувати їх звідси означало б
-    /// заборонити весь аркуш через правило про один рядок.
-    ///
-    /// ⛔ Поведінка звіряється теж. Без цього <c>Warn</c> і
-    /// <c>AllowWithConfirmation</c> блокували б так само, як <c>ReadOnly</c>, і
-    /// три поведінки <c>ФВ-2.16</c> тихо стали б однією — саме те, від чого
-    /// вимога застерігає.
-    /// </remarks>
-    private async Task<bool> OutOfWindowAsync(
-        int templateVersionId, int sheetDefId, int tableDefId, byte sequence, CancellationToken ct)
-    {
-        // ⚠ Застарілий <c>Hide</c> читається нарівні з <c>ReadOnly</c> (`H-1`):
-        // в базі лежать рядки, записані до того, як вияснилося, що
-        // ФВ-2.16 приховування не просила. Перестати їх бачити означало б
-        // тихе відкриття доступу там, де він був закритий.
-#pragma warning disable CS0618
-        var rules = await db.PeriodAccessRules
-            .AsNoTracking()
-            .Where(r => r.TemplateVersionId == templateVersionId
-                        && r.RuleKind == PeriodAccessRuleKind.EditablePeriodOnly
-                        && (r.OnOutOfWindow == OutOfWindowBehavior.Hide
-                            || r.OnOutOfWindow == OutOfWindowBehavior.ReadOnly)
-                        && (r.SheetDefId == null || r.SheetDefId == sheetDefId)
-                        && (r.TableDefId == null || r.TableDefId == tableDefId))
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
-#pragma warning restore CS0618
-
-        // Правил немає — вікна немає: за замовчуванням доступні всі періоди.
-        // Зворотне («немає правила — заборонено») зробило б кожен новий аркуш
-        // недоступним, і ніхто б не зрозумів чому.
-        return rules.Count > 0 && rules.TrueForAll(r => !r.AppliesTo(sequence));
     }
 
     /// <summary>Проєкт документа.</summary>
