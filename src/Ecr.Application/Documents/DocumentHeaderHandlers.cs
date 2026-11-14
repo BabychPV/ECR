@@ -742,7 +742,7 @@ public sealed class PatchDocumentHeaderHandler(
 
         var decision = EditRules.CanEdit(profile, new CellAccessContext(
             project.Id, SheetDefId: 0, TableDefId: 0, ColumnDefId: 0,
-            project.Status, project.IsArchiving, periodState, OutOfAccessWindow: false,
+            project.Status, project.IsArchiving, periodState,
             sheetStatus, ColumnIsComputed: false, ColumnIsReadOnly: false, RowIsReadOnly: false));
 
         if (decision.IsAllowed)

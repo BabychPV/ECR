@@ -264,7 +264,7 @@ internal static class EditAssignmentAccess
 
             var context = new CellAccessContext(
                 projectId, sheet.Id, 0, 0,
-                ProjectStatus.Active, IsArchiving: false, PeriodState.Open, OutOfAccessWindow: false,
+                ProjectStatus.Active, IsArchiving: false, PeriodState.Open,
                 DocumentStatus.Draft, ColumnIsComputed: false, ColumnIsReadOnly: false, RowIsReadOnly: false)
             {
                 SheetCode = sheet.Code,
@@ -578,7 +578,7 @@ internal static class EditAssignmentAccess
 
                     var context = new CellAccessContext(
                         projectId, sheet.Id, table.Id, column.Id,
-                        ProjectStatus.Active, IsArchiving: false, PeriodState.Open, OutOfAccessWindow: false,
+                        ProjectStatus.Active, IsArchiving: false, PeriodState.Open,
                         DocumentStatus.Draft, ColumnIsComputed: false, ColumnIsReadOnly: false, RowIsReadOnly: false)
                     {
                         SheetCode = sheet.Code,

@@ -48,7 +48,6 @@ public sealed class IntegrationWriterEditRulesTests
     [InlineData("computed", EditDenyReason.CalculatedCell)]
     [InlineData("columnReadOnly", EditDenyReason.ColumnReadOnly)]
     [InlineData("rowReadOnly", EditDenyReason.RowReadOnly)]
-    [InlineData("outOfWindow", EditDenyReason.OutOfAccessWindow)]
     [InlineData("archived", EditDenyReason.ProjectArchived)]
     [InlineData("archiving", EditDenyReason.ArchivingInProgress)]
     public void Заборони_комірки_діють_на_інтеграцію(string condition, EditDenyReason expected)
@@ -62,7 +61,6 @@ public sealed class IntegrationWriterEditRulesTests
             "computed" => AccessBuilder.Cell(computed: true),
             "columnReadOnly" => AccessBuilder.Cell(columnReadOnly: true),
             "rowReadOnly" => AccessBuilder.Cell(rowReadOnly: true),
-            "outOfWindow" => AccessBuilder.Cell(outOfWindow: true),
             "archived" => AccessBuilder.Cell(project: ProjectStatus.Archived),
             "archiving" => AccessBuilder.Cell(archiving: true),
             _ => throw new ArgumentOutOfRangeException(nameof(condition)),

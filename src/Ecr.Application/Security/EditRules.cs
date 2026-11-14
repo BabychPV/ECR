@@ -19,7 +19,6 @@ namespace Ecr.Application.Security;
 /// <param name="ProjectStatus">Стан проєкту.</param>
 /// <param name="IsArchiving">Чи триває архівація проєкту.</param>
 /// <param name="PeriodState">Стан періоду — збережене значення, не функція від <c>now()</c>.</param>
-/// <param name="OutOfAccessWindow">Аркуш поза вікном доступу за номером періоду (ФВ-2.16).</param>
 /// <param name="SheetStatus">Стан робочого процесу на аркуш × період.</param>
 /// <param name="ColumnIsComputed">Колонка обчислювана.</param>
 /// <param name="ColumnIsReadOnly">Колонка лише для читання.</param>
@@ -32,7 +31,6 @@ public readonly record struct CellAccessContext(
     ProjectStatus ProjectStatus,
     bool IsArchiving,
     PeriodState PeriodState,
-    bool OutOfAccessWindow,
     DocumentStatus SheetStatus,
     bool ColumnIsComputed,
     bool ColumnIsReadOnly,
@@ -217,10 +215,8 @@ public static class EditRules
                 break;
         }
 
-        if (context.OutOfAccessWindow)
-        {
-            return EditDecision.Deny(EditDenyReason.OutOfAccessWindow);
-        }
+        // ✎ B106: вікно доступу (ФВ-2.16) тут не перевіряється — правку поза вікном відхиляє
+        // `PeriodAccessRules.Evaluate` у `AccessDecisionService.Decide` (EditDenyReason.OutOfAccessWindow).
 
         // ⚠ Grace дає час на правки НЕПОДАНИХ документів, а не право змінити
         // подану форму (D-67). Тому стан аркуша перевіряється незалежно від

@@ -277,7 +277,7 @@ public sealed class ContractIntegrityTests
             EditRules.CanEdit(profile, AccessBuilder.Cell(archiving: true)).Reason,
             EditRules.CanEdit(profile, AccessBuilder.Cell(period: PeriodState.Scheduled)).Reason,
             EditRules.CanEdit(profile, AccessBuilder.Cell(period: PeriodState.Closed)).Reason,
-            EditRules.CanEdit(profile, AccessBuilder.Cell(outOfWindow: true)).Reason,
+            AccessWindowReason(),
             EditRules.CanEdit(profile, AccessBuilder.Cell(sheet: DocumentStatus.Submitted)).Reason,
             EditRules.CanEdit(profile, AccessBuilder.Cell(sheet: DocumentStatus.Approved)).Reason,
             EditRules.CanEdit(profile, AccessBuilder.Cell(computed: true)).Reason,
@@ -375,6 +375,30 @@ public sealed class ContractIntegrityTests
 
         return EditRules.CanEdit(
             writer, AccessBuilder.Cell() with { DelegatedWrite = facts.DelegatedWrite, AssignmentLock = facts.Lock }).Reason;
+    }
+
+    /// <summary>
+    /// Причина, яку повертає вікно доступу за номером періоду (<c>ФВ-2.16</c>, <c>EditablePeriodOnly</c>): з B106 її
+    /// дає лише <c>PeriodAccessRules</c>, а не ознака умов <c>EditRules</c>.
+    /// </summary>
+    private static EditDenyReason AccessWindowReason()
+    {
+        var rule = PeriodAccessRuleDef.EditablePeriodOnly(
+            templateVersionId: 1, OutOfWindowBehavior.ReadOnly, fromSequence: 2, toSequence: 4);
+
+        // Вікно — періоди 2..4; комірка — за п'ятий.
+        var facts = new PeriodRuleFacts(
+            SheetDefId: 0,
+            TableDefId: 0,
+            RowKind: RowKind.Item,
+            PeriodSequence: 5,
+            PeriodYear: 2026,
+            CurrentSequence: null,
+            ColumnMonthNumber: null,
+            SourceValues: new Dictionary<int, SourceValidity>(),
+            ExpressionResults: new Dictionary<string, bool>(StringComparer.Ordinal));
+
+        return PeriodAccessRules.Evaluate([rule], facts, new HashSet<int>()).Reason;
     }
 
     /// <summary>Причина, яку повертає правило вікна довідника (<c>ФВ-5.20</c>).</summary>

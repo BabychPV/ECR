@@ -103,11 +103,10 @@ public sealed class AccessBuilder
         DocumentStatus sheet = DocumentStatus.Draft,
         ProjectStatus project = ProjectStatus.Active,
         bool archiving = false,
-        bool outOfWindow = false,
         bool computed = false,
         bool columnReadOnly = false,
         bool rowReadOnly = false,
         int columnId = ColumnId)
         => new(ProjectId, SheetId, TableId, columnId, project, archiving, period,
-               outOfWindow, sheet, computed, columnReadOnly, rowReadOnly);
+               sheet, computed, columnReadOnly, rowReadOnly);
 }

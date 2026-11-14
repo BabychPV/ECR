@@ -236,7 +236,6 @@ public sealed class ListMyApprovalQueueHandler(
             project.Status,
             project.IsArchiving,
             PeriodState.Open,
-            OutOfAccessWindow: false,
             DocumentStatus.Submitted,
             ColumnIsComputed: false,
             ColumnIsReadOnly: false,

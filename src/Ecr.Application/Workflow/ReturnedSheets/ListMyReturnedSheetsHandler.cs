@@ -278,7 +278,6 @@ public sealed class ListMyReturnedSheetsHandler(
             project.Status,
             project.IsArchiving,
             PeriodState.Open,
-            OutOfAccessWindow: false,
             DocumentStatus.Draft,
             ColumnIsComputed: false,
             ColumnIsReadOnly: false,
