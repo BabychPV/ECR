@@ -71,6 +71,73 @@ describe('findHse400Document (B78 F13 P3-2)', () => {
     expect(listDocuments).not.toHaveBeenCalled();
   });
 
+  // ✎ B93 (a): діє версія, ЧИННА в році (остання з `fromPeriodKey` ≤ кінця року), а не «будь-коли була HSE400».
+  it('HSE400, яку пізніший шаблон замінив до кінця року, — не HSE400 у цьому році', async () => {
+    fetchAllProjects.mockResolvedValue({ items: [{ id: 2 }, { id: 3 }], nextCursor: null, totalCount: 2 });
+    apiFetch.mockImplementation((path: string) => {
+      if (path.endsWith('/2/template-versions')) {
+        return Promise.resolve({
+          projectId: 2,
+          currentVersionId: 9,
+          items: [
+            { fromPeriodKey: 202501, templateCode: 'HSE400', templateVersionId: 1, version: '1.0' },
+            { fromPeriodKey: 202601, templateCode: 'LAND_UI', templateVersionId: 9, version: '1.0' },
+          ],
+        });
+      }
+      return Promise.resolve(timeline(3, 'HSE400', 202501));
+    });
+    listDocuments.mockImplementation((params: { projectId: number }) =>
+      Promise.resolve(params.projectId === 2 ? page(22) : page(33)),
+    );
+
+    await expect(findHse400Document(null, 2026, 96)).resolves.toBe(33);
+    expect(listDocuments).toHaveBeenCalledTimes(1);
+    expect(listDocuments).toHaveBeenCalledWith({ periodKey: null, year: 2026, projectId: 3 });
+  });
+
+  // ✎ B93 (c): кілька документів року в проєкті — явне правило, а не порядок переліку.
+  it('кілька документів року: спершу з періодом панелі, далі найменший Id', async () => {
+    fetchAllProjects.mockResolvedValue({ items: [{ id: 5 }], nextCursor: null, totalCount: 1 });
+    apiFetch.mockResolvedValue(timeline(5, 'HSE400'));
+    listDocuments.mockResolvedValueOnce({
+      items: [
+        { id: 96, periodStates: [{ periodKey: 202605, state: 'Draft' }] },
+        { id: 40, periodStates: [{ periodKey: 202601, state: 'Draft' }] },
+        { id: 70, periodStates: [{ periodKey: 202605, state: 'Draft' }] },
+      ],
+      nextCursor: null,
+      totalCount: 3,
+    });
+    await expect(findHse400Document(5, 2026, 96, 202605)).resolves.toBe(70);
+
+    listDocuments.mockResolvedValueOnce(page(90, 96, 40));
+    await expect(findHse400Document(5, 2026, 96, 202605)).resolves.toBe(40);
+  });
+
+  // ✎ B93 (b): не N паралельних запитів на клік — проєкт документа сам, решта порціями до першого збігу.
+  it('HSE400 у проєкті документа — один запит шкали, без переліку проєктів', async () => {
+    apiFetch.mockResolvedValue(timeline(5, 'HSE400'));
+    listDocuments.mockResolvedValue(page(55));
+
+    await expect(findHse400Document(5, 2026, 96)).resolves.toBe(55);
+    expect(apiFetch).toHaveBeenCalledTimes(1);
+    expect(fetchAllProjects).not.toHaveBeenCalled();
+  });
+
+  it('решта проєктів — порціями по 4 до першого збігу, а не всі одразу', async () => {
+    const ids = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    fetchAllProjects.mockResolvedValue({ items: ids.map((id) => ({ id })), nextCursor: null, totalCount: ids.length });
+    apiFetch.mockImplementation((path: string) =>
+      Promise.resolve(path.endsWith('/3/template-versions') ? timeline(3, 'HSE400') : timeline(0, 'LAND_UI')),
+    );
+    listDocuments.mockResolvedValue(page(33));
+
+    await expect(findHse400Document(1, 2026, 96)).resolves.toBe(33);
+    // Проєкт документа (1) + перша порція (2, 3, 4, 5); 6…10 не запитуються.
+    expect(apiFetch).toHaveBeenCalledTimes(5);
+  });
+
   it('відмова API (не 403/404) — виняток для панелі', async () => {
     fetchAllProjects.mockResolvedValue({ items: [{ id: 2 }], nextCursor: null, totalCount: 1 });
     apiFetch.mockRejectedValue(new EcrApiError({ status: 500, title: 'Boom' } as never));

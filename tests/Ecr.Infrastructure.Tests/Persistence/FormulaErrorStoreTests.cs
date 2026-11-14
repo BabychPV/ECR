@@ -171,6 +171,34 @@ public sealed class FormulaErrorStoreTests(SqlServerFixture sql)
     }
 
     /// <summary>
+    /// ✎ B93 (d): опис рядка шаблону шукається за RowKey ТОЧНО (ordinal), як у сітці (<c>GetTableSliceHandler</c>,
+    /// <c>StringComparer.Ordinal</c>), а не за collation бази (CI): ключ, що відрізняється регістром, опису не має — рядок
+    /// іде в кінець за Id, і номер у деталях збігається з сіткою.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Опис_рядка_за_RowKey_точним_збігом_як_у_сітці()
+    {
+        var doc = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(periodKey: 202705);
+        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            await new FormulaErrorStore(db).ApplyAsync(
+                [Row(doc, 0, FormulaError.ErrorKind, "#N/A"), Row(doc, 3, FormulaError.ErrorKind, "#N/A")], [], CancellationToken.None);
+            await db.SaveChangesAsync();
+
+            // Опис шаблону перевертає порядок, але його ключі — в іншому регістрі ("r1" ≠ "R1" для сітки).
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE cfg.RowDef SET Ordinal = 10 - Ordinal, RowKey = LOWER(RowKey) WHERE TableDefId = {doc.TableDefId};");
+        }
+
+        await using var reader = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
+        var rows = await new FormulaErrorStore(reader).ListAsync(doc.DocumentId, doc.PeriodKey.Value, null, CancellationToken.None);
+
+        Assert.Equal([(doc.RowIds[0], 1), (doc.RowIds[3], 4)], rows.Select(r => (r.Row.TableRowId, r.RowOrdinal)));
+    }
+
+    /// <summary>
     /// ✎ B78: назва запису — лише для колонки, що посилається САМЕ на довідник запису; той самий Id у числовій колонці
     /// назвою не стає. Один запит.
     /// </summary>
