@@ -130,114 +130,142 @@ public sealed class FormulaRecalculationJob(
         // Завершення: кожна ланка ланцюжка несе `hops` на 1 більше за ту, що її породила, і `FindReadersAsync`
         // зупиняється за `CrossPeriodFanOut.MaxHops` (розбіжний цикл `x = [Period:#2].x + 1`); `MaxPasses` — запас.
         var passes = 0;
-        while (work.Count > 0 && passes < MaxPasses)
+        (int Slot, PeriodWork Item)? current = null;
+        try
         {
-            var (slot, item) = work.First();
-            work.Remove(slot);
-            passes++;
+            while (work.Count > 0 && passes < MaxPasses)
+            {
+                var (slot, item) = work.First();
+                work.Remove(slot);
+            current = (slot, item);
+                passes++;
 
-            var periodKey = new PeriodKey(slot);
-            var changed = new HashSet<(int TableDefId, int ColumnDefId)>();
+                var periodKey = new PeriodKey(slot);
+                var changed = new HashSet<(int TableDefId, int ColumnDefId)>();
 
-            // Q-17: колонки ВВЕДЕНИХ комірок (насіння правки) — не похідні: лише вони можуть бути стовпцями з чужим
-            // власником, чиї читачі в інших екземплярах року не бачили б зміни.
-            var inputColumns = new HashSet<(int TableDefId, int ColumnDefId)>();
-            var periodWritten = 0;
+                // Q-17: колонки ВВЕДЕНИХ комірок (насіння правки) — не похідні: лише вони можуть бути стовпцями з чужим
+                // власником, чиї читачі в інших екземплярах року не бачили б зміни.
+                var inputColumns = new HashSet<(int TableDefId, int ColumnDefId)>();
+                var periodWritten = 0;
+                try
+                {
+                    if (!item.Dirty.IsEmpty)
+                    {
+                        // RS: насіння оригіналу й кожної копії рахується окремим «видом» (самопосилання копії читає копію).
+                        foreach (var (instanceId, dirty) in await DirtyByScopeAsync(item, documentId, periodKey, shared, ct)
+                                     .ConfigureAwait(false))
+                        {
+                            periodWritten += await recalculation
+                                .RecalculateAsync(
+                                    instanceId, dirty, ct, changed, item.ApproverSheets, inputColumns, shared)
+                                .ConfigureAwait(false);
+                        }
+                    }
+
+                    // WW-03: період-читач. Закритий період не перераховується ніколи (стан міг змінитись
+                    // між постановкою й виконанням); подані аркуші відсікає сам запис прогону.
+                    // ✎ LAND-YEAR B58: виняток — закритий ЯКІР річної розкладки у відкритому році: лише не-місячні цілі під
+                    // агрегатом року (`CrossPeriodFanOut.ClosedAnchorYearAsync`, правило B24), перевірене тут ще раз.
+                    if (item.Sources.Count > 0 && documentId != 0 && periods is not null)
+                    {
+                        var readerState = await periods.FindPeriodStateAsync(documentId, periodKey.Value, ct).ConfigureAwait(false);
+                        IReadOnlyList<int>? annualPeriods = null;
+                        if (readerState == Ecr.Domain.Enums.PeriodState.Closed && fanOut is not null)
+                        {
+                            annualPeriods = await fanOut.ClosedAnchorYearAsync(documentId, periodKey, ct, shared).ConfigureAwait(false);
+                        }
+
+                        if (readerState is not (null or Ecr.Domain.Enums.PeriodState.Closed) || annualPeriods is not null)
+                        {
+                            periodWritten += await recalculation
+                                .RecalculateFromOtherPeriodsAsync(
+                                    documentId, periodKey, item.Sources, ct, changed, shared, annualPeriods)
+                                .ConfigureAwait(false);
+                        }
+                    }
+                }
+                catch (ConcurrencyConflictException busy) when (IsSheetBeingSubmitted(busy))
+                {
+                    // ⛔ X6-02: аркуш цього прогону подається (чи подання вже в черзі), а прогін
+                    // інших аркушів у черзі за ним не стоїть (`EnterEditNoWaitAsync`). Це не провал
+                    // і не ретрай (спроби 30/60/120 с вичерпались би за годину дедлайну): транзакція
+                    // відкочена, нічого не записано — задача повертається в чергу, не рахуючи спроби.
+                    // L2: інші періоди проходу це не зупиняє — вони дораховуються, а задача відкладається в кінці
+                    // (повторний прохід по вже порахованих нічого не пише).
+                    deferral ??= new JobDeferredException(RecalculationDocumentLock.DeferDelay, busy.Message);
+                    postponed.Add((slot, item));
+                    db.ChangeTracker.Clear();
+                    continue;
+                }
+                catch (Exception ex) when (RecalculationDocumentLock.IsLockWaitTimeout(ex))
+                {
+                    // ⛔ F1 (WW-02): вичерпане очікування блокування даних (`ECR-DOC-4091`, `lockTimeout`) — зайнятість, що
+                    // минає; не ретрай 30/60/120 с із `Failed` і застарілими обчисленими колонками, а відкладення (див.
+                    // `RecalculationJob`). Транзакція відкочена — нічого не записано.
+                    deferral ??= new JobDeferredException(
+                        RecalculationDocumentLock.LockWaitDeferDelay(documentId),
+                        "Document data is busy with a long operation; recalculation deferred.",
+                        RecalculationDocumentLock.Resource(documentId));
+                    postponed.Add((slot, item));
+                    db.ChangeTracker.Clear();
+                    continue;
+                }
+
+                written += periodWritten;
+                if (periodWritten > 0)
+                {
+                    writtenPeriods.Add(slot);
+                }
+
+                // WW-03: ланцюжок читачів — зміни цього прогону (насіння й похідні) йдуть в інші періоди року.
+                // L2: читачі дописуються в ЦЕЙ перелік (а не ставляться окремими задачами); без змін у записаному
+                // далі нічого не додається (ланцюжок завершується).
+                if (fanOut is not null && documentId != 0 && changed.Count > 0)
+                {
+                    var readers = await fanOut
+                        .FindReadersAsync(
+                            documentId, periodKey, changed, onlyEarlierReaders: false, item.Hops + 1, ct, inputColumns, shared)
+                        .ConfigureAwait(false);
+
+                    foreach (var (reader, readerSources) in readers)
+                    {
+                        if (!work.TryGetValue(reader.Value, out var next))
+                        {
+                            work[reader.Value] = next = new PeriodWork();
+                        }
+
+                        foreach (var readerSource in readerSources)
+                        {
+                            next.AddSource(readerSource);
+                        }
+
+                        next.Hops = Math.Max(next.Hops, item.Hops + 1);
+                    }
+                }
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // ⛔ D-8: непередбачений виняток посеред проходу. Ранні періоди вже закомічені, а ретрай виконає ПОЧАТКОВИЙ
+            // payload (лише насіння) і не знайде читачів похідних колонок — тож поточний, відкладені й ще не оброблені
+            // періоди-читачі ставляться окремою постановкою, і лише потім виняток іде далі (скасування не ловимо).
+            db.ChangeTracker.Clear();
+            IEnumerable<(int Slot, PeriodWork Item)> pending = postponed.Concat(work.Select(p => (p.Key, p.Value)));
+            if (current is { } failed)
+            {
+                pending = pending.Append(failed);
+            }
+
             try
             {
-                if (!item.Dirty.IsEmpty)
-                {
-                    // RS: насіння оригіналу й кожної копії рахується окремим «видом» (самопосилання копії читає копію).
-                    foreach (var (instanceId, dirty) in await DirtyByScopeAsync(item, documentId, periodKey, shared, ct)
-                                 .ConfigureAwait(false))
-                    {
-                        periodWritten += await recalculation
-                            .RecalculateAsync(
-                                instanceId, dirty, ct, changed, item.ApproverSheets, inputColumns, shared)
-                            .ConfigureAwait(false);
-                    }
-                }
-
-                // WW-03: період-читач. Закритий період не перераховується ніколи (стан міг змінитись
-                // між постановкою й виконанням); подані аркуші відсікає сам запис прогону.
-                // ✎ LAND-YEAR B58: виняток — закритий ЯКІР річної розкладки у відкритому році: лише не-місячні цілі під
-                // агрегатом року (`CrossPeriodFanOut.ClosedAnchorYearAsync`, правило B24), перевірене тут ще раз.
-                if (item.Sources.Count > 0 && documentId != 0 && periods is not null)
-                {
-                    var readerState = await periods.FindPeriodStateAsync(documentId, periodKey.Value, ct).ConfigureAwait(false);
-                    IReadOnlyList<int>? annualPeriods = null;
-                    if (readerState == Ecr.Domain.Enums.PeriodState.Closed && fanOut is not null)
-                    {
-                        annualPeriods = await fanOut.ClosedAnchorYearAsync(documentId, periodKey, ct, shared).ConfigureAwait(false);
-                    }
-
-                    if (readerState is not (null or Ecr.Domain.Enums.PeriodState.Closed) || annualPeriods is not null)
-                    {
-                        periodWritten += await recalculation
-                            .RecalculateFromOtherPeriodsAsync(
-                                documentId, periodKey, item.Sources, ct, changed, shared, annualPeriods)
-                            .ConfigureAwait(false);
-                    }
-                }
+                await RequeueSourcesAsync(documentId, pending, ct).ConfigureAwait(false);
             }
-            catch (ConcurrencyConflictException busy) when (IsSheetBeingSubmitted(busy))
+            catch (Exception requeueFailure) when (requeueFailure is not OperationCanceledException)
             {
-                // ⛔ X6-02: аркуш цього прогону подається (чи подання вже в черзі), а прогін
-                // інших аркушів у черзі за ним не стоїть (`EnterEditNoWaitAsync`). Це не провал
-                // і не ретрай (спроби 30/60/120 с вичерпались би за годину дедлайну): транзакція
-                // відкочена, нічого не записано — задача повертається в чергу, не рахуючи спроби.
-                // L2: інші періоди проходу це не зупиняє — вони дораховуються, а задача відкладається в кінці
-                // (повторний прохід по вже порахованих нічого не пише).
-                deferral ??= new JobDeferredException(RecalculationDocumentLock.DeferDelay, busy.Message);
-                postponed.Add((slot, item));
-                db.ChangeTracker.Clear();
-                continue;
-            }
-            catch (Exception ex) when (RecalculationDocumentLock.IsLockWaitTimeout(ex))
-            {
-                // ⛔ F1 (WW-02): вичерпане очікування блокування даних (`ECR-DOC-4091`, `lockTimeout`) — зайнятість, що
-                // минає; не ретрай 30/60/120 с із `Failed` і застарілими обчисленими колонками, а відкладення (див.
-                // `RecalculationJob`). Транзакція відкочена — нічого не записано.
-                deferral ??= new JobDeferredException(
-                    RecalculationDocumentLock.LockWaitDeferDelay(documentId),
-                    "Document data is busy with a long operation; recalculation deferred.",
-                    RecalculationDocumentLock.Resource(documentId));
-                postponed.Add((slot, item));
-                db.ChangeTracker.Clear();
-                continue;
+                // Збій самої постановки не підміняє першопричину: ретрай і так піде за початковим винятком.
             }
 
-            written += periodWritten;
-            if (periodWritten > 0)
-            {
-                writtenPeriods.Add(slot);
-            }
-
-            // WW-03: ланцюжок читачів — зміни цього прогону (насіння й похідні) йдуть в інші періоди року.
-            // L2: читачі дописуються в ЦЕЙ перелік (а не ставляться окремими задачами); без змін у записаному
-            // далі нічого не додається (ланцюжок завершується).
-            if (fanOut is not null && documentId != 0 && changed.Count > 0)
-            {
-                var readers = await fanOut
-                    .FindReadersAsync(
-                        documentId, periodKey, changed, onlyEarlierReaders: false, item.Hops + 1, ct, inputColumns, shared)
-                    .ConfigureAwait(false);
-
-                foreach (var (reader, readerSources) in readers)
-                {
-                    if (!work.TryGetValue(reader.Value, out var next))
-                    {
-                        work[reader.Value] = next = new PeriodWork();
-                    }
-
-                    foreach (var readerSource in readerSources)
-                    {
-                        next.AddSource(readerSource);
-                    }
-
-                    next.Hops = Math.Max(next.Hops, item.Hops + 1);
-                }
-            }
+            throw;
         }
 
         if (deferral is not null)

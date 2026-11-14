@@ -169,7 +169,7 @@ public sealed class ValidateDocumentHandler(
         // D-230: зв'язки Check (ПРИПУЩЕННЯ схеми, `RelationSpec.cs`). Читаються після таблиць із
         // правилами, бо мають власну вибірку таблиць (джерело й приймач зв'язку).
         messages.AddRange(await RelationCheckRunner
-            .RunAsync(templateVersions, cellStore, rowStore, metadata, instances, periodKey, currentUser.Language, ct)
+            .RunAsync(templateVersions, cellStore, rowStore, metadata, instances, periodKey, currentUser.Language, ct, columnDefaults)
             .ConfigureAwait(false));
 
         // ✎ Rule (h4): rows (and the header) whose permit does not cover the months with data.

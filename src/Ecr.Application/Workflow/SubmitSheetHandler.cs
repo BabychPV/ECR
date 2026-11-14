@@ -612,7 +612,7 @@ public sealed class SubmitSheetHandler(
         {
             var sheetInstances = instances.Where(i => tables.ContainsKey(i.TableDefId)).ToList();
             var relationMessages = await Validation.RelationCheckRunner
-                .RunAsync(versions, cellStore, rowStore, metadata, sheetInstances, key, currentUser.Language, ct)
+                .RunAsync(versions, cellStore, rowStore, metadata, sheetInstances, key, currentUser.Language, ct, columnDefaults)
                 .ConfigureAwait(false);
             blocking.AddRange(relationMessages.Where(m => m.Severity == ValidationSeverity.Error));
             warnings.AddRange(relationMessages.Where(m => m.Severity == ValidationSeverity.Warning));

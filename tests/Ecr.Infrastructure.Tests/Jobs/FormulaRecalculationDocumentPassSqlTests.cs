@@ -212,6 +212,56 @@ public sealed class FormulaRecalculationDocumentPassSqlTests(SqlServerFixture sq
         Assert.Equal(await OutputAsync(world, 3) + 40m, await OutputAsync(world, 4));
     }
 
+    /// <summary>
+    /// ⛔ D-8 (непередбачений виняток): прохід березня змінив C, читач квітня знайдений, але обробка квітня падає
+    /// не «зайнятістю», а довільним винятком. Ретрай виконав би ПОЧАТКОВИЙ payload (лише насіння березня) і читача не знайшов —
+    /// тож квітень ставиться окремою постановкою, а виняток іде далі. Мутація: прибрати catch-all навколо проходу — постановки
+    /// немає (червоне). Скасування не ловиться: постановки немає й тоді.
+    /// </summary>
+    [Theory]
+    [Trait("Finding", "D-8")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Непередбачений_виняток_посеред_проходу_ставить_читача_окремо_а_скасування_ні(bool cancellation)
+    {
+        var world = await ArrangeAsync(Chain);
+        await SetInputAsync(world, 3, 100m);
+        var request = new FormulaRecalculationRequest(
+            world.Instance(3).InstanceId, Period(3), [Seed(world, 3)], world.Doc.DocumentId);
+
+        var jobs = Substitute.For<IBackgroundJobScheduler>();
+        var periods = Periods(world);
+        periods.FindPeriodStateAsync(world.Doc.DocumentId, Period(4), Arg.Any<CancellationToken>())
+            .Returns(_ => Task.FromException<PeriodState?>(
+                cancellation ? new OperationCanceledException() : new InvalidOperationException("boom")));
+
+        await using (var db = world.Builder.CreateContext())
+        {
+            var job = Job(db, world, jobs, periods);
+            if (cancellation)
+            {
+                await Assert.ThrowsAsync<OperationCanceledException>(
+                    () => job.ExecuteAsync(request, new CapturingJobProgress(), CancellationToken.None));
+            }
+            else
+            {
+                await Assert.ThrowsAsync<InvalidOperationException>(
+                    () => job.ExecuteAsync(request, new CapturingJobProgress(), CancellationToken.None));
+            }
+        }
+
+        var enqueued = jobs.ReceivedCalls()
+            .Where(c => c.GetMethodInfo().Name == nameof(IBackgroundJobScheduler.EnqueueCoalescedAsync)).ToList();
+        if (cancellation)
+        {
+            Assert.Empty(enqueued);
+            return;
+        }
+
+        var april = Assert.Single(enqueued).GetArguments()[1]!;
+        Assert.Contains($"\"PeriodKey\":{Period(4)}", System.Text.Json.JsonSerializer.Serialize(april), StringComparison.Ordinal);
+    }
+
     private FormulaRecalculationJob Job(EcrDbContext db, World world, IBackgroundJobScheduler jobs, IPeriodStore periods)
     {
         var bulk = new BulkCellLoader(sql.ConnectionString, 1000);
