@@ -1,7 +1,9 @@
 // src/Ecr.Infrastructure/Persistence/SystemHealthStore.cs
 
 using Ecr.Application.Ports;
+using Ecr.Application.Registries;
 using Ecr.Domain.Entities.Integration;
+using Ecr.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -19,7 +21,8 @@ public sealed partial class SystemHealthStore(
     EcrDbContext db,
     ILogger<SystemHealthStore> logger,
     HealthProbeSql? probes = null,
-    HealthCountCache? failedCache = null) : ISystemHealthStore
+    HealthCountCache? failedCache = null,
+    string hse400TemplateCode = Hse400CompositionMapping.TemplateCode) : ISystemHealthStore
 {
     /// <summary>Вікно «прогалин покриття».</summary>
     private static readonly TimeSpan GapWindow = TimeSpan.FromDays(7);
@@ -119,13 +122,52 @@ public sealed partial class SystemHealthStore(
 
         var freeGb = await ProbeAsync<long?>(_probes.FreeSpaceGb, ct).ConfigureAwait(false);
         var backup = await ProbeAsync<DateTime?>(_probes.LastBackupUtc, ct).ConfigureAwait(false);
+        var hse400 = await Hse400DocumentInYearAsync(utcNow.Year, ct).ConfigureAwait(false);
 
         return new SystemHealthSnapshot(
             new HealthJobCounts(jobs?.Running ?? 0, jobs?.Queued ?? 0, jobs?.Failed ?? 0),
             new HealthSourceCounts(active, failedSources, gaps),
             freeGb is { } gb ? Math.Max(0, gb) : null,
             backup is { } b ? DateTime.SpecifyKind(b, DateTimeKind.Utc) : null,
-            Latest(lastJobError, lastRunError, lastScheduleError));
+            Latest(lastJobError, lastRunError, lastScheduleError),
+            hse400);
+    }
+
+    /// <summary>
+    /// B105: чи є опублікована версія шаблону HSE400 і документ HSE400 (екземпляр таблиці будь-якої його версії)
+    /// з періодом року <paramref name="year"/> — те, що <see cref="Hse400CompositionSnapshotLoader"/> підставив би
+    /// замість довідника. Документ проєкту золотих тестів не рахується, як і там.
+    /// </summary>
+    private async Task<bool> Hse400DocumentInYearAsync(int year, CancellationToken ct)
+    {
+        var published = await (
+                from t in db.Templates.AsNoTracking()
+                where t.Code == hse400TemplateCode
+                join v in db.TemplateVersions.AsNoTracking() on t.Id equals v.TemplateId
+                where v.Status == TemplateVersionStatus.Published
+                select v.Id)
+            .AnyAsync(ct).ConfigureAwait(false);
+        if (!published)
+        {
+            return false;
+        }
+
+        // Період HSE400 — yyyyMM (як у завантажувачі: рік = PeriodKeyValue / 100); межі року — діапазон ключа.
+        var yearStart = year * 100;
+        var yearEnd = (year + 1) * 100;
+        return await (
+                from t in db.Templates.AsNoTracking()
+                where t.Code == hse400TemplateCode
+                join v in db.TemplateVersions.AsNoTracking() on t.Id equals v.TemplateId
+                join s in db.SheetDefs.AsNoTracking() on v.Id equals s.TemplateVersionId
+                join d in db.TableDefs.AsNoTracking() on s.Id equals d.SheetDefId
+                join i in db.TableInstances.AsNoTracking() on d.Id equals i.TableDefId
+                where i.PeriodKeyValue >= yearStart && i.PeriodKeyValue < yearEnd && i.SheetCopyId == null
+                join doc in db.Documents.AsNoTracking() on i.DocumentId equals doc.Id
+                join project in db.Projects.AsNoTracking() on doc.ProjectId equals project.Id
+                where project.Code != Hse400CompositionMapping.GoldProjectCode
+                select i.Id)
+            .AnyAsync(ct).ConfigureAwait(false);
     }
 
     private static DateTime? Latest(params DateTime?[] values)

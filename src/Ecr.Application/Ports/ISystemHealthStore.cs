@@ -32,12 +32,17 @@ public interface ISystemHealthStore
 /// копій немає або немає права читати <c>msdb</c>.
 /// </param>
 /// <param name="LastErrorAt">Момент останнього провалу задачі чи збору (UTC); <c>null</c> — не було.</param>
+/// <param name="Hse400DocumentInCurrentYear">
+/// B105: чи є опублікована версія шаблону HSE400 і документ HSE400 (не золотого проєкту) з періодом поточного
+/// року. Лише так/ні: із цим знанням і вимкненим прапором Land мовчки читає склад газу з довідника.
+/// </param>
 public sealed record SystemHealthSnapshot(
     HealthJobCounts Jobs,
     HealthSourceCounts Sources,
     long? FreeSpaceDataDiskGb,
     DateTime? LastBackupAt,
-    DateTime? LastErrorAt);
+    DateTime? LastErrorAt,
+    bool Hse400DocumentInCurrentYear = false);
 
 /// <summary>Лічильники черги фонових задач.</summary>
 /// <param name="Running">Виконуються зараз.</param>

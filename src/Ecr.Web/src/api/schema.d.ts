@@ -41375,6 +41375,18 @@ export interface components {
             /** @description Режим входу: `Windows`, `Local`, `WindowsAndLocal`, `None`. */
             signInMode: string;
         };
+        /** @description Прапори розрахунків цього процесу (B105). */
+        SystemFactsCalculationsDto: {
+            /** @description Дієве значення `Calculations:Hse400CompositionFromDocument`: `true` — Land читає склад газу з
+             *     документа HSE400, `false` — з довідника `LAND_HSE400_COMPOSITION`. */
+            hse400CompositionFromDocument: boolean;
+            /** @description Джерело значення: `Default`, `Environment`, `ProgramData`, `AppSettings`,
+             *     `CommandLine`, `Other` (лише мітка, без шляху). */
+            hse400CompositionSource: string;
+            /** @description `true` — прапор вимкнено, а опублікований шаблон HSE400 і документ HSE400 поточного року є: Land мовчки
+             *             читає застарілий довідник. */
+            hse400CompositionWarning: boolean;
+        };
         /** @description Стан БД: лише число й мітки часу, без шляхів чи імен. */
         SystemFactsDbDto: {
             /**
@@ -41412,6 +41424,8 @@ export interface components {
         SystemFactsResponse: {
             /** @description Блок «Про систему». */
             about: components["schemas"]["SystemFactsAboutDto"];
+            /** @description Прапори розрахунків, від яких залежать числа (B105). */
+            calculations: components["schemas"]["SystemFactsCalculationsDto"];
             /** @description Стан БД (число й мітки часу, без шляхів). */
             db: components["schemas"]["SystemFactsDbDto"];
             /** @description Ім'я середовища хосту (`Production`, `Development`). */

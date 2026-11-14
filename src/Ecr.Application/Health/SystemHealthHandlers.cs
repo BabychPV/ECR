@@ -79,7 +79,11 @@ public sealed class GetSystemFactsHandler(
                 version,
                 host.SignInMode,
                 [.. languages.Select(l => l.Code)],
-                snapshot.LastErrorAt));
+                snapshot.LastErrorAt),
+            SystemFactsCalculationsDto.Of(
+                host.Hse400CompositionFromDocument,
+                host.Hse400CompositionSource,
+                snapshot.Hse400DocumentInCurrentYear));
     }
 
     /// <summary>Стан транспорту за відповіддю порту.</summary>
@@ -133,15 +137,28 @@ public sealed class GetPartitionScriptHandler(IAccessDecisionService access, ICu
 /// Режим входу за зареєстрованими схемами автентифікації: <c>Windows</c>, <c>Local</c>,
 /// <c>WindowsAndLocal</c> або <c>None</c> (лише мітка, без деталей схем).
 /// </param>
+/// <param name="Hse400CompositionFromDocument">
+/// B105: дієве значення <c>Calculations:Hse400CompositionFromDocument</c> цього процесу (Land читає склад газу з
+/// документа HSE400).
+/// </param>
+/// <param name="Hse400CompositionSource">
+/// Звідки прийшло значення: <c>Default</c> (не задано), <c>Environment</c>, <c>ProgramData</c>,
+/// <c>AppSettings</c>, <c>CommandLine</c>, <c>Other</c> — лише мітка, без шляхів.
+/// </param>
 public sealed record SystemHostFacts(
     string? InformationalVersion,
     DateTime StartedAtUtc,
     string EnvironmentName,
     string? LogDirectory,
-    string SignInMode = SystemHostFacts.SignInNone)
+    string SignInMode = SystemHostFacts.SignInNone,
+    bool Hse400CompositionFromDocument = false,
+    string Hse400CompositionSource = SystemHostFacts.SourceDefault)
 {
     /// <summary>Жодної схеми входу не зареєстровано.</summary>
     public const string SignInNone = "None";
+
+    /// <summary>Ключ конфігурації не задано жодним джерелом — діє умовчання коду.</summary>
+    public const string SourceDefault = "Default";
 
     /// <summary>Мітка режиму входу за наявністю схем Negotiate і cookie.</summary>
     /// <param name="windows">Чи зареєстрована схема Negotiate.</param>
@@ -166,6 +183,7 @@ public sealed record SystemHostFacts(
 /// <param name="Sources">Лічильники джерел збору (лише числа).</param>
 /// <param name="Db">Стан БД (число й мітки часу, без шляхів).</param>
 /// <param name="About">Блок «Про систему».</param>
+/// <param name="Calculations">Прапори розрахунків, від яких залежать числа (B105).</param>
 public sealed record SystemFactsResponse(
     string ProductVersion,
     DateTime StartedAt,
@@ -175,7 +193,32 @@ public sealed record SystemFactsResponse(
     SystemFactsJobsDto Jobs,
     SystemFactsSourcesDto Sources,
     SystemFactsDbDto Db,
-    SystemFactsAboutDto About);
+    SystemFactsAboutDto About,
+    SystemFactsCalculationsDto Calculations);
+
+/// <summary>Прапори розрахунків цього процесу (B105).</summary>
+/// <param name="Hse400CompositionFromDocument">
+/// Дієве значення <c>Calculations:Hse400CompositionFromDocument</c>: <c>true</c> — Land читає склад газу з
+/// документа HSE400, <c>false</c> — з довідника <c>LAND_HSE400_COMPOSITION</c>.
+/// </param>
+/// <param name="Hse400CompositionSource">
+/// Джерело значення: <c>Default</c>, <c>Environment</c>, <c>ProgramData</c>, <c>AppSettings</c>,
+/// <c>CommandLine</c>, <c>Other</c> (лише мітка, без шляху).
+/// </param>
+/// <param name="Hse400CompositionWarning">
+/// <c>true</c> — прапор вимкнено, а опублікований шаблон HSE400 і документ HSE400 поточного року є: Land мовчки
+/// читає застарілий довідник.
+/// </param>
+public sealed record SystemFactsCalculationsDto(
+    bool Hse400CompositionFromDocument, string Hse400CompositionSource, bool Hse400CompositionWarning)
+{
+    /// <summary>Складає блок; попередження — лише за вимкненого прапора й наявного документа поточного року.</summary>
+    /// <param name="enabled">Дієве значення прапора.</param>
+    /// <param name="source">Мітка джерела значення.</param>
+    /// <param name="hse400DocumentInCurrentYear">Чи є документ HSE400 поточного року з опублікованим шаблоном.</param>
+    public static SystemFactsCalculationsDto Of(bool enabled, string source, bool hse400DocumentInCurrentYear)
+        => new(enabled, source, !enabled && hse400DocumentInCurrentYear);
+}
 
 /// <summary>Лічильники черги фонових задач.</summary>
 /// <param name="Running">Виконуються зараз.</param>

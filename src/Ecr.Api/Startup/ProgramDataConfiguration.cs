@@ -49,6 +49,11 @@ public static partial class ProgramDataConfiguration
         return builder.Add(source);
     }
 
+    /// <summary>Чи цей постачальник — файл майданчика з %ProgramData% (B105: мітка джерела прапора в health/facts).</summary>
+    /// <param name="provider">Постачальник конфігурації.</param>
+    public static bool IsProgramDataProvider(IConfigurationProvider provider)
+        => provider is ResilientJsonConfigurationProvider;
+
     /// <summary>
     /// Куди звітувати про невдале перечитування файлу (U1-08). За замовчуванням — нікуди; <c>Program.cs</c> підключає
     /// журнал після побудови хоста (<see cref="AttachReloadLogger"/>).
