@@ -56,8 +56,13 @@ public sealed class GetCalculationIssuesHandler(
     /// <param name="periodKey">Період.</param>
     /// <param name="sheetCopyId">Копія аркуша; <c>null</c> — оригінал.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="year">
+    /// ✎ LAND-YEAR L6: для документа річної розкладки — проблеми ВСІХ місяців року періоду (прогін методології — по
+    /// місяцях, а річний аркуш один), кожна з <see cref="CalculationIssueDto.MonthNumber"/>; межі читання — свого місяця
+    /// (D-214). Інша розкладка — як без прапора.
+    /// </param>
     public async Task<CalculationIssuesDto> HandleAsync(
-        long documentId, int periodKey, long? sheetCopyId, CancellationToken ct)
+        long documentId, int periodKey, long? sheetCopyId, CancellationToken ct, bool year = false)
     {
         var profile = await PermissionCheck
             .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
@@ -66,6 +71,41 @@ public sealed class GetCalculationIssuesHandler(
         // ⛔ B-08: невидимий документ — 404, а не 403.
         await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, Permission, ct).ConfigureAwait(false);
 
+        var view = new PeriodKey(periodKey);
+        var months = year
+            ? await YearDocumentPeriods.ResolveAsync(monthRouter, documentId, view, ct).ConfigureAwait(false)
+            : null;
+        if (months is null)
+        {
+            var monthNumber = view.IsValid
+                              && await YearDocumentPeriods.IsYearLayoutAsync(monthRouter, documentId, ct).ConfigureAwait(false)
+                ? view.Sequence
+                : (int?)null;
+            return await PeriodAsync(profile, documentId, periodKey, sheetCopyId, monthNumber, ct).ConfigureAwait(false);
+        }
+
+        // Рік: проблеми кожного місяця — тим самим шляхом, що й один період (межі читання СВОГО місяця), потім разом.
+        var parts = new List<CalculationIssuesDto>(months.Count);
+        foreach (var month in months)
+        {
+            parts.Add(await PeriodAsync(profile, documentId, month, sheetCopyId, month % 100, ct).ConfigureAwait(false));
+        }
+
+        var errors = parts.Where(p => p.FormulaErrors is not null).SelectMany(p => p.FormulaErrors!).ToList();
+        var tables = parts.Where(p => p.Tables is not null).SelectMany(p => p.Tables!)
+            .DistinctBy(t => (t.TableCode, t.SheetCopyId))
+            .ToList();
+        return new CalculationIssuesDto(
+            [.. parts.SelectMany(p => p.Items)],
+            tables.Count == 0 ? null : tables,
+            errors.Count == 0 ? null : [.. errors.Take(CalculationIssuesDto.MaxFormulaErrors)],
+            errors.Count == 0 ? null : parts.Sum(p => p.FormulaErrorTotal ?? 0));
+    }
+
+    /// <summary>Проблеми одного періоду (межі читання цього періоду); <paramref name="monthNumber"/> — позначка рядків.</summary>
+    private async Task<CalculationIssuesDto> PeriodAsync(
+        AccessProfile profile, long documentId, int periodKey, long? sheetCopyId, int? monthNumber, CancellationToken ct)
+    {
         var rows = await issues.ListAsync(documentId, periodKey, sheetCopyId, ct).ConfigureAwait(false);
         IReadOnlyList<FormulaErrorView> errorRows = formulaErrors is null
             ? []
@@ -93,7 +133,7 @@ public sealed class GetCalculationIssuesHandler(
 
         var visible = rows.Where(r => readable.CanReadTable(r.TableDefId)).ToList();
         var names = await LookupNamesAsync(errorRows, ct).ConfigureAwait(false);
-        var (formulaErrorItems, visibleErrorCount) = FormulaErrorsOf(errorRows, readable, names, currentUser.Language);
+        var (formulaErrorItems, visibleErrorCount) = FormulaErrorsOf(errorRows, readable, names, currentUser.Language, monthNumber);
 
         // Підказка «що приймають правила» — лише рядкам без правила: відхиленому рядку (і рядку без входів, AN-164)
         // правило вже підійшло.
@@ -129,7 +169,8 @@ public sealed class GetCalculationIssuesHandler(
                         reason?.RuleCode,
                         reason is null || reason.Columns.Count == 0
                             ? null
-                            : [.. reason.Columns.Select(c => new CalculationIssueColumnDto(c.Code, c.Name))]);
+                            : [.. reason.Columns.Select(c => new CalculationIssueColumnDto(c.Code, c.Name))],
+                        monthNumber);
                 }),
             ],
             built.Tables.Count == 0 ? null : built.Tables,
@@ -143,7 +184,7 @@ public sealed class GetCalculationIssuesHandler(
     /// </summary>
     private static (IReadOnlyList<FormulaErrorIssueDto>? Items, int Total) FormulaErrorsOf(
         IReadOnlyList<FormulaErrorView> rows, DocumentReadScope readable,
-        IReadOnlyDictionary<(int ColumnDefId, long EntryId), LocalizedText> names, string language)
+        IReadOnlyDictionary<(int ColumnDefId, long EntryId), LocalizedText> names, string language, int? monthNumber)
     {
         // ✎ B78: значення довідникової колонки — назвою запису мовою користувача («Diesel», а не «37»).
         string? ValueOf(Recalculation.FormulaErrorInputRecord input)
@@ -212,7 +253,7 @@ public sealed class GetCalculationIssuesHandler(
                         .Select(i => new FormulaErrorInputDto(
                             i.TableCode ?? string.Empty, i.RowKey, i.ColumnCode ?? string.Empty, i.PeriodOffset, ValueOf(i)))]
                     : null,
-                source, v.Row.Since, dependentCount);
+                source, v.Row.Since, dependentCount, monthNumber);
         })], visible.Count);
     }
 

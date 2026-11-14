@@ -49,7 +49,8 @@ public sealed class GetValidationResultHandler(
     Security.IAccessDecisionService access,
     Common.ICurrentUser currentUser,
     ITemplateVersionStore templateVersions,
-    IUiStringCatalog uiStrings)
+    IUiStringCatalog uiStrings,
+    IMonthColumnRouter? monthRouter = null)
 {
     private static bool IsLegacyCheck(ValidationMessage m)
         => m.SourceTableDefId is null && m.RuleCode.StartsWith("REL-", StringComparison.Ordinal);
@@ -67,6 +68,57 @@ public sealed class GetValidationResultHandler(
     public async Task<IReadOnlyList<ValidationMessage>?> HandleAsync(
         long documentId, PeriodKey periodKey, CancellationToken ct)
         => (await ReadAsync(documentId, periodKey, ct).ConfigureAwait(false))?.Messages;
+
+    /// <summary>
+    /// ✎ LAND-YEAR L6: «річний режим» Issues — останні результати перевірки ВСІХ місяців року документа річної розкладки
+    /// разом, кожне зауваження з періодом прогону, що його дав; <c>null</c> — жоден місяць ще не перевіряли.
+    /// </summary>
+    /// <remarks>
+    /// <para>Кожен місяць читається тим самим <see cref="ReadAsync"/> — з межами читання СВОГО місяця (D-214) і мовою читача;
+    /// однакове зауваження (рівень, правило, таблиця, рядок, колонка, текст) з кількох місяців лишається одне — з
+    /// найновішого прогону. Момент результату — найновіший прогін.</para>
+    /// <para>Інша розкладка (або роутер вимкнено) — результат одного періоду <paramref name="periodKey"/>, кожне зауваження
+    /// з цим періодом.</para>
+    /// </remarks>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період перегляду (його рік задає місяці).</param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task<StoredYearValidationResult?> ReadYearAsync(
+        long documentId, PeriodKey periodKey, CancellationToken ct)
+    {
+        var months = await YearDocumentPeriods.ResolveAsync(monthRouter, documentId, periodKey, ct).ConfigureAwait(false)
+                     ?? [periodKey.Value];
+
+        var runs = new List<(int Period, StoredValidationResult Stored)>(months.Count);
+        foreach (var month in months)
+        {
+            if (await ReadAsync(documentId, new PeriodKey(month), ct).ConfigureAwait(false) is { } result)
+            {
+                runs.Add((month, result));
+            }
+        }
+
+        if (runs.Count == 0)
+        {
+            return null;
+        }
+
+        var seen = new HashSet<(Ecr.Domain.Enums.ValidationSeverity, string, int, string?, string?, string)>();
+        var messages = new List<PeriodValidationMessage>();
+        foreach (var (period, result) in runs.OrderByDescending(r => r.Stored.RunAt).ThenByDescending(r => r.Period))
+        {
+            foreach (var m in result.Messages)
+            {
+                if (seen.Add((m.Severity, m.RuleCode, m.TableDefId, m.RowKey, m.ColumnCode, m.Message)))
+                {
+                    messages.Add(new PeriodValidationMessage(m, period));
+                }
+            }
+        }
+
+        return new StoredYearValidationResult(
+            [.. messages.OrderBy(m => m.PeriodKey)], runs.Max(r => r.Stored.RunAt), [.. runs.Select(r => r.Period).Order()]);
+    }
 
     /// <summary>
     /// Останній результат разом із моментом прогону; <c>null</c> — перевірку за цей період ще не запускали.
@@ -201,3 +253,15 @@ public sealed class GetValidationResultHandler(
 /// <param name="Messages">Зауваження, видимі читачеві, його мовою.</param>
 /// <param name="RunAt">Момент прогону (UTC).</param>
 public sealed record StoredValidationResult(IReadOnlyList<ValidationMessage> Messages, DateTime RunAt);
+
+/// <summary>✎ LAND-YEAR L6: зауваження річного режиму з періодом прогону, що його дав.</summary>
+/// <param name="Message">Зауваження (видиме читачеві, його мовою).</param>
+/// <param name="PeriodKey">Період прогону перевірки (місяць року).</param>
+public sealed record PeriodValidationMessage(ValidationMessage Message, int PeriodKey);
+
+/// <summary>✎ LAND-YEAR L6: збережені результати перевірки місяців року разом.</summary>
+/// <param name="Messages">Зауваження всіх місяців без повторів, за періодом.</param>
+/// <param name="RunAt">Найновіший прогін (UTC).</param>
+/// <param name="ValidatedPeriods">Місяці, які перевіряли, за зростанням.</param>
+public sealed record StoredYearValidationResult(
+    IReadOnlyList<PeriodValidationMessage> Messages, DateTime RunAt, IReadOnlyList<int> ValidatedPeriods);

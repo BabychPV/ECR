@@ -362,6 +362,14 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
             .Replace("[", "\\[", StringComparison.Ordinal);
     }
 
+    /// <summary>Пари «період-власник → колонка» одним JSON-масивом <c>[{"p":…,"c":…}]</c> (параметр <c>@ownerColumns</c>).</summary>
+    private static string OwnerColumnsJson(IReadOnlyList<CellChangeOwnerColumns> owners)
+        => "[" + string.Join(
+            ",",
+            owners.SelectMany(o => o.ColumnDefIds.Select(c =>
+                "{\"p\":" + o.PeriodKey.ToString(CultureInfo.InvariantCulture)
+                + ",\"c\":" + c.ToString(CultureInfo.InvariantCulture) + "}"))) + "]";
+
     /// <summary>
     /// WHERE над <c>aud.CellChange</c> за фільтром: вікно, необов'язковий курсор і звуження.
     /// Параметри додаються в <paramref name="command"/>.
@@ -447,7 +455,28 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
 
         if (filter.PeriodKey is { } periodKey)
         {
-            if (filter.OwnerPeriodColumns is { Count: > 0 } owners)
+            if (filter.OtherPeriodKeys is { Count: > 0 } otherPeriods)
+            {
+                // ✎ LAND-YEAR L6 (річний журнал аркуша): інші місяці року, у яких читач бачить УСІ колонки
+                // `@visibleColumns` — умова періоду стає «перегляд АБО один із цих місяців АБО пара власника»; видимі
+                // колонки нижче діють на всі гілки. Місяць із вужчими межами сюди не потрапляє — він іде парами.
+                where.Append(
+                    "\n                   AND (PeriodKey = @periodKey"
+                    + " OR PeriodKey IN (SELECT CAST([value] AS int) FROM OPENJSON(@otherPeriods))");
+                command.Parameters.Add("@periodKey", SqlDbType.Int).Value = periodKey;
+                command.Parameters.Add("@otherPeriods", SqlDbType.NVarChar, -1).Value =
+                    "[" + string.Join(",", otherPeriods.Select(p => p.ToString(CultureInfo.InvariantCulture))) + "]";
+                if (filter.OwnerPeriodColumns is { Count: > 0 } pairs)
+                {
+                    where.Append(
+                        " OR EXISTS (SELECT 1 FROM OPENJSON(@ownerColumns) WITH (p int '$.p', c int '$.c') AS o"
+                        + " WHERE o.p = PeriodKey AND o.c = ColumnDefId)");
+                    command.Parameters.Add("@ownerColumns", SqlDbType.NVarChar, -1).Value = OwnerColumnsJson(pairs);
+                }
+
+                where.Append(')');
+            }
+            else if (filter.OwnerPeriodColumns is { Count: > 0 } owners)
             {
                 // ⛔ Q-17 (LAND-YEAR G1/G2): зміни колонок, якими володіє інший період (якір року / місяць M{m}), лежать
                 // у періоді-власнику. Пари (період, колонка) — ОДНИМ JSON-параметром у тому самому запиті (без N+1),
@@ -459,12 +488,7 @@ public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? l
                     "@periodKey",
                     periodKey,
                     SqlDbType.Int);
-                command.Parameters.Add("@ownerColumns", SqlDbType.NVarChar, -1).Value =
-                    "[" + string.Join(
-                        ",",
-                        owners.SelectMany(o => o.ColumnDefIds.Select(c =>
-                            "{\"p\":" + o.PeriodKey.ToString(CultureInfo.InvariantCulture)
-                            + ",\"c\":" + c.ToString(CultureInfo.InvariantCulture) + "}"))) + "]";
+                command.Parameters.Add("@ownerColumns", SqlDbType.NVarChar, -1).Value = OwnerColumnsJson(owners);
             }
             else
             {
