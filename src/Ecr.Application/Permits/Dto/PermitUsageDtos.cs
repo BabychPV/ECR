@@ -47,13 +47,23 @@ public sealed record PermitUsageItemDto(
 /// проєктів, які читач бачить (<c>Document.View</c>); решта не рахується й не називається.
 /// </summary>
 /// <param name="PermitId">Дозвіл.</param>
-/// <param name="DocumentCount">Скільки різних документів посилаються на дозвіл (під фільтром періоду).</param>
-/// <param name="LinkCount">Скільки місць (полів шапки й комірок) посилаються на дозвіл.</param>
+/// <param name="DocumentCount">
+/// Скільки різних документів посилаються на дозвіл (під фільтром періоду): полем шапки, коміркою або історією дозволів
+/// (пізніший дозвіл «з дати», частина місяця). Документ рахується один раз, скільки б місць чи сегментів історії в ньому не було
+/// (B56).
+/// </param>
+/// <param name="LinkCount">Скільки місць (полів шапки й комірок) посилаються на дозвіл; історія дозволів сюди не входить.</param>
 /// <param name="Truncated"><c>true</c>, якщо <paramref name="Items"/> обрізано лімітом <c>limit</c>.</param>
 /// <param name="Items">Місця посилань: за документом, періодом, шапка перед таблицями.</param>
+/// <param name="HistoryDocumentCount">
+/// Скільки з <paramref name="DocumentCount"/> документів містять дозвіл в історії дозволів (сегмент «з дати» шапки чи рядка,
+/// частина поділеного місяця). Ці посилання не перелічуються в <paramref name="Items"/>; документ, де дозвіл є лише в історії,
+/// входить у <paramref name="DocumentCount"/>, але не має рядка в переліку (B56).
+/// </param>
 public sealed record PermitUsageDto(
     long PermitId,
     int DocumentCount,
     int LinkCount,
     bool Truncated,
-    IReadOnlyList<PermitUsageItemDto> Items);
+    IReadOnlyList<PermitUsageItemDto> Items,
+    int HistoryDocumentCount = 0);

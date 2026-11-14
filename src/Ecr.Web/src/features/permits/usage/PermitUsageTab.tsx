@@ -13,6 +13,7 @@ import {
   parsePeriodParam,
   periodLabel,
   periodOptions,
+  summaryText,
   usageHref,
   usageKey,
   UsagePeriodParam,
@@ -113,6 +114,8 @@ export function PermitUsageTab({ permitId }: PermitUsageTabProps): JSX.Element {
   };
 
   const data = current.data;
+  // B56: документ, де дозвіл лише в історії дозволів, рахується, але місць у переліку не має — порожня таблиця не каже «ніде».
+  const historyOnly = data !== undefined && data.items.length === 0 && data.documentCount > 0;
 
   return (
     <section aria-labelledby="pp-usage-title" className="pp-section" data-permit-usage={data === undefined ? 'loading' : 'ready'}>
@@ -139,10 +142,7 @@ export function PermitUsageTab({ permitId }: PermitUsageTabProps): JSX.Element {
 
       {data !== undefined && (
         <Text size="sm" data-usage-summary="">
-          {t('permits.usage.summary', {
-            documents: formatNumber(data.documentCount),
-            links: formatNumber(data.linkCount),
-          })}
+          {summaryText(data)}
         </Text>
       )}
 
@@ -165,12 +165,12 @@ export function PermitUsageTab({ permitId }: PermitUsageTabProps): JSX.Element {
         error={current.error}
         onRetry={() => void current.refetch()}
         caption={t('permits.usage.caption')}
-        emptyTitle={t('permits.usage.emptyTitle')}
-        emptyHint={t('permits.usage.emptyHint')}
+        emptyTitle={historyOnly ? t('permits.usage.historyOnlyTitle') : t('permits.usage.emptyTitle')}
+        emptyHint={historyOnly ? t('permits.usage.historyOnlyHint') : t('permits.usage.emptyHint')}
         emptyHeadingOrder={3}
         filtered={periodKey !== null}
-        noMatchTitle={t('permits.usage.noMatchTitle')}
-        noMatchHint={t('permits.usage.noMatchHint')}
+        noMatchTitle={historyOnly ? t('permits.usage.historyOnlyTitle') : t('permits.usage.noMatchTitle')}
+        noMatchHint={historyOnly ? t('permits.usage.historyOnlyHint') : t('permits.usage.noMatchHint')}
         onClearFilters={() => setPeriod(null)}
         clearFiltersLabel={t('permits.usage.showAll')}
       />

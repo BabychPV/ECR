@@ -47,7 +47,13 @@ SELECT v.[Key], v.Lang, v.Val
     (N'permits.usage.listColumnHint', N'ru', N'Документы, в шапке или таблице которых указано это разрешение'),
     (N'permits.usage.listColumnHint', N'kz', N'Тақырыбында немесе кестесінде осы рұқсат бар құжаттар'),
     (N'permits.usage.typeListUsedIn', N'ru', N'Используются в документах: {count}'),
-    (N'permits.usage.typeListUsedIn', N'kz', N'Құжаттарда қолданылады: {count}')
+    (N'permits.usage.typeListUsedIn', N'kz', N'Құжаттарда қолданылады: {count}'),
+    (N'permits.usage.summaryHistory', N'ru', N'в истории разрешений: {history}'),
+    (N'permits.usage.summaryHistory', N'kz', N'рұқсаттар тарихында: {history}'),
+    (N'permits.usage.historyOnlyTitle', N'ru', N'Используется только в истории разрешений'),
+    (N'permits.usage.historyOnlyTitle', N'kz', N'Тек рұқсаттар тарихында қолданылады'),
+    (N'permits.usage.historyOnlyHint', N'ru', N'Разрешение задано в документе как более позднее «с даты» или для части месяца. Откройте документ — история разрешений показана в шапке документа и в инспекторе строки.'),
+    (N'permits.usage.historyOnlyHint', N'kz', N'Рұқсат құжатта кейінгі «күннен бастап» немесе айдың бір бөлігі үшін берілген. Құжатты ашыңыз — рұқсаттар тарихы құжат тақырыбында және жол инспекторында көрсетілген.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -78,7 +84,10 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'permits.usage.row', N'en', N'Row {row}', 1),
     (N'permits.usage.listColumn', N'en', N'Used in documents', 1),
     (N'permits.usage.listColumnHint', N'en', N'Documents whose header or table holds this permit', 1),
-    (N'permits.usage.typeListUsedIn', N'en', N'Used in documents: {count}', 1)
+    (N'permits.usage.typeListUsedIn', N'en', N'Used in documents: {count}', 1),
+    (N'permits.usage.summaryHistory', N'en', N'in permit history: {history}', 1),
+    (N'permits.usage.historyOnlyTitle', N'en', N'Used only in permit history', 1),
+    (N'permits.usage.historyOnlyHint', N'en', N'The document sets this permit as a later permit «from date» or for part of a month. Open the document: the permit history is shown in the document header and in the row inspector.', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO

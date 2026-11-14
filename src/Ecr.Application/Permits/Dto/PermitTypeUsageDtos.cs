@@ -13,8 +13,8 @@ public sealed record PermitTypeTableUsageDto(string Code, int RowCount);
 /// <param name="InstanceCount">Скільки живих дозволів цього типу (чернетки теж: їхні дані втратилися б так само).</param>
 /// <param name="Tables">Опубліковані таблиці з кількістю рядків; таблиць, що лише в чернетці, тут немає.</param>
 /// <param name="UsedInDocumentCount">
-/// У скількох документах (проєктів, документи яких читач бачить) обрано значенням шапки чи комірки бодай один дозвіл
-/// типу; 0 — ніде (або читач не бачить жодного проєкту).
+/// У скількох документах (проєктів, документи яких читач бачить) обрано значенням шапки чи комірки або стоїть в історії
+/// дозволів бодай один дозвіл типу (B56: документи, не сегменти); 0 — ніде (або читач не бачить жодного проєкту).
 /// </param>
 public sealed record PermitTypeUsageDto(
     int InstanceCount, IReadOnlyList<PermitTypeTableUsageDto> Tables, int UsedInDocumentCount = 0);

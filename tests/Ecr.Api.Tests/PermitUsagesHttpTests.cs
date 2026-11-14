@@ -271,6 +271,115 @@ public sealed class PermitUsagesHttpTests(SqlServerFixture sql)
         Assert.Equal("header", Kinds(usages)[0]);
     }
 
+    /// <summary>
+    /// ⛔ B56: картка дозволу рахує ДОКУМЕНТИ, а не сегменти історії. Дозвіл <c>unused</c> стоїть лише в історії дозволів (j)
+    /// одного документа — сегмент шапки «з дати», два сегменти рядків і частина поділеного місяця — і це ОДИН документ:
+    /// <c>documentCount = historyDocumentCount = 1</c>, місць (полів і комірок) 0. Той самий документ, де дозвіл ще й у шапці й
+    /// комірках (<c>active</c> + сегмент), — теж 1. Перелік дозволів (<c>usedInDocumentCount</c>) — те саме число; читач без
+    /// доступу до проєкту бачить 0.
+    /// </summary>
+    /// <remarks>
+    /// Мутаційні докази (виконано вручну, відновлено): (1) у <c>PermitStore.FindUsagesAsync</c> прибрати
+    /// <c>.Union(historyDocuments)</c> з лічильника документів — <c>documentCount</c> 0 замість 1; (2) порахувати історію
+    /// сегментами (<c>Concat</c> замість <c>Union</c> в <c>historyDocuments</c>) — <c>historyDocumentCount</c> 4 замість 1;
+    /// (3) у <c>CountUsedInDocumentsAsync</c> прибрати гілку <c>fromHistory</c> — <c>usedInDocumentCount</c> 0 замість 1;
+    /// (4) прибрати фільтр <c>projects.Contains(d.ProjectId)</c> у сегментах — читач іншого проєкту бачить 1 (outsider без
+    /// <c>Document.View</c> цього не ловить: обробник повертає нулі ще до сховища).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "PERMUSE")]
+    public async Task Історія_дозволів_рахується_документом_а_не_сегментами()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            var now = DateTime.UtcNow;
+            var rowKeys = await db.TableRows.AsNoTracking()
+                .Where(r => r.PeriodKeyValue == s.Period && (r.Id == s.Document.RowIds[0] || r.Id == s.Document.RowIds[1]))
+                .OrderBy(r => r.Ordinal).Select(r => r.RowKeyValue).ToListAsync().ConfigureAwait(true);
+            var firstDay = new DateOnly(s.Period / 100, s.Period % 100, 1);
+
+            db.PermitSegments.AddRange(
+                PermitSegment.ForHeader(s.Document.DocumentId, s.HeaderFieldId, firstDay.AddDays(9), s.Unused, s.WriterId, now),
+                PermitSegment.ForRow(s.Document.DocumentId, s.Document.TableDefId, null, rowKeys[0], s.PermitColumnId, firstDay.AddDays(9), s.Unused, s.WriterId, now),
+                PermitSegment.ForRow(s.Document.DocumentId, s.Document.TableDefId, null, rowKeys[1], s.PermitColumnId, firstDay.AddDays(19), s.Unused, s.WriterId, now),
+                PermitSegment.ForRow(s.Document.DocumentId, s.Document.TableDefId, null, rowKeys[1], s.PermitColumnId, firstDay.AddDays(4), s.Active, s.WriterId, now));
+            db.CellPermitParts.Add(new CellPermitPart(
+                s.Period, s.Document.DocumentId, s.Document.TableDefId, null, rowKeys[0], s.PermitColumnId, 2, s.Unused,
+                firstDay.AddDays(9), firstDay.AddDays(27), null));
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        using var app = new EcrApiFactory(sql);
+        using var writer = await SignedInAsync(app, s.Writer).ConfigureAwait(true);
+
+        var history = await GetAsync(writer, app, $"/api/v1/permits/{s.Unused}/usages").ConfigureAwait(true);
+        Assert.Equal((1, 1, 0), (
+            history.GetProperty("documentCount").GetInt32(),
+            history.GetProperty("historyDocumentCount").GetInt32(),
+            history.GetProperty("linkCount").GetInt32()));
+        Assert.Empty(history.GetProperty("items").EnumerateArray());
+
+        // Шапка + комірки + сегмент у тому ж документі — так само один документ.
+        var mixed = await GetAsync(writer, app, $"/api/v1/permits/{s.Active}/usages").ConfigureAwait(true);
+        Assert.Equal((1, 1, 3), (
+            mixed.GetProperty("documentCount").GetInt32(),
+            mixed.GetProperty("historyDocumentCount").GetInt32(),
+            mixed.GetProperty("linkCount").GetInt32()));
+
+        // Дозвіл без історії: historyDocumentCount 0.
+        var plain = await GetAsync(writer, app, $"/api/v1/permits/{s.Expired}/usages").ConfigureAwait(true);
+        Assert.Equal((1, 0), (plain.GetProperty("documentCount").GetInt32(), plain.GetProperty("historyDocumentCount").GetInt32()));
+
+        // Фільтр періоду: частина належить поточному місяцю, сегменти — документу з таблицями в періоді; періоду без таблиць — 0.
+        var inPeriod = await GetAsync(writer, app, $"/api/v1/permits/{s.Unused}/usages?periodKey={s.Period}").ConfigureAwait(true);
+        Assert.Equal(1, inPeriod.GetProperty("documentCount").GetInt32());
+        var none = await GetAsync(writer, app, $"/api/v1/permits/{s.Unused}/usages?periodKey=209912").ConfigureAwait(true);
+        Assert.Equal((0, 0), (none.GetProperty("documentCount").GetInt32(), none.GetProperty("historyDocumentCount").GetInt32()));
+
+        var list = await GetAsync(writer, app, $"/api/v1/permits?type={s.TypeCode}").ConfigureAwait(true);
+        Assert.Equal(
+            new Dictionary<long, int> { [s.Active] = 1, [s.Expired] = 1, [s.Unused] = 1 },
+            list.GetProperty("items").EnumerateArray().ToDictionary(i => i.GetProperty("id").GetInt64(), i => i.GetProperty("usedInDocumentCount").GetInt32()));
+        var type = await GetAsync(writer, app, $"/api/v1/permit-types/{s.TypeCode}/usage").ConfigureAwait(true);
+        Assert.Equal(1, type.GetProperty("usedInDocumentCount").GetInt32());
+
+        // Права не розширено: читач без Document.View у проєкті не бачить документа й через історію.
+        using var outsider = await SignedInAsync(app, s.Outsider).ConfigureAwait(true);
+        var blind = await GetAsync(outsider, app, $"/api/v1/permits/{s.Unused}/usages").ConfigureAwait(true);
+        Assert.Equal((0, 0), (blind.GetProperty("documentCount").GetInt32(), blind.GetProperty("historyDocumentCount").GetInt32()));
+        var blindList = await GetAsync(outsider, app, $"/api/v1/permits?type={s.TypeCode}").ConfigureAwait(true);
+        Assert.All(blindList.GetProperty("items").EnumerateArray(), i => Assert.Equal(0, i.GetProperty("usedInDocumentCount").GetInt32()));
+
+        // Читач ІНШОГО проєкту (Document.View є, перелік проєктів непорожній — фільтр сховища справді працює): документа з
+        // історією не бачить.
+        var stranger = await OtherProjectReaderAsync().ConfigureAwait(true);
+        using var other = await SignedInAsync(app, stranger).ConfigureAwait(true);
+        var foreign = await GetAsync(other, app, $"/api/v1/permits/{s.Unused}/usages").ConfigureAwait(true);
+        Assert.Equal((0, 0), (foreign.GetProperty("documentCount").GetInt32(), foreign.GetProperty("historyDocumentCount").GetInt32()));
+        var foreignList = await GetAsync(other, app, $"/api/v1/permits?type={s.TypeCode}").ConfigureAwait(true);
+        Assert.All(foreignList.GetProperty("items").EnumerateArray(), i => Assert.Equal(0, i.GetProperty("usedInDocumentCount").GetInt32()));
+    }
+
+    /// <summary>Читач з <c>Registry.View</c> і <c>Document.View</c>, грант <c>Read</c> — лише на проєкт окремого документа.</summary>
+    private async Task<string> OtherProjectReaderAsync()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var foreignDocument = await builder.BuildAsync(202601, columnCount: 1, rowCount: 1).ConfigureAwait(false);
+        await using var db = builder.CreateContext();
+        var user = NewUser(db, "pu_x", out var name);
+        var role = new Role(EcrCode.Create($"PUX_{Guid.NewGuid():N}"), Text("Other project reader"));
+        db.Roles.Add(role);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        db.RolePermissions.AddRange(new RolePermission(role.Id, "Registry.View"), new RolePermission(role.Id, "Document.View"));
+        db.RoleAssignments.Add(new RoleAssignment(role.Id, user.Id, null));
+        db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Project, foreignDocument.ProjectId, GrantLevel.Read));
+        await db.SaveChangesAsync().ConfigureAwait(false);
+        return name;
+    }
+
     private static List<string?> Kinds(JsonElement usages)
         => [.. usages.GetProperty("items").EnumerateArray().Select(i => i.GetProperty("kind").GetString())];
 
@@ -450,11 +559,12 @@ public sealed class PermitUsagesHttpTests(SqlServerFixture sql)
 
         return new Scenario(
             document, document.SheetCode, tableCode, column.Code, firstRowKey, period, previous, type.Code,
-            active.Id, expired.Id, unused.Id, foreign.Id, writerName, outsiderName, noRegistryName);
+            active.Id, expired.Id, unused.Id, foreign.Id, writerName, outsiderName, noRegistryName,
+            headerField.Id, column.Id, writer.Id);
     }
 
     private sealed record Scenario(
         TestDocument Document, string SheetCode, string TableCode, string PermitColumnCode, string FirstRowKey,
         int Period, int PreviousPeriod, string TypeCode, long Active, long Expired, long Unused, long Foreign,
-        string Writer, string Outsider, string NoRegistry);
+        string Writer, string Outsider, string NoRegistry, int HeaderFieldId, int PermitColumnId, int WriterId);
 }
