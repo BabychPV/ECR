@@ -701,6 +701,71 @@ public sealed partial class TemplateVersionStore(EcrDbContext db, IMetadataCache
     }
 
     /// <summary>
+    /// ✎ LAND-YEAR L0a: псевдоніми місячних входів методологій (<c>cfg.MonthInputAlias</c>) — як і прив'язки, посилаються
+    /// на <c>TableDefId</c>/<c>ColumnDefId</c> числом без навігації з версії. Копіюються на таблицю й колонку клону за кодами
+    /// аркуш/таблиця/колонка (тією самою ідентичністю, що й гранти та прив'язки).
+    /// </summary>
+    /// <remarks>
+    /// Псевдонім, чия таблиця чи колонка в клоні відсутня (видалена), не копіюється: перевірка публікації
+    /// (<c>PublishChecks.CheckMonthInputAliases</c>) відхилила б його однаково, а без цілі він нічого не дає.
+    /// </remarks>
+    private async Task CloneMonthInputAliasesAsync(
+        TemplateVersion clone, IReadOnlyList<GrantSource> sources, CancellationToken ct)
+    {
+        var sourceTables = sources.Where(s => s.Kind == ResourceKind.Table).ToList();
+        if (sourceTables.Count == 0)
+        {
+            return;
+        }
+
+        var tableIds = sourceTables.Select(s => s.SourceId).ToList();
+        var aliases = await db.MonthInputAliases
+            .AsNoTracking()
+            .Where(a => tableIds.Contains(a.TableDefId))
+            .OrderBy(a => a.Id)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        if (aliases.Count == 0)
+        {
+            return;
+        }
+
+        var cloneSheets = clone.Sheets.ToDictionary(s => s.Code);
+        TableDef? CloneTable(GrantSource src)
+            => cloneSheets.TryGetValue(src.Sheet, out var sheet)
+                ? sheet.Tables.FirstOrDefault(t => t.Code == src.Table && !t.IsDeleted)
+                : null;
+
+        var tableMap = new Dictionary<int, int>();
+        foreach (var src in sourceTables)
+        {
+            if (CloneTable(src) is { } table)
+            {
+                tableMap[src.SourceId] = table.Id;
+            }
+        }
+
+        var columnMap = new Dictionary<int, int>();
+        foreach (var src in sources.Where(s => s.Kind == ResourceKind.Column))
+        {
+            if (CloneTable(src) is { } table
+                && table.Columns.FirstOrDefault(c => c.Code == src.Column) is { IsDeleted: false } column)
+            {
+                columnMap[src.SourceId] = column.Id;
+            }
+        }
+
+        foreach (var alias in aliases)
+        {
+            if (tableMap.TryGetValue(alias.TableDefId, out var tableId)
+                && columnMap.TryGetValue(alias.ColumnDefId, out var columnId))
+            {
+                db.MonthInputAliases.Add(new MonthInputAlias(tableId, alias.Alias, alias.MonthNumber, columnId));
+            }
+        }
+    }
+
+    /// <summary>
     /// Переписує числові ключі предиката (<c>ColumnDefId</c> вихідної версії) на Id колонок клону.
     /// <c>null</c> — числовий ключ без відповідника: предикат переписати не можна, прив'язку не копіюємо.
     /// </summary>
@@ -764,6 +829,7 @@ public sealed partial class TemplateVersionStore(EcrDbContext db, IMetadataCache
         await CloneResourceGrantsAsync(clone, grantSources, ct).ConfigureAwait(false);
         await CloneAccessRulesAsync(clone, clonedFrom, grantSources, ct).ConfigureAwait(false);
         await CloneCalculationBindingsAsync(clone, grantSources, ct).ConfigureAwait(false);
+        await CloneMonthInputAliasesAsync(clone, grantSources, ct).ConfigureAwait(false);
         await CloneConditionalFormatsAsync(clone.Id, clonedFrom, ct).ConfigureAwait(false);
         await CloneSheetGroupRulesAsync(clone.Id, clonedFrom, ct).ConfigureAwait(false);
         SetClonedFrom(clone, clonedFrom);
@@ -1350,6 +1416,18 @@ public sealed partial class TemplateVersionStore(EcrDbContext db, IMetadataCache
                       && (v.Status == TemplateVersionStatus.Published || v.Status == TemplateVersionStatus.Deprecated)
                       && !c.IsDeleted && !t.IsDeleted && !s.IsDeleted
                 select new PublishedColumnType(s.Code, t.Code, c.Code, c.DataType, v.Version))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<MonthInputAlias>> ListMonthInputAliasesAsync(int templateVersionId, CancellationToken ct)
+        => await (
+                from a in db.MonthInputAliases.AsNoTracking()
+                join t in db.TableDefs.AsNoTracking() on a.TableDefId equals t.Id
+                join s in db.SheetDefs.AsNoTracking() on t.SheetDefId equals s.Id
+                where s.TemplateVersionId == templateVersionId
+                orderby a.Id
+                select a)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 

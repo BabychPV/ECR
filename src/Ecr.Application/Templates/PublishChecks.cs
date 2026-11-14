@@ -1326,6 +1326,85 @@ public static class PublishChecks
                 : string.Join(", ", codes.Take(3)) + (codes.Count > 3 ? ", …" : string.Empty);
     }
 
+    /// <summary>
+    /// ✎ LAND-YEAR L0a: псевдоніми місячних входів методологій (<c>cfg.MonthInputAlias</c>) — відмова публікації
+    /// (<c>ECR-TMPL-0422</c>, <c>monthInputAliasInvalid</c>), одна діагностика на таблицю.
+    /// </summary>
+    /// <param name="version">Версія, що публікується.</param>
+    /// <param name="aliases">Псевдоніми таблиць цієї версії.</param>
+    /// <returns>По одній діагностиці на таблицю з хибними псевдонімами; порожньо — усі коректні.</returns>
+    /// <remarks>
+    /// ⛔ Псевдонім мовчки годує методологію чужим місяцем, якщо він хибний (ризик 5 плану LAND-YEAR), тому правила
+    /// перевіряються до публікації, а не під час прогону:
+    /// <list type="bullet">
+    /// <item>версія — <see cref="TemplateLayout.YearWithMonthColumns"/>, таблиця — жива й <see cref="TableLayoutKind.MonthsInColumns"/>;</item>
+    /// <item>ціль — жива МІСЯЧНА колонка ТІЄЇ САМОЇ таблиці з <c>MonthNumber</c> = місяцю псевдоніма;</item>
+    /// <item>ім'я псевдоніма не збігається з кодом жодної живої колонки таблиці (інакше аргумент <c>@Код</c> мав би два
+    /// значення).</item>
+    /// </list>
+    /// </remarks>
+    public static IReadOnlyList<ExpressionDiagnostic> CheckMonthInputAliases(
+        TemplateVersion version, IReadOnlyList<MonthInputAlias> aliases)
+    {
+        ArgumentNullException.ThrowIfNull(version);
+        ArgumentNullException.ThrowIfNull(aliases);
+
+        if (aliases.Count == 0)
+        {
+            return [];
+        }
+
+        var yearLayout = version.Layout == TemplateLayout.YearWithMonthColumns;
+        var tables = LiveTables(version.Sheets).ToDictionary(t => t.Id);
+        var result = new List<ExpressionDiagnostic>();
+        foreach (var group in aliases.GroupBy(a => a.TableDefId).OrderBy(g => g.Key))
+        {
+            tables.TryGetValue(group.Key, out var table);
+            var columns = table?.Columns.Where(c => !c.IsDeleted).ToDictionary(c => c.Id) ?? [];
+            var codes = columns.Values.Select(c => c.Code).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var tableOk = yearLayout && table is { LayoutKind: TableLayoutKind.MonthsInColumns };
+
+            var bad = new SortedSet<string>(StringComparer.Ordinal);
+            foreach (var alias in group)
+            {
+                var valid = tableOk
+                    && columns.TryGetValue(alias.ColumnDefId, out var target)
+                    && target.IsMonthColumn
+                    && target.MonthNumber == alias.MonthNumber
+                    && !codes.Contains(alias.Alias);
+                if (!valid)
+                {
+                    bad.Add(string.Create(
+                        System.Globalization.CultureInfo.InvariantCulture, $"{alias.Alias}@M{alias.MonthNumber:00}"));
+                }
+            }
+
+            if (bad.Count == 0)
+            {
+                continue;
+            }
+
+            var tableCode = table?.Code ?? group.Key.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            var sample = string.Join(", ", bad.Take(3)) + (bad.Count > 3 ? ", …" : string.Empty);
+            result.Add(new ExpressionDiagnostic(
+                "ECR-TMPL-0422",
+                $"Псевдоніми місячних входів методологій у таблиці {tableCode} некоректні — {bad.Count}: {sample}. "
+                + "Ціль псевдоніма — місячна колонка тієї самої таблиці з тим самим місяцем, ім'я не збігається з кодом "
+                + "колонки, версія — «рік, місяці колонками», таблиця — «місяці в колонках».",
+                0,
+                1,
+                "err.ECR-TMPL-0422.monthInputAliasInvalid",
+                new Dictionary<string, string>
+                {
+                    ["tableCode"] = tableCode,
+                    ["count"] = bad.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["aliases"] = sample,
+                }));
+        }
+
+        return result;
+    }
+
     /// <summary>Чи читає вираз властивість періоду, що змінюється від місяця до місяця (усе, крім <c>Year</c>).</summary>
     private static bool DependsOnMonth(AstNode root)
     {

@@ -40,4 +40,23 @@ public sealed record TemplateVersionSnapshot(
     /// знімок чернетки живе не довше за вікно ревізії, як і решта структури чернетки).
     /// </summary>
     public bool HasActivePermitBindings { get; init; }
+
+    /// <summary>
+    /// ✎ LAND-YEAR L0a: псевдоніми аргументів методологій на місячні колонки (<c>cfg.MonthInputAlias</c>) — за
+    /// <c>(TableDefId, MonthNumber)</c>. Вантажаться лише для версії з розкладкою <c>YearWithMonthColumns</c> (інша
+    /// розкладка не платить запиту); порожньо — псевдонімів немає.
+    /// </summary>
+    /// <remarks>
+    /// Запуск методології періоду місяця <c>m</c> додає аргумент <c>@Alias</c> зі значенням колонки псевдоніма
+    /// (<c>CalculationInputBuilder</c>): після перебудови Land під рік коди селекторів (<c>Land_GasConsumption</c>) зникли,
+    /// а методології читають аргументи за цими іменами.
+    /// </remarks>
+    public IReadOnlyDictionary<(int TableDefId, int MonthNumber), IReadOnlyList<MonthInputAlias>> MonthInputAliases { get; init; }
+        = new Dictionary<(int TableDefId, int MonthNumber), IReadOnlyList<MonthInputAlias>>();
+
+    /// <summary>Псевдоніми таблиці для місяця <paramref name="monthNumber"/>; порожньо — немає.</summary>
+    /// <param name="tableDefId">Таблиця.</param>
+    /// <param name="monthNumber">Місяць 1..12.</param>
+    public IReadOnlyList<MonthInputAlias> MonthInputAliasesFor(int tableDefId, int monthNumber)
+        => MonthInputAliases.TryGetValue((tableDefId, monthNumber), out var aliases) ? aliases : [];
 }

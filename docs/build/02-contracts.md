@@ -2527,6 +2527,11 @@ public interface IDocumentStore
 `MonthsInColumns`), коли формула немісячної колонки читає `[Period]` (усе, крім `.Year`) —
 `messageKey = err.ECR-TMPL-0422.yearLayoutPeriodFormula`, або методологію прив'язано до немісячної
 колонки — `err.ECR-TMPL-0422.yearLayoutNonMonthBinding` (аргументи `tableCode`, `count`, `columns`).
+✎ LAND-YEAR L0a: псевдоніми місячних входів методологій (`cfg.MonthInputAlias`) перевіряються при публікації —
+ціль є місячною колонкою тієї самої таблиці з `MonthNumber` псевдоніма, ім'я не збігається з кодом живої колонки,
+версія `YearWithMonthColumns`, таблиця `MonthsInColumns`; інакше `ECR-TMPL-0422`,
+`messageKey = err.ECR-TMPL-0422.monthInputAliasInvalid` (аргументи `tableCode`, `count`, `aliases`). Клон версії
+копіює псевдоніми на таблиці й колонки клону за кодами.
 
 #### `IDocumentDeletionStore`
 
