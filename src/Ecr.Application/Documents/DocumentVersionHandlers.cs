@@ -121,7 +121,10 @@ public sealed class CompareDocumentVersionsHandler(
     IDocumentHeaderStore headers,
     Security.IAccessDecisionService access,
     Common.ICurrentUser currentUser,
-    IMonthColumnRouter? monthRouter = null)
+    IMonthColumnRouter? monthRouter = null,
+
+    // ✎ B72: родовід колонок для перекладу зрізу з таблиці, перейменованої мапою переносу; `null` — лише коди.
+    IColumnPathMapper? columnPaths = null)
 {
     /// <summary>Право — те саме, що й перегляд документа.</summary>
     public const string Permission = ListDocumentsHandler.Permission;
@@ -382,7 +385,8 @@ public sealed class CompareDocumentVersionsHandler(
         {
             // ⛔ V-2 (аудит 2026-11): зріз до переносу проєкту — на аркуші й колонках СТАРОЇ версії; межі читання й
             // живі дані — на версії документа в періоді. Переклад за кодами, інакше старі Id «невидимі» (порівняння
-            // мовчить про зміни або показує кожну комірку як нову).
+            // мовчить про зміни або показує кожну комірку як нову). ✎ B72: таблиця, перейменована мапою переносу, —
+            // за збереженими парами колонок (`cfg.ColumnRename`), бо за кодами відповідника в неї немає.
             var currentVersionId = await DocumentPeriodVersion.GetAsync(documents, documentId, found.PeriodKey, ct)
                 .ConfigureAwait(false);
             var current = await metadata.GetAsync(currentVersionId, ct).ConfigureAwait(false);
@@ -394,7 +398,9 @@ public sealed class CompareDocumentVersionsHandler(
             {
                 return new LoadedVersion(
                     found.PeriodKey,
-                    SubmissionSnapshotTranslation.Cells(SubmissionPayload.Read(found.PayloadJson), source, current),
+                    await SubmissionSnapshotTranslation
+                        .CellsAsync(SubmissionPayload.Read(found.PayloadJson), source, current, columnPaths, ct)
+                        .ConfigureAwait(false),
                     SubmissionPayload.ReadHeader(found.PayloadJson));
             }
         }
