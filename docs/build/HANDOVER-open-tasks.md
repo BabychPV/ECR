@@ -10,7 +10,9 @@
 - Пакет docs 2 злито (#914, #915). B5 batch 2 (контракт L0b + L6) злито #916 (`adeb14abd`), F13 PASS.
 - **B84 (прогрів першої правки):** `lane/integ-an-b84` @`f32364df3`, CI зелений, чекає F13 від AU. На PASS → RC (наступний вільний `rc/2026-11-14-pNNN`, після `p356`) → мерж. Результат −0.74 с (мета ≥1 с не досягнута); рішення координатора — прийняти, сервісного акаунта не заводити.
 - **B121 (новий, AN, разом з B57):** тести `MonthInputAliasesApiTests:184`, `YearLayoutYearModesApiTests:257` лишають у спільній тестовій БД версії YearWithMonthColumns; тести з точною кількістю запитів не пінять `ITemplateLayoutRegistry` → закріпити реєстр у спільній фабриці або скидати Layout у Dispose (правило 394).
-- PE B5 L5: план — `.sync-local\RESUME-PE-L5.md`.
+- PE B5 L5: план — `.sync-local\RESUME-PE-L5.md` (порядок після скидання: L5 → L7a–d → L3 → L8).
+- Docs-lane PE, ще не злиті: `lane/integ-b5-design` @`81f39d2e3` (чекає пакетного docs-коміту координатора); `lane/pe/wip-pe7-design` @`dee65adc5` (`docs/build/PE-7-design.md`, WIP — злити разом або відкинути).
+- AA: незлитого немає, нотатка `.sync-local\RESUME-AA-2026-11-14.md`.
 - **Прибирання 14.11 (за словом людини: «видали старі гілки та бази які не потрібні»):**
   - видалено 67 баз: 4 старі scratch на C:, `EcrScratch_W15j`, `EcrContractL2` і простійні `EcrTest_*`;
   - видалено 264 віддалені гілки, усі злиті в main, плюс `merge-check/*`. Перелік із SHA збережено в `.sync-local\reports\branch-backup-20261114-1251.txt`.
