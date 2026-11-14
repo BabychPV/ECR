@@ -19,6 +19,14 @@ import './documentToolbar.css';
  * - дії праворуч — ОДНА група з `wrap="nowrap"`: при нестачі місця переноситься
  *   вся група цілою (під стан ліворуч), а не одна кнопка з середини. Їх тепер
  *   щонайбільше чотири (дві другорядні, «More», головна), тож група вміщається.
+ *
+ * ⛔ Місце групи дій НЕ залежить від вмісту стану (e2e-stand 14.11, `submissionTargetLive.spec.ts`: «More»
+ * стрибала на рядок, y 148 → 124). Стан мав ширину вмісту, тож на межі переносу (рядок 996 px, стан ~500, дії
+ * ~510) саме напис збереження вирішував, чи вміщаються дії поруч: «All changes saved» (~88 px) — дії на
+ * другому рядку, «Read-only» (~50 px) — на першому. Тепер (`documentToolbar.css`):
+ * - стан має СТАЛУ flex-базу й росте на решту рядка: чи переноситься група дій, вирішують лише ширина рядка
+ *   й самої групи; коли стану тісно, переноситься ВІН усередині себе (напис збереження — під прогрес);
+ * - група дій притиснута до верху рядка, а не центрується: двоповерховий стан не зсуває її по вертикалі.
  */
 export function DocumentToolbar({
   status,
@@ -51,7 +59,7 @@ export function DocumentToolbar({
       data-testid="document-toolbar"
       style={{ rowGap: 'var(--mantine-spacing-xs)' }}
     >
-      <Group gap="md" data-testid="document-status" style={{ minWidth: 0, rowGap: 'var(--mantine-spacing-xs)' }}>
+      <Group gap="md" data-testid="document-status" className="ecr-doc-status" style={{ rowGap: 'var(--mantine-spacing-xs)' }}>
         {status}
       </Group>
 
