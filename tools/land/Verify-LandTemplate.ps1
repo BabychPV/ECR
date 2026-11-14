@@ -245,17 +245,17 @@ if ($na -and $na.fuelRegistry -and @($na.liquidFuels).Count) {
     $fuelReg = [string]$na.fuelRegistry
     $mFuel = @($mdl.registries) | Where-Object { [string]$_.code -eq $fuelReg } | Select-Object -First 1
     $liveFuel = @((Invoke-Ecr -Method GET -Path "/api/v1/registries/$fuelReg/entries?asOf=$today").Json)
-    $liveNames = @{}
+    $fuelLiveNames = @{}
     foreach ($fc in @($na.liquidFuels)) {
         $le = $liveFuel | Where-Object { [string]$_.code -eq [string]$fc } | Select-Object -First 1
-        if ($null -eq $le) { $liveNames[[string]$fc] = $null; continue }
+        if ($null -eq $le) { $fuelLiveNames[[string]$fc] = $null; continue }
         $det = (Invoke-Ecr -Method GET -Path "/api/v1/registries/$fuelReg/entries/$([long]$le.id)").Json
         $have = $null
         if ($det -and $det.values -and ($det.values.PSObject.Properties.Name -contains 'NAME')) { $have = [string]$det.values.NAME }
         if ($null -eq $have) { $have = [string]$le.display }
-        $liveNames[[string]$fc] = $have
+        $fuelLiveNames[[string]$fc] = $have
     }
-    $liqBad = Get-LiquidFuelNameMismatch -Registry $fuelReg -Codes @($na.liquidFuels) -ModelEntries @($mFuel.entries) -LiveNames $liveNames
+    $liqBad = Get-LiquidFuelNameMismatch -Registry $fuelReg -Codes @($na.liquidFuels) -ModelEntries @($mFuel.entries) -LiveNames $fuelLiveNames
     $bad += @($liqBad)
     Write-Host "Назв рідкого палива T3_00 (B107) збігається: $(@($na.liquidFuels).Count - @($liqBad).Count)/$(@($na.liquidFuels).Count)"
 }
