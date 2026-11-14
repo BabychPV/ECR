@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Reflection;
+using Ecr.Api.Startup;
 using Ecr.Application.Health;
+using Ecr.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.Negotiate;
@@ -23,7 +25,8 @@ public sealed class SystemHealthController(
     GetPartitionScriptHandler partitionScript,
     IHostEnvironment environment,
     Ecr.Api.Observability.FileLogStatus fileLog,
-    IAuthenticationSchemeProvider schemes) : ControllerBase
+    IAuthenticationSchemeProvider schemes,
+    IConfiguration configuration) : ControllerBase
 {
     /// <summary>
     /// Версія, час старту, середовище, транспорт сповіщень, тека журналу. Право <c>System.ViewHealth</c>.
@@ -50,7 +53,11 @@ public sealed class SystemHealthController(
             fileLog.Directory,
             SystemHostFacts.SignInModeOf(
                 names.Contains(NegotiateDefaults.AuthenticationScheme),
-                names.Contains(CookieAuthenticationDefaults.AuthenticationScheme)));
+                names.Contains(CookieAuthenticationDefaults.AuthenticationScheme)),
+            // B105: те саме читання, що в реєстрації завантажувача складу (DependencyInjection), і мітка джерела —
+            // щоб після перезапуску було видно, чи значення живе лише в змінній скрипту вікна.
+            Hse400CompositionSnapshotLoader.IsEnabled(configuration),
+            ConfigurationSourceLabel.Of(configuration, Hse400CompositionSnapshotLoader.EnabledKey));
 
         return Ok(await facts.HandleAsync(host, ct).ConfigureAwait(false));
     }

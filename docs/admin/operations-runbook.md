@@ -381,6 +381,8 @@ ORDER BY [Ts];
 | `Transport:Https:Port` | ні | `0` | Ціле число, не менше 0. |
 <!-- /generated:config -->
 
+✎ B105: `Calculations:Hse400CompositionFromDocument` на живому стенді задається **постійно** (файл майданчика `%ProgramData%\ECR\config\appsettings.Production.json` для Api і Worker), а не лише змінною в скрипті перезапуску вікна: перезапуск без неї мовчки повертає Land до складу газу з довідника. Дієве значення й джерело (`Environment`, `ProgramData`, `AppSettings`, `Default`…) видно в `GET /api/v1/health/facts` (блок `calculations`) і на сторінці «Здоров'я системи»; вимкнений прапор за наявного документа HSE400 поточного року дає там попередження і рядок `Warning` у журналі Api на старті.
+
 ## 3. Моніторинг і логи
 
 ### 3.1. Health-ендпоінти

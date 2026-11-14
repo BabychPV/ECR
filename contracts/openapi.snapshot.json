@@ -27968,6 +27968,29 @@
         ],
         "type": "object"
       },
+      "SystemFactsCalculationsDto": {
+        "description": "Прапори розрахунків цього процесу (B105).",
+        "properties": {
+          "hse400CompositionFromDocument": {
+            "description": "Дієве значення `Calculations:Hse400CompositionFromDocument`: `true` — Land читає склад газу з\nдокумента HSE400, `false` — з довідника `LAND_HSE400_COMPOSITION`.",
+            "type": "boolean"
+          },
+          "hse400CompositionSource": {
+            "description": "Джерело значення: `Default`, `Environment`, `ProgramData`, `AppSettings`,\n`CommandLine`, `Other` (лише мітка, без шляху).",
+            "type": "string"
+          },
+          "hse400CompositionWarning": {
+            "description": "`true` — прапор вимкнено, а опублікований шаблон HSE400 і документ HSE400 поточного року є: Land мовчки\n        читає застарілий довідник.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "hse400CompositionFromDocument",
+          "hse400CompositionSource",
+          "hse400CompositionWarning"
+        ],
+        "type": "object"
+      },
       "SystemFactsDbDto": {
         "description": "Стан БД: лише число й мітки часу, без шляхів чи імен.",
         "properties": {
@@ -28035,6 +28058,10 @@
             "$ref": "#/components/schemas/SystemFactsAboutDto",
             "description": "Блок «Про систему»."
           },
+          "calculations": {
+            "$ref": "#/components/schemas/SystemFactsCalculationsDto",
+            "description": "Прапори розрахунків, від яких залежать числа (B105)."
+          },
           "db": {
             "$ref": "#/components/schemas/SystemFactsDbDto",
             "description": "Стан БД (число й мітки часу, без шляхів)."
@@ -28081,7 +28108,8 @@
           "jobs",
           "sources",
           "db",
-          "about"
+          "about",
+          "calculations"
         ],
         "type": "object"
       },

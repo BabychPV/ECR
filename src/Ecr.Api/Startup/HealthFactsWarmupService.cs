@@ -1,5 +1,7 @@
+using Ecr.Application.Health;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
+using Ecr.Infrastructure.Persistence;
 
 namespace Ecr.Api.Startup;
 
@@ -44,7 +46,18 @@ public sealed partial class HealthFactsWarmupService(
             using var stop = CancellationTokenSource.CreateLinkedTokenSource(lifetime.ApplicationStopping);
             stop.CancelAfter(TimeSpan.FromSeconds(60));
 
-            _ = await store.ReadAsync(clock.UtcNow, stop.Token).ConfigureAwait(false);
+            var snapshot = await store.ReadAsync(clock.UtcNow, stop.Token).ConfigureAwait(false);
+
+            // B105: прапор складу HSE400 вимкнено, а документ HSE400 поточного року є — Land мовчки читає довідник.
+            // Один рядок на старт (той самий знімок, що прогрівається), а не на кожен запит фактів.
+            var calculations = SystemFactsCalculationsDto.Of(
+                Hse400CompositionSnapshotLoader.IsEnabled(configuration),
+                ConfigurationSourceLabel.Of(configuration, Hse400CompositionSnapshotLoader.EnabledKey),
+                snapshot.Hse400DocumentInCurrentYear);
+            if (calculations.Hse400CompositionWarning)
+            {
+                LogHse400CompositionOff(logger, Hse400CompositionSnapshotLoader.EnabledKey);
+            }
         }
         catch (Exception ex)
         {
@@ -52,6 +65,13 @@ public sealed partial class HealthFactsWarmupService(
             LogWarmupSkipped(logger, kind);
         }
     }
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "{Key} is off, but a published HSE400 template and an HSE400 document for the current year exist: "
+                  + "Land reads the gas composition from the registry, not from the HSE400 document. "
+                  + "Set the key persistently (site config) and restart.")]
+    private static partial void LogHse400CompositionOff(ILogger logger, string key);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Health facts warm-up skipped: {ExceptionType}.")]
     private static partial void LogWarmupSkipped(ILogger logger, string exceptionType);

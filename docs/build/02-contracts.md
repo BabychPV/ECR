@@ -2744,6 +2744,12 @@ public interface IJobProgressStore
 даних (ГБ), остання копія БД, момент останньої помилки. ⛔ Лише числа й мітки
 часу: жодних шляхів, імен серверів/баз, рядків підключення. Зонди до `msdb` і
 `sys.dm_os_volume_stats` не кидають — відмова (немає права) дає `null`.
+✎ B105: знімок несе ще `Hse400DocumentInCurrentYear` (є опублікована версія
+шаблону HSE400 і документ HSE400 поточного року, крім золотого проєкту); відповідь
+має блок `calculations` — `hse400CompositionFromDocument` (дієве значення
+`Calculations:Hse400CompositionFromDocument`), `hse400CompositionSource` (мітка
+джерела без шляху: `Default`, `Environment`, `ProgramData`, `AppSettings`,
+`CommandLine`, `Other`), `hse400CompositionWarning` (прапор вимкнено, а документ є).
 
 ```csharp
 public interface ISystemHealthStore

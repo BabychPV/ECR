@@ -56,6 +56,12 @@ test.describe('Health: банер, секції, Check now, Copy diagnostics (UI
     await page.getByRole('button', { name: /Check now|Проверить сейчас|Қазір тексеру/ }).click();
     expect((await recheck).status()).toBeLessThan(600);
 
+    // B105: прапор складу HSE400 — рядок фактів (значення · джерело). Чекаємо його ДО копіювання: діагностика
+    // бере факти лише тоді, коли вони вже прийшли.
+    await expect(
+      page.locator('[data-health-facts]').getByText(/Land: HSE400 gas composition from document|Land: состав газа|Land: газ құрамы/),
+    ).toBeVisible({ timeout: 30_000 });
+
     await page.getByRole('button', { name: /Copy diagnostics|Копировать диагностику|Диагностиканы көшіру/ }).click();
     const text = await page.evaluate(() => navigator.clipboard.readText());
 
@@ -63,5 +69,8 @@ test.describe('Health: банер, секції, Check now, Copy diagnostics (UI
     expect(text).toContain('Overall: ');
     expect(text).toMatch(/^db: /m);
     expect(text).not.toMatch(/Password|Server=|Data Source=|unreadableKeyCertificates/i);
+    expect(text).toMatch(
+      /^Hse400CompositionFromDocument: (true|false) \((Default|Environment|ProgramData|AppSettings|CommandLine|Other)\)/m,
+    );
   });
 });

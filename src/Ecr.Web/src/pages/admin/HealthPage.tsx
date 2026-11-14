@@ -1,4 +1,4 @@
-﻿import { useState, type JSX, type ReactNode } from 'react';
+import { useState, type JSX, type ReactNode } from 'react';
 import { Box, Button, Card, Group, Skeleton, Stack, Text, Title } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
@@ -103,6 +103,13 @@ export function diagnostics({ ready, db, facts, checkedAt }: DiagnosticsInput): 
       `Notifications: ${facts.notificationTransport.isConfigured ? (facts.notificationTransport.kind ?? 'configured') : 'not configured'}`,
     );
     if (facts.logDirectory !== null) lines.push(`Log folder: ${facts.logDirectory}`);
+
+    const calculations = (facts as Partial<SystemFacts>).calculations;
+    if (calculations !== undefined) {
+      lines.push(
+        `Hse400CompositionFromDocument: ${String(calculations.hse400CompositionFromDocument)} (${calculations.hse400CompositionSource})${calculations.hse400CompositionWarning ? ' · WARNING: off while an HSE400 document for the current year exists' : ''}`,
+      );
+    }
   }
 
   return lines.join('\n');
@@ -329,6 +336,17 @@ export function HealthPage(): JSX.Element {
           </AsyncBoundary>
         )}
 
+        {/* B105: прапор складу HSE400 вимкнено, а документ HSE400 поточного року є — Land мовчки читає
+            довідник. Лише коли сервер це сказав; старий процес без блоку `calculations` банера не дає. */}
+        {(facts.data as Partial<SystemFacts> | undefined)?.calculations?.hse400CompositionWarning === true && (
+          <Banner
+            tone="warning"
+            testId="health-hse400-warning"
+            title={t('health.hse400CompositionOff.title')}
+            text={<Text size="sm">{t('health.hse400CompositionOff.text')}</Text>}
+          />
+        )}
+
         {/* ⚠ Довідкові факти, не вміст екрана: доки їх немає (ще вантажаться,
             відмова, відповідь не тієї форми) — секція не малюється взагалі
             (`D15-06`), а про справжню біду вже кажуть дві межі поруч. */}
@@ -457,7 +475,25 @@ function factItems(facts: SystemFacts): { label: string; value: ReactNode }[] {
     },
     // `null` — файл журналу не пишеться; пару без значення `KeyValue` не малює.
     { label: t('health.facts.logDirectory'), value: facts.logDirectory },
+    // B105: дієвий прапор складу HSE400 для Land і його джерело (мітка сервера, не переклад — як `transport.kind`).
+    { label: t('health.facts.hse400Composition'), value: hse400Composition(facts) },
   ];
+}
+
+/**
+ * B105: «Увімкнено · Environment» — значення прапора й звідки воно. `null` — сервер блоку не віддав (старий
+ * процес), і рядка тоді немає (`D15-06`).
+ */
+function hse400Composition(facts: SystemFacts): string | null {
+  const calculations = (facts as Partial<SystemFacts>).calculations;
+
+  if (calculations === undefined) return null;
+
+  const state = calculations.hse400CompositionFromDocument
+    ? t('health.facts.hse400Composition.on')
+    : t('health.facts.hse400Composition.off');
+
+  return `${state} · ${calculations.hse400CompositionSource}`;
 }
 
 /**
