@@ -72,7 +72,7 @@ function showSheetError(error: unknown, sheetName: string | null): void {
  * (`routes.ts`), без нього посилання вело б у 403.
  *
  * ⚠ Тости живуть поза `RouterProvider` (`App.tsx`), тож `Link` у тості без контексту. B98(2): перехід —
- * звичайне посилання за `href` (повне завантаження сторінки задач), без `UNSAFE_NavigationContext` (не
+ * звичайне посилання за `href` (B107: у НОВІЙ вкладці), без `UNSAFE_NavigationContext` (не
  * стабільний API). `router.navigate` застосунку тут недоступний: `features` не імпортують `app` навіть
  * динамічно (сторож `ClientLayerRulesTests`), а мосту навігації в `shared` поки немає.
  */
@@ -93,6 +93,10 @@ function showSheetRecalcQueued(jobId: string, mayOpenJob: boolean): void {
         <Text size="sm">{message}</Text>
         <Anchor
           href={to}
+          // B107(a): нова вкладка — аркуш, на якому натиснули F9, лишається відкритим (повне завантаження
+          // сторінки задач у поточній вкладці скидало б його стан).
+          target="_blank"
+          rel="noopener noreferrer"
           size="sm"
           onClick={() => notifications.hide(id)}
         >

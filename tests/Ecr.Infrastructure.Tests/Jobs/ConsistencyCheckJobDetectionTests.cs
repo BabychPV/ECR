@@ -143,25 +143,44 @@ public sealed class ConsistencyCheckJobDetectionTests(SqlServerFixture sql)
     [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Звіряє_архів_із_джерелом_за_контрольними_сумами()
     {
+        // ⛔ B110: звірка читає 1000 НАЙСВІЖІШИХ прогонів (`ArchiveChecksumsAsync`, `OrderByDescending(StartedAt)`,
+        // `Take(MaxIssues)`), а `itg.ArchiveRun` спільна й не чиститься: кожен прохід класів архіву (ArchiveJob,
+        // ArchiveTamperDetection, RestoreYear, …) лишає ~145 прогонів зі справжнім годинником. Прогін цього тесту стояв
+        // на 2026-02-01, тобто СТАРШИМ за всі чужі, — і після ~7 прогонів набору в одній базі worktree випадав зі стелі:
+        // «Assert.NotNull() Failure: Value is null». Тепер прогін — найсвіжіший за побудовою (далеке майбутнє, жоден
+        // чужий тест так не датує), і тест прибирає по собі прогін і знахідку, щоб не займати стелю для інших.
+        var startedAt = new DateTime(2999, 1, 1, 2, 0, 0, DateTimeKind.Utc);
         long runId;
         await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
         {
             var run = new ArchiveRun(
                 projectId: 1, ArchiveRun.ToArchive, fromPeriodKey: 202601, toPeriodKey: 202601,
-                triggeredByUserId: null, utcNow: new DateTime(2026, 2, 1, 2, 0, 0, DateTimeKind.Utc));
+                triggeredByUserId: null, utcNow: startedAt);
             run.RecordChecksums(sourceJson: """{"count":10}""", targetJson: """{"count":9}""");
-            run.Complete("Succeeded", new DateTime(2026, 2, 1, 2, 5, 0, DateTimeKind.Utc), errorMessage: null);
+            run.Complete("Succeeded", startedAt.AddMinutes(5), errorMessage: null);
 
             db.ArchiveRuns.Add(run);
             await db.SaveChangesAsync(CancellationToken.None);
             runId = run.Id;
         }
 
-        await RunJobAsync();
+        try
+        {
+            await RunJobAsync();
 
-        var issue = await FindIssueAsync("ARCHIVE_CHECKSUM", "itg.ArchiveRun", runId);
-        Assert.NotNull(issue);
-        Assert.Equal(3, issue.Value.Severity);
+            var issue = await FindIssueAsync("ARCHIVE_CHECKSUM", "itg.ArchiveRun", runId);
+            Assert.NotNull(issue);
+            Assert.Equal(3, issue.Value.Severity);
+        }
+        finally
+        {
+            await using var connection = new SqlConnection(sql.ConnectionString);
+            await connection.OpenAsync(CancellationToken.None);
+            await ExecuteAsync(connection, $"""
+                DELETE FROM aud.ConsistencyIssue WHERE RuleCode = N'ARCHIVE_CHECKSUM' AND EntityType = N'itg.ArchiveRun' AND EntityId = {runId};
+                DELETE FROM itg.ArchiveRun WHERE Id = {runId};
+                """);
+        }
     }
 
     [Fact]
