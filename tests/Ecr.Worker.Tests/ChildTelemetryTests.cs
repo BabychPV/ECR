@@ -78,10 +78,23 @@ public sealed class ChildTelemetryTests
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     public async Task Увімкнено_метрики_дочірнього_долітають_до_колектора_після_Flush()
     {
-        var port = FreePort();
-        using var collector = new HttpListener();
-        collector.Prefixes.Add($"http://localhost:{port}/");
-        collector.Start();
+        var (collector, port) = StartCollector();
+        try
+        {
+            await AssertChildMetricsReachCollectorAsync(collector, port);
+        }
+        finally
+        {
+            // ⛔ B116: лише Close(), без Stop() + Dispose(). У керованому HttpListener (Linux) Dispose ПІСЛЯ Stop удруге
+            // знімає префікс: RemovePrefixInternal → GetEPListener заново ПРИВ'ЯЗУЄ вже звільнений порт, і якщо його
+            // за цю мить зайняв хтось інший — «HttpListenerException: Address already in use» з Dispose (CI B77, спроба 1).
+            // Close() на закритому слухачі — no-op, тож повторне звільнення тут безпечне.
+            collector.Close();
+        }
+    }
+
+    private static async Task AssertChildMetricsReachCollectorAsync(HttpListener collector, int port)
+    {
         var received = Task.Run(async () =>
         {
             var bodies = new List<byte[]>();
@@ -134,7 +147,7 @@ public sealed class ChildTelemetryTests
 
         // Dispose провайдера теж скидає, тож колектор міг отримати кілька POST-ів.
         await Task.Delay(300);
-        collector.Stop();
+        collector.Close();
         var bodies = await received.WaitAsync(TimeSpan.FromSeconds(10));
 
         Assert.NotEmpty(bodies);
@@ -181,6 +194,29 @@ public sealed class ChildTelemetryTests
         services.AddLogging();
         services.AddChildTelemetry(configuration);
         return services.BuildServiceProvider();
+    }
+
+    /// <summary>
+    /// Колектор на вільному порту. HttpListener не вміє порт 0 (префікс вимагає явного), тож порт береться пробою
+    /// <see cref="FreePort"/>; між її звільненням і <c>Start</c> його може зайняти інший процес (TOCTOU) — тоді нова спроба.
+    /// </summary>
+    private static (HttpListener Collector, int Port) StartCollector()
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            var port = FreePort();
+            var collector = new HttpListener();
+            collector.Prefixes.Add($"http://localhost:{port}/");
+            try
+            {
+                collector.Start();
+                return (collector, port);
+            }
+            catch (HttpListenerException) when (attempt < 5)
+            {
+                collector.Close();
+            }
+        }
     }
 
     private static int FreePort()
