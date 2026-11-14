@@ -63,4 +63,37 @@ Describe 'Build-LandTemplate: -BuildUser' {
         $got = $seen -join ','
         if ($got -ne 'LOGIN=land-owner,IMPORT=land-owner,LOGIN=au-runner,IMPORT=au-runner') { throw "отримано: $got" }
     }
+
+    It 'B98: -Stage Template без запису -BuildUser у -AccountsFile - відмова ДО мережі з іменами параметрів, без пароля' {
+        $repo = (Resolve-Path (Join-Path (Join-Path $PSScriptRoot '..') '..')).Path
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $repo 'tools/land/Build-LandTemplate.ps1'), [ref]$null, [ref]$null)
+        $def = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-BuildUserCredentialGap' }, $true)
+        if ($null -eq $def) { throw 'немає Get-BuildUserCredentialGap: етапи без Accounts падали б на першому LoginAs посеред етапу' }
+        . ([scriptblock]::Create($def.Extent.Text))
+        $created = @('land-owner', 'land-reviewer')
+        # файла немає, етап Template, постійний запис -> відмова з -BuildUser/-AccountsFile і порадою, без створення
+        $m = Get-BuildUserCredentialGap -Stages @('Template') -User 'au-runner' -Accounts @{} -AccountsPath 'X:\none.txt' -FileExists $false -CreatedUsers $created
+        foreach ($need in "-BuildUser 'au-runner'", "-AccountsFile 'X:\none.txt'", 'немає', 'НАЯВНИЙ', 'не створює') {
+            if ([string]$m -notlike "*$need*") { throw "у відмові немає «$need»: $m" }
+        }
+        # файл є, рядка немає; пароль чужого запису в тексті не з'являється
+        $m = Get-BuildUserCredentialGap -Stages @('Template', 'Project') -User 'au-runner' -Accounts @{ 'land-owner' = 'S3cret-pw' } -AccountsPath 'a.txt' -FileExists $true -CreatedUsers $created
+        if ([string]$m -notlike "*немає рядка для 'au-runner'*" -or [string]$m -like '*S3cret-pw*') { throw "файл без рядка: $m" }
+        # Accounts у прогоні створить лише land-*: чужий -BuildUser однаково відмова
+        $m = Get-BuildUserCredentialGap -Stages @('All') -User 'au-runner' -Accounts @{} -AccountsPath 'a.txt' -FileExists $false -CreatedUsers $created
+        if ([string]$m -notlike '*етап Accounts створює лише*') { throw "All + чужий запис: $m" }
+        # без відмови: запис у файлі; Accounts створить land-owner; лише Accounts/YearMonths (без входу під -BuildUser)
+        $ok = @(
+            (Get-BuildUserCredentialGap -Stages @('Template') -User 'au-runner' -Accounts @{ 'au-runner' = 'x' } -AccountsPath 'a.txt' -FileExists $true -CreatedUsers $created),
+            (Get-BuildUserCredentialGap -Stages @('All') -User 'land-owner' -Accounts @{} -AccountsPath 'a.txt' -FileExists $false -CreatedUsers $created),
+            (Get-BuildUserCredentialGap -Stages @('Accounts', 'Units') -User 'land-owner' -Accounts @{} -AccountsPath 'a.txt' -FileExists $false -CreatedUsers $created),
+            (Get-BuildUserCredentialGap -Stages @('Accounts') -User 'au-runner' -Accounts @{} -AccountsPath 'a.txt' -FileExists $false -CreatedUsers $created),
+            (Get-BuildUserCredentialGap -Stages @('YearMonths') -User 'au-runner' -Accounts @{} -AccountsPath 'a.txt' -FileExists $false -CreatedUsers $created))
+        if (@($ok | Where-Object { $_ }).Count -ne 0) { throw ('зайва відмова: ' + (@($ok | Where-Object { $_ }) -join ' | ')) }
+        # виклик стоїть до розбору моделі й до будь-якого LoginAs; поза DryRun - throw
+        $text = [IO.File]::ReadAllText((Join-Path $repo 'tools/land/Build-LandTemplate.ps1'))
+        $call = $text.IndexOf('$buildUserGap = Get-BuildUserCredentialGap')
+        if ($call -lt 0 -or $call -gt $text.IndexOf('Log "Модель: $modelFile"')) { throw 'перевірка -BuildUser не стоїть до розбору моделі' }
+        if ($text -notmatch 'if \(\$DryRun\) \{ Log "DryRun: WARN[^}]*\} else \{ throw \$buildUserGap \}') { throw 'поза DryRun перевірка не відмовляє' }
+    }
 }

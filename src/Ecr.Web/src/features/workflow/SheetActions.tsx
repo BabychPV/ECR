@@ -1,7 +1,6 @@
-import { lazy, Suspense, useContext, useEffect, useRef, useState, type ComponentProps, type JSX } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState, type ComponentProps, type JSX } from 'react';
 import { Anchor, Button, Divider, Stack, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { UNSAFE_NavigationContext, type Navigator } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { apiFetch, EcrApiError } from '@/api/client';
@@ -72,11 +71,12 @@ function showSheetError(error: unknown, sheetName: string | null): void {
  * `SourcesPage`), і ЛИШЕ з `System.ViewHealth`: маршрут `/admin/jobs` закритий цим правом
  * (`routes.ts`), без нього посилання вело б у 403.
  *
- * ⚠ Тости живуть поза `RouterProvider` (`App.tsx`), тож `Link` у тості без контексту: перехід —
- * навігатором роутера, захопленим тут. Поза роутером (ізольовані тести, `DocumentActionBar`) —
- * звичайне посилання з тією самою адресою.
+ * ⚠ Тости живуть поза `RouterProvider` (`App.tsx`), тож `Link` у тості без контексту. B98(2): перехід —
+ * звичайне посилання за `href` (повне завантаження сторінки задач), без `UNSAFE_NavigationContext` (не
+ * стабільний API). `router.navigate` застосунку тут недоступний: `features` не імпортують `app` навіть
+ * динамічно (сторож `ClientLayerRulesTests`), а мосту навігації в `shared` поки немає.
  */
-function showSheetRecalcQueued(jobId: string, mayOpenJob: boolean, navigator: Navigator | null): void {
+function showSheetRecalcQueued(jobId: string, mayOpenJob: boolean): void {
   const message = t('workflow.sheetRecalcQueued');
 
   if (!mayOpenJob) {
@@ -94,13 +94,7 @@ function showSheetRecalcQueued(jobId: string, mayOpenJob: boolean, navigator: Na
         <Anchor
           href={to}
           size="sm"
-          onClick={(event) => {
-            notifications.hide(id);
-            if (navigator === null) return;
-
-            event.preventDefault();
-            navigator.push(to);
-          }}
+          onClick={() => notifications.hide(id)}
         >
           {t('registries.impact.openJob')}
         </Anchor>
@@ -473,10 +467,6 @@ export function useSheetActions({
   const queryClient = useQueryClient();
   const session = useSession();
 
-  // B46(2): навігатор роутера для посилання в тості; поза роутером контексту немає (`null`), і це не помилка.
-  const routing = useContext(UNSAFE_NavigationContext) as { navigator: Navigator } | null;
-  const routerNavigator = routing?.navigator ?? null;
-
   // Знімок адреси цього рендеру: те, що оператор бачить у мить кліку (N3-01).
   const here: ActionTarget = { sheetDefId, periodKey, sheetName, sheetCopyId };
 
@@ -693,7 +683,7 @@ export function useSheetActions({
       setRecalc({ jobId: job.jobId, documentId, sheetDefId: at.sheetDefId, periodKey: at.periodKey });
       // ⛔ B46(2): у ТОСТІ ідентифікатора задачі немає зовсім (сирий `Recalculation-doc96-…` бачила людина);
       // `jobId` у стані — і, отже, в запиті опитування нижче — не змінюється.
-      showSheetRecalcQueued(job.jobId, can(session.data, 'System.ViewHealth'), routerNavigator);
+      showSheetRecalcQueued(job.jobId, can(session.data, 'System.ViewHealth'));
     },
     onError: (error, at) => showSheetError(error, at.sheetName),
   });
