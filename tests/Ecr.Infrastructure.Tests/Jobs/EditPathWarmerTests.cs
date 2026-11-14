@@ -118,6 +118,79 @@ public sealed class EditPathWarmerTests : IAsyncLifetime
         Assert.Equal(expected, askedCap);
     }
 
+    /// <summary>
+    /// B53: після версій відкритих періодів — версії шкали проєктів (ті, що <c>ReadScopeAsync</c> обʼєднує в знімок
+    /// меж читання): лише кеш метаданих (без графа формул), без повторного прогріву вже прогрітих, у межах стелі.
+    /// </summary>
+    /// <remarks>
+    /// Мутації (локальний worktree, відкат): прибрати виклик <c>WarmReadScopeVersionsAsync</c> у <c>WarmAsync</c> — червоний
+    /// (версій 70/30 немає); прибрати <c>!done.Contains(v)</c> — червоний (50 гріється вдруге).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    public async Task B53_версії_шкали_гріються_в_кеш_метаданих_після_версій_відкритих_періодів_без_повторів()
+    {
+        provider = Services().BuildServiceProvider();
+        var askedCap = 0;
+        var warmer = new EditPathWarmer(provider.GetRequiredService<IServiceScopeFactory>(), NullLogger<EditPathWarmer>.Instance)
+        {
+            ListVersions = (_, _, _) => Task.FromResult<IReadOnlyList<int>>([50, 40]),
+            ListReadScopeVersions = (_, cap, _) =>
+            {
+                askedCap = cap;
+                return Task.FromResult<IReadOnlyList<int>>([70, 50, 30, 20]);
+            },
+        };
+
+        var result = await warmer.WarmAsync(3, quartz: null, CancellationToken.None).WaitAsync(Safety);
+
+        Assert.Equal(3, askedCap);
+        Assert.Equal([50, 40], result.WarmedVersions);
+        Assert.Equal([70, 30, 20], result.ReadScopeVersions);
+        Assert.Equal([50, 40, 70, 30, 20], metadataCalls);
+        Assert.Equal([50, 40], dependencyCalls);
+    }
+
+    /// <summary>B53: вичерпаний бюджет часу зупиняє прогрів версій шкали (решту завантажить перший запит).</summary>
+    /// <remarks>Мутація: прибрати перевірку <c>ReadScopeBudget</c> — червоний (версію 70 прогріто).</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    public async Task B53_вичерпаний_бюджет_зупиняє_прогрів_версій_шкали()
+    {
+        provider = Services().BuildServiceProvider();
+        var warmer = new EditPathWarmer(provider.GetRequiredService<IServiceScopeFactory>(), NullLogger<EditPathWarmer>.Instance)
+        {
+            ListVersions = (_, _, _) => Task.FromResult<IReadOnlyList<int>>([50]),
+            ListReadScopeVersions = (_, _, _) => Task.FromResult<IReadOnlyList<int>>([70]),
+            ReadScopeBudget = TimeSpan.Zero,
+        };
+
+        var result = await warmer.WarmAsync(5, quartz: null, CancellationToken.None).WaitAsync(Safety);
+
+        Assert.Equal([50], result.WarmedVersions);
+        Assert.Empty(result.ReadScopeVersions!);
+        Assert.Equal([50], metadataCalls);
+    }
+
+    /// <summary>B53: збій переліку версій шкали не ламає проходу — версії відкритих періодів прогріто.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    public async Task B53_збій_переліку_версій_шкали_не_ламає_проходу()
+    {
+        provider = Services().BuildServiceProvider();
+        var warmer = new EditPathWarmer(provider.GetRequiredService<IServiceScopeFactory>(), NullLogger<EditPathWarmer>.Instance)
+        {
+            ListVersions = (_, _, _) => Task.FromResult<IReadOnlyList<int>>([50]),
+            ListReadScopeVersions = (_, _, _) => throw new InvalidOperationException("шкала"),
+        };
+
+        var result = await warmer.WarmAsync(5, quartz: null, CancellationToken.None).WaitAsync(Safety);
+
+        Assert.Equal([50], result.WarmedVersions);
+        Assert.Empty(result.ReadScopeVersions!);
+        Assert.Equal([50], metadataCalls);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage6)]
     public async Task Збій_версії_йде_в_журнал_і_прохід_триває()
