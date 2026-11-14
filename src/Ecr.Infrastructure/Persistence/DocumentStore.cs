@@ -469,6 +469,13 @@ public sealed class DocumentStore(
                 }
             }
 
+            // ✎ B109: код шаблону — версія, ЧИННА в періоді / році / зараз, має шаблон з цим кодом. Підзапит у тому самому
+            // запиті сторінки (звернень не додається), ПІСЛЯ межі видимості вище: невидимих документів фільтр не відкриває.
+            if (filter.TemplateCode is { Length: > 0 } templateCode)
+            {
+                documents = WhereTemplateCode(documents, templateCode, TemplateCodeVersionKey(period, filter));
+            }
+
             // UI-18: пошук — теж у ЗАПИТІ до `Take`, ПОРУЧ із межею проєктів вище (а не
             // постфільтр: той дав би хибні `NextCursor`/`TotalCount`). Лише поля самого
             // документа — аркуші й таблиці не чіпаються, тож приховане не підтверджується.
@@ -1716,6 +1723,31 @@ public sealed class DocumentStore(
 
         return documents.Where(d => db.Periods.Any(p => p.ProjectId == d.ProjectId
                                                         && p.PeriodKeyValue > from && p.PeriodKeyValue < to));
+    }
+
+    /// <summary>
+    /// ✎ B109: період, за який фільтр <see cref="DocumentListFilter.TemplateCode"/> бере чинну версію: заданий період;
+    /// без нього — кінець року (<c>YYYY99</c>: остання версія шкали з <c>fromPeriodKey</c> ≤ кінця року, D-511); без обох —
+    /// поточна версія (<see cref="MaxPeriodKey"/>, як у колонці «Version» без періоду).
+    /// </summary>
+    private static int TemplateCodeVersionKey(PeriodKeyFilter period, DocumentListFilter filter)
+        => period.Value ?? (filter.Year is { } year ? (year * 100) + 99 : MaxPeriodKey);
+
+    /// <summary>
+    /// ✎ B109: документи, версія шаблону яких за період <paramref name="versionKey"/> належить шаблону з кодом
+    /// <paramref name="templateCode"/>. Версія — шкали ШАБЛОНУ ДОКУМЕНТА (<c>fn_TemplateVersionOf</c>), документ без шаблону
+    /// (NULL, старий білд) — основного шаблону проєкту (<c>fn_VersionOf</c>), як <see cref="GetTemplateVersionIdForPeriodAsync"/>
+    /// (D-502). Невідомий код — порожньо (підзапит версій нічого не дає), не помилка.
+    /// </summary>
+    private IQueryable<Document> WhereTemplateCode(IQueryable<Document> documents, string templateCode, int versionKey)
+    {
+        var versionsOfCode = db.TemplateVersions
+            .Where(v => db.Templates.Any(t => t.Id == v.TemplateId && t.Code == templateCode))
+            .Select(v => v.Id);
+
+        return documents.Where(d => versionsOfCode.Contains(d.TemplateId == null
+            ? EcrDbContext.VersionOf(d.ProjectId, versionKey)
+            : EcrDbContext.TemplateVersionOf(d.ProjectId, d.TemplateId.Value, versionKey)));
     }
 
     /// <summary>

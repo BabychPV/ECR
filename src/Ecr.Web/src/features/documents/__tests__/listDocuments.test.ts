@@ -87,4 +87,17 @@ describe('listDocuments', () => {
 
     expect(sent).toEqual(['/api/v1/documents?limit=50&periodKey=202601']);
   });
+
+  // ✎ B109: фільтр коду шаблону — ім'ям, якого чекає сервер (`templateCode`), і власний розмір сторінки.
+  it('templateCode і limit ідуть в адресу; порожній код — параметра немає', async () => {
+    mockServer([row]);
+
+    await listDocuments({ periodKey: null, year: 2026, templateCode: 'HSE400', limit: 500 });
+    await listDocuments({ periodKey: null, year: 2026, templateCode: '' });
+
+    expect(sent).toEqual([
+      '/api/v1/documents?limit=500&year=2026&templateCode=HSE400',
+      '/api/v1/documents?limit=50&year=2026',
+    ]);
+  });
 });

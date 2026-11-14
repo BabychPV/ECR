@@ -36013,6 +36013,13 @@
             "schema": {
               "type": "boolean"
             }
+          },
+          {
+            "in": "query",
+            "name": "templateCode",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {

@@ -170,6 +170,76 @@ public sealed class DocumentStoreTests(SqlServerFixture sql)
         Assert.Equal(["Draft", "Submitted", "Draft"], cardSheets.Select(s => s.State));
     }
 
+    /// <summary>
+    /// ✎ B109: фільтр <c>templateCode</c> («Відкрити HSE400» одним запитом) — за шаблоном ДОКУМЕНТА (не проєкту): у
+    /// спільному проєкті A документ основного шаблону X і документ шаблону Y (шкала пари (A, Y)) розрізняються; документ без
+    /// шаблону (NULL) — основний шаблон проєкту. Невидимий проєкт B не відкривається збігом коду; невідомий код — порожньо.
+    /// І запитів на сторінку стільки ж, скільки без фільтра (підзапит у тому самому запиті сторінки, без N+1).
+    /// Мутаційний доказ (локально): фільтр за версією ПРОЄКТУ (<c>fn_VersionOf</c> для всіх) — червоний (a2 не знаходиться).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Фільтр_за_кодом_шаблону_бере_шаблон_документа_межу_видимості_і_не_додає_запитів()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var a = await builder.BuildAsync(ct: CancellationToken.None);
+        var b = await builder.BuildAsync(ct: CancellationToken.None);
+
+        long a2Id;
+        string codeX;
+        string codeY;
+        await using (var setup = builder.CreateContext())
+        {
+            // Документ шаблону Y у проєкті A: шкала пари (A, Y) дає версію Y за рік (B74 PT01, D-501).
+            setup.ProjectTemplateVersions.Add(new ProjectTemplateVersion(a.ProjectId, b.TemplateId, 202601, b.TemplateVersionId));
+            var a2 = new Document(
+                a.ProjectId, "DOC-A2-B109", 1, new DateTime(2026, 1, 15, 10, 0, 0, DateTimeKind.Utc), templateId: b.TemplateId);
+            setup.Documents.Add(a2);
+            await setup.SaveChangesAsync(CancellationToken.None);
+            a2Id = a2.Id;
+
+            codeX = await setup.Templates.Where(t => t.Id == a.TemplateId).Select(t => t.Code).SingleAsync();
+            codeY = await setup.Templates.Where(t => t.Id == b.TemplateId).Select(t => t.Code).SingleAsync();
+        }
+
+        int[] both = [a.ProjectId, b.ProjectId];
+
+        Assert.Equal([a.DocumentId], await IdsAsync(codeX, both));
+        Assert.Equal(new[] { a2Id, b.DocumentId }.Order(), await IdsAsync(codeY, both));
+
+        // ⛔ Межа видимості діє ПЕРШОЮ: документ невидимого проєкту B не відкривається збігом коду.
+        Assert.Equal([a2Id], await IdsAsync(codeY, [a.ProjectId]));
+
+        // Невідомий код — порожній перелік, не помилка.
+        Assert.Empty(await IdsAsync("NO-SUCH-TEMPLATE-B109", both));
+
+        // ⛔ Без N+1: з фільтром запитів стільки ж, скільки без нього (фільтр — підзапит у запиті сторінки).
+        var plain = await CountQueriesAsync(null, both);
+        var filtered = await CountQueriesAsync(codeY, both);
+        Assert.Equal(plain, filtered);
+
+        async Task<long[]> IdsAsync(string code, int[] visible)
+        {
+            await using var db = builder.CreateContext();
+            var page = await new DocumentStore(db).ListAsync(
+                null, new PeriodKeyFilter(null), new DocumentListFilter(null, null, Year: 2026, TemplateCode: code),
+                new CursorRequest(Limit: 50), visible, CancellationToken.None);
+            return [.. page.Items.Select(d => d.Id).Order()];
+        }
+
+        async Task<int> CountQueriesAsync(string? code, int[] visible)
+        {
+            var executed = new List<string>();
+            await using var counting = CreateCountingContext(executed);
+            var page = await new DocumentStore(counting).ListAsync(
+                null, new PeriodKeyFilter(null), new DocumentListFilter(null, null, Year: 2026, TemplateCode: code),
+                new CursorRequest(Limit: 50), visible, CancellationToken.None);
+            Assert.NotEmpty(page.Items);
+            return executed.Count;
+        }
+    }
+
     /// <summary>Суфікс, яким будівник позначив свої коди (<c>SHEET{tag}</c> → <c>{tag}</c>).</summary>
     private static string TagOf(string sheetCode) => sheetCode["SHEET".Length..];
 
