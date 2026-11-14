@@ -102,6 +102,10 @@ public sealed class GetSheetActivityHandler(
         // старої версії — межі журналу = видимі колонки поточної версії РАЗОМ з їхнім родоводом (і в парах власників).
         (columns, owners) = await WithLineageAsync(columns, owners, ct).ConfigureAwait(false);
 
+        // ✎ B102: так само `aud.RowChange` лишається на TableDefId старої версії — межі журналу рядків = видимі таблиці
+        // РАЗОМ з їхнім родоводом (лише від уже видимих: схована таблиця не дає й свого родоводу).
+        tables = await WithTableLineageAsync(tables, ct).ConfigureAwait(false);
+
         return await query
             .ReadAsync(
                 new SheetActivityScope(documentId, periodKey, sheetCode, columns, byUserId, includeSystem, tables, owners),
@@ -137,6 +141,22 @@ public sealed class GetSheetActivityHandler(
             : (IReadOnlyList<Ports.CellChangeOwnerColumns>)[.. owners.Select(o => o with { ColumnDefIds = Widen(o.ColumnDefIds) })];
 
         return (widened, widenedOwners);
+    }
+
+    /// <summary>
+    /// ✎ B102: видимі таблиці аркуша разом з Id тих самих таблиць у інших версіях шаблону
+    /// (<see cref="Ports.IColumnPathMapper.TableLineageAsync"/>, ОДИН виклик на запит).
+    /// </summary>
+    /// <remarks>⛔ Лише розширення від ВЖЕ видимих (Deny таблиці відсікає до родоводу). Без маппера — як було.</remarks>
+    private async Task<IReadOnlyList<int>> WithTableLineageAsync(IReadOnlyList<int> tables, CancellationToken ct)
+    {
+        if (columnPaths is null || tables.Count == 0)
+        {
+            return tables;
+        }
+
+        var lineage = await columnPaths.TableLineageAsync(tables, ct).ConfigureAwait(false);
+        return [.. tables.SelectMany(id => lineage.GetValueOrDefault(id) ?? [id]).Distinct().Order()];
     }
 
     private static NotFoundException NotFound(long documentId)

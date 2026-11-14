@@ -83,4 +83,9 @@ internal sealed class PrefetchedColumnMapper : IColumnPathMapper
     public Task<IReadOnlyDictionary<int, IReadOnlyList<int>>> LineageAsync(
         IReadOnlyCollection<int> columnIds, CancellationToken ct)
         => _inner.LineageAsync(columnIds, ct);
+
+    /// <inheritdoc />
+    public Task<IReadOnlyDictionary<int, IReadOnlyList<int>>> TableLineageAsync(
+        IReadOnlyCollection<int> tableIds, CancellationToken ct)
+        => _inner.TableLineageAsync(tableIds, ct);
 }

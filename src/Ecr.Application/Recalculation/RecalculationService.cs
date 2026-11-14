@@ -1140,6 +1140,29 @@ public sealed class RecalculationService(
                                  await YearStatesAsync(instance.DocumentId, annualPeriods, ct).ConfigureAwait(false))
                              : periodState == Domain.Enums.PeriodState.Grace);
 
+        // ✎ B104: прогін ВІДКРИТОГО якоря в Grace пише не-місячні цілі року — вони «пізні» за річним правилом
+        // (AnnualPeriodRule.IsLate: є Grace і немає Open), як PATCH не-місячної колонки; місячні цілі (C_M01, таблиці
+        // поза маршрутизацією) — за станом самого якоря. Стани року читаються лише коли якір у Grace (≤ 12 запитів).
+        var annualLateEdit = isLateEdit && openAnchorYear is not null
+            ? Security.AnnualPeriodRule.IsLate(
+                await YearStatesAsync(instance.DocumentId, openAnchorYear, ct).ConfigureAwait(false))
+            : isLateEdit;
+        var nonMonthOf = new Dictionary<long, HashSet<int>>();
+        bool RecordIsLate(long target, CellRecord record)
+        {
+            if (annualLateEdit == isLateEdit)
+            {
+                return isLateEdit;
+            }
+
+            if (!nonMonthOf.TryGetValue(target, out var nonMonth))
+            {
+                nonMonthOf[target] = nonMonth = NonMonthRoutedColumns(target, instances, tables);
+            }
+
+            return nonMonth.Contains(record.Address.ColumnDefId) ? annualLateEdit : isLateEdit;
+        }
+
         // ⛔ Q-2xx (аудит фази 3, звітність). До цього рядка формули шаблону
         // писалися в `doc.CellValue` ЧЕРЕЗ `cellStore.ApplyAsync` без жодного
         // запису в `aud.CellChange` — `RecalculationService` не мав
@@ -1195,9 +1218,10 @@ public sealed class RecalculationService(
                 instance.DocumentId);
 
             // ✎ LAND-YEAR B60: аркуші відкритого якоря, у які прогін пише не-місячне, — ще й агрегатний стан (окремий набір).
+            // ✎ B103: і аркуші, де змінюється лише стан помилки формули НЕ-місячної комірки (значення не пишеться).
             var annualSheets = openAnchorYear is null
                 ? null
-                : AnnualTargetSheets(byInstance, sheetOfInstance, instances, tables);
+                : AnnualTargetSheets(byInstance, sheetOfInstance, instances, tables, errorDelta.Cells());
             var annualWritable = annualSheets is { Count: > 0 } ? new HashSet<(int SheetDefId, long? CopyId)>() : null;
 
             var writable = await EnterSheetsAsync(
@@ -1275,15 +1299,31 @@ public sealed class RecalculationService(
             if (batch.Count > 0)
             {
                 await WriteBatchAsync(
-                    instance.DocumentId, batch, rowKeyByRowIdByInstance, isLateEdit, now, token, overridesActive)
+                    instance.DocumentId, batch, rowKeyByRowIdByInstance, RecordIsLate, now, token, overridesActive)
                     .ConfigureAwait(false);
             }
 
             // ✎ C-1 (D-475): стан помилок і події журналу — лише для аркушів, у які прогін пише (поданий/затверджений
             // аркуш не чіпається, як і його значення), тим самим комітом, що й значення.
+            // ✎ B103: стан помилки — за тим самим вибором стану аркуша на комірку, що й значення (B60(а)): не-місячна
+            // колонка маршрутизованої таблиці на аркуші відкритого якоря — агрегат року, решта — період прогону.
             if (!errorDelta.IsEmpty)
             {
-                await ApplyFormulaErrorsAsync(errorDelta, instance.DocumentId, stored, sheetOfInstance, writable, now, token)
+                bool ErrorWritable(FormulaErrorRow row)
+                {
+                    if (!sheetOfInstance.TryGetValue(row.TableInstanceId, out var sheetKey))
+                    {
+                        return false;
+                    }
+
+                    return annualWritable is not null
+                           && annualSheets!.Contains(sheetKey)
+                           && NonMonthRoutedColumns(row.TableInstanceId, instances, tables).Contains(row.ColumnDefId)
+                        ? annualWritable.Contains(sheetKey)
+                        : writable.Contains(sheetKey);
+                }
+
+                await ApplyFormulaErrorsAsync(errorDelta, instance.DocumentId, stored, ErrorWritable, now, token)
                     .ConfigureAwait(false);
             }
 
@@ -1336,19 +1376,15 @@ public sealed class RecalculationService(
     /// </summary>
     private async Task ApplyFormulaErrorsAsync(
         FormulaErrorDelta delta, long documentId, Dictionary<CellKey, CellValueData> stored,
-        Dictionary<long, (int SheetDefId, long? SheetCopyId)> sheetOfInstance,
-        IReadOnlySet<(int SheetDefId, long? CopyId)> writable, DateTime now, CancellationToken ct)
+        Func<FormulaErrorRow, bool> writable, DateTime now, CancellationToken ct)
     {
-        bool Writable(long instanceId)
-            => sheetOfInstance.TryGetValue(instanceId, out var sheetKey) && writable.Contains(sheetKey);
-
         await formulaErrors!.ApplyAsync(
-                [.. delta.Upserts.Where(u => Writable(u.TableInstanceId))],
-                [.. delta.Deletes.Where(d => Writable(d.TableInstanceId)).Select(d => d.Address)],
+                [.. delta.Upserts.Where(writable)],
+                [.. delta.Deletes.Where(writable).Select(d => d.Address)],
                 ct)
             .ConfigureAwait(false);
 
-        var events = delta.Events.Where(e => Writable(e.Row.TableInstanceId)).ToList();
+        var events = delta.Events.Where(e => writable(e.Row)).ToList();
         if (events.Count == 0)
         {
             return;
@@ -1378,7 +1414,10 @@ public sealed class RecalculationService(
     /// <param name="documentId">Документ прогону.</param>
     /// <param name="batch">Екземпляри, у які писати можна, з їхніми комірками — у порядку запису.</param>
     /// <param name="rowKeyByRowIdByInstance">Ключ рядка за його ідентифікатором — для аудиту.</param>
-    /// <param name="isLateEdit">Зміна в <c>Grace</c> (<c>D-70</c>).</param>
+    /// <param name="isLateEdit">
+    /// Зміна в <c>Grace</c> (<c>D-70</c>) — на ЗАПИС (екземпляр, комірка): ✎ B104 не-місячна ціль відкритого якоря
+    /// бере річне правило, місячна — стан свого періоду.
+    /// </param>
     /// <param name="now">Мить зміни для аудиту.</param>
     /// <param name="lockOverrides">✎ D-461: блокувати й перечитати позначки ручних значень перед записом (лише коли вони можливі).</param>
     /// <param name="ct">Токен скасування.</param>
@@ -1398,7 +1437,7 @@ public sealed class RecalculationService(
         long documentId,
         IReadOnlyList<(long Target, IReadOnlyList<CellRecord> Records)> batch,
         Dictionary<long, Dictionary<long, string>> rowKeyByRowIdByInstance,
-        bool isLateEdit,
+        Func<long, CellRecord, bool> isLateEdit,
         DateTime now,
         CancellationToken ct,
         bool lockOverrides = false)
@@ -1463,7 +1502,9 @@ public sealed class RecalculationService(
                         // однаково пишуть без `ExpectedRowVersions`.
                         TouchedRowIds: [],
                         ChangedByUserId: SystemUserId,
-                        isLateEdit))],
+
+                        // Сховище прапорця набору не читає (лише аудит нижче); «пізній», якщо пізній хоч один запис.
+                        item.Records.Any(r => isLateEdit(item.Target, r))))],
             ct).ConfigureAwait(false);
 
         // ⛔ `DAT-02` п. 2: аудит пишеться рівно по `Records`, тобто по тому,
@@ -1485,7 +1526,7 @@ public sealed class RecalculationService(
                     NewValue: Describe(r.Value),
                     SystemUserId,
                     Origin: "Recalculation",
-                    isLateEdit,
+                    isLateEdit(item.Target, r),
                     CorrelationId: null));
             })],
             ct).ConfigureAwait(false);
@@ -2082,22 +2123,29 @@ public sealed class RecalculationService(
     /// <param name="sheetOfInstance">Аркуш кожного екземпляра запису.</param>
     /// <param name="instances">Екземпляри виду прогону.</param>
     /// <param name="tables">Таблиці знімка.</param>
+    /// <param name="errorCells">✎ B103: комірки зі зміною стану помилки формули (<see cref="FormulaErrorDelta.Cells"/>).</param>
     private HashSet<(int SheetDefId, long? CopyId)> AnnualTargetSheets(
         Dictionary<long, Dictionary<CellAddress, CellRecord>> byInstance,
         Dictionary<long, (int SheetDefId, long? SheetCopyId)> sheetOfInstance,
         IReadOnlyList<TableInstanceRef> instances,
-        Dictionary<int, Domain.Entities.Configuration.TableDef> tables)
+        Dictionary<int, Domain.Entities.Configuration.TableDef> tables,
+        IEnumerable<(long TableInstanceId, int ColumnDefId)>? errorCells = null)
     {
         var result = new HashSet<(int SheetDefId, long? CopyId)>();
-        foreach (var (target, cells) in byInstance)
+        var written = byInstance
+            .Where(pair => pair.Value.Count > 0)
+            .SelectMany(pair => pair.Value.Keys.Select(a => (pair.Key, a.ColumnDefId)));
+
+        // ✎ B103: комірки, у яких змінюється лише стан помилки формули, — так само (значення там не пишеться).
+        foreach (var group in written.Concat(errorCells ?? []).GroupBy(c => c.Item1))
         {
-            if (cells.Count == 0 || !sheetOfInstance.TryGetValue(target, out var sheet) || sheet.SheetCopyId is not null)
+            if (!sheetOfInstance.TryGetValue(group.Key, out var sheet) || sheet.SheetCopyId is not null)
             {
                 continue;
             }
 
-            var annual = NonMonthRoutedColumns(target, instances, tables);
-            if (annual.Count > 0 && cells.Keys.Any(a => annual.Contains(a.ColumnDefId)))
+            var annual = NonMonthRoutedColumns(group.Key, instances, tables);
+            if (annual.Count > 0 && group.Any(c => annual.Contains(c.Item2)))
             {
                 result.Add(sheet);
             }

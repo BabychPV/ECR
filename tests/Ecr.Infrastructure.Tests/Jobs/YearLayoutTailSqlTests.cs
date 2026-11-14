@@ -234,7 +234,8 @@ public sealed partial class YearLayoutTailSqlTests(SqlServerFixture sql)
             $"{value.ToString(CultureInfo.InvariantCulture)}, {(calculated ? 1 : 0)}, 0);");
 
     private static RecalculationService Formulas(
-        EcrDbContext db, World world, ICellStore store, IMonthColumnRouter router, IPeriodStore periods)
+        EcrDbContext db, World world, ICellStore store, IMonthColumnRouter router, IPeriodStore periods,
+        IFormulaErrorStore? formulaErrors = null)
     {
         var bulk = new BulkCellLoader(db.Database.GetConnectionString()!, 1000);
         var clock = new TestClock(Now);
@@ -249,7 +250,8 @@ public sealed partial class YearLayoutTailSqlTests(SqlServerFixture sql)
         return new RecalculationService(
             store, new RowStore(db, bulk, clock), periods, world.Metadata,
             Versions(world), new RealFormulaEngine(), units, Substitute.For<IRegistryStore>(), headers,
-            new AuditWriter(db), clock, new UnitOfWork(db), new SheetEditGate(db), monthRouter: router);
+            new AuditWriter(db), clock, new UnitOfWork(db), new SheetEditGate(db), formulaErrors: formulaErrors,
+            monthRouter: router);
     }
 
     /// <summary>Порт періодів: ефективні стани — зі словника (за замовчуванням Open), межі — січень.</summary>
@@ -288,7 +290,10 @@ public sealed partial class YearLayoutTailSqlTests(SqlServerFixture sql)
         return versions;
     }
 
-    private static IMetadataCache Metadata(World world)
+    /// <summary>Знімок метаданих світу (формули CM1..CM12, TOT).</summary>
+    /// <param name="world">Світ тесту.</param>
+    /// <param name="expressions">✎ B103: вирази формул на заміну (Id формули → вираз); <c>null</c> — як завжди.</param>
+    private static IMetadataCache Metadata(World world, IReadOnlyDictionary<int, string>? expressions = null)
     {
         var doc = world.Doc;
         var text = ColumnDefFor(doc, doc.ColumnDefIds[0], "C1", 1, CellDataType.String);
@@ -324,10 +329,12 @@ public sealed partial class YearLayoutTailSqlTests(SqlServerFixture sql)
 
         for (var m = 1; m <= 12; m++)
         {
-            AddFormula(table, MonthFormulaBase + m, world.CalcMonth[m], $"[M{m}] * [IN]");
+            AddFormula(
+                table, MonthFormulaBase + m, world.CalcMonth[m],
+                expressions?.GetValueOrDefault(MonthFormulaBase + m) ?? $"[M{m}] * [IN]");
         }
 
-        AddFormula(table, TotalFormulaId, world.Total, "[CM9]");
+        AddFormula(table, TotalFormulaId, world.Total, expressions?.GetValueOrDefault(TotalFormulaId) ?? "[CM9]");
         sheet.AddTable(table);
 
         var snapshot = new TemplateVersionSnapshot(
@@ -384,6 +391,7 @@ public sealed partial class YearLayoutTailSqlTests(SqlServerFixture sql)
             $"UPDATE calc.CalculationRun SET Status = N'Superseded' " +
             $"WHERE ProjectId = {world.Doc.ProjectId} AND Status <> N'{Ecr.Domain.Entities.Calculations.CalculationRun.SupersededStatus}';");
         await ExecuteAsync($"DELETE FROM wf.ApprovalState WHERE DocumentId = {world.Doc.DocumentId};");
+        await ExecuteAsync($"DELETE FROM calc.FormulaError WHERE DocumentId = {world.Doc.DocumentId};");
         await ExecuteAsync(
             $"UPDATE doc.Period SET State = {(int)PeriodState.Open} " +
             $"WHERE ProjectId = {world.Doc.ProjectId} AND State <> {(int)PeriodState.Open};");
