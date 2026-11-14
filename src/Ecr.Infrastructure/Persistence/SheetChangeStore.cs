@@ -53,13 +53,15 @@ public sealed class SheetChangeStore(EcrDbContext db) : ISheetChangeStore
     /// «місяці в колонках». Той самий шлях доступу, що й <see cref="ProbeSql"/> (<c>UQ_TableInstance</c> → <c>FORCESEEK</c>
     /// по <c>UQ_TableRow_Key</c>), на кожен фізичний екземпляр; екземпляр ПЕРЕГЛЯДУ (<c>v</c>) тієї ж таблиці — у
     /// відповіді замість фізичного (його перечитує клієнт). Лише оригінал аркуша.
+    /// ✎ B43: ще й фізичний період і <c>RowKey</c> рядка (обидва — у ключі <c>UQ_TableRow_Key</c>, без нових читань) —
+    /// за ними обробник зводить «захоплений» рядок перегляду з рядком власника, куди лягла правка й журнал.
     /// </summary>
     internal const string ProbeOwnersSql = """
         SET NOCOUNT ON;
         DECLARE @upto binary(8) = MIN_ACTIVE_ROWVERSION();
         SELECT @upto;
-        SELECT x.ViewInstanceId, x.TableDefId, x.Id, x.Cnt
-          FROM (SELECT v.Id AS ViewInstanceId, i.TableDefId, r.Id,
+        SELECT x.ViewInstanceId, x.TableDefId, x.Id, x.Cnt, x.PeriodKey, x.RowKey
+          FROM (SELECT v.Id AS ViewInstanceId, i.TableDefId, r.Id, i.PeriodKey, r.RowKey,
                        ROW_NUMBER() OVER (PARTITION BY i.Id ORDER BY r.RowVersion DESC) AS Rn,
                        COUNT(*) OVER (PARTITION BY i.Id) AS Cnt
                   FROM OPENJSON(@targets) WITH (p int '$.p', t int '$.t') g
@@ -197,7 +199,10 @@ public sealed class SheetChangeStore(EcrDbContext db) : ISheetChangeStore
         var hasMore = false;
         while (await reader.ReadAsync(token).ConfigureAwait(false))
         {
-            rows.Add(new SheetChangedRow(reader.GetInt64(0), reader.GetInt32(1), reader.GetInt64(2)));
+            // ✎ B43: проба власників несе ще фізичний період і RowKey (5-та й 6-та колонки); звичайна — ні.
+            rows.Add(reader.FieldCount > 5
+                ? new SheetChangedRow(reader.GetInt64(0), reader.GetInt32(1), reader.GetInt64(2), reader.GetInt32(4), reader.GetString(5))
+                : new SheetChangedRow(reader.GetInt64(0), reader.GetInt32(1), reader.GetInt64(2)));
             hasMore |= reader.GetInt32(3) > cap;
         }
 

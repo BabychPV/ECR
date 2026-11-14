@@ -23,7 +23,8 @@ namespace Ecr.Application.Documents.SheetChanges;
 /// тому власний <c>PATCH</c> лише пересуває маркер наступного опитування, банера не дає. Чужа правка того самого
 /// рядка ПІСЛЯ маркера, перекрита власною, — це конфлікт версії рядка (<c>ECR-CELL-0409</c>), а не банер.
 /// Рядок, змінений без запису в журналі значень (додано порожній рядок, видалено рядок, позначка сироти), — чужий
-/// з невідомим автором: правдиве «дані змінились» дешевше за пропущене.
+/// з невідомим автором: правдиве «дані змінились» дешевше за пропущене. ✎ B43: виняток — рядок перегляду, лише
+/// «захоплений» правкою колонки з чужим власником (Q-17): його авторство — рядка власника з тим самим <c>RowKey</c>.
 ///
 /// ⚠ Межа проби: на екземпляр таблиці авторство перевіряється для <see cref="SampledRowsPerTable"/> найсвіжіших
 /// змінених рядків. Масова власна правка (імпорт сотень рядків), серед якої загубилася чужа правка СТАРІШОГО рядка,
@@ -120,8 +121,12 @@ public sealed class GetSheetChangesHandler(
                 issued - AttributionSlack, currentUser.UserId!.Value, ct)
             .ConfigureAwait(false);
 
+        // ✎ B43: рядок перегляду, лише «захоплений» правкою колонки з чужим власником, — авторство рядка власника.
+        HashSet<long> claimed = owners is null ? [] : ClaimedByOwnerPeer(probe.Rows, key, attribution);
+
         bool Foreign(SheetChangedRow row)
-            => attribution.ForeignRowIds.Contains(row.TableRowId) || !attribution.AttributedRowIds.Contains(row.TableRowId);
+            => attribution.ForeignRowIds.Contains(row.TableRowId)
+               || (!attribution.AttributedRowIds.Contains(row.TableRowId) && !claimed.Contains(row.TableRowId));
 
         if (!probe.Rows.Any(Foreign))
         {
@@ -227,6 +232,40 @@ public sealed class GetSheetChangesHandler(
                 .. owners.Select(o => new SheetProbeTarget(o.Period, o.Table)),
             ],
             [.. blocked.Order()]);
+    }
+
+    /// <summary>
+    /// ✎ B43: рядки ПЕРЕГЛЯДУ без жодного запису журналу, у яких серед змінених є рядок ВЛАСНИКА тієї ж таблиці з тим
+    /// самим <c>RowKey</c> і з записом журналу — це «захоплення» (claim) рядка перегляду правкою, що лягла у власника.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Дефект B43: PATCH колонки з чужим власником (не-місячна — якір року; M{m} — період m) пише значення й журнал у
+    /// рядок власника, а рядок перегляду лише «захоплює» (версія клієнта → нова версія, захист від втраченого оновлення,
+    /// див. <c>PatchCellsHandler.RouteForeignOwnersAsync</c>) — без запису в <c>aud.CellChange</c>. Проба бачила рядок
+    /// перегляду з новою версією й порожнім журналом і рахувала його чужим з невідомим автором: автор отримував банер
+    /// «змінено іншим» на власну правку. Тепер авторство такого рядка — авторство рядка власника: правка читача мовчить,
+    /// чужа будить банер рядком власника (він чужий сам по собі), а рядок перегляду без пари у власника лишається чужим.
+    /// ⚠ Прийнята межа: чужа зміна рядка перегляду БЕЗ журналу (видалення рядка) в тому самому вікні опитування, що й
+    /// власна правка колонки власника того ж рядка, банера не дасть — до наступної зміни. Пара поза пробою (стеля
+    /// <see cref="SampledRowsPerTable"/>) — рядок лишається чужим (зайвий банер, а не пропущений).
+    /// </remarks>
+    private static HashSet<long> ClaimedByOwnerPeer(
+        IReadOnlyList<SheetChangedRow> rows, PeriodKey viewPeriod, SheetChangeAttribution attribution)
+    {
+        var journaledOwnerKeys = rows
+            .Where(r => r.PeriodKey is { } p && p != viewPeriod.Value && r.RowKey is not null
+                        && attribution.AttributedRowIds.Contains(r.TableRowId))
+            .Select(r => (r.TableDefId, r.RowKey!))
+            .ToHashSet();
+
+        return
+        [
+            .. rows
+                .Where(r => r.PeriodKey == viewPeriod.Value && r.RowKey is not null
+                            && !attribution.AttributedRowIds.Contains(r.TableRowId)
+                            && journaledOwnerKeys.Contains((r.TableDefId, r.RowKey)))
+                .Select(r => r.TableRowId),
+        ];
     }
 
     private static SheetChangesDto Unchanged(ulong marker, DateTime now, SheetStatusSnapshot status, bool statusChanged)

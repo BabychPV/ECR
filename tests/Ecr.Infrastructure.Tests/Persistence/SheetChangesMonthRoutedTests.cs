@@ -129,6 +129,70 @@ public sealed class SheetChangesMonthRoutedTests(SqlServerFixture sql)
         Assert.Equal(["Status", "Probe"], calls);
     }
 
+    /// <summary>
+    /// B43: автор правит НЕ-місячну колонку з жовтня — PATCH пише її в якір (січень, там і журнал), а рядок жовтня лише
+    /// «захоплює» (claim версії клієнта, без запису в журнал). Наступне опитування самого автора — без банера «змінено іншим».
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Дефект (червоний до фіксу): проба бачила рядок жовтня з новою версією, журнал якого порожній, і рахувала його
+    /// «чужим з невідомим автором» — <c>Changed = true</c> на власну правку.
+    /// ⚠ МУТАЦІЙНИЙ ДОКАЗ (локально, не в коміті): прибрати в <c>GetSheetChangesHandler</c> перенесення авторства з
+    /// рядка власника (<c>ClaimedByOwnerPeer</c> → порожній набір) — червоніє цей тест; і окремо — проба власників без
+    /// <c>RowKey</c> (<c>SheetChangeStore.ReadProbeAsync</c> без 5-ї/6-ї колонок) — теж.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "Q-17")]
+    public async Task B43_власна_правка_немісячної_колонки_з_жовтня_банера_не_будить()
+    {
+        using var world = await MonthRoutedReadWorld.ArrangeAsync(sql.ConnectionString);
+
+        var first = await PollAsync(world, since: null);
+
+        await world.PatchAsync(Viewer, Oct, ("PLAIN", 7m));
+        var after = await PollAsync(world, first.Marker);
+
+        Assert.False(after.Changed);
+        Assert.Null(after.LastChangedByUserId);
+        Assert.Empty(after.ChangedTables);
+
+        // Місячна колонка ІНШОГО місяця з жовтня (власник — березень, екземпляр створюється ліниво) — так само тиша.
+        await world.PatchAsync(Viewer, Oct, ("M3", 4m));
+        Assert.False((await PollAsync(world, after.Marker)).Changed);
+    }
+
+    /// <summary>
+    /// B43 (контроль, без регресії справжнього сигналу): ту саму правку з жовтня робить ІНШИЙ користувач — банер є,
+    /// з його іменем і таблицею жовтня; і власна правка після чужої в межах одного опитування чужу не ховає.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "Q-17")]
+    public async Task B43_чужа_правка_немісячної_колонки_з_жовтня_будить_банер()
+    {
+        using var world = await MonthRoutedReadWorld.ArrangeAsync(sql.ConnectionString);
+
+        var first = await PollAsync(world, since: null);
+
+        await world.PatchAsync(Other, Oct, ("PLAIN", 7m));
+        var after = await PollAsync(world, first.Marker);
+
+        Assert.True(after.Changed);
+        Assert.Equal(Other, after.LastChangedByUserId);
+        Assert.Equal(world.Instances[Oct], Assert.Single(after.ChangedTables).TableInstanceId);
+
+        // Чужа місячна M3 (березень) і власна PLAIN (січень) у тому самому вікні: рядок жовтня «захоплено» обома, але
+        // чужа зміна рядка березня лишається чужою.
+        await world.PatchAsync(Other, Oct, ("M3", 5m));
+        await world.PatchAsync(Viewer, Oct, ("PLAIN", 8m));
+        var mixed = await PollAsync(world, after.Marker);
+
+        Assert.True(mixed.Changed);
+        Assert.Equal(Other, mixed.LastChangedByUserId);
+    }
+
     private static async Task<SheetChangesDto> PollAsync(
         MonthRoutedReadWorld world, string? since, List<string>? calls = null, AccessProfile? viewer = null)
     {

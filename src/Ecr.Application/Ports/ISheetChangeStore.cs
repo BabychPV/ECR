@@ -5,7 +5,12 @@ namespace Ecr.Application.Ports;
 /// <param name="TableInstanceId">Екземпляр таблиці за період.</param>
 /// <param name="TableDefId">Таблиця версії шаблону.</param>
 /// <param name="TableRowId">Рядок (<c>doc.TableRow.Id</c>).</param>
-public sealed record SheetChangedRow(long TableInstanceId, int TableDefId, long TableRowId);
+/// <param name="PeriodKey">
+/// ✎ B43: фізичний період рядка — лише з <see cref="ISheetChangeStore.ProbeOwnersAsync"/> (<c>null</c> — звичайна проба).
+/// </param>
+/// <param name="RowKey">✎ B43: бізнес-ключ рядка — лише з <see cref="ISheetChangeStore.ProbeOwnersAsync"/>.</param>
+public sealed record SheetChangedRow(
+    long TableInstanceId, int TableDefId, long TableRowId, int? PeriodKey = null, string? RowKey = null);
 
 /// <summary>Q-17: фізичний екземпляр для проби змін — таблиця в періоді (перегляду або власника колонок).</summary>
 /// <param name="PeriodKey">Період екземпляра.</param>
