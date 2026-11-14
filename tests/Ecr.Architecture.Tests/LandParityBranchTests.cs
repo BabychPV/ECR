@@ -128,7 +128,37 @@ public sealed class LandParityBranchTests
         Stage-ParityBranch
         """;
 
+    /// <summary>Останній рядок обох сценаріїв: без нього вивід обірваний, навіть якщо код виходу 0.</summary>
+    private const string EndMarker = "HARNESS_END=1";
+
+    /// <summary>
+    /// Запуск сценарію з перевіркою, що він дійшов до кінця. B99: Evidence run 43478146529 (спроба 1) - <c>KeyNotFoundException
+    /// 'C_T1'</c> за 99 мс при коді 0: дитячий pwsh на Linux-раннері завершився, не надрукувавши решти рядків (та сама
+    /// нестабільність старту pwsh, що й код 139 в обгортці <see cref="DeployScriptHarness.FindPowerShell"/>). Сценарій має
+    /// <c>$ErrorActionPreference = 'Stop'</c> і не викликає <c>exit</c>, тож код 0 без маркера кінця - лише обірваний процес,
+    /// а не результат логіки. Такий запуск повторюється ОДИН раз (причина - у виводі); ненульовий код і провали перевірок
+    /// не повторюються, два обірвані запуски поспіль - червоне з повним виводом обох.
+    /// </summary>
     private static (int Exit, string Output) RunPowerShell(string harness, params string[] arguments)
+    {
+        var script = harness + "\nWrite-Host '" + EndMarker + "'\n";
+        var first = RunPowerShellOnce(script, arguments);
+        if (first.Exit != 0 || HasEndMarker(first.Output))
+        {
+            return first;
+        }
+
+        var second = RunPowerShellOnce(script, arguments);
+        Assert.True(
+            second.Exit != 0 || HasEndMarker(second.Output),
+            $"pwsh двічі завершився з кодом 0 без маркера кінця {EndMarker} (обірваний вивід).\n--- спроба 1 ---\n{first.Output}\n--- спроба 2 ---\n{second.Output}");
+        return (second.Exit, second.Output + "\npwsh-повтор: спроба 1 - код 0 без маркера кінця, повтор один раз\n");
+    }
+
+    private static bool HasEndMarker(string output) =>
+        output.Split('\n').Any(l => string.Equals(l.Trim(), EndMarker, StringComparison.Ordinal));
+
+    private static (int Exit, string Output) RunPowerShellOnce(string harness, params string[] arguments)
     {
         var start = new ProcessStartInfo(DeployScriptHarness.FindPowerShell())
         {
@@ -150,15 +180,16 @@ public sealed class LandParityBranchTests
             }
 
             using var process = Process.Start(start) ?? throw new InvalidOperationException("PowerShell не запустився");
-            var stdout = process.StandardOutput.ReadToEnd();
-            var stderr = process.StandardError.ReadToEnd();
+            // Обидва потоки читаються одночасно: послідовне читання блокується, якщо stderr заповнить буфер каналу.
+            var stdout = process.StandardOutput.ReadToEndAsync();
+            var stderr = process.StandardError.ReadToEndAsync();
             if (!process.WaitForExit(120_000))
             {
                 process.Kill(entireProcessTree: true);
                 throw new TimeoutException("PowerShell не завершився за 120 с.");
             }
 
-            return (process.ExitCode, stdout + stderr);
+            return (process.ExitCode, stdout.Result + stderr.Result);
         }
         finally
         {
