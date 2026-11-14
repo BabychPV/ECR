@@ -1254,6 +1254,46 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
     }
 
     /// <summary>
+    /// AN-194: проганяє табличний параметр <c>doc.CellValueTvp</c> (той самий <see cref="ToCellRecords"/>) у
+    /// <c>SELECT COUNT(*) FROM @cells</c> — без жодної таблиці: перший <c>PATCH</c> після старту не платить за код
+    /// табличних параметрів SqlClient. Одна комірка з неіснуючою адресою; нічого не читається й не пишеться.
+    /// </summary>
+    /// <param name="db">Контекст scope (у транзакції — команда йде в ній).</param>
+    /// <param name="ct">Скасування.</param>
+    /// <returns>Число рядків параметра (1).</returns>
+    internal static async Task<int> WarmTableParameterAsync(EcrDbContext db, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+
+        var connection = (SqlConnection)db.Database.GetDbConnection();
+        var opened = connection.State != ConnectionState.Open;
+        if (opened)
+        {
+            await connection.OpenAsync(ct).ConfigureAwait(false);
+        }
+
+        try
+        {
+            await using var command = connection.CreateCommand();
+            command.Transaction = db.Database.CurrentTransaction?.GetDbTransaction() as SqlTransaction;
+            var cells = command.Parameters.Add("@cells", SqlDbType.Structured);
+            cells.TypeName = CellTvpTypeName;
+            cells.Value = ToCellRecords(
+                [new CellRecord(new CellAddress(new PeriodKey(209912), -1, -1), -1, CellValueData.Empty)]);
+            command.CommandText = "SELECT COUNT(*) FROM @cells;";
+            return Convert.ToInt32(
+                await command.ExecuteScalarAsync(ct).ConfigureAwait(false), System.Globalization.CultureInfo.InvariantCulture);
+        }
+        finally
+        {
+            if (opened)
+            {
+                await connection.CloseAsync().ConfigureAwait(false);
+            }
+        }
+    }
+
+    /// <summary>
     /// Перекладає батч у рядки табличного параметра.
     /// </summary>
     /// <param name="upserts">Комірки батчу; порожнім не буває.</param>

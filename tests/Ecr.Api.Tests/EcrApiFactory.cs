@@ -154,6 +154,8 @@ public sealed class EcrApiFactory(
         builder.UseEnvironment("Development");
         builder.UseSetting("Health:WarmupOnStart", "false");
         builder.UseSetting("Documents:StaleMapWarm:Enabled", "false");
+        builder.UseSetting(Ecr.Infrastructure.Jobs.EditPathWarmer.EnabledKey, "false");
+        builder.UseSetting(Ecr.Infrastructure.Jobs.FirstEditWarmer.EnabledKey, "false");
 
         // ⛔ Наздоганяння нічних задач (`NightlyCatchUp`) — вимкнено: журнал обслуговування спільної бази колекції пишуть
         // інші тести старими годинниками, і кожен старт хоста ставив би справжні нічні задачі проти чужих даних — той
