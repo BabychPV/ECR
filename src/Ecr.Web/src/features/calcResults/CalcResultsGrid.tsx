@@ -10,6 +10,11 @@ export const RowHeight = 32;
 /** Скільки рядків малювати понад видиму область з кожного боку. */
 const Overscan = 24;
 
+/** Підказка рядка виходу: «назва — код», а коли назви немає (текст і є кодом) — код один раз (B77). */
+function outputTitle(text: string, code: string): string {
+  return text === '' || text === code ? code : `${text} — ${code}`;
+}
+
 /** Підписи, спільні для сітки й шторки. */
 export interface ResultLabels {
   readonly equipment: (row: ResultRow) => string;
@@ -298,7 +303,7 @@ export function CalcResultsGrid({
             if (item.kind !== 'output') return band(item, index);
             return (
               <tr key={`o:${item.key}`} className="ecr-cr-out" aria-rowindex={index + 2} data-cr-row={item.row.id}>
-                <th scope="row" title={`${labels.outputText(item.row)} — ${item.row.outputCode}`}>{labels.output(item.row)}</th>
+                <th scope="row" title={outputTitle(labels.outputText(item.row), item.row.outputCode)}>{labels.output(item.row)}</th>
                 <td className="ecr-cr-unit">{labels.unit(item.row)}</td>
                 {months.map((_, i) => cell(item.row, i))}
                 {total(item.row)}

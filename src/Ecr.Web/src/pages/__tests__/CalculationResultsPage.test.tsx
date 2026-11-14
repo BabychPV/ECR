@@ -127,6 +127,20 @@ describe('CalculationResultsPage', () => {
     expect(rowsRequests().filter((u) => u.includes('table=20'))).toHaveLength(1);
   });
 
+  it('вихід без назви (ні колонки, ні речовини) — код один раз у підписі й підказці, а не «RATE RATE» (B77)', async () => {
+    serve(null);
+    show();
+    const grid = await screen.findByTestId('calc-results-grid');
+    await waitFor(() => expect(grid.querySelector('[data-cr-row="r-rate"]')).not.toBeNull());
+    const head = grid.querySelector('[data-cr-row="r-rate"] th[scope="row"]')!;
+    expect(head.textContent?.trim()).toBe('RATE');
+    expect(head.getAttribute('title')).toBe('RATE');
+    // Із речовиною підпис лишається повним: код речовини, назва й код виходу.
+    const co2 = grid.querySelector('[data-cr-row="r-co2"] th[scope="row"]')!;
+    expect(co2.textContent).toContain('Carbon dioxide');
+    expect(co2.getAttribute('title')).toBe('CO2 · Carbon dioxide — E_CO2');
+  });
+
   it('пошук іде на сервер (зведення й сторінка з q); шторка значення веде до документа на аркуші, таблиці й місяці', async () => {
     serve(null);
     show();
