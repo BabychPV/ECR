@@ -1654,6 +1654,8 @@ Enterprise; Standard і Express переписують таблицю. Коже�
 | `IX_CalculationResult_DocRun` (R5-Q1-02, `47e92166`, після RC16) | `07-partition-tables.sql` | `(PeriodKey, DocumentId, CalculationRunId)` з INCLUDE (`MethodologyVersionId`, `OutputCode`, `SourceRowKey`, `Value`, `UnitId`, `SubstanceEntryId`), вирівняний по `ps_ByPeriodKey`: за обсягом близький до самої таблиці | **офлайн** (гілки `ONLINE` у скрипті немає) | офлайн |
 | `IX_CalculationResult_DocRun`, ключ CRY01 (✎ 2026-11-12) | `07-partition-tables.sql` | `DROP_EXISTING` у `(PeriodKey, DocumentId, CalculationRunId, Kind, TableInstanceId)`, INCLUDE без `TableInstanceId`: **перебудова** наявного індексу — один раз на кожній базі, оновлюваній з версії до CRY01 (заміняє перебудову D-401) | **офлайн** | офлайн |
 | `IX_CalculationResult_Version` (`f7eda9da`, є в RC16) | `07-partition-tables.sql` | `(MethodologyVersionId, PeriodKey)` з INCLUDE (`CalculationRunId`, `DocumentId`), вирівняний по `ps_ByPeriodKey` | **офлайн** | офлайн |
+| `IX_arc_CellValue_Row` (✎ 2026-11-14, R-1 аудиту 2026-11, `D-498`, #898) | `12-archive-tables.sql` | `(PeriodKey, TableRowId, ColumnDefId)` на `arc.CellValue`, файлова група `DATA_ARCHIVE`: seek архівної гілки вʼюх SSRS | **офлайн** | офлайн |
+| `IX_arc_TableRow_Instance` (✎ 2026-11-14, R-1, `D-498`, #898) | `12-archive-tables.sql` | `(PeriodKey, TableInstanceId)` на `arc.TableRow`, `DATA_ARCHIVE` | **офлайн** | офлайн |
 
 На відміну від U1, B18 і `IX_CellChange_LateEdit`, `07-partition-tables.sql` редакції сервера не
 визначає: `CREATE NONCLUSTERED INDEX` іде без `WITH (ONLINE = ON)` і на Enterprise теж. Кожен індекс
@@ -1678,6 +1680,29 @@ Enterprise; Standard і Express переписують таблицю. Коже�
    -Server <сервер> -Database <копія> -Upgrade`, п. 8) — він і дає тривалість.
 
 Вікно закладайте за результатом пробного прогону, а не «хвилини».
+
+**Індекси `arc.*` з `12-archive-tables.sql` (R-1, ✎ 2026-11-14, B118).** `arc.CellValue` і `arc.TableRow` —
+таблиці з кластерним columnstore-індексом, а на такій таблиці SQL Server не будує новий B-tree індекс з
+`ONLINE = ON` на **жодній** редакції (Enterprise теж: «cannot be performed online on a table with a columnstore
+index»). Тому обидва індекси будуються **офлайн** на першому оновленні бази, де їх ще немає (`IF NOT EXISTS`),
+тобто на кожній базі, оновлюваній з версії до #898 (live W15v — `363dc0baa` — уже з ними). Тривалість залежить
+лише від обсягу архіву:
+- архів порожній (жоден рік не винесено `arc.usp_ArchiveYear`) — секунди;
+- архів наповнений — пропорційно до рядків `arc.CellValue` (порядок величини: ~108 млн комірок на рік
+  розрахунків). Перевірити до вікна:
+  ```sql
+  SELECT OBJECT_NAME(object_id) AS [Table], SUM(row_count) AS [Rows], SUM(used_page_count) * 8 / 1024 AS used_mb
+  FROM sys.dm_db_partition_stats
+  WHERE object_id IN (OBJECT_ID(N'arc.CellValue'), OBJECT_ID(N'arc.TableRow'))
+  GROUP BY object_id;
+  ```
+  Місце у файловій групі `DATA_ARCHIVE` і в журналі — із запасом понад `used_mb`.
+
+⛔ **Тривалість на архіві реального обсягу не заміряна** — так само, як для `calc.CalculationResult` вище:
+пробний прогін `setup-dev-db.ps1 -Upgrade` на відновленій копії бази з наповненим архівом дає число для вікна.
+Ті самі індекси трохи сповільнюють крок 1 `arc.usp_ArchiveYear` (масова копія в `arc.*`); і це, і час звітів
+SSRS за заархівований рік — відкритий замір R-1 (звіт `docs/build/audit-2026-11-10/07-archive-reporting.md`,
+R-1, крок 10).
 
 ⚠ **Для `aud.CellChange` розбити `ADD` на порції не можна:** журнал незмінний, а `UPDATE`
 (для «додати як `NULL`, заповнити пачками, потім `NOT NULL`») відхиляє тригер

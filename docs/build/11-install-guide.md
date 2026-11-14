@@ -939,7 +939,11 @@ SERVICE_ACCOUNT=<той самий> WORKER_ENABLED=<1 або 0>` (звичайн
 версії будує офлайн (на будь-якій редакції, Enterprise теж) індекс `IX_CalculationResult_DocRun` на
 всій `calc.CalculationResult`; вікно — за пробним прогоном на копії (runbook §8.2, «Індекси
 `calc.CalculationResult` з `07-partition-tables.sql`»). Перед
-першим скриптом схеми `deploy-ecr.ps1` зупиняє `EcrWorker` і `EcrApi`, а ще раніше
+першим скриптом схеми `deploy-ecr.ps1` зупиняє `EcrWorker` і `EcrApi`. ✎ 2026-11-14 (B118, R-1): оновлення з
+версії до #898 так само офлайн будує два індекси архіву `IX_arc_CellValue_Row` і `IX_arc_TableRow_Instance`
+(`12-archive-tables.sql`; columnstore-таблиці `arc.*` не дозволяють `ONLINE` на жодній редакції): на порожньому
+архіві — секунди, на наповненому — пропорційно до обсягу `arc.CellValue`, вікно — за пробним прогоном (runbook
+§8.2, «Індекси `arc.*` з `12-archive-tables.sql`»). А ще раніше `deploy-ecr.ps1`
 вимагає свіжу копію бази (`msdb.dbo.backupset`, не старша за `-BackupMaxAgeHours`,
 типово 24 год; `-SkipBackupCheck` — для автоматизації). Деталі —
 `docs/admin/operations-runbook.md` §8 «Копія і зупинка служб». Конфігурація в `%ProgramData%\ECR\config\`
