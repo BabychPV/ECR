@@ -351,6 +351,17 @@ public interface ITemplateVersionStore
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Рядок на кожну живу колонку кожної такої версії.</returns>
     public Task<IReadOnlyList<PublishedColumnType>> ListPublishedColumnTypesAsync(int templateId, CancellationToken ct);
+
+    /// <summary>
+    /// ✎ LAND-YEAR L0a: псевдоніми місячних входів методологій (<c>cfg.MonthInputAlias</c>) таблиць версії — вхід
+    /// перевірки публікації <c>PublishChecks.CheckMonthInputAliases</c>. Таблиця версії — через <c>TableDef → SheetDef</c>
+    /// (власного <c>TemplateVersionId</c> псевдонім не має).
+    /// </summary>
+    /// <param name="templateVersionId">Версія.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Псевдоніми в порядку Id.</returns>
+    public Task<IReadOnlyList<Domain.Entities.Configuration.MonthInputAlias>> ListMonthInputAliasesAsync(
+        int templateVersionId, CancellationToken ct);
 }
 
 /// <summary>✎ R-3: тип колонки опублікованої/застарілої версії шаблону (вхід перевірки родини типу при публікації).</summary>

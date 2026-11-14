@@ -244,6 +244,10 @@ public sealed partial class PublishTemplateVersionHandler(
         // ⛔ D-474: річна розкладка з місячно-залежним розрахунком у немісячній колонці показала б число одного місяця як річне.
         diagnostics = [.. diagnostics, .. PublishChecks.CheckYearLayoutPeriodDependence(version, formulaEngine, activeBindings)];
 
+        // ✎ LAND-YEAR L0a: хибний псевдонім місячного входу мовчки годував би методологію чужим місяцем.
+        var monthInputAliases = await versionStore.ListMonthInputAliasesAsync(templateVersionId, ct).ConfigureAwait(false);
+        diagnostics = [.. diagnostics, .. PublishChecks.CheckMonthInputAliases(version, monthInputAliases)];
+
         // ✎ RC16-2: ціль Lookup-колонок і Lookup-полів шапки - живий активний довідник.
         // Без сховища довідників (збирання без нього) існування цілі не перевіряється, як і в `PublishMethodologyHandler`;
         // Lookup без довідника (R16-1) відсівається завжди.

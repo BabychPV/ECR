@@ -416,6 +416,10 @@ public sealed class MetadataCache(
 
                 // PM-11c: прапор «є чинна прив'язка до дозволу» - тією ж проєкцією, без окремого звернення.
                 HasPermitBindings = db.PermitSheetBindings.Any(b => b.TemplateVersionId == templateVersionId && b.IsActive),
+
+                // ✎ LAND-YEAR L0a: розкладка версії — тією ж проєкцією; псевдоніми місячних входів читає лише YearWithMonthColumns.
+                YearLayout = db.TemplateVersions.Any(v =>
+                    v.Id == templateVersionId && v.Layout == Ecr.Domain.Enums.TemplateLayout.YearWithMonthColumns),
             })
             .Where(x => x.Sheet.TemplateVersionId == templateVersionId && !x.Sheet.IsDeleted)
             .OrderBy(x => x.Sheet.Ordinal)
@@ -425,6 +429,7 @@ public sealed class MetadataCache(
         var sheets = sheetRows.Select(x => x.Sheet).ToList();
         var hasRelations = sheetRows.Any(x => x.HasRelations);
         var hasPermitBindings = sheetRows.Any(x => x.HasPermitBindings);
+        var yearLayout = sheetRows.Any(x => x.YearLayout);
 
         var sheetIds = sheets.Select(s => s.Id).ToArray();
 
@@ -541,6 +546,23 @@ public sealed class MetadataCache(
             }
         }
 
+        // ✎ LAND-YEAR L0a: псевдоніми місячних входів методологій — лише версія YearWithMonthColumns (інші розкладки
+        // запиту не платять: кількість запитів побудови знімка для них незмінна).
+        var monthInputAliases = new Dictionary<(int TableDefId, int MonthNumber), IReadOnlyList<MonthInputAlias>>();
+        if (yearLayout && tableIds.Length > 0)
+        {
+            var aliases = await db.MonthInputAliases
+                .AsNoTracking()
+                .Where(a => tableIds.Contains(a.TableDefId))
+                .OrderBy(a => a.Id)
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+            foreach (var group in aliases.GroupBy(a => (a.TableDefId, (int)a.MonthNumber)))
+            {
+                monthInputAliases[group.Key] = [.. group];
+            }
+        }
+
         var tablesBySheet = tables.ToLookup(t => t.SheetDefId);
         foreach (var sheet in sheets)
         {
@@ -560,6 +582,7 @@ public sealed class MetadataCache(
             HeaderFields = headerFields,
             HasActiveRollupOrCheck = hasRelations,
             HasActivePermitBindings = hasPermitBindings,
+            MonthInputAliases = monthInputAliases,
         };
     }
 }
