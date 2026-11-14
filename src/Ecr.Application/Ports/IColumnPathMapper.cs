@@ -46,4 +46,25 @@ public interface IColumnPathMapper
     /// </returns>
     public Task<IReadOnlyDictionary<int, IReadOnlyList<int>>> LineageAsync(
         IReadOnlyCollection<int> columnIds, CancellationToken ct);
+
+    /// <summary>
+    /// ✎ B102: «родовід» таблиць — Id ТІЄЇ САМОЇ таблиці (шлях «аркуш → таблиця») в усіх версіях її шаблону плюс
+    /// таблиці, з яких пари <c>cfg.ColumnRename</c> ведуть у колонки будь-якої з них (перейменування таблиці при
+    /// переносі, транзитивно) — те саме джерело, що й у <see cref="LineageAsync"/>. Для журналу рядків
+    /// <c>aud.RowChange</c>, який після переносу лишається на <c>TableDefId</c> старої версії.
+    /// </summary>
+    /// <param name="tableIds">Таблиці (зазвичай — видимі таблиці аркуша поточної версії документа).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>
+    /// Для кожної названої таблиці — непорожній перелік, що містить і її саму (невідомий Id — лише вона сама).
+    /// Таблиця з тим самим кодом на ІНШОМУ аркуші в родовід не входить.
+    /// </returns>
+    /// <remarks>Типова реалізація — без родоводу (кожна таблиця лише сама); реальна — <c>ColumnPathMapper</c>.</remarks>
+    public Task<IReadOnlyDictionary<int, IReadOnlyList<int>>> TableLineageAsync(
+        IReadOnlyCollection<int> tableIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(tableIds);
+        return Task.FromResult<IReadOnlyDictionary<int, IReadOnlyList<int>>>(
+            tableIds.Distinct().ToDictionary(id => id, id => (IReadOnlyList<int>)[id]));
+    }
 }
