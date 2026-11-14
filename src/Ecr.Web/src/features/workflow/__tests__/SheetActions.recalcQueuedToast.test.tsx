@@ -1,9 +1,11 @@
-import type { JSX, ReactNode } from 'react';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { Notifications, notifications } from '@mantine/notifications';
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SheetActions } from '../SheetActions';
 
@@ -13,8 +15,15 @@ import { SheetActions } from '../SheetActions';
  * вигляду не впізнає й віддає його як є. Тепер тост лише каже, що перерахунок аркуша в черзі;
  * шлях до задачі — посилання на `/admin/jobs?id=…`, і лише з `System.ViewHealth` (маршрут
  * `/admin/jobs` закритий цим правом — без нього посилання вело б у 403).
+ *
+ * B98(2): перехід — звичайне посилання за `href` (повне завантаження), без `UNSAFE_NavigationContext`;
+ * і в роутері, і поза ним (тости, `DocumentActionBar`) поведінка одна: клік не перехоплюється, тост ховається.
+ * `router.navigate` застосунку недоступний — `features` не імпортують `app` (`ClientLayerRulesTests`).
  */
+const SheetActionsSource = readFileSync(resolve(__dirname, '../SheetActions.tsx'), 'utf8');
+
 const RawJobId = 'Recalculation-doc96-p202610-s218-0f3c9a7d2b6e4c1a8d5f7e9b3a1c2d4e';
+const JobTo = `/admin/jobs?id=${encodeURIComponent(RawJobId)}`;
 
 const QueuedText = /Sheet recalculation queued|workflow\.sheetRecalcQueued/i;
 const OpenJobLink = /open in the job queue|registries\.impact\.openJob/i;
@@ -50,12 +59,6 @@ function mockFetch(permissions: string[]): void {
   );
 }
 
-function JobsProbe(): JSX.Element {
-  const location = useLocation();
-
-  return <div data-testid="jobs-route">{`${location.pathname}${location.search}`}</div>;
-}
-
 function show(routed: boolean): void {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const actions = <SheetActions documentId={96} sheetDefId={218} periodKey={202610} state="Draft" />;
@@ -64,7 +67,6 @@ function show(routed: boolean): void {
     <MemoryRouter initialEntries={['/documents/96']}>
       <Routes>
         <Route path="/documents/96" element={actions} />
-        <Route path="/admin/jobs" element={<JobsProbe />} />
       </Routes>
     </MemoryRouter>
   ) : (
@@ -112,26 +114,26 @@ describe('SheetActions: тост F9 без сирого id задачі (B46(2))
     expect(screen.queryByRole('link', { name: OpenJobLink })).toBeNull();
   });
 
-  it('з System.ViewHealth — посилання відкриває саме цю задачу на /admin/jobs', async () => {
+  it.each([
+    ['у роутері', true],
+    ['поза роутером (тости, DocumentActionBar)', false],
+  ])('з System.ViewHealth %s — посилання на саме цю задачу, клік не перехоплено, тост ховається (B98(2))', async (_name, routed) => {
     mockFetch(['Document.View', 'System.ViewHealth']);
-    show(true);
+    show(routed);
     await pressF9();
 
     const link = await screen.findByRole('link', { name: OpenJobLink });
-    const to = `/admin/jobs?id=${encodeURIComponent(RawJobId)}`;
-    expect(link.getAttribute('href')).toBe(to);
+    expect(link.getAttribute('href')).toBe(JobTo);
 
-    fireEvent.click(link);
+    // ⛔ RED до B98(2): у роутері клік перехоплював навігатор з `UNSAFE_NavigationContext` (preventDefault).
+    // jsdom сам переходу не виконує («Not implemented: navigation») — перевіряємо, що браузерові його не заборонено.
+    const notPrevented = fireEvent.click(link);
 
-    await waitFor(() => expect(screen.getByTestId('jobs-route').textContent).toBe(to));
+    expect(notPrevented).toBe(true);
+    await waitFor(() => expect(screen.queryByRole('link', { name: OpenJobLink })).toBeNull());
   });
 
-  it('з System.ViewHealth поза роутером — звичайне посилання з тією самою адресою', async () => {
-    mockFetch(['Document.View', 'System.ViewHealth']);
-    show(false);
-    await pressF9();
-
-    const link = await screen.findByRole('link', { name: OpenJobLink });
-    expect(link.getAttribute('href')).toBe(`/admin/jobs?id=${encodeURIComponent(RawJobId)}`);
+  it('без нестабільного API роутера (B98(2))', () => {
+    expect(SheetActionsSource).not.toMatch(/import\s*\{[^}]*\bUNSAFE_/);
   });
 });

@@ -1666,7 +1666,8 @@ public sealed partial class SourceEventSyncJob(
     /// <summary>
     /// ⛔ Автоперерахунок (§4.7.4 крок 7, A4): ОДИН виклик на зачеплений період за прогін мапінгу,
     /// не на подію й не на групу; нуль записаного — нуль викликів. Черга зливає дублікати без
-    /// витіснення, тригер сам не ставить для закритого, Scheduled чи поданого періоду.
+    /// витіснення, тригер сам не ставить для закритого чи Scheduled періоду і повністю затвердженого документа
+    /// (✎ B83: поданий перераховується з позначкою).
     /// </summary>
     private async Task RequestRecalculationAsync(
         long documentId, HashSet<int> appliedPeriods, HashSet<int> alreadyRequested, CancellationToken ct)
