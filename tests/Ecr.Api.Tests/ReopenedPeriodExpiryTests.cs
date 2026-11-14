@@ -84,6 +84,12 @@ public sealed class ReopenedPeriodExpiryTests(SqlServerFixture sql)
         var project = await db.Projects.SingleAsync(p => p.Id == document.ProjectId).ConfigureAwait(false);
         project.Activate(DateTime.UtcNow);
 
+        // ⛔ B101: без цього тест — бомба за календарем. Річне вікно D-204 (31.12.2026 19:00Z … 14.02.2027 19:00Z
+        // для проєкту 2026) тримає ВСІ періоди року в `Grace`, тож після `until` запис проходив би з 200.
+        // Нуль днів — вікна немає (`YearGraceWindow.For`), і січень 2026 лишається порахованим `Closed` назавжди.
+        // Лише СВІЙ проєкт тесту (TestDocumentBuilder створює окремий), спільні дані не зачеплено.
+        db.Entry(project).Property(p => p.YearGraceOffsetDays).CurrentValue = 0;
+
         var policy = await db.PeriodPolicies.SingleAsync(p => p.Id == project.PeriodPolicyId).ConfigureAwait(false);
         var period = await db.Periods
             .SingleAsync(p => p.ProjectId == document.ProjectId && p.PeriodKeyValue == document.PeriodKey.Value)
