@@ -5798,6 +5798,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
 
+                    b.Property<DateTime?>("NextAttemptAt")
+                        .HasColumnType("datetime2(3)");
+
                     b.Property<string>("Recipients")
                         .HasMaxLength(4000)
                         .HasColumnType("nvarchar(4000)");

@@ -105,6 +105,12 @@ public sealed partial class OutboxDispatcher(
     public const int MaxAttempts = 5;
 
     /// <summary>
+    /// D-9: мінімальна пауза між невдалими спробами. Трохи менше за годину між прогонами зведення (NotificationJob),
+    /// щоб щогодинний тик її не пропускав; «відправити зараз» (OutboxFlushJob) рядок у паузі не бере.
+    /// </summary>
+    public static readonly TimeSpan RetryDelay = TimeSpan.FromMinutes(50);
+
+    /// <summary>
     /// Скільки часу захоплення (<c>Sending</c>) лишається чинним, перш ніж
     /// вважати його завислим і повернути подію в чергу.
     /// </summary>
@@ -224,7 +230,8 @@ public sealed partial class OutboxDispatcher(
                 item.MarkFailed(
                     "Адресатів не визначено: жоден активний користувач не має "
                     + "увімкненого отримання алертів і пошти.",
-                    MaxAttempts);
+                    MaxAttempts,
+                    clock.UtcNow + RetryDelay);
 
                 if (!await PersistAsync(item, claim.Token, ct).ConfigureAwait(false))
                 {
@@ -267,7 +274,8 @@ public sealed partial class OutboxDispatcher(
                     LogSendFailed(logger ?? NullLogger<OutboxDispatcher>.Instance, item.Id, correlationId, error);
                 }
 
-                item.MarkFailed(SafeErrorText.For(error, correlationId, "the delivery"), MaxAttempts);
+                item.MarkFailed(
+                    SafeErrorText.For(error, correlationId, "the delivery"), MaxAttempts, clock.UtcNow + RetryDelay);
             }
 
             // ⛔ Фіксація ОДРАЗУ, ще до наступної відправки. Раніше тут не було
@@ -320,7 +328,8 @@ public sealed partial class OutboxDispatcher(
         DateTime now, string? onlyEventCode, CancellationToken ct)
     {
         var candidateIds = await db.NotificationOutbox
-            .Where(n => n.State == "Pending" && (onlyEventCode == null || n.EventCode == onlyEventCode))
+            .Where(n => n.State == "Pending" && (n.NextAttemptAt == null || n.NextAttemptAt <= now)
+                        && (onlyEventCode == null || n.EventCode == onlyEventCode))
             .OrderBy(n => n.CreatedAt)
             .Take(MaxPerRun)
             .Select(n => n.Id)
@@ -397,6 +406,7 @@ public sealed partial class OutboxDispatcher(
                     .SetProperty(n => n.SentAt, item.SentAt)
                     .SetProperty(n => n.Attempts, item.Attempts)
                     .SetProperty(n => n.Error, item.Error)
+                    .SetProperty(n => n.NextAttemptAt, item.NextAttemptAt)
                     .SetProperty(n => n.ClaimedAt, (DateTime?)null)
                     .SetProperty(n => n.ClaimToken, (Guid?)null),
                 ct)

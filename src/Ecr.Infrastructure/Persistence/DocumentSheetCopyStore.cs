@@ -229,6 +229,22 @@ public sealed class DocumentSheetCopyStore(EcrDbContext db) : IDocumentSheetCopy
             .Where(i => i.DocumentId == documentId && i.SheetCopyId == sheetCopyId)
             .ExecuteDeleteAsync(ct).ConfigureAwait(false);
 
+        // ⛔ D-3: історія дозволів копії (J01) — зовнішнього ключа на копію немає. Частини — по одному періоду
+        // (відсічка партицій); періоди — з самих частин (поділ може лежати в місяці, де екземплярів копії вже немає).
+        var partPeriods = await db.CellPermitParts.AsNoTracking()
+            .Where(p => p.DocumentId == documentId && p.SheetCopyId == sheetCopyId)
+            .Select(p => p.PeriodKeyValue).Distinct().ToListAsync(ct).ConfigureAwait(false);
+        foreach (var key in partPeriods.Order())
+        {
+            await db.CellPermitParts
+                .Where(p => p.PeriodKeyValue == key && p.DocumentId == documentId && p.SheetCopyId == sheetCopyId)
+                .ExecuteDeleteAsync(ct).ConfigureAwait(false);
+        }
+
+        await db.PermitSegments
+            .Where(s => s.DocumentId == documentId && s.SheetCopyId == sheetCopyId)
+            .ExecuteDeleteAsync(ct).ConfigureAwait(false);
+
         // Журнал подій і стани копії (зрізи подань лишаються — без зовнішнього ключа).
         await db.ApprovalEvents
             .Where(e => e.DocumentId == documentId && e.SheetCopyId == sheetCopyId)
