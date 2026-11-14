@@ -64,4 +64,41 @@ describe('TestCaseRunner — тест без очікувань', () => {
     expect(within(row).getByText('expressions.testsGreen')).toBeTruthy();
     expect(within(row).queryByText('expressions.testsRed')).toBeNull();
   });
+
+  /**
+   * B54: підказка «чому червоний» — лише коли набір червоний, а кожен випадок зелений (нічого не очікували).
+   * Мутація: прибрати умову `every(isGreen)` або показувати підказку завжди — другий/третій тест червоніє.
+   */
+  it('показує підказку, коли набір червоний лише через відсутність очікувань', async () => {
+    reply = result([{ code: 'PARITY_1', isGreen: true, mismatches: [] }], false);
+
+    await runAndGetRow('PARITY_1');
+
+    expect(screen.getByText('expressions.noExpectationsHint')).toBeTruthy();
+  });
+
+  it('не показує підказку, коли набір зелений', async () => {
+    reply = result([{ code: 'GOLD_P1', isGreen: true, mismatches: [] }], true);
+
+    await runAndGetRow('GOLD_P1');
+
+    expect(screen.queryByText('expressions.noExpectationsHint')).toBeNull();
+  });
+
+  it('не показує підказку, коли червоний через справжню розбіжність', async () => {
+    reply = result(
+      [
+        {
+          code: 'GOLD_P1',
+          isGreen: false,
+          mismatches: [{ outputCode: 'OUT', expected: '1', actual: '2', tolerance: '0', substanceEntryId: null }],
+        },
+      ],
+      false,
+    );
+
+    await runAndGetRow('GOLD_P1');
+
+    expect(screen.queryByText('expressions.noExpectationsHint')).toBeNull();
+  });
 });
