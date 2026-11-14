@@ -71,6 +71,13 @@ public sealed class CalculationInputBuilder(
             .GroupBy(c => c.Address.TableRowId)
             .ToDictionary(g => g.Key, g => g.ToList());
 
+        // ✎ LAND-YEAR L2a: псевдоніми місячних входів (`cfg.MonthInputAlias`, лише версії YearWithMonthColumns) — аргумент
+        // `@Alias` прогону місяця m бере значення місячної колонки m. Місяць — порядковий номер періоду прогону (у місячному
+        // проєкті = місяць); псевдонімів немає — жодної роботи.
+        var aliases = periodKey.Sequence is >= 1 and <= 12
+            ? snapshot.MonthInputAliasesFor(instance.TableDefId, periodKey.Sequence)
+            : [];
+
         var inputs = new List<CalculationInput>(rowKeys.Count);
 
         foreach (var rowKey in rowKeys)
@@ -105,6 +112,11 @@ public sealed class CalculationInputBuilder(
                     .ToList()
                 : [];
 
+            if (aliases.Count > 0 && cells is not null)
+            {
+                arguments = WithAliases(arguments, cells, aliases, snapshot);
+            }
+
             inputs.Add(new CalculationInput(
                 methodology,
                 instance.DocumentId,
@@ -117,5 +129,47 @@ public sealed class CalculationInputBuilder(
         }
 
         return inputs;
+    }
+
+    /// <summary>
+    /// ✎ LAND-YEAR L2a: додає аргументи псевдонімів місяця прогону — ім'я псевдоніма, значення комірки його колонки в
+    /// цьому рядку (той самий вигляд аргументу, що й для колонки: одиниця комірки або колонки, id запису довідника).
+    /// </summary>
+    /// <remarks>
+    /// Незаповнена колонка-ціль — аргументу немає (як і для незаповненої колонки). Ім'я, що вже є серед аргументів (код
+    /// живої колонки), не перекривається: публікація таке відхиляє (<c>monthInputAliasInvalid</c>), а тут перемагає
+    /// колонка — правда комірки важливіша за псевдонім.
+    /// </remarks>
+    private static List<CalculationArgument> WithAliases(
+        List<CalculationArgument> arguments,
+        List<CellRecord> cells,
+        IReadOnlyList<Domain.Entities.Configuration.MonthInputAlias> aliases,
+        Domain.Entities.Configuration.TemplateVersionSnapshot snapshot)
+    {
+        var names = arguments.Select(a => a.ArgumentCode).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var byColumn = new Dictionary<int, CellRecord>(cells.Count);
+        foreach (var cell in cells)
+        {
+            byColumn.TryAdd(cell.Address.ColumnDefId, cell);
+        }
+
+        foreach (var alias in aliases)
+        {
+            if (names.Contains(alias.Alias) || !byColumn.TryGetValue(alias.ColumnDefId, out var cell))
+            {
+                continue;
+            }
+
+            names.Add(alias.Alias);
+            arguments.Add(new CalculationArgument(
+                alias.Alias,
+                cell.Value.ValueNumeric,
+                cell.Value.ValueString,
+                cell.Value.ValueUnitId
+                    ?? (snapshot.ColumnsById.TryGetValue(alias.ColumnDefId, out var column) ? column.UnitId : null),
+                cell.Value.ValueRegistryEntryId));
+        }
+
+        return arguments;
     }
 }
