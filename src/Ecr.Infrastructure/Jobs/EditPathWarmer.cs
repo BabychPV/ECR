@@ -178,9 +178,7 @@ public sealed partial class EditPathWarmer(IServiceScopeFactory scopes, ILogger<
             }
         }
 
-        var readScope = await WarmReadScopeVersionsAsync(cap, warmed, ct).ConfigureAwait(false);
-
-        var result = new EditPathWarmResult(warmed, failed, quartzMs, total.ElapsedMilliseconds, readScope);
+        var result = new EditPathWarmResult(warmed, failed, quartzMs, total.ElapsedMilliseconds);
         LogWarmed(logger, warmed.Count, failed, quartzMs ?? -1, result.ElapsedMs);
         return result;
     }
@@ -193,19 +191,29 @@ public sealed partial class EditPathWarmer(IServiceScopeFactory scopes, ILogger<
     /// </summary>
     /// <remarks>
     /// ⚠ Лише кеш метаданих (той самий ключ ревізії, що й перший користувач); без графа формул і оформлення — читанню в
-    /// межах доступу вони не потрібні. Версії, вже прогріті вище, пропускаються. Стеля — та сама
-    /// (<see cref="MaxVersionsKey"/>), плюс бюджет часу <see cref="ReadScopeBudget"/>: вичерпано — решту завантажить
-    /// перший запит, як і без прогріву.
+    /// межах доступу вони не потрібні. Окремий етап, а не частина <see cref="WarmAsync"/>: служба кличе його ПІСЛЯ
+    /// прогріву першої правки (AN-194), щоб до ~60 с бюджету не відсували той прогрів. Вже прогріті версії
+    /// (<paramref name="done"/>) виключає САМ запит — до стелі, інакше чинні версії (найбільші Id) з'їдали б стелю
+    /// замість історичних (F13 B53, D1). Стеля — <see cref="MaxVersionsKey"/>, плюс бюджет часу
+    /// <see cref="ReadScopeBudget"/>: вичерпано — решту завантажить перший запит, як і без прогріву.
     /// </remarks>
-    private async Task<IReadOnlyList<int>> WarmReadScopeVersionsAsync(int cap, List<int> done, CancellationToken ct)
+    /// <param name="maxVersions">Стеля версій (обрізається до 1…<see cref="MaxVersionsLimit"/>).</param>
+    /// <param name="done">Версії, вже прогріті <see cref="WarmAsync"/>.</param>
+    /// <param name="ct">Скасування (зупинка хоста).</param>
+    /// <returns>Прогріті версії шкали в порядку проходу.</returns>
+    /// <exception cref="OperationCanceledException">Прогрів скасовано.</exception>
+    public async Task<IReadOnlyList<int>> WarmReadScopeVersionsAsync(int maxVersions, IReadOnlyCollection<int> done, CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(done);
+
+        var cap = Math.Clamp(maxVersions, 1, MaxVersionsLimit);
         IReadOnlyList<int> versions;
         try
         {
             var scope = scopes.CreateAsyncScope();
             await using (scope.ConfigureAwait(false))
             {
-                versions = await ListReadScopeVersions(scope.ServiceProvider, cap, ct).ConfigureAwait(false);
+                versions = await ListReadScopeVersions(scope.ServiceProvider, cap, done, ct).ConfigureAwait(false);
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -216,7 +224,7 @@ public sealed partial class EditPathWarmer(IServiceScopeFactory scopes, ILogger<
 
         var budget = Stopwatch.StartNew();
         var warmed = new List<int>();
-        foreach (var versionId in versions.Where(v => !done.Contains(v)).Take(cap))
+        foreach (var versionId in versions.Take(cap))
         {
             ct.ThrowIfCancellationRequested();
             if (budget.Elapsed >= ReadScopeBudget)
@@ -241,6 +249,7 @@ public sealed partial class EditPathWarmer(IServiceScopeFactory scopes, ILogger<
             }
         }
 
+        LogReadScopeWarmed(logger, warmed.Count, budget.ElapsedMilliseconds);
         return warmed;
     }
 
@@ -252,13 +261,14 @@ public sealed partial class EditPathWarmer(IServiceScopeFactory scopes, ILogger<
     public static readonly TimeSpan DefaultReadScopeBudget = TimeSpan.FromSeconds(60);
 
     /// <summary>B53: джерело версій шкали; тести підміняють, у застосунку — <see cref="ReadScopeVersionsAsync"/>.</summary>
-    public Func<IServiceProvider, int, CancellationToken, Task<IReadOnlyList<int>>> ListReadScopeVersions { get; init; }
-        = (provider, cap, ct) => ReadScopeVersionsAsync(provider.GetRequiredService<EcrDbContext>(), cap, ct);
+    /// <remarks>Аргументи: провайдер scope, стеля, версії, які виключити (вже прогріті), токен.</remarks>
+    public Func<IServiceProvider, int, IReadOnlyCollection<int>, CancellationToken, Task<IReadOnlyList<int>>> ListReadScopeVersions { get; init; }
+        = (provider, cap, exclude, ct) => ReadScopeVersionsAsync(provider.GetRequiredService<EcrDbContext>(), cap, exclude, ct);
 
     /// <summary>
     /// B53: версії, знімки яких <c>ReadScopeAsync</c> обʼєднує для документів проєктів із відкритим (<c>Open</c>/<c>Grace</c>)
-    /// періодом: усі версії шкали проєкту (<c>doc.ProjectTemplateVersion</c>), найновіші першими, не більше
-    /// <paramref name="cap"/>.
+    /// періодом: усі версії шкали проєкту (<c>doc.ProjectTemplateVersion</c>), крім <paramref name="exclude"/>, найновіші
+    /// першими, не більше <paramref name="cap"/>. Виключення — у запиті (<c>OPENJSON</c>), тобто ДО стелі.
     /// </summary>
     /// <remarks>
     /// ⚠ Основну версію проєкту окремо не читає (B74: нових читань <c>doc.Project.TemplateVersionId</c> у сирому SQL немає):
@@ -267,11 +277,16 @@ public sealed partial class EditPathWarmer(IServiceScopeFactory scopes, ILogger<
     /// </remarks>
     /// <param name="db">Контекст.</param>
     /// <param name="cap">Стеля.</param>
+    /// <param name="exclude">Версії, яких не повертати (вже прогріті).</param>
     /// <param name="ct">Скасування.</param>
-    public static async Task<IReadOnlyList<int>> ReadScopeVersionsAsync(EcrDbContext db, int cap, CancellationToken ct)
+    public static async Task<IReadOnlyList<int>> ReadScopeVersionsAsync(
+        EcrDbContext db, int cap, IReadOnlyCollection<int> exclude, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(exclude);
         ArgumentOutOfRangeException.ThrowIfLessThan(cap, 1);
+
+        var excluded = System.Text.Json.JsonSerializer.Serialize(exclude.Distinct().ToArray());
 
         const byte open = (byte)Ecr.Domain.Enums.PeriodState.Open;
         const byte grace = (byte)Ecr.Domain.Enums.PeriodState.Grace;
@@ -284,6 +299,7 @@ public sealed partial class EditPathWarmer(IServiceScopeFactory scopes, ILogger<
                     FROM doc.Period AS pe
                     JOIN doc.Document AS d ON d.ProjectId = pe.ProjectId
                     WHERE pe.ProjectId = t.ProjectId AND pe.State IN ({open}, {grace}))
+                  AND t.TemplateVersionId NOT IN (SELECT CAST(j.[value] AS int) FROM OPENJSON({excluded}) AS j)
                 """)
             .OrderByDescending(id => id)
             .Take(cap)
@@ -383,6 +399,9 @@ public sealed partial class EditPathWarmer(IServiceScopeFactory scopes, ILogger<
         Message = "Прогрів шляху правки: бюджет {BudgetMs} мс на версії шкали вичерпано після {Warmed}; решту завантажить перший запит.")]
     private static partial void LogReadScopeBudgetExhausted(ILogger logger, int warmed, long budgetMs);
 
+    [LoggerMessage(Level = LogLevel.Information, Message = "Прогрів версій шкали: {Warmed} версій, {ElapsedMs} мс.")]
+    private static partial void LogReadScopeWarmed(ILogger logger, int warmed, long elapsedMs);
+
     [LoggerMessage(Level = LogLevel.Information, Message = "Прогрів шляху правки: Quartz не запущено в цьому процесі; прогрів Quartz пропущено.")]
     private static partial void LogQuartzSkipped(ILogger logger);
 
@@ -395,10 +414,8 @@ public sealed partial class EditPathWarmer(IServiceScopeFactory scopes, ILogger<
 /// <param name="FailedVersions">Скільки версій не прогріто через збій.</param>
 /// <param name="QuartzMs">Скільки тривав прогін порожньої задачі Quartz; <c>null</c> — Quartz не грівся.</param>
 /// <param name="ElapsedMs">Тривалість усього проходу.</param>
-/// <param name="ReadScopeVersions">B53: версії шкали, прогріті лише в кеш метаданих (для меж читання); <c>null</c> — жодної.</param>
 public sealed record EditPathWarmResult(
-    IReadOnlyList<int> WarmedVersions, int FailedVersions, long? QuartzMs, long ElapsedMs,
-    IReadOnlyList<int>? ReadScopeVersions = null);
+    IReadOnlyList<int> WarmedVersions, int FailedVersions, long? QuartzMs, long ElapsedMs);
 
 /// <summary>
 /// Порожня задача Quartz прогріву (<see cref="EditPathWarmer.WarmQuartzAsync"/>): лише сигналізує про свій прогін.

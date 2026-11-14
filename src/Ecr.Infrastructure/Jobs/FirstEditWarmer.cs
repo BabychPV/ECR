@@ -241,6 +241,16 @@ public sealed partial class FirstEditWarmer(IServiceScopeFactory scopes, ILogger
     /// </remarks>
     private static async Task WarmPermitPreviewAsync(IServiceProvider sp, IReadOnlyList<int> versions, CancellationToken ct)
     {
+        if (sp.GetService<IRepository<Domain.Entities.Configuration.TemplateVersion, int>>() is { } versionRepository)
+        {
+            _ = await versionRepository.FindAsync(NoId, ct).ConfigureAwait(false);
+        }
+
+        if (sp.GetService<IUnitStore>() is { } unitStore)
+        {
+            _ = await unitStore.FindUnitByIdAsync(NoId, ct).ConfigureAwait(false);
+        }
+
         if (sp.GetService<IPermitBindingStore>() is { } bindings)
         {
             _ = await bindings.GetAsync(NoId, NoCode, ct).ConfigureAwait(false);
