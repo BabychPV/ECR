@@ -213,7 +213,12 @@ public sealed class CrossPeriodFanOut(
 
             var readerKey = PeriodKey.Create(source.Year, reader);
             var state = await periods.FindPeriodStateAsync(documentId, readerKey.Value, ct).ConfigureAwait(false);
-            if (state is null or Ecr.Domain.Enums.PeriodState.Closed)
+
+            // ✎ LAND-YEAR B58: закритий ЯКІР річної розкладки у відкритому році — читач лише для не-місячних цілей
+            // (те саме правило, що B24 у RecalculationJob); решта закритих — ні, як доти.
+            if (state is null
+                || (state == Ecr.Domain.Enums.PeriodState.Closed
+                    && await ClosedAnchorYearAsync(documentId, readerKey, ct, shared).ConfigureAwait(false) is null))
             {
                 continue;
             }
@@ -229,6 +234,67 @@ public sealed class CrossPeriodFanOut(
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// ✎ LAND-YEAR B58 (хвіст L1b після B24): чи ЗАКРИТИЙ <paramref name="reader"/> — якір року документа річної розкладки
+    /// (<c>YearWithMonthColumns</c>), а рік (агрегат місяців) ще не закритий
+    /// (<see cref="Ecr.Application.Security.AnnualPeriodRule.AnchorWritesAnnualTargets"/>). Так — ключі місяців календаря
+    /// року (для агрегатного стану аркуша прогону); ні — <c>null</c>.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="reader">Закритий період-читач.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <param name="shared">Спільні читання проходу; <c>null</c> — читати напряму.</param>
+    /// <remarks>
+    /// <para>
+    /// ⛔ Стани — ефективні з винятком документа (<see cref="IPeriodStore.FindPeriodStateAsync"/>), той самий вхід, що й
+    /// гейт задачі перед стартом (<c>FormulaRecalculationJob</c>). Прогін такого читача пише лише не-місячні колонки
+    /// маршрутизованих таблиць (<c>RecalculationService</c>, параметр <c>annualPeriods</c>): місячні <c>C_M01</c> закритого
+    /// січня, таблиці поза маршрутизацією, копії й Rollup/Check — ні.
+    /// </para>
+    /// <para>
+    /// Запити — лише на шляху закритого читача: роутер (кеш документа), екземпляри читача (спільні), календар року
+    /// (1 запит) і, якщо читач — якір річної версії, стани місяців (≤ 12). Без роутера чи метаданих — <c>null</c> без запитів.
+    /// </para>
+    /// </remarks>
+    public async Task<IReadOnlyList<int>?> ClosedAnchorYearAsync(
+        long documentId, PeriodKey reader, CancellationToken ct, RecalculationSharedLoad? shared = null)
+    {
+        if (router is not { Enabled: true }
+            || await router.GetDocumentAsync(documentId, ct).ConfigureAwait(false) is not { } routed)
+        {
+            return null;
+        }
+
+        var instances = await InstancesAsync(shared, documentId, reader, ct).ConfigureAwait(false);
+        if (instances.Count == 0 || !instances.Any(i => router.RoutesComputedVersion(i.TemplateVersionId)))
+        {
+            return null;
+        }
+
+        var keys = await PeriodCalendar.YearPeriods(db, routed.ProjectId, reader.Year)
+            .Select(p => p.PeriodKeyValue)
+            .OrderBy(k => k)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        if (PeriodCalendar.AnchorOf(keys) != reader.Value)
+        {
+            return null;
+        }
+
+        var states = new List<Ecr.Domain.Enums.PeriodState>(keys.Count);
+        foreach (var key in keys)
+        {
+            if (await periods.FindPeriodStateAsync(documentId, key, ct).ConfigureAwait(false) is { } state)
+            {
+                states.Add(state);
+            }
+        }
+
+        return Ecr.Application.Security.AnnualPeriodRule.AnchorWritesAnnualTargets(Ecr.Domain.Enums.PeriodState.Closed, states)
+            ? keys
+            : null;
     }
 
     private Task<IReadOnlyList<TableInstanceRef>> InstancesAsync(

@@ -160,13 +160,24 @@ public sealed class FormulaRecalculationJob(
 
                 // WW-03: період-читач. Закритий період не перераховується ніколи (стан міг змінитись
                 // між постановкою й виконанням); подані аркуші відсікає сам запис прогону.
-                if (item.Sources.Count > 0 && documentId != 0 && periods is not null
-                    && await periods.FindPeriodStateAsync(documentId, periodKey.Value, ct).ConfigureAwait(false)
-                        is not (null or Ecr.Domain.Enums.PeriodState.Closed))
+                // ✎ LAND-YEAR B58: виняток — закритий ЯКІР річної розкладки у відкритому році: лише не-місячні цілі під
+                // агрегатом року (`CrossPeriodFanOut.ClosedAnchorYearAsync`, правило B24), перевірене тут ще раз.
+                if (item.Sources.Count > 0 && documentId != 0 && periods is not null)
                 {
-                    periodWritten += await recalculation
-                        .RecalculateFromOtherPeriodsAsync(documentId, periodKey, item.Sources, ct, changed, shared)
-                        .ConfigureAwait(false);
+                    var readerState = await periods.FindPeriodStateAsync(documentId, periodKey.Value, ct).ConfigureAwait(false);
+                    IReadOnlyList<int>? annualPeriods = null;
+                    if (readerState == Ecr.Domain.Enums.PeriodState.Closed && fanOut is not null)
+                    {
+                        annualPeriods = await fanOut.ClosedAnchorYearAsync(documentId, periodKey, ct, shared).ConfigureAwait(false);
+                    }
+
+                    if (readerState is not (null or Ecr.Domain.Enums.PeriodState.Closed) || annualPeriods is not null)
+                    {
+                        periodWritten += await recalculation
+                            .RecalculateFromOtherPeriodsAsync(
+                                documentId, periodKey, item.Sources, ct, changed, shared, annualPeriods)
+                            .ConfigureAwait(false);
+                    }
                 }
             }
             catch (ConcurrencyConflictException busy) when (IsSheetBeingSubmitted(busy))
