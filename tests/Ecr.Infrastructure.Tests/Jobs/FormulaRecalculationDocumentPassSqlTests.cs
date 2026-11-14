@@ -262,6 +262,48 @@ public sealed class FormulaRecalculationDocumentPassSqlTests(SqlServerFixture sq
         Assert.Contains($"\"PeriodKey\":{Period(4)}", System.Text.Json.JsonSerializer.Serialize(april), StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// ⛔ D-8: «отруйний» період-читач падає детерміновано. Кожна перепостановка несе Hops + 1, тож ланцюжок задач
+    /// обривається на <c>MaxHops</c> (а не ставить себе без кінця). Мутація: перепоставляти з тими самими Hops — цикл не
+    /// завершується, ліміт ітерацій тесту спрацьовує (червоне).
+    /// </summary>
+    [Fact]
+    [Trait("Finding", "D-8")]
+    public async Task Отруйний_читач_не_перепоставляється_без_кінця()
+    {
+        var world = await ArrangeAsync(Chain);
+        await SetInputAsync(world, 3, 100m);
+        object payload = new FormulaRecalculationRequest(
+            world.Instance(3).InstanceId, Period(3), [Seed(world, 3)], world.Doc.DocumentId);
+
+        var periods = Periods(world);
+        periods.FindPeriodStateAsync(world.Doc.DocumentId, Period(4), Arg.Any<CancellationToken>())
+            .Returns(_ => Task.FromException<PeriodState?>(new InvalidOperationException("boom")));
+
+        var runs = 0;
+        while (runs < Ecr.Infrastructure.Jobs.CrossPeriodFanOut.MaxHops + 5)
+        {
+            runs++;
+            var jobs = Substitute.For<IBackgroundJobScheduler>();
+            await using (var db = world.Builder.CreateContext())
+            {
+                await Assert.ThrowsAsync<InvalidOperationException>(
+                    () => Job(db, world, jobs, periods).ExecuteAsync(payload, new CapturingJobProgress(), CancellationToken.None));
+            }
+
+            var next = jobs.ReceivedCalls()
+                .Where(c => c.GetMethodInfo().Name == nameof(IBackgroundJobScheduler.EnqueueCoalescedAsync)).ToList();
+            if (next.Count == 0)
+            {
+                break;
+            }
+
+            payload = next[0].GetArguments()[1]!;
+        }
+
+        Assert.True(runs <= Ecr.Infrastructure.Jobs.CrossPeriodFanOut.MaxHops + 2, $"Ланцюжок не обірвався: {runs} запусків.");
+    }
+
     private FormulaRecalculationJob Job(EcrDbContext db, World world, IBackgroundJobScheduler jobs, IPeriodStore periods)
     {
         var bulk = new BulkCellLoader(sql.ConnectionString, 1000);

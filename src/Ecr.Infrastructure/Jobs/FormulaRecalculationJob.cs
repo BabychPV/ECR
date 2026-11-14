@@ -7,6 +7,7 @@ using Ecr.Application.Recalculation;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Ecr.Infrastructure.Jobs;
 
@@ -26,12 +27,13 @@ namespace Ecr.Infrastructure.Jobs;
 /// методологій — у <c>calc.CalculationResult</c> (<c>D-69</c>). Плутати ці два
 /// шляхи не можна, і саме плутанина й сталася.
 /// </remarks>
-public sealed class FormulaRecalculationJob(
+public sealed partial class FormulaRecalculationJob(
     RecalculationService recalculation,
     EcrDbContext db,
     // WW-03: необовʼязкові лише для тестів, що збирають задачу вручну; DI підставляє обидва.
     CrossPeriodFanOut? fanOut = null,
-    IPeriodStore? periods = null) : IFormulaRecalculationJob
+    IPeriodStore? periods = null,
+    ILogger<FormulaRecalculationJob>? logger = null) : IFormulaRecalculationJob
 {
     /// <summary>Ключ каталогу відмови спільного блокування аркуша (<c>SheetEditGate.Busy</c>).</summary>
     private const string SheetBeingSubmittedKey = "err.ECR-DOC-4091.sheetBeingSubmitted";
@@ -137,7 +139,7 @@ public sealed class FormulaRecalculationJob(
             {
                 var (slot, item) = work.First();
                 work.Remove(slot);
-            current = (slot, item);
+                current = (slot, item);
                 passes++;
 
                 var periodKey = new PeriodKey(slot);
@@ -244,16 +246,23 @@ public sealed class FormulaRecalculationJob(
                 }
             }
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException && !ct.IsCancellationRequested)
         {
             // ⛔ D-8: непередбачений виняток посеред проходу. Ранні періоди вже закомічені, а ретрай виконає ПОЧАТКОВИЙ
             // payload (лише насіння) і не знайде читачів похідних колонок — тож поточний, відкладені й ще не оброблені
             // періоди-читачі ставляться окремою постановкою, і лише потім виняток іде далі (скасування не ловимо).
             db.ChangeTracker.Clear();
             IEnumerable<(int Slot, PeriodWork Item)> pending = postponed.Concat(work.Select(p => (p.Key, p.Value)));
-            if (current is { } failed)
+            if (current is { } failed && failed.Item.Sources.Count > 0)
             {
-                pending = pending.Append(failed);
+                // ⛔ Збій у обробці САМОГО періоду-читача може бути детермінованим («отруйний» вхід): нова задача впала б
+                // тут же й поставила б себе знову без кінця (ліміт спроб діє на кожну задачу окремо). Тому ланка несе
+                // Hops + 1, а за `CrossPeriodFanOut.MaxHops` ланцюжок обривається.
+                failed.Item.Hops++;
+                if (failed.Item.Hops <= CrossPeriodFanOut.MaxHops)
+                {
+                    pending = pending.Append(failed);
+                }
             }
 
             try
@@ -263,6 +272,10 @@ public sealed class FormulaRecalculationJob(
             catch (Exception requeueFailure) when (requeueFailure is not OperationCanceledException)
             {
                 // Збій самої постановки не підміняє першопричину: ретрай і так піде за початковим винятком.
+                if (logger is not null)
+                {
+                    LogRequeueFailed(logger, requeueFailure, documentId);
+                }
             }
 
             throw;
@@ -353,6 +366,11 @@ public sealed class FormulaRecalculationJob(
                 .ConfigureAwait(false);
         }
     }
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "formula-recalc: не вдалося поставити в чергу читачів після збою проходу, документ {DocumentId}.")]
+    private static partial void LogRequeueFailed(ILogger logger, Exception exception, long documentId);
 
     /// <summary>Стеля проходів одного запуску: (ланки ланцюжка + 1) × періоди року + запас; страховка від циклу.</summary>
     internal const int MaxPasses = (CrossPeriodFanOut.MaxHops + 1) * 13;
