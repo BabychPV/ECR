@@ -95,6 +95,71 @@ public sealed class PatchCellsQueryCountTests(SqlServerFixture sql)
 
     private static readonly AsyncLocal<StrongBox<bool>?> Measuring = new();
 
+    /// <summary>Задача перерахунку, яку поставив (чи в яку злився) останній <c>PATCH</c>; <c>null</c> — немає.</summary>
+    private string? _lastRecalculationJobId;
+
+    /// <summary>Запам'ятовує <c>recalculationJobId</c> відповіді <c>PATCH</c>.</summary>
+    /// <remarks>Тіло не JSON (напр. порожній 500) — нічого: причину покаже асерт статусу нижче, а не розбір тут.</remarks>
+    private void RememberRecalculation(string body)
+    {
+        if (!body.TrimStart().StartsWith('{'))
+        {
+            return;
+        }
+
+        using var json = JsonDocument.Parse(body);
+        if (json.RootElement.ValueKind == JsonValueKind.Object
+            && json.RootElement.TryGetProperty("recalculationJobId", out var id)
+            && id.ValueKind == JsonValueKind.String)
+        {
+            _lastRecalculationJobId = id.GetString();
+        }
+    }
+
+    /// <summary>
+    /// ⛔ B57: перед кожним заміром задача перерахунку попереднього <c>PATCH</c> мусить бути ЗАВЕРШЕНА (не <c>Queued</c>
+    /// і не <c>Running</c>) — так кожен замір іде одним і тим самим шляхом постановки.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Причина флаку «Теплі заміри розходяться: 26, 26, 24» (1 некласифікована команда — це <c>SET LOCK_TIMEOUT</c>,
+    /// вона є в кожному раунді й до розкиду не причетна): <c>PATCH</c> ставить <c>IFormulaRecalculationJob</c>
+    /// злиттям (<c>QuartzJobScheduler.MergeAsync</c>, O1). Якщо задача попереднього раунду ще ЧЕКАЄ в пам'яті Quartz,
+    /// комірки дописуються в неї без жодної SQL-команди; якщо Quartz її вже взяв — ставиться нова задача:
+    /// <c>SELECT itg.JobProgress</c> + <c>INSERT itg.JobProgress</c>, тобто +2. Котрий шлях випаде, вирішував таймінг
+    /// фонового воркера (під навантаженням CI задача не встигала стартувати між раундами), а не код.
+    /// </para>
+    /// <para>
+    /// ⚠ Чекаємо саме найдорожчого шляху (нова задача): храповик міряє верхню межу, стеля не послаблюється. Очікування
+    /// — поза заміром (мітка <see cref="Measuring"/> ще не стоїть), тож його читання в число не потрапляють.
+    /// </para>
+    /// </remarks>
+    private async Task SettleRecalculationAsync()
+    {
+        if (_lastRecalculationJobId is not { } jobId)
+        {
+            return;
+        }
+
+        var deadline = DateTime.UtcNow.AddMinutes(2);
+        while (true)
+        {
+            await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
+            var state = await db.JobProgresses.AsNoTracking()
+                .Where(p => p.JobId == jobId)
+                .Select(p => p.State)
+                .FirstOrDefaultAsync().ConfigureAwait(false);
+            if (state is not null and not "Queued" and not "Running")
+            {
+                _lastRecalculationJobId = null;
+                return;
+            }
+
+            Assert.True(DateTime.UtcNow < deadline, $"Задача перерахунку {jobId} не завершилась за 2 хв (стан: {state ?? "немає рядка"}).");
+            await Task.Delay(50).ConfigureAwait(false);
+        }
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
@@ -103,7 +168,10 @@ public sealed class PatchCellsQueryCountTests(SqlServerFixture sql)
     {
         var scenario = await ArrangeAsync().ConfigureAwait(true);
 
-        using var app = new EcrApiFactory(sql, stampCacheSeconds: 300, revisionWindow: TimeSpan.FromMinutes(5));
+        using var app = new EcrApiFactory(sql, stampCacheSeconds: 300, revisionWindow: TimeSpan.FromMinutes(5))
+        {
+            LayoutRegistry = EmptyLayoutRegistry.Instance, // B121: річні версії інших тестів не вмикають роутер
+        };
         app.Server.PreserveExecutionContext = true;
         using var client = await SignedInAsync(app, scenario.UserName).ConfigureAwait(true);
 
@@ -138,6 +206,7 @@ public sealed class PatchCellsQueryCountTests(SqlServerFixture sql)
             counter.Tally.Reset();
             texts.Clear();
 
+            await SettleRecalculationAsync().ConfigureAwait(true);
             var flag = new StrongBox<bool>(true);
             Measuring.Value = flag;
             try
@@ -205,7 +274,10 @@ public sealed class PatchCellsQueryCountTests(SqlServerFixture sql)
                 .ExecuteUpdateAsync(s => s.SetProperty(r => r.RowKeyValue, "P1")).ConfigureAwait(true);
         }
 
-        using var app = new EcrApiFactory(sql, stampCacheSeconds: 300, revisionWindow: TimeSpan.FromMinutes(5));
+        using var app = new EcrApiFactory(sql, stampCacheSeconds: 300, revisionWindow: TimeSpan.FromMinutes(5))
+        {
+            LayoutRegistry = EmptyLayoutRegistry.Instance, // B121: річні версії інших тестів не вмикають роутер
+        };
         app.Server.PreserveExecutionContext = true;
         using var client = await SignedInAsync(app, scenario.UserName).ConfigureAwait(true);
 
@@ -235,6 +307,7 @@ public sealed class PatchCellsQueryCountTests(SqlServerFixture sql)
         {
             counter.Tally.Reset();
             texts.Clear();
+            await SettleRecalculationAsync().ConfigureAwait(true);
             var flag = new StrongBox<bool>(true);
             Measuring.Value = flag;
             try
@@ -345,6 +418,7 @@ public sealed class PatchCellsQueryCountTests(SqlServerFixture sql)
         using var app = new EcrApiFactory(sql, stampCacheSeconds: 300, revisionWindow: TimeSpan.FromMinutes(5))
         {
             ExtraServices = services => services.AddSingleton<Ecr.Application.Permits.Groups.ILookupTargetResolver>(groups),
+            LayoutRegistry = EmptyLayoutRegistry.Instance, // B121: річні версії інших тестів не вмикають роутер
         };
         app.Server.PreserveExecutionContext = true;
         using var client = await SignedInAsync(app, scenario.UserName).ConfigureAwait(true);
@@ -370,6 +444,7 @@ public sealed class PatchCellsQueryCountTests(SqlServerFixture sql)
             }).ConfigureAwait(false);
 
             var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+            RememberRecalculation(body);
             Assert.True(response.StatusCode == HttpStatusCode.OK, $"PATCH Lookup: {response.StatusCode}\n{body}\n{app.ErrorsText}");
 
             return JsonDocument.Parse(body).RootElement.GetProperty("rowVersions").EnumerateObject()
@@ -395,6 +470,7 @@ public sealed class PatchCellsQueryCountTests(SqlServerFixture sql)
         {
             counter.Tally.Reset();
             texts.Clear();
+            await SettleRecalculationAsync().ConfigureAwait(true);
             var flag = new StrongBox<bool>(true);
             Measuring.Value = flag;
             try
@@ -481,7 +557,10 @@ public sealed class PatchCellsQueryCountTests(SqlServerFixture sql)
         var scenario = await ArrangeAsync().ConfigureAwait(true);
         await SeedGatedMethodologiesAsync(scenario, methodologyCount).ConfigureAwait(true);
 
-        using var app = new EcrApiFactory(sql, stampCacheSeconds: 300, revisionWindow: TimeSpan.FromMinutes(5));
+        using var app = new EcrApiFactory(sql, stampCacheSeconds: 300, revisionWindow: TimeSpan.FromMinutes(5))
+        {
+            LayoutRegistry = EmptyLayoutRegistry.Instance, // B121: річні версії інших тестів не вмикають роутер
+        };
         app.Server.PreserveExecutionContext = true;
         using var client = await SignedInAsync(app, scenario.UserName).ConfigureAwait(true);
 
@@ -512,6 +591,7 @@ public sealed class PatchCellsQueryCountTests(SqlServerFixture sql)
         {
             counter.Tally.Reset();
             texts.Clear();
+            await SettleRecalculationAsync().ConfigureAwait(true);
             var flag = new StrongBox<bool>(true);
             Measuring.Value = flag;
             try
@@ -579,7 +659,7 @@ public sealed class PatchCellsQueryCountTests(SqlServerFixture sql)
     }
 
     /// <summary>Один <c>PATCH</c> однієї комірки одного рядка; повертає нову версію рядка.</summary>
-    private static async Task<string> PatchRowAsync(
+    private async Task<string> PatchRowAsync(
         HttpClient client, Uri patchUri, Scenario scenario, string rowKey, string baseVersion, string columnCode, string value, EcrApiFactory app)
     {
         var response = await client.PatchAsJsonAsync(patchUri, new
@@ -591,6 +671,7 @@ public sealed class PatchCellsQueryCountTests(SqlServerFixture sql)
         }).ConfigureAwait(false);
 
         var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+        RememberRecalculation(body);
         Assert.True(response.StatusCode == HttpStatusCode.OK, $"PATCH {rowKey}: {response.StatusCode}\n{body}\n{app.ErrorsText}");
 
         return JsonDocument.Parse(body).RootElement.GetProperty("rowVersions").GetProperty(rowKey).GetString()!;
@@ -637,7 +718,7 @@ public sealed class PatchCellsQueryCountTests(SqlServerFixture sql)
     /// Один <c>PATCH</c> усіх 100 комірок; повертає нові версії рядків із
     /// відповіді.
     /// </summary>
-    private static async Task<Dictionary<string, string>> PatchAsync(
+    private async Task<Dictionary<string, string>> PatchAsync(
         HttpClient client,
         Uri patchUri,
         Scenario scenario,
@@ -668,6 +749,7 @@ public sealed class PatchCellsQueryCountTests(SqlServerFixture sql)
         }).ConfigureAwait(false);
 
         var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+        RememberRecalculation(body);
         Assert.True(
             response.StatusCode == HttpStatusCode.OK,
             $"PATCH раунд {round}: {response.StatusCode}\n{body}\n{app.ErrorsText}");

@@ -45,7 +45,10 @@ public sealed class FormulaOverrideQueryCountTests(SqlServerFixture sql, ITestOu
     {
         var s = await ArrangeAsync().ConfigureAwait(true);
 
-        using var app = new EcrApiFactory(sql, stampCacheSeconds: 300, revisionWindow: TimeSpan.FromMinutes(5));
+        using var app = new EcrApiFactory(sql, stampCacheSeconds: 300, revisionWindow: TimeSpan.FromMinutes(5))
+        {
+            LayoutRegistry = EmptyLayoutRegistry.Instance, // B121: річні версії інших тестів не вмикають роутер
+        };
         app.Server.PreserveExecutionContext = true;
         using var client = await SignInAsync(app, s.UserName).ConfigureAwait(true);
 

@@ -283,10 +283,19 @@ public sealed class YearLayoutYearModesApiTests(SqlServerFixture sql)
         return new Scenario(builder, doc, rowKey);
     }
 
-    /// <summary>Власні рядки сценарію (проблеми, результати перевірки, події процесу) — геть.</summary>
+    /// <summary>
+    /// Власні рядки сценарію (проблеми, результати перевірки, події процесу) — геть; версія — назад до
+    /// <see cref="TemplateLayout.PerMonthCopies"/>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ B121: річна розкладка, що лишилася в СПІЛЬНІЙ базі колекції, вмикає роутер місячних колонок у кожному
+    /// наступному хості (реєстр розкладок читає базу на старті) — і тести з точною кількістю звернень міряли число,
+    /// яке залежить від порядку тестів.
+    /// </remarks>
     private static async Task CleanupAsync(Scenario s)
     {
         await using var db = s.Builder.CreateContext();
+        await YearLayoutCleanup.ResetAsync(db, [s.Doc.TemplateVersionId]).ConfigureAwait(false);
         await db.CalculationIssues.Where(i => i.DocumentId == s.Doc.DocumentId).ExecuteDeleteAsync().ConfigureAwait(false);
         await db.ValidationResults.Where(v => v.DocumentId == s.Doc.DocumentId).ExecuteDeleteAsync().ConfigureAwait(false);
         await db.Database.ExecuteSqlInterpolatedAsync($"DELETE FROM wf.ApprovalEvent WHERE DocumentId = {s.Doc.DocumentId}")

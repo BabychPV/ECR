@@ -69,7 +69,10 @@ public sealed class ImportPreviewAccessQueryCountTests(SqlServerFixture sql)
         var small = await ArrangeDocumentAsync(roleId, [2, 1]).ConfigureAwait(true);
         var large = await ArrangeDocumentAsync(roleId, [4, 4, 4]).ConfigureAwait(true);
 
-        using var app = new EcrApiFactory(sql, stampCacheSeconds: 300, revisionWindow: TimeSpan.FromMinutes(5));
+        using var app = new EcrApiFactory(sql, stampCacheSeconds: 300, revisionWindow: TimeSpan.FromMinutes(5))
+        {
+            LayoutRegistry = EmptyLayoutRegistry.Instance, // B121: річні версії інших тестів не вмикають роутер
+        };
         app.Server.PreserveExecutionContext = true;
         using var client = await SignedInAsync(app, userName).ConfigureAwait(true);
 

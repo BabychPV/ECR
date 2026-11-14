@@ -19,12 +19,31 @@ namespace Ecr.Api.Tests;
 /// заміна всього набору чернетки, відмова опублікованій версії (409), перевірка правилами публікації (422) і право
 /// <c>Template.Edit</c> (Allow/Deny пара на тій самій чернетці).
 /// </summary>
+/// <remarks>
+/// ⛔ B121: версії <c>YearWithMonthColumns</c>, які заводить тест, після нього повертаються до
+/// <see cref="TemplateLayout.PerMonthCopies"/> (<see cref="DisposeAsync"/>, і на червоному тесті теж). Інакше вони
+/// лишаються в СПІЛЬНІЙ базі колекції, реєстр розкладок кожного наступного хоста бачить «річну версію є», роутер
+/// місячних колонок вмикається, і тести з точною кількістю звернень міряють число, що залежить від порядку тестів.
+/// </remarks>
 [Collection("SqlServer")]
-public sealed class MonthInputAliasesApiTests(SqlServerFixture sql)
+public sealed class MonthInputAliasesApiTests(SqlServerFixture sql) : IAsyncLifetime
 {
     private const string Password = "Api-L0b-Aliases-2026!";
 
     private static readonly DateTime Now = new(2026, 11, 14, 10, 0, 0, DateTimeKind.Utc);
+
+    /// <summary>Річні версії, заведені цим тестом, — скидаються в <see cref="DisposeAsync"/>.</summary>
+    private readonly List<int> _yearVersions = [];
+
+    /// <inheritdoc />
+    public Task InitializeAsync() => Task.CompletedTask;
+
+    /// <inheritdoc />
+    public async Task DisposeAsync()
+    {
+        await using var db = new EcrDbContext(Options());
+        await YearLayoutCleanup.ResetAsync(db, _yearVersions).ConfigureAwait(false);
+    }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
@@ -184,6 +203,7 @@ public sealed class MonthInputAliasesApiTests(SqlServerFixture sql)
         version.SetLayout(TemplateLayout.YearWithMonthColumns);
         db.TemplateVersions.Add(version);
         await db.SaveChangesAsync().ConfigureAwait(false);
+        _yearVersions.Add(version.Id);
 
         var sheet = new SheetDef(version.Id, EcrCode.Create($"SH{tag}"), Name("Sheet"), 1);
         db.SheetDefs.Add(sheet);
