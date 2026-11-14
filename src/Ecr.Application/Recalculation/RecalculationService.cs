@@ -1140,6 +1140,29 @@ public sealed class RecalculationService(
                                  await YearStatesAsync(instance.DocumentId, annualPeriods, ct).ConfigureAwait(false))
                              : periodState == Domain.Enums.PeriodState.Grace);
 
+        // ✎ B104: прогін ВІДКРИТОГО якоря в Grace пише не-місячні цілі року — вони «пізні» за річним правилом
+        // (AnnualPeriodRule.IsLate: є Grace і немає Open), як PATCH не-місячної колонки; місячні цілі (C_M01, таблиці
+        // поза маршрутизацією) — за станом самого якоря. Стани року читаються лише коли якір у Grace (≤ 12 запитів).
+        var annualLateEdit = isLateEdit && openAnchorYear is not null
+            ? Security.AnnualPeriodRule.IsLate(
+                await YearStatesAsync(instance.DocumentId, openAnchorYear, ct).ConfigureAwait(false))
+            : isLateEdit;
+        var nonMonthOf = new Dictionary<long, HashSet<int>>();
+        bool RecordIsLate(long target, CellRecord record)
+        {
+            if (annualLateEdit == isLateEdit)
+            {
+                return isLateEdit;
+            }
+
+            if (!nonMonthOf.TryGetValue(target, out var nonMonth))
+            {
+                nonMonthOf[target] = nonMonth = NonMonthRoutedColumns(target, instances, tables);
+            }
+
+            return nonMonth.Contains(record.Address.ColumnDefId) ? annualLateEdit : isLateEdit;
+        }
+
         // ⛔ Q-2xx (аудит фази 3, звітність). До цього рядка формули шаблону
         // писалися в `doc.CellValue` ЧЕРЕЗ `cellStore.ApplyAsync` без жодного
         // запису в `aud.CellChange` — `RecalculationService` не мав
@@ -1276,7 +1299,7 @@ public sealed class RecalculationService(
             if (batch.Count > 0)
             {
                 await WriteBatchAsync(
-                    instance.DocumentId, batch, rowKeyByRowIdByInstance, isLateEdit, now, token, overridesActive)
+                    instance.DocumentId, batch, rowKeyByRowIdByInstance, RecordIsLate, now, token, overridesActive)
                     .ConfigureAwait(false);
             }
 
@@ -1391,7 +1414,10 @@ public sealed class RecalculationService(
     /// <param name="documentId">Документ прогону.</param>
     /// <param name="batch">Екземпляри, у які писати можна, з їхніми комірками — у порядку запису.</param>
     /// <param name="rowKeyByRowIdByInstance">Ключ рядка за його ідентифікатором — для аудиту.</param>
-    /// <param name="isLateEdit">Зміна в <c>Grace</c> (<c>D-70</c>).</param>
+    /// <param name="isLateEdit">
+    /// Зміна в <c>Grace</c> (<c>D-70</c>) — на ЗАПИС (екземпляр, комірка): ✎ B104 не-місячна ціль відкритого якоря
+    /// бере річне правило, місячна — стан свого періоду.
+    /// </param>
     /// <param name="now">Мить зміни для аудиту.</param>
     /// <param name="lockOverrides">✎ D-461: блокувати й перечитати позначки ручних значень перед записом (лише коли вони можливі).</param>
     /// <param name="ct">Токен скасування.</param>
@@ -1411,7 +1437,7 @@ public sealed class RecalculationService(
         long documentId,
         IReadOnlyList<(long Target, IReadOnlyList<CellRecord> Records)> batch,
         Dictionary<long, Dictionary<long, string>> rowKeyByRowIdByInstance,
-        bool isLateEdit,
+        Func<long, CellRecord, bool> isLateEdit,
         DateTime now,
         CancellationToken ct,
         bool lockOverrides = false)
@@ -1476,7 +1502,9 @@ public sealed class RecalculationService(
                         // однаково пишуть без `ExpectedRowVersions`.
                         TouchedRowIds: [],
                         ChangedByUserId: SystemUserId,
-                        isLateEdit))],
+
+                        // Сховище прапорця набору не читає (лише аудит нижче); «пізній», якщо пізній хоч один запис.
+                        item.Records.Any(r => isLateEdit(item.Target, r))))],
             ct).ConfigureAwait(false);
 
         // ⛔ `DAT-02` п. 2: аудит пишеться рівно по `Records`, тобто по тому,
@@ -1498,7 +1526,7 @@ public sealed class RecalculationService(
                     NewValue: Describe(r.Value),
                     SystemUserId,
                     Origin: "Recalculation",
-                    isLateEdit,
+                    isLateEdit(item.Target, r),
                     CorrelationId: null));
             })],
             ct).ConfigureAwait(false);
