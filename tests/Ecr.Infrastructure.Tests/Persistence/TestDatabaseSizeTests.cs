@@ -1,5 +1,4 @@
 using Ecr.TestKit;
-using Microsoft.Data.SqlClient;
 using Xunit;
 
 namespace Ecr.Infrastructure.Tests.Persistence;
@@ -52,14 +51,18 @@ public sealed class TestDatabaseSizeTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    public async Task Жоден_файл_тестової_бази_не_має_продуктивного_розміру()
+    public void Жоден_файл_тестової_бази_не_має_продуктивного_розміру()
     {
-        var oversized = await QueryAsync($"""
-            SELECT name + N' = ' + CAST(size / 128 AS nvarchar(10)) + N' МБ'
-            FROM sys.database_files
-            WHERE size / 128 > {MaxFileMb}
-            ORDER BY size DESC
-            """);
+        // ⛔ B117: розмір НАРОДЖЕННЯ (після схеми й сіду, до першого тесту), а не живої спільної бази. Раніше вердикт
+        // залежав від порядку класів: повний локальний прогін Persistence+Jobs давав файл даних «= 136 МБ», бо хтось до
+        // сторожа вже виростив файл, а той самий код окремо був зелений. Ріст за прогін — сторож наприкінці колекції
+        // (`SqlServerFixture.DisposeAsync`, D-375), без залежності від порядку.
+        Assert.NotEmpty(sql.FileSizesAtBirthMb);
+        var oversized = sql.FileSizesAtBirthMb
+            .Where(f => f.Value > MaxFileMb)
+            .OrderByDescending(f => f.Value)
+            .Select(f => $"{f.Key} = {f.Value} МБ")
+            .ToList();
 
         // ⛔ Повідомлення несе ІМЕНА і РОЗМІРИ: «якийсь файл завеликий» не
         // сказало б, чи це файлова група з `01-filegroups.sql`, чи журнал, що
@@ -68,8 +71,8 @@ public sealed class TestDatabaseSizeTests(SqlServerFixture sql)
     }
 
     /// <summary>
-    /// Z8-03: ця перевірка знімає розмір лише в ту мить, коли до неї дійшла черга, — журнал, що розрісся від класу
-    /// ПІСЛЯ неї, проходив. Тому те саме питання ставить <c>SqlServerFixture.DisposeAsync</c> наприкінці колекції.
+    /// Z8-03: ріст ЗА ПРОГІН (журнал, що розрісся від будь-якого класу) стереже <c>SqlServerFixture.DisposeAsync</c>
+    /// наприкінці колекції; сторожі вище (B117) — лише розмір народження, від порядку класів не залежать.
     /// Тут — що спільна функція справді бачить завеликі файли (стеля 0 МБ — завжди є) і мовчить на великій стелі;
     /// що <c>DisposeAsync</c> її кличе й кидає виняток після зупинки контейнера — <c>SqlServerFixtureSizeGuardTests</c>.
     /// Мутація: повернути <c>null</c> завжди → червоний перший Assert.
@@ -89,41 +92,13 @@ public sealed class TestDatabaseSizeTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    public async Task Уся_тестова_база_вкладається_в_гігабайт()
+    public void Уся_тестова_база_вкладається_в_гігабайт()
     {
         // ⚠ Окремо від перевірки файлів, і не заради повноти: одна межа на
         // всю базу ловить те, чого не ловить межа на файл, — чотирнадцять
-        // файлів, кожен трохи нижчий за стелю.
-        var totalMb = await ScalarAsync<int>(
-            "SELECT CAST(SUM(CAST(size AS bigint)) / 128 AS int) FROM sys.database_files");
+        // файлів, кожен трохи нижчий за стелю. B117: теж розмір народження.
+        var totalMb = sql.FileSizesAtBirthMb.Values.Sum();
 
         Assert.InRange(totalMb, 1, 1024);
-    }
-
-    private async Task<T?> ScalarAsync<T>(string query)
-    {
-        await using var connection = new SqlConnection(sql.ConnectionString);
-        await connection.OpenAsync().ConfigureAwait(false);
-        await using var command = connection.CreateCommand();
-        command.CommandText = query;
-        var value = await command.ExecuteScalarAsync().ConfigureAwait(false);
-
-        return value is null or DBNull ? default : (T)value;
-    }
-
-    private async Task<List<string>> QueryAsync(string query)
-    {
-        var rows = new List<string>();
-        await using var connection = new SqlConnection(sql.ConnectionString);
-        await connection.OpenAsync().ConfigureAwait(false);
-        await using var command = connection.CreateCommand();
-        command.CommandText = query;
-        await using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
-        while (await reader.ReadAsync().ConfigureAwait(false))
-        {
-            rows.Add(reader.GetString(0));
-        }
-
-        return rows;
     }
 }

@@ -123,6 +123,17 @@ public sealed class SqlServerFixture : IAsyncLifetime
     /// <summary>Ім'я тестової бази.</summary>
     public string DatabaseName { get; private set; } = DefaultDatabaseName();
 
+    /// <summary>
+    /// Розміри файлів бази (<c>sys.database_files</c>, МБ) одразу після розгортання схеми й сіду — ДО першого тесту.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ B117: сторож «база не народжується продуктивного розміру» (<c>TestDatabaseSizeTests</c>) міряв ЖИВУ спільну
+    /// базу в ту мить, коли до нього дійшла черга, тож його вердикт залежав від того, які класи встигли відпрацювати
+    /// раніше (повний локальний прогін Persistence+Jobs: 136 МБ &gt; 128). Розмір при народженні від порядку не залежить;
+    /// ріст за прогін стереже <see cref="DisposeAsync"/> наприкінці колекції.
+    /// </remarks>
+    public IReadOnlyDictionary<string, int> FileSizesAtBirthMb { get; private set; } = new Dictionary<string, int>();
+
     /// <inheritdoc />
     public async Task InitializeAsync()
     {
@@ -148,6 +159,7 @@ public sealed class SqlServerFixture : IAsyncLifetime
         ConnectionString = await CreateEmptyDatabaseAsync(serverConnection).ConfigureAwait(false);
         await BuildSchemaAsync().ConfigureAwait(false);
         await NarrowDataFileGrowthAsync().ConfigureAwait(false);
+        FileSizesAtBirthMb = await ReadFileSizesMbAsync(ConnectionString).ConfigureAwait(false);
 
         // Лише спільна база колекції; початкова точка — ПІСЛЯ розгортання схеми: її ріст не належить жодному тесту.
         if (_nameSuffix.Length == 0)
@@ -177,6 +189,22 @@ public sealed class SqlServerFixture : IAsyncLifetime
         command.Parameters.Add(new SqlParameter("@max", maxFileMb));
 
         return await command.ExecuteScalarAsync().ConfigureAwait(false) as string;
+    }
+
+    private static async Task<IReadOnlyDictionary<string, int>> ReadFileSizesMbAsync(string connectionString)
+    {
+        var sizes = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        await using var connection = new SqlConnection(connectionString);
+        await connection.OpenAsync().ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT name, CAST(size / 128 AS int) FROM sys.database_files";
+        await using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+        while (await reader.ReadAsync().ConfigureAwait(false))
+        {
+            sizes[reader.GetString(0)] = reader.GetInt32(1);
+        }
+
+        return sizes;
     }
 
     /// <inheritdoc />
