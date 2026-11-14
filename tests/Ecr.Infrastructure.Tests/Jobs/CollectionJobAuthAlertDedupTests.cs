@@ -99,9 +99,13 @@ public sealed class CollectionJobAuthAlertDedupTests(SqlServerFixture sql)
 
             await using (var db = Context())
             {
-                var dispatcher = new OutboxDispatcher(db, new TestClock(Now), sender);
+                // ✎ D-9 (аудит 2026-11, D-500): між невдалими спробами — пауза `OutboxDispatcher.RetryDelay`, тож три спроби
+                // потребують трьох моментів часу; три відправки в ту саму мить дали б ОДНУ спробу (це й перевіряє
+                // `OutboxDispatcherRetryBackoffTests`).
                 for (var i = 0; i < 3; i++)
                 {
+                    var at = Now + TimeSpan.FromTicks((OutboxDispatcher.RetryDelay.Ticks + TimeSpan.TicksPerMinute) * i);
+                    var dispatcher = new OutboxDispatcher(db, new TestClock(at), sender);
                     await dispatcher.FlushAsync(mine, CancellationToken.None);
                 }
             }
