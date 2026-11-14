@@ -224,6 +224,9 @@ test.describe('submissionTarget: «Подати: <період>» на реал�
     const context = await signedIn(browser);
     const page = await context.newPage();
     const targetPath = `/api/v1/documents/${DocumentId}/submission-target`;
+    // B113: широке вікно — стан і дії в один рядок за будь-якого складу дій (див. вибір періоду нижче): перенос рядка
+    // через інший склад дій іншого стану періоду — не те, що тут перевіряється.
+    await page.setViewportSize({ width: 1920, height: 1080 });
 
     try {
       // ── Інший період того самого документа: є аркуш, той самий стан аркушів (рядок дій тієї ж форми) ──────
@@ -234,10 +237,20 @@ test.describe('submissionTarget: «Подати: <період>» на реал�
       const here = await summaryOf(Number(PeriodKey));
       if (here === null) throw new Error(`зведення документа за ${PeriodKey} недоступне`);
       const calendar = (await (await context.request.get(`/api/v1/projects/${String(here.projectId)}/periods`)).json()) as Calendar;
+      /*
+       * B113: «та сама форма рядка дій» — це й той самий стан ПЕРІОДУ, а не лише аркушів: на закритому (`Closed`) періоді
+       * немає «Validate», рядок дій вужчий і вміщається в один рядок поруч зі станом, а на відкритому — переноситься під
+       * нього (+24 px). Найближчим сусідом за календарем бував закритий період, і «More» «зсувалась» на 24 px через
+       * інший склад дій, а не через очікування `submission-target` (залежало від дати прогону). Тому спершу — періоди з
+       * тим самим станом, що й період стенда; інші — лише якщо таких немає.
+       */
+      const hereState = calendar.periods.find((period) => period.periodKey === Number(PeriodKey))?.state;
+      const sameState = (key: number): number =>
+        calendar.periods.find((period) => period.periodKey === key)?.state === hereState ? 0 : 1;
       const candidates = calendar.periods
         .map((period) => period.periodKey)
         .filter((key) => key !== Number(PeriodKey))
-        .sort((a, b) => Math.abs(a - Number(PeriodKey)) - Math.abs(b - Number(PeriodKey)));
+        .sort((a, b) => sameState(a) - sameState(b) || Math.abs(a - Number(PeriodKey)) - Math.abs(b - Number(PeriodKey)));
       let other: number | undefined;
       for (const key of candidates) {
         const summary = await summaryOf(key);
@@ -289,6 +302,12 @@ test.describe('submissionTarget: «Подати: <період>» на реал�
       const submit = page.getByTestId('document-submit');
       const more = page.getByTestId('document-more');
       await expect(submit, 'на періоді стенда немає «Подати»').toHaveAttribute('data-period-key', /\d+/, { timeout: 60_000 });
+      // B113: «до» міряється на остаточній шапці — із самим вибором періоду (лінивий чанк), а не з його заглушкою:
+      // на повільному старті чанк доїжджав уже після заміру.
+      await expect(
+        page.getByRole('group', { name: /Reporting period|Звітний період|Отчётный период/i }),
+        'вибір періоду в шапці не зʼявився',
+      ).toBeVisible({ timeout: 60_000 });
       await page.evaluate(
         () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
       );

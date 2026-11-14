@@ -140,6 +140,12 @@ const TableChatHost = lazy(async () => ({ default: (await loadTableChat()).Table
 const loadPeriodPicker = () => import('@/shared/ui/PeriodPicker');
 void loadPeriodPicker();
 const PeriodPicker = lazy(async () => ({ default: (await loadPeriodPicker()).PeriodPicker }));
+/*
+ * B113: заглушка — та сама коробка, що й сам вибір періоду (`.ecr-period`: висота `--ecr-ctl-height`, 28/36 px за
+ * щільністю). Була 52 px: поки чанк `PeriodPicker` ще вантажився, шапка була вищою за остаточну, і коли чанк доїжджав,
+ * рядок дій під нею підстрибував угору (стенд, чанк притримано: «More» y 152 → 148, тобто 4 px CLS).
+ */
+const periodPickerFallback = <Skeleton h="var(--ecr-ctl-height, 28px)" w={190} />;
 
 /**
  * ✎ debt-1110: панель дій аркуша (`DocumentActionBar` + модель дій `SheetActions`, тулбар, вибір періоду подання) —
@@ -802,7 +808,7 @@ export function DocumentPage(): JSX.Element {
           <Button onClick={() => setPeriodKey(recoveryTarget)} data-testid="period-recovery-go">
             {t('document.periodGoTo', { period: formatPeriodKey(recoveryTarget) })}
           </Button>
-          <Suspense fallback={<Skeleton h={52} w={190} />}>
+          <Suspense fallback={periodPickerFallback}>
             <PeriodPicker size="xs" miw={110} value={periodKey} periods={projectPeriods} onChange={(value) => setPeriodKey(value ?? periodKey)} />
           </Suspense>
         </Group>
@@ -873,7 +879,7 @@ export function DocumentPage(): JSX.Element {
             // CALC-RESULTS (макет, варіант A): «Year YYYY» і «Calculated: <місяць>» замість перемикача місяця.
             <YearLayoutChips periodKey={periodKey} periods={projectPeriods} onPick={setPeriodKey} />
           ) : (
-          <Suspense fallback={<Skeleton h={52} w={190} />}>
+          <Suspense fallback={periodPickerFallback}>
             <PeriodPicker
               size="xs"
               miw={110}
