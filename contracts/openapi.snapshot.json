@@ -1750,6 +1750,14 @@
               "string"
             ]
           },
+          "monthNumber": {
+            "description": "✎ LAND-YEAR L6: місяць (1..12) періоду прогону, якому належить проблема, — лише документ річної розкладки\n(`YearWithMonthColumns`): рядок річного аркуша один, а прогони методологій — по місяцях. `null` — інша\nрозкладка.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "rowKey": {
             "description": "Публічний ключ рядка.",
             "type": "string"
@@ -9262,6 +9270,14 @@
             "description": "`Error` — власна помилка комірки (корінь); `Blocked` — комірки, не оновлені через помилку в\n        Source, корінь якої в переліку не показаний (адреса — перша з таких комірок).",
             "type": "string"
           },
+          "monthNumber": {
+            "description": "✎ LAND-YEAR L6: місяць (1..12) періоду, у якому лежить помилка, — лише документ річної розкладки\n(`YearWithMonthColumns`); `null` — інша розкладка.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "rowKey": {
             "description": "Ключ рядка.",
             "type": "string"
@@ -13413,6 +13429,108 @@
           "monthNumber",
           "periodKey",
           "sheetStatus"
+        ],
+        "type": "object"
+      },
+      "MonthInputAliasDto": {
+        "description": "Псевдонім місячного входу у відповіді.",
+        "properties": {
+          "alias": {
+            "description": "Ім'я аргументу.",
+            "type": "string"
+          },
+          "columnCode": {
+            "description": "Код цільової колонки.",
+            "type": "string"
+          },
+          "columnDefId": {
+            "description": "Цільова колонка.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "monthNumber": {
+            "description": "Місяць 1..12.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "sheetCode": {
+            "description": "Код аркуша.",
+            "type": "string"
+          },
+          "tableCode": {
+            "description": "Код таблиці.",
+            "type": "string"
+          },
+          "tableDefId": {
+            "description": "Таблиця.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sheetCode",
+          "tableCode",
+          "tableDefId",
+          "alias",
+          "monthNumber",
+          "columnCode",
+          "columnDefId"
+        ],
+        "type": "object"
+      },
+      "MonthInputAliasInput": {
+        "description": "Псевдонім місячного входу методології в запиті `PUT …/month-input-aliases` — адреса кодами.",
+        "properties": {
+          "alias": {
+            "description": "Ім'я аргументу методології (колишній код селектора / формули).",
+            "type": "string"
+          },
+          "columnCode": {
+            "description": "Код місячної колонки тієї самої таблиці з тим самим місяцем.",
+            "type": "string"
+          },
+          "monthNumber": {
+            "description": "Місяць 1..12.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "sheetCode": {
+            "description": "Код аркуша.",
+            "type": "string"
+          },
+          "tableCode": {
+            "description": "Код таблиці (у межах аркуша).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sheetCode",
+          "tableCode",
+          "alias",
+          "monthNumber",
+          "columnCode"
+        ],
+        "type": "object"
+      },
+      "MonthInputAliasesDto": {
+        "description": "Набір псевдонімів місячних входів версії.",
+        "properties": {
+          "items": {
+            "description": "Псевдоніми в порядку аркуш → таблиця → ім'я → місяць.",
+            "items": {
+              "$ref": "#/components/schemas/MonthInputAliasDto"
+            },
+            "type": "array"
+          },
+          "templateVersionId": {
+            "description": "Версія.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "templateVersionId",
+          "items"
         ],
         "type": "object"
       },
@@ -21908,6 +22026,22 @@
         "required": [
           "presentationRevision",
           "groups"
+        ],
+        "type": "object"
+      },
+      "ReplaceMonthInputAliasesRequest": {
+        "description": "Тіло `PUT /template-versions/{id}/month-input-aliases`: ПОВНИЙ набір псевдонімів версії.",
+        "properties": {
+          "items": {
+            "description": "Псевдоніми; порожній перелік — прибрати всі.",
+            "items": {
+              "$ref": "#/components/schemas/MonthInputAliasInput"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
         ],
         "type": "object"
       },
@@ -31134,6 +31268,14 @@
             "description": "Текст, уже локалізований.",
             "type": "string"
           },
+          "periodKey": {
+            "description": "✎ LAND-YEAR L6: лише `GET …/validation?year=true` — період прогону перевірки, що дав зауваження (місяць року);\n`null` — відповідь одного періоду.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "rowKey": {
             "description": "Рядок; `null` — зауваження до таблиці.",
             "type": [
@@ -31235,6 +31377,17 @@
             "type": [
               "null",
               "string"
+            ]
+          },
+          "validatedPeriods": {
+            "description": "✎ LAND-YEAR L6: лише `year=true` — місяці року, які перевіряли (за зростанням); `null` — один період.",
+            "items": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": [
+              "null",
+              "array"
             ]
           }
         },
@@ -31553,6 +31706,14 @@
           "fromState": {
             "description": "Стан до дії (`DocumentStatus`).",
             "type": "string"
+          },
+          "periodKey": {
+            "description": "✎ LAND-YEAR L6: лише `year=true` — період (місяць року) події; `null` — відповідь одного періоду.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "reason": {
             "description": "Причина відхилення або повернення в роботу.",
@@ -40574,7 +40735,7 @@
     },
     "/api/v1/documents/{id}/calculation-issues": {
       "get": {
-        "description": "⚠ Лише поточні проблеми останнього проходу; без `sheetCopyId` — оригінал аркуша. Рядки схованих таблиць\nу відповіді відсутні; невидимий документ — 404.",
+        "description": "⚠ Лише поточні проблеми останнього проходу; без `sheetCopyId` — оригінал аркуша. Рядки схованих таблиць\nу відповіді відсутні; невидимий документ — 404.\n\n✎ LAND-YEAR L6: документ річної розкладки — кожен рядок несе `monthNumber` (місяць прогону); з\n`year=true` — проблеми всіх місяців року періоду разом (межі читання — свого місяця). Інша розкладка —\n`monthNumber = null`, прапор нічого не змінює.",
         "parameters": [
           {
             "in": "path",
@@ -40600,6 +40761,14 @@
             "schema": {
               "format": "int64",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "year",
+            "schema": {
+              "default": false,
+              "type": "boolean"
             }
           }
         ],
@@ -42321,6 +42490,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "✎ LAND-YEAR L6: документ річної розкладки — журнал усіх місяців року періоду, злитий за часом; рядок несе свій\n`periodKey`. Інша розкладка — як без прапора.",
+            "in": "query",
+            "name": "year",
+            "schema": {
+              "default": false,
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -43192,6 +43370,15 @@
               "format": "int32",
               "type": "integer"
             }
+          },
+          {
+            "description": "✎ LAND-YEAR L6: документ річної розкладки — останні результати всіх місяців року періоду разом, кожне зауваження з\n`periodKey` прогону, що його дав; інша розкладка — один період.",
+            "in": "query",
+            "name": "year",
+            "schema": {
+              "default": false,
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -43331,6 +43518,15 @@
             "schema": {
               "format": "int64",
               "type": "integer"
+            }
+          },
+          {
+            "description": "✎ LAND-YEAR L6: документ річної розкладки — події всіх місяців року періоду, кожна з `periodKey`; інша\nрозкладка — як без прапора.",
+            "in": "query",
+            "name": "year",
+            "schema": {
+              "default": false,
+              "type": "boolean"
             }
           }
         ],
@@ -65566,6 +65762,192 @@
           }
         },
         "summary": "D-474: задає розкладку чернетки — копія документа на місяць або рік із місяцями в колонках.\nПраво `Template.Edit`.",
+        "tags": [
+          "TemplateVersions"
+        ]
+      }
+    },
+    "/api/v1/template-versions/{id}/month-input-aliases": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Версія.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MonthInputAliasesDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MonthInputAliasesDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/MonthInputAliasesDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "✎ LAND-YEAR L0b: псевдоніми місячних входів методологій версії (`cfg.MonthInputAlias`). Право\n`Template.View`.",
+        "tags": [
+          "TemplateVersions"
+        ]
+      },
+      "put": {
+        "description": "Опублікована/застаріла версія — `409 ECR-TMPL-0409`. Набір перевіряється правилами публікації: ціль — жива\nмісячна колонка тієї самої таблиці з тим самим місяцем, ім'я не збігається з кодом колонки, версія\n`YearWithMonthColumns`, таблиця `MonthsInColumns`; невідома адреса чи дублікат — теж. Будь-яка хиба —\n`422 ECR-TMPL-0422` (`monthInputAliasInvalid`), нічого не записано.",
+        "parameters": [
+          {
+            "description": "Версія-чернетка.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceMonthInputAliasesRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceMonthInputAliasesRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceMonthInputAliasesRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MonthInputAliasesDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MonthInputAliasesDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/MonthInputAliasesDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "✎ LAND-YEAR L0b (ADR-B74 Q3): замінює ВЕСЬ набір псевдонімів місячних входів методологій чернетки. Право\n`Template.Edit`.",
         "tags": [
           "TemplateVersions"
         ]
