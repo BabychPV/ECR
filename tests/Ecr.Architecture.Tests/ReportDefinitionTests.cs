@@ -68,8 +68,21 @@ public sealed partial class ReportDefinitionTests
         // SSRS ми маємо просто підготувати сирі дані») віддає статус аркуша
         // КОЛОНКОЮ: сирі дані — усі, а звіт регулятору обирає статус сам.
         var snapshotViews = ViewRegex.Matches(views)
-            .Where(v => !IsRawDocumentView(v.Groups["body"].Value))
+            .Where(v => !IsRawDocumentView(v.Groups["body"].Value) && !IsReferenceView(v))
             .ToList();
+
+        // ⛔ R-4 (аудит 2026-11): другий виняток — ІМЕНОВАНІ вʼюхи-розшифровки Id для SSRS (записи довідників, одиниці,
+        // підписи колонок). У них немає ані документів, ані зрізів — отже, і статусу подання. Виняток за іменем, а не
+        // за змістом, і кожна така вʼюха не має права читати `doc.*` чи `rpt.Report*`: інакше під назвою «довідник»
+        // повз фільтр пройшли б дані документів.
+        var references = ViewRegex.Matches(views).Where(IsReferenceView).ToList();
+        Assert.Equal(ReferenceViews.Count, references.Count);
+        foreach (var reference in references)
+        {
+            Assert.DoesNotContain("doc.", reference.Groups["body"].Value, StringComparison.Ordinal);
+            Assert.DoesNotContain("rpt.Report", reference.Groups["body"].Value, StringComparison.Ordinal);
+            Assert.DoesNotContain("calc.", reference.Groups["body"].Value, StringComparison.Ordinal);
+        }
 
         // ⛔ Виняток — ЛИШЕ вʼюха, що читає сирі комірки `doc.CellValue`. Раніше
         // сторож перевіряв тільки вʼюхи з `rpt.ReportSnapshot`, тож нова вʼюха
@@ -103,6 +116,14 @@ public sealed partial class ReportDefinitionTests
 
     // PERMUSE: шар сирих даних для SSRS - це ще й вʼюхи даних дозволів (`rpt.v_Permit`, `rpt.v_PermitAir*`), що читають записи
     // довідників `dic.RegistryValue`: у них немає ні зрізу, ні статусу подання. Правило «жодного `rpt.Report*`» на них діє так само.
+    /// <summary>R-4: вʼюхи-розшифровки Id (без даних документів і зрізів) — перелік поіменний.</summary>
+    private static readonly HashSet<string> ReferenceViews = new(StringComparer.Ordinal)
+    {
+        "rpt.v_RegistryEntry", "rpt.v_Unit", "rpt.v_TemplateColumn",
+    };
+
+    private static bool IsReferenceView(Match view) => ReferenceViews.Contains(view.Groups[1].Value);
+
     private static bool IsRawDocumentView(string body) =>
         body.Contains("doc.CellValue", StringComparison.Ordinal)
         || body.Contains("dic.RegistryValue", StringComparison.Ordinal);

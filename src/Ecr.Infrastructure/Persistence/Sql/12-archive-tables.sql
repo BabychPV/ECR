@@ -536,3 +536,19 @@ SELECT CAST(3 AS tinyint),
            ISNULL(CONVERT(nvarchar(20), t.SheetCopyId), N'~'))), 1, 8) AS bigint)
   FROM arc.TableInstance AS t;
 GO
+
+-- R-1 (audit 2026-11, D-498): the SSRS views (05-rpt-views.sql) read archived years from arc.* with the same per-row
+-- shape as the hot branch. arc.CellValue / arc.TableRow are clustered columnstores: without a B-tree every query of a
+-- stable view paid a scan of the archive, even for a live year (measured on the Land-shaped test: reads x2 without a
+-- predicate, x25 for one document and period). These two indexes give the archive branch a seek by (period, row) and
+-- (period, instance). Not ONLINE: SQL Server refuses an online build on a table with a columnstore index, so on a
+-- database whose arc.* is already large the first deploy builds them offline (maintenance window, runbook section 8).
+-- They slow the bulk copy of usp_ArchiveYear
+-- (step 1) a little; measure on the customer's volume together with the reports.
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'arc.CellValue') AND name = N'IX_arc_CellValue_Row')
+    CREATE NONCLUSTERED INDEX IX_arc_CellValue_Row ON arc.CellValue (PeriodKey, TableRowId, ColumnDefId) ON [DATA_ARCHIVE];
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'arc.TableRow') AND name = N'IX_arc_TableRow_Instance')
+    CREATE NONCLUSTERED INDEX IX_arc_TableRow_Instance ON arc.TableRow (PeriodKey, TableInstanceId) ON [DATA_ARCHIVE];
+GO

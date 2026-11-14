@@ -68,7 +68,8 @@ public sealed class StatusNumberingTests
         Assert.DoesNotContain("a.Status IN", sql, StringComparison.Ordinal);
         Assert.DoesNotContain("a.Status =", sql, StringComparison.Ordinal);
         // довга, широка (_vN), широка стабільна (RPT-STABLE) і «за дозволом» (j5, rpt.v_DocumentCellsByPermit) вʼюхи:
-        // статус - колонка в кожній
-        Assert.Equal(4,System.Text.RegularExpressions.Regex.Count(sql, @"COALESCE\(a\.Status, 0\)"));
+        // статус - колонка в кожній (довга й «за дозволом» — двома гілками, гарячою й архівною, R-1; текст стабільної
+        // збирається з однієї голови, тож у файлі вона одна)
+        Assert.Equal(6, System.Text.RegularExpressions.Regex.Count(sql, @"COALESCE\(a\.Status, 0\)"));
     }
 }

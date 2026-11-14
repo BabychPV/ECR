@@ -238,7 +238,7 @@ function MyTaskRow({ job, onNavigate }: { readonly job: JobSummary; readonly onN
          * ⛔ UX-09, директива №11, T10 #40. `isOwnJob` — завжди `true`: цей
          * перелік приходить з `mine=true` (`Q-156`, `useMyTasks`), тобто
          * кожен рядок шухляди ВЖЕ є власним за побудовою — окремо ходити за
-         * правом `System.ViewHealth` заради нього немає сенсу (`hasViewHealth`
+         * правом `System.RunJob` заради нього немає сенсу (`hasRunJob`
          * нижче не впливає на результат, доки `isOwnJob` — `true`; докладніше
          * — `JobFacts.canRestartJob`).
          */}
@@ -247,7 +247,7 @@ function MyTaskRow({ job, onNavigate }: { readonly job: JobSummary; readonly onN
             jobId={job.jobId}
             state={job.state}
             isOwnJob
-            hasViewHealth={false}
+            hasRunJob={false}
             onRestarted={() => void queryClient.invalidateQueries({ queryKey: ['jobs'] })}
           />
           <JobResultLink resultUrl={job.resultUrl} />

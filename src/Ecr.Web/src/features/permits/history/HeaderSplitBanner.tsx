@@ -1,7 +1,6 @@
 import { useState, type JSX } from 'react';
 import { Alert, Anchor, Badge, Button, Group, List, Stack, Text } from '@mantine/core';
 import type { DocumentTableDto } from '@/api/types';
-import { formatMonthYear } from '@/shared/format/period';
 import { formatCount } from '@/shared/format/plural';
 import { localized } from '@/shared/i18n/localized';
 import { t } from '@/shared/i18n';
@@ -11,7 +10,7 @@ import { firstLinePerRow, headerSplitLinesOf, orderedLines, pendingRowsByTable, 
 /** Rows shown while the banner is collapsed. */
 const CollapsedRows = 3;
 import { rowDisplayName } from './rowName';
-import { dayMonth, dottedDate, monthOf } from './splitModel';
+import { dayMonth, dottedDate, splitUnitLabel } from './splitModel';
 import { usePermitHistory } from './usePermitHistory';
 
 export interface HeaderSplitBannerProps {
@@ -47,8 +46,7 @@ export function HeaderSplitBanner({ documentId, periodKey, tables, readOnly, onR
     );
   }
 
-  const { year, month } = monthOf(first.month.month);
-  const monthLabel = formatMonthYear(year, month);
+  const monthLabel = splitUnitLabel(first.month);
   const [before, after] = first.month.parts;
   const pendingRows = firstLinePerRow(pending);
   const rowCount = pendingRows.length;

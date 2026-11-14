@@ -102,7 +102,7 @@ describe('AuditPage: вкладка структурних змін', () => {
 
       await screen.findByText('Save rules', {}, { timeout: SlowEnvTimeout });
 
-      // ⛔ Мутація: прибрати `!structure` з `useCellChanges(filter, !structure)`
+      // ⛔ Мутація: прибрати `!structure` з `useCellChangePages(applied, !structure)`
       // — тут з'явиться другий запит, по партиціях `aud.CellChange`, заради
       // таблиці, якої на вкладці не видно.
       expect(seen).toHaveLength(1);

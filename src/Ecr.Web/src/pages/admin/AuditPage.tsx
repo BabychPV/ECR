@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, type JSX } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, type JSX } from 'react';
 import {
   Badge,
   Button,
@@ -20,12 +20,14 @@ import {
   cellChangesQuery,
   fetchCellsExport,
   isSingleCell,
-  useCellChanges,
 } from '@/features/audit/api';
+import { useCellChangePages } from '@/features/audit/journalPages';
+import { InfiniteListFooter } from '@/features/common/infiniteList/InfiniteListFooter';
+import { mergePages } from '@/features/common/infiniteList/mergePages';
 import { FilterHints, FilterInline, FilterRow, readerOnlyDescription } from '@/shared/ui/FilterBar';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
-import { useDebouncedFilter, useFilterCursor } from '@/shared/ui/useDebouncedFilter';
+import { useDebouncedFilter } from '@/shared/ui/useDebouncedFilter';
 import { useFieldDraft } from '@/shared/ui/useFieldDraft';
 import { useUrlNumber, useUrlParamsSetter, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
@@ -167,11 +169,9 @@ export function AuditPage(): JSX.Element {
     limit: 100,
   };
 
-  // ⛔ Курсор скидається разом із ЗАСТОСОВАНИМ фільтром (`useFilterCursor`), а
-  // не з `onChange` полів: інакше після «More» перша ж клавіша давала зайвий
-  // запит «старий фільтр, перша сторінка» ще до паузи debounce.
-  const [cursor, setCursor] = useFilterCursor(cellChangesQuery(applied));
-  const filter = { ...applied, cursor };
+  // ✎ W-3b (рішення PO 11.11): курсор — параметр сторінки `useInfiniteQuery`; ключ — ЗАСТОСОВАНИЙ фільтр без курсора,
+  // тож нова видача починається з першої сторінки в тому самому рендері, що й новий фільтр (раніше — `useFilterCursor`).
+  const listKey = cellChangesQuery(applied);
 
   // ⚠ `BE-16`: друга вкладка — журнал структурних змін. Вкладка живе в адресі
   // (`?view=structure`), бо саме адресу людина надсилає колезі. Журнал комірок
@@ -182,13 +182,14 @@ export function AuditPage(): JSX.Element {
   // Журнал подій погодження (`?view=workflow`): `wf.ApprovalEvent` — подання, затвердження, відхилення, повернення.
   const workflow = view === 'workflow';
   const other = structure || security || workflow;
-  const changes = useCellChanges(filter, !other);
+  const changes = useCellChangePages(applied, !other);
+  const cellPage = useMemo(() => mergePages(changes.data?.pages), [changes.data]);
 
   // ⛔ `R-18`: попередня сторінка лишається на екрані, доки їде нова. Раніше кожен
   // застосований debounce фільтра клав скелет на місце таблиці й будував її
   // наново — саме ці кадри й давали затримку друку до 117 мс. Відмова й перше
   // завантаження показуються як і досі.
-  const shownChanges = useLastData(changes.data, changes.error === null);
+  const shownChanges = useLastData(cellPage, changes.error === null || changes.isFetchNextPageError);
 
   // Журнал комірок приїхав — сторінка вже показана, тож чанки вкладок можна тягнути (див. `preloadAuditTabs`).
   const changesArrived = changes.data !== undefined;
@@ -202,9 +203,9 @@ export function AuditPage(): JSX.Element {
    * нового. Без цього зміна фільтра давала б порожню сторінку замість перших
    * результатів, і це читалося б як «нічого не знайдено».
    */
-  const single = isSingleCell(filter);
+  const single = isSingleCell(applied);
 
-  const authorOptions = useAuthorOptions(changes.data?.items, author);
+  const authorOptions = useAuthorOptions(cellPage?.items, author);
 
   return (
     <>
@@ -438,7 +439,8 @@ export function AuditPage(): JSX.Element {
 
       <AsyncBoundary<CellChangePage>
         isPending={changes.isPending && shownChanges === undefined}
-        error={changes.error}
+        // ✎ W-3b: відмова НАСТУПНОЇ сторінки не ховає вже показані рядки — її показує підвал із «Повторити».
+        error={changes.isFetchNextPageError ? null : changes.error}
         data={shownChanges}
         isEmpty={(page) => page.items.length === 0}
         emptyTitle={t('audit.empty')}
@@ -453,10 +455,10 @@ export function AuditPage(): JSX.Element {
 
             {/* ⚠ Курсорна пагінація: журнал за рік — мільйони рядків, і
                 `OFFSET` на сторінці 200 сканував би все, що до неї. */}
-            {page.nextCursor !== null && (
-              <Button mt="md" variant="default" onClick={() => setCursor(page.nextCursor)}>
-                {t('documents.more')}
-              </Button>
+            {/* ✎ W-3b: сторінки ДОПИСУЮТЬСЯ. Підвал — лише над даними ПОТОЧНОГО фільтра: під `useLastData` (старий
+                фільтр показано, нова видача в дорозі) курсора нової видачі ще немає. */}
+            {changes.data !== undefined && (
+              <InfiniteListFooter key={listKey} pager={changes} shown={page.items.length} total={page.totalCount} />
             )}
           </>
         )}

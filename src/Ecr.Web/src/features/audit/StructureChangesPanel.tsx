@@ -1,12 +1,15 @@
-import type { JSX } from 'react';
-import { Button, Select, Table, Text, TextInput } from '@mantine/core';
-import { structureChangesQuery, useStructureChanges, type StructureChangePage } from '@/features/audit/api';
+import { useMemo, type JSX } from 'react';
+import { Select, Table, Text, TextInput } from '@mantine/core';
+import { structureChangesQuery, type StructureChangePage } from '@/features/audit/api';
+import { useStructureChangePages } from '@/features/audit/journalPages';
+import { InfiniteListFooter } from '@/features/common/infiniteList/InfiniteListFooter';
+import { mergePages } from '@/features/common/infiniteList/mergePages';
 import { authorName, useAuthorOptions } from '@/features/audit/authorOptions';
 import { useAuditSort } from '@/features/audit/auditSort';
 import { SortableTh } from '@/features/audit/SortableTh';
 import { FilterHints, FilterRow, readerOnlyDescription } from '@/shared/ui/FilterBar';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
-import { useDebouncedFilter, useFilterCursor } from '@/shared/ui/useDebouncedFilter';
+import { useDebouncedFilter } from '@/shared/ui/useDebouncedFilter';
 import { useFieldDraft } from '@/shared/ui/useFieldDraft';
 import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
@@ -45,11 +48,11 @@ export function StructureChangesPanel({ from, to }: { from: string; to: string }
     sort,
     limit: 100,
   };
-  // ⛔ Курсор — від застосованого фільтра, не від сирого поля (`useFilterCursor`).
-  const [cursor, setCursor] = useFilterCursor(structureChangesQuery(applied));
-
-  const changes = useStructureChanges({ ...applied, cursor });
-  const authorOptions = useAuthorOptions(changes.data?.items, changedBy);
+  // ✎ W-3e: курсор — параметр сторінки `useInfiniteQuery`; ключ — застосований (відкладений) фільтр без курсора.
+  const listKey = structureChangesQuery(applied);
+  const changes = useStructureChangePages(applied);
+  const changePage = useMemo(() => mergePages(changes.data?.pages), [changes.data]);
+  const authorOptions = useAuthorOptions(changePage?.items, changedBy);
 
   return (
     <>
@@ -89,8 +92,8 @@ export function StructureChangesPanel({ from, to }: { from: string; to: string }
 
       <AsyncBoundary<StructureChangePage>
         isPending={changes.isPending}
-        error={changes.error}
-        data={changes.data}
+        error={changes.isFetchNextPageError ? null : changes.error}
+        data={changePage}
         isEmpty={(page) => page.items.length === 0}
         emptyTitle={t('audit.structureEmpty')}
         emptyHint={t('audit.emptyHint')}
@@ -147,11 +150,8 @@ export function StructureChangesPanel({ from, to }: { from: string; to: string }
               </Table.Tbody>
             </Table>
 
-            {page.nextCursor !== null && (
-              <Button mt="md" variant="default" onClick={() => setCursor(page.nextCursor)}>
-                {t('documents.more')}
-              </Button>
-            )}
+            {/* ✎ W-3e: сторінки ДОПИСУЮТЬСЯ прокруткою (`InfiniteListFooter`). */}
+            <InfiniteListFooter key={listKey} pager={changes} shown={page.items.length} total={page.totalCount} />
           </>
         )}
       </AsyncBoundary>

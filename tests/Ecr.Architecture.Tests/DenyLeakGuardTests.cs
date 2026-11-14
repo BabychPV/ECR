@@ -126,6 +126,10 @@ public sealed partial class DenyLeakGuardTests
             (1, "те саме, що текст"),
         ["src/Ecr.Application/Documents/PatchCellsHandler.PermitValidity.cs | деталь columnCode | permitColumnCode"] =
             (1, "rule h2/h3: колонка дозволу рядка — лише коли автор її ЧИТАЄ (scope.CanReadColumn), інакше порожньо; доказ — A_hidden_month_is_refused_without_being_named / PermitRefusal(permitReadable)"),
+        ["src/Ecr.Application/Documents/PatchCellsHandler.PermitValidity.cs | деталь month | first.Unit.Label"] =
+            (1, "C-10 (4225): підпис ОДИНИЦІ ПОДІЛУ — місяць `MM.yyyy` або межі періоду `MM.yyyy–MM.yyyy` комірки, яку автор САМ пише; це календар проєкту, а не колонка, таблиця чи значення (до C-10 тут стояв той самий місяць форматом дати)"),
+        ["src/Ecr.Application/Documents/PatchCellsHandler.PermitValidity.cs | текст | first.Unit.Label"] =
+            (1, "те саме, що деталь month"),
         ["src/Ecr.Application/Documents/PatchCellsHandler.PermitValidity.cs | деталь row | rowName"] =
             (1, "feature (j) j3 (4225): назва рядка, у комірку якого автор САМ пише (після рішення про доступ до цієї комірки); не hex-ключ"),
         ["src/Ecr.Application/Permits/History/PermitHistoryHandlers.cs | деталь headerFieldCode | header.Field.Code"] =

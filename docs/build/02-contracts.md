@@ -973,7 +973,8 @@ namespace Ecr.Application.Ports;
 
 /// <summary>
 /// Збережена мапа перейменування колонок між версіями шаблону (<c>cfg.ColumnRename</c>): псевдонім для вʼюх SSRS
-/// і міжперіодних формул на межі версій. Пишеться переносом версії з <c>tableRenames</c>.
+/// і міжперіодних формул на межі версій. Пишеться переносом версії з <c>tableRenames</c>: пари колонок, що змінили
+/// код, і пари всіх колонок таблиці, чий код змінено мапою (R-2).
 /// </summary>
 public interface IColumnRenameMap
 {
@@ -4213,7 +4214,12 @@ public interface IValidationResultStore
 (лише додані колонки/таблиці/аркуші, розширення Precision/Scale, презентація) — статус, значення й журнал
 погодження лишаються, звіт каже скільки: `lockedSheetsCarried`; якщо зачіпає (втрата/видалення, звуження чи зміна
 типу, нові рядки фіксованої таблиці, перейменування) — `409 ECR-DOC-0409` (`migrateSheetsLocked`) з
-`lockedSheetsAffected` і переліком `lockedSheetItems` (код аркуша, період, статус; без імен і значень). Формульні
+`lockedSheetsAffected` і переліком `lockedSheetItems` (код аркуша, період, статус; без імен і значень).
+✎ V-7 (рішення PO 11.11, `D-497`): ручне значення замість формули (D-461), якого формула цільової версії не дозволяє,
+на поданому/затвердженому аркуші — окрема відмова `lockedOverridesLost` → `409 ECR-DOC-0409`
+(`migrateLockedOverrides`), звіт `lockedOverridesLost` (кількість позначок) і `lockedOverrideItems` (код аркуша,
+період, статус; ≤ 200), без значень; після повернення аркуша в роботу перенос знімає позначку, як для решти D-461.
+Формульні
 колонки перенесених аркушів не перераховуються до повернення аркуша в роботу. Ціль не опублікована,
 з іншого шаблону чи та сама — `422 ECR-TMPL-0422`. Подія — `aud.SecurityEvent`
 (`DocumentVersionMigrated`). Сигнатури — у `src/Ecr.Application/Ports/IDocumentVersionMigrationStore.cs`.
@@ -4411,7 +4417,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-CELL-4222` | 422 | значення поза межами реєстру або дії дозволу |
 | `ECR-CELL-4223` | 422 | посилання `Lookup`-комірки на запис довідника, якого не існує |
 | `ECR-CELL-4224` | 422 | `PATCH …/tables/{tableInstanceId}/cell-styles`: колір не `#rrggbb`, понад 2000 комірок в `items` або понад 50 000 в `scope` (`tooManyCells`), дубль або порожня зміна, невірна форма `scope`, комірки немає в зрізі; причина — у `messageKey` |
-| `ECR-CELL-4225` | 422 | (j) одне значення в місяць, який рядок ділить між двома дозволами (дозвіл змінився посеред місяця): запис сітки (`PATCH …/cells`, j3) чи імпорт Excel; місяць треба поділити (`PUT …/permit-history/splits`); `messageKey` `splitRequired` — рядок, місяць, дозволи; обчислені значення не діляться |
+| `ECR-CELL-4225` | 422 | (j) одне значення в місяць, який рядок ділить між двома дозволами (дозвіл змінився посеред місяця): запис сітки (`PATCH …/cells`, j3) чи імпорт Excel; місяць треба поділити (`PUT …/permit-history/splits`); `messageKey` `splitRequired` — рядок, місяць, дозволи; обчислені значення не діляться; ✎ 2026-11-11 (C-10): `month` — `MM.yyyy` або `MM.yyyy–MM.yyyy` (колонка без місяця в квартальному/річному проєкті — весь період комірки цілими місяцями) |
 | `ECR-HDR-0404` | 404 | код у `PATCH …/documents/{id}/header` не відповідає жодному полю шапки версії шаблону документа |
 | `ECR-HDR-0422` | 422 | значення поля шапки документа не відповідає типу чи обов'язковості |
 | `ECR-HDR-4223` | 422 | поле шапки `Lookup` посилається на запис довідника, який не можна обрати: чужий довідник, видалений, вимкнений або нечинний жодного дня звітного вікна проєкту (дозвіл `Permit` із закінченим строком); причина — у `messageKey` (PS-P1D, D-11) |
@@ -4531,6 +4537,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `err.ECR-REQ-0422.condFormatIfMatch` | 422 | `PUT …/conditional-formats` без `If-Match` (зміну випадку «змінили між читанням і записом» дає `ECR-TMPL-0409 condFormatChanged`) |
 | `err.ECR-DOC-0409.migrateProjectArchived` | 409 | перенос документів на нову версію шаблону: проєкт в архіві (ФВ-7.5) |
 | `err.ECR-DOC-0409.migrateSheetsLocked` | 409 | перенос версії зачепив би подані/затверджені аркуші (LP-32; решта поданих переноситься без змін) |
+| `err.ECR-DOC-0409.migrateLockedOverrides` | 409 | ✎ V-7: перенос версії зняв би ручні значення замість формул (D-461) на поданих/затверджених аркушах (`lockedOverrides`, `lockedOverrideSheets`, `lockedOverrideItems` — `SHEET\|період\|статус`); спершу повернути аркуші в роботу |
 | `err.ECR-SCHM-0422.migrateDataLoss` | 422 | перенос версії в режимі `Safe` втратив би дані |
 | `err.ECR-SCHM-0422.migrateGrantsNotMapped` | 422 | на аркуші/таблиці/колонці, якої в новій версії за кодом нема, стоїть будь-який грант: заборона або звужувальний дозвіл (`refusals` має `grantsNotMapped`); звіт сухого прогону й `details` несуть необов'язкове `blockedGrantCount` — лише кількість таких грантів (без переліку ресурсів/ролей; відсутнє, коли блокування немає) |
 | `err.ECR-SCHM-0422.migrateMappingsNotMapped` | 422 | D-1 (RC20): АКТИВНИЙ мапінг збору (`ext.EntityFieldMap`) вказує на колонку вихідної версії, якої немає в цільовій (`refusals` має `mappingsNotMapped`; `details.mappingsUnmapped` — кількість, `details.mappingColumns` — до 10 шляхів `SHEET.TABLE.COLUMN`, без джерела й поля). Мапінги з відповідником за кодами переносяться на колонки цільової версії автоматично в тій самій транзакції (фонова задача — так само); призупинений мапінг без відповідника не блокує й лишається. Звіт переносу і сухого прогону несе `mappingsRemapped`, `mappingsUnmapped`, `mappingsUnmappedKeys`; повідомлення `jobs.migrateDone` — параметри `mappingsRemapped`, `mappingsUnmapped`. D-1b: ті самі правила й ті самі поля звіту для мапінгів подій джерела (`ext.SourceEventMap`/`SourceEventFieldMap`, лише документи цього проєкту; ключ `events SHEET.TABLE`) і прив'язок вікна (`ext.RowWindowMap`; ключ `window SHEET.TABLE.COLUMN`, провенанс `ext.RowWindowValue` проєкту переїжджає на нові колонки); мапінг, чиє цільове місце в цільовій версії вже зайнято (`UQ_SourceEventMap`, `UQ_RowWindowMap_Target`), вважається «без відповідника». Для ВСІХ трьох видів мапінгів «без відповідника» також означає: режим рядків таблиці в цільовій версії інший, ніж у вихідній (збір, події, вікно); для мапінгу збору — `TargetRowKey` вказує на рядок фіксованої таблиці (`RowMode = Fixed`), якого немає в цільовій таблиці. Призупинений мапінг у таких випадках не переноситься (лишається на колонці вихідної версії) і не блокує |
@@ -4833,7 +4840,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/documents/{documentId}/period-reopen` | `Period.Reopen` у проєкті документа (✎ приймальна 08.11 (i): відкриває ЗАКРИТИЙ місяць лише для цього документа до `openUntil`, причина обов'язкова; решта документів місяця закрита; діючий виняток замінюється; аудит `DocumentPeriodReopen/Reopen` і `Close`; 404 — невидимий документ чи немає місяця, 409 `ECR-PRD-0409` — місяць не закритий / проєкт архівований, 422 `ECR-PRD-0422` — причина порожня/задовга, строк не в майбутньому) | 3 |
 | `DELETE` | `/api/v1/documents/{documentId}/period-reopen` | `Period.Reopen` у проєкті документа (✎ приймальна i4, «Close now» на вкладці Periods: закриває діючий виняток `?periodKey=` до строку — місяць знову закритий і для цього документа; нічого відкритого — 204 без змін; аудит `DocumentPeriodReopen/Close` із причиною `document.reopen.audit.closedManually`; 403 — немає права, 404 — невидимий документ) | 3 |
 | `GET` | `/api/v1/projects/{projectId}/document-reopens` | — (✎ приймальна i4: видимий проєкт; діючі винятки «місяць відкрито для документа» — `items` (документ, номер, місяць, `openUntil`, причина, хто відкрив) лише ВИДИМИХ документів, за місяцем і номером; `canClose` — `Period.Reopen` у проєкті; невидимий проєкт — 404) | 3 |
-| `GET` | `/api/v1/documents/{documentId}/permit-history` | — (✎ (j) 09.11: видимий документ; історія дозволів полів шапки й видимих рядків «KZ…A до 14.02 · KZ…B з 15.02» і місяці, які ще треба поділити між дозволами (`cellsNeedingSplit`), у періоді `?periodKey=`; невидимий документ — 404) | 3 |
+| `GET` | `/api/v1/documents/{documentId}/permit-history` | — (✎ (j) 09.11: видимий документ; історія дозволів полів шапки й видимих рядків «KZ…A до 14.02 · KZ…B з 15.02» і місяці, які ще треба поділити між дозволами (`cellsNeedingSplit`), у періоді `?periodKey=`; невидимий документ — 404; ✎ 2026-11-11 (C-10): `splitMonths[].monthTo` — останній день одиниці, коли вона довша за місяць (колонка без місяця в квартальному/річному проєкті: одиниця — сам період, ключ частин `doc.CellPermitPart.PeriodKey` — `PeriodKey` комірки); `null` — місяць) | 3 |
 | `POST` | `/api/v1/documents/{documentId}/permit-history/rows` | право редагувати комірку дозволу рядка (`CanEditCell`) (✎ (j1) 09.11: дозвіл рядка «з дати» в тому самому документі й рядку; аудит `PermitSegment/Add` — хто, обидва дозволи, дата; 403 `ECR-ACCS-0403 deniedCells`; 422 `ECR-CELL-4223 permitGap` — дні без чинного дозволу між дозволами названо (j4); 422 `ECR-CELL-4223 missingEntry`; 422 `ECR-REQ-0422 permitHistoryTarget`/`permitHistoryDate`; 409 `ECR-CELL-0409 concurrentChange` — шкалу дозволу змінив інший користувач між читанням і записом, ✎ D-1 аудиту 2026-11-10) | 3 |
 | `PUT` | `/api/v1/documents/{documentId}/permit-history/splits` | право редагувати місячну комірку (`CanEditCell`) (✎ (j2/jh3) 09.11: частини місяця, який ділять два дозволи рядка, — вводить користувач, без пропорції за днями; комірка з усіма частинами отримує суму звичайним записом комірки (аудит значення, перерахунок, `baseVersion`), часткове збереження лишає старе значення «неподіленим»; частини — `doc.CellPermitPart`, аудит `CellPermitPart/Split` (хто, частини, дозволи, дні); 409 `ECR-CELL-0409`; 422 `ECR-REQ-0422 permitSplitInvalid`; 409 `ECR-CELL-0409 concurrentChange` — шкалу дозволу змінив інший користувач між читанням і записом, ✎ D-1 аудиту 2026-11-10) | 3 |
 | `POST` | `/api/v1/documents/{documentId}/permit-history/rows/undo` | право редагувати комірку дозволу рядка (✎ (j) 09.11: скасовує останній доданий дозвіл рядка; аудит `PermitSegment/Remove`; 422 `ECR-REQ-0422 permitHistoryNothingToUndo` — нічого не додано або його місяці вже поділено; 409 `ECR-CELL-0409 concurrentChange` — шкалу дозволу змінив інший користувач між читанням і записом, ✎ D-1 аудиту 2026-11-10) | 3 |
@@ -4943,8 +4950,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/jobs?mine=true` | — (власні задачі) | 5 |
 | `GET` | `/api/v1/jobs/summary` | `System.ViewHealth` (або `mine=true` — власні задачі) | 5 |
 | `GET` | `/api/v1/jobs/{jobId}` | `System.ViewHealth` | 5 |
-| `POST` | `/api/v1/jobs/{jobId}/restart` | `System.ViewHealth` | 5 |
-| `POST` | `/api/v1/jobs/{jobId}/cancel` | `System.ViewHealth` | 5 |
+| `POST` | `/api/v1/jobs/{jobId}/restart` | `System.RunJob` (чужа чи системна задача, S-2/D-496; свою — автор з `System.ViewHealth` або за L1-19; повтор збору/синку — ще `Integration.Manage`) | 5 |
+| `POST` | `/api/v1/jobs/{jobId}/cancel` | `System.RunJob` (чужа чи системна задача, S-2/D-496; свою — автор без права, Q-156) | 5 |
 | `GET` | `/api/v1/sources` | `Integration.Manage` | 5 |
 | `POST` | `/api/v1/sources` | `Integration.Manage` | 7 |
 | `PUT` | `/api/v1/sources/{id}/registry` | `Integration.Manage` | 7 |
@@ -5439,6 +5446,17 @@ public sealed class NotFoundException(string errorCode, string message)
 > `ExportSnapshotHandler.MaxRows` = 50 000 рядків, понад неї `422 ECR-RPT-0422`,
 > ключ `err.ECR-RPT-0422.exportTooLarge`. Доступ — `Report.Export` ПЛЮС грант
 > `Read` на проєкт зрізу; чужий зріз = неіснуючий (`404`), як у `…/rows`.
+>
+> ✎ **X-1 / X-8 (аудит 2026-11, рішення PO 11.11) — імена файлів експорту.**
+> `GET /documents/{id}/export/{exportId}` віддає файл з іменем
+> `{назва документа} ({File Number}) {період}.{xlsx|zip|json}`, а
+> `GET /reports/snapshots/{id}/export.xlsx` —
+> `{назва звіту} ({код звіту}) {період} #{id}.xlsx`. Період: `2026-11` (місяць),
+> `Q2 2026` (квартал), `2026` (рік), інакше `2026-P05`. Назва — мовою
+> замовника; заборонені у Windows символи замінюються, основа імені — до 100
+> символів (ріжеться назва, а не код і період). Заголовок:
+> `Content-Disposition: attachment; filename="<ASCII-запасне>"; filename*=UTF-8''<повне>`.
+> Ключа сховища (`exportId`) в імені немає. Тіло й схема не змінюються.
 >
 > ⚠ **Числа в книзі мають 15 значущих цифр, а не 16.** Excel зберігає число
 > `double` — це формат книги, не наш вибір, — тож `decimal(38,16)` бази в неї

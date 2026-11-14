@@ -49,6 +49,35 @@ public sealed class ReportViewGeneratorFailureTextTests(SqlServerFixture sql)
     }
 
     /// <summary>
+    /// ✎ R-1: вʼюхи читають архівні таблиці <c>arc.*</c>; на базі без <c>12-archive-tables.sql</c> SQL Server відповідає
+    /// 208 («Invalid object name»). Текст для /health/ready каже операторові, що виконати, і не несе імені обʼєкта.
+    /// </summary>
+    /// <remarks>Мутація: прибрати гілку <c>MissingObjectError</c> у <c>SafeMessage</c> — підказки немає, червоний.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "R-1")]
+    public async Task Відсутня_таблиця_208_дає_підказку_про_скрипти_без_імені_обʼєкта()
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM arc.NoSuchTableR1";
+
+        var error = await Assert.ThrowsAsync<SqlException>(() => command.ExecuteScalarAsync());
+        Assert.Equal(208, error.Number);
+
+        var message = ReportViewGenerator.SafeMessage(error, "cid-r1");
+
+        Assert.Contains("208", message, StringComparison.Ordinal);
+        Assert.Contains("cid-r1", message, StringComparison.Ordinal);
+        Assert.Contains("12-archive-tables.sql", message, StringComparison.Ordinal);
+        Assert.Contains("deploy-ecr.ps1", message, StringComparison.Ordinal);
+        Assert.DoesNotContain("NoSuchTableR1", message, StringComparison.Ordinal);
+        Assert.DoesNotContain("arc.", message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Той самий correlation id стоїть і в тексті для /health/ready, і в рядку журналу з повним
     /// винятком (SEC TIER2): оператор зв'язує екранний текст із журналом.
     /// </summary>

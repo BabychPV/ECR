@@ -16,15 +16,14 @@ import { findRowOfState, openDrawerOf, rowOfState } from './jobsTestKit';
  * критерій показу, ті самі компоненти `JobFacts`, той самий каталог рядків
  * (`jobs.restart`, `jobs.resultDownload`) — нових ключів це не додає.
  *
- * ⚠ `hasViewHealth` у `JobsPage.tsx` — буквально `true`: маршрут
- * `/admin/jobs` уже вимагає `System.ViewHealth` (`routes.ts`, `RouteGuard`),
- * тобто кожен, хто бачить цей рядок, право має. Тому мутаційний доказ
- * «нема ViewHealth» тут не потрібен (він живе в `jobRetry.test.tsx` для
- * чистої функції `canRestartJob`) — тут доводимо лише видимість за СТАНОМ і
- * коректність `resultUrl`.
+ * ⚠ S-2 (аудит 2026-11, `D-496`): `System.ViewHealth`, яке відкриває маршрут
+ * `/admin/jobs`, повтору ЧУЖОЇ задачі вже не дає — потрібне `System.RunJob`
+ * або власність (`isOwnJobOf`). Тут доводимо видимість за СТАНОМ, за правом і
+ * власністю та коректність `resultUrl`; чиста функція `canRestartJob` — у
+ * `jobRetry.test.tsx`.
  */
 
-const jobs = [
+const jobs: Record<string, unknown>[] = [
   {
     jobCode: 'Ecr.Application.Ports.IRecalculationJob',
     jobId: 'IRecalculationJob#failed-1',
@@ -53,6 +52,30 @@ const jobs = [
   },
 ];
 
+/**
+ * Профіль `/api/v1/me` (S-2 аудиту 2026-11, `D-496`): чужу чи системну задачу скасовує й повторює лише носій
+ * `System.RunJob`; `System.ViewHealth` відкриває екран, але дає лише перегляд. Задачі цього файлу автора не
+ * мають (`createdByUserId` відсутній → системні), якщо тест не задав його сам.
+ */
+const MeUserId = 7;
+let permissions: string[] = ['System.ViewHealth', 'System.RunJob'];
+
+function meResponse(): Response {
+  return new Response(
+    JSON.stringify({
+      userId: MeUserId,
+      userName: 'tester',
+      permissions,
+      denies: [],
+      grants: {},
+      isSimulation: false,
+      language: 'uk',
+      mustChangePassword: false,
+    }),
+    { status: 200, headers: { 'Content-Type': 'application/json' } },
+  );
+}
+
 /** Адреси, куди сторінка сходила методом POST. */
 const posted: string[] = [];
 
@@ -74,6 +97,8 @@ function mockFetch(): void {
           }),
         );
       }
+
+      if (url.endsWith('/api/v1/me')) return Promise.resolve(meResponse());
 
       if (url.endsWith('/api/v1/jobs')) {
         return Promise.resolve(
@@ -106,6 +131,8 @@ function show(): void {
 afterEach(() => {
   vi.unstubAllGlobals();
   posted.length = 0;
+  permissions = ['System.ViewHealth', 'System.RunJob'];
+  delete jobs[0]?.createdByUserId;
 });
 
 describe('JobsPage: «Повторити» у шторці задачі', () => {
@@ -121,6 +148,28 @@ describe('JobsPage: «Повторити» у шторці задачі', () => 
     await waitFor(() => expect(posted.length).toBe(1));
     expect(posted[0]).toBe('/api/v1/jobs/IRecalculationJob%23failed-1/restart');
     expect(posted[0]).not.toContain('#');
+  });
+
+  it('S-2: чужа й системна провалена задача з самим System.ViewHealth — кнопки «Повторити» немає', async () => {
+    // ⛔ Мутаційний доказ: поверніть `isOwnJob={false} hasRunJob` (старе «право має кожен, хто бачить екран») у
+    // `JobsPage.tsx` — кнопка з'явиться, а сервер відповість на неї `403` (`RestartJobHandler`, `System.RunJob`).
+    permissions = ['System.ViewHealth'];
+    mockFetch();
+    show();
+
+    const system = await openDrawerOf('Failed');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(within(system).queryByRole('button', { name: '⟦jobs.restart⟧' })).toBeNull();
+  });
+
+  it('S-2: свою провалену задачу автор повторює без System.RunJob', async () => {
+    permissions = ['System.ViewHealth'];
+    jobs[0]!.createdByUserId = MeUserId;
+    mockFetch();
+    show();
+
+    const own = await openDrawerOf('Failed');
+    expect(await within(own).findByRole('button', { name: '⟦jobs.restart⟧' })).toBeTruthy();
   });
 
   it('мутація: задача не в термінальному невдалому стані — кнопки «Повторити» немає', async () => {

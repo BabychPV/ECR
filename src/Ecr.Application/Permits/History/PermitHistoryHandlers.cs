@@ -47,7 +47,8 @@ public sealed class AddRowPermitHandler(
     IPermitRegistryIndex? permitTargets = null,
     Groups.ILookupTargetResolver? groups = null,    // F13 p223 (1): the stored Issues of the change's year are re-run after the write. `null` (tests) — not re-run.
     ValidateDocumentHandler? revalidate = null,
-    IValidationResultStore? validationResults = null)
+    IValidationResultStore? validationResults = null,
+    IPeriodStore? periods = null)    // ✎ C-10: межі періоду комірки для одиниці поділу (квартал/рік). `null` (тести) — як для місячного.
 {
     /// <summary>Adds the permit and returns the row's history.</summary>
     public async Task<RowPermitHistoryDto> HandleAsync(long documentId, AddRowPermitRequest request, CancellationToken ct)
@@ -138,7 +139,10 @@ public sealed class AddRowPermitHandler(
         }, ct).ConfigureAwait(false);
 
         await PermitHistoryRevalidation.RunAsync(revalidate, validationResults, documentId, request.ValidFrom.Year, ct).ConfigureAwait(false);
-        return await PermitHistoryReader.RowAsync(store, registries, row, currentUser.Language, ct).ConfigureAwait(false);
+        var bounds = periods is null
+            ? null
+            : await periods.FindPeriodBoundsAsync(documentId, row.Instance.PeriodKey, ct).ConfigureAwait(false);
+        return await PermitHistoryReader.RowAsync(store, registries, row, currentUser.Language, ct, bounds).ConfigureAwait(false);
     }
 }
 
@@ -159,7 +163,8 @@ public sealed class UndoRowPermitHandler(
     IClock clock,
     IPermitRegistryIndex? permitTargets = null,    // F13 p223 (1): the stored Issues of the change's year are re-run after the write. `null` (tests) — not re-run.
     ValidateDocumentHandler? revalidate = null,
-    IValidationResultStore? validationResults = null)
+    IValidationResultStore? validationResults = null,
+    IPeriodStore? periods = null)    // ✎ C-10: див. AddRowPermitHandler.
 {
     /// <summary>Removes the latest permit and returns the row's history.</summary>
     public async Task<RowPermitHistoryDto> HandleAsync(long documentId, UndoRowPermitRequest request, CancellationToken ct)
@@ -216,7 +221,10 @@ public sealed class UndoRowPermitHandler(
         }, ct).ConfigureAwait(false);
 
         await PermitHistoryRevalidation.RunAsync(revalidate, validationResults, documentId, last.ValidFrom.Year, ct).ConfigureAwait(false);
-        return await PermitHistoryReader.RowAsync(store, registries, row, currentUser.Language, ct).ConfigureAwait(false);
+        var bounds = periods is null
+            ? null
+            : await periods.FindPeriodBoundsAsync(documentId, row.Instance.PeriodKey, ct).ConfigureAwait(false);
+        return await PermitHistoryReader.RowAsync(store, registries, row, currentUser.Language, ct, bounds).ConfigureAwait(false);
     }
 }
 
@@ -454,7 +462,8 @@ public sealed class GetPermitHistoryHandler(
     IRegistryStore registries,
     IAccessDecisionService access,
     ICurrentUser currentUser,
-    IPermitRegistryIndex? permitTargets = null)
+    IPermitRegistryIndex? permitTargets = null,
+    IPeriodStore? periods = null)    // ✎ C-10: межі періоду для одиниці поділу (квартал/рік).
 {
     /// <summary>The history.</summary>
     public async Task<DocumentPermitHistoryDto> HandleAsync(long documentId, int periodKey, CancellationToken ct)
@@ -470,6 +479,9 @@ public sealed class GetPermitHistoryHandler(
 
         var language = currentUser.Language;
         var period = new PeriodKey(periodKey);
+        var bounds = periods is null
+            ? null
+            : await periods.FindPeriodBoundsAsync(documentId, periodKey, ct).ConfigureAwait(false);
         var snapshot = await metadata.GetAsync(
             await documents.GetTemplateVersionIdAsync(documentId, ct).ConfigureAwait(false), ct).ConfigureAwait(false);
         var readable = (await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false)).InPeriod(period);
@@ -527,7 +539,7 @@ public sealed class GetPermitHistoryHandler(
             var column = table.Columns.First(c => c.Id == columnDefId);
             rowTargets.Add(new PermitHistoryReader.RowTarget(
                 table, column, sheetCopyId, rowKey, period, baseId, rowCells, [.. group.Select(g => g.Segment)],
-                group.ToDictionary(g => g.Segment.Id, g => g.AddedBy)));
+                group.ToDictionary(g => g.Segment.Id, g => g.AddedBy), Bounds: bounds));
         }
 
         // ✎ Ship 2 (jh2): rows of tables WITHOUT their own permit column rely on the header permit — those with entered data
@@ -541,7 +553,7 @@ public sealed class GetPermitHistoryHandler(
                 .Where(t => readable.CanReadTable(t.Id)
                             && !t.Columns.Any(c => !c.IsDeleted && c.LookupRegistryDefId is { } target && isPermitTarget(target)))
                 .ToDictionary(t => t.Id);
-            if (shared.Count > 0 && relying.Count > 0)
+            if ((shared.Count > 0 || bounds is not null) && relying.Count > 0)
             {
                 var headerInstances = (await rows.GetTableInstancesAsync(documentId, period, ct).ConfigureAwait(false))
                     .Where(i => relying.ContainsKey(i.TableDefId))
@@ -565,14 +577,15 @@ public sealed class GetPermitHistoryHandler(
                     {
                         var byColumn = rowCells.ToDictionary(c => c.Address.ColumnDefId, c => c.Value);
                         if (keyOf.GetValueOrDefault(rowCells.Key) is not { } rowKey
-                            || !shared.Any(m => PermitHistoryReader.DataCellsInMonth(table, period, byColumn, new HashSet<int>(), m).Count > 0))
+                            || !PermitHistoryReader.SplitUnits(table, period, bounds, headerSpans)
+                                .Any(u => PermitHistoryReader.DataCellsInUnit(table, period, byColumn, new HashSet<int>(), u).Count > 0))
                         {
                             continue;
                         }
 
                         rowTargets.Add(new PermitHistoryReader.RowTarget(
                             table, null, instance.SheetCopyId, rowKey, period, headerItem.BaseId, byColumn, segmentsOfHeader, addedBy,
-                            headerItem.Field.Code));
+                            headerItem.Field.Code, bounds));
                     }
                 }
             }
@@ -584,8 +597,8 @@ public sealed class GetPermitHistoryHandler(
             .ToList();
         var entries = (await registries.FindEntriesByIdsAsync(entryIds, ct).ConfigureAwait(false)).ToDictionary(e => e.Id);
 
-        var months = rowTargets.SelectMany(r => PermitTimeline.SharedMonths(r.Spans))
-            .Select(m => (m.Year * 100) + m.Month)
+        var months = rowTargets.SelectMany(r => PermitHistoryReader.SplitUnits(r.Table, r.Period, r.Bounds, r.Spans))
+            .Select(u => u.PartKey)
             .Distinct()
             .ToList();
         var parts = await store.PartsAsync(documentId, months, ct).ConfigureAwait(false);

@@ -1,5 +1,7 @@
 ﻿// src/Ecr.Application/Permits/History/PermitTimeline.cs
 using System.Globalization;
+using Ecr.Application.Ports;
+using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Permits.History;
 
@@ -20,6 +22,44 @@ public readonly record struct DayRange(DateOnly First, DateOnly Last)
             ? First.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture)
             : First.ToString(First.Year == Last.Year ? "dd.MM" : "dd.MM.yyyy", CultureInfo.InvariantCulture) + "–"
               + Last.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture);
+}
+
+/// <summary>
+/// ✎ C-10 (рішення PO 11.11): одиниця поділу значення між дозволами — календарний місяць (місячна колонка) або сам
+/// період комірки цілими календарними місяцями (колонка без місяця: квартал/рік; у місячному проєкті — той самий
+/// місяць). <see cref="PartKey"/> — ключ <c>doc.CellPermitPart.PeriodKey</c>.
+/// </summary>
+/// <param name="First">Перший день одиниці (1-ше число).</param>
+/// <param name="Last">Останній день одиниці.</param>
+/// <param name="PartKey">Ключ частин.</param>
+public sealed record PermitSplitUnit(DateOnly First, DateOnly Last, int PartKey)
+{
+    /// <summary>Календарний місяць; ключ частин — <c>YYYYMM</c> (як досі).</summary>
+    /// <param name="month">Будь-який день місяця.</param>
+    public static PermitSplitUnit Month(DateOnly month)
+    {
+        var first = new DateOnly(month.Year, month.Month, 1);
+        return new PermitSplitUnit(first, first.AddMonths(1).AddDays(-1), (first.Year * 100) + first.Month);
+    }
+
+    /// <summary>Період комірки: від 1-го числа місяця початку до кінця місяця кінця; ключ частин — сам <c>PeriodKey</c>.</summary>
+    /// <param name="period">Період комірки.</param>
+    /// <param name="bounds">Межі періоду.</param>
+    public static PermitSplitUnit OfPeriod(PeriodKey period, PeriodBounds bounds)
+    {
+        ArgumentNullException.ThrowIfNull(bounds);
+        var first = new DateOnly(bounds.PeriodStart.Year, bounds.PeriodStart.Month, 1);
+        var lastMonth = new DateOnly(bounds.PeriodEnd.Year, bounds.PeriodEnd.Month, 1);
+        return new PermitSplitUnit(first, lastMonth.AddMonths(1).AddDays(-1), period.Value);
+    }
+
+    /// <summary>Одиниця — один календарний місяць.</summary>
+    public bool IsSingleMonth => First.Year == Last.Year && First.Month == Last.Month;
+
+    /// <summary>Підпис для текстів і <c>Details</c>: <c>MM.yyyy</c> або <c>MM.yyyy–MM.yyyy</c>.</summary>
+    public string Label => IsSingleMonth
+        ? First.ToString("MM.yyyy", CultureInfo.InvariantCulture)
+        : First.ToString("MM.yyyy", CultureInfo.InvariantCulture) + "–" + Last.ToString("MM.yyyy", CultureInfo.InvariantCulture);
 }
 
 /// <summary>
@@ -78,6 +118,26 @@ public static class PermitTimeline
         var first = new DateOnly(month.Year, month.Month, 1);
         var last = first.AddMonths(1).AddDays(-1);
         return [.. spans.Where(s => (s.From is null || s.From <= last) && (s.Until is null || s.Until >= first))];
+    }
+
+    /// <summary>✎ C-10: дозволи, чинні хоч день одиниці (для місяця — те саме, що <see cref="InMonth"/>).</summary>
+    /// <param name="spans">History spans.</param>
+    /// <param name="unit">Одиниця поділу.</param>
+    public static IReadOnlyList<PermitSpan> InUnit(IReadOnlyList<PermitSpan> spans, PermitSplitUnit unit)
+    {
+        ArgumentNullException.ThrowIfNull(spans);
+        ArgumentNullException.ThrowIfNull(unit);
+        return [.. spans.Where(s => (s.From is null || s.From <= unit.Last) && (s.Until is null || s.Until >= unit.First))];
+    }
+
+    /// <summary>✎ C-10: одиницю ділять дозволи — зміна історії з датою ВСЕРЕДИНІ (не з першого дня; для місяця — те саме, що <see cref="SharedMonths"/>).</summary>
+    /// <param name="spans">History spans.</param>
+    /// <param name="unit">Одиниця поділу.</param>
+    public static bool IsShared(IReadOnlyList<PermitSpan> spans, PermitSplitUnit unit)
+    {
+        ArgumentNullException.ThrowIfNull(spans);
+        ArgumentNullException.ThrowIfNull(unit);
+        return spans.Any(s => s.From is { } from && from > unit.First && from <= unit.Last);
     }
 
     /// <summary>

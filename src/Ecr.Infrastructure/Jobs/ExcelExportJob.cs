@@ -124,7 +124,7 @@ public sealed class ExcelExportJob(
         await progress.ReportKeyAsync(80, "jobs.exportSavingWorkbook", ct).ConfigureAwait(false);
 
         await exports
-            .SaveAsync(task.ExportId, task.DocumentId, ownerUserId, content, Lifetime, ct)
+            .SaveAsync(task.ExportId, task.DocumentId, ownerUserId, content, Lifetime, ct, task.FileBaseName)
             .ConfigureAwait(false);
 
         // ⚠ Q-326: НЕ конвертується на структурований ключ. Ключ

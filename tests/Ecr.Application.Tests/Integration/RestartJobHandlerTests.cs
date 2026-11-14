@@ -29,7 +29,33 @@ public sealed class RestartJobHandlerTests
     {
         _user.UserId.Returns(Viewer);
         _access.BuildProfileAsync(Viewer, Arg.Any<CancellationToken>())
+            // ⚠ S-2: автор задачі в цих тестах не налаштований (`null` → системна), тож повторити її може лише
+            // носій `System.RunJob`; з самим `System.ViewHealth` відповіддю було б 403, а не 409/404, які тут перевіряються.
+            .Returns(new AccessBuilder { UserId = Viewer }.Permission(CancelJobHandler.ForeignJobPermission).Build());
+    }
+
+    /// <summary>
+    /// S-2 (аудит 2026-11, рішення PO 11.11): <c>System.ViewHealth</c> без <c>System.RunJob</c> чужу провалену задачу
+    /// не перезапускає.
+    /// </summary>
+    /// <remarks>Без виправлення червоний: стара гілка <c>IsGranted(ViewHealth)</c> пропускала перезапуск.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "S-2")]
+    public async Task З_ViewHealth_без_RunJob_чужу_провалену_задачу_перезапустити_не_можна()
+    {
+        _access.BuildProfileAsync(Viewer, Arg.Any<CancellationToken>())
             .Returns(new AccessBuilder { UserId = Viewer }.Permission(GetJobStatusHandler.Permission).Build());
+        _jobs.GetStatusAsync(JobId, Arg.Any<CancellationToken>())
+            .Returns(new JobStatus(JobId, "Failed", 0, null, "boom"));
+        _jobs.GetCreatedByUserIdAsync(JobId, Arg.Any<CancellationToken>()).Returns(Viewer + 1);
+
+        var denied = await Assert.ThrowsAsync<Ecr.Application.Errors.AccessDeniedException>(
+            () => Handler().HandleAsync(JobId, CancellationToken.None));
+
+        Assert.Equal("err.ECR-AUTH-0403.jobNotYours", denied.Details?["messageKey"]);
+        Assert.Equal(CancelJobHandler.ForeignJobPermission, denied.Details?["permission"]);
+        await _jobs.DidNotReceive().RestartAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
 
     private RestartJobHandler Handler() => new(_jobs, _access, _user, Substitute.For<IAuditWriter>(), Substitute.For<Ecr.Domain.Abstractions.IClock>());

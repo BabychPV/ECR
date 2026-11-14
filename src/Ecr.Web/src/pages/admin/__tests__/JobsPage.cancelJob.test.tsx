@@ -31,7 +31,7 @@ import { openDrawerOf, rowOfState } from './jobsTestKit';
  */
 const RunningJobId = 'IRecalculationJob#42';
 
-const jobs = [
+const jobs: Record<string, unknown>[] = [
   {
     jobCode: 'Ecr.Application.Ports.IRecalculationJob',
     jobId: RunningJobId,
@@ -47,6 +47,30 @@ const jobs = [
     updatedAt: '2026-09-19T09:00:00Z',
   },
 ];
+
+/**
+ * Профіль `/api/v1/me` (S-2 аудиту 2026-11, `D-496`): чужу чи системну задачу скасовує й повторює лише носій
+ * `System.RunJob`; `System.ViewHealth` відкриває екран, але дає лише перегляд. Задачі цього файлу автора не
+ * мають (`createdByUserId` відсутній → системні), якщо тест не задав його сам.
+ */
+const MeUserId = 7;
+let permissions: string[] = ['System.ViewHealth', 'System.RunJob'];
+
+function meResponse(): Response {
+  return new Response(
+    JSON.stringify({
+      userId: MeUserId,
+      userName: 'tester',
+      permissions,
+      denies: [],
+      grants: {},
+      isSimulation: false,
+      language: 'uk',
+      mustChangePassword: false,
+    }),
+    { status: 200, headers: { 'Content-Type': 'application/json' } },
+  );
+}
 
 /** Усі адреси, куди сторінка сходила методом POST. */
 const posted: string[] = [];
@@ -74,6 +98,8 @@ function mockFetch(): void {
           }),
         );
       }
+
+      if (url.endsWith('/api/v1/me')) return Promise.resolve(meResponse());
 
       if (url.endsWith('/api/v1/jobs')) {
         return Promise.resolve(
@@ -107,6 +133,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
   posted.length = 0;
   holdCancel = false;
+  permissions = ['System.ViewHealth', 'System.RunJob'];
+  delete jobs[0]?.createdByUserId;
 });
 
 describe('JobsPage: скасування задачі зі шторки', () => {
@@ -156,6 +184,41 @@ describe('JobsPage: скасування задачі зі шторки', () => 
 
     // ⚠ У рядку переліку кнопок дій більше немає (UI-28).
     expect(within(rowOfState('Running')).queryByRole('button', { name: '⟦jobs.cancel⟧' })).toBeNull();
+  });
+
+  it('S-2: чужа й системна задача з самим System.ViewHealth — кнопки скасування немає', async () => {
+    // ⛔ Мутаційний доказ: поверніть `isCancellable(openState) &&` замість `canCancelJob(...)` у `JobsPage.tsx` —
+    // кнопка з'явиться, а сервер відповість на неї `403` (`CancelJobHandler`, `System.RunJob`).
+    permissions = ['System.ViewHealth'];
+    mockFetch();
+    show();
+
+    const system = await openDrawerOf('Running');
+    // ⚠ Підвал намальований (шторка відкрита), профіль уже прийшов — інакше «немає» було б «ще немає».
+    await waitFor(() => expect(posted).toEqual([]));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(within(system).queryByRole('button', { name: '⟦jobs.cancel⟧' })).toBeNull();
+  });
+
+  it('S-2: чужа задача (інший автор) з самим System.ViewHealth — кнопки скасування немає', async () => {
+    permissions = ['System.ViewHealth'];
+    jobs[0]!.createdByUserId = MeUserId + 1;
+    mockFetch();
+    show();
+
+    const foreign = await openDrawerOf('Running');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(within(foreign).queryByRole('button', { name: '⟦jobs.cancel⟧' })).toBeNull();
+  });
+
+  it('S-2: свою задачу автор скасовує без System.RunJob', async () => {
+    permissions = ['System.ViewHealth'];
+    jobs[0]!.createdByUserId = MeUserId;
+    mockFetch();
+    show();
+
+    const own = await openDrawerOf('Running');
+    expect(await within(own).findByRole('button', { name: '⟦jobs.cancel⟧' })).toBeTruthy();
   });
 
   it('повторний клік підтвердження, поки запит у польоті, другого скасування не шле (L9-37)', async () => {

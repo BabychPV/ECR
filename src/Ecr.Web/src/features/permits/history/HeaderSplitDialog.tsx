@@ -7,14 +7,13 @@ import type { TableSliceDto } from '@/api/types';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { decimalTextOf } from '@/features/grid/rounding';
 import { formatDecimal } from '@/shared/format/number';
-import { formatMonthYear } from '@/shared/format/period';
 import { localized } from '@/shared/i18n/localized';
 import { formatCount } from '@/shared/format/plural';
 import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { rowKeyOfLine, type HeaderSplitLine } from './headerSplitModel';
 import { rowDisplayName } from './rowName';
-import { dayMonth, dottedDate, monthOf, shortDecimal, totalOfParts, wireDecimal } from './splitModel';
+import { dayMonth, dottedDate, shortDecimal, splitUnitLabel, totalOfParts, wireDecimal } from './splitModel';
 import { useSaveCellSplits } from './usePermitHistory';
 
 const PartLetters = 'ABCDEFGH';
@@ -66,8 +65,7 @@ export function HeaderSplitDialog({ documentId, periodKey, lines, slices, onClos
 
   const first = lines[0];
   const parts = first?.month.parts ?? [];
-  const { year, month } = first === undefined ? { year: 0, month: 0 } : monthOf(first.month.month);
-  const monthLabel = formatMonthYear(year, month);
+  const monthLabel = first === undefined ? '' : splitUnitLabel(first.month);
   const changedOn = parts[1]?.dayFrom;
   // F13 p223 (3): rows, as the banner counts them — a row is split when every one of its month cells holds all parts.
   const rowKeys = [...new Set(lines.map(rowKeyOfLine))];

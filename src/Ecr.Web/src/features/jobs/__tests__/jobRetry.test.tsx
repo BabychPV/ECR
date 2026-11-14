@@ -4,7 +4,7 @@ import { cleanup, render, screen } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { testTheme } from '@/test/render';
-import { canRestartJob, JobResultLink, JobRetry } from '@/features/jobs/JobFacts';
+import { canRestartJob, ForeignJobPermission, isOwnJobOf, JobResultLink, JobRetry } from '@/features/jobs/JobFacts';
 
 /**
  * «Повторити» і посилання на результат — юніт-рівень (`UX-09`, директива
@@ -39,41 +39,60 @@ describe('canRestartJob — правило показу (чиста функці
     expect(canRestartJob('Failed', true, false)).toBe(true);
   });
 
-  it('Failed + ViewHealth без власності — так', () => {
+  it('Failed + System.RunJob без власності — так (S-2)', () => {
     expect(canRestartJob('Failed', false, true)).toBe(true);
   });
 
-  it('мутація: Failed, чужа задача, без ViewHealth — ні', () => {
+  it('мутація: Failed, чужа задача, без System.RunJob — ні', () => {
     expect(canRestartJob('Failed', false, false)).toBe(false);
   });
 
-  it('мутація: не-Failed стан, навіть власна задача з ViewHealth — ні', () => {
+  it('мутація: не-Failed стан, навіть власна задача з System.RunJob — ні', () => {
     expect(canRestartJob('Running', true, true)).toBe(false);
     expect(canRestartJob('Succeeded', true, true)).toBe(false);
     expect(canRestartJob('Queued', true, true)).toBe(false);
   });
 });
 
+describe('isOwnJobOf — власність задачі (S-2)', () => {
+  it('право на чужу задачу — System.RunJob, як на сервері', () => {
+    expect(ForeignJobPermission).toBe('System.RunJob');
+  });
+
+  it('автор збігається з користувачем сеансу — власна', () => {
+    expect(isOwnJobOf(7, 7)).toBe(true);
+  });
+
+  it('мутація: інший автор, системна задача чи невідомий користувач — не власна', () => {
+    expect(isOwnJobOf(8, 7)).toBe(false);
+    expect(isOwnJobOf(null, 7)).toBe(false);
+    expect(isOwnJobOf(undefined, 7)).toBe(false);
+    // ⛔ `undefined === undefined` не має зробити системну задачу «власною», доки профіль летить.
+    expect(isOwnJobOf(undefined, undefined)).toBe(false);
+    expect(isOwnJobOf(7, undefined)).toBe(false);
+  });
+});
+
 describe('JobRetry — кнопка «Повторити»', () => {
   it('провалена власна задача — кнопка є', () => {
     show(
-      <JobRetry jobId="j-1" state="Failed" isOwnJob hasViewHealth={false} />,
+      <JobRetry jobId="j-1" state="Failed" isOwnJob hasRunJob={false} />,
     );
 
     expect(screen.getByRole('button', { name: '⟦jobs.restart⟧' })).toBeTruthy();
   });
 
-  it('провалена чужа задача з ViewHealth — кнопка є', () => {
+  it('провалена чужа задача з System.RunJob — кнопка є', () => {
     show(
-      <JobRetry jobId="j-2" state="Failed" isOwnJob={false} hasViewHealth />,
+      <JobRetry jobId="j-2" state="Failed" isOwnJob={false} hasRunJob />,
     );
 
     expect(screen.getByRole('button', { name: '⟦jobs.restart⟧' })).toBeTruthy();
   });
 
-  it('мутація: провалена чужа задача БЕЗ ViewHealth — кнопки немає', () => {
+  it('мутація: провалена чужа задача БЕЗ System.RunJob — кнопки немає', () => {
     show(
-      <JobRetry jobId="j-3" state="Failed" isOwnJob={false} hasViewHealth={false} />,
+      <JobRetry jobId="j-3" state="Failed" isOwnJob={false} hasRunJob={false} />,
     );
 
     expect(screen.queryByRole('button', { name: '⟦jobs.restart⟧' })).toBeNull();
@@ -82,7 +101,7 @@ describe('JobRetry — кнопка «Повторити»', () => {
 
   it('мутація: власна задача, не Failed (дзеркало) — кнопки немає', () => {
     show(
-      <JobRetry jobId="j-4" state="Running" isOwnJob hasViewHealth={false} />,
+      <JobRetry jobId="j-4" state="Running" isOwnJob hasRunJob={false} />,
     );
 
     expect(screen.queryByRole('button', { name: '⟦jobs.restart⟧' })).toBeNull();

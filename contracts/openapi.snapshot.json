@@ -7788,6 +7788,24 @@
               "integer"
             ]
           },
+          "lockedOverrideItems": {
+            "description": "✎ V-7: ці подані/затверджені пари «аркуш × період» (bool LockedSheetItem.Affected = `true`), не більше\n`MaxLockedItems`; `null` — таких немає. ⛔ Лише коди аркушів, періоди й статуси.",
+            "items": {
+              "$ref": "#/components/schemas/LockedSheetItem"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "lockedOverridesLost": {
+            "description": "✎ V-7 (рішення PO 11.11): скільки ручних значень замість формул (D-461), яких формула цільової версії не дозволяє,\nлежить на ПОДАНИХ або ЗАТВЕРДЖЕНИХ аркушах. Більше нуля — відмова `lockedOverridesLost` (`409 ECR-DOC-0409`,\n`migrateLockedOverrides`), доки аркуші не повернуть у роботу. `null` — таких немає.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "lockedSheetItems": {
             "description": "LP-32: перелік поданих/затверджених пар (спершу зачеплені), не більше `MaxLockedItems`; `null` — таких\nаркушів немає. ⛔ Без імен користувачів і значень — лише код аркуша, період, статус.",
             "items": {
@@ -27609,6 +27627,14 @@
             "format": "date",
             "type": "string"
           },
+          "monthTo": {
+            "description": "✎ C-10: останній день одиниці, коли вона довша за місяць (квартал/рік); `null` — місяць.",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "parts": {
             "description": "The parts the month splits into.",
             "items": {
@@ -44640,7 +44666,7 @@
             "description": "Conflict"
           }
         },
-        "summary": "Просить задачу завершитися. Право `System.ViewHealth` — або автор\nВЛАСНОЇ задачі (Q-156).",
+        "summary": "Просить задачу завершитися. Чужу чи системну — право `System.RunJob`\n(S-2, D-496); свою — автор без права (Q-156).",
         "tags": [
           "Jobs"
         ]
@@ -44721,7 +44747,7 @@
             "description": "Conflict"
           }
         },
-        "summary": "Ручний перезапуск проваленої задачі. Право `System.ViewHealth` — або\nавтор ВЛАСНОЇ задачі (директива №11, T10 #40; UX-09).",
+        "summary": "Ручний перезапуск проваленої задачі. Чужу чи системну — право `System.RunJob`\n(S-2, D-496); свою — автор (директива №11, T10 #40; UX-09).",
         "tags": [
           "Jobs"
         ]

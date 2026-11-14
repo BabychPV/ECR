@@ -1087,25 +1087,15 @@ public sealed class AccessDecisionService(
             return current;
         }
 
-        var sheets = new List<Ecr.Domain.Entities.Configuration.SheetDef>(current.Sheets);
-        var columns = new Dictionary<int, Ecr.Domain.Entities.Configuration.ColumnDef>(current.ColumnsById);
-        var rows = new Dictionary<(int TableDefId, string RowKey), Ecr.Domain.Entities.Configuration.RowDef>(current.RowsByKey);
+        // ⛔ P-6 (аудит 2026-11-10): знімок-обʼєднання — один на набір ЕКЗЕМПЛЯРІВ знімків, а не новий (з копіями словників
+        // колонок і рядків усіх версій) на кожне звернення. Запит `others` лишається: склад версій проєкту — дані.
+        var parts = new List<TemplateVersionSnapshot>(others.Count);
         foreach (var versionId in others)
         {
-            var other = await metadata.GetAsync(versionId, ct).ConfigureAwait(false);
-            sheets.AddRange(other.Sheets);
-            foreach (var column in other.ColumnsById)
-            {
-                columns.TryAdd(column.Key, column.Value);
-            }
-
-            foreach (var row in other.RowsByKey)
-            {
-                rows.TryAdd(row.Key, row.Value);
-            }
+            parts.Add(await metadata.GetAsync(versionId, ct).ConfigureAwait(false));
         }
 
-        return current with { Sheets = sheets, ColumnsById = columns, RowsByKey = rows };
+        return ProjectReadSnapshots.Merge(current, parts);
     }
 
     /// <inheritdoc />

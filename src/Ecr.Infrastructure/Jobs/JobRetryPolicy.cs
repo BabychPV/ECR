@@ -130,6 +130,7 @@ public static class JobRetryPolicy
     {
         "err.ECR-DOC-0409.migrateSheetsLocked",
         "err.ECR-DOC-0409.migrateProjectArchived",
+        "err.ECR-DOC-0409.migrateLockedOverrides", // ✎ V-7
     };
 
     /// <summary>

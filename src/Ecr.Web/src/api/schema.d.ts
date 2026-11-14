@@ -9030,8 +9030,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Просить задачу завершитися. Право `System.ViewHealth` — або автор
-         *     ВЛАСНОЇ задачі (Q-156).
+         * Просить задачу завершитися. Чужу чи системну — право `System.RunJob`
+         *     (S-2, D-496); свою — автор без права (Q-156).
          * @description     ⚠ `202`, а не `204`: скасування — прохання, не вбивство.
          *         Задача бачить токен і закривається станом `Cancelled` на найближчій
          *         межі батчу, тож у мить відповіді вона ЩЕ ВИКОНУЄТЬСЯ. Клієнт дочитує
@@ -9105,8 +9105,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Ручний перезапуск проваленої задачі. Право `System.ViewHealth` — або
-         *     автор ВЛАСНОЇ задачі (директива №11, T10 #40; UX-09).
+         * Ручний перезапуск проваленої задачі. Чужу чи системну — право `System.RunJob`
+         *     (S-2, D-496); свою — автор (директива №11, T10 #40; UX-09).
          * @description ⚠ Той самий `jobId` знову «у черзі» — не новий ідентифікатор:
          *     клієнт, що вже показує цю задачу, продовжує опитувати той самий
          *     `GET /jobs/{jobId}`.
@@ -32188,6 +32188,16 @@ export interface components {
              *     ⛔ Лише кількість.
              */
             lockedDocumentCount?: null | number;
+            /** @description ✎ V-7: ці подані/затверджені пари «аркуш × період» (bool LockedSheetItem.Affected = `true`), не більше
+             *     `MaxLockedItems`; `null` — таких немає. ⛔ Лише коди аркушів, періоди й статуси. */
+            lockedOverrideItems?: null | components["schemas"]["LockedSheetItem"][];
+            /**
+             * Format: int32
+             * @description ✎ V-7 (рішення PO 11.11): скільки ручних значень замість формул (D-461), яких формула цільової версії не дозволяє,
+             *     лежить на ПОДАНИХ або ЗАТВЕРДЖЕНИХ аркушах. Більше нуля — відмова `lockedOverridesLost` (`409 ECR-DOC-0409`,
+             *     `migrateLockedOverrides`), доки аркуші не повернуть у роботу. `null` — таких немає.
+             */
+            lockedOverridesLost?: null | number;
             /** @description LP-32: перелік поданих/затверджених пар (спершу зачеплені), не більше `MaxLockedItems`; `null` — таких
              *     аркушів немає. ⛔ Без імен користувачів і значень — лише код аркуша, період, статус. */
             lockedSheetItems?: null | components["schemas"]["LockedSheetItem"][];
@@ -41243,6 +41253,11 @@ export interface components {
              * @description First day of the month.
              */
             month: string;
+            /**
+             * Format: date
+             * @description ✎ C-10: останній день одиниці, коли вона довша за місяць (квартал/рік); `null` — місяць.
+             */
+            monthTo?: null | string;
             /** @description The parts the month splits into. */
             parts: components["schemas"]["PermitPartSpanDto"][];
         };

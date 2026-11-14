@@ -22,12 +22,15 @@ public sealed class ExportStore(IDistributedCache cache) : IExportStore
     /// форми (без власника) під новим префіксом просто не знаходиться —
     /// «побудуйте експорт заново», а не байти книги, прочитані як власник.
     /// Старі записи живуть годину й зникають самі.
+    /// X-1 (аудит 2026-11): <c>v3</c> — у заголовку ще й ім'я файлу (довжина UTF-8 як <c>int</c> + байти); записи
+    /// <c>v2</c> так само не знаходяться й зникають самі.
     /// </remarks>
-    public const string KeyPrefix = "ecr:export:v2:";
+    public const string KeyPrefix = "ecr:export:v3:";
 
     /// <summary>
-    /// Довжина заголовка запису: <c>documentId</c> як <c>long</c> (Q-180) і
-    /// власник як <c>int</c> (S6) попереду вмісту книги.
+    /// Довжина заголовка запису: <c>documentId</c> як <c>long</c> (Q-180),
+    /// власник як <c>int</c> (S6) і довжина імені файлу як <c>int</c> (X-1; <c>-1</c> — імені немає) попереду
+    /// байтів імені та вмісту книги.
     /// </summary>
     /// <remarks>
     /// ⚠ <c>IDistributedCache</c> зберігає лише опаковані байти — жодної
@@ -35,19 +38,23 @@ public sealed class ExportStore(IDistributedCache cache) : IExportStore
     /// одна таблиця «ключ → блоб», її форма не міняється), тож `documentId`
     /// і власник пакуються просто ПОПЕРЕДУ вмісту, а не окремими колонками.
     /// </remarks>
-    private const int HeaderLength = sizeof(long) + sizeof(int);
+    private const int HeaderLength = sizeof(long) + sizeof(int) + sizeof(int);
 
     /// <inheritdoc />
     public Task SaveAsync(
-        string exportId, long documentId, int ownerUserId, byte[] content, TimeSpan lifetime, CancellationToken ct)
+        string exportId, long documentId, int ownerUserId, byte[] content, TimeSpan lifetime, CancellationToken ct,
+        string? fileBaseName = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(exportId);
         ArgumentNullException.ThrowIfNull(content);
 
-        var envelope = new byte[HeaderLength + content.Length];
+        var name = fileBaseName is null ? [] : System.Text.Encoding.UTF8.GetBytes(fileBaseName);
+        var envelope = new byte[HeaderLength + name.Length + content.Length];
         BitConverter.TryWriteBytes(envelope, documentId);
         BitConverter.TryWriteBytes(envelope.AsSpan(sizeof(long)), ownerUserId);
-        content.CopyTo(envelope, HeaderLength);
+        BitConverter.TryWriteBytes(envelope.AsSpan(sizeof(long) + sizeof(int)), fileBaseName is null ? -1 : name.Length);
+        name.CopyTo(envelope, HeaderLength);
+        content.CopyTo(envelope, HeaderLength + name.Length);
 
         // ⛔ Абсолютний строк, а не ковзний: книга не має «продовжувати життя»
         // від того, що її кілька разів завантажили.
@@ -69,8 +76,16 @@ public sealed class ExportStore(IDistributedCache cache) : IExportStore
 
         var documentId = BitConverter.ToInt64(envelope, 0);
         var ownerUserId = BitConverter.ToInt32(envelope, sizeof(long));
-        var content = envelope[HeaderLength..];
+        var nameLength = BitConverter.ToInt32(envelope, sizeof(long) + sizeof(int));
+        var nameBytes = Math.Max(nameLength, 0);
+        if (envelope.Length < HeaderLength + nameBytes)
+        {
+            return null;
+        }
 
-        return new ExportedBook(documentId, ownerUserId, content);
+        var fileBaseName = nameLength < 0 ? null : System.Text.Encoding.UTF8.GetString(envelope, HeaderLength, nameBytes);
+        var content = envelope[(HeaderLength + nameBytes)..];
+
+        return new ExportedBook(documentId, ownerUserId, content, fileBaseName);
     }
 }

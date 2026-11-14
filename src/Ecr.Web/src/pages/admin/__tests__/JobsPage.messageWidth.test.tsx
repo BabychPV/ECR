@@ -24,9 +24,10 @@ describe('JobsPage: довге повідомлення не розсуває т
   it('повідомлення обрізається з повним текстом у title, кнопок дій у рядку немає', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () =>
+      // S-2 (`D-496`): сторінка читає профіль `/api/v1/me` (право `System.RunJob`, власність задачі).
+      vi.fn(async (input: RequestInfo | URL) =>
         new Response(
-          JSON.stringify([
+          JSON.stringify(String(input).endsWith('/api/v1/me') ? { userId: 7, userName: 'tester', permissions: ['System.ViewHealth'], denies: [], grants: {}, isSimulation: false, language: 'uk', mustChangePassword: false } : [
             { jobCode: 'Ecr.Application.Ports.IExcelExportJob', jobId: 'job-1', percent: 100, state: 'Succeeded', message: Key, startedAt: '2026-09-19T09:00:00Z', updatedAt: '2026-09-19T09:10:00Z' },
           ]),
           { status: 200, headers: { 'Content-Type': 'application/json' } },

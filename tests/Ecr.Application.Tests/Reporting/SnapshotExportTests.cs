@@ -172,6 +172,32 @@ public sealed class SnapshotExportTests
             .WriteAsync(Arg.Any<SnapshotWorkbook>(), Arg.Any<CancellationToken>());
     }
 
+    /// <summary>
+    /// X-8 (аудит 2026-11): файл зрізу називається за правилом X-1 — назва звіту мовою користувача, код, період і
+    /// номер зрізу; без фактів про зріз — запасне «snapshot #id».
+    /// </summary>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Файл_зрізу_має_назву_звіту_код_період_і_номер()
+    {
+        var world = Allowed();
+        world.Pages(1);
+        world.Snapshots.FindNameFactsAsync(SnapshotId, Arg.Any<CancellationToken>())
+            .Returns(new SnapshotNameFacts(
+                "IEC",
+                new Ecr.Domain.ValueObjects.LocalizedText(
+                    new Dictionary<string, string> { ["en"] = "Water report", [Language] = "Отчёт по воде" }),
+                202602,
+                PeriodKind.Quarterly));
+
+        var named = await world.Handler.HandleAsync(SnapshotId, CancellationToken.None);
+        Assert.Equal("Отчёт по воде (IEC) Q2 2026 #77.xlsx", named.FileName);
+
+        var bare = Allowed();
+        bare.Pages(1);
+        var unnamed = await bare.Handler.HandleAsync(SnapshotId, CancellationToken.None);
+        Assert.Equal("snapshot #77.xlsx", unnamed.FileName);
+    }
+
     private static World Allowed()
         => new(
             permissions: [ExportSnapshotHandler.Permission, GetSnapshotRowsHandler.ContentPermission],

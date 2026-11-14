@@ -41,8 +41,11 @@ function mockFetch(): void {
         );
       }
 
+      // S-2 (`D-496`): сторінка читає профіль `/api/v1/me` (право `System.RunJob`, власність задачі).
+      const me = { userId: 7, userName: 'tester', permissions: ['System.ViewHealth'], denies: [], grants: {}, isSimulation: false, language: 'uk', mustChangePassword: false };
+
       return Promise.resolve(
-        new Response(JSON.stringify([]), {
+        new Response(JSON.stringify(url.endsWith('/api/v1/me') ? me : []), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         }),

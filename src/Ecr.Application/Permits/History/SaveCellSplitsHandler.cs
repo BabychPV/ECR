@@ -52,7 +52,8 @@ public sealed class SaveCellSplitsHandler(
 
     // F13 p223 (1): the stored Issues of the year are re-run after the split. `null` (tests) — not re-run.
     ValidateDocumentHandler? revalidate = null,
-    IValidationResultStore? validationResults = null)
+    IValidationResultStore? validationResults = null,
+    IPeriodStore? periods = null)    // ✎ C-10: межі періоду комірки для одиниці поділу (квартал/рік). `null` (тести) — як для місячного.
 {
     /// <summary>Entity type of the split audit records (<c>aud.StructureChange</c>).</summary>
     public const string AuditEntityType = "CellPermitPart";
@@ -121,7 +122,7 @@ public sealed class SaveCellSplitsHandler(
 
             foreach (var plan in plans)
             {
-                var monthKey = (plan.Month.Year * 100) + plan.Month.Month;
+                var monthKey = plan.Unit.PartKey;
                 var stored = await store.CellPartsAsync(
                         monthKey, documentId, plan.Table.Id, plan.Instance.SheetCopyId, plan.RowKey, plan.Column.Id, innerCt)
                     .ConfigureAwait(false);
@@ -158,7 +159,9 @@ public sealed class SaveCellSplitsHandler(
                             sheetCopyId = plan.Instance.SheetCopyId,
                             rowKey = plan.RowKey,
                             column = plan.Column.Code,
-                            month = plan.Month.ToString("yyyy-MM", CultureInfo.InvariantCulture),
+                            month = plan.Unit.IsSingleMonth
+                                ? plan.Unit.First.ToString("yyyy-MM", CultureInfo.InvariantCulture)
+                                : $"{plan.Unit.First.ToString("yyyy-MM", CultureInfo.InvariantCulture)}..{plan.Unit.Last.ToString("yyyy-MM", CultureInfo.InvariantCulture)}",
                             total = plan.Total,
                             parts = plan.Spans.Select((s, i) => new
                             {
@@ -257,9 +260,16 @@ public sealed class SaveCellSplitsHandler(
             throw PartsInvalid("У рядка немає історії дозволу.");
         }
 
-        var monthNumber = column.MonthNumber is { } m ? (int)m : period.Sequence;
-        var month = new DateOnly(period.Year, monthNumber, 1);
-        var inMonth = PermitTimeline.InMonth(spans, month);
+        // ✎ C-10 (рішення PO 11.11): місячна колонка — свій місяць; колонка без місяця — період комірки (квартал/рік).
+        var bounds = column.MonthNumber is null && periods is not null
+            ? await periods.FindPeriodBoundsAsync(documentId, instance.PeriodKey, ct).ConfigureAwait(false)
+            : null;
+        var unit = column.MonthNumber is { } m
+            ? PermitSplitUnit.Month(new DateOnly(period.Year, m, 1))
+            : bounds is not null
+                ? PermitSplitUnit.OfPeriod(period, bounds)
+                : PermitSplitUnit.Month(new DateOnly(period.Year, period.Sequence, 1));
+        var inMonth = PermitTimeline.InUnit(spans, unit);
         if (inMonth.Count < 2)
         {
             throw PartsInvalid("Цей місяць не ділиться між дозволами.");
@@ -272,19 +282,18 @@ public sealed class SaveCellSplitsHandler(
 
         var entries = (await registries.FindEntriesByIdsAsync([.. inMonth.Select(s => s.EntryId).Distinct()], ct).ConfigureAwait(false))
             .ToDictionary(e => e.Id);
-        var last = month.AddMonths(1).AddDays(-1);
         var parts = inMonth
             .Select(s => new PartSpan(
                 s.EntryId,
                 entries.TryGetValue(s.EntryId, out var e) ? PatchCellsHandler.PermitName(e, null) : string.Empty,
-                s.From is { } f && f > month ? f : month,
-                s.Until is { } u && u < last ? u : last))
+                s.From is { } f && f > unit.First ? f : unit.First,
+                s.Until is { } u && u < unit.Last ? u : unit.Last))
             .ToList();
 
         // No pro rata, ever: the total exists only when the user typed every part.
         decimal? total = item.Parts.All(p => p is not null) ? item.Parts.Sum(p => p!.Value) : null;
         return new Plan(
-            instance, table, column, item.RowKey, item.BaseVersion, month, parts, item.Parts, total,
+            instance, table, column, item.RowKey, item.BaseVersion, unit, parts, item.Parts, total,
             segmentIds, permitColumnId, headerFieldId);
     }
 
@@ -298,6 +307,6 @@ public sealed class SaveCellSplitsHandler(
 
     private sealed record Plan(
         TableInstanceRef Instance, Domain.Entities.Configuration.TableDef Table, Domain.Entities.Configuration.ColumnDef Column,
-        string RowKey, string BaseVersion, DateOnly Month, IReadOnlyList<PartSpan> Spans, IReadOnlyList<decimal?> Parts,
+        string RowKey, string BaseVersion, PermitSplitUnit Unit, IReadOnlyList<PartSpan> Spans, IReadOnlyList<decimal?> Parts,
         decimal? Total, IReadOnlyList<int> SegmentIds, int? PermitColumnId, int? HeaderFieldId);
 }

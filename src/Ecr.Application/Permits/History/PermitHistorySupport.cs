@@ -262,7 +262,7 @@ internal static class PermitHistoryReader
     internal sealed record RowTarget(
         TableDef Table, ColumnDef? Column, long? SheetCopyId, string RowKey, PeriodKey Period, long BaseEntryId,
         IReadOnlyDictionary<int, CellValueData> Cells, IReadOnlyList<PermitSegment> Segments,
-        IReadOnlyDictionary<int, string?> AddedBy, string? HeaderFieldCode = null)
+        IReadOnlyDictionary<int, string?> AddedBy, string? HeaderFieldCode = null, PeriodBounds? Bounds = null)
     {
         /// <summary>The permit column's id (0 — the row relies on the header permit, Ship 2).</summary>
         public int PermitColumnId => Column?.Id ?? 0;
@@ -277,19 +277,20 @@ internal static class PermitHistoryReader
 
     /// <summary>The history of the row just written.</summary>
     public static async Task<RowPermitHistoryDto> RowAsync(
-        IPermitHistoryStore store, IRegistryStore registries, PermitHistoryRow row, string? language, CancellationToken ct)
+        IPermitHistoryStore store, IRegistryStore registries, PermitHistoryRow row, string? language, CancellationToken ct,
+        PeriodBounds? bounds = null)
     {
         var segments = await store
             .RowSegmentsAsync(row.Instance.DocumentId, row.Table.Id, row.Instance.SheetCopyId, row.RowKey, row.Column.Id, ct)
             .ConfigureAwait(false);
         var target = new RowTarget(
             row.Table, row.Column, row.Instance.SheetCopyId, row.RowKey, new PeriodKey(row.Instance.PeriodKey), row.BaseEntryId,
-            row.Cells, segments, segments.ToDictionary(s => s.Id, _ => (string?)null));
+            row.Cells, segments, segments.ToDictionary(s => s.Id, _ => (string?)null), Bounds: bounds);
         var entries = (await registries
                 .FindEntriesByIdsAsync([.. segments.Select(s => s.RegistryEntryId).Append(row.BaseEntryId).Distinct()], ct)
                 .ConfigureAwait(false))
             .ToDictionary(e => e.Id);
-        var months = PermitTimeline.SharedMonths(target.Spans).Select(m => (m.Year * 100) + m.Month).ToList();
+        var months = SplitUnits(target.Table, target.Period, bounds, target.Spans).Select(u => u.PartKey).ToList();
         var parts = await store.PartsAsync(row.Instance.DocumentId, months, ct).ConfigureAwait(false);
         return RowDto(target, entries, parts, language);
     }
@@ -314,15 +315,14 @@ internal static class PermitHistoryReader
         RowTarget row, IReadOnlyDictionary<long, RegistryEntry> entries, IReadOnlyList<CellPermitPart> parts, string? language)
     {
         var split = new List<SplitMonthDto>();
-        foreach (var month in PermitTimeline.SharedMonths(row.Spans))
+        foreach (var unit in SplitUnits(row.Table, row.Period, row.Bounds, row.Spans))
         {
-            var monthKey = (month.Year * 100) + month.Month;
-            var inMonth = PermitTimeline.InMonth(row.Spans, month);
-            var last = month.AddMonths(1).AddDays(-1);
+            var monthKey = unit.PartKey;
+            var inMonth = PermitTimeline.InUnit(row.Spans, unit);
             var spans = inMonth.Select((s, i) => new PermitPartSpanDto(
                     i + 1, s.EntryId, Name(entries, s.EntryId, language),
-                    s.From is { } f && f > month ? f : month,
-                    s.Until is { } u && u < last ? u : last))
+                    s.From is { } f && f > unit.First ? f : unit.First,
+                    s.Until is { } u && u < unit.Last ? u : unit.Last))
                 .ToList();
 
             // A cell is split when every part of it holds a value.
@@ -335,7 +335,7 @@ internal static class PermitHistoryReader
                 .Where(g => IsSplit(g.Value, spans.Count))
                 .Select(g => g.Key)
                 .ToHashSet();
-            var pending = DataCellsInMonth(row.Table, row.Period, row.Cells, new HashSet<int> { row.PermitColumnId }, month)
+            var pending = DataCellsInUnit(row.Table, row.Period, row.Cells, new HashSet<int> { row.PermitColumnId }, unit)
                 .Where(c => !done.Contains(c.Id))
                 .Select(c => c.Code)
                 .ToList();
@@ -343,11 +343,11 @@ internal static class PermitHistoryReader
             // The cells of the month: the month column of a month table, or the numeric cells holding data or parts.
             var monthColumns = PermitMonthCoverage.MonthColumns(row.Table);
             List<ColumnDef> cellColumns = monthColumns.Count > 0
-                ? [.. monthColumns.Where(c => row.Period.Year == month.Year && c.MonthNumber == month.Month)]
+                ? [.. monthColumns.Where(c => row.Period.Year == unit.First.Year && c.MonthNumber == unit.First.Month)]
                 : row.Table.Columns
                     .Where(c => !c.IsDeleted && c.DataType is CellDataType.Decimal or CellDataType.Int && c.Id != row.PermitColumnId
                                 && (rowParts.ContainsKey(c.Id)
-                                    || DataCellsInMonth(row.Table, row.Period, row.Cells, new HashSet<int>(), month).Any(d => d.Id == c.Id)))
+                                    || DataCellsInUnit(row.Table, row.Period, row.Cells, new HashSet<int>(), unit).Any(d => d.Id == c.Id)))
                     .ToList();
             var cellValues = cellColumns
                 .Select(c => new CellSplitValueDto(
@@ -358,7 +358,7 @@ internal static class PermitHistoryReader
                         : null)],
                     done.Contains(c.Id)))
                 .ToList();
-            split.Add(new SplitMonthDto(month, pending, spans, cellValues));
+            split.Add(new SplitMonthDto(unit.First, pending, spans, cellValues, unit.IsSingleMonth ? null : unit.Last));
         }
 
         return new RowPermitHistoryDto(
@@ -383,17 +383,46 @@ internal static class PermitHistoryReader
     }
 
     /// <summary>
-    /// Entered (not calculated) numeric data cells of a row that belong to <paramref name="month"/>: the month column of
-    /// that month (month table, the period's year), or every numeric data cell when the table has no month columns and the
-    /// period is that month.
+    /// ✎ C-10 (рішення PO 11.11): одиниці, які рядок має поділити в цьому періоді. Місячні колонки — спільні місяці
+    /// (як досі). Колонки без місяця: квартальний/річний період — сам період, якщо зміна історії всередині нього;
+    /// місячний період або межі невідомі — побайтно як досі (усі спільні місяці історії).
     /// </summary>
-    public static IReadOnlyList<ColumnDef> DataCellsInMonth(
-        TableDef table, PeriodKey period, IReadOnlyDictionary<int, CellValueData> cells, IReadOnlySet<int> skip, DateOnly month)
+    /// <param name="table">Таблиця.</param>
+    /// <param name="period">Період комірки.</param>
+    /// <param name="bounds">Межі періоду; <c>null</c> — невідомі.</param>
+    /// <param name="spans">Історія дозволів.</param>
+    public static IReadOnlyList<PermitSplitUnit> SplitUnits(
+        TableDef table, PeriodKey period, PeriodBounds? bounds, IReadOnlyList<PermitSpan> spans)
     {
+        var months = PermitTimeline.SharedMonths(spans).Select(PermitSplitUnit.Month).ToList();
+        if (PermitMonthCoverage.MonthColumns(table).Count > 0 || bounds is null)
+        {
+            return months;
+        }
+
+        var unit = PermitSplitUnit.OfPeriod(period, bounds);
+        if (unit.IsSingleMonth)
+        {
+            return months;
+        }
+
+        return PermitTimeline.IsShared(spans, unit) ? [unit] : [];
+    }
+
+    /// <summary>✎ C-10: введені числові комірки рядка, що належать одиниці (для колонки без місяця — одиниця = період комірки).</summary>
+    /// <param name="table">Таблиця.</param>
+    /// <param name="period">Період комірки.</param>
+    /// <param name="cells">Комірки рядка.</param>
+    /// <param name="skip">Колонки, які пропустити.</param>
+    /// <param name="unit">Одиниця поділу.</param>
+    public static IReadOnlyList<ColumnDef> DataCellsInUnit(
+        TableDef table, PeriodKey period, IReadOnlyDictionary<int, CellValueData> cells, IReadOnlySet<int> skip, PermitSplitUnit unit)
+    {
+        ArgumentNullException.ThrowIfNull(unit);
         var monthColumns = PermitMonthCoverage.MonthColumns(table);
         IEnumerable<ColumnDef> candidates = monthColumns.Count > 0
-            ? monthColumns.Where(c => period.Year == month.Year && c.MonthNumber == month.Month)
-            : period.Year == month.Year && period.Sequence == month.Month
+            ? monthColumns.Where(c => period.Year == unit.First.Year && c.MonthNumber == unit.First.Month)
+            : unit.PartKey == period.Value   // місячний проєкт: Month(m).PartKey = YYYYMM = PeriodKey лише для свого місяця
                 ? table.Columns.Where(c => !c.IsDeleted && c.DataType is CellDataType.Decimal or CellDataType.Int)
                 : [];
         return [.. candidates.Where(c => !skip.Contains(c.Id)

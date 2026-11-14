@@ -823,10 +823,18 @@ public sealed class DocumentsController(
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DownloadExport(long id, string exportId, CancellationToken ct)
     {
-        var content = await downloadExport.HandleAsync(exportId, ct).ConfigureAwait(false);
-        var (contentType, extension) = Ecr.Application.Documents.DocumentExportFormat.OfContent(content);
+        var book = await downloadExport.HandleAsync(exportId, ct).ConfigureAwait(false);
+        var (contentType, extension) = Ecr.Application.Documents.DocumentExportFormat.OfContent(book.Content);
 
-        return File(content, contentType, $"document-{id}-{exportId}.{extension}");
+        // ⛔ X-1 (аудит 2026-11): людське ім'я з книги; id — із книги, а не з маршруту (маршрут може назвати інший
+        // документ). Заголовок — ЯВНО: `filename*=UTF-8''…` (RFC 5987, повне ім'я) + ASCII `filename` (запасне для
+        // старих клієнтів); `File` без імені заголовка не пише.
+        _ = id;
+        var fallbackName = string.Create(System.Globalization.CultureInfo.InvariantCulture, $"document-{book.DocumentId}");
+        Response.Headers.ContentDisposition =
+            ExportAttachment.Header(book.FileBaseName ?? fallbackName, fallbackName, extension);
+
+        return File(book.Content, contentType);
     }
 
     /// <summary>Попередній перегляд імпорту. Право <c>Document.Import</c>.</summary>

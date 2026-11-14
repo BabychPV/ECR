@@ -100,8 +100,11 @@ public sealed class TableSliceRowScopeConditionalFormatTests
         SetId(running, RunningEntry);
         var numeric = new RegistryEntry(StatusRegistry, EcrCode.Create("E901"), Text("Numeric"));
         SetId(numeric, NumericCodeEntry);
-        _registries.ListEntriesAsync(StatusRegistry, Arg.Any<CancellationToken>())
-                   .Returns(Task.FromResult<IReadOnlyList<RegistryEntry>>([removed, running, numeric]));
+        // P-8 (аудит 2026-11-10): зріз питає лише записи, що стоять у його комірках (за Id), а не весь реєстр.
+        RegistryEntry[] all = [removed, running, numeric];
+        _registries.FindEntriesByIdsAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
+                   .Returns(call => Task.FromResult<IReadOnlyList<RegistryEntry>>(
+                       [.. all.Where(e => call.Arg<IReadOnlyCollection<long>>().Contains(e.Id))]));
     }
 
     private void Rules(params ConditionalFormatRule[] rules)
@@ -128,7 +131,13 @@ public sealed class TableSliceRowScopeConditionalFormatTests
         Assert.False(slice.CellFormats.ContainsKey("R3:Volume"));
         // Прихована колонка не отримує формату — її немає в зрізі.
         Assert.DoesNotContain(slice.CellFormats.Keys, k => k.EndsWith(":Secret", StringComparison.Ordinal));
-        await _registries.Received(1).ListEntriesAsync(StatusRegistry, Arg.Any<CancellationToken>());
+
+        // ⛔ P-8: рівно ОДИН точковий запит за Id із комірок зрізу і жодного читання всього реєстру.
+        // Мутація: повернути `LookupTargetEntries.ListAsync` у `GetTableSliceHandler` — `ListEntriesAsync` викликано, червоний.
+        await _registries.Received(1).FindEntriesByIdsAsync(
+            Arg.Is<IReadOnlyCollection<long>>(ids => ids.Contains(RemovedEntry) && ids.Count == ids.Distinct().Count()),
+            Arg.Any<CancellationToken>());
+        await _registries.DidNotReceive().ListEntriesAsync(Arg.Any<int>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -264,6 +273,7 @@ public sealed class TableSliceRowScopeConditionalFormatTests
 
         Assert.Equal("#ff0000", slice.CellFormats!["R1:Volume"].BackgroundHex);
         await _registries.DidNotReceive().ListEntriesAsync(Arg.Any<int>(), Arg.Any<CancellationToken>());
+        await _registries.DidNotReceive().FindEntriesByIdsAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>());
     }
 
     private GetTableSliceHandler Handler()
