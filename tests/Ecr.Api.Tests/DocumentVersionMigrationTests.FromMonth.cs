@@ -345,23 +345,28 @@ public sealed partial class DocumentVersionMigrationTests
     [Trait("Requirement", "RPT-STABLE")]
     public async Task Стабільна_вʼюха_після_переносу_з_місяця_веде_ряд_версій_за_справжньою_шкалою()
     {
-        var s = await ArrangeAsync(Target.AddsC4Only).ConfigureAwait(true);   // 202601 на v1
-        await AddMonthsAsync(s, 202602, 202603).ConfigureAwait(true);
-
-        using var flag = FromMonthOn();
-        using var app = new EcrApiFactory(sql);
-        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
-        var response = await PostRangeAsync(client, s, dryRun: false, "FromMonth", 202602).ConfigureAwait(true);
-        Assert.True(response.StatusCode == HttpStatusCode.OK, $"{response.StatusCode}: {await response.Content.ReadAsStringAsync().ConfigureAwait(true)}");
+        var s = await ArrangeAsync(Target.AddsC4Only, periodKey: 209901).ConfigureAwait(true);   // 209901 на v1
+        await AddMonthsAsync(s, 209902, 209903).ConfigureAwait(true);
 
         await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
         // Вихідна версія в будівнику - чернетка; вʼюхи стабільні беруть лише Published/Deprecated (як у бойовій базі).
+        // ⛔ B123: публікувати ДО старту застосунку. Старт ставить фонову задачу «усі шаблони» (ReportViewsJob →
+        // rpt.usp_GenerateStableViews NULL): вона знімає знімок опублікованих версій (@gt) на початку, а вʼюху ЦЬОГО шаблону
+        // пише наприкінці циклу по всіх групах спільної бази (секунди під навантаженням CI). Знімок без v1 (ще чернетка),
+        // записаний ПІСЛЯ генерації нижче, лишав вʼюху без 209901:v1 (CI 43639822988: бракувало `202601:1.0.0.185`).
+        // Опублікована до старту v1 є в будь-якому знімку, що містить цей шаблон, — порядок записувачів уже не важить.
         var source = await db.TemplateVersions.SingleAsync(v => v.Id == s.Doc.TemplateVersionId).ConfigureAwait(true);
         if (source.Status == TemplateVersionStatus.Draft)
         {
             source.Publish(1, DateTime.UtcNow);
             await db.SaveChangesAsync().ConfigureAwait(true);
         }
+
+        using var flag = FromMonthOn();
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+        var response = await PostRangeAsync(client, s, dryRun: false, "FromMonth", 209902).ConfigureAwait(true);
+        Assert.True(response.StatusCode == HttpStatusCode.OK, $"{response.StatusCode}: {await response.Content.ReadAsStringAsync().ConfigureAwait(true)}");
 
         var generator = new Ecr.Infrastructure.Reporting.ReportViewGenerator(db);
         await generator.GenerateAsync(s.Doc.TemplateVersionId, CancellationToken.None).ConfigureAwait(true);
@@ -390,11 +395,11 @@ public sealed partial class DocumentVersionMigrationTests
         }
 
         // Один безперервний ряд: січень - v1 (старі Id), лютий і березень - v2; на кожен період по рядку (2 рядки таблиці).
-        Assert.Contains($"202601:{versionText}", series);
-        Assert.Contains($"202602:{targetText}", series);
-        Assert.Contains($"202603:{targetText}", series);
-        Assert.DoesNotContain($"202602:{versionText}", series);
-        Assert.DoesNotContain($"202601:{targetText}", series);
+        Assert.Contains($"209901:{versionText}", series);
+        Assert.Contains($"209902:{targetText}", series);
+        Assert.Contains($"209903:{targetText}", series);
+        Assert.DoesNotContain($"209902:{versionText}", series);
+        Assert.DoesNotContain($"209901:{targetText}", series);
     }
 
     [Fact]
