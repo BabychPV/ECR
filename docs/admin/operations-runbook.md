@@ -1004,9 +1004,15 @@ attempt of this first deployment (skip)» на кроці бази (майсте
 **виявляє**:
 
 - `usp_ArchiveYear` після успішного перенесення записує **еталон** кожного періоду діапазону — кількість і
-  суму 64-бітних SHA2-хешів рядків `arc.CellValue`, `arc.TableRow`, `arc.TableInstance` (в'юха
+  суму 64-бітних SHA2-хешів рядків `arc.CellValue`, `arc.TableRow`, `arc.TableInstance`, а з B87 — ще й
+  `arc.CellPermitPart` (частини місяця між дозволами), `arc.CellStyle`, `arc.CellFormulaOverride` (в'юха
   `arc.ArchiveRowHash`, `12-archive-tables.sql`) — у `itg.ArchiveRun.ChecksumSourceJson` і
   `ChecksumTargetJson` (обидва однакові, `"origin":"archive"`).
+- **Еталони, записані до B87**, нових трьох таблиць не мають і звіряються лише за комірками, рядками й
+  екземплярами — оновлення хибних знахідок не дає. Якщо такий еталон збігся, нічний прохід **доповнює** його
+  трьома новими видами з поточного стану (підсумок — `archiveReferencesExtended`); далі їхня правка — знахідка.
+  ⚠ Зміну цих трьох таблиць, зроблену до першого проходу після оновлення, так не виявити (та сама ціна, що й у
+  базового еталона нижче).
 - Нічна `ConsistencyCheckJob` (і ручний запуск на `/admin/consistency`) перераховує той самий відбиток для
   кожного заархівованого періоду (останній завершений прогін — `ToArchive`) і порівнює з еталоном.
   Розбіжність — знахідка `ARCHIVE_CHECKSUM` з сутністю `arc.Period` (ідентифікатор — `PeriodKey`), вага 3:
