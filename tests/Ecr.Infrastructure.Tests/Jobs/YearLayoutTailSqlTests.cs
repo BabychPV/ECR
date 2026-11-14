@@ -373,7 +373,8 @@ public sealed partial class YearLayoutTailSqlTests(SqlServerFixture sql)
 
     /// <summary>
     /// Прибирання власного стану тесту (retro 375): спільна тестова база не має отримати від цього тесту ні
-    /// актуальних прогонів (інакше «останній прогін» інших тестів — наш), ні змінених станів, ні станів процесу.
+    /// актуальних чи «Running» прогонів (обробник завершення тут підмінений, тож прогони задачі лишались би
+    /// «Running»; інакше «останній прогін» інших тестів — наш), ні змінених станів, ні станів процесу.
     /// Лише рядки ЦЬОГО проєкту й документа. <c>aud.CellChange</c> незмінний (тригер) — його рядки лишаються на
     /// власному <c>DocumentId</c> і періодах 2099.
     /// </summary>
@@ -381,7 +382,7 @@ public sealed partial class YearLayoutTailSqlTests(SqlServerFixture sql)
     {
         await ExecuteAsync(
             $"UPDATE calc.CalculationRun SET Status = N'Superseded' " +
-            $"WHERE ProjectId = {world.Doc.ProjectId} AND Status = N'{Ecr.Domain.Entities.Calculations.CalculationRun.CurrentStatus}';");
+            $"WHERE ProjectId = {world.Doc.ProjectId} AND Status <> N'{Ecr.Domain.Entities.Calculations.CalculationRun.SupersededStatus}';");
         await ExecuteAsync($"DELETE FROM wf.ApprovalState WHERE DocumentId = {world.Doc.DocumentId};");
         await ExecuteAsync(
             $"UPDATE doc.Period SET State = {(int)PeriodState.Open} " +
