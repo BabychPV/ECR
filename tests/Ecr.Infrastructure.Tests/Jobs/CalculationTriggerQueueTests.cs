@@ -64,7 +64,7 @@ public sealed class CalculationTriggerQueueTests(SqlServerFixture sql) : DbJobQu
         Assert.Equal(behind, await trigger.RequestAsync(DocumentId, Period, CancellationToken.None));
         Assert.Equal(behind, await trigger.RequestAsync(DocumentId, Period, CancellationToken.None));
 
-        var target = $"{nameof(IRecalculationJob)}~{RecalculateDocumentHandler.TargetOf(DocumentId, Period)}";
+        var target = $"{nameof(IRecalculationJob)}~{CalculationTrigger.AutoTargetOf(DocumentId, Period)}";
         await using var db = Sql.CreateContext();
         Assert.Equal(1, await db.JobProgresses.CountAsync(p => p.TargetKey == target && p.State == "Queued"));
         Assert.Equal(1, await db.JobProgresses.CountAsync(p => p.TargetKey == target && p.State == "Running"));
@@ -84,25 +84,39 @@ public sealed class CalculationTriggerQueueTests(SqlServerFixture sql) : DbJobQu
         Assert.NotNull(february);
         Assert.NotEqual(january, february);
         Assert.Equal(
-            $"{nameof(IRecalculationJob)}~{RecalculateDocumentHandler.TargetOf(DocumentId, new PeriodKey(202602))}",
+            $"{nameof(IRecalculationJob)}~{CalculationTrigger.AutoTargetOf(DocumentId, new PeriodKey(202602))}",
             (await RowAsync(february))?.TargetKey);
     }
 
+    /// <summary>
+    /// ⛔ B83: нічна дочірня задача (ціль <c>TargetOf</c>, без людини й без позначки поданих) чекає в черзі — збір PI
+    /// ставить СВОЮ задачу з позначкою поданих, а не зливається в нічну (урок B63: інакше позначка губилась би, і
+    /// поданий аркуш із новими даними лишався б непорахованим). Нічна задача лишається без позначки.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ ДОКАЗ (локально): <c>AutoTargetOf</c> → <c>RecalculateDocumentHandler.TargetOf</c> у тригері — <c>auto == nightly</c>,
+    /// payload без <c>recalculateSubmitted</c>, червоний.
+    /// </remarks>
     [Fact]
-    public async Task Задачу_кнопки_і_автоперерахунку_черга_бачить_як_одну_ціль()
+    [Trait("Finding", "B83")]
+    public async Task Збір_не_зливається_в_нічну_задачу_і_не_губить_позначку_поданих()
     {
         await using var host = NewHost();
         var jobs = Scheduler(host);
         var trigger = Trigger(host);
 
-        // Ручна кнопка «Перерахувати» ставить через `EnqueueExclusiveAsync` з тією самою ціллю.
-        var manual = await jobs.EnqueueExclusiveAsync<IRecalculationJob>(
-            RecalculateDocumentHandler.TargetOf(DocumentId, Period), new { }, CancellationToken.None);
+        // Нічний розклад розклав дочірню задачу документа (`RecalculationJob.FanOutAsync`): та сама ціль, що в кнопки.
+        var nightly = await jobs.EnqueueCoalescedAsync<IRecalculationJob>(
+            RecalculateDocumentHandler.TargetOf(DocumentId, Period),
+            new { ProjectId = 1, DocumentId, PeriodKey = Period.Value, TriggeredByUserId = (int?)null },
+            CancellationToken.None);
 
         var auto = await trigger.RequestAsync(DocumentId, Period, CancellationToken.None);
 
-        // ⚠ Ручна ще чекає в черзі — автоперерахунок її поглинає, а не дублює.
-        Assert.Equal(manual, auto);
+        Assert.NotNull(auto);
+        Assert.NotEqual(nightly, auto);
+        Assert.Contains("\"recalculateSubmitted\":true", (await RowAsync(auto))?.Payload, StringComparison.Ordinal);
+        Assert.DoesNotContain("recalculateSubmitted", (await RowAsync(nightly))?.Payload, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -167,6 +181,12 @@ public sealed class CalculationTriggerQueueTests(SqlServerFixture sql) : DbJobQu
         workflow.GetSheetsAsync(Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
             .Returns(Array.Empty<ApprovalState>());
 
-        return new CalculationTrigger(Scheduler(host), periods, workflow);
+        var documents = Substitute.For<IDocumentStore>();
+        documents.GetIncludedSheetIdsAsync(Arg.Any<long>(), Arg.Any<CancellationToken>()).Returns(Array.Empty<int>());
+
+        var sheetCopies = Substitute.For<IDocumentSheetCopyStore>();
+        sheetCopies.ListGroupsAsync(Arg.Any<long>(), Arg.Any<CancellationToken>()).Returns(Array.Empty<SheetCopyGroupInfo>());
+
+        return new CalculationTrigger(Scheduler(host), periods, workflow, documents, sheetCopies);
     }
 }

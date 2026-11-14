@@ -164,7 +164,9 @@ public sealed class Hse400LandDependentsTriggerTests(SqlServerFixture sql) : DbJ
         await using (var db = Sql.CreateContext())
         {
             var job = new RegistryImpactRecalculationJob(
-                new RegistryImpactStore(db), new CalculationTrigger(jobs, new PeriodStore(db), new WorkflowStore(db)));
+                new RegistryImpactStore(db),
+                new CalculationTrigger(
+                    jobs, new PeriodStore(db), new WorkflowStore(db), new DocumentStore(db), new DocumentSheetCopyStore(db)));
 
             await job.ExecuteAsync(
                 new RegistryImpactRecalculationRequest(registryId, [], "HSE400 2026 recalculated", Year),

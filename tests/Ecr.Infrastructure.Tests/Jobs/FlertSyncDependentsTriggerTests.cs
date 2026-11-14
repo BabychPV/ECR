@@ -3,6 +3,7 @@ using Ecr.Application.Calculations;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Entities.Configuration;
+using Ecr.Domain.Entities.Workflow;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Jobs;
@@ -121,6 +122,73 @@ public sealed class FlertSyncDependentsTriggerTests(SqlServerFixture sql) : DbJo
             .EnqueueCoalescedAsync<IRegistryImpactRecalculationJob>(default!, default, default, default);
     }
 
+    /// <summary>
+    /// ⛔ B63 / B97 (слово людини 07.11: «тільки погоджені не мають перераховуватися»): увесь шлях FLERT F6 — синк змінив
+    /// склад → <see cref="FlertSyncDependentsTrigger"/> ставить задачу року → <see cref="RegistryImpactRecalculationJob"/>
+    /// → <c>CalculationTrigger.RequestDependentsAsync</c> — ставить перерахунок чернетки й ПОДАНОГО залежного (з позначкою
+    /// поданих), а затвердженого — ні.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ ДОКАЗ (локально): у <c>RegistryImpactRecalculationJob</c> <c>RequestDependentsAsync</c> → <c>RequestAsync</c> без
+    /// позначки (як до B63) — поданий без <c>recalculateSubmitted</c>/не поставлений, червоний. Періоди — 2099xx (retro 375).
+    /// </remarks>
+    [Fact]
+    [Trait("Finding", "B97")]
+    public async Task Синк_ставить_перерахунок_чернетки_й_поданого_залежного_з_позначкою_а_затвердженого_ні()
+    {
+        const int periodKey = 209901;
+        var (registryId, codes) = await NewMirrorAsync();
+        var draft = await ArrangeDependentAsync(registryId, PeriodState.Open, periodKey);
+        var submitted = await ArrangeDependentAsync(registryId, PeriodState.Open, periodKey, DocumentStatus.Submitted);
+        var approved = await ArrangeDependentAsync(registryId, PeriodState.Open, periodKey, DocumentStatus.Approved);
+
+        // Крок 1: синк FLERT — одна задача року на змінений довідник.
+        var impactJobs = Substitute.For<IBackgroundJobScheduler>();
+        object? impactPayload = null;
+        impactJobs.EnqueueCoalescedAsync<IRegistryImpactRecalculationJob>(
+                Arg.Any<string>(), Arg.Do<object?>(p => impactPayload = p), Arg.Any<CancellationToken>(), Arg.Any<int?>())
+            .Returns("impact-1");
+
+        await using (var db = Sql.CreateContext())
+        {
+            Assert.Equal(1, await new FlertSyncDependentsTrigger(db, impactJobs, enabled: true)
+                .OnSyncedAsync(Changed("compositions"), codes, CancellationToken.None));
+        }
+
+        Assert.NotNull(impactPayload);
+
+        // Крок 2: задача року розкладає на залежні через справжній тригер і справжні сховища.
+        var recalcJobs = Substitute.For<IBackgroundJobScheduler>();
+        var payloads = new Dictionary<string, string>(StringComparer.Ordinal);
+        recalcJobs.EnqueueCoalescedAsync<IRecalculationJob>(
+                Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
+            .Returns(call =>
+            {
+                payloads[call.ArgAt<string>(0)] = System.Text.Json.JsonSerializer.Serialize(
+                    call.ArgAt<object?>(1), System.Text.Json.JsonSerializerOptions.Web);
+                return "recalc-1";
+            });
+
+        await using (var db = Sql.CreateContext())
+        {
+            var trigger = new CalculationTrigger(
+                recalcJobs, new PeriodStore(db), new WorkflowStore(db), new DocumentStore(db), new DocumentSheetCopyStore(db));
+            await new RegistryImpactRecalculationJob(new RegistryImpactStore(db), trigger)
+                .ExecuteAsync(impactPayload, Substitute.For<IJobProgress>(), CancellationToken.None);
+        }
+
+        Assert.Equal(
+            new[]
+            {
+                CalculationTrigger.DependentsTargetOf(draft.DocumentId, draft.PeriodKey),
+                CalculationTrigger.DependentsTargetOf(submitted.DocumentId, submitted.PeriodKey),
+            }.Order(StringComparer.Ordinal),
+            payloads.Keys.Order(StringComparer.Ordinal));
+        Assert.All(payloads.Values, json => Assert.Contains("\"recalculateSubmitted\":true", json, StringComparison.Ordinal));
+        Assert.DoesNotContain(CalculationTrigger.DependentsTargetOf(approved.DocumentId, approved.PeriodKey), payloads.Keys);
+        await recalcJobs.DidNotReceiveWithAnyArgs().EnqueueExclusiveAsync<IRecalculationJob>(default!, default, default, default);
+    }
+
     private static FlertSyncOutcome Changed(string step)
     {
         var counts = new FlertSyncCounts();
@@ -156,7 +224,8 @@ public sealed class FlertSyncDependentsTriggerTests(SqlServerFixture sql) : DbJo
     }
 
     /// <summary>Документ із прогоном <c>Current</c>, чия методологія читає довідник, у періоді заданого стану.</summary>
-    private async Task ArrangeDependentAsync(int registryId, PeriodState state, int periodKey)
+    private async Task<(long DocumentId, PeriodKey PeriodKey)> ArrangeDependentAsync(
+        int registryId, PeriodState state, int periodKey, DocumentStatus? sheet = null)
     {
         var builder = new TestDocumentBuilder(Sql.ConnectionString);
         var document = await builder.BuildAsync(periodKey: periodKey);
@@ -168,6 +237,18 @@ public sealed class FlertSyncDependentsTriggerTests(SqlServerFixture sql) : DbJo
         if (state == PeriodState.Closed)
         {
             period.TransitionTo(PeriodState.Closed, Now);
+        }
+
+        if (sheet is { } status)
+        {
+            var approval = new ApprovalState(document.DocumentId, document.SheetDefId, document.PeriodKey.Value);
+            approval.Submit(userId: 5, Now);
+            if (status == DocumentStatus.Approved)
+            {
+                approval.Approve(userId: 6, Now);
+            }
+
+            db.ApprovalStates.Add(approval);
         }
 
         var methodology = new Methodology(
@@ -198,5 +279,7 @@ public sealed class FlertSyncDependentsTriggerTests(SqlServerFixture sql) : DbJo
                 [])],
             CancellationToken.None);
         await db.SaveChangesAsync();
+
+        return (document.DocumentId, document.PeriodKey);
     }
 }
