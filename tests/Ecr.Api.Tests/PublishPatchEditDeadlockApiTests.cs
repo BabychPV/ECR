@@ -35,10 +35,19 @@ namespace Ecr.Api.Tests;
 /// хто з двох першим отримає рядок версії після публікації.
 ///
 /// ⚠ Інтерлівінг детермінований шлюзом: публікація тримає блок версії й
-/// стоїть на читанні знімка, доки і патч, і правка не дійдуть до своїх
-/// транзакцій (<c>HasDocumentsAsync</c> — їхній останній крок перед
-/// транзакцією), і ще 2 с — за цей час обидва впираються в блок версії.
-/// Тест перевіряє, що вони справді там стояли, а не проскочили після.
+/// стоїть на читанні знімка, доки (1) патч і правка не ввійдуть у
+/// <c>LockVersionForUpdateAsync</c> (три входи разом із публікацією) і
+/// (2) SQL Server не покаже два запити в стані <c>WAIT</c> на ключі
+/// <c>cfg.TemplateVersion</c> своєї бази. Лише тоді шлюз відпускає
+/// публікацію. Тест перевіряє, що вони справді там стояли, а не проскочили
+/// після.
+///
+/// ⛔ B64: раніше замість (1)–(2) був годинник — «прийшли два
+/// <c>HasDocumentsAsync</c>, і ще 2 с». Під навантаженням CI (голодний пул
+/// потоків) від <c>HasDocumentsAsync</c> до блоку версії йшло понад 2 с, і
+/// шлюз відпускав публікацію раніше, ніж учасники доходили до блоку:
+/// «locks before release: 1». Тепер чекаємо факту, а не часу; ліміт 60 с —
+/// лише запобіжник від зависання, а не синхронізація.
 /// </remarks>
 [Collection("SqlServer")]
 public sealed class PublishPatchEditDeadlockApiTests(SqlServerFixture sql)
@@ -51,7 +60,7 @@ public sealed class PublishPatchEditDeadlockApiTests(SqlServerFixture sql)
     public async Task Публікація_патч_і_правка_однієї_версії_серіалізуються_без_дедлоку()
     {
         var draft = await ArrangeAsync();
-        var gate = new PublishHoldGate();
+        var gate = new PublishHoldGate(sql.ConnectionString);
 
         using var baseApp = new EcrApiFactory(sql);
         using var app = baseApp.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
@@ -106,7 +115,8 @@ public sealed class PublishPatchEditDeadlockApiTests(SqlServerFixture sql)
         var editBody = await edited.Content.ReadAsStringAsync();
         var summary =
             $"publish {(int)published.StatusCode} {publishBody}\npatch {(int)patched.StatusCode} {patchBody}\n" +
-            $"edit {(int)edited.StatusCode} {editBody}\nlocks before release: {gate.LocksEnteredBeforeRelease}\n{baseApp.ErrorsText}";
+            $"edit {(int)edited.StatusCode} {editBody}\nlocks before release: {gate.LocksEnteredBeforeRelease}\n" +
+            $"waiters before release: {gate.WaitersBeforeRelease}\n{baseApp.ErrorsText}";
 
         // ⛔ Жертви дедлоку немає: жодного 500, у журналі сервера — жодного 1205.
         Assert.DoesNotContain("1205", baseApp.ErrorsText, StringComparison.Ordinal);
@@ -114,6 +124,8 @@ public sealed class PublishPatchEditDeadlockApiTests(SqlServerFixture sql)
 
         // Контенція справжня: патч і правка стояли на блоці версії, поки публікація його тримала.
         Assert.True(gate.LocksEnteredBeforeRelease >= 3, summary);
+        // ...і не просто викликали метод, а справді чекали на рядок версії в SQL Server.
+        Assert.True(gate.WaitersBeforeRelease >= 2, summary);
 
         // Публікація — перша; патч законний і на опублікованій версії; правка бачить Published.
         Assert.True(published.IsSuccessStatusCode, summary);
@@ -174,16 +186,26 @@ public sealed class PublishPatchEditDeadlockApiTests(SqlServerFixture sql)
 
     /// <summary>
     /// Тримає публікацію на читанні знімка (перше <c>GetWithStructureAsync</c>
-    /// після <see cref="Arm"/>), доки не прийдуть два <c>HasDocumentsAsync</c>
-    /// (патч і правка), і ще 2 с; рахує входи в блок версії до відпуску.
+    /// після <see cref="Arm"/>), доки патч і правка не ввійдуть у блок версії
+    /// і SQL Server не покаже обидва запити в черзі на рядок версії; рахує
+    /// входи й очікувачів до відпуску.
     /// </summary>
-    public sealed class PublishHoldGate
+    /// <param name="connectionString">База тесту — для <c>sys.dm_tran_locks</c>.</param>
+    public sealed class PublishHoldGate(string connectionString)
     {
+        /// <summary>Публікація + патч + правка.</summary>
+        private const int Participants = 3;
+
+        /// <summary>
+        /// Запобіжник від зависання, а не синхронізація: штатно шлюз
+        /// відпускається, щойно учасники стали в чергу.
+        /// </summary>
+        private static readonly TimeSpan Patience = TimeSpan.FromSeconds(60);
+
         private readonly TaskCompletionSource _holding = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        private readonly TaskCompletionSource _othersReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _allEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private int _armed;
         private int _structureReads;
-        private int _documentChecks;
         private int _locksEntered;
         private int _released;
 
@@ -193,18 +215,18 @@ public sealed class PublishPatchEditDeadlockApiTests(SqlServerFixture sql)
         /// <summary>Скільки входів у блок версії було до відпуску публікації.</summary>
         public int LocksEnteredBeforeRelease { get; private set; }
 
+        /// <summary>Скільки запитів чекало (<c>WAIT</c>) на ключі версії до відпуску публікації.</summary>
+        public int WaitersBeforeRelease { get; private set; }
+
         /// <summary>Вмикає шлюз.</summary>
         public void Arm() => Volatile.Write(ref _armed, 1);
 
         /// <summary>Вхід у <c>LockVersionForUpdateAsync</c>.</summary>
-        public void LockEntered() => Interlocked.Increment(ref _locksEntered);
-
-        /// <summary>Після <c>HasDocumentsAsync</c>.</summary>
-        public void DocumentsChecked()
+        public void LockEntered()
         {
-            if (Volatile.Read(ref _armed) == 1 && Interlocked.Increment(ref _documentChecks) == 2)
+            if (Interlocked.Increment(ref _locksEntered) >= Participants)
             {
-                _othersReady.TrySetResult();
+                _allEntered.TrySetResult();
             }
         }
 
@@ -217,17 +239,63 @@ public sealed class PublishPatchEditDeadlockApiTests(SqlServerFixture sql)
             }
 
             _holding.TrySetResult();
-            await Task.WhenAny(_othersReady.Task, Task.Delay(TimeSpan.FromSeconds(20))).ConfigureAwait(false);
-            await Task.Delay(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+
+            // ⛔ Не годинник, а факт: спершу всі три ввійшли в блок версії,
+            // потім двоє з них справді стоять у черзі на рядок у SQL Server.
+            // Якщо ліміт вичерпано — відпускаємо, і асерти тесту покажуть,
+            // скільки встигло (замість зависання).
+            using var patience = new CancellationTokenSource(Patience);
+            await Task.WhenAny(_allEntered.Task, Task.Delay(Timeout.Infinite, patience.Token)).ConfigureAwait(false);
+            var waiters = await WaitForWaitersAsync(Participants - 1, patience.Token).ConfigureAwait(false);
 
             if (Interlocked.Exchange(ref _released, 1) == 0)
             {
                 LocksEnteredBeforeRelease = Volatile.Read(ref _locksEntered);
+                WaitersBeforeRelease = waiters;
             }
+        }
+
+        /// <summary>
+        /// Опитує <c>sys.dm_tran_locks</c>, доки на ключах <c>cfg.TemplateVersion</c>
+        /// своєї бази не стане <paramref name="expected"/> запитів у <c>WAIT</c>.
+        /// </summary>
+        private async Task<int> WaitForWaitersAsync(int expected, CancellationToken ct)
+        {
+            var seen = 0;
+            while (!ct.IsCancellationRequested)
+            {
+                await using var connection = new Microsoft.Data.SqlClient.SqlConnection(connectionString);
+                await connection.OpenAsync(CancellationToken.None).ConfigureAwait(false);
+                await using var command = connection.CreateCommand();
+                command.CommandText = """
+                    SELECT COUNT(*) FROM sys.dm_tran_locks
+                    WHERE  resource_database_id = DB_ID()
+                      AND  resource_type = 'KEY'
+                      AND  request_status = 'WAIT'
+                      AND  resource_associated_entity_id IN
+                           (SELECT hobt_id FROM sys.partitions WHERE object_id = OBJECT_ID(N'cfg.TemplateVersion'));
+                    """;
+                seen = (int)(await command.ExecuteScalarAsync(CancellationToken.None).ConfigureAwait(false))!;
+                if (seen >= expected)
+                {
+                    return seen;
+                }
+
+                try
+                {
+                    await Task.Delay(50, ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+            }
+
+            return seen;
         }
     }
 
-    /// <summary>Справжнє сховище версій зі шлюзом на трьох методах.</summary>
+    /// <summary>Справжнє сховище версій зі шлюзом на двох методах.</summary>
     public class GatedStore : DispatchProxy
     {
         private ITemplateVersionStore _inner = null!;
@@ -252,8 +320,6 @@ public sealed class PublishPatchEditDeadlockApiTests(SqlServerFixture sql)
             {
                 case nameof(ITemplateVersionStore.GetWithStructureAsync):
                     return StructureAsync((int)args![0]!, (CancellationToken)args[1]!);
-                case nameof(ITemplateVersionStore.HasDocumentsAsync):
-                    return DocumentsAsync((int)args![0]!, (CancellationToken)args[1]!);
                 case nameof(ITemplateVersionStore.LockVersionForUpdateAsync):
                     _gate.LockEntered();
                     break;
@@ -275,13 +341,6 @@ public sealed class PublishPatchEditDeadlockApiTests(SqlServerFixture sql)
             var version = await _inner.GetWithStructureAsync(templateVersionId, ct).ConfigureAwait(false);
             await _gate.AfterStructureReadAsync().ConfigureAwait(false);
             return version;
-        }
-
-        private async Task<bool> DocumentsAsync(int templateVersionId, CancellationToken ct)
-        {
-            var result = await _inner.HasDocumentsAsync(templateVersionId, ct).ConfigureAwait(false);
-            _gate.DocumentsChecked();
-            return result;
         }
     }
 }
