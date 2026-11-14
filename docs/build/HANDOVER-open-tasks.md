@@ -13,6 +13,7 @@
 - PE B5 L5: план — `.sync-local\RESUME-PE-L5.md` (порядок після скидання: L5 → L7a–d → L3 → L8).
 - Docs-lane PE, ще не злиті: `lane/integ-b5-design` @`81f39d2e3` (чекає пакетного docs-коміту координатора); `lane/pe/wip-pe7-design` @`dee65adc5` (`docs/build/PE-7-design.md`, WIP — злити разом або відкинути).
 - AA: незлитого немає, нотатка `.sync-local\RESUME-AA-2026-11-14.md`.
+- AN B85: WIP `lane/integ-an-b85` @`b02947125` — не компілюється й не тестований, червоний CI на ньому очікуваний. План і стан (дизайн bulk-запису, недоведена гіпотеза про затримку опитування 1 с, 7 кроків, далі B121) — `.sync-local\RESUME-AN-B85.md`.
 - **Прибирання 14.11 (за словом людини: «видали старі гілки та бази які не потрібні»):**
   - видалено 67 баз: 4 старі scratch на C:, `EcrScratch_W15j`, `EcrContractL2` і простійні `EcrTest_*`;
   - видалено 264 віддалені гілки, усі злиті в main, плюс `merge-check/*`. Перелік із SHA збережено в `.sync-local\reports\branch-backup-20261114-1251.txt`.
