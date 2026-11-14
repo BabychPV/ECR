@@ -107,11 +107,8 @@ public sealed partial class CalculationResultStore
         await copy.WriteToServerAsync(table, ct).ConfigureAwait(false);
         bulkPending = new BulkPendingResults(calculationRunId, ids);
 
-        LogBulkWritten(
-            logger ?? NullLogger<CalculationResultStore>.Instance,
-            calculationRunId,
-            rows.Count,
-            Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+        var elapsedMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+        LogBulkWritten(logger ?? NullLogger<CalculationResultStore>.Instance, calculationRunId, rows.Count, elapsedMs);
     }
 
     [LoggerMessage(

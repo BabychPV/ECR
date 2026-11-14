@@ -55,7 +55,12 @@ public sealed class CalculationResultBulkWriteDbTests(SqlServerFixture sql)
         Assert.Equal(Rows * 3, bulk.Steps.Count);
         Assert.Equal(ef.Results, bulk.Results);
         Assert.Equal(ef.Steps, bulk.Steps);
-        Assert.DoesNotContain(bulk.Steps, s => s.EndsWith("|noresult", StringComparison.Ordinal));
+
+        // Кроки A і B прив'язані до свого результату; крок C — без виходу (результату немає в обох шляхах).
+        Assert.Equal(Rows, bulk.Steps.Count(s => s.EndsWith("|noresult", StringComparison.Ordinal)));
+        Assert.All(
+            bulk.Steps.Where(s => s.Split('|')[3] is "A" or "B"),
+            s => Assert.False(s.EndsWith("|noresult", StringComparison.Ordinal), s));
     }
 
     [Fact]
