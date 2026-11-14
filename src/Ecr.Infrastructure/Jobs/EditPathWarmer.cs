@@ -23,8 +23,8 @@ namespace Ecr.Infrastructure.Jobs;
 /// рішення доступу: прогрів не читає <c>doc.CellValue</c>, не кличе служб доступу й не торкається фільтрів безпеки.
 /// Кеш, який він наповнює, — той самий, що наповнив би перший користувач, з тим самим ключем ревізії й тим самим
 /// скиданням (<see cref="IMetadataCache.InvalidateAsync"/>), тож свіжості не порушує.</item>
-/// <item>Версії — лише ті, що діють у ВІДКРИТИХ періодах (<c>Open</c>/<c>Grace</c>) проєктів, де є документи; версія
-/// періоду — <c>doc.fn_VersionOf</c> (SQL-відповідник <c>IProjectVersionTimeline</c>). Не більше
+/// <item>Версії — лише ті, що діють у ВІДКРИТИХ періодах (<c>Open</c>/<c>Grace</c>) для документів проєкту; версія —
+/// за документом (B74 P2: основний шаблон — <c>doc.fn_VersionOf</c>, власний — <c>doc.fn_TemplateVersionOf</c>). Не більше
 /// <see cref="MaxVersionsKey"/> версій, найновіші першими.</item>
 /// <item>Кожна версія — у власному scope (свіжий <c>DbContext</c>); збій версії — у журнал, далі наступна.</item>
 /// <item>Задача Quartz — сирий <see cref="IJob"/> без <c>QuartzJobAdapter</c>: не пише <c>itg.JobProgress</c> і не
@@ -90,8 +90,9 @@ public sealed partial class EditPathWarmer(IServiceScopeFactory scopes, ILogger<
         ArgumentNullException.ThrowIfNull(db);
         ArgumentOutOfRangeException.ThrowIfLessThan(cap, 1);
 
-        // ⚠ Стани — числа PeriodState (Open = 1, Grace = 2; конвертер HasConversion<byte>). Версія періоду —
-        // doc.fn_VersionOf, ТЕ САМЕ правило, що в IProjectVersionTimeline; NULL (проєкт без версії) відсікається.
+        // ⚠ Стани — числа PeriodState (Open = 1, Grace = 2; конвертер HasConversion<byte>). Версія — за документом
+        // (B74 P2): документ без власного шаблону — doc.fn_VersionOf (основний шаблон проєкту, те саме правило, що в
+        // IProjectVersionTimeline), із власним — doc.fn_TemplateVersionOf; NULL (без версії) відсікається.
         const byte open = (byte)Ecr.Domain.Enums.PeriodState.Open;
         const byte grace = (byte)Ecr.Domain.Enums.PeriodState.Grace;
 
@@ -99,10 +100,12 @@ public sealed partial class EditPathWarmer(IServiceScopeFactory scopes, ILogger<
             .SqlQuery<int>($"""
                 SELECT v.TemplateVersionId AS [Value]
                 FROM (
-                    SELECT DISTINCT doc.fn_VersionOf(p.ProjectId, p.PeriodKey) AS TemplateVersionId
+                    SELECT DISTINCT
+                        CASE WHEN d.TemplateId IS NULL THEN doc.fn_VersionOf(d.ProjectId, p.PeriodKey)
+                             ELSE doc.fn_TemplateVersionOf(d.ProjectId, d.TemplateId, p.PeriodKey) END AS TemplateVersionId
                     FROM doc.Period AS p
+                    JOIN doc.Document AS d ON d.ProjectId = p.ProjectId
                     WHERE p.State IN ({open}, {grace})
-                      AND EXISTS (SELECT 1 FROM doc.Document AS d WHERE d.ProjectId = p.ProjectId)
                 ) AS v
                 WHERE v.TemplateVersionId IS NOT NULL
                 """)
