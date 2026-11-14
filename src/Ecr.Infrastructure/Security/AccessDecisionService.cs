@@ -3225,7 +3225,7 @@ public sealed class AccessDecisionService(
 
         // ⛔ B100 (рішення людини 13.11, «варіант 1»): вікно доступу (ФВ-2.16) діє ЛИШЕ на введення/правку.
         // Подання, затвердження й reopen його не враховують, тож тут воно не рахується: правку комірки вирішує
-        // `PeriodAccessRules.Evaluate` у `Decide` (зріз), а `OutOfAccessWindow` цих умов завжди `false`.
+        // `PeriodAccessRules.Evaluate` у `Decide` (зріз); окремої ознаки вікна в умовах немає (B106).
         // Рішення тут — про аркуш, не про комірку: колонки й таблиці немає, знімок шаблону не читається.
         return new CellAccessContext(
             state.ProjectId,
@@ -3238,7 +3238,6 @@ public sealed class AccessDecisionService(
             state.Status,
             state.IsArchiving,
             periodState,
-            OutOfAccessWindow: false,
             sheetStatus ?? DocumentStatus.Draft,
             ColumnIsComputed: false,
             ColumnIsReadOnly: false,
