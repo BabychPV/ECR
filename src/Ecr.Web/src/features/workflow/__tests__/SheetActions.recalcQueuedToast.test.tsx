@@ -124,6 +124,9 @@ describe('SheetActions: тост F9 без сирого id задачі (B46(2))
 
     const link = await screen.findByRole('link', { name: OpenJobLink });
     expect(link.getAttribute('href')).toBe(JobTo);
+    // B107(a): нова вкладка — аркуш лишається відкритим; noopener — сторінка задач не дістає window.opener.
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.getAttribute('rel')).toContain('noopener');
 
     // ⛔ RED до B98(2): у роутері клік перехоплював навігатор з `UNSAFE_NavigationContext` (preventDefault).
     // jsdom сам переходу не виконує («Not implemented: navigation») — перевіряємо, що браузерові його не заборонено.
