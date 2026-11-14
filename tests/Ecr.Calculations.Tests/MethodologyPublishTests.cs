@@ -678,7 +678,7 @@ public sealed class MethodologyPublishTests
     /// <remarks>
     /// B21: набір, у якому єдиний випадок має <c>expectedJson = {}</c>, нічого не звіряв, і версія публікувалася
     /// «зеленою» за будь-якого виходу — так live C11_01 V5 (PARITY_1 з імпорту AF, 0 результатів і 64 кроки
-    /// #VALUE) пройшла ворота. Тепер публікація відмовляє ключем «нічого не перевірено» (goldenSetEmpty) і
+    /// #VALUE) пройшла ворота. Тепер публікація відмовляє окремим ключем «нічого не перевірено» (goldenNoExpectations, B54; goldenSetEmpty — лише порожній набір) і
     /// називає випадок і причину. Модуль тут видає ВАЛІДНЕ число — відмова саме через відсутність очікувань.
     /// Мутація: прибрати <c>ChecksAnything</c> з <c>GoldenSet.IsGreen(verdicts, testCases)</c> — версія
     /// публікується, тест червоний.
@@ -694,7 +694,7 @@ public sealed class MethodologyPublishTests
             () => Handler().HandleAsync(VersionId, "Уточнення", From, CancellationToken.None));
 
         Assert.Equal("ECR-CALC-0422", error.ErrorCode);
-        Assert.Equal("err.ECR-CALC-0422.goldenSetEmpty", error.Details!["messageKey"]);
+        Assert.Equal("err.ECR-CALC-0422.goldenNoExpectations", error.Details!["messageKey"]);
         Assert.Equal("PARITY_1", error.Details!["tests"]);
         Assert.Contains("PARITY_1", error.Message, StringComparison.Ordinal);
         Assert.Contains(GoldenSet.NoExpectationsReason, error.Message, StringComparison.Ordinal);

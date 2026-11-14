@@ -64,9 +64,20 @@ export function TestCaseRunner(props: TestCaseRunnerProps): JSX.Element {
         </Alert>
       )}
 
+      {result !== null && isRedBecauseEmpty(result) && (
+        // B54: набір червоний, хоч жоден випадок не розійшовся: жоден не має очікуваних значень. Без підказки
+        // червоний бейдж поруч із суцільно зеленими рядками виглядає як помилка інтерфейсу.
+        <Alert color="statusWarning">{t('expressions.noExpectationsHint')}</Alert>
+      )}
+
       {result !== null && result.testCases.length > 0 && <Verdicts result={result} />}
     </Stack>
   );
+}
+
+/** Набір червоний, а кожен випадок окремо зелений — єдина причина: нічого не очікується (B21/B54). */
+function isRedBecauseEmpty(result: SimulationResultDto): boolean {
+  return !result.isGreen && result.testCases.length > 0 && result.testCases.every((verdict) => verdict.isGreen);
 }
 
 function Verdict({ result }: { readonly result: SimulationResultDto }): JSX.Element {

@@ -1445,7 +1445,7 @@ export function MethodologyTestsPanel({
 
             <Textarea
               label={t('methodologies.expectedJson')}
-              description={t('methodologies.expectedJsonHint')}
+              description={t('methodologies.expectedJsonEmptyHint')}
               value={editing.expectedJson}
               minRows={2}
               autosize

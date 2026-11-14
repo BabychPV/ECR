@@ -1518,8 +1518,8 @@ public sealed class PublishMethodologyHandler(
         }
 
         // ⛔ B21: усі вердикти зелені, а набір червоний — значить, жоден випадок нічого не очікує
-        // (`GoldenSet.IsGreen(verdicts, testCases)`). Це той самий «нічого не перевірено», що й
-        // порожній набір, тому той самий ключ каталогу; текст і `tests` називають випадки.
+        // (`GoldenSet.IsGreen(verdicts, testCases)`). B54: це НЕ «набір порожній» — випадки є, тому свій ключ
+        // каталогу, а випадки названо в реченні через `tests`.
         if (GoldenSet.IsGreen(verdicts))
         {
             var codes = string.Join(", ", verdicts.Select(v => v.Code));
@@ -1528,7 +1528,7 @@ public sealed class PublishMethodologyHandler(
                 $"Публікацію версії {version.Version} відхилено: {codes}: {GoldenSet.NoExpectationsReason}.",
                 new Dictionary<string, object?>
                 {
-                    ["messageKey"] = "err.ECR-CALC-0422.goldenSetEmpty",
+                    ["messageKey"] = "err.ECR-CALC-0422.goldenNoExpectations",
                     ["version"] = version.Version,
                     ["tests"] = codes,
                 });
