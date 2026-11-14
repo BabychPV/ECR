@@ -2,6 +2,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Quartz;
 
 namespace Ecr.Infrastructure.Jobs;
@@ -10,17 +11,25 @@ namespace Ecr.Infrastructure.Jobs;
 /// <param name="Enabled"><see cref="EditPathWarmer.EnabledKey"/>.</param>
 /// <param name="MaxVersions"><see cref="EditPathWarmer.MaxVersionsKey"/> (уже обмежене).</param>
 /// <param name="WarmQuartz">Чи виконує Quartz ЦЬОГО процесу разові задачі (Api в режимі черги <c>Quartz</c>).</param>
-public sealed record EditPathWarmupOptions(bool Enabled, int MaxVersions, bool WarmQuartz)
+/// <param name="WarmFirstEdit">
+/// AN-194: чи гріти перше читання зрізу й перший <c>PATCH</c> (<see cref="FirstEditWarmer"/>) — лише процес, що їх
+/// обслуговує (Api), і лише за <see cref="FirstEditWarmer.EnabledKey"/>.
+/// </param>
+public sealed record EditPathWarmupOptions(bool Enabled, int MaxVersions, bool WarmQuartz, bool WarmFirstEdit = false)
 {
     /// <summary>Читає налаштування з конфігурації процесу.</summary>
     /// <param name="configuration">Конфігурація.</param>
     /// <param name="warmQuartz">Чи гріти Quartz (вирішує складання процесу, а не ключ).</param>
-    public static EditPathWarmupOptions Read(IConfiguration configuration, bool warmQuartz)
+    /// <param name="servesEdits">Чи обслуговує процес зріз і <c>PATCH</c> (Api); <c>false</c> — прогріву AN-194 немає.</param>
+    public static EditPathWarmupOptions Read(IConfiguration configuration, bool warmQuartz, bool servesEdits = false)
     {
         ArgumentNullException.ThrowIfNull(configuration);
 
         return new EditPathWarmupOptions(
-            EditPathWarmer.ReadEnabled(configuration), EditPathWarmer.ReadMaxVersions(configuration), warmQuartz);
+            EditPathWarmer.ReadEnabled(configuration),
+            EditPathWarmer.ReadMaxVersions(configuration),
+            warmQuartz,
+            servesEdits && FirstEditWarmer.ReadEnabled(configuration));
     }
 }
 
@@ -32,6 +41,8 @@ public sealed record EditPathWarmupOptions(bool Enabled, int MaxVersions, bool W
 /// ⚠ Не блокує ні старт, ні готовність: робота йде після <c>ApplicationStarted</c> окремою задачею, будь-який збій
 /// лише в журнал (прогрів — оптимізація, не вимога), зупинка хоста скасовує прохід і дочікується його.
 /// Вимикається <see cref="EditPathWarmer.EnabledKey"/> = <c>false</c> (тестові фабрики).
+/// AN-194: у процесі Api після метаданих той самий прохід гріє перше читання зрізу й перший <c>PATCH</c>
+/// (<see cref="FirstEditWarmer"/>, ключ <see cref="FirstEditWarmer.EnabledKey"/>); служба стартує, якщо ввімкнено хоч один.
 /// <para>
 /// ⚠ Типово УВІМКНЕНО — судження: прогрів обмежений (<see cref="EditPathWarmer.MaxVersionsKey"/>), читає лише
 /// метадані шаблону, які перша правка однаково завантажила б, і кладе їх у той самий кеш; виграш (~2–3 с на першій
@@ -44,6 +55,7 @@ public sealed record EditPathWarmupOptions(bool Enabled, int MaxVersions, bool W
 /// <param name="options">Налаштування.</param>
 /// <param name="logger">Журнал служби.</param>
 /// <param name="warmerLogger">Журнал прогріву.</param>
+/// <param name="firstEditLogger">AN-194: журнал прогріву першої правки (<see cref="FirstEditWarmer"/>).</param>
 /// <param name="quartz">Фабрика Quartz; береться лише за <see cref="EditPathWarmupOptions.WarmQuartz"/>.</param>
 public sealed partial class EditPathWarmupService(
     IServiceScopeFactory scopes,
@@ -51,6 +63,7 @@ public sealed partial class EditPathWarmupService(
     EditPathWarmupOptions options,
     ILogger<EditPathWarmupService> logger,
     ILogger<EditPathWarmer> warmerLogger,
+    ILogger<FirstEditWarmer>? firstEditLogger = null,
     ISchedulerFactory? quartz = null) : IHostedService
 {
     private CancellationTokenSource? stop;
@@ -63,22 +76,27 @@ public sealed partial class EditPathWarmupService(
     public Func<IServiceScopeFactory, ILogger<EditPathWarmer>, EditPathWarmer> CreateWarmer { get; init; }
         = (factory, log) => new EditPathWarmer(factory, log);
 
+    /// <summary>AN-194: фабрика прогріву першої правки; тести підміняють кроки, застосунок бере типову.</summary>
+    public Func<IServiceScopeFactory, FirstEditWarmer> CreateFirstEditWarmer { get; init; }
+        = factory => new FirstEditWarmer(factory, firstEditLogger ?? NullLogger<FirstEditWarmer>.Instance);
+
     /// <summary>Реєструє службу і її налаштування.</summary>
     /// <param name="services">Колекція сервісів.</param>
     /// <param name="configuration">Конфігурація процесу.</param>
     /// <param name="warmQuartz">Чи виконує Quartz цього процесу разові задачі.</param>
-    public static void Register(IServiceCollection services, IConfiguration configuration, bool warmQuartz)
+    /// <param name="servesEdits">AN-194: процес обслуговує зріз і <c>PATCH</c> (Api).</param>
+    public static void Register(IServiceCollection services, IConfiguration configuration, bool warmQuartz, bool servesEdits = false)
     {
         ArgumentNullException.ThrowIfNull(services);
 
-        services.AddSingleton(EditPathWarmupOptions.Read(configuration, warmQuartz));
+        services.AddSingleton(EditPathWarmupOptions.Read(configuration, warmQuartz, servesEdits));
         services.AddHostedService<EditPathWarmupService>();
     }
 
     /// <inheritdoc />
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        if (!options.Enabled)
+        if (!options.Enabled && !options.WarmFirstEdit)
         {
             return Task.CompletedTask;
         }
@@ -115,9 +133,19 @@ public sealed partial class EditPathWarmupService(
     {
         try
         {
-            _ = await CreateWarmer(scopes, warmerLogger)
-                .WarmAsync(options.MaxVersions, options.WarmQuartz ? quartz : null, ct)
-                .ConfigureAwait(false);
+            IReadOnlyList<int> versions = [];
+            if (options.Enabled)
+            {
+                versions = (await CreateWarmer(scopes, warmerLogger)
+                    .WarmAsync(options.MaxVersions, options.WarmQuartz ? quartz : null, ct)
+                    .ConfigureAwait(false)).WarmedVersions;
+            }
+
+            // AN-194: після метаданих — шлях зрізу й запису (EF-запити, JIT); версії — ті, що щойно прогріто.
+            if (options.WarmFirstEdit)
+            {
+                _ = await CreateFirstEditWarmer(scopes).WarmAsync(versions, ct).ConfigureAwait(false);
+            }
         }
         catch (OperationCanceledException)
         {

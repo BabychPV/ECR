@@ -159,6 +159,7 @@ public static partial class EcrConfigurationValidation
         "Security:Csp:Enforce",
         "Health:WarmupOnStart",
         Infrastructure.Jobs.EditPathWarmer.EnabledKey,
+        Infrastructure.Jobs.FirstEditWarmer.EnabledKey,
 
         // Q-17: читається `GetValue<bool>` у DependencyInjection (Infrastructure).
         "Collection:MonthColumnRouting",

@@ -170,10 +170,12 @@ builder.Services.AddHostedService<Ecr.Api.Startup.RecurringScheduleService>();
 builder.Services.AddHostedService<Ecr.Api.Startup.HealthFactsWarmupService>();
 // AN-190: фоновий прогрів шляху першої правки (метадані версій відкритих періодів, граф формул, перший прогін Quartz);
 // Startup:WarmEditPath=false вимикає. Quartz гріється лише тоді, коли разові задачі йдуть у нього (режим черги Quartz).
+// AN-194: тут же — перше читання зрізу й перший PATCH (EF-запити «порожняками», JIT обробників); Startup:WarmFirstEdit=false вимикає.
 Ecr.Infrastructure.Jobs.EditPathWarmupService.Register(
     builder.Services, builder.Configuration,
     warmQuartz: Ecr.Infrastructure.Jobs.DbBackgroundJobScheduler.ReadMode(builder.Configuration)
-                == Ecr.Infrastructure.Jobs.JobQueueMode.Quartz);
+                == Ecr.Infrastructure.Jobs.JobQueueMode.Quartz,
+    servesEdits: true);
 // D-430 (LP-45): прогрів і фоновий рефреш карти застарілості гарячих періодів; Documents:StaleMapWarm:Enabled=false вимикає.
 builder.Services.AddScoped<Ecr.Infrastructure.Persistence.StaleMapWarmer>();
 builder.Services.AddHostedService<Ecr.Api.Startup.StaleMapWarmService>();
