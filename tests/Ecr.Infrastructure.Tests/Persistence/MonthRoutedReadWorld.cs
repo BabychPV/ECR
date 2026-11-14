@@ -220,6 +220,71 @@ internal sealed class MonthRoutedReadWorld : IDisposable
             CancellationToken.None);
     }
 
+    /// <summary>
+    /// ✎ B43: структурна зміна БЕЗ журналу комірок, як <c>DeleteRowHandler</c> у Q-17: м'яке видалення рядка
+    /// <see cref="RowKey"/> у екземплярах <paramref name="periods"/> (справжнім <see cref="RowStore.SoftDeleteRowAsync"/>).
+    /// </summary>
+    public async Task SoftDeleteRowAsync(params int[] periods)
+    {
+        await using var db = CreateContext();
+        var store = new RowStore(db, new BulkCellLoader(_connectionString, 1000), new TestClock(Now));
+        foreach (var period in periods)
+        {
+            var rows = await store.GetRowIdsAsync(Instances[period], new PeriodKey(period), CancellationToken.None);
+            if (!await store.SoftDeleteRowAsync(rows[RowKey], new PeriodKey(period), CancellationToken.None))
+            {
+                throw new InvalidOperationException($"Рядок {RowKey} періоду {period} не видалено.");
+            }
+        }
+    }
+
+    /// <summary>
+    /// ✎ B43: додавання рядка з ключем <paramref name="rowKey"/> в екземпляри <paramref name="periods"/> без журналу
+    /// комірок (як дзеркальне створення рядка Q-17) — справжнім <see cref="RowStore.CreateRowsBatchAsync"/>.
+    /// </summary>
+    public async Task AddRowAsync(string rowKey, params int[] periods)
+    {
+        await using var db = CreateContext();
+        var store = new RowStore(db, new BulkCellLoader(_connectionString, 1000), new TestClock(Now));
+        foreach (var period in periods)
+        {
+            var key = new PeriodKey(period);
+            var ordinal = await store.GetMaxOrdinalAsync(Instances[period], key, CancellationToken.None) + 1;
+            await store.CreateRowsBatchAsync(
+                [new RowCreationBatch(Instances[period], key, [Ecr.Domain.ValueObjects.RowKey.Create(rowKey)], ordinal)],
+                CancellationToken.None);
+        }
+    }
+
+    /// <summary>
+    /// ✎ B43: друга таблиця того ж аркуша (звичайна, без маршрутизації) з екземпляром жовтня й ОДНИМ рядком із ТИМ САМИМ
+    /// <see cref="RowKey"/>, що й у таблиці «місяці в колонках». Викликати ДО першого читання метаданих світу.
+    /// </summary>
+    /// <returns>Екземпляр жовтня і його рядок.</returns>
+    public async Task<(long InstanceId, long RowId)> AddTwinTableAsync()
+    {
+        var twin = await new TestDocumentBuilder(_connectionString)
+            .AddTableAsync(Doc, TableLayoutKind.PerPeriodInstance, monthColumns: 0, columnCount: 2, rowCount: 1);
+
+        await using var db = CreateContext();
+        var rowId = twin.RowIds[0];
+        var key = RowKey;
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE doc.TableRow SET RowKey = {key} WHERE PeriodKey = {Oct} AND Id = {rowId};");
+        return (twin.TableInstanceId, rowId);
+    }
+
+    /// <summary>✎ B43: м'яке видалення рядка жовтня <paramref name="rowId"/> (будь-якої таблиці) без журналу комірок.</summary>
+    public async Task SoftDeleteOctRowAsync(long rowId)
+    {
+        await using var db = CreateContext();
+        var store = new RowStore(db, new BulkCellLoader(_connectionString, 1000), new TestClock(Now));
+        if (!await store.SoftDeleteRowAsync(rowId, new PeriodKey(Oct), CancellationToken.None))
+        {
+            throw new InvalidOperationException($"Рядок {rowId} не видалено.");
+        }
+    }
+
     /// <summary>Роутер власності з прапором <see cref="Routing"/>.</summary>
     public MonthColumnRouter Router(EcrDbContext db)
         => new(db, new ConfigurationBuilder()
