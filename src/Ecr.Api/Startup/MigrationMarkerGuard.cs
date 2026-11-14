@@ -143,9 +143,9 @@ public sealed class MigrationMarkerFilter(MigratingProjects projects) : IAsyncAc
         // P2-N1: окрім ключів маршруту - ПРЕФІКС шляху `/api/v1/documents/{n}/**` і `/api/v1/projects/{n}/**` (версії,
         // порівняння, історія процесу, recall та будь-який майбутній контролер під цими префіксами) і `projectId`/`documentId`
         // у ТІЛІ запиту (наприклад, `POST reports/{code}/build`) - з уже зв'язаних аргументів дії.
-        var prefix = PathPrefix.Match(path);
-        long? prefixProject = prefix.Success && prefix.Groups[1].Value == "projects" ? ParseId(prefix.Groups[2].Value) : null;
-        long? prefixDocument = prefix.Success && prefix.Groups[1].Value == "documents" ? ParseId(prefix.Groups[2].Value) : null;
+        var prefix = PathPrefixOf(path);
+        long? prefixProject = prefix is { IsProject: true } projectPrefix ? projectPrefix.Id : null;
+        long? prefixDocument = prefix is { IsProject: false } documentPrefix ? documentPrefix.Id : null;
         var (bodyProject, bodyDocument) = FromArguments(context.ActionArguments);
 
         long? projectKey = ParseId(values.GetValueOrDefault("projectId"))
@@ -192,10 +192,70 @@ public sealed class MigrationMarkerFilter(MigratingProjects projects) : IAsyncAc
         await next().ConfigureAwait(false);
     }
 
-    private static readonly System.Text.RegularExpressions.Regex PathPrefix = new(
-        @"^/api/v\d+/(documents|projects)/(\d+)(?:/|$)",
-        System.Text.RegularExpressions.RegexOptions.CultureInvariant | System.Text.RegularExpressions.RegexOptions.IgnoreCase,
-        TimeSpan.FromMilliseconds(50));
+    /// <summary>
+    /// Префікс шляху <c>/api/v{n}/documents/{id}</c> або <c>/api/v{n}/projects/{id}</c> (за ним — кінець або <c>/</c>);
+    /// <c>null</c> — шлях не під цими префіксами або Id не вміщається в <see cref="long"/>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ B122: тут стояв регекс із таймаутом 50 мс. Під навантаженням (голодний пул потоків) таймаут спрацьовував на
+    /// звичайному шляху, <c>RegexMatchTimeoutException</c> давав 500 на будь-якому маршруті, поки йде перенос версії
+    /// (rerun api-1 у CI B84). Розбір без регексу: лінійний прохід по символах, ні таймауту, ні виключення.
+    /// Літери — без урахування регістру, цифри — лише ASCII (як <see cref="ParseId"/>, що читає Id далі).
+    /// </remarks>
+    /// <param name="path">Шлях запиту (<c>Request.Path</c>).</param>
+    public static (bool IsProject, long Id)? PathPrefixOf(string? path)
+    {
+        var rest = path.AsSpan();
+        if (!rest.StartsWith("/api/v", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        rest = rest["/api/v".Length..];
+        var version = AsciiDigits(rest);
+        if (version == 0 || version == rest.Length || rest[version] != '/')
+        {
+            return null;
+        }
+
+        rest = rest[(version + 1)..];
+        bool isProject;
+        if (rest.StartsWith("projects/", StringComparison.OrdinalIgnoreCase))
+        {
+            isProject = true;
+            rest = rest["projects/".Length..];
+        }
+        else if (rest.StartsWith("documents/", StringComparison.OrdinalIgnoreCase))
+        {
+            isProject = false;
+            rest = rest["documents/".Length..];
+        }
+        else
+        {
+            return null;
+        }
+
+        var digits = AsciiDigits(rest);
+        if (digits == 0 || (digits < rest.Length && rest[digits] != '/'))
+        {
+            return null;
+        }
+
+        return long.TryParse(rest[..digits], NumberStyles.None, CultureInfo.InvariantCulture, out var id)
+            ? (isProject, id)
+            : null;
+    }
+
+    private static int AsciiDigits(ReadOnlySpan<char> text)
+    {
+        var count = 0;
+        while (count < text.Length && char.IsAsciiDigit(text[count]))
+        {
+            count++;
+        }
+
+        return count;
+    }
 
     /// <summary>Властивості <c>ProjectId</c>/<c>DocumentId</c> у зв'язаних аргументах дії (тіло запиту).</summary>
     private static (long? Project, long? Document) FromArguments(IDictionary<string, object?> arguments)
