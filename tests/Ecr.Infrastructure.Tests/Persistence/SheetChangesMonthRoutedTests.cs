@@ -193,6 +193,66 @@ public sealed class SheetChangesMonthRoutedTests(SqlServerFixture sql)
         Assert.Equal(Other, mixed.LastChangedByUserId);
     }
 
+    /// <summary>
+    /// B43 (рев'ю F13, п. 1): структурна зміна ІНШОГО користувача без журналу комірок у таблиці Q-17 — видалення рядка в
+    /// усіх екземплярах року (як <c>DeleteRowHandler</c>) і дзеркальне додавання рядка — банер будить (автор невідомий).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ МУТАЦІЙНИЙ ДОКАЗ (локально): у режимі проби власників рядок без журналу не вважається чужим — червоніє.
+    /// Мутація «пара власника без журналу теж рахується» (умова <c>AttributedRowIds</c> пари в <c>ClaimedByOwnerPeer</c>)
+    /// ЕКВІВАЛЕНТНА — перевірено, тест зелений: видалення/додавання Q-17 іде в усі екземпляри року, рядок власника без
+    /// журналу чужий сам по собі, і банер дає він (див. примітку в обробнику). Мутацію «без перевірки пари» ловить
+    /// <see cref="B43_пара_власника_лише_в_тій_самій_таблиці"/>.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "Q-17")]
+    public async Task B43_чуже_видалення_й_додавання_рядка_Q17_будять_банер()
+    {
+        using var world = await MonthRoutedReadWorld.ArrangeAsync(sql.ConnectionString);
+
+        var first = await PollAsync(world, since: null);
+
+        await world.SoftDeleteRowAsync(Oct, Jan, Nov);
+        var deleted = await PollAsync(world, first.Marker);
+
+        Assert.True(deleted.Changed);
+        Assert.Null(deleted.LastChangedByUserId);
+        Assert.Equal(world.Instances[Oct], Assert.Single(deleted.ChangedTables).TableInstanceId);
+
+        await world.AddRowAsync("B43NEW", Oct, Jan, Nov);
+        var added = await PollAsync(world, deleted.Marker);
+
+        Assert.True(added.Changed);
+        Assert.Equal(world.Instances[Oct], Assert.Single(added.ChangedTables).TableInstanceId);
+    }
+
+    /// <summary>
+    /// B43 (рев'ю F13, п. 2): той самий <c>RowKey</c> у ДВОХ таблицях аркуша. Власна правка PLAIN (пара у власника — у
+    /// таблиці «місяці в колонках») не глушить чуже видалення рядка з тим самим ключем в ІНШІЙ таблиці.
+    /// </summary>
+    /// <remarks>⚠ МУТАЦІЙНИЙ ДОКАЗ (локально): пара власника без перевірки <c>TableDefId</c> — червоніє.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "Q-17")]
+    public async Task B43_пара_власника_лише_в_тій_самій_таблиці()
+    {
+        using var world = await MonthRoutedReadWorld.ArrangeAsync(sql.ConnectionString);
+        var (twinInstance, twinRow) = await world.AddTwinTableAsync();
+
+        var first = await PollAsync(world, since: null);
+
+        await world.PatchAsync(Viewer, Oct, ("PLAIN", 7m));
+        await world.SoftDeleteOctRowAsync(twinRow);
+        var after = await PollAsync(world, first.Marker);
+
+        Assert.True(after.Changed);
+        Assert.Contains(after.ChangedTables, t => t.TableInstanceId == twinInstance);
+        Assert.DoesNotContain(after.ChangedTables, t => t.TableInstanceId == world.Instances[Oct]);
+    }
+
     private static async Task<SheetChangesDto> PollAsync(
         MonthRoutedReadWorld world, string? since, List<string>? calls = null, AccessProfile? viewer = null)
     {
