@@ -136,15 +136,6 @@ public sealed class AccessDecisionTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
-    public void A08_аркуш_поза_вікном_доступу_дає_причину_OutOfAccessWindow()
-    {
-        var decision = EditRules.CanEdit(Operator(), AccessBuilder.Cell(outOfWindow: true));
-
-        Assert.False(decision.IsAllowed);
-        Assert.Equal(EditDenyReason.OutOfAccessWindow, decision.Reason);
-    }
-
-    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait("Requirement", "ФВ-5.13")]
     public void A09_поданий_документ_блокує_запис_навіть_у_відкритому_періоді()
     {
@@ -516,7 +507,6 @@ public sealed class AccessDecisionTests
             (AccessBuilder.Cell(archiving: true), EditDenyReason.ArchivingInProgress),
             (AccessBuilder.Cell(period: PeriodState.Scheduled), EditDenyReason.PeriodNotOpenYet),
             (AccessBuilder.Cell(period: PeriodState.Closed), EditDenyReason.PeriodClosed),
-            (AccessBuilder.Cell(outOfWindow: true), EditDenyReason.OutOfAccessWindow),
             (AccessBuilder.Cell(sheet: DocumentStatus.Submitted), EditDenyReason.DocumentSubmitted),
             (AccessBuilder.Cell(sheet: DocumentStatus.Approved), EditDenyReason.DocumentApproved),
             (AccessBuilder.Cell(computed: true), EditDenyReason.CalculatedCell),

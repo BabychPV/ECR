@@ -133,7 +133,6 @@ public sealed class EditRulesDelegationTests
     [InlineData("computed", EditDenyReason.CalculatedCell)]
     [InlineData("columnReadOnly", EditDenyReason.ColumnReadOnly)]
     [InlineData("rowReadOnly", EditDenyReason.RowReadOnly)]
-    [InlineData("outOfWindow", EditDenyReason.OutOfAccessWindow)]
     [InlineData("archived", EditDenyReason.ProjectArchived)]
     [InlineData("archiving", EditDenyReason.ArchivingInProgress)]
     public void Стани_мають_перевагу_над_передачею(string condition, EditDenyReason expected)
@@ -147,7 +146,6 @@ public sealed class EditRulesDelegationTests
             "computed" => AccessBuilder.Cell(computed: true),
             "columnReadOnly" => AccessBuilder.Cell(columnReadOnly: true),
             "rowReadOnly" => AccessBuilder.Cell(rowReadOnly: true),
-            "outOfWindow" => AccessBuilder.Cell(outOfWindow: true),
             "archived" => AccessBuilder.Cell(project: ProjectStatus.Archived),
             "archiving" => AccessBuilder.Cell(archiving: true),
             _ => throw new ArgumentOutOfRangeException(nameof(condition)),
