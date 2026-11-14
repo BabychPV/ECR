@@ -25,29 +25,44 @@ public sealed class EditPathWarmerOpenPeriodsTests(SqlServerFixture sql)
     [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Лише_версії_відкритих_періодів_найновіші_першими_у_межах_стелі()
     {
+        // ⚠ Правило 394 / ретро 375: періоди 2099xx, а відкриті тестом періоди закриваються у finally — відкритий
+        // період вмикає глобальну поведінку (прогрів, задачі станів періодів) для решти тестів спільної бази.
         var builder = new TestDocumentBuilder(sql.ConnectionString);
-        var open = await builder.BuildAsync();
-        var scheduled = await builder.BuildAsync();
-        var closed = await builder.BuildAsync();
-        var grace = await builder.BuildAsync();
+        var open = await builder.BuildAsync(PeriodKey);
+        var scheduled = await builder.BuildAsync(PeriodKey);
+        var closed = await builder.BuildAsync(PeriodKey);
+        var grace = await builder.BuildAsync(PeriodKey);
 
-        await SetStateAsync(builder, open, PeriodState.Open);
-        await SetStateAsync(builder, closed, PeriodState.Closed);
-        await SetStateAsync(builder, grace, PeriodState.Grace);
+        try
+        {
+            await SetStateAsync(builder, open, PeriodState.Open);
+            await SetStateAsync(builder, closed, PeriodState.Closed);
+            await SetStateAsync(builder, grace, PeriodState.Grace);
 
-        await using var db = builder.CreateContext();
-        var all = await EditPathWarmer.OpenPeriodVersionsAsync(db, EditPathWarmer.MaxVersionsLimit, CancellationToken.None);
+            await using var db = builder.CreateContext();
+            var all = await EditPathWarmer.OpenPeriodVersionsAsync(db, EditPathWarmer.MaxVersionsLimit, CancellationToken.None);
 
-        Assert.Contains(open.TemplateVersionId, all);
-        Assert.Contains(grace.TemplateVersionId, all);
-        Assert.DoesNotContain(scheduled.TemplateVersionId, all);
-        Assert.DoesNotContain(closed.TemplateVersionId, all);
-        Assert.Equal(all.OrderDescending(), all);
-        Assert.Equal(all.Distinct(), all);
+            Assert.Contains(open.TemplateVersionId, all);
+            Assert.Contains(grace.TemplateVersionId, all);
+            Assert.DoesNotContain(scheduled.TemplateVersionId, all);
+            Assert.DoesNotContain(closed.TemplateVersionId, all);
+            Assert.Equal(all.OrderDescending(), all);
+            Assert.Equal(all.Distinct(), all);
 
-        var one = await EditPathWarmer.OpenPeriodVersionsAsync(db, 1, CancellationToken.None);
-        Assert.Equal([all[0]], one);
+            var one = await EditPathWarmer.OpenPeriodVersionsAsync(db, 1, CancellationToken.None);
+            Assert.Equal([all[0]], one);
+        }
+        finally
+        {
+            await using var cleanup = builder.CreateContext();
+            int[] projects = [open.ProjectId, grace.ProjectId];
+            await cleanup.Periods
+                .Where(p => projects.Contains(p.ProjectId) && p.PeriodKeyValue == PeriodKey)
+                .ExecuteUpdateAsync(s => s.SetProperty(p => p.State, PeriodState.Closed));
+        }
     }
+
+    private const int PeriodKey = 209901;
 
     private static async Task SetStateAsync(TestDocumentBuilder builder, TestDocument document, PeriodState state)
     {
