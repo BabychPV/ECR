@@ -214,6 +214,52 @@ foreach ($r in @($mdl.registries)) {
 }
 Write-Host "Довідників перевірено: $rn"
 
+# B107 (F13 AU з B98): мости T3_00 порівнюють НАЗВУ палива (REGFIELD(...,'NAME')) з назвами записів 'liquidFuels' моделі
+# (діалект коду запису не читає). Перейменування такого запису на стенді перетворить рідкий рядок на видиме #N/A
+# (безпечний бік, але блокує подання) - тому тут звіряємо поле NAME живих записів із назвою в моделі.
+$na = $null
+if ($mdl.argumentBridges -and $mdl.argumentBridges.hse400 -and $mdl.argumentBridges.hse400.existingInputBridges) {
+    $t3 = $mdl.argumentBridges.hse400.existingInputBridges.T3_00
+    if ($t3) { $na = $t3.notApplicable }
+}
+function Get-LiquidFuelNameMismatch {
+    <# Чиста функція (Pester без мережі): розбіжності NAME живих записів рідкого палива з назвами моделі.
+       $LiveNames - мапа код -> поле NAME живого чинного запису ($null - запису немає). #>
+    param([string]$Registry, [string[]]$Codes, $ModelEntries, [hashtable]$LiveNames)
+    $out = @()
+    foreach ($fc in $Codes) {
+        $want = [string](@($ModelEntries) | Where-Object { [string]$_.code -eq $fc } | Select-Object -First 1).name
+        if (-not $LiveNames.ContainsKey($fc) -or $null -eq $LiveNames[$fc]) {
+            $out += "B107: у довіднику $Registry немає чинного запису $fc - рідкі рядки T3_00 дадуть #N/A"
+            continue
+        }
+        $have = [string]$LiveNames[$fc]
+        if ($have.Trim() -ne $want.Trim()) {
+            $out += "B107: $Registry/$fc NAME '$have' != '$want' у моделі - рідкі рядки T3_00 дадуть #N/A; поверніть назву або перегенеруйте модель і шаблон"
+        }
+    }
+    return , $out
+}
+
+if ($na -and $na.fuelRegistry -and @($na.liquidFuels).Count) {
+    $fuelReg = [string]$na.fuelRegistry
+    $mFuel = @($mdl.registries) | Where-Object { [string]$_.code -eq $fuelReg } | Select-Object -First 1
+    $liveFuel = @((Invoke-Ecr -Method GET -Path "/api/v1/registries/$fuelReg/entries?asOf=$today").Json)
+    $liveNames = @{}
+    foreach ($fc in @($na.liquidFuels)) {
+        $le = $liveFuel | Where-Object { [string]$_.code -eq [string]$fc } | Select-Object -First 1
+        if ($null -eq $le) { $liveNames[[string]$fc] = $null; continue }
+        $det = (Invoke-Ecr -Method GET -Path "/api/v1/registries/$fuelReg/entries/$([long]$le.id)").Json
+        $have = $null
+        if ($det -and $det.values -and ($det.values.PSObject.Properties.Name -contains 'NAME')) { $have = [string]$det.values.NAME }
+        if ($null -eq $have) { $have = [string]$le.display }
+        $liveNames[[string]$fc] = $have
+    }
+    $liqBad = Get-LiquidFuelNameMismatch -Registry $fuelReg -Codes @($na.liquidFuels) -ModelEntries @($mFuel.entries) -LiveNames $liveNames
+    $bad += @($liqBad)
+    Write-Host "Назв рідкого палива T3_00 (B107) збігається: $(@($na.liquidFuels).Count - @($liqBad).Count)/$(@($na.liquidFuels).Count)"
+}
+
 # L1: стилі ролей Excel, на які посилаються колонки/шапки таблиць моделі, мусять існувати у версії; ширина/формат збігаються
 $usedStyles = @{}
 foreach ($sh in @($mdl.sheets)) {
