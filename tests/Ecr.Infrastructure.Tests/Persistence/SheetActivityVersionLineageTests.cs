@@ -86,7 +86,109 @@ public sealed class SheetActivityVersionLineageTests(SqlServerFixture sql) : IDi
         Assert.Equal(["a"], denied.Select(i => i.NewValue));
     }
 
+    /// <summary>
+    /// ✎ B102: рядки «додано/видалено» (<c>aud.RowChange</c>) до переносу лежать на <c>TableDefId</c> версії P — журнал
+    /// аркуша їх показує: та сама таблиця (шлях) у P, друга таблиця R2 у P, і таблиця RN версії P, перейменована при
+    /// переносі в R2 (пара <c>cfg.ColumnRename</c>). Таблиця з іншим кодом у P (OT) — не цього аркуша.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-7.5")]
+    public async Task B102_Журнал_рядків_після_переносу_показує_рядки_до_нього()
+    {
+        var world = await ArrangeAsync();
+        var rows = await ArrangeRowTablesAsync(world);
+        await RowAuditAsync(world, rows);
+
+        var items = await RowActivityAsync(world, Reader(world));
+
+        // Найновіший першим: «rC» (таблиця V), «rN» (RN@P → R2@V), «rB» (R2@P), «rA» (та сама таблиця @P).
+        Assert.Equal(["rC", "rN", "rB", "rA"], items.Select(i => i.RowKey));
+        Assert.DoesNotContain(items, i => i.RowKey == "rX");
+    }
+
+    /// <summary>
+    /// ✎ B102, диференційно: Deny таблиці R2 поточної версії ховає і її рядки до переносу (R2@P, RN@P) — родовід
+    /// розширюється лише від ВИДИМИХ таблиць. Решта запиту та сама.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.6")]
+    public async Task B102_Deny_таблиці_ховає_і_її_рядки_до_переносу_диференційно()
+    {
+        var world = await ArrangeAsync();
+        var rows = await ArrangeRowTablesAsync(world);
+        await RowAuditAsync(world, rows);
+
+        var allowed = await RowActivityAsync(world, Reader(world));
+        var denied = await RowActivityAsync(world, Reader(world).Deny(ResourceKind.Table, rows.R2));
+
+        Assert.Contains(allowed, i => i.RowKey == "rB");
+        Assert.Contains(allowed, i => i.RowKey == "rN");
+        Assert.Equal(["rC", "rA"], denied.Select(i => i.RowKey));
+    }
+
     // ───────────────────────────── допоміжне ─────────────────────────────
+
+    /// <summary>Таблиці журналу рядків: P-таблиця тим самим шляхом, R2 (V і P), RN@P (перейменована в R2@V), OT@P.</summary>
+    private sealed record RowWorld(int PTable, int R2, int PR2, int PRN, int POT);
+
+    private async Task<RowWorld> ArrangeRowTablesAsync(World world)
+    {
+        var tag = world.Doc.SheetCode["SHEET".Length..];
+        await using var db = CreateContext();
+
+        var vSheet = world.Doc.SheetDefId;
+        var pTable = await db.ColumnDefs.AsNoTracking().Where(c => c.Id == world.P0).Select(c => c.TableDefId).SingleAsync();
+        var pOt = await db.ColumnDefs.AsNoTracking().Where(c => c.Id == world.PX).Select(c => c.TableDefId).SingleAsync();
+        var pSheet = await db.TableDefs.AsNoTracking().Where(t => t.Id == pTable).Select(t => t.SheetDefId).SingleAsync();
+
+        var r2Code = $"R2_{tag}";
+        var r2Columns = await TableAsync(db, vSheet, r2Code, "K");
+        var pr2Columns = await TableAsync(db, pSheet, r2Code, "K");
+        var prnColumns = await TableAsync(db, pSheet, $"RN_{tag}", "K");
+
+        // Перейменування таблиці RN → R2 при переносі P → V зберігається парою колонок (VersionMigrationRenames).
+        db.ColumnRenames.Add(new ColumnRename(prnColumns[0], r2Columns[0]));
+        await db.SaveChangesAsync();
+
+        var tableOf = await db.ColumnDefs.AsNoTracking()
+            .Where(c => c.Id == r2Columns[0] || c.Id == pr2Columns[0] || c.Id == prnColumns[0])
+            .ToDictionaryAsync(c => c.Id, c => c.TableDefId);
+        return new RowWorld(pTable, tableOf[r2Columns[0]], tableOf[pr2Columns[0]], tableOf[prnColumns[0]], pOt);
+    }
+
+    /// <summary>
+    /// Журнал рядків після переносу: «rA» на таблиці P тим самим шляхом, «rX» на OT@P, «rB» на R2@P, «rN» на RN@P,
+    /// «rC» на таблиці документа версії V. Незмінний (тригер) — на власному документі, 2099, ~300 днів тому.
+    /// </summary>
+    private async Task RowAuditAsync(World world, RowWorld rows)
+    {
+        var now = DateTime.UtcNow.AddDays(-296);
+        await using var db = CreateContext();
+        foreach (var (table, key, at) in new[]
+                 {
+                     (rows.PTable, "rA", now.AddDays(-5)),
+                     (rows.POT, "rX", now.AddDays(-4)),
+                     (rows.PR2, "rB", now.AddDays(-3)),
+                     (rows.PRN, "rN", now.AddDays(-2)),
+                     (world.Doc.TableDefId, "rC", now.AddDays(-1)),
+                 })
+        {
+            await db.Database.ExecuteSqlAsync($"""
+                INSERT INTO aud.RowChange
+                    (ChangedAt, DocumentId, PeriodKey, TableInstanceId, TableDefId, TableRowId, RowKey, Action,
+                     ChangedByUserId, Origin, CorrelationId)
+                VALUES ({at}, {world.Doc.DocumentId}, {Key}, 0, {table}, {world.Doc.RowIds[0]}, {key}, 1,
+                        {UserId}, N'UserEdit', NULL)
+                """);
+        }
+    }
+
+    private Task<IReadOnlyList<SheetActivityItem>> RowActivityAsync(World world, AccessBuilder reader)
+        => ActivityAsync(world, reader, SheetActivityKinds.RowChange);
 
     private static AccessBuilder Reader(World world)
         => new AccessBuilder { UserId = UserId }
@@ -174,7 +276,8 @@ public sealed class SheetActivityVersionLineageTests(SqlServerFixture sql) : IDi
         }
     }
 
-    private async Task<IReadOnlyList<SheetActivityItem>> ActivityAsync(World world, AccessBuilder reader)
+    private async Task<IReadOnlyList<SheetActivityItem>> ActivityAsync(
+        World world, AccessBuilder reader, string kind = SheetActivityKinds.CellEdit)
     {
         await using var db = CreateContext();
         var metadata = new MetadataCache(_memory, db);
@@ -198,13 +301,13 @@ public sealed class SheetActivityVersionLineageTests(SqlServerFixture sql) : IDi
 
         var handler = new GetSheetActivityHandler(
             new GetDocumentHandler(new DocumentStore(db), access, user),
-            new SheetActivityQuery(new AuditReader(db), new WorkflowStore(db), clock: null, rowChanges: null),
+            new SheetActivityQuery(new AuditReader(db), new WorkflowStore(db), clock: null, rowChanges: new RowChangeAudit(db)),
             access, user, monthRouter: null, metadata: metadata, columnPaths: new ColumnPathMapper(db));
 
         var page = await handler.HandleAsync(
             world.Doc.DocumentId, world.Doc.SheetDefId, Key, byUserId: null, includeSystem: false, limit: 100,
             cursor: null, CancellationToken.None);
-        return [.. page.Items.Where(i => i.Kind == SheetActivityKinds.CellEdit)];
+        return [.. page.Items.Where(i => i.Kind == kind)];
     }
 
     private EcrDbContext CreateContext()
