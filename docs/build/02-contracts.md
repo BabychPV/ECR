@@ -4728,6 +4728,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/template-versions/{id}/diff/{otherId}` | `Template.View` | 1 |
 | `PATCH` | `/api/v1/template-versions/{id}/presentation` | `Template.Edit` | 1 |
 | `PUT` | `/api/v1/template-versions/{id}/layout` | `Template.Edit` | 1 |
+| `GET` | `/api/v1/template-versions/{id}/month-input-aliases` | `Template.View` | 7 |
+| `PUT` | `/api/v1/template-versions/{id}/month-input-aliases` | `Template.Edit` | 7 |
 | `GET` | `/api/v1/template-versions/{id}/structure` | `Template.View` | 1 |
 | `GET` | `/api/v1/column-defs/search` | `Template.View` | 7 |
 | `GET` | `/api/v1/column-defs/{id}/usage` | `Template.View` | 7 |
