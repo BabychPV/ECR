@@ -53,7 +53,9 @@ public sealed class CalculationOutputWriter(ICalculationResultStore store, IUnit
 
         var chunks = Chunk(outputs, traceLevel);
 
-        if (chunks.Count == 1)
+        // B85: чанк понад BulkWriteThreshold результатів сховище пише SqlBulkCopy - лише в транзакції, тож і
+        // один такий чанк іде гілкою транзакції нижче (результати + трейс атомарно, як один SaveChanges).
+        if (chunks.Count == 1 && chunks[0].Sum(o => o.Values.Count) <= ICalculationResultStore.BulkWriteThreshold)
         {
             // Пакетно, одним проходом: SaveChanges у циклі за РЯДКОМ заборонений — бюджет
             // річного перерахунку 10 хвилин (ПРД-13), і коміт на рядок з'їдає його сам собою.

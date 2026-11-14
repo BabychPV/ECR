@@ -24,7 +24,8 @@ public sealed partial class CalculationResultStore(
     IConfiguration? configuration = null,
     SupersededPurgeOptions? purgeOptions = null,
     ILogger<CalculationResultStore>? logger = null,
-    CalculationYearResultsCache? yearCache = null)
+    CalculationYearResultsCache? yearCache = null,
+    int? bulkThreshold = null)
     : ICalculationResultStore, ICurrentResultFilterReader
 {
     /// <summary>Прибирання рядків неактуальних прогонів: явні налаштування (тести) або з конфігурації (вимкнено за замовчуванням).</summary>
@@ -124,6 +125,9 @@ public sealed partial class CalculationResultStore(
         // періоду, і повний рік розкладається по дванадцятьох партиціях
         // окремими прогонами.
         var periodKey = run.PeriodKey ?? 0;
+        var bulk = UseBulk(values.Count, bulkThreshold);
+        var rows = bulk ? new List<CalculationResult>(values.Count) : null;
+        bulkPending = null;
 
         foreach (var (output, value) in values)
         {
@@ -147,7 +151,19 @@ public sealed partial class CalculationResultStore(
 
             result.SetSubstance(value.SubstanceEntryId);
             result.SetTable(output.TableInstanceId);
-            db.CalculationResults.Add(result);
+            if (rows is not null)
+            {
+                rows.Add(result);
+            }
+            else
+            {
+                db.CalculationResults.Add(result);
+            }
+        }
+
+        if (rows is not null)
+        {
+            await BulkInsertResultsAsync(calculationRunId, rows, ct).ConfigureAwait(false);
         }
     }
 
@@ -326,6 +342,15 @@ public sealed partial class CalculationResultStore(
                     (result.DocumentId, result.TableInstanceId, result.SourceRowKey, result.MethodologyVersionId,
                      result.OutputCode.ToUpperInvariant(), result.SubstanceEntryId),
                     result.Id);
+            }
+        }
+
+        // B85: результати, що пішли SqlBulkCopy, у трекері не живуть — їхні Id тримає останній масовий запис.
+        if (bulkPending is { RunId: var bulkRunId, Ids: var bulkIds } && bulkRunId == calculationRunId)
+        {
+            foreach (var (key, id) in bulkIds)
+            {
+                found.TryAdd(key, id);
             }
         }
 
