@@ -86,6 +86,9 @@ function labelsOf(year: number): ResultLabels {
     output: (row) => {
       const substance = row.substance;
       if (row.column !== null || substance === null) {
+        const text = outputText(row);
+        // Без назви (порожній заголовок колонки чи вихід без речовини) текст і є кодом — показати його раз (B77).
+        if (text === row.outputCode) return <span>{text}</span>;
         return (
           <>
             <span>{outputText(row)}</span> <span className="ecr-cr-muted">{row.outputCode}</span>
