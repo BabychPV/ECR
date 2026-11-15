@@ -231,6 +231,60 @@ public sealed class ServiceAccountLeastPrivilegeTests(ServiceAccountLeastPrivile
     }
 
     /// <summary>
+    /// B85: масовий запис результатів прогону (<c>SqlBulkCopy</c> з <c>CheckConstraints</c>, без <c>TableLock</c>, у
+    /// транзакції EF) проходить під службою з РІВНО переліком прав — нового гранту не треба (<c>INSERT BULK</c> з
+    /// перевіркою обмежень і без тригерів на <c>calc.CalculationResult</c> вимагає лише <c>INSERT</c> із
+    /// <c>db_datawriter</c>). ⚠ Перевірено локально: без <c>CheckConstraints</c> цей тест теж зелений (служба не
+    /// просить <c>ALTER</c>), тож FK-доказ тримає <c>CalculationResultBulkWriteDbTests</c> в Api.Tests, не цей тест.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Масовий_запис_результатів_прогону_проходить_під_службою()
+    {
+        var doc = await database.ArrangeAsync();
+        long runId;
+        int versionId, unitId;
+        await using (var admin = database.AdminContext())
+        {
+            var methodology = new Ecr.Domain.Entities.Calculations.Methodology(
+                EcrCode.Create($"B85LP_{Guid.NewGuid():N}"[..14].ToUpperInvariant()), Name("m"));
+            admin.Methodologies.Add(methodology);
+            await admin.SaveChangesAsync();
+            var version = new Ecr.Domain.Entities.Calculations.MethodologyVersion(
+                methodology.Id, "1.0", CalculationLevel.Configuration, createdByUserId: UserId, Now);
+            admin.MethodologyVersions.Add(version);
+            var run = new Ecr.Domain.Entities.Calculations.CalculationRun(
+                doc.ProjectId, doc.PeriodKey.Value, triggeredByUserId: null, Now);
+            admin.CalculationRuns.Add(run);
+            await admin.SaveChangesAsync();
+            (runId, versionId) = (run.Id, version.Id);
+            unitId = await admin.Units.AsNoTracking().OrderBy(u => u.Id).Select(u => u.Id).FirstAsync();
+        }
+
+        List<CalculationOutput> outputs = [.. Enumerable.Range(1, 5).Select(i => new CalculationOutput(
+            doc.DocumentId, $"R{i}", [new CalculationOutputValue(versionId, null, "A", i, unitId)], []))];
+
+        await using (var db = database.LowPrivContext())
+        {
+            var store = new CalculationResultStore(db, new FixedClock(Now), bulkThreshold: 1);
+            await new UnitOfWork(db).ExecuteInTransactionAsync(
+                async ct =>
+                {
+                    await store.WriteResultsAsync(runId, outputs, ct);
+
+                    // Масовий шлях, а не EF: у трекері результатів немає.
+                    Assert.Empty(db.ChangeTracker.Entries<Ecr.Domain.Entities.Calculations.CalculationResult>());
+                    await db.SaveChangesAsync(ct);
+                },
+                CancellationToken.None);
+        }
+
+        Assert.Equal(5, await database.AdminScalarAsync<int>(
+            $"SELECT COUNT(*) FROM calc.CalculationResult WHERE CalculationRunId = {runId}"));
+    }
+
+    /// <summary>
     /// Без EXECUTE на процедуру <c>rpt.*</c> перевірка старту не бачить її (OBJECT_ID = NULL) — попередження мусить назвати
     /// і цю причину, а не лише «базу оновлено без кроку схеми». Мутація: повернути старий текст у
     /// <c>SchemaValidator.ValidateSqlOnlyProceduresAsync</c> — тест червоний.
@@ -508,6 +562,9 @@ public sealed class ServiceAccountLeastPrivilegeTests(ServiceAccountLeastPrivile
 
         /// <summary>Контекст застосунку від імені служби.</summary>
         public EcrDbContext LowPrivContext() => Context(LowPrivConnectionString);
+
+        /// <summary>Контекст від імені власника — підготовка даних, яких документ-конструктор не робить.</summary>
+        public EcrDbContext AdminContext() => Context(_sql.ConnectionString);
 
         /// <summary>Контекст на заданий рядок — так само, як його будує застосунок.</summary>
         public static EcrDbContext Context(string connectionString)
