@@ -169,6 +169,42 @@ describe('UnmatchedRowsBanner', () => {
     expect(onOpenRow).toHaveBeenCalledExactlyOnceWith(101, 'S1_6', 'Hours_M10');
   });
 
+  // B66 (doc 96: 64 #VALUE і 0 проблем): помилка кроку — посилання на рядок з кроком і кодом; неактивні рядки — один
+  // підсумок таблиці з кількістю, без посилань. Мутації: прибрати гілку `row.stepError` у `rowLabel` — червоніє підпис;
+  // показувати посилання для `inactive` — червоніє «без посилань»; не додати підказку `document.inactiveRows.hint` — червоніє.
+  it('B66: помилка кроку — рядок · крок · код; неактивні — підсумок таблиці з кількістю без посилань', async () => {
+    const { onOpenRow } = show(
+      rows([
+        issue(1, 4, { rowKey: 'R4', kind: 'StepError', stepCode: 'Total', errorCode: '#VALUE', affectedCount: 1 }),
+        issue(1, 5, { rowKey: 'R5', kind: 'StepError', stepCode: 'Tons', errorCode: '#ARG', affectedCount: 3 }),
+        issue(2, 2, { rowKey: 'R2', kind: 'RowInactive', affectedCount: 12 }),
+      ]),
+    );
+    await userEvent.click(screen.getByTestId('document-unmatched-rows-toggle'));
+
+    expect(screen.getByTestId('document-unmatched-rows-summary').textContent).toContain(
+      '⟦document.unmatchedRows.rows.other (count=14)⟧',
+    );
+    expect(screen.getByTestId('document-step-error-rows-hint').textContent).toBe('⟦document.stepErrorRows.hint⟧');
+    expect(screen.getByTestId('document-inactive-rows-hint').textContent).toBe('⟦document.inactiveRows.hint⟧');
+    expect(screen.queryByTestId('document-unmatched-rows-hint')).toBeNull();
+
+    const links = screen.getAllByTestId('document-step-error-row-link');
+    expect(links.map((l) => l.textContent)).toEqual([
+      '⟦document.stepErrorRows.row (row=4, step=Total, error=#VALUE)⟧',
+      '⟦document.stepErrorRows.rowMore (row=5, step=Tons, error=#ARG, more=2)⟧',
+    ]);
+    await userEvent.click(links[0]!);
+    expect(onOpenRow).toHaveBeenCalledExactlyOnceWith(101, 'R4', null);
+
+    const groups = screen.getAllByTestId('document-unmatched-rows-group');
+    const inactive = groups.find((g) => (g.textContent ?? '').includes('document.inactiveRows.group'))!;
+    expect(inactive.textContent).toContain(
+      '⟦document.inactiveRows.group (table=Sheet · 9.03 Unit 430, rows=⟦document.unmatchedRows.rows.other (count=12)⟧)⟧',
+    );
+    expect(inactive.querySelectorAll('button')).toHaveLength(0);
+  });
+
   it('b3: пояснення «чому і як» - один раз, тон інформації (status), не помилки', () => {
     show(sixty);
 

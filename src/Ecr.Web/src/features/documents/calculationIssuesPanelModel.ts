@@ -2,7 +2,7 @@ import type { DocumentTableDto } from '@/api/types';
 import { copyFieldsOf } from '@/features/documents/sheetCopies/sheetCopyTypes';
 import { localized } from '@/shared/i18n/localized';
 import type { UnmatchedRows } from './useUnmatchedRows';
-import { groupUnmatchedRows } from './unmatchedRowsModel';
+import { groupRowCount, groupUnmatchedRows } from './unmatchedRowsModel';
 
 /**
  * ✎ B78 (людина 13.11: «не юзер френдлі, багато тексту»): ПРИЧИНА проблеми розрахунку — один рядок панелі замість
@@ -11,9 +11,19 @@ import { groupUnmatchedRows } from './unmatchedRowsModel';
  * - `hse400` — немає складу газу з HSE400 (формула читає довідник/документ HSE400): дія «Відкрити HSE400»;
  * - `formula` — інша власна помилка формули, згрупована за кодом і довідником формули (або колонкою);
  * - `blocked` — «не оновлено» через помилку, корінь якої в переліку не показано (інший період, закрите джерело);
- * - `unmatched` / `rejected` / `missingInputs` — рядки, не взяті в розрахунок (колишній банер «Some rows…»).
+ * - `unmatched` / `rejected` / `missingInputs` — рядки, не взяті в розрахунок (колишній банер «Some rows…»);
+ * - B66: `stepError` — крок методики рядка впав (`#VALUE`, `#ARG`…); `inactive` — рядки, відсіяні фільтром активності
+ *   (D-425), лише кількістю.
  */
-export type IssueCauseKind = 'hse400' | 'formula' | 'blocked' | 'unmatched' | 'rejected' | 'missingInputs';
+export type IssueCauseKind =
+  | 'hse400'
+  | 'formula'
+  | 'blocked'
+  | 'unmatched'
+  | 'rejected'
+  | 'missingInputs'
+  | 'stepError'
+  | 'inactive';
 
 /** Куди веде «Показати клітинки/рядки»: перша комірка причини в сітці. */
 export interface IssueTarget {
@@ -179,9 +189,17 @@ export function buildIssueCauses(rows: UnmatchedRows, tables: readonly DocumentT
   }
 
   for (const group of groupUnmatchedRows(rows.issues, tables, rows.hints)) {
-    const kind: IssueCauseKind = group.missingInputs ? 'missingInputs' : group.rejected ? 'rejected' : 'unmatched';
+    const kind: IssueCauseKind = group.inactive
+      ? 'inactive'
+      : group.stepError
+        ? 'stepError'
+        : group.missingInputs
+          ? 'missingInputs'
+          : group.rejected
+            ? 'rejected'
+            : 'unmatched';
     const cause = causeOf(`rows:${kind}`, kind, 'rows', null);
-    cause.count += group.rows.length;
+    cause.count += groupRowCount(group);
     cause.tables.add(group.sheetName.length > 0 ? `${group.sheetName} · ${group.tableName}` : group.tableName);
     const first = group.rows[0];
     if (cause.target === null && group.tableInstanceId !== null && first !== undefined) {
@@ -197,9 +215,11 @@ export function buildIssueCauses(rows: UnmatchedRows, tables: readonly DocumentT
     hse400: 0,
     formula: 1,
     blocked: 2,
-    missingInputs: 3,
-    rejected: 4,
-    unmatched: 5,
+    stepError: 3,
+    missingInputs: 4,
+    rejected: 5,
+    unmatched: 6,
+    inactive: 7,
   };
 
   return [...causes.values()].map(freeze).sort((a, b) => order[a.kind] - order[b.kind]);

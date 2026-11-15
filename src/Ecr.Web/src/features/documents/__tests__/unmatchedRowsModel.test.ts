@@ -97,4 +97,27 @@ describe('groupUnmatchedRows', () => {
 
     expect(groups.map((g) => g.tableInstanceId)).toEqual([101, 900]);
   });
+
+  // B66: помилка кроку методики — своя група з кроком і кодом на рядок; рядки, відсіяні фільтром активності (D-425), —
+  // ОДИН підсумок таблиці без поштучних рядків, кількість — із сервера. Мутації: не розпізнавати `RowInactive` (рядок іде
+  // «без правила») або рахувати `rows.length` замість `inactiveCount` у `unmatchedRowCount` — тест червоний.
+  it('B66: StepError — група з кроком і кодом; RowInactive — підсумок таблиці з кількістю', () => {
+    const tables = [table(1, 'Units')];
+    const issues = [
+      issue(1, 4, { rowKey: 'R4', kind: 'StepError', stepCode: 'Total', errorCode: '#VALUE', affectedCount: 3 }),
+      issue(1, 2, { rowKey: 'R2', kind: 'RowInactive', affectedCount: 1500 }),
+      issue(1, 7, { rowKey: 'R7' }),
+    ];
+
+    const groups = groupUnmatchedRows(issues, tables);
+
+    const step = groups.find((g) => g.stepError)!;
+    expect(step.rows.map((r) => [r.rowKey, r.stepError])).toEqual([['R4', { step: 'Total', error: '#VALUE', failedSteps: 3 }]]);
+    expect(step.hint).toBeNull();
+    const inactive = groups.find((g) => g.inactive)!;
+    expect(inactive.rows).toEqual([]);
+    expect(inactive.inactiveCount).toBe(1500);
+    expect(groups.find((g) => !g.stepError && !g.inactive)!.rows.map((r) => r.rowKey)).toEqual(['R7']);
+    expect(unmatchedRowCount(groups)).toBe(1 + 1500 + 1);
+  });
 });

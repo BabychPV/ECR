@@ -68,6 +68,10 @@ function causeTitle(cause: IssueCause): string {
       return t('document.calcIssues.rejected.title', { rows: plural('document.unmatchedRows.rows', cause.count) });
     case 'unmatched':
       return t('document.calcIssues.unmatched.title', { rows: plural('document.unmatchedRows.rows', cause.count) });
+    case 'stepError':
+      return t('document.calcIssues.stepError.title', { rows: plural('document.unmatchedRows.rows', cause.count) });
+    case 'inactive':
+      return t('document.calcIssues.inactive.title', { rows: plural('document.unmatchedRows.rows', cause.count) });
   }
 }
 
