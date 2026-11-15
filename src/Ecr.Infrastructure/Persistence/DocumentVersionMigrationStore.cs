@@ -2087,8 +2087,39 @@ public sealed partial class DocumentVersionMigrationStore(
         JOIN   @headerMap h ON h.o = g.HeaderFieldDefId;
         """;
 
+    /// <summary>
+    /// 6a. Копія грантів ролей на нові Id ресурсів (частина <see cref="FinishSql"/>; окремо — для тесту гонки).
+    /// </summary>
+    /// <remarks>
+    /// ✎ B130: <c>WITH (UPDLOCK, HOLDLOCK)</c> у <c>NOT EXISTS</c>. Ролі й ресурси шаблону спільні для проєктів, а переноси
+    /// РІЗНИХ проєктів не серіалізуються (замок — рядок <c>doc.Project</c> і applock структури документа свого проєкту).
+    /// Під RCSI <c>NOT EXISTS</c> не бачить незакомічений грант іншого переносу тієї самої ролі на той самий новий Id —
+    /// обидва вставляють, другий падає на <c>UQ_ResourceGrant</c> і відкочує весь перенос. Діапазонний U-замок змушує
+    /// другий чекати коміту першого й тоді пропустити вже наявний грант.
+    /// Порядок замків у <see cref="FinishSql"/> однаковий для всіх переносів: 6a (<c>sec.ResourceGrant</c>), далі 6b
+    /// (<c>cfg.ColumnRename</c>) — інших писарів обох таблиць в одній транзакції немає.
+    /// </remarks>
+    internal const string GrantCopyInsertSql = """
+        INSERT sec.ResourceGrant (RoleId, ResourceKind, ResourceId, [Level], IsDeny)
+        SELECT g.RoleId, g.ResourceKind, m.n, g.[Level], g.IsDeny
+        FROM   sec.ResourceGrant g
+        JOIN   @grantMap m ON m.k = g.ResourceKind AND m.o = g.ResourceId
+        WHERE  NOT EXISTS (SELECT 1 FROM sec.ResourceGrant t WITH (UPDLOCK, HOLDLOCK)
+                           WHERE t.RoleId = g.RoleId AND t.ResourceKind = g.ResourceKind AND t.ResourceId = m.n);
+        """;
+
+    /// <summary>6b. Спільна пара перейменування колонок (частина <see cref="FinishSql"/>; окремо — для тесту гонки).</summary>
+    /// <remarks>✎ B127: <c>UPDLOCK, HOLDLOCK</c> — з тієї самої причини, що й у <see cref="GrantCopyInsertSql"/>.</remarks>
+    internal const string ColumnRenameInsertSql = """
+        INSERT cfg.ColumnRename (FromColumnDefId, ToColumnDefId)
+        SELECT r.f, r.t
+        FROM   OPENJSON(@renames) WITH (f int, t int) r
+        WHERE  NOT EXISTS (SELECT 1 FROM cfg.ColumnRename x WITH (UPDLOCK, HOLDLOCK)
+                           WHERE x.FromColumnDefId = r.f AND x.ToColumnDefId = r.t);
+        """;
+
     /// <summary>6a. Гранти, версія проєкту, прибирання #-таблиць.</summary>
-    private const string FinishSql = """
+    private const string FinishSql = $"""
         -- 6a. Гранти ролей на аркуш/таблицю/колонку (sec.ResourceGrant): Id цих
         -- ресурсів свої в кожної версії, а грант не має ProjectId і діє на всіх,
         -- хто сидить на старій версії. Тому КОПІЮЄМО на нові Id за кодом (не
@@ -2110,19 +2141,10 @@ public sealed partial class DocumentVersionMigrationStore(
         JOIN   sec.ResourceGrant g ON g.RoleId = t.RoleId AND g.ResourceKind = m.k AND g.ResourceId = m.o
         WHERE  g.IsDeny = 1 AND t.IsDeny = 0;
 
-        INSERT sec.ResourceGrant (RoleId, ResourceKind, ResourceId, [Level], IsDeny)
-        SELECT g.RoleId, g.ResourceKind, m.n, g.[Level], g.IsDeny
-        FROM   sec.ResourceGrant g
-        JOIN   @grantMap m ON m.k = g.ResourceKind AND m.o = g.ResourceId
-        WHERE  NOT EXISTS (SELECT 1 FROM sec.ResourceGrant t
-                           WHERE t.RoleId = g.RoleId AND t.ResourceKind = g.ResourceKind AND t.ResourceId = m.n);
+        {GrantCopyInsertSql}
 
         -- 6b. RPT-STABLE Part B: збережена мапа перейменувань колонок (псевдонім для SSRS і міжперіодних формул).
-        INSERT cfg.ColumnRename (FromColumnDefId, ToColumnDefId)
-        SELECT r.f, r.t
-        FROM   OPENJSON(@renames) WITH (f int, t int) r
-        WHERE  NOT EXISTS (SELECT 1 FROM cfg.ColumnRename x WITH (UPDLOCK, HOLDLOCK)
-                           WHERE x.FromColumnDefId = r.f AND x.ToColumnDefId = r.t);
+        {ColumnRenameInsertSql}
         -- ✎ B127: UPDLOCK/HOLDLOCK - переноси РІЗНИХ проєктів не серіалізуються (замок - рядок doc.Project і applock
         -- структури документа свого проєкту), а пара (f, t) спільна для шаблону: без діапазонного замка дві одночасні
         -- вставки тієї самої пари давали б PK_ColumnRename і відкат усього переносу. Прив'язка нижче - своя для проєкту.
