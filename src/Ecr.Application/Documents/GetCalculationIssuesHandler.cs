@@ -137,7 +137,8 @@ public sealed class GetCalculationIssuesHandler(
 
         // Підказка «що приймають правила» — лише рядкам без правила: відхиленому рядку (і рядку без входів, AN-164)
         // правило вже підійшло.
-        var unmatched = visible.Where(r => !HasRuleReason(r.Kind)).ToList();
+        // B66: лише справді «без правила» — StepError і RowInactive правило вже закрило (чи відсіяв фільтр активності).
+        var unmatched = visible.Where(r => r.Kind == ICalculationIssueStore.NoMatchingRule).ToList();
         var built = hints is null || unmatched.Count == 0 || !key.IsValid
             ? CalculationIssueHintSet.Empty
             : await hints.BuildAsync(documentId, key, sheetCopyId, unmatched, readable.CanReadColumn, ct)
@@ -165,12 +166,17 @@ public sealed class GetCalculationIssuesHandler(
                         r.Kind,
                         r.MethodologyCode,
                         r.DetectedAt,
-                        reason is null ? built.CurrentValues.GetValueOrDefault((r.TableDefId, r.RowKey)) : null,
+                        reason is null && r.Kind == ICalculationIssueStore.NoMatchingRule
+                            ? built.CurrentValues.GetValueOrDefault((r.TableDefId, r.RowKey))
+                            : null,
                         reason?.RuleCode,
                         reason is null || reason.Columns.Count == 0
                             ? null
                             : [.. reason.Columns.Select(c => new CalculationIssueColumnDto(c.Code, c.Name))],
-                        monthNumber);
+                        monthNumber,
+                        r.StepCode,
+                        r.ErrorCode,
+                        r.AffectedCount);
                 }),
             ],
             built.Tables.Count == 0 ? null : built.Tables,

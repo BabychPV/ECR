@@ -37,7 +37,7 @@ public sealed partial class AuditReader
         }
 
         var lineage = await new ColumnPathMapper(db)
-            .LineageAsync([.. distinct.Select(c => c.ColumnDefId).Distinct()], ct)
+            .LineageAsync([.. distinct.Select(c => c.ColumnDefId).Distinct()], documentId, ct)
             .ConfigureAwait(false);
         if (lineage.Values.All(ids => ids.Count <= 1))
         {
@@ -123,7 +123,7 @@ public sealed partial class AuditReader
         }
 
         // Id журналу → поточна колонка. Поточна колонка — сама собі (першою), далі члени її родоводу.
-        var lineage = await new ColumnPathMapper(db).LineageAsync(current, ct).ConfigureAwait(false);
+        var lineage = await new ColumnPathMapper(db).LineageAsync(current, documentId, ct).ConfigureAwait(false);
         var map = current.Order().ToDictionary(id => id, id => id);
         foreach (var (column, ids) in lineage.OrderBy(p => p.Key))
         {

@@ -134,9 +134,10 @@ public sealed partial class EditPathWarmupService(
         try
         {
             IReadOnlyList<int> versions = [];
-            if (options.Enabled)
+            var warmer = options.Enabled ? CreateWarmer(scopes, warmerLogger) : null;
+            if (warmer is not null)
             {
-                versions = (await CreateWarmer(scopes, warmerLogger)
+                versions = (await warmer
                     .WarmAsync(options.MaxVersions, options.WarmQuartz ? quartz : null, ct)
                     .ConfigureAwait(false)).WarmedVersions;
             }
@@ -145,6 +146,13 @@ public sealed partial class EditPathWarmupService(
             if (options.WarmFirstEdit)
             {
                 _ = await CreateFirstEditWarmer(scopes).WarmAsync(versions, ct).ConfigureAwait(false);
+            }
+
+            // B53: версії шкали проєктів (межі читання) — ОСТАННІМИ: до ~60 с бюджету не відсувають прогріву першої
+            // правки й перегляду прив'язки; етап незалежний від того, чи вдався перелік версій відкритих періодів.
+            if (warmer is not null)
+            {
+                _ = await warmer.WarmReadScopeVersionsAsync(options.MaxVersions, versions, ct).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException)

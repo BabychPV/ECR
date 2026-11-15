@@ -130,12 +130,33 @@ public sealed class SheetActivityVersionLineageTests(SqlServerFixture sql) : IDi
         Assert.Equal(["rC", "rA"], denied.Select(i => i.RowKey));
     }
 
+    /// <summary>
+    /// B127: перейменування RN → R2 застосував перенос ІНШОГО проєкту тих самих версій шаблону — рядки RN@P у журнал
+    /// аркуша цього документа не потрапляють; решта (R2@P, та сама таблиця @P) — як у B102. Мутація: передати
+    /// <c>null</c> замість документа в <c>TableLineageAsync</c> (<c>GetSheetActivityHandler.WithTableLineageAsync</c>) → «rN» є.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "B127")]
+    public async Task B127_Журнал_рядків_не_бере_перейменування_таблиці_чужого_проєкту()
+    {
+        var world = await ArrangeAsync();
+        var foreign = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(Key, columnCount: 1, rowCount: 1);
+        var rows = await ArrangeRowTablesAsync(world, foreign.ProjectId);
+        await RowAuditAsync(world, rows);
+
+        var items = await RowActivityAsync(world, Reader(world));
+
+        Assert.Equal(["rC", "rB", "rA"], items.Select(i => i.RowKey));
+    }
+
     // ───────────────────────────── допоміжне ─────────────────────────────
 
     /// <summary>Таблиці журналу рядків: P-таблиця тим самим шляхом, R2 (V і P), RN@P (перейменована в R2@V), OT@P.</summary>
     private sealed record RowWorld(int PTable, int R2, int PR2, int PRN, int POT);
 
-    private async Task<RowWorld> ArrangeRowTablesAsync(World world)
+    private async Task<RowWorld> ArrangeRowTablesAsync(World world, int? renameProject = null)
     {
         var tag = world.Doc.SheetCode["SHEET".Length..];
         await using var db = CreateContext();
@@ -152,6 +173,9 @@ public sealed class SheetActivityVersionLineageTests(SqlServerFixture sql) : IDi
 
         // Перейменування таблиці RN → R2 при переносі P → V зберігається парою колонок (VersionMigrationRenames).
         db.ColumnRenames.Add(new ColumnRename(prnColumns[0], r2Columns[0]));
+
+        // ✎ B127: пару застосував перенос проєкту ЦЬОГО документа.
+        db.ColumnRenameProjects.Add(new ColumnRenameProject(prnColumns[0], r2Columns[0], renameProject ?? world.Doc.ProjectId));
         await db.SaveChangesAsync();
 
         var tableOf = await db.ColumnDefs.AsNoTracking()

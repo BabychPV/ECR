@@ -121,7 +121,10 @@ public sealed class CompareDocumentVersionsHandler(
     IDocumentHeaderStore headers,
     Security.IAccessDecisionService access,
     Common.ICurrentUser currentUser,
-    IMonthColumnRouter? monthRouter = null)
+    IMonthColumnRouter? monthRouter = null,
+
+    // ✎ B72: родовід колонок для перекладу зрізу з таблиці, перейменованої мапою переносу; `null` — лише коди.
+    IColumnPathMapper? columnPaths = null)
 {
     /// <summary>Право — те саме, що й перегляд документа.</summary>
     public const string Permission = ListDocumentsHandler.Permission;
@@ -233,8 +236,9 @@ public sealed class CompareDocumentVersionsHandler(
         IReadOnlyDictionary<string, SubmissionPayloadHeaderValue> newHeader,
         CancellationToken ct)
     {
-        var oldMap = oldCells.ToDictionary(c => (RowId: c.Row, ColumnDefId: c.Column));
-        var newMap = newCells.ToDictionary(c => (RowId: c.Row, ColumnDefId: c.Column));
+        // ✎ B72 (D1): переклад зрізу на іншу версію може звести дві комірки на одну адресу — перша, а не 500.
+        var oldMap = ByAddress(oldCells);
+        var newMap = ByAddress(newCells);
         var oldRows = oldCells.Select(c => c.Row).ToHashSet();
         var newRows = newCells.Select(c => c.Row).ToHashSet();
 
@@ -304,6 +308,19 @@ public sealed class CompareDocumentVersionsHandler(
             removed.Select(r => new RowChangeDto(r, Label(r).TableCode, Label(r).RowKey)).ToList(),
             truncated,
             headerChanges);
+    }
+
+    /// <summary>Комірки за адресою (рядок, колонка); повтор адреси — перша комірка.</summary>
+    private static Dictionary<(long RowId, int ColumnDefId), SubmissionPayloadCell> ByAddress(
+        IReadOnlyList<SubmissionPayloadCell> cells)
+    {
+        var map = new Dictionary<(long RowId, int ColumnDefId), SubmissionPayloadCell>(cells.Count);
+        foreach (var cell in cells)
+        {
+            map.TryAdd((cell.Row, cell.Column), cell);
+        }
+
+        return map;
     }
 
     /// <summary>
@@ -382,7 +399,8 @@ public sealed class CompareDocumentVersionsHandler(
         {
             // ⛔ V-2 (аудит 2026-11): зріз до переносу проєкту — на аркуші й колонках СТАРОЇ версії; межі читання й
             // живі дані — на версії документа в періоді. Переклад за кодами, інакше старі Id «невидимі» (порівняння
-            // мовчить про зміни або показує кожну комірку як нову).
+            // мовчить про зміни або показує кожну комірку як нову). ✎ B72: таблиця, перейменована мапою переносу, —
+            // за збереженими парами колонок (`cfg.ColumnRename`), бо за кодами відповідника в неї немає.
             var currentVersionId = await DocumentPeriodVersion.GetAsync(documents, documentId, found.PeriodKey, ct)
                 .ConfigureAwait(false);
             var current = await metadata.GetAsync(currentVersionId, ct).ConfigureAwait(false);
@@ -394,7 +412,9 @@ public sealed class CompareDocumentVersionsHandler(
             {
                 return new LoadedVersion(
                     found.PeriodKey,
-                    SubmissionSnapshotTranslation.Cells(SubmissionPayload.Read(found.PayloadJson), source, current),
+                    await SubmissionSnapshotTranslation
+                        .CellsAsync(SubmissionPayload.Read(found.PayloadJson), source, current, columnPaths, documentId, ct)
+                        .ConfigureAwait(false),
                     SubmissionPayload.ReadHeader(found.PayloadJson));
             }
         }

@@ -7,6 +7,7 @@ using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
+using Microsoft.EntityFrameworkCore;
 using Xunit;
 
 namespace Ecr.Infrastructure.Tests.Persistence;
@@ -49,12 +50,16 @@ public sealed class RegistryStorePermitHistoryReferenceTests(SqlServerFixture sq
             db.Users.Add(user);
             await db.SaveChangesAsync();
 
+            // ⛔ B56: справжній ключ рядка документа — історія рядка без живого рядка не є використанням.
+            var rowKey = await db.TableRows.AsNoTracking()
+                .Where(r => r.Id == doc.RowIds[0]).Select(r => r.RowKeyValue).SingleAsync();
+
             // B — лише пізніший сегмент історії рядка; C — лише дозвіл частини поділу. У комірках немає жодного.
             db.PermitSegments.Add(PermitSegment.ForRow(
-                doc.DocumentId, doc.TableDefId, null, "R1", doc.ColumnDefIds[0], new DateOnly(2026, 2, 15), b.Id, user.Id,
+                doc.DocumentId, doc.TableDefId, null, rowKey, doc.ColumnDefIds[0], new DateOnly(2026, 2, 15), b.Id, user.Id,
                 new DateTime(2026, 2, 15, 9, 0, 0, DateTimeKind.Utc)));
             db.CellPermitParts.Add(new CellPermitPart(
-                202601, doc.DocumentId, doc.TableDefId, null, "R1", doc.ColumnDefIds[1], 1, c.Id,
+                doc.PeriodKey.Value, doc.DocumentId, doc.TableDefId, null, rowKey, doc.ColumnDefIds[1], 1, c.Id,
                 new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 14), 5m));
             await db.SaveChangesAsync();
             (segmentOnly, partOnly) = (b.Id, c.Id);
@@ -70,6 +75,23 @@ public sealed class RegistryStorePermitHistoryReferenceTests(SqlServerFixture sq
         var usage = await store.FindEntryDocumentsAsync(segmentOnly, [doc.ProjectId], take: 10, CancellationToken.None);
         Assert.Equal(1, usage.Total);
         Assert.Equal(doc.DocumentId.ToString(System.Globalization.CultureInfo.InvariantCulture), Assert.Single(usage.Items).Id);
+        var partUsage = await store.FindEntryDocumentsAsync(partOnly, [doc.ProjectId], take: 10, CancellationToken.None);
+        Assert.Equal(1, partUsage.Total);
+
+        // ⛔ B56: рядок видалено логічно — історія лишається в базі (FK-посилання, видалення запису й далі блокується), але
+        // документ уже не «використовує» дозвіл. Мутація: прибрати вимогу живого рядка в PermitHistoryUsage — Total 1.
+        await using (var db = builder.CreateContext())
+        {
+            var row = await db.TableRows.SingleAsync(r => r.Id == doc.RowIds[0]);
+            row.SoftDelete(DateTime.UtcNow);
+            await db.SaveChangesAsync();
+        }
+
+        await using var after = builder.CreateContext();
+        var afterStore = new RegistryStore(after);
+        Assert.Equal(0, (await afterStore.FindEntryDocumentsAsync(segmentOnly, [doc.ProjectId], take: 10, CancellationToken.None)).Total);
+        Assert.Equal(0, (await afterStore.FindEntryDocumentsAsync(partOnly, [doc.ProjectId], take: 10, CancellationToken.None)).Total);
+        Assert.Equal(1, (await afterStore.CountReferencesAsync(segmentOnly, CancellationToken.None)).Total);
     }
 
     private static LocalizedText Text(string value) => new(new Dictionary<string, string> { ["en"] = value });

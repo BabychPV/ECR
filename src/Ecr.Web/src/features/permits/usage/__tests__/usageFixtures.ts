@@ -50,6 +50,7 @@ export function usage(items: readonly PermitUsageItem[], over: Partial<PermitUsa
     linkCount: items.length,
     truncated: false,
     items: [...items],
+    historyDocumentCount: 0,
     ...over,
   };
 }

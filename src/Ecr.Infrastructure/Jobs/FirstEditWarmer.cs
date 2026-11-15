@@ -45,6 +45,9 @@ public sealed partial class FirstEditWarmer(IServiceScopeFactory scopes, ILogger
     /// <summary>Дійсний ключ періоду для запитів-«порожняків»: з <see cref="NoId"/> він однаково нічого не знаходить.</summary>
     internal static readonly PeriodKey NoPeriod = new(209912);
 
+    /// <summary>B53: код, якого не буває (коди — <c>EcrCode</c>, без пробілів і дефіса на початку).</summary>
+    internal const string NoCode = "-b53-warmup-";
+
     /// <summary>Чи увімкнено прогрів (<see cref="EnabledKey"/>, типово <c>true</c>).</summary>
     /// <param name="configuration">Конфігурація процесу.</param>
     public static bool ReadEnabled(IConfiguration configuration)
@@ -63,6 +66,9 @@ public sealed partial class FirstEditWarmer(IServiceScopeFactory scopes, ILogger
         "Ecr.Application.Recalculation",
         "Ecr.Infrastructure.Security",
         "Ecr.Infrastructure.Caching",
+
+        // B53: перегляд прив'язки дозволу (вибір дозволу, планувальник рядків, межі читання після S-1/B44).
+        "Ecr.Application.Permits.Bindings",
     ];
 
     /// <summary>
@@ -80,6 +86,13 @@ public sealed partial class FirstEditWarmer(IServiceScopeFactory scopes, ILogger
         typeof(Persistence.LockWaitGuard),
         typeof(Persistence.AuditWriter),
         typeof(Persistence.AuditReader),
+
+        // B53: сховища перегляду прив'язки дозволу.
+        typeof(Persistence.PermitBindingStore),
+        typeof(Persistence.PermitTypeStore),
+        typeof(Persistence.RegistryStore),
+        typeof(Persistence.RegistrySnapshotLoader),
+        typeof(Persistence.TemplateVersionStore),
     ];
 
     /// <summary>Кроки прогріву: ім'я → дія над провайдером scope. Тести підміняють.</summary>
@@ -100,6 +113,7 @@ public sealed partial class FirstEditWarmer(IServiceScopeFactory scopes, ILogger
         ("permits", (sp, _, ct) => sp.GetService<IPermitRegistryIndex>() is { } index ? index.PermitTargetIdsAsync(ct).AsTask() : Task.CompletedTask),
         ("rowWindows", (sp, _, ct) => sp.GetService<IRowWindowColumnIndex>() is { } windows ? windows.WindowColumnsAsync(NoId, ct) : Task.CompletedTask),
         ("documentProject", (sp, _, ct) => sp.GetRequiredService<IAccessDecisionService>().DocumentProjectIdAsync(NoId, ct)),
+        ("permitPreview", WarmPermitPreviewAsync),
         ("session", WarmSessionAsync),
         ("transaction", WarmTransactionAsync),
         ("jit", (_, _, ct) => PrepareJit(ct)),
@@ -211,6 +225,81 @@ public sealed partial class FirstEditWarmer(IServiceScopeFactory scopes, ILogger
         if (sp.GetService<IFormulaErrorStore>() is { } errors)
         {
             _ = await errors.ReadInstancesAsync([NoId], NoPeriod, ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// B53: перший перегляд прив'язки дозволу (<c>GET …/permit-bindings/{code}/preview</c>) після старту. Замір B53
+    /// (Ecr.Api.Tests, той самий перегляд, свіжий хост): після AN-190/AN-194 перший виклик лишався ~0,9 с проти ~0,08 с
+    /// другого, і більшу частину давала компіляція EF-запитів вибору дозволу (<see cref="IRegistryStore"/>) і знімка
+    /// довідників (<see cref="IRegistrySnapshotLoader"/>), яких шлях зрізу/правки не торкається.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Ті самі межі, що й решта кроків: лише читання, лише неіснуючі ідентифікатори (<see cref="NoId"/>, код
+    /// <see cref="NoCode"/>) — запит компілюється й виконується, рядків не повертає. Порти — необов'язкові
+    /// (<c>GetService</c>): процес без них просто пропускає їхній виклик.
+    /// </remarks>
+    private static async Task WarmPermitPreviewAsync(IServiceProvider sp, IReadOnlyList<int> versions, CancellationToken ct)
+    {
+        if (sp.GetService<IRepository<Domain.Entities.Configuration.TemplateVersion, int>>() is { } versionRepository)
+        {
+            _ = await versionRepository.FindAsync(NoId, ct).ConfigureAwait(false);
+        }
+
+        if (sp.GetService<IUnitStore>() is { } unitStore)
+        {
+            _ = await unitStore.FindUnitByIdAsync(NoId, ct).ConfigureAwait(false);
+        }
+
+        if (sp.GetService<IPermitBindingStore>() is { } bindings)
+        {
+            _ = await bindings.GetAsync(NoId, NoCode, ct).ConfigureAwait(false);
+        }
+
+        if (sp.GetService<IPermitTypeStore>() is { } types)
+        {
+            _ = await types.FindByCodeAsync(NoCode, ct).ConfigureAwait(false);
+            _ = await types.ListTablesAsync(NoId, ct).ConfigureAwait(false);
+        }
+
+        if (sp.GetService<IRegistryStore>() is { } registries)
+        {
+            _ = await registries.FindDefinitionByIdAsync(NoId, ct).ConfigureAwait(false);
+            _ = await registries.ListEntriesAsync(NoId, ct).ConfigureAwait(false);
+            _ = await registries.ListValuesForEntriesAsync([NoId], ct).ConfigureAwait(false);
+            _ = await registries.FindEntryAsync(NoId, ct).ConfigureAwait(false);
+            _ = await registries.ListValuesAsync(NoId, ct).ConfigureAwait(false);
+        }
+
+        if (sp.GetService<IRegistrySnapshotLoader>() is { } snapshots)
+        {
+            _ = await snapshots.LoadSourceAsync([NoId], null, ct).ConfigureAwait(false);
+        }
+
+        if (sp.GetService<IDocumentStore>() is { } documents)
+        {
+            try
+            {
+                _ = await documents.GetTemplateVersionIdAsync(NoId, ct).ConfigureAwait(false);
+            }
+            catch (NotFoundException)
+            {
+                // Очікувано: документа немає, запит скомпільовано й виконано.
+            }
+        }
+
+        _ = await sp.GetRequiredService<IRowStore>().GetTableInstancesAsync(NoId, NoPeriod, ct).ConfigureAwait(false);
+
+        if (sp.GetService<ITemplateVersionStore>() is { } store)
+        {
+            try
+            {
+                _ = await store.GetWithStructureAsync(NoId, ct).ConfigureAwait(false);
+            }
+            catch (NotFoundException)
+            {
+                // Очікувано: версії немає, запит структури (split query) скомпільовано й виконано.
+            }
         }
     }
 

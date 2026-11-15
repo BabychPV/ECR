@@ -5,6 +5,7 @@ import { formatDateTime } from '@/shared/format/datetime';
 import { language, t } from '@/shared/i18n';
 import type { UnmatchedRows } from './useUnmatchedRows';
 import {
+  groupRowCount,
   groupUnmatchedRows,
   unmatchedRowCount,
   type UnmatchedRowRef,
@@ -69,8 +70,9 @@ interface UnmatchedRowsBannerProps {
  * «Частину рядків не взято в розрахунок» над сіткою (D14 + AN-69; UAT 08.11 b1–b4).
  *
  * ⛔ Це ІНФОРМАЦІЯ, а не помилка: тон `info` макета (`Alert color="brand" variant="light"`); підказка каже, чому рядки
- * не рахуються і що зробити, ЯКЩО рядок треба рахувати (свіжий погляд 08.11: без «нічого виправляти» поруч із дією). Рядки, відсіяні статусом «не Running» (D-425), сюди не
- * потрапляють — сервер пише лише ті, яким не підійшло жодне правило методології (`CalculationOrchestrator.UnmatchedRowsOf`).
+ * не рахуються і що зробити, ЯКЩО рядок треба рахувати (свіжий погляд 08.11: без «нічого виправляти» поруч із дією). Рядки, відсіяні статусом «не Running» (D-425), як
+ * «без правила» не потрапляють; ✎ B66 — лише ОДНИМ підсумком на таблицю (`RowInactive`, кількість без посилань), а помилки
+ * кроків методики — групою `StepError` (рядок · крок · код).
  *
  * ⚠ Групи — таблиця з аркушем і кількістю («Utility · 9.01 Unit 400 — rows: 2»), кожен рядок — кнопка-посилання,
  * що відкриває його в сітці. Згортання пам'ятається (`localStorage` під `try/catch`), кількість видно і згорнутим.
@@ -106,7 +108,7 @@ export function UnmatchedRowsBanner({
 
   const body = (
     <>
-      {groups.some((group) => !group.rejected) && (
+      {groups.some((group) => !group.rejected && !group.stepError && !group.inactive) && (
         <Text size="sm" mt="xs" data-testid="document-unmatched-rows-hint">
           {t(narrow ? 'document.unmatchedRows.hintNarrow' : 'document.unmatchedRows.hint')}
         </Text>
@@ -119,6 +121,16 @@ export function UnmatchedRowsBanner({
       {groups.some((group) => group.missingInputs) && (
         <Text size="sm" mt="xs" data-testid="document-missing-input-rows-hint">
           {t('document.missingInputRows.hint')}
+        </Text>
+      )}
+      {groups.some((group) => group.stepError) && (
+        <Text size="sm" mt="xs" data-testid="document-step-error-rows-hint">
+          {t('document.stepErrorRows.hint')}
+        </Text>
+      )}
+      {groups.some((group) => group.inactive) && (
+        <Text size="sm" mt="xs" data-testid="document-inactive-rows-hint">
+          {t('document.inactiveRows.hint')}
         </Text>
       )}
       <Stack
@@ -135,11 +147,7 @@ export function UnmatchedRowsBanner({
           return (
             <div role="listitem" key={group.key} data-testid="document-unmatched-rows-group">
               <Text size="sm" span fw={500}>
-                {group.missingInputs
-                  ? t('document.missingInputRows.group', { table, rows: plural('document.unmatchedRows.rows', group.rows.length) })
-                  : group.rejected
-                    ? t('document.rejectedRows.group', { table, rows: plural('document.unmatchedRows.rows', group.rows.length) })
-                    : t('document.unmatchedRows.group', { table, rows: plural('document.unmatchedRows.rows', group.rows.length) })}
+                {groupTitle(group.inactive, group.stepError, group.missingInputs, group.rejected, table, groupRowCount(group))}
               </Text>
               {group.hint === null && group.methodologyCode !== null && (
                 <Text size="xs" span>
@@ -147,50 +155,59 @@ export function UnmatchedRowsBanner({
                 </Text>
               )}
               {group.hint !== null && <AllowedValues hint={group.hint} />}
-              <Group gap="xs" wrap="wrap">
-                {shown.map((row, index) => {
-                  const label = rowLabel(row, group.rejected);
-                  const tableInstanceId = group.tableInstanceId;
-                  // ✎ Свіжий погляд 08.11: посилання розділені видимою « · », інакше «Row 2: «Coal» Row 3: «Oil»» читається однією фразою.
-                  const separator =
-                    index > 0 ? (
-                      <Text span size="sm" aria-hidden="true">
-                        ·
-                      </Text>
-                    ) : null;
+              {/* B66: підсумок неактивних — лише кількість, без поштучних посилань (виключення за задумом). */}
+              {!group.inactive && (
+                <Group gap="xs" wrap="wrap">
+                  {shown.map((row, index) => {
+                    const label = rowLabel(row, group.rejected);
+                    const tableInstanceId = group.tableInstanceId;
+                    // ✎ Свіжий погляд 08.11: посилання розділені видимою « · », інакше «Row 2: «Coal» Row 3: «Oil»» читається однією фразою.
+                    const separator =
+                      index > 0 ? (
+                        <Text span size="sm" aria-hidden="true">
+                          ·
+                        </Text>
+                      ) : null;
 
-                  return tableInstanceId === null ? (
-                    <Fragment key={row.rowKey}>
+                    return tableInstanceId === null ? (
+                      <Fragment key={row.rowKey}>
+                        {separator}
+                        <Text size="sm" span>
+                          {label}
+                        </Text>
+                      </Fragment>
+                    ) : (
+                      <Fragment key={row.rowKey}>
                       {separator}
-                      <Text size="sm" span>
+                      <Anchor
+                        component="button"
+                        type="button"
+                        size="sm"
+                        data-testid={
+                          group.stepError
+                            ? 'document-step-error-row-link'
+                            : group.rejected
+                              ? 'document-rejected-row-link'
+                              : 'document-unmatched-row-link'
+                        }
+                        data-row-key={row.rowKey}
+                        aria-label={`${table} · ${label}`}
+                        onClick={() =>
+                          onOpenRow(tableInstanceId, row.rowKey, row.missingColumns.find((c) => c.column)?.code ?? null)
+                        }
+                      >
                         {label}
-                      </Text>
-                    </Fragment>
-                  ) : (
-                    <Fragment key={row.rowKey}>
-                    {separator}
-                    <Anchor
-                      component="button"
-                      type="button"
-                      size="sm"
-                      data-testid={group.rejected ? 'document-rejected-row-link' : 'document-unmatched-row-link'}
-                      data-row-key={row.rowKey}
-                      aria-label={`${table} · ${label}`}
-                      onClick={() =>
-                        onOpenRow(tableInstanceId, row.rowKey, row.missingColumns.find((c) => c.column)?.code ?? null)
-                      }
-                    >
-                      {label}
-                    </Anchor>
-                    </Fragment>
-                  );
-                })}
-                {more > 0 && (
-                  <Text size="sm" span>
-                    {t('document.unmatchedRows.more', { count: String(more) })}
-                  </Text>
-                )}
-              </Group>
+                      </Anchor>
+                      </Fragment>
+                    );
+                  })}
+                  {more > 0 && (
+                    <Text size="sm" span>
+                      {t('document.unmatchedRows.more', { count: String(more) })}
+                    </Text>
+                  )}
+                </Group>
+              )}
             </div>
           );
         })}
@@ -288,11 +305,36 @@ export function plural(key: 'document.unmatchedRows.rows' | 'document.unmatchedR
   return t('document.unmatchedRows.tables.other', params);
 }
 
+/** Заголовок групи за видом: неактивні (B66), помилка кроку (B66), без входів, відхилені, без правила. */
+function groupTitle(
+  inactive: boolean,
+  stepError: boolean,
+  missingInputs: boolean,
+  rejected: boolean,
+  table: string,
+  count: number,
+): string {
+  const rows = plural('document.unmatchedRows.rows', count);
+  if (inactive) return t('document.inactiveRows.group', { table, rows });
+  if (stepError) return t('document.stepErrorRows.group', { table, rows });
+  if (missingInputs) return t('document.missingInputRows.group', { table, rows });
+  if (rejected) return t('document.rejectedRows.group', { table, rows });
+
+  return t('document.unmatchedRows.group', { table, rows });
+}
+
 /**
  * Підпис рядка: номер і (з підказкою) поточне значення в колонках правил — «Row 2: «Sample A-0»».
  * ✎ 10.11: відхилений правилом категорії — правило й колонки, які треба заповнити: «Row 1 · rule R_C05_01_01: fill …».
  */
 function rowLabel(row: UnmatchedRowRef, rejected: boolean): string {
+  // B66: помилка кроку — «Row 4 · step «Total»: #VALUE» (+ скільки ще кроків рядка впало).
+  if (row.stepError !== null) {
+    const params = { row: String(row.rowNumber), step: row.stepError.step, error: row.stepError.error };
+    return row.stepError.failedSteps > 1
+      ? t('document.stepErrorRows.rowMore', { ...params, more: String(row.stepError.failedSteps - 1) })
+      : t('document.stepErrorRows.row', params);
+  }
   if (rejected) {
     const rule = row.ruleCode ?? t('document.rejectedRows.ruleUnknown');
     if (row.missingColumns.length === 0) return t('document.rejectedRows.row', { row: String(row.rowNumber), rule });

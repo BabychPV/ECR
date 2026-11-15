@@ -96,9 +96,90 @@ public sealed class MissingInputsRowIssueTests
         Assert.Empty(profile.MissingInputRows);
     }
 
-    private static async Task<ModuleProfile> RunAsync(string expression, decimal?[] qtyByRow)
+    /// <summary>
+    /// B66 (doc 96: 64 <c>#VALUE</c> і 0 проблем): крок методики, що впав з помилкою, лишає ОДНУ проблему на рядок — перший
+    /// крок і код; повтор того самого коду (формула й однойменний вихід) кількість кроків не множить.
+    /// </summary>
+    /// <remarks>
+    /// Мутація: прибрати гілку <c>output.StepError</c> у <c>CalculationOrchestrator.ExecuteAsync</c> (або <c>StepError</c> у
+    /// <c>GenericCalculationModule.ExecuteAsync</c>) — тест червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Помилка_кроку_дає_одну_проблему_StepError_на_рядок()
     {
-        using var provider = Arrange(expression, qtyByRow);
+        var profile = await RunAsync("@Qty / \"abc\"", [5m, 7m]);
+
+        Assert.Equal(2, profile.StepErrorRows.Count);
+        var first = profile.StepErrorRows[0];
+        Assert.Equal(new RejectedRow(TableInstance, 1, "R000", DocumentId, Methodology), first.Row);
+        Assert.Equal("Total", first.StepCode);
+        Assert.StartsWith("#", first.ErrorCode, StringComparison.Ordinal);
+        Assert.NotEqual(TraceRecorder.NoValueError, first.ErrorCode);
+        Assert.Equal(1, first.FailedSteps);
+        Assert.Empty(profile.MissingInputRows);
+    }
+
+    /// <summary>
+    /// B66: рядок без входів (<c>MissingInputs</c>) другої проблеми StepError не отримує — його <c>#ARG</c> лише наслідок
+    /// відсутніх входів, дія та сама. Мутація: прибрати <c>else</c> перед гілкою StepError — тест червоний.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Рядок_без_входів_не_дублюється_проблемою_StepError()
+    {
+        var profile = await RunAsync("@Qty * 2", [null, 3m]);
+
+        Assert.Single(profile.MissingInputRows);
+        Assert.Empty(profile.StepErrorRows);
+    }
+
+    /// <summary>
+    /// B66 (F13 координатора 15.11): рядок із ПОВНИМ результатом і помилкою у формулі, яка до виходу не доходить
+    /// (невикористана формула, як не імпортована формула бібліотеки чи гілка IF), проблеми StepError НЕ отримує — мета
+    /// B66 назвати причину нуля/неповного результату, а не будь-який невдалий крок.
+    /// </summary>
+    /// <remarks>
+    /// Мутація: рахувати StepError у <c>TraceRecorder.Failed</c> (будь-який невдалий крок), а не лише у
+    /// <c>OutputFailed</c> — тест червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Помилка_у_невикористаній_формулі_при_повному_результаті_StepError_не_дає()
+    {
+        var profile = await RunAsync("@Qty * 2", [5m, 7m], unused: "@Qty / \"abc\"");
+
+        Assert.Equal(2, profile.Stats.Single().Rows);
+        Assert.Empty(profile.StepErrorRows);
+        Assert.Empty(profile.MissingInputRows);
+    }
+
+    /// <summary>
+    /// B66: вихід без результату рахується і на <c>TraceLevel.Off</c> (трейс порожній), <c>#NULL</c> помилкою не є, повтор
+    /// коду виходу (речовини) не множить кількість, а невдалий крок формули без виходу не рахується зовсім.
+    /// Мутації: облік у <c>OutputFailed</c> лише за <c>RecordsFailures</c> — червоніє; облік у <c>Failed</c> — червоніє
+    /// (FirstFailure стає «Rate»).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public void Облік_виходів_без_результату_не_залежить_від_рівня_трейсу()
+    {
+        var trace = new TraceRecorder(TraceLevel.Off);
+
+        trace.Failed("Rate", "y", "#DIV/0");
+        trace.OutputFailed("Out", TraceRecorder.NoValueError);
+        trace.OutputFailed("Total", "#VALUE");
+        trace.OutputFailed("Total", "#VALUE");
+        trace.OutputFailed("Tons", "#ARG");
+
+        Assert.Empty(trace.Steps);
+        Assert.Equal(("Total", "#VALUE"), trace.FirstFailure);
+        Assert.Equal(2, trace.FailedStepCount);
+    }
+
+    private static async Task<ModuleProfile> RunAsync(string expression, decimal?[] qtyByRow, string? unused = null)
+    {
+        using var provider = Arrange(expression, qtyByRow, unused);
         var orchestrator = new CalculationOrchestrator(
             provider.GetRequiredService<MethodologyResolver>(),
             provider.GetRequiredService<IPeriodStore>(),
@@ -113,7 +194,7 @@ public sealed class MissingInputsRowIssueTests
             CancellationToken.None);
     }
 
-    private static ServiceProvider Arrange(string expression, decimal?[] qtyByRow)
+    private static ServiceProvider Arrange(string expression, decimal?[] qtyByRow, string? unused = null)
     {
         var store = Substitute.For<IMethodologyStore>();
         var periods = Substitute.For<IPeriodStore>();
@@ -125,7 +206,16 @@ public sealed class MissingInputsRowIssueTests
              .Returns([PublishedVersion(Methodology, Version)]);
         store.GetRulesAsync(Version, Arg.Any<CancellationToken>())
              .Returns([new MethodologyRule(Version, EcrCode.Create("RULE"), $$"""{"{{FuelColumn}}":"Gas"}""", priority: 10)]);
-        store.GetFormulasAsync(Version, Arg.Any<CancellationToken>()).Returns([formula]);
+        // B66: формула, яка до виходу не доходить (виходом є лише Total).
+        MethodologyFormula[] formulas = [formula];
+        if (unused is not null)
+        {
+            var extra = new MethodologyFormula(Version, EcrCode.Create("Unused"), unused);
+            extra.SetEvaluationOrder(2);
+            formulas = [formula, extra];
+        }
+
+        store.GetFormulasAsync(Version, Arg.Any<CancellationToken>()).Returns(formulas);
         store.GetSubstancesAsync(Version, Arg.Any<CancellationToken>()).Returns([]);
         store.GetOutputsAsync(Version, Arg.Any<CancellationToken>())
              .Returns([new MethodologyOutput(Version, EcrCode.Create("Total"), unitId: 1)]);

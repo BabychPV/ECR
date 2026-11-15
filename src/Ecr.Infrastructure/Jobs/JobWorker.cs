@@ -226,9 +226,10 @@ public sealed partial class JobWorker(
     /// <param name="slots">Місця цього циклу.</param>
     /// <param name="primary">
     /// Основний цикл: лише він закриває прострочене (<see cref="ExpireAsync"/>) і чекає сигналу постановки.
-    /// Резервний цикл опитує свої лейни за <see cref="JobWorkerOptions.PollInterval"/> і сигналу не бере:
-    /// сигнал будить ОДНОГО (<see cref="JobQueueSignal"/>), і резервний цикл, «з'ївши» його заради чужого лейна,
-    /// відклав би звичайну задачу основного циклу до наступного опитування.
+    /// Резервний/окремий цикл спільного сигналу не бере: той будить ОДНОГО (<see cref="JobQueueSignal"/>), і такий
+    /// цикл, «з'ївши» його заради чужого лейна, відклав би звичайну задачу основного циклу до наступного опитування.
+    /// ✎ B85: натомість він має власну підписку на свої лейни (<c>JobQueueSignal.Subscribe</c>) і прокидається на
+    /// постановку в них; <see cref="JobWorkerOptions.PollInterval"/> лишається запасним опитуванням.
     /// </param>
     /// <param name="rotateLanes">Чергувати порядок лейнів на кожному claim (<see cref="Rotate"/>, J1-04).</param>
     /// <param name="stopping">Зупинка хоста.</param>
@@ -244,6 +245,9 @@ public sealed partial class JobWorker(
         var turn = 0;
         var queueUnusableReported = false;
 
+        // B85: окремий/резервний цикл чекає ВЛАСНОЇ підписки на свої лейни, а не спить PollInterval наосліп.
+        using var wake = primary ? null : signal.Subscribe(lanes);
+
         while (!stopping.IsCancellationRequested)
         {
             if (primary && (lastExpire == 0 || Stopwatch.GetElapsedTime(lastExpire) >= options.ExpireInterval))
@@ -256,11 +260,13 @@ public sealed partial class JobWorker(
 
             ClaimedJob? job = null;
             TimeSpan? backoff = null;
+            var claimStarted = 0L;
 
             try
             {
                 var claimLanes = rotateLanes ? Rotate(lanes, turn) : lanes;
                 turn = (turn + 1) % Math.Max(1, lanes.Length);
+                claimStarted = Stopwatch.GetTimestamp();
                 job = await ClaimAsync(owner, claimLanes).ConfigureAwait(false);
                 queueUnusableReported = false;
             }
@@ -302,14 +308,15 @@ public sealed partial class JobWorker(
                 }
                 else
                 {
-                    await Task.Delay(options.PollInterval, stopping).ConfigureAwait(false);
+                    await wake!.WaitAsync(options.PollInterval, stopping).ConfigureAwait(false);
                 }
 
                 continue;
             }
 
             Prune();
-            running[job.Claim.Token] = RunAsync(job, slots, stopping);
+            var phases = new JobPhaseClock { ClaimStarted = claimStarted, Claimed = Stopwatch.GetTimestamp() };
+            running[job.Claim.Token] = RunAsync(job, phases, slots, stopping);
         }
     }
 
@@ -410,12 +417,12 @@ public sealed partial class JobWorker(
         }
     }
 
-    private async Task RunAsync(ClaimedJob job, SemaphoreSlim slots, CancellationToken stopping)
+    private async Task RunAsync(ClaimedJob job, JobPhaseClock phases, SemaphoreSlim slots, CancellationToken stopping)
     {
         try
         {
             // Свій потік: задача не займає цикл захоплення навіть до першого await.
-            await Task.Run(() => ExecuteClaimedAsync(job, stopping), CancellationToken.None).ConfigureAwait(false);
+            await Task.Run(() => ExecuteClaimedAsync(job, phases, stopping), CancellationToken.None).ConfigureAwait(false);
         }
 #pragma warning disable CA1031 // Збій одного виконання не зупиняє воркер; причина — у журналі.
         catch (Exception ex)
@@ -425,12 +432,59 @@ public sealed partial class JobWorker(
         }
         finally
         {
+            LogPhases(job, phases);
             slots.Release();
         }
     }
 
-    private async Task ExecuteClaimedAsync(ClaimedJob job, CancellationToken stopping)
+    /// <summary>
+    /// B85: один рядок Debug на задачу з часом фаз поза тілом — черга (AvailableAt → claim, годинник СУБД),
+    /// claim, передача в потік, підготовка (scope, резолв, оренда), тіло, зупинка подовження + фіксація, разом
+    /// (від початку claim до кінця фіксації). Фаза, до якої задача не дійшла, — 0.
+    /// </summary>
+    private void LogPhases(ClaimedJob job, JobPhaseClock phases)
     {
+        if (!logger.IsEnabled(LogLevel.Debug))
+        {
+            return;
+        }
+
+        var ended = Stopwatch.GetTimestamp();
+        var bodyStarted = phases.BodyStarted == 0 ? ended : phases.BodyStarted;
+        var bodyEnded = phases.BodyEnded == 0 ? bodyStarted : phases.BodyEnded;
+        var started = phases.Started == 0 ? bodyStarted : phases.Started;
+        var claimMs = Ms(phases.ClaimStarted, phases.Claimed);
+        var dispatchMs = Ms(phases.Claimed, started);
+        var setupMs = Ms(started, bodyStarted);
+        var bodyMs = Ms(bodyStarted, bodyEnded);
+        var settleMs = Ms(bodyEnded, ended);
+        var totalMs = Ms(phases.ClaimStarted, ended);
+        var queueWaitMs = job.QueueWaitMs ?? -1;
+
+        LogJobPhases(
+            logger, job.Claim.JobId, job.JobCode, job.Lane, queueWaitMs, claimMs, dispatchMs, setupMs, bodyMs, settleMs,
+            totalMs);
+
+        static long Ms(long from, long to) => to <= from ? 0 : (long)Stopwatch.GetElapsedTime(from, to).TotalMilliseconds;
+    }
+
+    /// <summary>B85: мітки <see cref="Stopwatch.GetTimestamp"/> фаз однієї задачі; 0 — фази не було.</summary>
+    private sealed class JobPhaseClock
+    {
+        public long ClaimStarted { get; init; }
+
+        public long Claimed { get; init; }
+
+        public long Started { get; set; }
+
+        public long BodyStarted { get; set; }
+
+        public long BodyEnded { get; set; }
+    }
+
+    private async Task ExecuteClaimedAsync(ClaimedJob job, JobPhaseClock phases, CancellationToken stopping)
+    {
+        phases.Started = Stopwatch.GetTimestamp();
         var claim = job.Claim;
         var correlationId = job.CorrelationId is { Length: > 0 } id ? id : Guid.NewGuid().ToString("N");
 
@@ -521,6 +575,7 @@ public sealed partial class JobWorker(
         JobDeferredException? deferred = null;
         var cancelled = false;
         var runStarted = Stopwatch.GetTimestamp();
+        phases.BodyStarted = runStarted;
 
         try
         {
@@ -550,6 +605,8 @@ public sealed partial class JobWorker(
         }
         finally
         {
+            phases.BodyEnded = Stopwatch.GetTimestamp();
+
             // ⛔ Сторож зависання — лише на час ExecuteAsync. Спрацювання під час фіксації
             // результату нижче кинуло б оренду й (дочірній) завершило процес посеред
             // запису: задачу виконали б удруге. Dispose реєстрації дочікується колбеку,
@@ -863,6 +920,13 @@ public sealed partial class JobWorker(
         /// </summary>
         public bool Abandoned { get => abandoned; set => abandoned = value; }
     }
+
+    [LoggerMessage(
+        Level = LogLevel.Debug,
+        Message = "B85: задача {JobId} ({JobCode}, лейн {Lane}) — черга {QueueWaitMs} мс, claim {ClaimMs} мс, передача {DispatchMs} мс, підготовка {SetupMs} мс, тіло {BodyMs} мс, оренда+фіксація {SettleMs} мс, разом {TotalMs} мс.")]
+    private static partial void LogJobPhases(
+        ILogger logger, string jobId, string jobCode, string lane, long queueWaitMs, long claimMs, long dispatchMs,
+        long setupMs, long bodyMs, long settleMs, long totalMs);
 
     [LoggerMessage(
         Level = LogLevel.Critical,

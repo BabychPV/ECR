@@ -593,6 +593,10 @@ public sealed class CalculationIssueConfiguration : IEntityTypeConfiguration<Cal
         builder.Property(x => x.Kind).HasMaxLength(32).IsRequired();
         builder.Property(x => x.DetectedAt).HasColumnType("datetime2(3)").IsRequired();
 
+        // B66: деталі StepError (перший невдалий крок і код) і кількість (кроки рядка / відсіяні рядки RowInactive).
+        builder.Property(x => x.StepCode).HasMaxLength(CalculationIssue.MaxStepCodeLength);
+        builder.Property(x => x.ErrorCode).HasMaxLength(CalculationIssue.MaxErrorCodeLength);
+
         // Читання аркуша й заміна проходу йдуть за однією адресою: документ × період × таблиця × копія.
         builder.HasIndex(x => new { x.DocumentId, x.PeriodKey, x.TableDefId, x.SheetCopyId })
                .HasDatabaseName("IX_CalculationIssue_Address");

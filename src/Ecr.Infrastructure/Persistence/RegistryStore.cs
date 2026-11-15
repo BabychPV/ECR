@@ -985,9 +985,14 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
             .Select(v => v.DocumentId);
 
         // ⛔ C-13: пізніший дозвіл з історії рядка/шапки (j) — теж використання документом, хоч у комірці його немає.
-        var fromPermitHistory = db.PermitSegments.AsNoTracking()
+        // ⛔ B56: лише живі цілі (видалений логічно рядок — не використання, як у комірках) і частини поділених місяців теж —
+        // те саме правило, що в картці дозволу (PermitHistoryUsage). Періоду тут немає — ValidFrom не звужує.
+        var fromPermitHistory = PermitHistoryUsage.LiveSegments(db)
             .Where(s => s.RegistryEntryId == registryEntryId)
-            .Select(s => s.DocumentId);
+            .Select(s => s.DocumentId)
+            .Union(PermitHistoryUsage.LiveParts(db)
+                .Where(p => p.RegistryEntryId == registryEntryId)
+                .Select(p => p.DocumentId));
 
         // ⛔ Множина Id — ОКРЕМИМ запитом, без з'єднання з Document. Щойно Document (93 рядки на Land) стоїть у
         // тому ж запиті, оптимізатор робить його зовнішнім і проштовхує з'єднання в обидві гілки UNION — знову

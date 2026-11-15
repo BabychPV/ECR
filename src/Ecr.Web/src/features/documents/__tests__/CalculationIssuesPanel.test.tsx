@@ -240,6 +240,29 @@ describe('CalculationIssuesPanel (B78)', () => {
     expect(screen.getAllByTestId('document-calc-issue-title')[1]!.textContent).toContain('grid.calcError.cause.divideByZero');
   });
 
+  // B66: помилка кроку методики і неактивні рядки — свої причини панелі; неактивні рахуються кількістю підсумку, а не
+  // кількістю записів. Мутація: `cause.count += group.rows.length` замість `groupRowCount` — червоніє лічильник 40.
+  it('B66: помилка кроку і неактивні рядки — окремі причини з кількістю рядків, неактивні останніми', () => {
+    show(
+      rowsOf({
+        issues: [
+          issue(1, 2, { kind: 'RowInactive', affectedCount: 40 }),
+          issue(1, 3, { kind: 'StepError', stepCode: 'Total', errorCode: '#VALUE', affectedCount: 1 }),
+          issue(1, 4, { kind: 'StepError', stepCode: 'Total', errorCode: '#VALUE', affectedCount: 1 }),
+        ],
+      }),
+    );
+
+    const causes = screen.getAllByTestId('document-calc-issue');
+    expect(causes.map((c) => [c.getAttribute('data-kind'), c.getAttribute('data-count')])).toEqual([
+      ['stepError', '2'],
+      ['inactive', '40'],
+    ]);
+    const titles = screen.getAllByTestId('document-calc-issue-title').map((t) => t.textContent ?? '');
+    expect(titles[0]).toContain('document.calcIssues.stepError.title');
+    expect(titles[1]).toContain('document.calcIssues.inactive.title');
+  });
+
   it('проблем немає — панелі немає', () => {
     show(rowsOf({}));
 

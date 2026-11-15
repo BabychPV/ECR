@@ -20,6 +20,13 @@ namespace Ecr.Application.Ports;
 public interface ICalculationResultStore
 {
     /// <summary>
+    /// B85 (хвіст B13): понад стільки результатів за один виклик <see cref="WriteResultsAsync"/> реалізація пише їх
+    /// <c>SqlBulkCopy</c> у транзакції викликача; до межі — звичайний <c>SaveChanges</c>. Записувач відкриває
+    /// транзакцію для такого чанка сам, щоб результати й трейс лягали атомарно, як одним <c>SaveChanges</c>.
+    /// </summary>
+    public const int BulkWriteThreshold = 300;
+
+    /// <summary>
     /// Пише результати пакетно (<c>SqlBulkCopy</c>). <c>SaveChanges</c> у циклі
     /// заборонений: бюджет річного перерахунку — 10 хвилин (ПРД-13).
     /// </summary>

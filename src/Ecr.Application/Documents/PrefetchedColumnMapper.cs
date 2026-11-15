@@ -81,11 +81,11 @@ internal sealed class PrefetchedColumnMapper : IColumnPathMapper
 
     /// <inheritdoc />
     public Task<IReadOnlyDictionary<int, IReadOnlyList<int>>> LineageAsync(
-        IReadOnlyCollection<int> columnIds, CancellationToken ct)
-        => _inner.LineageAsync(columnIds, ct);
+        IReadOnlyCollection<int> columnIds, long? documentId, CancellationToken ct)
+        => _inner.LineageAsync(columnIds, documentId, ct);
 
     /// <inheritdoc />
     public Task<IReadOnlyDictionary<int, IReadOnlyList<int>>> TableLineageAsync(
-        IReadOnlyCollection<int> tableIds, CancellationToken ct)
-        => _inner.TableLineageAsync(tableIds, ct);
+        IReadOnlyCollection<int> tableIds, long? documentId, CancellationToken ct)
+        => _inner.TableLineageAsync(tableIds, documentId, ct);
 }

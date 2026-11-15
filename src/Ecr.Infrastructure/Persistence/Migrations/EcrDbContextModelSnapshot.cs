@@ -81,6 +81,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
 
+                    b.Property<int?>("AffectedCount")
+                        .HasColumnType("int");
+
                     b.Property<long>("CalculationRunId")
                         .HasColumnType("bigint");
 
@@ -89,6 +92,10 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     b.Property<long>("DocumentId")
                         .HasColumnType("bigint");
+
+                    b.Property<string>("ErrorCode")
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
 
                     b.Property<string>("Kind")
                         .IsRequired()
@@ -111,6 +118,10 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     b.Property<long?>("SheetCopyId")
                         .HasColumnType("bigint");
+
+                    b.Property<string>("StepCode")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
 
                     b.Property<int>("TableDefId")
                         .HasColumnType("int");
@@ -1211,6 +1222,11 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.Property<int>("ToColumnDefId")
                         .HasColumnType("int");
 
+                    b.Property<bool>("IsLegacyGlobal")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
+
                     b.HasKey("FromColumnDefId", "ToColumnDefId")
                         .HasName("PK_ColumnRename");
 
@@ -1218,6 +1234,23 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("IX_ColumnRename_To");
 
                     b.ToTable("ColumnRename", "cfg");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Configuration.ColumnRenameProject", b =>
+                {
+                    b.Property<int>("FromColumnDefId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ToColumnDefId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ProjectId")
+                        .HasColumnType("int");
+
+                    b.HasKey("FromColumnDefId", "ToColumnDefId", "ProjectId")
+                        .HasName("PK_ColumnRenameProject");
+
+                    b.ToTable("ColumnRenameProject", "cfg");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Configuration.ConditionalFormatRule", b =>

@@ -16,6 +16,12 @@ export const CategoryRuleRejectedKind = 'CategoryRuleRejected';
 /** Вид проблеми рядка, який правило закрило, але формулам бракує входів — жодного результату (AN-164). */
 export const MissingInputsKind = 'MissingInputs';
 
+/** B66: вихід методики рядка без результату через помилку (`#VALUE`, `#ARG`…) — одна проблема на рядок. */
+export const StepErrorKind = 'StepError';
+
+/** B66: рядки, відсіяні фільтром активності (D-425) — ОДИН підсумок на таблицю з кількістю (`affectedCount`). */
+export const RowInactiveKind = 'RowInactive';
+
 /** Колонка, яку треба заповнити, щоб рядок порахувався. */
 export interface MissingColumnRef {
   readonly code: string;
@@ -56,6 +62,8 @@ export interface UnmatchedRowRef {
   readonly ruleCode: string | null;
   /** ✎ 10.11: порожні колонки відхиленого рядка, які треба заповнити; порожньо — назвати нічого. */
   readonly missingColumns: readonly MissingColumnRef[];
+  /** B66: перший вихід без результату (`step` — код виходу), код помилки й кількість таких виходів (`StepError`). */
+  readonly stepError: { readonly step: string; readonly error: string; readonly failedSteps: number } | null;
 }
 
 /** Що приймають правила методологій таблиці (UAT 08.11 b3). */
@@ -91,6 +99,15 @@ export interface UnmatchedTableGroup {
   readonly rejected: boolean;
   /** AN-164: правило підійшло, але формулам бракує входів (`MissingInputs`); `rejected` теж `true`. */
   readonly missingInputs: boolean;
+  /** B66: рядки з помилкою кроку методики (`StepError`); рядок несе крок і код. */
+  readonly stepError: boolean;
+  /**
+   * B66: підсумок рядків, відсіяних фільтром активності (`RowInactive`): `rows` порожній (поштучно не показуємо — у Land
+   * це виключення за задумом), кількість — `inactiveCount`.
+   */
+  readonly inactive: boolean;
+  /** B66: скільки рядків таблиці відсіяно фільтром активності; 0 — не підсумок. */
+  readonly inactiveCount: number;
 }
 
 /**
@@ -123,6 +140,9 @@ export function groupUnmatchedRows(
       methodology: string | null;
       rejected: boolean;
       missingInputs: boolean;
+      stepError: boolean;
+      inactive: boolean;
+      inactiveCount: number;
       tableKey: string;
       rows: Map<string, UnmatchedRowRef>;
     }
@@ -133,7 +153,18 @@ export function groupUnmatchedRows(
     // AN-164: рядки без входів формул — своєю групою з тією ж формою рядка (правило й колонки, які треба заповнити).
     const missingInputs = issue.kind === MissingInputsKind;
     const rejected = missingInputs || issue.kind === CategoryRuleRejectedKind;
-    const key = missingInputs ? `${tableKey}!inputs` : rejected ? `${tableKey}!rejected` : tableKey;
+    // B66: помилки кроків і підсумок неактивних — своїми групами тієї ж таблиці (причина й дія інші).
+    const stepError = issue.kind === StepErrorKind;
+    const inactive = issue.kind === RowInactiveKind;
+    const key = inactive
+      ? `${tableKey}!inactive`
+      : stepError
+        ? `${tableKey}!steps`
+        : missingInputs
+          ? `${tableKey}!inputs`
+          : rejected
+            ? `${tableKey}!rejected`
+            : tableKey;
     let group = byKey.get(key);
     if (group === undefined) {
       group = {
@@ -142,12 +173,21 @@ export function groupUnmatchedRows(
         methodology: null,
         rejected,
         missingInputs,
+        stepError,
+        inactive,
+        inactiveCount: 0,
         tableKey,
         rows: new Map(),
       };
       byKey.set(key, group);
     }
     group.methodology ??= issue.methodologyCode ?? null;
+    if (inactive) {
+      // Підсумок таблиці: кількість із сервера. Рік (YearWithMonthColumns) — по підсумку на місяць для ТИХ САМИХ рядків
+      // річного аркуша: беремо найбільший (найгірший місяць), сума рахувала б той самий рядок по разу на місяць.
+      group.inactiveCount = Math.max(group.inactiveCount, issue.affectedCount ?? 1);
+      continue;
+    }
     if (!group.rows.has(issue.rowKey)) {
       group.rows.set(issue.rowKey, {
         rowKey: issue.rowKey,
@@ -155,6 +195,13 @@ export function groupUnmatchedRows(
         currentValues: rejected ? null : (issue.currentValues ?? null),
         ruleCode: rejected ? (issue.ruleCode ?? null) : null,
         missingColumns: rejected ? missingColumnsOf(issue.columns) : [],
+        stepError: stepError
+          ? {
+              step: issue.stepCode ?? '?',
+              error: issue.errorCode ?? '?',
+              failedSteps: Math.max(1, issue.affectedCount ?? 1),
+            }
+          : null,
       });
     }
   }
@@ -172,7 +219,7 @@ export function groupUnmatchedRows(
       return sa - sb || ca - cb || ta - tb || keyA.localeCompare(keyB);
     })
     .map(([key, group]) => {
-      const hint = group.rejected ? undefined : hintOf.get(group.tableKey);
+      const hint = group.rejected || group.stepError || group.inactive ? undefined : hintOf.get(group.tableKey);
 
       return {
         key,
@@ -186,13 +233,21 @@ export function groupUnmatchedRows(
           .sort((a, b) => a.rowNumber - b.rowNumber),
         rejected: group.rejected,
         missingInputs: group.missingInputs,
+        stepError: group.stepError,
+        inactive: group.inactive,
+        inactiveCount: group.inactiveCount,
       };
     });
 }
 
+/** Скільки рядків у групі: поштучні рядки, а для підсумку неактивних (B66) — його кількість. */
+export function groupRowCount(group: UnmatchedTableGroup): number {
+  return group.inactive ? group.inactiveCount : group.rows.length;
+}
+
 /** Загальна кількість рядків у групах. */
 export function unmatchedRowCount(groups: readonly UnmatchedTableGroup[]): number {
-  return groups.reduce((sum, group) => sum + group.rows.length, 0);
+  return groups.reduce((sum, group) => sum + groupRowCount(group), 0);
 }
 
 function hintTextOf(hint: CalculationIssueTableHint): UnmatchedTableHint {
