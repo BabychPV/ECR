@@ -42,18 +42,21 @@ public sealed class SqlServerFixture : IAsyncLifetime
     private const string DatabaseNamePrefix = "EcrTest";
 
     /// <summary>
-    /// Таймаут команд сіду — той самий, що в застосунку.
+    /// Таймаут однієї команди побудови схеми (скрипти, міграції, сід), секунд.
     /// </summary>
     /// <remarks>
-    /// ⚠ Константи в застосунку немає: значення живе дефолтом
-    /// <c>ReadInt(configuration, "Database:CommandTimeoutSeconds", 60)</c> у
-    /// <c>src/Ecr.Infrastructure/DependencyInjection.cs</c> (і тим самим числом у
-    /// <c>appsettings.json</c>). <see cref="SeedRunner"/> бере таймаут із контексту;
-    /// без нього контекст фікстури віддавав <c>null</c>, і кожен батч сіду мав
-    /// дефолтні 30 с SqlClient — удвічі менше, ніж застосунок, тож під
-    /// навантаженням фікстура падала там, де старт застосунку пройшов би.
+    /// ⛔ <c>B133</c>. Побудова схеми — підготовка, а не предмет тесту: таймаут застосунку
+    /// (<c>Database:CommandTimeoutSeconds</c>, 60 с) їй не межа. Сід із 60 с упав під
+    /// навантаженням машини (system_health: CPU системи 84–87 %, SQL Server — 5–18 %):
+    /// батч, що зазвичай іде ≤ 1 с, не вклався в 60 с, фікстура колекції впала, і КОЖЕН тест
+    /// прогону (так «упав» <c>B131_PATCH_…</c>) отримав за 0 мс «Execution Timeout Expired» у
+    /// <c>SeedRunner.RunAsync</c>. Repro: батч сіду, заблокований на 75 с (замок на
+    /// <c>rpt.ReportDef</c>, який чіпає лише епілог сіду), — з 60 с червоне, з цим значенням
+    /// зелене. Значення — те саме, що вже мали скрипти (<c>01-filegroups</c> створює файли).
+    /// <see cref="SeedRunner"/> бере таймаут із контексту; без нього кожен батч мав би дефолтні
+    /// 30 с SqlClient, міграції EF — теж.
     /// </remarks>
-    private const int AppCommandTimeoutSeconds = 60;
+    private const int SetupCommandTimeoutSeconds = 300;
 
     /// <summary>
     /// Стеля одного файла тестової бази, МБ: один приріст файла (64 МБ) понад початкові 64 — нормальна робота,
@@ -552,6 +555,7 @@ public sealed class SqlServerFixture : IAsyncLifetime
 
         await using (var db = CreateContext())
         {
+            db.Database.SetCommandTimeout(SetupCommandTimeoutSeconds);
             await db.Database.MigrateAsync().ConfigureAwait(false);
         }
 
@@ -597,7 +601,7 @@ public sealed class SqlServerFixture : IAsyncLifetime
         await RunScriptAsync("06-rcsi.sql").ConfigureAwait(false);
 
         await using var seedDb = CreateContext();
-        seedDb.Database.SetCommandTimeout(AppCommandTimeoutSeconds);
+        seedDb.Database.SetCommandTimeout(SetupCommandTimeoutSeconds);
         await new SeedRunner(seedDb).RunAsync(CancellationToken.None).ConfigureAwait(false);
     }
 
@@ -655,7 +659,7 @@ public sealed class SqlServerFixture : IAsyncLifetime
     {
         await using var command = connection.CreateCommand();
         command.CommandText = sql;
-        command.CommandTimeout = 300;   // 01-filegroups створює файли, це не миттєво
+        command.CommandTimeout = SetupCommandTimeoutSeconds;   // 01-filegroups створює файли, це не миттєво
         await command.ExecuteNonQueryAsync().ConfigureAwait(false);
     }
 }
