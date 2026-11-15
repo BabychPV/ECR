@@ -45,9 +45,12 @@ export function cellItem(over: Partial<PermitUsageItem> = {}): PermitUsageItem {
   };
 }
 
-/** B128c: запис історії дозволів рядка 3 таблиці «Water use» — пізніший дозвіл з 10.06.2026 (сегмент: без періоду). */
+/**
+ * B128c: запис історії дозволів рядка 3 таблиці «Water use» — пізніший дозвіл з 10.06.2026 (сегмент: без періоду);
+ * B136: посилання — на період 202606 (`linkPeriodKey` сервера).
+ */
 export function historyItem(over: Partial<PermitUsageItem> = {}): PermitUsageItem {
-  return cellItem({ kind: 'history', periodKey: null, rowOrdinal: null, validFrom: '2026-06-10', ...over });
+  return cellItem({ kind: 'history', periodKey: null, rowOrdinal: null, validFrom: '2026-06-10', linkPeriodKey: 202606, ...over });
 }
 
 export function usage(items: readonly PermitUsageItem[], over: Partial<PermitUsage> = {}): PermitUsage {

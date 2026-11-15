@@ -17,13 +17,6 @@ import { localName } from '../permit/names';
  */
 export const UsageKind = { Header: 'header', Cell: 'cell', History: 'history' } as const;
 
-/** Місяць `YYYYMM` дати `validFrom` запису історії; без дати — `null`. */
-function validFromMonth(item: PermitUsageItem): number | null {
-  const match = item.validFrom === null || item.validFrom === undefined ? null : /^(\d{4})-(\d{2})-/.exec(item.validFrom);
-
-  return match === null ? null : Number(match[1]) * 100 + Number(match[2]);
-}
-
 /** Місце в рядку таблиці: комірка або запис історії рядка (не шапки). */
 function isRowPlace(item: PermitUsageItem): boolean {
   return item.kind === UsageKind.Cell || (item.kind === UsageKind.History && item.tableCode !== null);
@@ -49,8 +42,9 @@ export function usageKey(item: PermitUsageItem): string {
 /**
  * Адреса місця в документі. Шапка належить документу цілком - лише документ. Комірка - період, аркуш і таблиця
  * в адресі (`ФВ-14.29`: посилання без них відкриває інший період і інший аркуш, ніж той, про який ішлося).
- * B128c: сегмент історії рядка не має свого періоду — береться період фільтра вкладки, а без фільтра — місяць `validFrom`
- * (з якого дозвіл чинний).
+ * B128c: сегмент історії рядка не має свого періоду — береться період фільтра вкладки, а без фільтра — `linkPeriodKey`
+ * сервера (B136: найраніший період, де рядок живий, запис чинний і колонку видно цьому читачу). ⛔ НЕ місяць `validFrom`:
+ * читачеві з областю «від поточного періоду» він може бути недоступний. Без `linkPeriodKey` — період не задається.
  *
  * ⛔ Літерал, а не `generatePath`: `features` не імпортують `app` (`ClientLayerRulesTests`).
  */
@@ -59,7 +53,7 @@ export function usageHref(item: PermitUsageItem, filterPeriod: number | null = n
   if (!isRowPlace(item)) return base;
 
   const params = new URLSearchParams();
-  const period = item.periodKey ?? (item.kind === UsageKind.History ? (filterPeriod ?? validFromMonth(item)) : null);
+  const period = item.periodKey ?? (item.kind === UsageKind.History ? (filterPeriod ?? item.linkPeriodKey ?? null) : null);
   if (period !== null) params.set('periodKey', String(period));
   if (item.sheetCode !== null) params.set('sheet', item.sheetCode);
   if (item.tableCode !== null) params.set('table', item.tableCode);

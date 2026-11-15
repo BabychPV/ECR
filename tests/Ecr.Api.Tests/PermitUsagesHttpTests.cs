@@ -914,9 +914,23 @@ public sealed class PermitUsagesHttpTests(SqlServerFixture sql)
         await ReplaceAsync(PermitSegment.ForRow(
             s.Document.DocumentId, s.Document.TableDefId, null, liveKey, s.PermitColumnId, previousFrom, s.Unused, s.WriterId, DateTime.UtcNow));
         var shown = await GetAsync(restricted, app, $"/api/v1/permits/{s.Unused}/usages").ConfigureAwait(true);
-        Assert.Equal(liveKey, Assert.Single(shown.GetProperty("items").EnumerateArray()).GetProperty("rowKey").GetString());
+        var shownItem = Assert.Single(shown.GetProperty("items").EnumerateArray());
+        Assert.Equal(liveKey, shownItem.GetProperty("rowKey").GetString());
         var filtered = await GetAsync(restricted, app, $"/api/v1/permits/{s.Unused}/usages?periodKey={s.Period}").ConfigureAwait(true);
-        Assert.Equal(liveKey, Assert.Single(filtered.GetProperty("items").EnumerateArray()).GetProperty("rowKey").GetString());
+        var filteredItem = Assert.Single(filtered.GetProperty("items").EnumerateArray());
+        Assert.Equal(liveKey, filteredItem.GetProperty("rowKey").GetString());
+
+        // ⛔ B136: посилання запису — на період, який читач бачить. Обмеженому — поточний (місяць validFrom йому недоступний),
+        // і з фільтром — період фільтра. Писачеві без обмежень — найраніший, де рядок живий і сегмент чинний: попередній;
+        // з фільтром поточного — поточний. Мутації (виконано вручну, відновлено): не перевіряти видимість колонки при виборі
+        // періоду (Min з усіх періодів сховища) — обмеженому попередній замість поточного; Max замість Min — писачеві поточний
+        // замість попереднього; повернути ранній вихід без Items = kept — linkPeriodKey null.
+        Assert.Equal(s.Period, shownItem.GetProperty("linkPeriodKey").GetInt32());
+        Assert.Equal(s.Period, filteredItem.GetProperty("linkPeriodKey").GetInt32());
+        var writerShown = await GetAsync(writer, app, $"/api/v1/permits/{s.Unused}/usages").ConfigureAwait(true);
+        Assert.Equal(s.PreviousPeriod, Assert.Single(writerShown.GetProperty("items").EnumerateArray()).GetProperty("linkPeriodKey").GetInt32());
+        var writerFiltered = await GetAsync(writer, app, $"/api/v1/permits/{s.Unused}/usages?periodKey={s.Period}").ConfigureAwait(true);
+        Assert.Equal(s.Period, Assert.Single(writerFiltered.GetProperty("items").EnumerateArray()).GetProperty("linkPeriodKey").GetInt32());
 
         // (C) Заборона на таблицю: active — шапка + дві комірки + сегмент рядка. Сховано дві комірки й запис історії рядка.
         await ReplaceAsync(PermitSegment.ForRow(

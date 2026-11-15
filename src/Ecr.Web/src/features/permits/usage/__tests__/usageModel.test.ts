@@ -69,9 +69,12 @@ describe('usageModel', () => {
     expect(usageKey(historyItem({ validFrom: '2026-06-10' }))).not.toBe(usageKey(historyItem({ validFrom: '2026-06-20' })));
   });
 
-  it('сегмент історії рядка: період адреси — фільтра, без фільтра — місяць validFrom; шапка — лише документ', () => {
-    expect(usageHref(historyItem({ validFrom: '2026-05-10' }))).toBe('/documents/2?periodKey=202605&sheet=WATER&table=USE');
-    expect(usageHref(historyItem({ validFrom: '2026-05-10' }), 202606)).toBe('/documents/2?periodKey=202606&sheet=WATER&table=USE');
+  // B136. Мутації (виконано вручну, відновлено): повернути місяць `validFrom` замість `linkPeriodKey` — червоніють перший і
+  // третій; поставити `linkPeriodKey` перед фільтром — червоніє другий.
+  it('сегмент історії рядка: період адреси — фільтра, без фільтра — linkPeriodKey сервера, а не місяць validFrom; шапка — лише документ', () => {
+    expect(usageHref(historyItem({ validFrom: '2026-05-10', linkPeriodKey: 202606 }))).toBe('/documents/2?periodKey=202606&sheet=WATER&table=USE');
+    expect(usageHref(historyItem({ validFrom: '2026-05-10', linkPeriodKey: 202607 }), 202606)).toBe('/documents/2?periodKey=202606&sheet=WATER&table=USE');
+    expect(usageHref(historyItem({ validFrom: '2026-05-10', linkPeriodKey: null }))).toBe('/documents/2?sheet=WATER&table=USE');
     expect(usageHref(historyItem({ periodKey: 202607 }), 202606)).toBe('/documents/2?periodKey=202607&sheet=WATER&table=USE');
     expect(usageHref(historyItem({ tableCode: null, sheetCode: null }), 202606)).toBe('/documents/2');
   });

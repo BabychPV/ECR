@@ -93,6 +93,8 @@ public sealed class GetPermitUsagesHandler(
     /// називається. Запис історії поля шапки лишається, як шапка.
     /// ⚠ F13: НЕ місяць <c>ValidFrom</c> — він і пропускав запис рядка, живого лише в недоступному періоді, і ховав сегмент,
     /// чинний і в доступному.
+    /// ⛔ B136: запис історії рядка несе <see cref="PermitUsageItemDto.LinkPeriodKey"/> — найраніший з цих періодів, де колонку
+    /// видно цьому читачу (ті самі дані сторінки, без нових запитів).
     /// </summary>
     private async Task<PermitUsageDto> WithoutHiddenCellsAsync(
         Security.AccessProfile profile, PermitUsagePage page, CancellationToken ct)
@@ -120,10 +122,13 @@ public sealed class GetPermitUsagesHandler(
             }
 
             var periods = page.ItemPeriods[i] ?? [];
-            if (item.TableCode is { } table
-                && periods.Any(p => scope.CanReadColumnCodeIn(table, item.FieldCode, new PeriodKey(p))))
+            var readable = item.TableCode is { } table
+                ? periods.Where(p => scope.CanReadColumnCodeIn(table, item.FieldCode, new PeriodKey(p))).ToList()
+                : [];
+            if (readable.Count > 0)
             {
-                kept.Add(item);
+                // ⛔ B136: посилання запису історії рядка — на найраніший ВИДИМИЙ читачу період, а не місяць validFrom.
+                kept.Add(isRowHistory ? item with { LinkPeriodKey = readable.Min() } : item);
             }
             else if (isRowHistory)
             {
@@ -132,14 +137,13 @@ public sealed class GetPermitUsagesHandler(
         }
 
         var removed = usage.Items.Count - kept.Count;
-        return removed == 0
-            ? usage
-            : usage with
-            {
-                LinkCount = Math.Max(0, usage.LinkCount - (removed - removedHistory)),
-                HistoryLinkCount = Math.Max(0, usage.HistoryLinkCount - removedHistory),
-                Items = kept,
-            };
+        // ⚠ Items = kept завжди: навіть без схованих записи історії рядка отримали LinkPeriodKey (B136).
+        return usage with
+        {
+            LinkCount = Math.Max(0, usage.LinkCount - (removed - removedHistory)),
+            HistoryLinkCount = Math.Max(0, usage.HistoryLinkCount - removedHistory),
+            Items = kept,
+        };
     }
 
     private static BusinessRuleException Invalid(string messageKey, string message)

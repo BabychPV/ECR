@@ -38,6 +38,12 @@ public static class PermitUsageKinds
 /// Лише для <c>history</c>: з якого дня дозвіл чинний у цьому місці (сегмент — <c>ValidFrom</c>, частина місяця — її перший
 /// день); для <c>header</c>/<c>cell</c> — <c>null</c> (B128c).
 /// </param>
+/// <param name="LinkPeriodKey">
+/// Лише для <c>history</c> рядка (B136): період, який відкриває посилання на місце, — НАЙРАНІШИЙ з періодів, де рядок живий,
+/// запис чинний І колонку цьому читачу видно (частина місяця — її місяць; з фільтром — період фільтра). Найраніший — як
+/// попереднє посилання на місяць <c>validFrom</c>: «з якого місяця дозвіл тут стоїть», але без періоду, якого читач не бачить.
+/// Для шапки, комірки й історії поля шапки — <c>null</c>.
+/// </param>
 public sealed record PermitUsageItemDto(
     string Kind,
     long DocumentId,
@@ -53,7 +59,8 @@ public sealed record PermitUsageItemDto(
     int? RowOrdinal,
     string FieldCode,
     Dictionary<string, string> FieldLabelL10n,
-    DateOnly? ValidFrom = null);
+    DateOnly? ValidFrom = null,
+    int? LinkPeriodKey = null);
 
 /// <summary>
 /// «Де використано» дозвіл: документи, у яких він обраний значенням поля шапки чи колонки таблиці або стоїть в історії
