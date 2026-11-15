@@ -88,6 +88,12 @@ public static class DependencyInjection
 
         // D-474: розкладка версії (копія на місяць | рік із місяцями в колонках).
         services.AddScoped<SetTemplateLayoutHandler>();
+
+        // ✎ B75: режим погодження версії (з поданням | без нього) і блокування рядків документа.
+        services.AddScoped<SetTemplateWorkflowModeHandler>();
+        services.AddScoped<Documents.RowLocks.GetRowLocksHandler>();
+        services.AddScoped<Documents.RowLocks.CreateRowLocksHandler>();
+        services.AddScoped<Documents.RowLocks.ReleaseRowLockHandler>();
         services.AddScoped<MonthInputAliasesHandler>();
 
         // Другий вертикальний зріз — таблиця на аркуші (W5.1), той самий патерн.

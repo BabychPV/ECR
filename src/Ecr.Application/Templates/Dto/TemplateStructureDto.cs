@@ -47,6 +47,9 @@ public sealed record TemplateStructureDto(
     /// лише показ (значок у редакторі).
     /// </summary>
     public Ecr.Domain.Enums.TemplateLayout Layout { get; init; }
+
+    /// <summary>✎ B75: режим погодження версії; у чернетці змінюється <c>PUT …/workflow-mode</c>.</summary>
+    public Ecr.Domain.Enums.WorkflowMode WorkflowMode { get; init; }
 }
 
 /// <summary>Група заголовків колонок таблиці (плоский список; дерево — через <c>ParentId</c>).</summary>

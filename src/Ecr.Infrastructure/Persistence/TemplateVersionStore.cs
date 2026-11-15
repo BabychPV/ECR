@@ -131,6 +131,14 @@ public sealed partial class TemplateVersionStore(EcrDbContext db, IMetadataCache
              .AnyAsync(id => id == templateVersionId, ct);
 
     /// <inheritdoc />
+    public Task<bool> HasApprovalRouteStepsAsync(int templateVersionId, CancellationToken ct)
+        => db.ApprovalRoutes
+             .AsNoTracking()
+             .AnyAsync(r => r.TemplateVersionId == templateVersionId
+                            && r.IsActive
+                            && db.ApprovalSteps.Any(s => s.ApprovalRouteId == r.Id), ct);
+
+    /// <inheritdoc />
     /// <remarks>Той самий шлях через проєкт, що <see cref="HasDocumentsAsync"/>.</remarks>
     public Task<int> CountDocumentsAsync(int templateVersionId, CancellationToken ct)
         => db.Documents
@@ -929,6 +937,7 @@ public sealed partial class TemplateVersionStore(EcrDbContext db, IMetadataCache
                 v.Id, v.Version, v.Status, v.PresentationRevision, v.ClonedFromVersionId, v.PublishedAt)
             {
                 Layout = v.Layout,
+                WorkflowMode = v.WorkflowMode,
             })
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -975,6 +984,7 @@ public sealed partial class TemplateVersionStore(EcrDbContext db, IMetadataCache
                     v.Id, v.Version, v.Status, v.PresentationRevision, v.ClonedFromVersionId, v.PublishedAt)
                 {
                     Layout = v.Layout,
+                    WorkflowMode = v.WorkflowMode,
                 },
             })
             .ToListAsync(ct)
