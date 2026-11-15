@@ -403,6 +403,9 @@ public sealed partial class PatchCellsHandler
 
         // ✎ B131 (D-491): нові рядки екземпляра запиту й тіньові рядки власників — насіння й у колонках із придатним
         // дефолтом (дефолт входить в агрегати свого екземпляра). Таблиця без дефолтів — нічого не додається.
+        // ⛔ B132: УСІ колонки з дефолтом, а не лише ті, чий власник — екземпляр групи: змінився СКЛАД рядків екземпляра,
+        // а його зріз читає чужі колонки маршрутизовано (власника рядка немає — діє дефолт). Звуження до «своїх» колонок
+        // лишило б застарілим, напр., SUM(M9) листопада після тіньового рядка (CrossPeriodRoutedSqlTests.B132_…).
         var defaultColumns = Recalculation.ColumnDefaultValues.SeedColumns(context.Table);
         var ownNewSeeds = NewRowDefaultSeeds(changes.NewRowIds, defaultColumns, approverSheet).ToList();
 

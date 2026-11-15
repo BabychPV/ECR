@@ -704,7 +704,7 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
         Assert.Equal(10m, await OutputAsync(world, Period(ViewMonth)));
 
         var (jobs, payload) = CapturingJobs();
-        await PatchNewRowAsync(world, jobs, "B131NEW", new PatchCell("C1", "x"));
+        await PatchNewRowAsync(world, jobs, "B131NEW", routing: false, new PatchCell("C1", "x"));
         Assert.NotNull(payload());
 
         await RunJobWithStoreAsync(world, [], payload(), routing: true);
@@ -712,7 +712,8 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
     }
 
     /// <summary>PATCH нового рядка в екземпляр перегляду через справжній <c>PatchCellsHandler</c> (права — дозвіл).</summary>
-    private static async Task PatchNewRowAsync(World world, IBackgroundJobScheduler jobs, string rowKey, params PatchCell[] cells)
+    private static async Task PatchNewRowAsync(
+        World world, IBackgroundJobScheduler jobs, string rowKey, bool routing, params PatchCell[] cells)
     {
         const int userId = 1;
         var snapshot = await world.Metadata.GetAsync(world.Doc.TemplateVersionId, CancellationToken.None);
@@ -745,8 +746,10 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
 
         await using var db = world.Builder.CreateContext();
         var clock = new TestClock(Now);
+        // B132: з роутером Q-17 — комірки чужих власників ідуть в їхні екземпляри (тіньові рядки).
+        var router = new MonthColumnRouter(db, Config(routing));
         var handler = new PatchCellsHandler(
-            new NormalizedCellStore(db),
+            routing ? new MonthRoutedCellStore(new NormalizedCellStore(db), router, world.Metadata, db) : new NormalizedCellStore(db),
             new RowStore(db, new BulkCellLoader(db.Database.GetConnectionString()!, 1000), clock),
             new DocumentStore(db),
             new PeriodStore(db),
@@ -763,12 +766,85 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
             user,
             clock,
             new SheetEditGate(db),
-            new UnitCatalog(db));
+            new UnitCatalog(db),
+            monthRouter: routing ? router : null);
 
         await handler.HandleAsync(
             new PatchCellsRequest(
                 world.Doc.TableInstanceId, Period(ViewMonth), "UserEdit", [new PatchRow(rowKey, null, cells)]),
             CancellationToken.None);
+    }
+
+    /// <summary>
+    /// ⛔ B132 (B131, наскрізно): PATCH з перегляду жовтня створює рядок і пише M11 (власник — 202611); у листопаді рядка
+    /// немає — сховище створює ТІНЬОВИЙ рядок власника. Агрегат листопада <c>SUM(M9)</c> читає M9 маршрутизовано (власник —
+    /// 202609, там рядка немає), тож для тіньового рядка діє дефолт 3: 3 + 3 → 3 + 3 + 3. Справжній
+    /// <c>PatchCellsHandler</c> з роутером, payload задачі ЕКЗЕМПЛЯРА ВЛАСНИКА — у справжню <c>FormulaRecalculationJob</c>.
+    /// Мутація: у <c>RouteForeignOwnersAsync</c> не сіяти дефолти тіньових рядків (<c>shadowSeeds</c>) — насіння лише
+    /// (тіньовий, M11), формула M9 не ціль, листопад лишається 6 (червоне). Друга мутація — звузити насіння тіньового
+    /// рядка до колонок, власник яких — листопад (лише M11): так само червоне; тому звуження за власником не зроблено.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "Q-17")]
+    [Trait("Finding", "B132")]
+    public async Task B132_тіньовий_рядок_власника_з_дефолтом_перераховує_агрегат_періоду_власника()
+    {
+        var world = await ArrangeAsync(sum: true, m11Default: "3", sumMonth: 9);
+
+        await using (var db = world.Builder.CreateContext())
+        {
+            var router = new MonthColumnRouter(db, Config(true));
+            var service = Formulas(db, world, new MonthRoutedCellStore(new NormalizedCellStore(db), router, world.Metadata, db), router);
+            await service.RecalculateAllAsync(world.Doc.DocumentId, new PeriodKey(Period(OwnerMonth)), CancellationToken.None);
+        }
+
+        // Два рядки без M9 — дефолт у кожному.
+        Assert.Equal([6m], await OutputsAsync(world, Period(OwnerMonth)));
+
+        var payloads = new List<object?>();
+        var jobs = Substitute.For<IBackgroundJobScheduler>();
+        jobs.EnlistsInCallerTransaction.Returns(false);
+        jobs.EnqueueCoalescedAsync<IFormulaRecalculationJob>(
+                Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
+            .Returns(call =>
+            {
+                payloads.Add(call.ArgAt<object?>(1));
+                return "job";
+            });
+
+        await PatchNewRowAsync(
+            world, jobs, "B132NEW", routing: true, new PatchCell($"M{OwnerMonth}", 1m));
+
+        var owner = Assert.Single(
+            payloads,
+            p => (long)p!.GetType().GetProperty("TableInstanceId")!.GetValue(p)! == world.Others[OwnerMonth].TableInstanceId);
+        await RunJobWithStoreAsync(world, [], owner, routing: true);
+
+        // Тіньовий рядок увійшов у склад листопада: усі три живі рядки — 9.
+        Assert.Equal([9m], await OutputsAsync(world, Period(OwnerMonth)));
+    }
+
+    /// <summary>Різні значення OUT живих рядків документа за період.</summary>
+    private async Task<List<decimal?>> OutputsAsync(World world, int period)
+    {
+        var values = new List<decimal?>();
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            "SELECT DISTINCT cv.ValueNumeric FROM doc.TableRow r LEFT JOIN doc.CellValue cv " +
+            $"ON cv.PeriodKey = r.PeriodKey AND cv.TableRowId = r.Id AND cv.ColumnDefId = {world.Doc.ColumnDefIds[2]} " +
+            $"WHERE r.PeriodKey = {period} AND r.IsDeleted = 0 " +
+            $"AND r.TableInstanceId IN (SELECT Id FROM doc.TableInstance WHERE DocumentId = {world.Doc.DocumentId})";
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            values.Add(reader.IsDBNull(0) ? null : reader.GetDecimal(0));
+        }
+
+        return values;
     }
 
     // ── допоміжне ────────────────────────────────────────────────────────
@@ -891,7 +967,7 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
 
     private async Task<World> ArrangeAsync(
         bool absolute = false, bool offsets = false, bool fullYear = false, bool sum = false, string? m11Default = null,
-        TableLayoutKind layout = TableLayoutKind.MonthsInColumns, bool m11Computed = false)
+        TableLayoutKind layout = TableLayoutKind.MonthsInColumns, bool m11Computed = false, int sumMonth = OwnerMonth)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var doc = await builder.BuildAsync(
@@ -922,7 +998,9 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
             await setup.SaveChangesAsync();
         }
 
-        var world = new World(builder, doc, others, Metadata(doc, absolute, offsets, sum, m11Default, layout, m11Computed), absolute, offsets);
+        var world = new World(
+            builder, doc, others, Metadata(doc, absolute, offsets, sum, m11Default, layout, m11Computed, sumMonth), absolute,
+            offsets, sumMonth);
 
         // Застарілий вихід у кожному екземплярі; M11 власника порожнє (до першої правки).
         foreach (var month in allMonths)
@@ -1039,7 +1117,8 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
 
     private static ITemplateVersionStore Versions(World world)
     {
-        var m11 = world.Doc.MonthColumnDefIds[OwnerMonth - 1];
+        // B132: колонка формули — M{SumMonth} (за замовчуванням M11).
+        var m11 = world.Doc.MonthColumnDefIds[world.SumMonth - 1];
         var versions = Substitute.For<ITemplateVersionStore>();
 
         // Залежність-комірка зі зсувом null на M11 (звичайне посилання [M11]); для режимів зі зсувами —
@@ -1082,7 +1161,7 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
 
     private static IMetadataCache Metadata(
         TestDocument doc, bool absolute, bool offsets, bool sum = false, string? m11Default = null,
-        TableLayoutKind layout = TableLayoutKind.MonthsInColumns, bool m11Computed = false)
+        TableLayoutKind layout = TableLayoutKind.MonthsInColumns, bool m11Computed = false, int sumMonth = OwnerMonth)
     {
         var text = ColumnDefFor(doc, doc.ColumnDefIds[0], "C1", 1, CellDataType.String);
         var input = ColumnDefFor(doc, doc.ColumnDefIds[1], "IN", 2, CellDataType.Decimal);
@@ -1095,7 +1174,8 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
                 doc, doc.MonthColumnDefIds[m - 1], $"M{m}", 3 + m,
                 m == OwnerMonth && m11Computed ? CellDataType.Calculated : CellDataType.Decimal);
             column.SetMonth(true, (byte)m);
-            if (m == OwnerMonth && m11Default is not null)
+            // B132: дефолт — на колонці формули M{sumMonth} (за замовчуванням M11).
+            if (m == sumMonth && m11Default is not null)
             {
                 column.SetPresentation(m11Default, displayFormat: null, styleId: null);
             }
@@ -1119,7 +1199,7 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
 
         // B124: агрегат по колонці (усі живі рядки) — той самий граф: комірка зі зсувом null на M11.
         var expression = sum
-            ? $"SUM([TB{doc.TableDefId}].[WHERE [M11] >= 0].[M11])"
+            ? $"SUM([TB{doc.TableDefId}].[WHERE [M{sumMonth}] >= 0].[M{sumMonth}])"
             : absolute
             ? "[Period:#11].[M11] * 2"
             : offsets
@@ -1193,6 +1273,7 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
         IReadOnlyDictionary<int, TestPeriodInstance> Others,
         IMetadataCache Metadata,
         bool Absolute,
-        bool Offsets);
+        bool Offsets,
+        int SumMonth = OwnerMonth);
 
 }
