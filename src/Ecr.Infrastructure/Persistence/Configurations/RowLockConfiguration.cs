@@ -37,6 +37,7 @@ public sealed class RowLockConfiguration : IEntityTypeConfiguration<RowLock>
         builder.Property(x => x.Id).UseIdentityColumn();
 
         builder.Property(x => x.PeriodKeyValue).HasColumnName("PeriodKey");
+        builder.Property(x => x.SheetCode).HasMaxLength(RowLock.MaxSheetCodeLength).IsRequired();
         builder.Property(x => x.TableCode).HasMaxLength(RowLock.MaxTableCodeLength).IsRequired();
         builder.Property(x => x.RowKey).HasMaxLength(RowLock.MaxRowKeyLength).IsRequired();
         builder.Property(x => x.LockFrom).HasColumnType("datetime2(3)");
@@ -48,7 +49,7 @@ public sealed class RowLockConfiguration : IEntityTypeConfiguration<RowLock>
 
         builder.HasIndex(x => new { x.DocumentId, x.PeriodKeyValue })
                .HasFilter("[ReleasedAt] IS NULL")
-               .IncludeProperties(x => new { x.TableCode, x.RowKey, x.LockFrom, x.LockUntil, x.OwnerUserId })
+               .IncludeProperties(x => new { x.SheetCode, x.TableCode, x.RowKey, x.LockFrom, x.LockUntil, x.OwnerUserId })
                .HasDatabaseName("IX_RowLock_Doc_Period");
 
         builder.HasOne<Document>()

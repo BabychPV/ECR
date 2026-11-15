@@ -6303,20 +6303,20 @@ public sealed record RowDto(
   ECR-SUB-4221`, `messageKey = err.ECR-SUB-4221.workflowDisabled` (після видимості документа й аркуша, до гранта й
   стану). Рішення про запис (`EditRules` через `AccessDecisionService`) для такої версії ігнорує старий стан
   `wf.ApprovalState` (Q4) — аркуш редагується як `Draft`.
-- **Блокування рядків** `doc.RowLock` (`Id bigint`, `DocumentId`, `PeriodKey`, `SheetCopyId?`, `TableCode`, `RowKey`,
+- **Блокування рядків** `doc.RowLock` (`Id int`, `DocumentId`, `PeriodKey`, `SheetCopyId?`, `SheetCode`, `TableCode`, `RowKey`,
   `LockFrom`/`LockUntil` UTC `[from, until)`, `OwnerUserId`, `Note?`, `CreatedAt`, `ReleasedAt?`/`ReleasedByUserId?`,
   `RowVersion`; індекс `IX_RowLock_Doc_Period` з фільтром `ReleasedAt IS NULL`). Діє, поки `LockFrom ≤ now < LockUntil`
   і не знято; задачі немає, історія лишається.
-  - `GET /documents/{id}/row-locks?periodKey=` → `RowLockDto[] { id, tableCode, sheetCopyId, rowKey, lockFrom,
+  - `GET /documents/{id}/row-locks?periodKey=` → `RowLockDto[] { id, sheetCode, tableCode, sheetCopyId, rowKey, lockFrom,
     lockUntil (дати проєкту, кінець включно), ownerUserId, ownerDisplayName, note, isActive, canUnlock }` — незняті й
     не прострочені (зокрема ще не початі), лише таблиці, які читач бачить.
-  - `POST /documents/{id}/row-locks { periodKey, sheetCopyId?, tableCode, rowKeys[1..500], fromDate, toDate, note? }`
+  - `POST /documents/{id}/row-locks { periodKey, sheetCopyId?, sheetCode, tableCode, rowKeys[1..500], fromDate, toDate, note? }`
     → `RowLockDto[]`. Усе або нічого. Дозволено власнику документа з рівнем `Write` на таблицю АБО носію проєктного права
     `Document.RowLock` із видимим документом (Q6); той, хто блокує, — власник блокування. `403
     err.ECR-ACCS-0403.rowLockDenied` (`reason`/`reasonKey`: `NoGrant`, `ProjectArchived`, `ArchivingInProgress`,
     `PeriodClosed`, `SimulationReadOnly`); `404` — документ, таблиця (`tableNotInDocument`) чи рядки (`lockRowsMissing`)
-    відсутні/невидимі; `409 ECR-ROW-0409 rowAlreadyLocked` — незняте блокування того самого рядка перетинає проміжок;
-    `422 ECR-REQ-0422 lockRangeInvalid` (проміжок порожній чи минув), `lockRowsInvalid`, `lockNoteTooLong` (≤ 400).
+    відсутні/невидимі; `409 ECR-ROW-0409 rowAlreadyLocked` — незняте й не прострочене блокування того самого рядка (копія, аркуш, таблиця, ключ) перетинає проміжок;
+    `422 ECR-REQ-0422 lockRangeInvalid` (проміжок порожній, минув, довший за 3660 днів чи за межею календаря), `lockRowsInvalid`, `lockNoteTooLong` (≤ 400).
   - `DELETE /documents/{id}/row-locks/{lockId}` → `204` — власник блокування або носій `Document.RowLock`; ті самі
     заборони стану. Обидві дії — `aud.StructureChange`, `EntityType = RowLock`, `Operation = Lock|Unlock`.
 - **Відмова запису `EditDenyReason.RowLocked = 21`** (`deny.RowLocked`): рядок із діючим блокуванням ІНШОЇ людини —
@@ -6325,6 +6325,12 @@ public sealed record RowDto(
   колонки/рядка/комірки, ДО гранта (поруч із забороною передачі). Власник блокування пише (Q1); інтеграція (збір) і
   перерахунок блокування не бачать (Q2). Блокування — на весь рядок, усі місячні колонки (Q3).
 - **Право `Document.RowLock`** — проєктне, не звужуване, не небезпечне; `SystemAdministrator` отримує його шаблоном `%`.
+- **F13 (B75).** Код таблиці унікальний лише в межах аркуша — рядок ідентифікує `(SheetCopyId, SheetCode, TableCode,
+  RowKey)`. Стан аркуша під замком (`SheetEditGate`) для версії документа за період із `WorkflowMode = None` — `Draft`
+  (перенос версії переносить `wf.ApprovalState`; старий Submitted/Approved не замикає записувачів, перерахунок і оновлення
+  з дозволу). Видалення рядка знімає його незняті блокування (`aud.StructureChange` `RowLock/RowDeleted`). Оновлення
+  таблиці з дозволу (`POST …/permit-bindings/{code}/refresh`), що зачіпає чужі заблоковані рядки, — `403 addRowDenied`,
+  `reason = RowLocked`, `rowKeys` (до 20) і `deniedCount`: одна дія над таблицею, усе або нічого.
 - **Гонка «блокування між рішенням і записом» (F13 п.4).** `POST …/row-locks` бере структуру (спільно) і замок аркуша ×
   період × копія ВИНЯТКОВО (як подання), потім UPDLOCK документа. Записувачі (PATCH, книга, колір, створення й видалення
   рядка) під своїм спільним замком перечитують блокування (`RowLockRecheck`, `IRowLockStore.LockedByOthersAsync`) і

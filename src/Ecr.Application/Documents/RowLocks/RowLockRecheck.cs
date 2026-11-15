@@ -21,7 +21,7 @@ namespace Ecr.Application.Documents.RowLocks;
 /// </remarks>
 public static class RowLockRecheck
 {
-    /// <summary>Ключі рядків (копія, таблиця, ключ), заблоковані ІНШИМИ людьми; порожньо — перевіряти нічого.</summary>
+    /// <summary>Рядки (копія, аркуш, таблиця, ключ), заблоковані ІНШИМИ людьми; порожньо — перевіряти нічого.</summary>
     /// <param name="gate">Замок аркуша, уже взятий цією транзакцією за <paramref name="periodKey"/>.</param>
     /// <param name="store">Сховище блокувань; <c>null</c> — прямі конструктори тестів (перевірки немає).</param>
     /// <param name="profile">Хто пише.</param>
@@ -29,7 +29,7 @@ public static class RowLockRecheck
     /// <param name="periodKey">Період екземпляра.</param>
     /// <param name="utcNow">Годинник записувача.</param>
     /// <param name="ct">Токен скасування.</param>
-    public static async Task<IReadOnlySet<(long? SheetCopyId, string TableCode, string RowKey)>> LockedAsync(
+    public static async Task<IReadOnlySet<RowLockKey>> LockedAsync(
         ISheetEditGate gate, IRowLockStore? store, AccessProfile profile, long documentId, int periodKey,
         DateTime utcNow, CancellationToken ct)
     {
@@ -48,18 +48,19 @@ public static class RowLockRecheck
     /// <summary>Відмова, якщо хоч один із рядків заблоковано: та сама форма, що й відмова рішення про комірки.</summary>
     /// <param name="locked">Результат <see cref="LockedAsync"/>.</param>
     /// <param name="sheetCopyId">Копія аркуша екземпляра.</param>
+    /// <param name="sheetCode">Код аркуша.</param>
     /// <param name="tableCode">Код таблиці.</param>
     /// <param name="rowKeys">Ключі рядків, які пишуться.</param>
     /// <param name="deniedCount">Скільки комірок/рядків відхилено (для <c>deniedCount</c>).</param>
     /// <exception cref="AccessDeniedException"><c>ECR-ACCS-0403</c>, <c>deniedCells</c>, <c>reason = RowLocked</c>.</exception>
     public static void ThrowIfLocked(
-        IReadOnlySet<(long? SheetCopyId, string TableCode, string RowKey)> locked, long? sheetCopyId, string tableCode,
+        IReadOnlySet<RowLockKey> locked, long? sheetCopyId, string? sheetCode, string tableCode,
         IEnumerable<string> rowKeys, int deniedCount)
     {
         ArgumentNullException.ThrowIfNull(locked);
         ArgumentNullException.ThrowIfNull(rowKeys);
 
-        if (locked.Count == 0 || !rowKeys.Any(k => locked.Contains((sheetCopyId, tableCode, k))))
+        if (!AnyLocked(locked, sheetCopyId, sheetCode, tableCode, rowKeys))
         {
             return;
         }
@@ -75,6 +76,25 @@ public static class RowLockRecheck
             });
     }
 
-    private static readonly IReadOnlySet<(long? SheetCopyId, string TableCode, string RowKey)> Empty =
-        new HashSet<(long?, string, string)>();
+    /// <summary>Чи заблоковано хоч один із рядків таблиці (аркуш невідомий — <c>null</c> — збігається з будь-яким: fail-closed).</summary>
+    /// <param name="locked">Результат <see cref="LockedAsync"/>.</param>
+    /// <param name="sheetCopyId">Копія аркуша.</param>
+    /// <param name="sheetCode">Код аркуша.</param>
+    /// <param name="tableCode">Код таблиці.</param>
+    /// <param name="rowKeys">Ключі рядків.</param>
+    public static bool AnyLocked(
+        IReadOnlySet<RowLockKey> locked, long? sheetCopyId, string? sheetCode, string tableCode, IEnumerable<string> rowKeys)
+    {
+        ArgumentNullException.ThrowIfNull(locked);
+        ArgumentNullException.ThrowIfNull(rowKeys);
+
+        return locked.Count > 0 && rowKeys.Any(k => locked.Any(l =>
+            l.SheetCopyId == sheetCopyId
+            && (sheetCode is null || string.Equals(l.SheetCode, sheetCode, StringComparison.Ordinal))
+            && string.Equals(l.TableCode, tableCode, StringComparison.Ordinal)
+            && string.Equals(l.RowKey, k, StringComparison.Ordinal)));
+    }
+
+    private static readonly IReadOnlySet<RowLockKey> Empty =
+        new HashSet<RowLockKey>();
 }

@@ -31644,6 +31644,8 @@ export interface components {
             periodKey: number;
             /** @description Ключі рядків (1..int RowLockRules.MaxRowsPerRequest). */
             rowKeys: string[];
+            /** @description Код аркуша (F13 D2: код таблиці унікальний лише в межах аркуша). */
+            sheetCode: string;
             /**
              * Format: int64
              * @description Копія аркуша; `null` — оригінал.
@@ -39876,12 +39878,14 @@ export interface components {
             ownerUserId: number;
             /** @description Ключ рядка. */
             rowKey: string;
+            /** @description ✎ F13 D2: код аркуша таблиці (код таблиці унікальний лише в межах аркуша). */
+            sheetCode?: string;
             /**
              * Format: int64
              * @description Копія аркуша; `null` — оригінал.
              */
             sheetCopyId: null | number;
-            /** @description Код таблиці. */
+            /** @description Код таблиці (унікальний у межах аркуша). */
             tableCode: string;
         };
         /** @description Permit history of one row's permit cell. */

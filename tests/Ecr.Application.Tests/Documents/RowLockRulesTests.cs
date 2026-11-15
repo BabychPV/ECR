@@ -45,7 +45,7 @@ public sealed class RowLockRulesTests
     {
         var created = new DateTime(2026, 11, 10, 0, 0, 0, DateTimeKind.Utc);
         var item = RowLock.Create(
-            1, 202611, null, "T", "R", created.AddDays(2), created.AddDays(4), 5, null, created);
+            1, 202611, null, "S", "T", "R", created.AddDays(2), created.AddDays(4), 5, null, created);
 
         Assert.False(item.IsActiveAt(created.AddDays(1)));
         Assert.True(item.IsActiveAt(created.AddDays(2)));
@@ -63,9 +63,9 @@ public sealed class RowLockRulesTests
     {
         var now = new DateTime(2026, 11, 10, 0, 0, 0, DateTimeKind.Utc);
 
-        var empty = Assert.Throws<DomainException>(() => RowLock.Create(1, 202611, null, "T", "R", now, now, 5, null, now));
+        var empty = Assert.Throws<DomainException>(() => RowLock.Create(1, 202611, null, "S", "T", "R", now, now, 5, null, now));
         var past = Assert.Throws<DomainException>(
-            () => RowLock.Create(1, 202611, null, "T", "R", now.AddDays(-3), now.AddDays(-1), 5, null, now));
+            () => RowLock.Create(1, 202611, null, "S", "T", "R", now.AddDays(-3), now.AddDays(-1), 5, null, now));
 
         Assert.Equal("err.ECR-REQ-0422.lockRangeInvalid", empty.Details!["messageKey"]);
         Assert.Equal("err.ECR-REQ-0422.lockRangeInvalid", past.Details!["messageKey"]);

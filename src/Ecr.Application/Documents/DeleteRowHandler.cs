@@ -330,7 +330,7 @@ public sealed class DeleteRowHandler(
         var lockedRows = await RowLocks.RowLockRecheck
             .LockedAsync(sheetGate, rowLocks, profile, instance.DocumentId, instance.PeriodKey, clock.UtcNow, ct)
             .ConfigureAwait(false);
-        if (lockedRows.Contains((instance.SheetCopyId, table.Code, key.Value)))
+        if (RowLocks.RowLockRecheck.AnyLocked(lockedRows, instance.SheetCopyId, sheetCode, table.Code, [key.Value]))
         {
             throw DeleteDenied(EditDenyReason.RowLocked);
         }
@@ -506,6 +506,26 @@ public sealed class DeleteRowHandler(
         if (rowAudit is not null)
         {
             await rowAudit.WriteRowChangesAsync(journal, ct).ConfigureAwait(false);
+        }
+
+        // ✎ B75 (F13): незняті блокування видаленого рядка (власні, майбутні, прострочені) знімаються тією ж транзакцією —
+        // рядка вже немає, і перелік блокувань не мусить показувати його. Журнал — `RowLock/RowDeleted`.
+        if (rowLocks is not null && sheetCode is not null)
+        {
+            var stale = await rowLocks
+                .FindUnreleasedForRowAsync(
+                    instance.DocumentId, instance.PeriodKey,
+                    new RowLockKey(instance.SheetCopyId, sheetCode, table.Code, key.Value), ct)
+                .ConfigureAwait(false);
+            foreach (var item in stale)
+            {
+                item.Release(profile.UserId, now);
+                await audit.WriteStructureChangeAsync(
+                    RowLocks.RowLockAudit.Record(
+                        item, instance.TemplateVersionId, businessKey: null, "RowDeleted", now, profile.UserId,
+                        correlationId: null),
+                    ct).ConfigureAwait(false);
+            }
         }
 
         // ⛔ Видалення рядка — зміна документа (`H-23d`), як і додавання.

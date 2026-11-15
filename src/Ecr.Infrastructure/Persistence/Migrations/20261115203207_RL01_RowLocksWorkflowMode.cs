@@ -25,11 +25,12 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                 schema: "doc",
                 columns: table => new
                 {
-                    Id = table.Column<long>(type: "bigint", nullable: false)
+                    Id = table.Column<int>(type: "int", nullable: false)
                         .Annotation("SqlServer:Identity", "1, 1"),
                     DocumentId = table.Column<long>(type: "bigint", nullable: false),
                     PeriodKey = table.Column<int>(type: "int", nullable: false),
                     SheetCopyId = table.Column<long>(type: "bigint", nullable: true),
+                    SheetCode = table.Column<string>(type: "nvarchar(64)", maxLength: 64, nullable: false),
                     TableCode = table.Column<string>(type: "nvarchar(64)", maxLength: 64, nullable: false),
                     RowKey = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: false),
                     LockFrom = table.Column<DateTime>(type: "datetime2(3)", nullable: false),
@@ -69,7 +70,7 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                 table: "RowLock",
                 columns: new[] { "DocumentId", "PeriodKey" },
                 filter: "[ReleasedAt] IS NULL")
-                .Annotation("SqlServer:Include", new[] { "TableCode", "RowKey", "LockFrom", "LockUntil", "OwnerUserId" });
+                .Annotation("SqlServer:Include", new[] { "SheetCode", "TableCode", "RowKey", "LockFrom", "LockUntil", "OwnerUserId" });
         }
 
         /// <inheritdoc />

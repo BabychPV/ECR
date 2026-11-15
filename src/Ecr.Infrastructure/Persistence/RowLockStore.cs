@@ -97,8 +97,8 @@ public sealed class RowLockStore(EcrDbContext db) : IRowLockStore
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<string>> OverlappingAsync(
-        long documentId, int periodKey, long? sheetCopyId, string tableCode, IReadOnlyCollection<string> rowKeys,
-        DateTime from, DateTime until, CancellationToken ct)
+        long documentId, int periodKey, long? sheetCopyId, string sheetCode, string tableCode,
+        IReadOnlyCollection<string> rowKeys, DateTime from, DateTime until, DateTime utcNow, CancellationToken ct)
     {
         var keys = rowKeys.ToList();
         return await db.RowLocks
@@ -107,8 +107,10 @@ public sealed class RowLockStore(EcrDbContext db) : IRowLockStore
                         && x.PeriodKeyValue == periodKey
                         && x.ReleasedAt == null
                         && x.SheetCopyId == sheetCopyId
+                        && x.SheetCode == sheetCode
                         && x.TableCode == tableCode
                         && keys.Contains(x.RowKey)
+                        && x.LockUntil > utcNow // F13 D3: прострочене незняте блокування — історія, не конфлікт
                         && x.LockFrom < until
                         && x.LockUntil > from)
             .Select(x => x.RowKey)
@@ -127,9 +129,9 @@ public sealed class RowLockStore(EcrDbContext db) : IRowLockStore
                         && x.LockUntil > utcNow
                   join u in db.Users.AsNoTracking() on x.OwnerUserId equals u.Id into users
                   from u in users.DefaultIfEmpty()
-                  orderby x.TableCode, x.RowKey, x.LockFrom
+                  orderby x.SheetCode, x.TableCode, x.RowKey, x.LockFrom
                   select new RowLockRecord(
-                      x.Id, x.SheetCopyId, x.TableCode, x.RowKey, x.LockFrom, x.LockUntil, x.OwnerUserId,
+                      x.Id, x.SheetCopyId, x.SheetCode, x.TableCode, x.RowKey, x.LockFrom, x.LockUntil, x.OwnerUserId,
                       u == null ? null : u.DisplayName, x.Note))
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -149,7 +151,7 @@ public sealed class RowLockStore(EcrDbContext db) : IRowLockStore
             .ConfigureAwait(false);
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<(long? SheetCopyId, string TableCode, string RowKey)>> LockedByOthersAsync(
+    public async Task<IReadOnlyList<RowLockKey>> LockedByOthersAsync(
         long documentId, int periodKey, int userId, DateTime utcNow, CancellationToken ct)
     {
         var rows = await db.RowLocks
@@ -160,12 +162,26 @@ public sealed class RowLockStore(EcrDbContext db) : IRowLockStore
                         && x.LockFrom <= utcNow
                         && x.LockUntil > utcNow
                         && x.OwnerUserId != userId)
-            .Select(x => new { x.SheetCopyId, x.TableCode, x.RowKey })
+            .Select(x => new { x.SheetCopyId, x.SheetCode, x.TableCode, x.RowKey })
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        return [.. rows.Select(x => (x.SheetCopyId, x.TableCode, x.RowKey))];
+        return [.. rows.Select(x => new RowLockKey(x.SheetCopyId, x.SheetCode, x.TableCode, x.RowKey))];
     }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<RowLock>> FindUnreleasedForRowAsync(
+        long documentId, int periodKey, RowLockKey key, CancellationToken ct)
+        => await db.RowLocks
+            .Where(x => x.DocumentId == documentId
+                        && x.PeriodKeyValue == periodKey
+                        && x.ReleasedAt == null
+                        && x.SheetCopyId == key.SheetCopyId
+                        && x.SheetCode == key.SheetCode
+                        && x.TableCode == key.TableCode
+                        && x.RowKey == key.RowKey)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
 
     /// <inheritdoc />
     public void AddRange(IEnumerable<RowLock> locks) => db.RowLocks.AddRange(locks);

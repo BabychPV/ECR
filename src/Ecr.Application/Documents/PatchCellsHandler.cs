@@ -3437,10 +3437,14 @@ public sealed partial class PatchCellsHandler(
             .ConfigureAwait(false);
 
         RowLocks.RowLockRecheck.ThrowIfLocked(
-            locked, context.Instance.SheetCopyId, context.Table.Code,
+            locked, context.Instance.SheetCopyId, SheetCodeOf(context), context.Table.Code,
             context.Updates.Concat(context.Creations).Select(r => r.RowKey),
             changes.Upserts.Count + changes.Deletes.Count);
     }
+
+    /// <summary>✎ B75: код аркуша таблиці контексту; <c>null</c> — невідомий (перевірка блокувань тоді fail-closed).</summary>
+    private static string? SheetCodeOf(RequestContext context)
+        => context.Snapshot.Sheets.FirstOrDefault(s => s.Id == context.Table.SheetDefId)?.Code;
 
     /// <summary>Аркуш, поданий чи затверджений під блокуванням, — відмова.</summary>
     private static void CheckSheetStatus(DocumentStatus status, CellChangeLists changes)

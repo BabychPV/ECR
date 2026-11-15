@@ -16,7 +16,7 @@ namespace Ecr.Application.Documents.RowLocks;
 
 /// <summary>✎ B75: блокування рядка у відповіді (дати — у часовому поясі проєкту, кінцева — включно).</summary>
 /// <param name="Id">Ідентифікатор.</param>
-/// <param name="TableCode">Код таблиці.</param>
+/// <param name="TableCode">Код таблиці (унікальний у межах аркуша).</param>
 /// <param name="SheetCopyId">Копія аркуша; <c>null</c> — оригінал.</param>
 /// <param name="RowKey">Ключ рядка.</param>
 /// <param name="LockFrom">Перший день дії.</param>
@@ -37,11 +37,16 @@ public sealed record RowLockDto(
     string? OwnerDisplayName,
     string? Note,
     bool IsActive,
-    bool CanUnlock);
+    bool CanUnlock)
+{
+    /// <summary>✎ F13 D2: код аркуша таблиці (код таблиці унікальний лише в межах аркуша).</summary>
+    public string SheetCode { get; init; } = string.Empty;
+}
 
 /// <summary>✎ B75: запит на блокування рядків (усе або нічого).</summary>
 /// <param name="PeriodKey">Період екземпляра таблиці.</param>
 /// <param name="SheetCopyId">Копія аркуша; <c>null</c> — оригінал.</param>
+/// <param name="SheetCode">Код аркуша (F13 D2: код таблиці унікальний лише в межах аркуша).</param>
 /// <param name="TableCode">Код таблиці.</param>
 /// <param name="RowKeys">Ключі рядків (1..<see cref="RowLockRules.MaxRowsPerRequest"/>).</param>
 /// <param name="FromDate">Перший день (часовий пояс проєкту).</param>
@@ -50,6 +55,7 @@ public sealed record RowLockDto(
 public sealed record CreateRowLocksRequest(
     int PeriodKey,
     long? SheetCopyId,
+    string SheetCode,
     string TableCode,
     IReadOnlyList<string> RowKeys,
     DateOnly FromDate,
@@ -73,6 +79,9 @@ public static class RowLockRules
 
     /// <summary>Стеля рядків в одному запиті.</summary>
     public const int MaxRowsPerRequest = 500;
+
+    /// <summary>Найдовший проміжок блокування в днях (≈ 10 років): більший — помилка вводу, а не намір.</summary>
+    public const int MaxRangeDays = 3660;
 
     /// <summary>Причина, з якої блокування/зняття в цьому документі за період недоступні; <c>None</c> — доступні.</summary>
     /// <param name="target">Факти документа.</param>
@@ -103,8 +112,17 @@ public static class RowLockRules
     /// <param name="fromDate">Перший день.</param>
     /// <param name="toDate">Останній день.</param>
     /// <param name="timeZoneId">Часовий пояс проєкту.</param>
+    /// <exception cref="BusinessRuleException">
+    /// <c>422 lockRangeInvalid</c>: кінець раніше початку, проміжок довший за <see cref="MaxRangeDays"/> або за межами
+    /// календаря (<c>DateOnly.MaxValue</c>) — замість 500 з переповнення.
+    /// </exception>
     public static (DateTime From, DateTime Until) ToUtcRange(DateOnly fromDate, DateOnly toDate, string timeZoneId)
     {
+        if (toDate < fromDate || toDate.DayNumber - fromDate.DayNumber > MaxRangeDays || toDate >= DateOnly.MaxValue)
+        {
+            throw RangeInvalid();
+        }
+
         var zone = SiteTimeZone.Create(timeZoneId).ToTimeZoneInfo();
         return (Midnight(fromDate, zone), Midnight(toDate.AddDays(1), zone));
     }
@@ -121,8 +139,20 @@ public static class RowLockRules
         return (DateOnly.FromDateTime(localFrom), DateOnly.FromDateTime(localUntil.AddTicks(-1)));
     }
 
+    /// <summary>
+    /// Початок доби в поясі проєкту → UTC. ⚠ Перехід на літній час опівночі робить 00:00 неіснуючим — тоді початок доби
+    /// — перша існуюча хвилина (зсув до години вперед), а не 500 з <see cref="TimeZoneInfo.ConvertTimeToUtc(DateTime, TimeZoneInfo)"/>.
+    /// </summary>
     private static DateTime Midnight(DateOnly date, TimeZoneInfo zone)
-        => TimeZoneInfo.ConvertTimeToUtc(date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified), zone);
+    {
+        var local = date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
+        for (var shift = 0; shift < 4 && zone.IsInvalidTime(local); shift++)
+        {
+            local = local.AddMinutes(30);
+        }
+
+        return TimeZoneInfo.ConvertTimeToUtc(local, zone);
+    }
 
     /// <summary>403 на блокування/зняття з причиною.</summary>
     /// <param name="reason">Причина.</param>
@@ -145,14 +175,16 @@ public static class RowLockRules
             "Проміжок блокування порожній або вже минув.",
             new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REQ-0422.lockRangeInvalid" });
 
-    /// <summary>Таблиця шаблону за кодом; <c>null</c> — немає.</summary>
+    /// <summary>Таблиця шаблону за кодами аркуша й таблиці; <c>null</c> — немає.</summary>
     /// <param name="snapshot">Знімок версії.</param>
-    /// <param name="tableCode">Код таблиці.</param>
-    public static (SheetDef Sheet, TableDef Table)? FindTable(TemplateVersionSnapshot snapshot, string tableCode)
+    /// <param name="sheetCode">Код аркуша.</param>
+    /// <param name="tableCode">Код таблиці (унікальний у межах аркуша).</param>
+    public static (SheetDef Sheet, TableDef Table)? FindTable(
+        TemplateVersionSnapshot snapshot, string sheetCode, string tableCode)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
 
-        foreach (var sheet in snapshot.Sheets)
+        foreach (var sheet in snapshot.Sheets.Where(s => string.Equals(s.Code, sheetCode, StringComparison.Ordinal)))
         {
             foreach (var table in sheet.Tables)
             {
@@ -203,17 +235,18 @@ public sealed class GetRowLocksHandler(
         var snapshot = await metadata.GetAsync(target.TemplateVersionId, ct).ConfigureAwait(false);
         var unlockAllowed = RowLockRules.StateDenial(target) == EditDenyReason.None;
         var holdsRight = RowLockRules.HoldsRight(profile, target.ProjectId);
-        var readable = new Dictionary<string, bool>(StringComparer.Ordinal);
+        var readable = new Dictionary<(string Sheet, string Table), bool>();
         var result = new List<RowLockDto>(records.Count);
 
         foreach (var record in records)
         {
             // ⛔ Ключі рядків таблиці, якої читач не бачить, не розкриваються (межа читання, S6).
-            if (!readable.TryGetValue(record.TableCode, out var canRead))
+            var tableKey = (record.SheetCode, record.TableCode);
+            if (!readable.TryGetValue(tableKey, out var canRead))
             {
-                canRead = RowLockRules.FindTable(snapshot, record.TableCode) is { } found
+                canRead = RowLockRules.FindTable(snapshot, record.SheetCode, record.TableCode) is { } found
                           && RowLockRules.CanReadTable(profile, target.ProjectId, found.Sheet, found.Table, key.Value);
-                readable[record.TableCode] = canRead;
+                readable[tableKey] = canRead;
             }
 
             if (!canRead)
@@ -227,7 +260,10 @@ public sealed class GetRowLocksHandler(
                 record.OwnerDisplayName, record.Note,
                 IsActive: record.LockFrom <= now && now < record.LockUntil,
                 CanUnlock: unlockAllowed && !profile.IsSimulation
-                           && (record.OwnerUserId == profile.UserId || holdsRight)));
+                           && (record.OwnerUserId == profile.UserId || holdsRight))
+            {
+                SheetCode = record.SheetCode,
+            });
         }
 
         return result;
@@ -276,11 +312,12 @@ public sealed class CreateRowLocksHandler(
             .ToList();
         if (rowKeys.Count == 0 || rowKeys.Count > RowLockRules.MaxRowsPerRequest
             || rowKeys.Any(k => k.Length > RowLock.MaxRowKeyLength)
-            || string.IsNullOrWhiteSpace(request.TableCode))
+            || string.IsNullOrWhiteSpace(request.TableCode)
+            || string.IsNullOrWhiteSpace(request.SheetCode))
         {
             throw new BusinessRuleException(
                 ErrorCodes.RequestInvalid,
-                $"Потрібно від 1 до {RowLockRules.MaxRowsPerRequest} ключів рядків і код таблиці.",
+                $"Потрібно від 1 до {RowLockRules.MaxRowsPerRequest} ключів рядків, код аркуша й код таблиці.",
                 new Dictionary<string, object?>
                 {
                     ["messageKey"] = "err.ECR-REQ-0422.lockRowsInvalid",
@@ -293,7 +330,7 @@ public sealed class CreateRowLocksHandler(
                      ?? throw DocumentVisibility.NotFound(documentId);
 
         var snapshot = await metadata.GetAsync(target.TemplateVersionId, ct).ConfigureAwait(false);
-        if (RowLockRules.FindTable(snapshot, request.TableCode) is not { } found
+        if (RowLockRules.FindTable(snapshot, request.SheetCode, request.TableCode) is not { } found
             || !RowLockRules.CanReadTable(profile, target.ProjectId, found.Sheet, found.Table, key.Value)
             || (request.SheetCopyId is { } copy
                 && !await documents.HasSheetCopyAsync(documentId, found.Sheet.Id, copy, ct).ConfigureAwait(false)))
@@ -350,7 +387,8 @@ public sealed class CreateRowLocksHandler(
             RequireMayLock(profile, locked, found, key.Value);
 
             var overlapping = await store.OverlappingAsync(
-                    documentId, key.Value, request.SheetCopyId, request.TableCode, rowKeys, from, until, innerCt)
+                    documentId, key.Value, request.SheetCopyId, found.Sheet.Code, request.TableCode, rowKeys, from, until,
+                    now, innerCt)
                 .ConfigureAwait(false);
             if (overlapping.Count > 0)
             {
@@ -365,7 +403,7 @@ public sealed class CreateRowLocksHandler(
             }
 
             created.AddRange(rowKeys.Select(k => RowLock.Create(
-                documentId, key.Value, request.SheetCopyId, request.TableCode, k, from, until, profile.UserId,
+                documentId, key.Value, request.SheetCopyId, found.Sheet.Code, request.TableCode, k, from, until, profile.UserId,
                 request.Note, now)));
             store.AddRange(created);
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
@@ -373,7 +411,9 @@ public sealed class CreateRowLocksHandler(
             foreach (var item in created)
             {
                 await audit.WriteStructureChangeAsync(
-                    RowLockAudit.Record(item, locked, "Lock", now, profile.UserId, currentUser.CorrelationId),
+                    RowLockAudit.Record(
+                        item, locked.TemplateVersionId, locked.BusinessKey, "Lock", now, profile.UserId,
+                        currentUser.CorrelationId),
                     innerCt).ConfigureAwait(false);
             }
         }, ct).ConfigureAwait(false);
@@ -383,7 +423,10 @@ public sealed class CreateRowLocksHandler(
             var (localFrom, localUntil) = RowLockRules.ToLocalDates(item.LockFrom, item.LockUntil, target.TimeZoneId);
             return new RowLockDto(
                 item.Id, item.TableCode, item.SheetCopyId, item.RowKey, localFrom, localUntil, item.OwnerUserId,
-                OwnerDisplayName: null, item.Note, IsActive: item.IsActiveAt(now), CanUnlock: true);
+                OwnerDisplayName: null, item.Note, IsActive: item.IsActiveAt(now), CanUnlock: true)
+            {
+                SheetCode = item.SheetCode,
+            };
         })];
     }
 
@@ -482,7 +525,9 @@ public sealed class ReleaseRowLockHandler(
 
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
             await audit.WriteStructureChangeAsync(
-                RowLockAudit.Record(item, target, "Unlock", now, profile.UserId, currentUser.CorrelationId),
+                RowLockAudit.Record(
+                    item, target.TemplateVersionId, target.BusinessKey, "Unlock", now, profile.UserId,
+                    currentUser.CorrelationId),
                 innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
     }
@@ -491,15 +536,23 @@ public sealed class ReleaseRowLockHandler(
 /// <summary>Запис журналу про блокування/зняття.</summary>
 internal static class RowLockAudit
 {
+    /// <param name="item">Блокування.</param>
+    /// <param name="templateVersionId">Версія шаблону документа за період.</param>
+    /// <param name="businessKey">Номер документа; <c>null</c> — невідомий.</param>
+    /// <param name="operation"><c>Lock</c> | <c>Unlock</c> | <c>RowDeleted</c>.</param>
+    /// <param name="utcNow">Момент.</param>
+    /// <param name="userId">Хто.</param>
+    /// <param name="correlationId">Кореляція.</param>
     public static StructureChangeRecord Record(
-        RowLock item, RowLockTarget target, string operation, DateTime utcNow, int userId, string? correlationId)
+        RowLock item, int templateVersionId, string? businessKey, string operation, DateTime utcNow, int userId,
+        string? correlationId)
         => new(
             utcNow,
-            TemplateVersionId: target.TemplateVersionId,
+            TemplateVersionId: templateVersionId,
             EntityType: RowLockRules.AuditEntityType,
 
-            // ⚠ Ідентифікатор журналу — int; повний bigint блокування — у NewJson.
-            EntityId: item.Id <= int.MaxValue ? (int)item.Id : 0,
+            // F13: Id блокування — int (як і EntityId журналу), без втрат.
+            EntityId: item.Id,
             ChangeClass: ChangeClass.Guarded,
             Operation: operation,
             OldJson: null,
@@ -507,9 +560,10 @@ internal static class RowLockAudit
             {
                 lockId = item.Id,
                 documentId = item.DocumentId,
-                document = target.BusinessKey,
+                document = businessKey,
                 periodKey = item.PeriodKeyValue,
                 sheetCopyId = item.SheetCopyId,
+                sheetCode = item.SheetCode,
                 tableCode = item.TableCode,
                 rowKey = item.RowKey,
                 lockFrom = item.LockFrom,

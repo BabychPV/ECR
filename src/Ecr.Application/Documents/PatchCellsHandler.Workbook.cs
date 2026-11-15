@@ -697,7 +697,7 @@ public sealed partial class PatchCellsHandler
         await EnsureWorkbookSheetsEditableAsync(active, statuses, ct).ConfigureAwait(false);
 
         // ✎ B75: блокування рядків — повторно під замками аркушів книги (один запит на період, лише коли вони є).
-        var lockedByPeriod = new Dictionary<int, IReadOnlySet<(long? SheetCopyId, string TableCode, string RowKey)>>();
+        var lockedByPeriod = new Dictionary<int, IReadOnlySet<RowLockKey>>();
         foreach (var item in active)
         {
             var itemPeriod = item.Context.PeriodKey.Value;
@@ -710,7 +710,7 @@ public sealed partial class PatchCellsHandler
             }
 
             Blamed(item.Id, () => RowLocks.RowLockRecheck.ThrowIfLocked(
-                locked, item.Context.Instance.SheetCopyId, item.Context.Table.Code,
+                locked, item.Context.Instance.SheetCopyId, SheetCodeOf(item.Context), item.Context.Table.Code,
                 item.Context.Updates.Concat(item.Context.Creations).Select(r => r.RowKey),
                 item.Planned.Upserts.Count + item.Planned.Deletes.Count));
         }

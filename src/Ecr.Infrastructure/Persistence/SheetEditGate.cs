@@ -158,12 +158,21 @@ public sealed class SheetEditGate(EcrDbContext db, SheetEditGatePolicy? policy =
                 RowLocks = db.RowLocks.Any(x => x.DocumentId == documentId
                                                 && x.PeriodKeyValue == period
                                                 && x.ReleasedAt == null),
+
+                // ✎ B75 (F13 D1): версія документа за період — без погодження. Перенос версії переносить
+                // wf.ApprovalState, тож старий Submitted/Approved не мусить замикати аркуш (Q4): стан для записувачів,
+                // перерахунку й оновлення з дозволу — Draft. Той самий оператор, 0 нових звернень.
+                WorkflowNone = db.TemplateVersions.Any(v =>
+                    v.WorkflowMode == WorkflowMode.None
+                    && v.Id == (d.TemplateId == null
+                        ? EcrDbContext.VersionOf(d.ProjectId, period)
+                        : EcrDbContext.TemplateVersionOf(d.ProjectId, d.TemplateId.Value, period))),
             })
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 
         _rowLocksSeen[(documentId, period)] = found?.RowLocks ?? false;
-        return found?.Status ?? DocumentStatus.Draft;
+        return found is { WorkflowNone: true } ? DocumentStatus.Draft : found?.Status ?? DocumentStatus.Draft;
     }
 
     /// <inheritdoc />

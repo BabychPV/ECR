@@ -253,7 +253,8 @@ public sealed class PatchCellStylesHandler(
             var lockedRows = await RowLocks.RowLockRecheck
                 .LockedAsync(sheetGate, rowLocks, profile, documentId, period.Value, clock.UtcNow, innerCt)
                 .ConfigureAwait(false);
-            if (decided.Allowed.Any(t => lockedRows.Contains((instance.SheetCopyId, table.Code, t.Target.RowKey))))
+            if (RowLocks.RowLockRecheck.AnyLocked(
+                    lockedRows, instance.SheetCopyId, sheetCode, table.Code, decided.Allowed.Select(t => t.Target.RowKey)))
             {
                 throw DeniedCells(targets.Count, EditDenyReason.RowLocked);
             }

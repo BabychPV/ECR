@@ -12,7 +12,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Ecr.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(EcrDbContext))]
-    [Migration("20261115164648_RL01_RowLocksWorkflowMode")]
+    [Migration("20261115203207_RL01_RowLocksWorkflowMode")]
     partial class RL01_RowLocksWorkflowMode
     {
         /// <inheritdoc />
@@ -4249,11 +4249,11 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("Ecr.Domain.Entities.Documents.RowLock", b =>
                 {
-                    b.Property<long>("Id")
+                    b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint");
+                        .HasColumnType("int");
 
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2(3)");
@@ -4295,6 +4295,11 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("rowversion");
 
+                    b.Property<string>("SheetCode")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<long?>("SheetCopyId")
                         .HasColumnType("bigint");
 
@@ -4310,7 +4315,7 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("IX_RowLock_Doc_Period")
                         .HasFilter("[ReleasedAt] IS NULL");
 
-                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("DocumentId", "PeriodKeyValue"), new[] { "TableCode", "RowKey", "LockFrom", "LockUntil", "OwnerUserId" });
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("DocumentId", "PeriodKeyValue"), new[] { "SheetCode", "TableCode", "RowKey", "LockFrom", "LockUntil", "OwnerUserId" });
 
                     b.ToTable("RowLock", "doc", t =>
                         {

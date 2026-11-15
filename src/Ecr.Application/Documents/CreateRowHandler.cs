@@ -319,7 +319,7 @@ public sealed class CreateRowHandler(
             .ConfigureAwait(false);
 
         // ✎ B75: ключ рядка, заблокований між рішенням і цим замком, — та сама відмова RowLocked.
-        await EnsureKeyNotLockedAsync(instance, table, key, profile, ct).ConfigureAwait(false);
+        await EnsureKeyNotLockedAsync(instance, table, key, profile, sheetCode, ct).ConfigureAwait(false);
 
         // Стеля й дубль ключа — за якорем.
         var anchorRows = await rowStore.GetRowIdsAsync(anchorInstance.TableInstanceId, mirror.Anchor, ct).ConfigureAwait(false);
@@ -469,12 +469,13 @@ public sealed class CreateRowHandler(
     /// </remarks>
     /// <summary>✎ B75: блокування рядка з ключем <paramref name="key"/> — повторно під уже взятим замком аркуша.</summary>
     private async Task EnsureKeyNotLockedAsync(
-        Ports.TableInstanceRef instance, TableDef table, RowKey key, AccessProfile profile, CancellationToken ct)
+        Ports.TableInstanceRef instance, TableDef table, RowKey key, AccessProfile profile, string? sheetCode,
+        CancellationToken ct)
     {
         var locked = await RowLocks.RowLockRecheck
             .LockedAsync(sheetGate, rowLocks, profile, instance.DocumentId, instance.PeriodKey, clock.UtcNow, ct)
             .ConfigureAwait(false);
-        if (!locked.Contains((instance.SheetCopyId, table.Code, key.Value)))
+        if (!RowLocks.RowLockRecheck.AnyLocked(locked, instance.SheetCopyId, sheetCode, table.Code, [key.Value]))
         {
             return;
         }
@@ -539,7 +540,7 @@ public sealed class CreateRowHandler(
             .ConfigureAwait(false);
 
         // ✎ B75: ключ рядка, заблокований між рішенням і цим замком, — та сама відмова RowLocked.
-        await EnsureKeyNotLockedAsync(instance, table, key, profile, ct).ConfigureAwait(false);
+        await EnsureKeyNotLockedAsync(instance, table, key, profile, sheetCode, ct).ConfigureAwait(false);
 
         var existing = await rowStore.GetRowIdsAsync(tableInstanceId, PeriodKeyOf(instance), ct).ConfigureAwait(false);
 

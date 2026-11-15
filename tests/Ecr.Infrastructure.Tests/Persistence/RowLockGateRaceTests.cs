@@ -48,6 +48,8 @@ public sealed class RowLockGateRaceTests(SqlServerFixture sql)
     private sealed record Scene(TestDocument Doc, int WriterId, int LockerId, string RowKey, string BaseVersion)
     {
         public string TableCode => $"TB{Doc.TableDefId}";
+
+        public string SheetCode => $"SH{Doc.SheetDefId}";
     }
 
     [Fact]
@@ -108,6 +110,25 @@ public sealed class RowLockGateRaceTests(SqlServerFixture sql)
         var deleteDenied = Assert.IsType<AccessDeniedException>(deleted);
         Assert.Equal(nameof(EditDenyReason.RowLocked), deleteDenied.Details?["reason"]?.ToString());
         Assert.Equal(1, await RowCountAsync(fresh, newKey));
+    }
+
+    /// <remarks>✎ F13: власник блокування видаляє свій заблокований рядок — блокування знімається тією ж транзакцією.
+    /// Мутація: прибрати зняття в <c>DeleteRowHandler</c> — червоніє.</remarks>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "B75")]
+    public async Task Видалення_рядка_власником_блокування_знімає_його_блокування()
+    {
+        var scene = await ArrangeAsync();
+        const string key = "B75OWNDEL";
+        Assert.Null(await RunRowAsync(scene, key, delete: false, lockBetween: false));
+        await InsertLockAsync(scene, key, scene.WriterId);
+
+        Assert.Null(await RunRowAsync(scene, key, delete: true, lockBetween: false));
+
+        Assert.Equal(0, await RowCountAsync(scene, key));
+        Assert.Equal(0, await ScalarAsync<int>(
+            $"SELECT COUNT(*) FROM doc.RowLock WHERE DocumentId = {scene.Doc.DocumentId} AND RowKey = N'{key}' AND ReleasedAt IS NULL"));
     }
 
     [Fact]
@@ -332,7 +353,8 @@ public sealed class RowLockGateRaceTests(SqlServerFixture sql)
     {
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         return new CreateRowLocksRequest(
-            scene.Doc.PeriodKey.Value, null, scene.TableCode, [scene.RowKey], today, today.AddDays(3), "race");
+            scene.Doc.PeriodKey.Value, null, scene.SheetCode, scene.TableCode, [scene.RowKey], today, today.AddDays(3),
+            "race");
     }
 
     private static AccessProfile Writer(Scene scene)
@@ -374,7 +396,7 @@ public sealed class RowLockGateRaceTests(SqlServerFixture sql)
         await using var other = CreateContext();
         var now = DateTime.UtcNow;
         other.RowLocks.Add(RowLock.Create(
-            scene.Doc.DocumentId, scene.Doc.PeriodKey.Value, null, scene.TableCode, rowKey,
+            scene.Doc.DocumentId, scene.Doc.PeriodKey.Value, null, scene.SheetCode, scene.TableCode, rowKey,
             now.AddMinutes(-1), now.AddDays(1), owner, "race", now));
         await other.SaveChangesAsync(CancellationToken.None);
     }

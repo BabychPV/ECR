@@ -24,18 +24,23 @@ public interface IRowLockStore
         long documentId, int periodKey, long? sheetCopyId, int tableDefId, IReadOnlyCollection<string> rowKeys,
         CancellationToken ct);
 
-    /// <summary>Ключі рядків, на які вже є незняте блокування, що перетинає проміжок <c>[from, until)</c>.</summary>
+    /// <summary>
+    /// Ключі рядків, на які вже є незняте й НЕ прострочене (<c>LockUntil &gt; utcNow</c>) блокування, що перетинає
+    /// проміжок <c>[from, until)</c>.
+    /// </summary>
     /// <param name="documentId">Документ.</param>
     /// <param name="periodKey">Період.</param>
     /// <param name="sheetCopyId">Копія аркуша.</param>
+    /// <param name="sheetCode">Код аркуша.</param>
     /// <param name="tableCode">Код таблиці.</param>
     /// <param name="rowKeys">Ключі рядків.</param>
     /// <param name="from">Початок (UTC).</param>
     /// <param name="until">Кінець (UTC, виключно).</param>
+    /// <param name="utcNow">Поточний момент: прострочене блокування не конфліктує (F13 D3).</param>
     /// <param name="ct">Токен скасування.</param>
     public Task<IReadOnlyList<string>> OverlappingAsync(
-        long documentId, int periodKey, long? sheetCopyId, string tableCode, IReadOnlyCollection<string> rowKeys,
-        DateTime from, DateTime until, CancellationToken ct);
+        long documentId, int periodKey, long? sheetCopyId, string sheetCode, string tableCode,
+        IReadOnlyCollection<string> rowKeys, DateTime from, DateTime until, DateTime utcNow, CancellationToken ct);
 
     /// <summary>Незняті й не прострочені блокування документа за період (з іменем власника).</summary>
     /// <param name="documentId">Документ.</param>
@@ -66,8 +71,19 @@ public interface IRowLockStore
     /// <param name="userId">Хто пише.</param>
     /// <param name="utcNow">Момент.</param>
     /// <param name="ct">Токен скасування.</param>
-    public Task<IReadOnlyList<(long? SheetCopyId, string TableCode, string RowKey)>> LockedByOthersAsync(
+    public Task<IReadOnlyList<RowLockKey>> LockedByOthersAsync(
         long documentId, int periodKey, int userId, DateTime utcNow, CancellationToken ct);
+
+    /// <summary>
+    /// Незняті блокування рядка (відстежувані) — їх знімає видалення рядка: ключ, якого більше немає, не мусить замикати
+    /// новий рядок із тим самим ключем.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період екземпляра.</param>
+    /// <param name="key">Рядок.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<RowLock>> FindUnreleasedForRowAsync(
+        long documentId, int periodKey, RowLockKey key, CancellationToken ct);
 
     /// <summary>Додає нові блокування.</summary>
     /// <param name="locks">Блокування.</param>
@@ -93,9 +109,17 @@ public sealed record RowLockTarget(
     int TemplateVersionId,
     string BusinessKey);
 
+/// <summary>Ідентичність заблокованого рядка в документі за період (F13 D2: таблиця — разом з аркушем).</summary>
+/// <param name="SheetCopyId">Копія аркуша; <c>null</c> — оригінал.</param>
+/// <param name="SheetCode">Код аркуша.</param>
+/// <param name="TableCode">Код таблиці (унікальний у межах аркуша).</param>
+/// <param name="RowKey">Ключ рядка.</param>
+public readonly record struct RowLockKey(long? SheetCopyId, string SheetCode, string TableCode, string RowKey);
+
 /// <summary>Блокування з іменем власника.</summary>
 /// <param name="Id">Ідентифікатор.</param>
 /// <param name="SheetCopyId">Копія аркуша.</param>
+/// <param name="SheetCode">Код аркуша.</param>
 /// <param name="TableCode">Код таблиці.</param>
 /// <param name="RowKey">Ключ рядка.</param>
 /// <param name="LockFrom">Початок (UTC).</param>
@@ -106,6 +130,7 @@ public sealed record RowLockTarget(
 public sealed record RowLockRecord(
     long Id,
     long? SheetCopyId,
+    string SheetCode,
     string TableCode,
     string RowKey,
     DateTime LockFrom,

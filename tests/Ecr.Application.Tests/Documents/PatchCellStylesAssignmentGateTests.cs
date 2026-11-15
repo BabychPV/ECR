@@ -219,8 +219,7 @@ public sealed class PatchCellStylesAssignmentGateTests
 
         var rowLocks = Substitute.For<IRowLockStore>();
         rowLocks.LockedByOthersAsync(Document, Period, UserId, Now, Arg.Any<CancellationToken>())
-                .Returns(Task.FromResult<IReadOnlyList<(long? SheetCopyId, string TableCode, string RowKey)>>(
-                    [(null, "Main", "R1")]));
+                .Returns(Task.FromResult<IReadOnlyList<RowLockKey>>([new RowLockKey(null, "Water", "Main", "R1")]));
 
         var call = () => Handler(rowLocks).HandleAsync(
             Document,

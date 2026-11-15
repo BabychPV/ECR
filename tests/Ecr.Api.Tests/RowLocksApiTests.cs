@@ -144,6 +144,13 @@ public sealed class RowLocksApiTests(SqlServerFixture sql)
         var s = await ArrangeAsync().ConfigureAwait(true);
         await using (var db = s.Builder.CreateContext())
         {
+            // ✎ F13 D1: перенос версії переносить wf.ApprovalState — старий Submitted аркуша версії None не замикає правку.
+            var state = new Ecr.Domain.Entities.Workflow.ApprovalState(
+                s.Document.DocumentId, s.Document.SheetDefId, s.PeriodKey);
+            state.Submit(1, DateTime.UtcNow.AddDays(-1));
+            db.ApprovalStates.Add(state);
+            await db.SaveChangesAsync().ConfigureAwait(true);
+
             await db.Database.ExecuteSqlInterpolatedAsync(
                 $"UPDATE cfg.TemplateVersion SET WorkflowMode = 1 WHERE Id = {s.Document.TemplateVersionId}").ConfigureAwait(true);
         }
@@ -177,6 +184,62 @@ public sealed class RowLocksApiTests(SqlServerFixture sql)
         Assert.Equal("err.ECR-SUB-4221.workflowDisabled", approve.GetProperty("messageKey").GetString());
     }
 
+    /// <remarks>
+    /// ✎ F13 мутації M2/M10/M15: власник документа лише з Read не блокує (потрібен Write на таблицю); носій права із
+    /// забороною на таблицю не блокує її рядки (404, таблиця невидима) і не бачить їхніх блокувань у переліку.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "B75")]
+    public async Task Власник_лише_з_Read_і_носій_права_без_доступу_до_таблиці_не_блокують_і_не_бачать()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var author = await SignInAsync(app, s.Author).ConfigureAwait(true);
+        using var reader = await SignInAsync(app, s.Reader).ConfigureAwait(true);
+        using var blind = await SignInAsync(app, s.Blind).ConfigureAwait(true);
+
+        await JsonAsync(app, HttpStatusCode.OK, author.PostAsJsonAsync(LocksUri(s), LockBody(s, s.RowKeys[0])))
+            .ConfigureAwait(true);
+
+        var hidden = await JsonAsync(app, HttpStatusCode.OK, blind.GetAsync(ListUri(s))).ConfigureAwait(true);
+        Assert.Empty(hidden.EnumerateArray());
+        await JsonAsync(app, HttpStatusCode.NotFound, blind.PostAsJsonAsync(LocksUri(s), LockBody(s, s.RowKeys[1])))
+            .ConfigureAwait(true);
+
+        await using (var db = s.Builder.CreateContext())
+        {
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE doc.Document SET CreatedByUserId = {s.ReaderId} WHERE Id = {s.Document.DocumentId}").ConfigureAwait(true);
+        }
+
+        await JsonAsync(app, HttpStatusCode.Forbidden, reader.PostAsJsonAsync(LocksUri(s), LockBody(s, s.RowKeys[1])))
+            .ConfigureAwait(true);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "B75")]
+    public async Task Межі_дат_422_а_не_500()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var author = await SignInAsync(app, s.Author).ConfigureAwait(true);
+
+        var body = new
+        {
+            periodKey = s.PeriodKey,
+            sheetCode = s.Document.SheetCode,
+            tableCode = s.TableCode,
+            rowKeys = new[] { s.RowKeys[0] },
+            fromDate = "2026-01-01",
+            toDate = "9999-12-31",
+        };
+        var refused = await JsonAsync(app, HttpStatusCode.UnprocessableEntity, author.PostAsJsonAsync(LocksUri(s), body))
+            .ConfigureAwait(true);
+        Assert.Equal("err.ECR-REQ-0422.lockRangeInvalid", refused.GetProperty("messageKey").GetString());
+    }
+
     // ───────────────────────────── допоміжне ─────────────────────────────
 
     private sealed record Scenario(
@@ -191,7 +254,13 @@ public sealed class RowLocksApiTests(SqlServerFixture sql)
         string ColumnCode,
         string TableCode,
         int PeriodKey,
-        int DraftVersionId);
+        int DraftVersionId)
+    {
+        /// <summary>Носій права Document.RowLock із Read на проєкт, але з забороною на таблицю.</summary>
+        public string Blind { get; init; } = string.Empty;
+
+        public int ReaderId { get; init; }
+    }
 
     private static Uri LocksUri(Scenario s) => new($"/api/v1/documents/{s.Document.DocumentId}/row-locks", UriKind.Relative);
 
@@ -210,6 +279,7 @@ public sealed class RowLocksApiTests(SqlServerFixture sql)
         {
             periodKey = s.PeriodKey,
             sheetCopyId = (long?)null,
+            sheetCode = s.Document.SheetCode,
             tableCode = s.TableCode,
             rowKeys = new[] { rowKey },
             fromDate = today.AddDays(fromDays).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
@@ -293,6 +363,10 @@ public sealed class RowLocksApiTests(SqlServerFixture sql)
         db.DocumentSheets.Add(new DocumentSheet(document.DocumentId, document.SheetDefId));
 
         async Task<(int Id, string Name)> UserAsync(string prefix, GrantLevel? level, params string[] permissions)
+            => await UserDenyAsync(prefix, level, denyTable: false, permissions).ConfigureAwait(false);
+
+        async Task<(int Id, string Name)> UserDenyAsync(
+            string prefix, GrantLevel? level, bool denyTable, params string[] permissions)
         {
             var name = $"{prefix}_{Guid.NewGuid():N}"[..20];
             var user = new User(name, name, AuthProvider.Local);
@@ -316,6 +390,12 @@ public sealed class RowLocksApiTests(SqlServerFixture sql)
                 db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Project, document.ProjectId, l));
             }
 
+            if (denyTable)
+            {
+                db.ResourceGrants.Add(new ResourceGrant(
+                    role.Id, ResourceKind.Table, document.TableDefId, GrantLevel.None, isDeny: true));
+            }
+
             await db.SaveChangesAsync().ConfigureAwait(false);
             return (user.Id, name);
         }
@@ -325,6 +405,8 @@ public sealed class RowLocksApiTests(SqlServerFixture sql)
         var holder = await UserAsync("b75h", GrantLevel.Read, "Document.View", "Document.RowLock").ConfigureAwait(false);
         var reader = await UserAsync("b75r", GrantLevel.Read, "Document.View").ConfigureAwait(false);
         var designer = await UserAsync("b75d", null, "Template.View", "Template.Edit").ConfigureAwait(false);
+        var blind = await UserDenyAsync("b75x", GrantLevel.Read, denyTable: true, "Document.View", "Document.RowLock")
+            .ConfigureAwait(false);
 
         await db.Database.ExecuteSqlInterpolatedAsync(
             $"UPDATE doc.Document SET CreatedByUserId = {author.Id} WHERE Id = {document.DocumentId}").ConfigureAwait(false);
@@ -355,6 +437,10 @@ public sealed class RowLocksApiTests(SqlServerFixture sql)
 
         return new Scenario(
             builder, document, author.Name, writer.Name, holder.Name, reader.Name, designer.Name, rowKeys, columnCode,
-            tableCode, periodKey, draft.Id);
+            tableCode, periodKey, draft.Id)
+        {
+            Blind = blind.Name,
+            ReaderId = reader.Id,
+        };
     }
 }

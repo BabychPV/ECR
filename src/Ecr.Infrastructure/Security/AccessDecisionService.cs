@@ -1,4 +1,4 @@
-﻿using Ecr.Application.Errors;
+using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
@@ -2188,7 +2188,7 @@ public sealed class AccessDecisionService(
 
             // ✎ B75: діючі блокування рядків ІНШИХ людей — ОДИН запит на групу і лише тоді, коли ознака з запиту умов
             // каже, що вони є. Інтеграція й симуляція їх не читають (Q2; симуляцію відхиляє `EditRules` раніше).
-            IReadOnlyList<(long? SheetCopyId, string TableCode, string RowKey)> lockedRows =
+            IReadOnlyList<RowLockKey> lockedRows =
                 !profile.IsIntegrationWriter && !profile.IsSimulation && sharedBySheet.Values.First().HasRowLocks
                     ? await ActiveRowLocksAsync(documentId, periodKey, profile.UserId, ct).ConfigureAwait(false)
                     : [];
@@ -2369,7 +2369,7 @@ public sealed class AccessDecisionService(
                     MonthShared = monthShared,
                     Annual = annual,
                     RoutesOwnership = annualRouting,
-                    LockedRows = LockedRowsOf(lockedRows, sheetKey.SheetCopyId, instanceTableCode),
+                    LockedRows = LockedRowsOf(lockedRows, sheetKey.SheetCopyId, sheetCode, instanceTableCode),
                 };
             }
         }
@@ -2381,7 +2381,7 @@ public sealed class AccessDecisionService(
     /// ✎ B75: діючі на <c>clock.UtcNow</c> блокування рядків документа за період, власник яких — НЕ <paramref name="userId"/>
     /// (власник блокування править рядок і далі, Q1).
     /// </summary>
-    private async Task<IReadOnlyList<(long? SheetCopyId, string TableCode, string RowKey)>> ActiveRowLocksAsync(
+    private async Task<IReadOnlyList<RowLockKey>> ActiveRowLocksAsync(
         long documentId, PeriodKey periodKey, int userId, CancellationToken ct)
     {
         var now = clock.UtcNow;
@@ -2394,16 +2394,19 @@ public sealed class AccessDecisionService(
                         && x.LockFrom <= now
                         && x.LockUntil > now
                         && x.OwnerUserId != userId)
-            .Select(x => new { x.SheetCopyId, x.TableCode, x.RowKey })
+            .Select(x => new { x.SheetCopyId, x.SheetCode, x.TableCode, x.RowKey })
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        return [.. rows.Select(x => (x.SheetCopyId, x.TableCode, x.RowKey))];
+        return [.. rows.Select(x => new RowLockKey(x.SheetCopyId, x.SheetCode, x.TableCode, x.RowKey))];
     }
 
-    /// <summary>✎ B75: ключі заблокованих рядків одного зрізу (копія аркуша й код таблиці мають збігатися).</summary>
+    /// <summary>
+    /// ✎ B75: ключі заблокованих рядків одного зрізу — копія аркуша, код АРКУША й код таблиці мають збігатися (F13 D2: код
+    /// таблиці унікальний лише в межах аркуша).
+    /// </summary>
     private static IReadOnlySet<string> LockedRowsOf(
-        IReadOnlyList<(long? SheetCopyId, string TableCode, string RowKey)> locks, long? sheetCopyId, string? tableCode)
+        IReadOnlyList<RowLockKey> locks, long? sheetCopyId, string? sheetCode, string? tableCode)
     {
         if (locks.Count == 0 || tableCode is null)
         {
@@ -2411,11 +2414,14 @@ public sealed class AccessDecisionService(
         }
 
         var result = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var (copy, table, rowKey) in locks)
+        foreach (var item in locks)
         {
-            if (copy == sheetCopyId && string.Equals(table, tableCode, StringComparison.Ordinal))
+            // ⚠ Невідомий код аркуша — збіг за таблицею (fail-closed: зайва відмова краща за пропущене блокування).
+            if (item.SheetCopyId == sheetCopyId
+                && (sheetCode is null || string.Equals(item.SheetCode, sheetCode, StringComparison.Ordinal))
+                && string.Equals(item.TableCode, tableCode, StringComparison.Ordinal))
             {
-                result.Add(rowKey);
+                result.Add(item.RowKey);
             }
         }
 

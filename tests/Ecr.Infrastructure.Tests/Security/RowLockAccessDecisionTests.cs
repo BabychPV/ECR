@@ -78,7 +78,7 @@ public sealed class RowLockAccessDecisionTests(SqlServerFixture sql) : IDisposab
     }
 
     private async Task<RowLock> LockAsync(
-        World w, int row = 0, DateTime? from = null, DateTime? until = null, int? owner = null)
+        World w, int row = 0, DateTime? from = null, DateTime? until = null, int? owner = null, string? sheetCode = null)
     {
         await using var db = w.Builder.CreateContext();
         var rowKey = await db.TableRows
@@ -89,7 +89,7 @@ public sealed class RowLockAccessDecisionTests(SqlServerFixture sql) : IDisposab
         // Створення — «давніше» (домен не приймає кінця в минулому), рішення — за годинником Now.
         var created = (from ?? Now.AddDays(-1)).AddDays(-1);
         var item = RowLock.Create(
-            w.Doc.DocumentId, PeriodKeyValue, sheetCopyId: null, w.TableCode, rowKey,
+            w.Doc.DocumentId, PeriodKeyValue, sheetCopyId: null, sheetCode ?? w.Doc.SheetCode, w.TableCode, rowKey,
             from ?? Now.AddDays(-1), until ?? Now.AddDays(5), owner ?? w.LockerUserId, note: "test", created);
         db.RowLocks.Add(item);
         await db.SaveChangesAsync();
@@ -247,6 +247,38 @@ public sealed class RowLockAccessDecisionTests(SqlServerFixture sql) : IDisposab
 
         var after = await BatchAsync(w, Writer(w, w.OtherUserId), w.Cell(0, 0));
         Assert.True(after[w.Cell(0, 0)].IsAllowed);
+    }
+
+    /// <remarks>
+    /// ✎ F13 D2/D3: блокування того самого коду таблиці на ІНШОМУ аркуші не замикає рядок і не конфліктує; прострочене
+    /// незняте блокування не дає хибного 409. Мутації: прибрати <c>SheetCode</c> з <c>LockedRowsOf</c>/<c>OverlappingAsync</c>
+    /// — червоніє перша/друга частина; прибрати <c>LockUntil &gt; utcNow</c> в <c>OverlappingAsync</c> — третя.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "B75-D2")]
+    public async Task Блокування_іншого_аркуша_з_тим_самим_кодом_таблиці_і_прострочене_не_заважають()
+    {
+        var w = await ArrangeAsync();
+        await LockAsync(w, row: 0, sheetCode: "OTHER_SHEET");
+        await LockAsync(w, row: 1);
+        await LockAsync(w, row: 2, from: Now.AddDays(-10), until: Now.AddMinutes(-1));
+
+        var decisions = await BatchAsync(w, Writer(w, w.OtherUserId), w.Cell(0, 0), w.Cell(1, 0));
+        Assert.True(decisions[w.Cell(0, 0)].IsAllowed);
+        Assert.Equal(EditDenyReason.RowLocked, decisions[w.Cell(1, 0)].Reason);
+
+        await using var db = w.Builder.CreateContext();
+        var byId = await db.TableRows
+            .Where(r => r.PeriodKeyValue == PeriodKeyValue && w.Doc.RowIds.Contains(r.Id))
+            .ToDictionaryAsync(r => r.Id, r => r.RowKeyValue);
+        var keys = w.Doc.RowIds.Select(id => byId[id]).ToList();
+        var overlapping = await new RowLockStore(db).OverlappingAsync(
+            w.Doc.DocumentId, PeriodKeyValue, null, w.Doc.SheetCode, w.TableCode, keys,
+            Now.AddDays(-1), Now.AddDays(3), Now, CancellationToken.None);
+
+        Assert.Equal([keys[1]], overlapping);
     }
 
     private static User NewUser()

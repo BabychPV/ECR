@@ -5914,6 +5914,10 @@
             },
             "type": "array"
           },
+          "sheetCode": {
+            "description": "Код аркуша (F13 D2: код таблиці унікальний лише в межах аркуша).",
+            "type": "string"
+          },
           "sheetCopyId": {
             "description": "Копія аркуша; `null` — оригінал.",
             "format": "int64",
@@ -5935,6 +5939,7 @@
         "required": [
           "periodKey",
           "sheetCopyId",
+          "sheetCode",
           "tableCode",
           "rowKeys",
           "fromDate",
@@ -23529,6 +23534,10 @@
             "description": "Ключ рядка.",
             "type": "string"
           },
+          "sheetCode": {
+            "description": "✎ F13 D2: код аркуша таблиці (код таблиці унікальний лише в межах аркуша).",
+            "type": "string"
+          },
           "sheetCopyId": {
             "description": "Копія аркуша; `null` — оригінал.",
             "format": "int64",
@@ -23538,7 +23547,7 @@
             ]
           },
           "tableCode": {
-            "description": "Код таблиці.",
+            "description": "Код таблиці (унікальний у межах аркуша).",
             "type": "string"
           }
         },

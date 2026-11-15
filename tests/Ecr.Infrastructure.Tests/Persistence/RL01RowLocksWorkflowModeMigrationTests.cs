@@ -51,8 +51,8 @@ public sealed class RL01RowLocksWorkflowModeMigrationTests(SqlServerFixture sql)
         var ex = await Assert.ThrowsAsync<SqlException>(() => ExecuteAsync(cs, """
             ALTER TABLE doc.RowLock NOCHECK CONSTRAINT FK_RowLock_Document;
             ALTER TABLE doc.RowLock NOCHECK CONSTRAINT FK_RowLock_Owner;
-            INSERT INTO doc.RowLock (DocumentId, PeriodKey, TableCode, RowKey, LockFrom, LockUntil, OwnerUserId, CreatedAt)
-            VALUES (1, 202610, N'T', N'R', '2026-10-02', '2026-10-01', 1, '2026-10-01');
+            INSERT INTO doc.RowLock (DocumentId, PeriodKey, SheetCode, TableCode, RowKey, LockFrom, LockUntil, OwnerUserId, CreatedAt)
+            VALUES (1, 202610, N'S', N'T', N'R', '2026-10-02', '2026-10-01', 1, '2026-10-01');
             """));
         Assert.Contains("CK_RowLock_Range", ex.Message, StringComparison.Ordinal);
 

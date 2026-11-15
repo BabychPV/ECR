@@ -119,10 +119,63 @@ public sealed partial class PermitRuntimeRowsTests
         Assert.Equal(1, (await HandleAsync(scene, withRight, Jobs())).Added);
     }
 
-    private async Task<PermitRefreshResultDto> HandleAsync(Scene scene, AccessProfile profile, IBackgroundJobScheduler jobs)
+    private async Task<PermitRefreshResultDto> HandleAsync(
+        Scene scene, AccessProfile profile, IBackgroundJobScheduler jobs, Func<Task>? afterDecision = null)
     {
         await using var db = scene.NewContext();
-        return await NewHandler(db, jobs).HandleAsync(scene.DocumentId, $"B{_tag}", January.Value, profile, default);
+        return await NewHandler(db, jobs, afterDecision)
+            .HandleAsync(scene.DocumentId, $"B{_tag}", January.Value, profile, default);
+    }
+
+    /// <remarks>
+    /// ✎ B75 (F13): оновлення з дозволу, що зачіпає чужі заблоковані рядки, — одна відмова RowLocked із переліком УСІХ
+    /// таких рядків, нічого не записано; те саме, коли блокування закомічено між рішенням і замком аркуша. Мутації:
+    /// прибрати перелік у рішенні (`lockedKeys`) — червоніє перша частина; прибрати перевірку під замком у
+    /// `RefreshUnderLockAsync` — друга.
+    /// </remarks>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "B75")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Обробник_оновлення_з_чужими_заблокованими_рядками_відмовляє_з_переліком(bool betweenDecisionAndLock)
+    {
+        var scene = await ArrangeAsync();
+        await using var _ = scene.H;
+        var profile = await OpenPeriodProfileAsync(scene);
+        await scene.H.SeedPermitAsync(Type, $"N3{_tag}", "Site A", new DateOnly(2026, 1, 15), null, true, ("NEW1", 1m, null));
+        var keys = (await scene.RowsAsync()).Select(r => r.RowKey).Take(2).ToList();
+
+        async Task LockRowsAsync()
+        {
+            await using var db = scene.NewContext();
+            var locker = new User($"rlp_{Guid.NewGuid():N}"[..20], "B75 locker", AuthProvider.Local);
+            locker.SetPassword("not-a-real-hash");
+            db.Users.Add(locker);
+            await db.SaveChangesAsync();
+            var tableCode = await db.TableDefs.Where(t => t.Id == scene.Sheet.Doc.TableDefId).Select(t => t.Code).SingleAsync();
+            foreach (var key in keys)
+            {
+                db.RowLocks.Add(RowLock.Create(
+                    scene.DocumentId, January.Value, null, scene.Sheet.Doc.SheetCode, tableCode, key,
+                    Now.AddDays(-1), Now.AddDays(5), locker.Id, "permit", Now.AddDays(-2)));
+            }
+
+            await db.SaveChangesAsync();
+        }
+
+        if (!betweenDecisionAndLock)
+        {
+            await LockRowsAsync();
+        }
+
+        var denied = await Assert.ThrowsAsync<AccessDeniedException>(
+            () => HandleAsync(scene, profile, Jobs(), betweenDecisionAndLock ? LockRowsAsync : null));
+
+        Assert.Equal(nameof(EditDenyReason.RowLocked), denied.Details!["reason"]?.ToString());
+        Assert.All(keys, k => Assert.Contains(k, denied.Details["rowKeys"]?.ToString(), StringComparison.Ordinal));
+        Assert.Equal(3, (await scene.RowsAsync()).Count);
     }
 
     private static IBackgroundJobScheduler Jobs()
@@ -135,7 +188,7 @@ public sealed partial class PermitRuntimeRowsTests
         return jobs;
     }
 
-    private RefreshPermitBindingHandler NewHandler(EcrDbContext db, IBackgroundJobScheduler jobs)
+    private RefreshPermitBindingHandler NewHandler(EcrDbContext db, IBackgroundJobScheduler jobs, Func<Task>? afterDecision = null)
     {
         var clock = new TestClock(Now);
         var memory = new MemoryCache(new MemoryCacheOptions());
@@ -144,9 +197,12 @@ public sealed partial class PermitRuntimeRowsTests
             serviceDb, new MetadataCache(memory, serviceDb), new AccessProfileCache(memory), clock,
             Substitute.For<ICurrentUser>(), new WorkflowStore(serviceDb));
 
+        IAccessDecisionService decided = afterDecision is null ? access : AfterRowDecision.Wrap(access, afterDecision);
+
         return new RefreshPermitBindingHandler(
             NewStore(db, permits: true), new DocumentStore(db), new PermitBindingStore(db), new PeriodStore(db), NewService(db),
-            new PermitTypeStore(db), new MetadataCache(memory, db), access, new UnitOfWork(db), clock, new SheetEditGate(db), jobs, new EditAssignmentStore(db));
+            new PermitTypeStore(db), new MetadataCache(memory, db), decided, new UnitOfWork(db), clock, new SheetEditGate(db), jobs,
+            new EditAssignmentStore(db), new RowLockStore(db));
     }
 
     /// <summary>Користувач із записом у проєкт; період відкрито, а рядки з дозволу вже заведені відкриттям документа.</summary>
@@ -169,5 +225,43 @@ public sealed partial class PermitRuntimeRowsTests
             .Grant(ResourceKind.Project, scene.ProjectId, GrantLevel.Write)
             .Permission("Registry.View")
             .Build();
+    }
+}
+
+/// <summary>
+/// ✎ B75: декоратор служби доступу — усе пересилає справжній, а після <c>CanCreateRowsAsync</c> виконує втручання (точка
+/// перемикання «між рішенням і замком»).
+/// </summary>
+public class AfterRowDecision : System.Reflection.DispatchProxy
+{
+    private IAccessDecisionService _inner = null!;
+    private Func<Task> _hook = null!;
+
+    /// <summary>Обгортає службу.</summary>
+    public static IAccessDecisionService Wrap(IAccessDecisionService inner, Func<Task> hook)
+    {
+        var proxy = Create<IAccessDecisionService, AfterRowDecision>();
+        var self = (AfterRowDecision)(object)proxy;
+        self._inner = inner;
+        self._hook = hook;
+        return proxy;
+    }
+
+    /// <inheritdoc />
+    protected override object? Invoke(System.Reflection.MethodInfo? targetMethod, object?[]? args)
+    {
+        ArgumentNullException.ThrowIfNull(targetMethod);
+        var result = targetMethod.Invoke(_inner, args);
+        return targetMethod.Name == nameof(IAccessDecisionService.CanCreateRowsAsync)
+            && result is Task<IReadOnlyDictionary<string, NewRowAccess>> decisions
+                ? ThenAsync(decisions)
+                : result;
+    }
+
+    private async Task<IReadOnlyDictionary<string, NewRowAccess>> ThenAsync(Task<IReadOnlyDictionary<string, NewRowAccess>> decisions)
+    {
+        var found = await decisions.ConfigureAwait(false);
+        await _hook().ConfigureAwait(false);
+        return found;
     }
 }

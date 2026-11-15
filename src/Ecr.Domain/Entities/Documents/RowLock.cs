@@ -7,15 +7,20 @@ namespace Ecr.Domain.Entities.Documents;
 /// обирає рядки й дати — їх ніхто, крім нього, не змінює; знімається само після кінцевої дати або власником»).
 /// </summary>
 /// <remarks>
-/// ⛔ Рядок ідентифікується <c>(DocumentId, PeriodKey, SheetCopyId, TableCode, RowKey)</c>, а не <c>TableRow.Id</c>:
-/// ключ переживає правку комірок, переупорядкування й перенос версії шаблону (код таблиці й ключ рядка зберігаються).
+/// ⛔ Рядок ідентифікується <c>(DocumentId, PeriodKey, SheetCopyId, SheetCode, TableCode, RowKey)</c>, а не
+/// <c>TableRow.Id</c>: ключ переживає правку комірок, переупорядкування й перенос версії шаблону (коди аркуша й таблиці та
+/// ключ рядка зберігаються). Код таблиці унікальний лише в межах аркуша (<c>UQ_TableDef (SheetDefId, Code)</c>), тому
+/// аркуш — частина ключа (F13 D2).
 /// <para>
 /// ⚠ Діє, поки <c>LockFrom ≤ now &lt; LockUntil</c> і не знято (<see cref="IsActiveAt"/>) — рахується на читанні, як
 /// строк передачі; задачі немає. Зняте й прострочене лишається історією.
 /// </para>
 /// </remarks>
-public sealed class RowLock : Entity<long>
+public sealed class RowLock : Entity<int>
 {
+    /// <summary>Найбільша довжина коду аркуша — як у <c>cfg.SheetDef.Code</c>.</summary>
+    public const int MaxSheetCodeLength = 64;
+
     /// <summary>Найбільша довжина коду таблиці — як у <c>cfg.TableDef.Code</c>.</summary>
     public const int MaxTableCodeLength = 64;
 
@@ -36,7 +41,10 @@ public sealed class RowLock : Entity<long>
     /// <summary>Копія аркуша (RS); <c>null</c> — оригінал.</summary>
     public long? SheetCopyId { get; private set; }
 
-    /// <summary>Код таблиці шаблону.</summary>
+    /// <summary>Код аркуша шаблону (стабільний між версіями).</summary>
+    public string SheetCode { get; private set; } = string.Empty;
+
+    /// <summary>Код таблиці шаблону (унікальний у межах аркуша).</summary>
     public string TableCode { get; private set; } = string.Empty;
 
     /// <summary>Ключ рядка.</summary>
@@ -74,6 +82,7 @@ public sealed class RowLock : Entity<long>
     /// <param name="documentId">Документ.</param>
     /// <param name="periodKey">Період екземпляра.</param>
     /// <param name="sheetCopyId">Копія аркуша; <c>null</c> — оригінал.</param>
+    /// <param name="sheetCode">Код аркуша.</param>
     /// <param name="tableCode">Код таблиці.</param>
     /// <param name="rowKey">Ключ рядка.</param>
     /// <param name="lockFrom">Початок (UTC, включно).</param>
@@ -83,9 +92,10 @@ public sealed class RowLock : Entity<long>
     /// <param name="utcNow">Поточний момент.</param>
     /// <exception cref="DomainException">Порожній проміжок або кінець у минулому (<c>ECR-REQ-0422</c>, <c>lockRangeInvalid</c>).</exception>
     public static RowLock Create(
-        long documentId, int periodKey, long? sheetCopyId, string tableCode, string rowKey,
+        long documentId, int periodKey, long? sheetCopyId, string sheetCode, string tableCode, string rowKey,
         DateTime lockFrom, DateTime lockUntil, int ownerUserId, string? note, DateTime utcNow)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sheetCode);
         ArgumentException.ThrowIfNullOrWhiteSpace(tableCode);
         ArgumentException.ThrowIfNullOrWhiteSpace(rowKey);
 
@@ -115,6 +125,7 @@ public sealed class RowLock : Entity<long>
             DocumentId = documentId,
             PeriodKeyValue = periodKey,
             SheetCopyId = sheetCopyId,
+            SheetCode = sheetCode,
             TableCode = tableCode,
             RowKey = rowKey,
             LockFrom = DateTime.SpecifyKind(lockFrom, DateTimeKind.Utc),
