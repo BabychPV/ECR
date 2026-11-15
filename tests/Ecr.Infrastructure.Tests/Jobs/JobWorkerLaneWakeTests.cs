@@ -20,7 +20,8 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 /// Без годинників: <c>PollInterval</c> = 1 година, тож задачу може запустити ЛИШЕ сигнал; синхронізація —
 /// <see cref="TaskCompletionSource"/>; межа 30 с — лише запобіжник від зависання, не вимір.
 /// Мутації: повернути <c>Task.Delay(PollInterval)</c> в окремий цикл <c>JobWorker.PollAsync</c> — 1-й червоний
-/// (таймаут); у <c>JobQueueSignal.Notify(lane)</c> будити всі підписки — 3-й червоний; не будити жодної — 1-й і 2-й.
+/// (таймаут); у <c>JobQueueSignal.Notify(lane)</c> будити всі підписки — 3-й червоний; не будити жодної — 1-й і 2-й; не писати
+/// в спільний канал у <c>Notify(lane)</c> — 2-й червоний.
 /// </remarks>
 [Trait(TestCategories.Stage, TestCategories.Stage5)]
 public sealed class JobWorkerLaneWakeTests
@@ -109,6 +110,9 @@ public sealed class JobWorkerLaneWakeTests
         // Сигнал уже в каналі підписки: очікування завершується синхронно, без годинника.
         Assert.True(wait.IsCompletedSuccessfully);
         await wait;
+
+        // Сигнал лейна будить і ОСНОВНИЙ цикл (спільний канал): там лейн теж може бути (interactive).
+        Assert.True(signal.WaitAsync(TimeSpan.FromHours(1), cts.Token).IsCompletedSuccessfully);
 
         signal.Notify();
         Assert.True(waiter.WaitAsync(TimeSpan.FromHours(1), cts.Token).IsCompletedSuccessfully);

@@ -5,7 +5,9 @@ using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Xunit;
 
 namespace Ecr.Api.Tests;
@@ -22,7 +24,8 @@ namespace Ecr.Api.Tests;
 /// ⛔ МУТАЦІЇ (червоні локально, не закомічені): у <c>CalculationResultStore.Bulk.cs</c> писати
 /// <c>TableInstanceId</c> як <c>DBNull</c> — червоний <see cref="Масовий_запис_дає_ті_самі_рядки_що_й_EF"/>; не
 /// зливати <c>bulkPending</c> у <c>PendingResults</c> — червоний той самий тест (кроки без результату); прибрати
-/// <c>SqlBulkCopyOptions.CheckConstraints</c> — червоний <see cref="Порушення_FK_у_масовому_записі_не_лишає_нічого"/>.
+/// <c>SqlBulkCopyOptions.CheckConstraints</c> — червоний <see cref="Порушення_FK_у_масовому_записі_не_лишає_нічого"/>. Повернути у <c>CalculationOutputWriter</c> умову <c>chunks.Count == 1</c> — червоні еквівалентність (лічильник
+/// масових записів) і FK-тест (тип винятку); <c>&gt;</c> → <c>&gt;=</c> у <c>UseBulk</c> — червоний <see cref="Межа_масового_запису_строго_понад_300"/>.
 /// </para>
 /// </remarks>
 [Collection("SqlServer")]
@@ -42,10 +45,16 @@ public sealed class CalculationResultBulkWriteDbTests(SqlServerFixture sql)
         Assert.True(outputs.Sum(o => o.Values.Count) > ICalculationResultStore.BulkWriteThreshold);
 
         var bulkRun = await StartRunAsync(f);
-        await WriteAsync(f, bulkRun, outputs, bulkThreshold: null);
+        var bulkWrites = await WriteAsync(f, bulkRun, outputs, bulkThreshold: null);
 
         var efRun = await StartRunAsync(f);
-        await WriteAsync(f, efRun, outputs, bulkThreshold: int.MaxValue);
+        var efBulkWrites = await WriteAsync(f, efRun, outputs, bulkThreshold: int.MaxValue);
+
+        // ⛔ Масовий прогін справді пройшов SqlBulkCopy (один чанк > межі — у транзакції записувача), а EF-прогін — ні.
+        // Без цього повернення умови `chunks.Count == 1` у CalculationOutputWriter лишало б тест зеленим: поза
+        // транзакцією сховище мовчки обирає EF, і рядки однакові.
+        Assert.Equal(1, bulkWrites);
+        Assert.Equal(0, efBulkWrites);
 
         await using var db = f.Builder.CreateContext();
         var bulk = await ShapeAsync(db, bulkRun);
@@ -99,21 +108,81 @@ public sealed class CalculationResultBulkWriteDbTests(SqlServerFixture sql)
         };
 
         var run = await StartRunAsync(f);
-        await Assert.ThrowsAnyAsync<Exception>(() => WriteAsync(f, run, outputs, bulkThreshold: null));
+
+        // Порушення FK ловить сам SqlBulkCopy (CheckConstraints): SqlException 547, а не DbUpdateException EF-шляху.
+        var violation = await Assert.ThrowsAsync<SqlException>(() => WriteAsync(f, run, outputs, bulkThreshold: null));
+        Assert.Equal(547, violation.Number);
 
         await using var db = f.Builder.CreateContext();
         Assert.Equal(0, await db.CalculationResults.AsNoTracking().CountAsync(r => r.CalculationRunId == run));
         Assert.Equal(0, await db.CalculationSteps.AsNoTracking().CountAsync(s => s.CalculationRunId == run));
     }
 
-    private static async Task WriteAsync(Fixture f, long runId, List<CalculationOutput> outputs, int? bulkThreshold)
+    /// <summary>
+    /// Межа включна: рівно <see cref="ICalculationResultStore.BulkWriteThreshold"/> результатів — ще EF (рядки в
+    /// трекері), на один більше — масовий шлях (трекер порожній).
+    /// </summary>
+    [Theory]
+    [InlineData(ICalculationResultStore.BulkWriteThreshold, false)]
+    [InlineData(ICalculationResultStore.BulkWriteThreshold + 1, true)]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Межа_масового_запису_строго_понад_300(int count, bool expectBulk)
+    {
+        var f = await ArrangeAsync();
+        List<CalculationOutput> outputs = [.. Enumerable.Range(1, count).Select(i => new CalculationOutput(
+            f.DocumentId, $"T{i:000}", [new CalculationOutputValue(f.VersionId, null, "A", i, f.UnitId)], []))];
+        var run = await StartRunAsync(f);
+
+        await using var db = f.Builder.CreateContext();
+        var log = new BulkLogCounter();
+        var store = new CalculationResultStore(db, new TestClock(Now), logger: log);
+        await new UnitOfWork(db, new TestClock(Now)).ExecuteInTransactionAsync(
+            async ct =>
+            {
+                await store.WriteResultsAsync(run, outputs, ct);
+                Assert.Equal(expectBulk ? 0 : count, db.ChangeTracker.Entries<CalculationResult>().Count());
+                await db.SaveChangesAsync(ct);
+            },
+            CancellationToken.None);
+
+        Assert.Equal(expectBulk ? 1 : 0, log.BulkWrites);
+        Assert.Equal(count, await db.CalculationResults.AsNoTracking().CountAsync(r => r.CalculationRunId == run));
+    }
+
+    /// <returns>Скільки разів сховище записало результати SqlBulkCopy (рядок журналу B85).</returns>
+    private static async Task<int> WriteAsync(Fixture f, long runId, List<CalculationOutput> outputs, int? bulkThreshold)
     {
         await using var db = f.Builder.CreateContext();
+        var log = new BulkLogCounter();
         var writer = new CalculationOutputWriter(
-            new CalculationResultStore(db, new TestClock(Now), bulkThreshold: bulkThreshold),
+            new CalculationResultStore(db, new TestClock(Now), logger: log, bulkThreshold: bulkThreshold),
             new UnitOfWork(db, new TestClock(Now)));
 
         await writer.WriteAsync(runId, outputs, TraceLevel.Full, CancellationToken.None);
+        return log.BulkWrites;
+    }
+
+    /// <summary>Лічильник рядків журналу «записано SqlBulkCopy» — доказ, що масовий шлях справді спрацював.</summary>
+    private sealed class BulkLogCounter : ILogger<CalculationResultStore>
+    {
+        private int bulkWrites;
+
+        public int BulkWrites => Volatile.Read(ref bulkWrites);
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (formatter(state, exception).Contains("SqlBulkCopy", StringComparison.Ordinal))
+            {
+                Interlocked.Increment(ref bulkWrites);
+            }
+        }
     }
 
     /// <summary>Усі колонки результату, крім Id; кроки — з адресою і КОНТЕНТОМ свого результату.</summary>
