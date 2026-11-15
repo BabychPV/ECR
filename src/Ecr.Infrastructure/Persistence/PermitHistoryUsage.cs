@@ -36,6 +36,22 @@ internal static class PermitHistoryUsage
                         r.PeriodKeyValue == ti.PeriodKeyValue && r.TableInstanceId == ti.Id
                         && r.RowKeyValue == s.RowKey && !r.IsDeleted))));
 
+    /// <summary>
+    /// Сегменти, чия ціль жива САМЕ в періоді <paramref name="periodKey"/>: поле шапки або рядок, невидалений у цьому
+    /// періоді (як комірки під фільтром періоду). Рядок, видалений лише в цьому періоді, але живий в іншому, тут не рахується;
+    /// без фільтра періоду — <see cref="LiveSegments"/> («бодай в одному періоді»).
+    /// </summary>
+    public static IQueryable<PermitSegment> LiveSegmentsIn(EcrDbContext db, int periodKey)
+        => db.PermitSegments.AsNoTracking().Where(s => s.HeaderFieldDefId != null)
+            .Concat(db.PermitSegments.AsNoTracking().Where(s =>
+                s.HeaderFieldDefId == null
+                && db.TableInstances.Any(ti =>
+                    ti.PeriodKeyValue == periodKey
+                    && ti.DocumentId == s.DocumentId && ti.TableDefId == s.TableDefId && ti.SheetCopyId == s.SheetCopyId
+                    && db.TableRows.Any(r =>
+                        r.PeriodKeyValue == ti.PeriodKeyValue && r.TableInstanceId == ti.Id
+                        && r.RowKeyValue == s.RowKey && !r.IsDeleted))));
+
     /// <summary>Частини поділених місяців, чий рядок у цьому місяці не видалено.</summary>
     public static IQueryable<CellPermitPart> LiveParts(EcrDbContext db)
         => db.CellPermitParts.AsNoTracking().Where(p =>

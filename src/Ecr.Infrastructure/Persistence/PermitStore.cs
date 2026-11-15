@@ -110,10 +110,13 @@ public sealed class PermitStore(EcrDbContext db) : IPermitStore
         // використання документом, хоч у полі чи комірці його немає. Рахується ДОКУМЕНТ, а не сегмент: кілька сегментів чи частин
         // одного документа — один документ (UNION у SQL). Видалені логічно рядки не рахуються (PermitHistoryUsage).
         // Сегмент логічний (без періоду) — з фільтром періоду береться документ, що має таблиці в цьому періоді, і лише
-        // сегмент, чинний не пізніше кінця періоду (ValidFrom <= Period.PeriodEnd проєкту); частина належить місяцю — фільтр
-        // за її періодом.
+        // сегмент, чинний не пізніше кінця періоду (ValidFrom <= Period.PeriodEnd проєкту), а сегмент рядка — лише якщо рядок
+        // живий САМЕ в цьому періоді (як комірки; LiveSegmentsIn); частина належить місяцю — фільтр за її періодом.
+        var liveSegments = periodKey is { } period
+            ? PermitHistoryUsage.LiveSegmentsIn(db, period)
+            : PermitHistoryUsage.LiveSegments(db);
         var segmentDocuments =
-            from s in PermitHistoryUsage.LiveSegments(db)
+            from s in liveSegments
             where s.RegistryEntryId == permitId
             join d in db.Documents.AsNoTracking() on s.DocumentId equals d.Id
             where projects == null || projects.Contains(d.ProjectId)

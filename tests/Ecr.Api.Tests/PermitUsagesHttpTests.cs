@@ -483,6 +483,93 @@ public sealed class PermitUsagesHttpTests(SqlServerFixture sql)
         Assert.Equal((0, 0), (previous.GetProperty("documentCount").GetInt32(), previous.GetProperty("historyDocumentCount").GetInt32()));
     }
 
+    /// <summary>
+    /// ⛔ B56 (F13-2): «живий рядок» історії — у правильному місці. (1) Під фільтром періоду сегмент рядка рахується лише за
+    /// рядком, живим САМЕ в цьому періоді (як комірки); без фільтра — бодай в одному. (2) Частина місяця — лише за рядком її
+    /// місяця: рядок, видалений у місяці частини й живий в іншому, частину не рятує. (3) Рядок копії аркуша з тим самим ключем
+    /// не оживляє сегмент оригіналу.
+    /// </summary>
+    /// <remarks>
+    /// Мутації (виконано вручну, відновлено): у <c>FindUsagesAsync</c> брати <c>LiveSegments</c> замість <c>LiveSegmentsIn</c> —
+    /// поточний період 1 замість 0; у <c>LiveParts</c> прибрати <c>ti.PeriodKeyValue == p.PeriodKeyValue</c> — 1 замість 0 (N4);
+    /// у <c>LiveSegments</c> прибрати <c>ti.SheetCopyId == s.SheetCopyId</c> — 1 замість 0 (N5).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "PERMUSE")]
+    public async Task Живий_рядок_історії_береться_за_періодом_місяцем_частини_і_копією_аркуша()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        var firstDay = new DateOnly(s.Period / 100, s.Period % 100, 1);
+        var previousFirstDay = new DateOnly(s.PreviousPeriod / 100, s.PreviousPeriod % 100, 1);
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        string rowKey;
+        await using (var db = builder.CreateContext())
+        {
+            // Рядок 1 видалено лише в поточному періоді; у попередньому той самий ключ живий.
+            var row = await db.TableRows.SingleAsync(r => r.PeriodKeyValue == s.Period && r.Id == s.Document.RowIds[0]).ConfigureAwait(true);
+            rowKey = row.RowKeyValue;
+            row.SoftDelete(DateTime.UtcNow);
+            db.PermitSegments.Add(PermitSegment.ForRow(
+                s.Document.DocumentId, s.Document.TableDefId, null, rowKey, s.PermitColumnId, previousFirstDay.AddDays(4), s.Unused, s.WriterId, DateTime.UtcNow));
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        using var app = new EcrApiFactory(sql);
+        using var writer = await SignedInAsync(app, s.Writer).ConfigureAwait(true);
+
+        async Task<int> DocumentsAsync(string query = "")
+            => (await GetAsync(writer, app, $"/api/v1/permits/{s.Unused}/usages{query}").ConfigureAwait(true)).GetProperty("documentCount").GetInt32();
+
+        // (1) Без фільтра — живий у попередньому, отже 1; у попередньому періоді — 1; у поточному рядок видалено — 0.
+        Assert.Equal(1, await DocumentsAsync().ConfigureAwait(true));
+        Assert.Equal(1, await DocumentsAsync($"?periodKey={s.PreviousPeriod}").ConfigureAwait(true));
+        Assert.Equal(0, await DocumentsAsync($"?periodKey={s.Period}").ConfigureAwait(true));
+
+        // (2) Замість сегмента — частина поточного місяця на тому ж рядку: у її місяці рядок видалено — 0 навіть без фільтра.
+        await using (var db = builder.CreateContext())
+        {
+            await db.PermitSegments.Where(x => x.DocumentId == s.Document.DocumentId).ExecuteDeleteAsync().ConfigureAwait(true);
+            db.CellPermitParts.Add(new CellPermitPart(
+                s.Period, s.Document.DocumentId, s.Document.TableDefId, null, rowKey, s.PermitColumnId, 2, s.Unused,
+                firstDay.AddDays(9), firstDay.AddDays(27), null));
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        Assert.Equal(0, await DocumentsAsync().ConfigureAwait(true));
+
+        // (3) Рядок видалено й у попередньому періоді; копія аркуша має ЖИВИЙ рядок з тим самим ключем. Сегмент оригіналу — 0.
+        await using (var db = builder.CreateContext())
+        {
+            await db.CellPermitParts.Where(x => x.DocumentId == s.Document.DocumentId).ExecuteDeleteAsync().ConfigureAwait(true);
+            var instances = await db.TableInstances.AsNoTracking()
+                .Where(t => t.DocumentId == s.Document.DocumentId).Select(t => t.Id).ToListAsync().ConfigureAwait(true);
+            foreach (var alive in await db.TableRows.Where(r => instances.Contains(r.TableInstanceId) && r.RowKeyValue == rowKey && !r.IsDeleted).ToListAsync().ConfigureAwait(true))
+            {
+                alive.SoftDelete(DateTime.UtcNow);
+            }
+
+            var original = new DocumentSheet(s.Document.DocumentId, s.Document.SheetDefId);
+            db.DocumentSheets.Add(original);
+            await db.SaveChangesAsync().ConfigureAwait(true);
+            var copy = original.CreateCopy(2);
+            db.DocumentSheets.Add(copy);
+            await db.SaveChangesAsync().ConfigureAwait(true);
+
+            var loader = new Ecr.Infrastructure.Persistence.BulkCellLoader(sql.ConnectionString, 1000);
+            var instanceId = await loader.ReserveIdsAsync("doc.TableInstanceSeq", 1, CancellationToken.None).ConfigureAwait(true);
+            var rowId = await loader.ReserveIdsAsync("doc.TableRowSeq", 1, CancellationToken.None).ConfigureAwait(true);
+            var period = new PeriodKey(s.Period);
+            db.TableInstances.Add(new TableInstance(period, instanceId, s.Document.DocumentId, s.Document.TableDefId, DateTime.UtcNow, copy.Id));
+            db.TableRows.Add(new TableRow(period, rowId, instanceId, RowKey.Create(rowKey), 1, DateTime.UtcNow));
+            db.PermitSegments.Add(PermitSegment.ForRow(
+                s.Document.DocumentId, s.Document.TableDefId, null, rowKey, s.PermitColumnId, firstDay.AddDays(4), s.Unused, s.WriterId, DateTime.UtcNow));
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        Assert.Equal(0, await DocumentsAsync().ConfigureAwait(true));
+    }
+
     /// <summary>Читач з <c>Registry.View</c> і <c>Document.View</c>, грант <c>Read</c> — лише на проєкт окремого документа.</summary>
     private async Task<string> OtherProjectReaderAsync()
     {
