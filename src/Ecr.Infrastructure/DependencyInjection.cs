@@ -61,10 +61,13 @@ public static class DependencyInjection
         // Епоха кешу лічильників "результати застаріли": піднімається після коміту запису комірок і перемикання
         // актуального прогону (`StaleCountsEpoch`); входить у ключ кешу `DocumentListSummaryStore`.
         services.AddSingleton<StaleCountsEpoch>();
+        // B125: сигнал черги — перехоплювач транзакцій: постановка в транзакції будить воркер лише після коміту.
+        services.AddSingleton<Jobs.JobQueueSignal>();
         services.AddDbContext<EcrDbContext>((sp, options) =>
             options.AddInterceptors(
                 sp.GetRequiredService<SecurityStampCacheInvalidator>(),
-                sp.GetRequiredService<StaleCountsEpoch>()).ConfigureEfFailureLogLevels().UseSqlServer(connectionString, sql =>
+                sp.GetRequiredService<StaleCountsEpoch>(),
+                sp.GetRequiredService<Jobs.JobQueueSignal>()).ConfigureEfFailureLogLevels().UseSqlServer(connectionString, sql =>
             {
                 sql.MigrationsHistoryTable("__EFMigrationsHistory", "dbo");
                 // ⛔ Саме `Database:`, а не `Sql:` (`S-11`). Префікс у файлі
@@ -383,7 +386,6 @@ public static class DependencyInjection
         services.AddScoped<IJobQueue, Jobs.DbJobQueue>();
         services.AddScoped<Jobs.JobLeaseContext>();
         services.AddScoped<IJobLeaseContext>(sp => sp.GetRequiredService<Jobs.JobLeaseContext>());
-        services.AddSingleton<Jobs.JobQueueSignal>();
         if (Jobs.DbBackgroundJobScheduler.ReadMode(configuration) == Jobs.JobQueueMode.Database)
         {
             services.AddScoped<IBackgroundJobScheduler, Jobs.DbBackgroundJobScheduler>();

@@ -37,6 +37,9 @@ namespace Ecr.Infrastructure.Jobs;
 /// </remarks>
 public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
 {
+    /// <summary>B125: контекст, у транзакції якого йде постановка, — щоб сигнал воркеру пішов після її коміту.</summary>
+    internal EcrDbContext Context => db;
+
     private const string SessionOptions = "SET QUOTED_IDENTIFIER ON; SET ANSI_NULLS ON;\n";
 
     // Спільна частина UPDATE захоплення: новий токен, власник, оренда за годинником СУБД.
