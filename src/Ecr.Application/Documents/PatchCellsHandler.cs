@@ -480,6 +480,17 @@ public sealed partial class PatchCellsHandler(
         /// </summary>
         public SortedSet<int> AnnualPeriods { get; } = [];
 
+        /// <summary>
+        /// ✎ B134 (D-457 п.3): нові рядки батчу таблиці Q-17 створюються в якорі й усіх наявних екземплярах року — тут ці
+        /// екземпляри (за зростанням періоду, з екземпляром запиту й лінивим якорем); <c>null</c> — дзеркалення немає
+        /// (прапор вимкнено, таблиця не «місяці в колонках», копія аркуша, нових рядків немає). Ставиться під блокуванням
+        /// структури (<see cref="PrepareRowMirrorAsync"/>), скидається на кожній спробі транзакції.
+        /// </summary>
+        public List<TableInstanceRef>? MirrorInstances { get; set; }
+
+        /// <summary>✎ B134: екземпляр якоря року (стеля <c>MaxDynamicRows</c> — за ним); <c>null</c> — дзеркалення немає.</summary>
+        public TableInstanceRef? MirrorAnchor { get; set; }
+
         /// <summary>AN-142: у батчі є річна комірка НЕ-текстового якоря (чи новий рядок) — агрегат аркушів замикає її повністю.</summary>
         public bool AnnualNumericWritten { get; set; }
 
@@ -1606,6 +1617,16 @@ public sealed partial class PatchCellsHandler(
         if (context.Creations.Count == 0)
         {
             return planned;
+        }
+
+        // ✎ B134 (D-457 п.3): таблиця Q-17 — рядки в якорі й усіх наявних екземплярах року, як POST rows.
+        if (context.MirrorInstances is { } mirror)
+        {
+            var (ownIds, mirrored) = await CreateMirroredRowsAsync(
+                    request, context, mirror, now, ct)
+                .ConfigureAwait(false);
+            await WriteRowAuditAsync(mirrored, ct).ConfigureAwait(false);
+            return WithRealRowIds(context, planned, ownIds);
         }
 
         var newIds = await rowStore
@@ -3139,6 +3160,9 @@ public sealed partial class PatchCellsHandler(
             context.Instance.TemplateVersionId,
             context.Instance.DocumentId);
 
+        // ✎ B134: екземпляри року для дзеркальних нових рядків — під блокуванням структури, до блокувань аркуша.
+        await PrepareRowMirrorAsync(context, ct).ConfigureAwait(false);
+
         // ⛔ Q-17: ВСІ задіяні періоди (власний, місячні колонки інших місяців, річний агрегат) беруться
         // у ЗРОСТАЮЧОМУ порядку ключа. Власний-першим давав дедлок: PATCH з перегляду 3 у колонку місяця 5 тримав 3 і
         // чекав 5, а PATCH з перегляду 5 у колонку місяця 3 — навпаки. Виняткове блокування рядків (стеля) береться
@@ -3146,11 +3170,16 @@ public sealed partial class PatchCellsHandler(
         var lockedStatuses = new Dictionary<int, DocumentStatus>();
         foreach (var lockedPeriod in AllInvolvedPeriods(context))
         {
-            if (lockedPeriod == context.PeriodKey.Value && CreatesRowsUnderCeiling(context))
+            // ✎ B134: дзеркальне створення — виняткове блокування КОЖНОГО періоду екземплярів року, як у POST rows.
+            if ((lockedPeriod == context.PeriodKey.Value && CreatesRowsUnderCeiling(context))
+                || context.MirrorInstances?.Exists(i => i.PeriodKey == lockedPeriod) == true)
             {
                 // ⛔ Y7-03: відмова «зайнято» — про рядки, а не про подання (див. `RowWriteLock`).
+                // ✎ B134 (F13 D1): саме ЦЕЙ період циклу — X на кожен місяць дзеркала, а не лише на свій.
                 await RowWriteLock
-                    .EnterAsync(sheetGate, context.Instance.DocumentId, context.Table.SheetDefId, context.PeriodKey, ct, context.Instance.SheetCopyId)
+                    .EnterAsync(
+                        sheetGate, context.Instance.DocumentId, context.Table.SheetDefId, new PeriodKey(lockedPeriod), ct,
+                        context.Instance.SheetCopyId)
                     .ConfigureAwait(false);
             }
 
@@ -3197,6 +3226,11 @@ public sealed partial class PatchCellsHandler(
         var all = new SortedSet<int>(context.ColumnPeriods);
         all.UnionWith(context.AnnualPeriods);
         all.Add(context.PeriodKey.Value);
+        if (context.MirrorInstances is { } mirror)
+        {
+            all.UnionWith(mirror.Select(i => i.PeriodKey));
+        }
+
         return all;
     }
 
@@ -3434,6 +3468,16 @@ public sealed partial class PatchCellsHandler(
             return;
         }
 
+        // ✎ B134 (D-457 п.3): у дзеркальному режимі стеля — за якорем (авторитетний склад року).
+        if (context.MirrorAnchor is { } anchor)
+        {
+            var anchorRows = await rowStore
+                .GetRowIdsAsync(anchor.TableInstanceId, new PeriodKey(anchor.PeriodKey), ct)
+                .ConfigureAwait(false);
+            CheckRowLimit(context, anchorRows.Count, context.Creations.Count(r => !anchorRows.ContainsKey(r.RowKey)));
+            return;
+        }
+
         var existing = await rowStore
             .GetRowIdsAsync(request.TableInstanceId, context.PeriodKey, ct)
             .ConfigureAwait(false);
@@ -3442,11 +3486,12 @@ public sealed partial class PatchCellsHandler(
     }
 
     /// <summary>Стеля <c>MaxDynamicRows</c> за числом рядків, прочитаним під блокуванням.</summary>
-    private static void CheckRowLimit(RequestContext context, int existing)
+    private static void CheckRowLimit(RequestContext context, int existing, int? adding = null)
     {
-        if (context.Table.MaxDynamicRows is { } maxRows && existing + context.Creations.Count > maxRows)
+        var added = adding ?? context.Creations.Count;
+        if (context.Table.MaxDynamicRows is { } maxRows && existing + added > maxRows)
         {
-            throw DynamicRowLimitExceeded(context.Table, existing, context.Creations.Count, maxRows);
+            throw DynamicRowLimitExceeded(context.Table, existing, added, maxRows);
         }
     }
 

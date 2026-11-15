@@ -1,3 +1,4 @@
+using Ecr.Application.Documents.Dto;
 using Ecr.Application.Ports;
 using Ecr.Domain.ValueObjects;
 
@@ -214,6 +215,68 @@ public sealed partial class PatchCellsHandler
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// ✎ B134 (D-457 п.3): екземпляри року для дзеркальних нових рядків батчу (той самий набір, що в
+    /// <c>CreateRowHandler</c>: прапор, «місяці в колонках», не копія, документ місячного проєкту, є якір року).
+    /// Якоря немає — створюється ліниво. Інакше — <c>null</c>, і нові рядки йдуть лише в екземпляр запиту, як і доти.
+    /// </summary>
+    private async Task PrepareRowMirrorAsync(RequestContext context, CancellationToken ct)
+    {
+        context.MirrorInstances = null;
+        context.MirrorAnchor = null;
+
+        if (context.Creations.Count == 0 || monthRouter is not { Enabled: true } || context.Instance.SheetCopyId is not null
+            || !monthRouter.AppliesToTable(context.Table)
+            || await monthRouter.GetDocumentAsync(context.Instance.DocumentId, ct).ConfigureAwait(false) is not { } document
+            || await monthRouter.AnchorOfAsync(document.ProjectId, context.PeriodKey.Year, ct).ConfigureAwait(false) is not { } anchor)
+        {
+            return;
+        }
+
+        var (instances, anchorInstance) = await MirroredRowCreation
+            .InstancesWithAnchorAsync(rowStore, context.Instance, anchor, ct)
+            .ConfigureAwait(false);
+        context.MirrorInstances = instances;
+        context.MirrorAnchor = anchorInstance;
+    }
+
+    /// <summary>
+    /// ✎ B134: нові рядки батчу — у кожному екземплярі року, де ключа ще немає (одним <c>CreateRowsBatchAsync</c>).
+    /// Повертає Id рядків ЕКЗЕМПЛЯРА ЗАПИТУ в порядку <c>Creations</c> і журнал «додано рядок» для всіх екземплярів.
+    /// </summary>
+    private async Task<(IReadOnlyList<long> OwnIds, List<RowChangeRecord> Journal)> CreateMirroredRowsAsync(
+        PatchCellsRequest request, RequestContext context, IReadOnlyList<TableInstanceRef> mirror, DateTime now,
+        CancellationToken ct)
+    {
+        var keys = context.Creations.Select(r => RowKey.Create(r.RowKey)).ToList();
+        var (batches, _) = await MirroredRowCreation.BatchesAsync(rowStore, mirror, keys, ordinal: 0, ct).ConfigureAwait(false);
+        var created = await rowStore.CreateRowsBatchAsync(batches, ct).ConfigureAwait(false);
+
+        var own = batches.FindIndex(b => b.TableInstanceId == context.Instance.TableInstanceId);
+        if (own < 0 || created[own].Count != keys.Count)
+        {
+            // Нові рядки PATCH — за визначенням ключі, яких в екземплярі запиту немає (BuildContext).
+            throw new InvalidOperationException(
+                $"Дзеркальне створення: екземпляр запиту {context.Instance.TableInstanceId} уже мав ключ нового рядка.");
+        }
+
+        var origin = BatchOrigin(request.Origin, context.ApproverEdit);
+        var correlation = AuditCorrelationId();
+        var journal = new List<RowChangeRecord>();
+        for (var i = 0; i < batches.Count; i++)
+        {
+            for (var k = 0; k < batches[i].RowKeys.Count; k++)
+            {
+                journal.Add(new RowChangeRecord(
+                    now, context.Instance.DocumentId, batches[i].PeriodKey.Value, batches[i].TableInstanceId,
+                    context.Instance.TableDefId, created[i][k], batches[i].RowKeys[k].Value, RowChangeAction.Added,
+                    context.UserId, origin, correlation));
+            }
+        }
+
+        return (created[own], journal);
     }
 
     private async Task<RoutedWrite?> RouteForeignOwnersAsync(
