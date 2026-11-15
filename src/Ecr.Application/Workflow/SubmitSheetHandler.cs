@@ -199,6 +199,9 @@ public sealed class SubmitSheetHandler(
         await Documents.DocumentVisibility
             .RequireSheetVisibleAsync(documents, access, profile, documentId, sheetDefId, key, ct).ConfigureAwait(false);
 
+        // ✎ B75: версія без погодження — подавати нічого (422 workflowDisabled), до гранта й стану.
+        await WorkflowModeGuard.EnsureEnabledAsync(documents, documentId, key, "Подання", ct).ConfigureAwait(false);
+
         // ⛔ Уся перевірка й сам зріз — ПІД винятковим блокуванням аркуша × періоду,
         // однією транзакцією (`ISheetEditGate`, `SubmitEditRaceTests`). Доти
         // транзакція відкривалась лише навколо запису зрізу і не брала жодного

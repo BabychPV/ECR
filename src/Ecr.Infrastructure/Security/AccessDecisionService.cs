@@ -1354,6 +1354,19 @@ public sealed class AccessDecisionService(
                         continue;
                     }
 
+                    // ✎ B75: заблокований рядок — поштучно, поза мемо класу рядка (інакше рішення «заблоковано»
+                    // перейшло б на сусідні незаблоковані рядки того самого класу або навпаки).
+                    if (slice.LockedRows.Contains(row.RowKey))
+                    {
+                        foreach (var column in columns)
+                        {
+                            decisions[new CellAddress(slice.PeriodKey, row.Id, column.Id)] =
+                                Decide(profile, slice, row.RowKey, column, EmptyWindows, ignoreColumnFlags);
+                        }
+
+                        continue;
+                    }
+
                     var def = RowDefOf(slice, row.RowKey);
                     var rowClass = (def?.IsReadOnly ?? false, def?.RowKind ?? RowKind.Item);
                     if (!memo.TryGetValue(rowClass, out var byColumn))
@@ -1674,6 +1687,9 @@ public sealed class AccessDecisionService(
                 ColumnIsComputed = false,
                 ColumnIsReadOnly = false,
                 RowIsReadOnly = RowDefOf(slice, rowKey)?.IsReadOnly ?? false,
+
+                // ✎ B75: створення/видалення заблокованого рядка — та сама відмова, що й правка його комірок.
+                RowLockedByOther = slice.LockedRows.Contains(rowKey),
             };
 
             // Q-17 (умови вмикання): рядок належить ЯКОРЮ року - область ролі за періодами (D-214) для створення/видалення
@@ -1815,6 +1831,9 @@ public sealed class AccessDecisionService(
             // ✎ D-461: формула комірки дозволяє ручне значення, або комірка вже ручна (її можна повернути до формули й
             // після вимкнення прапорця). Право `Document.OverrideFormula` перевіряє `EditRules.CanEdit`.
             FormulaOverridable = !ignoreColumnFlags && slice.Overrides.Overridable(rowKey, column),
+
+            // ✎ B75: рядок заблокувала інша людина — і для «стерти значення», і для кольору: рядок замкнено цілком (Q3).
+            RowLockedByOther = slice.LockedRows.Contains(rowKey),
         };
 
         // ⛔ EA-B: «передача місяця». Факти правила — на КОЖНУ комірку (місяць
@@ -1987,7 +2006,15 @@ public sealed class AccessDecisionService(
 
         /// <summary>✎ D-461: які комірки зрізу можна замінити ручним значенням (за формулою чи наявною позначкою).</summary>
         public FormulaOverrideFacts Overrides { get; init; } = FormulaOverrideFacts.None;
+
+        /// <summary>
+        /// ✎ B75: ключі рядків зрізу з діючим блокуванням ІНШОЇ людини (<c>doc.RowLock</c>); порожньо — блокувань немає,
+        /// користувач сам їх власник, або шлях інтеграції/симуляції (Q2).
+        /// </summary>
+        public IReadOnlySet<string> LockedRows { get; init; } = NoLockedRows;
     }
+
+    private static readonly IReadOnlySet<string> NoLockedRows = new HashSet<string>(StringComparer.Ordinal);
 
     private static readonly IReadOnlySet<(string RowKey, int ColumnDefId)> NoComputedCells =
         new HashSet<(string, int)>();
@@ -2159,6 +2186,13 @@ public sealed class AccessDecisionService(
             // ✎ D-442: погоджувач поточного кроку — ОДИН раз на поданий аркуш групи, не на комірку.
             var approverOf = new Dictionary<SheetKey, bool>();
 
+            // ✎ B75: діючі блокування рядків ІНШИХ людей — ОДИН запит на групу і лише тоді, коли ознака з запиту умов
+            // каже, що вони є. Інтеграція й симуляція їх не читають (Q2; симуляцію відхиляє `EditRules` раніше).
+            IReadOnlyList<(long? SheetCopyId, string TableCode, string RowKey)> lockedRows =
+                !profile.IsIntegrationWriter && !profile.IsSimulation && sharedBySheet.Values.First().HasRowLocks
+                    ? await ActiveRowLocksAsync(documentId, periodKey, profile.UserId, ct).ConfigureAwait(false)
+                    : [];
+
             // ⛔ P2-A: стани періодів місячних колонок — ОДИН раз на групу (проєкт + періоди року) і на аркуш (стани
             // аркуша), а не на таблицю чи комірку; лише для таблиць `MonthsInColumns` (решта не платить нічого).
             var monthEnvironmentRead = false;
@@ -2195,6 +2229,12 @@ public sealed class AccessDecisionService(
                     ParticipatesInDocument = grants.Count > 0,
                     ParticipationLevel = DocumentParticipation.LevelAt(grants, sheetCode, null, periodKey),
                 };
+
+                // ✎ B75 (Q4): версія без погодження — старий стан аркуша (Submitted/Approved) правку не замикає.
+                if (snapshot.WorkflowNone)
+                {
+                    shared = shared with { SheetStatus = DocumentStatus.Draft };
+                }
 
                 if (approverEdits && shared.SheetStatus == DocumentStatus.Submitted)
                 {
@@ -2258,6 +2298,14 @@ public sealed class AccessDecisionService(
                             ? new Dictionary<byte, MonthState>()
                             : await MonthStatesAsync(monthEnvironment, documentId, sheetKey, periodKey, ct)
                                 .ConfigureAwait(false);
+
+                        // ✎ B75 (Q4): і стани аркуша інших місяців — так само ігноруються для версії без погодження.
+                        if (snapshot.WorkflowNone)
+                        {
+                            monthStates = monthStates.ToDictionary(
+                                m => m.Key, m => m.Value with { Status = DocumentStatus.Draft });
+                        }
+
                         monthStatesBySheet[sheetKey] = monthStates;
                     }
 
@@ -2321,11 +2369,57 @@ public sealed class AccessDecisionService(
                     MonthShared = monthShared,
                     Annual = annual,
                     RoutesOwnership = annualRouting,
+                    LockedRows = LockedRowsOf(lockedRows, sheetKey.SheetCopyId, instanceTableCode),
                 };
             }
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// ✎ B75: діючі на <c>clock.UtcNow</c> блокування рядків документа за період, власник яких — НЕ <paramref name="userId"/>
+    /// (власник блокування править рядок і далі, Q1).
+    /// </summary>
+    private async Task<IReadOnlyList<(long? SheetCopyId, string TableCode, string RowKey)>> ActiveRowLocksAsync(
+        long documentId, PeriodKey periodKey, int userId, CancellationToken ct)
+    {
+        var now = clock.UtcNow;
+        var periodValue = periodKey.Value;
+        var rows = await db.RowLocks
+            .AsNoTracking()
+            .Where(x => x.DocumentId == documentId
+                        && x.PeriodKeyValue == periodValue
+                        && x.ReleasedAt == null
+                        && x.LockFrom <= now
+                        && x.LockUntil > now
+                        && x.OwnerUserId != userId)
+            .Select(x => new { x.SheetCopyId, x.TableCode, x.RowKey })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return [.. rows.Select(x => (x.SheetCopyId, x.TableCode, x.RowKey))];
+    }
+
+    /// <summary>✎ B75: ключі заблокованих рядків одного зрізу (копія аркуша й код таблиці мають збігатися).</summary>
+    private static IReadOnlySet<string> LockedRowsOf(
+        IReadOnlyList<(long? SheetCopyId, string TableCode, string RowKey)> locks, long? sheetCopyId, string? tableCode)
+    {
+        if (locks.Count == 0 || tableCode is null)
+        {
+            return NoLockedRows;
+        }
+
+        var result = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (copy, table, rowKey) in locks)
+        {
+            if (copy == sheetCopyId && string.Equals(table, tableCode, StringComparison.Ordinal))
+            {
+                result.Add(rowKey);
+            }
+        }
+
+        return result.Count == 0 ? NoLockedRows : result;
     }
 
     /// <summary>Стани періодів року документа (ефективні, на <c>clock.UtcNow</c>) за номером місяця.</summary>
@@ -3152,6 +3246,13 @@ public sealed class AccessDecisionService(
                     // 0 нових звернень; документ без передач не читає їх ні в рішенні, ні під гейтом.
                     HasAssignments = db.EditAssignments.Any(x => x.DocumentId == documentId),
 
+                    // ✎ B75: ознака «у документа за період є незняті й не прострочені блокування рядків» — EXISTS у тому
+                    // самому запиті (0 нових звернень); документ без блокувань не читає їх у рішенні.
+                    HasRowLocks = db.RowLocks.Any(x => x.DocumentId == documentId
+                                                       && x.PeriodKeyValue == periodValue
+                                                       && x.ReleasedAt == null
+                                                       && x.LockUntil > decisionNow),
+
                     // ⛔ Приймальна 08.11 (i): закритий місяць, відкритий лише для ЦЬОГО документа, — EXISTS у тому
                     // самому запиті (0 нових звернень). Решта документів місяця винятку не мають і лишаються закриті.
                     DocumentReopened = db.DocumentPeriodReopens.Any(x => x.DocumentId == documentId
@@ -3237,6 +3338,7 @@ public sealed class AccessDecisionService(
             // добирають самі (`WithSheetCodeAsync`) і лише тоді, коли він комусь потрібен.
             Period = periodKey,
             HasEditAssignments = state.HasAssignments,
+            HasRowLocks = state.HasRowLocks,
             SheetCopyId = sheetCopyId,
         };
     }

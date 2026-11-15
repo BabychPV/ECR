@@ -80,6 +80,9 @@ public sealed class ApproveSheetHandler(
             throw Documents.DocumentVisibility.SheetNotInDocument(documentId, sheetDefId);
         }
 
+        // ✎ B75: версія без погодження — затверджувати нічого (422 workflowDisabled), до гранта й стану.
+        await WorkflowModeGuard.EnsureEnabledAsync(documents, documentId, key, "Затвердження", ct).ConfigureAwait(false);
+
         // ⚠ Швидка відмова ДО транзакції — без блокувань і без читання стану.
         // Рішення, на яке справді спирається підпис, приймається ще раз
         // усередині транзакції (R5-W1 / W1-05, нижче).
