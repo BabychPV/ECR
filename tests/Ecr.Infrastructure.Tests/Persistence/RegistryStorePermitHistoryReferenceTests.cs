@@ -36,6 +36,7 @@ public sealed class RegistryStorePermitHistoryReferenceTests(SqlServerFixture sq
 
         long segmentOnly;
         long partOnly;
+        long notInForce;
         await using (var db = builder.CreateContext())
         {
             var tag = Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
@@ -44,7 +45,8 @@ public sealed class RegistryStorePermitHistoryReferenceTests(SqlServerFixture sq
             await db.SaveChangesAsync();
             var b = new RegistryEntry(registry.Id, EcrCode.Create("B"), Text("KZ-B"));
             var c = new RegistryEntry(registry.Id, EcrCode.Create("C"), Text("KZ-C"));
-            db.RegistryEntries.AddRange(b, c);
+            var later = new RegistryEntry(registry.Id, EcrCode.Create("D"), Text("KZ-D"));
+            db.RegistryEntries.AddRange(b, c, later);
             var user = new User($"prrf_{tag}", $"prrf_{tag}", AuthProvider.Local);
             user.SetPassword("not-a-real-hash");
             db.Users.Add(user);
@@ -54,15 +56,20 @@ public sealed class RegistryStorePermitHistoryReferenceTests(SqlServerFixture sq
             var rowKey = await db.TableRows.AsNoTracking()
                 .Where(r => r.Id == doc.RowIds[0]).Select(r => r.RowKeyValue).SingleAsync();
 
-            // B — лише пізніший сегмент історії рядка; C — лише дозвіл частини поділу. У комірках немає жодного.
-            db.PermitSegments.Add(PermitSegment.ForRow(
-                doc.DocumentId, doc.TableDefId, null, rowKey, doc.ColumnDefIds[0], new DateOnly(2026, 2, 15), b.Id, user.Id,
-                new DateTime(2026, 2, 15, 9, 0, 0, DateTimeKind.Utc)));
+            // B — лише пізніший сегмент історії рядка (чинний у 202601 — періоді документа); C — лише дозвіл частини поділу.
+            // D — сегмент тієї ж цілі з 15.02: рядок живий лише в 202601, де D ще не чинний (B128c). У комірках немає жодного.
+            db.PermitSegments.AddRange(
+                PermitSegment.ForRow(
+                    doc.DocumentId, doc.TableDefId, null, rowKey, doc.ColumnDefIds[0], new DateOnly(2026, 1, 15), b.Id, user.Id,
+                    new DateTime(2026, 1, 15, 9, 0, 0, DateTimeKind.Utc)),
+                PermitSegment.ForRow(
+                    doc.DocumentId, doc.TableDefId, null, rowKey, doc.ColumnDefIds[0], new DateOnly(2026, 2, 15), later.Id, user.Id,
+                    new DateTime(2026, 2, 15, 9, 0, 0, DateTimeKind.Utc)));
             db.CellPermitParts.Add(new CellPermitPart(
                 doc.PeriodKey.Value, doc.DocumentId, doc.TableDefId, null, rowKey, doc.ColumnDefIds[1], 1, c.Id,
                 new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 14), 5m));
             await db.SaveChangesAsync();
-            (segmentOnly, partOnly) = (b.Id, c.Id);
+            (segmentOnly, partOnly, notInForce) = (b.Id, c.Id, later.Id);
         }
 
         await using var read = builder.CreateContext();
@@ -77,6 +84,11 @@ public sealed class RegistryStorePermitHistoryReferenceTests(SqlServerFixture sq
         Assert.Equal(doc.DocumentId.ToString(System.Globalization.CultureInfo.InvariantCulture), Assert.Single(usage.Items).Id);
         var partUsage = await store.FindEntryDocumentsAsync(partOnly, [doc.ProjectId], take: 10, CancellationToken.None);
         Assert.Equal(1, partUsage.Total);
+
+        // ⛔ B128c: сегмент, чинний лише там, де рядка немає, — посилання (FK, видалення блокується), але не використання
+        // документом. Мутація: повернути старе LiveSegments («рядок живий бодай в одному періоді») — Total 1.
+        Assert.Equal(1, (await store.CountReferencesAsync(notInForce, CancellationToken.None)).Total);
+        Assert.Equal(0, (await store.FindEntryDocumentsAsync(notInForce, [doc.ProjectId], take: 10, CancellationToken.None)).Total);
 
         // ⛔ B56: рядок видалено логічно — історія лишається в базі (FK-посилання, видалення запису й далі блокується), але
         // документ уже не «використовує» дозвіл. Мутація: прибрати вимогу живого рядка в PermitHistoryUsage — Total 1.

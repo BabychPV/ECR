@@ -898,6 +898,18 @@ public sealed class PermitUsagesHttpTests(SqlServerFixture sql)
         Assert.Equal((0, 0), (leak.GetProperty("items").GetArrayLength(), leak.GetProperty("historyLinkCount").GetInt32()));
         Assert.DoesNotContain(deletedKey, leak.GetRawText(), StringComparison.Ordinal);
 
+        // ⛔ B128c: лічильники рахують рівно ті записи, що й перелік — навіть писачеві сегмент рядка, живого лише до початку дії
+        // сегмента, не є використанням: перелік порожній, документів 0, у переліку дозволів 0. Мутація: повернути старе
+        // LiveSegments («рядок живий бодай в одному періоді») — 1 замість 0.
+        using var writer = await SignedInAsync(app, s.Writer).ConfigureAwait(true);
+        var counted = await GetAsync(writer, app, $"/api/v1/permits/{s.Unused}/usages").ConfigureAwait(true);
+        Assert.Equal((0, 0, 0, 0), (
+            counted.GetProperty("items").GetArrayLength(), counted.GetProperty("documentCount").GetInt32(),
+            counted.GetProperty("historyDocumentCount").GetInt32(), counted.GetProperty("historyLinkCount").GetInt32()));
+        var list = await GetAsync(writer, app, $"/api/v1/permits?type={s.TypeCode}").ConfigureAwait(true);
+        Assert.Equal(0, list.GetProperty("items").EnumerateArray().Single(i => i.GetProperty("id").GetInt64() == s.Unused)
+            .GetProperty("usedInDocumentCount").GetInt32());
+
         // (B) Живий рядок 1, сегмент з 5-го попереднього місяця — чинний і в поточному (доступному).
         await ReplaceAsync(PermitSegment.ForRow(
             s.Document.DocumentId, s.Document.TableDefId, null, liveKey, s.PermitColumnId, previousFrom, s.Unused, s.WriterId, DateTime.UtcNow));
