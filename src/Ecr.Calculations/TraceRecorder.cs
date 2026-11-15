@@ -26,6 +26,10 @@ public sealed class TraceRecorder(TraceLevel level)
     private readonly List<TraceStep> _steps = [];
     private long? _substance;
 
+    // B66: невдалі кроки рахуються на БУДЬ-ЯКОМУ рівні, навіть Off: із них оркестратор пише проблему рядка StepError.
+    // Лише коди кроків (без входів і значень) і лише коли крок справді впав — рядок без помилок не платить нічим.
+    private HashSet<string>? _failedCodes;
+
     /// <summary>Рівень деталізації.</summary>
     public TraceLevel Level { get; } = level;
 
@@ -90,6 +94,16 @@ public sealed class TraceRecorder(TraceLevel level)
     public void Failed(
         string code, string? expression, string error, TraceDetail? detail = null, TraceSource? source = null)
     {
+        // B66: `#NULL` — «немає значення» (бракує входу), це MissingInputs, а не помилка кроку.
+        if (!string.Equals(error, NoValueError, StringComparison.Ordinal))
+        {
+            _failedCodes ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (_failedCodes.Add(code) && FirstFailure is null)
+            {
+                FirstFailure = (code, error);
+            }
+        }
+
         if (!RecordsFailures)
         {
             return;
@@ -98,6 +112,17 @@ public sealed class TraceRecorder(TraceLevel level)
         _steps.Add(new TraceStep(
             _steps.Count + 1, code, expression, null, error, Detail: detail, SubstanceEntryId: _substance, Source: source));
     }
+
+    /// <summary>Код «немає значення»: не помилка кроку (B66), а відсутній вхід.</summary>
+    public const string NoValueError = "#NULL";
+
+    /// <summary>
+    /// B66: перший крок, що впав з помилкою (не <c>#NULL</c>), — незалежно від рівня трейсу; <c>null</c> — таких немає.
+    /// </summary>
+    public (string Code, string Error)? FirstFailure { get; private set; }
+
+    /// <summary>B66: скільки РІЗНИХ кроків (за кодом) впало з помилкою — повтори по речовинах і виходах не множать.</summary>
+    public int FailedStepCount => _failedCodes?.Count ?? 0;
 
     /// <summary>Записує крок, значення якого замасковане в нуль.</summary>
     /// <param name="code">Код кроку — зазвичай код виходу.</param>

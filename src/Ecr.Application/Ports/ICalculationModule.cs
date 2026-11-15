@@ -464,7 +464,23 @@ public sealed record CalculationOutput(
     /// тихий нуль. Оркестратор пише з цього проблему рядка <c>MissingInputs</c>.
     /// </remarks>
     public IReadOnlyList<string>? MissingArguments { get; init; }
+
+    /// <summary>
+    /// B66: перший крок рядка, що впав з помилкою (<c>#VALUE</c>, <c>#ARG</c>, <c>#DIV/0</c>; не <c>#NULL</c>), і скільки
+    /// різних кроків рядка впало — незалежно від <c>TraceLevel</c>. <c>null</c> — жоден крок не впав.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Без цього помилки кроків лишались лише в трейсі (doc 96: 64 <c>#VALUE</c>, 0 проблем), а на <c>TraceLevel.Off</c>
+    /// — ніде. Оркестратор пише з цього ОДНУ проблему рядка <c>StepError</c>.
+    /// </remarks>
+    public CalculationStepError? StepError { get; init; }
 }
+
+/// <summary>B66: підсумок невдалих кроків одного рядка.</summary>
+/// <param name="StepCode">Код першого невдалого кроку (формули чи виходу).</param>
+/// <param name="ErrorCode">Його код помилки (<c>#VALUE</c>…).</param>
+/// <param name="FailedSteps">Скільки різних кроків рядка впало (≥ 1).</param>
+public sealed record CalculationStepError(string StepCode, string ErrorCode, int FailedSteps);
 
 /// <summary>Один обчислений вихід — рядок <c>calc.CalculationResult</c>.</summary>
 /// <param name="MethodologyVersionId">Версія, що дала число.</param>

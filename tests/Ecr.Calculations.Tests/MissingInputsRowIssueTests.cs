@@ -96,6 +96,65 @@ public sealed class MissingInputsRowIssueTests
         Assert.Empty(profile.MissingInputRows);
     }
 
+    /// <summary>
+    /// B66 (doc 96: 64 <c>#VALUE</c> і 0 проблем): крок методики, що впав з помилкою, лишає ОДНУ проблему на рядок — перший
+    /// крок і код; повтор того самого коду (формула й однойменний вихід) кількість кроків не множить.
+    /// </summary>
+    /// <remarks>
+    /// Мутація: прибрати гілку <c>output.StepError</c> у <c>CalculationOrchestrator.ExecuteAsync</c> (або <c>StepError</c> у
+    /// <c>GenericCalculationModule.ExecuteAsync</c>) — тест червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Помилка_кроку_дає_одну_проблему_StepError_на_рядок()
+    {
+        var profile = await RunAsync("@Qty / \"abc\"", [5m, 7m]);
+
+        Assert.Equal(2, profile.StepErrorRows.Count);
+        var first = profile.StepErrorRows[0];
+        Assert.Equal(new RejectedRow(TableInstance, 1, "R000", DocumentId, Methodology), first.Row);
+        Assert.Equal("Total", first.StepCode);
+        Assert.StartsWith("#", first.ErrorCode, StringComparison.Ordinal);
+        Assert.NotEqual(TraceRecorder.NoValueError, first.ErrorCode);
+        Assert.Equal(1, first.FailedSteps);
+        Assert.Empty(profile.MissingInputRows);
+    }
+
+    /// <summary>
+    /// B66: рядок без входів (<c>MissingInputs</c>) другої проблеми StepError не отримує — його <c>#ARG</c> лише наслідок
+    /// відсутніх входів, дія та сама. Мутація: прибрати <c>else</c> перед гілкою StepError — тест червоний.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Рядок_без_входів_не_дублюється_проблемою_StepError()
+    {
+        var profile = await RunAsync("@Qty * 2", [null, 3m]);
+
+        Assert.Single(profile.MissingInputRows);
+        Assert.Empty(profile.StepErrorRows);
+    }
+
+    /// <summary>
+    /// B66: невдалі кроки рахуються і на <c>TraceLevel.Off</c> (трейс порожній), <c>#NULL</c> помилкою кроку не є, повтор
+    /// коду не множить кількість. Мутація: перенести облік нижче <c>if (!RecordsFailures) return;</c> у
+    /// <c>TraceRecorder.Failed</c> — тест червоний.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public void Облік_невдалих_кроків_не_залежить_від_рівня_трейсу()
+    {
+        var trace = new TraceRecorder(TraceLevel.Off);
+
+        trace.Failed("Out", null, TraceRecorder.NoValueError);
+        trace.Failed("Total", "1/x", "#VALUE");
+        trace.Failed("Total", null, "#VALUE");
+        trace.Failed("Rate", "y", "#DIV/0");
+
+        Assert.Empty(trace.Steps);
+        Assert.Equal(("Total", "#VALUE"), trace.FirstFailure);
+        Assert.Equal(2, trace.FailedStepCount);
+    }
+
     private static async Task<ModuleProfile> RunAsync(string expression, decimal?[] qtyByRow)
     {
         using var provider = Arrange(expression, qtyByRow);

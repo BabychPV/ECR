@@ -84,7 +84,8 @@ public sealed class CalculationIssueStore(EcrDbContext db, IClock clock) : ICalc
             {
                 db.CalculationIssues.Add(new CalculationIssue(
                     instance.DocumentId, period, instance.TableDefId, instance.SheetCopyId,
-                    issue.RowKey, issue.RowNumber, issue.MethodologyId, calculationRunId, now, issue.Kind));
+                    issue.RowKey, issue.RowNumber, issue.MethodologyId, calculationRunId, now, issue.Kind,
+                    issue.StepCode, issue.ErrorCode, issue.AffectedCount));
             }
         }
 
@@ -134,7 +135,7 @@ public sealed class CalculationIssueStore(EcrDbContext db, IClock clock) : ICalc
                 orderby t.Id, i.RowNumber
                 select new CalculationIssueRow(
                     i.TableDefId, t.Code, i.SheetCopyId, i.RowNumber, i.RowKey, i.Kind,
-                    m == null ? null : m.Code, i.DetectedAt, i.MethodologyId))
+                    m == null ? null : m.Code, i.DetectedAt, i.MethodologyId, i.StepCode, i.ErrorCode, i.AffectedCount))
             .ToListAsync(ct)
             .ConfigureAwait(false);
 }

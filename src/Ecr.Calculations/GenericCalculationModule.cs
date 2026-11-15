@@ -665,6 +665,11 @@ public sealed class GenericCalculationModule(
             MissingArguments = values.Count == 0 && outputs.Count > 0
                 ? MissingArgumentsOf(ordered, binding.Libraries, arguments)
                 : null,
+
+            // B66: помилка кроку — проблема рядка StepError (раніше лише трейс, а на Off — ніде).
+            StepError = trace.FirstFailure is { } failure
+                ? new CalculationStepError(failure.Code, failure.Error, trace.FailedStepCount)
+                : null,
         };
     }
 

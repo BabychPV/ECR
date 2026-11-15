@@ -76,8 +76,39 @@ public sealed class GetCalculationIssuesHandlerTests
         Assert.All(result.Items, i => Assert.Equal(77, i.SheetCopyId));
     }
 
+    /// <remarks>
+    /// B66: StepError несе перший невдалий крок, код і кількість кроків; RowInactive — кількість відсіяних рядків таблиці.
+    /// Мутація: не передати <c>r.StepCode</c>/<c>r.AffectedCount</c> у DTO в <c>GetCalculationIssuesHandler.PeriodAsync</c> —
+    /// тест червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task StepError_і_RowInactive_віддають_крок_код_і_кількість()
+    {
+        var (handler, _) = Arrange(
+            deny: false,
+            visibleDocument: true,
+            extra: table =>
+            [
+                new CalculationIssueRow(table, "T1", null, 5, "R5", ICalculationIssueStore.StepError, "M1", Detected,
+                    StepCode: "Total", ErrorCode: "#VALUE", AffectedCount: 3),
+                new CalculationIssueRow(table, "T1", null, 7, "R7", ICalculationIssueStore.RowInactive, "M1", Detected,
+                    AffectedCount: 42),
+            ]);
+
+        var result = await handler.HandleAsync(Document, Period, null, CancellationToken.None);
+
+        var step = Assert.Single(result.Items, i => i.Kind == ICalculationIssueStore.StepError);
+        Assert.Equal(("Total", "#VALUE", (int?)3, 5), (step.StepCode, step.ErrorCode, step.AffectedCount, step.RowNumber));
+        Assert.Null(step.CurrentValues);
+        var inactive = Assert.Single(result.Items, i => i.Kind == ICalculationIssueStore.RowInactive);
+        Assert.Equal(42, inactive.AffectedCount);
+        Assert.Null(inactive.StepCode);
+        Assert.Null(Assert.Single(result.Items, i => i.Kind == "NoMatchingRule" && i.TableCode == "T1").AffectedCount);
+    }
+
     private static (GetCalculationIssuesHandler Handler, ICalculationIssueStore Issues) Arrange(
-        bool deny, bool visibleDocument, long? copyId = null)
+        bool deny, bool visibleDocument, long? copyId = null, Func<int, CalculationIssueRow[]>? extra = null)
     {
         var template = new TemplateBuilder();
         var visibleSheet = template.Sheet("S1");
@@ -107,6 +138,7 @@ public sealed class GetCalculationIssuesHandlerTests
               [
                   new CalculationIssueRow(visibleTable.Id, "T1", copyId, 3, "R3", "NoMatchingRule", "M1", Detected),
                   new CalculationIssueRow(hiddenTable.Id, "T2", copyId, 1, "R1", "NoMatchingRule", "M2", Detected),
+                  .. extra?.Invoke(visibleTable.Id) ?? [],
               ]);
 
         var user = Substitute.For<ICurrentUser>();

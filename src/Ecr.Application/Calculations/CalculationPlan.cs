@@ -124,6 +124,8 @@ public sealed class ModuleProfile
     private readonly Dictionary<RejectedRow, IReadOnlyList<string>> _missingArguments = [];
     private readonly List<int> _skippedUnpublished = [];
     private readonly HashSet<long> _evaluatedTables = [];
+    private readonly List<StepErrorRow> _stepErrors = [];
+    private readonly List<InactiveRowsSummary> _inactive = [];
 
     /// <summary>Записує виконання одного модуля.</summary>
     /// <param name="moduleCode">Код модуля.</param>
@@ -160,6 +162,8 @@ public sealed class ModuleProfile
         _unmatched.AddRange(other._unmatched);
         _rejected.AddRange(other._rejected);
         _missingInputs.AddRange(other._missingInputs);
+        _stepErrors.AddRange(other._stepErrors);
+        _inactive.AddRange(other._inactive);
         foreach (var (row, arguments) in other._missingArguments)
         {
             _missingArguments.TryAdd(row, arguments);
@@ -230,6 +234,8 @@ public sealed class ModuleProfile
         _unmatched.RemoveAll(r => tableInstanceIds.Contains(r.TableInstanceId));
         _rejected.RemoveAll(r => tableInstanceIds.Contains(r.TableInstanceId));
         _missingInputs.RemoveAll(r => tableInstanceIds.Contains(r.TableInstanceId));
+        _stepErrors.RemoveAll(e => tableInstanceIds.Contains(e.Row.TableInstanceId));
+        _inactive.RemoveAll(t => tableInstanceIds.Contains(t.TableInstanceId));
         foreach (var row in _missingArguments.Keys.Where(r => tableInstanceIds.Contains(r.TableInstanceId)).ToList())
         {
             _missingArguments.Remove(row);
@@ -303,6 +309,30 @@ public sealed class ModuleProfile
         {
             _missingArguments.TryAdd(row, arguments);
         }
+    }
+
+    /// <summary>B66: рядки, у яких крок методики впав з помилкою (<c>#VALUE</c>, <c>#ARG</c>…), — по одному на рядок.</summary>
+    public IReadOnlyList<StepErrorRow> StepErrorRows => _stepErrors;
+
+    /// <summary>Записує рядки з помилками кроків (B66).</summary>
+    /// <param name="rows">Рядки.</param>
+    public void RecordStepErrors(IEnumerable<StepErrorRow> rows)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+
+        _stepErrors.AddRange(rows);
+    }
+
+    /// <summary>B66: таблиці з рядками, відсіяними фільтром активності (D-425), — по одному підсумку на таблицю.</summary>
+    public IReadOnlyList<InactiveRowsSummary> InactiveTables => _inactive;
+
+    /// <summary>Записує підсумки відсіяних фільтром активності рядків (B66).</summary>
+    /// <param name="tables">Підсумки таблиць.</param>
+    public void RecordInactive(IEnumerable<InactiveRowsSummary> tables)
+    {
+        ArgumentNullException.ThrowIfNull(tables);
+
+        _inactive.AddRange(tables);
     }
 
     /// <summary>Аргументи, яких бракувало рядку (AN-164b); <c>null</c> — не записано.</summary>
@@ -550,3 +580,22 @@ public sealed record UnmatchedRow(
 /// <param name="MethodologyId">Методологія (не версія), чиє правило категорії відхилило рядок; <c>null</c> — невідома.</param>
 public sealed record RejectedRow(
     long TableInstanceId, int RowNumber, string RowKey, long DocumentId = 0, int? MethodologyId = null);
+
+/// <summary>B66: рядок, у якому крок методики впав з помилкою (не <c>#NULL</c>) — одна проблема на рядок.</summary>
+/// <param name="Row">Адреса рядка (та сама форма, що в відхилених).</param>
+/// <param name="StepCode">Перший невдалий крок.</param>
+/// <param name="ErrorCode">Його код помилки.</param>
+/// <param name="FailedSteps">Скільки різних кроків рядка впало.</param>
+public sealed record StepErrorRow(RejectedRow Row, string StepCode, string ErrorCode, int FailedSteps);
+
+/// <summary>
+/// B66: підсумок таблиці — рядки, відсіяні фільтром активності методики (D-425) і не закриті жодною іншою прив'язкою.
+/// </summary>
+/// <param name="TableInstanceId">Екземпляр таблиці.</param>
+/// <param name="FirstRowNumber">Номер першого такого рядка, з 1.</param>
+/// <param name="FirstRowKey">Ключ першого такого рядка.</param>
+/// <param name="Count">Скільки рядків таблиці відсіяно.</param>
+/// <param name="DocumentId">Документ прогону.</param>
+/// <param name="MethodologyId">Методологія прив'язки (найменший Id); <c>null</c> — невідома.</param>
+public sealed record InactiveRowsSummary(
+    long TableInstanceId, int FirstRowNumber, string FirstRowKey, int Count, long DocumentId = 0, int? MethodologyId = null);

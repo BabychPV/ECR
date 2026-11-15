@@ -160,6 +160,52 @@ public sealed class NoMatchingRuleDiagnosticTests
         Assert.Equal(1, profile.Stats.Single().Rows);
     }
 
+    /// <summary>
+    /// B66 (рішення координатора 13.11): рядки, відсіяні фільтром активності, не мовчать — ОДИН підсумок на таблицю з
+    /// першим рядком і кількістю (не проблема на рядок: у Land неактивні рядки — виключення за задумом).
+    /// </summary>
+    /// <remarks>
+    /// Мутація: не записувати <c>InactiveRowsOf</c> у профіль у <c>CalculationOrchestrator.RunAsync</c> (або рахувати
+    /// кількість без <c>excluded.Contains</c>) — тест червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "D-425")]
+    public async Task Відсіяні_фільтром_активності_рядки_дають_один_підсумок_на_таблицю_з_кількістю()
+    {
+        var activity = Substitute.For<IRowActivityFilterSource>();
+        activity.ResolveForVersionAsync(71, Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
+            .Returns(new RowActivityFilterResolution(
+                "77", new Dictionary<int, IReadOnlyList<int>> { [3] = [StatusColumn] }));
+
+        var provider = Arrange(
+            [(Methodology: 42, Version: 71, Rule: "{}")],
+            [
+                Cell(1000, FuelColumn, "Gas"), StatusEntry(1000, 77),
+                Cell(1001, FuelColumn, "Diesel"), StatusEntry(1001, 78),
+                Cell(1002, FuelColumn, "Coal"), StatusEntry(1002, 78),
+            ],
+            activity);
+
+        var profile = await Run(provider, [42]);
+
+        Assert.Equal([new InactiveRowsSummary(TableInstance, 2, "R001", 2, DocumentId, 42)], profile.InactiveTables);
+        Assert.Empty(profile.UnmatchedRows);
+        Assert.Equal(1, profile.Stats.Single().Rows);
+    }
+
+    /// <summary>B66: без фільтра активності підсумку RowInactive немає.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Без_фільтра_активності_підсумку_немає()
+    {
+        var provider = Arrange([(Methodology: 42, Version: 71, Rule: $$"""{"{{FuelColumn}}":"Gas"}""")]);
+
+        var profile = await Run(provider, [42]);
+
+        Assert.Empty(profile.InactiveTables);
+    }
+
     private static CellRecord StatusEntry(long rowId, long entryId)
         => new(
             new CellAddress(new PeriodKey(Period), rowId, StatusColumn),

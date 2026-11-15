@@ -1714,6 +1714,14 @@
       "CalculationIssueDto": {
         "description": "Одна поточна проблема розрахунку: рядок, який правило методології не охопило (AN-69).",
         "properties": {
+          "affectedCount": {
+            "description": "✎ B66: `StepError` — скільки різних кроків рядка впало; `RowInactive` — скільки рядків таблиці відсіяно\nфільтром активності; інакше `null`.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "columns": {
             "description": "✎ 10.11: лише для `CategoryRuleRejected` і `MissingInputs` — порожні колонки рядка, які треба заповнити (для\n`CategoryRuleRejected` — ті, що читає правило категорії; для `MissingInputs` — ті, що читають формули версії),\nу порядку колонок таблиці; `null` — назвати не вдалося або колонка прихована від читача.",
             "items": {
@@ -1739,8 +1747,15 @@
             "format": "date-time",
             "type": "string"
           },
+          "errorCode": {
+            "description": "✎ B66: лише для `StepError` — код помилки цього кроку (`#VALUE`…); інакше `null`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "kind": {
-            "description": "Вид проблеми: `NoMatchingRule`, `CategoryRuleRejected` (✎ 10.11) або `MissingInputs` (AN-164: правило\nзакрило рядок, але формулам бракує входів — жодного результату).",
+            "description": "Вид проблеми: `NoMatchingRule`, `CategoryRuleRejected` (✎ 10.11) або `MissingInputs` (AN-164: правило\nзакрило рядок, але формулам бракує входів — жодного результату); ✎ B66: `StepError` (крок методики рядка впав —\n`#VALUE`, `#ARG`…; одна проблема на рядок) і `RowInactive` (рядки, відсіяні фільтром активності D-425;\nОДИН підсумок на таблицю: перший рядок і кількість). Перелік відкритий — невідомий вид клієнт показує як «без правила».",
             "type": "string"
           },
           "methodologyCode": {
@@ -1780,6 +1795,13 @@
             "type": [
               "null",
               "integer"
+            ]
+          },
+          "stepCode": {
+            "description": "✎ B66: лише для `StepError` — код першого невдалого кроку методики; інакше `null`.",
+            "type": [
+              "null",
+              "string"
             ]
           },
           "tableCode": {

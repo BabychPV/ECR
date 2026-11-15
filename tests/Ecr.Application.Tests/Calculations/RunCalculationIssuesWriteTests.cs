@@ -91,6 +91,61 @@ public sealed class RunCalculationIssuesWriteTests
             Arg.Any<CancellationToken>());
     }
 
+    /// <remarks>
+    /// B66 (doc 96: 64 <c>#VALUE</c>, 0 проблем): помилка кроку методики — ОДНА проблема StepError на рядок з першим кроком,
+    /// кодом і кількістю. Мутація: прибрати додавання <c>profile.StepErrorRows</c> у <c>SwitchAsync</c> — тест червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Помилка_кроку_стає_однією_проблемою_StepError_на_рядок()
+    {
+        var (handler, issues) = Arrange(supersededSelf: false);
+        var profile = new ModuleProfile();
+        profile.RecordEvaluatedTables([10]);
+        var row = new RejectedRow(10, 4, "R4", 900, 41);
+        profile.RecordStepErrors([new StepErrorRow(row, "Total", "#VALUE", 2), new StepErrorRow(row, "Total", "#VALUE", 2)]);
+
+        await handler.CompleteAsync(RunId, profile, CancellationToken.None);
+
+        await issues.Received(1).ReplaceAsync(
+            RunId,
+            Arg.Any<IReadOnlyCollection<long>>(),
+            Arg.Is<IReadOnlyCollection<CalculationIssueInput>>(i =>
+                i.Count == 1
+                && i.Single() == new CalculationIssueInput(
+                    10, 4, "R4", 41, ICalculationIssueStore.StepError, "Total", "#VALUE", 2)),
+            Arg.Any<CancellationToken>());
+    }
+
+    /// <remarks>
+    /// B66 (рішення координатора 13.11): рядки, відсіяні фільтром активності (D-425), — ОДИН підсумок на таблицю з
+    /// кількістю, а не проблема на рядок. Мутація: прибрати додавання <c>profile.InactiveTables</c> у <c>SwitchAsync</c>
+    /// (або <c>AffectedCount</c>) — тест червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Відсіяні_фільтром_активності_рядки_стають_одним_підсумком_RowInactive_на_таблицю()
+    {
+        var (handler, issues) = Arrange(supersededSelf: false);
+        var profile = new ModuleProfile();
+        profile.RecordEvaluatedTables([10, 11]);
+        profile.RecordInactive(
+            [new InactiveRowsSummary(10, 2, "R2", 17, 900, 41), new InactiveRowsSummary(11, 1, "R1", 3, 900, 41)]);
+
+        await handler.CompleteAsync(RunId, profile, CancellationToken.None);
+
+        await issues.Received(1).ReplaceAsync(
+            RunId,
+            Arg.Any<IReadOnlyCollection<long>>(),
+            Arg.Is<IReadOnlyCollection<CalculationIssueInput>>(i =>
+                i.Count == 2
+                && i.All(x => x.Kind == ICalculationIssueStore.RowInactive)
+                && i.Single(x => x.TableInstanceId == 10).AffectedCount == 17
+                && i.Single(x => x.TableInstanceId == 10).RowKey == "R2"
+                && i.Single(x => x.TableInstanceId == 11).AffectedCount == 3),
+            Arg.Any<CancellationToken>());
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     public async Task Відмовлений_як_старіший_прогін_не_замінює_проблеми()
