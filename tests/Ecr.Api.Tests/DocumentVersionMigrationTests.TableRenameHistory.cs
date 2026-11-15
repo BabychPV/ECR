@@ -1,8 +1,12 @@
 // tests/Ecr.Api.Tests/DocumentVersionMigrationTests.TableRenameHistory.cs
 using System.Globalization;
 using System.Net;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using Ecr.Application.Audit;
 using Ecr.Application.Documents;
+using Ecr.Domain.Entities.Workflow;
 using Ecr.TestKit;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
@@ -106,6 +110,53 @@ public sealed partial class DocumentVersionMigrationTests
         Assert.Empty(compare.GetProperty("changes").EnumerateArray());
         Assert.Empty(compare.GetProperty("addedRows").EnumerateArray());
         Assert.Empty(compare.GetProperty("removedRows").EnumerateArray());
+    }
+
+    /// <remarks>
+    /// B72 (D1/M9): дві комірки зрізу на одній адресі (так буває, коли переклад зводить дві колонки в одну) — порівняння
+    /// не падає 500 і бере ПЕРШУ. Зріз: C2 = 42 (як живі дані), далі C2 = 41 тієї самої адреси → змін немає.
+    /// Мутація: у <c>CompareDocumentVersionsHandler.ByAddress</c> <c>TryAdd</c> → <c>Add</c> (500), або «остання
+    /// перемагає» (зміна 41 → 42) — червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-5.22")]
+    [Trait("Finding", "B72")]
+    public async Task B72_Порівняння_зрізу_з_двома_комірками_на_одній_адресі_бере_першу_без_500()
+    {
+        var s = await ArrangeAsync(
+                Target.OnlyLabels, extraPermission: ListDocumentVersionsHandler.Permission,
+                periodKey: TableRenameHistoryPeriod + 2)
+            .ConfigureAwait(true);
+
+        var row = s.Doc.RowIds[0];
+        var payload = JsonSerializer.Serialize(new object[]
+        {
+            new { row, column = s.Doc.ColumnDefIds[0], value = "a" },
+            new { row, column = s.Doc.ColumnDefIds[1], value = "42" },
+            new { row, column = s.Doc.ColumnDefIds[1], value = "41" },
+        });
+        long snapshotId;
+        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            var snapshot = new SubmissionSnapshot(
+                s.Doc.DocumentId, s.Doc.SheetDefId, s.Doc.PeriodKey.Value, s.Doc.TemplateVersionId,
+                "{}", numericMode: null, calendarMode: null, payload,
+                SHA256.HashData(Encoding.UTF8.GetBytes(payload)), DateTime.UtcNow.AddHours(-1), s.UserId);
+            db.SubmissionSnapshots.Add(snapshot);
+            await db.SaveChangesAsync().ConfigureAwait(true);
+            snapshotId = snapshot.Id;
+        }
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var compare = await GetJsonAsync(
+                client, app,
+                $"/api/v1/documents/{s.Doc.DocumentId.ToString(CultureInfo.InvariantCulture)}/compare?from={snapshotId}&to=current")
+            .ConfigureAwait(true);
+        Assert.Empty(compare.GetProperty("changes").EnumerateArray());
     }
 
     /// <summary>Додає ролі користувача сценарію ще права (журнал аудиту, версії документа).</summary>

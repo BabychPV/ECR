@@ -57,7 +57,7 @@ public static class SubmissionSnapshotTranslation
     /// <param name="ct">Токен скасування.</param>
     /// <remarks>
     /// Окремої мапи таблиць у схемі немає: перейменування таблиці зберігається парами ВСІХ її колонок. Кандидати — колонки
-    /// цільової версії, чийого шляху «аркуш → таблиця → колонка» у версії зрізу немає (нові або перейменовані); їхній
+    /// цільової версії, не зайняті жодною колонкою зрізу за кодами (нові або перейменовані); їхній
     /// родовід (<see cref="IColumnPathMapper.LineageAsync"/>, транзитивно через версії) дає Id версії зрізу. Усі колонки
     /// зрізу знайшлися за кодами (звичайний перенос) — жодного звернення до бази.
     /// </remarks>
@@ -79,10 +79,13 @@ public static class SubmissionSnapshotTranslation
         var map = CodeMap(from, to);
         if (paths is not null && cells.Any(c => !map.ContainsKey(c.Column)))
         {
-            var sourcePaths = Paths(from, liveOnly: true).Keys.ToHashSet();
+            // ✎ B72 (M10): кандидат — колонка цільової версії, яку НЕ зайняла жодна колонка зрізу за кодами (включно з
+            // вилученою: CodeMap перебирає всі колонки `from`, як і до B72). Інакше вилучена колонка з тим самим шляхом
+            // (за кодом) і перейменоване джерело (за родоводом) зійшлися б в одному кандидаті.
+            var occupied = map.Values.ToHashSet();
             var candidates = Paths(to, liveOnly: true)
-                .Where(p => !sourcePaths.Contains(p.Key))
                 .Select(p => p.Value)
+                .Where(id => !occupied.Contains(id))
                 .Order()
                 .ToList();
             if (candidates.Count > 0)

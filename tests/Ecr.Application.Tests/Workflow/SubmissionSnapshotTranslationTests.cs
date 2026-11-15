@@ -86,6 +86,36 @@ public sealed class SubmissionSnapshotTranslationTests
         await paths.DidNotReceiveWithAnyArgs().LineageAsync(default!, default);
     }
 
+    /// <remarks>
+    /// M10: у версії зрізу є ВИЛУЧЕНА колонка NEW.z (150) — тим самим шляхом, що й кандидат z (201); за кодами вона
+    /// переходить у z (як до B72). Родовід z веде ще й у перейменовану a — вона не має права зайняти ту саму z, інакше
+    /// дві комірки зрізу на одній адресі. Мутація: прибрати відсів кандидатів, зайнятих за кодами → червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Finding", "B72")]
+    public async Task Кандидат_зайнятий_вилученою_колонкою_за_кодами_не_приймає_джерело_родоводу()
+    {
+        const int DeletedZ = 150;
+        var from = Version(4, "OLD", (A, "a"));
+        var stale = new TableDef(from.Sheets[0].Id, EcrCode.Create("NEW"), Text("NEW"), 2,
+                                 TableLayoutKind.PerPeriodInstance, TableRowMode.Fixed);
+        SetId(stale, 42);
+        var z = new ColumnDef(stale.Id, EcrCode.Create("z"), Text("z"), 1, CellDataType.String);
+        SetId(z, DeletedZ);
+        z.SoftDelete(1, new DateTime(2099, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+        stale.AddColumn(z);
+        from.Sheets[0].AddTable(stale);
+
+        var paths = Mapper(new() { [Z] = [Z, A], [W] = [W] });
+
+        var cells = await SubmissionSnapshotTranslation.CellsAsync(
+            [Cell(A, "1"), Cell(DeletedZ, "9")], from, _to, paths, default);
+
+        Assert.Equal([A, Z], cells.Select(c => c.Column));
+        Assert.Equal(cells.Count, cells.Select(c => (c.Row, c.Column)).Distinct().Count());
+    }
+
     private static SubmissionPayloadCell Cell(int column, string value) => new(1, column, value, null);
 
     private static IColumnPathMapper Mapper(Dictionary<int, IReadOnlyList<int>> lineage)
