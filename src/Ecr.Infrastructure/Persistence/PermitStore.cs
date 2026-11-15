@@ -106,11 +106,39 @@ public sealed class PermitStore(EcrDbContext db) : IPermitStore
                 FieldLabel = col.HeaderL10n,
             };
 
+        // ⛔ B56: історія дозволів (j) — пізніший дозвіл «з дати» (doc.PermitSegment) і частина місяця (doc.CellPermitPart) — теж
+        // використання документом, хоч у полі чи комірці його немає. Рахується ДОКУМЕНТ, а не сегмент: кілька сегментів чи частин
+        // одного документа — один документ (UNION у SQL). Видалені логічно рядки не рахуються (PermitHistoryUsage).
+        // Сегмент логічний (без періоду) — з фільтром періоду береться документ, що має таблиці в цьому періоді, і лише
+        // сегмент, чинний не пізніше кінця періоду (ValidFrom <= Period.PeriodEnd проєкту), а сегмент рядка — лише якщо рядок
+        // живий САМЕ в цьому періоді (як комірки; LiveSegmentsIn); частина належить місяцю — фільтр за її періодом.
+        var liveSegments = periodKey is { } period
+            ? PermitHistoryUsage.LiveSegmentsIn(db, period)
+            : PermitHistoryUsage.LiveSegments(db);
+        var segmentDocuments =
+            from s in liveSegments
+            where s.RegistryEntryId == permitId
+            join d in db.Documents.AsNoTracking() on s.DocumentId equals d.Id
+            where projects == null || projects.Contains(d.ProjectId)
+            where periodKey == null
+                  || (db.TableInstances.Any(t => t.DocumentId == d.Id && t.PeriodKeyValue == periodKey)
+                      && db.Periods.Any(p => p.ProjectId == d.ProjectId && p.PeriodKeyValue == periodKey && s.ValidFrom <= p.PeriodEnd))
+            select d.Id;
+        var partDocuments =
+            from part in PermitHistoryUsage.LiveParts(db)
+            where part.RegistryEntryId == permitId && (periodKey == null || part.PeriodKeyValue == periodKey)
+            join d in db.Documents.AsNoTracking() on part.DocumentId equals d.Id
+            where projects == null || projects.Contains(d.ProjectId)
+            select d.Id;
+        var historyDocuments = segmentDocuments.Union(partDocuments);
+
         var headerCount = await headerQuery.CountAsync(ct).ConfigureAwait(false);
         var cellCount = await cellQuery.CountAsync(ct).ConfigureAwait(false);
         var documentCount = await headerQuery.Select(x => x.DocumentId)
             .Union(cellQuery.Select(x => x.DocumentId))
+            .Union(historyDocuments)
             .CountAsync(ct).ConfigureAwait(false);
+        var historyDocumentCount = await historyDocuments.CountAsync(ct).ConfigureAwait(false);
 
         var headers = await headerQuery
             .OrderBy(x => x.DocumentId).ThenBy(x => x.FieldCode)
@@ -136,7 +164,8 @@ public sealed class PermitStore(EcrDbContext db) : IPermitStore
             .Select(p => p.Item)
             .ToList();
 
-        return new PermitUsageDto(permitId, documentCount, headerCount + cellCount, headerCount + cellCount > items.Count, items);
+        return new PermitUsageDto(
+            permitId, documentCount, headerCount + cellCount, headerCount + cellCount > items.Count, items, historyDocumentCount);
     }
 
     /// <inheritdoc />
@@ -172,7 +201,22 @@ public sealed class PermitStore(EcrDbContext db) : IPermitStore
                 select new { Permit = c.ValueRegistryEntryId!.Value, Document = d.Id })
             .Distinct().ToListAsync(ct).ConfigureAwait(false);
 
-        return fromHeaders.Concat(fromCells)
+        // ⛔ B56: історія дозволів (j) — той самий предикат, що в FindUsagesAsync; пари (дозвіл, документ), не сегменти.
+        var fromHistory = await (
+                from s in PermitHistoryUsage.LiveSegments(db)
+                where permits.Contains(s.RegistryEntryId)
+                join d in db.Documents.AsNoTracking() on s.DocumentId equals d.Id
+                where projects == null || projects.Contains(d.ProjectId)
+                select new { Permit = s.RegistryEntryId, Document = d.Id })
+            .Union(
+                from part in PermitHistoryUsage.LiveParts(db)
+                where permits.Contains(part.RegistryEntryId)
+                join d in db.Documents.AsNoTracking() on part.DocumentId equals d.Id
+                where projects == null || projects.Contains(d.ProjectId)
+                select new { Permit = part.RegistryEntryId, Document = d.Id })
+            .ToListAsync(ct).ConfigureAwait(false);
+
+        return fromHeaders.Concat(fromCells).Concat(fromHistory)
             .Distinct()
             .GroupBy(x => x.Permit)
             .ToDictionary(g => g.Key, g => g.Count());
@@ -216,7 +260,24 @@ public sealed class PermitStore(EcrDbContext db) : IPermitStore
                 select new { Type = e.RegistryDefId, Document = d.Id })
             .Distinct().ToListAsync(ct).ConfigureAwait(false);
 
-        return fromHeaders.Concat(fromCells)
+        // ⛔ B56: історія дозволів (j) — як у CountUsedInDocumentsAsync; пари (тип, документ), не сегменти.
+        var fromHistory = await (
+                from s in PermitHistoryUsage.LiveSegments(db)
+                join e in db.RegistryEntries.AsNoTracking() on s.RegistryEntryId equals e.Id
+                where !e.IsDeleted && types.Contains(e.RegistryDefId)
+                join d in db.Documents.AsNoTracking() on s.DocumentId equals d.Id
+                where projects == null || projects.Contains(d.ProjectId)
+                select new { Type = e.RegistryDefId, Document = d.Id })
+            .Union(
+                from part in PermitHistoryUsage.LiveParts(db)
+                join e in db.RegistryEntries.AsNoTracking() on part.RegistryEntryId equals e.Id
+                where !e.IsDeleted && types.Contains(e.RegistryDefId)
+                join d in db.Documents.AsNoTracking() on part.DocumentId equals d.Id
+                where projects == null || projects.Contains(d.ProjectId)
+                select new { Type = e.RegistryDefId, Document = d.Id })
+            .ToListAsync(ct).ConfigureAwait(false);
+
+        return fromHeaders.Concat(fromCells).Concat(fromHistory)
             .Distinct()
             .GroupBy(x => x.Type)
             .ToDictionary(g => g.Key, g => g.Count());

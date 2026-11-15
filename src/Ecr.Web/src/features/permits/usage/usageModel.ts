@@ -1,6 +1,7 @@
+import { formatNumber } from '@/shared/format/number';
 import { formatPeriodKey } from '@/shared/format/periodKey';
 import { t } from '@/shared/i18n';
-import type { PermitUsageItem } from '../api/usagesApi';
+import type { PermitUsage, PermitUsageItem } from '../api/usagesApi';
 import { localName } from '../permit/names';
 
 /*
@@ -91,4 +92,19 @@ export function parsePeriodParam(raw: string | null): number | null {
   if (raw === null || !/^\d{5,6}$/.test(raw)) return null;
 
   return Number(raw);
+}
+
+/**
+ * Підсумок над таблицею: документи (B56 — документи, не сегменти історії: сервер рахує документ один раз, хоч би скільки
+ * місць чи сегментів у ньому було) і місця. Якщо дозвіл стоїть в історії дозволів документів — окремою часткою, бо ці
+ * посилання в переліку місць не перелічуються.
+ */
+export function summaryText(data: PermitUsage): string {
+  const summary = t('permits.usage.summary', {
+    documents: formatNumber(data.documentCount),
+    links: formatNumber(data.linkCount),
+  });
+  if (data.historyDocumentCount <= 0) return summary;
+
+  return `${summary} · ${t('permits.usage.summaryHistory', { history: formatNumber(data.historyDocumentCount) })}`;
 }

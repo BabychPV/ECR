@@ -146,6 +146,36 @@ describe('вкладка «Used in»', () => {
     expect(screen.getByText('Documents: 0 · places: 0')).toBeTruthy();
   });
 
+  // B56: лічильник — документи (сервер рахує документ один раз, хоч би скільки сегментів історії в ньому); історія — окремою
+  // часткою підсумку. Мутація: прибрати частку `summaryHistory` у `summaryText` (usageModel) — червоніє перший тест;
+  // умову `historyOnly` → `false` — червоніє другий («Not used in any document yet» замість пояснення про історію).
+  it('історія дозволів: підсумок каже, у скількох документах дозвіл стоїть в історії', async () => {
+    getUsages.mockResolvedValue(usage([headerItem()], { documentCount: 2, historyDocumentCount: 1 }));
+    open();
+
+    await screen.findByRole('table', { name: 'Places where the permit is used' });
+    expect(screen.getByText('Documents: 2 · places: 1 · in permit history: 1')).toBeTruthy();
+  });
+
+  it('дозвіл лише в історії: документ рахується, порожня таблиця не каже «ніде»', async () => {
+    getUsages.mockResolvedValue(usage([], { documentCount: 1, historyDocumentCount: 1 }));
+    open();
+
+    expect(await screen.findByText('Used only in permit history')).toBeTruthy();
+    expect(screen.queryByText('Not used in any document yet')).toBeNull();
+    expect(screen.getByText('Documents: 1 · places: 0 · in permit history: 1')).toBeTruthy();
+  });
+
+  // Мутація: прибрати `&& data.historyDocumentCount > 0` з умови `historyOnly` — червоніє (казало б «лише в історії»).
+  it('комірки сховані правилами читання, історії немає: не «лише в історії», а звичайне «порожньо»', async () => {
+    getUsages.mockResolvedValue(usage([], { documentCount: 1, historyDocumentCount: 0 }));
+    open();
+
+    expect(await screen.findByText('Not used in any document yet')).toBeTruthy();
+    expect(screen.queryByText('Used only in permit history')).toBeNull();
+    expect(screen.getByText('Documents: 1 · places: 0')).toBeTruthy();
+  });
+
   it('відмова читання — помилка з повтором; повтор читає знову', async () => {
     getUsages.mockRejectedValueOnce(new EcrApiError({ title: 'Not found', status: 404, errorCode: 'ECR-PRM-0404', correlationId: 'c1' }));
     getUsages.mockResolvedValue(usage([headerItem()]));

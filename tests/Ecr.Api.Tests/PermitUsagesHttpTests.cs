@@ -271,6 +271,323 @@ public sealed class PermitUsagesHttpTests(SqlServerFixture sql)
         Assert.Equal("header", Kinds(usages)[0]);
     }
 
+    /// <summary>
+    /// ⛔ B56: картка дозволу рахує ДОКУМЕНТИ, а не сегменти історії. Дозвіл <c>unused</c> стоїть лише в історії дозволів (j)
+    /// одного документа — сегмент шапки «з дати», два сегменти рядків і частина поділеного місяця — і це ОДИН документ:
+    /// <c>documentCount = historyDocumentCount = 1</c>, місць (полів і комірок) 0. Той самий документ, де дозвіл ще й у шапці й
+    /// комірках (<c>active</c> + сегмент), — теж 1. Перелік дозволів (<c>usedInDocumentCount</c>) — те саме число; читач без
+    /// доступу до проєкту бачить 0.
+    /// </summary>
+    /// <remarks>
+    /// Мутаційні докази (виконано вручну, відновлено): (1) у <c>PermitStore.FindUsagesAsync</c> прибрати
+    /// <c>.Union(historyDocuments)</c> з лічильника документів — <c>documentCount</c> 0 замість 1; (2) порахувати історію
+    /// сегментами (<c>Concat</c> замість <c>Union</c> в <c>historyDocuments</c>) — <c>historyDocumentCount</c> 4 замість 1;
+    /// (3) у <c>CountUsedInDocumentsAsync</c> прибрати гілку <c>fromHistory</c> — <c>usedInDocumentCount</c> 0 замість 1;
+    /// (4) прибрати фільтр <c>projects.Contains(d.ProjectId)</c> у сегментах — читач іншого проєкту бачить 1 (outsider без
+    /// <c>Document.View</c> цього не ловить: обробник повертає нулі ще до сховища).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "PERMUSE")]
+    public async Task Історія_дозволів_рахується_документом_а_не_сегментами()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            var now = DateTime.UtcNow;
+            var rowKeys = await db.TableRows.AsNoTracking()
+                .Where(r => r.PeriodKeyValue == s.Period && (r.Id == s.Document.RowIds[0] || r.Id == s.Document.RowIds[1]))
+                .OrderBy(r => r.Ordinal).Select(r => r.RowKeyValue).ToListAsync().ConfigureAwait(true);
+            var firstDay = new DateOnly(s.Period / 100, s.Period % 100, 1);
+
+            db.PermitSegments.AddRange(
+                PermitSegment.ForHeader(s.Document.DocumentId, s.HeaderFieldId, firstDay.AddDays(9), s.Unused, s.WriterId, now),
+                PermitSegment.ForRow(s.Document.DocumentId, s.Document.TableDefId, null, rowKeys[0], s.PermitColumnId, firstDay.AddDays(9), s.Unused, s.WriterId, now),
+                PermitSegment.ForRow(s.Document.DocumentId, s.Document.TableDefId, null, rowKeys[1], s.PermitColumnId, firstDay.AddDays(19), s.Unused, s.WriterId, now),
+                PermitSegment.ForRow(s.Document.DocumentId, s.Document.TableDefId, null, rowKeys[1], s.PermitColumnId, firstDay.AddDays(4), s.Active, s.WriterId, now));
+            db.CellPermitParts.Add(new CellPermitPart(
+                s.Period, s.Document.DocumentId, s.Document.TableDefId, null, rowKeys[0], s.PermitColumnId, 2, s.Unused,
+                firstDay.AddDays(9), firstDay.AddDays(27), null));
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        using var app = new EcrApiFactory(sql);
+        using var writer = await SignedInAsync(app, s.Writer).ConfigureAwait(true);
+
+        var history = await GetAsync(writer, app, $"/api/v1/permits/{s.Unused}/usages").ConfigureAwait(true);
+        Assert.Equal((1, 1, 0), (
+            history.GetProperty("documentCount").GetInt32(),
+            history.GetProperty("historyDocumentCount").GetInt32(),
+            history.GetProperty("linkCount").GetInt32()));
+        Assert.Empty(history.GetProperty("items").EnumerateArray());
+
+        // Шапка + комірки + сегмент у тому ж документі — так само один документ.
+        var mixed = await GetAsync(writer, app, $"/api/v1/permits/{s.Active}/usages").ConfigureAwait(true);
+        Assert.Equal((1, 1, 3), (
+            mixed.GetProperty("documentCount").GetInt32(),
+            mixed.GetProperty("historyDocumentCount").GetInt32(),
+            mixed.GetProperty("linkCount").GetInt32()));
+
+        // Дозвіл без історії: historyDocumentCount 0.
+        var plain = await GetAsync(writer, app, $"/api/v1/permits/{s.Expired}/usages").ConfigureAwait(true);
+        Assert.Equal((1, 0), (plain.GetProperty("documentCount").GetInt32(), plain.GetProperty("historyDocumentCount").GetInt32()));
+
+        // Фільтр періоду: частина належить поточному місяцю, сегменти — документу з таблицями в періоді; періоду без таблиць — 0.
+        var inPeriod = await GetAsync(writer, app, $"/api/v1/permits/{s.Unused}/usages?periodKey={s.Period}").ConfigureAwait(true);
+        Assert.Equal(1, inPeriod.GetProperty("documentCount").GetInt32());
+        var none = await GetAsync(writer, app, $"/api/v1/permits/{s.Unused}/usages?periodKey=209912").ConfigureAwait(true);
+        Assert.Equal((0, 0), (none.GetProperty("documentCount").GetInt32(), none.GetProperty("historyDocumentCount").GetInt32()));
+
+        var list = await GetAsync(writer, app, $"/api/v1/permits?type={s.TypeCode}").ConfigureAwait(true);
+        Assert.Equal(
+            new Dictionary<long, int> { [s.Active] = 1, [s.Expired] = 1, [s.Unused] = 1 },
+            list.GetProperty("items").EnumerateArray().ToDictionary(i => i.GetProperty("id").GetInt64(), i => i.GetProperty("usedInDocumentCount").GetInt32()));
+        var type = await GetAsync(writer, app, $"/api/v1/permit-types/{s.TypeCode}/usage").ConfigureAwait(true);
+        Assert.Equal(1, type.GetProperty("usedInDocumentCount").GetInt32());
+
+        // Права не розширено: читач без Document.View у проєкті не бачить документа й через історію.
+        using var outsider = await SignedInAsync(app, s.Outsider).ConfigureAwait(true);
+        var blind = await GetAsync(outsider, app, $"/api/v1/permits/{s.Unused}/usages").ConfigureAwait(true);
+        Assert.Equal((0, 0), (blind.GetProperty("documentCount").GetInt32(), blind.GetProperty("historyDocumentCount").GetInt32()));
+        var blindList = await GetAsync(outsider, app, $"/api/v1/permits?type={s.TypeCode}").ConfigureAwait(true);
+        Assert.All(blindList.GetProperty("items").EnumerateArray(), i => Assert.Equal(0, i.GetProperty("usedInDocumentCount").GetInt32()));
+
+        // Читач ІНШОГО проєкту (Document.View є, перелік проєктів непорожній — фільтр сховища справді працює): документа з
+        // історією не бачить.
+        var stranger = await OtherProjectReaderAsync().ConfigureAwait(true);
+        using var other = await SignedInAsync(app, stranger).ConfigureAwait(true);
+        var foreign = await GetAsync(other, app, $"/api/v1/permits/{s.Unused}/usages").ConfigureAwait(true);
+        Assert.Equal((0, 0), (foreign.GetProperty("documentCount").GetInt32(), foreign.GetProperty("historyDocumentCount").GetInt32()));
+        var foreignList = await GetAsync(other, app, $"/api/v1/permits?type={s.TypeCode}").ConfigureAwait(true);
+        Assert.All(foreignList.GetProperty("items").EnumerateArray(), i => Assert.Equal(0, i.GetProperty("usedInDocumentCount").GetInt32()));
+    }
+
+    /// <summary>
+    /// ⛔ B56 (F13): дозвіл лише в частині поділеного місяця рахується документом; тип дозволу, чиї дозволи лише в історії, —
+    /// теж (<c>/permit-types/{code}/usage</c> і перелік типів); читач іншого проєкту бачить нулі.
+    /// </summary>
+    /// <remarks>
+    /// Мутації (виконано вручну, відновлено): вимкнути частини (гілку <c>partDocuments</c>) — <c>documentCount</c> 0;
+    /// у <c>CountTypeUsedInDocumentsAsync</c> прибрати <c>.Concat(fromHistory)</c> — тип 0 замість 1; прибрати там фільтр
+    /// проєктів в історії — читач іншого проєкту бачить 1.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "PERMUSE")]
+    public async Task Дозвіл_лише_в_частині_місяця_і_тип_лише_в_історії_рахуються_документом()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            // Лише історія: шапку й комірки з дозволами типу прибрано.
+            await db.DocumentHeaderValues.Where(v => v.DocumentId == s.Document.DocumentId).ExecuteDeleteAsync().ConfigureAwait(true);
+            await db.CellValues.Where(c => c.ValueRegistryEntryId == s.Active || c.ValueRegistryEntryId == s.Expired)
+                .ExecuteDeleteAsync().ConfigureAwait(true);
+
+            var rowKey = await db.TableRows.AsNoTracking()
+                .Where(r => r.PeriodKeyValue == s.Period && r.Id == s.Document.RowIds[0]).Select(r => r.RowKeyValue).SingleAsync().ConfigureAwait(true);
+            var firstDay = new DateOnly(s.Period / 100, s.Period % 100, 1);
+            db.CellPermitParts.Add(new CellPermitPart(
+                s.Period, s.Document.DocumentId, s.Document.TableDefId, null, rowKey, s.PermitColumnId, 2, s.Unused,
+                firstDay.AddDays(9), firstDay.AddDays(27), null));
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        using var app = new EcrApiFactory(sql);
+        using var writer = await SignedInAsync(app, s.Writer).ConfigureAwait(true);
+
+        var part = await GetAsync(writer, app, $"/api/v1/permits/{s.Unused}/usages").ConfigureAwait(true);
+        Assert.Equal((1, 1, 0), (
+            part.GetProperty("documentCount").GetInt32(),
+            part.GetProperty("historyDocumentCount").GetInt32(),
+            part.GetProperty("linkCount").GetInt32()));
+
+        var type = await GetAsync(writer, app, $"/api/v1/permit-types/{s.TypeCode}/usage").ConfigureAwait(true);
+        Assert.Equal(1, type.GetProperty("usedInDocumentCount").GetInt32());
+        var types = await GetAsync(writer, app, $"/api/v1/permit-types?q={s.TypeCode}").ConfigureAwait(true);
+        Assert.Equal(1, Assert.Single(types.GetProperty("items").EnumerateArray(), i => i.GetProperty("code").GetString() == s.TypeCode)
+            .GetProperty("usedInDocumentCount").GetInt32());
+
+        var stranger = await OtherProjectReaderAsync().ConfigureAwait(true);
+        using var other = await SignedInAsync(app, stranger).ConfigureAwait(true);
+        var blindType = await GetAsync(other, app, $"/api/v1/permit-types/{s.TypeCode}/usage").ConfigureAwait(true);
+        Assert.Equal(0, blindType.GetProperty("usedInDocumentCount").GetInt32());
+        var blindTypes = await GetAsync(other, app, $"/api/v1/permit-types?q={s.TypeCode}").ConfigureAwait(true);
+        Assert.All(blindTypes.GetProperty("items").EnumerateArray(), i => Assert.Equal(0, i.GetProperty("usedInDocumentCount").GetInt32()));
+        var blindPart = await GetAsync(other, app, $"/api/v1/permits/{s.Unused}/usages").ConfigureAwait(true);
+        Assert.Equal(0, blindPart.GetProperty("documentCount").GetInt32());
+    }
+
+    /// <summary>
+    /// ⛔ B56 (F13): історія логічно видаленого рядка — не використання (SoftDelete сегменти й частини не прибирає); сегмент,
+    /// чинний з 10-го числа поточного місяця, не рахується у фільтрі попереднього місяця (<c>ValidFrom</c> ≤ кінець періоду).
+    /// </summary>
+    /// <remarks>
+    /// Мутації (виконано вручну, відновлено): у <c>PermitHistoryUsage.LiveSegments</c> і <c>LiveParts</c> прибрати вимогу
+    /// живого рядка — <c>documentCount</c> 1 замість 0; прибрати умову <c>s.ValidFrom &lt;= p.PeriodEnd</c> — попередній місяць 1
+    /// замість 0.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "PERMUSE")]
+    public async Task Історія_видаленого_рядка_і_сегмент_з_пізнішої_дати_не_рахуються()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        var firstDay = new DateOnly(s.Period / 100, s.Period % 100, 1);
+        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            // Рядок 3 видалено логічно в усіх періодах документа (у попередньому той самий ключ інакше лишився б живим).
+            var deletedKey = await db.TableRows.AsNoTracking()
+                .Where(r => r.PeriodKeyValue == s.Period && r.Id == s.Document.RowIds[2]).Select(r => r.RowKeyValue).SingleAsync().ConfigureAwait(true);
+            var instances = await db.TableInstances.AsNoTracking()
+                .Where(t => t.DocumentId == s.Document.DocumentId).Select(t => t.Id).ToListAsync().ConfigureAwait(true);
+            var alive = await db.TableRows
+                .Where(r => instances.Contains(r.TableInstanceId) && r.RowKeyValue == deletedKey && !r.IsDeleted).ToListAsync().ConfigureAwait(true);
+            foreach (var row in alive)
+            {
+                row.SoftDelete(DateTime.UtcNow);
+            }
+
+            db.PermitSegments.Add(PermitSegment.ForRow(
+                s.Document.DocumentId, s.Document.TableDefId, null, deletedKey, s.PermitColumnId, firstDay.AddDays(9), s.Unused, s.WriterId, DateTime.UtcNow));
+            db.CellPermitParts.Add(new CellPermitPart(
+                s.Period, s.Document.DocumentId, s.Document.TableDefId, null, deletedKey, s.PermitColumnId, 2, s.Unused,
+                firstDay.AddDays(9), firstDay.AddDays(27), null));
+            await db.SaveChangesAsync().ConfigureAwait(true);
+
+            // Передумова перевірки ValidFrom: попередній період є в календарі проєкту й закінчується раніше за сегмент.
+            var previousEnd = await db.Periods.AsNoTracking()
+                .Where(p => p.ProjectId == s.Document.ProjectId && p.PeriodKeyValue == s.PreviousPeriod).Select(p => p.PeriodEnd).SingleAsync().ConfigureAwait(true);
+            Assert.True(previousEnd < firstDay.AddDays(9));
+        }
+
+        using var app = new EcrApiFactory(sql);
+        using var writer = await SignedInAsync(app, s.Writer).ConfigureAwait(true);
+
+        var deleted = await GetAsync(writer, app, $"/api/v1/permits/{s.Unused}/usages").ConfigureAwait(true);
+        Assert.Equal((0, 0), (deleted.GetProperty("documentCount").GetInt32(), deleted.GetProperty("historyDocumentCount").GetInt32()));
+        var list = await GetAsync(writer, app, $"/api/v1/permits?type={s.TypeCode}").ConfigureAwait(true);
+        Assert.Equal(0, list.GetProperty("items").EnumerateArray().Single(i => i.GetProperty("id").GetInt64() == s.Unused)
+            .GetProperty("usedInDocumentCount").GetInt32());
+
+        // Сегмент поля шапки з 10-го поточного місяця.
+        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            db.PermitSegments.Add(PermitSegment.ForHeader(s.Document.DocumentId, s.HeaderFieldId, firstDay.AddDays(9), s.Unused, s.WriterId, DateTime.UtcNow));
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        var current = await GetAsync(writer, app, $"/api/v1/permits/{s.Unused}/usages?periodKey={s.Period}").ConfigureAwait(true);
+        Assert.Equal((1, 1), (current.GetProperty("documentCount").GetInt32(), current.GetProperty("historyDocumentCount").GetInt32()));
+        var previous = await GetAsync(writer, app, $"/api/v1/permits/{s.Unused}/usages?periodKey={s.PreviousPeriod}").ConfigureAwait(true);
+        Assert.Equal((0, 0), (previous.GetProperty("documentCount").GetInt32(), previous.GetProperty("historyDocumentCount").GetInt32()));
+    }
+
+    /// <summary>
+    /// ⛔ B56 (F13-2): «живий рядок» історії — у правильному місці. (1) Під фільтром періоду сегмент рядка рахується лише за
+    /// рядком, живим САМЕ в цьому періоді (як комірки); без фільтра — бодай в одному. (2) Частина місяця — лише за рядком її
+    /// місяця: рядок, видалений у місяці частини й живий в іншому, частину не рятує. (3) Рядок копії аркуша з тим самим ключем
+    /// не оживляє сегмент оригіналу.
+    /// </summary>
+    /// <remarks>
+    /// Мутації (виконано вручну, відновлено): у <c>FindUsagesAsync</c> брати <c>LiveSegments</c> замість <c>LiveSegmentsIn</c> —
+    /// поточний період 1 замість 0; у <c>LiveParts</c> прибрати <c>ti.PeriodKeyValue == p.PeriodKeyValue</c> — 1 замість 0 (N4);
+    /// у <c>LiveSegments</c> прибрати <c>ti.SheetCopyId == s.SheetCopyId</c> — 1 замість 0 (N5).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "PERMUSE")]
+    public async Task Живий_рядок_історії_береться_за_періодом_місяцем_частини_і_копією_аркуша()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        var firstDay = new DateOnly(s.Period / 100, s.Period % 100, 1);
+        var previousFirstDay = new DateOnly(s.PreviousPeriod / 100, s.PreviousPeriod % 100, 1);
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        string rowKey;
+        await using (var db = builder.CreateContext())
+        {
+            // Рядок 1 видалено лише в поточному періоді; у попередньому той самий ключ живий.
+            var row = await db.TableRows.SingleAsync(r => r.PeriodKeyValue == s.Period && r.Id == s.Document.RowIds[0]).ConfigureAwait(true);
+            rowKey = row.RowKeyValue;
+            row.SoftDelete(DateTime.UtcNow);
+            db.PermitSegments.Add(PermitSegment.ForRow(
+                s.Document.DocumentId, s.Document.TableDefId, null, rowKey, s.PermitColumnId, previousFirstDay.AddDays(4), s.Unused, s.WriterId, DateTime.UtcNow));
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        using var app = new EcrApiFactory(sql);
+        using var writer = await SignedInAsync(app, s.Writer).ConfigureAwait(true);
+
+        async Task<int> DocumentsAsync(string query = "")
+            => (await GetAsync(writer, app, $"/api/v1/permits/{s.Unused}/usages{query}").ConfigureAwait(true)).GetProperty("documentCount").GetInt32();
+
+        // (1) Без фільтра — живий у попередньому, отже 1; у попередньому періоді — 1; у поточному рядок видалено — 0.
+        Assert.Equal(1, await DocumentsAsync().ConfigureAwait(true));
+        Assert.Equal(1, await DocumentsAsync($"?periodKey={s.PreviousPeriod}").ConfigureAwait(true));
+        Assert.Equal(0, await DocumentsAsync($"?periodKey={s.Period}").ConfigureAwait(true));
+
+        // (2) Замість сегмента — частина поточного місяця на тому ж рядку: у її місяці рядок видалено — 0 навіть без фільтра.
+        await using (var db = builder.CreateContext())
+        {
+            await db.PermitSegments.Where(x => x.DocumentId == s.Document.DocumentId).ExecuteDeleteAsync().ConfigureAwait(true);
+            db.CellPermitParts.Add(new CellPermitPart(
+                s.Period, s.Document.DocumentId, s.Document.TableDefId, null, rowKey, s.PermitColumnId, 2, s.Unused,
+                firstDay.AddDays(9), firstDay.AddDays(27), null));
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        Assert.Equal(0, await DocumentsAsync().ConfigureAwait(true));
+
+        // (3) Рядок видалено й у попередньому періоді; копія аркуша має ЖИВИЙ рядок з тим самим ключем. Сегмент оригіналу — 0.
+        await using (var db = builder.CreateContext())
+        {
+            await db.CellPermitParts.Where(x => x.DocumentId == s.Document.DocumentId).ExecuteDeleteAsync().ConfigureAwait(true);
+            var instances = await db.TableInstances.AsNoTracking()
+                .Where(t => t.DocumentId == s.Document.DocumentId).Select(t => t.Id).ToListAsync().ConfigureAwait(true);
+            foreach (var alive in await db.TableRows.Where(r => instances.Contains(r.TableInstanceId) && r.RowKeyValue == rowKey && !r.IsDeleted).ToListAsync().ConfigureAwait(true))
+            {
+                alive.SoftDelete(DateTime.UtcNow);
+            }
+
+            var original = new DocumentSheet(s.Document.DocumentId, s.Document.SheetDefId);
+            db.DocumentSheets.Add(original);
+            await db.SaveChangesAsync().ConfigureAwait(true);
+            var copy = original.CreateCopy(2);
+            db.DocumentSheets.Add(copy);
+            await db.SaveChangesAsync().ConfigureAwait(true);
+
+            var loader = new Ecr.Infrastructure.Persistence.BulkCellLoader(sql.ConnectionString, 1000);
+            var instanceId = await loader.ReserveIdsAsync("doc.TableInstanceSeq", 1, CancellationToken.None).ConfigureAwait(true);
+            var rowId = await loader.ReserveIdsAsync("doc.TableRowSeq", 1, CancellationToken.None).ConfigureAwait(true);
+            var period = new PeriodKey(s.Period);
+            db.TableInstances.Add(new TableInstance(period, instanceId, s.Document.DocumentId, s.Document.TableDefId, DateTime.UtcNow, copy.Id));
+            db.TableRows.Add(new TableRow(period, rowId, instanceId, RowKey.Create(rowKey), 1, DateTime.UtcNow));
+            db.PermitSegments.Add(PermitSegment.ForRow(
+                s.Document.DocumentId, s.Document.TableDefId, null, rowKey, s.PermitColumnId, firstDay.AddDays(4), s.Unused, s.WriterId, DateTime.UtcNow));
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        Assert.Equal(0, await DocumentsAsync().ConfigureAwait(true));
+    }
+
+    /// <summary>Читач з <c>Registry.View</c> і <c>Document.View</c>, грант <c>Read</c> — лише на проєкт окремого документа.</summary>
+    private async Task<string> OtherProjectReaderAsync()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var foreignDocument = await builder.BuildAsync(202601, columnCount: 1, rowCount: 1).ConfigureAwait(false);
+        await using var db = builder.CreateContext();
+        var user = NewUser(db, "pu_x", out var name);
+        var role = new Role(EcrCode.Create($"PUX_{Guid.NewGuid():N}"), Text("Other project reader"));
+        db.Roles.Add(role);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        db.RolePermissions.AddRange(new RolePermission(role.Id, "Registry.View"), new RolePermission(role.Id, "Document.View"));
+        db.RoleAssignments.Add(new RoleAssignment(role.Id, user.Id, null));
+        db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Project, foreignDocument.ProjectId, GrantLevel.Read));
+        await db.SaveChangesAsync().ConfigureAwait(false);
+        return name;
+    }
+
     private static List<string?> Kinds(JsonElement usages)
         => [.. usages.GetProperty("items").EnumerateArray().Select(i => i.GetProperty("kind").GetString())];
 
@@ -450,11 +767,12 @@ public sealed class PermitUsagesHttpTests(SqlServerFixture sql)
 
         return new Scenario(
             document, document.SheetCode, tableCode, column.Code, firstRowKey, period, previous, type.Code,
-            active.Id, expired.Id, unused.Id, foreign.Id, writerName, outsiderName, noRegistryName);
+            active.Id, expired.Id, unused.Id, foreign.Id, writerName, outsiderName, noRegistryName,
+            headerField.Id, column.Id, writer.Id);
     }
 
     private sealed record Scenario(
         TestDocument Document, string SheetCode, string TableCode, string PermitColumnCode, string FirstRowKey,
         int Period, int PreviousPeriod, string TypeCode, long Active, long Expired, long Unused, long Foreign,
-        string Writer, string Outsider, string NoRegistry);
+        string Writer, string Outsider, string NoRegistry, int HeaderFieldId, int PermitColumnId, int WriterId);
 }

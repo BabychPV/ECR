@@ -46,7 +46,7 @@ public sealed record PermitBoundSheetDto(string BindingCode, string SheetName, s
 /// <param name="BoundSheetCount">Скільки аркушів читають дозвіл; поки привʼязок немає (PM-09) - завжди 0.</param>
 /// <param name="UpdatedAt">Остання зміна запису шапки, UTC.</param>
 /// <param name="UpdatedByDisplayName">Хто змінив.</param>
-/// <param name="UsedInDocumentCount">У скількох документах (проєктів, що читач бачить) дозвіл обраний значенням шапки чи комірки; 0 - ніде.</param>
+/// <param name="UsedInDocumentCount">У скількох документах (проєктів, що читач бачить) дозвіл обраний значенням шапки чи комірки або стоїть в історії дозволів документа (B56: документи, не сегменти); 0 - ніде.</param>
 public sealed record PermitListItemDto(
     long Id,
     string Number,
