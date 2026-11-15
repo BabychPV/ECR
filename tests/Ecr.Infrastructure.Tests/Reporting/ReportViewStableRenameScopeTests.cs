@@ -1,5 +1,6 @@
 // tests/Ecr.Infrastructure.Tests/Reporting/ReportViewStableRenameScopeTests.cs
 using System.Text.RegularExpressions;
+using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Enums;
@@ -24,8 +25,9 @@ namespace Ecr.Infrastructure.Tests.Reporting;
 /// До B129 (05-rpt-views.sql до цього коміту) червоніють тести колонок (обидва режими), R-2, відбитка і кількох скоупів: аліас
 /// діяв на рядки всіх проєктів. Мутації B129 (локально, SQL у bin): (1) <c>@pred</c> з усіма Id без скоупу (pc); (2) мапа слотів
 /// без <c>m.Scope</c>; (3) <c>fam</c> без <c>fm.Scope</c>; (4) рядки R-2 без предиката скоупу; (5) <c>IsLegacyGlobal</c> ігнорується;
-/// (6) відбиток без <c>cfg.ColumnRenameProject</c>; (7) усі пари глобальні — кожна червонить щонайменше один тест.
-/// Не покрито тестом: читач <c>rv</c> (результати методики для Calculated-колонок) — той самий шаблон предиката, що й pc.
+/// (6) відбиток без <c>cfg.ColumnRenameProject</c>; (7) усі пари глобальні; (8) читач <c>rv</c> (результати методики) без
+/// предиката скоупу; (9) підпис скоупу (FOR XML PATH) без пар — усі проєкти з прив'язками в одному скоупі — кожна червонить
+/// щонайменше один тест.
 /// </remarks>
 [Trait(TestCategories.Category, TestCategories.Integration)]
 [Trait("Requirement", "RPT-STABLE")]
@@ -168,6 +170,26 @@ public sealed partial class ReportViewStableRenameScopeTests(ITestOutputHelper o
         Assert.Null(await ScalarStringAsync(stable, projects[3].ProjectId, 209901, "N1", "R1"));
     }
 
+    [Fact]
+    public async Task Результат_методики_Calculated_колонки_йде_під_аліасом_лише_для_свого_проєкту()
+    {
+        // v1: K (Calculated, прив'язка методики) -> v2: KN (Calculated); PB переніс K -> KN, PA - ні.
+        var (templateId, code) = await NewTemplateAsync();
+        var v1 = await AddTypedVersionAsync(templateId, "1", [("T", [("A", CellDataType.String), ("K", CellDataType.Calculated)])]);
+        var v2 = await AddTypedVersionAsync(templateId, "2", [("T", [("A", CellDataType.String), ("KN", CellDataType.Calculated)])]);
+        var pb = await NewProjectAsync(v1.VersionId, 209901);
+        var pa = await NewProjectAsync(v1.VersionId, 209901);
+        await SeedAsync(pb, 209901, v1.Tables["T"], ("A", "pb_a"));
+        await SeedAsync(pa, 209901, v1.Tables["T"], ("A", "pa_a"));
+        await SeedResultsAsync(v1.Tables["T"].TableId, v1.Tables["T"].Cols["K"], (pb, 209901, 9.5m), (pa, 209901, 7.5m));
+        await RenameAsync(v1.Tables["T"].Cols["K"], v2.Tables["T"].Cols["KN"], legacy: false, pb.ProjectId);
+        await GenerateAsync(v2.VersionId, routing: false);
+
+        var stable = Sanitise($"v_{code}_S_T");
+        Assert.Equal(((decimal?)9.5m, (decimal?)9.5m), await KAsync(stable, pb.ProjectId));   // PB: результат під обома іменами
+        Assert.Equal(((decimal?)7.5m, (decimal?)null), await KAsync(stable, pa.ProjectId));   // PA: лише під своїм
+    }
+
     // ── помічники ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
     private sealed record Scenario(string Stable, int Pb, int Pa, int Pc, int BV1, int ZV2);
@@ -209,7 +231,11 @@ public sealed partial class ReportViewStableRenameScopeTests(ITestOutputHelper o
         return (t.Id, code);
     }
 
-    private async Task<VersionRef> AddVersionAsync(int templateId, string versionText, params (string Table, string[] Columns)[] tables)
+    private Task<VersionRef> AddVersionAsync(int templateId, string versionText, params (string Table, string[] Columns)[] tables)
+        => AddTypedVersionAsync(templateId, versionText,
+            [.. tables.Select(t => (t.Table, t.Columns.Select(c => (c, CellDataType.String)).ToArray()))]);
+
+    private async Task<VersionRef> AddTypedVersionAsync(int templateId, string versionText, (string Table, (string Code, CellDataType Type)[] Columns)[] tables)
     {
         await using var db = _sql.CreateContext();
         var version = new TemplateVersion(templateId, versionText, 1, Now);
@@ -226,7 +252,7 @@ public sealed partial class ReportViewStableRenameScopeTests(ITestOutputHelper o
                 TableLayoutKind.MonthsInColumns, TableRowMode.Fixed);
             db.TableDefs.Add(table);
             await db.SaveChangesAsync();
-            var defs = columns.Select((c, i) => new ColumnDef(table.Id, EcrCode.Create(c), Name(c), i + 1, CellDataType.String)).ToList();
+            var defs = columns.Select((c, i) => new ColumnDef(table.Id, EcrCode.Create(c.Code), Name(c.Code), i + 1, c.Type)).ToList();
             db.ColumnDefs.AddRange(defs);
             await db.SaveChangesAsync();
             result[tableCode] = new TableRef(table.Id, defs.ToDictionary(d => d.Code, d => d.Id, StringComparer.Ordinal));
@@ -291,6 +317,11 @@ public sealed partial class ReportViewStableRenameScopeTests(ITestOutputHelper o
         {
             db.TableRows.Add(new TableRow(key, rowId, instanceId, RowKey.Create(rowKey), int.Parse(rowKey[1..], System.Globalization.CultureInfo.InvariantCulture) + 1, Now));
             await db.SaveChangesAsync();
+        }
+
+        if (values.Length == 0)
+        {
+            return;
         }
 
         var text = string.Join("\n", values.Select(v =>
@@ -358,6 +389,57 @@ public sealed partial class ReportViewStableRenameScopeTests(ITestOutputHelper o
         }
 
         return list;
+    }
+
+    private async Task<(decimal? K, decimal? Kn)> KAsync(string view, int projectId)
+    {
+        await using var connection = await OpenAsync();
+        await using var command = connection.CreateCommand();
+#pragma warning disable CA2100
+        command.CommandText = $"SELECT [K], [KN] FROM rpt.[{view}] WHERE _ProjectId = @p AND _RowKey = N'R1'";
+#pragma warning restore CA2100
+        command.Parameters.AddWithValue("@p", projectId);
+        await using var reader = await command.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync(), $"{view}: немає рядка проєкту {projectId}");
+        return (reader.IsDBNull(0) ? null : reader.GetDecimal(0), reader.IsDBNull(1) ? null : reader.GetDecimal(1));
+    }
+
+    /// <summary>Методологія з прив'язкою до колонки, актуальний документний прогін і результат R1 на кожен (проєкт, період).</summary>
+    private async Task SeedResultsAsync(int tableId, int columnId, params (ProjectRef Project, int Period, decimal Value)[] results)
+    {
+        int versionId, unitId;
+        var runs = new List<long>();
+        await using (var db = _sql.CreateContext())
+        {
+            var methodology = new Methodology(EcrCode.Create("B129" + Guid.NewGuid().ToString("N")[..8].ToUpperInvariant()), Name("b129"));
+            db.Methodologies.Add(methodology);
+            await db.SaveChangesAsync();
+            var version = new MethodologyVersion(methodology.Id, "1.0", CalculationLevel.Configuration, createdByUserId: 1, Now);
+            db.MethodologyVersions.Add(version);
+            db.CalculationBindings.Add(new CalculationBinding(tableId, columnId, methodology.Id, "OUT", "{}"));
+            await db.SaveChangesAsync();
+            versionId = version.Id;
+            unitId = await db.Units.AsNoTracking().OrderBy(u => u.Id).Select(u => u.Id).FirstAsync();
+            foreach (var (project, period, _) in results)
+            {
+                var run = new CalculationRun(project.ProjectId, period, triggeredByUserId: 1, Now, project.DocumentId);
+                db.CalculationRuns.Add(run);
+                await db.SaveChangesAsync();
+                run.Complete("Completed", Now, profileJson: null, errorMessage: null);
+                run.MakeCurrent();
+                await db.SaveChangesAsync();
+                runs.Add(run.Id);
+            }
+        }
+
+        for (var i = 0; i < results.Length; i++)
+        {
+            var (project, period, value) = results[i];
+            await ExecAsync(
+                "INSERT INTO calc.CalculationResult (PeriodKey, Id, CalculationRunId, MethodologyVersionId, DocumentId, SourceRowKey, OutputCode, Value, UnitId, Kind) "
+                + $"VALUES ({period}, NEXT VALUE FOR calc.CalculationResultSeq, {runs[i]}, {versionId}, {project.DocumentId}, N'R1', N'OUT', "
+                + $"{value.ToString(System.Globalization.CultureInfo.InvariantCulture)}, {unitId}, 0);");
+        }
     }
 
     private async Task<string> DefinitionAsync(string view)
