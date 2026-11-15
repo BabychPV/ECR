@@ -23,8 +23,8 @@ public interface ICalculationIssueStore
     public const string MissingInputs = "MissingInputs";
 
     /// <summary>
-    /// Вид проблеми «крок методики не порахувався» (B66: <c>#VALUE</c>, <c>#ARG</c>…): одна проблема на рядок — перший
-    /// невдалий крок і код, кількість різних невдалих кроків рядка.
+    /// Вид проблеми «вихід методики без результату через помилку» (B66: <c>#VALUE</c>, <c>#ARG</c>…): одна проблема на
+    /// рядок — перший такий вихід і код, кількість різних виходів рядка без результату.
     /// </summary>
     public const string StepError = "StepError";
 
@@ -33,7 +33,10 @@ public interface ICalculationIssueStore
     /// </summary>
     public const string RowInactive = "RowInactive";
 
-    /// <summary>Скільки проблем на таблицю зберігає один прохід; решта відсікається.</summary>
+    /// <summary>
+    /// Скільки проблем на таблицю зберігає один прохід; решта відсікається. Підсумок <see cref="RowInactive"/> (один на
+    /// таблицю) у стелю не входить і не відсікається (B66).
+    /// </summary>
     public const int MaxPerTable = 1000;
 
     /// <summary>

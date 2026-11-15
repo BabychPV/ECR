@@ -77,10 +77,13 @@ public sealed class CalculationIssueStore(EcrDbContext db, IClock clock) : ICalc
         foreach (var table in issues.Where(i => byInstance.ContainsKey(i.TableInstanceId)).GroupBy(i => i.TableInstanceId))
         {
             var instance = byInstance[table.Key];
-            var ordered = table.OrderBy(i => i.RowNumber).ToList();
+            // B66: підсумок RowInactive (один на таблицю) — поза стелею: відсікти його рядками з меншими номерами означало б
+            // знову мовчати про причину нуля.
+            var summaries = table.Where(i => i.Kind == ICalculationIssueStore.RowInactive).ToList();
+            var ordered = table.Where(i => i.Kind != ICalculationIssueStore.RowInactive).OrderBy(i => i.RowNumber).ToList();
             dropped += Math.Max(0, ordered.Count - ICalculationIssueStore.MaxPerTable);
 
-            foreach (var issue in ordered.Take(ICalculationIssueStore.MaxPerTable))
+            foreach (var issue in summaries.Concat(ordered.Take(ICalculationIssueStore.MaxPerTable)))
             {
                 db.CalculationIssues.Add(new CalculationIssue(
                     instance.DocumentId, period, instance.TableDefId, instance.SheetCopyId,

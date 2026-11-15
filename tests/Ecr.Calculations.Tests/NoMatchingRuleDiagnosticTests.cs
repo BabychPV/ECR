@@ -194,6 +194,39 @@ public sealed class NoMatchingRuleDiagnosticTests
         Assert.Equal(1, profile.Stats.Single().Rows);
     }
 
+    /// <summary>
+    /// B66 (F13 S1): методологія A з фільтром активності рядок відсіює, а B без фільтра на тій самій таблиці його закриває —
+    /// рядок пораховано, підсумку RowInactive немає. Мутація: прибрати <c>!matched.Contains(...)</c> у
+    /// <c>InactiveRowsOf</c> — тест червоний.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "D-425")]
+    public async Task Рядок_відсіяний_однією_прив_язкою_але_закритий_іншою_підсумку_не_дає()
+    {
+        var activity = Substitute.For<IRowActivityFilterSource>();
+        activity.ResolveForVersionAsync(71, Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
+            .Returns(new RowActivityFilterResolution(
+                "77", new Dictionary<int, IReadOnlyList<int>> { [3] = [StatusColumn] }));
+
+        var provider = Arrange(
+            [
+                (Methodology: 42, Version: 71, Rule: "{}"),
+                (Methodology: 43, Version: 72, Rule: $$"""{"{{FuelColumn}}":"Diesel"}"""),
+            ],
+            [
+                Cell(1000, FuelColumn, "Gas"), StatusEntry(1000, 77),
+                Cell(1001, FuelColumn, "Diesel"), StatusEntry(1001, 78),
+                Cell(1002, FuelColumn, "Coal"), StatusEntry(1002, 78),
+            ],
+            activity);
+
+        var profile = await Run(provider, [42, 43]);
+
+        // Diesel (R001) відсіяла A, але закрила B; Coal (R002) не закрив ніхто — у підсумку лише він.
+        Assert.Equal([new InactiveRowsSummary(TableInstance, 3, "R002", 1, DocumentId, 42)], profile.InactiveTables);
+    }
+
     /// <summary>B66: без фільтра активності підсумку RowInactive немає.</summary>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]

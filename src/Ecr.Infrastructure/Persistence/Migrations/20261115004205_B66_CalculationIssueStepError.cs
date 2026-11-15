@@ -5,8 +5,9 @@
 namespace Ecr.Infrastructure.Persistence.Migrations
 {
     /// <summary>
-    /// B66: <c>calc.CalculationIssue</c> отримує три NULL-колонки для нових видів проблем — <c>StepError</c> (крок методики
-    /// впав: перший крок <c>StepCode</c>, код <c>ErrorCode</c>, кількість невдалих кроків рядка <c>AffectedCount</c>) і
+    /// B66: <c>calc.CalculationIssue</c> отримує три NULL-колонки для нових видів проблем — <c>StepError</c> (вихід методики
+    /// без результату через помилку: перший вихід <c>StepCode</c>, код <c>ErrorCode</c>, кількість таких виходів рядка
+    /// <c>AffectedCount</c>) і
     /// <c>RowInactive</c> (підсумок таблиці: кількість рядків, відсіяних фільтром активності D-425, у <c>AffectedCount</c>).
     /// </summary>
     /// <remarks>

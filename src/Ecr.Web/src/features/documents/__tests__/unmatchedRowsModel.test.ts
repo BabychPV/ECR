@@ -120,4 +120,22 @@ describe('groupUnmatchedRows', () => {
     expect(groups.find((g) => !g.stepError && !g.inactive)!.rows.map((r) => r.rowKey)).toEqual(['R7']);
     expect(unmatchedRowCount(groups)).toBe(1 + 1500 + 1);
   });
+
+  // B66 (F13 C6): документ річної розкладки віддає по підсумку RowInactive на кожен місяць тієї самої таблиці (рядки
+  // річного аркуша — ті самі). Підсумок групи — найбільша місячна кількість (скільки рядків таблиці відсіяно в найгіршому
+  // місяці), а не сума: сума рахувала б той самий рядок по разу на місяць. Мутація: сумувати `affectedCount` — тест червоний.
+  it('B66: рік — підсумки RowInactive місяців однієї таблиці дають найбільшу кількість, а не суму', () => {
+    const tables = [table(1, 'Units')];
+    const issues = [
+      issue(1, 2, { rowKey: 'R2', kind: 'RowInactive', affectedCount: 5, monthNumber: 1 }),
+      issue(1, 2, { rowKey: 'R2', kind: 'RowInactive', affectedCount: 7, monthNumber: 2 }),
+      issue(1, 3, { rowKey: 'R3', kind: 'RowInactive', affectedCount: 6, monthNumber: 3 }),
+    ];
+
+    const groups = groupUnmatchedRows(issues, tables);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.inactiveCount).toBe(7);
+    expect(unmatchedRowCount(groups)).toBe(7);
+  });
 });

@@ -216,6 +216,37 @@ public sealed class CalculationIssueStoreTests(SqlServerFixture sql)
         Assert.Equal((5, (int?)1500, (string?)null), (inactive.RowNumber, inactive.AffectedCount, inactive.StepCode));
     }
 
+    /// <remarks>
+    /// B66 (F13): підсумок RowInactive у стелю MaxPerTable не входить — 1005 рядків без правила з меншими номерами його не
+    /// відсікають. Мутація: повернути один <c>OrderBy(RowNumber).Take(MaxPerTable)</c> для всіх видів — тест червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Підсумок_RowInactive_не_відсікається_стелею_на_таблицю()
+    {
+        var f = await PurgeKit.ArrangeAsync(sql, 209912);
+        await using var db = f.Builder.CreateContext();
+        var run = await PurgeKit.AddRunAsync(db, f, "Running", T0);
+        var store = new CalculationIssueStore(db, new TestClock(T0));
+        var table = f.Document.TableInstanceId;
+
+        var dropped = await store.ReplaceAsync(
+            run,
+            [table],
+            [
+                .. Enumerable.Range(1, 1005).Select(n => Issue(table, n)),
+                new CalculationIssueInput(table, 1006, "R1006", null, ICalculationIssueStore.RowInactive, AffectedCount: 40),
+            ],
+            CancellationToken.None);
+        await db.SaveChangesAsync();
+
+        Assert.Equal(5, dropped);
+        var rows = await store.ListAsync(f.Document.DocumentId, f.Period, null, CancellationToken.None);
+        Assert.Equal(ICalculationIssueStore.MaxPerTable + 1, rows.Count);
+        Assert.Equal(40, Assert.Single(rows, r => r.Kind == ICalculationIssueStore.RowInactive).AffectedCount);
+    }
+
     private static CalculationIssueInput Issue(long tableInstanceId, int row, int? methodologyId = null)
         => new(tableInstanceId, row, $"R{row}", methodologyId);
 

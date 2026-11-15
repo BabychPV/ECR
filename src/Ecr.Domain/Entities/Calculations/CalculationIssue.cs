@@ -30,9 +30,11 @@ public sealed class CalculationIssue : Entity<long>
     public const string MissingInputsKind = "MissingInputs";
 
     /// <summary>
-    /// Вид (B66): крок методики рядка не порахувався (<c>#VALUE</c>, <c>#ARG</c>, <c>#DIV/0</c>…). ОДНА проблема на рядок —
-    /// перший невдалий крок (<see cref="StepCode"/>, <see cref="ErrorCode"/>) і скільки різних кроків рядка не порахувалось
-    /// (<see cref="AffectedCount"/>); <c>#NULL</c> («немає значення») сюди не йде — це <see cref="MissingInputsKind"/>.
+    /// Вид (B66): вихід методики рядка лишився без результату через помилку формули (<c>#VALUE</c>, <c>#ARG</c>,
+    /// <c>#DIV/0</c>…). ОДНА проблема на рядок — перший такий вихід (<see cref="StepCode"/>, <see cref="ErrorCode"/>) і скільки
+    /// різних виходів рядка без результату (<see cref="AffectedCount"/>); <c>#NULL</c> («немає значення») сюди не йде — це
+    /// <see cref="MissingInputsKind"/>. Помилка формули, що до виходу не дійшла (невикористана формула бібліотеки, гілка IF),
+    /// проблеми не дає.
     /// </summary>
     public const string StepErrorKind = "StepError";
 
@@ -65,10 +67,10 @@ public sealed class CalculationIssue : Entity<long>
     /// <param name="calculationRunId">Прогін, що виявив проблему.</param>
     /// <param name="detectedAt">Момент виявлення (UTC).</param>
     /// <param name="kind">Вид; <c>null</c> — <see cref="NoMatchingRuleKind"/>.</param>
-    /// <param name="stepCode">B66: перший невдалий крок (<see cref="StepErrorKind"/>); інакше <c>null</c>.</param>
+    /// <param name="stepCode">B66: перший вихід без результату (<see cref="StepErrorKind"/>); інакше <c>null</c>.</param>
     /// <param name="errorCode">B66: його код помилки (<see cref="StepErrorKind"/>); інакше <c>null</c>.</param>
     /// <param name="affectedCount">
-    /// B66: <see cref="StepErrorKind"/> — скільки різних кроків рядка не порахувалось; <see cref="RowInactiveKind"/> — скільки
+    /// B66: <see cref="StepErrorKind"/> — скільки різних виходів рядка без результату; <see cref="RowInactiveKind"/> — скільки
     /// рядків таблиці відсіяно; інакше <c>null</c>.
     /// </param>
     public CalculationIssue(
@@ -121,12 +123,12 @@ public sealed class CalculationIssue : Entity<long>
     public long CalculationRunId { get; private set; }
     public DateTime DetectedAt { get; private set; }
 
-    /// <summary>B66: перший невдалий крок рядка (<see cref="StepErrorKind"/>); <c>null</c> — інший вид.</summary>
+    /// <summary>B66: перший вихід рядка без результату (<see cref="StepErrorKind"/>); <c>null</c> — інший вид.</summary>
     public string? StepCode { get; private set; }
 
     /// <summary>B66: код помилки кроку <see cref="StepCode"/>; <c>null</c> — інший вид.</summary>
     public string? ErrorCode { get; private set; }
 
-    /// <summary>B66: кількість — невдалих кроків рядка або відсіяних рядків таблиці; <c>null</c> — інший вид.</summary>
+    /// <summary>B66: кількість — виходів рядка без результату або відсіяних рядків таблиці; <c>null</c> — інший вид.</summary>
     public int? AffectedCount { get; private set; }
 }

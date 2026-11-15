@@ -466,8 +466,9 @@ public sealed record CalculationOutput(
     public IReadOnlyList<string>? MissingArguments { get; init; }
 
     /// <summary>
-    /// B66: перший крок рядка, що впав з помилкою (<c>#VALUE</c>, <c>#ARG</c>, <c>#DIV/0</c>; не <c>#NULL</c>), і скільки
-    /// різних кроків рядка впало — незалежно від <c>TraceLevel</c>. <c>null</c> — жоден крок не впав.
+    /// B66: перший ВИХІД рядка без результату через помилку (<c>#VALUE</c>, <c>#ARG</c>, <c>#DIV/0</c>; не <c>#NULL</c>), і
+    /// скільки різних виходів рядка без результату — незалежно від <c>TraceLevel</c>. <c>null</c> — усі виходи мають
+    /// результат (помилка невикористаної формули бібліотеки чи гілки IF сюди не потрапляє).
     /// </summary>
     /// <remarks>
     /// ⛔ Без цього помилки кроків лишались лише в трейсі (doc 96: 64 <c>#VALUE</c>, 0 проблем), а на <c>TraceLevel.Off</c>
@@ -476,10 +477,10 @@ public sealed record CalculationOutput(
     public CalculationStepError? StepError { get; init; }
 }
 
-/// <summary>B66: підсумок невдалих кроків одного рядка.</summary>
-/// <param name="StepCode">Код першого невдалого кроку (формули чи виходу).</param>
-/// <param name="ErrorCode">Його код помилки (<c>#VALUE</c>…).</param>
-/// <param name="FailedSteps">Скільки різних кроків рядка впало (≥ 1).</param>
+/// <summary>B66: підсумок виходів одного рядка без результату через помилку.</summary>
+/// <param name="StepCode">Код першого такого виходу.</param>
+/// <param name="ErrorCode">Код помилки, що дійшла до виходу (<c>#VALUE</c>…).</param>
+/// <param name="FailedSteps">Скільки різних виходів рядка без результату (≥ 1).</param>
 public sealed record CalculationStepError(string StepCode, string ErrorCode, int FailedSteps);
 
 /// <summary>Один обчислений вихід — рядок <c>calc.CalculationResult</c>.</summary>

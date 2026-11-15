@@ -135,29 +135,51 @@ public sealed class MissingInputsRowIssueTests
     }
 
     /// <summary>
-    /// B66: невдалі кроки рахуються і на <c>TraceLevel.Off</c> (трейс порожній), <c>#NULL</c> помилкою кроку не є, повтор
-    /// коду не множить кількість. Мутація: перенести облік нижче <c>if (!RecordsFailures) return;</c> у
-    /// <c>TraceRecorder.Failed</c> — тест червоний.
+    /// B66 (F13 координатора 15.11): рядок із ПОВНИМ результатом і помилкою у формулі, яка до виходу не доходить
+    /// (невикористана формула, як не імпортована формула бібліотеки чи гілка IF), проблеми StepError НЕ отримує — мета
+    /// B66 назвати причину нуля/неповного результату, а не будь-який невдалий крок.
+    /// </summary>
+    /// <remarks>
+    /// Мутація: рахувати StepError у <c>TraceRecorder.Failed</c> (будь-який невдалий крок), а не лише у
+    /// <c>OutputFailed</c> — тест червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Помилка_у_невикористаній_формулі_при_повному_результаті_StepError_не_дає()
+    {
+        var profile = await RunAsync("@Qty * 2", [5m, 7m], unused: "@Qty / \"abc\"");
+
+        Assert.Equal(2, profile.Stats.Single().Rows);
+        Assert.Empty(profile.StepErrorRows);
+        Assert.Empty(profile.MissingInputRows);
+    }
+
+    /// <summary>
+    /// B66: вихід без результату рахується і на <c>TraceLevel.Off</c> (трейс порожній), <c>#NULL</c> помилкою не є, повтор
+    /// коду виходу (речовини) не множить кількість, а невдалий крок формули без виходу не рахується зовсім.
+    /// Мутації: облік у <c>OutputFailed</c> лише за <c>RecordsFailures</c> — червоніє; облік у <c>Failed</c> — червоніє
+    /// (FirstFailure стає «Rate»).
     /// </summary>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    public void Облік_невдалих_кроків_не_залежить_від_рівня_трейсу()
+    public void Облік_виходів_без_результату_не_залежить_від_рівня_трейсу()
     {
         var trace = new TraceRecorder(TraceLevel.Off);
 
-        trace.Failed("Out", null, TraceRecorder.NoValueError);
-        trace.Failed("Total", "1/x", "#VALUE");
-        trace.Failed("Total", null, "#VALUE");
         trace.Failed("Rate", "y", "#DIV/0");
+        trace.OutputFailed("Out", TraceRecorder.NoValueError);
+        trace.OutputFailed("Total", "#VALUE");
+        trace.OutputFailed("Total", "#VALUE");
+        trace.OutputFailed("Tons", "#ARG");
 
         Assert.Empty(trace.Steps);
         Assert.Equal(("Total", "#VALUE"), trace.FirstFailure);
         Assert.Equal(2, trace.FailedStepCount);
     }
 
-    private static async Task<ModuleProfile> RunAsync(string expression, decimal?[] qtyByRow)
+    private static async Task<ModuleProfile> RunAsync(string expression, decimal?[] qtyByRow, string? unused = null)
     {
-        using var provider = Arrange(expression, qtyByRow);
+        using var provider = Arrange(expression, qtyByRow, unused);
         var orchestrator = new CalculationOrchestrator(
             provider.GetRequiredService<MethodologyResolver>(),
             provider.GetRequiredService<IPeriodStore>(),
@@ -172,7 +194,7 @@ public sealed class MissingInputsRowIssueTests
             CancellationToken.None);
     }
 
-    private static ServiceProvider Arrange(string expression, decimal?[] qtyByRow)
+    private static ServiceProvider Arrange(string expression, decimal?[] qtyByRow, string? unused = null)
     {
         var store = Substitute.For<IMethodologyStore>();
         var periods = Substitute.For<IPeriodStore>();
@@ -184,7 +206,16 @@ public sealed class MissingInputsRowIssueTests
              .Returns([PublishedVersion(Methodology, Version)]);
         store.GetRulesAsync(Version, Arg.Any<CancellationToken>())
              .Returns([new MethodologyRule(Version, EcrCode.Create("RULE"), $$"""{"{{FuelColumn}}":"Gas"}""", priority: 10)]);
-        store.GetFormulasAsync(Version, Arg.Any<CancellationToken>()).Returns([formula]);
+        // B66: формула, яка до виходу не доходить (виходом є лише Total).
+        MethodologyFormula[] formulas = [formula];
+        if (unused is not null)
+        {
+            var extra = new MethodologyFormula(Version, EcrCode.Create("Unused"), unused);
+            extra.SetEvaluationOrder(2);
+            formulas = [formula, extra];
+        }
+
+        store.GetFormulasAsync(Version, Arg.Any<CancellationToken>()).Returns(formulas);
         store.GetSubstancesAsync(Version, Arg.Any<CancellationToken>()).Returns([]);
         store.GetOutputsAsync(Version, Arg.Any<CancellationToken>())
              .Returns([new MethodologyOutput(Version, EcrCode.Create("Total"), unitId: 1)]);

@@ -16,7 +16,7 @@ export const CategoryRuleRejectedKind = 'CategoryRuleRejected';
 /** Вид проблеми рядка, який правило закрило, але формулам бракує входів — жодного результату (AN-164). */
 export const MissingInputsKind = 'MissingInputs';
 
-/** B66: крок методики рядка впав (`#VALUE`, `#ARG`…) — одна проблема на рядок з першим кроком і кодом. */
+/** B66: вихід методики рядка без результату через помилку (`#VALUE`, `#ARG`…) — одна проблема на рядок. */
 export const StepErrorKind = 'StepError';
 
 /** B66: рядки, відсіяні фільтром активності (D-425) — ОДИН підсумок на таблицю з кількістю (`affectedCount`). */
@@ -62,7 +62,7 @@ export interface UnmatchedRowRef {
   readonly ruleCode: string | null;
   /** ✎ 10.11: порожні колонки відхиленого рядка, які треба заповнити; порожньо — назвати нічого. */
   readonly missingColumns: readonly MissingColumnRef[];
-  /** B66: помилка кроку методики рядка (`StepError`); `null` — інший вид. */
+  /** B66: перший вихід без результату (`step` — код виходу), код помилки й кількість таких виходів (`StepError`). */
   readonly stepError: { readonly step: string; readonly error: string; readonly failedSteps: number } | null;
 }
 
@@ -183,7 +183,8 @@ export function groupUnmatchedRows(
     }
     group.methodology ??= issue.methodologyCode ?? null;
     if (inactive) {
-      // Підсумок таблиці: кількість із сервера (рік — по одному підсумку на місяць, тож беремо найбільший).
+      // Підсумок таблиці: кількість із сервера. Рік (YearWithMonthColumns) — по підсумку на місяць для ТИХ САМИХ рядків
+      // річного аркуша: беремо найбільший (найгірший місяць), сума рахувала б той самий рядок по разу на місяць.
       group.inactiveCount = Math.max(group.inactiveCount, issue.affectedCount ?? 1);
       continue;
     }

@@ -258,10 +258,14 @@ public sealed class CalculationOrchestrator(
         profile.RecordMissingInputs(missing.Select(m => m.Row));
 
         // B66: одна проблема на рядок × методологію (дві прив'язки однієї методології на таблицю не дублюють).
+        // ⚠ ConcurrentBag без порядку: спершу стабільне впорядкування (вихід і код однакові між прогонами), потім DistinctBy.
         profile.RecordStepErrors(stepErrors
-            .DistinctBy(e => (e.Row.TableInstanceId, e.Row.RowKey, e.Row.MethodologyId))
             .OrderBy(e => e.Row.TableInstanceId)
-            .ThenBy(e => e.Row.RowNumber));
+            .ThenBy(e => e.Row.RowNumber)
+            .ThenBy(e => e.Row.MethodologyId)
+            .ThenBy(e => e.StepCode, StringComparer.Ordinal)
+            .ThenBy(e => e.ErrorCode, StringComparer.Ordinal)
+            .DistinctBy(e => (e.Row.TableInstanceId, e.Row.RowKey, e.Row.MethodologyId)));
 
         // AN-164b: які саме аргументи бракували — назве їх читання проблем (не здогад за формулами).
         foreach (var (row, arguments) in missing)

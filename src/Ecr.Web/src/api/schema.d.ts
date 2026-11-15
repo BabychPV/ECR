@@ -29436,7 +29436,7 @@ export interface components {
         CalculationIssueDto: {
             /**
              * Format: int32
-             * @description ✎ B66: `StepError` — скільки різних кроків рядка впало; `RowInactive` — скільки рядків таблиці відсіяно
+             * @description ✎ B66: `StepError` — скільки різних виходів рядка без результату; `RowInactive` — скільки рядків таблиці відсіяно
              *     фільтром активності; інакше `null`.
              */
             affectedCount?: null | number;
@@ -29452,11 +29452,12 @@ export interface components {
              * @description Коли виявлено (UTC).
              */
             detectedAt: string;
-            /** @description ✎ B66: лише для `StepError` — код помилки цього кроку (`#VALUE`…); інакше `null`. */
+            /** @description ✎ B66: лише для `StepError` — код помилки цього виходу (`#VALUE`…); інакше `null`. */
             errorCode?: null | string;
             /** @description Вид проблеми: `NoMatchingRule`, `CategoryRuleRejected` (✎ 10.11) або `MissingInputs` (AN-164: правило
-             *     закрило рядок, але формулам бракує входів — жодного результату); ✎ B66: `StepError` (крок методики рядка впав —
-             *     `#VALUE`, `#ARG`…; одна проблема на рядок) і `RowInactive` (рядки, відсіяні фільтром активності D-425;
+             *     закрило рядок, але формулам бракує входів — жодного результату); ✎ B66: `StepError` (вихід методики рядка без
+             *     результату через помилку формули — `#VALUE`, `#ARG`…; одна проблема на рядок) і `RowInactive` (рядки,
+             *     відсіяні фільтром активності D-425;
              *     ОДИН підсумок на таблицю: перший рядок і кількість). Перелік відкритий — невідомий вид клієнт показує як «без правила». */
             kind: string;
             /** @description Методологія прив'язки таблиці; `null` — невідома. */
@@ -29483,7 +29484,7 @@ export interface components {
              * @description Копія аркуша; `null` — оригінал.
              */
             sheetCopyId: null | number;
-            /** @description ✎ B66: лише для `StepError` — код першого невдалого кроку методики; інакше `null`. */
+            /** @description ✎ B66: лише для `StepError` — код першого виходу методики без результату; інакше `null`. */
             stepCode?: null | string;
             /** @description Код таблиці шаблону. */
             tableCode: string;

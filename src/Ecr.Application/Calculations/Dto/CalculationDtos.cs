@@ -203,8 +203,9 @@ public sealed record CalculationIssueColumnDto(string Code, LocalizedText NameL1
 /// <param name="RowKey">Публічний ключ рядка.</param>
 /// <param name="Kind">
 /// Вид проблеми: <c>NoMatchingRule</c>, <c>CategoryRuleRejected</c> (✎ 10.11) або <c>MissingInputs</c> (AN-164: правило
-/// закрило рядок, але формулам бракує входів — жодного результату); ✎ B66: <c>StepError</c> (крок методики рядка впав —
-/// <c>#VALUE</c>, <c>#ARG</c>…; одна проблема на рядок) і <c>RowInactive</c> (рядки, відсіяні фільтром активності D-425;
+/// закрило рядок, але формулам бракує входів — жодного результату); ✎ B66: <c>StepError</c> (вихід методики рядка без
+/// результату через помилку формули — <c>#VALUE</c>, <c>#ARG</c>…; одна проблема на рядок) і <c>RowInactive</c> (рядки,
+/// відсіяні фільтром активності D-425;
 /// ОДИН підсумок на таблицю: перший рядок і кількість). Перелік відкритий — невідомий вид клієнт показує як «без правила».
 /// </param>
 /// <param name="MethodologyCode">Методологія прив'язки таблиці; <c>null</c> — невідома.</param>
@@ -227,10 +228,10 @@ public sealed record CalculationIssueColumnDto(string Code, LocalizedText NameL1
 /// (<c>YearWithMonthColumns</c>): рядок річного аркуша один, а прогони методологій — по місяцях. <c>null</c> — інша
 /// розкладка.
 /// </param>
-/// <param name="StepCode">✎ B66: лише для <c>StepError</c> — код першого невдалого кроку методики; інакше <c>null</c>.</param>
-/// <param name="ErrorCode">✎ B66: лише для <c>StepError</c> — код помилки цього кроку (<c>#VALUE</c>…); інакше <c>null</c>.</param>
+/// <param name="StepCode">✎ B66: лише для <c>StepError</c> — код першого виходу методики без результату; інакше <c>null</c>.</param>
+/// <param name="ErrorCode">✎ B66: лише для <c>StepError</c> — код помилки цього виходу (<c>#VALUE</c>…); інакше <c>null</c>.</param>
 /// <param name="AffectedCount">
-/// ✎ B66: <c>StepError</c> — скільки різних кроків рядка впало; <c>RowInactive</c> — скільки рядків таблиці відсіяно
+/// ✎ B66: <c>StepError</c> — скільки різних виходів рядка без результату; <c>RowInactive</c> — скільки рядків таблиці відсіяно
 /// фільтром активності; інакше <c>null</c>.
 /// </param>
 public sealed record CalculationIssueDto(
