@@ -926,6 +926,19 @@ public sealed class PermitUsagesHttpTests(SqlServerFixture sql)
         var hidden = await GetAsync(noTable, app, $"/api/v1/permits/{s.Active}/usages").ConfigureAwait(true);
         Assert.Equal(["header"], Kinds(hidden));
         Assert.Equal((1, 0), (hidden.GetProperty("linkCount").GetInt32(), hidden.GetProperty("historyLinkCount").GetInt32()));
+
+        // (D) Живий в обох періодах рядок 1: S1 (unused) з 5-го попереднього місяця, S2 (active) з першого дня поточного —
+        // S1 перекрито до початку поточного, тож чинний лише в попередньому (недоступному): не названо. S2 чинний у поточному —
+        // названо. Мутація M9: прибрати з запиту періодів сторінки умову «сегмент чинний» (ValidFrom <= PeriodEnd і
+        // перекриття) — S1 названо.
+        await ReplaceAsync(
+            PermitSegment.ForRow(s.Document.DocumentId, s.Document.TableDefId, null, liveKey, s.PermitColumnId, previousFrom, s.Unused, s.WriterId, DateTime.UtcNow),
+            PermitSegment.ForRow(s.Document.DocumentId, s.Document.TableDefId, null, liveKey, s.PermitColumnId, firstDay, s.Active, s.WriterId, DateTime.UtcNow));
+        var superseded = await GetAsync(restricted, app, $"/api/v1/permits/{s.Unused}/usages").ConfigureAwait(true);
+        Assert.Equal((0, 0), (superseded.GetProperty("items").GetArrayLength(), superseded.GetProperty("historyLinkCount").GetInt32()));
+        var current = await GetAsync(restricted, app, $"/api/v1/permits/{s.Active}/usages").ConfigureAwait(true);
+        var currentHistory = Assert.Single(current.GetProperty("items").EnumerateArray(), i => i.GetProperty("kind").GetString() == "history");
+        Assert.Equal(liveKey, currentHistory.GetProperty("rowKey").GetString());
     }
 
     /// <summary>Читач з <c>Registry.View</c> і <c>Document.View</c>, грант <c>Read</c> — лише на проєкт окремого документа.</summary>
