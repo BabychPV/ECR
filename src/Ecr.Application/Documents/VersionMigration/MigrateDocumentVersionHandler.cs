@@ -1400,8 +1400,8 @@ public sealed class MigrateDocumentVersionHandler(
     /// відповідник.
     /// </summary>
     /// <remarks>
-    /// ✎ B130: пари без повторів і впорядковані за (From, To) — ключем <c>PK_ColumnRename</c>: два одночасні переноси з
-    /// перетином пар підходять до діапазонних U-замків 6b (<c>FinishSql</c>) в одному порядку, а не навхрест.
+    /// ✎ B130: пари впорядковані за (From, To) — ключем <c>PK_ColumnRename</c>: вставка 6b (<c>FinishSql</c>) іде в порядку
+    /// ключа. Повтори прибирає сам SQL (<c>DISTINCT</c> у <c>ColumnRenameInsertSql</c>), не цей список.
     /// </remarks>
     internal static IReadOnlyList<(int FromColumnDefId, int ToColumnDefId)> RenamePairs(
         VersionMigrationPlan plan, TemplateVersionSnapshot from, TemplateVersionSnapshot to)
@@ -1415,7 +1415,6 @@ public sealed class MigrateDocumentVersionHandler(
                             || (fromTables.TryGetValue(f.TableDefId, out var ft) && toTables.TryGetValue(t.TableDefId, out var tt)
                                 && !string.Equals(ft, tt, StringComparison.Ordinal))))
             .Select(c => (c.SourceColumnDefId, c.TargetColumnDefId))
-            .Distinct()
             .OrderBy(p => p.SourceColumnDefId)
             .ThenBy(p => p.TargetColumnDefId)];
     }

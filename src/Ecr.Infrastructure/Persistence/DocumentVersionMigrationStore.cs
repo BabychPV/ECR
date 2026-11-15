@@ -2095,7 +2095,9 @@ public sealed partial class DocumentVersionMigrationStore(
     /// РІЗНИХ проєктів не серіалізуються (замок — рядок <c>doc.Project</c> і applock структури документа свого проєкту).
     /// Під RCSI <c>NOT EXISTS</c> не бачить незакомічений грант іншого переносу тієї самої ролі на той самий новий Id —
     /// обидва вставляють, другий падає на <c>UQ_ResourceGrant</c> і відкочує весь перенос. Діапазонний U-замок змушує
-    /// другий чекати коміту першого й тоді пропустити вже наявний грант.
+    /// другий чекати коміту першого й тоді пропустити вже наявний грант. ✎ B130: <c>FORCESEEK</c> — без нього план
+    /// анти-з'єднання сканував <c>sec.ResourceGrant</c> під діапазонними U-замками (замок на всю таблицю до коміту
+    /// переносу) і давав дедлок 1205 з вставкою іншої транзакції навіть за обох хінтів (тест гонки 6a).
     /// Порядок замків у <see cref="FinishSql"/> однаковий для всіх переносів: 6a (<c>sec.ResourceGrant</c>), далі 6b
     /// (<c>cfg.ColumnRename</c>) — інших писарів обох таблиць в одній транзакції немає.
     /// </remarks>
@@ -2104,22 +2106,56 @@ public sealed partial class DocumentVersionMigrationStore(
         SELECT g.RoleId, g.ResourceKind, m.n, g.[Level], g.IsDeny
         FROM   sec.ResourceGrant g
         JOIN   @grantMap m ON m.k = g.ResourceKind AND m.o = g.ResourceId
-        WHERE  NOT EXISTS (SELECT 1 FROM sec.ResourceGrant t WITH (UPDLOCK, HOLDLOCK)
+        WHERE  NOT EXISTS (SELECT 1 FROM sec.ResourceGrant t WITH (UPDLOCK, HOLDLOCK, FORCESEEK)
                            WHERE t.RoleId = g.RoleId AND t.ResourceKind = g.ResourceKind AND t.ResourceId = m.n);
         """;
 
     /// <summary>6b. Спільна пара перейменування колонок (частина <see cref="FinishSql"/>; окремо — для тесту гонки).</summary>
-    /// <remarks>✎ B127: <c>UPDLOCK, HOLDLOCK</c> — з тієї самої причини, що й у <see cref="GrantCopyInsertSql"/>.</remarks>
+    /// <remarks>
+    /// ✎ B127: <c>UPDLOCK, HOLDLOCK</c> — з тієї самої причини, що й у <see cref="GrantCopyInsertSql"/>. ✎ B130:
+    /// <c>DISTINCT</c> — повтор пари в <c>@renames</c> інакше дав би дві вставки того самого ключа (порядок і унікальність
+    /// пар — у SQL, а не в залежності від викликача).
+    /// </remarks>
     internal const string ColumnRenameInsertSql = """
         INSERT cfg.ColumnRename (FromColumnDefId, ToColumnDefId)
-        SELECT r.f, r.t
+        SELECT DISTINCT r.f, r.t
         FROM   OPENJSON(@renames) WITH (f int, t int) r
         WHERE  NOT EXISTS (SELECT 1 FROM cfg.ColumnRename x WITH (UPDLOCK, HOLDLOCK)
                            WHERE x.FromColumnDefId = r.f AND x.ToColumnDefId = r.t);
         """;
 
     /// <summary>6a. Гранти, версія проєкту, прибирання #-таблиць.</summary>
-    private const string FinishSql = $"""
+    /// <summary>
+    /// ✎ B130: початок <see cref="FinishSql"/> — транзакційний виключний applock на ШАБЛОН цільової версії.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Кроки 6a/6b пишуть спільні для шаблону рядки (гранти ролей на ресурси версій, пари перейменувань), а переноси
+    /// РІЗНИХ проєктів інакше не серіалізуються. Діапазонних замків <c>UPDLOCK, HOLDLOCK</c> мало: два переноси з різних
+    /// вихідних версій на ту саму цільову з різними грантами давали дедлок 1205 — DELETE 6a одного бере X на рядок, який
+    /// чекає NOT EXISTS другого, а той уже тримає діапазонний U. Applock до коміту переносу робить 6a/6b одного шаблону
+    /// послідовними; хінти лишаються захистом від писарів поза переносом.
+    /// </para>
+    /// <para>
+    /// Порядок замків без циклу: перенос бере рядок <c>doc.Project</c> (<c>LockProjectVersionAsync</c>) і applock структури
+    /// документів СВОГО проєкту на початку транзакції, а цей applock — останнім, у <see cref="FinishSql"/>, і ніде інде
+    /// його не беруть. Хто чекає на нього, не тримає нічого, що потрібне власникові (чужі проєкт і документи), а власник
+    /// після нього пише лише спільні таблиці кроку 6 і свій проєкт.
+    /// </para>
+    /// </remarks>
+    internal const string TemplateFinishLockSql = """
+        DECLARE @templateLock int;
+        DECLARE @templateResource nvarchar(255) = N'ecr:migrate-finish:tpl:'
+            + CAST((SELECT TemplateId FROM cfg.TemplateVersion WHERE Id = @targetVersionId) AS nvarchar(20));
+        EXEC @templateLock = sp_getapplock @Resource = @templateResource, @LockMode = N'Exclusive',
+                                           @LockOwner = N'Transaction', @LockTimeout = -1;
+        IF @templateLock < 0
+            THROW 51300, N'Перенос версії: не вдалося взяти замок шаблону цільової версії (sp_getapplock < 0).', 1;
+        """;
+
+    internal const string FinishSql = $"""
+        {TemplateFinishLockSql}
+
         -- 6a. Гранти ролей на аркуш/таблицю/колонку (sec.ResourceGrant): Id цих
         -- ресурсів свої в кожної версії, а грант не має ProjectId і діє на всіх,
         -- хто сидить на старій версії. Тому КОПІЮЄМО на нові Id за кодом (не
