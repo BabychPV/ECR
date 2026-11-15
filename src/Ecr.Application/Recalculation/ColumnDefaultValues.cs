@@ -47,6 +47,26 @@ public sealed class ColumnDefaultValues(IMetadataCache metadata, IRegistryStore 
         return cached ?? await BuildAsync(snapshot, ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// ✎ B124/B131: вхідні колонки таблиці з ПРИДАТНИМ дефолтом — насіння перерахунку нового рядка (D-491: дефолт
+    /// входить в агрегати, тож новий рядок їх змінює). Умова — та сама, що в <see cref="BuildAsync"/>: непридатний
+    /// дефолт (<see cref="Parse"/> → <c>null</c>) як відсутній; Lookup розв'язується довідником лише при читанні, тож
+    /// береться завжди (зайвий перерахунок дешевший за пропущений). Таблиця без дефолтів — порожньо.
+    /// </summary>
+    /// <param name="table">Таблиця версії.</param>
+    public static IReadOnlyList<int> SeedColumns(TableDef table)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+
+        return
+        [
+            .. table.Columns
+                .Where(c => !c.IsDeleted && !c.IsComputed && !string.IsNullOrWhiteSpace(c.DefaultValue)
+                            && (c.DataType == CellDataType.Lookup || Parse(c) is not null))
+                .Select(c => c.Id),
+        ];
+    }
+
     /// <summary>Вхідні колонки з дефолтом разом із таблицею, якій вони належать у знімку.</summary>
     private static IEnumerable<(int TableDefId, ColumnDef Column)> Candidates(TemplateVersionSnapshot snapshot)
         => snapshot.Sheets.Where(s => !s.IsDeleted).SelectMany(s => s.Tables).Where(t => !t.IsDeleted)

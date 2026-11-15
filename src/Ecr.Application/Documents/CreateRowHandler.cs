@@ -208,15 +208,11 @@ public sealed class CreateRowHandler(
     }
 
     /// <summary>
-    /// ✎ B124: введені колонки таблиці з дефолтом (D-491) — новий рядок змінює їхні агрегати. Умова — та сама, що в
-    /// <see cref="Recalculation.ColumnDefaultValues"/>: непридатний дефолт (текст у числовій колонці) — як відсутній;
-    /// Lookup розв'язується довідником лише при читанні, тож тут його беремо завжди (зайвий перерахунок дешевший).
+    /// ✎ B124: введені колонки таблиці з придатним дефолтом (D-491) — новий рядок змінює їхні агрегати. Умова — одна
+    /// на всі шляхи створення рядків (<see cref="Recalculation.ColumnDefaultValues.SeedColumns"/>, B131).
     /// </summary>
     private static IEnumerable<int> NewRowDefaultColumns(TableDef table)
-        => table.Columns
-            .Where(c => !c.IsDeleted && !c.IsComputed && !string.IsNullOrWhiteSpace(c.DefaultValue)
-                        && (c.DataType == CellDataType.Lookup || Recalculation.ColumnDefaultValues.Parse(c) is not null))
-            .Select(c => c.Id);
+        => Recalculation.ColumnDefaultValues.SeedColumns(table);
 
     /// <summary>Параметри дзеркального створення рядка.</summary>
     /// <param name="Document">Документ місячного проєкту.</param>

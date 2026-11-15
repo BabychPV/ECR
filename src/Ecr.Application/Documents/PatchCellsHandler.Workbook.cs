@@ -210,7 +210,8 @@ public sealed partial class PatchCellsHandler
             {
                 foreach (var seed in BuildRecalculationSeeds(
                              SeedSource(item.Request, applied, item.Previous),
-                             item.Context.ApproverEdit ? item.Context.Table.SheetDefId : null))
+                             item.Context.ApproverEdit ? item.Context.Table.SheetDefId : null,
+                             Recalculation.ColumnDefaultValues.SeedColumns(item.Context.Table)))
                 {
                     recalculationSeeds.Add(seed);
                 }

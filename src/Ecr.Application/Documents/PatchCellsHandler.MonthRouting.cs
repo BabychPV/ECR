@@ -264,6 +264,9 @@ public sealed partial class PatchCellsHandler
         var ownerInstance = new Dictionary<int, TableInstanceRef>();
         var ownerRowIds = new Dictionary<int, Dictionary<string, long>>();
 
+        // ✎ B131: тіньові рядки власника — нові рядки ЙОГО екземпляра (склад періоду власника змінився).
+        var shadowRowIds = new Dictionary<int, List<long>>();
+
         foreach (var period in foreignPeriods)
         {
             var upsertsHere = changes.Upserts.Any(u => ownerOf[u.Address.ColumnDefId] == period);
@@ -303,6 +306,8 @@ public sealed partial class PatchCellsHandler
                 {
                     rowIds[missing[i]] = created[0][i];
                 }
+
+                shadowRowIds[period.Value] = [.. created[0]];
             }
 
             ownerInstance[period.Value] = instance;
@@ -396,14 +401,21 @@ public sealed partial class PatchCellsHandler
         var groups = new List<RecalcGroup>();
         var approverSheet = context.ApproverEdit ? context.Table.SheetDefId : (int?)null;
 
-        if (ownUpserts.Count + ownDeletes.Count > 0)
+        // ✎ B131 (D-491): нові рядки екземпляра запиту й тіньові рядки власників — насіння й у колонках із придатним
+        // дефолтом (дефолт входить в агрегати свого екземпляра). Таблиця без дефолтів — нічого не додається.
+        var defaultColumns = Recalculation.ColumnDefaultValues.SeedColumns(context.Table);
+        var ownNewSeeds = NewRowDefaultSeeds(changes.NewRowIds, defaultColumns, approverSheet).ToList();
+
+        if (ownUpserts.Count + ownDeletes.Count + ownNewSeeds.Count > 0)
         {
             groups.Add(new RecalcGroup(
                 context.Instance.TableInstanceId,
                 context.PeriodKey.Value,
                 [.. ownUpserts.Select(u => u.Address).Concat(ownDeletes)
-                    .Select(a => new RecalculationSeed(a.TableRowId, a.ColumnDefId, approverSheet)).Distinct()],
-                [.. ownUpserts.Select(u => u.Address.ColumnDefId).Concat(ownDeletes.Select(d => d.ColumnDefId)).Distinct()]));
+                    .Select(a => new RecalculationSeed(a.TableRowId, a.ColumnDefId, approverSheet))
+                    .Concat(ownNewSeeds).Distinct()],
+                [.. ownUpserts.Select(u => u.Address.ColumnDefId).Concat(ownDeletes.Select(d => d.ColumnDefId))
+                    .Concat(ownNewSeeds.Select(s => s.ColumnDefId)).Distinct()]));
         }
 
         foreach (var period in ownerInstance.Keys.Order())
@@ -422,12 +434,15 @@ public sealed partial class PatchCellsHandler
             ownerSets.Add(new CellChangeSet(
                 instance.TableInstanceId, upserts, deletes, touched, context.UserId, isLateEdit, ExpectedRowVersions: null));
 
+            var shadowSeeds = NewRowDefaultSeeds(shadowRowIds.GetValueOrDefault(period), defaultColumns, approverSheet).ToList();
             groups.Add(new RecalcGroup(
                 instance.TableInstanceId,
                 period,
                 [.. upserts.Select(u => u.Address).Concat(deletes)
-                    .Select(a => new RecalculationSeed(a.TableRowId, a.ColumnDefId, approverSheet)).Distinct()],
-                [.. upserts.Select(u => u.Address.ColumnDefId).Concat(deletes.Select(d => d.ColumnDefId)).Distinct()]));
+                    .Select(a => new RecalculationSeed(a.TableRowId, a.ColumnDefId, approverSheet))
+                    .Concat(shadowSeeds).Distinct()],
+                [.. upserts.Select(u => u.Address.ColumnDefId).Concat(deletes.Select(d => d.ColumnDefId))
+                    .Concat(shadowSeeds.Select(s => s.ColumnDefId)).Distinct()]));
         }
 
         // ── 4. Попередні значення — на ФІЗИЧНИХ адресах власників ────────
