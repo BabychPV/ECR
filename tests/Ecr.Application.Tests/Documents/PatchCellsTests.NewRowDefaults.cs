@@ -85,20 +85,36 @@ public sealed partial class PatchCellsTests
         Assert.Equal([(NewViewRow, VolumeColumnId)], Assert.Single(FormulaPayloads()).Cells);
     }
 
-    /// <summary>Правка НАЯВНОГО рядка таблиці з дефолтом — склад не змінився, зайвого насіння немає.</summary>
-    [Fact]
+    /// <summary>
+    /// Правка НАЯВНОГО рядка таблиці з дефолтом — склад не змінився, зайвого насіння немає; у ЗМІШАНОМУ батчі (B132:
+    /// наявний + новий рядок) насіння дефолту — лише в нового. Мутація N4: <c>NewRowIds</c> з усіх рядків батчу
+    /// (<c>Touched</c>) — з'являється (1001, RegistryLink), обидва рядки червоні.
+    /// </summary>
+    /// <param name="mixed">Додати в батч новий рядок.</param>
+    [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait("Requirement", "D-491")]
     [Trait("Finding", "B131")]
-    public async Task B131_наявний_рядок_не_дає_насіння_дефолтів()
+    [Trait("Finding", "B132")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task B131_наявний_рядок_не_дає_насіння_дефолтів(bool mixed)
     {
         await SetDefaultAsync(RegistryLinkColumnId, "CODE-1");
+        NewRowCreated();
 
-        await Handler().HandleAsync(
-            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 12501m)])),
-            CancellationToken.None);
+        List<PatchRow> rows = [new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 12501m)])];
+        if (mixed)
+        {
+            rows.Add(new PatchRow("NEW-1", BaseVersion: null, [new PatchCell("Volume", 2m)]));
+        }
 
-        Assert.Equal([(1001L, VolumeColumnId)], Assert.Single(FormulaPayloads()).Cells);
+        await Handler().HandleAsync(Request([.. rows]), CancellationToken.None);
+
+        List<(long, int)> expected = mixed
+            ? [(1001L, VolumeColumnId), (NewViewRow, VolumeColumnId), (NewViewRow, RegistryLinkColumnId)]
+            : [(1001L, VolumeColumnId)];
+        Assert.Equal(expected.Order(), Assert.Single(FormulaPayloads()).Cells.Order());
     }
 
     /// <summary>
