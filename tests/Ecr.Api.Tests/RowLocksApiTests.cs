@@ -153,6 +153,13 @@ public sealed class RowLocksApiTests(SqlServerFixture sql)
 
         await JsonAsync(app, HttpStatusCode.OK, PatchAsync(author, s, 0, 21m)).ConfigureAwait(true);
 
+        // Картка документа несе режим версії (клієнт ховає подання) — одним читанням із розкладкою.
+        var card = await JsonAsync(
+                app, HttpStatusCode.OK,
+                author.GetAsync(new Uri($"/api/v1/documents/{s.Document.DocumentId}?periodKey={s.PeriodKey}", UriKind.Relative)))
+            .ConfigureAwait(true);
+        Assert.Equal("None", card.GetProperty("workflowMode").GetString());
+
         var submit = await JsonAsync(
                 app, HttpStatusCode.UnprocessableEntity,
                 author.PostAsJsonAsync(
