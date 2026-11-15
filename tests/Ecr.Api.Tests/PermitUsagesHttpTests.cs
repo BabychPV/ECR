@@ -681,12 +681,14 @@ public sealed class PermitUsagesHttpTests(SqlServerFixture sql)
         var s = await ArrangeAsync().ConfigureAwait(true);
         var firstDay = new DateOnly(s.Period / 100, s.Period % 100, 1);
         var previousFirstDay = new DateOnly(s.PreviousPeriod / 100, s.PreviousPeriod % 100, 1);
+        string liveKey;
         await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
         {
             var keys = await db.TableRows.AsNoTracking()
                 .Where(r => r.PeriodKeyValue == s.Period && (r.Id == s.Document.RowIds[0] || r.Id == s.Document.RowIds[2]))
                 .OrderBy(r => r.Ordinal).Select(r => r.RowKeyValue).ToListAsync().ConfigureAwait(true);
-            var (liveKey, deletedKey) = (keys[0], keys[1]);
+            liveKey = keys[0];
+            var deletedKey = keys[1];
 
             // Рядок 3 видалено в УСІХ періодах (у поточному вже видалений сценарієм).
             var instances = await db.TableInstances.AsNoTracking()
@@ -743,6 +745,33 @@ public sealed class PermitUsagesHttpTests(SqlServerFixture sql)
         Assert.Equal(("history", JsonValueKind.Null), (visible.GetProperty("kind").GetString(), visible.GetProperty("tableCode").ValueKind));
         Assert.Equal(1, hidden.GetProperty("historyLinkCount").GetInt32());
         Assert.DoesNotContain(s.TableCode, hidden.GetRawText(), StringComparison.Ordinal);
+
+        // ⛔ B136: linkPeriodKey — лише для запису історії рядка. Комірка й запис поля шапки — null; частина місяця — її місяць.
+        // Мутації (виконано вручну, відновлено): ставити LinkPeriodKey і для комірок (S4) — комірка не null; не ставити для
+        // частин (S5) — частина null замість свого місяця.
+        static bool NoLink(JsonElement item)
+            => !item.TryGetProperty("linkPeriodKey", out var link) || link.ValueKind == JsonValueKind.Null;
+        Assert.True(NoLink(items[0]), "Запис історії поля шапки не має linkPeriodKey.");
+        var active = await GetAsync(writer, app, $"/api/v1/permits/{s.Active}/usages").ConfigureAwait(true);
+        var cells = active.GetProperty("items").EnumerateArray().Where(i => i.GetProperty("kind").GetString() == "cell").ToList();
+        Assert.NotEmpty(cells);
+        Assert.All(cells, cell => Assert.True(NoLink(cell), $"Комірка не має linkPeriodKey: {cell.GetRawText()}"));
+
+        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            db.CellPermitParts.Add(new CellPermitPart(
+                s.Period, s.Document.DocumentId, s.Document.TableDefId, null, liveKey, s.PermitColumnId, 2, s.Unused,
+                firstDay.AddDays(14), firstDay.AddDays(27), null));
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        var withPart = await GetAsync(writer, app, $"/api/v1/permits/{s.Unused}/usages").ConfigureAwait(true);
+        var part = Assert.Single(withPart.GetProperty("items").EnumerateArray(),
+            i => i.GetProperty("kind").GetString() == "history" && i.GetProperty("periodKey").ValueKind == JsonValueKind.Number);
+        Assert.Equal(s.Period, part.GetProperty("periodKey").GetInt32());
+        Assert.True(
+            part.GetProperty("linkPeriodKey") is { ValueKind: JsonValueKind.Number } link && link.GetInt32() == s.Period,
+            $"Частина місяця: linkPeriodKey = {s.Period}: {withPart.GetRawText()}");
     }
 
     /// <summary>
