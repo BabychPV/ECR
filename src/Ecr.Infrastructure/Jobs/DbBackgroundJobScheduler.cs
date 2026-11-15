@@ -1,10 +1,16 @@
 // src/Ecr.Infrastructure/Jobs/DbBackgroundJobScheduler.cs
 using System.Collections.Concurrent;
+using System.Data.Common;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Threading.Channels;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Errors;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Configuration;
 
 namespace Ecr.Infrastructure.Jobs;
@@ -127,10 +133,10 @@ public sealed class DbBackgroundJobScheduler(
                 ct)
             .ConfigureAwait(false);
 
-        // ⚠ Лише підказка: у відкритій транзакції рядок ще не видно, і воркер
-        // просто візьме його на наступному опитуванні (раз на секунду).
-        // B85: з лейном — будить і окремий/резервний цикл, що опитує цей лейн (не лише основний).
-        signal.Notify(JobLaneMap.Of<TJob>());
+        // ⛔ B125: у відкритій транзакції рядок ще не видно — сигнал іде ПІСЛЯ її коміту (при відкаті не йде
+        // зовсім), інакше воркер прокидався раніше за коміт, нічого не бачив і спав PollInterval (~1 с).
+        // Без транзакції — одразу. B85: з лейном — будить і окремий/резервний цикл, що опитує цей лейн.
+        signal.NotifyAfterCommit((queue as DbJobQueue)?.Context, JobLaneMap.Of<TJob>());
 
         return result.JobId;
     }
@@ -177,7 +183,8 @@ public sealed class DbBackgroundJobScheduler(
         var outcome = await queue.RestartAsync(jobId, ct).ConfigureAwait(false);
         if (outcome.IsRestarted)
         {
-            signal.Notify();
+            // B125: перепостановка — так само після коміту транзакції викликача (лейн тут невідомий — будимо всіх).
+            signal.NotifyAfterCommit((queue as DbJobQueue)?.Context, lane: null);
             return true;
         }
 
@@ -240,12 +247,142 @@ public sealed class DbBackgroundJobScheduler(
 /// лейна <c>excel</c> чекала старту 150–1100 мс (замір B85, N = 24, при claim ≈ 5 мс). Власна підписка не «з'їдає»
 /// сигнал основного циклу — для нього лишається спільний канал.
 /// </para>
+/// <para>
+/// ⛔ B125: постановка в транзакції викликача будить воркер ПІСЛЯ коміту (<see cref="NotifyAfterCommit"/>): сигнал
+/// відкладається до <c>TransactionCommitted</c> цієї транзакції (сінглтон підключено перехоплювачем
+/// <c>EcrDbContext</c>), відкат чи збій його скасовують. До B125 сигнал ішов до коміту — воркер прокидався, не бачив
+/// рядка і спав <c>PollInterval</c>. Ключ — сама <see cref="DbTransaction"/>: транзакція, звільнена без коміту, забирає
+/// відкладений сигнал із собою (<see cref="ConditionalWeakTable{TKey, TValue}"/>).
+/// </para>
 /// </remarks>
-public sealed class JobQueueSignal
+public sealed class JobQueueSignal : DbTransactionInterceptor
 {
     private readonly Channel<bool> channel = NewChannel();
 
     private readonly ConcurrentDictionary<LaneWaiter, byte> waiters = new();
+
+    private readonly ConditionalWeakTable<DbTransaction, PendingLanes> afterCommit = [];
+
+    /// <summary>
+    /// B125: сигнал постановки, зробленої через <paramref name="db"/>. Відкрита транзакція контексту, до якого цей
+    /// сигнал підключено перехоплювачем, — після її коміту; інакше (автокоміт, контекст без перехоплювача) — одразу.
+    /// </summary>
+    /// <param name="db">Контекст постановки (<c>null</c> — невідомий, сигнал одразу).</param>
+    /// <param name="lane">Лейн задачі (<c>null</c> — невідомий, будити всі цикли).</param>
+    public void NotifyAfterCommit(DbContext? db, string? lane)
+    {
+        var transaction = db?.Database.CurrentTransaction?.GetDbTransaction();
+        if (transaction is null || !InterceptsFor(db!))
+        {
+            NotifyNow(lane);
+            return;
+        }
+
+        afterCommit.GetOrCreateValue(transaction).Add(lane);
+    }
+
+    /// <inheritdoc />
+    public override void TransactionCommitted(DbTransaction transaction, TransactionEndEventData eventData)
+    {
+        Release(transaction, notify: true);
+        base.TransactionCommitted(transaction, eventData);
+    }
+
+    /// <inheritdoc />
+    public override Task TransactionCommittedAsync(
+        DbTransaction transaction, TransactionEndEventData eventData, CancellationToken cancellationToken = default)
+    {
+        Release(transaction, notify: true);
+        return base.TransactionCommittedAsync(transaction, eventData, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public override void TransactionRolledBack(DbTransaction transaction, TransactionEndEventData eventData)
+    {
+        Release(transaction, notify: false);
+        base.TransactionRolledBack(transaction, eventData);
+    }
+
+    /// <inheritdoc />
+    public override Task TransactionRolledBackAsync(
+        DbTransaction transaction, TransactionEndEventData eventData, CancellationToken cancellationToken = default)
+    {
+        Release(transaction, notify: false);
+        return base.TransactionRolledBackAsync(transaction, eventData, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public override void TransactionFailed(DbTransaction transaction, TransactionErrorEventData eventData)
+    {
+        Release(transaction, notify: false);
+        base.TransactionFailed(transaction, eventData);
+    }
+
+    /// <inheritdoc />
+    public override Task TransactionFailedAsync(
+        DbTransaction transaction, TransactionErrorEventData eventData, CancellationToken cancellationToken = default)
+    {
+        Release(transaction, notify: false);
+        return base.TransactionFailedAsync(transaction, eventData, cancellationToken);
+    }
+
+    private void Release(DbTransaction transaction, bool notify)
+    {
+        if (!afterCommit.TryGetValue(transaction, out var pending) || !afterCommit.Remove(transaction))
+        {
+            return;
+        }
+
+        if (notify)
+        {
+            foreach (var lane in pending.Drain())
+            {
+                NotifyNow(lane);
+            }
+        }
+    }
+
+    private void NotifyNow(string? lane)
+    {
+        if (lane is null)
+        {
+            Notify();
+        }
+        else
+        {
+            Notify(lane);
+        }
+    }
+
+    /// <summary>Чи підключено цей сигнал перехоплювачем до <paramref name="db"/> (інакше коміту він не побачить).</summary>
+    private bool InterceptsFor(DbContext db)
+        => ((IInfrastructure<IServiceProvider>)db).Instance.GetService(typeof(IDbContextOptions)) is IDbContextOptions options
+           && options.FindExtension<CoreOptionsExtension>()?.Interceptors?.Contains(this) == true;
+
+    /// <summary>Лейни, відкладені до коміту однієї транзакції.</summary>
+    private sealed class PendingLanes
+    {
+        private readonly List<string?> lanes = [];
+
+        public void Add(string? lane)
+        {
+            lock (lanes)
+            {
+                if (!lanes.Contains(lane))
+                {
+                    lanes.Add(lane);
+                }
+            }
+        }
+
+        public string?[] Drain()
+        {
+            lock (lanes)
+            {
+                return [.. lanes];
+            }
+        }
+    }
 
     /// <summary>Будить основний цикл і всі підписки (лейн невідомий).</summary>
     public void Notify()
