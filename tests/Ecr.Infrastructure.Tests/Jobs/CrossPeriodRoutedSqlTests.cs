@@ -378,6 +378,56 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
         Assert.Equal(expected, actual);
         Assert.Equal(actual.Count, actual.Distinct().Count());
     }
+    // ── B124: видалення рядка — склад року змінився в усіх екземплярах ──────
+
+    /// <summary>
+    /// ⛔ B124: видалення рядка таблиці «місяці в колонках» дзеркально прибирає його з УСІХ екземплярів року (D-457 п.3),
+    /// разом зі значеннями власників (M11 рядка 2 у 202611). Агрегат <c>SUM(M11)</c> в інших періодах мусить
+    /// перерахуватися тим самим проходом, як після правки M11 (п.6), а не лишатися з видаленим рядком до наступної правки.
+    /// Мутація: у <c>RecalculationService.RunAsync</c> не класти колонки насіння видаленого рядка в <c>inputColumns</c> —
+    /// читачів немає, періоди 1/9/11 лишаються -1 (червоне).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "Q-17")]
+    [Trait("Finding", "B124")]
+    public async Task B124_видалення_рядка_з_перегляду_перераховує_агрегат_власника_в_усіх_інших_екземплярах()
+    {
+        var world = await ArrangeAsync(sum: true);
+        var m11 = world.Doc.MonthColumnDefIds[OwnerMonth - 1];
+        await SetOwnerValueAsync(world, 7m);
+        await ExecuteAsync(
+            "INSERT INTO doc.CellValue (PeriodKey, TableRowId, ColumnDefId, TableDefId, ValueNumeric, IsCalculated, IsEmpty) VALUES " +
+            $"({Period(OwnerMonth)}, {world.Others[OwnerMonth].RowIds[1]}, {m11}, {world.Doc.TableDefId}, 5, 0, 0);");
+
+        // Те, що робить DeleteRowHandler у дзеркальному режимі: рядок 2 м'яко видалено в кожному екземплярі року.
+        await using (var db = world.Builder.CreateContext())
+        {
+            var rows = new RowStore(db, new BulkCellLoader(sql.ConnectionString, 1000), new TestClock(Now));
+            Assert.True(await rows.SoftDeleteRowAsync(world.Doc.RowIds[1], new PeriodKey(Period(ViewMonth)), CancellationToken.None));
+            foreach (var (month, instance) in world.Others)
+            {
+                Assert.True(await rows.SoftDeleteRowAsync(instance.RowIds[1], new PeriodKey(Period(month)), CancellationToken.None));
+            }
+        }
+
+        // Насіння — усі колонки видаленого рядка перегляду (як `DeleteRowHandler.EnqueueRecalculationAsync`).
+        var seeds = world.Doc.ColumnDefIds.Concat(world.Doc.MonthColumnDefIds)
+            .Select(column => new DirtyCell(world.Doc.RowIds[1], column))
+            .ToList();
+        var enqueued = new List<(string Target, string Payload)>();
+        var progress = await RunJobAsync(
+            world, enqueued, new FormulaRecalculationRequest(world.Doc.TableInstanceId, Period(ViewMonth), seeds), routing: true);
+
+        Assert.Empty(enqueued);
+        Assert.Equal([Period(1), Period(9), Period(ViewMonth), Period(OwnerMonth)], progress.Periods);
+        foreach (var month in new[] { 1, 9, ViewMonth, OwnerMonth })
+        {
+            Assert.Equal(7m, await OutputAsync(world, Period(month)));
+        }
+    }
+
     // ── допоміжне ────────────────────────────────────────────────────────
 
     private static int Period(int month) => (Year * 100) + month;
@@ -393,11 +443,12 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
             world.Others[OwnerMonth].TableInstanceId, Period(OwnerMonth),
             [new DirtyCell(world.Others[OwnerMonth].RowIds[0], world.Doc.MonthColumnDefIds[OwnerMonth - 1])]);
 
-    private async Task<World> ArrangeAsync(bool absolute = false, bool offsets = false, bool fullYear = false)
+    private async Task<World> ArrangeAsync(
+        bool absolute = false, bool offsets = false, bool fullYear = false, bool sum = false)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var doc = await builder.BuildAsync(
-            periodKey: Period(ViewMonth), columnCount: 3, rowCount: 1,
+            periodKey: Period(ViewMonth), columnCount: 3, rowCount: sum ? 2 : 1,
             layoutKind: TableLayoutKind.MonthsInColumns, monthColumns: 12);
 
         // L6: fullYear — усі 12 місяців року (звіт S07: правка січня тече у дванадцять періодів).
@@ -424,7 +475,7 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
             await setup.SaveChangesAsync();
         }
 
-        var world = new World(builder, doc, others, Metadata(doc, absolute, offsets), absolute, offsets);
+        var world = new World(builder, doc, others, Metadata(doc, absolute, offsets, sum), absolute, offsets);
 
         // Застарілий вихід у кожному екземплярі; M11 власника порожнє (до першої правки).
         foreach (var month in allMonths)
@@ -582,7 +633,7 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
         return versions;
     }
 
-    private static IMetadataCache Metadata(TestDocument doc, bool absolute, bool offsets)
+    private static IMetadataCache Metadata(TestDocument doc, bool absolute, bool offsets, bool sum = false)
     {
         var text = ColumnDefFor(doc, doc.ColumnDefIds[0], "C1", 1, CellDataType.String);
         var input = ColumnDefFor(doc, doc.ColumnDefIds[1], "IN", 2, CellDataType.Decimal);
@@ -611,7 +662,10 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
             table.AddColumn(month);
         }
 
-        var expression = absolute
+        // B124: агрегат по колонці (усі живі рядки) — той самий граф: комірка зі зсувом null на M11.
+        var expression = sum
+            ? $"SUM([TB{doc.TableDefId}].[WHERE [M11] >= 0].[M11])"
+            : absolute
             ? "[Period:#11].[M11] * 2"
             : offsets
                 ? "[M11] + [Period:-1].[M11] + [Period:+1].[M11]"

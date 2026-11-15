@@ -589,9 +589,13 @@ public sealed class RecalculationService(
                 else if (snapshot.ColumnsById.TryGetValue(seed.ColumnDefId, out var seedColumn))
                 {
                     // ✎ C-11 (крок 5): насіння ВИДАЛЕНОГО рядка (DeleteRowHandler сіє всі колонки рядка) — рядка вже немає
-                    // серед живих, але читачі інших періодів (предикат зі зсувом) мають перерахуватися. `inputColumns` не
-                    // чіпаємо: це правило Q-17 для ВВЕДЕНИХ значень власника.
+                    // серед живих, але читачі інших періодів (предикат зі зсувом) мають перерахуватися.
+                    // ✎ B124: і `inputColumns` теж — у дзеркальному режимі Q-17 (D-457 п.3) рядок зник з УСІХ екземплярів
+                    // року разом із введеними значеннями власників, тож читачі зі зсувом 0 в інших екземплярах мусять
+                    // перерахуватися, як після правки (п.6). Немаршрутизовані таблиці й обчислювані колонки відсіює
+                    // `CrossPeriodFanOut.RoutedInputsAsync` — поза Q-17 поведінка не змінюється.
                     changedColumns?.Add((seedColumn.TableDefId, seed.ColumnDefId));
+                    inputColumns?.Add((seedColumn.TableDefId, seed.ColumnDefId));
                 }
             }
         }
