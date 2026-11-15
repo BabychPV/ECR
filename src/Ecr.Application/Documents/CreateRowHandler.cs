@@ -271,21 +271,11 @@ public sealed class CreateRowHandler(
             instance.TemplateVersionId,
             instance.DocumentId);
 
-        var year = PeriodKeyOf(instance).Year;
-        var instances = (await rowStore
-                .GetTableInstancesOfTableInYearAsync(instance.DocumentId, instance.TableDefId, year, ct)
-                .ConfigureAwait(false))
-            .ToList();
-
-        // Якір авторитетний за складом: його екземпляр створюється ліниво, вузько (лише ця таблиця).
-        if (!instances.Exists(i => i.PeriodKey == mirror.Anchor.Value))
-        {
-            instances.Add(await rowStore
-                .EnsureTableInstanceAsync(instance.DocumentId, instance.TableDefId, mirror.Anchor, ct)
-                .ConfigureAwait(false));
-        }
-
-        var anchorInstance = instances.First(i => i.PeriodKey == mirror.Anchor.Value);
+        // Якір авторитетний за складом: його екземпляр створюється ліниво, вузько (лише ця таблиця). ✎ B134: спільне з
+        // PATCH/книгою (`MirroredRowCreation`).
+        var (instances, anchorInstance) = await MirroredRowCreation
+            .InstancesWithAnchorAsync(rowStore, instance, mirror.Anchor, ct)
+            .ConfigureAwait(false);
 
         // ⛔ Замки — за зростанням ключа періоду.
         var periodsToLock = new SortedSet<int>(mirror.AnnualPeriods);
@@ -340,29 +330,16 @@ public sealed class CreateRowHandler(
         var ordinal = await rowStore.GetMaxOrdinalAsync(anchorInstance.TableInstanceId, mirror.Anchor, ct)
             .ConfigureAwait(false) + 1;
 
-        var batches = new List<RowCreationBatch>(instances.Count);
-        long ownExisting = 0;
-        foreach (var target in instances.OrderBy(i => i.PeriodKey))
-        {
-            var targetPeriod = new PeriodKey(target.PeriodKey);
-            if (target.TableInstanceId != anchorInstance.TableInstanceId)
-            {
-                var present = await rowStore.GetRowIdsAsync(target.TableInstanceId, targetPeriod, ct).ConfigureAwait(false);
-                if (present.TryGetValue(key.Value, out var existingId))
-                {
-                    // ✎ B124: екземпляр запиту вже мав ключ (розбіжність складу) — його наявний рядок і є насінням:
-                    // рядок з'явився в інших місяцях, і читачі власника мусять це побачити.
-                    if (target.TableInstanceId == instance.TableInstanceId)
-                    {
-                        ownExisting = existingId;
-                    }
+        // Екземпляр, що вже має ключ (розбіжність складу), пропускається (✎ B134: спільне з PATCH/книгою).
+        var (batches, present) = await MirroredRowCreation
+            .BatchesAsync(rowStore, instances, [key], ordinal, ct)
+            .ConfigureAwait(false);
 
-                    continue;
-                }
-            }
-
-            batches.Add(new RowCreationBatch(target.TableInstanceId, targetPeriod, [key], ordinal));
-        }
+        // ✎ B124: екземпляр запиту вже мав ключ (розбіжність складу) — його наявний рядок і є насінням: рядок з'явився в
+        // інших місяцях, і читачі власника мусять це побачити.
+        var ownExisting = present.TryGetValue(instance.TableInstanceId, out var ownPresent)
+            ? ownPresent.GetValueOrDefault(key.Value)
+            : 0;
 
         var created = await rowStore.CreateRowsBatchAsync(batches, ct).ConfigureAwait(false);
 
