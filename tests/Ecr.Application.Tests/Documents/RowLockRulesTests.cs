@@ -38,6 +38,45 @@ public sealed class RowLockRulesTests
         Assert.Equal(new DateOnly(2026, 11, 20), localUntil);
     }
 
+    /// <remarks>
+    /// ✎ F13: у поясі з переходом на літній час ОПІВНОЧІ (America/Santiago: перший неділя вересня, 00:00 → 01:00) початок
+    /// доби не існує — проміжок починається з першої існуючої хвилини, а не падає 500. Дата переходу шукається за даними
+    /// поясу, а не вписана руками. Мутація N5: прибрати зсув у <c>Midnight</c> — <c>ConvertTimeToUtc</c> кидає, тест червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "B75")]
+    public void Північ_у_переході_на_літній_час_зсувається_на_першу_існуючу_хвилину()
+    {
+        const string santiago = "America/Santiago";
+        var zone = Ecr.Domain.ValueObjects.SiteTimeZone.Create(santiago).ToTimeZoneInfo();
+
+        DateOnly? gap = null;
+        for (var day = new DateOnly(2026, 1, 1); day < new DateOnly(2028, 1, 1); day = day.AddDays(1))
+        {
+            if (zone.IsInvalidTime(day.ToDateTime(TimeOnly.MinValue)))
+            {
+                gap = day;
+                break;
+            }
+        }
+
+        Assert.True(gap.HasValue, "У поясі America/Santiago 2026–2027 немає переходу опівночі: тест нічого не доводить.");
+        var date = gap!.Value;
+
+        var (from, until) = RowLockRules.ToUtcRange(date, date, santiago);
+
+        var firstValid = date.ToDateTime(TimeOnly.MinValue);
+        while (zone.IsInvalidTime(firstValid))
+        {
+            firstValid = firstValid.AddMinutes(30);
+        }
+
+        Assert.Equal(TimeZoneInfo.ConvertTimeToUtc(firstValid, zone), from);
+        Assert.True(until > from);
+        Assert.Equal(date, RowLockRules.ToLocalDates(from, until, santiago).From);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Requirement", "B75")]
