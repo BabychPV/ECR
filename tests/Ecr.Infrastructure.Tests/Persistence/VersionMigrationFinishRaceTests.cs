@@ -28,13 +28,13 @@ namespace Ecr.Infrastructure.Tests.Persistence;
 /// <para>
 /// Мутації: лише <c>HOLDLOCK</c>, лише <c>UPDLOCK</c> чи без хінтів у 6a/6b — червоніють «6a»/«6b»; без <c>DISTINCT</c>
 /// у 6b — «повтор пари»; без applock на початку <c>FinishSql</c> чи з порожнім
-/// <see cref="DocumentVersionMigrationStore.TemplateFinishLockSql"/> — «applock». 20 повторів на тест гонки.
+/// <see cref="DocumentVersionMigrationStore.TemplateFinishLockSql"/> — «applock». 50 повторів на тест гонки.
 /// </para>
 /// </remarks>
 [Collection("SqlServer")]
 public sealed class VersionMigrationFinishRaceTests(SqlServerFixture sql)
 {
-    private const int Rounds = 20;
+    private const int Rounds = 50;
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
@@ -92,6 +92,63 @@ public sealed class VersionMigrationFinishRaceTests(SqlServerFixture sql)
 
             // Пара рівно одна: A вставила, B (дочекавшись коміту A) — ні, і не впала на PK_ColumnRename.
             Assert.Equal(1, await CountAsync($"SELECT COUNT(*) FROM cfg.ColumnRename WHERE {key}"));
+        }
+    }
+
+    /// <summary>
+    /// B130 (CI 43721871030): кілька одночасних кроків 6b — як переноси РІЗНИХ шаблонів, яких applock шаблону не
+    /// серіалізує. Пари нових версій мають найбільші Id, тож усі вставки йдуть в останню прогалину PK і
+    /// <c>IX_ColumnRename_To</c>; набори пар переплетені й мають спільну пару. Кожна транзакція після вставки ще тримає
+    /// замки (решта <c>FinishSql</c> до коміту). Жодна не має впасти в 1205/2627; кожна пара — рівно один рядок.
+    /// </summary>
+    /// <remarks>
+    /// Мутація: <c>FORCESEEK</c> на <c>IX_ColumnRename_To</c> замість PK (план, який обрав оптимізатор у CI) → 1205.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "B130")]
+    public async Task B130_6b_одночасні_вставки_пар_у_останню_прогалину_без_дедлоку()
+    {
+        await RequireRcsiAsync();
+        const int Writers = 4;
+        const int PairsPerWriter = 3;
+
+        for (var round = 0; round < Rounds; round++)
+        {
+            // Над усіма наявними Id (остання прогалина обох індексів); унікально на прогін і раунд.
+            var baseId = 2_100_000_000 + Random.Shared.Next(0, 40_000_000);
+            var shared = (From: baseId + 1_000, To: baseId + 1_001);
+            var sets = Enumerable.Range(0, Writers)
+                .Select(w => Enumerable.Range(0, PairsPerWriter)
+                    .Select(j => (From: baseId + (10 * j) + w, To: baseId + 500 + (10 * j) + w))
+                    .Append(shared)
+                    .OrderBy(p => p.From).ThenBy(p => p.To)
+                    .ToList())
+                .ToList();
+
+            using var start = new SemaphoreSlim(0, Writers);
+            var writers = sets.Select(async pairs =>
+            {
+                await using var connection = new SqlConnection(sql.ConnectionString);
+                await connection.OpenAsync();
+                await using var tx = (SqlTransaction)await connection.BeginTransactionAsync();
+                var json = "[" + string.Join(",", pairs.Select(p => "{\"f\":" + p.From + ",\"t\":" + p.To + "}")) + "]";
+                await start.WaitAsync();
+                await ExecuteAsync(
+                    connection, tx, DocumentVersionMigrationStore.ColumnRenameInsertSql,
+                    () => new SqlParameter("@renames", SqlDbType.NVarChar, -1) { Value = json });
+                await Task.Delay(20);
+                await tx.CommitAsync();
+            }).ToList();
+
+            start.Release(Writers);
+            await Task.WhenAll(writers);
+
+            // Кожна пара — рівно один рядок (дубль був би неможливий через PK; перевіряється, що всі вставлені).
+            var expected = sets.SelectMany(p => p).Distinct().ToList();
+            var filter = string.Join(" OR ", expected.Select(p => $"(FromColumnDefId = {p.From} AND ToColumnDefId = {p.To})"));
+            Assert.Equal(expected.Count, await CountAsync($"SELECT COUNT(*) FROM cfg.ColumnRename WHERE {filter}"));
         }
     }
 

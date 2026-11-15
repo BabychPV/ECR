@@ -2106,7 +2106,8 @@ public sealed partial class DocumentVersionMigrationStore(
         SELECT g.RoleId, g.ResourceKind, m.n, g.[Level], g.IsDeny
         FROM   sec.ResourceGrant g
         JOIN   @grantMap m ON m.k = g.ResourceKind AND m.o = g.ResourceId
-        WHERE  NOT EXISTS (SELECT 1 FROM sec.ResourceGrant t WITH (UPDLOCK, HOLDLOCK, FORCESEEK)
+        WHERE  NOT EXISTS (SELECT 1 FROM sec.ResourceGrant t
+                           WITH (UPDLOCK, HOLDLOCK, FORCESEEK (UQ_ResourceGrant (RoleId, ResourceKind, ResourceId)))
                            WHERE t.RoleId = g.RoleId AND t.ResourceKind = g.ResourceKind AND t.ResourceId = m.n);
         """;
 
@@ -2115,12 +2116,22 @@ public sealed partial class DocumentVersionMigrationStore(
     /// ✎ B127: <c>UPDLOCK, HOLDLOCK</c> — з тієї самої причини, що й у <see cref="GrantCopyInsertSql"/>. ✎ B130:
     /// <c>DISTINCT</c> — повтор пари в <c>@renames</c> інакше дав би дві вставки того самого ключа (порядок і унікальність
     /// пар — у SQL, а не в залежності від викликача).
+    /// <para>
+    /// ✎ B130 (CI 43721871030, дедлок 1205): <c>FORCESEEK</c> по <c>PK_ColumnRename</c>. Без нього оптимізатор міг читати
+    /// NOT EXISTS через покривний <c>IX_ColumnRename_To</c> (To + ключ кластера): транзакція тримала RangeS-U на прогалині
+    /// <c>IX_ColumnRename_To</c> і чекала RangeI-N на прогалині PK, а інша — навпаки (граф system_health: обидві
+    /// прогалини — «нескінченність» (ffffffffffff), бо Id колонок нових версій завжди найбільші, тож одночасні переноси
+    /// РІЗНИХ шаблонів, яких applock шаблону не серіалізує, впираються в ту саму останню прогалину). Читання лише по PK
+    /// ставить усіх у чергу на одній прогалині PK ще до вставки, нічого іншого не тримаючи, — циклу немає. Те саме для 6a
+    /// (<c>UQ_ResourceGrant</c>) — індекс названо явно, щоб план не залежав від статистики.
+    /// </para>
     /// </remarks>
     internal const string ColumnRenameInsertSql = """
         INSERT cfg.ColumnRename (FromColumnDefId, ToColumnDefId)
         SELECT DISTINCT r.f, r.t
         FROM   OPENJSON(@renames) WITH (f int, t int) r
-        WHERE  NOT EXISTS (SELECT 1 FROM cfg.ColumnRename x WITH (UPDLOCK, HOLDLOCK)
+        WHERE  NOT EXISTS (SELECT 1 FROM cfg.ColumnRename x
+                           WITH (UPDLOCK, HOLDLOCK, FORCESEEK (PK_ColumnRename (FromColumnDefId, ToColumnDefId)))
                            WHERE x.FromColumnDefId = r.f AND x.ToColumnDefId = r.t);
         """;
 
