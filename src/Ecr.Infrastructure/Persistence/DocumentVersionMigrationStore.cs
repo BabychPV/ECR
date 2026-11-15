@@ -54,6 +54,21 @@ public sealed partial class DocumentVersionMigrationStore(
     public int RangeRows { get; init; } = DefaultRangeRows;
 
     /// <summary>
+    /// ✎ B135: скільки мс крок 6 переносу чекає глобальний applock кроку 6 (<see cref="FinishLockSql"/>).
+    /// </summary>
+    /// <remarks>
+    /// Власник замка після нього виконує лише решту кроку 6 (гранти, пари перейменувань, шкала версій, перемикання версії
+    /// проєкту) і комітить — секунди. 60 с з запасом покривають це й чергу з кількох одночасних переносів, і
+    /// лишаються далеко в межах <see cref="ApplyCommandTimeoutSeconds"/>: довше очікування означає завислий або аномально
+    /// великий чужий перенос — тоді відмова з «повторіть перенос» (409), а не безстрокове очікування з відкритою
+    /// транзакцією й блокуванням структури документів свого проєкту.
+    /// </remarks>
+    public const int DefaultFinishLockTimeoutMilliseconds = 60_000;
+
+    /// <summary>Очікування applock кроку 6, мс (змінюється лише у тестах).</summary>
+    public int FinishLockTimeoutMilliseconds { get; init; } = DefaultFinishLockTimeoutMilliseconds;
+
+    /// <summary>
     /// Спостерігач завершених діапазонів (лише тести/діагностика): викликається ПІСЛЯ коміту діапазону, поки ззовні
     /// транзакція переносу ще відкрита.
     /// </summary>
@@ -328,6 +343,20 @@ public sealed partial class DocumentVersionMigrationStore(
             });
 
     /// <summary>
+    /// ✎ B135: крок 6 не дочекався глобального applock кроку 6 — його тримає інший перенос, що саме завершується.
+    /// Транзакція відкочується; перенос ідемпотентний — повтор безпечний.
+    /// </summary>
+    private static Application.Errors.ConcurrencyConflictException FinishBusy(int targetVersionId)
+        => new(
+            Domain.Errors.ErrorCodes.JobStateConflict,
+            $"Перенос на версію {targetVersionId}: інший перенос версії шаблону ще завершується. Нічого не змінено; повторіть перенос.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-JOB-0409.migrationFinishBusy",
+                ["targetVersionId"] = targetVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            });
+
+    /// <summary>
     /// D-10: код таблиці <c>X → Y</c> (пункти <c>Renamed</c> плану — мапа перейменування) у чаті таблиці
     /// (<c>doc.TableDiscussion*</c>) і в передачах зрізу (<c>doc.EditAssignment</c>). Без мапи — жодного звернення.
     /// </summary>
@@ -575,6 +604,7 @@ public sealed partial class DocumentVersionMigrationStore(
                     Value = JsonSerializer.Serialize(plan.ColumnRenames.Select(r => new { f = r.FromColumnDefId, t = r.ToColumnDefId })),
                 },
                 new("@targetVersionId", targetVersionId),
+                new("@finishLockTimeout", FinishLockTimeoutMilliseconds),
                 new("@batch", batchRows),
                 new("@now", System.Data.SqlDbType.DateTime2) { Scale = 3, Value = now },
                 new("@sheets", System.Data.SqlDbType.NVarChar, -1) { Value = sheets },
@@ -616,7 +646,16 @@ public sealed partial class DocumentVersionMigrationStore(
 
         async Task SingleAsync(string stage, string sql)
         {
-            await db.Database.ExecuteSqlRawAsync(SingleCommand(sql), Parameters(), ct).ConfigureAwait(false);
+            try
+            {
+                await db.Database.ExecuteSqlRawAsync(SingleCommand(sql), Parameters(), ct).ConfigureAwait(false);
+            }
+            catch (SqlException ex) when (ex.Number == FinishLockError)
+            {
+                // ✎ B135: крок 6 не дочекався глобального applock (інший перенос саме завершується) — відкат, повтор.
+                throw FinishBusy(targetVersionId);
+            }
+
             stepsDone++;
             await ReportAsync(stage, 0).ConfigureAwait(false);
         }
@@ -933,6 +972,9 @@ public sealed partial class DocumentVersionMigrationStore(
 
     /// <summary>Номер помилки <c>THROW</c> у діапазоні: розбіжність "очікувано переселене - факт".</summary>
     private const int RangeMismatchError = 51001;
+
+    /// <summary>✎ B135: номер помилки <c>THROW</c> у <see cref="FinishLockSql"/>: applock кроку 6 не взято вчасно.</summary>
+    internal const int FinishLockError = 51300;
 
     private static async Task ClaimLeaseAsync(SqlConnection connection, int projectId, string owner, CancellationToken ct)
     {
@@ -2087,8 +2129,92 @@ public sealed partial class DocumentVersionMigrationStore(
         JOIN   @headerMap h ON h.o = g.HeaderFieldDefId;
         """;
 
-    /// <summary>6a. Гранти, версія проєкту, прибирання #-таблиць.</summary>
-    private const string FinishSql = """
+    /// <summary>
+    /// 6a. Копія грантів ролей на нові Id ресурсів (частина <see cref="FinishSql"/>; окремо — для тесту гонки).
+    /// </summary>
+    /// <remarks>
+    /// ✎ B130: <c>WITH (UPDLOCK, HOLDLOCK)</c> у <c>NOT EXISTS</c>. Ролі й ресурси шаблону спільні для проєктів, а переноси
+    /// РІЗНИХ проєктів не серіалізуються (замок — рядок <c>doc.Project</c> і applock структури документа свого проєкту).
+    /// Під RCSI <c>NOT EXISTS</c> не бачить незакомічений грант іншого переносу тієї самої ролі на той самий новий Id —
+    /// обидва вставляють, другий падає на <c>UQ_ResourceGrant</c> і відкочує весь перенос. Діапазонний U-замок змушує
+    /// другий чекати коміту першого й тоді пропустити вже наявний грант. ✎ B130: <c>FORCESEEK</c> — без нього план
+    /// анти-з'єднання сканував <c>sec.ResourceGrant</c> під діапазонними U-замками (замок на всю таблицю до коміту
+    /// переносу) і давав дедлок 1205 з вставкою іншої транзакції навіть за обох хінтів (тест гонки 6a).
+    /// Порядок замків у <see cref="FinishSql"/> однаковий для всіх переносів: 6a (<c>sec.ResourceGrant</c>), далі 6b
+    /// (<c>cfg.ColumnRename</c>) — інших писарів обох таблиць в одній транзакції немає.
+    /// </remarks>
+    internal const string GrantCopyInsertSql = """
+        INSERT sec.ResourceGrant (RoleId, ResourceKind, ResourceId, [Level], IsDeny)
+        SELECT g.RoleId, g.ResourceKind, m.n, g.[Level], g.IsDeny
+        FROM   sec.ResourceGrant g
+        JOIN   @grantMap m ON m.k = g.ResourceKind AND m.o = g.ResourceId
+        WHERE  NOT EXISTS (SELECT 1 FROM sec.ResourceGrant t
+                           WITH (UPDLOCK, HOLDLOCK, FORCESEEK (UQ_ResourceGrant (RoleId, ResourceKind, ResourceId)))
+                           WHERE t.RoleId = g.RoleId AND t.ResourceKind = g.ResourceKind AND t.ResourceId = m.n);
+        """;
+
+    /// <summary>6b. Спільна пара перейменування колонок (частина <see cref="FinishSql"/>; окремо — для тесту гонки).</summary>
+    /// <remarks>
+    /// ✎ B127: <c>UPDLOCK, HOLDLOCK</c> — з тієї самої причини, що й у <see cref="GrantCopyInsertSql"/>. ✎ B130:
+    /// <c>DISTINCT</c> — повтор пари в <c>@renames</c> інакше дав би дві вставки того самого ключа (порядок і унікальність
+    /// пар — у SQL, а не в залежності від викликача).
+    /// <para>
+    /// ✎ B130 (CI 43721871030, дедлок 1205): <c>FORCESEEK</c> по <c>PK_ColumnRename</c>. Без нього оптимізатор міг читати
+    /// NOT EXISTS через покривний <c>IX_ColumnRename_To</c> (To + ключ кластера): транзакція тримала RangeS-U на прогалині
+    /// <c>IX_ColumnRename_To</c> і чекала RangeI-N на прогалині PK, а інша — навпаки (граф system_health: обидві
+    /// прогалини — «нескінченність» (ffffffffffff), бо Id колонок нових версій завжди найбільші, тож одночасні переноси
+    /// РІЗНИХ шаблонів впиралися в ту саму останню прогалину). Читання лише по PK ставить усіх у чергу на одній прогалині
+    /// PK ще до вставки, нічого іншого не тримаючи, — циклу немає. Те саме для 6a (<c>UQ_ResourceGrant</c>) — індекс
+    /// названо явно, щоб план не залежав від статистики. ✎ B135: основний захист тепер — глобальний applock кроку 6
+    /// (<see cref="FinishLockSql"/>); хінти — страховка від писарів поза переносом.
+    /// </para>
+    /// </remarks>
+    internal const string ColumnRenameInsertSql = """
+        INSERT cfg.ColumnRename (FromColumnDefId, ToColumnDefId)
+        SELECT DISTINCT r.f, r.t
+        FROM   OPENJSON(@renames) WITH (f int, t int) r
+        WHERE  NOT EXISTS (SELECT 1 FROM cfg.ColumnRename x
+                           WITH (UPDLOCK, HOLDLOCK, FORCESEEK (PK_ColumnRename (FromColumnDefId, ToColumnDefId)))
+                           WHERE x.FromColumnDefId = r.f AND x.ToColumnDefId = r.t);
+        """;
+
+    /// <summary>
+    /// ✎ B130/B135: початок <see cref="FinishSql"/> — транзакційний виключний applock кроку 6, ОДИН на всю базу
+    /// (<c>ecr:migrate-finish</c>).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Кроки 6a/6b пишуть спільні рядки (гранти ролей на ресурси версій, пари перейменувань), а переноси різних проєктів
+    /// інакше не серіалізуються. Діапазонних замків мало навіть між різними шаблонами: DELETE 6a бере X на allow-рядки
+    /// нових Id, а NOT EXISTS іншої транзакції тримає RangeS-U на спільній останній прогалині <c>UQ_ResourceGrant</c> тієї
+    /// самої ролі (1205, рецензія B130); applock на шаблон цього не закривав. Крок 6 триває секунди, переноси рідкісні —
+    /// глобальна черга прибирає і цей ризик, і залежність від планів 6a/6b; хінти лишаються страховкою.
+    /// </para>
+    /// <para>
+    /// Порядок замків без циклу: перенос бере рядок <c>doc.Project</c> (<c>LockProjectVersionAsync</c>) і applock структури
+    /// документів СВОГО проєкту на початку транзакції, а цей applock — останнім, у <see cref="FinishSql"/>, і ніде інде
+    /// його не беруть. Хто чекає на нього, не тримає нічого, що потрібне власникові (чужі проєкт і документи), а власник
+    /// після нього пише лише спільні таблиці кроку 6 і свій проєкт. Очікування обмежене
+    /// (<see cref="DefaultFinishLockTimeoutMilliseconds"/>): тоді 409 «повторіть перенос».
+    /// </para>
+    /// </remarks>
+    internal const string FinishLockSql = """
+        DECLARE @finishLock int;
+        EXEC @finishLock = sp_getapplock @Resource = N'ecr:migrate-finish', @LockMode = N'Exclusive',
+                                         @LockOwner = N'Transaction', @LockTimeout = @finishLockTimeout;
+        IF @finishLock < 0
+            THROW 51300, N'Перенос версії: не дочекався замка кроку 6 (sp_getapplock < 0).', 1;
+        """;
+
+    /// <summary>
+    /// Крок 6 переносу (остання команда транзакції переносу): глобальний applock кроку 6
+    /// (<see cref="FinishLockSql"/>), 6a — гранти ролей на нові Id ресурсів (<see cref="GrantCopyInsertSql"/>), 6b —
+    /// пари перейменувань і їх прив'язка до проєкту (<see cref="ColumnRenameInsertSql"/>), 6c — шкала версій і версія
+    /// проєкту, прибирання.
+    /// </summary>
+    internal const string FinishSql = $"""
+        {FinishLockSql}
+
         -- 6a. Гранти ролей на аркуш/таблицю/колонку (sec.ResourceGrant): Id цих
         -- ресурсів свої в кожної версії, а грант не має ProjectId і діє на всіх,
         -- хто сидить на старій версії. Тому КОПІЮЄМО на нові Id за кодом (не
@@ -2110,19 +2236,10 @@ public sealed partial class DocumentVersionMigrationStore(
         JOIN   sec.ResourceGrant g ON g.RoleId = t.RoleId AND g.ResourceKind = m.k AND g.ResourceId = m.o
         WHERE  g.IsDeny = 1 AND t.IsDeny = 0;
 
-        INSERT sec.ResourceGrant (RoleId, ResourceKind, ResourceId, [Level], IsDeny)
-        SELECT g.RoleId, g.ResourceKind, m.n, g.[Level], g.IsDeny
-        FROM   sec.ResourceGrant g
-        JOIN   @grantMap m ON m.k = g.ResourceKind AND m.o = g.ResourceId
-        WHERE  NOT EXISTS (SELECT 1 FROM sec.ResourceGrant t
-                           WHERE t.RoleId = g.RoleId AND t.ResourceKind = g.ResourceKind AND t.ResourceId = m.n);
+        {GrantCopyInsertSql}
 
         -- 6b. RPT-STABLE Part B: збережена мапа перейменувань колонок (псевдонім для SSRS і міжперіодних формул).
-        INSERT cfg.ColumnRename (FromColumnDefId, ToColumnDefId)
-        SELECT r.f, r.t
-        FROM   OPENJSON(@renames) WITH (f int, t int) r
-        WHERE  NOT EXISTS (SELECT 1 FROM cfg.ColumnRename x WITH (UPDLOCK, HOLDLOCK)
-                           WHERE x.FromColumnDefId = r.f AND x.ToColumnDefId = r.t);
+        {ColumnRenameInsertSql}
         -- ✎ B127: UPDLOCK/HOLDLOCK - переноси РІЗНИХ проєктів не серіалізуються (замок - рядок doc.Project і applock
         -- структури документа свого проєкту), а пара (f, t) спільна для шаблону: без діапазонного замка дві одночасні
         -- вставки тієї самої пари давали б PK_ColumnRename і відкат усього переносу. Прив'язка нижче - своя для проєкту.
