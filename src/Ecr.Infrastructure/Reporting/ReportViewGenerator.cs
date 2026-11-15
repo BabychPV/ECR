@@ -208,8 +208,14 @@ public sealed partial class ReportViewGenerator(
             await using var command = connection.CreateCommand();
             // ⛔ AN-155d (знахідка Аудиту-2 на живому стенді): параметр @OnlyIfChanged мусить бути в ТЕКСТІ виклику - доданий лише
             // в Parameters, він мовчки ігнорувався, і стабільні вʼюхи перегенеровувались на кожному старті.
-            command.CommandText = "EXEC rpt.usp_GenerateStableViews @TemplateVersionId, @MonthRouting, @OnlyIfChanged";
+            command.CommandText = "EXEC rpt.usp_GenerateStableViews @TemplateVersionId, @MonthRouting, @OnlyIfChanged, @LockTimeoutMs";
             command.CommandTimeout = db.Database.GetCommandTimeout() ?? 30;
+            // ⛔ B126: очікування замка шаблону й генерація ділять ОДНУ стелю команди - процедурі половина стелі на замок, інакше
+            // клієнтський таймаут (без причини) замість названої 50423. Без версії / стеля 0 (без межі) - типове процедури.
+            command.Parameters.Add(new SqlParameter("@LockTimeoutMs", System.Data.SqlDbType.Int)
+            {
+                Value = LockTimeoutFor(templateVersionId, command.CommandTimeout) is { } wait ? wait : DBNull.Value,
+            });
             command.Transaction = db.Database.CurrentTransaction?.GetDbTransaction();
             command.Parameters.Add(new SqlParameter("@TemplateVersionId", System.Data.SqlDbType.Int)
             {
@@ -241,6 +247,16 @@ public sealed partial class ReportViewGenerator(
 
         return skipped;
     }
+
+    /// <summary>
+    /// ✎ B126: очікування замка шаблону (<c>@LockTimeoutMs</c>) для виклику з версією — половина стелі команди (друга половина —
+    /// генерації); без версії або без стелі (0) — <c>null</c> (типове значення процедури).
+    /// </summary>
+    /// <param name="templateVersionId">Версія; <c>null</c> — прогін по всіх шаблонах.</param>
+    /// <param name="commandTimeoutSeconds">Стеля команди, с.</param>
+    /// <returns>Мілісекунди очікування або <c>null</c>.</returns>
+    internal static int? LockTimeoutFor(int? templateVersionId, int commandTimeoutSeconds)
+        => templateVersionId is null || commandTimeoutSeconds <= 0 ? null : commandTimeoutSeconds * 500;
 
     [LoggerMessage(Level = LogLevel.Information, Message = "ReportViewGenerator: вʼюхи rpt.v_* на старті — {Outcome}.")]
     private static partial void LogStartupViews(ILogger logger, string outcome);
