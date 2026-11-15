@@ -1,4 +1,5 @@
 using System.Data;
+using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
@@ -88,7 +89,7 @@ public sealed class VersionMigrationFinishRaceTests(SqlServerFixture sql)
                 probe: $"SELECT 1 FROM cfg.ColumnRename WITH (UPDLOCK, HOLDLOCK) WHERE {key};",
                 insert: $"INSERT cfg.ColumnRename (FromColumnDefId, ToColumnDefId) VALUES ({from}, {to});",
                 DocumentVersionMigrationStore.ColumnRenameInsertSql,
-                () => new SqlParameter("@renames", SqlDbType.NVarChar, -1) { Value = renames });
+                () => [new SqlParameter("@renames", SqlDbType.NVarChar, -1) { Value = renames }]);
 
             // Пара рівно одна: A вставила, B (дочекавшись коміту A) — ні, і не впала на PK_ColumnRename.
             Assert.Equal(1, await CountAsync($"SELECT COUNT(*) FROM cfg.ColumnRename WHERE {key}"));
@@ -137,7 +138,7 @@ public sealed class VersionMigrationFinishRaceTests(SqlServerFixture sql)
                 await start.WaitAsync();
                 await ExecuteAsync(
                     connection, tx, DocumentVersionMigrationStore.ColumnRenameInsertSql,
-                    () => new SqlParameter("@renames", SqlDbType.NVarChar, -1) { Value = json });
+                    () => [new SqlParameter("@renames", SqlDbType.NVarChar, -1) { Value = json }]);
                 await Task.Delay(20);
                 await tx.CommitAsync();
             }).ToList();
@@ -175,6 +176,10 @@ public sealed class VersionMigrationFinishRaceTests(SqlServerFixture sql)
     /// Applock шаблону цільової версії: другий перенос того самого шаблону чекає коміту першого, іншого шаблону — ні;
     /// і саме ним <c>FinishSql</c> починається (до 6a/6b).
     /// </summary>
+    /// <remarks>
+    /// ✎ B135: другий перенос іде на ІНШУ цільову версію того самого шаблону — замок ключується шаблоном, а не версією
+    /// (мутація «ресурс за <c>@targetVersionId</c>» — червоний).
+    /// </remarks>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
@@ -190,6 +195,17 @@ public sealed class VersionMigrationFinishRaceTests(SqlServerFixture sql)
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var same = await builder.BuildAsync(209912, columnCount: 1, rowCount: 1);
         var other = await builder.BuildAsync(209912, columnCount: 1, rowCount: 1);
+        int sameTemplateOtherVersion;
+        await using (var db = new EcrDbContext(new DbContextOptionsBuilder<EcrDbContext>()
+                         .UseSqlServer(sql.ConnectionString, o => o.MigrationsHistoryTable("__EFMigrationsHistory", "dbo"))
+                         .Options))
+        {
+            var version = new TemplateVersion(
+                same.TemplateId, $"9.0.{Guid.NewGuid():N}"[..20], 1, DateTime.UtcNow, same.TemplateVersionId);
+            db.TemplateVersions.Add(version);
+            await db.SaveChangesAsync();
+            sameTemplateOtherVersion = version.Id;
+        }
 
         await using var a = new SqlConnection(sql.ConnectionString);
         await using var b = new SqlConnection(sql.ConnectionString);
@@ -211,22 +227,96 @@ public sealed class VersionMigrationFinishRaceTests(SqlServerFixture sql)
         }
 
         await using var txB = (SqlTransaction)await b.BeginTransactionAsync();
-        var second = ExecuteAsync(b, txB, DocumentVersionMigrationStore.TemplateFinishLockSql, Target(same.TemplateVersionId));
-        Assert.True(await BlockedAsync(spidA, spidB, second), "Другий перенос того самого шаблону не чекав applock першого.");
+        var second = ExecuteAsync(b, txB, DocumentVersionMigrationStore.TemplateFinishLockSql, Target(sameTemplateOtherVersion));
+        Assert.True(await BlockedAsync(spidA, spidB, second), "Перенос на іншу версію того самого шаблону не чекав applock першого.");
 
         await txA.CommitAsync();
         await second;
         await txB.CommitAsync();
 
-        static Func<SqlParameter> Target(int versionId)
-            => () => new SqlParameter("@targetVersionId", SqlDbType.Int) { Value = versionId };
+        static Func<SqlParameter[]> Target(int versionId)
+            => () =>
+            [
+                new SqlParameter("@targetVersionId", SqlDbType.Int) { Value = versionId },
+                new SqlParameter("@templateLockTimeout", SqlDbType.Int)
+                {
+                    Value = DocumentVersionMigrationStore.DefaultTemplateLockTimeoutMilliseconds,
+                },
+            ];
+    }
+
+    /// <summary>
+    /// B135: крок 6 переносу, який не дочекався applock шаблону (його тримає перенос іншого проєкту на версію того самого
+    /// шаблону), — <c>409 ECR-JOB-0409</c> з ключем «повторіть перенос», а не безстрокове очікування чи 500.
+    /// </summary>
+    /// <remarks>
+    /// Справжній <see cref="DocumentVersionMigrationStore.ApplyAsync(int, int, Ecr.Application.Documents.VersionMigration.VersionMigrationPlan, CancellationToken)"/>
+    /// (порожній план) з очікуванням 300 мс. Мутації: <c>@LockTimeout = -1</c> — тест не завершується (запобіжник 30 с);
+    /// без перетворення помилки 51300 — <c>SqlException</c> замість конфлікту.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "B135")]
+    public async Task B135_крок_6_не_дочекався_applock_шаблону_409_повторіть_перенос()
+    {
+        var doc = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(209911, columnCount: 1, rowCount: 1);
+        await using var db = new EcrDbContext(new DbContextOptionsBuilder<EcrDbContext>()
+            .UseSqlServer(sql.ConnectionString, o => o.MigrationsHistoryTable("__EFMigrationsHistory", "dbo"))
+            .Options);
+        var target = new TemplateVersion(doc.TemplateId, $"9.1.{Guid.NewGuid():N}"[..20], 1, DateTime.UtcNow, doc.TemplateVersionId);
+        db.TemplateVersions.Add(target);
+        await db.SaveChangesAsync();
+
+        // Інший перенос того самого шаблону тримає applock кроку 6 (транзакція відкрита).
+        await using var holder = new SqlConnection(sql.ConnectionString);
+        await holder.OpenAsync();
+        await using var held = (SqlTransaction)await holder.BeginTransactionAsync();
+        await ExecuteAsync(
+            holder, held, DocumentVersionMigrationStore.TemplateFinishLockSql,
+            () =>
+            [
+                new SqlParameter("@targetVersionId", SqlDbType.Int) { Value = target.Id },
+                new SqlParameter("@templateLockTimeout", SqlDbType.Int) { Value = 1_000 },
+            ]);
+
+        var plan = new Ecr.Application.Documents.VersionMigration.VersionMigrationPlan(
+            Sheets: new Dictionary<int, int>(),
+            Tables: new Dictionary<int, int>(),
+            Columns: [],
+            Rows: new Dictionary<int, int>(),
+            HeaderFields: new Dictionary<int, int>(),
+            NewRows: [],
+            Items: [],
+            TransferredValues: 0,
+            LostValues: 0,
+            GuardedValues: 0);
+
+        await using var tx = await db.Database.BeginTransactionAsync();
+        var store = new DocumentVersionMigrationStore(db) { TemplateLockTimeoutMilliseconds = 300 };
+        var apply = store.ApplyAsync(doc.ProjectId, target.Id, plan, CancellationToken.None);
+        var finished = await Task.WhenAny(apply, Task.Delay(TimeSpan.FromSeconds(30)));
+        if (finished != apply)
+        {
+            // Запобіжник: відпускаємо замок, інакше перенос (і прибирання тесту) чекали б до таймауту команди.
+            await held.RollbackAsync();
+            await apply;
+            Assert.Fail("Крок 6 чекав applock шаблону без меж.");
+        }
+
+        var conflict = await Assert.ThrowsAsync<Ecr.Application.Errors.ConcurrencyConflictException>(() => apply);
+        Assert.Equal("ECR-JOB-0409", conflict.ErrorCode);
+        Assert.Equal("err.ECR-JOB-0409.migrationTemplateBusy", conflict.Details?["messageKey"]);
+
+        await tx.RollbackAsync();
+        await held.RollbackAsync();
     }
 
     /// <summary>
     /// A: читання з <c>UPDLOCK, HOLDLOCK</c> по відсутньому ключу (без вставки); B: SQL кроку — доки не заблокується на A;
     /// A вставляє рядок і комітить; B має завершитися без винятку.
     /// </summary>
-    private async Task RaceAsync(string probe, string insert, string batch, Func<SqlParameter>? parameters)
+    private async Task RaceAsync(string probe, string insert, string batch, Func<SqlParameter[]>? parameters)
     {
         await using var a = new SqlConnection(sql.ConnectionString);
         await using var b = new SqlConnection(sql.ConnectionString);
@@ -271,12 +361,12 @@ public sealed class VersionMigrationFinishRaceTests(SqlServerFixture sql)
     }
 
     private static async Task ExecuteAsync(
-        SqlConnection connection, SqlTransaction transaction, string batch, Func<SqlParameter>? parameters)
+        SqlConnection connection, SqlTransaction transaction, string batch, Func<SqlParameter[]>? parameters)
     {
         await using var command = new SqlCommand(batch, connection, transaction) { CommandTimeout = 30 };
         if (parameters is not null)
         {
-            command.Parameters.Add(parameters());
+            command.Parameters.AddRange(parameters());
         }
 
         await command.ExecuteNonQueryAsync();

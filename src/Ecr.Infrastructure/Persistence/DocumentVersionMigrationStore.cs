@@ -54,6 +54,21 @@ public sealed partial class DocumentVersionMigrationStore(
     public int RangeRows { get; init; } = DefaultRangeRows;
 
     /// <summary>
+    /// ✎ B135: скільки мс крок 6 переносу чекає applock шаблону цільової версії (<see cref="TemplateFinishLockSql"/>).
+    /// </summary>
+    /// <remarks>
+    /// Власник замка після нього виконує лише решту кроку 6 (гранти, пари перейменувань, шкала версій, перемикання версії
+    /// проєкту) і комітить — секунди. 60 с з запасом покривають це й чергу з кількох переносів того самого шаблону, і
+    /// лишаються далеко в межах <see cref="ApplyCommandTimeoutSeconds"/>: довше очікування означає завислий або аномально
+    /// великий чужий перенос — тоді відмова з «повторіть перенос» (409), а не безстрокове очікування з відкритою
+    /// транзакцією й блокуванням структури документів свого проєкту.
+    /// </remarks>
+    public const int DefaultTemplateLockTimeoutMilliseconds = 60_000;
+
+    /// <summary>Очікування applock шаблону, мс (змінюється лише у тестах).</summary>
+    public int TemplateLockTimeoutMilliseconds { get; init; } = DefaultTemplateLockTimeoutMilliseconds;
+
+    /// <summary>
     /// Спостерігач завершених діапазонів (лише тести/діагностика): викликається ПІСЛЯ коміту діапазону, поки ззовні
     /// транзакція переносу ще відкрита.
     /// </summary>
@@ -328,6 +343,20 @@ public sealed partial class DocumentVersionMigrationStore(
             });
 
     /// <summary>
+    /// ✎ B135: крок 6 не дочекався applock шаблону цільової версії — його тримає перенос ІНШОГО проєкту на версію того
+    /// самого шаблону. Транзакція відкочується; перенос ідемпотентний — повтор безпечний.
+    /// </summary>
+    private static Application.Errors.ConcurrencyConflictException TemplateMigrationBusy(int targetVersionId)
+        => new(
+            Domain.Errors.ErrorCodes.JobStateConflict,
+            $"Перенос на версію {targetVersionId}: інший перенос на версію того самого шаблону ще завершується. Нічого не змінено; повторіть перенос.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-JOB-0409.migrationTemplateBusy",
+                ["targetVersionId"] = targetVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            });
+
+    /// <summary>
     /// D-10: код таблиці <c>X → Y</c> (пункти <c>Renamed</c> плану — мапа перейменування) у чаті таблиці
     /// (<c>doc.TableDiscussion*</c>) і в передачах зрізу (<c>doc.EditAssignment</c>). Без мапи — жодного звернення.
     /// </summary>
@@ -575,6 +604,7 @@ public sealed partial class DocumentVersionMigrationStore(
                     Value = JsonSerializer.Serialize(plan.ColumnRenames.Select(r => new { f = r.FromColumnDefId, t = r.ToColumnDefId })),
                 },
                 new("@targetVersionId", targetVersionId),
+                new("@templateLockTimeout", TemplateLockTimeoutMilliseconds),
                 new("@batch", batchRows),
                 new("@now", System.Data.SqlDbType.DateTime2) { Scale = 3, Value = now },
                 new("@sheets", System.Data.SqlDbType.NVarChar, -1) { Value = sheets },
@@ -616,7 +646,16 @@ public sealed partial class DocumentVersionMigrationStore(
 
         async Task SingleAsync(string stage, string sql)
         {
-            await db.Database.ExecuteSqlRawAsync(SingleCommand(sql), Parameters(), ct).ConfigureAwait(false);
+            try
+            {
+                await db.Database.ExecuteSqlRawAsync(SingleCommand(sql), Parameters(), ct).ConfigureAwait(false);
+            }
+            catch (SqlException ex) when (ex.Number == TemplateLockError)
+            {
+                // ✎ B135: крок 6 не дочекався applock шаблону (інший перенос того самого шаблону) — відкат, повтор.
+                throw TemplateMigrationBusy(targetVersionId);
+            }
+
             stepsDone++;
             await ReportAsync(stage, 0).ConfigureAwait(false);
         }
@@ -933,6 +972,9 @@ public sealed partial class DocumentVersionMigrationStore(
 
     /// <summary>Номер помилки <c>THROW</c> у діапазоні: розбіжність "очікувано переселене - факт".</summary>
     private const int RangeMismatchError = 51001;
+
+    /// <summary>✎ B135: номер помилки <c>THROW</c> у <see cref="TemplateFinishLockSql"/>: applock шаблону не взято вчасно.</summary>
+    internal const int TemplateLockError = 51300;
 
     private static async Task ClaimLeaseAsync(SqlConnection connection, int projectId, string owner, CancellationToken ct)
     {
@@ -2135,7 +2177,6 @@ public sealed partial class DocumentVersionMigrationStore(
                            WHERE x.FromColumnDefId = r.f AND x.ToColumnDefId = r.t);
         """;
 
-    /// <summary>6a. Гранти, версія проєкту, прибирання #-таблиць.</summary>
     /// <summary>
     /// ✎ B130: початок <see cref="FinishSql"/> — транзакційний виключний applock на ШАБЛОН цільової версії.
     /// </summary>
@@ -2159,11 +2200,17 @@ public sealed partial class DocumentVersionMigrationStore(
         DECLARE @templateResource nvarchar(255) = N'ecr:migrate-finish:tpl:'
             + CAST((SELECT TemplateId FROM cfg.TemplateVersion WHERE Id = @targetVersionId) AS nvarchar(20));
         EXEC @templateLock = sp_getapplock @Resource = @templateResource, @LockMode = N'Exclusive',
-                                           @LockOwner = N'Transaction', @LockTimeout = -1;
+                                           @LockOwner = N'Transaction', @LockTimeout = @templateLockTimeout;
         IF @templateLock < 0
-            THROW 51300, N'Перенос версії: не вдалося взяти замок шаблону цільової версії (sp_getapplock < 0).', 1;
+            THROW 51300, N'Перенос версії: не дочекався замка шаблону цільової версії (sp_getapplock < 0).', 1;
         """;
 
+    /// <summary>
+    /// Крок 6 переносу (остання команда транзакції переносу): applock шаблону цільової версії
+    /// (<see cref="TemplateFinishLockSql"/>), 6a — гранти ролей на нові Id ресурсів (<see cref="GrantCopyInsertSql"/>), 6b —
+    /// пари перейменувань і їх прив'язка до проєкту (<see cref="ColumnRenameInsertSql"/>), 6c — шкала версій і версія
+    /// проєкту, прибирання.
+    /// </summary>
     internal const string FinishSql = $"""
         {TemplateFinishLockSql}
 

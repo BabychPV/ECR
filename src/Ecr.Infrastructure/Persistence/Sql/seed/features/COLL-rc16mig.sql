@@ -28,6 +28,8 @@ SELECT v.[Key], v.Lang, v.Val
     (N'jobs.migrateDone', N'kz', N'{version} нұсқасына көшіру аяқталды: құжаттар {documents}, көшірілген мәндер {values}'),
     (N'err.ECR-JOB-0409.migrationInProgress', N'ru', N'Перенос этого проекта уже выполняется (запущен другим пользователем). Дождитесь завершения.'),
     (N'err.ECR-JOB-0409.migrationInProgress', N'kz', N'Бұл жобаны көшіру қазірдің өзінде орындалуда (басқа пайдаланушы бастаған). Аяқталуын күтіңіз.'),
+    (N'err.ECR-JOB-0409.migrationTemplateBusy', N'ru', N'Другой перенос на версию этого же шаблона сейчас завершается. Ничего не изменено; повторите перенос через минуту.'),
+    (N'err.ECR-JOB-0409.migrationTemplateBusy', N'kz', N'Осы үлгінің нұсқасына басқа көшіру дәл қазір аяқталуда. Ештеңе өзгертілмеді; бір минуттан кейін көшіруді қайталаңыз.'),
     (N'documents.migrateRunning', N'ru', N'Перенос выполняется в фоне: {percent}%. Окно можно закрыть; ход переноса остаётся в «Моих задачах».'),
     (N'documents.migrateRunning', N'kz', N'Көшіру фонда орындалуда: {percent}%. Терезені жабуға болады; барысы «Менің тапсырмаларымда» қалады.'),
     (N'documents.migrateJobFailed', N'ru', N'Перенос не завершён, ничего не изменено: {reason}'),
@@ -54,6 +56,7 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'jobs.migrateFinish', N'en', N'Switching the project to the new version', 1),
     (N'jobs.migrateDone', N'en', N'Migrated to version {version}: documents {documents}, values moved {values}', 1),
     (N'err.ECR-JOB-0409.migrationInProgress', N'en', N'A migration of this project is already running (started by another user). Wait for it to finish.', 1),
+    (N'err.ECR-JOB-0409.migrationTemplateBusy', N'en', N'Another migration to a version of the same template is finishing right now. Nothing was changed; retry the migration in a minute.', 1),
     (N'documents.migrateRunning', N'en', N'The migration runs in the background: {percent}%. You can close this window; progress stays in My tasks.', 1),
     (N'documents.migrateJobFailed', N'en', N'The migration did not finish, nothing was changed: {reason}', 1)
        ) AS v ([Key], Lang, Val, Scope)
