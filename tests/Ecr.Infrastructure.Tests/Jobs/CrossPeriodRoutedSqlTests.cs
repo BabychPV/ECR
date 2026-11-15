@@ -1,7 +1,9 @@
 ﻿// tests/Ecr.Infrastructure.Tests/Jobs/CrossPeriodRoutedSqlTests.cs
 using System.Globalization;
 using System.Text.Json;
+using Ecr.Application.Common;
 using Ecr.Application.Documents;
+using Ecr.Application.Documents.Dto;
 using Ecr.Application.Ports;
 using Ecr.Application.Recalculation;
 using Ecr.Application.Security;
@@ -676,6 +678,97 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
         {
             Assert.Equal(13m, await OutputAsync(world, Period(month)));
         }
+    }
+
+    /// <summary>
+    /// ⛔ B131 (D-491), наскрізно: PATCH створює рядок і пише лише текст C1; колонка M11 з дефолтом 3 не записана, але
+    /// агрегат <c>SUM(M11)</c> мусить урахувати дефолт нового рядка (7 + 3 → 7 + 3 + 3). Справжній
+    /// <c>PatchCellsHandler</c>, payload його задачі — у справжню <c>FormulaRecalculationJob</c>. Мутація: у
+    /// <c>BuildRecalculationSeeds</c> прибрати насіння дефолтів нових рядків — насіння лише C1, агрегат лишається 10
+    /// (червоне).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-491")]
+    [Trait("Finding", "B131")]
+    public async Task B131_PATCH_новий_рядок_без_запису_колонки_з_дефолтом_перераховує_агрегат()
+    {
+        var world = await ArrangeAsync(sum: true, m11Default: "3", layout: TableLayoutKind.PerPeriodInstance);
+        var m11 = world.Doc.MonthColumnDefIds[OwnerMonth - 1];
+        await SetCellAsync(world, Period(ViewMonth), m11, 7m);
+        await RunJobAsync(
+            world, [],
+            new FormulaRecalculationRequest(world.Doc.TableInstanceId, Period(ViewMonth), [new DirtyCell(world.Doc.RowIds[0], m11)]),
+            routing: true);
+        Assert.Equal(10m, await OutputAsync(world, Period(ViewMonth)));
+
+        var (jobs, payload) = CapturingJobs();
+        await PatchNewRowAsync(world, jobs, "B131NEW", new PatchCell("C1", "x"));
+        Assert.NotNull(payload());
+
+        await RunJobWithStoreAsync(world, [], payload(), routing: true);
+        Assert.Equal(13m, await OutputAsync(world, Period(ViewMonth)));
+    }
+
+    /// <summary>PATCH нового рядка в екземпляр перегляду через справжній <c>PatchCellsHandler</c> (права — дозвіл).</summary>
+    private static async Task PatchNewRowAsync(World world, IBackgroundJobScheduler jobs, string rowKey, params PatchCell[] cells)
+    {
+        const int userId = 1;
+        var snapshot = await world.Metadata.GetAsync(world.Doc.TemplateVersionId, CancellationToken.None);
+        var profile = new AccessBuilder { UserId = userId }
+            .Grant(ResourceKind.Project, world.Doc.ProjectId, GrantLevel.Write)
+            .Build();
+        var allColumns = snapshot.ColumnsById.Keys.ToList();
+
+        var access = Substitute.For<IAccessDecisionService>();
+        access.BuildProfileAsync(userId, Arg.Any<CancellationToken>()).Returns(profile);
+        access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), world.Doc.DocumentId, Arg.Any<CancellationToken>())
+            .Returns(EditDecision.Allow());
+        access.ReadScopeAsync(Arg.Any<AccessProfile>(), world.Doc.DocumentId, Arg.Any<CancellationToken>())
+            .Returns(_ => DocumentReadScope.For(profile, world.Doc.ProjectId, snapshot));
+        access.CanEditCellsAsync(
+                Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<PeriodKey>(),
+                Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>())
+            .Returns(call => (IReadOnlyDictionary<CellAddress, EditDecision>)call.ArgAt<IReadOnlyCollection<CellAddress>>(3)
+                .ToDictionary(a => a, _ => EditDecision.Allow()));
+        access.CanCreateRowsAsync(
+                Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
+            .Returns(call => (IReadOnlyDictionary<string, NewRowAccess>)call.ArgAt<IReadOnlyCollection<string>>(2)
+                .ToDictionary(
+                    k => k,
+                    _ => new NewRowAccess(EditDecision.Allow(), allColumns.ToDictionary(c => c, _ => EditDecision.Allow())),
+                    StringComparer.Ordinal));
+
+        var user = Substitute.For<ICurrentUser>();
+        user.UserId.Returns(userId);
+
+        await using var db = world.Builder.CreateContext();
+        var clock = new TestClock(Now);
+        var handler = new PatchCellsHandler(
+            new NormalizedCellStore(db),
+            new RowStore(db, new BulkCellLoader(db.Database.GetConnectionString()!, 1000), clock),
+            new DocumentStore(db),
+            new PeriodStore(db),
+            world.Metadata,
+            access,
+            new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
+            new MethodologyStore(db),
+            new RegistryStore(db),
+            new DocumentHeaderStore(db),
+            new AuditWriter(db),
+            new AuditReader(db),
+            jobs,
+            new UnitOfWork(db, clock),
+            user,
+            clock,
+            new SheetEditGate(db),
+            new UnitCatalog(db));
+
+        await handler.HandleAsync(
+            new PatchCellsRequest(
+                world.Doc.TableInstanceId, Period(ViewMonth), "UserEdit", [new PatchRow(rowKey, null, cells)]),
+            CancellationToken.None);
     }
 
     // ── допоміжне ────────────────────────────────────────────────────────

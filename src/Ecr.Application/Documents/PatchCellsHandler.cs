@@ -251,7 +251,8 @@ public sealed partial class PatchCellsHandler(
             var seeds = WithoutAnnualText(
                 context,
                 BuildRecalculationSeeds(
-                    SeedSource(request, applied, previous), context.ApproverEdit ? context.Table.SheetDefId : null));
+                    SeedSource(request, applied, previous), context.ApproverEdit ? context.Table.SheetDefId : null,
+                    Recalculation.ColumnDefaultValues.SeedColumns(context.Table)));
             if (seeds.Count == 0)
             {
                 return; // AN-142: лише текст якоря - задачі немає, recalculationJobId лишається null
@@ -522,6 +523,10 @@ public sealed partial class PatchCellsHandler(
     /// Q-17: насіння перерахунку по фізичних екземплярах, коли частину комірок записано власникам; <c>null</c> —
     /// маршрутизації не було (насіння з <c>Upserts</c>/<c>Deletes</c>).
     /// </param>
+    /// <param name="NewRowIds">
+    /// ✎ B131: справжні <c>TableRow.Id</c> рядків, створених цим батчем (після <see cref="WithRealRowIds"/>); <c>null</c>
+    /// — нових рядків немає або ще не створені. Насіння «новий рядок × колонка з дефолтом» (D-491).
+    /// </param>
     private sealed record CellChangeLists(
         List<CellRecord> Upserts,
         List<CellAddress> Deletes,
@@ -529,7 +534,8 @@ public sealed partial class PatchCellsHandler(
         Dictionary<long, string> RowKeyById,
         Dictionary<long, string> ExpectedRowVersions,
         IReadOnlyDictionary<long, string>? NewRowVersions = null,
-        IReadOnlyList<RecalcGroup>? Routed = null);
+        IReadOnlyList<RecalcGroup>? Routed = null,
+        IReadOnlyList<long>? NewRowIds = null);
 
     /// <summary>
     /// Розв'язує особу користувача, структуру таблиці зі знімка метаданих і
@@ -1643,7 +1649,8 @@ public sealed partial class PatchCellsHandler(
             planned.RowKeyById.ToDictionary(pair => Real(pair.Key), pair => pair.Value),
 
             // Версії заявляються лише для наявних рядків — підміняти нічого.
-            planned.ExpectedRowVersions);
+            planned.ExpectedRowVersions,
+            NewRowIds: newIds);
     }
 
     /// <summary>
@@ -3571,14 +3578,27 @@ public sealed partial class PatchCellsHandler(
     /// ✎ D-442: аркуш правки погоджувача (<see cref="RequestContext.ApproverEdit"/>) — позначка, з якою каскад
     /// перераховує саме цей поданий аркуш; <c>null</c> — звичайна правка.
     /// </param>
+    /// <param name="defaultColumns">
+    /// ✎ B131 (D-491): колонки таблиці з придатним дефолтом (<see cref="Recalculation.ColumnDefaultValues.SeedColumns"/>).
+    /// Новий рядок батчу (<see cref="CellChangeLists.NewRowIds"/>) дає насіння і в них, навіть незаписаних: дефолт
+    /// входить в агрегати. Без дефолтів — лише записані/стерті комірки, як і доти.
+    /// </param>
     private static List<RecalculationSeed> BuildRecalculationSeeds(
-        CellChangeLists changes, int? approverSheetDefId = null)
+        CellChangeLists changes, int? approverSheetDefId = null, IReadOnlyList<int>? defaultColumns = null)
         => changes.Upserts
             .Select(u => u.Address)
             .Concat(changes.Deletes)
             .Select(a => new RecalculationSeed(a.TableRowId, a.ColumnDefId, approverSheetDefId))
+            .Concat(NewRowDefaultSeeds(changes.NewRowIds, defaultColumns, approverSheetDefId))
             .Distinct()
             .ToList();
+
+    /// <summary>✎ B131: насіння «новий рядок × колонка з придатним дефолтом» (D-491); без нових рядків чи дефолтів — порожньо.</summary>
+    private static IEnumerable<RecalculationSeed> NewRowDefaultSeeds(
+        IReadOnlyList<long>? newRowIds, IReadOnlyList<int>? defaultColumns, int? approverSheetDefId)
+        => newRowIds is not { Count: > 0 } || defaultColumns is not { Count: > 0 }
+            ? []
+            : newRowIds.SelectMany(rowId => defaultColumns.Select(c => new RecalculationSeed(rowId, c, approverSheetDefId)));
 
     /// <summary>Підсумкова відповідь: застосовані комірки, нові версії рядків, повідомлення валідації.</summary>
     /// <remarks>
