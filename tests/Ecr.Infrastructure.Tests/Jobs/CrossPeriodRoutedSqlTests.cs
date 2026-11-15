@@ -1,8 +1,10 @@
 ﻿// tests/Ecr.Infrastructure.Tests/Jobs/CrossPeriodRoutedSqlTests.cs
 using System.Globalization;
 using System.Text.Json;
+using Ecr.Application.Documents;
 using Ecr.Application.Ports;
 using Ecr.Application.Recalculation;
+using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
@@ -378,7 +380,408 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
         Assert.Equal(expected, actual);
         Assert.Equal(actual.Count, actual.Distinct().Count());
     }
+    // ── B124: видалення рядка — склад року змінився в усіх екземплярах ──────
+
+    /// <summary>
+    /// ⛔ B124: видалення рядка таблиці «місяці в колонках» дзеркально прибирає його з УСІХ екземплярів року (D-457 п.3),
+    /// разом зі значеннями власників (M11 рядка 2 у 202611). Агрегат <c>SUM(M11)</c> в інших періодах мусить
+    /// перерахуватися тим самим проходом, як після правки M11 (п.6), а не лишатися з видаленим рядком до наступної правки.
+    /// Мутація: у <c>RecalculationService.RunAsync</c> не класти колонки насіння видаленого рядка в <c>inputColumns</c> —
+    /// читачів немає, періоди 1/9/11 лишаються -1 (червоне).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "Q-17")]
+    [Trait("Finding", "B124")]
+    public async Task B124_видалення_рядка_з_перегляду_перераховує_агрегат_власника_в_усіх_інших_екземплярах()
+    {
+        var world = await ArrangeAsync(sum: true);
+        var m11 = world.Doc.MonthColumnDefIds[OwnerMonth - 1];
+        await SetOwnerValueAsync(world, 7m);
+        await ExecuteAsync(
+            "INSERT INTO doc.CellValue (PeriodKey, TableRowId, ColumnDefId, TableDefId, ValueNumeric, IsCalculated, IsEmpty) VALUES " +
+            $"({Period(OwnerMonth)}, {world.Others[OwnerMonth].RowIds[1]}, {m11}, {world.Doc.TableDefId}, 5, 0, 0);");
+
+        // Те, що робить DeleteRowHandler у дзеркальному режимі: рядок 2 м'яко видалено в кожному екземплярі року.
+        await using (var db = world.Builder.CreateContext())
+        {
+            var rows = new RowStore(db, new BulkCellLoader(sql.ConnectionString, 1000), new TestClock(Now));
+            Assert.True(await rows.SoftDeleteRowAsync(world.Doc.RowIds[1], new PeriodKey(Period(ViewMonth)), CancellationToken.None));
+            foreach (var (month, instance) in world.Others)
+            {
+                Assert.True(await rows.SoftDeleteRowAsync(instance.RowIds[1], new PeriodKey(Period(month)), CancellationToken.None));
+            }
+        }
+
+        // Насіння — усі колонки видаленого рядка перегляду (як `DeleteRowHandler.EnqueueRecalculationAsync`).
+        var seeds = world.Doc.ColumnDefIds.Concat(world.Doc.MonthColumnDefIds)
+            .Select(column => new DirtyCell(world.Doc.RowIds[1], column))
+            .ToList();
+        var enqueued = new List<(string Target, string Payload)>();
+        var progress = await RunJobAsync(
+            world, enqueued, new FormulaRecalculationRequest(world.Doc.TableInstanceId, Period(ViewMonth), seeds), routing: true);
+
+        Assert.Empty(enqueued);
+        Assert.Equal([Period(1), Period(9), Period(ViewMonth), Period(OwnerMonth)], progress.Periods);
+        foreach (var month in new[] { 1, 9, ViewMonth, OwnerMonth })
+        {
+            Assert.Equal(7m, await OutputAsync(world, Period(month)));
+        }
+    }
+
+    /// <summary>
+    /// B124 (регресія): дзеркальне створення рядка (<c>CreateRowHandler.CreateMirroredUnderLockAsync</c>) перерахунку не
+    /// ставить — і не мусить: порожній рядок не змінює агрегатів (SUM/COUNT/AVERAGE пропускають порожнє). Збережені
+    /// значення кожного місяця після створення дорівнюють свіжому повному перерахунку. Мутація: дати новому рядку
+    /// значення M11 у власника — свіжий перерахунок розходиться зі збереженим (червоне).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "Q-17")]
+    [Trait("Finding", "B124")]
+    public async Task B124_дзеркальне_створення_порожнього_рядка_не_робить_агрегати_інших_місяців_застарілими()
+    {
+        var world = await ArrangeAsync(sum: true);
+        await SetOwnerValueAsync(world, 7m);
+        await RunJobAsync(world, [], OwnerRequest(world), routing: true);
+
+        var months = new[] { 1, 9, ViewMonth, OwnerMonth };
+        var stored = new Dictionary<int, decimal?>();
+        foreach (var month in months)
+        {
+            stored[month] = await OutputAsync(world, Period(month));
+            Assert.Equal(7m, stored[month]);
+        }
+
+        // Те, що робить CreateRowHandler у дзеркальному режимі: рядок у кожному наявному екземплярі року, без задачі.
+        await AddMirrorRowAsync(world, "B124NEW");
+
+        await using (var db = world.Builder.CreateContext())
+        {
+            var router = new MonthColumnRouter(db, Config(true));
+            var service = Formulas(db, world, new MonthRoutedCellStore(new NormalizedCellStore(db), router, world.Metadata, db), router);
+            foreach (var month in months)
+            {
+                await service.RecalculateAllAsync(world.Doc.DocumentId, new PeriodKey(Period(month)), CancellationToken.None);
+            }
+        }
+
+        foreach (var month in months)
+        {
+            Assert.Equal(stored[month], await OutputAsync(world, Period(month)));
+        }
+    }
+
+    /// <summary>
+    /// ⛔ B124 (D-491): колонка M11 з дефолтом 3 — новий рядок ЗМІНЮЄ агрегат (7 + 3 + 3 → 13). Дзеркальне створення з
+    /// перегляду жовтня (справжній <c>CreateRowHandler</c>) ставить задачу формул з насінням «новий рядок × M11», і її
+    /// прогін дає 13 у КОЖНОМУ місяці року. Мутація: прибрати <c>NewRowDefaultColumns</c> з насіння — задачі немає,
+    /// усі місяці лишаються 10 (червоне).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "Q-17")]
+    [Trait("Finding", "B124")]
+    public async Task B124_дзеркальне_створення_рядка_з_дефолтом_перераховує_агрегат_у_всіх_місяцях()
+    {
+        var world = await ArrangeAsync(sum: true, m11Default: "3");
+        await SetOwnerValueAsync(world, 7m);
+        await RunJobAsync(world, [], OwnerRequest(world), routing: true);
+
+        var months = new[] { 1, 9, ViewMonth, OwnerMonth };
+        foreach (var month in months)
+        {
+            // Рядок 1 — 7, рядок 2 порожній → дефолт 3.
+            Assert.Equal(10m, await OutputAsync(world, Period(month)));
+        }
+
+        var (jobs, payload) = CapturingJobs();
+        await CreateRowAsync(world, jobs, [.. months.Select(Period)]);
+        Assert.NotNull(payload());
+
+        // F13 M4: перегляд (жовтень) — не перший за періодом екземпляр; насіння — рядок САМЕ екземпляра запиту.
+        var own = await RowIdAsync(Period(ViewMonth), world.Doc.TableInstanceId, "B124NEW");
+        Assert.All(PayloadRowIds(payload()), id => Assert.Equal(own, id));
+
+        await RunJobWithStoreAsync(world, [], payload(), routing: true);
+        foreach (var month in months)
+        {
+            Assert.Equal(13m, await OutputAsync(world, Period(month)));
+        }
+    }
+
+    /// <summary>
+    /// B124 (межа правила): видалення рядка в НЕмаршрутизованій таблиці (не «місяці в колонках») — не Q-17: значень
+    /// власників немає, рядок видаляється лише в перегляді, читачів в інших періодах немає. Мутація M3: у
+    /// <c>CrossPeriodFanOut.RoutedInputsAsync</c> прибрати фільтр <c>AppliesToTable</c> — періоди 1/9/11 перераховуються
+    /// (червоне).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "Q-17")]
+    [Trait("Finding", "B124")]
+    public async Task B124_видалення_рядка_немаршрутизованої_таблиці_не_будить_читачів_інших_періодів()
+    {
+        var world = await ArrangeAsync(sum: true, layout: TableLayoutKind.PerPeriodInstance);
+
+        await using (var db = world.Builder.CreateContext())
+        {
+            var rows = new RowStore(db, new BulkCellLoader(sql.ConnectionString, 1000), new TestClock(Now));
+            Assert.True(await rows.SoftDeleteRowAsync(world.Doc.RowIds[1], new PeriodKey(Period(ViewMonth)), CancellationToken.None));
+        }
+
+        var seeds = world.Doc.ColumnDefIds.Concat(world.Doc.MonthColumnDefIds)
+            .Select(column => new DirtyCell(world.Doc.RowIds[1], column))
+            .ToList();
+        var enqueued = new List<(string Target, string Payload)>();
+        var progress = await RunJobAsync(
+            world, enqueued, new FormulaRecalculationRequest(world.Doc.TableInstanceId, Period(ViewMonth), seeds), routing: true);
+
+        Assert.Empty(enqueued);
+        Assert.Equal([Period(ViewMonth)], progress.Periods);
+        foreach (var month in new[] { 1, 9, OwnerMonth })
+        {
+            Assert.Equal(StaleOutput, await OutputAsync(world, Period(month)));
+        }
+    }
+
+    /// <summary>
+    /// B124 (межа правила): насіння видаленого рядка в ОБЧИСЛЮВАНІЙ колонці маршрутизованої таблиці — не введене
+    /// значення власника (живе в екземплярі перегляду, D-457 п.2), читачів Q-17 в інших періодах не будить. Мутація M3:
+    /// у <c>CrossPeriodFanOut.RoutedInputsAsync</c> прибрати фільтр <c>IsComputed</c> — періоди 1/9/11 перераховуються
+    /// (червоне).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "Q-17")]
+    [Trait("Finding", "B124")]
+    public async Task B124_видалений_рядок_в_обчислюваній_колонці_не_будить_читачів_Q17()
+    {
+        var world = await ArrangeAsync(sum: true, m11Computed: true);
+
+        await using (var db = world.Builder.CreateContext())
+        {
+            var rows = new RowStore(db, new BulkCellLoader(sql.ConnectionString, 1000), new TestClock(Now));
+            Assert.True(await rows.SoftDeleteRowAsync(world.Doc.RowIds[1], new PeriodKey(Period(ViewMonth)), CancellationToken.None));
+            foreach (var (month, instance) in world.Others)
+            {
+                Assert.True(await rows.SoftDeleteRowAsync(instance.RowIds[1], new PeriodKey(Period(month)), CancellationToken.None));
+            }
+        }
+
+        // Лише обчислювана M11 (її читає формула OUT): введених колонок у насінні немає.
+        var enqueued = new List<(string Target, string Payload)>();
+        var progress = await RunJobAsync(
+            world, enqueued,
+            new FormulaRecalculationRequest(
+                world.Doc.TableInstanceId, Period(ViewMonth),
+                [new DirtyCell(world.Doc.RowIds[1], world.Doc.MonthColumnDefIds[OwnerMonth - 1])]),
+            routing: true);
+
+        Assert.Empty(enqueued);
+        Assert.DoesNotContain(Period(1), progress.Periods);
+        foreach (var month in new[] { 1, 9, OwnerMonth })
+        {
+            Assert.Equal(StaleOutput, await OutputAsync(world, Period(month)));
+        }
+    }
+
+    /// <summary>
+    /// B124 (F13 M2): таблиця БЕЗ дефолту, з ПОРОЖНІМ (пробіли) і з НЕПРИДАТНИМ (текст у числовій колонці, як у
+    /// <c>ColumnDefaultValues</c>) — створення рядка через справжній <c>CreateRowHandler</c> задачі формул не ставить
+    /// (порожній рядок агрегатів не змінює). Мутація: прибрати <c>IsNullOrWhiteSpace</c>/<c>Parse</c> у
+    /// <c>NewRowDefaultColumns</c> — постановка є (червоне).
+    /// </summary>
+    /// <param name="m11Default">Дефолт колонки M11.</param>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "Q-17")]
+    [Trait("Finding", "B124")]
+    [InlineData(null)]
+    [InlineData("   ")]
+    [InlineData("abc")]
+    public async Task B124_створення_рядка_без_придатного_дефолту_задачі_не_ставить(string? m11Default)
+    {
+        var world = await ArrangeAsync(sum: true, m11Default: m11Default);
+        var (jobs, payload) = CapturingJobs();
+
+        await CreateRowAsync(world, jobs, [Period(1), Period(9), Period(ViewMonth), Period(OwnerMonth)]);
+
+        Assert.Null(payload());
+        Assert.DoesNotContain(jobs.ReceivedCalls(), c => c.GetMethodInfo().Name.StartsWith("Enqueue", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// B124 (F13 M3): звичайне (не Q-17) створення рядка в таблиці з дефолтом — агрегат перегляду перераховується
+    /// (7 + 3 → 7 + 3 + 3). Мутація: насіння дефолтів лише в дзеркальному шляху — задачі немає (червоне).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-491")]
+    [Trait("Finding", "B124")]
+    public async Task B124_звичайне_створення_рядка_з_дефолтом_перераховує_агрегат()
+    {
+        var world = await ArrangeAsync(sum: true, m11Default: "3", layout: TableLayoutKind.PerPeriodInstance);
+        await SetCellAsync(world, Period(ViewMonth), world.Doc.MonthColumnDefIds[OwnerMonth - 1], 7m);
+        await RunJobAsync(
+            world, [],
+            new FormulaRecalculationRequest(
+                world.Doc.TableInstanceId, Period(ViewMonth),
+                [new DirtyCell(world.Doc.RowIds[0], world.Doc.MonthColumnDefIds[OwnerMonth - 1])]),
+            routing: true);
+        Assert.Equal(10m, await OutputAsync(world, Period(ViewMonth)));
+
+        var (jobs, payload) = CapturingJobs();
+        await CreateRowAsync(world, jobs, [Period(ViewMonth)]);
+        Assert.NotNull(payload());
+        var own = await RowIdAsync(Period(ViewMonth), world.Doc.TableInstanceId, "B124NEW");
+        Assert.All(PayloadRowIds(payload()), id => Assert.Equal(own, id));
+
+        await RunJobWithStoreAsync(world, [], payload(), routing: true);
+        Assert.Equal(13m, await OutputAsync(world, Period(ViewMonth)));
+    }
+
+    /// <summary>
+    /// B124 (F13, крайній випадок): екземпляр запиту ВЖЕ мав ключ (розбіжність складу), рядок створено лише в інших
+    /// місяцях — насіння бере наявний рядок екземпляра запиту, і агрегати всіх місяців перераховуються. Мутація:
+    /// повертати 0 для пропущеного екземпляра — задачі немає (червоне).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "Q-17")]
+    [Trait("Finding", "B124")]
+    public async Task B124_дзеркальне_створення_коли_екземпляр_запиту_вже_мав_ключ_сіє_його_рядок()
+    {
+        var world = await ArrangeAsync(sum: true, m11Default: "3");
+        await SetOwnerValueAsync(world, 7m);
+        await RunJobAsync(world, [], OwnerRequest(world), routing: true);
+
+        var existing = await AddRowAsync(Period(ViewMonth), world.Doc.TableInstanceId, "B124NEW");
+
+        var (jobs, payload) = CapturingJobs();
+        await CreateRowAsync(world, jobs, [Period(1), Period(9), Period(ViewMonth), Period(OwnerMonth)]);
+        Assert.NotNull(payload());
+        Assert.All(PayloadRowIds(payload()), id => Assert.Equal(existing, id));
+
+        await RunJobWithStoreAsync(world, [], payload(), routing: true);
+        foreach (var month in new[] { 1, 9, ViewMonth, OwnerMonth })
+        {
+            Assert.Equal(13m, await OutputAsync(world, Period(month)));
+        }
+    }
+
     // ── допоміжне ────────────────────────────────────────────────────────
+
+    /// <summary>Черга, що запам'ятовує payload останньої постановки задачі формул.</summary>
+    private static (IBackgroundJobScheduler Jobs, Func<object?> Payload) CapturingJobs()
+    {
+        var jobs = Substitute.For<IBackgroundJobScheduler>();
+        jobs.EnlistsInCallerTransaction.Returns(false);
+        object? payload = null;
+        jobs.EnqueueCoalescedAsync<IFormulaRecalculationJob>(
+                Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
+            .Returns(call =>
+            {
+                payload = call.ArgAt<object?>(1);
+                return "job";
+            });
+        return (jobs, () => payload);
+    }
+
+    /// <summary>Id рядків насіння payload постановки (<c>Cells[].RowId</c>).</summary>
+    private static List<long> PayloadRowIds(object? payload)
+    {
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(payload));
+        var ids = json.RootElement.GetProperty("Cells").EnumerateArray()
+            .Select(c => c.GetProperty("RowId").GetInt64())
+            .ToList();
+        Assert.NotEmpty(ids);
+        return ids;
+    }
+
+    /// <summary>Живий рядок екземпляра за ключем.</summary>
+    private async Task<long> RowIdAsync(int period, long instanceId, string rowKey)
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            $"SELECT Id FROM doc.TableRow WHERE PeriodKey = {period} AND TableInstanceId = {instanceId} " +
+            $"AND RowKey = N'{rowKey}' AND IsDeleted = 0";
+        return (long)(await command.ExecuteScalarAsync())!;
+    }
+
+    /// <summary>Рядок лише в одному екземплярі (розбіжність складу).</summary>
+    private async Task<long> AddRowAsync(int period, long instanceId, string rowKey)
+    {
+        var loader = new BulkCellLoader(sql.ConnectionString, 1000);
+        var id = await loader.ReserveIdsAsync("doc.TableRowSeq", 1, CancellationToken.None);
+        await using var db = new EcrDbContext(
+            new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).Options);
+        db.TableRows.Add(new Ecr.Domain.Entities.Documents.TableRow(
+            new PeriodKey(period), id, instanceId, RowKey.Create(rowKey), 98, Now));
+        await db.SaveChangesAsync();
+        return id;
+    }
+
+    /// <summary>POST row у екземпляр перегляду через справжній <c>CreateRowHandler</c> з увімкненим прапором Q-17.</summary>
+    private static async Task CreateRowAsync(World world, IBackgroundJobScheduler jobs, IReadOnlyList<int> annualPeriods)
+    {
+        const int userId = 1;
+        var snapshot = await world.Metadata.GetAsync(world.Doc.TemplateVersionId, CancellationToken.None);
+        var profile = new AccessBuilder { UserId = userId }
+            .Grant(ResourceKind.Project, world.Doc.ProjectId, GrantLevel.Write)
+            .Build();
+
+        var access = Substitute.For<IAccessDecisionService>();
+        access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), world.Doc.DocumentId, Arg.Any<CancellationToken>())
+            .Returns(EditDecision.Allow());
+        access.ReadScopeAsync(Arg.Any<AccessProfile>(), world.Doc.DocumentId, Arg.Any<CancellationToken>())
+            .Returns(_ => DocumentReadScope.For(profile, world.Doc.ProjectId, snapshot));
+        access.CanCreateRowsAsync(
+                Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
+            .Returns(call => (IReadOnlyDictionary<string, NewRowAccess>)call.ArgAt<IReadOnlyCollection<string>>(2)
+                .ToDictionary(
+                    k => k,
+                    _ => new NewRowAccess(
+                        EditDecision.Allow() with { AnnualPeriods = annualPeriods }, new Dictionary<int, EditDecision>()),
+                    StringComparer.Ordinal));
+
+        await using var db = world.Builder.CreateContext();
+        var clock = new TestClock(Now);
+        var handler = new CreateRowHandler(
+            new RowStore(db, new BulkCellLoader(db.Database.GetConnectionString()!, 1000), clock), new DocumentStore(db),
+            world.Metadata, access, new UnitOfWork(db), clock, new SheetEditGate(db),
+            monthRouter: new MonthColumnRouter(db, Config(true)), jobs: jobs);
+        await handler.CreateAsync(
+            world.Doc.DocumentId, world.Doc.TableInstanceId, RowKey.Create("B124NEW"), profile, CancellationToken.None);
+    }
+
+    /// <summary>Новий рядок з ключем <paramref name="rowKey"/> у кожному екземплярі документа (дзеркало CreateRow).</summary>
+    private async Task AddMirrorRowAsync(World world, string rowKey)
+    {
+        var instances = new List<(int Period, long Instance)> { (Period(ViewMonth), world.Doc.TableInstanceId) };
+        instances.AddRange(world.Others.Select(o => (Period(o.Key), o.Value.TableInstanceId)));
+
+        var loader = new BulkCellLoader(sql.ConnectionString, 1000);
+        var firstId = await loader.ReserveIdsAsync("doc.TableRowSeq", instances.Count, CancellationToken.None);
+        await using var db = world.Builder.CreateContext();
+        for (var i = 0; i < instances.Count; i++)
+        {
+            db.TableRows.Add(new Ecr.Domain.Entities.Documents.TableRow(
+                new PeriodKey(instances[i].Period), firstId + i, instances[i].Instance, RowKey.Create(rowKey), 99, Now));
+        }
+
+        await db.SaveChangesAsync();
+    }
 
     private static int Period(int month) => (Year * 100) + month;
 
@@ -393,11 +796,13 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
             world.Others[OwnerMonth].TableInstanceId, Period(OwnerMonth),
             [new DirtyCell(world.Others[OwnerMonth].RowIds[0], world.Doc.MonthColumnDefIds[OwnerMonth - 1])]);
 
-    private async Task<World> ArrangeAsync(bool absolute = false, bool offsets = false, bool fullYear = false)
+    private async Task<World> ArrangeAsync(
+        bool absolute = false, bool offsets = false, bool fullYear = false, bool sum = false, string? m11Default = null,
+        TableLayoutKind layout = TableLayoutKind.MonthsInColumns, bool m11Computed = false)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var doc = await builder.BuildAsync(
-            periodKey: Period(ViewMonth), columnCount: 3, rowCount: 1,
+            periodKey: Period(ViewMonth), columnCount: 3, rowCount: sum ? 2 : 1,
             layoutKind: TableLayoutKind.MonthsInColumns, monthColumns: 12);
 
         // L6: fullYear — усі 12 місяців року (звіт S07: правка січня тече у дванадцять періодів).
@@ -424,7 +829,7 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
             await setup.SaveChangesAsync();
         }
 
-        var world = new World(builder, doc, others, Metadata(doc, absolute, offsets), absolute, offsets);
+        var world = new World(builder, doc, others, Metadata(doc, absolute, offsets, sum, m11Default, layout, m11Computed), absolute, offsets);
 
         // Застарілий вихід у кожному екземплярі; M11 власника порожнє (до першої правки).
         foreach (var month in allMonths)
@@ -472,7 +877,7 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
         => (await RunJobWithStoreAsync(world, enqueued, request, routing)).Progress;
 
     private async Task<(CapturingJobProgress Progress, MonthRoutedCellStore Store)> RunJobWithStoreAsync(
-        World world, List<(string Target, string Payload)> enqueued, FormulaRecalculationRequest request, bool routing)
+        World world, List<(string Target, string Payload)> enqueued, object? request, bool routing)
     {
         await using var db = world.Builder.CreateContext();
 
@@ -582,7 +987,9 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
         return versions;
     }
 
-    private static IMetadataCache Metadata(TestDocument doc, bool absolute, bool offsets)
+    private static IMetadataCache Metadata(
+        TestDocument doc, bool absolute, bool offsets, bool sum = false, string? m11Default = null,
+        TableLayoutKind layout = TableLayoutKind.MonthsInColumns, bool m11Computed = false)
     {
         var text = ColumnDefFor(doc, doc.ColumnDefIds[0], "C1", 1, CellDataType.String);
         var input = ColumnDefFor(doc, doc.ColumnDefIds[1], "IN", 2, CellDataType.Decimal);
@@ -591,8 +998,14 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
         var months = new List<ColumnDef>();
         for (var m = 1; m <= 12; m++)
         {
-            var column = ColumnDefFor(doc, doc.MonthColumnDefIds[m - 1], $"M{m}", 3 + m, CellDataType.Decimal);
+            var column = ColumnDefFor(
+                doc, doc.MonthColumnDefIds[m - 1], $"M{m}", 3 + m,
+                m == OwnerMonth && m11Computed ? CellDataType.Calculated : CellDataType.Decimal);
             column.SetMonth(true, (byte)m);
+            if (m == OwnerMonth && m11Default is not null)
+            {
+                column.SetPresentation(m11Default, displayFormat: null, styleId: null);
+            }
             months.Add(column);
         }
 
@@ -601,7 +1014,7 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
         typeof(Entity<int>).GetProperty("Id")!.SetValue(sheet, doc.SheetDefId);
         var table = new TableDef(doc.SheetDefId, EcrCode.Create($"TB{doc.TableDefId}"),
             new LocalizedText(new Dictionary<string, string> { ["en"] = "Table" }), 1,
-            TableLayoutKind.MonthsInColumns, TableRowMode.Dynamic);
+            layout, TableRowMode.Dynamic);
         typeof(Entity<int>).GetProperty("Id")!.SetValue(table, doc.TableDefId);
         table.AddColumn(text);
         table.AddColumn(input);
@@ -611,7 +1024,10 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
             table.AddColumn(month);
         }
 
-        var expression = absolute
+        // B124: агрегат по колонці (усі живі рядки) — той самий граф: комірка зі зсувом null на M11.
+        var expression = sum
+            ? $"SUM([TB{doc.TableDefId}].[WHERE [M11] >= 0].[M11])"
+            : absolute
             ? "[Period:#11].[M11] * 2"
             : offsets
                 ? "[M11] + [Period:-1].[M11] + [Period:+1].[M11]"

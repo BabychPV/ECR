@@ -158,6 +158,15 @@ public sealed class CreateRowHandler(
         IReadOnlyList<int> sheetNameColumns = jobs is null || mirror is not null
             ? []
             : SheetNameRecalculation.NewRowColumns(table, snapshot.ColumnsById);
+
+        // ✎ B124 (D-491): дефолт колонки (`DefaultValue`) підставляється у формулах при читанні — і в агрегатах. Новий
+        // рядок з дефолтом ЗМІНЮЄ SUM/COUNT/AVERAGE колонки (порожній без дефолту — ні), тож без насіння агрегати лишались
+        // старими до наступної правки — у дзеркальному режимі Q-17 у ВСІХ місяцях року. Насіння «рядок × колонка з
+        // дефолтом» живе в екземплярі запиту: каскад перераховує його період, а `inputColumns` будить читачів власника
+        // в інших екземплярах (`CrossPeriodFanOut.RoutedInputsAsync`).
+        IReadOnlyList<int> seedColumns = jobs is null
+            ? []
+            : [.. sheetNameColumns.Union(NewRowDefaultColumns(table))];
         var enlist = jobs?.EnlistsInCallerTransaction == true;
         long rowId = 0;
         string? jobId = null;
@@ -170,33 +179,44 @@ public sealed class CreateRowHandler(
                     rowId = await CreateUnderLockAsync(
                             instance, table, tableInstanceId, key, profile, createDecision.AssignmentsPresent, sheetCode, innerCt)
                         .ConfigureAwait(false);
-
-                    // ⛔ MI-02 (в): черга в базі — постановка ВСЕРЕДИНІ транзакції останнім оператором; Quartz — після коміту.
-                    if (enlist && sheetNameColumns.Count > 0)
-                    {
-                        jobId = await SheetNameRecalculation
-                            .EnqueueNewRowAsync(jobs!, instance, rowId, sheetNameColumns, profile.UserId, innerCt)
-                            .ConfigureAwait(false);
-                    }
                 }
                 else
                 {
-                    await CreateMirroredUnderLockAsync(
+                    rowId = await CreateMirroredUnderLockAsync(
                             instance, table, key, profile, createDecision.AssignmentsPresent, sheetCode, mirror, innerCt)
+                        .ConfigureAwait(false);
+                }
+
+                // ⛔ MI-02 (в): черга в базі — постановка ВСЕРЕДИНІ транзакції останнім оператором; Quartz — після коміту.
+                if (enlist && seedColumns.Count > 0 && rowId != 0)
+                {
+                    jobId = await SheetNameRecalculation
+                        .EnqueueNewRowAsync(jobs!, instance, rowId, seedColumns, profile.UserId, innerCt)
                         .ConfigureAwait(false);
                 }
             },
             ct).ConfigureAwait(false);
 
-        if (!enlist && sheetNameColumns.Count > 0 && rowId != 0)
+        if (!enlist && seedColumns.Count > 0 && rowId != 0)
         {
             jobId = await SheetNameRecalculation
-                .EnqueueNewRowAsync(jobs!, instance, rowId, sheetNameColumns, profile.UserId, ct)
+                .EnqueueNewRowAsync(jobs!, instance, rowId, seedColumns, profile.UserId, ct)
                 .ConfigureAwait(false);
         }
 
         return new CreateRowResult(key, jobId);
     }
+
+    /// <summary>
+    /// ✎ B124: введені колонки таблиці з дефолтом (D-491) — новий рядок змінює їхні агрегати. Умова — та сама, що в
+    /// <see cref="Recalculation.ColumnDefaultValues"/>: непридатний дефолт (текст у числовій колонці) — як відсутній;
+    /// Lookup розв'язується довідником лише при читанні, тож тут його беремо завжди (зайвий перерахунок дешевший).
+    /// </summary>
+    private static IEnumerable<int> NewRowDefaultColumns(TableDef table)
+        => table.Columns
+            .Where(c => !c.IsDeleted && !c.IsComputed && !string.IsNullOrWhiteSpace(c.DefaultValue)
+                        && (c.DataType == CellDataType.Lookup || Recalculation.ColumnDefaultValues.Parse(c) is not null))
+            .Select(c => c.Id);
 
     /// <summary>Параметри дзеркального створення рядка.</summary>
     /// <param name="Document">Документ місячного проєкту.</param>
@@ -245,7 +265,7 @@ public sealed class CreateRowHandler(
     /// (<c>ConsistencyCheck</c>, окремий крок Q-17).
     /// </para>
     /// </remarks>
-    private async Task CreateMirroredUnderLockAsync(
+    private async Task<long> CreateMirroredUnderLockAsync(
         Ports.TableInstanceRef instance, TableDef table, RowKey key, AccessProfile profile, bool assignmentsPresent,
         string? sheetCode, Mirror mirror, CancellationToken ct)
     {
@@ -325,14 +345,22 @@ public sealed class CreateRowHandler(
             .ConfigureAwait(false) + 1;
 
         var batches = new List<RowCreationBatch>(instances.Count);
+        long ownExisting = 0;
         foreach (var target in instances.OrderBy(i => i.PeriodKey))
         {
             var targetPeriod = new PeriodKey(target.PeriodKey);
             if (target.TableInstanceId != anchorInstance.TableInstanceId)
             {
                 var present = await rowStore.GetRowIdsAsync(target.TableInstanceId, targetPeriod, ct).ConfigureAwait(false);
-                if (present.ContainsKey(key.Value))
+                if (present.TryGetValue(key.Value, out var existingId))
                 {
+                    // ✎ B124: екземпляр запиту вже мав ключ (розбіжність складу) — його наявний рядок і є насінням:
+                    // рядок з'явився в інших місяцях, і читачі власника мусять це побачити.
+                    if (target.TableInstanceId == instance.TableInstanceId)
+                    {
+                        ownExisting = existingId;
+                    }
+
                     continue;
                 }
             }
@@ -355,6 +383,10 @@ public sealed class CreateRowHandler(
             .ConfigureAwait(false);
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        // ✎ B124: рядок у екземплярі ЗАПИТУ — насіння перерахунку (новий або, якщо екземпляр мав ключ, наявний).
+        var own = batches.FindIndex(b => b.TableInstanceId == instance.TableInstanceId);
+        return own >= 0 && created[own].Count > 0 ? created[own][0] : ownExisting;
     }
 
     /// <summary>Рішення служби доступу на створення рядка з цим ключем.</summary>
