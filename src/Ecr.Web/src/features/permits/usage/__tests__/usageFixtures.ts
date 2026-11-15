@@ -17,6 +17,7 @@ export function headerItem(over: Partial<PermitUsageItem> = {}): PermitUsageItem
     rowOrdinal: null,
     fieldCode: 'PERMIT',
     fieldLabelL10n: { en: 'Permit number', ru: 'Номер разрешения' },
+    validFrom: null,
     ...over,
   };
 }
@@ -39,18 +40,25 @@ export function cellItem(over: Partial<PermitUsageItem> = {}): PermitUsageItem {
     rowOrdinal: 2,
     fieldCode: 'PCOL',
     fieldLabelL10n: { en: 'Permit' },
+    validFrom: null,
     ...over,
   };
+}
+
+/** B128c: запис історії дозволів рядка 3 таблиці «Water use» — пізніший дозвіл з 10.06.2026 (сегмент: без періоду). */
+export function historyItem(over: Partial<PermitUsageItem> = {}): PermitUsageItem {
+  return cellItem({ kind: 'history', periodKey: null, rowOrdinal: null, validFrom: '2026-06-10', ...over });
 }
 
 export function usage(items: readonly PermitUsageItem[], over: Partial<PermitUsage> = {}): PermitUsage {
   return {
     permitId: 42,
     documentCount: new Set(items.map((item) => item.documentId)).size,
-    linkCount: items.length,
+    linkCount: items.filter((item) => item.kind !== 'history').length,
     truncated: false,
     items: [...items],
     historyDocumentCount: 0,
+    historyLinkCount: items.filter((item) => item.kind === 'history').length,
     ...over,
   };
 }
