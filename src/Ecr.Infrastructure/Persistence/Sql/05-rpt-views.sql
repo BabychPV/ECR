@@ -917,7 +917,11 @@ GO
 --     з версією (той самий замок, свіжий стан). Шаблон, замок якого не взято за @LockTimeoutMs (типово 15 с), пропускається
 --     з рядком Action = N'Busy' і попередженням: той, хто тримає замок, сам пише свіжий стан; відбиток тоді не зберігається
 --     (наступний старт повторить) - прогін не висить на чужому замку до стелі 1800 с;
---   * з версією замок чекає @LockTimeoutMs (типово 50 с, менше типової стелі команди 60 с) - далі 50423 (повторюваний збій).
+--   * з версією замок чекає @LockTimeoutMs, далі 50423 (повторюваний збій). Очікування і генерація ділять ОДНУ стелю команди
+--     клієнта: ReportViewGenerator передає половину своєї стелі (60 с -> 30 с, 300 с -> 150 с), друга половина - генерації;
+--     типове значення 30 с - та сама половина типової стелі 60 с (DBA через sqlcmd без стелі теж не чекає безкінечно).
+--     Sch-M на змінених вʼюхах шаблону тримається до кінця генерації шаблону (одна транзакція): SSRS чекає довше, а запит,
+--     що зʼєднує дві стабільні вʼюхи одного шаблону, може стати жертвою дедлоку.
 -- @Nested / @ResultJson / @ErrorNumber / @ErrorMessage - лише для вкладеного виклику з цієї ж процедури.
 CREATE OR ALTER PROCEDURE rpt.usp_GenerateStableViews
     @TemplateVersionId int = NULL,
@@ -954,7 +958,7 @@ BEGIN
             RETURN;
         END
 
-        SET @lockWait = COALESCE(@LockTimeoutMs, 50000);
+        SET @lockWait = COALESCE(@LockTimeoutMs, 30000);
         SET @lockRes = CONCAT(N'ecr.rpt.stableviews.template.', @tid);
         BEGIN TRANSACTION;
         EXEC @lockRc = sys.sp_getapplock @Resource = @lockRes, @LockMode = N'Exclusive', @LockOwner = N'Transaction',
@@ -1053,9 +1057,7 @@ BEGIN
 
     -- A stable name that equals another stable name or any _vN name is not generated (collation of the database, as the server compares names).
     -- As in the _vN proc, only the template of the requested version matters: a clash elsewhere does not block this call.
-    DELETE FROM @groups
-     WHERE @TemplateVersionId IS NOT NULL
-       AND TemplateId <> (SELECT TemplateId FROM cfg.TemplateVersion WHERE Id = @TemplateVersionId);
+    DELETE FROM @groups WHERE @tid IS NOT NULL AND TemplateId <> @tid;
     DECLARE @clashNames TABLE (Name nvarchar(400) NOT NULL);
     INSERT INTO @clashNames
     SELECT n.Name FROM @nm AS n GROUP BY n.Name
@@ -1136,7 +1138,15 @@ BEGIN
             IF @dNo = 50423
             BEGIN
                 SET @dBusy += 1;
-                INSERT INTO @result VALUES (LEFT(CONCAT(N'v_', @dCode, N'_*'), 128), N'Busy', LEFT(@dMsg, 2000));
+                -- Ім'я - префікс стабільних вʼюх шаблону за тим самим правилом очищення (не-[A-Za-z0-9_] -> '_').
+                SET @raw = CONCAT(N'v_', @dCode, N'_');
+                SET @pos = PATINDEX(N'%[^A-Za-z0-9_]%', @raw COLLATE Latin1_General_BIN2);
+                WHILE @pos > 0
+                BEGIN
+                    SET @raw = STUFF(@raw, @pos, 1, N'_');
+                    SET @pos = PATINDEX(N'%[^A-Za-z0-9_]%', @raw COLLATE Latin1_General_BIN2);
+                END
+                INSERT INTO @result VALUES (LEFT(@raw, 128), N'Busy', LEFT(@dMsg, 2000));
             END
             ELSE IF @dNo = 50409
                 SET @dClash = COALESCE(@dClash, @dMsg);

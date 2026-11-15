@@ -27,7 +27,9 @@ namespace Ecr.Infrastructure.Tests.Reporting;
 /// ІНШОГО шаблону (раніший у циклі) зупиняє прогін «усі» між знімком і записом.
 /// Мутації (локально, B126): (1) прибрати <c>sp_getapplock</c> (rc = 0) — червоніє тест таймауту замка; (2) читати <c>@gt</c>
 /// ДО замка (перенести блок замка після <c>INSERT INTO @gt</c>) — червоніє тест «записувач, що чекав на замок»; без фіксу
-/// (05-rpt-views.sql з origin/main до B126) — червоніє тест прогону «усі шаблони».
+/// (05-rpt-views.sql з origin/main до B126) — червоніє тест прогону «усі шаблони». F13 B126: (M4) <c>Exclusive</c> → <c>Shared</c> —
+/// червоніє «два виклики процедури взаємно виключаються»; (M5) очищення видаляє ВСІ чужі імена — червоніє тест зіткнення імен;
+/// (M6) вкладений виклик губить 50422/50409 — червоніють обидва випадки «прогін усі прокидає помилку шаблону».
 /// </remarks>
 [Trait(TestCategories.Category, TestCategories.Integration)]
 [Trait("Requirement", "RPT-STABLE")]
@@ -135,6 +137,86 @@ public sealed partial class ReportViewStableWriterLockTests : IAsyncLifetime
         Assert.Equal([(209901, "1"), (209902, "2")], await SeriesAsync(s));
     }
 
+    [Fact]
+    public async Task Два_виклики_процедури_для_шаблону_взаємно_виключаються_другий_отримує_50423()
+    {
+        var s = await ArrangeAsync();
+
+        // Сеанс А: сама процедура в транзакції, яку він не завершує (вʼюхи вже актуальні - Sch-M нема, лише замок шаблону).
+        await using var a = await OpenAsync();
+        await using var aTx = (SqlTransaction)await a.BeginTransactionAsync();
+        await ExecAsync(a, aTx, $"EXEC rpt.usp_GenerateStableViews {s.V1}, 0, 0");
+
+        // Сеанс Б: той самий шаблон - не паралельно, а названа відмова після свого очікування.
+        var clock = Stopwatch.StartNew();
+        var refused = await Assert.ThrowsAsync<SqlException>(() => RunAsync($"EXEC rpt.usp_GenerateStableViews {s.V1}, 0, 0, 500"));
+        Assert.Equal(50423, refused.Number);
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(30), $"другий виклик чекав {clock.Elapsed}");
+
+        await aTx.CommitAsync();
+        Assert.All(await RunAsync($"EXEC rpt.usp_GenerateStableViews {s.V1}, 0, 0, 500"), r => Assert.Equal("Unchanged", r.Action));
+    }
+
+    [Fact]
+    public async Task Зіткнення_стабільних_імен_двох_шаблонів_виклик_з_версією_кидає_50409()
+    {
+        // `Q…_B` + аркуш `C` і `Q…` + аркуш `B_C` -> обидва rpt.v_Q…_B_C_T.
+        var stem = "Q" + Guid.NewGuid().ToString("N")[..10].ToUpperInvariant();
+        var (first, _) = await NewTemplateWithCodeAsync(stem + "_B");
+        var (firstVersion, _) = await AddVersionAsync(first, "1", publish: true, sheetCode: "C");
+        var (second, _) = await NewTemplateWithCodeAsync(stem);
+        var (secondVersion, _) = await AddVersionAsync(second, "1", publish: true, sheetCode: "B_C");
+
+        foreach (var version in new[] { firstVersion, secondVersion })
+        {
+            var clash = await Assert.ThrowsAsync<SqlException>(() => RunAsync($"EXEC rpt.usp_GenerateStableViews {version}, 0, 0"));
+            Assert.Equal(50409, clash.Number);
+            Assert.Contains($"v_{stem}_B_C_T", clash.Message, StringComparison.Ordinal);
+        }
+    }
+
+    [Theory]
+    [InlineData(50409)]
+    [InlineData(50422)]
+    public async Task Прогін_усі_шаблони_прокидає_помилку_шаблону_і_не_пише_відбиток(int expected)
+    {
+        var s = await ArrangeAsync();
+        await PublishAsync(s.V2);
+        if (expected == 50409)
+        {
+            var stem = "Q" + Guid.NewGuid().ToString("N")[..10].ToUpperInvariant();
+            var (first, _) = await NewTemplateWithCodeAsync(stem + "_B");
+            await AddVersionAsync(first, "1", publish: true, sheetCode: "C");
+            var (second, _) = await NewTemplateWithCodeAsync(stem);
+            await AddVersionAsync(second, "1", publish: true, sheetCode: "B_C");
+        }
+        else
+        {
+            var (wide, _) = await NewTemplateAsync("WIDE");
+            await AddVersionAsync(wide, "1", publish: true, extraDecimalColumns: 1001);
+        }
+
+        var error = await Assert.ThrowsAsync<SqlException>(() => RunAsync("EXEC rpt.usp_GenerateStableViews NULL, 0, 1"));
+        Assert.Equal(expected, error.Number);
+
+        // Решту шаблонів згенеровано (помилка - наприкінці), а відбиток НЕ записано: наступний старт не пропустить.
+        Assert.Equal([(209901, "1"), (209902, "2")], await SeriesAsync(s));
+        var stored = (string?)(await ScalarAsync(
+            "SELECT CONVERT(varchar(64), value) FROM sys.extended_properties WHERE class = 3 AND major_id = SCHEMA_ID(N'rpt') AND minor_id = 0 AND name = N'ecr.stableviews.fingerprint'"));
+        var current = (string?)await ScalarAsync("SELECT rpt.fn_ViewsFingerprint(0)");
+        Assert.NotEqual(current, stored);
+        var again = await Assert.ThrowsAsync<SqlException>(() => RunAsync("EXEC rpt.usp_GenerateStableViews NULL, 0, 1"));
+        Assert.Equal(expected, again.Number);
+    }
+
+    [Theory]
+    [InlineData(5, 60, 30_000)]
+    [InlineData(5, 300, 150_000)]
+    [InlineData(null, 60, null)]
+    [InlineData(5, 0, null)]
+    public void Генератор_дає_процедурі_на_замок_половину_стелі_команди(int? version, int timeoutSeconds, int? expected)
+        => Assert.Equal(expected, ReportViewGenerator.LockTimeoutFor(version, timeoutSeconds));
+
     // ── помічники ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
     private sealed record Scenario(int TemplateId, string TemplateCode, int V1, int V2, int ProjectId, string Stable);
@@ -165,23 +247,26 @@ public sealed partial class ReportViewStableWriterLockTests : IAsyncLifetime
         return s;
     }
 
-    private async Task<(int TemplateId, string Code)> NewTemplateAsync(string prefix)
+    private Task<(int TemplateId, string Code)> NewTemplateAsync(string prefix)
+        => NewTemplateWithCodeAsync(prefix + Guid.NewGuid().ToString("N")[..10].ToUpperInvariant());
+
+    private async Task<(int TemplateId, string Code)> NewTemplateWithCodeAsync(string code)
     {
         await using var db = _sql.CreateContext();
-        var code = prefix + Guid.NewGuid().ToString("N")[..10].ToUpperInvariant();
         var t = new Template(EcrCode.Create(code), Name(code), 1, Now);
         db.Templates.Add(t);
         await db.SaveChangesAsync();
         return (t.Id, code);
     }
 
-    private async Task<(int VersionId, (int TableId, int ColumnId) Table)> AddVersionAsync(int templateId, string versionText, bool publish)
+    private async Task<(int VersionId, (int TableId, int ColumnId) Table)> AddVersionAsync(
+        int templateId, string versionText, bool publish, string sheetCode = "S", int extraDecimalColumns = 0)
     {
         await using var db = _sql.CreateContext();
         var version = new TemplateVersion(templateId, versionText, 1, Now);
         db.TemplateVersions.Add(version);
         await db.SaveChangesAsync();
-        var sheet = new SheetDef(version.Id, EcrCode.Create("S"), Name("S"), 1);
+        var sheet = new SheetDef(version.Id, EcrCode.Create(sheetCode), Name(sheetCode), 1);
         db.SheetDefs.Add(sheet);
         await db.SaveChangesAsync();
         var table = new TableDef(sheet.Id, EcrCode.Create("T"), Name("T"), 1, TableLayoutKind.PerPeriodInstance, TableRowMode.Fixed);
@@ -189,6 +274,8 @@ public sealed partial class ReportViewStableWriterLockTests : IAsyncLifetime
         await db.SaveChangesAsync();
         var column = new ColumnDef(table.Id, EcrCode.Create("A"), Name("A"), 1, CellDataType.String);
         db.ColumnDefs.Add(column);
+        db.ColumnDefs.AddRange(Enumerable.Range(1, extraDecimalColumns)
+            .Select(i => new ColumnDef(table.Id, EcrCode.Create($"H{i}"), Name($"H{i}"), i + 1, CellDataType.Decimal)));
         if (publish)
         {
             version.Publish(1, Now);
@@ -349,6 +436,15 @@ public sealed partial class ReportViewStableWriterLockTests : IAsyncLifetime
         while (await reader.NextResultAsync())
         {
         }
+    }
+
+    private async Task<object?> ScalarAsync(string text)
+    {
+        await using var connection = await OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = text;
+        var value = await command.ExecuteScalarAsync();
+        return value is DBNull ? null : value;
     }
 
     private async Task<SqlConnection> OpenAsync()
