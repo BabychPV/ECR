@@ -27,7 +27,7 @@ export function permitUsagesKey(permitId: number, periodKey: number | null) {
   return ['permits', 'usages', permitId, periodKey ?? 'all'] as const;
 }
 
-function columns(): readonly DataTableColumn<PermitUsageItem>[] {
+function columns(filterPeriod: number | null): readonly DataTableColumn<PermitUsageItem>[] {
   return [
     {
       key: 'document',
@@ -37,7 +37,7 @@ function columns(): readonly DataTableColumn<PermitUsageItem>[] {
       render: (item) => (
         <TwoLine
           primary={
-            <Anchor component={Link} to={usageHref(item)} size="sm" data-usage-open={item.documentId}>
+            <Anchor component={Link} to={usageHref(item, filterPeriod)} size="sm" data-usage-open={item.documentId}>
               {item.documentKey}
             </Anchor>
           }
@@ -157,7 +157,7 @@ export function PermitUsageTab({ permitId }: PermitUsageTabProps): JSX.Element {
       )}
 
       <DataTable<PermitUsageItem>
-        columns={columns()}
+        columns={columns(periodKey)}
         rows={data?.items}
         rowKey={usageKey}
         isPending={current.isPending}

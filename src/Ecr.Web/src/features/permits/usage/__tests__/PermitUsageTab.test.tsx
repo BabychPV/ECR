@@ -170,7 +170,7 @@ describe('вкладка «Used in»', () => {
     const row = within(table).getAllByRole('row')[1] as HTMLElement;
     expect(within(row).getByText('Water · Water use')).toBeTruthy();
     expect(within(row).getByText(`R3 · in history from ${formatDate(parseDateOnly('2026-06-10'))}`)).toBeTruthy();
-    expect(within(row).getByRole('link', { name: 'LAND-2026-06' }).getAttribute('href')).toBe('/documents/2?sheet=WATER&table=USE');
+    expect(within(row).getByRole('link', { name: 'LAND-2026-06' }).getAttribute('href')).toBe('/documents/2?periodKey=202606&sheet=WATER&table=USE');
     expect(screen.getByText('Documents: 1 · places: 1 · in permit history: 1')).toBeTruthy();
     expect(screen.queryByText('Not used in any document yet')).toBeNull();
   });

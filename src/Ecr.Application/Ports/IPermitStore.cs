@@ -51,7 +51,12 @@ public interface IPermitStore
     /// <param name="periodKey">Лише цей період: комірки періоду й шапки документів, що мають у ньому таблиці; <c>null</c> - усі.</param>
     /// <param name="take">Скільки місць повернути в переліку (рахуються всі).</param>
     /// <param name="ct">Токен скасування.</param>
-    public Task<Permits.Dto.PermitUsageDto> FindUsagesAsync(
+    /// <returns>
+    /// Відповідь і, для кожного рядка переліку (той самий порядок), періоди даних, за якими обробник перевіряє межі читання
+    /// (B128c, S-4): для комірки й частини місяця — їхній період; для сегмента історії рядка — періоди, де рядок живий І сегмент
+    /// чинний (з фільтром — лише період фільтра); для шапки й сегмента поля шапки — <c>null</c>.
+    /// </returns>
+    public Task<PermitUsagePage> FindUsagesAsync(
         long permitId, IReadOnlyCollection<int>? projectIds, int? periodKey, int take, CancellationToken ct);
 
     /// <summary>У скількох різних документах кожен із дозволів обраний значенням (шапка або комірка); одним запитом.</summary>
@@ -78,3 +83,11 @@ public interface IPermitStore
 /// <param name="Count">Живих рядків.</param>
 /// <param name="Total">Σ головного стовпця; <c>null</c> - стовпця немає.</param>
 public sealed record PermitRowStat(int Count, decimal? Total);
+
+/// <summary>
+/// Сторінка «де використано» дозволу для обробника: відповідь і періоди перевірки меж читання кожного рядка переліку (B128c).
+/// Періоди — внутрішні: у відповідь API не потрапляють.
+/// </summary>
+/// <param name="Usage">Відповідь (без фільтра меж читання).</param>
+/// <param name="ItemPeriods">Періоди перевірки для <c>Usage.Items[i]</c>; <c>null</c> — рядок не залежить від періоду (шапка).</param>
+public sealed record PermitUsagePage(Permits.Dto.PermitUsageDto Usage, IReadOnlyList<IReadOnlyList<int>?> ItemPeriods);

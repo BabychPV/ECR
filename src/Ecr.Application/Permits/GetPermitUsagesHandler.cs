@@ -80,26 +80,31 @@ public sealed class GetPermitUsagesHandler(
             return new PermitUsageDto(permitId, 0, 0, false, []);
         }
 
-        var usage = await permits.FindUsagesAsync(permitId, projects, periodKey, limit ?? DefaultLimit, ct).ConfigureAwait(false);
-        return await WithoutHiddenCellsAsync(profile, usage, periodKey, ct).ConfigureAwait(false);
+        var page = await permits.FindUsagesAsync(permitId, projects, periodKey, limit ?? DefaultLimit, ct).ConfigureAwait(false);
+        return await WithoutHiddenCellsAsync(profile, page, ct).ConfigureAwait(false);
     }
 
     /// <summary>
     /// ⛔ S-4: місце комірки поза межами читання документа (Deny, D-214, період) не називається — те саме рішення, що й зріз.
     /// Поля шапки лишаються: шапку бачить кожен, хто бачить документ.
-    /// ⛔ B128c: запис історії рядка (<c>history</c> з таблицею) — те саме правило, що й комірка: колонка в межах читання в
-    /// періоді. Період — частини місяця; сегмента (він логічний) — фільтра запиту, а без фільтра — місяця його
-    /// <c>ValidFrom</c> (з якого він чинний). Запис історії поля шапки лишається, як шапка.
+    /// ⛔ B128c: запис історії рядка (<c>history</c> з таблицею) — те саме правило, що й комірка: колонка в межах читання хоч
+    /// в одному з періодів, які дає сховище (<see cref="PermitUsagePage.ItemPeriods"/>): частина місяця — її місяць; сегмент
+    /// рядка — періоди, де рядок живий І сегмент чинний (з фільтром — лише період фільтра). Без таких періодів запис не
+    /// називається. Запис історії поля шапки лишається, як шапка.
+    /// ⚠ F13: НЕ місяць <c>ValidFrom</c> — він і пропускав запис рядка, живого лише в недоступному періоді, і ховав сегмент,
+    /// чинний і в доступному.
     /// </summary>
     private async Task<PermitUsageDto> WithoutHiddenCellsAsync(
-        Security.AccessProfile profile, PermitUsageDto usage, int? periodKey, CancellationToken ct)
+        Security.AccessProfile profile, PermitUsagePage page, CancellationToken ct)
     {
+        var usage = page.Usage;
         var scopes = new Dictionary<long, Security.DocumentReadScope>();
         var kept = new List<PermitUsageItemDto>(usage.Items.Count);
         var removedHistory = 0;
 
-        foreach (var item in usage.Items)
+        for (var i = 0; i < usage.Items.Count; i++)
         {
+            var item = usage.Items[i];
             var isCell = string.Equals(item.Kind, PermitUsageKinds.Cell, StringComparison.Ordinal);
             var isRowHistory = string.Equals(item.Kind, PermitUsageKinds.History, StringComparison.Ordinal) && item.TableCode is not null;
             if (!isCell && !isRowHistory)
@@ -114,10 +119,9 @@ public sealed class GetPermitUsagesHandler(
                 scopes[item.DocumentId] = scope;
             }
 
-            var period = item.PeriodKey
-                         ?? (isRowHistory ? periodKey ?? (item.ValidFrom is { } from ? (from.Year * 100) + from.Month : null) : null);
-            if (item.TableCode is { } table && period is { } p
-                && scope.CanReadColumnCodeIn(table, item.FieldCode, new PeriodKey(p)))
+            var periods = page.ItemPeriods[i] ?? [];
+            if (item.TableCode is { } table
+                && periods.Any(p => scope.CanReadColumnCodeIn(table, item.FieldCode, new PeriodKey(p))))
             {
                 kept.Add(item);
             }

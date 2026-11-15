@@ -49,7 +49,7 @@ public sealed class PermitStore(EcrDbContext db) : IPermitStore
     }
 
     /// <inheritdoc />
-    public async Task<PermitUsageDto> FindUsagesAsync(
+    public async Task<PermitUsagePage> FindUsagesAsync(
         long permitId, IReadOnlyCollection<int>? projectIds, int? periodKey, int take, CancellationToken ct)
     {
         var projects = projectIds?.ToList();
@@ -210,14 +210,61 @@ public sealed class PermitStore(EcrDbContext db) : IPermitStore
                      select new { table.Id, TableCode = table.Code, TableName = table.NameL10n, SheetCode = sheet.Code, SheetName = sheet.NameL10n })
                 .ToDictionaryAsync(t => t.Id, ct).ConfigureAwait(false);
 
+        // ⛔ B128c (S-4, F13): межі читання сегмента історії рядка перевіряються в періодах, де рядок ЖИВИЙ і сегмент ЧИННИЙ
+        // (правило B128: ValidFrom <= PeriodEnd і немає наступного сегмента цілі з ValidFrom <= PeriodStart); з фільтром — лише
+        // період фільтра (запит його вже так звузив). Одним запитом на сегменти сторінки.
+        var rowSegmentIds = history.Where(x => x.PeriodKey == null && x.TableDefId != null).Select(x => (int)x.Id).ToList();
+        var segmentPeriods = new Dictionary<long, List<int>>();
+        if (periodKey is { } filter)
+        {
+            foreach (var id in rowSegmentIds)
+            {
+                segmentPeriods[id] = [filter];
+            }
+        }
+        else if (rowSegmentIds.Count > 0)
+        {
+            var inForce = await (
+                    from seg in db.PermitSegments.AsNoTracking()
+                    where rowSegmentIds.Contains(seg.Id)
+                    join d in db.Documents.AsNoTracking() on seg.DocumentId equals d.Id
+                    from ti in db.TableInstances.AsNoTracking()
+                    where ti.DocumentId == seg.DocumentId && ti.TableDefId == seg.TableDefId && ti.SheetCopyId == seg.SheetCopyId
+                          && db.TableRows.Any(r =>
+                              r.PeriodKeyValue == ti.PeriodKeyValue && r.TableInstanceId == ti.Id
+                              && r.RowKeyValue == seg.RowKey && !r.IsDeleted)
+                    from per in db.Periods.AsNoTracking()
+                    where per.ProjectId == d.ProjectId && per.PeriodKeyValue == ti.PeriodKeyValue
+                          && seg.ValidFrom <= per.PeriodEnd
+                          && !db.PermitSegments.Any(n =>
+                              n.DocumentId == seg.DocumentId && n.HeaderFieldDefId == seg.HeaderFieldDefId
+                              && n.TableDefId == seg.TableDefId && n.SheetCopyId == seg.SheetCopyId
+                              && n.RowKey == seg.RowKey && n.ColumnDefId == seg.ColumnDefId
+                              && n.ValidFrom > seg.ValidFrom && n.ValidFrom <= per.PeriodStart)
+                    select new { seg.Id, Period = ti.PeriodKeyValue })
+                .Distinct().ToListAsync(ct).ConfigureAwait(false);
+            foreach (var id in rowSegmentIds)
+            {
+                segmentPeriods[id] = [];
+            }
+
+            foreach (var x in inForce)
+            {
+                segmentPeriods[x.Id].Add(x.Period);
+            }
+        }
+
         static Dictionary<string, string> Copy(Domain.ValueObjects.LocalizedText text)
             => text.Values.ToDictionary(p => p.Key, p => p.Value, StringComparer.Ordinal);
 
-        var items = headers
-            .Select(x => (Order: (x.DocumentId, 0, 0, string.Empty, string.Empty, 0L, x.FieldCode), Item: new PermitUsageItemDto(
+        // ⚠ Порядок злиття в межах кожного джерела = порядок його вибірки в БД (інакше Take після злиття взяв би не ті рядки):
+        // історія — документ, період (сегмент 0, частина — свій), ValidFrom, Id.
+        var page = headers
+            .Select(x => (Order: (x.DocumentId, 0, 0, string.Empty, string.Empty, 0L, x.FieldCode), Periods: (IReadOnlyList<int>?)null, Item: new PermitUsageItemDto(
                 PermitUsageKinds.Header, x.DocumentId, x.DocumentKey, x.ProjectId, x.ProjectCode, null,
                 null, null, null, null, null, null, x.FieldCode, Copy(x.FieldLabel))))
-            .Concat(cells.Select(x => (Order: (x.DocumentId, 1, x.PeriodKey, x.SheetCode, x.TableCode, (long)x.RowOrdinal, x.FieldCode), Item: new PermitUsageItemDto(
+            .Concat(cells.Select(x => (Order: (x.DocumentId, 1, x.PeriodKey, x.SheetCode, x.TableCode, (long)x.RowOrdinal, x.FieldCode),
+                Periods: (IReadOnlyList<int>?)[x.PeriodKey], Item: new PermitUsageItemDto(
                 PermitUsageKinds.Cell, x.DocumentId, x.DocumentKey, x.ProjectId, x.ProjectCode, x.PeriodKey,
                 x.SheetCode, Copy(x.SheetName), x.TableCode, Copy(x.TableName), x.RowKey, x.RowOrdinal,
                 x.FieldCode, Copy(x.FieldLabel)))))
@@ -227,8 +274,12 @@ public sealed class PermitStore(EcrDbContext db) : IPermitStore
                 var (fieldCode, fieldLabel) = x.HeaderFieldDefId is { } fieldId
                     ? (historyFields[fieldId].Code, historyFields[fieldId].LabelL10n)
                     : (historyColumns[x.ColumnDefId!.Value].Code, historyColumns[x.ColumnDefId!.Value].HeaderL10n);
-                return (Order: (x.DocumentId, 2, x.PeriodKey ?? 0, table?.SheetCode ?? string.Empty, table?.TableCode ?? string.Empty,
-                        (long)x.ValidFrom.DayNumber, fieldCode),
+                IReadOnlyList<int>? periods = table is null ? null
+                    : x.PeriodKey is { } partPeriod ? [partPeriod]
+                    : segmentPeriods[x.Id];
+                return (Order: (x.DocumentId, 2, x.PeriodKey ?? 0, string.Empty, string.Empty,
+                        (long)x.ValidFrom.DayNumber, x.Id.ToString("D20", System.Globalization.CultureInfo.InvariantCulture)),
+                    Periods: periods,
                     Item: new PermitUsageItemDto(
                         PermitUsageKinds.History, x.DocumentId, x.DocumentKey, x.ProjectId, x.ProjectCode, x.PeriodKey,
                         table?.SheetCode, table is null ? null : Copy(table.SheetName), table?.TableCode,
@@ -236,12 +287,14 @@ public sealed class PermitStore(EcrDbContext db) : IPermitStore
             }))
             .OrderBy(p => p.Order)
             .Take(take)
-            .Select(p => p.Item)
             .ToList();
+        var items = page.Select(p => p.Item).ToList();
 
-        return new PermitUsageDto(
-            permitId, documentCount, headerCount + cellCount, headerCount + cellCount + historyLinkCount > items.Count, items,
-            historyDocumentCount, historyLinkCount);
+        return new PermitUsagePage(
+            new PermitUsageDto(
+                permitId, documentCount, headerCount + cellCount, headerCount + cellCount + historyLinkCount > items.Count, items,
+                historyDocumentCount, historyLinkCount),
+            [.. page.Select(p => p.Periods)]);
     }
 
     /// <inheritdoc />

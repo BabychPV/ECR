@@ -17,6 +17,13 @@ import { localName } from '../permit/names';
  */
 export const UsageKind = { Header: 'header', Cell: 'cell', History: 'history' } as const;
 
+/** Місяць `YYYYMM` дати `validFrom` запису історії; без дати — `null`. */
+function validFromMonth(item: PermitUsageItem): number | null {
+  const match = item.validFrom === null || item.validFrom === undefined ? null : /^(\d{4})-(\d{2})-/.exec(item.validFrom);
+
+  return match === null ? null : Number(match[1]) * 100 + Number(match[2]);
+}
+
 /** Місце в рядку таблиці: комірка або запис історії рядка (не шапки). */
 function isRowPlace(item: PermitUsageItem): boolean {
   return item.kind === UsageKind.Cell || (item.kind === UsageKind.History && item.tableCode !== null);
@@ -42,15 +49,18 @@ export function usageKey(item: PermitUsageItem): string {
 /**
  * Адреса місця в документі. Шапка належить документу цілком - лише документ. Комірка - період, аркуш і таблиця
  * в адресі (`ФВ-14.29`: посилання без них відкриває інший період і інший аркуш, ніж той, про який ішлося).
+ * B128c: сегмент історії рядка не має свого періоду — береться період фільтра вкладки, а без фільтра — місяць `validFrom`
+ * (з якого дозвіл чинний).
  *
  * ⛔ Літерал, а не `generatePath`: `features` не імпортують `app` (`ClientLayerRulesTests`).
  */
-export function usageHref(item: PermitUsageItem): string {
+export function usageHref(item: PermitUsageItem, filterPeriod: number | null = null): string {
   const base = `/documents/${String(item.documentId)}`;
   if (!isRowPlace(item)) return base;
 
   const params = new URLSearchParams();
-  if (item.periodKey !== null) params.set('periodKey', String(item.periodKey));
+  const period = item.periodKey ?? (item.kind === UsageKind.History ? (filterPeriod ?? validFromMonth(item)) : null);
+  if (period !== null) params.set('periodKey', String(period));
   if (item.sheetCode !== null) params.set('sheet', item.sheetCode);
   if (item.tableCode !== null) params.set('table', item.tableCode);
 
@@ -123,16 +133,16 @@ export function parsePeriodParam(raw: string | null): number | null {
   return Number(raw);
 }
 
-/**
- * Підсумок над таблицею: документи (B56 — документи, не сегменти історії: сервер рахує документ один раз, хоч би скільки
- * місць чи сегментів у ньому було) і місця. Якщо дозвіл стоїть в історії дозволів документів — окремою часткою, бо ці
- * посилання в переліку місць не перелічуються.
- */
 /** B128c: усі місця переліку — поля й комірки плюс записи історії дозволів. */
 export function placeCount(data: PermitUsage): number {
   return data.linkCount + data.historyLinkCount;
 }
 
+/**
+ * Підсумок над таблицею: документи (B56 — документи, не сегменти історії: сервер рахує документ один раз, хоч би скільки
+ * місць чи сегментів у ньому було), місця (B128c — поля, комірки й записи історії) і, якщо дозвіл стоїть в історії дозволів
+ * документів, — у скількох документах (документи, а не записи).
+ */
 export function summaryText(data: PermitUsage): string {
   const summary = t('permits.usage.summary', {
     documents: formatNumber(data.documentCount),
