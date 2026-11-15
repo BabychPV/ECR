@@ -206,6 +206,17 @@ public sealed class CellHistoryVersionLineageTests(SqlServerFixture sql) : IDisp
         Assert.True(forward.ContainsKey(world.QR));
         var (forwardAll, _) = await new ColumnRenameMap(read).GetAsync(null, CancellationToken.None);
         Assert.True(forwardAll.ContainsKey(foreign));
+
+        // Невідомий документ — лише застарілі глобальні пари: межа не розширюється до «усіх» через помилку викликача.
+        const long unknown = long.MaxValue;
+        var unknownLineage = await mapper.LineageAsync([world.C0, world.C1], unknown, CancellationToken.None);
+        Assert.Contains(legacy, unknownLineage[world.C0]);
+        Assert.DoesNotContain(foreign, unknownLineage[world.C0]);
+        Assert.DoesNotContain(world.QR, unknownLineage[world.C1]);
+        var (forwardUnknown, _) = await new ColumnRenameMap(read).GetAsync(unknown, CancellationToken.None);
+        Assert.True(forwardUnknown.ContainsKey(legacy));
+        Assert.False(forwardUnknown.ContainsKey(foreign));
+        Assert.False(forwardUnknown.ContainsKey(world.QR));
     }
 
     private async Task<World> ArrangeAsync()

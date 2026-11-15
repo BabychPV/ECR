@@ -12,15 +12,22 @@ public sealed class ColumnRenameMap(EcrDbContext db) : IColumnRenameMap
     /// <summary>Мапи за проєктом; ключ <c>-1</c> — усі пари (без документа).</summary>
     private readonly Dictionary<int, (IReadOnlyDictionary<int, int>, IReadOnlyDictionary<int, int>)> _loaded = [];
 
+    /// <summary>Проєкт документа (документ свого проєкту не змінює) — один запит на документ за скоуп.</summary>
+    private readonly Dictionary<long, int> _projects = [];
+
     /// <inheritdoc />
     public async Task<(IReadOnlyDictionary<int, int> Forward, IReadOnlyDictionary<int, int> Backward)> GetAsync(
         long? documentId, CancellationToken ct)
     {
         // Невідомий документ — проєкт 0: лише застарілі глобальні пари (межа не розширюється через помилку викликача).
-        var projectId = documentId is { } id
-            ? await db.Documents.AsNoTracking().Where(d => d.Id == id).Select(d => (int?)d.ProjectId)
-                  .FirstOrDefaultAsync(ct).ConfigureAwait(false) ?? 0
-            : -1;
+        var projectId = -1;
+        if (documentId is { } id && !_projects.TryGetValue(id, out projectId))
+        {
+            projectId = await db.Documents.AsNoTracking().Where(d => d.Id == id).Select(d => (int?)d.ProjectId)
+                .FirstOrDefaultAsync(ct).ConfigureAwait(false) ?? 0;
+            _projects[id] = projectId;
+        }
+
         if (_loaded.TryGetValue(projectId, out var cached))
         {
             return cached;

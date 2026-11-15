@@ -126,6 +126,13 @@ public sealed partial class DocumentVersionMigrationTests
         Assert.Equal(expectZ, cells.GetProperty("items").EnumerateArray().Any(i => i.GetProperty("newValue").GetString() == "77"));
         Assert.Contains(cells.GetProperty("items").EnumerateArray(), i => i.GetProperty("newValue").GetString() == "42");
 
+        // Історія ОДНІЄЇ комірки z (інспектор): родовід лише цієї колонки — той самий межовий випадок (M10).
+        var history = await GetJsonAsync(
+                client, app,
+                $"/api/v1/audit/cells?{window}&documentId={id}&periodKey={key}&rowKey={Uri.EscapeDataString(rowKey)}&columnDefId={z}")
+            .ConfigureAwait(true);
+        Assert.Equal(expectZ, history.GetProperty("items").EnumerateArray().Any(i => i.GetProperty("newValue").GetString() == "77"));
+
         var activity = await GetJsonAsync(client, app, $"/api/v1/documents/{id}/sheets/{s.TargetSheetDefId}/activity?periodKey={key}")
             .ConfigureAwait(true);
         Assert.Equal(

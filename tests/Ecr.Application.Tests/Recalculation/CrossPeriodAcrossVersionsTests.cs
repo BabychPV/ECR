@@ -86,6 +86,36 @@ public sealed class CrossPeriodAcrossVersionsTests
         }
     }
 
+    /// <remarks>
+    /// B127: мапа перейменувань читається ДЛЯ ДОКУМЕНТА (його проєкту) — пара є лише в мапі документа, а мапа «усіх
+    /// проєктів» (<c>null</c>) чи іншого документа її не має. Мутація: передати <c>null</c> замість <c>documentId</c> у
+    /// <c>TranslateForeignInstancesAsync</c> → NULL замість 40.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Finding", "B127")]
+    public async Task B127_Мапа_перейменувань_для_суміжного_періоду_читається_для_документа()
+    {
+        Arrange("C1_OLD");
+        var renames = Substitute.For<IColumnRenameMap>();
+        var none = new Dictionary<int, int>();
+        renames.GetAsync(Arg.Any<long?>(), Arg.Any<CancellationToken>())
+            .Returns(((IReadOnlyDictionary<int, int>)none, (IReadOnlyDictionary<int, int>)none));
+        renames.GetAsync(DocumentId, Arg.Any<CancellationToken>())
+            .Returns((
+                (IReadOnlyDictionary<int, int>)new Dictionary<int, int> { [_inputV1!.Value] = _inputV2 },
+                (IReadOnlyDictionary<int, int>)new Dictionary<int, int> { [_inputV2] = _inputV1.Value }));
+
+        await Service(renames).RecalculateAllAsync(DocumentId, Key(5), CancellationToken.None);
+
+        var applied = _cells.ReceivedCalls()
+            .Where(c => c.GetMethodInfo().Name == nameof(ICellStore.ApplyBatchAsync))
+            .SelectMany(c => ((IReadOnlyCollection<CellChangeSet>)c.GetArguments()[0]!).SelectMany(set => set.Upserts))
+            .Where(r => r.Address.ColumnDefId == _outV2)
+            .ToList();
+        Assert.Equal(40, Assert.Single(applied).Value.ValueNumeric);
+    }
+
     private RecalculationService Service(IColumnRenameMap renames)
     {
         _units.GetAsync(Arg.Any<CancellationToken>()).Returns(UnitCatalogSnapshot.Empty);
