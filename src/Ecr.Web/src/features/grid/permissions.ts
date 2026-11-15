@@ -44,7 +44,8 @@ export type DenyReason =
   | 'AssignmentFilled'
   | 'AssignmentValidated'
   | 'AssignmentExpired'
-  | 'NotAssignedToYou';
+  | 'NotAssignedToYou'
+  | 'RowLocked';
 
 /** Рішення про комірку. */
 export interface CellDecision {
@@ -89,6 +90,8 @@ const Hints: Record<DenyReason, string> = {
   AssignmentValidated: 'deny.AssignmentValidated',
   AssignmentExpired: 'deny.AssignmentExpired',
   NotAssignedToYou: 'deny.NotAssignedToYou',
+  // ✎ B75: рядок заблоковано на проміжок дат іншою людиною.
+  RowLocked: 'deny.RowLocked',
 };
 
 /** Ключ комірки у словнику прав, який віддає сервер. */
