@@ -3175,8 +3175,11 @@ public sealed partial class PatchCellsHandler(
                 || context.MirrorInstances?.Exists(i => i.PeriodKey == lockedPeriod) == true)
             {
                 // ⛔ Y7-03: відмова «зайнято» — про рядки, а не про подання (див. `RowWriteLock`).
+                // ✎ B134 (F13 D1): саме ЦЕЙ період циклу — X на кожен місяць дзеркала, а не лише на свій.
                 await RowWriteLock
-                    .EnterAsync(sheetGate, context.Instance.DocumentId, context.Table.SheetDefId, context.PeriodKey, ct, context.Instance.SheetCopyId)
+                    .EnterAsync(
+                        sheetGate, context.Instance.DocumentId, context.Table.SheetDefId, new PeriodKey(lockedPeriod), ct,
+                        context.Instance.SheetCopyId)
                     .ConfigureAwait(false);
             }
 
