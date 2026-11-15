@@ -173,6 +173,9 @@ public sealed class CalculationOrchestrator(
         // AN-164: рядки, закриті правилом, але без жодного значення через відсутні аргументи формул.
         var missingInputs = new ConcurrentBag<(RejectedRow Row, IReadOnlyList<string> Arguments)>();
 
+        // B66: рядки, у яких крок методики впав з помилкою (#VALUE, #ARG…), — одна проблема на рядок.
+        var stepErrors = new ConcurrentBag<StepErrorRow>();
+
         foreach (var batch in batches)
         {
             // 3. ⚠ Усередині пакета — ПАРАЛЕЛЬНО. Послідовний прогін у 10
@@ -215,7 +218,7 @@ public sealed class CalculationOrchestrator(
                         var stat = await ExecuteAsync(
                             scopedResolver, scopedModules, scopedInputBuilder, scopedOutputWriter,
                             calculationRunId, documentId, periodKey, binding, registries,
-                            _limits.MaxInputCellsPerBinding, rowMatches, rejected, missingInputs, token).ConfigureAwait(false);
+                            _limits.MaxInputCellsPerBinding, rowMatches, rejected, missingInputs, stepErrors, token).ConfigureAwait(false);
 
                         measured.Add(stat);
                     }
@@ -243,6 +246,9 @@ public sealed class CalculationOrchestrator(
 
         profile.RecordUnmatched(UnmatchedRowsOf(rowMatches, documentId));
 
+        // B66: рядки, відсіяні фільтром активності (D-425), — не «непокриті», але й не мовчки: один підсумок на таблицю.
+        profile.RecordInactive(InactiveRowsOf(rowMatches, documentId));
+
         // AN-69: таблиці, чиї рядки зіставлено з правилами (версія без правил рядків не бачить) - їхні попередні
         // проблеми замінюються навіть тоді, коли поточних немає.
         profile.RecordEvaluatedTables(
@@ -250,6 +256,16 @@ public sealed class CalculationOrchestrator(
         profile.RecordRejected(rejected.OrderBy(r => r.TableInstanceId).ThenBy(r => r.RowNumber));
         var missing = missingInputs.OrderBy(m => m.Row.TableInstanceId).ThenBy(m => m.Row.RowNumber).ToList();
         profile.RecordMissingInputs(missing.Select(m => m.Row));
+
+        // B66: одна проблема на рядок × методологію (дві прив'язки однієї методології на таблицю не дублюють).
+        // ⚠ ConcurrentBag без порядку: спершу стабільне впорядкування (вихід і код однакові між прогонами), потім DistinctBy.
+        profile.RecordStepErrors(stepErrors
+            .OrderBy(e => e.Row.TableInstanceId)
+            .ThenBy(e => e.Row.RowNumber)
+            .ThenBy(e => e.Row.MethodologyId)
+            .ThenBy(e => e.StepCode, StringComparer.Ordinal)
+            .ThenBy(e => e.ErrorCode, StringComparer.Ordinal)
+            .DistinctBy(e => (e.Row.TableInstanceId, e.Row.RowKey, e.Row.MethodologyId)));
 
         // AN-164b: які саме аргументи бракували — назве їх читання проблем (не здогад за формулами).
         foreach (var (row, arguments) in missing)
@@ -325,6 +341,62 @@ public sealed class CalculationOrchestrator(
         return unmatched;
     }
 
+    /// <summary>
+    /// B66: рядки, відсіяні фільтром активності (D-425) хоч однією прив'язкою таблиці й не закриті жодною іншою, — ОДИН
+    /// підсумок на таблицю (перший рядок і кількість), а не проблема на рядок.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Рішення координатора 13.11: у Land неактивні рядки — виключення за задумом (Removed, Stand-by), тож поштучний
+    /// список засмітив би перелік проблем; але нуль результатів через них мусить мати названу причину. Рядок, закритий
+    /// правилом іншої прив'язки тієї ж таблиці, сюди не входить — його пораховано.
+    /// </remarks>
+    private static List<InactiveRowsSummary> InactiveRowsOf(IEnumerable<RowMatchSummary> summaries, long documentId)
+    {
+        var result = new List<InactiveRowsSummary>();
+        foreach (var table in summaries.GroupBy(s => s.TableInstanceId).OrderBy(g => g.Key))
+        {
+            var all = table.Select(s => s.AllRowKeys).FirstOrDefault(keys => keys is not null);
+            if (all is null)
+            {
+                continue;
+            }
+
+            var excluded = table.SelectMany(s => s.ExcludedKeys ?? []).ToHashSet(StringComparer.Ordinal);
+            if (excluded.Count == 0)
+            {
+                continue;
+            }
+
+            var matched = table.SelectMany(s => s.MatchedKeys).ToHashSet(StringComparer.Ordinal);
+            int? methodology = table
+                .Where(s => s.AllRowKeys is not null && s.MethodologyId is not null)
+                .Select(s => s.MethodologyId)
+                .Order()
+                .FirstOrDefault();
+
+            var first = -1;
+            var count = 0;
+            for (var i = 0; i < all.Count; i++)
+            {
+                if (excluded.Contains(all[i]) && !matched.Contains(all[i]))
+                {
+                    count++;
+                    if (first < 0)
+                    {
+                        first = i;
+                    }
+                }
+            }
+
+            if (count > 0)
+            {
+                result.Add(new InactiveRowsSummary(table.Key, first + 1, all[first], count, documentId, methodology));
+            }
+        }
+
+        return result;
+    }
+
     /// <summary>Виконує одну прив'язку і повертає її внесок у профіль.</summary>
     /// <remarks>
     /// Приймає <paramref name="scopedResolver"/>/<paramref name="scopedModules"/>/
@@ -348,6 +420,7 @@ public sealed class CalculationOrchestrator(
         ConcurrentBag<RowMatchSummary> rowMatches,
         ConcurrentBag<RejectedRow> rejected,
         ConcurrentBag<(RejectedRow Row, IReadOnlyList<string> Arguments)> missingInputs,
+        ConcurrentBag<StepErrorRow> stepErrors,
         CancellationToken ct)
     {
         var module = scopedModules.FirstOrDefault(m => m.CanHandle(binding.Descriptor));
@@ -470,6 +543,15 @@ public sealed class CalculationOrchestrator(
                     if (output.Values.Count == 0 && output.MissingArguments is { Count: > 0 } missingArguments)
                     {
                         missingInputs.Add((RowOf(input), missingArguments));
+                    }
+
+                    // B66: крок методики впав (#VALUE, #ARG…) — проблема рядка, а не лише трейс (doc 96: 64 #VALUE,
+                    // 0 проблем). Рядок, що вже має MissingInputs, другої проблеми не отримує: його #ARG — наслідок
+                    // відсутніх входів, і дія та сама («заповніть комірки»).
+                    else if (output.StepError is { } stepError)
+                    {
+                        stepErrors.Add(new StepErrorRow(
+                            RowOf(input), stepError.StepCode, stepError.ErrorCode, stepError.FailedSteps));
                     }
                 }
                 catch (Domain.Abstractions.DomainException error)

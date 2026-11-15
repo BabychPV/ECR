@@ -665,6 +665,11 @@ public sealed class GenericCalculationModule(
             MissingArguments = values.Count == 0 && outputs.Count > 0
                 ? MissingArgumentsOf(ordered, binding.Libraries, arguments)
                 : null,
+
+            // B66: вихід без результату через помилку — проблема рядка StepError (раніше лише трейс, а на Off — ніде).
+            StepError = trace.FirstFailure is { } failure
+                ? new CalculationStepError(failure.Code, failure.Error, trace.FailedStepCount)
+                : null,
         };
     }
 
@@ -803,13 +808,14 @@ public sealed class GenericCalculationModule(
             // `double` за межею ≈7.9e28 (`Pow(10, 30)`). Колонка
             // результату його не вмістить, а «#NULL» збрехав би, що
             // значення не було; тому `#VALUE`, як у `Strict`.
-            trace.Failed(
-                code,
-                null,
-                value.ErrorCode
-                    ?? (value.Type == Expressions.Ast.ExpressionValueType.Number
-                        ? Expressions.ExpressionErrors.BadValue
-                        : "#NULL"));
+            var error = value.ErrorCode
+                ?? (value.Type == Expressions.Ast.ExpressionValueType.Number
+                    ? Expressions.ExpressionErrors.BadValue
+                    : "#NULL");
+
+            // B66: вихід без результату через помилку — причина нуля/неповного результату (StepError рядка).
+            trace.OutputFailed(code, error);
+            trace.Failed(code, null, error);
             return;
         }
 

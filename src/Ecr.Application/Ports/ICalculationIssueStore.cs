@@ -22,7 +22,21 @@ public interface ICalculationIssueStore
     /// </summary>
     public const string MissingInputs = "MissingInputs";
 
-    /// <summary>Скільки проблем на таблицю зберігає один прохід; решта відсікається.</summary>
+    /// <summary>
+    /// Вид проблеми «вихід методики без результату через помилку» (B66: <c>#VALUE</c>, <c>#ARG</c>…): одна проблема на
+    /// рядок — перший такий вихід і код, кількість різних виходів рядка без результату.
+    /// </summary>
+    public const string StepError = "StepError";
+
+    /// <summary>
+    /// Вид проблеми «рядки відсіяно фільтром активності» (B66, D-425): один підсумок на таблицю з кількістю рядків.
+    /// </summary>
+    public const string RowInactive = "RowInactive";
+
+    /// <summary>
+    /// Скільки проблем на таблицю зберігає один прохід; решта відсікається. Підсумок <see cref="RowInactive"/> (один на
+    /// таблицю) у стелю не входить і не відсікається (B66).
+    /// </summary>
     public const int MaxPerTable = 1000;
 
     /// <summary>
@@ -74,8 +88,18 @@ public interface ICalculationIssueStore
 /// <param name="RowKey">Ключ рядка.</param>
 /// <param name="MethodologyId">Методологія прив'язки; <c>null</c> — невідома.</param>
 /// <param name="Kind">Вид проблеми; <c>null</c> — <see cref="ICalculationIssueStore.NoMatchingRule"/>.</param>
+/// <param name="StepCode">B66: перший невдалий крок (<see cref="ICalculationIssueStore.StepError"/>).</param>
+/// <param name="ErrorCode">B66: код помилки цього кроку.</param>
+/// <param name="AffectedCount">B66: невдалих кроків рядка (StepError) або відсіяних рядків таблиці (RowInactive).</param>
 public sealed record CalculationIssueInput(
-    long TableInstanceId, int RowNumber, string RowKey, int? MethodologyId, string? Kind = null);
+    long TableInstanceId,
+    int RowNumber,
+    string RowKey,
+    int? MethodologyId,
+    string? Kind = null,
+    string? StepCode = null,
+    string? ErrorCode = null,
+    int? AffectedCount = null);
 
 /// <summary>Збережена проблема для читання.</summary>
 /// <param name="TableDefId">Таблиця шаблону (для видимості).</param>
@@ -87,6 +111,9 @@ public sealed record CalculationIssueInput(
 /// <param name="MethodologyCode">Код методології (з <c>cfg.Methodology</c>, не мітка версії); <c>null</c> — невідома.</param>
 /// <param name="DetectedAt">Коли виявлено (UTC).</param>
 /// <param name="MethodologyId">Методологія (не версія); <c>null</c> — невідома. Потрібна причині відхилення.</param>
+/// <param name="StepCode">B66: перший невдалий крок (StepError).</param>
+/// <param name="ErrorCode">B66: код помилки кроку (StepError).</param>
+/// <param name="AffectedCount">B66: невдалих кроків рядка (StepError) або відсіяних рядків таблиці (RowInactive).</param>
 public sealed record CalculationIssueRow(
     int TableDefId,
     string TableCode,
@@ -96,4 +123,7 @@ public sealed record CalculationIssueRow(
     string Kind,
     string? MethodologyCode,
     DateTime DetectedAt,
-    int? MethodologyId = null);
+    int? MethodologyId = null,
+    string? StepCode = null,
+    string? ErrorCode = null,
+    int? AffectedCount = null);

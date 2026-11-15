@@ -397,6 +397,18 @@ public sealed class RunCalculationHandler(
                             .Select(r => new CalculationIssueInput(
                                 r.TableInstanceId, r.RowNumber, r.RowKey, r.MethodologyId,
                                 ICalculationIssueStore.MissingInputs)),
+                        // B66: помилка кроку методики (#VALUE, #ARG…) — одна проблема на рядок з першим кроком і кодом.
+                        .. profile.StepErrorRows
+                            .DistinctBy(e => (e.Row.TableInstanceId, e.Row.RowKey, e.Row.MethodologyId))
+                            .Select(e => new CalculationIssueInput(
+                                e.Row.TableInstanceId, e.Row.RowNumber, e.Row.RowKey, e.Row.MethodologyId,
+                                ICalculationIssueStore.StepError, e.StepCode, e.ErrorCode, e.FailedSteps)),
+                        // B66: рядки, відсіяні фільтром активності (D-425), — ОДИН підсумок на таблицю з кількістю.
+                        .. profile.InactiveTables
+                            .DistinctBy(t => t.TableInstanceId)
+                            .Select(t => new CalculationIssueInput(
+                                t.TableInstanceId, t.FirstRowNumber, t.FirstRowKey, t.MethodologyId,
+                                ICalculationIssueStore.RowInactive, AffectedCount: t.Count)),
                     ],
                     ct)
                 .ConfigureAwait(false);

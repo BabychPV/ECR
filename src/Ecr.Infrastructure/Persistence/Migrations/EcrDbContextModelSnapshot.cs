@@ -81,6 +81,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
 
+                    b.Property<int?>("AffectedCount")
+                        .HasColumnType("int");
+
                     b.Property<long>("CalculationRunId")
                         .HasColumnType("bigint");
 
@@ -89,6 +92,10 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     b.Property<long>("DocumentId")
                         .HasColumnType("bigint");
+
+                    b.Property<string>("ErrorCode")
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
 
                     b.Property<string>("Kind")
                         .IsRequired()
@@ -111,6 +118,10 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     b.Property<long?>("SheetCopyId")
                         .HasColumnType("bigint");
+
+                    b.Property<string>("StepCode")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
 
                     b.Property<int>("TableDefId")
                         .HasColumnType("int");

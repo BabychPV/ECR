@@ -29434,6 +29434,12 @@ export interface components {
         };
         /** @description Одна поточна проблема розрахунку: рядок, який правило методології не охопило (AN-69). */
         CalculationIssueDto: {
+            /**
+             * Format: int32
+             * @description ✎ B66: `StepError` — скільки різних виходів рядка без результату; `RowInactive` — скільки рядків таблиці відсіяно
+             *     фільтром активності; інакше `null`.
+             */
+            affectedCount?: null | number;
             /** @description ✎ 10.11: лише для `CategoryRuleRejected` і `MissingInputs` — порожні колонки рядка, які треба заповнити (для
              *     `CategoryRuleRejected` — ті, що читає правило категорії; для `MissingInputs` — ті, що читають формули версії),
              *     у порядку колонок таблиці; `null` — назвати не вдалося або колонка прихована від читача. */
@@ -29446,8 +29452,13 @@ export interface components {
              * @description Коли виявлено (UTC).
              */
             detectedAt: string;
+            /** @description ✎ B66: лише для `StepError` — код помилки цього виходу (`#VALUE`…); інакше `null`. */
+            errorCode?: null | string;
             /** @description Вид проблеми: `NoMatchingRule`, `CategoryRuleRejected` (✎ 10.11) або `MissingInputs` (AN-164: правило
-             *     закрило рядок, але формулам бракує входів — жодного результату). */
+             *     закрило рядок, але формулам бракує входів — жодного результату); ✎ B66: `StepError` (вихід методики рядка без
+             *     результату через помилку формули — `#VALUE`, `#ARG`…; одна проблема на рядок) і `RowInactive` (рядки,
+             *     відсіяні фільтром активності D-425;
+             *     ОДИН підсумок на таблицю: перший рядок і кількість). Перелік відкритий — невідомий вид клієнт показує як «без правила». */
             kind: string;
             /** @description Методологія прив'язки таблиці; `null` — невідома. */
             methodologyCode: null | string;
@@ -29473,6 +29484,8 @@ export interface components {
              * @description Копія аркуша; `null` — оригінал.
              */
             sheetCopyId: null | number;
+            /** @description ✎ B66: лише для `StepError` — код першого виходу методики без результату; інакше `null`. */
+            stepCode?: null | string;
             /** @description Код таблиці шаблону. */
             tableCode: string;
         };
