@@ -18,7 +18,8 @@ namespace Ecr.Api.Tests;
 /// ⚠ Справжнім HTTP на справжньому SQL Server; період 2099xx, час журналу — відносно годинника. Записи «до переносу»
 /// лягають на Id СТАРОЇ таблиці й колонок (журнал незмінний), читання — після переносу, з Id НОВОЇ версії.
 /// Мутація (B72-фікс): у <c>CompareDocumentVersionsHandler.LoadAsync</c> повернути синхронний
-/// <c>SubmissionSnapshotTranslation.Cells</c> (лише коди) → червоніє (6): кожна комірка NEW — «зміна від порожнього».
+/// <c>SubmissionSnapshotTranslation.Cells</c> (лише коди) → червоніє крок (6) <c>/compare</c> (кожна комірка NEW —
+/// «зміна від порожнього»); кроки (1)–(5) зелені й без фіксу (їх уже покривають R-2, B73, B102).
 /// </remarks>
 public sealed partial class DocumentVersionMigrationTests
 {

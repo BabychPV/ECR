@@ -77,10 +77,9 @@ public static class SubmissionSnapshotTranslation
         }
 
         var map = CodeMap(from, to);
-        var unmapped = cells.Select(c => c.Column).Where(c => !map.ContainsKey(c)).ToHashSet();
-        if (paths is not null && unmapped.Count > 0)
+        if (paths is not null && cells.Any(c => !map.ContainsKey(c.Column)))
         {
-            var sourcePaths = Paths(from, liveOnly: false).Keys.ToHashSet();
+            var sourcePaths = Paths(from, liveOnly: true).Keys.ToHashSet();
             var candidates = Paths(to, liveOnly: true)
                 .Where(p => !sourcePaths.Contains(p.Key))
                 .Select(p => p.Value)
@@ -88,21 +87,50 @@ public static class SubmissionSnapshotTranslation
                 .ToList();
             if (candidates.Count > 0)
             {
+                // Джерела — УСІ колонки версії зрізу без відповідника за кодами (а не лише ті, що є в зрізі): однозначність
+                // пари не залежить від того, які комірки випадково потрапили в зріз.
+                var unmapped = from.Sheets.SelectMany(s => s.Tables).SelectMany(t => t.Columns)
+                    .Select(c => c.Id)
+                    .Where(id => !map.ContainsKey(id))
+                    .ToHashSet();
                 var lineage = await paths.LineageAsync(candidates, ct).ConfigureAwait(false);
-                foreach (var candidate in candidates)
+                foreach (var (source, candidate) in UnambiguousPairs(candidates, lineage, unmapped))
                 {
-                    foreach (var id in lineage.GetValueOrDefault(candidate) ?? [])
-                    {
-                        if (unmapped.Contains(id))
-                        {
-                            map.TryAdd(id, candidate);
-                        }
-                    }
+                    map[source] = candidate;
                 }
             }
         }
 
         return [.. cells.Select(c => map.TryGetValue(c.Column, out var id) ? c with { Column = id } : c)];
+    }
+
+    /// <summary>
+    /// ✎ B72 (D1): лише ОДНОЗНАЧНІ пари «джерело → кандидат»: у кандидата рівно одне джерело серед
+    /// <paramref name="unmapped"/>, і це джерело — у родоводі рівно одного кандидата.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ <c>cfg.ColumnRename</c> глобальний (без проєкту), а перенос — на проєкт: проєкт A міг перенести <c>a → z</c>, а
+    /// проєкт B тієї самої пари версій — <c>b → z</c>. Тоді в <c>z</c> два джерела, і будь-який вибір — вигадка (або дві
+    /// комірки зрізу на одній адресі, або значення відкинутої колонки під чужим кодом). Неоднозначне лишається
+    /// неперекладеним — як до B72 (порівняння покаже це «зміною», а не хибними даними).
+    /// </remarks>
+    private static IEnumerable<(int Source, int Candidate)> UnambiguousPairs(
+        IReadOnlyList<int> candidates,
+        IReadOnlyDictionary<int, IReadOnlyList<int>> lineage,
+        IReadOnlySet<int> unmapped)
+    {
+        var sourcesOf = candidates.Distinct().ToDictionary(
+            c => c,
+            c => (lineage.GetValueOrDefault(c) ?? []).Where(unmapped.Contains).Distinct().ToList());
+        var candidatesOf = sourcesOf
+            .SelectMany(p => p.Value.Select(s => (Source: s, Candidate: p.Key)))
+            .GroupBy(p => p.Source)
+            .ToDictionary(g => g.Key, g => g.Count());
+
+        return sourcesOf
+            .Where(p => p.Value.Count == 1 && candidatesOf[p.Value[0]] == 1)
+            .Select(p => (p.Value[0], p.Key))
+            .OrderBy(p => p.Item1);
     }
 
     /// <summary>Колонка версії <paramref name="from"/> → колонка версії <paramref name="to"/> з тим самим шляхом кодів.</summary>

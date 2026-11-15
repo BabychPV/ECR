@@ -236,8 +236,9 @@ public sealed class CompareDocumentVersionsHandler(
         IReadOnlyDictionary<string, SubmissionPayloadHeaderValue> newHeader,
         CancellationToken ct)
     {
-        var oldMap = oldCells.ToDictionary(c => (RowId: c.Row, ColumnDefId: c.Column));
-        var newMap = newCells.ToDictionary(c => (RowId: c.Row, ColumnDefId: c.Column));
+        // ✎ B72 (D1): переклад зрізу на іншу версію може звести дві комірки на одну адресу — перша, а не 500.
+        var oldMap = ByAddress(oldCells);
+        var newMap = ByAddress(newCells);
         var oldRows = oldCells.Select(c => c.Row).ToHashSet();
         var newRows = newCells.Select(c => c.Row).ToHashSet();
 
@@ -307,6 +308,19 @@ public sealed class CompareDocumentVersionsHandler(
             removed.Select(r => new RowChangeDto(r, Label(r).TableCode, Label(r).RowKey)).ToList(),
             truncated,
             headerChanges);
+    }
+
+    /// <summary>Комірки за адресою (рядок, колонка); повтор адреси — перша комірка.</summary>
+    private static Dictionary<(long RowId, int ColumnDefId), SubmissionPayloadCell> ByAddress(
+        IReadOnlyList<SubmissionPayloadCell> cells)
+    {
+        var map = new Dictionary<(long RowId, int ColumnDefId), SubmissionPayloadCell>(cells.Count);
+        foreach (var cell in cells)
+        {
+            map.TryAdd((cell.Row, cell.Column), cell);
+        }
+
+        return map;
     }
 
     /// <summary>
