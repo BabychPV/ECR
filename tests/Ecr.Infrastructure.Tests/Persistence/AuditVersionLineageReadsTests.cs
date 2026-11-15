@@ -102,6 +102,52 @@ public sealed class AuditVersionLineageReadsTests(SqlServerFixture sql)
             world.Doc.DocumentId, world.Doc.TableDefId, world.RowKeys[0], world.C0, [Key], CancellationToken.None));
     }
 
+    /// <summary>
+    /// B127: колонка F версії Q перейменована в C0 переносом — СВОГО проєкту документа або ЧУЖОГО (тих самих версій
+    /// шаблону). Правка F до переносу — це правка C0 лише для свого: «остання зміна» (конфлікт), значок «поза вікном»
+    /// і останній запис у джерелі комірки. Мутації: передати <c>null</c> замість документа в
+    /// <c>AuditReader.ReadLastChangesAsync</c>, <c>ReadOutOfWindowCellsAsync</c> чи <c>CellSourceStore.LastWriteAsync</c>
+    /// → червоніє «чужий».
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "B127")]
+    public async Task B127_Читання_журналу_беруть_перейменування_лише_свого_проєкту(bool own)
+    {
+        var world = await ArrangeAsync();
+        var tag = world.Doc.SheetCode["SHEET".Length..];
+        var owner = own
+            ? world.Doc.ProjectId
+            : (await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(Key, columnCount: 1, rowCount: 1)).ProjectId;
+        int f;
+        await using (var db = CreateContext())
+        {
+            f = (await TableAsync(db, await VersionSheetAsync(db, world.Doc, $"0.8.0.{tag}"), $"FT_{tag}", $"F_{tag}"))[0];
+            db.ColumnRenames.Add(new ColumnRename(f, world.C0));
+            db.ColumnRenameProjects.Add(new ColumnRenameProject(f, world.C0, owner));
+            await db.SaveChangesAsync();
+        }
+
+        await AuditAsync(world, (0, f, "77", Now.AddDays(-2), true));
+
+        await using var read = CreateContext();
+        var reader = new AuditReader(read);
+        var cell = (world.Doc.RowIds[0], world.C0);
+
+        var last = await reader.ReadLastChangesAsync(world.Doc.DocumentId, [cell], Now.AddDays(-30), CancellationToken.None);
+        Assert.Equal(own, last.ContainsKey(cell));
+
+        var flagged = await reader.ReadOutOfWindowCellsAsync(world.Doc.DocumentId, Key, CancellationToken.None);
+        Assert.Equal(own, flagged.Contains(cell));
+
+        var write = await new CellSourceStore(read, Substitute.For<IUnitCatalog>()).LastWriteAsync(
+            world.Doc.DocumentId, world.Doc.TableDefId, world.RowKeys[0], world.C0, [Key], CancellationToken.None);
+        Assert.Equal(own ? "77" : null, write?.NewValue);
+    }
+
     // ───────────────────────────── допоміжне ─────────────────────────────
 
     private async Task<World> ArrangeAsync()

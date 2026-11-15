@@ -118,5 +118,22 @@ public sealed class ColumnRenameConfiguration : IEntityTypeConfiguration<ColumnR
         builder.ToTable("ColumnRename", "cfg");
         builder.HasKey(x => new { x.FromColumnDefId, x.ToColumnDefId }).HasName("PK_ColumnRename");
         builder.HasIndex(x => x.ToColumnDefId).HasDatabaseName("IX_ColumnRename_To");
+
+        // ✎ B127: наявні до міграції рядки — глобальні (міграція ставить 1); нові — 0, діють через ColumnRenameProject.
+        builder.Property(x => x.IsLegacyGlobal).HasDefaultValue(false);
+    }
+}
+
+/// <summary>Конфігурація <see cref="ColumnRenameProject"/> (<c>cfg.ColumnRenameProject</c>, B127).</summary>
+public sealed class ColumnRenameProjectConfiguration : IEntityTypeConfiguration<ColumnRenameProject>
+{
+    /// <inheritdoc />
+    public void Configure(EntityTypeBuilder<ColumnRenameProject> builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        // PK (From, To, Project) — пошук «чи застосовано пару в проєкті» за ключем у родоводі (ColumnPathMapper).
+        builder.ToTable("ColumnRenameProject", "cfg");
+        builder.HasKey(x => new { x.FromColumnDefId, x.ToColumnDefId, x.ProjectId }).HasName("PK_ColumnRenameProject");
     }
 }

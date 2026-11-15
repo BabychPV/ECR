@@ -94,6 +94,9 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     /// <summary>Збережена мапа перейменування колонок між версіями (RPT-STABLE Part B).</summary>
     public DbSet<ColumnRename> ColumnRenames => Set<ColumnRename>();
 
+    /// <summary>✎ B127: проєкти, переноси яких застосували перейменування колонок.</summary>
+    public DbSet<ColumnRenameProject> ColumnRenameProjects => Set<ColumnRenameProject>();
+
     /// <summary>
     /// Версія шаблону проєкту за період (SQL: <c>doc.fn_VersionOf</c>) — для запитів-приєднань. Поза запитом кидає.
     /// </summary>

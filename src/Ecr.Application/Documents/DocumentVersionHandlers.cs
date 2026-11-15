@@ -413,7 +413,7 @@ public sealed class CompareDocumentVersionsHandler(
                 return new LoadedVersion(
                     found.PeriodKey,
                     await SubmissionSnapshotTranslation
-                        .CellsAsync(SubmissionPayload.Read(found.PayloadJson), source, current, columnPaths, ct)
+                        .CellsAsync(SubmissionPayload.Read(found.PayloadJson), source, current, columnPaths, documentId, ct)
                         .ConfigureAwait(false),
                     SubmissionPayload.ReadHeader(found.PayloadJson));
             }

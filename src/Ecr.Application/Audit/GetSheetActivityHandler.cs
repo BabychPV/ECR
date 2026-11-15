@@ -117,17 +117,17 @@ public sealed class GetSheetActivityHandler(
 
         // ✎ B73 (V-4 для журналу аркуша): `aud.CellChange` незмінний і після переносу проєкту лишається на Id колонок
         // старої версії — межі журналу = видимі колонки поточної версії РАЗОМ з їхнім родоводом (і в парах власників).
-        (columns, owners) = await WithLineageAsync(columns, owners, ct).ConfigureAwait(false);
+        (columns, owners) = await WithLineageAsync(columns, owners, documentId, ct).ConfigureAwait(false);
 
         // ✎ B102: так само `aud.RowChange` лишається на TableDefId старої версії — межі журналу рядків = видимі таблиці
         // РАЗОМ з їхнім родоводом (лише від уже видимих: схована таблиця не дає й свого родоводу).
-        tables = await WithTableLineageAsync(tables, ct).ConfigureAwait(false);
+        tables = await WithTableLineageAsync(tables, documentId, ct).ConfigureAwait(false);
         if (yearPeriods is not null)
         {
             var widened = new List<SheetActivityPeriod>(yearPeriods.Count);
             foreach (var p in yearPeriods)
             {
-                widened.Add(p with { VisibleTableIds = await WithTableLineageAsync(p.VisibleTableIds, ct).ConfigureAwait(false) });
+                widened.Add(p with { VisibleTableIds = await WithTableLineageAsync(p.VisibleTableIds, documentId, ct).ConfigureAwait(false) });
             }
 
             yearPeriods = widened;
@@ -198,14 +198,14 @@ public sealed class GetSheetActivityHandler(
     /// Без маппера чи без інших версій — набори дослівно як були.
     /// </remarks>
     private async Task<(IReadOnlyList<int> Columns, IReadOnlyList<Ports.CellChangeOwnerColumns>? Owners)> WithLineageAsync(
-        IReadOnlyList<int> columns, IReadOnlyList<Ports.CellChangeOwnerColumns>? owners, CancellationToken ct)
+        IReadOnlyList<int> columns, IReadOnlyList<Ports.CellChangeOwnerColumns>? owners, long documentId, CancellationToken ct)
     {
         if (columnPaths is null || columns.Count == 0)
         {
             return (columns, owners);
         }
 
-        var lineage = await columnPaths.LineageAsync(columns, ct).ConfigureAwait(false);
+        var lineage = await columnPaths.LineageAsync(columns, documentId, ct).ConfigureAwait(false);
 
         IReadOnlyList<int> Widen(IEnumerable<int> ids)
             => [.. ids.SelectMany(id => lineage.GetValueOrDefault(id) ?? [id]).Distinct().Order()];
@@ -223,14 +223,14 @@ public sealed class GetSheetActivityHandler(
     /// (<see cref="Ports.IColumnPathMapper.TableLineageAsync"/>, ОДИН виклик на запит).
     /// </summary>
     /// <remarks>⛔ Лише розширення від ВЖЕ видимих (Deny таблиці відсікає до родоводу). Без маппера — як було.</remarks>
-    private async Task<IReadOnlyList<int>> WithTableLineageAsync(IReadOnlyList<int> tables, CancellationToken ct)
+    private async Task<IReadOnlyList<int>> WithTableLineageAsync(IReadOnlyList<int> tables, long documentId, CancellationToken ct)
     {
         if (columnPaths is null || tables.Count == 0)
         {
             return tables;
         }
 
-        var lineage = await columnPaths.TableLineageAsync(tables, ct).ConfigureAwait(false);
+        var lineage = await columnPaths.TableLineageAsync(tables, documentId, ct).ConfigureAwait(false);
         return [.. tables.SelectMany(id => lineage.GetValueOrDefault(id) ?? [id]).Distinct().Order()];
     }
 

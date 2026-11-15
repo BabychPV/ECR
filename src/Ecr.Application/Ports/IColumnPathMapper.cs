@@ -39,13 +39,17 @@ public interface IColumnPathMapper
     /// <c>aud.CellChange</c>, який після переносу проєкту лишається на Id старої версії (журнал незмінний).
     /// </summary>
     /// <param name="columnIds">Колонки (зазвичай — видимі колонки поточної версії документа).</param>
+    /// <param name="documentId">
+    /// ✎ B127: документ, для якого читається родовід, — перейменування беруться лише ті, що застосував перенос ЙОГО
+    /// проєкту (плюс застарілі глобальні, записані до B127). <c>null</c> — усі пари шаблону (без документа).
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>
     /// Для кожної названої колонки — непорожній перелік, що містить і її саму (невідомий Id — лише він сам).
     /// Колонка з тим самим кодом в ІНШІЙ таблиці чи аркуші в родовід не входить.
     /// </returns>
     public Task<IReadOnlyDictionary<int, IReadOnlyList<int>>> LineageAsync(
-        IReadOnlyCollection<int> columnIds, CancellationToken ct);
+        IReadOnlyCollection<int> columnIds, long? documentId, CancellationToken ct);
 
     /// <summary>
     /// ✎ B102: «родовід» таблиць — Id ТІЄЇ САМОЇ таблиці (шлях «аркуш → таблиця») в усіх версіях її шаблону плюс
@@ -54,6 +58,7 @@ public interface IColumnPathMapper
     /// <c>aud.RowChange</c>, який після переносу лишається на <c>TableDefId</c> старої версії.
     /// </summary>
     /// <param name="tableIds">Таблиці (зазвичай — видимі таблиці аркуша поточної версії документа).</param>
+    /// <param name="documentId">✎ B127: як у <see cref="LineageAsync"/> — лише перейменування проєкту документа.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>
     /// Для кожної названої таблиці — непорожній перелік, що містить і її саму (невідомий Id — лише вона сама).
@@ -61,7 +66,7 @@ public interface IColumnPathMapper
     /// </returns>
     /// <remarks>Типова реалізація — без родоводу (кожна таблиця лише сама); реальна — <c>ColumnPathMapper</c>.</remarks>
     public Task<IReadOnlyDictionary<int, IReadOnlyList<int>>> TableLineageAsync(
-        IReadOnlyCollection<int> tableIds, CancellationToken ct)
+        IReadOnlyCollection<int> tableIds, long? documentId, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(tableIds);
         return Task.FromResult<IReadOnlyDictionary<int, IReadOnlyList<int>>>(

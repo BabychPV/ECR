@@ -2395,13 +2395,13 @@ public sealed class RecalculationService(
     /// у результат не потрапляє.
     /// </summary>
     private async Task<Dictionary<long, (int TableDefId, Dictionary<int, int> Columns)>> TranslateForeignInstancesAsync(
-        IReadOnlyList<TableInstanceRef> all, int currentVersion, CancellationToken ct)
+        IReadOnlyList<TableInstanceRef> all, int currentVersion, long documentId, CancellationToken ct)
     {
         var result = new Dictionary<long, (int, Dictionary<int, int>)>();
         var current = await metadata.GetAsync(currentVersion, ct).ConfigureAwait(false);
         var (forward, backward) = columnRenames is null
             ? ((IReadOnlyDictionary<int, int>)new Dictionary<int, int>(), (IReadOnlyDictionary<int, int>)new Dictionary<int, int>())
-            : await columnRenames.GetAsync(ct).ConfigureAwait(false);
+            : await columnRenames.GetAsync(documentId, ct).ConfigureAwait(false);
 
         foreach (var foreign in all.Where(t => t.TemplateVersionId != currentVersion))
         {
@@ -2504,7 +2504,7 @@ public sealed class RecalculationService(
         Dictionary<long, (int TableDefId, Dictionary<int, int> Columns)>? translations = null;
         if (currentVersionId is { } currentVersion && all.Any(t => t.TemplateVersionId != currentVersion))
         {
-            translations = await TranslateForeignInstancesAsync(all, currentVersion, ct).ConfigureAwait(false);
+            translations = await TranslateForeignInstancesAsync(all, currentVersion, documentId, ct).ConfigureAwait(false);
             all =
             [
                 .. all.Where(t => t.TemplateVersionId == currentVersion || translations.ContainsKey(t.TableInstanceId))

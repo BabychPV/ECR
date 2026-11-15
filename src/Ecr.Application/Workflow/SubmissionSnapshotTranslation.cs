@@ -54,6 +54,7 @@ public static class SubmissionSnapshotTranslation
     /// <param name="from">Версія, на якій знято зріз.</param>
     /// <param name="to">Версія документа (ціль перекладу).</param>
     /// <param name="paths">Родовід колонок; <c>null</c> — лише коди (як <see cref="Cells"/>).</param>
+    /// <param name="documentId">✎ B127: документ зрізу — родовід лише з перейменувань його проєкту.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <remarks>
     /// Окремої мапи таблиць у схемі немає: перейменування таблиці зберігається парами ВСІХ її колонок. Кандидати — колонки
@@ -66,6 +67,7 @@ public static class SubmissionSnapshotTranslation
         TemplateVersionSnapshot from,
         TemplateVersionSnapshot to,
         IColumnPathMapper? paths,
+        long? documentId,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(cells);
@@ -96,7 +98,7 @@ public static class SubmissionSnapshotTranslation
                     .Select(c => c.Id)
                     .Where(id => !map.ContainsKey(id))
                     .ToHashSet();
-                var lineage = await paths.LineageAsync(candidates, ct).ConfigureAwait(false);
+                var lineage = await paths.LineageAsync(candidates, documentId, ct).ConfigureAwait(false);
                 foreach (var (source, candidate) in UnambiguousPairs(candidates, lineage, unmapped))
                 {
                     map[source] = candidate;
@@ -112,10 +114,11 @@ public static class SubmissionSnapshotTranslation
     /// <paramref name="unmapped"/>, і це джерело — у родоводі рівно одного кандидата.
     /// </summary>
     /// <remarks>
-    /// ⛔ <c>cfg.ColumnRename</c> глобальний (без проєкту), а перенос — на проєкт: проєкт A міг перенести <c>a → z</c>, а
-    /// проєкт B тієї самої пари версій — <c>b → z</c>. Тоді в <c>z</c> два джерела, і будь-який вибір — вигадка (або дві
-    /// комірки зрізу на одній адресі, або значення відкинутої колонки під чужим кодом). Неоднозначне лишається
-    /// неперекладеним — як до B72 (порівняння покаже це «зміною», а не хибними даними).
+    /// ⛔ Родовід документа після B127 бере пари лише його проєкту (<c>cfg.ColumnRenameProject</c>), але застарілі
+    /// глобальні пари (записані до B127, <c>IsLegacyGlobal</c>) — від будь-якого проєкту: проєкт A міг перенести
+    /// <c>a → z</c>, а проєкт B тієї самої пари версій — <c>b → z</c>. Тоді в <c>z</c> два джерела, і будь-який вибір —
+    /// вигадка (або дві комірки зрізу на одній адресі, або значення відкинутої колонки під чужим кодом). Неоднозначне
+    /// лишається неперекладеним — як до B72 (порівняння покаже це «зміною», а не хибними даними).
     /// </remarks>
     private static IEnumerable<(int Source, int Candidate)> UnambiguousPairs(
         IReadOnlyList<int> candidates,
