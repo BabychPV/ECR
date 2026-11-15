@@ -234,6 +234,46 @@ public sealed class EditPathWarmerTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// B53: збій переліку версій відкритих періодів не скасовує етапу шкали — служба все одно кличе джерело шкали
+    /// (з порожнім виключенням) і гріє його версії.
+    /// </summary>
+    /// <remarks>Мутація: гріти шкалу лише за непорожнього переліку відкритих версій — червоний (джерело шкали не викликано).</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    public async Task B53_збій_переліку_відкритих_версій_не_скасовує_етапу_шкали()
+    {
+        using var lifetime = new TestLifetime();
+        var scaleCalls = 0;
+        IReadOnlyCollection<int>? excluded = null;
+        provider = Services().BuildServiceProvider();
+        var service = new EditPathWarmupService(
+            provider.GetRequiredService<IServiceScopeFactory>(), lifetime,
+            new EditPathWarmupOptions(Enabled: true, MaxVersions: 5, WarmQuartz: false, WarmFirstEdit: false),
+            NullLogger<EditPathWarmupService>.Instance, NullLogger<EditPathWarmer>.Instance)
+        {
+            CreateWarmer = (scopes, log) => new EditPathWarmer(scopes, log)
+            {
+                ListVersions = (_, _, _) => throw new InvalidOperationException("база недоступна"),
+                ListReadScopeVersions = (_, _, exclude, _) =>
+                {
+                    Interlocked.Increment(ref scaleCalls);
+                    excluded = [.. exclude];
+                    return Task.FromResult<IReadOnlyList<int>>([30]);
+                },
+            },
+        };
+
+        await service.StartAsync(CancellationToken.None).WaitAsync(Safety);
+        lifetime.NotifyStarted();
+        await service.Completion!.WaitAsync(Safety);
+        await service.StopAsync(CancellationToken.None);
+
+        Assert.Equal(1, scaleCalls);
+        Assert.Empty(excluded!);
+        Assert.Equal([30], metadataCalls);
+    }
+
+    /// <summary>
     /// B53 (F13 D2): служба гріє версії шкали ОСТАННІМИ — після прогріву першої правки (AN-194), щоб бюджет шкали не
     /// відсував його; виключення — версії, щойно прогріті AN-190.
     /// </summary>

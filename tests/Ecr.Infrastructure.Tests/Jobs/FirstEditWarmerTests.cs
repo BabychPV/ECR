@@ -26,7 +26,8 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 /// «Служба_гріє…»; прибрати <c>servesEdits &amp;&amp;</c> у <c>EditPathWarmupOptions.Read</c> — «Ключ_і_процес…»; підставити
 /// справжній ідентифікатор замість <c>NoId</c> у кроці рядків — «Типові_кроки…»; прибрати <c>catch</c> кроку —
 /// «Збій_кроку…». B53: прибрати крок <c>permitPreview</c> з <c>DefaultSteps</c> — червоний «Типові_кроки…» (порти
-/// перегляду без викликів); прибрати <c>Ecr.Application.Permits.Bindings</c> з <c>JitNamespaces</c> — «JIT_готує…».
+/// перегляду без викликів); прибрати <c>Ecr.Application.Permits.Bindings</c> з <c>JitNamespaces</c> — «JIT_готує…»;
+/// прибрати виклик <c>versionRepository.FindAsync</c> чи <c>unitStore.FindUnitByIdAsync</c> у <c>permitPreview</c> — «Типові_кроки…».
 /// </remarks>
 public sealed class FirstEditWarmerTests : IDisposable
 {
@@ -122,10 +123,12 @@ public sealed class FirstEditWarmerTests : IDisposable
         var snapshots = Substitute.For<IRegistrySnapshotLoader>();
         var documents = Substitute.For<IDocumentStore>();
         var templates = Substitute.For<ITemplateVersionStore>();
+        var versionRepository = Substitute.For<IRepository<Ecr.Domain.Entities.Configuration.TemplateVersion, int>>();
+        var unitStore = Substitute.For<IUnitStore>();
         object[] ports =
         [
             rows, cells, periods, headers, units, methodologies, styles, formats, access, cellStyles, overrides, errors, permits, windows,
-            bindings, permitTypes, registries, snapshots, documents, templates,
+            bindings, permitTypes, registries, snapshots, documents, templates, versionRepository, unitStore,
         ];
 
         var services = new ServiceCollection();
@@ -134,7 +137,7 @@ public sealed class FirstEditWarmerTests : IDisposable
             .AddScoped(_ => access).AddScoped(_ => cellStyles).AddScoped(_ => overrides).AddScoped(_ => errors)
             .AddScoped(_ => permits).AddScoped(_ => windows)
             .AddScoped(_ => bindings).AddScoped(_ => permitTypes).AddScoped(_ => registries).AddScoped(_ => snapshots)
-            .AddScoped(_ => documents).AddScoped(_ => templates);
+            .AddScoped(_ => documents).AddScoped(_ => templates).AddScoped(_ => versionRepository).AddScoped(_ => unitStore);
         provider = services.BuildServiceProvider();
 
         // Транзакція (база) і JIT (рефлексія) — поза цим тестом: перший потребує SQL Server, другий портів не кличе.
@@ -169,7 +172,7 @@ public sealed class FirstEditWarmerTests : IDisposable
         Assert.Equal([41, 42], styles.ReceivedCalls().Select(c => (int)c.GetArguments()[0]!));
 
         // B53: крок перегляду прив'язки дозволу — лише читання (Find/List/Get/Load) тих самих запитів, що й перегляд.
-        object[] preview = [bindings, permitTypes, registries, snapshots, documents, templates];
+        object[] preview = [bindings, permitTypes, registries, snapshots, documents, templates, versionRepository, unitStore];
         foreach (var port in preview)
         {
             Assert.NotEmpty(port.ReceivedCalls());
@@ -181,6 +184,8 @@ public sealed class FirstEditWarmerTests : IDisposable
         await registries.Received(1).ListEntriesAsync(FirstEditWarmer.NoId, Arg.Any<CancellationToken>());
         await templates.Received(1).GetWithStructureAsync(FirstEditWarmer.NoId, Arg.Any<CancellationToken>());
         await rows.Received(1).GetTableInstancesAsync(FirstEditWarmer.NoId, FirstEditWarmer.NoPeriod, Arg.Any<CancellationToken>());
+        await versionRepository.Received(1).FindAsync(FirstEditWarmer.NoId, Arg.Any<CancellationToken>());
+        await unitStore.Received(1).FindUnitByIdAsync(FirstEditWarmer.NoId, Arg.Any<CancellationToken>());
     }
 
     [Fact]
