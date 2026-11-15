@@ -36960,17 +36960,24 @@ export interface components {
              * @description Скільки з DocumentCount документів мають дозвіл у записах історії дозволів: сегмент «з дати» поля
              *     шапки чи живого рядка, або частина поділеного місяця. ⚠ Частина 1 поділеного місяця несе БАЗОВИЙ дозвіл комірки, тож
              *     документ, де дозвіл стоїть значенням комірки з поділеним місяцем, теж потрапляє сюди — це «є в історії», а не «лише в
-             *     історії». Записи історії не перелічуються в Items і не входять у `LinkCount`; документ, де дозвіл є
-             *     лише в історії, входить у DocumentCount, але не має рядка в переліку. З фільтром періоду: частина — свого
-             *     місяця, сегмент — якщо документ має таблиці в періоді і сегмент чинний не пізніше кінця періоду (B56).
+             *     історії». Записи історії не входять у `LinkCount`; з B128c вони перелічуються в Items видом
+             *     `history`. З фільтром періоду: частина — свого місяця, сегмент — якщо документ має таблиці в періоді і сегмент
+             *     чинний бодай частково в періоді (B56, B128).
              * @default 0
              */
             historyDocumentCount: number;
-            /** @description Місця посилань: за документом, періодом, шапка перед таблицями. */
+            /**
+             * Format: int32
+             * @description B128c: скільки записів історії дозволів (сегментів і частин місяців) посилаються на дозвіл під тими самими правилами, що й
+             *     HistoryDocumentCount; сховані правилами читання з поточної сторінки віднімаються (як у `LinkCount`).
+             * @default 0
+             */
+            historyLinkCount: number;
+            /** @description Місця посилань: за документом; шапка, далі комірки, далі записи історії (`history`). */
             items: components["schemas"]["PermitUsageItemDto"][];
             /**
              * Format: int32
-             * @description Скільки місць (полів шапки й комірок) посилаються на дозвіл; історія дозволів сюди не входить.
+             * @description Скільки місць (полів шапки й комірок) посилаються на дозвіл; історія дозволів сюди не входить (її — HistoryLinkCount).
              */
             linkCount: number;
             /**
@@ -36978,7 +36985,7 @@ export interface components {
              * @description Дозвіл.
              */
             permitId: number;
-            /** @description `true`, якщо Items обрізано лімітом `limit`. */
+            /** @description `true`, якщо Items обрізано лімітом `limit` (з урахуванням рядків історії). */
             truncated: boolean;
         };
         /** @description Одне місце, де дозвіл стоїть значенням: поле шапки або комірка рядка таблиці документа. */
@@ -36996,7 +37003,7 @@ export interface components {
             fieldLabelL10n: {
                 [key: string]: string;
             };
-            /** @description `header` або `cell` (PermitUsageKinds). */
+            /** @description `header`, `cell` або `history` (PermitUsageKinds). */
             kind: string;
             /**
              * Format: int32
@@ -37029,6 +37036,12 @@ export interface components {
             tableNameL10n: null | {
                 [key: string]: string;
             };
+            /**
+             * Format: date
+             * @description Лише для `history`: з якого дня дозвіл чинний у цьому місці (сегмент — `ValidFrom`, частина місяця — її перший
+             *     день); для `header`/`cell` — `null` (B128c).
+             */
+            validFrom?: null | string;
         };
         /** @description Атрибут події: що прочитано з PI, що записав би синк, що в комірці. */
         PiEventAttributeView: {

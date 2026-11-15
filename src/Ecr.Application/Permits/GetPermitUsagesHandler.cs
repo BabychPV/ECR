@@ -81,22 +81,28 @@ public sealed class GetPermitUsagesHandler(
         }
 
         var usage = await permits.FindUsagesAsync(permitId, projects, periodKey, limit ?? DefaultLimit, ct).ConfigureAwait(false);
-        return await WithoutHiddenCellsAsync(profile, usage, ct).ConfigureAwait(false);
+        return await WithoutHiddenCellsAsync(profile, usage, periodKey, ct).ConfigureAwait(false);
     }
 
     /// <summary>
     /// ⛔ S-4: місце комірки поза межами читання документа (Deny, D-214, період) не називається — те саме рішення, що й зріз.
     /// Поля шапки лишаються: шапку бачить кожен, хто бачить документ.
+    /// ⛔ B128c: запис історії рядка (<c>history</c> з таблицею) — те саме правило, що й комірка: колонка в межах читання в
+    /// періоді. Період — частини місяця; сегмента (він логічний) — фільтра запиту, а без фільтра — місяця його
+    /// <c>ValidFrom</c> (з якого він чинний). Запис історії поля шапки лишається, як шапка.
     /// </summary>
     private async Task<PermitUsageDto> WithoutHiddenCellsAsync(
-        Security.AccessProfile profile, PermitUsageDto usage, CancellationToken ct)
+        Security.AccessProfile profile, PermitUsageDto usage, int? periodKey, CancellationToken ct)
     {
         var scopes = new Dictionary<long, Security.DocumentReadScope>();
         var kept = new List<PermitUsageItemDto>(usage.Items.Count);
+        var removedHistory = 0;
 
         foreach (var item in usage.Items)
         {
-            if (!string.Equals(item.Kind, PermitUsageKinds.Cell, StringComparison.Ordinal))
+            var isCell = string.Equals(item.Kind, PermitUsageKinds.Cell, StringComparison.Ordinal);
+            var isRowHistory = string.Equals(item.Kind, PermitUsageKinds.History, StringComparison.Ordinal) && item.TableCode is not null;
+            if (!isCell && !isRowHistory)
             {
                 kept.Add(item);
                 continue;
@@ -108,15 +114,28 @@ public sealed class GetPermitUsagesHandler(
                 scopes[item.DocumentId] = scope;
             }
 
-            if (item.TableCode is { } table && item.PeriodKey is { } period
-                && scope.CanReadColumnCodeIn(table, item.FieldCode, new PeriodKey(period)))
+            var period = item.PeriodKey
+                         ?? (isRowHistory ? periodKey ?? (item.ValidFrom is { } from ? (from.Year * 100) + from.Month : null) : null);
+            if (item.TableCode is { } table && period is { } p
+                && scope.CanReadColumnCodeIn(table, item.FieldCode, new PeriodKey(p)))
             {
                 kept.Add(item);
+            }
+            else if (isRowHistory)
+            {
+                removedHistory++;
             }
         }
 
         var removed = usage.Items.Count - kept.Count;
-        return removed == 0 ? usage : usage with { LinkCount = Math.Max(0, usage.LinkCount - removed), Items = kept };
+        return removed == 0
+            ? usage
+            : usage with
+            {
+                LinkCount = Math.Max(0, usage.LinkCount - (removed - removedHistory)),
+                HistoryLinkCount = Math.Max(0, usage.HistoryLinkCount - removedHistory),
+                Items = kept,
+            };
     }
 
     private static BusinessRuleException Invalid(string messageKey, string message)

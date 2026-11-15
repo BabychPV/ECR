@@ -119,7 +119,7 @@ public sealed class PermitStore(EcrDbContext db) : IPermitStore
         var liveSegments = periodKey is { } period
             ? PermitHistoryUsage.LiveSegmentsIn(db, period)
             : PermitHistoryUsage.LiveSegments(db);
-        var segmentDocuments =
+        var segmentRows =
             from s in liveSegments
             where s.RegistryEntryId == permitId
             join d in db.Documents.AsNoTracking() on s.DocumentId equals d.Id
@@ -133,14 +133,42 @@ public sealed class PermitStore(EcrDbContext db) : IPermitStore
                               && n.TableDefId == s.TableDefId && n.SheetCopyId == s.SheetCopyId
                               && n.RowKey == s.RowKey && n.ColumnDefId == s.ColumnDefId
                               && n.ValidFrom > s.ValidFrom && n.ValidFrom <= p.PeriodStart)))
-            select d.Id;
-        var partDocuments =
+            join pr in db.Projects.AsNoTracking() on d.ProjectId equals pr.Id
+            select new
+            {
+                Id = (long)s.Id,
+                DocumentId = d.Id,
+                DocumentKey = d.BusinessKey,
+                d.ProjectId,
+                ProjectCode = pr.Code,
+                PeriodKey = (int?)null,
+                s.HeaderFieldDefId,
+                s.TableDefId,
+                s.RowKey,
+                s.ColumnDefId,
+                s.ValidFrom,
+            };
+        var partRows =
             from part in PermitHistoryUsage.LiveParts(db)
             where part.RegistryEntryId == permitId && (periodKey == null || part.PeriodKeyValue == periodKey)
             join d in db.Documents.AsNoTracking() on part.DocumentId equals d.Id
             where projects == null || projects.Contains(d.ProjectId)
-            select d.Id;
-        var historyDocuments = segmentDocuments.Union(partDocuments);
+            join pr in db.Projects.AsNoTracking() on d.ProjectId equals pr.Id
+            select new
+            {
+                part.Id,
+                DocumentId = d.Id,
+                DocumentKey = d.BusinessKey,
+                d.ProjectId,
+                ProjectCode = pr.Code,
+                PeriodKey = (int?)part.PeriodKeyValue,
+                HeaderFieldDefId = (int?)null,
+                TableDefId = (int?)part.TableDefId,
+                RowKey = (string?)part.RowKey,
+                ColumnDefId = (int?)part.ColumnDefId,
+                ValidFrom = part.DayFrom,
+            };
+        var historyDocuments = segmentRows.Select(x => x.DocumentId).Union(partRows.Select(x => x.DocumentId));
 
         var headerCount = await headerQuery.CountAsync(ct).ConfigureAwait(false);
         var cellCount = await cellQuery.CountAsync(ct).ConfigureAwait(false);
@@ -149,6 +177,8 @@ public sealed class PermitStore(EcrDbContext db) : IPermitStore
             .Union(historyDocuments)
             .CountAsync(ct).ConfigureAwait(false);
         var historyDocumentCount = await historyDocuments.CountAsync(ct).ConfigureAwait(false);
+        var historyLinkCount = await segmentRows.CountAsync(ct).ConfigureAwait(false)
+                               + await partRows.CountAsync(ct).ConfigureAwait(false);
 
         var headers = await headerQuery
             .OrderBy(x => x.DocumentId).ThenBy(x => x.FieldCode)
@@ -157,6 +187,28 @@ public sealed class PermitStore(EcrDbContext db) : IPermitStore
             .OrderBy(x => x.DocumentId).ThenBy(x => x.PeriodKey).ThenBy(x => x.SheetCode).ThenBy(x => x.TableCode)
             .ThenBy(x => x.RowOrdinal).ThenBy(x => x.RowKey).ThenBy(x => x.FieldCode)
             .Take(take).ToListAsync(ct).ConfigureAwait(false);
+
+        // ⛔ B128c: рядки історії — сторінка з кожного джерела (як шапка й комірки), підписи — трьома пакетними запитами за
+        // Id полів/колонок/таблиць сторінки (без N+1).
+        var history = (await segmentRows
+                .OrderBy(x => x.DocumentId).ThenBy(x => x.ValidFrom).ThenBy(x => x.Id)
+                .Take(take).ToListAsync(ct).ConfigureAwait(false))
+            .Concat(await partRows
+                .OrderBy(x => x.DocumentId).ThenBy(x => x.PeriodKey).ThenBy(x => x.ValidFrom).ThenBy(x => x.Id)
+                .Take(take).ToListAsync(ct).ConfigureAwait(false))
+            .ToList();
+        var historyFieldIds = history.Where(x => x.HeaderFieldDefId != null).Select(x => x.HeaderFieldDefId!.Value).Distinct().ToList();
+        var historyColumnIds = history.Where(x => x.ColumnDefId != null).Select(x => x.ColumnDefId!.Value).Distinct().ToList();
+        var historyTableIds = history.Where(x => x.TableDefId != null).Select(x => x.TableDefId!.Value).Distinct().ToList();
+        var historyFields = await db.HeaderFieldDefs.AsNoTracking().Where(f => historyFieldIds.Contains(f.Id))
+                .Select(f => new { f.Id, f.Code, f.LabelL10n }).ToDictionaryAsync(f => f.Id, ct).ConfigureAwait(false);
+        var historyColumns = await db.ColumnDefs.AsNoTracking().Where(c => historyColumnIds.Contains(c.Id))
+                .Select(c => new { c.Id, c.Code, c.HeaderL10n }).ToDictionaryAsync(c => c.Id, ct).ConfigureAwait(false);
+        var historyTables = await (from table in db.TableDefs.AsNoTracking()
+                     where historyTableIds.Contains(table.Id)
+                     join sheet in db.SheetDefs.AsNoTracking() on table.SheetDefId equals sheet.Id
+                     select new { table.Id, TableCode = table.Code, TableName = table.NameL10n, SheetCode = sheet.Code, SheetName = sheet.NameL10n })
+                .ToDictionaryAsync(t => t.Id, ct).ConfigureAwait(false);
 
         static Dictionary<string, string> Copy(Domain.ValueObjects.LocalizedText text)
             => text.Values.ToDictionary(p => p.Key, p => p.Value, StringComparer.Ordinal);
@@ -169,13 +221,27 @@ public sealed class PermitStore(EcrDbContext db) : IPermitStore
                 PermitUsageKinds.Cell, x.DocumentId, x.DocumentKey, x.ProjectId, x.ProjectCode, x.PeriodKey,
                 x.SheetCode, Copy(x.SheetName), x.TableCode, Copy(x.TableName), x.RowKey, x.RowOrdinal,
                 x.FieldCode, Copy(x.FieldLabel)))))
+            .Concat(history.Select(x =>
+            {
+                var table = x.TableDefId is { } tableId ? historyTables[tableId] : null;
+                var (fieldCode, fieldLabel) = x.HeaderFieldDefId is { } fieldId
+                    ? (historyFields[fieldId].Code, historyFields[fieldId].LabelL10n)
+                    : (historyColumns[x.ColumnDefId!.Value].Code, historyColumns[x.ColumnDefId!.Value].HeaderL10n);
+                return (Order: (x.DocumentId, 2, x.PeriodKey ?? 0, table?.SheetCode ?? string.Empty, table?.TableCode ?? string.Empty,
+                        (long)x.ValidFrom.DayNumber, fieldCode),
+                    Item: new PermitUsageItemDto(
+                        PermitUsageKinds.History, x.DocumentId, x.DocumentKey, x.ProjectId, x.ProjectCode, x.PeriodKey,
+                        table?.SheetCode, table is null ? null : Copy(table.SheetName), table?.TableCode,
+                        table is null ? null : Copy(table.TableName), x.RowKey, null, fieldCode, Copy(fieldLabel), x.ValidFrom));
+            }))
             .OrderBy(p => p.Order)
             .Take(take)
             .Select(p => p.Item)
             .ToList();
 
         return new PermitUsageDto(
-            permitId, documentCount, headerCount + cellCount, headerCount + cellCount > items.Count, items, historyDocumentCount);
+            permitId, documentCount, headerCount + cellCount, headerCount + cellCount + historyLinkCount > items.Count, items,
+            historyDocumentCount, historyLinkCount);
     }
 
     /// <inheritdoc />

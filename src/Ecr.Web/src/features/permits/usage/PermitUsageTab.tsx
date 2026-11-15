@@ -13,6 +13,7 @@ import {
   parsePeriodParam,
   periodLabel,
   periodOptions,
+  placeCount,
   summaryText,
   usageHref,
   usageKey,
@@ -114,11 +115,6 @@ export function PermitUsageTab({ permitId }: PermitUsageTabProps): JSX.Element {
   };
 
   const data = current.data;
-  // B56: документ, де дозвіл лише в історії дозволів, рахується, але місць у переліку не має — порожня таблиця не каже «ніде».
-  // ⚠ Лише коли історія справді є: порожньо буває й тоді, коли всі комірки сховані правилами читання (S6, D-214, S-4) —
-  // тоді документ теж рахується, але «лише в історії» було б неправдою.
-  const historyOnly =
-    data !== undefined && data.items.length === 0 && data.documentCount > 0 && data.historyDocumentCount > 0;
 
   return (
     <section aria-labelledby="pp-usage-title" className="pp-section" data-permit-usage={data === undefined ? 'loading' : 'ready'}>
@@ -155,7 +151,7 @@ export function PermitUsageTab({ permitId }: PermitUsageTabProps): JSX.Element {
           title={t('permits.usage.truncatedTitle')}
           text={t('permits.usage.truncatedText', {
             shown: formatNumber(data.items.length),
-            links: formatNumber(data.linkCount),
+            links: formatNumber(placeCount(data)),
           })}
         />
       )}
@@ -168,12 +164,12 @@ export function PermitUsageTab({ permitId }: PermitUsageTabProps): JSX.Element {
         error={current.error}
         onRetry={() => void current.refetch()}
         caption={t('permits.usage.caption')}
-        emptyTitle={historyOnly ? t('permits.usage.historyOnlyTitle') : t('permits.usage.emptyTitle')}
-        emptyHint={historyOnly ? t('permits.usage.historyOnlyHint') : t('permits.usage.emptyHint')}
+        emptyTitle={t('permits.usage.emptyTitle')}
+        emptyHint={t('permits.usage.emptyHint')}
         emptyHeadingOrder={3}
         filtered={periodKey !== null}
-        noMatchTitle={historyOnly ? t('permits.usage.historyOnlyTitle') : t('permits.usage.noMatchTitle')}
-        noMatchHint={historyOnly ? t('permits.usage.historyOnlyHint') : t('permits.usage.noMatchHint')}
+        noMatchTitle={t('permits.usage.noMatchTitle')}
+        noMatchHint={t('permits.usage.noMatchHint')}
         onClearFilters={() => setPeriod(null)}
         clearFiltersLabel={t('permits.usage.showAll')}
       />

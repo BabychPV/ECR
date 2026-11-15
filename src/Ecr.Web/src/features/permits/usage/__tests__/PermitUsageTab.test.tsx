@@ -5,13 +5,15 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { apiFetch, EcrApiError } from '@/api/client';
 import { PermitPage } from '@/pages/admin/PermitPage';
+import { parseDateOnly } from '@/shared/format/dateOnly';
+import { formatDate } from '@/shared/format/datetime';
 import { Catalog } from '@/test/__tests__/a11yFixtures';
 import { TestProviders } from '@/test/render';
 import * as permitsApi from '../../api/permitsApi';
 import * as typesApi from '../../api/typesApi';
 import * as usagesApi from '../../api/usagesApi';
 import { permit, permitType } from '../../permit/__tests__/permitFixtures';
-import { cellItem, headerItem, usage } from './usageFixtures';
+import { cellItem, headerItem, historyItem, usage } from './usageFixtures';
 
 /**
  * Вкладка «Used in» картки дозволу (PERMIT-USAGE): дані з `GET /permits/{id}/usages`, посилання на місце в документі,
@@ -148,7 +150,7 @@ describe('вкладка «Used in»', () => {
 
   // B56: лічильник — документи (сервер рахує документ один раз, хоч би скільки сегментів історії в ньому); історія — окремою
   // часткою підсумку. Мутація: прибрати частку `summaryHistory` у `summaryText` (usageModel) — червоніє перший тест;
-  // умову `historyOnly` → `false` — червоніє другий («Not used in any document yet» замість пояснення про історію).
+  // B128c: запис історії — рядок таблиці (видом history), а не порожня таблиця з поясненням.
   it('історія дозволів: підсумок каже, у скількох документах дозвіл стоїть в історії', async () => {
     getUsages.mockResolvedValue(usage([headerItem()], { documentCount: 2, historyDocumentCount: 1 }));
     open();
@@ -157,22 +159,47 @@ describe('вкладка «Used in»', () => {
     expect(screen.getByText('Documents: 2 · places: 1 · in permit history: 1')).toBeTruthy();
   });
 
-  it('дозвіл лише в історії: документ рахується, порожня таблиця не каже «ніде»', async () => {
-    getUsages.mockResolvedValue(usage([], { documentCount: 1, historyDocumentCount: 1 }));
+  // B128c. Мутації (виконано вручну, відновлено): `isRowPlace` лише для `cell` — рядок історії показує «Document header» і
+  // посилання без аркуша; `historyFromText` → `null` — немає «in history from …»; `placeCount` без `historyLinkCount` —
+  // «places: 0» і «1 of 5 places».
+  it('запис історії рядка: аркуш · таблиця, рядок і «in history from <дата>», посилання на аркуш і таблицю', async () => {
+    getUsages.mockResolvedValue(usage([historyItem()], { documentCount: 1, historyDocumentCount: 1 }));
     open();
 
-    expect(await screen.findByText('Used only in permit history')).toBeTruthy();
+    const table = await screen.findByRole('table', { name: 'Places where the permit is used' });
+    const row = within(table).getAllByRole('row')[1] as HTMLElement;
+    expect(within(row).getByText('Water · Water use')).toBeTruthy();
+    expect(within(row).getByText(`R3 · in history from ${formatDate(parseDateOnly('2026-06-10'))}`)).toBeTruthy();
+    expect(within(row).getByRole('link', { name: 'LAND-2026-06' }).getAttribute('href')).toBe('/documents/2?sheet=WATER&table=USE');
+    expect(screen.getByText('Documents: 1 · places: 1 · in permit history: 1')).toBeTruthy();
     expect(screen.queryByText('Not used in any document yet')).toBeNull();
-    expect(screen.getByText('Documents: 1 · places: 0 · in permit history: 1')).toBeTruthy();
   });
 
-  // Мутація: прибрати `&& data.historyDocumentCount > 0` з умови `historyOnly` — червоніє (казало б «лише в історії»).
-  it('комірки сховані правилами читання, історії немає: не «лише в історії», а звичайне «порожньо»', async () => {
+  it('запис історії поля шапки: «Document header» і дата', async () => {
+    getUsages.mockResolvedValue(
+      usage([historyItem({ sheetCode: null, sheetNameL10n: null, tableCode: null, tableNameL10n: null, rowKey: null, fieldCode: 'PERMIT', validFrom: '2026-05-05' })]),
+    );
+    open();
+
+    const table = await screen.findByRole('table', { name: 'Places where the permit is used' });
+    const row = within(table).getAllByRole('row')[1] as HTMLElement;
+    expect(within(row).getByText('Document header')).toBeTruthy();
+    expect(within(row).getByText(`in history from ${formatDate(parseDateOnly('2026-05-05'))}`)).toBeTruthy();
+    expect(within(row).getByRole('link', { name: 'LAND-2026-06' }).getAttribute('href')).toBe('/documents/2');
+  });
+
+  it('обрізаний перелік рахує й записи історії', async () => {
+    getUsages.mockResolvedValue(usage([cellItem()], { truncated: true, linkCount: 2, historyLinkCount: 3 }));
+    open();
+
+    expect(await screen.findByText('The list shows the first 1 of 5 places. Choose a period to narrow it.')).toBeTruthy();
+  });
+
+  it('комірки сховані правилами читання й історії немає: звичайне «порожньо»', async () => {
     getUsages.mockResolvedValue(usage([], { documentCount: 1, historyDocumentCount: 0 }));
     open();
 
     expect(await screen.findByText('Not used in any document yet')).toBeTruthy();
-    expect(screen.queryByText('Used only in permit history')).toBeNull();
     expect(screen.getByText('Documents: 1 · places: 0')).toBeTruthy();
   });
 

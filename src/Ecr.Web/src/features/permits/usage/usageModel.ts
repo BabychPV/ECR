@@ -1,3 +1,5 @@
+import { parseDateOnly } from '@/shared/format/dateOnly';
+import { formatDate } from '@/shared/format/datetime';
 import { formatNumber } from '@/shared/format/number';
 import { formatPeriodKey } from '@/shared/format/periodKey';
 import { t } from '@/shared/i18n';
@@ -9,8 +11,16 @@ import { localName } from '../permit/names';
  * «де» і «яке поле», варіанти фільтра періоду. Нічого з React і мережі — перевіряється без рендера.
  */
 
-/** Вид місця з контракту (`PermitUsageKinds`): поле шапки або комірка рядка. */
-export const UsageKind = { Header: 'header', Cell: 'cell' } as const;
+/**
+ * Вид місця з контракту (`PermitUsageKinds`): поле шапки, комірка рядка або запис історії дозволів (B128c: сегмент «з дати»
+ * поля шапки чи рядка, частина поділеного місяця; `tableCode === null` — запис поля шапки).
+ */
+export const UsageKind = { Header: 'header', Cell: 'cell', History: 'history' } as const;
+
+/** Місце в рядку таблиці: комірка або запис історії рядка (не шапки). */
+function isRowPlace(item: PermitUsageItem): boolean {
+  return item.kind === UsageKind.Cell || (item.kind === UsageKind.History && item.tableCode !== null);
+}
 
 /** Параметр адреси вкладки з фільтром періоду (`?tab=usage&period=202606`). */
 export const UsagePeriodParam = 'period';
@@ -25,6 +35,7 @@ export function usageKey(item: PermitUsageItem): string {
     item.tableCode ?? '',
     item.rowKey ?? '',
     item.fieldCode,
+    item.validFrom ?? '',
   ].join('|');
 }
 
@@ -36,7 +47,7 @@ export function usageKey(item: PermitUsageItem): string {
  */
 export function usageHref(item: PermitUsageItem): string {
   const base = `/documents/${String(item.documentId)}`;
-  if (item.kind !== UsageKind.Cell) return base;
+  if (!isRowPlace(item)) return base;
 
   const params = new URLSearchParams();
   if (item.periodKey !== null) params.set('periodKey', String(item.periodKey));
@@ -48,7 +59,7 @@ export function usageHref(item: PermitUsageItem): string {
 
 /** «Де»: «Document header» для шапки; «аркуш · таблиця» для комірки (назви мовою користувача, інакше коди). */
 export function wherePrimary(item: PermitUsageItem): string {
-  if (item.kind !== UsageKind.Cell) return t('permits.usage.header');
+  if (!isRowPlace(item)) return t('permits.usage.header');
 
   const sheet = (item.sheetNameL10n !== null ? localName(item.sheetNameL10n) : '') || (item.sheetCode ?? '');
   const table = (item.tableNameL10n !== null ? localName(item.tableNameL10n) : '') || (item.tableCode ?? '');
@@ -61,10 +72,28 @@ export function wherePrimary(item: PermitUsageItem): string {
  * ⚠ `rowOrdinal` сервера рахується від 0 (живий стенд: перший рядок динамічної таблиці - 0), тож показується +1.
  */
 export function whereSecondary(item: PermitUsageItem): string | null {
+  if (item.kind === UsageKind.History) {
+    const row = item.tableCode === null ? null : rowText(item);
+
+    return [row, historyFromText(item)].filter((part): part is string => part !== null && part !== '').join(' · ');
+  }
   if (item.kind !== UsageKind.Cell) return null;
+
+  return rowText(item);
+}
+
+function rowText(item: PermitUsageItem): string | null {
   if (item.rowOrdinal !== null) return t('permits.usage.row', { row: item.rowOrdinal + 1 });
 
   return item.rowKey;
+}
+
+/** B128c: «в історії з <дата>» для запису історії дозволів; дату, яку не вдалося розібрати, показуємо як є. */
+export function historyFromText(item: PermitUsageItem): string | null {
+  if (item.kind !== UsageKind.History || item.validFrom === null || item.validFrom === undefined) return null;
+  const parsed = parseDateOnly(item.validFrom);
+
+  return t('permits.usage.historyFrom', { date: parsed === null ? item.validFrom : formatDate(parsed) });
 }
 
 /** Підпис поля шапки чи колонки мовою користувача; без підпису - код. */
@@ -99,10 +128,15 @@ export function parsePeriodParam(raw: string | null): number | null {
  * місць чи сегментів у ньому було) і місця. Якщо дозвіл стоїть в історії дозволів документів — окремою часткою, бо ці
  * посилання в переліку місць не перелічуються.
  */
+/** B128c: усі місця переліку — поля й комірки плюс записи історії дозволів. */
+export function placeCount(data: PermitUsage): number {
+  return data.linkCount + data.historyLinkCount;
+}
+
 export function summaryText(data: PermitUsage): string {
   const summary = t('permits.usage.summary', {
     documents: formatNumber(data.documentCount),
-    links: formatNumber(data.linkCount),
+    links: formatNumber(placeCount(data)),
   });
   if (data.historyDocumentCount <= 0) return summary;
 
