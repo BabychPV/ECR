@@ -570,6 +570,95 @@ public sealed class PermitUsagesHttpTests(SqlServerFixture sql)
         Assert.Equal(0, await DocumentsAsync().ConfigureAwait(true));
     }
 
+    /// <summary>
+    /// ⛔ B128 (борг B56): під фільтром періоду (1) рядок копії аркуша з тим самим ключем не оживляє сегмент оригіналу, рядок
+    /// якого в цьому періоді видалено; (2) сегмент, перекритий наступним сегментом ТІЄЇ Ж цілі ще до початку періоду, у
+    /// періоді не рахується, а наступний сегмент ІНШОЇ цілі (інший рядок) його не перекриває.
+    /// </summary>
+    /// <remarks>
+    /// Мутації (виконано вручну, відновлено): у <c>PermitHistoryUsage.LiveSegmentsIn</c> прибрати
+    /// <c>ti.SheetCopyId == s.SheetCopyId</c> — копія дає 1 замість 0 (N5b); у <c>FindUsagesAsync</c> прибрати умову
+    /// «немає наступного сегмента цілі з ValidFrom ≤ PeriodStart» — перекритий сегмент шапки дає 1 замість 0; прибрати з неї
+    /// рівність <c>RowKey</c> — сегмент іншого рядка «перекриває» чужий, 0 замість 1.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "PERMUSE")]
+    public async Task Під_фільтром_періоду_копія_аркуша_і_перекритий_сегмент_не_рахуються()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        var firstDay = new DateOnly(s.Period / 100, s.Period % 100, 1);
+        var previousFirstDay = new DateOnly(s.PreviousPeriod / 100, s.PreviousPeriod % 100, 1);
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+
+        using var app = new EcrApiFactory(sql);
+        using var writer = await SignedInAsync(app, s.Writer).ConfigureAwait(true);
+
+        async Task<int> DocumentsAsync(string query = "")
+            => (await GetAsync(writer, app, $"/api/v1/permits/{s.Unused}/usages{query}").ConfigureAwait(true)).GetProperty("documentCount").GetInt32();
+
+        // (1) Рядок 1 оригіналу видалено в поточному періоді (у попередньому живий); копія аркуша має в поточному періоді
+        // ЖИВИЙ рядок з тим самим ключем. Сегмент оригіналу під фільтром поточного періоду — 0.
+        string rowKey;
+        await using (var db = builder.CreateContext())
+        {
+            var row = await db.TableRows.SingleAsync(r => r.PeriodKeyValue == s.Period && r.Id == s.Document.RowIds[0]).ConfigureAwait(true);
+            rowKey = row.RowKeyValue;
+            row.SoftDelete(DateTime.UtcNow);
+
+            var original = new DocumentSheet(s.Document.DocumentId, s.Document.SheetDefId);
+            db.DocumentSheets.Add(original);
+            await db.SaveChangesAsync().ConfigureAwait(true);
+            var copy = original.CreateCopy(2);
+            db.DocumentSheets.Add(copy);
+            await db.SaveChangesAsync().ConfigureAwait(true);
+
+            var loader = new Ecr.Infrastructure.Persistence.BulkCellLoader(sql.ConnectionString, 1000);
+            var instanceId = await loader.ReserveIdsAsync("doc.TableInstanceSeq", 1, CancellationToken.None).ConfigureAwait(true);
+            var rowId = await loader.ReserveIdsAsync("doc.TableRowSeq", 1, CancellationToken.None).ConfigureAwait(true);
+            var period = new PeriodKey(s.Period);
+            db.TableInstances.Add(new TableInstance(period, instanceId, s.Document.DocumentId, s.Document.TableDefId, DateTime.UtcNow, copy.Id));
+            db.TableRows.Add(new TableRow(period, rowId, instanceId, RowKey.Create(rowKey), 1, DateTime.UtcNow));
+            db.PermitSegments.Add(PermitSegment.ForRow(
+                s.Document.DocumentId, s.Document.TableDefId, null, rowKey, s.PermitColumnId, previousFirstDay.AddDays(4), s.Unused, s.WriterId, DateTime.UtcNow));
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        Assert.Equal(0, await DocumentsAsync($"?periodKey={s.Period}").ConfigureAwait(true));
+        Assert.Equal(1, await DocumentsAsync($"?periodKey={s.PreviousPeriod}").ConfigureAwait(true));
+
+        // (2a) Шапка: unused з 5-го попереднього місяця, active — з ПЕРШОГО дня поточного (ValidFrom = PeriodStart). У поточному
+        // періоді unused уже не чинний — 0; у попередньому — 1; без фільтра — 1 (історія є).
+        await using (var db = builder.CreateContext())
+        {
+            await db.PermitSegments.Where(x => x.DocumentId == s.Document.DocumentId).ExecuteDeleteAsync().ConfigureAwait(true);
+            db.PermitSegments.AddRange(
+                PermitSegment.ForHeader(s.Document.DocumentId, s.HeaderFieldId, previousFirstDay.AddDays(4), s.Unused, s.WriterId, DateTime.UtcNow),
+                PermitSegment.ForHeader(s.Document.DocumentId, s.HeaderFieldId, firstDay, s.Active, s.WriterId, DateTime.UtcNow));
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        Assert.Equal(0, await DocumentsAsync($"?periodKey={s.Period}").ConfigureAwait(true));
+        Assert.Equal(1, await DocumentsAsync($"?periodKey={s.PreviousPeriod}").ConfigureAwait(true));
+        Assert.Equal(1, await DocumentsAsync().ConfigureAwait(true));
+
+        // (2b) Рядок 2 (живий): unused з 5-го попереднього місяця; наступний сегмент з першого дня поточного — на ІНШОМУ рядку
+        // (рядок 3, інша ціль). Він unused не перекриває: у поточному періоді — 1.
+        await using (var db = builder.CreateContext())
+        {
+            await db.PermitSegments.Where(x => x.DocumentId == s.Document.DocumentId).ExecuteDeleteAsync().ConfigureAwait(true);
+            var keys = await db.TableRows.AsNoTracking()
+                .Where(r => r.PeriodKeyValue == s.Period && (r.Id == s.Document.RowIds[1] || r.Id == s.Document.RowIds[2]))
+                .OrderBy(r => r.Ordinal).Select(r => r.RowKeyValue).ToListAsync().ConfigureAwait(true);
+            db.PermitSegments.AddRange(
+                PermitSegment.ForRow(s.Document.DocumentId, s.Document.TableDefId, null, keys[0], s.PermitColumnId, previousFirstDay.AddDays(4), s.Unused, s.WriterId, DateTime.UtcNow),
+                PermitSegment.ForRow(s.Document.DocumentId, s.Document.TableDefId, null, keys[1], s.PermitColumnId, firstDay, s.Active, s.WriterId, DateTime.UtcNow));
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        Assert.Equal(1, await DocumentsAsync($"?periodKey={s.Period}").ConfigureAwait(true));
+    }
+
     /// <summary>Читач з <c>Registry.View</c> і <c>Document.View</c>, грант <c>Read</c> — лише на проєкт окремого документа.</summary>
     private async Task<string> OtherProjectReaderAsync()
     {
