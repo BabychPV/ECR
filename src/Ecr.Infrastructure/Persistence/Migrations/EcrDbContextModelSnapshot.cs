@@ -2841,6 +2841,11 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
 
+                    b.Property<byte>("WorkflowMode")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("tinyint")
+                        .HasDefaultValue((byte)0, "DF_TV_WorkflowMode");
+
                     b.HasKey("Id");
 
                     b.HasAlternateKey("Id", "TemplateId")
@@ -4237,6 +4242,81 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("IX_ProjectTemplateVersion_TemplateVersion");
 
                     b.ToTable("ProjectTemplateVersion", "doc");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Documents.RowLock", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long>("DocumentId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("LockFrom")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<DateTime>("LockUntil")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)");
+
+                    b.Property<int>("OwnerUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("PeriodKeyValue")
+                        .HasColumnType("int")
+                        .HasColumnName("PeriodKey");
+
+                    b.Property<DateTime?>("ReleasedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<int?>("ReleasedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("RowKey")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<long?>("SheetCopyId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("TableCode")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.HasKey("Id")
+                        .HasName("PK_RowLock");
+
+                    b.HasIndex("DocumentId", "PeriodKeyValue")
+                        .HasDatabaseName("IX_RowLock_Doc_Period")
+                        .HasFilter("[ReleasedAt] IS NULL");
+
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("DocumentId", "PeriodKeyValue"), new[] { "TableCode", "RowKey", "LockFrom", "LockUntil", "OwnerUserId" });
+
+                    b.ToTable("RowLock", "doc", t =>
+                        {
+                            t.HasCheckConstraint("CK_RowLock_Period", "PeriodKey / 100 BETWEEN 1900 AND 9999 AND PeriodKey % 100 BETWEEN 0 AND 99");
+
+                            t.HasCheckConstraint("CK_RowLock_Range", "LockUntil > LockFrom");
+
+                            t.HasCheckConstraint("CK_RowLock_Release", "(ReleasedAt IS NULL AND ReleasedByUserId IS NULL) OR (ReleasedAt IS NOT NULL AND ReleasedByUserId IS NOT NULL)");
+                        });
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Documents.TableDiscussionMention", b =>
@@ -8315,6 +8395,23 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("FK_ProjectTemplateVersion_TemplateVersion");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Documents.RowLock", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Documents.Document", null)
+                        .WithMany()
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_RowLock_Document");
+
+                    b.HasOne("Ecr.Domain.Entities.Security.User", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_RowLock_Owner");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Documents.TableDiscussionMention", b =>
