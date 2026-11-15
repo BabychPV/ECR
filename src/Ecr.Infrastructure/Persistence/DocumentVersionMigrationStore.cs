@@ -54,19 +54,19 @@ public sealed partial class DocumentVersionMigrationStore(
     public int RangeRows { get; init; } = DefaultRangeRows;
 
     /// <summary>
-    /// ✎ B135: скільки мс крок 6 переносу чекає applock шаблону цільової версії (<see cref="TemplateFinishLockSql"/>).
+    /// ✎ B135: скільки мс крок 6 переносу чекає глобальний applock кроку 6 (<see cref="FinishLockSql"/>).
     /// </summary>
     /// <remarks>
     /// Власник замка після нього виконує лише решту кроку 6 (гранти, пари перейменувань, шкала версій, перемикання версії
-    /// проєкту) і комітить — секунди. 60 с з запасом покривають це й чергу з кількох переносів того самого шаблону, і
+    /// проєкту) і комітить — секунди. 60 с з запасом покривають це й чергу з кількох одночасних переносів, і
     /// лишаються далеко в межах <see cref="ApplyCommandTimeoutSeconds"/>: довше очікування означає завислий або аномально
     /// великий чужий перенос — тоді відмова з «повторіть перенос» (409), а не безстрокове очікування з відкритою
     /// транзакцією й блокуванням структури документів свого проєкту.
     /// </remarks>
-    public const int DefaultTemplateLockTimeoutMilliseconds = 60_000;
+    public const int DefaultFinishLockTimeoutMilliseconds = 60_000;
 
-    /// <summary>Очікування applock шаблону, мс (змінюється лише у тестах).</summary>
-    public int TemplateLockTimeoutMilliseconds { get; init; } = DefaultTemplateLockTimeoutMilliseconds;
+    /// <summary>Очікування applock кроку 6, мс (змінюється лише у тестах).</summary>
+    public int FinishLockTimeoutMilliseconds { get; init; } = DefaultFinishLockTimeoutMilliseconds;
 
     /// <summary>
     /// Спостерігач завершених діапазонів (лише тести/діагностика): викликається ПІСЛЯ коміту діапазону, поки ззовні
@@ -343,16 +343,16 @@ public sealed partial class DocumentVersionMigrationStore(
             });
 
     /// <summary>
-    /// ✎ B135: крок 6 не дочекався applock шаблону цільової версії — його тримає перенос ІНШОГО проєкту на версію того
-    /// самого шаблону. Транзакція відкочується; перенос ідемпотентний — повтор безпечний.
+    /// ✎ B135: крок 6 не дочекався глобального applock кроку 6 — його тримає інший перенос, що саме завершується.
+    /// Транзакція відкочується; перенос ідемпотентний — повтор безпечний.
     /// </summary>
-    private static Application.Errors.ConcurrencyConflictException TemplateMigrationBusy(int targetVersionId)
+    private static Application.Errors.ConcurrencyConflictException FinishBusy(int targetVersionId)
         => new(
             Domain.Errors.ErrorCodes.JobStateConflict,
-            $"Перенос на версію {targetVersionId}: інший перенос на версію того самого шаблону ще завершується. Нічого не змінено; повторіть перенос.",
+            $"Перенос на версію {targetVersionId}: інший перенос версії шаблону ще завершується. Нічого не змінено; повторіть перенос.",
             new Dictionary<string, object?>
             {
-                ["messageKey"] = "err.ECR-JOB-0409.migrationTemplateBusy",
+                ["messageKey"] = "err.ECR-JOB-0409.migrationFinishBusy",
                 ["targetVersionId"] = targetVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
             });
 
@@ -604,7 +604,7 @@ public sealed partial class DocumentVersionMigrationStore(
                     Value = JsonSerializer.Serialize(plan.ColumnRenames.Select(r => new { f = r.FromColumnDefId, t = r.ToColumnDefId })),
                 },
                 new("@targetVersionId", targetVersionId),
-                new("@templateLockTimeout", TemplateLockTimeoutMilliseconds),
+                new("@finishLockTimeout", FinishLockTimeoutMilliseconds),
                 new("@batch", batchRows),
                 new("@now", System.Data.SqlDbType.DateTime2) { Scale = 3, Value = now },
                 new("@sheets", System.Data.SqlDbType.NVarChar, -1) { Value = sheets },
@@ -650,10 +650,10 @@ public sealed partial class DocumentVersionMigrationStore(
             {
                 await db.Database.ExecuteSqlRawAsync(SingleCommand(sql), Parameters(), ct).ConfigureAwait(false);
             }
-            catch (SqlException ex) when (ex.Number == TemplateLockError)
+            catch (SqlException ex) when (ex.Number == FinishLockError)
             {
-                // ✎ B135: крок 6 не дочекався applock шаблону (інший перенос того самого шаблону) — відкат, повтор.
-                throw TemplateMigrationBusy(targetVersionId);
+                // ✎ B135: крок 6 не дочекався глобального applock (інший перенос саме завершується) — відкат, повтор.
+                throw FinishBusy(targetVersionId);
             }
 
             stepsDone++;
@@ -973,8 +973,8 @@ public sealed partial class DocumentVersionMigrationStore(
     /// <summary>Номер помилки <c>THROW</c> у діапазоні: розбіжність "очікувано переселене - факт".</summary>
     private const int RangeMismatchError = 51001;
 
-    /// <summary>✎ B135: номер помилки <c>THROW</c> у <see cref="TemplateFinishLockSql"/>: applock шаблону не взято вчасно.</summary>
-    internal const int TemplateLockError = 51300;
+    /// <summary>✎ B135: номер помилки <c>THROW</c> у <see cref="FinishLockSql"/>: applock кроку 6 не взято вчасно.</summary>
+    internal const int FinishLockError = 51300;
 
     private static async Task ClaimLeaseAsync(SqlConnection connection, int projectId, string owner, CancellationToken ct)
     {
@@ -2163,9 +2163,10 @@ public sealed partial class DocumentVersionMigrationStore(
     /// NOT EXISTS через покривний <c>IX_ColumnRename_To</c> (To + ключ кластера): транзакція тримала RangeS-U на прогалині
     /// <c>IX_ColumnRename_To</c> і чекала RangeI-N на прогалині PK, а інша — навпаки (граф system_health: обидві
     /// прогалини — «нескінченність» (ffffffffffff), бо Id колонок нових версій завжди найбільші, тож одночасні переноси
-    /// РІЗНИХ шаблонів, яких applock шаблону не серіалізує, впираються в ту саму останню прогалину). Читання лише по PK
-    /// ставить усіх у чергу на одній прогалині PK ще до вставки, нічого іншого не тримаючи, — циклу немає. Те саме для 6a
-    /// (<c>UQ_ResourceGrant</c>) — індекс названо явно, щоб план не залежав від статистики.
+    /// РІЗНИХ шаблонів впиралися в ту саму останню прогалину). Читання лише по PK ставить усіх у чергу на одній прогалині
+    /// PK ще до вставки, нічого іншого не тримаючи, — циклу немає. Те саме для 6a (<c>UQ_ResourceGrant</c>) — індекс
+    /// названо явно, щоб план не залежав від статистики. ✎ B135: основний захист тепер — глобальний applock кроку 6
+    /// (<see cref="FinishLockSql"/>); хінти — страховка від писарів поза переносом.
     /// </para>
     /// </remarks>
     internal const string ColumnRenameInsertSql = """
@@ -2178,41 +2179,41 @@ public sealed partial class DocumentVersionMigrationStore(
         """;
 
     /// <summary>
-    /// ✎ B130: початок <see cref="FinishSql"/> — транзакційний виключний applock на ШАБЛОН цільової версії.
+    /// ✎ B130/B135: початок <see cref="FinishSql"/> — транзакційний виключний applock кроку 6, ОДИН на всю базу
+    /// (<c>ecr:migrate-finish</c>).
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Кроки 6a/6b пишуть спільні для шаблону рядки (гранти ролей на ресурси версій, пари перейменувань), а переноси
-    /// РІЗНИХ проєктів інакше не серіалізуються. Діапазонних замків <c>UPDLOCK, HOLDLOCK</c> мало: два переноси з різних
-    /// вихідних версій на ту саму цільову з різними грантами давали дедлок 1205 — DELETE 6a одного бере X на рядок, який
-    /// чекає NOT EXISTS другого, а той уже тримає діапазонний U. Applock до коміту переносу робить 6a/6b одного шаблону
-    /// послідовними; хінти лишаються захистом від писарів поза переносом.
+    /// Кроки 6a/6b пишуть спільні рядки (гранти ролей на ресурси версій, пари перейменувань), а переноси різних проєктів
+    /// інакше не серіалізуються. Діапазонних замків мало навіть між різними шаблонами: DELETE 6a бере X на allow-рядки
+    /// нових Id, а NOT EXISTS іншої транзакції тримає RangeS-U на спільній останній прогалині <c>UQ_ResourceGrant</c> тієї
+    /// самої ролі (1205, рецензія B130); applock на шаблон цього не закривав. Крок 6 триває секунди, переноси рідкісні —
+    /// глобальна черга прибирає і цей ризик, і залежність від планів 6a/6b; хінти лишаються страховкою.
     /// </para>
     /// <para>
     /// Порядок замків без циклу: перенос бере рядок <c>doc.Project</c> (<c>LockProjectVersionAsync</c>) і applock структури
     /// документів СВОГО проєкту на початку транзакції, а цей applock — останнім, у <see cref="FinishSql"/>, і ніде інде
     /// його не беруть. Хто чекає на нього, не тримає нічого, що потрібне власникові (чужі проєкт і документи), а власник
-    /// після нього пише лише спільні таблиці кроку 6 і свій проєкт.
+    /// після нього пише лише спільні таблиці кроку 6 і свій проєкт. Очікування обмежене
+    /// (<see cref="DefaultFinishLockTimeoutMilliseconds"/>): тоді 409 «повторіть перенос».
     /// </para>
     /// </remarks>
-    internal const string TemplateFinishLockSql = """
-        DECLARE @templateLock int;
-        DECLARE @templateResource nvarchar(255) = N'ecr:migrate-finish:tpl:'
-            + CAST((SELECT TemplateId FROM cfg.TemplateVersion WHERE Id = @targetVersionId) AS nvarchar(20));
-        EXEC @templateLock = sp_getapplock @Resource = @templateResource, @LockMode = N'Exclusive',
-                                           @LockOwner = N'Transaction', @LockTimeout = @templateLockTimeout;
-        IF @templateLock < 0
-            THROW 51300, N'Перенос версії: не дочекався замка шаблону цільової версії (sp_getapplock < 0).', 1;
+    internal const string FinishLockSql = """
+        DECLARE @finishLock int;
+        EXEC @finishLock = sp_getapplock @Resource = N'ecr:migrate-finish', @LockMode = N'Exclusive',
+                                         @LockOwner = N'Transaction', @LockTimeout = @finishLockTimeout;
+        IF @finishLock < 0
+            THROW 51300, N'Перенос версії: не дочекався замка кроку 6 (sp_getapplock < 0).', 1;
         """;
 
     /// <summary>
-    /// Крок 6 переносу (остання команда транзакції переносу): applock шаблону цільової версії
-    /// (<see cref="TemplateFinishLockSql"/>), 6a — гранти ролей на нові Id ресурсів (<see cref="GrantCopyInsertSql"/>), 6b —
+    /// Крок 6 переносу (остання команда транзакції переносу): глобальний applock кроку 6
+    /// (<see cref="FinishLockSql"/>), 6a — гранти ролей на нові Id ресурсів (<see cref="GrantCopyInsertSql"/>), 6b —
     /// пари перейменувань і їх прив'язка до проєкту (<see cref="ColumnRenameInsertSql"/>), 6c — шкала версій і версія
     /// проєкту, прибирання.
     /// </summary>
     internal const string FinishSql = $"""
-        {TemplateFinishLockSql}
+        {FinishLockSql}
 
         -- 6a. Гранти ролей на аркуш/таблицю/колонку (sec.ResourceGrant): Id цих
         -- ресурсів свої в кожної версії, а грант не має ProjectId і діє на всіх,
