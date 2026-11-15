@@ -63,7 +63,7 @@ public sealed class CrossPeriodAcrossVersionsTests
             backward[_inputV2] = oldId;
         }
 
-        renames.GetAsync(Arg.Any<CancellationToken>())
+        renames.GetAsync(Arg.Any<long?>(), Arg.Any<CancellationToken>())
             .Returns(((IReadOnlyDictionary<int, int>)forward, (IReadOnlyDictionary<int, int>)backward));
 
         var service = Service(renames);

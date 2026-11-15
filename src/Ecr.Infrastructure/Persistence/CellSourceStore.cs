@@ -132,7 +132,7 @@ public sealed class CellSourceStore(EcrDbContext db, Ecr.Application.Ports.IUnit
         ArgumentNullException.ThrowIfNull(periodKeys);
 
         // B49: родовід колонки — та сама логіка, що в History інспектора (V-4). Інших версій немає — запит як доти.
-        var lineage = (await new ColumnPathMapper(db).LineageAsync([columnDefId], ct).ConfigureAwait(false))
+        var lineage = (await new ColumnPathMapper(db).LineageAsync([columnDefId], documentId, ct).ConfigureAwait(false))
             .GetValueOrDefault(columnDefId) ?? [columnDefId];
 
         await using var command = await CommandAsync(lineage.Count > 1 ? LastWriteLineageSql : LastWriteSql, ct).ConfigureAwait(false);

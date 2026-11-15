@@ -152,6 +152,9 @@ public sealed class SheetActivityVersionLineageTests(SqlServerFixture sql) : IDi
 
         // Перейменування таблиці RN → R2 при переносі P → V зберігається парою колонок (VersionMigrationRenames).
         db.ColumnRenames.Add(new ColumnRename(prnColumns[0], r2Columns[0]));
+
+        // ✎ B127: пару застосував перенос проєкту ЦЬОГО документа.
+        db.ColumnRenameProjects.Add(new ColumnRenameProject(prnColumns[0], r2Columns[0], world.Doc.ProjectId));
         await db.SaveChangesAsync();
 
         var tableOf = await db.ColumnDefs.AsNoTracking()

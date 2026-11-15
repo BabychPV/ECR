@@ -28,4 +28,42 @@ public sealed class ColumnRename
 
     /// <summary>Колонка цільової версії.</summary>
     public int ToColumnDefId { get; private set; }
+
+    /// <summary>
+    /// ✎ B127: запис, збережений ДО прив'язки перейменувань до проєкту (міграція B127 ставить <c>true</c> усім наявним
+    /// рядкам). Проєкт, що його застосував, невідомий — такий запис діє для всіх проєктів, як і раніше. Нові записи —
+    /// <c>false</c>: діють лише для проєктів із <see cref="ColumnRenameProject"/>.
+    /// </summary>
+    public bool IsLegacyGlobal { get; private set; }
+}
+
+/// <summary>
+/// ✎ B127: проєкт, перенос якого застосував перейменування <see cref="ColumnRename"/>. <c>cfg.ColumnRename</c> — пара колонок
+/// версій ШАБЛОНУ (спільного для проєктів), а перенос — на проєкт: проєкт A міг відкинути колонку <c>b</c>, яку проєкт B тих
+/// самих версій переніс у <c>z</c>. Родовід для документа бере лише пари свого проєкту (і застарілі глобальні).
+/// </summary>
+/// <remarks>⚠ Без зовнішніх ключів — з тієї самої причини, що й <see cref="ColumnRename"/>.</remarks>
+public sealed class ColumnRenameProject
+{
+    private ColumnRenameProject() { }
+
+    /// <summary>Створює прив'язку.</summary>
+    /// <param name="fromColumnDefId">Колонка вихідної версії.</param>
+    /// <param name="toColumnDefId">Колонка цільової версії.</param>
+    /// <param name="projectId">Проєкт, перенос якого застосував перейменування.</param>
+    public ColumnRenameProject(int fromColumnDefId, int toColumnDefId, int projectId)
+    {
+        FromColumnDefId = fromColumnDefId;
+        ToColumnDefId = toColumnDefId;
+        ProjectId = projectId;
+    }
+
+    /// <summary>Колонка вихідної версії.</summary>
+    public int FromColumnDefId { get; private set; }
+
+    /// <summary>Колонка цільової версії.</summary>
+    public int ToColumnDefId { get; private set; }
+
+    /// <summary>Проєкт.</summary>
+    public int ProjectId { get; private set; }
 }

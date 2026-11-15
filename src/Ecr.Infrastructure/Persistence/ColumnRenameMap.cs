@@ -3,20 +3,40 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Ecr.Infrastructure.Persistence;
 
-/// <summary>Реалізація <see cref="IColumnRenameMap"/> над <c>cfg.ColumnRename</c>: читається раз на скоуп.</summary>
+/// <summary>
+/// Реалізація <see cref="IColumnRenameMap"/> над <c>cfg.ColumnRename</c>: читається раз на скоуп і проєкт.
+/// ✎ B127: для документа — лише пари його проєкту (<c>cfg.ColumnRenameProject</c>) і застарілі глобальні.
+/// </summary>
 public sealed class ColumnRenameMap(EcrDbContext db) : IColumnRenameMap
 {
-    private (IReadOnlyDictionary<int, int>, IReadOnlyDictionary<int, int>)? _loaded;
+    /// <summary>Мапи за проєктом; ключ <c>-1</c> — усі пари (без документа).</summary>
+    private readonly Dictionary<int, (IReadOnlyDictionary<int, int>, IReadOnlyDictionary<int, int>)> _loaded = [];
 
     /// <inheritdoc />
-    public async Task<(IReadOnlyDictionary<int, int> Forward, IReadOnlyDictionary<int, int> Backward)> GetAsync(CancellationToken ct)
+    public async Task<(IReadOnlyDictionary<int, int> Forward, IReadOnlyDictionary<int, int> Backward)> GetAsync(
+        long? documentId, CancellationToken ct)
     {
-        if (_loaded is { } cached)
+        // Невідомий документ — проєкт 0: лише застарілі глобальні пари (межа не розширюється через помилку викликача).
+        var projectId = documentId is { } id
+            ? await db.Documents.AsNoTracking().Where(d => d.Id == id).Select(d => (int?)d.ProjectId)
+                  .FirstOrDefaultAsync(ct).ConfigureAwait(false) ?? 0
+            : -1;
+        if (_loaded.TryGetValue(projectId, out var cached))
         {
             return cached;
         }
 
-        var rows = await db.ColumnRenames.AsNoTracking().OrderBy(r => r.FromColumnDefId).ThenBy(r => r.ToColumnDefId).Take(100_000).ToListAsync(ct).ConfigureAwait(false);
+        var query = db.ColumnRenames.AsNoTracking();
+        if (projectId >= 0)
+        {
+            query = query.Where(r => r.IsLegacyGlobal
+                                     || db.ColumnRenameProjects.Any(p => p.FromColumnDefId == r.FromColumnDefId
+                                                                         && p.ToColumnDefId == r.ToColumnDefId
+                                                                         && p.ProjectId == projectId));
+        }
+
+        var rows = await query.OrderBy(r => r.FromColumnDefId).ThenBy(r => r.ToColumnDefId).Take(100_000)
+            .ToListAsync(ct).ConfigureAwait(false);
         var forward = new Dictionary<int, int>();
         var backward = new Dictionary<int, int>();
         foreach (var row in rows)
@@ -25,7 +45,8 @@ public sealed class ColumnRenameMap(EcrDbContext db) : IColumnRenameMap
             backward[row.ToColumnDefId] = row.FromColumnDefId;
         }
 
-        _loaded = (forward, backward);
-        return _loaded.Value;
+        var loaded = ((IReadOnlyDictionary<int, int>)forward, (IReadOnlyDictionary<int, int>)backward);
+        _loaded[projectId] = loaded;
+        return loaded;
     }
 }

@@ -38,7 +38,7 @@ public sealed class SubmissionSnapshotTranslationTests
         // 301 — Id проміжної версії (ланцюжок v1 → v3 → v2): у версії зрізу його немає, на однозначність не впливає.
         var paths = Mapper(new() { [Z] = [Z, 301, A], [W] = [W, B] });
 
-        var cells = await SubmissionSnapshotTranslation.CellsAsync([Cell(A, "1"), Cell(B, "2")], _from, _to, paths, default);
+        var cells = await SubmissionSnapshotTranslation.CellsAsync([Cell(A, "1"), Cell(B, "2")], _from, _to, paths, null, default);
 
         Assert.Equal([Z, W], cells.Select(c => c.Column));
         Assert.Equal(["1", "2"], cells.Select(c => c.Value));
@@ -52,8 +52,8 @@ public sealed class SubmissionSnapshotTranslationTests
         // Проєкт A переніс a → z, проєкт B (ті самі версії) — b → z.
         var paths = Mapper(new() { [Z] = [Z, A, B], [W] = [W] });
 
-        var both = await SubmissionSnapshotTranslation.CellsAsync([Cell(A, "1"), Cell(B, "2")], _from, _to, paths, default);
-        var single = await SubmissionSnapshotTranslation.CellsAsync([Cell(A, "1")], _from, _to, paths, default);
+        var both = await SubmissionSnapshotTranslation.CellsAsync([Cell(A, "1"), Cell(B, "2")], _from, _to, paths, null, default);
+        var single = await SubmissionSnapshotTranslation.CellsAsync([Cell(A, "1")], _from, _to, paths, null, default);
 
         // Без дубля адреси (r, z) і без значення відкинутої колонки під чужим кодом — як до B72.
         Assert.Equal([A, B], both.Select(c => c.Column));
@@ -67,7 +67,7 @@ public sealed class SubmissionSnapshotTranslationTests
     {
         var paths = Mapper(new() { [Z] = [Z, A], [W] = [W, A] });
 
-        var cells = await SubmissionSnapshotTranslation.CellsAsync([Cell(A, "1")], _from, _to, paths, default);
+        var cells = await SubmissionSnapshotTranslation.CellsAsync([Cell(A, "1")], _from, _to, paths, null, default);
 
         Assert.Equal([A], cells.Select(c => c.Column));
     }
@@ -80,10 +80,10 @@ public sealed class SubmissionSnapshotTranslationTests
         var paths = Substitute.For<IColumnPathMapper>();
         var same = Version(3, "OLD", (301, "a"), (302, "b"));
 
-        var cells = await SubmissionSnapshotTranslation.CellsAsync([Cell(A, "1")], _from, same, paths, default);
+        var cells = await SubmissionSnapshotTranslation.CellsAsync([Cell(A, "1")], _from, same, paths, null, default);
 
         Assert.Equal([301], cells.Select(c => c.Column));
-        await paths.DidNotReceiveWithAnyArgs().LineageAsync(default!, default);
+        await paths.DidNotReceiveWithAnyArgs().LineageAsync(default!, default, default);
     }
 
     /// <remarks>
@@ -110,7 +110,7 @@ public sealed class SubmissionSnapshotTranslationTests
         var paths = Mapper(new() { [Z] = [Z, A], [W] = [W] });
 
         var cells = await SubmissionSnapshotTranslation.CellsAsync(
-            [Cell(A, "1"), Cell(DeletedZ, "9")], from, _to, paths, default);
+            [Cell(A, "1"), Cell(DeletedZ, "9")], from, _to, paths, null, default);
 
         Assert.Equal([A, Z], cells.Select(c => c.Column));
         Assert.Equal(cells.Count, cells.Select(c => (c.Row, c.Column)).Distinct().Count());
@@ -121,7 +121,7 @@ public sealed class SubmissionSnapshotTranslationTests
     private static IColumnPathMapper Mapper(Dictionary<int, IReadOnlyList<int>> lineage)
     {
         var paths = Substitute.For<IColumnPathMapper>();
-        paths.LineageAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
+        paths.LineageAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<long?>(), Arg.Any<CancellationToken>())
             .Returns(lineage.ToDictionary(p => p.Key, p => p.Value) as IReadOnlyDictionary<int, IReadOnlyList<int>>);
         return paths;
     }

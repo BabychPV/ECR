@@ -54,6 +54,7 @@ public static class SubmissionSnapshotTranslation
     /// <param name="from">Версія, на якій знято зріз.</param>
     /// <param name="to">Версія документа (ціль перекладу).</param>
     /// <param name="paths">Родовід колонок; <c>null</c> — лише коди (як <see cref="Cells"/>).</param>
+    /// <param name="documentId">✎ B127: документ зрізу — родовід лише з перейменувань його проєкту.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <remarks>
     /// Окремої мапи таблиць у схемі немає: перейменування таблиці зберігається парами ВСІХ її колонок. Кандидати — колонки
@@ -66,6 +67,7 @@ public static class SubmissionSnapshotTranslation
         TemplateVersionSnapshot from,
         TemplateVersionSnapshot to,
         IColumnPathMapper? paths,
+        long? documentId,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(cells);
@@ -96,7 +98,7 @@ public static class SubmissionSnapshotTranslation
                     .Select(c => c.Id)
                     .Where(id => !map.ContainsKey(id))
                     .ToHashSet();
-                var lineage = await paths.LineageAsync(candidates, ct).ConfigureAwait(false);
+                var lineage = await paths.LineageAsync(candidates, documentId, ct).ConfigureAwait(false);
                 foreach (var (source, candidate) in UnambiguousPairs(candidates, lineage, unmapped))
                 {
                     map[source] = candidate;

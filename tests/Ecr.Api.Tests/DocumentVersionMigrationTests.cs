@@ -420,12 +420,19 @@ public sealed partial class DocumentVersionMigrationTests(SqlServerFixture sql)
 
         /// <summary>ACC-OW: те саме, що й <see cref="AddsCellFormulaOnInput"/>, і ще звуження Scale C2 (12 → 10).</summary>
         AddsCellFormulaAndNarrowsScale,
+
+        /// <summary>
+        /// B127: як <see cref="TableRenamed"/>, але в джерелі ще порожня колонка C4 («b», значень немає — перенос її
+        /// відкидає), а в цілі — нова колонка <c>Z_…</c>.
+        /// </summary>
+        TableRenamedDropsC4AddsZ,
     }
 
     private static bool ChangesNumericFormat(Target target)
         => target is Target.C2PrecisionWidened or Target.C2ScaleNarrowed or Target.AddsCellFormulaAndNarrowsScale;
 
-    private static bool RenamesTable(Target target) => target is Target.TableRenamed or Target.TableAndColumnRenamed;
+    private static bool RenamesTable(Target target)
+        => target is Target.TableRenamed or Target.TableAndColumnRenamed or Target.TableRenamedDropsC4AddsZ;
 
     private static Task<HttpResponseMessage> PostAsync(HttpClient client, Scenario s, string mode, bool dryRun)
         => client.PostAsJsonAsync(
@@ -487,7 +494,7 @@ public sealed partial class DocumentVersionMigrationTests(SqlServerFixture sql)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var doc = await builder.BuildAsync(
-            periodKey, columnCount: 3, rowCount: 2,
+            periodKey, columnCount: target == Target.TableRenamedDropsC4AddsZ ? 4 : 3, rowCount: 2,
             rowMode: target == Target.KeepsMixedMode ? TableRowMode.Mixed : TableRowMode.Fixed).ConfigureAwait(false);
         var tag = doc.SheetCode["SHEET".Length..];
         var now = new DateTime(2026, 1, 16, 9, 0, 0, DateTimeKind.Utc);
@@ -596,6 +603,11 @@ public sealed partial class DocumentVersionMigrationTests(SqlServerFixture sql)
         else
         {
             Column("C4", 4, CellDataType.Decimal);
+        }
+
+        if (target == Target.TableRenamedDropsC4AddsZ)
+        {
+            Column("Z", 4, CellDataType.Decimal);
         }
 
         if (target == Target.AddsC4Only)

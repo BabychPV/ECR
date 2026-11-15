@@ -1222,6 +1222,11 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.Property<int>("ToColumnDefId")
                         .HasColumnType("int");
 
+                    b.Property<bool>("IsLegacyGlobal")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
+
                     b.HasKey("FromColumnDefId", "ToColumnDefId")
                         .HasName("PK_ColumnRename");
 
@@ -1229,6 +1234,23 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("IX_ColumnRename_To");
 
                     b.ToTable("ColumnRename", "cfg");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Configuration.ColumnRenameProject", b =>
+                {
+                    b.Property<int>("FromColumnDefId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ToColumnDefId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ProjectId")
+                        .HasColumnType("int");
+
+                    b.HasKey("FromColumnDefId", "ToColumnDefId", "ProjectId")
+                        .HasName("PK_ColumnRenameProject");
+
+                    b.ToTable("ColumnRenameProject", "cfg");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Configuration.ConditionalFormatRule", b =>

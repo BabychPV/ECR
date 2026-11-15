@@ -126,7 +126,7 @@ public sealed class CellHistoryVersionLineageTests(SqlServerFixture sql) : IDisp
         var world = await ArrangeAsync();
 
         await using var db = CreateContext();
-        var lineage = await new ColumnPathMapper(db).LineageAsync([world.C0, world.C1, world.P1, int.MaxValue], CancellationToken.None);
+        var lineage = await new ColumnPathMapper(db).LineageAsync([world.C0, world.C1, world.P1, int.MaxValue], null, CancellationToken.None);
 
         Assert.Equal(new[] { world.C0, world.P0 }.Order(), lineage[world.C0]);
 
@@ -144,6 +144,69 @@ public sealed class CellHistoryVersionLineageTests(SqlServerFixture sql) : IDisp
         => new AccessBuilder { UserId = UserId }
             .Grant(ResourceKind.Project, world.Doc.ProjectId, GrantLevel.Write)
             .Permission(GetCellChangesHandler.CellHistoryPermission);
+
+    /// <summary>
+    /// B127: <c>cfg.ColumnRename</c> спільний для шаблону, а перенос — на проєкт. Родовід ДЛЯ ДОКУМЕНТА бере пари свого
+    /// проєкту (ланцюжок RR → QR → C1 прив'язано до проєкту документа) і застарілі глобальні (записані до B127,
+    /// <c>IsLegacyGlobal = 1</c>), але не пару переносу ІНШОГО проєкту; без документа — усі пари, як раніше. Те саме — у
+    /// родоводі таблиць (B102) і мапі перерахунку (R-2, <see cref="ColumnRenameMap"/>).
+    /// </summary>
+    /// <remarks>
+    /// Мутації (червоніє цей тест): прибрати <c>RenameInScope</c> з <c>LineageSql</c> чи <c>TableLineageSql</c>; повернути
+    /// <c>ProjectOfAsync</c> → <c>null</c>; прибрати <c>r.IsLegacyGlobal = 1</c>; прибрати фільтр у <c>ColumnRenameMap</c>.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "B127")]
+    public async Task B127_Родовід_документа_бере_лише_перейменування_свого_проєкту_і_застарілі_глобальні()
+    {
+        var world = await ArrangeAsync();
+        var tag = world.Doc.SheetCode["SHEET".Length..];
+        var foreignProject = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(Key, columnCount: 1, rowCount: 1);
+
+        int foreign, legacy, foreignTable, legacyTable;
+        await using (var db = CreateContext())
+        {
+            var sheet = await VersionSheetAsync(db, world.Doc, $"0.6.0.{tag}");
+            foreign = (await TableAsync(db, sheet, $"FT_{tag}", $"F_{tag}"))[0];
+            legacy = (await TableAsync(db, sheet, $"GT_{tag}", $"G_{tag}"))[0];
+            db.ColumnRenames.Add(new ColumnRename(foreign, world.C0));
+            db.ColumnRenameProjects.Add(new ColumnRenameProject(foreign, world.C0, foreignProject.ProjectId));
+            db.ColumnRenames.Add(new ColumnRename(legacy, world.C0));
+            await db.SaveChangesAsync();
+            await db.Database.ExecuteSqlAsync(
+                $"UPDATE cfg.ColumnRename SET IsLegacyGlobal = 1 WHERE FromColumnDefId = {legacy} AND ToColumnDefId = {world.C0}");
+            foreignTable = await db.ColumnDefs.Where(c => c.Id == foreign).Select(c => c.TableDefId).SingleAsync();
+            legacyTable = await db.ColumnDefs.Where(c => c.Id == legacy).Select(c => c.TableDefId).SingleAsync();
+        }
+
+        await using var read = CreateContext();
+        var mapper = new ColumnPathMapper(read);
+        var docTable = world.Doc.TableDefId;
+
+        var scoped = await mapper.LineageAsync([world.C0, world.C1], world.Doc.DocumentId, CancellationToken.None);
+        Assert.Contains(legacy, scoped[world.C0]);
+        Assert.DoesNotContain(foreign, scoped[world.C0]);
+        Assert.Contains(world.QR, scoped[world.C1]);
+        Assert.Contains(world.RR, scoped[world.C1]);
+
+        var all = await mapper.LineageAsync([world.C0], null, CancellationToken.None);
+        Assert.Contains(foreign, all[world.C0]);
+        Assert.Contains(legacy, all[world.C0]);
+
+        var tables = await mapper.TableLineageAsync([docTable], world.Doc.DocumentId, CancellationToken.None);
+        Assert.Contains(legacyTable, tables[docTable]);
+        Assert.DoesNotContain(foreignTable, tables[docTable]);
+        Assert.Contains(foreignTable, (await mapper.TableLineageAsync([docTable], null, CancellationToken.None))[docTable]);
+
+        var (forward, _) = await new ColumnRenameMap(read).GetAsync(world.Doc.DocumentId, CancellationToken.None);
+        Assert.True(forward.ContainsKey(legacy));
+        Assert.False(forward.ContainsKey(foreign));
+        Assert.True(forward.ContainsKey(world.QR));
+        var (forwardAll, _) = await new ColumnRenameMap(read).GetAsync(null, CancellationToken.None);
+        Assert.True(forwardAll.ContainsKey(foreign));
+    }
 
     private async Task<World> ArrangeAsync()
     {
@@ -172,6 +235,10 @@ public sealed class CellHistoryVersionLineageTests(SqlServerFixture sql) : IDisp
         var rr = (await TableAsync(db, await VersionSheetAsync(db, doc, $"0.7.0.{tag}"), tableCode, $"OLDER_{tag}"))[0];
         db.ColumnRenames.Add(new ColumnRename(qr, c1));
         db.ColumnRenames.Add(new ColumnRename(rr, qr));
+
+        // ✎ B127: пари застосував перенос проєкту ЦЬОГО документа.
+        db.ColumnRenameProjects.Add(new ColumnRenameProject(qr, c1, doc.ProjectId));
+        db.ColumnRenameProjects.Add(new ColumnRenameProject(rr, qr, doc.ProjectId));
         await db.SaveChangesAsync();
 
         return new World(doc, rowKey, c0, c1, p[0], p[1], px, qr, rr);

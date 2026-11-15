@@ -2123,6 +2123,13 @@ public sealed partial class DocumentVersionMigrationStore(
         FROM   OPENJSON(@renames) WITH (f int, t int) r
         WHERE  NOT EXISTS (SELECT 1 FROM cfg.ColumnRename x WHERE x.FromColumnDefId = r.f AND x.ToColumnDefId = r.t);
 
+        -- ✎ B127: пара діє для родоводу документів ЛИШЕ цього проєкту (cfg.ColumnRename спільний для шаблону, а перенос - на проєкт).
+        INSERT cfg.ColumnRenameProject (FromColumnDefId, ToColumnDefId, ProjectId)
+        SELECT DISTINCT r.f, r.t, @projectId
+        FROM   OPENJSON(@renames) WITH (f int, t int) r
+        WHERE  NOT EXISTS (SELECT 1 FROM cfg.ColumnRenameProject x
+                           WHERE x.FromColumnDefId = r.f AND x.ToColumnDefId = r.t AND x.ProjectId = @projectId);
+
         -- 6c. RPT-STABLE Part B: часова шкала версій. Перший рядок (поточна версія на першому періоді) засівається, якщо
         -- його немає; далі рядки з ефективного початку й пізніші замінюються одним (X, нова). Увесь проєкт (@fromPeriod = 0)
         -- лишає ОДИН рядок - нову версію з першого періоду.

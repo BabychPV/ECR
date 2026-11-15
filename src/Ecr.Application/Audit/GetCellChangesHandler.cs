@@ -236,7 +236,7 @@ public sealed class GetCellChangesHandler(
         if (filter.IsSingleCell)
         {
             var cell = filter.ColumnDefId!.Value;
-            var lineage = (await columns.LineageAsync([cell], ct).ConfigureAwait(false)).GetValueOrDefault(cell) ?? [cell];
+            var lineage = (await columns.LineageAsync([cell], filter.DocumentId, ct).ConfigureAwait(false)).GetValueOrDefault(cell) ?? [cell];
             return (filter with { VisibleColumnIds = lineage, ColumnLineage = lineage }, lineage.ToHashSet());
         }
 
@@ -246,7 +246,7 @@ public sealed class GetCellChangesHandler(
             return (filter with { VisibleColumnIds = visible }, new HashSet<int>());
         }
 
-        var lineages = await columns.LineageAsync(visible, ct).ConfigureAwait(false);
+        var lineages = await columns.LineageAsync(visible, filter.DocumentId, ct).ConfigureAwait(false);
         IReadOnlyList<int> widened = [.. visible.Concat(lineages.Values.SelectMany(v => v)).Distinct().Order()];
         return (filter with { VisibleColumnIds = widened }, widened.ToHashSet());
     }
@@ -372,7 +372,7 @@ public sealed class GetCellChangesHandler(
         {
             var allowed = visible as IReadOnlySet<int> ?? visible.ToHashSet();
             var lineages = await columns
-                .LineageAsync([.. owners.SelectMany(o => o.ColumnDefIds).Distinct()], ct)
+                .LineageAsync([.. owners.SelectMany(o => o.ColumnDefIds).Distinct()], documentId, ct)
                 .ConfigureAwait(false);
             owners =
             [

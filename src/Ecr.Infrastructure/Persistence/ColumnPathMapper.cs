@@ -102,6 +102,15 @@ public sealed class ColumnPathMapper(EcrDbContext db) : IColumnPathMapper
     internal const int MaxLineageRounds = 8;
 
     /// <summary>
+    /// ✎ B127: пара <c>cfg.ColumnRename</c> <c>r</c> діє для документа, лише якщо її застосував перенос ПРОЄКТУ документа
+    /// (<c>cfg.ColumnRenameProject</c>, пошук за PK) або вона застаріла глобальна (записана до B127, проєкт невідомий).
+    /// <c>@projectId</c> = NULL — усі пари (родовід без документа).
+    /// </summary>
+    private const string RenameInScope =
+        "(@projectId IS NULL OR r.IsLegacyGlobal = 1 OR EXISTS (SELECT 1 FROM cfg.ColumnRenameProject AS rp "
+        + "WHERE rp.FromColumnDefId = r.FromColumnDefId AND rp.ToColumnDefId = r.ToColumnDefId AND rp.ProjectId = @projectId))";
+
+    /// <summary>
     /// V-4: ОДИН запит на раунд — шлях кожної названої колонки й Id того самого шляху в усіх версіях її шаблону,
     /// разом із джерелом перейменування (<c>cfg.ColumnRename</c>), що веде в будь-який із них.
     /// </summary>
@@ -112,7 +121,7 @@ public sealed class ColumnPathMapper(EcrDbContext db) : IColumnPathMapper
     /// <c>UQ_TableDef (SheetDefId, Code)</c>, <c>UQ_ColumnDef (TableDefId, Code)</c>, <c>IX_ColumnRename_To</c>,
     /// версії шаблону — за <c>(TemplateId, Version)</c>. Розмір виходу — колонки × версії шаблону.
     /// </remarks>
-    private const string LineageSql = """
+    private const string LineageSql = $"""
         SELECT c.Id AS SourceId, c2.Id AS LinkedId, r.FromColumnDefId AS RenamedFromId
           FROM OPENJSON(@ids) AS j
           JOIN cfg.ColumnDef AS c ON c.Id = CAST(j.[value] AS int)
@@ -124,6 +133,7 @@ public sealed class ColumnPathMapper(EcrDbContext db) : IColumnPathMapper
           JOIN cfg.TableDef AS t2 ON t2.SheetDefId = s2.Id AND t2.Code = t.Code
           JOIN cfg.ColumnDef AS c2 ON c2.TableDefId = t2.Id AND c2.Code = c.Code
           LEFT JOIN cfg.ColumnRename AS r ON r.ToColumnDefId = c2.Id
+               AND {RenameInScope}
         """;
 
     /// <inheritdoc />
@@ -132,9 +142,10 @@ public sealed class ColumnPathMapper(EcrDbContext db) : IColumnPathMapper
     /// його власний шлях у інших версіях і перейменування, що ведуть у нього.
     /// </remarks>
     public async Task<IReadOnlyDictionary<int, IReadOnlyList<int>>> LineageAsync(
-        IReadOnlyCollection<int> columnIds, CancellationToken ct)
+        IReadOnlyCollection<int> columnIds, long? documentId, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(columnIds);
+        var projectId = await ProjectOfAsync(documentId, ct).ConfigureAwait(false);
 
         var result = new Dictionary<int, HashSet<int>>();
         foreach (var id in columnIds)
@@ -148,7 +159,7 @@ public sealed class ColumnPathMapper(EcrDbContext db) : IColumnPathMapper
         {
             var json = "[" + string.Join(",", frontier.Keys.Select(v => v.ToString(CultureInfo.InvariantCulture))) + "]";
             var rows = await db.Database
-                .SqlQueryRaw<LineageRow>(LineageSql, new SqlParameter("@ids", SqlDbType.NVarChar, -1) { Value = json })
+                .SqlQueryRaw<LineageRow>(LineageSql, IdsParameter(json), ProjectParameter(projectId))
                 .ToListAsync(ct)
                 .ConfigureAwait(false);
 
@@ -186,7 +197,7 @@ public sealed class ColumnPathMapper(EcrDbContext db) : IColumnPathMapper
     /// тож джерело — таблиця колонки <c>FromColumnDefId</c>. Пошуки за <c>UQ_SheetDef</c>, <c>UQ_TableDef</c>,
     /// <c>UQ_ColumnDef</c> (за <c>TableDefId</c>) і <c>IX_ColumnRename_To</c>.
     /// </remarks>
-    private const string TableLineageSql = """
+    private const string TableLineageSql = $"""
         SELECT t.Id AS SourceId, t2.Id AS LinkedId, rf.FromTableId AS RenamedFromId
           FROM OPENJSON(@ids) AS j
           JOIN cfg.TableDef AS t ON t.Id = CAST(j.[value] AS int)
@@ -199,7 +210,8 @@ public sealed class ColumnPathMapper(EcrDbContext db) : IColumnPathMapper
                          FROM cfg.ColumnDef AS c2
                          JOIN cfg.ColumnRename AS r ON r.ToColumnDefId = c2.Id
                          JOIN cfg.ColumnDef AS cf ON cf.Id = r.FromColumnDefId
-                        WHERE c2.TableDefId = t2.Id AND cf.TableDefId <> t2.Id) AS rf
+                        WHERE c2.TableDefId = t2.Id AND cf.TableDefId <> t2.Id
+                          AND {RenameInScope}) AS rf
         """;
 
     /// <inheritdoc />
@@ -208,9 +220,10 @@ public sealed class ColumnPathMapper(EcrDbContext db) : IColumnPathMapper
     /// (її власний шлях у інших версіях і перейменування, що ведуть у неї).
     /// </remarks>
     public async Task<IReadOnlyDictionary<int, IReadOnlyList<int>>> TableLineageAsync(
-        IReadOnlyCollection<int> tableIds, CancellationToken ct)
+        IReadOnlyCollection<int> tableIds, long? documentId, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(tableIds);
+        var projectId = await ProjectOfAsync(documentId, ct).ConfigureAwait(false);
 
         var result = new Dictionary<int, HashSet<int>>();
         foreach (var id in tableIds)
@@ -223,7 +236,7 @@ public sealed class ColumnPathMapper(EcrDbContext db) : IColumnPathMapper
         {
             var json = "[" + string.Join(",", frontier.Keys.Select(v => v.ToString(CultureInfo.InvariantCulture))) + "]";
             var rows = await db.Database
-                .SqlQueryRaw<LineageRow>(TableLineageSql, new SqlParameter("@ids", SqlDbType.NVarChar, -1) { Value = json })
+                .SqlQueryRaw<LineageRow>(TableLineageSql, IdsParameter(json), ProjectParameter(projectId))
                 .ToListAsync(ct)
                 .ConfigureAwait(false);
 
@@ -250,6 +263,30 @@ public sealed class ColumnPathMapper(EcrDbContext db) : IColumnPathMapper
 
         return result.ToDictionary(p => p.Key, p => (IReadOnlyList<int>)[.. p.Value.Order()]);
     }
+
+    /// <summary>
+    /// ✎ B127: проєкт документа для <see cref="RenameInScope"/>; <c>null</c> — без документа (усі пари). Невідомий документ —
+    /// <c>0</c> (лише застарілі глобальні пари), а не «усі»: межа не розширюється через помилку викликача.
+    /// </summary>
+    private async Task<int?> ProjectOfAsync(long? documentId, CancellationToken ct)
+    {
+        if (documentId is not { } id)
+        {
+            return null;
+        }
+
+        var project = await db.Documents.AsNoTracking()
+            .Where(d => d.Id == id)
+            .Select(d => (int?)d.ProjectId)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+        return project ?? 0;
+    }
+
+    private static SqlParameter IdsParameter(string json) => new("@ids", SqlDbType.NVarChar, -1) { Value = json };
+
+    private static SqlParameter ProjectParameter(int? projectId)
+        => new("@projectId", SqlDbType.Int) { Value = projectId is { } p ? p : DBNull.Value };
 
     /// <summary>Рядок <see cref="LineageSql"/>; імена колонок — імена властивостей.</summary>
     /// <param name="SourceId">Названа (або розгортувана) колонка.</param>

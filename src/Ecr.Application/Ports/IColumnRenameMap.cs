@@ -7,7 +7,12 @@ namespace Ecr.Application.Ports;
 /// </summary>
 public interface IColumnRenameMap
 {
-    /// <summary>Пари «старa колонка → нова» і зворотні (читання скоупу: мапа мала, читається раз).</summary>
+    /// <summary>Пари «старa колонка → нова» і зворотні (читання скоупу: мапа мала, читається раз на проєкт).</summary>
+    /// <param name="documentId">
+    /// ✎ B127: документ, для якого читається мапа, — лише пари, що застосував перенос ЙОГО проєкту (плюс застарілі
+    /// глобальні, записані до B127). <c>null</c> — усі пари.
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
-    public Task<(IReadOnlyDictionary<int, int> Forward, IReadOnlyDictionary<int, int> Backward)> GetAsync(CancellationToken ct);
+    public Task<(IReadOnlyDictionary<int, int> Forward, IReadOnlyDictionary<int, int> Backward)> GetAsync(
+        long? documentId, CancellationToken ct);
 }
