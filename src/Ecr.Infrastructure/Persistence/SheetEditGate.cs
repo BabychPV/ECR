@@ -62,6 +62,9 @@ public sealed class SheetEditGate(EcrDbContext db, SheetEditGatePolicy? policy =
     /// </summary>
     private readonly HashSet<long> _goneDocuments = [];
 
+    /// <summary>✎ B75: (документ, період) → чи бачило спільне блокування аркуша блокування рядків (див. <see cref="RowLocksSeen"/>).</summary>
+    private readonly Dictionary<(long DocumentId, int PeriodKey), bool> _rowLocksSeen = [];
+
     /// <summary>Ім'я ресурсу <c>sp_getapplock</c> аркуша «документ × аркуш × період».</summary>
     /// <param name="documentId">Документ.</param>
     /// <param name="sheetDefId">Аркуш.</param>
@@ -134,19 +137,38 @@ public sealed class SheetEditGate(EcrDbContext db, SheetEditGatePolicy? policy =
         // ⛔ Стан читається ПІСЛЯ блокування і окремим запитом: під RCSI знімок
         // береться на початку ОПЕРАТОРА, тож цей оператор бачить подання, яке
         // зафіксувалося, поки ми чекали на блокування.
-        var status = await db.ApprovalStates
+        // ✎ B75: тим самим оператором — чи є в документа за період незняті блокування рядків (EXISTS, 0 нових звернень):
+        // записувач перечитує їх під цим замком лише тоді, коли вони є (`RowLocksSeen`).
+        var period = periodKey.Value;
+        var found = await db.Documents
             .AsNoTracking()
-            .Where(a => a.DocumentId == documentId
-                        && a.SheetDefId == sheetDefId
-                        && a.PeriodKey == periodKey.Value
-                        // RS: стан КОПІЇ окремий — затвердження оригіналу копію не замикає (і навпаки).
-                        && a.SheetCopyId == sheetCopyId)
-            .Select(a => (DocumentStatus?)a.Status)
+            .Where(d => d.Id == documentId)
+            .Select(d => new
+            {
+                Status = db.ApprovalStates
+                    .Where(a => a.DocumentId == documentId
+                                && a.SheetDefId == sheetDefId
+                                && a.PeriodKey == period
+                                // RS: стан КОПІЇ окремий — затвердження оригіналу копію не замикає (і навпаки).
+                                && a.SheetCopyId == sheetCopyId)
+                    .Select(a => (DocumentStatus?)a.Status)
+                    .FirstOrDefault(),
+                // ⚠ Без умови часу (fail-closed): годинник служби тут не потрібен, а прострочене незняте блокування
+                // коштує лише одного точного перечитування нижче, яке рахує строк за годинником записувача.
+                RowLocks = db.RowLocks.Any(x => x.DocumentId == documentId
+                                                && x.PeriodKeyValue == period
+                                                && x.ReleasedAt == null),
+            })
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 
-        return status ?? DocumentStatus.Draft;
+        _rowLocksSeen[(documentId, period)] = found?.RowLocks ?? false;
+        return found?.Status ?? DocumentStatus.Draft;
     }
+
+    /// <inheritdoc />
+    public bool RowLocksSeen(long documentId, int periodKey)
+        => !_rowLocksSeen.TryGetValue((documentId, periodKey), out var seen) || seen;
 
     /// <inheritdoc />
     public Task EnterSubmitAsync(long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)

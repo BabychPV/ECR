@@ -62,7 +62,10 @@ public sealed class DeleteRowHandler(
 
     // ✎ Журнал рядків (`aud.RowChange`): «видалено рядок» у журналі аркуша — тією самою транзакцією, що й видалення
     // (поруч зі складом у `aud.StructureChange`, який журнал аркуша не читає). `null` — лише прямі конструктори тестів.
-    IRowChangeAudit? rowAudit = null)
+    IRowChangeAudit? rowAudit = null,
+
+    // ✎ B75: блокування рядків — повторно під замком аркуша. `null` — прямі конструктори тестів.
+    IRowLockStore? rowLocks = null)
 {
     /// <summary>Тип сутності запису аудиту (<c>aud.StructureChange.EntityType</c>).</summary>
     public const string AuditEntityType = "doc.TableRow";
@@ -322,6 +325,15 @@ public sealed class DeleteRowHandler(
         // ексклюзивність, що з'явилися між рішенням і комітом, відхиляють видалення (рядковий рівень, без колонки).
         await EnsureAssignmentsHoldAsync(instance, table, profile, assignmentsPresent, sheetCode, ct)
             .ConfigureAwait(false);
+
+        // ✎ B75: рядок, заблокований між рішенням і цим замком, — та сама відмова RowLocked.
+        var lockedRows = await RowLocks.RowLockRecheck
+            .LockedAsync(sheetGate, rowLocks, profile, instance.DocumentId, instance.PeriodKey, clock.UtcNow, ct)
+            .ConfigureAwait(false);
+        if (lockedRows.Contains((instance.SheetCopyId, table.Code, key.Value)))
+        {
+            throw DeleteDenied(EditDenyReason.RowLocked);
+        }
 
         // Живий рядок: «немає» і «уже видалено» — одна відповідь (нерозкриття).
         var row = await rowStore

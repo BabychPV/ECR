@@ -696,6 +696,25 @@ public sealed partial class PatchCellsHandler
 
         await EnsureWorkbookSheetsEditableAsync(active, statuses, ct).ConfigureAwait(false);
 
+        // ✎ B75: блокування рядків — повторно під замками аркушів книги (один запит на період, лише коли вони є).
+        var lockedByPeriod = new Dictionary<int, IReadOnlySet<(long? SheetCopyId, string TableCode, string RowKey)>>();
+        foreach (var item in active)
+        {
+            var itemPeriod = item.Context.PeriodKey.Value;
+            if (!lockedByPeriod.TryGetValue(itemPeriod, out var locked))
+            {
+                locked = await RowLocks.RowLockRecheck
+                    .LockedAsync(sheetGate, rowLocks, item.Context.Profile, documentId, itemPeriod, clock.UtcNow, ct)
+                    .ConfigureAwait(false);
+                lockedByPeriod[itemPeriod] = locked;
+            }
+
+            Blamed(item.Id, () => RowLocks.RowLockRecheck.ThrowIfLocked(
+                locked, item.Context.Instance.SheetCopyId, item.Context.Table.Code,
+                item.Context.Updates.Concat(item.Context.Creations).Select(r => r.RowKey),
+                item.Planned.Upserts.Count + item.Planned.Deletes.Count));
+        }
+
         // ⛔ AN-106 (P1-01): ліміт очікування блокувань — до стелі й вставки нових рядків, як у
         // поштучного (`PersistCoreAsync`); `ApplyBatchAsync` нижче його вже не повторює.
         await cellStore.LimitLockWaitAsync(ct).ConfigureAwait(false);

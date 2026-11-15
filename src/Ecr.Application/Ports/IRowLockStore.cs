@@ -57,6 +57,18 @@ public interface IRowLockStore
     /// <param name="ct">Токен скасування.</param>
     public Task LockDocumentAsync(long documentId, CancellationToken ct);
 
+    /// <summary>
+    /// ✎ B75: діючі на <paramref name="utcNow"/> блокування рядків документа за період, власник яких — НЕ
+    /// <paramref name="userId"/>: перевірка записувача ПІД замком аркуша (гонка «блокування між рішенням і записом»).
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період екземпляра.</param>
+    /// <param name="userId">Хто пише.</param>
+    /// <param name="utcNow">Момент.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<(long? SheetCopyId, string TableCode, string RowKey)>> LockedByOthersAsync(
+        long documentId, int periodKey, int userId, DateTime utcNow, CancellationToken ct);
+
     /// <summary>Додає нові блокування.</summary>
     /// <param name="locks">Блокування.</param>
     public void AddRange(IEnumerable<RowLock> locks);

@@ -149,5 +149,24 @@ public sealed class RowLockStore(EcrDbContext db) : IRowLockStore
             .ConfigureAwait(false);
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<(long? SheetCopyId, string TableCode, string RowKey)>> LockedByOthersAsync(
+        long documentId, int periodKey, int userId, DateTime utcNow, CancellationToken ct)
+    {
+        var rows = await db.RowLocks
+            .AsNoTracking()
+            .Where(x => x.DocumentId == documentId
+                        && x.PeriodKeyValue == periodKey
+                        && x.ReleasedAt == null
+                        && x.LockFrom <= utcNow
+                        && x.LockUntil > utcNow
+                        && x.OwnerUserId != userId)
+            .Select(x => new { x.SheetCopyId, x.TableCode, x.RowKey })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return [.. rows.Select(x => (x.SheetCopyId, x.TableCode, x.RowKey))];
+    }
+
+    /// <inheritdoc />
     public void AddRange(IEnumerable<RowLock> locks) => db.RowLocks.AddRange(locks);
 }

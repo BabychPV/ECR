@@ -185,7 +185,7 @@ public sealed class PatchCellStylesAssignmentGateTests
             IsExclusive: exclusive, IsValidated: validated, DelegatorActive: true,
             DelegatedByUserId: OwnerId, ExpiresAt: expiresAt, MyProgress: progress);
 
-    private PatchCellStylesHandler Handler()
+    private PatchCellStylesHandler Handler(IRowLockStore? rowLocks = null)
     {
         var user = Substitute.For<ICurrentUser>();
         user.UserId.Returns(UserId);
@@ -193,7 +193,54 @@ public sealed class PatchCellStylesAssignmentGateTests
         clock.UtcNow.Returns(Now);
 
         return new PatchCellStylesHandler(
-            _rows, _styles, _metadata, _access, _gate, _uow, _audit, user, clock, _assignments);
+            _rows, _styles, _metadata, _access, _gate, _uow, _audit, user, clock, _assignments, rowLocks);
+    }
+
+    /// <remarks>
+    /// ✎ B75 (F13 п.4): рядок заблоковано між рішенням і записом кольору — під замком аркуша відмова RowLocked, нічого
+    /// не записано; замок без блокувань (<c>RowLocksSeen = false</c>) сховища блокувань не питає. Мутація: прибрати
+    /// перевірку в <c>PatchCellStylesHandler</c> — червоніє перший випадок.
+    /// </remarks>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Рядок_заблоковано_між_рішенням_і_записом_кольору_відмова_RowLocked(bool seen)
+    {
+        _access.CanClearCellsAsync(
+                Arg.Any<AccessProfile>(), TableInstance, Arg.Any<PeriodKey>(),
+                Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>())
+            .Returns(call => new Dictionary<CellAddress, EditDecision>
+            {
+                [new CellAddress(new PeriodKey(Period), 1, ColumnId)] = EditDecision.Allow(),
+            });
+        _assignments.ReadFactsForGateAsync(Document, UserId, Arg.Any<CancellationToken>())
+                    .Returns(new EditAssignmentGateFacts(OwnerId, []));
+        _gate.RowLocksSeen(Document, Period).Returns(seen);
+
+        var rowLocks = Substitute.For<IRowLockStore>();
+        rowLocks.LockedByOthersAsync(Document, Period, UserId, Now, Arg.Any<CancellationToken>())
+                .Returns(Task.FromResult<IReadOnlyList<(long? SheetCopyId, string TableCode, string RowKey)>>(
+                    [(null, "Main", "R1")]));
+
+        var call = () => Handler(rowLocks).HandleAsync(
+            Document,
+            new TableInstanceRef(TableInstance, Document, TableDef, 2, Period),
+            new PatchCellStylesRequest(Period, [new CellStyleChange("R1", "Volume", "#FFFF00")], false),
+            CancellationToken.None);
+
+        if (seen)
+        {
+            var ex = await Assert.ThrowsAsync<AccessDeniedException>(call);
+            Assert.Equal(nameof(EditDenyReason.RowLocked), ex.Details?["reason"]?.ToString());
+            _styles.DidNotReceive().Add(Arg.Any<CellStyle>());
+        }
+        else
+        {
+            await call();
+            await rowLocks.DidNotReceive().LockedByOthersAsync(
+                Arg.Any<long>(), Arg.Any<int>(), Arg.Any<int>(), Arg.Any<DateTime>(), Arg.Any<CancellationToken>());
+            _styles.Received(1).Add(Arg.Any<CellStyle>());
+        }
     }
 
     private static AccessProfile Profile() => new()

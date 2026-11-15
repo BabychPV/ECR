@@ -178,4 +178,17 @@ public interface ISheetEditGate
     /// Береться ПІСЛЯ структури й ДО блокування аркуша.
     /// </remarks>
     public Task EnterHeaderAsync(long documentId, bool exclusive, CancellationToken ct);
+
+    /// <summary>
+    /// ✎ B75: чи бачило спільне блокування аркуша документа за період (<see cref="EnterEditAsync"/> і копієві варіанти)
+    /// незняті блокування рядків (<c>doc.RowLock</c>, без умови строку) — тим самим запитом, що й стан аркуша, ПІСЛЯ
+    /// того, як блокування взято. Записувачі за цією ознакою вирішують, чи перечитувати блокування рядків під замком.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <returns>
+    /// <c>true</c> — блокування є або невідомо (типова реалізація обгорток у тестах і період, замок якого ще не брали):
+    /// перевірка під замком тоді виконується (fail-closed).
+    /// </returns>
+    public bool RowLocksSeen(long documentId, int periodKey) => true;
 }

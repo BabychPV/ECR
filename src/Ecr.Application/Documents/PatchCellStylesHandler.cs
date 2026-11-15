@@ -52,7 +52,10 @@ public sealed class PatchCellStylesHandler(
     IClock clock,
 
     // ⛔ EA-B: передачі зрізу читаються ПІД блокуванням аркуша ЗАВЖДИ (fail-closed: сховище обов'язкове).
-    IEditAssignmentStore assignments)
+    IEditAssignmentStore assignments,
+
+    // ✎ B75: блокування рядків — повторно під замком аркуша. `null` — прямі конструктори тестів.
+    IRowLockStore? rowLocks = null)
 {
     /// <summary>Тип події журналу безпеки: оформлення задано/змінено.</summary>
     public const string SetEventType = "CellStyleSet";
@@ -245,6 +248,15 @@ public sealed class PatchCellStylesHandler(
                 .EnterEditOfAsync(documentId, table.SheetDefId, period, instance.SheetCopyId, innerCt)
                 .ConfigureAwait(false);
             EnsureSheetEditable(status, targets.Count + decided.ScopeDenied.Values.Sum());
+
+            // ✎ B75: рядок, заблокований між рішенням і цим замком, — повна відмова RowLocked (колір рядка теж замкнено, Q3).
+            var lockedRows = await RowLocks.RowLockRecheck
+                .LockedAsync(sheetGate, rowLocks, profile, documentId, period.Value, clock.UtcNow, innerCt)
+                .ConfigureAwait(false);
+            if (decided.Allowed.Any(t => lockedRows.Contains((instance.SheetCopyId, table.Code, t.Target.RowKey))))
+            {
+                throw DeniedCells(targets.Count, EditDenyReason.RowLocked);
+            }
 
             // ⛔ EA-B: передача зрізу ПОВТОРНО — під блокуванням аркуша, і порядок блокувань той самий, що в
             // CreateRow/DeleteRow/PatchCells: структура → аркуш → передачі (U) → виконавці. Рішення про права

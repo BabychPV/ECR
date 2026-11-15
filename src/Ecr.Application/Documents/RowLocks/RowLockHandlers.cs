@@ -237,6 +237,14 @@ public sealed class GetRowLocksHandler(
 /// <summary>
 /// ✎ B75: <c>POST /documents/{id}/row-locks</c> — блокує рядки таблиці (усе або нічого; вже заблокований рядок — 409).
 /// </summary>
+/// <remarks>
+/// ⛔ B75 (F13 пункт 4): блокування створюється під ВИНЯТКОВИМ замком аркуша × періоду (× копії) — тим самим, що й
+/// подання й створення рядків (<see cref="ISheetEditGate"/>), після спільного замка структури, як у всіх записувачів.
+/// Записувач, що вже пише (спільний замок), дописує й комітить ДО блокування; той, що прийде після, під своїм замком
+/// перечитує блокування (<see cref="RowLockRecheck"/>) і відмовляє <c>RowLocked</c>. Тож запису після блокування,
+/// яке він не бачив, не буває. Порядок замків: структура → аркуш → рядок документа (UPDLOCK), як у записувачів
+/// (вони торкаються <c>doc.Document</c> після аркуша).
+/// </remarks>
 public sealed class CreateRowLocksHandler(
     IRowLockStore store,
     IDocumentStore documents,
@@ -245,7 +253,8 @@ public sealed class CreateRowLocksHandler(
     IUnitOfWork uow,
     IAuditWriter audit,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+    ISheetEditGate sheetGate)
 {
     /// <summary>Створює блокування.</summary>
     /// <param name="documentId">Документ.</param>
@@ -328,8 +337,11 @@ public sealed class CreateRowLocksHandler(
         {
             created.Clear();
 
-            // ⛔ Перевірка перетину й вставка — під UPDLOCK рядка документа: два паралельні блокування того самого рядка
-            // не проходять обидва.
+            // ⛔ F13 п.4: структура (спільно) → аркуш × період × копія (ВИНЯТКОВО) — серіалізує з записувачами цього
+            // аркуша; далі UPDLOCK рядка документа: два паралельні блокування того самого рядка не проходять обидва.
+            await sheetGate.EnterStructureForPeriodAsync(documentId, exclusive: false, key.Value, innerCt).ConfigureAwait(false);
+            await sheetGate.EnterSubmitOfAsync(documentId, found.Sheet.Id, key, request.SheetCopyId, innerCt)
+                .ConfigureAwait(false);
             await store.LockDocumentAsync(documentId, innerCt).ConfigureAwait(false);
 
             // Стан проєкту/періоду — перечитується під замком (архівація могла зафіксуватися між перевіркою й замком).

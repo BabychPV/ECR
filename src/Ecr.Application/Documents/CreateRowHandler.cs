@@ -32,7 +32,10 @@ public sealed class CreateRowHandler(
 
     // ✎ SHEETNAME (борг 09.11): перерахунок колонок SHEETNAME нового рядка. Контейнер передає завжди; `null` — лише
     // прямі конструктори тестів, і тоді задачі немає.
-    IBackgroundJobScheduler? jobs = null)
+    IBackgroundJobScheduler? jobs = null,
+
+    // ✎ B75: блокування рядків — повторно під замком аркуша. `null` — прямі конструктори тестів.
+    IRowLockStore? rowLocks = null)
 {
     /// <summary>Походження запису журналу рядків для POST row — правка людини.</summary>
     public const string RowAuditOrigin = CellChangeOrigins.UserEdit;
@@ -315,6 +318,9 @@ public sealed class CreateRowHandler(
         await EnsureAssignmentsHoldAsync(instance, table, profile, assignmentsPresent, sheetCode, ct)
             .ConfigureAwait(false);
 
+        // ✎ B75: ключ рядка, заблокований між рішенням і цим замком, — та сама відмова RowLocked.
+        await EnsureKeyNotLockedAsync(instance, table, key, profile, ct).ConfigureAwait(false);
+
         // Стеля й дубль ключа — за якорем.
         var anchorRows = await rowStore.GetRowIdsAsync(anchorInstance.TableInstanceId, mirror.Anchor, ct).ConfigureAwait(false);
         if (table.MaxDynamicRows is { } max && anchorRows.Count >= max)
@@ -461,6 +467,28 @@ public sealed class CreateRowHandler(
     /// читає <c>EnterEditAsync</c> — той самий власник транзакції вже тримає
     /// виняткове, тож спільне видається одразу й лише читає стан після блокування.
     /// </remarks>
+    /// <summary>✎ B75: блокування рядка з ключем <paramref name="key"/> — повторно під уже взятим замком аркуша.</summary>
+    private async Task EnsureKeyNotLockedAsync(
+        Ports.TableInstanceRef instance, TableDef table, RowKey key, AccessProfile profile, CancellationToken ct)
+    {
+        var locked = await RowLocks.RowLockRecheck
+            .LockedAsync(sheetGate, rowLocks, profile, instance.DocumentId, instance.PeriodKey, clock.UtcNow, ct)
+            .ConfigureAwait(false);
+        if (!locked.Contains((instance.SheetCopyId, table.Code, key.Value)))
+        {
+            return;
+        }
+
+        throw new Errors.AccessDeniedException(
+            "ECR-ACCS-0403",
+            $"Рядок у цю таблицю додати не можна: {EditDenyReason.RowLocked}.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-ACCS-0403.addRowDenied",
+                ["reason"] = nameof(EditDenyReason.RowLocked),
+            });
+    }
+
     private async Task<long> CreateUnderLockAsync(
         Ports.TableInstanceRef instance, TableDef table, long tableInstanceId, RowKey key,
         AccessProfile profile, bool assignmentsPresent, string? sheetCode, CancellationToken ct)
@@ -509,6 +537,9 @@ public sealed class CreateRowHandler(
         // коммітом, відхиляють створення рядка тією ж відмовою, що й служба доступу.
         await EnsureAssignmentsHoldAsync(instance, table, profile, assignmentsPresent, sheetCode, ct)
             .ConfigureAwait(false);
+
+        // ✎ B75: ключ рядка, заблокований між рішенням і цим замком, — та сама відмова RowLocked.
+        await EnsureKeyNotLockedAsync(instance, table, key, profile, ct).ConfigureAwait(false);
 
         var existing = await rowStore.GetRowIdsAsync(tableInstanceId, PeriodKeyOf(instance), ct).ConfigureAwait(false);
 
