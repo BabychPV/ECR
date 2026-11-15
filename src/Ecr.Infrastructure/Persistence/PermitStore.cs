@@ -108,18 +108,21 @@ public sealed class PermitStore(EcrDbContext db) : IPermitStore
 
         // ⛔ B56: історія дозволів (j) — пізніший дозвіл «з дати» (doc.PermitSegment) і частина місяця (doc.CellPermitPart) — теж
         // використання документом, хоч у полі чи комірці його немає. Рахується ДОКУМЕНТ, а не сегмент: кілька сегментів чи частин
-        // одного документа — один документ (UNION у SQL). Сегмент логічний (без періоду) — з фільтром періоду, як шапка,
-        // береться документ, що має таблиці в цьому періоді; частина належить місяцю — фільтр за її періодом.
+        // одного документа — один документ (UNION у SQL). Видалені логічно рядки не рахуються (PermitHistoryUsage).
+        // Сегмент логічний (без періоду) — з фільтром періоду береться документ, що має таблиці в цьому періоді, і лише
+        // сегмент, чинний не пізніше кінця періоду (ValidFrom <= Period.PeriodEnd проєкту); частина належить місяцю — фільтр
+        // за її періодом.
         var segmentDocuments =
-            from s in db.PermitSegments.AsNoTracking()
+            from s in PermitHistoryUsage.LiveSegments(db)
             where s.RegistryEntryId == permitId
             join d in db.Documents.AsNoTracking() on s.DocumentId equals d.Id
             where projects == null || projects.Contains(d.ProjectId)
             where periodKey == null
-                  || db.TableInstances.Any(t => t.DocumentId == d.Id && t.PeriodKeyValue == periodKey)
+                  || (db.TableInstances.Any(t => t.DocumentId == d.Id && t.PeriodKeyValue == periodKey)
+                      && db.Periods.Any(p => p.ProjectId == d.ProjectId && p.PeriodKeyValue == periodKey && s.ValidFrom <= p.PeriodEnd))
             select d.Id;
         var partDocuments =
-            from part in db.CellPermitParts.AsNoTracking()
+            from part in PermitHistoryUsage.LiveParts(db)
             where part.RegistryEntryId == permitId && (periodKey == null || part.PeriodKeyValue == periodKey)
             join d in db.Documents.AsNoTracking() on part.DocumentId equals d.Id
             where projects == null || projects.Contains(d.ProjectId)
@@ -197,13 +200,13 @@ public sealed class PermitStore(EcrDbContext db) : IPermitStore
 
         // ⛔ B56: історія дозволів (j) — той самий предикат, що в FindUsagesAsync; пари (дозвіл, документ), не сегменти.
         var fromHistory = await (
-                from s in db.PermitSegments.AsNoTracking()
+                from s in PermitHistoryUsage.LiveSegments(db)
                 where permits.Contains(s.RegistryEntryId)
                 join d in db.Documents.AsNoTracking() on s.DocumentId equals d.Id
                 where projects == null || projects.Contains(d.ProjectId)
                 select new { Permit = s.RegistryEntryId, Document = d.Id })
             .Union(
-                from part in db.CellPermitParts.AsNoTracking()
+                from part in PermitHistoryUsage.LiveParts(db)
                 where permits.Contains(part.RegistryEntryId)
                 join d in db.Documents.AsNoTracking() on part.DocumentId equals d.Id
                 where projects == null || projects.Contains(d.ProjectId)
@@ -256,14 +259,14 @@ public sealed class PermitStore(EcrDbContext db) : IPermitStore
 
         // ⛔ B56: історія дозволів (j) — як у CountUsedInDocumentsAsync; пари (тип, документ), не сегменти.
         var fromHistory = await (
-                from s in db.PermitSegments.AsNoTracking()
+                from s in PermitHistoryUsage.LiveSegments(db)
                 join e in db.RegistryEntries.AsNoTracking() on s.RegistryEntryId equals e.Id
                 where !e.IsDeleted && types.Contains(e.RegistryDefId)
                 join d in db.Documents.AsNoTracking() on s.DocumentId equals d.Id
                 where projects == null || projects.Contains(d.ProjectId)
                 select new { Type = e.RegistryDefId, Document = d.Id })
             .Union(
-                from part in db.CellPermitParts.AsNoTracking()
+                from part in PermitHistoryUsage.LiveParts(db)
                 join e in db.RegistryEntries.AsNoTracking() on part.RegistryEntryId equals e.Id
                 where !e.IsDeleted && types.Contains(e.RegistryDefId)
                 join d in db.Documents.AsNoTracking() on part.DocumentId equals d.Id

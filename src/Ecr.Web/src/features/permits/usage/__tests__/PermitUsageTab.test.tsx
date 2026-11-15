@@ -166,6 +166,16 @@ describe('вкладка «Used in»', () => {
     expect(screen.getByText('Documents: 1 · places: 0 · in permit history: 1')).toBeTruthy();
   });
 
+  // Мутація: прибрати `&& data.historyDocumentCount > 0` з умови `historyOnly` — червоніє (казало б «лише в історії»).
+  it('комірки сховані правилами читання, історії немає: не «лише в історії», а звичайне «порожньо»', async () => {
+    getUsages.mockResolvedValue(usage([], { documentCount: 1, historyDocumentCount: 0 }));
+    open();
+
+    expect(await screen.findByText('Not used in any document yet')).toBeTruthy();
+    expect(screen.queryByText('Used only in permit history')).toBeNull();
+    expect(screen.getByText('Documents: 1 · places: 0')).toBeTruthy();
+  });
+
   it('відмова читання — помилка з повтором; повтор читає знову', async () => {
     getUsages.mockRejectedValueOnce(new EcrApiError({ title: 'Not found', status: 404, errorCode: 'ECR-PRM-0404', correlationId: 'c1' }));
     getUsages.mockResolvedValue(usage([headerItem()]));

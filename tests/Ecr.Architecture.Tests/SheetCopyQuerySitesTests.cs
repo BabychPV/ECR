@@ -70,6 +70,8 @@ public sealed partial class SheetCopyQuerySitesTests
             "HSE400 3b: «чи документ HSE400» — за екземплярами оригіналу (SheetCopyId == null), як у завантажувачі складу",
         ["src/Ecr.Infrastructure/Persistence/SystemHealthStore.cs"] =
             "B105: «чи є документ HSE400 року» для попередження про прапор — екземпляри оригіналу (SheetCopyId == null), як у завантажувачі складу",
+        ["src/Ecr.Infrastructure/Persistence/PermitHistoryUsage.cs"] =
+            "B56: живий рядок історії дозволів — екземпляр тієї ж копії (SheetCopyId сегмента/частини, null = оригінал)",
 
         // ── байдужі до копії: адресація за Id екземпляра/рядка або агрегат без ключа таблиці ──
         ["src/Ecr.Infrastructure/Persistence/PermitStore.cs"] = "«де вжито» за Id екземпляра рядка",

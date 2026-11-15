@@ -115,7 +115,10 @@ export function PermitUsageTab({ permitId }: PermitUsageTabProps): JSX.Element {
 
   const data = current.data;
   // B56: документ, де дозвіл лише в історії дозволів, рахується, але місць у переліку не має — порожня таблиця не каже «ніде».
-  const historyOnly = data !== undefined && data.items.length === 0 && data.documentCount > 0;
+  // ⚠ Лише коли історія справді є: порожньо буває й тоді, коли всі комірки сховані правилами читання (S6, D-214, S-4) —
+  // тоді документ теж рахується, але «лише в історії» було б неправдою.
+  const historyOnly =
+    data !== undefined && data.items.length === 0 && data.documentCount > 0 && data.historyDocumentCount > 0;
 
   return (
     <section aria-labelledby="pp-usage-title" className="pp-section" data-permit-usage={data === undefined ? 'loading' : 'ready'}>
