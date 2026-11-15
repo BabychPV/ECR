@@ -170,8 +170,14 @@ public sealed partial class ReportViewStableRenameScopeTests(ITestOutputHelper o
         Assert.Null(await ScalarStringAsync(stable, projects[3].ProjectId, 209901, "N1", "R1"));
     }
 
-    [Fact]
-    public async Task Результат_методики_Calculated_колонки_йде_під_аліасом_лише_для_свого_проєкту()
+    /// <summary>
+    /// Обидві гілки читача rv: прив'язка без предиката (<c>{}</c> - rowApply, <c>rvPack</c>) і з предикатом MatchJson за значенням
+    /// колонки A рядка (rvApply, <c>rvAgg</c>).
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Результат_методики_Calculated_колонки_йде_під_аліасом_лише_для_свого_проєкту(bool matchPredicate)
     {
         // v1: K (Calculated, прив'язка методики) -> v2: KN (Calculated); PB переніс K -> KN, PA - ні.
         var (templateId, code) = await NewTemplateAsync();
@@ -179,13 +185,15 @@ public sealed partial class ReportViewStableRenameScopeTests(ITestOutputHelper o
         var v2 = await AddTypedVersionAsync(templateId, "2", [("T", [("A", CellDataType.String), ("KN", CellDataType.Calculated)])]);
         var pb = await NewProjectAsync(v1.VersionId, 209901);
         var pa = await NewProjectAsync(v1.VersionId, 209901);
-        await SeedAsync(pb, 209901, v1.Tables["T"], ("A", "pb_a"));
-        await SeedAsync(pa, 209901, v1.Tables["T"], ("A", "pa_a"));
-        await SeedResultsAsync(v1.Tables["T"].TableId, v1.Tables["T"].Cols["K"], (pb, 209901, 9.5m), (pa, 209901, 7.5m));
+        await SeedAsync(pb, 209901, v1.Tables["T"], ("A", "m"));
+        await SeedAsync(pa, 209901, v1.Tables["T"], ("A", "m"));
+        var matchJson = matchPredicate ? $"{{\"{v1.Tables["T"].Cols["A"]}\":\"m\"}}" : "{}";
+        await SeedResultsAsync(v1.Tables["T"].TableId, v1.Tables["T"].Cols["K"], matchJson, (pb, 209901, 9.5m), (pa, 209901, 7.5m));
         await RenameAsync(v1.Tables["T"].Cols["K"], v2.Tables["T"].Cols["KN"], legacy: false, pb.ProjectId);
         await GenerateAsync(v2.VersionId, routing: false);
 
         var stable = Sanitise($"v_{code}_S_T");
+        Assert.Equal(matchPredicate, (await DefinitionAsync(stable)).Contains("OPENJSON", StringComparison.Ordinal));   // гілка rvApply
         Assert.Equal(((decimal?)9.5m, (decimal?)9.5m), await KAsync(stable, pb.ProjectId));   // PB: результат під обома іменами
         Assert.Equal(((decimal?)7.5m, (decimal?)null), await KAsync(stable, pa.ProjectId));   // PA: лише під своїм
     }
@@ -405,7 +413,7 @@ public sealed partial class ReportViewStableRenameScopeTests(ITestOutputHelper o
     }
 
     /// <summary>Методологія з прив'язкою до колонки, актуальний документний прогін і результат R1 на кожен (проєкт, період).</summary>
-    private async Task SeedResultsAsync(int tableId, int columnId, params (ProjectRef Project, int Period, decimal Value)[] results)
+    private async Task SeedResultsAsync(int tableId, int columnId, string matchJson, params (ProjectRef Project, int Period, decimal Value)[] results)
     {
         int versionId, unitId;
         var runs = new List<long>();
@@ -416,7 +424,7 @@ public sealed partial class ReportViewStableRenameScopeTests(ITestOutputHelper o
             await db.SaveChangesAsync();
             var version = new MethodologyVersion(methodology.Id, "1.0", CalculationLevel.Configuration, createdByUserId: 1, Now);
             db.MethodologyVersions.Add(version);
-            db.CalculationBindings.Add(new CalculationBinding(tableId, columnId, methodology.Id, "OUT", "{}"));
+            db.CalculationBindings.Add(new CalculationBinding(tableId, columnId, methodology.Id, "OUT", matchJson));
             await db.SaveChangesAsync();
             versionId = version.Id;
             unitId = await db.Units.AsNoTracking().OrderBy(u => u.Id).Select(u => u.Id).FirstAsync();
