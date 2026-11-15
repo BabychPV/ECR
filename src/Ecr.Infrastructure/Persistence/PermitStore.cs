@@ -112,6 +112,10 @@ public sealed class PermitStore(EcrDbContext db) : IPermitStore
         // Сегмент логічний (без періоду) — з фільтром періоду береться документ, що має таблиці в цьому періоді, і лише
         // сегмент, чинний не пізніше кінця періоду (ValidFrom <= Period.PeriodEnd проєкту), а сегмент рядка — лише якщо рядок
         // живий САМЕ в цьому періоді (як комірки; LiveSegmentsIn); частина належить місяцю — фільтр за її періодом.
+        // ⛔ B128: сегмент чинний до дня перед наступним сегментом ТІЄЇ Ж цілі (шкала PermitTimeline). Під фільтром періоду він
+        // рахується, лише якщо чинний бодай частково в періоді: ValidFrom <= PeriodEnd І немає наступного сегмента цілі з
+        // ValidFrom <= PeriodStart (інакше він закінчився до початку періоду). «Та сама ціль» — як UQ_PermitSegment_Header/_Row:
+        // шапка — документ + поле; рядок — документ + таблиця + копія аркуша + ключ рядка + колонка (рівність з NULL — як у C#).
         var liveSegments = periodKey is { } period
             ? PermitHistoryUsage.LiveSegmentsIn(db, period)
             : PermitHistoryUsage.LiveSegments(db);
@@ -122,7 +126,13 @@ public sealed class PermitStore(EcrDbContext db) : IPermitStore
             where projects == null || projects.Contains(d.ProjectId)
             where periodKey == null
                   || (db.TableInstances.Any(t => t.DocumentId == d.Id && t.PeriodKeyValue == periodKey)
-                      && db.Periods.Any(p => p.ProjectId == d.ProjectId && p.PeriodKeyValue == periodKey && s.ValidFrom <= p.PeriodEnd))
+                      && db.Periods.Any(p => p.ProjectId == d.ProjectId && p.PeriodKeyValue == periodKey
+                          && s.ValidFrom <= p.PeriodEnd
+                          && !db.PermitSegments.Any(n =>
+                              n.DocumentId == s.DocumentId && n.HeaderFieldDefId == s.HeaderFieldDefId
+                              && n.TableDefId == s.TableDefId && n.SheetCopyId == s.SheetCopyId
+                              && n.RowKey == s.RowKey && n.ColumnDefId == s.ColumnDefId
+                              && n.ValidFrom > s.ValidFrom && n.ValidFrom <= p.PeriodStart)))
             select d.Id;
         var partDocuments =
             from part in PermitHistoryUsage.LiveParts(db)
