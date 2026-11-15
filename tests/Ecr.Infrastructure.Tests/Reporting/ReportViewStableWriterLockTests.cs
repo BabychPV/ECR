@@ -29,7 +29,8 @@ namespace Ecr.Infrastructure.Tests.Reporting;
 /// ДО замка (перенести блок замка після <c>INSERT INTO @gt</c>) — червоніє тест «записувач, що чекав на замок»; без фіксу
 /// (05-rpt-views.sql з origin/main до B126) — червоніє тест прогону «усі шаблони». F13 B126: (M4) <c>Exclusive</c> → <c>Shared</c> —
 /// червоніє «два виклики процедури взаємно виключаються»; (M5) очищення видаляє ВСІ чужі імена — червоніє тест зіткнення імен;
-/// (M6) вкладений виклик губить 50422/50409 — червоніють обидва випадки «прогін усі прокидає помилку шаблону».
+/// (M6) вкладений виклик губить 50422/50409 — червоніють обидва випадки «прогін усі прокидає помилку шаблону»; (M9) прибрати
+/// <c>, @LockTimeoutMs</c> з тексту виклику в <c>ReportViewGenerator</c> — червоніє «генератор передає процедурі бюджет замка» (-2).
 /// </remarks>
 [Trait(TestCategories.Category, TestCategories.Integration)]
 [Trait("Requirement", "RPT-STABLE")]
@@ -207,6 +208,29 @@ public sealed partial class ReportViewStableWriterLockTests : IAsyncLifetime
         Assert.NotEqual(current, stored);
         var again = await Assert.ThrowsAsync<SqlException>(() => RunAsync("EXEC rpt.usp_GenerateStableViews NULL, 0, 1"));
         Assert.Equal(expected, again.Number);
+    }
+
+    [Fact]
+    public async Task Генератор_передає_процедурі_бюджет_замка_і_отримує_50423_до_власного_таймауту_команди()
+    {
+        var s = await ArrangeAsync();
+
+        await using var hold = await OpenAsync();
+        await using var holdTx = (SqlTransaction)await hold.BeginTransactionAsync();
+        await ExecAsync(hold, holdTx,
+            "DECLARE @rc int; EXEC @rc = sys.sp_getapplock @Resource = @r, @LockMode = N'Exclusive', @LockOwner = N'Transaction', @LockTimeout = 0; "
+            + "IF @rc < 0 THROW 50000, N'lock not granted', 1;",
+            ("@r", LockResource(s.TemplateId)));
+
+        // Стеля команди 4 с -> процедурі 2 с на замок: названа 50423, а не клієнтський таймаут (-2) після типових 30 с очікування,
+        // які процедура взяла б, якби генератор не передав @LockTimeoutMs у ТЕКСТІ виклику.
+        await using var db = _sql.CreateContext();
+        db.Database.SetCommandTimeout(4);
+        var clock = Stopwatch.StartNew();
+        var refused = await Assert.ThrowsAsync<SqlException>(
+            () => new ReportViewGenerator(db).GenerateStableViewsAsync(s.TemplateId, s.V1, CancellationToken.None));
+        Assert.Equal(50423, refused.Number);
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(4), $"генератор чекав {clock.Elapsed}");
     }
 
     [Theory]
