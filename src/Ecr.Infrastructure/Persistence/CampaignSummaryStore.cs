@@ -28,6 +28,13 @@ public sealed class CampaignSummaryStore(EcrDbContext db) : ICampaignSummaryStor
     /// значення <c>DocumentStatus</c>: 0 Draft, 1 Submitted, 2 Approved,
     /// 3 Rejected. <c>PeriodKey</c> стоїть у предикаті партиційованої
     /// <c>wf.ApprovalState</c> (урок <c>WR-05</c>).
+    ///
+    /// ✎ B144 (B75): аркуш документа, чия версія шаблону за період — без подання й затвердження
+    /// (<c>cfg.TemplateVersion.WorkflowMode = 1</c>, None), ФІНАЛЬНИЙ, як у зрізі звіту
+    /// (<c>ReportSnapshotBuilder.StatusOfDataAsync</c>, B138): рахується затвердженим, а не чернеткою, і в
+    /// <c>NotSubmittedSheets</c> не входить; старий стан (перенос версії) не враховується. Версія — за правилом
+    /// <c>SheetEditGate</c>: без шаблону — <c>doc.fn_VersionOf</c>, із шаблоном — <c>doc.fn_TemplateVersionOf</c>.
+    /// Приєднання <c>nv</c> — у тому самому запиті (щонайбільше один рядок на документ: <c>Id</c> — ключ).
     /// </remarks>
     private const string ProjectStagesSql = """
         SELECT x.ProjectId,
@@ -41,11 +48,15 @@ public sealed class CampaignSummaryStore(EcrDbContext db) : ICampaignSummaryStor
         FROM (
             SELECT d.Id, d.ProjectId,
                    COUNT(s.SheetDefId) AS Sheets,
-                   COALESCE(SUM(CASE WHEN s.SheetDefId IS NOT NULL AND COALESCE(a.Status, 0) = 0 THEN 1 ELSE 0 END), 0) AS Draft,
-                   COALESCE(SUM(CASE WHEN a.Status = 1 THEN 1 ELSE 0 END), 0) AS Submitted,
-                   COALESCE(SUM(CASE WHEN a.Status = 2 THEN 1 ELSE 0 END), 0) AS Approved,
-                   COALESCE(SUM(CASE WHEN a.Status = 3 THEN 1 ELSE 0 END), 0) AS Rejected
+                   COALESCE(SUM(CASE WHEN s.SheetDefId IS NOT NULL AND nv.Id IS NULL AND COALESCE(a.Status, 0) = 0 THEN 1 ELSE 0 END), 0) AS Draft,
+                   COALESCE(SUM(CASE WHEN nv.Id IS NULL AND a.Status = 1 THEN 1 ELSE 0 END), 0) AS Submitted,
+                   COALESCE(SUM(CASE WHEN s.SheetDefId IS NOT NULL AND (nv.Id IS NOT NULL OR a.Status = 2) THEN 1 ELSE 0 END), 0) AS Approved,
+                   COALESCE(SUM(CASE WHEN nv.Id IS NULL AND a.Status = 3 THEN 1 ELSE 0 END), 0) AS Rejected
             FROM doc.Document d
+            LEFT JOIN cfg.TemplateVersion nv   -- B144: версія документа за період без подання й затвердження (None) — аркуші фінальні
+              ON nv.WorkflowMode = 1
+             AND nv.Id = CASE WHEN d.TemplateId IS NULL THEN doc.fn_VersionOf(d.ProjectId, @periodKey)
+                              ELSE doc.fn_TemplateVersionOf(d.ProjectId, d.TemplateId, @periodKey) END
             LEFT JOIN doc.DocumentSheet s
               ON s.DocumentId = d.Id AND s.IsIncluded = 1
             LEFT JOIN wf.ApprovalState a
@@ -220,12 +231,18 @@ public sealed class CampaignSummaryStore(EcrDbContext db) : ICampaignSummaryStor
     /// <remarks>
     /// ⚠ <c>PeriodKey</c> стоїть у предикаті приєднання партиційованої <c>wf.ApprovalState</c> (урок <c>WR-05</c>);
     /// «подано» — статуси 1 (Submitted) і 2 (Approved), решта (немає рядка, 0, 3) — не подано.
+    /// ✎ B144 (B75): аркуш версії без подання й затвердження (None, версія — ЗА ЦЕЙ період) не подається взагалі,
+    /// тож «не поданим» не є — те саме правило й те саме приєднання <c>nv</c>, що в <see cref="ProjectStagesSql"/>.
     /// </remarks>
     private const string NotSubmittedByPeriodSql = """
         SELECT p.PeriodKey AS PeriodKey,
-               CAST(COUNT(s.SheetDefId) - COUNT(CASE WHEN a.Status IN (1, 2) THEN 1 END) AS int) AS NotSubmitted
+               CAST(COUNT(s.SheetDefId) - COUNT(CASE WHEN nv.Id IS NOT NULL OR a.Status IN (1, 2) THEN 1 END) AS int) AS NotSubmitted
         FROM doc.Period p
         JOIN doc.Document d ON d.ProjectId = p.ProjectId
+        LEFT JOIN cfg.TemplateVersion nv   -- B144: версія документа за період без подання й затвердження (None)
+          ON nv.WorkflowMode = 1
+         AND nv.Id = CASE WHEN d.TemplateId IS NULL THEN doc.fn_VersionOf(d.ProjectId, p.PeriodKey)
+                          ELSE doc.fn_TemplateVersionOf(d.ProjectId, d.TemplateId, p.PeriodKey) END
         JOIN doc.DocumentSheet s ON s.DocumentId = d.Id AND s.IsIncluded = 1
         LEFT JOIN wf.ApprovalState a
           ON a.DocumentId = s.DocumentId AND a.SheetDefId = s.SheetDefId AND a.PeriodKey = p.PeriodKey

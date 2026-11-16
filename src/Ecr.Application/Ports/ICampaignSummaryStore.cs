@@ -30,6 +30,8 @@ public interface ICampaignSummaryStore
     /// ⚠ Не подано = чернетка, без рядка стану чи відхилено — те саме правило, що й у
     /// <see cref="CampaignProjectFacts.NotSubmittedSheets"/>. Періоди без документів у словнику відсутні (0).
     /// Без звуження за читачем: його застосовує виклик (<c>SheetVisibility</c>).
+    /// ✎ B144 (B75): аркуш версії шаблону без подання й затвердження (<c>WorkflowMode.None</c>, версія — за період)
+    /// не подається взагалі й «не поданим» не є; в огляді кампанії (<see cref="ListAsync"/>) такий аркуш — затверджений.
     /// </remarks>
     /// <param name="projectId">Проєкт.</param>
     /// <param name="ct">Токен скасування.</param>
