@@ -76,23 +76,31 @@ public static class DependentMonthsRule
             return decision;
         }
 
+        // ⚠ Перелік місяців — у `BlockingMonths` (структуровано), не в тексті: текст відмови не несе нічого, крім
+        // причини (сторож `DenyLeakGuardTests`).
         return EditDecision.Deny(
                 EditDenyReason.DependentMonthsLocked,
-                $"Від стовпця залежать розрахунки затверджених місяців: {MonthsText(blockingMonths)}.")
+                "Від стовпця залежать розрахунки затверджених місяців.")
             with
             {
                 BlockingMonths = blockingMonths,
             };
     }
 
-    /// <summary>Подробиці відмови <c>ECR-ACCS-0403</c> з переліком місяців.</summary>
+    /// <summary>Відмова <c>ECR-ACCS-0403</c> з причиною <c>DependentMonthsLocked</c> і переліком місяців.</summary>
     /// <param name="deniedCount">Скільки комірок відхилено.</param>
     /// <param name="blockingMonths">Місяці, що блокують.</param>
-    public static Dictionary<string, object?> Details(int deniedCount, IReadOnlyCollection<int> blockingMonths)
+    /// <remarks>
+    /// Одна фабрика на обидва місця кидка (рішення в PATCH і повторна перевірка під замками): ті самі подробиці —
+    /// <c>messageKey</c>, <c>deniedCount</c>, <c>reason</c>, <c>months</c>, <c>monthsText</c>. Місяці — ключі періодів
+    /// аркуша, який користувач уже читає й має право правити (правило останнє, після гранта), тож нового про схований
+    /// стовпець чи значення вони не розкривають.
+    /// </remarks>
+    public static AccessDeniedException Denied(int deniedCount, IReadOnlyCollection<int> blockingMonths)
     {
         ArgumentNullException.ThrowIfNull(blockingMonths);
 
-        return new Dictionary<string, object?>
+        var details = new Dictionary<string, object?>
         {
             ["messageKey"] = "err.ECR-ACCS-0403.deniedCells",
             ["deniedCount"] = deniedCount.ToString(CultureInfo.InvariantCulture),
@@ -100,6 +108,11 @@ public static class DependentMonthsRule
             [MonthsDetail] = blockingMonths.ToArray(),
             [MonthsTextDetail] = MonthsText(blockingMonths),
         };
+
+        return new AccessDeniedException(
+            "ECR-ACCS-0403",
+            $"Заборонених комірок у батчі: {deniedCount}. Причина першої: {EditDenyReason.DependentMonthsLocked}.",
+            details);
     }
 
     /// <summary>
@@ -120,10 +133,7 @@ public static class DependentMonthsRule
             return;
         }
 
-        throw new AccessDeniedException(
-            "ECR-ACCS-0403",
-            $"Заборонених комірок у батчі: {deniedCount}. Причина першої: {EditDenyReason.DependentMonthsLocked}.",
-            Details(deniedCount, blocking));
+        throw Denied(deniedCount, blocking);
     }
 
     private static string MonthsText(IEnumerable<int> months)

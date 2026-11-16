@@ -1469,10 +1469,7 @@ public sealed partial class PatchCellsHandler(
                     .Where(d => d.Reason == EditDenyReason.DependentMonthsLocked)
                     .SelectMany(d => d.BlockingMonths ?? []));
 
-                throw new AccessDeniedException(
-                    "ECR-ACCS-0403",
-                    $"Заборонених комірок у батчі: {denied.Count}. Причина першої: {first.Reason}.",
-                    DependentMonthsRule.Details(denied.Count, months));
+                throw DependentMonthsRule.Denied(denied.Count, months);
             }
 
             throw new AccessDeniedException(
