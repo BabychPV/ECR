@@ -363,7 +363,7 @@ public sealed class RecalculationService(
     /// бо формула аркуша має право читати сусідній (Q-331, `RecalculationJob`).
     /// </param>
     /// <param name="changedColumns">WW-03: куди скласти змінені колонки; <c>null</c> — не збирати.</param>
-    /// <param name="writeSubmitted">✎ UAT-recalc-ux: писати й ПОДАНІ аркуші (ручний перерахунок, <c>RecalculationJob.WritesSubmitted</c>); затверджені — ніколи.</param>
+    /// <param name="writeSubmitted">✎ UAT-recalc-ux: писати й ПОДАНІ аркуші (✎ B79: кожен прогін <c>RecalculationJob</c> і каскад); затверджені — ніколи.</param>
     /// <returns>Скільки комірок перераховано.</returns>
     /// <remarks>
     /// ⛔ Окремий метод, а НЕ прапорець на <see cref="RecalculateAsync"/>.
@@ -394,13 +394,19 @@ public sealed class RecalculationService(
     /// цілі (<c>C_M01</c>), таблиці поза маршрутизацією, копії аркушів і Rollup/Check закритого місяця не пишуться.
     /// <c>null</c> — звичайний прогін періоду.
     /// </param>
+    /// <param name="submittedWritten">
+    /// ✎ B79: куди скласти ПОДАНІ аркуші (аркуш × копія), у які прогін справді записав хоч одну комірку (незмінене
+    /// значення не пишеться, <see cref="Evaluate"/>); <c>null</c> — не збирати. З цього набору викликач ставить позначку
+    /// «перераховано після подання» (<see cref="SubmittedSheetChanges"/>).
+    /// </param>
     public Task<int> RecalculateAllAsync(
         long documentId, PeriodKey periodKey, CancellationToken ct, int? sheetDefId = null,
         HashSet<(int TableDefId, int ColumnDefId)>? changedColumns = null, bool writeSubmitted = false,
-        IReadOnlyList<int>? annualPeriods = null)
+        IReadOnlyList<int>? annualPeriods = null,
+        HashSet<(int SheetDefId, long? CopyId)>? submittedWritten = null)
         => RecalculateDocumentAsync(
             documentId, periodKey, sheetDefId, heldSheet: null, ScopeFilter.All, ct, changedColumns, writeSubmitted,
-            annualPeriods: annualPeriods);
+            annualPeriods: annualPeriods, submittedWritten: submittedWritten);
 
     /// <inheritdoc />
     /// <remarks>
@@ -434,7 +440,8 @@ public sealed class RecalculationService(
         ScopeFilter scopes, CancellationToken ct,
         HashSet<(int TableDefId, int ColumnDefId)>? changedColumns = null, bool writeSubmitted = false,
         List<FormulaErrorCell>? errorSink = null,
-        IReadOnlyList<int>? annualPeriods = null)
+        IReadOnlyList<int>? annualPeriods = null,
+        HashSet<(int SheetDefId, long? CopyId)>? submittedWritten = null)
     {
         var instances = await rowStore
             .GetTableInstancesAsync(documentId, periodKey, ct)
@@ -455,7 +462,8 @@ public sealed class RecalculationService(
             written += await RunAsync(
                     representative, dirty: null, ct, sheetDefId, heldSheet, instances, changedColumns, writeSubmitted: writeSubmitted,
                     errorSink: errorSink,
-                    annualPeriods: annualPeriods)
+                    annualPeriods: annualPeriods,
+                    submittedWritten: submittedWritten)
                 .ConfigureAwait(false);
         }
 
@@ -491,7 +499,7 @@ public sealed class RecalculationService(
     /// <param name="approverEditSheets">D-442: подані аркуші правки погоджувача (лише інкрементний вхід).</param>
     /// <param name="inputColumns">Q-17: куди скласти колонки насіння (введені, не похідні); <c>null</c> — не збирати.</param>
     /// <param name="shared">L2: спільні читання проходу (екземпляри, залежності); <c>null</c> — читати напряму.</param>
-    /// <param name="writeSubmitted">✎ UAT-recalc-ux: писати й ПОДАНІ аркуші (ручний перерахунок, <c>RecalculationJob.WritesSubmitted</c>); затверджені — ніколи.</param>
+    /// <param name="writeSubmitted">✎ UAT-recalc-ux: писати й ПОДАНІ аркуші (✎ B79: кожен прогін <c>RecalculationJob</c> і каскад); затверджені — ніколи.</param>
     /// <param name="errorSink">✎ C-1: куди скласти комірки аркуша (<paramref name="sheetDefId"/>) з помилкою формули; <c>null</c> — не збирати.</param>
     /// <param name="annualPeriods">✎ LAND-YEAR B24: прогін закритого якоря під агрегатом року (див. <see cref="RecalculateAllAsync"/>).</param>
     /// <param name="submittedWritten">
@@ -1635,7 +1643,7 @@ public sealed class RecalculationService(
     /// записаних входів. <c>Approved</c> не пишеться ніколи (затвердження бере ВИНЯТКОВЕ блокування й
     /// перераховує аркуш саме, <c>ApprovalSnapshotRefresh</c>); інші подані аркуші — так само пропускаються.
     /// </param>
-    /// <param name="writeSubmitted">✎ UAT-recalc-ux: писати й ПОДАНІ аркуші (ручний перерахунок, <c>RecalculationJob.WritesSubmitted</c>); затверджені — ніколи.</param>
+    /// <param name="writeSubmitted">✎ UAT-recalc-ux: писати й ПОДАНІ аркуші (✎ B79: кожен прогін <c>RecalculationJob</c> і каскад); затверджені — ніколи.</param>
     /// <param name="annualPeriods">
     /// ✎ LAND-YEAR B24: місяці року — прогін закритого якоря пише не-місячне, тож стан аркуша — АГРЕГАТ за місяцями
     /// (<see cref="Security.AnnualPeriodRule.AggregateStatus"/>, те саме правило, що в <c>PatchCellsHandler</c> для

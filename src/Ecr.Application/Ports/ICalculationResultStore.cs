@@ -134,6 +134,31 @@ public interface ICalculationResultStore
         long calculationRunId, long documentId, IReadOnlyCollection<int> methodologyIds, CancellationToken ct);
 
     /// <summary>
+    /// ✎ B79: де числа нового прогону ВІДРІЗНЯЮТЬСЯ від актуальних — єдина підстава позначки «перераховано після
+    /// подання» для результатів методологій (<see cref="Recalculation.SubmittedSheetChanges"/>).
+    /// </summary>
+    /// <param name="calculationRunId">Новий прогін (ще не актуальний).</param>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="methodologyIds">
+    /// Методології (не версії), які прогін ПЕРЕРАХУВАВ для цього документа. Перенесені (<see cref="CarryOverResultsAsync"/>)
+    /// сюди не входять: у новому прогоні їх ще немає, і порівняння показало б їх «зниклими».
+    /// </param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>
+    /// Пари «методологія × екземпляр таблиці», де хоч одне число додалося, зникло або змінилося; порожньо — прогін
+    /// нічого не змінив.
+    /// </returns>
+    /// <remarks>
+    /// ⚠ Викликати ДО <see cref="SwitchCurrentRunAsync"/> і до переносу, у тій самій транзакції: «актуальне» — та сама
+    /// вибірка прогонів, що й у <see cref="ReadCurrentAsync"/> (без самого нового прогону), а після перемикання й
+    /// прибирання порівнювати вже нема з чим. Порівнюється число як його бачить читач: екземпляр таблиці, рядок, код
+    /// виходу, вид, речовина, одиниця, значення. ВЕРСІЯ методології в порівняння не входить — нова редакція з тими самими
+    /// числами нічого не змінила. Перший прогін документа (актуального ще немає) — зміна: числа з'явилися.
+    /// </remarks>
+    public Task<IReadOnlyList<ChangedResultScope>> ChangedResultsAsync(
+        long calculationRunId, long documentId, IReadOnlyCollection<int> methodologyIds, CancellationToken ct);
+
+    /// <summary>
     /// Числа <b>актуального</b> прогону для документа й періоду.
     /// </summary>
     /// <param name="documentId">Документ.</param>
@@ -178,6 +203,14 @@ public interface ICalculationResultStore
 /// <param name="PeriodKey">Партиція його рядків (<c>0</c> — прогін без періоду).</param>
 /// <param name="DocumentId">Документ прогону документа; <c>null</c> — прогін усього проєкту.</param>
 public sealed record SupersededRun(long RunId, int PeriodKey, long? DocumentId);
+
+/// <summary>✎ B79: де новий прогін змінив числа методології проти актуальних.</summary>
+/// <param name="MethodologyId">Методологія.</param>
+/// <param name="TableInstanceId">
+/// Екземпляр таблиці зміненого числа (D-401); <c>null</c> — результат без екземпляра: викликач відносить зміну до всіх
+/// таблиць, до яких методологія прив'язана.
+/// </param>
+public sealed record ChangedResultScope(int MethodologyId, long? TableInstanceId);
 
 /// <summary>Актуальний прогін документа й збережений профіль (D14).</summary>
 /// <param name="RunId">Прогін.</param>
