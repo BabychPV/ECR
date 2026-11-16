@@ -81,6 +81,19 @@ export function RoleActions({
   const [action, setAction] = useState<Action | null>(null);
   const [code, setCode] = useState('');
 
+  /*
+   * ⛔ B145: роль, для якої відкрито діалог видалення, — зафіксована в момент відкриття, а не `role` на
+   * момент кліку. Після видалення перелік перечитується, і панель показує ІНШУ роль: компонент не
+   * перемонтовується, йому лише приходить інший `role`. Діалог при цьому ще ~200 мс у DOM (анімація
+   * закриття), і кнопка «Delete», що читала `role.id`, другим кліком подвійного кліку слала
+   * `DELETE /roles/<інша роль>` — видалення, якого ніхто не підтверджував (зонд: після `DELETE /roles/3`
+   * ішов `DELETE /roles/2`). Те саме під відкритим діалогом, якщо перелік перечитався без обраної ролі.
+   */
+  const [target, setTarget] = useState<{ readonly id: number; readonly code: string }>({
+    id: role.id,
+    code: role.code,
+  });
+
   const close = (): void => {
     setAction(null);
     setCode('');
@@ -116,15 +129,16 @@ export function RoleActions({
   // ⚠ `onError` немає навмисно, а `handled` каже про це страхувальній сітці
   // (`app/queryClient.ts`): відмову показує сам діалог. «Роль використовується»
   // — відповідь по суті, і повторення того самого запиту нічого не змінить.
-  const remove = useMutation<void, Error>({
+  const remove = useMutation<void, Error, number>({
     meta: { handled: true },
-    mutationFn: () => apiFetch<void>(`/api/v1/roles/${role.id}`, { method: 'DELETE' }),
+    mutationFn: (roleId) => apiFetch<void>(`/api/v1/roles/${roleId}`, { method: 'DELETE' }),
     onSuccess: () => done(t('security.roleDeleted')),
   });
 
   const usage = roleUsage(remove.error);
   const open = (next: Action): void => {
     setCode(next === 'rename' ? role.code : '');
+    if (next === 'delete') setTarget({ id: role.id, code: role.code });
     setAction(next);
   };
 
@@ -198,9 +212,9 @@ export function RoleActions({
         </Group>
       </Modal>
 
-      <Modal opened={action === 'delete'} onClose={close} title={`${t('common.delete')} · ${role.code}`}>
+      <Modal opened={action === 'delete'} onClose={close} title={`${t('common.delete')} · ${target.code}`}>
         {remove.error === null ? (
-          <Text size="sm">{t('security.deleteRoleConfirm', { code: role.code })}</Text>
+          <Text size="sm">{t('security.deleteRoleConfirm', { code: target.code })}</Text>
         ) : (
           <Alert color="statusWarning" title={t('security.roleDeleteRefused')}>
             {/* ⛔ `X-08`: тут стояв `remove.error.message` — сирий `detail`
@@ -238,7 +252,16 @@ export function RoleActions({
           {/* ⛔ Після відмови кнопки «видалити» вже немає: повтор дав би ту саму
               відповідь. Спершу зняти призначення й гранти. */}
           {remove.error === null && (
-            <Button color="statusError" loading={remove.isPending} onClick={() => remove.mutate()}>
+            <Button
+              color="statusError"
+              loading={remove.isPending}
+              onClick={() => {
+                // ⛔ B145: діалог, що закривається (ще в DOM), і запит у польоті не видаляють удруге.
+                if (action !== 'delete' || remove.isPending) return;
+
+                remove.mutate(target.id);
+              }}
+            >
               {t('common.delete')}
             </Button>
           )}
