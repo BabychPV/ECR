@@ -18,7 +18,7 @@ using Xunit.Abstractions;
 namespace Ecr.Infrastructure.Tests.Reporting;
 
 /// <summary>
-/// B138 (рішення людини 16.11 «додай позначку у в'юхи»): вʼюхи сирих даних віддають позначку «перераховано після подання»
+/// B138 / B146 (D-536; рішення людини 16.11 «додай позначку у в'юхи»): вʼюхи сирих даних віддають позначку «перераховано після подання»
 /// останньою службовою колонкою <c>_RecalculatedAfterSubmission</c> (tinyint, після <c>_WorkflowMode</c>): 1 — аркуш рядка
 /// (аркуш × копія × період документа) ПОДАНИЙ і в журналі є запис <c>SheetRecalc / RecalculatedAfterSubmission</c> цього
 /// документа, аркуша, копії й періоду, пізніший за <c>SubmittedAt</c>; інакше 0.
@@ -28,6 +28,31 @@ namespace Ecr.Infrastructure.Tests.Reporting;
 /// записувач (<c>RecalculationJob</c>) звіряється з вʼюхою в <c>SheetNameRecalculationTests</c>.
 /// Власна база, періоди 2099xx.
 /// </summary>
+/// <remarks>
+/// Мутації (правила 401 і 410; локально 16.11, вихідний SQL + перезбірка, SQL у bin звірено з мутованим; пакет — мутації, що
+/// червонять РІЗНІ тести; 13 — без двох тестів обсягу, <c>B138=Volume</c>). Повідомлення падіння називає види вʼюх
+/// (<c>KINDS versioned/stable/long</c>), тож мутація одного виду видна окремо:
+/// <list type="table">
+/// <listheader><term>пакет: мутації</term><description>збірка; червоні (цей клас)</description></listheader>
+/// <item><term>G1: <c>&gt;</c> → <c>&gt;=</c>; без умови статусу; <c>#</c> → <c>-</c> у ключі копії; період фіксовано 209901;
+/// документ — шаблон <c>%</c>; без умови операції; без умови EntityType</term><description>OK; 8/13 — «same-moment»,
+/// затвердження після позначки, копія (markCopy: True), інший період ×2, інший документ, «other-operation»,
+/// «other-entity-type»</description></item>
+/// <item><term>G2: без порівняння з <c>SubmittedAt</c>; ключ без частини копії</term><description>OK; 5/13 — «earlier»,
+/// «same-moment», повторне подання, копія ×2</description></item>
+/// <item><term>G3: <c>rc.EntityId = a.PeriodKey</c></term><description>OK; 7/13 — кожне очікування «позначено»</description></item>
+/// <item><term>W1: константа — версійна 0, стабільна 1, довга (гаряча) 0</term><description>OK; 13/13, повідомлення називають
+/// саме ці види</description></item>
+/// <item><term>W2: константа — версійна 1, стабільна 0, довга (гаряча) 1</term><description>OK; 13/13</description></item>
+/// <item><term>W3: приєднання <c>ras.ApprovalStateId IS NOT NULL</c> замість ключа стану (усі три види)</term>
+/// <description>OK; 5/13 — інший документ, копія ×2, інший період ×2, усі три види</description></item>
+/// <item><term>A2 / A3: архівна гілка довгої — константа 0 / приєднання не за станом</term><description>н/з (вихідний текст
+/// читають Architecture-тести); ReportArchiveBranchTests 1/5 кожна</description></item>
+/// <item><term>A4: правило за <c>Status = 2</c>; A5: статус порівнюється у вʼюсі</term><description>н/з; StatusNumberingTests
+/// 1/5; A5 — 2/5 (StatusNumberingTests і ReportArchiveBranchTests)</description></item>
+/// </list>
+/// Позиція колонки (перед <c>_WorkflowMode</c>) — пакет B3 у <see cref="ReportViewWorkflowModeTests"/>.
+/// </remarks>
 [Trait(TestCategories.Category, TestCategories.Integration)]
 [Trait("Requirement", "RPT-STABLE")]
 public sealed partial class ReportViewRecalculatedAfterSubmissionTests(ITestOutputHelper output) : IAsyncLifetime

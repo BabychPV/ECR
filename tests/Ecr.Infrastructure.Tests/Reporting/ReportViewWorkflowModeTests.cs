@@ -13,7 +13,7 @@ using Xunit;
 namespace Ecr.Infrastructure.Tests.Reporting;
 
 /// <summary>
-/// B138 (B75, звітна частина): вʼюхи сирих даних віддають режим погодження версії шаблону службовою колонкою
+/// B138 (B75, звітна частина; D-537): вʼюхи сирих даних віддають режим погодження версії шаблону службовою колонкою
 /// <c>_WorkflowMode</c> (<c>cfg.TemplateVersion.WorkflowMode</c>: 0 SubmitApprove, 1 None) — ОСТАННЬОЮ в списку:
 /// версійна <c>rpt.v_*_vN</c> — константа своєї версії; стабільна <c>rpt.v_&lt;Шаблон&gt;_&lt;Аркуш&gt;_&lt;Таблиця&gt;</c> — за версією
 /// РЯДКА (не за версією з параметра процедури); довга <c>rpt.v_DocumentCells</c> — за версією рядка. <c>_Status</c> не
@@ -22,9 +22,19 @@ namespace Ecr.Infrastructure.Tests.Reporting;
 /// Власна база, періоди 2099xx.
 /// </summary>
 /// <remarks>
-/// Мутації (правило 401; локально, вихідний SQL + перезбірка; перелік і результати — у листі готовності B138): константа 0
-/// замість режиму версії — окремо у версійній, стабільній і довгій (гаряча й архівна гілки) вʼюхах; стабільна бере режим
-/// версії з параметра процедури; колонка не на своєму місці — окремо в кожному виді вʼюх; відбиток без режиму версії.
+/// Мутації (правила 401 і 410; локально 16.11, вихідний SQL + перезбірка, SQL у bin звірено з мутованим; пакет — мутації, що
+/// червонять РІЗНІ тести; «збірка» — dotnet build тестового проєкту з мутованим SQL):
+/// <list type="table">
+/// <listheader><term>пакет: мутації</term><description>збірка; червоні (цей клас)</description></listheader>
+/// <item><term>B1: константа 0 замість режиму — версійна, стабільна, довга (гаряча); відбиток без <c>tv.WorkflowMode</c></term>
+/// <description>OK; 7/12 — версійна, стабільна ×3 (параметр 0/1/2), довга, «видна одразу», відбиток</description></item>
+/// <item><term>B2: стабільна бере режим версії з параметра процедури; <c>_WorkflowMode</c> перед попередньою останньою колонкою
+/// (довга, версійна, стабільна)</term><description>OK; 8/12 — стабільна ×3, позиція ×5 (кожен вид)</description></item>
+/// <item><term>B3: <c>_RecalculatedAfterSubmission</c> перед <c>_WorkflowMode</c> (довга обидві гілки, версійна, стабільна)</term>
+/// <description>OK; 5/12 — позиція ×5</description></item>
+/// <item><term>A1: архівна гілка довгої — константа 0</term><description>н/з (вихідний текст читають Architecture-тести);
+/// червоний ReportArchiveBranchTests 1/5</description></item>
+/// </list>
 /// </remarks>
 [Trait(TestCategories.Category, TestCategories.Integration)]
 [Trait("Requirement", "RPT-STABLE")]

@@ -100,7 +100,7 @@ public sealed partial class ReportViewStableTests(SqlServerFixture sql)
             (int)(await ScalarRowsAsync(
                 $"SELECT COUNT(*) FROM rpt.[{stable}] WHERE _ProjectId = {p1.ProjectId} AND _TemplateVersion = N'2' AND _PeriodKey BETWEEN 202611 AND 202611"))[0][0]!);
         Assert.Equal(
-            ab.Length + 14,
+            ab.Length + 16,
             (await ScalarRowsAsync($"SELECT TOP 1 * FROM rpt.[{stable}]"))[0].Length);
 
         // Крок 4: v3 ПРИБИРАЄ B і додає аркуш S2: стара колонка B лишається (NULL для нових рядків), для S2 зʼявляється своя вʼюха,
@@ -472,7 +472,7 @@ public sealed partial class ReportViewStableTests(SqlServerFixture sql)
             Assert.Equal(["_ProjectId", "_ProjectCode", "_DocumentId", "_DocumentKey", "_PeriodKey", "_Status", "_RowId", "_RowKey", "_RowOrdinal", "_TemplateVersion", "A", "_SheetCopyOrdinal", "_SheetDisplayName", "_IsArchived", "_WorkflowMode", "_RecalculatedAfterSubmission"],
                 await ColumnNamesAsync(stable));
             await GenerateAsync(v1.VersionId);   // idempotent re-run
-            Assert.Equal(14, (await ColumnNamesAsync(stable)).Count);
+            Assert.Equal(16, (await ColumnNamesAsync(stable)).Count);
         }
         finally
         {
