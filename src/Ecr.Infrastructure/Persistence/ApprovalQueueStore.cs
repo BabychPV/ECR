@@ -67,8 +67,10 @@ public sealed class ApprovalQueueStore(EcrDbContext db) : IApprovalQueueStore
         }
 
         // ✎ B138: стан версії без погодження (старий Submitted після переносу версії) у черзі не з'являється.
+        // ✎ B144 (замір): версії без погодження — заздалегідь; немає жодної — запит рівно той, що до B138.
+        var noneVersionIds = await db.NoneVersionIdsAsync(ct).ConfigureAwait(false);
         var submitted =
-            from a in db.ApprovalStates.AsNoTracking().ExceptWorkflowNone(db)
+            from a in db.ApprovalStates.AsNoTracking().ExceptWorkflowNone(db, noneVersionIds)
             join d in db.Documents.AsNoTracking() on a.DocumentId equals d.Id
             where a.Status == DocumentStatus.Submitted
             select new { a, d };
@@ -190,8 +192,10 @@ public sealed class ApprovalQueueStore(EcrDbContext db) : IApprovalQueueStore
         }
 
         // ✎ B138: аркуш версії без погодження нікому не «повертається».
+        // ✎ B144 (замір): версії без погодження — заздалегідь; немає жодної — запит рівно той, що до B138.
+        var noneVersionIds = await db.NoneVersionIdsAsync(ct).ConfigureAwait(false);
         var returned =
-            from a in db.ApprovalStates.AsNoTracking().ExceptWorkflowNone(db)
+            from a in db.ApprovalStates.AsNoTracking().ExceptWorkflowNone(db, noneVersionIds)
             join d in db.Documents.AsNoTracking() on a.DocumentId equals d.Id
             where a.Status == DocumentStatus.Rejected
                   || (a.Status == DocumentStatus.Draft

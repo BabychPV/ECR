@@ -38,4 +38,52 @@ public static class WorkflowNoneQueries
                     ? EcrDbContext.VersionOf(d.ProjectId, a.PeriodKey)
                     : EcrDbContext.TemplateVersionOf(d.ProjectId, d.TemplateId.Value, a.PeriodKey)))));
     }
+
+    /// <summary>Ідентифікатори версій без подання й затвердження — один дрібний запит (версій одиниці).</summary>
+    /// <param name="db">Контекст.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public static Task<int[]> NoneVersionIdsAsync(this EcrDbContext db, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        return Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.ToArrayAsync(
+            Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.AsNoTracking(db.TemplateVersions)
+                .Where(v => v.WorkflowMode == WorkflowMode.None)
+                .Select(v => v.Id),
+            ct);
+    }
+
+    /// <summary>
+    /// Те саме для ПЕРЕЛІКІВ через усі проєкти (черга погодження, «повернуті мені»), де станів багато: версії без
+    /// погодження читаються заздалегідь (<see cref="NoneVersionIdsAsync"/>), і коли їх НЕМАЄ — фільтр не додається
+    /// зовсім (текст запиту рівно той, що до B138).
+    /// </summary>
+    /// <param name="source">Запит до <c>wf.ApprovalState</c>.</param>
+    /// <param name="db">Контекст (для корельованого підзапиту версії).</param>
+    /// <param name="noneVersionIds">Версії без подання й затвердження.</param>
+    /// <returns>Звужений запит.</returns>
+    /// <remarks>
+    /// ⚠ Замір (B144, 14 411 поданих станів, тестова база): корельований <c>NOT EXISTS</c> зі скалярною
+    /// <c>doc.fn_VersionOf</c> на КОЖЕН стан коштував ~17 мкс/рядок і тоді, коли жодної версії без погодження немає
+    /// (усі подані: 3 → 61–249 мс; сторінка 200: 15 → 27 мс). Некорельований запобіжник у самому SQL не допомагає
+    /// (133 мс). Тому «чи є такі версії» вирішується до запиту; ціна — одне звернення до <c>cfg.TemplateVersion</c>.
+    /// Запити ОДНОГО документа (перерахунок, стани аркушів) лишаються на однопараметровій формі: там рядків одиниці.
+    /// </remarks>
+    public static IQueryable<ApprovalState> ExceptWorkflowNone(
+        this IQueryable<ApprovalState> source, EcrDbContext db, int[] noneVersionIds)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(noneVersionIds);
+
+        if (noneVersionIds.Length == 0)
+        {
+            return source;
+        }
+
+        return source.Where(a => !db.Documents.Any(d =>
+            d.Id == a.DocumentId
+            && noneVersionIds.Contains(d.TemplateId == null
+                ? EcrDbContext.VersionOf(d.ProjectId, a.PeriodKey)
+                : EcrDbContext.TemplateVersionOf(d.ProjectId, d.TemplateId.Value, a.PeriodKey))));
+    }
 }

@@ -430,16 +430,20 @@ public sealed class CampaignSummaryStoreTests(SqlServerFixture sql)
     /// <remarks>
     /// КОНТРОЛЬ у тому самому тесті: до перемикання режиму ті самі документи — чернетка / поданий / відхилений.
     /// ⛔ МУТАЦІЙНИЙ ДОКАЗ: прибрати приєднання <c>nv</c> (або умови <c>nv.Id IS …</c>) у
-    /// <c>CampaignSummaryStore.ProjectStagesSql</c> — друга половина червона. <paramref name="withTemplate"/> — документ
-    /// із шаблоном (B74, гілка <c>doc.fn_TemplateVersionOf</c>); без — гілка <c>doc.fn_VersionOf</c>.
+    /// <c>CampaignSummaryStore.ProjectStagesSql</c> — друга половина червона. Випадки версії —
+    /// <see cref="WorkflowNoneCase"/>: завжди брати <c>doc.fn_VersionOf</c> (ігнорувати власний шаблон документа, B74) —
+    /// червоні <c>ownNone</c> (None лише власна версія: аркуші мусять стати фінальними) і <c>projectNone</c> (None лише
+    /// версія проєкту: документ лишається з погодженням, числа не змінюються).
     /// </remarks>
     [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Finding", "B144")]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task Огляд_рахує_аркуші_версії_без_погодження_фінальними_а_не_неподаними(bool withTemplate)
+    [InlineData(WorkflowNoneCase.Plain)]
+    [InlineData(WorkflowNoneCase.SameTemplate)]
+    [InlineData(WorkflowNoneCase.OwnNone)]
+    [InlineData(WorkflowNoneCase.ProjectNone)]
+    public async Task Огляд_рахує_аркуші_версії_без_погодження_фінальними_а_не_неподаними(string mode)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var key = await FreshPeriodKeyAsync(builder);
@@ -450,7 +454,7 @@ public sealed class CampaignSummaryStoreTests(SqlServerFixture sql)
         await ArrangeAsync(db, chain, chain.DocumentId, status: null);
         await AddAsync(db, chain, DocumentStatus.Submitted, count: 1);
         await AddAsync(db, chain, DocumentStatus.Rejected, count: 1);
-        await BindTemplateAsync(db, chain, withTemplate);
+        var binding = await WorkflowNoneCase.BindAsync(mode, sql.ConnectionString, db, chain);
 
         var before = await new CampaignSummaryStore(db).ListAsync(key, NoLimit, CancellationToken.None);
         var control = before.Projects.Single(p => p.ProjectId == chain.ProjectId);
@@ -459,10 +463,19 @@ public sealed class CampaignSummaryStoreTests(SqlServerFixture sql)
         Assert.Equal(2, before.Buckets.Sum(b => b.NotSubmittedSheets));
         Assert.DoesNotContain(before.Buckets, b => b.AllApproved);
 
-        await SetWorkflowNoneAsync(db, chain);
+        await WorkflowNoneCase.SwitchAsync(db, binding);
 
         var after = await new CampaignSummaryStore(db).ListAsync(key, NoLimit, CancellationToken.None);
         var row = after.Projects.Single(p => p.ProjectId == chain.ProjectId);
+        if (!binding.DocumentBecomesNone)
+        {
+            // None стала лише версія ПРОЄКТУ, а документи мають власний шаблон з погодженням: числа ті самі.
+            Assert.Equal((3, 1, 1, 0, 1), (row.Documents, row.Draft, row.Submitted, row.Approved, row.Rejected));
+            Assert.Equal((3, 2), (row.Sheets, row.NotSubmittedSheets));
+            Assert.DoesNotContain(after.Buckets, b => b.AllApproved);
+            return;
+        }
+
         Assert.Equal((3, 0, 0, 3, 0), (row.Documents, row.Draft, row.Submitted, row.Approved, row.Rejected));
         Assert.Equal((3, 0), (row.Sheets, row.NotSubmittedSheets));
 
@@ -522,18 +535,23 @@ public sealed class CampaignSummaryStoreTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Finding", "B144")]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task Календар_не_рахує_неподаними_аркуші_версії_без_погодження(bool withTemplate)
+    [InlineData(WorkflowNoneCase.Plain)]
+    [InlineData(WorkflowNoneCase.SameTemplate)]
+    [InlineData(WorkflowNoneCase.OwnNone)]
+    [InlineData(WorkflowNoneCase.ProjectNone)]
+    public async Task Календар_не_рахує_неподаними_аркуші_версії_без_погодження(string mode)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
-        var chain = await builder.BuildAsync(ct: CancellationToken.None);
+        var chain = await builder.BuildAsync(periodKey: 209905, ct: CancellationToken.None);   // 2099xx — правило 382
         await using var db = builder.CreateContext();
 
         await ArrangeAsync(db, chain, chain.DocumentId, status: null);
         await AddAsync(db, chain, DocumentStatus.Rejected, count: 1);
         await AddAsync(db, chain, DocumentStatus.Approved, count: 1);
-        await BindTemplateAsync(db, chain, withTemplate);
+        var binding = await WorkflowNoneCase.BindAsync(mode, sql.ConnectionString, db, chain);
+
+        // None лише версія проєкту при власному шаблоні з погодженням — документ не змінюється: лишається 2.
+        var expected = binding.DocumentBecomesNone ? 0 : 2;
 
         async Task<int> NotSubmitted()
         {
@@ -544,9 +562,9 @@ public sealed class CampaignSummaryStoreTests(SqlServerFixture sql)
 
         Assert.Equal(2, await NotSubmitted());
 
-        await SetWorkflowNoneAsync(db, chain);
+        await WorkflowNoneCase.SwitchAsync(db, binding);
 
-        Assert.Equal(0, await NotSubmitted());
+        Assert.Equal(expected, await NotSubmitted());
 
         // Той самий шлях, яким число бере календар (`GetPeriodCalendarHandler`).
         var calendar = await CalendarHandler(
@@ -555,26 +573,13 @@ public sealed class CampaignSummaryStoreTests(SqlServerFixture sql)
                     .Permission("Document.View")
                     .Grant(ResourceKind.Project, chain.ProjectId, GrantLevel.Read))
             .HandleAsync(chain.ProjectId, CancellationToken.None, true);
-        Assert.Equal(0, calendar.Periods.Single(p => p.PeriodKey == chain.PeriodKey.Value).NotSubmittedSheets);
+        Assert.Equal(expected, calendar.Periods.Single(p => p.PeriodKey == chain.PeriodKey.Value).NotSubmittedSheets);
     }
 
     /// <summary>B144: версія шаблону ланцюга — без подання й затвердження (<c>WorkflowMode.None</c> = 1).</summary>
     private static Task<int> SetWorkflowNoneAsync(EcrDbContext db, TestDocument chain)
         => db.Database.ExecuteSqlAsync(
             $"UPDATE cfg.TemplateVersion SET WorkflowMode = 1 WHERE Id = {chain.TemplateVersionId}");
-
-    /// <summary>
-    /// B144: документи проєкту ланцюга отримують шаблон (B74) — версію дає <c>doc.fn_TemplateVersionOf</c>; без цього
-    /// (<c>TemplateId IS NULL</c>) — <c>doc.fn_VersionOf</c>.
-    /// </summary>
-    private static async Task BindTemplateAsync(EcrDbContext db, TestDocument chain, bool withTemplate)
-    {
-        if (withTemplate)
-        {
-            await db.Database.ExecuteSqlAsync(
-                $"UPDATE doc.Document SET TemplateId = {chain.TemplateId} WHERE ProjectId = {chain.ProjectId}");
-        }
-    }
 
     /// <summary>Обробник календаря над справжніми сховищами; користувач описаний <paramref name="access"/>.</summary>
     private static GetPeriodCalendarHandler CalendarHandler(EcrDbContext db, AccessBuilder access)
