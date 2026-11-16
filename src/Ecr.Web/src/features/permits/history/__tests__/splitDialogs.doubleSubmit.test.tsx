@@ -11,6 +11,11 @@ import { HeaderSplitBanner } from '../HeaderSplitBanner';
 import { permitGridMarksOf } from '../splitModel';
 import { historyOf, seaWaterRow } from './historyFixture';
 
+// ⚠ Спінер (`usePendingLoading`) вмикається за 100 мс РЕАЛЬНОГО часу й вимикає кнопку: під навантаженням CPU тест
+// доходив би до другого кліку вже після нього й був би зеленим і без захисту в обробнику. Подвійний клік людини
+// швидший за 100 мс, тож тут спінера немає — доказ лише про обробник.
+vi.mock('@/features/common/usePendingLoading', () => ({ usePendingLoading: () => false }));
+
 /**
  * B149: «Split February 2026 — …» (одна комірка й «Split all» шапки) — один `PUT …/permit-history/splits` на збереження.
  *

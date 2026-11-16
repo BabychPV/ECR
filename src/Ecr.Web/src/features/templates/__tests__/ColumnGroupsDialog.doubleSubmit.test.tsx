@@ -4,6 +4,11 @@ import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { ColumnGroupsDialog } from '@/features/templates/ColumnGroupsDialog';
 import { holdWrites, renderKeepMounted, settle } from '@/test/closedDialogProbe';
 
+// ⚠ Спінер (`usePendingLoading`) вмикається за 100 мс РЕАЛЬНОГО часу й вимикає кнопку: під навантаженням CPU тест
+// доходив би до другого кліку вже після нього й був би зеленим і без захисту в обробнику. Подвійний клік людини
+// швидший за 100 мс, тож тут спінера немає — доказ лише про обробник.
+vi.mock('@/features/common/usePendingLoading', () => ({ usePendingLoading: () => false }));
+
 /**
  * B149: «Column groups» — один `PUT …/header-groups` на збереження.
  *
