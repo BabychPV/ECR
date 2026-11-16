@@ -1,13 +1,10 @@
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { MantineUseTransitionModule, patchMantineUseTransition } from '../../../scripts/patch-mantine-transition.mjs';
-
-const modulePath = path.resolve(
-  process.cwd(),
-  'node_modules/@mantine/core/esm/components/Transition/use-transition.mjs',
-);
-const installed = readFileSync(modulePath, 'utf8');
+import {
+  InstalledMantineUseTransition as installed,
+  InstalledMantineUseTransitionPath as modulePath,
+  MantinePatchMissingHint,
+} from '@/test/mantineTransitionPatch';
 
 /** Тіло `handleStateChange` до першого `requestAnimationFrame` — те, що виконується синхронно. */
 function syncPrologue(code: string): string {
@@ -18,8 +15,9 @@ function syncPrologue(code: string): string {
 describe('patchMantineUseTransition', () => {
   // ⛔ Червоний, якщо `postinstall` не відпрацював: тоді і `vite dev`, і всі тести бачать
   // незалатаний Mantine, а `modalReopenRemount.test.tsx` падав би без пояснення причини.
+  // ✎ `B137`: падіння саме каже, що це середовище, і називає команду (`@/test/mantineTransitionPatch`).
   it('встановлений Mantine залатаний: новий перехід скасовує кадр попереднього', () => {
-    expect(syncPrologue(installed)).toContain('cancelAnimationFrame(rafRef.current)');
+    expect(syncPrologue(installed), MantinePatchMissingHint).toContain('cancelAnimationFrame(rafRef.current)');
   });
 
   it('латка ставить скасування кадру саме в синхронний пролог `handleStateChange`', () => {
