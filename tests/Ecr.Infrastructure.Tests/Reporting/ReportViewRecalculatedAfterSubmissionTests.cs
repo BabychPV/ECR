@@ -65,6 +65,7 @@ public sealed partial class ReportViewRecalculatedAfterSubmissionTests(ITestOutp
     [InlineData("earlier")]
     [InlineData("same-moment")]
     [InlineData("other-operation")]
+    [InlineData("other-entity-type")]
     [InlineData("no-state")]
     public async Task Без_запису_пізнішого_за_подання_позначки_немає(string what)
     {
@@ -79,6 +80,7 @@ public sealed partial class ReportViewRecalculatedAfterSubmissionTests(ITestOutp
             case "earlier": await AuditAsync(s, s.DocumentId, 209901, null, Now.AddMinutes(-1), Marked); break;
             case "same-moment": await AuditAsync(s, s.DocumentId, 209901, null, Now, Marked); break;
             case "other-operation": await AuditAsync(s, s.DocumentId, 209901, null, Now.AddMinutes(1), RecalculationSkips.AuditSkippedApproved); break;
+            case "other-entity-type": await AuditAsync(s, s.DocumentId, 209901, null, Now.AddMinutes(1), Marked, "OtherEntity"); break;
             case "no-state": await AuditAsync(s, s.DocumentId, 209901, null, Now.AddMinutes(1), Marked); break;
         }
 
@@ -149,6 +151,7 @@ public sealed partial class ReportViewRecalculatedAfterSubmissionTests(ITestOutp
     /// посиланнями (стан аркуша у функції та журнал) створюється й читається.
     /// </summary>
     [Fact]
+    [Trait("B138", "Volume")]
     public async Task Версійна_вʼюха_з_250_колонками_створюється_і_читається_з_позначкою()
     {
         string[] codes = [.. Enumerable.Range(1, 250).Select(i => $"C{i}")];
@@ -172,6 +175,7 @@ public sealed partial class ReportViewRecalculatedAfterSubmissionTests(ITestOutp
     /// за читання журналу «кандидати × стани» з запасом. Якщо вимір покаже інше — це рішення про індекс журналу, а не про тест.
     /// </remarks>
     [Fact]
+    [Trait("B138", "Volume")]
     public async Task Позначка_на_обсязі_рахується_на_стан_аркуша_а_не_на_рядок()
     {
         const int documents = 40, rows = 50, foreign = 5000;
@@ -208,7 +212,7 @@ public sealed partial class ReportViewRecalculatedAfterSubmissionTests(ITestOutp
         var baseText = MarkColumn().Replace(MarkJoin().Replace(text, ""), "");
         var applyText = MarkJoin().Replace(text, """
 
-            OUTER APPLY (SELECT TOP (1) 1 AS ApprovalStateId
+            OUTER APPLY (SELECT TOP (1) CAST(1 AS tinyint) AS Marked
                            FROM aud.StructureChange AS rc
                           WHERE a.Status = 1
                             AND rc.EntityType = N'SheetRecalc' AND rc.EntityId = a.SheetDefId
@@ -313,9 +317,9 @@ public sealed partial class ReportViewRecalculatedAfterSubmissionTests(ITestOutp
                 s.ProjectVersionId, PeriodKind.Monthly, policyId, "Asia/Atyrau");
             db.Projects.Add(project);
             await db.SaveChangesAsync();
-            foreach (var p in new[] { period, second ?? 0 }.Where(p => p != 0))
+            foreach (var value in new[] { period, second ?? 0 }.Where(k => k != 0))
             {
-                var key = new PeriodKey(p);
+                var key = new PeriodKey(value);
                 db.Periods.Add(new Period(project.Id, key, (byte)key.Sequence, new DateOnly(key.Year, key.Sequence, 1),
                     new DateOnly(key.Year, key.Sequence, DateTime.DaysInMonth(key.Year, key.Sequence))));
             }
@@ -378,10 +382,11 @@ public sealed partial class ReportViewRecalculatedAfterSubmissionTests(ITestOutp
     }
 
     /// <summary>Запис журналу аркуша перерахунку — як його пише <c>RecalculationJob</c> (EntityId = аркуш, ключ <c>AuditCorrelation</c>).</summary>
-    private Task AuditAsync(Scenario s, long documentId, int period, long? copyId, DateTime at, string operation)
+    private Task AuditAsync(
+        Scenario s, long documentId, int period, long? copyId, DateTime at, string operation, string entityType = RecalculationSkips.AuditEntityType)
         => ExecAsync(string.Create(CultureInfo.InvariantCulture, $"""
             INSERT INTO aud.StructureChange (ChangedAt, TemplateVersionId, EntityType, EntityId, ChangeClass, Operation, ChangedByUserId, CorrelationId)
-            VALUES ('{at:yyyy-MM-ddTHH:mm:ss.fff}', {s.VersionId}, N'{RecalculationSkips.AuditEntityType}', {s.SheetId}, 0, N'{operation}', {UserId},
+            VALUES ('{at:yyyy-MM-ddTHH:mm:ss.fff}', {s.VersionId}, N'{entityType}', {s.SheetId}, 0, N'{operation}', {UserId},
                     N'{RecalculationSkips.AuditCorrelation(documentId, s.SheetId, period, copyId)}');
             """));
 
@@ -403,19 +408,25 @@ public sealed partial class ReportViewRecalculatedAfterSubmissionTests(ITestOutp
         var wide = $"WHERE _DocumentId = @d AND _PeriodKey = {period} AND _SheetCopyOrdinal = {ordinal}";
         var views = new (string Kind, string Text)[]
         {
-            ("версійна", $"SELECT DISTINCT _RecalculatedAfterSubmission FROM rpt.[{s.Versioned}] {wide}"),
-            ("стабільна", $"SELECT DISTINCT _RecalculatedAfterSubmission FROM rpt.[{s.Stable}] {wide}"),
-            ("довга", "SELECT DISTINCT _RecalculatedAfterSubmission FROM rpt.v_DocumentCells "
+            ("versioned", $"SELECT DISTINCT _RecalculatedAfterSubmission FROM rpt.[{s.Versioned}] {wide}"),
+            ("stable", $"SELECT DISTINCT _RecalculatedAfterSubmission FROM rpt.[{s.Stable}] {wide}"),
+            ("long", "SELECT DISTINCT _RecalculatedAfterSubmission FROM rpt.v_DocumentCells "
                       + $"WHERE DocumentId = @d AND PeriodKey = {period} AND SheetCopyOrdinal = {ordinal}"),
         };
+        // Усі три види перевіряються до кінця, розбіжності — одним повідомленням з назвами видів (мутація одного виду вʼюх
+        // називає саме його).
+        var wrong = new List<string>();
         foreach (var (kind, text) in views)
         {
             var marks = await MarksAsync(text, documentId);
-            Assert.True(marks.Count == 1, $"{kind} вʼюха: {marks.Count} різних значень позначки для скоупу {documentId}/{period}/{copyId}");
-            Assert.True(card == (marks[0] == 1),
-                $"{kind} вʼюха дає {marks[0]}, картка документа — {card} (скоуп {documentId}/{period}/{copyId})");
+            if (marks.Count != 1 || card != (marks[0] == 1))
+            {
+                wrong.Add($"{kind} = [{string.Join(",", marks)}]");
+            }
         }
 
+        Assert.True(wrong.Count == 0,
+            $"KINDS {string.Join("; ", wrong)} проти картки документа {card} (скоуп {documentId}/{period}/{copyId})");
         Assert.Equal(expected, card);
     }
 
@@ -551,6 +562,6 @@ public sealed partial class ReportViewRecalculatedAfterSubmissionTests(ITestOutp
     [GeneratedRegex(@"\r?\nLEFT JOIN rpt\.fn_RecalculatedAfterSubmission\(\) AS ras ON ras\.ApprovalStateId = a\.Id")]
     private static partial Regex MarkJoin();
 
-    [GeneratedRegex(@",\r?\n\s+CAST\(CASE WHEN ras\.ApprovalStateId IS NULL THEN 0 ELSE 1 END AS tinyint\) AS _RecalculatedAfterSubmission")]
+    [GeneratedRegex(@",\r?\n\s+ISNULL\(ras\.Marked, 0\) AS _RecalculatedAfterSubmission")]
     private static partial Regex MarkColumn();
 }

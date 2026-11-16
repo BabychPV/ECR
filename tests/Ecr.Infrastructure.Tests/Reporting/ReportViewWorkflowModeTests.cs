@@ -86,29 +86,36 @@ public sealed partial class ReportViewWorkflowModeTests : IAsyncLifetime
             await LongAsync(s.DocumentId));
     }
 
+    /// <summary>
+    /// Колонки лише додаються і лише в кінець: попередня остання колонка виду вʼюх, за нею <c>_WorkflowMode</c>, за нею
+    /// <c>_RecalculatedAfterSubmission</c> (людина 16.11). Окремий випадок на кожен вид вʼюх (версійна, стабільна, довга).
+    /// </summary>
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task Службові_колонки_B138_останні_в_усіх_вʼюхах(bool monthRouting)
+    [InlineData("versioned", false)]
+    [InlineData("versioned", true)]
+    [InlineData("stable", false)]
+    [InlineData("stable", true)]
+    [InlineData("long", false)]
+    public async Task Службові_колонки_B138_останні_у_вʼюсі(string kind, bool monthRouting)
     {
         var s = await ArrangeAsync(monthRouting);
+        var (views, previous) = kind switch
+        {
+            "versioned" => (new[] { s.V1View, s.V2View }, "_SheetDisplayName"),
+            "stable" => (new[] { s.Stable }, "_IsArchived"),
+            _ => (new[] { "v_DocumentCells" }, "IsArchived"),
+        };
 
-        foreach (var view in new[] { s.V1View, s.V2View, s.Stable, "v_DocumentCells" })
+        foreach (var view in views)
         {
             var columns = await ColumnsAsync(view);
-            Assert.True(columns.Count > 1, $"rpt.{view}: вʼюхи немає");
-            // Порядок додавання: _WorkflowMode, за нею _RecalculatedAfterSubmission (людина 16.11) — остання.
+            Assert.True(columns.Count > 3, $"rpt.{view}: вʼюхи немає");
+            Assert.Equal(previous, columns[^3].Name);
             Assert.Equal(("_WorkflowMode", "tinyint"), columns[^2]);
             Assert.Equal(("_RecalculatedAfterSubmission", "tinyint"), columns[^1]);
             Assert.Single(columns, c => c.Name == "_WorkflowMode");
             Assert.Single(columns, c => c.Name == "_RecalculatedAfterSubmission");
         }
-
-        // Попередні «останні» колонки лишилися на місці — одразу перед новими (колонки лише додаються).
-        Assert.Equal("_SheetDisplayName", (await ColumnsAsync(s.V1View))[^3].Name);
-        Assert.Equal("_SheetDisplayName", (await ColumnsAsync(s.V2View))[^3].Name);
-        Assert.Equal("_IsArchived", (await ColumnsAsync(s.Stable))[^3].Name);
-        Assert.Equal("IsArchived", (await ColumnsAsync("v_DocumentCells"))[^3].Name);
     }
 
     /// <summary>

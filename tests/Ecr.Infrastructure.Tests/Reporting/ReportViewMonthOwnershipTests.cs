@@ -279,7 +279,7 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
         Assert.Single(System.Text.RegularExpressions.Regex.Matches(current, @",\r?\n\s+CAST\(0 AS tinyint\) AS _WorkflowMode"));
         current = System.Text.RegularExpressions.Regex.Replace(current, @",\r?\n\s+CAST\(0 AS tinyint\) AS _WorkflowMode", "");
         // B138: колонка _RecalculatedAfterSubmission (остання) і приєднання її функції за станом аркуша — теж адитивні; по одному.
-        const string markColumn = @",\r?\n\s+CAST\(CASE WHEN ras\.ApprovalStateId IS NULL THEN 0 ELSE 1 END AS tinyint\) AS _RecalculatedAfterSubmission";
+        const string markColumn = @",\r?\n\s+ISNULL\(ras\.Marked, 0\) AS _RecalculatedAfterSubmission";
         const string markJoin = @"\r?\nLEFT JOIN rpt\.fn_RecalculatedAfterSubmission\(\) AS ras ON ras\.ApprovalStateId = a\.Id";
         Assert.Single(System.Text.RegularExpressions.Regex.Matches(current, markColumn));
         Assert.Single(System.Text.RegularExpressions.Regex.Matches(current, markJoin));
