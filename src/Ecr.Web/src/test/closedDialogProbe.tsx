@@ -17,7 +17,7 @@ import { keepMountedModalsTheme } from '@/test/keepMountedModals';
  */
 
 /** Відповідь «сервера» на запит запису. `status` без тіла (204) — `body` не задавати. */
-export interface HeldResponse {
+export interface HeldReply {
   readonly status?: number;
   readonly body?: unknown;
 }
@@ -55,7 +55,7 @@ function parse(body: unknown): unknown {
 export function holdWrites(
   options: {
     readonly read?: (url: string) => unknown;
-    readonly write?: (method: string, url: string, index: number) => HeldResponse | undefined;
+    readonly write?: (method: string, url: string, index: number) => HeldReply | undefined;
   } = {},
 ): HeldWrites {
   const sent: string[] = [];
