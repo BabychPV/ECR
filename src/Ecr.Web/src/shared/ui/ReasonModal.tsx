@@ -109,7 +109,14 @@ export function ReasonModal({
         <Button
           disabled={!enough}
           loading={isPending === true}
-          onClick={() => onConfirm(reason.trim())}
+          /*
+           * ⛔ B145: закритий діалог не підтверджує. Після `opened = false` `Modal` ще ~200 мс лишається
+           * в DOM (анімація закриття) з набраною причиною в полі, а власник дію вже завершив і зайнятість
+           * зняв — клік по кнопці діалогу, що закривається, запускав дію ВДРУГЕ з тією самою причиною.
+           */
+          onClick={() => {
+            if (opened) onConfirm(reason.trim());
+          }}
         >
           {confirmLabel}
         </Button>

@@ -1,4 +1,4 @@
-import { useEffect, useState, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 import { Checkbox, Select, Stack, Text } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
@@ -137,6 +137,27 @@ export function CreateDocumentModal({
   // ⛔ Директива «live-попередження про порушення SheetGroupRule»: не блокує — сервер
   // лишається останньою лінією правди.
   const violations = groupRuleViolations(template.data, sheets);
+
+  /*
+   * ⛔ B145: одна постановка на відкриття майстра. Сервер дублі документів приймає (ключ видає сам), тож
+   * кожен зайвий `POST` — зайвий документ, а самого `create.isPending` для одного запиту мало:
+   *   - після відповіді сервера `onSuccess` виклику ще чекає перечитування переліку (`invalidateQueries`):
+   *     мутація вже не `isPending`, майстер ще ВІДКРИТИЙ, і активна «Create» слала другий `POST`;
+   *   - після `onClose` майстер ще ~200 мс у DOM (анімація закриття) — те саме;
+   *   - два кліки до першого перемальовування зайнятість кнопки не зупиняє зовсім.
+   * Тому — прапорець: ставиться кліком, знімається лише відмовою сервера (людина виправляє й повторює) і
+   * новим відкриттям. `created` тримає кнопку зайнятою від успіху до закриття: активна кнопка, що нічого
+   * не робить, — загадка.
+   */
+  const creating = useRef(false);
+  const [created, setCreated] = useState(false);
+
+  useEffect(() => {
+    if (!opened) return;
+
+    creating.current = false;
+    setCreated(false);
+  }, [opened]);
 
   const create = useMutation({
     // ⛔ N3-05: відмову показує майстер (банер у кроці Review через `api.fail` у per-call
@@ -334,7 +355,7 @@ export function CreateDocumentModal({
       steps={steps}
       labels={{ back: t('wizard.back'), next: t('wizard.next'), review: t('wizard.review') }}
       applyLabel={t('documents.createApply')}
-      isApplying={create.isPending}
+      isApplying={create.isPending || created}
       summary={() => (
         <KeyValue
           items={[
@@ -364,8 +385,13 @@ export function CreateDocumentModal({
           : `${t('documents.createReviewText')} ${t('documents.createExistsReview', { key: firstExisting.businessKey })}`
       }
       onApply={(_data, api) => {
+        // ⛔ B145: одна постановка на відкриття (див. `creating` вище).
+        if (creating.current) return;
+        creating.current = true;
+
         create.mutate(undefined, {
           onSuccess: async (result) => {
+            setCreated(true);
             await queryClient.invalidateQueries({ queryKey: ['documents'] });
 
             // ⚠ Не `api.close()`: це той самий `onClose` майстра, тобто `requestClose` з питанням «Discard?» —
@@ -386,6 +412,7 @@ export function CreateDocumentModal({
           // ⚠ Відмова (порушення складу, 403, 409) — банером у кроці Review, без втрати
           // введеного: «Back» веде до аркушів, де її можна виправити.
           onError: (error) => {
+            creating.current = false;
             const shown = problemText(error);
             api.fail(shown.detail === null ? shown.title : `${shown.title}: ${shown.detail}`);
           },
