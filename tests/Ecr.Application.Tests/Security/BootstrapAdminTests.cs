@@ -130,14 +130,63 @@ public sealed class BootstrapAdminTests
             Assert.Equal("ECR-PWD-0428", blocked.ErrorCode);
         }
 
-        // А справжні дозволені маршрути — разом із підшляхами, запитом і
-        // фрагментом — лишаються відкритими: інакше вхід став би колом.
+        // А справжні дозволені маршрути — із запитом і фрагментом — лишаються
+        // відкритими: інакше вхід став би колом. ✎ PT-1: підшлях (`/api/v1/me/grants`,
+        // такого маршруту й немає) більше НЕ дозволений — див. тести PT-1 нижче.
         PasswordChangeGate.Ensure(true, "GET", "/api/v1/me");
         PasswordChangeGate.Ensure(true, "GET", "/api/v1/me?include=grants");
-        PasswordChangeGate.Ensure(true, "GET", "/api/v1/me/grants");
+        PasswordChangeGate.Ensure(true, "GET", "/api/v1/me#top");
         PasswordChangeGate.Ensure(true, "GET", "/api/v1/ui-strings/uk");
         PasswordChangeGate.Ensure(true, "POST", "/api/v1/logout");
     }
+
+    /// <summary>
+    /// ⛔ PT-1 (пентест 2026-11): підшлях дозволеного маршруту — ІНШИЙ маршрут. Під <c>/api/v1/me</c> живуть шість
+    /// контролерів (налаштування, набори редактора, згадки чату, черга погодження, повернуті аркуші, передачі
+    /// зрізів), і разовий пароль відкривав їх усі.
+    /// </summary>
+    /// <remarks>Без виправлення (межею сегмента вважався й <c>/</c>) кожен рядок червоний.</remarks>
+    [Theory]
+    [InlineData("GET", "/api/v1/me/preferences")]
+    [InlineData("PUT", "/api/v1/me/preferences/language")]
+    [InlineData("DELETE", "/api/v1/me/editor-sets/1")]
+    [InlineData("GET", "/api/v1/me/table-discussion-mentions")]
+    [InlineData("GET", "/api/v1/me/approval-queue")]
+    [InlineData("GET", "/api/v1/me/returned-sheets")]
+    [InlineData("GET", "/api/v1/me/edit-assignments")]
+    [InlineData("GET", "/API/V1/ME/Preferences")]
+    [InlineData("GET", "/api/v1/me/")]
+    [InlineData("GET", "/api/v1/me/grants")]
+    [InlineData("POST", "/api/v1/auth/change-password/extra")]
+    [InlineData("POST", "/api/v1/session/activity/extra")]
+    [InlineData("POST", "/api/v1/logout/idle/extra")]
+    [InlineData("POST", "/api/v1/logout/everywhere")]
+    [InlineData("POST", "/api/v1/logout/x")]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-6.18")]
+    [Trait("Finding", "PT-1")]
+    public void Разовий_пароль_не_відкриває_підшляхів_дозволених_маршрутів(string method, string path)
+    {
+        var blocked = Assert.Throws<BusinessRuleException>(
+            () => PasswordChangeGate.Ensure(mustChangePassword: true, method, path));
+
+        Assert.Equal("ECR-PWD-0428", blocked.ErrorCode);
+    }
+
+    [Theory]
+    [InlineData("GET", "/api/v1/me")]
+    [InlineData("GET", "/api/v1/me?include=grants")]
+    [InlineData("POST", "/api/v1/logout")]
+    [InlineData("POST", "/api/v1/logout/idle")]
+    [InlineData("POST", "/api/v1/logout/idle?reason=timeout")]
+    [InlineData("POST", "/api/v1/session/activity")]
+    [InlineData("POST", "/api/v1/auth/change-password")]
+    [InlineData("GET", "/api/v1/ui-strings/en")]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-6.18")]
+    [Trait("Finding", "PT-1")]
+    public void Разовий_пароль_лишає_власні_маршрути(string method, string path)
+        => PasswordChangeGate.Ensure(mustChangePassword: true, method, path);
 
     [Theory]
     [InlineData("PUT", "/api/v1/ui-strings/en/common.save")]

@@ -41,9 +41,11 @@ public static class PasswordChangeGate
         "/api/v1/me",
         "/api/v1/ui-strings",
 
-        // D-471: активність людини на екрані зміни пароля теж тримає сеанс (вихід після бездіяльності);
-        // `/api/v1/logout/idle` покриває `/api/v1/logout` вище (межа сегмента).
+        // D-471: активність людини на екрані зміни пароля теж тримає сеанс (вихід після бездіяльності).
         "/api/v1/session/activity",
+
+        // PT-1: підшляхи більше не дозволяються «за префіксом», тому вихід після бездіяльності — окремим рядком.
+        "/api/v1/logout/idle",
     ];
 
     /// <summary>Префікс каталогу рядків — із нього дозволене лише ЧИТАННЯ однієї мови.</summary>
@@ -78,6 +80,10 @@ public static class PasswordChangeGate
     /// константи, <c>publish</c>, <c>simulate</c> — ще до того, як користувач
     /// довів, що знає власний пароль. Дефект невидимий за побудовою: жоден
     /// маршрут не «падає», просто дозволяється зайвий.
+    ///
+    /// ⛔ PT-1 (пентест 2026-11): підшляхи дозволених маршрутів закриті; виняток — читання каталогу рядків.
+    /// Доти межею сегмента вважався й <c>/</c>, і <c>/api/v1/me/&lt;що завгодно&gt;</c> проходив як підшлях
+    /// <c>/api/v1/me</c> (налаштування, згадки чату, черга погодження, передачі зрізів).
     /// </remarks>
     public static bool IsAllowed(string? method, string? path)
     {
@@ -93,14 +99,23 @@ public static class PasswordChangeGate
                 continue;
             }
 
-            // Точний збіг або наступний символ — межа: підшлях (`/`), запит
-            // (`?`), фрагмент (`#`). Інакше це інший маршрут, що просто
-            // починається з тих самих літер.
-            if (path.Length == allowed.Length || path[allowed.Length] is '/' or '?' or '#')
+            var isUiStrings = string.Equals(allowed, UiStrings, StringComparison.Ordinal);
+            var next = path.Length == allowed.Length ? '\0' : path[allowed.Length];
+
+            // Точний збіг або рядок запиту/фрагмент — той самий маршрут.
+            if (next is '\0' or '?' or '#')
             {
-                return string.Equals(allowed, UiStrings, StringComparison.Ordinal)
-                    ? IsCatalogRead(method, path)
-                    : true;
+                return isUiStrings ? IsCatalogRead(method, path) : true;
+            }
+
+            // ⛔ PT-1: підшлях (`/`) дозволений ЛИШЕ каталогу рядків (`GET {lang}`).
+            // Для решти це ІНШИЙ маршрут: під `/api/v1/me` живуть `me/preferences`,
+            // `me/editor-sets`, `me/table-discussion-mentions` тощо, і разовий пароль
+            // відкривав їх усі. Довший дозволений маршрут (`/api/v1/logout/idle`) має
+            // власний рядок переліку — цикл іде далі й знаходить його.
+            if (next == '/' && isUiStrings)
+            {
+                return IsCatalogRead(method, path);
             }
         }
 
