@@ -180,7 +180,7 @@ public sealed class ListMyApprovalQueueHandler(
     /// не на переглянутих кандидатів), лише коли сторінка непорожня. Ключ рядка — стан аркуша (<c>StateId</c> курсора).
     /// </summary>
     private async Task<IReadOnlyList<ApprovalQueueItemDto>> MarkedAsync(
-        IReadOnlyList<(ApprovalQueueItemDto Item, ApprovalQueueCursor Position)> page, CancellationToken ct)
+        List<(ApprovalQueueItemDto Item, ApprovalQueueCursor Position)> page, CancellationToken ct)
     {
         if (page.Count == 0)
         {
