@@ -94,10 +94,31 @@ public readonly record struct EditDecision(
     public bool DependentInput { get; init; }
 
     /// <summary>
+    /// ✎ B79 (квіз 16.11): при <see cref="DependentInput"/> стовпець читають формули ЛИШЕ інших аркушів — власні
+    /// затверджені місяці аркуша правки не блокують, і запис не повторює їх під замками аркушів року (стани аркушів-читачів
+    /// врахувало рішення поза транзакцією; повторної перевірки їх під замком немає — відома межа). <c>false</c> — читає й
+    /// формула самого аркуша (або аркуш читача невідомий): власні місяці блокують, як доти.
+    /// </summary>
+    public bool DependentOnlyOtherSheets { get; init; }
+
+    /// <summary>
+    /// ✎ B79 (квіз 16.11): при <see cref="DependentInput"/> — ІНШІ аркуші, чиї формули читають стовпець: запис бере їхні
+    /// спільні замки за місяці року (<see cref="DependentReaderLocks"/>) і повторює під ними правило; <c>null</c>/порожньо
+    /// — таких немає.
+    /// </summary>
+    public IReadOnlyList<DependentReaderSheet>? DependentReaderSheets { get; init; }
+
+    /// <summary>
     /// ✎ B79: ключі періодів затверджених місяців, що спричинили <see cref="EditDenyReason.DependentMonthsLocked"/>
     /// (за зростанням); <c>null</c> — причина інша або рішення дозволяє.
     /// </summary>
     public IReadOnlyList<int>? BlockingMonths { get; init; }
+
+    /// <summary>
+    /// ✎ B79 (квіз 16.11, «і користувач має побачити чому»): аркуші, чиї затверджені місяці залежать від стовпця, — з
+    /// місяцями кожного; <c>null</c> — причина інша або рішення дозволяє.
+    /// </summary>
+    public IReadOnlyList<DependentMonthsBlock>? BlockingSheets { get; init; }
 
     public static EditDecision Allow() => new(true, EditDenyReason.None);
 

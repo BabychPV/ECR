@@ -44,7 +44,8 @@ public sealed class DependentMonthsGateRaceTests(SqlServerFixture sql)
     private const int Jan = 209901;
     private static readonly TimeSpan HookTimeout = TimeSpan.FromSeconds(60);
 
-    private sealed record Scene(TestDocument Doc, int WriterId, string RowKey, string BaseVersion);
+    private sealed record Scene(
+        TestDocument Doc, int WriterId, string RowKey, string BaseVersion, int ReaderSheetId, string ReaderSheetCode);
 
     /// <summary>Payload задач каскаду, поставлених останнім <see cref="RunPatchAsync"/> (JSON).</summary>
     private readonly List<string> _payloads = [];
@@ -155,8 +156,47 @@ public sealed class DependentMonthsGateRaceTests(SqlServerFixture sql)
         Assert.Equal(nameof(EditDenyReason.DocumentApproved), denied.Details?["reason"]?.ToString());
     }
 
+    // ── квіз 16.11: аркуш-ЧИТАЧ (інший аркуш, чия формула читає стовпець) ──
+
+    /// <remarks>
+    /// ✎ Квіз 16.11 (координатор: «перевірка після факту без замка — не досить»): стовпець читає лише формула аркуша B.
+    /// Місяць B затверджено між рішенням і записом — записувач (PATCH, книга) під СПІЛЬНИМИ замками місяців B (у
+    /// каноничному порядку з замками аркуша правки) перечитує стан B і відмовляє <c>DependentMonthsLocked</c> з
+    /// <c>sheets = [{ B, [січень] }]</c>; нічого не записано. Контроль — B лише поданий: запис проходить.
+    /// МУТАЦІЯ (локально): у <c>EnsureSheetStillEditableAsync</c>/<c>EnsureColumnPeriodsEditableAsync</c> прибрати
+    /// <c>DependentReaderLocks.ThrowIfLocked</c> — рядки <c>Approved</c> червоніють.
+    /// </remarks>
+    [Theory]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "B79")]
+    [InlineData(false, DocumentStatus.Approved)]
+    [InlineData(true, DocumentStatus.Approved)]
+    [InlineData(false, DocumentStatus.Submitted)]
+    [InlineData(true, DocumentStatus.Submitted)]
+    public async Task Затвердження_місяця_аркуша_читача_між_рішенням_і_записом_відхиляє_з_аркушем(
+        bool workbook, DocumentStatus readerJanuary)
+    {
+        var scene = await ArrangeAsync();
+
+        var error = await RunPatchAsync(scene, readerJanuary, dependent: true, workbook, readerOnly: true);
+
+        if (readerJanuary != DocumentStatus.Approved)
+        {
+            Assert.Null(error);
+            Assert.Equal(EditedValue, await LiveValueAsync(scene));
+            return;
+        }
+
+        var denied = Assert.IsType<AccessDeniedException>(error);
+        Assert.Equal(nameof(EditDenyReason.DependentMonthsLocked), denied.Details?["reason"]?.ToString());
+        Assert.Equal(new[] { Jan }, Assert.IsType<int[]>(denied.Details?[DependentMonthsRule.MonthsDetail]));
+        var sheet = Assert.Single(Assert.IsType<Dictionary<string, object?>[]>(denied.Details?[DependentMonthsRule.SheetsDetail]));
+        Assert.Equal(scene.ReaderSheetCode, sheet["sheetCode"]);
+        Assert.Null(await LiveValueAsync(scene));
+    }
+
     private async Task<Exception?> RunPatchAsync(
-        Scene scene, DocumentStatus? between, bool dependent, bool workbook, bool text = false)
+        Scene scene, DocumentStatus? between, bool dependent, bool workbook, bool text = false, bool readerOnly = false)
     {
         await using var db = CreateContext();
         var doc = scene.Doc;
@@ -169,12 +209,21 @@ public sealed class DependentMonthsGateRaceTests(SqlServerFixture sql)
         // Рішення поза транзакцією: річна комірка (січень і жовтень 2099), усі місяці ще чернетки.
         IReadOnlyList<int> annual = [Jan, View];
         var allowed = EditDecision.Allow() with { AnnualPeriods = annual, DependentInput = dependent, AnnualTextOnly = text };
+        if (readerOnly)
+        {
+            // ✎ Квіз 16.11: стовпець читає лише формула аркуша B.
+            allowed = allowed with
+            {
+                DependentOnlyOtherSheets = true,
+                DependentReaderSheets = [new DependentReaderSheet(scene.ReaderSheetId, scene.ReaderSheetCode)],
+            };
+        }
 
         async Task<T> AfterDecision<T>(T decisions)
         {
             if (between is { } status)
             {
-                await InsertStateAsync(scene, Jan, status);
+                await InsertStateAsync(scene, Jan, status, readerOnly ? scene.ReaderSheetId : null);
             }
 
             return decisions;
@@ -277,6 +326,7 @@ public sealed class DependentMonthsGateRaceTests(SqlServerFixture sql)
         var doc = await builder.BuildAsync(View, rowMode: TableRowMode.Mixed, ct: CancellationToken.None);
 
         int writer;
+        SheetDef readerSheet;
         await using (var db = CreateContext())
         {
             var period = await db.Periods.FirstAsync(
@@ -286,6 +336,12 @@ public sealed class DependentMonthsGateRaceTests(SqlServerFixture sql)
             var writerUser = new User($"dmg_{Guid.NewGuid():N}"[..20], "B79 race user", AuthProvider.Local);
             writerUser.SetPassword("not-a-real-hash");
             db.Users.Add(writerUser);
+
+            // ✎ Квіз 16.11: аркуш-читач B тієї ж версії (його стан — у гонці «читач»).
+            readerSheet = new SheetDef(
+                doc.TemplateVersionId, EcrCode.Create($"RDR{Guid.NewGuid():N}"[..12].ToUpperInvariant()),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "Reader" }), 2);
+            db.SheetDefs.Add(readerSheet);
             await db.SaveChangesAsync(CancellationToken.None);
             writer = writerUser.Id;
         }
@@ -295,15 +351,15 @@ public sealed class DependentMonthsGateRaceTests(SqlServerFixture sql)
         var version = Convert.ToBase64String(await ScalarAsync<byte[]>(
             $"SELECT RowVersion FROM doc.TableRow WHERE TableInstanceId = {doc.TableInstanceId} AND RowKey = N'{rowKey}'"));
 
-        return new Scene(doc, writer, rowKey, version);
+        return new Scene(doc, writer, rowKey, version, readerSheet.Id, readerSheet.Code);
     }
 
     /// <summary>Інше з'єднання комітить стан аркуша місяця (точка перемикання гонки).</summary>
-    private async Task InsertStateAsync(Scene scene, int periodKey, DocumentStatus status)
+    private async Task InsertStateAsync(Scene scene, int periodKey, DocumentStatus status, int? sheetDefId = null)
     {
         await using var other = CreateContext();
         var now = DateTime.UtcNow;
-        var state = new ApprovalState(scene.Doc.DocumentId, scene.Doc.SheetDefId, periodKey);
+        var state = new ApprovalState(scene.Doc.DocumentId, sheetDefId ?? scene.Doc.SheetDefId, periodKey);
         state.Submit(scene.WriterId, now);
         if (status == DocumentStatus.Approved)
         {

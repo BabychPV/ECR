@@ -1947,7 +1947,8 @@ public sealed class AccessDecisionService(
         // перемагають): затверджений місяць року відхиляє правку стовпця, від якого залежать розрахунки місяців.
         if (dependentInput)
         {
-            decision = DependentMonthsRule.Apply(decision, slice.ApprovedMonths);
+            // ✎ Квіз 16.11: затверджений місяць БУДЬ-ЯКОГО аркуша, чия формула читає стовпець, — з назвою аркуша.
+            decision = DependentMonthsRule.Apply(decision, slice.BlockingSheets(column.Id));
         }
 
         // Прапорець «через передачу» переживає правила періоду, що замінили
@@ -1977,6 +1978,8 @@ public sealed class AccessDecisionService(
                 AnnualTextOnly = annualText,
                 AnnualTextRelaxed = annualRelaxed,
                 DependentInput = dependentInput,
+                DependentOnlyOtherSheets = dependentInput && !slice.OwnSheetReads(column.Id),
+                DependentReaderSheets = dependentInput ? slice.OtherReaderSheets(column.Id) : null,
             };
         }
 
@@ -2058,7 +2061,62 @@ public sealed class AccessDecisionService(
         /// з залежними розрахунками; порожньо — таких місяців немає, версія без погодження або річного контексту немає.
         /// </summary>
         public IReadOnlyList<int> ApprovedMonths { get; init; } = [];
+
+        /// <summary>
+        /// ✎ B79 (квіз 16.11): ІНШІ аркуші документа (читачі стовпців версії) → їхні затверджені місяці року, з кодом
+        /// аркуша; порожньо — таких немає. Аркуш самого зрізу — у <see cref="ApprovedMonths"/>.
+        /// </summary>
+        public IReadOnlyDictionary<int, (string Code, IReadOnlyList<int> Months)> OtherSheetsApproved { get; init; } =
+            NoOtherSheetsApproved;
+
+        /// <summary>
+        /// ✎ B79 (квіз 16.11): чи читає стовпець формула САМОГО аркуша зрізу (або аркуш читача невідомий) — лише тоді
+        /// його власні затверджені місяці блокують, і запис повторює це під замками аркушів року.
+        /// </summary>
+        /// <param name="columnDefId">Стовпець правки.</param>
+        public bool OwnSheetReads(int columnDefId)
+        {
+            var readers = Dependents.ReaderSheets(TableDefId, columnDefId);
+            return readers.Contains(GeneralInputDependents.UnknownReaderSheet) || readers.Contains(SheetDefId);
+        }
+
+        /// <summary>✎ B79 (квіз 16.11): ІНШІ аркуші, чиї формули читають стовпець, з кодами — для замків запису.</summary>
+        /// <param name="columnDefId">Стовпець правки.</param>
+        public List<DependentReaderSheet> OtherReaderSheets(int columnDefId)
+            => [.. Dependents.ReaderSheets(TableDefId, columnDefId)
+                .Where(r => r != GeneralInputDependents.UnknownReaderSheet && r != SheetDefId)
+                .Order()
+                .Select(r => new DependentReaderSheet(r, SheetCodeOf(Snapshot, r) ?? string.Empty))];
+
+        /// <summary>
+        /// ✎ B79 (квіз 16.11): аркуші-читачі стовпця з їхніми затвердженими місяцями — те, що відхиляє правку й називає
+        /// відмова. Невідомий читач (<see cref="GeneralInputDependents.UnknownReaderSheet"/>) — аркуш самого зрізу.
+        /// </summary>
+        /// <param name="columnDefId">Стовпець правки.</param>
+        public List<DependentMonthsBlock> BlockingSheets(int columnDefId)
+        {
+            List<DependentMonthsBlock>? blocks = null;
+            foreach (var reader in Dependents.ReaderSheets(TableDefId, columnDefId).Order())
+            {
+                if (reader == GeneralInputDependents.UnknownReaderSheet || reader == SheetDefId)
+                {
+                    if (ApprovedMonths.Count > 0 && blocks?.Exists(b => b.SheetDefId == SheetDefId) != true)
+                    {
+                        (blocks ??= []).Add(new DependentMonthsBlock(SheetDefId, Shared.SheetCode ?? string.Empty, ApprovedMonths));
+                    }
+                }
+                else if (OtherSheetsApproved.TryGetValue(reader, out var other) && other.Months.Count > 0)
+                {
+                    (blocks ??= []).Add(new DependentMonthsBlock(reader, other.Code, other.Months));
+                }
+            }
+
+            return blocks ?? [];
+        }
     }
+
+    private static readonly IReadOnlyDictionary<int, (string Code, IReadOnlyList<int> Months)> NoOtherSheetsApproved =
+        new Dictionary<int, (string, IReadOnlyList<int>)>();
 
     private static readonly IReadOnlySet<string> NoLockedRows = new HashSet<string>(StringComparer.Ordinal);
 
@@ -2245,6 +2303,9 @@ public sealed class AccessDecisionService(
             MonthEnvironment? monthEnvironment = null;
             var monthStatesBySheet = new Dictionary<SheetKey, IReadOnlyDictionary<byte, MonthState>>();
 
+            // ✎ B79 (квіз 16.11): затверджені місяці аркушів-читачів документа за рік — один запит на групу.
+            Dictionary<int, (string Code, IReadOnlyList<int> Months)>? otherApprovedAll = null;
+
             // ✎ D-461: що з комірок групи можна замінити ручним значенням — ОДИН запит позначок на групу, і лише для
             // таблиць, де взагалі є формули колонки/комірки (більшість таблиць не платить нічого).
             var overrideFacts = await FormulaOverrideFacts
@@ -2319,6 +2380,7 @@ public sealed class AccessDecisionService(
                 (CellAccessContext Context, IReadOnlyList<int> Periods)? annual = null;
                 var dependents = GeneralInputDependents.None;
                 IReadOnlyList<int> approvedMonths = [];
+                IReadOnlyDictionary<int, (string Code, IReadOnlyList<int> Months)> otherApproved = NoOtherSheetsApproved;
                 var instanceTable = snapshot.Sheets.SelectMany(s => s.Tables).FirstOrDefault(t => t.Id == instance.TableDefId);
                 var isMonthsTable = !profile.IsIntegrationWriter
                     && !profile.IsSimulation
@@ -2409,6 +2471,18 @@ public sealed class AccessDecisionService(
                         dependents = await DependentsAsync(
                                 dependentsByVersion, VersionOfSheet(snapshot, sheetDefId), ct)
                             .ConfigureAwait(false);
+
+                        // ✎ Квіз 16.11 (людина: «і користувач має побачити чому»): затверджені місяці ІНШИХ аркушів-читачів
+                        // — один запит на групу (документ × рік), лише коли в індексі є читачі з інших аркушів.
+                        var readers = dependents.AllReaderSheets();
+                        if (readers.Count > 0 && (readers.Count > 1 || !readers.Contains(sheetDefId)))
+                        {
+                            otherApprovedAll ??= await OtherSheetsApprovedAsync(documentId, keys, snapshot, ct)
+                                .ConfigureAwait(false);
+                            otherApproved = otherApprovedAll
+                                .Where(p => p.Key != sheetDefId)
+                                .ToDictionary(p => p.Key, p => p.Value);
+                        }
                     }
 
                     if (hasOtherMonthColumn && monthStates.Count > 0)
@@ -2437,6 +2511,7 @@ public sealed class AccessDecisionService(
                     LockedRows = LockedRowsOf(lockedRows, sheetKey.SheetCopyId, sheetCode, instanceTableCode),
                     Dependents = dependents,
                     ApprovedMonths = approvedMonths,
+                    OtherSheetsApproved = otherApproved,
                 };
             }
         }
@@ -2447,6 +2522,33 @@ public sealed class AccessDecisionService(
     /// <summary>✎ B79: версія шаблону, якій належить аркуш (знімок проєкту з кількома версіями — об'єднання їхніх аркушів).</summary>
     private static int VersionOfSheet(TemplateVersionSnapshot snapshot, int sheetDefId)
         => snapshot.Sheets.FirstOrDefault(s => s.Id == sheetDefId)?.TemplateVersionId ?? snapshot.TemplateVersionId;
+
+    /// <summary>
+    /// ✎ B79 (квіз 16.11): аркуш документа → його ЗАТВЕРДЖЕНІ місяці серед <paramref name="yearKeys"/> (будь-яка копія
+    /// аркуша — формула копії теж читає стовпець), з кодом аркуша. Версія без погодження нічого не затверджує
+    /// (<c>ExceptWorkflowNone</c>, як і для аркуша самого зрізу). Один запит.
+    /// </summary>
+    private async Task<Dictionary<int, (string Code, IReadOnlyList<int> Months)>> OtherSheetsApprovedAsync(
+        long documentId, IReadOnlyList<int> yearKeys, TemplateVersionSnapshot snapshot, CancellationToken ct)
+    {
+        var keys = yearKeys.ToList();
+        var rows = await db.ApprovalStates
+            .AsNoTracking()
+            .Where(a => a.DocumentId == documentId
+                        && keys.Contains(a.PeriodKey)
+                        && a.Status == DocumentStatus.Approved)
+            .ExceptWorkflowNone(db)
+            .Select(a => new { a.SheetDefId, a.PeriodKey })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return rows
+            .GroupBy(r => r.SheetDefId)
+            .ToDictionary(
+                g => g.Key,
+                g => (SheetCodeOf(snapshot, g.Key) ?? string.Empty,
+                    (IReadOnlyList<int>)[.. g.Select(r => r.PeriodKey).Distinct().Order()]));
+    }
 
     /// <summary>
     /// ✎ B79: індекс стовпців версії, які читає хоч одна ЖИВА формула (<see cref="GeneralInputDependents"/>).
@@ -2468,7 +2570,7 @@ public sealed class AccessDecisionService(
             .GetDerivedAsync(
                 templateVersionId,
                 GeneralInputDependents.DerivedKind,
-                async token => GeneralInputDependents.From(await (
+                async token => GeneralInputDependents.From((await (
                         from dependency in db.FormulaDependencies.AsNoTracking()
                         join formula in db.FormulaDefs.AsNoTracking() on dependency.FormulaDefId equals formula.Id
                         join table in db.TableDefs.AsNoTracking() on formula.TableDefId equals table.Id
@@ -2477,9 +2579,9 @@ public sealed class AccessDecisionService(
                               && !formula.IsDeleted
                               && dependency.TableDefId != null
                               && (dependency.DependsOnKind == 0 || dependency.DependsOnKind == 3 || dependency.DependsOnKind == 5)
-                        select dependency)
+                        select new { dependency, ReaderSheet = sheet.Id })
                     .ToListAsync(token)
-                    .ConfigureAwait(false)),
+                    .ConfigureAwait(false)).Select(r => (r.dependency, r.ReaderSheet))),
                 ct)
             .ConfigureAwait(false);
 

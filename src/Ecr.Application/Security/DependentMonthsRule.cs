@@ -29,6 +29,9 @@ public static class DependentMonthsRule
     /// <summary>Ім'я подробиці з тими самими ключами одним рядком — для підстановки в текст каталогу.</summary>
     public const string MonthsTextDetail = "monthsText";
 
+    /// <summary>✎ B79 (квіз 16.11): ім'я подробиці з аркушами-читачами та їхніми місяцями (масив <c>{ sheetCode, months }</c>).</summary>
+    public const string SheetsDetail = "sheets";
+
     private static readonly IReadOnlyList<int> NoMonths = [];
 
     /// <summary>Ключі періодів місяців року, стан аркуша яких блокує правку; за зростанням.</summary>
@@ -70,7 +73,27 @@ public static class DependentMonthsRule
     public static EditDecision Apply(EditDecision decision, IReadOnlyList<int> blockingMonths)
     {
         ArgumentNullException.ThrowIfNull(blockingMonths);
+        return Apply(decision, blockingMonths, null);
+    }
 
+    /// <summary>
+    /// ✎ B79 (квіз 16.11): те саме, але місяці — по аркушах-читачах: затверджений місяць БУДЬ-ЯКОГО аркуша, чия формула
+    /// читає стовпець, блокує правку, і відмова називає аркуш(і) з місяцями.
+    /// </summary>
+    /// <param name="decision">Рішення решти правил.</param>
+    /// <param name="blockingSheets">Аркуші-читачі з затвердженими місяцями (порожні місяці пропускаються).</param>
+    public static EditDecision Apply(EditDecision decision, IReadOnlyList<DependentMonthsBlock> blockingSheets)
+    {
+        ArgumentNullException.ThrowIfNull(blockingSheets);
+
+        var sheets = blockingSheets.Where(b => b.Months.Count > 0).ToList();
+        var months = sheets.SelectMany(b => b.Months).Distinct().Order().ToList();
+        return Apply(decision, months, sheets);
+    }
+
+    private static EditDecision Apply(
+        EditDecision decision, IReadOnlyList<int> blockingMonths, IReadOnlyList<DependentMonthsBlock>? blockingSheets)
+    {
         if (!decision.IsAllowed || blockingMonths.Count == 0)
         {
             return decision;
@@ -84,19 +107,26 @@ public static class DependentMonthsRule
             with
             {
                 BlockingMonths = blockingMonths,
+                BlockingSheets = blockingSheets,
             };
     }
 
     /// <summary>Відмова <c>ECR-ACCS-0403</c> з причиною <c>DependentMonthsLocked</c> і переліком місяців.</summary>
     /// <param name="deniedCount">Скільки комірок відхилено.</param>
     /// <param name="blockingMonths">Місяці, що блокують.</param>
+    /// <param name="blockingSheets">
+    /// ✎ B79 (квіз 16.11): аркуші-читачі з їхніми місяцями — подробиця <c>sheets</c>; <c>null</c> — не відомі (повторна
+    /// перевірка під замками бачить лише місяці аркуша правки), подробиці немає.
+    /// </param>
     /// <remarks>
     /// Одна фабрика на обидва місця кидка (рішення в PATCH і повторна перевірка під замками): ті самі подробиці —
-    /// <c>messageKey</c>, <c>deniedCount</c>, <c>reason</c>, <c>months</c>, <c>monthsText</c>. Місяці — ключі періодів
-    /// аркуша, який користувач уже читає й має право правити (правило останнє, після гранта), тож нового про схований
-    /// стовпець чи значення вони не розкривають.
+    /// <c>messageKey</c>, <c>deniedCount</c>, <c>reason</c>, <c>months</c>, <c>monthsText</c> і, коли відомі, <c>sheets</c>.
+    /// Місяці — ключі періодів документа, який користувач уже читає й має право правити (правило останнє, після гранта).
+    /// ⚠ Код аркуша-читача називається навіть тоді, коли той аркуш користувачеві не видно: людина 16.11 — «і користувач
+    /// має побачити чому»; код аркуша — структура шаблону, не дані (питання до AU в листі готовності).
     /// </remarks>
-    public static AccessDeniedException Denied(int deniedCount, IReadOnlyCollection<int> blockingMonths)
+    public static AccessDeniedException Denied(
+        int deniedCount, IReadOnlyCollection<int> blockingMonths, IReadOnlyList<DependentMonthsBlock>? blockingSheets = null)
     {
         ArgumentNullException.ThrowIfNull(blockingMonths);
 
@@ -108,6 +138,17 @@ public static class DependentMonthsRule
             [MonthsDetail] = blockingMonths.ToArray(),
             [MonthsTextDetail] = MonthsText(blockingMonths),
         };
+
+        if (blockingSheets is { Count: > 0 })
+        {
+            details[SheetsDetail] = blockingSheets
+                .Select(b => new Dictionary<string, object?>
+                {
+                    ["sheetCode"] = b.SheetCode,
+                    [MonthsDetail] = b.Months.ToArray(),
+                })
+                .ToArray();
+        }
 
         return new AccessDeniedException(
             "ECR-ACCS-0403",
@@ -139,3 +180,9 @@ public static class DependentMonthsRule
     private static string MonthsText(IEnumerable<int> months)
         => string.Join(", ", months.Select(m => m.ToString(CultureInfo.InvariantCulture)));
 }
+
+/// <summary>✎ B79 (квіз 16.11): аркуш-читач стовпця і його затверджені місяці, що блокують правку.</summary>
+/// <param name="SheetDefId">Аркуш формули-читача.</param>
+/// <param name="SheetCode">Код аркуша (для відмови й підказки).</param>
+/// <param name="Months">Ключі періодів затверджених місяців аркуша, за зростанням.</param>
+public sealed record DependentMonthsBlock(int SheetDefId, string SheetCode, IReadOnlyList<int> Months);

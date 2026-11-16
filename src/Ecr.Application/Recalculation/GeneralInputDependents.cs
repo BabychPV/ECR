@@ -30,10 +30,19 @@ public sealed class GeneralInputDependents
     /// <summary>Жоден стовпець залежних не має.</summary>
     public static GeneralInputDependents None { get; } = new([], []);
 
-    private readonly HashSet<(int TableDefId, int ColumnDefId)> _columns;
-    private readonly HashSet<int> _tables;
+    /// <summary>
+    /// ✎ B79 (квіз 16.11): аркуш формули-читача невідомий (індекс зібрано без нього, <see cref="From(IEnumerable{FormulaDependency})"/>) —
+    /// правило вважає читачем аркуш самого стовпця.
+    /// </summary>
+    public const int UnknownReaderSheet = 0;
 
-    private GeneralInputDependents(HashSet<(int, int)> columns, HashSet<int> tables)
+    private static readonly IReadOnlySet<int> NoReaders = new HashSet<int>();
+
+    private readonly Dictionary<(int TableDefId, int ColumnDefId), HashSet<int>> _columns;
+    private readonly Dictionary<int, HashSet<int>> _tables;
+
+    private GeneralInputDependents(
+        Dictionary<(int, int), HashSet<int>> columns, Dictionary<int, HashSet<int>> tables)
     {
         _columns = columns;
         _tables = tables;
@@ -42,16 +51,27 @@ public sealed class GeneralInputDependents
     /// <summary>Чи є хоч один стовпець із залежними (порожній індекс — правило B79 мовчить).</summary>
     public bool IsEmpty => _columns.Count == 0 && _tables.Count == 0;
 
-    /// <summary>Будує індекс із графа залежностей формул версії.</summary>
+    /// <summary>Будує індекс із графа залежностей формул версії (аркуш читача невідомий).</summary>
     /// <param name="dependencies">Залежності живих формул версії.</param>
     public static GeneralInputDependents From(IEnumerable<FormulaDependency> dependencies)
     {
         ArgumentNullException.ThrowIfNull(dependencies);
+        return From(dependencies.Select(d => (d, UnknownReaderSheet)));
+    }
 
-        var columns = new HashSet<(int, int)>();
-        var tables = new HashSet<int>();
+    /// <summary>
+    /// ✎ B79 (квіз 16.11, «і користувач має побачити чому»): індекс з аркушем формули-читача — правило блокують
+    /// затверджені місяці БУДЬ-ЯКОГО аркуша, чия формула читає стовпець, і відмова їх називає.
+    /// </summary>
+    /// <param name="dependencies">Залежності живих формул версії з аркушем формули.</param>
+    public static GeneralInputDependents From(IEnumerable<(FormulaDependency Dependency, int ReaderSheetDefId)> dependencies)
+    {
+        ArgumentNullException.ThrowIfNull(dependencies);
 
-        foreach (var dependency in dependencies)
+        var columns = new Dictionary<(int, int), HashSet<int>>();
+        var tables = new Dictionary<int, HashSet<int>>();
+
+        foreach (var (dependency, readerSheet) in dependencies)
         {
             if (dependency.FormulaDefId is null || dependency.TableDefId is not { } tableDefId)
             {
@@ -74,14 +94,20 @@ public sealed class GeneralInputDependents
                     continue;
             }
 
+            HashSet<int>? readers;
             if (wholeTable)
             {
-                tables.Add(tableDefId);
+                if (!tables.TryGetValue(tableDefId, out readers))
+                {
+                    tables[tableDefId] = readers = [];
+                }
             }
-            else
+            else if (!columns.TryGetValue((tableDefId, dependency.ColumnDefId!.Value), out readers))
             {
-                columns.Add((tableDefId, dependency.ColumnDefId!.Value));
+                columns[(tableDefId, dependency.ColumnDefId!.Value)] = readers = [];
             }
+
+            readers.Add(readerSheet);
         }
 
         return columns.Count == 0 && tables.Count == 0 ? None : new GeneralInputDependents(columns, tables);
@@ -91,5 +117,43 @@ public sealed class GeneralInputDependents
     /// <param name="tableDefId">Таблиця стовпця.</param>
     /// <param name="columnDefId">Стовпець.</param>
     public bool Reads(int tableDefId, int columnDefId)
-        => _tables.Contains(tableDefId) || _columns.Contains((tableDefId, columnDefId));
+        => _tables.ContainsKey(tableDefId) || _columns.ContainsKey((tableDefId, columnDefId));
+
+    /// <summary>
+    /// ✎ B79 (квіз 16.11): аркуші формул, що читають стовпець (<see cref="UnknownReaderSheet"/> — аркуш невідомий);
+    /// порожньо — читачів немає.
+    /// </summary>
+    /// <param name="tableDefId">Таблиця стовпця.</param>
+    /// <param name="columnDefId">Стовпець.</param>
+    public IReadOnlySet<int> ReaderSheets(int tableDefId, int columnDefId)
+    {
+        var byTable = _tables.GetValueOrDefault(tableDefId);
+        var byColumn = _columns.GetValueOrDefault((tableDefId, columnDefId));
+        if (byTable is null)
+        {
+            return byColumn ?? NoReaders;
+        }
+
+        if (byColumn is null)
+        {
+            return byTable;
+        }
+
+        var union = new HashSet<int>(byTable);
+        union.UnionWith(byColumn);
+        return union;
+    }
+
+    /// <summary>Усі аркуші-читачі індексу (для одного запиту станів), без <see cref="UnknownReaderSheet"/>.</summary>
+    public IReadOnlySet<int> AllReaderSheets()
+    {
+        var all = new HashSet<int>();
+        foreach (var readers in _tables.Values.Concat(_columns.Values))
+        {
+            all.UnionWith(readers);
+        }
+
+        all.Remove(UnknownReaderSheet);
+        return all;
+    }
 }

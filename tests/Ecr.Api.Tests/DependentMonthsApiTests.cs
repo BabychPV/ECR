@@ -55,6 +55,9 @@ public sealed class DependentMonthsApiTests(SqlServerFixture sql)
     /// <summary>Затверджені місяці першого сценарію — у відмові за зростанням.</summary>
     private static readonly int[] ApprovedMonths = [209901, 209903];
 
+    /// <summary>✎ Квіз 16.11: затверджений березень аркуша-читача B.</summary>
+    private static readonly int[] ReaderMarch = [209903];
+
     // ── 1. Затверджений місяць блокує; перелік місяців у відмові; нічого не записано ──
 
     [Fact]
@@ -274,7 +277,75 @@ public sealed class DependentMonthsApiTests(SqlServerFixture sql)
     private sealed record Scenario(
         TestDocumentBuilder Builder, TestDocument Doc, string Writer, int WriterId, string ColumnDenied, string Stranger,
         int LockerId, IReadOnlyList<string> RowKeys, string TableCode,
-        Dictionary<string, int> ColumnIds, Dictionary<string, string> ColumnCodes);
+        Dictionary<string, int> ColumnIds, Dictionary<string, string> ColumnCodes)
+    {
+        /// <summary>✎ Квіз 16.11: аркуш B, формула якого читає FUEL аркуша A (лише в сценарії «читач на іншому аркуші»).</summary>
+        public (int Id, string Code)? ReaderSheet { get; init; }
+    }
+
+    // ── 10. Квіз 16.11: формула ІНШОГО аркуша читає стовпець — його затверджений місяць блокує і названий ──
+
+    /// <summary>
+    /// ✎ Квіз 16.11 (людина: «будь-який затверджений місяць, що залежить від стовпця, блокує — і користувач має побачити
+    /// чому»): FUEL аркуша A читає лише формула аркуша B. Затверджений березень B відхиляє правку FUEL з
+    /// <c>sheets = [{ sheetCode: B, months: [209903] }]</c>, і зріз несе те саме для підказки сірої комірки. Затверджений
+    /// січень САМОГО A не блокує (жодна формула A стовпець не читає). Контроль: березень B лише поданий — правка проходить.
+    /// </summary>
+    /// <remarks>⛔ МУТАЦІЇ (локально): у <c>AccessDecisionService.SliceContext.BlockingSheets</c> не брати
+    /// <c>OtherSheetsApproved</c> — рядок <c>Approved</c> червоніє (200 замість 403); не кликати
+    /// <c>OtherSheetsApprovedAsync</c> — те саме; у <c>DependentMonthsRule.Denied</c> не писати <c>sheets</c> — червоніє;
+    /// у <c>GetTableSliceHandler.DependentMonthsOf</c> повернути <c>null</c> — червоніє твердження зрізу.</remarks>
+    [Theory]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "B79")]
+    [InlineData(DocumentStatus.Approved)]
+    [InlineData(DocumentStatus.Submitted)]
+    public async Task Формула_іншого_аркуша_читає_стовпець_його_затверджений_місяць_блокує_і_названий(DocumentStatus readerMarch)
+    {
+        var s = await ArrangeAsync(readerOnOtherSheet: true).ConfigureAwait(true);
+        var (readerId, readerCode) = s.ReaderSheet!.Value;
+        await SetStatusAsync(s, 1, DocumentStatus.Approved).ConfigureAwait(true);
+        await SetStatusAsync(s, 3, readerMarch, readerId).ConfigureAwait(true);
+        using var app = Boot();
+        using var client = await SignInAsync(app, s.Writer).ConfigureAwait(true);
+
+        if (readerMarch != DocumentStatus.Approved)
+        {
+            await ExpectAsync(app, HttpStatusCode.OK, PatchAsync(client, s, (Fuel, 22m))).ConfigureAwait(true);
+            Assert.Equal([(Anchor, 22m)], await StoredAsync(s, Fuel).ConfigureAwait(true));
+            return;
+        }
+
+        var body = await ExpectAsync(app, HttpStatusCode.Forbidden, PatchAsync(client, s, (Fuel, 23m))).ConfigureAwait(true);
+        var root = JsonDocument.Parse(body).RootElement;
+
+        Assert.Equal("DependentMonthsLocked", root.GetProperty("reason").GetString());
+        Assert.Equal(ReaderMarch, root.GetProperty("months").EnumerateArray().Select(m => m.GetInt32()));
+        var sheet = Assert.Single(root.GetProperty("sheets").EnumerateArray());
+        Assert.Equal(readerCode, sheet.GetProperty("sheetCode").GetString());
+        Assert.Equal(ReaderMarch, sheet.GetProperty("months").EnumerateArray().Select(m => m.GetInt32()));
+        Assert.Empty(await StoredAsync(s, Fuel).ConfigureAwait(true));
+
+        // Зріз: та сама причина й аркуш для підказки сірої комірки.
+        var slice = await SliceAsync(client, s).ConfigureAwait(true);
+        Assert.Equal(
+            "DependentMonthsLocked",
+            slice.GetProperty("cellPermissions").GetProperty($"{s.RowKeys[0]}:{s.ColumnCodes[Fuel]}").GetString());
+        var hint = Assert.Single(slice.GetProperty("dependentMonths").GetProperty(s.ColumnCodes[Fuel]).EnumerateArray());
+        Assert.Equal(readerCode, hint.GetProperty("sheetCode").GetString());
+        Assert.Equal(ReaderMarch, hint.GetProperty("months").EnumerateArray().Select(m => m.GetInt32()));
+    }
+
+    /// <summary>Тіло зрізу таблиці документа (перший екземпляр — перегляд 209910).</summary>
+    private static async Task<JsonElement> SliceAsync(HttpClient client, Scenario s)
+    {
+        using var response = await client.GetAsync(new Uri(
+            $"/api/v1/documents/{s.Doc.DocumentId.ToString(CultureInfo.InvariantCulture)}/tables/{s.Doc.TableInstanceId.ToString(CultureInfo.InvariantCulture)}",
+            UriKind.Relative)).ConfigureAwait(false);
+        var text = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+        Assert.True(response.IsSuccessStatusCode, $"GET зрізу: {response.StatusCode}\n{text}");
+        return JsonDocument.Parse(text).RootElement.Clone();
+    }
 
     /// <summary>Хост із маршрутизацією місячних стовпців: змінна оточення діє лише на час його старту.</summary>
     private EcrApiFactory Boot()
@@ -397,7 +468,11 @@ public sealed class DependentMonthsApiTests(SqlServerFixture sql)
     }
 
     /// <summary>Стан аркуша місяця <paramref name="month"/> року 2099 (оригінал аркуша, без копії).</summary>
-    private static async Task SetStatusAsync(Scenario s, int month, DocumentStatus status)
+    /// <param name="s">Сценарій.</param>
+    /// <param name="month">Місяць 2099.</param>
+    /// <param name="status">Стан.</param>
+    /// <param name="sheetDefId">Аркуш; <c>null</c> — аркуш таблиці сценарію (A).</param>
+    private static async Task SetStatusAsync(Scenario s, int month, DocumentStatus status, int? sheetDefId = null)
     {
         if (status == DocumentStatus.Draft)
         {
@@ -405,7 +480,7 @@ public sealed class DependentMonthsApiTests(SqlServerFixture sql)
         }
 
         await using var db = s.Builder.CreateContext();
-        var state = new ApprovalState(s.Doc.DocumentId, s.Doc.SheetDefId, (Year * 100) + month);
+        var state = new ApprovalState(s.Doc.DocumentId, sheetDefId ?? s.Doc.SheetDefId, (Year * 100) + month);
         state.Submit(s.WriterId, Now);
         if (status == DocumentStatus.Approved)
         {
@@ -424,8 +499,12 @@ public sealed class DependentMonthsApiTests(SqlServerFixture sql)
     /// Документ року 2099 з таблицею «місяці в колонках» (екземпляри 01, 02, 10; перегляд — 10, якір — 01), усі місяці
     /// календаря відкриті; формула місячного стовпця M12 читає загальний стовпець FUEL; FREE ніхто не читає.
     /// </summary>
-    private async Task<Scenario> ArrangeAsync()
+    /// <param name="readerOnOtherSheet">
+    /// ✎ Квіз 16.11: FUEL читає НЕ формула аркуша A, а формула аркуша B тієї ж версії (окрема таблиця B).
+    /// </param>
+    private async Task<Scenario> ArrangeAsync(bool readerOnOtherSheet = false)
     {
+        (int Id, string Code)? readerSheet = null;
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var doc = await builder.BuildAsync(
             View, columnCount: 3, rowCount: 2, rowMode: TableRowMode.Mixed,
@@ -466,17 +545,55 @@ public sealed class DependentMonthsApiTests(SqlServerFixture sql)
                 .Where(r => r.PeriodKeyValue == View && r.TableInstanceId == doc.TableInstanceId)
                 .OrderBy(r => r.Ordinal).Select(r => r.RowKeyValue).ToListAsync().ConfigureAwait(false);
 
-            // Формула M12 = FUEL * 2 і її ребро в графі версії: саме воно робить FUEL стовпцем із залежними.
-            var formula = new FormulaDef(
-                doc.TableDefId, FormulaScope.Column, $"[{columnCodes[Fuel]}] * 2", ExpressionDialect.Template);
-            formula.AssignColumn(doc.MonthColumnDefIds[11]);
-            db.FormulaDefs.Add(formula);
-            await db.SaveChangesAsync().ConfigureAwait(false);
+            if (readerOnOtherSheet)
+            {
+                // ✎ Квіз 16.11: аркуш B з таблицею й формулою стовпця, ребро якої читає FUEL таблиці аркуша A.
+                var tag = Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
+                var sheetB = new SheetDef(
+                    doc.TemplateVersionId, EcrCode.Create($"SHB{tag}"),
+                    new LocalizedText(new Dictionary<string, string> { ["en"] = "Reader sheet" }), 2);
+                db.SheetDefs.Add(sheetB);
+                await db.SaveChangesAsync().ConfigureAwait(false);
 
-            db.FormulaDependencies.Add(FormulaDependency.ForFormula(
-                formula.Id, dependsOnKind: 0, doc.TableDefId, rowKey: null, columnIds[Fuel],
-                filterJson: null, periodOffset: null, sortOrder: 0));
-            await db.SaveChangesAsync().ConfigureAwait(false);
+                var tableB = new TableDef(
+                    sheetB.Id, EcrCode.Create($"TBB{tag}"),
+                    new LocalizedText(new Dictionary<string, string> { ["en"] = "Reader table" }), 1,
+                    TableLayoutKind.PerPeriodInstance, TableRowMode.Fixed);
+                db.TableDefs.Add(tableB);
+                await db.SaveChangesAsync().ConfigureAwait(false);
+
+                var readerColumn = new ColumnDef(
+                    tableB.Id, EcrCode.Create($"RB{tag}"),
+                    new LocalizedText(new Dictionary<string, string> { ["en"] = "Reader" }), 1, CellDataType.Formula);
+                db.ColumnDefs.Add(readerColumn);
+                db.DocumentSheets.Add(new DocumentSheet(doc.DocumentId, sheetB.Id));
+                await db.SaveChangesAsync().ConfigureAwait(false);
+
+                var readerFormula = new FormulaDef(tableB.Id, FormulaScope.Column, "0", ExpressionDialect.Template);
+                readerFormula.AssignColumn(readerColumn.Id);
+                db.FormulaDefs.Add(readerFormula);
+                await db.SaveChangesAsync().ConfigureAwait(false);
+
+                db.FormulaDependencies.Add(FormulaDependency.ForFormula(
+                    readerFormula.Id, dependsOnKind: 0, doc.TableDefId, rowKey: null, columnIds[Fuel],
+                    filterJson: null, periodOffset: null, sortOrder: 0));
+                await db.SaveChangesAsync().ConfigureAwait(false);
+                readerSheet = (sheetB.Id, sheetB.Code);
+            }
+            else
+            {
+                // Формула M12 = FUEL * 2 і її ребро в графі версії: саме воно робить FUEL стовпцем із залежними.
+                var formula = new FormulaDef(
+                    doc.TableDefId, FormulaScope.Column, $"[{columnCodes[Fuel]}] * 2", ExpressionDialect.Template);
+                formula.AssignColumn(doc.MonthColumnDefIds[11]);
+                db.FormulaDefs.Add(formula);
+                await db.SaveChangesAsync().ConfigureAwait(false);
+
+                db.FormulaDependencies.Add(FormulaDependency.ForFormula(
+                    formula.Id, dependsOnKind: 0, doc.TableDefId, rowKey: null, columnIds[Fuel],
+                    filterJson: null, periodOffset: null, sortOrder: 0));
+                await db.SaveChangesAsync().ConfigureAwait(false);
+            }
         }
 
         int writerId;
@@ -527,6 +644,9 @@ public sealed class DependentMonthsApiTests(SqlServerFixture sql)
         }
 
         return new Scenario(
-            builder, doc, writer, writerId, columnDenied, stranger, lockerId, rowKeys, tableCode, columnIds, columnCodes);
+            builder, doc, writer, writerId, columnDenied, stranger, lockerId, rowKeys, tableCode, columnIds, columnCodes)
+        {
+            ReaderSheet = readerSheet,
+        };
     }
 }

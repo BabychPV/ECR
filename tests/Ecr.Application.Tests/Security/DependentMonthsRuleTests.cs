@@ -187,4 +187,85 @@ public sealed class DependentMonthsRuleTests
         Assert.True(index.IsEmpty);
         Assert.Same(GeneralInputDependents.None, index);
     }
+
+    private const int SheetA = 501;
+    private const int SheetB = 502;
+    private const int SheetC = 503;
+
+    /// <summary>
+    /// ✎ Квіз 16.11 (людина: «і користувач має побачити чому»): індекс знає АРКУШ формули-читача — стовпця (точно) і
+    /// всієї таблиці (предикат, посилання без стовпця); аркуші об'єднуються. Невідомий аркуш (старий вхід без аркуша) —
+    /// <see cref="GeneralInputDependents.UnknownReaderSheet"/>.
+    /// </summary>
+    /// <remarks>⛔ МУТАЦІЇ (локально): у <c>From</c> не додавати аркуш читача (<c>readers.Add</c>) — червоніє; у
+    /// <c>ReaderSheets</c> не поєднувати читачів таблиці зі стовпцевими — червоніє рядок <c>SheetC</c>.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "B79")]
+    public void Індекс_знає_аркуш_формули_читача_стовпця_і_таблиці()
+    {
+        var index = GeneralInputDependents.From(new[]
+        {
+            (Edge(kind: 0, Table, Fuel), SheetB),
+            (Edge(kind: 3, Table, Fuel, offset: -1), SheetA),
+            (Edge(kind: 0, Table, column: null), SheetC),
+        });
+
+        Assert.Equal(new[] { SheetA, SheetB, SheetC }, index.ReaderSheets(Table, Fuel).Order());
+        Assert.Equal(new[] { SheetC }, index.ReaderSheets(Table, Free).Order());
+        Assert.Empty(index.ReaderSheets(OtherTable, Fuel));
+        Assert.Equal(new[] { SheetA, SheetB, SheetC }, index.AllReaderSheets().Order());
+
+        var legacy = GeneralInputDependents.From([Edge(kind: 0, Table, Fuel)]);
+        Assert.Equal(new[] { GeneralInputDependents.UnknownReaderSheet }, legacy.ReaderSheets(Table, Fuel));
+        Assert.Empty(legacy.AllReaderSheets());
+    }
+
+    /// <summary>
+    /// ✎ Квіз 16.11: відмова за аркушами-читачами — місяці об'єднано за зростанням, аркуш без затверджених місяців у
+    /// відмову не йде; жодного затвердженого місяця — дозвіл лишається.
+    /// </summary>
+    /// <remarks>⛔ МУТАЦІЇ (локально): у <c>Apply</c> за аркушами не відкидати аркуші без місяців — червоніє
+    /// <c>Assert.Single</c>; не передавати аркуші в рішення (<c>BlockingSheets = null</c>) — червоніє.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "B79")]
+    public void Відмова_називає_аркуші_читачі_з_їхніми_затвердженими_місяцями()
+    {
+        var allowed = EditRules.CanEdit(Writer(), AccessBuilder.Cell());
+
+        var denied = DependentMonthsRule.Apply(
+            allowed,
+            [
+                new DependentMonthsBlock(SheetB, "B", [Mar]),
+                new DependentMonthsBlock(SheetC, "C", []),
+                new DependentMonthsBlock(SheetA, "A", [Jan, Mar]),
+            ]);
+
+        Assert.Equal(EditDenyReason.DependentMonthsLocked, denied.Reason);
+        Assert.Equal(new[] { Jan, Mar }, denied.BlockingMonths);
+        Assert.Equal(["B", "A"], denied.BlockingSheets!.Select(b => b.SheetCode).ToArray());
+
+        var stillAllowed = DependentMonthsRule.Apply(allowed, [new DependentMonthsBlock(SheetC, "C", [])]);
+        Assert.True(stillAllowed.IsAllowed);
+        Assert.Null(stillAllowed.BlockingSheets);
+
+        var single = DependentMonthsRule.Apply(allowed, [new DependentMonthsBlock(SheetB, "B", [Feb])]);
+        Assert.Single(single.BlockingSheets!);
+    }
+
+    /// <summary>✎ Квіз 16.11: відмова 403 несе <c>sheets</c> (аркуш і його місяці), коли аркуші відомі; без них — ні.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "B79")]
+    public void Відмова_403_несе_аркуші_коли_вони_відомі()
+    {
+        var withSheets = DependentMonthsRule.Denied(2, [Jan, Mar], [new DependentMonthsBlock(SheetB, "B", [Mar])]);
+        var withoutSheets = DependentMonthsRule.Denied(1, [Jan]);
+
+        var sheets = Assert.IsType<Dictionary<string, object?>[]>(withSheets.Details![DependentMonthsRule.SheetsDetail]);
+        Assert.Equal("B", Assert.Single(sheets)["sheetCode"]);
+        Assert.Equal(new[] { Mar }, sheets[0][DependentMonthsRule.MonthsDetail]);
+        Assert.False(withoutSheets.Details!.ContainsKey(DependentMonthsRule.SheetsDetail));
+    }
 }

@@ -52,6 +52,48 @@ public sealed class AnnualDecisionRecheckTests
     private static Task RunAsync(ISheetEditGate? gate, EditDecision decision, long? copyId = null)
         => AnnualDecisionRecheck.EnsureAsync(gate, DocumentId, SheetDefId, copyId, decision, 1, CancellationToken.None);
 
+    private const int ReaderSheet = 3;
+
+    /// <remarks>
+    /// ✎ Квіз 16.11: стовпець читає лише формула аркуша-читача (Id 3 &lt; 5). Його лютий затверджено — відмова з
+    /// <c>sheets = [{ RDR, [лютий] }]</c>; власний затверджений січень не блокує (<c>DependentOnlyOtherSheets</c>).
+    /// Замки — у каноничному порядку: аркуш ↑, період ↑ (читач раніше за аркуш правки). МУТАЦІЇ (локально): прибрати
+    /// <c>DependentReaderLocks.ThrowIfLocked</c> в <c>EnsureAsync</c> — не червоніє лише без відмови, червоніє
+    /// <c>ThrowsAsync</c>; у <c>DependentReaderLocks.Plan</c> упорядкувати «спершу аркуш правки» — червоніє порядок.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "B79")]
+    public async Task Аркуш_читач_затверджений_під_замком_відхиляє_з_аркушем_а_замки_в_каноничному_порядку()
+    {
+        var order = new List<(int Sheet, int Period)>();
+        var gate = Substitute.For<ISheetEditGate>();
+        gate.EnterEditAsync(DocumentId, Arg.Any<int>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns(c =>
+            {
+                var sheet = c.ArgAt<int>(1);
+                var period = c.ArgAt<PeriodKey>(2).Value;
+                order.Add((sheet, period));
+                var approved = (sheet == ReaderSheet && period == Feb) || (sheet == SheetDefId && period == Jan);
+                return Task.FromResult(approved ? DocumentStatus.Approved : DocumentStatus.Draft);
+            });
+        var decision = Annual(dependent: true) with
+        {
+            DependentOnlyOtherSheets = true,
+            DependentReaderSheets = [new DependentReaderSheet(ReaderSheet, "RDR")],
+        };
+
+        var denied = await Assert.ThrowsAsync<AccessDeniedException>(() => RunAsync(gate, decision));
+
+        Assert.Equal(nameof(EditDenyReason.DependentMonthsLocked), denied.Details?["reason"]);
+        Assert.Equal([Feb], Assert.IsType<int[]>(denied.Details?[DependentMonthsRule.MonthsDetail]));
+        var sheet = Assert.Single(Assert.IsType<Dictionary<string, object?>[]>(denied.Details?[DependentMonthsRule.SheetsDetail]));
+        Assert.Equal("RDR", sheet["sheetCode"]);
+        Assert.Equal(
+            [(ReaderSheet, Jan), (ReaderSheet, Feb), (SheetDefId, Jan), (SheetDefId, Feb)],
+            order.ToArray());
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Requirement", "B79")]

@@ -51,17 +51,27 @@ public static class AnnualDecisionRecheck
                 "Річне рішення про комірку потребує повторної перевірки під замком аркуша, але замка немає.");
         }
 
+        // ✎ B79 (квіз 16.11): аркуші-читачі стовпця з залежними — у каноничному порядку разом з аркушем правки.
+        var readers = decision.DependentInput ? decision.DependentReaderSheets ?? [] : [];
         var locked = new Dictionary<int, DocumentStatus>(annual.Count);
-        foreach (var period in annual.Distinct().Order())
-        {
-            locked[period] = await gate
-                .EnterEditOfAsync(documentId, sheetDefId, new PeriodKey(period), sheetCopyId, ct)
-                .ConfigureAwait(false);
-        }
+        var readerStatuses = await DependentReaderLocks
+            .EnterAsync(
+                gate, documentId, DependentReaderLocks.Plan(sheetDefId, sheetCopyId, annual, readers, annual),
+                async period => locked[period] = await gate
+                    .EnterEditOfAsync(documentId, sheetDefId, new PeriodKey(period), sheetCopyId, ct)
+                    .ConfigureAwait(false),
+                ct)
+            .ConfigureAwait(false);
 
         if (decision.DependentInput)
         {
-            DependentMonthsRule.ThrowIfLocked(annual, locked, deniedCount);
+            // ✎ Квіз 16.11: власні місяці — лише коли стовпець читає формула цього ж аркуша.
+            if (!decision.DependentOnlyOtherSheets)
+            {
+                DependentMonthsRule.ThrowIfLocked(annual, locked, deniedCount);
+            }
+
+            DependentReaderLocks.ThrowIfLocked(readers, annual, readerStatuses, deniedCount);
             return;
         }
 
