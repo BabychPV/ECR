@@ -140,6 +140,13 @@ namespace Ecr.Application.Ports;
 /// <paramref name="TemplateLayout"/>; лише в картці (<c>GET /documents/{id}</c>), у переліку — <c>null</c>. За
 /// <c>None</c> клієнт не показує подання, затвердження й відкликання («без погодження»).
 /// </param>
+/// <param name="CanLockRows">
+/// ✎ B143 (D-538): чи може поточний користувач блокувати рядки документа за запитаний період — рішення СЕРВЕРА, те саме, що
+/// приймає <c>POST /documents/{id}/row-locks</c> (<c>RowLockRules.LockDenial</c>: носій права <c>Document.RowLock</c>
+/// або власник документа з рівнем Write на таблицю; архів, архівація й закритий період — ні). <c>true</c> — є хоч одна
+/// таблиця, рядки якої він може блокувати; клієнт показує «Заблокувати рядки…» лише за ним (власника документа клієнт
+/// не знає). Лише картка (<c>GET /documents/{id}?periodKey=</c>); <c>null</c> — період не задано або це рядок переліку.
+/// </param>
 public sealed record DocumentSummary(
     long Id,
     int ProjectId,
@@ -171,7 +178,8 @@ public sealed record DocumentSummary(
     IReadOnlyList<DocumentPeriodState>? PeriodStates = null,
     IReadOnlyList<DocumentReopenedPeriod>? ReopenedPeriods = null,
     string? TemplateLayout = null,
-    string? WorkflowMode = null);
+    string? WorkflowMode = null,
+    bool? CanLockRows = null);
 
 /// <summary>
 /// ✎ 10.11 (слово людини через координатора): закритий місяць, відкритий для ЦЬОГО документа

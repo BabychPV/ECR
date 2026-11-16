@@ -94,6 +94,9 @@ public static class DependencyInjection
         services.AddScoped<Documents.RowLocks.GetRowLocksHandler>();
         services.AddScoped<Documents.RowLocks.CreateRowLocksHandler>();
         services.AddScoped<Documents.RowLocks.ReleaseRowLockHandler>();
+
+        // ✎ B143 (D-538): прапорець картки «можна блокувати рядки» — те саме рішення, що й POST …/row-locks.
+        services.AddScoped<Documents.RowLocks.RowLockCapability>();
         services.AddScoped<MonthInputAliasesHandler>();
 
         // Другий вертикальний зріз — таблиця на аркуші (W5.1), той самий патерн.
