@@ -134,7 +134,18 @@ export function CalcResultsExport({
           <Button variant="default" onClick={onClose}>
             {t('calcResults.cancel')}
           </Button>
-          <Button onClick={() => start.mutate()} loading={startLoading} disabled={start.isPending} data-testid="cr-export-go">
+          <Button
+            onClick={() => {
+              // ⛔ B145b: діалог, що закривається (ще ~200 мс у DOM), не ставить ДРУГУ задачу експорту —
+              // зонд: другий клік слав другий `POST`, а `jobId` першої задачі затирався.
+              if (!opened || start.isPending) return;
+
+              start.mutate();
+            }}
+            loading={startLoading}
+            disabled={start.isPending}
+            data-testid="cr-export-go"
+          >
             {t('calcResults.exportGo')}
           </Button>
         </Group>
