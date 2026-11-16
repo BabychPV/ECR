@@ -151,6 +151,23 @@ $psExe = if ($onWindows) { 'powershell' } else { 'pwsh' }
 $psPrefix = if ($onWindows) { @('-ExecutionPolicy', 'Bypass') } else { @() }
 $npxExe = if ($onWindows) { 'npx.cmd' } else { 'npx' }
 
+# ✎ B152: Playwright — НЕ через `npx.cmd` у Windows. `npx.cmd` — пакетний файл, і його аргументи розбирає `cmd.exe`:
+# `-Grep 'a|b'` (кілька spec-файлів) він різав на конвеєр («'b' is not recognized as an internal or external
+# command»), а план шардів (`--grep-invert '(?:…|…)'`) — так само. Тому у Windows — `node` прямо на CLI Playwright
+# (той самий `@playwright/test` із node_modules клієнта), де аргументи доходять як є. Поза Windows — `npx`, як було.
+# Виклик завжди всередині `Push-Location $client`; перший аргумент — `playwright` (як для `npx`).
+function Invoke-Playwright {
+    param([string[]] $Arguments)
+
+    $rest = @($Arguments | Select-Object -Skip 1)
+    if ($onWindows) {
+        & node (Join-Path $client 'node_modules/@playwright/test/cli.js') @rest
+    }
+    else {
+        & $npxExe @Arguments
+    }
+}
+
 $ErrorActionPreference = 'Stop'
 
 # ⛔ Q-217: PowerShell перетворює запис нативної команди в stderr на
@@ -289,7 +306,7 @@ if ($ListOnly) {
     $previousEapList = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        $listOut = @(& $npxExe @listArgs)
+        $listOut = @(Invoke-Playwright $listArgs)
         $listCode = $LASTEXITCODE
     }
     finally {
@@ -839,9 +856,9 @@ try {
             if ($Shard) {
                 # Склад шарда видно в журналі (і для звірки: сума по шардах = увесь набір).
                 $listArgs = @('playwright', 'test', '--list') + @($shardArgs) + $(if ($Grep) { @('--grep', $Grep) } else { @() })
-                Write-Host "  шард ${Shard}: $(@(& $npxExe @listArgs) | Select-Object -Last 1)"
+                Write-Host "  шард ${Shard}: $(@(Invoke-Playwright $listArgs) | Select-Object -Last 1)"
             }
-            & $npxExe @pwArgs
+            Invoke-Playwright $pwArgs
         }
         finally {
             $ErrorActionPreference = $previousEap
