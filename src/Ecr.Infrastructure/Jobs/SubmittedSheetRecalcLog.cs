@@ -75,7 +75,7 @@ internal static class SubmittedSheetRecalcLog
                     periodKey,
                     state = nameof(Domain.Enums.DocumentStatus.Submitted),
                     reason = "recalculatedAfterSubmission",
-                    source = "dependentInput",
+                    source = "cascade",
                 }),
                 ChangeReason: "recalc-after-submission",
                 ChangedByUserId: 0,

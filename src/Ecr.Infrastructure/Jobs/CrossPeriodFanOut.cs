@@ -116,13 +116,8 @@ public sealed class CrossPeriodFanOut(
     /// <param name="sources">Джерела зміни, які він має врахувати.</param>
     /// <param name="hops">Номер ланки ланцюжка.</param>
     /// <param name="ct">Токен скасування.</param>
-    /// <param name="writeSubmitted">
-    /// ✎ B79: ланка ланцюжка від загального стовпця з залежними розрахунками — задача періоду-читача пише й подані
-    /// аркуші (позначка їде в кожному елементі, <c>DirtyCell.WriteSubmitted</c>); <c>false</c> — як доти.
-    /// </param>
     public async Task EnqueueSourcesAsync(
-        long documentId, PeriodKey reader, IReadOnlyCollection<CrossPeriodSource> sources, int hops, CancellationToken ct,
-        bool writeSubmitted = false)
+        long documentId, PeriodKey reader, IReadOnlyCollection<CrossPeriodSource> sources, int hops, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(sources);
         if (sources.Count == 0)
@@ -133,8 +128,7 @@ public sealed class CrossPeriodFanOut(
         var cells = sources
             .Select(s => new DirtyCell(
                 0, s.ColumnDefId, s.TableDefId, s.SourceSequence, hops,
-                OwnerInput: s.OwnerInput ? true : null, PeriodKey: reader.Value,
-                WriteSubmitted: writeSubmitted ? true : null))
+                OwnerInput: s.OwnerInput ? true : null, PeriodKey: reader.Value))
             .ToList();
 
         await jobs.EnqueueCoalescedAsync<IFormulaRecalculationJob>(
