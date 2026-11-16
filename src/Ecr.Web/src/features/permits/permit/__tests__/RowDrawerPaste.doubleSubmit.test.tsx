@@ -138,7 +138,7 @@ async function openLimits(): Promise<void> {
       </QueryClientProvider>
     </TestProviders>,
   );
-  await screen.findByText('Outfall A', );
+  await screen.findByText('Outfall A');
 }
 
 describe('B149: RowDrawer і PasteDialog — один запис на дію', () => {

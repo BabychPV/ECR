@@ -323,7 +323,8 @@ describe('B149: форми конструктора версії шаблону 
       `/admin/templates/1/versions/1${probe.query}`,
     );
 
-    const triggers = await screen.findAllByRole('button', { name: probe.trigger });
+    // Бюджет 10 с (правило 386): під навантаженням «таблиця» не встигала за типову 1 с (F13, 18/20).
+    const triggers = await screen.findAllByRole('button', { name: probe.trigger }, { timeout: 10_000 });
     fireEvent.click(triggers[0]!);
     const dialog = await screen.findByRole('dialog');
     await probe.fill?.(dialog);
