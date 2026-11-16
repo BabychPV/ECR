@@ -78,9 +78,15 @@ public static class RecalculationSkips
         => sheetCopyId is { } copy
             ? string.Create(
                 System.Globalization.CultureInfo.InvariantCulture,
-                $"sheet-recalc:{documentId}:{sheetDefId}{Domain.ValueObjects.SheetCopyNaming.StateKeySeparator}{copy}:{periodKey}")
+                $"{AuditCorrelationPrefix}{documentId}:{sheetDefId}{Domain.ValueObjects.SheetCopyNaming.StateKeySeparator}{copy}:{periodKey}")
             : string.Create(
-                System.Globalization.CultureInfo.InvariantCulture, $"sheet-recalc:{documentId}:{sheetDefId}:{periodKey}");
+                System.Globalization.CultureInfo.InvariantCulture, $"{AuditCorrelationPrefix}{documentId}:{sheetDefId}:{periodKey}");
+
+    /// <summary>
+    /// Початок кореляції (<see cref="AuditCorrelation"/>) — за ним позначку шукає й SQL
+    /// (<c>RecalculatedAfterSubmissionMark</c>: картка документа і черга «До погодження»).
+    /// </summary>
+    public const string AuditCorrelationPrefix = "sheet-recalc:";
 
     /// <summary>Перелік із сховища (стеля + 1) → обрізаний перелік і ознака обрізання.</summary>
     /// <param name="rows">Рядки сховища (до <see cref="MaxListed"/> + 1).</param>

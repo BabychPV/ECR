@@ -234,32 +234,10 @@ public sealed class DocumentStore(
             return sheets;
         }
 
-        var entityType = Application.Calculations.RecalculationSkips.AuditEntityType;
-        var operation = Application.Calculations.RecalculationSkips.AuditRecalculatedAfterSubmission;
-        var prefix = string.Create(CultureInfo.InvariantCulture, $"sheet-recalc:{documentId}:");
-        var suffix = string.Create(CultureInfo.InvariantCulture, $":{periodKey}");
-
         // ✎ F13 p218 #788: по скоупу (аркуш × копія, RS). Ключ стану копії — «КОД#sheetCopyId» (SheetCopyNaming.StateKey),
         // кореляція журналу — «…:{аркуш}#{копія}:{період}» (RecalculationSkips.AuditCorrelation); оригінал — як і доти.
-        var separator = SheetCopyNaming.StateKeySeparator.ToString();
-        var codes = await db.Database
-            .SqlQuery<string>($"""
-                SELECT CASE WHEN a.SheetCopyId IS NULL THEN sd.Code
-                            ELSE CONCAT(sd.Code, {separator}, CAST(a.SheetCopyId AS nvarchar(20))) END AS Value
-                  FROM wf.ApprovalState a
-                  JOIN cfg.SheetDef sd ON sd.Id = a.SheetDefId
-                 WHERE a.DocumentId = {documentId} AND a.PeriodKey = {periodKey}
-                   AND a.Status = 1 AND a.SubmittedAt IS NOT NULL
-                   AND EXISTS (SELECT 1
-                                 FROM aud.StructureChange c
-                                WHERE c.EntityType = {entityType} AND c.Operation = {operation}
-                                  AND c.ChangedAt > a.SubmittedAt
-                                  AND c.CorrelationId = CONCAT({prefix}, CAST(a.SheetDefId AS nvarchar(12)),
-                                      CASE WHEN a.SheetCopyId IS NULL THEN N''
-                                           ELSE CONCAT({separator}, CAST(a.SheetCopyId AS nvarchar(20))) END,
-                                      {suffix}))
-                """)
-            .ToListAsync(ct)
+        // ✎ B79 (Q13): саме правило — спільне з чергою «До погодження» (RecalculatedAfterSubmissionMark), одне на обидва.
+        var codes = await RecalculatedAfterSubmissionMark.SheetStateKeysAsync(db, documentId, periodKey, ct)
             .ConfigureAwait(false);
 
         if (codes.Count == 0)

@@ -6380,8 +6380,13 @@ public sealed record RowDto(
   Нічний розклад і повний перерахунок (`RecalculationJob`) — без змін, за своїм правилом `WritesSubmitted`.
   **Поправка до ФВ-9.17:** подане число може змінитися каскадом; сигнал — позначка «перераховано після подання»
   (`GET /documents/{id}` → `sheets[].recalculatedAfterSubmission`, банер аркуша); зріз подання (`calc.SubmissionSnapshot`)
-  каскад НЕ оновлює — він зберігає значення, якими аркуш подано. ⚠ Черга «До погодження» (`GET /me/approval-queue`,
-  `ApprovalQueueItemDto`) позначки не несе — прогалина, окрема задача.
+  каскад НЕ оновлює — він зберігає значення, якими аркуш подано.
+- **Позначка в черзі «До погодження» (Q13).** `GET /api/v1/me/approval-queue` → `items[].recalculatedAfterSubmission`
+  (`bool`, нове поле `ApprovalQueueItemDto`): те саме правило й те саме джерело, що `sheets[].recalculatedAfterSubmission`
+  картки документа (спільний `RecalculatedAfterSubmissionMark`: запис журналу `SheetRecalc / RecalculatedAfterSubmission`
+  цього аркуша, копії й періоду, пізніший за `SubmittedAt`); повторне подання позначку знімає. Один запит на сторінку
+  черги (за Id станів рядків сторінки), без звернень на рядок; порожня сторінка запиту не робить. Клієнт: позначка в
+  рядку черги шухляди «My tasks» (`myTasks.approval.recalculated`, підказка `myTasks.approval.recalculatedHint`).
 - **⚠ Відома межа до lane 4.** Залежності через МЕТОДОЛОГІЇ (аргументи `@Код`, `MethodologyRequiredInput`, `MatchJson`
   прив'язки) у графі версії не зберігаються. Загальний стовпець, який читає ЛИШЕ методологія (жодної формули шаблону),
   правило `DependentMonthsLocked` не блокує; методологічний перерахунок поданих місяців після правки — теж у lane 4.
