@@ -32,7 +32,7 @@ WHERE d.Code = N'WaterReport'
 GO
 
 
--- ══ B138: позначка «перераховано після подання» для вʼюх сирих даних ════════
+-- ══ B138 / B146 (D-536): позначка «перераховано після подання» для вʼюх сирих даних ════════
 -- Рішення людини 16.11 («додай позначку у в'юхи»). ЄДИНЕ визначення правила в SQL: стани аркушів (wf.ApprovalState:
 -- документ × аркуш × копія × період), які ПОДАНІ (Status = 1) і для яких у журналі є запис перерахунку
 -- `SheetRecalc / RecalculatedAfterSubmission`, пізніший за подання (SubmittedAt). Те саме правило, що в картці документа
@@ -84,10 +84,10 @@ GO
 -- лише екземпляри, яких немає в `doc.*` (проміжні стани архівації/повернення: гаряча копія має перевагу, як F-13).
 -- Архівна гілка — ДОСЛІВНО гаряча із заміною `doc.CellValue`/`doc.TableRow`/`doc.TableInstance` на `arc.*` (сторож
 -- ReportArchiveBranchTests). Колонка IsArchived — останньою.
--- ✎ B138 (B75): _WorkflowMode — режим погодження версії шаблону РЯДКА (cfg.TemplateVersion.WorkflowMode: 0 SubmitApprove,
+-- ✎ B138 (B75, D-537): _WorkflowMode — режим погодження версії шаблону РЯДКА (cfg.TemplateVersion.WorkflowMode: 0 SubmitApprove,
 -- 1 None - без подання й затвердження), ОСТАННЬОЮ колонкою (колонки лише додаються). Status не змінюється: для версії None
 -- він лишається 0, і звіт, що читає всі рядки такої версії, відрізняє її за _WorkflowMode, а не за «Approved».
--- ✎ B138 (людина 16.11): _RecalculatedAfterSubmission (tinyint) - 1, якщо аркуш рядка поданий і після подання перерахований
+-- ✎ B138 / B146 (D-536, людина 16.11): _RecalculatedAfterSubmission (tinyint) - 1, якщо аркуш рядка поданий і після подання перерахований
 -- (rpt.fn_RecalculatedAfterSubmission вище), інакше 0; ОСТАННЬОЮ колонкою, після _WorkflowMode.
 CREATE OR ALTER VIEW rpt.v_DocumentCells
 AS
@@ -195,7 +195,7 @@ IF OBJECT_ID(N'rpt.ViewSlot', N'U') IS NULL
         CONSTRAINT PK_ViewSlot PRIMARY KEY CLUSTERED (ViewName, ColumnDefId, Slot, Scope));
 GO
 
--- B129 (D-NEW): Scope - скоуп перейменувань стабільної вʼюхи (0 - для всіх проєктів: власний код і застарілі глобальні пари;
+-- B129 (D-534): Scope - скоуп перейменувань стабільної вʼюхи (0 - для всіх проєктів: власний код і застарілі глобальні пари;
 -- 1..k - Id-аліаси, що діють лише для проєктів цього скоупу, cfg.ColumnRenameProject). Вʼюхи _vN і вʼюхи без проєктних
 -- аліасів мають лише 0. Оновлення наявної бази: колонка й ключ - ідемпотентно.
 IF COL_LENGTH(N'rpt.ViewSlot', N'Scope') IS NULL
@@ -882,12 +882,12 @@ JOIN doc.TableRow      AS r ON r.PeriodKey = ti.PeriodKey AND r.TableInstanceId 
                       CASE WHEN ti.SheetCopyId IS NOT NULL OR MAX(CASE WHEN g.CopyOfId IS NOT NULL THEN 1 ELSE 0 END) = 1
                            THEN CONCAT(N'' '', COALESCE(dsh.CopyOrdinal, 1)) ELSE N'''' END)
         FROM doc.DocumentSheet AS g WHERE g.DocumentId = d.Id AND g.SheetDefId = ', CAST(@sheet AS nvarchar(10)), N') AS _SheetDisplayName');
-        -- ✎ B138 (B75): _WorkflowMode - режим погодження ЦІЄЇ версії (cfg.TemplateVersion.WorkflowMode: 0 SubmitApprove, 1 None),
+        -- ✎ B138 (B75, D-537): _WorkflowMode - режим погодження ЦІЄЇ версії (cfg.TemplateVersion.WorkflowMode: 0 SubmitApprove, 1 None),
         -- константа вʼюхи (опублікована версія незмінна), ОСТАННЬОЮ колонкою. _Status не змінюється (для None лишається 0).
         SET @copyCols = CONCAT(@copyCols, N',
        CAST(', CAST((SELECT wtv.WorkflowMode FROM cfg.SheetDef AS wsd JOIN cfg.TemplateVersion AS wtv ON wtv.Id = wsd.TemplateVersionId
                       WHERE wsd.Id = @sheet) AS nvarchar(3)), N' AS tinyint) AS _WorkflowMode');
-        -- ✎ B138 (людина 16.11): _RecalculatedAfterSubmission - аркуш рядка поданий і після подання перерахований
+        -- ✎ B138 / B146 (D-536, людина 16.11): _RecalculatedAfterSubmission - аркуш рядка поданий і після подання перерахований
         -- (rpt.fn_RecalculatedAfterSubmission, приєднана за станом a.Id); ОСТАННЬОЮ колонкою, після _WorkflowMode.
         SET @copyCols = CONCAT(@copyCols, N',
        ISNULL(ras.Marked, 0) AS _RecalculatedAfterSubmission');
@@ -998,10 +998,10 @@ GO
 --   * _TemplateVersion : service column, nvarchar, taken PER ROW from the version of the row's own TableDef (a constant CASE
 --                  over ti.TableDefId, no extra join), never from Project.TemplateVersionId - one project may show some periods
 --                  as v1 and later periods as v2;
---   * _WorkflowMode : B138 (B75) - service column, tinyint, LAST in the list: cfg.TemplateVersion.WorkflowMode (0 SubmitApprove,
+--   * _WorkflowMode : B138 (B75, D-537) - service column, tinyint, LAST in the list: cfg.TemplateVersion.WorkflowMode (0 SubmitApprove,
 --                  1 None) of the version of the row's own TableDef (a constant CASE over ti.TableDefId, like _TemplateVersion),
 --                  never of the version passed to the procedure; _Status is not changed (stays 0 for a None version);
---   * _RecalculatedAfterSubmission : B138 - service column, tinyint, LAST (after _WorkflowMode): 1 when the row's sheet state
+--   * _RecalculatedAfterSubmission : B138 / B146 (D-536) - service column, tinyint, LAST (after _WorkflowMode): 1 when the row's sheet state
 --                  is Submitted and was recalculated after the submission (rpt.fn_RecalculatedAfterSubmission joined on the
 --                  state key a.Id - evaluated per sheet state, not per row), else 0;
 --   * type conflict : a code whose storage family differs between versions (e.g. string in v1, number in v2) becomes nvarchar
@@ -1111,7 +1111,7 @@ BEGIN
         SheetCode nvarchar(64) NOT NULL, TableCode nvarchar(64) NOT NULL, Header nvarchar(400) NOT NULL, ViewName nvarchar(400) NOT NULL);
     INSERT INTO @groups (TemplateId, TemplateCode, SheetCode, TableCode, Header, ViewName)
     SELECT g.TemplateId, g.TemplateCode, g.SheetCode, g.TableCode,
-           -- PT-2: заголовок іде в коментар «--» тіла вʼюхи (EXECUTE AS OWNER) - перенос рядка в коді вивів би решту з коментаря.
+           -- PT-2 (D-535): заголовок іде в коментар «--» тіла вʼюхи (EXECUTE AS OWNER) - перенос рядка в коді вивів би решту з коментаря.
            REPLACE(REPLACE(CONCAT(N'template ', g.TemplateCode, N', sheet ', g.SheetCode, N', table ', g.TableCode, N', all versions'), NCHAR(13), N' '), NCHAR(10), N' '),
            CONCAT(N'v_', g.TemplateCode, N'_', g.SheetCode, N'_', g.TableCode)
       FROM (SELECT DISTINCT TemplateId, TemplateCode, SheetCode, TableCode FROM @gt) AS g;
@@ -1180,7 +1180,7 @@ BEGIN
         FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 2, N'');
     DELETE FROM @groups WHERE ViewName IN (SELECT Name FROM @clashNames);
 
-    -- ⛔ B129 (D-NEW, людина 15.11 - варіант «За проєктом»): пара перейменування (cfg.ColumnRename) діє для РЯДКА вʼюхи, лише якщо
+    -- ⛔ B129 (D-534, людина 15.11 - варіант «За проєктом»): пара перейменування (cfg.ColumnRename) діє для РЯДКА вʼюхи, лише якщо
     -- прив'язана до проєкту рядка (cfg.ColumnRenameProject, B127) або застаріла глобальна (IsLegacyGlobal = 1). Скоуп - проєкти
     -- з однаковим набором прив'язаних пар шаблону: 0 - лише глобальні (усі інші проєкти, і нові), 1..k - за набором. Читачі
     -- набору Id «коду з аліасами» (pc, мапа слотів rpt.ViewSlot зі Scope, rv, fam/sc) і рядки таблиць R-2 беруть Id/таблиці
@@ -1369,6 +1369,11 @@ BEGIN
 
         -- Q-17.slotmap: map rows of views that no longer exist are removed (full generation only).
         DELETE FROM rpt.ViewSlot WHERE OBJECT_ID(N'rpt.' + QUOTENAME(ViewName), N'V') IS NULL;
+        -- B129 (D-534, примітка аудиту №3): рядки скоупів шаблону, якого більше немає (застосунок видаляє лише чернетки версій,
+        -- тож шаблон зникає тільки прямим SQL). Номери скоупів не перевикористовуються в межах шаблону, а Id шаблону - identity
+        -- (новий шаблон старого Id не отримає), тож прибрати ВСІ рядки неіснуючого шаблону узгоджено; ці рядки ніхто не пише.
+        DELETE FROM rpt.ViewProjectScope WHERE NOT EXISTS (SELECT 1 FROM cfg.Template AS t WHERE t.Id = TemplateId);
+        DELETE FROM rpt.ViewScopeSig WHERE NOT EXISTS (SELECT 1 FROM cfg.Template AS t WHERE t.Id = TemplateId);
 
         IF @dFail IS NOT NULL
             THROW 50422, @dFail, 1;
@@ -1855,9 +1860,9 @@ N'SELECT p.Id AS _ProjectId, p.Code AS _ProjectCode,
        r.Id AS _RowId, r.RowKey AS _RowKey, r.Ordinal AS _RowOrdinal,
        ', @verCase, N' AS _TemplateVersion', @select, @copyCols, N',
        CAST(');
-        -- ✎ B138 (B75): _WorkflowMode - режим погодження версії РЯДКА (CASE за таблицею рядка, як _TemplateVersion), а не
+        -- ✎ B138 (B75, D-537): _WorkflowMode - режим погодження версії РЯДКА (CASE за таблицею рядка, як _TemplateVersion), а не
         -- версії з параметра процедури; ОСТАННЬОЮ колонкою обох гілок. _Status не змінюється.
-        -- ✎ B138 (людина 16.11): _RecalculatedAfterSubmission - аркуш рядка поданий і після подання перерахований
+        -- ✎ B138 / B146 (D-536, людина 16.11): _RecalculatedAfterSubmission - аркуш рядка поданий і після подання перерахований
         -- (rpt.fn_RecalculatedAfterSubmission, приєднана за станом a.Id); ОСТАННЬОЮ колонкою обох гілок, після _WorkflowMode.
         SET @tail = CONCAT(N' AS bit) AS _IsArchived,
        ', @wfCase, N' AS _WorkflowMode,
