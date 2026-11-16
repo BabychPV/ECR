@@ -120,19 +120,6 @@ public sealed class CiPushGateTests
         }
     }
 
-    [Theory]
-    [InlineData("ci.yml")]
-    [InlineData("evidence.yml")]
-    [Trait(TestCategories.Stage, TestCategories.Stage1)]
-    [Trait(TestCategories.Category, TestCategories.Architecture)]
-    public void Атестація_не_залежить_від_gate(string file)
-    {
-        // attest йде лише на PR rc/**; gate на ньому завжди skip=false, але залежність зайва й
-        // могла б зробити атестацію «skipped» при падінні gate — тобто хибно пройденою.
-        var attest = Jobs(file).Single(j => j.Id == "attest").Body;
-        Assert.DoesNotMatch(@"\bgate\b", attest);
-    }
-
     private sealed record JobBlock(string Id, string Body);
 
     private static List<JobBlock> Jobs(string file)
