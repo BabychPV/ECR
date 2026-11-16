@@ -382,6 +382,13 @@ export function Wizard<TData>({
 
   const apply = useCallback((): void => {
     /*
+     * ⛔ B145b: майстер, що закривається, не застосовує. `Modal` після `opened = false` ще ~200 мс у DOM
+     * (анімація закриття), і другий клік подвійного кліку по `Apply` викликав би `onApply` вдруге — для
+     * майстра «створити» це другий запит на створення (той самий клас, що B145 у `ConfirmModal`).
+     */
+    if (!opened) return;
+
+    /*
      * ⛔ Перед застосуванням перевіряються ВСІ кроки, а не лише останній
      * пройдений. Дані можна змінити й після того, як крок було пройдено
      * (повернувся назад, стер поле, пішов уперед по вже перевірених кроках),
@@ -405,7 +412,7 @@ export function Wizard<TData>({
     setFailure(null);
     setFocusRequest(null);
     onApply(data, api);
-  }, [api, checkStep, data, onApply, reject, steps]);
+  }, [api, checkStep, data, onApply, opened, reject, steps]);
 
   const requestClose = useCallback((): void => {
     if (!dirty) {
