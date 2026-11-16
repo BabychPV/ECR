@@ -137,6 +137,43 @@ public sealed class ApprovalRouteResolutionTests(SqlServerFixture sql)
         Assert.Equal([33], replaced.Steps.Select(s => s.RoleId));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-5.17")]
+    public async Task Маршрут_проєкту_не_плутається_з_маршрутом_проєкт_і_версія()
+    {
+        // ⛔ D1 (B155): редактор маршруту проєкту читав/переписував/видаляв перший-ліпший маршрут з цим ProjectId.
+        // Код «AAA_» навмисно впорядковується раніше за «PRJ_», щоб без фільтра версії виграв саме він.
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await builder.BuildAsync(periodKey: 209911, ct: CancellationToken.None);
+
+        await using (var db = builder.CreateContext())
+        {
+            db.ApprovalRoutes.Add(Route($"AAA_{doc.ProjectId}", doc.ProjectId, doc.TemplateVersionId, roleId: 3));
+            await db.SaveChangesAsync(CancellationToken.None);
+        }
+
+        // Лише маршрут «проєкт × версія» — власного маршруту проєкту НЕМАЄ.
+        await using (var db = builder.CreateContext())
+        {
+            Assert.Null(await new WorkflowStore(db).FindProjectRouteAsync(doc.ProjectId, CancellationToken.None));
+        }
+
+        await using (var db = builder.CreateContext())
+        {
+            db.ApprovalRoutes.Add(Route($"PRJ_{doc.ProjectId}", doc.ProjectId, null, roleId: 4));
+            await db.SaveChangesAsync(CancellationToken.None);
+        }
+
+        await using var check = builder.CreateContext();
+        var route = await new WorkflowStore(check).FindProjectRouteAsync(doc.ProjectId, CancellationToken.None);
+
+        Assert.NotNull(route);
+        Assert.Null(route.TemplateVersionId);
+        Assert.Equal([4], route.Steps.Select(s => s.RoleId));
+    }
+
     /// <summary>Роль першого кроку маршруту, який виграв резолюцію.</summary>
     private async Task<int> RoleOfFirstStepAsync(TestDocumentBuilder builder, TestDocument doc)
     {

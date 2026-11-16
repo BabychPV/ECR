@@ -202,7 +202,7 @@ public interface IWorkflowStore
     public Task<ApprovalRoute?> FindRouteAsync(
         int projectId, int templateVersionId, CancellationToken ct);
 
-    /// <summary>Власний маршрут проєкту (<c>ProjectId = @id</c>) або <c>null</c>.</summary>
+    /// <summary>Власний маршрут проєкту (<c>ProjectId = @id</c>, без версії шаблону) або <c>null</c>.</summary>
     /// <remarks>
     /// ⚠ Саме ВЛАСНИЙ, а не той, що діє. Екран налаштування має показувати,
     /// що налаштовано тут, а не те, що успадковано: інакше «прибрати
