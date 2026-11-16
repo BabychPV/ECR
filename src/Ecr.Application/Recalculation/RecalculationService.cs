@@ -238,13 +238,11 @@ public sealed class RecalculationService(
     /// стовпці з чужим власником, чиї читачі в інших екземплярах року треба перерахувати; <c>null</c> — не збирати.
     /// </param>
     /// <param name="shared">L2: спільні читання проходу (екземпляри, залежності); <c>null</c> — читати напряму.</param>
-    /// <param name="writeSubmitted">
-    /// ✎ B79 (правило людини 07.11): насіння — правка загального стовпця з залежними розрахунками; прогін пише й ПОДАНІ
-    /// аркуші, затверджені — ніколи (<see cref="EnterSheetsAsync"/>).
-    /// </param>
     /// <param name="submittedWritten">
-    /// ✎ B79: куди скласти подані аркуші (аркуш × копія), у які прогін записав завдяки <paramref name="writeSubmitted"/>, —
-    /// їм викликач ставить позначку «перераховано після подання»; <c>null</c> — не збирати.
+    /// ✎ B79 (правило людини 07.11: «пропускати лише погоджені; подані — з позначкою»): каскад пише й ПОДАНІ аркуші,
+    /// затверджені — ніколи (<see cref="EnterSheetsAsync"/>). Сюди складаються подані аркуші (аркуш × копія), у які
+    /// прогін справді записав (крім правки погоджувача, D-442), — їм викликач ставить позначку «перераховано після
+    /// подання»; <c>null</c> — не збирати.
     /// </param>
     public async Task<int> RecalculateAsync(
         long tableInstanceId, DirtySet dirty, CancellationToken ct,
@@ -252,7 +250,6 @@ public sealed class RecalculationService(
         IReadOnlySet<int>? approverEditSheets = null,
         HashSet<(int TableDefId, int ColumnDefId)>? inputColumns = null,
         RecalculationSharedLoad? shared = null,
-        bool writeSubmitted = false,
         HashSet<(int SheetDefId, long? CopyId)>? submittedWritten = null)
     {
         ArgumentNullException.ThrowIfNull(dirty);
@@ -271,7 +268,7 @@ public sealed class RecalculationService(
         // RS: правка комірки копії — «вид» цієї копії (instance.SheetCopyId), правка оригіналу — оригінал.
         return await RunAsync(
                 instance, dirty, ct, changedColumns: changedColumns, approverEditSheets: approverEditSheets,
-                inputColumns: inputColumns, shared: shared, writeSubmitted: writeSubmitted,
+                inputColumns: inputColumns, shared: shared, writeSubmitted: true,
                 submittedWritten: submittedWritten)
             .ConfigureAwait(false);
     }
@@ -291,23 +288,23 @@ public sealed class RecalculationService(
     /// <c>CrossPeriodFanOut.ClosedAnchorYearAsync</c>): прогін пише лише не-місячні цілі під агрегатом року, як прогін B24
     /// (<see cref="RecalculateAllAsync"/>). Значення — ключі місяців року; <c>null</c> — звичайний читач.
     /// </param>
-    /// <param name="writeSubmitted">✎ B79: писати й ПОДАНІ аркуші періоду-читача (ланцюжок від загального стовпця з залежними); затверджені — ніколи.</param>
-    /// <param name="submittedWritten">✎ B79: куди скласти подані аркуші, у які прогін записав; <c>null</c> — не збирати.</param>
+    /// <param name="submittedWritten">
+    /// ✎ B79 (правило людини 07.11): період-читач пише й ПОДАНІ аркуші, затверджені — ніколи; сюди — подані аркуші, у які
+    /// прогін записав (для позначки «перераховано після подання»); <c>null</c> — не збирати.
+    /// </param>
     /// <returns>Скільки комірок перераховано.</returns>
     /// <remarks>
     /// ⛔ Це G2 із дизайну WW-03: залежність із ненульовим зсувом не входить у зворотний індекс
     /// плану (правка періоду k не «брудна» для формул періоду m у ТІЄЇ Ж таблиці комірок). Міст —
     /// цей вхід: цілі = формули з міжперіодним ребром на змінену колонку плюс їхні залежні в
     /// межах періоду. Закриті періоди тут НЕ перевіряються — це робить постановник (fan-out) і
-    /// задача перед стартом; поданий/затверджений аркуш не пишеться так само, як у всіх входах
-    /// (<see cref="EnterSheetsAsync"/>).
+    /// задача перед стартом; затверджений аркуш не пишеться, як у всіх входах (<see cref="EnterSheetsAsync"/>).
     /// </remarks>
     public async Task<int> RecalculateFromOtherPeriodsAsync(
         long documentId, PeriodKey periodKey, IReadOnlyCollection<CrossPeriodSource> sources, CancellationToken ct,
         HashSet<(int TableDefId, int ColumnDefId)>? changedColumns = null,
         RecalculationSharedLoad? shared = null,
         IReadOnlyList<int>? annualPeriods = null,
-        bool writeSubmitted = false,
         HashSet<(int SheetDefId, long? CopyId)>? submittedWritten = null)
     {
         ArgumentNullException.ThrowIfNull(sources);
@@ -326,7 +323,7 @@ public sealed class RecalculationService(
         {
             written += await RunAsync(
                     representative, dirty: null, ct, sheetDefId: null, heldSheet: null, instances,
-                    changedColumns, sources, shared: shared, writeSubmitted: writeSubmitted, annualPeriods: annualPeriods,
+                    changedColumns, sources, shared: shared, writeSubmitted: true, annualPeriods: annualPeriods,
                     submittedWritten: submittedWritten)
                 .ConfigureAwait(false);
         }

@@ -228,7 +228,7 @@ public sealed partial class PatchCellsHandler(
                 foreach (var group in groups)
                 {
                     // AN-142: правка лише тексту якоря перерахунку не ставить.
-                    var groupSeeds = WithDependentInputs(context, WithoutAnnualText(context, group.Seeds));
+                    var groupSeeds = WithoutAnnualText(context, group.Seeds);
                     if (groupSeeds.Count == 0)
                     {
                         continue;
@@ -252,13 +252,11 @@ public sealed partial class PatchCellsHandler(
             // PM-PASS-A-P3 п.10а: комірки з тим самим значенням, що вже стояло, насіння не дають - PATCH без змін не
             // ставить зайвого перерахунку. Ручні значення формул (D-461) відсіву не мають: їхня позначка міняється й
             // без зміни числа.
-            var seeds = WithDependentInputs(
+            var seeds = WithoutAnnualText(
                 context,
-                WithoutAnnualText(
-                    context,
-                    BuildRecalculationSeeds(
-                        SeedSource(request, applied, previous), context.ApproverEdit ? context.Table.SheetDefId : null,
-                        Recalculation.ColumnDefaultValues.SeedColumns(context.Table))));
+                BuildRecalculationSeeds(
+                    SeedSource(request, applied, previous), context.ApproverEdit ? context.Table.SheetDefId : null,
+                    Recalculation.ColumnDefaultValues.SeedColumns(context.Table)));
             if (seeds.Count == 0)
             {
                 return; // AN-142: лише текст якоря - задачі немає, recalculationJobId лишається null
@@ -365,16 +363,6 @@ public sealed partial class PatchCellsHandler(
         };
 
     /// <summary>AN-142: насіння без текстових комірок якоря (вони не входять у числа, тож каскаду не потребують).</summary>
-    /// <summary>
-    /// ✎ B79 (рішення людини 13.11, правило 07.11 «пропускати лише погоджені»): насіння правки загального стовпця, від
-    /// якого залежать розрахунки місяців, несе позначку — каскад перераховує й ПОДАНІ місяці-читачі (з журналом і
-    /// позначкою «перераховано після подання»), затверджені пропускає. Решта насіння — без змін.
-    /// </summary>
-    private static List<RecalculationSeed> WithDependentInputs(RequestContext context, IReadOnlyList<RecalculationSeed> seeds)
-        => context.DependentInputColumns.Count == 0
-            ? [.. seeds]
-            : [.. seeds.Select(s => context.DependentInputColumns.Contains(s.ColumnDefId) ? s with { WriteSubmitted = true } : s)];
-
     private static List<RecalculationSeed> WithoutAnnualText(RequestContext context, IReadOnlyList<RecalculationSeed> seeds)
         => context.AnnualTextColumns.Count == 0
             ? [.. seeds]
@@ -531,13 +519,7 @@ public sealed partial class PatchCellsHandler(
         /// (<see cref="EditDecision.DependentInput"/>): під блокуваннями аркушів року затверджений місяць відхиляє запис
         /// (<see cref="DependentMonthsRule"/>), поданий — ні.
         /// </summary>
-        public bool DependentInputWritten => DependentInputColumns.Count > 0;
-
-        /// <summary>
-        /// ✎ B79: колонки таких комірок батчу. Їхнє насіння каскаду несе позначку <see cref="RecalculationSeed.WriteSubmitted"/>:
-        /// подані місяці-читачі перераховуються (з позначкою «перераховано після подання»), затверджені — ні.
-        /// </summary>
-        public HashSet<int> DependentInputColumns { get; } = [];
+        public bool DependentInputWritten { get; set; }
 
         /// <summary>
         /// ✎ D-461: комірки батчу <c>(RowKey, ColumnDefId)</c>, писати які дозволено САМЕ як ручне значення замість
@@ -1277,7 +1259,7 @@ public sealed partial class PatchCellsHandler(
         // залежних місяців. Перерахунок ставиться як для будь-якої правки (це не «текст якоря»).
         if (decision.DependentInput)
         {
-            context.DependentInputColumns.Add(columnDefId);
+            context.DependentInputWritten = true;
             return;
         }
 
@@ -4320,14 +4302,6 @@ public sealed record RecalculationSeed(
         Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     long? TableInstanceId = null)
 {
-    /// <summary>
-    /// ✎ B79: комірка — загальний стовпець вводу річної таблиці, від якого залежать розрахунки місяців. Каскад від
-    /// такого насіння пише й ПОДАНІ аркуші (із записом журналу й позначкою «перераховано після подання»); затверджені
-    /// не пише ніколи. <c>null</c> — звичайна правка, поле в JSON не пишеться.
-    /// </summary>
-    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-    public bool? WriteSubmitted { get; init; }
-
     /// <summary>
     /// L2: задача формул одна на ДОКУМЕНТ (<see cref="Ports.FormulaRecalculationTarget.Of"/>), а злиття дописує масив
     /// <c>cells</c> із різних періодів в одну задачу, тож період і екземпляр несе кожна комірка, а не лише тіло задачі.
