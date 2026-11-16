@@ -13,6 +13,7 @@ using Ecr.Domain.ValueObjects;
 using Ecr.Expressions.Evaluation;
 using Ecr.Infrastructure.Jobs;
 using Ecr.Infrastructure.Persistence;
+using Ecr.Infrastructure.Tests.Persistence;
 using Ecr.TestKit;
 using Microsoft.EntityFrameworkCore;
 using NSubstitute;
@@ -501,6 +502,128 @@ public sealed class RecalculationJobSheetScopeResultsTests(SqlServerFixture sql)
         Assert.Equal("-,-", await MarksAsync(arranged));
     }
 
+    /// <summary>
+    /// ✎ B138 (B75 lane 1b): версія без подання й затвердження (<c>WorkflowMode.None</c>) — старий <c>Approved</c>
+    /// (лишився після переносу версії) перерахунок НЕ пропускає й у журнал «пропущено» не пише. Контроль у тому ж
+    /// тесті: до перемикання режиму той самий аркуш пропускається.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ ДОКАЗ (локально): прибрати <c>ExceptWorkflowNone</c> у <c>SubmittedSheetsAsync</c> — B лишається 1001 (значення
+    /// першого прогону); прибрати в <c>SheetLogAsync</c> — другий запис «пропущено». Фільтр у <c>SkippedScopesAsync</c>
+    /// ловить сусідній тест «…повністю_затверджений_документ…». Період — 2099xx (правило 382).
+    /// </remarks>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "B138")]
+    public async Task Версія_без_погодження_затверджений_аркуш_перераховується_без_запису_пропущено(bool byHuman)
+    {
+        var arranged = await ArrangeAsync(submitSecondSheet: false, periodKey: NonePeriod);
+        await RunJobAsync(arranged, SheetRequest(arranged, sheetDefId: null), label: 1_000m);
+        await SubmitSecondSheetAsync(arranged);
+        var request = byHuman
+            ? SheetRequest(arranged, sheetDefId: null)
+            : SheetRequest(arranged, sheetDefId: null) with { TriggeredByUserId = null };
+
+        // Контроль: режим SubmitApprove — затверджений B пропущено.
+        await using (var auditDb = arranged.Builder.CreateContext())
+        {
+            await RunJobAsync(arranged, request, label: 2_000m, audit: new AuditWriter(auditDb));
+        }
+
+        Assert.Equal(["A|2001", "B|1001"], await ShapeAsync(arranged));
+        Assert.Equal(1, await SheetLogCountAsync(arranged, arranged.SecondSheetId, RecalculationSkips.AuditSkippedApproved));
+
+        await SetWorkflowNoneAsync(arranged);
+
+        await using (var auditDb = arranged.Builder.CreateContext())
+        {
+            await RunJobAsync(arranged, request, label: 3_000m, audit: new AuditWriter(auditDb));
+        }
+
+        Assert.Equal(["A|3001", "B|3001"], await ShapeAsync(arranged));
+        Assert.Equal(1, await SheetLogCountAsync(arranged, arranged.SecondSheetId, RecalculationSkips.AuditSkippedApproved));
+        Assert.Equal(0, await SheetLogCountAsync(arranged, arranged.SecondSheetId, RecalculationSkips.AuditRecalculatedAfterSubmission));
+    }
+
+    /// <summary>
+    /// ✎ B138 (F13): ПОВНІСТЮ затверджений документ (обидва аркуші <c>Approved</c>), перенесений на версію без подання й
+    /// затвердження, перераховується — і результати методологій, і значення обох аркушів. Контроль у тому ж тесті: до
+    /// перемикання режиму прогін нічого не змінює (усі скоупи пропущено).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ ДОКАЗ (локально): прибрати <c>ExceptWorkflowNone</c> у <c>SkippedScopesAsync</c> — після перемикання результати
+    /// лишаються від першого прогону (1001), червоний. Випадки версії — <see cref="WorkflowNoneCase"/>: завжди брати
+    /// <c>fn_VersionOf</c> (ігнорувати власний шаблон документа, B74) — червоні <c>ownNone</c> (мусить перерахувати) і
+    /// <c>projectNone</c> (документ лишається з погодженням — мусить і далі пропускати).
+    /// </remarks>
+    [Theory]
+    [InlineData(WorkflowNoneCase.Plain)]
+    [InlineData(WorkflowNoneCase.SameTemplate)]
+    [InlineData(WorkflowNoneCase.OwnNone)]
+    [InlineData(WorkflowNoneCase.ProjectNone)]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "B138")]
+    public async Task Версія_без_погодження_повністю_затверджений_документ_перераховується(string mode)
+    {
+        var arranged = await ArrangeAsync(submitSecondSheet: false, periodKey: NonePeriod);
+        WorkflowNoneCase.Binding binding;
+        await using (var bind = arranged.Builder.CreateContext())
+        {
+            binding = await WorkflowNoneCase.BindAsync(mode, sql.ConnectionString, bind, arranged.Document);
+        }
+
+        await RunJobAsync(arranged, SheetRequest(arranged, sheetDefId: null), label: 1_000m);
+        await SubmitSheetAsync(arranged, arranged.Document.SheetDefId);
+        await SubmitSecondSheetAsync(arranged);
+
+        // Контроль: з погодженням автоматичний прогін повністю затвердженого документа нічого не переписує.
+        var automatic = SheetRequest(arranged, sheetDefId: null) with { TriggeredByUserId = null };
+        try
+        {
+            await RunJobAsync(arranged, automatic, label: 2_000m);
+        }
+        catch (EcrException)
+        {
+            // «рахувати нічого» може бути й відмовою задачі — головне, що числа не змінилися (нижче).
+        }
+
+        Assert.Equal(["A|1001", "B|1001"], await ShapeAsync(arranged));
+
+        await using (var switchDb = arranged.Builder.CreateContext())
+        {
+            await WorkflowNoneCase.SwitchAsync(switchDb, binding);
+        }
+
+        try
+        {
+            await RunJobAsync(arranged, automatic, label: 3_000m);
+        }
+        catch (EcrException) when (!binding.DocumentBecomesNone)
+        {
+            // Документ лишився з погодженням (None лише версія проєкту, не власного шаблону): як у контролі.
+        }
+
+        Assert.Equal(binding.DocumentBecomesNone ? RecalculatedShape : FirstRunShape, await ShapeAsync(arranged));
+    }
+
+    private static readonly string[] FirstRunShape = ["A|1001", "B|1001"];
+    private static readonly string[] RecalculatedShape = ["A|3001", "B|3001"];
+
+    /// <summary>Період нових тестів B138 — далеке майбутнє (правило 382), не перетинається з рештою класу.</summary>
+    /// <remarks>⚠ Саме січень: значення прогону — «мітка + номер місяця» (1001, 2001…), як у решті класу.</remarks>
+    private const int NonePeriod = 209901;
+
+    private static async Task SetWorkflowNoneAsync(Arranged arranged)
+    {
+        await using var db = arranged.Builder.CreateContext();
+        await db.Database.ExecuteSqlAsync(
+            $"UPDATE cfg.TemplateVersion SET WorkflowMode = 1 WHERE Id = {arranged.Document.TemplateVersionId}");
+    }
+
     private static async Task SubmitOnlyAsync(Arranged arranged, int sheetDefId, DateTime at)
     {
         await using var db = arranged.Builder.CreateContext();
@@ -609,10 +732,10 @@ public sealed class RecalculationJobSheetScopeResultsTests(SqlServerFixture sql)
     }
 
     private async Task<Arranged> ArrangeAsync(
-        bool submitSecondSheet, bool submitFirstSheet = false, bool sharedMethodology = false)
+        bool submitSecondSheet, bool submitFirstSheet = false, bool sharedMethodology = false, int periodKey = 202601)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
-        var document = await builder.BuildAsync();
+        var document = await builder.BuildAsync(periodKey: periodKey);
 
         await using var db = builder.CreateContext();
 

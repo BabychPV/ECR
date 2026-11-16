@@ -197,6 +197,14 @@ public sealed partial class SheetWorkflowNotifier(
             return;
         }
 
+        // ✎ B138 (дизайн B75): аркуш версії без подання й затвердження нікому не «повертається» - повернення в роботу
+        // старого стану (перенос версії) лишається дією без листа. Перевірка ПІСЛЯ правила: без правила - 0 звернень.
+        if (await documents.GetWorkflowModeForPeriodAsync(documentId, periodKey.Value, ct).ConfigureAwait(false)
+            == WorkflowMode.None)
+        {
+            return;
+        }
+
         var facts = await store.GetFactsAsync(documentId, sheetDefId, periodKey, returnerId, ct).ConfigureAwait(false);
         if (facts is null)
         {

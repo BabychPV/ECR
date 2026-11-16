@@ -4413,7 +4413,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-CFG-0422` | 422 | код або `RowKey` не відповідає шаблону — помилка введення, не збій |
 | `ECR-CFG-4221` | 422 | `Project.TimeZoneId` не є відомим ідентифікатором IANA: порожньо, невідомий пояс, Windows-ідентифікатор (`Central Asia Standard Time`) або зсув (`+05:00`) |
 | `ECR-REQ-0422` | 422 | параметр самого запиту поза межами: розмір сторінки, ширина або напрям вікна аудиту; **також** (E1-06) помилка читання тіла самим Kestrel (`BadHttpRequestException`): тіло понад межу — статус `413` (`err.ECR-REQ-0422.requestTooLarge`), обірване чи некоректне — `400` (`err.ECR-REQ-0422.malformedRequest`) |
-| `ECR-REQ-0429` | 429 | КОРИСТУВАЧ вичерпав межу частоти запитів (пошук `GET /api/v1/search`, типово 30 за 10 с, `Security:RateLimit:SearchPermit`/`SearchWindowSeconds`; перерахунок документа `POST /documents/{id}/recalculate`, дві межі: 6/хв на пару «користувач + документ», `Security:RateLimit:RecalculatePermitPerMinute`, і 30/хв на користувача для всіх документів, `Security:RateLimit:RecalculateUserPermitPerMinute`; `4xx`-відмови межі не витрачають, `5xx` і скасування запиту — витрачають; проби SMTP `POST /notifications/smtp/test` і `/notifications/channels/{id}/test`, політика `smtp-test`: 5/хв на користувача і 30/год на систему, `Security:RateLimit:SmtpTestPermitPerMinute`/`SmtpTestSystemPermitPerHour`; кандидати згадок чату `GET /documents/{id}/tables/{tableCode}/mention-candidates` — той самий кошик, що й пошук (політика `search`); запис у чат `POST /documents/{id}/tables/{tableCode}/messages`, політика `discussion-post`: 20/хв на користувача, `Security:RateLimit:DiscussionPostPermitPerMinute`, ключ `tooManyChatMessages`); у відповіді `Retry-After` |
+| `ECR-REQ-0429` | 429 | КОРИСТУВАЧ вичерпав межу частоти запитів (пошук `GET /api/v1/search`, типово 30 за 10 с, `Security:RateLimit:SearchPermit`/`SearchWindowSeconds`; перерахунок документа `POST /documents/{id}/recalculate`, дві межі: 6/хв на пару «користувач + документ», `Security:RateLimit:RecalculatePermitPerMinute`, і 30/хв на користувача для всіх документів, `Security:RateLimit:RecalculateUserPermitPerMinute`; `4xx`-відмови межі не витрачають, `5xx` і скасування запиту — витрачають; проби SMTP `POST /notifications/smtp/test` і `/notifications/channels/{id}/test`, політика `smtp-test`: 5/хв на користувача і 30/год на систему, `Security:RateLimit:SmtpTestPermitPerMinute`/`SmtpTestSystemPermitPerHour`; кандидати згадок чату `GET /documents/{id}/tables/{tableCode}/mention-candidates` — той самий кошик, що й пошук (політика `search`); запис у чат `POST /documents/{id}/tables/{tableCode}/messages`, політика `discussion-post`: 20/хв на користувача, `Security:RateLimit:DiscussionPostPermitPerMinute`, ключ `tooManyChatMessages`; постановка вивантаження в чергу — експорт документа `POST /documents/{id}/export`, експорт огляду року `POST /documents/{id}/calculation-results/year/export` і побудова зрізу `POST /reports/{code}/build`, політика `document-export`: 6/хв на користувача, ОДИН кошик на всі три, `Security:RateLimit:ExportPermitPerMinute`, ключ `tooManyExports` (PT-6)); у відповіді `Retry-After` |
 | `ECR-SCHM-0409` | 409 | `Breaking`-зміна у версії з документами (ФВ-7.4); у т. ч. видалення прив'язки аркуша до дозволу (PM-09, `messageKey` `permitBindingBreaking`) |
 | `ECR-SCHM-0422` | 422 | `Guarded`-зміна без стратегії міграції; режим переносу документа на нову версію (ФВ-7.5) не має стратегії для змін |
 | `ECR-DOC-0404` | 404 | документ не знайдено |
@@ -4874,7 +4874,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/documents/{documentId}/permit-history/header/undo` | грант Write на проєкт (✎ (j) 09.11: скасовує останній доданий дозвіл поля шапки; аудит `PermitSegment/Remove`; 422 `ECR-REQ-0422 permitHistoryNothingToUndo` — нічого не додано або його місяць уже поділено, ✎ C-9 аудиту 2026-11-10; 409 `ECR-CELL-0409 concurrentChange` — шкалу дозволу змінив інший користувач між читанням і записом, ✎ D-1 аудиту 2026-11-10) | 3 |
 | `GET` | `/api/v1/documents/{id}/tables` | `Document.View` (✎ TC02: таблиця копії несе `chatMessageCount` (оригінал — `null`) — живих повідомлень чату цієї копії в усіх її таблицях; клієнт показує число ДО підтвердження видалення копії, яка забирає чат разом з даними; `DELETE …/sheet-copies/{sheetCopyId}` пише його в журнал безпеки як `chatMessages`) | 6 |
 | `GET` | `/api/v1/documents/{id}/tables/status` | `Document.View` | 6 |
-| `POST` | `/api/v1/documents/{id}/export` | `Document.Export` | 5 |
+| `POST` | `/api/v1/documents/{id}/export` | `Document.Export` (PT-6: межа 6/хв на користувача, політика `document-export`; понад — 429 `tooManyExports` із `Retry-After`) | 5 |
 | `GET` | `/api/v1/documents/{id}/export/{exportId}` | `Document.Export` | 5 |
 | `POST` | `/api/v1/documents/{id}/import/preview` | `Document.Import` | 5 |
 | `POST` | `/api/v1/documents/{id}/import/apply` | `Document.Import` | 5 |
@@ -4936,7 +4936,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/documents/{id}/calculation-results` | `Calculation.View` | 7 |
 | `GET` | `/api/v1/documents/{id}/calculation-results/year/summary` | `Calculation.View` | 7 |
 | `GET` | `/api/v1/documents/{id}/calculation-results/year/rows` | `Calculation.View` | 7 |
-| `POST` | `/api/v1/documents/{id}/calculation-results/year/export` | `Document.Export` | 7 |
+| `POST` | `/api/v1/documents/{id}/calculation-results/year/export` | `Document.Export` (PT-6: той самий кошик `document-export`, 429 `tooManyExports`) | 7 |
 | `GET` | `/api/v1/documents/{id}/calculation-run` | `Calculation.View` | 7 |
 | `GET` | `/api/v1/documents/{id}/calculation-issues` | `Document.View` | 7 |
 | `POST` | `/api/v1/methodologies/{id}/versions/{vid}/publish` | `Calculation.Publish` | 4 |
@@ -5033,7 +5033,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/reports/snapshots/{id}/verify` | `Report.ViewRegulatory` | 5 |
 | `GET` | `/api/v1/reports/snapshots/{id}/rows` | `Report.ViewRegulatory` | 5 |
 | `GET` | `/api/v1/reports/snapshots/{id}/export.xlsx` | `Report.Export` | 5 |
-| `POST` | `/api/v1/reports/{code}/build` | `Report.BuildSnapshot` | 5 |
+| `POST` | `/api/v1/reports/{code}/build` | `Report.BuildSnapshot` (PT-6: той самий кошик `document-export`, 429 `tooManyExports`) | 5 |
 | `GET` | `/api/v1/languages` | — (будь-який автентифікований) | 3 |
 | `GET` | `/api/v1/public/bootstrap` | — (анонімний) | 7 |
 | `POST` | `/api/v1/csp-report` | — (анонімний; приймач звітів CSP від браузера, S14) | 7 |

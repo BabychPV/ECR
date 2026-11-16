@@ -326,6 +326,7 @@ public static class LoginRateLimiting
             options.AddPolicy<string, SnapshotVerifyRateLimitPolicy>(SnapshotVerifyRateLimitPolicy.PolicyName); // L1-05
             options.AddPolicy<string, DocumentValidateRateLimitPolicy>(DocumentValidateRateLimitPolicy.PolicyName); // P1-08
             options.AddPolicy<string, TableDiscussionPostRateLimitPolicy>(TableDiscussionPostRateLimitPolicy.PolicyName); // S-6
+            options.AddPolicy<string, DocumentExportRateLimitPolicy>(DocumentExportRateLimitPolicy.PolicyName); // PT-6
         });
 
         return services;

@@ -253,6 +253,7 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
     public async Task<IReadOnlyList<ApprovalState>> GetSheetsAsync(
         long documentId, PeriodKey periodKey, CancellationToken ct)
         => await db.ApprovalStates
+            .ExceptWorkflowNone(db) // ✎ B138: версія без погодження - станів немає (старі після переносу не діють)
             .Where(s => s.DocumentId == documentId && s.PeriodKey == periodKey.Value)
             .OrderBy(s => s.SheetDefId)
             .ToListAsync(ct)
@@ -547,7 +548,8 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
         // RS: перерахунок пропускає аркуш × КОПІЮ окремо (`SkippedScopesAsync`), тож і перелік — кожен затверджений
         // стан, з копією (✎ борг 09.11: раніше `OriginalOnly()` мовчки ховав затверджені копії з переліку).
         var rows = await (
-                from state in db.ApprovalStates.AsNoTracking()
+                // ✎ B138: аркуш версії без погодження перерахунок не пропускає - і в переліку «пропущено» його немає.
+                from state in db.ApprovalStates.AsNoTracking().ExceptWorkflowNone(db)
                 join document in db.Documents.AsNoTracking() on state.DocumentId equals document.Id
                 join sheet in db.SheetDefs.AsNoTracking() on state.SheetDefId equals sheet.Id
                 from copy in db.DocumentSheets.AsNoTracking().Where(c => c.Id == state.SheetCopyId).DefaultIfEmpty()

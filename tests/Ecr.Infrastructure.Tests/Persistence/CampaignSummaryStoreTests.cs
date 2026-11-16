@@ -421,6 +421,166 @@ public sealed class CampaignSummaryStoreTests(SqlServerFixture sql)
         // Кількість документів і зрізів лишається видимою (Q15-07).
         Assert.Equal(3, narrowed.Totals.Documents);
     }
+
+    /// <summary>
+    /// ✎ B144 (B75): аркуші документа, чия версія шаблону за період — без подання й затвердження
+    /// (<c>WorkflowMode.None</c>), в огляді кампанії ФІНАЛЬНІ (як у зрізі звіту, B138): затверджені, а не чернетки,
+    /// і в «не подано» не входять; старі стани (перенос версії) не діють.
+    /// </summary>
+    /// <remarks>
+    /// КОНТРОЛЬ у тому самому тесті: до перемикання режиму ті самі документи — чернетка / поданий / відхилений.
+    /// ⛔ МУТАЦІЙНИЙ ДОКАЗ: прибрати приєднання <c>nv</c> (або умови <c>nv.Id IS …</c>) у
+    /// <c>CampaignSummaryStore.ProjectStagesSql</c> — друга половина червона. Випадки версії —
+    /// <see cref="WorkflowNoneCase"/>: завжди брати <c>doc.fn_VersionOf</c> (ігнорувати власний шаблон документа, B74) —
+    /// червоні <c>ownNone</c> (None лише власна версія: аркуші мусять стати фінальними) і <c>projectNone</c> (None лише
+    /// версія проєкту: документ лишається з погодженням, числа не змінюються).
+    /// </remarks>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "B144")]
+    [InlineData(WorkflowNoneCase.Plain)]
+    [InlineData(WorkflowNoneCase.SameTemplate)]
+    [InlineData(WorkflowNoneCase.OwnNone)]
+    [InlineData(WorkflowNoneCase.ProjectNone)]
+    public async Task Огляд_рахує_аркуші_версії_без_погодження_фінальними_а_не_неподаними(string mode)
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var key = await FreshPeriodKeyAsync(builder);
+        var chain = await builder.BuildAsync(periodKey: key, ct: CancellationToken.None);
+        await using var db = builder.CreateContext();
+
+        // Чернетка (без рядка стану), поданий і відхилений: три різні «не фінальні» стани.
+        await ArrangeAsync(db, chain, chain.DocumentId, status: null);
+        await AddAsync(db, chain, DocumentStatus.Submitted, count: 1);
+        await AddAsync(db, chain, DocumentStatus.Rejected, count: 1);
+        var binding = await WorkflowNoneCase.BindAsync(mode, sql.ConnectionString, db, chain);
+
+        var before = await new CampaignSummaryStore(db).ListAsync(key, NoLimit, CancellationToken.None);
+        var control = before.Projects.Single(p => p.ProjectId == chain.ProjectId);
+        Assert.Equal((3, 1, 1, 0, 1), (control.Documents, control.Draft, control.Submitted, control.Approved, control.Rejected));
+        Assert.Equal((3, 2), (control.Sheets, control.NotSubmittedSheets));
+        Assert.Equal(2, before.Buckets.Sum(b => b.NotSubmittedSheets));
+        Assert.DoesNotContain(before.Buckets, b => b.AllApproved);
+
+        await WorkflowNoneCase.SwitchAsync(db, binding);
+
+        var after = await new CampaignSummaryStore(db).ListAsync(key, NoLimit, CancellationToken.None);
+        var row = after.Projects.Single(p => p.ProjectId == chain.ProjectId);
+        if (!binding.DocumentBecomesNone)
+        {
+            // None стала лише версія ПРОЄКТУ, а документи мають власний шаблон з погодженням: числа ті самі.
+            Assert.Equal((3, 1, 1, 0, 1), (row.Documents, row.Draft, row.Submitted, row.Approved, row.Rejected));
+            Assert.Equal((3, 2), (row.Sheets, row.NotSubmittedSheets));
+            Assert.DoesNotContain(after.Buckets, b => b.AllApproved);
+            return;
+        }
+
+        Assert.Equal((3, 0, 0, 3, 0), (row.Documents, row.Draft, row.Submitted, row.Approved, row.Rejected));
+        Assert.Equal((3, 0), (row.Sheets, row.NotSubmittedSheets));
+
+        // Підсумки — той самий текст агрегату: період свіжий, тож група одна й лише наша.
+        var bucket = Assert.Single(after.Buckets);
+        Assert.True(bucket.AllApproved);
+        Assert.Equal((3, 0, 0, 3, 0, 3, 0),
+            (bucket.Documents, bucket.Draft, bucket.Submitted, bucket.Approved, bucket.Rejected, bucket.Sheets,
+                bucket.NotSubmittedSheets));
+    }
+
+    /// <summary>
+    /// ✎ B144: проєкт, документи якого — версії без подання й затвердження, стає «Готово» зі зрізом, а не лишається
+    /// простроченим через «незатверджені» аркуші, яких ніхто не може затвердити (<c>CampaignProgressRule</c>).
+    /// </summary>
+    /// <remarks>⛔ МУТАЦІЙНИЙ ДОКАЗ: той самий, що вище, — без <c>nv</c> проєкт лишається <c>Overdue</c>.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "B144")]
+    public async Task Проєкт_версії_без_погодження_зі_зрізом_готовий_а_не_прострочений()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var key = await FreshPeriodKeyAsync(builder);
+        var chain = await builder.BuildAsync(periodKey: key, ct: CancellationToken.None);
+        await using var db = builder.CreateContext();
+        await ArrangeAsync(db, chain, chain.DocumentId, status: null);
+        await AddCurrentSnapshotAsync(db, chain.ProjectId, key);
+
+        var today = new DateOnly(2026, 6, 15);
+        var period = await db.Periods.SingleAsync(p => p.ProjectId == chain.ProjectId && p.PeriodKeyValue == key);
+        SetLastDay(period, today.AddDays(-1));
+        await db.SaveChangesAsync(CancellationToken.None);
+
+        var before = await Handler(db, LocalToUtc(today, 10, 0)).HandleAsync(key, CancellationToken.None);
+        Assert.Equal(CampaignProgress.Overdue, before.Projects.Single(p => p.ProjectId == chain.ProjectId).Progress);
+        Assert.Equal((0, 1), (before.Totals.Done, before.Totals.NotSubmittedSheets ?? -1));
+
+        await SetWorkflowNoneAsync(db, chain);
+
+        var after = await Handler(db, LocalToUtc(today, 10, 0)).HandleAsync(key, CancellationToken.None);
+        var row = after.Projects.Single(p => p.ProjectId == chain.ProjectId);
+        Assert.Equal(CampaignProgress.Done, row.Progress);
+        Assert.Equal(0, row.NotSubmittedSheets);
+        Assert.Equal((1, 0), (after.Totals.Done, after.Totals.NotSubmittedSheets ?? -1));
+    }
+
+    /// <summary>
+    /// ✎ B144: календар періодів (UI-33, D1) не рахує «не поданими» аркуші версії без подання й затвердження.
+    /// </summary>
+    /// <remarks>
+    /// КОНТРОЛЬ: до перемикання режиму — 2 (чернетка й відхилений; затверджений уже поданий).
+    /// ⛔ МУТАЦІЙНИЙ ДОКАЗ: прибрати <c>nv.Id IS NOT NULL OR</c> (або приєднання <c>nv</c>) у
+    /// <c>CampaignSummaryStore.NotSubmittedByPeriodSql</c> — після перемикання лишається 2 замість 0.
+    /// </remarks>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "B144")]
+    [InlineData(WorkflowNoneCase.Plain)]
+    [InlineData(WorkflowNoneCase.SameTemplate)]
+    [InlineData(WorkflowNoneCase.OwnNone)]
+    [InlineData(WorkflowNoneCase.ProjectNone)]
+    public async Task Календар_не_рахує_неподаними_аркуші_версії_без_погодження(string mode)
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var chain = await builder.BuildAsync(periodKey: 209905, ct: CancellationToken.None);   // 2099xx — правило 382
+        await using var db = builder.CreateContext();
+
+        await ArrangeAsync(db, chain, chain.DocumentId, status: null);
+        await AddAsync(db, chain, DocumentStatus.Rejected, count: 1);
+        await AddAsync(db, chain, DocumentStatus.Approved, count: 1);
+        var binding = await WorkflowNoneCase.BindAsync(mode, sql.ConnectionString, db, chain);
+
+        // None лише версія проєкту при власному шаблоні з погодженням — документ не змінюється: лишається 2.
+        var expected = binding.DocumentBecomesNone ? 0 : 2;
+
+        async Task<int> NotSubmitted()
+        {
+            var byPeriod = await new CampaignSummaryStore(db)
+                .NotSubmittedSheetsByPeriodAsync(chain.ProjectId, CancellationToken.None);
+            return byPeriod[chain.PeriodKey.Value];
+        }
+
+        Assert.Equal(2, await NotSubmitted());
+
+        await WorkflowNoneCase.SwitchAsync(db, binding);
+
+        Assert.Equal(expected, await NotSubmitted());
+
+        // Той самий шлях, яким число бере календар (`GetPeriodCalendarHandler`).
+        var calendar = await CalendarHandler(
+                db,
+                new AccessBuilder { UserId = 7 }
+                    .Permission("Document.View")
+                    .Grant(ResourceKind.Project, chain.ProjectId, GrantLevel.Read))
+            .HandleAsync(chain.ProjectId, CancellationToken.None, true);
+        Assert.Equal(expected, calendar.Periods.Single(p => p.PeriodKey == chain.PeriodKey.Value).NotSubmittedSheets);
+    }
+
+    /// <summary>B144: версія шаблону ланцюга — без подання й затвердження (<c>WorkflowMode.None</c> = 1).</summary>
+    private static Task<int> SetWorkflowNoneAsync(EcrDbContext db, TestDocument chain)
+        => db.Database.ExecuteSqlAsync(
+            $"UPDATE cfg.TemplateVersion SET WorkflowMode = 1 WHERE Id = {chain.TemplateVersionId}");
+
     /// <summary>Обробник календаря над справжніми сховищами; користувач описаний <paramref name="access"/>.</summary>
     private static GetPeriodCalendarHandler CalendarHandler(EcrDbContext db, AccessBuilder access)
     {

@@ -7,6 +7,7 @@ using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
 using Ecr.Infrastructure.Reporting;
+using Ecr.Infrastructure.Tests.Persistence;
 using Ecr.TestKit;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
@@ -232,6 +233,61 @@ public sealed class ReportSnapshotSheetStatusTests(SqlServerFixture sql)
         Assert.Equal((int)SnapshotStatus.Submitted, shown.Status);
     }
 
+    /// <summary>
+    /// ✎ B138 (B75 lane 1b): аркуші версії без подання й затвердження (<c>WorkflowMode.None</c>) — фінальні: зріз над
+    /// ними <c>Approved</c>, хоч би який стан лишився від старої версії (або жодного). Контроль у тому ж тесті: до
+    /// перемикання режиму той самий набір дає звичайний статус.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ ДОКАЗ (локально): прибрати гілку <c>WorkflowMode.None</c> у <c>StatusOfDataAsync</c> — усі рядки червоні;
+    /// завжди брати <c>VersionOf</c> (ігнорувати власний шаблон документа, B74) — червоні рядки <c>ownNone</c>
+    /// (власна версія None, версія проєкту — ні: зріз мусить стати Approved) і <c>projectNone</c> (навпаки: документ
+    /// лишається з погодженням, зріз мусить лишитись Draft). Випадки — <c>WorkflowNoneCase</c>. Період — 2099xx.
+    /// </remarks>
+    [Theory]
+    [InlineData("none", nameof(SnapshotStatus.Draft), WorkflowNoneCase.Plain)]
+    [InlineData("Draft,Rejected", nameof(SnapshotStatus.Draft), WorkflowNoneCase.Plain)]
+    [InlineData("Submitted,none", nameof(SnapshotStatus.Draft), WorkflowNoneCase.Plain)]
+    [InlineData("none", nameof(SnapshotStatus.Draft), WorkflowNoneCase.SameTemplate)]
+    [InlineData("Submitted,none", nameof(SnapshotStatus.Draft), WorkflowNoneCase.SameTemplate)]
+    [InlineData("Submitted,none", nameof(SnapshotStatus.Draft), WorkflowNoneCase.OwnNone)]
+    [InlineData("Submitted,none", nameof(SnapshotStatus.Draft), WorkflowNoneCase.ProjectNone)]
+    // ⚠ Набір «усе подано» тут не перевіряється: контрольний крок зробив би зріз Submitted, а поданий зріз
+    // заморожений (ФВ-9.17) і далі не перераховується - це інше правило, не B138.
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "B138")]
+    public async Task Версія_без_погодження_аркуші_фінальні_зріз_Approved(string sheetStates, string beforeName, string mode)
+    {
+        var scenario = await ArrangeAsync(sheetStates.Split(','), periodKey: 209904).ConfigureAwait(true);
+        WorkflowNoneCase.Binding binding;
+        await using (var bind = scenario.Chain.CreateContext())
+        {
+            binding = await WorkflowNoneCase.BindAsync(mode, sql.ConnectionString, bind, scenario.Document).ConfigureAwait(true);
+        }
+
+        var snapshotId = await AddSnapshotAsync(scenario, scenario.Document.PeriodKey.Value).ConfigureAwait(true);
+
+        await using (var before = scenario.Chain.CreateContext())
+        {
+            Assert.Equal(
+                Enum.Parse<SnapshotStatus>(beforeName),
+                await Builder(before).RefreshStatusAsync(snapshotId, CancellationToken.None).ConfigureAwait(true));
+        }
+
+        await using (var db = scenario.Chain.CreateContext())
+        {
+            await WorkflowNoneCase.SwitchAsync(db, binding).ConfigureAwait(true);
+        }
+
+        // Документ став «без погодження» — зріз Approved; None лише версія проєкту, а в документа власний шаблон з
+        // погодженням — статус той самий, що до перемикання.
+        var expected = binding.DocumentBecomesNone ? SnapshotStatus.Approved : Enum.Parse<SnapshotStatus>(beforeName);
+        await using var after = scenario.Chain.CreateContext();
+        Assert.Equal(expected, await Builder(after).RefreshStatusAsync(snapshotId, CancellationToken.None).ConfigureAwait(true));
+        Assert.Equal(expected, await StoredStatusAsync(scenario, snapshotId).ConfigureAwait(true));
+    }
+
     // ───────────────────────────── допоміжне ─────────────────────────────
 
     private sealed record Scenario(
@@ -244,10 +300,10 @@ public sealed class ReportSnapshotSheetStatusTests(SqlServerFixture sql)
     /// Документ з N аркушами у складі й станом кожного в одному періоді. Перший аркуш — з ланцюга
     /// будівника, решта — додаткові <c>SheetDef</c> тієї самої версії шаблону.
     /// </summary>
-    private async Task<Scenario> ArrangeAsync(string[] states)
+    private async Task<Scenario> ArrangeAsync(string[] states, int periodKey = 202601)
     {
         var chain = new TestDocumentBuilder(sql.ConnectionString);
-        var document = await chain.BuildAsync().ConfigureAwait(false);
+        var document = await chain.BuildAsync(periodKey: periodKey).ConfigureAwait(false);
         var tag = Guid.NewGuid().ToString("N")[..8];
 
         await using var db = chain.CreateContext();

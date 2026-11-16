@@ -180,6 +180,26 @@ public sealed class SheetWorkflowNotifierTests
             Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<int>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
     }
 
+    /// <summary>
+    /// ✎ B138 (B75 lane 1b): повернення в роботу старого стану аркуша версії без подання й затвердження листа не дає.
+    /// Контроль — тест вище: той самий виклик у звичайному режимі шле лист.
+    /// </summary>
+    /// <remarks>⛔ ДОКАЗ (локально): прибрати перевірку <c>WorkflowMode.None</c> у <c>ReturnedCoreAsync</c> — лист у черзі, падає.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Finding", "B138")]
+    public async Task Повернення_аркуша_версії_без_погодження_листа_не_дає()
+    {
+        _documents.GetWorkflowModeForPeriodAsync(DocumentId, Period.Value, Arg.Any<CancellationToken>())
+            .Returns(Ecr.Domain.Enums.WorkflowMode.None);
+
+        await Notifier().ReturnedAsync(DocumentId, SheetId, Period, 40, At, "Fix row 3", CancellationToken.None);
+
+        Assert.Empty(_queued);
+        await _store.DidNotReceive().GetFactsAsync(
+            Arg.Any<long>(), Arg.Any<int>(), Arg.Any<PeriodKey>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait("Requirement", "D-451")]
