@@ -319,6 +319,66 @@ public sealed partial class ReportViewStableRenameScopeTests(ITestOutputHelper o
         Assert.Equal(((decimal?)7.5m, (decimal?)null), await KAsync(stable, pa.ProjectId));   // PA: лише під своїм
     }
 
+    /// <summary>
+    /// F13: скоуп проєкту змінюється (новий перенос додав пару; прив'язки прибрано; проєкт видалено) — після перегенерації в
+    /// rpt.ViewProjectScope рівно актуальний рядок (або жодного), і вʼюха показує аліаси НОВОГО скоупу, а старого - ні.
+    /// </summary>
+    [Fact]
+    public async Task Зміна_скоупу_проєкту_оновлює_і_прибирає_його_рядок_відповідності()
+    {
+        var (templateId, code) = await NewTemplateAsync();
+        var v1 = await AddVersionAsync(templateId, "1", ("T", ["A", "B", "C"]));
+        var v2 = await AddVersionAsync(templateId, "2", ("T", ["A", "Z", "W"]));
+        var t1 = v1.Tables["T"];
+        var t2 = v2.Tables["T"];
+        var pb = await NewProjectAsync(v1.VersionId, 209901);
+        var pq = await NewProjectAsync(v1.VersionId, 209901);
+        var gone = await NewProjectAsync(v1.VersionId);   // без даних: буде видалено
+        await SeedAsync(pb, 209901, t1, ("A", "a"), ("B", "pb_b"), ("C", "pb_c"));
+        await SeedAsync(pq, 209901, t1, ("A", "a"), ("B", "pq_b"), ("C", "pq_c"));
+        await RenameAsync(t1.Cols["B"], t2.Cols["Z"], legacy: false, pb.ProjectId);   // PB: X = {B -> Z}
+        await RenameAsync(t1.Cols["C"], t2.Cols["W"], legacy: false, pq.ProjectId);
+        await BindAsync(t1.Cols["B"], t2.Cols["Z"], pq.ProjectId);                       // PQ: Y = {B -> Z, C -> W}
+        await BindAsync(t1.Cols["B"], t2.Cols["Z"], gone.ProjectId);                     // gone: X
+        await GenerateAsync(v2.VersionId, routing: false);
+        var stable = Sanitise($"v_{code}_S_T");
+
+        async Task<Dictionary<int, int>> ScopesAsync()
+            => (await ScalarRowsAsync($"SELECT ProjectId, Scope FROM rpt.ViewProjectScope WHERE TemplateId = {templateId}"))
+                .ToDictionary(r => r.ProjectId, r => r.Scope);
+
+        var before = await ScopesAsync();
+        Assert.Equal(3, before.Count);
+        Assert.NotEqual(before[pq.ProjectId], before[pb.ProjectId]);
+        Assert.Equal("pb_b", await ScalarStringAsync(stable, pb.ProjectId, 209901, "Z", "R1"));
+        Assert.Null(await ScalarStringAsync(stable, pb.ProjectId, 209901, "W", "R1"));
+
+        // (1) Новий перенос додав PB пару C -> W: PB тепер у скоупі PQ - один рядок, новий скоуп, аліас W видно.
+        await BindAsync(t1.Cols["C"], t2.Cols["W"], pb.ProjectId);
+        await GenerateAsync(v2.VersionId, routing: false);
+        var moved = await ScopesAsync();
+        Assert.Equal(moved[pq.ProjectId], moved[pb.ProjectId]);
+        Assert.Equal(1, (await ScalarRowsAsync($"SELECT ProjectId, COUNT(*) FROM rpt.ViewProjectScope WHERE TemplateId = {templateId} AND ProjectId = {pb.ProjectId} GROUP BY ProjectId"))[0].Scope);
+        Assert.Equal("pb_c", await ScalarStringAsync(stable, pb.ProjectId, 209901, "W", "R1"));
+        Assert.Equal("pb_b", await ScalarStringAsync(stable, pb.ProjectId, 209901, "Z", "R1"));
+
+        // (2) Прив'язки PB прибрано: рядка немає (скоуп 0), аліасів немає.
+        await ExecAsync($"DELETE FROM cfg.ColumnRenameProject WHERE ProjectId = {pb.ProjectId}");
+        await GenerateAsync(v2.VersionId, routing: false);
+        Assert.False((await ScopesAsync()).ContainsKey(pb.ProjectId));
+        Assert.Null(await ScalarStringAsync(stable, pb.ProjectId, 209901, "Z", "R1"));
+        Assert.Null(await ScalarStringAsync(stable, pb.ProjectId, 209901, "W", "R1"));
+        Assert.Equal("pq_c", await ScalarStringAsync(stable, pq.ProjectId, 209901, "W", "R1"));   // PQ не зачеплено
+
+        // (3) Проєкт видалено (прив'язка лишилась): його рядок прибирається.
+        Assert.True((await ScopesAsync()).ContainsKey(gone.ProjectId));
+        await ExecAsync($"DELETE FROM doc.Document WHERE ProjectId = {gone.ProjectId}; DELETE FROM doc.Project WHERE Id = {gone.ProjectId};");
+        await GenerateAsync(v2.VersionId, routing: false);
+        var after = await ScopesAsync();
+        Assert.False(after.ContainsKey(gone.ProjectId));
+        Assert.Equal([pq.ProjectId], after.Keys.ToList());
+    }
+
     // ── помічники ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
     private sealed record Scenario(string Stable, int Pb, int Pa, int Pc, int BV1, int ZV2);
@@ -462,6 +522,9 @@ public sealed partial class ReportViewStableRenameScopeTests(ITestOutputHelper o
         => ExecAsync(
             $"INSERT INTO cfg.ColumnRename (FromColumnDefId, ToColumnDefId, IsLegacyGlobal) VALUES ({from}, {to}, {(legacy ? 1 : 0)});"
             + (projectId is { } p ? $"INSERT INTO cfg.ColumnRenameProject (FromColumnDefId, ToColumnDefId, ProjectId) VALUES ({from}, {to}, {p});" : string.Empty));
+
+    private Task BindAsync(int from, int to, int projectId)
+        => ExecAsync($"INSERT INTO cfg.ColumnRenameProject (FromColumnDefId, ToColumnDefId, ProjectId) VALUES ({from}, {to}, {projectId})");
 
     private Task GenerateAsync(int versionId, bool routing)
         => ExecAsync($"EXEC rpt.usp_GenerateStableViews {versionId}, {(routing ? 1 : 0)}, 0");

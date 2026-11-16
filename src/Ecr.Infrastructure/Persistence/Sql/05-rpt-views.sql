@@ -1127,6 +1127,7 @@ BEGIN
     INSERT INTO @pb (ProjectId, FromId, ToId)
     SELECT DISTINCT b.ProjectId, b.FromColumnDefId, b.ToColumnDefId
       FROM cfg.ColumnRenameProject AS b JOIN @rp AS p ON p.FromId = b.FromColumnDefId AND p.ToId = b.ToColumnDefId
+      JOIN doc.Project AS pr ON pr.Id = b.ProjectId   -- B129 F13: видалений проєкт скоупу не має (його рядок rpt.ViewProjectScope прибирається)
      WHERE p.IsLegacy = 0;
     INSERT INTO @ps (ProjectId, Scope)
     SELECT s.ProjectId, DENSE_RANK() OVER (ORDER BY s.Sig)
