@@ -39,12 +39,19 @@ export function CreateUserModal({ opened, onClose, roles, rolesError, onRetry }:
 
   return (
     <Modal opened={opened} onClose={onClose} title={t('security.createUser')}>
-      <CreateUserForm key={generation} onClose={onClose} roles={roles} rolesError={rolesError} onRetry={onRetry} />
+      <CreateUserForm
+        key={generation}
+        opened={opened}
+        onClose={onClose}
+        roles={roles}
+        rolesError={rolesError}
+        onRetry={onRetry}
+      />
     </Modal>
   );
 }
 
-function CreateUserForm({ onClose, roles, rolesError, onRetry }: Omit<CreateUserModalProps, 'opened'>): JSX.Element {
+function CreateUserForm({ opened, onClose, roles, rolesError, onRetry }: CreateUserModalProps): JSX.Element {
   const queryClient = useQueryClient();
   const [userName, setUserName] = useState('');
   const [displayName, setDisplayName] = useState('');
@@ -167,7 +174,13 @@ function CreateUserForm({ onClose, roles, rolesError, onRetry }: Omit<CreateUser
             || rolesError !== null
           }
           loading={createUser.isPending}
-          onClick={() => createUser.mutate()}
+          onClick={() => {
+            // ⛔ B145b: діалог, що закривається (ще ~200 мс у DOM, форма з тими самими значеннями), і запит
+            // у польоті не створюють удруге — зонд: другий клік слав другий `POST /users` з тим самим тілом.
+            if (!opened || createUser.isPending) return;
+
+            createUser.mutate();
+          }}
         >
           {t('common.save')}
         </Button>

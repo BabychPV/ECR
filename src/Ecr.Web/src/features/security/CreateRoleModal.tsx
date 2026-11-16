@@ -46,6 +46,7 @@ export function CreateRoleModal({
     <Modal opened={opened} onClose={onClose} title={t('security.createRole')} size="lg">
       <CreateRoleForm
         key={generation}
+        opened={opened}
         onClose={onClose}
         permissions={permissions}
         permissionCatalogError={permissionCatalogError}
@@ -56,11 +57,12 @@ export function CreateRoleModal({
 }
 
 function CreateRoleForm({
+  opened,
   onClose,
   permissions,
   permissionCatalogError,
   onRetry,
-}: Omit<CreateRoleModalProps, 'opened'>): JSX.Element {
+}: CreateRoleModalProps): JSX.Element {
   const queryClient = useQueryClient();
   const [roleCode, setRoleCode] = useState('');
   const [roleName, setRoleName] = useState<LocalizedValue>({});
@@ -156,7 +158,13 @@ function CreateRoleForm({
             roleCode.trim().length === 0 || !hasAnyText(roleName) || permissionCatalogError !== null
           }
           loading={createRole.isPending}
-          onClick={() => createRole.mutate()}
+          onClick={() => {
+            // ⛔ B145b: діалог, що закривається (ще ~200 мс у DOM, форма з тими самими значеннями), і запит
+            // у польоті не створюють удруге — зонд: другий клік слав другий `POST /roles` з тим самим тілом.
+            if (!opened || createRole.isPending) return;
+
+            createRole.mutate();
+          }}
         >
           {t('common.save')}
         </Button>
