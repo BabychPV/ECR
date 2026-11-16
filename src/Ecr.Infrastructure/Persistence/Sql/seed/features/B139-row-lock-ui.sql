@@ -1,0 +1,108 @@
+-- B139:row-lock-ui ── ru/kz: екрани блокування рядків (B75 lane 2): діалог «Заблокувати рядки…», значок рядка, перелік блокувань; власна порція ──
+-- ⚠ kz — робочий переклад, на звірку термінологу.
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'rowLock.lockAction', N'ru', N'Заблокировать строки…'),
+    (N'rowLock.lockAction', N'kz', N'Жолдарды бұғаттау…'),
+    (N'rowLock.pickHint', N'ru', N'Сначала выделите в таблице строки, которые нужно заблокировать.'),
+    (N'rowLock.pickHint', N'kz', N'Алдымен кестеде бұғатталатын жолдарды белгілеңіз.'),
+    (N'rowLock.listAction', N'ru', N'Заблокированные строки: {count}'),
+    (N'rowLock.listAction', N'kz', N'Бұғатталған жолдар: {count}'),
+    (N'rowLock.dialogTitle', N'ru', N'Заблокировать строки: {count}'),
+    (N'rowLock.dialogTitle', N'kz', N'Жолдарды бұғаттау: {count}'),
+    (N'rowLock.dialogBody', N'ru', N'Пока действует блокировка, менять эти строки можете только вы. Остальные увидят значок замка и объяснение.'),
+    (N'rowLock.dialogBody', N'kz', N'Бұғат күшінде тұрғанда бұл жолдарды тек сіз өзгерте аласыз. Басқалар құлып белгісі мен түсіндірмені көреді.'),
+    (N'rowLock.rowsLabel', N'ru', N'Строки ({count})'),
+    (N'rowLock.rowsLabel', N'kz', N'Жолдар ({count})'),
+    (N'rowLock.rowsMore', N'ru', N'и ещё {count}'),
+    (N'rowLock.rowsMore', N'kz', N'және тағы {count}'),
+    (N'rowLock.fromLabel', N'ru', N'С даты'),
+    (N'rowLock.fromLabel', N'kz', N'Басталу күні'),
+    (N'rowLock.toLabel', N'ru', N'По дату'),
+    (N'rowLock.toLabel', N'kz', N'Аяқталу күні'),
+    (N'rowLock.toHint', N'ru', N'Включительно. После этой даты блокировка снимется сама.'),
+    (N'rowLock.toHint', N'kz', N'Осы күнді қоса. Бұл күннен кейін бұғат өзі алынады.'),
+    (N'rowLock.noteLabel', N'ru', N'Примечание (необязательно)'),
+    (N'rowLock.noteLabel', N'kz', N'Ескертпе (міндетті емес)'),
+    (N'rowLock.lockVerb', N'ru', N'Заблокировать'),
+    (N'rowLock.lockVerb', N'kz', N'Бұғаттау'),
+    (N'rowLock.close', N'ru', N'Закрыть'),
+    (N'rowLock.close', N'kz', N'Жабу'),
+    (N'rowLock.errorNoRows', N'ru', N'Не выбрано ни одной строки.'),
+    (N'rowLock.errorNoRows', N'kz', N'Бірде-бір жол таңдалмаған.'),
+    (N'rowLock.errorDates', N'ru', N'Укажите дату начала и дату окончания.'),
+    (N'rowLock.errorDates', N'kz', N'Басталу және аяқталу күнін көрсетіңіз.'),
+    (N'rowLock.errorRange', N'ru', N'Дата окончания раньше даты начала.'),
+    (N'rowLock.errorRange', N'kz', N'Аяқталу күні басталу күнінен ерте.'),
+    (N'rowLock.errorNote', N'ru', N'Примечание длиннее {max} символов.'),
+    (N'rowLock.errorNote', N'kz', N'Ескертпе {max} таңбадан ұзын.'),
+    (N'rowLock.badgeHint', N'ru', N'Строку заблокировал(а) {owner} до {until} включительно.'),
+    (N'rowLock.badgeHint', N'kz', N'Жолды {owner} {until} күнін қоса бұғаттаған.'),
+    (N'rowLock.ownerUnknown', N'ru', N'другой пользователь'),
+    (N'rowLock.ownerUnknown', N'kz', N'басқа пайдаланушы'),
+    (N'rowLock.listTitle', N'ru', N'Заблокированные строки'),
+    (N'rowLock.listTitle', N'kz', N'Бұғатталған жолдар'),
+    (N'rowLock.listEmpty', N'ru', N'В этой таблице нет заблокированных строк.'),
+    (N'rowLock.listEmpty', N'kz', N'Бұл кестеде бұғатталған жолдар жоқ.'),
+    (N'rowLock.colRow', N'ru', N'Строка'),
+    (N'rowLock.colRow', N'kz', N'Жол'),
+    (N'rowLock.colPeriod', N'ru', N'Срок'),
+    (N'rowLock.colPeriod', N'kz', N'Мерзімі'),
+    (N'rowLock.colOwner', N'ru', N'Кто заблокировал'),
+    (N'rowLock.colOwner', N'kz', N'Кім бұғаттады'),
+    (N'rowLock.colNote', N'ru', N'Примечание'),
+    (N'rowLock.colNote', N'kz', N'Ескертпе'),
+    (N'rowLock.colActions', N'ru', N'Действия'),
+    (N'rowLock.colActions', N'kz', N'Әрекеттер'),
+    (N'rowLock.range', N'ru', N'{from} – {to}'),
+    (N'rowLock.range', N'kz', N'{from} – {to}'),
+    (N'rowLock.notStarted', N'ru', N'ещё не началась'),
+    (N'rowLock.notStarted', N'kz', N'әлі басталған жоқ'),
+    (N'rowLock.release', N'ru', N'Снять'),
+    (N'rowLock.release', N'kz', N'Алу'),
+    (N'rowLock.releaseRow', N'ru', N'Снять блокировку: {row}'),
+    (N'rowLock.releaseRow', N'kz', N'Бұғатты алу: {row}')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- B139:row-lock-ui ── кінець секції ──
+
+-- B139:row-lock-ui ── en: екрани блокування рядків (B75 lane 2); ru/kz — порцією B139:row-lock-ui вище ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'rowLock.lockAction', N'en', N'Lock rows…', 1),
+    (N'rowLock.pickHint', N'en', N'Select the rows to lock in the table first.', 1),
+    (N'rowLock.listAction', N'en', N'Locked rows: {count}', 1),
+    (N'rowLock.dialogTitle', N'en', N'Lock rows: {count}', 1),
+    (N'rowLock.dialogBody', N'en', N'While the lock is in effect, only you can change these rows. Everyone else sees a lock mark and an explanation.', 1),
+    (N'rowLock.rowsLabel', N'en', N'Rows ({count})', 1),
+    (N'rowLock.rowsMore', N'en', N'and {count} more', 1),
+    (N'rowLock.fromLabel', N'en', N'From', 1),
+    (N'rowLock.toLabel', N'en', N'To', 1),
+    (N'rowLock.toHint', N'en', N'Inclusive. The lock ends by itself after this date.', 1),
+    (N'rowLock.noteLabel', N'en', N'Note (optional)', 1),
+    (N'rowLock.lockVerb', N'en', N'Lock', 1),
+    (N'rowLock.close', N'en', N'Close', 1),
+    (N'rowLock.errorNoRows', N'en', N'No rows are selected.', 1),
+    (N'rowLock.errorDates', N'en', N'Enter the start date and the end date.', 1),
+    (N'rowLock.errorRange', N'en', N'The end date is before the start date.', 1),
+    (N'rowLock.errorNote', N'en', N'The note is longer than {max} characters.', 1),
+    (N'rowLock.badgeHint', N'en', N'Row locked by {owner} until {until} inclusive.', 1),
+    (N'rowLock.ownerUnknown', N'en', N'another user', 1),
+    (N'rowLock.listTitle', N'en', N'Locked rows', 1),
+    (N'rowLock.listEmpty', N'en', N'This table has no locked rows.', 1),
+    (N'rowLock.colRow', N'en', N'Row', 1),
+    (N'rowLock.colPeriod', N'en', N'Period', 1),
+    (N'rowLock.colOwner', N'en', N'Locked by', 1),
+    (N'rowLock.colNote', N'en', N'Note', 1),
+    (N'rowLock.colActions', N'en', N'Actions', 1),
+    (N'rowLock.range', N'en', N'{from} – {to}', 1),
+    (N'rowLock.notStarted', N'en', N'not started yet', 1),
+    (N'rowLock.release', N'en', N'Release', 1),
+    (N'rowLock.releaseRow', N'en', N'Release the lock: {row}', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- B139:row-lock-ui ── кінець секції ──

@@ -939,6 +939,8 @@ export function DocumentPage(): JSX.Element {
                   // за ВИДИМИМИ таблицями (`inspectorModel.ts`); тут другого немає.
                   issues={null}
                   onShowIssues={() => undefined}
+                  // ✎ B143 (B75): шаблон без подання й затвердження — «No approval» замість стану аркуша.
+                  workflowOff={document.workflowMode === 'None'}
                 />
                 <DocumentSaveState readOnly={gridReadOnly} periodKey={periodKey} />
                 {/* ✎ D-446: застарілість не визначена — частину документа читачеві закрито (те саме, що в рядку переліку). */}

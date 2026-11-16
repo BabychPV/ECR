@@ -1,0 +1,41 @@
+/* B139 (B75): значок «рядок заблоковано» в першій колонці сітки. Окремий елемент, а не ::before/::after комірки —
+   псевдоелементи вже зайняті станами комірки (shared/theme/cell-states.css). */
+.ecr-row-lock {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+}
+
+.ecr-row-lock-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Замок: дужка (рамка без низу) над корпусом — без шрифтів-іконок і зображень; колір — поточний текст, тож
+   контраст такий самий, як у значення комірки в обох темах. */
+.ecr-row-lock-glyph {
+  flex: none;
+  position: relative;
+  width: 10px;
+  height: 8px;
+  margin-top: 5px;
+  border-radius: 2px;
+  background: currentColor;
+}
+
+.ecr-row-lock-glyph::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: -5px;
+  width: 6px;
+  height: 6px;
+  box-sizing: border-box;
+  border: 1.5px solid currentColor;
+  border-bottom: 0;
+  border-radius: 3px 3px 0 0;
+}

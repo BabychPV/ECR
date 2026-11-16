@@ -225,6 +225,10 @@ import { NoPermitMarks, permitGridMarksOf, splitRefusalOf, type SplitRefusal } f
 import { requestCellSplit } from '@/features/permits/history/splitRequest';
 import { usePermitHistory } from '@/features/permits/history/usePermitHistory';
 import { localized } from '@/shared/i18n/localized';
+import { withRowLockMarks } from '@/features/rowLocks/gridRowLockMarks';
+import { RowLockControl } from '@/features/rowLocks/RowLockControl';
+import { activeLocksByRow, belongsTo } from '@/features/rowLocks/rowLockModel';
+import { useRowLocks } from '@/features/rowLocks/useRowLocks';
 
 /** Властивості grid. */
 interface DocumentGridProps {
@@ -243,6 +247,12 @@ interface DocumentGridProps {
   sheetDefId?: number;
   /** ✎ RS: копія аркуша (ключ статусів місячних колонок копії); не задано/`null` — оригінал. */
   sheetCopyId?: number | null;
+  /**
+   * ✎ B139 (B75): коди аркуша й таблиці — адреса блокувань рядків (`RowLockDto.sheetCode`/`tableCode`). Не задано
+   * (сітка поза сторінкою документа) — блокувань не питаємо, значків і кнопок блокування немає.
+   */
+  sheetCode?: string;
+  tableCode?: string;
   /**
    * Останній день періоду документа (`PeriodDto.periodEnd`, `YYYY-MM-DD`) —
    * `asOf` темпоральних Lookup-довідників комірок (ФВ-8.5). `null` — календар
@@ -453,6 +463,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     periodKey,
     sheetDefId,
     sheetCopyId = null,
+    sheetCode,
+    tableCode,
     periodEnd = null,
     readOnly: pageReadOnly,
     sheetState,
@@ -1545,11 +1557,26 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     () => (tableDefId === undefined ? NoPermitMarks : permitGridMarksOf(permitHistory.data, tableDefId, sheetCopyId)),
     [permitHistory.data, tableDefId, sheetCopyId],
   );
+  // ✎ B139 (B75): блокування рядків цієї таблиці — один запит на документ і період (спільний ключ усіх сіток).
+  const lockTable = useMemo(
+    () => (sheetCode === undefined || tableCode === undefined ? null : { sheetCode, tableCode, sheetCopyId }),
+    [sheetCode, tableCode, sheetCopyId],
+  );
+  const rowLocks = useRowLocks(documentId, periodKey, lockTable !== null);
+  const tableLocks = useMemo(
+    () => (lockTable === null ? [] : (rowLocks.data ?? []).filter((lock) => belongsTo(lock, lockTable))),
+    [rowLocks.data, lockTable],
+  );
+  const locksByRow = useMemo(
+    () => (lockTable === null ? new Map<string, never>() : activeLocksByRow(tableLocks, lockTable)),
+    [tableLocks, lockTable],
+  );
   const frozenColumns = useMemo(() => {
     const frozen = applyFrozenColumns(columns, frozenCount);
+    const marked = data === undefined ? frozen : withPermitMarks(frozen, data, permitMarks, rowKeyOf);
 
-    return data === undefined ? frozen : withPermitMarks(frozen, data, permitMarks, rowKeyOf);
-  }, [columns, frozenCount, data, permitMarks]);
+    return withRowLockMarks(marked, locksByRow, rowKeyOf);
+  }, [columns, frozenCount, data, permitMarks, locksByRow]);
 
   // ✎ (j) j2: Enter/F2/double-click/typing on a month cell shared by two permits opens the split dialog, not the editor.
   const onBeforeEditStart = useCallback(
@@ -3106,6 +3133,19 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
             periodKey={periodKey}
             slice={data}
             onDeleted={() => void slice.refetch()}
+          />
+        )}
+
+        {/* ✎ B139 (B75): «Заблокувати рядки…» (право `Document.RowLock`) і перелік блокувань таблиці. Не залежить
+            від стану аркуша: блокування — окремий від погодження механізм (шаблони «без подання»). */}
+        {lockTable !== null && data !== undefined && (
+          <RowLockControl
+            documentId={documentId}
+            periodKey={periodKey}
+            tableInstanceId={tableInstanceId}
+            table={lockTable}
+            slice={data}
+            locks={tableLocks}
           />
         )}
         {addRowDenial !== null && (
