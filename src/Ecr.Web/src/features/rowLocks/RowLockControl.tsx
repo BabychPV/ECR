@@ -1,12 +1,14 @@
 import { lazy, Suspense, useState, type JSX } from 'react';
 import { Button, VisuallyHidden } from '@mantine/core';
-import type { TableSliceDto } from '@/api/types';
+import { useQuery } from '@tanstack/react-query';
+import { queryKeys } from '@/api/queryKeys';
+import type { DocumentSummary, TableSliceDto } from '@/api/types';
 import type { RowLockDto } from '@/features/documents/rowLocks/api';
 import { useFocusedCell } from '@/features/grid/focusStore';
 import { useSelectedRange } from '@/features/grid/selectionStore';
 import { rowDisplayName } from '@/features/permits/history/rowName';
 import { t } from '@/shared/i18n';
-import { can, useSession } from '@/shared/session/useSession';
+import { can, useSession, type MeDto } from '@/shared/session/useSession';
 import { pickedRowKeys, type LockTable } from './rowLockModel';
 
 // ⛔ D-132: діалог і перелік — окремі чанки, з першим відкриттям (сітка документа їх не тягне).
@@ -15,6 +17,23 @@ const RowLocksPanel = lazy(() => import('./RowLocksPanel'));
 
 /** Право, з яким сервер приймає блокування й зняття будь-чийого блокування (`Document.RowLock`, B75). */
 export const RowLockPermission = 'Document.RowLock';
+
+/**
+ * ✎ B143 (D-538): чи показувати «Заблокувати рядки…».
+ *
+ * Рішення — СЕРВЕРА: `DocumentSummary.canLockRows` рахується тим самим правилом, що й `POST …/row-locks` (носій
+ * `Document.RowLock` або власник документа з Write на таблицю; симуляція, архів, архівація й закритий період — ні).
+ * `true` — показати (і власникові без права, якого `/me` не знає); `false` — не показувати навіть носієві права:
+ * сервер однаково відмовив би.
+ *
+ * ⚠ Прапорця немає (`undefined`/`null`: картка ще не дійшла, картка без періоду, старіший сервер) — запасне правило
+ * до B143: право `Document.RowLock` з `/me`.
+ */
+export function mayLockRows(canLockRows: boolean | null | undefined, me: MeDto | undefined): boolean {
+  if (typeof canLockRows === 'boolean') return canLockRows;
+
+  return can(me, RowLockPermission);
+}
 
 interface RowLockControlProps {
   readonly documentId: number;
@@ -29,16 +48,19 @@ interface RowLockControlProps {
 /**
  * ✎ B139 (B75): дії блокування рядків у рядку кнопок сітки.
  *
- * - «Заблокувати рядки…» — лише з правом `Document.RowLock` (`/me`); діє на виділені рядки (діапазон або рядок
- *   фокусної комірки). Без виділення кнопка вимкнена з причиною (видно й читалці).
+ * - «Заблокувати рядки…» — за рішенням сервера `canLockRows` у картці документа (`mayLockRows`); діє на виділені
+ *   рядки (діапазон або рядок фокусної комірки). Без виділення кнопка вимкнена з причиною (видно й читалці).
  * - «Заблоковані рядки: N» — перелік блокувань таблиці зі «Зняти»; лише коли блокування є.
- *
- * ⚠ Власник документа без права теж може блокувати (сервер, B75 «Lock»), але `/me` власності не знає — кнопки
- * для нього немає; спроба без права однаково дала б `403 rowLockDenied`.
  */
 export function RowLockControl({ documentId, periodKey, tableInstanceId, table, slice, locks }: RowLockControlProps): JSX.Element | null {
   const session = useSession();
-  const allowed = can(session.data, RowLockPermission);
+  /*
+   * ✎ B143: картку (`GET /documents/{id}?periodKey=`) вантажить `DocumentPage` під тим самим ключем; тут — лише
+   * ПІДПИСКА на кеш (`enabled: false`, без власного запиту), тож кнопка з'являється, щойно картка дійшла, і
+   * йде за нею після зміни періоду чи інвалідації.
+   */
+  const card = useQuery<DocumentSummary>({ queryKey: queryKeys.document.summary(documentId, periodKey), enabled: false });
+  const allowed = mayLockRows(card.data?.canLockRows, session.data);
   const focus = useFocusedCell(tableInstanceId, periodKey);
   const range = useSelectedRange(tableInstanceId, periodKey);
   const [open, setOpen] = useState<'lock' | 'list' | null>(null);

@@ -104,7 +104,7 @@ const Locks: RowLockDto[] = [
   lock({ id: 8, rowKey: 'r1', sheetCopyId: 4 }),
 ];
 
-function show(): void {
+function show(card?: { canLockRows: boolean }): void {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
@@ -133,6 +133,8 @@ function show(): void {
   );
 
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  // ✎ B143: картка документа — як її лишає в кеші `DocumentPage` (ключ `['document', id, period]`).
+  if (card !== undefined) client.setQueryData(['document', 96, 202611], { id: 96, ...card });
   render(
     <MantineProvider>
       <QueryClientProvider client={client}>
@@ -254,5 +256,27 @@ describe('DocumentGrid: блокування рядків (B139, F13 c, d)', () 
     const panel = await screen.findByRole('dialog');
     const listed = Array.from(panel.querySelectorAll('[data-row-lock-item]')).map((row) => row.getAttribute('data-row-lock-item'));
     expect(listed).toEqual(['5']);
+  });
+
+  /*
+   * ✎ B143 (D-538): сітка дає кнопці саме СВІЙ документ і період — картка з `canLockRows = true` показує
+   * «Заблокувати рядки…» користувачеві без права `Document.RowLock` (у `/me` цього тесту його немає), а без
+   * прапорця (тести c і d) кнопки немає.
+   * ⛔ Мутація: `RowLockControl` читає картку за іншим ключем (чи сітка дає не свій `documentId`/`periodKey`) —
+   * червоніє цей тест.
+   */
+  it('B143: картка з canLockRows = true — «Заблокувати рядки…» є без права Document.RowLock', async () => {
+    show({ canLockRows: true });
+    await screen.findByTestId('revogrid-stub');
+
+    await waitFor(() => expect(document.querySelector('[data-row-lock-open]'), 'кнопки блокування немає').not.toBeNull());
+  });
+
+  it('B143: без прапорця й без права кнопки «Заблокувати рядки…» немає (перелік є)', async () => {
+    show();
+    await screen.findByTestId('revogrid-stub');
+
+    await waitFor(() => expect(document.querySelector('[data-row-locks-open]')).not.toBeNull());
+    expect(document.querySelector('[data-row-lock-open]')).toBeNull();
   });
 });

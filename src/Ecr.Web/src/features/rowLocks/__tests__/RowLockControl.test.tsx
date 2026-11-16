@@ -1,7 +1,9 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
+import type { JSX } from 'react';
+import { apiFetch } from '@/api/client';
 import type { TableSliceDto } from '@/api/types';
 import type { RowLockDto } from '@/features/documents/rowLocks/api';
 import { publishFocus, resetFocus } from '@/features/grid/focusStore';
@@ -53,7 +55,14 @@ interface Sent {
 
 let sent: Sent[] = [];
 
-function show(permissions: string[], locks: RowLockDto[] = []): void {
+/** Картка документа в кеші (`GET /documents/{id}?periodKey=`): лише те, що читає кнопка. */
+interface Card {
+  readonly canLockRows?: boolean | null;
+}
+
+const CardKey = ['document', DocumentId, PeriodKey];
+
+function show(permissions: string[], locks: RowLockDto[] = [], card?: Card): QueryClient {
   sent = [];
   vi.stubGlobal(
     'fetch',
@@ -76,6 +85,8 @@ function show(permissions: string[], locks: RowLockDto[] = []): void {
   );
 
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  // ⚠ Картку кладе в кеш сторінка документа (`DocumentPage`); кнопка її лише читає й сама нічого не запитує.
+  if (card !== undefined) client.setQueryData(CardKey, { id: DocumentId, ...card });
   render(
     <MantineProvider theme={testTheme}>
       <QueryClientProvider client={client}>
@@ -90,6 +101,45 @@ function show(permissions: string[], locks: RowLockDto[] = []): void {
       </QueryClientProvider>
     </MantineProvider>,
   );
+
+  return client;
+}
+
+/** Сесія прочитана (`/me`), а кнопки «Заблокувати рядки…» немає. */
+async function expectNoLockButton(): Promise<void> {
+  await waitFor(() =>
+    expect(vi.mocked(fetch).mock.calls.some(([input]) => String(input).includes('/api/v1/me'))).toBe(true),
+  );
+  // Один оберт черги: відповідь `/me` дійшла до компонента (з правом кнопка вже була б).
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(screen.queryByRole('button', { name: LockButton })).toBeNull();
+}
+
+/** Рядок 0 у фокусі → «Заблокувати рядки…» → дати → «Заблокувати»: один POST з адресою таблиці. */
+async function lockFocusedRowThroughDialog(): Promise<void> {
+  act(() => publishFocus(TableInstanceId, PeriodKey, { rowIndex: 0, columnCode: 'A' } as never));
+
+  const button = await screen.findByRole('button', { name: LockButton });
+  await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(button);
+
+  const dialog = await screen.findByRole('dialog');
+  const save = await screen.findByRole('button', { name: /rowLock\.lockVerb/ });
+  const [from, to] = Array.from(dialog.querySelectorAll('input')).filter((input) => input.type !== 'hidden');
+  if (from === undefined || to === undefined) throw new Error('полів дат немає');
+  fireEvent.change(from, { target: { value: '2026-11-10' } });
+  fireEvent.blur(from);
+  fireEvent.change(to, { target: { value: '2026-11-20' } });
+  fireEvent.blur(to);
+  await waitFor(() => expect((save as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(save);
+
+  await waitFor(() => expect(sent).toHaveLength(1));
+  expect(sent[0]?.method).toBe('POST');
+  expect(sent[0]?.url).toContain(`/api/v1/documents/${String(DocumentId)}/row-locks`);
+  expect((sent[0]?.body as { rowKeys?: string[] }).rowKeys).toEqual(['R1']);
 }
 
 const LockButton = /rowLock\.lockAction/;
@@ -194,6 +244,129 @@ describe('RowLockControl (B139)', () => {
       note: null,
     });
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  /*
+   * ✎ B143 (D-538): «Заблокувати рядки…» — за прапорцем картки документа `canLockRows` (рішення сервера: носій
+   * права `Document.RowLock` або ВЛАСНИК документа з Write на таблицю; закритий період, архів, симуляція — ні).
+   * Право з `/me` — лише запасне правило, доки прапорця немає (картка не дійшла, без періоду, старіший сервер).
+   *
+   * ⛔ Мутації (`RowLockControl.tsx`, `mayLockRows`): ігнорувати прапорець (лише право) — червоні (1) і (4);
+   * `false` як «прапорця немає» — (4); кнопка завжди — (2), (4), (6); читати картку за іншим ключем — (1), (4), (7).
+   */
+  describe('B143: видимість за canLockRows картки документа', () => {
+    it('(1) власник без права, canLockRows = true — кнопка є, діалог шле POST', async () => {
+      show(['Document.View'], [], { canLockRows: true });
+
+      await lockFocusedRowThroughDialog();
+    });
+
+    it('(2) не власник без права, canLockRows = false — кнопки немає', async () => {
+      show(['Document.View'], [], { canLockRows: false });
+
+      await expectNoLockButton();
+    });
+
+    it('(3) носій права, canLockRows = true — кнопка є', async () => {
+      show(['Document.View', 'Document.RowLock'], [], { canLockRows: true });
+
+      expect(await screen.findByRole('button', { name: LockButton })).toBeTruthy();
+    });
+
+    it('(4) носій права, canLockRows = false (закритий період) — кнопки немає, перелік лишається', async () => {
+      show(['Document.View', 'Document.RowLock'], [lock({ canUnlock: false })], { canLockRows: false });
+
+      await expectNoLockButton();
+      expect(screen.getByRole('button', { name: ListButton })).toBeTruthy();
+    });
+
+    it.each([
+      { name: 'картки в кеші немає', card: undefined },
+      { name: 'картка без прапорця (старіший сервер)', card: {} },
+      { name: 'canLockRows = null (картка без періоду)', card: { canLockRows: null } },
+    ])('(5) прапорця немає ($name) + право — кнопка є (запасне правило)', async ({ card }) => {
+      show(['Document.View', 'Document.RowLock'], [], card);
+
+      expect(await screen.findByRole('button', { name: LockButton })).toBeTruthy();
+    });
+
+    it.each([
+      { name: 'картки в кеші немає', card: undefined },
+      { name: 'canLockRows = null (картка без періоду)', card: { canLockRows: null } },
+    ])('(6) прапорця немає ($name), права немає — кнопки немає', async ({ card }) => {
+      show(['Document.View'], [], card);
+
+      await expectNoLockButton();
+    });
+
+    it('(7) картка дійшла пізніше за сітку — кнопка з’являється без нового запиту картки', async () => {
+      const client = show(['Document.View']);
+      await expectNoLockButton();
+
+      act(() => {
+        client.setQueryData(CardKey, { id: DocumentId, canLockRows: true });
+      });
+
+      expect(await screen.findByRole('button', { name: LockButton })).toBeTruthy();
+      // ⛔ Другого запиту картки немає: її вантажить сторінка документа.
+      const cardRequests = vi.mocked(fetch).mock.calls.filter(([input]) =>
+        /\/api\/v1\/documents\/\d+(\?|$)/.test(String(input)),
+      );
+      expect(cardRequests).toHaveLength(0);
+    });
+
+    it('(8) поруч із запитом сторінки: інвалідація картки перечитує її ОДИН раз, кнопка йде за новим прапорцем', async () => {
+      // Сторінка документа тримає запит картки (з `queryFn`), кнопка — лише підписку на той самий ключ.
+      let served = 0;
+      let flag = false;
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL) => {
+          const url = String(input);
+          const json = (body: unknown): Response =>
+            new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+          if (url.includes('/api/v1/me')) {
+            return json({ denies: [], grants: {}, isSimulation: false, language: 'en', mustChangePassword: false, permissions: ['Document.View'], simulatedForUserId: null, userId: 9, userName: 'tester' });
+          }
+          if (/\/api\/v1\/documents\/\d+\?periodKey=/.test(url)) {
+            served += 1;
+
+            return json({ id: DocumentId, canLockRows: flag });
+          }
+
+          return json([]);
+        }),
+      );
+
+      function Page(): JSX.Element {
+        useQuery({
+          queryKey: CardKey,
+          queryFn: () => apiFetch(`/api/v1/documents/${String(DocumentId)}?periodKey=${String(PeriodKey)}`),
+        });
+
+        return <RowLockControl documentId={DocumentId} periodKey={PeriodKey} tableInstanceId={TableInstanceId} table={Table} slice={Slice} locks={[]} />;
+      }
+
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      render(
+        <MantineProvider theme={testTheme}>
+          <QueryClientProvider client={client}>
+            <Page />
+          </QueryClientProvider>
+        </MantineProvider>,
+      );
+
+      await waitFor(() => expect(served).toBe(1));
+      await expectNoLockButton();
+
+      flag = true;
+      await act(async () => {
+        await client.invalidateQueries({ queryKey: CardKey });
+      });
+
+      expect(await screen.findByRole('button', { name: LockButton })).toBeTruthy();
+      expect(served).toBe(2);
+    });
   });
 
   it('перелік: «Зняти» шле DELETE саме цього блокування', async () => {
