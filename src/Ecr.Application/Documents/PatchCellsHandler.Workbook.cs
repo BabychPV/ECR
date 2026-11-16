@@ -1028,7 +1028,7 @@ public sealed partial class PatchCellsHandler
                 await EnsureColumnPeriodsEditableAsync(
                         item.Context.Instance.DocumentId, item.Context.Table.SheetDefId, item.Context.ColumnPeriods,
                         item.Planned, ct, item.Context.AnnualPeriods, item.Context.AnnualTextOnly,
-                        item.Context.AnnualAggregateGoverns, item.Context.DependentInputWritten)
+                        dependentInputWritten: item.Context.DependentInputWritten)
                     .ConfigureAwait(false);
                 return true;
             }).ConfigureAwait(false);

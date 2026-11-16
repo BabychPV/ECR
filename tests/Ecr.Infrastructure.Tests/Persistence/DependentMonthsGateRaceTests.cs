@@ -30,9 +30,10 @@ namespace Ecr.Infrastructure.Tests.Persistence;
 /// дозволяє річну комірку) → у точці перемикання ІНШЕ з'єднання комітить стан аркуша січня → записувач іде в транзакцію.
 /// <para>
 /// МУТАЦІЇ (локально): (1) у <c>PatchCellsHandler.CheckLockedColumnPeriods</c> прибрати виклик
-/// <c>DependentMonthsRule.ThrowIfLocked</c> — червоніє «Затвердження_між…» (обидва рядки); (2) там само прибрати
-/// <c>if (!annualAggregateGoverns) return;</c> — червоніє «Усі_місяці_подані…»; (3) у <c>NoteAnnualText</c> не
-/// ставити <c>DependentInputWritten</c> — червоніє «Затвердження_між…».
+/// <c>DependentMonthsRule.ThrowIfLocked</c> — червоніє «Затвердження_між…» (обидва рядки); (2) у <c>NoteAnnualText</c>
+/// не ставити <c>DependentInputWritten</c> — червоніє «Затвердження_між…». ✎ 16.11: колишня гілка
+/// <c>if (!annualAggregateGoverns) return;</c> прибрана як еквівалентна (мутація 14 вижила: батч лише зі стовпцями з
+/// залежними має annualTextOnly, і поданий агрегат пропускає виняток AN-142).
 /// </para>
 /// </remarks>
 [Collection("SqlServer")]
@@ -139,7 +140,7 @@ public sealed class DependentMonthsGateRaceTests(SqlServerFixture sql)
     // ───────────────────────────── допоміжне ─────────────────────────────
 
     /// <remarks>Текст якоря (AN-142) — теж за річним агрегатом: рік, затверджений цілком, його замикає й під замком.
-    /// Мутація: у <c>NoteAnnualText</c> не ставити <c>AnnualTextWritten</c> — червоніє.</remarks>
+    /// Мутація: у <c>CheckLockedColumnPeriods</c> пропустити перевірку агрегату для батчу тексту якоря — червоніє.</remarks>
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "B79")]

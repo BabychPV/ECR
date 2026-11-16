@@ -505,16 +505,6 @@ public sealed partial class PatchCellsHandler(
         public HashSet<int> AnnualTextColumns { get; } = [];
 
         /// <summary>
-        /// ✎ B79: у батчі є річна комірка (чи новий рядок), якою керує річний АГРЕГАТ стану аркуша (стовпець без
-        /// залежних розрахунків, текст якоря, створення рядка). <c>false</c> при непорожніх <see cref="AnnualPeriods"/> —
-        /// усі річні комірки батчу підлягають лише правилу залежних місяців.
-        /// </summary>
-        public bool AnnualAggregateGoverns => AnnualNumericWritten || AnnualTextWritten;
-
-        /// <summary>✎ B79: у батчі є комірка тексту якоря (AN-142) — нею теж керує річний агрегат.</summary>
-        public bool AnnualTextWritten { get; set; }
-
-        /// <summary>
         /// ✎ B79: у батчі є комірка загального стовпця, від якого залежать розрахунки місяців
         /// (<see cref="EditDecision.DependentInput"/>): під блокуваннями аркушів року затверджений місяць відхиляє запис
         /// (<see cref="DependentMonthsRule"/>), поданий — ні.
@@ -1265,8 +1255,6 @@ public sealed partial class PatchCellsHandler(
 
         if (decision.AnnualTextOnly && !creation)
         {
-            context.AnnualTextWritten = true;
-
             // Перерахунок пропускається лише коли поблажка справді спрацювала (аркуш Submitted).
             if (decision.AnnualTextRelaxed)
             {
@@ -3269,7 +3257,7 @@ public sealed partial class PatchCellsHandler(
 
         CheckLockedColumnPeriods(
             lockedStatuses, context.ColumnPeriods, context.AnnualPeriods, changes, context.AnnualTextOnly,
-            context.AnnualAggregateGoverns, context.DependentInputWritten);
+            context.DependentInputWritten);
     }
 
     /// <summary>Q-17: власний період + періоди колонок + річні періоди — без повторів, за зростанням ключа.</summary>
@@ -3295,7 +3283,6 @@ public sealed partial class PatchCellsHandler(
         IReadOnlyCollection<int> annualPeriods,
         CellChangeLists changes,
         bool annualTextOnly = false,
-        bool annualAggregateGoverns = true,
         bool dependentInputWritten = false)
     {
         foreach (var columnPeriod in columnPeriods)
@@ -3314,11 +3301,9 @@ public sealed partial class PatchCellsHandler(
             }
 
             // Решта річних комірок батчу (без залежних, текст якоря, нові рядки) — за річним агрегатом, як і було.
-            if (!annualAggregateGoverns)
-            {
-                return;
-            }
-
+            // ⚠ Окремого «пропустити агрегат, якщо в батчі лише стовпці з залежними» немає (мутаційний прохід 16.11,
+            // №14 — еквівалентна): такий батч не пише ні числа, ні нового рядка, тож annualTextOnly = true; затверджений
+            // місяць уже відхилено вище, а поданий агрегат пропускає виняток AN-142 нижче — результат той самий.
             var aggregate = AnnualPeriodRule.AggregateStatus(annualPeriods.Select(p => lockedStatuses[p]));
 
             // AN-142: текст якоря править і Submitted-аркуш; Approved (і Draft-чернетка без поблажок) - як було.
@@ -3343,7 +3328,6 @@ public sealed partial class PatchCellsHandler(
         long documentId, int sheetDefId, IEnumerable<int> columnPeriods, CellChangeLists changes, CancellationToken ct,
         IReadOnlyCollection<int>? annualPeriods = null,
         bool annualTextOnly = false,
-        bool annualAggregateGoverns = true,
         bool dependentInputWritten = false)
     {
         // ⛔ Q-17: усі періоди — за зростанням ключа (див. EnsureSheetStillEditableAsync).
@@ -3360,7 +3344,7 @@ public sealed partial class PatchCellsHandler(
         }
 
         CheckLockedColumnPeriods(
-            lockedStatuses, columnPeriods, annual, changes, annualTextOnly, annualAggregateGoverns, dependentInputWritten);
+            lockedStatuses, columnPeriods, annual, changes, annualTextOnly, dependentInputWritten);
     }
 
     /// <summary>D-442: користувач і далі погоджувач поточного кроку цього аркуша — під блокуванням.</summary>
