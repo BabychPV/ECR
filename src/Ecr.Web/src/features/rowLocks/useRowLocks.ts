@@ -20,6 +20,10 @@ export function useRowLocks(documentId: number, periodKey: number, enabled = tru
     queryFn: () => getRowLocks(documentId, periodKey),
     // Сітка поза сторінкою документа (без кодів аркуша й таблиці) блокувань не питає.
     enabled,
+    // ⛔ Блокування — другорядні дані сторінки: відповідь не тієї форми (проксі, старий сервер) не має валити
+    // сітку документа (`….filter is not a function` у рендері = помилка всього маршруту). Не масив — «блокувань
+    // немає»; правку однаково вирішує сервер (`cellPermissions`).
+    select: (data: RowLockDto[]) => (Array.isArray(data) ? data : []),
     // Блокування міняються рідко; свіжість тримає інвалідація після власних дій і перезапит при фокусі вікна.
     staleTime: 30_000,
   });

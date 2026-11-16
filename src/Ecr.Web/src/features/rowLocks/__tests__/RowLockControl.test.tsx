@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { TableSliceDto } from '@/api/types';
@@ -7,6 +7,7 @@ import type { RowLockDto } from '@/features/documents/rowLocks/api';
 import { publishFocus, resetFocus } from '@/features/grid/focusStore';
 import { testTheme } from '@/test/render';
 import { RowLockControl } from '../RowLockControl';
+import { useRowLocks } from '../useRowLocks';
 
 /**
  * ✎ B139 (B75): кнопки блокування рядків у сітці, діалог «Заблокувати рядки…» і перелік блокувань зі «Зняти».
@@ -97,6 +98,21 @@ const ListButton = /rowLock\.listAction/;
 afterEach(() => {
   resetFocus();
   vi.unstubAllGlobals();
+});
+
+describe('useRowLocks (B139)', () => {
+  it('відповідь не масивом не валить сітку: блокувань немає', async () => {
+    // ⛔ RED до фіксу: `renderFeedback` (сторінка документа з загальним моком `{}`) падала в рендері
+    // «(rowLocks.data ?? []).filter is not a function».
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } })));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result } = renderHook(() => useRowLocks(DocumentId, PeriodKey), {
+      wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data).toEqual([]);
+  });
 });
 
 describe('RowLockControl (B139)', () => {

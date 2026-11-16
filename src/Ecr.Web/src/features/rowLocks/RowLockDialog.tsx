@@ -2,6 +2,7 @@ import { useState, type JSX } from 'react';
 import { Button, Group, List, Modal, Stack, Text, Textarea } from '@mantine/core';
 // ⚠ Поле дати — лише в цьому лінивому модулі (`D-132`): `@mantine/dates` і його стилі не їдуть із сіткою.
 import { DateOnlyInput } from '@/shared/dates/DateInputWithStyles';
+import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { todayDateOnly } from '@/shared/format/dateOnly';
 import { t } from '@/shared/i18n';
 import { lockFormError, lockFormErrorText, lockRequest, MaxNoteLength, type LockForm, type LockTable } from './rowLockModel';
@@ -43,6 +44,11 @@ export default function RowLockDialog({ documentId, periodKey, table, rows, onCl
   const form: LockForm = { rowKeys: rows.map((row) => row.rowKey), fromDate, toDate, note };
   const error = lockFormError(form);
   const create = useCreateRowLocks(documentId, periodKey, onClose);
+
+  // ФВ-14.26: спінер не миттєво (короткий запит не блимає).
+
+  const createLoading = usePendingLoading(create.isPending);
+
 
   const submit = (): void => {
     if (error !== null || create.isPending) return;
@@ -105,7 +111,7 @@ export default function RowLockDialog({ documentId, periodKey, table, rows, onCl
           <Button variant="default" onClick={close} disabled={create.isPending}>
             {t('grid.confirmCancel')}
           </Button>
-          <Button onClick={submit} disabled={error !== null} loading={create.isPending} data-row-lock-save>
+          <Button onClick={submit} disabled={error !== null} loading={createLoading} data-row-lock-save>
             {t('rowLock.lockVerb')}
           </Button>
         </Group>

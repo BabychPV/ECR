@@ -1,5 +1,6 @@
 import { useState, type JSX } from 'react';
 import { Badge, Button, Group, Modal, Stack, Table, Text, VisuallyHidden } from '@mantine/core';
+import { usePendingLoading } from '@/features/common/usePendingLoading';
 import type { RowLockDto } from '@/features/documents/rowLocks/api';
 import { t } from '@/shared/i18n';
 import { lockDate, lockOwner } from './rowLockModel';
@@ -28,6 +29,8 @@ export interface RowLocksPanelProps {
 export default function RowLocksPanel({ documentId, periodKey, locks, rowName, onClose }: RowLocksPanelProps): JSX.Element {
   const [releasing, setReleasing] = useState<number | null>(null);
   const release = useReleaseRowLock(documentId, periodKey, () => setReleasing(null));
+  // ФВ-14.26: спінер не миттєво (короткий запит не блимає).
+  const releaseLoading = usePendingLoading(release.isPending);
 
   return (
     <Modal opened onClose={onClose} title={t('rowLock.listTitle')} size="lg" data-row-locks-panel>
@@ -70,7 +73,7 @@ export default function RowLocksPanel({ documentId, periodKey, locks, rowName, o
                       <Button
                         size="xs"
                         variant="default"
-                        loading={release.isPending && releasing === lock.id}
+                        loading={releaseLoading && releasing === lock.id}
                         disabled={release.isPending && releasing !== lock.id}
                         aria-label={t('rowLock.releaseRow', { row: rowName(lock.rowKey) })}
                         onClick={() => {
