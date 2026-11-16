@@ -1,4 +1,4 @@
-import { fireEvent, waitFor } from '@testing-library/react';
+import { act, fireEvent, waitFor } from '@testing-library/react';
 import { expect, vi } from 'vitest';
 import { settle, type HeldWrites } from '@/test/closedDialogProbe';
 
@@ -12,7 +12,8 @@ import { settle, type HeldWrites } from '@/test/closedDialogProbe';
  * Вікна:
  * 1. запит у дорозі (подвійний клік);
  * 2. сервер відповів, власник ще чекає перечитування — діалог відкритий (якщо `refetchWindow`);
- * 3. діалог закрито, але `Modal` ще в DOM (`keepMountedModalsTheme`) — клік після звірки `isConnected`.
+ * 3. діалог закрито, але `Modal` ще в DOM (`keepMountedModalsTheme`) — клік після звірки `isConnected` і ПІСЛЯ
+ *    завершення мутації (пауза 300 мс): кнопку має тримати скидання форми чи захист обробника, а не спінер.
  *
  * ⛔ Лише для тестів.
  */
@@ -123,6 +124,16 @@ export async function probeThreeWindows(options: {
   await waitFor(() => {
     expect(isOpen()).toBe(false);
   });
+  /*
+   * ⛔ F13 (B149): вікно 3 — ПІСЛЯ того, як мутація скінчилась. Без паузи клік падав ще на `loading` (запис чи
+   * `await` власника в `onSuccess` ще тривали), і кнопку вимикав спінер, а не скидання форми: мутація
+   * `disabled={incomplete && false}` у `CreateProjectModal` лишалась зеленою. Пауза — РЕАЛЬНИЙ час, бо `onSuccess`
+   * чекає ланцюжок промісів і таймерів (`notifyManager` React Query), а не один тік.
+   */
+  await act(async () => {
+    await new Promise<void>((resolve) => setTimeout(resolve, 300));
+  });
+  await settle();
   const node = button();
   if (options.afterClose === 'detached') {
     expect(node.isConnected).toBe(false);
