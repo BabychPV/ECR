@@ -1051,7 +1051,8 @@ BEGIN
         SheetCode nvarchar(64) NOT NULL, TableCode nvarchar(64) NOT NULL, Header nvarchar(400) NOT NULL, ViewName nvarchar(400) NOT NULL);
     INSERT INTO @groups (TemplateId, TemplateCode, SheetCode, TableCode, Header, ViewName)
     SELECT g.TemplateId, g.TemplateCode, g.SheetCode, g.TableCode,
-           CONCAT(N'template ', g.TemplateCode, N', sheet ', g.SheetCode, N', table ', g.TableCode, N', all versions'),
+           -- PT-2: заголовок іде в коментар «--» тіла вʼюхи (EXECUTE AS OWNER) - перенос рядка в коді вивів би решту з коментаря.
+           REPLACE(REPLACE(CONCAT(N'template ', g.TemplateCode, N', sheet ', g.SheetCode, N', table ', g.TableCode, N', all versions'), NCHAR(13), N' '), NCHAR(10), N' '),
            CONCAT(N'v_', g.TemplateCode, N'_', g.SheetCode, N'_', g.TableCode)
       FROM (SELECT DISTINCT TemplateId, TemplateCode, SheetCode, TableCode FROM @gt) AS g;
     UPDATE x SET GroupId = g.GroupId

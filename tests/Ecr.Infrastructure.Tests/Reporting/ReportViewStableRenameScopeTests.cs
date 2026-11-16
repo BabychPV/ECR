@@ -609,6 +609,37 @@ public sealed partial class ReportViewStableRenameScopeTests(ITestOutputHelper o
         Assert.Equal("pa_jan", await ScalarStringAsync(stable, pa.ProjectId, 209903, "B", "R1"));
     }
 
+    /// <summary>
+    /// PT-2 (пентест 2026-11): код таблиці з переносом рядка (можливий лише прямим записом у базу, в обхід <c>EcrCode</c>) не
+    /// виводить текст із коментаря-заголовка стабільної вʼюхи: жоден рядок тіла не починається з підкинутого SQL.
+    /// </summary>
+    [Fact]
+    public async Task Перенос_рядка_в_коді_таблиці_не_виходить_із_коментаря_заголовка()
+    {
+        var (templateId, code) = await NewTemplateAsync();
+        var v1 = await AddVersionAsync(templateId, "1", ("T1", ["A"]));
+        await ExecAsync($"UPDATE cfg.TableDef SET Code = N'T1' + NCHAR(13) + NCHAR(10) + N'SELECT 1 AS Injected --' WHERE Id = {v1.Tables["T1"].TableId}");
+
+        await GenerateAsync(v1.VersionId, routing: false);
+
+        var definitions = new List<string>();
+        await using (var connection = await OpenAsync())
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "SELECT OBJECT_DEFINITION(v.object_id) FROM sys.views AS v WHERE v.schema_id = SCHEMA_ID(N'rpt') AND v.name LIKE @p";
+            command.Parameters.AddWithValue("@p", $"v[_]{code}[_]%");
+            await using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                definitions.Add(reader.GetString(0));
+            }
+        }
+
+        var definition = Assert.Single(definitions);
+        Assert.Contains("SELECT 1 AS Injected", definition, StringComparison.Ordinal);   // текст лишився - у коментарі
+        Assert.DoesNotContain(definition.Split('\r', '\n'), line => line.TrimStart().StartsWith("SELECT 1 AS Injected", StringComparison.Ordinal));
+    }
+
     /// <summary>Підпис набору пар - як у rpt.usp_GenerateStableViews: SHA2_256 nvarchar-рядка «,from>to» за (from, to).</summary>
     private static byte[] Signature(IEnumerable<(int From, int To)> pairs)
         => System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.Unicode.GetBytes(
