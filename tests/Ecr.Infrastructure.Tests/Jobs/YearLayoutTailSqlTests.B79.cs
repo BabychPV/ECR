@@ -53,7 +53,12 @@ public sealed partial class YearLayoutTailSqlTests
             Assert.Equal(1, await SheetLogAsync(world, 4, RecalculationSkips.AuditRecalculatedAfterSubmission));
             Assert.Equal(0, await SheetLogAsync(world, 5, RecalculationSkips.AuditRecalculatedAfterSubmission));
             Assert.Equal(0, await SheetLogAsync(world, 6, RecalculationSkips.AuditRecalculatedAfterSubmission));
-            Assert.Equal(1, await SheetLogAsync(world, 6, RecalculationSkips.AuditSkippedApproved));
+
+            // Червень — єдиний аркуш періоду й затверджений: такий період цілком випадає з області річної задачі
+            // (`RefusedPeriodsAsync`: рахувати нічого), тож запису «пропущено» за нього немає — як і до B79. Запис
+            // `SkippedApproved` для затвердженого аркуша поруч із чернетковим — у
+            // `RecalculationJobSheetScopeResultsTests.Нічний_прогін_затверджений_аркуш_пропускає_із_журналом_і_без_позначки`.
+            Assert.Equal(0, await SheetLogAsync(world, 6, RecalculationSkips.AuditSkippedApproved));
 
             // Наступна ніч: входи ті самі — поданому квітню нового запису немає.
             await RunJobAsync(world, periodKey: null, year: Year, States(closed: []), audit: true);
