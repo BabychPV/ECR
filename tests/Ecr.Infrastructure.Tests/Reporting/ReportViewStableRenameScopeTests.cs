@@ -25,9 +25,10 @@ namespace Ecr.Infrastructure.Tests.Reporting;
 /// До B129 (05-rpt-views.sql до цього коміту) червоніють тести колонок (обидва режими), R-2, відбитка і кількох скоупів: аліас
 /// діяв на рядки всіх проєктів. Мутації B129 (локально, SQL у bin): (1) <c>@pred</c> з усіма Id без скоупу (pc); (2) мапа слотів
 /// без <c>m.Scope</c>; (3) <c>fam</c> без <c>fm.Scope</c>; (4) рядки R-2 без предиката скоупу; (5) <c>IsLegacyGlobal</c> ігнорується;
-/// (6) відбиток без <c>cfg.ColumnRenameProject</c>; (7) усі пари глобальні; (8) читач <c>rv</c> (результати методики) без
-/// предиката скоупу; (9) підпис скоупу (FOR XML PATH) без пар — усі проєкти з прив'язками в одному скоупі — кожна червонить
-/// щонайменше один тест.
+/// (6) відбиток без <c>cfg.ColumnRenameProject</c>; (7) усі пари глобальні; (8) читач <c>rv</c> (результати методики, обидві гілки)
+/// без предиката скоупу; (9) підпис скоупу (FOR XML PATH) без пар — усі прив'язані проєкти в одному скоупі; (10) окремий скоуп на
+/// кожен проєкт; (11) rpt.ViewProjectScope не пишеться; (12) заміна ключа ViewSlot без транзакції; (13) DROP без перевірки
+/// наявності ключа — кожна червонить щонайменше один тест.
 /// </remarks>
 [Trait(TestCategories.Category, TestCategories.Integration)]
 [Trait("Requirement", "RPT-STABLE")]
@@ -128,7 +129,7 @@ public sealed partial class ReportViewStableRenameScopeTests(ITestOutputHelper o
         var v1 = await AddVersionAsync(templateId, "1", ("T", v1Cols));
         var v2 = await AddVersionAsync(templateId, "2", ("T", v2Cols));
         var projects = new List<ProjectRef>();
-        for (var p = 0; p < 4; p++)
+        for (var p = 0; p < 5; p++)
         {
             var project = await NewProjectAsync(v1.VersionId, 209901, 209902);
             projects.Add(project);
@@ -149,10 +150,10 @@ public sealed partial class ReportViewStableRenameScopeTests(ITestOutputHelper o
         var plain = (await DefinitionAsync(stable)).Length;
         var plainReads = await ReadsAsync(stable);
 
-        // Скоупи: PB0 - C1, PB1 - C1,C2, PB2 - C1,C2,C3; PB3 - без пар.
-        for (var p = 0; p < 3; p++)
+        // Скоупи: PB0 і PB4 - C1 (ОДИН скоуп, Z3), PB1 - C1,C2, PB2 - C1,C2,C3; PB3 - без пар.
+        foreach (var (p, pairs) in new[] { (0, 1), (1, 2), (2, 3), (4, 1) })
         {
-            for (var i = 1; i <= p + 1; i++)
+            for (var i = 1; i <= pairs; i++)
             {
                 await ExecAsync($"INSERT INTO cfg.ColumnRenameProject (FromColumnDefId, ToColumnDefId, ProjectId) VALUES ({v1.Tables["T"].Cols[$"C{i}"]}, {v2.Tables["T"].Cols[$"N{i}"]}, {projects[p].ProjectId})");
             }
@@ -168,6 +169,126 @@ public sealed partial class ReportViewStableRenameScopeTests(ITestOutputHelper o
         Assert.Equal("C31", await ScalarStringAsync(stable, projects[2].ProjectId, 209901, "N3", "R1"));
         Assert.Null(await ScalarStringAsync(stable, projects[0].ProjectId, 209901, "N3", "R1"));
         Assert.Null(await ScalarStringAsync(stable, projects[3].ProjectId, 209901, "N1", "R1"));
+        Assert.Equal("C11", await ScalarStringAsync(stable, projects[4].ProjectId, 209901, "N1", "R1"));
+        Assert.Null(await ScalarStringAsync(stable, projects[4].ProjectId, 209901, "N2", "R1"));
+
+        // Z3: проєкти з однаковим набором пар - один скоуп: 4 прив'язані проєкти, 3 скоупи (і в мапі слотів - не більше 3).
+        var scopes = await ScalarRowsAsync($"SELECT ProjectId, Scope FROM rpt.ViewProjectScope WHERE TemplateId = {templateId}");
+        Assert.Equal(4, scopes.Count);
+        Assert.Equal(3, scopes.Select(r => r.Scope).Distinct().Count());
+        Assert.Equal(scopes.Single(r => r.ProjectId == projects[0].ProjectId).Scope, scopes.Single(r => r.ProjectId == projects[4].ProjectId).Scope);
+        var mapScopes = await ScalarRowsAsync($"SELECT 0, COUNT(DISTINCT Scope) FROM rpt.ViewSlot WHERE ViewName = N'{stable}' AND Scope > 0");
+        Assert.Equal(3, mapScopes[0].Scope);
+    }
+
+    /// <summary>
+    /// Z2: 50 проєктів у 2 скоупах (без маршрутизації, з читачем rv): текст вʼюхи не залежить від кількості проєктів, нова прив'язка
+    /// проєкту з наявним набором пар не переписує вʼюху (Unchanged) - лише рядок rpt.ViewProjectScope; читання - у межах.
+    /// </summary>
+    [Fact]
+    public async Task Пʼятдесят_проєктів_у_двох_скоупах_текст_вʼюхи_не_росте_і_без_ALTER()
+    {
+        var (templateId, code) = await NewTemplateAsync();
+        var v1 = await AddTypedVersionAsync(templateId, "1", [("T", [("A", CellDataType.String), ("B", CellDataType.String), ("K", CellDataType.Calculated)])]);
+        var v2 = await AddTypedVersionAsync(templateId, "2", [("T", [("A", CellDataType.String), ("Z", CellDataType.String), ("KN", CellDataType.Calculated)])]);
+        var t1 = v1.Tables["T"];
+        var t2 = v2.Tables["T"];
+        var projects = new List<ProjectRef>();
+        for (var i = 0; i < 51; i++)
+        {
+            var project = await NewProjectAsync(v1.VersionId, 209901);
+            projects.Add(project);
+            await SeedAsync(project, 209901, t1, ("A", "m"), ("B", $"b{i}"));
+        }
+
+        // Результати методики K - для трьох проєктів (скоуп X, скоуп Y, без пар).
+        await SeedResultsAsync(t1.TableId, t1.Cols["K"], "{}", (projects[0], 209901, 1m), (projects[1], 209901, 2m), (projects[50], 209901, 3m));
+        await RenameAsync(t1.Cols["B"], t2.Cols["Z"], legacy: false);
+        await RenameAsync(t1.Cols["K"], t2.Cols["KN"], legacy: false);
+        var stable = Sanitise($"v_{code}_S_T");
+        await GenerateAsync(v2.VersionId, routing: false);
+        var plainReads = await ReadsAsync(stable);
+
+        // Скоуп X (B -> Z): парні проєкти; скоуп Y (B -> Z, K -> KN): непарні; проєкт 50 - без пар. Спершу 5 проєктів.
+        async Task BindAsync(int from, int to)
+        {
+            for (var i = from; i < to; i++)
+            {
+                await ExecAsync($"INSERT INTO cfg.ColumnRenameProject (FromColumnDefId, ToColumnDefId, ProjectId) VALUES ({t1.Cols["B"]}, {t2.Cols["Z"]}, {projects[i].ProjectId})"
+                    + (i % 2 == 1 ? $";INSERT INTO cfg.ColumnRenameProject (FromColumnDefId, ToColumnDefId, ProjectId) VALUES ({t1.Cols["K"]}, {t2.Cols["KN"]}, {projects[i].ProjectId})" : string.Empty));
+            }
+        }
+
+        await BindAsync(0, 5);
+        await GenerateAsync(v2.VersionId, routing: false);
+        var five = await DefinitionAsync(stable);
+
+        await BindAsync(5, 50);
+        var actions = await StableActionsAsync(v2.VersionId);
+        var fifty = await DefinitionAsync(stable);
+        var scopedReads = await ReadsAsync(stable);
+        output.WriteLine($"B129 Z2: текст вʼюхи 5 проєктів {five.Length}, 50 проєктів {fifty.Length}; логічні читання без прив'язок {plainReads} -> 50 проєктів {scopedReads}");
+
+        Assert.Equal(five, fifty);   // текст не залежить від кількості проєктів
+        Assert.Equal("Unchanged", actions.Single(a => a.View == stable).Action);   // без ALTER VIEW
+        Assert.True(scopedReads <= plainReads * 2 + 200, $"читання {plainReads} -> {scopedReads}");
+        Assert.Equal(2, (await ScalarRowsAsync($"SELECT 0, COUNT(DISTINCT Scope) FROM rpt.ViewProjectScope WHERE TemplateId = {templateId}"))[0].Scope);
+
+        Assert.Equal("b48", await ScalarStringAsync(stable, projects[48].ProjectId, 209901, "Z", "R1"));   // скоуп X (доданий без ALTER)
+        Assert.Equal("b49", await ScalarStringAsync(stable, projects[49].ProjectId, 209901, "Z", "R1"));   // скоуп Y
+        Assert.Null(await ScalarStringAsync(stable, projects[50].ProjectId, 209901, "Z", "R1"));          // без пар
+        Assert.Equal(((decimal?)1m, (decimal?)null), await KAsync(stable, projects[0].ProjectId));        // X: K без KN
+        Assert.Equal(((decimal?)2m, (decimal?)2m), await KAsync(stable, projects[1].ProjectId));          // Y: K і KN
+        Assert.Equal(((decimal?)3m, (decimal?)null), await KAsync(stable, projects[50].ProjectId));       // без пар
+    }
+
+    /// <summary>
+    /// Z1: оновлення ключа rpt.ViewSlot (05-rpt-views.sql) - ідемпотентне з будь-якого стану (ключа немає; старий ключ; схема до B129)
+    /// і атомарне: збій ADD (DDL-тригер) відкочує DROP - старий ключ на місці, повторний прогін довершує.
+    /// </summary>
+    [Fact]
+    public async Task Оновлення_ключа_ViewSlot_ідемпотентне_з_будь_якого_стану_і_атомарне()
+    {
+        const string Old = "ALTER TABLE rpt.ViewSlot ADD CONSTRAINT PK_ViewSlot PRIMARY KEY CLUSTERED (ViewName, ColumnDefId, Slot)";
+        const string DropPk = "IF OBJECT_ID(N'rpt.PK_ViewSlot', N'PK') IS NOT NULL ALTER TABLE rpt.ViewSlot DROP CONSTRAINT PK_ViewSlot";
+
+        // (а) ключа немає.
+        await ExecAsync(DropPk);
+        await RunRptScriptAsync();
+        Assert.Equal(["ViewName", "ColumnDefId", "Slot", "Scope"], await PkColumnsAsync());
+
+        // (б) старий ключ, колонка Scope є.
+        await ExecAsync(DropPk + ";" + Old);
+        await RunRptScriptAsync();
+        Assert.Equal(["ViewName", "ColumnDefId", "Slot", "Scope"], await PkColumnsAsync());
+
+        // (в) схема до B129: без Scope, старий ключ; (г) повторний прогін - без змін.
+        await ExecAsync(DropPk + ";ALTER TABLE rpt.ViewSlot DROP CONSTRAINT DF_ViewSlot_Scope;ALTER TABLE rpt.ViewSlot DROP COLUMN Scope;" + Old);
+        await RunRptScriptAsync();
+        await RunRptScriptAsync();
+        Assert.Equal(["ViewName", "ColumnDefId", "Slot", "Scope"], await PkColumnsAsync());
+
+        // (д) атомарність: ADD падає - DROP відкочено, старий ключ лишився; без тригера повтор довершує.
+        await ExecAsync(DropPk + ";" + Old);
+        await ExecAsync("""
+            CREATE TRIGGER trg_b129_fail_pk ON DATABASE FOR ALTER_TABLE AS
+            BEGIN
+                IF EVENTDATA().value('(/EVENT_INSTANCE/TSQLCommand/CommandText)[1]', 'nvarchar(max)') LIKE N'%ADD CONSTRAINT PK_ViewSlot%Scope%'
+                    THROW 50000, N'b129: simulated ADD failure', 1;
+            END
+            """);
+        try
+        {
+            await Assert.ThrowsAsync<SqlException>(RunRptScriptAsync);
+            Assert.Equal(["ViewName", "ColumnDefId", "Slot"], await PkColumnsAsync());
+        }
+        finally
+        {
+            await ExecAsync("IF EXISTS (SELECT 1 FROM sys.triggers WHERE name = N'trg_b129_fail_pk' AND parent_class = 0) DROP TRIGGER trg_b129_fail_pk ON DATABASE");
+        }
+
+        await RunRptScriptAsync();
+        Assert.Equal(["ViewName", "ColumnDefId", "Slot", "Scope"], await PkColumnsAsync());
     }
 
     /// <summary>
@@ -448,6 +569,69 @@ public sealed partial class ReportViewStableRenameScopeTests(ITestOutputHelper o
                 + $"VALUES ({period}, NEXT VALUE FOR calc.CalculationResultSeq, {runs[i]}, {versionId}, {project.DocumentId}, N'R1', N'OUT', "
                 + $"{value.ToString(System.Globalization.CultureInfo.InvariantCulture)}, {unitId}, 0);");
         }
+    }
+
+    private async Task RunRptScriptAsync()
+    {
+        var script = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "Persistence", "Sql", "05-rpt-views.sql"));
+        await using var connection = await OpenAsync();
+        foreach (var batch in Ecr.Infrastructure.Persistence.SqlBatches.Split(script))
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = batch;
+            command.CommandTimeout = 300;
+            await command.ExecuteNonQueryAsync();
+        }
+    }
+
+    private async Task<List<string>> PkColumnsAsync()
+    {
+        var list = new List<string>();
+        await using var connection = await OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT COL_NAME(ic.object_id, ic.column_id) FROM sys.indexes AS i
+              JOIN sys.index_columns AS ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
+             WHERE i.object_id = OBJECT_ID(N'rpt.ViewSlot') AND i.name = N'PK_ViewSlot' ORDER BY ic.key_ordinal
+            """;
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            list.Add(reader.GetString(0));
+        }
+
+        return list;
+    }
+
+    private async Task<List<(int ProjectId, int Scope)>> ScalarRowsAsync(string text)
+    {
+        var list = new List<(int, int)>();
+        await using var connection = await OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = text;
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            list.Add((reader.GetInt32(0), reader.GetInt32(1)));
+        }
+
+        return list;
+    }
+
+    private async Task<List<(string View, string Action)>> StableActionsAsync(int versionId)
+    {
+        var list = new List<(string, string)>();
+        await using var connection = await OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"EXEC rpt.usp_GenerateStableViews {versionId}, 0, 0";
+        command.CommandTimeout = 600;
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            list.Add((reader.GetString(0), reader.GetString(1)));
+        }
+
+        return list;
     }
 
     private async Task<string> DefinitionAsync(string view)

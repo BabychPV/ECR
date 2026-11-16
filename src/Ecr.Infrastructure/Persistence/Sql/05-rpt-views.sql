@@ -158,14 +158,31 @@ GO
 IF COL_LENGTH(N'rpt.ViewSlot', N'Scope') IS NULL
     ALTER TABLE rpt.ViewSlot ADD Scope int NOT NULL CONSTRAINT DF_ViewSlot_Scope DEFAULT 0;
 GO
+-- ⛔ B129 F13 Z1: заміна ключа - ОДНА транзакція (XACT_ABORT): збій ADD відкочує DROP, таблиця не лишається без ключа; DROP - лише
+-- наявного ключа (база після часткового прогону без PK_ViewSlot теж оновлюється).
 IF NOT EXISTS (SELECT 1 FROM sys.indexes AS i
                  JOIN sys.index_columns AS ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
                 WHERE i.object_id = OBJECT_ID(N'rpt.ViewSlot') AND i.name = N'PK_ViewSlot'
                   AND COL_NAME(ic.object_id, ic.column_id) = N'Scope')
 BEGIN
-    ALTER TABLE rpt.ViewSlot DROP CONSTRAINT PK_ViewSlot;
+    SET XACT_ABORT ON;
+    BEGIN TRANSACTION;
+    IF EXISTS (SELECT 1 FROM sys.key_constraints WHERE parent_object_id = OBJECT_ID(N'rpt.ViewSlot') AND name = N'PK_ViewSlot')
+        ALTER TABLE rpt.ViewSlot DROP CONSTRAINT PK_ViewSlot;
     ALTER TABLE rpt.ViewSlot ADD CONSTRAINT PK_ViewSlot PRIMARY KEY CLUSTERED (ViewName, ColumnDefId, Slot, Scope);
+    COMMIT TRANSACTION;
 END
+GO
+
+-- ⛔ B129 F13 Z2: скоуп перейменувань проєкту в шаблоні (0 - рядка немає). Вʼюхи читають скоуп рядка ЗВІДСИ, а не з літеральних
+-- переліків проєктів: текст вʼюхи залежить лише від скоупів і колонок, а нова прив'язка проєкту з наявним набором пар - лише рядок
+-- тут, без ALTER VIEW. Веде ЛИШЕ rpt.usp_GenerateStableViews (з версією, під замком шаблону B126, у тій самій транзакції, що й вʼюхи).
+IF OBJECT_ID(N'rpt.ViewProjectScope', N'U') IS NULL
+    CREATE TABLE rpt.ViewProjectScope (
+        TemplateId int NOT NULL,
+        ProjectId  int NOT NULL,
+        Scope      int NOT NULL,
+        CONSTRAINT PK_ViewProjectScope PRIMARY KEY CLUSTERED (TemplateId, ProjectId));
 GO
 
 -- AN-155d: відбиток УСІХ входів, від яких залежить текст вʼюх rpt.v_*_vN та стабільних (обидві процедури нижче):
@@ -1121,9 +1138,16 @@ BEGIN
     INSERT INTO @scopes (Scope, Projects)
     SELECT 0, NULL
     UNION ALL
-    SELECT g.Scope, STUFF((SELECT N',' + CAST(ps.ProjectId AS nvarchar(10)) FROM @ps AS ps WHERE ps.Scope = g.Scope ORDER BY ps.ProjectId
-                            FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 1, N'')
-      FROM (SELECT DISTINCT Scope FROM @ps) AS g;
+    SELECT DISTINCT ps.Scope, NULL FROM @ps AS ps;
+    -- Z2: проєкт -> скоуп шаблону (rpt.ViewProjectScope) - у транзакції шаблону (B126); пишемо лише різницю.
+    IF @tid IS NOT NULL
+    BEGIN
+        DELETE v FROM rpt.ViewProjectScope AS v
+         WHERE v.TemplateId = @tid AND NOT EXISTS (SELECT 1 FROM @ps AS p WHERE p.ProjectId = v.ProjectId AND p.Scope = v.Scope);
+        INSERT INTO rpt.ViewProjectScope (TemplateId, ProjectId, Scope)
+        SELECT @tid, p.ProjectId, p.Scope FROM @ps AS p
+         WHERE NOT EXISTS (SELECT 1 FROM rpt.ViewProjectScope AS v WHERE v.TemplateId = @tid AND v.ProjectId = p.ProjectId);
+    END
     INSERT INTO @sp (Scope, FromId, ToId)
     SELECT sc.Scope, p.FromId, p.ToId FROM @scopes AS sc CROSS JOIN @rp AS p WHERE p.IsLegacy = 1
     UNION
@@ -1266,7 +1290,10 @@ BEGIN
     -- з маркером #c# (колонка Id: x./q.ColumnDefId), предикат рядків R-2 і вираз скоупу рядка для мапи слотів.
     DECLARE @cid TABLE (Scope int NOT NULL, ColId int NOT NULL, PRIMARY KEY (Scope, ColId));
     DECLARE @extraTpl nvarchar(max), @inTpl nvarchar(max), @predTpl nvarchar(max), @allIds nvarchar(max), @rowScope nvarchar(max), @baseTids nvarchar(max);
-    DECLARE @scopeD nvarchar(max), @scopeC nvarchar(max), @anyExtra bit, @spJoin nvarchar(100);
+    DECLARE @scopeD nvarchar(max), @scopeC nvarchar(max), @anyExtra bit, @spJoin nvarchar(400), @scExpr nvarchar(300);
+    -- Z2: скоуп рядка - з rpt.ViewProjectScope за проєктом рядка (немає рядка - 0): ОДНЕ зʼєднання на рядок (vsc у FROM), а не
+    -- підзапит на кожну комірку в apply (заміряно: x2,5 логічних читань маршрутизованої вʼюхи).
+    SET @scExpr = N'COALESCE(vsc.Scope, 0)';
     -- D-474: група з версіями різної маршрутизації (прапор OFF, Layout = 1 лише в частини версій) - @mixedGuard обмежує
     -- значення власника (fam) рядками маршрутизованих версій (@routedTids); без змішування - порожній (текст як до D-474).
     DECLARE @routedTids nvarchar(max), @mixedGuard nvarchar(max);
@@ -1306,7 +1333,7 @@ BEGIN
         SET @rowScope = (SELECT N' OR (ti.TableDefId IN (' + STUFF((SELECT N',' + CAST(e.TableDefId AS nvarchar(10)) FROM @gxs AS e
                                          WHERE e.Scope = sc.Scope AND NOT EXISTS (SELECT 1 FROM @gxs AS z WHERE z.Scope = 0 AND z.TableDefId = e.TableDefId)
                                          ORDER BY e.TableDefId FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 1, N'')
-                                + N') AND d.ProjectId IN (' + sc.Projects + N'))'
+                                + N') AND ' + @scExpr + N' = ' + CAST(sc.Scope AS nvarchar(10)) + N')'
                            FROM @scopes AS sc
                           WHERE sc.Scope > 0 AND EXISTS (SELECT 1 FROM @gxs AS e WHERE e.Scope = sc.Scope
                                                              AND NOT EXISTS (SELECT 1 FROM @gxs AS z WHERE z.Scope = 0 AND z.TableDefId = e.TableDefId))
@@ -1375,12 +1402,12 @@ BEGIN
                               FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 1, N'');
             SET @allIds = STUFF((SELECT N',' + CAST(k.ColId AS nvarchar(10)) FROM (SELECT DISTINCT ColId FROM @cid) AS k ORDER BY k.ColId
                               FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 1, N'');
-            -- B129: надлишок скоупів - " OR (#c# IN (..) AND sp.Pid IN (..))"; без нього текст як до B129. sp.Pid - проєкт рядка
-            -- через похідну таблицю всередині apply: зовнішнє посилання (d.ProjectId) в агрегаті разом із колонкою x/q - помилка 8124.
+            -- B129: надлишок скоупів - " OR (#c# IN (..) AND sp.Sc = s)"; без нього текст як до B129. sp.Sc - скоуп рядка через
+            -- похідну таблицю всередині apply: зовнішнє посилання (d.ProjectId) в агрегаті разом із колонкою x/q - помилка 8124.
             SET @extraTpl = COALESCE((SELECT N' OR (#c# IN (' + STUFF((SELECT N',' + CAST(e.ColId AS nvarchar(10)) FROM @cid AS e
                                                                        WHERE e.Scope = sc.Scope ORDER BY e.ColId
                                                                        FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 1, N'')
-                                              + N') AND sp.Pid IN (' + sc.Projects + N'))'
+                                              + N') AND sp.Sc = ' + CAST(sc.Scope AS nvarchar(10)) + N')'
                                         FROM @scopes AS sc WHERE sc.Scope > 0 AND EXISTS (SELECT 1 FROM @cid AS e WHERE e.Scope = sc.Scope)
                                        ORDER BY sc.Scope FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), N'');
             SET @inTpl = CASE WHEN @extraTpl = N'' THEN N'#c# IN (' + @ids + N')' ELSE N'(#c# IN (' + @ids + N')' + @extraTpl + N')' END;
@@ -1535,18 +1562,16 @@ BEGIN
         -- B129: рядки мапи скоупу s - лише для проєктів скоупу s (скоуп рядка - вираз за проєктом); без них текст як до B129.
         SET @scopeD = N'';
         SET @scopeC = N'';
-        SET @spJoin = CASE WHEN @anyExtra = 1 THEN N' CROSS JOIN (SELECT d.ProjectId AS Pid) AS sp' ELSE N'' END;
+        SET @spJoin = CASE WHEN @anyExtra = 1 OR EXISTS (SELECT 1 FROM @slot WHERE Scope > 0)
+                           THEN N' CROSS JOIN (SELECT ' + @scExpr + N' AS Sc) AS sp' ELSE N'' END;
         IF EXISTS (SELECT 1 FROM @slot WHERE Scope > 0)
         BEGIN
-            SET @scopeD = (SELECT N' WHEN #p# IN (' + sc.Projects + N') THEN ' + CAST(sc.Scope AS nvarchar(10))
-                             FROM @scopes AS sc WHERE sc.Scope > 0 AND EXISTS (SELECT 1 FROM @slot AS z WHERE z.Scope = sc.Scope)
-                            ORDER BY sc.Scope FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)');
-            SET @scopeC = N' AND fm.Scope IN (0, CASE' + REPLACE(@scopeD, N'#p#', N'c.ProjectId') + N' ELSE 0 END)';
-            SET @scopeD = N' AND m.Scope IN (0, CASE' + REPLACE(@scopeD, N'#p#', N'd.ProjectId') + N' ELSE 0 END)';
+            SET @scopeC = N' AND fm.Scope IN (0, c.Sc)';
+            SET @scopeD = N' AND m.Scope IN (0, sp.Sc)';
         END
         IF @plainCnt > 0
             SET @joins = @joins + CASE WHEN @useSlots = 1 THEN N'
-OUTER APPLY (SELECT ' + STUFF(@plainAggS, 1, 2, N'') + N' FROM doc.CellValue AS x WITH (FORCESEEK (1 (PeriodKey, TableRowId))) INNER LOOP JOIN rpt.ViewSlot AS m ON m.ViewName = ' + @vnLit
+OUTER APPLY (SELECT ' + STUFF(@plainAggS, 1, 2, N'') + N' FROM doc.CellValue AS x WITH (FORCESEEK (1 (PeriodKey, TableRowId)))' + @spJoin + N' INNER LOOP JOIN rpt.ViewSlot AS m ON m.ViewName = ' + @vnLit
                 + N' AND m.ColumnDefId = x.ColumnDefId' + @scopeD + N' WHERE x.PeriodKey = r.PeriodKey AND x.TableRowId = r.Id) AS pc' ELSE N'
 OUTER APPLY (SELECT ' + STUFF(@plainAgg, 1, 2, N'') + N' FROM doc.CellValue AS x WITH (FORCESEEK (1 (PeriodKey, TableRowId)))' + @spJoin + N' WHERE x.PeriodKey = r.PeriodKey AND x.TableRowId = r.Id) AS pc' END;
 
@@ -1560,9 +1585,12 @@ LEFT HASH JOIN (SELECT c.DocumentId, c.Yr, c.RowKey' + @famAgg + N'
                   FROM rpt.ViewSlot AS fm
                   INNER HASH JOIN (SELECT oi.DocumentId, oi.PeriodKey / 100 AS Yr, oi.PeriodKey, pa.AnchorKey, ow.RowKey, x.ColumnDefId,
                                           x.ValueString, x.ValueNumeric, x.ValueDate, x.ValueBool, x.ValueRegistryEntryId, x.ValueUnitId'
-                    + CASE WHEN @scopeC = N'' THEN N'' ELSE N', od.ProjectId' END + N'
+                    + CASE WHEN @scopeC = N'' THEN N'' ELSE N', COALESCE(vps.Scope, 0) AS Sc' END + N'
                                      FROM doc.TableInstance AS oi
-                                     JOIN doc.Document AS od ON od.Id = oi.DocumentId
+                                     JOIN doc.Document AS od ON od.Id = oi.DocumentId'
+                    + CASE WHEN @scopeC = N'' THEN N'' ELSE N'
+                                     LEFT JOIN rpt.ViewProjectScope AS vps ON vps.TemplateId = ' + CAST(COALESCE(@tid, 0) AS nvarchar(10))
+                                     + N' AND vps.ProjectId = od.ProjectId' END + N'
                                      LEFT JOIN (SELECT ProjectId, PeriodKey / 100 AS Yr, MIN(PeriodKey) AS AnchorKey
                                                   FROM doc.Period GROUP BY ProjectId, PeriodKey / 100) AS pa
                                             ON pa.ProjectId = od.ProjectId AND pa.Yr = oi.PeriodKey / 100
@@ -1576,7 +1604,7 @@ LEFT HASH JOIN (SELECT c.DocumentId, c.Yr, c.RowKey' + @famAgg + N'
        ON p.PeriodKind = 0 AND fam.DocumentId = ti.DocumentId AND fam.Yr = ti.PeriodKey / 100 AND fam.RowKey = r.RowKey' + @mixedGuard;
             -- Own computed cell (sc): only the computed cells of ROUTED columns (map rows with Mo) reach the aggregate.
             SET @ownerCells = N'
-OUTER APPLY (SELECT ' + STUFF(@scAggS, 1, 2, N'') + N' FROM doc.CellValue AS x WITH (FORCESEEK (1 (PeriodKey, TableRowId))) INNER LOOP JOIN rpt.ViewSlot AS m ON m.ViewName = ' + @vnLit
+OUTER APPLY (SELECT ' + STUFF(@scAggS, 1, 2, N'') + N' FROM doc.CellValue AS x WITH (FORCESEEK (1 (PeriodKey, TableRowId)))' + @spJoin + N' INNER LOOP JOIN rpt.ViewSlot AS m ON m.ViewName = ' + @vnLit
                 + N' AND m.ColumnDefId = x.ColumnDefId AND m.Mo IS NOT NULL' + @scopeD + N' WHERE x.PeriodKey = r.PeriodKey AND x.TableRowId = r.Id AND x.IsCalculated = 1) AS sc';
             SET @joins = @ownerRows + @joins + @ownerCells;
         END
@@ -1676,6 +1704,11 @@ JOIN doc.Project       AS p ON p.Id = d.ProjectId'
             ELSE N'FROM doc.TableInstance AS ti
 JOIN doc.Document      AS d ON d.Id = ti.DocumentId
 JOIN doc.Project       AS p ON p.Id = d.ProjectId' + @rowApply END;
+        -- B129 Z2: скоуп рядка (vsc) - лише коли вʼюха має проєктні скоупи (без них текст як до B129).
+        IF @spJoin <> N'' OR COALESCE(@rowScope, N'') <> N''
+            SET @fromSql = REPLACE(@fromSql, N'JOIN doc.Project       AS p ON p.Id = d.ProjectId',
+                                   N'JOIN doc.Project       AS p ON p.Id = d.ProjectId
+LEFT JOIN rpt.ViewProjectScope AS vsc ON vsc.TemplateId = ' + CAST(COALESCE(@tid, 0) AS nvarchar(10)) + N' AND vsc.ProjectId = d.ProjectId');
 
         -- ⛔ RS (копії аркушів, людина 03.11): стан подання — СВОЄЇ копії; номер у групі і назва «<Назва> N» (мова en, інакше
         -- код аркуша). Назва аркуша кожної версії групи — літерал у CASE за таблицею; група шукається за аркушем версії рядка.
