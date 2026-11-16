@@ -203,7 +203,15 @@ export function ConfirmModal({
             {...(danger ? { color: 'statusError' } : {})}
             loading={isPending === true}
             disabled={typeBlocked || confirmDisabled === true}
-            onClick={onConfirm}
+            /*
+             * ⛔ B145: закритий діалог не підтверджує. Після `opened = false` `Modal` ще ~200 мс
+             * лишається в DOM (анімація закриття), а власник у цю мить дію вже завершив і зайнятість
+             * зняв — клік по кнопці діалогу, що закривається, запускав дію ВДРУГЕ (другий DELETE/POST
+             * без підтвердження). Умова тут, а не у власниках: відкритість знає сам діалог.
+             */
+            onClick={() => {
+              if (opened) onConfirm();
+            }}
             data-testid="confirm-verb"
           >
             {verb}
