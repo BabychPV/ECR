@@ -1,4 +1,4 @@
-import { expect, test, type Browser, type BrowserContext } from '@playwright/test';
+import { expect, test, type APIResponse, type Browser, type BrowserContext } from '@playwright/test';
 
 /**
  * B139 (B75 lane 2) проти РЕАЛЬНОГО сервера стенда (`tools/e2e-stand.ps1`, workflow `e2e-stand`, `-Grep rowLock`):
@@ -97,6 +97,22 @@ async function cardOf(context: BrowserContext, documentId: string): Promise<Docu
   expect(response.ok(), `GET document ${documentId}: ${String(response.status())} ${await response.text()}`).toBe(true);
 
   return (await response.json()) as DocumentCard;
+}
+
+/**
+ * Повертає власність документа стенда (B143). Початкового власника заводить генератор до появи користувачів стенда, і
+ * він може не мати Write на проєкт — тоді сервер відмовляє `422` «The new owner needs write access to the project».
+ * Як у `documentParticipantsLive`: у такому разі власником стає `e2e-admin` (не e2e-operator — базова лінія «оператор
+ * документом стенда не володіє» лишається).
+ */
+async function restoreOwner(admin: BrowserContext, originalOwner: number | null): Promise<APIResponse> {
+  if (originalOwner !== null) {
+    const back = await admin.request.post(`/api/v1/documents/${DocumentId}/owner`, { data: { newOwnerUserId: originalOwner } });
+    if (back.status() !== 422) return back;
+  }
+  const me = (await (await admin.request.get('/api/v1/me')).json()) as { userId: number };
+
+  return admin.request.post(`/api/v1/documents/${DocumentId}/owner`, { data: { newOwnerUserId: me.userId } });
 }
 
 /** Дата `YYYY-MM-DD` через `days` днів від сьогодні (UTC; запас у тиждень перекриває різницю поясу проєкту). */
@@ -319,11 +335,9 @@ test.describe('rowLock: блокування рядків документа н�
 
       // ── 3. Власність повернуто: той самий оператор знову без кнопки ───────────────────────────
       await releaseAll(admin);
-      if (originalOwner !== null) {
-        const back = await admin.request.post(`/api/v1/documents/${DocumentId}/owner`, { data: { newOwnerUserId: originalOwner } });
-        expect(back.ok(), `POST owner → назад: ${String(back.status())} ${await back.text()}`).toBe(true);
-        moved = false;
-      }
+      const back = await restoreOwner(admin, originalOwner);
+      expect(back.ok(), `POST owner → назад: ${String(back.status())} ${await back.text()}`).toBe(true);
+      moved = false;
       const after = await cardOf(operator, DocumentId);
       expect(after.canLockRows, 'картка після повернення власності: canLockRows').toBe(false);
       await page.reload();
@@ -334,8 +348,8 @@ test.describe('rowLock: блокування рядків документа н�
       try {
         // Базова лінія для решти файлів: без блокувань і з початковим власником.
         await releaseAll(admin);
-        if (moved && originalOwner !== null) {
-          const back = await admin.request.post(`/api/v1/documents/${DocumentId}/owner`, { data: { newOwnerUserId: originalOwner } });
+        if (moved) {
+          const back = await restoreOwner(admin, originalOwner);
           // `soft`: відмова прибирання не має перекривати причину падіння самого тесту.
           expect.soft(back.ok(), `повернення власності документа стенда: ${String(back.status())} ${await back.text()}`).toBe(true);
         }
