@@ -42,7 +42,7 @@ public sealed partial class ProjectTemplateVersionB74GuardTests
         ["Ecr.Application.Documents.GetDocumentTemplateHandler"] = 1,                  // P2: версія документа
 
         // P2 (безпека; з диференційними Deny-тестами на реальному шляху).
-        ["Ecr.Infrastructure.Security.AccessDecisionService"] = 8,                     // P2
+        ["Ecr.Infrastructure.Security.AccessDecisionService"] = 7,                     // P2; ✎ D2 (B155): роль повернення — версія періоду документа
         ["Ecr.Infrastructure.Security.EffectiveAccessStore"] = 1,                      // P2
         ["Ecr.Infrastructure.Security.ResourceNameResolver"] = 1,                      // P2
 
