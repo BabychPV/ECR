@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { Route, Routes } from 'react-router-dom';
 import { TemplateVersionPage } from '@/pages/admin/TemplateVersionPage';
@@ -278,6 +278,24 @@ const Cases: readonly Case[] = [
     },
   },
 ];
+
+/*
+ * ⛔ Правило 386 / F13: «таблиця» плавала під навантаженням. Причина — холодний лінивий чанк редактора, який відкриває
+ * САМЕ цей випадок (`TableEditor`; «аркуш» перед ним гріє лише `SheetEditor`), плюс робоча область таблиці: перше
+ * `import()` під навантаженням з'їдало бюджет `findBy`. Прогрів усіх редакторів, які відкривають випадки, — до тестів.
+ */
+beforeAll(async () => {
+  await Promise.all([
+    import('@/features/templates/SheetEditor'),
+    import('@/features/templates/TableEditor'),
+    import('@/features/templates/ColumnEditor'),
+    import('@/features/templates/HeaderFieldEditor'),
+    import('@/features/templates/RowEditor'),
+    import('@/features/templates/FormulaEditor'),
+    import('@/features/templates/ValidationRuleEditor'),
+    import('@/features/templates/ctor/TableWorkspace'),
+  ]);
+}, 60_000);
 
 beforeEach(() => {
   vi.stubGlobal(

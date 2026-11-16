@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -95,6 +95,21 @@ async function nextTick(): Promise<void> {
   });
 }
 
+/*
+ * ⛔ Правило 386 / F13: під навантаженням падало 6/33. Причина — холодні ліниві чанки (`TableTab` сторінки,
+ * `RowDrawer`/`PasteDialog` вкладки, поле дати): перше `import()` під навантаженням довше за 1 с бюджету `findBy`.
+ * Прогрів тут, до першого тесту; компоненти далі монтуються тим самим `lazy()` із уже теплого кешу модулів.
+ */
+beforeAll(async () => {
+  await Promise.all([
+    import('@/features/permits/permit/TableTab'),
+    import('@/features/permits/permit/RowDrawer'),
+    import('@/features/permits/permit/PasteDialog'),
+    import('@/features/permits/permit/LifecycleDialogs'),
+    import('@/shared/dates/DateInputWithStyles'),
+  ]);
+}, 60_000);
+
 beforeEach(() => {
   const importServer = fakeImportServer();
   vi.mocked(apiFetch).mockImplementation((path: string, init?: RequestInit) =>
@@ -123,7 +138,7 @@ async function openLimits(): Promise<void> {
       </QueryClientProvider>
     </TestProviders>,
   );
-  await screen.findByText('Outfall A');
+  await screen.findByText('Outfall A', );
 }
 
 describe('B149: RowDrawer і PasteDialog — один запис на дію', () => {
