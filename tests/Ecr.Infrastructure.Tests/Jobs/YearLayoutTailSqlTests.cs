@@ -91,14 +91,17 @@ public sealed partial class YearLayoutTailSqlTests(SqlServerFixture sql)
 
     // ── сценарії ─────────────────────────────────────────────────────────
 
-    private async Task RunJobAsync(World world, int? periodKey, int? year, Dictionary<int, PeriodState> states)
+    private async Task RunJobAsync(
+        World world, int? periodKey, int? year, Dictionary<int, PeriodState> states, bool audit = false)
     {
         await using var db = world.Builder.CreateContext();
         var router = new MonthColumnRouter(db, Flag(false), YearRegistry(world));
         var store = new MonthRoutedCellStore(new NormalizedCellStore(db), router, world.Metadata, db);
+
+        // ✎ B79: журнал аркушів (`SheetLogAsync`) пишеться лише з журналом — як у DI.
         var job = new RecalculationJob(
             db, new NoBindingsRunner(), RunHandler(), Formulas(db, world, store, router, Periods(world, states)),
-            new TestClock(JobNow));
+            new TestClock(JobNow), audit: audit ? new AuditWriter(db) : null);
 
         await job.ExecuteAsync(
             new RecalculationRequest(world.Doc.ProjectId, world.Doc.DocumentId, periodKey, TriggeredByUserId: null, Year: year),
