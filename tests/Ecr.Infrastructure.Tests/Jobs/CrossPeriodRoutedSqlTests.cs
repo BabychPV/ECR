@@ -1661,9 +1661,19 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
     private static async Task<bool> CardMarkAsync(World world, int month)
     {
         await using var db = world.Builder.CreateContext();
+
+        // Склад документа (картка показує стан аркушів СКЛАДУ); будівник документа його не створює.
+        if (!await db.DocumentSheets.AnyAsync(s => s.DocumentId == world.Doc.DocumentId))
+        {
+            db.DocumentSheets.Add(new Ecr.Domain.Entities.Documents.DocumentSheet(world.Doc.DocumentId, world.Doc.SheetDefId));
+            await db.SaveChangesAsync();
+        }
+
         var summary = await new DocumentStore(db).FindAsync(
             world.Doc.DocumentId, new PeriodKeyFilter(Period(month)), CancellationToken.None);
-        return summary!.Sheets!.Any(s => s.RecalculatedAfterSubmission);
+        var sheets = summary!.Sheets!;
+        Assert.NotEmpty(sheets);
+        return sheets.Any(s => s.RecalculatedAfterSubmission);
     }
 
     private static async Task<long> StateIdAsync(World world, int month)
