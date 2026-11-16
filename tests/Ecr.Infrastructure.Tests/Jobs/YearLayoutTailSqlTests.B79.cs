@@ -166,11 +166,15 @@ public sealed partial class YearLayoutTailSqlTests
             await CloseAsync(world, Anchor);
             await SubmitAsync(world, 3);
 
+            // Затверджений травень теж поза областю задачі: у «пропущені» він не йде (задача його й не мала рахувати).
+            await ApproveAsync(world, 5);
+
             await RunJobAsync(world, periodKey: Period(Anchor), year: null, States(closed: [Anchor]), audit: true);
 
             Assert.Equal(9 * Input, await PhysicalAsync(world, Anchor, world.Total));
             Assert.Equal(1, await SheetLogAsync(world, 3, RecalculationSkips.AuditRecalculatedAfterSubmission));
             Assert.Equal(0, await SheetLogAsync(world, Anchor, RecalculationSkips.AuditRecalculatedAfterSubmission));
+            Assert.Equal(0, await SheetLogAsync(world, 5, RecalculationSkips.AuditSkippedApproved));
 
             // Та сама задача вдруге: підсумок не змінився — нового запису березню немає.
             await RunJobAsync(world, periodKey: Period(Anchor), year: null, States(closed: [Anchor]), audit: true);
@@ -182,9 +186,86 @@ public sealed partial class YearLayoutTailSqlTests
         }
     }
 
+    /// <summary>
+    /// Поданий якір, а змінився ЛИШЕ підсумок (місячна CM1 уже актуальна): позначка — січню як місяцю року, а аркуш
+    /// періоду прогону в набір «місячних» змін не потрапляє (двох записів на одну зміну не буде).
+    /// </summary>
+    /// <remarks>⛔ ДОКАЗ (локально): у гілці B60 додавати в <c>submittedNow</c> без умови «записано місячну комірку» —
+    /// набір аркушів непорожній, червоний.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "B79")]
+    public async Task B79_відкритий_поданий_якір_змінився_лише_підсумок_аркуш_періоду_не_в_наборі()
+    {
+        var world = await ArrangeAsync();
+        try
+        {
+            await PrepareAnchorRunAsync(world);
+            await SetCellAsync(world, Anchor, world.CalcMonth[Anchor], Anchor * Input, calculated: true);
+            await SubmitAsync(world, Anchor);
+
+            var (sheets, months) = await RecalculateAnchorWithSinksAsync(world);
+
+            Assert.Equal(9 * Input, await PhysicalAsync(world, Anchor, world.Total));
+            Assert.Empty(sheets);
+            Assert.Equal(new[] { (Period(Anchor), world.Doc.SheetDefId) }, months);
+        }
+        finally
+        {
+            await CleanupAsync(world);
+        }
+    }
+
+    /// <summary>
+    /// Закритий якір (B24), агрегат року «поданий»: січень ЗАТВЕРДЖЕНО, решта місяців подано. Підсумок пишеться (агрегат
+    /// дозволяє), позначку отримують одинадцять поданих місяців; затверджений січень — період прогону — ні в набір
+    /// аркушів, ні в набір місяців не потрапляє.
+    /// </summary>
+    /// <remarks>⛔ ДОКАЗ (локально): у <c>EnterSheetsAsync</c> прибрати <c>!annualAggregate</c> — аркуш періоду прогону
+    /// (затверджений січень) потрапляє в набір аркушів, червоний; у <c>NoteSubmittedMonth</c> прибрати перевірку стану
+    /// місяця — січень у наборі місяців, червоний.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "B79")]
+    public async Task B79_закритий_якір_агрегат_поданий_позначка_лише_поданим_місяцям_а_не_затвердженому_якорю()
+    {
+        var world = await ArrangeAsync();
+        try
+        {
+            await SeedInputsAsync(world);
+            await SetCellAsync(world, 9, world.CalcMonth[9], 9 * Input, calculated: true);
+            await SetCellAsync(world, Anchor, world.Total, 0m, calculated: true);
+            await CloseAsync(world, Anchor);
+            await ApproveAsync(world, Anchor);
+            for (var m = 2; m <= 12; m++)
+            {
+                await SubmitAsync(world, m);
+            }
+
+            var (sheets, months) = await RecalculateAnchorWithSinksAsync(
+                world, States(closed: [Anchor]), [.. Enumerable.Range(1, 12).Select(Period)]);
+
+            Assert.Equal(9 * Input, await PhysicalAsync(world, Anchor, world.Total));
+            Assert.Empty(sheets);
+            Assert.Equal(
+                Enumerable.Range(2, 11).Select(m => (Period(m), world.Doc.SheetDefId)),
+                months.OrderBy(m => m.PeriodKey));
+        }
+        finally
+        {
+            await CleanupAsync(world);
+        }
+    }
+
     /// <summary>Повний прогін формул якоря із записом поданих — так, як його кличе <c>RecalculationJob.FormulasAsync</c>.</summary>
+    /// <param name="world">Стенд.</param>
+    /// <param name="states">Стани місяців; <c>null</c> — усі відкриті.</param>
+    /// <param name="annualPeriods">Місяці року для прогону ЗАКРИТОГО якоря (B24); <c>null</c> — відкритий якір.</param>
     private static async Task<(HashSet<(int SheetDefId, long? CopyId)> Sheets, HashSet<(int PeriodKey, int SheetDefId)> Months)>
-        RecalculateAnchorWithSinksAsync(World world)
+        RecalculateAnchorWithSinksAsync(
+            World world, Dictionary<int, PeriodState>? states = null, IReadOnlyList<int>? annualPeriods = null)
     {
         var sheets = new HashSet<(int SheetDefId, long? CopyId)>();
         var months = new HashSet<(int PeriodKey, int SheetDefId)>();
@@ -192,10 +273,11 @@ public sealed partial class YearLayoutTailSqlTests
         await using var db = world.Builder.CreateContext();
         var router = new MonthColumnRouter(db, Flag(false), YearRegistry(world));
         var store = new MonthRoutedCellStore(new NormalizedCellStore(db), router, world.Metadata, db);
-        await Formulas(db, world, store, router, Periods(world, States(closed: [])))
+        await Formulas(db, world, store, router, Periods(world, states ?? States(closed: [])))
             .RecalculateAllAsync(
                 world.Doc.DocumentId, Key(Anchor), CancellationToken.None,
-                writeSubmitted: true, submittedWritten: sheets, submittedYearWritten: months);
+                writeSubmitted: true, annualPeriods: annualPeriods,
+                submittedWritten: sheets, submittedYearWritten: months);
 
         return (sheets, months);
     }
