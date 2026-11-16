@@ -191,27 +191,31 @@ public sealed partial class PatchCellsHandler
             {
                 // ✎ Q-17: насіння по ФІЗИЧНИХ екземплярах: власні комірки - у задачу періоду книги, комірки власників -
                 // у задачі їхніх екземплярів (`ownerRecalcs`; ставить викликач разом із задачею книги).
+                // ✎ B79: насіння стовпців із залежними розрахунками несе позначку «писати й подані» — як у PATCH.
                 foreach (var group in groups)
                 {
+                    var groupSeeds = WithDependentInputs(item.Context, group.Seeds);
                     if (group.TableInstanceId == item.Id)
                     {
-                        foreach (var seed in group.Seeds)
+                        foreach (var seed in groupSeeds)
                         {
                             recalculationSeeds.Add(seed);
                         }
                     }
                     else
                     {
-                        ownerRecalcs?.Add(new WorkbookOwnerRecalc(group.TableInstanceId, group.PeriodKey, group.Seeds));
+                        ownerRecalcs?.Add(new WorkbookOwnerRecalc(group.TableInstanceId, group.PeriodKey, groupSeeds));
                     }
                 }
             }
             else
             {
-                foreach (var seed in BuildRecalculationSeeds(
-                             SeedSource(item.Request, applied, item.Previous),
-                             item.Context.ApproverEdit ? item.Context.Table.SheetDefId : null,
-                             Recalculation.ColumnDefaultValues.SeedColumns(item.Context.Table)))
+                foreach (var seed in WithDependentInputs(
+                             item.Context,
+                             BuildRecalculationSeeds(
+                                 SeedSource(item.Request, applied, item.Previous),
+                                 item.Context.ApproverEdit ? item.Context.Table.SheetDefId : null,
+                                 Recalculation.ColumnDefaultValues.SeedColumns(item.Context.Table))))
                 {
                     recalculationSeeds.Add(seed);
                 }
@@ -1027,7 +1031,8 @@ public sealed partial class PatchCellsHandler
             {
                 await EnsureColumnPeriodsEditableAsync(
                         item.Context.Instance.DocumentId, item.Context.Table.SheetDefId, item.Context.ColumnPeriods,
-                        item.Planned, ct, item.Context.AnnualPeriods, item.Context.AnnualTextOnly)
+                        item.Planned, ct, item.Context.AnnualPeriods, item.Context.AnnualTextOnly,
+                        item.Context.AnnualAggregateGoverns, item.Context.DependentInputWritten)
                     .ConfigureAwait(false);
                 return true;
             }).ConfigureAwait(false);

@@ -228,7 +228,7 @@ public sealed partial class PatchCellsHandler(
                 foreach (var group in groups)
                 {
                     // AN-142: правка лише тексту якоря перерахунку не ставить.
-                    var groupSeeds = WithoutAnnualText(context, group.Seeds);
+                    var groupSeeds = WithDependentInputs(context, WithoutAnnualText(context, group.Seeds));
                     if (groupSeeds.Count == 0)
                     {
                         continue;
@@ -252,11 +252,13 @@ public sealed partial class PatchCellsHandler(
             // PM-PASS-A-P3 п.10а: комірки з тим самим значенням, що вже стояло, насіння не дають - PATCH без змін не
             // ставить зайвого перерахунку. Ручні значення формул (D-461) відсіву не мають: їхня позначка міняється й
             // без зміни числа.
-            var seeds = WithoutAnnualText(
+            var seeds = WithDependentInputs(
                 context,
-                BuildRecalculationSeeds(
-                    SeedSource(request, applied, previous), context.ApproverEdit ? context.Table.SheetDefId : null,
-                    Recalculation.ColumnDefaultValues.SeedColumns(context.Table)));
+                WithoutAnnualText(
+                    context,
+                    BuildRecalculationSeeds(
+                        SeedSource(request, applied, previous), context.ApproverEdit ? context.Table.SheetDefId : null,
+                        Recalculation.ColumnDefaultValues.SeedColumns(context.Table))));
             if (seeds.Count == 0)
             {
                 return; // AN-142: лише текст якоря - задачі немає, recalculationJobId лишається null
@@ -363,6 +365,16 @@ public sealed partial class PatchCellsHandler(
         };
 
     /// <summary>AN-142: насіння без текстових комірок якоря (вони не входять у числа, тож каскаду не потребують).</summary>
+    /// <summary>
+    /// ✎ B79 (рішення людини 13.11, правило 07.11 «пропускати лише погоджені»): насіння правки загального стовпця, від
+    /// якого залежать розрахунки місяців, несе позначку — каскад перераховує й ПОДАНІ місяці-читачі (з журналом і
+    /// позначкою «перераховано після подання»), затверджені пропускає. Решта насіння — без змін.
+    /// </summary>
+    private static List<RecalculationSeed> WithDependentInputs(RequestContext context, IReadOnlyList<RecalculationSeed> seeds)
+        => context.DependentInputColumns.Count == 0
+            ? [.. seeds]
+            : [.. seeds.Select(s => context.DependentInputColumns.Contains(s.ColumnDefId) ? s with { WriteSubmitted = true } : s)];
+
     private static List<RecalculationSeed> WithoutAnnualText(RequestContext context, IReadOnlyList<RecalculationSeed> seeds)
         => context.AnnualTextColumns.Count == 0
             ? [.. seeds]
@@ -503,6 +515,29 @@ public sealed partial class PatchCellsHandler(
 
         /// <summary>AN-142: колонки текстових комірок якоря - їхні правки не ставлять перерахунок.</summary>
         public HashSet<int> AnnualTextColumns { get; } = [];
+
+        /// <summary>
+        /// ✎ B79: у батчі є річна комірка (чи новий рядок), якою керує річний АГРЕГАТ стану аркуша (стовпець без
+        /// залежних розрахунків, текст якоря, створення рядка). <c>false</c> при непорожніх <see cref="AnnualPeriods"/> —
+        /// усі річні комірки батчу підлягають лише правилу залежних місяців.
+        /// </summary>
+        public bool AnnualAggregateGoverns => AnnualNumericWritten || AnnualTextWritten;
+
+        /// <summary>✎ B79: у батчі є комірка тексту якоря (AN-142) — нею теж керує річний агрегат.</summary>
+        public bool AnnualTextWritten { get; set; }
+
+        /// <summary>
+        /// ✎ B79: у батчі є комірка загального стовпця, від якого залежать розрахунки місяців
+        /// (<see cref="EditDecision.DependentInput"/>): під блокуваннями аркушів року затверджений місяць відхиляє запис
+        /// (<see cref="DependentMonthsRule"/>), поданий — ні.
+        /// </summary>
+        public bool DependentInputWritten => DependentInputColumns.Count > 0;
+
+        /// <summary>
+        /// ✎ B79: колонки таких комірок батчу. Їхнє насіння каскаду несе позначку <see cref="RecalculationSeed.WriteSubmitted"/>:
+        /// подані місяці-читачі перераховуються (з позначкою «перераховано після подання»), затверджені — ні.
+        /// </summary>
+        public HashSet<int> DependentInputColumns { get; } = [];
 
         /// <summary>
         /// ✎ D-461: комірки батчу <c>(RowKey, ColumnDefId)</c>, писати які дозволено САМЕ як ручне значення замість
@@ -1238,8 +1273,18 @@ public sealed partial class PatchCellsHandler(
             return;
         }
 
+        // ✎ B79: стовпець із залежними розрахунками — поза річним агрегатом: його під блокуванням судить правило
+        // залежних місяців. Перерахунок ставиться як для будь-якої правки (це не «текст якоря»).
+        if (decision.DependentInput)
+        {
+            context.DependentInputColumns.Add(columnDefId);
+            return;
+        }
+
         if (decision.AnnualTextOnly && !creation)
         {
+            context.AnnualTextWritten = true;
+
             // Перерахунок пропускається лише коли поблажка справді спрацювала (аркуш Submitted).
             if (decision.AnnualTextRelaxed)
             {
@@ -1434,6 +1479,20 @@ public sealed partial class PatchCellsHandler(
         if (denied.Count > 0)
         {
             var first = denied[0];
+
+            // ✎ B79: відмова через затверджені місяці несе їхній перелік (`months`) — клієнт пропонує повернути саме їх.
+            if (first.Reason == EditDenyReason.DependentMonthsLocked)
+            {
+                var months = new SortedSet<int>(denied
+                    .Where(d => d.Reason == EditDenyReason.DependentMonthsLocked)
+                    .SelectMany(d => d.BlockingMonths ?? []));
+
+                throw new AccessDeniedException(
+                    "ECR-ACCS-0403",
+                    $"Заборонених комірок у батчі: {denied.Count}. Причина першої: {first.Reason}.",
+                    DependentMonthsRule.Details(denied.Count, months));
+            }
+
             throw new AccessDeniedException(
                 "ECR-ACCS-0403",
                 $"Заборонених комірок у батчі: {denied.Count}. Причина першої: {first.Reason}.",
@@ -3229,7 +3288,9 @@ public sealed partial class PatchCellsHandler(
             }
         }
 
-        CheckLockedColumnPeriods(lockedStatuses, context.ColumnPeriods, context.AnnualPeriods, changes, context.AnnualTextOnly);
+        CheckLockedColumnPeriods(
+            lockedStatuses, context.ColumnPeriods, context.AnnualPeriods, changes, context.AnnualTextOnly,
+            context.AnnualAggregateGoverns, context.DependentInputWritten);
     }
 
     /// <summary>Q-17: власний період + періоди колонок + річні періоди — без повторів, за зростанням ключа.</summary>
@@ -3254,7 +3315,9 @@ public sealed partial class PatchCellsHandler(
         IEnumerable<int> columnPeriods,
         IReadOnlyCollection<int> annualPeriods,
         CellChangeLists changes,
-        bool annualTextOnly = false)
+        bool annualTextOnly = false,
+        bool annualAggregateGoverns = true,
+        bool dependentInputWritten = false)
     {
         foreach (var columnPeriod in columnPeriods)
         {
@@ -3263,6 +3326,20 @@ public sealed partial class PatchCellsHandler(
 
         if (annualPeriods.Count > 0)
         {
+            // ✎ B79: стовпець із залежними розрахунками — місяць, затверджений між рішенням і цим замком, відхиляє запис
+            // (затвердження бере той самий замок винятково); поданий місяць не блокує.
+            if (dependentInputWritten)
+            {
+                DependentMonthsRule.ThrowIfLocked(
+                    annualPeriods, lockedStatuses, changes.Upserts.Count + changes.Deletes.Count);
+            }
+
+            // Решта річних комірок батчу (без залежних, текст якоря, нові рядки) — за річним агрегатом, як і було.
+            if (!annualAggregateGoverns)
+            {
+                return;
+            }
+
             var aggregate = AnnualPeriodRule.AggregateStatus(annualPeriods.Select(p => lockedStatuses[p]));
 
             // AN-142: текст якоря править і Submitted-аркуш; Approved (і Draft-чернетка без поблажок) - як було.
@@ -3286,7 +3363,9 @@ public sealed partial class PatchCellsHandler(
     private async Task EnsureColumnPeriodsEditableAsync(
         long documentId, int sheetDefId, IEnumerable<int> columnPeriods, CellChangeLists changes, CancellationToken ct,
         IReadOnlyCollection<int>? annualPeriods = null,
-        bool annualTextOnly = false)
+        bool annualTextOnly = false,
+        bool annualAggregateGoverns = true,
+        bool dependentInputWritten = false)
     {
         // ⛔ Q-17: усі періоди — за зростанням ключа (див. EnsureSheetStillEditableAsync).
         var annual = annualPeriods ?? [];
@@ -3301,7 +3380,8 @@ public sealed partial class PatchCellsHandler(
                 .ConfigureAwait(false);
         }
 
-        CheckLockedColumnPeriods(lockedStatuses, columnPeriods, annual, changes, annualTextOnly);
+        CheckLockedColumnPeriods(
+            lockedStatuses, columnPeriods, annual, changes, annualTextOnly, annualAggregateGoverns, dependentInputWritten);
     }
 
     /// <summary>D-442: користувач і далі погоджувач поточного кроку цього аркуша — під блокуванням.</summary>
@@ -4240,6 +4320,14 @@ public sealed record RecalculationSeed(
         Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     long? TableInstanceId = null)
 {
+    /// <summary>
+    /// ✎ B79: комірка — загальний стовпець вводу річної таблиці, від якого залежать розрахунки місяців. Каскад від
+    /// такого насіння пише й ПОДАНІ аркуші (із записом журналу й позначкою «перераховано після подання»); затверджені
+    /// не пише ніколи. <c>null</c> — звичайна правка, поле в JSON не пишеться.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public bool? WriteSubmitted { get; init; }
+
     /// <summary>
     /// L2: задача формул одна на ДОКУМЕНТ (<see cref="Ports.FormulaRecalculationTarget.Of"/>), а злиття дописує масив
     /// <c>cells</c> із різних періодів в одну задачу, тож період і екземпляр несе кожна комірка, а не лише тіло задачі.
