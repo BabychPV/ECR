@@ -43,7 +43,8 @@ public sealed record TransportState(bool HttpsCertificateLoaded, DateTimeOffset?
 /// кожної <c>https://</c>-адреси, яку хост отримав з <c>ASPNETCORE_URLS</c>
 /// (це єдине, що пише <c>deploy-ecr.ps1</c>) — окремої секції
 /// <c>Kestrel:Endpoints</c> не потрібно, а отже й другого місця, де порт міг би
-/// розійтися з <c>ASPNETCORE_URLS</c>.
+/// розійтися з <c>ASPNETCORE_URLS</c>. Разом із сертифікатом задаються версії TLS: лише 1.2 і 1.3
+/// (<see cref="AllowedProtocols"/>, PT-7).
 ///
 /// ⚠ Відбиток заданий, а сертифіката немає (або він без закритого ключа) —
 /// відмова старту з причиною, а не тихий відкат до HTTP: той самий принцип, що
@@ -63,6 +64,14 @@ public static partial class HttpsTransport
     /// (слухає лише HTTPS, або HTTP-порту немає взагалі).
     /// </summary>
     public const string PortKey = "Transport:Https:Port";
+
+    /// <summary>Версії TLS, які приймає застосунок: 1.2 і 1.3 (PT-7, пентест 2026-11).</summary>
+    /// <remarks>
+    /// Старіші (1.0, 1.1) застарілі (RFC 8996). На системі без TLS 1.3 (Windows Server до 2022) узгоджується 1.2.
+    /// Балансувальник, що сам завершує TLS, налаштовує версії в себе: це стосується лише прямого підключення до Kestrel.
+    /// </remarks>
+    public const System.Security.Authentication.SslProtocols AllowedProtocols =
+        System.Security.Authentication.SslProtocols.Tls12 | System.Security.Authentication.SslProtocols.Tls13;
 
     /// <summary>За скільки днів до кінця строку <c>transport</c> жовтіє.</summary>
     public const int ExpiryWarningDays = 30;
@@ -164,8 +173,14 @@ public static partial class HttpsTransport
             throw new InvalidOperationException(selection.Problem);
         }
 
-        builder.WebHost.ConfigureKestrel(kestrel => kestrel.ConfigureHttpsDefaults(
-            https => https.ServerCertificate = certificate));
+        builder.WebHost.ConfigureKestrel(kestrel => kestrel.ConfigureHttpsDefaults(https =>
+        {
+            https.ServerCertificate = certificate;
+
+            // ⛔ PT-7: без цього Kestrel приймає все, що дозволяє ОС, а Windows Server до 2022 включно
+            // за замовчуванням дозволяє серверний TLS 1.0 і 1.1.
+            https.SslProtocols = AllowedProtocols;
+        }));
 
         var port = builder.Configuration.GetValue(PortKey, defaultValue: 0);
         if (port > 0)

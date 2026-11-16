@@ -577,6 +577,15 @@ public sealed partial class SaveDataSourceHandler(
             }
         }
 
+        // ⛔ PT-5 (пентест 2026-11): секрет у заголовку (Basic/Bearer) не йде відкритим текстом. Для Negotiate схема
+        // не обмежується: квиток Kerberos не є повторно вживаним секретом. `http://` — лише за явним
+        // `PiWebApi:AllowInsecureHttp = true`; без порту мережі (тестові фабрики) — заборонено, як і за замовчуванням.
+        if (verdict == EndpointVerdict.Allowed && !negotiate && network is not { AllowInsecureHttp: true }
+            && address.TrimStart().StartsWith("http://", StringComparison.OrdinalIgnoreCase))
+        {
+            verdict = EndpointVerdict.Scheme;
+        }
+
         var key = verdict switch
         {
             EndpointVerdict.Allowed => null,

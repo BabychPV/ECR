@@ -152,7 +152,9 @@ public sealed partial class PermitRuntimeRowsTests(SqlServerFixture sql)
         await setup.SaveChangesAsync();
 
         var profile = new AccessBuilder { UserId = user.Id }
-            .Grant(Ecr.Domain.Enums.ResourceKind.Project, scene.ProjectId, Ecr.Domain.Enums.GrantLevel.Write).Build();
+            .Grant(Ecr.Domain.Enums.ResourceKind.Project, scene.ProjectId, Ecr.Domain.Enums.GrantLevel.Write)
+            .Permission("Document.View") // PT-8: оновлення з дозволу — запис у документ
+            .Build();
 
         await using var serviceDb = scene.NewContext();
         using var memory = new MemoryCache(new MemoryCacheOptions());

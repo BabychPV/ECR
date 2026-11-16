@@ -147,6 +147,91 @@ public sealed class DataSourceEndpointPolicyTests
         Assert.Equal("endpoint", refused.Details!["field"]);
     }
 
+    /// <summary>Мережа з прапором PT-5 (<c>PiWebApi:AllowInsecureHttp</c>); ім'я розв'язується в приватну адресу.</summary>
+    private sealed class HttpFlagNetwork(bool allowInsecureHttp) : IEndpointNetwork
+    {
+        public IReadOnlyList<string> AllowedHosts => [];
+
+        public bool AllowInsecureHttp => allowInsecureHttp;
+
+        public Task<IReadOnlyList<IPAddress>> ResolveAsync(string host, CancellationToken ct)
+            => Task.FromResult<IReadOnlyList<IPAddress>>([IPAddress.Parse("10.0.0.5")]);
+    }
+
+    private static async Task<BusinessRuleException?> TryCreateWithSecret(
+        string endpoint, string? secondary, string? secret, IEndpointNetwork? net)
+    {
+        var access = Substitute.For<IAccessDecisionService>();
+        var user = Substitute.For<ICurrentUser>();
+        var secrets = Substitute.For<ISecretProvider>();
+        secrets.Find(Arg.Any<string>()).Returns(secret);
+        user.UserId.Returns(11);
+        access.BuildProfileAsync(11, Arg.Any<CancellationToken>())
+            .Returns(new AccessBuilder { UserId = 11 }.Permission("Integration.Manage").Build());
+
+        var handler = new SaveDataSourceHandler(
+            Substitute.For<IDataSourceStore>(), secrets, access, Substitute.For<IUnitOfWork>(),
+            Substitute.For<IAuditWriter>(), user, Substitute.For<IClock>(), net);
+
+        try
+        {
+            await handler.CreateAsync(
+                "SRC", new Dictionary<string, string> { ["uk"] = "Джерело" }, ExternalTransport.PiWebApi,
+                endpoint, secondary, null, null, null, default);
+            return null;
+        }
+        catch (BusinessRuleException e)
+        {
+            return e;
+        }
+    }
+
+    /// <summary>
+    /// PT-5 (пентест 2026-11): джерело із секретом у заголовку (<c>Basic</c>/<c>Bearer</c>) не зберігається з адресою
+    /// <c>http://</c> — секрет і зібрані значення пішли б мережею відкритим текстом. <c>https://</c>, Negotiate і явний
+    /// дозвіл <c>PiWebApi:AllowInsecureHttp = true</c> — проходять.
+    /// </summary>
+    /// <remarks>Без виправлення перший і другий рядки (відмова) червоні: адреса зберігалась.</remarks>
+    [Theory]
+    [InlineData("http://pi.corp.local/piwebapi", "Bearer x", false, true)]
+    [InlineData("HTTP://pi.corp.local/piwebapi", "Basic dTpw", false, true)]
+    [InlineData("https://pi.corp.local/piwebapi", "Bearer x", false, false)]
+    [InlineData("http://pi.corp.local/piwebapi", "Negotiate", false, false)]
+    [InlineData("http://pi.corp.local/piwebapi", null, false, false)]
+    [InlineData("http://pi.corp.local/piwebapi", "Bearer x", true, false)]
+    [Trait("Finding", "PT-5")]
+    public async Task Секрет_у_заголовку_не_зберігається_з_адресою_http(
+        string address, string? secret, bool allowInsecureHttp, bool refusedExpected)
+    {
+        var refused = await TryCreateWithSecret(address, null, secret, new HttpFlagNetwork(allowInsecureHttp));
+
+        if (!refusedExpected)
+        {
+            // Політику адреси пройдено. Далі діють інші правила збереження (напр. повторне введення секрету для
+            // нової адреси) — їхня відмова тут не предмет; головне, що це НЕ відмова схеми.
+            Assert.NotEqual("err.ECR-REQ-0422.dataSourceEndpointScheme", refused?.Details?["messageKey"]);
+            return;
+        }
+
+        Assert.NotNull(refused);
+        Assert.Equal("err.ECR-REQ-0422.dataSourceEndpointScheme", refused.Details!["messageKey"]);
+        Assert.Equal("endpoint", refused.Details!["field"]);
+    }
+
+    [Fact]
+    [Trait("Finding", "PT-5")]
+    public async Task Секрет_у_заголовку_запасна_адреса_http_теж_відхиляється_і_без_порту_мережі_заборонено()
+    {
+        var spare = await TryCreateWithSecret(
+            "https://pi.corp.local/x", "http://pi2.corp.local/x", "Bearer x", new HttpFlagNetwork(false));
+        Assert.Equal("secondaryEndpoint", spare!.Details!["field"]);
+        Assert.Equal("err.ECR-REQ-0422.dataSourceEndpointScheme", spare.Details!["messageKey"]);
+
+        // Без порту мережі (тестові фабрики) — як за замовчуванням: http із секретом не проходить.
+        var noNetwork = await TryCreateWithSecret("http://pi.corp.local/x", null, "Bearer x", net: null);
+        Assert.Equal("err.ECR-REQ-0422.dataSourceEndpointScheme", noNetwork!.Details!["messageKey"]);
+    }
+
     [Fact]
     public async Task Запасна_адреса_теж_перевіряється()
     {

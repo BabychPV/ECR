@@ -25,9 +25,14 @@ namespace Ecr.Adapters.PiAf;
 /// самим <paramref name="http"/>.
 /// </param>
 /// <param name="logger">Журнал перемикання на запасну адресу (D-462); <c>null</c> — тести.</param>
+/// <param name="network">
+/// PT-5: <c>PiWebApi:AllowInsecureHttp</c>; <c>null</c> (тестові фабрики) — як за замовчуванням: секрет по
+/// <c>http://</c> не йде.
+/// </param>
 public sealed partial class PiWebApiDataSource(
     HttpClient http, ICollectionStore store, ISecretProvider secrets, IHttpClientFactory? clients = null,
-    Microsoft.Extensions.Logging.ILogger<PiWebApiDataSource>? logger = null)
+    Microsoft.Extensions.Logging.ILogger<PiWebApiDataSource>? logger = null,
+    IEndpointNetwork? network = null)
     : IExternalDataSource, IHierarchicalCatalogSource, IBatchCollectionSource
 {
     /// <summary>Перемикання на запасну адресу при відмові зв'язку з основною (D-462).</summary>
@@ -689,6 +694,19 @@ public sealed partial class PiWebApiDataSource(
         {
             // Заголовка немає: облікові дані дає ОС у відповідь на виклик 401.
             return negotiateClient ??= clients?.CreateClient(PiWebApiAuthentication.NegotiateClientName) ?? http;
+        }
+
+        // ⛔ PT-5 (пентест 2026-11): секрет у заголовку не йде відкритим текстом. Збереження таку адресу вже
+        // відхиляє (`DataSourceHandlers.RequireAllowedEndpointAsync`), а ця перевірка закриває джерела, збережені
+        // РАНІШЕ: відмова до з'єднання, тип винятку — «нас не пускають» (прогін Failed, алерт одразу), бо само не мине.
+        if (message.RequestUri is { IsAbsoluteUri: true } target
+            && string.Equals(target.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+            && network is not { AllowInsecureHttp: true })
+        {
+            throw new SourceAuthenticationException(
+                AuthenticationRefused,
+                "Джерело PI Web API із секретом у заголовку налаштоване на http://: секрет не надсилається відкритим текстом.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-INT-0502.piWebApiInsecureHttp" });
         }
 
         message.Headers.Authorization = PiWebApiAuthentication.HeaderOf(secret);

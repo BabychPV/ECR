@@ -104,6 +104,7 @@ public sealed partial class PermitRuntimeRowsTests
         // Той самий запис у проєкт, але без права читати реєстри дозволів.
         var noRegistry = new AccessBuilder { UserId = withRight.UserId }
             .Grant(ResourceKind.Project, scene.ProjectId, GrantLevel.Write)
+            .Permission("Document.View") // PT-8: оновлення з дозволу — запис у документ; предмет тесту — Registry.View
             .Build();
         var jobs = Jobs();
 
@@ -224,6 +225,7 @@ public sealed partial class PermitRuntimeRowsTests
         return new AccessBuilder { UserId = user.Id }
             .Grant(ResourceKind.Project, scene.ProjectId, GrantLevel.Write)
             .Permission("Registry.View")
+            .Permission("Document.View") // PT-8: оновлення з дозволу — запис у документ
             .Build();
     }
 }

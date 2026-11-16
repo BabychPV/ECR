@@ -139,6 +139,62 @@ public sealed class HttpsTransportTests
         Assert.Equal(cert.Thumbprint, presented);
     }
 
+    /// <summary>
+    /// PT-7 (пентест 2026-11): Kestrel приймає лише TLS 1.2 і 1.3; клієнт, що вміє тільки 1.0 або 1.1, з'єднання не
+    /// отримує. Контроль у тому ж тесті: TLS 1.2 проходить.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Без виправлення (рядок <c>https.SslProtocols = AllowedProtocols</c>) на машині, де ОС дозволяє серверний
+    /// TLS 1.0/1.1, рукостискання 1.1 вдається — червоний. Там, де ОС їх уже вимкнула, тест зелений і без рядка,
+    /// тому другий доказ — константа: рівно <c>Tls12 | Tls13</c>.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Finding", "PT-7")]
+    public async Task Kestrel_приймає_TLS_1_2_і_відмовляє_TLS_1_1_та_1_0()
+    {
+        Assert.Equal(
+            System.Security.Authentication.SslProtocols.Tls12 | System.Security.Authentication.SslProtocols.Tls13,
+            HttpsTransport.AllowedProtocols);
+
+        using var cert = NewCertificate(TimeSpan.FromDays(400));
+        await using var app = BuildApp(cert, port: null, "https://127.0.0.1:0");
+        await app.StartAsync();
+        var address = new Uri(AddressOf(app));
+
+        Assert.Equal(
+            System.Security.Authentication.SslProtocols.Tls12,
+            await HandshakeAsync(address, System.Security.Authentication.SslProtocols.Tls12));
+
+#pragma warning disable CS0618, SYSLIB0039, CA5397 // застарілі версії TLS — саме їх відмову й перевіряємо
+        foreach (var old in new[] { System.Security.Authentication.SslProtocols.Tls11, System.Security.Authentication.SslProtocols.Tls })
+#pragma warning restore CS0618, SYSLIB0039, CA5397
+        {
+            var failure = await Record.ExceptionAsync(() => HandshakeAsync(address, old));
+            Assert.True(
+                failure is System.Security.Authentication.AuthenticationException or IOException
+                    or System.ComponentModel.Win32Exception or System.Net.Sockets.SocketException,
+                $"{old}: очікували відмову рукостискання, отримали {failure?.GetType().Name ?? "успіх"}");
+        }
+    }
+
+    /// <summary>Рукостискання TLS рівно заданою версією; повертає узгоджену версію.</summary>
+    private static async Task<System.Security.Authentication.SslProtocols> HandshakeAsync(
+        Uri address, System.Security.Authentication.SslProtocols protocol)
+    {
+        using var tcp = new System.Net.Sockets.TcpClient();
+        await tcp.ConnectAsync(address.Host, address.Port);
+#pragma warning disable CA5359 // самопідписаний тестовий сертифікат на 127.0.0.1: перевіряється версія TLS, не особа сервера
+        await using var ssl = new System.Net.Security.SslStream(tcp.GetStream(), leaveInnerStreamOpen: false, (_, _, _, _) => true);
+#pragma warning restore CA5359
+        await ssl.AuthenticateAsClientAsync(new System.Net.Security.SslClientAuthenticationOptions
+        {
+            TargetHost = "ecr-test",
+            EnabledSslProtocols = protocol,
+        });
+        return ssl.SslProtocol;
+    }
+
     /// <remarks>
     /// Перенаправлення — лише за <c>Transport:Https:Port</c>. Мутація (прогнано): у
     /// <c>UseEcrHttpsRedirection</c> прибрати виклик <c>UseHttpsRedirection</c> → друга половина

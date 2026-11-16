@@ -38,6 +38,8 @@ public sealed class EcrConfigurationValidationTests(SqlServerFixture sql)
     [InlineData("PiSqlClient:EventQueryTimeoutSeconds", "5m")]           // D-464
     [InlineData("Collection:MaxEventPages", "0")]                        // D-464
     [InlineData("PiSqlClient:EventQueryChunk", "Mnth")]                  // D-464
+    [InlineData("Auth:Negotiate:AllowNtlm", "yes")]                      // PT-4
+    [InlineData("PiWebApi:AllowInsecureHttp", "1")]                      // PT-5
     public void Недійсне_значення_називає_ключ(string key, string value)
     {
         var problems = EcrConfigurationValidation.Validate(Config((key, value)));

@@ -25,6 +25,13 @@ public interface IEndpointNetwork
     /// </summary>
     public IReadOnlyList<int> SmtpAllowedPorts => [];
 
+    /// <summary>
+    /// <c>PiWebApi:AllowInsecureHttp</c> (PT-5): чи дозволено джерелу PI Web API із секретом у заголовку
+    /// (<c>Basic</c>/<c>Bearer</c>) адресу <c>http://</c>. За замовчуванням — ні: секрет і зібрані значення не йдуть
+    /// мережею відкритим текстом. Windows-автентифікації (Negotiate) це не стосується.
+    /// </summary>
+    public bool AllowInsecureHttp => false;
+
     /// <summary>Усі A/AAAA-адреси імені; порожній список — не розв'язалось.</summary>
     public Task<IReadOnlyList<IPAddress>> ResolveAsync(string host, CancellationToken ct);
 }

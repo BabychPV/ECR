@@ -112,7 +112,7 @@ public sealed class PatchCellsPermitValidityTests
         var profile = new AccessProfile
         {
             CacheKey = "p1", UserId = 9, SecurityStamp = "s",
-            Permissions = new HashSet<string> { "Registry.View" },
+            Permissions = new HashSet<string> { "Registry.View", "Document.View" /* PT-8 */ },
             Grants = new Dictionary<string, GrantLevel> { ["Project:10"] = GrantLevel.Write },
             Denies = new HashSet<string>(), RoleIds = new HashSet<int>(),
         };
@@ -301,7 +301,7 @@ public sealed class PatchCellsPermitValidityTests
         _readerProfile = new AccessProfile
         {
             CacheKey = "p-deny", UserId = 9, SecurityStamp = "s",
-            Permissions = new HashSet<string> { "Registry.View" },
+            Permissions = new HashSet<string> { "Registry.View", "Document.View" /* PT-8 */ },
             Grants = new Dictionary<string, GrantLevel> { ["Project:10"] = GrantLevel.Write },
             Denies = new HashSet<string> { "Column:" + JanuaryId }, RoleIds = new HashSet<int>(),
         };

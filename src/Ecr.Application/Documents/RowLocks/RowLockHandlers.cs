@@ -272,7 +272,10 @@ public sealed class GetRowLocksHandler(
     {
         var key = PeriodKey.Parse(periodKey);
         var profile = await OpenDocumentPeriodReopenHandler.ProfileAsync(access, currentUser, ct).ConfigureAwait(false);
-        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, ct).ConfigureAwait(false);
+
+        // PT-8 (class sweep): the lock list names row keys, table codes and lock owners of the document — content, so
+        // the same entry as the slice read: visibility (404) AND Document.View in the document's project (403).
+        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, "Document.View", ct).ConfigureAwait(false);
 
         var now = clock.UtcNow;
         var target = await store.GetTargetAsync(documentId, key.Value, now, ct).ConfigureAwait(false)

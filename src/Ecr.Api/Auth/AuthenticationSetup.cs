@@ -147,11 +147,47 @@ public static partial class AuthenticationSetup
         // За замовчуванням увімкнено: у проді за IIS він потрібен.
         if (configuration.GetValue("Auth:EnableNegotiate", defaultValue: true))
         {
-            builder.AddNegotiate();
+            // ⛔ PT-4 (пентест 2026-11; рішення людини 16.11: за замовчуванням NTLM ЗАБОРОНЕНО, налаштовується):
+            // Negotiate мовчки відкочується до NTLM, а NTLM не прив'язаний до адресата — чужу спробу входу можна
+            // переслати сюди й отримати сеанс жертви. Kestrel прив'язки до TLS-каналу не перевіряє. Тому
+            // приймається лише Kerberos, доки майданчик явно не дозволив NTLM.
+            var allowNtlm = configuration.GetValue(AllowNtlmKey, defaultValue: false);
+            builder.AddNegotiate(options =>
+            {
+                options.Events = new NegotiateEvents
+                {
+                    OnAuthenticated = context =>
+                    {
+                        if (!allowNtlm && !IsKerberos(context.Principal))
+                        {
+                            context.Fail("NTLM is not accepted (" + AllowNtlmKey + " = false).");
+                        }
+
+                        return Task.CompletedTask;
+                    },
+                };
+            });
         }
 
         services.AddAuthorization();
         return services;
+    }
+
+    /// <summary>Чи приймати NTLM на вході Windows. За замовчуванням — ні (PT-4): NTLM ретранслюється.</summary>
+    public const string AllowNtlmKey = "Auth:Negotiate:AllowNtlm";
+
+    /// <summary>Чи пройшла автентифікація через Kerberos (а не через відкат на NTLM).</summary>
+    /// <param name="principal">Суб'єкт, якого віддав обробник Negotiate.</param>
+    /// <remarks>Усе, що не Kerberos (NTLM, «Negotiate» без уточнення, порожньо), — відмова.</remarks>
+    public static bool IsKerberos(ClaimsPrincipal? principal)
+    {
+        // ⚠ Без перевірки OperatingSystem.IsWindows() аналізатор CA1416 зупиняє збірку:
+        // WindowsIdentity.AuthenticationType існує лише у Windows.
+        var package = OperatingSystem.IsWindows() && principal?.Identity is System.Security.Principal.WindowsIdentity windows
+            ? windows.AuthenticationType
+            : principal?.Identity?.AuthenticationType;
+
+        return string.Equals(package, "Kerberos", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>Ставить момент входу, якщо його ще немає (перший вхід, не перевидання).</summary>

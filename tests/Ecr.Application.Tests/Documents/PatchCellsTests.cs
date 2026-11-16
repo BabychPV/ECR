@@ -195,7 +195,7 @@ public sealed partial class PatchCellsTests
     private static AccessProfile Profile() => new()
     {
         CacheKey = "p1", UserId = 9, SecurityStamp = "s",
-        Permissions = new HashSet<string> { "Registry.View" },  Grants = new Dictionary<string, GrantLevel>(),
+        Permissions = new HashSet<string> { "Registry.View", "Document.View" /* PT-8 */ },  Grants = new Dictionary<string, GrantLevel>(),
         Denies = new HashSet<string>(), RoleIds = new HashSet<int>()
     };
 

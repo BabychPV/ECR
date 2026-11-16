@@ -2152,6 +2152,9 @@ public sealed partial class SourceEventSyncJobTests(SqlServerFixture sql)
         await db.SaveChangesAsync(CancellationToken.None);
 
         db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Project, projectId, GrantLevel.Write));
+
+        // PT-8: запис людини вимагає Document.View у проєкті документа, як читання зрізу (svc-integration ролі не має).
+        db.RolePermissions.Add(new RolePermission(role.Id, "Document.View"));
         await db.SaveChangesAsync(CancellationToken.None);
 
         return role.Id;
@@ -2173,6 +2176,7 @@ public sealed partial class SourceEventSyncJobTests(SqlServerFixture sql)
     private Task RevokeAsync(int roleId)
         => ExecuteAsync(
             $"DELETE FROM sec.ResourceGrant WHERE RoleId = {roleId}; "
+            + $"DELETE FROM sec.RolePermission WHERE RoleId = {roleId}; "
             + $"DELETE FROM sec.RoleAssignment WHERE RoleId = {roleId}; "
             + $"DELETE FROM sec.Role WHERE Id = {roleId};");
 

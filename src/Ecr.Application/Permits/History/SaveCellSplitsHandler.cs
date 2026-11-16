@@ -71,7 +71,8 @@ public sealed class SaveCellSplitsHandler(
         }
 
         var profile = await Periods.OpenDocumentPeriodReopenHandler.ProfileAsync(access, currentUser, ct).ConfigureAwait(false);
-        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, ct).ConfigureAwait(false);
+        // PT-8: the same entry as the slice read — visibility (404) AND Document.View in the document's project (403).
+        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, "Document.View", ct).ConfigureAwait(false);
         var segments = (await store.ListAsync(documentId, ct).ConfigureAwait(false)).Select(r => r.Segment).ToList();
         var isPermitTarget = permitTargets is null
             ? (_ => false)

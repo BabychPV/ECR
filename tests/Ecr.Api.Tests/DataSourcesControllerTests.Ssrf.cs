@@ -110,7 +110,8 @@ public sealed partial class DataSourcesControllerTests
     [Trait("Scenario", "Н-Л1а")]
     public async Task Н_Л1а_приватний_IP_літерал_заборонено_лише_для_Negotiate()
     {
-        const string privateIp = "http://10.0.0.5/piwebapi";
+        // ✎ PT-5: https — джерело з Basic-секретом на http:// тепер відхиляє правило схеми, а предмет тесту — літерал IP.
+        const string privateIp = "https://10.0.0.5/piwebapi";
         var negotiateCode = $"NG{Guid.NewGuid():N}"[..12].ToUpperInvariant();
         var basicCode = $"BA{Guid.NewGuid():N}"[..12].ToUpperInvariant();
 

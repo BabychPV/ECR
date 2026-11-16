@@ -152,6 +152,12 @@ public static partial class EcrConfigurationValidation
         "Auth:RequireHttps",
         "Auth:EnableNegotiate",
 
+        // PT-4 (пентест 2026-11): NTLM у Negotiate лише за явним true (типово false).
+        Ecr.Api.Auth.AuthenticationSetup.AllowNtlmKey,
+
+        // PT-5: секрет у заголовку джерела PI Web API по http:// лише за явним true (типово false).
+        Ecr.Infrastructure.Integration.EndpointNetwork.AllowInsecureHttpKey,
+
         // U1-09: читається `GetValue<bool>`; опечатка («ye») інакше падала б із повідомленням біндера, а не
         // з переліком недійсних ключів разом з рештою.
         Ecr.Api.Auth.AuthenticationSetup.AllowUnprotectedKeysKey,

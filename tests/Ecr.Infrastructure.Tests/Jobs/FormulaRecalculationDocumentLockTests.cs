@@ -303,7 +303,7 @@ public sealed class FormulaRecalculationDocumentLockTests(SqlServerFixture sql)
         var profile = new Ecr.Application.Security.AccessProfile
         {
             CacheKey = "p", UserId = 1, SecurityStamp = "s",
-            Permissions = new HashSet<string>(), Grants = new Dictionary<string, GrantLevel>(),
+            Permissions = new HashSet<string> { "Document.View" /* PT-8 */ }, Grants = new Dictionary<string, GrantLevel>(),
             Denies = new HashSet<string>(), RoleIds = new HashSet<int>(),
         };
         var access = Substitute.For<Ecr.Application.Security.IAccessDecisionService>();

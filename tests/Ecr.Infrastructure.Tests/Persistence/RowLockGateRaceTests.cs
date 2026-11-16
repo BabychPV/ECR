@@ -359,6 +359,7 @@ public sealed class RowLockGateRaceTests(SqlServerFixture sql)
 
     private static AccessProfile Writer(Scene scene)
         => new AccessBuilder { UserId = scene.WriterId }
+            .Permission("Document.View") // PT-8
             .Grant(ResourceKind.Project, scene.Doc.ProjectId, GrantLevel.Write)
             .Build();
 

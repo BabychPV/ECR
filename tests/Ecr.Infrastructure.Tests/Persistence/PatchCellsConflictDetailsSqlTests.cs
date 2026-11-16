@@ -164,7 +164,7 @@ public sealed class PatchCellsConflictDetailsSqlTests(SqlServerFixture sql)
         var profile = new AccessProfile
         {
             CacheKey = "p", UserId = userId, SecurityStamp = "s",
-            Permissions = new HashSet<string>(), Grants = new Dictionary<string, GrantLevel>(),
+            Permissions = new HashSet<string> { "Document.View" /* PT-8 */ }, Grants = new Dictionary<string, GrantLevel>(),
             Denies = new HashSet<string>(), RoleIds = new HashSet<int>(),
         };
         access.BuildProfileAsync(userId, Arg.Any<CancellationToken>()).Returns(profile);

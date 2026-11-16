@@ -2,8 +2,8 @@
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
-    (N'err.ECR-REQ-0422.dataSourceEndpointScheme', N'ru', N'Адрес источника данных должен использовать http или https.'),
-    (N'err.ECR-REQ-0422.dataSourceEndpointScheme', N'kz', N'Деректер көзінің мекенжайы http немесе https пайдалануы тиіс.'),
+    (N'err.ECR-REQ-0422.dataSourceEndpointScheme', N'ru', N'Адрес источника данных должен использовать http или https. Для источника с секретом в заголовке (Basic или Bearer) допускается только https.'),
+    (N'err.ECR-REQ-0422.dataSourceEndpointScheme', N'kz', N'Деректер көзінің мекенжайы http немесе https пайдалануы тиіс. Тақырыпта құпиясы бар (Basic немесе Bearer) көз үшін тек https рұқсат етіледі.'),
     (N'err.ECR-REQ-0422.dataSourceEndpointHostForbidden', N'ru', N'Этот хост не допускается для источника данных: loopback, link-local, metadata и неопределённые адреса отклоняются всегда. Источник без секрета подключается по Windows-аутентификации (Negotiate), и в этом режиме литералы частных IP-адресов тоже запрещены: используйте имя хоста.'),
     (N'err.ECR-REQ-0422.dataSourceEndpointHostForbidden', N'kz', N'Бұл хост деректер көзі үшін рұқсат етілмейді: loopback, link-local, metadata және анықталмаған мекенжайлар әрдайым қабылданбайды. Құпиясы жоқ көз Windows аутентификациясымен (Negotiate) қосылады, және бұл режимде жеке IP-мекенжай литералдары да тыйым салынған: хост атын пайдаланыңыз.'),
     (N'err.ECR-REQ-0422.dataSourceEndpointHostNotAllowed', N'ru', N'Этого хоста нет в списке разрешённых хостов источников данных (PiWebApi:AllowedHosts).'),
@@ -27,7 +27,7 @@ GO
 INSERT INTO #UiEn ([Key], Lang, Val, Scope)
 SELECT v.[Key], v.Lang, v.Val, v.Scope
   FROM (VALUES
-    (N'err.ECR-REQ-0422.dataSourceEndpointScheme',       N'en', N'The data source address must use http or https.', 1),
+    (N'err.ECR-REQ-0422.dataSourceEndpointScheme',       N'en', N'The data source address must use http or https. A source with a secret in the header (Basic or Bearer) accepts https only.', 1),
     (N'err.ECR-REQ-0422.dataSourceEndpointHostForbidden', N'en', N'This host is not allowed for a data source: loopback, link-local, metadata and unspecified addresses are always refused. A source without a secret authenticates with Windows (Negotiate), and in that mode private IP-address literals are refused too: use the host name.', 1),
     (N'err.ECR-REQ-0422.dataSourceEndpointHostNotAllowed', N'en', N'This host is not in the list of allowed data source hosts (PiWebApi:AllowedHosts).', 1),
     (N'err.ECR-REQ-0422.dataSourceEndpointMalformed',    N'en', N'The data source address is empty or malformed: use a full http(s) address without a user name.', 1),

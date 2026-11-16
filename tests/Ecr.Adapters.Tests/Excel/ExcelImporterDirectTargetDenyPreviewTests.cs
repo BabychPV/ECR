@@ -57,7 +57,8 @@ public sealed class ExcelImporterDirectTargetDenyPreviewTests
     private long? _currentEntry;
 
     // P3 (рішення людини 25.10 «вимагати Registry.View»): права профілю тесту.
-    private string[] _permissions = ["Registry.View"];
+    // PT-8: Document.View — застосування книги (запис) вимагає його, як читання зрізу; перегляд на нього не дивиться.
+    private string[] _permissions = ["Registry.View", "Document.View"];
     private int? _scopedViewProject;
     private bool _scopedDeny;
     private const int DocumentProjectId = 10;

@@ -173,6 +173,7 @@ public sealed class ExcelImportMonthColumnPeriodStateTests(SqlServerFixture sql)
             db, metadata, new AccessProfileCache(_memory), clock, Substitute.For<ICurrentUser>(), new WorkflowStore(db));
 
         var profile = new AccessBuilder { UserId = 1 }
+            .Permission("Document.View") // PT-8
             .Grant(ResourceKind.Project, projectId, GrantLevel.Write)
             .Build();
 

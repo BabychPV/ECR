@@ -228,6 +228,9 @@ function adapterRefusal(key: string, params: Record<string, string>): string | n
       return t('err.ECR-INT-0502.credentialsRefused', params);
     case 'err.ECR-INT-0502.piWebApiUnauthorized':
       return t('err.ECR-INT-0502.piWebApiUnauthorized', params);
+    // PT-5: джерело із секретом у заголовку на http:// — збирач не шле секрет відкритим текстом.
+    case 'err.ECR-INT-0502.piWebApiInsecureHttp':
+      return t('err.ECR-INT-0502.piWebApiInsecureHttp', params);
     case 'err.ECR-INT-0503.sourcePathTooLong':
       return t('err.ECR-INT-0503.sourcePathTooLong', params);
     case 'err.ECR-INT-0503.queryNotConfigured':

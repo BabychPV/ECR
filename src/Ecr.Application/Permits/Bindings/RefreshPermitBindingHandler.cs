@@ -71,6 +71,13 @@ public sealed class RefreshPermitBindingHandler(
             throw DocumentVisibility.DocumentNotFound(documentId);
         }
 
+        // ⛔ PT-8 (огляд класу): оновлення з дозволу додає й змінює рядки — запис у документ, тож той самий вхід, що й
+        // читання зрізу: видимий без права Document.View — 403. Системний записувач збору прав ролей не має — як доти.
+        if (!profile.IsIntegrationWriter)
+        {
+            await DocumentVisibility.RequirePermissionAsync(access, profile, documentId, "Document.View", ct).ConfigureAwait(false);
+        }
+
         var periodKey = PeriodKey.Parse(periodKeyValue);
         var bounds = await periods.FindPeriodBoundsAsync(documentId, periodKey.Value, ct).ConfigureAwait(false)
             ?? throw PermitBindingErrors.PreviewPeriodUnknown(periodKey.Value);

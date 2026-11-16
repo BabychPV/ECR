@@ -123,7 +123,7 @@ public sealed class RecalculationJobIdTests
         // перед тим, як віддати стан. Додати його тут означало б знищити
         // предмет тесту — з ним 200 віддався б і без автора задачі.
         _access.BuildProfileAsync(Editor, Arg.Any<CancellationToken>())
-               .Returns(new AccessBuilder { UserId = Editor }.Build());
+               .Returns(new AccessBuilder { UserId = Editor }.Permission("Document.View" /* PT-8 */).Build());
         _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
             .Returns(EditDecision.Allow());
 
