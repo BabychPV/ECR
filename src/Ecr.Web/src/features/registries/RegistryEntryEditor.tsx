@@ -411,7 +411,9 @@ export function ValidityEditor({
         <Button
           loading={saveLoading}
           onClick={() => {
-            if (save.isPending) return;
+            // ⛔ B145b: діалог, що закривається (`entry` уже знято, `Modal` ще ~200 мс у DOM), не шле запит —
+            // зонд: другий клік слав `POST …/entries/0/validity` (адреса читала `entry` на момент кліку).
+            if (entry === null || save.isPending) return;
             save.mutate();
           }}
         >
