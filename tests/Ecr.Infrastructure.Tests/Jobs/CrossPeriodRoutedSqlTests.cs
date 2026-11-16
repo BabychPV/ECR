@@ -1437,6 +1437,80 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
         }
     }
 
+    /// <summary>
+    /// ✎ B79 (слово людини 16.11, «якщо вхідні дані … змінилися»): позначку ставить ЗМІНА числа, а не факт прогону.
+    /// Повторний каскад того самого насіння над уже перерахованим поданим місяцем нічого не пише й другої позначки не лишає.
+    /// </summary>
+    /// <remarks>Мутації (локально): у <c>RecalculationService.Evaluate</c> прибрати пропуск незміненого значення
+    /// (<c>CellValueComparison.AreEqual</c>) — друга позначка, червоне; у <c>RunAsync</c> складати в <c>submittedNow</c>
+    /// поданий аркуш ДО перевірки, чи є що писати (<c>pair.Value.Count &gt; 0</c>), — друга позначка, червоне.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "B79")]
+    public async Task B79_повторний_каскад_без_зміни_чисел_другої_позначки_не_ставить()
+    {
+        var world = await ArrangeAsync();
+        await SetOwnerValueAsync(world, 7m);
+        await SetSheetStatusAsync(world, 9, DocumentStatus.Submitted);
+
+        await RunJobAsync(world, [], OwnerRequest(world), routing: true);
+        Assert.Equal(14m, await OutputAsync(world, Period(9)));
+        Assert.Equal(1, await SubmittedMarksAsync(world, 9));
+
+        // Те саме насіння вдруге: входи не змінились — числа ті самі, запису немає, позначка лишається одна.
+        await RunJobAsync(world, [], OwnerRequest(world), routing: true);
+        Assert.Equal(14m, await OutputAsync(world, Period(9)));
+        Assert.Equal(1, await SubmittedMarksAsync(world, 9));
+    }
+
+    /// <summary>
+    /// ✎ B79: повний прогін формул (шлях <c>RecalculationJob</c>: нічний розклад, кнопка, автоперерахунок) повертає
+    /// поданий аркуш у <c>submittedWritten</c> лише тоді, коли записав у нього змінене число; прогін над тими самими
+    /// входами — порожній набір; чернетка перераховується й у набір не потрапляє ніколи.
+    /// </summary>
+    /// <remarks>Мутації (локально): у <c>RecalculateAllAsync</c>/<c>RecalculateDocumentAsync</c> не передавати
+    /// <c>submittedWritten</c> далі — перший набір порожній, червоне; у <c>EnterSheetsAsync</c> складати в
+    /// <c>submittedByFlag</c> і чернетку — набір чернетки непорожній, червоне; прибрати пропуск незміненого значення —
+    /// другий набір непорожній, червоне.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "B79")]
+    public async Task B79_повний_прогін_повертає_поданий_аркуш_лише_коли_записав_змінене_число()
+    {
+        var world = await ArrangeAsync();
+        await SetOwnerValueAsync(world, 7m);
+        await SetSheetStatusAsync(world, 9, DocumentStatus.Submitted);
+
+        // Поданий вересень, вхід змінився: число перераховано, аркуш — у наборі.
+        var changed = await FullRunAsync(world, 9);
+        Assert.Equal(14m, await OutputAsync(world, Period(9)));
+        Assert.Equal(new[] { (world.Doc.SheetDefId, (long?)null) }, changed);
+
+        // Той самий прогін удруге (типова ніч): нічого не змінилось — набір порожній.
+        Assert.Empty(await FullRunAsync(world, 9));
+        Assert.Equal(14m, await OutputAsync(world, Period(9)));
+
+        // Чернетка (жовтень): перераховано, у набір поданих не потрапляє.
+        Assert.Empty(await FullRunAsync(world, ViewMonth));
+        Assert.Equal(14m, await OutputAsync(world, Period(ViewMonth)));
+    }
+
+    /// <summary>Повний прогін формул документа за місяць так, як його кличе <c>RecalculationJob.FormulasAsync</c>.</summary>
+    private static async Task<HashSet<(int SheetDefId, long? CopyId)>> FullRunAsync(World world, int month)
+    {
+        var written = new HashSet<(int SheetDefId, long? CopyId)>();
+        await using var db = world.Builder.CreateContext();
+        var router = new MonthColumnRouter(db, Config(true));
+        var service = Formulas(db, world, new MonthRoutedCellStore(new NormalizedCellStore(db), router, world.Metadata, db), router);
+        await service.RecalculateAllAsync(
+            world.Doc.DocumentId, new PeriodKey(Period(month)), CancellationToken.None,
+            writeSubmitted: true, submittedWritten: written);
+
+        return written;
+    }
+
     /// <remarks>Поданий місяць САМОГО насіння (власник) — теж перераховано й позначено (вхід <c>RecalculateAsync</c>).
     /// Мутація: у <c>RecalculateAsync</c> передати <c>writeSubmitted: false</c> — червоніє.</remarks>
     [Fact]
