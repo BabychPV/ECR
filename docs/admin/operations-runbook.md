@@ -122,6 +122,7 @@ Api й воркер на **одному** хості — різні ролі й 
 | `Transport:Https:CertificateThumbprint` | порожньо | відбиток сертифіката HTTPS у `LocalMachine\My`; Kestrel віддає його для кожної `https://`-адреси з `ASPNETCORE_URLS`. Пише `deploy-ecr.ps1 -HttpsThumbprint`. Заданий, а сертифіката немає чи він без закритого ключа — служба не стартує (п. 11) |
 | `Transport:Https:Port` | `0` | порт HTTPS для перенаправлення `http` → `https` (308); `0` — без перенаправлення. Пише `deploy-ecr.ps1 -HttpRedirectPort` |
 | `Auth:EnableNegotiate` | `true` | вхід Windows (Negotiate) |
+| `Auth:Negotiate:AllowNtlm` | `false` | чи приймати NTLM на вході Windows (PT-4, рішення людини 16.11). `false` — лише Kerberos: без SPN `HTTP/<ім'я сайту>` на обліковому записі служби (або при вході за IP) вхід Windows відмовляє `401`, локальний вхід працює. `true` — як до оновлення (NTLM приймається; його можна ретранслювати, тож лише там, де SPN налаштувати неможливо). Перед оновленням: перевірити SPN (`setspn -Q HTTP/<ім'я сайту>`), `docs/admin/https-certificate.md` §4.4 |
 | `Auth:StampCacheSeconds` | 5 | як швидко блокування чи зміна ролей діє на відкриті сесії, с |
 | `Auth:DataProtection:CertificateThumbprint` | немає | відбиток сертифіката з `LocalMachine\My` для захисту ключів Data Protection (п. 6.2). ⛔ **З 2026-09-29 (S11) у Production обов'язковий**: без нього служба не стартує. Один і той самий сертифікат (із закритим ключем, з правом читання для облікового запису служби) — на всіх вузлах |
 | `Auth:DataProtection:PreviousCertificateThumbprints` | немає | відбитки попередніх сертифікатів Data Protection (масив або список через `;`/`,`), сертифікати мають лишатися в `LocalMachine\My`. Пише `deploy-ecr.ps1 -PreviousDataProtectionCertificateThumbprints`; ненайдений — Warning у журналі. Заміна сертифіката — `https-certificate.md` §9.2–9.3 |
@@ -269,6 +270,7 @@ ORDER BY [Ts];
 | `Auth:DataProtection:AllowUnprotectedKeys` | ні | — | `true` або `false`. |
 | `Auth:EnableNegotiate` | ні | `true` | `true` або `false`. |
 | `Auth:IdleTimeout:MinimumMinutes` | ні | `5` | Ціле число, не менше 1. |
+| `Auth:Negotiate:AllowNtlm` | ні | `false` | Значення на старті не перевіряється. |
 | `Auth:RequireHttps` | ні | `true` | `true` або `false`. |
 | `Auth:SlidingHours` | ні | `8` | Ціле число, не менше 1. |
 | `Auth:StampCacheSeconds` | ні | `5` | Ціле число, не менше 0. |
@@ -343,6 +345,7 @@ ORDER BY [Ts];
 | `PiSqlClient:EventQueryChunk` | ні | — | Одне з: None, Month. |
 | `PiSqlClient:EventQueryTimeoutSeconds` | ні | — | Ціле число, не менше 1. |
 | `PiWebApi:AllowedHosts` | ні | `[]` | Значення на старті не перевіряється. |
+| `PiWebApi:AllowInsecureHttp` | ні | `false` | Значення на старті не перевіряється. |
 | `Registries:ExportMaxRows` | ні | `50000` | Ціле число, не менше 1. |
 | `Registries:ImportMaxBytes` | ні | `1048576` | Ціле число, не менше 1. |
 | `Retention:SubmissionSnapshots:BatchSize` | ні | `10` | Ціле число, не менше 1. |
@@ -1210,6 +1213,12 @@ DECLARE @a int; EXEC arc.usp_EnsureAuditPartitions @MonthsAhead = 12, @Added = @
 межі якнайшвидше, у вікно обслуговування, з бекапом.
 
 ## 8. Оновлення версії
+
+⚠ **Перед оновленням на версію з виправленнями пентесту 2026-11** виконати перевірки з
+`docs/release-notes/pentest-2026-11-upgrade.md`: (1) запит «хто має грант запису без права `Document.View`» — такі
+користувачі після оновлення втратять запис (PT-8), право їм додає адміністратор; (2) SPN для входу Windows або
+`Auth:Negotiate:AllowNtlm = true` (PT-4); (3) джерела PI Web API з адресою `http://` і секретом у заголовку (PT-5);
+(4) клієнти, що вміють лише TLS 1.0/1.1 (PT-7).
 
 Схема має **два джерела**: міграції EF (основні таблиці) і `Sql/*.sql`
 (файлові групи, партиції, аудит, архів, тригери, RCSI, Agent). Порядок —

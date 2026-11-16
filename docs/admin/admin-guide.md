@@ -140,7 +140,8 @@ Known limitations (не цього циклу): (а) заборона, дода�
 | Windows (домен) | Negotiate/Kerberos, без пароля в ECR | `POST /api/v1/login/windows` |
 | Локальний | ім'я + пароль, політика паролів ECR | `POST /api/v1/login/local` |
 
-Вхід Windows вимикається ключем `Auth:EnableNegotiate` (дефолт `true`).
+Вхід Windows вимикається ключем `Auth:EnableNegotiate` (дефолт `true`). Приймається лише Kerberos; NTLM — тільки
+за явним `Auth:Negotiate:AllowNtlm = true` (дефолт `false`, PT-4; див. `https-certificate.md` §4.4).
 
 ### 2.2. Первинне налаштування (bootstrap)
 
