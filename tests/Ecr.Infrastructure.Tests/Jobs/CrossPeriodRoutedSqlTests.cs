@@ -1252,10 +1252,14 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
             .Build();
 
     /// <summary>Запит задачі на екземпляр власника: насіння — введена комірка M11.</summary>
-    private static FormulaRecalculationRequest OwnerRequest(World world)
+    /// <param name="world">Світ.</param>
+    /// <param name="writeSubmitted">✎ B79: насіння — стовпець із залежними розрахунками (каскад пише й подані).</param>
+    private static FormulaRecalculationRequest OwnerRequest(World world, bool writeSubmitted = false)
         => new(
             world.Others[OwnerMonth].TableInstanceId, Period(OwnerMonth),
-            [new DirtyCell(world.Others[OwnerMonth].RowIds[0], world.Doc.MonthColumnDefIds[OwnerMonth - 1])]);
+            [new DirtyCell(
+                world.Others[OwnerMonth].RowIds[0], world.Doc.MonthColumnDefIds[OwnerMonth - 1],
+                WriteSubmitted: writeSubmitted ? true : null)]);
 
     private async Task<World> ArrangeAsync(
         bool absolute = false, bool offsets = false, bool fullYear = false, bool sum = false, string? m11Default = null,
@@ -1367,12 +1371,122 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
         var fanOut = new CrossPeriodFanOut(
             new RowStore(db, bulk, new TestClock(Now)), Versions(world), periods, jobs, db, router, world.Metadata);
 
-        var job = new FormulaRecalculationJob(Formulas(db, world, store, router), db, fanOut, periods);
+        // ✎ B79: журнал і годинник — як у DI; позначка «перераховано після подання» пишеться лише для насіння WriteSubmitted.
+        var job = new FormulaRecalculationJob(
+            Formulas(db, world, store, router), db, fanOut, periods, logger: null, audit: new AuditWriter(db),
+            clock: new TestClock(Now));
         var progress = new CapturingJobProgress();
         await job.ExecuteAsync(request, progress, CancellationToken.None);
 
         return (progress, store);
     }
+
+    // ── B79 (lane 3): каскад від загального стовпця з залежними — подані з позначкою, затверджені ні ──
+
+    /// <remarks>
+    /// Диференційний: один прогін, три місяці-читачі в різних станах. Мутації (локально): (1) у
+    /// <c>FormulaRecalculationJob</c> не передавати <c>writeSubmitted</c> у <c>RecalculateFromOtherPeriodsAsync</c> —
+    /// поданий місяць лишається застарілим; (2) не переносити <c>WriteSubmitted</c> на читачів (<c>next.WriteSubmitted</c>)
+    /// — те саме; (3) у <c>RecalculationService.EnterSheetsAsync</c> дозволити <c>Approved</c> — січень переписано;
+    /// (4) прибрати виклик <c>SubmittedSheetRecalcLog.WriteAsync</c> — позначки немає; (5) у <c>EnterSheetsAsync</c> не
+    /// наповнювати <c>submittedByFlag</c> — позначки немає; (6) наповнювати його й для чернетки — зайва позначка жовтня.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "B79")]
+    public async Task B79_поданий_місяць_перераховано_з_позначкою_затверджений_не_чіпано_чернетка_без_позначки()
+    {
+        var world = await ArrangeAsync();
+        await SetOwnerValueAsync(world, 7m);
+        await SetSheetStatusAsync(world, 1, DocumentStatus.Approved);
+        await SetSheetStatusAsync(world, 9, DocumentStatus.Submitted);
+
+        var enqueued = new List<(string Target, string Payload)>();
+        await RunJobAsync(world, enqueued, OwnerRequest(world, writeSubmitted: true), routing: true);
+
+        // Поданий вересень: перераховано й позначено.
+        Assert.Equal(14m, await OutputAsync(world, Period(9)));
+        Assert.Equal(1, await SubmittedMarksAsync(world, 9));
+
+        // Затверджений січень: число старе, позначки немає.
+        Assert.Equal(StaleOutput, await OutputAsync(world, Period(1)));
+        Assert.Equal(0, await SubmittedMarksAsync(world, 1));
+
+        // Чернетки (жовтень — перегляд, листопад — власник): перераховано без позначки.
+        Assert.Equal(14m, await OutputAsync(world, Period(ViewMonth)));
+        Assert.Equal(14m, await OutputAsync(world, Period(OwnerMonth)));
+        Assert.Equal(0, await SubmittedMarksAsync(world, ViewMonth));
+        Assert.Equal(0, await SubmittedMarksAsync(world, OwnerMonth));
+    }
+
+    /// <remarks>Контроль: те саме насіння БЕЗ позначки (звичайна правка) — поданий місяць пропущено, як і до B79.
+    /// Мутація: у <c>FormulaRecalculationJob</c> ставити <c>item.WriteSubmitted = true</c> завжди — червоніє.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "B79")]
+    public async Task B79_контроль_насіння_без_позначки_поданий_місяць_пропускає()
+    {
+        var world = await ArrangeAsync();
+        await SetOwnerValueAsync(world, 7m);
+        await SetSheetStatusAsync(world, 9, DocumentStatus.Submitted);
+
+        var enqueued = new List<(string Target, string Payload)>();
+        await RunJobAsync(world, enqueued, OwnerRequest(world), routing: true);
+
+        Assert.Equal(StaleOutput, await OutputAsync(world, Period(9)));
+        Assert.Equal(0, await SubmittedMarksAsync(world, 9));
+        Assert.Equal(14m, await OutputAsync(world, Period(ViewMonth)));
+    }
+
+    /// <remarks>Поданий місяць САМОГО насіння (власник) — теж перераховано й позначено (вхід <c>RecalculateAsync</c>).
+    /// Мутація: не передавати <c>writeSubmitted</c> у <c>RecalculateAsync</c> — червоніє.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "B79")]
+    public async Task B79_поданий_місяць_насіння_теж_перераховано_з_позначкою()
+    {
+        var world = await ArrangeAsync();
+        await SetOwnerValueAsync(world, 7m);
+        await SetSheetStatusAsync(world, OwnerMonth, DocumentStatus.Submitted);
+
+        var enqueued = new List<(string Target, string Payload)>();
+        await RunJobAsync(world, enqueued, OwnerRequest(world, writeSubmitted: true), routing: true);
+
+        Assert.Equal(14m, await OutputAsync(world, Period(OwnerMonth)));
+        Assert.Equal(1, await SubmittedMarksAsync(world, OwnerMonth));
+    }
+
+    /// <summary>Стан аркуша місяця (оригінал) — напряму в <c>wf.ApprovalState</c>.</summary>
+    private static async Task SetSheetStatusAsync(World world, int month, DocumentStatus status)
+    {
+        await using var db = world.Builder.CreateContext();
+        var user = new Ecr.Domain.Entities.Security.User(
+            $"b79c_{Guid.NewGuid():N}"[..20], "B79 cascade user", AuthProvider.Local);
+        user.SetPassword("not-a-real-hash");
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        // Подання — РАНІШЕ за годинник задачі: позначку читають як запис журналу, пізніший за SubmittedAt.
+        var state = new Ecr.Domain.Entities.Workflow.ApprovalState(world.Doc.DocumentId, world.Doc.SheetDefId, Period(month));
+        state.Submit(user.Id, Now.AddDays(-2));
+        if (status == DocumentStatus.Approved)
+        {
+            state.Approve(user.Id, Now.AddDays(-1));
+        }
+
+        db.ApprovalStates.Add(state);
+        await db.SaveChangesAsync();
+    }
+
+    /// <summary>Скільки записів «перераховано після подання» має аркуш документа за місяць.</summary>
+    private Task<int> SubmittedMarksAsync(World world, int month)
+        => CountAsync(
+            "SELECT COUNT(*) FROM aud.StructureChange WHERE EntityType = N'SheetRecalc' " +
+            "AND Operation = N'RecalculatedAfterSubmission' " +
+            $"AND CorrelationId = N'sheet-recalc:{world.Doc.DocumentId}:{world.Doc.SheetDefId}:{Period(month)}'");
 
     private static RecalculationService Formulas(
         EcrDbContext db, World world, ICellStore store, IMonthColumnRouter router)
