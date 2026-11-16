@@ -586,6 +586,111 @@ public sealed class RecalculationJobSheetScopeResultsTests(SqlServerFixture sql)
     }
 
     /// <summary>
+    /// ✎ B79: зміну відносять до аркуша за ЕКЗЕМПЛЯРОМ ТАБЛИЦІ результату, коли він є: методологія спільна для двох
+    /// поданих аркушів, число змінилось лише в таблиці першого — позначено лише його. Запасний шлях (за прив'язкою
+    /// методології) позначив би обидва.
+    /// </summary>
+    /// <remarks>⛔ ДОКАЗ (локально, мутація 59b): у <c>ResultChangesAsync</c> ігнорувати <c>change.TableInstanceId</c>
+    /// (завжди запасний шлях) — «marked,marked», червоний.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-9.17")]
+    [Trait("Finding", "B79")]
+    public async Task Спільна_методологія_число_змінилось_в_одній_таблиці_позначено_лише_її_поданий_аркуш()
+    {
+        var arranged = await ArrangeAsync(submitSecondSheet: false, sharedMethodology: true);
+        await RunJobAsync(arranged, SheetRequest(arranged, sheetDefId: null), label: 1_000m, stampTables: true);
+        await SubmitOnlyAsync(arranged, arranged.Document.SheetDefId, Now.AddMinutes(-5));
+        await SubmitOnlyAsync(arranged, arranged.SecondSheetId, Now.AddMinutes(-5));
+
+        // Штамп 2000 — лише рядкам таблиці ПЕРШОГО аркуша; рядки таблиці другого (і A, і B) лишаються 1001.
+        await using (var auditDb = arranged.Builder.CreateContext())
+        {
+            await RunJobAsync(
+                arranged, SheetRequest(arranged, sheetDefId: null) with { TriggeredByUserId = null }, label: 2_000m,
+                audit: new AuditWriter(auditDb), secondLabel: 1_000m, stampTables: true);
+        }
+
+        Assert.Equal(["A|1001", "A|2001", "B|1001"], await ShapeAsync(arranged));
+        Assert.Equal("marked,-", await MarksAsync(arranged));
+    }
+
+    /// <summary>
+    /// ✎ B79: порівняння «новий прогін проти актуального» (<c>ChangedResultsAsync</c>) на справжній базі: число, що лише
+    /// З'ЯВИЛОСЬ, і число, що лише ЗНИКЛО, — обидва зміна; методологія, якої прогін не рахував (переноситься), зниклою
+    /// не вважається; те саме число — не зміна.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ ДОКАЗ (локально): мутація 61a — прибрати напрям «актуальне без нового» — червоне «зникло»; 61b — прибрати
+    /// напрям «нове без актуального» — червоне «з'явилось»; 62 — прибрати фільтр перерахованих методологій — червоне
+    /// «перенесена не зникла»; 60 — додати в порівняння <c>CalculationRunId</c> — червоне «те саме число».
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "B79")]
+    public async Task Порівняння_результатів_з_явилось_і_зникло_це_зміна_а_перенесена_методологія_і_те_саме_число_ні()
+    {
+        var arranged = await ArrangeAsync(submitSecondSheet: false);
+        await RunJobAsync(arranged, SheetRequest(arranged, sheetDefId: null), label: 1_000m, stampTables: true);
+
+        var methodologyA = arranged.Versions.Single(v => v.Value.Output == "tonsA").Key;
+        var methodologyB = arranged.Versions.Single(v => v.Value.Output == "tonsB").Key;
+        var documentId = arranged.Document.DocumentId;
+        var sameValue = 1_000m + arranged.Document.PeriodKey.Sequence;
+
+        await using var db = arranged.Builder.CreateContext();
+        var store = new CalculationResultStore(db, new TestClock(Now));
+        var current = await store.ReadCurrentAsync(documentId, arranged.Document.PeriodKey.Value, default);
+        var tableA = current.Single(r => r.OutputCode == "tonsA").TableInstanceId;
+        Assert.NotNull(tableA);
+
+        async Task<long> NewRunAsync(params string[] rowKeys)
+        {
+            var run = new CalculationRun(
+                arranged.Document.ProjectId, arranged.Document.PeriodKey.Value, triggeredByUserId: null, Now,
+                documentId: documentId);
+            db.CalculationRuns.Add(run);
+            await db.SaveChangesAsync();
+
+            if (rowKeys.Length > 0)
+            {
+                await store.WriteResultsAsync(
+                    run.Id,
+                    [
+                        .. rowKeys.Select(rowKey => new CalculationOutput(
+                            documentId, rowKey,
+                            [new CalculationOutputValue(arranged.Versions[methodologyA].VersionId, null, "tonsA", sameValue, arranged.UnitId)],
+                            [], TableInstanceId: tableA)),
+                    ],
+                    default);
+                await db.SaveChangesAsync();
+            }
+
+            return run.Id;
+        }
+
+        // Те саме число методології A; B прогін не рахував (переноситься) — змін немає.
+        var same = await NewRunAsync("R-1");
+        Assert.Empty(await store.ChangedResultsAsync(same, documentId, [methodologyA], default));
+
+        // Якби B вважалась перерахованою, її числа «зникли» б — саме тому її в переліку немає.
+        var withB = await store.ChangedResultsAsync(same, documentId, [methodologyA, methodologyB], default);
+        Assert.Equal(methodologyB, Assert.Single(withB).MethodologyId);
+
+        // Число лише з'явилось (новий рядок R-2 поруч із незмінним R-1).
+        var added = await NewRunAsync("R-1", "R-2");
+        var appeared = Assert.Single(await store.ChangedResultsAsync(added, documentId, [methodologyA], default));
+        Assert.Equal((methodologyA, tableA), (appeared.MethodologyId, appeared.TableInstanceId));
+
+        // Число лише зникло (прогін рахував A, але рядка не дав).
+        var gone = await NewRunAsync();
+        var vanished = Assert.Single(await store.ChangedResultsAsync(gone, documentId, [methodologyA], default));
+        Assert.Equal((methodologyA, tableA), (vanished.MethodologyId, vanished.TableInstanceId));
+    }
+
+    /// <summary>
     /// ✎ B79: аркуш ПОДАНО (не затверджено), поки нічний прогін рахував методології. Доти перемикання відмовляло
     /// (<c>ECR-CALC-0409</c>); тепер поданий аркуш перераховує кожен прогін, тож прогін стає актуальним, а аркуш, чиї
     /// числа змінились, отримує позначку (стан читається в транзакції перемикання, після воріт).
@@ -1105,7 +1210,10 @@ public sealed class RecalculationJobSheetScopeResultsTests(SqlServerFixture sql)
                 {
                     var (versionId, output) = arranged.Versions[b.MethodologyId];
                     var rowKey = arranged.SharedMethodology ? $"I{b.TableInstanceId}" : "R-1";
-                    var stamp = output == "tonsB" ? secondLabel ?? label : label;
+                    // ✎ B79: «другий» штамп — методології другого аркуша і (спільна методологія) рядкам таблиці другого аркуша.
+                    var second = output == "tonsB"
+                                 || (arranged.SharedMethodology && b.TableInstanceId != arranged.Document.TableInstanceId);
+                    var stamp = second ? secondLabel ?? label : label;
                     return new CalculationOutput(documentId, rowKey,
                     [
                         new CalculationOutputValue(versionId, null, output, stamp + periodKey.Sequence, arranged.UnitId),
