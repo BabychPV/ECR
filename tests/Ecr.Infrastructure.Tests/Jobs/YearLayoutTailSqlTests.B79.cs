@@ -259,6 +259,39 @@ public sealed partial class YearLayoutTailSqlTests
         }
     }
 
+    /// <summary>
+    /// Каскад формул (правка M9 у вересні) доходить до закритого якоря й змінює не-місячний підсумок. Поданий БЕРЕЗЕНЬ
+    /// не є ні періодом правки, ні періодом-читачем — і отримує запис «перераховано після подання»; вересень (чернетка)
+    /// і січень (не поданий) — ні.
+    /// </summary>
+    /// <remarks>⛔ ДОКАЗ (локально): у <c>FormulaRecalculationJob</c> не передавати <c>submittedYearWritten</c> у
+    /// <c>RecalculateFromOtherPeriodsAsync</c> або не писати записи за місяцями (<c>marks</c>) — запису березня немає,
+    /// червоний.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "B79")]
+    public async Task B79_каскад_до_закритого_якоря_змінив_підсумок_поданий_місяць_року_позначено()
+    {
+        var world = await ArrangeAsync();
+        try
+        {
+            await PrepareFanOutAsync(world);
+            await SubmitAsync(world, 3);
+
+            await RunFanOutAsync(world, States(closed: [Anchor]), audit: true);
+
+            Assert.Equal(11m * Input, await PhysicalAsync(world, Anchor, world.Total));
+            Assert.Equal(1, await SheetLogAsync(world, 3, RecalculationSkips.AuditRecalculatedAfterSubmission));
+            Assert.Equal(0, await SheetLogAsync(world, 9, RecalculationSkips.AuditRecalculatedAfterSubmission));
+            Assert.Equal(0, await SheetLogAsync(world, Anchor, RecalculationSkips.AuditRecalculatedAfterSubmission));
+        }
+        finally
+        {
+            await CleanupAsync(world);
+        }
+    }
+
     /// <summary>Повний прогін формул якоря із записом поданих — так, як його кличе <c>RecalculationJob.FormulasAsync</c>.</summary>
     /// <param name="world">Стенд.</param>
     /// <param name="states">Стани місяців; <c>null</c> — усі відкриті.</param>
