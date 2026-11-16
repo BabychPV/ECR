@@ -185,6 +185,19 @@ IF OBJECT_ID(N'rpt.ViewProjectScope', N'U') IS NULL
         CONSTRAINT PK_ViewProjectScope PRIMARY KEY CLUSTERED (TemplateId, ProjectId));
 GO
 
+-- ⛔ B129 F13 D1: СТАБІЛЬНИЙ номер скоупу - за підписом набору пар (SHA2 переліку пар). Новий підпис - наступний вільний номер
+-- шаблону; номери не перевикористовуються й не перенумеровуються. Інакше новий набір пар перенумеровував би скоупи, а вʼюха групи,
+-- яку виклик пропускає (50422 / 50409, коміт до THROW), лишалася б зі старим текстом при нових номерах у rpt.ViewProjectScope -
+-- проєкт бачив би аліаси чужого набору. Зі стабільним номером старий текст для номера s означає той самий набір пар.
+IF OBJECT_ID(N'rpt.ViewScopeSig', N'U') IS NULL
+    CREATE TABLE rpt.ViewScopeSig (
+        TemplateId int            NOT NULL,
+        Sig        varbinary(32)  NOT NULL,
+        Scope      int            NOT NULL,
+        CONSTRAINT PK_ViewScopeSig PRIMARY KEY CLUSTERED (TemplateId, Sig),
+        CONSTRAINT UQ_ViewScopeSig_Scope UNIQUE (TemplateId, Scope));
+GO
+
 -- AN-155d: відбиток УСІХ входів, від яких залежить текст вʼюх rpt.v_*_vN та стабільних (обидві процедури нижче):
 --   * @MonthRouting і (D-474) cfg.TemplateVersion.Layout кожної опублікованої версії;
 --   * визначення самих процедур і цієї функції (правка 05-rpt-views.sql => інший відбиток => перегенерація);
@@ -1129,13 +1142,25 @@ BEGIN
       FROM cfg.ColumnRenameProject AS b JOIN @rp AS p ON p.FromId = b.FromColumnDefId AND p.ToId = b.ToColumnDefId
       JOIN doc.Project AS pr ON pr.Id = b.ProjectId   -- B129 F13: видалений проєкт скоупу не має (його рядок rpt.ViewProjectScope прибирається)
      WHERE p.IsLegacy = 0;
-    INSERT INTO @ps (ProjectId, Scope)
-    SELECT s.ProjectId, DENSE_RANK() OVER (ORDER BY s.Sig)
-      FROM (SELECT x.ProjectId,
-                   HASHBYTES('SHA2_256', (SELECT N',' + CAST(b.FromId AS nvarchar(10)) + N'>' + CAST(b.ToId AS nvarchar(10))
-                                            FROM @pb AS b WHERE b.ProjectId = x.ProjectId ORDER BY b.FromId, b.ToId
-                                             FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)')) AS Sig
-              FROM (SELECT DISTINCT ProjectId FROM @pb) AS x) AS s;   -- FOR XML PATH, а не агрегат рядків 2017+ (D-101)
+    DECLARE @psig TABLE (ProjectId int NOT NULL PRIMARY KEY, Sig varbinary(32) NOT NULL);
+    INSERT INTO @psig (ProjectId, Sig)
+    SELECT x.ProjectId,
+           CAST(HASHBYTES('SHA2_256', (SELECT N',' + CAST(b.FromId AS nvarchar(10)) + N'>' + CAST(b.ToId AS nvarchar(10))
+                                         FROM @pb AS b WHERE b.ProjectId = x.ProjectId ORDER BY b.FromId, b.ToId
+                                          FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)')) AS varbinary(32))
+      FROM (SELECT DISTINCT ProjectId FROM @pb) AS x;   -- FOR XML PATH, а не агрегат рядків 2017+ (D-101)
+    IF @tid IS NOT NULL
+    BEGIN
+        -- D1: новий підпис - наступний номер шаблону (порядок - за найменшим проєктом підпису); наявні номери не змінюються.
+        INSERT INTO rpt.ViewScopeSig (TemplateId, Sig, Scope)
+        SELECT @tid, n.Sig,
+               COALESCE((SELECT MAX(v.Scope) FROM rpt.ViewScopeSig AS v WHERE v.TemplateId = @tid), 0)
+               + ROW_NUMBER() OVER (ORDER BY n.FirstProject)
+          FROM (SELECT Sig, MIN(ProjectId) AS FirstProject FROM @psig GROUP BY Sig) AS n
+         WHERE NOT EXISTS (SELECT 1 FROM rpt.ViewScopeSig AS v WHERE v.TemplateId = @tid AND v.Sig = n.Sig);
+        INSERT INTO @ps (ProjectId, Scope)
+        SELECT p.ProjectId, v.Scope FROM @psig AS p JOIN rpt.ViewScopeSig AS v ON v.TemplateId = @tid AND v.Sig = p.Sig;
+    END
     INSERT INTO @scopes (Scope, Projects)
     SELECT 0, NULL
     UNION ALL

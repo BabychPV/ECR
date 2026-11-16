@@ -379,6 +379,109 @@ public sealed partial class ReportViewStableRenameScopeTests(ITestOutputHelper o
         Assert.Equal([pq.ProjectId], after.Keys.ToList());
     }
 
+    /// <summary>
+    /// D1: номер скоупу стабільний - за підписом набору пар у порядку появи (1, 2, 3, ...); новий набір не перенумеровує наявні.
+    /// </summary>
+    [Fact]
+    public async Task Номери_скоупів_стабільні_новий_набір_пар_отримує_наступний_номер()
+    {
+        var (templateId, _) = await NewTemplateAsync();
+        var v1 = await AddVersionAsync(templateId, "1", ("T", ["A", "B", "C", "D"]));
+        var v2 = await AddVersionAsync(templateId, "2", ("T", ["A", "Z", "W", "V"]));
+        var t1 = v1.Tables["T"];
+        var t2 = v2.Tables["T"];
+        (int From, int To) bz = (t1.Cols["B"], t2.Cols["Z"]), cw = (t1.Cols["C"], t2.Cols["W"]), dv = (t1.Cols["D"], t2.Cols["V"]);
+        await RenameAsync(bz.From, bz.To, legacy: false);
+        await RenameAsync(cw.From, cw.To, legacy: false);
+        await RenameAsync(dv.From, dv.To, legacy: false);
+
+        // П'ять проєктів по черзі, кожен з НОВИМ набором пар: номери 1..5 у порядку появи, наявні не змінюються.
+        (int From, int To)[][] sets = [[bz], [bz, cw], [cw], [dv], [bz, dv]];
+        var projects = new List<ProjectRef>();
+        for (var i = 0; i < sets.Length; i++)
+        {
+            var project = await NewProjectAsync(v1.VersionId, 209901);
+            projects.Add(project);
+            foreach (var (from, to) in sets[i])
+            {
+                await BindAsync(from, to, project.ProjectId);
+            }
+
+            await GenerateAsync(v2.VersionId, routing: false);
+            var scopes = (await ScalarRowsAsync($"SELECT ProjectId, Scope FROM rpt.ViewProjectScope WHERE TemplateId = {templateId}"))
+                .ToDictionary(r => r.ProjectId, r => r.Scope);
+            Assert.Equal([.. Enumerable.Range(1, i + 1)], projects.Select(p => scopes[p.ProjectId]).ToList());
+        }
+    }
+
+    /// <summary>
+    /// D1: група, яку виклик пропускає (50422, понад 1000 колонок), лишається зі старим текстом; новий набір пар іншого проєкту
+    /// не змінює номера скоупу PB - старий текст і rpt.ViewProjectScope узгоджені: PB бачить свій аліас, PQ - не бачить чужого.
+    /// </summary>
+    [Fact]
+    public async Task Пропущена_група_50422_лишається_узгодженою_зі_стабільними_номерами()
+    {
+        var (templateId, code) = await NewTemplateAsync();
+        var filler = Enumerable.Range(1, 990).Select(i => ($"F{i}", CellDataType.String)).ToArray();
+        (string, CellDataType)[] v1Cols = [("A", CellDataType.String), ("B", CellDataType.String), ("C", CellDataType.String), .. filler];
+        (string, CellDataType)[] v2Cols = [("A", CellDataType.String), ("Z", CellDataType.String), ("W", CellDataType.String), .. filler];
+        var v1 = await AddTypedVersionAsync(templateId, "1", [("T", v1Cols)]);
+        var v2 = await AddTypedVersionAsync(templateId, "2", [("T", v2Cols)]);
+        var t1 = v1.Tables["T"];
+        var t2 = v2.Tables["T"];
+        var pb = await NewProjectAsync(v1.VersionId, 209901);
+        var pq = await NewProjectAsync(v1.VersionId, 209901);
+        await SeedAsync(pb, 209901, t1, ("A", "a"), ("B", "pb_b"), ("C", "pb_c"));
+        await SeedAsync(pq, 209901, t1, ("A", "a"), ("B", "pq_b"), ("C", "pq_c"));
+        await RenameAsync(t1.Cols["B"], t2.Cols["Z"], legacy: false, pb.ProjectId);   // PB: {B -> Z}
+        await RenameAsync(t1.Cols["C"], t2.Cols["W"], legacy: false);
+        await GenerateAsync(v2.VersionId, routing: false);
+        var stable = Sanitise($"v_{code}_S_T");
+        var oldText = await DefinitionAsync(stable);
+        Assert.Equal("pb_b", await ScalarStringAsync(stable, pb.ProjectId, 209901, "Z", "R1"));
+
+        // v3 додає 10 колонок: група понад 1000 - 50422, вʼюха лишається зі старим текстом. Тим часом PQ - новий набір {C -> W}.
+        (string, CellDataType)[] v3Cols = [.. v2Cols, .. Enumerable.Range(1, 10).Select(i => ($"G{i}", CellDataType.String))];
+        var v3 = await AddTypedVersionAsync(templateId, "3", [("T", v3Cols)]);
+        await BindAsync(t1.Cols["C"], t2.Cols["W"], pq.ProjectId);
+        var failed = await Assert.ThrowsAsync<SqlException>(() => GenerateAsync(v3.VersionId, routing: false));
+        Assert.Equal(50422, failed.Number);
+        Assert.Equal(oldText, await DefinitionAsync(stable));
+
+        Assert.Equal("pb_b", await ScalarStringAsync(stable, pb.ProjectId, 209901, "Z", "R1"));   // PB - свій аліас
+        Assert.Null(await ScalarStringAsync(stable, pq.ProjectId, 209901, "Z", "R1"));            // PQ - не чужий
+    }
+
+    /// <summary>
+    /// r3: маршрутизація місяців - значення перейменованої МІСЯЧНОЇ колонки (січень) у рядку лютого PB приходить лише від
+    /// екземпляра-власника (fam, січневий екземпляр v1), не з власної копії; PB бачить його під новим іменем, PA - ні.
+    /// </summary>
+    [Fact]
+    public async Task Маршрутизація_значення_власника_перейменованої_місячної_колонки_за_скоупом_проєкту()
+    {
+        var (templateId, code) = await NewTemplateAsync();
+        var v1 = await AddVersionAsync(templateId, "1", ("T", ["A", "B"]));
+        var v2 = await AddVersionAsync(templateId, "2", ("T", ["A", "Z"]));
+        var t1 = v1.Tables["T"];
+        var t2 = v2.Tables["T"];
+        await ExecAsync($"UPDATE cfg.ColumnDef SET IsMonthColumn = 1, MonthNumber = 1 WHERE Id IN ({t1.Cols["B"]}, {t2.Cols["Z"]})");
+        var pb = await NewProjectAsync(v1.VersionId, 209901, 209902);
+        var pa = await NewProjectAsync(v1.VersionId, 209901, 209902);
+        foreach (var (project, tag) in new[] { (pb, "pb"), (pa, "pa") })
+        {
+            await SeedAsync(project, 209901, t1, ("A", $"{tag}_a1"), ("B", $"{tag}_jan"));   // власник січня - екземпляр v1
+            await SeedAsync(project, 209902, t2, ("A", $"{tag}_a2"));                         // лютий (v2): Z без власної копії
+        }
+
+        await RenameAsync(t1.Cols["B"], t2.Cols["Z"], legacy: false, pb.ProjectId);
+        await GenerateAsync(v2.VersionId, routing: true);
+        var stable = Sanitise($"v_{code}_S_T");
+        Assert.Contains("FROM rpt.ViewSlot AS fm", await DefinitionAsync(stable), StringComparison.Ordinal);
+
+        Assert.Equal("pb_jan", await ScalarStringAsync(stable, pb.ProjectId, 209902, "Z", "R1"));
+        Assert.Null(await ScalarStringAsync(stable, pa.ProjectId, 209902, "Z", "R1"));
+    }
+
     // ── помічники ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
     private sealed record Scenario(string Stable, int Pb, int Pa, int Pc, int BV1, int ZV2);
