@@ -53,10 +53,9 @@ internal static class SubmittedSheetRecalcLog
         var entries = new List<StructureChangeRecord>(sheets.Count);
         foreach (var (sheetDefId, copyId) in sheets.OrderBy(s => s.SheetDefId).ThenBy(s => s.CopyId ?? 0))
         {
-            if (!defs.TryGetValue(sheetDefId, out var def))
-            {
-                continue;
-            }
+            // Аркуш, у який прогін щойно записав, існує за побудовою (екземпляр таблиці → таблиця → аркуш, FK): гілки
+            // «аркуша немає» тут немає — її неможливо було б покрити тестом (мутація 37).
+            var def = defs[sheetDefId];
 
             entries.Add(new StructureChangeRecord(
                 now,
@@ -82,10 +81,7 @@ internal static class SubmittedSheetRecalcLog
                 CorrelationId: RecalculationSkips.AuditCorrelation(documentId, sheetDefId, periodKey, copyId)));
         }
 
-        if (entries.Count > 0)
-        {
-            await audit.WriteStructureChangesAsync(entries, ct).ConfigureAwait(false);
-        }
+        await audit.WriteStructureChangesAsync(entries, ct).ConfigureAwait(false);
 
         return entries.Count;
     }
