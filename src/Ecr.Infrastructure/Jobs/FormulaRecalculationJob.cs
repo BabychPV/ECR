@@ -33,7 +33,10 @@ public sealed partial class FormulaRecalculationJob(
     // WW-03: необовʼязкові лише для тестів, що збирають задачу вручну; DI підставляє обидва.
     CrossPeriodFanOut? fanOut = null,
     IPeriodStore? periods = null,
-    ILogger<FormulaRecalculationJob>? logger = null) : IFormulaRecalculationJob
+    ILogger<FormulaRecalculationJob>? logger = null,
+    // ✎ B79: журнал і годинник — для позначки «перераховано після подання»; без них (ручна збірка в тестах) позначки немає.
+    IAuditWriter? audit = null,
+    Ecr.Domain.Abstractions.IClock? clock = null) : IFormulaRecalculationJob
 {
     /// <summary>Ключ каталогу відмови спільного блокування аркуша (<c>SheetEditGate.Busy</c>).</summary>
     private const string SheetBeingSubmittedKey = "err.ECR-DOC-4091.sheetBeingSubmitted";
@@ -57,6 +60,13 @@ public sealed partial class FormulaRecalculationJob(
             if (!work.TryGetValue(cellPeriod, out var item))
             {
                 work[cellPeriod] = item = new PeriodWork();
+            }
+
+            // ✎ B79 (правило людини 07.11): насіння правки загального стовпця з залежними розрахунками (і ланки його
+            // ланцюжка) — прогін періоду пише й ПОДАНІ аркуші, з позначкою; затверджені не пише ніколи.
+            if (cell.WriteSubmitted == true)
+            {
+                item.WriteSubmitted = true;
             }
 
             // WW-03: елемент `cells` із `TableDefId` — не адреса комірки, а «у іншому періоді змінилась
@@ -149,6 +159,9 @@ public sealed partial class FormulaRecalculationJob(
                 // власником, чиї читачі в інших екземплярах року не бачили б зміни.
                 var inputColumns = new HashSet<(int TableDefId, int ColumnDefId)>();
                 var periodWritten = 0;
+
+                // ✎ B79: подані аркуші, у які прогін періоду записав завдяки `WriteSubmitted` (наповнюється після коміту).
+                var submittedWritten = item.WriteSubmitted ? new HashSet<(int SheetDefId, long? CopyId)>() : null;
                 try
                 {
                     if (!item.Dirty.IsEmpty)
@@ -159,7 +172,8 @@ public sealed partial class FormulaRecalculationJob(
                         {
                             periodWritten += await recalculation
                                 .RecalculateAsync(
-                                    instanceId, dirty, ct, changed, item.ApproverSheets, inputColumns, shared)
+                                    instanceId, dirty, ct, changed, item.ApproverSheets, inputColumns, shared,
+                                    writeSubmitted: item.WriteSubmitted, submittedWritten: submittedWritten)
                                 .ConfigureAwait(false);
                         }
                     }
@@ -181,7 +195,8 @@ public sealed partial class FormulaRecalculationJob(
                         {
                             periodWritten += await recalculation
                                 .RecalculateFromOtherPeriodsAsync(
-                                    documentId, periodKey, item.Sources, ct, changed, shared, annualPeriods)
+                                    documentId, periodKey, item.Sources, ct, changed, shared, annualPeriods,
+                                    writeSubmitted: item.WriteSubmitted, submittedWritten: submittedWritten)
                                 .ConfigureAwait(false);
                         }
                     }
@@ -219,6 +234,15 @@ public sealed partial class FormulaRecalculationJob(
                     writtenPeriods.Add(slot);
                 }
 
+                // ✎ B79: поданий аркуш, у який каскад записав, — запис журналу й позначка «перераховано після подання»
+                // (той самий механізм, що B63/B83: `SheetRecalc/RecalculatedAfterSubmission`, читає картка документа).
+                if (submittedWritten is { Count: > 0 })
+                {
+                    await SubmittedSheetRecalcLog
+                        .WriteAsync(db, audit, clock, documentId, slot, submittedWritten, ct)
+                        .ConfigureAwait(false);
+                }
+
                 // WW-03: ланцюжок читачів — зміни цього прогону (насіння й похідні) йдуть в інші періоди року.
                 // L2: читачі дописуються в ЦЕЙ перелік (а не ставляться окремими задачами); без змін у записаному
                 // далі нічого не додається (ланцюжок завершується).
@@ -242,6 +266,9 @@ public sealed partial class FormulaRecalculationJob(
                         }
 
                         next.Hops = Math.Max(next.Hops, item.Hops + 1);
+
+                        // ✎ B79: позначка «писати й подані» йде ланцюжком — місяці-читачі загального стовпця.
+                        next.WriteSubmitted |= item.WriteSubmitted;
                     }
                 }
             }
@@ -362,7 +389,8 @@ public sealed partial class FormulaRecalculationJob(
 
         foreach (var (slot, item) in pending.Where(p => p.Item.Sources.Count > 0))
         {
-            await fanOut.EnqueueSourcesAsync(documentId, new PeriodKey(slot), item.Sources, item.Hops, ct)
+            await fanOut
+                .EnqueueSourcesAsync(documentId, new PeriodKey(slot), item.Sources, item.Hops, ct, item.WriteSubmitted)
                 .ConfigureAwait(false);
         }
     }
@@ -402,6 +430,9 @@ public sealed partial class FormulaRecalculationJob(
         public long InstanceId { get; set; }
 
         public int Hops { get; set; }
+
+        /// <summary>✎ B79: прогін періоду пише й подані аркуші (насіння чи ланка ланцюжка з <c>WriteSubmitted</c>).</summary>
+        public bool WriteSubmitted { get; set; }
 
         public bool IsEmpty => Dirty.IsEmpty && Sources.Count == 0;
 
@@ -492,6 +523,12 @@ public sealed record FormulaRecalculationRequest(
 /// документ, тож період несе кожен елемент; <c>null</c> — період тіла задачі (старий формат у черзі).
 /// </param>
 /// <param name="TableInstanceId">L2: екземпляр таблиці комірки-насіння; <c>null</c> — екземпляр тіла задачі.</param>
+/// <param name="WriteSubmitted">
+/// ✎ B79: насіння — правка загального стовпця вводу річної таблиці з залежними розрахунками (<c>RecalculationSeed</c>),
+/// або ланка його ланцюжка: прогін періоду пише й ПОДАНІ аркуші з позначкою «перераховано після подання»;
+/// затверджені — ніколи. <c>null</c> — звичайна правка (подані пропускаються, як і доти).
+/// </param>
 public sealed record DirtyCell(
     long RowId, int ColumnDefId, int? TableDefId = null, int? SourcePeriod = null, int? Hops = null,
-    int? ApproverSheetDefId = null, bool? OwnerInput = null, int? PeriodKey = null, long? TableInstanceId = null);
+    int? ApproverSheetDefId = null, bool? OwnerInput = null, int? PeriodKey = null, long? TableInstanceId = null,
+    bool? WriteSubmitted = null);
