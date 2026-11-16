@@ -19,8 +19,12 @@ vi.mock('@/features/common/usePendingLoading', () => ({ usePendingLoading: () =>
  *   (`opened` пропом), форма після закриття на місці, кнопки активні — клік по «New version» закритого `Modal` слав
  *   `POST /api/v1/reports/3/versions` уже після закриття (так само «Add» — `POST /api/v1/reports`).
  *
- * Мутаційний доказ: прибрати `!opened ||` з обробника «New version» у `ReportDefinitionsModal.tsx` → червоний другий
- * тест (`expected [ 'POST /api/v1/reports/3/versions' ] to deeply equal []`).
+ * Мутаційний доказ: прибрати `!opened ||` з обробника «New version» у `ReportDefinitionsModal.tsx` → червоний
+ * «New version закритого вікна» (`expected [ 'POST /api/v1/reports/3/versions' ] to deeply equal []`).
+ *
+ * F13: прибрати `!opened ||` з обробника «Add» → червоний «Add закритого вікна»
+ * (`expected [ 'POST /api/v1/reports' ] to deeply equal []`). Повтор після відмови: обробник, що замикається після
+ * помилки (`|| create.isError`), → червоний «після відмови…» (один POST замість двох).
  */
 
 const Definitions = [
@@ -45,9 +49,24 @@ function Host(): JSX.Element {
       <button type="button" onClick={() => setOpened(false)}>
         close
       </button>
+      <button type="button" onClick={() => setOpened(true)}>
+        reopen
+      </button>
     </>
   );
 }
+
+// ⚠ Код відмови — з каталогу (`ECR-REQ-0422`, `err.ECR-REQ-0422.malformedRequest`).
+const Refused = {
+  status: 422,
+  body: {
+    title: 'Unprocessable',
+    status: 422,
+    errorCode: 'ECR-REQ-0422',
+    correlationId: 'cid-refused',
+    messageKey: 'err.ECR-REQ-0422.malformedRequest',
+  },
+};
 
 async function fillNewVersion(): Promise<HTMLElement> {
   fireEvent.click(await screen.findByRole('textbox', { name: /reportDefs\.forReport/ }));
@@ -64,6 +83,30 @@ async function fillNewVersion(): Promise<HTMLElement> {
   });
 
   return button;
+}
+
+const AddDefinition = 'POST /api/v1/reports';
+
+/** Читання з реєстром мов: без нього `LocalizedInput` не малює поля назви, і «Add» лишається заблокованою. */
+function readWithLanguages(url: string): unknown {
+  if (url.endsWith('/api/v1/languages')) return [{ code: 'en', nameNative: 'English', isDefault: true, isActive: true }];
+
+  return [];
+}
+
+/** Заповнити форму нового опису: «Add» стає доступною. */
+async function fillAdd(): Promise<HTMLElement> {
+  fireEvent.change(screen.getAllByRole('textbox', { name: /reportDefs\.code/ })[0]!, { target: { value: 'NEW_REPORT' } });
+  fireEvent.change(await screen.findByRole('textbox', { name: /registries\.name.*English/ }), { target: { value: 'New report' } });
+  fireEvent.change(screen.getAllByRole('textbox', { name: /reportDefs\.version/ })[0]!, { target: { value: '1.0' } });
+  fireEvent.change(screen.getByRole('textbox', { name: /reportDefs\.columnCode/ }), { target: { value: 'CO2' } });
+  await waitFor(() => {
+    const add = screen.getByRole('button', { name: /reportDefs\.add⟧/ });
+    expect(add.getAttribute('aria-disabled')).toBeNull();
+  });
+
+  // ⚠ `DisabledReason` перемонтовує кнопку, коли причина зникає: шукати її після цього.
+  return screen.getByRole('button', { name: /reportDefs\.add⟧/ });
 }
 
 /** Наступний тік: `isPending` мутації вже дійшов до рендера (так приходить другий клік подвійного кліку). */
@@ -91,6 +134,72 @@ describe('B149: ReportDefinitionsModal — один запис на дію, жо
     fireEvent.click(button);
     await settle();
     expect(server.sent).toEqual([AddVersion]);
+  }, 60_000);
+
+  it('«Add» закритого вікна (ще в DOM) нічого не шле', async () => {
+    const server = holdWrites({ read: readWithLanguages });
+    renderKeepMounted(<Host />);
+    const button = await fillAdd();
+
+    fireEvent.click(screen.getByRole('button', { name: 'close' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+
+    expect(button.isConnected).toBe(true);
+    expect(button.getAttribute('aria-disabled')).toBeNull();
+    fireEvent.click(button);
+    await settle();
+    expect(server.sent).toEqual([]);
+  }, 60_000);
+
+  it('закрити й відкрити знову: «Add» відкритого вікна шле рівно один POST', async () => {
+    const server = holdWrites({ read: readWithLanguages });
+    renderKeepMounted(<Host />);
+    await fillAdd();
+
+    fireEvent.click(screen.getByRole('button', { name: 'close' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'reopen' }));
+    await screen.findByRole('dialog');
+
+    // Форма менеджера переживає закриття (стан у компоненті) — після повторного відкриття «Add» доступна одразу.
+    const add = screen.getByRole('button', { name: /reportDefs\.add⟧/ });
+    expect(add.getAttribute('aria-disabled')).toBeNull();
+    fireEvent.click(add);
+    await waitFor(() => {
+      expect(server.sent).toEqual([AddDefinition]);
+    });
+    await nextTick();
+    fireEvent.click(add);
+    await settle();
+    expect(server.sent).toEqual([AddDefinition]);
+    server.release();
+  }, 60_000);
+
+  it('після відмови сервера повторний «Add» шле POST знову', async () => {
+    const server = holdWrites({ read: readWithLanguages, write: (_m, _u, index) => (index === 0 ? Refused : { body: {} }) });
+    renderKeepMounted(<Host />);
+    const add = await fillAdd();
+
+    fireEvent.click(add);
+    await waitFor(() => {
+      expect(server.sent).toEqual([AddDefinition]);
+    });
+    server.release();
+    // Відмова доходить до мутації через розбір відповіді й `notifyManager` (кілька тіків і таймерів), а видимого
+    // сліду в діалозі немає (тост `showApiError`) — тому пауза в реальному часі, як у вікні 3 `probeThreeWindows`.
+    await act(async () => {
+      await new Promise<void>((resolve) => setTimeout(resolve, 300));
+    });
+    // Відмова не закриває менеджер і не скидає форму: повтор — той самий натиск.
+    expect(screen.queryByRole('dialog')).not.toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /reportDefs\.add⟧/ }));
+    await waitFor(() => {
+      expect(server.sent).toEqual([AddDefinition, AddDefinition]);
+    });
   }, 60_000);
 
   it('«New version» закритого вікна (ще в DOM) нічого не шле', async () => {

@@ -1,6 +1,6 @@
 import type { JSX } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { Menu } from '@mantine/core';
 import type { DocumentSummary } from '@/api/types';
 import { useBusinessKeyChangeAction } from '@/features/documents/BusinessKeyChangeAction';
@@ -78,6 +78,52 @@ function Harness(): JSX.Element {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+async function openAndFill(): Promise<HTMLElement> {
+  const item = await waitFor(() => {
+    const found = document.querySelector<HTMLElement>('[data-change-business-key]');
+    if (found === null) throw new Error('пункту ще немає');
+    return found;
+  });
+  fireEvent.click(item);
+  fireEvent.change(await screen.findByLabelText(/documents\.newBusinessKey/), { target: { value: 'DOC-NEW' } });
+  fireEvent.change(screen.getByLabelText(/workflow\.reason/), { target: { value: 'Typo in the case number' } });
+
+  return screen.getByTestId('business-key-confirm');
+}
+
+/** Наступний тік: `isPending` мутації вже дійшов до рендера (так приходить другий клік подвійного кліку). */
+async function nextTick(): Promise<void> {
+  await act(async () => {
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  });
+}
+
+const Rekey = `POST /api/v1/documents/${String(DocumentId)}/business-key`;
+
+describe('B149: Change case number — подвійний клік, поки запис у дорозі', () => {
+  /*
+   * ⚠ Спінер тут — НЕ `usePendingLoading` (100 мс): `loading={isPending}` і `canSubmit` (з `!change.isPending`) вимикають
+   * кнопку в тому ж рендері, що й приносить `isPending` у захист обробника. Тому захист `isPending` в обробнику —
+   * другий шар (F13, мутації зі збіркою OK): без нього — зелено; без нього й без `loading` — зелено (тримає
+   * `canSubmit`); без нього й без `disabled` — зелено (тримає `loading`); без усіх трьох — червоно (два POST).
+   */
+  it('другий клік, поки запит у дорозі, не шле другий POST', async () => {
+    const server = holdWrites({ read: (url) => (url.endsWith('/api/v1/me') ? Me : {}), write: () => ({ body: {} }) });
+    renderKeepMounted(<Harness />);
+    const confirm = await openAndFill();
+
+    fireEvent.click(confirm);
+    await waitFor(() => {
+      expect(server.sent).toEqual([Rekey]);
+    });
+    await nextTick();
+    fireEvent.click(confirm);
+    await settle();
+    expect(server.sent).toEqual([Rekey]);
+    server.release();
+  });
 });
 
 describe('B149: Change case number, що закрився (ще в DOM), не шле запит удруге', () => {

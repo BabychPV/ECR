@@ -21,6 +21,9 @@ vi.mock('@/features/common/usePendingLoading', () => ({ usePendingLoading: () =>
  * Мутаційний доказ: прибрати `!opened ||` з обробника «Import» у `MethodologyPackageImport.tsx` → червоний другий тест
  * (`expected [ …(2) ] to deeply equal [ 'POST /api/v1/methodologies/import' ]`); без `|| apply.isPending` — червоний
  * перший (`expected [ …(3) ] to deeply equal [ …(2) ]`).
+ *
+ * F13: прибрати `!opened ||` з обробника «Check» → червоний «Check закритого вікна»
+ * (`expected [ 'POST /api/v1/methodologies/import' ] to deeply equal []`).
  */
 
 const Report = {
@@ -42,8 +45,8 @@ async function nextTick(): Promise<void> {
   });
 }
 
-/** Відкрити, вибрати пакет, перевірити (`dryRun=true`): «Import» стає доступною. */
-async function checked(server: ReturnType<typeof holdWrites>): Promise<HTMLElement> {
+/** Відкрити й вибрати пакет: «Check» стає доступною. */
+async function chosen(): Promise<HTMLElement> {
   fireEvent.click(screen.getByRole('button', { name: /methodologies\.importPackage/ }));
   const input = await waitFor(() => {
     const found = document.querySelector('input[type="file"]');
@@ -56,7 +59,13 @@ async function checked(server: ReturnType<typeof holdWrites>): Promise<HTMLEleme
   await waitFor(() => {
     expect(check.hasAttribute('disabled')).toBe(false);
   });
-  fireEvent.click(check);
+
+  return check;
+}
+
+/** Відкрити, вибрати пакет, перевірити (`dryRun=true`): «Import» стає доступною. */
+async function checked(server: ReturnType<typeof holdWrites>): Promise<HTMLElement> {
+  fireEvent.click(await chosen());
   await waitFor(() => {
     expect(server.sent).toEqual([Import]);
   });
@@ -87,6 +96,23 @@ describe('B149: MethodologyPackageImport — один імпорт, жодног
     fireEvent.click(apply);
     await settle();
     expect(server.sent).toEqual([Import, Import]);
+  });
+
+  it('«Check» закритого вікна (ще в DOM) нічого не шле', async () => {
+    const server = holdWrites({ read: () => [], write: () => ({ body: Report }) });
+    renderKeepMounted(<MethodologyPackageImport />);
+    const check = await chosen();
+
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+
+    expect(check.isConnected).toBe(true);
+    expect(check.hasAttribute('disabled')).toBe(false);
+    fireEvent.click(check);
+    await settle();
+    expect(server.sent).toEqual([]);
   });
 
   it('«Import» закритого вікна (ще в DOM) нічого не шле', async () => {

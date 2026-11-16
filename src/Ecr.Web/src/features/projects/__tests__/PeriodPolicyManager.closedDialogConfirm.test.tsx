@@ -59,6 +59,29 @@ describe('B149: PeriodPolicyManager — один запис на дію, жод�
     expect(server.sent).toEqual([Create]);
   });
 
+  /*
+   * ⚠ «Save» рядка: рядки після закриття знімаються (`data={opened ? … : undefined}`) — кнопка від'єднана, і клік до
+   * React не доходить. Тому `!opened` в її обробнику — ДРУГИЙ шар і сам по собі не червоніє (див. звіт мутацій: без
+   * нього зелено; без нього І з рядками, що лишаються після закриття (`data={policies.data}`), — червоно; з захистом і
+   * такими рядками — зелено).
+   */
+  it('«Save» рядка закритого вікна нічого не шле (рядки зняті разом із вікном)', async () => {
+    const server = holdWrites({ read: () => [Policy] });
+    renderKeepMounted(<PeriodPolicyManager />);
+    await openAndType();
+    const save = screen.getByRole('button', { name: /common\.save/ });
+    expect(save).toHaveProperty('disabled', false);
+
+    fireEvent.click(screen.getByRole('button', { name: /common\.close/ }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+
+    fireEvent.click(save);
+    await settle();
+    expect(server.sent).toEqual([]);
+  });
+
   it('«Create» закритого вікна (ще в DOM) нічого не шле', async () => {
     const server = holdWrites({ read: () => [Policy] });
     renderKeepMounted(<PeriodPolicyManager />);

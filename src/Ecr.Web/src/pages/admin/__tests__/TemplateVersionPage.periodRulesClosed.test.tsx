@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { Route, Routes } from 'react-router-dom';
 import { TemplateVersionPage } from '@/pages/admin/TemplateVersionPage';
 import { holdWrites, renderKeepMounted, settle } from '@/test/closedDialogProbe';
@@ -15,6 +15,10 @@ import { holdWrites, renderKeepMounted, settle } from '@/test/closedDialogProbe'
  *
  * Мутаційний доказ: прибрати `!periodRulesOpen ||` з `onSave` у `TemplateVersionPage.tsx` → червоний
  * (`expected [ Array(1) ] to deeply equal []`).
+ *
+ * F13: те саме для `onSubmit` нового правила («Add») і `onDelete` — кожен має власний тест, червоний без свого
+ * `!periodRulesOpen ||`. «Delete» закритого вікна відкриває ВЛАСНЕ підтвердження (`ConfirmModal` з `opened = true`),
+ * тож захист `shared/ui` там не допомагає — лишається лише захист `onDelete`.
  */
 
 function structureDto(): unknown {
@@ -60,7 +64,80 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+function renderPage(): void {
+  renderKeepMounted(
+    <Routes>
+      <Route path="/admin/templates/:id/versions/:versionId" element={<TemplateVersionPage />} />
+    </Routes>,
+    '/admin/templates/1/versions/1',
+  );
+}
+
+async function openRules(): Promise<void> {
+  fireEvent.click(await screen.findByTestId('version-more'));
+  fireEvent.click(await screen.findByRole('menuitem', { name: /periodRules\.title/ }));
+  await screen.findByRole('dialog');
+}
+
+/** Форма нового правила: ціль — аркуш (без цілі «Add» заблокована). Повертає «Add». */
+async function fillCreate(): Promise<HTMLElement> {
+  const sheet = (await screen.findAllByRole('textbox', { name: /periodRules\.sheet/ }))[0]!;
+  fireEvent.click(sheet);
+  // ⚠ Не будь-яка `option`: `NativeSelect` форми (вид правила тощо) теж має `<option>` — лише список `Select` аркуша.
+  const list = await screen.findByRole('listbox', { hidden: true });
+  fireEvent.click(within(list).getAllByRole('option', { hidden: true })[0]!);
+  const add = screen.getByRole('button', { name: /periodRules\.add/ });
+  await waitFor(() => {
+    expect(add).toHaveProperty('disabled', false);
+  });
+
+  return add;
+}
+
+/** Закрити вікно правил Escape-ом; `Modal` лишається в DOM (`keepMounted`). */
+async function closeRules(): Promise<void> {
+  fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+  await waitFor(() => {
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+}
+
 describe('B149: правила доступу до періоду — жодного запису з закритого вікна', () => {
+  it('«Add» нового правила в закритому вікні (ще в DOM) нічого не шле', async () => {
+    const server = holdWrites({ read });
+    renderPage();
+    await openRules();
+    const add = await fillCreate();
+
+    await closeRules();
+    expect(add.isConnected).toBe(true);
+    expect(add).toHaveProperty('disabled', false);
+    fireEvent.click(add);
+    await settle();
+    expect(server.sent).toEqual([]);
+  }, 60_000);
+
+  it('«Delete» правила, підтверджене після закриття вікна правил, нічого не шле', async () => {
+    const server = holdWrites({ read });
+    renderPage();
+    await openRules();
+    fireEvent.change(await screen.findByRole('textbox', { name: /periodRules\.manageId/ }), { target: { value: '7' } });
+    const remove = screen.getByRole('button', { name: /periodRules\.delete/ });
+    await waitFor(() => {
+      expect(remove).toHaveProperty('disabled', false);
+    });
+
+    await closeRules();
+    // Кнопка закритого вікна ще в DOM і активна: клік відкриває ВЛАСНЕ підтвердження (його `opened` — істина),
+    // тож захист `ConfirmModal` (`if (opened)`) запис не зупиняє — лишається лише `!periodRulesOpen` в `onDelete`.
+    expect(remove.isConnected).toBe(true);
+    fireEvent.click(remove);
+    const confirm = await screen.findByRole('dialog');
+    fireEvent.click(within(confirm).getByRole('button', { name: /periodRules\.delete/ }));
+    await settle();
+    expect(server.sent).toEqual([]);
+  }, 60_000);
+
   it('«Save» правила в закритому вікні (ще в DOM) нічого не шле', async () => {
     const server = holdWrites({ read });
     renderKeepMounted(
