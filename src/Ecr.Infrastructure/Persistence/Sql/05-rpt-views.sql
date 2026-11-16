@@ -44,12 +44,13 @@ GO
 -- індексу за CorrelationId журнал не має. Журнал читається лише гарячий (aud.*), як і в картці.
 -- Вʼюхи приєднують функцію за ключем стану (`ras.ApprovalStateId = a.Id`): позначка рахується на СТАН аркуша, а не на
 -- рядок вʼюхи. ⛔ Це єдине місце файла, де статус подання порівнюється (сторож StatusNumberingTests): вʼюхи за статусом
--- не фільтрують.
+-- не фільтрують. Marked - tinyint 1: колонка вʼюхи `ISNULL(ras.Marked, 0)` виходить tinyint NOT NULL (CAST у вʼюсі дав би
+-- nullable-колонку), а 0 - жива гілка «не позначено», не запасне значення.
 CREATE OR ALTER FUNCTION rpt.fn_RecalculatedAfterSubmission ()
 RETURNS TABLE
 AS
 RETURN
-SELECT a.Id AS ApprovalStateId
+SELECT a.Id AS ApprovalStateId, CAST(1 AS tinyint) AS Marked
   FROM wf.ApprovalState AS a
  WHERE a.Status = 1
    AND EXISTS (SELECT 1
@@ -113,7 +114,7 @@ SELECT p.Id AS ProjectId, p.Code AS ProjectCode,
         FROM doc.DocumentSheet AS g WHERE g.DocumentId = d.Id AND g.SheetDefId = sd.Id) AS SheetDisplayName,
        CAST(0 AS bit) AS IsArchived,
        tv.WorkflowMode AS _WorkflowMode,
-       CAST(CASE WHEN ras.ApprovalStateId IS NULL THEN 0 ELSE 1 END AS tinyint) AS _RecalculatedAfterSubmission
+       ISNULL(ras.Marked, 0) AS _RecalculatedAfterSubmission
 FROM doc.CellValue          AS cv
 JOIN doc.TableRow           AS r  ON r.PeriodKey = cv.PeriodKey AND r.Id = cv.TableRowId AND r.IsDeleted = 0
 JOIN doc.TableInstance      AS ti ON ti.PeriodKey = r.PeriodKey AND ti.Id = r.TableInstanceId
@@ -155,7 +156,7 @@ SELECT p.Id AS ProjectId, p.Code AS ProjectCode,
         FROM doc.DocumentSheet AS g WHERE g.DocumentId = d.Id AND g.SheetDefId = sd.Id) AS SheetDisplayName,
        CAST(1 AS bit) AS IsArchived,
        tv.WorkflowMode AS _WorkflowMode,
-       CAST(CASE WHEN ras.ApprovalStateId IS NULL THEN 0 ELSE 1 END AS tinyint) AS _RecalculatedAfterSubmission
+       ISNULL(ras.Marked, 0) AS _RecalculatedAfterSubmission
 FROM arc.CellValue          AS cv
 JOIN arc.TableRow           AS r  ON r.PeriodKey = cv.PeriodKey AND r.Id = cv.TableRowId AND r.IsDeleted = 0
 JOIN arc.TableInstance      AS ti ON ti.PeriodKey = r.PeriodKey AND ti.Id = r.TableInstanceId
@@ -889,7 +890,7 @@ JOIN doc.TableRow      AS r ON r.PeriodKey = ti.PeriodKey AND r.TableInstanceId 
         -- ✎ B138 (людина 16.11): _RecalculatedAfterSubmission - аркуш рядка поданий і після подання перерахований
         -- (rpt.fn_RecalculatedAfterSubmission, приєднана за станом a.Id); ОСТАННЬОЮ колонкою, після _WorkflowMode.
         SET @copyCols = CONCAT(@copyCols, N',
-       CAST(CASE WHEN ras.ApprovalStateId IS NULL THEN 0 ELSE 1 END AS tinyint) AS _RecalculatedAfterSubmission');
+       ISNULL(ras.Marked, 0) AS _RecalculatedAfterSubmission');
 
         SET @sql = CONCAT(
 N'CREATE OR ALTER VIEW rpt.', QUOTENAME(@view), N'
@@ -1860,7 +1861,7 @@ N'SELECT p.Id AS _ProjectId, p.Code AS _ProjectCode,
         -- (rpt.fn_RecalculatedAfterSubmission, приєднана за станом a.Id); ОСТАННЬОЮ колонкою обох гілок, після _WorkflowMode.
         SET @tail = CONCAT(N' AS bit) AS _IsArchived,
        ', @wfCase, N' AS _WorkflowMode,
-       CAST(CASE WHEN ras.ApprovalStateId IS NULL THEN 0 ELSE 1 END AS tinyint) AS _RecalculatedAfterSubmission
+       ISNULL(ras.Marked, 0) AS _RecalculatedAfterSubmission
 ', @fromSql, N'
 LEFT JOIN wf.ApprovalState AS a ON a.DocumentId = d.Id AND a.SheetDefId = ', @sheetCase,
 N' AND a.PeriodKey = ti.PeriodKey
