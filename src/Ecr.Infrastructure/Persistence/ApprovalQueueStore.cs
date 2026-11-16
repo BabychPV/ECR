@@ -47,6 +47,11 @@ public sealed class ApprovalQueueStore(EcrDbContext db) : IApprovalQueueStore
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlySet<long>> ListRecalculatedAfterSubmissionAsync(
+        IReadOnlyCollection<long> stateIds, CancellationToken ct)
+        => await RecalculatedAfterSubmissionMark.StateIdsAsync(db, stateIds, ct).ConfigureAwait(false);
+
+    /// <inheritdoc />
     /// <remarks>
     /// ⚠ ОДИН запит на порцію (ім'я того, хто подав, — підзапитом у тому ж зверненні): без N+1. Порядок
     /// «момент подання, ключ стану» детермінований; курсор — keyset, а не зсув, тож нове подання не зсуває

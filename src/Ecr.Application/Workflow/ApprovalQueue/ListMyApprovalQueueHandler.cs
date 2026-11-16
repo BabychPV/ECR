@@ -167,12 +167,33 @@ public sealed class ListMyApprovalQueueHandler(
         if (found.Count > take)
         {
             var page = found.Take(take).ToList();
-            return new ApprovalQueueDto([.. page.Select(f => f.Item)], FormatCursor(page[^1].Position));
+            return new ApprovalQueueDto(await MarkedAsync(page, ct).ConfigureAwait(false), FormatCursor(page[^1].Position));
         }
 
         return new ApprovalQueueDto(
-            [.. found.Select(f => f.Item)],
+            await MarkedAsync(found, ct).ConfigureAwait(false),
             !exhausted && lastScanned is not null ? FormatCursor(lastScanned) : null);
+    }
+
+    /// <summary>
+    /// ✎ B79 (Q13): позначка «перераховано після подання» для рядків СТОРІНКИ — один запит на сторінку (не на рядок і
+    /// не на переглянутих кандидатів), лише коли сторінка непорожня. Ключ рядка — стан аркуша (<c>StateId</c> курсора).
+    /// </summary>
+    private async Task<IReadOnlyList<ApprovalQueueItemDto>> MarkedAsync(
+        IReadOnlyList<(ApprovalQueueItemDto Item, ApprovalQueueCursor Position)> page, CancellationToken ct)
+    {
+        if (page.Count == 0)
+        {
+            return [];
+        }
+
+        var marked = await store
+            .ListRecalculatedAfterSubmissionAsync([.. page.Select(p => p.Position.StateId)], ct)
+            .ConfigureAwait(false);
+
+        return [.. page.Select(p => marked.Contains(p.Position.StateId)
+            ? p.Item with { RecalculatedAfterSubmission = true }
+            : p.Item)];
     }
 
     private static ApprovalQueueItemDto? Evaluate(

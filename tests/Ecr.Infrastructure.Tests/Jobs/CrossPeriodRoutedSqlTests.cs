@@ -1495,6 +1495,62 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
         Assert.Equal(before, await SubmissionSnapshotsAsync(world));
     }
 
+    /// <summary>
+    /// ✎ B79 (Q13): після справжнього каскаду рядок черги «До погодження» поданого місяця позначено (те саме правило, що
+    /// на картці документа), рядок поданого місяця без перерахунку — ні; повторне подання (пізніший <c>SubmittedAt</c>)
+    /// позначку знімає.
+    /// </summary>
+    /// <remarks>Мутації (локально): у <c>RecalculatedAfterSubmissionMark.Rule</c> прибрати порівняння
+    /// <c>c.ChangedAt &gt; a.SubmittedAt</c> — червоніє «після повторного подання»; прибрати період із кореляції —
+    /// позначено й серпень; у <c>StateIdsAsync</c> прибрати <c>a.Id IN (…)</c> — у відповідь потрапляють чужі стани.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "B79")]
+    public async Task B79_після_каскаду_рядок_черги_позначено_сусідній_поданий_без_перерахунку_ні_повторне_подання_знімає()
+    {
+        var world = await ArrangeAsync();
+        await SetOwnerValueAsync(world, 7m);
+        await SetSheetStatusAsync(world, 9, DocumentStatus.Submitted);
+
+        // Серпень: поданий, але екземпляра таблиці в ньому немає — каскад його не пише, позначки не буде.
+        await SetSheetStatusAsync(world, 8, DocumentStatus.Submitted);
+        var september = await StateIdAsync(world, 9);
+        var august = await StateIdAsync(world, 8);
+
+        var enqueued = new List<(string Target, string Payload)>();
+        await RunJobAsync(world, enqueued, OwnerRequest(world), routing: true);
+
+        await using (var db = world.Builder.CreateContext())
+        {
+            var marked = await new ApprovalQueueStore(db)
+                .ListRecalculatedAfterSubmissionAsync(new[] { september, august }, CancellationToken.None);
+            Assert.Equal(new[] { september }, marked);
+
+            // Порожній набір — без позначок.
+            Assert.Empty(await new ApprovalQueueStore(db)
+                .ListRecalculatedAfterSubmissionAsync(Array.Empty<long>(), CancellationToken.None));
+        }
+
+        // Повторне подання: SubmittedAt пізніший за запис журналу.
+        await ExecuteAsync($"UPDATE wf.ApprovalState SET SubmittedAt = '2100-01-01T00:00:00' WHERE Id = {september}");
+        await using (var db = world.Builder.CreateContext())
+        {
+            Assert.Empty(await new ApprovalQueueStore(db)
+                .ListRecalculatedAfterSubmissionAsync(new[] { september, august }, CancellationToken.None));
+        }
+    }
+
+    private static async Task<long> StateIdAsync(World world, int month)
+    {
+        var period = Period(month);
+        await using var db = world.Builder.CreateContext();
+        return await db.ApprovalStates.AsNoTracking()
+            .Where(a => a.DocumentId == world.Doc.DocumentId && a.SheetDefId == world.Doc.SheetDefId && a.PeriodKey == period)
+            .Select(a => a.Id)
+            .SingleAsync();
+    }
+
     /// <summary>Усі зрізи подання документа (за Id) одним рядком JSON — для порівняння «до/після».</summary>
     private static async Task<string> SubmissionSnapshotsAsync(World world)
     {

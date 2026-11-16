@@ -111,6 +111,8 @@ public sealed partial class SheetCopyQuerySitesTests
         // ── контракт (RS8): відповідь API знає копію ──
         ["src/Ecr.Infrastructure/Persistence/DocumentStore.cs"] =
             "SheetStates/Sheets: ключ КОД#sheetCopyId, стан СВОГО рядка складу; WhereState — те саме; Distinct id/кодів аркушів",
+        ["src/Ecr.Infrastructure/Persistence/RecalculatedAfterSubmissionMark.cs"] =
+            "B79: позначка «перераховано після подання» — рядок стану СВОЄЇ копії (кореляція …:{аркуш}#{копія}:{період}; NULL — оригінал)",
         ["src/Ecr.Infrastructure/Persistence/SheetChangeStore.cs"] =
             "опитування змін і стан аркуша — екземплярів і стану своєї копії (@copy)",
         ["src/Ecr.Infrastructure/Persistence/AuditReader.cs"] = "журнал переходів несе SheetCopyId події",
