@@ -1308,6 +1308,11 @@
             "description": "Код проєкту документа.",
             "type": "string"
           },
+          "recalculatedAfterSubmission": {
+            "default": false,
+            "description": "✎ B79 (Q13): числа аркуша перераховано ПІСЛЯ подання (каскадом чи перерахунком) — погоджувач має побачити це ще в\nчерзі, до затвердження. Те саме правило й джерело, що `sheets[].recalculatedAfterSubmission` картки документа:\nзапис журналу `SheetRecalc / RecalculatedAfterSubmission`, пізніший за останнє подання; повторне подання\nпозначку знімає.",
+            "type": "boolean"
+          },
           "sheetCode": {
             "description": "Код аркуша.",
             "type": "string"
@@ -6660,6 +6665,28 @@
         ],
         "type": "object"
       },
+      "DependentMonthsBlockDto": {
+        "description": "✎ B79 (квіз 16.11): аркуш, чиї затверджені місяці залежать від стовпця.",
+        "properties": {
+          "months": {
+            "description": "Ключі періодів затверджених місяців аркуша (`Рік*100+№`), за зростанням.",
+            "items": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "sheetCode": {
+            "description": "Код аркуша-читача.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sheetCode",
+          "months"
+        ],
+        "type": "object"
+      },
       "DeprecateVersionRequest": {
         "description": "Запит на виведення версії з обігу.",
         "properties": {
@@ -8448,7 +8475,8 @@
           "AssignmentValidated",
           "AssignmentExpired",
           "NotAssignedToYou",
-          "RowLocked"
+          "RowLocked",
+          "DependentMonthsLocked"
         ]
       },
       "EditTableDiscussionMessageRequest": {
@@ -29119,6 +29147,19 @@
               "$ref": "#/components/schemas/ColumnDto"
             },
             "type": "array"
+          },
+          "dependentMonths": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/DependentMonthsBlockDto"
+              },
+              "type": "array"
+            },
+            "description": "✎ B79 (квіз 16.11, людина: «і користувач має побачити чому»): видимі стовпці з відмовою\n`DependentMonthsLocked` → аркуші, чиї затверджені місяці від них залежать, з місяцями (ключі періодів).\nКлюч — код колонки. `null` — таких стовпців у зрізі немає (більшість зрізів, нуль байтів).",
+            "type": [
+              "null",
+              "object"
+            ]
           },
           "formulaOverride": {
             "oneOf": [

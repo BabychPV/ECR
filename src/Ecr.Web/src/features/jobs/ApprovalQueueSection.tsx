@@ -91,11 +91,11 @@ export function groupApprovalItems(items: readonly ApprovalQueueItem[]): readonl
 }
 
 /**
- * ✎ B79 (Q13): позначка рядка черги `recalculatedAfterSubmission` (те саме правило, що в картці документа).
- * Поле читається через розширений тип: старіший сервер його не віддає - тоді позначки просто немає.
+ * ✎ B79 (Q13): позначка рядка черги `recalculatedAfterSubmission` (те саме правило, що в картці документа); поле
+ * контракту (`ApprovalQueueItemDto`). `=== true`: відповідь без поля (старіший сервер) — позначки просто немає.
  */
 function recalculatedAfterSubmission(item: ApprovalQueueItem): boolean {
-  return (item as ApprovalQueueItem & { readonly recalculatedAfterSubmission?: boolean | null }).recalculatedAfterSubmission === true;
+  return item.recalculatedAfterSubmission === true;
 }
 
 function itemKey(item: ApprovalQueueItem): string {

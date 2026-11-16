@@ -41,7 +41,7 @@ function slice(dependentMonths?: TableSliceDto['dependentMonths']): TableSliceDt
     rows: [{ rowKey: 'R1', ordinal: 1, rowKind: 'Static', label: null, rowVersion: '0x01', cells: {}, isOrphaned: false }],
     cellPermissions: { 'R1:FUEL': 'DependentMonthsLocked' },
     cellConfirmations: {},
-    dependentMonths,
+    ...(dependentMonths === undefined ? {} : { dependentMonths }),
   };
 }
 

@@ -29545,6 +29545,14 @@ export interface components {
             periodKey: number;
             /** @description Код проєкту документа. */
             projectCode: string;
+            /**
+             * @description ✎ B79 (Q13): числа аркуша перераховано ПІСЛЯ подання (каскадом чи перерахунком) — погоджувач має побачити це ще в
+             *     черзі, до затвердження. Те саме правило й джерело, що `sheets[].recalculatedAfterSubmission` картки документа:
+             *     запис журналу `SheetRecalc / RecalculatedAfterSubmission`, пізніший за останнє подання; повторне подання
+             *     позначку знімає.
+             * @default false
+             */
+            recalculatedAfterSubmission: boolean;
             /** @description Код аркуша. */
             sheetCode: string;
             /**
@@ -32003,6 +32011,13 @@ export interface components {
             /** @description Задача перерахунку, поставлена видаленням; `null` — таблиця без колонок. */
             recalculationJobId: null | string;
         };
+        /** @description ✎ B79 (квіз 16.11): аркуш, чиї затверджені місяці залежать від стовпця. */
+        DependentMonthsBlockDto: {
+            /** @description Ключі періодів затверджених місяців аркуша (`Рік*100+№`), за зростанням. */
+            months: number[];
+            /** @description Код аркуша-читача. */
+            sheetCode: string;
+        };
         /** @description Запит на виведення версії з обігу. */
         DeprecateVersionRequest: {
             /** @description Причина; потрапляє в журнал публікацій. Обов'язкова: «чому цю версію
@@ -32996,7 +33011,7 @@ export interface components {
          * @description Причина відмови в доступі. Повертається замість `bool` (ФВ-6.8).
          * @enum {unknown}
          */
-        EditDenyReason: "None" | "NoGrant" | "PeriodNotOpenYet" | "PeriodClosed" | "OutOfAccessWindow" | "DocumentSubmitted" | "DocumentApproved" | "ColumnReadOnly" | "RowReadOnly" | "CalculatedCell" | "ProjectArchived" | "ArchivingInProgress" | "BusinessRule" | "SimulationReadOnly" | "OutsidePermitWindow" | "InsufficientGrantLevel" | "LockedByOwner" | "AssignmentFilled" | "AssignmentValidated" | "AssignmentExpired" | "NotAssignedToYou" | "RowLocked";
+        EditDenyReason: "None" | "NoGrant" | "PeriodNotOpenYet" | "PeriodClosed" | "OutOfAccessWindow" | "DocumentSubmitted" | "DocumentApproved" | "ColumnReadOnly" | "RowReadOnly" | "CalculatedCell" | "ProjectArchived" | "ArchivingInProgress" | "BusinessRule" | "SimulationReadOnly" | "OutsidePermitWindow" | "InsufficientGrantLevel" | "LockedByOwner" | "AssignmentFilled" | "AssignmentValidated" | "AssignmentExpired" | "NotAssignedToYou" | "RowLocked" | "DependentMonthsLocked";
         /** @description Тіло правки повідомлення. */
         EditTableDiscussionMessageRequest: {
             /** @description Новий текст. */
@@ -42471,6 +42486,12 @@ export interface components {
             };
             /** @description Опис колонок таблиці. */
             columns: components["schemas"]["ColumnDto"][];
+            /** @description ✎ B79 (квіз 16.11, людина: «і користувач має побачити чому»): видимі стовпці з відмовою
+             *     `DependentMonthsLocked` → аркуші, чиї затверджені місяці від них залежать, з місяцями (ключі періодів).
+             *     Ключ — код колонки. `null` — таких стовпців у зрізі немає (більшість зрізів, нуль байтів). */
+            dependentMonths?: null | {
+                [key: string]: components["schemas"]["DependentMonthsBlockDto"][];
+            };
             formulaOverride?: null | components["schemas"]["FormulaOverrideSliceDto"];
             /** @description Групи заголовків видимих колонок (плоский список). Лише групи, у піддереві яких є хоч одна видима
              *     колонка зрізу (прихована/заборонена колонка випадає зі спану, група без видимих — не віддається).
