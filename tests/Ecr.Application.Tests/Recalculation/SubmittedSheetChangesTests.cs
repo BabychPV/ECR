@@ -62,6 +62,21 @@ public sealed class SubmittedSheetChangesTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Requirement", "B79")]
+    public void PeriodsOf_дає_періоди_змін_лише_свого_документа_без_повторів_за_зростанням()
+    {
+        var changes = new SubmittedSheetChanges();
+        changes.Add(DocumentId, Period + 2, SheetDefId, sheetCopyId: null);
+        changes.Add(DocumentId, Period, SheetDefId, sheetCopyId: null);
+        changes.Add(DocumentId, Period, SheetDefId + 1, sheetCopyId: null);
+        changes.Add(DocumentId + 1, Period + 5, SheetDefId, sheetCopyId: null);
+
+        Assert.Equal(new[] { Period, Period + 2 }, changes.PeriodsOf(DocumentId));
+        Assert.Empty(changes.PeriodsOf(DocumentId + 2));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "B79")]
     public void AddRange_додає_всі_аркуші_шляху_запису_під_документом_і_періодом()
     {
         var changes = new SubmittedSheetChanges();
