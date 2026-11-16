@@ -398,6 +398,11 @@ public sealed partial class YearLayoutTailSqlTests(SqlServerFixture sql)
         await ExecuteAsync(
             $"UPDATE doc.Period SET State = {(int)PeriodState.Open} " +
             $"WHERE ProjectId = {world.Doc.ProjectId} AND State <> {(int)PeriodState.Open};");
+
+        // ✎ B79 (правило 394, аудит 16.11): річна розкладка версії цього тесту в спільній базі не лишається — версія
+        // повертається до розкладки, з якою її створив будівник (ArrangeAsync ставив YearWithMonthColumns).
+        await ExecuteAsync(
+            $"UPDATE cfg.TemplateVersion SET Layout = {(int)default(TemplateLayout)} WHERE Id = {world.Doc.TemplateVersionId};");
     }
 
     private async Task ExecuteAsync(string statement)
