@@ -5887,6 +5887,67 @@
         ],
         "type": "object"
       },
+      "CreateRowLocksRequest": {
+        "description": "✎ B75: запит на блокування рядків (усе або нічого).",
+        "properties": {
+          "fromDate": {
+            "description": "Перший день (часовий пояс проєкту).",
+            "format": "date",
+            "type": "string"
+          },
+          "note": {
+            "description": "Примітка; необов'язкова.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "periodKey": {
+            "description": "Період екземпляра таблиці.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "rowKeys": {
+            "description": "Ключі рядків (1..int RowLockRules.MaxRowsPerRequest).",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "sheetCode": {
+            "description": "Код аркуша (F13 D2: код таблиці унікальний лише в межах аркуша).",
+            "type": "string"
+          },
+          "sheetCopyId": {
+            "description": "Копія аркуша; `null` — оригінал.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "tableCode": {
+            "description": "Код таблиці.",
+            "type": "string"
+          },
+          "toDate": {
+            "description": "Останній день, включно.",
+            "format": "date",
+            "type": "string"
+          }
+        },
+        "required": [
+          "periodKey",
+          "sheetCopyId",
+          "sheetCode",
+          "tableCode",
+          "rowKeys",
+          "fromDate",
+          "toDate",
+          "note"
+        ],
+        "type": "object"
+      },
       "CreateRowRequest": {
         "description": "Запит на створення рядка.",
         "properties": {
@@ -7393,6 +7454,13 @@
               "null",
               "integer"
             ]
+          },
+          "workflowMode": {
+            "description": "✎ B75: режим погодження тієї самої версії (`SubmitApprove` | `None`) — рядком, як\nTemplateLayout; лише в картці (`GET /documents/{id}`), у переліку — `null`. За\n`None` клієнт не показує подання, затвердження й відкликання («без погодження»).",
+            "type": [
+              "null",
+              "string"
+            ]
           }
         },
         "required": [
@@ -8372,7 +8440,8 @@
           "AssignmentFilled",
           "AssignmentValidated",
           "AssignmentExpired",
-          "NotAssignedToYou"
+          "NotAssignedToYou",
+          "RowLocked"
         ]
       },
       "EditTableDiscussionMessageRequest": {
@@ -17678,19 +17747,25 @@
           },
           "historyDocumentCount": {
             "default": 0,
-            "description": "Скільки з DocumentCount документів мають дозвіл у записах історії дозволів: сегмент «з дати» поля\nшапки чи живого рядка, або частина поділеного місяця. ⚠ Частина 1 поділеного місяця несе БАЗОВИЙ дозвіл комірки, тож\nдокумент, де дозвіл стоїть значенням комірки з поділеним місяцем, теж потрапляє сюди — це «є в історії», а не «лише в\nісторії». Записи історії не перелічуються в Items і не входять у `LinkCount`; документ, де дозвіл є\nлише в історії, входить у DocumentCount, але не має рядка в переліку. З фільтром періоду: частина — свого\nмісяця, сегмент — якщо документ має таблиці в періоді і сегмент чинний не пізніше кінця періоду (B56).",
+            "description": "Скільки з DocumentCount документів мають дозвіл у записах історії дозволів: сегмент «з дати» поля\nшапки чи живого рядка, або частина поділеного місяця. ⚠ Частина 1 поділеного місяця несе БАЗОВИЙ дозвіл комірки, тож\nдокумент, де дозвіл стоїть значенням комірки з поділеним місяцем, теж потрапляє сюди — це «є в історії», а не «лише в\nісторії». Записи історії не входять у `LinkCount`; з B128c вони перелічуються в Items видом\n`history`. З фільтром періоду: частина — свого місяця, сегмент — якщо документ має таблиці в періоді і сегмент\nчинний бодай частково в періоді (B56, B128).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "historyLinkCount": {
+            "default": 0,
+            "description": "B128c: скільки записів історії дозволів (сегментів і частин місяців) посилаються на дозвіл під тими самими правилами, що й\nHistoryDocumentCount; сховані правилами читання з поточної сторінки віднімаються (як у `LinkCount`).",
             "format": "int32",
             "type": "integer"
           },
           "items": {
-            "description": "Місця посилань: за документом, періодом, шапка перед таблицями.",
+            "description": "Місця посилань: за документом; шапка, далі комірки, далі записи історії (`history`).",
             "items": {
               "$ref": "#/components/schemas/PermitUsageItemDto"
             },
             "type": "array"
           },
           "linkCount": {
-            "description": "Скільки місць (полів шапки й комірок) посилаються на дозвіл; історія дозволів сюди не входить.",
+            "description": "Скільки місць (полів шапки й комірок) посилаються на дозвіл; історія дозволів сюди не входить (її — HistoryLinkCount).",
             "format": "int32",
             "type": "integer"
           },
@@ -17700,7 +17775,7 @@
             "type": "integer"
           },
           "truncated": {
-            "description": "`true`, якщо Items обрізано лімітом `limit`.",
+            "description": "`true`, якщо Items обрізано лімітом `limit` (з урахуванням рядків історії).",
             "type": "boolean"
           }
         },
@@ -17737,8 +17812,16 @@
             "type": "object"
           },
           "kind": {
-            "description": "`header` або `cell` (PermitUsageKinds).",
+            "description": "`header`, `cell` або `history` (PermitUsageKinds).",
             "type": "string"
+          },
+          "linkPeriodKey": {
+            "description": "Лише для `history` рядка (B136): період, який відкриває посилання на місце, — НАЙРАНІШИЙ з періодів, де рядок живий,\nзапис чинний І колонку цьому читачу видно (частина місяця — її місяць; з фільтром — період фільтра). Найраніший — як\nпопереднє посилання на місяць `validFrom`: «з якого місяця дозвіл тут стоїть», але без періоду, якого читач не бачить.\nДля шапки, комірки й історії поля шапки — `null`.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "periodKey": {
             "description": "Період комірки (`YYYYMM`-подібний ключ); `null` для шапки - вона належить документу цілком.",
@@ -17804,6 +17887,14 @@
             "type": [
               "null",
               "object"
+            ]
+          },
+          "validFrom": {
+            "description": "Лише для `history`: з якого дня дозвіл чинний у цьому місці (сегмент — `ValidFrom`, частина місяця — її перший\nдень); для `header`/`cell` — `null` (B128c).",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
             ]
           }
         },
@@ -23394,6 +23485,87 @@
           "Header"
         ]
       },
+      "RowLockDto": {
+        "description": "✎ B75: блокування рядка у відповіді (дати — у часовому поясі проєкту, кінцева — включно).",
+        "properties": {
+          "canUnlock": {
+            "description": "Поточний користувач може зняти (власник блокування або право `Document.RowLock`).",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "Ідентифікатор.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "isActive": {
+            "description": "Діє зараз (почалося й не скінчилося).",
+            "type": "boolean"
+          },
+          "lockFrom": {
+            "description": "Перший день дії.",
+            "format": "date",
+            "type": "string"
+          },
+          "lockUntil": {
+            "description": "Останній день дії (включно).",
+            "format": "date",
+            "type": "string"
+          },
+          "note": {
+            "description": "Примітка.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "ownerDisplayName": {
+            "description": "Ім'я того, хто заблокував; `null` — невідоме.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "ownerUserId": {
+            "description": "Хто заблокував.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "rowKey": {
+            "description": "Ключ рядка.",
+            "type": "string"
+          },
+          "sheetCode": {
+            "description": "✎ F13 D2: код аркуша таблиці (код таблиці унікальний лише в межах аркуша).",
+            "type": "string"
+          },
+          "sheetCopyId": {
+            "description": "Копія аркуша; `null` — оригінал.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "tableCode": {
+            "description": "Код таблиці (унікальний у межах аркуша).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "tableCode",
+          "sheetCopyId",
+          "rowKey",
+          "lockFrom",
+          "lockUntil",
+          "ownerUserId",
+          "ownerDisplayName",
+          "note",
+          "isActive",
+          "canUnlock"
+        ],
+        "type": "object"
+      },
       "RowPermitHistoryDto": {
         "description": "Permit history of one row's permit cell.",
         "properties": {
@@ -25578,6 +25750,19 @@
         },
         "required": [
           "layout"
+        ],
+        "type": "object"
+      },
+      "SetTemplateWorkflowModeRequest": {
+        "description": "Режим погодження версії-чернетки (B75).",
+        "properties": {
+          "workflowMode": {
+            "$ref": "#/components/schemas/WorkflowMode",
+            "description": "З поданням і затвердженням або без них."
+          }
+        },
+        "required": [
+          "workflowMode"
         ],
         "type": "object"
       },
@@ -29585,6 +29770,10 @@
             "description": "Версія шаблону.",
             "format": "int32",
             "type": "integer"
+          },
+          "workflowMode": {
+            "$ref": "#/components/schemas/WorkflowMode",
+            "description": "✎ B75: режим погодження версії; у чернетці змінюється `PUT …/workflow-mode`."
           }
         },
         "required": [
@@ -29730,6 +29919,10 @@
           "version": {
             "description": "Номер версії.",
             "type": "string"
+          },
+          "workflowMode": {
+            "$ref": "#/components/schemas/WorkflowMode",
+            "description": "✎ B75: режим погодження версії (з поданням і затвердженням або без них)."
           }
         },
         "required": [
@@ -29761,6 +29954,25 @@
         "required": [
           "templateId",
           "versions"
+        ],
+        "type": "object"
+      },
+      "TemplateWorkflowModeDto": {
+        "description": "Режим погодження версії шаблону у відповіді `PUT …/workflow-mode`.",
+        "properties": {
+          "templateVersionId": {
+            "description": "Версія.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "workflowMode": {
+            "$ref": "#/components/schemas/WorkflowMode",
+            "description": "Чинний режим."
+          }
+        },
+        "required": [
+          "templateVersionId",
+          "workflowMode"
         ],
         "type": "object"
       },
@@ -31892,6 +32104,13 @@
           "stepOrdinal"
         ],
         "type": "object"
+      },
+      "WorkflowMode": {
+        "description": "✎ B75: чи має документ версії шаблону подання й затвердження (`cfg.TemplateVersion.WorkflowMode`).",
+        "enum": [
+          "SubmitApprove",
+          "None"
+        ]
       }
     }
   },
@@ -38762,6 +38981,316 @@
         "summary": "j2/jh3: saves the parts of month cells shared by two permits — typed by the user, never divided by days. A cell with\nevery part entered gets the total (sum of the parts) through the ordinary cell write; partial save keeps the old value.",
         "tags": [
           "DocumentPermitHistory"
+        ]
+      }
+    },
+    "/api/v1/documents/{documentId}/row-locks": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Документ.",
+            "in": "path",
+            "name": "documentId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Період екземпляра таблиці.",
+            "in": "query",
+            "name": "periodKey",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RowLockDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RowLockDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RowLockDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Незняті й не прострочені блокування документа за період (лише таблиці, які читач бачить).",
+        "tags": [
+          "RowLocks"
+        ]
+      },
+      "post": {
+        "description": "`403` — немає права, проєкт в архіві чи архівується, період закрито; `404` — документ, таблиця чи\nрядок відсутні або невидимі; `409 rowAlreadyLocked` — рядок уже заблоковано на цей час;\n`422 lockRangeInvalid` — проміжок порожній або минув.",
+        "parameters": [
+          {
+            "description": "Документ.",
+            "in": "path",
+            "name": "documentId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRowLocksRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRowLocksRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRowLocksRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RowLockDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RowLockDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RowLockDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Блокує рядки таблиці (усе або нічого). Власник документа з рівнем Write на таблицю або носій права\n`Document.RowLock`; той, хто блокує, стає власником блокування.",
+        "tags": [
+          "RowLocks"
+        ]
+      }
+    },
+    "/api/v1/documents/{documentId}/row-locks/{lockId}": {
+      "delete": {
+        "parameters": [
+          {
+            "description": "Документ.",
+            "in": "path",
+            "name": "documentId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Блокування.",
+            "in": "path",
+            "name": "lockId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Знімає блокування (власник блокування або носій права `Document.RowLock`); історія лишається.",
+        "tags": [
+          "RowLocks"
         ]
       }
     },
@@ -69508,6 +70037,131 @@
         ]
       }
     },
+    "/api/v1/template-versions/{id}/workflow-mode": {
+      "put": {
+        "description": "Опублікована версія відхиляє правку (`ECR-TMPL-0409`); версія з документами — `ECR-SCHM-0409`;\n`None` для версії з власним маршрутом погодження — `ECR-TMPL-0422` (`workflowModeHasRoute`).",
+        "parameters": [
+          {
+            "description": "Версія-чернетка.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetTemplateWorkflowModeRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetTemplateWorkflowModeRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetTemplateWorkflowModeRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateWorkflowModeDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateWorkflowModeDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateWorkflowModeDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "✎ B75: задає режим погодження чернетки — з поданням і затвердженням (`SubmitApprove`) або без них\n(`None`: значення одразу доступні звітності, подання/затвердження/відкликання — `422 workflowDisabled`).\nПраво `Template.Edit`.",
+        "tags": [
+          "TemplateVersions"
+        ]
+      }
+    },
     "/api/v1/templates": {
       "get": {
         "description": "Сторінка, а не «все»: ендпоінтів, що повертають увесь набір, не існує.",
@@ -72256,6 +72910,9 @@
     },
     {
       "name": "Reports"
+    },
+    {
+      "name": "RowLocks"
     },
     {
       "name": "RowWindowMaps"

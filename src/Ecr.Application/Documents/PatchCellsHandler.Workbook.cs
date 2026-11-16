@@ -210,7 +210,8 @@ public sealed partial class PatchCellsHandler
             {
                 foreach (var seed in BuildRecalculationSeeds(
                              SeedSource(item.Request, applied, item.Previous),
-                             item.Context.ApproverEdit ? item.Context.Table.SheetDefId : null))
+                             item.Context.ApproverEdit ? item.Context.Table.SheetDefId : null,
+                             Recalculation.ColumnDefaultValues.SeedColumns(item.Context.Table)))
                 {
                     recalculationSeeds.Add(seed);
                 }
@@ -598,6 +599,17 @@ public sealed partial class PatchCellsHandler
             }
         }
 
+        // ✎ B134 (D-457 п.3): екземпляри року для дзеркальних нових рядків таблиць Q-17 — під блокуванням структури,
+        // до блокувань аркушів (як у поштучного).
+        foreach (var item in active.Where(x => x.Context.Creations.Count > 0))
+        {
+            await BlamedAsync(item.Id, async () =>
+            {
+                await PrepareRowMirrorAsync(item.Context, ct).ConfigureAwait(false);
+                return true;
+            }).ConfigureAwait(false);
+        }
+
         // ⛔ C-3 (аудит 2026-11): ключ — `(аркуш, копія)`: копія (RS) має власний замок і стан, як у поштучного PATCH
         // (`EnterEditOfAsync`); порядок — `(SheetDefId, SheetCopyId ?? 0)`, як `RecalculationService.EnterSheetsAsync`.
         // Періоди колонок/річні (нижче) — за аркушем без копії, як `EnsureColumnPeriodsEditableAsync`.
@@ -613,27 +625,45 @@ public sealed partial class PatchCellsHandler
             // (повторне спільне блокування того ж ключа тією ж транзакцією видається одразу).
             var otherPeriods = new SortedSet<int>(sheet.SelectMany(x => x.Context.ColumnPeriods));
             otherPeriods.UnionWith(sheet.SelectMany(x => x.Context.AnnualPeriods));
+
+            // ✎ B134: періоди дзеркальних нових рядків — ВИНЯТКОВО (як POST rows), у тому ж порядку за зростанням.
+            var mirrorPeriods = new SortedSet<int>(sheet.SelectMany(x => x.Context.MirrorInstances?.Select(i => i.PeriodKey) ?? []));
+            otherPeriods.UnionWith(mirrorPeriods);
             otherPeriods.Remove(period.Value);
+
+            async Task EnterOtherAsync(int other)
+            {
+                if (mirrorPeriods.Contains(other))
+                {
+                    await RowWriteLock.EnterAsync(sheetGate, documentId, sheet.Key.SheetDefId, new PeriodKey(other), ct)
+                        .ConfigureAwait(false);
+                }
+
+                await sheetGate.EnterEditAsync(documentId, sheet.Key.SheetDefId, new PeriodKey(other), ct).ConfigureAwait(false);
+            }
 
             statuses[sheet.Key] = await BlamedAsync(sheet.First().Id, async () =>
             {
                 foreach (var lower in otherPeriods.Where(p => p < period.Value))
                 {
-                    await sheetGate.EnterEditAsync(documentId, sheet.Key.SheetDefId, new PeriodKey(lower), ct).ConfigureAwait(false);
+                    await EnterOtherAsync(lower).ConfigureAwait(false);
                 }
 
                 var ownStatus = await LockOwnWorkbookSheetAsync().ConfigureAwait(false);
 
                 foreach (var higher in otherPeriods.Where(p => p > period.Value))
                 {
-                    await sheetGate.EnterEditAsync(documentId, sheet.Key.SheetDefId, new PeriodKey(higher), ct).ConfigureAwait(false);
+                    await EnterOtherAsync(higher).ConfigureAwait(false);
                 }
 
                 return ownStatus;
 
                 async Task<Domain.Enums.DocumentStatus> LockOwnWorkbookSheetAsync()
                 {
-                if (sheet.Any(x => CreatesRowsUnderCeiling(x.Context)))
+                // ✎ B134: дзеркальне створення бере виняткове й власного періоду — коли викликач не тримає спільного
+                // (з `heldSheetStatuses` власний аркуш уже заблоковано спільно на всю транзакцію імпорту).
+                if (sheet.Any(x => CreatesRowsUnderCeiling(x.Context))
+                    || (heldSheetStatuses is null && mirrorPeriods.Contains(period.Value)))
                 {
                     // ⛔ L6-08: викликач уже тримає СПІЛЬНЕ блокування цього аркуша
                     // (`heldSheetStatuses`). Виняткове поверх нього — перетворення
@@ -665,6 +695,25 @@ public sealed partial class PatchCellsHandler
         }
 
         await EnsureWorkbookSheetsEditableAsync(active, statuses, ct).ConfigureAwait(false);
+
+        // ✎ B75: блокування рядків — повторно під замками аркушів книги (один запит на період, лише коли вони є).
+        var lockedByPeriod = new Dictionary<int, IReadOnlySet<RowLockKey>>();
+        foreach (var item in active)
+        {
+            var itemPeriod = item.Context.PeriodKey.Value;
+            if (!lockedByPeriod.TryGetValue(itemPeriod, out var locked))
+            {
+                locked = await RowLocks.RowLockRecheck
+                    .LockedAsync(sheetGate, rowLocks, item.Context.Profile, documentId, itemPeriod, clock.UtcNow, ct)
+                    .ConfigureAwait(false);
+                lockedByPeriod[itemPeriod] = locked;
+            }
+
+            Blamed(item.Id, () => RowLocks.RowLockRecheck.ThrowIfLocked(
+                locked, item.Context.Instance.SheetCopyId, SheetCodeOf(item.Context), item.Context.Table.Code,
+                item.Context.Updates.Concat(item.Context.Creations).Select(r => r.RowKey),
+                item.Planned.Upserts.Count + item.Planned.Deletes.Count));
+        }
 
         // ⛔ AN-106 (P1-01): ліміт очікування блокувань — до стелі й вставки нових рядків, як у
         // поштучного (`PersistCoreAsync`); `ApplyBatchAsync` нижче його вже не повторює.
@@ -708,6 +757,17 @@ public sealed partial class PatchCellsHandler
                 .ConfigureAwait(false);
             foreach (var item in ceiling)
             {
+                // ✎ B134 (D-457 п.3): дзеркальний режим — стеля за якорем.
+                if (item.Context.MirrorAnchor is { } anchor)
+                {
+                    var anchorRows = await rowStore
+                        .GetRowIdsAsync(anchor.TableInstanceId, new PeriodKey(anchor.PeriodKey), ct)
+                        .ConfigureAwait(false);
+                    Blamed(item.Id, () => CheckRowLimit(
+                        item.Context, anchorRows.Count, item.Context.Creations.Count(r => !anchorRows.ContainsKey(r.RowKey))));
+                    continue;
+                }
+
                 Blamed(item.Id, () => CheckRowLimit(item.Context, existing.GetValueOrDefault(item.Id)?.Count ?? 0));
             }
         }
@@ -718,7 +778,17 @@ public sealed partial class PatchCellsHandler
             item.Previous = previous;
         }
 
-        var creating = active.Where(x => x.Context.Creations.Count > 0).ToList();
+        // ✎ B134 (D-457 п.3): нові рядки таблиць Q-17 — у якорі й усіх наявних екземплярах року (як POST rows).
+        foreach (var item in active.Where(x => x.Context.Creations.Count > 0 && x.Context.MirrorInstances is not null))
+        {
+            var (ownIds, journal) = await BlamedAsync(
+                    item.Id, () => CreateMirroredRowsAsync(item.Request, item.Context, item.Context.MirrorInstances!, now, ct))
+                .ConfigureAwait(false);
+            item.Applied = WithRealRowIds(item.Context, item.Planned, ownIds);
+            await WriteRowAuditAsync(journal, ct).ConfigureAwait(false);
+        }
+
+        var creating = active.Where(x => x.Context.Creations.Count > 0 && x.Context.MirrorInstances is null).ToList();
         if (creating.Count > 0)
         {
             IReadOnlyList<IReadOnlyList<long>> newIds;

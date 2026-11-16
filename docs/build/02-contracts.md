@@ -4737,6 +4737,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/template-versions/{id}/diff/{otherId}` | `Template.View` | 1 |
 | `PATCH` | `/api/v1/template-versions/{id}/presentation` | `Template.Edit` | 1 |
 | `PUT` | `/api/v1/template-versions/{id}/layout` | `Template.Edit` | 1 |
+| `PUT` | `/api/v1/template-versions/{id}/workflow-mode` | `Template.Edit` | 1 |
 | `GET` | `/api/v1/template-versions/{id}/month-input-aliases` | `Template.View` | 7 |
 | `PUT` | `/api/v1/template-versions/{id}/month-input-aliases` | `Template.Edit` | 7 |
 | `GET` | `/api/v1/template-versions/{id}/structure` | `Template.View` | 1 |
@@ -4861,6 +4862,9 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/documents/{documentId}/period-reopen` | — (✎ приймальна 08.11 (i): видимий документ; стан місяця `?periodKey=` для документа — діючий виняток, `canOpen`/`denial` для викликача, `defaultOpenUntil` = кінець доби майданчика; невидимий документ — 404) | 3 |
 | `POST` | `/api/v1/documents/{documentId}/period-reopen` | `Period.Reopen` у проєкті документа (✎ приймальна 08.11 (i): відкриває ЗАКРИТИЙ місяць лише для цього документа до `openUntil`, причина обов'язкова; решта документів місяця закрита; діючий виняток замінюється; аудит `DocumentPeriodReopen/Reopen` і `Close`; 404 — невидимий документ чи немає місяця, 409 `ECR-PRD-0409` — місяць не закритий / проєкт архівований, 422 `ECR-PRD-0422` — причина порожня/задовга, строк не в майбутньому) | 3 |
 | `DELETE` | `/api/v1/documents/{documentId}/period-reopen` | `Period.Reopen` у проєкті документа (✎ приймальна i4, «Close now» на вкладці Periods: закриває діючий виняток `?periodKey=` до строку — місяць знову закритий і для цього документа; нічого відкритого — 204 без змін; аудит `DocumentPeriodReopen/Close` із причиною `document.reopen.audit.closedManually`; 403 — немає права, 404 — невидимий документ) | 3 |
+| `GET` | `/api/v1/documents/{documentId}/row-locks` | — (✎ B75: видимий документ; незняті й не прострочені блокування рядків `?periodKey=`, лише таблиці, які читач бачить; невидимий документ — 404) | 3 |
+| `POST` | `/api/v1/documents/{documentId}/row-locks` | власник документа з `Write` на таблицю або `Document.RowLock` у проєкті документа (✎ B75: блокує рядки на проміжок дат, усе або нічого; 403 `rowLockDenied`, 404, 409 `rowAlreadyLocked`, 422 `lockRangeInvalid`) | 3 |
+| `DELETE` | `/api/v1/documents/{documentId}/row-locks/{lockId}` | власник блокування або `Document.RowLock` у проєкті документа (✎ B75: знімає блокування, історія лишається; 403, 404) | 3 |
 | `GET` | `/api/v1/projects/{projectId}/document-reopens` | — (✎ приймальна i4: видимий проєкт; діючі винятки «місяць відкрито для документа» — `items` (документ, номер, місяць, `openUntil`, причина, хто відкрив) лише ВИДИМИХ документів, за місяцем і номером; `canClose` — `Period.Reopen` у проєкті; невидимий проєкт — 404) | 3 |
 | `GET` | `/api/v1/documents/{documentId}/permit-history` | — (✎ (j) 09.11: видимий документ; історія дозволів полів шапки й видимих рядків «KZ…A до 14.02 · KZ…B з 15.02» і місяці, які ще треба поділити між дозволами (`cellsNeedingSplit`), у періоді `?periodKey=`; невидимий документ — 404; ✎ 2026-11-11 (C-10): `splitMonths[].monthTo` — останній день одиниці, коли вона довша за місяць (колонка без місяця в квартальному/річному проєкті: одиниця — сам період, ключ частин `doc.CellPermitPart.PeriodKey` — `PeriodKey` комірки); `null` — місяць) | 3 |
 | `POST` | `/api/v1/documents/{documentId}/permit-history/rows` | право редагувати комірку дозволу рядка (`CanEditCell`) (✎ (j1) 09.11: дозвіл рядка «з дати» в тому самому документі й рядку; аудит `PermitSegment/Add` — хто, обидва дозволи, дата; 403 `ECR-ACCS-0403 deniedCells`; 422 `ECR-CELL-4223 permitGap` — дні без чинного дозволу між дозволами названо (j4); 422 `ECR-CELL-4223 missingEntry`; 422 `ECR-REQ-0422 permitHistoryTarget`/`permitHistoryDate`; 409 `ECR-CELL-0409 concurrentChange` — шкалу дозволу змінив інший користувач між читанням і записом, ✎ D-1 аудиту 2026-11-10) | 3 |
@@ -5143,7 +5147,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/permits?type=&status=&q=&asOf=&limit=&cursor=` | `Registry.View` | 8 |
 | `POST` | `/api/v1/permits` | `Registry.EditData` | 8 |
 | `GET` | `/api/v1/permits/{id}?asOf=` | `Registry.View` | 8 |
-| `GET` | `/api/v1/permits/{id}/usages?periodKey=&limit=` | `Registry.View` (+ `Document.View` у проєкті документа: чужі документи не рахуються); комірки поза межами читання документа (S6, D-214) не віддаються, `linkCount` зменшується на сховані з поточної сторінки (S-4). ✎ 2026-11-14 (B56): `documentCount` — різні ДОКУМЕНТИ з дозволом у шапці, комірці або в історії дозволів (`doc.PermitSegment`, `doc.CellPermitPart`), документ рахується один раз, хоч би скільки в ньому місць чи сегментів; нове поле `historyDocumentCount` (int, додаткове) — скільки з них мають дозвіл в історії (ці посилання в `items` не перелічуються, у `linkCount` не входять); логічно видалені рядки не рахуються й через історію (сегмент рядка чи частина без живого рядка — не використання); частина 1 поділеного місяця несе базовий дозвіл комірки, тож `historyDocumentCount` — «є в історії», а не «лише в історії»; фільтр періоду для сегментів — документ має таблиці в періоді І `ValidFrom` ≤ кінець періоду (`Period.PeriodEnd` проєкту) І (для сегмента рядка) рядок живий САМЕ в цьому періоді, як комірки — і сегмент чинний бодай частково в періоді: немає наступного сегмента тієї ж цілі (шапка — документ + поле; рядок — документ + таблиця + копія аркуша + ключ + колонка) з `ValidFrom` ≤ початок періоду (B128); без фільтра — рядок живий бодай в одному періоді (так само `usedInDocumentCount` і C-13); частина місяця — за періодом частини й рядком саме її місяця; рядок копії аркуша з тим самим ключем не оживляє ціль оригіналу. Те саме правило живих рядків — у «де використовується» запису довідника (C-13). Те саме правило документів — у `usedInDocumentCount` переліку дозволів і типів (`GET /permits`, `GET /permit-types`, `GET /permit-types/{code}/usage`) | 8 |
+| `GET` | `/api/v1/permits/{id}/usages?periodKey=&limit=` | `Registry.View` (+ `Document.View` у проєкті документа: чужі документи не рахуються); комірки поза межами читання документа (S6, D-214) не віддаються, `linkCount` зменшується на сховані з поточної сторінки (S-4). ✎ 2026-11-14 (B56): `documentCount` — різні ДОКУМЕНТИ з дозволом у шапці, комірці або в історії дозволів (`doc.PermitSegment`, `doc.CellPermitPart`), документ рахується один раз, хоч би скільки в ньому місць чи сегментів; нове поле `historyDocumentCount` (int, додаткове) — скільки з них мають дозвіл в історії (у `linkCount` не входять). ✎ 2026-11-15 (B128c, додатково): записи історії перелічуються в `items` новим видом `kind = "history"` з новим полем `validFrom` (date, `null` для `header`/`cell`): сегмент поля шапки (`tableCode = null`), сегмент рядка (`periodKey = null`) або частина поділеного місяця (свій `periodKey`); нове поле `historyLinkCount` (int) — скільки записів історії під тими самими правилами; `truncated` і `limit` рахують їх разом із полями й комірками; запис історії рядка схований так само, як комірка (S-4: колонка в межах читання хоч в одному з періодів — для частини місяця її період, для сегмента рядка — періоди, де рядок живий і сегмент чинний, з фільтром — період фільтра), запис поля шапки — як шапка; клієнт, що не знає виду `history`, може його пропустити; логічно видалені рядки не рахуються й через історію (сегмент рядка чи частина без живого рядка — не використання); частина 1 поділеного місяця несе базовий дозвіл комірки, тож `historyDocumentCount` — «є в історії», а не «лише в історії»; фільтр періоду для сегментів — документ має таблиці в періоді І `ValidFrom` ≤ кінець періоду (`Period.PeriodEnd` проєкту) І (для сегмента рядка) рядок живий САМЕ в цьому періоді, як комірки — і сегмент чинний бодай частково в періоді: немає наступного сегмента тієї ж цілі (шапка — документ + поле; рядок — документ + таблиця + копія аркуша + ключ + колонка) з `ValidFrom` ≤ початок періоду (B128); без фільтра — рядок живий бодай в одному періоді, у якому сегмент чинний (B128c: лічильники рахують рівно ті записи, що й перелік; так само `usedInDocumentCount` і C-13); частина місяця — за періодом частини й рядком саме її місяця; рядок копії аркуша з тим самим ключем не оживляє ціль оригіналу. Те саме правило живих рядків — у «де використовується» запису довідника (C-13). Те саме правило документів — у `usedInDocumentCount` переліку дозволів і типів (`GET /permits`, `GET /permit-types`, `GET /permit-types/{code}/usage`). ✎ 2026-11-15 (B136, додатково): нове поле item `linkPeriodKey` (int, nullable) — лише для `history` рядка: період, який відкриває посилання на місце, — найраніший з періодів, де рядок живий, запис чинний І колонку цьому читачу видно (частина місяця — її місяць; з фільтром — період фільтра); для `header`, `cell` та історії поля шапки — `null`. Клієнт бере його для посилання на сегмент рядка (фільтр періоду вкладки має пріоритет), а не місяць `validFrom`, який обмеженому читачеві може бути недоступний | 8 |
 | `PUT` | `/api/v1/permits/{id}` | `Registry.EditData` | 8 |
 | `DELETE` | `/api/v1/permits/{id}` | `Registry.EditData` | 8 |
 | `POST` | `/api/v1/permits/{id}/activate` | `Registry.EditData` | 8 |
@@ -6282,3 +6286,60 @@ public sealed record RowDto(
   перераховується ОДРАЗУ за тим самим правилом (раніше — до наступного прогону `PeriodStateJob`). Відповідь — DTO.
 - `PUT /projects/{id}/current-period` — **застаріло** (`deprecated` в OpenAPI), лишається для старого клієнта; той самий
   обробник (і та сама негайна зміна при знятті закріплення).
+
+## ✎ 2026-11-15 B75: HSE401 без подання й затвердження; блокування рядків
+
+Рішення людини 13.11: шаблон може працювати **без подання й затвердження** (значення одразу доступні звітності), а
+власник може **заблокувати рядки** на проміжок дат. Міграція `RL01_RowLocksWorkflowMode`. Усе — лише додаванням.
+
+- **Режим погодження версії.** `cfg.TemplateVersion.WorkflowMode tinyint NOT NULL DEFAULT 0` (`DF_TV_WorkflowMode`):
+  `SubmitApprove` (0, усі наявні версії) | `None` (1). `PUT /template-versions/{id}/workflow-mode` (тіло
+  `{ "workflowMode": "…" }`, право `Template.Edit`) → `TemplateWorkflowModeDto { templateVersionId, workflowMode }`.
+  Лише чернетка (`ECR-TMPL-0409` інакше) без документів (`409 ECR-SCHM-0409`, `workflowModeBreaking`); `None` для версії
+  з власним діючим маршрутом погодження з кроками — `422 ECR-TMPL-0422 workflowModeHasRoute`. Клон успадковує режим.
+  `TemplateStructureDto.workflowMode`, рядок переліку версій `workflowMode`, `DocumentSummary.workflowMode` (рядок, лише в
+  картці `GET /documents/{id}`; у переліку `null`).
+- **`None` у дії.** `POST …/submit`, `…/approve`, `…/recall` для документа, версія якого за період — `None`: `422
+  ECR-SUB-4221`, `messageKey = err.ECR-SUB-4221.workflowDisabled` (після видимості документа й аркуша, до гранта й
+  стану). Рішення про запис (`EditRules` через `AccessDecisionService`) для такої версії ігнорує старий стан
+  `wf.ApprovalState` (Q4) — аркуш редагується як `Draft`.
+- **Блокування рядків** `doc.RowLock` (`Id int`, `DocumentId`, `PeriodKey`, `SheetCopyId?`, `SheetCode`, `TableCode`, `RowKey`,
+  `LockFrom`/`LockUntil` UTC `[from, until)`, `OwnerUserId`, `Note?`, `CreatedAt`, `ReleasedAt?`/`ReleasedByUserId?`,
+  `RowVersion`; індекс `IX_RowLock_Doc_Period` з фільтром `ReleasedAt IS NULL`). Діє, поки `LockFrom ≤ now < LockUntil`
+  і не знято; задачі немає, історія лишається.
+  - `GET /documents/{id}/row-locks?periodKey=` → `RowLockDto[] { id, sheetCode, tableCode, sheetCopyId, rowKey, lockFrom,
+    lockUntil (дати проєкту, кінець включно), ownerUserId, ownerDisplayName, note, isActive, canUnlock }` — незняті й
+    не прострочені (зокрема ще не початі), лише таблиці, які читач бачить.
+  - `POST /documents/{id}/row-locks { periodKey, sheetCopyId?, sheetCode, tableCode, rowKeys[1..500], fromDate, toDate, note? }`
+    → `RowLockDto[]`. Усе або нічого. Дозволено власнику документа з рівнем `Write` на таблицю АБО носію проєктного права
+    `Document.RowLock` із видимим документом (Q6); той, хто блокує, — власник блокування. `403
+    err.ECR-ACCS-0403.rowLockDenied` (`reason`/`reasonKey`: `NoGrant`, `ProjectArchived`, `ArchivingInProgress`,
+    `PeriodClosed`, `SimulationReadOnly`); `404` — документ, таблиця (`tableNotInDocument`) чи рядки (`lockRowsMissing`)
+    відсутні/невидимі; `409 ECR-ROW-0409 rowAlreadyLocked` — незняте й не прострочене блокування того самого рядка (копія, аркуш, таблиця, ключ) перетинає проміжок;
+    `422 ECR-REQ-0422 lockRangeInvalid` (проміжок порожній, минув, довший за 3660 днів чи за межею календаря), `lockRowsInvalid`, `lockNoteTooLong` (≤ 400).
+  - `DELETE /documents/{id}/row-locks/{lockId}` → `204` — власник блокування або носій `Document.RowLock`; ті самі
+    заборони стану. Обидві дії — `aud.StructureChange`, `EntityType = RowLock`, `Operation = Lock|Unlock`.
+- **Відмова запису `EditDenyReason.RowLocked = 21`** (`deny.RowLocked`): рядок із діючим блокуванням ІНШОЇ людини —
+  на всіх шляхах запису (`PATCH …/cells`, застосування книги — під правилом «усе або нічого», створення й видалення рядка
+  `CanCreateRowsAsync`, колір/очищення). Порядок: після симуляції, архіву, періоду, стану аркуша й ознак
+  колонки/рядка/комірки, ДО гранта (поруч із забороною передачі). Власник блокування пише (Q1); інтеграція (збір) і
+  перерахунок блокування не бачать (Q2). Блокування — на весь рядок, усі місячні колонки (Q3).
+- **Право `Document.RowLock`** — проєктне, не звужуване, не небезпечне; `SystemAdministrator` отримує його шаблоном `%`.
+- **F13 (B75).** Код таблиці унікальний лише в межах аркуша — рядок ідентифікує `(SheetCopyId, SheetCode, TableCode,
+  RowKey)`. Стан аркуша під замком (`SheetEditGate`) для версії документа за період із `WorkflowMode = None` — `Draft`
+  (перенос версії переносить `wf.ApprovalState`; старий Submitted/Approved не замикає записувачів, перерахунок і оновлення
+  з дозволу). Видалення рядка знімає його незняті блокування (`aud.StructureChange` `RowLock/RowDeleted`). Оновлення
+  таблиці з дозволу (`POST …/permit-bindings/{code}/refresh`), що зачіпає чужі заблоковані рядки, — `403 addRowDenied`,
+  `reason = RowLocked`, `rowKeys` (до 20) і `deniedCount`: одна дія над таблицею, усе або нічого.
+- **Гонка «блокування між рішенням і записом» (F13 п.4).** `POST …/row-locks` бере структуру (спільно) і замок аркуша ×
+  період × копія ВИНЯТКОВО (як подання), потім UPDLOCK документа. Записувачі (PATCH, книга, колір, створення й видалення
+  рядка) під своїм спільним замком перечитують блокування (`RowLockRecheck`, `IRowLockStore.LockedByOthersAsync`) і
+  відмовляють `403 deniedCells`/`addRowDenied` з `reason = RowLocked`. Перечитування — лише коли замок бачив незняті
+  блокування: `ISheetEditGate.RowLocksSeen` (EXISTS тим самим запитом, що й стан аркуша; 0 нових звернень без блокувань).
+- **Порт `IRowLockStore`** (`Application/Ports`): факти документа за період (`RowLockTarget`: проєкт, власник, стан
+  проєкту/архівації, ефективний стан періоду з винятком документа, часовий пояс, версія за період), наявні ключі рядків
+  екземпляра, перетин незнятих блокувань, перелік з іменем власника, пошук для зняття, UPDLOCK рядка документа (серіалізує
+  перевірку перетину й вставку). Рішення про запис читає `doc.RowLock` напряму в `AccessDecisionService` (EXISTS-ознака в
+  запиті умов — документ без блокувань не платить нічого).
+- **Порт `ITemplateVersionStore.HasApprovalRouteStepsAsync`**, **`IDocumentStore.GetWorkflowModeForPeriodAsync`** — нові
+  методи з типовою реалізацією для двійників у тестах.

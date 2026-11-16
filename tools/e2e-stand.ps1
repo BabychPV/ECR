@@ -618,6 +618,8 @@ try {
             'Document.Discuss', 'Document.DiscussModerate',
             # ✎ D-461: ручне значення замість формули — e2e UI-lane (замінити, повернути формулу). Лише тестова роль.
             'Document.OverrideFormula',
+            # ✎ B75: блокування рядків — e2e UI-lane (заблокувати, зняти чуже блокування). Лише тестова роль.
+            'Document.RowLock',
             'Project.Manage', 'Period.Configure', 'Period.Reopen',
             # ✎ P44: `Calculation.EditFormula` — `resizableModal.spec` заводить методологію з чернеткою й відкриває
             # вікно формули. Лише тестова роль стенда; ролі продукту не змінюються.

@@ -9,7 +9,7 @@ import {
   wherePrimary,
   whereSecondary,
 } from '../usageModel';
-import { cellItem, headerItem } from './usageFixtures';
+import { cellItem, headerItem, historyItem } from './usageFixtures';
 
 /**
  * Модель вкладки «Used in» (PERMIT-USAGE): адреса місця, підписи «де»/«поле», фільтр періоду. Тексти — справжні, із сіду.
@@ -61,6 +61,22 @@ describe('usageModel', () => {
   it('два рядки однієї колонки — різні ключі; шапка і комірка того самого документа — теж', () => {
     const keys = new Set([usageKey(cellItem()), usageKey(cellItem({ rowKey: 'R4', rowOrdinal: 3 })), usageKey(headerItem())]);
     expect(keys.size).toBe(3);
+  });
+
+  // B128c. Мутації (виконано вручну, відновлено): прибрати `validFrom` з `usageKey` — червоніє перший (дубль React-ключа);
+  // у `usageHref` брати лише `item.periodKey` — червоніє другий.
+  it('два записи історії однієї цілі з різними датами — різні ключі', () => {
+    expect(usageKey(historyItem({ validFrom: '2026-06-10' }))).not.toBe(usageKey(historyItem({ validFrom: '2026-06-20' })));
+  });
+
+  // B136. Мутації (виконано вручну, відновлено): повернути місяць `validFrom` замість `linkPeriodKey` — червоніють перший і
+  // третій; поставити `linkPeriodKey` перед фільтром — червоніє другий.
+  it('сегмент історії рядка: період адреси — фільтра, без фільтра — linkPeriodKey сервера, а не місяць validFrom; шапка — лише документ', () => {
+    expect(usageHref(historyItem({ validFrom: '2026-05-10', linkPeriodKey: 202606 }))).toBe('/documents/2?periodKey=202606&sheet=WATER&table=USE');
+    expect(usageHref(historyItem({ validFrom: '2026-05-10', linkPeriodKey: 202607 }), 202606)).toBe('/documents/2?periodKey=202606&sheet=WATER&table=USE');
+    expect(usageHref(historyItem({ validFrom: '2026-05-10', linkPeriodKey: null }))).toBe('/documents/2?sheet=WATER&table=USE');
+    expect(usageHref(historyItem({ periodKey: 202607 }), 202606)).toBe('/documents/2?periodKey=202607&sheet=WATER&table=USE');
+    expect(usageHref(historyItem({ tableCode: null, sheetCode: null }), 202606)).toBe('/documents/2');
   });
 
   it('варіанти періоду — унікальні, без шапки (null), від нового до старого', () => {

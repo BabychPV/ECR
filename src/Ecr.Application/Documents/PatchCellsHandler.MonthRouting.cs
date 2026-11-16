@@ -1,3 +1,4 @@
+using Ecr.Application.Documents.Dto;
 using Ecr.Application.Ports;
 using Ecr.Domain.ValueObjects;
 
@@ -216,6 +217,68 @@ public sealed partial class PatchCellsHandler
         return result;
     }
 
+    /// <summary>
+    /// ✎ B134 (D-457 п.3): екземпляри року для дзеркальних нових рядків батчу (той самий набір, що в
+    /// <c>CreateRowHandler</c>: прапор, «місяці в колонках», не копія, документ місячного проєкту, є якір року).
+    /// Якоря немає — створюється ліниво. Інакше — <c>null</c>, і нові рядки йдуть лише в екземпляр запиту, як і доти.
+    /// </summary>
+    private async Task PrepareRowMirrorAsync(RequestContext context, CancellationToken ct)
+    {
+        context.MirrorInstances = null;
+        context.MirrorAnchor = null;
+
+        if (context.Creations.Count == 0 || monthRouter is not { Enabled: true } || context.Instance.SheetCopyId is not null
+            || !monthRouter.AppliesToTable(context.Table)
+            || await monthRouter.GetDocumentAsync(context.Instance.DocumentId, ct).ConfigureAwait(false) is not { } document
+            || await monthRouter.AnchorOfAsync(document.ProjectId, context.PeriodKey.Year, ct).ConfigureAwait(false) is not { } anchor)
+        {
+            return;
+        }
+
+        var (instances, anchorInstance) = await MirroredRowCreation
+            .InstancesWithAnchorAsync(rowStore, context.Instance, anchor, ct)
+            .ConfigureAwait(false);
+        context.MirrorInstances = instances;
+        context.MirrorAnchor = anchorInstance;
+    }
+
+    /// <summary>
+    /// ✎ B134: нові рядки батчу — у кожному екземплярі року, де ключа ще немає (одним <c>CreateRowsBatchAsync</c>).
+    /// Повертає Id рядків ЕКЗЕМПЛЯРА ЗАПИТУ в порядку <c>Creations</c> і журнал «додано рядок» для всіх екземплярів.
+    /// </summary>
+    private async Task<(IReadOnlyList<long> OwnIds, List<RowChangeRecord> Journal)> CreateMirroredRowsAsync(
+        PatchCellsRequest request, RequestContext context, IReadOnlyList<TableInstanceRef> mirror, DateTime now,
+        CancellationToken ct)
+    {
+        var keys = context.Creations.Select(r => RowKey.Create(r.RowKey)).ToList();
+        var (batches, _) = await MirroredRowCreation.BatchesAsync(rowStore, mirror, keys, ordinal: 0, ct).ConfigureAwait(false);
+        var created = await rowStore.CreateRowsBatchAsync(batches, ct).ConfigureAwait(false);
+
+        var own = batches.FindIndex(b => b.TableInstanceId == context.Instance.TableInstanceId);
+        if (own < 0 || created[own].Count != keys.Count)
+        {
+            // Нові рядки PATCH — за визначенням ключі, яких в екземплярі запиту немає (BuildContext).
+            throw new InvalidOperationException(
+                $"Дзеркальне створення: екземпляр запиту {context.Instance.TableInstanceId} уже мав ключ нового рядка.");
+        }
+
+        var origin = BatchOrigin(request.Origin, context.ApproverEdit);
+        var correlation = AuditCorrelationId();
+        var journal = new List<RowChangeRecord>();
+        for (var i = 0; i < batches.Count; i++)
+        {
+            for (var k = 0; k < batches[i].RowKeys.Count; k++)
+            {
+                journal.Add(new RowChangeRecord(
+                    now, context.Instance.DocumentId, batches[i].PeriodKey.Value, batches[i].TableInstanceId,
+                    context.Instance.TableDefId, created[i][k], batches[i].RowKeys[k].Value, RowChangeAction.Added,
+                    context.UserId, origin, correlation));
+            }
+        }
+
+        return (created[own], journal);
+    }
+
     private async Task<RoutedWrite?> RouteForeignOwnersAsync(
         RequestContext context,
         CellChangeLists changes,
@@ -264,6 +327,9 @@ public sealed partial class PatchCellsHandler
         var ownerInstance = new Dictionary<int, TableInstanceRef>();
         var ownerRowIds = new Dictionary<int, Dictionary<string, long>>();
 
+        // ✎ B131: тіньові рядки власника — нові рядки ЙОГО екземпляра (склад періоду власника змінився).
+        var shadowRowIds = new Dictionary<int, List<long>>();
+
         foreach (var period in foreignPeriods)
         {
             var upsertsHere = changes.Upserts.Any(u => ownerOf[u.Address.ColumnDefId] == period);
@@ -303,6 +369,8 @@ public sealed partial class PatchCellsHandler
                 {
                     rowIds[missing[i]] = created[0][i];
                 }
+
+                shadowRowIds[period.Value] = [.. created[0]];
             }
 
             ownerInstance[period.Value] = instance;
@@ -396,14 +464,24 @@ public sealed partial class PatchCellsHandler
         var groups = new List<RecalcGroup>();
         var approverSheet = context.ApproverEdit ? context.Table.SheetDefId : (int?)null;
 
-        if (ownUpserts.Count + ownDeletes.Count > 0)
+        // ✎ B131 (D-491): нові рядки екземпляра запиту й тіньові рядки власників — насіння й у колонках із придатним
+        // дефолтом (дефолт входить в агрегати свого екземпляра). Таблиця без дефолтів — нічого не додається.
+        // ⛔ B132: УСІ колонки з дефолтом, а не лише ті, чий власник — екземпляр групи: змінився СКЛАД рядків екземпляра,
+        // а його зріз читає чужі колонки маршрутизовано (власника рядка немає — діє дефолт). Звуження до «своїх» колонок
+        // лишило б застарілим, напр., SUM(M9) листопада після тіньового рядка (CrossPeriodRoutedSqlTests.B132_…).
+        var defaultColumns = Recalculation.ColumnDefaultValues.SeedColumns(context.Table);
+        var ownNewSeeds = NewRowDefaultSeeds(changes.NewRowIds, defaultColumns, approverSheet).ToList();
+
+        if (ownUpserts.Count + ownDeletes.Count + ownNewSeeds.Count > 0)
         {
             groups.Add(new RecalcGroup(
                 context.Instance.TableInstanceId,
                 context.PeriodKey.Value,
                 [.. ownUpserts.Select(u => u.Address).Concat(ownDeletes)
-                    .Select(a => new RecalculationSeed(a.TableRowId, a.ColumnDefId, approverSheet)).Distinct()],
-                [.. ownUpserts.Select(u => u.Address.ColumnDefId).Concat(ownDeletes.Select(d => d.ColumnDefId)).Distinct()]));
+                    .Select(a => new RecalculationSeed(a.TableRowId, a.ColumnDefId, approverSheet))
+                    .Concat(ownNewSeeds).Distinct()],
+                [.. ownUpserts.Select(u => u.Address.ColumnDefId).Concat(ownDeletes.Select(d => d.ColumnDefId))
+                    .Concat(ownNewSeeds.Select(s => s.ColumnDefId)).Distinct()]));
         }
 
         foreach (var period in ownerInstance.Keys.Order())
@@ -422,12 +500,15 @@ public sealed partial class PatchCellsHandler
             ownerSets.Add(new CellChangeSet(
                 instance.TableInstanceId, upserts, deletes, touched, context.UserId, isLateEdit, ExpectedRowVersions: null));
 
+            var shadowSeeds = NewRowDefaultSeeds(shadowRowIds.GetValueOrDefault(period), defaultColumns, approverSheet).ToList();
             groups.Add(new RecalcGroup(
                 instance.TableInstanceId,
                 period,
                 [.. upserts.Select(u => u.Address).Concat(deletes)
-                    .Select(a => new RecalculationSeed(a.TableRowId, a.ColumnDefId, approverSheet)).Distinct()],
-                [.. upserts.Select(u => u.Address.ColumnDefId).Concat(deletes.Select(d => d.ColumnDefId)).Distinct()]));
+                    .Select(a => new RecalculationSeed(a.TableRowId, a.ColumnDefId, approverSheet))
+                    .Concat(shadowSeeds).Distinct()],
+                [.. upserts.Select(u => u.Address.ColumnDefId).Concat(deletes.Select(d => d.ColumnDefId))
+                    .Concat(shadowSeeds.Select(s => s.ColumnDefId)).Distinct()]));
         }
 
         // ── 4. Попередні значення — на ФІЗИЧНИХ адресах власників ────────

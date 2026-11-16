@@ -91,6 +91,26 @@ public sealed class VersionMigrationTableRenamesTests
             MigrateDocumentVersionHandler.RenamePairs(plan, from, to).OrderBy(p => p.FromColumnDefId).ToList());
     }
 
+    /// <summary>
+    /// B130: пари для <c>cfg.ColumnRename</c> — у порядку ключа (From, To), незалежно від порядку колонок у таблиці й
+    /// плані: одночасні переноси з перетином пар беруть діапазонні U-замки 6b в одному порядку (без дедлоку навхрест).
+    /// </summary>
+    /// <remarks>Мутація: прибрати <c>OrderBy/ThenBy</c> у <c>RenamePairs</c> → порядок колонок таблиці (105, 103, 101).</remarks>
+    [Fact]
+    [Trait("Requirement", "ФВ-7.5")]
+    [Trait("Finding", "B130")]
+    public void B130_RenamePairs_впорядковані_за_ключем_From_To()
+    {
+        var from = WithColumns(Version(1, Table("OLD", 100, ("A", 105), ("B", 103), ("C", 101))));
+        var to = WithColumns(Version(2, Table("NEW", 200, ("A", 201), ("B", 202), ("C", 203))));
+
+        var plan = VersionMigrationPlanner.Plan(
+            from, to, [new(105, null, 1), new(103, null, 1), new(101, null, 1)], Empty,
+            [new VersionMigrationTableRename("OLD", "NEW")]);
+
+        Assert.Equal([(101, 203), (103, 202), (105, 201)], MigrateDocumentVersionHandler.RenamePairs(plan, from, to));
+    }
+
     private static TemplateVersionSnapshot WithColumns(TemplateVersionSnapshot version)
         => version with
         {

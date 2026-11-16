@@ -28,6 +28,24 @@ public enum TemplateLayout : byte
     YearWithMonthColumns = 1,
 }
 
+/// <summary>
+/// ✎ B75: чи має документ версії шаблону подання й затвердження (<c>cfg.TemplateVersion.WorkflowMode</c>).
+/// </summary>
+/// <remarks>
+/// Задається лише в чернетці версії (як <see cref="TemplateLayout"/>); в опублікованій незмінний.
+/// </remarks>
+public enum WorkflowMode : byte
+{
+    /// <summary>Звичайний процес: подання, затвердження, повернення (усі версії до B75).</summary>
+    SubmitApprove = 0,
+
+    /// <summary>
+    /// Без подання й затвердження: значення збираються й одразу доступні звітності; подання, затвердження й
+    /// відкликання відхиляються (<c>workflowDisabled</c>), старі стани погодження не замикають правку (Q4).
+    /// </summary>
+    None = 1,
+}
+
 /// <summary>Розкладка таблиці: як періоди лягають на структуру.</summary>
 public enum TableLayoutKind : byte
 {
@@ -316,7 +334,13 @@ public enum EditDenyReason : byte
     /// передана, а за роллю він лише читає: «ця частина вам не передана». Замінює загальне
     /// <see cref="InsufficientGrantLevel"/> («підвищте рівень гранта»), яке виконавцеві підказувало не те (RC20 D-3).
     /// </summary>
-    NotAssignedToYou = 20
+    NotAssignedToYou = 20,
+
+    /// <summary>
+    /// ✎ B75: рядок заблоковано власником блокування на проміжок дат (<c>doc.RowLock</c>): поки блокування діє, рядок
+    /// не змінює ніхто, крім того, хто заблокував (Q1). Системні записи (перерахунок, збір) його не бачать (Q2).
+    /// </summary>
+    RowLocked = 21
 }
 
 /// <summary>

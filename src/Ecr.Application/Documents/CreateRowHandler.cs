@@ -32,7 +32,10 @@ public sealed class CreateRowHandler(
 
     // ✎ SHEETNAME (борг 09.11): перерахунок колонок SHEETNAME нового рядка. Контейнер передає завжди; `null` — лише
     // прямі конструктори тестів, і тоді задачі немає.
-    IBackgroundJobScheduler? jobs = null)
+    IBackgroundJobScheduler? jobs = null,
+
+    // ✎ B75: блокування рядків — повторно під замком аркуша. `null` — прямі конструктори тестів.
+    IRowLockStore? rowLocks = null)
 {
     /// <summary>Походження запису журналу рядків для POST row — правка людини.</summary>
     public const string RowAuditOrigin = CellChangeOrigins.UserEdit;
@@ -158,6 +161,15 @@ public sealed class CreateRowHandler(
         IReadOnlyList<int> sheetNameColumns = jobs is null || mirror is not null
             ? []
             : SheetNameRecalculation.NewRowColumns(table, snapshot.ColumnsById);
+
+        // ✎ B124 (D-491): дефолт колонки (`DefaultValue`) підставляється у формулах при читанні — і в агрегатах. Новий
+        // рядок з дефолтом ЗМІНЮЄ SUM/COUNT/AVERAGE колонки (порожній без дефолту — ні), тож без насіння агрегати лишались
+        // старими до наступної правки — у дзеркальному режимі Q-17 у ВСІХ місяцях року. Насіння «рядок × колонка з
+        // дефолтом» живе в екземплярі запиту: каскад перераховує його період, а `inputColumns` будить читачів власника
+        // в інших екземплярах (`CrossPeriodFanOut.RoutedInputsAsync`).
+        IReadOnlyList<int> seedColumns = jobs is null
+            ? []
+            : [.. sheetNameColumns.Union(NewRowDefaultColumns(table))];
         var enlist = jobs?.EnlistsInCallerTransaction == true;
         long rowId = 0;
         string? jobId = null;
@@ -170,33 +182,40 @@ public sealed class CreateRowHandler(
                     rowId = await CreateUnderLockAsync(
                             instance, table, tableInstanceId, key, profile, createDecision.AssignmentsPresent, sheetCode, innerCt)
                         .ConfigureAwait(false);
-
-                    // ⛔ MI-02 (в): черга в базі — постановка ВСЕРЕДИНІ транзакції останнім оператором; Quartz — після коміту.
-                    if (enlist && sheetNameColumns.Count > 0)
-                    {
-                        jobId = await SheetNameRecalculation
-                            .EnqueueNewRowAsync(jobs!, instance, rowId, sheetNameColumns, profile.UserId, innerCt)
-                            .ConfigureAwait(false);
-                    }
                 }
                 else
                 {
-                    await CreateMirroredUnderLockAsync(
+                    rowId = await CreateMirroredUnderLockAsync(
                             instance, table, key, profile, createDecision.AssignmentsPresent, sheetCode, mirror, innerCt)
+                        .ConfigureAwait(false);
+                }
+
+                // ⛔ MI-02 (в): черга в базі — постановка ВСЕРЕДИНІ транзакції останнім оператором; Quartz — після коміту.
+                if (enlist && seedColumns.Count > 0 && rowId != 0)
+                {
+                    jobId = await SheetNameRecalculation
+                        .EnqueueNewRowAsync(jobs!, instance, rowId, seedColumns, profile.UserId, innerCt)
                         .ConfigureAwait(false);
                 }
             },
             ct).ConfigureAwait(false);
 
-        if (!enlist && sheetNameColumns.Count > 0 && rowId != 0)
+        if (!enlist && seedColumns.Count > 0 && rowId != 0)
         {
             jobId = await SheetNameRecalculation
-                .EnqueueNewRowAsync(jobs!, instance, rowId, sheetNameColumns, profile.UserId, ct)
+                .EnqueueNewRowAsync(jobs!, instance, rowId, seedColumns, profile.UserId, ct)
                 .ConfigureAwait(false);
         }
 
         return new CreateRowResult(key, jobId);
     }
+
+    /// <summary>
+    /// ✎ B124: введені колонки таблиці з придатним дефолтом (D-491) — новий рядок змінює їхні агрегати. Умова — одна
+    /// на всі шляхи створення рядків (<see cref="Recalculation.ColumnDefaultValues.SeedColumns"/>, B131).
+    /// </summary>
+    private static IEnumerable<int> NewRowDefaultColumns(TableDef table)
+        => Recalculation.ColumnDefaultValues.SeedColumns(table);
 
     /// <summary>Параметри дзеркального створення рядка.</summary>
     /// <param name="Document">Документ місячного проєкту.</param>
@@ -245,7 +264,7 @@ public sealed class CreateRowHandler(
     /// (<c>ConsistencyCheck</c>, окремий крок Q-17).
     /// </para>
     /// </remarks>
-    private async Task CreateMirroredUnderLockAsync(
+    private async Task<long> CreateMirroredUnderLockAsync(
         Ports.TableInstanceRef instance, TableDef table, RowKey key, AccessProfile profile, bool assignmentsPresent,
         string? sheetCode, Mirror mirror, CancellationToken ct)
     {
@@ -255,21 +274,11 @@ public sealed class CreateRowHandler(
             instance.TemplateVersionId,
             instance.DocumentId);
 
-        var year = PeriodKeyOf(instance).Year;
-        var instances = (await rowStore
-                .GetTableInstancesOfTableInYearAsync(instance.DocumentId, instance.TableDefId, year, ct)
-                .ConfigureAwait(false))
-            .ToList();
-
-        // Якір авторитетний за складом: його екземпляр створюється ліниво, вузько (лише ця таблиця).
-        if (!instances.Exists(i => i.PeriodKey == mirror.Anchor.Value))
-        {
-            instances.Add(await rowStore
-                .EnsureTableInstanceAsync(instance.DocumentId, instance.TableDefId, mirror.Anchor, ct)
-                .ConfigureAwait(false));
-        }
-
-        var anchorInstance = instances.First(i => i.PeriodKey == mirror.Anchor.Value);
+        // Якір авторитетний за складом: його екземпляр створюється ліниво, вузько (лише ця таблиця). ✎ B134: спільне з
+        // PATCH/книгою (`MirroredRowCreation`).
+        var (instances, anchorInstance) = await MirroredRowCreation
+            .InstancesWithAnchorAsync(rowStore, instance, mirror.Anchor, ct)
+            .ConfigureAwait(false);
 
         // ⛔ Замки — за зростанням ключа періоду.
         var periodsToLock = new SortedSet<int>(mirror.AnnualPeriods);
@@ -309,6 +318,9 @@ public sealed class CreateRowHandler(
         await EnsureAssignmentsHoldAsync(instance, table, profile, assignmentsPresent, sheetCode, ct)
             .ConfigureAwait(false);
 
+        // ✎ B75: ключ рядка, заблокований між рішенням і цим замком, — та сама відмова RowLocked.
+        await EnsureKeyNotLockedAsync(instance, table, key, profile, sheetCode, ct).ConfigureAwait(false);
+
         // Стеля й дубль ключа — за якорем.
         var anchorRows = await rowStore.GetRowIdsAsync(anchorInstance.TableInstanceId, mirror.Anchor, ct).ConfigureAwait(false);
         if (table.MaxDynamicRows is { } max && anchorRows.Count >= max)
@@ -324,21 +336,16 @@ public sealed class CreateRowHandler(
         var ordinal = await rowStore.GetMaxOrdinalAsync(anchorInstance.TableInstanceId, mirror.Anchor, ct)
             .ConfigureAwait(false) + 1;
 
-        var batches = new List<RowCreationBatch>(instances.Count);
-        foreach (var target in instances.OrderBy(i => i.PeriodKey))
-        {
-            var targetPeriod = new PeriodKey(target.PeriodKey);
-            if (target.TableInstanceId != anchorInstance.TableInstanceId)
-            {
-                var present = await rowStore.GetRowIdsAsync(target.TableInstanceId, targetPeriod, ct).ConfigureAwait(false);
-                if (present.ContainsKey(key.Value))
-                {
-                    continue;
-                }
-            }
+        // Екземпляр, що вже має ключ (розбіжність складу), пропускається (✎ B134: спільне з PATCH/книгою).
+        var (batches, present) = await MirroredRowCreation
+            .BatchesAsync(rowStore, instances, [key], ordinal, ct)
+            .ConfigureAwait(false);
 
-            batches.Add(new RowCreationBatch(target.TableInstanceId, targetPeriod, [key], ordinal));
-        }
+        // ✎ B124: екземпляр запиту вже мав ключ (розбіжність складу) — його наявний рядок і є насінням: рядок з'явився в
+        // інших місяцях, і читачі власника мусять це побачити.
+        var ownExisting = present.TryGetValue(instance.TableInstanceId, out var ownPresent)
+            ? ownPresent.GetValueOrDefault(key.Value)
+            : 0;
 
         var created = await rowStore.CreateRowsBatchAsync(batches, ct).ConfigureAwait(false);
 
@@ -355,6 +362,10 @@ public sealed class CreateRowHandler(
             .ConfigureAwait(false);
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        // ✎ B124: рядок у екземплярі ЗАПИТУ — насіння перерахунку (новий або, якщо екземпляр мав ключ, наявний).
+        var own = batches.FindIndex(b => b.TableInstanceId == instance.TableInstanceId);
+        return own >= 0 && created[own].Count > 0 ? created[own][0] : ownExisting;
     }
 
     /// <summary>Рішення служби доступу на створення рядка з цим ключем.</summary>
@@ -456,6 +467,29 @@ public sealed class CreateRowHandler(
     /// читає <c>EnterEditAsync</c> — той самий власник транзакції вже тримає
     /// виняткове, тож спільне видається одразу й лише читає стан після блокування.
     /// </remarks>
+    /// <summary>✎ B75: блокування рядка з ключем <paramref name="key"/> — повторно під уже взятим замком аркуша.</summary>
+    private async Task EnsureKeyNotLockedAsync(
+        Ports.TableInstanceRef instance, TableDef table, RowKey key, AccessProfile profile, string? sheetCode,
+        CancellationToken ct)
+    {
+        var locked = await RowLocks.RowLockRecheck
+            .LockedAsync(sheetGate, rowLocks, profile, instance.DocumentId, instance.PeriodKey, clock.UtcNow, ct)
+            .ConfigureAwait(false);
+        if (!RowLocks.RowLockRecheck.AnyLocked(locked, instance.SheetCopyId, sheetCode, table.Code, [key.Value]))
+        {
+            return;
+        }
+
+        throw new Errors.AccessDeniedException(
+            "ECR-ACCS-0403",
+            $"Рядок у цю таблицю додати не можна: {EditDenyReason.RowLocked}.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-ACCS-0403.addRowDenied",
+                ["reason"] = nameof(EditDenyReason.RowLocked),
+            });
+    }
+
     private async Task<long> CreateUnderLockAsync(
         Ports.TableInstanceRef instance, TableDef table, long tableInstanceId, RowKey key,
         AccessProfile profile, bool assignmentsPresent, string? sheetCode, CancellationToken ct)
@@ -504,6 +538,9 @@ public sealed class CreateRowHandler(
         // коммітом, відхиляють створення рядка тією ж відмовою, що й служба доступу.
         await EnsureAssignmentsHoldAsync(instance, table, profile, assignmentsPresent, sheetCode, ct)
             .ConfigureAwait(false);
+
+        // ✎ B75: ключ рядка, заблокований між рішенням і цим замком, — та сама відмова RowLocked.
+        await EnsureKeyNotLockedAsync(instance, table, key, profile, sheetCode, ct).ConfigureAwait(false);
 
         var existing = await rowStore.GetRowIdsAsync(tableInstanceId, PeriodKeyOf(instance), ct).ConfigureAwait(false);
 

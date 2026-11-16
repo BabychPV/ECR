@@ -11,7 +11,7 @@ namespace Ecr.Infrastructure.Persistence;
 /// <para>
 /// Логічне видалення рядка (<c>TableRow.SoftDelete</c>) сегменти й частини НЕ прибирає, а видалений рядок — не використання
 /// (як <c>where !r.IsDeleted</c> у комірках). Тому ціль-рядок вимагає невидалений рядок того ж документа, таблиці, копії
-/// аркуша й ключа: для сегмента (він логічний, без періоду) — у будь-якому періоді, для частини — у її місяці. Сегмент поля
+/// аркуша й ключа: для сегмента (він логічний, без періоду) — у періоді, де сегмент чинний (B128c), для частини — у її місяці. Сегмент поля
 /// шапки (<c>HeaderFieldDefId != null</c>) — як є: шапка не видаляється логічно.
 /// </para>
 /// <para>
@@ -21,8 +21,14 @@ namespace Ecr.Infrastructure.Persistence;
 /// </remarks>
 internal static class PermitHistoryUsage
 {
-    /// <summary>Сегменти, чия ціль жива: поле шапки або невидалений рядок.</summary>
+    /// <summary>
+    /// Сегменти, чия ціль жива: поле шапки або рядок, невидалений у періоді, де сегмент ЧИННИЙ (правило B128:
+    /// <c>ValidFrom &lt;= PeriodEnd</c> і немає наступного сегмента тієї ж цілі з <c>ValidFrom &lt;= PeriodStart</c>).
+    /// </summary>
     /// <remarks>
+    /// ⛔ B128c (рішення координатора, F13): лічильники рахують рівно ті записи, що й перелік — сегмент рядка, живого лише
+    /// до початку дії сегмента (чи після його перекриття), не рахується ні в «де використовується» дозволу, ні в
+    /// <c>usedInDocumentCount</c>, ні в C-13. Ті самі періоди дає <c>PermitStore</c> для перевірки меж читання.
     /// ⛔ Дві непересічні гілки через <c>UNION ALL</c>, а не <c>HeaderFieldDefId IS NOT NULL OR EXISTS (…)</c>: OR над
     /// корельованим підзапитом оптимізатор не розкладає на seek-и (F13 p227, сторож <c>RegistryEntryUsageTests</c>).
     /// </remarks>
@@ -34,7 +40,16 @@ internal static class PermitHistoryUsage
                     ti.DocumentId == s.DocumentId && ti.TableDefId == s.TableDefId && ti.SheetCopyId == s.SheetCopyId
                     && db.TableRows.Any(r =>
                         r.PeriodKeyValue == ti.PeriodKeyValue && r.TableInstanceId == ti.Id
-                        && r.RowKeyValue == s.RowKey && !r.IsDeleted))));
+                        && r.RowKeyValue == s.RowKey && !r.IsDeleted)
+                    && db.Periods.Any(p =>
+                        p.PeriodKeyValue == ti.PeriodKeyValue
+                        && db.Documents.Any(d => d.Id == s.DocumentId && d.ProjectId == p.ProjectId)
+                        && s.ValidFrom <= p.PeriodEnd
+                        && !db.PermitSegments.Any(n =>
+                            n.DocumentId == s.DocumentId && n.HeaderFieldDefId == s.HeaderFieldDefId
+                            && n.TableDefId == s.TableDefId && n.SheetCopyId == s.SheetCopyId
+                            && n.RowKey == s.RowKey && n.ColumnDefId == s.ColumnDefId
+                            && n.ValidFrom > s.ValidFrom && n.ValidFrom <= p.PeriodStart)))));
 
     /// <summary>
     /// Сегменти, чия ціль жива САМЕ в періоді <paramref name="periodKey"/>: поле шапки або рядок, невидалений у цьому

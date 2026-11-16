@@ -98,7 +98,11 @@ public sealed partial class PatchCellsHandler(
     // ✎ Feature (j) P2: permit history of rows (a permit changed mid-month) — the validity rule checks each month against
     // the permits in force in it, and a single value into a month shared by two permits is refused (ECR-CELL-4225).
     // `null` (direct constructor in tests) — no history.
-    IPermitHistoryStore? permitHistory = null)
+    IPermitHistoryStore? permitHistory = null,
+
+    // ✎ B75: блокування рядків — повторно під замком аркуша (`RowLocks.RowLockRecheck`). `null` (прямий конструктор у
+    // тестах) — перевірки під замком немає; у проді вприснуте завжди.
+    IRowLockStore? rowLocks = null)
 {
     /// <summary>Застосовує зміни.</summary>
     /// <exception cref="ConcurrencyConflictException">
@@ -251,7 +255,8 @@ public sealed partial class PatchCellsHandler(
             var seeds = WithoutAnnualText(
                 context,
                 BuildRecalculationSeeds(
-                    SeedSource(request, applied, previous), context.ApproverEdit ? context.Table.SheetDefId : null));
+                    SeedSource(request, applied, previous), context.ApproverEdit ? context.Table.SheetDefId : null,
+                    Recalculation.ColumnDefaultValues.SeedColumns(context.Table)));
             if (seeds.Count == 0)
             {
                 return; // AN-142: лише текст якоря - задачі немає, recalculationJobId лишається null
@@ -479,6 +484,17 @@ public sealed partial class PatchCellsHandler(
         /// </summary>
         public SortedSet<int> AnnualPeriods { get; } = [];
 
+        /// <summary>
+        /// ✎ B134 (D-457 п.3): нові рядки батчу таблиці Q-17 створюються в якорі й усіх наявних екземплярах року — тут ці
+        /// екземпляри (за зростанням періоду, з екземпляром запиту й лінивим якорем); <c>null</c> — дзеркалення немає
+        /// (прапор вимкнено, таблиця не «місяці в колонках», копія аркуша, нових рядків немає). Ставиться під блокуванням
+        /// структури (<see cref="PrepareRowMirrorAsync"/>), скидається на кожній спробі транзакції.
+        /// </summary>
+        public List<TableInstanceRef>? MirrorInstances { get; set; }
+
+        /// <summary>✎ B134: екземпляр якоря року (стеля <c>MaxDynamicRows</c> — за ним); <c>null</c> — дзеркалення немає.</summary>
+        public TableInstanceRef? MirrorAnchor { get; set; }
+
         /// <summary>AN-142: у батчі є річна комірка НЕ-текстового якоря (чи новий рядок) — агрегат аркушів замикає її повністю.</summary>
         public bool AnnualNumericWritten { get; set; }
 
@@ -522,6 +538,10 @@ public sealed partial class PatchCellsHandler(
     /// Q-17: насіння перерахунку по фізичних екземплярах, коли частину комірок записано власникам; <c>null</c> —
     /// маршрутизації не було (насіння з <c>Upserts</c>/<c>Deletes</c>).
     /// </param>
+    /// <param name="NewRowIds">
+    /// ✎ B131: справжні <c>TableRow.Id</c> рядків, створених цим батчем (після <see cref="WithRealRowIds"/>); <c>null</c>
+    /// — нових рядків немає або ще не створені. Насіння «новий рядок × колонка з дефолтом» (D-491).
+    /// </param>
     private sealed record CellChangeLists(
         List<CellRecord> Upserts,
         List<CellAddress> Deletes,
@@ -529,7 +549,8 @@ public sealed partial class PatchCellsHandler(
         Dictionary<long, string> RowKeyById,
         Dictionary<long, string> ExpectedRowVersions,
         IReadOnlyDictionary<long, string>? NewRowVersions = null,
-        IReadOnlyList<RecalcGroup>? Routed = null);
+        IReadOnlyList<RecalcGroup>? Routed = null,
+        IReadOnlyList<long>? NewRowIds = null);
 
     /// <summary>
     /// Розв'язує особу користувача, структуру таблиці зі знімка метаданих і
@@ -1602,6 +1623,16 @@ public sealed partial class PatchCellsHandler(
             return planned;
         }
 
+        // ✎ B134 (D-457 п.3): таблиця Q-17 — рядки в якорі й усіх наявних екземплярах року, як POST rows.
+        if (context.MirrorInstances is { } mirror)
+        {
+            var (ownIds, mirrored) = await CreateMirroredRowsAsync(
+                    request, context, mirror, now, ct)
+                .ConfigureAwait(false);
+            await WriteRowAuditAsync(mirrored, ct).ConfigureAwait(false);
+            return WithRealRowIds(context, planned, ownIds);
+        }
+
         var newIds = await rowStore
             .CreateRowsAsync(
                 request.TableInstanceId, context.PeriodKey,
@@ -1643,7 +1674,8 @@ public sealed partial class PatchCellsHandler(
             planned.RowKeyById.ToDictionary(pair => Real(pair.Key), pair => pair.Value),
 
             // Версії заявляються лише для наявних рядків — підміняти нічого.
-            planned.ExpectedRowVersions);
+            planned.ExpectedRowVersions,
+            NewRowIds: newIds);
     }
 
     /// <summary>
@@ -3003,6 +3035,9 @@ public sealed partial class PatchCellsHandler(
             // 500, а не ECR-DOC-4091).
             await EnsureAssignmentsHoldAsync(context, planned, innerCt).ConfigureAwait(false);
 
+            // ✎ B75: блокування рядка, створене між рішенням і цим замком, — та сама відмова RowLocked.
+            await EnsureRowsNotLockedAsync(context, planned, innerCt).ConfigureAwait(false);
+
             await EnsureRowLimitUnderLockAsync(request, context, innerCt).ConfigureAwait(false);
 
             // ⛔ `DAT-04` п. 1: рядки — ПІСЛЯ блокування аркуша й усіх відмов,
@@ -3132,6 +3167,9 @@ public sealed partial class PatchCellsHandler(
             context.Instance.TemplateVersionId,
             context.Instance.DocumentId);
 
+        // ✎ B134: екземпляри року для дзеркальних нових рядків — під блокуванням структури, до блокувань аркуша.
+        await PrepareRowMirrorAsync(context, ct).ConfigureAwait(false);
+
         // ⛔ Q-17: ВСІ задіяні періоди (власний, місячні колонки інших місяців, річний агрегат) беруться
         // у ЗРОСТАЮЧОМУ порядку ключа. Власний-першим давав дедлок: PATCH з перегляду 3 у колонку місяця 5 тримав 3 і
         // чекав 5, а PATCH з перегляду 5 у колонку місяця 3 — навпаки. Виняткове блокування рядків (стеля) береться
@@ -3139,11 +3177,16 @@ public sealed partial class PatchCellsHandler(
         var lockedStatuses = new Dictionary<int, DocumentStatus>();
         foreach (var lockedPeriod in AllInvolvedPeriods(context))
         {
-            if (lockedPeriod == context.PeriodKey.Value && CreatesRowsUnderCeiling(context))
+            // ✎ B134: дзеркальне створення — виняткове блокування КОЖНОГО періоду екземплярів року, як у POST rows.
+            if ((lockedPeriod == context.PeriodKey.Value && CreatesRowsUnderCeiling(context))
+                || context.MirrorInstances?.Exists(i => i.PeriodKey == lockedPeriod) == true)
             {
                 // ⛔ Y7-03: відмова «зайнято» — про рядки, а не про подання (див. `RowWriteLock`).
+                // ✎ B134 (F13 D1): саме ЦЕЙ період циклу — X на кожен місяць дзеркала, а не лише на свій.
                 await RowWriteLock
-                    .EnterAsync(sheetGate, context.Instance.DocumentId, context.Table.SheetDefId, context.PeriodKey, ct, context.Instance.SheetCopyId)
+                    .EnterAsync(
+                        sheetGate, context.Instance.DocumentId, context.Table.SheetDefId, new PeriodKey(lockedPeriod), ct,
+                        context.Instance.SheetCopyId)
                     .ConfigureAwait(false);
             }
 
@@ -3190,6 +3233,11 @@ public sealed partial class PatchCellsHandler(
         var all = new SortedSet<int>(context.ColumnPeriods);
         all.UnionWith(context.AnnualPeriods);
         all.Add(context.PeriodKey.Value);
+        if (context.MirrorInstances is { } mirror)
+        {
+            all.UnionWith(mirror.Select(i => i.PeriodKey));
+        }
+
         return all;
     }
 
@@ -3377,6 +3425,27 @@ public sealed partial class PatchCellsHandler(
         return null;
     }
 
+    /// <summary>
+    /// ✎ B75: блокування рядків — повторно під уже взятим замком аркуша періоду екземпляра (див.
+    /// <see cref="RowLocks.RowLockRecheck"/>).
+    /// </summary>
+    private async Task EnsureRowsNotLockedAsync(RequestContext context, CellChangeLists changes, CancellationToken ct)
+    {
+        var locked = await RowLocks.RowLockRecheck
+            .LockedAsync(
+                sheetGate, rowLocks, context.Profile, context.Instance.DocumentId, context.PeriodKey.Value, clock.UtcNow, ct)
+            .ConfigureAwait(false);
+
+        RowLocks.RowLockRecheck.ThrowIfLocked(
+            locked, context.Instance.SheetCopyId, SheetCodeOf(context), context.Table.Code,
+            context.Updates.Concat(context.Creations).Select(r => r.RowKey),
+            changes.Upserts.Count + changes.Deletes.Count);
+    }
+
+    /// <summary>✎ B75: код аркуша таблиці контексту; <c>null</c> — невідомий (перевірка блокувань тоді fail-closed).</summary>
+    private static string? SheetCodeOf(RequestContext context)
+        => context.Snapshot.Sheets.FirstOrDefault(s => s.Id == context.Table.SheetDefId)?.Code;
+
     /// <summary>Аркуш, поданий чи затверджений під блокуванням, — відмова.</summary>
     private static void CheckSheetStatus(DocumentStatus status, CellChangeLists changes)
     {
@@ -3427,6 +3496,16 @@ public sealed partial class PatchCellsHandler(
             return;
         }
 
+        // ✎ B134 (D-457 п.3): у дзеркальному режимі стеля — за якорем (авторитетний склад року).
+        if (context.MirrorAnchor is { } anchor)
+        {
+            var anchorRows = await rowStore
+                .GetRowIdsAsync(anchor.TableInstanceId, new PeriodKey(anchor.PeriodKey), ct)
+                .ConfigureAwait(false);
+            CheckRowLimit(context, anchorRows.Count, context.Creations.Count(r => !anchorRows.ContainsKey(r.RowKey)));
+            return;
+        }
+
         var existing = await rowStore
             .GetRowIdsAsync(request.TableInstanceId, context.PeriodKey, ct)
             .ConfigureAwait(false);
@@ -3435,11 +3514,12 @@ public sealed partial class PatchCellsHandler(
     }
 
     /// <summary>Стеля <c>MaxDynamicRows</c> за числом рядків, прочитаним під блокуванням.</summary>
-    private static void CheckRowLimit(RequestContext context, int existing)
+    private static void CheckRowLimit(RequestContext context, int existing, int? adding = null)
     {
-        if (context.Table.MaxDynamicRows is { } maxRows && existing + context.Creations.Count > maxRows)
+        var added = adding ?? context.Creations.Count;
+        if (context.Table.MaxDynamicRows is { } maxRows && existing + added > maxRows)
         {
-            throw DynamicRowLimitExceeded(context.Table, existing, context.Creations.Count, maxRows);
+            throw DynamicRowLimitExceeded(context.Table, existing, added, maxRows);
         }
     }
 
@@ -3571,14 +3651,27 @@ public sealed partial class PatchCellsHandler(
     /// ✎ D-442: аркуш правки погоджувача (<see cref="RequestContext.ApproverEdit"/>) — позначка, з якою каскад
     /// перераховує саме цей поданий аркуш; <c>null</c> — звичайна правка.
     /// </param>
+    /// <param name="defaultColumns">
+    /// ✎ B131 (D-491): колонки таблиці з придатним дефолтом (<see cref="Recalculation.ColumnDefaultValues.SeedColumns"/>).
+    /// Новий рядок батчу (<see cref="CellChangeLists.NewRowIds"/>) дає насіння і в них, навіть незаписаних: дефолт
+    /// входить в агрегати. Без дефолтів — лише записані/стерті комірки, як і доти.
+    /// </param>
     private static List<RecalculationSeed> BuildRecalculationSeeds(
-        CellChangeLists changes, int? approverSheetDefId = null)
+        CellChangeLists changes, int? approverSheetDefId = null, IReadOnlyList<int>? defaultColumns = null)
         => changes.Upserts
             .Select(u => u.Address)
             .Concat(changes.Deletes)
             .Select(a => new RecalculationSeed(a.TableRowId, a.ColumnDefId, approverSheetDefId))
+            .Concat(NewRowDefaultSeeds(changes.NewRowIds, defaultColumns, approverSheetDefId))
             .Distinct()
             .ToList();
+
+    /// <summary>✎ B131: насіння «новий рядок × колонка з придатним дефолтом» (D-491); без нових рядків чи дефолтів — порожньо.</summary>
+    private static IEnumerable<RecalculationSeed> NewRowDefaultSeeds(
+        IReadOnlyList<long>? newRowIds, IReadOnlyList<int>? defaultColumns, int? approverSheetDefId)
+        => newRowIds is not { Count: > 0 } || defaultColumns is not { Count: > 0 }
+            ? []
+            : newRowIds.SelectMany(rowId => defaultColumns.Select(c => new RecalculationSeed(rowId, c, approverSheetDefId)));
 
     /// <summary>Підсумкова відповідь: застосовані комірки, нові версії рядків, повідомлення валідації.</summary>
     /// <remarks>

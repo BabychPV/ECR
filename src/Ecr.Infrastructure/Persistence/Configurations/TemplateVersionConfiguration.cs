@@ -26,6 +26,8 @@ public sealed class TemplateVersionConfiguration : IEntityTypeConfiguration<Temp
 
         // D-474: розкладка версії; наявні версії — PerMonthCopies (0) іменованим DEFAULT.
         builder.Property(x => x.Layout).HasConversion<byte>().HasDefaultValue(TemplateLayout.PerMonthCopies, "DF_TV_Layout");
+        // ✎ B75: режим погодження; наявні версії — SubmitApprove (0) іменованим DEFAULT.
+        builder.Property(x => x.WorkflowMode).HasConversion<byte>().HasDefaultValue(WorkflowMode.SubmitApprove, "DF_TV_WorkflowMode");
         builder.Property(x => x.SourceWorkbookHash).HasColumnType("varbinary(32)");
 
         // DEFAULT-и з іменами за 02a-db-schema.md: безіменне обмеження

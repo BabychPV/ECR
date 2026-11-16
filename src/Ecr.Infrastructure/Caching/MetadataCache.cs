@@ -420,6 +420,10 @@ public sealed class MetadataCache(
                 // ✎ LAND-YEAR L0a: розкладка версії — тією ж проєкцією; псевдоніми місячних входів читає лише YearWithMonthColumns.
                 YearLayout = db.TemplateVersions.Any(v =>
                     v.Id == templateVersionId && v.Layout == Ecr.Domain.Enums.TemplateLayout.YearWithMonthColumns),
+
+                // ✎ B75: режим «без погодження» — тією ж проєкцією (рішення про запис не читає старих станів аркуша).
+                WorkflowNone = db.TemplateVersions.Any(v =>
+                    v.Id == templateVersionId && v.WorkflowMode == Ecr.Domain.Enums.WorkflowMode.None),
             })
             .Where(x => x.Sheet.TemplateVersionId == templateVersionId && !x.Sheet.IsDeleted)
             .OrderBy(x => x.Sheet.Ordinal)
@@ -430,6 +434,7 @@ public sealed class MetadataCache(
         var hasRelations = sheetRows.Any(x => x.HasRelations);
         var hasPermitBindings = sheetRows.Any(x => x.HasPermitBindings);
         var yearLayout = sheetRows.Any(x => x.YearLayout);
+        var workflowNone = sheetRows.Any(x => x.WorkflowNone);
 
         var sheetIds = sheets.Select(s => s.Id).ToArray();
 
@@ -583,6 +588,7 @@ public sealed class MetadataCache(
             HasActiveRollupOrCheck = hasRelations,
             HasActivePermitBindings = hasPermitBindings,
             MonthInputAliases = monthInputAliases,
+            WorkflowNone = workflowNone,
         };
     }
 }

@@ -146,10 +146,14 @@ public sealed class CrossPeriodRecalculationTests
         var dirty = new DirtySet();
         dirty.Add(new CellAddress(Key(5), RowId + 7_000, _inputColumn));
         var changed = new HashSet<(int TableDefId, int ColumnDefId)>();
+        var inputs = new HashSet<(int TableDefId, int ColumnDefId)>();
 
-        await Service().RecalculateAsync(Instance(5), dirty, CancellationToken.None, changed);
+        await Service().RecalculateAsync(Instance(5), dirty, CancellationToken.None, changed, inputColumns: inputs);
 
         Assert.Contains((_table.Id, _inputColumn), changed);
+
+        // ✎ B124: і у введені колонки (Q-17) — дзеркально видалений рядок забрав значення власників з усіх екземплярів року.
+        Assert.Contains((_table.Id, _inputColumn), inputs);
     }
 
     [Fact]

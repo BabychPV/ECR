@@ -49,6 +49,7 @@ public sealed class TemplateVersionsController(
     DeletePeriodAccessRuleHandler deletePeriodAccessRule,
     DiscardTemplateVersionHandler discard,
     SetTemplateLayoutHandler setLayout,
+    SetTemplateWorkflowModeHandler setWorkflowMode,
     MonthInputAliasesHandler monthInputAliases,
     Ecr.Api.Auth.CurrentUser currentUser) : ControllerBase
 {
@@ -112,6 +113,31 @@ public sealed class TemplateVersionsController(
         ArgumentNullException.ThrowIfNull(request);
 
         return Ok(await setLayout.HandleAsync(id, request.Layout, ct).ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// ✎ B75: задає режим погодження чернетки — з поданням і затвердженням (<c>SubmitApprove</c>) або без них
+    /// (<c>None</c>: значення одразу доступні звітності, подання/затвердження/відкликання — <c>422 workflowDisabled</c>).
+    /// Право <c>Template.Edit</c>.
+    /// </summary>
+    /// <param name="id">Версія-чернетка.</param>
+    /// <param name="request">Новий режим.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// Опублікована версія відхиляє правку (<c>ECR-TMPL-0409</c>); версія з документами — <c>ECR-SCHM-0409</c>;
+    /// <c>None</c> для версії з власним маршрутом погодження — <c>ECR-TMPL-0422</c> (<c>workflowModeHasRoute</c>).
+    /// </remarks>
+    [HttpPut("workflow-mode")]
+    [ProducesResponseType<TemplateWorkflowModeDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<TemplateWorkflowModeDto>> SetWorkflowMode(
+        int id, [FromBody] SetTemplateWorkflowModeRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        return Ok(await setWorkflowMode.HandleAsync(id, request.WorkflowMode, ct).ConfigureAwait(false));
     }
 
     /// <summary>
@@ -1185,6 +1211,10 @@ public sealed record SaveSheetDefRequest(
 /// <summary>Розкладка версії-чернетки (D-474).</summary>
 /// <param name="Layout">Копія документа на місяць або рік із місяцями в колонках.</param>
 public sealed record SetTemplateLayoutRequest(Ecr.Domain.Enums.TemplateLayout Layout);
+
+/// <summary>Режим погодження версії-чернетки (B75).</summary>
+/// <param name="WorkflowMode">З поданням і затвердженням або без них.</param>
+public sealed record SetTemplateWorkflowModeRequest(Ecr.Domain.Enums.WorkflowMode WorkflowMode);
 
 /// <summary>Налаштування таблиці на аркуші чернетки (<c>W5.1</c>).</summary>
 /// <param name="NameL10n">Назва таблиці мовами каталогу.</param>

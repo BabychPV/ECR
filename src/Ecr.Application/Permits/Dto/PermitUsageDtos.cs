@@ -9,10 +9,18 @@ public static class PermitUsageKinds
 
     /// <summary>Комірка рядка таблиці (колонка <c>Lookup</c>) вказує на дозвіл.</summary>
     public const string Cell = "cell";
+
+    /// <summary>
+    /// B128c: запис історії дозволів — пізніший дозвіл «з дати» поля шапки (<c>TableCode = null</c>) чи рядка
+    /// (<c>doc.PermitSegment</c>, <c>PeriodKey = null</c>) або частина поділеного місяця (<c>doc.CellPermitPart</c>, свій
+    /// <c>PeriodKey</c>); дата початку — <see cref="PermitUsageItemDto.ValidFrom"/>. Додатковий вид: клієнт, що його не знає,
+    /// може пропустити рядок.
+    /// </summary>
+    public const string History = "history";
 }
 
 /// <summary>Одне місце, де дозвіл стоїть значенням: поле шапки або комірка рядка таблиці документа.</summary>
-/// <param name="Kind"><c>header</c> або <c>cell</c> (<see cref="PermitUsageKinds"/>).</param>
+/// <param name="Kind"><c>header</c>, <c>cell</c> або <c>history</c> (<see cref="PermitUsageKinds"/>).</param>
 /// <param name="DocumentId">Документ.</param>
 /// <param name="DocumentKey">Бізнес-ключ документа.</param>
 /// <param name="ProjectId">Проєкт документа.</param>
@@ -26,6 +34,16 @@ public static class PermitUsageKinds
 /// <param name="RowOrdinal">Порядок рядка на екрані; <c>null</c> для шапки.</param>
 /// <param name="FieldCode">Код поля шапки або колонки.</param>
 /// <param name="FieldLabelL10n">Підпис поля шапки або заголовок колонки мовами каталогу.</param>
+/// <param name="ValidFrom">
+/// Лише для <c>history</c>: з якого дня дозвіл чинний у цьому місці (сегмент — <c>ValidFrom</c>, частина місяця — її перший
+/// день); для <c>header</c>/<c>cell</c> — <c>null</c> (B128c).
+/// </param>
+/// <param name="LinkPeriodKey">
+/// Лише для <c>history</c> рядка (B136): період, який відкриває посилання на місце, — НАЙРАНІШИЙ з періодів, де рядок живий,
+/// запис чинний І колонку цьому читачу видно (частина місяця — її місяць; з фільтром — період фільтра). Найраніший — як
+/// попереднє посилання на місяць <c>validFrom</c>: «з якого місяця дозвіл тут стоїть», але без періоду, якого читач не бачить.
+/// Для шапки, комірки й історії поля шапки — <c>null</c>.
+/// </param>
 public sealed record PermitUsageItemDto(
     string Kind,
     long DocumentId,
@@ -40,7 +58,9 @@ public sealed record PermitUsageItemDto(
     string? RowKey,
     int? RowOrdinal,
     string FieldCode,
-    Dictionary<string, string> FieldLabelL10n);
+    Dictionary<string, string> FieldLabelL10n,
+    DateOnly? ValidFrom = null,
+    int? LinkPeriodKey = null);
 
 /// <summary>
 /// «Де використано» дозвіл: документи, у яких він обраний значенням поля шапки чи колонки таблиці або стоїть в історії
@@ -53,16 +73,20 @@ public sealed record PermitUsageItemDto(
 /// (пізніший дозвіл «з дати», частина місяця). Документ рахується один раз, скільки б місць чи сегментів історії в ньому не було
 /// (B56).
 /// </param>
-/// <param name="LinkCount">Скільки місць (полів шапки й комірок) посилаються на дозвіл; історія дозволів сюди не входить.</param>
-/// <param name="Truncated"><c>true</c>, якщо <paramref name="Items"/> обрізано лімітом <c>limit</c>.</param>
-/// <param name="Items">Місця посилань: за документом, періодом, шапка перед таблицями.</param>
+/// <param name="LinkCount">Скільки місць (полів шапки й комірок) посилаються на дозвіл; історія дозволів сюди не входить (її — <paramref name="HistoryLinkCount"/>).</param>
+/// <param name="Truncated"><c>true</c>, якщо <paramref name="Items"/> обрізано лімітом <c>limit</c> (з урахуванням рядків історії).</param>
+/// <param name="Items">Місця посилань: за документом; шапка, далі комірки, далі записи історії (<c>history</c>).</param>
 /// <param name="HistoryDocumentCount">
 /// Скільки з <paramref name="DocumentCount"/> документів мають дозвіл у записах історії дозволів: сегмент «з дати» поля
 /// шапки чи живого рядка, або частина поділеного місяця. ⚠ Частина 1 поділеного місяця несе БАЗОВИЙ дозвіл комірки, тож
 /// документ, де дозвіл стоїть значенням комірки з поділеним місяцем, теж потрапляє сюди — це «є в історії», а не «лише в
-/// історії». Записи історії не перелічуються в <paramref name="Items"/> і не входять у <c>LinkCount</c>; документ, де дозвіл є
-/// лише в історії, входить у <paramref name="DocumentCount"/>, але не має рядка в переліку. З фільтром періоду: частина — свого
-/// місяця, сегмент — якщо документ має таблиці в періоді і сегмент чинний не пізніше кінця періоду (B56).
+/// історії». Записи історії не входять у <c>LinkCount</c>; з B128c вони перелічуються в <paramref name="Items"/> видом
+/// <c>history</c>. З фільтром періоду: частина — свого місяця, сегмент — якщо документ має таблиці в періоді і сегмент
+/// чинний бодай частково в періоді (B56, B128).
+/// </param>
+/// <param name="HistoryLinkCount">
+/// B128c: скільки записів історії дозволів (сегментів і частин місяців) посилаються на дозвіл під тими самими правилами, що й
+/// <paramref name="HistoryDocumentCount"/>; сховані правилами читання з поточної сторінки віднімаються (як у <c>LinkCount</c>).
 /// </param>
 public sealed record PermitUsageDto(
     long PermitId,
@@ -70,4 +94,5 @@ public sealed record PermitUsageDto(
     int LinkCount,
     bool Truncated,
     IReadOnlyList<PermitUsageItemDto> Items,
-    int HistoryDocumentCount = 0);
+    int HistoryDocumentCount = 0,
+    int HistoryLinkCount = 0);
