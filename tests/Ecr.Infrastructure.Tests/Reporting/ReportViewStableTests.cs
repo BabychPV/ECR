@@ -534,6 +534,7 @@ public sealed partial class ReportViewStableTests(SqlServerFixture sql)
         await using (var db = sql.CreateContext())
         {
             db.ColumnRenames.Add(new ColumnRename(v1.Cols["OLD"], v2.Cols["NEW"]));
+            db.ColumnRenameProjects.Add(new ColumnRenameProject(v1.Cols["OLD"], v2.Cols["NEW"], p.ProjectId));   // B129: як перенос проєкту
             await db.SaveChangesAsync();
         }
 
@@ -587,6 +588,7 @@ public sealed partial class ReportViewStableTests(SqlServerFixture sql)
         await using (var db = sql.CreateContext())
         {
             db.ColumnRenames.Add(new ColumnRename(v1.Cols["X"], v2.Cols["X"]));
+            db.ColumnRenameProjects.Add(new ColumnRenameProject(v1.Cols["X"], v2.Cols["X"], p.ProjectId));   // B129: як перенос проєкту
             await db.SaveChangesAsync();
         }
 
