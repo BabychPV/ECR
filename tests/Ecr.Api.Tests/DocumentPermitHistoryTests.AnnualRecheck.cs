@@ -166,7 +166,7 @@ public sealed partial class DocumentPermitHistoryTests
         {
             var permitColumnId = (await db.ColumnDefs.AsNoTracking()
                     .Where(c => c.TableDefId == tableDefId).ToListAsync().ConfigureAwait(false))
-                .Single(c => string.Equals(c.Code.Value, s.PermitColumnCode, StringComparison.Ordinal)).Id;
+                .Single(c => string.Equals(c.Code, s.PermitColumnCode, StringComparison.Ordinal)).Id;
             var formula = new FormulaDef(tableDefId, FormulaScope.Column, "1", ExpressionDialect.Template);
             formula.AssignColumn(s.DataColumnId);
             db.FormulaDefs.Add(formula);

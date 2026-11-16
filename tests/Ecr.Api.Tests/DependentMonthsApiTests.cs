@@ -52,6 +52,9 @@ public sealed class DependentMonthsApiTests(SqlServerFixture sql)
 
     private static readonly DateTime Now = new(2026, 10, 15, 10, 0, 0, DateTimeKind.Utc);
 
+    /// <summary>Затверджені місяці першого сценарію — у відмові за зростанням.</summary>
+    private static readonly int[] ApprovedMonths = [209901, 209903];
+
     // ── 1. Затверджений місяць блокує; перелік місяців у відмові; нічого не записано ──
 
     [Fact]
@@ -72,7 +75,7 @@ public sealed class DependentMonthsApiTests(SqlServerFixture sql)
         Assert.Equal("ECR-ACCS-0403", root.GetProperty("errorCode").GetString());
         Assert.Equal("err.ECR-ACCS-0403.deniedCells", root.GetProperty("messageKey").GetString());
         Assert.Equal("DependentMonthsLocked", root.GetProperty("reason").GetString());
-        Assert.Equal(new[] { 209901, 209903 }, root.GetProperty("months").EnumerateArray().Select(m => m.GetInt32()));
+        Assert.Equal(ApprovedMonths, root.GetProperty("months").EnumerateArray().Select(m => m.GetInt32()));
         Assert.Equal("209901, 209903", root.GetProperty("monthsText").GetString());
         Assert.Empty(await StoredAsync(s, Fuel).ConfigureAwait(true));
 
