@@ -41,6 +41,8 @@ export function AirRowEditor({
   const set = (code: string, value: string): void => setDraft((current) => ({ ...current, [code]: value }));
 
   const submit = (): void => {
+    // ⛔ B149 (KIT §6.9): спінер вмикається лише через 100 мс — другий сабміт слав другий запис рядка.
+    if (save.isPending) return;
     const values = changedValues(target.fields, target.initial, draft);
     if (Object.keys(values).length === 0) {
       onClose();
