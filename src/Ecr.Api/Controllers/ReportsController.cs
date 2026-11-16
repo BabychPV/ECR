@@ -217,9 +217,11 @@ public sealed class ReportsController(
     /// давали б різні числа без жодного сліду.
     /// </remarks>
     [HttpPost("{code}/build")]
+    [EnableRateLimiting(DocumentExportRateLimitPolicy.PolicyName)] // PT-6: кошик спільний з експортом (важка задача в чергу)
     [ProducesResponseType<Contracts.JobAcceptedResponse>(StatusCodes.Status202Accepted)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
     public async Task<IActionResult> Build(
         string code, [FromBody] BuildSnapshotRequest request, CancellationToken ct)
     {

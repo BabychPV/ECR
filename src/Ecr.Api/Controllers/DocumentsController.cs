@@ -769,7 +769,9 @@ public sealed class DocumentsController(
     /// <param name="request">Рік, розкладка, виходи «як відфільтровано».</param>
     /// <param name="ct">Токен скасування.</param>
     [HttpPost("{id:long}/calculation-results/year/export")]
+    [EnableRateLimiting(DocumentExportRateLimitPolicy.PolicyName)] // PT-6: 6/хв на користувача, кошик спільний з експортом документа
     [ProducesResponseType<Contracts.JobAcceptedResponse>(StatusCodes.Status202Accepted)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
     public async Task<IActionResult> ExportCalculationResultsYear(
         long id, [FromBody] CalculationYearExportRequest request, CancellationToken ct)
     {
@@ -817,7 +819,9 @@ public sealed class DocumentsController(
 
     /// <summary>Експорт у <c>.xlsx</c>. Право <c>Document.Export</c>.</summary>
     [HttpPost("{id:long}/export")]
+    [EnableRateLimiting(DocumentExportRateLimitPolicy.PolicyName)] // PT-6: 6/хв на користувача
     [ProducesResponseType<Contracts.JobAcceptedResponse>(StatusCodes.Status202Accepted)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
     public async Task<IActionResult> Export(long id, [FromBody] ExportRequest request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
