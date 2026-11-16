@@ -280,7 +280,7 @@ public sealed class DependentMonthsApiTests(SqlServerFixture sql)
         Dictionary<string, int> ColumnIds, Dictionary<string, string> ColumnCodes)
     {
         /// <summary>✎ Квіз 16.11: аркуш B, формула якого читає FUEL аркуша A (лише в сценарії «читач на іншому аркуші»).</summary>
-        public (int Id, string Code)? ReaderSheet { get; init; }
+        public (int Id, string Code, long CopyId)? ReaderSheet { get; init; }
     }
 
     // ── 10. Квіз 16.11: формула ІНШОГО аркуша читає стовпець — його затверджений місяць блокує і названий ──
@@ -298,14 +298,18 @@ public sealed class DependentMonthsApiTests(SqlServerFixture sql)
     [Theory]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "B79")]
-    [InlineData(DocumentStatus.Approved)]
-    [InlineData(DocumentStatus.Submitted)]
-    public async Task Формула_іншого_аркуша_читає_стовпець_його_затверджений_місяць_блокує_і_названий(DocumentStatus readerMarch)
+    [InlineData(DocumentStatus.Approved, false)]
+    [InlineData(DocumentStatus.Submitted, false)]
+    [InlineData(DocumentStatus.Approved, true)]
+    public async Task Формула_іншого_аркуша_читає_стовпець_його_затверджений_місяць_блокує_і_названий(
+        DocumentStatus readerMarch, bool onCopy)
     {
         var s = await ArrangeAsync(readerOnOtherSheet: true).ConfigureAwait(true);
-        var (readerId, readerCode) = s.ReaderSheet!.Value;
+        var (readerId, readerCode, readerCopy) = s.ReaderSheet!.Value;
         await SetStatusAsync(s, 1, DocumentStatus.Approved).ConfigureAwait(true);
-        await SetStatusAsync(s, 3, readerMarch, readerId).ConfigureAwait(true);
+
+        // ✎ Квіз 16.11 (координатор): затверджений місяць КОПІЇ аркуша-читача — теж залежний затверджений місяць.
+        await SetStatusAsync(s, 3, readerMarch, readerId, onCopy ? readerCopy : null).ConfigureAwait(true);
         using var app = Boot();
         using var client = await SignInAsync(app, s.Writer).ConfigureAwait(true);
 
@@ -472,7 +476,9 @@ public sealed class DependentMonthsApiTests(SqlServerFixture sql)
     /// <param name="month">Місяць 2099.</param>
     /// <param name="status">Стан.</param>
     /// <param name="sheetDefId">Аркуш; <c>null</c> — аркуш таблиці сценарію (A).</param>
-    private static async Task SetStatusAsync(Scenario s, int month, DocumentStatus status, int? sheetDefId = null)
+    /// <param name="copyId">Копія аркуша; <c>null</c> — оригінал.</param>
+    private static async Task SetStatusAsync(
+        Scenario s, int month, DocumentStatus status, int? sheetDefId = null, long? copyId = null)
     {
         if (status == DocumentStatus.Draft)
         {
@@ -480,7 +486,7 @@ public sealed class DependentMonthsApiTests(SqlServerFixture sql)
         }
 
         await using var db = s.Builder.CreateContext();
-        var state = new ApprovalState(s.Doc.DocumentId, sheetDefId ?? s.Doc.SheetDefId, (Year * 100) + month);
+        var state = new ApprovalState(s.Doc.DocumentId, sheetDefId ?? s.Doc.SheetDefId, (Year * 100) + month, copyId);
         state.Submit(s.WriterId, Now);
         if (status == DocumentStatus.Approved)
         {
@@ -504,7 +510,8 @@ public sealed class DependentMonthsApiTests(SqlServerFixture sql)
     /// </param>
     private async Task<Scenario> ArrangeAsync(bool readerOnOtherSheet = false)
     {
-        (int Id, string Code)? readerSheet = null;
+        (int Id, string Code, long CopyId)? readerSheet = null;
+        long readerCopyId = 0;
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var doc = await builder.BuildAsync(
             View, columnCount: 3, rowCount: 2, rowMode: TableRowMode.Mixed,
@@ -566,8 +573,13 @@ public sealed class DependentMonthsApiTests(SqlServerFixture sql)
                     tableB.Id, EcrCode.Create($"RB{tag}"),
                     new LocalizedText(new Dictionary<string, string> { ["en"] = "Reader" }), 1, CellDataType.Formula);
                 db.ColumnDefs.Add(readerColumn);
-                db.DocumentSheets.Add(new DocumentSheet(doc.DocumentId, sheetB.Id));
+                var originalB = new DocumentSheet(doc.DocumentId, sheetB.Id);
+                db.DocumentSheets.Add(originalB);
                 await db.SaveChangesAsync().ConfigureAwait(false);
+                var copyB = originalB.CreateCopy(2);
+                db.DocumentSheets.Add(copyB);
+                await db.SaveChangesAsync().ConfigureAwait(false);
+                readerCopyId = copyB.Id;
 
                 var readerFormula = new FormulaDef(tableB.Id, FormulaScope.Column, "0", ExpressionDialect.Template);
                 readerFormula.AssignColumn(readerColumn.Id);
@@ -578,7 +590,7 @@ public sealed class DependentMonthsApiTests(SqlServerFixture sql)
                     readerFormula.Id, dependsOnKind: 0, doc.TableDefId, rowKey: null, columnIds[Fuel],
                     filterJson: null, periodOffset: null, sortOrder: 0));
                 await db.SaveChangesAsync().ConfigureAwait(false);
-                readerSheet = (sheetB.Id, sheetB.Code);
+                readerSheet = (sheetB.Id, sheetB.Code, readerCopyId);
             }
             else
             {

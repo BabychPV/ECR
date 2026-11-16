@@ -6,6 +6,7 @@ using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Configuration;
+using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Entities.Workflow;
 using Ecr.Domain.Enums;
@@ -45,7 +46,8 @@ public sealed class DependentMonthsGateRaceTests(SqlServerFixture sql)
     private static readonly TimeSpan HookTimeout = TimeSpan.FromSeconds(60);
 
     private sealed record Scene(
-        TestDocument Doc, int WriterId, string RowKey, string BaseVersion, int ReaderSheetId, string ReaderSheetCode);
+        TestDocument Doc, int WriterId, string RowKey, string BaseVersion, int ReaderSheetId, string ReaderSheetCode,
+        long ReaderCopyId);
 
     /// <summary>Payload задач каскаду, поставлених останнім <see cref="RunPatchAsync"/> (JSON).</summary>
     private readonly List<string> _payloads = [];
@@ -169,16 +171,20 @@ public sealed class DependentMonthsGateRaceTests(SqlServerFixture sql)
     [Theory]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "B79")]
-    [InlineData(false, DocumentStatus.Approved)]
-    [InlineData(true, DocumentStatus.Approved)]
-    [InlineData(false, DocumentStatus.Submitted)]
-    [InlineData(true, DocumentStatus.Submitted)]
+    [InlineData(false, DocumentStatus.Approved, false)]
+    [InlineData(true, DocumentStatus.Approved, false)]
+    [InlineData(false, DocumentStatus.Submitted, false)]
+    [InlineData(true, DocumentStatus.Submitted, false)]
+    [InlineData(false, DocumentStatus.Approved, true)]
+    [InlineData(true, DocumentStatus.Approved, true)]
+    [InlineData(false, DocumentStatus.Submitted, true)]
     public async Task Затвердження_місяця_аркуша_читача_між_рішенням_і_записом_відхиляє_з_аркушем(
-        bool workbook, DocumentStatus readerJanuary)
+        bool workbook, DocumentStatus readerJanuary, bool onCopy)
     {
         var scene = await ArrangeAsync();
 
-        var error = await RunPatchAsync(scene, readerJanuary, dependent: true, workbook, readerOnly: true);
+        // ✎ Квіз 16.11 (координатор): копія аркуша-читача має власний стан — її затверджений місяць теж блокує.
+        var error = await RunPatchAsync(scene, readerJanuary, dependent: true, workbook, readerOnly: true, readerCopy: onCopy);
 
         if (readerJanuary != DocumentStatus.Approved)
         {
@@ -196,7 +202,8 @@ public sealed class DependentMonthsGateRaceTests(SqlServerFixture sql)
     }
 
     private async Task<Exception?> RunPatchAsync(
-        Scene scene, DocumentStatus? between, bool dependent, bool workbook, bool text = false, bool readerOnly = false)
+        Scene scene, DocumentStatus? between, bool dependent, bool workbook, bool text = false, bool readerOnly = false,
+        bool readerCopy = false)
     {
         await using var db = CreateContext();
         var doc = scene.Doc;
@@ -215,7 +222,7 @@ public sealed class DependentMonthsGateRaceTests(SqlServerFixture sql)
             allowed = allowed with
             {
                 DependentOnlyOtherSheets = true,
-                DependentReaderSheets = [new DependentReaderSheet(scene.ReaderSheetId, scene.ReaderSheetCode)],
+                DependentReaderSheets = [new DependentReaderSheet(scene.ReaderSheetId, scene.ReaderSheetCode, [scene.ReaderCopyId])],
             };
         }
 
@@ -223,7 +230,8 @@ public sealed class DependentMonthsGateRaceTests(SqlServerFixture sql)
         {
             if (between is { } status)
             {
-                await InsertStateAsync(scene, Jan, status, readerOnly ? scene.ReaderSheetId : null);
+                await InsertStateAsync(
+                    scene, Jan, status, readerOnly ? scene.ReaderSheetId : null, readerCopy ? scene.ReaderCopyId : null);
             }
 
             return decisions;
@@ -327,6 +335,7 @@ public sealed class DependentMonthsGateRaceTests(SqlServerFixture sql)
 
         int writer;
         SheetDef readerSheet;
+        DocumentSheet readerCopy;
         await using (var db = CreateContext())
         {
             var period = await db.Periods.FirstAsync(
@@ -344,6 +353,14 @@ public sealed class DependentMonthsGateRaceTests(SqlServerFixture sql)
             db.SheetDefs.Add(readerSheet);
             await db.SaveChangesAsync(CancellationToken.None);
             writer = writerUser.Id;
+
+            // Оригінал і копія аркуша-читача в документі (копія — свій стан, свій замок).
+            var original = new DocumentSheet(doc.DocumentId, readerSheet.Id);
+            db.DocumentSheets.Add(original);
+            await db.SaveChangesAsync(CancellationToken.None);
+            readerCopy = original.CreateCopy(2);
+            db.DocumentSheets.Add(readerCopy);
+            await db.SaveChangesAsync(CancellationToken.None);
         }
 
         var rowKey = await ScalarAsync<string>(
@@ -351,15 +368,16 @@ public sealed class DependentMonthsGateRaceTests(SqlServerFixture sql)
         var version = Convert.ToBase64String(await ScalarAsync<byte[]>(
             $"SELECT RowVersion FROM doc.TableRow WHERE TableInstanceId = {doc.TableInstanceId} AND RowKey = N'{rowKey}'"));
 
-        return new Scene(doc, writer, rowKey, version, readerSheet.Id, readerSheet.Code);
+        return new Scene(doc, writer, rowKey, version, readerSheet.Id, readerSheet.Code, readerCopy.Id);
     }
 
     /// <summary>Інше з'єднання комітить стан аркуша місяця (точка перемикання гонки).</summary>
-    private async Task InsertStateAsync(Scene scene, int periodKey, DocumentStatus status, int? sheetDefId = null)
+    private async Task InsertStateAsync(
+        Scene scene, int periodKey, DocumentStatus status, int? sheetDefId = null, long? copyId = null)
     {
         await using var other = CreateContext();
         var now = DateTime.UtcNow;
-        var state = new ApprovalState(scene.Doc.DocumentId, sheetDefId ?? scene.Doc.SheetDefId, periodKey);
+        var state = new ApprovalState(scene.Doc.DocumentId, sheetDefId ?? scene.Doc.SheetDefId, periodKey, copyId);
         state.Submit(scene.WriterId, now);
         if (status == DocumentStatus.Approved)
         {
