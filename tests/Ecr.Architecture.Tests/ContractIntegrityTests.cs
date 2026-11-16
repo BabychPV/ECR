@@ -325,6 +325,14 @@ public sealed class ContractIntegrityTests
         // ✎ B75: рядок, заблокований іншою людиною (ознаку ставить AccessDecisionService з doc.RowLock).
         produced.Add(EditRules.CanEdit(profile, AccessBuilder.Cell() with { RowLockedByOther = true }).Reason);
 
+        // ✎ B79: затверджений місяць року відхиляє правку загального стовпця, від якого залежать розрахунки місяців —
+        // правило поверх дозволу решти (AccessDecisionService.Decide і повторна перевірка під блокуванням).
+        produced.Add(DependentMonthsRule
+            .Apply(
+                EditRules.CanEdit(profile, AccessBuilder.Cell()),
+                DependentMonthsRule.BlockingMonths([209901, 209902], p => p == 209901 ? DocumentStatus.Approved : DocumentStatus.Submitted))
+            .Reason);
+
         var unreachable = Enum.GetValues<EditDenyReason>()
             .Except(produced)
             .Select(r => r.ToString())

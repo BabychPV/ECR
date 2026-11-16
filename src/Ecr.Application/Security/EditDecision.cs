@@ -86,6 +86,19 @@ public readonly record struct EditDecision(
     /// </summary>
     public bool ViaFormulaOverride { get; init; }
 
+    /// <summary>
+    /// ✎ B79: рішення про загальний стовпець вводу річної таблиці, від якого залежать розрахунки місяців
+    /// (<see cref="DependentMonthsRule"/>). Таким стовпцем керує НЕ річний агрегат стану аркуша: подані місяці його не
+    /// замикають, затверджені — відхиляють. Запис повторює саме це правило під блокуваннями аркушів року.
+    /// </summary>
+    public bool DependentInput { get; init; }
+
+    /// <summary>
+    /// ✎ B79: ключі періодів затверджених місяців, що спричинили <see cref="EditDenyReason.DependentMonthsLocked"/>
+    /// (за зростанням); <c>null</c> — причина інша або рішення дозволяє.
+    /// </summary>
+    public IReadOnlyList<int>? BlockingMonths { get; init; }
+
     public static EditDecision Allow() => new(true, EditDenyReason.None);
 
     /// <summary>Дозволено погоджувачеві поточного кроку правити поданий аркуш (D-442).</summary>
