@@ -1742,11 +1742,13 @@ public sealed class RecalculationService(
         var holdsAny = false;
 
         // ✎ B79: подані місяці аркуша річної розкладки — для позначки при записі не-місячної комірки.
+        // ✎ Квіз 16.11 (дефект): правка погоджувача (D-442) знімає позначку лише своєму аркушу × МІСЯЦЮ — періоду прогону,
+        // де він правив; інші подані місяці того ж аркуша позначку отримують (доти її губив увесь рік аркуша).
         void NoteSubmittedMonth((int SheetDefId, long? CopyId) sheet, int month, Domain.Enums.DocumentStatus monthStatus)
         {
             if (submittedMonths is null
                 || monthStatus != Domain.Enums.DocumentStatus.Submitted
-                || approverEditSheets?.Contains(sheet.SheetDefId) == true)
+                || (month == periodKey.Value && approverEditSheets?.Contains(sheet.SheetDefId) == true))
             {
                 return;
             }
