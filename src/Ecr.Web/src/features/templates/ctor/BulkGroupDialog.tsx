@@ -153,7 +153,10 @@ export function BulkGroupDialog({
           disabled={value === null || unchanged || columns.length === 0}
           loading={applyLoading}
           onClick={() => {
-            if (value !== null) patch.mutate(value);
+            // ⛔ B149: спінер — лише через 100 мс, і поки `PATCH` летить чи версія перечитується, кнопка активна:
+            // другий клік слав той самий `PATCH` зі старою ревізією і отримував 409 після власного успіху.
+            if (!opened || value === null || patch.isPending) return;
+            patch.mutate(value);
           }}
         >
           {t('columns.bulkApply')}
