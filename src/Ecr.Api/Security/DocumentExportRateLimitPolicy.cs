@@ -14,7 +14,7 @@ namespace Ecr.Api.Security;
 /// </remarks>
 /// <param name="configuration">Конфігурація застосунку.</param>
 public sealed class DocumentExportRateLimitPolicy(IConfiguration configuration)
-    : UserPerMinuteRateLimitPolicy(configuration, PermitKey, DetailKey, DetailFallback, DefaultPermit)
+    : UserPerMinuteRateLimitPolicy(configuration, PermitKey, DetailKey, DetailFallback, DefaultExportPermit)
 {
     /// <summary>Ім'я політики для <c>[EnableRateLimiting]</c>.</summary>
     public const string PolicyName = "document-export";
@@ -23,7 +23,11 @@ public sealed class DocumentExportRateLimitPolicy(IConfiguration configuration)
     public const string PermitKey = "Security:RateLimit:ExportPermitPerMinute";
 
     /// <summary>Межа за хвилину на користувача, якщо конфігурація мовчить.</summary>
-    public const int DefaultPermit = 6;
+    /// <remarks>
+    /// ⚠ Ім'я унікальне навмисно: сторож <c>ConfigurationKeysTests</c> шукає константи за КОРОТКИМ іменем (перша
+    /// виграє), і <c>DefaultPermit</c> тут перекрив би однойменну константу <c>SearchRateLimitPolicy</c> (30).
+    /// </remarks>
+    public const int DefaultExportPermit = 6;
 
     /// <summary>Ключ каталогу подробиці відмови (повним літералом — так його шукає сторож каталогу).</summary>
     public const string DetailKey = "err.ECR-REQ-0429.tooManyExports";
