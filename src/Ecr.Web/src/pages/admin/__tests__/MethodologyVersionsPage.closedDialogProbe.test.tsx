@@ -1,9 +1,9 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router-dom';
 import { MethodologyVersionsPage } from '@/pages/admin/MethodologyVersionsPage';
-import { holdWrites, renderKeepMounted } from '@/test/closedDialogProbe';
+import { holdWrites, renderKeepMounted, settle } from '@/test/closedDialogProbe';
 import { gateReads, probeThreeWindows } from '@/test/stillOpenProbe';
 
 /**
@@ -16,6 +16,10 @@ import { gateReads, probeThreeWindows } from '@/test/stillOpenProbe';
  *   `disabled` (ціль `publishing?.versionId ?? 0` уже не досяжна). ЗАКРИТО, один `POST …/versions/10/publish`.
  * - «Remove formula» (група «null-захист в обробнику») — вікно 2: `!remove.isPending`; вікно 3:
  *   `deleteTarget === null` → обробник нічого не шле. ЗАКРИТО, один `DELETE …/formulas/F1`.
+ *
+ * F13 (база 0c1ec8ad9): «New version» і «Publish», закриті БЕЗ запису, були ВІДКРИТІ — діалоги змонтовані завжди,
+ * «Cancel» поля не скидає, кнопка закритого `Modal` слала `POST …/versions` / `POST …/publish`. Захист в обробниках
+ * (`!creating ||`, `publishing === null ||`); без нього — червоний відповідний тест «закрито без запису».
  */
 
 vi.mock('@/features/methodologies/MethodologyContentPanels', () => ({
@@ -84,6 +88,22 @@ function show(): void {
 
 const dialogOpen = (name: string) => (): boolean => screen.queryByRole('dialog', { name }) !== null;
 
+/*
+ * ⛔ Правило 386 / F13: зонд плавав під навантаженням. Причина — холодні ліниві чанки сторінки (поле дати діалогу
+ * «Publish», панелі публікацій/покриття/правил категорій, довідка синтаксису): перше `import()` під навантаженням
+ * з'їдало бюджет `findBy` і межу тесту. Прогрів — до тестів; сторінка далі бере їх тим самим `lazy()`.
+ */
+beforeAll(async () => {
+  await Promise.all([
+    import('@/shared/dates/DateInputWithStyles'),
+    import('@/features/methodologies/MethodologyPublicationsPanel'),
+    import('@/features/methodologies/RuleCoveragePanel'),
+    import('@/features/methodologies/CategoryRulePanel'),
+    import('@/features/methodologies/FormulaSyntaxHelp'),
+    import('@/features/methodologies/MethodologyCoveragePanel'),
+  ]);
+}, 60_000);
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -146,6 +166,53 @@ describe('B149: MethodologyVersionsPage — один запит на відкр�
       awaitedRead: '/api/v1/methodologies/1/versions',
     });
     expect(server.bodies[0]).toEqual({ changeReason: 'Новий коефіцієнт', effectiveFrom: '2026-01-01' });
+  });
+
+  it('«New version»: номер введено, вікно закрито без запису — кнопка закритого вікна нічого не шле', async () => {
+    const server = holdWrites({ read });
+    show();
+
+    fireEvent.click(await screen.findByRole('button', { name: '⟦methodologies.newVersion⟧' }));
+    const dialog = await screen.findByRole('dialog', { name: '⟦methodologies.newVersionTitle⟧' });
+    fireEvent.change(within(dialog).getByLabelText('⟦methodologies.versionNumber⟧'), { target: { value: '2.0' } });
+    const create = within(dialog).getByRole('button', { name: '⟦methodologies.createVersion⟧' });
+    await waitFor(() => {
+      expect(create).toHaveProperty('disabled', false);
+    });
+
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    await waitFor(() => {
+      expect(dialogOpen('⟦methodologies.newVersionTitle⟧')()).toBe(false);
+    });
+    expect(create.isConnected).toBe(true);
+    fireEvent.click(create);
+    await settle();
+    expect(server.sent).toEqual([]);
+  });
+
+  it('«Publish»: причину й дату введено, вікно закрито без запису — кнопка закритого вікна нічого не шле', async () => {
+    const server = holdWrites({ read });
+    const user = userEvent.setup();
+    show();
+
+    await screen.findByText('F1');
+    fireEvent.click(screen.getAllByRole('button', { name: '⟦methodologies.publish⟧' })[0] as HTMLElement);
+    const dialog = await screen.findByRole('dialog', { name: '⟦methodologies.publishTitle⟧' });
+    fireEvent.change(within(dialog).getByLabelText('⟦methodologies.reason⟧'), { target: { value: 'Новий коефіцієнт' } });
+    await user.type(await within(dialog).findByLabelText('⟦methodologies.effectiveFrom⟧', {}, { timeout: 10_000 }), '2026-01-01');
+    const publish = within(dialog).getByRole('button', { name: '⟦methodologies.publish⟧' });
+    await waitFor(() => {
+      expect(publish).toHaveProperty('disabled', false);
+    });
+
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    await waitFor(() => {
+      expect(dialogOpen('⟦methodologies.publishTitle⟧')()).toBe(false);
+    });
+    expect(publish.isConnected).toBe(true);
+    fireEvent.click(publish);
+    await settle();
+    expect(server.sent).toEqual([]);
   });
 
   it('«Remove formula»: один DELETE …/formulas/F1 у всіх трьох вікнах', async () => {

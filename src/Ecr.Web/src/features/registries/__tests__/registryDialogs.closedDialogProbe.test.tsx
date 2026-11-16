@@ -8,7 +8,7 @@ import type { RegistryDefDto } from '@/api/types';
 import { CreateRegistryModal } from '@/features/registries/CreateRegistryModal';
 import { RegistryImportPanel } from '@/features/registries/RegistryImportPanel';
 import { SourceKindSwitchDialog } from '@/features/registries/SourceKindSwitchDialog';
-import { holdWrites, renderKeepMounted } from '@/test/closedDialogProbe';
+import { holdWrites, renderKeepMounted, settle } from '@/test/closedDialogProbe';
 import { gateReads, probeThreeWindows } from '@/test/stillOpenProbe';
 
 /**
@@ -21,6 +21,11 @@ import { gateReads, probeThreeWindows } from '@/test/stillOpenProbe';
  * - SourceKindSwitchDialog — те саме: набір кодів і причину скинуто → `disabled`. ЗАКРИТО, один `PUT`.
  * - RegistryImportPanel «Apply» — тіло діалогу живе лише при `reviewed !== null`: після успіху звіт і файл
  *   скинуто, кнопка від'єднана від документа. ЗАКРИТО, один `POST …/entries/import` застосування.
+ *
+ * F13 (база 0c1ec8ad9): шлях «заповнено, закрито БЕЗ запису» для CreateRegistryModal і SourceKindSwitchDialog був
+ * ВІДКРИТИЙ — закриття форму не скидає, кнопка закритого `Modal` слала `POST /registries` / `PUT …/source-kind`.
+ * Захист в обробнику: `if (!opened || x.isPending) return`. Мутації: без `!opened ||` — червоний відповідний тест
+ * «закрито без запису»; `disabled={… && false}` разом зі зняттям захисту — червоний і зонд «три вікна» (вікно 3).
  *
  * Перелік довідників змонтовано в господарі навмисно: без активного запиту `invalidateQueries` нічого не
  * чекає, і вікна 2 у тесті не було б, а на сторінці воно є.
@@ -68,6 +73,14 @@ function ImportHost(): JSX.Element {
 
 const isOpen = (): boolean => screen.queryByRole('dialog') !== null;
 
+/** Закрити діалог Escape-ом (без запису); `Modal` лишається в DOM (`keepMounted`). */
+async function closeByEscape(): Promise<void> {
+  fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+  await waitFor(() => {
+    expect(isOpen()).toBe(false);
+  });
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -111,6 +124,43 @@ describe('B149: діалоги довідників — один запит на
       awaitedRead: '/api/v1/registries',
     });
     expect(server.bodies[0]).toEqual({ registryCodes: ['FUEL'], sourceKind: 'Local', reason: 'перехід на AF' });
+  });
+
+  it('CreateRegistryModal: форму заповнено, вікно закрито без запису — кнопка закритого вікна нічого не шле', async () => {
+    const server = holdWrites({ write: () => ({ body: { code: 'FUEL' } }) });
+    renderKeepMounted(<CreateHost />);
+
+    fireEvent.change(screen.getByLabelText(/registries\.code/), { target: { value: 'FUEL' } });
+    fireEvent.change(screen.getByLabelText(/registries\.name/), { target: { value: 'Fuel' } });
+    const save = screen.getByRole('button', { name: '⟦common.save⟧' });
+    await waitFor(() => {
+      expect(save).toHaveProperty('disabled', false);
+    });
+
+    await closeByEscape();
+    expect(save.isConnected).toBe(true);
+    fireEvent.click(save);
+    await settle();
+    expect(server.sent).toEqual([]);
+  });
+
+  it('SourceKindSwitchDialog: вибрано й пояснено, вікно закрито без запису — кнопка закритого вікна нічого не шле', async () => {
+    const server = holdWrites({ write: () => ({ body: { affectedRows: 1 } }) });
+    renderKeepMounted(<SwitchHost />);
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /FUEL/ }));
+    fireEvent.change(screen.getByLabelText(/workflow\.reason/), { target: { value: 'перехід на AF' } });
+    const confirm = screen.getAllByRole('button', { name: '⟦registries.sourceSwitch⟧' }).at(-1);
+    if (confirm === undefined) throw new Error('немає кнопки перемикання');
+    await waitFor(() => {
+      expect(confirm).toHaveProperty('disabled', false);
+    });
+
+    await closeByEscape();
+    expect(confirm.isConnected).toBe(true);
+    fireEvent.click(confirm);
+    await settle();
+    expect(server.sent).toEqual([]);
   });
 
   it('RegistryImportPanel «Apply»: один POST застосування; після закриття кнопка від\'єднана', async () => {

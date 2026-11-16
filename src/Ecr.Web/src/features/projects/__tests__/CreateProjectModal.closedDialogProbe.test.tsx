@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { apiFetch } from '@/api/client';
 import { CreateProjectModal } from '@/features/projects/CreateProjectModal';
-import { holdWrites, renderKeepMounted } from '@/test/closedDialogProbe';
+import { holdWrites, renderKeepMounted, settle } from '@/test/closedDialogProbe';
 import { gateReads, probeThreeWindows } from '@/test/stillOpenProbe';
 
 /**
@@ -13,6 +13,12 @@ import { gateReads, probeThreeWindows } from '@/test/stillOpenProbe';
  * Зонд: ЗАКРИТО. Вікно 2 — `onSuccess` ще не скінчився (`await onCreated`), `isPending` тримає кнопку
  * `loading` (вимкнена); вікно 3 — код, назву, пояс, версію й політику скинуто → `disabled`. Один
  * `POST /api/v1/projects`.
+ *
+ * F13 (база 0c1ec8ad9): «заповнено, закрито БЕЗ запису» було ВІДКРИТО — `ProjectsPage` тримає діалог змонтованим,
+ * закриття форму не скидає, «Save» закритого `Modal` слала `POST /api/v1/projects`. Захист в обробнику
+ * (`if (!opened || create.isPending) return`). Мутації: без `!opened ||` — червоний другий тест; рецензентова
+ * `disabled={incomplete && false}` (разом зі зняттям захисту, тобто як на базі) — червоний перший (вікно 3 тепер
+ * після завершення мутації: `expected [ 'POST /api/v1/projects', …(1) ] to deeply equal [ 'POST /api/v1/projects' ]`).
  *
  * ⚠ Перелік поясів підмінено одним значенням: справжні ~600 опцій `Select` роблять рендер у jsdom хвилинним
  * (див. `create-project-modal.render.test.tsx`), а логіка діалогу від їх кількості не залежить.
@@ -55,6 +61,21 @@ async function choose(label: RegExp, option: string): Promise<void> {
   fireEvent.click(await screen.findByRole('option', { name: option, hidden: true }));
 }
 
+/** Заповнити всі обов'язкові поля: «Save» стає доступною. */
+async function fill(): Promise<HTMLElement> {
+  fireEvent.change(screen.getByLabelText(/periods\.code/), { target: { value: 'AIR-2027' } });
+  fireEvent.change(await screen.findByLabelText(/periods\.name/), { target: { value: 'Air 2027' } });
+  await choose(/periods\.timeZone/, 'Europe/Kyiv');
+  await choose(/periods\.policy/, 'STD · +15/45');
+
+  const save = screen.getByRole('button', { name: '⟦common.save⟧' });
+  await waitFor(() => {
+    expect(save).toHaveProperty('disabled', false);
+  });
+
+  return save;
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -64,16 +85,7 @@ describe('B149: CreateProjectModal — один POST /projects на відкри
     const server = holdWrites({ read, write: () => ({ body: { projectId: 41 } }) });
     const gate = gateReads();
     renderKeepMounted(<Host />);
-
-    fireEvent.change(screen.getByLabelText(/periods\.code/), { target: { value: 'AIR-2027' } });
-    fireEvent.change(await screen.findByLabelText(/periods\.name/), { target: { value: 'Air 2027' } });
-    await choose(/periods\.timeZone/, 'Europe/Kyiv');
-    await choose(/periods\.policy/, 'STD · +15/45');
-
-    const save = screen.getByRole('button', { name: '⟦common.save⟧' });
-    await waitFor(() => {
-      expect(save).toHaveProperty('disabled', false);
-    });
+    const save = await fill();
 
     await probeThreeWindows({
       server,
@@ -86,5 +98,20 @@ describe('B149: CreateProjectModal — один POST /projects на відкри
       openWhileAwaiting: false,
     });
     expect(server.bodies[0]).toMatchObject({ code: 'AIR-2027', timeZoneId: 'Europe/Kyiv', templateVersionId: 10, periodPolicyId: 7 });
+  });
+
+  it('форму заповнено, вікно закрито без запису — «Save» закритого вікна нічого не шле', async () => {
+    const server = holdWrites({ read, write: () => ({ body: { projectId: 41 } }) });
+    renderKeepMounted(<Host />);
+    const save = await fill();
+
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+    expect(save.isConnected).toBe(true);
+    fireEvent.click(save);
+    await settle();
+    expect(server.sent).toEqual([]);
   });
 });

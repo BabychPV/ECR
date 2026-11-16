@@ -117,6 +117,9 @@ export function AddSourceEntityModal({
             disabled={chosen === null}
             loading={create.isPending}
             onClick={() => {
+              // ⛔ B149 (KIT §6.9): власник тримає діалог змонтованим, «Cancel» вибір не скидає — кнопка закритого `Modal`
+              // (~200 мс у DOM) заводила сутність збору вже після відмови.
+              if (!opened || create.isPending) return;
               if (chosen !== null) create.mutate(chosen);
             }}
             data-add-entity-save=""

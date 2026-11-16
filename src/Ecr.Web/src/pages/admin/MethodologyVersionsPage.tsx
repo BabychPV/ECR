@@ -805,7 +805,9 @@ export function MethodologyVersionsPage(): JSX.Element {
             disabled={newVersion.trim().length === 0}
             loading={createLoading}
             onClick={() => {
-              if (create.isPending) return;
+              // ⛔ B149 (KIT §6.9): діалог змонтований завжди, «Cancel» номер не скидає — кнопка закритого `Modal`
+              // (~200 мс у DOM) заводила версію вже після відмови.
+              if (!creating || create.isPending) return;
               create.mutate();
             }}
           >
@@ -1023,7 +1025,9 @@ export function MethodologyVersionsPage(): JSX.Element {
             disabled={publishReason.trim().length === 0 || publishEffectiveFrom.length === 0}
             loading={publishLoading}
             onClick={() => {
-              if (publish.isPending) return;
+              // ⛔ B149 (KIT §6.9): діалог змонтований завжди, «Cancel» причину й дату не скидає — кнопка закритого `Modal`
+              // (~200 мс у DOM) публікувала версію вже після відмови.
+              if (publishing === null || publish.isPending) return;
               publish.mutate();
             }}
           >

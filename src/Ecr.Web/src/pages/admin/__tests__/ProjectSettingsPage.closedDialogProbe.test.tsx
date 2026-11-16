@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { ProjectSettingsPage } from '@/pages/admin/ProjectSettingsPage';
-import { holdWrites, renderKeepMounted } from '@/test/closedDialogProbe';
+import { holdWrites, renderKeepMounted, settle } from '@/test/closedDialogProbe';
 import { gateReads, probeThreeWindows } from '@/test/stillOpenProbe';
 
 /**
@@ -11,6 +11,10 @@ import { gateReads, probeThreeWindows } from '@/test/stillOpenProbe';
  * Зонд на СПРАВЖНІЙ сторінці налаштувань (власник діалогу): вікно 2 — `await refresh()` (проєкти, потім
  * календар), діалог відкритий, `loading={changeTimeZone.isPending}` (вимкнена); вікно 3 —
  * `newTimeZoneId = null` → `disabled`, обробник теж мовчить (`if (newTimeZoneId !== null)`). ЗАКРИТО.
+ *
+ * F13: шлях «вибрано, Cancel» на базі 0c1ec8ad9 був ВІДКРИТИЙ — «Cancel» пояс не скидає, діалог змонтований завжди,
+ * клік по кнопці закритого `Modal` слав `PUT …/timezone`. Захист у обробнику: `if (!changingTimeZone || …) return`.
+ * Мутаційний доказ: без `!changingTimeZone ||` — червоний другий тест (`expected [ 'PUT …/timezone' ] to deeply equal []`).
  *
  * ⚠ Перелік поясів підмінено одним значенням (рендер ~600 опцій у jsdom — хвилини).
  */
@@ -73,5 +77,28 @@ describe('B149: ProjectSettingsPage — один PUT …/timezone на відк�
       awaitedRead: '/api/v1/projects',
     });
     expect(server.bodies).toEqual([{ timeZoneId: 'Asia/Atyrau' }]);
+  });
+
+  it('пояс вибрано, «Cancel» — кнопка закритого діалогу (ще в DOM) нічого не шле', async () => {
+    const server = holdWrites({ read, write: () => ({ status: 204 }) });
+    renderKeepMounted(<ProjectSettingsPage projectId={7} />, '/admin/projects?projectId=7');
+
+    fireEvent.click(await screen.findByRole('button', { name: '⟦periods.timezoneChange⟧' }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('textbox', { name: /periods\.timeZone/ }));
+    fireEvent.click(await screen.findByRole('option', { name: 'Asia/Atyrau', hidden: true }));
+    const change = within(dialog).getByRole('button', { name: '⟦periods.timezoneChange⟧' });
+    await waitFor(() => {
+      expect(change).toHaveProperty('disabled', false);
+    });
+
+    fireEvent.click(within(dialog).getByRole('button', { name: /common\.cancel/ }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+    expect(change.isConnected).toBe(true);
+    fireEvent.click(change);
+    await settle();
+    expect(server.sent).toEqual([]);
   });
 });

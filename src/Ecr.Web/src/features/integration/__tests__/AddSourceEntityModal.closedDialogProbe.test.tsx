@@ -2,7 +2,7 @@ import { useState, type JSX } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { AddSourceEntityModal } from '@/features/integration/AddSourceEntityModal';
-import { holdWrites, renderKeepMounted } from '@/test/closedDialogProbe';
+import { holdWrites, renderKeepMounted, settle } from '@/test/closedDialogProbe';
 import { gateReads, probeThreeWindows } from '@/test/stillOpenProbe';
 
 /**
@@ -13,6 +13,10 @@ import { gateReads, probeThreeWindows } from '@/test/stillOpenProbe';
  * (вимкнена); вікна 2 немає — `onSuccess` нічого не чекає (`void invalidateQueries`), `setChosen(null)` і
  * `onClose()` в одному оновленні; вікно 3 — `chosen === null` → `disabled`, обробник теж мовчить. ЗАКРИТО,
  * один `POST /api/v1/sources`.
+ *
+ * F13 (база 0c1ec8ad9): «обрано, Cancel» було ВІДКРИТО — власник тримає діалог змонтованим, «Cancel» вибір не скидає,
+ * кнопка закритого `Modal` слала `POST /api/v1/sources`. Захист в обробнику (`if (!opened || create.isPending) return`);
+ * без `!opened ||` — червоний другий тест.
  */
 
 function Host(): JSX.Element {
@@ -55,5 +59,26 @@ describe('B149: AddSourceEntityModal — один POST /sources на відкр�
       awaitedRead: null,
     });
     expect(server.bodies[0]).toMatchObject({ dataSourceId: 3, code: 'Boiler1' });
+  });
+
+  it('позицію обрано, вікно закрито без запису («Cancel») — кнопка закритого вікна нічого не шле', async () => {
+    const server = holdWrites({ read, write: () => ({ body: { id: 9, code: 'Boiler1' } }) });
+    renderKeepMounted(<Host />);
+
+    const dialog = screen.getByRole('dialog');
+    fireEvent.click(await within(dialog).findByRole('button', { name: '⟦sources.catalogChoose⟧' }));
+    const save = within(dialog).getByRole('button', { name: '⟦sources.addEntity⟧' });
+    await waitFor(() => {
+      expect(save).toHaveProperty('disabled', false);
+    });
+
+    fireEvent.click(within(dialog).getByRole('button', { name: /common\.cancel/ }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+    expect(save.isConnected).toBe(true);
+    fireEvent.click(save);
+    await settle();
+    expect(server.sent).toEqual([]);
   });
 });
