@@ -84,6 +84,8 @@ export function HeaderSplitDialog({ documentId, periodKey, lines, slices, onClos
   const anyInvalid = lines.some(invalidOf);
 
   const submit = (): void => {
+    // ⛔ B149 (KIT §6.9): спінер вмикається лише через 100 мс — другий сабміт слав другий PUT.
+    if (save.isPending) return;
     const items = lines
       .filter((line) => line.table !== null && texts.has(lineKey(line)))
       .map((line) => {

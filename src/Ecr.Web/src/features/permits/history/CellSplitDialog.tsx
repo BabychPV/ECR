@@ -65,7 +65,8 @@ export function CellSplitDialog({ target, mark, historyPending, rowLabel, unit, 
   const wasSingle = mark !== null && !mark.isSplit && (mark.cell?.parts ?? []).every((part) => part === null) ? initial[0] : null;
 
   const submit = (): void => {
-    if (mark === null || invalid.some(Boolean)) return;
+    // ⛔ B149 (KIT §6.9): спінер вмикається лише через 100 мс — другий сабміт слав другий PUT.
+    if (save.isPending || mark === null || invalid.some(Boolean)) return;
     save.mutate(
       {
         periodKey: target.periodKey,
