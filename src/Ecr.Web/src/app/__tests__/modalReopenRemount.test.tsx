@@ -4,6 +4,7 @@ import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Drawer, MantineProvider, Modal, TextInput } from '@mantine/core';
 import { theme } from '@/shared/theme/theme';
+import { mantinePatchHint } from '@/test/mantineTransitionPatch';
 import { withTestDefaults } from '@/test/render';
 
 /**
@@ -20,6 +21,9 @@ import { withTestDefaults } from '@/test/render';
  * новий перехід скасовує й запланований кадр попереднього).
  * ⛔ Мутація «без латки» (`npm ci --ignore-scripts`) — обидва тести (`Modal`, `Drawer`) червоні:
  * `expected 2 to be 1`.
+ * ✎ `B137` (2026-11-16): саме це й було «червоним локально на чистому main» — дерево без
+ * `postinstall`, а не плаваючий тест. Тепер падіння без латки починається з підказки
+ * `mantinePatchHint()` (причина + команда); із латкою повідомлення те саме, що й було.
  *
  * ⚠ Тема — справжня (`transitionProps.duration` 150 мс для `Modal`/`Drawer`): з нульовою
  * тривалістю Mantine оминає `useTransition` і дефект не відтворюється.
@@ -96,7 +100,7 @@ describe.each(['modal', 'drawer'] as const)('%s: повторне відкрит
 
     // ⛔ ЧЕРВОНИЙ до фіксу: таймер «exited» закриття розмонтовує вміст, mounts == 2, а поле,
     // в яке друкували, вже відʼєднане від документа.
-    expect(mounts).toBe(1);
+    expect(mounts, mantinePatchHint()).toBe(1);
     expect(input.isConnected).toBe(true);
     expect((screen.getByLabelText('code') as HTMLInputElement).value).toBe('TOLUENE');
   });
