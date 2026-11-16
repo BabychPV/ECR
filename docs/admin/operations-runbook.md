@@ -270,7 +270,7 @@ ORDER BY [Ts];
 | `Auth:DataProtection:AllowUnprotectedKeys` | ні | — | `true` або `false`. |
 | `Auth:EnableNegotiate` | ні | `true` | `true` або `false`. |
 | `Auth:IdleTimeout:MinimumMinutes` | ні | `5` | Ціле число, не менше 1. |
-| `Auth:Negotiate:AllowNtlm` | ні | `false` | Значення на старті не перевіряється. |
+| `Auth:Negotiate:AllowNtlm` | ні | `false` | `true` або `false`. |
 | `Auth:RequireHttps` | ні | `true` | `true` або `false`. |
 | `Auth:SlidingHours` | ні | `8` | Ціле число, не менше 1. |
 | `Auth:StampCacheSeconds` | ні | `5` | Ціле число, не менше 0. |
@@ -345,7 +345,7 @@ ORDER BY [Ts];
 | `PiSqlClient:EventQueryChunk` | ні | — | Одне з: None, Month. |
 | `PiSqlClient:EventQueryTimeoutSeconds` | ні | — | Ціле число, не менше 1. |
 | `PiWebApi:AllowedHosts` | ні | `[]` | Значення на старті не перевіряється. |
-| `PiWebApi:AllowInsecureHttp` | ні | `false` | Значення на старті не перевіряється. |
+| `PiWebApi:AllowInsecureHttp` | ні | `false` | `true` або `false`. |
 | `Registries:ExportMaxRows` | ні | `50000` | Ціле число, не менше 1. |
 | `Registries:ImportMaxBytes` | ні | `1048576` | Ціле число, не менше 1. |
 | `Retention:SubmissionSnapshots:BatchSize` | ні | `10` | Ціле число, не менше 1. |
