@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { settleAndFlushEdits } from '@/features/grid/settleEdits';
 import { registerUnsavedSource } from '@/shared/ui/unsavedSources';
 import { SheetActions } from '../SheetActions';
 
@@ -24,6 +25,8 @@ const CurrentUser = {
 };
 
 const log: string[] = [];
+/** Відпускає відповідь сервера на `POST …/submit`; `null` — запит ще не дійшов. */
+let respond: (() => void) | null = null;
 
 function json(body: unknown): Response {
   return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -48,8 +51,16 @@ function mockFetch(): void {
       }
       if (url.includes('/submit')) {
         log.push('POST submit');
-        // Сервер відповідає не миттєво: подвійний клік у цей час теж не має пройти.
-        await new Promise((resolve) => setTimeout(resolve, 100));
+        /*
+         * Сервер відповідає не миттєво: подвійний клік у цей час теж не має пройти.
+         * ✎ B145: відповідь віддає САМ ТЕСТ (`respond`), а не таймер на 100 мс. Під навантаженням
+         * `waitFor` помічав `POST submit` пізніше, ніж за 100 мс, і «клік, поки сервер відповідає»
+         * припадав уже ПІСЛЯ відповіді — на діалог, що закривається (а той подавав удруге; дефект
+         * продукту закрито в `lazyDialogs.tsx`, доказ — `SheetActions.closedDialogConfirm.test.tsx`).
+         */
+        await new Promise<void>((resolve) => {
+          respond = resolve;
+        });
       }
 
       return json({});
@@ -99,6 +110,7 @@ afterEach(() => {
   unregister?.();
   unregister = null;
   log.length = 0;
+  respond = null;
   vi.unstubAllGlobals();
 });
 
@@ -123,9 +135,24 @@ describe('AN-28 P2-2: Submit під час збереження набраног
     await waitFor(() => {
       expect(log).toEqual(['flush', 'POST submit']);
     });
-    // Клік, поки сервер іще відповідає.
+    // Клік, поки сервер іще відповідає: відповідь тримає тест, тож це саме «поки», за будь-якого навантаження.
+    expect(respond).not.toBeNull();
     fireEvent.click(button);
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(log).toEqual(['flush', 'POST submit']);
+
+    // Сервер відповів, дія скінчилась (кнопка більше не зайнята) — діалог закривається.
+    respond?.();
+    await waitFor(() => {
+      expect(button.hasAttribute('data-loading')).toBe(false);
+    });
+    // Кліки по діалогу, що закривається, доки його кнопка ще в DOM (анімація закриття).
+    await waitFor(() => {
+      if (button.isConnected) fireEvent.click(button);
+      expect(button.isConnected).toBe(false);
+    });
+    // Той самий кадр + тік, який дія чекає перед запитом: незахищений повторний POST уже пішов би.
+    await settleAndFlushEdits();
+    await settleAndFlushEdits();
 
     expect(log).toEqual(['flush', 'POST submit']);
   });

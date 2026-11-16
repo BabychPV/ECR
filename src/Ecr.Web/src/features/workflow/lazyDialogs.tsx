@@ -31,13 +31,25 @@ function useEverOpened(opened: boolean): boolean {
   return ever || opened;
 }
 
+/**
+ * ⛔ B145: закритий діалог не підтверджує. `Modal` після `opened = false` ще ~200 мс лишається в DOM
+ * (анімація закриття), і кнопка підтвердження далі викликала `onConfirm`. Власник у цю мить дію вже
+ * завершив і зайнятість зняв (`useSettledAction`, `isPending`), тож клік по діалогу, що закривається,
+ * запускав дію ВДРУГЕ: зонд дав 5 `POST …/submit` замість одного. Людині досить подвійного кліку,
+ * повільнішого за відповідь сервера.
+ *
+ * ⚠ Тут, а не у власниках: відкритість знає сам діалог, а умова одна для всіх, хто ним користується
+ * (подання, погодження, повернення, видалення документа/рядка/копії аркуша).
+ */
+function ignore(): void {}
+
 export function LazyConfirmModal(props: ComponentProps<typeof ConfirmModalImpl>): JSX.Element | null {
   const mounted = useEverOpened(props.opened);
   if (!mounted) return null;
 
   return (
     <Suspense fallback={null}>
-      <ConfirmModalChunk {...props} />
+      <ConfirmModalChunk {...props} onConfirm={props.opened ? props.onConfirm : ignore} />
     </Suspense>
   );
 }
@@ -48,7 +60,7 @@ export function LazyReasonModal(props: ComponentProps<typeof ReasonModalImpl>): 
 
   return (
     <Suspense fallback={null}>
-      <ReasonModalChunk {...props} />
+      <ReasonModalChunk {...props} onConfirm={props.opened ? props.onConfirm : ignore} />
     </Suspense>
   );
 }
