@@ -81,11 +81,12 @@ public sealed class RecalculationJobFanOutTests(SqlServerFixture sql)
             Assert.Null(c.Request.PeriodKey);
             Assert.Null(c.CreatedBy);
 
-            // ⛔ ✎ B83 (контроль): нічний розклад поданих НЕ чіпає — дочірні без людини й без позначки поданих
-            // (`RecalculationJob.WritesSubmitted` = false); позначку ставить лише автоперерахунок збору та залежних.
+            // ⛔ ✎ B83 (контроль): дочірні задачі нічного розкладу — без людини й без прапорця `RecalculateSubmitted`.
+            // ✎ B79: прапорець більше не вирішує, чи писати подані (їх перераховує кожен прогін, нічний теж;
+            // `RecalculationJobSheetScopeResultsTests.Нічний_прогін_…`), тому твердження про `WritesSubmitted` прибрано
+            // разом із самим методом; форма payload дочірньої задачі — та сама.
             Assert.Null(c.Request.TriggeredByUserId);
             Assert.False(c.Request.RecalculateSubmitted);
-            Assert.False(RecalculationJob.WritesSubmitted(c.Request));
         });
         Assert.Equal(documents, scheduler.Calls.Select(c => c.Request.DocumentId));
 
