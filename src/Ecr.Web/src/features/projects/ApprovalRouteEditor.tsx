@@ -155,7 +155,13 @@ export function ApprovalRouteEditor({
           <Button
             loading={save.isPending}
             disabled={route.isPending || Boolean(route.error)}
-            onClick={() => save.mutate()}
+            onClick={() => {
+              // ⛔ B145b: діалог, що закривається (ще ~200 мс у DOM), і запит у польоті не зберігають
+              // удруге — зонд: другий клік слав другий `PUT` (повну заміну маршруту) з тим самим тілом.
+              if (!opened || save.isPending) return;
+
+              save.mutate();
+            }}
           >
             {t('common.save')}
           </Button>
