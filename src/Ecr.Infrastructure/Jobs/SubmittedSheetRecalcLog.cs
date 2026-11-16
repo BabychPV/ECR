@@ -71,7 +71,7 @@ internal static class SubmittedSheetRecalcLog
                     documentId,
                     sheetDefId,
                     sheetCopyId = copyId,
-                    sheetCode = def.Code.Value,
+                    sheetCode = def.Code,
                     periodKey,
                     state = nameof(Domain.Enums.DocumentStatus.Submitted),
                     reason = "recalculatedAfterSubmission",
