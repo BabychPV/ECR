@@ -1,5 +1,5 @@
 import { useState, type JSX } from 'react';
-import { Anchor, Button, Card, Group, Stack, Text, UnstyledButton } from '@mantine/core';
+import { Anchor, Badge, Button, Card, Group, Stack, Text, UnstyledButton } from '@mantine/core';
 import { Link } from 'react-router-dom';
 import { formatDateTime } from '@/shared/format/datetime';
 import { formatPeriodKey } from '@/shared/format/periodKey';
@@ -89,6 +89,14 @@ export function groupApprovalItems(items: readonly ApprovalQueueItem[]): readonl
   return [...groups].map(([key, list]) => ({ key, items: list }));
 }
 
+/**
+ * ✎ B79 (Q13): позначка рядка черги `recalculatedAfterSubmission` (те саме правило, що в картці документа).
+ * Поле читається через розширений тип: старіший сервер його не віддає - тоді позначки просто немає.
+ */
+function recalculatedAfterSubmission(item: ApprovalQueueItem): boolean {
+  return (item as ApprovalQueueItem & { readonly recalculatedAfterSubmission?: boolean | null }).recalculatedAfterSubmission === true;
+}
+
 function itemKey(item: ApprovalQueueItem): string {
   return `${String(item.documentId)}:${String(item.sheetDefId)}:${String(item.periodKey)}`;
 }
@@ -157,6 +165,19 @@ function ApprovalRow({
             {item.stepOrdinal !== null && item.stepCount !== null
               && ` · ${t('myTasks.approval.step', { n: String(item.stepOrdinal), count: String(item.stepCount) })}`}
           </Text>
+          {/* ✎ B79 (Q13): числа аркуша перераховано після подання - погоджувач бачить це ще в черзі, до затвердження. */}
+          {recalculatedAfterSubmission(item) && (
+            <Badge
+              size="sm"
+              variant="light"
+              color="statusWarning"
+              mt={4}
+              title={t('myTasks.approval.recalculatedHint')}
+              data-recalculated-after-submission=""
+            >
+              {t('myTasks.approval.recalculated')}
+            </Badge>
+          )}
         </div>
         <Group justify="flex-end">
           <Anchor component={Link} to={approvalQueueHref(item)} size="sm" data-action="review" onClick={onNavigate}>
