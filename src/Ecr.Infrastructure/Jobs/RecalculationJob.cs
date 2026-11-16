@@ -1525,6 +1525,7 @@ public sealed partial class RecalculationJob(
         var documentIds = recalculated.Select(g => g.DocumentId).Distinct().ToList();
         var submitted = (await db.ApprovalStates
                 .AsNoTracking()
+                .ExceptWorkflowNone(db) // ✎ B138: версія без погодження «поданих» не має — як у SheetLogAsync
                 .Where(a => documentIds.Contains(a.DocumentId) && a.PeriodKey == period
                             && a.Status == Domain.Enums.DocumentStatus.Submitted)
                 .Select(a => new { a.DocumentId, a.SheetDefId, a.SheetCopyId })
