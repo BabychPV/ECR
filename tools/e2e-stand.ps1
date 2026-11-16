@@ -732,6 +732,35 @@ try {
     $env:ECR_E2E_PERIOD = $open.periodKey
     $env:ECR_E2E_DOCUMENT = $documents.items[0].id
 
+    # ⛔ B152: документ стенда створює генератор ДО появи користувачів стенда, і його власник не має Write на проєкт 1.
+    # Специфікація, що передає власність (`documentParticipantsLive`, `rowLock`, `returnedToMeLive`), повернути її такому
+    # власникові не може (422 «The new owner needs write access to the project») — і стенд лишався з тим власником, на
+    # якому зупинився попередній файл: базова лінія залежала від порядку файлів і шарда. Тому власником документа стенда
+    # одразу стає `e2e-admin` (Manage на проєкт 1) — тим самим API, що й у специфікаціях; це дані стенда, не обліковий
+    # запис і не роль. Специфікації звіряють власника з `ECR_E2E_DOCUMENT_OWNER` на старті й повертають саме його.
+    Step 'власник документа стенда — e2e-admin (B152)'
+    $standOwner = Call GET '/api/v1/me'
+    if (-not $standOwner.userId) { Fail 'GET /api/v1/me не повернув userId e2e-admin' }
+    $standOwnerId = [int] $standOwner.userId
+    $card = Call GET "/api/v1/documents/$($env:ECR_E2E_DOCUMENT)?periodKey=$($open.periodKey)"
+    $generatorOwner = $card.ownerUserId
+    # Сервер відхиляє передачу самому поточному власникові (422), тож повторний запуск на тому самому стенді нічого не шле.
+    if ($generatorOwner -ne $standOwnerId) {
+        try {
+            Call POST "/api/v1/documents/$($env:ECR_E2E_DOCUMENT)/owner" @{ newOwnerUserId = $standOwnerId } | Out-Null
+        }
+        catch {
+            $serverText = if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $_.ErrorDetails.Message } else { $_.Exception.Message }
+            Fail "передача власника документа $($env:ECR_E2E_DOCUMENT) до e2e-admin (userId $standOwnerId): $serverText"
+        }
+        $card = Call GET "/api/v1/documents/$($env:ECR_E2E_DOCUMENT)?periodKey=$($open.periodKey)"
+    }
+    if ($card.ownerUserId -ne $standOwnerId) {
+        Fail "власник документа $($env:ECR_E2E_DOCUMENT) — userId $($card.ownerUserId), очікувався e2e-admin (userId $standOwnerId)"
+    }
+    $env:ECR_E2E_DOCUMENT_OWNER = "$standOwnerId"
+    Write-Host "      власник: e2e-admin (userId $standOwnerId), від генератора — userId $generatorOwner"
+
     Write-Host ''
     Write-Host "  стенд готовий: період $($open.periodKey), документ $($env:ECR_E2E_DOCUMENT)" -ForegroundColor Green
     Write-Host ''

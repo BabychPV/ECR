@@ -19,6 +19,8 @@ const Operator = { userName: 'e2e-operator', password: 'E2E-Oper8tor-Work-2026!'
 const PeriodKey = process.env['ECR_E2E_PERIOD'] ?? '';
 const DocumentId = process.env['ECR_E2E_DOCUMENT'] ?? '';
 const DocumentUrl = `/documents/${DocumentId}?periodKey=${PeriodKey}`;
+/** B152: власник документа стенда, якого виставляє `tools/e2e-stand.ps1` (`e2e-admin`), — базова лінія всіх файлів. */
+const StandOwner = Number(process.env['ECR_E2E_DOCUMENT_OWNER'] ?? '0');
 
 // Ім'я без «approve»/«admin»: локатори кнопок звіряють підрядок доступного імені (див. e2e-stand.ps1, e2e-reviewer).
 const Stamp = Date.now().toString(36);
@@ -69,8 +71,8 @@ test.describe('Учасники документа (D-443) на реальном
   let originalOwner: number | null = null;
 
   test.beforeAll(async ({ browser }) => {
-    if (PeriodKey === '' || DocumentId === '') {
-      throw new Error('стенда немає: в оточенні немає ECR_E2E_PERIOD/ECR_E2E_DOCUMENT (tools/e2e-stand.ps1)');
+    if (PeriodKey === '' || DocumentId === '' || !(StandOwner > 0)) {
+      throw new Error('стенда немає: в оточенні немає ECR_E2E_PERIOD/ECR_E2E_DOCUMENT/ECR_E2E_DOCUMENT_OWNER (tools/e2e-stand.ps1)');
     }
 
     const admin = await signedIn(browser, Admin);
@@ -78,6 +80,8 @@ test.describe('Учасники документа (D-443) на реальном
       const document = await admin.request.get(`/api/v1/documents/${DocumentId}?periodKey=${PeriodKey}`);
       expect(document.ok(), `GET document: ${String(document.status())}`).toBe(true);
       originalOwner = ((await document.json()) as { ownerUserId: number | null }).ownerUserId;
+      // B152: чужий залишок ловиться тут, у файлі, що його успадкував, а не трьома файлами пізніше.
+      expect(originalOwner, 'власник документа стенда не той, що виставив e2e-stand.ps1: залишок іншої специфікації').toBe(StandOwner);
     } finally {
       await admin.close();
     }
@@ -241,8 +245,8 @@ test.describe('Учасники документа (D-443) на реальном
    * ⛔ Прибирання — НЕ в `finally` другого тесту, як було: режим `serial` пропускає решту файла після першого падіння,
    * тож упалий перший тест (надання «View» уже видано) лишав учасника в документі стенда для всіх наступних
    * специфікацій (`editAssignments` іде одразу за цим файлом і рахує рядки шторки). `afterAll` виконується завжди.
-   * Власника повертаємо (менеджер лишається менеджером); якщо попередній власник сам документом керувати не може
-   * (сервер 422 — без права запису в проєкті), власником стає `e2e-admin`.
+   * Власника повертаємо ТОЧНО того, що був до файла (B152: стенд виставляє `e2e-admin`, а той має Write на проєкт —
+   * запасного «тоді власником стає e2e-admin» більше немає). Відмова повернення валить файл: зламана базова лінія.
    */
   test.afterAll(async ({ browser }, testInfo) => {
     if (PeriodKey === '' || DocumentId === '') return;
@@ -254,12 +258,8 @@ test.describe('Учасники документа (D-443) на реальном
         ownerUserId: number | null;
       }).ownerUserId;
       if (originalOwner !== null && current !== originalOwner) {
-        let back = await admin.request.post(`/api/v1/documents/${DocumentId}/owner`, { data: { newOwnerUserId: originalOwner } });
-        if (back.status() === 422) {
-          const me = (await (await admin.request.get('/api/v1/me')).json()) as { userId: number };
-          back = await admin.request.post(`/api/v1/documents/${DocumentId}/owner`, { data: { newOwnerUserId: me.userId } });
-        }
-        expect(back.ok(), `повернення власника: ${String(back.status())} ${await back.text()}`).toBe(true);
+        const back = await admin.request.post(`/api/v1/documents/${DocumentId}/owner`, { data: { newOwnerUserId: originalOwner } });
+        expect(back.ok(), `повернення власника ${String(originalOwner)}: ${String(back.status())} ${await back.text()}`).toBe(true);
       }
 
       const list = (await (await admin.request.get(`/api/v1/documents/${DocumentId}/edit-assignments`)).json()) as {

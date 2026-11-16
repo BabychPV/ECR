@@ -25,6 +25,8 @@ const Operator = { userName: 'e2e-operator', password: 'E2E-Oper8tor-Work-2026!'
 
 const PeriodKey = process.env['ECR_E2E_PERIOD'] ?? '';
 const DocumentId = process.env['ECR_E2E_DOCUMENT'] ?? '';
+/** B152: власник документа стенда, якого виставляє `tools/e2e-stand.ps1` (`e2e-admin`), — базова лінія всіх файлів. */
+const StandOwner = Number(process.env['ECR_E2E_DOCUMENT_OWNER'] ?? '0');
 
 interface DocumentTable {
   sheetDefId: number;
@@ -100,19 +102,12 @@ async function cardOf(context: BrowserContext, documentId: string): Promise<Docu
 }
 
 /**
- * Повертає власність документа стенда (B143). Початкового власника заводить генератор до появи користувачів стенда, і
- * він може не мати Write на проєкт — тоді сервер відмовляє `422` «The new owner needs write access to the project».
- * Як у `documentParticipantsLive`: у такому разі власником стає `e2e-admin` (не e2e-operator — базова лінія «оператор
- * документом стенда не володіє» лишається).
+ * Повертає власність документа стенда ТОЧНО початковому власникові (B143, B152). Початкового власника виставляє
+ * `tools/e2e-stand.ps1` — `e2e-admin` (Write на проєкт є), тож запасного «тоді власником стає e2e-admin» більше немає:
+ * відмова сервера тут означає зламану базову лінію і має валити файл, а не ховатися.
  */
-async function restoreOwner(admin: BrowserContext, originalOwner: number | null): Promise<APIResponse> {
-  if (originalOwner !== null) {
-    const back = await admin.request.post(`/api/v1/documents/${DocumentId}/owner`, { data: { newOwnerUserId: originalOwner } });
-    if (back.status() !== 422) return back;
-  }
-  const me = (await (await admin.request.get('/api/v1/me')).json()) as { userId: number };
-
-  return admin.request.post(`/api/v1/documents/${DocumentId}/owner`, { data: { newOwnerUserId: me.userId } });
+async function restoreOwner(admin: BrowserContext, originalOwner: number): Promise<APIResponse> {
+  return admin.request.post(`/api/v1/documents/${DocumentId}/owner`, { data: { newOwnerUserId: originalOwner } });
 }
 
 /** Дата `YYYY-MM-DD` через `days` днів від сьогодні (UTC; запас у тиждень перекриває різницю поясу проєкту). */
@@ -122,8 +117,8 @@ function dayFromNow(days: number): string {
 
 test.describe('rowLock: блокування рядків документа на реальному стенді (B139, B75)', () => {
   test.beforeAll(() => {
-    if (PeriodKey === '' || DocumentId === '') {
-      throw new Error('стенда немає: в оточенні немає ECR_E2E_PERIOD/ECR_E2E_DOCUMENT (tools/e2e-stand.ps1)');
+    if (PeriodKey === '' || DocumentId === '' || !(StandOwner > 0)) {
+      throw new Error('стенда немає: в оточенні немає ECR_E2E_PERIOD/ECR_E2E_DOCUMENT/ECR_E2E_DOCUMENT_OWNER (tools/e2e-stand.ps1)');
     }
   });
 
@@ -266,7 +261,7 @@ test.describe('rowLock: блокування рядків документа н�
   }) => {
     const admin = await signedIn(browser, Admin);
     const operator = await signedIn(browser, Operator);
-    let originalOwner: number | null = null;
+    let originalOwner = 0;
     let moved = false;
 
     try {
@@ -278,7 +273,11 @@ test.describe('rowLock: блокування рядків документа н�
       expect(me.permissions, 'e2e-operator отримав Document.RowLock — тест власника втратив сенс').not.toContain('Document.RowLock');
 
       const before = await cardOf(operator, DocumentId);
-      originalOwner = before.ownerUserId;
+      // B152: базова лінія — власник, якого виставив стенд; чужий залишок ловиться тут, а не трьома файлами пізніше.
+      expect(before.ownerUserId, 'власник документа стенда не той, що виставив e2e-stand.ps1: залишок іншої специфікації').toBe(
+        StandOwner,
+      );
+      originalOwner = StandOwner;
       expect(originalOwner, 'e2e-operator уже власник документа стенда: порівнювати ні з чим').not.toBe(me.userId);
       expect(before.canLockRows, 'картка не власника без права: canLockRows').toBe(false);
 
