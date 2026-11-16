@@ -36,6 +36,13 @@
             Message="!(loc.RequireWin2012R2)" />
     <Launch Condition="Installed OR Privileged"
             Message="!(loc.RequireAdmin)" />
+    <!-- PT-3 (пентест 2026-11, B141): відновлення й оновлення — лише адміністратором. `Installed OR …` вище завжди
+         істинне для встановленого продукту, тому не-адміністратор міг би запустити відновлення з власним
+         SERVICE_ACCOUNT (Secure-властивість доходить до привілейованої частини: `icacls /grant` від SYSTEM і
+         StartName служб). AdminUser істинне для адміністратора й SYSTEM; `Privileged` тут не підходить — воно
+         істинне й для відновлення, яке Windows підвищує сама. -->
+    <Launch Condition="AdminUser"
+            Message="!(loc.RequireAdmin)" />
 
     <!-- ───────────── Властивості ───────────── -->
 

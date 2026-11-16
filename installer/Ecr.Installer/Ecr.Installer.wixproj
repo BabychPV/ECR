@@ -37,8 +37,16 @@
       Підтверджено емпірично: прибрати `codicon.ttf` з публікації —
       помилка ICE60 зникає; повернути — з'являється знов, на цьому самому
       файлі й ні на якому іншому.
+
+      ICE86 (PT-3, B141): радить `Privileged` замість `AdminUser` в умові
+      запуску. Але `Privileged` істинне й для відновлення, яке Windows
+      підвищує сама (до оновлень вересня 2024, CVE-2024-38014), — тобто
+      саме для сценарію, який третя умова `Launch` у `Package.wxs`
+      закриває: відновлення не-адміністратором із власним SERVICE_ACCOUNT.
+      Умова `AdminUser` поставлена свідомо; без придушення пакет не
+      збирається (`error WIX1076: ICE86`).
     -->
-    <SuppressIces>ICE61;ICE60</SuppressIces>
+    <SuppressIces>ICE61;ICE60;ICE86</SuppressIces>
 
     <!-- Три поля: MSI порівнює версії лише за ними (docs/build/10-installer.md §1.5). -->
     <DefineConstants>ProductVersion=$(VersionPrefix);PublishDir=$(PublishDir)</DefineConstants>
