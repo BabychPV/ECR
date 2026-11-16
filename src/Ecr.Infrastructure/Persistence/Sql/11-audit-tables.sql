@@ -209,6 +209,26 @@ BEGIN
 END
 GO
 
+-- B146 (D-536): позначка «перераховано після подання» - rpt.fn_RecalculatedAfterSubmission (вʼюхи rpt) і картка документа
+-- (DocumentStore) шукають запис журналу за (EntityType, Operation, CorrelationId) і ChangedAt > SubmittedAt. Без цього індексу
+-- оптимізатор сканує весь гарячий журнал (кластерний ключ ChangedAt, Id; IX_StructureChange_Entity не має Operation і
+-- CorrelationId - пошук по аркушу з key lookup на кожен запис), і ціна позначки росте з журналом за 24 місяці, а не зі станами
+-- аркушів. З ним - seek на стан. Вирівняний по ps_AuditByMonth і ДЗЕРКАЛЬНИЙ у arc.AuditStructureChange (12-archive-tables.sql,
+-- SWITCH - Msg 4913), як IX_StructureChange_Entity вище; сторож AuditStructureChangeEntityIndexTests. ONLINE - лише де він є.
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_StructureChange_Recalc'
+               AND object_id = OBJECT_ID(N'aud.StructureChange'))
+BEGIN
+    DECLARE @structureRecalcIndex nvarchar(max) =
+        N'CREATE INDEX IX_StructureChange_Recalc '
+        + N'ON aud.StructureChange (EntityType, Operation, CorrelationId, ChangedAt)'
+        + CASE WHEN CAST(SERVERPROPERTY('EngineEdition') AS int) IN (3, 5, 8)
+               THEN N' WITH (ONLINE = ON)' ELSE N'' END
+        + N' ON ps_AuditByMonth(ChangedAt);';
+    PRINT @structureRecalcIndex;
+    EXEC sys.sp_executesql @structureRecalcIndex;
+END
+GO
+
 IF OBJECT_ID(N'aud.SecurityEvent', N'U') IS NULL
 BEGIN
     CREATE TABLE aud.SecurityEvent

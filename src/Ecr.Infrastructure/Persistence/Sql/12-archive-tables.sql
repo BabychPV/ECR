@@ -409,6 +409,21 @@ BEGIN
 END
 GO
 
+-- B146 (D-536): дзеркало `IX_StructureChange_Recalc` з `11-audit-tables.sql` (SWITCH, Msg 4913). Те саме визначення, ONLINE - як там.
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_StructureChange_Recalc'
+               AND object_id = OBJECT_ID(N'arc.AuditStructureChange'))
+BEGIN
+    DECLARE @arcStructureRecalcIndex nvarchar(max) =
+        N'CREATE INDEX IX_StructureChange_Recalc '
+        + N'ON arc.AuditStructureChange (EntityType, Operation, CorrelationId, ChangedAt)'
+        + CASE WHEN CAST(SERVERPROPERTY('EngineEdition') AS int) IN (3, 5, 8)
+               THEN N' WITH (ONLINE = ON)' ELSE N'' END
+        + N' ON ps_AuditByMonth(ChangedAt);';
+    PRINT @arcStructureRecalcIndex;
+    EXEC sys.sp_executesql @arcStructureRecalcIndex;
+END
+GO
+
 IF OBJECT_ID(N'arc.AuditSecurityEvent', N'U') IS NULL
 BEGIN
     CREATE TABLE arc.AuditSecurityEvent

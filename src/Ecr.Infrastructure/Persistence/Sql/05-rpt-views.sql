@@ -40,8 +40,15 @@ GO
 -- `sheet-recalc:{документ}:{аркуш}[#{копія}]:{період}`); звіряє їх тест ReportViewRecalculatedAfterSubmissionTests.
 -- Повторне подання зсуває SubmittedAt, затвердження знімає стан Submitted - позначка зникає без окремого запису.
 -- ⚠ `rc.EntityId = a.SheetDefId` - надлишкова за змістом умова (аркуш уже є в ключі, записувач RecalculationJob кладе його
--- в EntityId), але саме вона дає пошук за наявним індексом IX_StructureChange_Entity (EntityType, EntityId, ChangedAt);
--- індексу за CorrelationId журнал не має. Журнал читається лише гарячий (aud.*), як і в картці.
+-- в EntityId). Журнал читається лише гарячий (aud.*), як і в картці.
+-- ⛔ B146 (D-536): пошук - ОДИН seek на стан за IX_StructureChange_Recalc (EntityType, Operation, CorrelationId, ChangedAt;
+-- 11-audit-tables.sql), FORCESEEK. Заміри 16.11 (згенерований обсяг, 200 станів, 500 000 рядків вʼюхи): без індексу на 150 000
+-- записів журналу - скан усього журналу (3 104 читання), на 1 000 000 - seek по аркушу з key lookup на кожен запис
+-- (+15,4 млн читань); з індексом без підказки - hash-зʼєднання з усіма записами операції (1 007 / 6 903 читання, росте з
+-- журналом); з індексом і FORCESEEK - 200 seek-ів, ~1 150 читань незалежно від журналу. Сторож плану й межі - тест обсягу.
+-- FORCESEEK без імені індексу дає той самий hash, що й без підказки (заміряно), тому індекс названо. ⚠ Наслідок: без індексу
+-- (часткове оновлення, DBA видалив чи перейменував) читання вʼюх rpt падає Msg 308. Індекс створюють 11/12, які в setup-dev-db і
+-- deploy-ecr йдуть ДО цього файла; сторож AuditStructureChangeEntityIndexTests звіряє ім'я з підказки з індексом у розгорнутій базі.
 -- Вʼюхи приєднують функцію за ключем стану (`ras.ApprovalStateId = a.Id`): позначка рахується на СТАН аркуша, а не на
 -- рядок вʼюхи. ⛔ Це єдине місце файла, де статус подання порівнюється (сторож StatusNumberingTests): вʼюхи за статусом
 -- не фільтрують. Marked - tinyint 1: колонка вʼюхи `ISNULL(ras.Marked, 0)` виходить tinyint NOT NULL (CAST у вʼюсі дав би
@@ -54,7 +61,7 @@ SELECT a.Id AS ApprovalStateId, CAST(1 AS tinyint) AS Marked
   FROM wf.ApprovalState AS a
  WHERE a.Status = 1
    AND EXISTS (SELECT 1
-                 FROM aud.StructureChange AS rc
+                 FROM aud.StructureChange AS rc WITH (FORCESEEK (IX_StructureChange_Recalc (EntityType, Operation, CorrelationId)))
                 WHERE rc.EntityType = N'SheetRecalc' AND rc.EntityId = a.SheetDefId
                   AND rc.ChangedAt > a.SubmittedAt
                   AND rc.Operation = N'RecalculatedAfterSubmission'

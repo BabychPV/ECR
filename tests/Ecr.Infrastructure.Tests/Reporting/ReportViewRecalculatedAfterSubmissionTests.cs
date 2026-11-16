@@ -1,6 +1,7 @@
 // tests/Ecr.Infrastructure.Tests/Reporting/ReportViewRecalculatedAfterSubmissionTests.cs
 using System.Globalization;
 using System.Text.RegularExpressions;
+using System.Xml.Linq;
 using Ecr.Application.Calculations;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Configuration;
@@ -197,9 +198,10 @@ public sealed partial class ReportViewRecalculatedAfterSubmissionTests(ITestOutp
     /// (той самий текст без приєднання й колонки), з колонкою (функція, приєднана за станом) і варіант A (підзапит на рядок).
     /// </summary>
     /// <remarks>
-    /// Виміри 16.11 (5 000 сторонніх записів): без колонки 8 074, з колонкою 10 577, варіант A 25 518 читань. Числа друкуються
-    /// у вивід тесту. Межа: позначка не дорожча за варіант A і додає не більше ніж «2 читання на сторонній запис + 5 000»
-    /// (тобто росте з обсягом журналу аркуша, а не з кількістю рядків вʼюхи). Друга точка (20 000 записів) показує, як саме.
+    /// Виміри 16.11 без індексу B146: без колонки 8 074; з колонкою 10 577 (5 000 записів) і 17 797 (20 000) — ціна росла з
+    /// журналом (~0,48 читання на запис). З IX_StructureChange_Recalc і FORCESEEK (D-536) межа — «12 читань на стан + 200»
+    /// для обох точок, і план — seek на цьому індексі без жодного скану aud.StructureChange. Числа й план друкуються у вивід.
+    /// Мутація: без індексу в 11-audit-tables.sql — FORCESEEK на відсутній індекс, вʼюха не читається (обидві точки червоні).
     /// </remarks>
     [Theory]
     [Trait("B138", "Volume")]
@@ -268,8 +270,57 @@ public sealed partial class ReportViewRecalculatedAfterSubmissionTests(ITestOutp
                          + $"without column {without}; with column (function joined on state) {shipped}; variant A (apply per row) {perRow}");
 
         Assert.True(shipped <= perRow * 11 / 10, $"позначка за станом ({shipped}) дорожча за підзапит на рядок ({perRow})");
-        Assert.True(shipped - without <= (2L * foreign) + 5000,
-            $"позначка коштує {shipped - without} читань понад {without} — більше за «2 на сторонній запис журналу + 5 000»");
+
+        // B146 (D-536): з IX_StructureChange_Recalc і FORCESEEK - seek на стан аркуша; ціна обмежена кількістю станів
+        // (тут documents), а не обсягом журналу: однакова межа для 5 000 і 20 000 сторонніх записів.
+        Assert.True(shipped - without <= (12L * documents) + 200,
+            $"позначка коштує {shipped - without} читань понад {without} — більше за «12 на стан + 200» ({documents} станів, {foreign} сторонніх записів)");
+        var plan = await PlanAsync($"SELECT COUNT_BIG(*), MAX(CHECKSUM(*)) FROM rpt.[{s.Stable}]");
+        XNamespace ns = "http://schemas.microsoft.com/sqlserver/2004/07/showplan";
+        var journal = System.Xml.Linq.XDocument.Parse(plan).Descendants(ns + "RelOp")
+            .Where(r => r.Elements().Elements(ns + "Object").Any(o => (string?)o.Attribute("Table") == "[StructureChange]"))
+            .Select(r => $"{(string?)r.Attribute("PhysicalOp")}:{r.Elements().Elements(ns + "Object").First().Attribute("Index")?.Value}"
+                         + ":seek=" + string.Join(",", r.Descendants(ns + "SeekPredicates").Descendants(ns + "ColumnReference")
+                             .Select(c => (string?)c.Attribute("Column")).Where(c => c is not null && c.Length > 0 && !c.StartsWith("Expr", StringComparison.Ordinal))
+                             .Distinct()))
+            .ToList();
+        output.WriteLine($"plan on aud.StructureChange: {string.Join("; ", journal)}");
+        // Seek саме за ключем стану (CorrelationId у ключі пошуку), а не діапазон усіх записів операції з hash-зʼєднанням.
+        Assert.Contains(journal, op => op.StartsWith("Index Seek:[IX_StructureChange_Recalc]", StringComparison.Ordinal)
+                                       && op.Contains("CorrelationId", StringComparison.Ordinal));
+        Assert.DoesNotContain(journal, op => op.Contains("Scan", StringComparison.Ordinal));
+    }
+
+    /// <summary>Фактичний план запиту (SET STATISTICS XML ON) - перший план, що читає aud.StructureChange.</summary>
+    private async Task<string> PlanAsync(string text)
+    {
+        await using var connection = await OpenAsync();
+        await using (var on = connection.CreateCommand())
+        {
+            on.CommandText = "SET STATISTICS XML ON;";
+            await on.ExecuteNonQueryAsync();
+        }
+
+        await using var command = connection.CreateCommand();
+#pragma warning disable CA2100
+        command.CommandText = text;
+#pragma warning restore CA2100
+        command.CommandTimeout = 600;
+        await using var reader = await command.ExecuteReaderAsync();
+        do
+        {
+            if (reader.FieldCount == 1 && reader.GetName(0).Contains("Showplan", StringComparison.OrdinalIgnoreCase) && await reader.ReadAsync())
+            {
+                var xml = reader.GetString(0);
+                if (xml.Contains("StructureChange", StringComparison.Ordinal))
+                {
+                    return xml;
+                }
+            }
+        }
+        while (await reader.NextResultAsync());
+
+        throw new InvalidOperationException("SQL Server не повернув план, що читає aud.StructureChange.");
     }
 
     // ── помічники ───────────────────────────────────────────────────────────────────────────────────────────────────────
