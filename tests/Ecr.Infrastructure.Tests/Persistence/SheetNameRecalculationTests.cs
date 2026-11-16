@@ -327,7 +327,10 @@ public sealed class SheetNameRecalculationTests(SqlServerFixture sql)
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
             command.CommandText =
-                "SELECT COUNT(*) FROM aud.StructureChange WHERE EntityType = @t AND Operation = @o AND CorrelationId = @c";
+                "SELECT COUNT(*) FROM aud.StructureChange WHERE EntityType = @t AND Operation = @o AND CorrelationId = @c AND EntityId = @s";
+            // B138: EntityId запису — аркуш: на цьому тримається пошук позначки у вʼюхах rpt за наявним індексом журналу
+            // (rpt.fn_RecalculatedAfterSubmission: rc.EntityId = a.SheetDefId).
+            command.Parameters.AddWithValue("@s", world.Doc.SheetDefId);
             command.Parameters.AddWithValue("@t", RecalculationSkips.AuditEntityType);
             command.Parameters.AddWithValue("@o", RecalculationSkips.AuditRecalculatedAfterSubmission);
             command.Parameters.AddWithValue("@c", correlation);
@@ -352,6 +355,23 @@ public sealed class SheetNameRecalculationTests(SqlServerFixture sql)
                 world.Doc.DocumentId, new PeriodKeyFilter(world.Doc.PeriodKey.Value), CancellationToken.None);
             var copyState = Assert.Single(summary!.Sheets!, s => s.Code == SheetCopyNaming.StateKey(world.Doc.SheetCode, copy.SheetCopyId));
             Assert.True(copyState.RecalculatedAfterSubmission);
+        }
+
+        // B138: те саме правило у вʼюсі сирих даних — запис СПРАВЖНЬОГО записувача (RecalculationJob) дає позначку 1 на
+        // рядках копії (усі комірки копії документа за період; інших станів у документа немає).
+        await using (var connection = new SqlConnection(sql.ConnectionString))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText =
+                "SELECT COUNT(*), MIN(_RecalculatedAfterSubmission), MAX(_RecalculatedAfterSubmission) FROM rpt.v_DocumentCells "
+                + "WHERE DocumentId = @d AND PeriodKey = @p AND SheetCopyOrdinal > 1";
+            command.Parameters.AddWithValue("@d", world.Doc.DocumentId);
+            command.Parameters.AddWithValue("@p", world.Doc.PeriodKey.Value);
+            await using var reader = await command.ExecuteReaderAsync();
+            Assert.True(await reader.ReadAsync());
+            Assert.True(reader.GetInt32(0) > 0, "у довгій вʼюсі немає рядків копії");
+            Assert.Equal(((byte)1, (byte)1), (reader.GetByte(1), reader.GetByte(2)));
         }
     }
 
