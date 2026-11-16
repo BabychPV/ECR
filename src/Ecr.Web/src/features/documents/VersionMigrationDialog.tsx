@@ -393,7 +393,13 @@ export function VersionMigrationDialog({
             ref={applyButtonRef}
             disabled={report === null || !report.canApply || backupMissing || busy}
             loading={apply.isPending || settled.settling || jobRunning}
-            onClick={() => settled.run(() => apply.mutateAsync({ accept: overwriteAccepted, backup: backupRequired ? backupConfirmation : '' }))}
+            onClick={() => {
+              // ⛔ B149 (KIT §6.9): після `Succeeded` сторінка ще перечитує ВСІ запити й лише потім закриває діалог —
+              // задача вже не «йде», звіт «можна» на місці, і клік ставив другий перенос. Нова спроба — лише після
+              // відмови задачі або зміни вибору (обидва скидають `jobId`).
+              if (jobState === 'Succeeded' || busy) return;
+              settled.run(() => apply.mutateAsync({ accept: overwriteAccepted, backup: backupRequired ? backupConfirmation : '' }));
+            }}
             data-testid="migrate-apply"
           >
             {t('documents.migrateApply')}
