@@ -52,6 +52,9 @@ GO
 -- лише екземпляри, яких немає в `doc.*` (проміжні стани архівації/повернення: гаряча копія має перевагу, як F-13).
 -- Архівна гілка — ДОСЛІВНО гаряча із заміною `doc.CellValue`/`doc.TableRow`/`doc.TableInstance` на `arc.*` (сторож
 -- ReportArchiveBranchTests). Колонка IsArchived — останньою.
+-- ✎ B138 (B75): _WorkflowMode — режим погодження версії шаблону РЯДКА (cfg.TemplateVersion.WorkflowMode: 0 SubmitApprove,
+-- 1 None - без подання й затвердження), ОСТАННЬОЮ колонкою (колонки лише додаються). Status не змінюється: для версії None
+-- він лишається 0, і звіт, що читає всі рядки такої версії, відрізняє її за _WorkflowMode, а не за «Approved».
 CREATE OR ALTER VIEW rpt.v_DocumentCells
 AS
 SELECT p.Id AS ProjectId, p.Code AS ProjectCode,
@@ -75,7 +78,8 @@ SELECT p.Id AS ProjectId, p.Code AS ProjectCode,
                       CASE WHEN ti.SheetCopyId IS NOT NULL OR MAX(CASE WHEN g.CopyOfId IS NOT NULL THEN 1 ELSE 0 END) = 1
                            THEN CONCAT(N' ', COALESCE(dsh.CopyOrdinal, 1)) ELSE N'' END)
         FROM doc.DocumentSheet AS g WHERE g.DocumentId = d.Id AND g.SheetDefId = sd.Id) AS SheetDisplayName,
-       CAST(0 AS bit) AS IsArchived
+       CAST(0 AS bit) AS IsArchived,
+       tv.WorkflowMode AS _WorkflowMode
 FROM doc.CellValue          AS cv
 JOIN doc.TableRow           AS r  ON r.PeriodKey = cv.PeriodKey AND r.Id = cv.TableRowId AND r.IsDeleted = 0
 JOIN doc.TableInstance      AS ti ON ti.PeriodKey = r.PeriodKey AND ti.Id = r.TableInstanceId
@@ -114,7 +118,8 @@ SELECT p.Id AS ProjectId, p.Code AS ProjectCode,
                       CASE WHEN ti.SheetCopyId IS NOT NULL OR MAX(CASE WHEN g.CopyOfId IS NOT NULL THEN 1 ELSE 0 END) = 1
                            THEN CONCAT(N' ', COALESCE(dsh.CopyOrdinal, 1)) ELSE N'' END)
         FROM doc.DocumentSheet AS g WHERE g.DocumentId = d.Id AND g.SheetDefId = sd.Id) AS SheetDisplayName,
-       CAST(1 AS bit) AS IsArchived
+       CAST(1 AS bit) AS IsArchived,
+       tv.WorkflowMode AS _WorkflowMode
 FROM arc.CellValue          AS cv
 JOIN arc.TableRow           AS r  ON r.PeriodKey = cv.PeriodKey AND r.Id = cv.TableRowId AND r.IsDeleted = 0
 JOIN arc.TableInstance      AS ti ON ti.PeriodKey = r.PeriodKey AND ti.Id = r.TableInstanceId
@@ -199,7 +204,7 @@ IF OBJECT_ID(N'rpt.ViewScopeSig', N'U') IS NULL
 GO
 
 -- AN-155d: відбиток УСІХ входів, від яких залежить текст вʼюх rpt.v_*_vN та стабільних (обидві процедури нижче):
---   * @MonthRouting і (D-474) cfg.TemplateVersion.Layout кожної опублікованої версії;
+--   * @MonthRouting і (D-474) cfg.TemplateVersion.Layout та (B138) WorkflowMode кожної опублікованої версії;
 --   * визначення самих процедур і цієї функції (правка 05-rpt-views.sql => інший відбиток => перегенерація);
 --   * остання застосована міграція EF (dbo.__EFMigrationsHistory) — зміна таблиць під вʼюхами => перегенерація;
 --   * опубліковані/застарілі версії (Status 1,2): cfg.Template(Code), cfg.TemplateVersion(Id, TemplateId, Version);
@@ -222,7 +227,8 @@ BEGIN
             COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'rpt.usp_GenerateStableViews')), N''), N'|',
             COALESCE(OBJECT_DEFINITION(OBJECT_ID(N'rpt.fn_ViewsFingerprint')), N''))), 2),
         -- D-474: розкладка версії (Layout = 1 - маршрутизація місяців лише для неї) входить у відбиток: зміна => перегенерація.
-        N';tpl=', CAST((SELECT t.Id AS i, t.Code AS c, tv.Id AS v, tv.[Version] AS n, tv.Layout AS l
+        -- B138: режим погодження версії (_WorkflowMode - літерал у тексті вʼюх) теж входить у відбиток.
+        N';tpl=', CAST((SELECT t.Id AS i, t.Code AS c, tv.Id AS v, tv.[Version] AS n, tv.Layout AS l, tv.WorkflowMode AS w
                           FROM cfg.TemplateVersion AS tv JOIN cfg.Template AS t ON t.Id = tv.TemplateId
                          WHERE tv.Status IN (1, 2) ORDER BY tv.Id FOR XML RAW(N'r'), TYPE) AS nvarchar(max)),
         N';sh=', CAST((SELECT sd.Id AS i, sd.TemplateVersionId AS v, sd.Code AS c, JSON_VALUE(sd.NameL10n, N'$.en') AS e
@@ -838,6 +844,11 @@ JOIN doc.TableRow      AS r ON r.PeriodKey = ti.PeriodKey AND r.TableInstanceId 
                       CASE WHEN ti.SheetCopyId IS NOT NULL OR MAX(CASE WHEN g.CopyOfId IS NOT NULL THEN 1 ELSE 0 END) = 1
                            THEN CONCAT(N'' '', COALESCE(dsh.CopyOrdinal, 1)) ELSE N'''' END)
         FROM doc.DocumentSheet AS g WHERE g.DocumentId = d.Id AND g.SheetDefId = ', CAST(@sheet AS nvarchar(10)), N') AS _SheetDisplayName');
+        -- ✎ B138 (B75): _WorkflowMode - режим погодження ЦІЄЇ версії (cfg.TemplateVersion.WorkflowMode: 0 SubmitApprove, 1 None),
+        -- константа вʼюхи (опублікована версія незмінна), ОСТАННЬОЮ колонкою. _Status не змінюється (для None лишається 0).
+        SET @copyCols = CONCAT(@copyCols, N',
+       CAST(', CAST(COALESCE((SELECT wtv.WorkflowMode FROM cfg.SheetDef AS wsd JOIN cfg.TemplateVersion AS wtv ON wtv.Id = wsd.TemplateVersionId
+                              WHERE wsd.Id = @sheet), 0) AS nvarchar(3)), N' AS tinyint) AS _WorkflowMode');
 
         SET @sql = CONCAT(
 N'CREATE OR ALTER VIEW rpt.', QUOTENAME(@view), N'
@@ -944,6 +955,9 @@ GO
 --   * _TemplateVersion : service column, nvarchar, taken PER ROW from the version of the row's own TableDef (a constant CASE
 --                  over ti.TableDefId, no extra join), never from Project.TemplateVersionId - one project may show some periods
 --                  as v1 and later periods as v2;
+--   * _WorkflowMode : B138 (B75) - service column, tinyint, LAST in the list: cfg.TemplateVersion.WorkflowMode (0 SubmitApprove,
+--                  1 None) of the version of the row's own TableDef (a constant CASE over ti.TableDefId, like _TemplateVersion),
+--                  never of the version passed to the procedure; _Status is not changed (stays 0 for a None version);
 --   * type conflict : a code whose storage family differs between versions (e.g. string in v1, number in v2) becomes nvarchar
 --                  (every value converted to text); the proc returns a Warning for it; such a column is not month-routed and
 --                  not overlaid with methodology results;
@@ -1329,7 +1343,7 @@ BEGIN
         RETURN;
     END
 
-    DECLARE @g int, @header nvarchar(400), @view sysname, @tids nvarchar(max), @sheetCase nvarchar(max), @verCase nvarchar(max);
+    DECLARE @g int, @header nvarchar(400), @view sysname, @tids nvarchar(max), @sheetCase nvarchar(max), @verCase nvarchar(max), @wfCase nvarchar(max);
     DECLARE @select nvarchar(max), @selectText nvarchar(max), @joins nvarchar(max), @sql nvarchar(max), @existing nvarchar(max), @message nvarchar(2048);
     -- R-1 (D-498): shared SELECT head and FROM..WHERE tail; the archive tail is the same text with three tables replaced by arc.*.
     DECLARE @selHead nvarchar(max), @tail nvarchar(max), @tailArc nvarchar(max);
@@ -1405,6 +1419,10 @@ BEGIN
                            FROM @gt WHERE TableDefId IN (SELECT TableDefId FROM @gx) ORDER BY TableDefId FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)') + N' END';
         SET @verCase = N'CAST(CASE ti.TableDefId' + (SELECT N' WHEN ' + CAST(TableDefId AS nvarchar(10)) + N' THEN N' + QUOTENAME(VersionText, '''')
                            FROM @gt WHERE TableDefId IN (SELECT TableDefId FROM @gx) ORDER BY TableDefId FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)') + N' END AS nvarchar(20))';
+        -- B138: режим погодження версії таблиці рядка (літерал: опублікована версія незмінна; зміна - через відбиток).
+        SET @wfCase = N'CAST(CASE ti.TableDefId' + (SELECT N' WHEN ' + CAST(x.TableDefId AS nvarchar(10)) + N' THEN ' + CAST(wtv.WorkflowMode AS nvarchar(3))
+                           FROM @gt AS x JOIN cfg.TemplateVersion AS wtv ON wtv.Id = x.TemplateVersionId
+                           WHERE x.TableDefId IN (SELECT TableDefId FROM @gx) ORDER BY x.TableDefId FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)') + N' END AS tinyint)';
 
         -- Month routing needs the MonthsInColumns layout (0) in EVERY version of the table.
         -- D-474: and at least one routed version (flag ON = all versions; flag OFF = versions with Layout = 1). Flag ON or no
@@ -1791,7 +1809,10 @@ N'SELECT p.Id AS _ProjectId, p.Code AS _ProjectCode,
        r.Id AS _RowId, r.RowKey AS _RowKey, r.Ordinal AS _RowOrdinal,
        ', @verCase, N' AS _TemplateVersion', @select, @copyCols, N',
        CAST(');
-        SET @tail = CONCAT(N' AS bit) AS _IsArchived
+        -- ✎ B138 (B75): _WorkflowMode - режим погодження версії РЯДКА (CASE за таблицею рядка, як _TemplateVersion), а не
+        -- версії з параметра процедури; ОСТАННЬОЮ колонкою обох гілок. _Status не змінюється.
+        SET @tail = CONCAT(N' AS bit) AS _IsArchived,
+       ', @wfCase, N' AS _WorkflowMode
 ', @fromSql, N'
 LEFT JOIN wf.ApprovalState AS a ON a.DocumentId = d.Id AND a.SheetDefId = ', @sheetCase,
 N' AND a.PeriodKey = ti.PeriodKey
