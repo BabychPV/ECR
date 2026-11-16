@@ -4,3 +4,6 @@
 .githooks/* text eol=lf
 *.sh text eol=lf
 docs/delivery/reference-data/land-template/*.json text eol=lf
+# tools/api-test-shards.psd1 читає CI на Linux і сторож ApiTestShardsTests («BOM + LF»). З core.autocrlf=true
+# робоча копія Windows діставала CRLF, і сторож був червоний локально (у CI зелений). LF — завжди.
+tools/api-test-shards.psd1 text eol=lf
