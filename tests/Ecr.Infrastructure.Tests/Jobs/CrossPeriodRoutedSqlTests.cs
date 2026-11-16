@@ -1456,6 +1456,58 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
         Assert.Equal(1, await SubmittedMarksAsync(world, OwnerMonth));
     }
 
+    /// <summary>
+    /// ✎ B79 (Q12, поправка до ФВ-9.17): каскад змінює ЖИВЕ число поданого аркуша й ставить позначку, але зріз подання
+    /// (<c>calc.SubmissionSnapshot</c>) лишається таким, яким його подано, — рядки до і після прогону тотожні.
+    /// </summary>
+    /// <remarks>Мутація (локально): у транзакції запису <c>RecalculationService.RunAsync</c> для поданого аркуша
+    /// оновити чи додати рядок <c>SubmissionSnapshot</c> (або викликати <c>ReportSnapshotSync</c>/перебудову зрізу з
+    /// каскаду) — червоніє порівняння «до/після»; прибрати виклик <c>SubmittedSheetRecalcLog.WriteAsync</c> — червоніє
+    /// позначка.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "B79")]
+    public async Task B79_каскад_поданого_місяця_не_чіпає_зріз_подання_а_позначку_ставить()
+    {
+        var world = await ArrangeAsync();
+        await SetOwnerValueAsync(world, 7m);
+        await SetSheetStatusAsync(world, 9, DocumentStatus.Submitted);
+        await using (var setup = world.Builder.CreateContext())
+        {
+            setup.SubmissionSnapshots.Add(new Ecr.Domain.Entities.Workflow.SubmissionSnapshot(
+                world.Doc.DocumentId, world.Doc.SheetDefId, Period(9), world.Doc.TemplateVersionId, "[]", null, null,
+                "{\"out\":-1}", new byte[32], Now.AddDays(-2), 1));
+            await setup.SaveChangesAsync();
+        }
+
+        var before = await SubmissionSnapshotsAsync(world);
+        Assert.Contains("-1", before, StringComparison.Ordinal);
+
+        var enqueued = new List<(string Target, string Payload)>();
+        await RunJobAsync(world, enqueued, OwnerRequest(world), routing: true);
+
+        // Живе число змінилось і позначено…
+        Assert.Equal(14m, await OutputAsync(world, Period(9)));
+        Assert.Equal(1, await SubmittedMarksAsync(world, 9));
+
+        // …а зріз подання — той самий рядок із тими самими значеннями.
+        Assert.Equal(before, await SubmissionSnapshotsAsync(world));
+    }
+
+    /// <summary>Усі зрізи подання документа (за Id) одним рядком JSON — для порівняння «до/після».</summary>
+    private static async Task<string> SubmissionSnapshotsAsync(World world)
+    {
+        await using var db = world.Builder.CreateContext();
+        var rows = await db.SubmissionSnapshots.AsNoTracking()
+            .Where(s => s.DocumentId == world.Doc.DocumentId)
+            .OrderBy(s => s.Id)
+            .ToListAsync();
+        Assert.NotEmpty(rows);
+
+        return JsonSerializer.Serialize(rows);
+    }
+
     /// <summary>Стан аркуша місяця (оригінал) — напряму в <c>wf.ApprovalState</c>.</summary>
     private static async Task SetSheetStatusAsync(World world, int month, DocumentStatus status)
     {
