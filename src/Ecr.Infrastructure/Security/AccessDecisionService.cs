@@ -2086,7 +2086,11 @@ public sealed class AccessDecisionService(
             => [.. Dependents.ReaderSheets(TableDefId, columnDefId)
                 .Where(r => r != GeneralInputDependents.UnknownReaderSheet && r != SheetDefId)
                 .Order()
-                .Select(r => new DependentReaderSheet(r, SheetCodeOf(Snapshot, r) ?? string.Empty))];
+                .Select(r => new DependentReaderSheet(
+                    r, SheetCodeOf(Snapshot, r) ?? string.Empty, ReaderCopies.GetValueOrDefault(r)))];
+
+        /// <summary>✎ B79 (квіз 16.11): копії аркушів документа (аркуш → Id копій) — для замків аркушів-читачів.</summary>
+        public IReadOnlyDictionary<int, IReadOnlyList<long>> ReaderCopies { get; init; } = NoReaderCopies;
 
         /// <summary>
         /// ✎ B79 (квіз 16.11): аркуші-читачі стовпця з їхніми затвердженими місяцями — те, що відхиляє правку й називає
@@ -2117,6 +2121,9 @@ public sealed class AccessDecisionService(
 
     private static readonly IReadOnlyDictionary<int, (string Code, IReadOnlyList<int> Months)> NoOtherSheetsApproved =
         new Dictionary<int, (string, IReadOnlyList<int>)>();
+
+    private static readonly IReadOnlyDictionary<int, IReadOnlyList<long>> NoReaderCopies =
+        new Dictionary<int, IReadOnlyList<long>>();
 
     private static readonly IReadOnlySet<string> NoLockedRows = new HashSet<string>(StringComparer.Ordinal);
 
@@ -2305,6 +2312,7 @@ public sealed class AccessDecisionService(
 
             // ✎ B79 (квіз 16.11): затверджені місяці аркушів-читачів документа за рік — один запит на групу.
             Dictionary<int, (string Code, IReadOnlyList<int> Months)>? otherApprovedAll = null;
+            Dictionary<int, IReadOnlyList<long>>? readerCopiesAll = null;
 
             // ✎ D-461: що з комірок групи можна замінити ручним значенням — ОДИН запит позначок на групу, і лише для
             // таблиць, де взагалі є формули колонки/комірки (більшість таблиць не платить нічого).
@@ -2381,6 +2389,7 @@ public sealed class AccessDecisionService(
                 var dependents = GeneralInputDependents.None;
                 IReadOnlyList<int> approvedMonths = [];
                 IReadOnlyDictionary<int, (string Code, IReadOnlyList<int> Months)> otherApproved = NoOtherSheetsApproved;
+                IReadOnlyDictionary<int, IReadOnlyList<long>> readerCopies = NoReaderCopies;
                 var instanceTable = snapshot.Sheets.SelectMany(s => s.Tables).FirstOrDefault(t => t.Id == instance.TableDefId);
                 var isMonthsTable = !profile.IsIntegrationWriter
                     && !profile.IsSimulation
@@ -2479,9 +2488,11 @@ public sealed class AccessDecisionService(
                         {
                             otherApprovedAll ??= await OtherSheetsApprovedAsync(documentId, keys, snapshot, ct)
                                 .ConfigureAwait(false);
+                            readerCopiesAll ??= await SheetCopiesAsync(documentId, ct).ConfigureAwait(false);
                             otherApproved = otherApprovedAll
                                 .Where(p => p.Key != sheetDefId)
                                 .ToDictionary(p => p.Key, p => p.Value);
+                            readerCopies = readerCopiesAll;
                         }
                     }
 
@@ -2512,6 +2523,7 @@ public sealed class AccessDecisionService(
                     Dependents = dependents,
                     ApprovedMonths = approvedMonths,
                     OtherSheetsApproved = otherApproved,
+                    ReaderCopies = readerCopies,
                 };
             }
         }
@@ -2522,6 +2534,21 @@ public sealed class AccessDecisionService(
     /// <summary>✎ B79: версія шаблону, якій належить аркуш (знімок проєкту з кількома версіями — об'єднання їхніх аркушів).</summary>
     private static int VersionOfSheet(TemplateVersionSnapshot snapshot, int sheetDefId)
         => snapshot.Sheets.FirstOrDefault(s => s.Id == sheetDefId)?.TemplateVersionId ?? snapshot.TemplateVersionId;
+
+    /// <summary>✎ B79 (квіз 16.11): аркуш документа → Id його КОПІЙ (включених) — для замків аркушів-читачів. Один запит.</summary>
+    private async Task<Dictionary<int, IReadOnlyList<long>>> SheetCopiesAsync(long documentId, CancellationToken ct)
+    {
+        var rows = await db.DocumentSheets
+            .AsNoTracking()
+            .Where(s => s.DocumentId == documentId && s.CopyOfId != null && s.IsIncluded)
+            .Select(s => new { s.SheetDefId, s.Id })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return rows
+            .GroupBy(r => r.SheetDefId)
+            .ToDictionary(g => g.Key, g => (IReadOnlyList<long>)[.. g.Select(r => r.Id).Order()]);
+    }
 
     /// <summary>
     /// ✎ B79 (квіз 16.11): аркуш документа → його ЗАТВЕРДЖЕНІ місяці серед <paramref name="yearKeys"/> (будь-яка копія
