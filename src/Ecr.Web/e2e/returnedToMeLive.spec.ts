@@ -24,6 +24,8 @@ const Operator = { userName: 'e2e-operator', password: 'E2E-Oper8tor-Work-2026!'
 
 const PeriodKey = process.env['ECR_E2E_PERIOD'] ?? '';
 const DocumentId = process.env['ECR_E2E_DOCUMENT'] ?? '';
+/** B152: власник документа стенда, якого виставляє `tools/e2e-stand.ps1` (`e2e-admin`), — базова лінія всіх файлів. */
+const StandOwner = Number(process.env['ECR_E2E_DOCUMENT_OWNER'] ?? '0');
 
 const ReasonFirst = 'e2e D-449: рядок 1 не збігається з актами';
 const Reason = `${ReasonFirst}\nПеревірте одиниці виміру.`;
@@ -116,8 +118,8 @@ test.describe('returnedToMe: «Повернуто на доопрацюванн�
   let originalOwner: number | null = null;
 
   test.beforeAll(async ({ browser }) => {
-    if (PeriodKey === '' || DocumentId === '') {
-      throw new Error('стенда немає: в оточенні немає ECR_E2E_PERIOD/ECR_E2E_DOCUMENT (tools/e2e-stand.ps1)');
+    if (PeriodKey === '' || DocumentId === '' || !(StandOwner > 0)) {
+      throw new Error('стенда немає: в оточенні немає ECR_E2E_PERIOD/ECR_E2E_DOCUMENT/ECR_E2E_DOCUMENT_OWNER (tools/e2e-stand.ps1)');
     }
 
     const admin = await signedIn(browser, Admin);
@@ -125,6 +127,8 @@ test.describe('returnedToMe: «Повернуто на доопрацюванн�
       const document = await admin.request.get(`/api/v1/documents/${DocumentId}?periodKey=${PeriodKey}`);
       expect(document.ok(), `GET document: ${String(document.status())}`).toBe(true);
       originalOwner = ((await document.json()) as { ownerUserId: number | null }).ownerUserId;
+      // B152: чужий залишок ловиться тут, у файлі, що його успадкував, а не трьома файлами пізніше.
+      expect(originalOwner, 'власник документа стенда не той, що виставив e2e-stand.ps1: залишок іншої специфікації').toBe(StandOwner);
     } finally {
       await admin.close();
     }
@@ -143,13 +147,11 @@ test.describe('returnedToMe: «Повернуто на доопрацюванн�
       const current = ((await (await admin.request.get(`/api/v1/documents/${DocumentId}?periodKey=${PeriodKey}`)).json()) as {
         ownerUserId: number | null;
       }).ownerUserId;
+      // B152: ТОЧНО той власник, що був до файла (стенд виставляє `e2e-admin`, Write на проєкт є) — без запасного
+      // «тоді e2e-admin»; відмова валить файл, бо означає зламану базову лінію.
       if (originalOwner !== null && current !== originalOwner) {
-        let back = await admin.request.post(`/api/v1/documents/${DocumentId}/owner`, { data: { newOwnerUserId: originalOwner } });
-        if (back.status() === 422) {
-          const me = (await (await admin.request.get('/api/v1/me')).json()) as { userId: number };
-          back = await admin.request.post(`/api/v1/documents/${DocumentId}/owner`, { data: { newOwnerUserId: me.userId } });
-        }
-        expect(back.ok(), `повернення власника: ${String(back.status())} ${await back.text()}`).toBe(true);
+        const back = await admin.request.post(`/api/v1/documents/${DocumentId}/owner`, { data: { newOwnerUserId: originalOwner } });
+        expect(back.ok(), `повернення власника ${String(originalOwner)}: ${String(back.status())} ${await back.text()}`).toBe(true);
       }
     } finally {
       await admin.close();
