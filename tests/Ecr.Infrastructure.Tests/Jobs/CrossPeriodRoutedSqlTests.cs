@@ -1541,6 +1541,57 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
         }
     }
 
+    /// <summary>
+    /// ✎ B79 (Q13): спільне правило позначки вимагає стан <c>Submitted</c> — аркуш, затверджений після перерахунку,
+    /// позначки не має ні в черзі, ні на картці документа (той самий фрагмент SQL), хоч запис журналу лишився.
+    /// </summary>
+    /// <remarks>Мутація (локально): у <c>RecalculatedAfterSubmissionMark.Rule</c> прибрати <c>a.Status = 1</c> —
+    /// червоніє друга половина (після затвердження).</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "B79")]
+    public async Task B79_затверджений_після_перерахунку_аркуш_позначки_не_має_ні_в_черзі_ні_на_картці()
+    {
+        var world = await ArrangeAsync();
+        await SetOwnerValueAsync(world, 7m);
+        await SetSheetStatusAsync(world, 9, DocumentStatus.Submitted);
+        var september = await StateIdAsync(world, 9);
+
+        var enqueued = new List<(string Target, string Payload)>();
+        await RunJobAsync(world, enqueued, OwnerRequest(world), routing: true);
+
+        // Поданий і перерахований: позначка є і в черзі, і на картці документа за вересень.
+        Assert.Equal(new[] { september }, await QueueMarksAsync(world, september));
+        Assert.True(await CardMarkAsync(world, 9));
+
+        await using (var db = world.Builder.CreateContext())
+        {
+            var state = await db.ApprovalStates.SingleAsync(a => a.Id == september);
+            state.Approve(state.SubmittedByUserId ?? 0, Now.AddDays(1));
+            await db.SaveChangesAsync();
+        }
+
+        Assert.Empty(await QueueMarksAsync(world, september));
+        Assert.False(await CardMarkAsync(world, 9));
+        Assert.Equal(1, await SubmittedMarksAsync(world, 9));
+    }
+
+    private static async Task<IReadOnlySet<long>> QueueMarksAsync(World world, params long[] stateIds)
+    {
+        await using var db = world.Builder.CreateContext();
+        return await new ApprovalQueueStore(db).ListRecalculatedAfterSubmissionAsync(stateIds, CancellationToken.None);
+    }
+
+    /// <summary>Позначка аркуша на картці документа (<c>sheets[].recalculatedAfterSubmission</c>) за місяць.</summary>
+    private static async Task<bool> CardMarkAsync(World world, int month)
+    {
+        await using var db = world.Builder.CreateContext();
+        var summary = await new DocumentStore(db).FindAsync(
+            world.Doc.DocumentId, new PeriodKeyFilter(Period(month)), CancellationToken.None);
+        return summary!.Sheets!.Any(s => s.RecalculatedAfterSubmission);
+    }
+
     private static async Task<long> StateIdAsync(World world, int month)
     {
         var period = Period(month);

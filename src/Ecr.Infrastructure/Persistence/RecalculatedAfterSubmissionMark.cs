@@ -87,11 +87,8 @@ internal static class RecalculatedAfterSubmissionMark
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(stateIds);
 
-        if (stateIds.Count == 0)
-        {
-            return [];
-        }
-
+        // Порожній набір сюди не доходить (обробник черги для порожньої сторінки не питає); якщо дійде — запит
+        // просто нічого не поверне (`OPENJSON('[]')`).
         var marked = await db.Database
             .SqlQueryRaw<long>(
                 StateIdsSql,
