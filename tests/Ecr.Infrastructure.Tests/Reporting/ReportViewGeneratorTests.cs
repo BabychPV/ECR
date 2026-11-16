@@ -53,6 +53,8 @@ public sealed partial class ReportViewGeneratorTests(SqlServerFixture sql)
                 (codes[0], "nvarchar"), (codes[1], "decimal"), (codes[2], "decimal"),
                 // RS (копії аркушів): службові колонки в кінці списку.
                 ("_SheetCopyOrdinal", "smallint"), ("_SheetDisplayName", "nvarchar"),
+                // B138: режим погодження версії — останньою колонкою.
+                ("_WorkflowMode", "tinyint"),
             ],
             await ColumnsAsync(view));
 

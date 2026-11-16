@@ -61,7 +61,7 @@ public sealed partial class ReportViewStableTests(SqlServerFixture sql)
         // Крок 1: лише v1 - стабільна вʼюха = v1; службові колонки + _TemplateVersion + A, B.
         Assert.Equal(
             ["_ProjectId", "_ProjectCode", "_DocumentId", "_DocumentKey", "_PeriodKey", "_Status", "_RowId", "_RowKey", "_RowOrdinal",
-             "_TemplateVersion", "A", "B", "_SheetCopyOrdinal", "_SheetDisplayName", "_IsArchived"],
+             "_TemplateVersion", "A", "B", "_SheetCopyOrdinal", "_SheetDisplayName", "_IsArchived", "_WorkflowMode"],
             await ColumnNamesAsync(stable));
         var v1Definition = await DefinitionAsync(v1View);
 
@@ -223,7 +223,7 @@ public sealed partial class ReportViewStableTests(SqlServerFixture sql)
 
         await ExecStableAsync(built.VersionId);
         var stable = StableName(tpl, "S", "T");
-        Assert.Equal(300, (await ColumnNamesAsync(stable)).Count - 13);   // 13 службових: R-1 додала _IsArchived
+        Assert.Equal(300, (await ColumnNamesAsync(stable)).Count - 14);   // 14 службових: R-1 додала _IsArchived, B138 - _WorkflowMode
         var row = (await RowsAsync(stable, p.ProjectId, "C1", "C2", "C300"))[0];
         Assert.Equal((1m, (decimal?)null, 300m), ((decimal)row[0]!, (decimal?)row[1], (decimal)row[2]!));
 
@@ -469,7 +469,7 @@ public sealed partial class ReportViewStableTests(SqlServerFixture sql)
                 (int)(await ScalarRowsAsync("SELECT COUNT(*) FROM sys.procedures WHERE name = N'usp_GenerateStableViews' AND schema_id = SCHEMA_ID(N'rpt')"))[0][0]!);
 
             await GenerateAsync(v1.VersionId);
-            Assert.Equal(["_ProjectId", "_ProjectCode", "_DocumentId", "_DocumentKey", "_PeriodKey", "_Status", "_RowId", "_RowKey", "_RowOrdinal", "_TemplateVersion", "A", "_SheetCopyOrdinal", "_SheetDisplayName", "_IsArchived"],
+            Assert.Equal(["_ProjectId", "_ProjectCode", "_DocumentId", "_DocumentKey", "_PeriodKey", "_Status", "_RowId", "_RowKey", "_RowOrdinal", "_TemplateVersion", "A", "_SheetCopyOrdinal", "_SheetDisplayName", "_IsArchived", "_WorkflowMode"],
                 await ColumnNamesAsync(stable));
             await GenerateAsync(v1.VersionId);   // idempotent re-run
             Assert.Equal(14, (await ColumnNamesAsync(stable)).Count);
