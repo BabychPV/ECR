@@ -32,6 +32,9 @@ namespace Ecr.Infrastructure.Tests.Reporting;
 /// (14) блок засіву rpt.ViewScopeSig вимкнено — червоний «Оновлена_база…»; (15) DENSE_RANK замість стабільного номера —
 /// червоні «Номери_скоупів_стабільні…», «Пропущена_група_50422…», «Оновлена_база…»; (16) <c>fam</c> стабільного генератора без
 /// місяця власника — червоний «Маршрутизація_значення_власника…»; (17) заголовок без заміни CR/LF — червоний «Перенос_рядка…».
+/// Гілки засіву (правило 401; 4 тести «Засів_…» і «Оновлена_база…»): (18) без резервування заглушками — 4 червоні; (19) без
+/// rpt.ViewSlot у найбільшому відомому номері — «Засів_резервує_номер…»; (20) без <c>HAVING MIN = MAX</c> — «Засів_не_віддає…»;
+/// (21) без <c>Rn = 1</c> — «Засів_зводить…» (порушення PK_ViewScopeSig).
 /// </remarks>
 [Trait(TestCategories.Category, TestCategories.Integration)]
 [Trait("Requirement", "RPT-STABLE")]
@@ -536,6 +539,106 @@ public sealed partial class ReportViewStableRenameScopeTests(ITestOutputHelper o
         Assert.Null(await ScalarStringAsync(stable, pq.ProjectId, 209901, "Z", "R1"));
         Assert.Equal("pr_b", await ScalarStringAsync(stable, pr.ProjectId, 209901, "Z", "R1"));
         Assert.Equal("pr_c", await ScalarStringAsync(stable, pr.ProjectId, 209901, "W", "R1"));
+    }
+
+    /// <summary>
+    /// D1, засів: номер, відомий лише мапі слотів rpt.ViewSlot (рядка rpt.ViewProjectScope вже немає), теж резервується - новий
+    /// набір пар отримує номер ПІСЛЯ нього.
+    /// </summary>
+    [Fact]
+    public async Task Засів_резервує_номер_відомий_лише_мапі_слотів()
+    {
+        var (templateId, code) = await NewTemplateAsync();
+        var v1 = await AddVersionAsync(templateId, "1", ("T", ["A", "B", "C"]));
+        var v2 = await AddVersionAsync(templateId, "2", ("T", ["A", "Z", "W"]));
+        var t1 = v1.Tables["T"];
+        var t2 = v2.Tables["T"];
+        var pb = await NewProjectAsync(v1.VersionId, 209901);
+        var pq = await NewProjectAsync(v1.VersionId, 209901);
+        await RenameAsync(t1.Cols["B"], t2.Cols["Z"], legacy: false, pb.ProjectId);
+        await GenerateAsync(v2.VersionId, routing: false);
+        var stable = Sanitise($"v_{code}_S_T");
+
+        await ExecAsync($"""
+            DELETE FROM rpt.ViewScopeSig WHERE TemplateId = {templateId};
+            INSERT INTO rpt.ViewSlot (ViewName, ColumnDefId, Slot, Mo, Scope) VALUES (N'{stable}', {t1.Cols["B"]}, 99, NULL, 7);
+            """);
+        await RenameAsync(t1.Cols["C"], t2.Cols["W"], legacy: false, pq.ProjectId);   // PQ: новий набір {C -> W}
+        await GenerateAsync(v2.VersionId, routing: false);
+
+        var scopes = (await ScalarRowsAsync($"SELECT ProjectId, Scope FROM rpt.ViewProjectScope WHERE TemplateId = {templateId}"))
+            .ToDictionary(r => r.ProjectId, r => r.Scope);
+        Assert.Equal(new Dictionary<int, int> { [pb.ProjectId] = 1, [pq.ProjectId] = 8 }, scopes);
+        Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8], (await ScalarRowsAsync($"SELECT 0, Scope FROM rpt.ViewScopeSig WHERE TemplateId = {templateId} ORDER BY Scope"))
+            .Select(r => r.Scope).ToList());
+    }
+
+    /// <summary>
+    /// D1, засів: старий номер, під яким зібрані проєкти з РІЗНИМИ наборами пар, не отримує жодного з підписів (резервується
+    /// заглушкою) - обидва набори отримують нові номери, і кожен проєкт бачить лише свій аліас.
+    /// </summary>
+    [Fact]
+    public async Task Засів_не_віддає_номер_зі_змішаними_наборами_пар()
+    {
+        var (templateId, code) = await NewTemplateAsync();
+        var v1 = await AddVersionAsync(templateId, "1", ("T", ["A", "B", "C"]));
+        var v2 = await AddVersionAsync(templateId, "2", ("T", ["A", "Z", "W"]));
+        var t1 = v1.Tables["T"];
+        var t2 = v2.Tables["T"];
+        var pb = await NewProjectAsync(v1.VersionId, 209901);
+        var pq = await NewProjectAsync(v1.VersionId, 209901);
+        foreach (var (project, tag) in new[] { (pb, "pb"), (pq, "pq") })
+        {
+            await SeedAsync(project, 209901, t1, ("A", "a"), ("B", $"{tag}_b"), ("C", $"{tag}_c"));
+        }
+
+        await RenameAsync(t1.Cols["B"], t2.Cols["Z"], legacy: false, pb.ProjectId);
+        await RenameAsync(t1.Cols["C"], t2.Cols["W"], legacy: false, pq.ProjectId);
+        await GenerateAsync(v2.VersionId, routing: false);
+
+        await ExecAsync($"""
+            DELETE FROM rpt.ViewScopeSig WHERE TemplateId = {templateId};
+            UPDATE rpt.ViewProjectScope SET Scope = 1 WHERE TemplateId = {templateId};
+            """);
+        await GenerateAsync(v2.VersionId, routing: false);
+
+        var scopes = (await ScalarRowsAsync($"SELECT ProjectId, Scope FROM rpt.ViewProjectScope WHERE TemplateId = {templateId}"))
+            .ToDictionary(r => r.ProjectId, r => r.Scope);
+        Assert.Equal(new Dictionary<int, int> { [pb.ProjectId] = 2, [pq.ProjectId] = 3 }, scopes);
+        var stable = Sanitise($"v_{code}_S_T");
+        Assert.Equal("pb_b", await ScalarStringAsync(stable, pb.ProjectId, 209901, "Z", "R1"));
+        Assert.Null(await ScalarStringAsync(stable, pb.ProjectId, 209901, "W", "R1"));
+        Assert.Equal("pq_c", await ScalarStringAsync(stable, pq.ProjectId, 209901, "W", "R1"));
+        Assert.Null(await ScalarStringAsync(stable, pq.ProjectId, 209901, "Z", "R1"));
+    }
+
+    /// <summary>
+    /// D1, засів: два старі номери з ОДНИМ набором пар - підпис отримує менший номер, більший резервується; обидва проєкти
+    /// сходяться в один скоуп, перегенерація не падає на ключі (шаблон, підпис).
+    /// </summary>
+    [Fact]
+    public async Task Засів_зводить_два_номери_одного_набору_пар_до_меншого()
+    {
+        var (templateId, _) = await NewTemplateAsync();
+        var v1 = await AddVersionAsync(templateId, "1", ("T", ["A", "B"]));
+        var v2 = await AddVersionAsync(templateId, "2", ("T", ["A", "Z"]));
+        var pb = await NewProjectAsync(v1.VersionId, 209901);
+        var pq = await NewProjectAsync(v1.VersionId, 209901);
+        await RenameAsync(v1.Tables["T"].Cols["B"], v2.Tables["T"].Cols["Z"], legacy: false, pb.ProjectId);
+        await BindAsync(v1.Tables["T"].Cols["B"], v2.Tables["T"].Cols["Z"], pq.ProjectId);
+        await GenerateAsync(v2.VersionId, routing: false);
+
+        await ExecAsync($"""
+            DELETE FROM rpt.ViewScopeSig WHERE TemplateId = {templateId};
+            UPDATE rpt.ViewProjectScope SET Scope = 2 WHERE TemplateId = {templateId} AND ProjectId = {pq.ProjectId};
+            """);
+        await GenerateAsync(v2.VersionId, routing: false);
+
+        var scopes = (await ScalarRowsAsync($"SELECT ProjectId, Scope FROM rpt.ViewProjectScope WHERE TemplateId = {templateId}"))
+            .ToDictionary(r => r.ProjectId, r => r.Scope);
+        Assert.Equal(new Dictionary<int, int> { [pb.ProjectId] = 1, [pq.ProjectId] = 1 }, scopes);
+        Assert.Equal([1, 2], (await ScalarRowsAsync($"SELECT 0, Scope FROM rpt.ViewScopeSig WHERE TemplateId = {templateId} ORDER BY Scope"))
+            .Select(r => r.Scope).ToList());
     }
 
     /// <summary>
