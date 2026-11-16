@@ -501,6 +501,56 @@ public sealed class RecalculationJobSheetScopeResultsTests(SqlServerFixture sql)
         Assert.Equal("-,-", await MarksAsync(arranged));
     }
 
+    /// <summary>
+    /// ✎ B138 (B75 lane 1b): версія без подання й затвердження (<c>WorkflowMode.None</c>) — старий <c>Approved</c>
+    /// (лишився після переносу версії) перерахунок НЕ пропускає й у журнал «пропущено» не пише. Контроль у тому ж
+    /// тесті: до перемикання режиму той самий аркуш пропускається.
+    /// </summary>
+    /// <remarks>⛔ ДОКАЗ (локально): прибрати <c>ExceptWorkflowNone</c> у <c>SkippedScopesAsync</c>/<c>SubmittedSheetsAsync</c>
+    /// — B лишається 2001; прибрати в <c>SheetLogAsync</c> — другий запис «пропущено».</remarks>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "B138")]
+    public async Task Версія_без_погодження_затверджений_аркуш_перераховується_без_запису_пропущено(bool byHuman)
+    {
+        var arranged = await ArrangeAsync(submitSecondSheet: false);
+        await RunJobAsync(arranged, SheetRequest(arranged, sheetDefId: null), label: 1_000m);
+        await SubmitSecondSheetAsync(arranged);
+        var request = byHuman
+            ? SheetRequest(arranged, sheetDefId: null)
+            : SheetRequest(arranged, sheetDefId: null) with { TriggeredByUserId = null };
+
+        // Контроль: режим SubmitApprove — затверджений B пропущено.
+        await using (var auditDb = arranged.Builder.CreateContext())
+        {
+            await RunJobAsync(arranged, request, label: 2_000m, audit: new AuditWriter(auditDb));
+        }
+
+        Assert.Equal(["A|2001", "B|1001"], await ShapeAsync(arranged));
+        Assert.Equal(1, await SheetLogCountAsync(arranged, arranged.SecondSheetId, RecalculationSkips.AuditSkippedApproved));
+
+        await SetWorkflowNoneAsync(arranged);
+
+        await using (var auditDb = arranged.Builder.CreateContext())
+        {
+            await RunJobAsync(arranged, request, label: 3_000m, audit: new AuditWriter(auditDb));
+        }
+
+        Assert.Equal(["A|3001", "B|3001"], await ShapeAsync(arranged));
+        Assert.Equal(1, await SheetLogCountAsync(arranged, arranged.SecondSheetId, RecalculationSkips.AuditSkippedApproved));
+        Assert.Equal(0, await SheetLogCountAsync(arranged, arranged.SecondSheetId, RecalculationSkips.AuditRecalculatedAfterSubmission));
+    }
+
+    private static async Task SetWorkflowNoneAsync(Arranged arranged)
+    {
+        await using var db = arranged.Builder.CreateContext();
+        await db.Database.ExecuteSqlAsync(
+            $"UPDATE cfg.TemplateVersion SET WorkflowMode = 1 WHERE Id = {arranged.Document.TemplateVersionId}");
+    }
+
     private static async Task SubmitOnlyAsync(Arranged arranged, int sheetDefId, DateTime at)
     {
         await using var db = arranged.Builder.CreateContext();

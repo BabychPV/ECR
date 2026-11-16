@@ -232,6 +232,47 @@ public sealed class ReportSnapshotSheetStatusTests(SqlServerFixture sql)
         Assert.Equal((int)SnapshotStatus.Submitted, shown.Status);
     }
 
+    /// <summary>
+    /// ✎ B138 (B75 lane 1b): аркуші версії без подання й затвердження (<c>WorkflowMode.None</c>) — фінальні: зріз над
+    /// ними <c>Approved</c>, хоч би який стан лишився від старої версії (або жодного). Контроль у тому ж тесті: до
+    /// перемикання режиму той самий набір дає звичайний статус.
+    /// </summary>
+    /// <remarks>⛔ ДОКАЗ (локально): прибрати гілку <c>WorkflowMode.None</c> у <c>StatusOfDataAsync</c> — усі рядки червоні.</remarks>
+    [Theory]
+    [InlineData("none", nameof(SnapshotStatus.Draft))]
+    [InlineData("Draft,Rejected", nameof(SnapshotStatus.Draft))]
+    [InlineData("Submitted,none", nameof(SnapshotStatus.Draft))]
+    // ⚠ Набір «усе подано» тут не перевіряється: контрольний крок зробив би зріз Submitted, а поданий зріз
+    // заморожений (ФВ-9.17) і далі не перераховується - це інше правило, не B138.
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "B138")]
+    public async Task Версія_без_погодження_аркуші_фінальні_зріз_Approved(string sheetStates, string beforeName)
+    {
+        var scenario = await ArrangeAsync(sheetStates.Split(',')).ConfigureAwait(true);
+        var snapshotId = await AddSnapshotAsync(scenario, scenario.Document.PeriodKey.Value).ConfigureAwait(true);
+
+        await using (var before = scenario.Chain.CreateContext())
+        {
+            Assert.Equal(
+                Enum.Parse<SnapshotStatus>(beforeName),
+                await Builder(before).RefreshStatusAsync(snapshotId, CancellationToken.None).ConfigureAwait(true));
+        }
+
+        await using (var db = scenario.Chain.CreateContext())
+        {
+            await db.Database.ExecuteSqlAsync(
+                $"UPDATE cfg.TemplateVersion SET WorkflowMode = 1 WHERE Id = {scenario.Document.TemplateVersionId}")
+                .ConfigureAwait(true);
+        }
+
+        await using var after = scenario.Chain.CreateContext();
+        Assert.Equal(
+            SnapshotStatus.Approved,
+            await Builder(after).RefreshStatusAsync(snapshotId, CancellationToken.None).ConfigureAwait(true));
+        Assert.Equal(SnapshotStatus.Approved, await StoredStatusAsync(scenario, snapshotId).ConfigureAwait(true));
+    }
+
     // ───────────────────────────── допоміжне ─────────────────────────────
 
     private sealed record Scenario(

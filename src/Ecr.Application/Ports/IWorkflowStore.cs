@@ -23,7 +23,10 @@ public interface IWorkflowStore
     public Task<ApprovalState> GetOrCreateAsync(
         long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct);
 
-    /// <summary>Стани всіх аркушів документа за період.</summary>
+    /// <summary>
+    /// Стани всіх аркушів документа за період. ✎ B138: версія документа за період без подання й затвердження
+    /// (<c>WorkflowMode.None</c>) — порожньо: старі стани (перенос версії) не діють.
+    /// </summary>
     public Task<IReadOnlyList<ApprovalState>> GetSheetsAsync(
         long documentId, PeriodKey periodKey, CancellationToken ct);
 

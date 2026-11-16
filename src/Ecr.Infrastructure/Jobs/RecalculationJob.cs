@@ -874,8 +874,10 @@ public sealed partial class RecalculationJob(
         {
             // ✎ F13 p218 #788: по СКОУПУ (аркуш × копія, RS) — подана копія перераховується з позначкою й записом журналу,
             // затверджена — пропускається із записом, так само як оригінал (правило людини 07.11).
+            // ✎ B138: версія без погодження — нічого не «пропущено» й не «перераховано після подання».
             var rows = await db.ApprovalStates
                 .AsNoTracking()
+                .ExceptWorkflowNone(db)
                 .Where(a => a.DocumentId == documentId && periods.Contains(a.PeriodKey)
                             && (request.SheetDefId == null || a.SheetDefId == request.SheetDefId)
                             && (a.Status == Domain.Enums.DocumentStatus.Approved
@@ -1405,6 +1407,7 @@ public sealed partial class RecalculationJob(
                     : await db.ApprovalStates
                         .AsNoTracking()
                         .OriginalOnly()
+                        .ExceptWorkflowNone(db) // ✎ B138: як SheetEditGate - версія без погодження = Draft
                         .Where(a => a.DocumentId == guard.DocumentId && a.SheetDefId == sheetDefId && a.PeriodKey == period)
                         .Select(a => (Domain.Enums.DocumentStatus?)a.Status)
                         .FirstOrDefaultAsync(ct)
@@ -1708,8 +1711,10 @@ public sealed partial class RecalculationJob(
         var writeSubmitted = WritesSubmitted(request);
         var fromKey = request.FromKey;
         var toKey = request.ToKey;
+        // ✎ B138: версія без погодження нічого не пропускає (старі стани після переносу версії не діють).
         var rows = await db.ApprovalStates
             .AsNoTracking()
+            .ExceptWorkflowNone(db)
             .Where(s => s.DocumentId == request.DocumentId
                         && (request.PeriodKey == null || s.PeriodKey == request.PeriodKey)
                         && s.PeriodKey >= fromKey && s.PeriodKey <= toKey
@@ -1738,6 +1743,7 @@ public sealed partial class RecalculationJob(
         var rows = await db.ApprovalStates
             .AsNoTracking()
             .OriginalOnly()
+            .ExceptWorkflowNone(db) // ✎ B138: версія без погодження нічого не пропускає
             .Where(s => s.DocumentId == request.DocumentId
                         && (periodKey == null || s.PeriodKey == periodKey)
                         && ((s.Status == Domain.Enums.DocumentStatus.Submitted && !writeSubmitted)

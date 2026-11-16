@@ -1187,7 +1187,16 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
             from period in db.Periods.AsNoTracking()
             where period.ProjectId == projectId
                   && (key == null || period.PeriodKeyValue == key)
-            select db.ApprovalStates
+            // ✎ B138 (дизайн B75): аркуш версії без подання й затвердження (WorkflowMode.None, за період - те саме
+            // правило версії, що SheetEditGate) - ФІНАЛЬНИЙ: значення йдуть у звітність одразу після збереження, тож
+            // зріз над такими аркушами не застрягає в Draft. Старий стан (перенос версії) не враховується.
+            select db.TemplateVersions.Any(v =>
+                       v.WorkflowMode == WorkflowMode.None
+                       && v.Id == (document.TemplateId == null
+                           ? EcrDbContext.VersionOf(projectId, period.PeriodKeyValue)
+                           : EcrDbContext.TemplateVersionOf(projectId, document.TemplateId.Value, period.PeriodKeyValue)))
+                ? DocumentStatus.Approved
+                : db.ApprovalStates
                        .Where(a => a.DocumentId == document.Id
                                    && a.SheetDefId == sheet.SheetDefId
                                    && a.PeriodKey == period.PeriodKeyValue
