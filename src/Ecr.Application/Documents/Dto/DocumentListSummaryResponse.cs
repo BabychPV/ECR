@@ -28,13 +28,20 @@ namespace Ecr.Application.Documents.Dto;
 /// ✎ UAT-recalc-ux: частина видимих аркушів подана чи затверджена, частина — ні (чернетка або без стану), і жодного
 /// відхиленого.
 /// </param>
+/// <param name="NoApproval">
+/// ✎ B147 (B75): документи «без погодження» — версія шаблону за період без подання й затвердження
+/// (<c>WorkflowMode.None</c>). Окремий стан: у п'ять чисел стану вони НЕ входять (старі стани аркушів після переносу
+/// версії не діють), у <paramref name="SheetsApproved"/>/<paramref name="SheetsTotal"/> теж. За рік — документи, у яких
+/// УСІ розпочаті періоди року без погодження; періоди без погодження у «змішаного» документа просто не рахуються.
+/// Те саме число дає фільтр <c>state=NoApproval</c>.
+/// </param>
 /// <remarks>
 /// ⚠ Стан документа — за аркушами складу, які читач бачить (`02-contracts.md`, «Стан погодження документа»):
 /// <c>Rejected</c> (хоч один повернуто) → <c>Draft</c> (жодного поданого) → <c>PartlySubmitted</c> →
-/// <c>Submitted</c> → <c>Approved</c>. П'ять чисел у сумі дають кількість видимих документів;
-/// <paramref name="WithIssues"/> — окремий вимір і з ними не складається.
+/// <c>Submitted</c> → <c>Approved</c>. П'ять чисел і <paramref name="NoApproval"/> у сумі дають кількість видимих
+/// документів; <paramref name="WithIssues"/> — окремий вимір і з ними не складається.
 /// </remarks>
 public sealed record DocumentListSummaryResponse(
     int Draft, int Submitted, int Approved, int Rejected, int WithIssues,
     int SheetsApproved = 0, int SheetsTotal = 0, int StaleResultsCount = 0, int StaleResultsMineCount = 0,
-    int PartlySubmitted = 0);
+    int PartlySubmitted = 0, int NoApproval = 0);

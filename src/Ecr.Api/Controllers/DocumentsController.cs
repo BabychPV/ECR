@@ -64,6 +64,10 @@ public sealed class DocumentsController(
     /// а не зберігається полем (<c>D-93</c>): скалярний статус був би другим
     /// джерелом істини і рано чи пізно показав би <c>Approved</c> на документі
     /// з половиною аркушів у <c>Draft</c>.
+    /// ✎ B147 (B75): фільтр <c>state</c> приймає ще <c>NoApproval</c> — документи, чия версія шаблону за період без
+    /// подання й затвердження (за рік — усі розпочаті періоди року такі). Такий документ у стани
+    /// <c>Draft|PartlySubmitted|Submitted|Approved|Rejected</c> не входить; рядок несе <c>workflowMode = None</c>
+    /// (з <c>periodKey</c>), клітинка року — <c>periodStates[].state = NoApproval</c>.
     /// </remarks>
     [HttpGet]
     [ProducesResponseType<Ecr.Application.Common.PagedResult<Ecr.Application.Ports.DocumentSummary>>(StatusCodes.Status200OK)]
@@ -151,6 +155,8 @@ public sealed class DocumentsController(
     /// Потрібен місяць (<c>periodKey</c>) або ✎ 2026-11-07 (Period clarity) рік (<c>year</c> без <c>periodKey</c>) — за
     /// тим самим правилом року, що й фільтр стану переліку; без обох стан документа не визначений (<c>D-93</c>), 422.
     /// За рік <c>staleResultsCount</c>/<c>staleResultsMineCount</c> — 0 (застарілість належить місяцю).
+    /// ✎ B147 (B75): документи версії шаблону без подання й затвердження — окреме число <c>noApproval</c>, поза
+    /// п'ятьма числами стану (те саме дає фільтр <c>state=NoApproval</c> переліку).
     /// </remarks>
     [HttpGet("summary")]
     [ProducesResponseType<Ecr.Application.Documents.Dto.DocumentListSummaryResponse>(StatusCodes.Status200OK)]

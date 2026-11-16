@@ -488,8 +488,9 @@ public sealed partial class DocumentStaleResultsStoreTests(SqlServerFixture sql)
         // Перший виклик: агрегат + відбиток (прогони + довідники, D-430) + дві карти (усі / мої) + два підрахунки
         // видимих = 7 запитів, плюс по запиту набору актуальних прогонів на кожну з двох карт (AN-155b) = 9; другий - агрегат + прогонова частина відбитка + два підрахунки (4): карти періоду й
         // довідникова частина з кешу, журнал правок не чіпається.
-        Assert.Equal(9, afterFirst);
-        Assert.Equal(4, afterSecond - afterFirst);
+        // ✎ B147: у кожному виклику ще один запит ключів «без погодження» періоду (`WorkflowNoneScope`): 10 і 5.
+        Assert.Equal(10, afterFirst);
+        Assert.Equal(5, afterSecond - afterFirst);
     }
 
     [Fact]
@@ -594,11 +595,12 @@ public sealed partial class DocumentStaleResultsStoreTests(SqlServerFixture sql)
 
         // Інший набір схованого аркуша без звуження проєкту: карта періоду спільна (вона без читача), а ЧИСЛО
         // рахується щоразу по видимих документах - агрегат + відбиток + 2 підрахунки, журнал правок не чіпається.
+        // ✎ B147: плюс один запит ключів «без погодження» періоду (`WorkflowNoneScope`) перед агрегатом — разом 5.
         var otherHidden = new SummaryRestrictions([(s.Chain.ProjectId, "OTHER")], []);
         var before = counter.Tally.Snapshot().Total;
         var partial = await SummaryAsync(store, s, otherHidden, Me);
         Assert.Equal(2, partial.StaleResultsCount);
-        Assert.Equal(4, counter.Tally.Snapshot().Total - before);
+        Assert.Equal(5, counter.Tally.Snapshot().Total - before);
 
         // Кожен читає своє й з теплого кешу.
         Assert.Equal(0, (await SummaryAsync(store, s, narrowed, Me)).StaleResultsCount);
@@ -697,8 +699,8 @@ public sealed partial class DocumentStaleResultsStoreTests(SqlServerFixture sql)
         var queriesBefore = counter.Tally.Snapshot().Total;
         Assert.Equal(2, (await SummaryAsync(store, s, null, Me)).StaleResultsCount);
 
-        // Агрегат + відбиток + 2 підрахунки (4): карти з кешу (промах дав би 6).
-        Assert.Equal(4, counter.Tally.Snapshot().Total - queriesBefore);
+        // Ключі «без погодження» (✎ B147) + агрегат + відбиток + 2 підрахунки (5): карти з кешу (промах дав би 7).
+        Assert.Equal(5, counter.Tally.Snapshot().Total - queriesBefore);
     }
 
     [Fact]
@@ -825,8 +827,8 @@ public sealed partial class DocumentStaleResultsStoreTests(SqlServerFixture sql)
         var queriesBefore = counter.Tally.Snapshot().Total;
         Assert.Equal(2, (await SummaryAsync(store, s, null, Me)).StaleResultsCount);
 
-        // Агрегат + відбиток + 2 підрахунки (4): карти з кешу.
-        Assert.Equal(4, counter.Tally.Snapshot().Total - queriesBefore);
+        // Ключі «без погодження» (✎ B147) + агрегат + відбиток + 2 підрахунки (5): карти з кешу.
+        Assert.Equal(5, counter.Tally.Snapshot().Total - queriesBefore);
 
         // Глобальний підйом (невідомий період) скидає і цей.
         epoch.Invalidate(db);

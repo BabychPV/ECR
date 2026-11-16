@@ -136,9 +136,12 @@ namespace Ecr.Application.Ports;
 /// <c>YearWithMonthColumns</c> клієнт не показує вибір місяця: документ має одне подання на рік.
 /// </param>
 /// <param name="WorkflowMode">
-/// ✎ B75: режим погодження тієї самої версії (<c>SubmitApprove</c> | <c>None</c>) — рядком, як
-/// <paramref name="TemplateLayout"/>; лише в картці (<c>GET /documents/{id}</c>), у переліку — <c>null</c>. За
-/// <c>None</c> клієнт не показує подання, затвердження й відкликання («без погодження»).
+/// ✎ B75: режим погодження версії шаблону документа (<c>SubmitApprove</c> | <c>None</c>) — рядком, як
+/// <paramref name="TemplateLayout"/>. За <c>None</c> клієнт не показує подання, затвердження й відкликання, а стан
+/// документа — «без погодження». ✎ B147: з періодом — режим версії документа ЗА ЦЕЙ ПЕРІОД (власний шаблон документа
+/// першим), і заповнюють його і картка, і перелік (<c>GET /documents?periodKey=</c>); аркуші такого документа віддаються
+/// <c>Draft</c> — старі стани після переносу версії не діють. Без періоду: картка — режим типової версії проєкту,
+/// перелік — <c>null</c> (за рік режим несе кожна клітинка <paramref name="PeriodStates"/>: <c>NoApproval</c>).
 /// </param>
 /// <param name="CanLockRows">
 /// ✎ B143 (D-538): чи може поточний користувач блокувати рядки документа за запитаний період — рішення СЕРВЕРА, те саме, що
@@ -192,7 +195,10 @@ public sealed record DocumentReopenedPeriod(int PeriodKey, DateTime OpenUntil);
 
 /// <summary>Стан погодження документа за один період (смуга року, ✎ 2026-11-07 Period clarity).</summary>
 /// <param name="PeriodKey">Період; `Рік*100 + Номер`.</param>
-/// <param name="State">`Rejected` / `Draft` / `PartlySubmitted` / `Submitted` / `Approved`.</param>
+/// <param name="State">
+/// `Rejected` / `Draft` / `PartlySubmitted` / `Submitted` / `Approved`; ✎ B147 — `NoApproval`: версія шаблону документа
+/// за цей період без подання й затвердження (стани аркушів за нього не враховуються).
+/// </param>
 public sealed record DocumentPeriodState(int PeriodKey, string State);
 
 /// <summary>
@@ -314,6 +320,12 @@ public sealed record DocumentSheetState(
 /// Діє ЗАПИТОМ до <c>Take</c>, поруч із межею видимості (підзапит у тому самому запиті сторінки, без додаткових звернень).
 /// <c>null</c> — без фільтра.
 /// </param>
+/// <param name="NoApproval">
+/// ✎ B147 (B75): лише документи «без погодження» — версія шаблону за період без подання й затвердження
+/// (<c>WorkflowMode.None</c>; за рік <paramref name="Year"/> без періоду — усі розпочаті періоди року такі). Разом із
+/// <paramref name="State"/> і <paramref name="PartlySubmitted"/> не задається. Такий документ у жоден із п'яти станів
+/// (<paramref name="State"/>, <paramref name="PartlySubmitted"/>) не потрапляє — те саме правило, що в смузі лічильників.
+/// </param>
 public readonly record struct DocumentListFilter(
     DocumentStatus? State, int? MineUserId, bool? HasLateEdits = null,
     IReadOnlyCollection<(int ProjectId, int Id)>? HiddenSheetDefIds = null,
@@ -332,7 +344,8 @@ public readonly record struct DocumentListFilter(
     int? ReaderUserId = null,
     bool? HasReopenedMonths = null,
     DateTime? AsOfUtc = null,
-    string? TemplateCode = null);
+    string? TemplateCode = null,
+    bool NoApproval = false);
 
 /// <summary>Напрямок сортування переліку документів за версією шаблону.</summary>
 public enum DocumentVersionSort

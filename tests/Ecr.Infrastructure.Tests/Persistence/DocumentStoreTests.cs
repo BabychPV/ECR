@@ -77,7 +77,9 @@ public sealed class DocumentStoreTests(SqlServerFixture sql)
         // а не по запиту на кожен документ окремо: число не залежить від розміру
         // сторінки. П'ятий запит - лише для сторінки З ПЕРІОДОМ (без періоду
         // застарілість не визначена, запиту немає).
-        Assert.Equal(5, executed.Count);
+        // ✎ B147: шостий — ключі «без погодження» періоду (`WorkflowNoneScope`), теж ОДИН на сторінку й теж лише з
+        // періодом чи роком; число від розміру сторінки й від даних не залежить.
+        Assert.Equal(6, executed.Count);
     }
 
     [Fact]
@@ -157,8 +159,8 @@ public sealed class DocumentStoreTests(SqlServerFixture sql)
 
         // ⛔ Q-167: назви приїхали тим самим пакетним запитом станів — запитів
         // на сторінку П'ЯТЬ (з застарілістю результатів, `resultsStale`), як і без назв, а не +1 на
-        // документ чи на сторінку.
-        Assert.Equal(5, executed.Count);
+        // документ чи на сторінку. ✎ B147: шостий — ключі «без погодження» періоду, один на сторінку.
+        Assert.Equal(6, executed.Count);
 
         // Картка документа (`GET /documents/{id}`) віддає те саме поле тим самим запитом.
         var card = await store.FindAsync(doc1.DocumentId, new PeriodKeyFilter(doc1.PeriodKey.Value), CancellationToken.None);

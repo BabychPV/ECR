@@ -2912,6 +2912,10 @@ export interface paths {
          *     а не зберігається полем (`D-93`): скалярний статус був би другим
          *     джерелом істини і рано чи пізно показав би `Approved` на документі
          *     з половиною аркушів у `Draft`.
+         *     ✎ B147 (B75): фільтр `state` приймає ще `NoApproval` — документи, чия версія шаблону за період без
+         *     подання й затвердження (за рік — усі розпочаті періоди року такі). Такий документ у стани
+         *     `Draft|PartlySubmitted|Submitted|Approved|Rejected` не входить; рядок несе `workflowMode = None`
+         *     (з `periodKey`), клітинка року — `periodStates[].state = NoApproval`.
          */
         get: {
             parameters: {
@@ -3050,6 +3054,8 @@ export interface paths {
          *     Потрібен місяць (`periodKey`) або ✎ 2026-11-07 (Period clarity) рік (`year` без `periodKey`) — за
          *     тим самим правилом року, що й фільтр стану переліку; без обох стан документа не визначений (`D-93`), 422.
          *     За рік `staleResultsCount`/`staleResultsMineCount` — 0 (застарілість належить місяцю).
+         *     ✎ B147 (B75): документи версії шаблону без подання й затвердження — окреме число `noApproval`, поза
+         *     п'ятьма числами стану (те саме дає фільтр `state=NoApproval` переліку).
          */
         get: {
             parameters: {
@@ -32125,6 +32131,16 @@ export interface components {
             draft: number;
             /**
              * Format: int32
+             * @description ✎ B147 (B75): документи «без погодження» — версія шаблону за період без подання й затвердження
+             *     (`WorkflowMode.None`). Окремий стан: у п'ять чисел стану вони НЕ входять (старі стани аркушів після переносу
+             *     версії не діють), у SheetsApproved/SheetsTotal теж. За рік — документи, у яких
+             *     УСІ розпочаті періоди року без погодження; періоди без погодження у «змішаного» документа просто не рахуються.
+             *     Те саме число дає фільтр `state=NoApproval`.
+             * @default 0
+             */
+            noApproval: number;
+            /**
+             * Format: int32
              * @description ✎ UAT-recalc-ux: частина видимих аркушів подана чи затверджена, частина — ні (чернетка або без стану), і жодного
              *     відхиленого.
              * @default 0
@@ -32280,7 +32296,8 @@ export interface components {
              * @description Період; `Рік*100 + Номер`.
              */
             periodKey: number;
-            /** @description `Rejected` / `Draft` / `PartlySubmitted` / `Submitted` / `Approved`. */
+            /** @description `Rejected` / `Draft` / `PartlySubmitted` / `Submitted` / `Approved`; ✎ B147 — `NoApproval`: версія шаблону документа
+             *     за цей період без подання й затвердження (стани аркушів за нього не враховуються). */
             state: string;
         };
         /** @description Permit history of a document and how many cells still need a split. */
@@ -32479,9 +32496,12 @@ export interface components {
              * @description Попередження звідти ж; `null` — за тим самим правилом.
              */
             warningCount?: null | number;
-            /** @description ✎ B75: режим погодження тієї самої версії (`SubmitApprove` | `None`) — рядком, як
-             *     TemplateLayout; лише в картці (`GET /documents/{id}`), у переліку — `null`. За
-             *     `None` клієнт не показує подання, затвердження й відкликання («без погодження»). */
+            /** @description ✎ B75: режим погодження версії шаблону документа (`SubmitApprove` | `None`) — рядком, як
+             *     TemplateLayout. За `None` клієнт не показує подання, затвердження й відкликання, а стан
+             *     документа — «без погодження». ✎ B147: з періодом — режим версії документа ЗА ЦЕЙ ПЕРІОД (власний шаблон документа
+             *     першим), і заповнюють його і картка, і перелік (`GET /documents?periodKey=`); аркуші такого документа віддаються
+             *     `Draft` — старі стани після переносу версії не діють. Без періоду: картка — режим типової версії проєкту,
+             *     перелік — `null` (за рік режим несе кожна клітинка PeriodStates: `NoApproval`). */
             workflowMode?: null | string;
         };
         /** @description Екземпляр таблиці разом з аркушем, якому він належить. */

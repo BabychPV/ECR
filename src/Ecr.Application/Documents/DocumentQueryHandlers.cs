@@ -18,7 +18,10 @@ public sealed class ListDocumentsHandler(
     /// <summary>Повертає сторінку документів, видимих користувачу.</summary>
     /// <param name="projectId">Фільтр за проєктом; <c>null</c> — усі.</param>
     /// <param name="periodKey">Період для зведеного стану; <c>null</c> — без стану.</param>
-    /// <param name="state">Зведений стан (<c>Draft|Submitted|Approved|Rejected</c>); порожньо — будь-який.</param>
+    /// <param name="state">
+    /// Зведений стан (<c>Draft|PartlySubmitted|Submitted|Approved|Rejected</c>, ✎ B147 <c>NoApproval</c> — документи
+    /// версії шаблону без подання й затвердження); порожньо — будь-який.
+    /// </param>
     /// <param name="mine">Лише документи, де користувач — автор або подавав аркуш.</param>
     /// <param name="hasLateEdits">
     /// Лише документи з (<c>true</c>) або без (<c>false</c>) пізньої правки (<c>BE-09b</c>);
@@ -205,13 +208,16 @@ public sealed class ListDocumentsHandler(
         ValidateOwner(ownerUserId, mine);
         var versionSort = ParseVersionSort(sort);
         var versions = ParseTemplateVersions(templateVersions);
-        var partly = IsPartlySubmitted(state, stateScope);
+        var partly = IsNamedState(state, StatePartlySubmitted, stateScope);
+        var noApproval = IsNamedState(state, StateNoApproval, stateScope);
         var filter = new DocumentListFilter(
-            partly ? null : ParseState(state, stateScope), mine ? profile.UserId : null, hasLateEdits, Query: NormalizeQuery(query),
+            partly || noApproval ? null : ParseState(state, stateScope), mine ? profile.UserId : null, hasLateEdits,
+            Query: NormalizeQuery(query),
             ResultsStale: resultsStale, StaleByUserId: staleByMe ? profile.UserId : null, OwnerUserId: ownerUserId,
             TemplateVersions: versions, VersionSort: versionSort, PartlySubmitted: partly, Year: year,
             HasReopenedMonths: hasReopenedMonths,
-            TemplateCode: string.IsNullOrWhiteSpace(templateCode) ? null : templateCode.Trim());
+            TemplateCode: string.IsNullOrWhiteSpace(templateCode) ? null : templateCode.Trim(),
+            NoApproval: noApproval);
 
         // ⛔ Родина REQ, а не CELL (`P-25`, рядок 1): хибний `limit` — це
         // помилка параметра запиту, і показувати її в обробнику помилок
@@ -547,10 +553,20 @@ public sealed class ListDocumentsHandler(
     /// <summary>Значення фільтра стану «частково подано» (✎ UAT-recalc-ux); не є станом аркуша.</summary>
     public const string StatePartlySubmitted = "PartlySubmitted";
 
-    /// <summary><c>state=PartlySubmitted</c>: так — <c>true</c>; без періоду — 422, як і решта станів.</summary>
-    private static bool IsPartlySubmitted(string? state, int? periodKey)
+    /// <summary>
+    /// ✎ B147 (B75): значення фільтра стану «без погодження» — документи, чия версія шаблону за період без подання й
+    /// затвердження (<c>WorkflowMode.None</c>); не є станом аркуша. Те саме ім'я несе клітинка року
+    /// (<see cref="DocumentPeriodState.State"/>).
+    /// </summary>
+    public const string StateNoApproval = "NoApproval";
+
+    /// <summary>
+    /// <c>state=PartlySubmitted</c> / <c>state=NoApproval</c> (стани документа, яких немає серед станів аркуша): так —
+    /// <c>true</c>; без періоду й року — 422, як і решта станів.
+    /// </summary>
+    private static bool IsNamedState(string? state, string name, int? periodKey)
     {
-        if (!string.Equals(state?.Trim(), StatePartlySubmitted, StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(state?.Trim(), name, StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
