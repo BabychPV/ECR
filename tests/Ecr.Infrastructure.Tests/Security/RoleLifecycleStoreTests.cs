@@ -64,13 +64,41 @@ public sealed class RoleLifecycleStoreTests(SqlServerFixture sql)
             db.RoleAssignments.RemoveRange(db.RoleAssignments.Where(a => a.RoleId == roleId));
             await db.SaveChangesAsync();
 
-            await new UserStore(db).RemoveRoleAsync(roleId, CancellationToken.None);
+            Assert.True(await new UserStore(db).RemoveRoleAsync(roleId, CancellationToken.None));
             await db.SaveChangesAsync();
         }
 
         await using var check = Context();
         Assert.False(await check.Roles.AnyAsync(r => r.Id == roleId));
         Assert.False(await check.RolePermissions.AnyAsync(p => p.RoleId == roleId));
+    }
+
+    /// <summary>
+    /// B150: роль, яку щойно видалив паралельний запит, — <c>false</c> і нічого не позначено, а не
+    /// <c>InvalidOperationException</c> «Sequence contains no elements» (голий 500 на подвійний клік).
+    /// </summary>
+    /// <remarks>Мутація: повернути <c>FirstAsync</c> / прибрати повернення <c>false</c> — тест червоний.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Видалення_вже_видаленої_ролі_дає_false_без_винятку()
+    {
+        int roleId;
+        await using (var db = Context())
+        {
+            roleId = await new UserStore(db).AddRoleAsync(
+                new Role(EcrCode.Create($"GONE_{_tag}"), Text("Gone")), [], CancellationToken.None);
+        }
+
+        await using (var winner = Context())
+        {
+            Assert.True(await new UserStore(winner).RemoveRoleAsync(roleId, CancellationToken.None));
+            await winner.SaveChangesAsync();
+        }
+
+        await using var loser = Context();
+        Assert.False(await new UserStore(loser).RemoveRoleAsync(roleId, CancellationToken.None));
+        Assert.DoesNotContain(loser.ChangeTracker.Entries(), e => e.State == EntityState.Deleted);
     }
 
     [Fact]

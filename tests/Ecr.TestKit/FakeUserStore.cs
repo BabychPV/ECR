@@ -178,6 +178,9 @@ public sealed class FakeUserStore : IUserStore
     }
 
     /// <inheritdoc />
+    public void ForgetAdded(User user) => _users.Remove(user);
+
+    /// <inheritdoc />
     public Task GrantRoleAsync(User user, string roleCode, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(user);
@@ -349,11 +352,8 @@ public sealed class FakeUserStore : IUserStore
     }
 
     /// <inheritdoc />
-    public Task RemoveRoleAsync(int roleId, CancellationToken ct)
-    {
-        Roles.RemoveAll(r => r.Id == roleId);
-        return Task.CompletedTask;
-    }
+    public Task<bool> RemoveRoleAsync(int roleId, CancellationToken ct)
+        => Task.FromResult(Roles.RemoveAll(r => r.Id == roleId) > 0);
 
     /// <summary>Ресурсні гранти за роллю.</summary>
     /// <remarks>

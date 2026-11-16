@@ -144,6 +144,9 @@ public sealed class UserStore(EcrDbContext db, SelfStampRotation? selfRotation =
     public void Add(User user) => db.Users.Add(user);
 
     /// <inheritdoc />
+    public void ForgetAdded(User user) => db.Entry(user).State = Microsoft.EntityFrameworkCore.EntityState.Detached;
+
+    /// <inheritdoc />
     public void RecordAttempt(LoginAttempt attempt) => db.LoginAttempts.Add(attempt);
 
     /// <inheritdoc />
@@ -566,8 +569,17 @@ public sealed class UserStore(EcrDbContext db, SelfStampRotation? selfRotation =
     }
 
     /// <inheritdoc />
-    public async Task RemoveRoleAsync(int roleId, CancellationToken ct)
+    public async Task<bool> RemoveRoleAsync(int roleId, CancellationToken ct)
     {
+        // ⛔ B150: роль, яку щойно видалив паралельний запит (подвійний клік), — `false`, а не виняток
+        // `FirstAsync` («Sequence contains no elements» → голий 500). Обробник відповідає тим самим 404, що й
+        // послідовний повтор.
+        var role = await db.Roles.FirstOrDefaultAsync(r => r.Id == roleId, ct).ConfigureAwait(false);
+        if (role is null)
+        {
+            return false;
+        }
+
         // ⚠ Права прибираються явно, а не каскадом бази: чи стоїть на
         // `FK_RolePerm_Role` каскад — властивість схеми, а не цього коду.
         var permissions = await db.RolePermissions
@@ -580,7 +592,8 @@ public sealed class UserStore(EcrDbContext db, SelfStampRotation? selfRotation =
         // D-263: роль як адресат каналу сповіщень — зв'язок зникає разом із роллю.
         db.NotificationChannelRoles.RemoveRange(
             await db.NotificationChannelRoles.Where(r => r.RoleId == roleId).ToListAsync(ct).ConfigureAwait(false));
-        db.Roles.Remove(await db.Roles.FirstAsync(r => r.Id == roleId, ct).ConfigureAwait(false));
+        db.Roles.Remove(role);
+        return true;
     }
 
     /// <inheritdoc />

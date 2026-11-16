@@ -111,6 +111,18 @@ public sealed class UnitOfWork(
                     ["messageKey"] = "err.ECR-CELL-0409.concurrentChange",
                 });
         }
+        catch (DbUpdateException ex) when (SqlConflict.IsTemporalPeriodRace(ex))
+        {
+            // ⛔ B150: два одночасні оновлення того самого рядка системно-версійованої таблиці (13535) — гонитва
+            // «одночасна зміна», а не збій: 409, як у гілці DbUpdateConcurrencyException вище. Доти — голий 500.
+            throw new Application.Errors.ConcurrencyConflictException(
+                "ECR-CELL-0409",
+                "Дані змінилися після того, як ви їх прочитали.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CELL-0409.concurrentChange",
+                });
+        }
         catch (DbUpdateException ex) when (SqlConflict.IsUniqueConstraintViolation(ex))
         {
             // ⛔ Integration-pending фікс findings 2-3: `CreateProjectHandler`
@@ -517,6 +529,59 @@ public sealed class UnitOfWork(
                 {
                     ["messageKey"] = "err.ECR-PRM-4101.code",
                     ["bindingCode"] = codeBinding.Code,
+                });
+        }
+
+        // ⛔ B150. Два одночасні `POST /users` з тим самим іменем проходять `FindByUserNameAsync` обидва
+        // (check-then-insert, `CreateUserHandler`), і другого відбиває лише `UQ_User_Name` — голий 500.
+        // Та сама відмова, що й перевірка обробника (`409 ECR-USR-0409`, ключ `userNameTaken` з `{userName}`):
+        // клієнт бачить один контракт незалежно від того, хто програв. Лише цей індекс (за ім'ям).
+        if (SqlConflict.ViolatesIndex(ex, "UQ_User_Name")
+            && ex.Entries.FirstOrDefault(e => e.State == EntityState.Added && e.Entity is Domain.Entities.Security.User)
+                is { Entity: Domain.Entities.Security.User user })
+        {
+            return new BusinessRuleException(
+                ErrorCodes.UserDuplicate,
+                $"Користувач з іменем «{user.UserName}» уже існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-USR-0409.userNameTaken",
+                    ["userName"] = user.UserName,
+                });
+        }
+
+        // ⛔ B150 (рішення координатора 16.11). Той самий SID у двох одночасних записах — перший вхід Windows того
+        // самого доменного користувача двічі (JIT `User.CreateDomain`), або `POST /users` з SID, який щойно забрав
+        // інший запит. Відбиває `UX_User_Sid` — доти голий 500. Відмова — та сама, що й перевірки
+        // (`WindowsSidFormat`: `409 ECR-USR-0409 windowsSidTaken`); вхід Windows ловить її й бере запис переможця.
+        if (SqlConflict.ViolatesIndex(ex, "UX_User_Sid")
+            && ex.Entries.FirstOrDefault(e => e.Entity is Domain.Entities.Security.User
+                                              && e.State is EntityState.Added or EntityState.Modified)
+                is { Entity: Domain.Entities.Security.User sidUser })
+        {
+            return new BusinessRuleException(
+                ErrorCodes.UserDuplicate,
+                $"SID {sidUser.WindowsSid} уже прив'язаний до іншого запису.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-USR-0409.windowsSidTaken",
+                    ["sid"] = sidUser.WindowsSid,
+                    ["userName"] = sidUser.UserName,
+                });
+        }
+
+        // ⛔ B150. Перший `PUT /projects/{id}/approval-route` проєкту без маршруту: обидва одночасні запити читають
+        // «маршруту немає» й додають `PRJ_{id}`; другого відбиває лише `UQ_ApprovalRoute` — голий 500. Та сама відмова,
+        // що й у гонки за НАЯВНИМ маршрутом (`DbUpdateConcurrencyException` вище: `409 ECR-CELL-0409 concurrentChange`).
+        if (SqlConflict.ViolatesIndex(ex, "UQ_ApprovalRoute")
+            && ex.Entries.Any(e => e.State == EntityState.Added && e.Entity is Domain.Entities.Workflow.ApprovalRoute))
+        {
+            return new ConcurrencyConflictException(
+                "ECR-CELL-0409",
+                "Маршрут погодження щойно змінив хтось інший: перечитайте його й збережіть ще раз.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CELL-0409.concurrentChange",
                 });
         }
 

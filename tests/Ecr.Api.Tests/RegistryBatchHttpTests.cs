@@ -325,6 +325,73 @@ public sealed class RegistryBatchHttpTests(SqlServerFixture sql)
         Assert.Equal(before, await SnapshotAsync(fixture));
     }
 
+    /// <summary>
+    /// B150 (вставка/пакетний імпорт рядків): <c>dryRun</c>-пакет нових рядків, чиї бізнес-ключі ВЖЕ мають записи
+    /// довідника, — помилка <c>4092 keyTaken</c> на КОЖНОМУ такому рядку (з кодом запису-власника), вільний рядок —
+    /// <c>added</c>; і не записано нічого: записи, значення, ключі, ревізія, послідовність — звірено з базою.
+    /// </summary>
+    /// <remarks>
+    /// Мутація: у <c>RegistryBatchHandler.CheckKeysAsync</c> умова <c>conflict is not null</c> →
+    /// <c>conflict is not null &amp;&amp; key.Id &lt; 0</c> — тест червоний (звіт без помилок рядків або відмова пакета).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task DryRun_рядки_з_наявними_бізнес_ключами_дають_помилку_кожного_рядка_і_нічого_не_пишуть()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Registry.View", "Registry.EditData");
+        var fixture = await SeedAsync(RegistryCodeMode.Manual);
+
+        try
+        {
+            await CreateAsync(client, fixture, "E1", "10");
+            await CreateAsync(client, fixture, "E2", "20");
+            var before = await SnapshotAsync(fixture);
+
+            // Ключ без урахування регістру (`ignoreCase`) — «20» і «20» тотожні; третій рядок вільний.
+            var (status, body) = await BatchAsync(client, fixture, dryRun: true,
+                new { clientRowId = "p1", op = "upsert", code = $"P1{fixture.Tag}", values = new Dictionary<string, object?> { ["STREAM"] = "10" } },
+                new { clientRowId = "p2", op = "upsert", code = $"P2{fixture.Tag}", values = new Dictionary<string, object?> { ["STREAM"] = "20" } },
+                new { clientRowId = "p3", op = "upsert", code = $"P3{fixture.Tag}", values = new Dictionary<string, object?> { ["STREAM"] = "30" } });
+
+            Assert.True(status == HttpStatusCode.OK, $"{status}: {body}\n{app.ErrorsText}");
+            Assert.True(body.GetProperty("dryRun").GetBoolean(), body.ToString());
+            Assert.False(body.GetProperty("applied").GetBoolean(), body.ToString());
+            Assert.Equal(["error", "error", "added"], Statuses(body));
+
+            foreach (var (row, owner) in new[] { (0, "E1"), (1, "E2") })
+            {
+                var errors = Rows(body)[row].GetProperty("errors");
+                Assert.Equal(1, errors.GetArrayLength());
+                Assert.Equal("ECR-REG-4092", errors[0].GetProperty("errorCode").GetString());
+                Assert.Equal("err.ECR-REG-4092.keyTaken", errors[0].GetProperty("messageKey").GetString());
+                Assert.Equal($"{owner}{fixture.Tag}", errors[0].GetProperty("params").GetProperty("entryCode").GetString());
+            }
+
+            Assert.Equal(0, Rows(body)[2].GetProperty("errors").GetArrayLength());
+            Assert.Equal(before, await SnapshotAsync(fixture));
+        }
+        finally
+        {
+            await CleanupAsync(fixture);
+        }
+    }
+
+    /// <summary>Прибирає власний довідник тесту (записи, значення, ключі, поля, опис).</summary>
+    private async Task CleanupAsync(Fixture fixture)
+    {
+        await using var db = new EcrDbContext(Options());
+        var ids = await db.RegistryEntries.Where(e => e.RegistryDefId == fixture.DefinitionId).Select(e => e.Id).ToListAsync();
+        await db.RegistryEntryKeys.Where(k => ids.Contains(k.RegistryEntryId)).ExecuteDeleteAsync();
+        await db.RegistryValues.Where(v => ids.Contains(v.RegistryEntryId)).ExecuteDeleteAsync();
+        await db.RegistryEntries.Where(e => e.RegistryDefId == fixture.DefinitionId).ExecuteDeleteAsync();
+        await db.RegistryKeyFields.Where(f => f.RegistryKeyDefId == fixture.KeyDefId).ExecuteDeleteAsync();
+        await db.RegistryKeyDefs.Where(k => k.RegistryDefId == fixture.DefinitionId).ExecuteDeleteAsync();
+        await db.RegistryFieldDefs.Where(f => f.RegistryDefId == fixture.DefinitionId).ExecuteDeleteAsync();
+        await db.RegistryDefs.Where(r => r.Id == fixture.DefinitionId).ExecuteDeleteAsync();
+    }
+
     private static object Upsert(string clientRowId, long id, string? baseVersion, params (string Field, string Value)[] values)
         => new { clientRowId, op = "upsert", id, baseVersion, values = values.ToDictionary(v => v.Field, v => (object?)v.Value) };
 
