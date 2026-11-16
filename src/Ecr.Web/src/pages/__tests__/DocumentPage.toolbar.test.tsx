@@ -52,7 +52,12 @@ const AllRights = [
 
 function mockFetch(
   permissions: string[],
-  options: { sheetStates?: Record<string, string>; validation?: unknown; noVisibleSheets?: boolean } = {},
+  options: {
+    sheetStates?: Record<string, string>;
+    validation?: unknown;
+    noVisibleSheets?: boolean;
+    workflowMode?: string;
+  } = {},
 ): void {
   vi.stubGlobal(
     'fetch',
@@ -138,6 +143,7 @@ function mockFetch(
           sheetCount: 1,
           sheetStates: options.sheetStates ?? { GEN: 'Draft' },
           hasLateEdits: false,
+          ...(options.workflowMode === undefined ? {} : { workflowMode: options.workflowMode }),
         });
       }
 
@@ -363,6 +369,21 @@ describe('DocumentPage: прогрес у шапці (UI-15)', () => {
       expect(within(progress).getByText('⟦status.sheet.Draft⟧')).toBeDefined();
       // ⛔ «Не перевіряли» ≠ «0 зауважень» (`A7-28`).
       expect(screen.queryByTestId('document-issues-link')).toBeNull();
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'B143: шаблон без подання й затвердження (workflowMode=None) — «No approval» замість стану аркуша',
+    async () => {
+      show(AllRights, { workflowMode: 'None' });
+
+      // ⛔ Мутація: прибрати `workflowOff={…}` у `DocumentPage` — позначки немає, стан аркуша лишається.
+      const chip = await screen.findByTestId('document-no-approval', {}, { timeout: SlowEnvTimeout });
+      expect(chip.textContent).toContain('⟦workflow.noApproval⟧');
+
+      const progress = screen.getByTestId('document-progress');
+      expect(within(progress).queryByText('⟦status.sheet.Draft⟧')).toBeNull();
     },
     SlowEnvTimeout,
   );
