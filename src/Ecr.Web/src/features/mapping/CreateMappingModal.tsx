@@ -160,7 +160,17 @@ export function CreateMappingModal({
           data={AggregationOptions.map((value) => ({ value, label: value }))}
         />
 
-        <Button onClick={() => create.mutate()} loading={create.isPending} disabled={!canSubmit}>
+        <Button
+          onClick={() => {
+            // ⛔ B145b: діалог, що закривається (ще ~200 мс у DOM, поля з тими самими значеннями), і запит
+            // у польоті не створюють удруге — зонд: другий клік слав другий `POST` з тим самим тілом.
+            if (!opened || create.isPending) return;
+
+            create.mutate();
+          }}
+          loading={create.isPending}
+          disabled={!canSubmit}
+        >
           {t('mapping.createSubmit')}
         </Button>
       </Stack>
