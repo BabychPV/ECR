@@ -149,11 +149,48 @@ public sealed class PiWebApiAuthModeTests
         Assert.Empty(fixture.Negotiate.Requests);
     }
 
-    private static DataSource NewSource(string code) => new(
+    /// <summary>
+    /// PT-5 (пентест 2026-11): джерело, збережене РАНІШЕ з адресою <c>http://</c> і секретом у заголовку, секрету
+    /// відкритим текстом не шле — відмова ДО з'єднання (жодного запиту), типом «нас не пускають». Явний дозвіл
+    /// <c>PiWebApi:AllowInsecureHttp</c> і Negotiate — як доти.
+    /// </summary>
+    /// <remarks>Без виправлення перший рядок червоний: запит із <c>Authorization</c> іде по http.</remarks>
+    [Theory]
+    [InlineData("Bearer sup3r-s3cret-tok", false, false)]
+    [InlineData("Basic c3VwM3ItczNjcjN0", null, false)]
+    [InlineData("Bearer sup3r-s3cret-tok", true, true)]
+    [InlineData("Negotiate", false, true)]
+    public async Task Секрет_у_заголовку_не_йде_по_http(string secret, bool? allowInsecureHttp, bool sent)
+    {
+        var typed = new StubHandler();
+        var network = allowInsecureHttp is { } allow ? Substitute.For<IEndpointNetwork>() : null;
+        network?.AllowInsecureHttp.Returns(allowInsecureHttp!.Value);
+
+        var sut = new PiWebApiDataSource(
+            new HttpClient(typed),
+            Store(new Dictionary<int, DataSource> { [1] = NewSource("OLD", "http://pi.example") }),
+            Secrets(_ => secret),
+            network: network);
+
+        if (sent)
+        {
+            await sut.DiscoverAsync(1, CancellationToken.None);
+            Assert.Single(typed.Requests);
+            return;
+        }
+
+        var thrown = await Assert.ThrowsAsync<SourceAuthenticationException>(() => sut.DiscoverAsync(1, CancellationToken.None));
+
+        Assert.Equal("err.ECR-INT-0502.piWebApiInsecureHttp", thrown.Details?["messageKey"]);
+        Assert.DoesNotContain(secret[(secret.IndexOf(' ', StringComparison.Ordinal) + 1)..], thrown.Message, StringComparison.Ordinal);
+        Assert.Empty(typed.Requests);
+    }
+
+    private static DataSource NewSource(string code, string endpoint = "https://pi.example") => new(
         EcrCode.Create(code),
         new LocalizedText(new Dictionary<string, string> { ["uk"] = code }),
         ExternalTransport.PiWebApi,
-        "https://pi.example",
+        endpoint,
         $"DataSource.{code}");
 
     private static ICollectionStore Store(Dictionary<int, DataSource> sources)

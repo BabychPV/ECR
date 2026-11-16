@@ -297,7 +297,6 @@ public sealed class DataSourceHandlersTests
         [
             (ExternalTransport.PiWebApi, "https://attacker.example/piwebapi", null),
             (ExternalTransport.PiWebApi, "https://pi.corp.example:8443/piwebapi", null),
-            (ExternalTransport.PiWebApi, "http://pi.corp.example/piwebapi", null),
             (ExternalTransport.PiWebApi, "https://pi.corp.example/other", null),
             (ExternalTransport.PiWebApi, Endpoint, "https://attacker.example/piwebapi"),
             // L3-05: Sql — рядок з'єднання; URL у ньому відхиляє вже політика адреси (D-279), до цього правила.
@@ -319,6 +318,16 @@ public sealed class DataSourceHandlersTests
                 Assert.DoesNotContain(SecretValue, refused.Message, StringComparison.Ordinal);
             }
         }
+
+        // ✎ PT-5: зміна схеми на http:// для джерела із секретом у заголовку відхиляється ще раніше — політикою адреси
+        // (секрет не йде відкритим текстом); теж 422, і теж нічого не змінює.
+        var insecure = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Save().UpdateAsync(
+                source.Id, Named(), ExternalTransport.PiWebApi, "http://pi.corp.example/piwebapi", null, null, null, true,
+                Version(source), null, false, default));
+        Assert.Equal("ECR-REQ-0422", insecure.ErrorCode);
+        Assert.Equal("err.ECR-REQ-0422.dataSourceEndpointScheme", insecure.Details!["messageKey"]);
+        Assert.DoesNotContain(SecretValue, insecure.Message, StringComparison.Ordinal);
 
         // Рядок з'єднання: доданий `Failover Partner` веде секрет на інший сервер.
         var flert = Add("FLERT", ExternalTransport.Sql, "Server=flert;Database=Vol");

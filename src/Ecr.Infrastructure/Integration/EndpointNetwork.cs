@@ -21,6 +21,12 @@ public sealed class EndpointNetwork(IConfiguration configuration) : IEndpointNet
             .Where(p => p is >= 1 and <= 65535)
             .ToList();
 
+    /// <summary>Ключ конфігурації PT-5; за замовчуванням <c>false</c>.</summary>
+    public const string AllowInsecureHttpKey = "PiWebApi:AllowInsecureHttp";
+
+    /// <inheritdoc />
+    public bool AllowInsecureHttp => configuration.GetValue(AllowInsecureHttpKey, false);
+
     /// <inheritdoc />
     public async Task<IReadOnlyList<IPAddress>> ResolveAsync(string host, CancellationToken ct)
     {
