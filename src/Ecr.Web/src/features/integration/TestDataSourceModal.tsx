@@ -137,7 +137,12 @@ export function TestDataSourceModal({
           <Button
             disabled={trimmed.length === 0}
             loading={test.isPending}
-            onClick={() => test.mutate(trimmed)}
+            onClick={() => {
+              // ⛔ B149 (KIT §6.9): власник лишає діалог змонтованим — кнопка закритого `Modal` (~200 мс у DOM, причина на
+              // місці) ставила б пробу в чужу систему (і запис у журнал безпеки) вже після закриття.
+              if (!opened || test.isPending) return;
+              test.mutate(trimmed);
+            }}
           >
             {t('sources.testConnection')}
           </Button>

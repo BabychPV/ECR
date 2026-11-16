@@ -185,7 +185,8 @@ export function MethodologyPackageImport(): JSX.Element {
               disabled={pkg === null}
               loading={checkLoading}
               onClick={() => {
-                if (check.isPending) return;
+                // ⛔ B149 (KIT §6.9): вікно змонтоване завжди — закритий `Modal` ще мить у DOM з вибраним файлом.
+                if (!opened || check.isPending) return;
                 check.mutate(pkg);
               }}
             >
@@ -203,7 +204,7 @@ export function MethodologyPackageImport(): JSX.Element {
               <Button
                 loading={applyLoading}
                 onClick={() => {
-                  if (apply.isPending) return;
+                  if (!opened || apply.isPending) return;
                   apply.mutate(pkg);
                 }}
               >
