@@ -160,9 +160,10 @@ public sealed partial class ReportViewRecalculatedAfterSubmissionTests(ITestOutp
         await AuditAsync(s, s.DocumentId, 209901, null, Now.AddMinutes(1), Marked);
 
         Assert.Equal(250 + 13, (await ColumnNamesAsync(s.Versioned)).Count);   // 9 службових + 250 + 4 (копії, режим, позначка)
-        Assert.Equal([(byte)1], await MarksAsync(
-            $"SELECT DISTINCT _RecalculatedAfterSubmission FROM rpt.[{s.Versioned}] WHERE _DocumentId = @d AND _PeriodKey = 209901 AND [C1] = N'v'",
-            s.DocumentId));
+        // Оригінал подано й позначено; копія аркуша за той самий період має власний стан (його немає) — 0.
+        var read = $"SELECT DISTINCT _RecalculatedAfterSubmission FROM rpt.[{s.Versioned}] WHERE _DocumentId = @d AND _PeriodKey = 209901 AND [C1] = N'v'";
+        Assert.Equal([(byte)1], await MarksAsync(read + " AND _SheetCopyOrdinal = 1", s.DocumentId));
+        Assert.Equal([(byte)0], await MarksAsync(read + " AND _SheetCopyOrdinal = 2", s.DocumentId));
     }
 
     /// <summary>
@@ -171,14 +172,17 @@ public sealed partial class ReportViewRecalculatedAfterSubmissionTests(ITestOutp
     /// (той самий текст без приєднання й колонки), з колонкою (функція, приєднана за станом) і варіант A (підзапит на рядок).
     /// </summary>
     /// <remarks>
-    /// ⚠ Межа попередня — до виміру на слоті (числа друкуються у вивід тесту): позначка не дорожча за варіант A і не більша
-    /// за читання журналу «кандидати × стани» з запасом. Якщо вимір покаже інше — це рішення про індекс журналу, а не про тест.
+    /// Виміри 16.11 (5 000 сторонніх записів): без колонки 8 074, з колонкою 10 577, варіант A 25 518 читань. Числа друкуються
+    /// у вивід тесту. Межа: позначка не дорожча за варіант A і додає не більше ніж «2 читання на сторонній запис + 5 000»
+    /// (тобто росте з обсягом журналу аркуша, а не з кількістю рядків вʼюхи). Друга точка (20 000 записів) показує, як саме.
     /// </remarks>
-    [Fact]
+    [Theory]
     [Trait("B138", "Volume")]
-    public async Task Позначка_на_обсязі_рахується_на_стан_аркуша_а_не_на_рядок()
+    [InlineData(5000)]
+    [InlineData(20000)]
+    public async Task Позначка_на_обсязі_рахується_на_стан_аркуша_а_не_на_рядок(int foreign)
     {
-        const int documents = 40, rows = 50, foreign = 5000;
+        const int documents = 40, rows = 50;
         var s = await ArrangeAsync();
         var ids = new List<long>();   // документ сценарію лишається без стану (його рядки — 0)
         for (var i = 0; i < documents; i++)
@@ -239,8 +243,8 @@ public sealed partial class ReportViewRecalculatedAfterSubmissionTests(ITestOutp
                          + $"without column {without}; with column (function joined on state) {shipped}; variant A (apply per row) {perRow}");
 
         Assert.True(shipped <= perRow * 11 / 10, $"позначка за станом ({shipped}) дорожча за підзапит на рядок ({perRow})");
-        Assert.True(shipped - without <= (long)documents * foreign * 4,
-            $"позначка коштує {shipped - without} читань понад {without} — більше за «стани × кандидати журналу» з запасом");
+        Assert.True(shipped - without <= (2L * foreign) + 5000,
+            $"позначка коштує {shipped - without} читань понад {without} — більше за «2 на сторонній запис журналу + 5 000»");
     }
 
     // ── помічники ───────────────────────────────────────────────────────────────────────────────────────────────────────
