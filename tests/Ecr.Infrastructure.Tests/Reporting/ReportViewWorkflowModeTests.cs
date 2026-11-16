@@ -22,10 +22,9 @@ namespace Ecr.Infrastructure.Tests.Reporting;
 /// Власна база, періоди 2099xx.
 /// </summary>
 /// <remarks>
-/// Мутації (локально, вихідний SQL + перезбірка, 9 тестів класу): (1) константа 0 замість режиму версії в усіх трьох місцях —
-/// червоні «Версійна…», «Стабільна…» (×3), «Довга…», «Комірка…»; (2) стабільна вʼюха бере режим версії з параметра процедури —
-/// червоні «Стабільна…» (×3) і «Комірка…»; (3) колонка не остання (перед <c>_SheetDisplayName</c> / <c>_IsArchived</c> /
-/// <c>IsArchived</c>) — червоні «Колонка_WorkflowMode_остання…» (×2).
+/// Мутації (правило 401; локально, вихідний SQL + перезбірка; перелік і результати — у листі готовності B138): константа 0
+/// замість режиму версії — окремо у версійній, стабільній і довгій (гаряча й архівна гілки) вʼюхах; стабільна бере режим
+/// версії з параметра процедури; колонка не на своєму місці — окремо в кожному виді вʼюх; відбиток без режиму версії.
 /// </remarks>
 [Trait(TestCategories.Category, TestCategories.Integration)]
 [Trait("Requirement", "RPT-STABLE")]
@@ -90,7 +89,7 @@ public sealed partial class ReportViewWorkflowModeTests : IAsyncLifetime
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task Колонка_WorkflowMode_остання_в_усіх_вʼюхах(bool monthRouting)
+    public async Task Службові_колонки_B138_останні_в_усіх_вʼюхах(bool monthRouting)
     {
         var s = await ArrangeAsync(monthRouting);
 
@@ -98,15 +97,18 @@ public sealed partial class ReportViewWorkflowModeTests : IAsyncLifetime
         {
             var columns = await ColumnsAsync(view);
             Assert.True(columns.Count > 1, $"rpt.{view}: вʼюхи немає");
-            Assert.Equal(("_WorkflowMode", "tinyint"), columns[^1]);
+            // Порядок додавання: _WorkflowMode, за нею _RecalculatedAfterSubmission (людина 16.11) — остання.
+            Assert.Equal(("_WorkflowMode", "tinyint"), columns[^2]);
+            Assert.Equal(("_RecalculatedAfterSubmission", "tinyint"), columns[^1]);
             Assert.Single(columns, c => c.Name == "_WorkflowMode");
+            Assert.Single(columns, c => c.Name == "_RecalculatedAfterSubmission");
         }
 
-        // Попередні «останні» колонки лишилися на місці — одразу перед новою (колонки лише додаються).
-        Assert.Equal("_SheetDisplayName", (await ColumnsAsync(s.V1View))[^2].Name);
-        Assert.Equal("_SheetDisplayName", (await ColumnsAsync(s.V2View))[^2].Name);
-        Assert.Equal("_IsArchived", (await ColumnsAsync(s.Stable))[^2].Name);
-        Assert.Equal("IsArchived", (await ColumnsAsync("v_DocumentCells"))[^2].Name);
+        // Попередні «останні» колонки лишилися на місці — одразу перед новими (колонки лише додаються).
+        Assert.Equal("_SheetDisplayName", (await ColumnsAsync(s.V1View))[^3].Name);
+        Assert.Equal("_SheetDisplayName", (await ColumnsAsync(s.V2View))[^3].Name);
+        Assert.Equal("_IsArchived", (await ColumnsAsync(s.Stable))[^3].Name);
+        Assert.Equal("IsArchived", (await ColumnsAsync("v_DocumentCells"))[^3].Name);
     }
 
     /// <summary>
