@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -94,6 +94,17 @@ function show(permissions: string[], locks: RowLockDto[] = []): void {
 
 const LockButton = /rowLock\.lockAction/;
 const ListButton = /rowLock\.listAction/;
+
+/*
+ * ⛔ F13 (B139, пункт e): діалог і перелік — `lazy()`-чанки (`RowLockControl.tsx`), і діалог тягне `@mantine/dates`.
+ * Без прогріву перший тест, що відкриває діалог, платив за імпорт і трансформацію чанка ВСЕРЕДИНІ власного
+ * бюджету часу — під навантаженням CPU він не вкладався (`findByRole('dialog')` / таймаут тесту). Модулі
+ * вантажаться тут один раз, до тестів; `lazy()` у компоненті далі бере їх із кешу модулів. Час хука — на імпорт,
+ * бюджети самих тестів не змінено.
+ */
+beforeAll(async () => {
+  await Promise.all([import('../RowLockDialog'), import('../RowLocksPanel')]);
+}, 120_000);
 
 afterEach(() => {
   resetFocus();
