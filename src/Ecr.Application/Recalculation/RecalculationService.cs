@@ -244,13 +244,19 @@ public sealed class RecalculationService(
     /// прогін справді записав (крім правки погоджувача, D-442), — їм викликач ставить позначку «перераховано після
     /// подання»; <c>null</c> — не збирати.
     /// </param>
+    /// <param name="submittedYearWritten">
+    /// ✎ B79: річна розкладка — ПОДАНІ місяці року (ключ періоду × аркуш), коли прогін записав НЕ-МІСЯЧНУ комірку аркуша
+    /// (вона живе в якорі, а пишеться за агрегатом року, B24/B60): число, яке бачить погоджувач кожного поданого місяця,
+    /// змінилось — позначка йому, а не лише періоду прогону; <c>null</c> — не збирати.
+    /// </param>
     public async Task<int> RecalculateAsync(
         long tableInstanceId, DirtySet dirty, CancellationToken ct,
         HashSet<(int TableDefId, int ColumnDefId)>? changedColumns = null,
         IReadOnlySet<int>? approverEditSheets = null,
         HashSet<(int TableDefId, int ColumnDefId)>? inputColumns = null,
         RecalculationSharedLoad? shared = null,
-        HashSet<(int SheetDefId, long? CopyId)>? submittedWritten = null)
+        HashSet<(int SheetDefId, long? CopyId)>? submittedWritten = null,
+        HashSet<(int PeriodKey, int SheetDefId)>? submittedYearWritten = null)
     {
         ArgumentNullException.ThrowIfNull(dirty);
 
@@ -269,7 +275,7 @@ public sealed class RecalculationService(
         return await RunAsync(
                 instance, dirty, ct, changedColumns: changedColumns, approverEditSheets: approverEditSheets,
                 inputColumns: inputColumns, shared: shared, writeSubmitted: true,
-                submittedWritten: submittedWritten)
+                submittedWritten: submittedWritten, submittedYearWritten: submittedYearWritten)
             .ConfigureAwait(false);
     }
 
@@ -292,6 +298,7 @@ public sealed class RecalculationService(
     /// ✎ B79 (правило людини 07.11): період-читач пише й ПОДАНІ аркуші, затверджені — ніколи; сюди — подані аркуші, у які
     /// прогін записав (для позначки «перераховано після подання»); <c>null</c> — не збирати.
     /// </param>
+    /// <param name="submittedYearWritten">✎ B79: подані місяці року при записі не-місячної комірки (див. <see cref="RecalculateAsync"/>).</param>
     /// <returns>Скільки комірок перераховано.</returns>
     /// <remarks>
     /// ⛔ Це G2 із дизайну WW-03: залежність із ненульовим зсувом не входить у зворотний індекс
@@ -305,7 +312,8 @@ public sealed class RecalculationService(
         HashSet<(int TableDefId, int ColumnDefId)>? changedColumns = null,
         RecalculationSharedLoad? shared = null,
         IReadOnlyList<int>? annualPeriods = null,
-        HashSet<(int SheetDefId, long? CopyId)>? submittedWritten = null)
+        HashSet<(int SheetDefId, long? CopyId)>? submittedWritten = null,
+        HashSet<(int PeriodKey, int SheetDefId)>? submittedYearWritten = null)
     {
         ArgumentNullException.ThrowIfNull(sources);
 
@@ -324,7 +332,7 @@ public sealed class RecalculationService(
             written += await RunAsync(
                     representative, dirty: null, ct, sheetDefId: null, heldSheet: null, instances,
                     changedColumns, sources, shared: shared, writeSubmitted: true, annualPeriods: annualPeriods,
-                    submittedWritten: submittedWritten)
+                    submittedWritten: submittedWritten, submittedYearWritten: submittedYearWritten)
                 .ConfigureAwait(false);
         }
 
@@ -399,14 +407,16 @@ public sealed class RecalculationService(
     /// значення не пишеться, <see cref="Evaluate"/>); <c>null</c> — не збирати. З цього набору викликач ставить позначку
     /// «перераховано після подання» (<see cref="SubmittedSheetChanges"/>).
     /// </param>
+    /// <param name="submittedYearWritten">✎ B79: подані місяці року при записі не-місячної комірки (див. <see cref="RecalculateAsync"/>).</param>
     public Task<int> RecalculateAllAsync(
         long documentId, PeriodKey periodKey, CancellationToken ct, int? sheetDefId = null,
         HashSet<(int TableDefId, int ColumnDefId)>? changedColumns = null, bool writeSubmitted = false,
         IReadOnlyList<int>? annualPeriods = null,
-        HashSet<(int SheetDefId, long? CopyId)>? submittedWritten = null)
+        HashSet<(int SheetDefId, long? CopyId)>? submittedWritten = null,
+        HashSet<(int PeriodKey, int SheetDefId)>? submittedYearWritten = null)
         => RecalculateDocumentAsync(
             documentId, periodKey, sheetDefId, heldSheet: null, ScopeFilter.All, ct, changedColumns, writeSubmitted,
-            annualPeriods: annualPeriods, submittedWritten: submittedWritten);
+            annualPeriods: annualPeriods, submittedWritten: submittedWritten, submittedYearWritten: submittedYearWritten);
 
     /// <inheritdoc />
     /// <remarks>
@@ -441,7 +451,8 @@ public sealed class RecalculationService(
         HashSet<(int TableDefId, int ColumnDefId)>? changedColumns = null, bool writeSubmitted = false,
         List<FormulaErrorCell>? errorSink = null,
         IReadOnlyList<int>? annualPeriods = null,
-        HashSet<(int SheetDefId, long? CopyId)>? submittedWritten = null)
+        HashSet<(int SheetDefId, long? CopyId)>? submittedWritten = null,
+        HashSet<(int PeriodKey, int SheetDefId)>? submittedYearWritten = null)
     {
         var instances = await rowStore
             .GetTableInstancesAsync(documentId, periodKey, ct)
@@ -463,7 +474,8 @@ public sealed class RecalculationService(
                     representative, dirty: null, ct, sheetDefId, heldSheet, instances, changedColumns, writeSubmitted: writeSubmitted,
                     errorSink: errorSink,
                     annualPeriods: annualPeriods,
-                    submittedWritten: submittedWritten)
+                    submittedWritten: submittedWritten,
+                    submittedYearWritten: submittedYearWritten)
                 .ConfigureAwait(false);
         }
 
@@ -506,6 +518,10 @@ public sealed class RecalculationService(
     /// ✎ B79: куди скласти ПОДАНІ аркуші (аркуш × копія), у які прогін записав завдяки <paramref name="writeSubmitted"/>
     /// (не правка погоджувача); <c>null</c> — не збирати. Наповнюється після коміту транзакції запису.
     /// </param>
+    /// <param name="submittedYearWritten">
+    /// ✎ B79: річна розкладка — подані місяці року (ключ періоду × аркуш), коли прогін записав НЕ-МІСЯЧНУ комірку аркуша
+    /// за агрегатом року (відкритий якір B60 або закритий B24); <c>null</c> — не збирати. Після коміту.
+    /// </param>
     private async Task<int> RunAsync(
         TableInstanceRef instance, DirtySet? dirty, CancellationToken ct, int? sheetDefId = null,
         (int SheetDefId, long? CopyId)? heldSheet = null, IReadOnlyList<TableInstanceRef>? knownInstances = null,
@@ -516,7 +532,8 @@ public sealed class RecalculationService(
         RecalculationSharedLoad? shared = null, bool writeSubmitted = false,
         List<FormulaErrorCell>? errorSink = null,
         IReadOnlyList<int>? annualPeriods = null,
-        HashSet<(int SheetDefId, long? CopyId)>? submittedWritten = null)
+        HashSet<(int SheetDefId, long? CopyId)>? submittedWritten = null,
+        HashSet<(int PeriodKey, int SheetDefId)>? submittedYearWritten = null)
     {
         // ✎ LAND-YEAR B24: копії аркушів Q-17 не маршрутизуються — у закритому місяці їм писати нічого.
         if (annualPeriods is not null && instance.SheetCopyId is not null)
@@ -1229,6 +1246,9 @@ public sealed class RecalculationService(
         // ✎ B79: подані аркуші, у які прогін записав завдяки `writeSubmitted`; у набір викликача — лише після коміту.
         var submittedNow = submittedWritten is null ? null : new HashSet<(int SheetDefId, long? CopyId)>();
 
+        // ✎ B79: подані місяці року, чиє не-місячне число цей прогін записав (річна розкладка); так само — після коміту.
+        var yearNow = submittedYearWritten is null ? null : new HashSet<(int PeriodKey, int SheetDefId)>();
+
         // ⚠ Один запис на екземпляр: перерахунок торкається десятків комірок,
         // і окрема транзакція на кожну перетворила б фонову задачу на джерело
         // блокувань саме тоді, коли документ активно правлять.
@@ -1271,11 +1291,29 @@ public sealed class RecalculationService(
             var submittedSheets = submittedWritten is null ? null : new HashSet<(int SheetDefId, long? CopyId)>();
             submittedNow?.Clear();
 
+            // ✎ B79: аркуш річної розкладки → його ПОДАНІ місяці (стани читає `EnterSheetsAsync` під тими самими
+            // блокуваннями, якими рахує агрегат). Не-місячна комірка пишеться за агрегатом року, тож її зміну мають
+            // побачити погоджувачі всіх поданих місяців, а не лише періоду прогону.
+            var submittedMonths = yearNow is null ? null : new Dictionary<(int SheetDefId, long? CopyId), List<int>>();
+            yearNow?.Clear();
+
+            void NoteAnnualWrite((int SheetDefId, long? CopyId) sheet)
+            {
+                if (submittedMonths is not null && submittedMonths.TryGetValue(sheet, out var months))
+                {
+                    foreach (var month in months)
+                    {
+                        yearNow!.Add((month, sheet.SheetDefId));
+                    }
+                }
+            }
+
             var writable = await EnterSheetsAsync(
                     instance.DocumentId, periodKey, sheetOfInstance.Values, heldSheet, token, approverEditSheets, writeSubmitted,
                     annualPeriods,
                     annualWritable is null ? null : (openAnchorYear!, annualSheets!, annualWritable),
-                    submittedSheets)
+                    submittedSheets,
+                    submittedMonths)
                 .ConfigureAwait(false);
 
             // ⛔ O2 (ФВ-9.8, замір I2). Доти тіло нижче виконувалося НА КОЖЕН
@@ -1312,6 +1350,20 @@ public sealed class RecalculationService(
                     if (allowed.Count > 0)
                     {
                         batch.Add((target, allowed));
+
+                        // ✎ B79: зміна поданого числа тут теж мусить дати позначку (доти ця гілка виходила раніше, і
+                        // подані аркуші відкритого якоря в набір не потрапляли зовсім). Не-місячна комірка — усім поданим
+                        // місяцям року; місячна (C_M01, таблиця поза маршрутизацією) — поданому періоду прогону.
+                        if (allowed.Exists(c => annualColumns.Contains(c.Address.ColumnDefId)))
+                        {
+                            NoteAnnualWrite(sheetKey);
+                        }
+
+                        if (submittedSheets?.Contains(sheetKey) == true
+                            && allowed.Exists(c => !annualColumns.Contains(c.Address.ColumnDefId)))
+                        {
+                            submittedNow!.Add(sheetKey);
+                        }
                     }
 
                     continue;
@@ -1327,6 +1379,12 @@ public sealed class RecalculationService(
                 if (submittedSheets?.Contains(sheetKey) == true)
                 {
                     submittedNow!.Add(sheetKey);
+                }
+
+                // ✎ B79: прогін закритого якоря (B24) пише лише не-місячні цілі під агрегатом року — подані місяці року.
+                if (annualPeriods is not null)
+                {
+                    NoteAnnualWrite(sheetKey);
                 }
             }
 
@@ -1387,6 +1445,11 @@ public sealed class RecalculationService(
         if (submittedNow is { Count: > 0 })
         {
             submittedWritten!.UnionWith(submittedNow);
+        }
+
+        if (yearNow is { Count: > 0 })
+        {
+            submittedYearWritten!.UnionWith(yearNow);
         }
 
         return applied;
@@ -1657,7 +1720,13 @@ public sealed class RecalculationService(
     /// </param>
     /// <param name="submittedByFlag">
     /// ✎ B79: куди скласти ПОДАНІ аркуші, які прогін пише саме через <paramref name="writeSubmitted"/> (не правка
-    /// погоджувача); <c>null</c> — не збирати.
+    /// погоджувача); <c>null</c> — не збирати. Аркуш під АГРЕГАТОМ року (<paramref name="annualPeriods"/>) сюди не
+    /// потрапляє: його подані місяці — у <paramref name="submittedMonths"/>.
+    /// </param>
+    /// <param name="submittedMonths">
+    /// ✎ B79: аркуш річної розкладки (гілки <paramref name="annualPeriods"/> і <paramref name="openAnchor"/>) → місяці
+    /// року, де він ПОДАНИЙ (прочитано під блокуваннями цього ж входу; правка погоджувача D-442 — без місяців);
+    /// <c>null</c> — не збирати.
     /// </param>
     private async Task<IReadOnlySet<(int SheetDefId, long? CopyId)>> EnterSheetsAsync(
         long documentId, PeriodKey periodKey, IEnumerable<(int SheetDefId, long? CopyId)> sheets,
@@ -1666,10 +1735,29 @@ public sealed class RecalculationService(
         IReadOnlyList<int>? annualPeriods = null,
         (IReadOnlyList<int> Months, IReadOnlySet<(int SheetDefId, long? CopyId)> Sheets,
             HashSet<(int SheetDefId, long? CopyId)> Writable)? openAnchor = null,
-        HashSet<(int SheetDefId, long? CopyId)>? submittedByFlag = null)
+        HashSet<(int SheetDefId, long? CopyId)>? submittedByFlag = null,
+        Dictionary<(int SheetDefId, long? CopyId), List<int>>? submittedMonths = null)
     {
         var writable = new HashSet<(int SheetDefId, long? CopyId)>();
         var holdsAny = false;
+
+        // ✎ B79: подані місяці аркуша річної розкладки — для позначки при записі не-місячної комірки.
+        void NoteSubmittedMonth((int SheetDefId, long? CopyId) sheet, int month, Domain.Enums.DocumentStatus monthStatus)
+        {
+            if (submittedMonths is null
+                || monthStatus != Domain.Enums.DocumentStatus.Submitted
+                || approverEditSheets?.Contains(sheet.SheetDefId) == true)
+            {
+                return;
+            }
+
+            if (!submittedMonths.TryGetValue(sheet, out var months))
+            {
+                submittedMonths[sheet] = months = [];
+            }
+
+            months.Add(month);
+        }
 
         bool Writable(Domain.Enums.DocumentStatus status, int sheetDefId)
             => status is not (Domain.Enums.DocumentStatus.Submitted or Domain.Enums.DocumentStatus.Approved)
@@ -1691,19 +1779,25 @@ public sealed class RecalculationService(
             }
 
             Domain.Enums.DocumentStatus status;
+
+            // ✎ B79: стан — агрегат року (закритий якір, B24): «поданий» тут не про період прогону, а про місяці.
+            var annualAggregate = false;
             if (annualPeriods is { Count: > 0 } && copyId is null)
             {
                 // ⛔ X6-02: чекати — лише перше блокування прогону; далі без черги (відмова відкочує запис).
                 var statuses = new List<Domain.Enums.DocumentStatus>(annualPeriods.Count);
                 foreach (var month in annualPeriods.Distinct().Order())
                 {
-                    statuses.Add(holdsAny
+                    var monthStatus = holdsAny
                         ? await sheetGate.EnterEditNoWaitAsync(documentId, sheetDefId, new PeriodKey(month), ct).ConfigureAwait(false)
-                        : await sheetGate.EnterEditAsync(documentId, sheetDefId, new PeriodKey(month), ct).ConfigureAwait(false));
+                        : await sheetGate.EnterEditAsync(documentId, sheetDefId, new PeriodKey(month), ct).ConfigureAwait(false);
+                    statuses.Add(monthStatus);
+                    NoteSubmittedMonth(sheet, month, monthStatus);
                     holdsAny = true;
                 }
 
                 status = Security.AnnualPeriodRule.AggregateStatus(statuses);
+                annualAggregate = true;
             }
             else if (openAnchor is { } anchorYear && copyId is null && anchorYear.Sheets.Contains(sheet))
             {
@@ -1718,6 +1812,7 @@ public sealed class RecalculationService(
                         : await sheetGate.EnterEditAsync(documentId, sheetDefId, new PeriodKey(month), ct).ConfigureAwait(false);
                     holdsAny = true;
                     statuses.Add(monthStatus);
+                    NoteSubmittedMonth(sheet, month, monthStatus);
                     if (month == periodKey.Value)
                     {
                         status = monthStatus;
@@ -1749,7 +1844,9 @@ public sealed class RecalculationService(
                 writable.Add(sheet);
 
                 // ✎ B79: поданий аркуш, який пишеться САМЕ через `writeSubmitted` (не правка погоджувача, D-442).
+                // Агрегат року «поданий» — не стан періоду прогону: позначку отримують подані місяці (`submittedMonths`).
                 if (status == Domain.Enums.DocumentStatus.Submitted
+                    && !annualAggregate
                     && approverEditSheets?.Contains(sheetDefId) != true)
                 {
                     submittedByFlag?.Add(sheet);

@@ -157,6 +157,10 @@ public sealed partial class FormulaRecalculationJob(
                 // ✎ B79 (правило людини 07.11: «пропускати лише погоджені; подані — з позначкою»): каскад пише й ПОДАНІ
                 // аркуші періоду (затверджені — ніколи). Тут — подані аркуші, у які прогін справді записав (після коміту).
                 var submittedWritten = new HashSet<(int SheetDefId, long? CopyId)>();
+
+                // ✎ B79: річна розкладка — подані МІСЯЦІ року, чиє не-місячне число прогін змінив (воно живе в якорі й
+                // пишеться за агрегатом року): позначка кожному такому місяцю, а не лише періоду прогону.
+                var submittedYearWritten = new HashSet<(int PeriodKey, int SheetDefId)>();
                 try
                 {
                     if (!item.Dirty.IsEmpty)
@@ -168,7 +172,7 @@ public sealed partial class FormulaRecalculationJob(
                             periodWritten += await recalculation
                                 .RecalculateAsync(
                                     instanceId, dirty, ct, changed, item.ApproverSheets, inputColumns, shared,
-                                    submittedWritten: submittedWritten)
+                                    submittedWritten: submittedWritten, submittedYearWritten: submittedYearWritten)
                                 .ConfigureAwait(false);
                         }
                     }
@@ -191,7 +195,7 @@ public sealed partial class FormulaRecalculationJob(
                             periodWritten += await recalculation
                                 .RecalculateFromOtherPeriodsAsync(
                                     documentId, periodKey, item.Sources, ct, changed, shared, annualPeriods,
-                                    submittedWritten: submittedWritten)
+                                    submittedWritten: submittedWritten, submittedYearWritten: submittedYearWritten)
                                 .ConfigureAwait(false);
                         }
                     }
@@ -231,10 +235,27 @@ public sealed partial class FormulaRecalculationJob(
 
                 // ✎ B79: поданий аркуш, у який каскад записав, — запис журналу й позначка «перераховано після подання»
                 // (той самий механізм, що B63/B83: `SheetRecalc/RecalculatedAfterSubmission`, читає картка документа).
+                // Подані місяці року (не-місячне число) — тим самим записом, за своїм періодом; місяць самого прогону, уже
+                // названий у `submittedWritten`, удруге не пишеться.
+                var marks = submittedYearWritten
+                    .GroupBy(m => m.PeriodKey)
+                    .ToDictionary(g => g.Key, g => g.Select(m => (m.SheetDefId, CopyId: (long?)null)).ToHashSet());
                 if (submittedWritten.Count > 0)
                 {
+                    if (marks.TryGetValue(slot, out var own))
+                    {
+                        own.UnionWith(submittedWritten);
+                    }
+                    else
+                    {
+                        marks[slot] = submittedWritten;
+                    }
+                }
+
+                foreach (var (markPeriod, markSheets) in marks.OrderBy(m => m.Key))
+                {
                     await SubmittedSheetRecalcLog
-                        .WriteAsync(db, audit, clock, documentId, slot, submittedWritten, ct)
+                        .WriteAsync(db, audit, clock, documentId, markPeriod, markSheets, ct)
                         .ConfigureAwait(false);
                 }
 

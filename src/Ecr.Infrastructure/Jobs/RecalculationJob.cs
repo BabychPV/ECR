@@ -891,8 +891,17 @@ public sealed partial class RecalculationJob(
         var recalculated = 0;
         var now = clock.UtcNow;
 
-        foreach (var (documentId, periods) in scopeByDocument.Where(pair => pair.Value.Length > 0))
+        foreach (var (documentId, scope) in scopeByDocument)
         {
+            // ✎ B79: не-місячне число річної розкладки змінює прогін якоря, а позначку отримують подані місяці РОКУ —
+            // вони можуть лежати поза областю прогону (кнопка за названий місяць, закритий якір B24 з порожньою областю).
+            // Затверджені поза областю в «пропущені» не йдуть: прогін їх і не мав рахувати.
+            var periods = scope.Union(changes.PeriodsOf(documentId)).ToArray();
+            if (periods.Length == 0)
+            {
+                continue;
+            }
+
             // ✎ F13 p218 #788: по СКОУПУ (аркуш × копія, RS) — подана копія перераховується з позначкою й записом журналу,
             // затверджена — пропускається із записом, так само як оригінал (правило людини 07.11).
             // ✎ B138: версія без погодження — нічого не «пропущено» й не «перераховано після подання».
@@ -914,6 +923,12 @@ public sealed partial class RecalculationJob(
 
                 // ✎ B79: поданий аркуш, у якому прогін не змінив жодного числа, — без запису й без позначки.
                 if (!approvedRow && !changes.Contains(documentId, row.PeriodKey, row.SheetDefId, row.SheetCopyId))
+                {
+                    continue;
+                }
+
+                // ✎ B79: затверджений аркуш періоду поза областю прогону (період додано лише заради поданих місяців року).
+                if (approvedRow && !scope.Contains(row.PeriodKey))
                 {
                     continue;
                 }
@@ -1018,15 +1033,23 @@ public sealed partial class RecalculationJob(
             // аркуші, де він справді записав змінену комірку, — другого читання для цього не треба.
             var submittedWritten = new HashSet<(int SheetDefId, long? CopyId)>();
 
+            // Річна розкладка: не-місячне число (якір, агрегат року) — поданим МІСЯЦЯМ року, а не періоду прогону.
+            var submittedYearWritten = new HashSet<(int PeriodKey, int SheetDefId)>();
+
             written += await formulas
                 .RecalculateAllAsync(
                     request.DocumentId, new PeriodKey(period), ct, request.SheetDefId, changed,
                     writeSubmitted: true,
                     annualPeriods: annualOnly?.GetValueOrDefault(period),
-                    submittedWritten: submittedWritten)
+                    submittedWritten: submittedWritten,
+                    submittedYearWritten: submittedYearWritten)
                 .ConfigureAwait(false);
 
             submittedChanges.AddRange(request.DocumentId, period, submittedWritten);
+            foreach (var (month, sheetDefId) in submittedYearWritten)
+            {
+                submittedChanges.Add(request.DocumentId, month, sheetDefId, sheetCopyId: null);
+            }
         }
 
         // ⛔ WW-03: прохід за зростанням коректний для читачів ПІЗНІШЕ за джерело (`[Period:-1]`,
