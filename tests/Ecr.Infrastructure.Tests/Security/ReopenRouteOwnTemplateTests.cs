@@ -1,6 +1,8 @@
 // tests/Ecr.Infrastructure.Tests/Security/ReopenRouteOwnTemplateTests.cs
 using Ecr.Application.Common;
 using Ecr.Application.Security;
+using Ecr.Domain.Entities.Configuration;
+using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Entities.Workflow;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
@@ -78,6 +80,69 @@ public sealed class ReopenRouteOwnTemplateTests(SqlServerFixture sql) : IDisposa
         finally
         {
             await CleanupAsync(doc, codes);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-5.17")]
+    [Trait("Decision", "B155")]
+    public async Task Зміна_версії_посеред_року_роль_повернення_з_версії_ЦЬОГО_місяця()
+    {
+        // ⛔ F13 AU (D2, вісь періоду): шкала проєкту — версія A з місяця 1, версія B з місяця 3 (як Land 1.0.17 → 1.0.18).
+        // Маршрут A — останній крок роль 1, маршрут B — роль 2. Повернення затвердженого аркуша місяця 3 вимагає ролі B.
+        // Роль із версії ІНШОГО місяця (A) — відмова. Чинна версія проєкту лишається A, тож «версія проєкту» теж червона.
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await builder.BuildAsync(PeriodKeyValue, rowCount: 1);
+        await builder.OpenPeriodAsync(doc);
+
+        string[] codes = [$"D2MA_{doc.ProjectId}", $"D2MB_{doc.ProjectId}"];
+        try
+        {
+            await using (var db = Context())
+            {
+                var later = new TemplateVersion(doc.TemplateId, $"9.{doc.ProjectId}.3", 1, Now);
+                db.TemplateVersions.Add(later);
+                await db.SaveChangesAsync();
+
+                db.ProjectTemplateVersions.Add(new ProjectTemplateVersion(doc.ProjectId, doc.TemplateId, 209901, doc.TemplateVersionId));
+                db.ProjectTemplateVersions.Add(new ProjectTemplateVersion(doc.ProjectId, doc.TemplateId, PeriodKeyValue, later.Id));
+                db.ApprovalRoutes.AddRange(
+                    Route(codes[0], doc.ProjectId, doc.TemplateVersionId, roleId: 1),
+                    Route(codes[1], doc.ProjectId, later.Id, roleId: 2));
+
+                var state = new ApprovalState(doc.DocumentId, doc.SheetDefId, PeriodKeyValue);
+                state.Submit(userId: 1, Now);
+                db.ApprovalStates.Add(state);
+                await db.SaveChangesAsync();
+            }
+
+            await using (var db = Context())
+            {
+                var state = await db.ApprovalStates.SingleAsync(
+                    a => a.DocumentId == doc.DocumentId && a.SheetDefId == doc.SheetDefId && a.PeriodKey == PeriodKeyValue);
+                state.Approve(userId: 2, Now);
+                await db.SaveChangesAsync();
+            }
+
+            await using (var db = Context())
+            {
+                var service = Service(db);
+                var withB = await service.CanReopenAsync(
+                    Profile(doc, roleId: 2), doc.DocumentId, doc.SheetDefId, doc.PeriodKey, CancellationToken.None);
+                Assert.True(withB.IsAllowed, $"Роль маршруту версії місяця 3 (B) має повертати: {withB.Reason} {withB.Detail}");
+
+                var withA = await service.CanReopenAsync(
+                    Profile(doc, roleId: 1), doc.DocumentId, doc.SheetDefId, doc.PeriodKey, CancellationToken.None);
+                Assert.False(withA.IsAllowed, "Роль маршруту версії місяця 1 (A) не має повертати аркуш місяця 3.");
+            }
+        }
+        finally
+        {
+            await CleanupAsync(doc, codes);
+            await using var db = Context();
+            await db.ProjectTemplateVersions.Where(t => t.ProjectId == doc.ProjectId).ExecuteDeleteAsync();
         }
     }
 
