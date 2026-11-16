@@ -57,6 +57,16 @@ public sealed class SubmittedSheetChanges
         }
     }
 
+    /// <summary>
+    /// Періоди документа, у яких є змінений поданий аркуш. Потрібні тому, що не-місячне число річної розкладки
+    /// змінюється прогоном ОДНОГО періоду (якоря), а позначку отримують подані місяці всього року — зокрема поза
+    /// областю прогону.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <returns>Ключі періодів за зростанням; порожньо — змін немає.</returns>
+    public IReadOnlyList<int> PeriodsOf(long documentId)
+        => [.. changed.Where(c => c.DocumentId == documentId).Select(c => c.PeriodKey).Distinct().Order()];
+
     /// <summary>Чи змінилося хоч одне число поданого аркуша — тобто чи ставити позначку.</summary>
     /// <param name="documentId">Документ.</param>
     /// <param name="periodKey">Період.</param>
