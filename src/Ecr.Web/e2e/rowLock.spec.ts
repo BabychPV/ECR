@@ -1,4 +1,4 @@
-import { expect, test, type Browser, type BrowserContext } from '@playwright/test';
+import { expect, test, type APIResponse, type Browser, type BrowserContext } from '@playwright/test';
 
 /**
  * B139 (B75 lane 2) проти РЕАЛЬНОГО сервера стенда (`tools/e2e-stand.ps1`, workflow `e2e-stand`, `-Grep rowLock`):
@@ -8,7 +8,8 @@ import { expect, test, type Browser, type BrowserContext } from '@playwright/tes
  *    «по» і блокує: `POST …/row-locks` 200, у першій комірці рядка — значок замка, у рядку кнопок — «Locked rows: 1»;
  *  - `e2e-operator` (Write на проєкт, без права) бачить той самий значок, кнопки «Lock rows…» у нього немає, а
  *    правка комірки заблокованого рядка — 403 з причиною `RowLocked`;
- *  - `e2e-admin` знімає блокування з переліку: `DELETE …/row-locks/{id}` 204, значок зникає, оператор знову править.
+ *  - `e2e-admin` знімає блокування з переліку: `DELETE …/row-locks/{id}` 204, значок зникає, оператор знову править;
+ *  - ✎ B143: `e2e-operator` як ВЛАСНИК власного документа (без права) бачить «Lock rows…» і блокує рядок — другий тест.
  *
  * ⛔ Без стенда файл ПАДАЄ (`beforeAll`), а не пропускається (honesty-guard, `globalSetup.ts`).
  *
@@ -43,6 +44,12 @@ interface RowLock {
   isActive: boolean;
 }
 
+interface DocumentCard {
+  projectId: number;
+  ownerUserId: number | null;
+  canLockRows?: boolean | null;
+}
+
 async function signedIn(browser: Browser, user: { userName: string; password: string }): Promise<BrowserContext> {
   const context = await browser.newContext();
   const login = await context.request.post('/api/v1/login/local', {
@@ -53,9 +60,9 @@ async function signedIn(browser: Browser, user: { userName: string; password: st
   return context;
 }
 
-async function sliceOf(context: BrowserContext, tableInstanceId: number): Promise<Slice> {
+async function sliceOf(context: BrowserContext, tableInstanceId: number, documentId: string = DocumentId): Promise<Slice> {
   const response = await context.request.get(
-    `/api/v1/documents/${DocumentId}/tables/${String(tableInstanceId)}?periodKey=${PeriodKey}`,
+    `/api/v1/documents/${documentId}/tables/${String(tableInstanceId)}?periodKey=${PeriodKey}`,
   );
   expect(response.ok(), `GET slice: ${String(response.status())}`).toBe(true);
 
@@ -76,12 +83,36 @@ async function patchCell(context: BrowserContext, tableInstanceId: number, rowKe
   });
 }
 
-async function releaseAll(context: BrowserContext): Promise<void> {
-  const list = await context.request.get(`/api/v1/documents/${DocumentId}/row-locks?periodKey=${PeriodKey}`);
+async function releaseAll(context: BrowserContext, documentId: string = DocumentId): Promise<void> {
+  const list = await context.request.get(`/api/v1/documents/${documentId}/row-locks?periodKey=${PeriodKey}`);
   if (!list.ok()) return;
   for (const lock of (await list.json()) as RowLock[]) {
-    await context.request.delete(`/api/v1/documents/${DocumentId}/row-locks/${String(lock.id)}`);
+    await context.request.delete(`/api/v1/documents/${documentId}/row-locks/${String(lock.id)}`);
   }
+}
+
+/** Картка документа за період стенда — те саме `GET`, яке робить сторінка документа (B143: `canLockRows`). */
+async function cardOf(context: BrowserContext, documentId: string): Promise<DocumentCard> {
+  const response = await context.request.get(`/api/v1/documents/${documentId}?periodKey=${PeriodKey}`);
+  expect(response.ok(), `GET document ${documentId}: ${String(response.status())} ${await response.text()}`).toBe(true);
+
+  return (await response.json()) as DocumentCard;
+}
+
+/**
+ * Повертає власність документа стенда (B143). Початкового власника заводить генератор до появи користувачів стенда, і
+ * він може не мати Write на проєкт — тоді сервер відмовляє `422` «The new owner needs write access to the project».
+ * Як у `documentParticipantsLive`: у такому разі власником стає `e2e-admin` (не e2e-operator — базова лінія «оператор
+ * документом стенда не володіє» лишається).
+ */
+async function restoreOwner(admin: BrowserContext, originalOwner: number | null): Promise<APIResponse> {
+  if (originalOwner !== null) {
+    const back = await admin.request.post(`/api/v1/documents/${DocumentId}/owner`, { data: { newOwnerUserId: originalOwner } });
+    if (back.status() !== 422) return back;
+  }
+  const me = (await (await admin.request.get('/api/v1/me')).json()) as { userId: number };
+
+  return admin.request.post(`/api/v1/documents/${DocumentId}/owner`, { data: { newOwnerUserId: me.userId } });
 }
 
 /** Дата `YYYY-MM-DD` через `days` днів від сьогодні (UTC; запас у тиждень перекриває різницю поясу проєкту). */
@@ -213,6 +244,119 @@ test.describe('rowLock: блокування рядків документа н�
     } finally {
       await admin.close();
       await operator.close();
+    }
+  });
+
+  /*
+   * ✎ B143 (D-538): ВЛАСНИК документа без права `Document.RowLock` блокує рядки свого документа.
+   *
+   * `e2e-operator` (Write на проєкт 1, права `Document.RowLock` немає) документом стенда не володіє. Тест на свій час
+   * передає йому власність документа стенда (`POST …/owner`, як `documentParticipantsLive`) і повертає її у `finally`:
+   *  - до передачі картка оператора: `canLockRows = false`, кнопки «Lock rows…» немає;
+   *  - власником: `canLockRows = true`, кнопку видно, блокування через діалог — `POST …/row-locks` 200, значок є;
+   *  - після повернення власності: знову `false` і без кнопки.
+   * Нових облікових записів, ролей і документів немає.
+   *
+   * ⚠ Перша версія заводила оператору ВЛАСНИЙ документ через API — локальний стенд показав, що так не можна: таблиці
+   * шаблону стенда (`Ecr.DataGen`) мають `RowMode = Fixed` без рядків шаблону (рядки документа стенда вставляє
+   * генератор), тож у новому документі рядків немає і додати їх не можна (`409 ECR-ROW-0409`).
+   */
+  test('B143: власник без права Document.RowLock блокує рядок свого документа; не власником кнопки немає', async ({
+    browser,
+  }) => {
+    const admin = await signedIn(browser, Admin);
+    const operator = await signedIn(browser, Operator);
+    let originalOwner: number | null = null;
+    let moved = false;
+
+    try {
+      // ── 0. Оператор: права немає, документом стенда не володіє, сервер блокувати не дає ───────
+      await releaseAll(admin);
+      const meResponse = await operator.request.get('/api/v1/me');
+      expect(meResponse.ok(), `GET /me: ${String(meResponse.status())}`).toBe(true);
+      const me = (await meResponse.json()) as { userId: number; permissions: string[] };
+      expect(me.permissions, 'e2e-operator отримав Document.RowLock — тест власника втратив сенс').not.toContain('Document.RowLock');
+
+      const before = await cardOf(operator, DocumentId);
+      originalOwner = before.ownerUserId;
+      expect(originalOwner, 'e2e-operator уже власник документа стенда: порівнювати ні з чим').not.toBe(me.userId);
+      expect(before.canLockRows, 'картка не власника без права: canLockRows').toBe(false);
+
+      const page = await operator.newPage();
+      await page.goto(`/documents/${DocumentId}?periodKey=${PeriodKey}`);
+      const grid = page.locator('revo-grid').first();
+      const firstCell = grid.locator('revogr-data .rgCell').first();
+      await expect(firstCell, 'рядки сітки не завантажилися').toBeVisible({ timeout: 60_000 });
+      await expect(page.locator('[data-row-lock-open]'), 'не власник без права бачить «Lock rows…»').toHaveCount(0);
+
+      // ── 1. Власність документа стенда — операторові ───────────────────────────────────────────
+      const transfer = await admin.request.post(`/api/v1/documents/${DocumentId}/owner`, { data: { newOwnerUserId: me.userId } });
+      expect(transfer.ok(), `POST owner → e2e-operator: ${String(transfer.status())} ${await transfer.text()}`).toBe(true);
+      moved = true;
+
+      const owned = await cardOf(operator, DocumentId);
+      expect(owned.ownerUserId, 'власність не перейшла до e2e-operator').toBe(me.userId);
+      expect(owned.canLockRows, 'картка власника без права: canLockRows').toBe(true);
+
+      // ── 2. Власник без права бачить «Lock rows…» і блокує рядок через діалог ──────────────────
+      await page.reload();
+      await expect(firstCell, 'рядки сітки не завантажилися після перезавантаження').toBeVisible({ timeout: 60_000 });
+      const lockButton = page.locator('[data-row-lock-open]').first();
+      await expect(lockButton, 'кнопки «Lock rows…» немає у власника документа без права Document.RowLock').toBeVisible({
+        timeout: 30_000,
+      });
+      await firstCell.click();
+      await expect(lockButton).toBeEnabled({ timeout: 15_000 });
+      await lockButton.click();
+
+      const dialog = page.getByRole('dialog');
+      await expect(dialog).toBeVisible({ timeout: 30_000 });
+      const save = dialog.locator('[data-row-lock-save]');
+      const until = dialog.getByRole('textbox', { name: /^To/ });
+      await until.fill(dayFromNow(7));
+      await until.press('Tab');
+      await expect(save).toBeEnabled({ timeout: 15_000 });
+
+      const created = page.waitForResponse(
+        (response) =>
+          response.request().method() === 'POST' && new URL(response.url()).pathname === `/api/v1/documents/${DocumentId}/row-locks`,
+        { timeout: 60_000 },
+      );
+      await save.click();
+      const createdResponse = await created;
+      expect(createdResponse.status(), `POST row-locks (власник без права): ${await createdResponse.text()}`).toBe(200);
+      const lock = ((await createdResponse.json()) as RowLock[])[0];
+      if (lock === undefined) throw new Error('POST row-locks не повернув блокування');
+
+      await expect(dialog).toBeHidden({ timeout: 30_000 });
+      await expect(grid.locator(`[data-row-lock-badge="${String(lock.id)}"]`), 'значка замка у власника немає').toBeVisible({
+        timeout: 30_000,
+      });
+
+      // ── 3. Власність повернуто: той самий оператор знову без кнопки ───────────────────────────
+      await releaseAll(admin);
+      const back = await restoreOwner(admin, originalOwner);
+      expect(back.ok(), `POST owner → назад: ${String(back.status())} ${await back.text()}`).toBe(true);
+      moved = false;
+      const after = await cardOf(operator, DocumentId);
+      expect(after.canLockRows, 'картка після повернення власності: canLockRows').toBe(false);
+      await page.reload();
+      await expect(firstCell, 'рядки сітки не завантажилися після повернення власності').toBeVisible({ timeout: 60_000 });
+      await expect(page.locator('[data-row-lock-open]'), 'після повернення власності кнопка лишилась').toHaveCount(0);
+      await page.close();
+    } finally {
+      try {
+        // Базова лінія для решти файлів: без блокувань і з початковим власником.
+        await releaseAll(admin);
+        if (moved) {
+          const back = await restoreOwner(admin, originalOwner);
+          // `soft`: відмова прибирання не має перекривати причину падіння самого тесту.
+          expect.soft(back.ok(), `повернення власності документа стенда: ${String(back.status())} ${await back.text()}`).toBe(true);
+        }
+      } finally {
+        await admin.close();
+        await operator.close();
+      }
     }
   });
 });
