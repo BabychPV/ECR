@@ -531,23 +531,31 @@ public sealed partial class ReportViewStableTests(SqlServerFixture sql)
                 .Select(r => ((int)r[0]!, (decimal?)r[1], (decimal?)r[2])).ToList());
 
         // З мапою (cfg.ColumnRename): обидва імені, однакові дані - обʼєднання даних обох ідентифікаторів.
-        await using (var db = sql.CreateContext())
+        // Спільна база колекції (правило 394): пари прибираються у finally.
+        try
         {
-            db.ColumnRenames.Add(new ColumnRename(v1.Cols["OLD"], v2.Cols["NEW"]));
-            db.ColumnRenameProjects.Add(new ColumnRenameProject(v1.Cols["OLD"], v2.Cols["NEW"], p.ProjectId));   // B129: як перенос проєкту
-            await db.SaveChangesAsync();
+            await using (var db = sql.CreateContext())
+            {
+                db.ColumnRenames.Add(new ColumnRename(v1.Cols["OLD"], v2.Cols["NEW"]));
+                db.ColumnRenameProjects.Add(new ColumnRenameProject(v1.Cols["OLD"], v2.Cols["NEW"], p.ProjectId));   // B129: як перенос проєкту
+                await db.SaveChangesAsync();
+            }
+
+            var again = await ExecStableAsync(v2.VersionId);
+            Assert.Contains(again, r => r.View == stable && r.Action != "Unchanged");
+            Assert.Equal(
+                [(202609, (decimal?)5m, (decimal?)5m), (202610, 7m, 7m)],
+                (await RowsAsync(stable, p.ProjectId, "_PeriodKey", "OLD", "NEW"))
+                    .Select(r => ((int)r[0]!, (decimal?)r[1], (decimal?)r[2])).ToList());
+            Assert.Equal(["OLD", "KEEP", "NEW"], await UserColumnsAsync(stable));   // за першою появою
+
+            // Ідемпотентність і без побічних ефектів на _vN.
+            Assert.All(await ExecStableAsync(v2.VersionId), r => Assert.Equal("Unchanged", r.Action));
         }
-
-        var again = await ExecStableAsync(v2.VersionId);
-        Assert.Contains(again, r => r.View == stable && r.Action != "Unchanged");
-        Assert.Equal(
-            [(202609, (decimal?)5m, (decimal?)5m), (202610, 7m, 7m)],
-            (await RowsAsync(stable, p.ProjectId, "_PeriodKey", "OLD", "NEW"))
-                .Select(r => ((int)r[0]!, (decimal?)r[1], (decimal?)r[2])).ToList());
-        Assert.Equal(["OLD", "KEEP", "NEW"], await UserColumnsAsync(stable));   // за першою появою
-
-        // Ідемпотентність і без побічних ефектів на _vN.
-        Assert.All(await ExecStableAsync(v2.VersionId), r => Assert.Equal("Unchanged", r.Action));
+        finally
+        {
+            await DeleteRenamesAsync(v1.Cols["OLD"]);
+        }
     }
 
     /// <summary>
@@ -585,23 +593,44 @@ public sealed partial class ReportViewStableTests(SqlServerFixture sql)
         Assert.Equal([(202610, (decimal?)7m)], await ReadAsync(newName));
 
         // Мапа, яку пише перенос із tableRenames: пара колонок з ТИМ САМИМ кодом, але різних таблиць.
-        await using (var db = sql.CreateContext())
+        // Спільна база колекції (правило 394): пари прибираються у finally.
+        try
         {
-            db.ColumnRenames.Add(new ColumnRename(v1.Cols["X"], v2.Cols["X"]));
-            db.ColumnRenameProjects.Add(new ColumnRenameProject(v1.Cols["X"], v2.Cols["X"], p.ProjectId));   // B129: як перенос проєкту
-            await db.SaveChangesAsync();
+            await using (var db = sql.CreateContext())
+            {
+                db.ColumnRenames.Add(new ColumnRename(v1.Cols["X"], v2.Cols["X"]));
+                db.ColumnRenameProjects.Add(new ColumnRenameProject(v1.Cols["X"], v2.Cols["X"], p.ProjectId));   // B129: як перенос проєкту
+                await db.SaveChangesAsync();
+            }
+
+            var again = await ExecStableAsync(v2.VersionId);
+            Assert.Contains(again, r => r.View == oldName && r.Action != "Unchanged");
+            Assert.Contains(again, r => r.View == newName && r.Action != "Unchanged");
+
+            List<(int, decimal?)> both = [(202609, 5m), (202610, 7m)];
+            Assert.Equal(both, await ReadAsync(oldName));
+            Assert.Equal(both, await ReadAsync(newName));
+            Assert.Equal(["X"], await UserColumnsAsync(oldName));
+
+            Assert.All(await ExecStableAsync(v2.VersionId), r => Assert.Equal("Unchanged", r.Action));
         }
+        finally
+        {
+            await DeleteRenamesAsync(v1.Cols["X"]);
+        }
+    }
 
-        var again = await ExecStableAsync(v2.VersionId);
-        Assert.Contains(again, r => r.View == oldName && r.Action != "Unchanged");
-        Assert.Contains(again, r => r.View == newName && r.Action != "Unchanged");
-
-        List<(int, decimal?)> both = [(202609, 5m), (202610, 7m)];
-        Assert.Equal(both, await ReadAsync(oldName));
-        Assert.Equal(both, await ReadAsync(newName));
-        Assert.Equal(["X"], await UserColumnsAsync(oldName));
-
-        Assert.All(await ExecStableAsync(v2.VersionId), r => Assert.Equal("Unchanged", r.Action));
+    /// <summary>Прибирає пари перейменування (спершу прив'язки проєктів, потім самі пари) за колонками «з».</summary>
+    private async Task DeleteRenamesAsync(params int[] fromColumnIds)
+    {
+        var ids = string.Join(",", fromColumnIds.Select(i => i.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+#pragma warning disable CA2100 // лише цілі Id колонок тесту
+        command.CommandText = $"DELETE FROM cfg.ColumnRenameProject WHERE FromColumnDefId IN ({ids}); DELETE FROM cfg.ColumnRename WHERE FromColumnDefId IN ({ids});";
+#pragma warning restore CA2100
+        await command.ExecuteNonQueryAsync();
     }
 
 
