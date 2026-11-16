@@ -846,6 +846,15 @@ export function useSheetActions({
   const grant = effectiveGrant(me, summary?.projectId ?? null, sheetDefId);
 
   /**
+   * ✎ B139 (B75): версія шаблону «без подання й затвердження» (`DocumentSummary.workflowMode = 'None'`) — подання,
+   * затвердження, повернення й відкликання не показуються зовсім: сервер на них відповів би відмовою, а значення
+   * звітність бачить одразу після збереження. Захист даних у такому шаблоні — блокування рядків, не стан аркуша.
+   * ⚠ «Reopen» лишається за станом аркуша: документ, перенесений на таку версію з поданими аркушами, інакше не
+   * мав би шляху назад у чернетку.
+   */
+  const workflowOff = summary?.workflowMode === 'None';
+
+  /**
    * Чи пропустить сервер дію робочого процесу цієї людини.
    *
    * ⚠ Симуляція відмовляється ПЕРШОЮ — так само, як у сервера: `CanSubmit`,
@@ -919,7 +928,7 @@ export function useSheetActions({
   // Перша відповідь у дорозі (без підставних даних) — лише ПЕРША спроба: збій із повторами не тримає скелет
   // (див. `DocumentActionBar`). Профілю ще немає — право невідоме, тож місце «Подати» тримається.
   const submitPending =
-    submissionTarget.isLoading && submissionTarget.failureCount === 0 && (me === undefined || maySubmit);
+    !workflowOff && submissionTarget.isLoading && submissionTarget.failureCount === 0 && (me === undefined || maySubmit);
 
   /*
    * ⚠ D-440: правило чотирьох очей скасоване — автор подання з потрібною роллю
@@ -1121,7 +1130,7 @@ export function useSheetActions({
             recalcBlockedReason !== null ? showWarning(recalcBlockedReason) : settled.run(() => recalculate.mutateAsync(here)),
         }
       : null,
-    submit: canSubmit && submitPeriod !== null
+    submit: !workflowOff && canSubmit && submitPeriod !== null
       ? {
           loading: submitLoading || settled.settling,
           periodKey: submitPeriod,
@@ -1143,10 +1152,10 @@ export function useSheetActions({
         }
       : null,
     submitPending,
-    approve: canApprove ? { loading: decideLoading || settled.settling, ask: () => askFresh('approve') } : null,
-    reject: canReject ? { ask: () => askFresh('reject') } : null,
+    approve: !workflowOff && canApprove ? { loading: decideLoading || settled.settling, ask: () => askFresh('approve') } : null,
+    reject: !workflowOff && canReject ? { ask: () => askFresh('reject') } : null,
     reopen: canReopen ? { ask: () => askFresh('reopen') } : null,
-    recall: canRecall ? { ask: () => askFresh('recall') } : null,
+    recall: !workflowOff && canRecall ? { ask: () => askFresh('recall') } : null,
     stale: statusStale,
     dialogs,
   };

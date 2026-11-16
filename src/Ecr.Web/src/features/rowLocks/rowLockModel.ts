@@ -76,14 +76,34 @@ export const MaxNoteLength = 400;
  * ⚠ Лише те, що видно без сервера: порожні рядки чи дати й кінець раніше за початок. «У минулому» і «довше
  * 10 років» рахує сервер у часовому поясі ПРОЄКТУ (`lockRangeInvalid`) — клієнт його не знає і не вгадує.
  */
-export function lockFormError(form: LockForm): string | null {
-  if (form.rowKeys.length === 0) return 'rowLock.errorNoRows';
-  if (parseDateOnly(form.fromDate) === null || parseDateOnly(form.toDate) === null) return 'rowLock.errorDates';
+export function lockFormError(form: LockForm): LockFormError | null {
+  if (form.rowKeys.length === 0) return 'noRows';
+  if (parseDateOnly(form.fromDate) === null || parseDateOnly(form.toDate) === null) return 'dates';
   // `yyyy-MM-dd` порівнюється рядком так само, як датою.
-  if (form.toDate < form.fromDate) return 'rowLock.errorRange';
-  if (form.note.length > MaxNoteLength) return 'rowLock.errorNote';
+  if (form.toDate < form.fromDate) return 'range';
+  if (form.note.length > MaxNoteLength) return 'note';
 
   return null;
+}
+
+/** Що не так із формою (перша помилка). */
+export type LockFormError = 'noRows' | 'dates' | 'range' | 'note';
+
+/**
+ * Текст помилки форми. ⚠ Ключі — літералами в кожній гілці, а не `t(змінна)`: сторож ключів каталогу рахує місця з
+ * динамічним ключем, і літерал дає перевірити, що текст є в сіді.
+ */
+export function lockFormErrorText(error: LockFormError): string {
+  switch (error) {
+    case 'noRows':
+      return t('rowLock.errorNoRows');
+    case 'dates':
+      return t('rowLock.errorDates');
+    case 'range':
+      return t('rowLock.errorRange');
+    case 'note':
+      return t('rowLock.errorNote', { max: MaxNoteLength });
+  }
 }
 
 /** Тіло `POST …/row-locks` із форми (порожня примітка — `null`). */

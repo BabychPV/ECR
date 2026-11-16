@@ -14,10 +14,12 @@ import { showApiError } from '@/shared/ui/notify';
  * ✎ B139: блокування рядків документа за період — ОДИН запит на документ і період (той самий ключ у кожної сітки
  * аркуша, TanStack зводить їх в один).
  */
-export function useRowLocks(documentId: number, periodKey: number): UseQueryResult<RowLockDto[]> {
+export function useRowLocks(documentId: number, periodKey: number, enabled = true): UseQueryResult<RowLockDto[]> {
   return useQuery({
     queryKey: rowLocksKey(documentId, periodKey),
     queryFn: () => getRowLocks(documentId, periodKey),
+    // Сітка поза сторінкою документа (без кодів аркуша й таблиці) блокувань не питає.
+    enabled,
     // Блокування міняються рідко; свіжість тримає інвалідація після власних дій і перезапит при фокусі вікна.
     staleTime: 30_000,
   });

@@ -4,7 +4,7 @@ import { Button, Group, List, Modal, Stack, Text, Textarea } from '@mantine/core
 import { DateOnlyInput } from '@/shared/dates/DateInputWithStyles';
 import { todayDateOnly } from '@/shared/format/dateOnly';
 import { t } from '@/shared/i18n';
-import { lockFormError, lockRequest, MaxNoteLength, type LockForm, type LockTable } from './rowLockModel';
+import { lockFormError, lockFormErrorText, lockRequest, MaxNoteLength, type LockForm, type LockTable } from './rowLockModel';
 import { useCreateRowLocks } from './useRowLocks';
 
 /** Рядок, який блокуємо: ключ для запиту й назва для людини (підпис або «рядок N», без технічного ключа). */
@@ -97,7 +97,7 @@ export default function RowLockDialog({ documentId, periodKey, table, rows, onCl
 
         {error !== null && toDate !== '' && (
           <Text size="sm" c="statusError" role="alert" data-row-lock-error>
-            {t(error, { max: MaxNoteLength })}
+            {lockFormErrorText(error)}
           </Text>
         )}
 

@@ -432,6 +432,8 @@ export function SheetTables({
                 tableDefId={table.tableDefId}
                 sheetDefId={table.sheetDefId}
                 sheetCopyId={table.sheetCopyId ?? null}
+                sheetCode={table.sheetCode}
+                tableCode={table.tableCode}
                 periodKey={periodKey}
                 periodEnd={periodEnd}
                 readOnly={readOnly}
