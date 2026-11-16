@@ -1,4 +1,5 @@
 import type { ColumnDto, TableSliceDto } from '@/api/types';
+import { formatMonthName } from '@/shared/format/period';
 import { t } from '@/shared/i18n';
 import { overridesFormula } from './formulaOverride';
 
@@ -151,6 +152,12 @@ export function decide(slice: TableSliceDto, rowKey: string, column: ColumnDto):
   // даних» — і те, і те означає «дивись локальну евристику нижче».
   if (permission !== undefined && permission !== 'None') {
     const reason = reasonOf(permission);
+    if (reason === 'DependentMonthsLocked') {
+      const decision = deny(reason);
+      const detail = dependentMonthsDetail(dependentMonthsOf(slice, column.code));
+
+      return detail === '' ? decision : { ...decision, hint: `${decision.hint} ${detail}` };
+    }
 
     return reason === null
       ? { editable: false, reason: null, hint: t('deny.Unknown', { reason: permission }) }
@@ -224,6 +231,30 @@ export function addRowDenialOf(slice: TableSliceDto): { reason: DenyReason; hint
   }
 
   return found === null ? null : { reason: found, hint: deny(found).hint };
+}
+
+/** ✎ B79 (квіз 16.11): аркуш, чиї затверджені місяці залежать від стовпця (`dependentMonths` зрізу, `sheets` відмови 403). */
+export interface DependentMonthsBlock {
+  readonly sheetCode: string;
+  /** Ключі періодів `Рік*100+№`. */
+  readonly months: readonly number[];
+}
+
+/** Аркуші й місяці, що замикають колонку зрізу (`dependentMonths`); порожньо — немає. */
+export function dependentMonthsOf(slice: TableSliceDto, columnCode: string): readonly DependentMonthsBlock[] {
+  return slice.dependentMonths?.[columnCode] ?? [];
+}
+
+/**
+ * ✎ B79 (квіз 16.11, людина: «і користувач має побачити чому»): «SHEET_B: березень; SHEET_C: січень, квітень» — аркуші,
+ * чиї ЗАТВЕРДЖЕНІ місяці залежать від стовпця; назви місяців — з каталогу (`periods.month.N`), без нового ключа.
+ * Порожньо — аркушів немає (підказка лишається звичайною).
+ */
+export function dependentMonthsDetail(blocks: readonly DependentMonthsBlock[]): string {
+  return blocks
+    .filter((block) => block.months.length > 0)
+    .map((block) => `${block.sheetCode}: ${block.months.map((key) => formatMonthName(key % 100)).join(', ')}`)
+    .join('; ');
 }
 
 function deny(reason: DenyReason): CellDecision {

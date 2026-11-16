@@ -2,7 +2,7 @@ import { EcrApiError, type RequiredInputCell } from '@/api/client';
 import type { TableSliceDto } from '@/api/types';
 import type { PendingEdit } from './useCellPatch';
 import { problemText } from '@/shared/ui/problemText';
-import { decide, denyText } from './permissions';
+import { decide, denyText, dependentMonthsDetail, type DependentMonthsBlock } from './permissions';
 import { columnIndexOf } from './rowIndex';
 
 /**
@@ -154,7 +154,28 @@ export function deniedCellReasons(
   const [only] = attempted;
   if (attempted.length !== 1 || only === undefined) return [];
 
-  return [{ rowKey: only.rowKey, columnCode: only.columnCode, message: denyText(reason) ?? refusalText(error) }];
+  const text = denyText(reason) ?? refusalText(error);
+  // ✎ B79 (квіз 16.11): відмова за затвердженими місяцями називає аркуші й місяці (`sheets` відмови).
+  const detail = reason === 'DependentMonthsLocked' ? dependentMonthsDetail(dependentSheetsOf(error)) : '';
+
+  return [{ rowKey: only.rowKey, columnCode: only.columnCode, message: detail === '' ? text : `${text} ${detail}` }];
+}
+
+/**
+ * ✎ B79 (квіз 16.11): `sheets` відмови `DependentMonthsLocked` — `[{ sheetCode, months }]`; некоректні елементи
+ * відкидаються, відсутнє поле — порожньо (повторна перевірка під замками аркушів не знає аркушів-читачів).
+ */
+export function dependentSheetsOf(error: unknown): readonly DependentMonthsBlock[] {
+  const raw = error instanceof EcrApiError ? error.problem.extensions2?.['sheets'] : undefined;
+  if (!Array.isArray(raw)) return [];
+
+  return (raw as unknown[]).flatMap((item) => {
+    if (typeof item !== 'object' || item === null) return [];
+    const { sheetCode, months } = item as Record<string, unknown>;
+    if (typeof sheetCode !== 'string' || !Array.isArray(months)) return [];
+
+    return [{ sheetCode, months: (months as unknown[]).filter((m): m is number => typeof m === 'number') }];
+  });
 }
 
 /** Скільки комірок відхилено (`deniedCount` відмови), інакше — скільки названо. */

@@ -89,7 +89,19 @@ public sealed record TableSliceDto(
     /// (більшість зрізів, нуль байтів і нуль звернень). Лише видимі колонки.
     /// </summary>
     public IReadOnlyDictionary<string, CellCalcErrorDto>? CalcErrors { get; init; }
+
+    /// <summary>
+    /// ✎ B79 (квіз 16.11, людина: «і користувач має побачити чому»): видимі стовпці з відмовою
+    /// <c>DependentMonthsLocked</c> → аркуші, чиї затверджені місяці від них залежать, з місяцями (ключі періодів).
+    /// Ключ — код колонки. <c>null</c> — таких стовпців у зрізі немає (більшість зрізів, нуль байтів).
+    /// </summary>
+    public IReadOnlyDictionary<string, IReadOnlyList<DependentMonthsBlockDto>>? DependentMonths { get; init; }
 }
+
+/// <summary>✎ B79 (квіз 16.11): аркуш, чиї затверджені місяці залежать від стовпця.</summary>
+/// <param name="SheetCode">Код аркуша-читача.</param>
+/// <param name="Months">Ключі періодів затверджених місяців аркуша (<c>Рік*100+№</c>), за зростанням.</param>
+public sealed record DependentMonthsBlockDto(string SheetCode, IReadOnlyList<int> Months);
 
 /// <summary>✎ C-1 (D-475): стан помилки формули комірки зрізу.</summary>
 /// <param name="Kind"><c>Error</c> — власна помилка; <c>Blocked</c> — не оновлено через помилку в <paramref name="Source"/>.</param>
