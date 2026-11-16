@@ -89,7 +89,7 @@ function show(refusal: { status: number; messageKey: string }, locks: RowLockDto
           {
             title: 'Refused',
             status: refusal.status,
-            errorCode: refusal.status === 403 ? 'ECR-DOC-0403' : 'ECR-DOC-0409',
+            errorCode: refusal.status === 403 ? 'ECR-ACCS-0403' : 'ECR-ROW-0409',
             messageKey: refusal.messageKey,
             correlationId: 'c1',
           },
@@ -129,8 +129,8 @@ afterEach(() => {
 
 describe('RowLockControl: відмова сервера (B139, F13 b)', () => {
   it.each([
-    { status: 403, messageKey: 'err.ECR-DOC-0403.rowLockDenied' },
-    { status: 409, messageKey: 'err.ECR-DOC-0409.rowAlreadyLocked' },
+    { status: 403, messageKey: 'err.ECR-ACCS-0403.rowLockDenied' },
+    { status: 409, messageKey: 'err.ECR-ROW-0409.rowAlreadyLocked' },
   ])('POST → $status: причина показана, діалог відкритий із введеним, кнопка знову доступна', async (refusal) => {
     show(refusal);
     act(() => publishFocus(TableInstanceId, PeriodKey, { rowIndex: 0, columnCode: 'A' } as never));
@@ -173,7 +173,7 @@ describe('RowLockControl: відмова сервера (B139, F13 b)', () => {
   });
 
   it('DELETE → 403: причина показана, рядок блокування в переліку лишився, «Зняти» знову доступна', async () => {
-    show({ status: 403, messageKey: 'err.ECR-DOC-0403.rowLockDenied' }, [Lock]);
+    show({ status: 403, messageKey: 'err.ECR-ACCS-0403.rowLockDenied' }, [Lock]);
 
     fireEvent.click(await screen.findByRole('button', { name: /rowLock\.listAction/ }));
     const release = await screen.findByRole('button', { name: /rowLock\.release/ });
