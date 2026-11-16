@@ -217,7 +217,12 @@ export function PresentationEditor({
         <Button
           disabled={pending.length === 0}
           loading={patch.isPending}
-          onClick={() => patch.mutate(pending)}
+          onClick={() => {
+            // B149 (KIT §6.9): другий шар — діалог, що закрився (`column = null`), або запит у дорозі не шлють
+            // патч удруге, навіть якщо `disabled` колись перестане цього не допускати.
+            if (column === null || patch.isPending || pending.length === 0) return;
+            patch.mutate(pending);
+          }}
         >
           {t('common.save')}
         </Button>
