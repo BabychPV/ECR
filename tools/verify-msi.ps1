@@ -355,6 +355,18 @@ Test-Case 'S7. ECR/logs/config — захищений SDDL з власником
     if ($grant[0][1] -notmatch 'SERVICE_ACCOUNT') { throw "умова EcrLogsServiceAccountGrant '$($grant[0][1])' — без SERVICE_ACCOUNT" }
 }
 
+# PT-3 (пентест 2026-11, B141): SERVICE_ACCOUNT — Secure-властивість і доходить до привілейованої частини
+# (icacls /grant від SYSTEM, StartName служб). Умови `Installed OR …` для встановленого продукту завжди істинні,
+# тож відновлення не-адміністратором (Windows до оновлень вересня 2024 його підвищувала сама) могло підмінити
+# обліковий запис. Пакет мусить мати БЕЗУМОВНУ умову запуску AdminUser — без `Installed OR`.
+Test-Case 'S8. Умова запуску AdminUser без «Installed OR» — відновлення лише адміністратором (PT-3)' {
+    $conditions = Get-MsiRows 'SELECT `Condition` FROM `LaunchCondition`' 1
+    $plain = @($conditions | Where-Object { $_[0].Trim() -eq 'AdminUser' })
+    if ($plain.Count -ne 1) {
+        throw "LaunchCondition: рядків 'AdminUser' $($plain.Count), очікували 1 (є: $(@($conditions | ForEach-Object { $_[0] }) -join ' | '))"
+    }
+}
+
 function Get-MsiProperty([string] $name) {
     $rows = Get-MsiRows "SELECT ``Value`` FROM ``Property`` WHERE ``Property`` = '$name'" 1
     if ($rows.Count -ne 1) { return $null }

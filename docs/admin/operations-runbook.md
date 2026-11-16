@@ -1222,6 +1222,12 @@ DECLARE @a int; EXEC arc.usp_EnsureAuditPartitions @MonthsAhead = 12, @Added = @
 
 `09-seed.sql` виконує застосунок на старті. Скрипти запускати не треба.
 
+⚠ ✎ 2026-11-16 (пентест PT-3, B141): **оновлення Windows на сервері ECR — не нижче вересня 2024**
+(CVE-2024-38014: до них Windows сама підвищувала відновлення пакета, запущене звичайним користувачем). Пакет
+ECR від цієї версії має власну умову запуску: встановлення, оновлення й відновлення (`msiexec /f…`) —
+лише адміністратором; звичайному користувачеві інсталятор відмовляє з текстом «Administrator privileges are
+required.» Оновлення Windows лишається обов'язковим: воно закриває той самий клас атак для інших пакетів.
+
 ⚠ ✎ 2026-11-02 (`DB-1`): служба під логіном без `db_owner` потребує перед стартом нової версії трьох нових
 `EXECUTE` — на `doc.fn_VersionOf`, `doc.fn_TemplateVersionOf`, `rpt.usp_GenerateTemplateViews`, `rpt.usp_GenerateStableViews` (скрипт —
 абзац «Права облікового запису служби» в п. 7, нотатка `docs/release-notes/db-service-account-grants.md`). Без
