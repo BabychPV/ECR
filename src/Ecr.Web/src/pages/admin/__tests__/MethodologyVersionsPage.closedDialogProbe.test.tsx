@@ -108,7 +108,9 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('B149: MethodologyVersionsPage — один запит на відкриття діалогу', () => {
+// ⚠ Бюджет 30 с (як `AppLayout.navbarCollapse`): три вікна зонда з паузою 300 мс перед вікном 3 на сторінці з
+// кількома лінивими панелями. Під повним vitest паралельно зі збіркою .NET «Remove formula» перевищив 15 с (F13).
+describe('B149: MethodologyVersionsPage — один запит на відкриття діалогу', { timeout: 30_000 }, () => {
   it('«New version»: один POST …/versions у всіх трьох вікнах', async () => {
     const server = holdWrites({ read, write: () => ({ body: { ...Version, id: 11, versionNumber: '2.0' } }) });
     const gate = gateReads();
