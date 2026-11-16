@@ -1149,8 +1149,41 @@ BEGIN
                                          FROM @pb AS b WHERE b.ProjectId = x.ProjectId ORDER BY b.FromId, b.ToId
                                           FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)')) AS varbinary(32))
       FROM (SELECT DISTINCT ProjectId FROM @pb) AS x;   -- FOR XML PATH, а не агрегат рядків 2017+ (D-101)
+    -- @tid IS NULL - лише прогін «усі шаблони» (@TemplateVersionId IS NULL; невідома версія вийшла вище): він нічого не генерує
+    -- (пропуск AN-155d або вкладені виклики з версією нижче), тож @ps і rpt.ViewProjectScope тут не потрібні й не пишуться.
+    -- ⛔ Конкурентність: @tid NOT NULL лише після sys.sp_getapplock шаблону вище (B126, транзакційний, Exclusive) - виділення
+    -- MAX(Scope) + ROW_NUMBER нижче завжди під замком шаблону, у тій самій транзакції, що й вʼюхи та rpt.ViewProjectScope.
     IF @tid IS NOT NULL
     BEGIN
+        -- D1 (оновлення наявної бази): перший прогін шаблону без рядків rpt.ViewScopeSig ЗБЕРІГАЄ номери rpt.ViewProjectScope
+        -- (тексти пропущених вʼюх зібрані під ними). Номер s отримує поточний підпис своїх проєктів, якщо він у них один і не
+        -- зайнятий меншим номером; решта номерів до найбільшого відомого (rpt.ViewProjectScope і мапа слотів rpt.ViewSlot вʼюх
+        -- шаблону) резервуються заглушкою (4 байти - не збігається з 32-байтовим SHA2): новий набір пар їх не отримає.
+        IF NOT EXISTS (SELECT 1 FROM rpt.ViewScopeSig WHERE TemplateId = @tid)
+        BEGIN
+            DECLARE @seedMax int = (SELECT MAX(u.Scope)
+                                      FROM (SELECT v.Scope FROM rpt.ViewProjectScope AS v WHERE v.TemplateId = @tid
+                                            UNION ALL
+                                            SELECT vs.Scope FROM rpt.ViewSlot AS vs JOIN @groups AS g ON g.ViewName = vs.ViewName) AS u);
+            IF @seedMax > 0
+            BEGIN
+                INSERT INTO rpt.ViewScopeSig (TemplateId, Sig, Scope)
+                SELECT @tid, d.Sig, d.Scope
+                  FROM (SELECT o.Scope, MIN(o.Sig) AS Sig, ROW_NUMBER() OVER (PARTITION BY MIN(o.Sig) ORDER BY o.Scope) AS Rn
+                          FROM (SELECT v.Scope, p.Sig FROM rpt.ViewProjectScope AS v JOIN @psig AS p ON p.ProjectId = v.ProjectId
+                                 WHERE v.TemplateId = @tid AND v.Scope > 0) AS o
+                         GROUP BY o.Scope
+                        HAVING MIN(o.Sig) = MAX(o.Sig)) AS d
+                 WHERE d.Rn = 1;
+                DECLARE @seedN int = 1;
+                WHILE @seedN <= @seedMax
+                BEGIN
+                    IF NOT EXISTS (SELECT 1 FROM rpt.ViewScopeSig WHERE TemplateId = @tid AND Scope = @seedN)
+                        INSERT INTO rpt.ViewScopeSig (TemplateId, Sig, Scope) VALUES (@tid, CAST(@seedN AS varbinary(4)), @seedN);
+                    SET @seedN += 1;
+                END
+            END
+        END
         -- D1: новий підпис - наступний номер шаблону (порядок - за найменшим проєктом підпису); наявні номери не змінюються.
         INSERT INTO rpt.ViewScopeSig (TemplateId, Sig, Scope)
         SELECT @tid, n.Sig,

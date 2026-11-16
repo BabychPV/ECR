@@ -417,44 +417,166 @@ public sealed partial class ReportViewStableRenameScopeTests(ITestOutputHelper o
     /// <summary>
     /// D1: група, яку виклик пропускає (50422, понад 1000 колонок), лишається зі старим текстом; новий набір пар іншого проєкту
     /// не змінює номера скоупу PB - старий текст і rpt.ViewProjectScope узгоджені: PB бачить свій аліас, PQ - не бачить чужого.
+    /// Набори обрано за SHA2 (як підпис процедури): підпис PQ МЕНШИЙ за підпис PB, тож нумерація за підписом (DENSE_RANK) дала б
+    /// PQ номер 1 (старий текст: 1 = набір PB) детерміновано, а не з імовірністю 1/2.
     /// </summary>
     [Fact]
     public async Task Пропущена_група_50422_лишається_узгодженою_зі_стабільними_номерами()
     {
         var (templateId, code) = await NewTemplateAsync();
-        var filler = Enumerable.Range(1, 990).Select(i => ($"F{i}", CellDataType.String)).ToArray();
-        (string, CellDataType)[] v1Cols = [("A", CellDataType.String), ("B", CellDataType.String), ("C", CellDataType.String), .. filler];
-        (string, CellDataType)[] v2Cols = [("A", CellDataType.String), ("Z", CellDataType.String), ("W", CellDataType.String), .. filler];
+        string[] olds = ["B", "C", "D", "E", "F"], news = ["Z", "W", "V", "U", "X"];
+        var filler = Enumerable.Range(1, 984).Select(i => ($"F{i}", CellDataType.String)).ToArray();
+        (string, CellDataType)[] v1Cols = [("A", CellDataType.String), .. olds.Select(c => (c, CellDataType.String)), .. filler];
+        (string, CellDataType)[] v2Cols = [("A", CellDataType.String), .. news.Select(c => (c, CellDataType.String)), .. filler];
         var v1 = await AddTypedVersionAsync(templateId, "1", [("T", v1Cols)]);
         var v2 = await AddTypedVersionAsync(templateId, "2", [("T", v2Cols)]);
         var t1 = v1.Tables["T"];
         var t2 = v2.Tables["T"];
+        var pairs = olds.Select((c, i) => (From: t1.Cols[c], To: t2.Cols[news[i]])).ToArray();
+        foreach (var (from, to) in pairs)
+        {
+            await RenameAsync(from, to, legacy: false);
+        }
+
+        // PB: {B -> Z} + будь-яка підмножина решти (найбільший підпис); PQ: непорожня підмножина без B -> Z (найменший підпис).
+        var rest = pairs[1..];
+        var subsets = Enumerable.Range(0, 1 << rest.Length)
+            .Select(mask => rest.Where((_, i) => (mask & (1 << i)) != 0).ToArray()).ToList();
+        var pbSet = subsets.Select(s => (IReadOnlyList<(int From, int To)>)[pairs[0], .. s]).MaxBy(s => Convert.ToHexString(Signature(s)))!;
+        var pqSet = subsets.Where(s => s.Length > 0).Select(s => (IReadOnlyList<(int From, int To)>)s).MinBy(s => Convert.ToHexString(Signature(s)))!;
+        Assert.True(string.CompareOrdinal(Convert.ToHexString(Signature(pqSet)), Convert.ToHexString(Signature(pbSet))) < 0, "передумова: підпис PQ < PB");
+
         var pb = await NewProjectAsync(v1.VersionId, 209901);
         var pq = await NewProjectAsync(v1.VersionId, 209901);
-        await SeedAsync(pb, 209901, t1, ("A", "a"), ("B", "pb_b"), ("C", "pb_c"));
-        await SeedAsync(pq, 209901, t1, ("A", "a"), ("B", "pq_b"), ("C", "pq_c"));
-        await RenameAsync(t1.Cols["B"], t2.Cols["Z"], legacy: false, pb.ProjectId);   // PB: {B -> Z}
-        await RenameAsync(t1.Cols["C"], t2.Cols["W"], legacy: false);
+        await SeedAsync(pb, 209901, t1, [("A", "a"), .. olds.Select(c => (c, "pb_" + c))], "R1");
+        await SeedAsync(pq, 209901, t1, [("A", "a"), .. olds.Select(c => (c, "pq_" + c))], "R1");
+        foreach (var (from, to) in pbSet)
+        {
+            await BindAsync(from, to, pb.ProjectId);
+        }
+
         await GenerateAsync(v2.VersionId, routing: false);
         var stable = Sanitise($"v_{code}_S_T");
         var oldText = await DefinitionAsync(stable);
-        Assert.Equal("pb_b", await ScalarStringAsync(stable, pb.ProjectId, 209901, "Z", "R1"));
+        Assert.Equal("pb_B", await ScalarStringAsync(stable, pb.ProjectId, 209901, "Z", "R1"));
+        Assert.Null(await ScalarStringAsync(stable, pq.ProjectId, 209901, "Z", "R1"));
 
-        // v3 додає 10 колонок: група понад 1000 - 50422, вʼюха лишається зі старим текстом. Тим часом PQ - новий набір {C -> W}.
+        // v3 додає 10 колонок: група понад 1000 - 50422, вʼюха лишається зі старим текстом. Тим часом PQ - новий набір пар.
         (string, CellDataType)[] v3Cols = [.. v2Cols, .. Enumerable.Range(1, 10).Select(i => ($"G{i}", CellDataType.String))];
         var v3 = await AddTypedVersionAsync(templateId, "3", [("T", v3Cols)]);
-        await BindAsync(t1.Cols["C"], t2.Cols["W"], pq.ProjectId);
+        foreach (var (from, to) in pqSet)
+        {
+            await BindAsync(from, to, pq.ProjectId);
+        }
+
         var failed = await Assert.ThrowsAsync<SqlException>(() => GenerateAsync(v3.VersionId, routing: false));
         Assert.Equal(50422, failed.Number);
         Assert.Equal(oldText, await DefinitionAsync(stable));
+        var scopes = (await ScalarRowsAsync($"SELECT ProjectId, Scope FROM rpt.ViewProjectScope WHERE TemplateId = {templateId}"))
+            .ToDictionary(r => r.ProjectId, r => r.Scope);
+        Assert.Equal(1, scopes[pb.ProjectId]);   // номер PB не змінився
+        Assert.Equal(2, scopes[pq.ProjectId]);   // новий набір - наступний номер
 
-        Assert.Equal("pb_b", await ScalarStringAsync(stable, pb.ProjectId, 209901, "Z", "R1"));   // PB - свій аліас
-        Assert.Null(await ScalarStringAsync(stable, pq.ProjectId, 209901, "Z", "R1"));            // PQ - не чужий
+        Assert.Equal("pb_B", await ScalarStringAsync(stable, pb.ProjectId, 209901, "Z", "R1"));   // PB - свій аліас
+        for (var i = 0; i < olds.Length; i++)
+        {
+            Assert.Null(await ScalarStringAsync(stable, pq.ProjectId, 209901, news[i], "R1"));     // PQ - жодного чужого аліаса
+        }
     }
 
     /// <summary>
-    /// r3: маршрутизація місяців - значення перейменованої МІСЯЧНОЇ колонки (січень) у рядку лютого PB приходить лише від
-    /// екземпляра-власника (fam, січневий екземпляр v1), не з власної копії; PB бачить його під новим іменем, PA - ні.
+    /// D1, оновлення наявної бази: шаблон з rpt.ViewProjectScope, але без rpt.ViewScopeSig (база до цього коміту; номери могли
+    /// бути будь-якими, напр. за DENSE_RANK підпису) - перша перегенерація ЗБЕРІГАЄ номери проєктів, резервує номери без
+    /// власника (до найбільшого відомого), а новий набір пар отримує наступний вільний номер.
+    /// </summary>
+    [Fact]
+    public async Task Оновлена_база_зберігає_номери_скоупів_на_першій_перегенерації()
+    {
+        var (templateId, code) = await NewTemplateAsync();
+        var v1 = await AddVersionAsync(templateId, "1", ("T", ["A", "B", "C"]));
+        var v2 = await AddVersionAsync(templateId, "2", ("T", ["A", "Z", "W"]));
+        var t1 = v1.Tables["T"];
+        var t2 = v2.Tables["T"];
+        var pb = await NewProjectAsync(v1.VersionId, 209901);
+        var pq = await NewProjectAsync(v1.VersionId, 209901);
+        var pr = await NewProjectAsync(v1.VersionId, 209901);
+        var px = await NewProjectAsync(v1.VersionId);   // без прив'язок: рядок-сирота старої бази
+        foreach (var (project, tag) in new[] { (pb, "pb"), (pq, "pq"), (pr, "pr") })
+        {
+            await SeedAsync(project, 209901, t1, ("A", "a"), ("B", $"{tag}_b"), ("C", $"{tag}_c"));
+        }
+
+        await RenameAsync(t1.Cols["B"], t2.Cols["Z"], legacy: false, pb.ProjectId);   // PB: {B -> Z}
+        await RenameAsync(t1.Cols["C"], t2.Cols["W"], legacy: false, pq.ProjectId);   // PQ: {C -> W}
+        await GenerateAsync(v2.VersionId, routing: false);
+
+        // Стара база: номерів-підписів немає, номери інші (PB 2, PQ 1), сирота PX з номером 4.
+        await ExecAsync($"""
+            DELETE FROM rpt.ViewScopeSig WHERE TemplateId = {templateId};
+            UPDATE rpt.ViewProjectScope SET Scope = 3 - Scope WHERE TemplateId = {templateId};
+            INSERT INTO rpt.ViewProjectScope (TemplateId, ProjectId, Scope) VALUES ({templateId}, {px.ProjectId}, 4);
+            """);
+        await BindAsync(t1.Cols["B"], t2.Cols["Z"], pr.ProjectId);
+        await BindAsync(t1.Cols["C"], t2.Cols["W"], pr.ProjectId);                    // PR: новий набір {B -> Z, C -> W}
+        await GenerateAsync(v2.VersionId, routing: false);
+
+        var scopes = (await ScalarRowsAsync($"SELECT ProjectId, Scope FROM rpt.ViewProjectScope WHERE TemplateId = {templateId}"))
+            .ToDictionary(r => r.ProjectId, r => r.Scope);
+        Assert.Equal(new Dictionary<int, int> { [pb.ProjectId] = 2, [pq.ProjectId] = 1, [pr.ProjectId] = 5 }, scopes);
+        Assert.Equal([1, 2, 3, 4, 5], (await ScalarRowsAsync($"SELECT 0, Scope FROM rpt.ViewScopeSig WHERE TemplateId = {templateId} ORDER BY Scope"))
+            .Select(r => r.Scope).ToList());
+
+        var stable = Sanitise($"v_{code}_S_T");
+        Assert.Equal("pb_b", await ScalarStringAsync(stable, pb.ProjectId, 209901, "Z", "R1"));
+        Assert.Null(await ScalarStringAsync(stable, pb.ProjectId, 209901, "W", "R1"));
+        Assert.Equal("pq_c", await ScalarStringAsync(stable, pq.ProjectId, 209901, "W", "R1"));
+        Assert.Null(await ScalarStringAsync(stable, pq.ProjectId, 209901, "Z", "R1"));
+        Assert.Equal("pr_b", await ScalarStringAsync(stable, pr.ProjectId, 209901, "Z", "R1"));
+        Assert.Equal("pr_c", await ScalarStringAsync(stable, pr.ProjectId, 209901, "W", "R1"));
+    }
+
+    /// <summary>
+    /// D1, конкурентність: номер скоупу виділяється (MAX + ROW_NUMBER) лише під замком шаблону B126. Поки замок тримає інша
+    /// сесія, виклик з версією відмовляє 50423, не записавши ні rpt.ViewScopeSig, ні rpt.ViewProjectScope; після звільнення - пише.
+    /// </summary>
+    [Fact]
+    public async Task Номер_скоупу_виділяється_лише_під_замком_шаблону()
+    {
+        var (templateId, _) = await NewTemplateAsync();
+        var v1 = await AddVersionAsync(templateId, "1", ("T", ["A", "B"]));
+        var v2 = await AddVersionAsync(templateId, "2", ("T", ["A", "Z"]));
+        var pb = await NewProjectAsync(v1.VersionId, 209901);
+        await RenameAsync(v1.Tables["T"].Cols["B"], v2.Tables["T"].Cols["Z"], legacy: false, pb.ProjectId);
+
+        async Task<int> CountAsync(string table)
+            => (await ScalarRowsAsync($"SELECT 0, COUNT(*) FROM rpt.{table} WHERE TemplateId = {templateId}"))[0].Scope;
+
+        await using (var holder = await OpenAsync())
+        {
+            await using var transaction = (SqlTransaction)await holder.BeginTransactionAsync();
+            await using (var take = holder.CreateCommand())
+            {
+                take.Transaction = transaction;
+                take.CommandText = $"DECLARE @rc int; EXEC @rc = sys.sp_getapplock @Resource = N'ecr.rpt.stableviews.template.{templateId}', @LockMode = N'Exclusive', @LockOwner = N'Transaction', @LockTimeout = 0; SELECT @rc;";
+                Assert.True((int)(await take.ExecuteScalarAsync())! >= 0);
+            }
+
+            var busy = await Assert.ThrowsAsync<SqlException>(() => ExecAsync($"EXEC rpt.usp_GenerateStableViews {v2.VersionId}, 0, 0, 200"));
+            Assert.Equal(50423, busy.Number);
+            Assert.Equal(0, await CountAsync("ViewScopeSig"));
+            Assert.Equal(0, await CountAsync("ViewProjectScope"));
+            await transaction.RollbackAsync();
+        }
+
+        await GenerateAsync(v2.VersionId, routing: false);
+        Assert.Equal(1, await CountAsync("ViewScopeSig"));
+        Assert.Equal(1, await CountAsync("ViewProjectScope"));
+    }
+
+    /// <summary>
+    /// r3: маршрутизація місяців - значення перейменованої МІСЯЧНОЇ колонки (січень) у рядках лютого й березня PB приходить ЛИШЕ
+    /// від екземпляра-власника (fam, січневий екземпляр v1 свого документа): не з власної копії лютого і не з березневого
+    /// екземпляра v1 (той самий Id колонки B, але не власник січня). PA (без прив'язки) значення власника під новим іменем не бачить.
     /// </summary>
     [Fact]
     public async Task Маршрутизація_значення_власника_перейменованої_місячної_колонки_за_скоупом_проєкту()
@@ -465,12 +587,13 @@ public sealed partial class ReportViewStableRenameScopeTests(ITestOutputHelper o
         var t1 = v1.Tables["T"];
         var t2 = v2.Tables["T"];
         await ExecAsync($"UPDATE cfg.ColumnDef SET IsMonthColumn = 1, MonthNumber = 1 WHERE Id IN ({t1.Cols["B"]}, {t2.Cols["Z"]})");
-        var pb = await NewProjectAsync(v1.VersionId, 209901, 209902);
-        var pa = await NewProjectAsync(v1.VersionId, 209901, 209902);
+        var pb = await NewProjectAsync(v1.VersionId, 209901, 209902, 209903);
+        var pa = await NewProjectAsync(v1.VersionId, 209901, 209902, 209903);
         foreach (var (project, tag) in new[] { (pb, "pb"), (pa, "pa") })
         {
-            await SeedAsync(project, 209901, t1, ("A", $"{tag}_a1"), ("B", $"{tag}_jan"));   // власник січня - екземпляр v1
-            await SeedAsync(project, 209902, t2, ("A", $"{tag}_a2"));                         // лютий (v2): Z без власної копії
+            await SeedAsync(project, 209901, t1, ("A", $"{tag}_a1"), ("B", $"{tag}_jan"));         // власник січня - екземпляр v1
+            await SeedAsync(project, 209902, t2, ("A", $"{tag}_a2"), ("Z", $"{tag}_feb_copy"));    // лютий (v2): власна копія Z
+            await SeedAsync(project, 209903, t1, ("A", $"{tag}_a3"), ("B", $"{tag}_mar"));         // березень (v1): НЕ власник січня
         }
 
         await RenameAsync(t1.Cols["B"], t2.Cols["Z"], legacy: false, pb.ProjectId);
@@ -479,8 +602,17 @@ public sealed partial class ReportViewStableRenameScopeTests(ITestOutputHelper o
         Assert.Contains("FROM rpt.ViewSlot AS fm", await DefinitionAsync(stable), StringComparison.Ordinal);
 
         Assert.Equal("pb_jan", await ScalarStringAsync(stable, pb.ProjectId, 209902, "Z", "R1"));
-        Assert.Null(await ScalarStringAsync(stable, pa.ProjectId, 209902, "Z", "R1"));
+        Assert.Equal("pb_jan", await ScalarStringAsync(stable, pb.ProjectId, 209903, "Z", "R1"));
+        Assert.Equal("pb_jan", await ScalarStringAsync(stable, pb.ProjectId, 209903, "B", "R1"));
+        Assert.Equal("pa_feb_copy", await ScalarStringAsync(stable, pa.ProjectId, 209902, "Z", "R1"));   // без аліаса: власник Z не має значення
+        Assert.Null(await ScalarStringAsync(stable, pa.ProjectId, 209903, "Z", "R1"));
+        Assert.Equal("pa_jan", await ScalarStringAsync(stable, pa.ProjectId, 209903, "B", "R1"));
     }
+
+    /// <summary>Підпис набору пар - як у rpt.usp_GenerateStableViews: SHA2_256 nvarchar-рядка «,from>to» за (from, to).</summary>
+    private static byte[] Signature(IEnumerable<(int From, int To)> pairs)
+        => System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.Unicode.GetBytes(
+            string.Concat(pairs.OrderBy(p => p.From).ThenBy(p => p.To).Select(p => $",{p.From}>{p.To}"))));
 
     // ── помічники ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
