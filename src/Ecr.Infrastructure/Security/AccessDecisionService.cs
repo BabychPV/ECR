@@ -3110,27 +3110,28 @@ public sealed class AccessDecisionService(
         {
             requiredRoleId = context.SheetStatus == DocumentStatus.Submitted
                 ? (await CurrentApprovalStepCoreAsync(documentId, sheetDefId, periodKey, sheetCopyId, ct).ConfigureAwait(false))?.RoleId
-                : await LastApprovalStepRoleAsync(documentId, ct).ConfigureAwait(false);
+                : await LastApprovalStepRoleAsync(documentId, periodKey, ct).ConfigureAwait(false);
         }
 
         return EditRules.CanReopen(profile, context, requiredRoleId);
     }
 
-    /// <summary>Роль ОСТАННЬОГО кроку маршруту документа; <c>null</c> — маршруту немає.</summary>
-    private async Task<int?> LastApprovalStepRoleAsync(long documentId, CancellationToken ct)
+    /// <summary>Роль ОСТАННЬОГО кроку маршруту документа за період; <c>null</c> — маршруту немає.</summary>
+    /// <remarks>
+    /// ⛔ D2 (B155, 16.11): версія — та сама, що й для поточного кроку (<see cref="RouteScopeAsync"/>): версія
+    /// ПЕРІОДУ шаблону документа (власного, B74, або основного). Доти тут стояла чинна версія ПРОЄКТУ, і для
+    /// документа з власним шаблоном (або періоду іншої версії) роль повернення бралась із чужого маршруту.
+    /// </remarks>
+    private async Task<int?> LastApprovalStepRoleAsync(long documentId, PeriodKey periodKey, CancellationToken ct)
     {
-        var scope = await db.Documents
-            .AsNoTracking()
-            .Where(d => d.Id == documentId)
-            .Join(db.Projects, d => d.ProjectId, p => p.Id, (_, p) => new { p.Id, p.TemplateVersionId })
-            .FirstOrDefaultAsync(ct)
-            .ConfigureAwait(false);
+        var scope = await RouteScopeAsync(documentId, periodKey, ct).ConfigureAwait(false);
         if (scope is null)
         {
             return null;
         }
 
-        var route = await workflow.FindRouteAsync(scope.Id, scope.TemplateVersionId, ct).ConfigureAwait(false);
+        var route = await workflow.FindRouteAsync(scope.Value.ProjectId, scope.Value.TemplateVersionId, ct)
+            .ConfigureAwait(false);
         return route is null || route.Steps.Count == 0
             ? null
             : route.Steps.OrderBy(s => s.Ordinal).Last().RoleId;
@@ -3146,9 +3147,12 @@ public sealed class AccessDecisionService(
         long documentId, int sheetDefId, PeriodKey periodKey, long sheetCopyId, CancellationToken ct)
         => CurrentApprovalStepCoreAsync(documentId, sheetDefId, periodKey, sheetCopyId, ct);
 
-    /// <summary>Крок маршруту аркуша або копії (RS): копія має власний крок за період.</summary>
-    private async Task<ApprovalStepView?> CurrentApprovalStepCoreAsync(
-        long documentId, int sheetDefId, PeriodKey periodKey, long? sheetCopyId, CancellationToken ct)
+    /// <summary>Область вибору маршруту документа за період: проєкт і версія шаблону ПЕРІОДУ.</summary>
+    /// <remarks>
+    /// Одне місце для поточного кроку й ролі повернення (D2): дві копії вже розійшлися раз.
+    /// </remarks>
+    private async Task<(int ProjectId, int TemplateVersionId)?> RouteScopeAsync(
+        long documentId, PeriodKey periodKey, CancellationToken ct)
     {
         var scope = await db.Documents
             .AsNoTracking()
@@ -3165,12 +3169,21 @@ public sealed class AccessDecisionService(
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 
+        return scope is null ? null : (scope.Id, scope.TemplateVersionId);
+    }
+
+    /// <summary>Крок маршруту аркуша або копії (RS): копія має власний крок за період.</summary>
+    private async Task<ApprovalStepView?> CurrentApprovalStepCoreAsync(
+        long documentId, int sheetDefId, PeriodKey periodKey, long? sheetCopyId, CancellationToken ct)
+    {
+        var scope = await RouteScopeAsync(documentId, periodKey, ct).ConfigureAwait(false);
+
         if (scope is null)
         {
             return null;
         }
 
-        var route = await workflow.FindRouteAsync(scope.Id, scope.TemplateVersionId, ct)
+        var route = await workflow.FindRouteAsync(scope.Value.ProjectId, scope.Value.TemplateVersionId, ct)
             .ConfigureAwait(false);
 
         // ⛔ Немає маршруту — немає кроку, і затвердження лишається

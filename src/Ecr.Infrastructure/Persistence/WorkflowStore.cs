@@ -92,10 +92,17 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ D1 (B155, 16.11): лише маршрут ПРОЄКТУ — без версії шаблону. Доти тут стояв перший-ліпший маршрут
+    /// з <c>ProjectId = @id</c>, і за наявності маршруту «проєкт × версія» редактор маршруту проєкту читав,
+    /// переписував або видаляв саме його.
+    /// </remarks>
     public async Task<ApprovalRoute?> FindProjectRouteAsync(int projectId, CancellationToken ct)
         => await db.ApprovalRoutes
             .Include(r => r.Steps)
-            .FirstOrDefaultAsync(r => r.ProjectId == projectId, ct)
+            .Where(r => r.ProjectId == projectId && r.TemplateVersionId == null)
+            .OrderBy(r => r.Code)
+            .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 
     /// <inheritdoc />

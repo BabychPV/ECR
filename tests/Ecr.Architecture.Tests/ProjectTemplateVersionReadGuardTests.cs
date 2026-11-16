@@ -69,9 +69,10 @@ public sealed partial class ProjectTemplateVersionReadGuardTests
 
         // AccessDecisionService: (1) знімки читання документа/правок - обʼєднання ВСІХ версій шкали (чинна + ознака Multi,
         // ProjectReadSnapshotAsync), 3 запити × 2 читання; (2) дійсність надання учасника - зріз за КОДАМИ аркуша/таблиці, а
-        // гранти скопійовано на нові Id переносом (FinishSql), тож чинна версія достатня; (3) роль ОСТАННЬОГО кроку маршруту
-        // документа (без періоду) - маршрут чинної версії. Поточний крок за періодом - уже doc.fn_VersionOf.
-        ["src/Ecr.Infrastructure/Security/AccessDecisionService.cs"] = (8, Kind.Current),
+        // гранти скопійовано на нові Id переносом (FinishSql), тож чинна версія достатня. ✎ D2 (B155, 16.11): роль
+        // ОСТАННЬОГО кроку маршруту (повернення затвердженого) тепер, як і поточний крок, - версія ПЕРІОДУ шаблону
+        // документа (RouteScopeAsync), тож читання чинної версії тут стало на одне менше.
+        ["src/Ecr.Infrastructure/Security/AccessDecisionService.cs"] = (7, Kind.Current),
     };
 
     [Fact]
