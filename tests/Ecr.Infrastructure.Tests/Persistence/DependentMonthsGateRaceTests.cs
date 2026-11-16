@@ -49,17 +49,16 @@ public sealed class DependentMonthsGateRaceTests(SqlServerFixture sql)
     private readonly List<string> _payloads = [];
 
     /// <remarks>
-    /// ✎ B79 (lane 3): насіння стовпця з залежними несе <c>WriteSubmitted</c> (каскад пише й подані місяці), насіння
-    /// стовпця без залежних — ні. Мутація: у <c>PatchCellsHandler.WithDependentInputs</c> не ставити позначку —
-    /// червоніє перший рядок; ставити всім — другий.
+    /// Контроль: без зміни стану між рішенням і записом PATCH пише, і каскад формул ставиться — і для стовпця з
+    /// залежними (це не «текст якоря», перерахунок не пропускається), і для стовпця без них. Мутація: у
+    /// <c>NoteAnnualText</c> для <c>DependentInput</c> додати колонку в <c>AnnualTextColumns</c> — червоніє рядок (true).
     /// </remarks>
     [Theory]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "B79")]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task Контроль_без_зміни_стану_PATCH_пише_а_насіння_каскаду_несе_позначку_лише_для_стовпця_із_залежними(
-        bool dependent)
+    public async Task Контроль_без_зміни_стану_PATCH_пише_і_ставить_каскад_формул(bool dependent)
     {
         var scene = await ArrangeAsync();
 
@@ -67,7 +66,7 @@ public sealed class DependentMonthsGateRaceTests(SqlServerFixture sql)
         Assert.Equal(EditedValue, await LiveValueAsync(scene));
 
         var payload = Assert.Single(_payloads);
-        Assert.Equal(dependent, payload.Contains("\"WriteSubmitted\":true", StringComparison.Ordinal));
+        Assert.Contains($"\"ColumnDefId\":{scene.Doc.ColumnDefIds[1]}", payload, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -220,7 +219,7 @@ public sealed class DependentMonthsGateRaceTests(SqlServerFixture sql)
         var user = Substitute.For<ICurrentUser>();
         user.UserId.Returns(scene.WriterId);
 
-        // ✎ B79 (lane 3): payload задачі каскаду — щоб побачити позначку `WriteSubmitted` на насінні.
+        // Payload задачі каскаду формул — щоб побачити, що правка ставить перерахунок.
         _payloads.Clear();
         var jobs = Substitute.For<IBackgroundJobScheduler>();
         jobs.EnqueueCoalescedAsync<IFormulaRecalculationJob>(

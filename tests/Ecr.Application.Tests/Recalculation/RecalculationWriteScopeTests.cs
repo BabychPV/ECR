@@ -204,21 +204,23 @@ public sealed class RecalculationWriteScopeTests
     }
 
     /// <summary>
-    /// ✎ D-442 (борг AN-129): поданий аркуш каскад пише лише тоді, коли саме ЦЕЙ аркуш названо аркушем правки
-    /// погоджувача; позначка іншого аркуша поданий не відкриває, без позначки — пропуск, як і доти.
+    /// ✎ B79 (Q10; правило людини 07.11 «пропускати лише погоджені; подані — з позначкою») змінює D-442: каскад пише
+    /// поданий аркуш ЗАВЖДИ. Різниця лишилась одна — позначка «перераховано після подання»: аркуш правки погоджувача
+    /// (саме ЦЕЙ аркуш названо в насінні) її не отримує, решта поданих — отримує.
     /// </summary>
     /// <remarks>
-    /// ⛔ Мутація: у <c>EnterSheetsAsync</c> пускати поданий за будь-якої непорожньої позначки — червоніє
-    /// «інший аркуш»; прибрати гілку позначки — червоніє «свій аркуш».
+    /// ⛔ Мутація: у <c>RecalculateAsync</c> передати <c>writeSubmitted: false</c> — червоніють «інший аркуш» і «без
+    /// позначки» (0 записано); у <c>EnterSheetsAsync</c> прибрати виняток <c>approverEditSheets</c> для позначки —
+    /// червоніє «свій аркуш»; не наповнювати <c>submittedByFlag</c> — червоніють два інші.
     /// </remarks>
     [Theory]
-    [InlineData("свій аркуш", 1)]
-    [InlineData("інший аркуш", 0)]
-    [InlineData("без позначки", 0)]
+    [InlineData("свій аркуш", false)]
+    [InlineData("інший аркуш", true)]
+    [InlineData("без позначки", true)]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait("Decision", "D-442")]
-    public async Task D442_поданий_аркуш_пишеться_лише_за_позначкою_правки_погоджувача_саме_цього_аркуша(
-        string marker, int expected)
+    public async Task D442_поданий_аркуш_каскад_пише_завжди_а_позначку_не_ставить_лише_аркушу_правки_погоджувача(
+        string marker, bool marked)
     {
         Arrange();
         _gate.EnterEditAsync(DocumentId, Arg.Any<int>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
@@ -231,10 +233,43 @@ public sealed class RecalculationWriteScopeTests
             _ => null,
         };
 
+        var submittedWritten = new HashSet<(int SheetDefId, long? CopyId)>();
         var written = await Service().RecalculateAsync(
-            TableInstance, Dirty(), CancellationToken.None, approverEditSheets: sheets);
+            TableInstance, Dirty(), CancellationToken.None, approverEditSheets: sheets, submittedWritten: submittedWritten);
+
+        Assert.Equal(1, written);
+        if (marked)
+        {
+            Assert.Equal(new[] { (_sheetId, (long?)null) }, submittedWritten);
+        }
+        else
+        {
+            Assert.Empty(submittedWritten);
+        }
+    }
+
+    /// <summary>✎ B79 (Q10): затверджений аркуш каскад не пише ніколи й позначки не ставить; чернетка — без позначки.</summary>
+    /// <remarks>⛔ Мутація: у <c>EnterSheetsAsync</c> дозволити <c>Approved</c> — червоніє перший рядок; складати в
+    /// <c>submittedByFlag</c> і чернетку — другий.</remarks>
+    [Theory]
+    [InlineData(DocumentStatus.Approved, 0)]
+    [InlineData(DocumentStatus.Draft, 1)]
+    [InlineData(DocumentStatus.Rejected, 1)]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "B79")]
+    public async Task B79_затверджений_аркуш_каскад_не_пише_а_чернетку_й_відхилений_пише_без_позначки(
+        DocumentStatus status, int expected)
+    {
+        Arrange();
+        _gate.EnterEditAsync(DocumentId, Arg.Any<int>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+             .Returns(status);
+
+        var submittedWritten = new HashSet<(int SheetDefId, long? CopyId)>();
+        var written = await Service().RecalculateAsync(
+            TableInstance, Dirty(), CancellationToken.None, submittedWritten: submittedWritten);
 
         Assert.Equal(expected, written);
+        Assert.Empty(submittedWritten);
     }
 
     /// <summary>Змінена комірка <c>C1</c> першого рядка.</summary>
