@@ -102,6 +102,58 @@ public static class RowLockRules
         return target.PeriodState == PeriodState.Closed ? EditDenyReason.PeriodClosed : EditDenyReason.None;
     }
 
+    /// <summary>
+    /// ✎ B143 (D-538): причина, з якої профіль НЕ може блокувати рядки таблиці; <c>None</c> — може. ЄДИНЕ рішення: його
+    /// застосовує <c>POST …/row-locks</c> і за ним же рахується прапорець картки (<see cref="RowLockCapability"/>).
+    /// </summary>
+    /// <remarks>
+    /// Блокує носій права <see cref="Permission"/> у проєкті (Q6) або власник документа з рівнем
+    /// <see cref="GrantLevel.Write"/> на таблицю. Симуляція, архів, архівація й закритий період відмовляють усім.
+    /// Видимість документа й таблиці перевіряє викликач ДО цього рішення.
+    /// </remarks>
+    /// <param name="profile">Профіль.</param>
+    /// <param name="target">Факти документа за період.</param>
+    /// <param name="sheet">Аркуш таблиці.</param>
+    /// <param name="table">Таблиця.</param>
+    /// <param name="periodKey">Період.</param>
+    public static EditDenyReason LockDenial(
+        AccessProfile profile, RowLockTarget target, SheetDef sheet, TableDef table, int periodKey)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        ArgumentNullException.ThrowIfNull(target);
+        ArgumentNullException.ThrowIfNull(sheet);
+        ArgumentNullException.ThrowIfNull(table);
+
+        if (profile.IsSimulation)
+        {
+            return EditDenyReason.SimulationReadOnly;
+        }
+
+        var state = StateDenial(target);
+        if (state != EditDenyReason.None)
+        {
+            return state;
+        }
+
+        if (HoldsRight(profile, target.ProjectId))
+        {
+            return EditDenyReason.None;
+        }
+
+        var level = EditRules.Effective(profile, default(CellAccessContext) with
+        {
+            ProjectId = target.ProjectId,
+            SheetDefId = sheet.Id,
+            TableDefId = table.Id,
+            SheetCode = sheet.Code,
+            Period = new PeriodKey(periodKey),
+        });
+
+        return target.OwnerUserId != profile.UserId || level < GrantLevel.Write
+            ? EditDenyReason.NoGrant
+            : EditDenyReason.None;
+    }
+
     /// <summary>Чи може профіль знімати будь-яке блокування документа (право в проєкті).</summary>
     /// <param name="profile">Профіль.</param>
     /// <param name="projectId">Проєкт документа.</param>
@@ -431,38 +483,61 @@ public sealed class CreateRowLocksHandler(
     }
 
     /// <summary>Право блокувати: власник документа з Write на таблицю або носій <c>Document.RowLock</c> (Q6).</summary>
+    /// <remarks>✎ B143 (D-538): саме рішення — <see cref="RowLockRules.LockDenial"/>; його ж читає прапорець картки.</remarks>
     private static void RequireMayLock(
         AccessProfile profile, RowLockTarget target, (SheetDef Sheet, TableDef Table) found, int periodKey)
     {
-        if (profile.IsSimulation)
+        var reason = RowLockRules.LockDenial(profile, target, found.Sheet, found.Table, periodKey);
+        if (reason != EditDenyReason.None)
         {
-            throw RowLockRules.Denied(EditDenyReason.SimulationReadOnly, "Блокування");
+            throw RowLockRules.Denied(reason, "Блокування");
+        }
+    }
+}
+
+/// <summary>
+/// ✎ B143 (D-538): «чи може користувач блокувати рядки документа за період» — прапорець картки
+/// (<c>DocumentSummary.CanLockRows</c>). Власник документа блокує й без права <c>Document.RowLock</c>, а клієнт
+/// власника не знає, тож кнопку «Заблокувати рядки…» він показує лише за цим рішенням сервера.
+/// </summary>
+/// <remarks>
+/// ⛔ Одне джерело: таблиця проходить ті самі дві перевірки, що й <c>POST …/row-locks</c>, —
+/// <see cref="RowLockRules.CanReadTable"/> і <see cref="RowLockRules.LockDenial"/>. Прапорець істинний, коли є хоч одна
+/// таблиця версії шаблону, рядки якої <c>POST</c> дозволив би блокувати. Видимість документа перевіряє викликач
+/// (картка невидимого документа — 404, прапорця немає).
+/// </remarks>
+public sealed class RowLockCapability(IRowLockStore store, IMetadataCache metadata, IClock clock)
+{
+    /// <summary>Чи є таблиця, рядки якої профіль може блокувати в документі за період.</summary>
+    /// <param name="profile">Профіль.</param>
+    /// <param name="documentId">Документ (видимий профілю).</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task<bool> CanLockRowsAsync(AccessProfile profile, long documentId, int periodKey, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+
+        var target = await store.GetTargetAsync(documentId, periodKey, clock.UtcNow, ct).ConfigureAwait(false);
+        if (target is null)
+        {
+            return false;
         }
 
-        var state = RowLockRules.StateDenial(target);
-        if (state != EditDenyReason.None)
+        var snapshot = await metadata.GetAsync(target.TemplateVersionId, ct).ConfigureAwait(false);
+        foreach (var sheet in snapshot.Sheets)
         {
-            throw RowLockRules.Denied(state, "Блокування");
+            foreach (var table in sheet.Tables)
+            {
+                if (!table.IsDeleted
+                    && RowLockRules.CanReadTable(profile, target.ProjectId, sheet, table, periodKey)
+                    && RowLockRules.LockDenial(profile, target, sheet, table, periodKey) == EditDenyReason.None)
+                {
+                    return true;
+                }
+            }
         }
 
-        if (RowLockRules.HoldsRight(profile, target.ProjectId))
-        {
-            return;
-        }
-
-        var level = EditRules.Effective(profile, default(CellAccessContext) with
-        {
-            ProjectId = target.ProjectId,
-            SheetDefId = found.Sheet.Id,
-            TableDefId = found.Table.Id,
-            SheetCode = found.Sheet.Code,
-            Period = new PeriodKey(periodKey),
-        });
-
-        if (target.OwnerUserId != profile.UserId || level < GrantLevel.Write)
-        {
-            throw RowLockRules.Denied(EditDenyReason.NoGrant, "Блокування");
-        }
+        return false;
     }
 }
 

@@ -678,7 +678,8 @@ public sealed class ListDocumentsHandler(
 /// <summary>Документ і стан його аркушів. Право <c>Document.View</c>.</summary>
 public sealed class GetDocumentHandler(
     IDocumentStore documents, IAccessDecisionService access, ICurrentUser currentUser,
-    StepApproversResolver? stepApprovers = null)
+    StepApproversResolver? stepApprovers = null,
+    RowLocks.RowLockCapability? rowLocks = null)
 {
     /// <summary>Повертає документ; <c>null</c> — не існує або невидимий.</summary>
     /// <param name="documentId">Документ.</param>
@@ -758,6 +759,16 @@ public sealed class GetDocumentHandler(
             CanManageEditAccess = EditAssignments.EditAssignmentAccess.CanManage(
                 profile, document.ProjectId, document.OwnerUserId ?? 0, document.ProjectIsReadOnly),
         };
+
+        // ✎ B143 (D-538): «можна блокувати рядки» — лише картка з періодом (решта споживачів обробника не платять). Документ
+        // уже визнано видимим вище; рішення — те саме, що в POST …/row-locks (`RowLockRules.LockDenial`).
+        if (includeStepApprovers && rowLocks is not null && periodKey is { } lockPeriod)
+        {
+            result = result with
+            {
+                CanLockRows = await rowLocks.CanLockRowsAsync(profile, document.Id, lockPeriod, ct).ConfigureAwait(false),
+            };
+        }
 
         // ✎ AN-59 (D-466): «хто може діяти на поточному кроці» — лише картка, лише з періодом і лише коли є поданий аркуш
         // (або копія) у НЕЗВУЖЕНОМУ документі. ⛔ Звужений читач (та сама умова, що ховає автора) — null: імена людей

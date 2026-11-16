@@ -32344,6 +32344,12 @@ export interface components {
             approverDisplayName?: null | string;
             /** @description Бізнес-ключ, унікальний у межах проєкту. */
             businessKey: string;
+            /** @description ✎ B143 (D-538): чи може поточний користувач блокувати рядки документа за запитаний період — рішення СЕРВЕРА, те саме, що
+             *     приймає `POST /documents/{id}/row-locks` (`RowLockRules.LockDenial`: носій права `Document.RowLock`
+             *     або власник документа з рівнем Write на таблицю; архів, архівація й закритий період — ні). `true` — є хоч одна
+             *     таблиця, рядки якої він може блокувати; клієнт показує «Заблокувати рядки…» лише за ним (власника документа клієнт
+             *     не знає). Лише картка (`GET /documents/{id}?periodKey=`); `null` — період не задано або це рядок переліку. */
+            canLockRows?: null | boolean;
             /** @description EA-C: чи може поточний користувач керувати передачами місяця — рішення СЕРВЕРА (автор ∨ `Manage` проєкту,
              *     та сама функція, що в обробниках `edit-assignments`). Клієнт показує пункт меню лише за ним. Лише картка. */
             canManageEditAccess?: null | boolean;

@@ -240,7 +240,116 @@ public sealed class RowLocksApiTests(SqlServerFixture sql)
         Assert.Equal("err.ECR-REQ-0422.lockRangeInvalid", refused.GetProperty("messageKey").GetString());
     }
 
+    /// <remarks>
+    /// ✎ B143 (D-538): прапорець картки <c>canLockRows</c> — те саме рішення, що й <c>POST …/row-locks</c>
+    /// (<c>RowLockRules.LockDenial</c>). Диференційна пара: для кожного актора прапорець дорівнює тому, чи дозволив
+    /// сервер блокування. Власні дані, період 2099xx.
+    /// ⛔ Доказ: прибрати заповнення <c>CanLockRows</c> у <c>GetDocumentHandler</c> — червоніють обидва тести B143.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "B143")]
+    public async Task Картка_canLockRows_дорівнює_рішенню_POST_для_кожного_актора()
+    {
+        var s = await ArrangeAsync(209903).ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var author = await SignInAsync(app, s.Author).ConfigureAwait(true);
+        using var writer = await SignInAsync(app, s.Writer).ConfigureAwait(true);
+        using var holder = await SignInAsync(app, s.Holder).ConfigureAwait(true);
+        using var reader = await SignInAsync(app, s.Reader).ConfigureAwait(true);
+        using var blind = await SignInAsync(app, s.Blind).ConfigureAwait(true);
+
+        // Прапорець читається ДО спроби блокування; дозволені актори блокують різні рядки (повтор дав би 409).
+        async Task<(bool Flag, HttpStatusCode Post)> PairAsync(HttpClient client, int row)
+        {
+            var flag = await CanLockRowsAsync(app, client, s, s.PeriodKey).ConfigureAwait(true);
+            Assert.True(flag.HasValue, "Картка з періодом мусить нести canLockRows.");
+            using var post = await client.PostAsJsonAsync(LocksUri(s), LockBody(s, s.RowKeys[row])).ConfigureAwait(true);
+
+            // Диференційна пара: прапорець істинний рівно тоді, коли сервер блокування дозволив.
+            Assert.Equal(flag.Value, post.StatusCode == HttpStatusCode.OK);
+            return (flag.Value, post.StatusCode);
+        }
+
+        // Власник документа без права Document.RowLock (Write на таблицю) — може.
+        Assert.Equal((true, HttpStatusCode.OK), await PairAsync(author, 0).ConfigureAwait(true));
+
+        // Не власник без права — ні, хоч би й з Write.
+        Assert.Equal((false, HttpStatusCode.Forbidden), await PairAsync(writer, 1).ConfigureAwait(true));
+        Assert.Equal((false, HttpStatusCode.Forbidden), await PairAsync(reader, 1).ConfigureAwait(true));
+
+        // Носій права (лише Read) — може.
+        Assert.Equal((true, HttpStatusCode.OK), await PairAsync(holder, 1).ConfigureAwait(true));
+
+        // Носій права, якому єдина таблиця закрита, — ні (POST: таблиця невидима, 404).
+        Assert.Equal((false, HttpStatusCode.NotFound), await PairAsync(blind, 1).ConfigureAwait(true));
+
+        // Власність вирішує: власником стає читач (лише Read) — ні йому (немає Write), ні колишньому власникові.
+        await using (var db = s.Builder.CreateContext())
+        {
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE doc.RowLock SET ReleasedAt = SYSUTCDATETIME(), ReleasedByUserId = {s.ReaderId} WHERE DocumentId = {s.Document.DocumentId}")
+                .ConfigureAwait(true);
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE doc.Document SET CreatedByUserId = {s.ReaderId} WHERE Id = {s.Document.DocumentId}").ConfigureAwait(true);
+        }
+
+        Assert.Equal((false, HttpStatusCode.Forbidden), await PairAsync(reader, 0).ConfigureAwait(true));
+        Assert.Equal((false, HttpStatusCode.Forbidden), await PairAsync(author, 0).ConfigureAwait(true));
+
+        // …а власником стає писар (Write) — може.
+        await using (var db = s.Builder.CreateContext())
+        {
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE doc.Document SET CreatedByUserId = {s.WriterId} WHERE Id = {s.Document.DocumentId}").ConfigureAwait(true);
+        }
+
+        Assert.Equal((true, HttpStatusCode.OK), await PairAsync(writer, 0).ConfigureAwait(true));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "B143")]
+    public async Task Картка_невидимого_документа_404_без_canLockRows_а_без_періоду_прапорця_немає()
+    {
+        var s = await ArrangeAsync(209904).ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var author = await SignInAsync(app, s.Author).ConfigureAwait(true);
+        using var outsider = await SignInAsync(app, s.Outsider).ConfigureAwait(true);
+
+        // Чужинець має і Document.View, і Document.RowLock, але не бачить проєкту: картка — 404, прапорця в тілі немає.
+        using (var hidden = await outsider.GetAsync(CardUri(s, s.PeriodKey)).ConfigureAwait(true))
+        {
+            var body = await hidden.Content.ReadAsStringAsync().ConfigureAwait(true);
+            Assert.True(hidden.StatusCode == HttpStatusCode.NotFound, $"{(int)hidden.StatusCode}\n{body}\n{app.ErrorsText}");
+            Assert.DoesNotContain("canLockRows", body, StringComparison.OrdinalIgnoreCase);
+        }
+
+        await JsonAsync(app, HttpStatusCode.NotFound, outsider.PostAsJsonAsync(LocksUri(s), LockBody(s, s.RowKeys[0])))
+            .ConfigureAwait(true);
+
+        // Власник: з періодом — true; без періоду рішення немає (воно на документ × період) — прапорець не заповнено.
+        Assert.True(await CanLockRowsAsync(app, author, s, s.PeriodKey).ConfigureAwait(true));
+        Assert.Null(await CanLockRowsAsync(app, author, s, periodKey: null).ConfigureAwait(true));
+    }
+
     // ───────────────────────────── допоміжне ─────────────────────────────
+
+    private static Uri CardUri(Scenario s, int? periodKey)
+        => new(
+            periodKey is { } p
+                ? $"/api/v1/documents/{s.Document.DocumentId}?periodKey={p}"
+                : $"/api/v1/documents/{s.Document.DocumentId}",
+            UriKind.Relative);
+
+    /// <summary>Прапорець <c>canLockRows</c> картки; <c>null</c> — поля немає або воно <c>null</c>.</summary>
+    private static async Task<bool?> CanLockRowsAsync(EcrApiFactory app, HttpClient client, Scenario s, int? periodKey)
+    {
+        var card = await JsonAsync(app, HttpStatusCode.OK, client.GetAsync(CardUri(s, periodKey))).ConfigureAwait(false);
+        return card.TryGetProperty("canLockRows", out var value) && value.ValueKind != JsonValueKind.Null
+            ? value.GetBoolean()
+            : null;
+    }
 
     private sealed record Scenario(
         TestDocumentBuilder Builder,
@@ -260,6 +369,11 @@ public sealed class RowLocksApiTests(SqlServerFixture sql)
         public string Blind { get; init; } = string.Empty;
 
         public int ReaderId { get; init; }
+
+        public int WriterId { get; init; }
+
+        /// <summary>✎ B143 (D-538): має Document.View і Document.RowLock, але жодного доступу до проєкту документа.</summary>
+        public string Outsider { get; init; } = string.Empty;
     }
 
     private static Uri LocksUri(Scenario s) => new($"/api/v1/documents/{s.Document.DocumentId}/row-locks", UriKind.Relative);
@@ -350,12 +464,13 @@ public sealed class RowLocksApiTests(SqlServerFixture sql)
     /// Документ у відкритому поточному періоді активного проєкту: автор (власник, Write), писар (Write), носій права
     /// <c>Document.RowLock</c> (Read), читач (Read), проєктувальник (<c>Template.Edit</c>) і чернетка версії шаблону.
     /// </summary>
-    private async Task<Scenario> ArrangeAsync()
+    /// <param name="ownPeriod">✎ B143 (D-538): власний період тесту (2099xx); <c>null</c> — поточний місяць майданчика.</param>
+    private async Task<Scenario> ArrangeAsync(int? ownPeriod = null)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
 
         var siteToday = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, SiteZone));
-        var periodKey = (siteToday.Year * 100) + siteToday.Month;
+        var periodKey = ownPeriod ?? ((siteToday.Year * 100) + siteToday.Month);
         var document = await builder.BuildAsync(periodKey, columnCount: 3, rowCount: 2).ConfigureAwait(false);
         var now = DateTime.UtcNow;
 
@@ -407,6 +522,7 @@ public sealed class RowLocksApiTests(SqlServerFixture sql)
         var designer = await UserAsync("b75d", null, "Template.View", "Template.Edit").ConfigureAwait(false);
         var blind = await UserDenyAsync("b75x", GrantLevel.Read, denyTable: true, "Document.View", "Document.RowLock")
             .ConfigureAwait(false);
+        var outsider = await UserAsync("b143o", null, "Document.View", "Document.RowLock").ConfigureAwait(false);
 
         await db.Database.ExecuteSqlInterpolatedAsync(
             $"UPDATE doc.Document SET CreatedByUserId = {author.Id} WHERE Id = {document.DocumentId}").ConfigureAwait(false);
@@ -441,6 +557,8 @@ public sealed class RowLocksApiTests(SqlServerFixture sql)
         {
             Blind = blind.Name,
             ReaderId = reader.Id,
+            WriterId = writer.Id,
+            Outsider = outsider.Name,
         };
     }
 }
