@@ -4,12 +4,23 @@
     публікація, ПРОЄКТ Yearly 2026 і порожній ДОКУМЕНТ. Стан (id) -> out/hse401-state.json.
 
 .PARAMETER Stage
-    Template | Project | All (за замовчуванням All). Повтор безпечний: наявне не перестворюється.
+    Template | Project | WorkflowNone | All (за замовчуванням All). Повтор безпечний: наявне не перестворюється.
+    WorkflowNone у All НЕ входить — лише явно.
+
+.PARAMETER WorkflowNone
+    B75/B140 (рішення людини 13.11): HSE401 лише збирає значення й віддає їх звітності — без подання й затвердження.
+    З перемикачем НОВА чернетка (етап Template) отримує PUT workflow-mode None до публікації.
+    ⛔ За замовчуванням ВИМКНЕНО: вмикати лише після злиття B138 (сервер: зріз, черга, перерахунок) і B139 (клієнт).
+
+.PARAMETER NewVersion
+    Етап WorkflowNone: номер нової версії (напр. 1.0.0.2). Шаблон уже опублікований з погодженням — режим міняється лише
+    в чернетці, тож етап клонує останню опубліковану версію, ставить None і публікує. Перенос проєкту HSE401 на нову
+    версію — ОКРЕМА дія вікна (скрипт її не робить).
 #>
 [CmdletBinding()]
-param([ValidateSet('Template', 'Project', 'All')][string]$Stage = 'All', [int]$Year = 2026,
+param([ValidateSet('Template', 'Project', 'WorkflowNone', 'All')][string]$Stage = 'All', [int]$Year = 2026,
     [ValidateSet('Scratch', 'Live')][string]$Target = 'Scratch', [string]$BaseUrl, [string]$Database, [string]$ConfirmStand, [string]$CredentialFile,
-    [switch]$PreviewOnly, [switch]$AcceptNaePreview)
+    [switch]$PreviewOnly, [switch]$AcceptNaePreview, [switch]$WorkflowNone, [string]$NewVersion)
 $ErrorActionPreference = 'Stop'
 $here = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 . (Join-Path $here 'Hse401Stand.Lib.ps1')
@@ -25,6 +36,19 @@ $state = Get-State
 
 Connect-Hse
 $code = $script:HseTemplateCode
+
+# B140: остання опублікована версія шаблону і її режим погодження (лише GET).
+function Get-Hse401PublishedMode {
+    $t0 = (Invoke-HseOk GET ("/api/v1/templates?limit=50&q=$code")).Json
+    $tpl0 = @($t0.items) | Where-Object { $_.code -eq $code } | Select-Object -First 1
+    if ($null -eq $tpl0) { return $null }
+    $vers0 = @((Invoke-HseOk GET "/api/v1/templates/$($tpl0.id)/versions?limit=100").Json.items)
+    $pub0 = $vers0 | Where-Object { $_.status -eq 'Published' } | Sort-Object id -Descending | Select-Object -First 1
+    $drf0 = $vers0 | Where-Object { $_.status -eq 'Draft' } | Sort-Object id -Descending | Select-Object -First 1
+    if ($null -eq $pub0) { return @{ TemplateId = [int]$tpl0.id; Published = $null; Draft = $drf0; Mode = $null } }
+    $mode0 = [string](Invoke-HseOk GET "/api/v1/template-versions/$($pub0.id)/structure").Json.workflowMode
+    return @{ TemplateId = [int]$tpl0.id; Published = $pub0; Draft = $drf0; Mode = $mode0 }
+}
 
 if ($preview) {
     # лише GET: що вже існує на стенді і що було б створено
@@ -58,6 +82,42 @@ if ($preview) {
             })
         Write-HseLog ("[preview] політика HSE401_OPEN існує={0}; проєкт HSE401_2026 існує={1}; документ існує={2}" -f ($null -ne $pol), ($null -ne $found), ($null -ne $found -and $null -ne $found['documentId']))
     }
+    if ($Stage -eq 'WorkflowNone') {
+        $m = Get-Hse401PublishedMode
+        $pubV = $(if ($null -ne $m -and $null -ne $m.Published) { [string]$m.Published.version } else { $null })
+        $would = ($null -ne $m -and $null -ne $m.Published -and $m.Mode -ne 'None' -and $null -eq $m.Draft)
+        Save-Hse401PlanSection 'workflowNone' ([ordered]@{
+                templateCode = $code; publishedVersion = $pubV; publishedWorkflowMode = $(if ($null -ne $m) { $m.Mode } else { $null })
+                draftExists = ($null -ne $m -and $null -ne $m.Draft); newVersion = $NewVersion; wouldCloneSetNoneAndPublish = $would
+            })
+        Write-HseLog ("[preview] WorkflowNone: опублікована={0}, режим={1}, чернетка є={2}, нова версія={3}, клонував би={4}" -f $pubV, $(if ($null -ne $m) { $m.Mode } else { '-' }), ($null -ne $m -and $null -ne $m.Draft), $NewVersion, $would)
+    }
+    return
+}
+
+if ($Stage -eq 'WorkflowNone') {
+    Write-HseLog '== WorkflowNone (B75/B140) =='
+    $m = Get-Hse401PublishedMode
+    if ($null -eq $m -or $null -eq $m.Published) { throw 'WorkflowNone: опублікованої версії шаблону HSE401 немає — спершу етап Template (з -WorkflowNone для нового стенда).' }
+    if ($m.Mode -eq 'None') {
+        Write-HseLog "  версія $($m.Published.version) (id $($m.Published.id)) уже без погодження; нічого не роблю"
+        $state['workflowNoneVersionId'] = [int]$m.Published.id; Save-State $state
+        return
+    }
+    if ($null -ne $m.Draft) { throw "WorkflowNone: у шаблону вже є чернетка $($m.Draft.version) (id $($m.Draft.id)) — опублікуйте або приберіть її; чужу чернетку скрипт не чіпає." }
+    if ([string]::IsNullOrWhiteSpace($NewVersion)) { throw 'WorkflowNone: задайте -NewVersion (номер нової версії, напр. 1.0.0.2).' }
+    $null = Invoke-HseOk POST "/api/v1/templates/$($m.TemplateId)/versions" @{ versionNumber = $NewVersion; cloneFromVersionId = [int]$m.Published.id }
+    $vers = @((Invoke-HseOk GET "/api/v1/templates/$($m.TemplateId)/versions?limit=100").Json.items)
+    $clone = $vers | Where-Object { $_.status -eq 'Draft' } | Sort-Object id -Descending | Select-Object -First 1
+    $nvid = [int]$clone.id
+    Write-HseLog "  чернетка $($clone.version) (id $nvid) — копія версії $($m.Published.version)"
+    $null = Invoke-HseOk PUT "/api/v1/template-versions/$nvid/workflow-mode" @{ workflowMode = 'None' }
+    $got = [string](Invoke-HseOk GET "/api/v1/template-versions/$nvid/structure").Json.workflowMode
+    if ($got -ne 'None') { throw "WorkflowNone: після PUT режим версії $nvid = '$got', очікували 'None' — не публікую." }
+    $p = Invoke-Hse POST "/api/v1/template-versions/$nvid/publish" @{ reason = 'HSE401: версія без подання й затвердження (B75, рішення 13.11)' }
+    if ($p.Status -notin 200, 201, 202, 204) { throw "publish -> $($p.Status) $(Get-EcrErrorCode $p) $($p.Text)" }
+    Write-HseLog "  опубліковано версію $NewVersion (id $nvid) без погодження. Перенос проєкту HSE401 на неї — окрема дія вікна."
+    $state['workflowNoneVersionId'] = $nvid; Save-State $state
     return
 }
 
@@ -128,6 +188,11 @@ if ($Stage -in 'Template', 'All') {
         Write-HseLog "  груп заголовків: $($groups.Count); колонок прив'язано: $($changes.Count)"
         # D-474 (4): річний проєкт приймає лише версію «рік, місяці в колонках» — розкладку задаємо в чернетці, до публікації.
         $null = Invoke-HseOk PUT "/api/v1/template-versions/$vid/layout" @{ layout = 'YearWithMonthColumns' }
+        # B75/B140: HSE401 без подання й затвердження — теж лише в чернетці, до публікації; лише за явним -WorkflowNone.
+        if ($WorkflowNone) {
+            $null = Invoke-HseOk PUT "/api/v1/template-versions/$vid/workflow-mode" @{ workflowMode = 'None' }
+            Write-HseLog '  режим погодження: None (без подання й затвердження)'
+        }
         $p = Invoke-Hse POST "/api/v1/template-versions/$vid/publish" @{ reason = $(if (Test-Hse401Live) { 'HSE401: перша версія шаблону (завантаження з книги HSE401_v1.0.3.1)' } else { 'HSE401 scratch: перша версія' }) }
         if ($p.Status -notin 200, 201, 202, 204) { throw "publish -> $($p.Status) $(Get-EcrErrorCode $p) $($p.Text)" }
         Write-HseLog "  опубліковано версію id $vid"
