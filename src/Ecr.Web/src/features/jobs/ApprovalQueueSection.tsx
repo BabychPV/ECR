@@ -1,10 +1,11 @@
 import { useState, type JSX } from 'react';
-import { Anchor, Badge, Button, Card, Group, Stack, Text, UnstyledButton } from '@mantine/core';
+import { Anchor, Button, Card, Group, Stack, Text, UnstyledButton } from '@mantine/core';
 import { Link } from 'react-router-dom';
 import { formatDateTime } from '@/shared/format/datetime';
 import { formatPeriodKey } from '@/shared/format/periodKey';
 import { formatCount } from '@/shared/format/plural';
 import { t } from '@/shared/i18n';
+import { toneFills } from '@/shared/ui/StatusBadge';
 import { MyTasksSection } from './MyTasksSection';
 import { approvalQueueHref, approvalQueueItems, useApprovalQueue, type ApprovalQueueItem } from './useApprovalQueue';
 
@@ -167,16 +168,17 @@ function ApprovalRow({
           </Text>
           {/* ✎ B79 (Q13): числа аркуша перераховано після подання - погоджувач бачить це ще в черзі, до затвердження. */}
           {recalculatedAfterSubmission(item) && (
-            <Badge
-              size="sm"
-              variant="light"
-              color="statusWarning"
-              mt={4}
+            // ⚠ Не Badge: за KIT.md бейджі - лише `StatusBadge` (стани словника сервера), а це ознака рядка, не стан.
+            // Тому текст у тоні «увага» (`toneFills.warning` - виміряний токен), як позначка на банері аркуша.
+            <Text
+              size="xs"
+              fw={500}
+              c={toneFills.warning.text}
               title={t('myTasks.approval.recalculatedHint')}
               data-recalculated-after-submission=""
             >
               {t('myTasks.approval.recalculated')}
-            </Badge>
+            </Text>
           )}
         </div>
         <Group justify="flex-end">
