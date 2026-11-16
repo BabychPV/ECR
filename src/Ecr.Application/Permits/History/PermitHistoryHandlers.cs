@@ -48,7 +48,8 @@ public sealed class AddRowPermitHandler(
     Groups.ILookupTargetResolver? groups = null,    // F13 p223 (1): the stored Issues of the change's year are re-run after the write. `null` (tests) — not re-run.
     ValidateDocumentHandler? revalidate = null,
     IValidationResultStore? validationResults = null,
-    IPeriodStore? periods = null)    // ✎ C-10: межі періоду комірки для одиниці поділу (квартал/рік). `null` (тести) — як для місячного.
+    IPeriodStore? periods = null,    // ✎ C-10: межі періоду комірки для одиниці поділу (квартал/рік). `null` (тести) — як для місячного.
+    ISheetEditGate? sheetGate = null)    // ✎ B79 (Q9): повторна перевірка річного рішення під замками аркушів року.
 {
     /// <summary>Adds the permit and returns the row's history.</summary>
     public async Task<RowPermitHistoryDto> HandleAsync(long documentId, AddRowPermitRequest request, CancellationToken ct)
@@ -123,6 +124,9 @@ public sealed class AddRowPermitHandler(
 
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            // ✎ B79 (Q9): річне рішення про комірку дозволу — повторно під замками аркушів року, до будь-якого запису.
+            await row.EnsureStillEditableAsync(sheetGate, documentId, innerCt).ConfigureAwait(false);
+
             // ⛔ D-1: та сама шкала, на якій рахувались дата й розрив, — під UPDLOCK+HOLDLOCK до коміту.
             PermitHistoryRules.EnsureUnchanged(
                 segments.Select(s => s.Id),
@@ -164,7 +168,8 @@ public sealed class UndoRowPermitHandler(
     IPermitRegistryIndex? permitTargets = null,    // F13 p223 (1): the stored Issues of the change's year are re-run after the write. `null` (tests) — not re-run.
     ValidateDocumentHandler? revalidate = null,
     IValidationResultStore? validationResults = null,
-    IPeriodStore? periods = null)    // ✎ C-10: див. AddRowPermitHandler.
+    IPeriodStore? periods = null,    // ✎ C-10: див. AddRowPermitHandler.
+    ISheetEditGate? sheetGate = null)    // ✎ B79 (Q9): див. AddRowPermitHandler.
 {
     /// <summary>Removes the latest permit and returns the row's history.</summary>
     public async Task<RowPermitHistoryDto> HandleAsync(long documentId, UndoRowPermitRequest request, CancellationToken ct)
@@ -196,6 +201,9 @@ public sealed class UndoRowPermitHandler(
         var now = clock.UtcNow;
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            // ✎ B79 (Q9): річне рішення — повторно під замками аркушів року.
+            await row.EnsureStillEditableAsync(sheetGate, documentId, innerCt).ConfigureAwait(false);
+
             PermitHistoryRules.EnsureUnchanged(
                 segments.Select(s => s.Id),
                 await store.LockRowSegmentsAsync(
