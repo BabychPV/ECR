@@ -355,7 +355,14 @@ export function TemplateCardPage(): JSX.Element {
           <Button
             disabled={!hasAnyText(renameValue)}
             loading={rename.isPending}
-            onClick={() => rename.mutate(renameValue)}
+            onClick={() => {
+              // ⛔ B145b: діалог, що закрився (ще ~200 мс у DOM), і запит у польоті не перейменовують удруге. Зонд:
+              // чернетку вже скинуто, значення падає на назву картки, кнопка активна — другий клік слав другий
+              // `PUT /templates/{id}` з поточною назвою.
+              if (dialog !== 'rename' || rename.isPending) return;
+
+              rename.mutate(renameValue);
+            }}
           >
             {t('common.save')}
           </Button>

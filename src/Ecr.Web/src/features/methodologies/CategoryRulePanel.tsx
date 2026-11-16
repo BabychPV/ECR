@@ -171,7 +171,9 @@ export function MethodologyCategoryRulePanel({ methodologyId, versionId, editabl
               color="statusError"
               loading={removeLoading}
               onClick={() => {
-                if (remove.isPending) return;
+                // ⛔ B145b: діалог, що закривається (ще ~200 мс у DOM), і запит у польоті не видаляють удруге —
+                // зонд: другий клік слав другий `DELETE …/category-rule`.
+                if (!confirmingDelete || remove.isPending) return;
                 remove.mutate();
               }}
             >

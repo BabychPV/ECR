@@ -100,7 +100,15 @@ export function EndEarlyModal({
         <Button variant="default" onClick={onClose}>
           {t('common.cancel')}
         </Button>
-        <Button disabled={!enough} loading={confirmLoading} onClick={() => onConfirm(reason.trim())}>
+        {/* ⛔ B145b: діалог, що закривається (ще ~200 мс у DOM, причина ще в полі), не підтверджує вдруге -
+            той самий захист, що в `shared/ui/ReasonModal`. */}
+        <Button
+          disabled={!enough}
+          loading={confirmLoading}
+          onClick={() => {
+            if (opened) onConfirm(reason.trim());
+          }}
+        >
           {confirmLabel}
         </Button>
       </Group>

@@ -122,7 +122,13 @@ export function GroupDrawer({ group, canEdit, onDirtyChange, switchRequested = f
   // Тип прибрано зі складу використовуваної групи: значення, вже введені в документах, лишаються (сервер перевіряє лише змінені).
   const compositionShrunk = !isNew && used && original.typeCodes.some((code) => !draft.typeCodes.includes(code));
 
+  // ⛔ B145b: шторка, що вже закрила себе (`?panel=` прибрано), не зберігає вдруге. Зонд на
+  // сторінці: між відповіддю сервера і зняттям шторки з дерева форма ще в DOM, `busy` уже `false`, код нової групи на
+  // місці — другий сабміт слав другий `POST /permit-groups` з тим самим тілом. Ref, а не стан: синхронно, без перерендеру.
+  const leaving = useRef(false);
+
   function close(): void {
+    leaving.current = true;
     setPanel(null);
   }
 
@@ -145,6 +151,8 @@ export function GroupDrawer({ group, canEdit, onDirtyChange, switchRequested = f
   }
 
   function change(next: Partial<GroupDraft>, field?: GroupField | 'description'): void {
+    // B145b: правка після закриття можлива лише в шторці, яку відкрили знову до зняття з дерева, — вона знову зберігає.
+    leaving.current = false;
     setDraft((current) => ({ ...current, ...next }));
     if (field !== undefined) setErrors((current) => ({ ...current, [field]: undefined }));
     setFormError(null);
@@ -193,7 +201,7 @@ export function GroupDrawer({ group, canEdit, onDirtyChange, switchRequested = f
   }
 
   async function submit(): Promise<void> {
-    if (!canEdit || busy) return;
+    if (!canEdit || busy || leaving.current) return;
 
     const problems = draftProblems(draft, isNew);
     setErrors(problems);

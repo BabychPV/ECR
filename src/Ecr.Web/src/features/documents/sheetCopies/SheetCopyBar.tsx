@@ -51,6 +51,10 @@ export function SheetCopyBar({ documentId, target, canAdd, onSelect }: SheetCopy
   // після 100 мс (`usePendingLoading`), а `isPending` оновлюється після перерендеру: подвійний клік давав дві копії.
   // Ref — синхронно.
   const adding = useRef(false);
+  // ⛔ B145b: те саме для «Save» перейменування. Зонд: подвійний клік слав два `PUT …/name`, а клік по кнопці діалогу,
+  // що вже закрився (ще ~200 мс у DOM, чернетка та сама, кнопка активна), — ще один. Звільняється після відповіді й
+  // перечитування (`onSettled` виклику), тож відмова сервера лишає діалог відкритим і дає повторити.
+  const renaming = useRef(false);
 
   const refresh = async (): Promise<void> => {
     // ⚠ Префікси ключів: `['document-tables', id, period]` залежить від періоду, який тут не потрібен.
@@ -185,7 +189,13 @@ export function SheetCopyBar({ documentId, target, canAdd, onSelect }: SheetCopy
               loading={renameLoading}
               data-testid="sheet-copy-rename-save"
               onClick={() => {
-                rename.mutate();
+                if (!renameOpen || renaming.current) return;
+                renaming.current = true;
+                rename.mutate(undefined, {
+                  onSettled: () => {
+                    renaming.current = false;
+                  },
+                });
               }}
             >
               {t('common.save')}

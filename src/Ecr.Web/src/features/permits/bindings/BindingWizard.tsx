@@ -79,6 +79,13 @@ export function BindingWizard({ opened, templateVersionId, table, existing, onCl
   const save = useMutation({
     mutationFn: (data: WizardData) =>
       savePermitBinding(templateVersionId, existing?.code ?? bindingCodeFor(table), toRequest(data, sheet)),
+    /*
+     * ⛔ B145b: перелік прив'язок перечитується ТУТ, в `onSuccess` самої мутації, а не в `onSuccess` виклику
+     * `save.mutate`: так `isPending` (і зайнятість кнопки майстра) триває від запиту до закриття. Доти після
+     * відповіді сервера мутація вже не була `isPending`, майстер ще був ВІДКРИТИЙ, а «Save binding» -
+     * активна на весь час перечитування: клік у цьому вікні слав другий `PUT` прив'язки (зонд: 2 замість 1).
+     */
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: bindingsKey(templateVersionId) }),
   });
 
   const initial: WizardData = useMemo(() => {
@@ -191,8 +198,7 @@ export function BindingWizard({ opened, templateVersionId, table, existing, onCl
         }}
         onApply={(data, api) => {
           save.mutate(data, {
-            onSuccess: async () => {
-              await queryClient.invalidateQueries({ queryKey: bindingsKey(templateVersionId) });
+            onSuccess: () => {
               showDone(t('permits.sheetBinding.saved'));
               api.close();
             },

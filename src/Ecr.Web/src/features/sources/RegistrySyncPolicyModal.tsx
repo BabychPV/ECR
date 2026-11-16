@@ -159,14 +159,16 @@ export function RegistrySyncPolicyModal({
           </Button>
           <Button
             loading={save.isPending}
-            onClick={() =>
+            onClick={() => {
+              // B145b (KIT §6.9): діалог, що закрився, ще ~200 мс у DOM — його кнопка не зберігає вдруге.
+              if (!opened || save.isPending) return;
               save.mutate({
                 onMissingInSource: missing,
                 validFromAttribute: attribute(validFrom),
                 validToAttribute: attribute(validTo),
                 validToInclusive: hasValidTo && inclusive,
-              })
-            }
+              });
+            }}
             data-sync-policy-save=""
           >
             {t('common.save')}

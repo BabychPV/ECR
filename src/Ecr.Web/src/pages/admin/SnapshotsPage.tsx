@@ -612,7 +612,9 @@ export function SnapshotsPage(): JSX.Element {
             <Button
               loading={buildLoading}
               onClick={() => {
-                if (build.isPending) return;
+                // ⛔ B145b: діалог, що закривається (ще ~200 мс у DOM, звіт і період ті самі), не ставить
+                // ДРУГУ побудову — зонд: другий клік слав другий `POST …/build`; зрізи не видаляються.
+                if (!building || build.isPending) return;
                 build.mutate();
               }}
             >

@@ -66,6 +66,11 @@ export function AddRegionModal({ opened, onClose, onAdded }: AddRegionModalProps
   const busy = usePendingLoading(create.isPending);
 
   const submit = (): void => {
+    // ⛔ B145b: один POST на відкриття. Зонд: діалог, що закрився, але лишився в дереві (власний `Modal` ще ~200 мс у
+    // DOM, регіон обраний, кнопка активна), слав другий `POST /nae-tree/roots` з тим самим тілом. Єдиний власник
+    // (`NaeStructurePage`) знімає діалог із дерева одразу — це другий шар, щоб захист не залежав від власника.
+    if (!opened || create.isPending) return;
+
     if (chosen === '') {
       setError(t('permits.nae.manual.regionRequired'));
 

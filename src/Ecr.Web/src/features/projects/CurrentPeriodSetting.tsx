@@ -215,6 +215,9 @@ export function CurrentPeriodSetting({
               disabled={pinPeriodId === null || reason.trim().length === 0 || pin.isPending}
               loading={pinLoading}
               onClick={() => {
+                // ⛔ B145b: діалог, що закривається (ще ~200 мс у DOM, період і причина ті самі), і запит у
+                // польоті не закріплюють удруге — зонд: другий клік слав другий `PUT` з тим самим тілом.
+                if (!pinning || pin.isPending) return;
                 if (pinPeriodId !== null) pin.mutate({ periodId: Number(pinPeriodId), reason: reason.trim() });
               }}
             >
