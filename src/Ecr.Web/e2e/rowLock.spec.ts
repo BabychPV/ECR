@@ -8,7 +8,8 @@ import { expect, test, type Browser, type BrowserContext } from '@playwright/tes
  *    «по» і блокує: `POST …/row-locks` 200, у першій комірці рядка — значок замка, у рядку кнопок — «Locked rows: 1»;
  *  - `e2e-operator` (Write на проєкт, без права) бачить той самий значок, кнопки «Lock rows…» у нього немає, а
  *    правка комірки заблокованого рядка — 403 з причиною `RowLocked`;
- *  - `e2e-admin` знімає блокування з переліку: `DELETE …/row-locks/{id}` 204, значок зникає, оператор знову править.
+ *  - `e2e-admin` знімає блокування з переліку: `DELETE …/row-locks/{id}` 204, значок зникає, оператор знову править;
+ *  - ✎ B143: `e2e-operator` як ВЛАСНИК власного документа (без права) бачить «Lock rows…» і блокує рядок — другий тест.
  *
  * ⛔ Без стенда файл ПАДАЄ (`beforeAll`), а не пропускається (honesty-guard, `globalSetup.ts`).
  *
@@ -43,6 +44,12 @@ interface RowLock {
   isActive: boolean;
 }
 
+interface DocumentCard {
+  projectId: number;
+  ownerUserId: number | null;
+  canLockRows?: boolean | null;
+}
+
 async function signedIn(browser: Browser, user: { userName: string; password: string }): Promise<BrowserContext> {
   const context = await browser.newContext();
   const login = await context.request.post('/api/v1/login/local', {
@@ -53,9 +60,9 @@ async function signedIn(browser: Browser, user: { userName: string; password: st
   return context;
 }
 
-async function sliceOf(context: BrowserContext, tableInstanceId: number): Promise<Slice> {
+async function sliceOf(context: BrowserContext, tableInstanceId: number, documentId: string = DocumentId): Promise<Slice> {
   const response = await context.request.get(
-    `/api/v1/documents/${DocumentId}/tables/${String(tableInstanceId)}?periodKey=${PeriodKey}`,
+    `/api/v1/documents/${documentId}/tables/${String(tableInstanceId)}?periodKey=${PeriodKey}`,
   );
   expect(response.ok(), `GET slice: ${String(response.status())}`).toBe(true);
 
@@ -76,12 +83,20 @@ async function patchCell(context: BrowserContext, tableInstanceId: number, rowKe
   });
 }
 
-async function releaseAll(context: BrowserContext): Promise<void> {
-  const list = await context.request.get(`/api/v1/documents/${DocumentId}/row-locks?periodKey=${PeriodKey}`);
+async function releaseAll(context: BrowserContext, documentId: string = DocumentId): Promise<void> {
+  const list = await context.request.get(`/api/v1/documents/${documentId}/row-locks?periodKey=${PeriodKey}`);
   if (!list.ok()) return;
   for (const lock of (await list.json()) as RowLock[]) {
-    await context.request.delete(`/api/v1/documents/${DocumentId}/row-locks/${String(lock.id)}`);
+    await context.request.delete(`/api/v1/documents/${documentId}/row-locks/${String(lock.id)}`);
   }
+}
+
+/** Картка документа за період стенда — те саме `GET`, яке робить сторінка документа (B143: `canLockRows`). */
+async function cardOf(context: BrowserContext, documentId: string): Promise<DocumentCard> {
+  const response = await context.request.get(`/api/v1/documents/${documentId}?periodKey=${PeriodKey}`);
+  expect(response.ok(), `GET document ${documentId}: ${String(response.status())} ${await response.text()}`).toBe(true);
+
+  return (await response.json()) as DocumentCard;
 }
 
 /** Дата `YYYY-MM-DD` через `days` днів від сьогодні (UTC; запас у тиждень перекриває різницю поясу проєкту). */
@@ -213,6 +228,133 @@ test.describe('rowLock: блокування рядків документа н�
     } finally {
       await admin.close();
       await operator.close();
+    }
+  });
+
+  /*
+   * ✎ B143 (D-538): ВЛАСНИК документа без права `Document.RowLock` блокує рядки свого документа.
+   *
+   * `e2e-operator` (роль E2EOperator: `Document.Create`, Write на проєкт 1, права `Document.RowLock` немає) документом
+   * стенда не володіє (його заводить генератор до появи користувачів стенда), тому тест заводить ВЛАСНИЙ документ
+   * оператора в тому самому проєкті через API (нових облікових записів і ролей немає):
+   *  - картка власного документа: `canLockRows = true`; картка документа стенда: `false` і кнопки немає;
+   *  - у власному документі «Lock rows…» видно, блокування через діалог — `POST …/row-locks` 200.
+   * Прибирання (`finally`): блокування зняті, документ видаляє `e2e-admin` (`Document.Delete`, чернетка).
+   *
+   * ⚠ Написано без локального прогону (правило «e2e — на CI»): перший живий прогін — CI `e2e-stand`.
+   */
+  test('B143: власник без права Document.RowLock блокує рядок свого документа; у чужому документі кнопки немає', async ({
+    browser,
+  }) => {
+    const admin = await signedIn(browser, Admin);
+    const operator = await signedIn(browser, Operator);
+    let ownDocumentId = '';
+
+    try {
+      // ── 0. Оператор: права немає, документом стенда не володіє, сервер там блокувати не дає ─────
+      const meResponse = await operator.request.get('/api/v1/me');
+      expect(meResponse.ok(), `GET /me: ${String(meResponse.status())}`).toBe(true);
+      const me = (await meResponse.json()) as { userId: number; permissions: string[] };
+      expect(me.permissions, 'e2e-operator отримав Document.RowLock — тест власника втратив сенс').not.toContain('Document.RowLock');
+
+      const standCard = await cardOf(operator, DocumentId);
+      expect(standCard.ownerUserId, 'e2e-operator — власник документа стенда: «чужого» документа для порівняння немає').not.toBe(
+        me.userId,
+      );
+      expect(standCard.canLockRows, 'картка чужого документа: canLockRows').toBe(false);
+
+      // ── 1. Власний документ оператора в проєкті стенда (той самий склад аркушів) ──────────────
+      const standTables = await operator.request.get(`/api/v1/documents/${DocumentId}/tables?periodKey=${PeriodKey}`);
+      expect(standTables.ok(), `GET tables: ${String(standTables.status())}`).toBe(true);
+      const sheetDefIds = [...new Set(((await standTables.json()) as DocumentTable[]).map((table) => table.sheetDefId))];
+      const createdDocument = await operator.request.post('/api/v1/documents', {
+        data: { projectId: standCard.projectId, sheetDefIds },
+      });
+      expect(createdDocument.ok(), `POST documents (e2e-operator): ${String(createdDocument.status())} ${await createdDocument.text()}`).toBe(
+        true,
+      );
+      ownDocumentId = String(((await createdDocument.json()) as { documentId: number }).documentId);
+
+      const ownCard = await cardOf(operator, ownDocumentId);
+      expect(ownCard.ownerUserId, 'власник нового документа — не e2e-operator').toBe(me.userId);
+      expect(ownCard.canLockRows, 'картка власного документа: canLockRows').toBe(true);
+
+      // Рядок для блокування: у новому документі динамічна таблиця порожня — оператор додає рядок.
+      const ownTables = await operator.request.get(`/api/v1/documents/${ownDocumentId}/tables?periodKey=${PeriodKey}`);
+      expect(ownTables.ok(), `GET tables власного документа: ${String(ownTables.status())}`).toBe(true);
+      const table = ((await ownTables.json()) as DocumentTable[])[0];
+      if (table === undefined) throw new Error('у власного документа немає таблиць');
+      let rows = (await sliceOf(operator, table.tableInstanceId, ownDocumentId)).rows;
+      if (rows.length === 0) {
+        const added = await operator.request.post(`/api/v1/documents/${ownDocumentId}/rows`, {
+          data: { tableInstanceId: table.tableInstanceId, rowKey: null },
+        });
+        expect(added.ok(), `POST rows: ${String(added.status())} ${await added.text()}`).toBe(true);
+        rows = (await sliceOf(operator, table.tableInstanceId, ownDocumentId)).rows;
+      }
+      expect(rows.length, 'у першій таблиці власного документа немає рядків').toBeGreaterThan(0);
+
+      // ── 2. Власник без права бачить «Lock rows…» і блокує рядок через діалог ──────────────────
+      const page = await operator.newPage();
+      await page.goto(`/documents/${ownDocumentId}?periodKey=${PeriodKey}`);
+      const grid = page.locator('revo-grid').first();
+      const firstCell = grid.locator('revogr-data .rgCell').first();
+      await expect(firstCell, 'рядки сітки власного документа не завантажилися').toBeVisible({ timeout: 60_000 });
+
+      const lockButton = page.locator('[data-row-lock-open]').first();
+      await expect(lockButton, 'кнопки «Lock rows…» немає у власника документа без права Document.RowLock').toBeVisible({
+        timeout: 30_000,
+      });
+      await firstCell.click();
+      await expect(lockButton).toBeEnabled({ timeout: 15_000 });
+      await lockButton.click();
+
+      const dialog = page.getByRole('dialog');
+      await expect(dialog).toBeVisible({ timeout: 30_000 });
+      const save = dialog.locator('[data-row-lock-save]');
+      const until = dialog.getByRole('textbox', { name: /^To/ });
+      await until.fill(dayFromNow(7));
+      await until.press('Tab');
+      await expect(save).toBeEnabled({ timeout: 15_000 });
+
+      const created = page.waitForResponse(
+        (response) =>
+          response.request().method() === 'POST' &&
+          new URL(response.url()).pathname === `/api/v1/documents/${ownDocumentId}/row-locks`,
+        { timeout: 60_000 },
+      );
+      await save.click();
+      const createdResponse = await created;
+      expect(createdResponse.status(), `POST row-locks (власник без права): ${await createdResponse.text()}`).toBe(200);
+      const lock = ((await createdResponse.json()) as RowLock[])[0];
+      if (lock === undefined) throw new Error('POST row-locks не повернув блокування');
+      expect(rows.map((row) => row.rowKey), 'заблоковано рядок не цієї таблиці').toContain(lock.rowKey);
+
+      await expect(dialog).toBeHidden({ timeout: 30_000 });
+      await expect(grid.locator(`[data-row-lock-badge="${String(lock.id)}"]`), 'значка замка у власника немає').toBeVisible({
+        timeout: 30_000,
+      });
+
+      // ── 3. У чужому документі (стенда) той самий оператор кнопки не має ────────────────────────
+      await page.goto(`/documents/${DocumentId}?periodKey=${PeriodKey}`);
+      await expect(page.locator('revo-grid').first().locator('revogr-data .rgCell').first(), 'сітка документа стенда').toBeVisible({
+        timeout: 60_000,
+      });
+      // Права в оператора немає, тож кнопки немає і до картки (запасне правило), і з нею (`canLockRows = false`, крок 0).
+      await expect(page.locator('[data-row-lock-open]')).toHaveCount(0);
+      await page.close();
+    } finally {
+      try {
+        if (ownDocumentId !== '') {
+          await releaseAll(admin, ownDocumentId);
+          const removed = await admin.request.delete(`/api/v1/documents/${ownDocumentId}`);
+          // `soft`: відмова прибирання не має перекривати причину падіння самого тесту.
+          expect.soft(removed.ok(), `DELETE власного документа оператора: ${String(removed.status())} ${await removed.text()}`).toBe(true);
+        }
+      } finally {
+        await admin.close();
+        await operator.close();
+      }
     }
   });
 });
