@@ -38,6 +38,8 @@ public sealed partial class SheetCopyQuerySitesTests
         ["src/Ecr.Infrastructure/Persistence/CalculationResultStore.Year.cs"] =
             "огляд року: екземпляри документа (усі копії) за Id з будівника; зведення групує за (TableDefId, SheetCopyId) — копія окремою таблицею",
         ["src/Ecr.Infrastructure/Security/AccessDecisionService.cs"] = "стан і крок маршруту — своєї копії (SheetKey)",
+        ["src/Ecr.Infrastructure/Persistence/RowLockStore.cs"] =
+            "B75: наявні рядки блокування — екземпляр САМЕ своєї копії (SheetCopyId = запиту; NULL — оригінал)",
         ["src/Ecr.Infrastructure/Persistence/WorkflowStore.cs"] =
             "стан, зрізи, журнал — за копією; календар подання — оригінал (копія — коміт 8)",
         ["src/Ecr.Infrastructure/Persistence/RegistryStore.cs"] =

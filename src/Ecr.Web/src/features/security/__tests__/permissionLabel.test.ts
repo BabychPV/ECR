@@ -102,8 +102,9 @@ describe('Сід покриває ВЕСЬ каталог прав (U-11)', () =
   // ✎ 2026-10-19: 45-те — `Permit.EditType`, `Permit.PublishType` (PM-04, група `Permit`).
   // ✎ 2026-10-29: 47-ме — `Document.Discuss`, `Document.DiscussModerate` (чат таблиці документа, TC).
   // ✎ 2026-10-30: 48-ме — `Document.OverrideFormula` (D-461, ручне значення замість формули).
-  it('у каталозі 48 прав — рівно стільки колонок і має матриця', () => {
-    expect(codes.size).toBe(48);
+  // ✎ 2026-11-16: 49-те — `Document.RowLock` (B75, блокування рядків; назви ru/kz/en — seed/features/B75-row-lock.sql).
+  it('у каталозі 49 прав — рівно стільки колонок і має матриця', () => {
+    expect(codes.size).toBe(49);
   });
 
   it('кожне право має назву в каталозі рядків', () => {

@@ -93,6 +93,7 @@ public sealed class GetTemplateStructureHandler(
             [.. groupRules.Select(r => new SheetGroupRuleDto(r.SheetGroup, r.RuleKind, r.TargetGroup))])
         {
             Layout = version.Layout,
+            WorkflowMode = version.WorkflowMode,
         };
     }
 

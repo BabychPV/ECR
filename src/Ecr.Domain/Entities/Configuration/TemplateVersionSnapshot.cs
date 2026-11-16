@@ -54,6 +54,12 @@ public sealed record TemplateVersionSnapshot(
     public IReadOnlyDictionary<(int TableDefId, int MonthNumber), IReadOnlyList<MonthInputAlias>> MonthInputAliases { get; init; }
         = new Dictionary<(int TableDefId, int MonthNumber), IReadOnlyList<MonthInputAlias>>();
 
+    /// <summary>
+    /// ✎ B75: версія без подання й затвердження (<c>WorkflowMode.None</c>). Їде проєкцією в запиті аркушів (нового
+    /// звернення не додає); режим міняється лише в чернетці, і <c>SetTemplateWorkflowModeHandler</c> скидає знімок.
+    /// </summary>
+    public bool WorkflowNone { get; init; }
+
     /// <summary>Псевдоніми таблиці для місяця <paramref name="monthNumber"/>; порожньо — немає.</summary>
     /// <param name="tableDefId">Таблиця.</param>
     /// <param name="monthNumber">Місяць 1..12.</param>

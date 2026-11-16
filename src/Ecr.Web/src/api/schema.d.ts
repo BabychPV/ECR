@@ -4783,6 +4783,204 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{documentId}/row-locks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Незняті й не прострочені блокування документа за період (лише таблиці, які читач бачить). */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Період екземпляра таблиці. */
+                    periodKey?: number;
+                };
+                header?: never;
+                path: {
+                    /** @description Документ. */
+                    documentId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RowLockDto"][];
+                        "text/json": components["schemas"]["RowLockDto"][];
+                        "text/plain": components["schemas"]["RowLockDto"][];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Блокує рядки таблиці (усе або нічого). Власник документа з рівнем Write на таблицю або носій права
+         *     `Document.RowLock`; той, хто блокує, стає власником блокування.
+         * @description `403` — немає права, проєкт в архіві чи архівується, період закрито; `404` — документ, таблиця чи
+         *     рядок відсутні або невидимі; `409 rowAlreadyLocked` — рядок уже заблоковано на цей час;
+         *     `422 lockRangeInvalid` — проміжок порожній або минув.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Документ. */
+                    documentId: number;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["CreateRowLocksRequest"];
+                    "application/json": components["schemas"]["CreateRowLocksRequest"];
+                    "text/json": components["schemas"]["CreateRowLocksRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RowLockDto"][];
+                        "text/json": components["schemas"]["RowLockDto"][];
+                        "text/plain": components["schemas"]["RowLockDto"][];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{documentId}/row-locks/{lockId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Знімає блокування (власник блокування або носій права `Document.RowLock`); історія лишається. */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Документ. */
+                    documentId: number;
+                    /** @description Блокування. */
+                    lockId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents/{documentId}/rows": {
         parameters: {
             query?: never;
@@ -26580,6 +26778,93 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/template-versions/{id}/workflow-mode": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * ✎ B75: задає режим погодження чернетки — з поданням і затвердженням (`SubmitApprove`) або без них
+         *     (`None`: значення одразу доступні звітності, подання/затвердження/відкликання — `422 workflowDisabled`).
+         *     Право `Template.Edit`.
+         * @description Опублікована версія відхиляє правку (`ECR-TMPL-0409`); версія з документами — `ECR-SCHM-0409`;
+         *     `None` для версії з власним маршрутом погодження — `ECR-TMPL-0422` (`workflowModeHasRoute`).
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Версія-чернетка. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SetTemplateWorkflowModeRequest"];
+                    "application/json": components["schemas"]["SetTemplateWorkflowModeRequest"];
+                    "text/json": components["schemas"]["SetTemplateWorkflowModeRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TemplateWorkflowModeDto"];
+                        "text/json": components["schemas"]["TemplateWorkflowModeDto"];
+                        "text/plain": components["schemas"]["TemplateWorkflowModeDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/templates": {
         parameters: {
             query?: never;
@@ -31343,6 +31628,37 @@ export interface components {
             /** @description Права, що входять у роль. */
             permissionCodes: string[];
         };
+        /** @description ✎ B75: запит на блокування рядків (усе або нічого). */
+        CreateRowLocksRequest: {
+            /**
+             * Format: date
+             * @description Перший день (часовий пояс проєкту).
+             */
+            fromDate: string;
+            /** @description Примітка; необов'язкова. */
+            note: null | string;
+            /**
+             * Format: int32
+             * @description Період екземпляра таблиці.
+             */
+            periodKey: number;
+            /** @description Ключі рядків (1..int RowLockRules.MaxRowsPerRequest). */
+            rowKeys: string[];
+            /** @description Код аркуша (F13 D2: код таблиці унікальний лише в межах аркуша). */
+            sheetCode: string;
+            /**
+             * Format: int64
+             * @description Копія аркуша; `null` — оригінал.
+             */
+            sheetCopyId: null | number;
+            /** @description Код таблиці. */
+            tableCode: string;
+            /**
+             * Format: date
+             * @description Останній день, включно.
+             */
+            toDate: string;
+        };
         /** @description Запит на створення рядка. */
         CreateRowRequest: {
             /** @description Бажаний ключ; `null` — згенерувати GUID. */
@@ -32124,6 +32440,10 @@ export interface components {
              * @description Попередження звідти ж; `null` — за тим самим правилом.
              */
             warningCount?: null | number;
+            /** @description ✎ B75: режим погодження тієї самої версії (`SubmitApprove` | `None`) — рядком, як
+             *     TemplateLayout; лише в картці (`GET /documents/{id}`), у переліку — `null`. За
+             *     `None` клієнт не показує подання, затвердження й відкликання («без погодження»). */
+            workflowMode?: null | string;
         };
         /** @description Екземпляр таблиці разом з аркушем, якому він належить. */
         DocumentTableDto: {
@@ -32637,7 +32957,7 @@ export interface components {
          * @description Причина відмови в доступі. Повертається замість `bool` (ФВ-6.8).
          * @enum {unknown}
          */
-        EditDenyReason: "None" | "NoGrant" | "PeriodNotOpenYet" | "PeriodClosed" | "OutOfAccessWindow" | "DocumentSubmitted" | "DocumentApproved" | "ColumnReadOnly" | "RowReadOnly" | "CalculatedCell" | "ProjectArchived" | "ArchivingInProgress" | "BusinessRule" | "SimulationReadOnly" | "OutsidePermitWindow" | "InsufficientGrantLevel" | "LockedByOwner" | "AssignmentFilled" | "AssignmentValidated" | "AssignmentExpired" | "NotAssignedToYou";
+        EditDenyReason: "None" | "NoGrant" | "PeriodNotOpenYet" | "PeriodClosed" | "OutOfAccessWindow" | "DocumentSubmitted" | "DocumentApproved" | "ColumnReadOnly" | "RowReadOnly" | "CalculatedCell" | "ProjectArchived" | "ArchivingInProgress" | "BusinessRule" | "SimulationReadOnly" | "OutsidePermitWindow" | "InsufficientGrantLevel" | "LockedByOwner" | "AssignmentFilled" | "AssignmentValidated" | "AssignmentExpired" | "NotAssignedToYou" | "RowLocked";
         /** @description Тіло правки повідомлення. */
         EditTableDiscussionMessageRequest: {
             /** @description Новий текст. */
@@ -39526,6 +39846,48 @@ export interface components {
          * @enum {unknown}
          */
         RowKind: "Group" | "Item" | "Balance" | "Note" | "Header";
+        /** @description ✎ B75: блокування рядка у відповіді (дати — у часовому поясі проєкту, кінцева — включно). */
+        RowLockDto: {
+            /** @description Поточний користувач може зняти (власник блокування або право `Document.RowLock`). */
+            canUnlock: boolean;
+            /**
+             * Format: int64
+             * @description Ідентифікатор.
+             */
+            id: number;
+            /** @description Діє зараз (почалося й не скінчилося). */
+            isActive: boolean;
+            /**
+             * Format: date
+             * @description Перший день дії.
+             */
+            lockFrom: string;
+            /**
+             * Format: date
+             * @description Останній день дії (включно).
+             */
+            lockUntil: string;
+            /** @description Примітка. */
+            note: null | string;
+            /** @description Ім'я того, хто заблокував; `null` — невідоме. */
+            ownerDisplayName: null | string;
+            /**
+             * Format: int32
+             * @description Хто заблокував.
+             */
+            ownerUserId: number;
+            /** @description Ключ рядка. */
+            rowKey: string;
+            /** @description ✎ F13 D2: код аркуша таблиці (код таблиці унікальний лише в межах аркуша). */
+            sheetCode?: string;
+            /**
+             * Format: int64
+             * @description Копія аркуша; `null` — оригінал.
+             */
+            sheetCopyId: null | number;
+            /** @description Код таблиці (унікальний у межах аркуша). */
+            tableCode: string;
+        };
         /** @description Permit history of one row's permit cell. */
         RowPermitHistoryDto: {
             /** @description The permit column. */
@@ -40526,6 +40888,11 @@ export interface components {
         SetTemplateLayoutRequest: {
             /** @description Копія документа на місяць або рік із місяцями в колонках. */
             layout: components["schemas"]["TemplateLayout"];
+        };
+        /** @description Режим погодження версії-чернетки (B75). */
+        SetTemplateWorkflowModeRequest: {
+            /** @description З поданням і затвердженням або без них. */
+            workflowMode: components["schemas"]["WorkflowMode"];
         };
         /** @description Запит на зміну рядка каталогу. */
         SetUiStringRequest: {
@@ -42425,6 +42792,8 @@ export interface components {
              * @description Версія шаблону.
              */
             templateVersionId: number;
+            /** @description ✎ B75: режим погодження версії; у чернетці змінюється `PUT …/workflow-mode`. */
+            workflowMode?: components["schemas"]["WorkflowMode"];
         };
         /** @description Шаблон у переліку. */
         TemplateSummary: {
@@ -42510,6 +42879,8 @@ export interface components {
             status: components["schemas"]["TemplateVersionStatus"];
             /** @description Номер версії. */
             version: string;
+            /** @description ✎ B75: режим погодження версії (з поданням і затвердженням або без них). */
+            workflowMode?: components["schemas"]["WorkflowMode"];
         };
         /** @description Версії одного шаблону в межах пакетної відповіді (`ListTemplateVersionsHandler.HandleBatchAsync`, `BR-07`). */
         TemplateVersionsForTemplate: {
@@ -42520,6 +42891,16 @@ export interface components {
             templateId: number;
             /** @description Версії шаблону, у тому самому порядку, що й Task&lt;PagedResult&lt;TemplateVersionSummary&gt;&gt; ListTemplateVersionsHandler.HandleAsync(int templateId, CursorRequest page, CancellationToken ct). */
             versions: components["schemas"]["TemplateVersionSummary"][];
+        };
+        /** @description Режим погодження версії шаблону у відповіді `PUT …/workflow-mode`. */
+        TemplateWorkflowModeDto: {
+            /**
+             * Format: int32
+             * @description Версія.
+             */
+            templateVersionId: number;
+            /** @description Чинний режим. */
+            workflowMode: components["schemas"]["WorkflowMode"];
         };
         /** @description Одна розбіжність: очікували одне, отримали інше. */
         TestCaseMismatch: {
@@ -43535,6 +43916,11 @@ export interface components {
             /** @description Стан після дії. */
             toStatus: string;
         };
+        /**
+         * @description ✎ B75: чи має документ версії шаблону подання й затвердження (`cfg.TemplateVersion.WorkflowMode`).
+         * @enum {unknown}
+         */
+        WorkflowMode: "SubmitApprove" | "None";
     };
     responses: never;
     parameters: never;

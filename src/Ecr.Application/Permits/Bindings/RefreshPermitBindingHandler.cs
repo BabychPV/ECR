@@ -48,7 +48,10 @@ public sealed class RefreshPermitBindingHandler(
     IClock clock,
     ISheetEditGate sheetGate,
     IBackgroundJobScheduler jobs,
-    IEditAssignmentStore? assignments = null)
+    IEditAssignmentStore? assignments = null,
+
+    // ✎ B75: блокування рядків — повторно під замком аркуша (`RowLockRecheck`). `null` — прямі конструктори тестів.
+    IRowLockStore? rowLocks = null)
 {
     /// <summary>Оновлює таблицю документа з дозволу.</summary>
     /// <param name="documentId">Документ.</param>
@@ -125,6 +128,17 @@ public sealed class RefreshPermitBindingHandler(
             .CanCreateRowsAsync(profile, instance.TableInstanceId, keys, ct)
             .ConfigureAwait(false);
         var assignmentsPresent = false;
+
+        // ✎ B75 (F13): оновлення з дозволу — одна дія над таблицею (усе або нічого, як і доти). Заблоковані іншою людиною
+        // рядки не пропускаються мовчки: відмова називає їх усіх (`rowKeys`), щоб власник блокування знав, що зняти.
+        var lockedKeys = keys
+            .Where(k => decisions.TryGetValue(k, out var d) && d.Row.Reason == EditDenyReason.RowLocked)
+            .ToList();
+        if (lockedKeys.Count > 0)
+        {
+            throw RowsLockedDenied(lockedKeys);
+        }
+
         foreach (var key in keys)
         {
             var decision = decisions.TryGetValue(key, out var found)
@@ -145,7 +159,8 @@ public sealed class RefreshPermitBindingHandler(
             async innerCt =>
             {
                 result = await RefreshUnderLockAsync(
-                        documentId, periodKey, instance, table, view, plan, profile, assignmentsPresent, sheetCode, innerCt)
+                        documentId, periodKey, instance, table, view, plan, profile, assignmentsPresent, sheetCode, keys,
+                        innerCt)
                     .ConfigureAwait(false);
 
                 // ⛔ MI-02 (в): постановка перерахунку - останнім оператором транзакції (черга в базі) або після коміту.
@@ -179,6 +194,7 @@ public sealed class RefreshPermitBindingHandler(
         AccessProfile profile,
         bool assignmentsPresent,
         string? sheetCode,
+        IReadOnlyList<string> keys,
         CancellationToken ct)
     {
         // ⛔ L6-02: структура документа - першою, до блокування аркуша (як у створенні рядка).
@@ -202,6 +218,18 @@ public sealed class RefreshPermitBindingHandler(
         }
 
         await EnsureAssignmentsHoldAsync(instance, table, profile, assignmentsPresent, sheetCode, ct).ConfigureAwait(false);
+
+        // ✎ B75 (F13): блокування, створене між рішенням і цим замком, — та сама відмова з переліком рядків.
+        var locked = await Documents.RowLocks.RowLockRecheck
+            .LockedAsync(sheetGate, rowLocks, profile, instance.DocumentId, instance.PeriodKey, clock.UtcNow, ct)
+            .ConfigureAwait(false);
+        var lockedKeys = keys
+            .Where(k => Documents.RowLocks.RowLockRecheck.AnyLocked(locked, instance.SheetCopyId, sheetCode, table.Code, [k]))
+            .ToList();
+        if (lockedKeys.Count > 0)
+        {
+            throw RowsLockedDenied(lockedKeys);
+        }
 
         var result = await service
             .RefreshAsync(documentId, periodKey, instance.TableInstanceId, view, plan, ct)
@@ -261,6 +289,19 @@ public sealed class RefreshPermitBindingHandler(
             {
                 ["messageKey"] = "err.ECR-ACCS-0403.addRowDenied",
                 ["reason"] = reason.ToString(),
+            });
+
+    /// <summary>✎ B75: оновлення відхилено — рядки заблоковано іншою людиною (перелік у <c>rowKeys</c>, до 20).</summary>
+    private static AccessDeniedException RowsLockedDenied(List<string> rowKeys)
+        => new(
+            "ECR-ACCS-0403",
+            $"Рядок у цю таблицю додати не можна: {EditDenyReason.RowLocked} ({string.Join(", ", rowKeys.Take(20))}).",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-ACCS-0403.addRowDenied",
+                ["reason"] = nameof(EditDenyReason.RowLocked),
+                ["rowKeys"] = string.Join(", ", rowKeys.Take(20)),
+                ["deniedCount"] = rowKeys.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
             });
 
     private Task<string> EnqueueRecalculationAsync(

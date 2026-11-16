@@ -65,6 +65,15 @@ public interface ITemplateVersionStore
     public Task<bool> HasDocumentsAsync(int templateVersionId, CancellationToken ct);
 
     /// <summary>
+    /// ✎ B75: чи має версія власний діючий маршрут погодження з кроками (<c>wf.ApprovalRoute.TemplateVersionId</c>).
+    /// Типова реалізація (двійники в тестах) — ні.
+    /// </summary>
+    /// <param name="templateVersionId">Версія.</param>
+    /// <param name="ct">Скасування.</param>
+    public Task<bool> HasApprovalRouteStepsAsync(int templateVersionId, CancellationToken ct)
+        => Task.FromResult(false);
+
+    /// <summary>
     /// Скільки документів прив'язано до цієї версії (X-12, четвертий раунд UX).
     /// </summary>
     /// <remarks>
@@ -416,6 +425,9 @@ public sealed record TemplateVersionSummary(
 {
     /// <summary>D-474: розкладка версії (копія на місяць або рік із місяцями в колонках).</summary>
     public Domain.Enums.TemplateLayout Layout { get; init; }
+
+    /// <summary>✎ B75: режим погодження версії (з поданням і затвердженням або без них).</summary>
+    public Domain.Enums.WorkflowMode WorkflowMode { get; init; }
 }
 
 /// <summary>Шаблон у переліку.</summary>

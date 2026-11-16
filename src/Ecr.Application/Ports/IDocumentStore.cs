@@ -135,6 +135,11 @@ namespace Ecr.Application.Ports;
 /// <paramref name="PeriodKind"/> (nullable-enum ламає типи клієнта). <c>null</c> — проєкту або версії немає. За
 /// <c>YearWithMonthColumns</c> клієнт не показує вибір місяця: документ має одне подання на рік.
 /// </param>
+/// <param name="WorkflowMode">
+/// ✎ B75: режим погодження тієї самої версії (<c>SubmitApprove</c> | <c>None</c>) — рядком, як
+/// <paramref name="TemplateLayout"/>; лише в картці (<c>GET /documents/{id}</c>), у переліку — <c>null</c>. За
+/// <c>None</c> клієнт не показує подання, затвердження й відкликання («без погодження»).
+/// </param>
 public sealed record DocumentSummary(
     long Id,
     int ProjectId,
@@ -165,7 +170,8 @@ public sealed record DocumentSummary(
     bool StepApproverNamesTruncated = false,
     IReadOnlyList<DocumentPeriodState>? PeriodStates = null,
     IReadOnlyList<DocumentReopenedPeriod>? ReopenedPeriods = null,
-    string? TemplateLayout = null);
+    string? TemplateLayout = null,
+    string? WorkflowMode = null);
 
 /// <summary>
 /// ✎ 10.11 (слово людини через координатора): закритий місяць, відкритий для ЦЬОГО документа
@@ -591,6 +597,16 @@ public interface IDocumentStore
     /// <param name="ct">Токен скасування.</param>
     public Task<int> GetTemplateVersionIdForPeriodAsync(long documentId, int periodKey, CancellationToken ct)
         => GetTemplateVersionIdAsync(documentId, ct);
+
+    /// <summary>
+    /// ✎ B75: режим погодження версії шаблону документа за ПЕРІОД (та сама шкала, що й
+    /// <see cref="GetTemplateVersionIdForPeriodAsync"/>). Типова реалізація (двійники в тестах) — з поданням.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<Domain.Enums.WorkflowMode> GetWorkflowModeForPeriodAsync(long documentId, int periodKey, CancellationToken ct)
+        => Task.FromResult(Domain.Enums.WorkflowMode.SubmitApprove);
 
     /// <summary>Версія шаблону ПРОЄКТУ; <c>null</c> — проєкту немає.</summary>
     /// <remarks>

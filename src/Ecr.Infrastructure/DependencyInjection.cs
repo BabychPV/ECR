@@ -137,6 +137,9 @@ public static class DependencyInjection
         services.AddScoped<IDocumentVersionMigrationStore, DocumentVersionMigrationStore>();
         services.AddScoped<IPeriodStore, PeriodStore>();
         services.AddScoped<IDocumentPeriodReopenStore, DocumentPeriodReopenStore>();
+
+        // ✎ B75: блокування рядків документа.
+        services.AddScoped<IRowLockStore, RowLockStore>();
         services.AddScoped<IPermitHistoryStore, PermitHistoryStore>();
         services.AddScoped<IAuditReader, AuditReader>();
         services.AddScoped<IConsistencyIssueReader, ConsistencyIssueReader>();

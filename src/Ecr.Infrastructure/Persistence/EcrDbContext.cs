@@ -142,6 +142,9 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     /// <summary>Закритий місяць, відкритий для ОДНОГО документа (приймальна 08.11 (i)).</summary>
     public DbSet<DocumentPeriodReopen> DocumentPeriodReopens => Set<DocumentPeriodReopen>();
 
+    /// <summary>✎ B75: блокування рядків таблиці документа на проміжок дат.</summary>
+    public DbSet<RowLock> RowLocks => Set<RowLock>();
+
     /// <summary>Feature (j): later permits «from date» of a row's permit cell or of a header field.</summary>
     public DbSet<PermitSegment> PermitSegments => Set<PermitSegment>();
 

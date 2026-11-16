@@ -98,7 +98,11 @@ public sealed partial class PatchCellsHandler(
     // ✎ Feature (j) P2: permit history of rows (a permit changed mid-month) — the validity rule checks each month against
     // the permits in force in it, and a single value into a month shared by two permits is refused (ECR-CELL-4225).
     // `null` (direct constructor in tests) — no history.
-    IPermitHistoryStore? permitHistory = null)
+    IPermitHistoryStore? permitHistory = null,
+
+    // ✎ B75: блокування рядків — повторно під замком аркуша (`RowLocks.RowLockRecheck`). `null` (прямий конструктор у
+    // тестах) — перевірки під замком немає; у проді вприснуте завжди.
+    IRowLockStore? rowLocks = null)
 {
     /// <summary>Застосовує зміни.</summary>
     /// <exception cref="ConcurrencyConflictException">
@@ -3031,6 +3035,9 @@ public sealed partial class PatchCellsHandler(
             // 500, а не ECR-DOC-4091).
             await EnsureAssignmentsHoldAsync(context, planned, innerCt).ConfigureAwait(false);
 
+            // ✎ B75: блокування рядка, створене між рішенням і цим замком, — та сама відмова RowLocked.
+            await EnsureRowsNotLockedAsync(context, planned, innerCt).ConfigureAwait(false);
+
             await EnsureRowLimitUnderLockAsync(request, context, innerCt).ConfigureAwait(false);
 
             // ⛔ `DAT-04` п. 1: рядки — ПІСЛЯ блокування аркуша й усіх відмов,
@@ -3417,6 +3424,27 @@ public sealed partial class PatchCellsHandler(
 
         return null;
     }
+
+    /// <summary>
+    /// ✎ B75: блокування рядків — повторно під уже взятим замком аркуша періоду екземпляра (див.
+    /// <see cref="RowLocks.RowLockRecheck"/>).
+    /// </summary>
+    private async Task EnsureRowsNotLockedAsync(RequestContext context, CellChangeLists changes, CancellationToken ct)
+    {
+        var locked = await RowLocks.RowLockRecheck
+            .LockedAsync(
+                sheetGate, rowLocks, context.Profile, context.Instance.DocumentId, context.PeriodKey.Value, clock.UtcNow, ct)
+            .ConfigureAwait(false);
+
+        RowLocks.RowLockRecheck.ThrowIfLocked(
+            locked, context.Instance.SheetCopyId, SheetCodeOf(context), context.Table.Code,
+            context.Updates.Concat(context.Creations).Select(r => r.RowKey),
+            changes.Upserts.Count + changes.Deletes.Count);
+    }
+
+    /// <summary>✎ B75: код аркуша таблиці контексту; <c>null</c> — невідомий (перевірка блокувань тоді fail-closed).</summary>
+    private static string? SheetCodeOf(RequestContext context)
+        => context.Snapshot.Sheets.FirstOrDefault(s => s.Id == context.Table.SheetDefId)?.Code;
 
     /// <summary>Аркуш, поданий чи затверджений під блокуванням, — відмова.</summary>
     private static void CheckSheetStatus(DocumentStatus status, CellChangeLists changes)

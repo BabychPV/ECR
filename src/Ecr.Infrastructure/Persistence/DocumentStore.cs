@@ -135,9 +135,10 @@ public sealed class DocumentStore(
                 TemplateVersion = db.Projects.Where(p => p.Id == d.ProjectId)
                     .Join(db.TemplateVersions, p => p.TemplateVersionId, v => v.Id, (p, v) => v.Version)
                     .FirstOrDefault(),
-                // D-474: розкладка тієї самої версії - у тому самому запиті.
-                TemplateLayout = db.Projects.Where(p => p.Id == d.ProjectId)
-                    .Join(db.TemplateVersions, p => p.TemplateVersionId, v => v.Id, (p, v) => (TemplateLayout?)v.Layout)
+                // D-474: розкладка тієї самої версії - у тому самому запиті; ✎ B75: разом із режимом погодження (одне читання).
+                VersionFacts = db.Projects.Where(p => p.Id == d.ProjectId)
+                    .Join(db.TemplateVersions, p => p.TemplateVersionId, v => v.Id,
+                        (p, v) => new { Layout = (TemplateLayout?)v.Layout, Mode = (WorkflowMode?)v.WorkflowMode })
                     .FirstOrDefault(),
                 // ✎ RPT-STABLE Part B: ознака «кілька версій за періодами» - у тому самому запиті (без зайвого звернення).
                 Multi = db.ProjectTemplateVersions.Any(t => t.ProjectId == d.ProjectId
@@ -186,7 +187,8 @@ public sealed class DocumentStore(
         // після кожного PATCH кеш карти холодний, і повний запит періоду заради одного документа - зайвий.
         // ✎ LAND-YEAR B24: річна розкладка — картка показує рік (перегляд = якір), а результати методологій і правки
         // місячних входів лежать у місяцях-власниках: застарілість — АБО за 12 місяцями, «відколи» — найраніший момент.
-        var stale = document.TemplateLayout == TemplateLayout.YearWithMonthColumns
+        var templateLayout = document.VersionFacts?.Layout;
+        var stale = templateLayout == TemplateLayout.YearWithMonthColumns
                     && document.ProjectPeriodKind == PeriodKind.Monthly
                     && period.Value is { } viewKey
             ? await StaleResultsYearCardAsync(documentId, document.ProjectId, viewKey / 100, ct).ConfigureAwait(false)
@@ -209,7 +211,8 @@ public sealed class DocumentStore(
             OwnerUserId: document.CreatedByUserId,
             ProjectIsReadOnly: document.ProjectReadOnly,
             PeriodKind: document.ProjectPeriodKind?.ToString(),
-            TemplateLayout: document.TemplateLayout?.ToString());
+            TemplateLayout: templateLayout?.ToString(),
+            WorkflowMode: document.VersionFacts?.Mode?.ToString());
     }
 
 
@@ -1370,6 +1373,25 @@ public sealed class DocumentStore(
                 ["messageKey"] = "err.ECR-DOC-0404.document",
                 ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
             });
+    }
+
+    /// <inheritdoc />
+    public async Task<WorkflowMode> GetWorkflowModeForPeriodAsync(long documentId, int periodKey, CancellationToken ct)
+    {
+        // ✎ B75: та сама шкала версії за період, що й `GetTemplateVersionIdForPeriodAsync`, — одним запитом.
+        var found = await db.Documents
+            .AsNoTracking()
+            .Where(d => d.Id == documentId)
+            .Select(d => db.TemplateVersions
+                .Where(v => v.Id == (d.TemplateId == null
+                    ? EcrDbContext.VersionOf(d.ProjectId, periodKey)
+                    : EcrDbContext.TemplateVersionOf(d.ProjectId, d.TemplateId.Value, periodKey)))
+                .Select(v => (WorkflowMode?)v.WorkflowMode)
+                .FirstOrDefault())
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        return found ?? WorkflowMode.SubmitApprove;
     }
 
     /// <inheritdoc />

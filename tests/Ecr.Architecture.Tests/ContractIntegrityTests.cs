@@ -322,6 +322,9 @@ public sealed class ContractIntegrityTests
         // RC20 D-3: виконавець (Read за роллю) у частині, яку йому не передано, — окрема причина.
         produced.Add(NotAssignedReason());
 
+        // ✎ B75: рядок, заблокований іншою людиною (ознаку ставить AccessDecisionService з doc.RowLock).
+        produced.Add(EditRules.CanEdit(profile, AccessBuilder.Cell() with { RowLockedByOther = true }).Reason);
+
         var unreachable = Enum.GetValues<EditDenyReason>()
             .Except(produced)
             .Select(r => r.ToString())

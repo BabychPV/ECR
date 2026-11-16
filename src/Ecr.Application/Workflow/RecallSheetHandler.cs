@@ -103,6 +103,9 @@ public sealed class RecallSheetHandler(
         await Documents.DocumentVisibility
             .RequireSheetVisibleAsync(documents, access, profile, documentId, sheetDefId, key, ct).ConfigureAwait(false);
 
+        // ✎ B75: версія без погодження — відкликати нічого (422 workflowDisabled), до гранта й стану.
+        await WorkflowModeGuard.EnsureEnabledAsync(documents, documentId, key, "Відкликання", ct).ConfigureAwait(false);
+
         var projectId = await documents.FindProjectIdAsync(documentId, ct).ConfigureAwait(false);
 
         // ⛔ C-7: повний контекст рішення (код аркуша, період, участь) — як у поданні.

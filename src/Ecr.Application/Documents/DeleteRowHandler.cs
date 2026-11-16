@@ -62,7 +62,10 @@ public sealed class DeleteRowHandler(
 
     // ✎ Журнал рядків (`aud.RowChange`): «видалено рядок» у журналі аркуша — тією самою транзакцією, що й видалення
     // (поруч зі складом у `aud.StructureChange`, який журнал аркуша не читає). `null` — лише прямі конструктори тестів.
-    IRowChangeAudit? rowAudit = null)
+    IRowChangeAudit? rowAudit = null,
+
+    // ✎ B75: блокування рядків — повторно під замком аркуша. `null` — прямі конструктори тестів.
+    IRowLockStore? rowLocks = null)
 {
     /// <summary>Тип сутності запису аудиту (<c>aud.StructureChange.EntityType</c>).</summary>
     public const string AuditEntityType = "doc.TableRow";
@@ -323,6 +326,15 @@ public sealed class DeleteRowHandler(
         await EnsureAssignmentsHoldAsync(instance, table, profile, assignmentsPresent, sheetCode, ct)
             .ConfigureAwait(false);
 
+        // ✎ B75: рядок, заблокований між рішенням і цим замком, — та сама відмова RowLocked.
+        var lockedRows = await RowLocks.RowLockRecheck
+            .LockedAsync(sheetGate, rowLocks, profile, instance.DocumentId, instance.PeriodKey, clock.UtcNow, ct)
+            .ConfigureAwait(false);
+        if (RowLocks.RowLockRecheck.AnyLocked(lockedRows, instance.SheetCopyId, sheetCode, table.Code, [key.Value]))
+        {
+            throw DeleteDenied(EditDenyReason.RowLocked);
+        }
+
         // Живий рядок: «немає» і «уже видалено» — одна відповідь (нерозкриття).
         var row = await rowStore
             .FindLiveRowAsync(instance.TableInstanceId, periodKey, key.Value, ct)
@@ -494,6 +506,26 @@ public sealed class DeleteRowHandler(
         if (rowAudit is not null)
         {
             await rowAudit.WriteRowChangesAsync(journal, ct).ConfigureAwait(false);
+        }
+
+        // ✎ B75 (F13): незняті блокування видаленого рядка (власні, майбутні, прострочені) знімаються тією ж транзакцією —
+        // рядка вже немає, і перелік блокувань не мусить показувати його. Журнал — `RowLock/RowDeleted`.
+        if (rowLocks is not null && sheetCode is not null)
+        {
+            var stale = await rowLocks
+                .FindUnreleasedForRowAsync(
+                    instance.DocumentId, instance.PeriodKey,
+                    new RowLockKey(instance.SheetCopyId, sheetCode, table.Code, key.Value), ct)
+                .ConfigureAwait(false);
+            foreach (var item in stale)
+            {
+                item.Release(profile.UserId, now);
+                await audit.WriteStructureChangeAsync(
+                    RowLocks.RowLockAudit.Record(
+                        item, instance.TemplateVersionId, businessKey: null, "RowDeleted", now, profile.UserId,
+                        correlationId: null),
+                    ct).ConfigureAwait(false);
+            }
         }
 
         // ⛔ Видалення рядка — зміна документа (`H-23d`), як і додавання.

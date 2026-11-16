@@ -64,6 +64,34 @@ public sealed class TemplateVersion : Entity<int>
         return true;
     }
 
+    /// <summary>
+    /// ✎ B75: чи мають документи версії подання й затвердження. Нова версія — <see cref="WorkflowMode.SubmitApprove"/>;
+    /// клон успадковує режим джерела (клонується той самий об'єкт).
+    /// </summary>
+    public WorkflowMode WorkflowMode { get; private set; }
+
+    /// <summary>Змінює режим погодження версії — лише в чернетці (B75, як <see cref="SetLayout"/>).</summary>
+    /// <param name="mode">Новий режим.</param>
+    /// <returns><c>true</c>, якщо значення змінилося.</returns>
+    /// <exception cref="DomainException">Версія структурно заморожена.</exception>
+    public bool SetWorkflowMode(WorkflowMode mode)
+    {
+        EnsureStructurallyMutable();
+
+        if (!Enum.IsDefined(mode))
+        {
+            throw new ArgumentOutOfRangeException(nameof(mode), mode, "Невідомий режим погодження версії.");
+        }
+
+        if (WorkflowMode == mode)
+        {
+            return false;
+        }
+
+        WorkflowMode = mode;
+        return true;
+    }
+
     /// <summary>Ревізія презентаційного шару. Інкрементує застосунок одним statement (R-B7).</summary>
     public int PresentationRevision { get; private set; }
 

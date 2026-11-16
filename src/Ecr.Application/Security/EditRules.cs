@@ -149,6 +149,22 @@ public readonly record struct CellAccessContext(
     /// </para>
     /// </remarks>
     public bool FormulaOverridable { get; init; }
+
+    /// <summary>
+    /// ✎ B75: рядок комірки заблоковано діючим блокуванням (<c>doc.RowLock</c>) ІНШОЇ людини. Рахує служба; власник
+    /// блокування (Q1), інтеграція й системні записи (Q2) сюди ознаки не отримують.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Відмова <see cref="EditDenyReason.RowLocked"/> — після заборон архіву, симуляції, періоду, стану аркуша й ознак
+    /// колонки/рядка/комірки, але ДО гранта (поруч із забороною передачі): заблокований рядок не править ніхто.
+    /// </remarks>
+    public bool RowLockedByOther { get; init; }
+
+    /// <summary>
+    /// ✎ B75: у документа за період є незняті блокування рядків. Лише ознака для служби (як
+    /// <see cref="HasEditAssignments"/>): документ без блокувань не читає їх у рішенні. Правила її не читають.
+    /// </summary>
+    public bool HasRowLocks { get; init; }
 }
 
 /// <summary>
@@ -281,6 +297,12 @@ public static class EditRules
             or EditDenyReason.AssignmentValidated or EditDenyReason.AssignmentExpired)
         {
             return EditDecision.Deny(context.AssignmentLock);
+        }
+
+        // ✎ B75: рядок заблокував інший (власник блокування править і далі, Q1) — ДО гранта, як заборона передачі.
+        if (context.RowLockedByOther)
+        {
+            return EditDecision.Deny(EditDenyReason.RowLocked);
         }
 
         var effective = Effective(profile, context);
