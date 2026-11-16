@@ -1252,14 +1252,10 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
             .Build();
 
     /// <summary>Запит задачі на екземпляр власника: насіння — введена комірка M11.</summary>
-    /// <param name="world">Світ.</param>
-    /// <param name="writeSubmitted">✎ B79: насіння — стовпець із залежними розрахунками (каскад пише й подані).</param>
-    private static FormulaRecalculationRequest OwnerRequest(World world, bool writeSubmitted = false)
+    private static FormulaRecalculationRequest OwnerRequest(World world)
         => new(
             world.Others[OwnerMonth].TableInstanceId, Period(OwnerMonth),
-            [new DirtyCell(
-                world.Others[OwnerMonth].RowIds[0], world.Doc.MonthColumnDefIds[OwnerMonth - 1],
-                WriteSubmitted: writeSubmitted ? true : null)]);
+            [new DirtyCell(world.Others[OwnerMonth].RowIds[0], world.Doc.MonthColumnDefIds[OwnerMonth - 1])]);
 
     private async Task<World> ArrangeAsync(
         bool absolute = false, bool offsets = false, bool fullYear = false, bool sum = false, string? m11Default = null,
@@ -1371,7 +1367,7 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
         var fanOut = new CrossPeriodFanOut(
             new RowStore(db, bulk, new TestClock(Now)), Versions(world), periods, jobs, db, router, world.Metadata);
 
-        // ✎ B79: журнал і годинник — як у DI; позначка «перераховано після подання» пишеться лише для насіння WriteSubmitted.
+        // ✎ B79: журнал і годинник — як у DI; позначку «перераховано після подання» отримує поданий аркуш, у який записано.
         var job = new FormulaRecalculationJob(
             Formulas(db, world, store, router), db, fanOut, periods, logger: null, audit: new AuditWriter(db),
             clock: new TestClock(Now));
@@ -1381,21 +1377,21 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
         return (progress, store);
     }
 
-    // ── B79 (lane 3): каскад від загального стовпця з залежними — подані з позначкою, затверджені ні ──
+    // ── B79 (lane 3, Q10): каскад ЗВИЧАЙНОЇ правки — подані з позначкою, затверджені ні (правило людини 07.11) ──
 
     /// <remarks>
-    /// Диференційний: один прогін, три місяці-читачі в різних станах. Мутації (локально): (1) у
-    /// <c>FormulaRecalculationJob</c> не передавати <c>writeSubmitted</c> у <c>RecalculateFromOtherPeriodsAsync</c> —
-    /// поданий місяць лишається застарілим; (2) не переносити <c>WriteSubmitted</c> на читачів (<c>next.WriteSubmitted</c>)
-    /// — те саме; (3) у <c>RecalculationService.EnterSheetsAsync</c> дозволити <c>Approved</c> — січень переписано;
-    /// (4) прибрати виклик <c>SubmittedSheetRecalcLog.WriteAsync</c> — позначки немає; (5) у <c>EnterSheetsAsync</c> не
-    /// наповнювати <c>submittedByFlag</c> — позначки немає; (6) наповнювати його й для чернетки — зайва позначка жовтня.
+    /// Диференційний: один прогін звичайного насіння, місяці-читачі в різних станах. Мутації (локально): (1) у
+    /// <c>RecalculationService.RecalculateFromOtherPeriodsAsync</c> передати <c>writeSubmitted: false</c> — поданий
+    /// вересень лишається застарілим; (2) у <c>EnterSheetsAsync</c> дозволити <c>Approved</c> — січень переписано;
+    /// (3) прибрати виклик <c>SubmittedSheetRecalcLog.WriteAsync</c> — позначки немає; (4) у <c>EnterSheetsAsync</c> не
+    /// наповнювати <c>submittedByFlag</c> — позначки немає; (5) наповнювати його й для чернетки — зайва позначка жовтня;
+    /// (6) у <c>SubmittedSheetRecalcLog</c> зіпсувати кореляцію чи операцію — позначку не знайдено.
     /// </remarks>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage6)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "B79")]
-    public async Task B79_поданий_місяць_перераховано_з_позначкою_затверджений_не_чіпано_чернетка_без_позначки()
+    public async Task B79_звичайна_правка_поданий_місяць_перераховано_з_позначкою_затверджений_не_чіпано_чернетка_без_позначки()
     {
         var world = await ArrangeAsync();
         await SetOwnerValueAsync(world, 7m);
@@ -1403,7 +1399,7 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
         await SetSheetStatusAsync(world, 9, DocumentStatus.Submitted);
 
         var enqueued = new List<(string Target, string Payload)>();
-        await RunJobAsync(world, enqueued, OwnerRequest(world, writeSubmitted: true), routing: true);
+        await RunJobAsync(world, enqueued, OwnerRequest(world), routing: true);
 
         // Поданий вересень: перераховано й позначено.
         Assert.Equal(14m, await OutputAsync(world, Period(9)));
@@ -1420,28 +1416,29 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
         Assert.Equal(0, await SubmittedMarksAsync(world, OwnerMonth));
     }
 
-    /// <remarks>Контроль: те саме насіння БЕЗ позначки (звичайна правка) — поданий місяць пропущено, як і до B79.
-    /// Мутація: у <c>FormulaRecalculationJob</c> ставити <c>item.WriteSubmitted = true</c> завжди — червоніє.</remarks>
+    /// <remarks>Контроль: без поданих місяців каскад позначок не ставить нікому (усі місяці — чернетки).
+    /// Мутація: у <c>RunAsync</c> складати в <c>submittedNow</c> кожен записаний аркуш — червоніє.</remarks>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage6)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "B79")]
-    public async Task B79_контроль_насіння_без_позначки_поданий_місяць_пропускає()
+    public async Task B79_контроль_усі_місяці_чернетки_перераховано_без_жодної_позначки()
     {
         var world = await ArrangeAsync();
         await SetOwnerValueAsync(world, 7m);
-        await SetSheetStatusAsync(world, 9, DocumentStatus.Submitted);
 
         var enqueued = new List<(string Target, string Payload)>();
         await RunJobAsync(world, enqueued, OwnerRequest(world), routing: true);
 
-        Assert.Equal(StaleOutput, await OutputAsync(world, Period(9)));
-        Assert.Equal(0, await SubmittedMarksAsync(world, 9));
-        Assert.Equal(14m, await OutputAsync(world, Period(ViewMonth)));
+        foreach (var month in new[] { 1, 9, ViewMonth, OwnerMonth })
+        {
+            Assert.Equal(14m, await OutputAsync(world, Period(month)));
+            Assert.Equal(0, await SubmittedMarksAsync(world, month));
+        }
     }
 
     /// <remarks>Поданий місяць САМОГО насіння (власник) — теж перераховано й позначено (вхід <c>RecalculateAsync</c>).
-    /// Мутація: не передавати <c>writeSubmitted</c> у <c>RecalculateAsync</c> — червоніє.</remarks>
+    /// Мутація: у <c>RecalculateAsync</c> передати <c>writeSubmitted: false</c> — червоніє.</remarks>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage6)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
@@ -1453,7 +1450,7 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
         await SetSheetStatusAsync(world, OwnerMonth, DocumentStatus.Submitted);
 
         var enqueued = new List<(string Target, string Payload)>();
-        await RunJobAsync(world, enqueued, OwnerRequest(world, writeSubmitted: true), routing: true);
+        await RunJobAsync(world, enqueued, OwnerRequest(world), routing: true);
 
         Assert.Equal(14m, await OutputAsync(world, Period(OwnerMonth)));
         Assert.Equal(1, await SubmittedMarksAsync(world, OwnerMonth));

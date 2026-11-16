@@ -116,7 +116,7 @@ public sealed class CrossPeriodRecalculationSqlTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "WW-03")]
-    public async Task Поданий_аркуш_періоду_читача_лишається_знімком()
+    public async Task Поданий_аркуш_періоду_читача_перераховується_з_позначкою_а_чернетка_без_неї()
     {
         var world = await ArrangeAsync();
         await using (var setup = world.Builder.CreateContext())
@@ -139,9 +139,13 @@ public sealed class CrossPeriodRecalculationSqlTests(SqlServerFixture sql)
 
         Assert.Empty(enqueued);
 
-        // ФВ-9.17: подана цифра змінюється лише Reopen. Липень (не поданий) оновився, травень — ні.
-        Assert.Equal(StaleOutput, await OutputAsync(world, May));
+        // ✎ B79 (Q10; правило людини 07.11 «пропускати лише погоджені; подані — з позначкою») замінює колишнє «подана
+        // цифра змінюється лише Reopen» (ФВ-9.17) для каскаду: поданий травень перераховано й позначено «перераховано
+        // після подання»; липень (чернетка) оновився без позначки.
+        Assert.Equal(33m, await OutputAsync(world, May));
+        Assert.Equal(1, await SubmittedMarksAsync(world, May));
         Assert.Equal(33m, await OutputAsync(world, July));
+        Assert.Equal(0, await SubmittedMarksAsync(world, July));
     }
 
     /// <summary>
@@ -176,19 +180,29 @@ public sealed class CrossPeriodRecalculationSqlTests(SqlServerFixture sql)
         await RunJobAsync(world, [], request);
 
         Assert.Equal(33m, await OutputAsync(world, 202603));
+
+        // ✎ B79 (Q10): правка самого погоджувача позначки «перераховано після подання» не ставить.
+        Assert.Equal(0, await SubmittedMarksAsync(world, 202603));
     }
 
     /// <summary>
-    /// D-442: поданий аркуш, який ніхто не правив (насіння без позначки погоджувача), каскад і далі пропускає;
-    /// затверджений не пишеться навіть із позначкою (затвердження вже перерахувало його під своїм блокуванням).
+    /// ✎ B79 (Q10; правило людини 07.11) змінює D-442 для звичайної правки: поданий аркуш, який погоджувач НЕ правив
+    /// (насіння без позначки погоджувача), каскад тепер перераховує — з позначкою «перераховано після подання».
+    /// Затверджений не пишеться навіть із позначкою погоджувача (затвердження вже перерахувало його під своїм
+    /// блокуванням) і позначки не отримує.
     /// </summary>
+    /// <remarks>
+    /// ⛔ Мутації: у <c>RecalculationService.RecalculateAsync</c> передати <c>writeSubmitted: false</c> — червоніє рядок
+    /// «поданий»; у <c>EnterSheetsAsync</c> дозволити <c>Approved</c> — рядок «затверджений».
+    /// </remarks>
     [Theory]
-    [InlineData(false, false)]
-    [InlineData(true, true)]
+    [InlineData(false, false, 33, 1)]
+    [InlineData(true, true, -1, 0)]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Decision", "D-442")]
-    public async Task D442_поданий_без_правки_погоджувача_і_затверджений_каскад_пропускає(bool approved, bool marked)
+    public async Task D442_поданий_без_правки_погоджувача_перераховується_з_позначкою_а_затверджений_каскад_пропускає(
+        bool approved, bool marked, int expectedOutput, int expectedMarks)
     {
         var world = await ArrangeAsync();
         await SetSheetStateAsync(world, approved);
@@ -205,7 +219,21 @@ public sealed class CrossPeriodRecalculationSqlTests(SqlServerFixture sql)
                     world.Doc.RowIds[0], world.Doc.ColumnDefIds[1],
                     ApproverSheetDefId: marked ? world.Doc.SheetDefId : null)]));
 
-        Assert.Equal(StaleOutput, await OutputAsync(world, 202603));
+        Assert.Equal((decimal)expectedOutput, await OutputAsync(world, 202603));
+        Assert.Equal(expectedMarks, await SubmittedMarksAsync(world, 202603));
+    }
+
+    /// <summary>✎ B79: скільки записів «перераховано після подання» має аркуш документа за період.</summary>
+    private async Task<int> SubmittedMarksAsync(World world, int period)
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            "SELECT COUNT(*) FROM aud.StructureChange WHERE EntityType = N'SheetRecalc' " +
+            "AND Operation = N'RecalculatedAfterSubmission' " +
+            $"AND CorrelationId = N'sheet-recalc:{world.Doc.DocumentId}:{world.Doc.SheetDefId}:{period}'";
+        return (int)(await command.ExecuteScalarAsync())!;
     }
 
     /// <summary>Аркуш документа за березень — поданий (або затверджений).</summary>
@@ -243,7 +271,9 @@ public sealed class CrossPeriodRecalculationSqlTests(SqlServerFixture sql)
         var fanOut = new CrossPeriodFanOut(
             new RowStore(db, bulk, new TestClock(Now)), versions, periods, jobs, db);
 
-        var job = new FormulaRecalculationJob(Formulas(db, world), db, fanOut, periods);
+        // ✎ B79: журнал і годинник — як у DI (позначка «перераховано після подання»).
+        var job = new FormulaRecalculationJob(
+            Formulas(db, world), db, fanOut, periods, logger: null, audit: new AuditWriter(db), clock: new TestClock(Now));
         var progress = new CapturingJobProgress();
         await job.ExecuteAsync(request, progress, CancellationToken.None);
 
