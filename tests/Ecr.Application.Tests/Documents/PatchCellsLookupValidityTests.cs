@@ -91,7 +91,7 @@ public sealed class PatchCellsLookupValidityTests
         {
             CacheKey = "p1", UserId = 9, SecurityStamp = "s",
             // Рішення 25.10: вибір запису потребує Registry.View - звичайний користувач фікстури його має.
-            Permissions = new HashSet<string> { "Registry.View" }, Grants = new Dictionary<string, GrantLevel>(),
+            Permissions = new HashSet<string> { "Registry.View", "Document.View" /* PT-8 */ }, Grants = new Dictionary<string, GrantLevel>(),
             Denies = new HashSet<string>(), RoleIds = new HashSet<int>(),
         });
         _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
@@ -360,7 +360,7 @@ public sealed class PatchCellsLookupValidityTests
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(new AccessProfile
         {
             CacheKey = "p2", UserId = 9, SecurityStamp = "s",
-            Permissions = new HashSet<string>(), Grants = new Dictionary<string, GrantLevel>(),
+            Permissions = new HashSet<string> { "Document.View" /* PT-8 */ }, Grants = new Dictionary<string, GrantLevel>(),
             Denies = new HashSet<string> { "Registry:2" }, RoleIds = new HashSet<int>(),
         });
         _groups.WithGroup(ColumnRegistryDefId, [OtherRegistryDefId]);
@@ -385,7 +385,7 @@ public sealed class PatchCellsLookupValidityTests
         => _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(new AccessProfile
         {
             CacheKey = "p-deny", UserId = 9, SecurityStamp = "s",
-            Permissions = new HashSet<string> { "Registry.View" }, Grants = new Dictionary<string, GrantLevel>(),
+            Permissions = new HashSet<string> { "Registry.View", "Document.View" /* PT-8 */ }, Grants = new Dictionary<string, GrantLevel>(),
             Denies = new HashSet<string>(registryIds.Select(id => "Registry:" + id)), RoleIds = new HashSet<int>(),
         });
 
@@ -531,7 +531,12 @@ public sealed class PatchCellsLookupValidityTests
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(new AccessProfile
         {
             CacheKey = "view-case", UserId = 9, SecurityStamp = "s",
-            Permissions = new HashSet<string>(globalPermissions ?? []),
+            // PT-8: запис вимагає Document.View, як і читання зрізу; предмет цих тестів — Registry.View.
+            // ⚠ Профіль збору (`integration`) прав ролей НЕ має (AccessDecisionService.IntegrationWriter): саме так тест
+            // `Збір_IsIntegrationWriter_без_View_запис_приймається` доводить виняток PT-8 для системного записувача.
+            Permissions = integration
+                ? new HashSet<string>(globalPermissions ?? [])
+                : new HashSet<string>([.. globalPermissions ?? [], "Document.View"]),
             Grants = grants ?? new Dictionary<string, GrantLevel>(),
             Denies = new HashSet<string>(denies ?? []), RoleIds = new HashSet<int>(),
             IsIntegrationWriter = integration,

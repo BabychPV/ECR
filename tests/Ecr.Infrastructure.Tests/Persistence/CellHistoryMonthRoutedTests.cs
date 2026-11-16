@@ -192,6 +192,7 @@ public sealed class CellHistoryMonthRoutedTests(SqlServerFixture sql) : IDisposa
         var metadata = new MetadataCache(_memory, db);
         var real = RealAccess(db, metadata, router, clock);
         var profile = new AccessBuilder { UserId = UserId }
+            .Permission("Document.View") // PT-8
             .Grant(ResourceKind.Project, world.Doc.ProjectId, GrantLevel.Write)
             .Build();
 

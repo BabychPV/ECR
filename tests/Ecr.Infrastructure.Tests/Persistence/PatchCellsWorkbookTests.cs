@@ -103,6 +103,7 @@ public sealed partial class PatchCellsWorkbookTests(SqlServerFixture sql) : IDis
         var world = await ArrangeAsync([2, 2]);
         var guilty = world.Tables[3];
         var profile = new AccessBuilder { UserId = 1 }
+            .Permission("Document.View") // PT-8
             .Grant(ResourceKind.Project, world.Doc.ProjectId, GrantLevel.Write)
             .Deny(ResourceKind.Table, guilty.TableDefId)
             .Build();
@@ -123,6 +124,7 @@ public sealed partial class PatchCellsWorkbookTests(SqlServerFixture sql) : IDis
         var world = await ArrangeAsync([2, 2]);
         var guilty = world.Tables[3];
         var profile = new AccessBuilder { UserId = 1 }
+            .Permission("Document.View") // PT-8
             .Grant(ResourceKind.Project, world.Doc.ProjectId, GrantLevel.Write)
             .Deny(ResourceKind.Table, guilty.TableDefId)
             .Build();
@@ -647,6 +649,7 @@ public sealed partial class PatchCellsWorkbookTests(SqlServerFixture sql) : IDis
     private static AccessProfile Writer(World world)
         => new AccessBuilder { UserId = 1 }
             .Permission("Registry.View") // 25.10: вибір запису Lookup потребує Registry.View
+            .Permission("Document.View") // PT-8
             .Grant(ResourceKind.Project, world.Doc.ProjectId, GrantLevel.Write).Build();
 
     // ── Світ ─────────────────────────────────────────────────────────────────

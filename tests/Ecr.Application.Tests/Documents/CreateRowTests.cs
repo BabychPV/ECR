@@ -29,7 +29,7 @@ public sealed class CreateRowTests
     private static AccessProfile Profile() => new()
     {
         CacheKey = "p", UserId = 9, SecurityStamp = "s",
-        Permissions = new HashSet<string>(), Grants = new Dictionary<string, GrantLevel>(),
+        Permissions = new HashSet<string> { "Document.View" /* PT-8 */ }, Grants = new Dictionary<string, GrantLevel>(),
         Denies = new HashSet<string>(), RoleIds = new HashSet<int>()
     };
 

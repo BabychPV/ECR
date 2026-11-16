@@ -107,11 +107,10 @@ public sealed class PatchCellStylesHandler(
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
 
         // ⛔ Невидимий документ — 404, а не 403 (та сама відповідь, що на неіснуючий).
-        var read = await access.CanReadDocumentAsync(profile, documentId, ct).ConfigureAwait(false);
-        if (!read.IsAllowed)
-        {
-            throw DocumentVisibility.NotFound(documentId);
-        }
+        // PT-8: видимий без права Document.View — 403, як на читанні зрізу.
+        await DocumentVisibility
+            .RequireVisibleAsync(access, profile, documentId, "Document.View", ct)
+            .ConfigureAwait(false);
 
         await DocumentVisibility
             .RequireTableVisibleAsync(

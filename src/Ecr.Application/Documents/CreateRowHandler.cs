@@ -87,6 +87,14 @@ public sealed class CreateRowHandler(
         {
             throw DocumentVisibility.DocumentNotFound(documentId);
         }
+
+        // ⛔ PT-8: видимий документ без права Document.View — 403, як на читанні зрізу (грант Write сам рядка не додає).
+        // Системний записувач збору (`IsIntegrationWriter`) прав ролей не має — для нього як доти.
+        if (!profile.IsIntegrationWriter)
+        {
+            await DocumentVisibility.RequirePermissionAsync(access, profile, documentId, "Document.View", ct).ConfigureAwait(false);
+        }
+
         // ⛔ D-6: схована таблиця для читача НЕ ІСНУЄ — 404 ДО відмови «RowMode = Fixed», що називала її код.
         //
         // ⚠ EA6-D1: тіло — `tableInstance` (як у поштучного PATCH, книги й GET зрізу; D-6 і `HiddenTableConflictLeakTests`

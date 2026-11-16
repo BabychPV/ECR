@@ -654,18 +654,23 @@ public sealed partial class PatchCellsHandler(
         // а не 403. Різниця між «заборонено» і «не знайдено» сама була б
         // відомістю про те, що документ існує.
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
-        var read = await access.CanReadDocumentAsync(profile, documentId, ct).ConfigureAwait(false);
-        if (!read.IsAllowed)
+
+        // ⛔ PT-8: той самий вхід, що й на читанні зрізу (`GetTableSliceHandler`): видимість документа
+        // (невидимий — 404) І право Document.View у його проєкті (видимий без права — 403). Без права
+        // запис проходив за самим грантом, а відмови `ECR-ROW-0409`/`ECR-CELL-0409` нижче віддавали
+        // ключі рядків і чужі значення тому, кому читання заборонене.
+        //
+        // ⚠ Системний записувач збору (`IsIntegrationWriter`, профіль фонової задачі — людина його отримати не може,
+        // `ICurrentUser`) прав ролей не має взагалі: для нього лишається перевірка видимості, як доти.
+        if (profile.IsIntegrationWriter)
         {
-            throw new NotFoundException(
-                "ECR-DOC-0404",
-                $"Документ {documentId} не знайдено.",
-                new Dictionary<string, object?>(StringComparer.Ordinal)
-                {
-                    ["messageKey"] = "err.ECR-DOC-0404.document",
-                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                });
+            await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, ct).ConfigureAwait(false);
+            return profile;
         }
+
+        await DocumentVisibility
+            .RequireVisibleAsync(access, profile, documentId, "Document.View", ct)
+            .ConfigureAwait(false);
 
         return profile;
     }

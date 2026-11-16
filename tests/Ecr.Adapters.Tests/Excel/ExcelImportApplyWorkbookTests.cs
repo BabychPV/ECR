@@ -118,6 +118,7 @@ public sealed class ExcelImportApplyWorkbookTests(SqlServerFixture sql) : IDispo
         var world = await ArrangeAsync(4);
         var guilty = world.Tables[2];
         var profile = new AccessBuilder { UserId = 1 }
+            .Permission("Document.View") // PT-8
             .Grant(ResourceKind.Project, world.Doc.ProjectId, GrantLevel.Write)
             .Deny(ResourceKind.Table, guilty.TableDefId)
             .Build();
@@ -358,7 +359,9 @@ public sealed class ExcelImportApplyWorkbookTests(SqlServerFixture sql) : IDispo
     }
 
     private static AccessProfile Writer(World world)
-        => new AccessBuilder { UserId = 1 }.Grant(ResourceKind.Project, world.Doc.ProjectId, GrantLevel.Write).Build();
+        => new AccessBuilder { UserId = 1 }
+            .Permission("Document.View") // PT-8
+            .Grant(ResourceKind.Project, world.Doc.ProjectId, GrantLevel.Write).Build();
 
     private EcrDbContext CreateContext()
         => new(new DbContextOptionsBuilder<EcrDbContext>()

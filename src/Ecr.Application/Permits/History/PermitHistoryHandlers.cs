@@ -469,7 +469,10 @@ public sealed class GetPermitHistoryHandler(
     public async Task<DocumentPermitHistoryDto> HandleAsync(long documentId, int periodKey, CancellationToken ct)
     {
         var profile = await Periods.OpenDocumentPeriodReopenHandler.ProfileAsync(access, currentUser, ct).ConfigureAwait(false);
-        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, ct).ConfigureAwait(false);
+
+        // PT-8 (class sweep): the permit history reads document content (rows, values, permits) — the same entry as the
+        // slice read: visibility (404) AND Document.View in the document's project (403).
+        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, "Document.View", ct).ConfigureAwait(false);
 
         var segments = await store.ListAsync(documentId, ct).ConfigureAwait(false);
         if (segments.Count == 0)

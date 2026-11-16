@@ -67,7 +67,7 @@ public sealed class DeleteRowGuardsTests(SqlServerFixture sql) : IDisposable
     {
         var scene = await ArrangeAsync(withAssignment: false);
         var profile = new AccessBuilder { UserId = scene.StrangerId }
-            .Grant(ResourceKind.Project, scene.Doc.ProjectId, GrantLevel.Write).Build();
+            .Permission("Document.View") /* PT-8 */.Grant(ResourceKind.Project, scene.Doc.ProjectId, GrantLevel.Write).Build();
 
         var error = await RunAsync(scene, profile, Interference.None);
 
@@ -86,7 +86,7 @@ public sealed class DeleteRowGuardsTests(SqlServerFixture sql) : IDisposable
         var scene = await ArrangeAsync(withAssignment: false);
         var column = scene.Doc.ColumnDefIds[1];
         var builder = new AccessBuilder { UserId = scene.StrangerId }
-            .Grant(ResourceKind.Project, scene.Doc.ProjectId, GrantLevel.Write);
+            .Permission("Document.View") /* PT-8 */.Grant(ResourceKind.Project, scene.Doc.ProjectId, GrantLevel.Write);
         var profile = explicitDeny
             ? builder.Deny(ResourceKind.Column, column).Build()
             : builder.Grant(ResourceKind.Column, column, GrantLevel.Read).Build();
@@ -129,7 +129,7 @@ Assert.Equal("err.ECR-ACCS-0403.deleteRowValuesDenied", denied.Details!["message
     {
         var scene = await ArrangeAsync(withAssignment: false);
         var profile = new AccessBuilder { UserId = scene.StrangerId }
-            .Grant(ResourceKind.Project, scene.Doc.ProjectId, GrantLevel.Write).Build();
+            .Permission("Document.View") /* PT-8 */.Grant(ResourceKind.Project, scene.Doc.ProjectId, GrantLevel.Write).Build();
 
         await InsertCellChangeAsync(scene, first, Now.AddMinutes(-10));
         if (second is not null)
@@ -168,7 +168,7 @@ Assert.Equal("err.ECR-ACCS-0403.deleteRowValuesDenied", denied.Details!["message
         await ExecuteAsync($"UPDATE cfg.ColumnDef SET IsReadOnly = 1 WHERE Id = {column}");
 
         var builder = new AccessBuilder { UserId = scene.StrangerId }
-            .Grant(ResourceKind.Project, scene.Doc.ProjectId, GrantLevel.Write);
+            .Permission("Document.View") /* PT-8 */.Grant(ResourceKind.Project, scene.Doc.ProjectId, GrantLevel.Write);
         var profile = (deny ? builder.Deny(ResourceKind.Column, column) : builder).Build();
 
         var error = await RunAsync(scene, profile, Interference.None);
@@ -195,7 +195,7 @@ Assert.Equal("err.ECR-ACCS-0403.deleteRowValuesDenied", denied.Details!["message
     {
         var scene = await ArrangeAsync(withAssignment: false);
         var profile = new AccessBuilder { UserId = scene.StrangerId }
-            .Grant(ResourceKind.Project, scene.Doc.ProjectId, GrantLevel.Write).Build();
+            .Permission("Document.View") /* PT-8 */.Grant(ResourceKind.Project, scene.Doc.ProjectId, GrantLevel.Write).Build();
         var doc = scene.Doc;
         var rowKey = await ScalarAsync<string>(
             $"SELECT RowKey FROM doc.TableRow WHERE PeriodKey = {doc.PeriodKey.Value} AND Id = {doc.RowIds[0]}");
@@ -225,7 +225,7 @@ Assert.Equal("err.ECR-ACCS-0403.deleteRowValuesDenied", denied.Details!["message
     {
         var scene = await ArrangeAsync(withAssignment: true);
         var profile = new AccessBuilder { UserId = scene.ExecutorId }
-            .Grant(ResourceKind.Project, scene.Doc.ProjectId, GrantLevel.Write).Build();
+            .Permission("Document.View") /* PT-8 */.Grant(ResourceKind.Project, scene.Doc.ProjectId, GrantLevel.Write).Build();
 
         var error = await RunAsync(scene, profile, interference);
 
@@ -241,7 +241,7 @@ Assert.Equal("err.ECR-ACCS-0403.deleteRowValuesDenied", denied.Details!["message
     {
         var scene = await ArrangeAsync(withAssignment: true, exclusive: false);
         var profile = new AccessBuilder { UserId = scene.StrangerId }
-            .Grant(ResourceKind.Project, scene.Doc.ProjectId, GrantLevel.Write).Build();
+            .Permission("Document.View") /* PT-8 */.Grant(ResourceKind.Project, scene.Doc.ProjectId, GrantLevel.Write).Build();
 
         var error = await RunAsync(scene, profile, Interference.MakeExclusive);
 
@@ -257,7 +257,7 @@ Assert.Equal("err.ECR-ACCS-0403.deleteRowValuesDenied", denied.Details!["message
     {
         var scene = await ArrangeAsync(withAssignment: true, exclusive: true);
         var profile = new AccessBuilder { UserId = scene.StrangerId }
-            .Grant(ResourceKind.Project, scene.Doc.ProjectId, GrantLevel.Write).Build();
+            .Permission("Document.View") /* PT-8 */.Grant(ResourceKind.Project, scene.Doc.ProjectId, GrantLevel.Write).Build();
 
         var error = await RunAsync(scene, profile, Interference.None);
 
@@ -273,7 +273,7 @@ Assert.Equal("err.ECR-ACCS-0403.deleteRowValuesDenied", denied.Details!["message
     {
         var scene = await ArrangeAsync(withAssignment: true, exclusive: false);
         var profile = new AccessBuilder { UserId = scene.StrangerId }
-            .Grant(ResourceKind.Project, scene.Doc.ProjectId, GrantLevel.Write).Build();
+            .Permission("Document.View") /* PT-8 */.Grant(ResourceKind.Project, scene.Doc.ProjectId, GrantLevel.Write).Build();
 
         var error = await RunAsync(scene, profile, Interference.None, withStore: false);
 
@@ -291,7 +291,7 @@ Assert.Equal("err.ECR-ACCS-0403.deleteRowValuesDenied", denied.Details!["message
     {
         var scene = await ArrangeAsync(withAssignment: false);
         var profile = new AccessBuilder { UserId = scene.StrangerId }
-            .Grant(ResourceKind.Project, scene.Doc.ProjectId, GrantLevel.Write).Build();
+            .Permission("Document.View") /* PT-8 */.Grant(ResourceKind.Project, scene.Doc.ProjectId, GrantLevel.Write).Build();
 
         // Правка (спільне блокування аркуша) тримається в окремій транзакції до кінця перевірки.
         await using var holder = CreateContext();
@@ -325,7 +325,7 @@ Assert.Equal("err.ECR-ACCS-0403.deleteRowValuesDenied", denied.Details!["message
         var scene = await ArrangeAsync(withAssignment: false);
         var actor = asExecutor ? scene.ExecutorId : scene.StrangerId;
         var profile = new AccessBuilder { UserId = actor }
-            .Grant(ResourceKind.Project, scene.Doc.ProjectId, GrantLevel.Write).Build();
+            .Permission("Document.View") /* PT-8 */.Grant(ResourceKind.Project, scene.Doc.ProjectId, GrantLevel.Write).Build();
 
         var error = await RunAsync(scene, profile, interference);
 
@@ -350,7 +350,7 @@ Assert.Equal("err.ECR-ACCS-0403.deleteRowValuesDenied", denied.Details!["message
         await ExecuteAsync($"UPDATE cfg.ColumnDef SET DataType = 6 WHERE Id = {column}");
 
         var builder = new AccessBuilder { UserId = scene.StrangerId }
-            .Grant(ResourceKind.Project, scene.Doc.ProjectId, GrantLevel.Write);
+            .Permission("Document.View") /* PT-8 */.Grant(ResourceKind.Project, scene.Doc.ProjectId, GrantLevel.Write);
         var profile = (deny ? builder.Deny(ResourceKind.Column, column) : builder).Build();
 
         var error = await RunAsync(scene, profile, Interference.None);

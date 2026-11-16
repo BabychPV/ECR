@@ -236,6 +236,7 @@ public sealed class ExcelImportMonthRoutingTests(SqlServerFixture sql) : IDispos
             db, metadata, new AccessProfileCache(_memory), clock, Substitute.For<ICurrentUser>(), new WorkflowStore(db), router);
 
         var profile = new AccessBuilder { UserId = 1 }
+            .Permission("Document.View") // PT-8
             .Grant(ResourceKind.Project, projectId, GrantLevel.Write)
             .Build();
 
@@ -295,6 +296,7 @@ public sealed class ExcelImportMonthRoutingTests(SqlServerFixture sql) : IDispos
         var (patch, uow) = Patch(db, projectId, seen);
 
         var profile = new AccessBuilder { UserId = 1 }
+            .Permission("Document.View") // PT-8
             .Grant(ResourceKind.Project, projectId, GrantLevel.Write)
             .Build();
         var real = new AccessDecisionService(

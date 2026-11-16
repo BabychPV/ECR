@@ -72,6 +72,25 @@ public static class DocumentVisibility
         ArgumentNullException.ThrowIfNull(profile);
 
         await RequireVisibleAsync(access, profile, documentId, ct).ConfigureAwait(false);
+        await RequirePermissionAsync(access, profile, documentId, permission, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Проєктне право в проєкті ВЖЕ ВИДИМОГО документа (друга половина
+    /// <see cref="RequireVisibleAsync(IAccessDecisionService, AccessProfile, long, string, CancellationToken)"/>) — для
+    /// обробників, що видимість перевірили самі (PT-8: створення й видалення рядка).
+    /// </summary>
+    /// <param name="access">Служба рішень доступу.</param>
+    /// <param name="profile">Профіль користувача.</param>
+    /// <param name="documentId">Документ, видимість якого вже перевірено.</param>
+    /// <param name="permission">Проєктне право дії.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="AccessDeniedException"><c>ECR-AUTH-0403</c> — права в проєкті документа немає.</exception>
+    public static async Task RequirePermissionAsync(
+        IAccessDecisionService access, AccessProfile profile, long documentId, string permission, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(access);
+        ArgumentNullException.ThrowIfNull(profile);
 
         if (PermissionCheck.IsGranted(profile, permission))
         {

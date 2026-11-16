@@ -228,6 +228,7 @@ public sealed class EditAssignmentGateRaceTests(SqlServerFixture sql) : IDisposa
         var clock = new FixedClock(Now.AddSeconds(1));
         var actorId = actor == Actor.Executor ? scene.ExecutorId : scene.StrangerId;
         var profile = new AccessBuilder { UserId = actorId }
+            .Permission("Document.View") // PT-8
             .Grant(
                 ResourceKind.Project, doc.ProjectId,
                 actor == Actor.Executor ? GrantLevel.Read : GrantLevel.Write)
@@ -354,6 +355,7 @@ public sealed class EditAssignmentGateRaceTests(SqlServerFixture sql) : IDisposa
 
         // Рядки — окремо від підйому (D5): виконавцю потрібне Write за роллю, щоб рішення дійшло до заборони.
         var profile = new AccessBuilder { UserId = actorId }
+            .Permission("Document.View") // PT-8
             .Grant(ResourceKind.Project, doc.ProjectId, GrantLevel.Write)
             .Build();
 

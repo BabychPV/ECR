@@ -732,6 +732,7 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
         const int userId = 1;
         var snapshot = await world.Metadata.GetAsync(world.Doc.TemplateVersionId, CancellationToken.None);
         var profile = new AccessBuilder { UserId = userId }
+            .Permission("Document.View") // PT-8
             .Grant(ResourceKind.Project, world.Doc.ProjectId, GrantLevel.Write)
             .Build();
         var allColumns = snapshot.ColumnsById.Keys.ToList();
@@ -1197,6 +1198,7 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
         const int userId = 1;
         var snapshot = await world.Metadata.GetAsync(world.Doc.TemplateVersionId, CancellationToken.None);
         var profile = new AccessBuilder { UserId = userId }
+            .Permission("Document.View") // PT-8
             .Grant(ResourceKind.Project, world.Doc.ProjectId, GrantLevel.Write)
             .Build();
 

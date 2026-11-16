@@ -31,7 +31,10 @@ internal sealed record PermitHistoryRow(
         IPermitRegistryIndex? permitTargets, CancellationToken ct)
     {
         var profile = await Periods.OpenDocumentPeriodReopenHandler.ProfileAsync(access, currentUser, ct).ConfigureAwait(false);
-        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, ct).ConfigureAwait(false);
+
+        // PT-8: a history write is a document write — the same entry as the slice read: visibility (404) AND
+        // Document.View in the document's project (403).
+        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, "Document.View", ct).ConfigureAwait(false);
         var instance = await DocumentVisibility.ResolveInDocumentAsync(rows, documentId, tableInstanceId, ct).ConfigureAwait(false);
         await DocumentVisibility.RequireTableVisibleAsync(
             access, profile, documentId, instance.TableInstanceId, instance.TableDefId, instance.PeriodKey, ct).ConfigureAwait(false);
@@ -101,6 +104,10 @@ internal sealed record PermitHistoryHeader(
         {
             throw DocumentVisibility.NotFound(documentId);
         }
+
+        // PT-8: a header history write needs Document.View in the document's project too (403), like the slice read.
+        await DocumentVisibility.RequireInDocumentAsync(access, profile, documentId, document.ProjectId, "Document.View", ct)
+            .ConfigureAwait(false);
 
         if (profile.LevelFor(ResourceKind.Project, document.ProjectId) < GrantLevel.Write)
         {

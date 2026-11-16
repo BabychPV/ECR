@@ -196,7 +196,7 @@ internal sealed class MonthRoutedReadWorld : IDisposable
         var clock = new TestClock(Now);
         var router = Router(db);
         var metadata = Metadata(db);
-        var access = Access(db, Profile(userId).Build(), metadata, router);
+        var access = Access(db, Profile(userId, "Document.View" /* PT-8 */).Build(), metadata, router);
         var user = User(userId);
 
         var patch = new PatchCellsHandler(
