@@ -131,6 +131,28 @@ public sealed partial class ReportViewWorkflowModeTests : IAsyncLifetime
         Assert.Equal(before, (await DefinitionAsync(s.V2View), await DefinitionAsync(s.Stable)));
     }
 
+    /// <summary>
+    /// Режим — літерал у тексті вʼюх, тому входить у відбиток входів (<c>rpt.fn_ViewsFingerprint</c>): зміна режиму
+    /// опублікованої версії (застосунок такого не робить — лише DBA напряму) дає інший відбиток, тобто перегенерацію на старті.
+    /// </summary>
+    [Fact]
+    public async Task Режим_версії_входить_у_відбиток_входів_вʼюх()
+    {
+        var s = await ArrangeAsync();
+        var before = await FingerprintAsync();
+        try
+        {
+            await ExecAsync($"UPDATE cfg.TemplateVersion SET WorkflowMode = 0 WHERE Id = {s.V2}");
+            Assert.NotEqual(before, await FingerprintAsync());
+        }
+        finally
+        {
+            await ExecAsync($"UPDATE cfg.TemplateVersion SET WorkflowMode = 1 WHERE Id = {s.V2}");
+        }
+
+        Assert.Equal(before, await FingerprintAsync());
+    }
+
     // ── помічники ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
     private sealed record Scenario(int V1, int V2, int T2, int A2, long DocumentId, string V1View, string V2View, string Stable);
@@ -340,6 +362,14 @@ public sealed partial class ReportViewWorkflowModeTests : IAsyncLifetime
         await using var command = connection.CreateCommand();
         command.CommandText = "SELECT OBJECT_DEFINITION(OBJECT_ID(N'rpt.' + QUOTENAME(@v), N'V'))";
         command.Parameters.AddWithValue("@v", view);
+        return (string)(await command.ExecuteScalarAsync())!;
+    }
+
+    private async Task<string> FingerprintAsync()
+    {
+        await using var connection = await OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT rpt.fn_ViewsFingerprint(0)";
         return (string)(await command.ExecuteScalarAsync())!;
     }
 

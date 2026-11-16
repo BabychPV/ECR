@@ -847,8 +847,8 @@ JOIN doc.TableRow      AS r ON r.PeriodKey = ti.PeriodKey AND r.TableInstanceId 
         -- ✎ B138 (B75): _WorkflowMode - режим погодження ЦІЄЇ версії (cfg.TemplateVersion.WorkflowMode: 0 SubmitApprove, 1 None),
         -- константа вʼюхи (опублікована версія незмінна), ОСТАННЬОЮ колонкою. _Status не змінюється (для None лишається 0).
         SET @copyCols = CONCAT(@copyCols, N',
-       CAST(', CAST(COALESCE((SELECT wtv.WorkflowMode FROM cfg.SheetDef AS wsd JOIN cfg.TemplateVersion AS wtv ON wtv.Id = wsd.TemplateVersionId
-                              WHERE wsd.Id = @sheet), 0) AS nvarchar(3)), N' AS tinyint) AS _WorkflowMode');
+       CAST(', CAST((SELECT wtv.WorkflowMode FROM cfg.SheetDef AS wsd JOIN cfg.TemplateVersion AS wtv ON wtv.Id = wsd.TemplateVersionId
+                      WHERE wsd.Id = @sheet) AS nvarchar(3)), N' AS tinyint) AS _WorkflowMode');
 
         SET @sql = CONCAT(
 N'CREATE OR ALTER VIEW rpt.', QUOTENAME(@view), N'
