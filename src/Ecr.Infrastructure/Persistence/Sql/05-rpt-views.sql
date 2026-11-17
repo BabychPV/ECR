@@ -36,7 +36,7 @@ GO
 -- Рішення людини 16.11 («додай позначку у в'юхи»). ЄДИНЕ визначення правила в SQL: стани аркушів (wf.ApprovalState:
 -- документ × аркуш × копія × період), які ПОДАНІ (Status = 1) і для яких у журналі є запис перерахунку
 -- `SheetRecalc / RecalculatedAfterSubmission`, пізніший за подання (SubmittedAt). Те саме правило, що в картці документа
--- (DocumentStore.MarkRecalculatedAfterSubmissionAsync; ключ журналу - RecalculationSkips.AuditCorrelation:
+-- і черзі «До погодження» (RecalculatedAfterSubmissionMark, B79; ключ журналу - RecalculationSkips.AuditCorrelation:
 -- `sheet-recalc:{документ}:{аркуш}[#{копія}]:{період}`); звіряє їх тест ReportViewRecalculatedAfterSubmissionTests.
 -- Повторне подання зсуває SubmittedAt, затвердження знімає стан Submitted - позначка зникає без окремого запису.
 -- ⚠ `rc.EntityId = a.SheetDefId` - надлишкова за змістом умова (аркуш уже є в ключі, записувач RecalculationJob кладе його
