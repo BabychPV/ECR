@@ -99,7 +99,7 @@ output ECW_EC_tons_337 : t       = hours * k1 * k2 * EF_gsec[season].s337 / 1000
 - Коментарі: `// …` до кінця рядка, `/* … */` (без вкладення).
 - Число: `123`, `1.5`, `1e6`, `2.5E-3` → `decimal` (`decimal.Parse`, `NumberStyles.Float`, Invariant); поза межами `decimal` — `script.invalidNumber`. Унарний мінус — оператор.
 - Рядок: `"…"` або `'…'`; екранування `\"`, `\'`, `\\`, `\n`. Незакритий — `script.unterminatedString`.
-- Ключові слова (зарезервовані, не можуть бути іменами): `import rows from where active when const var visible function output per if else foreach substance in reject skip true false null row period header`.
+- Ключові слова (зарезервовані, не можуть бути іменами): `import rows from where active when const var visible function output per if else foreach substance in reject skip true false null row period header key entry`.
 - Оператори: `+ - * / %`, `== != < <= > >=`, `&& || !`, `? :`, `( ) [ ] { } , ; : .`, `=` (лише в оголошеннях).
 - Заборонено з порадою: `^` (`script.caretNotPower`: «степінь — Pow(a, b)»), одинарне `=` у виразі (`script.assignInExpression`: «порівняння — ==»), `&`, `|`.
 
@@ -421,6 +421,8 @@ Task<IReadOnlyList<LiveTable>> FindLiveTablesByCodeAsync(string tableCode, strin
 | `POST …/script/preview` | `Calculation.View` + доступ до документа | `{ text?, documentId, periodKey, tableInstanceId?, maxRows (≤ 200, типово 50) }` → `ScriptPreviewDto` |
 | `POST api/v1/methodologies/{id}/versions` | як зараз | додається поле `engine: "Formulas" \| "Script"` (типово `Script` для нової порожньої; при копіюванні — як у джерела) |
 
+Нова порожня версія з рушієм `Script` отримує стартовий текст-заготовку (закоментований приклад: `rows from`, `const`, `var`, `output`) — константа `ScriptStarter.Text` в `Ecr.Application`. Порівняння версій (`CompareMethodologyVersionsHandler`, `MethodologyDiffFields`) отримує поле `scriptText` (сторож `MethodologyDiffFieldCatalogTests`: рядок сіду + гілка в `DiffFieldLabel.tsx`).
+
 `outline`: `{ tables[], inputs[{name, optional}], outputs[{code, unit, perSubstance}], substances[], imports[], constants[{name, kind: scalar|map, line}] }`.
 `ScriptPreviewDto`: `{ tables: [{ tableInstanceId, tableCode, totalRows, selectedRows, inactiveRows, rows: [{ rowKey, rowNumber, state: "selected"|"inactive"|"notSelected"|"rejected", issue?: "missingInputs"|"stepError"|"rejected", missing?: string[], values: [{ name, substance?, kind, text, error? }] }] }], diagnostics[] }`. Перегляд нічого не пише; `text` порожній → збережений текст версії. Рядки `notSelected`/`inactive` повертаються без `values`.
 
@@ -595,3 +597,14 @@ T6.1 редактор константи-мапи сіткою (вставка �
 | Еколог не впорається з кодом | заготовки, підказки колонок, помилки з порадами, живий перегляд, тест із рядка, редактор таблиць |
 | Змішаний стан (частина версій на скрипті) | рушій — властивість версії; бібліотека й імпортери перемикаються разом |
 | Конфлікт EF-міграцій з іншими сесіями | одна міграція `MS01`; перед злиттям — перегенерація знімка поверх `origin/main` |
+
+## 12. Самоперевірка плану (18.11.2026)
+
+Перевірено за кодом і враховано:
+
+1. **Збіг чисел.** Літерали й константи скрипта — `decimal`, як константи й літерали старого рушія; у `Legacy` обидва шляхи переходять у `double` тим самим `AsDouble()`. Аргументи рядка йдуть тим самим `CalculationInputBuilder` і `ToValue`. Арифметика, порівняння, `if`, `in`, функції — ті самі вузли й той самий `Evaluator`. Єдине джерело можливих розбіжностей — порядок кроків і маскування; його закриває спільний `CalculationSteps` і паритет.
+2. **Гачок `$`.** `Evaluator.Function` спершу питає `RegistryForms.Handles` (імена на `$` йому невідомі), далі `MethodologyCall` — гачок стоїть там. Наявні парсери символ `$` не пропускають.
+3. **Прив'язки.** Вони належать методології й копіюються разом із версією шаблону — тому скрипт їх не описує, а публікація лише додає відсутні за угодою «код колонки = код виходу».
+4. **Паралельність виконавців.** Етап 1 (`Ecr.Scripting`) не перетинається з T2.1–T2.3 — їх можна вести двома виконавцями в окремих worktree і злити. T2.4+ — послідовно.
+5. **Чого v1 свідомо не дає** (етап 6): читання інших рядків/таблиць і місячних колонок напряму (поки працюють колонки-містки шаблону й місячні псевдоніми), перевірка одиниць у виразах, редактор таблиць коефіцієнтів, `foreach` для імен. Це не блокує перенесення: наявні методології цих можливостей не мають.
+6. **Ризик обсягу.** Найбільші задачі — T2.4 (модуль) і T5.2 (конвертер). Обидві мають вимірюване приймання (пари «формули ↔ скрипт», паритет 0 розбіжностей).
