@@ -195,6 +195,82 @@ public sealed partial class AdminDuplicateRequestHttpTests(
         Assert.Equal(1, await db.RegistryValues.CountAsync(v => v.RegistryEntryId == e2).ConfigureAwait(true));
     }
 
+    /// <summary>
+    /// d3 (шлях пакета, правило 429): <c>POST /registries/{code}/entries/batch</c> — та сама правка наявного запису, що
+    /// вперше заповнює порожнє поле, — двічі одночасно: жодного 500 на <c>UQ_RegistryValue</c>; переможений — та сама
+    /// відповідь, що й послідовний повтор пакета, або загальний <c>409 concurrentChange</c>; значення поля одне.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "B158d")]
+    public async Task d3b_Значення_запису_пакетом_двічі_одночасно_без_500_і_без_дублів()
+    {
+        var (one, two) = await SignInTwiceAsync(["Registry.View", "Registry.EditData"]).ConfigureAwait(true);
+        using var first = one;
+        using var second = two;
+
+        var (registryId, code) = await NewRegistryAsync(withField: "NOTE").ConfigureAwait(true);
+        var url = $"/api/v1/registries/{code}/entries/batch?dryRun=false";
+
+        async Task<long> NewEntryAsync(string entryCode)
+        {
+            var created = await SendAsync(
+                first,
+                HttpMethod.Post,
+                $"/api/v1/registries/{code}/entries",
+                new
+                {
+                    id = (long?)null, registryDefId = registryId, code = entryCode,
+                    display = new { values = new { en = entryCode } }, parentEntryId = (long?)null,
+                    values = new Dictionary<string, object?>(),
+                }).ConfigureAwait(true);
+            Assert.True(created.Status == HttpStatusCode.Created, $"{created}\n{App.ErrorsText}");
+            return created.Json.GetProperty("id").GetInt64();
+        }
+
+        static object Batch(long id) => new
+        {
+            items = new[]
+            {
+                new
+                {
+                    clientRowId = "u", op = "upsert", id, baseVersion = (string?)null,
+                    values = new Dictionary<string, object?> { ["NOTE"] = "B158d" },
+                },
+            },
+        };
+
+        // Послідовно: повтор того самого пакета — той самий 200 (застосовано).
+        var e1 = await NewEntryAsync("E1");
+        var saved = await SendAsync(first, HttpMethod.Post, url, Batch(e1)).ConfigureAwait(true);
+        var repeated = await SendAsync(first, HttpMethod.Post, url, Batch(e1)).ConfigureAwait(true);
+
+        Assert.True(saved.Status == HttpStatusCode.OK && saved.Json.GetProperty("applied").GetBoolean(), $"{saved}\n{App.ErrorsText}");
+        Assert.True(repeated.Status == HttpStatusCode.OK && repeated.Json.GetProperty("applied").GetBoolean(), $"{repeated}\n{App.ErrorsText}");
+
+        // Одночасно.
+        var e2 = await NewEntryAsync("E2");
+        var replies = await RaceAsync(
+            "entry-values-batch",
+            meet => SendAsync(first, HttpMethod.Post, url, Batch(e2), meet),
+            meet => SendAsync(second, HttpMethod.Post, url, Batch(e2), meet)).ConfigureAwait(true);
+
+        foreach (var reply in replies.Where(r => r.Status == HttpStatusCode.OK))
+        {
+            output.WriteLine($"RACE entry-values-batch body {reply.Body}");
+        }
+
+        AssertNoServerError(replies);
+        Assert.Contains(replies, r => r.Status == HttpStatusCode.OK && r.Json.GetProperty("applied").GetBoolean());
+        foreach (var reply in replies.Where(r => !(r.Status == HttpStatusCode.OK && r.Json.GetProperty("applied").GetBoolean())))
+        {
+            AssertRefusal(reply, HttpStatusCode.Conflict, "ECR-CELL-0409", "err.ECR-CELL-0409.concurrentChange");
+        }
+
+        await using var db = Db();
+        Assert.Equal(1, await db.RegistryValues.CountAsync(v => v.RegistryEntryId == e2).ConfigureAwait(true));
+    }
+
     // ───────────────────────────── d5: чернетка опису довідника ─────────────────────────────
 
     /// <summary>
