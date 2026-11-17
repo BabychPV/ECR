@@ -1082,6 +1082,7 @@ public sealed partial class ReportViewStableRenameScopeTests(ITestOutputHelper o
         command.Parameters.AddWithValue("@p", projectId);
         command.Parameters.AddWithValue("@k", period);
         command.Parameters.AddWithValue("@r", rowKey);
+        command.CommandTimeout = 300;   // вʼюха «50422» має ~1000 колонок: компіляція плану під навантаженням машини > 30 с
         await using var reader = await command.ExecuteReaderAsync();
         Assert.True(await reader.ReadAsync(), $"{view}: немає рядка проєкту {projectId} за {period}");
         var value = reader.IsDBNull(0) ? null : reader.GetString(0);

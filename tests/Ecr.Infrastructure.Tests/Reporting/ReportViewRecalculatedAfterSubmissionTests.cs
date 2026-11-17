@@ -53,6 +53,9 @@ namespace Ecr.Infrastructure.Tests.Reporting;
 /// 1/5; A5 — 2/5 (StatusNumberingTests і ReportArchiveBranchTests)</description></item>
 /// </list>
 /// Позиція колонки (перед <c>_WorkflowMode</c>) — пакет B3 у <see cref="ReportViewWorkflowModeTests"/>.
+/// AU F13 (17.11): скоуп сценарію — 2 рядки, перевіряється КОЖЕН рядок. Мутація AU1: гаряча гілка <c>rpt.v_DocumentCells</c>
+/// позначає лише рядки з парним Id (<c>ISNULL(CASE WHEN r.Id % 2 = 0 THEN ras.Marked END, 0)</c>) — збірка OK; червоні 7 із 16
+/// цього класу, кожен — «KINDS long = [0,1]» (усі випадки «позначено»); на скоупі з одного рядка вона лишалась зеленою.
 /// </remarks>
 [Trait(TestCategories.Category, TestCategories.Integration)]
 [Trait("Requirement", "RPT-STABLE")]
@@ -60,6 +63,9 @@ public sealed partial class ReportViewRecalculatedAfterSubmissionTests(ITestOutp
 {
     private const int UserId = 1;
     private const string Marked = RecalculationSkips.AuditRecalculatedAfterSubmission;
+
+    /// <summary>Рядків у кожному скоупі сценарію (≥ 2: перевірка «кожен рядок скоупу несе позначку картки»).</summary>
+    private const int ScopeRows = 2;
 
     private static readonly DateTime Now = new(2099, 1, 2, 10, 0, 0, DateTimeKind.Utc);
 
@@ -418,8 +424,13 @@ public sealed partial class ReportViewRecalculatedAfterSubmissionTests(ITestOutp
         return documentId;
     }
 
+    /// <summary>
+    /// Скоуп сценарію (аркуш × копія × період документа) — <see cref="ScopeRows"/> рядків, а не один: позначка рахується на
+    /// стан, і перевірка має бачити, що її несе КОЖЕН рядок скоупу (AU F13: мутація «позначено лише кожен другий рядок»
+    /// на скоупі з одного рядка лишалась зеленою).
+    /// </summary>
     private Task SeedAsync(long documentId, int periodKey, Scenario s, long? copyId, string rowKey)
-        => SeedRowsAsync(documentId, periodKey, s, 1, copyId, rowKey);
+        => SeedRowsAsync(documentId, periodKey, s, ScopeRows, copyId, rowKey);
 
     /// <summary>Рядки з коміркою першої колонки («v») в екземплярі таблиці (оригінал або копія) за період.</summary>
     private async Task SeedRowsAsync(long documentId, int periodKey, Scenario s, int count, long? copyId = null, string? firstRowKey = null)
@@ -472,7 +483,7 @@ public sealed partial class ReportViewRecalculatedAfterSubmissionTests(ITestOutp
 
     /// <summary>
     /// Один скоуп (документ × аркуш × копія × період): картка документа і три види вʼюх дають те саме значення, і воно —
-    /// очікуване. У вʼюхах — рівно одне значення на всі рядки скоупу.
+    /// очікуване. У КОЖНОМУ з <see cref="ScopeRows"/> рядків скоупу кожного виду вʼюх — те саме значення, що в картці.
     /// </summary>
     private async Task AssertScopeAsync(Scenario s, long documentId, int period, long? copyId, bool expected)
     {
@@ -488,10 +499,10 @@ public sealed partial class ReportViewRecalculatedAfterSubmissionTests(ITestOutp
         var wide = $"WHERE _DocumentId = @d AND _PeriodKey = {period} AND _SheetCopyOrdinal = {ordinal}";
         var views = new (string Kind, string Text)[]
         {
-            ("versioned", $"SELECT DISTINCT _RecalculatedAfterSubmission FROM rpt.[{s.Versioned}] {wide}"),
-            ("stable", $"SELECT DISTINCT _RecalculatedAfterSubmission FROM rpt.[{s.Stable}] {wide}"),
-            ("long", "SELECT DISTINCT _RecalculatedAfterSubmission FROM rpt.v_DocumentCells "
-                      + $"WHERE DocumentId = @d AND PeriodKey = {period} AND SheetCopyOrdinal = {ordinal}"),
+            ("versioned", $"SELECT _RecalculatedAfterSubmission FROM rpt.[{s.Versioned}] {wide} ORDER BY _RowKey"),
+            ("stable", $"SELECT _RecalculatedAfterSubmission FROM rpt.[{s.Stable}] {wide} ORDER BY _RowKey"),
+            ("long", "SELECT _RecalculatedAfterSubmission FROM rpt.v_DocumentCells "
+                      + $"WHERE DocumentId = @d AND PeriodKey = {period} AND SheetCopyOrdinal = {ordinal} ORDER BY RowKey"),
         };
         // Усі три види перевіряються до кінця, розбіжності — одним повідомленням з назвами видів (мутація одного виду вʼюх
         // називає саме його).
@@ -499,7 +510,8 @@ public sealed partial class ReportViewRecalculatedAfterSubmissionTests(ITestOutp
         foreach (var (kind, text) in views)
         {
             var marks = await MarksAsync(text, documentId);
-            if (marks.Count != 1 || card != (marks[0] == 1))
+            // Рівно рядки скоупу (кожен рядок — одна комірка) і кожен із позначкою картки.
+            if (marks.Count != ScopeRows || marks.Any(m => (m == 1) != card))
             {
                 wrong.Add($"{kind} = [{string.Join(",", marks)}]");
             }
@@ -519,6 +531,7 @@ public sealed partial class ReportViewRecalculatedAfterSubmissionTests(ITestOutp
         command.CommandText = text;
 #pragma warning restore CA2100
         command.Parameters.AddWithValue("@d", documentId);
+        command.CommandTimeout = 300;   // перше читання широкої вʼюхи (250 колонок) компілює план; під навантаженням машини > 30 с
         await using var reader = await command.ExecuteReaderAsync();
         while (await reader.ReadAsync())
         {

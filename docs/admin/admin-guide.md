@@ -1114,6 +1114,9 @@ SELECT v._PeriodKey, re.Name_ru AS Substance, v.[VALUE]
 У `rpt.v_DocumentCells` і `rpt.v_DocumentCellsByPermit` службові колонки без підкреслення (`PeriodKey`, `Status`, …):
 там немає колонок-кодів шаблону, з якими їх треба розводити.
 
+`rpt.v_DocumentCellsByPermit` колонок `_WorkflowMode` і `_RecalculatedAfterSubmission` НЕ має — свідомо (B138, D-536/D-537):
+режим і позначку беріть з `rpt.v_DocumentCells` за `DocumentId`, `SheetCode`, `SheetCopyOrdinal` і `PeriodKey`.
+
 ### 13.4. Що переживає назва стабільної вʼюхи
 
 - **Нові версії шаблону, нові колонки, нові періоди, копії аркушів** — назва й наявні колонки лишаються; колонка,
