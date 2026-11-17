@@ -76,8 +76,21 @@ public sealed class SourceEventMapStore(EcrDbContext db) : ISourceEventMapStore
     /// <inheritdoc />
     public async Task<SourceEventMap> AddMapAsync(SourceEventMap map, CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(map);
+
         db.SourceEventMaps.Add(map);
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        try
+        {
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
+        catch (DbUpdateException ex) when (SqlConflict.ViolatesIndex(ex, "'UQ_SourceEventMap'"))
+        {
+            // ⛔ B158 c6. Перевірка обробника (`MapExistsAsync`) читає без блокування: два одночасні однакові
+            // `POST /source-event-maps` проходять її обидва, і другого відбиває `UQ_SourceEventMap` — повз одиницю роботи,
+            // тож без цієї гілки голий 500. Та сама відмова, що й у перевірки.
+            throw Application.Sources.CreateSourceEventMapHandler.MapExists(map.SourceEntityId);
+        }
 
         return map;
     }

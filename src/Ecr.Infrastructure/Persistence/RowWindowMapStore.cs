@@ -40,8 +40,27 @@ public sealed class RowWindowMapStore(EcrDbContext db) : IRowWindowMapStore
     /// <inheritdoc />
     public async Task<RowWindowMap> AddMapAsync(RowWindowMap map, CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(map);
+
         db.RowWindowMaps.Add(map);
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        try
+        {
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
+        catch (DbUpdateException ex) when (SqlConflict.ViolatesIndex(ex, "'UQ_RowWindowMap_Target'"))
+        {
+            // ⛔ B158 c7. Перевірка обробника (`TargetTakenAsync`) читає без блокування: два одночасні `POST
+            // /row-window-maps` на ту саму колонку-ціль проходять її обидва, і другого відбиває `UQ_RowWindowMap_Target` —
+            // повз одиницю роботи, тож без цієї гілки голий 500. Та сама відмова (з кодом колонки), що й у перевірки.
+            var targetColumn = await db.ColumnDefs.AsNoTracking()
+                .Where(c => c.Id == map.TargetColumnDefId)
+                .Select(c => c.Code)
+                .FirstAsync(ct)
+                .ConfigureAwait(false);
+
+            throw Application.Sources.CreateRowWindowMapHandler.TargetTaken(targetColumn);
+        }
 
         return map;
     }

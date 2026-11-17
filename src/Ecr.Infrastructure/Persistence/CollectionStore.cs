@@ -885,7 +885,25 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
         ArgumentNullException.ThrowIfNull(entity);
 
         db.SourceEntities.Add(entity);
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        try
+        {
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
+        catch (DbUpdateException ex) when (SqlConflict.ViolatesIndex(ex, "'UQ_SourceEntity'"))
+        {
+            // ⛔ B158 c4. Перевірка обробника (`SourceEntityCodeExistsAsync`) читає без блокування: два одночасні
+            // `POST /sources` проходять її обидва, і другого відбиває `UQ_SourceEntity` — повз одиницю роботи, тож без
+            // цієї гілки голий 500. Та сама відмова, що й у перевірки. Ім'я індексу — в лапках: інакше збігся б і
+            // `UQ_SourceEntity_Registry` (його відмова — у `SaveSourceEntityAsync`).
+            var dataSourceCode = await db.DataSources.AsNoTracking()
+                .Where(s => s.Id == entity.DataSourceId)
+                .Select(s => s.Code)
+                .FirstAsync(ct)
+                .ConfigureAwait(false);
+
+            throw CreateSourceEntityHandler.CodeTaken(dataSourceCode, entity.Code);
+        }
 
         return entity;
     }

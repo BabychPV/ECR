@@ -564,14 +564,7 @@ public sealed class CreateRowWindowMapHandler(
 
         if (await store.TargetTakenAsync(target.TableDefId, target.Id, ct).ConfigureAwait(false))
         {
-            throw new BusinessRuleException(
-                ErrorCodes.EntityFieldMapStateConflict,
-                $"На колонку «{target.Code}» уже є прив'язка вікна рядка.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-INT-0409.rowWindowTargetTaken",
-                    ["targetColumn"] = target.Code.ToString(),
-                });
+            throw TargetTaken(target.Code);
         }
 
         var map = RowWindowMap.Create(
@@ -619,6 +612,21 @@ public sealed class CreateRowWindowMapHandler(
 
         return RowWindowMapSupport.ToDto(created!, columns);
     }
+
+    /// <summary>
+    /// Відмова «на колонку-ціль уже є прив'язка вікна рядка» (<c>409 ECR-INT-0409 rowWindowTargetTaken</c>): спільна для
+    /// перевірки обробника й для порушення <c>UQ_RowWindowMap_Target</c> у сховищі (B158 c7, програш гонки).
+    /// </summary>
+    /// <param name="targetColumn">Код колонки-цілі.</param>
+    public static BusinessRuleException TargetTaken(string targetColumn)
+        => new(
+            ErrorCodes.EntityFieldMapStateConflict,
+            $"На колонку «{targetColumn}» уже є прив'язка вікна рядка.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-INT-0409.rowWindowTargetTaken",
+                ["targetColumn"] = targetColumn,
+            });
 }
 
 /// <summary>

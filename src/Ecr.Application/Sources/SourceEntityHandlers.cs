@@ -101,15 +101,7 @@ public sealed class CreateSourceEntityHandler(
         // інакше відмова доїхала б як збій бази, а не як «такий код уже є».
         if (await sources.SourceEntityCodeExistsAsync(dataSource.Id, code, ct).ConfigureAwait(false))
         {
-            throw new BusinessRuleException(
-                ErrorCodes.EntityFieldMapStateConflict,
-                $"У з'єднання «{dataSource.Code}» вже є сутність збору з кодом «{code}».",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-INT-0409.sourceEntityDuplicate",
-                    ["code"] = code,
-                    ["dataSource"] = dataSource.Code,
-                });
+            throw CodeTaken(dataSource.Code, code);
         }
 
         var path = Blank(command.EntityPath);
@@ -133,6 +125,23 @@ public sealed class CreateSourceEntityHandler(
 
         return SourceEntityDto.From(created!);
     }
+
+    /// <summary>
+    /// Відмова «код сутності в цьому з'єднанні зайнятий» (<c>409 ECR-INT-0409 sourceEntityDuplicate</c>): спільна для
+    /// перевірки обробника й для порушення <c>UQ_SourceEntity</c> у сховищі (B158 c4, програш гонки).
+    /// </summary>
+    /// <param name="dataSourceCode">Код з'єднання.</param>
+    /// <param name="code">Код сутності.</param>
+    public static BusinessRuleException CodeTaken(string dataSourceCode, string code)
+        => new(
+            ErrorCodes.EntityFieldMapStateConflict,
+            $"У з'єднання «{dataSourceCode}» вже є сутність збору з кодом «{code}».",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-INT-0409.sourceEntityDuplicate",
+                ["code"] = code,
+                ["dataSource"] = dataSourceCode,
+            });
 
     private static string? Blank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
