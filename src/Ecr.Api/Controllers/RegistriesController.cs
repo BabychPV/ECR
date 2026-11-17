@@ -30,7 +30,8 @@ public sealed class RegistriesController(
     DiscardRegistryDefinitionDraftHandler discardDraft,
     ImportRegistryEntriesHandler importEntries,
     IConfiguration configuration,
-    GetRegistryTargetHandler getTarget) : ControllerBase
+    GetRegistryTargetHandler getTarget,
+    IServiceScopeFactory scopes) : ControllerBase
 {
     /// <summary>
     /// Мінімальні відомості про довідник-ЦІЛЬ Lookup за Id - для показу поточної цілі колонки чи поля шапки, якої немає
@@ -374,9 +375,24 @@ public sealed class RegistriesController(
             }
         }
 
-        return Ok(await importEntries
-            .HandleAsync(code, content, file.Length, maxBytes, dryRun, ct, notUtf8)
-            .ConfigureAwait(false));
+        try
+        {
+            return Ok(await importEntries
+                .HandleAsync(code, content, file.Length, maxBytes, dryRun, ct, notUtf8)
+                .ConfigureAwait(false));
+        }
+        catch (Application.Errors.ConcurrencyConflictException ex) when (!dryRun && ex.ErrorCode == Domain.Errors.ErrorCodes.CellConflict)
+        {
+            // ⛔ B167: імпорт ідемпотентний і без токена версії — файл каже «стан має бути таким», а не «змінити ось цю
+            // версію». Наявні значення він читає ДО транзакції, тож другий із двох одночасних однакових файлів програвав
+            // унікальному індексу (UQ_RegistryValue) чи ревізії довідника — 409, хоча послідовний повтор того самого файлу
+            // — 200 «без змін». Один повтор усього імпорту в СВІЖІЙ області (новий DbContext; трекер першої спроби брудний)
+            // читає закомічене переможцем і дає ту саму відповідь, що й послідовний повтор. Інші відмови не повторюються.
+            await using var retry = scopes.CreateAsyncScope();
+            return Ok(await retry.ServiceProvider.GetRequiredService<ImportRegistryEntriesHandler>()
+                .HandleAsync(code, content, file.Length, maxBytes, dryRun, ct, notUtf8)
+                .ConfigureAwait(false));
+        }
     }
 
     /// <summary>

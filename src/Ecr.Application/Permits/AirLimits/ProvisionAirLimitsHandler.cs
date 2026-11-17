@@ -94,6 +94,11 @@ public sealed partial class ProvisionAirLimitsHandler(
             {
                 created = false;
                 profileCreated = false;
+
+                // ⛔ B167: два одночасні розгортання (два запити, два старти інстансів) — по черзі. Без замка обидва бачили «AIR_AREA,
+                // типу, профілю немає», і другого відбивав унікальний індекс (409), хоча послідовний повтор — 200 «нічого не змінено».
+                // Під замком другий читає закомічене першим і проходить тим самим no-op, що й послідовний повтор.
+                await registries.LockProvisioningAsync(AirLimitsSchema.TypeCode, token).ConfigureAwait(false);
                 await EnsureAreaRegistryAsync(actor, token).ConfigureAwait(false);
                 type = await permits.FindByCodeAsync(AirLimitsSchema.TypeCode, token).ConfigureAwait(false);
 
