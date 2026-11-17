@@ -28424,6 +28424,14 @@
       "SystemFactsCalculationsDto": {
         "description": "Прапори розрахунків цього процесу (B105).",
         "properties": {
+          "hse400ApprovedMonths": {
+            "description": "B80: затверджених місяців обраного документа HSE400 поточного року (0–12); `null` — зв'язки або документа\nпоточного року немає.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "hse400CompositionFromDocument": {
             "description": "Дієве значення `Calculations:Hse400CompositionFromDocument`: `true` — Land читає склад газу з\nдокумента HSE400, `false` — з довідника `LAND_HSE400_COMPOSITION`.",
             "type": "boolean"
@@ -28434,6 +28442,18 @@
           },
           "hse400CompositionWarning": {
             "description": "`true` — прапор вимкнено, а опублікований шаблон HSE400 і документ HSE400 поточного року є: Land мовчки\n        читає застарілий довідник.",
+            "type": "boolean"
+          },
+          "hse400SourceState": {
+            "description": "B80 (N1): стан-ворота зв'язки HSE400 → Land — `any` або `approvedOnly`; `null` — зв'язки немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "hse400SourceWarning": {
+            "default": false,
+            "description": "B80: `true` — документ HSE400 поточного року є і зв'язка або ще на `any` (Land читає й незатверджене), або\nна `approvedOnly`, а місяць із введеними даними не затверджений (Land цього місяця без складу).",
             "type": "boolean"
           }
         },

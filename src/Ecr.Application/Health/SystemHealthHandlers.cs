@@ -83,7 +83,7 @@ public sealed class GetSystemFactsHandler(
             SystemFactsCalculationsDto.Of(
                 host.Hse400CompositionFromDocument,
                 host.Hse400CompositionSource,
-                snapshot.Hse400DocumentInCurrentYear));
+                snapshot));
     }
 
     /// <summary>Стан транспорту за відповіддю порту.</summary>
@@ -209,15 +209,66 @@ public sealed record SystemFactsResponse(
 /// <c>true</c> — прапор вимкнено, а опублікований шаблон HSE400 і документ HSE400 поточного року є: Land мовчки
 /// читає застарілий довідник.
 /// </param>
+/// <param name="Hse400SourceState">
+/// B80 (N1): стан-ворота зв'язки HSE400 → Land — <c>any</c> або <c>approvedOnly</c>; <c>null</c> — зв'язки немає.
+/// </param>
+/// <param name="Hse400ApprovedMonths">
+/// B80: затверджених місяців обраного документа HSE400 поточного року (0–12); <c>null</c> — зв'язки або документа
+/// поточного року немає.
+/// </param>
+/// <param name="Hse400SourceWarning">
+/// B80: <c>true</c> — документ HSE400 поточного року є і зв'язка або ще на <c>any</c> (Land читає й незатверджене), або
+/// на <c>approvedOnly</c>, а місяць із введеними даними не затверджений (Land цього місяця без складу).
+/// </param>
 public sealed record SystemFactsCalculationsDto(
-    bool Hse400CompositionFromDocument, string Hse400CompositionSource, bool Hse400CompositionWarning)
+    bool Hse400CompositionFromDocument,
+    string Hse400CompositionSource,
+    bool Hse400CompositionWarning,
+    string? Hse400SourceState = null,
+    int? Hse400ApprovedMonths = null,
+    bool Hse400SourceWarning = false)
 {
+    /// <summary>Мітка джерела, коли ключ не задано, а значення дає біт зв'язки (B80).</summary>
+    public const string SourceBinding = "Binding";
+
     /// <summary>Складає блок; попередження — лише за вимкненого прапора й наявного документа поточного року.</summary>
     /// <param name="enabled">Дієве значення прапора.</param>
     /// <param name="source">Мітка джерела значення.</param>
     /// <param name="hse400DocumentInCurrentYear">Чи є документ HSE400 поточного року з опублікованим шаблоном.</param>
     public static SystemFactsCalculationsDto Of(bool enabled, string source, bool hse400DocumentInCurrentYear)
         => new(enabled, source, !enabled && hse400DocumentInCurrentYear);
+
+    /// <summary>
+    /// B80: блок із фактами зв'язки. Ключ не задано (<paramref name="source"/> = <c>Default</c>), а зв'язка є — дієве
+    /// значення дає її біт, мітка <see cref="SourceBinding"/>.
+    /// </summary>
+    /// <param name="enabled">Значення ключа (за незаданого — <c>false</c>).</param>
+    /// <param name="source">Мітка джерела ключа.</param>
+    /// <param name="snapshot">Знімок фактів.</param>
+    public static SystemFactsCalculationsDto Of(bool enabled, string source, SystemHealthSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        var facts = snapshot.Hse400Source;
+        if (facts is not null && source == SystemHostFacts.SourceDefault)
+        {
+            enabled = facts.ReadFromDocument;
+            source = SourceBinding;
+        }
+
+        var basic = Of(enabled, source, snapshot.Hse400DocumentInCurrentYear);
+        if (facts is null)
+        {
+            return basic;
+        }
+
+        var hasDocument = facts.ApprovedMonths is not null;
+        return basic with
+        {
+            Hse400SourceState = facts.ApprovedOnly ? "approvedOnly" : "any",
+            Hse400ApprovedMonths = facts.ApprovedMonths,
+            Hse400SourceWarning = hasDocument && (!facts.ApprovedOnly || facts.UnapprovedMonthWithData),
+        };
+    }
 }
 
 /// <summary>Лічильники черги фонових задач.</summary>

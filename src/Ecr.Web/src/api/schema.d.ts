@@ -42206,6 +42206,12 @@ export interface components {
         };
         /** @description Прапори розрахунків цього процесу (B105). */
         SystemFactsCalculationsDto: {
+            /**
+             * Format: int32
+             * @description B80: затверджених місяців обраного документа HSE400 поточного року (0–12); `null` — зв'язки або документа
+             *     поточного року немає.
+             */
+            hse400ApprovedMonths?: null | number;
             /** @description Дієве значення `Calculations:Hse400CompositionFromDocument`: `true` — Land читає склад газу з
              *     документа HSE400, `false` — з довідника `LAND_HSE400_COMPOSITION`. */
             hse400CompositionFromDocument: boolean;
@@ -42215,6 +42221,14 @@ export interface components {
             /** @description `true` — прапор вимкнено, а опублікований шаблон HSE400 і документ HSE400 поточного року є: Land мовчки
              *             читає застарілий довідник. */
             hse400CompositionWarning: boolean;
+            /** @description B80 (N1): стан-ворота зв'язки HSE400 → Land — `any` або `approvedOnly`; `null` — зв'язки немає. */
+            hse400SourceState?: null | string;
+            /**
+             * @description B80: `true` — документ HSE400 поточного року є і зв'язка або ще на `any` (Land читає й незатверджене), або
+             *     на `approvedOnly`, а місяць із введеними даними не затверджений (Land цього місяця без складу).
+             * @default false
+             */
+            hse400SourceWarning: boolean;
         };
         /** @description Стан БД: лише число й мітки часу, без шляхів чи імен. */
         SystemFactsDbDto: {
