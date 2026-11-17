@@ -392,7 +392,12 @@ public sealed partial class DocumentVersionMigrationTests
         string Row1Key);
 
     /// <summary>Сценарій L3 (див. опис класу); <paramref name="targetMonths"/> — скільки місячних F_Mmm має ціль.</summary>
-    private async Task<YearScenario> ArrangeYearAsync(int targetMonths)
+    /// <param name="targetMonths">Скільки місячних F_Mmm має ціль.</param>
+    /// <param name="beforeTargetPublish">
+    /// ✎ B-static (e): додати в цільову версію ще структуру ДО публікації (опубліковану версію структурно змінювати не можна).
+    /// </param>
+    private async Task<YearScenario> ArrangeYearAsync(
+        int targetMonths, Action<Ecr.Infrastructure.Persistence.EcrDbContext, int>? beforeTargetPublish = null)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var doc = await builder.BuildAsync(
@@ -511,6 +516,7 @@ public sealed partial class DocumentVersionMigrationTests
             db.MonthInputAliases.Add(new MonthInputAlias(table.Id, sCode, (byte)m, targetM[m].Id));
         }
 
+        beforeTargetPublish?.Invoke(db, version.Id);
         version.Publish(1, now);
         await db.SaveChangesAsync().ConfigureAwait(false);
 

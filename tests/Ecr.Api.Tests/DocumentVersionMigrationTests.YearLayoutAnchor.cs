@@ -2,7 +2,9 @@
 using System.Globalization;
 using System.Net;
 using System.Text.Json;
+using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Documents;
+using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.TestKit;
 using Microsoft.EntityFrameworkCore;
@@ -270,7 +272,130 @@ public sealed partial class DocumentVersionMigrationTests
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-474")]
+    [Trait("Task", "LAND-YEAR-L3-STATIC")]
+    public async Task Поданий_або_затверджений_якір_відмова_sheetsLocked_і_нічого_не_записано(bool approved)
+    {
+        // Як T8_00 Land doc 96: окремий аркуш зі СТАТИЧНОЮ таблицею (без місячних колонок; план переносу аркуш не зачіпає —
+        // наявна LP-32 його не рахує), таблиці в якорі немає, травень і жовтень V = 55 (згодні). Аркуш якоря (209901)
+        // поданий/затверджений. Без замка крок створив би екземпляр, рядок і комірку; із замком — sheetsLocked, жодного запису.
+        // Мутаційний доказ: у MigrateDocumentVersionHandler.ClassifyLocked умова `anchorWritten?.Contains(...) == true` →
+        // `(... == true && l.PeriodKey < 0)` — поданий якір не зачеплений, перенос проходить і пише в поданий аркуш: червоний.
+        (int Sheet, int Table, int Column, int Row) target = default;
+        var y = await ArrangeYearAsync(targetMonths: 12, (db, versionId) => target = AddStaticStructure(db, versionId))
+            .ConfigureAwait(true);
+        try
+        {
+            var stat = await AddStaticSheetAsync(y, target, [209905, 209910], 55m).ConfigureAwait(true);
+            await using (var db = y.Builder.CreateContext())
+            {
+                var now = new DateTime(2026, 11, 18, 1, 0, 0, DateTimeKind.Utc);
+                var state = new Ecr.Domain.Entities.Workflow.ApprovalState(y.Doc.DocumentId, stat.SourceSheetId, YearAnchor);
+                state.Submit(1, now);
+                if (approved)
+                {
+                    state.Approve(1, now.AddMinutes(5));
+                }
+
+                db.ApprovalStates.Add(state);
+                await db.SaveChangesAsync().ConfigureAwait(true);
+            }
+
+            using var app = CreateYearApp();
+            using var client = await SignedInAsync(app, y.UserName).ConfigureAwait(true);
+
+            var dry = await PostYearAsync(client, y, dryRun: true).ConfigureAwait(true);
+            var dryBody = await dry.Content.ReadAsStringAsync().ConfigureAwait(true);
+            Assert.True(dry.StatusCode == HttpStatusCode.OK, $"{dry.StatusCode}: {dryBody} {app.ErrorsText}");
+            var report = JsonDocument.Parse(dryBody).RootElement;
+            Assert.False(report.GetProperty("canApply").GetBoolean(), dryBody);
+            Assert.Contains("sheetsLocked", report.GetProperty("refusals").EnumerateArray().Select(r => r.GetString()));
+            Assert.Equal(1, report.GetProperty("lockedSheetsAffected").GetInt32());
+
+            var refused = await PostYearAsync(client, y, dryRun: false).ConfigureAwait(true);
+            await AssertProblemAsync(
+                refused, HttpStatusCode.Conflict, "ECR-DOC-0409", "err.ECR-DOC-0409.migrateSheetsLocked").ConfigureAwait(true);
+
+            // Нічого не записано: версія та сама, у якорі немає ні екземпляра статичної таблиці (вихідної чи цільової), ні V.
+            Assert.Equal(y.SourceVersionId, await YearProjectVersionAsync(y).ConfigureAwait(true));
+            await using var check = y.Builder.CreateContext();
+            Assert.False(await check.TableInstances.AsNoTracking()
+                .AnyAsync(t => t.PeriodKeyValue == YearAnchor && t.DocumentId == y.Doc.DocumentId
+                               && (t.TableDefId == stat.SourceTableId || t.TableDefId == stat.TargetTableId)).ConfigureAwait(true));
+            Assert.False(await check.CellValues.AsNoTracking()
+                .AnyAsync(c => c.PeriodKeyValue == YearAnchor && (c.ColumnDefId == stat.SourceColumnId || c.ColumnDefId == stat.TargetColumnId))
+                .ConfigureAwait(true));
+        }
+        finally
+        {
+            await CleanupYearAsync(y).ConfigureAwait(true);
+        }
+    }
+
     // ───────────────────────────── допоміжне (B-static) ─────────────────────────────
+
+    /// <summary>Ідентифікатори статичного аркуша (e): аркуш/таблиця/колонка вихідної й цільової версій.</summary>
+    private sealed record StaticSheet(int SourceSheetId, int SourceTableId, int SourceColumnId, int TargetTableId, int TargetColumnId);
+
+    /// <summary>
+    /// Статичний аркуш (e): аркуш STATB зі статичною фіксованою таблицею T8B (колонка VB, рядок RSB1) у версії
+    /// <paramref name="versionId"/> — однакові коди в обох версіях (план переносить 1:1 і аркуш не зачіпає).
+    /// </summary>
+    private static (int Sheet, int Table, int Column, int Row) AddStaticStructure(
+        Ecr.Infrastructure.Persistence.EcrDbContext db, int versionId)
+    {
+        var sheet = new SheetDef(versionId, EcrCode.Create("STATB"), Name("Static B"), 9);
+        db.SheetDefs.Add(sheet);
+        db.SaveChanges();
+        var table = new TableDef(sheet.Id, EcrCode.Create("T8B"), Name("T8 B"), 1, TableLayoutKind.Static, TableRowMode.Fixed);
+        db.TableDefs.Add(table);
+        db.SaveChanges();
+        var column = new ColumnDef(table.Id, EcrCode.Create("VB"), Name("V"), 1, CellDataType.Decimal);
+        var row = new RowDef(table.Id, RowKey.Create(StaticRowKey), 1, Name("Row S1"), RowKind.Item);
+        db.ColumnDefs.Add(column);
+        db.RowDefs.Add(row);
+        db.SaveChanges();
+        return (sheet.Id, table.Id, column.Id, row.Id);
+    }
+
+    private const string StaticRowKey = "RSB1";
+
+    /// <summary>
+    /// Додає статичний аркуш у вихідну версію (ціль — <paramref name="target"/>, додана до публікації), вмикає його в
+    /// документ і кладе VB = <paramref name="value"/> у екземпляри періодів <paramref name="periods"/> (якір — без екземпляра).
+    /// </summary>
+    private static async Task<StaticSheet> AddStaticSheetAsync(
+        YearScenario y, (int Sheet, int Table, int Column, int Row) target, int[] periods, decimal value)
+    {
+        await using var db = y.Builder.CreateContext();
+        var source = AddStaticStructure(db, y.SourceVersionId);
+
+        var document = await db.Documents.Include(d => d.Sheets).SingleAsync(d => d.Id == y.Doc.DocumentId).ConfigureAwait(false);
+        document.IncludeSheet(source.Sheet);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        var rowKey = StaticRowKey;
+        foreach (var period in periods)
+        {
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                DECLARE @i bigint = NEXT VALUE FOR doc.TableInstanceSeq;
+                DECLARE @r bigint = NEXT VALUE FOR doc.TableRowSeq;
+                INSERT doc.TableInstance (PeriodKey, Id, DocumentId, TableDefId, CreatedAt, ModifiedAt, SheetCopyId)
+                VALUES ({period}, @i, {y.Doc.DocumentId}, {source.Table}, SYSUTCDATETIME(), SYSUTCDATETIME(), NULL);
+                INSERT doc.TableRow (PeriodKey, Id, TableInstanceId, RowKey, RowDefId, Ordinal, IsDeleted, IsOrphaned, ModifiedAt)
+                VALUES ({period}, @r, @i, {rowKey}, {source.Row}, 1, 0, 0, SYSUTCDATETIME());
+                INSERT doc.CellValue (PeriodKey, TableRowId, ColumnDefId, TableDefId, ValueNumeric, IsCalculated, IsEmpty)
+                VALUES ({period}, @r, {source.Column}, {source.Table}, {value}, 0, 0);
+                """).ConfigureAwait(false);
+        }
+
+        return new StaticSheet(source.Sheet, source.Table, source.Column, target.Table, target.Column);
+    }
 
     /// <summary>Прибирає значення C2 (вихідна колонка) з рядка 1 якоря.</summary>
     private static async Task RemoveAnchorC2Async(YearScenario y)
