@@ -65,16 +65,21 @@ public sealed class TableRelationCodeConflictTests(SqlServerFixture sql)
         var doc = await builder.BuildAsync(ct: ct);
 
         await using var db = builder.CreateContext();
-        var template = await db.Templates.AsNoTracking().SingleAsync(t => t.Id == doc.TemplateId, ct);
+        var table = await db.TableDefs.AsNoTracking().SingleAsync(t => t.Id == doc.TableDefId, ct);
+        var sheet = await db.SheetDefs.AsNoTracking().SingleAsync(s => s.Id == table.SheetDefId, ct);
 
-        // Той самий код шаблону — `UQ_Template…`, не `UQ_TableRelationDef`.
-        db.Templates.Add(new Template(
-            EcrCode.Create(template.Code), new LocalizedText(new Dictionary<string, string> { ["en"] = "dup" }),
-            1, DateTime.UtcNow));
+        // Той самий код аркуша в тій самій версії — `UQ_SheetDef`, не `UQ_TableRelationDef`.
+        // ✎ B158 (batch-1117-3): раніше тут був дубль коду ШАБЛОНУ, але `UQ_Template_Code` тепер законно мапить
+        // `TemplateDuplicateKeys` (B158b) — передумова «індекс без арму» застаріла. `UQ_SheetDef` арму не має;
+        // друга перевірка нижче тримає саму передумову: якщо арм для нього з'явиться — тест скаже про це прямо.
+        db.SheetDefs.Add(new SheetDef(
+            sheet.TemplateVersionId, EcrCode.Create(sheet.Code),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "dup" }), sheet.Ordinal + 100));
 
         var ex = await Assert.ThrowsAnyAsync<Exception>(() => new UnitOfWork(db).SaveChangesAsync(ct));
         Assert.IsNotType<ConcurrencyConflictException>(ex);
         Assert.IsType<DbUpdateException>(ex);
+        Assert.Contains("UQ_SheetDef", ex.GetBaseException().Message, StringComparison.Ordinal);
     }
 
     private static TableRelationDef Relation(string code, int source, int target)

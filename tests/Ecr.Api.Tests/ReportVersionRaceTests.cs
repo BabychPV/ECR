@@ -1,6 +1,7 @@
 // tests/Ecr.Api.Tests/ReportVersionRaceTests.cs
 using System.Text.Json;
 using Ecr.Application.Common;
+using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Reporting;
 using Ecr.Application.Security;
@@ -27,7 +28,8 @@ namespace Ecr.Api.Tests;
 /// отримати відмову обробника «версія вже є» (409 + 409).
 /// <para>
 /// Мутація: прибрати арм <c>UQ_ReportVersion</c> з <c>ExceptionHandlingMiddleware</c> — відповідь 500,
-/// червоні обидва тести.
+/// червоний перший тест; ✎ B158d: прибрати арм <c>'UQ_ReportVersion'</c> з <c>DuplicateRefusalsAdmin</c> — червоний
+/// тест гонки (сирий <c>DbUpdateException</c> замість відмови з номером версії).
 /// </para>
 /// </remarks>
 [Collection("SqlServer")]
@@ -100,13 +102,20 @@ public sealed class ReportVersionRaceTests(SqlServerFixture sql)
             Assert.Equal(1, await check.ReportVersions.CountAsync(v => v.ReportDefId == reportDefId && v.Version == "2.0"));
         }
 
-        var failure = failures[0]!;
-        Assert.IsType<DbUpdateException>(failure);
-        Assert.Contains("UQ_ReportVersion", failure.GetBaseException().Message, StringComparison.Ordinal);
+        // ✎ B158d (d6): програш гонки на `UQ_ReportVersion` мапить уже одиниця роботи (`DuplicateRefusalsAdmin`) —
+        // та сама відмова, що й послідовна перевірка обробника (`ECR-RPT-4091 version {version}`), а не сирий
+        // `DbUpdateException` з ключем `versionConcurrent` без номера. Передумова «до middleware доходить сирий виняток»
+        // застаріла; тест тримає нову, сильнішу: відповідь гонки = відповідь послідовного повтору.
+        var failure = Assert.IsType<BusinessRuleException>(failures[0]);
+        Assert.Equal("ECR-RPT-4091", failure.ErrorCode);
+        Assert.NotNull(failure.Details);
+        Assert.Equal("err.ECR-RPT-4091.version", failure.Details["messageKey"]);
+        Assert.Equal("2.0", failure.Details["version"]);
 
         var problem = JsonDocument.Parse(await ProblemReservedMembersTests.ProblemTextAsync(failure)).RootElement;
         Assert.Equal(409, problem.GetProperty("status").GetInt32());
         Assert.Equal("ECR-RPT-4091", problem.GetProperty("errorCode").GetString());
+        Assert.Equal("err.ECR-RPT-4091.version", problem.GetProperty("messageKey").GetString());
     }
 
     /// <summary>Опис звіту без версій; повертає його Id.</summary>
