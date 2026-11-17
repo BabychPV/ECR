@@ -43,7 +43,25 @@ public sealed class ApprovalQueueStore(EcrDbContext db) : IApprovalQueueStore
                 .ToDictionaryAsync(r => r.Id, r => r.Code, ct)
                 .ConfigureAwait(false);
 
-        return new ApprovalQueueRoutes(routes, codes);
+        // ✎ B155: шаблон версії й загальний Approver потрібні лише маршрутам шаблону; немає жодного — без запитів.
+        if (!routes.Exists(r => r.TemplateId is not null))
+        {
+            return new ApprovalQueueRoutes(routes, codes);
+        }
+
+        var templateIds = routes.Where(r => r.TemplateId is not null).Select(r => r.TemplateId!.Value).Distinct().ToList();
+        var versionTemplates = await db.TemplateVersions
+            .AsNoTracking()
+            .Where(v => templateIds.Contains(v.TemplateId))
+            .Select(v => new { v.Id, v.TemplateId })
+            .ToDictionaryAsync(v => v.Id, v => v.TemplateId, ct)
+            .ConfigureAwait(false);
+
+        return new ApprovalQueueRoutes(routes, codes)
+        {
+            VersionTemplates = versionTemplates,
+            GeneralApproverRoleId = await GeneralApprover.RoleIdAsync(db, ct).ConfigureAwait(false),
+        };
     }
 
     /// <inheritdoc />

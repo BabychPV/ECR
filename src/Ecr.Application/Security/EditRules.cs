@@ -485,8 +485,12 @@ public static class EditRules
     /// Роль ПОТОЧНОГО кроку маршруту погодження (<c>ФВ-5.17</c>);
     /// <c>null</c> — маршруту немає, і затвердження одноетапне.
     /// </param>
+    /// <param name="alternativeRoleId">
+    /// ✎ B155: роль, що ТЕЖ задовольняє крок (вбудований загальний <c>Approver</c> для кроку маршруту шаблону);
+    /// <c>null</c> — лише роль кроку.
+    /// </param>
     public static EditDecision CanApprove(
-        AccessProfile profile, CellAccessContext context, int? requiredRoleId = null)
+        AccessProfile profile, CellAccessContext context, int? requiredRoleId = null, int? alternativeRoleId = null)
     {
         ArgumentNullException.ThrowIfNull(profile);
 
@@ -530,12 +534,11 @@ public static class EditRules
         // не робить людину учасником маршруту проєкту B.
         // ⚠ D-214: роль, звужена аркушами чи періодами, — учасник маршруту лише
         // на своєму аркуші у своєму періоді.
-        if (requiredRoleId is { } roleId
-            && !profile.RoleIdsAt(context.ProjectId, context.SheetCode, context.Period).Contains(roleId))
+        if (requiredRoleId is { } roleId && !HoldsStepRole(profile, context, roleId, alternativeRoleId))
         {
             return EditDecision.Deny(
                 EditDenyReason.NoGrant,
-                $"Крок маршруту погодження вимагає ролі {roleId}; зараз черга не ваша.");
+                $"Крок маршруту погодження вимагає ролі {StepRoles(roleId, alternativeRoleId)}; зараз черга не ваша.");
         }
 
         // ⛔ Та сама різниця причин, що в CanSubmit вище: грант ВІДСУТНІЙ і
@@ -568,8 +571,9 @@ public static class EditRules
     /// маршруту немає. Перевірка така сама, як у <see cref="CanApprove"/>: хто не в черзі погодження, не повертає
     /// аркуш поза нею лише завдяки наданню рівня <c>Approve</c>.
     /// </param>
+    /// <param name="alternativeRoleId">✎ B155: як у <see cref="CanApprove"/> — те саме правило кроку.</param>
     public static EditDecision CanReopen(
-        AccessProfile profile, CellAccessContext context, int? requiredRoleId = null)
+        AccessProfile profile, CellAccessContext context, int? requiredRoleId = null, int? alternativeRoleId = null)
     {
         ArgumentNullException.ThrowIfNull(profile);
 
@@ -600,12 +604,11 @@ public static class EditRules
         }
 
         // ⛔ P2-4: роль кроку — НА ДОДАЧУ до гранта, як у CanApprove (ролі з областю/звуженням — теж ті самі).
-        if (requiredRoleId is { } roleId
-            && !profile.RoleIdsAt(context.ProjectId, context.SheetCode, context.Period).Contains(roleId))
+        if (requiredRoleId is { } roleId && !HoldsStepRole(profile, context, roleId, alternativeRoleId))
         {
             return EditDecision.Deny(
                 EditDenyReason.NoGrant,
-                $"Крок маршруту погодження вимагає ролі {roleId}; повернути аркуш у роботу може лише учасник маршруту.");
+                $"Крок маршруту погодження вимагає ролі {StepRoles(roleId, alternativeRoleId)}; повернути аркуш у роботу може лише учасник маршруту.");
         }
 
         // ⛔ Та сама різниця причин, що в CanApprove: грант ВІДСУТНІЙ і грант
@@ -622,6 +625,27 @@ public static class EditRules
 
         return EditDecision.Allow();
     }
+
+    /// <summary>
+    /// ✎ B155: ЄДИНЕ правило «профіль — учасник кроку маршруту» для затвердження й повернення в роботу: роль кроку АБО
+    /// альтернативна (загальний <c>Approver</c> на кроці маршруту шаблону), чинна в цьому проєкті, аркуші й періоді.
+    /// </summary>
+    /// <param name="profile">Профіль прав.</param>
+    /// <param name="context">Умови аркуша.</param>
+    /// <param name="roleId">Роль кроку.</param>
+    /// <param name="alternativeRoleId">Альтернативна роль; <c>null</c> — немає.</param>
+    public static bool HoldsStepRole(AccessProfile profile, CellAccessContext context, int roleId, int? alternativeRoleId)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+
+        var held = profile.RoleIdsAt(context.ProjectId, context.SheetCode, context.Period);
+        return held.Contains(roleId) || (alternativeRoleId is { } alternative && held.Contains(alternative));
+    }
+
+    private static string StepRoles(int roleId, int? alternativeRoleId)
+        => alternativeRoleId is { } alternative && alternative != roleId
+            ? string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{roleId} або {alternative}")
+            : roleId.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     /// <summary>Відмова інтеграції в дії робочого процесу.</summary>
     /// <param name="action">Назва дії для подробиці.</param>

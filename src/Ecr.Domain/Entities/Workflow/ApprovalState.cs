@@ -137,6 +137,28 @@ public sealed class ApprovalState : Entity<long>
         CurrentStepId = firstStepId;
     }
 
+    /// <summary>
+    /// ✎ B155 (слово людини 16.11): маршрут погодження змінено — поданий аркуш починає погодження з ПЕРШОГО кроку
+    /// чинного маршруту.
+    /// </summary>
+    /// <param name="firstStepId">Перший крок чинного тепер маршруту; <c>null</c> — маршруту немає (одноетапне).</param>
+    /// <returns><c>false</c> — аркуш уже не поданий (між підрахунком і зміною його погодили, відхилили чи відкликали).</returns>
+    /// <remarks>
+    /// ⚠ Явно, а не «невідомий крок веде на перший» (<c>ApprovalRoute.StepAt</c>): без запису старий
+    /// <see cref="CurrentStepId"/> лишався б посиланням на видалений крок, і відкликання (<see cref="IsRecallable"/>)
+    /// аркуша, що фактично стоїть на першому кроці, було б недоступне.
+    /// </remarks>
+    public bool RestartApproval(int? firstStepId)
+    {
+        if (Status != DocumentStatus.Submitted)
+        {
+            return false;
+        }
+
+        CurrentStepId = firstStepId;
+        return true;
+    }
+
     /// <summary>Затверджує поданий аркуш.</summary>
     /// <param name="userId">Хто затверджує.</param>
     /// <param name="utcNow">Момент затвердження.</param>

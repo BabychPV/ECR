@@ -76,19 +76,193 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
         // ⚠ ОДИН запит на всі рівні, а не чотири по черзі: подання і
         // затвердження — часті операції, і чотири походи в базу заради
         // таблиці на кілька рядків були б платою ні за що.
+        // ✎ B155: маршрут шаблону — того шаблону, якому належить версія (підзапит у тому самому зверненні).
+        var templateOfVersion = db.TemplateVersions
+            .Where(v => v.Id == templateVersionId)
+            .Select(v => (int?)v.TemplateId);
         var candidates = await db.ApprovalRoutes
             .AsNoTracking()
             .Include(r => r.Steps)
             .Where(r => r.IsActive
                         && (r.ProjectId == null || r.ProjectId == projectId)
-                        && (r.TemplateVersionId == null || r.TemplateVersionId == templateVersionId))
+                        && (r.TemplateVersionId == null || r.TemplateVersionId == templateVersionId)
+                        && (r.TemplateId == null || r.TemplateId == templateOfVersion.FirstOrDefault()))
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
         // Найконкретніший виграє; при рівній конкретності — стабільний
         // порядок за кодом, щоб вибір не залежав від порядку рядків у базі.
         // ⛔ Правило — одне на затвердження й на чергу «До погодження» (ФВ-12.5): `ApprovalRoute.Resolve`.
-        return ApprovalRoute.Resolve(candidates, projectId, templateVersionId);
+        // Кандидат-маршрут шаблону вже відфільтрований за шаблоном версії — його `TemplateId` і є шаблон версії.
+        var templateId = candidates.Find(r => r.TemplateId is not null)?.TemplateId;
+        return ApprovalRoute.Resolve(candidates, projectId, templateId, templateVersionId);
+    }
+
+    /// <inheritdoc />
+    public async Task<ApprovalRoute?> FindScopedRouteAsync(int? projectId, int? templateId, CancellationToken ct)
+        => await db.ApprovalRoutes
+            .Include(r => r.Steps)
+            .Where(r => r.ProjectId == projectId && r.TemplateId == templateId && r.TemplateVersionId == null)
+            .OrderBy(r => r.Code)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<ApprovalRoute>> ListActiveRoutesAsync(CancellationToken ct)
+        => await db.ApprovalRoutes
+            .AsNoTracking()
+            .Include(r => r.Steps)
+            .Where(r => r.IsActive)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public Task<int?> GeneralApproverRoleIdAsync(CancellationToken ct) => GeneralApprover.RoleIdAsync(db, ct);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<InFlightSheet>> ListInFlightSheetsAsync(
+        int? projectId, int? templateId, CancellationToken ct)
+    {
+        // Шаблон документа: власний (B74) або основний проєкту (шаблон чинної версії проєкту) — як у `RouteScopeAsync`.
+        var rows =
+            from s in db.ApprovalStates.AsNoTracking().ExceptWorkflowNone(db)
+            join d in db.Documents.AsNoTracking() on s.DocumentId equals d.Id
+            join p in db.Projects.AsNoTracking() on d.ProjectId equals p.Id
+            join mv in db.TemplateVersions.AsNoTracking() on p.TemplateVersionId equals mv.Id
+            where s.Status == Domain.Enums.DocumentStatus.Submitted
+            select new
+            {
+                s.Id,
+                s.DocumentId,
+                s.SheetDefId,
+                s.PeriodKey,
+                s.SheetCopyId,
+                d.ProjectId,
+                TemplateId = d.TemplateId ?? mv.TemplateId,
+                OwnTemplateId = d.TemplateId,
+                s.CurrentStepId,
+            };
+
+        if (projectId is { } project)
+        {
+            rows = rows.Where(r => r.ProjectId == project);
+        }
+
+        if (templateId is { } template)
+        {
+            rows = rows.Where(r => r.TemplateId == template);
+        }
+
+        var list = await rows
+            .Select(r => new
+            {
+                r.Id,
+                r.DocumentId,
+                r.SheetDefId,
+                r.PeriodKey,
+                r.SheetCopyId,
+                r.ProjectId,
+                r.TemplateId,
+                r.CurrentStepId,
+                // ⚠ Версія лише для маршрутів версії; шкали без рядка для пари (проєкт, шаблон) дають NULL — не падіння.
+                TemplateVersionId = (int?)(r.OwnTemplateId == null
+                    ? EcrDbContext.VersionOf(r.ProjectId, r.PeriodKey)
+                    : EcrDbContext.TemplateVersionOf(r.ProjectId, r.OwnTemplateId.Value, r.PeriodKey)),
+            })
+            .OrderBy(r => r.Id)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return
+        [
+            .. list.Select(r => new InFlightSheet(
+                r.Id, r.DocumentId, r.SheetDefId, r.PeriodKey, r.SheetCopyId, r.ProjectId, r.TemplateId,
+                r.TemplateVersionId ?? 0, r.CurrentStepId)),
+        ];
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<ApprovalState>> GetStatesAsync(IReadOnlyCollection<long> stateIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(stateIds);
+        if (stateIds.Count == 0)
+        {
+            return [];
+        }
+
+        var ids = stateIds.ToArray();
+        return await db.ApprovalStates.Where(s => ids.Contains(s.Id)).ToListAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<ApprovalTemplateRef?> FindTemplateAsync(int templateId, CancellationToken ct)
+    {
+        var row = await db.Templates
+            .AsNoTracking()
+            .Where(t => t.Id == templateId)
+            .Select(t => new
+            {
+                t.Id,
+                t.Code,
+                t.NameL10n,
+                Mode = db.TemplateVersions
+                    .Where(v => v.TemplateId == t.Id)
+                    .OrderByDescending(v => v.Id)
+                    .Select(v => (Domain.Enums.WorkflowMode?)v.WorkflowMode)
+                    .FirstOrDefault(),
+            })
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        return row is null
+            ? null
+            : new ApprovalTemplateRef(row.Id, row.Code, row.NameL10n, row.Mode == Domain.Enums.WorkflowMode.None);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<ApprovalTemplateRef>> ListProjectTemplatesAsync(int projectId, CancellationToken ct)
+    {
+        var main = await (
+                from p in db.Projects.AsNoTracking()
+                join v in db.TemplateVersions.AsNoTracking() on p.TemplateVersionId equals v.Id
+                where p.Id == projectId
+                select (int?)v.TemplateId)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        var attached = await db.ProjectTemplates
+            .AsNoTracking()
+            .Where(x => x.ProjectId == projectId)
+            .Select(x => x.TemplateId)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var ids = attached.Concat(main is { } m ? [m] : []).Distinct().ToList();
+        var templates = await db.Templates
+            .AsNoTracking()
+            .Where(t => ids.Contains(t.Id))
+            .Select(t => new
+            {
+                t.Id,
+                t.Code,
+                t.NameL10n,
+                Mode = db.TemplateVersions
+                    .Where(v => v.TemplateId == t.Id)
+                    .OrderByDescending(v => v.Id)
+                    .Select(v => (Domain.Enums.WorkflowMode?)v.WorkflowMode)
+                    .FirstOrDefault(),
+            })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return
+        [
+            .. templates
+                .OrderByDescending(t => t.Id == main)
+                .ThenBy(t => t.Code, StringComparer.Ordinal)
+                .Select(t => new ApprovalTemplateRef(
+                    t.Id, t.Code, t.NameL10n, t.Mode == Domain.Enums.WorkflowMode.None, t.Id == main)),
+        ];
     }
 
     /// <inheritdoc />

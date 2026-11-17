@@ -243,11 +243,18 @@ public sealed class ListMyApprovalQueueHandler(
         // Маршрут проєкту (єдиний вибір із затвердженням) і крок, на якому стоїть аркуш.
         if (!resolved.TryGetValue((project.ProjectId, versionId), out var route))
         {
-            route = ApprovalRoute.Resolve(routes.Routes, project.ProjectId, versionId);
+            route = ApprovalRoute.Resolve(
+                routes.Routes,
+                project.ProjectId,
+                routes.VersionTemplates.TryGetValue(versionId, out var templateId) ? templateId : null,
+                versionId);
             resolved[(project.ProjectId, versionId)] = route;
         }
 
         var step = route is { Steps.Count: > 0 } ? route.StepAt(row.CurrentStepId) : null;
+
+        // ✎ B155: крок маршруту шаблону задовольняє й загальний Approver (те саме правило, що й `CanApproveAsync`).
+        var alternativeRoleId = step is not null && route!.AllowsGeneralApprover ? routes.GeneralApproverRoleId : null;
 
         var context = new CellAccessContext(
             project.ProjectId,
@@ -274,7 +281,7 @@ public sealed class ListMyApprovalQueueHandler(
                 : DocumentParticipation.LevelAt(grants, sheet.Code, null, period),
         };
 
-        if (!EditRules.CanApprove(profile, context, step?.RoleId).IsAllowed)
+        if (!EditRules.CanApprove(profile, context, step?.RoleId, alternativeRoleId).IsAllowed)
         {
             return null;
         }

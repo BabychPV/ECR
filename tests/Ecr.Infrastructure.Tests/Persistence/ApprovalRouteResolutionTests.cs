@@ -43,25 +43,49 @@ public sealed class ApprovalRouteResolutionTests(SqlServerFixture sql)
         // 1. Проєкт І версія.
         Assert.Equal(4, await RoleOfFirstStepAsync(builder, doc));
 
-        // 2. Проєкт, версія будь-яка.
-        await DropAsync(builder, $"BOTH_{tag}");
-        Assert.Equal(3, await RoleOfFirstStepAsync(builder, doc));
-
-        // 3. Версія, проєкт будь-який.
+        // 2. Версія, проєкт будь-який (✎ B155: версія стоїть вище за проєкт — порядок координатора 16.11).
         //
         // ⚠ Цього рівня директива не називає, але поле `TemplateVersionId`
         // існувало в схемі до `ProjectId`. Без нього маршрут, налаштований
         // лише на версію, був би тихо мертвим — той самий дефект, від якого
         // весь `A7`.
-        await DropAsync(builder, $"PRJ_{tag}");
+        await DropAsync(builder, $"BOTH_{tag}");
         Assert.Equal(2, await RoleOfFirstStepAsync(builder, doc));
 
-        // 4. Типовий: обидві координати порожні.
+        // 3. Проєкт, версія будь-яка.
         await DropAsync(builder, $"VER_{tag}");
+        Assert.Equal(3, await RoleOfFirstStepAsync(builder, doc));
+
+        // 4. Типовий: обидві координати порожні.
+        await DropAsync(builder, $"PRJ_{tag}");
         Assert.Equal(1, await RoleOfFirstStepAsync(builder, doc));
 
         // 5. Маршруту немає → затвердження ОДНОЕТАПНЕ, як було.
         await DropAsync(builder, $"ALL_{tag}");
+
+        // ✎ B155: маршрут ШАБЛОНУ документа діє через шаблон версії (підзапит у `FindRouteAsync`) і стоїть над маршрутом
+        // проєкту; маршрут ЧУЖОГО шаблону (тут — винятком у цьому ж проєкті) не діє.
+        var alien = await builder.BuildAsync(periodKey: 202611, ct: CancellationToken.None);
+        await using (var db = builder.CreateContext())
+        {
+            db.ApprovalRoutes.AddRange(
+                Route($"PRJ2_{tag}", doc.ProjectId, null, roleId: 3),
+                Route($"TPLX_{tag}", doc.ProjectId, null, roleId: 6, templateId: alien.TemplateId));
+            await db.SaveChangesAsync(CancellationToken.None);
+        }
+
+        Assert.Equal(3, await RoleOfFirstStepAsync(builder, doc));
+
+        await using (var db = builder.CreateContext())
+        {
+            db.ApprovalRoutes.Add(Route($"TPL_{tag}", null, null, roleId: 5, templateId: doc.TemplateId));
+            await db.SaveChangesAsync(CancellationToken.None);
+        }
+
+        Assert.Equal(5, await RoleOfFirstStepAsync(builder, doc));
+        await DropAsync(builder, $"TPL_{tag}");
+        await DropAsync(builder, $"TPLX_{tag}");
+        await DropAsync(builder, $"PRJ2_{tag}");
 
         await using var last = builder.CreateContext();
         Assert.Null(await new WorkflowStore(last)
@@ -197,13 +221,14 @@ public sealed class ApprovalRouteResolutionTests(SqlServerFixture sql)
         await db.SaveChangesAsync(CancellationToken.None);
     }
 
-    private static ApprovalRoute Route(string code, int? projectId, int? templateVersionId, int roleId)
+    private static ApprovalRoute Route(string code, int? projectId, int? templateVersionId, int roleId, int? templateId = null)
     {
         var route = new ApprovalRoute(
             EcrCode.Create(code),
             new LocalizedText(new Dictionary<string, string> { ["en"] = code }),
             projectId,
-            templateVersionId);
+            templateVersionId,
+            templateId);
 
         route.AddStep(roleId);
 

@@ -134,7 +134,10 @@ public sealed partial class TemplateVersionStore(EcrDbContext db, IMetadataCache
     public Task<bool> HasApprovalRouteStepsAsync(int templateVersionId, CancellationToken ct)
         => db.ApprovalRoutes
              .AsNoTracking()
-             .AnyAsync(r => r.TemplateVersionId == templateVersionId
+             // ✎ B155: і маршрут ШАБЛОНУ версії (усі проєкти або виняток проєкту) — він діє для всіх версій шаблону.
+             .AnyAsync(r => (r.TemplateVersionId == templateVersionId
+                             || (r.TemplateId != null
+                                 && db.TemplateVersions.Any(v => v.Id == templateVersionId && v.TemplateId == r.TemplateId)))
                             && r.IsActive
                             && db.ApprovalSteps.Any(s => s.ApprovalRouteId == r.Id), ct);
 
