@@ -4783,6 +4783,16 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PUT` | `/api/v1/projects/period-policies/{id}` | `Project.Manage` | 8 |
 | `GET` | `/api/v1/projects/{id}/approval-route` | `Project.Manage` | 3 |
 | `PUT` | `/api/v1/projects/{id}/approval-route` | `Project.Manage` | 3 |
+| `GET` | `/api/v1/projects/{id}/templates/{templateId}/approval-route` | `Project.Manage` | 3 |
+| `PUT` | `/api/v1/projects/{id}/templates/{templateId}/approval-route` | `Project.Manage` | 3 |
+| `POST` | `/api/v1/projects/{id}/templates/{templateId}/approval-route/preview` | `Project.Manage` | 3 |
+| `GET` | `/api/v1/projects/{id}/template-routes` | `Project.Manage` | 3 |
+| `GET` | `/api/v1/templates/{id}/approval-route` | `Template.Edit` або `Template.View` | 3 |
+| `PUT` | `/api/v1/templates/{id}/approval-route` | `Template.Edit` | 3 |
+| `POST` | `/api/v1/templates/{id}/approval-route/preview` | `Template.Edit` | 3 |
+| `GET` | `/api/v1/approval-route/default` | `Security.ManageRoles` | 3 |
+| `PUT` | `/api/v1/approval-route/default` | `Security.ManageRoles` | 3 |
+| `POST` | `/api/v1/approval-route/default/preview` | `Security.ManageRoles` | 3 |
 | `GET` | `/api/v1/projects/{id}/document-template` | `Document.Create` | 4 |
 | `POST` | `/api/v1/projects/{id}/activate` | `Project.Manage` | 1 |
 | `POST` | `/api/v1/projects/{id}/archive` | `Project.Manage` | 1 |
@@ -4945,6 +4955,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/expressions/validate` | `Calculation.View` | 4 |
 | `GET` | `/api/v1/expressions/metadata` | `Calculation.View` | 4 |
 | `GET` | `/api/v1/roles` | `Security.ManageRoles` | 3 |
+| `GET` | `/api/v1/roles/approvers` | `Security.ManageRoles`, `Template.Edit` або `Project.Manage` | 3 |
 | `GET` | `/api/v1/permissions` | `Security.ManageRoles` | 3 |
 | `POST` | `/api/v1/roles` | `Security.ManageRoles` | 3 |
 | `GET` | `/api/v1/users` | `Security.ManageUsers` | 3 |

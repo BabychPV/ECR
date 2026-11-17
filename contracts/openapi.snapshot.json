@@ -1378,6 +1378,25 @@
         ],
         "type": "object"
       },
+      "ApprovalRouteChangeDto": {
+        "description": "✎ B155: відповідь заміни маршруту області.",
+        "properties": {
+          "restarted": {
+            "$ref": "#/components/schemas/ApprovalRouteImpactDto",
+            "description": "Подані аркуші, що почали погодження з першого кроку."
+          },
+          "steps": {
+            "description": "Скільки кроків тепер у власному маршруті області (0 — прибрано).",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "steps",
+          "restarted"
+        ],
+        "type": "object"
+      },
       "ApprovalRouteDto": {
         "description": "Маршрут погодження проєкту.",
         "properties": {
@@ -1402,6 +1421,59 @@
           "projectId",
           "hasRoute",
           "steps"
+        ],
+        "type": "object"
+      },
+      "ApprovalRouteImpactDto": {
+        "description": "✎ B155 (C-8): подані аркуші, які зміна маршруту області поверне на перший крок.",
+        "properties": {
+          "sheets": {
+            "description": "Видимі аркуші (не більше int ApprovalRouteImpact.MaxListed).",
+            "items": {
+              "$ref": "#/components/schemas/RestartedSheetDto"
+            },
+            "type": "array"
+          },
+          "total": {
+            "description": "Усього таких аркушів (у всіх проєктах, де маршрут області діє, крім проєктів із власним винятком).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "truncated": {
+            "description": "Видимих більше, ніж у Sheets.",
+            "type": "boolean"
+          },
+          "visible": {
+            "description": "Скільки з них у проєктах, видимих викликачу.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "visible",
+          "sheets",
+          "truncated"
+        ],
+        "type": "object"
+      },
+      "ApprovalRoutePreviewRequest": {
+        "description": "✎ B155: запит підрахунку перезапуску (C-8).",
+        "properties": {
+          "roleIds": {
+            "description": "Запропоновані ролі кроків; `null` — будь-яка зміна; рівні наявним — 0.",
+            "items": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "required": [
+          "roleIds"
         ],
         "type": "object"
       },
@@ -1481,6 +1553,47 @@
         },
         "required": [
           "canApproverEdit"
+        ],
+        "type": "object"
+      },
+      "ApproverRoleDto": {
+        "description": "✎ B155 (C-7): роль для вибору в кроці маршруту.",
+        "properties": {
+          "code": {
+            "description": "Код.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Роль.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "isBuiltIn": {
+            "description": "Вбудована.",
+            "type": "boolean"
+          },
+          "isGeneralApprover": {
+            "description": "Вбудована загальна роль `Approver`.",
+            "type": "boolean"
+          },
+          "nameL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Назва; `null` — немає."
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "nameL10n",
+          "isBuiltIn",
+          "isGeneralApprover"
         ],
         "type": "object"
       },
@@ -19054,6 +19167,58 @@
         ],
         "type": "object"
       },
+      "ProjectTemplateRouteDto": {
+        "description": "✎ B155 (C-5): шаблон проєкту і маршрут, що для нього діє в цьому проєкті.",
+        "properties": {
+          "code": {
+            "description": "Код шаблону.",
+            "type": "string"
+          },
+          "effectiveSource": {
+            "description": "Звідки маршрут: `own` (виняток проєкту) | `template` | `project` | `default` | `none`.",
+            "type": "string"
+          },
+          "effectiveSteps": {
+            "description": "Кроки маршруту, що діє.",
+            "items": {
+              "$ref": "#/components/schemas/ApprovalStepDto"
+            },
+            "type": "array"
+          },
+          "generalApproverAlsoApproves": {
+            "description": "Діє маршрут шаблону: загальний `Approver` теж затверджує.",
+            "type": "boolean"
+          },
+          "isMain": {
+            "description": "Основний шаблон проєкту.",
+            "type": "boolean"
+          },
+          "nameL10n": {
+            "$ref": "#/components/schemas/LocalizedText",
+            "description": "Назва."
+          },
+          "templateId": {
+            "description": "Шаблон.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "workflowModeNone": {
+            "description": "Найновіша версія — без подання й затвердження (B75).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "templateId",
+          "code",
+          "nameL10n",
+          "isMain",
+          "workflowModeNone",
+          "effectiveSource",
+          "effectiveSteps",
+          "generalApproverAlsoApproves"
+        ],
+        "type": "object"
+      },
       "ProjectTemplateTimelineDto": {
         "description": "Часова шкала версій шаблону проєкту: з якого періоду яка версія діє.",
         "properties": {
@@ -23096,6 +23261,47 @@
           "Registry"
         ]
       },
+      "RestartedSheetDto": {
+        "description": "✎ B155: поданий аркуш, погодження якого почнеться (почалося) з першого кроку.",
+        "properties": {
+          "documentId": {
+            "description": "Документ.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "periodKey": {
+            "description": "Період.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "projectId": {
+            "description": "Проєкт.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "sheetCopyId": {
+            "description": "Копія (RS); `null` — оригінал.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "sheetDefId": {
+            "description": "Аркуш.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "projectId",
+          "documentId",
+          "sheetDefId",
+          "sheetCopyId",
+          "periodKey"
+        ],
+        "type": "object"
+      },
       "ResultsStaleUndeterminedReason": {
         "enum": [
           "PartiallyHidden",
@@ -25726,6 +25932,82 @@
           "messageL10n",
           "columnDefId",
           "isActive"
+        ],
+        "type": "object"
+      },
+      "ScopedApprovalRouteDto": {
+        "description": "✎ B155: маршрут області з тим, що в ній діє.",
+        "properties": {
+          "canEdit": {
+            "description": "Чи може викликач змінити маршрут цієї області.",
+            "type": "boolean"
+          },
+          "effectiveSource": {
+            "description": "Звідки маршрут, що діє: `own` | `template` | `project` | `default` | `none`\n(ApprovalRouteSource). Для області «шаблон, усі проєкти» маршрути окремих проєктів не враховуються.",
+            "type": "string"
+          },
+          "effectiveSteps": {
+            "description": "Кроки маршруту, що діє (власного або успадкованого).",
+            "items": {
+              "$ref": "#/components/schemas/ApprovalStepDto"
+            },
+            "type": "array"
+          },
+          "generalApproverAlsoApproves": {
+            "description": "Маршрут, що діє, — маршрут ШАБЛОНУ: кожен його крок затверджує роль кроку АБО вбудований загальний `Approver`.",
+            "type": "boolean"
+          },
+          "generalApproverRoleId": {
+            "description": "Вбудована загальна роль `Approver`; `null` — її немає.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "hasRoute": {
+            "description": "Чи є ВЛАСНИЙ маршрут області.",
+            "type": "boolean"
+          },
+          "projectId": {
+            "description": "Проєкт області; `null` — усі.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "steps": {
+            "description": "Кроки власного маршруту (порожньо — його немає).",
+            "items": {
+              "$ref": "#/components/schemas/ApprovalStepDto"
+            },
+            "type": "array"
+          },
+          "templateId": {
+            "description": "Шаблон області; `null` — усі.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "workflowModeNone": {
+            "description": "Найновіша версія шаблону області — без подання й затвердження (B75): маршрут не діє.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "projectId",
+          "templateId",
+          "hasRoute",
+          "steps",
+          "effectiveSource",
+          "effectiveSteps",
+          "generalApproverAlsoApproves",
+          "generalApproverRoleId",
+          "canEdit",
+          "workflowModeNone"
         ],
         "type": "object"
       },
@@ -32953,6 +33235,216 @@
         "summary": "✎ AIR-ON-AIR: the import scope columns REGION and AREA as configured on the AIR permit type (`Text`, `Registry`\nor `List`) with the values to pick from, each mapped to the NAE tree. Permission `Registry.View`.",
         "tags": [
           "AirLimits"
+        ]
+      }
+    },
+    "/api/v1/approval-route/default": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScopedApprovalRouteDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScopedApprovalRouteDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScopedApprovalRouteDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "Типовий маршрут майданчика (шаблони без власного маршруту). Право `Security.ManageRoles`.",
+        "tags": [
+          "ApprovalRoutes"
+        ]
+      },
+      "put": {
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceApprovalRouteRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceApprovalRouteRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceApprovalRouteRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalRouteChangeDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalRouteChangeDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalRouteChangeDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Замінює типовий маршрут майданчика. Право `Security.ManageRoles`.",
+        "tags": [
+          "ApprovalRoutes"
+        ]
+      }
+    },
+    "/api/v1/approval-route/default/preview": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovalRoutePreviewRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovalRoutePreviewRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovalRoutePreviewRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalRouteImpactDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalRouteImpactDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalRouteImpactDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "Скільки поданих аркушів зміна типового маршруту поверне на перший крок. Право `Security.ManageRoles`.",
+        "tags": [
+          "ApprovalRoutes"
         ]
       }
     },
@@ -56881,6 +57373,98 @@
         ]
       }
     },
+    "/api/v1/projects/{id}/template-routes": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Проєкт.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProjectTemplateRouteDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProjectTemplateRouteDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProjectTemplateRouteDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Шаблони проєкту (основний і приєднані) з маршрутом, що діє для кожного. Право `Project.Manage` у проєкті й\nгрант `Manage` на проєкт.",
+        "tags": [
+          "ApprovalRoutes"
+        ]
+      }
+    },
     "/api/v1/projects/{id}/template-versions": {
       "get": {
         "description": "Порожній `items` — проєкт на одній (чинній) версії всі періоди. `currentVersionId` — версія для НОВИХ\nперіодів. Невидимий проєкт — той самий `404`, що й неіснуючий.",
@@ -56942,6 +57526,348 @@
         "summary": "Часова шкала версій шаблону проєкту (RPT-STABLE Part B): з якого періоду яка версія діє. Право\n`Document.View` і видимий проєкт.",
         "tags": [
           "Projects"
+        ]
+      }
+    },
+    "/api/v1/projects/{id}/templates/{templateId}/approval-route": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Проєкт.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Шаблон.",
+            "in": "path",
+            "name": "templateId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScopedApprovalRouteDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScopedApprovalRouteDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScopedApprovalRouteDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Виняток проєкту для шаблону. Право `Project.Manage` у проєкті й грант `Manage` на проєкт.",
+        "tags": [
+          "ApprovalRoutes"
+        ]
+      },
+      "put": {
+        "parameters": [
+          {
+            "description": "Проєкт.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Шаблон.",
+            "in": "path",
+            "name": "templateId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceApprovalRouteRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceApprovalRouteRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceApprovalRouteRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalRouteChangeDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalRouteChangeDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalRouteChangeDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Замінює виняток проєкту для шаблону. Право `Project.Manage` у проєкті й грант `Manage` на проєкт.",
+        "tags": [
+          "ApprovalRoutes"
+        ]
+      }
+    },
+    "/api/v1/projects/{id}/templates/{templateId}/approval-route/preview": {
+      "post": {
+        "parameters": [
+          {
+            "description": "Проєкт.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Шаблон.",
+            "in": "path",
+            "name": "templateId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovalRoutePreviewRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovalRoutePreviewRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovalRoutePreviewRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalRouteImpactDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalRouteImpactDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalRouteImpactDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Скільки поданих аркушів зміна винятку поверне на перший крок. Право `Project.Manage`.",
+        "tags": [
+          "ApprovalRoutes"
         ]
       }
     },
@@ -61546,6 +62472,65 @@
         "summary": "Створює роль. Право `Security.ManageRoles`.",
         "tags": [
           "Security"
+        ]
+      }
+    },
+    "/api/v1/roles/approvers": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ApproverRoleDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ApproverRoleDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ApproverRoleDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "Ролі для кроків маршруту (ідентифікатор, код, назва). Право `Security.ManageRoles`, `Template.Edit` або\n`Project.Manage`.",
+        "tags": [
+          "ApprovalRoutes"
         ]
       }
     },
@@ -71163,6 +72148,315 @@
         ]
       }
     },
+    "/api/v1/templates/{id}/approval-route": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Шаблон.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScopedApprovalRouteDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScopedApprovalRouteDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScopedApprovalRouteDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Маршрут шаблону в усіх проєктах. Право `Template.Edit` або `Template.View`.",
+        "tags": [
+          "ApprovalRoutes"
+        ]
+      },
+      "put": {
+        "parameters": [
+          {
+            "description": "Шаблон.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceApprovalRouteRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceApprovalRouteRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceApprovalRouteRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalRouteChangeDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalRouteChangeDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalRouteChangeDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Замінює маршрут шаблону в усіх проєктах. Право `Template.Edit`.",
+        "tags": [
+          "ApprovalRoutes"
+        ]
+      }
+    },
+    "/api/v1/templates/{id}/approval-route/preview": {
+      "post": {
+        "parameters": [
+          {
+            "description": "Шаблон.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovalRoutePreviewRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovalRoutePreviewRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovalRoutePreviewRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalRouteImpactDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalRouteImpactDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalRouteImpactDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Скільки поданих аркушів зміна маршруту шаблону поверне на перший крок. Право `Template.Edit`.",
+        "tags": [
+          "ApprovalRoutes"
+        ]
+      }
+    },
     "/api/v1/templates/{id}/archive": {
       "post": {
         "description": "⛔ Наявні документи працюють далі — документ назавжди лишається на своїй\nверсії шаблону (рішення людини на `Q15-05`). Повторне архівування —\n`409 ECR-TMPL-0409` від домену, не від цього контролера.",
@@ -73493,6 +74787,9 @@
   "tags": [
     {
       "name": "AirLimits"
+    },
+    {
+      "name": "ApprovalRoutes"
     },
     {
       "name": "Audit"
