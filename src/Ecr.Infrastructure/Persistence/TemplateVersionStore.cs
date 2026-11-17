@@ -168,7 +168,7 @@ public sealed partial class TemplateVersionStore(EcrDbContext db, IMetadataCache
 
         var version = new TemplateVersion(templateId, versionNumber, userId, utcNow);
         db.TemplateVersions.Add(version);
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        await SaveMappingDuplicatesAsync(ct).ConfigureAwait(false);
 
         return version.Id;
     }
@@ -291,6 +291,7 @@ public sealed partial class TemplateVersionStore(EcrDbContext db, IMetadataCache
     /// одночасні спроби з тим самим номером обидві її пройдуть, і друга впаде на
     /// індексі. Це гонитва двох адміністраторів над одним шаблоном — рідкісна, і
     /// її ціна (одна невдала спроба) нижча за блокування шаблону на час клону.
+    /// ⛔ B158 (b2): падіння на індексі мапить <see cref="SaveMappingDuplicatesAsync"/> у ту саму відмову, що тут.
     /// </remarks>
     private async Task EnsureVersionNumberFreeAsync(int templateId, string versionNumber, CancellationToken ct)
     {
@@ -824,7 +825,7 @@ public sealed partial class TemplateVersionStore(EcrDbContext db, IMetadataCache
         IReadOnlyList<GrantSource> grantSources, CancellationToken ct)
     {
         db.TemplateVersions.Add(clone);
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        await SaveMappingDuplicatesAsync(ct).ConfigureAwait(false);
 
         // D3: стилі належать ВЕРСІЇ (cfg.StyleDef.TemplateVersionId, UQ_StyleDef) — клонуються за кодом, а
         // посилання колонок/рядків/шапки таблиці перев'язуються на нові Id (спершу стилі потрібні в базі).
@@ -1026,9 +1027,31 @@ public sealed partial class TemplateVersionStore(EcrDbContext db, IMetadataCache
             utcNow);
 
         db.Templates.Add(template);
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        await SaveMappingDuplicatesAsync(ct).ConfigureAwait(false);
 
         return template.Id;
+    }
+
+    /// <summary>
+    /// ⛔ B158 (b1/b2): створення шаблону, версії й клону зберігає повз <see cref="UnitOfWork"/>, тож гонку двох
+    /// однакових запитів (<c>UQ_Template_Code</c>, <c>UQ_TemplateVersion</c>) мапить тут — та сама відмова, що й
+    /// перевірка-передумова, а не 500.
+    /// </summary>
+    private async Task SaveMappingDuplicatesAsync(CancellationToken ct)
+    {
+        try
+        {
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
+        catch (DbUpdateException ex) when (SqlConflict.IsUniqueConstraintViolation(ex))
+        {
+            if (TemplateDuplicateKeys.TryMap(ex) is { } mapped)
+            {
+                throw mapped;
+            }
+
+            throw;
+        }
     }
 
     /// <inheritdoc />

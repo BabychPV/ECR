@@ -50,6 +50,19 @@ public interface IPeriodStore
     /// <summary>Період із <c>UPDLOCK</c> до кінця транзакції.</summary>
     public Task<Period?> LockAsync(int periodId, CancellationToken ct);
 
+    /// <summary>
+    /// ⛔ B158 (b10): блок рядка проєкту (<c>UPDLOCK, HOLDLOCK</c>) до кінця транзакції — перед добудовою календаря.
+    /// </summary>
+    /// <remarks>
+    /// Календар детермінований (ключі періодів — з дат проєкту), тож два одночасні <c>GET …/periods</c> (або
+    /// активація поруч) без блоку обидва бачили «періодів немає» і другий падав на <c>UQ_Period</c> — 500 на
+    /// ЧИТАННІ. Під блоком другий чекає, перечитує проєкт (<see cref="FindProjectAsync"/> ПІСЛЯ блоку) і бачить
+    /// періоди першого. Викликається лише в транзакції. Типова реалізація — без блоку: для підмін у тестах без бази.
+    /// </remarks>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task LockProjectCalendarAsync(int projectId, CancellationToken ct) => Task.CompletedTask;
+
     /// <summary>Додає нові періоди календаря.</summary>
     public void AddRange(IEnumerable<Period> periods);
 
