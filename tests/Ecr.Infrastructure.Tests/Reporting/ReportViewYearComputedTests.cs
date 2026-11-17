@@ -22,8 +22,9 @@ namespace Ecr.Infrastructure.Tests.Reporting;
 /// Дані: місячний проєкт 2099 (209901..209912), документ, рядки R1 (число) і R2 (рядковий результат). Формула C_M09 записана
 /// в 209909 (R1 = 9, R2 = «TXT9»), у 209903 лежить застаріла власна копія (R1 = 333, R2 = «STALE»). Формула C_M03 — у 209903
 /// (3), застаріла копія в 209909 (999). Не-місячна формула CY — у якорі 209901 (1), застаріла копія в 209903 (33).
+/// Calculated K_M09: актуальний прогін 209909 (R1 = 90) і 209903 (R1 = 30), матеріалізоване 209909 R2 = 77, копія 209903 R2 = 55.
 /// Не-місячний (квартальний) проєкт і версія з Layout = 0 під прапором — власна копія, як до L5.
-/// Мутації (див. звіт lane): умова @routed без @rc; без маршрутизації _Text.
+/// Мутації (див. звіт lane): умова @routed без @rc; Calculated з прогону періоду рядка; без маршрутизації _Text.
 /// </remarks>
 [Trait(TestCategories.Category, TestCategories.Integration)]
 [Trait(TestCategories.Stage, TestCategories.Stage5)]
@@ -38,7 +39,7 @@ public sealed class ReportViewYearComputedTests : IAsyncLifetime
 
     private sealed record Version(int VersionId, int TableId, Dictionary<string, int> Cols);
 
-    private sealed record Row(int Period, string RowKey, decimal? CM03, decimal? CM09, string? CM09Text, decimal? CY);
+    private sealed record Row(int Period, string RowKey, decimal? CM03, decimal? CM09, string? CM09Text, decimal? CY, decimal? KM09);
 
     public Task InitializeAsync() => _sql.InitializeAsync();
 
@@ -82,6 +83,40 @@ public sealed class ReportViewYearComputedTests : IAsyncLifetime
         }
     }
 
+    /// <summary>
+    /// L5b: Calculated K_M09 - число АКТУАЛЬНОГО прогону періоду-власника 209909 (90) у кожному рядку року, а не прогону періоду
+    /// перегляду (209903: 30) і не застарілого прогону (900); без числа - матеріалізоване значення власника (77), не копія (55).
+    /// </summary>
+    [Fact]
+    public async Task Рік_Calculated_місяця_з_прогону_періоду_власника()
+    {
+        try
+        {
+            var (templateId, tpl) = await NewTemplateAsync();
+            var v = await AddVersionAsync(templateId);
+            await SetLayoutAsync(v.VersionId, 1);
+            var doc = await NewDocumentAsync(v.VersionId, PeriodKind.Monthly);
+            var rows = await SeedYearAsync(doc, v);
+            await SeedCalcAsync(doc, v, rows);
+
+            await GenerateAsync(v.VersionId, routing: false);
+
+            foreach (var view in new[] { Sanitize($"v_{tpl}_S_T_v1"), Sanitize($"v_{tpl}_S_T") })
+            {
+                var all = await RowsAsync(view, doc);
+                foreach (var period in new[] { 209901, 209903, 209909 })
+                {
+                    Assert.Equal(90m, all.Single(r => r.Period == period && r.RowKey == "R1").KM09);
+                    Assert.Equal(77m, all.Single(r => r.Period == period && r.RowKey == "R2").KM09);
+                }
+            }
+        }
+        finally
+        {
+            await CleanupAsync();
+        }
+    }
+
     [Fact]
     public async Task Не_місячний_проєкт_і_прапор_без_розкладки_рік_власна_копія_як_раніше()
     {
@@ -91,9 +126,9 @@ public sealed class ReportViewYearComputedTests : IAsyncLifetime
             var v = await AddVersionAsync(templateId);
             await SetLayoutAsync(v.VersionId, 1);
             var quarterly = await NewDocumentAsync(v.VersionId, PeriodKind.Quarterly);
-            await SeedYearAsync(quarterly, v);
+            await SeedCalcAsync(quarterly, v, await SeedYearAsync(quarterly, v));
             var monthly = await NewDocumentAsync(v.VersionId, PeriodKind.Monthly);
-            await SeedYearAsync(monthly, v);
+            await SeedCalcAsync(monthly, v, await SeedYearAsync(monthly, v));
             var versioned = Sanitize($"v_{tpl}_S_T_v1");
 
             // Layout = 1, квартальний проєкт: ключ 209903 - не місяць, маршрутизації немає (API: GetDocumentAsync = null).
@@ -101,7 +136,10 @@ public sealed class ReportViewYearComputedTests : IAsyncLifetime
             var q = (await RowsAsync(versioned, quarterly)).Single(r => r is { Period: 209903, RowKey: "R1" });
             Assert.Equal(333m, q.CM09);
             Assert.Equal(33m, q.CY);
-            Assert.Equal("STALE", (await RowsAsync(versioned, quarterly)).Single(r => r is { Period: 209903, RowKey: "R2" }).CM09Text);
+            Assert.Equal(30m, q.KM09);   // прогін свого періоду
+            var q2 = (await RowsAsync(versioned, quarterly)).Single(r => r is { Period: 209903, RowKey: "R2" });
+            Assert.Equal("STALE", q2.CM09Text);
+            Assert.Equal(55m, q2.KM09);
 
             // Layout = 0, спадковий прапор ON: обчислювані НЕ маршрутизуються (лише розкладка версії, як у MonthColumnRouter).
             await SetLayoutAsync(v.VersionId, 0);
@@ -112,7 +150,10 @@ public sealed class ReportViewYearComputedTests : IAsyncLifetime
                 var m = rows.Single(r => r is { Period: 209903, RowKey: "R1" });
                 Assert.Equal(333m, m.CM09);
                 Assert.Equal(33m, m.CY);
-                Assert.Equal("STALE", rows.Single(r => r is { Period: 209903, RowKey: "R2" }).CM09Text);
+                Assert.Equal(30m, m.KM09);
+                var m2 = rows.Single(r => r is { Period: 209903, RowKey: "R2" });
+                Assert.Equal("STALE", m2.CM09Text);
+                Assert.Equal(55m, m2.KM09);
             }
         }
         finally
@@ -188,9 +229,13 @@ public sealed class ReportViewYearComputedTests : IAsyncLifetime
             columns.Add(new ColumnDef(table.Id, EcrCode.Create("A"), Name("A"), 1, CellDataType.Decimal));
         }
 
-        foreach (var (code, month, ordinal) in new[] { ("C_M03", (byte?)3, 2), ("C_M09", (byte?)9, 3), ("CY", null, 4) })
+        foreach (var (code, month, ordinal, type) in new[]
+                 {
+                     ("C_M03", (byte?)3, 2, CellDataType.Formula), ("C_M09", (byte?)9, 3, CellDataType.Formula),
+                     ("CY", null, 4, CellDataType.Formula), ("K_M09", (byte?)9, 5, CellDataType.Calculated),
+                 })
         {
-            var column = new ColumnDef(table.Id, EcrCode.Create(code), Name(code), ordinal, CellDataType.Formula);
+            var column = new ColumnDef(table.Id, EcrCode.Create(code), Name(code), ordinal, type);
             if (month is { } m)
             {
                 column.SetMonth(true, m);
@@ -238,9 +283,9 @@ public sealed class ReportViewYearComputedTests : IAsyncLifetime
     /// Екземпляри 209901, 209903, 209909 (рядки R1, R2). Власники: CY - 209901 (R1 = 1); C_M03 - 209903 (R1 = 3);
     /// C_M09 - 209909 (R1 = 9, R2 = «TXT9»). Застарілі власні копії: 209903 C_M09 (333 / «STALE»), CY (33); 209909 C_M03 (999).
     /// </summary>
-    private async Task SeedYearAsync(long documentId, Version table)
+    private async Task<Dictionary<int, (long Instance, long R1, long R2)>> SeedYearAsync(long documentId, Version table)
     {
-        var rows = new Dictionary<int, (long R1, long R2)>();
+        var rows = new Dictionary<int, (long Instance, long R1, long R2)>();
         foreach (var period in new[] { 209901, 209903, 209909 })
         {
             rows[period] = await InstanceAsync(documentId, period, table.TableId);
@@ -249,6 +294,7 @@ public sealed class ReportViewYearComputedTests : IAsyncLifetime
         var c3 = table.Cols["C_M03"];
         var c9 = table.Cols["C_M09"];
         var cy = table.Cols["CY"];
+        var k9 = table.Cols["K_M09"];
         var cells = new List<string>
         {
             Cell(209901, rows[209901].R1, cy, table.TableId, 1m, null),
@@ -259,6 +305,9 @@ public sealed class ReportViewYearComputedTests : IAsyncLifetime
             Cell(209903, rows[209903].R2, c9, table.TableId, null, "STALE"),
             Cell(209903, rows[209903].R1, cy, table.TableId, 33m, null),
             Cell(209909, rows[209909].R1, c3, table.TableId, 999m, null),
+            // K_M09 (Calculated): матеріалізоване значення власника 209909 (R2 = 77) і застаріла копія 209903 (R2 = 55).
+            Cell(209909, rows[209909].R2, k9, table.TableId, 77m, null),
+            Cell(209903, rows[209903].R2, k9, table.TableId, 55m, null),
         };
         if (table.Cols.TryGetValue("A", out var a))
         {
@@ -269,13 +318,67 @@ public sealed class ReportViewYearComputedTests : IAsyncLifetime
             INSERT INTO doc.CellValue (PeriodKey, TableRowId, ColumnDefId, TableDefId, ValueNumeric, ValueString, IsCalculated)
             VALUES {string.Join(",\n       ", cells)}
             """);
+        return rows;
+    }
+
+    /// <summary>
+    /// Методологія з виходом OUT9, прив'язка {} до K_M09; АКТУАЛЬНІ документні прогони 209909 (R1 = 90, екземпляр 209909) і 209903
+    /// (R1 = 30, екземпляр 209903 - число «по періодах», яке вʼюха року показувати не має); застарілий прогін 209909 (R1 = 900).
+    /// </summary>
+    private async Task SeedCalcAsync(long documentId, Version table, Dictionary<int, (long Instance, long R1, long R2)> rows)
+    {
+        long run903, run909, old909;
+        int versionId, unitId;
+        await using (var db = _sql.CreateContext())
+        {
+            var projectId = await db.Documents.Where(d => d.Id == documentId).Select(d => d.ProjectId).FirstAsync();
+            var methodology = new Ecr.Domain.Entities.Calculations.Methodology(
+                EcrCode.Create("L5Y" + Guid.NewGuid().ToString("N")[..8]), Name("l5"));
+            db.Methodologies.Add(methodology);
+            await db.SaveChangesAsync();
+            var version = new Ecr.Domain.Entities.Calculations.MethodologyVersion(
+                methodology.Id, "1.0", CalculationLevel.Configuration, createdByUserId: 1, Now);
+            db.MethodologyVersions.Add(version);
+            await db.SaveChangesAsync();
+            versionId = version.Id;
+            db.CalculationBindings.Add(new CalculationBinding(table.TableId, table.Cols["K_M09"], methodology.Id, "OUT9", "{}"));
+            await db.SaveChangesAsync();
+
+            async Task<long> RunAsync(int period, bool current)
+            {
+                var run = new Ecr.Domain.Entities.Calculations.CalculationRun(projectId, period, triggeredByUserId: 1, Now, documentId);
+                db.CalculationRuns.Add(run);
+                await db.SaveChangesAsync();
+                run.Complete("Completed", Now, profileJson: null, errorMessage: null);
+                if (current)
+                {
+                    run.MakeCurrent();
+                }
+
+                await db.SaveChangesAsync();
+                return run.Id;
+            }
+
+            old909 = await RunAsync(209909, current: false);
+            run909 = await RunAsync(209909, current: true);
+            run903 = await RunAsync(209903, current: true);
+            unitId = await db.Units.AsNoTracking().OrderBy(u => u.Id).Select(u => u.Id).FirstAsync();
+        }
+
+        await ExecuteAsync($"""
+            INSERT INTO calc.CalculationResult
+                (PeriodKey, Id, CalculationRunId, MethodologyVersionId, DocumentId, TableInstanceId, SourceRowKey, OutputCode, Value, UnitId, Kind)
+            VALUES (209909, NEXT VALUE FOR calc.CalculationResultSeq, {run909}, {versionId}, {documentId}, {rows[209909].Instance}, N'R1', N'OUT9', 90, {unitId}, 0),
+                   (209909, NEXT VALUE FOR calc.CalculationResultSeq, {old909}, {versionId}, {documentId}, {rows[209909].Instance}, N'R1', N'OUT9', 900, {unitId}, 0),
+                   (209903, NEXT VALUE FOR calc.CalculationResultSeq, {run903}, {versionId}, {documentId}, {rows[209903].Instance}, N'R1', N'OUT9', 30, {unitId}, 0);
+            """);
     }
 
     private static string Cell(int period, long row, int column, int table, decimal? number, string? text)
         => $"({period}, {row}, {column}, {table}, {(number is { } n ? n.ToString(System.Globalization.CultureInfo.InvariantCulture) : "NULL")}, "
            + $"{(text is null ? "NULL" : $"N'{text}'")}, 1)";
 
-    private async Task<(long R1, long R2)> InstanceAsync(long documentId, int periodKey, int tableId)
+    private async Task<(long Instance, long R1, long R2)> InstanceAsync(long documentId, int periodKey, int tableId)
     {
         var loader = new BulkCellLoader(_sql.ConnectionString, 1000);
         var instanceId = await loader.ReserveIdsAsync("doc.TableInstanceSeq", 1, CancellationToken.None);
@@ -286,7 +389,7 @@ public sealed class ReportViewYearComputedTests : IAsyncLifetime
         db.TableRows.Add(new TableRow(key, rowId, instanceId, RowKey.Create("R1"), 1, Now));
         db.TableRows.Add(new TableRow(key, rowId + 1, instanceId, RowKey.Create("R2"), 2, Now));
         await db.SaveChangesAsync();
-        return (rowId, rowId + 1);
+        return (instanceId, rowId, rowId + 1);
     }
 
     private Task SetLayoutAsync(int versionId, int layout)
@@ -316,8 +419,8 @@ public sealed class ReportViewYearComputedTests : IAsyncLifetime
         => (string?)(await QueryAsync($"SELECT OBJECT_DEFINITION(OBJECT_ID(N'rpt.[{view}]', N'V'))"))[0][0] ?? string.Empty;
 
     private async Task<List<Row>> RowsAsync(string view, long documentId)
-        => [.. (await QueryAsync($"SELECT _PeriodKey, _RowKey, [C_M03], [C_M09], [C_M09_Text], [CY] FROM rpt.[{view}] WHERE _DocumentId = {documentId} ORDER BY _PeriodKey, _RowKey"))
-            .Select(r => new Row((int)r[0]!, (string)r[1]!, (decimal?)r[2], (decimal?)r[3], (string?)r[4], (decimal?)r[5]))];
+        => [.. (await QueryAsync($"SELECT _PeriodKey, _RowKey, [C_M03], [C_M09], [C_M09_Text], [CY], [K_M09] FROM rpt.[{view}] WHERE _DocumentId = {documentId} ORDER BY _PeriodKey, _RowKey"))
+            .Select(r => new Row((int)r[0]!, (string)r[1]!, (decimal?)r[2], (decimal?)r[3], (string?)r[4], (decimal?)r[5], (decimal?)r[6]))];
 
     /// <summary>Свої дані (документи 2099, Layout версій) прибираються після кожного тесту.</summary>
     private async Task CleanupAsync()
@@ -326,6 +429,8 @@ public sealed class ReportViewYearComputedTests : IAsyncLifetime
         {
             var docs = string.Join(",", _documents);
             await ExecuteAsync($"""
+                DELETE FROM calc.CalculationResult WHERE DocumentId IN ({docs}) AND PeriodKey BETWEEN 209901 AND 209912;
+                DELETE FROM calc.CalculationRun WHERE DocumentId IN ({docs});
                 DELETE cv FROM doc.CellValue AS cv
                   JOIN doc.TableRow AS r ON r.PeriodKey = cv.PeriodKey AND r.Id = cv.TableRowId
                   JOIN doc.TableInstance AS ti ON ti.PeriodKey = r.PeriodKey AND ti.Id = r.TableInstanceId
@@ -340,7 +445,14 @@ public sealed class ReportViewYearComputedTests : IAsyncLifetime
 
         if (_versions.Count > 0)
         {
-            await ExecuteAsync($"UPDATE cfg.TemplateVersion SET Layout = 0 WHERE Id IN ({string.Join(",", _versions)})");
+            var versions = string.Join(",", _versions);
+            await ExecuteAsync($"""
+                DELETE b FROM cfg.CalculationBinding AS b
+                  JOIN cfg.TableDef AS td ON td.Id = b.TableDefId
+                  JOIN cfg.SheetDef AS sd ON sd.Id = td.SheetDefId
+                 WHERE sd.TemplateVersionId IN ({versions});
+                UPDATE cfg.TemplateVersion SET Layout = 0 WHERE Id IN ({versions});
+                """);
             _versions.Clear();
         }
     }

@@ -479,7 +479,7 @@ BEGIN
     -- @rc - версія вʼюхи з Layout = 1; @rcCol - поточна колонка маршрутизована обчислювана; @rcSlots - їхні слоти (поза sc);
     -- @owner - умова «рядок читає власника» (місячний проєкт, оригінал аркуша); @orv* - числа прогонів власників (L5b).
     DECLARE @rc bit, @rcCol bit, @rcSlots nvarchar(max), @owner nvarchar(200), @orvIds nvarchar(max), @orvSlots nvarchar(max),
-            @orvPack nvarchar(max), @orvExprs nvarchar(max), @orvStub nvarchar(max), @orvText nvarchar(max), @orvOn bit;
+            @orvPack nvarchar(max), @orvExprs nvarchar(max), @orvStub nvarchar(max), @orvStubRv nvarchar(max), @orvText nvarchar(max), @orvOn bit;
     SET @owner = N'p.PeriodKind = 0 AND ti.SheetCopyId IS NULL';
 
     DECLARE cur_views CURSOR LOCAL FAST_FORWARD FOR
@@ -504,7 +504,7 @@ BEGIN
         -- ✎ L5: обчислювані маршрутизуються лише за розкладкою версії (та сама умова, без прапора).
         SET @rc = CASE WHEN EXISTS (SELECT 1 FROM cfg.SheetDef AS lsd JOIN cfg.TemplateVersion AS ltv ON ltv.Id = lsd.TemplateVersionId
                                      WHERE lsd.Id = @sheet AND ltv.Layout = 1) THEN 1 ELSE 0 END;
-        SELECT @rcSlots = N'', @orvIds = N'', @orvSlots = N'', @orvPack = N'', @orvExprs = N'', @orvStub = N'', @orvText = N'', @orvOn = 0;
+        SELECT @rcSlots = N'', @orvIds = N'', @orvSlots = N'', @orvPack = N'', @orvExprs = N'', @orvStub = N'', @orvStubRv = N'', @orvText = N'', @orvOn = 0;
         -- Q-17.perf: чи є в таблиці активна прив'язка з предикатом MatchJson (тоді rv - посередній apply на рядок, нижче).
         -- rv наборового варіанта стає колонками apply-джерела рядків r (alias r), посередній - окремим apply rv.
         SET @rvPred = CASE WHEN EXISTS (SELECT 1 FROM cfg.CalculationBinding
@@ -531,7 +531,7 @@ BEGIN
             -- власна копія в рядку перегляду лишається запасним значенням (до консолідації даних і після неї
             -- до -PurgeCopies). Похідні (Formula/Calculated) і всі інші розкладки — як було.
             -- ✎ L5: обчислювана колонка версії з Layout = 1 (@rc) маршрутизується так само (власник - той самий).
-            SET @routed = CASE WHEN @mr = 1 AND @layout = 0 AND (@colType NOT IN (6, 8) OR (@rc = 1 AND @colType = 6))
+            SET @routed = CASE WHEN @mr = 1 AND @layout = 0 AND (@colType NOT IN (6, 8) OR (@rc = 1 AND @colType IN (6, 8)))
                                     AND (@isMonth = 0 OR @monthNo BETWEEN 1 AND 12) THEN 1 ELSE 0 END;
             SET @rcCol = CASE WHEN @routed = 1 AND @colType IN (6, 8) THEN 1 ELSE 0 END;
 
@@ -674,6 +674,23 @@ LEFT JOIN doc.CellValue AS ' + @alias + N' ON ' + @alias + N'.PeriodKey = r.Peri
                 -- (nvarchar-пакет x 40 колонок Calculated давав "worktable ... exceeds 8060").
                 SET @rvExprs = @rvExprs + N', CASE WHEN SUBSTRING(rvx.p' + CAST(@n AS nvarchar(10)) + N', 5, 1) = 0x01 THEN CAST(SUBSTRING(rvx.p'
                              + CAST(@n AS nvarchar(10)) + N', 6, 20) AS decimal(34, 16)) END AS rv' + CAST(@n AS nvarchar(10));
+                -- ✎ L5b: маршрутизована Calculated (рік) - число АКТУАЛЬНОГО ПРОГОНУ ПЕРІОДУ-ВЛАСНИКА (orv нижче, CalculatedCellOverlay L2b:
+                -- місячна m - прогін періоду m, не-місячна - якоря; «свій» екземпляр - оригінал таблиці у власнику), запасне - матеріалізоване
+                -- значення власника. Рядки без маршрутизації (не-місячний проєкт, копія аркуша) - як і раніше: прогін свого періоду (rv)
+                -- і власна копія. Предикатна прив'язка (@rvPred = 1): orv не рахується - число періоду перегляду (rv), запасне -
+                -- матеріалізоване значення власника (D-NEW, відкрите питання в листі готовності).
+                IF @rcCol = 1
+                BEGIN
+                    SET @valueColRv = N'CASE WHEN ' + @owner + N' THEN COALESCE(orv.rv' + CAST(@n AS nvarchar(10)) + N', fam.v' + CAST(@n AS nvarchar(10))
+                                    + N') ELSE COALESCE(' + @rvRef + N'.rv' + CAST(@n AS nvarchar(10)) + N', pc.v' + CAST(@n AS nvarchar(10)) + N') END';
+                    SET @orvIds = @orvIds + N', ' + CAST(@colId AS nvarchar(10));
+                    SET @orvSlots = @orvSlots + N',' + CAST(@n AS nvarchar(10));
+                    SET @orvPack = @orvPack + N', MAX(CASE WHEN q.Slot = ' + CAST(@n AS nvarchar(10)) + N' THEN q.Pack END) AS p' + CAST(@n AS nvarchar(10));
+                    SET @orvExprs = @orvExprs + N', CASE WHEN SUBSTRING(k.p' + CAST(@n AS nvarchar(10)) + N', 5, 1) = 0x01 THEN CAST(SUBSTRING(k.p'
+                                  + CAST(@n AS nvarchar(10)) + N', 6, 20) AS decimal(34, 16)) END AS rv' + CAST(@n AS nvarchar(10));
+                    SET @orvStub = @orvStub + N', CAST(NULL AS decimal(34, 16)) AS rv' + CAST(@n AS nvarchar(10));
+                    SET @orvStubRv = @orvStubRv + N', rv.rv' + CAST(@n AS nvarchar(10)) + N' AS rv' + CAST(@n AS nvarchar(10));
+                END
             END
 
             SET @select = @select + N',
@@ -696,7 +713,8 @@ LEFT JOIN doc.CellValue AS ' + @alias + N' ON ' + @alias + N'.PeriodKey = r.Peri
                AND NOT EXISTS (SELECT 1 FROM cfg.ColumnDef
                                 WHERE TableDefId = @id AND IsDeleted = 0 AND Code = @colCode + N'_Text')
                 SET @selectTextRv = @selectTextRv + N',
-       CASE WHEN ' + CASE WHEN @colType = 8 THEN N'COALESCE(' + @rvRef + N'.rv' + CAST(@n AS nvarchar(10)) + N', ' + @numRef + N')'
+       CASE WHEN ' + CASE WHEN @colType = 8 AND @rcCol = 1 THEN @valueColRv   -- ✎ L5b: підсумкове число власника
+                          WHEN @colType = 8 THEN N'COALESCE(' + @rvRef + N'.rv' + CAST(@n AS nvarchar(10)) + N', ' + @numRef + N')'
                           ELSE @numRef END
                                 + N' IS NULL THEN ' + @strRef + N' END AS '
                                 + QUOTENAME(@colCode + N'_Text');
@@ -811,6 +829,58 @@ OUTER APPLY (SELECT ' + STUFF(@scAggS, 1, 2, N'') + N' FROM doc.CellValue AS x W
         -- so runs are restricted to ti.PeriodKey and the join ru -> cr is forced to LOOP: the optimizer then seeks IX_CalculationResult_DocRun on all
         -- THREE key columns (PeriodKey, DocumentId, CalculationRunId) and reads only the rows of the Current runs. Without the hint the plan seeks
         -- (PeriodKey, DocumentId) and filters the run above the seek, i.e. reads every Superseded run of the document-period (Land: 4.47 M rows).
+        -- ✎ L5b (D-NEW): числа прогонів ВЛАСНИКІВ маршрутизованих Calculated (orv) - ОДИН раз НАБОРОМ по (документ, рік, RowKey), як fam:
+        -- екземпляр-оригінал таблиці у періоді-власнику (мапа слотів fm: Mo = місяць екземпляра або 0 = якір року) -> АКТУАЛЬНИЙ прогін ЦЬОГО
+        -- періоду (документний > проєктний, правило ReadCurrentAsync / EffectiveRuns) -> результати партиції періоду цього прогону для
+        -- прив'язок колонки ({} - уся таблиця). «Свій» > загальний (D-401), TryCombine і найбільший Id прив'язки - як у rv. Рядки без
+        -- маршрутизації (не-місячний проєкт, копія аркуша) orv не читають (умова в ON). Ціна: +9 таблиць; не вміщається в ліміт 250 -
+        -- orv замінює заглушка NULL (лишається матеріалізоване значення власника).
+        SET @orvOn = CASE WHEN @orvPack <> N'' AND @rvIds <> N'' AND @rvPred = 0 AND @n + @extra + 7 + 9 <= 250 THEN 1 ELSE 0 END;
+        IF @orvOn = 1
+            SET @orvText = N'
+LEFT HASH JOIN (SELECT k.DocumentId, k.Yr, k.SourceRowKey' + @orvExprs + N'
+                  FROM (SELECT q.DocumentId, q.Yr, q.SourceRowKey' + @orvPack + N'
+                          FROM (SELECT t.DocumentId, t.Yr, t.SourceRowKey, t.Slot,
+                                       CAST(t.BindingId AS binary(4)) + CAST(CASE WHEN t.Total IS NULL THEN 0 ELSE 1 END AS binary(1))
+                                       + CAST(COALESCE(t.Total, 0) AS binary(20)) AS Pack
+                                  FROM (SELECT g.DocumentId, g.Yr, g.SourceRowKey, g.BindingId, g.Slot,
+                                               CASE WHEN MAX(g.Own) = 1
+                                                    THEN CASE WHEN MAX(CASE WHEN g.Own = 1 THEN g.Amb END) = 1 THEN NULL ELSE SUM(CASE WHEN g.Own = 1 THEN g.SubTotal END) END
+                                                    ELSE CASE WHEN MAX(CASE WHEN g.Own = 0 THEN g.Amb END) = 1 THEN NULL ELSE SUM(CASE WHEN g.Own = 0 THEN g.SubTotal END) END
+                                               END AS Total
+                                          FROM (SELECT u.DocumentId, u.Yr, u.SourceRowKey, u.BindingId, u.Slot, u.Own, MIN(u.Value) AS SubTotal,
+                                                       CASE WHEN MIN(u.Value) <> MAX(u.Value) OR MIN(u.UnitId) <> MAX(u.UnitId) THEN 1 ELSE 0 END AS Amb
+                                                  FROM (SELECT oi.DocumentId, oi.PeriodKey / 100 AS Yr, cr.SourceRowKey, b.Id AS BindingId, fm.Slot,
+                                                               cr.SubstanceEntryId, cr.Value, cr.UnitId,
+                                                               CASE WHEN cr.TableInstanceId IS NULL THEN 0 ELSE 1 END AS Own
+                                                          FROM doc.TableInstance AS oi
+                                                          JOIN doc.Document AS od ON od.Id = oi.DocumentId
+                                                          LEFT JOIN (SELECT ProjectId, PeriodKey / 100 AS Yr, MIN(PeriodKey) AS AnchorKey
+                                                                       FROM doc.Period GROUP BY ProjectId, PeriodKey / 100) AS pa
+                                                                 ON pa.ProjectId = od.ProjectId AND pa.Yr = oi.PeriodKey / 100
+                                                          JOIN rpt.ViewSlot AS fm ON fm.ViewName = ' + @vnLit + N' AND fm.Mo IS NOT NULL
+                                                               AND fm.Slot IN (' + STUFF(@orvSlots, 1, 1, N'') + N')
+                                                               AND ((fm.Mo > 0 AND oi.PeriodKey % 100 = fm.Mo) OR (fm.Mo = 0 AND oi.PeriodKey = pa.AnchorKey))
+                                                          JOIN (SELECT bb.Id, bb.ColumnDefId, bb.OutputCode, mv.Id AS MvId
+                                                                  FROM cfg.CalculationBinding AS bb
+                                                                  JOIN calc.MethodologyVersion AS mv ON mv.MethodologyId = bb.MethodologyId
+                                                                 WHERE bb.IsActive = 1 AND bb.TableDefId = ' + CAST(@id AS nvarchar(10)) + N' AND bb.ColumnDefId IN (' + STUFF(@orvIds, 1, 2, N'') + N')
+                                                                   AND REPLACE(bb.MatchJson, CHAR(32), N'''') = N''{}'') AS b
+                                                               ON b.ColumnDefId = fm.ColumnDefId
+                                                          JOIN calc.CalculationRun AS ru ON ru.ProjectId = od.ProjectId AND ru.Status = N''Current'' AND ru.PeriodKey = oi.PeriodKey
+                                                               AND (ru.DocumentId = od.Id
+                                                                    OR (ru.DocumentId IS NULL AND NOT EXISTS (SELECT 1 FROM calc.CalculationRun AS ru2
+                                                                         WHERE ru2.ProjectId = od.ProjectId AND ru2.Status = N''Current''
+                                                                           AND ru2.DocumentId = od.Id AND ru2.PeriodKey = oi.PeriodKey)))
+                                                          JOIN calc.CalculationResult AS cr ON cr.PeriodKey = oi.PeriodKey AND cr.DocumentId = od.Id AND cr.CalculationRunId = ru.Id
+                                                               AND cr.MethodologyVersionId = b.MvId AND cr.OutputCode = b.OutputCode
+                                                               AND (cr.TableInstanceId = oi.Id OR cr.TableInstanceId IS NULL)
+                                                         WHERE oi.TableDefId = ' + CAST(@id AS nvarchar(10)) + N' AND oi.SheetCopyId IS NULL) AS u
+                                                 GROUP BY u.DocumentId, u.Yr, u.SourceRowKey, u.BindingId, u.Slot, u.Own, u.SubstanceEntryId) AS g
+                                         GROUP BY g.DocumentId, g.Yr, g.SourceRowKey, g.BindingId, g.Slot) AS t) AS q
+                         GROUP BY q.DocumentId, q.Yr, q.SourceRowKey) AS k) AS orv
+       ON ' + @owner + N' AND orv.DocumentId = ti.DocumentId AND orv.Yr = ti.PeriodKey / 100 AND orv.SourceRowKey = r.RowKey';
+
         IF @rvIds <> N'' AND @rvPred = 0 AND @n + @extra + 7 <= 250
         BEGIN
             SET @rowApply = N'
@@ -850,6 +920,13 @@ CROSS APPLY (SELECT r0.Id, r0.RowKey, r0.Ordinal, r0.PeriodKey' + @rvExprs + N'
              WHERE r0.PeriodKey = ti.PeriodKey AND r0.TableInstanceId = ti.Id AND r0.IsDeleted = 0) AS r';
             SET @select = @selectRv;
             SET @extra = @extra + 7;
+            -- ✎ L5b: orv (або заглушка NULL поза ліміту) - лише коли є маршрутизовані Calculated; інакше текст як до L5.
+            IF @orvPack <> N''
+            BEGIN
+                SET @joins = @joins + CASE WHEN @orvOn = 1 THEN @orvText ELSE N'
+CROSS APPLY (SELECT ' + STUFF(@orvStub, 1, 2, N'') + N') AS orv' END;
+                SET @extra = @extra + CASE WHEN @orvOn = 1 THEN 9 ELSE 0 END;
+            END
         END
         ELSE IF @rvIds <> N'' AND @rvPred = 1 AND @n + @extra + 8 <= 250
         BEGIN
@@ -891,6 +968,10 @@ OUTER APPLY (SELECT ' + STUFF(@rvAgg, 1, 2, N'') + N'
                                GROUP BY u.BindingId, u.ColumnDefId, u.Own, u.SubstanceEntryId) AS g
                          GROUP BY g.BindingId, g.ColumnDefId) AS t) AS q) AS rv';
             SET @joins = @joins + @rvApply;
+            -- ✎ L5b: предикатна прив'язка - число періоду перегляду (rv) і в маршрутизованій Calculated (див. вище).
+            IF @orvPack <> N''
+                SET @joins = @joins + N'
+CROSS APPLY (SELECT ' + STUFF(@orvStubRv, 1, 2, N'') + N') AS orv';
             SET @select = @selectRv;
             SET @extra = @extra + 8;
         END
@@ -1626,7 +1707,7 @@ BEGIN
             -- ✎ L5: обчислювана колонка маршрутизується, якщо її Id є у версії з Layout = 1 (Rc).
             SET @routed = CASE WHEN @routedGroup = 1 AND @conflict = 0
                                     AND (@colType NOT IN (6, 8)
-                                         OR (@colType = 6 AND EXISTS (SELECT 1 FROM @cid AS k JOIN @ci AS c ON c.ColId = k.ColId WHERE c.Rc = 1)))
+                                         OR (@colType IN (6, 8) AND EXISTS (SELECT 1 FROM @cid AS k JOIN @ci AS c ON c.ColId = k.ColId WHERE c.Rc = 1)))
                                     AND (@isMonth = 0 OR @monthNo BETWEEN 1 AND 12) THEN 1 ELSE 0 END;
             SET @rcCol = CASE WHEN @routed = 1 AND @colType IN (6, 8) THEN 1 ELSE 0 END;
             -- Q-17.slotmap: кожен Id коду (з аліасами) - рядок мапи у слоті @n; Mo - лише для маршрутизованої колонки
@@ -1741,6 +1822,20 @@ BEGIN
                 SET @rvPack = @rvPack + N', MAX(CASE WHEN ' + REPLACE(@inTpl, N'#c#', N'q.ColumnDefId') + N' THEN q.Pack END) AS p' + CAST(@n AS nvarchar(10));
                 SET @rvExprs = @rvExprs + N', CASE WHEN SUBSTRING(rvx.p' + CAST(@n AS nvarchar(10)) + N', 5, 1) = 0x01 THEN CAST(SUBSTRING(rvx.p'
                              + CAST(@n AS nvarchar(10)) + N', 6, 20) AS decimal(34, 16)) END AS rv' + CAST(@n AS nvarchar(10));
+                -- ✎ L5b: a routed Calculated column (year layout) - the number of the OWNER period's Current run (orv below), fallback the owner's
+                -- materialised value; rows without routing - the own period's run (rv) and the own copy, as before; predicate bindings
+                -- (@rvPred = 1) - the view period's number (rv), as in the _vN proc.
+                IF @rcCol = 1
+                BEGIN
+                    SET @valueColRv = N'CASE WHEN ' + @owner + N' THEN COALESCE(orv.rv' + CAST(@n AS nvarchar(10)) + N', fam.v' + CAST(@n AS nvarchar(10))
+                                    + N') ELSE COALESCE(' + @rvRef + N'.rv' + CAST(@n AS nvarchar(10)) + N', pc.v' + CAST(@n AS nvarchar(10)) + N') END';
+                    SET @orvIds = @orvIds + N', ' + @allIds;
+                    SET @orvSlots = @orvSlots + N',' + CAST(@n AS nvarchar(10));
+                    SET @orvPack = @orvPack + N', MAX(CASE WHEN q.Slot = ' + CAST(@n AS nvarchar(10)) + N' THEN q.Pack END) AS p' + CAST(@n AS nvarchar(10));
+                    SET @orvExprs = @orvExprs + N', CASE WHEN SUBSTRING(k.p' + CAST(@n AS nvarchar(10)) + N', 5, 1) = 0x01 THEN CAST(SUBSTRING(k.p'
+                                  + CAST(@n AS nvarchar(10)) + N', 6, 20) AS decimal(34, 16)) END AS rv' + CAST(@n AS nvarchar(10));
+                    SET @orvStub = @orvStub + N', rv.rv' + CAST(@n AS nvarchar(10)) + N' AS rv' + CAST(@n AS nvarchar(10));   -- @rvPred = 1
+                END
             END
 
             SET @select = @select + N',
@@ -1751,7 +1846,8 @@ BEGIN
                 SET @selectText = @selectText + N',
        CASE WHEN ' + @numRef + N' IS NULL THEN ' + @strRef + N' END AS ' + QUOTENAME(@colCode + N'_Text');
                 SET @selectTextRv = @selectTextRv + N',
-       CASE WHEN ' + CASE WHEN @colType = 8 THEN N'COALESCE(' + @rvRef + N'.rv' + CAST(@n AS nvarchar(10)) + N', ' + @numRef + N')' ELSE @numRef END
+       CASE WHEN ' + CASE WHEN @colType = 8 AND @rcCol = 1 THEN @valueColRv   -- ✎ L5b: the owner's final number
+                          WHEN @colType = 8 THEN N'COALESCE(' + @rvRef + N'.rv' + CAST(@n AS nvarchar(10)) + N', ' + @numRef + N')' ELSE @numRef END
                                 + N' IS NULL THEN ' + @strRef + N' END AS ' + QUOTENAME(@colCode + N'_Text');
             END
             SET @selectRv = @selectRv + N',
@@ -1889,6 +1985,57 @@ CROSS APPLY (SELECT r0.Id, r0.RowKey, r0.Ordinal, r0.PeriodKey' + @rvExprs + N'
                   GROUP BY q.SourceRowKey) AS rvx ON rvx.SourceRowKey = r0.RowKey
              WHERE r0.PeriodKey = ti.PeriodKey AND r0.TableInstanceId = ti.Id AND r0.IsDeleted = 0) AS r';
             SET @select = @selectRv;
+            -- ✎ L5b: owner-period run numbers of the routed Calculated columns (orv), the same set-based read as in the _vN proc: the sheet
+            -- ORIGINAL instance of a Layout = 1 table in the owner period (slot map fm, scope of the project), the Current run of THAT period,
+            -- the bindings of the instance's own version. Without routed Calculated columns the text is as before L5.
+            IF @orvPack <> N''
+                SET @joins = @joins + N'
+LEFT HASH JOIN (SELECT k.DocumentId, k.Yr, k.SourceRowKey' + @orvExprs + N'
+                  FROM (SELECT q.DocumentId, q.Yr, q.SourceRowKey' + @orvPack + N'
+                          FROM (SELECT t.DocumentId, t.Yr, t.SourceRowKey, t.Slot,
+                                       CAST(t.BindingId AS binary(4)) + CAST(CASE WHEN t.Total IS NULL THEN 0 ELSE 1 END AS binary(1))
+                                       + CAST(COALESCE(t.Total, 0) AS binary(20)) AS Pack
+                                  FROM (SELECT g.DocumentId, g.Yr, g.SourceRowKey, g.BindingId, g.Slot,
+                                               CASE WHEN MAX(g.Own) = 1
+                                                    THEN CASE WHEN MAX(CASE WHEN g.Own = 1 THEN g.Amb END) = 1 THEN NULL ELSE SUM(CASE WHEN g.Own = 1 THEN g.SubTotal END) END
+                                                    ELSE CASE WHEN MAX(CASE WHEN g.Own = 0 THEN g.Amb END) = 1 THEN NULL ELSE SUM(CASE WHEN g.Own = 0 THEN g.SubTotal END) END
+                                               END AS Total
+                                          FROM (SELECT u.DocumentId, u.Yr, u.SourceRowKey, u.BindingId, u.Slot, u.Own, MIN(u.Value) AS SubTotal,
+                                                       CASE WHEN MIN(u.Value) <> MAX(u.Value) OR MIN(u.UnitId) <> MAX(u.UnitId) THEN 1 ELSE 0 END AS Amb
+                                                  FROM (SELECT oi.DocumentId, oi.PeriodKey / 100 AS Yr, cr.SourceRowKey, b.Id AS BindingId, fm.Slot,
+                                                               cr.SubstanceEntryId, cr.Value, cr.UnitId,
+                                                               CASE WHEN cr.TableInstanceId IS NULL THEN 0 ELSE 1 END AS Own
+                                                          FROM doc.TableInstance AS oi
+                                                          JOIN doc.Document AS od ON od.Id = oi.DocumentId'
+                    + CASE WHEN @scopeC = N'' THEN N'' ELSE N'
+                                                          LEFT JOIN rpt.ViewProjectScope AS ovps ON ovps.TemplateId = ' + CAST(COALESCE(@tid, 0) AS nvarchar(10))
+                                                          + N' AND ovps.ProjectId = od.ProjectId' END + N'
+                                                          LEFT JOIN (SELECT ProjectId, PeriodKey / 100 AS Yr, MIN(PeriodKey) AS AnchorKey
+                                                                       FROM doc.Period GROUP BY ProjectId, PeriodKey / 100) AS pa
+                                                                 ON pa.ProjectId = od.ProjectId AND pa.Yr = oi.PeriodKey / 100
+                                                          JOIN rpt.ViewSlot AS fm ON fm.ViewName = ' + @vnLit + N' AND fm.Mo IS NOT NULL
+                                                               AND fm.Slot IN (' + STUFF(@orvSlots, 1, 1, N'') + N')
+                                                               AND ((fm.Mo > 0 AND oi.PeriodKey % 100 = fm.Mo) OR (fm.Mo = 0 AND oi.PeriodKey = pa.AnchorKey))'
+                    + CASE WHEN @scopeC = N'' THEN N'' ELSE N' AND fm.Scope IN (0, COALESCE(ovps.Scope, 0))' END + N'
+                                                          JOIN (SELECT bb.Id, bb.TableDefId, bb.ColumnDefId, bb.OutputCode, mv.Id AS MvId
+                                                                  FROM cfg.CalculationBinding AS bb
+                                                                  JOIN calc.MethodologyVersion AS mv ON mv.MethodologyId = bb.MethodologyId
+                                                                 WHERE bb.IsActive = 1 AND bb.ColumnDefId IN (' + STUFF(@orvIds, 1, 2, N'') + N')
+                                                                   AND REPLACE(bb.MatchJson, CHAR(32), N'''') = N''{}'') AS b
+                                                               ON b.ColumnDefId = fm.ColumnDefId AND b.TableDefId = oi.TableDefId
+                                                          JOIN calc.CalculationRun AS ru ON ru.ProjectId = od.ProjectId AND ru.Status = N''Current'' AND ru.PeriodKey = oi.PeriodKey
+                                                               AND (ru.DocumentId = od.Id
+                                                                    OR (ru.DocumentId IS NULL AND NOT EXISTS (SELECT 1 FROM calc.CalculationRun AS ru2
+                                                                         WHERE ru2.ProjectId = od.ProjectId AND ru2.Status = N''Current''
+                                                                           AND ru2.DocumentId = od.Id AND ru2.PeriodKey = oi.PeriodKey)))
+                                                          JOIN calc.CalculationResult AS cr ON cr.PeriodKey = oi.PeriodKey AND cr.DocumentId = od.Id AND cr.CalculationRunId = ru.Id
+                                                               AND cr.MethodologyVersionId = b.MvId AND cr.OutputCode = b.OutputCode
+                                                               AND (cr.TableInstanceId = oi.Id OR cr.TableInstanceId IS NULL)
+                                                         WHERE oi.TableDefId IN (' + COALESCE(@rcTids, N'0') + N') AND oi.SheetCopyId IS NULL) AS u
+                                                 GROUP BY u.DocumentId, u.Yr, u.SourceRowKey, u.BindingId, u.Slot, u.Own, u.SubstanceEntryId) AS g
+                                         GROUP BY g.DocumentId, g.Yr, g.SourceRowKey, g.BindingId, g.Slot) AS t) AS q
+                         GROUP BY q.DocumentId, q.Yr, q.SourceRowKey) AS k) AS orv
+       ON ' + @owner + N' AND orv.DocumentId = ti.DocumentId AND orv.Yr = ti.PeriodKey / 100 AND orv.SourceRowKey = r.RowKey';
         END
         ELSE IF @rvIds <> N'' AND @rvPred = 1
         BEGIN
@@ -1930,6 +2077,10 @@ OUTER APPLY (SELECT ' + STUFF(@rvAgg, 1, 2, N'') + N'
                                GROUP BY u.BindingId, u.ColumnDefId, u.Own, u.SubstanceEntryId) AS g
                          GROUP BY g.BindingId, g.ColumnDefId) AS t) AS q' + @spJoin + N') AS rv';
             SET @joins = @joins + @rvApply;
+            -- ✎ L5b: predicate bindings - the view period's number (rv) in routed Calculated columns too.
+            IF @orvPack <> N''
+                SET @joins = @joins + N'
+CROSS APPLY (SELECT ' + STUFF(@orvStub, 1, 2, N'') + N') AS orv';
             SET @select = @selectRv;
         END
 
