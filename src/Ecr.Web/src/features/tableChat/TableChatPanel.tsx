@@ -27,6 +27,12 @@ export interface TableChatPanelProps {
   readonly onClose: (refocus: boolean) => void;
   /** Opened by a human action (the button/badge), not from the address on load: take the focus. */
   readonly takeFocus: boolean;
+  /**
+   * ✎ LAND-YEAR L7a (item 18 of the plan): the document is a year (`YearWithMonthColumns`) — one copy for the whole
+   * year, so "this period only" would show the anchor month's messages only. No filter: every message, each tagged with
+   * its month (`ChatMessageItem`). A new message is still written in the document period (the anchor).
+   */
+  readonly yearLayout?: boolean;
 }
 
 /** The edit window is checked against the wall clock; the panel re-renders it this often. */
@@ -47,7 +53,14 @@ const MarkReadDelayMs = 800;
  * ⛔ Non-modal `aside` (like the inspector, not a `Drawer`): the grid behind stays alive. The window polls only
  * while this component is mounted — the host unmounts it on close — and not while the tab is hidden.
  */
-export function TableChatPanel({ documentId, periodKey, table, onClose, takeFocus }: TableChatPanelProps): JSX.Element {
+export function TableChatPanel({
+  documentId,
+  periodKey,
+  table,
+  onClose,
+  takeFocus,
+  yearLayout = false,
+}: TableChatPanelProps): JSX.Element {
   const session = useSession();
   const me = session.data?.userId;
   const queryClient = useQueryClient();
@@ -58,7 +71,7 @@ export function TableChatPanel({ documentId, periodKey, table, onClose, takeFocu
   const key = chatKey(table.tableCode, sheetCopyId);
 
   const [filter, setFilter] = useState<'all' | 'period'>('all');
-  const chat = useChatWindow(documentId, table.tableCode, sheetCopyId, filter === 'period' ? periodKey : null);
+  const chat = useChatWindow(documentId, table.tableCode, sheetCopyId, filter === 'period' && !yearLayout ? periodKey : null);
   const { state } = chat;
 
   const periodText = formatPeriodKey(periodKey);
@@ -294,6 +307,7 @@ export function TableChatPanel({ documentId, periodKey, table, onClose, takeFocu
         </ActionIcon>
       </div>
 
+      {!yearLayout && (
       <div className="ecr-chat-filter" role="group" aria-label={t('tableChat.periodFilter')}>
         <Button
           size="xs"
@@ -314,6 +328,7 @@ export function TableChatPanel({ documentId, periodKey, table, onClose, takeFocu
           {t('tableChat.thisPeriod', { period: periodText })}
         </Button>
       </div>
+      )}
 
       <div
         ref={scroller}

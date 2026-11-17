@@ -30,6 +30,7 @@ import {
 import { formatDateOnly } from '@/shared/format/dateOnly';
 import { formatDateTime } from '@/shared/format/datetime';
 import { formatPeriodKey } from '@/shared/format/periodKey';
+import { yearLabel } from '@/features/documents/yearLayout';
 import { formatCount } from '@/shared/format/plural';
 import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -108,6 +109,12 @@ function asTab(value: string | null): InspectorTab | null {
 export interface DocumentInspectorProps {
   readonly documentId: number;
   readonly periodKey: number;
+  /**
+   * ✎ LAND-YEAR L7b: документ «рік» (`YearWithMonthColumns`): шапка й Issues називають рік, кожне зауваження — свій
+   * місяць (`periodKey` прогону з `GET validation?year=true`), журнал аркуша — усі місяці з позначкою, Info — місяць-власник
+   * комірки і зауваження таблиці за рік. Не задано — копія на місяць, усе як раніше.
+   */
+  readonly yearLayout?: boolean;
   /** Структура документа з `GET …/tables` — ЛИШЕ видимі людині таблиці. */
   readonly tables: readonly DocumentTableDto[];
   /** Зауваження останньої перевірки; `null` — не перевіряли. */
@@ -138,6 +145,7 @@ export interface DocumentInspectorProps {
 export function DocumentInspector({
   documentId,
   periodKey,
+  yearLayout = false,
   tables,
   messages,
   onSelectFinding,
@@ -301,6 +309,9 @@ export function DocumentInspector({
   };
   const onSelectIssue = useCallback((finding: ValidationFindingDto) => selectLatest.current(finding), []);
 
+  // ✎ LAND-YEAR L7b: документ «рік» — «Year 2026» замість місяця-якоря («January 2026» читалося як «показано січень»).
+  const periodLabel = yearLayout ? yearLabel(periodKey) : formatPeriodKey(periodKey) || String(periodKey);
+
   const cell = useInspectedCell();
   const cellTable =
     cell === null || cell.periodKey !== periodKey
@@ -341,7 +352,7 @@ export function DocumentInspector({
               {/* ✎ UAT 08.11 (d5): шапка називає період, ЗА ЯКИЙ показано все нижче, — той самий `periodKey`, що й
                   сітка й перевірка; комірка іншого періоду тут не показується (`shownCell`). */}
               <span className="ecr-insp-chip" data-inspector-period={periodKey}>
-                {formatPeriodKey(periodKey) || String(periodKey)}
+                {periodLabel}
               </span>
               {shownCell !== null && (
                 // ✎ UAT 08.11 (d5): чип показував «rowKey · columnCode», а в місячних таблицях код колонки — назва
@@ -401,14 +412,17 @@ export function DocumentInspector({
                 rowLabels={rowLabels}
                 onSelect={onSelectIssue}
                 onSplit={onSplitIssue}
-                checkedPeriod={formatPeriodKey(periodKey) || String(periodKey)}
+                checkedPeriod={periodLabel}
                 checkedAt={checkedAt}
+                yearLayout={yearLayout}
               />
             </Tabs.Panel>
             <Tabs.Panel value="history" className="ecr-insp-body">
               <HistoryTab
                 documentId={documentId}
                 periodKey={periodKey}
+                periodLabel={periodLabel}
+                yearLayout={yearLayout}
                 cell={shownCell}
                 sheet={sheet}
                 mode={historyMode}
@@ -417,7 +431,13 @@ export function DocumentInspector({
               />
             </Tabs.Panel>
             <Tabs.Panel value="info" className="ecr-insp-body">
-              <InfoTab documentId={documentId} periodKey={periodKey} cell={shownCell} table={cellTable} />
+              <InfoTab
+                documentId={documentId}
+                periodKey={periodKey}
+                cell={shownCell}
+                table={cellTable}
+                {...(yearLayout ? { year: { messages } } : {})}
+              />
             </Tabs.Panel>
           </Tabs>
         </aside>
@@ -612,6 +632,7 @@ const IssuesTab = memo(function IssuesTab({
   onSplit,
   checkedPeriod,
   checkedAt,
+  yearLayout,
 }: {
   groups: readonly InspectorIssueGroup[] | null;
   rowLabels: ReadonlyMap<string, string>;
@@ -620,6 +641,8 @@ const IssuesTab = memo(function IssuesTab({
   onSplit: (finding: ValidationFindingDto) => void;
   checkedPeriod: string;
   checkedAt: Date | null;
+  /** ✎ LAND-YEAR L7b: документ «рік» — кожне зауваження називає місяць прогону, що його дав. */
+  yearLayout: boolean;
 }): JSX.Element {
   // Скільки показано в кожній групі; свіжа перевірка (нові `groups`) починає знову з першої порції.
   const [shown, setShown] = useState<{ of: typeof groups; by: Readonly<Record<string, number>> }>({
@@ -696,6 +719,11 @@ const IssuesTab = memo(function IssuesTab({
                   <span className="ecr-insp-chip" {...(rowName === undefined ? {} : { title: addressChip(finding.rowKey, finding.columnCode) })}>
                     {addressChip(rowName ?? finding.rowKey, finding.columnCode)}
                   </span>
+                  {yearLayout && finding.periodKey != null && (
+                    <span className="ecr-insp-chip" data-inspector-finding-period={finding.periodKey}>
+                      {formatPeriodKey(finding.periodKey) || String(finding.periodKey)}
+                    </span>
+                  )}
                   <span title={finding.ruleCode}>{finding.displayCode ?? ruleLabel(finding.ruleCode)}</span>
                   <StatusBadge kind="severity" state={finding.severity} quiet />
                 </span>
@@ -756,6 +784,8 @@ export type HistoryMode = 'sheet' | 'cell';
 function HistoryTab({
   documentId,
   periodKey,
+  periodLabel,
+  yearLayout,
   cell,
   sheet,
   mode,
@@ -764,6 +794,8 @@ function HistoryTab({
 }: {
   documentId: number;
   periodKey: number;
+  periodLabel: string;
+  yearLayout: boolean;
   cell: InspectedCell | null;
   sheet: InspectorSheet | null;
   mode: HistoryMode;
@@ -771,7 +803,7 @@ function HistoryTab({
   onOpenCell: ((target: SheetLogTarget) => void) | undefined;
 }): JSX.Element {
   const effective: HistoryMode = mode === 'cell' && cell !== null ? 'cell' : 'sheet';
-  const period = formatPeriodKey(periodKey) || String(periodKey);
+  const period = periodLabel;
   const scope =
     effective === 'cell' && cell !== null
       ? t('inspector.history.scopeCell', {
@@ -807,7 +839,7 @@ function HistoryTab({
       {effective === 'cell' ? (
         <CellHistory documentId={documentId} periodKey={periodKey} cell={cell} />
       ) : (
-        <SheetLog documentId={documentId} periodKey={periodKey} sheet={sheet} onOpenCell={onOpenCell} />
+        <SheetLog documentId={documentId} periodKey={periodKey} sheet={sheet} onOpenCell={onOpenCell} year={yearLayout} />
       )}
     </div>
   );
@@ -949,11 +981,17 @@ function InfoTab({
   periodKey,
   cell,
   table,
+  year,
 }: {
   documentId: number;
   periodKey: number;
   cell: InspectedCell | null;
   table: DocumentTableDto | undefined;
+  /**
+   * ✎ LAND-YEAR L7a (п. 7 плану): документ «рік» — `messages` річного результату перевірки (`null` — не перевіряли).
+   * Не задано — копія на місяць: стан таблиці за період перегляду, як і раніше.
+   */
+  year?: { readonly messages: readonly ValidationFindingDto[] | null };
 }): JSX.Element {
   // ⚠ Той самий ключ запиту, що в `SheetFillSummary`: зайвого запиту немає.
   const status = useTableStatus(documentId, periodKey);
@@ -962,7 +1000,9 @@ function InfoTab({
     return <Empty title={t('inspector.noCellTitle')} hint={t('inspector.noCellHint')} />;
   }
 
-  const tableStatus = status.data?.find((row) => row.tableDefId === table.tableDefId);
+  // ✎ LAND-YEAR L7a: рік — зауваження таблиці за ВСІ місяці (агрегат річного результату, той самий, що в Issues), а не
+  // лише прогону якоря з `tables/status`; `null` — не перевіряли (`—`).
+  const tableStatus = year === undefined ? status.data?.find((row) => row.tableDefId === table.tableDefId) : yearTableIssues(year.messages, table.tableDefId);
 
   const items: KeyValueItem[] = [
     { label: t('inspector.info.cell'), value: addressChip(cell.rowKey, cell.columnCode), mono: true },
@@ -985,6 +1025,15 @@ function InfoTab({
           : t('inspector.info.inputManual'),
     },
     { label: t('inspector.info.value'), value: cell.value.length === 0 ? null : cell.value, mono: true },
+    // ✎ LAND-YEAR L7a: рік — ЧИЯ комірка: місячна колонка належить своєму місяцю, решта — році (якорю, річний агрегат).
+    ...(year === undefined
+      ? []
+      : [
+          {
+            label: t('inspector.info.period'),
+            value: cell.ownerPeriodKey == null ? yearLabel(periodKey) : formatPeriodKey(cell.ownerPeriodKey) || String(cell.ownerPeriodKey),
+          },
+        ]),
     { label: t('inspector.info.table'), value: tableTitleOf(table) },
     {
       label: t('inspector.info.tableIssues'),
@@ -1020,6 +1069,20 @@ function InfoTab({
       </Suspense>
     </Box>
   );
+}
+
+/** ✎ LAND-YEAR L7a: помилки й попередження таблиці в річному результаті перевірки; `null` — не перевіряли. */
+function yearTableIssues(
+  messages: readonly ValidationFindingDto[] | null,
+  tableDefId: number,
+): { errorCount: number | null; warningCount: number | null } {
+  if (messages === null) return { errorCount: null, warningCount: null };
+  const own = messages.filter((message) => message.tableDefId === tableDefId);
+
+  return {
+    errorCount: own.filter((message) => message.severity === 'Error').length,
+    warningCount: own.filter((message) => message.severity === 'Warning').length,
+  };
 }
 
 function Empty({ title, hint }: { title: string; hint: string }): JSX.Element {

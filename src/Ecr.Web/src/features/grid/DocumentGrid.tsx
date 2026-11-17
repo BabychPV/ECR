@@ -3283,6 +3283,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           rows={rows}
           labelProp={RowLabelProp}
           pending={pending}
+          columnMonths={columnMonths}
         />
       )}
 

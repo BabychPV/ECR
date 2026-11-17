@@ -51,7 +51,13 @@ import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showApiError } from '@/shared/ui/notify';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { useProjectCurrentPeriodDefault } from '@/features/documents/useProjectCurrentPeriodDefault';
-import { isYearLayout, yearAggregatePeriodState, yearAnchorCalendar } from '@/features/documents/yearLayout';
+import {
+  isYearLayout,
+  yearAggregatePeriodState,
+  yearAnchorCalendar,
+  yearAnchorOf,
+  yearAnchors,
+} from '@/features/documents/yearLayout';
 import { AllMonthsLink, YearLayoutChips } from '@/features/calcResults/DocumentResultsLinks';
 import { SheetStrip } from '@/features/documents/SheetStrip';
 import { copyFieldsOf, sheetTabKey } from '@/features/documents/sheetCopies/sheetCopyTypes';
@@ -321,11 +327,19 @@ export function DocumentPage(): JSX.Element {
    * можна — зелений напис під документом, якого ніхто не перевіряв,
    * повідомляє неправду про готовність.
    */
+  /*
+   * ✎ LAND-YEAR L7b: документ «рік» (`YearWithMonthColumns`) — Issues за ВСІ місяці року: `year=true` віддає останні
+   * результати перевірки кожного місяця разом, кожне зауваження з `periodKey` прогону (сервер L6, дедуплікація там).
+   * Доти Issues показував лише прогін якоря — зауваження, знайдені в жовтні, не було видно ніде. Ключ — під тим самим
+   * префіксом `['validation', id, period]`, тож скидання після дій (дозвіл, перевірка) зачіпає обидва. Копія на місяць —
+   * запит і ключ як були.
+   */
+  const yearDocument = isYearLayout(summary.data?.templateLayout);
   const lastValidation = useQuery({
-    queryKey: ['validation', documentId, periodKey],
+    queryKey: yearDocument ? ['validation', documentId, periodKey, 'year'] : ['validation', documentId, periodKey],
     queryFn: () =>
       apiFetch<ValidationResultResponse>(
-        `/api/v1/documents/${documentId}/validation?periodKey=${periodKey}`,
+        `/api/v1/documents/${documentId}/validation?periodKey=${periodKey}${yearDocument ? '&year=true' : ''}`,
       ),
     retry: false,
   });
@@ -382,7 +396,13 @@ export function DocumentPage(): JSX.Element {
       ),
     onSuccess: (result, target) => {
       setFresh({ scope: target.scope, result, at: new Date() });
-      setValidatedSeq((value) => value + 1);
+      // ✎ LAND-YEAR L7b: документ «рік» — прогін пише результат ОДНОГО періоду (якоря), а Issues показує рік: спершу
+      // перечитати річний результат (у ньому вже цей прогін), потім сигнал інспектору — інакше він рахував би старе.
+      if (yearDocument) {
+        void lastValidation.refetch().then(() => setValidatedSeq((value) => value + 1));
+      } else {
+        setValidatedSeq((value) => value + 1);
+      }
 
       const errors = result.messages.filter((message) => message.severity === 'Error');
 
@@ -409,8 +429,9 @@ export function DocumentPage(): JSX.Element {
    */
   // ✎ F13 p223 (1): a permit change re-runs the stored check on the server and refetches it — a stored result read AFTER
   // this tab's own run is newer and wins (else Issues kept the undone change's PERMIT-SPLIT).
+  // ✎ LAND-YEAR L7b: документ «рік» — свіжий прогін (лише якір) не підміняє річний перелік; його вже перечитано вище.
   const freshForScope =
-    fresh?.scope === scope && !(lastValidation.data?.validated === true && lastValidation.dataUpdatedAt > fresh.at.getTime())
+    !yearDocument && fresh?.scope === scope && !(lastValidation.data?.validated === true && lastValidation.dataUpdatedAt > fresh.at.getTime())
       ? fresh.result
       : null;
   const shownValidation =
@@ -614,8 +635,8 @@ export function DocumentPage(): JSX.Element {
   });
 
   // ✎ D-474, п. 5: документ із розкладкою «рік, місяці в колонках» — одна копія на рік; без `?periodKey` він
-  // відкривається на якорі року поточного періоду, а не на поточному місяці. Явний `?periodKey` (смуга року в переліку,
-  // посилання) лишається як є: Submit/Reopen за місяцем працюють від нього.
+  // відкривається на якорі року поточного періоду, а не на поточному місяці. ✎ LAND-YEAR L7a: явний `?periodKey`
+  // місяця теж веде на якір (`yearAnchorOf` нижче); подання за місяцем — власний вибір цілі (`submission-target`).
   const yearLayout = isYearLayout((summary.data ?? baseSummary.data)?.templateLayout);
   useProjectCurrentPeriodDefault(
     urlPeriod,
@@ -628,11 +649,27 @@ export function DocumentPage(): JSX.Element {
     () => calendar.data?.periods?.map((period) => period.periodKey).sort((a, b) => a - b),
     [calendar.data],
   );
-  const lastValidPeriod = projectPeriods?.[projectPeriods.length - 1] ?? null;
+  // ✎ LAND-YEAR L7a: документ «рік» вибирає лише якорі років — місяць такого документа не окрема копія (п. 2 плану:
+  // запасний вибір періоду теж без місяців).
+  const pickablePeriods = yearLayout ? yearAnchors(projectPeriods) : projectPeriods;
+  const lastValidPeriod = pickablePeriods?.[pickablePeriods.length - 1] ?? null;
   const nearestValid =
     periodRejected && projectPeriods !== undefined && !projectPeriods.includes(periodKey)
       ? nearestPeriod(projectPeriods, periodKey)
       : null;
+
+  /*
+   * ✎ LAND-YEAR L7a (п. 1 плану): документ «рік» — одна копія на рік, тож будь-який `?periodKey` місяця (смуга року в
+   * переліку, посилання, закладка, згадка в чаті) веде на ЯКІР року (найменший місяць року в календарі, як на сервері).
+   * Доти `?periodKey=202609` відкривав ту саму річну сітку «за вересень»: шапка, Issues, журнали й перевірка жили в
+   * іншому періоді, ніж показувала людина сусідові, — і це був той самий перемикач місяця, лише через адресу.
+   * ⚠ Календар ще не прийшов або місяців цього року в ньому немає — нікуди не ведемо (`yearAnchorOf` → `null`).
+   * Копія на місяць — без змін.
+   */
+  const yearAnchor = yearLayout ? yearAnchorOf(projectPeriods, periodKey) : null;
+  useEffect(() => {
+    if (yearAnchor !== null && yearAnchor !== periodKey) setPeriodKey(yearAnchor);
+  }, [yearAnchor, periodKey, setPeriodKey]);
 
   // Адреса з періодом поза проєктом (сервер його відхилив) сама веде на найближчий допустимий; кнопка в стані
   // помилки нижче - запасний шлях, якщо календар не завантажився.
@@ -776,7 +813,8 @@ export function DocumentPage(): JSX.Element {
   });
 
   // «History» і «Compare versions» — пункти «More» + лінивий діалог (макет: блоків між шапкою й сіткою немає).
-  const documentLog = useDocumentLogActions({ documentId, periodKey });
+  // ✎ LAND-YEAR L7b: документ «рік» — журнал переходів усіх місяців року, згрупований за місяцем.
+  const documentLog = useDocumentLogActions({ documentId, periodKey, year: yearLayout });
 
   const staleReminderHost = useStaleResultsReminderHost(documentId);
   // ✎ ui-sheet-bottom (рішення людини 28.10): назва пункту «More» («Recalculate calculations») бере застарілість з
@@ -799,7 +837,9 @@ export function DocumentPage(): JSX.Element {
 
   // PERIODNAV: період поза проєктом - не глухий кут: повідомлення сервера лишається, а поруч - перехід до
   // найближчого допустимого періоду й вибір періоду (лише з переліку проєкту).
-  const recoveryTarget = nearestValid ?? lastValidPeriod;
+  // ✎ LAND-YEAR L7a: документ «рік» — і кнопка переходу, і вибір ведуть на якір року, не на місяць.
+  const recoveryTarget =
+    (yearLayout && nearestValid !== null ? yearAnchorOf(projectPeriods, nearestValid) : nearestValid) ?? lastValidPeriod;
   const recovery =
     periodRejected && projectPeriods !== undefined && recoveryTarget !== null ? (
       <Stack data-testid="period-recovery">
@@ -809,7 +849,7 @@ export function DocumentPage(): JSX.Element {
             {t('document.periodGoTo', { period: formatPeriodKey(recoveryTarget) })}
           </Button>
           <Suspense fallback={periodPickerFallback}>
-            <PeriodPicker size="xs" miw={110} value={periodKey} periods={projectPeriods} onChange={(value) => setPeriodKey(value ?? periodKey)} />
+            <PeriodPicker size="xs" miw={110} value={periodKey} periods={pickablePeriods} onChange={(value) => setPeriodKey(value ?? periodKey)} />
           </Suspense>
         </Group>
       </Stack>
@@ -877,7 +917,7 @@ export function DocumentPage(): JSX.Element {
               ✎ D-474, п. 5: розкладка «рік» — одна копія, перемикача місяця немає. */
           yearLayout ? (
             // CALC-RESULTS (макет, варіант A): «Year YYYY» і «Calculated: <місяць>» замість перемикача місяця.
-            <YearLayoutChips periodKey={periodKey} periods={projectPeriods} onPick={setPeriodKey} />
+            <YearLayoutChips periodKey={periodKey} />
           ) : (
           <Suspense fallback={periodPickerFallback}>
             <PeriodPicker
@@ -926,6 +966,7 @@ export function DocumentPage(): JSX.Element {
             resultsStaleSince={document.resultsStaleSince ?? null}
             staleReminderHost={staleReminderHost}
             periodAction={periodReopen.lockAction}
+            yearLayout={yearLayout}
             status={
               <>
                 {/* ✎ UI-15: чип стану аркуша і заповненість одним рядком
@@ -975,7 +1016,9 @@ export function DocumentPage(): JSX.Element {
       {/* ⛔ `F-18`: ЧОМУ тут нічого не змінити — одразу під рядком дій, до
           будь-якої сітки: сірі комірки без пояснення читаються як збій.
           ✎ UI-26: за наявного аркуша банер малює панель дій (з контекстом). */}
-      {active === undefined && <DocumentLockBanner lock={lock} periodKey={periodKey} periodAction={periodReopen.lockAction} />}
+      {active === undefined && (
+        <DocumentLockBanner lock={lock} periodKey={periodKey} periodAction={periodReopen.lockAction} yearLayout={yearLayout} />
+      )}
 
       {periodReopen.banner}
       {periodReopen.dialog}
@@ -1107,9 +1150,10 @@ export function DocumentPage(): JSX.Element {
         <DocumentInspector
           documentId={documentId}
           periodKey={periodKey}
+          yearLayout={yearLayout}
           tables={tables.data ?? []}
           messages={shownValidation?.messages ?? null}
-          checkedAt={validationCheckedAt(fresh?.scope === scope ? fresh : null, lastValidation.data)}
+          checkedAt={validationCheckedAt(!yearDocument && fresh?.scope === scope ? fresh : null, lastValidation.data)}
           validatedSeq={validatedSeq}
           extraTriggers={
             <Suspense fallback={null}>
@@ -1160,6 +1204,7 @@ export function DocumentPage(): JSX.Element {
         <TableChatHost
           documentId={documentId}
           periodKey={periodKey}
+          yearLayout={yearLayout}
           tables={tables.data ?? []}
           activeTables={active?.tables ?? []}
         />
@@ -1312,7 +1357,10 @@ export function DocumentPage(): JSX.Element {
           просто не малюється. Знайдено проходом інтерфейсу як користувач
           (`docs/build/UI-WALKTHROUGH.md`, F2): жоден компонентний тест цього
           не бачив, бо кожен із них монтує панель напряму. */}
-      {can(session.data, 'Calculation.View') && (
+      {/* ✎ LAND-YEAR L7a (п. 9 плану): документ «рік» — числа методологій УЖЕ в місячних колонках аркуша (накладення
+          за власником, L2b), а панель показувала б прогін одного якоря під виглядом «результатів документа». Усі місяці —
+          «All months» у смузі таблиці (сторінка результатів за рік лишається). Копія на місяць — панель як була. */}
+      {can(session.data, 'Calculation.View') && !yearLayout && (
         <Suspense fallback={null}>
           <CalculationResultsPanel documentId={documentId} periodKey={periodKey} />
         </Suspense>

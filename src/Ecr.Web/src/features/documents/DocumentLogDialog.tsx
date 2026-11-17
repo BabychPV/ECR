@@ -20,11 +20,14 @@ export function DocumentLogDialog({
   kind,
   documentId,
   periodKey,
+  year = false,
   onClose,
 }: {
   readonly kind: DocumentLogKind;
   readonly documentId: number;
   readonly periodKey: number;
+  /** ✎ LAND-YEAR L7b: документ «рік» — журнал переходів за всі місяці року, згрупований за місяцем. */
+  readonly year?: boolean;
   readonly onClose: () => void;
 }): JSX.Element {
   useReturnFocusOnUnmount();
@@ -38,7 +41,7 @@ export function DocumentLogDialog({
       data-testid={`document-log-dialog-${kind}`}
     >
       {kind === 'history' ? (
-        <WorkflowHistory embedded documentId={documentId} periodKey={periodKey} />
+        <WorkflowHistory embedded documentId={documentId} periodKey={periodKey} year={year} />
       ) : (
         <DocumentVersionCompare embedded documentId={documentId} periodKey={periodKey} />
       )}

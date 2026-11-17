@@ -100,10 +100,12 @@ export interface TableChatHostProps {
   readonly tables: readonly DocumentTableDto[];
   /** Tables of the active sheet — the fallback binding. */
   readonly activeTables: readonly DocumentTableDto[];
+  /** ✎ LAND-YEAR L7a: the document is a year (YearWithMonthColumns): the panel has no "this period" filter. */
+  readonly yearLayout?: boolean;
 }
 
 /** Mounts the panel while `?panel=discussion` is in the address. */
-export function TableChatHost({ documentId, periodKey, tables, activeTables }: TableChatHostProps): JSX.Element | null {
+export function TableChatHost({ documentId, periodKey, tables, activeTables, yearLayout = false }: TableChatHostProps): JSX.Element | null {
   const [panel, setPanel] = useUrlState('panel');
   const table = useChatTable(tables, activeTables, periodKey);
 
@@ -123,6 +125,7 @@ export function TableChatHost({ documentId, periodKey, tables, activeTables }: T
     <PanelMount
       documentId={documentId}
       periodKey={periodKey}
+      yearLayout={yearLayout}
       table={table}
       onClose={(refocus) => {
         setPanel(null);
@@ -136,11 +139,13 @@ export function TableChatHost({ documentId, periodKey, tables, activeTables }: T
 function PanelMount({
   documentId,
   periodKey,
+  yearLayout,
   table,
   onClose,
 }: {
   readonly documentId: number;
   readonly periodKey: number;
+  readonly yearLayout: boolean;
   readonly table: DocumentTableDto;
   readonly onClose: (refocus: boolean) => void;
 }): JSX.Element {
@@ -149,7 +154,14 @@ function PanelMount({
 
   return (
     <Suspense fallback={null}>
-      <TableChatPanel documentId={documentId} periodKey={periodKey} table={table} onClose={onClose} takeFocus={takeFocus} />
+      <TableChatPanel
+        documentId={documentId}
+        periodKey={periodKey}
+        yearLayout={yearLayout}
+        table={table}
+        onClose={onClose}
+        takeFocus={takeFocus}
+      />
     </Suspense>
   );
 }

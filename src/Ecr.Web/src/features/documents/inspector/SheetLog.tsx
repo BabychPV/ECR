@@ -1,6 +1,7 @@
 import { useState, type JSX } from 'react';
 import { Badge, Box, Button, Checkbox, Group, Text } from '@mantine/core';
 import { auditValueText } from '@/features/audit/auditValue';
+import { formatPeriodKey } from '@/shared/format/periodKey';
 import { useSheetActivity, type SheetActivityItem } from '@/features/workflow/api';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
@@ -32,6 +33,12 @@ export interface SheetLogProps {
   readonly sheet: InspectorSheet | null;
   /** Клік по рядку правки веде в комірку; `undefined` - рядки не клікабельні. */
   readonly onOpenCell?: ((target: SheetLogTarget) => void) | undefined;
+  /**
+   * ✎ LAND-YEAR L7b (п. 6 плану): документ «рік» (`YearWithMonthColumns`) — журнал УСІХ місяців року, злитий сервером
+   * за часом (`?year=true`), і кожен рядок називає свій місяць: правка вересня в журналі «за рік» без назви місяця
+   * читалася б як правка якоря. Копія на місяць — журнал одного періоду, як і раніше, без позначки.
+   */
+  readonly year?: boolean;
 }
 
 /**
@@ -45,9 +52,9 @@ export interface SheetLogProps {
  * Додавання й видалення рядків (`kind: RowChange`, `action: RowAdded | RowDeleted`) сервер веде в `aud.RowChange`
  * лише для таблиць, які читач бачить; клієнт лише показує їх (таблиця · ключ рядка), без значень комірок.
  */
-export function SheetLog({ documentId, periodKey, sheet, onOpenCell }: SheetLogProps): JSX.Element {
+export function SheetLog({ documentId, periodKey, sheet, onOpenCell, year = false }: SheetLogProps): JSX.Element {
   const [includeSystem, setIncludeSystem] = useState(false);
-  const log = useSheetActivity(documentId, sheet?.sheetDefId ?? 0, periodKey, includeSystem, sheet !== null);
+  const log = useSheetActivity(documentId, sheet?.sheetDefId ?? 0, periodKey, includeSystem, sheet !== null, year);
 
   if (sheet === null) {
     return <Empty title={t('inspector.sheetHistoryTitle')} hint={t('inspector.sheetHistoryEmpty')} />;
@@ -87,7 +94,7 @@ export function SheetLog({ documentId, periodKey, sheet, onOpenCell }: SheetLogP
         <div role="list" aria-label={t('inspector.sheetHistoryTitle')}>
           {items.map((item, index) => (
             // Рядок не має власного id: перелік лише читається й дочитується з кінця - позиція чесний ключ.
-            <SheetLogRow key={index} item={item} sheetCode={sheet.code} onOpenCell={onOpenCell} />
+            <SheetLogRow key={index} item={item} sheetCode={sheet.code} onOpenCell={onOpenCell} year={year} />
           ))}
         </div>
       )}
@@ -113,20 +120,32 @@ function SheetLogRow({
   item,
   sheetCode,
   onOpenCell,
+  year,
 }: {
   item: SheetActivityItem;
   sheetCode: string;
   onOpenCell: ((target: SheetLogTarget) => void) | undefined;
+  year: boolean;
 }): JSX.Element {
+  const month = year ? <MonthTag periodKey={item.periodKey} /> : null;
   if (item.kind === 'CellEdit') {
-    return <CellEditRow item={item} sheetCode={sheetCode} onOpenCell={onOpenCell} />;
+    return <CellEditRow item={item} sheetCode={sheetCode} onOpenCell={onOpenCell} month={month} />;
   }
 
-  return item.kind === 'RowChange' ? <RowChangeRow item={item} /> : <WorkflowRow item={item} />;
+  return item.kind === 'RowChange' ? <RowChangeRow item={item} month={month} /> : <WorkflowRow item={item} month={month} />;
+}
+
+/** ✎ LAND-YEAR L7b: місяць рядка журналу року («September 2026») — назвою, як у чаті таблиці. */
+function MonthTag({ periodKey }: { periodKey: number }): JSX.Element {
+  return (
+    <Text size="xs" c="dimmed" data-inspector-log-period={periodKey}>
+      {formatPeriodKey(periodKey) || String(periodKey)}
+    </Text>
+  );
 }
 
 /** Додано / видалено рядок: дія, час, виконавець, таблиця · ключ рядка, походження. */
-function RowChangeRow({ item }: { item: SheetActivityItem }): JSX.Element {
+function RowChangeRow({ item, month }: { item: SheetActivityItem; month: JSX.Element | null }): JSX.Element {
   const where = [localized(item.tableNameL10n) || (item.tableCode ?? ''), item.rowKey ?? '']
     .filter((part) => part.length > 0)
     .join(' · ');
@@ -141,6 +160,7 @@ function RowChangeRow({ item }: { item: SheetActivityItem }): JSX.Element {
           <Timestamp value={item.at} />
         </Text>
       </Group>
+      {month}
       <Text size="xs" c="dimmed" data-inspector-author="">
         {actorOf(item)}
       </Text>
@@ -180,10 +200,12 @@ function CellEditRow({
   item,
   sheetCode,
   onOpenCell,
+  month,
 }: {
   item: SheetActivityItem;
   sheetCode: string;
   onOpenCell: ((target: SheetLogTarget) => void) | undefined;
+  month: JSX.Element | null;
 }): JSX.Element {
   const rowKey = item.rowKey ?? '';
   const columnCode = item.columnCode ?? '';
@@ -207,6 +229,7 @@ function CellEditRow({
           <Timestamp value={item.at} />
         </Text>
       </Group>
+      {month}
       <Text size="xs" c="dimmed" style={{ overflowWrap: 'anywhere' }} data-inspector-cell-where="">
         {where}
       </Text>
@@ -255,7 +278,7 @@ function CellEditRow({
   );
 }
 
-function WorkflowRow({ item }: { item: SheetActivityItem }): JSX.Element {
+function WorkflowRow({ item, month }: { item: SheetActivityItem; month: JSX.Element | null }): JSX.Element {
   const reason = item.reason ?? '';
   const clipped = reason.length > SheetLogReasonMax ? `${reason.slice(0, SheetLogReasonMax)}…` : reason;
 
@@ -269,6 +292,7 @@ function WorkflowRow({ item }: { item: SheetActivityItem }): JSX.Element {
           <Timestamp value={item.at} />
         </Text>
       </Group>
+      {month}
       <Text size="xs" c="dimmed">
         {actorOf(item)}
       </Text>
