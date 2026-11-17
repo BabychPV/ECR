@@ -79,7 +79,7 @@ public sealed partial class AirLimitsImportHttpTests
         var replies = await Task.WhenAll(Task.Run(() => PutAsync(first, raced, key)), Task.Run(() => PutAsync(second, raced, key)));
         foreach (var reply in replies)
         {
-            output.WriteLine($"RACE import-profiles {(int)reply.Status} {reply.Text}");
+            output.WriteLine($"RACE import-profiles {(int)reply.Status} {reply.Error?.GetProperty("errorCode").GetString()} {reply.Error?.GetProperty("messageKey").GetString()}");
         }
 
         Assert.True(meeting.Overlapped, "import-profiles: запити не зустрілися на вході конвеєра");

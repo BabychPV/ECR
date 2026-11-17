@@ -635,6 +635,12 @@ public sealed class UnitOfWork(
                 });
         }
 
+        // ⛔ B158 (лінія d): довідники, профілі імпорту, версії звітів, групові призначення, перейменування ролі.
+        if (DuplicateRefusalsAdmin.TryMap(ex) is { } admin)
+        {
+            return admin;
+        }
+
         foreach (var entry in ex.Entries)
         {
             switch (entry.Entity)

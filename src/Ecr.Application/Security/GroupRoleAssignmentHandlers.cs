@@ -115,21 +115,7 @@ public sealed partial class AssignGroupRoleHandler(
                 });
         }
 
-        var existing = (await users.ListGroupRoleAssignmentsAsync(ct).ConfigureAwait(false))
-            .Where(a => string.Equals(a.PrincipalSid, sid, StringComparison.OrdinalIgnoreCase))
-            .ToList();
-
-        if (existing.Exists(a => a.RoleId == roleId))
-        {
-            throw new BusinessRuleException(
-                ErrorCodes.SecurityConflict, $"Роль «{role.Code}» уже призначена групі {sid}.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-SEC-0409.groupAssignmentExists",
-                    ["code"] = role.Code,
-                    ["sid"] = sid,
-                });
-        }
+        var existing = await RefuseIfAssignedAsync(role.Code, roleId, sid, ct).ConfigureAwait(false);
 
         // ⛔ ФВ-6.14: область перевіряється ДО запису — існування проєкту й
         // право ним керувати (`RoleAssignmentScopeRules`).
@@ -145,35 +131,70 @@ public sealed partial class AssignGroupRoleHandler(
         users.AddGroupAssignment(assignment);
 
         // ⛔ C4: подія й призначення — одним комітом; область дії — в події.
-        await uow.ExecuteInTransactionAsync(
-            async token =>
-            {
-                await audit.WriteSecurityEventAsync(
-                    new SecurityEventRecord(
-                        clock.UtcNow,
-                        "GroupRoleAssigned",
-                        TargetUserId: null,
-                        TargetRoleId: roleId,
-                        DetailsJson: JsonSerializer.Serialize(
-                            new
-                            {
-                                role = role.Code, sid, name, validFrom, validTo, dangerous,
-                                scope = domainScope?.ProjectIds,
+        try
+        {
+            await uow.ExecuteInTransactionAsync(
+                async token =>
+                {
+                    await audit.WriteSecurityEventAsync(
+                        new SecurityEventRecord(
+                            clock.UtcNow,
+                            "GroupRoleAssigned",
+                            TargetUserId: null,
+                            TargetRoleId: roleId,
+                            DetailsJson: JsonSerializer.Serialize(
+                                new
+                                {
+                                    role = role.Code, sid, name, validFrom, validTo, dangerous,
+                                    scope = domainScope?.ProjectIds,
 
-                                // D-214: звуження — окремо, форма `scope` та сама.
-                                sheets = domainScope is { SheetCodes.Count: > 0 } ? domainScope.SheetCodes : null,
-                                periodFrom = domainScope?.PeriodFrom?.Value,
-                                periodTo = domainScope?.PeriodTo?.Value,
-                            }),
-                        ChangedByUserId: profile.UserId,
-                        CorrelationId: currentUser.CorrelationId),
-                    token).ConfigureAwait(false);
+                                    // D-214: звуження — окремо, форма `scope` та сама.
+                                    sheets = domainScope is { SheetCodes.Count: > 0 } ? domainScope.SheetCodes : null,
+                                    periodFrom = domainScope?.PeriodFrom?.Value,
+                                    periodTo = domainScope?.PeriodTo?.Value,
+                                }),
+                            ChangedByUserId: profile.UserId,
+                            CorrelationId: currentUser.CorrelationId),
+                        token).ConfigureAwait(false);
 
-                await uow.SaveChangesAsync(token).ConfigureAwait(false);
-            },
-            ct).ConfigureAwait(false);
+                    await uow.SaveChangesAsync(token).ConfigureAwait(false);
+                },
+                ct).ConfigureAwait(false);
+        }
+        catch (ConcurrencyConflictException)
+        {
+            // ⛔ B158 d7. Перелік вище читається без блокування: два одночасні однакові призначення проходять його обидва,
+            // і другого відбиває `UQ_RoleAssignment_Sid` (арм `DuplicateRefusalsAdmin` — загальний 409: код ролі рядок
+            // призначення не несе). Перечитуємо тією самою перевіркою — клієнт бачить ту саму відмову, що й послідовний
+            // повтор; призначення немає (інший конфлікт) — загальний 409 як є.
+            _ = await RefuseIfAssignedAsync(role.Code, roleId, sid, ct).ConfigureAwait(false);
+            throw;
+        }
 
         return new GroupRoleAssignedResult(assignment.Id, sid, name, EffectiveAfterNextSignIn: existing.Count == 0);
+    }
+
+    /// <summary>Призначення групи <paramref name="sid"/>; роль уже призначена їй — <c>ECR-SEC-0409 groupAssignmentExists</c>.</summary>
+    private async Task<List<GroupRoleAssignmentView>> RefuseIfAssignedAsync(
+        string roleCode, int roleId, string sid, CancellationToken ct)
+    {
+        var existing = (await users.ListGroupRoleAssignmentsAsync(ct).ConfigureAwait(false))
+            .Where(a => string.Equals(a.PrincipalSid, sid, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (existing.Exists(a => a.RoleId == roleId))
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.SecurityConflict, $"Роль «{roleCode}» уже призначена групі {sid}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-SEC-0409.groupAssignmentExists",
+                    ["code"] = roleCode,
+                    ["sid"] = sid,
+                });
+        }
+
+        return existing;
     }
 
     /// <summary>SID і (якщо вдалося) ім'я з того, що набрав адміністратор.</summary>

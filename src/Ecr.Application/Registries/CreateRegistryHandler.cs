@@ -92,7 +92,36 @@ public sealed class CreateRegistryHandler(
         // поля-посилання інших довідників (`RefRegistryDefId`) і колонки
         // шаблону (`Lookup`), і мовчазний другий довідник із тим самим кодом
         // зробив би це посилання неоднозначним.
-        var clash = await registries.FindDefinitionAsync(registryCode.Value, ct).ConfigureAwait(false);
+        await RefuseIfTakenAsync(registryCode.Value, profile, ct).ConfigureAwait(false);
+
+        var definition = new RegistryDef(
+            registryCode,
+            new LocalizedText(new Dictionary<string, string>(name, StringComparer.OrdinalIgnoreCase)),
+            isTemporal);
+
+        registries.AddDefinition(definition);
+
+        try
+        {
+            await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
+        catch (ConcurrencyConflictException)
+        {
+            // ⛔ B158 d1. Перевірка вище читає без блокування: два одночасні запити проходять її обидва, і другого
+            // відбиває `UQ_RegistryDef` (арм `DuplicateRefusalsAdmin` дає загальний 409). `{id}` переможця база не каже —
+            // перечитуємо його тією самою перевіркою, і клієнт бачить ту саму відмову, що й послідовний повтор; код не
+            // зайнятий (інший конфлікт) — загальний 409 як є.
+            await RefuseIfTakenAsync(registryCode.Value, profile, ct).ConfigureAwait(false);
+            throw;
+        }
+
+        return Map(definition);
+    }
+
+    /// <summary>Код зайнятий — <c>ECR-REG-4091 registryCodeTaken</c> (або <c>…Hidden</c> без <c>{id}</c>, L5-08).</summary>
+    private async Task RefuseIfTakenAsync(string code, Security.AccessProfile profile, CancellationToken ct)
+    {
+        var clash = await registries.FindDefinitionAsync(code, ct).ConfigureAwait(false);
         if (clash is not null)
         {
             // ⛔ L5-08: ідентифікатор довідника, закритого цьому читачеві явною забороною, не віддається —
@@ -103,7 +132,7 @@ public sealed class CreateRegistryHandler(
             var details = new Dictionary<string, object?>
             {
                 ["messageKey"] = hidden ? CodeTakenHiddenKey : CodeTakenKey,
-                ["code"] = registryCode.Value,
+                ["code"] = code,
             };
             if (!hidden)
             {
@@ -113,22 +142,12 @@ public sealed class CreateRegistryHandler(
             throw new BusinessRuleException(
                 "ECR-REG-4091",
                 hidden
-                    ? $"Довідник «{registryCode.Value}» уже існує: "
+                    ? $"Довідник «{code}» уже існує: "
                       + "код — те, чим на нього посилаються поля-довідники і колонки шаблону."
-                    : $"Довідник «{registryCode.Value}» уже існує (ідентифікатор {clash.Id}): "
+                    : $"Довідник «{code}» уже існує (ідентифікатор {clash.Id}): "
                       + "код — те, чим на нього посилаються поля-довідники і колонки шаблону.",
                 details);
         }
-
-        var definition = new RegistryDef(
-            registryCode,
-            new LocalizedText(new Dictionary<string, string>(name, StringComparer.OrdinalIgnoreCase)),
-            isTemporal);
-
-        registries.AddDefinition(definition);
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
-
-        return Map(definition);
     }
 
     /// <summary>Складає DTO щойно заведеного довідника — без полів.</summary>

@@ -77,6 +77,7 @@ public sealed class AirImportProfileHandler(
             StringComparer.OrdinalIgnoreCase));
 
         var existing = await profiles.FindAsync(tables.Sources.Id, ecrCode.Value, ct).ConfigureAwait(false);
+        var isNew = existing is null;
         if (existing is null)
         {
             existing = new RegistryImportProfile(tables.Sources.Id, ecrCode, name, spec.ToJson(), userId, clock.UtcNow);
@@ -108,8 +109,10 @@ public sealed class AirImportProfileHandler(
         {
             await uow.SaveChangesAsync(ct).ConfigureAwait(false);
         }
-        catch (ConcurrencyConflictException)
+        catch (ConcurrencyConflictException) when (!isNew)
         {
+            // ⛔ B158 d4: лише правка наявного. Новий профіль, який випередив одночасний запит з тим самим кодом, отримує
+            // від одиниці роботи ту саму відмову, що й послідовний повтор (`profileCodeTaken`), а не «змінено після читання».
             throw Changed(existing.Code);
         }
 

@@ -160,6 +160,7 @@ public sealed class SaveRegistryDefinitionDraftHandler(
 
         // Збереження чернетки перебазовує її на поточну версію: клієнт надсилає
         // ПОВНИЙ стан, прочитаний разом з опублікованим описом.
+        var isNew = draft is null;
         if (draft is null)
         {
             draft = new RegistryDefinitionDraft(
@@ -171,6 +172,27 @@ public sealed class SaveRegistryDefinitionDraftHandler(
             draft.Replace(definition.DefinitionVersion, content, request.Reason, userId, clock.UtcNow);
         }
 
+        try
+        {
+            await SaveAsync(definition, content, request.Reason, userId, ct).ConfigureAwait(false);
+        }
+        catch (ConcurrencyConflictException) when (isNew)
+        {
+            // ⛔ B158 d5. Перша чернетка: «чернетки немає» прочитано без блокування, тож два одночасні перші збереження
+            // проходять перевірку обидва, і другого відбиває `PK_RegistryDefinitionDraft` (арм `DuplicateRefusalsAdmin` —
+            // загальний 409). `{rowVersion}` переможця база не каже: відчіплюємо свою невдалу вставку, перечитуємо чернетку
+            // тією самою перевіркою версії — і клієнт бачить ту саму відмову, що й послідовний повтор.
+            drafts.Remove(draft);
+            RegistryDraft.RequireVersion(
+                await drafts.FindAsync(definition.Id, ct).ConfigureAwait(false), request.RowVersion, definition.Code);
+            throw;
+        }
+
+        return RegistryDraft.ToDto(draft);
+    }
+
+    private async Task SaveAsync(RegistryDef definition, string content, string reason, int userId, CancellationToken ct)
+    {
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
             await audit.WriteStructureChangeAsync(
@@ -183,15 +205,13 @@ public sealed class SaveRegistryDefinitionDraftHandler(
                     Operation: "SaveDefinitionDraft",
                     OldJson: null,
                     NewJson: content,
-                    ChangeReason: request.Reason,
+                    ChangeReason: reason,
                     ChangedByUserId: userId,
                     CorrelationId: currentUser.CorrelationId),
                 innerCt).ConfigureAwait(false);
 
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
-
-        return RegistryDraft.ToDto(draft);
     }
 }
 
