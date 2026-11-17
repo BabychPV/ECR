@@ -134,6 +134,16 @@ public sealed class MethodologyVersionConfiguration : IEntityTypeConfiguration<M
         builder.Property(x => x.EffectiveFrom).HasColumnType("date");
         builder.Property(x => x.ChangeReason).HasMaxLength(1000);
         builder.Property(x => x.ContentHash).HasColumnType("varbinary(32)");
+
+        // MS01: рушій версії і текст скрипта. Лише додавання: наявні рядки лишаються `Formulas`.
+        // ⛔ `ValueGeneratedNever`, як у `TraceLevel`: `Formulas` (= 0, CLR-замовчування) EF вважав би
+        // «незаданим» і підставляв би DEFAULT схеми.
+        builder.Property(x => x.Engine)
+               .HasColumnType("tinyint")
+               .HasDefaultValue(Domain.Enums.MethodologyEngine.Formulas)
+               .ValueGeneratedNever();
+        builder.Property(x => x.ScriptText).HasColumnType("nvarchar(max)");
+        builder.Property(x => x.ScriptHash).HasColumnType("varbinary(32)");
         builder.Property(x => x.CreatedAt).HasColumnType("datetime2(3)").IsRequired();
         builder.Property(x => x.PublishedAt).HasColumnType("datetime2(3)");
 
@@ -412,6 +422,26 @@ public sealed class MethodologyOutputConfiguration : IEntityTypeConfiguration<Me
                .HasConstraintName("FK_MO_Version");
         builder.HasOne<Unit>().WithMany().HasForeignKey(x => x.UnitId)
                .HasConstraintName("FK_MO_Unit");
+    }
+}
+
+/// <summary>Конфігурація <see cref="MethodologyReadTable"/> — таблиці, які читає скрипт версії (MS01).</summary>
+public sealed class MethodologyReadTableConfiguration : IEntityTypeConfiguration<MethodologyReadTable>
+{
+    /// <inheritdoc />
+    public void Configure(EntityTypeBuilder<MethodologyReadTable> builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        builder.ToTable("MethodologyReadTable", "calc");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.TableCode).HasMaxLength(128).IsRequired();
+
+        builder.HasIndex(x => new { x.MethodologyVersionId, x.TableCode })
+               .IsUnique().HasDatabaseName("UQ_MethodologyReadTable");
+
+        builder.HasOne<MethodologyVersion>().WithMany().HasForeignKey(x => x.MethodologyVersionId)
+               .HasConstraintName("FK_MRT_Version");
     }
 }
 

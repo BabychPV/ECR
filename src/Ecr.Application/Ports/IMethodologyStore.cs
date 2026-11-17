@@ -1,6 +1,7 @@
 // src/Ecr.Application/Ports/IMethodologyStore.cs
 
 using Ecr.Domain.Entities.Calculations;
+using Ecr.Domain.Enums;
 
 namespace Ecr.Application.Ports;
 
@@ -142,6 +143,40 @@ public interface IMethodologyStore
 
     /// <summary>Оголошені виходи версії — з обов'язковими одиницями (ФВ-16.6).</summary>
     public Task<IReadOnlyList<MethodologyOutput>> GetOutputsAsync(int methodologyVersionId, CancellationToken ct);
+
+    /// <summary>
+    /// Текст скрипта версії й усе, що потрібне для його компіляції (MS, план 5.3).
+    /// </summary>
+    /// <param name="methodologyVersionId">Версія методології.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>
+    /// <c>null</c> — версії немає або в неї немає тексту скрипта (порожній текст — теж «немає»).
+    /// Текст читається незалежно від <c>Engine</c>: «тіньовий» скрипт формульної версії теж видно.
+    /// </returns>
+    public Task<MethodologyScript?> GetScriptAsync(int methodologyVersionId, CancellationToken ct);
+
+    /// <summary>
+    /// Повністю замінює перелік таблиць, які читає скрипт версії (<c>calc.MethodologyReadTable</c>).
+    /// </summary>
+    /// <param name="versionId">Версія методології.</param>
+    /// <param name="tableCodes">Коди таблиць; дублікати без урахування регістру зливаються.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Задача заміни; збереження робить <c>IUnitOfWork</c> — у транзакції матеріалізації.</returns>
+    public Task ReplaceScriptReadTablesAsync(int versionId, IReadOnlyList<string> tableCodes, CancellationToken ct);
+
+    /// <summary>
+    /// Методології, що мають ОПУБЛІКОВАНУ або ВИВЕДЕНУ З ОБІГУ версію, яка читає бодай одну з
+    /// названих таблиць.
+    /// </summary>
+    /// <param name="tableCodes">Коди таблиць (порівняння без урахування регістру).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Різні ідентифікатори методологій за зростанням; порожньо — ніхто не читає.</returns>
+    /// <remarks>
+    /// ⚠ Для перерахунку і позначки «результати застаріли»: правка в чужій таблиці-джерелі
+    /// мусить потягнути методології-читачі. Чернетки не враховуються — вони нічого не рахували.
+    /// </remarks>
+    public Task<IReadOnlyList<int>> GetMethodologyIdsReadingTablesAsync(
+        IReadOnlyCollection<string> tableCodes, CancellationToken ct);
 
     /// <summary>
     /// Обов'язкові вхідні колонки версії — gate перед збереженням клітинки
@@ -341,6 +376,19 @@ public sealed record MethodologyLibrary(
     string MethodologyCode,
     int? MethodologyVersionId,
     IReadOnlyList<string> FormulaCodes);
+
+/// <summary>Скрипт версії методології з режимами, потрібними для компіляції (MS, план 5.3).</summary>
+/// <param name="Text">Текст скрипта.</param>
+/// <param name="Hash">SHA-256 тексту; <c>null</c> — ще не порахований.</param>
+/// <param name="Engine">Рушій версії.</param>
+/// <param name="IsLibrary">Методологія має вид <c>Library</c>.</param>
+/// <param name="NumericMode">Арифметичний режим версії.</param>
+public sealed record MethodologyScript(
+    string Text,
+    byte[]? Hash,
+    MethodologyEngine Engine,
+    bool IsLibrary,
+    NumericMode NumericMode);
 
 /// <summary>
 /// Імпорт, розв'язаний на дату, разом зі складом обраної версії бібліотеки (HSE301 L).

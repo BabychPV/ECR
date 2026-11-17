@@ -61,7 +61,10 @@ public sealed class GenericCalculationModule(
     public bool CanHandle(MethodologyDescriptor methodology)
     {
         ArgumentNullException.ThrowIfNull(methodology);
-        return methodology.Level == CalculationLevel.Configuration;
+
+        // MS: версії-скрипти рахує окремий модуль; цей лишається для формульних.
+        return methodology.Level == CalculationLevel.Configuration
+               && methodology.Engine == MethodologyEngine.Formulas;
     }
 
     /// <inheritdoc />

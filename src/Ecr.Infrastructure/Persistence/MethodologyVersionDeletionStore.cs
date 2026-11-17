@@ -57,6 +57,7 @@ public sealed class MethodologyVersionDeletionStore(EcrDbContext db) : IMethodol
         children += await db.MethodologySubstances.Where(x => x.MethodologyVersionId == id).ExecuteDeleteAsync(ct).ConfigureAwait(false);
         children += await db.MethodologyCategories.Where(x => x.MethodologyVersionId == id).ExecuteDeleteAsync(ct).ConfigureAwait(false);
         children += await db.MethodologyOutputs.Where(x => x.MethodologyVersionId == id).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+        children += await db.MethodologyReadTables.Where(x => x.MethodologyVersionId == id).ExecuteDeleteAsync(ct).ConfigureAwait(false);
         children += await db.MethodologyTestCases.Where(x => x.MethodologyVersionId == id).ExecuteDeleteAsync(ct).ConfigureAwait(false);
 
         await db.MethodologyVersions.Where(v => v.Id == id).ExecuteDeleteAsync(ct).ConfigureAwait(false);

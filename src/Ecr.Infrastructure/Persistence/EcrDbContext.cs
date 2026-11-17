@@ -205,6 +205,9 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     /// <summary>Перелік категорій констант версії методології (план CONST-CATEGORY).</summary>
     public DbSet<MethodologyCategory> MethodologyCategories => Set<MethodologyCategory>();
     public DbSet<MethodologyOutput> MethodologyOutputs => Set<MethodologyOutput>();
+
+    /// <summary>Коди таблиць, які читає скрипт версії (MS01).</summary>
+    public DbSet<MethodologyReadTable> MethodologyReadTables => Set<MethodologyReadTable>();
     public DbSet<MethodologyRule> MethodologyRules => Set<MethodologyRule>();
 
     /// <summary>Правило категорії константи версії — вираз «рядок → ключ категорії» (L-2, <c>calc.CategoryRule</c>).</summary>

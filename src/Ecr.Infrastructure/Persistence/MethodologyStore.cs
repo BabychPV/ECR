@@ -383,6 +383,87 @@ public sealed class MethodologyStore(EcrDbContext db, int constantCap) : IMethod
     }
 
     /// <inheritdoc />
+    public async Task<MethodologyScript?> GetScriptAsync(int methodologyVersionId, CancellationToken ct)
+    {
+        var row = await (
+                from v in db.MethodologyVersions.AsNoTracking()
+                join m in db.Methodologies.AsNoTracking() on v.MethodologyId equals m.Id
+                where v.Id == methodologyVersionId
+                select new
+                {
+                    v.ScriptText,
+                    v.ScriptHash,
+                    v.Engine,
+                    v.NumericMode,
+                    m.Kind,
+                })
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        return row is { ScriptText: { Length: > 0 } text }
+            ? new MethodologyScript(
+                text, row.ScriptHash, row.Engine, row.Kind == MethodologyKind.Library, row.NumericMode)
+            : null;
+    }
+
+    /// <inheritdoc />
+    public async Task ReplaceScriptReadTablesAsync(
+        int versionId, IReadOnlyList<string> tableCodes, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(tableCodes);
+
+        var existing = await db.MethodologyReadTables
+            .Where(t => t.MethodologyVersionId == versionId)
+            .OrderBy(t => t.Id)
+            .Take(MaxChildren)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        // Регістр не розрізняється: SQL-порівняння за замовчуванням нечутливе, а `UQ_MethodologyReadTable`
+        // відхилив би «T3_00» і «t3_00» як дубль.
+        var wanted = tableCodes
+            .Where(c => !string.IsNullOrWhiteSpace(c))
+            .Select(c => c.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        db.MethodologyReadTables.RemoveRange(
+            existing.Where(e => !wanted.Contains(e.TableCode, StringComparer.OrdinalIgnoreCase)));
+
+        foreach (var code in wanted.Where(
+                     w => !existing.Any(e => string.Equals(e.TableCode, w, StringComparison.OrdinalIgnoreCase))))
+        {
+            db.MethodologyReadTables.Add(new MethodologyReadTable(versionId, code));
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<int>> GetMethodologyIdsReadingTablesAsync(
+        IReadOnlyCollection<string> tableCodes, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(tableCodes);
+        if (tableCodes.Count == 0)
+        {
+            return [];
+        }
+
+        var codes = tableCodes.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+        return await (
+                from r in db.MethodologyReadTables.AsNoTracking()
+                join v in db.MethodologyVersions.AsNoTracking() on r.MethodologyVersionId equals v.Id
+                where codes.Contains(r.TableCode)
+                      && (v.Status == TemplateVersionStatus.Published
+                          || v.Status == TemplateVersionStatus.Deprecated)
+                select v.MethodologyId)
+            .Distinct()
+            .OrderBy(id => id)
+            .Take(MaxChildren)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<MethodologyOutput>> GetOutputsAsync(
         int methodologyVersionId, CancellationToken ct)
         => await db.MethodologyOutputs

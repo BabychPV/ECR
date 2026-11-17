@@ -357,6 +357,7 @@ public sealed class RegistrySnapshotCache(DateTime? registryAsOfUtc)
 /// <param name="NumericMode">Арифметика; <c>Legacy</c> відтворює числа чинної системи.</param>
 /// <param name="CalendarMode">Джерело тривалості періоду.</param>
 /// <param name="TraceLevel">Скільки писати в <c>calc.CalculationStep</c>.</param>
+/// <param name="Engine">Рушій версії; старі версії — <c>Formulas</c> (MS).</param>
 public sealed record MethodologyDescriptor(
     int MethodologyId,
     int MethodologyVersionId,
@@ -365,7 +366,8 @@ public sealed record MethodologyDescriptor(
     CalculationLevel Level,
     NumericMode NumericMode,
     CalendarMode CalendarMode,
-    TraceLevel TraceLevel);
+    TraceLevel TraceLevel,
+    MethodologyEngine Engine = MethodologyEngine.Formulas);
 
 /// <summary>
 /// Вхід розрахунку — <b>один рядок документа</b> з усіма аргументами.

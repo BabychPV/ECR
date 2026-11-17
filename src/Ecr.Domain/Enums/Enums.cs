@@ -572,6 +572,19 @@ public enum RequiredInputSeverity : byte
 }
 
 /// <summary>
+/// Рушій версії методології: формули (кілька типів об'єктів) чи один скрипт.
+/// Старі версії лишаються <c>Formulas</c>, доки їх не перенесено; нові — <c>Script</c>.
+/// </summary>
+public enum MethodologyEngine : byte
+{
+    /// <summary>Формули, константи, правила — як було.</summary>
+    Formulas = 0,
+
+    /// <summary>Текст скрипта (<c>ScriptText</c>).</summary>
+    Script = 1
+}
+
+/// <summary>
 /// Арифметичний режим версії методології (ФВ-9.9). <c>Legacy</c> відтворює
 /// арифметику чинної системи побітово і використовується лише заради сумісності.
 /// </summary>

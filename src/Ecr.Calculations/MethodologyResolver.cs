@@ -131,7 +131,8 @@ public sealed class MethodologyResolver(
                 version.Level,
                 version.NumericMode,
                 version.CalendarMode,
-                version.TraceLevel),
+                version.TraceLevel,
+                version.Engine),
             NoPublishedVersion: false);
     }
 

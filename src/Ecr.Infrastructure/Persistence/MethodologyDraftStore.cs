@@ -524,6 +524,15 @@ public sealed class MethodologyDraftStore(EcrDbContext db) : IMethodologyDraftSt
             db.MethodologyOutputs.Add(clone);
         }
 
+        // MS01: таблиці, які читає скрипт. Матеріалізуються зі скрипта, але клон мусить мати їх
+        // одразу: перерахунок шукає методології-читачі за цими рядками, а не за текстом.
+        foreach (var source in await ChildrenAsync(
+                     db.MethodologyReadTables.Where(t => t.MethodologyVersionId == sourceVersionId), ct)
+                     .ConfigureAwait(false))
+        {
+            db.MethodologyReadTables.Add(new MethodologyReadTable(targetVersionId, source.TableCode));
+        }
+
         foreach (var source in await ChildrenAsync(
                      db.MethodologyTestCases.Where(t => t.MethodologyVersionId == sourceVersionId), ct)
                      .ConfigureAwait(false))
