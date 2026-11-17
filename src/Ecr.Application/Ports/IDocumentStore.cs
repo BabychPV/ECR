@@ -635,6 +635,16 @@ public interface IDocumentStore
     public Task<int?> FindTemplateIdOfVersionAsync(int templateVersionId, CancellationToken ct);
 
     /// <summary>
+    /// ✎ B151: наявний документ шаблону в проєкті, якщо шаблон дозволяє лише ОДИН документ на проєкт;
+    /// <c>null</c> — шаблон дозволяє кілька або документа ще немає.
+    /// </summary>
+    /// <remarks>Лише в транзакції, після блоку рядка проєкту (<see cref="LockProjectTemplateVersionAsync"/>).</remarks>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="templateId">Шаблон документа, що створюється.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<long?> FindDocumentBlockingSingleTemplateAsync(int projectId, int templateId, CancellationToken ct);
+
+    /// <summary>
     /// Версія шаблону ПРОЄКТУ, прочитана ПІД блоком його рядка до кінця транзакції; <c>null</c> —
     /// проєкту немає.
     /// </summary>

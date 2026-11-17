@@ -160,6 +160,9 @@ export type TemplateCard = Schemas['TemplateCard'];
 /** Запит на зміну назви шаблону; коду в ньому немає — він незмінний. */
 export type RenameTemplateRequest = Schemas['RenameTemplateRequest'];
 
+/** B151: правило «один документ на проєкт» шаблону. */
+export type SetTemplateDocumentPolicyRequest = Schemas['SetTemplateDocumentPolicyRequest'];
+
 /** Структура версії шаблону: аркуші, таблиці, колонки. */
 export type TemplateStructureDto = Schemas['TemplateStructureDto'];
 export type PeriodPolicyDto = Schemas['PeriodPolicyDto'];

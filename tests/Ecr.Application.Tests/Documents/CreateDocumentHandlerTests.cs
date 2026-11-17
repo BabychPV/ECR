@@ -226,6 +226,82 @@ public sealed class CreateDocumentHandlerTests
         Assert.Equal(["tx:open", "lock", "add", "tx:commit"], trace);
     }
 
+    /// <summary>
+    /// B151: шаблон «один документ на проєкт», у проєкті вже є документ цього шаблону — 409
+    /// <c>documentExistsForTemplate</c>, нового документа немає; номер наявного — лише тому, хто його бачить.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Мутації: прибрати перевірку в <c>CreateDocumentHandler</c> — документ додається, тест червоний; прибрати
+    /// фільтр <c>CanReadDocumentAsync</c> — номер прихованого документа витікає, червоний сусідній тест.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Finding", "B151")]
+    public async Task Шаблон_один_документ_на_проєкт_другий_документ_не_створюється_409()
+    {
+        SingleTemplateHasDocument(existingId: 500, readable: true);
+
+        var error = await Assert.ThrowsAsync<DomainException>(() => Create(name: null));
+
+        Assert.Equal("ECR-DOC-0409", error.ErrorCode);
+        Assert.Equal("err.ECR-DOC-0409.documentExistsForTemplate", error.Details!["messageKey"]);
+        Assert.Equal("77", error.Details["templateId"]);
+        Assert.Equal("500", error.Details["existingDocumentId"]);
+        Assert.DoesNotContain(
+            _documents.ReceivedCalls(),
+            c => string.Equals(c.GetMethodInfo().Name, nameof(IDocumentStore.AddAsync), StringComparison.Ordinal));
+        await _uow.DidNotReceiveWithAnyArgs().SaveChangesAsync(default);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Finding", "B151")]
+    public async Task Наявний_документ_невидимий_відмова_без_його_номера()
+    {
+        SingleTemplateHasDocument(existingId: 500, readable: false);
+
+        var error = await Assert.ThrowsAsync<DomainException>(() => Create(name: null));
+
+        Assert.Equal("err.ECR-DOC-0409.documentExistsForTemplate", error.Details!["messageKey"]);
+        Assert.False(error.Details.ContainsKey("existingDocumentId"));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Finding", "B151")]
+    public async Task Перевірка_одного_документа_йде_під_блоком_проєкту_до_додавання()
+    {
+        var trace = new List<string>();
+        _documents.FindTemplateIdOfVersionAsync(TemplateVersionId, Arg.Any<CancellationToken>()).Returns(77);
+        _documents.LockProjectTemplateVersionAsync(AccessBuilder.ProjectId, Arg.Any<CancellationToken>())
+            .Returns(_ =>
+            {
+                trace.Add("lock");
+                return Task.FromResult<int?>(TemplateVersionId);
+            });
+        _documents.FindDocumentBlockingSingleTemplateAsync(AccessBuilder.ProjectId, 77, Arg.Any<CancellationToken>())
+            .Returns(_ =>
+            {
+                trace.Add("single");
+                return Task.FromResult<long?>(null);
+            });
+        _documents.When(d => d.AddAsync(Arg.Any<Document>(), Arg.Any<CancellationToken>()))
+            .Do(_ => trace.Add("add"));
+
+        await Create(name: null);
+
+        Assert.Equal(["lock", "single", "add"], trace);
+    }
+
+    private void SingleTemplateHasDocument(long existingId, bool readable)
+    {
+        _documents.FindTemplateIdOfVersionAsync(TemplateVersionId, Arg.Any<CancellationToken>()).Returns(77);
+        _documents.FindDocumentBlockingSingleTemplateAsync(AccessBuilder.ProjectId, 77, Arg.Any<CancellationToken>())
+            .Returns(existingId);
+        _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), existingId, Arg.Any<CancellationToken>())
+            .Returns(readable ? EditDecision.Allow() : EditDecision.Deny(EditDenyReason.NoGrant));
+    }
+
     private async Task<long> Create(IReadOnlyDictionary<string, string>? name)
         => await new CreateDocumentHandler(_metadata, _documents, _templates, _uow, _access, _user, _clock)
             .HandleAsync(AccessBuilder.ProjectId, TemplateVersionId, [SheetId], name, CancellationToken.None);

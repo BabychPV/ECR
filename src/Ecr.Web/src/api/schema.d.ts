@@ -2980,6 +2980,17 @@ export interface paths {
                         "text/plain": components["schemas"]["DocumentIdResponse"];
                     };
                 };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
             };
         };
         delete?: never;
@@ -27239,6 +27250,89 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/templates/{id}/document-policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * ✎ B151: скільки документів шаблону дозволено в проєкті — один чи скільки завгодно. Право `Template.Edit`.
+         * @description Увімкнення «один документ на проєкт», коли в якомусь проєкті документів шаблону вже кілька, —
+         *     `409 ECR-TMPL-0409` (`singleDocumentDuplicates`) з переліком видимих дублікатів.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SetTemplateDocumentPolicyRequest"];
+                    "application/json": components["schemas"]["SetTemplateDocumentPolicyRequest"];
+                    "text/json": components["schemas"]["SetTemplateDocumentPolicyRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TemplateCard"];
+                        "text/json": components["schemas"]["TemplateCard"];
+                        "text/plain": components["schemas"]["TemplateCard"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/templates/{id}/restore": {
         parameters: {
             query?: never;
@@ -40923,6 +41017,11 @@ export interface components {
             /** @description `КОД_ДОВІДНИКА:КОД_ЗАПИСУ`, наприклад `LAND_GENERIC_EQUIPSTATUS:Running`; `null` — зняти. */
             filter: null | string;
         };
+        /** @description ✎ B151: запит на правило «один документ на проєкт». */
+        SetTemplateDocumentPolicyRequest: {
+            /** @description `true` — один документ шаблону на проєкт; `false` — скільки завгодно. */
+            singleDocumentPerProject: boolean;
+        };
         /** @description Розкладка версії-чернетки (D-474). */
         SetTemplateLayoutRequest: {
             /** @description Копія документа на місяць або рік із місяцями в колонках. */
@@ -42570,6 +42669,11 @@ export interface components {
             isActive: boolean;
             /** @description Назва мовами каталогу. */
             nameL10n: components["schemas"]["LocalizedText"];
+            /**
+             * @description ✎ B151: `true` — у проєкті щонайбільше один документ цього шаблону.
+             * @default false
+             */
+            singleDocumentPerProject: boolean;
         };
         /** @description ✎ D-461: формула однієї комірки таблиці в структурі шаблону. */
         TemplateCellFormulaDto: {

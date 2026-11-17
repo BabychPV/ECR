@@ -209,6 +209,74 @@ public sealed class TemplateCardTests(SqlServerFixture sql)
             .GetProperty("isActive").GetBoolean());
     }
 
+    /// <summary>
+    /// B151: <c>PUT /templates/{id}/document-policy</c> — увімкнення «один документ на проєкт» з дублікатами дає
+    /// <c>409 ECR-TMPL-0409 singleDocumentDuplicates</c> і не змінює прапорця; без дублікатів — <c>200</c>, картка
+    /// несе прапорець, подія в журналі безпеки; вимкнення — <c>200</c>.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "B151")]
+    public async Task Правило_один_документ_на_проєкт_з_дублікатами_409_без_них_200()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, ViewPermission, EditPermission).ConfigureAwait(true);
+
+        var duplicated = await ArrangeAsync(versions: 1, published: 1, projects: 1, documentsPerProject: 2)
+            .ConfigureAwait(true);
+
+        var refused = await PolicyAsync(client, duplicated.TemplateId, single: true).ConfigureAwait(true);
+
+        Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
+        var error = await JsonAsync(refused).ConfigureAwait(true);
+        Assert.Equal("ECR-TMPL-0409", error.GetProperty("errorCode").GetString());
+        Assert.Contains("singleDocumentDuplicates", error.GetRawText(), StringComparison.Ordinal);
+        Assert.False((await CardAsync(client, duplicated.TemplateId).ConfigureAwait(true))
+            .GetProperty("singleDocumentPerProject").GetBoolean());
+
+        var clean = await ArrangeAsync(versions: 1, published: 1, projects: 2, documentsPerProject: 1)
+            .ConfigureAwait(true);
+
+        var accepted = await PolicyAsync(client, clean.TemplateId, single: true).ConfigureAwait(true);
+
+        Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+        Assert.True((await JsonAsync(accepted).ConfigureAwait(true)).GetProperty("singleDocumentPerProject").GetBoolean());
+        Assert.NotNull(await SecurityEventAsync(
+            Ecr.Application.Templates.SetTemplateDocumentPolicyHandler.EventType, clean.TemplateId).ConfigureAwait(true));
+
+        var off = await PolicyAsync(client, clean.TemplateId, single: false).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, off.StatusCode);
+        Assert.False((await JsonAsync(off).ConfigureAwait(true)).GetProperty("singleDocumentPerProject").GetBoolean());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "B151")]
+    public async Task Правило_один_документ_без_права_Template_Edit_403_і_неіснуючий_шаблон_404()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var viewer = await SignedInAsync(app, ViewPermission).ConfigureAwait(true);
+
+        var stand = await ArrangeAsync(versions: 1, published: 0, projects: 0, documentsPerProject: 0)
+            .ConfigureAwait(true);
+
+        var forbidden = await PolicyAsync(viewer, stand.TemplateId, single: true).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
+        Assert.False((await CardAsync(viewer, stand.TemplateId).ConfigureAwait(true))
+            .GetProperty("singleDocumentPerProject").GetBoolean());
+
+        using var editor = await SignedInAsync(app, ViewPermission, EditPermission).ConfigureAwait(true);
+        var missing = await PolicyAsync(editor, int.MaxValue, single: true).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
+    }
+
+    private static Task<HttpResponseMessage> PolicyAsync(HttpClient client, int templateId, bool single)
+        => client.PutAsJsonAsync(
+            new Uri($"/api/v1/templates/{templateId}/document-policy", UriKind.Relative),
+            new { singleDocumentPerProject = single });
+
     /// <summary>Що саме заведено для одного тесту.</summary>
     private sealed record Stand(int TemplateId, string Code, IReadOnlyList<int> ProjectIds);
 
@@ -315,7 +383,8 @@ public sealed class TemplateCardTests(SqlServerFixture sql)
                     project.Id,
                     $"{tag}-{i.ToString(CultureInfo.InvariantCulture)}-{d.ToString(CultureInfo.InvariantCulture)}",
                     createdByUserId: 1,
-                    Now));
+                    Now,
+                    templateId: template.Id));
             }
 
             await db.SaveChangesAsync().ConfigureAwait(false);

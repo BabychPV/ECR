@@ -1,5 +1,5 @@
 import { apiFetch } from '@/api/client';
-import type { RenameTemplateRequest, TemplateCard } from '@/api/types';
+import type { RenameTemplateRequest, SetTemplateDocumentPolicyRequest, TemplateCard } from '@/api/types';
 
 /**
  * Картка шаблону: читання, перейменування, архівування (директива №15,
@@ -46,6 +46,19 @@ export function archiveTemplate(templateId: number): Promise<TemplateCard> {
 export function restoreTemplate(templateId: number): Promise<TemplateCard> {
   return apiFetch<TemplateCard>(`/api/v1/templates/${String(templateId)}/restore`, {
     method: 'POST',
+  });
+}
+
+/**
+ * B151: «один документ на проєкт» (`true`) або скільки завгодно (`false`); повертає оновлену картку.
+ *
+ * ⚠ Увімкнення, коли в якомусь проєкті документів шаблону вже кілька, сервер відхиляє з
+ * `409 ECR-TMPL-0409` (`singleDocumentDuplicates`) і прапорця не змінює.
+ */
+export function setTemplateDocumentPolicy(templateId: number, singleDocumentPerProject: boolean): Promise<TemplateCard> {
+  return apiFetch<TemplateCard>(`/api/v1/templates/${String(templateId)}/document-policy`, {
+    method: 'PUT',
+    body: JSON.stringify({ singleDocumentPerProject } satisfies SetTemplateDocumentPolicyRequest),
   });
 }
 

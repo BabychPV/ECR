@@ -153,6 +153,7 @@ public static class DependencyInjection
         services.AddScoped<Templates.GetTemplateCardHandler>();
         services.AddScoped<Templates.RenameTemplateHandler>();
         services.AddScoped<Templates.SetTemplateArchivedHandler>();
+        services.AddScoped<Templates.SetTemplateDocumentPolicyHandler>(); // B151
 
         services.AddScoped<Projects.ListProjectsHandler>();
         services.AddScoped<Projects.CreateProjectHandler>();

@@ -4727,6 +4727,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PUT` | `/api/v1/templates/{id}` | `Template.Edit` | 1 |
 | `POST` | `/api/v1/templates/{id}/archive` | `Template.Edit` | 1 |
 | `POST` | `/api/v1/templates/{id}/restore` | `Template.Edit` | 1 |
+| `PUT` | `/api/v1/templates/{id}/document-policy` | `Template.Edit` | 1 |
 | `GET` | `/api/v1/templates/{id}/versions` | `Template.View` | 1 |
 | `POST` | `/api/v1/templates/{id}/versions` | `Template.Edit` | 1 |
 | `GET` | `/api/v1/templates/versions` | `Template.View` | 1 |

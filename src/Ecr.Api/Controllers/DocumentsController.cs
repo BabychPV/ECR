@@ -161,6 +161,7 @@ public sealed class DocumentsController(
     /// <summary>Створює документ. Право <c>Document.Create</c>.</summary>
     [HttpPost]
     [ProducesResponseType<Contracts.DocumentIdResponse>(StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)] // ✎ B151: documentExistsForTemplate (+ інші 409 створення)
     public async Task<IActionResult> Create([FromBody] CreateDocumentRequest request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
