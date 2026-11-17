@@ -113,11 +113,12 @@ public sealed class CreateUnitHandler(
         {
             await uow.SaveChangesAsync(ct).ConfigureAwait(false);
         }
-        catch (BusinessRuleException lost) when (lost.ErrorCode == ErrorCodes.UnitCodeTaken)
+        catch (ConcurrencyConflictException)
         {
             // ⛔ B158 c1. Перевірка вище читає без блокування: два одночасні запити проходять її обидва, і другого
-            // відбиває `UQ_Unit_Code` (арм `DuplicateCreateRefusals` дає код і ключ). `{id}` переможця база не каже —
-            // перечитуємо його тією самою перевіркою, і клієнт бачить ту саму відмову, що й послідовний повтор.
+            // відбиває `UQ_Unit_Code` (арм `DuplicateCreateRefusals` дає загальний 409). `{id}` переможця база не каже —
+            // перечитуємо його тією самою перевіркою, і клієнт бачить ту саму відмову, що й послідовний повтор; код
+            // не зайнятий (інший конфлікт) — загальний 409 як є.
             await RefuseIfTakenAsync(unitCode.Value, ct).ConfigureAwait(false);
             throw;
         }

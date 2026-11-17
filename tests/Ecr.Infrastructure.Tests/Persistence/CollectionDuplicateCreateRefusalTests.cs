@@ -30,14 +30,14 @@ public sealed class CollectionDuplicateCreateRefusalTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Finding", "B158")]
-    public async Task c1_Дубль_коду_одиниці_дає_unitCodeTaken_а_не_сирий_виняток_бази()
+    public async Task c1_Дубль_коду_одиниці_дає_загальний_409_а_не_сирий_виняток_бази()
     {
+        // Ключ переможця ({id}) база не каже: арм дає загальний 409, повну відмову будує CreateUnitHandler (HTTP-тест c1).
         var code = $"b158u{Guid.NewGuid():N}"[..14];
-        var thrown = await LoseRaceAsync<BusinessRuleException>(db => db.Units.Add(NewUnit(code)));
+        var thrown = await LoseRaceAsync<ConcurrencyConflictException>(db => db.Units.Add(NewUnit(code)));
 
-        Assert.Equal("ECR-UOM-4091", thrown.ErrorCode);
-        Assert.Equal("err.ECR-UOM-4091.unitCodeTaken", thrown.Details!["messageKey"]);
-        Assert.Equal(code, thrown.Details["code"]);
+        Assert.Equal("ECR-CELL-0409", thrown.ErrorCode);
+        Assert.Equal("err.ECR-CELL-0409.concurrentChange", thrown.Details!["messageKey"]);
     }
 
     [Fact]
@@ -70,14 +70,15 @@ public sealed class CollectionDuplicateCreateRefusalTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Finding", "B158")]
-    public async Task c5_Другий_розклад_сутності_дає_collectionScheduleExists_а_не_сирий_виняток_бази()
+    public async Task c5_Другий_розклад_сутності_дає_загальний_409_а_не_сирий_виняток_бази()
     {
+        // Ключ переможця ({scheduleId}) база не каже: повну відмову будує CreateCollectionScheduleHandler (HTTP-тест c5).
         var (_, entityId) = await AddSourceEntityAsync();
         var thrown = await LoseRaceAsync<ConcurrencyConflictException>(
             db => db.CollectionSchedules.Add(new CollectionSchedule(entityId, "0 0 3 1 1 ? 2099")));
 
-        Assert.Equal("ECR-JOB-0409", thrown.ErrorCode);
-        Assert.Equal("err.ECR-JOB-0409.collectionScheduleExists", thrown.Details!["messageKey"]);
+        Assert.Equal("ECR-CELL-0409", thrown.ErrorCode);
+        Assert.Equal("err.ECR-CELL-0409.concurrentChange", thrown.Details!["messageKey"]);
     }
 
     [Fact]

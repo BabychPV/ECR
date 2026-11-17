@@ -16,28 +16,22 @@ namespace Ecr.Infrastructure.Persistence;
 /// запити проходять перевірку обидва, і другого відбиває лише унікальний індекс. Кожен арм — лише СВІЙ індекс (за ім'ям)
 /// і лише доданий/змінений рядок СВОГО типу; код, ключ і аргументи — ті самі, що в перевірки обробника.
 /// ⚠ Де аргумент послідовної відмови — ключ ПЕРЕМОЖЦЯ (одиниця: <c>{id}</c>; розклад: <c>{scheduleId}</c>), база його не
-/// каже: арм дає код і ключ, а обробник, спіймавши саме цю відмову, перечитує переможця й кидає повну
-/// (<c>CreateUnitHandler</c>, <c>CreateCollectionScheduleHandler</c>).
+/// каже, а шаблон без нього показав би фігурні дужки (сторож <c>MessageKeyRatchetTests</c>). Тому арм дає загальний
+/// <c>409 ECR-CELL-0409 concurrentChange</c>, а обробник на цей конфлікт перечитує переможця тією самою перевіркою й кидає
+/// повну послідовну відмову (<c>CreateUnitHandler</c>, <c>CreateCollectionScheduleHandler</c>); шлях без такого обробника
+/// (типовий розклад мапінгу подій) лишається чесним загальним 409.
 /// </remarks>
 internal static class DuplicateCreateRefusals
 {
     /// <summary>Відмова для програшу гонки на одному з індексів лінії c; <c>null</c> — не наш випадок.</summary>
     public static EcrException? TryMap(DbUpdateException ex)
     {
-        // c1. `POST /units` (`CreateUnitHandler`, `FindUnitByCodeAsync`) → `409 ECR-UOM-4091 unitCodeTaken {code}`;
-        // `{id}` переможця додає обробник.
+        // c1. `POST /units` (`CreateUnitHandler`, `FindUnitByCodeAsync`): загальний 409; обробник перечитує переможця і
+        // відповідає `409 ECR-UOM-4091 unitCodeTaken {code, id}`.
         if (SqlConflict.ViolatesIndex(ex, "UQ_Unit_Code")
-            && ex.Entries.FirstOrDefault(e => e.State == EntityState.Added && e.Entity is Unit)
-                is { Entity: Unit unit })
+            && ex.Entries.Any(e => e.State == EntityState.Added && e.Entity is Unit))
         {
-            return new BusinessRuleException(
-                ErrorCodes.UnitCodeTaken,
-                $"Одиниця «{unit.Code}» уже існує.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-UOM-4091.unitCodeTaken",
-                    ["code"] = unit.Code,
-                });
+            return Concurrent("Одиницю з цим кодом щойно завів інший запит.");
         }
 
         // c2. `POST /notifications/channels` і перейменування `PUT …/channels/{id}` (`IsChannelNameTakenAsync`) →
@@ -72,21 +66,22 @@ internal static class DuplicateCreateRefusals
                 });
         }
 
-        // c5. `POST /collection-schedules` (`entity.ScheduleId` з читання без блокування) і типовий розклад мапінгу подій
-        // → `409 ECR-JOB-0409 collectionScheduleExists`; `{scheduleId}` переможця додає обробник.
+        // c5. `POST /collection-schedules` (`entity.ScheduleId` з читання без блокування) і типовий розклад мапінгу подій:
+        // загальний 409; обробник створення перечитує переможця і відповідає `409 ECR-JOB-0409 collectionScheduleExists
+        // {scheduleId}`.
         if (SqlConflict.ViolatesIndex(ex, "UQ_CollectionSchedule")
-            && ex.Entries.FirstOrDefault(e => e.State == EntityState.Added && e.Entity is CollectionSchedule)
-                is { Entity: CollectionSchedule schedule })
+            && ex.Entries.Any(e => e.State == EntityState.Added && e.Entity is CollectionSchedule))
         {
-            return new ConcurrencyConflictException(
-                ErrorCodes.JobStateConflict,
-                $"Сутність джерела {schedule.SourceEntityId} уже має розклад.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-JOB-0409.collectionScheduleExists",
-                });
+            return Concurrent("Розклад цієї сутності джерела щойно завів інший запит.");
         }
 
         return null;
     }
+
+    /// <summary>Загальний конфлікт стану — той самий код і ключ, що й <c>DbUpdateConcurrencyException</c> в одиниці роботи.</summary>
+    private static ConcurrencyConflictException Concurrent(string message)
+        => new(
+            "ECR-CELL-0409",
+            message,
+            new Dictionary<string, object?> { ["messageKey"] = "err.ECR-CELL-0409.concurrentChange" });
 }

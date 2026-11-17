@@ -658,12 +658,12 @@ public sealed class CreateCollectionScheduleHandler(
                     .ConfigureAwait(false);
             }, ct)).ConfigureAwait(false);
         }
-        catch (ConcurrencyConflictException lost) when (IsScheduleExists(lost))
+        catch (ConcurrencyConflictException)
         {
             // ⛔ B158 c5. Перевірка `entity.ScheduleId` вище читає без блокування: два одночасні запити на ту саму
             // сутність проходять її обидва, і другого відбиває `UQ_CollectionSchedule` (арм `DuplicateCreateRefusals`
-            // дає код і ключ). `{scheduleId}` переможця база не каже — перечитуємо сутність і кидаємо ту саму відмову,
-            // що й послідовний повтор.
+            // дає загальний 409). `{scheduleId}` переможця база не каже — перечитуємо сутність і кидаємо ту саму відмову,
+            // що й послідовний повтор; розкладу немає (інший конфлікт) — відмова як є.
             if ((await store.FindSourceEntityAsync(sourceEntityId, ct).ConfigureAwait(false))?.ScheduleId is { } winner)
             {
                 throw ScheduleExists(sourceEntityId, winner);
@@ -680,8 +680,6 @@ public sealed class CreateCollectionScheduleHandler(
                 schedule, entity.Code, entity.Name, entity.DataSourceId, entity.DataSourceCode, entity.SourceKind));
     }
 
-    private const string ScheduleExistsKey = "err.ECR-JOB-0409.collectionScheduleExists";
-
     /// <summary>Сутність уже має розклад — <c>409 ECR-JOB-0409 collectionScheduleExists</c> з його ключем.</summary>
     private static ConcurrencyConflictException ScheduleExists(int sourceEntityId, int scheduleId)
         => new(
@@ -689,16 +687,9 @@ public sealed class CreateCollectionScheduleHandler(
             $"Сутність джерела {sourceEntityId} уже має розклад {scheduleId}.",
             new Dictionary<string, object?>
             {
-                ["messageKey"] = ScheduleExistsKey,
+                ["messageKey"] = "err.ECR-JOB-0409.collectionScheduleExists",
                 ["scheduleId"] = scheduleId.ToString(CultureInfo.InvariantCulture),
             });
-
-    /// <summary>Та сама відмова без ключа переможця — так її дає арм одиниці роботи на <c>UQ_CollectionSchedule</c>.</summary>
-    private static bool IsScheduleExists(ConcurrencyConflictException conflict)
-        => conflict.ErrorCode == ErrorCodes.JobStateConflict
-           && conflict.Details is { } details
-           && details.TryGetValue("messageKey", out var key)
-           && Equals(key, ScheduleExistsKey);
 }
 
 /// <summary>
