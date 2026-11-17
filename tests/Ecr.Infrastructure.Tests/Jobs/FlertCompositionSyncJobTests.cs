@@ -34,7 +34,7 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 /// </para>
 /// </remarks>
 [Collection("SqlServer")]
-public sealed class FlertCompositionSyncJobTests(SqlServerFixture sql)
+public sealed partial class FlertCompositionSyncJobTests(SqlServerFixture sql)
 {
     private static readonly DateTime Now = new(2026, 11, 11, 23, 0, 0, DateTimeKind.Utc);
     private static readonly string[] MirrorCodes = ["STREAM", "STREAM_CASE", "GAS_COMPOSITION"];
