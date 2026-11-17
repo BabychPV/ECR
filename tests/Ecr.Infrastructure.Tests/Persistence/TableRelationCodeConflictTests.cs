@@ -64,23 +64,29 @@ public sealed class TableRelationCodeConflictTests(SqlServerFixture sql)
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var doc = await builder.BuildAsync(ct: ct);
 
-        await using var db = builder.CreateContext();
-        var table = await db.TableDefs.AsNoTracking().SingleAsync(t => t.Id == doc.TableDefId, ct);
-        var sheet = await db.SheetDefs.AsNoTracking().SingleAsync(s => s.Id == table.SheetDefId, ct);
+        var code = $"HG{Guid.NewGuid():N}"[..16].ToUpperInvariant();
+        await using (var seed = builder.CreateContext())
+        {
+            seed.ColumnHeaderGroupDefs.Add(Group(doc.TableDefId, code, 900));
+            await seed.SaveChangesAsync(ct);
+        }
 
-        // Той самий код аркуша в тій самій версії — `UQ_SheetDef`, не `UQ_TableRelationDef`.
-        // ✎ B158 (batch-1117-3): раніше тут був дубль коду ШАБЛОНУ, але `UQ_Template_Code` тепер законно мапить
-        // `TemplateDuplicateKeys` (B158b) — передумова «індекс без арму» застаріла. `UQ_SheetDef` арму не має;
-        // друга перевірка нижче тримає саму передумову: якщо арм для нього з'явиться — тест скаже про це прямо.
-        db.SheetDefs.Add(new SheetDef(
-            sheet.TemplateVersionId, EcrCode.Create(sheet.Code),
-            new LocalizedText(new Dictionary<string, string> { ["en"] = "dup" }), sheet.Ordinal + 100));
+        // Той самий код групи шапки в тій самій таблиці — `UQ_ColumnHeaderGroupDef`, не `UQ_TableRelationDef`.
+        // ✎ B158 (batch-1117-3): раніше тут був дубль коду ШАБЛОНУ, але `UQ_Template_Code` (і структура версії:
+        // `UQ_SheetDef`, `UQ_TableDef`, `UQ_ColumnDef`…) тепер законно мапить `TemplateDuplicateKeys` (B158b) —
+        // передумова «індекс без арму» застаріла. `UQ_ColumnHeaderGroupDef` арму не має в жодному `TryMap`;
+        // остання перевірка тримає саму передумову: з'явиться арм — тест скаже про це прямо, а не мовчки.
+        await using var db = builder.CreateContext();
+        db.ColumnHeaderGroupDefs.Add(Group(doc.TableDefId, code, 901));
 
         var ex = await Assert.ThrowsAnyAsync<Exception>(() => new UnitOfWork(db).SaveChangesAsync(ct));
         Assert.IsNotType<ConcurrencyConflictException>(ex);
         Assert.IsType<DbUpdateException>(ex);
-        Assert.Contains("UQ_SheetDef", ex.GetBaseException().Message, StringComparison.Ordinal);
+        Assert.Contains("UQ_ColumnHeaderGroupDef", ex.GetBaseException().Message, StringComparison.Ordinal);
     }
+
+    private static ColumnHeaderGroupDef Group(int tableDefId, string code, int ordinal)
+        => new(tableDefId, EcrCode.Create(code), new LocalizedText(new Dictionary<string, string> { ["en"] = "dup" }), ordinal);
 
     private static TableRelationDef Relation(string code, int source, int target)
         => new(EcrCode.Create(code), source, target, TableRelationKind.Check, "{}");
