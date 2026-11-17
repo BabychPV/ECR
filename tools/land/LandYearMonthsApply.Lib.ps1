@@ -239,12 +239,12 @@ function Get-LandCarryOverMonthBindings {
         прибраній (м'яко) базовій колонці <код> переноситься на живі місячні колонки <код>_M01..M12 тієї ж таблиці з тими
         самими методологією й виходом. Закриває методології, яких немає в моделі/списку збирача (AU L8 17.11: ECW_C07_07_01,
         ECW_C07_16 - 12 виходів без прив'язок -> L3 bindingsNotMapped).
-        Rows: MethodologyId, OutputCode, TableCode, BaseCode, MonthColumnId (NULL - немає місячних), MonthCode, MonthNumber.
+        BindingRows: MethodologyId, OutputCode, TableCode, BaseCode, MonthColumnId (NULL - немає місячних), MonthCode, MonthNumber.
         Повертає Wanted (за методологією: масив для Set-LandMethodologyBindings), Incomplete (1..11 місяців), NoMonths.
     #>
-    param([object[]]$Rows)
+    param([object[]]$BindingRows)
     $groups = [ordered]@{}
-    foreach ($r in @($Rows | Where-Object { $_ })) {
+    foreach ($r in @($BindingRows | Where-Object { $_ })) {
         $k = "$([int]$r.MethodologyId)|$([string]$r.TableCode)|$([string]$r.BaseCode)|$([string]$r.OutputCode)"
         if (-not $groups.Contains($k)) { $groups[$k] = [pscustomobject]@{ M = [int]$r.MethodologyId; T = [string]$r.TableCode; B = [string]$r.BaseCode; O = [string]$r.OutputCode; Months = @{} } }
         $mid = $r.MonthColumnId
@@ -254,18 +254,18 @@ function Get-LandCarryOverMonthBindings {
         if ($mc -ne ('{0}_M{1:00}' -f $groups[$k].B, [int]$r.MonthNumber)) { continue }
         $groups[$k].Months[[int]$r.MonthNumber] = [int]$mid
     }
-    $wanted = @{}; $incomplete = New-Object 'System.Collections.Generic.List[string]'; $none = New-Object 'System.Collections.Generic.List[string]'
+    $byMeth = @{}; $incomplete = New-Object 'System.Collections.Generic.List[string]'; $none = New-Object 'System.Collections.Generic.List[string]'
     foreach ($g in $groups.Values) {
         $label = "$($g.T)/$($g.B)/$($g.O) (методологія $($g.M))"
         if ($g.Months.Count -eq 0) { $none.Add($label); continue }
         if ($g.Months.Count -lt 12) { $incomplete.Add("$label - місяців $($g.Months.Count)") }
-        if (-not $wanted.ContainsKey($g.M)) { $wanted[$g.M] = New-Object 'System.Collections.Generic.List[object]' }
+        if (-not $byMeth.ContainsKey($g.M)) { $byMeth[$g.M] = New-Object 'System.Collections.Generic.List[object]' }
         foreach ($mn in @($g.Months.Keys | Sort-Object)) {
-            $wanted[$g.M].Add([pscustomobject]@{ ColumnDefId = $g.Months[$mn]; OutputCode = $g.O; IsActive = $true; Label = ('{0}/{1}_M{2:00}' -f $g.T, $g.B, $mn) })
+            $byMeth[$g.M].Add([pscustomobject]@{ ColumnDefId = $g.Months[$mn]; OutputCode = $g.O; IsActive = $true; Label = ('{0}/{1}_M{2:00}' -f $g.T, $g.B, $mn) })
         }
     }
     $arr = @{}   # PS 5.1: @() навколо List[object] з hashtable дає «Argument types do not match» - віддаємо масиви
-    foreach ($k in @($wanted.Keys)) { $arr[$k] = [object[]]$wanted[$k].ToArray() }
+    foreach ($k in @($byMeth.Keys)) { $arr[$k] = [object[]]$byMeth[$k].ToArray() }
     return [pscustomobject]@{ Wanted = $arr; Incomplete = $incomplete.ToArray(); NoMonths = $none.ToArray() }
 }
 

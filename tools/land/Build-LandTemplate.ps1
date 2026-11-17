@@ -1774,7 +1774,7 @@ LEFT JOIN cfg.ColumnDef m ON m.TableDefId = t.Id AND m.IsDeleted = 0 AND m.IsMon
 WHERE sd.TemplateVersionId = @vid AND t.IsDeleted = 0 AND b.IsActive = 1 AND c.IsDeleted = 1
 "@ @{ vid = $vid }
     } finally { $cn.Close() }
-    $co = Get-LandCarryOverMonthBindings -Rows @($dt.Rows)
+    $co = Get-LandCarryOverMonthBindings -BindingRows @($dt.Rows)
     $cr = 0; $up = 0; $sm = 0; $fl = 0
     foreach ($m in @($co.Wanted.Keys | Sort-Object)) {
         $sb = Set-LandMethodologyBindings -MethodologyId $m -Wanted $co.Wanted[$m]

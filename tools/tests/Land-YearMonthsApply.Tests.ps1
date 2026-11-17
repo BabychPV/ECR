@@ -147,7 +147,7 @@ Describe 'Build-LandTemplate -Stage YearMonths: застосування пла�
         $rows += [pscustomobject]@{ MethodologyId = 9; OutputCode = 'O_1'; TableCode = 'T5_08'; BaseCode = 'O_1'; MonthColumnId = 999; MonthCode = 'OX1_M01'; MonthNumber = 1 }
         foreach ($m in 1..3) { $rows += [pscustomobject]@{ MethodologyId = 11; OutputCode = 'P'; TableCode = 'T5_22'; BaseCode = 'P'; MonthColumnId = 200 + $m; MonthCode = ('P_M{0:00}' -f $m); MonthNumber = $m } }
         $rows += [pscustomobject]@{ MethodologyId = 11; OutputCode = 'Q'; TableCode = 'T5_22'; BaseCode = 'Q'; MonthColumnId = [DBNull]::Value; MonthCode = [DBNull]::Value; MonthNumber = [DBNull]::Value }
-        $co = Get-LandCarryOverMonthBindings -Rows $rows
+        $co = Get-LandCarryOverMonthBindings -BindingRows $rows
         $w9 = @($co.Wanted[9]); $w11 = @($co.Wanted[11])
         if ($w9.Count -ne 12 -or (@($w9 | ForEach-Object { $_.ColumnDefId }) -join ',') -ne ((101..112) -join ',') -or @($w9 | Where-Object { $_.OutputCode -ne 'O_1' -or -not $_.IsActive }).Count) { throw "методологія 9: $(@($w9 | ForEach-Object { "$($_.ColumnDefId)/$($_.OutputCode)" }) -join ',')" }
         if ($w11.Count -ne 3 -or @($co.Incomplete).Count -ne 1 -or @($co.Incomplete)[0] -notlike 'T5_22/P/P*3') { throw "неповні: $(@($co.Incomplete) -join ';') / $($w11.Count)" }
