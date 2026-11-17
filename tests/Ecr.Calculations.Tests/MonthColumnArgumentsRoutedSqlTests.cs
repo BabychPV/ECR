@@ -191,6 +191,29 @@ public sealed class MonthColumnArgumentsRoutedSqlTests(SqlServerFixture sql, ITe
         }
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "B80")]
+    public async Task Перегляд_річного_проєкту_читає_всі_місяці_з_власного_екземпляра_як_доти()
+    {
+        var world = await ArrangeAsync("TA", routed: false, [.. Inputs, "F_Sum"]);
+
+        // Річний документ: один екземпляр, усі місяці в ньому. Ті самі ключі в чужому екземплярі (99) не беруться.
+        var facts = new List<YearResult>();
+        for (var m = 1; m <= 3; m++)
+        {
+            facts.Add(new YearResult(Period(1), VersionId, world.Instances[1], "F_Sum", Month(m), null, OneUnit, 11m * m));
+            facts.Add(new YearResult(Period(1), VersionId, 99, "F_Sum", Month(m), null, OneUnit, -1m));
+        }
+
+        var cells = await OverlayAsync(world, 1, facts);
+        var row = world.Rows[1]["F_Sum"];
+        Assert.Equal(
+            new decimal?[] { 11m, 22m, 33m, null },
+            Enumerable.Range(1, 4).Select(m => Value(cells, row, world.MonthColumn(m))).ToArray());
+    }
+
     // ── золотий набір HSE400: річний і місячний ──────────────────────────
 
     [Fact]
@@ -272,7 +295,8 @@ public sealed class MonthColumnArgumentsRoutedSqlTests(SqlServerFixture sql, ITe
             Substitute.For<ICalculationBindingStore>(),
             cells,
             world.Metadata,
-            rows);
+            rows,
+            monthRouter: router);
 
         var key = Key(period);
         var results = new List<Result>();
@@ -331,8 +355,9 @@ public sealed class MonthColumnArgumentsRoutedSqlTests(SqlServerFixture sql, ITe
             .Sheets.SelectMany(s => s.Tables).Single();
         var monthColumns = MonthRowResultOverlay.MonthColumns(table);
 
-        return await new MonthRowResultOverlay(methodologies, results).ApplyAsync(
-            world.Doc.DocumentId, Period(view), world.Instances[view], table.Id, rowIds, [], monthColumns, CancellationToken.None);
+        // Як зріз таблиці (GetTableSliceHandler): роутер того самого scope і опис таблиці.
+        return await new MonthRowResultOverlay(methodologies, results, Router(db)).ApplyAsync(
+            world.Doc.DocumentId, Period(view), world.Instances[view], table, rowIds, [], monthColumns, CancellationToken.None);
     }
 
     // ── світ ─────────────────────────────────────────────────────────────
