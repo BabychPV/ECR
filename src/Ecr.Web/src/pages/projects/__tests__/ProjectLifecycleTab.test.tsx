@@ -32,7 +32,7 @@ const period = (sequence: number, state: string) => ({
 
 function respond(
   status: Status,
-  options: { grant?: 'Read' | 'Manage'; periods?: ReturnType<typeof period>[]; summaryDraft?: number } = {},
+  options: { grant?: 'Read' | 'Manage'; periods?: ReturnType<typeof period>[]; summaryDraft?: number; summaryNoApproval?: number } = {},
 ): { posts: string[] } {
   const state = { posts: [] as string[] };
   const periods = options.periods ?? [period(10, 'Open'), period(11, 'Open'), period(12, 'Scheduled')];
@@ -66,7 +66,7 @@ function respond(
         });
       }
       if (url.includes('/documents/summary')) {
-        return json({ draft: options.summaryDraft ?? 92, partlySubmitted: 0, submitted: 0, approved: 0, rejected: 0, withIssues: 0 });
+        return json({ draft: options.summaryDraft ?? 92, partlySubmitted: 0, submitted: 0, approved: 0, rejected: 0, withIssues: 0, noApproval: options.summaryNoApproval ?? 0 });
       }
       if (url.includes('/periods')) {
         return json({
@@ -158,6 +158,26 @@ describe('ProjectLifecycleTab: Delete draft (c1, c2)', () => {
     Slow,
   );
 });
+describe('ProjectLifecycleTab: документи «без погодження» (B147)', () => {
+  it(
+    'чернетка, де всі документи без погодження, — Delete недоступна: noApproval входить у кількість документів',
+    async () => {
+      // ⛔ Сервер не кладе такі документи в п'ять чисел стану: без noApproval тут було б «0 документів» і видалення.
+      const state = respond('Draft', { periods: [period(1, 'Scheduled')], summaryDraft: 0, summaryNoApproval: 3 });
+      show();
+
+      const remove = await screen.findByRole('button', { name: '⟦projects.lifecycle.delete⟧' });
+      await waitFor(() =>
+        expect(reason('delete')).toBe('⟦projects.lifecycle.delete.notAllowed (status=⟦status.project.Draft⟧, count=3)⟧'),
+      );
+      expect(remove.hasAttribute('disabled')).toBe(true);
+      expect(document.querySelector('[data-project-documents]')?.getAttribute('data-project-documents')).toBe('3');
+      expect(state.posts).toEqual([]);
+    },
+    Slow,
+  );
+});
+
 describe('ProjectLifecycleTab: дії з видимими причинами (c2–c4)', () => {
   it(
     'c3: активний проєкт із відкритими місяцями — Archive недоступна, причина називає місяці',

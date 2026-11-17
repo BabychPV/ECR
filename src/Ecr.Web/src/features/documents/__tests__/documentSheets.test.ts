@@ -30,6 +30,15 @@ describe('documentState', () => {
   it('невідомий стан повертається як є — бейдж позначить його «увагою»', () => {
     expect(documentState(of({ A: 'Approved', B: 'Returned' }))).toBe('Returned');
   });
+
+  it('B147: версія без погодження (workflowMode=None) — «NoApproval», ніколи не Draft; і за 0 аркушів', () => {
+    // Аркуші такого документа сервер віддає `Draft` — стан документа від них не залежить.
+    expect(documentState({ sheetStates: { A: 'Draft', B: 'Draft' }, workflowMode: 'None' })).toBe('NoApproval');
+    expect(documentState({ sheetStates: {}, workflowMode: 'None' })).toBe('NoApproval');
+    // Контроль: з погодженням — як доти.
+    expect(documentState({ sheetStates: { A: 'Draft' }, workflowMode: 'SubmitApprove' })).toBe('Draft');
+    expect(documentState({ sheetStates: { A: 'Draft' }, workflowMode: null })).toBe('Draft');
+  });
 });
 
 describe('sheetLabels', () => {

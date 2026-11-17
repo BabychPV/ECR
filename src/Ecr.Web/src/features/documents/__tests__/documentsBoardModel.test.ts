@@ -38,6 +38,25 @@ describe('boardColumns', () => {
     expect(columns.reduce((sum, column) => sum + column.items.length, 0)).toBe(2);
   });
 
+  it('B147: документ без погодження (workflowMode=None) — у власному стовпці, не в чернетках і не «без стану»', () => {
+    // ⚠ Аркуші такого документа сервер віддає `Draft`; документ без аркушів — теж «без погодження».
+    const columns = boardColumns([
+      { id: 1, sheetStates: { A: 'Draft' }, workflowMode: 'None' },
+      { id: 2, sheetStates: {}, workflowMode: 'None' },
+      { id: 3, sheetStates: { A: 'Draft' }, workflowMode: 'SubmitApprove' },
+    ]);
+
+    expect(columns.map((column) => [column.id, column.items.map((item) => item.id)])).toEqual([
+      ['Draft', [3]],
+      ['Submitted', []],
+      ['Rework', []],
+      ['Approved', []],
+      ['NoApproval', [1, 2]],
+    ]);
+    // Без таких документів стовпця немає.
+    expect(boardColumns([d(1, { A: 'Draft' })]).map((column) => column.id)).not.toContain('NoApproval');
+  });
+
   it('лише «Returned or rejected» чекає уваги', () => {
     expect(boardColumns([]).filter((column) => column.attention).map((column) => column.id)).toEqual(['Rework']);
   });

@@ -14,6 +14,8 @@ export const DocumentStateFilters: readonly DocumentStateFilter[] = [
   'Submitted',
   'Approved',
   'Rejected',
+  // ✎ B147 (B75): «без погодження» — поза п'ятьма станами погодження, тож останнім.
+  'NoApproval',
 ];
 
 /** Значення з адреси → фільтр; невідоме — «без фільтра», а не `422`. */

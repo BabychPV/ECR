@@ -55,7 +55,12 @@ const Worst = ['Rejected', 'Draft', 'Submitted', 'Approved'] as const;
  * `StatusBadge` позначить його «увагою», а не сховає за відомим словом.
  * Без станів (`null`) — період не обрано або станів за нього немає.
  */
-export function documentState(document: Pick<DocumentSummary, 'sheetStates'>): string | null {
+export function documentState(document: Pick<DocumentSummary, 'sheetStates' | 'workflowMode'>): string | null {
+  // ✎ B147 (B75): версія шаблону документа за період — без подання й затвердження (`workflowMode = None`): стан
+  // «без погодження», а не чернетка; стани аркушів (сервер віддає їх `Draft`) не діють — і за 0 аркушів теж.
+  // Те саме правило — фільтр `state=NoApproval` і лічильник смуги `noApproval`.
+  if (document.workflowMode === 'None') return 'NoApproval';
+
   const states = Object.values(document.sheetStates);
   if (states.length === 0) return null;
 

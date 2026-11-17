@@ -2,7 +2,7 @@ import type { DocumentSummary } from '@/api/types';
 import { documentState } from './documentSheets';
 
 /** Стовпець подання «Board» (`UI-40`). */
-export type BoardColumnId = 'Draft' | 'Submitted' | 'Rework' | 'Approved' | 'NoState';
+export type BoardColumnId = 'Draft' | 'Submitted' | 'Rework' | 'Approved' | 'NoApproval' | 'NoState';
 
 export interface BoardColumn<T> {
   readonly id: BoardColumnId;
@@ -39,7 +39,7 @@ const Columns: readonly Omit<BoardColumn<never>, 'items'>[] = [
  * зовсім, а невідомий стан нікуди не належить. Сховати такі документи означало б сказати «їх
  * немає»; тому стовпець з'являється, лише коли в ньому щось є.
  */
-export function boardColumns<T extends Pick<DocumentSummary, 'sheetStates'>>(
+export function boardColumns<T extends Pick<DocumentSummary, 'sheetStates' | 'workflowMode'>>(
   documents: readonly T[],
 ): BoardColumn<T>[] {
   const columns: BoardColumn<T>[] = Columns.map((column) => ({
@@ -50,6 +50,11 @@ export function boardColumns<T extends Pick<DocumentSummary, 'sheetStates'>>(
       return state !== null && column.states.includes(state);
     }),
   }));
+
+  // ✎ B147 (B75): «без погодження» — не чернетка й не «без стану»: власний стовпець, лише коли в ньому щось є
+  // (як «без стану»; у макеті його немає, бо там немає й документів без погодження).
+  const noApproval = documents.filter((document) => documentState(document) === 'NoApproval');
+  if (noApproval.length > 0) columns.push({ id: 'NoApproval', states: ['NoApproval'], attention: false, items: noApproval });
 
   const placed = new Set(columns.flatMap((column) => column.items));
   const rest = documents.filter((document) => !placed.has(document));

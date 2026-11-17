@@ -45,13 +45,16 @@ export function stripCellLabel(cell: StripCell): string {
       return t('documents.strip.reopened');
     case 'notOpen':
       return t('documents.strip.notOpen');
+    // ✎ B147: той самий підпис, що в чипі документа «без погодження» (`NoApprovalChip`).
+    case 'noApproval':
+      return t('workflow.noApproval');
     default:
       return t('documents.strip.unknown');
   }
 }
 
 /** Знак у клітинці (не лише колір): ✓ затверджено, ✕ — повернуто, ! — пізні правки; замок — заблоковано (SVG, не емодзі). */
-const Marks: Readonly<Partial<Record<StripCell, string>>> = { approved: '✓', returned: '✕', late: '!' };
+const Marks: Readonly<Partial<Record<StripCell, string>>> = { approved: '✓', returned: '✕', late: '!', noApproval: '–' };
 
 function LockMark(): JSX.Element {
   return (
