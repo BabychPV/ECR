@@ -102,7 +102,7 @@ async function arrange(request: APIRequestContext): Promise<Arranged> {
       `таблиця ${tableCode}`,
     );
     const columns: [string, Record<string, unknown>][] = [
-      ['NAME', column(0, `${tableCode} name`, 'String', null, true)],
+      ['NAME', column(0, `${tableCode} name`, 'String', null)],
       ...Array.from({ length: 12 }, (_, i): [string, Record<string, unknown>] => [
         `M${String(i + 1).padStart(2, '0')}`,
         column(i + 1, MonthHeader(i + 1), 'Decimal', i + 1),
@@ -111,6 +111,13 @@ async function arrange(request: APIRequestContext): Promise<Arranged> {
     for (const [code, body] of columns) {
       await ok(await request.put(`${base}/tables/${String(table.id)}/columns/${code}`, { data: body }), `стовпець ${tableCode}.${code}`);
     }
+    // Правило рядка «жовтень ≤ 5»: правка 10 у жовтні дає зауваження — його знаходить прогін жовтня.
+    await ok(
+      await request.put(`${base}/tables/${String(table.id)}/validation-rules/OCT_CAP`, {
+        data: { columnDefId: null, expression: '[M10] <= 5', isActive: true, messageL10n: { en: `October of ${tableCode} is above 5` }, scope: 1, severity: 'Warning' },
+      }),
+      `правило ${tableCode}`,
+    );
   }
   await ok(await request.post(`${base}/publish`, { data: { reason: 'e2e: документ «рік» (LAND-YEAR L7)' } }), 'публікація');
 
@@ -178,7 +185,7 @@ async function arrange(request: APIRequestContext): Promise<Arranged> {
     }
   }
 
-  // Перевірка — лише за ЖОВТЕНЬ: якір року не перевіряли (обов'язкова NAME порожня → зауваження обох таблиць).
+  // Перевірка — лише за ЖОВТЕНЬ: якір року не перевіряли (правило OCT_CAP → зауваження обох таблиць).
   const validated = await ok<{ messages: { tableDefId: number }[] }>(
     await request.post(`/api/v1/documents/${String(documentId)}/validate`, { data: { periodKey: october } }),
     'перевірка жовтня',
