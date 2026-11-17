@@ -299,6 +299,119 @@ public sealed class ApprovalQueueApiTests(SqlServerFixture sql)
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
+    /// <summary>
+    /// ✎ B79 (Q13): рядок черги несе позначку «перераховано після подання» за тим самим правилом, що картка документа:
+    /// запис журналу <c>SheetRecalc / RecalculatedAfterSubmission</c> цього аркуша й періоду, пізніший за подання.
+    /// Аркуш без запису — без позначки; повторне подання (новий <c>SubmittedAt</c>) позначку знімає.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Мутації (локально): (1) у <c>ListMyApprovalQueueHandler.MarkedAsync</c> не ставити позначку — червоніє перший
+    /// блок; (2) ставити всім рядкам сторінки — червоніє «другий документ без позначки»; (3) у
+    /// <c>RecalculatedAfterSubmissionMark.Rule</c> прибрати <c>c.ChangedAt &gt; a.SubmittedAt</c> — червоніє «після
+    /// повторного подання»; (4) там само зіпсувати кореляцію (без періоду чи документа) — червоніє перший блок або
+    /// «другий документ». Запис журналу тут — тієї самої форми, що його пише каскад
+    /// (<c>SubmittedSheetRecalcLog</c>); сам каскад → позначка в черзі перевіряє
+    /// <c>CrossPeriodRoutedSqlTests.B79_після_каскаду_рядок_черги_позначено…</c>.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "B79")]
+    public async Task B79_рядок_черги_несе_позначку_перераховано_після_подання_а_повторне_подання_її_знімає()
+    {
+        var marked = await ArrangeDocumentAsync().ConfigureAwait(true);
+        var plain = await ArrangeDocumentAsync().ConfigureAwait(true);
+        var submitter = await NewUserAsync(marked, GrantLevel.Submit).ConfigureAwait(true);
+        var approver = await NewUserAsync(marked, GrantLevel.Approve).ConfigureAwait(true);
+        await GrantAsync(submitter.RoleId, plain, GrantLevel.Submit).ConfigureAwait(true);
+        await GrantAsync(approver.RoleId, plain, GrantLevel.Approve).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var submitterClient = await SignInAsync(app, submitter.Name).ConfigureAwait(true);
+        using var approverClient = await SignInAsync(app, approver.Name).ConfigureAwait(true);
+
+        foreach (var document in new[] { marked, plain })
+        {
+            using var submitted = await SubmitAsync(submitterClient, document).ConfigureAwait(true);
+            Assert.Equal(HttpStatusCode.NoContent, submitted.StatusCode);
+        }
+
+        // До будь-якого перерахунку — позначки немає в жодного.
+        Assert.All(
+            await ItemsOfAsync(app, approverClient, marked, plain).ConfigureAwait(true),
+            item => Assert.False(item.GetProperty("recalculatedAfterSubmission").GetBoolean()));
+
+        // Перерахунок після подання першого документа (запис журналу — як його пише каскад).
+        await WriteRecalculatedMarkAsync(marked).ConfigureAwait(true);
+
+        var items = await ItemsOfAsync(app, approverClient, marked, plain).ConfigureAwait(true);
+        Assert.True(Of(items, marked).GetProperty("recalculatedAfterSubmission").GetBoolean());
+        Assert.False(Of(items, plain).GetProperty("recalculatedAfterSubmission").GetBoolean());
+
+        // Повернення й повторне подання: SubmittedAt пізніший за запис журналу — позначка зникає, як на аркуші.
+        using (var rejected = await ApproveAsync(approverClient, marked, approved: false, reason: "B79").ConfigureAwait(true))
+        {
+            Assert.Equal(HttpStatusCode.NoContent, rejected.StatusCode);
+        }
+
+        using (var resubmitted = await SubmitAsync(submitterClient, marked).ConfigureAwait(true))
+        {
+            Assert.Equal(HttpStatusCode.NoContent, resubmitted.StatusCode);
+        }
+
+        var after = await ItemsOfAsync(app, approverClient, marked, plain).ConfigureAwait(true);
+        Assert.False(Of(after, marked).GetProperty("recalculatedAfterSubmission").GetBoolean());
+    }
+
+    private static JsonElement Of(List<JsonElement> items, TestDocument document)
+        => items.Single(i => i.GetProperty("documentId").GetInt64() == document.DocumentId);
+
+    /// <summary>Рядки черги лише наведених документів (у спільній базі черга погоджувача може мати й інші).</summary>
+    private static async Task<List<JsonElement>> ItemsOfAsync(EcrApiFactory app, HttpClient client, params TestDocument[] documents)
+    {
+        var ids = documents.Select(d => d.DocumentId).ToHashSet();
+        var items = await ItemsAsync(app, client).ConfigureAwait(false);
+        var own = items.Where(i => ids.Contains(i.GetProperty("documentId").GetInt64())).ToList();
+        Assert.Equal(documents.Length, own.Count);
+        return own;
+    }
+
+    private async Task GrantAsync(int roleId, TestDocument document, GrantLevel level)
+    {
+        await using var db = Context();
+        db.ResourceGrants.Add(new ResourceGrant(roleId, ResourceKind.Project, document.ProjectId, level));
+        await db.SaveChangesAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>Запис журналу «поданий аркуш перераховано після подання» — на мить після <c>SubmittedAt</c> аркуша.</summary>
+    private async Task WriteRecalculatedMarkAsync(TestDocument document)
+    {
+        await using var db = Context();
+        var submittedAt = await db.ApprovalStates.AsNoTracking()
+            .Where(a => a.DocumentId == document.DocumentId && a.SheetDefId == document.SheetDefId
+                        && a.PeriodKey == document.PeriodKey.Value)
+            .Select(a => a.SubmittedAt)
+            .SingleAsync().ConfigureAwait(false);
+
+        await new AuditWriter(db).WriteStructureChangesAsync(
+            [
+                new Ecr.Application.Ports.StructureChangeRecord(
+                    submittedAt!.Value.AddMilliseconds(50),
+                    TemplateVersionId: document.TemplateVersionId,
+                    EntityType: Ecr.Application.Calculations.RecalculationSkips.AuditEntityType,
+                    EntityId: document.SheetDefId,
+                    ChangeClass: ChangeClass.Safe,
+                    Operation: Ecr.Application.Calculations.RecalculationSkips.AuditRecalculatedAfterSubmission,
+                    OldJson: null,
+                    NewJson: "{}",
+                    ChangeReason: "recalc-after-submission",
+                    ChangedByUserId: 0,
+                    CorrelationId: Ecr.Application.Calculations.RecalculationSkips.AuditCorrelation(
+                        document.DocumentId, document.SheetDefId, document.PeriodKey.Value)),
+            ],
+            CancellationToken.None).ConfigureAwait(false);
+    }
+
     // ───────────────────────────── допоміжне ─────────────────────────────
 
     private static async Task<List<JsonElement>> ItemsAsync(EcrApiFactory app, HttpClient client)

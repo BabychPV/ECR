@@ -83,8 +83,27 @@ internal sealed record PermitHistoryRow(
         }
 
         var projectId = await access.DocumentProjectIdAsync(documentId, ct).ConfigureAwait(false);
-        return new PermitHistoryRow(profile, projectId, instance, table, column, rowKey, rowId, baseId, rowCells);
+        return new PermitHistoryRow(profile, projectId, instance, table, column, rowKey, rowId, baseId, rowCells)
+        {
+            Decision = decision,
+        };
     }
+
+    /// <summary>
+    /// ✎ B79 (Q9): дозволене рішення про комірку дозволу, прийняте поза транзакцією. Річне рішення запис повторює під
+    /// замками аркушів року (<see cref="EnsureStillEditableAsync"/>).
+    /// </summary>
+    public EditDecision Decision { get; init; }
+
+    /// <summary>
+    /// ✎ B79 (Q9): повторна перевірка річного рішення в транзакції запису історії дозволу — місяць, затверджений між
+    /// рішенням і комітом, запис відхиляє тією самою відмовою, що й PATCH комірки.
+    /// </summary>
+    /// <param name="gate">Замок аркуша.</param>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="ct">Токен скасування транзакції.</param>
+    public Task EnsureStillEditableAsync(ISheetEditGate? gate, long documentId, CancellationToken ct)
+        => AnnualDecisionRecheck.EnsureAsync(gate, documentId, Table.SheetDefId, Instance.SheetCopyId, Decision, 1, ct);
 }
 
 /// <summary>A header permit field resolved for a history write.</summary>

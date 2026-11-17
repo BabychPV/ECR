@@ -19,7 +19,8 @@ namespace Ecr.Infrastructure.Tests.Persistence;
 /// </summary>
 /// <remarks>
 /// Мутації: прибрати арм <c>UQ_User_Name</c> або <c>UQ_ApprovalRoute</c> з <c>UnitOfWork.TryMapDuplicateKey</c> —
-/// відповідний тест червоний (сирий виняток бази).
+/// відповідний тест червоний (сирий виняток бази). B161: арм <c>UX_User_Sid</c> називає запис програшного запиту
+/// замість власника SID — тест SID червоний на <c>userName</c>.
 /// </remarks>
 [Collection("SqlServer")]
 public sealed class UnitOfWorkUserAndRouteDuplicateTests(SqlServerFixture sql)
@@ -76,11 +77,58 @@ public sealed class UnitOfWorkUserAndRouteDuplicateTests(SqlServerFixture sql)
             Assert.Equal("ECR-USR-0409", thrown.ErrorCode);
             Assert.Equal("err.ECR-USR-0409.windowsSidTaken", thrown.Details!["messageKey"]);
             Assert.Equal(sid, thrown.Details["sid"]);
+
+            // ⛔ B161: відмова називає ВЛАСНИКА SID (той, хто закомітився першим), як і послідовна перевірка
+            // `WindowsSidFormat.EnsureFreeAsync`, — а не запис програшного запиту, якого в базі немає.
+            Assert.Equal($"B150\\a{tag}", thrown.Details["userName"]);
         }
         finally
         {
             await using var cleanup = Context();
             await cleanup.Users.Where(u => u.WindowsSid == sid).ExecuteDeleteAsync();
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "B161")]
+    public async Task Виправлення_SID_на_щойно_зайнятий_називає_власника_а_не_виправлюваний_запис()
+    {
+        // `PUT /users/{id}/windows-sid` (Modified, а не Added): перевірку обробника обійшов паралельний запит, що
+        // забрав той самий SID. Відмова мусить назвати власника, а не запис, якому SID виправляли.
+        var tag = Guid.NewGuid().ToString("N")[..10];
+        var n = Random.Shared.Next(100_000, 999_999);
+        var sid = $"S-1-5-21-2099-161-{n}-77";
+        var otherSid = $"S-1-5-21-2099-161-{n}-78";
+        var now = new DateTime(2099, 1, 15, 8, 0, 0, DateTimeKind.Utc);
+        try
+        {
+            int correctedId;
+            await using (var setup = Context())
+            {
+                setup.Users.Add(User.CreateDomain($"B161\\a{tag}", "A", sid, now));
+                var corrected = User.CreateDomain($"B161\\b{tag}", "B", otherSid, now);
+                setup.Users.Add(corrected);
+                await new UnitOfWork(setup).SaveChangesAsync(CancellationToken.None);
+                correctedId = corrected.Id;
+            }
+
+            await using var loser = Context();
+            var user = await loser.Users.SingleAsync(u => u.Id == correctedId);
+            user.CorrectUnconfirmedWindowsSid(sid);
+
+            var thrown = await Assert.ThrowsAsync<BusinessRuleException>(
+                () => new UnitOfWork(loser).SaveChangesAsync(CancellationToken.None));
+
+            Assert.Equal("err.ECR-USR-0409.windowsSidTaken", thrown.Details!["messageKey"]);
+            Assert.Equal(sid, thrown.Details["sid"]);
+            Assert.Equal($"B161\\a{tag}", thrown.Details["userName"]);
+        }
+        finally
+        {
+            await using var cleanup = Context();
+            await cleanup.Users.Where(u => u.WindowsSid == sid || u.WindowsSid == otherSid).ExecuteDeleteAsync();
         }
     }
 

@@ -65,19 +65,7 @@ public sealed class CreateUnitHandler(
         // ⛔ Унікальність коду — той самий прецедент, що й `CreateRegistryHandler`:
         // код — те, чим на одиницю посилаються формули й довідник (`UnitRef.Code`),
         // і мовчазний дублікат зробив би це посилання неоднозначним.
-        var clash = await units.FindUnitByCodeAsync(unitCode.Value, ct).ConfigureAwait(false);
-        if (clash is not null)
-        {
-            throw new BusinessRuleException(
-                ErrorCodes.UnitCodeTaken,
-                $"Одиниця «{unitCode.Value}» уже існує (ідентифікатор {clash.Id}).",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-UOM-4091.unitCodeTaken",
-                    ["code"] = unitCode.Value,
-                    ["id"] = clash.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                });
-        }
+        await RefuseIfTakenAsync(unitCode.Value, ct).ConfigureAwait(false);
 
         // ⛔ Нульовий (і від'ємний) множник — ВІДМОВА на вході, а не помилка
         // десь у конверсії через пів року. `factorToBase = 0` згортає
@@ -120,8 +108,39 @@ public sealed class CreateUnitHandler(
             offsetToBase);
 
         units.AddUnit(unit);
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        try
+        {
+            await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
+        catch (ConcurrencyConflictException)
+        {
+            // ⛔ B158 c1. Перевірка вище читає без блокування: два одночасні запити проходять її обидва, і другого
+            // відбиває `UQ_Unit_Code` (арм `DuplicateCreateRefusals` дає загальний 409). `{id}` переможця база не каже —
+            // перечитуємо його тією самою перевіркою, і клієнт бачить ту саму відмову, що й послідовний повтор; код
+            // не зайнятий (інший конфлікт) — загальний 409 як є.
+            await RefuseIfTakenAsync(unitCode.Value, ct).ConfigureAwait(false);
+            throw;
+        }
 
         return unit;
+    }
+
+    /// <summary>Код зайнятий — <c>ECR-UOM-4091 unitCodeTaken</c> з кодом і ідентифікатором наявної одиниці.</summary>
+    private async Task RefuseIfTakenAsync(string code, CancellationToken ct)
+    {
+        var clash = await units.FindUnitByCodeAsync(code, ct).ConfigureAwait(false);
+        if (clash is not null)
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.UnitCodeTaken,
+                $"Одиниця «{code}» уже існує (ідентифікатор {clash.Id}).",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-UOM-4091.unitCodeTaken",
+                    ["code"] = code,
+                    ["id"] = clash.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
     }
 }

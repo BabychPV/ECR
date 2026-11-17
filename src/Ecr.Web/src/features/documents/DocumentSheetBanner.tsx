@@ -25,6 +25,8 @@ interface DocumentSheetBannerProps {
   readonly recalculatedAfterSubmission?: boolean;
   /** Приймальна 08.11 (i1): дія закритого періоду для `DocumentLockBanner`. */
   readonly periodAction?: JSX.Element | null;
+  /** ✎ LAND-YEAR L7a: документ «рік» — ширші причини банера називають «Year YYYY» (`DocumentLockBanner`). */
+  readonly yearLayout?: boolean;
 }
 
 /**
@@ -52,12 +54,15 @@ export function DocumentSheetBanner({
   canDecide,
   recalculatedAfterSubmission = false,
   periodAction = null,
+  yearLayout = false,
 }: DocumentSheetBannerProps): JSX.Element | null {
   const contextual =
     !widerLock(lock) && (lock === 'sheetSubmitted' || lock === 'sheetApproved' || state === 'Rejected');
   const history = useWorkflowHistory(documentId, periodKey, contextual, sheetCopyId);
 
-  if (!contextual) return <DocumentLockBanner lock={lock} periodKey={periodKey} periodAction={periodAction} />;
+  if (!contextual) {
+    return <DocumentLockBanner lock={lock} periodKey={periodKey} periodAction={periodAction} yearLayout={yearLayout} />;
+  }
 
   const event = latestInto(history.data, sheetCode, sheetCopyId, state);
   const who = event === null ? null : { name: event.byDisplayName, date: formatDate(event.at) };

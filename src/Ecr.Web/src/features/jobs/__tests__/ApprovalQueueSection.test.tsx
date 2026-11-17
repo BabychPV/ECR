@@ -207,6 +207,71 @@ describe('ApprovalQueueSection: місяці одного аркуша - одн�
   });
 });
 
+describe('ApprovalQueueSection: позначка «перераховано після подання» (B79, Q13)', () => {
+  // Мутація: приберіть умову `recalculatedAfterSubmission(item)` (позначка завжди) - червоніє другий тест;
+  // приберіть сам Badge - червоніє перший; порівняння `=== true` замініть на `!== false` - червоніє третій.
+  const badge = (card: HTMLElement): Element | null => card.querySelector('[data-recalculated-after-submission]');
+
+  async function card(): Promise<HTMLElement> {
+    return waitFor(() => {
+      const el = document.querySelector('[data-approval-document="11"]');
+      expect(el).not.toBeNull();
+
+      return el as HTMLElement;
+    });
+  }
+
+  it('рядок із позначкою показує її текстом і підказкою', async () => {
+    show(() => ({
+      status: 200,
+      body: { items: [{ ...item({}), recalculatedAfterSubmission: true }], nextCursor: null },
+    }));
+    const found = badge(await card());
+
+    expect(found).not.toBeNull();
+    expect(found?.textContent).toContain('myTasks.approval.recalculated');
+    expect(found?.getAttribute('title')).toContain('myTasks.approval.recalculatedHint');
+  });
+
+  it('рядок без позначки її не показує', async () => {
+    show(() => ({
+      status: 200,
+      body: { items: [{ ...item({}), recalculatedAfterSubmission: false }], nextCursor: null },
+    }));
+
+    expect(badge(await card())).toBeNull();
+  });
+
+  it('відповідь без поля (старіший сервер) - позначки немає', async () => {
+    show(() => ({ status: 200, body: { items: [item({})], nextCursor: null } }));
+
+    expect(badge(await card())).toBeNull();
+  });
+
+  it('у групі місяців позначку несе лише свій місяць', async () => {
+    show(() => ({
+      status: 200,
+      body: {
+        items: [
+          { ...item({ periodKey: 202601 }), recalculatedAfterSubmission: false },
+          { ...item({ periodKey: 202602 }), recalculatedAfterSubmission: true },
+        ],
+        nextCursor: null,
+      },
+    }));
+    await waitFor(() => expect(document.querySelector('[data-approval-group="11:3"]')).not.toBeNull());
+    const rows = [...document.querySelectorAll('[data-approval-document="11"]')] as HTMLElement[];
+
+    expect(rows.map((row) => badge(row) !== null)).toEqual([false, true]);
+  });
+
+  it('сід en/ru/kz: текст позначки й підказки є', () => {
+    const catalog = readSeedEnCatalog();
+    expect(catalog).toContain("(N'myTasks.approval.recalculated', N'en', N'Recalculated after submission'");
+    expect(catalog).toContain("(N'myTasks.approval.recalculatedHint', N'en',");
+  });
+});
+
 describe('approvalQueueHref', () => {
   it('кодує код аркуша', () => {
     expect(approvalQueueHref(item({ sheetCode: 'A B' }))).toBe('/documents/11?periodKey=202609&sheet=A%20B');

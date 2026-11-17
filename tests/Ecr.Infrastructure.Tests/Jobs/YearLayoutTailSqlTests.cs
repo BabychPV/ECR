@@ -91,14 +91,17 @@ public sealed partial class YearLayoutTailSqlTests(SqlServerFixture sql)
 
     // ── сценарії ─────────────────────────────────────────────────────────
 
-    private async Task RunJobAsync(World world, int? periodKey, int? year, Dictionary<int, PeriodState> states)
+    private async Task RunJobAsync(
+        World world, int? periodKey, int? year, Dictionary<int, PeriodState> states, bool audit = false)
     {
         await using var db = world.Builder.CreateContext();
         var router = new MonthColumnRouter(db, Flag(false), YearRegistry(world));
         var store = new MonthRoutedCellStore(new NormalizedCellStore(db), router, world.Metadata, db);
+
+        // ✎ B79: журнал аркушів (`SheetLogAsync`) пишеться лише з журналом — як у DI.
         var job = new RecalculationJob(
             db, new NoBindingsRunner(), RunHandler(), Formulas(db, world, store, router, Periods(world, states)),
-            new TestClock(JobNow));
+            new TestClock(JobNow), audit: audit ? new AuditWriter(db) : null);
 
         await job.ExecuteAsync(
             new RecalculationRequest(world.Doc.ProjectId, world.Doc.DocumentId, periodKey, TriggeredByUserId: null, Year: year),
@@ -395,6 +398,11 @@ public sealed partial class YearLayoutTailSqlTests(SqlServerFixture sql)
         await ExecuteAsync(
             $"UPDATE doc.Period SET State = {(int)PeriodState.Open} " +
             $"WHERE ProjectId = {world.Doc.ProjectId} AND State <> {(int)PeriodState.Open};");
+
+        // ✎ B79 (правило 394, аудит 16.11): річна розкладка версії цього тесту в спільній базі не лишається — версія
+        // повертається до розкладки, з якою її створив будівник (ArrangeAsync ставив YearWithMonthColumns).
+        await ExecuteAsync(
+            $"UPDATE cfg.TemplateVersion SET Layout = {(int)default(TemplateLayout)} WHERE Id = {world.Doc.TemplateVersionId};");
     }
 
     private async Task ExecuteAsync(string statement)

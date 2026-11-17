@@ -532,6 +532,14 @@ public sealed partial class DocumentVersionMigrationStore(
             payload += "|fp" + plan.FromPeriodKey.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
 
+        // ✎ LAND-YEAR L3: мапа місяців — теж лише коли є (відбиток решти переносів незмінний).
+        if (plan.MonthColumns.Count > 0)
+        {
+            payload += "|mc" + JsonSerializer.Serialize(plan.MonthColumns
+                .OrderBy(c => c.SourceColumnDefId).ThenBy(c => c.MonthNumber)
+                .Select(c => new { c.SourceColumnDefId, c.MonthNumber, c.TargetColumnDefId, c.TargetTableDefId }));
+        }
+
         return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(payload)))[..32];
     }
     /// <inheritdoc />
@@ -582,6 +590,10 @@ public sealed partial class DocumentVersionMigrationStore(
         var sheets = JsonSerializer.Serialize(plan.Sheets.Select(p => new { o = p.Key, n = p.Value }));
         var tables = JsonSerializer.Serialize(plan.Tables.Select(p => new { o = p.Key, n = p.Value }));
         var columns = JsonSerializer.Serialize(plan.Columns.Select(c => new { o = c.SourceColumnDefId, n = c.TargetColumnDefId, t = c.TargetTableDefId }));
+        var monthColumns = JsonSerializer.Serialize(plan.MonthColumns.Select(c => new
+        {
+            o = c.SourceColumnDefId, m = c.MonthNumber, n = c.TargetColumnDefId, t = c.TargetTableDefId,
+        }));
         var rows = JsonSerializer.Serialize(plan.Rows.Select(p => new { o = p.Key, n = p.Value }));
         var headers = JsonSerializer.Serialize(plan.HeaderFields.Select(p => new { o = p.Key, n = p.Value }));
         var newRows = JsonSerializer.Serialize(plan.NewRows.Select(r => new { t = r.TargetTableDefId, d = r.TargetRowDefId, k = r.RowKey, s = r.Ordinal }));
@@ -610,6 +622,7 @@ public sealed partial class DocumentVersionMigrationStore(
                 new("@sheets", System.Data.SqlDbType.NVarChar, -1) { Value = sheets },
                 new("@tables", System.Data.SqlDbType.NVarChar, -1) { Value = tables },
                 new("@columns", System.Data.SqlDbType.NVarChar, -1) { Value = columns },
+                new("@monthColumns", System.Data.SqlDbType.NVarChar, -1) { Value = monthColumns },
                 new("@rows", System.Data.SqlDbType.NVarChar, -1) { Value = rows },
                 new("@headers", System.Data.SqlDbType.NVarChar, -1) { Value = headers },
                 new("@newRows", System.Data.SqlDbType.NVarChar, -1) { Value = newRows },
@@ -917,6 +930,7 @@ public sealed partial class DocumentVersionMigrationStore(
                     JOIN   @instances i    ON i.PeriodKey = r.PeriodKey AND i.Id = r.TableInstanceId
                     WHERE  cv.PeriodKey IN (SELECT PeriodKey FROM @periods)
                       AND  NOT EXISTS (SELECT 1 FROM @columnMap m WHERE m.n = cv.ColumnDefId)
+                      AND  NOT EXISTS (SELECT 1 FROM @monthColumnMap mm WHERE mm.n = cv.ColumnDefId)
                     OPTION (MAXDOP 1, RECOMPILE);
                     """;
                 verify.Parameters.AddRange(Parameters());
@@ -1228,10 +1242,17 @@ public sealed partial class DocumentVersionMigrationStore(
     }
 
     /// <inheritdoc />
-    public async Task<int> CountUnmappedBindingsAsync(
+    public Task<int> CountUnmappedBindingsAsync(
         int sourceVersionId, IReadOnlyDictionary<int, int> columnMap, CancellationToken ct)
+        => CountUnmappedBindingsAsync(sourceVersionId, columnMap, new Dictionary<int, IReadOnlyList<int>>(), ct);
+
+    /// <inheritdoc />
+    public async Task<int> CountUnmappedBindingsAsync(
+        int sourceVersionId, IReadOnlyDictionary<int, int> columnMap,
+        IReadOnlyDictionary<int, IReadOnlyList<int>> monthColumnMap, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(columnMap);
+        ArgumentNullException.ThrowIfNull(monthColumnMap);
 
         // З'єднання через ColumnDef → TableDef → SheetDef: власного TemplateVersionId прив'язка не має.
         var source = await (
@@ -1249,7 +1270,7 @@ public sealed partial class DocumentVersionMigrationStore(
             return 0;
         }
 
-        var targetColumns = columnMap.Values.Distinct().ToList();
+        var targetColumns = columnMap.Values.Concat(monthColumnMap.Values.SelectMany(v => v)).Distinct().ToList();
         var targetBindings = await db.CalculationBindings
             .AsNoTracking()
             .Where(b => b.IsActive && targetColumns.Contains(b.ColumnDefId))
@@ -1262,8 +1283,18 @@ public sealed partial class DocumentVersionMigrationStore(
             .Select(b => (b.ColumnDefId, b.MethodologyId, Output: b.OutputCode.ToUpperInvariant()))
             .ToHashSet();
 
-        return source.Count(b => !columnMap.TryGetValue(b.ColumnDefId, out var target)
-                                 || !carried.Contains((target, b.MethodologyId, b.OutputCode.ToUpperInvariant())));
+        // ✎ LAND-YEAR L3 (D-13): прив'язка немісячної колонки перенесена, коли КОЖНА з її місячних колонок має прив'язку
+        // того самого виходу (12 прив'язок на одну стару — так їх кладе будівник Land, етап YearMonths).
+        return source.Count(b =>
+        {
+            var output = b.OutputCode.ToUpperInvariant();
+            if (monthColumnMap.TryGetValue(b.ColumnDefId, out var months) && months.Count > 0)
+            {
+                return !months.All(n => carried.Contains((n, b.MethodologyId, output)));
+            }
+
+            return !columnMap.TryGetValue(b.ColumnDefId, out var target) || !carried.Contains((target, b.MethodologyId, output));
+        });
     }
 
     /// <inheritdoc />
@@ -1617,6 +1648,8 @@ public sealed partial class DocumentVersionMigrationStore(
         var keys = plan.Sheets.Keys.Select(i => new { k = (byte)ResourceKind.Sheet, i })
             .Concat(plan.Tables.Keys.Select(i => new { k = (byte)ResourceKind.Table, i }))
             .Concat(plan.Columns.Select(c => new { k = (byte)ResourceKind.Column, i = c.SourceColumnDefId }))
+            .Concat(plan.MonthColumns.Select(c => c.SourceColumnDefId).Distinct()
+                .Select(i => new { k = (byte)ResourceKind.Column, i }))
             .ToList();
         if (keys.Count == 0)
         {
@@ -1698,6 +1731,10 @@ public sealed partial class DocumentVersionMigrationStore(
         DECLARE @columnMap TABLE (o int PRIMARY KEY, n int NOT NULL, t int NOT NULL);
         INSERT @columnMap SELECT o, n, t FROM OPENJSON(@columns) WITH (o int, n int, t int);
 
+        -- ✎ LAND-YEAR L3: немісячна колонка o × місяць m → місячна колонка n таблиці t (порожня поза переносом на рік).
+        DECLARE @monthColumnMap TABLE (o int NOT NULL, m int NOT NULL, n int NOT NULL, t int NOT NULL, PRIMARY KEY (o, m));
+        INSERT @monthColumnMap SELECT o, m, n, t FROM OPENJSON(@monthColumns) WITH (o int, m int, n int, t int);
+
         DECLARE @rowMap TABLE (o int PRIMARY KEY, n int NOT NULL);
         INSERT @rowMap SELECT o, n FROM OPENJSON(@rows) WITH (o int, n int);
 
@@ -1727,6 +1764,43 @@ public sealed partial class DocumentVersionMigrationStore(
     private const string RangeCommandText = """
         DECLARE @c bigint = 0;
 
+        -- 0. ✎ LAND-YEAR L3: немісячна колонка «копії на місяць» → місячна колонка МІСЯЦЯ ПЕРІОДУ (m = PeriodKey % 100),
+        -- НА МІСЦІ: власник місячної колонки m річної версії — екземпляр періоду (рік, m), тобто саме той, де значення
+        -- вже лежить. Перед мапою 1:1; перенесене стоїть на колонці цільової версії (mm.n ніколи не є mm.o) — повтор
+        -- діапазону нічого не знаходить. Поза переносом на рік мапа порожня.
+        UPDATE cv
+        SET    cv.ColumnDefId = mm.n, cv.TableDefId = mm.t
+        FROM   doc.CellValue cv
+        JOIN   doc.TableRow r      ON r.PeriodKey = cv.PeriodKey AND r.Id = cv.TableRowId
+        JOIN   @instances i    ON i.PeriodKey = r.PeriodKey AND i.Id = r.TableInstanceId
+        JOIN   @monthColumnMap mm ON mm.o = cv.ColumnDefId AND mm.m = cv.PeriodKey % 100
+        WHERE  cv.PeriodKey = @p AND cv.TableRowId BETWEEN @lo AND @hi
+          AND  r.PeriodKey = @p AND r.Id BETWEEN @lo AND @hi
+        OPTION (MAXDOP 1, RECOMPILE);
+        SET @c += @@ROWCOUNT;
+
+        UPDATE cs
+        SET    cs.ColumnDefId = mm.n
+        FROM   doc.CellStyle cs
+        JOIN   doc.TableRow r      ON r.PeriodKey = cs.PeriodKey AND r.Id = cs.TableRowId
+        JOIN   @instances i    ON i.PeriodKey = r.PeriodKey AND i.Id = r.TableInstanceId
+        JOIN   @monthColumnMap mm ON mm.o = cs.ColumnDefId AND mm.m = cs.PeriodKey % 100
+        WHERE  cs.PeriodKey = @p AND cs.TableRowId BETWEEN @lo AND @hi
+          AND  r.PeriodKey = @p AND r.Id BETWEEN @lo AND @hi
+        OPTION (MAXDOP 1, RECOMPILE);
+        SET @c += @@ROWCOUNT;
+
+        UPDATE fo
+        SET    fo.ColumnDefId = mm.n
+        FROM   doc.CellFormulaOverride fo
+        JOIN   doc.TableRow r      ON r.PeriodKey = fo.PeriodKey AND r.Id = fo.TableRowId
+        JOIN   @instances i    ON i.PeriodKey = r.PeriodKey AND i.Id = r.TableInstanceId
+        JOIN   @monthColumnMap mm ON mm.o = fo.ColumnDefId AND mm.m = fo.PeriodKey % 100
+        WHERE  fo.PeriodKey = @p AND fo.TableRowId BETWEEN @lo AND @hi
+          AND  r.PeriodKey = @p AND r.Id BETWEEN @lo AND @hi
+        OPTION (MAXDOP 1, RECOMPILE);
+        SET @c += @@ROWCOUNT;
+
         -- 1. Комірки: у колонку-відповідник, разом із таблицею (складений FK). Діапазон за ключем кластерного
         -- індексу (PeriodKey, TableRowId) — seek, а не скан з початку.
         UPDATE cv
@@ -1749,6 +1823,7 @@ public sealed partial class DocumentVersionMigrationStore(
         WHERE  cv.PeriodKey = @p AND cv.TableRowId BETWEEN @lo AND @hi
           AND  r.PeriodKey = @p AND r.Id BETWEEN @lo AND @hi
           AND  NOT EXISTS (SELECT 1 FROM @columnMap m WHERE m.n = cv.ColumnDefId)
+          AND  NOT EXISTS (SELECT 1 FROM @monthColumnMap mm WHERE mm.n = cv.ColumnDefId OR mm.o = cv.ColumnDefId)
         OPTION (MAXDOP 1, RECOMPILE);
         SET @c += @@ROWCOUNT;
 
@@ -1774,6 +1849,7 @@ public sealed partial class DocumentVersionMigrationStore(
         WHERE  cs.PeriodKey = @p AND cs.TableRowId BETWEEN @lo AND @hi
           AND  r.PeriodKey = @p AND r.Id BETWEEN @lo AND @hi
           AND  NOT EXISTS (SELECT 1 FROM @columnMap m WHERE m.n = cs.ColumnDefId)
+          AND  NOT EXISTS (SELECT 1 FROM @monthColumnMap mm WHERE mm.n = cs.ColumnDefId OR mm.o = cs.ColumnDefId)
         OPTION (MAXDOP 1, RECOMPILE);
         SET @c += @@ROWCOUNT;
 
@@ -1799,6 +1875,7 @@ public sealed partial class DocumentVersionMigrationStore(
         WHERE  fo.PeriodKey = @p AND fo.TableRowId BETWEEN @lo AND @hi
           AND  r.PeriodKey = @p AND r.Id BETWEEN @lo AND @hi
           AND  NOT EXISTS (SELECT 1 FROM @columnMap m WHERE m.n = fo.ColumnDefId)
+          AND  NOT EXISTS (SELECT 1 FROM @monthColumnMap mm WHERE mm.n = fo.ColumnDefId OR mm.o = fo.ColumnDefId)
         OPTION (MAXDOP 1, RECOMPILE);
         SET @c += @@ROWCOUNT;
 
@@ -1892,6 +1969,29 @@ public sealed partial class DocumentVersionMigrationStore(
           AND  m.o <> m.n
         OPTION (MAXDOP 1, RECOMPILE);
         IF @bad > 0 THROW 51001, N'Діапазон оформлення комірок: частина записів не переселена.', 1;
+
+        -- ✎ LAND-YEAR L3: жодне значення/оформлення діапазону не лишилось на немісячній колонці, яку мапа місяців
+        -- переселяє (DELETE вище їх не чіпає навмисно: розбіжність — відкат діапазону, а не мовчазне видалення).
+        SELECT @bad = COUNT_BIG(*)
+        FROM   doc.CellValue cv
+        JOIN   doc.TableRow r  ON r.PeriodKey = cv.PeriodKey AND r.Id = cv.TableRowId
+        JOIN   @instances i    ON i.PeriodKey = r.PeriodKey AND i.Id = r.TableInstanceId
+        WHERE  cv.PeriodKey = @p AND cv.TableRowId BETWEEN @lo AND @hi
+          AND  r.PeriodKey = @p AND r.Id BETWEEN @lo AND @hi
+          AND  EXISTS (SELECT 1 FROM @monthColumnMap mm WHERE mm.o = cv.ColumnDefId)
+        OPTION (MAXDOP 1, RECOMPILE);
+        IF @bad > 0 THROW 51001, N'Діапазон комірок: частина значень не переселена в місячні колонки.', 1;
+
+        SELECT @bad = COUNT_BIG(*)
+        FROM   doc.CellStyle cs
+        JOIN   doc.TableRow r  ON r.PeriodKey = cs.PeriodKey AND r.Id = cs.TableRowId
+        JOIN   @instances i    ON i.PeriodKey = r.PeriodKey AND i.Id = r.TableInstanceId
+        WHERE  cs.PeriodKey = @p AND cs.TableRowId BETWEEN @lo AND @hi
+          AND  r.PeriodKey = @p AND r.Id BETWEEN @lo AND @hi
+          AND  EXISTS (SELECT 1 FROM @monthColumnMap mm WHERE mm.o = cs.ColumnDefId)
+        OPTION (MAXDOP 1, RECOMPILE);
+        IF @bad > 0 THROW 51001, N'Діапазон оформлення комірок: частина записів не переселена в місячні колонки.', 1;
+
         IF @leaseOwner IS NOT NULL
         BEGIN
             UPDATE doc.Project
@@ -1934,6 +2034,9 @@ public sealed partial class DocumentVersionMigrationStore(
         JOIN   @docs d ON d.Id = x.DocumentId
         WHERE  x.Id BETWEEN @lo AND @hi
           AND  NOT EXISTS (SELECT 1 FROM @columnMap m WHERE m.o = x.ColumnDefId OR m.n = x.ColumnDefId)
+          -- ✎ LAND-YEAR L3: індекс без періоду не знає місяця — значення немісячної колонки відходять разом з нею,
+          -- а вже перенесене на місячну (mm.n) лишається.
+          AND  NOT EXISTS (SELECT 1 FROM @monthColumnMap mm WHERE mm.n = x.ColumnDefId)
         OPTION (MAXDOP 1, RECOMPILE);
         SET @c += @@ROWCOUNT;
 
@@ -2101,13 +2204,22 @@ public sealed partial class DocumentVersionMigrationStore(
         FROM   doc.CellPermitPart p
         JOIN   @docs d ON d.Id = p.DocumentId
         WHERE  p.PeriodKey IN (SELECT PeriodKey FROM @periods)
-          AND  NOT EXISTS (SELECT 1 FROM @columnMap c WHERE c.o = p.ColumnDefId);
+          AND  NOT EXISTS (SELECT 1 FROM @columnMap c WHERE c.o = p.ColumnDefId)
+          AND  NOT EXISTS (SELECT 1 FROM @monthColumnMap mm WHERE mm.o = p.ColumnDefId AND mm.m = p.PeriodKey % 100);
 
         UPDATE p
         SET    p.TableDefId = c.t, p.ColumnDefId = c.n
         FROM   doc.CellPermitPart p
         JOIN   @docs d      ON d.Id = p.DocumentId
         JOIN   @columnMap c ON c.o = p.ColumnDefId
+        WHERE  p.PeriodKey IN (SELECT PeriodKey FROM @periods);
+
+        -- ✎ LAND-YEAR L3: частини місяця немісячної колонки — у місячну колонку свого місяця (як комірки).
+        UPDATE p
+        SET    p.TableDefId = mm.t, p.ColumnDefId = mm.n
+        FROM   doc.CellPermitPart p
+        JOIN   @docs d      ON d.Id = p.DocumentId
+        JOIN   @monthColumnMap mm ON mm.o = p.ColumnDefId AND mm.m = p.PeriodKey % 100
         WHERE  p.PeriodKey IN (SELECT PeriodKey FROM @periods);
 
         DELETE g
@@ -2221,11 +2333,13 @@ public sealed partial class DocumentVersionMigrationStore(
         -- переносимо), інакше deny мовчки перестає діяти (fail-open). Заборона
         -- перекриває вже наявний дозвіл на новому Id; повторний перенос нічого
         -- не дублює (UQ_ResourceGrant).
-        DECLARE @grantMap TABLE (k tinyint NOT NULL, o int NOT NULL, n int NOT NULL, PRIMARY KEY (k, o));
+        -- ✎ LAND-YEAR L3: грант немісячної колонки копіюється на КОЖНУ з її місячних колонок (ключ — (k, o, n)).
+        DECLARE @grantMap TABLE (k tinyint NOT NULL, o int NOT NULL, n int NOT NULL, PRIMARY KEY (k, o, n));
         INSERT @grantMap (k, o, n)
         SELECT 1, o, n FROM @sheetMap UNION ALL
         SELECT 2, o, n FROM @tableMap UNION ALL
-        SELECT 3, o, n FROM @columnMap;
+        SELECT 3, o, n FROM @columnMap UNION ALL
+        SELECT 3, o, n FROM @monthColumnMap;
 
         -- ⚠ DELETE + INSERT, а не UPDATE IsDeny: відбиток груп у ключі кешу профілю
         -- (count і max(Id) грантів ролі) від UPDATE не міняється, і профіль без

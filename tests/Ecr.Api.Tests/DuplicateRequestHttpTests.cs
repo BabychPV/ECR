@@ -45,6 +45,15 @@ public sealed partial class DuplicateRequestHttpTests(
 
     private static readonly TimeZoneInfo SiteZone = SiteTimeZone.Create("Asia/Atyrau").ToTimeZoneInfo();
 
+    /// <summary>Вікно дозволу тесту завершення: від фіксованої минулої дати до кінця 2099 (B161, правило 394).</summary>
+    private static readonly DateOnly PermitFrom = new(2001, 1, 1);
+
+    /// <summary>Кінець вікна дозволу.</summary>
+    private static readonly DateOnly PermitTo = new(2099, 12, 31);
+
+    /// <summary>Фіксована минула дата завершення: після неї дозвіл нечинний на будь-який день прогону.</summary>
+    private static readonly DateOnly PermitEnd = new(2001, 6, 30);
+
     private EcrApiFactory App => shared.Factory;
 
     // ───────────────────────────── ролі ─────────────────────────────
@@ -66,6 +75,7 @@ public sealed partial class DuplicateRequestHttpTests(
 
         // Послідовно.
         var code = $"DQ{Guid.NewGuid():N}"[..12];
+        _created.RoleCodes.Add(code);
         var created = await SendAsync(first, HttpMethod.Post, "/api/v1/roles", Body(code)).ConfigureAwait(true);
         var repeated = await SendAsync(first, HttpMethod.Post, "/api/v1/roles", Body(code)).ConfigureAwait(true);
 
@@ -75,6 +85,7 @@ public sealed partial class DuplicateRequestHttpTests(
 
         // Одночасно.
         var raced = $"DQ{Guid.NewGuid():N}"[..12];
+        _created.RoleCodes.Add(raced);
         var replies = await RaceAsync("roles", first, second, HttpMethod.Post, "/api/v1/roles", Body(raced)).ConfigureAwait(true);
 
         AssertNoServerError(replies);
@@ -243,6 +254,7 @@ public sealed partial class DuplicateRequestHttpTests(
         Assert.All(replies, r => Assert.True(r.Status == HttpStatusCode.Accepted, $"{r}\n{App.ErrorsText}"));
 
         var jobIds = new[] { a, b, replies[0], replies[1] }.Select(r => r.Json.GetProperty("jobId").GetString()!).ToList();
+        _created.JobIds.AddRange(jobIds);
         Assert.Equal(4, jobIds.Distinct(StringComparer.Ordinal).Count());
         Assert.Equal(before + 4, await JobCountAsync(jobCode, documentId: null).ConfigureAwait(true));
 
@@ -360,10 +372,17 @@ public sealed partial class DuplicateRequestHttpTests(
     // ───────────────────────────── дозвіл: завершення ─────────────────────────────
 
     /// <summary>
-    /// Завершення дозволу сьогоднішньою датою (без <c>endDate</c>): перший запит робить дозвіл нечинним, другий —
+    /// Завершення дозволу явною датою <see cref="PermitEnd"/>: перший запит робить дозвіл нечинним, другий —
     /// <c>409 ECR-PRM-4096 notActive</c> (<c>EndPermitHandler</c>, перевірка під блокуванням запису). Окремого кроку
     /// «підтвердити завершення» на сервері немає — маршрут один, <c>POST /permits/{id}/end</c>.
     /// </summary>
+    /// <remarks>
+    /// ⛔ B161 (правило 394): дати фіксовані, без <c>DateTime.UtcNow</c>. ⚠ Не 2099: стан дозволу сервер рахує на
+    /// СПРАВЖНЮ сьогоднішню дату (<c>PermitLifecycle.StatusOf</c>, <c>end &lt;= today</c> → <c>Expired</c>), тож
+    /// завершення датою в 2099 лишило б дозвіл чинним, і другий запит дав би <c>200</c>, а не <c>notActive</c>. Тому
+    /// вікно — <see cref="PermitFrom"/>..<see cref="PermitTo"/> (2099), а дата завершення — фіксована минула
+    /// <see cref="PermitEnd"/>: результат не залежить від дня прогону.
+    /// </remarks>
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Завершення_дозволу_двічі_друге_409_notActive()
@@ -374,20 +393,19 @@ public sealed partial class DuplicateRequestHttpTests(
         using var second = two;
 
         var type = await PublishPermitTypeAsync(first).ConfigureAwait(true);
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
-        var body = new { reason = "об'єкт виведено з експлуатації", endDate = (string?)null };
+        var body = new { reason = "об'єкт виведено з експлуатації", endDate = Iso(PermitEnd) };
 
         // Послідовно.
-        var permit = await ActivePermitAsync(first, type, "DQ-1", today).ConfigureAwait(true);
+        var permit = await ActivePermitAsync(first, type, "DQ-1").ConfigureAwait(true);
         var ended = await SendAsync(first, HttpMethod.Post, $"/api/v1/permits/{permit}/end", body).ConfigureAwait(true);
         var repeated = await SendAsync(first, HttpMethod.Post, $"/api/v1/permits/{permit}/end", body).ConfigureAwait(true);
 
         Assert.True(ended.Status == HttpStatusCode.OK, $"{ended}\n{App.ErrorsText}");
-        Assert.Equal(Iso(today), ended.Json.GetProperty("actualEnd").GetString());
+        Assert.Equal(Iso(PermitEnd), ended.Json.GetProperty("actualEnd").GetString());
         AssertRefused(repeated, HttpStatusCode.Conflict, "ECR-PRM-4096", "err.ECR-PRM-4096.notActive");
 
         // Одночасно.
-        var raced = await ActivePermitAsync(first, type, "DQ-2", today).ConfigureAwait(true);
+        var raced = await ActivePermitAsync(first, type, "DQ-2").ConfigureAwait(true);
         var replies = await RaceAsync("permit-end", first, second, HttpMethod.Post, $"/api/v1/permits/{raced}/end", body)
             .ConfigureAwait(true);
 
@@ -398,7 +416,7 @@ public sealed partial class DuplicateRequestHttpTests(
             HttpStatusCode.Conflict, "ECR-PRM-4096", "err.ECR-PRM-4096.notActive");
 
         var read = await SendAsync(first, HttpMethod.Get, $"/api/v1/permits/{raced}", null).ConfigureAwait(true);
-        Assert.Equal(Iso(today), read.Json.GetProperty("actualEnd").GetString());
+        Assert.Equal(Iso(PermitEnd), read.Json.GetProperty("actualEnd").GetString());
     }
 
     // ───────────────────────────── спільне для задач ─────────────────────────────
@@ -419,6 +437,7 @@ public sealed partial class DuplicateRequestHttpTests(
         Assert.All(replies, r => Assert.True(r.Status == HttpStatusCode.Accepted, $"{r}\n{App.ErrorsText}"));
 
         var jobIds = new[] { a, b, replies[0], replies[1] }.Select(r => r.Json.GetProperty("jobId").GetString()!).ToList();
+        _created.JobIds.AddRange(jobIds);
         Assert.Equal(4, jobIds.Distinct(StringComparer.Ordinal).Count());
         Assert.Equal(4, await JobCountAsync(jobCode, documentId).ConfigureAwait(false));
     }
@@ -614,6 +633,7 @@ public sealed partial class DuplicateRequestHttpTests(
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var document = await builder.BuildAsync(periodKey, columnCount: 3, rowCount: 2, rowMode: TableRowMode.Mixed)
             .ConfigureAwait(false);
+        _created.Documents.Add(document);
 
         await using var db = builder.CreateContext();
         db.DocumentSheets.Add(new DocumentSheet(document.DocumentId, document.SheetDefId));
@@ -642,6 +662,7 @@ public sealed partial class DuplicateRequestHttpTests(
         var role = new Role(EcrCode.Create($"R{Guid.NewGuid():N}"[..12]), Name("Duplicate request"));
         db.Roles.Add(role);
         await db.SaveChangesAsync().ConfigureAwait(false);
+        _created.RoleIds.Add(role.Id);
         return role.Id;
     }
 
@@ -653,6 +674,7 @@ public sealed partial class DuplicateRequestHttpTests(
         var registry = new RegistryDef(EcrCode.Create($"DQ{tag}"), Name($"Duplicate request {tag}"), isTemporal: false);
         db.RegistryDefs.Add(registry);
         await db.SaveChangesAsync().ConfigureAwait(false);
+        _created.RegistryIds.Add(registry.Id);
 
         var entry = new RegistryEntry(registry.Id, EcrCode.Create($"E{tag}"), Name($"E{tag}"), userId, DateTime.UtcNow);
         db.RegistryEntries.Add(entry);
@@ -681,6 +703,7 @@ public sealed partial class DuplicateRequestHttpTests(
         Assert.True((int)created.Status is >= 200 and < 300, $"опис звіту: {created}\n{App.ErrorsText}");
 
         var definitionId = created.Json.GetProperty("id").GetInt32();
+        _created.ReportDefIds.Add(definitionId);
         var versionId = created.Json.GetProperty("versions")[0].GetProperty("id").GetInt32();
 
         var published = await SendAsync(
@@ -694,6 +717,7 @@ public sealed partial class DuplicateRequestHttpTests(
     private async Task<string> PublishPermitTypeAsync(HttpClient client)
     {
         var code = $"DQ{Guid.NewGuid():N}"[..8].ToUpperInvariant();
+        _created.PermitTypeCodes.Add(code);
         var created = await SendAsync(
             client, HttpMethod.Post, "/api/v1/permit-types", new { code, nameL10n = new { en = code }, category = "Air" })
             .ConfigureAwait(false);
@@ -736,8 +760,8 @@ public sealed partial class DuplicateRequestHttpTests(
         return code;
     }
 
-    /// <summary>Чинний сьогодні дозвіл: вікно від «місяць тому» до «за рік».</summary>
-    private async Task<long> ActivePermitAsync(HttpClient client, string type, string number, DateOnly today)
+    /// <summary>Активований дозвіл з вікном <see cref="PermitFrom"/>..<see cref="PermitTo"/> (чинний на будь-який день прогону).</summary>
+    private async Task<long> ActivePermitAsync(HttpClient client, string type, string number)
     {
         var created = await SendAsync(client, HttpMethod.Post, "/api/v1/permits", new
         {
@@ -745,8 +769,8 @@ public sealed partial class DuplicateRequestHttpTests(
             number,
             location = (string?)null,
             issueDate = (string?)null,
-            validFrom = Iso(today.AddDays(-30)),
-            validTo = Iso(today.AddDays(365)),
+            validFrom = Iso(PermitFrom),
+            validTo = Iso(PermitTo),
             reportingFlags = (object?)null,
         }).ConfigureAwait(false);
         Assert.True(created.Status == HttpStatusCode.Created, $"дозвіл: {created}\n{App.ErrorsText}");
@@ -782,6 +806,8 @@ public sealed partial class DuplicateRequestHttpTests(
             db.Roles.Add(role);
             await db.SaveChangesAsync().ConfigureAwait(false);
             userId = user.Id;
+            _created.UserNames.Add(name);
+            _created.RoleIds.Add(role.Id);
 
             foreach (var permission in permissions)
             {

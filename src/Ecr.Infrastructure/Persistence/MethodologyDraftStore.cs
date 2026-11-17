@@ -335,15 +335,36 @@ public sealed class MethodologyDraftStore(EcrDbContext db) : IMethodologyDraftSt
         ArgumentNullException.ThrowIfNull(draft);
 
         db.MethodologyVersions.Add(draft);
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        await SaveMappingDuplicatesAsync(ct).ConfigureAwait(false);
 
         if (copyFromVersionId is { } sourceId)
         {
             await CopyChildrenAsync(sourceId, draft.Id, ct).ConfigureAwait(false);
-            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+            await SaveMappingDuplicatesAsync(ct).ConfigureAwait(false);
         }
 
         return draft.Id;
+    }
+
+    /// <summary>
+    /// ⛔ B158 (a3): збереження повз <see cref="UnitOfWork"/>, тож гонку за <c>UQ_MethodologyVersion</c> (два
+    /// однакові номери одночасно) мапить тут — та сама відмова, що й перевірка агрегату, а не 500.
+    /// </summary>
+    private async Task SaveMappingDuplicatesAsync(CancellationToken ct)
+    {
+        try
+        {
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
+        catch (DbUpdateException ex) when (SqlConflict.IsUniqueConstraintViolation(ex))
+        {
+            if (await MethodologyDuplicateKeys.TryMapAsync(db, ex, ct).ConfigureAwait(false) is { } mapped)
+            {
+                throw mapped;
+            }
+
+            throw;
+        }
     }
 
     /// <summary>

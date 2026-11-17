@@ -1,0 +1,226 @@
+// tests/Ecr.Application.Tests/Security/AnnualDecisionRecheckTests.cs
+using Ecr.Application.Errors;
+using Ecr.Application.Ports;
+using Ecr.Application.Security;
+using Ecr.Domain.Enums;
+using Ecr.Domain.ValueObjects;
+using Ecr.TestKit;
+using NSubstitute;
+using Xunit;
+
+namespace Ecr.Application.Tests.Security;
+
+/// <summary>
+/// ✎ B79 (Q9): повторна перевірка річного рішення під замками аркушів року — правило для записувачів історії дозволу.
+/// </summary>
+/// <remarks>
+/// ⛔ МУТАЦІЇ (локально): (1) прибрати гілку <c>DependentInput</c> — «Стовпець_із_залежними…» дає іншу причину, а
+/// «…поданий_не_блокує» червоніє; (2) прибрати виняток тексту якоря — «Текст_якоря…»; (3) замість відмови без замка
+/// повертатись мовчки — «Річне_рішення_без_замка…»; (4) не брати замки (стани = Draft) — усі відмови зеленіють хибно,
+/// червоніють «Стовпець_із_залежними…» і «Без_залежних…»; (5) прибрати ранній вихід для нерічного рішення —
+/// «Нерічне_рішення…».
+/// </remarks>
+public sealed class AnnualDecisionRecheckTests
+{
+    private const long DocumentId = 71;
+    private const int SheetDefId = 5;
+    private const int Jan = 209901;
+    private const int Feb = 209902;
+
+    private static readonly IReadOnlyList<int> Year = [Feb, Jan];
+
+    private static ISheetEditGate Gate(DocumentStatus january, DocumentStatus february, long? copyId = null)
+    {
+        var gate = Substitute.For<ISheetEditGate>();
+        if (copyId is { } copy)
+        {
+            gate.EnterCopyEditAsync(DocumentId, SheetDefId, new PeriodKey(Jan), copy, Arg.Any<CancellationToken>()).Returns(january);
+            gate.EnterCopyEditAsync(DocumentId, SheetDefId, new PeriodKey(Feb), copy, Arg.Any<CancellationToken>()).Returns(february);
+        }
+        else
+        {
+            gate.EnterEditAsync(DocumentId, SheetDefId, new PeriodKey(Jan), Arg.Any<CancellationToken>()).Returns(january);
+            gate.EnterEditAsync(DocumentId, SheetDefId, new PeriodKey(Feb), Arg.Any<CancellationToken>()).Returns(february);
+        }
+
+        return gate;
+    }
+
+    private static EditDecision Annual(bool dependent = false, bool text = false)
+        => EditDecision.Allow() with { AnnualPeriods = Year, DependentInput = dependent, AnnualTextOnly = text };
+
+    private static Task RunAsync(ISheetEditGate? gate, EditDecision decision, long? copyId = null)
+        => AnnualDecisionRecheck.EnsureAsync(gate, DocumentId, SheetDefId, copyId, decision, 1, CancellationToken.None);
+
+    private const int ReaderSheet = 3;
+
+    /// <remarks>
+    /// ✎ Квіз 16.11: стовпець читає лише формула аркуша-читача (Id 3 &lt; 5). Його лютий затверджено — відмова з
+    /// <c>sheets = [{ RDR, [лютий] }]</c>; власний затверджений січень не блокує (<c>DependentOnlyOtherSheets</c>).
+    /// Замки — у каноничному порядку: аркуш ↑, період ↑ (читач раніше за аркуш правки). МУТАЦІЇ (локально): прибрати
+    /// <c>DependentReaderLocks.ThrowIfLocked</c> в <c>EnsureAsync</c> — не червоніє лише без відмови, червоніє
+    /// <c>ThrowsAsync</c>; у <c>DependentReaderLocks.Plan</c> упорядкувати «спершу аркуш правки» — червоніє порядок.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "B79")]
+    public async Task Аркуш_читач_затверджений_під_замком_відхиляє_з_аркушем_а_замки_в_каноничному_порядку()
+    {
+        var order = new List<(int Sheet, int Period)>();
+        var gate = Substitute.For<ISheetEditGate>();
+        gate.EnterEditAsync(DocumentId, Arg.Any<int>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns(c =>
+            {
+                var sheet = c.ArgAt<int>(1);
+                var period = c.ArgAt<PeriodKey>(2).Value;
+                order.Add((sheet, period));
+                var approved = (sheet == ReaderSheet && period == Feb) || (sheet == SheetDefId && period == Jan);
+                return Task.FromResult(approved ? DocumentStatus.Approved : DocumentStatus.Draft);
+            });
+        var decision = Annual(dependent: true) with
+        {
+            DependentOnlyOtherSheets = true,
+            DependentReaderSheets = [new DependentReaderSheet(ReaderSheet, "RDR")],
+        };
+
+        var denied = await Assert.ThrowsAsync<AccessDeniedException>(() => RunAsync(gate, decision));
+
+        Assert.Equal(nameof(EditDenyReason.DependentMonthsLocked), denied.Details?["reason"]);
+        Assert.Equal([Feb], Assert.IsType<int[]>(denied.Details?[DependentMonthsRule.MonthsDetail]));
+        var sheet = Assert.Single(Assert.IsType<Dictionary<string, object?>[]>(denied.Details?[DependentMonthsRule.SheetsDetail]));
+        Assert.Equal("RDR", sheet["sheetCode"]);
+        Assert.Equal(
+            [(ReaderSheet, Jan), (ReaderSheet, Feb), (SheetDefId, Jan), (SheetDefId, Feb)],
+            order.ToArray());
+    }
+
+    /// <remarks>
+    /// ✎ F13 AU (B79): стовпець читає лише аркуш-читач (у ньому нічого не затверджено), а ВЕСЬ рік аркуша правки
+    /// затверджено під замком — запис відхиляє <c>DocumentApproved</c> (затверджені значення не змінюються). Поданий рік
+    /// і рік «затверджений + чернетка» не блокують (поблажка для поданих і правило «лише затверджений місяць читача»).
+    /// МУТАЦІЯ (AU): прибрати перевірку агрегату у гілці <c>DependentOnlyOtherSheets</c> — червоніє <c>ThrowsAsync</c>.
+    /// </remarks>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "B79")]
+    [InlineData(DocumentStatus.Approved, DocumentStatus.Approved, true)]
+    [InlineData(DocumentStatus.Submitted, DocumentStatus.Submitted, false)]
+    [InlineData(DocumentStatus.Approved, DocumentStatus.Submitted, false)]
+    [InlineData(DocumentStatus.Approved, DocumentStatus.Draft, false)]
+    public async Task Читач_лише_інший_аркуш_весь_рік_аркуша_правки_затверджено_DocumentApproved(
+        DocumentStatus january, DocumentStatus february, bool denied)
+    {
+        var gate = Substitute.For<ISheetEditGate>();
+        gate.EnterEditAsync(DocumentId, Arg.Any<int>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns(c => Task.FromResult(c.ArgAt<int>(1) != SheetDefId
+                ? DocumentStatus.Draft
+                : c.ArgAt<PeriodKey>(2).Value == Jan ? january : february));
+        var decision = Annual(dependent: true) with
+        {
+            DependentOnlyOtherSheets = true,
+            DependentReaderSheets = [new DependentReaderSheet(ReaderSheet, "RDR")],
+        };
+
+        if (!denied)
+        {
+            await RunAsync(gate, decision);
+            return;
+        }
+
+        var error = await Assert.ThrowsAsync<AccessDeniedException>(() => RunAsync(gate, decision));
+        Assert.Equal("ECR-ACCS-0403", error.ErrorCode);
+        Assert.Equal(nameof(EditDenyReason.DocumentApproved), error.Details?["reason"]);
+        Assert.False(error.Details!.ContainsKey(DependentMonthsRule.MonthsDetail));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "B79")]
+    public async Task Стовпець_із_залежними_затверджений_місяць_під_замком_відхиляє_з_переліком()
+    {
+        var denied = await Assert.ThrowsAsync<AccessDeniedException>(
+            () => RunAsync(Gate(DocumentStatus.Approved, DocumentStatus.Draft), Annual(dependent: true)));
+
+        Assert.Equal(nameof(EditDenyReason.DependentMonthsLocked), denied.Details?["reason"]);
+        Assert.Equal(new[] { Jan }, Assert.IsType<int[]>(denied.Details?[DependentMonthsRule.MonthsDetail]));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "B79")]
+    public async Task Стовпець_із_залежними_поданий_рік_не_блокує_а_без_залежних_DocumentSubmitted()
+    {
+        await RunAsync(Gate(DocumentStatus.Submitted, DocumentStatus.Submitted), Annual(dependent: true));
+
+        var denied = await Assert.ThrowsAsync<AccessDeniedException>(
+            () => RunAsync(Gate(DocumentStatus.Submitted, DocumentStatus.Submitted), Annual()));
+        Assert.Equal(nameof(EditDenyReason.DocumentSubmitted), denied.Details?["reason"]);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "B79")]
+    public async Task Без_залежних_агрегат_року_один_затверджений_і_чернетка_пише_усі_затверджені_DocumentApproved()
+    {
+        await RunAsync(Gate(DocumentStatus.Approved, DocumentStatus.Draft), Annual());
+
+        var denied = await Assert.ThrowsAsync<AccessDeniedException>(
+            () => RunAsync(Gate(DocumentStatus.Approved, DocumentStatus.Approved), Annual()));
+        Assert.Equal("ECR-ACCS-0403", denied.ErrorCode);
+        Assert.Equal("err.ECR-ACCS-0403.deniedCells", denied.Details?["messageKey"]);
+        Assert.Equal(nameof(EditDenyReason.DocumentApproved), denied.Details?["reason"]);
+        Assert.False(denied.Details!.ContainsKey(DependentMonthsRule.MonthsDetail));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "B79")]
+    public async Task Текст_якоря_поданий_рік_пише_затверджений_ні()
+    {
+        await RunAsync(Gate(DocumentStatus.Submitted, DocumentStatus.Submitted), Annual(text: true));
+
+        var denied = await Assert.ThrowsAsync<AccessDeniedException>(
+            () => RunAsync(Gate(DocumentStatus.Approved, DocumentStatus.Approved), Annual(text: true)));
+        Assert.Equal(nameof(EditDenyReason.DocumentApproved), denied.Details?["reason"]);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "B79")]
+    public async Task Нерічне_рішення_замків_не_бере_і_без_замка_не_падає()
+    {
+        var gate = Substitute.For<ISheetEditGate>();
+
+        await RunAsync(gate, EditDecision.Allow());
+        await RunAsync(null, EditDecision.Allow());
+
+        Assert.Empty(gate.ReceivedCalls());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "B79")]
+    public async Task Річне_рішення_без_замка_відмовляє_а_не_пропускає()
+    {
+        await Assert.ThrowsAsync<InvalidOperationException>(() => RunAsync(null, Annual(dependent: true)));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "B79")]
+    public async Task Замки_беруться_за_зростанням_періоду_і_для_копії_аркуша_її_власні()
+    {
+        var gate = Gate(DocumentStatus.Approved, DocumentStatus.Draft, copyId: 9);
+
+        var denied = await Assert.ThrowsAsync<AccessDeniedException>(() => RunAsync(gate, Annual(dependent: true), copyId: 9));
+
+        Assert.Equal(nameof(EditDenyReason.DependentMonthsLocked), denied.Details?["reason"]);
+        Received.InOrder(() =>
+        {
+            gate.EnterCopyEditAsync(DocumentId, SheetDefId, new PeriodKey(Jan), 9, Arg.Any<CancellationToken>());
+            gate.EnterCopyEditAsync(DocumentId, SheetDefId, new PeriodKey(Feb), 9, Arg.Any<CancellationToken>());
+        });
+        await gate.DidNotReceive().EnterEditAsync(
+            Arg.Any<long>(), Arg.Any<int>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
+    }
+}

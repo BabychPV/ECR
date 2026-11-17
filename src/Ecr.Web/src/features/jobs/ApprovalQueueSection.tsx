@@ -5,6 +5,7 @@ import { formatDateTime } from '@/shared/format/datetime';
 import { formatPeriodKey } from '@/shared/format/periodKey';
 import { formatCount } from '@/shared/format/plural';
 import { t } from '@/shared/i18n';
+import { toneFills } from '@/shared/ui/StatusBadge';
 import { MyTasksSection } from './MyTasksSection';
 import { approvalQueueHref, approvalQueueItems, useApprovalQueue, type ApprovalQueueItem } from './useApprovalQueue';
 
@@ -89,6 +90,14 @@ export function groupApprovalItems(items: readonly ApprovalQueueItem[]): readonl
   return [...groups].map(([key, list]) => ({ key, items: list }));
 }
 
+/**
+ * ✎ B79 (Q13): позначка рядка черги `recalculatedAfterSubmission` (те саме правило, що в картці документа); поле
+ * контракту (`ApprovalQueueItemDto`). `=== true`: відповідь без поля (старіший сервер) — позначки просто немає.
+ */
+function recalculatedAfterSubmission(item: ApprovalQueueItem): boolean {
+  return item.recalculatedAfterSubmission === true;
+}
+
 function itemKey(item: ApprovalQueueItem): string {
   return `${String(item.documentId)}:${String(item.sheetDefId)}:${String(item.periodKey)}`;
 }
@@ -157,6 +166,20 @@ function ApprovalRow({
             {item.stepOrdinal !== null && item.stepCount !== null
               && ` · ${t('myTasks.approval.step', { n: String(item.stepOrdinal), count: String(item.stepCount) })}`}
           </Text>
+          {/* ✎ B79 (Q13): числа аркуша перераховано після подання - погоджувач бачить це ще в черзі, до затвердження. */}
+          {recalculatedAfterSubmission(item) && (
+            // ⚠ Не Badge: за KIT.md бейджі - лише `StatusBadge` (стани словника сервера), а це ознака рядка, не стан.
+            // Тому текст у тоні «увага» (`toneFills.warning` - виміряний токен), як позначка на банері аркуша.
+            <Text
+              size="xs"
+              fw={500}
+              c={toneFills.warning.text}
+              title={t('myTasks.approval.recalculatedHint')}
+              data-recalculated-after-submission=""
+            >
+              {t('myTasks.approval.recalculated')}
+            </Text>
+          )}
         </div>
         <Group justify="flex-end">
           <Anchor component={Link} to={approvalQueueHref(item)} size="sm" data-action="review" onClick={onNavigate}>

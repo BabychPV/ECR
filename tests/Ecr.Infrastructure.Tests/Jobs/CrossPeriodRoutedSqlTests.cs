@@ -1367,12 +1367,366 @@ public sealed class CrossPeriodRoutedSqlTests(SqlServerFixture sql)
         var fanOut = new CrossPeriodFanOut(
             new RowStore(db, bulk, new TestClock(Now)), Versions(world), periods, jobs, db, router, world.Metadata);
 
-        var job = new FormulaRecalculationJob(Formulas(db, world, store, router), db, fanOut, periods);
+        // ✎ B79: журнал і годинник — як у DI; позначку «перераховано після подання» отримує поданий аркуш, у який записано.
+        var job = new FormulaRecalculationJob(
+            Formulas(db, world, store, router), db, fanOut, periods, logger: null, audit: new AuditWriter(db),
+            clock: new TestClock(Now));
         var progress = new CapturingJobProgress();
         await job.ExecuteAsync(request, progress, CancellationToken.None);
 
         return (progress, store);
     }
+
+    // ── B79 (lane 3, Q10): каскад ЗВИЧАЙНОЇ правки — подані з позначкою, затверджені ні (правило людини 07.11) ──
+
+    /// <remarks>
+    /// Диференційний: один прогін звичайного насіння, місяці-читачі в різних станах. Мутації (локально): (1) у
+    /// <c>RecalculationService.RecalculateFromOtherPeriodsAsync</c> передати <c>writeSubmitted: false</c> — поданий
+    /// вересень лишається застарілим; (2) у <c>EnterSheetsAsync</c> дозволити <c>Approved</c> — січень переписано;
+    /// (3) прибрати виклик <c>SubmittedSheetRecalcLog.WriteAsync</c> — позначки немає; (4) у <c>EnterSheetsAsync</c> не
+    /// наповнювати <c>submittedByFlag</c> — позначки немає; (5) наповнювати його й для чернетки — зайва позначка жовтня;
+    /// (6) у <c>SubmittedSheetRecalcLog</c> зіпсувати кореляцію чи операцію — позначку не знайдено.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "B79")]
+    public async Task B79_звичайна_правка_поданий_місяць_перераховано_з_позначкою_затверджений_не_чіпано_чернетка_без_позначки()
+    {
+        var world = await ArrangeAsync();
+        await SetOwnerValueAsync(world, 7m);
+        await SetSheetStatusAsync(world, 1, DocumentStatus.Approved);
+        await SetSheetStatusAsync(world, 9, DocumentStatus.Submitted);
+
+        var enqueued = new List<(string Target, string Payload)>();
+        await RunJobAsync(world, enqueued, OwnerRequest(world), routing: true);
+
+        // Поданий вересень: перераховано й позначено.
+        Assert.Equal(14m, await OutputAsync(world, Period(9)));
+        Assert.Equal(1, await SubmittedMarksAsync(world, 9));
+
+        // Затверджений січень: число старе, позначки немає.
+        Assert.Equal(StaleOutput, await OutputAsync(world, Period(1)));
+        Assert.Equal(0, await SubmittedMarksAsync(world, 1));
+
+        // Чернетки (жовтень — перегляд, листопад — власник): перераховано без позначки.
+        Assert.Equal(14m, await OutputAsync(world, Period(ViewMonth)));
+        Assert.Equal(14m, await OutputAsync(world, Period(OwnerMonth)));
+        Assert.Equal(0, await SubmittedMarksAsync(world, ViewMonth));
+        Assert.Equal(0, await SubmittedMarksAsync(world, OwnerMonth));
+    }
+
+    /// <remarks>Контроль: без поданих місяців каскад позначок не ставить нікому (усі місяці — чернетки).
+    /// Мутація: у <c>RunAsync</c> складати в <c>submittedNow</c> кожен записаний аркуш — червоніє.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "B79")]
+    public async Task B79_контроль_усі_місяці_чернетки_перераховано_без_жодної_позначки()
+    {
+        var world = await ArrangeAsync();
+        await SetOwnerValueAsync(world, 7m);
+
+        var enqueued = new List<(string Target, string Payload)>();
+        await RunJobAsync(world, enqueued, OwnerRequest(world), routing: true);
+
+        foreach (var month in new[] { 1, 9, ViewMonth, OwnerMonth })
+        {
+            Assert.Equal(14m, await OutputAsync(world, Period(month)));
+            Assert.Equal(0, await SubmittedMarksAsync(world, month));
+        }
+    }
+
+    /// <summary>
+    /// ✎ B79 (слово людини 16.11, «якщо вхідні дані … змінилися»): позначку ставить ЗМІНА числа, а не факт прогону.
+    /// Повторний каскад того самого насіння над уже перерахованим поданим місяцем нічого не пише й другої позначки не лишає.
+    /// </summary>
+    /// <remarks>Мутації (локально): у <c>RecalculationService.Evaluate</c> прибрати пропуск незміненого значення
+    /// (<c>CellValueComparison.AreEqual</c>) — друга позначка, червоне; у <c>RunAsync</c> складати в <c>submittedNow</c>
+    /// поданий аркуш ДО перевірки, чи є що писати (<c>pair.Value.Count &gt; 0</c>), — друга позначка, червоне.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "B79")]
+    public async Task B79_повторний_каскад_без_зміни_чисел_другої_позначки_не_ставить()
+    {
+        var world = await ArrangeAsync();
+        await SetOwnerValueAsync(world, 7m);
+        await SetSheetStatusAsync(world, 9, DocumentStatus.Submitted);
+
+        await RunJobAsync(world, [], OwnerRequest(world), routing: true);
+        Assert.Equal(14m, await OutputAsync(world, Period(9)));
+        Assert.Equal(1, await SubmittedMarksAsync(world, 9));
+
+        // Те саме насіння вдруге: входи не змінились — числа ті самі, запису немає, позначка лишається одна.
+        await RunJobAsync(world, [], OwnerRequest(world), routing: true);
+        Assert.Equal(14m, await OutputAsync(world, Period(9)));
+        Assert.Equal(1, await SubmittedMarksAsync(world, 9));
+    }
+
+    /// <summary>
+    /// ✎ B79: повний прогін формул (шлях <c>RecalculationJob</c>: нічний розклад, кнопка, автоперерахунок) повертає
+    /// поданий аркуш у <c>submittedWritten</c> лише тоді, коли записав у нього змінене число; прогін над тими самими
+    /// входами — порожній набір; чернетка перераховується й у набір не потрапляє ніколи.
+    /// </summary>
+    /// <remarks>Мутації (локально): у <c>RecalculateAllAsync</c>/<c>RecalculateDocumentAsync</c> не передавати
+    /// <c>submittedWritten</c> далі — перший набір порожній, червоне; у <c>EnterSheetsAsync</c> складати в
+    /// <c>submittedByFlag</c> і чернетку — набір чернетки непорожній, червоне; прибрати пропуск незміненого значення —
+    /// другий набір непорожній, червоне.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "B79")]
+    public async Task B79_повний_прогін_повертає_поданий_аркуш_лише_коли_записав_змінене_число()
+    {
+        var world = await ArrangeAsync();
+        await SetOwnerValueAsync(world, 7m);
+        await SetSheetStatusAsync(world, 9, DocumentStatus.Submitted);
+
+        // Поданий вересень, вхід змінився: число перераховано, аркуш — у наборі.
+        var changed = await FullRunAsync(world, 9);
+        Assert.Equal(14m, await OutputAsync(world, Period(9)));
+        Assert.Equal(new[] { (world.Doc.SheetDefId, (long?)null) }, changed);
+
+        // Той самий прогін удруге (типова ніч): нічого не змінилось — набір порожній.
+        Assert.Empty(await FullRunAsync(world, 9));
+        Assert.Equal(14m, await OutputAsync(world, Period(9)));
+
+        // Чернетка (жовтень): перераховано, у набір поданих не потрапляє.
+        Assert.Empty(await FullRunAsync(world, ViewMonth));
+        Assert.Equal(14m, await OutputAsync(world, Period(ViewMonth)));
+    }
+
+    /// <summary>Повний прогін формул документа за місяць так, як його кличе <c>RecalculationJob.FormulasAsync</c>.</summary>
+    private static async Task<HashSet<(int SheetDefId, long? CopyId)>> FullRunAsync(World world, int month)
+    {
+        var written = new HashSet<(int SheetDefId, long? CopyId)>();
+        await using var db = world.Builder.CreateContext();
+        var router = new MonthColumnRouter(db, Config(true));
+        var service = Formulas(db, world, new MonthRoutedCellStore(new NormalizedCellStore(db), router, world.Metadata, db), router);
+        await service.RecalculateAllAsync(
+            world.Doc.DocumentId, new PeriodKey(Period(month)), CancellationToken.None,
+            writeSubmitted: true, submittedWritten: written);
+
+        return written;
+    }
+
+    /// <remarks>Поданий місяць САМОГО насіння (власник) — теж перераховано й позначено (вхід <c>RecalculateAsync</c>).
+    /// Мутація: у <c>RecalculateAsync</c> передати <c>writeSubmitted: false</c> — червоніє.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "B79")]
+    public async Task B79_поданий_місяць_насіння_теж_перераховано_з_позначкою()
+    {
+        var world = await ArrangeAsync();
+        await SetOwnerValueAsync(world, 7m);
+        await SetSheetStatusAsync(world, OwnerMonth, DocumentStatus.Submitted);
+
+        var enqueued = new List<(string Target, string Payload)>();
+        await RunJobAsync(world, enqueued, OwnerRequest(world), routing: true);
+
+        Assert.Equal(14m, await OutputAsync(world, Period(OwnerMonth)));
+        Assert.Equal(1, await SubmittedMarksAsync(world, OwnerMonth));
+    }
+
+    /// <summary>
+    /// ✎ B79 (Q12, поправка до ФВ-9.17): каскад змінює ЖИВЕ число поданого аркуша й ставить позначку, але зріз подання
+    /// (<c>calc.SubmissionSnapshot</c>) лишається таким, яким його подано, — рядки до і після прогону тотожні.
+    /// </summary>
+    /// <remarks>Мутація (локально): у транзакції запису <c>RecalculationService.RunAsync</c> для поданого аркуша
+    /// оновити чи додати рядок <c>SubmissionSnapshot</c> (або викликати <c>ReportSnapshotSync</c>/перебудову зрізу з
+    /// каскаду) — червоніє порівняння «до/після»; прибрати виклик <c>SubmittedSheetRecalcLog.WriteAsync</c> — червоніє
+    /// позначка.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "B79")]
+    public async Task B79_каскад_поданого_місяця_не_чіпає_зріз_подання_а_позначку_ставить()
+    {
+        var world = await ArrangeAsync();
+        await SetOwnerValueAsync(world, 7m);
+        await SetSheetStatusAsync(world, 9, DocumentStatus.Submitted);
+        await using (var setup = world.Builder.CreateContext())
+        {
+            setup.SubmissionSnapshots.Add(new Ecr.Domain.Entities.Workflow.SubmissionSnapshot(
+                world.Doc.DocumentId, world.Doc.SheetDefId, Period(9), world.Doc.TemplateVersionId, "[]", null, null,
+                "{\"out\":-1}", new byte[32], Now.AddDays(-2), 1));
+            await setup.SaveChangesAsync();
+        }
+
+        var before = await SubmissionSnapshotsAsync(world);
+        Assert.Contains("-1", before, StringComparison.Ordinal);
+
+        var enqueued = new List<(string Target, string Payload)>();
+        await RunJobAsync(world, enqueued, OwnerRequest(world), routing: true);
+
+        // Живе число змінилось і позначено…
+        Assert.Equal(14m, await OutputAsync(world, Period(9)));
+        Assert.Equal(1, await SubmittedMarksAsync(world, 9));
+
+        // …а зріз подання — той самий рядок із тими самими значеннями.
+        Assert.Equal(before, await SubmissionSnapshotsAsync(world));
+    }
+
+    /// <summary>
+    /// ✎ B79 (Q13): після справжнього каскаду рядок черги «До погодження» поданого місяця позначено (те саме правило, що
+    /// на картці документа), рядок поданого місяця без перерахунку — ні; повторне подання (пізніший <c>SubmittedAt</c>)
+    /// позначку знімає.
+    /// </summary>
+    /// <remarks>Мутації (локально): у <c>RecalculatedAfterSubmissionMark.Rule</c> прибрати порівняння
+    /// <c>c.ChangedAt &gt; a.SubmittedAt</c> — червоніє «після повторного подання»; прибрати період із кореляції —
+    /// позначено й серпень; у <c>StateIdsAsync</c> прибрати <c>a.Id IN (…)</c> — у відповідь потрапляють чужі стани.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "B79")]
+    public async Task B79_після_каскаду_рядок_черги_позначено_сусідній_поданий_без_перерахунку_ні_повторне_подання_знімає()
+    {
+        var world = await ArrangeAsync();
+        await SetOwnerValueAsync(world, 7m);
+        await SetSheetStatusAsync(world, 9, DocumentStatus.Submitted);
+
+        // Серпень: поданий, але екземпляра таблиці в ньому немає — каскад його не пише, позначки не буде.
+        await SetSheetStatusAsync(world, 8, DocumentStatus.Submitted);
+        var september = await StateIdAsync(world, 9);
+        var august = await StateIdAsync(world, 8);
+
+        var enqueued = new List<(string Target, string Payload)>();
+        await RunJobAsync(world, enqueued, OwnerRequest(world), routing: true);
+
+        await using (var db = world.Builder.CreateContext())
+        {
+            var marked = await new ApprovalQueueStore(db)
+                .ListRecalculatedAfterSubmissionAsync(new[] { september, august }, CancellationToken.None);
+            Assert.Equal(new[] { september }, marked);
+
+            // Порожній набір — без позначок.
+            Assert.Empty(await new ApprovalQueueStore(db)
+                .ListRecalculatedAfterSubmissionAsync(Array.Empty<long>(), CancellationToken.None));
+        }
+
+        // Повторне подання: SubmittedAt пізніший за запис журналу.
+        await ExecuteAsync($"UPDATE wf.ApprovalState SET SubmittedAt = '2100-01-01T00:00:00' WHERE Id = {september}");
+        await using (var db = world.Builder.CreateContext())
+        {
+            Assert.Empty(await new ApprovalQueueStore(db)
+                .ListRecalculatedAfterSubmissionAsync(new[] { september, august }, CancellationToken.None));
+        }
+    }
+
+    /// <summary>
+    /// ✎ B79 (Q13): спільне правило позначки вимагає стан <c>Submitted</c> — аркуш, затверджений після перерахунку,
+    /// позначки не має ні в черзі, ні на картці документа (той самий фрагмент SQL), хоч запис журналу лишився.
+    /// </summary>
+    /// <remarks>Мутація (локально): у <c>RecalculatedAfterSubmissionMark.Rule</c> прибрати <c>a.Status = 1</c> —
+    /// червоніє друга половина (після затвердження).</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "B79")]
+    public async Task B79_затверджений_після_перерахунку_аркуш_позначки_не_має_ні_в_черзі_ні_на_картці()
+    {
+        var world = await ArrangeAsync();
+        await SetOwnerValueAsync(world, 7m);
+        await SetSheetStatusAsync(world, 9, DocumentStatus.Submitted);
+        var september = await StateIdAsync(world, 9);
+
+        var enqueued = new List<(string Target, string Payload)>();
+        await RunJobAsync(world, enqueued, OwnerRequest(world), routing: true);
+
+        // Поданий і перерахований: позначка є і в черзі, і на картці документа за вересень.
+        Assert.Equal(new[] { september }, await QueueMarksAsync(world, september));
+        Assert.True(await CardMarkAsync(world, 9));
+
+        await using (var db = world.Builder.CreateContext())
+        {
+            var state = await db.ApprovalStates.SingleAsync(a => a.Id == september);
+            state.Approve(state.SubmittedByUserId ?? 0, Now.AddDays(1));
+            await db.SaveChangesAsync();
+        }
+
+        Assert.Empty(await QueueMarksAsync(world, september));
+        Assert.False(await CardMarkAsync(world, 9));
+        Assert.Equal(1, await SubmittedMarksAsync(world, 9));
+    }
+
+    private static async Task<IReadOnlySet<long>> QueueMarksAsync(World world, params long[] stateIds)
+    {
+        await using var db = world.Builder.CreateContext();
+        return await new ApprovalQueueStore(db).ListRecalculatedAfterSubmissionAsync(stateIds, CancellationToken.None);
+    }
+
+    /// <summary>Позначка аркуша на картці документа (<c>sheets[].recalculatedAfterSubmission</c>) за місяць.</summary>
+    private static async Task<bool> CardMarkAsync(World world, int month)
+    {
+        await using var db = world.Builder.CreateContext();
+
+        // Склад документа (картка показує стан аркушів СКЛАДУ); будівник документа його не створює.
+        if (!await db.DocumentSheets.AnyAsync(s => s.DocumentId == world.Doc.DocumentId))
+        {
+            db.DocumentSheets.Add(new Ecr.Domain.Entities.Documents.DocumentSheet(world.Doc.DocumentId, world.Doc.SheetDefId));
+            await db.SaveChangesAsync();
+        }
+
+        var summary = await new DocumentStore(db).FindAsync(
+            world.Doc.DocumentId, new PeriodKeyFilter(Period(month)), CancellationToken.None);
+        var sheets = summary!.Sheets!;
+        Assert.NotEmpty(sheets);
+        return sheets.Any(s => s.RecalculatedAfterSubmission);
+    }
+
+    private static async Task<long> StateIdAsync(World world, int month)
+    {
+        var period = Period(month);
+        await using var db = world.Builder.CreateContext();
+        return await db.ApprovalStates.AsNoTracking()
+            .Where(a => a.DocumentId == world.Doc.DocumentId && a.SheetDefId == world.Doc.SheetDefId && a.PeriodKey == period)
+            .Select(a => a.Id)
+            .SingleAsync();
+    }
+
+    /// <summary>Усі зрізи подання документа (за Id) одним рядком JSON — для порівняння «до/після».</summary>
+    private static async Task<string> SubmissionSnapshotsAsync(World world)
+    {
+        await using var db = world.Builder.CreateContext();
+        var rows = await db.SubmissionSnapshots.AsNoTracking()
+            .Where(s => s.DocumentId == world.Doc.DocumentId)
+            .OrderBy(s => s.Id)
+            .ToListAsync();
+        Assert.NotEmpty(rows);
+
+        return JsonSerializer.Serialize(rows);
+    }
+
+    /// <summary>Стан аркуша місяця (оригінал) — напряму в <c>wf.ApprovalState</c>.</summary>
+    private static async Task SetSheetStatusAsync(World world, int month, DocumentStatus status)
+    {
+        await using var db = world.Builder.CreateContext();
+        var user = new Ecr.Domain.Entities.Security.User(
+            $"b79c_{Guid.NewGuid():N}"[..20], "B79 cascade user", AuthProvider.Local);
+        user.SetPassword("not-a-real-hash");
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        // Подання — РАНІШЕ за годинник задачі: позначку читають як запис журналу, пізніший за SubmittedAt.
+        var state = new Ecr.Domain.Entities.Workflow.ApprovalState(world.Doc.DocumentId, world.Doc.SheetDefId, Period(month));
+        state.Submit(user.Id, Now.AddDays(-2));
+        if (status == DocumentStatus.Approved)
+        {
+            state.Approve(user.Id, Now.AddDays(-1));
+        }
+
+        db.ApprovalStates.Add(state);
+        await db.SaveChangesAsync();
+    }
+
+    /// <summary>Скільки записів «перераховано після подання» має аркуш документа за місяць.</summary>
+    private Task<int> SubmittedMarksAsync(World world, int month)
+        => CountAsync(
+            "SELECT COUNT(*) FROM aud.StructureChange WHERE EntityType = N'SheetRecalc' " +
+            "AND Operation = N'RecalculatedAfterSubmission' " +
+            $"AND CorrelationId = N'sheet-recalc:{world.Doc.DocumentId}:{world.Doc.SheetDefId}:{Period(month)}'");
 
     private static RecalculationService Formulas(
         EcrDbContext db, World world, ICellStore store, IMonthColumnRouter router)

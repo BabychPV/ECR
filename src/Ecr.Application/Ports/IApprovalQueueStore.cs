@@ -43,6 +43,17 @@ public interface IApprovalQueueStore
         IReadOnlyCollection<long> participatedDocumentIds, CancellationToken ct);
 
     /// <summary>
+    /// ✎ B79 (Q13): які з поданих рядків стану сторінки черги мають позначку «перераховано після подання» — те саме
+    /// правило, що <c>sheets[].recalculatedAfterSubmission</c> картки документа (запис журналу
+    /// <c>SheetRecalc / RecalculatedAfterSubmission</c>, пізніший за останнє подання). ОДИН запит на сторінку.
+    /// </summary>
+    /// <param name="stateIds">Ключі стану (<see cref="ApprovalQueueCandidate.StateId"/>) рядків сторінки.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Підмножина <paramref name="stateIds"/> з позначкою.</returns>
+    public Task<IReadOnlySet<long>> ListRecalculatedAfterSubmissionAsync(
+        IReadOnlyCollection<long> stateIds, CancellationToken ct);
+
+    /// <summary>
     /// ✎ D-449 («Повернуто на доопрацювання» у «My tasks»): аркуші, повернені на доопрацювання — відхилені погоджувачем
     /// (<c>Rejected</c>) або повернені в роботу (<c>Draft</c>, остання подія журналу — <c>Reopen</c>; відкликання автором — ні),
     /// документів, де <paramref name="userId"/> — власник чи останній подавач аркуша (у проєктах

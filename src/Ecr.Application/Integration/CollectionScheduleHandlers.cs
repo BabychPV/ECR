@@ -592,14 +592,7 @@ public sealed class CreateCollectionScheduleHandler(
 
         if (entity.ScheduleId is { } existing)
         {
-            throw new ConcurrencyConflictException(
-                ErrorCodes.JobStateConflict,
-                $"Сутність джерела {sourceEntityId} уже має розклад {existing}.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-JOB-0409.collectionScheduleExists",
-                    ["scheduleId"] = existing.ToString(CultureInfo.InvariantCulture),
-                });
+            throw ScheduleExists(sourceEntityId, existing);
         }
 
         ListCollectionSchedulesHandler.RequireCollectableSource(entity.SourceKind, entity.Code);
@@ -631,37 +624,53 @@ public sealed class CreateCollectionScheduleHandler(
         var schedule = NewSchedule();
         var attempt = 0;
 
-        // ФВ-12.10: новий розклад — у журналі структурних змін, в одній транзакції зі збереженням.
-        await CollectionScheduleDependencyRules.RunMappingConflictAsync(store, 0, () => uow.ExecuteInTransactionAsync(async innerCt =>
+        try
         {
-            // ⛔ AN-101 (a) (аудит R11): сутність додається ВСЕРЕДИНІ замикання і свіжим екземпляром на кожну спробу.
-            // `ChangeTrackerCheckpoint` не відновлює `Added`, а `store.Add` ДО транзакції давав таке: транзієнтний збій
-            // ПІСЛЯ `SaveChanges` (журнал, коміт) відкочував транзакцію, а трекер уже вважав розклад збереженим
-            // (`Unchanged`, `Id` відкоченої identity) — повтор нічого не вставляв, журнал писав про неіснуючий розклад,
-            // відповідь була 201. Той самий прийом, що `CreateDataSourceHandler` (ent4 P2-2); попередній екземпляр
-            // повтор відчіплює сам (створений після початку транзакції).
-            if (attempt++ > 0)
+            // ФВ-12.10: новий розклад — у журналі структурних змін, в одній транзакції зі збереженням.
+            await CollectionScheduleDependencyRules.RunMappingConflictAsync(store, 0, () => uow.ExecuteInTransactionAsync(async innerCt =>
             {
-                schedule = NewSchedule();
+                // ⛔ AN-101 (a) (аудит R11): сутність додається ВСЕРЕДИНІ замикання і свіжим екземпляром на кожну спробу.
+                // `ChangeTrackerCheckpoint` не відновлює `Added`, а `store.Add` ДО транзакції давав таке: транзієнтний збій
+                // ПІСЛЯ `SaveChanges` (журнал, коміт) відкочував транзакцію, а трекер уже вважав розклад збереженим
+                // (`Unchanged`, `Id` відкоченої identity) — повтор нічого не вставляв, журнал писав про неіснуючий розклад,
+                // відповідь була 201. Той самий прийом, що `CreateDataSourceHandler` (ent4 P2-2); попередній екземпляр
+                // повтор відчіплює сам (створений після початку транзакції).
+                if (attempt++ > 0)
+                {
+                    schedule = NewSchedule();
+                }
+
+                store.Add(schedule);
+
+                if (dependsOnScheduleId is { } locked)
+                {
+                    // S-D1: залежність могли видалити чи переключити між ранньою перевіркою і збереженням.
+                    await store.LockDependenciesAsync(entity.DataSourceId, innerCt).ConfigureAwait(false);
+                    await CollectionScheduleDependencyRules
+                        .RequireValidAsync(store, selfId: null, entity.DataSourceId, locked, innerCt).ConfigureAwait(false);
+                }
+
+                await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+                await IntegrationConfigAudit.WriteAsync(
+                    audit, clock, currentUser, IntegrationConfigAudit.ScheduleType, schedule.Id, AuditOperation,
+                    oldJson: null, newJson: IntegrationConfigAudit.Snapshot(schedule),
+                    reason: IntegrationConfigAudit.Reason("integrationAudit.scheduleCreated", ("id", schedule.Id), ("entity", entity.Code)), innerCt)
+                    .ConfigureAwait(false);
+            }, ct)).ConfigureAwait(false);
+        }
+        catch (ConcurrencyConflictException)
+        {
+            // ⛔ B158 c5. Перевірка `entity.ScheduleId` вище читає без блокування: два одночасні запити на ту саму
+            // сутність проходять її обидва, і другого відбиває `UQ_CollectionSchedule` (арм `DuplicateCreateRefusals`
+            // дає загальний 409). `{scheduleId}` переможця база не каже — перечитуємо сутність і кидаємо ту саму відмову,
+            // що й послідовний повтор; розкладу немає (інший конфлікт) — відмова як є.
+            if ((await store.FindSourceEntityAsync(sourceEntityId, ct).ConfigureAwait(false))?.ScheduleId is { } winner)
+            {
+                throw ScheduleExists(sourceEntityId, winner);
             }
 
-            store.Add(schedule);
-
-            if (dependsOnScheduleId is { } locked)
-            {
-                // S-D1: залежність могли видалити чи переключити між ранньою перевіркою і збереженням.
-                await store.LockDependenciesAsync(entity.DataSourceId, innerCt).ConfigureAwait(false);
-                await CollectionScheduleDependencyRules
-                    .RequireValidAsync(store, selfId: null, entity.DataSourceId, locked, innerCt).ConfigureAwait(false);
-            }
-
-            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
-            await IntegrationConfigAudit.WriteAsync(
-                audit, clock, currentUser, IntegrationConfigAudit.ScheduleType, schedule.Id, AuditOperation,
-                oldJson: null, newJson: IntegrationConfigAudit.Snapshot(schedule),
-                reason: IntegrationConfigAudit.Reason("integrationAudit.scheduleCreated", ("id", schedule.Id), ("entity", entity.Code)), innerCt)
-                .ConfigureAwait(false);
-        }, ct)).ConfigureAwait(false);
+            throw;
+        }
 
         await ListCollectionSchedulesHandler
             .ApplyOrFailAsync(applier, uow, clock, schedule, ct, log).ConfigureAwait(false);
@@ -670,6 +679,17 @@ public sealed class CreateCollectionScheduleHandler(
             new ScheduledSourceEntity(
                 schedule, entity.Code, entity.Name, entity.DataSourceId, entity.DataSourceCode, entity.SourceKind));
     }
+
+    /// <summary>Сутність уже має розклад — <c>409 ECR-JOB-0409 collectionScheduleExists</c> з його ключем.</summary>
+    private static ConcurrencyConflictException ScheduleExists(int sourceEntityId, int scheduleId)
+        => new(
+            ErrorCodes.JobStateConflict,
+            $"Сутність джерела {sourceEntityId} уже має розклад {scheduleId}.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-JOB-0409.collectionScheduleExists",
+                ["scheduleId"] = scheduleId.ToString(CultureInfo.InvariantCulture),
+            });
 }
 
 /// <summary>

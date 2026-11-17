@@ -59,6 +59,10 @@ public sealed class ParticipantReachBudgetTests
             Arg.Is<IReadOnlyCollection<int>>(p => p.Count == 1 && p.Contains(ProjectId)), Arg.Any<bool>(),
             Arg.Any<ApprovalQueueCursor?>(), Arg.Any<int>(),
             Arg.Is<IReadOnlyCollection<long>>(d => d.Count == 0), Arg.Any<CancellationToken>());
+
+        // ✎ B79 (Q13): порожня сторінка черги запиту позначки «перераховано після подання» НЕ робить (бюджет запитів).
+        // Мутація: у `ListMyApprovalQueueHandler.MarkedAsync` прибрати ранній вихід для порожньої сторінки — червоніє.
+        await _queue.DidNotReceiveWithAnyArgs().ListRecalculatedAfterSubmissionAsync(default!, default);
     }
 
     [Fact]

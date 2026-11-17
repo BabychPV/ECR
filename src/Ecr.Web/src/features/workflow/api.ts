@@ -26,8 +26,9 @@ export function useWorkflowHistory(
   periodKey: number,
   enabled: boolean,
   sheetCopyId: number | null = null,
+  year = false,
 ): UseQueryResult<WorkflowEvent[]> {
-  return useQuery({ ...workflowHistoryQuery(documentId, periodKey, sheetCopyId), enabled });
+  return useQuery({ ...workflowHistoryQuery(documentId, periodKey, sheetCopyId, year), enabled });
 }
 
 /** ✎ RS: the event belongs to this sheet — same code AND same copy (`null`/absent = the original). */
@@ -39,15 +40,24 @@ export function isEventOfSheet(event: WorkflowEvent, sheetCode: string, sheetCop
  * ✎ LIVE-STATUS: key and reader of the transition log — ONE pair for `useWorkflowHistory` and the live banner
  * ("Status changed by …" reads the author from the same cache entry; no second key for the same data).
  */
-export function workflowHistoryQuery(documentId: number, periodKey: number, sheetCopyId: number | null = null) {
+export function workflowHistoryQuery(
+  documentId: number,
+  periodKey: number,
+  sheetCopyId: number | null = null,
+  year = false,
+) {
   return {
     // ✎ RS: a copy has its own entry; the original's key and URL are unchanged (no param = originals only).
-    queryKey: (sheetCopyId === null
-      ? ['document', documentId, periodKey, 'workflow-history']
-      : ['document', documentId, periodKey, 'workflow-history', sheetCopyId]) as readonly unknown[],
+    // ✎ LAND-YEAR L7b: `year` — events of every month of the year (a `YearWithMonthColumns` document), each with its
+    // `periodKey`; an entry of its own under the same `['document', id, period]` prefix (workflow actions reset it too).
+    queryKey: (year
+      ? ['document', documentId, periodKey, 'workflow-history-year', sheetCopyId]
+      : sheetCopyId === null
+        ? ['document', documentId, periodKey, 'workflow-history']
+        : ['document', documentId, periodKey, 'workflow-history', sheetCopyId]) as readonly unknown[],
     queryFn: () =>
       apiFetch<WorkflowEvent[]>(
-        `/api/v1/documents/${String(documentId)}/workflow/history?periodKey=${String(periodKey)}${copyParam(sheetCopyId)}`,
+        `/api/v1/documents/${String(documentId)}/workflow/history?periodKey=${String(periodKey)}${copyParam(sheetCopyId)}${year ? '&year=true' : ''}`,
       ),
   };
 }
@@ -81,13 +91,19 @@ export function useSheetActivity(
   periodKey: number,
   includeSystem: boolean,
   enabled: boolean,
+  year = false,
 ): UseInfiniteQueryResult<InfiniteData<SheetActivityPage, string | null>> {
   return useInfiniteQuery({
-    queryKey: ['document', documentId, periodKey, 'sheet-activity', sheetDefId, includeSystem],
+    // ✎ LAND-YEAR L7b: `year` — the log of every month of the year merged by time, each row with its `periodKey`
+    // (a `YearWithMonthColumns` document); without it the key and the URL are as before.
+    queryKey: year
+      ? ['document', documentId, periodKey, 'sheet-activity', sheetDefId, includeSystem, 'year']
+      : ['document', documentId, periodKey, 'sheet-activity', sheetDefId, includeSystem],
     queryFn: ({ pageParam }: { pageParam: string | null }) =>
       apiFetch<SheetActivityPage>(
         `/api/v1/documents/${String(documentId)}/sheets/${String(sheetDefId)}/activity`
           + `?periodKey=${String(periodKey)}&includeSystem=${String(includeSystem)}&limit=${String(SheetActivityPageSize)}`
+          + (year ? '&year=true' : '')
           + (pageParam === null ? '' : `&cursor=${encodeURIComponent(pageParam)}`),
       ),
     initialPageParam: null as string | null,

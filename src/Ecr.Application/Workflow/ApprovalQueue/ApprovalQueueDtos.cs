@@ -16,6 +16,12 @@ namespace Ecr.Application.Workflow.ApprovalQueue;
 /// <param name="StepOrdinal">Номер поточного кроку маршруту; <c>null</c> — маршруту немає (одноетапне).</param>
 /// <param name="StepCount">Скільки кроків у маршруті; <c>null</c> — маршруту немає.</param>
 /// <param name="StepRoleCode">Код ролі поточного кроку; <c>null</c> — маршруту немає.</param>
+/// <param name="RecalculatedAfterSubmission">
+/// ✎ B79 (Q13): числа аркуша перераховано ПІСЛЯ подання (каскадом чи перерахунком) — погоджувач має побачити це ще в
+/// черзі, до затвердження. Те саме правило й джерело, що <c>sheets[].recalculatedAfterSubmission</c> картки документа:
+/// запис журналу <c>SheetRecalc / RecalculatedAfterSubmission</c>, пізніший за останнє подання; повторне подання
+/// позначку знімає.
+/// </param>
 public sealed record ApprovalQueueItemDto(
     long DocumentId,
     string DocumentKey,
@@ -28,7 +34,8 @@ public sealed record ApprovalQueueItemDto(
     string? SubmittedByDisplayName,
     int? StepOrdinal,
     int? StepCount,
-    string? StepRoleCode);
+    string? StepRoleCode,
+    bool RecalculatedAfterSubmission = false);
 
 /// <summary>Сторінка черги «До погодження»: найдавніші подання першими.</summary>
 /// <param name="Items">Аркуші, які поточний користувач МОЖЕ затвердити зараз.</param>

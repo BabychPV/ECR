@@ -88,7 +88,7 @@ public sealed partial class YearLayoutTailSqlTests
         await SetCellAsync(world, 9, world.Doc.MonthColumnDefIds[8], 11m);
     }
 
-    private async Task RunFanOutAsync(World world, Dictionary<int, PeriodState> states)
+    private async Task RunFanOutAsync(World world, Dictionary<int, PeriodState> states, bool audit = false)
     {
         await using var db = world.Builder.CreateContext();
         var router = new MonthColumnRouter(db, Flag(false), YearRegistry(world));
@@ -97,7 +97,12 @@ public sealed partial class YearLayoutTailSqlTests
         var fanOut = new CrossPeriodFanOut(
             new RowStore(db, new BulkCellLoader(sql.ConnectionString, 1000), new TestClock(Now)),
             Versions(world), periods, Substitute.For<IBackgroundJobScheduler>(), db, router, world.Metadata);
-        var job = new FormulaRecalculationJob(Formulas(db, world, store, router, periods), db, fanOut, periods);
+        // ✎ B79: позначку «перераховано після подання» каскад пише лише з журналом і годинником — як у DI.
+        var job = audit
+            ? new FormulaRecalculationJob(
+                Formulas(db, world, store, router, periods), db, fanOut, periods, logger: null,
+                audit: new AuditWriter(db), clock: new TestClock(JobNow))
+            : new FormulaRecalculationJob(Formulas(db, world, store, router, periods), db, fanOut, periods);
 
         await job.ExecuteAsync(
             new FormulaRecalculationRequest(

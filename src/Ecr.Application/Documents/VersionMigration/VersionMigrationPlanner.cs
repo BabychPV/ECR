@@ -55,7 +55,7 @@ public sealed record VersionMigrationNewRow(int TargetTableDefId, int TargetRowD
 /// поле шапки), ніколи за позицією: ідентифікатори в кожної версії свої, а
 /// <c>Ordinal</c> — презентація (ФВ-7.2).
 /// </remarks>
-public sealed record VersionMigrationPlan(
+public sealed partial record VersionMigrationPlan(
     IReadOnlyDictionary<int, int> Sheets,
     IReadOnlyDictionary<int, int> Tables,
     IReadOnlyList<VersionMigrationColumn> Columns,
@@ -197,7 +197,7 @@ public sealed record VersionMigrationPlan(
 /// бази, ані часу. Тому звіт сухого прогону й перевірка перед застосуванням
 /// рахуються ОДНИМ кодом — розійтися вони не можуть.
 /// </remarks>
-public static class VersionMigrationPlanner
+public static partial class VersionMigrationPlanner
 {
     /// <summary>Будує план.</summary>
     /// <param name="source">Поточна версія проєкту.</param>
@@ -211,13 +211,19 @@ public static class VersionMigrationPlanner
     /// <param name="lookup">
     /// Мапи записів Lookup шапки з даними їхнього використання; <c>null</c> — без мап (план і SQL як раніше).
     /// </param>
+    /// <param name="monthColumns">
+    /// ✎ LAND-YEAR L3: перенос місячного проєкту з розкладки «копія на місяць» на «рік, місяці в колонках» — немісячна
+    /// колонка без відповідника за кодом шукає місячні цілі (<see cref="VersionMigrationPlan.MonthColumns"/>).
+    /// <c>false</c> — як раніше (лише 1:1).
+    /// </param>
     public static VersionMigrationPlan Plan(
         TemplateVersionSnapshot source,
         TemplateVersionSnapshot target,
         IReadOnlyList<VersionMigrationCellUsage> cells,
         IReadOnlyDictionary<int, long> headerValues,
         IReadOnlyList<VersionMigrationTableRename>? renames = null,
-        VersionMigrationLookupInput? lookup = null)
+        VersionMigrationLookupInput? lookup = null,
+        bool monthColumns = false)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(target);
@@ -233,6 +239,7 @@ public static class VersionMigrationPlanner
         var conflicts = new List<string>();
         var formulaChanges = new List<string>();
         var overwrites = new List<GuardedOverwriteItem>();
+        var month = monthColumns ? new MonthOutcome(target) : null;
 
         // ⚠ Відновлення після обриву: комірки переносяться пачками з окремими комітами (див. `DocumentVersionMigrationStore`),
         // тож повторний запуск бачить частину значень уже на колонках ЦІЛЬОВОЇ версії. Вони вже перенесені: у «втрачені» їх
@@ -331,7 +338,7 @@ public static class VersionMigrationPlanner
                 var columnsBefore = columns.Count;
                 PresentationDiff(items, tablePath, "Name", table.NameL10n, otherTable.NameL10n);
                 CompareTableShape(items, tablePath, table, otherTable, valuesByColumn);
-                CompareColumns(items, columns, conflicts, tablePath, table, otherTable, valuesByColumn, columnRenames);
+                CompareColumns(items, columns, conflicts, tablePath, table, otherTable, valuesByColumn, columnRenames, month);
                 CompareRows(items, rows, newRows, tablePath, table, otherTable, valuesByRow);
                 CompareFormulas(formulaChanges, tablePath, table, otherTable, columns, rows);
                 CompareCellFormulas(items, overwrites, sheet.Code.ToString(), table.Code.ToString(), tablePath, table, otherTable, valuesByCell);
@@ -376,10 +383,23 @@ public static class VersionMigrationPlanner
         var mappedColumns = columns.ToDictionary(c => c.SourceColumnDefId);
         long lost = 0;
         long transferred = alreadyMoved;
+        long monthTransferred = 0;
+        long recomputed = 0;
         foreach (var usage in cells)
         {
             var rowLost = usage.RowDefId is { } rowDefId && !rows.ContainsKey(rowDefId) && !targetRowIds.Contains(rowDefId);
-            if (!mappedColumns.ContainsKey(usage.ColumnDefId) || rowLost)
+            if (!rowLost && month is not null && month.Sources.Contains(usage.ColumnDefId))
+            {
+                // ✎ LAND-YEAR L3: значення переходить у місячну колонку свого періоду — перенос, не втрата.
+                transferred += usage.Values;
+                monthTransferred += usage.Values;
+            }
+            else if (!rowLost && month is not null && month.Recomputed.Contains(usage.ColumnDefId))
+            {
+                // ✎ LAND-YEAR L3: похідне значення селектора — відтворить перерахунок; ні перенос, ні втрата.
+                recomputed += usage.Values;
+            }
+            else if (!mappedColumns.ContainsKey(usage.ColumnDefId) || rowLost)
             {
                 lost += usage.Values;
             }
@@ -404,6 +424,10 @@ public static class VersionMigrationPlanner
             LookupGuardedValues = lookupOutcome.Guarded,
             LookupUnmappedValues = lookupOutcome.Unmapped,
             LookupReport = lookupOutcome.Report,
+            MonthColumns = month?.Map ?? [],
+            MonthTransferredValues = monthTransferred,
+            RecomputedValues = recomputed,
+            MonthColumnsUnmapped = month is null ? [] : [.. month.Unmapped.Order(StringComparer.Ordinal)],
             GuardedOverwrites =
             [
                 .. overwrites
@@ -493,8 +517,11 @@ public static class VersionMigrationPlanner
     /// видалення, зміна тлумачення; <c>Renamed</c> — код таблиці/колонки змінюється (клас Safe, але адреса інша).
     /// <c>Added</c>/<c>Widened</c>/<c>Presentation</c> (клас Safe і нижче) дані подання не міняють.
     /// </summary>
+    /// <remarks>✎ LAND-YEAR L3: <c>MonthColumns</c> — як <c>Renamed</c>: значення лишається, але його адреса (колонка) інша.</remarks>
     private static bool TouchesLockedSheet(VersionMigrationItem item)
-        => item.ChangeClass >= ChangeClass.Guarded || string.Equals(item.Kind, "Renamed", StringComparison.Ordinal);
+        => item.ChangeClass >= ChangeClass.Guarded
+           || string.Equals(item.Kind, "Renamed", StringComparison.Ordinal)
+           || string.Equals(item.Kind, MonthColumnsKind, StringComparison.Ordinal);
 
     /// <summary>
     /// Запис мапи для таблиці: з вказаним аркушем має перевагу над записом «на будь-якому аркуші».
@@ -556,7 +583,7 @@ public static class VersionMigrationPlanner
     private static void CompareColumns(
         List<VersionMigrationItem> items, List<VersionMigrationColumn> map, List<string> conflicts, string tablePath,
         TableDef from, TableDef to, IReadOnlyDictionary<int, long> valuesByColumn,
-        IReadOnlyList<VersionMigrationColumnRename>? columnRenames)
+        IReadOnlyList<VersionMigrationColumnRename>? columnRenames, MonthOutcome? month)
     {
         var targetColumns = Live(to.Columns).ToDictionary(c => c.Code, StringComparer.Ordinal);
         var sourceColumnCodes = Live(from.Columns).Select(c => c.Code).ToHashSet(StringComparer.Ordinal);
@@ -592,7 +619,12 @@ public static class VersionMigrationPlanner
 
                 if (other is null)
                 {
-                    items.Add(Removal(path, values));
+                    // ✎ LAND-YEAR L3: копія на місяць → рік — місячні цілі замість видалення (або «перерахується»).
+                    if (!TryMapMonthColumns(month, items, path, to, column, values, sourceColumnCodes, renamedTargets))
+                    {
+                        items.Add(Removal(path, values));
+                    }
+
                     continue;
                 }
             }

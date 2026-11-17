@@ -53,7 +53,8 @@ public sealed class SaveCellSplitsHandler(
     // F13 p223 (1): the stored Issues of the year are re-run after the split. `null` (tests) — not re-run.
     ValidateDocumentHandler? revalidate = null,
     IValidationResultStore? validationResults = null,
-    IPeriodStore? periods = null)    // ✎ C-10: межі періоду комірки для одиниці поділу (квартал/рік). `null` (тести) — як для місячного.
+    IPeriodStore? periods = null,    // ✎ C-10: межі періоду комірки для одиниці поділу (квартал/рік). `null` (тести) — як для місячного.
+    ISheetEditGate? sheetGate = null)    // ✎ B79 (Q9): повторна перевірка річного рішення під замками аркушів року.
 {
     /// <summary>Entity type of the split audit records (<c>aud.StructureChange</c>).</summary>
     public const string AuditEntityType = "CellPermitPart";
@@ -91,6 +92,20 @@ public sealed class SaveCellSplitsHandler(
         var now = clock.UtcNow;
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            // ✎ B79 (Q9): річні рішення (не-місячна числова колонка річної таблиці) — повторно під замками аркушів року,
+            // до будь-якого запису. Частини без суми (jh3) не йдуть через PATCH, тож без цього місяць, затверджений між
+            // рішенням і комітом, їх би не зупинив. Порядок — за аркушем і копією: замки двох поділів не беруться навхрест.
+            foreach (var plan in plans
+                         .Where(p => p.Decision.AnnualPeriods is { Count: > 0 })
+                         .OrderBy(p => p.Table.SheetDefId).ThenBy(p => p.Instance.SheetCopyId ?? 0))
+            {
+                await AnnualDecisionRecheck
+                    .EnsureAsync(
+                        sheetGate, documentId, plan.Table.SheetDefId, plan.Instance.SheetCopyId, plan.Decision, plans.Count,
+                        innerCt)
+                    .ConfigureAwait(false);
+            }
+
             using (PermitSplitWrite.Begin())
             {
                 foreach (var group in plans.Where(p => p.Total is not null).GroupBy(p => p.Instance.TableInstanceId))
@@ -295,7 +310,10 @@ public sealed class SaveCellSplitsHandler(
         decimal? total = item.Parts.All(p => p is not null) ? item.Parts.Sum(p => p!.Value) : null;
         return new Plan(
             instance, table, column, item.RowKey, item.BaseVersion, unit, parts, item.Parts, total,
-            segmentIds, permitColumnId, headerFieldId);
+            segmentIds, permitColumnId, headerFieldId)
+        {
+            Decision = decision,
+        };
     }
 
     private static BusinessRuleException PartsInvalid(string why)
@@ -309,5 +327,9 @@ public sealed class SaveCellSplitsHandler(
     private sealed record Plan(
         TableInstanceRef Instance, Domain.Entities.Configuration.TableDef Table, Domain.Entities.Configuration.ColumnDef Column,
         string RowKey, string BaseVersion, PermitSplitUnit Unit, IReadOnlyList<PartSpan> Spans, IReadOnlyList<decimal?> Parts,
-        decimal? Total, IReadOnlyList<int> SegmentIds, int? PermitColumnId, int? HeaderFieldId);
+        decimal? Total, IReadOnlyList<int> SegmentIds, int? PermitColumnId, int? HeaderFieldId)
+    {
+        /// <summary>✎ B79 (Q9): дозволене рішення про комірку — річне повторюється під замками аркушів року.</summary>
+        public EditDecision Decision { get; init; }
+    }
 }

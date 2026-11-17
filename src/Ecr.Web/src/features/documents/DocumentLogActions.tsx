@@ -27,9 +27,12 @@ interface DocumentLogActions {
 export function useDocumentLogActions({
   documentId,
   periodKey,
+  year = false,
 }: {
   readonly documentId: number;
   readonly periodKey: number;
+  /** ✎ LAND-YEAR L7b: документ «рік» — «History» показує переходи всіх місяців року, згруповані за місяцем. */
+  readonly year?: boolean;
 }): DocumentLogActions {
   const [kind, setKind] = useState<DocumentLogKind | null>(null);
 
@@ -49,6 +52,7 @@ export function useDocumentLogActions({
             kind={kind}
             documentId={documentId}
             periodKey={periodKey}
+            year={year}
             onClose={() => setKind(null)}
           />
         </Suspense>

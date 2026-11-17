@@ -322,6 +322,20 @@ public sealed class RunCalculationHandler(
     }
 
     /// <summary>
+    /// ✎ B79: де новий прогін змінив числа методологій проти актуальних
+    /// (<see cref="ICalculationResultStore.ChangedResultsAsync"/>). Викликається з <c>beforeSwitch</c>
+    /// <see cref="CompleteAsync"/> — до переносу й перемикання, у тій самій транзакції.
+    /// </summary>
+    /// <param name="calculationRunId">Новий прогін.</param>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="methodologyIds">Методології, які прогін перерахував для документа.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Пари «методологія × екземпляр таблиці» зі зміненими числами.</returns>
+    public Task<IReadOnlyList<ChangedResultScope>> ChangedResultsAsync(
+        long calculationRunId, long documentId, IReadOnlyCollection<int> methodologyIds, CancellationToken ct)
+        => results.ChangedResultsAsync(calculationRunId, documentId, methodologyIds, ct);
+
+    /// <summary>
     /// Q-17 (рішення людини 28.10): після коміту перемикання прибирає рядки прогонів, що перестали бути актуальними.
     /// </summary>
     /// <remarks>

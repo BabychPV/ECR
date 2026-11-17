@@ -555,14 +555,7 @@ public sealed class CreateSourceEventMapHandler(
 
         if (await store.MapExistsAsync(command.SourceEntityId, command.DocumentId, command.TableDefId, ct).ConfigureAwait(false))
         {
-            throw new BusinessRuleException(
-                ErrorCodes.EntityFieldMapStateConflict,
-                "Для цієї сутності, документа й таблиці мапінг подій уже є.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-INT-0409.eventMapExists",
-                    ["sourceEntityId"] = command.SourceEntityId.ToString(CultureInfo.InvariantCulture),
-                });
+            throw MapExists(command.SourceEntityId);
         }
 
         var built = await SourceEventMapSupport.BuildSpecsAsync(store, sources, command.Fields, ct, groups).ConfigureAwait(false);
@@ -595,6 +588,21 @@ public sealed class CreateSourceEventMapHandler(
 
         return SourceEventMapSupport.ToDto(created!);
     }
+
+    /// <summary>
+    /// Відмова «мапінг подій цієї сутності, документа й таблиці вже є» (<c>409 ECR-INT-0409 eventMapExists</c>):
+    /// спільна для перевірки обробника й для порушення <c>UQ_SourceEventMap</c> у сховищі (B158 c6, програш гонки).
+    /// </summary>
+    /// <param name="sourceEntityId">Сутність джерела.</param>
+    public static BusinessRuleException MapExists(int sourceEntityId)
+        => new(
+            ErrorCodes.EntityFieldMapStateConflict,
+            "Для цієї сутності, документа й таблиці мапінг подій уже є.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-INT-0409.eventMapExists",
+                ["sourceEntityId"] = sourceEntityId.ToString(CultureInfo.InvariantCulture),
+            });
 
     /// <summary>
     /// Q-2: типовий щогодинний розклад сутності, у якої розкладу ще немає (і яка не власна форма ECR, і не добова

@@ -33,7 +33,10 @@ public sealed partial class FormulaRecalculationJob(
     // WW-03: необовʼязкові лише для тестів, що збирають задачу вручну; DI підставляє обидва.
     CrossPeriodFanOut? fanOut = null,
     IPeriodStore? periods = null,
-    ILogger<FormulaRecalculationJob>? logger = null) : IFormulaRecalculationJob
+    ILogger<FormulaRecalculationJob>? logger = null,
+    // ✎ B79: журнал і годинник — для позначки «перераховано після подання»; без них (ручна збірка в тестах) позначки немає.
+    IAuditWriter? audit = null,
+    Ecr.Domain.Abstractions.IClock? clock = null) : IFormulaRecalculationJob
 {
     /// <summary>Ключ каталогу відмови спільного блокування аркуша (<c>SheetEditGate.Busy</c>).</summary>
     private const string SheetBeingSubmittedKey = "err.ECR-DOC-4091.sheetBeingSubmitted";
@@ -74,8 +77,9 @@ public sealed partial class FormulaRecalculationJob(
             item.AddDirty(seedInstance, seed);
             item.InstanceId = item.InstanceId != 0 ? item.InstanceId : seedInstance;
 
-            // ✎ D-442: подані аркуші, правлені погоджувачем поточного кроку (позначка з насіння PATCH). Лише їх
-            // каскад пише попри `Submitted`; решту поданих/затверджених пропускає, як і доти.
+            // ✎ D-442: подані аркуші, правлені погоджувачем поточного кроку (позначка з насіння PATCH): каскад пише їх
+            // БЕЗ позначки «перераховано після подання» (це правка самого погоджувача). ✎ B79: решту поданих каскад
+            // теж пише, але з позначкою; затверджені пропускає.
             if (cell.ApproverSheetDefId is { } approverSheet)
             {
                 item.ApproverSheets.Add(approverSheet);
@@ -149,6 +153,14 @@ public sealed partial class FormulaRecalculationJob(
                 // власником, чиї читачі в інших екземплярах року не бачили б зміни.
                 var inputColumns = new HashSet<(int TableDefId, int ColumnDefId)>();
                 var periodWritten = 0;
+
+                // ✎ B79 (правило людини 07.11: «пропускати лише погоджені; подані — з позначкою»): каскад пише й ПОДАНІ
+                // аркуші періоду (затверджені — ніколи). Тут — подані аркуші, у які прогін справді записав (після коміту).
+                var submittedWritten = new HashSet<(int SheetDefId, long? CopyId)>();
+
+                // ✎ B79: річна розкладка — подані МІСЯЦІ року, чиє не-місячне число прогін змінив (воно живе в якорі й
+                // пишеться за агрегатом року): позначка кожному такому місяцю, а не лише періоду прогону.
+                var submittedYearWritten = new HashSet<(int PeriodKey, int SheetDefId)>();
                 try
                 {
                     if (!item.Dirty.IsEmpty)
@@ -159,7 +171,8 @@ public sealed partial class FormulaRecalculationJob(
                         {
                             periodWritten += await recalculation
                                 .RecalculateAsync(
-                                    instanceId, dirty, ct, changed, item.ApproverSheets, inputColumns, shared)
+                                    instanceId, dirty, ct, changed, item.ApproverSheets, inputColumns, shared,
+                                    submittedWritten: submittedWritten, submittedYearWritten: submittedYearWritten)
                                 .ConfigureAwait(false);
                         }
                     }
@@ -181,7 +194,8 @@ public sealed partial class FormulaRecalculationJob(
                         {
                             periodWritten += await recalculation
                                 .RecalculateFromOtherPeriodsAsync(
-                                    documentId, periodKey, item.Sources, ct, changed, shared, annualPeriods)
+                                    documentId, periodKey, item.Sources, ct, changed, shared, annualPeriods,
+                                    submittedWritten: submittedWritten, submittedYearWritten: submittedYearWritten)
                                 .ConfigureAwait(false);
                         }
                     }
@@ -217,6 +231,32 @@ public sealed partial class FormulaRecalculationJob(
                 if (periodWritten > 0)
                 {
                     writtenPeriods.Add(slot);
+                }
+
+                // ✎ B79: поданий аркуш, у який каскад записав, — запис журналу й позначка «перераховано після подання»
+                // (той самий механізм, що B63/B83: `SheetRecalc/RecalculatedAfterSubmission`, читає картка документа).
+                // Подані місяці року (не-місячне число) — тим самим записом, за своїм періодом; місяць самого прогону, уже
+                // названий у `submittedWritten`, удруге не пишеться.
+                var marks = submittedYearWritten
+                    .GroupBy(m => m.PeriodKey)
+                    .ToDictionary(g => g.Key, g => g.Select(m => (m.SheetDefId, CopyId: (long?)null)).ToHashSet());
+                if (submittedWritten.Count > 0)
+                {
+                    if (marks.TryGetValue(slot, out var own))
+                    {
+                        own.UnionWith(submittedWritten);
+                    }
+                    else
+                    {
+                        marks[slot] = submittedWritten;
+                    }
+                }
+
+                foreach (var (markPeriod, markSheets) in marks.OrderBy(m => m.Key))
+                {
+                    await SubmittedSheetRecalcLog
+                        .WriteAsync(db, audit, clock, documentId, markPeriod, markSheets, ct)
+                        .ConfigureAwait(false);
                 }
 
                 // WW-03: ланцюжок читачів — зміни цього прогону (насіння й похідні) йдуть в інші періоди року.

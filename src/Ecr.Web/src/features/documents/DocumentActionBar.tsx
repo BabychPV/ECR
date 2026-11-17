@@ -66,6 +66,8 @@ interface DocumentActionBarProps {
   readonly recalculatedAfterSubmission?: boolean;
   /** Приймальна 08.11 (i1): дія банера закритого періоду — «Reopen … for this document…». */
   readonly periodAction?: JSX.Element | null;
+  /** ✎ LAND-YEAR L7a: документ «рік» — банер замка називає «Year YYYY» замість місяця-якоря. */
+  readonly yearLayout?: boolean;
 }
 
 /**
@@ -104,6 +106,7 @@ export function DocumentActionBar({
   resultsStaleSince,
   staleReminderHost,
   periodAction = null,
+  yearLayout = false,
 }: DocumentActionBarProps): JSX.Element {
   const actions = useSheetActions({ documentId, sheetDefId, sheetCopyId, sheetName, periodKey, state, lock });
   useStaleResultsReminder(documentId, resultsStale === true, actions.recalculate !== null, staleReminderHost);
@@ -281,6 +284,7 @@ export function DocumentActionBar({
         canDecide={actions.approve !== null || actions.reject !== null}
         recalculatedAfterSubmission={recalculatedAfterSubmission}
         periodAction={periodAction}
+        yearLayout={yearLayout}
       />
 
       {/* ✎ resultsStale: входи змінилися після прогону - банер і кнопка «Recalculate» (автоперерахунку немає). */}

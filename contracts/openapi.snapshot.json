@@ -1308,6 +1308,11 @@
             "description": "Код проєкту документа.",
             "type": "string"
           },
+          "recalculatedAfterSubmission": {
+            "default": false,
+            "description": "✎ B79 (Q13): числа аркуша перераховано ПІСЛЯ подання (каскадом чи перерахунком) — погоджувач має побачити це ще в\nчерзі, до затвердження. Те саме правило й джерело, що `sheets[].recalculatedAfterSubmission` картки документа:\nзапис журналу `SheetRecalc / RecalculatedAfterSubmission`, пізніший за останнє подання; повторне подання\nпозначку знімає.",
+            "type": "boolean"
+          },
           "sheetCode": {
             "description": "Код аркуша.",
             "type": "string"
@@ -6660,6 +6665,28 @@
         ],
         "type": "object"
       },
+      "DependentMonthsBlockDto": {
+        "description": "✎ B79 (квіз 16.11): аркуш, чиї затверджені місяці залежать від стовпця.",
+        "properties": {
+          "months": {
+            "description": "Ключі періодів затверджених місяців аркуша (`Рік*100+№`), за зростанням.",
+            "items": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "sheetCode": {
+            "description": "Код аркуша-читача.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sheetCode",
+          "months"
+        ],
+        "type": "object"
+      },
       "DeprecateVersionRequest": {
         "description": "Запит на виведення версії з обігу.",
         "properties": {
@@ -8006,6 +8033,24 @@
             "$ref": "#/components/schemas/VersionMigrationMode",
             "description": "Режим."
           },
+          "monthColumnsUnmapped": {
+            "description": "✎ LAND-YEAR L3: шляхи `SHEET.TABLE.COLUMN` немісячних колонок зі значеннями без повного набору місячних цілей\nу річній версії (причина `dataLoss`), не більше `MaxItems`; `null` — таких немає.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "monthTransferredValues": {
+            "description": "✎ LAND-YEAR L3: скільки з TransferredValues переїде (переїхало) з немісячних колонок «копії на\nмісяць» у місячні колонки річної версії (`C` періоду з місяцем m → `C_Mmm`). `null` — перенос не\nзмінює розкладку «копія на місяць» → «рік, місяці в колонках».",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "otherDocumentsOnSourceVersion": {
             "default": 0,
             "description": "D-1b P3: скільки документів у цих проєктах.",
@@ -8032,6 +8077,14 @@
                 "$ref": "#/components/schemas/VersionMigrationRange",
                 "description": "RPT-STABLE Part B: обсяг переносу, як у запиті (`WholeProject` / `FromMonth`)."
               }
+            ]
+          },
+          "recomputedValues": {
+            "description": "✎ LAND-YEAR L3: скільки значень обчислюваних колонок, яких річна версія не має (селектори «поточного місяця»), не\nпереїде, а буде перераховано (не втрата). `null` — як для MonthTransferredValues.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
             ]
           },
           "refusals": {
@@ -8454,7 +8507,8 @@
           "AssignmentValidated",
           "AssignmentExpired",
           "NotAssignedToYou",
-          "RowLocked"
+          "RowLocked",
+          "DependentMonthsLocked"
         ]
       },
       "EditTableDiscussionMessageRequest": {
@@ -29138,6 +29192,19 @@
               "$ref": "#/components/schemas/ColumnDto"
             },
             "type": "array"
+          },
+          "dependentMonths": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/DependentMonthsBlockDto"
+              },
+              "type": "array"
+            },
+            "description": "✎ B79 (квіз 16.11, людина: «і користувач має побачити чому»): видимі стовпці з відмовою\n`DependentMonthsLocked` → аркуші, чиї затверджені місяці від них залежать, з місяцями (ключі періодів).\nКлюч — код колонки. `null` — таких стовпців у зрізі немає (більшість зрізів, нуль байтів).",
+            "type": [
+              "null",
+              "object"
+            ]
           },
           "formulaOverride": {
             "oneOf": [

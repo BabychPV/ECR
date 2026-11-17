@@ -67,8 +67,9 @@ public sealed class CreateMethodologyHandler(
 
         var methodologyCode = EcrCode.Create(code);
 
-        // ⛔ Унікальність коду перевіряється ТУТ, бо унікального індексу на
-        // `calc.Methodology.Code` у схемі немає. Два однакові коди роблять
+        // ⛔ Унікальність коду перевіряється ТУТ, щоб відмова мала код і причину; індекс
+        // `UQ_Methodology` ловить лише гонку двох одночасних запитів — `UnitOfWork` мапить її в ту саму
+        // відмову (B158). Два однакові коди роблять
         // неоднозначним `!Name` через `MethodologyImport`: `MethodologyReferenceResolver`
         // віддав би `Ambiguous`, і публікація ЧУЖОЇ методології відмовлялася б
         // із причиною, яка не вказує на справжнє джерело.

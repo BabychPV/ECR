@@ -286,8 +286,8 @@ public sealed partial class LoginHandler(
             // ⛔ B150 (рішення координатора 16.11): два одночасні ПЕРШІ входи того самого доменного користувача обидва
             // не бачать запису за SID і обидва його створюють. Програшна вставка відбивається унікальним індексом
             // (ім'я або SID → 409 ECR-USR-0409). 409 на вході — не відповідь людині: програшний бере запис
-            // ПЕРЕМОЖЦЯ (той самий SID) і входить далі, як звичайний повторний вхід. Іншого власника SID тут бути не
-            // може — тоді запис не знайдеться, і відмова лишається відмовою.
+            // ПЕРЕМОЖЦЯ (той самий SID) і входить далі, як звичайний повторний вхід. Немає запису за SID, але ім'я
+            // зайняте — `windowsSidMismatch` (B161); немає ні того, ні іншого — відмова лишається відмовою.
             try
             {
                 await uow.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -298,6 +298,17 @@ public sealed partial class LoginHandler(
                 var winner = await users.FindByWindowsSidAsync(sid, ct).ConfigureAwait(false);
                 if (winner is null)
                 {
+                    // ⛔ B161: за SID переможця немає — отже конфлікт був на ІМЕНІ, і його щойно зайняв запис з ІНШИМ
+                    // SID (закомітився між пошуком за ім'ям вище і вставкою). Та сама відмова, що й послідовний шлях
+                    // X5-01 вище: `windowsSidMismatch`, спроба в журналі входів і Warning адміністраторові — а не
+                    // `userNameTaken`, який людині на екрані входу нічого не каже.
+                    if (await users.FindByUserNameAsync(userName, ct).ConfigureAwait(false) is { } nameHolder)
+                    {
+                        await FailAsync(userName, "SidMismatch", ipAddress, now, ct, AuthProvider.Windows).ConfigureAwait(false);
+                        LogSidMismatch(logger, userName, nameHolder.Id, sid);
+                        throw SidMismatch(userName, sid);
+                    }
+
                     throw;
                 }
 

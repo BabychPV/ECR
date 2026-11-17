@@ -1,4 +1,5 @@
 import type { components } from '@/api/schema';
+import { t } from '@/shared/i18n';
 
 /**
  * ✎ D-474, п. 5: «вибір місяця в документі показується лише там, де документ має кілька копій».
@@ -38,6 +39,40 @@ export function yearAnchorCalendar<T extends PeriodLike>(periods: readonly T[] |
   );
 
   return [{ periodKey: anchor, isCurrent: true }];
+}
+
+/**
+ * ✎ LAND-YEAR L7a: якір року `periodKey` — найменший ключ календаря проєкту в тому ж році (той самий якір, що в
+ * `IMonthColumnRouter` на сервері). Документ «рік» має одну копію на рік, тож будь-який `?periodKey` місяця (смуга
+ * року в переліку, старе посилання) веде на якір. Місяців цього року в календарі немає або календар ще не прийшов —
+ * `null` (невідоме нікуди не переводить).
+ */
+export function yearAnchorOf(periods: readonly number[] | undefined, periodKey: number): number | null {
+  const year = Math.floor(periodKey / 100);
+  const months = (periods ?? []).filter((key) => Math.floor(key / 100) === year);
+
+  return months.length === 0 ? null : Math.min(...months);
+}
+
+/**
+ * ✎ LAND-YEAR L7a: «Year YYYY» — назва періоду документа «рік» у банерах замка, інспекторі й журналах (замість назви
+ * місяця-якоря «January 2026», що читалася як «відкрито січень»). Той самий ключ, що й чип шапки (`YearLayoutChips`).
+ */
+export function yearLabel(periodKey: number): string {
+  return t('calcResults.yearChip', { year: Math.floor(periodKey / 100) });
+}
+
+/** ✎ LAND-YEAR L7a: якорі всіх років календаря, за зростанням, — вибір періоду документа «рік» (без місяців). */
+export function yearAnchors(periods: readonly number[] | undefined): number[] | undefined {
+  if (periods === undefined) return undefined;
+  const byYear = new Map<number, number>();
+  for (const key of periods) {
+    const year = Math.floor(key / 100);
+    const seen = byYear.get(year);
+    if (seen === undefined || key < seen) byYear.set(year, key);
+  }
+
+  return [...byYear.values()].sort((a, b) => a - b);
 }
 
 /**

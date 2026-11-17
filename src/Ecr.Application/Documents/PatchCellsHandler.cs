@@ -505,6 +505,19 @@ public sealed partial class PatchCellsHandler(
         public HashSet<int> AnnualTextColumns { get; } = [];
 
         /// <summary>
+        /// ✎ B79: у батчі є комірка загального стовпця, від якого залежать розрахунки місяців
+        /// (<see cref="EditDecision.DependentInput"/>): під блокуваннями аркушів року затверджений місяць відхиляє запис
+        /// (<see cref="DependentMonthsRule"/>), поданий — ні.
+        /// </summary>
+        public bool DependentInputWritten { get; set; }
+
+        /// <summary>
+        /// ✎ B79 (квіз 16.11): ІНШІ аркуші, чиї формули читають записані стовпці з залежними, — їхні місяці року запис бере
+        /// під спільні замки в каноничному порядку (<see cref="DependentReaderLocks"/>) і повторює правило.
+        /// </summary>
+        public HashSet<DependentReaderSheet> DependentReaderSheets { get; } = [];
+
+        /// <summary>
         /// ✎ D-461: комірки батчу <c>(RowKey, ColumnDefId)</c>, писати які дозволено САМЕ як ручне значення замість
         /// формули (<see cref="EditDecision.ViaFormulaOverride"/>). Наповнює <c>CheckAccess</c>.
         /// </summary>
@@ -1238,6 +1251,17 @@ public sealed partial class PatchCellsHandler(
             return;
         }
 
+        // ✎ B79: стовпець із залежними розрахунками — поза річним агрегатом: його під блокуванням судить правило
+        // залежних місяців. Перерахунок ставиться як для будь-якої правки (це не «текст якоря»).
+        if (decision.DependentInput)
+        {
+            // ✎ Квіз 16.11: власні затверджені місяці під замком перевіряються, лише коли стовпець читає формула цього ж
+            // аркуша (читачі лише на інших аркушах — рішення поза транзакцією, `sheets` відмови).
+            context.DependentInputWritten |= !decision.DependentOnlyOtherSheets;
+            context.DependentReaderSheets.UnionWith(decision.DependentReaderSheets ?? []);
+            return;
+        }
+
         if (decision.AnnualTextOnly && !creation)
         {
             // Перерахунок пропускається лише коли поблажка справді спрацювала (аркуш Submitted).
@@ -1434,6 +1458,25 @@ public sealed partial class PatchCellsHandler(
         if (denied.Count > 0)
         {
             var first = denied[0];
+
+            // ✎ B79: відмова через затверджені місяці несе їхній перелік (`months`) — клієнт пропонує повернути саме їх.
+            if (first.Reason == EditDenyReason.DependentMonthsLocked)
+            {
+                var locked = denied.Where(d => d.Reason == EditDenyReason.DependentMonthsLocked).ToList();
+                var months = new SortedSet<int>(locked.SelectMany(d => d.BlockingMonths ?? []));
+
+                // ✎ B79 (квіз 16.11): і аркуші-читачі з місяцями — об'єднання по всіх відхилених комірках батчу.
+                var sheets = locked
+                    .SelectMany(d => d.BlockingSheets ?? [])
+                    .GroupBy(b => (b.SheetDefId, b.SheetCode))
+                    .OrderBy(g => g.Key.SheetCode, StringComparer.Ordinal)
+                    .Select(g => new DependentMonthsBlock(
+                        g.Key.SheetDefId, g.Key.SheetCode, [.. g.SelectMany(b => b.Months).Distinct().Order()]))
+                    .ToList();
+
+                throw DependentMonthsRule.Denied(denied.Count, months, sheets);
+            }
+
             throw new AccessDeniedException(
                 "ECR-ACCS-0403",
                 $"Заборонених комірок у батчі: {denied.Count}. Причина першої: {first.Reason}.",
@@ -3180,28 +3223,39 @@ public sealed partial class PatchCellsHandler(
         // чекав 5, а PATCH з перегляду 5 у колонку місяця 3 — навпаки. Виняткове блокування рядків (стеля) береться
         // на місці власного періоду в тому ж порядку.
         var lockedStatuses = new Dictionary<int, DocumentStatus>();
-        foreach (var lockedPeriod in AllInvolvedPeriods(context))
-        {
-            // ✎ B134: дзеркальне створення — виняткове блокування КОЖНОГО періоду екземплярів року, як у POST rows.
-            if ((lockedPeriod == context.PeriodKey.Value && CreatesRowsUnderCeiling(context))
-                || context.MirrorInstances?.Exists(i => i.PeriodKey == lockedPeriod) == true)
-            {
-                // ⛔ Y7-03: відмова «зайнято» — про рядки, а не про подання (див. `RowWriteLock`).
-                // ✎ B134 (F13 D1): саме ЦЕЙ період циклу — X на кожен місяць дзеркала, а не лише на свій.
-                await RowWriteLock
-                    .EnterAsync(
-                        sheetGate, context.Instance.DocumentId, context.Table.SheetDefId, new PeriodKey(lockedPeriod), ct,
-                        context.Instance.SheetCopyId)
-                    .ConfigureAwait(false);
-            }
 
-            // RS: копія аркуша — власне блокування й власний стан (у кожному періоді та сама копія).
-            lockedStatuses[lockedPeriod] = await sheetGate
-                .EnterEditOfAsync(
-                    context.Instance.DocumentId, context.Table.SheetDefId, new PeriodKey(lockedPeriod),
-                    context.Instance.SheetCopyId, ct)
-                .ConfigureAwait(false);
-        }
+        // ✎ B79 (квіз 16.11): аркуші-ЧИТАЧІ стовпців із залежними — спільні замки за місяці року разом із замками аркуша
+        // правки в каноничному порядку (аркуш ↑, копія ↑, період ↑); власні кроки — як були, у своєму місці порядку.
+        var plan = DependentReaderLocks.Plan(
+            context.Table.SheetDefId, context.Instance.SheetCopyId, AllInvolvedPeriods(context),
+            context.DependentReaderSheets, context.AnnualPeriods);
+        var readerStatuses = await DependentReaderLocks
+            .EnterAsync(
+                sheetGate, context.Instance.DocumentId, plan,
+                async lockedPeriod =>
+                {
+                    // ✎ B134: дзеркальне створення — виняткове блокування КОЖНОГО періоду екземплярів року, як у POST rows.
+                    if ((lockedPeriod == context.PeriodKey.Value && CreatesRowsUnderCeiling(context))
+                        || context.MirrorInstances?.Exists(i => i.PeriodKey == lockedPeriod) == true)
+                    {
+                        // ⛔ Y7-03: відмова «зайнято» — про рядки, а не про подання (див. `RowWriteLock`).
+                        // ✎ B134 (F13 D1): саме ЦЕЙ період циклу — X на кожен місяць дзеркала, а не лише на свій.
+                        await RowWriteLock
+                            .EnterAsync(
+                                sheetGate, context.Instance.DocumentId, context.Table.SheetDefId, new PeriodKey(lockedPeriod), ct,
+                                context.Instance.SheetCopyId)
+                            .ConfigureAwait(false);
+                    }
+
+                    // RS: копія аркуша — власне блокування й власний стан (у кожному періоді та сама копія).
+                    lockedStatuses[lockedPeriod] = await sheetGate
+                        .EnterEditOfAsync(
+                            context.Instance.DocumentId, context.Table.SheetDefId, new PeriodKey(lockedPeriod),
+                            context.Instance.SheetCopyId, ct)
+                        .ConfigureAwait(false);
+                },
+                ct)
+            .ConfigureAwait(false);
 
         var status = lockedStatuses[context.PeriodKey.Value];
 
@@ -3229,7 +3283,14 @@ public sealed partial class PatchCellsHandler(
             }
         }
 
-        CheckLockedColumnPeriods(lockedStatuses, context.ColumnPeriods, context.AnnualPeriods, changes, context.AnnualTextOnly);
+        CheckLockedColumnPeriods(
+            lockedStatuses, context.ColumnPeriods, context.AnnualPeriods, changes, context.AnnualTextOnly,
+            context.DependentInputWritten);
+
+        // ✎ B79 (квіз 16.11): місяць аркуша-читача, затверджений між рішенням і цим замком, відхиляє запис (з `sheets`).
+        DependentReaderLocks.ThrowIfLocked(
+            context.DependentReaderSheets, context.AnnualPeriods, readerStatuses,
+            changes.Upserts.Count + changes.Deletes.Count);
     }
 
     /// <summary>Q-17: власний період + періоди колонок + річні періоди — без повторів, за зростанням ключа.</summary>
@@ -3254,7 +3315,8 @@ public sealed partial class PatchCellsHandler(
         IEnumerable<int> columnPeriods,
         IReadOnlyCollection<int> annualPeriods,
         CellChangeLists changes,
-        bool annualTextOnly = false)
+        bool annualTextOnly = false,
+        bool dependentInputWritten = false)
     {
         foreach (var columnPeriod in columnPeriods)
         {
@@ -3263,6 +3325,18 @@ public sealed partial class PatchCellsHandler(
 
         if (annualPeriods.Count > 0)
         {
+            // ✎ B79: стовпець із залежними розрахунками — місяць, затверджений між рішенням і цим замком, відхиляє запис
+            // (затвердження бере той самий замок винятково); поданий місяць не блокує.
+            if (dependentInputWritten)
+            {
+                DependentMonthsRule.ThrowIfLocked(
+                    annualPeriods, lockedStatuses, changes.Upserts.Count + changes.Deletes.Count);
+            }
+
+            // Решта річних комірок батчу (без залежних, текст якоря, нові рядки) — за річним агрегатом, як і було.
+            // ⚠ Окремого «пропустити агрегат, якщо в батчі лише стовпці з залежними» немає (мутаційний прохід 16.11,
+            // №14 — еквівалентна): такий батч не пише ні числа, ні нового рядка, тож annualTextOnly = true; затверджений
+            // місяць уже відхилено вище, а поданий агрегат пропускає виняток AN-142 нижче — результат той самий.
             var aggregate = AnnualPeriodRule.AggregateStatus(annualPeriods.Select(p => lockedStatuses[p]));
 
             // AN-142: текст якоря править і Submitted-аркуш; Approved (і Draft-чернетка без поблажок) - як було.
@@ -3286,22 +3360,31 @@ public sealed partial class PatchCellsHandler(
     private async Task EnsureColumnPeriodsEditableAsync(
         long documentId, int sheetDefId, IEnumerable<int> columnPeriods, CellChangeLists changes, CancellationToken ct,
         IReadOnlyCollection<int>? annualPeriods = null,
-        bool annualTextOnly = false)
+        bool annualTextOnly = false,
+        bool dependentInputWritten = false,
+        IReadOnlyCollection<DependentReaderSheet>? readerSheets = null)
     {
         // ⛔ Q-17: усі періоди — за зростанням ключа (див. EnsureSheetStillEditableAsync).
         var annual = annualPeriods ?? [];
         var all = new SortedSet<int>(columnPeriods);
         all.UnionWith(annual);
 
+        // ✎ B79 (квіз 16.11): і аркуші-читачі — у каноничному порядку разом з аркушем правки.
+        var readers = readerSheets ?? [];
         var lockedStatuses = new Dictionary<int, DocumentStatus>();
-        foreach (var period in all)
-        {
-            lockedStatuses[period] = await sheetGate
-                .EnterEditAsync(documentId, sheetDefId, new PeriodKey(period), ct)
-                .ConfigureAwait(false);
-        }
+        var readerStatuses = await DependentReaderLocks
+            .EnterAsync(
+                sheetGate, documentId, DependentReaderLocks.Plan(sheetDefId, null, all, readers, annual),
+                async period => lockedStatuses[period] = await sheetGate
+                    .EnterEditAsync(documentId, sheetDefId, new PeriodKey(period), ct)
+                    .ConfigureAwait(false),
+                ct)
+            .ConfigureAwait(false);
 
-        CheckLockedColumnPeriods(lockedStatuses, columnPeriods, annual, changes, annualTextOnly);
+        CheckLockedColumnPeriods(
+            lockedStatuses, columnPeriods, annual, changes, annualTextOnly, dependentInputWritten);
+        DependentReaderLocks.ThrowIfLocked(
+            readers, annual, readerStatuses, changes.Upserts.Count + changes.Deletes.Count);
     }
 
     /// <summary>D-442: користувач і далі погоджувач поточного кроку цього аркуша — під блокуванням.</summary>

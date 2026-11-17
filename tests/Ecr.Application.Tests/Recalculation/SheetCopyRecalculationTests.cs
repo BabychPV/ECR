@@ -158,17 +158,33 @@ public sealed class SheetCopyRecalculationTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait("Decision", "RS-1103")]
-    public async Task Запис_у_копію_бере_спільне_блокування_саме_копії_а_подана_копія_не_пишеться()
+    public async Task Запис_у_копію_бере_спільне_блокування_саме_копії_подана_копія_пишеться_з_позначкою_затверджена_ні()
     {
         Arrange(includePrev: false);
         _gate.EnterCopyEditAsync(DocumentId, _sheet1, Arg.Any<PeriodKey>(), CopyId, Arg.Any<CancellationToken>())
             .Returns(DocumentStatus.Submitted);
 
-        var written = await Service().RecalculateAsync(Copy1(5), Dirty(5, Copy1(5)), CancellationToken.None);
+        // ✎ B79 (Q10; правило людини 07.11): подана копія каскадом ПИШЕТЬСЯ і йде в перелік для позначки «перераховано
+        // після подання» — саме копія (аркуш × копія), а не оригінал. Доти подана копія пропускалась (0 записано).
+        var submittedWritten = new HashSet<(int SheetDefId, long? CopyId)>();
+        var written = await Service().RecalculateAsync(
+            Copy1(5), Dirty(5, Copy1(5)), CancellationToken.None, submittedWritten: submittedWritten);
 
-        Assert.Equal(0, written);   // копія подана → прогін її не пише (оригінал Draft цього не змінює)
+        Assert.True(written > 0, "подана копія не перерахована");
+        Assert.Equal(new[] { (_sheet1, (long?)CopyId) }, submittedWritten);
         await _gate.Received().EnterCopyEditAsync(
             DocumentId, _sheet1, Arg.Any<PeriodKey>(), CopyId, Arg.Any<CancellationToken>());
+
+        // Затверджена копія — як і доти: не пишеться, позначки немає.
+        _gate.EnterCopyEditAsync(DocumentId, _sheet1, Arg.Any<PeriodKey>(), CopyId, Arg.Any<CancellationToken>())
+            .Returns(DocumentStatus.Approved);
+        var approvedMarks = new HashSet<(int SheetDefId, long? CopyId)>();
+
+        Assert.Equal(
+            0,
+            await Service().RecalculateAsync(
+                Copy1(5), Dirty(5, Copy1(5)), CancellationToken.None, submittedWritten: approvedMarks));
+        Assert.Empty(approvedMarks);
     }
 
     private static decimal? ValueAt(IReadOnlyList<CellRecord> applied, long instance, int column)

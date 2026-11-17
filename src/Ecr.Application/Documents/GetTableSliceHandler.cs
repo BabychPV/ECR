@@ -539,7 +539,36 @@ public sealed class GetTableSliceHandler(
             HeaderGroups = headerGroups,
             FormulaOverride = formulaOverride,
             CalcErrors = calcErrors,
+            DependentMonths = DependentMonthsOf(decisions, readable.CanReadColumn, columnCodeById),
         };
+    }
+
+    /// <summary>
+    /// ✎ B79 (квіз 16.11): для підказки сірої комірки — аркуші й затверджені місяці, що замикають стовпець
+    /// (<c>DependentMonthsLocked</c>); перше рішення стовпця (правило — на рівні стовпця, не рядка). Лише видимі колонки.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, IReadOnlyList<DependentMonthsBlockDto>>? DependentMonthsOf(
+        IReadOnlyDictionary<Domain.ValueObjects.CellAddress, Security.EditDecision> decisions,
+        Func<int, bool> canReadColumn,
+        IReadOnlyDictionary<int, string> columnCodeById)
+    {
+        Dictionary<string, IReadOnlyList<DependentMonthsBlockDto>>? result = null;
+        foreach (var (address, decision) in decisions)
+        {
+            if (decision.Reason != Domain.Enums.EditDenyReason.DependentMonthsLocked
+                || decision.BlockingSheets is not { Count: > 0 } sheets
+                || !canReadColumn(address.ColumnDefId)
+                || !columnCodeById.TryGetValue(address.ColumnDefId, out var code)
+                || result?.ContainsKey(code) == true)
+            {
+                continue;
+            }
+
+            (result ??= new Dictionary<string, IReadOnlyList<DependentMonthsBlockDto>>(StringComparer.Ordinal))[code] =
+                [.. sheets.Select(s => new DependentMonthsBlockDto(s.SheetCode, s.Months))];
+        }
+
+        return result;
     }
 
     /// <summary>

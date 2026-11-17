@@ -7,6 +7,7 @@ import { publishInspectedCell } from '@/features/documents/inspector/inspectedCe
 import { useFocusedCell, useIsLastFocusedSlice } from './focusStore';
 import { formulaBarModel } from './formulaBar';
 import type { TotalsEdit } from './gridTotals';
+import type { MonthOfColumn } from './monthColumnStatus';
 
 /**
  * Рядок формули над сіткою документа (`UI-08`, `DIRECTIVE-15-FRONTEND.md` §3).
@@ -39,6 +40,12 @@ interface GridFormulaBarProps {
   readonly pending?: ReadonlyMap<string, TotalsEdit>;
   /** Тексти виразів за кодом колонки; порожня, доки сервер їх не віддає. */
   readonly expressionByColumnCode?: ReadonlyMap<string, string>;
+  /**
+   * ✎ LAND-YEAR L7b (п. 3 плану): місяць кожної місячної колонки таблиці (`useMonthColumnMonths` — `monthNumber` і період
+   * колонки з `submission-target`, той самий кеш, що й позначки заголовків). Комірка такої колонки публікується з
+   * `ownerPeriodKey` = період її місяця; інша колонка — `null`. Не задано — `null` для всіх (як доти).
+   */
+  readonly columnMonths?: ReadonlyMap<string, MonthOfColumn>;
 }
 
 export function GridFormulaBar(props: GridFormulaBarProps): JSX.Element {
@@ -71,6 +78,7 @@ export function GridFormulaBar(props: GridFormulaBarProps): JSX.Element {
     publishInspectedCell({
       tableInstanceId: props.tableInstanceId,
       periodKey: props.periodKey,
+      ownerPeriodKey: props.columnMonths?.get(model.columnCode)?.periodKey ?? null,
       rowKey: model.rowKey,
       rowLabel: model.rowLabel,
       columnCode: model.columnCode,

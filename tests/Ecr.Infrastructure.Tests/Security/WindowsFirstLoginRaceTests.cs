@@ -1,7 +1,9 @@
 // tests/Ecr.Infrastructure.Tests/Security/WindowsFirstLoginRaceTests.cs
+using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Entities.Security;
+using Ecr.Domain.Enums;
 using Ecr.Infrastructure.Persistence;
 using Ecr.Infrastructure.Security;
 using Ecr.TestKit;
@@ -21,7 +23,9 @@ namespace Ecr.Infrastructure.Tests.Security;
 /// ні за ім'ям (так виглядає читання до коміту переможця), а сам запис переможця вже в базі. Тоді вставка
 /// програшного відбивається унікальним індексом, і вхід мусить узяти запис переможця. Мутації: прибрати
 /// <c>catch</c> у <c>LoginHandler.HandleWindowsAsync</c> (умова <c>&amp;&amp; race.Details is null</c>) або арм
-/// <c>UX_User_Sid</c> у <c>UnitOfWork</c> → червоний. Справжня паралель — другий тест (запускати 20 разів).
+/// <c>UX_User_Sid</c> у <c>UnitOfWork</c> → червоний. Справжня паралель — тест «два одночасні» (запускати 20 разів).
+/// B161: програшний, чиє ім'я зайняв запис з ІНШИМ SID, отримує <c>windowsSidMismatch</c> і спробу <c>SidMismatch</c>
+/// у журналі, як послідовний шлях X5-01; мутація — повернути <c>throw;</c> на <c>winner is null</c> → червоний.
 /// </remarks>
 [Collection("SqlServer")]
 public sealed class WindowsFirstLoginRaceTests(SqlServerFixture sql)
@@ -85,6 +89,51 @@ public sealed class WindowsFirstLoginRaceTests(SqlServerFixture sql)
         finally
         {
             await CleanupAsync(sid, name);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "B161")]
+    public async Task Ім_я_щойно_зайняв_запис_з_іншим_SID_це_SidMismatch_а_не_userNameTaken()
+    {
+        // Вставку програшного відбиває `UQ_User_Name`, а за його SID переможця немає: ім'я зайняв запис з ІНШИМ SID
+        // (комітився між пошуком за ім'ям і вставкою). Відповідь — та сама, що й послідовний шлях X5-01.
+        var (sid, name) = Identity();
+        var holderSid = sid.Replace("-1001", "-1002", StringComparison.Ordinal);
+        try
+        {
+            int holderId;
+            await using (var holderDb = Context())
+            {
+                var holder = User.CreateDomain(name, name, holderSid, Now);
+                holderDb.Users.Add(holder);
+                await new UnitOfWork(holderDb).SaveChangesAsync(CancellationToken.None);
+                holderId = holder.Id;
+            }
+
+            await using var loserDb = Context();
+            var thrown = await Assert.ThrowsAsync<BusinessRuleException>(
+                () => Handler(loserDb, BlindOnce(new UserStore(loserDb)))
+                    .HandleWindowsAsync(sid, name, name, [], null, CancellationToken.None));
+
+            Assert.Equal("ECR-USR-0409", thrown.ErrorCode);
+            Assert.Equal("err.ECR-USR-0409.windowsSidMismatch", thrown.Details!["messageKey"]);
+            Assert.Equal(sid, thrown.Details["sid"]);
+
+            await using var check = Context();
+            var attempt = await check.LoginAttempts.SingleAsync(a => a.UserName == name);
+            Assert.False(attempt.IsSuccess);
+            Assert.Equal("SidMismatch", attempt.FailReason);
+            Assert.Equal(AuthProvider.Windows, attempt.Provider);
+            Assert.Equal(holderSid, (await check.Users.SingleAsync(u => u.Id == holderId)).WindowsSid);
+            Assert.Equal(0, await CountAsync(sid));
+        }
+        finally
+        {
+            await CleanupAsync(sid, name);
+            await CleanupAsync(holderSid, name);
         }
     }
 

@@ -28,6 +28,7 @@ public sealed partial class DuplicateRequestHttpTests
         two.Dispose();
 
         var name = $"dqu_{Guid.NewGuid():N}"[..20];
+        _created.UserNames.Add(name);
         var created = await SendAsync(first, HttpMethod.Post, "/api/v1/users", UserBody(name)).ConfigureAwait(true);
         var repeated = await SendAsync(first, HttpMethod.Post, "/api/v1/users", UserBody(name)).ConfigureAwait(true);
 
@@ -49,6 +50,7 @@ public sealed partial class DuplicateRequestHttpTests
         using var second = two;
 
         var name = $"dqu_{Guid.NewGuid():N}"[..20];
+        _created.UserNames.Add(name);
         var replies = await RaceAsync("users", first, second, HttpMethod.Post, "/api/v1/users", UserBody(name)).ConfigureAwait(true);
 
         output.WriteLine($"ROWS users {await UsersWithNameAsync(name).ConfigureAwait(true)}");

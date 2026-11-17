@@ -15,7 +15,14 @@ import { useSyncExternalStore } from 'react';
  */
 export interface InspectedCell {
   readonly tableInstanceId: number;
+  /** Період ПЕРЕГЛЯДУ (зрізу сітки) — адреса сторінки; комірка іншого періоду інспектору не показується. */
   readonly periodKey: number;
+  /**
+   * ✎ LAND-YEAR L7b (п. 3 плану): період-ВЛАСНИК комірки — місячна колонка m таблиці «місяці в колонках» належить
+   * періоду m (``monthColumns`` відповіді ``submission-target``: ``monthNumber`` + ``periodKey``); ``null`` — колонка не
+   * місячна (власник — період перегляду / якір року) або місяць ще невідомий.
+   */
+  readonly ownerPeriodKey?: number | null;
   readonly rowKey: string;
   readonly rowLabel: string;
   readonly columnCode: string;

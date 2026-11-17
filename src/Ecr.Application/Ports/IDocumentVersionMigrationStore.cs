@@ -208,6 +208,23 @@ public interface IDocumentVersionMigrationStore
         int sourceVersionId, IReadOnlyDictionary<int, int> columnMap, CancellationToken ct);
 
     /// <summary>
+    /// ✎ LAND-YEAR L3: те саме з мапою місяців — прив'язка немісячної колонки перенесена, коли кожна з її місячних
+    /// колонок (<paramref name="monthColumnMap"/>) має активну прив'язку тієї ж методології й виходу.
+    /// </summary>
+    /// <param name="sourceVersionId">Вихідна версія шаблону.</param>
+    /// <param name="columnMap">Колонка вихідної версії → колонка цільової (з плану, 1:1).</param>
+    /// <param name="monthColumnMap">Немісячна колонка вихідної версії → її місячні колонки цільової.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// Типова реалізація (обгортки в тестах) мапу місяців не бачить: місячні колонки рахуються неперенесеними —
+    /// відмова, а не мовчазний дозвіл.
+    /// </remarks>
+    public Task<int> CountUnmappedBindingsAsync(
+        int sourceVersionId, IReadOnlyDictionary<int, int> columnMap,
+        IReadOnlyDictionary<int, IReadOnlyList<int>> monthColumnMap, CancellationToken ct)
+        => CountUnmappedBindingsAsync(sourceVersionId, columnMap, ct);
+
+    /// <summary>
     /// Мапінги збору (<c>ext.EntityFieldMap</c>), що адресують колонки вихідної версії шаблону (D-1 RC20).
     /// </summary>
     /// <param name="sourceVersionId">Вихідна версія шаблону.</param>
