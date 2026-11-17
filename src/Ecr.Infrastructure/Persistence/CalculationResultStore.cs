@@ -944,6 +944,39 @@ public sealed partial class CalculationResultStore(
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Один запит за прогоном без перевірки «актуальності»: прогін ще не став актуальним (його перемикають
+    /// після всіх методологій), а читач — інша методологія цього ж прогону.
+    /// </remarks>
+    public async Task<IReadOnlyList<CalculationResultRow>> ReadRunAsync(
+        long calculationRunId, long documentId, int periodKey, CurrentResultFilter filter, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+        if (filter.OutputCodes.Count == 0 || filter.MethodologyVersionIds.Count == 0)
+        {
+            return [];
+        }
+
+        var rows = await ReadRowsAsync(documentId, periodKey, [calculationRunId], filter, ct).ConfigureAwait(false);
+        if (rows.Count > Ceiling)
+        {
+            throw new BusinessRuleException(
+                "ECR-CALC-0422",
+                $"Результатів прогону {calculationRunId} документа {documentId} за період {periodKey} більше за {Ceiling}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.resultsTooLarge",
+                    ["documentId"] = documentId,
+                    ["periodKey"] = periodKey,
+                    ["max"] = Ceiling,
+                });
+        }
+
+        return rows.ConvertAll(r => new CalculationResultRow(
+            r.MethodologyVersionId, r.SourceRowKey, r.OutputCode, r.Value, r.UnitId, r.SubstanceEntryId, r.TableInstanceId));
+    }
+
+    /// <inheritdoc />
     public async Task<CurrentRunProfile?> ReadCurrentRunProfileAsync(
         long documentId, int periodKey, CancellationToken ct)
     {

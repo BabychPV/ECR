@@ -157,6 +157,10 @@ public sealed partial class CalculatedCellOverlay(
                 var rowCells = cellsByRow.GetValueOrDefault(rowId) ?? [];
                 IReadOnlyDictionary<string, string?>? matchValues = null;
                 var filled = new HashSet<int>();
+                IReadOnlyDictionary<string, string?> rowMatchValues() => matchValues ??= rowCells.ToDictionary(
+                    c => c.Address.ColumnDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    c => MethodologyRuleMatcher.Text(c.Value),
+                    StringComparer.Ordinal);
 
                 // ⛔ P2-1: дві активні прив'язки на ОДНУ колонку (конфігураційна помилка
                 // або законні взаємовиключні предикати) давали дві комірки з тією самою
@@ -195,28 +199,10 @@ public sealed partial class CalculatedCellOverlay(
                             .Where(r => binding.VersionIds.Contains(r.MethodologyVersionId))];
                     }
 
-                    var values = candidates.Where(r => ownInstance is not null && r.TableInstanceId == ownInstance).ToList();
-                    if (values.Count == 0)
-                    {
-                        values = [.. candidates.Where(r => r.TableInstanceId is null)];
-                    }
-
-                    if (values.Count == 0)
+                    var matched = CalculatedResultMatching.Resolve(binding.MatchJson, candidates, ownInstance, rowMatchValues);
+                    if (matched.Kind == CalculatedMatchKind.NoValue)
                     {
                         continue;
-                    }
-
-                    if (!IsCatchAll(binding.MatchJson))
-                    {
-                        matchValues ??= rowCells.ToDictionary(
-                            c => c.Address.ColumnDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                            c => MethodologyRuleMatcher.Text(c.Value),
-                            StringComparer.Ordinal);
-
-                        if (!MethodologyRuleMatcher.Matches(binding.MatchJson, matchValues))
-                        {
-                            continue;
-                        }
                     }
 
                     filled.Add(binding.ColumnDefId);
@@ -227,7 +213,8 @@ public sealed partial class CalculatedCellOverlay(
                     // комірку й сумувалися. Для ОДНІЄЇ речовини в рядку законне значення
                     // рівно одне: збіг — одне значення (не подвоєне), розбіжність — комірку
                     // не формуємо (хибне число гірше за відсутнє) і пишемо попередження.
-                    if (!TryCombine(values, out var total, out var unitId))
+                    // ✎ MS: правило відбору й узгодження — `CalculatedResultMatching`, спільне з рушієм скрипта.
+                    if (matched.Kind == CalculatedMatchKind.Ambiguous)
                     {
                         ambiguous++;
                         if (samples.Count < AmbiguousSamples)
@@ -237,6 +224,9 @@ public sealed partial class CalculatedCellOverlay(
 
                         continue;
                     }
+
+                    var total = matched.Total;
+                    var unitId = matched.UnitId;
 
                     overlaid.Add(new CellRecord(
                         new CellAddress(key, rowId, binding.ColumnDefId),
@@ -321,29 +311,6 @@ public sealed partial class CalculatedCellOverlay(
             => Instances.TryGetValue((periodKey, tableDefId), out var id) ? id : null;
     }
 
-    /// <summary>
-    /// Зводить значення комірки: різні речовини сумуються (одиниця виходу одна), а кілька
-    /// різних значень ОДНІЄЇ речовини — колізія рядків двох таблиць, тоді <c>false</c>.
-    /// </summary>
-    private static bool TryCombine(List<CalculationResultRow> values, out decimal total, out int unitId)
-    {
-        total = 0m;
-        unitId = values[0].UnitId;
-
-        foreach (var group in values.GroupBy(v => v.SubstanceEntryId))
-        {
-            var first = group.First();
-            if (group.Any(v => v.Value != first.Value || v.UnitId != first.UnitId))
-            {
-                return false;
-            }
-
-            total += first.Value;
-        }
-
-        return true;
-    }
-
     /// <summary>Те саме для всього документа — шлях експорту (xlsx, csv, json).</summary>
     /// <param name="documentId">Документ.</param>
     /// <param name="periodKey">Період.</param>
@@ -391,10 +358,6 @@ public sealed partial class CalculatedCellOverlay(
         Level = LogLevel.Warning,
         Message = "Неоднозначні результати розрахунку не накладено (D-401): документ {DocumentId}, період {PeriodKey}, комірок {Count}, приклади (рядок/вихід): {Samples}")]
     private static partial void LogAmbiguous(ILogger logger, long documentId, int periodKey, int count, string samples);
-
-    /// <summary>Чи предикат — «уся таблиця» (<c>{}</c>): тоді значення рядка не потрібні.</summary>
-    private static bool IsCatchAll(string matchJson)
-        => string.Equals(matchJson.Replace(" ", string.Empty, StringComparison.Ordinal), "{}", StringComparison.Ordinal);
 }
 
 /// <summary>Один екземпляр таблиці для <see cref="CalculatedCellOverlay"/>.</summary>

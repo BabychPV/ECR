@@ -1305,7 +1305,7 @@ public static partial class ScriptParser
 }
 
 /// <summary>Текстові подання чисел для ключів мап.</summary>
-internal static class ScriptNumbers
+public static class ScriptNumbers
 {
     /// <summary>Інваріантний текст числа без хвостових нулів (<c>1.50</c> → <c>1.5</c>).</summary>
     public static string KeyText(decimal value)

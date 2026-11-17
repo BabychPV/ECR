@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Globalization;
 using Ecr.Application.Calculations;
 using Ecr.Application.Ports;
+using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -158,8 +159,13 @@ public sealed class CalculationOrchestrator(
         //    для інвалідації (ФВ-9.10). Тому набір лягає в один пакет і йде
         //    паралельно; якщо колись з'явиться залежність за результатом —
         //    сюди мусять прийти реальні ребра.
+        // ✎ MS (план §13.9): версія-скрипт, що читає результат іншої методології (колонка `Calculated`), рахується
+        // у пізнішій пачці за неї; цикл — відмова всього прогону до першого розрахунку.
+        var scriptDependencies = await ScriptDependenciesAsync(resolved, onDate, ct).ConfigureAwait(false);
         var batches = CalculationPlan.Build(
-            resolved.Select(r => new CalculationNode(r.Descriptor.MethodologyVersionId, [])).ToList());
+            resolved.Select(r => new CalculationNode(
+                r.Descriptor.MethodologyVersionId,
+                scriptDependencies.GetValueOrDefault(r.Descriptor.MethodologyVersionId) ?? [])).ToList());
 
         var byVersion = resolved.ToLookup(r => r.Descriptor.MethodologyVersionId);
         var done = 0;
@@ -213,10 +219,18 @@ public sealed class CalculationOrchestrator(
                     var scopedOutputWriter = scope.ServiceProvider.GetRequiredService<CalculationOutputWriter>();
                     var scopedModules = scope.ServiceProvider.GetRequiredService<IEnumerable<ICalculationModule>>();
 
+                    // ✎ MS: модуль скрипта читає результати ЦЬОГО прогону (колонки `Calculated`, §13.9) і вибирає
+                    // рядки власним селектором; обидва — зі scope гілки.
+                    var scopedSelector = scope.ServiceProvider.GetService<ScriptRowSelector>();
+                    if (scope.ServiceProvider.GetService<ScriptRunContext>() is { } scriptRun)
+                    {
+                        scriptRun.CalculationRunId = calculationRunId;
+                    }
+
                     foreach (var binding in byVersion[versionId])
                     {
                         var stat = await ExecuteAsync(
-                            scopedResolver, scopedModules, scopedInputBuilder, scopedOutputWriter,
+                            scopedResolver, scopedSelector, scopedModules, scopedInputBuilder, scopedOutputWriter,
                             calculationRunId, documentId, periodKey, binding, registries,
                             _limits.MaxInputCellsPerBinding, rowMatches, rejected, missingInputs, stepErrors, token).ConfigureAwait(false);
 
@@ -408,6 +422,7 @@ public sealed class CalculationOrchestrator(
     /// </remarks>
     private static async Task<(string Module, TimeSpan Elapsed, int Rows)> ExecuteAsync(
         MethodologyResolver scopedResolver,
+        ScriptRowSelector? scopedSelector,
         IEnumerable<ICalculationModule> scopedModules,
         CalculationInputBuilder scopedInputBuilder,
         CalculationOutputWriter scopedOutputWriter,
@@ -442,9 +457,40 @@ public sealed class CalculationOrchestrator(
                 });
         }
 
-        var outcome = await scopedResolver
-            .MatchRowsDetailedAsync(binding.Descriptor.MethodologyVersionId, binding.TableInstanceId, ct)
-            .ConfigureAwait(false);
+        // ✎ MS (план §4.5): версія-скрипт — СПЕРШУ підготовка (вона дає скомпільований скрипт і Id записів `entry()`),
+        // потім вибір рядків його реченнями `rows`; формульна версія — як і було.
+        CalculationBindingContext? prepared = null;
+        RowMatchOutcome outcome;
+        if (binding.Descriptor.Engine == MethodologyEngine.Script)
+        {
+            if (scopedSelector is null)
+            {
+                throw new Domain.Abstractions.DomainException(
+                    "ECR-CALC-0422",
+                    $"Немає селектора рядків для версії-скрипта {binding.Descriptor.Code}.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-CALC-0422.noModule",
+                        ["code"] = binding.Descriptor.Code,
+                        ["level"] = $"{binding.Descriptor.Level}",
+                    });
+            }
+
+            prepared = await module
+                .PrepareAsync(binding.Descriptor, documentId, periodKey, registries, ct)
+                .ConfigureAwait(false);
+            var runtime = prepared.ScriptRuntime as ScriptRuntime;
+            outcome = await scopedSelector
+                .MatchAsync(prepared.Script!, binding.TableInstanceId, (registry, entry) => runtime?.EntryIdText(registry, entry), ct)
+                .ConfigureAwait(false);
+        }
+        else
+        {
+            outcome = await scopedResolver
+                .MatchRowsDetailedAsync(binding.Descriptor.MethodologyVersionId, binding.TableInstanceId, ct)
+                .ConfigureAwait(false);
+        }
+
         IReadOnlyList<string> rowKeys = [.. outcome.Matches.Select(m => m.RowKey)];
         rowMatches.Add(new RowMatchSummary(
             binding.TableInstanceId, rowKeys, outcome.AllRowKeys, outcome.Excluded, binding.Descriptor.MethodologyId));
@@ -511,7 +557,7 @@ public sealed class CalculationOrchestrator(
             // ⚠ RT-23a: знімок довідників — з кешу ПРОГОНУ (§5.7), спільного для
             // всіх прив'язок і паралельних гілок: завантажується один раз на
             // (довідники, бізнес-дата, момент), а не на прив'язку.
-            var prepared = await module
+            prepared ??= await module
                 .PrepareAsync(binding.Descriptor, documentId, periodKey, registries, ct)
                 .ConfigureAwait(false);
 
@@ -591,6 +637,115 @@ public sealed class CalculationOrchestrator(
     /// цьому ж проєкті явно уникає тим самим способом — через реальні межі
     /// періоду, а не арифметику ключа).
     /// </remarks>
+    /// <summary>
+    /// Залежності версій-скриптів за результатами (MS, план §13.9): версії інших методологій цього прогону, чиї виходи
+    /// скрипт читає колонками <c>Calculated</c>. Цикл — <c>ECR-CALC-0422 scriptResultCycle</c>, прогін не виконується.
+    /// </summary>
+    private async Task<IReadOnlyDictionary<int, IReadOnlyList<int>>> ScriptDependenciesAsync(
+        List<ResolvedBinding> resolved, DateOnly onDate, CancellationToken ct)
+    {
+        var scripts = resolved.Where(r => r.Descriptor.Engine == MethodologyEngine.Script).ToList();
+        if (scripts.Count == 0)
+        {
+            return new Dictionary<int, IReadOnlyList<int>>();
+        }
+
+        using var scope = scopeFactory.CreateScope();
+        var module = scope.ServiceProvider.GetServices<ICalculationModule>().OfType<ScriptCalculationModule>().FirstOrDefault();
+        if (module is null)
+        {
+            return new Dictionary<int, IReadOnlyList<int>>();
+        }
+
+        var versionsByMethodology = resolved
+            .GroupBy(r => r.Descriptor.MethodologyId)
+            .ToDictionary(g => g.Key, g => g.Select(r => r.Descriptor.MethodologyVersionId).Distinct().ToList());
+
+        var graph = new SortedDictionary<int, SortedSet<int>>();
+        foreach (var binding in scripts)
+        {
+            var version = binding.Descriptor.MethodologyVersionId;
+            var reads = await module
+                .ReadsMethodologyIdsAsync(binding.Descriptor, binding.TableInstanceId, onDate, ct)
+                .ConfigureAwait(false);
+
+            if (!graph.TryGetValue(version, out var edges))
+            {
+                graph[version] = edges = [];
+            }
+
+            foreach (var methodologyId in reads)
+            {
+                if (versionsByMethodology.TryGetValue(methodologyId, out var versions))
+                {
+                    edges.UnionWith(versions.Where(v => v != version));
+                }
+            }
+        }
+
+        var cycle = FindCycle(graph);
+        if (cycle is not null)
+        {
+            throw new Domain.Abstractions.DomainException(
+                "ECR-CALC-0422",
+                "Методології читають результати одна одної по колу: " + string.Join(", ", cycle),
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.scriptResultCycle",
+                    ["methodologyVersionIds"] = cycle,
+                });
+        }
+
+        return graph.ToDictionary(p => p.Key, p => (IReadOnlyList<int>)[.. p.Value]);
+    }
+
+    /// <summary>Знаходить цикл у графі залежностей версій; <c>null</c> — циклу немає.</summary>
+    private static List<int>? FindCycle(IReadOnlyDictionary<int, SortedSet<int>> graph)
+    {
+        // 0 — не бачили, 1 — на стеку, 2 — завершено. Ітеративний обхід: глибина графа не обмежена стеком потоку.
+        var state = new Dictionary<int, byte>();
+        foreach (var start in graph.Keys)
+        {
+            if (state.GetValueOrDefault(start) != 0)
+            {
+                continue;
+            }
+
+            var path = new List<int> { start };
+            var cursors = new Stack<IEnumerator<int>>();
+            state[start] = 1;
+            cursors.Push((graph.GetValueOrDefault(start) ?? []).GetEnumerator());
+
+            while (cursors.Count > 0)
+            {
+                var cursor = cursors.Peek();
+                if (!cursor.MoveNext())
+                {
+                    state[path[^1]] = 2;
+                    path.RemoveAt(path.Count - 1);
+                    cursors.Pop();
+                    continue;
+                }
+
+                var next = cursor.Current;
+                switch (state.GetValueOrDefault(next))
+                {
+                    case 1:
+                        return [.. path.SkipWhile(v => v != next), next];
+                    case 0:
+                        state[next] = 1;
+                        path.Add(next);
+                        cursors.Push((graph.GetValueOrDefault(next) ?? []).GetEnumerator());
+                        break;
+                    default:
+                        break;
+                }
+            }
+        }
+
+        return null;
+    }
+
     private async Task<DateOnly> PeriodDateAsync(long documentId, PeriodKey periodKey, CancellationToken ct)
     {
         // ⛔ Спершу — чи це взагалі період, і лише потім похід у сховище.

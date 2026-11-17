@@ -195,6 +195,31 @@ public sealed class MethodologyResolver(
         return outcome.Matches;
     }
 
+    /// <summary>Читає екземпляр таблиці, ключі його рядків і зріз комірок (з дефолтами колонок).</summary>
+    /// <param name="tableInstanceId">Екземпляр таблиці документа.</param>
+    /// <param name="ct">Токен скасування.</param>
+    internal async Task<TableRead> ReadTableAsync(long tableInstanceId, CancellationToken ct)
+    {
+        var instance = await rows.ResolveTableInstanceAsync(tableInstanceId, ct).ConfigureAwait(false);
+        var period = new PeriodKey(instance.PeriodKey);
+        var rowIds = await rows
+            .GetRowIdsAsync(tableInstanceId, period, ct)
+            .ConfigureAwait(false);
+
+        // O3c: період екземпляра вже відомий — ключ партиції замість пошуку по всіх.
+        var slice = await cells.ReadSliceAsync(tableInstanceId, period, ct).ConfigureAwait(false);
+
+        // ✎ C-5 (рішення PO 11.11, 02b §6.3): правило бачить дефолт незаповненої комірки; той самий доповнений зріз іде
+        // у входи (`Read` нижче → CalculationInputBuilder), тож зіставлення й аргументи не розходяться.
+        if (defaults is not null)
+        {
+            slice = (await defaults.ForVersionAsync(instance.TemplateVersionId, ct).ConfigureAwait(false))
+                .Complete(slice, instance.TableDefId, rowIds, period);
+        }
+
+        return new TableRead(instance, period, rowIds, slice);
+    }
+
     /// <summary>
     /// Те саме, що <see cref="MatchRowsWithRulesAsync"/>, плюс <b>усі</b> живі рядки таблиці
     /// в порядку створення — щоб оркестратор міг назвати рядки, яким не підійшло жодне правило (L-4).
@@ -216,28 +241,18 @@ public sealed class MethodologyResolver(
             return new RowMatchOutcome([], null);
         }
 
-        var instance = await rows.ResolveTableInstanceAsync(tableInstanceId, ct).ConfigureAwait(false);
+        // ✎ MS: читання екземпляра, рядків і зрізу (з дефолтами колонок) — спільне зі `ScriptRowSelector`.
+        var table = await ReadTableAsync(tableInstanceId, ct).ConfigureAwait(false);
+        var instance = table.Instance;
+        var period = table.Period;
+        var rowIds = table.RowIds;
+        var slice = table.Slice;
 
         // ⛔ C1: ключі правил — Id колонок тієї версії шаблону, у якій правило писали; документ може бути на
         // клон-версії. Без перекладу правило на клоні не збігається ні з чим.
         var localized = await MethodologyKeyLocalizer
             .LocalizeAsync(columnMapper, instance.TemplateVersionId, rules, requiredInputs: null, ct)
             .ConfigureAwait(false);
-        var period = new PeriodKey(instance.PeriodKey);
-        var rowIds = await rows
-            .GetRowIdsAsync(tableInstanceId, period, ct)
-            .ConfigureAwait(false);
-
-        // O3c: період екземпляра вже відомий — ключ партиції замість пошуку по всіх.
-        var slice = await cells.ReadSliceAsync(tableInstanceId, period, ct).ConfigureAwait(false);
-
-        // ✎ C-5 (рішення PO 11.11, 02b §6.3): правило бачить дефолт незаповненої комірки; той самий доповнений зріз іде
-        // у входи (`Read` нижче → CalculationInputBuilder), тож зіставлення й аргументи не розходяться.
-        if (defaults is not null)
-        {
-            slice = (await defaults.ForVersionAsync(instance.TemplateVersionId, ct).ConfigureAwait(false))
-                .Complete(slice, instance.TableDefId, rowIds, period);
-        }
 
         // Значення рядка: колонка → рядкове подання. Порівняння в предикаті
         // текстове навмисно — MatchJson описує коди довідників і ознаки, а не
@@ -305,6 +320,20 @@ public sealed class MethodologyResolver(
         };
     }
 }
+
+/// <summary>
+/// Екземпляр таблиці, його рядки (ключ → Id) і зріз комірок з дефолтами колонок — спільне читання старого
+/// зіставлення правил і <see cref="ScriptRowSelector"/> (MS).
+/// </summary>
+/// <param name="Instance">Екземпляр таблиці.</param>
+/// <param name="Period">Період екземпляра.</param>
+/// <param name="RowIds">Ключ рядка → <c>TableRow.Id</c>.</param>
+/// <param name="Slice">Комірки зрізу, доповнені дефолтами колонок.</param>
+internal sealed record TableRead(
+    TableInstanceRef Instance,
+    PeriodKey Period,
+    IReadOnlyDictionary<string, long> RowIds,
+    IReadOnlyList<CellRecord> Slice);
 
 /// <summary>
 /// Зріз екземпляра таблиці й ключі його рядків, уже прочитані зіставленням правил (AN-13 D4).

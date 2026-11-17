@@ -193,6 +193,7 @@ public static class DependencyInjection
         services.AddScoped<IConstantStore, ConstantStore>();
         services.AddSingleton<CalculationYearResultsCache>(); // CRY03: власне сховище зі стелею, сирі факти до звуження
         services.AddScoped<ICalculationResultStore, CalculationResultStore>();
+        services.AddScoped<IScriptRuntimeStore, ScriptRuntimeStore>();
 
         // CALC-RESULTS: огляд року читає той самий екземпляр сховища (правило актуального прогону — одне).
         services.AddScoped<ICalculationYearReader>(sp => (CalculationResultStore)sp.GetRequiredService<ICalculationResultStore>());

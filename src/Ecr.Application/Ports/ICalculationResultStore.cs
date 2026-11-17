@@ -196,6 +196,23 @@ public interface ICalculationResultStore
     /// проєкту живуть по одному на період.
     /// </remarks>
     public Task<CurrentRunProfile?> ReadCurrentRunProfileAsync(long documentId, int periodKey, CancellationToken ct);
+
+    /// <summary>
+    /// Результати КОНКРЕТНОГО прогону документа за період — те, що вже записали методології цього прогону
+    /// (MS, план §13.9: методологія-читач бачить результат джерела з того самого прогону).
+    /// </summary>
+    /// <param name="calculationRunId">Прогін.</param>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="filter">Звуження: екземпляри таблиць, коди виходів, версії методологій.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Рядки прогону за фільтром; порожньо — прогін нічого такого не записав.</returns>
+    /// <remarks>
+    /// ⚠ Реалізація за замовчуванням порожня: подвійники портів у тестах, що її не знають, лишаються працездатними.
+    /// </remarks>
+    public Task<IReadOnlyList<CalculationResultRow>> ReadRunAsync(
+        long calculationRunId, long documentId, int periodKey, CurrentResultFilter filter, CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<CalculationResultRow>>([]);
 }
 
 /// <summary>Прогін, що перестав бути актуальним (Q-17): що саме прибирати з <c>calc.*</c>.</summary>
