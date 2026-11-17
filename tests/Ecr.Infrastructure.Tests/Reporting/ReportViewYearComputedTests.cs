@@ -17,6 +17,8 @@ namespace Ecr.Infrastructure.Tests.Reporting;
 /// (<c>cfg.TemplateVersion.Layout = 1</c>) віддають ОБЧИСЛЮВАНІ колонки так само, як API (<c>MonthRoutedCellStore</c>,
 /// <c>CalculatedCellOverlay</c> L2b): місячна <c>C_Mm</c> — з екземпляра періоду <c>m</c>, не-місячна — з якоря року, власна
 /// копія рядка перегляду затінена (застаріле значення «по періодах» не видно), <c>_Text</c> — з того самого джерела.
+/// ✎ B170 / D-547 (людина 18.11 «У всіх річних»): у версії з Layout = 1 місячні Formula/Calculated колонки супутника
+/// <c>_Text</c> НЕ мають (вʼюха його не віддає); немісячні - як раніше. Тому тут <c>C_M09_Text</c> відсутня, а з Layout = 0 - є.
 /// </summary>
 /// <remarks>
 /// Дані: місячний проєкт 2099 (209901..209912), документ, рядки R1 (число) і R2 (рядковий результат). Формула C_M09 записана
@@ -60,6 +62,7 @@ public sealed class ReportViewYearComputedTests : IAsyncLifetime
 
             foreach (var view in new[] { Sanitize($"v_{tpl}_S_T_v1"), Sanitize($"v_{tpl}_S_T") })
             {
+                Assert.False(await HasColumnAsync(view, "C_M09_Text"));   // B170 / D-547: річна розкладка - місячні без _Text
                 var rows = await RowsAsync(view, doc);
                 var r1 = rows.Single(r => r is { Period: 209903, RowKey: "R1" });
                 Assert.Equal(9m, r1.CM09);            // власник - 209909, а не застаріла копія 333
@@ -67,7 +70,7 @@ public sealed class ReportViewYearComputedTests : IAsyncLifetime
                 Assert.Equal(1m, r1.CY);              // не-місячна - якір 209901, а не 33
                 var r2 = rows.Single(r => r is { Period: 209903, RowKey: "R2" });
                 Assert.Null(r2.CM09);
-                Assert.Equal("TXT9", r2.CM09Text);    // _Text - з власника, а не «STALE»
+                Assert.Null(r2.CM09Text);             // B170 / D-547: у річній розкладці місячних _Text немає
                 var r1Sep = rows.Single(r => r is { Period: 209909, RowKey: "R1" });
                 Assert.Equal(3m, r1Sep.CM03);         // копія 999 у 209909 затінена
                 Assert.Equal(9m, r1Sep.CM09);
@@ -103,6 +106,7 @@ public sealed class ReportViewYearComputedTests : IAsyncLifetime
 
             foreach (var view in new[] { Sanitize($"v_{tpl}_S_T_v1"), Sanitize($"v_{tpl}_S_T") })
             {
+                Assert.False(await HasColumnAsync(view, "C_M09_Text"));   // B170 / D-547: річна розкладка - місячні без _Text
                 var all = await RowsAsync(view, doc);
                 foreach (var period in new[] { 209901, 209903, 209909 })
                 {
@@ -175,6 +179,7 @@ public sealed class ReportViewYearComputedTests : IAsyncLifetime
 
             foreach (var view in new[] { Sanitize($"v_{tpl}_S_T_v1"), Sanitize($"v_{tpl}_S_T") })
             {
+                Assert.False(await HasColumnAsync(view, "C_M09_Text"));   // B170 / D-547: річна розкладка - місячні без _Text
                 // Оригінал: власник місяця 9 - екземпляр-ОРИГІНАЛ 209909, копія не змішується (MAX / розбіжність прогону).
                 var originals = await RowsAsync(view, doc, copyOrdinal: 1);
                 foreach (var period in new[] { 209901, 209903, 209909 })
@@ -183,7 +188,7 @@ public sealed class ReportViewYearComputedTests : IAsyncLifetime
                     Assert.Equal(9m, r1.CM09);
                     Assert.Equal(90m, r1.KM09);
                     var r2 = originals.Single(r => r.Period == period && r.RowKey == "R2");
-                    Assert.Equal("TXT9", r2.CM09Text);
+                    Assert.Null(r2.CM09Text);   // B170 / D-547
                     Assert.Equal(77m, r2.KM09);
                 }
 
@@ -197,7 +202,7 @@ public sealed class ReportViewYearComputedTests : IAsyncLifetime
                 Assert.Equal(99m, c909.CM09);
                 Assert.Equal(95m, c909.KM09);
                 var c909r2 = copies.Single(r => r is { Period: 209909, RowKey: "R2" });
-                Assert.Equal("ZZZ", c909r2.CM09Text);
+                Assert.Null(c909r2.CM09Text);   // B170 / D-547
                 Assert.Equal(88m, c909r2.KM09);
             }
         }
@@ -228,7 +233,7 @@ public sealed class ReportViewYearComputedTests : IAsyncLifetime
             Assert.Equal(33m, q.CY);
             Assert.Equal(30m, q.KM09);   // прогін свого періоду
             var q2 = (await RowsAsync(versioned, quarterly)).Single(r => r is { Period: 209903, RowKey: "R2" });
-            Assert.Equal("STALE", q2.CM09Text);
+            Assert.Null(q2.CM09Text);   // B170 / D-547: правило - за розкладкою ВЕРСІЇ (Layout = 1), і для квартального
             Assert.Equal(55m, q2.KM09);
 
             // Layout = 0, спадковий прапор ON: обчислювані НЕ маршрутизуються (лише розкладка версії, як у MonthColumnRouter).
@@ -267,6 +272,7 @@ public sealed class ReportViewYearComputedTests : IAsyncLifetime
 
             foreach (var view in new[] { Sanitize($"v_{tpl}_S_T_v1"), Sanitize($"v_{tpl}_S_T") })
             {
+                Assert.False(await HasColumnAsync(view, "C_M09_Text"));   // B170 / D-547: річна розкладка - місячні без _Text
                 var definition = await DefinitionAsync(view);
                 Assert.False(string.IsNullOrEmpty(definition));
                 Assert.DoesNotContain(") AS sc", definition, StringComparison.Ordinal);
@@ -512,9 +518,16 @@ public sealed class ReportViewYearComputedTests : IAsyncLifetime
     private async Task<string> DefinitionAsync(string view)
         => (string?)(await QueryAsync($"SELECT OBJECT_DEFINITION(OBJECT_ID(N'rpt.[{view}]', N'V'))"))[0][0] ?? string.Empty;
 
+    /// <summary>B170 / D-547: у річній розкладці колонки <c>C_M09_Text</c> немає - читаємо NULL, у місячній - саму колонку.</summary>
+    private async Task<string> TextColumnAsync(string view)
+        => await HasColumnAsync(view, "C_M09_Text") ? "[C_M09_Text]" : "CAST(NULL AS nvarchar(1)) AS [C_M09_Text]";
+
+    private async Task<bool> HasColumnAsync(string view, string column)
+        => (int)(await QueryAsync($"SELECT COUNT(*) FROM sys.columns WHERE object_id = OBJECT_ID(N'rpt.[{view}]', N'V') AND name = N'{column}'"))[0][0]! > 0;
+
     /// <summary>Рядки вʼюхи документа; <paramref name="copyOrdinal"/> - лише оригінал (1) або копія аркуша (2…), <c>null</c> - усі.</summary>
     private async Task<List<Row>> RowsAsync(string view, long documentId, short? copyOrdinal = null)
-        => [.. (await QueryAsync($"SELECT _PeriodKey, _RowKey, [C_M03], [C_M09], [C_M09_Text], [CY], [K_M09] FROM rpt.[{view}] WHERE _DocumentId = {documentId}"
+        => [.. (await QueryAsync($"SELECT _PeriodKey, _RowKey, [C_M03], [C_M09], {await TextColumnAsync(view)}, [CY], [K_M09] FROM rpt.[{view}] WHERE _DocumentId = {documentId}"
                                  + (copyOrdinal is { } o ? $" AND _SheetCopyOrdinal = {o}" : string.Empty) + " ORDER BY _PeriodKey, _RowKey"))
             .Select(r => new Row((int)r[0]!, (string)r[1]!, (decimal?)r[2], (decimal?)r[3], (string?)r[4], (decimal?)r[5], (decimal?)r[6]))];
 
