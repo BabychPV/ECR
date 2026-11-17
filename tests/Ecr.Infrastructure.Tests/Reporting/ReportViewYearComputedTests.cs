@@ -117,6 +117,96 @@ public sealed class ReportViewYearComputedTests : IAsyncLifetime
         }
     }
 
+    /// <summary>
+    /// L5b (F13 AU): власник маршрутизованих обчислюваних - лише ОРИГІНАЛ аркуша (API: MonthRoutedCellStore OriginalOnly). Копія
+    /// аркуша (CopyOrdinal 2) має свої екземпляри 209903/209909 з іншими значеннями того самого RowKey/місяця: C_M09 R1 = 99,
+    /// R2 = «ZZZ», матеріалізоване K_M09 R2 = 88, результат актуального прогону 209909 для екземпляра копії R1 = 95. Рядки
+    /// оригіналу показують значення власника-оригіналу (9 / «TXT9» / 90 / 77), а не копії; рядки копії не маршрутизуються -
+    /// власна копія й прогін свого періоду (209903: 444 / 35; 209909: 99 / 95 / 88).
+    /// </summary>
+    /// <remarks>
+    /// Мутації (локально, не комітиться): прибрати <c>AND oi.SheetCopyId IS NULL</c> у fam або в orv (обидві процедури) -
+    /// MAX змішує копію (99 / «ZZZ» / 88), а orv дає розбіжні 90 і 95 одного джерела - NULL; прибрати <c>ti.SheetCopyId IS NULL</c>
+    /// з @owner - рядки копії читають власника-оригінал (9 замість 444).
+    /// </remarks>
+    [Fact]
+    [Trait("L5b", "SheetCopy")]
+    public async Task Рік_копія_аркуша_не_стає_власником_і_не_маршрутизується()
+    {
+        try
+        {
+            var (templateId, tpl) = await NewTemplateAsync();
+            var v = await AddVersionAsync(templateId);
+            await SetLayoutAsync(v.VersionId, 1);
+            var doc = await NewDocumentAsync(v.VersionId, PeriodKind.Monthly);
+            var rows = await SeedYearAsync(doc, v);
+            var calc = await SeedCalcAsync(doc, v, rows);
+
+            long copyId;
+            await using (var db = _sql.CreateContext())
+            {
+                var sheetDefId = await db.TableDefs.Where(t => t.Id == v.TableId).Select(t => t.SheetDefId).FirstAsync();
+                var original = new DocumentSheet(doc, sheetDefId);
+                db.DocumentSheets.Add(original);
+                await db.SaveChangesAsync();
+                var copy = original.CreateCopy(2);
+                db.DocumentSheets.Add(copy);
+                await db.SaveChangesAsync();
+                copyId = copy.Id;
+            }
+
+            var copy903 = await InstanceAsync(doc, 209903, v.TableId, copyId);
+            var copy909 = await InstanceAsync(doc, 209909, v.TableId, copyId);
+            var c9 = v.Cols["C_M09"];
+            var k9 = v.Cols["K_M09"];
+            await ExecuteAsync($"""
+                INSERT INTO doc.CellValue (PeriodKey, TableRowId, ColumnDefId, TableDefId, ValueNumeric, ValueString, IsCalculated)
+                VALUES {Cell(209909, copy909.R1, c9, v.TableId, 99m, null)},
+                       {Cell(209909, copy909.R2, c9, v.TableId, null, "ZZZ")},
+                       {Cell(209909, copy909.R2, k9, v.TableId, 88m, null)},
+                       {Cell(209903, copy903.R1, c9, v.TableId, 444m, null)};
+                INSERT INTO calc.CalculationResult
+                    (PeriodKey, Id, CalculationRunId, MethodologyVersionId, DocumentId, TableInstanceId, SourceRowKey, OutputCode, Value, UnitId, Kind)
+                VALUES (209909, NEXT VALUE FOR calc.CalculationResultSeq, {calc.Run909}, {calc.MethodologyVersionId}, {doc}, {copy909.Instance}, N'R1', N'OUT9', 95, {calc.UnitId}, 0),
+                       (209903, NEXT VALUE FOR calc.CalculationResultSeq, {calc.Run903}, {calc.MethodologyVersionId}, {doc}, {copy903.Instance}, N'R1', N'OUT9', 35, {calc.UnitId}, 0);
+                """);
+
+            await GenerateAsync(v.VersionId, routing: false);
+
+            foreach (var view in new[] { Sanitize($"v_{tpl}_S_T_v1"), Sanitize($"v_{tpl}_S_T") })
+            {
+                // Оригінал: власник місяця 9 - екземпляр-ОРИГІНАЛ 209909, копія не змішується (MAX / розбіжність прогону).
+                var originals = await RowsAsync(view, doc, copyOrdinal: 1);
+                foreach (var period in new[] { 209901, 209903, 209909 })
+                {
+                    var r1 = originals.Single(r => r.Period == period && r.RowKey == "R1");
+                    Assert.Equal(9m, r1.CM09);
+                    Assert.Equal(90m, r1.KM09);
+                    var r2 = originals.Single(r => r.Period == period && r.RowKey == "R2");
+                    Assert.Equal("TXT9", r2.CM09Text);
+                    Assert.Equal(77m, r2.KM09);
+                }
+
+                // Копія: маршрутизації немає - власна копія комірки і прогін свого періоду для свого екземпляра.
+                var copies = await RowsAsync(view, doc, copyOrdinal: 2);
+                Assert.Equal(4, copies.Count);
+                var c903 = copies.Single(r => r is { Period: 209903, RowKey: "R1" });
+                Assert.Equal(444m, c903.CM09);
+                Assert.Equal(35m, c903.KM09);
+                var c909 = copies.Single(r => r is { Period: 209909, RowKey: "R1" });
+                Assert.Equal(99m, c909.CM09);
+                Assert.Equal(95m, c909.KM09);
+                var c909r2 = copies.Single(r => r is { Period: 209909, RowKey: "R2" });
+                Assert.Equal("ZZZ", c909r2.CM09Text);
+                Assert.Equal(88m, c909r2.KM09);
+            }
+        }
+        finally
+        {
+            await CleanupAsync();
+        }
+    }
+
     [Fact]
     public async Task Не_місячний_проєкт_і_прапор_без_розкладки_рік_власна_копія_як_раніше()
     {
@@ -325,7 +415,7 @@ public sealed class ReportViewYearComputedTests : IAsyncLifetime
     /// Методологія з виходом OUT9, прив'язка {} до K_M09; АКТУАЛЬНІ документні прогони 209909 (R1 = 90, екземпляр 209909) і 209903
     /// (R1 = 30, екземпляр 209903 - число «по періодах», яке вʼюха року показувати не має); застарілий прогін 209909 (R1 = 900).
     /// </summary>
-    private async Task SeedCalcAsync(long documentId, Version table, Dictionary<int, (long Instance, long R1, long R2)> rows)
+    private async Task<CalcSeed> SeedCalcAsync(long documentId, Version table, Dictionary<int, (long Instance, long R1, long R2)> rows)
     {
         long run903, run909, old909;
         int versionId, unitId;
@@ -372,20 +462,24 @@ public sealed class ReportViewYearComputedTests : IAsyncLifetime
                    (209909, NEXT VALUE FOR calc.CalculationResultSeq, {old909}, {versionId}, {documentId}, {rows[209909].Instance}, N'R1', N'OUT9', 900, {unitId}, 0),
                    (209903, NEXT VALUE FOR calc.CalculationResultSeq, {run903}, {versionId}, {documentId}, {rows[209903].Instance}, N'R1', N'OUT9', 30, {unitId}, 0);
             """);
+        return new CalcSeed(run903, run909, versionId, unitId);
     }
+
+    /// <summary>Актуальні прогони 209903/209909, версія методології й одиниця з <see cref="SeedCalcAsync"/>.</summary>
+    private sealed record CalcSeed(long Run903, long Run909, int MethodologyVersionId, int UnitId);
 
     private static string Cell(int period, long row, int column, int table, decimal? number, string? text)
         => $"({period}, {row}, {column}, {table}, {(number is { } n ? n.ToString(System.Globalization.CultureInfo.InvariantCulture) : "NULL")}, "
            + $"{(text is null ? "NULL" : $"N'{text}'")}, 1)";
 
-    private async Task<(long Instance, long R1, long R2)> InstanceAsync(long documentId, int periodKey, int tableId)
+    private async Task<(long Instance, long R1, long R2)> InstanceAsync(long documentId, int periodKey, int tableId, long? sheetCopyId = null)
     {
         var loader = new BulkCellLoader(_sql.ConnectionString, 1000);
         var instanceId = await loader.ReserveIdsAsync("doc.TableInstanceSeq", 1, CancellationToken.None);
         var rowId = await loader.ReserveIdsAsync("doc.TableRowSeq", 2, CancellationToken.None);
         var key = new PeriodKey(periodKey);
         await using var db = _sql.CreateContext();
-        db.TableInstances.Add(new TableInstance(key, instanceId, documentId, tableId, Now));
+        db.TableInstances.Add(new TableInstance(key, instanceId, documentId, tableId, Now, sheetCopyId));
         db.TableRows.Add(new TableRow(key, rowId, instanceId, RowKey.Create("R1"), 1, Now));
         db.TableRows.Add(new TableRow(key, rowId + 1, instanceId, RowKey.Create("R2"), 2, Now));
         await db.SaveChangesAsync();
@@ -418,8 +512,10 @@ public sealed class ReportViewYearComputedTests : IAsyncLifetime
     private async Task<string> DefinitionAsync(string view)
         => (string?)(await QueryAsync($"SELECT OBJECT_DEFINITION(OBJECT_ID(N'rpt.[{view}]', N'V'))"))[0][0] ?? string.Empty;
 
-    private async Task<List<Row>> RowsAsync(string view, long documentId)
-        => [.. (await QueryAsync($"SELECT _PeriodKey, _RowKey, [C_M03], [C_M09], [C_M09_Text], [CY], [K_M09] FROM rpt.[{view}] WHERE _DocumentId = {documentId} ORDER BY _PeriodKey, _RowKey"))
+    /// <summary>Рядки вʼюхи документа; <paramref name="copyOrdinal"/> - лише оригінал (1) або копія аркуша (2…), <c>null</c> - усі.</summary>
+    private async Task<List<Row>> RowsAsync(string view, long documentId, short? copyOrdinal = null)
+        => [.. (await QueryAsync($"SELECT _PeriodKey, _RowKey, [C_M03], [C_M09], [C_M09_Text], [CY], [K_M09] FROM rpt.[{view}] WHERE _DocumentId = {documentId}"
+                                 + (copyOrdinal is { } o ? $" AND _SheetCopyOrdinal = {o}" : string.Empty) + " ORDER BY _PeriodKey, _RowKey"))
             .Select(r => new Row((int)r[0]!, (string)r[1]!, (decimal?)r[2], (decimal?)r[3], (string?)r[4], (decimal?)r[5], (decimal?)r[6]))];
 
     /// <summary>Свої дані (документи 2099, Layout версій) прибираються після кожного тесту.</summary>
@@ -439,6 +535,8 @@ public sealed class ReportViewYearComputedTests : IAsyncLifetime
                   JOIN doc.TableInstance AS ti ON ti.PeriodKey = r.PeriodKey AND ti.Id = r.TableInstanceId
                  WHERE ti.DocumentId IN ({docs}) AND ti.PeriodKey BETWEEN 209901 AND 209912;
                 DELETE FROM doc.TableInstance WHERE DocumentId IN ({docs}) AND PeriodKey BETWEEN 209901 AND 209912;
+                DELETE FROM doc.DocumentSheet WHERE DocumentId IN ({docs}) AND CopyOfId IS NOT NULL;
+                DELETE FROM doc.DocumentSheet WHERE DocumentId IN ({docs});
                 """);
             _documents.Clear();
         }
