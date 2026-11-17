@@ -210,6 +210,7 @@ public sealed class DependentMonthsGateRaceTests(SqlServerFixture sql)
         var clock = new FixedClock(DateTime.UtcNow);
         var bulk = new BulkCellLoader(db.Database.GetConnectionString()!, 1000);
         var profile = new AccessBuilder { UserId = scene.WriterId }
+            .Permission("Document.View") // PT-8 (main #963): запис вимагає права Document.View
             .Grant(ResourceKind.Project, doc.ProjectId, GrantLevel.Write)
             .Build();
 
