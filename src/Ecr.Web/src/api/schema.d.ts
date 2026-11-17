@@ -32901,6 +32901,16 @@ export interface components {
             mappingsUnmappedKeys?: null | string[];
             /** @description Режим. */
             mode: components["schemas"]["VersionMigrationMode"];
+            /** @description ✎ LAND-YEAR L3: шляхи `SHEET.TABLE.COLUMN` немісячних колонок зі значеннями без повного набору місячних цілей
+             *     у річній версії (причина `dataLoss`), не більше `MaxItems`; `null` — таких немає. */
+            monthColumnsUnmapped?: null | string[];
+            /**
+             * Format: int64
+             * @description ✎ LAND-YEAR L3: скільки з TransferredValues переїде (переїхало) з немісячних колонок «копії на
+             *     місяць» у місячні колонки річної версії (`C` періоду з місяцем m → `C_Mmm`). `null` — перенос не
+             *     змінює розкладку «копія на місяць» → «рік, місяці в колонках».
+             */
+            monthTransferredValues?: null | number;
             /**
              * Format: int32
              * @description D-1b P3: скільки документів у цих проєктах.
@@ -32921,6 +32931,12 @@ export interface components {
              */
             projectId: number;
             range?: null | components["schemas"]["VersionMigrationRange"];
+            /**
+             * Format: int64
+             * @description ✎ LAND-YEAR L3: скільки значень обчислюваних колонок, яких річна версія не має (селектори «поточного місяця»), не
+             *     переїде, а буде перераховано (не втрата). `null` — як для MonthTransferredValues.
+             */
+            recomputedValues?: null | number;
             /** @description Причини відмови: `structural`, `dataLoss`, `guardedWithData`, `sheetsLocked`, `projectArchived`. */
             refusals: string[];
             /** @description Її номер. */

@@ -119,6 +119,19 @@ namespace Ecr.Application.Documents.VersionMigration;
 /// ✎ V-7: ці подані/затверджені пари «аркуш × період» (<see cref="LockedSheetItem.Affected"/> = <c>true</c>), не більше
 /// <c>MaxLockedItems</c>; <c>null</c> — таких немає. ⛔ Лише коди аркушів, періоди й статуси.
 /// </param>
+/// <param name="MonthTransferredValues">
+/// ✎ LAND-YEAR L3: скільки з <paramref name="TransferredValues"/> переїде (переїхало) з немісячних колонок «копії на
+/// місяць» у місячні колонки річної версії (<c>C</c> періоду з місяцем m → <c>C_Mmm</c>). <c>null</c> — перенос не
+/// змінює розкладку «копія на місяць» → «рік, місяці в колонках».
+/// </param>
+/// <param name="RecomputedValues">
+/// ✎ LAND-YEAR L3: скільки значень обчислюваних колонок, яких річна версія не має (селектори «поточного місяця»), не
+/// переїде, а буде перераховано (не втрата). <c>null</c> — як для <paramref name="MonthTransferredValues"/>.
+/// </param>
+/// <param name="MonthColumnsUnmapped">
+/// ✎ LAND-YEAR L3: шляхи <c>SHEET.TABLE.COLUMN</c> немісячних колонок зі значеннями без повного набору місячних цілей
+/// у річній версії (причина <c>dataLoss</c>), не більше <c>MaxItems</c>; <c>null</c> — таких немає.
+/// </param>
 public sealed record DocumentVersionMigrationDto(
     long DocumentId,
     int ProjectId,
@@ -161,7 +174,10 @@ public sealed record DocumentVersionMigrationDto(
     int? EffectiveFromPeriodKey = null,
     IReadOnlyList<VersionMigrationWarning>? Warnings = null,
     int? LockedOverridesLost = null,
-    IReadOnlyList<LockedSheetItem>? LockedOverrideItems = null);
+    IReadOnlyList<LockedSheetItem>? LockedOverrideItems = null,
+    long? MonthTransferredValues = null,
+    long? RecomputedValues = null,
+    IReadOnlyList<string>? MonthColumnsUnmapped = null);
 
 /// <summary>Комірка, значення якої перезапише нова комірочна формула (ACC-OW).</summary>
 /// <param name="SheetCode">Код аркуша вихідної версії.</param>
@@ -1059,6 +1075,13 @@ public sealed class MigrateDocumentVersionHandler(
             {
                 formulaTables = plan.FormulaChanges.Count;
 
+                // ✎ LAND-YEAR L3: перехід на рік — перерахунок ЗАВЖДИ: місячні колонки результатів і формул отримують
+                // значення від власників-місяців (закриті місяці перерахунок не пише, їхнє лишається перенесеним на місці).
+                if (planned.YearTransition)
+                {
+                    formulaTables = Math.Max(formulaTables, 1);
+                }
+
                 // ✎ D-461: позначки вже переїхали за колонками (діапазони); ті, яких цільова формула не дозволяє, —
                 // знімаються, комірка знову обчислена (перерахунок проєкту нижче), журнал — FormulaRestored.
                 var released = await ReleaseLostOverridesAsync(projectId, target.Id, profile.UserId, plan.FromPeriodKey, innerCt).ConfigureAwait(false);
@@ -1135,6 +1158,18 @@ public sealed class MigrateDocumentVersionHandler(
                             lookupRemapped = plan.LookupRemappedValues,
                             lookupRemapTargets = plan.LookupRemaps.Select(r => r.HeaderFieldDefId).Distinct().Count(),
                             backupConfirmation = BackupConfirmation is { Length: > 500 } longValue ? longValue[..500] : BackupConfirmation,
+
+                            // ✎ LAND-YEAR L3 (план §d.3): мапа «стара немісячна колонка × місяць → місячна колонка» — щоб
+                            // історія місячної колонки знайшла рядки aud.CellChange, записані ДО переносу на старий Id.
+                            // ⛔ Лише ідентифікатори колонок шаблону; null — перенос без зміни розкладки.
+                            monthColumns = plan.MonthColumns.Count == 0
+                                ? null
+                                : plan.MonthColumns
+                                    .OrderBy(c => c.SourceColumnDefId).ThenBy(c => c.MonthNumber)
+                                    .Select(c => new { o = c.SourceColumnDefId, m = c.MonthNumber, n = c.TargetColumnDefId })
+                                    .ToList(),
+                            monthTransferredValues = planned.YearTransition ? plan.MonthTransferredValues : (long?)null,
+                            recomputedValues = planned.YearTransition ? plan.RecomputedValues : (long?)null,
                         }),
                         profile.UserId, currentUser.CorrelationId),
                     innerCt).ConfigureAwait(false);
@@ -1419,6 +1454,34 @@ public sealed class MigrateDocumentVersionHandler(
             .ThenBy(p => p.TargetColumnDefId)];
     }
 
+    /// <summary>
+    /// ✎ D-461 + LAND-YEAR L3: позначки ручних значень, що не переживуть перенос. Позначка немісячної колонки з місячними
+    /// цілями оцінюється на цілі МІСЯЦЯ СВОГО ПЕРІОДУ (сховище переносить її туди ж, <c>PeriodKey % 100</c>).
+    /// </summary>
+    private static List<ProjectFormulaOverride> LostOverrides(
+        IReadOnlyList<ProjectFormulaOverride> marks, Dictionary<int, int> columnMap,
+        IReadOnlyList<VersionMigrationMonthColumn> monthColumns, TemplateVersionSnapshot to)
+    {
+        int? Resolve(int column) => columnMap.TryGetValue(column, out var mapped) ? mapped : to.ColumnsById.ContainsKey(column) ? column : null;
+
+        if (monthColumns.Count == 0)
+        {
+            return FormulaOverrideMigration.Lost(marks, Resolve, to);
+        }
+
+        var months = monthColumns.ToDictionary(c => (c.SourceColumnDefId, c.MonthNumber), c => c.TargetColumnDefId);
+        var sources = monthColumns.Select(c => c.SourceColumnDefId).ToHashSet();
+        var lost = FormulaOverrideMigration.Lost([.. marks.Where(m => !sources.Contains(m.Address.ColumnDefId))], Resolve, to);
+        foreach (var group in marks.Where(m => sources.Contains(m.Address.ColumnDefId)).GroupBy(m => m.Address.PeriodKey.Value % 100))
+        {
+            var month = group.Key;
+            lost.AddRange(FormulaOverrideMigration.Lost(
+                [.. group], column => months.TryGetValue((column, month), out var target) ? target : null, to));
+        }
+
+        return lost;
+    }
+
     /// <summary>RPT-STABLE B2: позначки ручних значень лише в періодах, які перенос зачіпає (0 - усі).</summary>
     private static IReadOnlyList<ProjectFormulaOverride> InScope(IReadOnlyList<ProjectFormulaOverride> marks, int fromPeriodKey)
         => fromPeriodKey == 0 ? marks : [.. marks.Where(m => m.Address.PeriodKey.Value >= fromPeriodKey)];
@@ -1430,7 +1493,8 @@ public sealed class MigrateDocumentVersionHandler(
         IReadOnlyList<string> ForeignKeys,
         ExtendedMappingRemap Extended,
         IReadOnlyList<HeaderLookupValueRow> LookupRows,
-        int AssignmentConflicts = 0);
+        int AssignmentConflicts = 0,
+        bool YearTransition = false);
 
     /// <summary>Підготовлені мапи Lookup: вхід планувальника, прочитані значення, цілі поза парою версій.</summary>
     private sealed record LookupPrepared(
@@ -1454,17 +1518,23 @@ public sealed class MigrateDocumentVersionHandler(
         // Без мап нових читань немає: шлях і кількість запитів як до мап Lookup.
         var lookup = await PrepareLookupAsync(projectId, from, to, lookupRemaps, ct).ConfigureAwait(false);
 
-        var plan = VersionMigrationPlanner.Plan(from, to, scope.Cells, scope.HeaderValues, renames, lookup.Input);
+        // ✎ LAND-YEAR L3: місячний проєкт переходить з «копії на місяць» на «рік, місяці в колонках» — немісячні колонки
+        // без відповідника за кодом шукають місячні цілі (C → C_M01..C_M12 або псевдоніми), селектори — «перерахується».
+        var yearTransition = source.Layout == TemplateLayout.PerMonthCopies
+                             && target.Layout == TemplateLayout.YearWithMonthColumns
+                             && (await periods.FindProjectAsync(projectId, ct).ConfigureAwait(false))?.PeriodKind == PeriodKind.Monthly;
+
+        var plan = VersionMigrationPlanner.Plan(
+            from, to, scope.Cells, scope.HeaderValues, renames, lookup.Input, monthColumns: yearTransition);
         plan = plan with { FromPeriodKey = range.FromPeriodKey, ColumnRenames = RenamePairs(plan, from, to) };
 
         // ✎ D-461: ручні значення, яких цільова формула не дозволяє, — пункти «OverrideLost» (перенос не блокують).
         var overrideMap = plan.Columns.ToDictionary(c => c.SourceColumnDefId, c => c.TargetColumnDefId);
         var lostOverrides = formulaOverrides is null
             ? []
-            : FormulaOverrideMigration.Lost(
+            : LostOverrides(
                 InScope(await formulaOverrides.ReadProjectAsync(projectId, ct).ConfigureAwait(false), range.FromPeriodKey),
-                column => overrideMap.TryGetValue(column, out var mapped) ? mapped : to.ColumnsById.ContainsKey(column) ? column : null,
-                to);
+                overrideMap, plan.MonthColumns, to);
         if (lostOverrides.Count > 0)
         {
             plan = plan with { Items = [.. plan.Items, .. FormulaOverrideMigration.Items(lostOverrides, from)] };
@@ -1523,7 +1593,10 @@ public sealed class MigrateDocumentVersionHandler(
         // найдрібніший рівень). Якщо ресурс просто перейменували, новий код лишився б без
         // обмеження (fail-open) — тому перенос відмовляє, доки грант на старому
         // ресурсі свідомо не зніме адміністратор безпеки.
-        var mappedColumns = plan.Columns.Select(c => c.SourceColumnDefId).ToHashSet();
+        // ✎ LAND-YEAR L3: грант немісячної колонки з місячними цілями копіюється на кожну з них (FinishSql, @grantMap).
+        var mappedColumns = plan.Columns.Select(c => c.SourceColumnDefId)
+            .Concat(plan.MonthColumns.Select(c => c.SourceColumnDefId))
+            .ToHashSet();
         var denied = await store.CountDenyGrantsAsync(
             [.. from.Sheets.Where(s => !s.IsDeleted && !plan.Sheets.ContainsKey(s.Id)).Select(s => s.Id)],
             [.. from.Sheets.SelectMany(s => s.Tables).Where(t => !t.IsDeleted && !plan.Tables.ContainsKey(t.Id)).Select(t => t.Id)],
@@ -1558,9 +1631,16 @@ public sealed class MigrateDocumentVersionHandler(
         // ⛔ D-13: активна прив'язка методології до колонки вихідної версії, якої нема в цільовій, після
         // переносу не рахувала б нічого — колонка лишалася б порожньою без помилки. Блокуємо, доки
         // конфігуратор не перенесе прив'язку (клон версії тепер копіює їх сам) або не вимкне її.
+        // ✎ LAND-YEAR L3: одна стара прив'язка немісячної колонки ↔ 12 прив'язок її місячних колонок.
         var columnMap = plan.Columns.ToDictionary(c => c.SourceColumnDefId, c => c.TargetColumnDefId);
-        var unmappedBindings = await store.CountUnmappedBindingsAsync(sourceVersionId, columnMap, ct)
-            .ConfigureAwait(false);
+        var unmappedBindings = plan.MonthColumns.Count == 0
+            ? await store.CountUnmappedBindingsAsync(sourceVersionId, columnMap, ct).ConfigureAwait(false)
+            : await store.CountUnmappedBindingsAsync(
+                    sourceVersionId, columnMap,
+                    plan.MonthColumns.GroupBy(c => c.SourceColumnDefId)
+                        .ToDictionary(g => g.Key, g => (IReadOnlyList<int>)[.. g.Select(c => c.TargetColumnDefId)]),
+                    ct)
+                .ConfigureAwait(false);
         if (unmappedBindings > 0)
         {
             refusals.Add("bindingsNotMapped");
@@ -1661,11 +1741,14 @@ public sealed class MigrateDocumentVersionHandler(
             EffectiveFromPeriodKey: range.Effective,
             Warnings: range.Warnings,
             LockedOverridesLost: lockedOverrides.Marks == 0 ? null : lockedOverrides.Marks,
-            LockedOverrideItems: lockedOverrides.Items.Count == 0 ? null : lockedOverrides.Items);
+            LockedOverrideItems: lockedOverrides.Items.Count == 0 ? null : lockedOverrides.Items,
+            MonthTransferredValues: yearTransition ? plan.MonthTransferredValues : null,
+            RecomputedValues: yearTransition ? plan.RecomputedValues : null,
+            MonthColumnsUnmapped: plan.MonthColumnsUnmapped.Count == 0 ? null : [.. plan.MonthColumnsUnmapped.Take(MaxItems)]);
 
         return new PlannedMigration(
             dto, plan, foreignKeys, extendedPlan.Remap with { CollectionMappingIds = collectionPlan.RemapIds }, lookup.Rows,
-            assignmentConflicts);
+            assignmentConflicts, yearTransition);
     }
 
     /// <summary>
@@ -2077,6 +2160,8 @@ public sealed class MigrateDocumentVersionHandler(
                 ["mappingColumns"] = dto.MappingsUnmappedKeys is { Count: > 0 } ? dto.MappingsUnmappedKeys : null,
                 // ⚠ Лише коди шаблону (шлях → цільовий код); значень і документів тут немає.
                 ["renameConflicts"] = renameConflicts is { Count: > 0 } ? renameConflicts : null,
+                // ✎ LAND-YEAR L3: немісячні колонки зі значеннями без місячних цілей у річній версії (лише шляхи шаблону).
+                ["monthColumnsUnmapped"] = dto.MonthColumnsUnmapped is { Count: > 0 } ? dto.MonthColumnsUnmapped : null,
                 // D-10-b: лише КІЛЬКІСТЬ передач, що зіткнулися б із наявними (без виконавців і зрізів).
                 ["assignmentConflicts"] = assignmentConflicts > 0
                     ? assignmentConflicts.ToString(CultureInfo.InvariantCulture)
