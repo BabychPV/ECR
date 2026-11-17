@@ -312,7 +312,9 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('B149: форми конструктора версії шаблону — один PUT на відкриття', () => {
+// ⚠ Бюджет 30 с (як MethodologyVersionsPage.closedDialogProbe): під навантаженням ~100 % CPU випадки «таблиця» і
+// «рядок» виходили за типові 15 с тесту (F13: 15163 мс і 15573 мс).
+describe('B149: форми конструктора версії шаблону — один PUT на відкриття', { timeout: 30_000 }, () => {
   it.each(Cases)('$name: ні під час перечитування, ні після закриття другого PUT немає', async (probe) => {
     const server = holdWrites({ read, write: () => ({ body: probe.reply }) });
     const reads = holdReads((url) => url === probe.refetch);
