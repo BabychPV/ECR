@@ -145,6 +145,12 @@ public sealed class UnitOfWork(
                 throw mapped;
             }
 
+            // ⛔ B158 (a): гонки конфігуратора методологій (код, номер версії, upsert складу версії).
+            if (await MethodologyDuplicateKeys.TryMapAsync(db, ex, ct).ConfigureAwait(false) is { } methodologyRefusal)
+            {
+                throw methodologyRefusal;
+            }
+
             // Дублікат ключа сутності, для якої немає доменного
             // повідомлення, — краще необроблений 500 із CorrelationId, ніж
             // вигадана відповідь про те, чого перевірка тут не знає.
