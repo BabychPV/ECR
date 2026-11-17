@@ -82,8 +82,9 @@ public sealed class DocumentYearStatesStoreTests(SqlServerFixture sql)
         // Три документи × 12 місяців — смуга року додає рівно ОДИН запит на сторінку, а не по запиту на документ чи місяць;
         // ✎ g4: позначка застарілості за рік — ще ОДИН запит періодів року з актуальним прогоном (прогонів немає — і все);
         // ✎ 10.11: діючі винятки «місяць відкрито для документа» (`reopenedPeriods`) — ще ОДИН запит на сторінку.
+        // ✎ B147: ключі «без погодження» року (`WorkflowNoneScope`) — ще ОДИН запит на сторінку, незалежно від даних.
         Assert.Equal(3, page.Items.Count);
-        Assert.True(counter.Tally.Snapshot().Total == withoutYear + 3, $"без року {withoutYear}; " + counter.Tally.Snapshot().Format());
+        Assert.True(counter.Tally.Snapshot().Total == withoutYear + 4, $"без року {withoutYear}; " + counter.Tally.Snapshot().Format());
 
         // Аркуш 2 схований від читача (S18): січень документа A — «подано», а не «частково».
         IReadOnlyCollection<(int, int)> hidden = [(chain.ProjectId, sheet2)];
@@ -192,8 +193,8 @@ public sealed class DocumentYearStatesStoreTests(SqlServerFixture sql)
         Assert.Equal(0, summary.StaleResultsCount);
 
         // Агрегат станів — один запит; ✎ g4: плюс один запит періодів року з актуальним прогоном (лічильник застарілих
-        // за рік); прогонів немає — далі жодного запиту.
-        Assert.True(counter.Tally.Snapshot().Total == 2, counter.Tally.Snapshot().Format());
+        // за рік); прогонів немає — далі жодного запиту. ✎ B147: плюс один запит ключів «без погодження» року.
+        Assert.True(counter.Tally.Snapshot().Total == 3, counter.Tally.Snapshot().Format());
 
         // Та сама відповідь, що дає фільтр стану переліку за рік (одне правило — одне число).
         await using var read = builder.CreateContext();

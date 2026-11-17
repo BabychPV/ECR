@@ -68,19 +68,27 @@ public sealed class DocumentListSummaryStore(
         // `errorCount` лише без схованої таблиці, колонки чи аркуша складу); решта документів — за правилом проєкту.
         var participantIssueJson = JsonSerializer.Serialize(participants?.IssueDocumentIds ?? []);
 
+        // ✎ B147 (B75): документ, чия версія шаблону за період — без подання й затвердження, має ВЛАСНИЙ стан
+        // «без погодження»: у п'ять плиток стану й у лічильники аркушів не входить (старі стани після переносу версії
+        // не діють), рахується в `NoApproval`. Ключі — `WorkflowNoneScope` (одне правило з фільтром і рядком переліку);
+        // у цьому запиті — лише приєднання готових ключів, без функції версії на рядок.
+        var noneJson = (await WorkflowNoneScope.ForPeriodAsync(db, periodKey, ct).ConfigureAwait(false)).Json;
+
         var row = await db.Database
             .SqlQuery<SummaryRow>($"""
                 SELECT
-                    COALESCE(SUM(CASE WHEN x.Rejected = 0 AND x.Submitted = 0 AND x.Approved = 0 THEN 1 ELSE 0 END), 0) AS Draft,
-                    COALESCE(SUM(CASE WHEN x.Rejected = 0 AND x.Draft > 0 AND x.Submitted + x.Approved > 0 THEN 1 ELSE 0 END), 0) AS PartlySubmitted,
-                    COALESCE(SUM(CASE WHEN x.Rejected = 0 AND x.Draft = 0 AND x.Submitted > 0 THEN 1 ELSE 0 END), 0) AS Submitted,
-                    COALESCE(SUM(CASE WHEN x.Sheets > 0 AND x.Approved = x.Sheets THEN 1 ELSE 0 END), 0) AS Approved,
-                    COALESCE(SUM(CASE WHEN x.Rejected > 0 THEN 1 ELSE 0 END), 0) AS Rejected,
+                    COALESCE(SUM(CASE WHEN x.IsNone = 0 AND x.Rejected = 0 AND x.Submitted = 0 AND x.Approved = 0 THEN 1 ELSE 0 END), 0) AS Draft,
+                    COALESCE(SUM(CASE WHEN x.IsNone = 0 AND x.Rejected = 0 AND x.Draft > 0 AND x.Submitted + x.Approved > 0 THEN 1 ELSE 0 END), 0) AS PartlySubmitted,
+                    COALESCE(SUM(CASE WHEN x.IsNone = 0 AND x.Rejected = 0 AND x.Draft = 0 AND x.Submitted > 0 THEN 1 ELSE 0 END), 0) AS Submitted,
+                    COALESCE(SUM(CASE WHEN x.IsNone = 0 AND x.Sheets > 0 AND x.Approved = x.Sheets THEN 1 ELSE 0 END), 0) AS Approved,
+                    COALESCE(SUM(CASE WHEN x.IsNone = 0 AND x.Rejected > 0 THEN 1 ELSE 0 END), 0) AS Rejected,
                     COALESCE(SUM(CASE WHEN x.LastErrorCount > 0 THEN 1 ELSE 0 END), 0) AS WithIssues,
-                    COALESCE(SUM(x.Approved), 0) AS SheetsApproved,
-                    COALESCE(SUM(x.Sheets), 0) AS SheetsTotal
+                    COALESCE(SUM(CASE WHEN x.IsNone = 0 THEN x.Approved ELSE 0 END), 0) AS SheetsApproved,
+                    COALESCE(SUM(CASE WHEN x.IsNone = 0 THEN x.Sheets ELSE 0 END), 0) AS SheetsTotal,
+                    COALESCE(SUM(x.IsNone), 0) AS NoApproval
                 FROM (
                     SELECT d.Id,
+                           CASE WHEN nk.p IS NULL THEN 0 ELSE 1 END AS IsNone,
                            COUNT(s.SheetDefId) AS Sheets,
                            COALESCE(SUM(CASE WHEN s.SheetDefId IS NOT NULL AND COALESCE(a.Status, 0) = 0 THEN 1 ELSE 0 END), 0) AS Draft,
                            COALESCE(SUM(CASE WHEN a.Status = 1 THEN 1 ELSE 0 END), 0) AS Submitted,
@@ -102,6 +110,9 @@ public sealed class DocumentListSummaryStore(
                                                        WHERE si.DocumentId = d.Id AND si.IsIncluded = 1)))
                             ORDER BY v.RunAt DESC, v.Id DESC) AS LastErrorCount
                     FROM doc.Document d
+                    LEFT JOIN OPENJSON({noneJson}) WITH (p int '$.p', t int '$.t') nk   -- B147: документ без погодження (ключі — лише цього періоду)
+                      ON nk.p = d.ProjectId
+                     AND (nk.t = d.TemplateId OR (nk.t IS NULL AND d.TemplateId IS NULL))
                     LEFT JOIN doc.DocumentSheet s
                       ON s.DocumentId = d.Id AND s.IsIncluded = 1
                      AND NOT EXISTS (SELECT 1
@@ -122,7 +133,7 @@ public sealed class DocumentListSummaryStore(
                        OR (d.Id IN (SELECT CAST(pd.value AS bigint) FROM OPENJSON({participantDocsJson}) pd)
                            AND ({participantProject} = 0 OR d.ProjectId = {participantProject})
                            AND d.ProjectId NOT IN (SELECT CAST(dn.value AS int) FROM OPENJSON({participantDeniedJson}) dn))
-                    GROUP BY d.Id, d.ProjectId
+                    GROUP BY d.Id, d.ProjectId, nk.p
                 ) x
                 """)
             .SingleAsync(ct)
@@ -137,7 +148,7 @@ public sealed class DocumentListSummaryStore(
 
         return new DocumentListSummaryResponse(
             row.Draft, row.Submitted, row.Approved, row.Rejected, row.WithIssues,
-            row.SheetsApproved, row.SheetsTotal, staleCount, staleMine, row.PartlySubmitted);
+            row.SheetsApproved, row.SheetsTotal, staleCount, staleMine, row.PartlySubmitted, row.NoApproval);
     }
 
     /// <summary>
@@ -288,19 +299,37 @@ public sealed class DocumentListSummaryStore(
         var participantProject = projectId ?? 0;
         var participantIssueJson = JsonSerializer.Serialize(participants?.IssueDocumentIds ?? []);
 
+        // ✎ B147 (B75): рік — ПО ПЕРІОДАХ. Клітинки періоду, де версія документа без подання й затвердження, у правило
+        // п'яти станів не входять (версія може змінитися посеред року: місяці з погодженням рахуються як завжди).
+        // Документ, у якого ВСІ розпочаті періоди року без погодження (і хоч один розпочатий є), — «без погодження»:
+        // поза п'ятьма плитками, у `NoApproval`. Те саме правило — `DocumentStore.WhereYearState`.
+        // ⚠ Такий документ клітинок не має зовсім, тож із п'яти плиток потрапив би лише в «чернетки» (жодної поданої
+        // клітинки) — саме там і стоїть `x.IsNone = 0`; решта чотири без клітинок його не рахують і так.
+        var noneJson = (await WorkflowNoneScope.ForYearAsync(db, year, ct).ConfigureAwait(false)).Json;
+
         var row = await db.Database
             .SqlQuery<SummaryRow>($"""
                 SELECT
-                    COALESCE(SUM(CASE WHEN x.Rejected = 0 AND x.Submitted = 0 AND x.Approved = 0 THEN 1 ELSE 0 END), 0) AS Draft,
+                    COALESCE(SUM(CASE WHEN x.IsNone = 0 AND x.Rejected = 0 AND x.Submitted = 0 AND x.Approved = 0 THEN 1 ELSE 0 END), 0) AS Draft,
                     COALESCE(SUM(CASE WHEN x.Rejected = 0 AND x.Draft > 0 AND x.Submitted + x.Approved > 0 THEN 1 ELSE 0 END), 0) AS PartlySubmitted,
                     COALESCE(SUM(CASE WHEN x.Rejected = 0 AND x.Draft = 0 AND x.Submitted > 0 THEN 1 ELSE 0 END), 0) AS Submitted,
                     COALESCE(SUM(CASE WHEN x.Cells > 0 AND x.Approved = x.Cells THEN 1 ELSE 0 END), 0) AS Approved,
                     COALESCE(SUM(CASE WHEN x.Rejected > 0 THEN 1 ELSE 0 END), 0) AS Rejected,
                     COALESCE(SUM(x.HasIssues), 0) AS WithIssues,
                     COALESCE(SUM(x.Approved), 0) AS SheetsApproved,
-                    COALESCE(SUM(x.Cells), 0) AS SheetsTotal
+                    COALESCE(SUM(x.Cells), 0) AS SheetsTotal,
+                    COALESCE(SUM(x.IsNone), 0) AS NoApproval
                 FROM (
                     SELECT d.Id,
+                           CASE WHEN EXISTS (SELECT 1 FROM doc.Period ps
+                                             WHERE ps.ProjectId = d.ProjectId AND ps.PeriodKey > {from} AND ps.PeriodKey < {to} AND ps.State <> 0)
+                                 AND NOT EXISTS (SELECT 1 FROM doc.Period pl
+                                                 WHERE pl.ProjectId = d.ProjectId AND pl.PeriodKey > {from} AND pl.PeriodKey < {to} AND pl.State <> 0
+                                                   AND NOT EXISTS (SELECT 1
+                                                                   FROM OPENJSON({noneJson}) WITH (p int '$.p', t int '$.t', k int '$.k') nl
+                                                                   WHERE nl.p = d.ProjectId AND nl.k = pl.PeriodKey
+                                                                     AND (nl.t = d.TemplateId OR (nl.t IS NULL AND d.TemplateId IS NULL))))
+                                THEN 1 ELSE 0 END AS IsNone,
                            COUNT(p.PeriodKey) AS Cells,
                            COALESCE(SUM(CASE WHEN p.PeriodKey IS NOT NULL AND COALESCE(a.Status, 0) = 0 THEN 1 ELSE 0 END), 0) AS Draft,
                            COALESCE(SUM(CASE WHEN a.Status = 1 THEN 1 ELSE 0 END), 0) AS Submitted,
@@ -343,6 +372,10 @@ public sealed class DocumentListSummaryStore(
                     LEFT JOIN doc.Period p
                       ON s.SheetDefId IS NOT NULL AND p.ProjectId = d.ProjectId
                      AND p.PeriodKey > {from} AND p.PeriodKey < {to} AND p.State <> 0
+                     AND NOT EXISTS (SELECT 1   -- B147: період без погодження клітинок не дає
+                                     FROM OPENJSON({noneJson}) WITH (p int '$.p', t int '$.t', k int '$.k') nk
+                                     WHERE nk.p = d.ProjectId AND nk.k = p.PeriodKey
+                                       AND (nk.t = d.TemplateId OR (nk.t IS NULL AND d.TemplateId IS NULL)))
                     LEFT JOIN wf.ApprovalState a
                       ON a.DocumentId = s.DocumentId AND a.SheetDefId = s.SheetDefId AND a.PeriodKey = p.PeriodKey
                      AND a.PeriodKey > {from} AND a.PeriodKey < {to}
@@ -356,7 +389,7 @@ public sealed class DocumentListSummaryStore(
                       -- в переліку, `DocumentStore.WhereProjectYear`); раніше рік без проєктів рахував чужі документи Draft.
                       AND EXISTS (SELECT 1 FROM doc.Period py
                                   WHERE py.ProjectId = d.ProjectId AND py.PeriodKey > {from} AND py.PeriodKey < {to})
-                    GROUP BY d.Id, d.ProjectId
+                    GROUP BY d.Id, d.ProjectId, d.TemplateId
                 ) x
                 """)
             .SingleAsync(ct)
@@ -367,7 +400,7 @@ public sealed class DocumentListSummaryStore(
 
         return new DocumentListSummaryResponse(
             row.Draft, row.Submitted, row.Approved, row.Rejected, row.WithIssues,
-            row.SheetsApproved, row.SheetsTotal, staleCount, staleMine, row.PartlySubmitted);
+            row.SheetsApproved, row.SheetsTotal, staleCount, staleMine, row.PartlySubmitted, row.NoApproval);
     }
 
     /// <inheritdoc />
@@ -389,5 +422,5 @@ public sealed class DocumentListSummaryStore(
     /// <summary>Рядок агрегату; імена колонок — імена властивостей.</summary>
     public sealed record SummaryRow(
         int Draft, int PartlySubmitted, int Submitted, int Approved, int Rejected, int WithIssues, int SheetsApproved,
-        int SheetsTotal);
+        int SheetsTotal, int NoApproval);
 }

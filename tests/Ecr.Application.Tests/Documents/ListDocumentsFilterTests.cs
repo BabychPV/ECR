@@ -157,6 +157,42 @@ public sealed class ListDocumentsFilterTests
         await _documents.DidNotReceiveWithAnyArgs().ListAsync(default, default, default, null!, null, default);
     }
 
+    /// <summary>
+    /// ✎ B147 (B75): <c>state=NoApproval</c> — окрема ознака фільтра (не стан аркуша): доходить до сховища як
+    /// <c>NoApproval</c>, без <c>State</c> і без <c>PartlySubmitted</c>; регістр і пробіли не важать. Контроль — сусідній
+    /// стан «частково подано» ознаки не ставить.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Мутація: не передавати <c>NoApproval: noApproval</c> у фільтр або не виключати ім'я з <c>ParseState</c> —
+    /// червоний (фільтр без ознаки або 422 «стану не існує»).
+    /// </remarks>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait("Finding", "B147")]
+    [InlineData("NoApproval", true, false)]
+    [InlineData(" noapproval ", true, false)]
+    [InlineData("PartlySubmitted", false, true)]
+    public async Task Стан_без_погодження_доходить_до_сховища_окремою_ознакою(string state, bool noApproval, bool partly)
+    {
+        await Handler().HandleAsync(null, Period, state, false, hasLateEdits: null, new CursorRequest(50), default);
+
+        await _documents.Received(1).ListAsync(
+            Arg.Any<int?>(), Arg.Any<PeriodKeyFilter>(),
+            new DocumentListFilter(null, null, PartlySubmitted: partly, ReaderUserId: UserId, NoApproval: noApproval),
+            Arg.Any<CursorRequest>(), Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait("Finding", "B147")]
+    public async Task Стан_без_погодження_без_періоду_й_року_422()
+    {
+        var refused = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().HandleAsync(null, periodKey: null, "NoApproval", false, hasLateEdits: null, new CursorRequest(50), default));
+
+        Assert.Equal("err.ECR-REQ-0422.documentStateNeedsPeriod", refused.Details!["messageKey"]);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage6)]
     public async Task Стан_без_періоду_422_бо_поза_періодом_він_не_визначений()

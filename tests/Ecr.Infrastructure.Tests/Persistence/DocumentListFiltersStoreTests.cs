@@ -206,9 +206,10 @@ public sealed class DocumentListFiltersStoreTests(SqlServerFixture sql)
         Assert.False(page.Items.Single(d => d.Id == otherPeriod).HasLateEdits);
 
         // Чотири документи на сторінці — п'ять запитів на всю сторінку (документи, стани, підсумки, пізні правки,
-        // застарілі результати), не по запиту на рядок.
+        // застарілі результати), не по запиту на рядок. ✎ B147: плюс ОДИН запит ключів «без погодження» періоду
+        // (`WorkflowNoneScope`), теж на всю сторінку й незалежно від даних — разом шість.
         Assert.Equal(4, page.Items.Count);
-        Assert.True(counter.Tally.Snapshot().Total == 5, counter.Tally.Snapshot().Format());
+        Assert.True(counter.Tally.Snapshot().Total == 6, counter.Tally.Snapshot().Format());
     }
 
     [Fact]

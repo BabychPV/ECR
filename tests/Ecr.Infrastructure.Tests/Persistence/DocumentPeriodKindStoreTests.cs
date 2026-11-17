@@ -69,7 +69,8 @@ public sealed class DocumentPeriodKindStoreTests(SqlServerFixture sql)
         Assert.NotNull(page.Items.Single(d => d.Id == chain.DocumentId).PeriodKind);
 
         // Документи, стани, підсумки, пізні правки, застарілі результати (як у DocumentListFiltersStoreTests) - періодичність
-        // їде підзапитом у запиті документів, не окремим запитом і не запитом на рядок.
-        Assert.True(counter.Tally.Snapshot().Total == 5, counter.Tally.Snapshot().Format());
+        // їде підзапитом у запиті документів, не окремим запитом і не запитом на рядок. ✎ B147: шостий — ключі
+        // «без погодження» періоду (`WorkflowNoneScope`), один на сторінку.
+        Assert.True(counter.Tally.Snapshot().Total == 6, counter.Tally.Snapshot().Format());
     }
 }

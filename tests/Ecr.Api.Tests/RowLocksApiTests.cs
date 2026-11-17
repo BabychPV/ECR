@@ -167,6 +167,29 @@ public sealed class RowLocksApiTests(SqlServerFixture sql)
             .ConfigureAwait(true);
         Assert.Equal("None", card.GetProperty("workflowMode").GetString());
 
+        // ✎ B147: старий «подано» для версії без погодження не діє — картка віддає аркуш чернеткою; перелік несе той самий
+        // режим у рядку, фільтр `state=NoApproval` знаходить документ (а `state=Submitted` — ні), смуга рахує його окремо.
+        Assert.Equal("Draft", card.GetProperty("sheets")[0].GetProperty("state").GetString());
+        var listUri = $"/api/v1/documents?projectId={s.Document.ProjectId}&periodKey={s.PeriodKey}";
+        var noApproval = await JsonAsync(
+                app, HttpStatusCode.OK, author.GetAsync(new Uri(listUri + "&state=NoApproval", UriKind.Relative)))
+            .ConfigureAwait(true);
+        var row = Assert.Single(
+            noApproval.GetProperty("items").EnumerateArray(), i => i.GetProperty("id").GetInt64() == s.Document.DocumentId);
+        Assert.Equal("None", row.GetProperty("workflowMode").GetString());
+        var submittedList = await JsonAsync(
+                app, HttpStatusCode.OK, author.GetAsync(new Uri(listUri + "&state=Submitted", UriKind.Relative)))
+            .ConfigureAwait(true);
+        Assert.DoesNotContain(
+            submittedList.GetProperty("items").EnumerateArray(), i => i.GetProperty("id").GetInt64() == s.Document.DocumentId);
+        var strip = await JsonAsync(
+                app, HttpStatusCode.OK,
+                author.GetAsync(new Uri(
+                    $"/api/v1/documents/summary?projectId={s.Document.ProjectId}&periodKey={s.PeriodKey}", UriKind.Relative)))
+            .ConfigureAwait(true);
+        Assert.Equal(noApproval.GetProperty("items").GetArrayLength(), strip.GetProperty("noApproval").GetInt32());
+        Assert.Equal(0, strip.GetProperty("submitted").GetInt32());
+
         var submit = await JsonAsync(
                 app, HttpStatusCode.UnprocessableEntity,
                 author.PostAsJsonAsync(
