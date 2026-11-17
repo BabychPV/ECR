@@ -466,6 +466,135 @@ public sealed class DocumentListNoApprovalStoreTests(SqlServerFixture sql)
         Assert.Empty(withoutPeriod.SheetStates);
     }
 
+    // ───────────────────── вісь періоду (F13 AU, B147) ─────────────────────
+
+    /// <summary>
+    /// Шкала версій в одному році: січень — версія A (з погодженням), з лютого — версія B без погодження. Місяць
+    /// 209901 — НЕ «без погодження», місяць 209902 — «без погодження»: смуга, фільтр і рядок беруть версію САМЕ
+    /// запитаного місяця. Два документи: без власного шаблону (<c>doc.fn_VersionOf</c>) і з власним тим самим
+    /// шаблоном (<c>doc.fn_TemplateVersionOf</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Мутації (F13 AU): у <c>WorkflowNoneScope.LoadAsync</c> узяти версію іншого періоду (<c>999912</c> замість
+    /// <c>pk.PeriodKey</c>) — січень стає «без погодження», червоний; узяти <c>pk.PeriodKey - 1</c> — лютий лишається з
+    /// погодженням, червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "B147")]
+    public async Task Місяць_бере_версію_саме_цього_місяця_січень_з_погодженням_лютий_без()
+    {
+        var stage = await ArrangeAsync(209901, started: 2).ConfigureAwait(true);
+        await using var db = stage.Builder.CreateContext();
+
+        var byProject = await AttachAsync(db, stage.One.DocumentId, [stage.One.SheetDefId],
+            (stage.One.SheetDefId, 209901, DocumentStatus.Approved), (stage.One.SheetDefId, 209902, DocumentStatus.Approved))
+            .ConfigureAwait(true);
+        var byOwn = await DocumentAsync(db, stage.One, "TL", [stage.One.SheetDefId],
+            (stage.One.SheetDefId, 209901, DocumentStatus.Approved), (stage.One.SheetDefId, 209902, DocumentStatus.Approved))
+            .ConfigureAwait(true);
+        await db.Database.ExecuteSqlAsync($"UPDATE doc.Document SET TemplateId = {stage.One.TemplateId} WHERE Id = {byOwn}")
+            .ConfigureAwait(true);
+        var second = await TimelineAsync(db, stage).ConfigureAwait(true);
+        await WorkflowNoneCase.SwitchAsync(db, new WorkflowNoneCase.Binding(second, true)).ConfigureAwait(true);
+        long[] own = [byProject, byOwn];
+
+        var january = await MonthAsync(stage, 209901).ConfigureAwait(true);
+        AssertConsistent(january);
+        Assert.Empty(january.ByState[NoApproval]);
+        Assert.Equal(0, january.Summary.NoApproval);
+        Assert.All(own, id => Assert.Contains(id, january.ByState["Approved"]));
+        Assert.All(january.Rows.Where(r => own.Contains(r.Id)), r => Assert.Equal("SubmitApprove", r.WorkflowMode));
+
+        var february = await MonthAsync(stage, 209902).ConfigureAwait(true);
+        AssertConsistent(february);
+        Assert.Equal(Ids(own), february.ByState[NoApproval]);
+        Assert.Equal(2, february.Summary.NoApproval);
+        Assert.All(own, id => Assert.DoesNotContain(id, february.ByState["Approved"]));
+        Assert.All(february.Rows.Where(r => own.Contains(r.Id)), r => Assert.Equal("None", r.WorkflowMode));
+    }
+
+    /// <summary>
+    /// Та сама шкала версій для картки: картка за січнем — режим версії A, за лютим — версії B без погодження.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Мутація (F13 AU): у <c>DocumentStore.FindAsync</c> узяти період <c>999912</c> замість запитаного — картка
+    /// за січнем показує «None», червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "B147")]
+    public async Task Картка_бере_версію_запитаного_місяця_а_не_останнього()
+    {
+        var stage = await ArrangeAsync(209901, started: 2).ConfigureAwait(true);
+        await using var db = stage.Builder.CreateContext();
+        var document = await AttachAsync(db, stage.One.DocumentId, [stage.One.SheetDefId],
+            (stage.One.SheetDefId, 209901, DocumentStatus.Submitted), (stage.One.SheetDefId, 209902, DocumentStatus.Submitted))
+            .ConfigureAwait(true);
+        var second = await TimelineAsync(db, stage).ConfigureAwait(true);
+        await WorkflowNoneCase.SwitchAsync(db, new WorkflowNoneCase.Binding(second, true)).ConfigureAwait(true);
+
+        async Task<DocumentSummary> CardAsync(int key)
+        {
+            await using var read = stage.Builder.CreateContext();
+            return (await new DocumentStore(read).FindAsync(document, new PeriodKeyFilter(key), CancellationToken.None)
+                .ConfigureAwait(false))!;
+        }
+
+        var january = await CardAsync(209901).ConfigureAwait(true);
+        Assert.Equal(("SubmitApprove", "Submitted"), (january.WorkflowMode, january.Sheets!.Single().State));
+
+        var february = await CardAsync(209902).ConfigureAwait(true);
+        Assert.Equal(("None", "Draft"), (february.WorkflowMode, february.Sheets!.Single().State));
+    }
+
+    /// <summary>
+    /// Документ без погодження БЕЗ жодного аркуша на смузі місяця: рахується в «без погодження» (не в чернетки), і
+    /// плитка дорівнює фільтру.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Мутація (F13 AU): у <c>DocumentListSummaryStore.SummarizeAsync</c> рахувати «без погодження» лише документи з
+    /// аркушами — плитка 0 при фільтрі 1, червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "B147")]
+    public async Task Документ_без_погодження_без_аркушів_на_смузі_місяця_без_погодження()
+    {
+        const int Key = 209906;
+        var stage = await ArrangeAsync(Key, started: 0).ConfigureAwait(true);
+        await using var db = stage.Builder.CreateContext();
+
+        // Документ ланцюга 1 — без складу (нуль аркушів); документ ланцюга 2 — контрольний, теж без складу.
+        await WorkflowNoneCase.SwitchAsync(db, new WorkflowNoneCase.Binding(stage.One.TemplateVersionId, true)).ConfigureAwait(true);
+
+        var month = await MonthAsync(stage, Key).ConfigureAwait(true);
+        AssertConsistent(month);
+        Assert.Equal([stage.One.DocumentId], month.ByState[NoApproval]);
+        Assert.Equal(1, month.Summary.NoApproval);
+        Assert.Equal([stage.Two.DocumentId], month.ByState["Draft"]);
+        Assert.Equal((1, 0, 0, 0, 0, 1), Tiles(month.Summary));
+        Assert.Equal((0, 0), (month.Summary.SheetsApproved, month.Summary.SheetsTotal));
+    }
+
+    /// <summary>
+    /// Шкала версій ланцюга 1: січень — його версія (A), з лютого — нова версія того самого шаблону; повертає її Id.
+    /// </summary>
+    private static async Task<int> TimelineAsync(EcrDbContext db, Stage stage)
+    {
+        var second = new TemplateVersion(stage.One.TemplateId, $"7.{Guid.NewGuid():N}"[..12], 1, Now);
+        db.TemplateVersions.Add(second);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+        db.ProjectTemplateVersions.AddRange(
+            new ProjectTemplateVersion(stage.One.ProjectId, stage.One.TemplateId, 209901, stage.One.TemplateVersionId),
+            new ProjectTemplateVersion(stage.One.ProjectId, stage.One.TemplateId, 209902, second.Id));
+        await db.SaveChangesAsync().ConfigureAwait(false);
+        return second.Id;
+    }
+
     // ───────────────────────────── допоміжне ─────────────────────────────
 
     /// <summary>Два проєкти (два ланцюги) в одному періоді й другий аркуш версії першого.</summary>
