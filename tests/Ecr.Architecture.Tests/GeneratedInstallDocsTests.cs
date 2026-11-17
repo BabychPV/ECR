@@ -19,6 +19,15 @@ public sealed class GeneratedInstallDocsTests
 {
     private const string FixCommand = "powershell -File tools/gen-install-docs.ps1";
 
+    /// <summary>
+    /// Межа — сторож від зависання, а не бюджет швидкодії (B164). Заміри 17.11 (Windows PowerShell 5.1, 12 логічних CPU,
+    /// навантаження 32–95 %, 6–16 процесів dotnet, по черзі старий/новий скрипт): до оптимізації 7,9–25,0 с, після
+    /// 4,5–9,9 с. Межа 3 хв на старому скрипті під повним навантаженням машини вже перевищувалась (≥ 7× від найгіршого
+    /// заміру), тобто розкид під навантаженням сягає порядку; тому 5 хв ≈ 30× найгіршого заміру нового скрипта і ≈ 4×
+    /// від того самого 7×-гіршого сценарію, перерахованого на нього. Справжнє зависання однаково червоніє.
+    /// </summary>
+    private static readonly TimeSpan ScriptTimeout = TimeSpan.FromMinutes(5);
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
@@ -74,10 +83,10 @@ public sealed class GeneratedInstallDocsTests
                 using var process = Process.Start(info)!;
                 var stdout = process.StandardOutput.ReadToEndAsync();
                 var stderr = process.StandardError.ReadToEndAsync();
-                if (!process.WaitForExit(TimeSpan.FromMinutes(3)))
+                if (!process.WaitForExit(ScriptTimeout))
                 {
                     process.Kill(entireProcessTree: true);
-                    Assert.Fail($"{shell} {script}: не завершився за 3 хвилини.");
+                    Assert.Fail($"{shell} {script}: не завершився за {ScriptTimeout.TotalMinutes} хвилин.");
                 }
 
                 process.WaitForExit();
