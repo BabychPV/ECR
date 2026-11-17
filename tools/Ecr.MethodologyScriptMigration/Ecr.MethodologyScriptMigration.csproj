@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Ecr.MethodologyScriptMigration</RootNamespace>
+    <AssemblyName>Ecr.MethodologyScriptMigration</AssemblyName>
+  </PropertyGroup>
+
+  <!--
+    Інструмент перенесення методологій у «ECR Script» (METHODOLOGY-SCRIPT-PLAN.md розд. 8).
+    Зараз — лише чисте ядро перетворення (Conversion/): жодного доступу до БД.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Ecr.Domain\Ecr.Domain.csproj" />
+    <ProjectReference Include="..\..\src\Ecr.Expressions\Ecr.Expressions.csproj" />
+    <ProjectReference Include="..\..\src\Ecr.Scripting\Ecr.Scripting.csproj" />
+    <ProjectReference Include="..\..\src\Ecr.Calculations\Ecr.Calculations.csproj" />
+  </ItemGroup>
+
+</Project>
