@@ -462,7 +462,7 @@ BEGIN
     -- скалярному apply rv; @rvPred - є прив'язка з предикатом MatchJson (тоді лишається посередній apply на рядок).
     -- @plainAgg / @plainCnt - при прапорі ON усі НЕмаршрутизовані колонки читає ОДИН apply pc замість c<n> на колонку.
     DECLARE @rvPack nvarchar(max), @rvChoose nvarchar(max), @rvExprs nvarchar(max), @rvPred bit, @rvDer nvarchar(max), @rvOwn nvarchar(max), @rvGen nvarchar(max),
-            @plainAgg nvarchar(max), @plainCnt int, @numRef nvarchar(64), @strRef nvarchar(64),
+            @plainAgg nvarchar(max), @plainCnt int, @numRef nvarchar(max), @strRef nvarchar(max),
             @famAgg nvarchar(max), @pkExpr nvarchar(16), @rvRef nvarchar(8), @fromSql nvarchar(max), @tiAp nvarchar(max), @rowApply nvarchar(max);
     -- RS (копії аркушів): службові колонки _SheetCopyOrdinal/_SheetDisplayName — у КІНЦІ списку (адитивні, як <Код>_Text).
     DECLARE @sheetNameLit nvarchar(max), @copyCols nvarchar(max);
@@ -471,6 +471,16 @@ BEGIN
     DECLARE @slot TABLE (ColumnDefId int NOT NULL, Slot int NOT NULL, Mo int NULL, PRIMARY KEY (ColumnDefId, Slot));
     -- D-474: маршрутизація місяців версії поточної вʼюхи (@MonthRouting = 1 або cfg.TemplateVersion.Layout = 1).
     DECLARE @mr bit;
+    -- ✎ LAND-YEAR L5 (D-NEW): обчислювані колонки (Formula 6, Calculated 8) версії з Layout = 1 (YearWithMonthColumns) мають
+    -- того самого власника, що й введені (MonthColumnRouter.OwnerOf з RoutesComputedVersion): місячна C_Mm - екземпляр періоду m,
+    -- не-місячна - якір року; власна копія рядка перегляду ЗАТІНЕНА повністю (MonthRoutedCellStore), Calculated - число
+    -- актуального прогону періоду-власника (CalculatedCellOverlay L2b). Спадковий прапор @MonthRouting сам обчислюваних
+    -- НЕ маршрутизує - лише @rc (розкладка версії). Копії аркушів і не-місячні проєкти - власна копія, як і в API.
+    -- @rc - версія вʼюхи з Layout = 1; @rcCol - поточна колонка маршрутизована обчислювана; @rcSlots - їхні слоти (поза sc);
+    -- @owner - умова «рядок читає власника» (місячний проєкт, оригінал аркуша); @orv* - числа прогонів власників (L5b).
+    DECLARE @rc bit, @rcCol bit, @rcSlots nvarchar(max), @owner nvarchar(200), @orvIds nvarchar(max), @orvSlots nvarchar(max),
+            @orvPack nvarchar(max), @orvExprs nvarchar(max), @orvStub nvarchar(max), @orvText nvarchar(max), @orvOn bit;
+    SET @owner = N'p.PeriodKind = 0 AND ti.SheetCopyId IS NULL';
 
     DECLARE cur_views CURSOR LOCAL FAST_FORWARD FOR
         SELECT TableDefId, SheetDefId, Header, ViewName FROM @tables ORDER BY TableDefId;
@@ -491,6 +501,10 @@ BEGIN
         SET @mr = CASE WHEN @MonthRouting = 1
                          OR EXISTS (SELECT 1 FROM cfg.SheetDef AS lsd JOIN cfg.TemplateVersion AS ltv ON ltv.Id = lsd.TemplateVersionId
                                      WHERE lsd.Id = @sheet AND ltv.Layout = 1) THEN 1 ELSE 0 END;
+        -- ✎ L5: обчислювані маршрутизуються лише за розкладкою версії (та сама умова, без прапора).
+        SET @rc = CASE WHEN EXISTS (SELECT 1 FROM cfg.SheetDef AS lsd JOIN cfg.TemplateVersion AS ltv ON ltv.Id = lsd.TemplateVersionId
+                                     WHERE lsd.Id = @sheet AND ltv.Layout = 1) THEN 1 ELSE 0 END;
+        SELECT @rcSlots = N'', @orvIds = N'', @orvSlots = N'', @orvPack = N'', @orvExprs = N'', @orvStub = N'', @orvText = N'', @orvOn = 0;
         -- Q-17.perf: чи є в таблиці активна прив'язка з предикатом MatchJson (тоді rv - посередній apply на рядок, нижче).
         -- rv наборового варіанта стає колонками apply-джерела рядків r (alias r), посередній - окремим apply rv.
         SET @rvPred = CASE WHEN EXISTS (SELECT 1 FROM cfg.CalculationBinding
@@ -516,8 +530,10 @@ BEGIN
             -- Q-17.7: MonthsInColumns — ВВЕДЕНИЙ стовпець (не Formula/Calculated) читається з комірки власника;
             -- власна копія в рядку перегляду лишається запасним значенням (до консолідації даних і після неї
             -- до -PurgeCopies). Похідні (Formula/Calculated) і всі інші розкладки — як було.
-            SET @routed = CASE WHEN @mr = 1 AND @layout = 0 AND @colType NOT IN (6, 8)
+            -- ✎ L5: обчислювана колонка версії з Layout = 1 (@rc) маршрутизується так само (власник - той самий).
+            SET @routed = CASE WHEN @mr = 1 AND @layout = 0 AND (@colType NOT IN (6, 8) OR (@rc = 1 AND @colType = 6))
                                     AND (@isMonth = 0 OR @monthNo BETWEEN 1 AND 12) THEN 1 ELSE 0 END;
+            SET @rcCol = CASE WHEN @routed = 1 AND @colType IN (6, 8) THEN 1 ELSE 0 END;
 
             SET @numRef = @alias + N'.ValueNumeric';
             SET @strRef = @alias + N'.ValueString';
@@ -589,17 +605,28 @@ LEFT JOIN doc.CellValue AS ' + @alias + N' ON ' + @alias + N'.PeriodKey = r.Peri
                 -- а не другим агрегатом на колонку в sv: p61 (прапор k<n> у sv) подвоював роботу sv (T10_03 / T11_03 у 2-4 рази).
                 -- Q-17.perf3 (Land T9_04 ON 2,2-2,4 с проти OFF 0,5-0,8 с): власна копія - у СПІЛЬНОМУ apply pc (ті самі рядки й той
                 -- самий агрегат), а не окремим apply sv (зайвий seek і прохід на рядок, +~200 агрегатів у тексті й компіляції).
-                SET @plainAgg = @plainAgg + N', ' + @agg;
+                SET @plainAgg = @plainAgg + N', ' + @agg
+                    + CASE WHEN @rcCol = 1 THEN N', MAX(CASE WHEN x.ColumnDefId = ' + CAST(@colId AS nvarchar(10)) + N' THEN x.ValueString END) AS s'
+                                                + CAST(@n AS nvarchar(10)) ELSE N'' END;
                 SET @plainCnt = @plainCnt + 1;
                 -- Q-17.slotmap: pc і sc - за слотом (рядок мапи з Mo: місяць колонки або 0 = якір року).
+                -- ✎ L5: маршрутизована обчислювана - ще й рядковий результат s<n> (супутник _Text власної копії).
                 SET @plainAggS = @plainAggS + N', ' + CASE WHEN @colType = 3
                     THEN N'MAX(CAST(CASE WHEN m.Slot = ' + CAST(@n AS nvarchar(10)) + N' THEN x.' + @raw1 + N' END AS tinyint))'
                     ELSE N'MAX(CASE WHEN m.Slot = ' + CAST(@n AS nvarchar(10)) + N' THEN x.' + @raw1 + N' END)' END
-                    + N' AS v' + CAST(@n AS nvarchar(10));
-                SET @scAggS = @scAggS + N', ' + CASE WHEN @colType = 3
-                    THEN N'MAX(CAST(CASE WHEN m.Slot = ' + CAST(@n AS nvarchar(10)) + N' THEN x.' + @raw1 + N' END AS tinyint))'
-                    ELSE N'MAX(CASE WHEN m.Slot = ' + CAST(@n AS nvarchar(10)) + N' THEN x.' + @raw1 + N' END)' END
-                    + N' AS cv' + CAST(@n AS nvarchar(10));
+                    + N' AS v' + CAST(@n AS nvarchar(10))
+                    + CASE WHEN @rcCol = 1 THEN N', MAX(CASE WHEN m.Slot = ' + CAST(@n AS nvarchar(10)) + N' THEN x.ValueString END) AS s'
+                                                + CAST(@n AS nvarchar(10)) ELSE N'' END;
+                -- ✎ L5: у маршрутизованій обчислюваній колонці кожна комірка - обчислена (IsCalculated = 1), а власна копія затінена
+                -- (API): шару sc у неї немає - її слот не йде в sc ані агрегатом, ані скануванням (Land T9_04: ~3 448 обчислених
+                -- комірок екземпляра).
+                IF @rcCol = 1
+                    SET @rcSlots = @rcSlots + N',' + CAST(@n AS nvarchar(10));
+                ELSE
+                    SET @scAggS = @scAggS + N', ' + CASE WHEN @colType = 3
+                        THEN N'MAX(CAST(CASE WHEN m.Slot = ' + CAST(@n AS nvarchar(10)) + N' THEN x.' + @raw1 + N' END AS tinyint))'
+                        ELSE N'MAX(CASE WHEN m.Slot = ' + CAST(@n AS nvarchar(10)) + N' THEN x.' + @raw1 + N' END)' END
+                        + N' AS cv' + CAST(@n AS nvarchar(10));
                 INSERT INTO @slot (ColumnDefId, Slot, Mo) VALUES (@colId, @n, CASE WHEN @isMonth = 1 THEN @monthNo ELSE 0 END);
                 -- Q-17.perf3: fam агрегував УСІ комірки 12 екземплярів року (45 520 рядків на T9_04 Land, 1,96 с CPU з 3,0) через
                 -- ~200 CASE (ColumnDefId + місяць/якір) на кожну. Тепер у агрегацію йдуть лише комірки, що НАЛЕЖАТЬ власнику (мапа fm
@@ -608,12 +635,26 @@ LEFT JOIN doc.CellValue AS ' + @alias + N' ON ' + @alias + N'.PeriodKey = r.Peri
                 SET @famAgg = @famAgg + N', ' + CASE WHEN @colType = 3
                     THEN N'MAX(CAST(CASE WHEN fm.Slot = ' + CAST(@n AS nvarchar(10)) + N' THEN c.' + @raw1 + N' END AS tinyint))'
                     ELSE N'MAX(CASE WHEN fm.Slot = ' + CAST(@n AS nvarchar(10)) + N' THEN c.' + @raw1 + N' END)' END
-                    + N' AS v' + CAST(@n AS nvarchar(10));
+                    + N' AS v' + CAST(@n AS nvarchar(10))
+                    + CASE WHEN @rcCol = 1 THEN N', MAX(CASE WHEN fm.Slot = ' + CAST(@n AS nvarchar(10)) + N' THEN c.ValueString END) AS s'
+                                                + CAST(@n AS nvarchar(10)) ELSE N'' END;
 
-                SET @valueCol = N'COALESCE(sc.cv' + CAST(@n AS nvarchar(10)) + N', '
-                              + N'fam.v' + CAST(@n AS nvarchar(10)) + N', pc.v' + CAST(@n AS nvarchar(10)) + N')';
-                IF @colType = 3
-                    SET @valueCol = N'CAST(' + @valueCol + N' AS bit)';
+                IF @rcCol = 1
+                BEGIN
+                    -- ✎ L5: обчислювана - значення ВЛАСНИКА без запасної власної копії (вона затінена, як у MonthRoutedCellStore:
+                    -- немає комірки власника - NULL); не-місячний проєкт і копія аркуша - власна копія (API їх не маршрутизує).
+                    -- Супутник _Text - з того самого джерела (s<n> власника або власної копії).
+                    SET @valueCol = N'CASE WHEN ' + @owner + N' THEN fam.v' + CAST(@n AS nvarchar(10)) + N' ELSE pc.v' + CAST(@n AS nvarchar(10)) + N' END';
+                    SET @numRef = @valueCol;
+                    SET @strRef = N'CASE WHEN ' + @owner + N' THEN fam.s' + CAST(@n AS nvarchar(10)) + N' ELSE pc.s' + CAST(@n AS nvarchar(10)) + N' END';
+                END
+                ELSE
+                BEGIN
+                    SET @valueCol = N'COALESCE(sc.cv' + CAST(@n AS nvarchar(10)) + N', '
+                                  + N'fam.v' + CAST(@n AS nvarchar(10)) + N', pc.v' + CAST(@n AS nvarchar(10)) + N')';
+                    IF @colType = 3
+                        SET @valueCol = N'CAST(' + @valueCol + N' AS bit)';
+                END
             END
 
             -- Q-17.recalc: колонка Calculated (8) у зрізі API - число методології (CalculatedCellOverlay, calc.CalculationResult),
@@ -638,8 +679,9 @@ LEFT JOIN doc.CellValue AS ' + @alias + N' ON ' + @alias + N'.PeriodKey = r.Peri
             SET @select = @select + N',
        ' + @valueCol + N' AS ' + QUOTENAME(@colCode);
             -- AN-147: колонка-супутник `<Код>_Text` лише для Formula/Calculated - РЯДКОВИЙ результат обчислення (ValueString);
-            -- числова колонка вище не змінюється. Формула/Calculated ніколи не маршрутизується (@routed = 0), тож і в режимі
-            -- @MonthRouting = 1 супутник читає ту саму власну комірку c<n> (власна обчислена > власник дотримано). Супутники
+            -- числова колонка вище не змінюється. Формула/Calculated маршрутизується лише у версії з Layout = 1 (✎ L5: тоді
+            -- @numRef/@strRef - вирази власника вище); інакше (@routed = 0) і в режимі @MonthRouting = 1 супутник читає ту саму
+            -- власну комірку (c<n> / pc). Супутники
             -- ідуть У КІНЦІ списку колонок (позиції наявних колонок не зсуваються). Колізія імені: якщо в таблиці вже є
             -- колонка з кодом `<Код>_Text`, супутник для цієї колонки ПРОПУСКАЄТЬСЯ (наявна колонка не підміняється).
             IF @colType IN (6, 8)
@@ -711,7 +753,10 @@ LEFT HASH JOIN (SELECT c.DocumentId, c.Yr, c.RowKey' + @famAgg + N'
                                             ON pa.ProjectId = od.ProjectId AND pa.Yr = oi.PeriodKey / 100
                                      JOIN doc.TableRow AS ow ON ow.PeriodKey = oi.PeriodKey AND ow.TableInstanceId = oi.Id AND ow.IsDeleted = 0
                                      JOIN doc.CellValue AS x ON x.PeriodKey = ow.PeriodKey AND x.TableRowId = ow.Id
-                                    WHERE oi.TableDefId = ' + CAST(@id AS nvarchar(10)) + N') AS c
+                                    WHERE oi.TableDefId = ' + CAST(@id AS nvarchar(10))
+                -- ✎ L5: з маршрутизованими обчислюваними власник - лише ОРИГІНАЛ аркуша (MonthRoutedCellStore: OriginalOnly), рядки копії
+                -- з тим самим RowKey не змішуються з ним у MAX. Без них текст як до L5.
+                + CASE WHEN @rcSlots <> N'' THEN N' AND oi.SheetCopyId IS NULL' ELSE N'' END + N') AS c
                           ON c.ColumnDefId = fm.ColumnDefId
                          AND ((fm.Mo > 0 AND c.PeriodKey % 100 = fm.Mo) OR (fm.Mo = 0 AND c.PeriodKey = c.AnchorKey))
                  WHERE fm.ViewName = ' + @vnLit + N' AND fm.Mo IS NOT NULL
@@ -720,10 +765,18 @@ LEFT HASH JOIN (SELECT c.DocumentId, c.Yr, c.RowKey' + @famAgg + N'
             -- Власна обчислена (sc) - OUTER APPLY з умовною агрегацією (B1) лише по обчислених комірках МАРШРУТИЗОВАНИХ колонок
             -- (seek мапи по (вʼюха, ColumnDefId) з Mo IS NOT NULL): обчислені Formula/Calculated у агрегацію більше не йдуть
             -- (Land T9_04: 3 448 обчислених комірок екземпляра x ~150 CASE, із них маршрутизованих - 0). Власна копія - у pc.
-            SET @extra = @extra + 2;   -- sc + його мапа
-            SET @ownerCells = N'
+            -- ✎ L5: слоти маршрутизованих обчислюваних (@rcSlots) sc не сканує; немає жодної введеної маршрутизованої колонки
+            -- (@scAggS порожній) - apply sc немає зовсім (STUFF(N'') дав би NULL - і NULL-текст усієї вʼюхи).
+            SET @ownerCells = N'';
+            IF @scAggS <> N''
+            BEGIN
+                SET @extra = @extra + 2;   -- sc + його мапа
+                SET @ownerCells = N'
 OUTER APPLY (SELECT ' + STUFF(@scAggS, 1, 2, N'') + N' FROM doc.CellValue AS x WITH (FORCESEEK (1 (PeriodKey, TableRowId))) INNER LOOP JOIN rpt.ViewSlot AS m ON m.ViewName = ' + @vnLit
-                + N' AND m.ColumnDefId = x.ColumnDefId AND m.Mo IS NOT NULL WHERE x.PeriodKey = r.PeriodKey AND x.TableRowId = r.Id AND x.IsCalculated = 1) AS sc';
+                    + N' AND m.ColumnDefId = x.ColumnDefId AND m.Mo IS NOT NULL'
+                    + CASE WHEN @rcSlots <> N'' THEN N' AND m.Slot NOT IN (' + STUFF(@rcSlots, 1, 1, N'') + N')' ELSE N'' END
+                    + N' WHERE x.PeriodKey = r.PeriodKey AND x.TableRowId = r.Id AND x.IsCalculated = 1) AS sc';
+            END
 
             -- Порядок: приєднання власників-рядків ідуть ДО комірок власників; власні копії нероутованих колонок (c<n>) - між ними.
             SET @joins = @ownerRows + @joins + @ownerCells;
@@ -1102,11 +1155,13 @@ BEGIN
     DECLARE @gt TABLE (
         TableDefId int NOT NULL PRIMARY KEY, SheetDefId int NOT NULL, TemplateVersionId int NOT NULL, TemplateId int NOT NULL,
         TemplateCode nvarchar(64) NOT NULL, SheetCode nvarchar(64) NOT NULL, TableCode nvarchar(64) NOT NULL,
-        VersionText nvarchar(20) NOT NULL, LayoutKind tinyint NOT NULL, GroupId int NULL, Routed bit NOT NULL);
+        VersionText nvarchar(20) NOT NULL, LayoutKind tinyint NOT NULL, GroupId int NULL, Routed bit NOT NULL, Rc bit NOT NULL);
     -- D-474: Routed - маршрутизація місяців ВЕРСІЇ таблиці: прапор (усі версії) або розкладка версії YearWithMonthColumns (1).
-    INSERT INTO @gt (TableDefId, SheetDefId, TemplateVersionId, TemplateId, TemplateCode, SheetCode, TableCode, VersionText, LayoutKind, Routed)
+    -- ✎ L5 (D-NEW): Rc - маршрутизація ОБЧИСЛЮВАНИХ колонок (Formula/Calculated) версії: лише Layout = 1, прапор її не дає.
+    INSERT INTO @gt (TableDefId, SheetDefId, TemplateVersionId, TemplateId, TemplateCode, SheetCode, TableCode, VersionText, LayoutKind, Routed, Rc)
     SELECT td.Id, sd.Id, tv.Id, t.Id, t.Code, sd.Code, td.Code, tv.[Version], td.LayoutKind,
-           CASE WHEN @MonthRouting = 1 OR tv.Layout = 1 THEN 1 ELSE 0 END
+           CASE WHEN @MonthRouting = 1 OR tv.Layout = 1 THEN 1 ELSE 0 END,
+           CASE WHEN tv.Layout = 1 THEN 1 ELSE 0 END
       FROM cfg.TableDef AS td
       JOIN cfg.SheetDef AS sd ON sd.Id = td.SheetDefId
       JOIN cfg.TemplateVersion AS tv ON tv.Id = sd.TemplateVersionId
@@ -1408,7 +1463,7 @@ BEGIN
     DECLARE @marker nvarchar(64) = N'-- Згенеровано rpt.usp_GenerateStableViews';
     DECLARE @failure nvarchar(2048), @warning nvarchar(2000);
     DECLARE @seq int, @colCode nvarchar(64), @colType tinyint, @isMonth bit, @monthNo tinyint, @conflict bit, @ids nvarchar(max), @pred nvarchar(max);
-    DECLARE @n int, @plainCnt int, @plainAgg nvarchar(max), @valueCol nvarchar(max), @valueColRv nvarchar(max), @numRef nvarchar(64), @strRef nvarchar(64), @raw1 nvarchar(64);
+    DECLARE @n int, @plainCnt int, @plainAgg nvarchar(max), @valueCol nvarchar(max), @valueColRv nvarchar(max), @numRef nvarchar(max), @strRef nvarchar(max), @raw1 nvarchar(64);
     DECLARE @routedGroup bit, @routed bit, @layoutOk bit, @monthMask int, @needAnchor bit, @ownerRows nvarchar(max), @ownerCells nvarchar(max);
     DECLARE @agg nvarchar(max), @aggBody nvarchar(max), @famAgg nvarchar(max), @pkExpr nvarchar(16), @fromSql nvarchar(max), @rowApply nvarchar(max);
     DECLARE @selectRv nvarchar(max), @selectTextRv nvarchar(max), @rvIds nvarchar(max), @rvApply nvarchar(max), @rvAgg nvarchar(max), @rvPack nvarchar(max), @rvExprs nvarchar(max);
@@ -1433,7 +1488,12 @@ BEGIN
     -- Columns of one group: one row per ColumnDef (all versions), then one row per code.
     -- D-474: Routed - версія колонки маршрутизується (Mo у мапі слотів - лише для Id маршрутизованих версій).
     DECLARE @ci TABLE (ColId int NOT NULL PRIMARY KEY, Code nvarchar(64) NOT NULL, DataType tinyint NOT NULL, Fam tinyint NOT NULL,
-                       IsMonth bit NOT NULL, MonthNo tinyint NULL, Ord bigint NOT NULL, Routed bit NOT NULL);
+                       IsMonth bit NOT NULL, MonthNo tinyint NULL, Ord bigint NOT NULL, Routed bit NOT NULL, Rc bit NOT NULL);
+    -- ✎ L5 (як у rpt.usp_GenerateTemplateViews): @rcCol - колонка маршрутизована обчислювана (Mo - лише в Id версій з Rc = 1);
+    -- @rcSlots - їхні слоти (поза sc); @rcTids / @owner - рядки, що читають власника: місячний проєкт, оригінал аркуша і (група
+    -- змішана) таблиця версії з Layout = 1; @orv* - числа прогонів власників (L5b).
+    DECLARE @rcCol bit, @rcSlots nvarchar(max), @rcTids nvarchar(max), @owner nvarchar(max), @orvIds nvarchar(max), @orvSlots nvarchar(max),
+            @orvPack nvarchar(max), @orvExprs nvarchar(max), @orvStub nvarchar(max), @orvText nvarchar(max);
     DECLARE @cols TABLE (Seq int IDENTITY(1, 1) PRIMARY KEY, Code nvarchar(64) NOT NULL, FirstOrd bigint NOT NULL);
     -- RPT-STABLE Part B: code aliases of one group from the persisted rename map (cfg.ColumnRename): a renamed column is
     -- exposed under BOTH names, each reading the data of every id of the whole alias class (transitive closure).
@@ -1493,15 +1553,22 @@ BEGIN
                                  FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 1, N'');
         SET @mixedGuard = CASE WHEN @routedGroup = 1 AND EXISTS (SELECT 1 FROM @gt WHERE TableDefId IN (SELECT TableDefId FROM @gx) AND Routed = 0)
                                THEN N' AND ti.TableDefId IN (' + @routedTids + N')' ELSE N'' END;
+        -- ✎ L5: рядки, що читають власника обчислюваних колонок; таблиці версій з Layout = 1 - умовою лише в змішаній групі.
+        SET @rcTids = STUFF((SELECT N',' + CAST(TableDefId AS nvarchar(10)) FROM @gt WHERE TableDefId IN (SELECT TableDefId FROM @gx) AND Rc = 1 ORDER BY TableDefId
+                             FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 1, N'');
+        SET @owner = N'p.PeriodKind = 0 AND ti.SheetCopyId IS NULL'
+                   + CASE WHEN EXISTS (SELECT 1 FROM @gt WHERE TableDefId IN (SELECT TableDefId FROM @gx) AND Rc = 0)
+                          THEN N' AND ti.TableDefId IN (' + COALESCE(@rcTids, N'0') + N')' ELSE N'' END;
+        SELECT @rcSlots = N'', @orvIds = N'', @orvSlots = N'', @orvPack = N'', @orvExprs = N'', @orvStub = N'', @orvText = N'';
         SET @rvPred = CASE WHEN EXISTS (SELECT 1 FROM cfg.CalculationBinding AS cb JOIN @gt AS x ON x.TableDefId = cb.TableDefId
                                          WHERE x.TableDefId IN (SELECT TableDefId FROM @gx) AND cb.IsActive = 1 AND REPLACE(cb.MatchJson, CHAR(32), N'') <> N'{}') THEN 1 ELSE 0 END;
         SET @rvRef = CASE WHEN @rvPred = 0 THEN N'r' ELSE N'rv' END;
 
-        INSERT INTO @ci (ColId, Code, DataType, Fam, IsMonth, MonthNo, Ord, Routed)
+        INSERT INTO @ci (ColId, Code, DataType, Fam, IsMonth, MonthNo, Ord, Routed, Rc)
         SELECT cd.Id, cd.Code, cd.DataType,
                CASE cd.DataType WHEN 0 THEN 0 WHEN 3 THEN 3 WHEN 4 THEN 4 WHEN 5 THEN 5 WHEN 7 THEN 7 ELSE 1 END,
                cd.IsMonthColumn, cd.MonthNumber,
-               CAST(x.TemplateVersionId AS bigint) * 4294967296 + cd.Id, x.Routed
+               CAST(x.TemplateVersionId AS bigint) * 4294967296 + cd.Id, x.Routed, x.Rc
           FROM cfg.ColumnDef AS cd JOIN @gt AS x ON x.TableDefId = cd.TableDefId
          WHERE x.TableDefId IN (SELECT TableDefId FROM @gx) AND cd.IsDeleted = 0;
         INSERT INTO @cols (Code, FirstOrd) SELECT Code, MIN(Ord) FROM @ci GROUP BY Code ORDER BY MIN(Ord);
@@ -1556,12 +1623,18 @@ BEGIN
                                       WHEN 5 THEN N'ValueRegistryEntryId' WHEN 7 THEN N'ValueUnitId' ELSE N'ValueNumeric' END;
             SET @numRef = N'pc.v' + CAST(@n AS nvarchar(10));
             SET @strRef = N'pc.s' + CAST(@n AS nvarchar(10));
-            SET @routed = CASE WHEN @routedGroup = 1 AND @conflict = 0 AND @colType NOT IN (6, 8)
+            -- ✎ L5: обчислювана колонка маршрутизується, якщо її Id є у версії з Layout = 1 (Rc).
+            SET @routed = CASE WHEN @routedGroup = 1 AND @conflict = 0
+                                    AND (@colType NOT IN (6, 8)
+                                         OR (@colType = 6 AND EXISTS (SELECT 1 FROM @cid AS k JOIN @ci AS c ON c.ColId = k.ColId WHERE c.Rc = 1)))
                                     AND (@isMonth = 0 OR @monthNo BETWEEN 1 AND 12) THEN 1 ELSE 0 END;
+            SET @rcCol = CASE WHEN @routed = 1 AND @colType IN (6, 8) THEN 1 ELSE 0 END;
             -- Q-17.slotmap: кожен Id коду (з аліасами) - рядок мапи у слоті @n; Mo - лише для маршрутизованої колонки
             -- (D-474: і лише для Id маршрутизованої версії - Id немаршрутизованої читаються як власна копія, pc).
+            -- ✎ L5: для обчислюваної - лише Id версій з Layout = 1 (Rc), прапор їх не маршрутизує.
             INSERT INTO @slot (ColumnDefId, Slot, Mo, Scope)
-            SELECT c.ColId, @n, CASE WHEN @routed = 1 AND c.Routed = 1 THEN CASE WHEN @isMonth = 1 THEN @monthNo ELSE 0 END END, k.Scope
+            SELECT c.ColId, @n, CASE WHEN @routed = 1 AND CASE WHEN @rcCol = 1 THEN c.Rc ELSE c.Routed END = 1
+                                     THEN CASE WHEN @isMonth = 1 THEN @monthNo ELSE 0 END END, k.Scope
               FROM @cid AS k JOIN @ci AS c ON c.ColId = k.ColId;
             SET @slotAgg = CASE WHEN @colType = 3
                                 THEN N'MAX(CAST(CASE WHEN m.Slot = ' + CAST(@n AS nvarchar(10)) + N' THEN x.' + @raw1 + N' END AS tinyint))'
@@ -1621,19 +1694,40 @@ BEGIN
                 ELSE
                     SET @needAnchor = 1;
                 -- Q-17.perf3: own copy - the shared apply pc (same rows, same aggregate), not a second apply sv.
-                SET @plainAgg = @plainAgg + N', ' + @agg;
+                -- ✎ L5: a routed computed column also carries its string result s<n> (the _Text companion), in pc and in fam.
+                SET @plainAgg = @plainAgg + N', ' + @agg
+                    + CASE WHEN @rcCol = 1 THEN N', MAX(CASE WHEN ' + @pred + N' THEN x.ValueString END) AS s' + CAST(@n AS nvarchar(10)) ELSE N'' END;
                 -- Q-17.slotmap: pc and sc aggregate by slot (m.Slot) over the cells joined to the view's slot map.
-                SET @plainAggS = @plainAggS + N', ' + @slotAgg + N' AS v' + CAST(@n AS nvarchar(10));
-                SET @scAggS = @scAggS + N', ' + @slotAgg + N' AS cv' + CAST(@n AS nvarchar(10));
+                SET @plainAggS = @plainAggS + N', ' + @slotAgg + N' AS v' + CAST(@n AS nvarchar(10))
+                    + CASE WHEN @rcCol = 1 THEN N', MAX(CASE WHEN m.Slot = ' + CAST(@n AS nvarchar(10)) + N' THEN x.ValueString END) AS s'
+                                                + CAST(@n AS nvarchar(10)) ELSE N'' END;
+                -- ✎ L5: a routed computed column has no sc layer (its own copy is shadowed, as in the API), and sc does not scan its slot.
+                IF @rcCol = 1
+                    SET @rcSlots = @rcSlots + N',' + CAST(@n AS nvarchar(10));
+                ELSE
+                    SET @scAggS = @scAggS + N', ' + @slotAgg + N' AS cv' + CAST(@n AS nvarchar(10));
                 SET @plainCnt = @plainCnt + 1;
                 -- Q-17.perf3: fam aggregates by slot (fm.Slot) over the OWNED cells only (map rows with Mo, rpt.ViewSlot), see the _vN proc.
                 SET @famAgg = @famAgg + N', ' + CASE WHEN @colType = 3
                     THEN N'MAX(CAST(CASE WHEN fm.Slot = ' + CAST(@n AS nvarchar(10)) + N' THEN c.' + @raw1 + N' END AS tinyint))'
                     ELSE N'MAX(CASE WHEN fm.Slot = ' + CAST(@n AS nvarchar(10)) + N' THEN c.' + @raw1 + N' END)' END
-                    + N' AS v' + CAST(@n AS nvarchar(10));
-                SET @valueCol = N'COALESCE(sc.cv' + CAST(@n AS nvarchar(10)) + N', fam.v' + CAST(@n AS nvarchar(10)) + N', pc.v' + CAST(@n AS nvarchar(10)) + N')';
-                IF @colType = 3
-                    SET @valueCol = N'CAST(' + @valueCol + N' AS bit)';
+                    + N' AS v' + CAST(@n AS nvarchar(10))
+                    + CASE WHEN @rcCol = 1 THEN N', MAX(CASE WHEN fm.Slot = ' + CAST(@n AS nvarchar(10)) + N' THEN c.ValueString END) AS s'
+                                                + CAST(@n AS nvarchar(10)) ELSE N'' END;
+                IF @rcCol = 1
+                BEGIN
+                    -- ✎ L5: the owner's value with no own-copy fallback (shadowed); a non-monthly project, a sheet copy and (mixed
+                    -- group) a row of a version without Layout = 1 read their own copy.
+                    SET @valueCol = N'CASE WHEN ' + @owner + N' THEN fam.v' + CAST(@n AS nvarchar(10)) + N' ELSE pc.v' + CAST(@n AS nvarchar(10)) + N' END';
+                    SET @numRef = @valueCol;
+                    SET @strRef = N'CASE WHEN ' + @owner + N' THEN fam.s' + CAST(@n AS nvarchar(10)) + N' ELSE pc.s' + CAST(@n AS nvarchar(10)) + N' END';
+                END
+                ELSE
+                BEGIN
+                    SET @valueCol = N'COALESCE(sc.cv' + CAST(@n AS nvarchar(10)) + N', fam.v' + CAST(@n AS nvarchar(10)) + N', pc.v' + CAST(@n AS nvarchar(10)) + N')';
+                    IF @colType = 3
+                        SET @valueCol = N'CAST(' + @valueCol + N' AS bit)';
+                END
             END
 
             -- Calculated (8): the methodology result (as in the API slice and _vN), materialised value as the fallback.
@@ -1732,16 +1826,23 @@ LEFT HASH JOIN (SELECT c.DocumentId, c.Yr, c.RowKey' + @famAgg + N'
                                             ON pa.ProjectId = od.ProjectId AND pa.Yr = oi.PeriodKey / 100
                                      JOIN doc.TableRow AS ow ON ow.PeriodKey = oi.PeriodKey AND ow.TableInstanceId = oi.Id AND ow.IsDeleted = 0
                                      JOIN doc.CellValue AS x ON x.PeriodKey = ow.PeriodKey AND x.TableRowId = ow.Id
-                                    WHERE oi.TableDefId IN (' + @tids + N')) AS c
+                                    WHERE oi.TableDefId IN (' + @tids + N')'
+                    -- ✎ L5: with routed computed columns the owner is the sheet ORIGINAL only (API: OriginalOnly); otherwise as before.
+                    + CASE WHEN @rcSlots <> N'' THEN N' AND oi.SheetCopyId IS NULL' ELSE N'' END + N') AS c
                           ON c.ColumnDefId = fm.ColumnDefId
                          AND ((fm.Mo > 0 AND c.PeriodKey % 100 = fm.Mo) OR (fm.Mo = 0 AND c.PeriodKey = c.AnchorKey))' + @scopeC + N'
                  WHERE fm.ViewName = ' + @vnLit + N' AND fm.Mo IS NOT NULL
                  GROUP BY c.DocumentId, c.Yr, c.RowKey) AS fam
        ON p.PeriodKind = 0 AND fam.DocumentId = ti.DocumentId AND fam.Yr = ti.PeriodKey / 100 AND fam.RowKey = r.RowKey' + @mixedGuard;
             -- Own computed cell (sc): only the computed cells of ROUTED columns (map rows with Mo) reach the aggregate.
-            SET @ownerCells = N'
+            -- ✎ L5: not the slots of routed computed columns; no routed input column at all - no sc (STUFF(N'') is NULL).
+            SET @ownerCells = N'';
+            IF @scAggS <> N''
+                SET @ownerCells = N'
 OUTER APPLY (SELECT ' + STUFF(@scAggS, 1, 2, N'') + N' FROM doc.CellValue AS x WITH (FORCESEEK (1 (PeriodKey, TableRowId)))' + @spJoin + N' INNER LOOP JOIN rpt.ViewSlot AS m ON m.ViewName = ' + @vnLit
-                + N' AND m.ColumnDefId = x.ColumnDefId AND m.Mo IS NOT NULL' + @scopeD + N' WHERE x.PeriodKey = r.PeriodKey AND x.TableRowId = r.Id AND x.IsCalculated = 1) AS sc';
+                    + N' AND m.ColumnDefId = x.ColumnDefId AND m.Mo IS NOT NULL'
+                    + CASE WHEN @rcSlots <> N'' THEN N' AND m.Slot NOT IN (' + STUFF(@rcSlots, 1, 1, N'') + N')' ELSE N'' END
+                    + @scopeD + N' WHERE x.PeriodKey = r.PeriodKey AND x.TableRowId = r.Id AND x.IsCalculated = 1) AS sc';
             SET @joins = @ownerRows + @joins + @ownerCells;
         END
 
