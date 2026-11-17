@@ -8051,6 +8051,31 @@
               "integer"
             ]
           },
+          "nonMonthConflicts": {
+            "description": "✎ LAND-YEAR L3 (B-static): комірки немісячних колонок, де якір порожній, а місяці року мають РІЗНІ значення —\nпричина відмови `nonMonthConflict` (система не вибирає мовчки). Не більше `MaxItems`; `null` — таких немає.",
+            "items": {
+              "$ref": "#/components/schemas/NonMonthConflictItem"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "nonMonthConflictsTruncated": {
+            "description": "Перелік NonMonthConflicts обрізано стелею; `null` — переліку немає.",
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "nonMonthCopiedToAnchor": {
+            "description": "✎ LAND-YEAR L3 (B-static): скільки введених значень немісячних колонок якір року (найменший період року в календарі\nпроєкту — його показує річний перегляд) дістане (дістав) з НАЙПІЗНІШОГО місяця, бо в якорі їх немає. Значення якоря\nне перезаписується ніколи. `null` — перенос не є переходом на рік.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "otherDocumentsOnSourceVersion": {
             "default": 0,
             "description": "D-1b P3: скільки документів у цих проєктах.",
@@ -14162,6 +14187,70 @@
           "canApply",
           "applied",
           "registryProvisioned"
+        ],
+        "type": "object"
+      },
+      "NonMonthConflictItem": {
+        "description": "✎ LAND-YEAR L3 (B-static): комірка немісячної колонки, у якої якір року порожній, а місяці року не згодні\n(причина відмови `nonMonthConflict`). Коди — цільової (річної) версії.",
+        "properties": {
+          "columnCode": {
+            "description": "Код колонки.",
+            "type": "string"
+          },
+          "documentId": {
+            "description": "Документ проєкту.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "rowKey": {
+            "description": "Ключ рядка.",
+            "type": "string"
+          },
+          "sheetCode": {
+            "description": "Код аркуша.",
+            "type": "string"
+          },
+          "tableCode": {
+            "description": "Код таблиці.",
+            "type": "string"
+          },
+          "values": {
+            "description": "Значення по місяцях за зростанням періоду.",
+            "items": {
+              "$ref": "#/components/schemas/NonMonthConflictValue"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "documentId",
+          "sheetCode",
+          "tableCode",
+          "rowKey",
+          "columnCode",
+          "values"
+        ],
+        "type": "object"
+      },
+      "NonMonthConflictValue": {
+        "description": "Значення комірки в одному місяці (✎ LAND-YEAR L3, NonMonthConflictItem).",
+        "properties": {
+          "periodKey": {
+            "description": "Період.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "value": {
+            "description": "Значення текстом (число — інваріантною культурою, дата — ISO 8601, запис довідника — `#id`).",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "periodKey",
+          "value"
         ],
         "type": "object"
       },

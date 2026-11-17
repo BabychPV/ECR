@@ -32926,6 +32926,18 @@ export interface components {
              *     змінює розкладку «копія на місяць» → «рік, місяці в колонках».
              */
             monthTransferredValues?: null | number;
+            /** @description ✎ LAND-YEAR L3 (B-static): комірки немісячних колонок, де якір порожній, а місяці року мають РІЗНІ значення —
+             *     причина відмови `nonMonthConflict` (система не вибирає мовчки). Не більше `MaxItems`; `null` — таких немає. */
+            nonMonthConflicts?: null | components["schemas"]["NonMonthConflictItem"][];
+            /** @description Перелік NonMonthConflicts обрізано стелею; `null` — переліку немає. */
+            nonMonthConflictsTruncated?: null | boolean;
+            /**
+             * Format: int64
+             * @description ✎ LAND-YEAR L3 (B-static): скільки введених значень немісячних колонок якір року (найменший період року в календарі
+             *     проєкту — його показує річний перегляд) дістане (дістав) з НАЙПІЗНІШОГО місяця, бо в якорі їх немає. Значення якоря
+             *     не перезаписується ніколи. `null` — перенос не є переходом на рік.
+             */
+            nonMonthCopiedToAnchor?: null | number;
             /**
              * Format: int32
              * @description D-1b P3: скільки документів у цих проєктах.
@@ -35770,6 +35782,35 @@ export interface components {
             rowsRead: number;
             /** @description Sheet that was read. */
             sheetName: string;
+        };
+        /** @description ✎ LAND-YEAR L3 (B-static): комірка немісячної колонки, у якої якір року порожній, а місяці року не згодні
+         *     (причина відмови `nonMonthConflict`). Коди — цільової (річної) версії. */
+        NonMonthConflictItem: {
+            /** @description Код колонки. */
+            columnCode: string;
+            /**
+             * Format: int64
+             * @description Документ проєкту.
+             */
+            documentId: number;
+            /** @description Ключ рядка. */
+            rowKey: string;
+            /** @description Код аркуша. */
+            sheetCode: string;
+            /** @description Код таблиці. */
+            tableCode: string;
+            /** @description Значення по місяцях за зростанням періоду. */
+            values: components["schemas"]["NonMonthConflictValue"][];
+        };
+        /** @description Значення комірки в одному місяці (✎ LAND-YEAR L3, NonMonthConflictItem). */
+        NonMonthConflictValue: {
+            /**
+             * Format: int32
+             * @description Період.
+             */
+            periodKey: number;
+            /** @description Значення текстом (число — інваріантною культурою, дата — ISO 8601, запис довідника — `#id`). */
+            value: null | string;
         };
         /**
          * @description Транспорт каналу сповіщень. Числа зберігаються в базі — не перенумеровувати.

@@ -43,7 +43,44 @@ public sealed partial record VersionMigrationPlan
     /// не має повного набору місячних колонок (<c>C_M01..C_M12</c> або псевдонімів) — причина відмови <c>dataLoss</c>.
     /// </summary>
     public IReadOnlyList<string> MonthColumnsUnmapped { get; init; } = [];
+
+    /// <summary>
+    /// ✎ LAND-YEAR L3 (B-static): немісячні ВВЕДЕНІ колонки цільової річної версії (не <c>IsMonthColumn</c>, не
+    /// обчислювані), власник яких — якір року (<c>IMonthColumnRouter</c>: найменший ключ календаря проєкту в році).
+    /// Непорожньо лише для переходу «копія на місяць» → «рік»: сховище в транзакції перемикання версії дописує в якір
+    /// значення, яких там немає, з НАЙПІЗНІШОГО місяця року (див. <see cref="NonMonthCopiedToAnchor"/>). Порожньо — крок
+    /// не виконується (усі інші переноси).
+    /// </summary>
+    public IReadOnlyList<int> AnchorColumns { get; init; } = [];
+
+    /// <summary>
+    /// ✎ LAND-YEAR L3 (B-static): скільки комірок немісячних колонок дістане якір року з найпізнішого місяця (якір порожній,
+    /// місяці згодні). Сховище при застосуванні звіряє фактичну кількість із цією (розбіжність — відкат T2, ECR-CELL-0409).
+    /// </summary>
+    public long NonMonthCopiedToAnchor { get; init; }
 }
+
+/// <summary>
+/// ✎ LAND-YEAR L3 (B-static): що зробить (зробив би) крок «немісячне значення → якір року» переходу на рік.
+/// </summary>
+/// <param name="Copies">Скільки комірок якір дістане з найпізнішого місяця (порожній якір, місяці згодні).</param>
+/// <param name="ConflictCells">Скільки комірок мають у місяцях РІЗНІ значення при порожньому якорі (причина <c>nonMonthConflict</c>).</param>
+/// <param name="Conflicts">Ці комірки зі значеннями по місяцях — не більше стелі запиту.</param>
+public sealed record VersionMigrationAnchorFill(
+    long Copies, long ConflictCells, IReadOnlyList<VersionMigrationAnchorConflict> Conflicts)
+{
+    /// <summary>Кроку немає (не перехід на рік).</summary>
+    public static VersionMigrationAnchorFill None { get; } = new(0, 0, []);
+}
+
+/// <summary>Комірка немісячної колонки, у якої місяці року не згодні, а якір порожній (ідентифікатори ЦІЛЬОВОЇ версії).</summary>
+/// <param name="DocumentId">Документ.</param>
+/// <param name="TableDefId">Таблиця цільової версії.</param>
+/// <param name="RowKey">Бізнес-ключ рядка (ним рядки зіставляються між екземплярами періодів).</param>
+/// <param name="ColumnDefId">Колонка цільової версії.</param>
+/// <param name="Values">Значення по місяцях (період, текст значення) за зростанням періоду.</param>
+public sealed record VersionMigrationAnchorConflict(
+    long DocumentId, int TableDefId, string RowKey, int ColumnDefId, IReadOnlyList<NonMonthConflictValue> Values);
 
 /// <summary>Планувальник — частина LAND-YEAR L3 (місячні колонки).</summary>
 public static partial class VersionMigrationPlanner

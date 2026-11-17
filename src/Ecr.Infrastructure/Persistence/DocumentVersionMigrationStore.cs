@@ -482,6 +482,127 @@ public sealed partial class DocumentVersionMigrationStore(
         return collidesWithExisting + duplicatesAmongMoved;
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// Той самий текст <see cref="AnchorFillSql"/>, що виконує T2 (<c>@apply = 0</c> — лише рахує й перелічує). Комірки
+    /// зводяться до цільових ідентифікаторів (<c>@columnMap</c>/<c>@tableMap</c>, або вже цільові — відновлення після обриву
+    /// важкої частини), тож план до й після важкої частини однаковий.
+    /// </remarks>
+    public async Task<VersionMigrationAnchorFill> ReadAnchorFillAsync(
+        int projectId, VersionMigrationPlan plan, int maxConflicts, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        if (plan.AnchorColumns.Count == 0)
+        {
+            return VersionMigrationAnchorFill.None;
+        }
+
+        using var timeout = ExtendTimeout();
+        var connection = db.Database.GetDbConnection();
+        var opened = false;
+        if (connection.State != System.Data.ConnectionState.Open)
+        {
+            await db.Database.OpenConnectionAsync(ct).ConfigureAwait(false);
+            opened = true;
+        }
+
+        try
+        {
+            await using var command = connection.CreateCommand();
+            command.Transaction = db.Database.CurrentTransaction?.GetDbTransaction();
+            command.CommandTimeout = ApplyCommandTimeoutSeconds;
+            command.CommandText = Prelude + AnchorFillSql;
+            command.Parameters.AddRange(new SqlParameter[]
+            {
+                new("@projectId", projectId),
+                new("@fromPeriod", plan.FromPeriodKey),
+                new("@sheets", System.Data.SqlDbType.NVarChar, -1) { Value = JsonSerializer.Serialize(plan.Sheets.Select(p => new { o = p.Key, n = p.Value })) },
+                new("@tables", System.Data.SqlDbType.NVarChar, -1) { Value = JsonSerializer.Serialize(plan.Tables.Select(p => new { o = p.Key, n = p.Value })) },
+                new("@columns", System.Data.SqlDbType.NVarChar, -1)
+                {
+                    Value = JsonSerializer.Serialize(plan.Columns.Select(c => new { o = c.SourceColumnDefId, n = c.TargetColumnDefId, t = c.TargetTableDefId })),
+                },
+                new("@monthColumns", System.Data.SqlDbType.NVarChar, -1)
+                {
+                    Value = JsonSerializer.Serialize(plan.MonthColumns.Select(c => new
+                    {
+                        o = c.SourceColumnDefId, m = c.MonthNumber, n = c.TargetColumnDefId, t = c.TargetTableDefId,
+                    })),
+                },
+                new("@rows", System.Data.SqlDbType.NVarChar, -1) { Value = JsonSerializer.Serialize(plan.Rows.Select(p => new { o = p.Key, n = p.Value })) },
+                new("@headers", System.Data.SqlDbType.NVarChar, -1) { Value = JsonSerializer.Serialize(plan.HeaderFields.Select(p => new { o = p.Key, n = p.Value })) },
+                new("@anchorColumns", System.Data.SqlDbType.NVarChar, -1) { Value = JsonSerializer.Serialize(plan.AnchorColumns) },
+                new("@apply", false),
+                new("@maxConflicts", Math.Max(0, maxConflicts)),
+                new("@now", System.Data.SqlDbType.DateTime2) { Scale = 3, Value = DBNull.Value },   // лише гілка @apply = 1
+                new("@copied", System.Data.SqlDbType.BigInt) { Direction = System.Data.ParameterDirection.Output },
+            });
+
+            long copies = 0;
+            long conflictCells = 0;
+            var conflicts = new List<VersionMigrationAnchorConflict>();
+            await using (var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false))
+            {
+                if (await reader.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    copies = reader.GetInt64(0);
+                    conflictCells = reader.GetInt64(1);
+                }
+
+                await reader.NextResultAsync(ct).ConfigureAwait(false);
+                (long Doc, int Table, string RowKey, int Column)? current = null;
+                List<NonMonthConflictValue>? values = null;
+                while (await reader.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    var key = (reader.GetInt64(0), reader.GetInt32(1), reader.GetString(2), reader.GetInt32(3));
+                    if (current != key)
+                    {
+                        if (current is { } done && values is not null)
+                        {
+                            conflicts.Add(new VersionMigrationAnchorConflict(done.Doc, done.Table, done.RowKey, done.Column, values));
+                        }
+
+                        current = key;
+                        values = [];
+                    }
+
+                    values!.Add(new NonMonthConflictValue(reader.GetInt32(4), AnchorValueText(reader)));
+                }
+
+                if (current is { } last && values is not null)
+                {
+                    conflicts.Add(new VersionMigrationAnchorConflict(last.Doc, last.Table, last.RowKey, last.Column, values));
+                }
+            }
+
+            return new VersionMigrationAnchorFill(copies, conflictCells, conflicts);
+        }
+        finally
+        {
+            if (opened)
+            {
+                await db.Database.CloseConnectionAsync().ConfigureAwait(false);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Значення комірки текстом для переліку конфліктів (колонки 5..10 читача <see cref="AnchorFillSql"/>): текст як є,
+    /// число — інваріантно без хвостових нулів, дата — ISO 8601, логічне — <c>true</c>/<c>false</c>, запис довідника —
+    /// <c>#id</c>; одиниця (якщо є) — <c> [unit id]</c>.
+    /// </summary>
+    private static string? AnchorValueText(System.Data.Common.DbDataReader reader)
+    {
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        string? text = !reader.IsDBNull(5) ? reader.GetString(5)
+            : !reader.IsDBNull(6) ? reader.GetDecimal(6).ToString("G29", inv)
+            : !reader.IsDBNull(7) ? reader.GetDateTime(7).ToString("yyyy-MM-ddTHH:mm:ss.fff", inv)
+            : !reader.IsDBNull(8) ? (reader.GetBoolean(8) ? "true" : "false")
+            : !reader.IsDBNull(9) ? "#" + reader.GetInt32(9).ToString(inv)
+            : null;
+        return reader.IsDBNull(10) ? text : $"{text} [unit {reader.GetInt32(10).ToString(inv)}]";
+    }
+
     /// <summary>D-10: пари «аркуш, X → Y» з пунктів <c>Renamed</c> плану (код таблиці; шлях <c>SHEET.TABLE</c>).</summary>
     private static List<(string Sheet, string From, string To)> TableCodeRenames(VersionMigrationPlan plan)
         => plan.Items
@@ -538,6 +659,14 @@ public sealed partial class DocumentVersionMigrationStore(
             payload += "|mc" + JsonSerializer.Serialize(plan.MonthColumns
                 .OrderBy(c => c.SourceColumnDefId).ThenBy(c => c.MonthNumber)
                 .Select(c => new { c.SourceColumnDefId, c.MonthNumber, c.TargetColumnDefId, c.TargetTableDefId }));
+        }
+
+        // ✎ LAND-YEAR L3 (B-static): крок «немісячне → якір» і його колонки — теж лише коли є. ⚠ Кількість
+        // (NonMonthCopiedToAnchor) у відбиток НЕ входить, як і кількість значень Lookup: це дані, а не мапа; її звіряє сам
+        // крок у T2 з планом, перерахованим на старті (і при відновленні) під маркером, коли писарі вже заблоковані.
+        if (plan.AnchorColumns.Count > 0)
+        {
+            payload += "|ac" + JsonSerializer.Serialize(plan.AnchorColumns.Order());
         }
 
         return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(payload)))[..32];
@@ -961,6 +1090,39 @@ public sealed partial class DocumentVersionMigrationStore(
             if (hasNewRows)
             {
                 await BatchesAsync(VersionMigrationStages.NewRows, NewRowsBatchSql).ConfigureAwait(false);
+            }
+
+            // ✎ LAND-YEAR L3 (B-static): немісячний ввід, якого немає в якорі року, — з найпізнішого місяця, у ТІЙ САМІЙ
+            // транзакції перемикання версії (екземпляри й комірки вже на цільовій версії). Кількість мусить дорівнювати
+            // плану (сухому прогону): розбіжність — відкат T2 (ECR-CELL-0409), маркер лишається, повтор перераховує план.
+            if (plan.AnchorColumns.Count > 0)
+            {
+                await using var fill = db.Database.GetDbConnection().CreateCommand();
+                fill.Transaction = db.Database.CurrentTransaction!.GetDbTransaction();
+                fill.CommandTimeout = ApplyCommandTimeoutSeconds;
+                fill.CommandText = Prelude + AnchorFillSql;
+                var copied = new SqlParameter("@copied", System.Data.SqlDbType.BigInt) { Direction = System.Data.ParameterDirection.Output };
+                fill.Parameters.AddRange(Parameters(
+                    copied, BatchRows,
+                    new SqlParameter("@anchorColumns", System.Data.SqlDbType.NVarChar, -1) { Value = JsonSerializer.Serialize(plan.AnchorColumns) },
+                    new SqlParameter("@apply", true),
+                    // ⚠ Не `new SqlParameter(name, 0)`: літерал 0 обирає перевантаження (string, SqlDbType) — значення null.
+                    new SqlParameter("@maxConflicts", System.Data.SqlDbType.Int) { Value = 0 }));
+                await fill.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                var actual = copied.Value is long n ? n : -1;
+                if (actual != plan.NonMonthCopiedToAnchor)
+                {
+                    throw new Application.Errors.ConcurrencyConflictException(
+                        Domain.Errors.ErrorCodes.CellConflict,
+                        $"Перенос немісячних значень у якір року зачепив {actual} комірок замість очікуваних " +
+                        $"{plan.NonMonthCopiedToAnchor}: версію проєкту не перемкнуто, повторіть перенос.",
+                        new Dictionary<string, object?>
+                        {
+                            ["messageKey"] = "err.ECR-CELL-0409.concurrentChange",
+                            ["expected"] = plan.NonMonthCopiedToAnchor.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            ["actual"] = actual.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        });
+                }
             }
 
             await SingleAsync(VersionMigrationStages.Finish, FinishSql).ConfigureAwait(false);
@@ -2074,6 +2236,155 @@ public sealed partial class DocumentVersionMigrationStore(
         FROM   wf.ValidationResult v
         JOIN   @docs d ON d.Id = v.DocumentId
         WHERE  v.PeriodKey >= @fromPeriod;
+        """;
+
+    /// <summary>
+    /// ✎ LAND-YEAR L3 (B-static): немісячний ввід → якір року (після прелюдії). Якір — найменший ключ календаря проєкту
+    /// (<c>doc.Period</c>) у році (той самий, що в <c>MonthColumnRouter</c>/<c>PeriodCalendar.AnchorOf</c>), і лише якщо він у
+    /// межах переносу (<c>@periods</c>). Кандидат — введена (<c>IsCalculated = 0</c>, без позначки D-461) непорожня комірка
+    /// пізнішого місяця того самого року, чия колонка (після мапи) — у <c>@anchorColumns</c>, і для якої в якорі є рядок з
+    /// тим самим <c>RowKey</c> (той самий документ, копія аркуша й таблиця після мапи), а значення в якорі немає.
+    /// Групи «рядок якоря × колонка»: одне значення по всіх місяцях — копія НАЙПІЗНІШОГО; різні — конфлікт.
+    /// </summary>
+    /// <remarks>
+    /// <c>@apply = 0</c> (сухий прогін, план) — два набори: (копій, конфліктних комірок) і перелік значень перших
+    /// <c>@maxConflicts</c> конфліктних груп. <c>@apply = 1</c> (T2, після екземплярів і нових рядків) — запис у якір
+    /// (порожня комірка-заглушка оновлюється, відсутня вставляється, рядок якоря — <c>ModifiedAt = @now</c>), кількість —
+    /// у <c>@copied</c>; конфліктні групи не пишуться ніколи. ⚠ Рядок, якого в якорі немає, — поза кроком (дзеркальних
+    /// рядків перенос не створює: їх і місячні значення річний перегляд без рядка якоря однаково не показує).
+    /// </remarks>
+    private const string AnchorFillSql = """
+        DECLARE @anchorCols TABLE (n int PRIMARY KEY);
+        INSERT @anchorCols (n) SELECT DISTINCT CAST(value AS int) FROM OPENJSON(@anchorColumns);
+
+        DECLARE @anchors TABLE (Yr int PRIMARY KEY, PeriodKey int NOT NULL);
+        INSERT @anchors (Yr, PeriodKey)
+        SELECT p.PeriodKey / 100, MIN(p.PeriodKey)
+        FROM   doc.Period p
+        WHERE  p.ProjectId = @projectId
+        GROUP BY p.PeriodKey / 100;
+        DELETE a FROM @anchors a WHERE NOT EXISTS (SELECT 1 FROM @periods s WHERE s.PeriodKey = a.PeriodKey);
+
+        DECLARE @anchorInst TABLE (DocumentId bigint NOT NULL, CopyId bigint NOT NULL, TableDefId int NOT NULL,
+                                   PeriodKey int NOT NULL, Id bigint NOT NULL);
+        INSERT @anchorInst (DocumentId, CopyId, TableDefId, PeriodKey, Id)
+        SELECT ti.DocumentId, ISNULL(ti.SheetCopyId, 0), COALESCE(tm.n, ti.TableDefId), ti.PeriodKey, ti.Id
+        FROM   @anchors a
+        JOIN   @instances i        ON i.PeriodKey = a.PeriodKey
+        JOIN   doc.TableInstance ti ON ti.PeriodKey = i.PeriodKey AND ti.Id = i.Id
+        LEFT JOIN @tableMap tm     ON tm.o = ti.TableDefId;
+
+        DECLARE @cand TABLE (
+            DocumentId bigint NOT NULL, TableDefId int NOT NULL, RowKey nvarchar(100) NOT NULL, ColumnDefId int NOT NULL,
+            PeriodKey int NOT NULL, AnchorPeriod int NOT NULL, AnchorRowId bigint NOT NULL, H binary(32) NOT NULL,
+            ValueString nvarchar(1000) NULL, ValueNumeric decimal(34, 16) NULL, ValueDate datetime2(3) NULL, ValueBool bit NULL,
+            ValueRegistryEntryId int NULL, ValueUnitId int NULL);
+        INSERT @cand (DocumentId, TableDefId, RowKey, ColumnDefId, PeriodKey, AnchorPeriod, AnchorRowId, H,
+                      ValueString, ValueNumeric, ValueDate, ValueBool, ValueRegistryEntryId, ValueUnitId)
+        SELECT ti.DocumentId, k.Tbl, r.RowKey, k.Col, cv.PeriodKey, a.PeriodKey, ar.Id,
+               CAST(HASHBYTES('SHA2_256', CONCAT(
+                   N's', LEN(cv.ValueString), N':', cv.ValueString,
+                   N'|n', CONVERT(nvarchar(64), cv.ValueNumeric),
+                   N'|d', CONVERT(nvarchar(30), cv.ValueDate, 126),
+                   N'|b', CONVERT(nvarchar(1), cv.ValueBool),
+                   N'|r', cv.ValueRegistryEntryId,
+                   N'|u', cv.ValueUnitId)) AS binary(32)),
+               cv.ValueString, cv.ValueNumeric, cv.ValueDate, cv.ValueBool, cv.ValueRegistryEntryId, cv.ValueUnitId
+        FROM   @anchors a
+        JOIN   @instances i         ON i.PeriodKey > a.PeriodKey AND i.PeriodKey <= a.Yr * 100 + 12
+        JOIN   doc.TableInstance ti ON ti.PeriodKey = i.PeriodKey AND ti.Id = i.Id
+        JOIN   doc.TableRow r       ON r.PeriodKey = i.PeriodKey AND r.TableInstanceId = i.Id
+        JOIN   doc.CellValue cv     ON cv.PeriodKey = r.PeriodKey AND cv.TableRowId = r.Id
+        LEFT JOIN @tableMap tm      ON tm.o = ti.TableDefId
+        LEFT JOIN @columnMap cm     ON cm.o = cv.ColumnDefId
+        CROSS APPLY (SELECT COALESCE(tm.n, ti.TableDefId) AS Tbl, COALESCE(cm.n, cv.ColumnDefId) AS Col) k
+        JOIN   @anchorCols ac       ON ac.n = k.Col
+        JOIN   @anchorInst ai       ON ai.PeriodKey = a.PeriodKey AND ai.DocumentId = ti.DocumentId
+                                   AND ai.CopyId = ISNULL(ti.SheetCopyId, 0) AND ai.TableDefId = k.Tbl
+        JOIN   doc.TableRow ar      ON ar.PeriodKey = ai.PeriodKey AND ar.TableInstanceId = ai.Id
+                                   AND ar.RowKey = r.RowKey AND ar.IsDeleted = 0
+        WHERE  r.IsDeleted = 0
+          AND  cv.IsEmpty = 0
+          AND  cv.IsCalculated = 0
+          AND  NOT EXISTS (SELECT 1 FROM doc.CellFormulaOverride fo
+                           WHERE fo.PeriodKey = cv.PeriodKey AND fo.TableRowId = cv.TableRowId AND fo.ColumnDefId = cv.ColumnDefId)
+          -- Значення якоря (на цільовій колонці або ще на вихідній, до важкої частини) — недоторканне.
+          AND  NOT EXISTS (SELECT 1 FROM doc.CellValue av
+                           WHERE av.PeriodKey = ar.PeriodKey AND av.TableRowId = ar.Id AND av.IsEmpty = 0
+                             AND (av.ColumnDefId = k.Col
+                                  OR EXISTS (SELECT 1 FROM @columnMap x WHERE x.n = k.Col AND x.o = av.ColumnDefId)))
+        OPTION (RECOMPILE);
+
+        DECLARE @groups TABLE (AnchorPeriod int NOT NULL, AnchorRowId bigint NOT NULL, ColumnDefId int NOT NULL, Kinds int NOT NULL,
+                               PRIMARY KEY (AnchorPeriod, AnchorRowId, ColumnDefId));
+        INSERT @groups (AnchorPeriod, AnchorRowId, ColumnDefId, Kinds)
+        SELECT AnchorPeriod, AnchorRowId, ColumnDefId, COUNT(DISTINCT H)
+        FROM   @cand
+        GROUP BY AnchorPeriod, AnchorRowId, ColumnDefId;
+
+        SET @copied = 0;
+        IF @apply = 0
+        BEGIN
+            SELECT CAST(ISNULL(SUM(CASE WHEN Kinds = 1 THEN 1 ELSE 0 END), 0) AS bigint) AS Copies,
+                   CAST(ISNULL(SUM(CASE WHEN Kinds > 1 THEN 1 ELSE 0 END), 0) AS bigint) AS Conflicts
+            FROM   @groups;
+
+            SELECT c.DocumentId, c.TableDefId, c.RowKey, c.ColumnDefId, c.PeriodKey,
+                   c.ValueString, c.ValueNumeric, c.ValueDate, c.ValueBool, c.ValueRegistryEntryId, c.ValueUnitId
+            FROM   (SELECT TOP (@maxConflicts) AnchorPeriod, AnchorRowId, ColumnDefId
+                    FROM   @groups
+                    WHERE  Kinds > 1
+                    ORDER BY AnchorPeriod, AnchorRowId, ColumnDefId) g
+            JOIN   @cand c ON c.AnchorPeriod = g.AnchorPeriod AND c.AnchorRowId = g.AnchorRowId AND c.ColumnDefId = g.ColumnDefId
+            ORDER BY c.DocumentId, c.TableDefId, c.RowKey, c.ColumnDefId, c.AnchorPeriod, c.PeriodKey;
+        END
+        ELSE
+        BEGIN
+            DECLARE @pick TABLE (AnchorPeriod int NOT NULL, AnchorRowId bigint NOT NULL, ColumnDefId int NOT NULL, TableDefId int NOT NULL,
+                                 ValueString nvarchar(1000) NULL, ValueNumeric decimal(34, 16) NULL, ValueDate datetime2(3) NULL,
+                                 ValueBool bit NULL, ValueRegistryEntryId int NULL, ValueUnitId int NULL,
+                                 PRIMARY KEY (AnchorPeriod, AnchorRowId, ColumnDefId));
+            INSERT @pick (AnchorPeriod, AnchorRowId, ColumnDefId, TableDefId,
+                          ValueString, ValueNumeric, ValueDate, ValueBool, ValueRegistryEntryId, ValueUnitId)
+            SELECT x.AnchorPeriod, x.AnchorRowId, x.ColumnDefId, x.TableDefId,
+                   x.ValueString, x.ValueNumeric, x.ValueDate, x.ValueBool, x.ValueRegistryEntryId, x.ValueUnitId
+            FROM   (SELECT c.AnchorPeriod, c.AnchorRowId, c.ColumnDefId, c.TableDefId,
+                           c.ValueString, c.ValueNumeric, c.ValueDate, c.ValueBool, c.ValueRegistryEntryId, c.ValueUnitId,
+                           ROW_NUMBER() OVER (PARTITION BY c.AnchorPeriod, c.AnchorRowId, c.ColumnDefId ORDER BY c.PeriodKey DESC) AS Latest
+                    FROM   @cand c) x
+            JOIN   @groups g ON g.AnchorPeriod = x.AnchorPeriod AND g.AnchorRowId = x.AnchorRowId
+                            AND g.ColumnDefId = x.ColumnDefId AND g.Kinds = 1
+            WHERE  x.Latest = 1;
+
+            DECLARE @n bigint = 0;
+
+            -- Порожня комірка-заглушка якоря (IsEmpty = 1) — оновлюється; значення якоря (IsEmpty = 0) сюди не потрапляє.
+            UPDATE av
+            SET    av.ValueString = p.ValueString, av.ValueNumeric = p.ValueNumeric, av.ValueDate = p.ValueDate,
+                   av.ValueBool = p.ValueBool, av.ValueRegistryEntryId = p.ValueRegistryEntryId, av.ValueUnitId = p.ValueUnitId,
+                   av.TableDefId = p.TableDefId, av.IsCalculated = 0, av.IsEmpty = 0
+            FROM   doc.CellValue av
+            JOIN   @pick p ON av.PeriodKey = p.AnchorPeriod AND av.TableRowId = p.AnchorRowId AND av.ColumnDefId = p.ColumnDefId
+            WHERE  av.IsEmpty = 1;
+            SET @n += @@ROWCOUNT;
+
+            INSERT doc.CellValue (PeriodKey, TableRowId, ColumnDefId, TableDefId, ValueString, ValueNumeric, ValueDate,
+                                  ValueBool, ValueRegistryEntryId, ValueUnitId, IsCalculated, IsEmpty)
+            SELECT p.AnchorPeriod, p.AnchorRowId, p.ColumnDefId, p.TableDefId, p.ValueString, p.ValueNumeric, p.ValueDate,
+                   p.ValueBool, p.ValueRegistryEntryId, p.ValueUnitId, 0, 0
+            FROM   @pick p
+            WHERE  NOT EXISTS (SELECT 1 FROM doc.CellValue av
+                               WHERE av.PeriodKey = p.AnchorPeriod AND av.TableRowId = p.AnchorRowId AND av.ColumnDefId = p.ColumnDefId);
+            SET @n += @@ROWCOUNT;
+
+            -- Рядок якоря змінився: ModifiedAt піднімає RowVersion (оптимістичне блокування бачить зміну).
+            UPDATE r
+            SET    r.ModifiedAt = @now
+            FROM   doc.TableRow r
+            JOIN   (SELECT DISTINCT AnchorPeriod, AnchorRowId FROM @pick) p ON r.PeriodKey = p.AnchorPeriod AND r.Id = p.AnchorRowId;
+
+            SET @copied = @n;
+        END
         """;
 
     /// <summary>Екземпляри таблиць (їх мало: документи × таблиці × періоди) — одним оператором.</summary>
