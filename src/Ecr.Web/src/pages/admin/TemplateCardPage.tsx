@@ -9,6 +9,7 @@ import {
   dependentWorkCount,
   renameTemplate,
   restoreTemplate,
+  setTemplateDocumentPolicy,
 } from '@/features/templates/templateApi';
 import { templateCardKey, useTemplateCard } from '@/features/templates/templateCardQuery';
 import { toTemplateListRow } from '@/features/templates/templateListModel';
@@ -134,6 +135,19 @@ export function TemplateCardPage(): JSX.Element {
     },
   });
 
+  /*
+   * B151: «один документ на проєкт». Відмову (`409 ECR-TMPL-0409 singleDocumentDuplicates` — у якомусь проєкті
+   * документів уже кілька) несе тост із текстом сервера; прапорець тоді не змінено, картка лишається як була.
+   */
+  const documentPolicy = useMutation({
+    mutationFn: (single: boolean) => setTemplateDocumentPolicy(templateId, single),
+    onSuccess: async (updated) => {
+      await applyCard(updated);
+      showDone(t('templates.documentPolicySaved'));
+    },
+    onError: showApiError,
+  });
+
   const rename = useMutation({
     mutationFn: (nameL10n: LocalizedValue) => renameTemplate(templateId, nameL10n),
     onSuccess: async (updated) => {
@@ -214,6 +228,19 @@ export function TemplateCardPage(): JSX.Element {
             setDialog('rename');
           },
         },
+        data?.singleDocumentPerProject === true
+          ? {
+              label: t('templates.allowManyDocuments'),
+              onClick: () => {
+                documentPolicy.mutate(false);
+              },
+            }
+          : {
+              label: t('templates.allowOneDocument'),
+              onClick: () => {
+                documentPolicy.mutate(true);
+              },
+            },
         isActive
           ? {
               label: t('templates.archive'),
@@ -291,6 +318,14 @@ export function TemplateCardPage(): JSX.Element {
                     projects: loaded.dependents.projects,
                     documents: loaded.dependents.documents,
                   }),
+                },
+                {
+                  // B151: скільки документів шаблону може бути в одному проєкті (= рік проєкту).
+                  label: t('templates.documentsPerProject'),
+                  value: loaded.singleDocumentPerProject
+                    ? t('templates.documentsPerProjectOne')
+                    : t('templates.documentsPerProjectMany'),
+                  hint: t('templates.documentsPerProjectHint'),
                 },
               ]}
             />
