@@ -55,21 +55,32 @@ public sealed partial class AdminDuplicateRequestHttpTests
         Assert.True(repeated.Status == HttpStatusCode.OK, $"{repeated}\n{App.ErrorsText}");
         AssertReport(repeated, applied: false, updated: 0, unchanged: 1);
 
-        // Одночасно.
-        var e2 = await NewEntryAsync("E2");
-        var replies = await RaceAsync(
-            "entries-import",
-            meet => ImportAsync(first, import, "E2", meet),
-            meet => ImportAsync(second, import, "E2", meet)).ConfigureAwait(true);
+        // Одночасно. ⚠ Вікно гонки — від читання значень до коміту, і зустріч на вході конвеєра не завжди його перекриває
+        // (без фіксу проба червоніла не в кожному прогоні): кілька спроб, кожна на своєму записі, і кожна мусить дати ту саму
+        // відповідь, що й послідовно.
+        for (var attempt = 1; attempt <= RaceAttempts; attempt++)
+        {
+            var entryCode = $"R{attempt}";
+            var entryId = await NewEntryAsync(entryCode);
+            var replies = await RaceAsync(
+                $"entries-import#{attempt}",
+                meet => ImportAsync(first, import, entryCode, meet),
+                meet => ImportAsync(second, import, entryCode, meet)).ConfigureAwait(true);
 
-        AssertNoServerError(replies);
-        Assert.True(replies.All(r => r.Status == HttpStatusCode.OK), $"очікувались обидва 200:\n{replies[0]}\n{replies[1]}\n{App.ErrorsText}");
-        AssertReport(Assert.Single(replies, r => r.Json.GetProperty("applied").GetBoolean()), applied: true, updated: 1, unchanged: 0);
-        AssertReport(Assert.Single(replies, r => !r.Json.GetProperty("applied").GetBoolean()), applied: false, updated: 0, unchanged: 1);
+            AssertNoServerError(replies);
+            Assert.True(
+                replies.All(r => r.Status == HttpStatusCode.OK),
+                $"спроба {attempt}: очікувались обидва 200:\n{replies[0]}\n{replies[1]}\n{App.ErrorsText}");
+            AssertReport(Assert.Single(replies, r => r.Json.GetProperty("applied").GetBoolean()), applied: true, updated: 1, unchanged: 0);
+            AssertReport(Assert.Single(replies, r => !r.Json.GetProperty("applied").GetBoolean()), applied: false, updated: 0, unchanged: 1);
 
-        await using var db = Db();
-        Assert.Equal(1, await db.RegistryValues.CountAsync(v => v.RegistryEntryId == e2).ConfigureAwait(true));
+            await using var db = Db();
+            Assert.Equal(1, await db.RegistryValues.CountAsync(v => v.RegistryEntryId == entryId).ConfigureAwait(true));
+        }
     }
+
+    /// <summary>Скільки разів e4 зіштовхує два імпорти (кожен раз — новий запис).</summary>
+    private const int RaceAttempts = 6;
 
     private static void AssertReport(Reply reply, bool applied, int updated, int unchanged)
     {
