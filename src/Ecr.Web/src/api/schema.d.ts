@@ -32926,6 +32926,13 @@ export interface components {
              *     змінює розкладку «копія на місяць» → «рік, місяці в колонках».
              */
             monthTransferredValues?: null | number;
+            /**
+             * Format: int64
+             * @description ✎ LAND-YEAR L3 (B-static): скільки рядків створить (створив) перенос у якорі року, бо якорю бракувало рядка (а то й
+             *     екземпляра таблиці) для немісячного значення: рядок береться з найпізнішого місяця (`RowKey`, опис рядка,
+             *     порядок). `null` — перенос не є переходом на рік.
+             */
+            nonMonthAnchorRowsCreated?: null | number;
             /** @description ✎ LAND-YEAR L3 (B-static): комірки немісячних колонок, де якір порожній, а місяці року мають РІЗНІ значення —
              *     причина відмови `nonMonthConflict` (система не вибирає мовчки). Не більше `MaxItems`; `null` — таких немає. */
             nonMonthConflicts?: null | components["schemas"]["NonMonthConflictItem"][];

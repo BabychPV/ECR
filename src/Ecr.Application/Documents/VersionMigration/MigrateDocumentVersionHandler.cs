@@ -142,6 +142,11 @@ namespace Ecr.Application.Documents.VersionMigration;
 /// причина відмови <c>nonMonthConflict</c> (система не вибирає мовчки). Не більше <c>MaxItems</c>; <c>null</c> — таких немає.
 /// </param>
 /// <param name="NonMonthConflictsTruncated">Перелік <paramref name="NonMonthConflicts"/> обрізано стелею; <c>null</c> — переліку немає.</param>
+/// <param name="NonMonthAnchorRowsCreated">
+/// ✎ LAND-YEAR L3 (B-static): скільки рядків створить (створив) перенос у якорі року, бо якорю бракувало рядка (а то й
+/// екземпляра таблиці) для немісячного значення: рядок береться з найпізнішого місяця (<c>RowKey</c>, опис рядка,
+/// порядок). <c>null</c> — перенос не є переходом на рік.
+/// </param>
 public sealed record DocumentVersionMigrationDto(
     long DocumentId,
     int ProjectId,
@@ -190,7 +195,8 @@ public sealed record DocumentVersionMigrationDto(
     IReadOnlyList<string>? MonthColumnsUnmapped = null,
     long? NonMonthCopiedToAnchor = null,
     IReadOnlyList<NonMonthConflictItem>? NonMonthConflicts = null,
-    bool? NonMonthConflictsTruncated = null);
+    bool? NonMonthConflictsTruncated = null,
+    long? NonMonthAnchorRowsCreated = null);
 
 /// <summary>
 /// ✎ LAND-YEAR L3 (B-static): комірка немісячної колонки, у якої якір року порожній, а місяці року не згодні
@@ -1205,6 +1211,8 @@ public sealed class MigrateDocumentVersionHandler(
 
                             // ✎ LAND-YEAR L3 (B-static): скільки немісячних значень якір року дістав з найпізнішого місяця.
                             nonMonthCopiedToAnchor = planned.YearTransition ? plan.NonMonthCopiedToAnchor : (long?)null,
+                            nonMonthAnchorRowsCreated = planned.YearTransition ? plan.NonMonthAnchorRowsCreated : (long?)null,
+                            nonMonthAnchorInstancesCreated = planned.YearTransition ? plan.NonMonthAnchorInstancesCreated : (long?)null,
                         }),
                         profile.UserId, currentUser.CorrelationId),
                     innerCt).ConfigureAwait(false);
@@ -1619,7 +1627,27 @@ public sealed class MigrateDocumentVersionHandler(
         // нові `SheetDefId`, значення переїжджають за кодами, перерахунок Submitted/Approved не пише.
         // ⚠ Аркуш, якого немає серед живих вихідної версії (не потрапив у `plan.Sheets`), `WorkflowSql` ВИДАЛИВ би
         // разом зі станом, тому рахується зачепленим.
-        var locked = ClassifyLocked(scope, plan, from);
+        // ✎ LAND-YEAR L3 (B-static, рішення координатора): немісячна комірка без значення в якорі дістає значення
+        // НАЙПІЗНІШОГО місяця року (тією самою транзакцією перемикання версії; бракує екземпляра таблиці чи рядків у
+        // якорі — вони створюються); місяці не згодні — відмова з переліком, система мовчки не вибирає; значення якоря не
+        // чіпається ніколи. Рахується ДО LP-32: запис у поданий/затверджений аркуш якоря — це зачеплений аркуш.
+        var anchorFill = VersionMigrationAnchorFill.None;
+        if (yearTransition && plan.AnchorColumns.Count > 0)
+        {
+            anchorFill = await store.ReadAnchorFillAsync(projectId, plan, MaxItems, ct).ConfigureAwait(false);
+            plan = plan with
+            {
+                NonMonthCopiedToAnchor = anchorFill.Copies,
+                NonMonthAnchorRowsCreated = anchorFill.RowsCreated,
+                NonMonthAnchorInstancesCreated = anchorFill.InstancesCreated,
+            };
+            if (anchorFill.ConflictCells > 0)
+            {
+                refusals.Add("nonMonthConflict");
+            }
+        }
+
+        var locked = ClassifyLocked(scope, plan, from, AnchorWrittenSheets(anchorFill, plan, to));
         if (locked.Affected > 0)
         {
             refusals.Add("sheetsLocked");
@@ -1633,20 +1661,6 @@ public sealed class MigrateDocumentVersionHandler(
         if (lockedOverrides.Marks > 0)
         {
             refusals.Add("lockedOverridesLost");
-        }
-
-        // ✎ LAND-YEAR L3 (B-static, рішення координатора): немісячна комірка без значення в якорі дістає значення
-        // НАЙПІЗНІШОГО місяця року (тією самою транзакцією перемикання версії); місяці не згодні — відмова з переліком,
-        // система мовчки не вибирає; значення якоря не чіпається ніколи.
-        var anchorFill = VersionMigrationAnchorFill.None;
-        if (yearTransition && plan.AnchorColumns.Count > 0)
-        {
-            anchorFill = await store.ReadAnchorFillAsync(projectId, plan, MaxItems, ct).ConfigureAwait(false);
-            plan = plan with { NonMonthCopiedToAnchor = anchorFill.Copies };
-            if (anchorFill.ConflictCells > 0)
-            {
-                refusals.Add("nonMonthConflict");
-            }
         }
 
         // ⛔ Шапка закритого документа (є подані/затверджені аркуші) мігрується лише з явною згодою
@@ -1831,7 +1845,8 @@ public sealed class MigrateDocumentVersionHandler(
             MonthColumnsUnmapped: plan.MonthColumnsUnmapped.Count == 0 ? null : [.. plan.MonthColumnsUnmapped.Take(MaxItems)],
             NonMonthCopiedToAnchor: yearTransition ? anchorFill.Copies : null,
             NonMonthConflicts: anchorFill.ConflictCells == 0 ? null : AnchorConflictItems(anchorFill, to),
-            NonMonthConflictsTruncated: anchorFill.ConflictCells == 0 ? null : anchorFill.ConflictCells > anchorFill.Conflicts.Count);
+            NonMonthConflictsTruncated: anchorFill.ConflictCells == 0 ? null : anchorFill.ConflictCells > anchorFill.Conflicts.Count,
+            NonMonthAnchorRowsCreated: yearTransition ? anchorFill.RowsCreated : null);
 
         return new PlannedMigration(
             dto, plan, foreignKeys, extendedPlan.Remap with { CollectionMappingIds = collectionPlan.RemapIds }, lookup.Rows,
@@ -1973,8 +1988,40 @@ public sealed class MigrateDocumentVersionHandler(
     private sealed record LockedClassification(
         int Carried, int Affected, IReadOnlyList<LockedSheetItem> Items, bool Truncated);
 
+    /// <summary>
+    /// ✎ LAND-YEAR L3 (B-static): пари «документ × аркуш ВИХІДНОЇ версії × період якоря», куди пише крок якоря (таблиця
+    /// цільової версії → її аркуш → аркуш-джерело за мапою аркушів плану). Подана/затверджена така пара — зачеплена (LP-32).
+    /// </summary>
+    private static HashSet<(long DocumentId, int SheetDefId, int PeriodKey)> AnchorWrittenSheets(
+        VersionMigrationAnchorFill fill, VersionMigrationPlan plan, TemplateVersionSnapshot to)
+    {
+        var result = new HashSet<(long, int, int)>();
+        if (fill.Targets is not { Count: > 0 } targets)
+        {
+            return result;
+        }
+
+        var targetSheetOfTable = to.Sheets.SelectMany(s => s.Tables.Select(t => (t.Id, SheetId: s.Id)))
+            .ToDictionary(x => x.Id, x => x.SheetId);
+        var sourceSheetsOf = plan.Sheets.GroupBy(p => p.Value).ToDictionary(g => g.Key, g => g.Select(p => p.Key).ToList());
+        foreach (var target in targets)
+        {
+            if (targetSheetOfTable.TryGetValue(target.TableDefId, out var sheet)
+                && sourceSheetsOf.TryGetValue(sheet, out var sources))
+            {
+                foreach (var source in sources)
+                {
+                    result.Add((target.DocumentId, source, target.PeriodKey));
+                }
+            }
+        }
+
+        return result;
+    }
+
     private static LockedClassification ClassifyLocked(
-        VersionMigrationScope scope, VersionMigrationPlan plan, TemplateVersionSnapshot from)
+        VersionMigrationScope scope, VersionMigrationPlan plan, TemplateVersionSnapshot from,
+        HashSet<(long DocumentId, int SheetDefId, int PeriodKey)>? anchorWritten = null)
     {
         if (scope.LockedSheets == 0)
         {
@@ -1996,7 +2043,8 @@ public sealed class MigrateDocumentVersionHandler(
                 codes.GetValueOrDefault(l.SheetDefId) ?? string.Create(CultureInfo.InvariantCulture, $"#{l.SheetDefId}"),
                 l.PeriodKey,
                 l.Status,
-                Affected: !plan.Sheets.ContainsKey(l.SheetDefId) || touched.Contains(l.SheetDefId)))
+                Affected: !plan.Sheets.ContainsKey(l.SheetDefId) || touched.Contains(l.SheetDefId)
+                          || anchorWritten?.Contains((l.DocumentId, l.SheetDefId, l.PeriodKey)) == true))
             .ToList();
 
         var affected = items.Count(i => i.Affected);

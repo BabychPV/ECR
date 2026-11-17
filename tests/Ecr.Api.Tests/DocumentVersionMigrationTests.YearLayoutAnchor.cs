@@ -48,6 +48,7 @@ public sealed partial class DocumentVersionMigrationTests
             var report = JsonDocument.Parse(dryBody).RootElement;
             Assert.True(report.GetProperty("canApply").GetBoolean(), dryBody);
             Assert.Equal(2, report.GetProperty("nonMonthCopiedToAnchor").GetInt64());
+            Assert.Equal(0, report.GetProperty("nonMonthAnchorRowsCreated").GetInt64());   // обидва рядки в якорі вже є
             Assert.Equal(JsonValueKind.Null, report.GetProperty("nonMonthConflicts").ValueKind);
 
             var applied = await PostYearAsync(client, y, dryRun: false).ConfigureAwait(true);
@@ -177,6 +178,91 @@ public sealed partial class DocumentVersionMigrationTests
             Assert.Equal(7m, (await db.CellValues.AsNoTracking()
                 .SingleAsync(c => c.PeriodKeyValue == YearAnchor && c.TableRowId == anchorRow && c.ColumnDefId == y.TargetC2)
                 .ConfigureAwait(true)).ValueNumeric);
+        }
+        finally
+        {
+            await CleanupYearAsync(y).ConfigureAwait(true);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-474")]
+    [Trait("Task", "LAND-YEAR-L3-STATIC")]
+    public async Task Якір_без_екземпляра_таблиці_дістає_екземпляр_рядки_й_значення_найпізнішого_місяця()
+    {
+        // Як Land doc 96: T8_00 немає в 202601..202608, є лише в пізніших місяцях з тими самими RowKey.
+        // Мутаційний доказ: у AnchorFillSql вставка рядків якоря `WHERE NOT EXISTS (SELECT 1 FROM doc.TableRow y ...)` →
+        // `WHERE 1 = 0 AND NOT EXISTS (...)` — T2 відкочується (рядків 0 замість 2, ECR-CELL-0409), тест червоний.
+        var y = await ArrangeYearAsync(targetMonths: 12).ConfigureAwait(true);
+        try
+        {
+            await using (var db = y.Builder.CreateContext())
+            {
+                var instanceId = y.Doc.TableInstanceId;
+                await db.Database.ExecuteSqlInterpolatedAsync($"""
+                    DELETE cv FROM doc.CellValue cv JOIN doc.TableRow r ON r.PeriodKey = cv.PeriodKey AND r.Id = cv.TableRowId
+                     WHERE r.PeriodKey = {YearAnchor} AND r.TableInstanceId = {instanceId};
+                    DELETE cs FROM doc.CellStyle cs JOIN doc.TableRow r ON r.PeriodKey = cs.PeriodKey AND r.Id = cs.TableRowId
+                     WHERE r.PeriodKey = {YearAnchor} AND r.TableInstanceId = {instanceId};
+                    DELETE fo FROM doc.CellFormulaOverride fo JOIN doc.TableRow r ON r.PeriodKey = fo.PeriodKey AND r.Id = fo.TableRowId
+                     WHERE r.PeriodKey = {YearAnchor} AND r.TableInstanceId = {instanceId};
+                    DELETE FROM doc.TableRow WHERE PeriodKey = {YearAnchor} AND TableInstanceId = {instanceId};
+                    DELETE FROM doc.TableInstance WHERE PeriodKey = {YearAnchor} AND Id = {instanceId};
+                    """).ConfigureAwait(true);
+            }
+
+            await PutC2Async(y, 209910, rowIndex: 0, 55m).ConfigureAwait(true);   // травень 55 (сценарій) + жовтень 55
+
+            using var app = CreateYearApp();
+            using var client = await SignedInAsync(app, y.UserName).ConfigureAwait(true);
+
+            var dry = await PostYearAsync(client, y, dryRun: true).ConfigureAwait(true);
+            var dryBody = await dry.Content.ReadAsStringAsync().ConfigureAwait(true);
+            Assert.True(dry.StatusCode == HttpStatusCode.OK, $"{dry.StatusCode}: {dryBody} {app.ErrorsText}");
+            var report = JsonDocument.Parse(dryBody).RootElement;
+            Assert.True(report.GetProperty("canApply").GetBoolean(), dryBody);
+            Assert.Equal(1, report.GetProperty("nonMonthCopiedToAnchor").GetInt64());
+            Assert.Equal(2, report.GetProperty("nonMonthAnchorRowsCreated").GetInt64());   // обидва рядки таблиці, не лише заповнений
+
+            var applied = await PostYearAsync(client, y, dryRun: false).ConfigureAwait(true);
+            var body = await applied.Content.ReadAsStringAsync().ConfigureAwait(true);
+            Assert.True(applied.StatusCode == HttpStatusCode.OK, $"{applied.StatusCode}: {body} {app.ErrorsText}");
+            Assert.Equal(y.TargetVersionId, await YearProjectVersionAsync(y).ConfigureAwait(true));
+
+            long anchorInstance;
+            await using (var db = y.Builder.CreateContext())
+            {
+                anchorInstance = await db.TableInstances.AsNoTracking()
+                    .Where(t => t.PeriodKeyValue == YearAnchor && t.DocumentId == y.Doc.DocumentId && t.TableDefId == y.TargetTableDefId)
+                    .Select(t => t.Id).SingleAsync().ConfigureAwait(true);
+                var anchorRows = await db.TableRows.AsNoTracking()
+                    .Where(r => r.PeriodKeyValue == YearAnchor && r.TableInstanceId == anchorInstance && !r.IsDeleted)
+                    .Select(r => new { r.Id, r.RowKeyValue, r.RowDefId, r.Ordinal }).ToListAsync().ConfigureAwait(true);
+                var monthRows = await db.TableRows.AsNoTracking()
+                    .Where(r => r.PeriodKeyValue == 209911 && r.TableInstanceId == db.TableRows
+                        .Where(x => x.PeriodKeyValue == 209911 && x.Id == y.Row1ByPeriod[209911]).Select(x => x.TableInstanceId).First())
+                    .Select(r => new { r.RowKeyValue, r.RowDefId, r.Ordinal }).ToListAsync().ConfigureAwait(true);
+                Assert.Equal(
+                    monthRows.OrderBy(r => r.RowKeyValue, StringComparer.Ordinal).Select(r => (r.RowKeyValue, r.RowDefId, r.Ordinal)).ToList(),
+                    anchorRows.OrderBy(r => r.RowKeyValue, StringComparer.Ordinal).Select(r => (r.RowKeyValue, r.RowDefId, r.Ordinal)).ToList());
+
+                var row1 = anchorRows.Single(r => r.RowKeyValue == y.Row1Key).Id;
+                Assert.Equal(55m, (await db.CellValues.AsNoTracking()
+                    .SingleAsync(c => c.PeriodKeyValue == YearAnchor && c.TableRowId == row1 && c.ColumnDefId == y.TargetC2)
+                    .ConfigureAwait(true)).ValueNumeric);
+            }
+
+            // Справжній шлях читання річної версії: зріз нового екземпляра якоря показує C2 = 55.
+            await Task.Delay(TimeSpan.FromSeconds(2.5)).ConfigureAwait(true);   // кеш маркерів міграції
+            using var response = await client.GetAsync(new Uri(
+                $"/api/v1/documents/{y.Doc.DocumentId}/tables/{anchorInstance}", UriKind.Relative)).ConfigureAwait(true);
+            var text = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
+            Assert.True(response.IsSuccessStatusCode, $"{(int)response.StatusCode}\n{text}\n{app.ErrorsText}");
+            var cells = JsonDocument.Parse(text).RootElement.GetProperty("rows").EnumerateArray()
+                .First(r => r.GetProperty("rowKey").GetString() == y.Row1Key).GetProperty("cells");
+            Assert.Equal(55m, decimal.Parse(cells.GetProperty(y.C2Code).GetString()!, CultureInfo.InvariantCulture));
         }
         finally
         {

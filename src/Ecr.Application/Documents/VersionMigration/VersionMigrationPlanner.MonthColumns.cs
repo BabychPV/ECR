@@ -58,6 +58,15 @@ public sealed partial record VersionMigrationPlan
     /// місяці згодні). Сховище при застосуванні звіряє фактичну кількість із цією (розбіжність — відкат T2, ECR-CELL-0409).
     /// </summary>
     public long NonMonthCopiedToAnchor { get; init; }
+
+    /// <summary>
+    /// ✎ LAND-YEAR L3 (B-static): скільки рядків створить (або відновить знятими) крок якоря в якорі року — рядки
+    /// пізніших місяців, яких якорю бракує для копії (Land doc 96: T8_00 у 202601 не має ні рядків, ні екземпляра).
+    /// </summary>
+    public long NonMonthAnchorRowsCreated { get; init; }
+
+    /// <summary>✎ LAND-YEAR L3 (B-static): скільки екземплярів таблиць створить крок якоря в якорі року.</summary>
+    public long NonMonthAnchorInstancesCreated { get; init; }
 }
 
 /// <summary>
@@ -66,12 +75,22 @@ public sealed partial record VersionMigrationPlan
 /// <param name="Copies">Скільки комірок якір дістане з найпізнішого місяця (порожній якір, місяці згодні).</param>
 /// <param name="ConflictCells">Скільки комірок мають у місяцях РІЗНІ значення при порожньому якорі (причина <c>nonMonthConflict</c>).</param>
 /// <param name="Conflicts">Ці комірки зі значеннями по місяцях — не більше стелі запиту.</param>
+/// <param name="RowsCreated">Скільки рядків крок створить (відновить) у якорі.</param>
+/// <param name="InstancesCreated">Скільки екземплярів таблиць крок створить у якорі.</param>
+/// <param name="Targets">Куди крок пише: документ × таблиця цільової версії × період якоря (перевірка поданих аркушів).</param>
 public sealed record VersionMigrationAnchorFill(
-    long Copies, long ConflictCells, IReadOnlyList<VersionMigrationAnchorConflict> Conflicts)
+    long Copies, long ConflictCells, IReadOnlyList<VersionMigrationAnchorConflict> Conflicts,
+    long RowsCreated = 0, long InstancesCreated = 0, IReadOnlyList<VersionMigrationAnchorTarget>? Targets = null)
 {
     /// <summary>Кроку немає (не перехід на рік).</summary>
     public static VersionMigrationAnchorFill None { get; } = new(0, 0, []);
 }
+
+/// <summary>Пара «документ × таблиця цільової версії × період якоря», куди пише крок якоря.</summary>
+/// <param name="DocumentId">Документ.</param>
+/// <param name="TableDefId">Таблиця цільової версії.</param>
+/// <param name="PeriodKey">Період якоря.</param>
+public sealed record VersionMigrationAnchorTarget(long DocumentId, int TableDefId, int PeriodKey);
 
 /// <summary>Комірка немісячної колонки, у якої місяці року не згодні, а якір порожній (ідентифікатори ЦІЛЬОВОЇ версії).</summary>
 /// <param name="DocumentId">Документ.</param>
