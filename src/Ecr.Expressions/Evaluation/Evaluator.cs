@@ -910,6 +910,17 @@ public sealed class Evaluator(
             args.Add(EvaluateScalar(argument, context, ExpressionDialect.Methodology, budget));
         }
 
+        // Хостова функція ($lookup, $call:f, $entry …): її обчислює контекст скрипта, а не
+        // MethodologyFunctions. Аргументи вже обчислено вище під сторожем глибини, а `if`/`ifs`
+        // відпрацювали раніше — тому гілки лишаються ліниві. Без хоста — #VALUE, а не виняток.
+        if (node.Name.StartsWith('$'))
+        {
+            return context is IHostFunctionContext host
+                   && host.TryInvokeHost(node.Name, args, budget, out var hosted)
+                ? hosted
+                : ExpressionValue.Error(ExpressionErrors.BadValue);
+        }
+
         return Functions.MethodologyFunctions.Invoke(node.Name, args, arithmetic, context);
     }
 
