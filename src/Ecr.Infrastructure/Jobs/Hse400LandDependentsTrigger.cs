@@ -40,14 +40,20 @@ public interface IRecalculationCompletionHook
 /// <para>
 /// ⚠ Збій постановки не валить перерахунок HSE400 (його результати вже актуальні): помилка — у журнал.
 /// </para>
+/// <para>
+/// ✎ B80 (N1): <c>enabled</c> — перекриття ключем <see cref="EnabledKey"/>, заданим явно; <c>null</c> — вирішує
+/// біт зв'язки <c>RecalculateDependents</c>. Читання складу (<c>readOverride</c>, ключ завантажувача) — так само:
+/// явний ключ, інакше біт <c>ReadFromDocument</c>. Хук вимикається в N2 (тригер — Approve/Reopen джерела).
+/// </para>
 /// </remarks>
 public sealed partial class Hse400LandDependentsTrigger(
     EcrDbContext db,
     IBackgroundJobScheduler jobs,
-    bool enabled,
+    bool? enabled,
     ILogger<Hse400LandDependentsTrigger>? logger = null,
     string registryCode = Hse400CompositionMapping.RegistryCode,
-    string templateCode = Hse400CompositionMapping.TemplateCode) : IRecalculationCompletionHook
+    string templateCode = Hse400CompositionMapping.TemplateCode,
+    bool? readOverride = true) : IRecalculationCompletionHook
 {
     /// <summary>Ключ налаштування: <c>true</c> — після перерахунку HSE400 ставити перерахунок залежних Land.</summary>
     public const string EnabledKey = "Calculations:Hse400RecalculateLandDependents";
@@ -64,13 +70,37 @@ public sealed partial class Hse400LandDependentsTrigger(
                && bool.TryParse(configuration[EnabledKey], out var value) && value;
     }
 
+    /// <summary>B80: створює хук із перекриттями обох ключів (не задано — біт зв'язки).</summary>
+    /// <param name="sp">Провайдер.</param>
+    /// <param name="configuration">Конфігурація.</param>
+    public static Hse400LandDependentsTrigger Create(IServiceProvider sp, IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(sp);
+        ArgumentNullException.ThrowIfNull(configuration);
+        return new Hse400LandDependentsTrigger(
+            (EcrDbContext)sp.GetService(typeof(EcrDbContext))!,
+            (IBackgroundJobScheduler)sp.GetService(typeof(IBackgroundJobScheduler))!,
+            Hse400CompositionSnapshotLoader.Override(configuration, EnabledKey),
+            (ILogger<Hse400LandDependentsTrigger>?)sp.GetService(typeof(ILogger<Hse400LandDependentsTrigger>)),
+            readOverride: Hse400CompositionSnapshotLoader.Override(configuration, Hse400CompositionSnapshotLoader.EnabledKey));
+    }
+
     /// <inheritdoc />
     public async Task OnSucceededAsync(IReadOnlyDictionary<long, int[]> periodsByDocument, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(periodsByDocument);
-        if (!enabled || periodsByDocument.Count == 0)
+        if (enabled == false || readOverride == false || periodsByDocument.Count == 0)
         {
             return;
+        }
+
+        if (enabled is null || readOverride is null)
+        {
+            var binding = await DocumentSourceGate.FindBindingAsync(db, templateCode, registryCode, ct).ConfigureAwait(false);
+            if (!(enabled ?? binding?.RecalculateDependents ?? false) || !(readOverride ?? binding?.ReadFromDocument ?? false))
+            {
+                return;
+            }
         }
 
         try

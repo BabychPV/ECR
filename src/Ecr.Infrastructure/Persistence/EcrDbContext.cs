@@ -69,6 +69,10 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     /// <summary>Групи типів дозволів і їхній склад (Permits, PRMG).</summary>
     public DbSet<PermitGroup> PermitGroups => Set<PermitGroup>();
     public DbSet<PermitGroupMember> PermitGroupMembers => Set<PermitGroupMember>();
+
+    /// <summary>B80: зв'язки «документ-джерело → довідник → споживачі» і стан-ворота читання.</summary>
+    public DbSet<DocumentSourceBinding> DocumentSourceBindings => Set<DocumentSourceBinding>();
+    public DbSet<DocumentSourceBindingConsumer> DocumentSourceBindingConsumers => Set<DocumentSourceBindingConsumer>();
     public DbSet<CalculationBinding> CalculationBindings => Set<CalculationBinding>();
 
     // uom

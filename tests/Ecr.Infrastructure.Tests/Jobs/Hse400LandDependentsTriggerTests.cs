@@ -115,6 +115,46 @@ public sealed class Hse400LandDependentsTriggerTests(SqlServerFixture sql) : DbJ
         Assert.Single(rows, r => r.State == "Queued");
     }
 
+    /// <summary>B80 (N1): ключ не задано — вирішують біти зв'язки; явний ключ перекриває біт.</summary>
+    /// <remarks>
+    /// Мутація (B80-M13): <c>enabled ?? binding?.RecalculateDependents ?? false</c> → <c>enabled ?? true</c> — біт 0 більше
+    /// не вимикає, червоний.
+    /// </remarks>
+    [Fact]
+    [Trait("Directive", "B80")]
+    public async Task Без_ключів_вирішують_біти_зв_язки_а_явний_ключ_перекриває()
+    {
+        var (registryId, registryCode) = await NewRegistryAsync();
+        var (hse400, template) = await NewHse400DocumentAsync();
+
+        // Зв'язки немає, ключів немає — вимкнено, як і до B80.
+        await RunAsync(enabled: null, readOverride: null);
+        Assert.Equal(0, await QueuedAsync(registryId));
+
+        await using (var db = Sql.CreateContext())
+        {
+            var templateId = await db.Templates.Where(t => t.Code == template).Select(t => t.Id).SingleAsync();
+            db.DocumentSourceBindings.Add(new DocumentSourceBinding($"B80TR_{registryCode}", templateId, registryId));
+            await db.SaveChangesAsync();
+            await db.DocumentSourceBindings.Where(b => b.RegistryDefId == registryId)
+                .ExecuteUpdateAsync(s => s.SetProperty(b => b.RecalculateDependents, false));
+        }
+
+        // Біт «перераховувати» 0 — нічого; явний ключ true перекриває біт.
+        await RunAsync(enabled: null, readOverride: null);
+        Assert.Equal(0, await QueuedAsync(registryId));
+        await RunAsync(enabled: true, readOverride: null);
+        Assert.Equal(1, await QueuedAsync(registryId));
+
+        async Task RunAsync(bool? enabled, bool? readOverride)
+        {
+            await using var host = NewHost();
+            await new Hse400LandDependentsTrigger(
+                    host.Db, Scheduler(host), enabled, registryCode: registryCode, templateCode: template, readOverride: readOverride)
+                .OnSucceededAsync(Scope(hse400), CancellationToken.None);
+        }
+    }
+
     [Fact]
     public async Task Інший_документ_не_HSE400_нічого_не_ставить()
     {

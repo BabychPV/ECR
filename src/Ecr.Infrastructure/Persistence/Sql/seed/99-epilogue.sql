@@ -535,3 +535,31 @@ JOIN cfg.TemplateVersion AS v ON v.Id = p.TemplateVersionId
 WHERE d.TemplateId IS NULL;
 GO
 -- B74:project-templates ── кінець секції ──
+
+-- B80:source-binding ── зв'язка HSE400 → LAND_HSE400_COMPOSITION → Land (B80 N1, план R3.3) ──
+-- ⛔ Лише INSERT відсутнього (WHEN NOT MATCHED): наявний рядок — стан-ворота, політику й біти — сід НЕ змінює. Новий
+-- рядок завжди SourceState = 0 (Any): рішення людини «сід лишає кожен стенд на Any, ApprovedOnly — лише явне
+-- перемикання» (ендпоінт PUT /api/v1/document-source-bindings/{id}/source-state). Біти 1/1 — дієві лише там, де ключі
+-- Calculations:Hse400CompositionFromDocument / Hse400RecalculateLandDependents НЕ задано (appsettings.json їх задає).
+-- Рядка немає, доки на стенді немає шаблону HSE400 і довідника; з'явиться на першому старті після них.
+MERGE cfg.DocumentSourceBinding AS t
+USING (
+    SELECT tpl.Id AS SourceTemplateId, reg.Id AS RegistryDefId
+    FROM cfg.Template AS tpl
+    CROSS JOIN cfg.RegistryDef AS reg
+    WHERE tpl.Code = N'HSE400' AND reg.Code = N'LAND_HSE400_COMPOSITION'
+) AS s
+ON t.SourceTemplateId = s.SourceTemplateId AND t.RegistryDefId = s.RegistryDefId
+WHEN NOT MATCHED BY TARGET AND NOT EXISTS (SELECT 1 FROM cfg.DocumentSourceBinding WHERE Code = N'HSE400_LAND_COMPOSITION') THEN
+    INSERT (Code, SourceTemplateId, RegistryDefId, MappingKind, SourceTableCodes, Policy, SourceState,
+            ReadFromDocument, RecalculateDependents, UpdatedAt, UpdatedByUserId)
+    VALUES (N'HSE400_LAND_COMPOSITION', s.SourceTemplateId, s.RegistryDefId, 1, NULL, 2, 0, 1, 1, NULL, NULL);
+-- Споживач — шаблон Land (код LAND_UI, tools/land/Build-LandTemplate.ps1). Лише відсутня пара.
+INSERT INTO cfg.DocumentSourceBindingConsumer (BindingId, TemplateId)
+SELECT b.Id, tpl.Id
+FROM cfg.DocumentSourceBinding AS b
+JOIN cfg.Template AS tpl ON tpl.Code = N'LAND_UI'
+WHERE b.Code = N'HSE400_LAND_COMPOSITION'
+  AND NOT EXISTS (SELECT 1 FROM cfg.DocumentSourceBindingConsumer AS c WHERE c.BindingId = b.Id AND c.TemplateId = tpl.Id);
+GO
+-- B80:source-binding ── кінець секції ──
