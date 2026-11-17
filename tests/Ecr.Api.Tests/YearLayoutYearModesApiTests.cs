@@ -196,7 +196,171 @@ public sealed class YearLayoutYearModesApiTests(SqlServerFixture sql)
         }
     }
 
+    /// <summary>
+    /// ✎ F13 LD2: журнал аркуша року фільтрує рядки (<c>aud.RowChange</c>) КОЖНОГО місяця таблицями, видимими саме в
+    /// тому місяці (D-214), а не таблицями місяця перегляду.
+    /// </summary>
+    /// <remarks>
+    /// Таблиця T того самого аркуша: у січні читач її бачить, у листопаді — ні (друга роль, звужена періодом
+    /// 209911..209911, несе Deny на T). Базова таблиця відкрита в обох місяцях — тож листопад у журналі лишається, і
+    /// зникає лише рядок T листопада. Пара переглядів (з січня і з листопада) і читач без заборони — Allow/Deny пара
+    /// на справжньому шляху, без змін фільтрів доступу.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-214")]
+    public async Task Журнал_аркуша_року_фільтрує_рядки_кожного_місяця_таблицями_видимими_в_тому_місяці()
+    {
+        const string JanT = "ld2-jan-t";
+        const string NovT = "ld2-nov-t";
+        const string NovBase = "ld2-nov-base";
+
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        try
+        {
+            // T — друга таблиця того самого аркуша, з екземплярами в січні і в листопаді.
+            var t = await s.Builder.AddTableAsync(s.Doc, TableLayoutKind.MonthsInColumns, monthColumns: 12, columnCount: 2, rowCount: 1)
+                .ConfigureAwait(true);
+            var tNov = await s.Builder.AddPeriodInstanceAsync(t, new PeriodKey(Nov)).ConfigureAwait(true);
+
+            await using (var db = s.Builder.CreateContext())
+            {
+                var baseNov = await db.TableInstances.AsNoTracking()
+                    .Where(i => i.DocumentId == s.Doc.DocumentId && i.TableDefId == s.Doc.TableDefId && i.PeriodKeyValue == Nov)
+                    .Select(i => i.Id).SingleAsync().ConfigureAwait(true);
+
+                await db.Database.ExecuteSqlInterpolatedAsync($"""
+                    INSERT INTO aud.RowChange
+                        (ChangedAt, DocumentId, PeriodKey, TableInstanceId, TableDefId, TableRowId, RowKey, Action,
+                         ChangedByUserId, Origin, CorrelationId)
+                    VALUES ({DateTime.UtcNow.AddMinutes(-30)}, {s.Doc.DocumentId}, {Jan}, {t.TableInstanceId}, {t.TableDefId},
+                            {t.RowIds[0]}, {JanT}, 1, 1, N'UserEdit', NULL),
+                           ({DateTime.UtcNow.AddMinutes(-20)}, {s.Doc.DocumentId}, {Nov}, {tNov.TableInstanceId}, {t.TableDefId},
+                            {tNov.RowIds[0]}, {NovT}, 1, 1, N'UserEdit', NULL),
+                           ({DateTime.UtcNow.AddMinutes(-10)}, {s.Doc.DocumentId}, {Nov}, {baseNov}, {s.Doc.TableDefId},
+                            {s.Doc.RowIds[0]}, {NovBase}, 1, 1, N'UserEdit', NULL);
+                    """).ConfigureAwait(true);
+            }
+
+            var open = await AddPerMonthUserAsync(s, denyTableInNov: null).ConfigureAwait(true);
+            var split = await AddPerMonthUserAsync(s, denyTableInNov: t.TableDefId).ConfigureAwait(true);
+
+            // Фікстура справді різна за місяцями: Deny на T діє в листопаді й не діє в січні — і лише в «split».
+            Assert.Equal((false, false), await DeniedInAsync(s, open.Name, t.TableDefId).ConfigureAwait(true));
+            Assert.Equal((false, true), await DeniedInAsync(s, split.Name, t.TableDefId).ConfigureAwait(true));
+
+            using var app = CreateApp();
+            using var openClient = await SignInAsync(app, open.Name, open.Password).ConfigureAwait(true);
+            using var splitClient = await SignInAsync(app, split.Name, split.Password).ConfigureAwait(true);
+
+            string Year(int view) => $"/api/v1/documents/{s.Doc.DocumentId}/sheets/{s.Doc.SheetDefId}/activity?periodKey={view}&year=true";
+
+            // Allow: без заборони рядок T листопада в році видно (тобто дані досяжні, і зникнення нижче — через Deny).
+            var openLog = RowKeys(await GetJsonAsync(app, openClient, Year(Jan)).ConfigureAwait(true));
+            Assert.Equal(Nov, openLog[NovT]);
+            Assert.Equal(Jan, openLog[JanT]);
+            Assert.Equal(Nov, openLog[NovBase]);
+
+            // Deny, перегляд із січня (T видима в перегляді): рядок T листопада відсутній, листопад не зник цілком.
+            var fromJan = RowKeys(await GetJsonAsync(app, splitClient, Year(Jan)).ConfigureAwait(true));
+            Assert.False(fromJan.ContainsKey(NovT), $"рядок T листопада просочився в рік із січня: {string.Join(", ", fromJan)}");
+            Assert.Equal(Jan, fromJan[JanT]);
+            Assert.Equal(Nov, fromJan[NovBase]);
+
+            // Deny, перегляд із листопада (T схована в перегляді): рядок T січня є, з місяцем січня; T листопада — ні.
+            var fromNov = RowKeys(await GetJsonAsync(app, splitClient, Year(Nov)).ConfigureAwait(true));
+            Assert.False(fromNov.ContainsKey(NovT), $"рядок T листопада в році з листопада: {string.Join(", ", fromNov)}");
+            Assert.Equal(Jan, fromNov[JanT]);
+            Assert.Equal(Nov, fromNov[NovBase]);
+        }
+        finally
+        {
+            await CleanupAsync(s).ConfigureAwait(true);
+        }
+    }
+
     // ───────────────────────────── допоміжне ─────────────────────────────
+
+    /// <summary>Рядки <c>RowChange</c> журналу: ключ рядка → період рядка.</summary>
+    private static Dictionary<string, int> RowKeys(JsonElement log)
+        => log.GetProperty("items").EnumerateArray()
+            .Where(i => i.GetProperty("kind").GetString() == "RowChange")
+            .ToDictionary(i => i.GetProperty("rowKey").GetString()!, i => i.GetProperty("periodKey").GetInt32(), StringComparer.Ordinal);
+
+    /// <summary>
+    /// Тестовий користувач (<c>test_…</c>, випадковий пароль): роль Document.View + Submit на проєкт у 209901..209911;
+    /// за <paramref name="denyTableInNov"/> — друга роль, звужена періодом 209911..209911, з Deny на цю таблицю.
+    /// </summary>
+    private static async Task<(string Name, string Password)> AddPerMonthUserAsync(Scenario s, int? denyTableInNov)
+    {
+        var userName = $"test_ld2_{Guid.NewGuid():N}"[..24];
+        var password = $"T{Guid.NewGuid():N}!a1";
+        await using var db = s.Builder.CreateContext();
+        var user = new User(userName, userName, AuthProvider.Local);
+        user.SetPassword(new PasswordHasher().Hash(password));
+        db.Users.Add(user);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        async Task AddRoleAsync(int from, int to, Action<int> grants)
+        {
+            var role = new Role(
+                EcrCode.Create($"TLD2{Guid.NewGuid():N}"[..14]),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "test LD2 per-month" }));
+            db.Roles.Add(role);
+            await db.SaveChangesAsync().ConfigureAwait(false);
+
+            db.RolePermissions.Add(new RolePermission(role.Id, "Document.View"));
+            var assignment = new RoleAssignment(role.Id, user.Id, null);
+            assignment.SetScope(RoleAssignmentScope.Create(
+                [s.Doc.ProjectId], periodFrom: new PeriodKey(from), periodTo: new PeriodKey(to)));
+            db.RoleAssignments.Add(assignment);
+            grants(role.Id);
+            await db.SaveChangesAsync().ConfigureAwait(false);
+        }
+
+        await AddRoleAsync(Jan, Nov, roleId => db.ResourceGrants.Add(
+            new ResourceGrant(roleId, ResourceKind.Project, s.Doc.ProjectId, GrantLevel.Submit))).ConfigureAwait(false);
+        if (denyTableInNov is { } table)
+        {
+            await AddRoleAsync(Nov, Nov, roleId =>
+            {
+                db.ResourceGrants.Add(new ResourceGrant(roleId, ResourceKind.Project, s.Doc.ProjectId, GrantLevel.Read));
+                db.ResourceGrants.Add(new ResourceGrant(roleId, ResourceKind.Table, table, GrantLevel.Read, isDeny: true));
+            }).ConfigureAwait(false);
+        }
+
+        return (userName, password);
+    }
+
+    /// <summary>Чи діє на таблицю Deny якоїсь ролі користувача в січні та в листопаді — за даними призначень і грантів.</summary>
+    private static async Task<(bool Jan, bool Nov)> DeniedInAsync(Scenario s, string userName, int tableDefId)
+    {
+        await using var db = s.Builder.CreateContext();
+        var userId = await db.Users.AsNoTracking().Where(u => u.UserName == userName).Select(u => u.Id).SingleAsync()
+            .ConfigureAwait(false);
+        var assignments = await db.RoleAssignments.AsNoTracking().Where(a => a.UserId == userId)
+            .Select(a => new { a.RoleId, a.ScopeJson }).ToListAsync().ConfigureAwait(false);
+        var denyRoles = await db.ResourceGrants.AsNoTracking()
+            .Where(g => g.IsDeny && g.ResourceKind == ResourceKind.Table && g.ResourceId == tableDefId)
+            .Select(g => g.RoleId).ToListAsync().ConfigureAwait(false);
+
+        bool DeniedIn(int period) => assignments.Exists(a =>
+            denyRoles.Contains(a.RoleId)
+            && (a.ScopeJson is null || RoleAssignmentScope.TryParse(a.ScopeJson)!.IncludesPeriod(new PeriodKey(period))));
+
+        return (DeniedIn(Jan), DeniedIn(Nov));
+    }
+
+    private static async Task<HttpClient> SignInAsync(EcrApiFactory app, string userName, string password)
+    {
+        var client = app.CreateClient();
+        var login = await client.PostAsJsonAsync(
+            new Uri("/api/v1/login/local", UriKind.Relative),
+            new { userName, password }).ConfigureAwait(false);
+        Assert.True(login.IsSuccessStatusCode, $"Вхід {userName}: {login.StatusCode}: {app.ErrorsText}");
+        return client;
+    }
 
     private sealed record Scenario(TestDocumentBuilder Builder, TestDocument Doc, string RowKey);
 
