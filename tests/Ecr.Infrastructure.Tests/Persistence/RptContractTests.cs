@@ -147,6 +147,36 @@ public sealed class RptContractTests(SqlServerFixture sql)
         }
     }
 
+    /// <summary>
+    /// Контракт довгої вʼюхи <c>rpt.v_DocumentCells</c>: імена колонок за порядком. Колонки лише ДОДАЮТЬСЯ і лише в кінець
+    /// (правило стабільних вʼюх rpt): B138 додала <c>_WorkflowMode</c> (tinyint, режим погодження версії шаблону рядка)
+    /// після <c>IsArchived</c> (R-1), а за нею <c>_RecalculatedAfterSubmission</c> (tinyint, людина 16.11) — останньою.
+    /// </summary>
+    private static readonly string[] DocumentCells =
+    [
+        "ProjectId", "ProjectCode", "TemplateCode", "TemplateVersion", "DocumentId", "DocumentKey", "PeriodKey",
+        "SheetCode", "TableCode", "RowId", "RowKey", "RowOrdinal", "ColumnCode", "DataType",
+        "ValueString", "ValueNumeric", "ValueDate", "ValueBool", "ValueRegistryEntryId", "ValueUnitId", "ValueUnitCode",
+        "ColumnUnitCode", "IsCalculated", "Status", "SheetCopyOrdinal", "SheetDisplayName", "IsArchived", "_WorkflowMode",
+        "_RecalculatedAfterSubmission",
+    ];
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-10.12")]
+    public async Task Контракт_довгої_вʼюхи_колонки_лише_додаються_в_кінець()
+    {
+        var actual = await ColumnsAsync("rpt", "v_DocumentCells");
+
+        Assert.Equal(DocumentCells, actual.Select(c => c.Name));
+
+        // B138: дві останні колонки — режим погодження версії (cfg.TemplateVersion.WorkflowMode) і позначка «перераховано
+        // після подання»; обидві tinyint NOT NULL.
+        Assert.Equal(("_WorkflowMode", "tinyint", 1, false), actual[^2]);
+        Assert.Equal(("_RecalculatedAfterSubmission", "tinyint", 1, false), actual[^1]);
+    }
+
     private async Task<IReadOnlyList<(string Name, string Type, int MaxLength, bool IsNullable)>> ColumnsAsync(
         string schema,
         string view)

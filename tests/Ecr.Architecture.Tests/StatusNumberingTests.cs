@@ -64,6 +64,19 @@ public sealed class StatusNumberingTests
             System.Text.RegularExpressions.Regex.Count(sql, System.Text.RegularExpressions.Regex.Escape(legend)) >= 1,
             "Легенда 0 Draft, 1 Submitted, 2 Approved має бути у примітці сирих вʼюх.");
 
+        // ⛔ ІМЕНОВАНИЙ ВИНЯТОК (B138, рішення людини 16.11): функція rpt.fn_RecalculatedAfterSubmission — єдине місце файла,
+        // де статус подання ПОРІВНЮЄТЬСЯ: позначка «перераховано після подання» стосується лише поданих аркушів
+        // (те саме правило, що в картці документа, DocumentStore). Вона не фільтрує рядків вʼюх — дає колонку
+        // _RecalculatedAfterSubmission. Її тіло вилучається з перевірки нижче, а саме порівняння фіксується тут числом енума.
+        const string head = "CREATE OR ALTER FUNCTION rpt.fn_RecalculatedAfterSubmission ()";
+        var start = sql.IndexOf(head, StringComparison.Ordinal);
+        Assert.True(start >= 0, "Функцію rpt.fn_RecalculatedAfterSubmission не знайдено.");
+        var end = sql.IndexOf("\nGO", start, StringComparison.Ordinal);
+        var function = sql[start..end];
+        Assert.Equal(1, System.Text.RegularExpressions.Regex.Count(function, @"a\.Status\b"));
+        Assert.Contains($"WHERE a.Status = {(byte)DocumentStatus.Submitted}\n", function.Replace("\r\n", "\n", StringComparison.Ordinal), StringComparison.Ordinal);
+        sql = sql.Remove(start, end - start);
+
         // Сирі вʼюхи не фільтрують за статусом: він лише колонка (довга й широка).
         Assert.DoesNotContain("a.Status IN", sql, StringComparison.Ordinal);
         Assert.DoesNotContain("a.Status =", sql, StringComparison.Ordinal);

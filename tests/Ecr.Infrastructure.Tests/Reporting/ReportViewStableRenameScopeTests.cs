@@ -15,11 +15,13 @@ using Xunit.Abstractions;
 namespace Ecr.Infrastructure.Tests.Reporting;
 
 /// <summary>
-/// B129 (D-NEW, людина 15.11 — варіант «За проєктом»): стабільна вʼюха <c>rpt.v_&lt;Шаблон&gt;_&lt;Аркуш&gt;_&lt;Таблиця&gt;</c> бере
+/// B129 (D-534, людина 15.11 — варіант «За проєктом»): стабільна вʼюха <c>rpt.v_&lt;Шаблон&gt;_&lt;Аркуш&gt;_&lt;Таблиця&gt;</c> бере
 /// аліаси перейменувань (<c>cfg.ColumnRename</c>) для КОЖНОГО рядка лише за рішенням його проєкту (<c>_ProjectId</c>): пара діє,
 /// якщо прив'язана до проєкту рядка (<c>cfg.ColumnRenameProject</c>, B127) або застаріла глобальна (<c>IsLegacyGlobal = 1</c>).
 /// Сценарій: v1 (A, B) → v2 (A, Z); проєкт PB переніс B → Z, проєкт PA колонку B відкинув, проєкт PC стартував на v2.
-/// Власна база, періоди 2099xx.
+/// Власна база класу (одна на клас, <see cref="Database"/>), періоди 2099xx; тести, що ганяють «усі шаблони» або міняють
+/// схему, — у власній ізольованій базі (<see cref="IsolateAsync"/>). Незалежність від порядку: <see cref="SeededTestCaseOrderer"/>
+/// (<c>ECR_TEST_ORDER_SEED</c>).
 /// </summary>
 /// <remarks>
 /// До B129 (05-rpt-views.sql до цього коміту) червоніють тести колонок (обидва режими), R-2, відбитка і кількох скоупів: аліас
@@ -31,22 +33,64 @@ namespace Ecr.Infrastructure.Tests.Reporting;
 /// наявності ключа — кожна червонить щонайменше один тест. F13 D1/r3 і PT-2 (вихідний SQL + перезбірка, 17 тестів класу):
 /// (14) блок засіву rpt.ViewScopeSig вимкнено — червоний «Оновлена_база…»; (15) DENSE_RANK замість стабільного номера —
 /// червоні «Номери_скоупів_стабільні…», «Пропущена_група_50422…», «Оновлена_база…»; (16) <c>fam</c> стабільного генератора без
-/// місяця власника — червоний «Маршрутизація_значення_власника…»; (17) заголовок без заміни CR/LF — червоний «Перенос_рядка…».
+/// місяця власника — червоний «Маршрутизація_значення_власника…»; (17) PT-2 (D-535): заголовок без заміни CR/LF — червоний
+/// «Перенос_рядка…».
 /// Гілки засіву (правило 401; 4 тести «Засів_…» і «Оновлена_база…»): (18) без резервування заглушками — 4 червоні; (19) без
 /// rpt.ViewSlot у найбільшому відомому номері — «Засів_резервує_номер…»; (20) без <c>HAVING MIN = MAX</c> — «Засів_не_віддає…»;
 /// (21) без <c>Rn = 1</c> — «Засів_зводить…» (порушення PK_ViewScopeSig).
+/// Примітки аудиту B129 (16.11, правило 410: кожна мутація збирається; один пакет N1–N3 — різні тести; клас 22 тести):
+/// (N1) зʼєднання скоупу рядка для кожної групи (<c>IF 1 = 1 OR @spJoin …</c>) — збірка OK, червоний «Застаріла_глобальна…»;
+/// (N2) у відбитку <c>CAST(0 AS bit) AS g</c> замість <c>r.IsLegacyGlobal</c> — збірка OK, червоний «Ознака_застарілої…»;
+/// (N3) прибирання рядків видаленого шаблону вимкнено (<c>1 = 0 AND</c>, обидва DELETE) — збірка OK, червоний «Усі_шаблони…»;
+/// пакет N1–N3 — 3/22, рівно ці три. (I5) <see cref="IsolateAsync"/> створює базу, але не перемикається на неї — збірка OK,
+/// 1/22: «Оновлення_ключа_ViewSlot…» у спільній базі падає на дублікаті ключа rpt.ViewSlot інших тестів; тести «усі шаблони»
+/// в порядку за замовчуванням лишились зеленими (їхня ізоляція — запобіжник від 50422/чужих шаблонів, а не доведений червоний).
 /// </remarks>
 [Trait(TestCategories.Category, TestCategories.Integration)]
 [Trait("Requirement", "RPT-STABLE")]
-public sealed partial class ReportViewStableRenameScopeTests(ITestOutputHelper output) : IAsyncLifetime
+[TestCaseOrderer("Ecr.Infrastructure.Tests.Reporting.SeededTestCaseOrderer", "Ecr.Infrastructure.Tests")]
+public sealed partial class ReportViewStableRenameScopeTests(ITestOutputHelper output, ReportViewStableRenameScopeTests.Database database)
+    : IClassFixture<ReportViewStableRenameScopeTests.Database>, IAsyncLifetime
 {
     private static readonly DateTime Now = new(2099, 1, 2, 10, 0, 0, DateTimeKind.Utc);
 
-    private readonly SqlServerFixture _sql = SqlServerFixture.WithOwnDatabase("_b129");
+    /// <summary>Фрагменти тексту, які <c>rpt.usp_GenerateStableViews</c> додає лише вʼюсі з проєктними скоупами (B129).</summary>
+    private static readonly string[] ScopeTokens = ["rpt.ViewProjectScope", "sp.Sc", ".Scope IN (0,"];
 
-    public Task InitializeAsync() => _sql.InitializeAsync();
+    private SqlServerFixture _sql = database.Sql;
 
-    public Task DisposeAsync() => _sql.DisposeAsync();
+    private SqlServerFixture? _isolated;
+
+    public Task InitializeAsync() => Task.CompletedTask;
+
+    public async Task DisposeAsync()
+    {
+        if (_isolated is not null)
+        {
+            await _isolated.DisposeAsync();
+        }
+    }
+
+    /// <summary>
+    /// Окрема база для тесту, що ганяє «усі шаблони» (відбиток і генерація — по ВСІХ шаблонах бази класу) або міняє схему
+    /// (ключ rpt.ViewSlot): спільна база класу таких змін не бачить.
+    /// </summary>
+    private async Task IsolateAsync()
+    {
+        _isolated = SqlServerFixture.WithOwnDatabase("_b129i");
+        await _isolated.InitializeAsync();
+        _sql = _isolated;
+    }
+
+    /// <summary>Спільна база класу (B129, примітка аудиту 5: раніше база перестворювалась на кожен тест).</summary>
+    public sealed class Database : IAsyncLifetime
+    {
+        public SqlServerFixture Sql { get; } = SqlServerFixture.WithOwnDatabase("_b129");
+
+        public Task InitializeAsync() => Sql.InitializeAsync();
+
+        public Task DisposeAsync() => Sql.DisposeAsync();
+    }
 
     [Theory]
     [InlineData(false)]
@@ -75,6 +119,11 @@ public sealed partial class ReportViewStableRenameScopeTests(ITestOutputHelper o
         // PC (лише v2): Z - свій, під B - нічого.
         Assert.Equal("pc_z", await CellAsync(s, s.Pc, 209902, "Z"));
         Assert.Null(await CellAsync(s, s.Pc, 209902, "B"));
+
+        // Контроль фрагментів, яких НЕМАЄ в тексті застарілої глобальної пари (тест нижче): з проєктною парою вони є.
+        var definition = await DefinitionAsync(s.Stable);
+        Assert.Contains("rpt.ViewProjectScope", definition, StringComparison.Ordinal);
+        Assert.Contains("sp.Sc", definition, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -86,7 +135,14 @@ public sealed partial class ReportViewStableRenameScopeTests(ITestOutputHelper o
         Assert.Equal("pa_b", await CellAsync(s, s.Pa, 209901, "Z"));
         Assert.Equal("pa_z", await CellAsync(s, s.Pa, 209902, "B"));
         Assert.Equal("pc_z", await CellAsync(s, s.Pc, 209902, "B"));
-        Assert.DoesNotContain("d.ProjectId IN", await DefinitionAsync(s.Stable), StringComparison.Ordinal);   // текст як до B129
+
+        // Текст як до B129: жодного з фрагментів, які генератор додає лише для проєктних скоупів (скоуп рядка vsc/vps,
+        // apply sp.Sc, рядки мапи слотів за скоупом). Що ці фрагменти справжні, доводить тест колонок нижче (там вони є).
+        var definition = await DefinitionAsync(s.Stable);
+        foreach (var scopeToken in ScopeTokens)
+        {
+            Assert.DoesNotContain(scopeToken, definition, StringComparison.Ordinal);
+        }
     }
 
     [Fact]
@@ -115,6 +171,7 @@ public sealed partial class ReportViewStableRenameScopeTests(ITestOutputHelper o
     [Fact]
     public async Task Нова_прив_язка_проєкту_змінює_відбиток_і_перегенеровує_вʼюху_на_старті()
     {
+        await IsolateAsync();   // «усі шаблони» + відбиток усієї бази
         var s = await ArrangeAsync(legacy: false, monthRouting: false);
         Assert.DoesNotContain(await RunAllAsync(), a => a == "Skipped");
         Assert.Contains(await RunAllAsync(), a => a == "Skipped");   // нічого не змінилося
@@ -123,6 +180,77 @@ public sealed partial class ReportViewStableRenameScopeTests(ITestOutputHelper o
         await ExecAsync($"INSERT INTO cfg.ColumnRenameProject (FromColumnDefId, ToColumnDefId, ProjectId) VALUES ({s.BV1}, {s.ZV2}, {s.Pa})");
         Assert.DoesNotContain(await RunAllAsync(), a => a == "Skipped");
         Assert.Equal("pa_b", await CellAsync(s, s.Pa, 209901, "Z"));
+    }
+
+    /// <summary>
+    /// Відбиток (AN-155d) бере ознаку <c>IsLegacyGlobal</c> пари: та сама пара, що стала застарілою глобальною, — інший відбиток,
+    /// і старт («усі шаблони», <c>@OnlyIfChanged = 1</c>) перегенеровує вʼюху, а не пропускає її (примітка аудиту B129 №2).
+    /// </summary>
+    [Fact]
+    public async Task Ознака_застарілої_глобальної_пари_входить_у_відбиток_і_перегенеровує_вʼюху_на_старті()
+    {
+        await IsolateAsync();   // «усі шаблони» + відбиток усієї бази
+        var s = await ArrangeAsync(legacy: false, monthRouting: false);
+        Assert.DoesNotContain(await RunAllAsync(), a => a == "Skipped");
+        Assert.Contains(await RunAllAsync(), a => a == "Skipped");
+        var before = await FingerprintAsync();
+        Assert.Null(await CellAsync(s, s.Pa, 209901, "Z"));   // PA без прив'язки - аліаса немає
+
+        var flip = $"UPDATE cfg.ColumnRename SET IsLegacyGlobal = #v# WHERE FromColumnDefId = {s.BV1} AND ToColumnDefId = {s.ZV2}";
+        await ExecAsync(flip.Replace("#v#", "1", StringComparison.Ordinal));
+        try
+        {
+            Assert.NotEqual(before, await FingerprintAsync());
+            Assert.DoesNotContain(await RunAllAsync(), a => a == "Skipped");
+            Assert.Equal("pa_b", await CellAsync(s, s.Pa, 209901, "Z"));   // застаріла глобальна - для всіх проєктів
+        }
+        finally
+        {
+            await ExecAsync(flip.Replace("#v#", "0", StringComparison.Ordinal));
+        }
+    }
+
+    /// <summary>
+    /// Прогін «усі шаблони» прибирає рядки rpt.ViewProjectScope і rpt.ViewScopeSig шаблону, якого більше немає (застосунок
+    /// видаляє лише чернетки версій, тож шаблон зникає тільки прямим SQL); рядки іншого шаблону не зачіпає (примітка аудиту
+    /// B129 №3).
+    /// </summary>
+    [Fact]
+    public async Task Усі_шаблони_прибирають_рядки_скоупів_видаленого_шаблону()
+    {
+        await IsolateAsync();   // «усі шаблони»
+        var kept = await TwoVersionTemplateWithBindingAsync();
+        var gone = await TwoVersionTemplateWithBindingAsync();
+
+        async Task<List<(int ProjectId, int Scope)>> RowsOfAsync(int templateId)
+            => await ScalarRowsAsync($"SELECT ProjectId, Scope FROM rpt.ViewProjectScope WHERE TemplateId = {templateId} "
+                                     + $"UNION ALL SELECT -1, Scope FROM rpt.ViewScopeSig WHERE TemplateId = {templateId} ORDER BY 1, 2");
+
+        var keptBefore = await RowsOfAsync(kept.TemplateId);
+        Assert.Equal(2, keptBefore.Count);   // проєкт -> скоуп 1 і підпис скоупу 1
+        Assert.Equal(2, (await RowsOfAsync(gone.TemplateId)).Count);
+
+        // Шаблон зникає прямим SQL: прив'язки, проєкт, версії (через чернетку - тригер незмінності), сам шаблон.
+        await ExecAsync($"""
+            DELETE FROM cfg.ColumnRenameProject WHERE ProjectId = {gone.ProjectId};
+            DELETE FROM cfg.ColumnRename WHERE FromColumnDefId = {gone.FromId};
+            DELETE FROM doc.Document WHERE ProjectId = {gone.ProjectId};
+            DELETE FROM doc.Project WHERE Id = {gone.ProjectId};
+            UPDATE cfg.TemplateVersion SET Status = 0 WHERE TemplateId = {gone.TemplateId};
+            DELETE cd FROM cfg.ColumnDef AS cd JOIN cfg.TableDef AS td ON td.Id = cd.TableDefId JOIN cfg.SheetDef AS sd ON sd.Id = td.SheetDefId
+              JOIN cfg.TemplateVersion AS tv ON tv.Id = sd.TemplateVersionId WHERE tv.TemplateId = {gone.TemplateId};
+            DELETE td FROM cfg.TableDef AS td JOIN cfg.SheetDef AS sd ON sd.Id = td.SheetDefId
+              JOIN cfg.TemplateVersion AS tv ON tv.Id = sd.TemplateVersionId WHERE tv.TemplateId = {gone.TemplateId};
+            DELETE sd FROM cfg.SheetDef AS sd JOIN cfg.TemplateVersion AS tv ON tv.Id = sd.TemplateVersionId WHERE tv.TemplateId = {gone.TemplateId};
+            DELETE FROM cfg.TemplateVersion WHERE TemplateId = {gone.TemplateId};
+            DELETE FROM cfg.Template WHERE Id = {gone.TemplateId};
+            """);
+        Assert.Equal(2, (await RowsOfAsync(gone.TemplateId)).Count);   // передумова: рядки-сироти є
+
+        Assert.DoesNotContain(await RunAllAsync(onlyIfChanged: false), a => a == "Skipped");
+
+        Assert.Empty(await RowsOfAsync(gone.TemplateId));
+        Assert.Equal(keptBefore, await RowsOfAsync(kept.TemplateId));
     }
 
     [Fact]
@@ -257,6 +385,7 @@ public sealed partial class ReportViewStableRenameScopeTests(ITestOutputHelper o
     {
         const string Old = "ALTER TABLE rpt.ViewSlot ADD CONSTRAINT PK_ViewSlot PRIMARY KEY CLUSTERED (ViewName, ColumnDefId, Slot)";
         const string DropPk = "IF OBJECT_ID(N'rpt.PK_ViewSlot', N'PK') IS NOT NULL ALTER TABLE rpt.ViewSlot DROP CONSTRAINT PK_ViewSlot";
+        await IsolateAsync();   // міняє схему (ключ rpt.ViewSlot, тригер бази)
 
         // (а) ключа немає.
         await ExecAsync(DropPk);
@@ -706,6 +835,7 @@ public sealed partial class ReportViewStableRenameScopeTests(ITestOutputHelper o
         await GenerateAsync(v2.VersionId, routing: true);
         var stable = Sanitise($"v_{code}_S_T");
         Assert.Contains("FROM rpt.ViewSlot AS fm", await DefinitionAsync(stable), StringComparison.Ordinal);
+        Assert.Contains(".Scope IN (0,", await DefinitionAsync(stable), StringComparison.Ordinal);   // фрагмент ScopeTokens справжній
 
         Assert.Equal("pb_jan", await ScalarStringAsync(stable, pb.ProjectId, 209902, "Z", "R1"));
         Assert.Equal("pb_jan", await ScalarStringAsync(stable, pb.ProjectId, 209903, "Z", "R1"));
@@ -716,7 +846,7 @@ public sealed partial class ReportViewStableRenameScopeTests(ITestOutputHelper o
     }
 
     /// <summary>
-    /// PT-2 (пентест 2026-11): код таблиці з переносом рядка (можливий лише прямим записом у базу, в обхід <c>EcrCode</c>) не
+    /// PT-2 (пентест 2026-11, D-535): код таблиці з переносом рядка (можливий лише прямим записом у базу, в обхід <c>EcrCode</c>) не
     /// виводить текст із коментаря-заголовка стабільної вʼюхи: жоден рядок тіла не починається з підкинутого SQL.
     /// </summary>
     [Fact]
@@ -901,12 +1031,34 @@ public sealed partial class ReportViewStableRenameScopeTests(ITestOutputHelper o
     private Task GenerateAsync(int versionId, bool routing)
         => ExecAsync($"EXEC rpt.usp_GenerateStableViews {versionId}, {(routing ? 1 : 0)}, 0");
 
-    private async Task<List<string>> RunAllAsync()
+    /// <summary>Шаблон v1 (A, B) → v2 (A, Z), проєкт (без даних) з перенесеною парою B → Z; стабільні вʼюхи згенеровано.</summary>
+    private async Task<(int TemplateId, int ProjectId, int FromId)> TwoVersionTemplateWithBindingAsync()
+    {
+        var (templateId, _) = await NewTemplateAsync();
+        var v1 = await AddVersionAsync(templateId, "1", ("T", ["A", "B"]));
+        var v2 = await AddVersionAsync(templateId, "2", ("T", ["A", "Z"]));
+        var project = await NewProjectAsync(v1.VersionId);
+        await RenameAsync(v1.Tables["T"].Cols["B"], v2.Tables["T"].Cols["Z"], legacy: false, project.ProjectId);
+        await GenerateAsync(v2.VersionId, routing: false);
+        return (templateId, project.ProjectId, v1.Tables["T"].Cols["B"]);
+    }
+
+    private async Task<string> FingerprintAsync()
+    {
+        await using var connection = await OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT rpt.fn_ViewsFingerprint(0)";
+        return (string)(await command.ExecuteScalarAsync())!;
+    }
+
+    private async Task<List<string>> RunAllAsync(bool onlyIfChanged = true)
     {
         var actions = new List<string>();
         await using var connection = await OpenAsync();
         await using var command = connection.CreateCommand();
-        command.CommandText = "EXEC rpt.usp_GenerateStableViews NULL, 0, 1";
+#pragma warning disable CA2100 // лише літерал 0/1
+        command.CommandText = $"EXEC rpt.usp_GenerateStableViews NULL, 0, {(onlyIfChanged ? 1 : 0)}";
+#pragma warning restore CA2100
         command.CommandTimeout = 600;
         await using var reader = await command.ExecuteReaderAsync();
         while (await reader.ReadAsync())
@@ -930,6 +1082,7 @@ public sealed partial class ReportViewStableRenameScopeTests(ITestOutputHelper o
         command.Parameters.AddWithValue("@p", projectId);
         command.Parameters.AddWithValue("@k", period);
         command.Parameters.AddWithValue("@r", rowKey);
+        command.CommandTimeout = 300;   // вʼюха «50422» має ~1000 колонок: компіляція плану під навантаженням машини > 30 с
         await using var reader = await command.ExecuteReaderAsync();
         Assert.True(await reader.ReadAsync(), $"{view}: немає рядка проєкту {projectId} за {period}");
         var value = reader.IsDBNull(0) ? null : reader.GetString(0);

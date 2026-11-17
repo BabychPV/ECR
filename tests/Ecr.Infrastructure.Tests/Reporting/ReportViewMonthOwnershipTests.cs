@@ -275,6 +275,16 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
         Assert.Contains("_Text]", current, StringComparison.Ordinal);
         // RS (копії аркушів): службові колонки _SheetCopyOrdinal/_SheetDisplayName, умова копії у приєднанні стану й
         // приєднання doc.DocumentSheet — теж адитивні (стан і колонки копії), текст до них незмінний.
+        // B138: службова колонка _WorkflowMode (константа версії, остання в списку) — теж адитивна; рівно одна.
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(current, @",\r?\n\s+CAST\(0 AS tinyint\) AS _WorkflowMode"));
+        current = System.Text.RegularExpressions.Regex.Replace(current, @",\r?\n\s+CAST\(0 AS tinyint\) AS _WorkflowMode", "");
+        // B138: колонка _RecalculatedAfterSubmission (остання) і приєднання її функції за станом аркуша — теж адитивні; по одному.
+        const string markColumn = @",\r?\n\s+ISNULL\(ras\.Marked, 0\) AS _RecalculatedAfterSubmission";
+        const string markJoin = @"\r?\nLEFT JOIN rpt\.fn_RecalculatedAfterSubmission\(\) AS ras ON ras\.ApprovalStateId = a\.Id";
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(current, markColumn));
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(current, markJoin));
+        current = System.Text.RegularExpressions.Regex.Replace(current, markColumn, "");
+        current = System.Text.RegularExpressions.Regex.Replace(current, markJoin, "");
         var withoutCopies = System.Text.RegularExpressions.Regex.Replace(
             current,
             @",\r?\n\s+CAST\(COALESCE\(dsh\.CopyOrdinal, 1\) AS smallint\) AS _SheetCopyOrdinal,[\s\S]*?AS _SheetDisplayName", "");
@@ -1142,8 +1152,9 @@ public sealed class ReportViewMonthOwnershipTests(SqlServerFixture sql)
 
             var types = await ViewColumnTypesAsync(f.View);
             Assert.Contains(types, t => t.StartsWith(f.Derived + ":decimal:", StringComparison.Ordinal));
-            // RS: дві службові колонки копій (_SheetCopyOrdinal, _SheetDisplayName) — після колонок шаблону.
-            Assert.StartsWith(text + ":nvarchar:", types[^3], StringComparison.Ordinal);
+            // RS: дві службові колонки копій (_SheetCopyOrdinal, _SheetDisplayName) — після колонок шаблону; B138: за ними _WorkflowMode
+            // і _RecalculatedAfterSubmission.
+            Assert.StartsWith(text + ":nvarchar:", types[^5], StringComparison.Ordinal);
             Assert.Single(types, t => t.Contains("_Text:", StringComparison.Ordinal));
         }
     }

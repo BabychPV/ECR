@@ -61,7 +61,7 @@ public sealed partial class ReportViewStableTests(SqlServerFixture sql)
         // Крок 1: лише v1 - стабільна вʼюха = v1; службові колонки + _TemplateVersion + A, B.
         Assert.Equal(
             ["_ProjectId", "_ProjectCode", "_DocumentId", "_DocumentKey", "_PeriodKey", "_Status", "_RowId", "_RowKey", "_RowOrdinal",
-             "_TemplateVersion", "A", "B", "_SheetCopyOrdinal", "_SheetDisplayName", "_IsArchived"],
+             "_TemplateVersion", "A", "B", "_SheetCopyOrdinal", "_SheetDisplayName", "_IsArchived", "_WorkflowMode", "_RecalculatedAfterSubmission"],
             await ColumnNamesAsync(stable));
         var v1Definition = await DefinitionAsync(v1View);
 
@@ -100,7 +100,7 @@ public sealed partial class ReportViewStableTests(SqlServerFixture sql)
             (int)(await ScalarRowsAsync(
                 $"SELECT COUNT(*) FROM rpt.[{stable}] WHERE _ProjectId = {p1.ProjectId} AND _TemplateVersion = N'2' AND _PeriodKey BETWEEN 202611 AND 202611"))[0][0]!);
         Assert.Equal(
-            ab.Length + 14,
+            ab.Length + 16,
             (await ScalarRowsAsync($"SELECT TOP 1 * FROM rpt.[{stable}]"))[0].Length);
 
         // Крок 4: v3 ПРИБИРАЄ B і додає аркуш S2: стара колонка B лишається (NULL для нових рядків), для S2 зʼявляється своя вʼюха,
@@ -223,7 +223,7 @@ public sealed partial class ReportViewStableTests(SqlServerFixture sql)
 
         await ExecStableAsync(built.VersionId);
         var stable = StableName(tpl, "S", "T");
-        Assert.Equal(300, (await ColumnNamesAsync(stable)).Count - 13);   // 13 службових: R-1 додала _IsArchived
+        Assert.Equal(300, (await ColumnNamesAsync(stable)).Count - 15);   // 15 службових: R-1 додала _IsArchived, B138 - _WorkflowMode і _RecalculatedAfterSubmission
         var row = (await RowsAsync(stable, p.ProjectId, "C1", "C2", "C300"))[0];
         Assert.Equal((1m, (decimal?)null, 300m), ((decimal)row[0]!, (decimal?)row[1], (decimal)row[2]!));
 
@@ -469,10 +469,10 @@ public sealed partial class ReportViewStableTests(SqlServerFixture sql)
                 (int)(await ScalarRowsAsync("SELECT COUNT(*) FROM sys.procedures WHERE name = N'usp_GenerateStableViews' AND schema_id = SCHEMA_ID(N'rpt')"))[0][0]!);
 
             await GenerateAsync(v1.VersionId);
-            Assert.Equal(["_ProjectId", "_ProjectCode", "_DocumentId", "_DocumentKey", "_PeriodKey", "_Status", "_RowId", "_RowKey", "_RowOrdinal", "_TemplateVersion", "A", "_SheetCopyOrdinal", "_SheetDisplayName", "_IsArchived"],
+            Assert.Equal(["_ProjectId", "_ProjectCode", "_DocumentId", "_DocumentKey", "_PeriodKey", "_Status", "_RowId", "_RowKey", "_RowOrdinal", "_TemplateVersion", "A", "_SheetCopyOrdinal", "_SheetDisplayName", "_IsArchived", "_WorkflowMode", "_RecalculatedAfterSubmission"],
                 await ColumnNamesAsync(stable));
             await GenerateAsync(v1.VersionId);   // idempotent re-run
-            Assert.Equal(14, (await ColumnNamesAsync(stable)).Count);
+            Assert.Equal(16, (await ColumnNamesAsync(stable)).Count);
         }
         finally
         {
@@ -531,23 +531,31 @@ public sealed partial class ReportViewStableTests(SqlServerFixture sql)
                 .Select(r => ((int)r[0]!, (decimal?)r[1], (decimal?)r[2])).ToList());
 
         // З мапою (cfg.ColumnRename): обидва імені, однакові дані - обʼєднання даних обох ідентифікаторів.
-        await using (var db = sql.CreateContext())
+        // Спільна база колекції (правило 394): пари прибираються у finally.
+        try
         {
-            db.ColumnRenames.Add(new ColumnRename(v1.Cols["OLD"], v2.Cols["NEW"]));
-            db.ColumnRenameProjects.Add(new ColumnRenameProject(v1.Cols["OLD"], v2.Cols["NEW"], p.ProjectId));   // B129: як перенос проєкту
-            await db.SaveChangesAsync();
+            await using (var db = sql.CreateContext())
+            {
+                db.ColumnRenames.Add(new ColumnRename(v1.Cols["OLD"], v2.Cols["NEW"]));
+                db.ColumnRenameProjects.Add(new ColumnRenameProject(v1.Cols["OLD"], v2.Cols["NEW"], p.ProjectId));   // B129: як перенос проєкту
+                await db.SaveChangesAsync();
+            }
+
+            var again = await ExecStableAsync(v2.VersionId);
+            Assert.Contains(again, r => r.View == stable && r.Action != "Unchanged");
+            Assert.Equal(
+                [(202609, (decimal?)5m, (decimal?)5m), (202610, 7m, 7m)],
+                (await RowsAsync(stable, p.ProjectId, "_PeriodKey", "OLD", "NEW"))
+                    .Select(r => ((int)r[0]!, (decimal?)r[1], (decimal?)r[2])).ToList());
+            Assert.Equal(["OLD", "KEEP", "NEW"], await UserColumnsAsync(stable));   // за першою появою
+
+            // Ідемпотентність і без побічних ефектів на _vN.
+            Assert.All(await ExecStableAsync(v2.VersionId), r => Assert.Equal("Unchanged", r.Action));
         }
-
-        var again = await ExecStableAsync(v2.VersionId);
-        Assert.Contains(again, r => r.View == stable && r.Action != "Unchanged");
-        Assert.Equal(
-            [(202609, (decimal?)5m, (decimal?)5m), (202610, 7m, 7m)],
-            (await RowsAsync(stable, p.ProjectId, "_PeriodKey", "OLD", "NEW"))
-                .Select(r => ((int)r[0]!, (decimal?)r[1], (decimal?)r[2])).ToList());
-        Assert.Equal(["OLD", "KEEP", "NEW"], await UserColumnsAsync(stable));   // за першою появою
-
-        // Ідемпотентність і без побічних ефектів на _vN.
-        Assert.All(await ExecStableAsync(v2.VersionId), r => Assert.Equal("Unchanged", r.Action));
+        finally
+        {
+            await DeleteRenamesAsync(v1.Cols["OLD"]);
+        }
     }
 
     /// <summary>
@@ -585,23 +593,44 @@ public sealed partial class ReportViewStableTests(SqlServerFixture sql)
         Assert.Equal([(202610, (decimal?)7m)], await ReadAsync(newName));
 
         // Мапа, яку пише перенос із tableRenames: пара колонок з ТИМ САМИМ кодом, але різних таблиць.
-        await using (var db = sql.CreateContext())
+        // Спільна база колекції (правило 394): пари прибираються у finally.
+        try
         {
-            db.ColumnRenames.Add(new ColumnRename(v1.Cols["X"], v2.Cols["X"]));
-            db.ColumnRenameProjects.Add(new ColumnRenameProject(v1.Cols["X"], v2.Cols["X"], p.ProjectId));   // B129: як перенос проєкту
-            await db.SaveChangesAsync();
+            await using (var db = sql.CreateContext())
+            {
+                db.ColumnRenames.Add(new ColumnRename(v1.Cols["X"], v2.Cols["X"]));
+                db.ColumnRenameProjects.Add(new ColumnRenameProject(v1.Cols["X"], v2.Cols["X"], p.ProjectId));   // B129: як перенос проєкту
+                await db.SaveChangesAsync();
+            }
+
+            var again = await ExecStableAsync(v2.VersionId);
+            Assert.Contains(again, r => r.View == oldName && r.Action != "Unchanged");
+            Assert.Contains(again, r => r.View == newName && r.Action != "Unchanged");
+
+            List<(int, decimal?)> both = [(202609, 5m), (202610, 7m)];
+            Assert.Equal(both, await ReadAsync(oldName));
+            Assert.Equal(both, await ReadAsync(newName));
+            Assert.Equal(["X"], await UserColumnsAsync(oldName));
+
+            Assert.All(await ExecStableAsync(v2.VersionId), r => Assert.Equal("Unchanged", r.Action));
         }
+        finally
+        {
+            await DeleteRenamesAsync(v1.Cols["X"]);
+        }
+    }
 
-        var again = await ExecStableAsync(v2.VersionId);
-        Assert.Contains(again, r => r.View == oldName && r.Action != "Unchanged");
-        Assert.Contains(again, r => r.View == newName && r.Action != "Unchanged");
-
-        List<(int, decimal?)> both = [(202609, 5m), (202610, 7m)];
-        Assert.Equal(both, await ReadAsync(oldName));
-        Assert.Equal(both, await ReadAsync(newName));
-        Assert.Equal(["X"], await UserColumnsAsync(oldName));
-
-        Assert.All(await ExecStableAsync(v2.VersionId), r => Assert.Equal("Unchanged", r.Action));
+    /// <summary>Прибирає пари перейменування (спершу прив'язки проєктів, потім самі пари) за колонками «з».</summary>
+    private async Task DeleteRenamesAsync(params int[] fromColumnIds)
+    {
+        var ids = string.Join(",", fromColumnIds.Select(i => i.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+#pragma warning disable CA2100 // лише цілі Id колонок тесту
+        command.CommandText = $"DELETE FROM cfg.ColumnRenameProject WHERE FromColumnDefId IN ({ids}); DELETE FROM cfg.ColumnRename WHERE FromColumnDefId IN ({ids});";
+#pragma warning restore CA2100
+        await command.ExecuteNonQueryAsync();
     }
 
 
