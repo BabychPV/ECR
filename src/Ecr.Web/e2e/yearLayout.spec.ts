@@ -210,7 +210,9 @@ async function signedIn(browser: Browser, userName: string, password: string): P
 let arranged: Arranged;
 let adminContext: BrowserContext;
 
-test.beforeAll(async ({ browser }) => {
+test.beforeAll(async ({ browser }, testInfo) => {
+  // ⚠ Хук має власну межу (30 с типово), а фікстура — ~30 PUT/PATCH: на завантаженій машині її не вистачало.
+  testInfo.setTimeout(300_000);
   adminContext = await signedIn(browser, Admin.userName, Admin.password);
   arranged = await arrange(adminContext.request);
 });
