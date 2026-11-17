@@ -123,12 +123,12 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
     public async Task<IReadOnlyList<InFlightSheet>> ListInFlightSheetsAsync(
         int? projectId, int? templateId, CancellationToken ct)
     {
-        // Шаблон документа: власний (B74) або основний проєкту (шаблон чинної версії проєкту) — як у `RouteScopeAsync`.
-        var rows =
+        // Версія — як у `RouteScopeAsync` (версія ПЕРІОДУ шаблону документа: власного, B74, або основного); шаблон —
+        // власний шаблон документа або шаблон цієї версії (без нових читань `Project.TemplateVersionId`, B74).
+        // ⚠ Шкали без рядка для пари (проєкт, шаблон) дають NULL-версію — не падіння.
+        var versioned =
             from s in db.ApprovalStates.AsNoTracking().ExceptWorkflowNone(db)
             join d in db.Documents.AsNoTracking() on s.DocumentId equals d.Id
-            join p in db.Projects.AsNoTracking() on d.ProjectId equals p.Id
-            join mv in db.TemplateVersions.AsNoTracking() on p.TemplateVersionId equals mv.Id
             where s.Status == Domain.Enums.DocumentStatus.Submitted
             select new
             {
@@ -138,10 +138,28 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
                 s.PeriodKey,
                 s.SheetCopyId,
                 d.ProjectId,
-                TemplateId = d.TemplateId ?? mv.TemplateId,
                 OwnTemplateId = d.TemplateId,
                 s.CurrentStepId,
+                TemplateVersionId = (int?)(d.TemplateId == null
+                    ? EcrDbContext.VersionOf(d.ProjectId, s.PeriodKey)
+                    : EcrDbContext.TemplateVersionOf(d.ProjectId, d.TemplateId.Value, s.PeriodKey)),
             };
+
+        var rows = versioned.Select(r => new
+        {
+            r.Id,
+            r.DocumentId,
+            r.SheetDefId,
+            r.PeriodKey,
+            r.SheetCopyId,
+            r.ProjectId,
+            r.CurrentStepId,
+            r.TemplateVersionId,
+            TemplateId = r.OwnTemplateId ?? db.TemplateVersions
+                .Where(v => v.Id == r.TemplateVersionId)
+                .Select(v => (int?)v.TemplateId)
+                .FirstOrDefault(),
+        });
 
         if (projectId is { } project)
         {
@@ -154,21 +172,6 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
         }
 
         var list = await rows
-            .Select(r => new
-            {
-                r.Id,
-                r.DocumentId,
-                r.SheetDefId,
-                r.PeriodKey,
-                r.SheetCopyId,
-                r.ProjectId,
-                r.TemplateId,
-                r.CurrentStepId,
-                // ⚠ Версія лише для маршрутів версії; шкали без рядка для пари (проєкт, шаблон) дають NULL — не падіння.
-                TemplateVersionId = (int?)(r.OwnTemplateId == null
-                    ? EcrDbContext.VersionOf(r.ProjectId, r.PeriodKey)
-                    : EcrDbContext.TemplateVersionOf(r.ProjectId, r.OwnTemplateId.Value, r.PeriodKey)),
-            })
             .OrderBy(r => r.Id)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -220,27 +223,15 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Лише <c>doc.ProjectTemplate</c> (B74: шаблони проєкту, основний — теж там), без нових читань
+    /// <c>Project.TemplateVersionId</c> (сторож B74).
+    /// </remarks>
     public async Task<IReadOnlyList<ApprovalTemplateRef>> ListProjectTemplatesAsync(int projectId, CancellationToken ct)
     {
-        var main = await (
-                from p in db.Projects.AsNoTracking()
-                join v in db.TemplateVersions.AsNoTracking() on p.TemplateVersionId equals v.Id
-                where p.Id == projectId
-                select (int?)v.TemplateId)
-            .FirstOrDefaultAsync(ct)
-            .ConfigureAwait(false);
-
-        var attached = await db.ProjectTemplates
-            .AsNoTracking()
-            .Where(x => x.ProjectId == projectId)
-            .Select(x => x.TemplateId)
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
-
-        var ids = attached.Concat(main is { } m ? [m] : []).Distinct().ToList();
         var templates = await db.Templates
             .AsNoTracking()
-            .Where(t => ids.Contains(t.Id))
+            .Where(t => db.ProjectTemplates.Any(x => x.ProjectId == projectId && x.TemplateId == t.Id))
             .Select(t => new
             {
                 t.Id,
@@ -258,10 +249,8 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
         return
         [
             .. templates
-                .OrderByDescending(t => t.Id == main)
-                .ThenBy(t => t.Code, StringComparer.Ordinal)
-                .Select(t => new ApprovalTemplateRef(
-                    t.Id, t.Code, t.NameL10n, t.Mode == Domain.Enums.WorkflowMode.None, t.Id == main)),
+                .OrderBy(t => t.Code, StringComparer.Ordinal)
+                .Select(t => new ApprovalTemplateRef(t.Id, t.Code, t.NameL10n, t.Mode == Domain.Enums.WorkflowMode.None)),
         ];
     }
 

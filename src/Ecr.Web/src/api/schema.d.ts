@@ -38900,8 +38900,6 @@ export interface components {
             effectiveSteps: components["schemas"]["ApprovalStepDto"][];
             /** @description Діє маршрут шаблону: загальний `Approver` теж затверджує. */
             generalApproverAlsoApproves: boolean;
-            /** @description Основний шаблон проєкту. */
-            isMain: boolean;
             /** @description Назва. */
             nameL10n: components["schemas"]["LocalizedText"];
             /**

@@ -19189,10 +19189,6 @@
             "description": "Діє маршрут шаблону: загальний `Approver` теж затверджує.",
             "type": "boolean"
           },
-          "isMain": {
-            "description": "Основний шаблон проєкту.",
-            "type": "boolean"
-          },
           "nameL10n": {
             "$ref": "#/components/schemas/LocalizedText",
             "description": "Назва."
@@ -19211,7 +19207,6 @@
           "templateId",
           "code",
           "nameL10n",
-          "isMain",
           "workflowModeNone",
           "effectiveSource",
           "effectiveSteps",

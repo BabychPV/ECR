@@ -99,7 +99,6 @@ public sealed record ApprovalRouteChangeDto(int Steps, ApprovalRouteImpactDto Re
 /// <param name="TemplateId">Шаблон.</param>
 /// <param name="Code">Код шаблону.</param>
 /// <param name="NameL10n">Назва.</param>
-/// <param name="IsMain">Основний шаблон проєкту.</param>
 /// <param name="WorkflowModeNone">Найновіша версія — без подання й затвердження (B75).</param>
 /// <param name="EffectiveSource">Звідки маршрут: <c>own</c> (виняток проєкту) | <c>template</c> | <c>project</c> | <c>default</c> | <c>none</c>.</param>
 /// <param name="EffectiveSteps">Кроки маршруту, що діє.</param>
@@ -108,7 +107,6 @@ public sealed record ProjectTemplateRouteDto(
     int TemplateId,
     string Code,
     LocalizedText NameL10n,
-    bool IsMain,
     bool WorkflowModeNone,
     string EffectiveSource,
     IReadOnlyList<ApprovalStepDto> EffectiveSteps,
@@ -122,6 +120,13 @@ public sealed record ProjectTemplateRouteDto(
 /// <param name="IsGeneralApprover">Вбудована загальна роль <c>Approver</c>.</param>
 public sealed record ApproverRoleDto(int Id, string Code, LocalizedText? NameL10n, bool IsBuiltIn, bool IsGeneralApprover);
 
+/// <summary>✎ B155: права обробника на області маршруту.</summary>
+/// <param name="Project">Виняток проєкту (<c>Project.Manage</c>).</param>
+/// <param name="Template">Маршрут шаблону — зміна (<c>Template.Edit</c>).</param>
+/// <param name="TemplateRead">Маршрут шаблону — лише читання (<c>Template.View</c>); <c>null</c> — лише <paramref name="Template"/>.</param>
+/// <param name="Default">Типовий маршрут майданчика (<c>Security.ManageRoles</c>).</param>
+public sealed record ApprovalRouteScopePermissions(string Project, string Template, string? TemplateRead, string Default);
+
 /// <summary>✎ B155: права й перевірки області маршруту — одне місце для читання, підрахунку й заміни.</summary>
 /// <remarks>
 /// ⛔ Рішення координатора 16.11: маршрут ШАБЛОНУ (усі проєкти) ставить TemplateAdmin (<c>Template.Edit</c>; читання —
@@ -130,56 +135,47 @@ public sealed record ApproverRoleDto(int Id, string Code, LocalizedText? NameL10
 /// </remarks>
 public static class ApprovalRouteScopeAccess
 {
-    /// <summary>Право маршруту шаблону.</summary>
-    public const string TemplateEdit = "Template.Edit";
-
-    /// <summary>Право читання маршруту шаблону.</summary>
-    public const string TemplateView = "Template.View";
-
-    /// <summary>Право винятку проєкту.</summary>
-    public const string ProjectManage = "Project.Manage";
-
-    /// <summary>Право типового маршруту майданчика.</summary>
-    public const string ManageRoles = "Security.ManageRoles";
-
     /// <summary>Перевіряє право на область; повертає профіль, шаблон області й чи можна змінювати.</summary>
     /// <param name="scope">Область (не «лише проєкт»).</param>
-    /// <param name="write">Зміна, а не читання.</param>
+    /// <param name="permissions">Права обробника на кожну область (константи обробника — сторож §9 їх бачить).</param>
     /// <param name="workflow">Сховище.</param>
     /// <param name="access">Рішення про доступ.</param>
     /// <param name="currentUser">Поточний користувач.</param>
     /// <param name="ct">Токен скасування.</param>
     public static async Task<(AccessProfile Profile, ApprovalTemplateRef? Template, bool CanEdit)> AuthorizeAsync(
         ApprovalRouteScope scope,
-        bool write,
+        ApprovalRouteScopePermissions permissions,
         IWorkflowStore workflow,
         IAccessDecisionService access,
         ICurrentUser currentUser,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(scope);
+        ArgumentNullException.ThrowIfNull(permissions);
         ArgumentNullException.ThrowIfNull(workflow);
 
         switch (scope)
         {
             case { ProjectId: { } projectId, TemplateId: { } templateId }:
             {
-                var profile = await RequireProjectManageAsync(access, currentUser, projectId, ct).ConfigureAwait(false);
+                var profile = await RequireProjectManageAsync(access, currentUser, permissions.Project, projectId, ct)
+                    .ConfigureAwait(false);
                 return (profile, await RequireTemplateAsync(workflow, templateId, ct).ConfigureAwait(false), true);
             }
 
             case { ProjectId: null, TemplateId: { } templateId }:
             {
-                var profile = write
-                    ? await PermissionCheck.RequireAsync(access, currentUser, TemplateEdit, ct).ConfigureAwait(false)
-                    : await PermissionCheck.RequireAnyAsync(access, currentUser, [TemplateEdit, TemplateView], ct)
-                        .ConfigureAwait(false);
+                var profile = permissions.TemplateRead is { } read
+                    ? await PermissionCheck.RequireAnyAsync(access, currentUser, [permissions.Template, read], ct)
+                        .ConfigureAwait(false)
+                    : await PermissionCheck.RequireAsync(access, currentUser, permissions.Template, ct).ConfigureAwait(false);
                 return (profile, await RequireTemplateAsync(workflow, templateId, ct).ConfigureAwait(false),
-                    PermissionCheck.IsGranted(profile, TemplateEdit));
+                    PermissionCheck.IsGranted(profile, permissions.Template));
             }
 
             case { ProjectId: null, TemplateId: null }:
-                return (await PermissionCheck.RequireAsync(access, currentUser, ManageRoles, ct).ConfigureAwait(false), null, true);
+                return (await PermissionCheck.RequireAsync(access, currentUser, permissions.Default, ct).ConfigureAwait(false),
+                    null, true);
 
             default:
                 throw new ArgumentException("Маршрут проєкту без шаблону веде ReplaceApprovalRouteHandler.", nameof(scope));
@@ -187,23 +183,25 @@ public static class ApprovalRouteScopeAccess
     }
 
     /// <summary>
-    /// Право <c>Project.Manage</c> у проєкті, видимість і грант <c>Manage</c> на нього — як маршрут проєкту (Q-179, S17).
+    /// Право <paramref name="permission"/> (<c>Project.Manage</c>) у проєкті, видимість і грант <c>Manage</c> на нього — як
+    /// маршрут проєкту (Q-179, S17).
     /// </summary>
     /// <param name="access">Рішення про доступ.</param>
     /// <param name="currentUser">Поточний користувач.</param>
+    /// <param name="permission">Проєктне право.</param>
     /// <param name="projectId">Проєкт.</param>
     /// <param name="ct">Токен скасування.</param>
     public static async Task<AccessProfile> RequireProjectManageAsync(
-        IAccessDecisionService access, ICurrentUser currentUser, int projectId, CancellationToken ct)
+        IAccessDecisionService access, ICurrentUser currentUser, string permission, int projectId, CancellationToken ct)
     {
-        var profile = await PermissionCheck.RequireInAnyProjectAsync(access, currentUser, ProjectManage, ct)
+        var profile = await PermissionCheck.RequireInAnyProjectAsync(access, currentUser, permission, ct)
             .ConfigureAwait(false);
 
         // ⛔ S17: невидимий проєкт — `404 ECR-PRJ-0404`, як неіснуючий, і ДО права в проєкті й гранта.
         Projects.ProjectVisibility.RequireVisible(profile, projectId);
 
         // ⛔ ФВ-6.14: право — у ЦЬОМУ проєкті.
-        PermissionCheck.RequireIn(profile, ProjectManage, projectId);
+        PermissionCheck.RequireIn(profile, permission, projectId);
 
         if (profile.LevelFor(ResourceKind.Project, projectId) < GrantLevel.Manage)
         {
@@ -378,6 +376,21 @@ public static class ApprovalRouteSteps
 public sealed class GetScopedApprovalRouteHandler(
     IWorkflowStore workflow, IAccessDecisionService access, ICurrentUser currentUser)
 {
+    /// <summary>Виняток проєкту: право в проєкті й грант Manage.</summary>
+    public const string ProjectPermission = "Project.Manage";
+
+    /// <summary>Маршрут шаблону: зміна.</summary>
+    public const string TemplatePermission = "Template.Edit";
+
+    /// <summary>Маршрут шаблону: лише читання.</summary>
+    public const string TemplateReadPermission = "Template.View";
+
+    /// <summary>Типовий маршрут майданчика.</summary>
+    public const string DefaultPermission = "Security.ManageRoles";
+
+    private static readonly ApprovalRouteScopePermissions Permissions =
+        new(ProjectPermission, TemplatePermission, TemplateReadPermission, DefaultPermission);
+
     /// <summary>Маршрут області.</summary>
     /// <param name="scope">Область (не «лише проєкт»).</param>
     /// <param name="ct">Токен скасування.</param>
@@ -386,7 +399,7 @@ public sealed class GetScopedApprovalRouteHandler(
         ArgumentNullException.ThrowIfNull(scope);
 
         var (_, template, canEdit) = await ApprovalRouteScopeAccess
-            .AuthorizeAsync(scope, write: false, workflow, access, currentUser, ct)
+            .AuthorizeAsync(scope, Permissions, workflow, access, currentUser, ct)
             .ConfigureAwait(false);
 
         var routes = await workflow.ListActiveRoutesAsync(ct).ConfigureAwait(false);
@@ -413,6 +426,18 @@ public sealed class GetScopedApprovalRouteHandler(
 public sealed class PreviewApprovalRouteImpactHandler(
     IWorkflowStore workflow, IAccessDecisionService access, ICurrentUser currentUser)
 {
+    /// <summary>Виняток проєкту: право в проєкті й грант Manage.</summary>
+    public const string ProjectPermission = "Project.Manage";
+
+    /// <summary>Маршрут шаблону.</summary>
+    public const string TemplatePermission = "Template.Edit";
+
+    /// <summary>Типовий маршрут майданчика.</summary>
+    public const string DefaultPermission = "Security.ManageRoles";
+
+    private static readonly ApprovalRouteScopePermissions Permissions =
+        new(ProjectPermission, TemplatePermission, TemplateRead: null, DefaultPermission);
+
     /// <summary>Підрахунок.</summary>
     /// <param name="scope">Область.</param>
     /// <param name="roleIds">
@@ -426,7 +451,7 @@ public sealed class PreviewApprovalRouteImpactHandler(
         ArgumentNullException.ThrowIfNull(scope);
 
         var (profile, _, _) = await ApprovalRouteScopeAccess
-            .AuthorizeAsync(scope, write: true, workflow, access, currentUser, ct)
+            .AuthorizeAsync(scope, Permissions, workflow, access, currentUser, ct)
             .ConfigureAwait(false);
 
         if (roleIds is not null)
@@ -459,6 +484,18 @@ public sealed class ReplaceScopedApprovalRouteHandler(
     IClock clock,
     ICurrentUser currentUser)
 {
+    /// <summary>Виняток проєкту: право в проєкті й грант Manage.</summary>
+    public const string ProjectPermission = "Project.Manage";
+
+    /// <summary>Маршрут шаблону (TemplateAdmin).</summary>
+    public const string TemplatePermission = "Template.Edit";
+
+    /// <summary>Типовий маршрут майданчика (SysAdmin).</summary>
+    public const string DefaultPermission = "Security.ManageRoles";
+
+    private static readonly ApprovalRouteScopePermissions Permissions =
+        new(ProjectPermission, TemplatePermission, TemplateRead: null, DefaultPermission);
+
     /// <summary>Замінює маршрут області.</summary>
     /// <param name="scope">Область (не «лише проєкт»).</param>
     /// <param name="roleIds">Ролі кроків у порядку проходження; порожньо — прибрати.</param>
@@ -470,7 +507,7 @@ public sealed class ReplaceScopedApprovalRouteHandler(
         ArgumentNullException.ThrowIfNull(roleIds);
 
         var (profile, _, _) = await ApprovalRouteScopeAccess
-            .AuthorizeAsync(scope, write: true, workflow, access, currentUser, ct)
+            .AuthorizeAsync(scope, Permissions, workflow, access, currentUser, ct)
             .ConfigureAwait(false);
         var userId = currentUser.UserId ?? 0;
 
@@ -576,16 +613,20 @@ public sealed class ReplaceScopedApprovalRouteHandler(
         => JsonSerializer.Serialize(new { scope.ProjectId, scope.TemplateId, roleIds, restarted });
 }
 
-/// <summary>✎ B155 (C-5): шаблони проєкту й маршрут, що діє для кожного в цьому проєкті.</summary>
+/// <summary>✎ B155 (C-5): шаблони проєкту (<c>doc.ProjectTemplate</c>) й маршрут, що діє для кожного в цьому проєкті.</summary>
 public sealed class ListProjectTemplateRoutesHandler(
     IWorkflowStore workflow, IAccessDecisionService access, ICurrentUser currentUser)
 {
+    /// <summary>Право в проєкті (і грант Manage) — як маршрут проєкту.</summary>
+    public const string Permission = "Project.Manage";
+
     /// <summary>Перелік.</summary>
     /// <param name="projectId">Проєкт.</param>
     /// <param name="ct">Токен скасування.</param>
     public async Task<IReadOnlyList<ProjectTemplateRouteDto>> HandleAsync(int projectId, CancellationToken ct)
     {
-        await ApprovalRouteScopeAccess.RequireProjectManageAsync(access, currentUser, projectId, ct).ConfigureAwait(false);
+        await ApprovalRouteScopeAccess.RequireProjectManageAsync(access, currentUser, Permission, projectId, ct)
+            .ConfigureAwait(false);
 
         var templates = await workflow.ListProjectTemplatesAsync(projectId, ct).ConfigureAwait(false);
         var routes = await workflow.ListActiveRoutesAsync(ct).ConfigureAwait(false);
@@ -597,7 +638,7 @@ public sealed class ListProjectTemplateRoutesHandler(
                 var scope = new ApprovalRouteScope(projectId, t.Id);
                 var effective = ApprovalRoute.ResolveForScope(routes, projectId, t.Id);
                 return new ProjectTemplateRouteDto(
-                    t.Id, t.Code, t.NameL10n, t.IsMain, t.WorkflowNone,
+                    t.Id, t.Code, t.NameL10n, t.WorkflowNone,
                     ApprovalRouteSteps.SourceOf(effective, scope),
                     ApprovalRouteSteps.Of(effective),
                     effective?.AllowsGeneralApprover == true);
@@ -623,16 +664,16 @@ public sealed class ListApproverRolesHandler(
                          new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
-        if (!PermissionCheck.IsGranted(profile, ApprovalRouteScopeAccess.ManageRoles)
-            && !PermissionCheck.IsGranted(profile, ApprovalRouteScopeAccess.TemplateEdit)
-            && !profile.HasInAnyProject(ApprovalRouteScopeAccess.ProjectManage))
+        if (!PermissionCheck.IsGranted(profile, ManageRolesPermission)
+            && !PermissionCheck.IsGranted(profile, TemplatePermission)
+            && !profile.HasInAnyProject(ProjectPermission))
         {
             throw new AccessDeniedException(
-                "ECR-AUTH-0403", $"Потрібне право {ApprovalRouteScopeAccess.TemplateEdit}.",
+                "ECR-AUTH-0403", $"Потрібне право {TemplatePermission}.",
                 new Dictionary<string, object?>
                 {
                     ["messageKey"] = "err.ECR-AUTH-0403.permission",
-                    ["permission"] = ApprovalRouteScopeAccess.TemplateEdit,
+                    ["permission"] = TemplatePermission,
                 });
         }
 
@@ -648,4 +689,13 @@ public sealed class ListApproverRolesHandler(
 
     /// <summary>Код вбудованої загальної ролі погоджувача (сід <c>00-prelude.sql</c>).</summary>
     public const string GeneralApproverCode = "Approver";
+
+    /// <summary>Право SysAdmin на ролі.</summary>
+    public const string ManageRolesPermission = "Security.ManageRoles";
+
+    /// <summary>Право TemplateAdmin на маршрут шаблону.</summary>
+    public const string TemplatePermission = "Template.Edit";
+
+    /// <summary>Право менеджера проєкту на маршрут проєкту.</summary>
+    public const string ProjectPermission = "Project.Manage";
 }

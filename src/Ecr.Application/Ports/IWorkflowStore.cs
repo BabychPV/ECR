@@ -468,8 +468,7 @@ public sealed record InFlightSheet(
 /// <param name="Code">Код.</param>
 /// <param name="NameL10n">Назва.</param>
 /// <param name="WorkflowNone">Найновіша версія шаблону — без подання й затвердження (B75).</param>
-/// <param name="IsMain">Основний шаблон проєкту (у переліку шаблонів проєкту); інакше <c>false</c>.</param>
-public sealed record ApprovalTemplateRef(int Id, string Code, LocalizedText NameL10n, bool WorkflowNone, bool IsMain = false);
+public sealed record ApprovalTemplateRef(int Id, string Code, LocalizedText NameL10n, bool WorkflowNone);
 
 /// <summary>Календар подання аркуша (D-441): проєкт документа і стани періодів × аркуша.</summary>
 /// <param name="ProjectStatus">Стан проєкту.</param>
