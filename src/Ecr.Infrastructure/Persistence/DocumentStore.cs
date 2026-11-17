@@ -1371,6 +1371,52 @@ public sealed class DocumentStore(
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ B151. Прапорець шаблону читається з <c>HOLDLOCK</c> (серіалізовне читання — під RCSI теж блокувальне, не
+    /// з версії рядка; разом із <c>READCOMMITTEDLOCK</c> SQL Server його не приймає): спільний замок рядка
+    /// <c>cfg.Template</c> тримається до кінця транзакції створення, тож увімкнення прапорця
+    /// (<c>UPDATE</c> → X-замок) чекає, доки створення закомітиться, і бачить новий документ у своїй перевірці
+    /// дублікатів; і навпаки — створення після увімкнення бачить <c>1</c>. Наявний документ шукається вже під
+    /// блоком рядка проєкту (<see cref="LockProjectTemplateVersionAsync"/>): два створення в одному проєкті
+    /// йдуть по черзі, і друге бачить перше. Шаблон документа — його власний <c>TemplateId</c>: створення ставить
+    /// його завжди, а рядки без нього доповнює ремонт 99-epilogue на кожному розгортанні (версію проєкту тут не
+    /// читаємо — сторож B74).
+    /// </remarks>
+    public async Task<long?> FindDocumentBlockingSingleTemplateAsync(int projectId, int templateId, CancellationToken ct)
+    {
+        _ = db.Database.CurrentTransaction
+            ?? throw new InvalidOperationException(
+                "FindDocumentBlockingSingleTemplateAsync викликано поза транзакцією: замок прапорця шаблону звільнився б одразу.");
+
+        var single = await db.Database
+            .SqlQuery<bool>($"""
+                SELECT SingleDocumentPerProject AS Value
+                FROM   cfg.Template WITH (HOLDLOCK, ROWLOCK)
+                WHERE  Id = {templateId}
+                """)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        if (single.Count == 0 || !single[0])
+        {
+            return null;
+        }
+
+        var existing = await db.Database
+            .SqlQuery<long>($"""
+                SELECT TOP (1) d.Id AS Value
+                FROM   doc.Document d WITH (READCOMMITTEDLOCK)
+                WHERE  d.ProjectId = {projectId}
+                  AND  d.TemplateId = {templateId}
+                ORDER BY d.Id
+                """)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return existing.Count == 0 ? null : existing[0];
+    }
+
+    /// <inheritdoc />
     public async Task<Domain.Enums.ProjectStatus?> FindProjectStatusAsync(int projectId, CancellationToken ct)
         => await db.Projects
             .AsNoTracking()

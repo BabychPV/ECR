@@ -266,6 +266,10 @@ if ($Stage -in 'Template', 'All') {
         $r = Invoke-Hse400Ok -Method POST -Path '/api/v1/templates' -Body @{ code = $tplCode; nameL10n = @{ en = [string]$model.template.en; ru = [string]$model.template.ru } }
         $templateId = Get-Hse400Id $r.Json 'templateId', 'id'
         Write-Hse400Log "Створено шаблон $tplCode (id $templateId)."
+        # B151: HSE400 — один документ на проєкт. Лише при створенні: на наявному шаблоні рішення адміністратора не чіпаю
+        # (наявним базам прапорець ставить міграція B151TemplateSingleDocumentPerProject).
+        Invoke-Hse400Ok -Method PUT -Path ("/api/v1/templates/{0}/document-policy" -f $templateId) -Body @{ singleDocumentPerProject = $true } | Out-Null
+        Write-Hse400Log "Шаблон $tplCode — один документ на проєкт."
     }
     else { $templateId = Get-Hse400Id $t 'id', 'templateId' }
     $vs = Get-Hse400Versions $templateId

@@ -94,6 +94,115 @@ public sealed class RenameTemplateHandler(
 }
 
 /// <summary>
+/// ✎ B151: скільки документів шаблону дозволено в проєкті — один чи скільки завгодно. Право <c>Template.Edit</c>.
+/// </summary>
+/// <remarks>
+/// ⛔ Увімкнення «один на проєкт» при наявних дублікатах ВІДМОВЛЯЄ (<c>409 ECR-TMPL-0409</c>,
+/// <c>singleDocumentDuplicates</c>) і називає документи-дублікати — лише ті, які цьому користувачеві видно, плюс
+/// загальну кількість. Прапорець пишеться першим (X-замок рядка шаблону), дублікати шукаються після нього в тій
+/// самій транзакції: створення, що читає прапорець під спільним замком (<c>CreateDocumentHandler</c>), або вже
+/// закомітилось і потрапляє в перелік, або чекає й бачить увімкнений прапорець.
+/// </remarks>
+public sealed class SetTemplateDocumentPolicyHandler(
+    ITemplateVersionStore templates,
+    IAccessDecisionService access,
+    IUnitOfWork uow,
+    IAuditWriter audit,
+    ICurrentUser currentUser,
+    IClock clock)
+{
+    /// <summary>Право редагування шаблонів (`02-contracts.md` §9).</summary>
+    public const string Permission = "Template.Edit";
+
+    /// <summary>Тип події журналу безпеки.</summary>
+    public const string EventType = "TemplateDocumentPolicyChanged";
+
+    /// <summary>Задає правило «один документ на проєкт» і повертає оновлену картку.</summary>
+    /// <param name="templateId">Шаблон.</param>
+    /// <param name="single"><c>true</c> — один документ на проєкт; <c>false</c> — скільки завгодно.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="NotFoundException"><c>ECR-TMPL-0404</c> — шаблону немає.</exception>
+    /// <exception cref="DomainException"><c>ECR-TMPL-0409</c> — у проєктах уже є кілька документів шаблону.</exception>
+    public async Task<TemplateCard> HandleAsync(int templateId, bool single, CancellationToken ct)
+    {
+        var profile = await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
+
+        var userId = currentUser.UserId
+                     ?? throw new AccessDeniedException(
+                         ErrorCodes.Unauthorized, "Потрібна автентифікація.",
+                         new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
+
+        var before = false;
+        await uow.ExecuteInTransactionAsync(
+            async innerCt =>
+            {
+                var template = await templates.FindTemplateAsync(templateId, innerCt).ConfigureAwait(false)
+                               ?? throw GetTemplateCardHandler.NotFound(templateId);
+
+                before = template.SingleDocumentPerProject;
+                template.SetSingleDocumentPerProject(single);
+                await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+
+                if (single && !before)
+                {
+                    var duplicates = await templates.FindDuplicateDocumentsAsync(templateId, innerCt).ConfigureAwait(false);
+                    if (duplicates.Count > 0)
+                    {
+                        throw await DuplicatesConflictAsync(profile, templateId, duplicates, innerCt).ConfigureAwait(false);
+                    }
+                }
+            },
+            ct).ConfigureAwait(false);
+
+        var card = await templates.FindCardAsync(templateId, ct).ConfigureAwait(false)
+                   ?? throw GetTemplateCardHandler.NotFound(templateId);
+
+        if (before != single)
+        {
+            // ⚠ Після коміту — як в архівування: журнал пише власним підключенням і не відкочується.
+            await audit.WriteSecurityEventAsync(
+                new SecurityEventRecord(
+                    clock.UtcNow,
+                    EventType,
+                    TargetUserId: null,
+                    TargetRoleId: null,
+                    JsonSerializer.Serialize(new { templateId, code = card.Code, singleDocumentPerProject = single }),
+                    userId,
+                    currentUser.CorrelationId),
+                ct).ConfigureAwait(false);
+        }
+
+        return card;
+    }
+
+    /// <summary>Відмова з переліком видимих дублікатів і загальною кількістю.</summary>
+    private async Task<DomainException> DuplicatesConflictAsync(
+        AccessProfile profile, int templateId, IReadOnlyList<TemplateDuplicateDocument> duplicates, CancellationToken ct)
+    {
+        // ⛔ Номери лише видимих документів: перелік чужих розкривав би, що в невидимих проєктах є документи.
+        var visible = new List<long>();
+        foreach (var duplicate in duplicates)
+        {
+            if ((await access.CanReadDocumentAsync(profile, duplicate.DocumentId, ct).ConfigureAwait(false)).IsAllowed)
+            {
+                visible.Add(duplicate.DocumentId);
+            }
+        }
+
+        return new DomainException(
+            "ECR-TMPL-0409",
+            $"Шаблон {templateId}: у проєктах уже по кілька документів ({duplicates.Count}); «один документ на проєкт» не вмикається.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-TMPL-0409.singleDocumentDuplicates",
+                ["templateId"] = templateId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["duplicateCount"] = duplicates.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["documentIds"] = visible,
+            });
+    }
+}
+
+/// <summary>
 /// Архівування шаблону й повернення його в обіг. Право <c>Template.Edit</c>.
 /// </summary>
 /// <remarks>

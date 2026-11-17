@@ -1241,8 +1241,45 @@ public sealed partial class TemplateVersionStore(EcrDbContext db, IMetadataCache
                 versions.Count,
                 versions.Count(v => v.Status == Domain.Enums.TemplateVersionStatus.Published),
                 projects,
-                documents));
+                documents),
+            template.SingleDocumentPerProject);
     }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<TemplateDuplicateDocument>> FindDuplicateDocumentsAsync(int templateId, CancellationToken ct)
+    {
+        _ = db.Database.CurrentTransaction
+            ?? throw new InvalidOperationException(
+                "FindDuplicateDocumentsAsync викликано поза транзакцією: замок прапорця шаблону звільнився б одразу.");
+
+        // ⚠ READCOMMITTEDLOCK: під RCSI звичайне читання бачило б знімок до створення, що саме комітиться.
+        // Шаблон документа — його власний TemplateId (створення ставить завжди, решту доповнює 99-epilogue; версію
+        // проєкту не читаємо — сторож B74). Межа MaxDuplicateDocuments: відмові досить перших, кількість — окремо.
+        var rows = await db.Database
+            .SqlQuery<DuplicateRow>($"""
+                SELECT d.ProjectId, d.Id AS DocumentId
+                FROM   doc.Document d WITH (READCOMMITTEDLOCK)
+                WHERE  d.TemplateId = {templateId}
+                  AND  d.ProjectId IN (SELECT x.ProjectId
+                                       FROM   doc.Document x WITH (READCOMMITTEDLOCK)
+                                       WHERE  x.TemplateId = {templateId}
+                                       GROUP BY x.ProjectId
+                                       HAVING COUNT(*) > 1)
+                """)
+            .OrderBy(r => r.ProjectId)
+            .ThenBy(r => r.DocumentId)
+            .Take(MaxDuplicateDocuments)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return [.. rows.Select(r => new TemplateDuplicateDocument(r.ProjectId, r.DocumentId))];
+    }
+
+    /// <summary>Скільки дублікатів найбільше повертає <see cref="FindDuplicateDocumentsAsync"/> (B151).</summary>
+    internal const int MaxDuplicateDocuments = 500;
+
+    /// <summary>Рядок запиту дублікатів (B151).</summary>
+    internal sealed record DuplicateRow(int ProjectId, long DocumentId);
 
     /// <inheritdoc />
     public async Task<Template?> FindTemplateAsync(int templateId, CancellationToken ct)

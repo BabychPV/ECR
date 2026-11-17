@@ -199,6 +199,17 @@ public interface ITemplateVersionStore
     public Task<TemplateCard?> FindCardAsync(int templateId, CancellationToken ct);
 
     /// <summary>
+    /// ✎ B151: документи шаблону в проєктах, де їх більше одного (дублікати для правила «один документ на проєкт»).
+    /// </summary>
+    /// <remarks>
+    /// Лише в транзакції ПІСЛЯ збереження прапорця (X-замок рядка <c>cfg.Template</c>): створення, що читає прапорець
+    /// під спільним замком, тоді або вже закомітилось і видне тут, або чекає й побачить увімкнений прапорець.
+    /// </remarks>
+    /// <param name="templateId">Шаблон.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<TemplateDuplicateDocument>> FindDuplicateDocumentsAsync(int templateId, CancellationToken ct);
+
+    /// <summary>
     /// ВІДСТЕЖУВАНИЙ шаблон для правки; <c>null</c> — такого немає.
     /// </summary>
     /// <remarks>
@@ -467,6 +478,11 @@ public sealed record TemplateSummary(
     DateTime? ArchivedAt = null,
     DateTime? DraftEditedAt = null);
 
+/// <summary>✎ B151: документ шаблону в проєкті, де документів цього шаблону більше одного.</summary>
+/// <param name="ProjectId">Проєкт.</param>
+/// <param name="DocumentId">Документ.</param>
+public sealed record TemplateDuplicateDocument(int ProjectId, long DocumentId);
+
 /// <summary>Картка шаблону.</summary>
 /// <param name="Id">Ідентифікатор.</param>
 /// <param name="Code">Код — бізнес-ключ; <b>незмінний</b>.</param>
@@ -477,13 +493,17 @@ public sealed record TemplateSummary(
 /// </param>
 /// <param name="CreatedAt">Момент створення, UTC.</param>
 /// <param name="Dependents">Скільки всього посилається на шаблон.</param>
+/// <param name="SingleDocumentPerProject">
+/// ✎ B151: <c>true</c> — у проєкті щонайбільше один документ цього шаблону.
+/// </param>
 public sealed record TemplateCard(
     int Id,
     string Code,
     Domain.ValueObjects.LocalizedText NameL10n,
     bool IsActive,
     DateTime CreatedAt,
-    TemplateDependents Dependents);
+    TemplateDependents Dependents,
+    bool SingleDocumentPerProject = false);
 
 /// <summary>Скільки всього посилається на шаблон — ціна архівування.</summary>
 /// <param name="Versions">Версій шаблону всього.</param>

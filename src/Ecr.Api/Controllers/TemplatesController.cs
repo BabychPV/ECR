@@ -21,7 +21,8 @@ public sealed class TemplatesController(
     CreateTemplateVersionHandler createVersion,
     GetTemplateCardHandler card,
     RenameTemplateHandler rename,
-    SetTemplateArchivedHandler archive) : ControllerBase
+    SetTemplateArchivedHandler archive,
+    SetTemplateDocumentPolicyHandler documentPolicy) : ControllerBase
 {
     /// <summary>Перелік шаблонів. Право <c>Template.View</c>.</summary>
     /// <remarks>Сторінка, а не «все»: ендпоінтів, що повертають увесь набір, не існує.</remarks>
@@ -111,6 +112,26 @@ public sealed class TemplatesController(
     public async Task<IActionResult> Restore(int id, CancellationToken ct)
         => Ok(await archive.HandleAsync(id, archived: false, ct).ConfigureAwait(false));
 
+    /// <summary>
+    /// ✎ B151: скільки документів шаблону дозволено в проєкті — один чи скільки завгодно. Право <c>Template.Edit</c>.
+    /// </summary>
+    /// <remarks>
+    /// Увімкнення «один документ на проєкт», коли в якомусь проєкті документів шаблону вже кілька, —
+    /// <c>409 ECR-TMPL-0409</c> (<c>singleDocumentDuplicates</c>) з переліком видимих дублікатів.
+    /// </remarks>
+    [HttpPut("{id:int}/document-policy")]
+    [ProducesResponseType<Ecr.Application.Ports.TemplateCard>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> SetDocumentPolicy(
+        int id, [FromBody] SetTemplateDocumentPolicyRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        return Ok(await documentPolicy.HandleAsync(id, request.SingleDocumentPerProject, ct).ConfigureAwait(false));
+    }
+
     /// <summary>Сторінка версій шаблону. Право <c>Template.View</c>.</summary>
     /// <remarks>
     /// ⛔ Q-225: раніше — `new CursorRequest()`, завжди дефолтний ліміт 50,
@@ -173,6 +194,10 @@ public sealed record CreateTemplateRequest(string Code, IReadOnlyDictionary<stri
 /// <summary>Запит на зміну назви шаблону.</summary>
 /// <param name="NameL10n">Назва мовами каталогу; хоча б одна непорожня.</param>
 public sealed record RenameTemplateRequest(IReadOnlyDictionary<string, string> NameL10n);
+
+/// <summary>✎ B151: запит на правило «один документ на проєкт».</summary>
+/// <param name="SingleDocumentPerProject"><c>true</c> — один документ шаблону на проєкт; <c>false</c> — скільки завгодно.</param>
+public sealed record SetTemplateDocumentPolicyRequest(bool SingleDocumentPerProject);
 
 /// <summary>Запит на створення версії шаблону.</summary>
 /// <param name="VersionNumber">Номер нової версії.</param>

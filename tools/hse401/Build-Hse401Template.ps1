@@ -71,9 +71,13 @@ if ($Stage -in 'Template', 'All') {
         $null = Invoke-HseOk POST '/api/v1/templates' @{ code = $code; nameL10n = @{ en = 'HSE401 Air emissions inventory'; ru = 'HSE401 Инвентаризация выбросов в атмосферу' } }
         $t = (Invoke-HseOk GET ("/api/v1/templates?limit=50&q=$code")).Json
         $tpl = @($t.items) | Where-Object { $_.code -eq $code } | Select-Object -First 1
+        # B151: HSE401 — один документ на проєкт. Лише при створенні: на наявному шаблоні рішення адміністратора не чіпаю
+        # (наявним базам прапорець ставить міграція B151TemplateSingleDocumentPerProject).
+        $null = Invoke-HseOk PUT "/api/v1/templates/$($tpl.id)/document-policy" @{ singleDocumentPerProject = $true }
+        Write-HseLog "  шаблон $code — один документ на проєкт"
     }
     $vers = @((Invoke-HseOk GET "/api/v1/templates/$($tpl.id)/versions?limit=100").Json.items)
-    $pub = $vers | Where-Object { $_.status -eq 'Published' } | Sort-Object id -Descending | Select-Object -First 1
+    $pub =$vers | Where-Object { $_.status -eq 'Published' } | Sort-Object id -Descending | Select-Object -First 1
     $draft = $vers | Where-Object { $_.status -eq 'Draft' } | Sort-Object id -Descending | Select-Object -First 1
     if ($null -ne $pub -and $null -eq $draft) {
         Write-HseLog "  шаблон уже опублікований (версія $($pub.version), id $($pub.id)); структуру не чіпаю"

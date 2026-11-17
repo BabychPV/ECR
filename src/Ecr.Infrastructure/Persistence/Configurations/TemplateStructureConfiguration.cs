@@ -22,6 +22,9 @@ public sealed class TemplateConfiguration : IEntityTypeConfiguration<Template>
         // неможливо прибрати скриптом, не з'ясувавши спершу його
         // випадкове ім'я на конкретній базі.
         builder.Property(x => x.IsActive).HasDefaultValue(true, "DF_Template_Active");
+
+        // ✎ B151: типово — скільки завгодно документів на проєкт (поведінка до B151; Land).
+        builder.Property(x => x.SingleDocumentPerProject).HasDefaultValue(false, "DF_Template_SingleDocumentPerProject");
         builder.LocalizedText(x => x.NameL10n);
         builder.Property(x => x.ArchivedAt).HasColumnType("datetime2(3)");
         builder.Navigation(x => x.Versions).UsePropertyAccessMode(PropertyAccessMode.Field);

@@ -25753,6 +25753,19 @@
         ],
         "type": "object"
       },
+      "SetTemplateDocumentPolicyRequest": {
+        "description": "✎ B151: запит на правило «один документ на проєкт».",
+        "properties": {
+          "singleDocumentPerProject": {
+            "description": "`true` — один документ шаблону на проєкт; `false` — скільки завгодно.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "singleDocumentPerProject"
+        ],
+        "type": "object"
+      },
       "SetTemplateLayoutRequest": {
         "description": "Розкладка версії-чернетки (D-474).",
         "properties": {
@@ -29297,6 +29310,11 @@
           "nameL10n": {
             "$ref": "#/components/schemas/LocalizedText",
             "description": "Назва мовами каталогу."
+          },
+          "singleDocumentPerProject": {
+            "default": false,
+            "description": "✎ B151: `true` — у проєкті щонайбільше один документ цього шаблону.",
+            "type": "boolean"
           }
         },
         "required": [
@@ -36350,6 +36368,26 @@
               }
             },
             "description": "Created"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
           }
         },
         "summary": "Створює документ. Право `Document.Create`.",
@@ -70694,6 +70732,129 @@
           }
         },
         "summary": "Архівує шаблон: для нових документів він більше не пропонується.\nПраво `Template.Edit`.",
+        "tags": [
+          "Templates"
+        ]
+      }
+    },
+    "/api/v1/templates/{id}/document-policy": {
+      "put": {
+        "description": "Увімкнення «один документ на проєкт», коли в якомусь проєкті документів шаблону вже кілька, —\n`409 ECR-TMPL-0409` (`singleDocumentDuplicates`) з переліком видимих дублікатів.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetTemplateDocumentPolicyRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetTemplateDocumentPolicyRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetTemplateDocumentPolicyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateCard"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateCard"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateCard"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "✎ B151: скільки документів шаблону дозволено в проєкті — один чи скільки завгодно. Право `Template.Edit`.",
         "tags": [
           "Templates"
         ]

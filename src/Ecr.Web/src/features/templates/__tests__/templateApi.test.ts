@@ -6,6 +6,7 @@ import {
   fetchTemplateCard,
   renameTemplate,
   restoreTemplate,
+  setTemplateDocumentPolicy,
 } from '../templateApi';
 
 /**
@@ -26,6 +27,7 @@ function card(overrides: Partial<TemplateCard> = {}): TemplateCard {
     isActive: true,
     createdAt: '2026-01-01T00:00:00Z',
     dependents: { versions: 3, publishedVersions: 2, projects: 4, documents: 91 },
+    singleDocumentPerProject: false,
     ...overrides,
   };
 }
@@ -95,6 +97,18 @@ describe('templateApi: адреса й метод кожної дії картк
     expect(calls[0]?.method).toBe('POST');
     expect(calls[1]?.url).toBe('/api/v1/templates/7/restore');
     expect(calls[1]?.method).toBe('POST');
+  });
+
+  it('B151: правило «один документ на проєкт» — PUT …/document-policy з одним прапорцем', async () => {
+    const { calls } = mockServer();
+
+    await setTemplateDocumentPolicy(7, true);
+    await setTemplateDocumentPolicy(7, false);
+
+    expect(calls[0]?.url).toBe('/api/v1/templates/7/document-policy');
+    expect(calls[0]?.method).toBe('PUT');
+    expect(calls[0]?.body).toStrictEqual({ singleDocumentPerProject: true });
+    expect(calls[1]?.body).toStrictEqual({ singleDocumentPerProject: false });
   });
 });
 

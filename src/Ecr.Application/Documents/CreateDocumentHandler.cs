@@ -195,6 +195,18 @@ public sealed class CreateDocumentHandler(
                         // цей шлях — їх доповнює ремонт 99-epilogue.sql.
                         var templateId = await documents
                             .FindTemplateIdOfVersionAsync(versionId, innerCt).ConfigureAwait(false);
+
+                        // ⛔ B151 (рішення людини 16.11): шаблон «один документ на проєкт» (HSE400, HSE401) —
+                        // другий документ у тому самому проєкті не заводиться. Під блоком рядка проєкту вище два
+                        // одночасні створення йдуть по черзі, тож друге бачить перше (409, а не дублікат).
+                        if (templateId is { } tid
+                            && await documents.FindDocumentBlockingSingleTemplateAsync(projectId, tid, innerCt)
+                                .ConfigureAwait(false) is { } existingId)
+                        {
+                            throw await SingleDocumentConflictAsync(profile, projectId, tid, existingId, innerCt)
+                                .ConfigureAwait(false);
+                        }
+
                         document = new Document(projectId, businessKey, userId, now, templateId);
 
                         // ⚠ Ім'я — опційне, ПОРУЧ із BusinessKey, не замість нього: механізм
@@ -246,6 +258,38 @@ public sealed class CreateDocumentHandler(
 
             return document!.Id;
         }
+    }
+
+    /// <summary>
+    /// ✎ B151: відмова «документ цього шаблону в проєкті вже є» — <c>409 ECR-DOC-0409</c>
+    /// (<c>err.ECR-DOC-0409.documentExistsForTemplate</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ <c>existingDocumentId</c> їде у відповідь ЛИШЕ тоді, коли наявний документ видно цьому користувачеві:
+    /// інакше відмова розкривала б номер документа, якого людина не має права бачити. Сам факт «документ уже
+    /// є» не приховується — без нього не пояснити, чому створення не пройшло.
+    /// </remarks>
+    private async Task<DomainException> SingleDocumentConflictAsync(
+        Security.AccessProfile profile, int projectId, int templateId, long existingId, CancellationToken ct)
+    {
+        var visible = (await access.CanReadDocumentAsync(profile, existingId, ct).ConfigureAwait(false)).IsAllowed;
+
+        var details = new Dictionary<string, object?>
+        {
+            ["messageKey"] = "err.ECR-DOC-0409.documentExistsForTemplate",
+            ["projectId"] = projectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["templateId"] = templateId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        };
+
+        if (visible)
+        {
+            details["existingDocumentId"] = existingId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        return new DomainException(
+            Ecr.Domain.Errors.ErrorCodes.DocumentSubmitted,
+            $"У проєкті {projectId} документ шаблону {templateId} уже є: шаблон дозволяє один документ на проєкт.",
+            details);
     }
 
     /// <summary>
