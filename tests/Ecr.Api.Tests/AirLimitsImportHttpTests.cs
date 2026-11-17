@@ -34,7 +34,7 @@ namespace Ecr.Api.Tests;
 /// the re-import test doubles the rows.
 /// </remarks>
 [Collection("SqlServer")]
-public sealed class AirLimitsImportHttpTests(SqlServerFixture sql, ITestOutputHelper output)
+public sealed partial class AirLimitsImportHttpTests(SqlServerFixture sql, ITestOutputHelper output)
 {
     private static readonly SemaphoreSlim Gate = new(1, 1);
     private static bool prepared;

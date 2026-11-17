@@ -48,6 +48,10 @@ public sealed class ActivateProjectTests
     {
         _clock.UtcNow.Returns(Now);
         _user.UserId.Returns(9);
+
+        // B158 (b10): добудова календаря йде в транзакції під блоком проєкту — підміна виконує тіло, як справжня.
+        _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.ArgAt<Func<CancellationToken, Task>>(0)(call.ArgAt<CancellationToken>(1)));
         // ⚠ Грант на 10 — це `ProjectBuilder.Project()`'s дефолтний Id
         // (`Q-179`, аудит фази 2, авторизація).
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())

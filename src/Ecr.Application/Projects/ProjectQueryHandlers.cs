@@ -786,24 +786,34 @@ public sealed class ActivateProjectHandler(
         // кроку, про який ніде не написано. Порядок виклику двох маршрутів не
         // може бути частиною контракту, якої в контракті немає.
         //
-        var created = await calendar.MaterializeAsync(project, clock.UtcNow, ct).ConfigureAwait(false);
-
-        if (created.Count > 0)
+        // ⛔ B158 (b10): добудова й її збереження — під блоком рядка проєкту, проєкт перечитується ПІСЛЯ блоку
+        // (той самий об'єкт контексту: EF дотягує періоди, які встиг зберегти одночасний `GET …/periods`), тож
+        // календар не будується вдруге і не падає на `UQ_Period`.
+        IReadOnlyList<Period> created = [];
+        await uow.ExecuteInTransactionAsync(async innerCt =>
         {
-            // ⛔ ЗБЕРЕЖЕННЯ ТУТ — вимушене, і ціна назвала себе сама. Нижче
-            // `SetCurrentPeriodAutomatically` записує ІДЕНТИФІКАТОР періоду, а
-            // `Period.Id` призначає база (`Entity<int>`, identity). Щойно
-            // побудований період до збереження має `Id = 0`, тож без цього
-            // рядка активація новоствореного проєкту прописала б поточним
-            // періодом нуль — мовчки, без жодної помилки.
-            //
-            // ⚠ Отже транзакція таки ділиться надвоє, і це свідомий розмін.
-            // Проміжний стан — «календар є, проєкт ще чернетка» — рівно той
-            // самий, що існував і досі (його лишав `GET …/periods`), він
-            // безпечний і самовиправний: календар ідемпотентний, повторна
-            // активація доведе справу до кінця.
-            await uow.SaveChangesAsync(ct).ConfigureAwait(false);
-        }
+            created = [];
+            await periods.LockProjectCalendarAsync(projectId, innerCt).ConfigureAwait(false);
+            project = await periods.FindProjectAsync(projectId, innerCt).ConfigureAwait(false)
+                      ?? throw ProjectVisibility.NotFound(projectId);
+            created = await calendar.MaterializeAsync(project, clock.UtcNow, innerCt).ConfigureAwait(false);
+            if (created.Count > 0)
+            {
+                // ⛔ ЗБЕРЕЖЕННЯ ТУТ — вимушене, і ціна назвала себе сама. Нижче
+                // `SetCurrentPeriodAutomatically` записує ІДЕНТИФІКАТОР періоду, а
+                // `Period.Id` призначає база (`Entity<int>`, identity). Щойно
+                // побудований період до збереження має `Id = 0`, тож без цього
+                // рядка активація новоствореного проєкту прописала б поточним
+                // періодом нуль — мовчки, без жодної помилки.
+                //
+                // ⚠ Отже транзакція таки ділиться надвоє, і це свідомий розмін.
+                // Проміжний стан — «календар є, проєкт ще чернетка» — рівно той
+                // самий, що існував і досі (його лишав `GET …/periods`), він
+                // безпечний і самовиправний: календар ідемпотентний, повторна
+                // активація доведе справу до кінця.
+                await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+            }
+        }, ct).ConfigureAwait(false);
 
         // ⚠ Об'єднання ЯВНЕ: `MaterializeAsync` кладе нові періоди у сховище, а
         // не в колекцію агрегата (див. його ⚠). Порахувати стани по

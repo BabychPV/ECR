@@ -51,33 +51,45 @@ public sealed class BuildPeriodCalendarHandler(
             return 0;
         }
 
-        var project = await periods.FindProjectAsync(projectId, ct).ConfigureAwait(false);
-        if (project is null)
-        {
-            return 0;
-        }
-
-        // ⚠ Сама побудова живе в `PeriodCalendarMaterializer`, бо той самий
-        // календар потрібен і активації проєкту, у якої ІНШЕ право. Тут
-        // лишилося рівно те, що специфічне для цього маршруту: перевірка прав
-        // вище і збереження нижче.
         var now = clock.UtcNow;
-        var created = await materializer.MaterializeAsync(project, now, ct).ConfigureAwait(false);
+        var createdCount = 0;
 
-        // ⛔ Зберігаємо ЗАВЖДИ, а не лише коли щось створено. До `A7-26` тут
-        // стояло дострокове повернення при `created.Count == 0` — і перераховані
-        // межі наявних періодів просто губилися. Зміна політики або поясу
-        // майданчика не діяла ніколи, а період, створений в обхід календаря,
-        // назавжди лишався з межами `0001-01-01`, тобто вважався закритим.
-        //
-        // ⚠ Це не зайвий запис: EF надсилає UPDATE лише для рядків, які справді
-        // змінилися, тому другий виклик поспіль не робить нічого.
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        // ⛔ B158 (b10): добудова — під блоком рядка проєкту, і проєкт із періодами читається ПІСЛЯ блоку. Доти два
+        // одночасні `GET …/periods` обидва бачили «періодів немає», будували той самий календар, і другий падав на
+        // `UQ_Period` — 500 на читанні. Тепер другий чекає на блок, бачить періоди першого і нічого не дублює.
+        await uow.ExecuteInTransactionAsync(async innerCt =>
+        {
+            createdCount = 0;
+            await periods.LockProjectCalendarAsync(projectId, innerCt).ConfigureAwait(false);
+
+            var project = await periods.FindProjectAsync(projectId, innerCt).ConfigureAwait(false);
+            if (project is null)
+            {
+                return;
+            }
+
+            // ⚠ Сама побудова живе в `PeriodCalendarMaterializer`, бо той самий
+            // календар потрібен і активації проєкту, у якої ІНШЕ право. Тут
+            // лишилося рівно те, що специфічне для цього маршруту: перевірка прав
+            // вище і збереження нижче.
+            var created = await materializer.MaterializeAsync(project, now, innerCt).ConfigureAwait(false);
+
+            // ⛔ Зберігаємо ЗАВЖДИ, а не лише коли щось створено. До `A7-26` тут
+            // стояло дострокове повернення при `created.Count == 0` — і перераховані
+            // межі наявних періодів просто губилися. Зміна політики або поясу
+            // майданчика не діяла ніколи, а період, створений в обхід календаря,
+            // назавжди лишався з межами `0001-01-01`, тобто вважався закритим.
+            //
+            // ⚠ Це не зайвий запис: EF надсилає UPDATE лише для рядків, які справді
+            // змінилися, тому другий виклик поспіль не робить нічого.
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+            createdCount = created.Count;
+        }, ct).ConfigureAwait(false);
 
         // ⚠ Межі рахуються від дат проєкту, а не від «зараз»; момент потрібен
         // лише сторожу «межу закриття вже минуто» (V9-01) і журналу викликача.
         BuiltAt = now;
-        return created.Count;
+        return createdCount;
     }
 
     /// <summary>Момент останньої побудови.</summary>

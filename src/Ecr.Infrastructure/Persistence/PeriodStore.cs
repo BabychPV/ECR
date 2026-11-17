@@ -32,7 +32,13 @@ public sealed class PeriodStore(EcrDbContext db, Ecr.Domain.Abstractions.IClock?
         // Періоди завантажуються явно: календар звіряє наявні ключі, і
         // порожня колекція означала б «періодів немає» — тобто побудову
         // дублікатів на кожному виклику.
-        await db.Entry(project).Collection(p => p.Periods).LoadAsync(ct).ConfigureAwait(false);
+        //
+        // ⛔ B158 (b10): `IsLoaded = false` — повторний виклик на тому самому контексті (активація: прочитати проєкт,
+        // взяти блок, перечитати) інакше НЕ ходив би в базу (EF пропускає завантаження вже завантаженої колекції) і
+        // не побачив би періодів, які одночасний запит зберіг між двома читаннями, — дублікат на `UQ_Period`.
+        var periods = db.Entry(project).Collection(p => p.Periods);
+        periods.IsLoaded = false;
+        await periods.LoadAsync(ct).ConfigureAwait(false);
 
         // B74: шаблони проєкту (клон копіює їх; AttachTemplate звіряє повтор за завантаженою навігацією).
         await db.Entry(project).Collection(p => p.Templates).LoadAsync(ct).ConfigureAwait(false);
@@ -97,6 +103,28 @@ public sealed class PeriodStore(EcrDbContext db, Ecr.Domain.Abstractions.IClock?
                 SELECT * FROM doc.Period WITH (UPDLOCK, ROWLOCK) WHERE Id = {periodId}
                 """)
             .FirstOrDefaultAsync(ct);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ <c>UPDLOCK</c> обходить версіонування рядків RCSI (звичайний <c>SELECT</c> не чекав би ні на кого);
+    /// <c>HOLDLOCK</c> тримає блок до кінця транзакції. Поза транзакцією блок звільнився б одразу — помилка
+    /// програміста, тому <see cref="InvalidOperationException"/>.
+    /// </remarks>
+    public async Task LockProjectCalendarAsync(int projectId, CancellationToken ct)
+    {
+        if (db.Database.CurrentTransaction is null)
+        {
+            throw new InvalidOperationException(
+                "LockProjectCalendarAsync викликано поза транзакцією: блок рядка проєкту звільнився б одразу.");
+        }
+
+        await db.Database.ExecuteSqlAsync(
+            $"""
+            DECLARE @locked int;
+            SELECT @locked = Id FROM doc.Project WITH (UPDLOCK, HOLDLOCK, ROWLOCK) WHERE Id = {projectId};
+            """,
+            ct).ConfigureAwait(false);
+    }
 
     /// <inheritdoc />
     public void AddRange(IEnumerable<Period> periods) => db.Periods.AddRange(periods);

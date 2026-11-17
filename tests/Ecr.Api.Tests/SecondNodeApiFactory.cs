@@ -91,6 +91,7 @@ public sealed class SecondNodeApiFactory : WebApplicationFactory<Program>
         // Наздоганяння нічних задач вимкнено з тієї ж причини, що й cron (`NightlyCatchUp`, як у EcrApiFactory).
         builder.UseSetting(Ecr.Api.Startup.NightlyCatchUp.EnabledKey, "false");
         builder.ConfigureTestServices(RecurringTriggerVeto.Register);
+        builder.ConfigureTestServices(RetryingStartupSeed.Register);
     }
 
     /// <inheritdoc />

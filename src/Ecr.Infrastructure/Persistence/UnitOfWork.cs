@@ -152,6 +152,12 @@ public sealed class UnitOfWork(
                 throw methodologyRefusal;
             }
 
+            // ⛔ B158 (b): гонки шаблонів, версій, структури версії, політик і календаря періодів.
+            if (TemplateDuplicateKeys.TryMap(ex) is { } templateRefusal)
+            {
+                throw templateRefusal;
+            }
+
             // Дублікат ключа сутності, для якої немає доменного
             // повідомлення, — краще необроблений 500 із CorrelationId, ніж
             // вигадана відповідь про те, чого перевірка тут не знає.
@@ -633,6 +639,12 @@ public sealed class UnitOfWork(
                 {
                     ["messageKey"] = "err.ECR-CELL-0409.concurrentChange",
                 });
+        }
+
+        // ⛔ B158 (лінія d): довідники, профілі імпорту, версії звітів, групові призначення, перейменування ролі.
+        if (DuplicateRefusalsAdmin.TryMap(ex) is { } admin)
+        {
+            return admin;
         }
 
         foreach (var entry in ex.Entries)

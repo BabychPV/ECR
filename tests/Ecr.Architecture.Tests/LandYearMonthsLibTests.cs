@@ -20,7 +20,8 @@ namespace Ecr.Architecture.Tests;
 /// місце підсумку; Selector не прибирати (<c>$new.Add($c)</c>) — червоніє прибирання; у класифікації не пропускати місячні
 /// колонки — червоніє повтор; у <c>Test-LandYearMonthsCodes</c> не порівнювати родину опублікованого коду — червоніє R-3;
 /// у <c>Get-LandMonthBandPlan</c> не виключати колонки груп виходу з місячних блоків — червоніють смуги; у
-/// <c>Stage-YearMonths</c> зняти гейт «разом з іншими етапами» — червоніє етап.</remarks>
+/// <c>Stage-YearMonths</c> зняти вимогу <c>-StructureMode Sql</c> разом із Template (✎ B5 17.11: гейт «лише план» знято) —
+/// червоніє етап.</remarks>
 /// <remarks>
 /// Перевірено 12.11 (lane/integ-land-year-builder): кожна з восьми мутацій давала 1–5 червоних тестів класу.
 /// </remarks>
@@ -295,8 +296,10 @@ public sealed class LandYearMonthsLibTests
 
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
-    public void Етап_YearMonths_лише_план_поки_немає_L0()
+    public void Етап_YearMonths_застосовується_разом_із_Template_лише_в_Sql()
     {
+        // ✎ B5 17.11: сервер має L0b (month-input-aliases) і L1/L2 - гейт «лише план» знято; YearMonths разом із Template
+        // застосовує план (клон 1.0.18 -> 1.0.19), прибирання й порядок колонок - SQL-гілкою, тож Api-режим відмовляє.
         var output = Run("""
             $build = Join-Path $land 'Build-LandTemplate.ps1'
             $ast = [System.Management.Automation.Language.Parser]::ParseFile($build, [ref]$null, [ref]$null)
@@ -307,19 +310,24 @@ public sealed class LandYearMonthsLibTests
             . ([scriptblock]::Create($fn.Extent.Text))
             function Try-Stage { try { Stage-YearMonths; return 'OK' } catch { return $_.Exception.Message } }
             $script:Mdl = New-Fixture
-            $Stage = @('YearMonths'); $DryRun = $false; $Layout = 'PerMonthCopies'
+            $Stage = @('YearMonths'); $DryRun = $false; $Layout = 'PerMonthCopies'; $StructureMode = 'Sql'
             Write-Host ('NOLAYOUT=' + (Try-Stage))
-            $Layout = 'YearWithMonthColumns'; $Stage = @('YearMonths', 'Template')
-            Write-Host ('WITHTEMPLATE=' + (Try-Stage))
+            $Layout = 'YearWithMonthColumns'; $Stage = @('YearMonths', 'Template'); $StructureMode = 'Api'
+            Write-Host ('WITHAPI=' + (Try-Stage))
+            $script:Mdl = New-Fixture; $StructureMode = 'Sql'
+            Write-Host ('WITHTEMPLATE=' + (Try-Stage) + '|' + @($script:YearMonthsPlan.Aliases).Count)
+            $script:Mdl = New-Fixture
             $YearMonthsPlanOut = Join-Path $root 'plan.json'; $Stage = @('YearMonths')
             Write-Host ('INREPO=' + (Try-Stage))
+            $script:Mdl = New-Fixture
             $YearMonthsPlanOut = $null
             Write-Host ('ALONE=' + (Try-Stage) + '|' + $script:Mdl.yearMonthsTargetVersion + '|' + @((Get-Table $script:Mdl 'A').columns).Count)
             """);
 
         Assert.Contains("NOLAYOUT=-Stage YearMonths потребує -Layout YearWithMonthColumns", output, StringComparison.Ordinal);
-        Assert.Contains("WITHTEMPLATE=-Stage YearMonths разом з етапами (Template) поки заборонено", output, StringComparison.Ordinal);
-        Assert.Contains("(L0)", output, StringComparison.Ordinal);
+        Assert.Contains("WITHAPI=-Stage YearMonths разом з Template потребує -StructureMode Sql", output, StringComparison.Ordinal);
+        Assert.Contains("WITHTEMPLATE=OK|", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("поки заборонено", output, StringComparison.Ordinal);
         Assert.Contains("INREPO=-YearMonthsPlanOut усередині репозиторію", output, StringComparison.Ordinal);
         // 13 + DIY + Fuel… : Fuel, X×12, Dens/Days/Tr ×12, DIY, Out_A/Out_B ×12 = 1 + 12 + 36 + 1 + 24
         Assert.Contains("ALONE=OK|1.0.17.0|74\n", output, StringComparison.Ordinal);
