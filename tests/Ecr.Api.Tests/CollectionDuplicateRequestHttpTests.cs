@@ -126,6 +126,60 @@ public sealed partial class CollectionDuplicateRequestHttpTests(
         Assert.Equal(1, await db.NotificationChannels.CountAsync(c => c.Name == raced).ConfigureAwait(true));
     }
 
+    /// <summary>
+    /// c2, шлях перейменування: два РІЗНІ канали одночасно перейменовують <c>PUT …/channels/{id}</c> на ту саму назву —
+    /// один <c>200</c>, другий та сама відмова <c>ECR-REQ-0422 notificationChannelNameTaken</c> з <c>{name}</c>, що й
+    /// послідовне перейменування (переможений рядок у трекері — <c>Modified</c>, не <c>Added</c>).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "B158")]
+    public async Task c2_Перейменування_двох_каналів_на_одну_назву_одночасно_одне_200_друге_та_сама_відмова_що_й_послідовно()
+    {
+        var (one, two) = await SignInTwiceAsync(["System.ManageNotifications"]).ConfigureAwait(true);
+        using var first = one;
+        using var second = two;
+
+        const string url = "/api/v1/notifications/channels";
+
+        async Task<string> CreateAsync()
+        {
+            var initial = $"b158c-{Guid.NewGuid():N}";
+            var created = await SendAsync(
+                first, HttpMethod.Post, url, new { kind = "TeamsWebhook", name = initial, settings = new { title = "ECR" } })
+                .ConfigureAwait(true);
+            Assert.True(created.Status == HttpStatusCode.Created, $"{created}\n{App.ErrorsText}");
+            return $"{url}/{created.Id}";
+        }
+
+        static object Rename(string name) => new { name, isEnabled = true, settings = new { title = "ECR" } };
+
+        // Послідовно.
+        var (a, b) = (await CreateAsync().ConfigureAwait(true), await CreateAsync().ConfigureAwait(true));
+        var name = $"b158c-{Guid.NewGuid():N}";
+        var renamed = await SendAsync(first, HttpMethod.Put, a, Rename(name)).ConfigureAwait(true);
+        var repeated = await SendAsync(first, HttpMethod.Put, b, Rename(name)).ConfigureAwait(true);
+
+        Assert.True(renamed.Status == HttpStatusCode.OK, $"{renamed}\n{App.ErrorsText}");
+        AssertRefusal(repeated, repeated.Status, "ECR-REQ-0422", "err.ECR-REQ-0422.notificationChannelNameTaken", ("name", name));
+
+        // Одночасно.
+        var (c, d) = (await CreateAsync().ConfigureAwait(true), await CreateAsync().ConfigureAwait(true));
+        var raced = $"b158c-{Guid.NewGuid():N}";
+        var replies = await RaceAsync(
+            "channel-rename", (first, HttpMethod.Put, c, Rename(raced)), (second, HttpMethod.Put, d, Rename(raced)))
+            .ConfigureAwait(true);
+
+        AssertNoServerError(replies);
+        Assert.Single(replies, r => r.Status == HttpStatusCode.OK);
+        AssertRefusal(
+            replies.Single(r => r.Status != HttpStatusCode.OK),
+            repeated.Status, "ECR-REQ-0422", "err.ECR-REQ-0422.notificationChannelNameTaken", ("name", raced));
+
+        await using var db = Db();
+        Assert.Equal(1, await db.NotificationChannels.CountAsync(ch => ch.Name == raced).ConfigureAwait(true));
+    }
+
     // ───────────────────────────── c3: джерела даних ─────────────────────────────
 
     /// <summary>
@@ -234,14 +288,21 @@ public sealed partial class CollectionDuplicateRequestHttpTests(
         => element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 
     /// <summary>Два однакові <c>POST</c>, відпущені в конвеєр РАЗОМ (проміжне ПЗ тесту чекає на обидва).</summary>
-    private async Task<Reply[]> RaceAsync(string label, HttpClient first, HttpClient second, string url, object body)
+    private Task<Reply[]> RaceAsync(string label, HttpClient first, HttpClient second, string url, object body)
+        => RaceAsync(label, (first, HttpMethod.Post, url, body), (second, HttpMethod.Post, url, body));
+
+    /// <summary>Два запити (метод, адреса й тіло — свої в кожного), відпущені в конвеєр РАЗОМ.</summary>
+    private async Task<Reply[]> RaceAsync(
+        string label,
+        (HttpClient Client, HttpMethod Method, string Url, object Body) first,
+        (HttpClient Client, HttpMethod Method, string Url, object Body) second)
     {
         var key = Guid.NewGuid().ToString("N");
         var meeting = shared.Meetings.GetOrAdd(key, _ => new Meeting());
 
         var replies = await Task.WhenAll(
-            Task.Run(() => SendAsync(first, HttpMethod.Post, url, body, key)),
-            Task.Run(() => SendAsync(second, HttpMethod.Post, url, body, key))).ConfigureAwait(false);
+            Task.Run(() => SendAsync(first.Client, first.Method, first.Url, first.Body, key)),
+            Task.Run(() => SendAsync(second.Client, second.Method, second.Url, second.Body, key))).ConfigureAwait(false);
 
         foreach (var reply in replies)
         {

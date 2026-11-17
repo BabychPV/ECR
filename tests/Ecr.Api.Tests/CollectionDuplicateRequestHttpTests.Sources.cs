@@ -186,6 +186,80 @@ public sealed partial class CollectionDuplicateRequestHttpTests
         }
     }
 
+    /// <summary>
+    /// c5, шлях типового розкладу: два РІЗНІ мапінги подій (різні документ і таблиця) однієї сутності без розкладу
+    /// одночасно — кожен заводить типовий розклад (Q-2), і переможеного відбиває <c>UQ_CollectionSchedule</c>. Обробника,
+    /// що перечитав би переможця, тут немає: один <c>200</c>, другий загальний <c>409 ECR-CELL-0409 concurrentChange</c>
+    /// («повторіть»), а не 500; транзакція переможеного відкочена разом із його мапінгом, повтор проходить, і розклад
+    /// сутності — рівно один.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "B158")]
+    public async Task c5_Два_різні_мапінги_подій_однієї_сутності_одночасно_одне_200_друге_загальний_409_і_один_розклад()
+    {
+        var standA = await ArrangeTableAsync().ConfigureAwait(true);
+        var standB = await ArrangeTableAsync().ConfigureAwait(true);
+        var (one, two) = await SignInTwiceAsync(
+            ["Integration.Manage"],
+            (ResourceKind.Project, standA.ProjectId, GrantLevel.Manage),
+            (ResourceKind.Project, standB.ProjectId, GrantLevel.Manage)).ConfigureAwait(true);
+        using var first = one;
+        using var second = two;
+
+        static object Body(int sourceEntityId, TableStand stand) => new
+        {
+            sourceEntityId,
+            documentId = stand.DocumentId,
+            tableDefId = stand.TableDefId,
+            volumeMode = "None",
+            fields = new[]
+            {
+                new { targetColumnDefId = stand.Start, sourceAttribute = "$start", attributeScope = "Event", valueKind = "Direct" },
+                new { targetColumnDefId = stand.End, sourceAttribute = "$end", attributeScope = "Event", valueKind = "Direct" },
+            },
+        };
+
+        const string url = "/api/v1/source-event-maps";
+
+        try
+        {
+            var raced = await AddSourceEntityAsync(standA.DataSourceId, active: true).ConfigureAwait(true);
+            var replies = await RaceAsync(
+                "event-map-default-schedule",
+                (first, HttpMethod.Post, url, Body(raced, standA)),
+                (second, HttpMethod.Post, url, Body(raced, standB))).ConfigureAwait(true);
+
+            AssertNoServerError(replies);
+            var loser = Array.FindIndex(replies, r => r.Status != HttpStatusCode.OK);
+            Assert.True(loser >= 0, $"обидва 200 — гонка за типовий розклад не відтворилась:\n{replies[0]}\n{replies[1]}");
+            Assert.Single(replies, r => r.Status == HttpStatusCode.OK);
+            AssertRefusal(replies[loser], HttpStatusCode.Conflict, "ECR-CELL-0409", "err.ECR-CELL-0409.concurrentChange");
+
+            await using (var db = Db())
+            {
+                Assert.Equal(1, await db.SourceEventMaps.CountAsync(m => m.SourceEntityId == raced).ConfigureAwait(true));
+                Assert.Equal(1, await db.CollectionSchedules.CountAsync(s => s.SourceEntityId == raced).ConfigureAwait(true));
+            }
+
+            // Повтор переможеного: розклад уже є, тож мапінг заводиться без другого розкладу.
+            var retried = await SendAsync(
+                loser == 0 ? first : second, HttpMethod.Post, url, Body(raced, loser == 0 ? standA : standB)).ConfigureAwait(true);
+            Assert.True(retried.Status == HttpStatusCode.OK, $"повтор переможеного: {retried}\n{App.ErrorsText}");
+
+            await using (var db = Db())
+            {
+                Assert.Equal(2, await db.SourceEventMaps.CountAsync(m => m.SourceEntityId == raced).ConfigureAwait(true));
+                Assert.Equal(1, await db.CollectionSchedules.CountAsync(s => s.SourceEntityId == raced).ConfigureAwait(true));
+            }
+        }
+        finally
+        {
+            await DeactivateAsync(standA.DataSourceId).ConfigureAwait(true);
+            await DeactivateAsync(standB.DataSourceId).ConfigureAwait(true);
+        }
+    }
+
     // ───────────────────────────── c7: прив'язки вікна рядка ─────────────────────────────
 
     /// <summary>

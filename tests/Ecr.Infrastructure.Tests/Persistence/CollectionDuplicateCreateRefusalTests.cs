@@ -57,6 +57,35 @@ public sealed class CollectionDuplicateCreateRefusalTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Finding", "B158")]
+    public async Task c2_Перейменування_каналу_на_зайняту_назву_Modified_дає_notificationChannelNameTaken_а_не_сирий_виняток_бази()
+    {
+        // Шлях `PUT …/channels/{id}`: переможений рядок у трекері — Modified (наявний канал), а не Added.
+        var (winnerId, loserId) = (await AddChannelAsync(), await AddChannelAsync());
+        var name = $"b158c-{Guid.NewGuid():N}";
+
+        await using (var winner = Context())
+        {
+            var channel = await winner.NotificationChannels.SingleAsync(c => c.Id == winnerId);
+            channel.Update(name, "{}", true, Clock.UtcNow, null);
+            await new UnitOfWork(winner).SaveChangesAsync(CancellationToken.None);
+        }
+
+        await using var loser = Context();
+        var renamed = await loser.NotificationChannels.SingleAsync(c => c.Id == loserId);
+        renamed.Update(name, "{}", true, Clock.UtcNow, null);
+        Assert.Equal(EntityState.Modified, loser.Entry(renamed).State);
+
+        var thrown = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => new UnitOfWork(loser).SaveChangesAsync(CancellationToken.None));
+
+        Assert.Equal("ECR-REQ-0422", thrown.ErrorCode);
+        Assert.Equal("err.ECR-REQ-0422.notificationChannelNameTaken", thrown.Details!["messageKey"]);
+        Assert.Equal(name, thrown.Details["name"]);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "B158")]
     public async Task c3_Дубль_коду_джерела_даних_дає_dataSourceCodeTaken_а_не_сирий_виняток_бази()
     {
         var code = $"B158DS{Guid.NewGuid():N}"[..14];
@@ -203,6 +232,17 @@ public sealed class CollectionDuplicateCreateRefusalTests(SqlServerFixture sql)
         await db.SaveChangesAsync();
 
         return new TableStand(chain.TableDefId, chain.DocumentId, start, end, target, unit.Id);
+    }
+
+    private async Task<int> AddChannelAsync()
+    {
+        await using var db = Context();
+        var channel = new NotificationChannel(
+            NotificationChannelKind.TeamsWebhook, $"b158c-{Guid.NewGuid():N}", "{}", Clock.UtcNow, null);
+        db.NotificationChannels.Add(channel);
+        await db.SaveChangesAsync();
+
+        return channel.Id;
     }
 
     private async Task<(int Id, string Code)> AddDataSourceAsync()
