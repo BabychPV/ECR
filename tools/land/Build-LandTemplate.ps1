@@ -67,8 +67,12 @@
       YearMonths    (лише явно, в All не входить; LAND-YEAR L4, Land 1.0.17.0) перебудова моделі під річний аркуш у пам'яті:
                     немісячні Calculated і місячно-залежні Formula -> _M01.._M12 (по виходу, групи MB_O_<код>), селектори
                     «(current period)» прибрано (псевдоніми місяця), річні підсумки - лише як у xlsm (land-year-totals.json).
-                    Потребує -Layout YearWithMonthColumns. Поки сервер без cfg.MonthInputAlias (L0) і маршрутизації обчислених
-                    (L1/L2) - лише план: разом з іншими етапами без -DryRun відмовляє; -YearMonthsPlanOut <файл поза репо> - план JSON
+                    Потребує -Layout YearWithMonthColumns; -YearMonthsPlanOut <файл поза репо> - план JSON.
+                    ✎ B5 17.11: разом з Template/Methodologies ЗАСТОСОВУЄ план (LandYearMonthsApply.Lib.ps1): клон останньої
+                    опублікованої PerMonthCopies (1.0.18.0) у наступну (1.0.19.0) або -YearMonthsTargetVersion; чернетка цілі -
+                    продовження; опублікована ціль з іншою розкладкою - відмова; колонки +/- (SQL, м'яко) і порядок, формули,
+                    групи виходів, розкладка, псевдоніми місяця (PUT лише за різниці), публікація; Methodologies - прив'язки
+                    виходів до 12 місячних колонок (GET, PUT лише відсутніх). -DryRun - план по кроках без мережі.
     ⛔ Не запускати проти робочої бази замовника. Скрипт нічого не видаляє, окрім явного
     -PruneStaleTables (м'яке видалення таблиць чернетки, яких немає в моделі; без прапора - лише попередження).
     Формули колонок наявної чернетки-клону порівнюються з моделлю й оновлюються (D-YE-1). Прод-БД старої системи тут
@@ -140,6 +144,9 @@ param(
     [ValidateSet('YearWithMonthColumns', 'PerMonthCopies')][string]$Layout = 'PerMonthCopies',
     # -Stage YearMonths (LAND-YEAR L4): куди записати план (модель 1.0.17.0, прив'язки, псевдоніми, групи) - лише поза репозиторієм.
     [string]$YearMonthsPlanOut,
+    # -Stage YearMonths + Template: у яку версію будувати річну LAND_UI. Порожньо - наступна після останньої опублікованої
+    # (1.0.18.0 -> 1.0.19.0); чернетка цього номера - продовження; опублікована річна - повтор без змін.
+    [string]$YearMonthsTargetVersion,
     [switch]$DryRun
 )
 
@@ -158,6 +165,7 @@ if (-not $afFile) { $afFile = Join-Path $repo 'docs\delivery\reference-data\land
 . (Join-Path $here 'LandMonthBands.Lib.ps1')
 . (Join-Path $here 'LandTemplateDraft.Lib.ps1')
 . (Join-Path $here 'LandYearMonths.Lib.ps1')
+. (Join-Path $here 'LandYearMonthsApply.Lib.ps1')
 Set-StrictMode -Off
 
 # Безпека стенда: лише локальні API і SQL (база з іменем EcrLand*); мутації лише з явним
@@ -295,13 +303,10 @@ Log ("Формул комірок (Cell, PUT formulas/cell): {0}" -f $cellFormul
 function Stage-YearMonths {
     Log '== YearMonths (LAND-YEAR L4) =='
     if ($Layout -ne 'YearWithMonthColumns') { throw '-Stage YearMonths потребує -Layout YearWithMonthColumns: місячні колонки результатів мають сенс лише в річному аркуші.' }
-    $others = @($Stage | Where-Object { $_ -ne 'YearMonths' })
-    if ($others.Count -gt 0 -and -not $DryRun) {
-        # L0: cfg.MonthInputAlias (аргументи методологій за кодом селектора/формули); L1/L2: власник обчисленої місячної комірки
-        # і накладання результату прогону місяця m. Без них версія з цією моделлю дала б #ARG і порожні колонки результатів.
-        throw ("-Stage YearMonths разом з етапами ($($others -join ', ')) поки заборонено: сервер ще без cfg.MonthInputAlias (L0) " +
-            'і маршрутизації обчислених комірок (L1/L2). Запускайте YearMonths окремо (план) або з -DryRun.')
-    }
+    # ✎ 17.11 (B5): сервер має L0b (PUT …/month-input-aliases) і L1/L2 - гейт «лише план» знято: YearMonths разом із
+    # Template/Methodologies застосовує план (клон 1.0.18 -> 1.0.19, колонки, псевдоніми, прив'язки). Прибирання колонок
+    # і порядок - SQL-гілкою структури, тому з Template лише -StructureMode Sql.
+    if ((($Stage -contains 'All') -or ($Stage -contains 'Template')) -and $StructureMode -ne 'Sql') { throw '-Stage YearMonths разом з Template потребує -StructureMode Sql (прибирання й порядок колонок клону - SQL-гілкою).' }
     $months = (Read-LandMonthBandSource (Join-Path $here 'land-month-bands.json')).months
     $totals = ([IO.File]::ReadAllText((Join-Path $here 'land-year-totals.json'), [Text.Encoding]::UTF8) | ConvertFrom-Json).totals
     $ym = Convert-LandYearMonthsModel -Model $script:Mdl -MonthNames $months -Totals $totals
@@ -311,7 +316,7 @@ function Stage-YearMonths {
     $sum = { param($prop) [int](@($ym.Tables) | Measure-Object -Property $prop -Sum).Sum }
     Log ("  таблиць {0}; колонок +{1} / -{2} (селекторів {3}, змінних формул {4}, результатів {5}); підсумків xlsm додано {6}; змін {7}" -f `
             @($ym.Tables).Count, (& $sum 'Added'), (& $sum 'Removed'), (& $sum 'Selectors'), (& $sum 'Varying'), (& $sum 'Calculated'), (& $sum 'Totals'), $ym.Changes)
-    Log ("  місячних колонок результатів (прив'язки): {0}; псевдонімів місяця (L0): {1}; груп виходів: {2}; цільова версія {3}" -f `
+    Log ("  місячних колонок результатів (прив'язки): {0}; псевдонімів місяця (L0): {1}; груп виходів: {2}; позначка моделі {3} (версію на стенді обирає Template: -YearMonthsTargetVersion або наступна після опублікованої)" -f `
             @($ym.Bindings).Count, @($ym.Aliases).Count, @($ym.Groups).Count, $ym.Model.yearMonthsTargetVersion)
     if ($YearMonthsPlanOut) {
         $full = [IO.Path]::GetFullPath($YearMonthsPlanOut)
@@ -322,9 +327,12 @@ function Stage-YearMonths {
         Log "  план: $full"
     }
     $script:Mdl = $ym.Model
+    $script:YearMonthsPlan = $ym
 }
+$script:YearMonthsPlan = $null
 if ($Stage -contains 'YearMonths') { Stage-YearMonths }
 if ($DryRun) {
+    if ($script:YearMonthsPlan) { Write-LandYearMonthsPlanReport -Ym $script:YearMonthsPlan -TargetVersion $YearMonthsTargetVersion -Log { param($logLine) Log $logLine } }
     # D-423: перелік String-колонок моделі, що читаються текстовими мостами, - кандидати Decimal->String у клоні (сам клон
     # у DryRun не читається; точний перелік змін типу друкує Stage Template у звичайному прогоні).
     $txtSrc = @(Get-LandTextBridgeSources $Mdl)
@@ -1176,6 +1184,90 @@ function Set-TableHeaderStyles {
     else { Log "  стиль шапок таблиць: $($changes.Count) змін (PATCH presentation)" }
 }
 
+# B5 (17.11): версія для річної LAND_UI за планом YearMonths (LandYearMonthsApply.Lib.ps1). Розкладку версій читає з
+# GET …/structure (поле layout) - лише для останньої опублікованої і для опублікованої з номером -YearMonthsTargetVersion.
+# Повертає id чернетки (нова чи наявна) або $null, коли ціль уже опублікована річною (повтор - 0 змін).
+function Select-LandYearMonthsDraft($vers) {
+    $lay = @{}
+    $pubs = @($vers | Where-Object { [string]$_.status -eq 'Published' } | Sort-Object { [int]$_.id } -Descending)
+    $need = @($pubs | Select-Object -First 1)
+    if ($YearMonthsTargetVersion) { $need += @($pubs | Where-Object { [string]$_.version -eq $YearMonthsTargetVersion }) }
+    foreach ($v in $need) { if (-not $lay.ContainsKey([int]$v.id)) { $lay[[int]$v.id] = (Api GET "/api/v1/template-versions/$($v.id)/structure").Json.layout } }
+    $yp = Get-LandYearMonthsVersionPlan -Versions $vers -Layouts $lay -TargetVersion $YearMonthsTargetVersion
+    Log ("  YearMonths: ціль {0} ({1}); джерело {2} (id {3}); дія {4}" -f $yp.NewVersion, $yp.Why, $yp.SourceVersion, $yp.SourceId, $yp.Action)
+    switch ($yp.Action) {
+        'TargetPublished' {
+            $S.VersionId = $yp.PublishedId
+            Log "  версія $($yp.NewVersion) (id $($yp.PublishedId)) уже опублікована з YearWithMonthColumns - структуру не чіпаю (повтор, 0 змін)."
+            return $null
+        }
+        'ResumeDraft' { Log "  продовження: наявна чернетка $($yp.DraftVersion) (id $($yp.DraftId)), нового клону немає"; return [int]$yp.DraftId }
+        default {
+            foreach ($sk in @($yp.SkippedDrafts)) { Log "  наявну чернетку $sk пропущено (не змінюється й не видаляється)" }
+            $id = New-LandTemplateCloneDraft -Plan $yp
+            Log "  клон опублікованої $($yp.SourceVersion) (id $($yp.SourceId), PerMonthCopies) -> чернетка $($yp.NewVersion) (id $id)"
+            return [int]$id
+        }
+    }
+}
+
+# B5 (17.11): у чернетці-клоні місячної версії - те, чого Fill-StructureSql не робить: (1) м'яко прибрати колонки плану
+# (table.yearMonths.removed: селектори, змінні формули, немісячні результати) разом з їхніми формулами (колонки й
+# комірок) - інакше перевірка публікації yearLayoutPeriodFormula бачила б [Period]-формулу немісячної колонки; прив'язки
+# методологій на прибраних колонках сервер не читає (!IsDeleted); (2) Ordinal живих колонок цих таблиць = порядок моделі:
+# нові _Mnn вставляються з Ordinal = позиція в моделі й змішувались би з успадкованими (групи MB_O_* несуміжні).
+# Гарди в SQL: версія - чернетка (Status=0), рядок ще не змінений (повтор - 0 змін). Порціями по 200 (тригери O(n^2)).
+function Set-LandYearMonthsStructureSql([int]$vid) {
+    Assert-EcrMutationAllowed 'YearMonths: SQL-прибирання й порядок колонок'
+    $cn = New-Object System.Data.SqlClient.SqlConnection($effectiveSqlConnection)
+    $cn.Open()
+    try {
+        $live = @(foreach ($r in (Sql-Query $cn ('SELECT c.Id, c.Code, c.Ordinal, t.Code AS T, s.Code AS S FROM cfg.ColumnDef c JOIN cfg.TableDef t ON t.Id=c.TableDefId ' +
+                        'JOIN cfg.SheetDef s ON s.Id=t.SheetDefId WHERE s.TemplateVersionId=@v AND c.IsDeleted=0 AND t.IsDeleted=0 AND s.IsDeleted=0') @{ v = $vid }).Rows) {
+                [pscustomobject]@{ Id = [int]$r.Id; Code = [string]$r.Code; Ordinal = [int]$r.Ordinal; Table = [string]$r.T; Sheet = [string]$r.S } })
+        $gone = @(Get-LandYearMonthsRemovals -Model $Mdl -Live $live)
+        $nCol = 0; $nF = 0
+        if ($gone.Count -gt 0) {
+            $null = Sql-Exec $cn 'CREATE TABLE #YR (N int IDENTITY(1,1) PRIMARY KEY, Id int)'
+            $dt = New-Object System.Data.DataTable; [void]$dt.Columns.Add('Id', [int])
+            foreach ($g in $gone) { [void]$dt.Rows.Add([int]$g.Id) }
+            Assert-EcrMutationAllowed 'SQL-запис (SqlBulkCopy у #YR)'
+            $bc = New-Object System.Data.SqlClient.SqlBulkCopy($cn); $bc.DestinationTableName = '#YR'; [void]$bc.ColumnMappings.Add('Id', 'Id'); $bc.WriteToServer($dt); $bc.Close()
+            $guard = 'JOIN cfg.TableDef t ON t.Id=c.TableDefId JOIN cfg.SheetDef s ON s.Id=t.SheetDefId JOIN cfg.TemplateVersion v ON v.Id=s.TemplateVersionId'
+            for ($lo = 0; $lo -lt $dt.Rows.Count; $lo += 200) {
+                $nF += [int](Sql-Exec $cn ("UPDATE f SET IsDeleted=1 FROM cfg.FormulaDef f JOIN cfg.ColumnDef c ON c.Id=f.ColumnDefId $guard JOIN #YR y ON y.Id=c.Id " +
+                        'WHERE y.N > @lo AND y.N <= @hi AND v.Id=@v AND v.Status=0 AND f.IsDeleted=0') @{ lo = $lo; hi = ($lo + 200); v = $vid })
+                $nCol += [int](Sql-Exec $cn ("UPDATE c SET IsDeleted=1, DeletedAt=SYSUTCDATETIME() FROM cfg.ColumnDef c $guard JOIN #YR y ON y.Id=c.Id " +
+                        'WHERE y.N > @lo AND y.N <= @hi AND v.Id=@v AND v.Status=0 AND c.IsDeleted=0') @{ lo = $lo; hi = ($lo + 200); v = $vid })
+            }
+            $null = Sql-Exec $cn 'DROP TABLE #YR'
+        }
+        Log ("  YearMonths: колонок прибрано (м'яко) {0} із {1} у плані, їхніх формул {2}" -f $nCol, $gone.Count, $nF)
+        foreach ($g in @($gone | Select-Object -First 5)) { Log "    - $($g.Sheet)/$($g.Table).$($g.Code)" }
+        if ($nCol -ne $gone.Count) { throw "YearMonths: прибрано $nCol колонок із $($gone.Count) - версія $vid не чернетка? Відмова." }
+        $goneIds = @{}; foreach ($g in $gone) { $goneIds[[int]$g.Id] = $true }
+        $live2 = @($live | Where-Object { -not $goneIds.ContainsKey([int]$_.Id) })
+        $ord = @(Get-LandYearMonthsOrdinalPlan -Model $Mdl -Live $live2)
+        $nO = 0
+        if ($ord.Count -gt 0) {
+            $null = Sql-Exec $cn 'CREATE TABLE #YO (N int IDENTITY(1,1) PRIMARY KEY, Id int, Ord int)'
+            $dt = New-Object System.Data.DataTable; [void]$dt.Columns.Add('Id', [int]); [void]$dt.Columns.Add('Ord', [int])
+            foreach ($o in $ord) { [void]$dt.Rows.Add([int]$o.Id, [int]$o.To) }
+            Assert-EcrMutationAllowed 'SQL-запис (SqlBulkCopy у #YO)'
+            $bc = New-Object System.Data.SqlClient.SqlBulkCopy($cn); $bc.DestinationTableName = '#YO'
+            [void]$bc.ColumnMappings.Add('Id', 'Id'); [void]$bc.ColumnMappings.Add('Ord', 'Ord'); $bc.WriteToServer($dt); $bc.Close()
+            for ($lo = 0; $lo -lt $dt.Rows.Count; $lo += 200) {
+                $nO += [int](Sql-Exec $cn ('UPDATE c SET Ordinal=y.Ord FROM cfg.ColumnDef c JOIN cfg.TableDef t ON t.Id=c.TableDefId JOIN cfg.SheetDef s ON s.Id=t.SheetDefId ' +
+                        'JOIN cfg.TemplateVersion v ON v.Id=s.TemplateVersionId JOIN #YO y ON y.Id=c.Id WHERE y.N > @lo AND y.N <= @hi AND v.Id=@v AND v.Status=0 AND c.Ordinal<>y.Ord') @{ lo = $lo; hi = ($lo + 200); v = $vid })
+            }
+            $null = Sql-Exec $cn 'DROP TABLE #YO'
+        }
+        Log ("  YearMonths: Ordinal колонок за моделлю змінено {0} (у плані {1})" -f $nO, $ord.Count)
+        foreach ($o in @($ord | Select-Object -First 5)) { Log "    $($o.Key): $($o.From) -> $($o.To)" }
+    }
+    finally { $cn.Close() }
+}
+
 function Stage-Template {
     Log '== Template =='
     LoginAs $BuildUser
@@ -1194,7 +1286,15 @@ function Stage-Template {
     $vers = @((Api GET "/api/v1/templates/$($tpl.id)/versions?limit=100").Json.items)
     # Рішення координатора 10.11: свіжий клон останньої опублікованої; наявна чернетка не чіпається (-ReuseDraft - стара поведінка).
     $plan = Get-LandTemplateDraftPlan -Versions $vers -ReuseDraft:$ReuseDraft
+    # B5 (17.11): з -Stage YearMonths версію обирає план YearMonths (клон місячної 1.0.18 -> 1.0.19, продовження чернетки
+    # цілі, повтор на опублікованій річній - без змін); номер моделі yearMonthsTargetVersion (1.0.17.0) застарів і не діє.
+    if ($script:YearMonthsPlan) {
+        $ymv = Select-LandYearMonthsDraft $vers
+        if ($null -eq $ymv) { return }
+        $plan = [pscustomobject]@{ Action = 'YearMonths'; DraftId = $ymv }
+    }
     switch ($plan.Action) {
+        'YearMonths' { $vid = $plan.DraftId }
         'PublishedNoOp' {
             $S.VersionId = $plan.PublishedId
             Log "  шаблон $TemplateCode вже опублікований (версія $($plan.PublishedVersion), id $($plan.PublishedId)); -ReuseDraft без чернетки - структуру не чіпаю."
@@ -1203,9 +1303,6 @@ function Stage-Template {
         'UseDraft' { $vid = $plan.DraftId; Log "  -ReuseDraft: наявна чернетка $($plan.DraftVersion) (id $vid)" }
         'Clone' {
             foreach ($sk in $plan.SkippedDrafts) { Log "  наявну чернетку $sk пропущено (не змінюється й не видаляється)" }
-            if ($Mdl.PSObject.Properties['yearMonthsTargetVersion'] -and $plan.NewVersion -ne [string]$Mdl.yearMonthsTargetVersion) {
-                throw "YearMonths будує версію $($Mdl.yearMonthsTargetVersion), а клон дав би $($plan.NewVersion) (опублікована $($plan.SourceVersion)). Відмова."
-            }
             $vid = New-LandTemplateCloneDraft -Plan $plan
             Log "  свіжий клон опублікованої $($plan.SourceVersion) (id $($plan.SourceId)) -> чернетка $($plan.NewVersion) (id $vid)"
         }
@@ -1222,6 +1319,7 @@ function Stage-Template {
     $nCols = 0; $nRows = 0; $nRules = 0; $nF = 0
     $apiSheets = @($Mdl.sheets)
     if ($StructureMode -eq 'Sql') { Fill-StructureSql $vid; $apiSheets = @() }   # API-гілку нижче не виконуємо
+    if ($script:YearMonthsPlan) { Set-LandYearMonthsStructureSql $vid }
     foreach ($sh in $apiSheets) {
         $null = Api PUT "/api/v1/template-versions/$vid/sheets/$($sh.code)" @{ nameL10n = (L10n $sh.nameEn $null); ordinal = [int]$sh.ordinal; sheetGroup = $null; isMandatory = [bool]$sh.mandatory; isVisible = [bool]$sh.visible }
         $to = 0
@@ -1327,6 +1425,12 @@ function Stage-Template {
     if ($lay.Status -in 404, 405) { throw "PUT /template-versions/$vid/layout: HTTP $($lay.Status) - сервер без D-474 (lane template-layout не розгорнуто); розкладку $Layout поставити неможливо." }
     Assert-EcrOk $lay "layout $vid"
     Log "  розкладка версії: $Layout (таблиць «копія на період» у моделі: 0)"
+    # B5: псевдоніми місяця (L0b) - після місячних колонок, прибирання селекторів і розкладки (сервер перевіряє їх правилами
+    # публікації: жива місячна ціль, ім'я не збігається з живим кодом, YearWithMonthColumns); до публікації (лише чернетка).
+    if ($script:YearMonthsPlan) {
+        $aliasItems = Get-LandMonthInputAliasItems -Model $Mdl -Aliases @($script:YearMonthsPlan.Aliases)
+        $null = Invoke-LandMonthInputAliases -VersionId $vid -Items $aliasItems -Log { param($logLine) Log $logLine }
+    }
     # шапка Contract (13 полів) — офіційним скриптом на цій чернетці, з публікацією
     $pw = ConvertTo-SecureString $Acc[$BuildUser] -AsPlainText -Force
     # -PermitLookup передається лише явно: без нього діє значення маніфесту (LAND_PERMIT), поведінка Land не змінюється.
@@ -1521,8 +1625,12 @@ function Stage-Methodologies {
         ECW_C07_08 = "if(REGFIELD(@Land_TypePumpedLiquid,'NAME') = '$($pl.Diesel)', 'Diesel', if(REGFIELD(@Land_TypePumpedLiquid,'NAME') = '$($pl.Gasoline)', 'Gasoline', if(REGFIELD(@Land_TypePumpedLiquid,'NAME') = '$($pl['Jet fuel'])', 'Kerosene', if(REGFIELD(@Land_TypePumpedLiquid,'NAME') = '$($pl.Lubricant)', 'MineralOil', ''))))"
         ECW_C07_21 = '!ECW_Category'
     }
-    $docId = [int]((Items (Api GET "/api/v1/documents?projectId=$($S.ProjectId)&limit=5").Json | Select-Object -First 1).id)
-    if (-not $docId) { throw 'Немає документа для golden-тестів (спершу -Stage Documents).' }
+    $docId = 0
+    if ($S.ProjectId) { $docId = [int]((Items (Api GET "/api/v1/documents?projectId=$($S.ProjectId)&limit=5").Json | Select-Object -First 1).id) }
+    # B5: документ потрібен лише golden-тестам НЕопублікованих методологій; на стенді з опублікованими (YearMonths лише
+    # прив'язує місячні колонки) його відсутність не відмова.
+    $needDoc = @($PublishList | Where-Object { $mid[$_] -and [string](Items (Api GET "/api/v1/methodologies/$($mid[$_])/versions").Json | Sort-Object id -Descending | Select-Object -First 1).status -ne 'Published' }).Count -gt 0
+    if (-not $docId -and $needDoc) { throw 'Немає документа для golden-тестів (спершу -Stage Documents).' }
     function Arg([string]$c, $v) {
         if ($v -is [hashtable]) { return @{ argumentCode = $c; value = $null; valueString = $null; unitId = $null; entryId = [int]$v.entryId } }
         if ($v -is [string]) { return @{ argumentCode = $c; value = $null; valueString = $v; unitId = $null } }
@@ -1557,7 +1665,27 @@ function Stage-Methodologies {
         $tbl = $AF_TABLE[$name]
         $vers = Items (Api GET "/api/v1/methodologies/$m/versions").Json
         $v = $vers | Sort-Object id -Descending | Select-Object -First 1
-        if ([string]$v.status -eq 'Published') { Log "  $name вже опублікована"; continue }
+        if ([string]$v.status -eq 'Published') {
+            Log "  $name вже опублікована"
+            # B5: після -Stage YearMonths вихід опублікованої методології прив'язується до 12 місячних колонок нової версії
+            # (раніше гілка лише пропускала методологію - місячні колонки аркушів 3-5 лишались би без джерела).
+            if ($script:YearMonthsPlan) {
+                $tbP = @($Mdl.sheets | ForEach-Object { $_.tables } | Where-Object { $_.code -eq $tbl }) | Select-Object -First 1
+                $fxP = Items (Api GET "/api/v1/methodologies/$m/versions/$([int]$v.id)/formulas").Json
+                $want = @()
+                foreach ($c in @($fxP | ForEach-Object { [string]$_.code } | Where-Object { $_ -match '^ECW_EC_' } | Sort-Object -Unique)) {
+                    foreach ($colCode in (Get-LandResultColumnCodes -Table $tbP -Output $c)) {
+                        $cid = $S.Cols[$S.ShortTable[$tbl]][$colCode]
+                        if (-not $cid) { Log "  ! немає колонки $tbl/$colCode"; continue }
+                        $want += [pscustomobject]@{ ColumnDefId = [int]$cid; OutputCode = $c; IsActive = $true; Label = "$name/$tbl/$colCode" }
+                    }
+                }
+                $sb = Set-LandMethodologyBindings -MethodologyId $m -Wanted $want
+                Log ("    прив'язки до місячних колонок: створено {0}, змінено {1}, без змін {2}, помилок {3}" -f $sb.Created, $sb.Updated, $sb.Same, $sb.Failed)
+                foreach ($e in @($sb.Errors | Select-Object -First 10)) { Log "    ! $e" }
+            }
+            continue
+        }
         $vid = [int]$v.id
         $fx = Items (Api GET "/api/v1/methodologies/$m/versions/$vid/formulas").Json
         $codes = @($fx | ForEach-Object { [string]$_.code } | Where-Object { $_ -match '^ECW_EC_' } | Sort-Object -Unique)
@@ -1631,7 +1759,7 @@ function Stage-Methodologies {
 # Методології, яких на сервері немає, пропускаються; виходу, якого немає у версії методології, ні. Прив'язка активна лише
 # якщо остання версія опублікована: активна прив'язка до чернетки валить перерахунки документа (див. цикл вище).
 function Bind-ResultColumns($mid) {
-    $bound = 0; $off = 0; $noMeth = @{}; $noOut = 0; $noCol = 0
+    $bound = 0; $off = 0; $noMeth = @{}; $noOut = 0; $noCol = 0; $same = 0
     $vinfo = @{}
     foreach ($sh in @($Mdl.sheets)) {
         if ($sh.calc) { continue }   # аркуші 3-5 ведуть цикл Stage-Methodologies вище
@@ -1645,7 +1773,10 @@ function Bind-ResultColumns($mid) {
                     $v = $vers | Sort-Object id -Descending | Select-Object -First 1
                     $codes = @{}
                     foreach ($f in @(Items (Api GET "/api/v1/methodologies/$m/versions/$([int]$v.id)/formulas").Json)) { $codes[[string]$f.code] = $true }
-                    $vinfo[$name] = @{ active = ([string]$v.status -eq 'Published'); codes = $codes }
+                    # B5: наявні прив'язки - одним GET; PUT лише відсутніх/змінених (8 тис. місячних прив'язок YearMonths, повтор - 0 PUT)
+                    $have = @{}
+                    foreach ($b in @(Items (Api GET "/api/v1/methodologies/$m/bindings").Json)) { $have["$([int]$b.columnDefId)|$([string]$b.outputCode)"] = $b }
+                    $vinfo[$name] = @{ active = ([string]$v.status -eq 'Published'); codes = $codes; have = $have }
                 }
                 $vi = $vinfo[$name]
                 foreach ($o in @($tb.calc.outputs)) {
@@ -1654,6 +1785,8 @@ function Bind-ResultColumns($mid) {
                     foreach ($colCode in (Get-LandResultColumnCodes -Table $tb -Output ([string]$o))) {
                         $cid = $S.Cols[$S.ShortTable[[string]$tb.code]][$colCode]
                         if (-not $cid) { $noCol++; Log "  ! немає колонки $($tb.code)/$colCode"; continue }
+                        $hb = $vi.have["$([int]$cid)|$o"]
+                        if ($null -ne $hb -and [bool]$hb.isActive -eq [bool]$vi.active -and [string]$hb.matchJson -eq '{}') { $same++; continue }
                         $r = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/bindings/$cid/$o" -Body @{ isActive = [bool]$vi.active; matchJson = '{}' }
                         if ($r.Status -eq 200) { if ($vi.active) { $bound++ } else { $off++ } }
                         else { Log "  ! прив'язка $name/$($tb.code)/${colCode}/${o}: HTTP $($r.Status) $(Get-EcrErrorCode $r)" }
@@ -1662,7 +1795,7 @@ function Bind-ResultColumns($mid) {
             }
         }
     }
-    Log ("  колонки результатів (LP-08): прив'язок {0} активних, {1} вимкнених (чернетки); методологій на сервері немає: {2}; виходів без формули: {3}; без колонки: {4}" -f $bound, $off, $noMeth.Count, $noOut, $noCol)
+    Log ("  колонки результатів (LP-08): прив'язок записано {0} активних, {1} вимкнених (чернетки), без змін {5}; методологій на сервері немає: {2}; виходів без формули: {3}; без колонки: {4}" -f $bound, $off, $noMeth.Count, $noOut, $noCol, $same)
 }
 
 # ==================== LandParity (LP-07: правила категорії C11/C12, склад речовин, аргументи тест-кейсу) ====================
