@@ -6,6 +6,7 @@ import { apiFetch } from '@/api/client';
 import type { DocumentSummary } from '@/api/types';
 import { useTableStatus, type TableStatus } from '@/features/documents/api';
 import { documentState, hasSheetStates, sheetLabels, type SheetLabel } from '@/features/documents/documentSheets';
+import { DocumentStateBadge } from '@/features/documents/NoApprovalChip';
 import { useWorkflowHistory, type WorkflowEvent } from '@/features/workflow/api';
 import { formatPeriodKey } from '@/shared/format/periodKey';
 import { t } from '@/shared/i18n';
@@ -127,7 +128,7 @@ export function DocumentQuickLook({
       panelId={panelId}
       title={title}
       subtitle={subtitle}
-      badge={state === null ? undefined : <StatusBadge kind="sheet" state={state} />}
+      badge={state === null ? undefined : <DocumentStateBadge state={state} />}
       closeLabel={t('documents.quickLookClose')}
       onClose={onClose}
       footer={

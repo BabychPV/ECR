@@ -92,6 +92,8 @@ export function DocumentListFilterBar({
     Submitted: t(statusKey('sheet', 'Submitted')),
     Approved: t(statusKey('sheet', 'Approved')),
     Rejected: t(statusKey('sheet', 'Rejected')),
+    // ✎ B147: той самий підпис, що в чипі документа «без погодження» (`NoApprovalChip`).
+    NoApproval: t('workflow.noApproval'),
   };
 
   const options = [

@@ -128,6 +128,16 @@ export function DocumentListSummaryStrip({
         ]
       : [];
 
+  /*
+   * ✎ B147 (B75): «без погодження» — документи, чия версія шаблону за період без подання й затвердження; у п'ять чисел
+   * стану сервер їх не кладе. Як і PartlySubmitted — лише коли такі Є або фільтр уже активний; без кольору.
+   */
+  const noApprovalCount = summary.data.noApproval ?? 0;
+  const noApproval: readonly Counter[] =
+    noApprovalCount > 0 || active === 'NoApproval'
+      ? [{ id: 'noApproval', label: t('workflow.noApproval'), count: noApprovalCount, tone: null, state: 'NoApproval' }]
+      : [];
+
   const counters: readonly Counter[] = [
     { id: 'draft', label: t(statusKey('sheet', 'Draft')), count: summary.data.draft, tone: null, state: 'Draft' },
     ...partly,
@@ -140,6 +150,7 @@ export function DocumentListSummaryStrip({
     },
     ...rejected,
     { id: 'approved', label: t(statusKey('sheet', 'Approved')), count: summary.data.approved, tone: null, state: 'Approved' },
+    ...noApproval,
     { id: 'withIssues', label: t('documents.summaryWithIssues'), count: summary.data.withIssues, tone: null, state: null },
   ];
 

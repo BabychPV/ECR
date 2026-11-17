@@ -18,15 +18,28 @@ import { showApiError, showDone } from '@/shared/ui/notify';
 import { statusKey } from '@/shared/ui/StatusBadge';
 import './projects.css';
 
-/** Документів у проєкті за його роки (зведення сервера за рік — та сама межа видимості, що й перелік). */
+/**
+ * Документів у проєкті за його роки (зведення сервера за рік — та сама межа видимості, що й перелік).
+ *
+ * ⛔ ✎ B147 (B75): документи «без погодження» сервер у п'ять чисел стану НЕ кладе — без `noApproval` проєкт, де всі
+ * документи такі, читався б «0 документів», і видалення чернетки стало б доступним.
+ */
 export function documentTotal(summary: {
   readonly draft: number;
   readonly partlySubmitted: number;
   readonly submitted: number;
   readonly approved: number;
   readonly rejected: number;
+  readonly noApproval?: number | undefined;
 }): number {
-  return summary.draft + summary.partlySubmitted + summary.submitted + summary.approved + summary.rejected;
+  return (
+    summary.draft +
+    summary.partlySubmitted +
+    summary.submitted +
+    summary.approved +
+    summary.rejected +
+    (summary.noApproval ?? 0)
+  );
 }
 
 /** Причина недоступності архівації — видимим текстом (рядок c3). */

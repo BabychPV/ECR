@@ -5,11 +5,11 @@ import type { DocumentSummary } from '@/api/types';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
 import { SegmentBar } from '@/shared/ui/SegmentBar';
-import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { EyeIcon, IssueCount } from './DocumentListMarks';
 import { documentState, hasSheetStates, sheetLabels } from './documentSheets';
 import { boardColumns, type BoardColumnId } from './documentsBoardModel';
+import { DocumentStateBadge, NoApprovalState } from './NoApprovalChip';
 import { LateEditsMark } from './LateEditsMark';
 import { StaleResultsMark, StaleResultsUndeterminedMark } from './StaleResultsMark';
 import './documentsBoard.css';
@@ -113,7 +113,8 @@ export function DocumentsBoard({ documents, documentHref, projectCode, onQuickLo
                       </div>
                     )}
 
-                    {hasSheetStates(document) ? (
+                    {/* ✎ B147: аркуші документа без погодження сервер віддає Draft — смужка «чернеток» неправдива. */}
+                    {hasSheetStates(document) && state !== NoApprovalState ? (
                       <SegmentBar segments={sheetLabels(document)} />
                     ) : (
                       <Text size="xs" c="dimmed">
@@ -129,8 +130,8 @@ export function DocumentsBoard({ documents, documentHref, projectCode, onQuickLo
                         <Timestamp value={document.modifiedAt} dateOnly />
                       </span>
                       <span className="ecr-board-marks">
-                        {(column.id === 'Rework' || column.id === 'NoState') && state !== null && (
-                          <StatusBadge kind="sheet" state={state} quiet />
+                        {(column.id === 'Rework' || column.id === 'NoState' || column.id === 'NoApproval') && state !== null && (
+                          <DocumentStateBadge state={state} quiet />
                         )}
                         {document.hasLateEdits && <LateEditsMark />}
                         {document.resultsStale === true && <StaleResultsMark since={document.resultsStaleSince} />}
@@ -170,6 +171,8 @@ function columnLabel(id: BoardColumnId): string {
       return t('documents.board.rework');
     case 'Approved':
       return t('documents.board.approved');
+    case 'NoApproval':
+      return t('workflow.noApproval');
     case 'NoState':
       return t('documents.board.noState');
   }

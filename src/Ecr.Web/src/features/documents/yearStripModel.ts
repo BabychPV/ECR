@@ -17,6 +17,7 @@ export type StripCell =
   | 'locked'
   | 'reopened'
   | 'notOpen'
+  | 'noApproval'
   | 'unknown';
 
 /**
@@ -32,6 +33,9 @@ export function stripCell(documentState: string | null, periodState: string | nu
   if (documentState === 'Submitted' || documentState === 'PartlySubmitted') return 'submitted';
   if (documentState === 'Rejected') return 'returned';
   if (reopened) return 'reopened';
+  // ✎ B147 (B75): версія шаблону за місяць без подання й затвердження — «без погодження», а не стан періоду (чернетка
+  // такого місяця нічого не каже). Виняток «відкрито для документа» важить більше: він про те, чи можна вводити.
+  if (documentState === 'NoApproval') return 'noApproval';
 
   switch (periodState) {
     case 'Open':
@@ -62,4 +66,6 @@ export const StripLegend: readonly StripCell[] = [
   'reopened',
   'notOpen',
   'returned',
+  // ✎ B147: «без погодження» — останнім, поза станами погодження.
+  'noApproval',
 ];

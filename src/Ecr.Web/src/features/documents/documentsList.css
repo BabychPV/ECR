@@ -119,6 +119,15 @@
   border-color: var(--ecr-faint, var(--mantine-color-dimmed));
 }
 
+/*
+ * ✎ B147 (B75): «без погодження» — нейтральна плитка з рискою (той самий знак, що в чипі `NoApprovalChip`): від «Open»
+ * відрізняється знаком, не кольором.
+ */
+.ecr-year-strip-box[data-cell='noApproval'] {
+  color: var(--mantine-color-text);
+  font-weight: 700;
+}
+
 .ecr-year-strip-box[data-cell='returned'] {
   border-color: var(--ecr-warning, var(--mantine-color-yellow-filled));
   background: var(--ecr-warning, var(--mantine-color-yellow-filled));
