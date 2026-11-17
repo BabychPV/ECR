@@ -130,6 +130,7 @@ public sealed class TemplateApprovalRouteHttpTests(SqlServerFixture sql)
     public async Task Права_маршрут_шаблону_лише_Template_Edit_виняток_лише_менеджер_з_грантом_типовий_лише_ManageRoles()
     {
         var stand = await ArrangeAsync().ConfigureAwait(true);
+        var hadDefault = await DefaultRouteExistsAsync().ConfigureAwait(true);
         try
         {
             using var app = new EcrApiFactory(sql);
@@ -183,6 +184,16 @@ public sealed class TemplateApprovalRouteHttpTests(SqlServerFixture sql)
         finally
         {
             await CleanupAsync(stand).ConfigureAwait(true);
+
+            // ⚠ Під мутацією права типового маршруту PUT пройшов би й лишив маршрут майданчика для ВСІЄЇ спільної бази.
+            if (!hadDefault)
+            {
+                var code = ApprovalRoute.ScopeCode(null, null);
+                await ExecuteAsync($"""
+                    DELETE s FROM wf.ApprovalStep s JOIN wf.ApprovalRoute r ON r.Id = s.ApprovalRouteId WHERE r.Code = N'{code}';
+                    DELETE FROM wf.ApprovalRoute WHERE Code = N'{code}';
+                    """).ConfigureAwait(true);
+            }
         }
     }
 
@@ -329,6 +340,13 @@ public sealed class TemplateApprovalRouteHttpTests(SqlServerFixture sql)
             UPDATE doc.Document SET TemplateId = NULL WHERE Id IN ({stand.B.DocumentId}, {stand.D.DocumentId});
             DELETE FROM doc.ProjectTemplate WHERE ProjectId IN ({stand.B.ProjectId}, {stand.D.ProjectId}) AND TemplateId = {stand.T};
             """).ConfigureAwait(false);
+    }
+
+    private async Task<bool> DefaultRouteExistsAsync()
+    {
+        await using var db = Db();
+        var code = ApprovalRoute.ScopeCode(null, null);
+        return await db.ApprovalRoutes.AnyAsync(r => r.Code == code).ConfigureAwait(false);
     }
 
     private async Task<int?> StepOfAsync(TestDocument doc)
