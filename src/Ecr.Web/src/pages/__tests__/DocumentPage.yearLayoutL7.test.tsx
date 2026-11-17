@@ -337,3 +337,55 @@ describe('DocumentPage «рік» L7a: панель результатів і б
     SlowEnvTimeout,
   );
 });
+
+/**
+ * ✎ LAND-YEAR L7a (координатор 17.11): документ «рік» відкриває закритий МІСЯЦЬ для себе з шапки — вибір місяця
+ * («Reopen a month for this document…»); лише з правом `Period.Reopen` і лише за наявності закритого місяця року.
+ * Копія на місяць — без вибору (банер закритого місяця, як було).
+ */
+describe('DocumentPage «рік» L7a: відкриття місяця для документа', () => {
+  it(
+    'рік, закриті місяці, право Period.Reopen: у шапці є вибір місяця',
+    async () => {
+      show(`/documents/1?periodKey=${String(Anchor)}`, {
+        layout: 'YearWithMonthColumns', state: 'Closed', permissions: ['Document.View', 'Period.Reopen'],
+      });
+
+      expect(await screen.findByTestId('year-month-reopen', {}, { timeout: SlowEnvTimeout })).toBeTruthy();
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'рік без права Period.Reopen: вибору місяця немає',
+    async () => {
+      show(`/documents/1?periodKey=${String(Anchor)}`, { layout: 'YearWithMonthColumns', state: 'Closed' });
+
+      await screen.findByText(/document\.lock\.periodClosed/, {}, { timeout: SlowEnvTimeout });
+      expect(screen.queryByTestId('year-month-reopen')).toBeNull();
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'рік без закритих місяців: вибору місяця немає',
+    async () => {
+      show(`/documents/1?periodKey=${String(Anchor)}`, { layout: 'YearWithMonthColumns', permissions: ['Document.View', 'Period.Reopen'] });
+
+      await actionsRow();
+      expect(screen.queryByTestId('year-month-reopen')).toBeNull();
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'копія на місяць з правом і закритим місяцем: вибору місяця немає (дія — у банері, як було)',
+    async () => {
+      show(`/documents/1?periodKey=${String(Anchor)}`, { layout: 'PerMonthCopies', state: 'Closed', permissions: ['Document.View', 'Period.Reopen'] });
+
+      await screen.findByText(/document\.lock\.periodClosed/, {}, { timeout: SlowEnvTimeout });
+      expect(screen.queryByTestId('year-month-reopen')).toBeNull();
+    },
+    SlowEnvTimeout,
+  );
+});

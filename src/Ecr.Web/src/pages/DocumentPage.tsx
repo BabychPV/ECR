@@ -146,6 +146,10 @@ const TableChatHost = lazy(async () => ({ default: (await loadTableChat()).Table
 const loadPeriodPicker = () => import('@/shared/ui/PeriodPicker');
 void loadPeriodPicker();
 const PeriodPicker = lazy(async () => ({ default: (await loadPeriodPicker()).PeriodPicker }));
+// ✎ LAND-YEAR L7a: вибір місяця для «Reopen … for this document» документа «рік» — лише коли є що відкривати (D-132).
+const YearMonthReopen = lazy(async () => ({
+  default: (await import('@/features/documents/periodReopen/YearMonthReopen')).YearMonthReopen,
+}));
 /*
  * B113: заглушка — та сама коробка, що й сам вибір періоду (`.ecr-period`: висота `--ecr-ctl-height`, 28/36 px за
  * щільністю). Була 52 px: поки чанк `PeriodPicker` ще вантажився, шапка була вищою за остаточну, і коли чанк доїжджав,
@@ -652,6 +656,17 @@ export function DocumentPage(): JSX.Element {
   // ✎ LAND-YEAR L7a: документ «рік» вибирає лише якорі років — місяць такого документа не окрема копія (п. 2 плану:
   // запасний вибір періоду теж без місяців).
   const pickablePeriods = yearLayout ? yearAnchors(projectPeriods) : projectPeriods;
+  // ✎ LAND-YEAR L7a (координатор 17.11): місяці року документа «рік» для «Reopen … for this document» — з правом
+  // `Period.Reopen` і лише коли в році є закритий місяць; інакше вибору немає (копія на місяць — банер, як було).
+  const yearMonths = yearLayout
+    ? (calendar.data?.periods ?? [])
+        .filter((period) => Math.floor(period.periodKey / 100) === Math.floor(periodKey / 100))
+        .sort((a, b) => a.periodKey - b.periodKey)
+    : [];
+  const yearReopenMonths =
+    yearLayout && can(session.data, 'Period.Reopen') && yearMonths.some((period) => period.state === 'Closed')
+      ? yearMonths
+      : null;
   const lastValidPeriod = pickablePeriods?.[pickablePeriods.length - 1] ?? null;
   const nearestValid =
     periodRejected && projectPeriods !== undefined && !projectPeriods.includes(periodKey)
@@ -916,8 +931,16 @@ export function DocumentPage(): JSX.Element {
               просто лишало те, що вже було.
               ✎ D-474, п. 5: розкладка «рік» — одна копія, перемикача місяця немає. */
           yearLayout ? (
-            // CALC-RESULTS (макет, варіант A): «Year YYYY» і «Calculated: <місяць>» замість перемикача місяця.
-            <YearLayoutChips periodKey={periodKey} />
+            // CALC-RESULTS (макет, варіант A): «Year YYYY» замість перемикача місяця (L7a: меню «Calculated» прибрано).
+            <Group gap="xs" wrap="nowrap">
+              <YearLayoutChips periodKey={periodKey} />
+              {/* ✎ LAND-YEAR L7a: відкрити закритий МІСЯЦЬ року для цього документа — вибір місяця замість ?periodKey. */}
+              {yearReopenMonths !== null && (
+                <Suspense fallback={null}>
+                  <YearMonthReopen documentId={documentId} months={yearReopenMonths} timeZoneId={calendar.data?.timeZoneId} />
+                </Suspense>
+              )}
+            </Group>
           ) : (
           <Suspense fallback={periodPickerFallback}>
             <PeriodPicker
