@@ -260,7 +260,8 @@ test('yearLayout: the sheet log names the month of every edit (September and Oct
 test('yearLayout: Allow/Deny — a Deny on table T2 hides its year Issues and the sheet log of S2', async ({ browser }) => {
   const request = adminContext.request;
   const stamp = String(Date.now());
-  const roleCode = `test-L7Deny-${stamp}`;
+  // ⚠ Код ролі — лише латиниця, цифри й «_» (ECR-CFG-0422), тож `test_…`, а не `test-…`.
+  const roleCode = `test_L7Deny_${stamp}`;
   const userName = `test-l7-deny-${stamp}`;
 
   // Allow (адміністратор): у річному результаті є зауваження T2, у журналі S2 — правка жовтня.
