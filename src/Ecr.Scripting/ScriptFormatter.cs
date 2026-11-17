@@ -12,10 +12,10 @@ public static partial class ScriptFormatter
 {
     private const string Indent = "    ";
 
-    [GeneratedRegex("^[A-Za-z_][A-Za-z0-9_]*$")]
+    [GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_]*\z")]
     private static partial Regex IdentPattern();
 
-    [GeneratedRegex(@"^-?\d+(\.\d+)?$")]
+    [GeneratedRegex(@"^-?\d+(\.\d+)?\z")]
     private static partial Regex NumberPattern();
 
     /// <summary>

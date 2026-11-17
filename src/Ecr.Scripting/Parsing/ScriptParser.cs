@@ -44,7 +44,7 @@ public static partial class ScriptParser
         return new Impl([.. lex.Tokens], [.. lex.Diagnostics]).Run();
     }
 
-    [GeneratedRegex("^[A-Za-z_][A-Za-z0-9_]*$")]
+    [GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_]*\z")]
     private static partial Regex IdentifierPattern();
 
     private sealed class Recovery : Exception;
