@@ -140,7 +140,8 @@ public sealed class UnitOfWork(
             // назвою індексу з тексту `SqlException.Message`: розбір рядка
             // повідомлення СУБД крихкий до локалізації сервера й версії, тип
             // .NET-об'єкта — ні.
-            if (TryMapDuplicateKey(ex) is { } mapped)
+            var sidHolder = await FindSidHolderAsync(ex, ct).ConfigureAwait(false);
+            if (TryMapDuplicateKey(ex, sidHolder) is { } mapped)
             {
                 throw mapped;
             }
@@ -343,6 +344,43 @@ public sealed class UnitOfWork(
         }
     }
 
+    /// <summary>Доданий чи змінений обліковий запис, чию вставку/зміну SID відбив <c>UX_User_Sid</c>; інакше <c>null</c>.</summary>
+    /// <param name="ex">Відмова збереження.</param>
+    private static Domain.Entities.Security.User? SidRace(DbUpdateException ex)
+        => SqlConflict.ViolatesIndex(ex, "UX_User_Sid")
+           && ex.Entries.FirstOrDefault(e => e.Entity is Domain.Entities.Security.User { WindowsSid: not null }
+                                             && e.State is EntityState.Added or EntityState.Modified)
+               is { Entity: Domain.Entities.Security.User user }
+            ? user
+            : null;
+
+    /// <summary>
+    /// B161: ім'я ВЛАСНИКА SID, на якому програв запис (<c>UX_User_Sid</c>), — закомічений запис з тим самим SID, крім
+    /// самого запису, що програв (виправлення SID наявного запису). <c>null</c> — це не гонка за SID або власника вже
+    /// немає (тоді відмова називає сам SID, а не програшний запис).
+    /// </summary>
+    /// <param name="ex">Відмова збереження.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Окремий запит після відмови — лише на цій гілці: інші унікальні індекси назву переможця беруть з доданої
+    /// сутності (значення в них однакові), а тут однаковий лише SID, і ім'я переможця інше.
+    /// </remarks>
+    private async Task<string?> FindSidHolderAsync(DbUpdateException ex, CancellationToken ct)
+    {
+        if (SidRace(ex) is not { WindowsSid: { } sid } loser)
+        {
+            return null;
+        }
+
+        var loserId = loser.Id;
+        return await db.Users
+            .AsNoTracking()
+            .Where(u => u.WindowsSid == sid && u.Id != loserId)
+            .Select(u => u.UserName)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+    }
+
     /// <summary>
     /// Дублікат унікального ключа проєкту/запису довідника/документа — у чисту
     /// відмову з кодом. <c>null</c>, якщо серед доданих сутностей немає
@@ -356,7 +394,7 @@ public sealed class UnitOfWork(
     /// повернути документу «дані невірні», або заводити для нього точковий
     /// арм у middleware — тобто описувати те саме двічі.
     /// </remarks>
-    private static EcrException? TryMapDuplicateKey(DbUpdateException ex)
+    private static EcrException? TryMapDuplicateKey(DbUpdateException ex, string? sidHolder)
     {
         // ⛔ L4-08. Зовнішній ключ запису довідника вибирається за ІНДЕКСОМ, який порушено, а не за
         // першою доданою сутністю: пакет синку несе запис, його ключі й значення разом, і `ex.Entries`
@@ -566,19 +604,19 @@ public sealed class UnitOfWork(
         // самого доменного користувача двічі (JIT `User.CreateDomain`), або `POST /users` з SID, який щойно забрав
         // інший запит. Відбиває `UX_User_Sid` — доти голий 500. Відмова — та сама, що й перевірки
         // (`WindowsSidFormat`: `409 ECR-USR-0409 windowsSidTaken`); вхід Windows ловить її й бере запис переможця.
-        if (SqlConflict.ViolatesIndex(ex, "UX_User_Sid")
-            && ex.Entries.FirstOrDefault(e => e.Entity is Domain.Entities.Security.User
-                                              && e.State is EntityState.Added or EntityState.Modified)
-                is { Entity: Domain.Entities.Security.User { WindowsSid: { } takenSid } sidUser })
+        // ⛔ B161: `{userName}` — ВЛАСНИК SID (закомічений запис, `FindSidHolderAsync`), як у `EnsureFreeAsync`, а не
+        // запис програшного запиту: той у базі не існує (або це запис, якому SID лише намагалися виправити).
+        if (SidRace(ex) is { WindowsSid: { } takenSid })
         {
+            var holderName = sidHolder ?? takenSid;
             return new BusinessRuleException(
                 ErrorCodes.UserDuplicate,
-                $"SID {takenSid} уже прив'язаний до іншого запису.",
+                $"SID {takenSid} уже прив'язаний до запису «{holderName}».",
                 new Dictionary<string, object?>
                 {
                     ["messageKey"] = "err.ECR-USR-0409.windowsSidTaken",
                     ["sid"] = takenSid,
-                    ["userName"] = sidUser.UserName,
+                    ["userName"] = holderName,
                 });
         }
 
