@@ -1026,8 +1026,9 @@ function Invoke-StaleTables([int]$vid) {
 # IsCrossSheet лишається 0, як у формул, створених через API (домен не виставляє його; відкладений rollup не потрібен).
 function Put-CellFormulasSql([int]$vid, $planned) {
     Assert-EcrMutationAllowed 'масовий SQL-запис формул комірок'
-    $null = Assert-LocalSqlConnection $SqlConnection
-    $cn = New-Object System.Data.SqlClient.SqlConnection($SqlConnection)
+    # ✎ YearMonths: рядок, виведений з -ConfirmStand (як у Fill-StructureSql), а не сирий -SqlConnection (порожній без нього).
+    $null = Assert-LocalSqlConnection $effectiveSqlConnection
+    $cn = New-Object System.Data.SqlClient.SqlConnection($effectiveSqlConnection)
     $cn.Open()
     try {
         $tid = @{}; $cols = @{}; $rows = @{}
