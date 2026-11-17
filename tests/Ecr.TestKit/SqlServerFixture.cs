@@ -362,8 +362,10 @@ public sealed class SqlServerFixture : IAsyncLifetime
             TrustServerCertificate = true,
         };
 
-        await using (var connection = new SqlConnection(master.ConnectionString))
+        // ⛔ B166: DROP + CREATE — одна ідемпотентна одиниця повтору (1807 «замок на model» під навантаженням).
+        await RetryDdlAsync("CREATE DATABASE " + DatabaseName, async () =>
         {
+            await using var connection = new SqlConnection(master.ConnectionString);
             await connection.OpenAsync().ConfigureAwait(false);
 
             // SINGLE_USER WITH ROLLBACK IMMEDIATE: інакше DROP не пройде,
@@ -384,17 +386,22 @@ public sealed class SqlServerFixture : IAsyncLifetime
                 connection,
                 $"CREATE DATABASE [{DatabaseName}]{FilesClause()} COLLATE Latin1_General_100_CI_AS_SC;")
                 .ConfigureAwait(false);
+        }).ConfigureAwait(false);
 
-            // ⚠ Приріст журналу 16 МБ, а не типові 64: з SQL Server 2022 приріст
-            // ≤ 64 МБ — це ОДИН VLF, і журнал із VLF по 64 МБ не звільняється на
-            // CHECKPOINT, доки весь блок активний, — тож росте кроками по 64 МБ
-            // і перетинає стелю `TestDatabaseSizeTests` (128 МБ) від порядку тестів.
+        // ⚠ Приріст журналу 16 МБ, а не типові 64: з SQL Server 2022 приріст
+        // ≤ 64 МБ — це ОДИН VLF, і журнал із VLF по 64 МБ не звільняється на
+        // CHECKPOINT, доки весь блок активний, — тож росте кроками по 64 МБ
+        // і перетинає стелю `TestDatabaseSizeTests` (128 МБ) від порядку тестів.
+        await RetryDdlAsync("ALTER DATABASE " + DatabaseName + " (журнал)", async () =>
+        {
+            await using var connection = new SqlConnection(master.ConnectionString);
+            await connection.OpenAsync().ConfigureAwait(false);
             await ExecuteAsync(connection, $"""
                 DECLARE @log sysname = (SELECT name FROM sys.master_files
                                          WHERE database_id = DB_ID(N'{DatabaseName}') AND type = 1);
                 EXEC (N'ALTER DATABASE [{DatabaseName}] MODIFY FILE (NAME = N''' + @log + N''', FILEGROWTH = 16MB);');
                 """).ConfigureAwait(false);
-        }
+        }).ConfigureAwait(false);
 
         await MarkAsSmallAsync(serverConnection).ConfigureAwait(false);
         await MarkDataPathAsync(serverConnection).ConfigureAwait(false);
@@ -451,7 +458,7 @@ public sealed class SqlServerFixture : IAsyncLifetime
     /// мегабайта даних (<c>server-part (core-persistence)</c>: <c>PermitTypeListProjectionTests</c> 72 → 136 МБ). Розмір
     /// файла тоді міряв крок приросту, а не дані. Продуктивні розміри (<c>01-filegroups.sql</c>) не змінюються.
     /// </remarks>
-    private async Task NarrowDataFileGrowthAsync()
+    private Task NarrowDataFileGrowthAsync() => RetryDdlAsync("ALTER DATABASE " + DatabaseName + " (файли даних)", async () =>
     {
         await using var connection = new SqlConnection(ConnectionString);
         await connection.OpenAsync().ConfigureAwait(false);
@@ -462,7 +469,18 @@ public sealed class SqlServerFixture : IAsyncLifetime
             WHERE type = 0 AND (is_percent_growth = 1 OR growth > 16 * 128);
             EXEC (@sql);
             """).ConfigureAwait(false);
-    }
+    });
+
+    /// <summary>
+    /// DDL рівня бази з повтором на перехідних помилках замків (<see cref="TransientSqlRetry.DdlLockErrors"/>, межі —
+    /// <see cref="TransientSqlRetry.Ddl"/>). Кожна спроба — нове з'єднання; одиниця повтору мусить бути ідемпотентною.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ B166: під навантаженням машини ALTER/CREATE DATABASE падали на 5061/1807 — замок на базу чи на <c>model</c>
+    /// тримав чужий прогін, — і з ними вся колекція (16/16 червоні за ~86 мс, жоден асерт не впав). Інші помилки — одразу.
+    /// </remarks>
+    private static Task RetryDdlAsync(string operation, Func<Task> ddl) => TransientSqlRetry.RunAsync(
+        operation, _ => ddl(), TransientSqlRetry.SqlClassifier(TransientSqlRetry.DdlLockErrors), TransientSqlRetry.Ddl);
 
     /// <summary>Каталог файлів тестових баз, якщо він відрізняється від типового.</summary>
     /// <remarks>
@@ -598,7 +616,9 @@ public sealed class SqlServerFixture : IAsyncLifetime
         await RunScriptAsync("15-cell-tvp.sql").ConfigureAwait(false);
 
         await RunScriptAsync("10-triggers.sql").ConfigureAwait(false);
-        await RunScriptAsync("06-rcsi.sql").ConfigureAwait(false);
+        // ⛔ B166: `06` перемикає RCSI (`ALTER DATABASE … WITH ROLLBACK IMMEDIATE`) — 5061 під навантаженням. Скрипт
+        // ідемпотентний (IF NOT EXISTS / IF EXISTS), тож повтор цілого скрипта безпечний.
+        await RetryDdlAsync("06-rcsi.sql", () => RunScriptAsync("06-rcsi.sql")).ConfigureAwait(false);
 
         await using var seedDb = CreateContext();
         seedDb.Database.SetCommandTimeout(SetupCommandTimeoutSeconds);

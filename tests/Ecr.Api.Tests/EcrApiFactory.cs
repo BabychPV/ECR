@@ -242,6 +242,9 @@ public sealed class EcrApiFactory(
             // і RecurringTriggersInTestHostTests.
             RecurringTriggerVeto.Register(services);
 
+            // ⛔ B166: seed на старті хоста — таймаут фікстури (300 с) і повтор на перехідних помилках; у продукті служби немає.
+            RetryingStartupSeed.Register(services);
+
             // ⛔ B121: реєстр розкладок закріплюється ДО ExtraServices — тест може перекрити і його.
             if (LayoutRegistry is { } layouts)
             {

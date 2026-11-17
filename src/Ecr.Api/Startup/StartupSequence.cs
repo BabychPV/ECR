@@ -97,7 +97,17 @@ public static partial class StartupSequence
 
         // 4) Ідемпотентний seed. Без нього немає ні мов, ні прав, ні одиниць —
         //    застосунок формально піднімається і не робить нічого.
-        await new SeedRunner(db, logger).RunAsync(CancellationToken.None).ConfigureAwait(false);
+        //    ⚠ B166: `IStartupSeedRunner` реєструє лише хост тестів (довший таймаут + повтор); у продукті його немає.
+        var seedOverride = scope.ServiceProvider.GetService<IStartupSeedRunner>();
+        if (seedOverride is null)
+        {
+            await new SeedRunner(db, logger).RunAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        else
+        {
+            await seedOverride.RunAsync(db, logger, CancellationToken.None).ConfigureAwait(false);
+        }
+
         LogSeedDone(logger);
         Lap(logger, lap, "4 seed");
 
