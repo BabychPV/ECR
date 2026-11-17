@@ -146,8 +146,14 @@ USING (VALUES
   -- сам; `TemplateAdministrator` і явна пара `SystemAdministrator` — секція `PERMITS: permissions` після роздач ролей.
   -- Рядок стоїть у єдиному каталозі (його читають сторожі). Перегляд типів лишається Registry.View.
   (N'Permit.EditType',          N'Permit',      0),
-  (N'Permit.PublishType',       N'Permit',      0)
+  (N'Permit.PublishType',       N'Permit',      0),
   -- PERMITS: permissions ── кінець секції ──
+  -- B80:source-binding ── право «Керувати зв'язками документа-джерела» (рішення координатора R4.6, 16.11) ──
+  -- Глобальне (`PermissionScopes.Global`): читання й перемикання стану-воріт `cfg.DocumentSourceBinding`
+  -- (`any` / `approvedOnly`). Не небезпечне (0): з вбудованих ролей його бере лише `SystemAdministrator` шаблоном `%`
+  -- (жоден інший шаблон ролей його не покриває); решті ролей адміністратор видає свідомо.
+  (N'Calculation.ManageSourceBinding', N'Calculation', 0)
+  -- B80:source-binding ── кінець секції ──
 ) AS s (Code, [Group], IsDangerous)
 ON t.Code = s.Code
 WHEN NOT MATCHED THEN INSERT (Code, [Group], NameL10n, IsDangerous)

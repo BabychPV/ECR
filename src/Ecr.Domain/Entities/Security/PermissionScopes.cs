@@ -49,6 +49,7 @@ public static class PermissionScopes
         "Calculation.EditRule",
         "Calculation.Publish",
         "Calculation.ManageRequiredInputs",
+        "Calculation.ManageSourceBinding", // B80 N1: зв'язки документа-джерела — системне налаштування
         "Report.EditDefinition",
         "Report.ViewCampaign",
     };

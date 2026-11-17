@@ -2899,6 +2899,153 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/document-source-bindings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Перелік зв'язок зі станом-воротами і дієвим читанням. Право `Calculation.ManageSourceBinding`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DocumentSourceBindingDto"][];
+                        "text/json": components["schemas"]["DocumentSourceBindingDto"][];
+                        "text/plain": components["schemas"]["DocumentSourceBindingDto"][];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/document-source-bindings/{id}/source-state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Явне перемикання стану-воріт: `any` (будь-який стан джерела) або `approvedOnly` (лише затверджений
+         *     місяць). Право `Calculation.ManageSourceBinding`; подія `DocumentSourceBindingChanged` у журналі безпеки.
+         * @description `approvedOnly` — `409 ECR-CALC-0409`, доки документ-джерело поточного року не лежить у місячному
+         *     проєкті з погодженням (`sourceBindingNoDocument`, `sourceBindingNotMonthly`,
+         *     `sourceBindingWorkflowNone`). Справжня зміна ставить злитий перерахунок залежних за кожен рік джерела.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Зв'язка. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SwitchDocumentSourceStateRequest"];
+                    "application/json": components["schemas"]["SwitchDocumentSourceStateRequest"];
+                    "text/json": components["schemas"]["SwitchDocumentSourceStateRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SwitchDocumentSourceStateResponse"];
+                        "text/json": components["schemas"]["SwitchDocumentSourceStateResponse"];
+                        "text/plain": components["schemas"]["SwitchDocumentSourceStateResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents": {
         parameters: {
             query?: never;
@@ -32456,6 +32603,44 @@ export interface components {
             /** @description Стан робочого процесу; аркуш без рядка стану — `Draft`. */
             state: string;
         };
+        /** @description Зв'язка «документ-джерело → довідник» для адміністратора (B80 N1). */
+        DocumentSourceBindingDto: {
+            /** @description Код зв'язки. */
+            code: string;
+            /** @description Коди шаблонів-споживачів. */
+            consumerTemplateCodes: string[];
+            /**
+             * Format: int32
+             * @description Зв'язка.
+             */
+            id: number;
+            /** @description Політика згоди: `None`, `Warn`, `ConfirmWithReason`, `Block`. */
+            policy: string;
+            /** @description Біт зв'язки «читати з документа». */
+            readFromDocument: boolean;
+            /** @description Дієве значення з урахуванням явного ключа конфігурації. */
+            readFromDocumentEffective: boolean;
+            /** @description `configuration` — діє явний ключ; `binding` — біт зв'язки. */
+            readFromDocumentSource: string;
+            /** @description Біт зв'язки «ставити перерахунок залежних». */
+            recalculateDependents: boolean;
+            /** @description Код довідника, рядки якого замінює документ. */
+            registryCode: string;
+            /** @description Стан-ворота: `any` або `approvedOnly`. */
+            sourceState: string;
+            /** @description Код шаблону-джерела. */
+            sourceTemplateCode: string;
+            /**
+             * Format: date-time
+             * @description Остання зміна стану-воріт, UTC; `null` — не змінювався.
+             */
+            updatedAt: null | string;
+            /**
+             * Format: int32
+             * @description Хто змінив востаннє.
+             */
+            updatedByUserId: null | number;
+        };
         /**
          * @description Стан документа у робочому процесі.
          * @enum {unknown}
@@ -42178,6 +42363,20 @@ export interface components {
              * @description Період, який подасть «Подати»: найраніший неподаний `Open`/`Grace`; `null` — подавати нічого.
              */
             targetPeriodKey: null | number;
+        };
+        /** @description Запит перемикання стану-воріт. */
+        SwitchDocumentSourceStateRequest: {
+            /** @description `any` або `approvedOnly`. */
+            sourceState: string;
+        };
+        /** @description Результат перемикання. */
+        SwitchDocumentSourceStateResponse: {
+            /** @description Зв'язка після перемикання. */
+            binding: components["schemas"]["DocumentSourceBindingDto"];
+            /** @description `false` — стан уже був таким; нічого не записано й не поставлено. */
+            changed: boolean;
+            /** @description Роки, за які поставлено перерахунок залежних (злита задача на довідник × рік). */
+            queuedYears: number[];
         };
         /** @description Запит на перемикання master-джерела набору довідників. */
         SwitchSourceKindRequest: {

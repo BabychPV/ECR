@@ -7267,6 +7267,91 @@
         ],
         "type": "object"
       },
+      "DocumentSourceBindingDto": {
+        "description": "Зв'язка «документ-джерело → довідник» для адміністратора (B80 N1).",
+        "properties": {
+          "code": {
+            "description": "Код зв'язки.",
+            "type": "string"
+          },
+          "consumerTemplateCodes": {
+            "description": "Коди шаблонів-споживачів.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "id": {
+            "description": "Зв'язка.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "policy": {
+            "description": "Політика згоди: `None`, `Warn`, `ConfirmWithReason`, `Block`.",
+            "type": "string"
+          },
+          "readFromDocument": {
+            "description": "Біт зв'язки «читати з документа».",
+            "type": "boolean"
+          },
+          "readFromDocumentEffective": {
+            "description": "Дієве значення з урахуванням явного ключа конфігурації.",
+            "type": "boolean"
+          },
+          "readFromDocumentSource": {
+            "description": "`configuration` — діє явний ключ; `binding` — біт зв'язки.",
+            "type": "string"
+          },
+          "recalculateDependents": {
+            "description": "Біт зв'язки «ставити перерахунок залежних».",
+            "type": "boolean"
+          },
+          "registryCode": {
+            "description": "Код довідника, рядки якого замінює документ.",
+            "type": "string"
+          },
+          "sourceState": {
+            "description": "Стан-ворота: `any` або `approvedOnly`.",
+            "type": "string"
+          },
+          "sourceTemplateCode": {
+            "description": "Код шаблону-джерела.",
+            "type": "string"
+          },
+          "updatedAt": {
+            "description": "Остання зміна стану-воріт, UTC; `null` — не змінювався.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "updatedByUserId": {
+            "description": "Хто змінив востаннє.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "sourceTemplateCode",
+          "registryCode",
+          "sourceState",
+          "policy",
+          "readFromDocument",
+          "recalculateDependents",
+          "readFromDocumentEffective",
+          "readFromDocumentSource",
+          "consumerTemplateCodes",
+          "updatedAt",
+          "updatedByUserId"
+        ],
+        "type": "object"
+      },
       "DocumentStatus": {
         "description": "Стан документа у робочому процесі.",
         "enum": [
@@ -28360,6 +28445,46 @@
         ],
         "type": "object"
       },
+      "SwitchDocumentSourceStateRequest": {
+        "description": "Запит перемикання стану-воріт.",
+        "properties": {
+          "sourceState": {
+            "description": "`any` або `approvedOnly`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sourceState"
+        ],
+        "type": "object"
+      },
+      "SwitchDocumentSourceStateResponse": {
+        "description": "Результат перемикання.",
+        "properties": {
+          "binding": {
+            "$ref": "#/components/schemas/DocumentSourceBindingDto",
+            "description": "Зв'язка після перемикання."
+          },
+          "changed": {
+            "description": "`false` — стан уже був таким; нічого не записано й не поставлено.",
+            "type": "boolean"
+          },
+          "queuedYears": {
+            "description": "Роки, за які поставлено перерахунок залежних (злита задача на довідник × рік).",
+            "items": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "binding",
+          "changed",
+          "queuedYears"
+        ],
+        "type": "object"
+      },
       "SwitchSourceKindRequest": {
         "description": "Запит на перемикання master-джерела набору довідників.",
         "properties": {
@@ -36262,6 +36387,210 @@
         "summary": "Перевіряє з'єднання з джерелом. Право `Integration.Manage`.",
         "tags": [
           "DataSources"
+        ]
+      }
+    },
+    "/api/v1/document-source-bindings": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/DocumentSourceBindingDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/DocumentSourceBindingDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/DocumentSourceBindingDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "Перелік зв'язок зі станом-воротами і дієвим читанням. Право `Calculation.ManageSourceBinding`.",
+        "tags": [
+          "DocumentSourceBindings"
+        ]
+      }
+    },
+    "/api/v1/document-source-bindings/{id}/source-state": {
+      "put": {
+        "description": "`approvedOnly` — `409 ECR-CALC-0409`, доки документ-джерело поточного року не лежить у місячному\nпроєкті з погодженням (`sourceBindingNoDocument`, `sourceBindingNotMonthly`,\n`sourceBindingWorkflowNone`). Справжня зміна ставить злитий перерахунок залежних за кожен рік джерела.",
+        "parameters": [
+          {
+            "description": "Зв'язка.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SwitchDocumentSourceStateRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SwitchDocumentSourceStateRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SwitchDocumentSourceStateRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwitchDocumentSourceStateResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwitchDocumentSourceStateResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwitchDocumentSourceStateResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Явне перемикання стану-воріт: `any` (будь-який стан джерела) або `approvedOnly` (лише затверджений\nмісяць). Право `Calculation.ManageSourceBinding`; подія `DocumentSourceBindingChanged` у журналі безпеки.",
+        "tags": [
+          "DocumentSourceBindings"
         ]
       }
     },
@@ -73105,6 +73434,9 @@
     },
     {
       "name": "Documents"
+    },
+    {
+      "name": "DocumentSourceBindings"
     },
     {
       "name": "DocumentVersions"

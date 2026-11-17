@@ -633,6 +633,8 @@ public static class DependencyInjection
         services.AddScoped<IPermitTypeStore, PermitTypeStore>();
         services.AddScoped<IPermitListStore, PermitListStore>(); // PM-08e
         services.AddScoped<IPermitGroupStore, PermitGroupStore>(); // PRMG: групи типів як ціль Lookup
+        services.AddScoped<IDocumentSourceBindingStore, DocumentSourceBindingStore>(); // B80 N1
+        services.AddSingleton<IDocumentSourceFlagOverrides>(new DocumentSourceFlagOverrides(configuration)); // B80 N1
         services.AddScoped<IPermitDataMonthsReader, PermitDataMonthsReader>(); // rule (h): months with data of a document
         services.AddSingleton<IPermitRegistryIndex, PermitRegistryIndex>(); // rule (h): permit-type targets, in memory (hot PATCH path)
 

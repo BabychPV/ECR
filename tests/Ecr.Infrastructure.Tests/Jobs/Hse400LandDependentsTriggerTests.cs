@@ -117,7 +117,7 @@ public sealed class Hse400LandDependentsTriggerTests(SqlServerFixture sql) : DbJ
 
     /// <summary>B80 (N1): ключ не задано — вирішують біти зв'язки; явний ключ перекриває біт.</summary>
     /// <remarks>
-    /// Мутація (B80-M13): <c>enabled ?? binding?.RecalculateDependents ?? false</c> → <c>enabled ?? true</c> — біт 0 більше
+    /// Мутація (B80-M16): <c>enabled ?? binding?.RecalculateDependents ?? false</c> → <c>enabled ?? true</c> — біт 0 більше
     /// не вимикає, червоний.
     /// </remarks>
     [Fact]
