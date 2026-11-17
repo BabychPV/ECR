@@ -1,8 +1,9 @@
 import type { JSX } from 'react';
-import { Anchor, Badge, Group, Text } from '@mantine/core';
-import { StatusBadge, badgeLook } from '@/shared/ui/StatusBadge';
+import { Anchor, Group, Text } from '@mantine/core';
+import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { formatCount } from '@/shared/format/plural';
 import { t } from '@/shared/i18n';
+import { NoApprovalChip } from './NoApprovalChip';
 import { SheetFillSummary } from './SheetFillSummary';
 
 /** Аркуш документа для смужки станів. */
@@ -31,66 +32,6 @@ interface DocumentProgressProps {
    * замість стану аркуша показується позначка «No approval».
    */
   readonly workflowOff?: boolean;
-}
-
-/**
- * Позначка «No approval» (B143, B75): шаблон працює без подання й затвердження, тож стан аркуша
- * (Draft/Submitted/…) тут нічого не означає — значення доступні звітності одразу після збереження, рядки
- * захищають блокування рядків (пояснення — у підказці).
- *
- * ⛔ Власна плашка, а не `StatusBadge`: «без погодження» — не стан сервера, і рядка в закритій таблиці
- * `kind × state` (`shared/ui/**`) для нього немає; невідомий стан там малюється «увагою». Вигляд — ті самі
- * токени нейтрального тону (`badgeLook`), що й у чипа стану, який вона заміняє (той самий прийом —
- * `AssignmentBadge`, `PermitStateBadge`). Зміст несе слово; риска — декоративна.
- */
-function NoApprovalChip(): JSX.Element {
-  const look = badgeLook('neutral');
-
-  return (
-    <Badge
-      size="sm"
-      variant="transparent"
-      miw="fit-content"
-      radius="xs"
-      c={look.text}
-      bg={look.bg}
-      leftSection={
-        <svg
-          width={12}
-          height={12}
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke={look.icon}
-          strokeWidth={2}
-          strokeLinecap="round"
-          aria-hidden="true"
-          focusable="false"
-          style={{ flex: 'none', display: 'block' }}
-        >
-          <path d="M5 12h14" />
-        </svg>
-      }
-      styles={{
-        root: {
-          height: 20,
-          paddingInline: '4px var(--mantine-spacing-xs)',
-          border: `1px solid ${look.border}`,
-          textTransform: 'none',
-          letterSpacing: 'normal',
-          fontWeight: 500,
-          fontSize: 'var(--mantine-font-size-xs)',
-          gap: 4,
-        },
-        section: { marginInlineEnd: 0 },
-      }}
-      style={{ width: 'max-content' }}
-      title={t('workflow.noApprovalHint')}
-      data-testid="document-no-approval"
-      data-status-tone="neutral"
-    >
-      {t('workflow.noApproval')}
-    </Badge>
-  );
 }
 
 /**
