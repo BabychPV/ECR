@@ -77,7 +77,7 @@ if ($Stage -in 'Template', 'All') {
         Write-HseLog "  шаблон $code — один документ на проєкт"
     }
     $vers = @((Invoke-HseOk GET "/api/v1/templates/$($tpl.id)/versions?limit=100").Json.items)
-    $pub =$vers | Where-Object { $_.status -eq 'Published' } | Sort-Object id -Descending | Select-Object -First 1
+    $pub = $vers | Where-Object { $_.status -eq 'Published' } | Sort-Object id -Descending | Select-Object -First 1
     $draft = $vers | Where-Object { $_.status -eq 'Draft' } | Sort-Object id -Descending | Select-Object -First 1
     if ($null -ne $pub -and $null -eq $draft) {
         Write-HseLog "  шаблон уже опублікований (версія $($pub.version), id $($pub.id)); структуру не чіпаю"
