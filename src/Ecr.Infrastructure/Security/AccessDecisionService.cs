@@ -1807,7 +1807,12 @@ public sealed class AccessDecisionService(
             if (!ignoreColumnFlags && !newRow && slice.Dependents.Reads(slice.TableDefId, column.Id))
             {
                 dependentInput = true;
-                if (shared.SheetStatus is DocumentStatus.Submitted or DocumentStatus.Approved)
+
+                // ✎ F13 AU: затверджений рік зводиться до Draft лише тоді, коли стовпець читає формула САМОГО аркуша — тоді
+                // його затверджені місяці відхиляє `DependentMonthsRule` нижче. Читає лише інший аркуш — власний
+                // затверджений рік лишається `DocumentApproved` (затверджені значення не змінюються); поданий — зводиться.
+                if (shared.SheetStatus == DocumentStatus.Submitted
+                    || (shared.SheetStatus == DocumentStatus.Approved && slice.OwnSheetReads(column.Id)))
                 {
                     shared = shared with { SheetStatus = DocumentStatus.Draft };
                 }

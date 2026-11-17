@@ -201,6 +201,30 @@ public sealed class DependentMonthsGateRaceTests(SqlServerFixture sql)
         Assert.Null(await LiveValueAsync(scene));
     }
 
+    /// <remarks>
+    /// ✎ F13 AU (правило 437): стовпець читає лише аркуш B (нічого не затверджено), а весь рік аркуша правки затверджено;
+    /// рішення поза транзакцією (заглушка — як неправлене до фіксу <c>Decide</c>) дозволило. PATCH і книга під замками
+    /// перевіряють річний агрегат і відмовляють <c>DocumentApproved</c> — цей шлях був закритий і до фіксу (зелений
+    /// доказ, не червоний); нічого не записано.
+    /// </remarks>
+    [Theory]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "B79")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Читач_лише_аркуш_B_рік_аркуша_правки_затверджено_під_замком_DocumentApproved(bool workbook)
+    {
+        var scene = await ArrangeAsync();
+        await InsertStateAsync(scene, Jan, DocumentStatus.Approved);
+        await InsertStateAsync(scene, View, DocumentStatus.Approved);
+
+        var error = await RunPatchAsync(scene, between: null, dependent: true, workbook, readerOnly: true);
+
+        var denied = Assert.IsType<AccessDeniedException>(error);
+        Assert.Equal(nameof(EditDenyReason.DocumentApproved), denied.Details?["reason"]?.ToString());
+        Assert.Null(await LiveValueAsync(scene));
+    }
+
     private async Task<Exception?> RunPatchAsync(
         Scene scene, DocumentStatus? between, bool dependent, bool workbook, bool text = false, bool readerOnly = false,
         bool readerCopy = false)

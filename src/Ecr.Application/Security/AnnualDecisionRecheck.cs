@@ -70,6 +70,13 @@ public static class AnnualDecisionRecheck
             {
                 DependentMonthsRule.ThrowIfLocked(annual, locked, deniedCount);
             }
+            else if (AnnualPeriodRule.AggregateStatus(annual.Select(period => locked[period])) == DocumentStatus.Approved)
+            {
+                // ✎ F13 AU: читає лише інший аркуш — власний рік, затверджений цілком (агрегат), лишається замкненим
+                // (`DocumentApproved`), як у рішенні (`AccessDecisionService.Decide`, причина стану перед правилом
+                // залежних) і в PATCH; поданий рік поблажку зберігає.
+                throw Denied(EditDenyReason.DocumentApproved, deniedCount);
+            }
 
             DependentReaderLocks.ThrowIfLocked(readers, annual, readerStatuses, deniedCount);
             return;
@@ -88,12 +95,14 @@ public static class AnnualDecisionRecheck
             _ => null,
         };
 
-        if (reason is null)
+        if (reason is { } denied)
         {
-            return;
+            throw Denied(denied, deniedCount);
         }
+    }
 
-        throw new AccessDeniedException(
+    private static AccessDeniedException Denied(EditDenyReason reason, int deniedCount)
+        => new(
             "ECR-ACCS-0403",
             $"Заборонених комірок у запиті: {deniedCount}. Причина першої: {reason}.",
             new Dictionary<string, object?>
@@ -102,5 +111,4 @@ public static class AnnualDecisionRecheck
                 ["deniedCount"] = deniedCount.ToString(CultureInfo.InvariantCulture),
                 ["reason"] = reason.ToString(),
             });
-    }
 }

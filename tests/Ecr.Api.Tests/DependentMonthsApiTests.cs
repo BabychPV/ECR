@@ -340,6 +340,54 @@ public sealed class DependentMonthsApiTests(SqlServerFixture sql)
         Assert.Equal(ReaderMarch, hint.GetProperty("months").EnumerateArray().Select(m => m.GetInt32()));
     }
 
+    // ── 11. F13 (AU): стовпець читає лише ІНШИЙ аркуш, а ВЕСЬ рік власного аркуша затверджено ──
+
+    /// <summary>
+    /// ✎ F13 AU (B79): затверджені значення не змінюються. Власний аркуш A затверджено за всі 12 місяців, FUEL читає лише
+    /// формула аркуша B (у B нічого не затверджено). Поблажка «стовпець із залежними не замикається річним агрегатом»
+    /// діє лише для ПОДАНОГО року або коли стовпець читає формула самого A; тут зріз, PATCH і запис згоджуються на
+    /// <c>DocumentApproved</c> — як FREE, і нічого не записано. Контроль тим самим входом: рік A лише ПОДАНИЙ — FUEL
+    /// пишеться (поблажка для поданих лишається), FREE — <c>DocumentSubmitted</c>.
+    /// </summary>
+    /// <remarks>⛔ МУТАЦІЯ (AU): в <c>AccessDecisionService.Decide</c> зводити до <c>Draft</c> і <c>Approved</c> без умови
+    /// <c>OwnSheetReads</c> — рядок <c>Approved</c> червоніє (зріз без причини, PATCH 403 лише під замком).</remarks>
+    [Theory]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "B79")]
+    [InlineData(DocumentStatus.Approved)]
+    [InlineData(DocumentStatus.Submitted)]
+    public async Task Читач_лише_на_іншому_аркуші_а_власний_рік_затверджено_стовпець_замкнений_DocumentApproved(
+        DocumentStatus ownYear)
+    {
+        var s = await ArrangeAsync(readerOnOtherSheet: true).ConfigureAwait(true);
+        for (var month = 1; month <= 12; month++)
+        {
+            await SetStatusAsync(s, month, ownYear).ConfigureAwait(true);
+        }
+
+        using var app = Boot();
+        using var client = await SignInAsync(app, s.Writer).ConfigureAwait(true);
+
+        if (ownYear == DocumentStatus.Submitted)
+        {
+            Assert.Null(await SliceReasonAsync(client, s, Fuel).ConfigureAwait(true));
+            await ExpectAsync(app, HttpStatusCode.OK, PatchAsync(client, s, (Fuel, 24m))).ConfigureAwait(true);
+            Assert.Equal([(Anchor, 24m)], await StoredAsync(s, Fuel).ConfigureAwait(true));
+            Assert.Equal("DocumentSubmitted", await SliceReasonAsync(client, s, Free).ConfigureAwait(true));
+            return;
+        }
+
+        // Зріз: FUEL сірий з тією ж причиною, що й FREE, без підказки місяців (жоден місяць-читач не затверджений).
+        Assert.Equal("DocumentApproved", await SliceReasonAsync(client, s, Fuel).ConfigureAwait(true));
+        Assert.Equal("DocumentApproved", await SliceReasonAsync(client, s, Free).ConfigureAwait(true));
+
+        var body = await ExpectAsync(app, HttpStatusCode.Forbidden, PatchAsync(client, s, (Fuel, 25m))).ConfigureAwait(true);
+        var root = JsonDocument.Parse(body).RootElement;
+        Assert.Equal("DocumentApproved", root.GetProperty("reason").GetString());
+        Assert.False(root.TryGetProperty("months", out _));
+        Assert.Empty(await StoredAsync(s, Fuel).ConfigureAwait(true));
+    }
+
     /// <summary>Тіло зрізу таблиці документа (перший екземпляр — перегляд 209910).</summary>
     private static async Task<JsonElement> SliceAsync(HttpClient client, Scenario s)
     {

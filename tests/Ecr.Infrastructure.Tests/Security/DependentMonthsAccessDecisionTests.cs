@@ -253,7 +253,75 @@ public sealed class DependentMonthsAccessDecisionTests(SqlServerFixture sql) : I
         Assert.False(deleted[w.Cell(w.Fuel)].DependentInput);
     }
 
+    /// <remarks>
+    /// ✎ F13 AU (правило 437): стовпець FUEL читає лише формула ІНШОГО аркуша (у ньому нічого не затверджено), а весь рік
+    /// аркуша правки (оригіналу або КОПІЇ) затверджено. Рішення для всіх шляхів запису — PATCH
+    /// (<c>CanEditCellsAsync</c>), книга (<c>CanEditCellsBatchAsync</c>), зріз (<c>CanEditSliceAsync</c>) — однаково
+    /// <c>DocumentApproved</c>: затверджені значення не змінюються. Контроль: інший бік (копія, коли затверджено
+    /// оригінал, і навпаки) пишеться. МУТАЦІЯ (AU): у <c>Decide</c> зводити <c>Approved</c> до <c>Draft</c> без
+    /// <c>OwnSheetReads</c> — червоніють обидва рядки.
+    /// </remarks>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "B79")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Читач_лише_інший_аркуш_затверджений_рік_аркуша_правки_DocumentApproved_на_всіх_шляхах_і_для_копії(
+        bool onCopy)
+    {
+        var w = await ArrangeAsync(readerOnOtherSheet: true);
+        var (copyId, copyInstance, copyRow) = await AddCopyInstanceAsync(w);
+        for (var m = 1; m <= 12; m++)
+        {
+            await StateAsync(w, (Year * 100) + m, DocumentStatus.Approved, onCopy ? copyId : null);
+        }
+
+        var writer = Writer(w);
+        var originalCell = w.Cell(w.Fuel);
+        var copyCell = new CellAddress(w.Doc.PeriodKey, copyRow, w.Fuel);
+        var (instance, cell, otherInstance, otherCell) = onCopy
+            ? (copyInstance, copyCell, w.Doc.TableInstanceId, originalCell)
+            : (w.Doc.TableInstanceId, originalCell, copyInstance, copyCell);
+
+        await using var db = w.Builder.CreateContext();
+        var service = Service(db);
+        var patch = await service.CanEditCellsAsync(writer, instance, w.Doc.PeriodKey, [cell], CancellationToken.None);
+        var workbook = await service.CanEditCellsBatchAsync(
+            writer, [new CellsAccessRequest(instance, w.Doc.PeriodKey, [cell])], CancellationToken.None);
+        var slice = await service.CanEditSliceAsync(writer, instance, CancellationToken.None);
+        var other = await service.CanEditCellsAsync(
+            writer, otherInstance, w.Doc.PeriodKey, [otherCell], CancellationToken.None);
+
+        foreach (var decision in new[] { patch[cell], workbook[instance][cell], slice[cell] })
+        {
+            Assert.Equal(EditDenyReason.DocumentApproved, decision.Reason);
+            Assert.Null(decision.BlockingMonths);
+        }
+
+        Assert.True(other[otherCell].IsAllowed);
+        Assert.True(other[otherCell].DependentOnlyOtherSheets);
+    }
+
     // ───────────────────────────── допоміжне ─────────────────────────────
+
+    /// <summary>Копія аркуша таблиці з екземпляром перегляду і першим рядком (той самий ключ рядка).</summary>
+    private async Task<(long CopyId, long Instance, long Row)> AddCopyInstanceAsync(World w)
+    {
+        await using var db = w.Builder.CreateContext();
+        var copyId = (await new DocumentSheetCopyStore(db).AddCopyAsync(w.Doc.DocumentId, w.Doc.SheetDefId, default)).SheetCopyId;
+        await db.SaveChangesAsync();
+
+        var rowKey = await db.TableRows.AsNoTracking()
+            .Where(r => r.PeriodKeyValue == View && r.Id == w.Doc.RowIds[0]).Select(r => r.RowKeyValue).SingleAsync();
+        var loader = new BulkCellLoader(sql.ConnectionString, 1000);
+        var instanceId = await loader.ReserveIdsAsync("doc.TableInstanceSeq", 1, CancellationToken.None);
+        var rowId = await loader.ReserveIdsAsync("doc.TableRowSeq", 1, CancellationToken.None);
+        db.TableInstances.Add(new TableInstance(w.Doc.PeriodKey, instanceId, w.Doc.DocumentId, w.Doc.TableDefId, Now, copyId));
+        db.TableRows.Add(new TableRow(w.Doc.PeriodKey, rowId, instanceId, RowKey.Create(rowKey), 1, Now));
+        await db.SaveChangesAsync();
+        return (copyId, instanceId, rowId);
+    }
 
     private static async Task StateAsync(World w, int periodKey, DocumentStatus status, long? sheetCopyId = null)
     {
@@ -273,7 +341,8 @@ public sealed class DependentMonthsAccessDecisionTests(SqlServerFixture sql) : I
     /// Документ 2099 року з таблицею «місяці в колонках» (екземпляри 01 і 10), усі місяці календаря відкриті; формула
     /// M12 читає другий стовпець (FUEL), третій (FREE) не читає ніхто.
     /// </summary>
-    private async Task<World> ArrangeAsync()
+    /// <param name="readerOnOtherSheet">✎ F13 AU: FUEL читає не M12 аркуша, а формула аркуша B тієї ж версії.</param>
+    private async Task<World> ArrangeAsync(bool readerOnOtherSheet = false)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var doc = await builder.BuildAsync(
@@ -301,8 +370,36 @@ public sealed class DependentMonthsAccessDecisionTests(SqlServerFixture sql) : I
             db.Users.Add(user);
 
             var fuelCode = await db.ColumnDefs.Where(c => c.Id == doc.ColumnDefIds[1]).Select(c => c.Code).SingleAsync();
-            var formula = new FormulaDef(doc.TableDefId, FormulaScope.Column, $"[{fuelCode}] * 2", ExpressionDialect.Template);
-            formula.AssignColumn(doc.MonthColumnDefIds[11]);
+            FormulaDef formula;
+            if (readerOnOtherSheet)
+            {
+                var tag = Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
+                var sheetB = new SheetDef(
+                    doc.TemplateVersionId, EcrCode.Create($"SHB{tag}"),
+                    new LocalizedText(new Dictionary<string, string> { ["en"] = "Reader sheet" }), 2);
+                db.SheetDefs.Add(sheetB);
+                await db.SaveChangesAsync();
+                var tableB = new TableDef(
+                    sheetB.Id, EcrCode.Create($"TBB{tag}"),
+                    new LocalizedText(new Dictionary<string, string> { ["en"] = "Reader table" }), 1,
+                    TableLayoutKind.PerPeriodInstance, TableRowMode.Fixed);
+                db.TableDefs.Add(tableB);
+                await db.SaveChangesAsync();
+                var readerColumn = new ColumnDef(
+                    tableB.Id, EcrCode.Create($"RB{tag}"),
+                    new LocalizedText(new Dictionary<string, string> { ["en"] = "Reader" }), 1, CellDataType.Formula);
+                db.ColumnDefs.Add(readerColumn);
+                db.DocumentSheets.Add(new DocumentSheet(doc.DocumentId, sheetB.Id));
+                await db.SaveChangesAsync();
+                formula = new FormulaDef(tableB.Id, FormulaScope.Column, "0", ExpressionDialect.Template);
+                formula.AssignColumn(readerColumn.Id);
+            }
+            else
+            {
+                formula = new FormulaDef(doc.TableDefId, FormulaScope.Column, $"[{fuelCode}] * 2", ExpressionDialect.Template);
+                formula.AssignColumn(doc.MonthColumnDefIds[11]);
+            }
+
             db.FormulaDefs.Add(formula);
             await db.SaveChangesAsync();
 

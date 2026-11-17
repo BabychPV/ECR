@@ -94,6 +94,45 @@ public sealed class AnnualDecisionRecheckTests
             order.ToArray());
     }
 
+    /// <remarks>
+    /// ✎ F13 AU (B79): стовпець читає лише аркуш-читач (у ньому нічого не затверджено), а ВЕСЬ рік аркуша правки
+    /// затверджено під замком — запис відхиляє <c>DocumentApproved</c> (затверджені значення не змінюються). Поданий рік
+    /// і рік «затверджений + чернетка» не блокують (поблажка для поданих і правило «лише затверджений місяць читача»).
+    /// МУТАЦІЯ (AU): прибрати перевірку агрегату у гілці <c>DependentOnlyOtherSheets</c> — червоніє <c>ThrowsAsync</c>.
+    /// </remarks>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "B79")]
+    [InlineData(DocumentStatus.Approved, DocumentStatus.Approved, true)]
+    [InlineData(DocumentStatus.Submitted, DocumentStatus.Submitted, false)]
+    [InlineData(DocumentStatus.Approved, DocumentStatus.Submitted, false)]
+    [InlineData(DocumentStatus.Approved, DocumentStatus.Draft, false)]
+    public async Task Читач_лише_інший_аркуш_весь_рік_аркуша_правки_затверджено_DocumentApproved(
+        DocumentStatus january, DocumentStatus february, bool denied)
+    {
+        var gate = Substitute.For<ISheetEditGate>();
+        gate.EnterEditAsync(DocumentId, Arg.Any<int>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns(c => Task.FromResult(c.ArgAt<int>(1) != SheetDefId
+                ? DocumentStatus.Draft
+                : c.ArgAt<PeriodKey>(2).Value == Jan ? january : february));
+        var decision = Annual(dependent: true) with
+        {
+            DependentOnlyOtherSheets = true,
+            DependentReaderSheets = [new DependentReaderSheet(ReaderSheet, "RDR")],
+        };
+
+        if (!denied)
+        {
+            await RunAsync(gate, decision);
+            return;
+        }
+
+        var error = await Assert.ThrowsAsync<AccessDeniedException>(() => RunAsync(gate, decision));
+        Assert.Equal("ECR-ACCS-0403", error.ErrorCode);
+        Assert.Equal(nameof(EditDenyReason.DocumentApproved), error.Details?["reason"]);
+        Assert.False(error.Details!.ContainsKey(DependentMonthsRule.MonthsDetail));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Requirement", "B79")]
