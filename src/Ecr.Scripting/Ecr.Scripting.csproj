@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Ecr.Scripting</RootNamespace>
+  </PropertyGroup>
+
+  <!--
+    «ECR Script» (METHODOLOGY-SCRIPT-PLAN.md §3–4): лексер, парсер, зв'язування
+    й опускання виразів у AST діалекту методологій. Без БД, без обчислень —
+    числа рахує Ecr.Expressions.Evaluation.Evaluator.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\Ecr.Expressions\Ecr.Expressions.csproj" />
+  </ItemGroup>
+
+</Project>
