@@ -4973,6 +4973,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/consistency/run` | `System.RunJob` | 5 |
 | `GET` | `/api/v1/health/facts` | `System.ViewHealth` | 5 |
 | `GET` | `/api/v1/health/partitions/script` | `System.ViewHealth` | 5 |
+| `GET` | `/api/v1/document-source-bindings` | `Calculation.ManageSourceBinding` | 5 |
+| `PUT` | `/api/v1/document-source-bindings/{id}/source-state` | `Calculation.ManageSourceBinding` | 5 |
 | `GET` | `/api/v1/jobs` | `System.ViewHealth` | 5 |
 | `GET` | `/api/v1/jobs?mine=true` | — (власні задачі) | 5 |
 | `GET` | `/api/v1/jobs/summary` | `System.ViewHealth` (або `mine=true` — власні задачі) | 5 |
@@ -6500,4 +6502,5 @@ public sealed record RowDto(
   немає), `hse400ApprovedMonths` (затверджених місяців обраного документа поточного року; `null` — зв'язки чи документа
   немає), `hse400SourceWarning` (документ року є і зв'язка на `any` або на `approvedOnly` з незатвердженим місяцем, де є
   дані). `hse400CompositionSource` = `Binding`, коли ключ не задано, а значення дав біт зв'язки.
+- Порти: `IDocumentSourceBindingStore` (перелік, `UPDLOCK` зв'язки, обраний документ-джерело року з періодичністю проєкту й режимом погодження, роки джерела) і `IDocumentSourceFlagOverrides` (явні значення двох ключів або `null`).
 - Помилки — наявні коди (`ECR-CALC-0404/0409`, `ECR-REQ-0422`) з новими `messageKey`; §7 не змінюється.

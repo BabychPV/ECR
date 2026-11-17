@@ -122,11 +122,14 @@ public sealed class ListDocumentSourceBindingsHandler(
     IAccessDecisionService access,
     ICurrentUser currentUser)
 {
+    /// <summary>Право (те саме, що <see cref="DocumentSourceBindings.Permission"/>).</summary>
+    public const string Permission = "Calculation.ManageSourceBinding";
+
     /// <summary>Перелік.</summary>
     /// <param name="ct">Токен скасування.</param>
     public async Task<IReadOnlyList<DocumentSourceBindingDto>> HandleAsync(CancellationToken ct)
     {
-        await PermissionCheck.RequireAsync(access, currentUser, DocumentSourceBindings.Permission, ct).ConfigureAwait(false);
+        await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
         var views = await store.ListAsync(ct).ConfigureAwait(false);
         return [.. views.Select(v => DocumentSourceBindings.ToDto(v, overrides))];
     }
@@ -160,6 +163,9 @@ public sealed class SwitchDocumentSourceStateHandler(
     IBackgroundJobScheduler jobs,
     IClock clock)
 {
+    /// <summary>Право (те саме, що <see cref="DocumentSourceBindings.Permission"/>).</summary>
+    public const string Permission = "Calculation.ManageSourceBinding";
+
     /// <summary>Перемикає.</summary>
     /// <param name="id">Зв'язка.</param>
     /// <param name="request">Запит.</param>
@@ -168,7 +174,7 @@ public sealed class SwitchDocumentSourceStateHandler(
         int id, SwitchDocumentSourceStateRequest request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
-        await PermissionCheck.RequireAsync(access, currentUser, DocumentSourceBindings.Permission, ct).ConfigureAwait(false);
+        await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
         var userId = currentUser.UserId
                      ?? throw new AccessDeniedException(
                          ErrorCodes.Unauthorized, "Потрібна автентифікація.",
