@@ -1,6 +1,6 @@
 import type { JSX } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -102,6 +102,8 @@ function mockFetch({ layout, state = 'Open', permissions = ['Document.View'], re
       }
       if (rejectAll && /\/api\/v1\/documents\/1(\?|\/tables\?)/.test(url)) return rejected();
 
+      // ✎ Прогін (POST validate) пише результат ОДНОГО періоду — якоря, тут чистий.
+      if (url.includes('/validate')) return jsonResponse({ documentId: 1, periodKey: Anchor, messages: [], validated: true });
       // ✎ L6: `year=true` — останні результати всіх місяців року (жовтень і вересень); без прапора — лише якір (чисто).
       if (url.includes('/validation')) {
         return url.includes('year=true')
@@ -253,6 +255,24 @@ describe('DocumentPage «рік» L7b: Issues за всі місяці року'
 
       expect(await issuesCount()).toBe('2');
       expect(requested).toContain(`/api/v1/documents/1/validation?periodKey=${String(Anchor)}&year=true`);
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'рік: «Validate» не підміняє річний перелік прогоном якоря — перечитує рік (зауваження жовтня лишаються)',
+    async () => {
+      show(`/documents/1?periodKey=${String(Anchor)}`, { layout: 'YearWithMonthColumns' });
+
+      expect(await issuesCount()).toBe('2');
+      const yearReads = (): number => requested.filter((url) => url.includes('/validation?') && url.includes('year=true')).length;
+      const before = yearReads();
+      const row = await actionsRow();
+      fireEvent.click(await within(row).findByRole('button', { name: '⟦document.validate⟧' }, { timeout: SlowEnvTimeout }));
+
+      await waitFor(() => expect(requested.some((url) => url.includes('/validate'))).toBe(true), { timeout: SlowEnvTimeout });
+      await waitFor(() => expect(yearReads()).toBeGreaterThan(before), { timeout: SlowEnvTimeout });
+      expect(await issuesCount()).toBe('2');
     },
     SlowEnvTimeout,
   );
