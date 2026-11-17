@@ -557,15 +557,15 @@ public sealed class UnitOfWork(
         if (SqlConflict.ViolatesIndex(ex, "UX_User_Sid")
             && ex.Entries.FirstOrDefault(e => e.Entity is Domain.Entities.Security.User
                                               && e.State is EntityState.Added or EntityState.Modified)
-                is { Entity: Domain.Entities.Security.User sidUser })
+                is { Entity: Domain.Entities.Security.User { WindowsSid: { } takenSid } sidUser })
         {
             return new BusinessRuleException(
                 ErrorCodes.UserDuplicate,
-                $"SID {sidUser.WindowsSid} уже прив'язаний до іншого запису.",
+                $"SID {takenSid} уже прив'язаний до іншого запису.",
                 new Dictionary<string, object?>
                 {
                     ["messageKey"] = "err.ECR-USR-0409.windowsSidTaken",
-                    ["sid"] = sidUser.WindowsSid,
+                    ["sid"] = takenSid,
                     ["userName"] = sidUser.UserName,
                 });
         }
