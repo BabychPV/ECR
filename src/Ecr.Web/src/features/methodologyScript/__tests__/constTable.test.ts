@@ -1,0 +1,251 @@
+import { describe, expect, it } from 'vitest';
+import {
+  cellToText,
+  findConstAt,
+  gridFromTsv,
+  gridIssues,
+  parseCellText,
+  parseConstLiteral,
+  parseTsv,
+  pasteIntoGrid,
+  printConstGrid,
+  printKey,
+  type ConstGrid,
+} from '../constTable';
+
+function parse(text: string): ConstGrid {
+  const result = parseConstLiteral(text);
+  if (!result.ok) throw new Error(`parse failed: ${result.code}`);
+  return result.grid;
+}
+
+const twoLevel = `{
+    Summer: { NOx: 1.2, s330: 0.3, s337: 7.5 },
+    Winter: { NOx: 1.4, s330: 0.3, s337: 9.3 },
+}`;
+
+describe('розбір літерала', () => {
+  it('дворівнева мапа → сітка', () => {
+    const grid = parse(twoLevel);
+    expect(grid.rowKeys).toEqual(['Summer', 'Winter']);
+    expect(grid.columnKeys).toEqual(['NOx', 's330', 's337']);
+    expect(grid.cells).toEqual([
+      [1.2, 0.3, 7.5],
+      [1.4, 0.3, 9.3],
+    ]);
+  });
+
+  it('однорівнева мапа: columnKeys = null', () => {
+    const grid = parse('{ a: 1, "b c": -2.5, 3: "x", t: true }');
+    expect(grid.columnKeys).toBeNull();
+    expect(grid.rowKeys).toEqual(['a', 'b c', '3', 't']);
+    expect(grid.cells).toEqual([[1], [-2.5], ['x'], [true]]);
+  });
+
+  it('порожня мапа, коментарі, кінцева кома, експонента', () => {
+    expect(parse('{}').rowKeys).toEqual([]);
+    const grid = parse('{ /* c */ a: 1e3, // x\n b: 2.5E-3, }');
+    expect(grid.cells).toEqual([[1000], [0.0025]]);
+  });
+
+  it('колонки — об’єднання ключів; відсутні комірки — null', () => {
+    const grid = parse('{ A: { x: 1 }, B: { y: 2 } }');
+    expect(grid.columnKeys).toEqual(['x', 'y']);
+    expect(grid.cells).toEqual([[1, null], [null, 2]]);
+  });
+
+  it('помилки: не мапа, змішані рівні, глибина, дубль, синтаксис', () => {
+    const code = (text: string): string => {
+      const r = parseConstLiteral(text);
+      return r.ok ? 'ok' : r.code;
+    };
+    expect(code('5')).toBe('notMap');
+    expect(code('{ a: 1, b: { c: 2 } }')).toBe('mixedLevels');
+    expect(code('{ a: { b: { c: 1 } } }')).toBe('tooDeep');
+    expect(code('{ a: 1, a: 2 }')).toBe('duplicateKey');
+    expect(code('{ a 1 }')).toBe('syntax');
+    expect(code('{ a: 1 } x')).toBe('syntax');
+    expect(code('{ a: "open }')).toBe('syntax');
+  });
+
+  it('екранування в рядках', () => {
+    expect(parse('{ k: "a\\"b\\\\c\\nd" }').cells).toEqual([['a"b\\c\nd']]);
+  });
+});
+
+describe('друк', () => {
+  it('канонічний вигляд дворівневої мапи — вирівняні колонки, кінцеві коми', () => {
+    const printed = printConstGrid({
+      rowKeys: ['Summer', 'Winter'],
+      columnKeys: ['NOx', 's330'],
+      cells: [
+        [1.2, 0.3],
+        [14, 0.35],
+      ],
+    });
+    expect(printed).toBe(
+      ['{', '    Summer: { NOx: 1.2, s330: 0.3 },', '    Winter: { NOx: 14,  s330: 0.35 },', '}'].join('\n'),
+    );
+  });
+
+  it('однорівнева: ключі вирівняні, кінцеві коми', () => {
+    expect(printConstGrid({ rowKeys: ['a', 'long'], columnKeys: null, cells: [[1], ['x']] })).toBe(
+      ['{', '    a:    1,', '    long: "x",', '}'].join('\n'),
+    );
+  });
+
+  it('ключі в лапках лише коли не ідентифікатор (і не ключове слово)', () => {
+    expect(printKey('NOx')).toBe('NOx');
+    expect(printKey('s330')).toBe('s330');
+    expect(printKey('2025')).toBe('"2025"');
+    expect(printKey('a b')).toBe('"a b"');
+    expect(printKey('row')).toBe('"row"');
+    expect(printKey('Київ')).toBe('"Київ"');
+  });
+
+  it('null-комірки не друкуються; порожній рядок — {}', () => {
+    expect(
+      printConstGrid({ rowKeys: ['A', 'B'], columnKeys: ['x', 'y'], cells: [[1, null], [null, null]] }),
+    ).toBe(['{', '    A: { x: 1 },', '    B: {},', '}'].join('\n'));
+    expect(printConstGrid({ rowKeys: [], columnKeys: null, cells: [] })).toBe('{}');
+  });
+
+  it('round-trip: друк → розбір → друк стабільний, сітка збігається', () => {
+    const grid = parse(twoLevel);
+    const printed = printConstGrid(grid);
+    expect(parse(printed)).toEqual(grid);
+    expect(printConstGrid(parse(printed))).toBe(printed);
+
+    const flat = parse('{ a: 1, "b c": "text", d: false }');
+    expect(parse(printConstGrid(flat))).toEqual(flat);
+  });
+
+  it('round-trip з дірами й булевими', () => {
+    const grid = parse('{ A: { x: 1, y: true }, B: { y: "s" } }');
+    const again = parse(printConstGrid(grid));
+    expect(again).toEqual(grid);
+  });
+});
+
+describe('вставка з Excel (TSV)', () => {
+  it('кома як десяткова, порожня комірка — null, булеві й текст', () => {
+    expect(parseTsv('1,5\t2\t\tabc\ttrue\n3\t4,25\t5\t6\t7')).toEqual([
+      [1.5, 2, null, 'abc', true],
+      [3, 4.25, 5, 6, 7],
+    ]);
+  });
+
+  it('CRLF, кінцевий порожній рядок, лапки Excel', () => {
+    expect(parseTsv('a\tb\r\nc\td\r\n')).toEqual([
+      ['a', 'b'],
+      ['c', 'd'],
+    ]);
+    expect(parseTsv('"x\ty"\t"he said ""hi"""')).toEqual([['x\ty', 'he said "hi"']]);
+  });
+
+  it('пробіл як роздільник тисяч і від’ємні/експоненти', () => {
+    expect(parseCellText('1 234,5')).toBe(1234.5);
+    expect(parseCellText('-0,5')).toBe(-0.5);
+    expect(parseCellText('1e-3')).toBe(0.001);
+    expect(parseCellText('1,2,3')).toBe('1,2,3');
+    expect(parseCellText('  ')).toBeNull();
+    expect(cellToText(null)).toBe('');
+    expect(cellToText(2.5)).toBe('2.5');
+  });
+
+  it('gridFromTsv із заголовками', () => {
+    const grid = gridFromTsv('\tNOx\tSOx\nSummer\t1,2\t3\nWinter\t1,4\t', true);
+    expect(grid).toEqual({
+      rowKeys: ['Summer', 'Winter'],
+      columnKeys: ['NOx', 'SOx'],
+      cells: [
+        [1.2, 3],
+        [1.4, null],
+      ],
+    });
+  });
+
+  it('gridFromTsv без заголовків: два стовпці — однорівнева, більше — Col1…', () => {
+    expect(gridFromTsv('a\t1\nb\t2', false)).toEqual({
+      rowKeys: ['a', 'b'],
+      columnKeys: null,
+      cells: [[1], [2]],
+    });
+    expect(gridFromTsv('a\t1\t2', false)?.columnKeys).toEqual(['Col1', 'Col2']);
+    expect(gridFromTsv('', true)).toBeNull();
+    expect(gridFromTsv('a\nb', false)).toBeNull();
+  });
+
+  it('pasteIntoGrid розширює сітку новими рядками й колонками', () => {
+    const grid = parse('{ A: { x: 1 } }');
+    const pasted = pasteIntoGrid(grid, [[10, 20], [30, 40]], 0, 0);
+    expect(pasted.rowKeys).toEqual(['A', 'Key2']);
+    expect(pasted.columnKeys).toEqual(['x', 'Col2']);
+    expect(pasted.cells).toEqual([[10, 20], [30, 40]]);
+  });
+
+  it('pasteIntoGrid для однорівневої сітки відкидає зайві колонки', () => {
+    const grid = parse('{ a: 1 }');
+    const pasted = pasteIntoGrid(grid, [[5, 6]], 0, 0);
+    expect(pasted.columnKeys).toBeNull();
+    expect(pasted.cells).toEqual([[5]]);
+  });
+});
+
+describe('перевірка сітки', () => {
+  it('порожні й повторні ключі', () => {
+    expect(
+      gridIssues({ rowKeys: ['a', 'a', ' '], columnKeys: ['x', 'x'], cells: [] }),
+    ).toEqual([
+      { kind: 'duplicateKey', axis: 'row', index: 1 },
+      { kind: 'emptyKey', axis: 'row', index: 2 },
+      { kind: 'duplicateKey', axis: 'column', index: 1 },
+    ]);
+    expect(gridIssues(parse(twoLevel))).toEqual([]);
+  });
+});
+
+describe('findConstAt', () => {
+  const text = [
+    '// head',
+    'const k1 = 5;',
+    'const EF : g_per_s = {',
+    '    A: { x: 1 },',
+    '    B: { x: "}" },',
+    '};',
+    'var v = 1;',
+  ].join('\n');
+
+  it('курсор усередині мапи, на ключовому слові, на імені, на «;»', () => {
+    const start = text.indexOf('{');
+    const end = text.indexOf('};') + 1;
+    for (const offset of [text.indexOf('const EF'), text.indexOf('EF'), text.indexOf('x: 1'), end + 1]) {
+      expect(findConstAt(text, offset)).toEqual({
+        name: 'EF',
+        declarationStart: text.indexOf('const EF'),
+        start,
+        end,
+      });
+    }
+    expect(text.slice(start, end).endsWith('}')).toBe(true);
+  });
+
+  it('дужка в рядку не рахується', () => {
+    const range = findConstAt(text, text.indexOf('"}"'));
+    expect(range?.end).toBe(text.indexOf('};') + 1);
+  });
+
+  it('скалярна константа, інші місця й порожній текст — null', () => {
+    expect(findConstAt(text, text.indexOf('k1'))).toBeNull();
+    expect(findConstAt(text, text.indexOf('var v'))).toBeNull();
+    expect(findConstAt(text, 2)).toBeNull();
+    expect(findConstAt('', 0)).toBeNull();
+  });
+
+  it('літерал знайдений можна розібрати й надрукувати', () => {
+    const range = findConstAt(text, text.indexOf('A:'));
+    expect(range).not.toBeNull();
+    const literal = text.slice(range?.start, range?.end);
+    expect(parseConstLiteral(literal).ok).toBe(true);
+  });
+});
