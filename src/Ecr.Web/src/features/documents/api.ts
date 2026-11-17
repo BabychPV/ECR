@@ -112,9 +112,10 @@ export type DocumentListPage = components['schemas']['PagedResultOfDocumentSumma
 
 /**
  * Значення фільтра `state` — імена `DocumentStatus` на сервері плюс ✎ UAT-recalc-ux `PartlySubmitted`
- * (`02-contracts.md`, «Стан погодження документа»); інше сервер відхиляє `422`.
+ * (`02-contracts.md`, «Стан погодження документа») і ✎ B147 `NoApproval` (версія шаблону за період без подання й
+ * затвердження); інше сервер відхиляє `422`.
  */
-export type DocumentStateFilter = 'Draft' | 'PartlySubmitted' | 'Submitted' | 'Approved' | 'Rejected';
+export type DocumentStateFilter = 'Draft' | 'PartlySubmitted' | 'Submitted' | 'Approved' | 'Rejected' | 'NoApproval';
 
 /** Параметри переліку документів (`BE-09b`). */
 interface DocumentListParams {

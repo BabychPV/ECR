@@ -70,6 +70,20 @@ const withUnknown = {
   periodStates: [{ periodKey: 202608, state: 'Returned' }],
 };
 
+/* ✎ B147 (B75): документ «без погодження» — сервер віддає місяці `NoApproval`, аркуші — `Draft`. */
+const noApproval = {
+  id: 9,
+  businessKey: 'DOC-000009',
+  createdAt: '2026-01-01T00:00:00Z',
+  projectId: 1,
+  sheetCount: 1,
+  sheetStates: { S1: 'Draft' },
+  periodStates: [
+    { periodKey: 202601, state: 'NoApproval' },
+    { periodKey: 202602, state: 'NoApproval' },
+  ],
+};
+
 /* ⚠ Внутрішній код аркуша (знімок людини: `S99819007` перед станом) — не текст інтерфейсу. */
 const singleSheet = {
   id: 4,
@@ -127,9 +141,9 @@ function mockFetch(): void {
 
       if (url.includes('/api/v1/documents')) {
         return json({
-          items: [withoutStates, withStates, withUnknown, singleSheet, scopedToOneSheet],
+          items: [withoutStates, withStates, withUnknown, singleSheet, scopedToOneSheet, noApproval],
           nextCursor: null,
-          totalCount: 5,
+          totalCount: 6,
         });
       }
 
@@ -278,6 +292,26 @@ describe('DocumentsPage: стан місяця — не лише кольоро�
       const cell = monthOf('DOC-000003', 202608).getAttribute('data-cell');
       expect(['approved', 'submitted']).not.toContain(cell);
       expect(cell).toBe('unknown');
+    },
+    SlowEnvTimeout,
+  );
+});
+
+describe('DocumentsPage: рядок документа без погодження (B147)', () => {
+  it(
+    'місяці NoApproval — клітинки «без погодження» з підписом, а не чернетка/стан періоду',
+    async () => {
+      await shown('DOC-000009');
+
+      for (const key of [202601, 202602]) {
+        const cell = monthOf('DOC-000009', key);
+        expect(cell.getAttribute('data-cell')).toBe('noApproval');
+        expect(cell.getAttribute('aria-label') ?? '').toContain('⟦workflow.noApproval⟧');
+      }
+      // Решта місяців — як доти (за календарем): березень ще не відкрито.
+      await vi.waitFor(() => expect(monthOf('DOC-000009', 202603).getAttribute('data-cell')).toBe('notOpen'), {
+        timeout: SlowEnvTimeout,
+      });
     },
     SlowEnvTimeout,
   );

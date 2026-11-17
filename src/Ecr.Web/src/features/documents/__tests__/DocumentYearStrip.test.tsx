@@ -168,6 +168,43 @@ describe('DocumentYearStrip (g3)', () => {
     expect(links[0]!.getAttribute('aria-label')).toContain('documents.strip.approved');
   });
 
+  it('B147: місяць «без погодження» (periodStates NoApproval) — клітинка noApproval з рискою і підписом, не стан періоду', () => {
+    // Модель: «без погодження» сильніше за стан періоду; виняток «відкрито для документа» — ще сильніше.
+    expect(stripCell('NoApproval', 'Open')).toBe('noApproval');
+    expect(stripCell('NoApproval', 'Closed')).toBe('noApproval');
+    expect(stripCell('NoApproval', 'Closed', true)).toBe('reopened');
+
+    render(
+      <MantineProvider theme={testTheme}>
+        <MemoryRouter>
+          <DocumentYearStrip
+            documentId={7}
+            businessKey="HSE401-1"
+            year={2026}
+            periodStates={[
+              { periodKey: 202601, state: 'Approved' },
+              { periodKey: 202602, state: 'NoApproval' },
+              { periodKey: 202610, state: 'NoApproval' },
+            ]}
+            calendar={calendar}
+          />
+        </MemoryRouter>
+      </MantineProvider>,
+    );
+
+    const links = within(screen.getByRole('list')).getAllByRole('link');
+    expect(links[0]!.getAttribute('data-cell')).toBe('approved');
+    for (const index of [1, 9]) {
+      const cell = links[index]!;
+      expect(cell.getAttribute('data-cell')).toBe('noApproval');
+      // Не лише колір: знак і підпис — ті самі, що в чипі «без погодження».
+      expect(cell.textContent).toBe('–');
+      expect(cell.getAttribute('aria-label')).toContain('workflow.noApproval');
+    }
+    // Сусідні місяці без NoApproval — як доти (за станом періоду).
+    expect(links[2]!.getAttribute('data-cell')).toBe('locked');
+  });
+
   it('легенда називає всі стани клітинок', () => {
     render(
       <MantineProvider theme={testTheme}>
@@ -179,6 +216,9 @@ describe('DocumentYearStrip (g3)', () => {
     for (const key of ['open', 'late', 'submitted', 'approved', 'locked', 'reopened', 'notOpen', 'returned', 'current']) {
       expect(legend.textContent).toContain(`documents.strip.${key}`);
     }
+    // ✎ B147: «без погодження» — у легенді тим самим підписом, що в клітинці.
+    expect(legend.querySelector('.ecr-year-strip-box[data-cell="noApproval"]')?.textContent).toBe('–');
+    expect(legend.textContent).toContain('workflow.noApproval');
     // ✎ 10.11: зразок «reopened» у легенді — та сама коробка з відкритим замком.
     expect(legend.querySelector('.ecr-year-strip-box[data-cell="reopened"] [data-mark="open-lock"]')).not.toBeNull();
   });

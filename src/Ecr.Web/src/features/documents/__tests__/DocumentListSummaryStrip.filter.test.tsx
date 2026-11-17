@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -116,6 +116,83 @@ describe('DocumentListSummaryStrip: лічильник — фільтр стан
       } finally {
         Reflect.deleteProperty(Summary, 'partlySubmitted');
       }
+    },
+    Slow,
+  );
+
+  it(
+    'B147: «без погодження» — плитка з числом noApproval, клік ставить state=NoApproval в адресу, запит і поле фільтра',
+    async () => {
+      mockFetch();
+      Object.assign(Summary, { noApproval: 5 });
+      try {
+        show('/?year=2026');
+
+        const tile = within(await strip()).getByRole('button', { name: /workflow\.noApproval/ });
+        expect(tile.getAttribute('data-summary-counter')).toBe('noApproval');
+        expect(tile.textContent).toContain('5');
+        // Нейтральна: стан не проблема (KIT §1 п.3).
+        expect(tile.hasAttribute('data-summary-tone')).toBe(false);
+        fireEvent.click(tile);
+
+        await waitFor(() => expect(lastListed().get('state')).toBe('NoApproval'), { timeout: Find });
+        expect(lastListed().get('year')).toBe('2026');
+        expect(urlState()).toBe('NoApproval');
+        expect(tile.getAttribute('aria-pressed')).toBe('true');
+        const field = screen.getByRole('combobox', { name: '⟦documents.state⟧' }) as HTMLSelectElement;
+        expect(field.value).toBe('NoApproval');
+      } finally {
+        Reflect.deleteProperty(Summary, 'noApproval');
+      }
+    },
+    Slow,
+  );
+
+  it(
+    'B147: без документів «без погодження» плитки немає; активний фільтр NoApproval лишає її і при нулі',
+    async () => {
+      mockFetch();
+      show('/?year=2026');
+      const group = await strip();
+      expect(group.querySelector('[data-summary-counter="noApproval"]')).toBeNull();
+
+      cleanup();
+      show('/?year=2026&state=NoApproval');
+      const tile = within(await strip()).getByRole('button', { name: /workflow\.noApproval/ });
+      expect(tile.getAttribute('aria-pressed')).toBe('true');
+      expect(tile.textContent).toContain('0');
+    },
+    Slow,
+  );
+
+  it(
+    'B147: фільтр стану має варіант «без погодження» — вибір ставить state=NoApproval в адресу і в запит',
+    async () => {
+      mockFetch();
+      show('/?year=2026');
+
+      const field = (await screen.findByRole('combobox', { name: '⟦documents.state⟧' }, { timeout: Find })) as HTMLSelectElement;
+      const option = [...field.options].find((item) => item.value === 'NoApproval');
+      expect(option?.textContent).toBe('⟦workflow.noApproval⟧');
+
+      fireEvent.change(field, { target: { value: 'NoApproval' } });
+
+      await waitFor(() => expect(urlState()).toBe('NoApproval'), { timeout: Find });
+      await waitFor(() => expect(lastListed().get('state')).toBe('NoApproval'), { timeout: Find });
+      expect(field.value).toBe('NoApproval');
+    },
+    Slow,
+  );
+
+  it(
+    'B147: адреса з state=NoApproval (посилання колезі) — фільтр і запит її беруть, а не гублять як невідому',
+    async () => {
+      mockFetch();
+      show('/?year=2026&state=NoApproval');
+
+      await waitFor(() => expect(lastListed().get('state')).toBe('NoApproval'), { timeout: Find });
+      const field = (await screen.findByRole('combobox', { name: '⟦documents.state⟧' }, { timeout: Find })) as HTMLSelectElement;
+      expect(field.value).toBe('NoApproval');
     },
     Slow,
   );

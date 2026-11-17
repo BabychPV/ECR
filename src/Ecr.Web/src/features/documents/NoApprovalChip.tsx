@@ -1,7 +1,10 @@
 import type { JSX } from 'react';
 import { Badge } from '@mantine/core';
-import { badgeLook } from '@/shared/ui/StatusBadge';
+import { StatusBadge, badgeLook } from '@/shared/ui/StatusBadge';
 import { t } from '@/shared/i18n';
+
+/** ✎ B147: стан документа «без погодження» (`documentState` / `periodStates[].state` / фільтр `state`). */
+export const NoApprovalState = 'NoApproval';
 
 /**
  * Позначка «No approval» (B143, B75): шаблон працює без подання й затвердження, тож стан аркуша
@@ -13,7 +16,7 @@ import { t } from '@/shared/i18n';
  * токени нейтрального тону (`badgeLook`), що й у чипа стану, який вона заміняє (той самий прийом —
  * `AssignmentBadge`, `PermitStateBadge`). Зміст несе слово; риска — декоративна.
  *
- * ✎ B147: винесено з `DocumentProgress` — ту саму плашку покажуть дошка й швидкий перегляд переліку.
+ * ✎ B147: винесено з `DocumentProgress` — ту саму плашку показують дошка й швидкий перегляд переліку.
  */
 export function NoApprovalChip(): JSX.Element {
   const look = badgeLook('neutral');
@@ -65,3 +68,10 @@ export function NoApprovalChip(): JSX.Element {
   );
 }
 
+/**
+ * ✎ B147: стан ДОКУМЕНТА в переліку (дошка, швидкий перегляд): «без погодження» — `NoApprovalChip`, решта —
+ * `StatusBadge kind="sheet"` як і доти.
+ */
+export function DocumentStateBadge({ state, quiet = false }: { readonly state: string; readonly quiet?: boolean }): JSX.Element {
+  return state === NoApprovalState ? <NoApprovalChip /> : <StatusBadge kind="sheet" state={state} quiet={quiet} />;
+}
