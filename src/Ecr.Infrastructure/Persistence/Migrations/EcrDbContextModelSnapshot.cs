@@ -2769,6 +2769,11 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<bool>("SingleDocumentPerProject")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false, "DF_Template_SingleDocumentPerProject");
+
                     b.Property<string>("TagsJson")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");

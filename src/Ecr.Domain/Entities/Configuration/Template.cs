@@ -44,8 +44,22 @@ public sealed class Template : Entity<int>
     /// </summary>
     public DateTime? ArchivedAt { get; private set; }
 
+    /// <summary>
+    /// ✎ B151 (рішення людини 16.11): у проєкті (рік + об'єкт) — щонайбільше ОДИН документ цього шаблону.
+    /// <c>false</c> — документів скільки завгодно (Land); <c>true</c> — один (HSE400, HSE401).
+    /// </summary>
+    /// <remarks>
+    /// Видалений документ не рахується (видалення фізичне), архівований — рахується. Правило перевіряє
+    /// <c>CreateDocumentHandler</c> під блоком рядка проєкту; увімкнення при наявних дублікатах відмовляє.
+    /// </remarks>
+    public bool SingleDocumentPerProject { get; private set; }
+
     /// <summary>Версії шаблону.</summary>
     public IReadOnlyList<TemplateVersion> Versions => _versions;
+
+    /// <summary>Задає, скільки документів цього шаблону дозволено в проєкті (B151).</summary>
+    /// <param name="single"><c>true</c> — один на проєкт; <c>false</c> — скільки завгодно.</param>
+    public void SetSingleDocumentPerProject(bool single) => SingleDocumentPerProject = single;
 
     /// <summary>
     /// Змінює назву шаблону. <b>Код не змінюється ніколи</b>.
