@@ -438,6 +438,318 @@ public sealed class MethodologyStore(EcrDbContext db, int constantCap) : IMethod
     }
 
     /// <inheritdoc />
+    public async Task ReplaceScriptOutputsAsync(
+        int versionId, IReadOnlyList<ScriptOutputRow> rows, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+
+        var existing = await db.MethodologyOutputs
+            .Where(o => o.MethodologyVersionId == versionId)
+            .OrderBy(o => o.Id)
+            .Take(MaxChildren)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var wanted = rows
+            .GroupBy(r => r.Code, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.First())
+            .ToList();
+
+        // Рядок, у якого змінилося хоч щось (код — теж, регістр включно), замінюється цілком: сутність
+        // ззовні незмінна, а нічого не змінилося — рядок лишається як є.
+        foreach (var old in existing)
+        {
+            var next = wanted.FirstOrDefault(w => string.Equals(w.Code, old.Code, StringComparison.OrdinalIgnoreCase));
+            if (next is null
+                || !string.Equals(next.Code, old.Code, StringComparison.Ordinal)
+                || next.UnitId != old.UnitId
+                || next.Ordinal != old.Ordinal
+                || next.IsPerSubstance != old.IsPerSubstance)
+            {
+                db.MethodologyOutputs.Remove(old);
+            }
+        }
+
+        foreach (var row in wanted)
+        {
+            var kept = existing.Any(o =>
+                string.Equals(o.Code, row.Code, StringComparison.Ordinal)
+                && o.UnitId == row.UnitId
+                && o.Ordinal == row.Ordinal
+                && o.IsPerSubstance == row.IsPerSubstance);
+            if (kept)
+            {
+                continue;
+            }
+
+            var output = new MethodologyOutput(
+                versionId, Ecr.Domain.ValueObjects.EcrCode.Create(row.Code), row.UnitId, row.Ordinal);
+            output.SetPerSubstance(row.IsPerSubstance);
+            db.MethodologyOutputs.Add(output);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task ReplaceScriptSubstancesAsync(
+        int versionId, IReadOnlyList<long> substanceEntryIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(substanceEntryIds);
+
+        var existing = await db.MethodologySubstances
+            .Where(s => s.MethodologyVersionId == versionId)
+            .OrderBy(s => s.Id)
+            .Take(MaxChildren)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var wanted = substanceEntryIds.Distinct().Select((id, index) => (Id: id, Ordinal: index + 1)).ToList();
+
+        foreach (var old in existing)
+        {
+            if (!wanted.Any(w => w.Id == old.SubstanceEntryId && w.Ordinal == old.Ordinal))
+            {
+                db.MethodologySubstances.Remove(old);
+            }
+        }
+
+        foreach (var (id, ordinal) in wanted)
+        {
+            if (!existing.Any(s => s.SubstanceEntryId == id && s.Ordinal == ordinal))
+            {
+                db.MethodologySubstances.Add(new MethodologySubstance(versionId, id, ordinal));
+            }
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task ReplaceScriptImportsAsync(
+        int versionId, IReadOnlyList<int> importedMethodologyIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(importedMethodologyIds);
+
+        var ownerMethodologyId = await db.MethodologyVersions
+            .AsNoTracking()
+            .Where(v => v.Id == versionId)
+            .Select(v => (int?)v.MethodologyId)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+        if (ownerMethodologyId is not { } owner)
+        {
+            return;
+        }
+
+        var existing = await db.MethodologyImports
+            .Where(i => i.MethodologyVersionId == versionId)
+            .OrderBy(i => i.Id)
+            .Take(MaxChildren)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var wanted = importedMethodologyIds.Distinct().ToList();
+        db.MethodologyImports.RemoveRange(existing.Where(i => !wanted.Contains(i.ImportedMethodologyId)));
+
+        foreach (var id in wanted.Where(w => !existing.Any(i => i.ImportedMethodologyId == w)))
+        {
+            db.MethodologyImports.Add(new MethodologyImport(versionId, id, owner));
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<string, long>> FindSubstanceEntryIdsAsync(
+        IReadOnlyCollection<string> codes, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(codes);
+
+        var wanted = codes
+            .Where(c => !string.IsNullOrWhiteSpace(c))
+            .Select(c => c.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var result = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        if (wanted.Count == 0)
+        {
+            return result;
+        }
+
+        // Довідники речовин — ті, що мають поле SUBSTANCE_CODE (так само, як у GetSubstanceCodesAsync).
+        var fields = await db.RegistryFieldDefs
+            .AsNoTracking()
+            .Where(f => f.Code == "SUBSTANCE_CODE")
+            .Select(f => new { f.Id, f.RegistryDefId })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        if (fields.Count == 0)
+        {
+            return result;
+        }
+
+        var registryIds = fields.Select(f => f.RegistryDefId).Distinct().ToList();
+        var fieldIds = fields.Select(f => f.Id).ToList();
+
+        var byField = await (
+                from v in db.RegistryValues.AsNoTracking()
+                join e in db.RegistryEntries.AsNoTracking() on v.RegistryEntryId equals e.Id
+                where fieldIds.Contains(v.RegistryFieldDefId) && !e.IsDeleted
+                orderby e.Id, v.Id
+                select new { e.Id, v.ValueString, v.ValueNumeric })
+            .Take(MaxChildren * 10)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        foreach (var row in byField.OrderBy(r => r.Id))
+        {
+            var text = !string.IsNullOrWhiteSpace(row.ValueString)
+                ? row.ValueString.Trim()
+                : row.ValueNumeric?.ToString("0.#########", System.Globalization.CultureInfo.InvariantCulture);
+            if (text is not null && wanted.Contains(text, StringComparer.OrdinalIgnoreCase) && !result.ContainsKey(text))
+            {
+                result[text] = row.Id;
+            }
+        }
+
+        var missing = wanted.Where(w => !result.ContainsKey(w)).ToList();
+        if (missing.Count > 0)
+        {
+            var byCode = await db.RegistryEntries
+                .AsNoTracking()
+                .Where(e => registryIds.Contains(e.RegistryDefId) && !e.IsDeleted && missing.Contains(e.Code))
+                .Select(e => new { e.Id, e.Code })
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+
+            foreach (var row in byCode.OrderBy(r => r.Id))
+            {
+                var key = missing.First(m => string.Equals(m, row.Code, StringComparison.OrdinalIgnoreCase));
+                if (!result.ContainsKey(key))
+                {
+                    result[key] = row.Id;
+                }
+            }
+        }
+
+        return result;
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<LiveTable>> FindLiveTablesByCodeAsync(
+        string tableCode, string? templateCode, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(tableCode);
+
+        var candidates = await (
+                from table in db.TableDefs.AsNoTracking()
+                where table.Code == tableCode && !table.IsDeleted
+                join sheet in db.SheetDefs.AsNoTracking() on table.SheetDefId equals sheet.Id
+                where !sheet.IsDeleted
+                join version in db.TemplateVersions.AsNoTracking() on sheet.TemplateVersionId equals version.Id
+                where version.Status == TemplateVersionStatus.Published
+                join template in db.Templates.AsNoTracking() on version.TemplateId equals template.Id
+                where templateCode == null || template.Code == templateCode
+                orderby table.Id
+                select new
+                {
+                    TableDefId = table.Id,
+                    TableCode = table.Code,
+                    VersionId = version.Id,
+                    TemplateId = template.Id,
+                    TemplateCode = template.Code,
+                })
+            .Take(MaxChildren)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        // «Жива» версія шаблону — остання опублікована (так само, як ListLiveTableDefIdsAsync).
+        var templateIds = candidates.Select(c => c.TemplateId).Distinct().ToList();
+        if (templateIds.Count == 0)
+        {
+            return [];
+        }
+
+        var published = await db.TemplateVersions
+            .AsNoTracking()
+            .Where(v => templateIds.Contains(v.TemplateId) && v.Status == TemplateVersionStatus.Published)
+            .Select(v => new { v.Id, v.TemplateId, v.PublishedAt })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        var latest = published
+            .GroupBy(v => v.TemplateId)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(v => v.PublishedAt).ThenByDescending(v => v.Id).First().Id);
+
+        var live = candidates
+            .Where(c => latest.TryGetValue(c.TemplateId, out var id) && id == c.VersionId)
+            .OrderBy(c => c.TemplateCode, StringComparer.Ordinal)
+            .ThenBy(c => c.TableDefId)
+            .ToList();
+        if (live.Count == 0)
+        {
+            return [];
+        }
+
+        var tableIds = live.Select(l => l.TableDefId).ToList();
+        var columns = await db.ColumnDefs
+            .AsNoTracking()
+            .Where(c => tableIds.Contains(c.TableDefId) && !c.IsDeleted)
+            .OrderBy(c => c.Ordinal)
+            .ThenBy(c => c.Id)
+            .Select(c => new
+            {
+                c.TableDefId,
+                c.Id,
+                c.Code,
+                c.DataType,
+                c.IsMonthColumn,
+                c.MonthNumber,
+                c.UnitId,
+            })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        var aliases = await db.MonthInputAliases
+            .AsNoTracking()
+            .Where(a => tableIds.Contains(a.TableDefId))
+            .Select(a => new { a.TableDefId, a.Alias })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return
+        [
+            .. live.Select(l => new LiveTable(
+                l.TemplateId,
+                l.TemplateCode,
+                l.VersionId,
+                l.TableDefId,
+                l.TableCode,
+                [.. columns.Where(c => c.TableDefId == l.TableDefId)
+                    .Select(c => new LiveColumn(c.Id, c.Code, c.DataType, c.IsMonthColumn, c.MonthNumber, c.UnitId))],
+                [.. aliases.Where(a => a.TableDefId == l.TableDefId).Select(a => a.Alias).Distinct(StringComparer.OrdinalIgnoreCase)])),
+        ];
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<int, IReadOnlyList<int>>> GetMethodologyDependenciesAsync(
+        IReadOnlyCollection<int> fromMethodologyIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(fromMethodologyIds);
+        if (fromMethodologyIds.Count == 0)
+        {
+            return new Dictionary<int, IReadOnlyList<int>>();
+        }
+
+        var ids = fromMethodologyIds.Distinct().ToList();
+        var rows = await db.MethodologyDependencies
+            .AsNoTracking()
+            .Where(d => ids.Contains(d.FromMethodologyId))
+            .OrderBy(d => d.Id)
+            .Select(d => new { d.FromMethodologyId, d.ToMethodologyId })
+            .Take(MaxChildren * 10)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return rows
+            .GroupBy(r => r.FromMethodologyId)
+            .ToDictionary(g => g.Key, g => (IReadOnlyList<int>)[.. g.Select(r => r.ToMethodologyId).Distinct().Order()]);
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<int>> GetMethodologyIdsReadingTablesAsync(
         IReadOnlyCollection<string> tableCodes, CancellationToken ct)
     {
