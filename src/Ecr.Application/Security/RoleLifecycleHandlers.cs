@@ -33,15 +33,18 @@ internal static class RoleLifecycle
     /// <summary>Знаходить роль або відповідає <c>ECR-SEC-0404</c>.</summary>
     public static async Task<RoleView> FindAsync(IUserStore users, int roleId, CancellationToken ct)
     {
-        return await users.FindRoleAsync(roleId, ct).ConfigureAwait(false)
-               ?? throw new NotFoundException(
-                   ErrorCodes.SecurityPrincipalNotFound, $"Ролі {roleId} не існує.",
-                   new Dictionary<string, object?>
-                   {
-                       ["messageKey"] = "err.ECR-SEC-0404.roleNotFound",
-                       ["roleId"] = roleId.ToString(CultureInfo.InvariantCulture),
-                   });
+        return await users.FindRoleAsync(roleId, ct).ConfigureAwait(false) ?? throw NotFound(roleId);
     }
+
+    /// <summary>Відмова <c>404 ECR-SEC-0404 roleNotFound</c> — одна на всі шляхи «ролі немає».</summary>
+    public static NotFoundException NotFound(int roleId)
+        => new(
+            ErrorCodes.SecurityPrincipalNotFound, $"Ролі {roleId} не існує.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-SEC-0404.roleNotFound",
+                ["roleId"] = roleId.ToString(CultureInfo.InvariantCulture),
+            });
 
     /// <summary>Вбудована роль із сіду не перейменовується й не видаляється.</summary>
     /// <remarks>
@@ -177,12 +180,19 @@ public sealed class DeleteRoleHandler(
                 });
         }
 
-        await users.RemoveRoleAsync(roleId, ct).ConfigureAwait(false);
-
         // ⛔ C4: подія й видалення — одним комітом.
         await uow.ExecuteInTransactionAsync(
             async token =>
             {
+                // ⛔ B150: два одночасні DELETE тієї самої ролі (подвійний клік, дві вкладки) обидва проходять
+                // `FindAsync` вище. Той, хто прочитав роль ПІСЛЯ коміту переможця, отримує `false`; той, хто прочитав
+                // ДО, — 0 видалених рядків на збереженні (`ConcurrencyConflictException`). В обох випадках роль
+                // перевіряється в ЦІЙ транзакції, і відповідь — той самий 404, що й послідовний повтор, а не 500/409.
+                if (!await users.RemoveRoleAsync(roleId, token).ConfigureAwait(false))
+                {
+                    throw RoleLifecycle.NotFound(roleId);
+                }
+
                 await audit.WriteSecurityEventAsync(
                     new SecurityEventRecord(
                         clock.UtcNow,
@@ -194,7 +204,20 @@ public sealed class DeleteRoleHandler(
                         CorrelationId: currentUser.CorrelationId),
                     token).ConfigureAwait(false);
 
-                await uow.SaveChangesAsync(token).ConfigureAwait(false);
+                try
+                {
+                    await uow.SaveChangesAsync(token).ConfigureAwait(false);
+                }
+                catch (ConcurrencyConflictException)
+                {
+                    // ⚠ Лише якщо ролі справді вже немає; інший конфлікт лишається 409, як був.
+                    if (await users.FindRoleAsync(roleId, token).ConfigureAwait(false) is null)
+                    {
+                        throw RoleLifecycle.NotFound(roleId);
+                    }
+
+                    throw;
+                }
             },
             ct).ConfigureAwait(false);
     }

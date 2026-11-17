@@ -147,6 +147,67 @@ public sealed class RoleLifecycleTests
         Assert.Equal("Reviewers", _users.Roles.Single(r => r.Id == 2).Code);
     }
 
+    /// <summary>
+    /// B150: паралельний DELETE прочитав роль ДО коміту переможця, і збереження видалило 0 рядків
+    /// (<c>ConcurrencyConflictException</c>). Ролі вже немає — відповідь та сама, що й у послідовного повтору:
+    /// <c>404 ECR-SEC-0404 roleNotFound</c>.
+    /// </summary>
+    /// <remarks>Мутація: прибрати перевірку «ролі немає» в <c>catch</c> — летить 409, тест червоний.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public async Task Видалення_ролі_яку_випередив_паралельний_запит_дає_404_а_не_409()
+    {
+        _uow.SaveChangesAsync(Arg.Any<CancellationToken>()).Returns<Task<int>>(_ => throw new ConcurrencyConflictException(
+            "ECR-CELL-0409", "0 рядків", new Dictionary<string, object?> { ["messageKey"] = "err.ECR-CELL-0409.concurrentChange" }));
+
+        var error = await Assert.ThrowsAsync<NotFoundException>(() => Delete().HandleAsync(2, CancellationToken.None));
+
+        Assert.Equal("ECR-SEC-0404", error.ErrorCode);
+        Assert.Equal("err.ECR-SEC-0404.roleNotFound", error.Details!["messageKey"]);
+    }
+
+    /// <summary>
+    /// B150: паралельний DELETE закомітився між перевіркою ролі й видаленням — сховище каже «ролі вже немає»
+    /// (<c>false</c>); відповідь — <c>404 roleNotFound</c>, без запису в журнал і без збереження.
+    /// </summary>
+    /// <remarks>Мутація: ігнорувати <c>false</c> від <c>RemoveRoleAsync</c> — летить 204 з подією, тест червоний.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public async Task Роль_зникла_між_перевіркою_і_видаленням_дає_404_без_події()
+    {
+        var store = Substitute.For<IUserStore>();
+        store.FindRoleAsync(2, Arg.Any<CancellationToken>())
+            .Returns(new RoleView(2, "Reviewers", IsBuiltIn: false, IsActive: true, [], []));
+        store.CountRoleUsageAsync(2, Arg.Any<CancellationToken>()).Returns(new RoleUsage(0, 0));
+        store.RemoveRoleAsync(2, Arg.Any<CancellationToken>()).Returns(false);
+
+        var handler = new DeleteRoleHandler(store, _access, _uow, _audit, _user, _clock);
+        var error = await Assert.ThrowsAsync<NotFoundException>(() => handler.HandleAsync(2, CancellationToken.None));
+
+        Assert.Equal("ECR-SEC-0404", error.ErrorCode);
+        Assert.Equal("err.ECR-SEC-0404.roleNotFound", error.Details!["messageKey"]);
+        await _audit.DidNotReceive().WriteSecurityEventAsync(Arg.Any<SecurityEventRecord>(), Arg.Any<CancellationToken>());
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>B150: конфлікт збереження, коли роль ЩЕ є, лишається конфліктом (409), а не перетворюється на 404.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public async Task Конфлікт_збереження_при_живій_ролі_лишається_409()
+    {
+        var reviewers = _users.Roles.Single(r => r.Id == 2);
+        _uow.SaveChangesAsync(Arg.Any<CancellationToken>()).Returns<Task<int>>(_ =>
+        {
+            _users.Roles.Add(reviewers);
+            throw new ConcurrencyConflictException(
+                "ECR-CELL-0409", "конфлікт", new Dictionary<string, object?> { ["messageKey"] = "err.ECR-CELL-0409.concurrentChange" });
+        });
+
+        var error = await Assert.ThrowsAsync<ConcurrencyConflictException>(() => Delete().HandleAsync(2, CancellationToken.None));
+
+        Assert.Equal("ECR-CELL-0409", error.ErrorCode);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     public async Task Дубль_коду_за_межею_обрізаного_списку_ролей_дає_409_а_не_500()

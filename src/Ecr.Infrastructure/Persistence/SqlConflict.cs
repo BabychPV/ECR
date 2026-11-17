@@ -49,4 +49,16 @@ internal static class SqlConflict
     public static bool ViolatesIndex(DbUpdateException ex, string indexName)
         => ex.InnerException is SqlException { Number: 2601 or 2627 } sql
            && sql.Message.Contains(indexName, StringComparison.Ordinal);
+
+    /// <summary>
+    /// ✎ B150: <c>true</c> — 13535, «transaction time was earlier than period start time» на системно-версійованій
+    /// таблиці: дві одночасні транзакції змінюють той самий рядок, і та, що ПОЧАЛАСЬ раніше, пише після пізнішої.
+    /// </summary>
+    /// <remarks>
+    /// Це гонитва «одночасна зміна» того самого рядка — той самий клас, що й <c>DbUpdateConcurrencyException</c>:
+    /// відповідь — 409 <c>concurrentChange</c>, повторний запит прочитає новий стан. Помічено на
+    /// <c>dic.RegistryEntry</c> (вікно чинності, двічі одночасно); правило не прив'язане до таблиці.
+    /// </remarks>
+    public static bool IsTemporalPeriodRace(DbUpdateException ex)
+        => ex.InnerException is SqlException { Number: 13535 };
 }

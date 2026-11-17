@@ -67,6 +67,13 @@ public interface IUserStore
     /// <summary>Додає новий обліковий запис.</summary>
     public void Add(User user);
 
+    /// <summary>
+    /// ✎ B150: забуває доданий, але не збережений запис — після програшу гонитви за унікальним індексом, щоб наступне
+    /// збереження не намагалося вставити його вдруге.
+    /// </summary>
+    /// <param name="user">Запис, доданий через <see cref="Add"/>.</param>
+    public void ForgetAdded(User user);
+
     /// <summary>Фіксує спробу входу — вдалу чи ні.</summary>
     /// <remarks>
     /// Пишеться й для НЕІСНУЮЧОГО імені: інакше підбір імен не лишав би сліду
@@ -174,7 +181,8 @@ public interface IUserStore
     /// <summary>Прибирає роль разом із її набором прав; збереження — за обробником.</summary>
     /// <param name="roleId">Роль.</param>
     /// <param name="ct">Токен скасування.</param>
-    public Task RemoveRoleAsync(int roleId, CancellationToken ct);
+    /// <returns><c>false</c> — ролі вже немає (її щойно видалив паралельний запит); нічого не позначено.</returns>
+    public Task<bool> RemoveRoleAsync(int roleId, CancellationToken ct);
 
     /// <summary>Залишає з переліку лише **небезпечні** права (<c>ФВ-6.12</c>).</summary>
     /// <summary>Ресурсні гранти ролі.</summary>

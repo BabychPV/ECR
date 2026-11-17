@@ -262,15 +262,47 @@ public sealed partial class LoginHandler(
             // зі збоєм — на екрані безпеки слідів не було. Тепер 409 з причиною, спроба в журналі
             // входів, а Warning каже адміністраторові, який запис виправити і на який SID
             // (`PUT /users/{id}/windows-sid`, поки запис ще не входив).
-            if (await users.FindByUserNameAsync(userName, ct).ConfigureAwait(false) is { } taken)
+            var taken = await users.FindByUserNameAsync(userName, ct).ConfigureAwait(false);
+
+            // ⛔ B150: запис з тим самим ім'ям і ТИМ САМИМ SID — це переможець одночасного першого входу, що
+            // закомітився між пошуком за SID вище і цим пошуком за ім'ям. Не «інший SID», а той самий користувач.
+            if (taken is not null && string.Equals(taken.WindowsSid, sid, StringComparison.OrdinalIgnoreCase))
+            {
+                user = taken;
+            }
+            else if (taken is not null)
             {
                 await FailAsync(userName, "SidMismatch", ipAddress, now, ct, AuthProvider.Windows).ConfigureAwait(false);
                 LogSidMismatch(logger, userName, taken.Id, sid);
                 throw SidMismatch(userName, sid);
             }
+        }
 
+        if (user is null)
+        {
             user = User.CreateDomain(userName, displayName, sid, now);
             users.Add(user);
+
+            // ⛔ B150 (рішення координатора 16.11): два одночасні ПЕРШІ входи того самого доменного користувача обидва
+            // не бачать запису за SID і обидва його створюють. Програшна вставка відбивається унікальним індексом
+            // (ім'я або SID → 409 ECR-USR-0409). 409 на вході — не відповідь людині: програшний бере запис
+            // ПЕРЕМОЖЦЯ (той самий SID) і входить далі, як звичайний повторний вхід. Іншого власника SID тут бути не
+            // може — тоді запис не знайдеться, і відмова лишається відмовою.
+            try
+            {
+                await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+            }
+            catch (BusinessRuleException race) when (race.ErrorCode == Domain.Errors.ErrorCodes.UserDuplicate)
+            {
+                users.ForgetAdded(user);
+                var winner = await users.FindByWindowsSidAsync(sid, ct).ConfigureAwait(false);
+                if (winner is null)
+                {
+                    throw;
+                }
+
+                user = winner;
+            }
         }
 
         if (!user.IsActive)
