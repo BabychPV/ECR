@@ -1714,7 +1714,11 @@ function TemplateVersionEditor(): JSX.Element {
                 disabled={!canEditSheets}
                 saving={createPeriodRuleMutation.isPending}
                 onChange={setDraft}
-                onSubmit={() => createPeriodRuleMutation.mutate(draft)}
+                onSubmit={() => {
+                  // ⛔ B149 (KIT §6.9): вікно правил змонтоване завжди — закритий `Modal` ще ~200 мс у DOM із формою.
+                  if (!periodRulesOpen || createPeriodRuleMutation.isPending) return;
+                  createPeriodRuleMutation.mutate(draft);
+                }}
               />
             )}
           </LocalDraft>
@@ -1734,11 +1738,13 @@ function TemplateVersionEditor(): JSX.Element {
                 onRuleIdChange={(ruleId) => setManage({ ...manage, ruleId })}
                 onChange={(draft) => setManage({ ...manage, draft })}
                 onSave={() => {
+                  if (!periodRulesOpen || savePeriodRuleMutation.isPending) return;
                   if (manage.ruleId !== null) {
                     savePeriodRuleMutation.mutate({ ruleId: manage.ruleId, draft: manage.draft });
                   }
                 }}
                 onDelete={() => {
+                  if (!periodRulesOpen || deletePeriodRuleMutation.isPending) return;
                   if (manage.ruleId !== null) {
                     deletePeriodRuleMutation.mutate(manage.ruleId);
                   }

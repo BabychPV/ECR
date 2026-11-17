@@ -270,7 +270,10 @@ export function UiStringsCsvPanel(): JSX.Element | null {
                 disabled={!isApplicable(report) || file === null}
                 loading={applyLoading}
                 onClick={() => {
-                  if (file !== null) apply.mutate({ lang, file });
+                  // ⛔ B149: спінер (`usePendingLoading`) вмикається лише через 100 мс, і поки запис летить чи
+                  // каталог перечитується, кнопка активна — другий клік слав другий запис того самого файлу.
+                  if (file === null || apply.isPending) return;
+                  apply.mutate({ lang, file });
                 }}
               >
                 {t('import.apply')}

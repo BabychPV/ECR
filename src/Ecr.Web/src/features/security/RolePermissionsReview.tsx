@@ -248,7 +248,11 @@ export function RolePermissionsReview({
               <Button
                 loading={saving}
                 disabled={blocked || (data.added.length === 0 && data.removed.length === 0)}
-                onClick={() => save.mutate(data.version)}
+                onClick={() => {
+                  // ⛔ B149 (KIT §6.9): спінер вмикається лише через 100 мс — другий клік слав другий PUT.
+                  if (save.isPending) return;
+                  save.mutate(data.version);
+                }}
               >
                 {t('security.savePermissions')}
               </Button>

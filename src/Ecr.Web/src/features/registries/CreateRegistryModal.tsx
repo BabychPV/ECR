@@ -123,7 +123,12 @@ export function CreateRegistryModal({
         <Button
           disabled={missingFields.length > 0}
           loading={create.isPending}
-          onClick={() => create.mutate()}
+          onClick={() => {
+            // ⛔ B149 (KIT §6.9): власник тримає діалог змонтованим, закриття форму не скидає — кнопка закритого `Modal`
+            // (~200 мс у DOM) заводила довідник уже після «Cancel».
+            if (!opened || create.isPending) return;
+            create.mutate();
+          }}
         >
           {t('common.save')}
         </Button>

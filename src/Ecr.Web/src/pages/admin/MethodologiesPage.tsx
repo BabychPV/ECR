@@ -290,7 +290,9 @@ export function MethodologiesPage(): JSX.Element {
             disabled={code.trim().length === 0 || name.trim().length === 0}
             loading={createLoading}
             onClick={() => {
-              if (create.isPending) return;
+              // ⛔ B149 (KIT §6.9): діалог змонтований завжди, «Cancel» форму не скидає — кнопка закритого `Modal`
+              // (~200 мс у DOM) заводила методологію вже після відмови.
+              if (!creating || create.isPending) return;
               create.mutate();
             }}
           >

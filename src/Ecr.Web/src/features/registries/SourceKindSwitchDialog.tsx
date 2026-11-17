@@ -107,7 +107,12 @@ export function SourceKindSwitchDialog({
         <Button
           disabled={codes.length === 0 || reason.trim().length === 0}
           loading={send.isPending}
-          onClick={() => send.mutate()}
+          onClick={() => {
+            // ⛔ B149 (KIT §6.9): власник тримає діалог змонтованим, закриття вибір і причину не скидає — кнопка
+            // закритого `Modal` (~200 мс у DOM) перемикала джерело довідників уже після «Cancel».
+            if (!opened || send.isPending) return;
+            send.mutate();
+          }}
         >
           {t('registries.sourceSwitch')}
         </Button>

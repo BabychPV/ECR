@@ -189,7 +189,9 @@ export function ParticipantModal({
             disabled={user === null}
             loading={loading}
             onClick={() => {
-              if (user !== null) onSubmit({ user, level, sheetCode, tableCode });
+              // ⛔ B149 (KIT §6.9): спінер вмикається лише через 100 мс — другий клік слав другий POST.
+              if (!opened || isPending || user === null) return;
+              onSubmit({ user, level, sheetCode, tableCode });
             }}
           >
             {t('editAssign.participant.grant')}
@@ -237,7 +239,9 @@ export function OwnerTransferModal({
             disabled={user === null}
             loading={loading}
             onClick={() => {
-              if (user !== null) onSubmit(user);
+              // ⛔ B149 (KIT §6.9): той самий захист, що в «Add participant».
+              if (!opened || isPending || user === null) return;
+              onSubmit(user);
             }}
           >
             {t('editAssign.owner.confirm')}

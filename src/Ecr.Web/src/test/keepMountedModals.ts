@@ -18,5 +18,13 @@ import { testTheme } from '@/test/render';
  */
 export const keepMountedModalsTheme = mergeThemeOverrides(
   testTheme,
-  createTheme({ components: { Modal: { defaultProps: { keepMounted: true } } } }),
+  // ⚠ B149: `ModalRoot` окремо — `shared/ui/ResizableModal` збирає діалог із `Modal.Root`, а той бере
+  // типові пропси під власним іменем, не `Modal`. Без цього закритий `ResizableModal` зникав із DOM за кадр
+  // переходу, і зонд бачив або не бачив кнопку залежно від таймінгу.
+  createTheme({
+    components: {
+      Modal: { defaultProps: { keepMounted: true } },
+      ModalRoot: { defaultProps: { keepMounted: true } },
+    },
+  }),
 );

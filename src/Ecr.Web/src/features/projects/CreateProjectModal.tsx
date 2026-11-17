@@ -447,7 +447,16 @@ export function CreateProjectModal({
         <Button variant="default" onClick={onClose}>
           {t('common.cancel')}
         </Button>
-        <Button disabled={incomplete} loading={create.isPending} onClick={() => create.mutate()}>
+        <Button
+          disabled={incomplete}
+          loading={create.isPending}
+          onClick={() => {
+            // ⛔ B149 (KIT §6.9): `ProjectsPage` тримає діалог змонтованим, закриття форму не скидає — кнопка закритого
+            // `Modal` (~200 мс у DOM) заводила проєкт уже після «Cancel».
+            if (!opened || create.isPending) return;
+            create.mutate();
+          }}
+        >
           {t('common.save')}
         </Button>
       </Group>

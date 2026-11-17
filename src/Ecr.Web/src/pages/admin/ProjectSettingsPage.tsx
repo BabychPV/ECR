@@ -169,6 +169,9 @@ export function ProjectSettingsPage({ projectId }: { readonly projectId: number 
             disabled={newTimeZoneId === null}
             loading={changeTimeZone.isPending}
             onClick={() => {
+              // ⛔ B149 (KIT §6.9): діалог змонтований завжди, «Cancel» пояс не скидає — кнопка закритого `Modal` (~200 мс
+              // у DOM) міняла пояс проєкту вже після відмови людини.
+              if (!changingTimeZone || changeTimeZone.isPending) return;
               if (newTimeZoneId !== null) changeTimeZone.mutate({ id: selected.id, timeZoneId: newTimeZoneId });
             }}
           >

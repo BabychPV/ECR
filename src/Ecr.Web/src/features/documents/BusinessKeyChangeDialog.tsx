@@ -71,7 +71,17 @@ export function BusinessKeyChangeDialog({
           <Button variant="default" onClick={onClose} data-testid="business-key-cancel">
             {t('common.cancel')}
           </Button>
-          <Button disabled={!canSubmit} loading={isPending} onClick={onConfirm} data-testid="business-key-confirm">
+          <Button
+            disabled={!canSubmit}
+            loading={isPending}
+            onClick={() => {
+              // ⛔ B149 (KIT §6.9): власник лишає діалог змонтованим, а `rekeyStale` закриває його — кнопка закритого
+              // `Modal` (~200 мс у DOM, поля на місці) слала б другий запит зміни ключа.
+              if (!opened || isPending) return;
+              onConfirm();
+            }}
+            data-testid="business-key-confirm"
+          >
             {t('documents.changeKey')}
           </Button>
         </Group>

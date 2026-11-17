@@ -439,7 +439,12 @@ export function TemplatesPage(): JSX.Element {
           <Button
             disabled={code.trim().length === 0 || !hasAnyText(name)}
             loading={create.isPending}
-            onClick={() => create.mutate()}
+            onClick={() => {
+              // ⛔ B149 (KIT §6.9): діалог змонтований завжди, «Cancel» форму не скидає — кнопка закритого `Modal`
+              // (~200 мс у DOM) заводила шаблон уже після відмови.
+              if (!creating || create.isPending) return;
+              create.mutate();
+            }}
           >
             {t('common.save')}
           </Button>

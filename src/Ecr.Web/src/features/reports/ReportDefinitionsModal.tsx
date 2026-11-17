@@ -268,7 +268,8 @@ export function ReportDefinitionsModal({
             <Button
               loading={createLoading}
               onClick={() => {
-                if (create.isPending) return;
+                // ⛔ B149 (KIT §6.9): власник тримає вікно змонтованим — закритий `Modal` ще ~200 мс у DOM з формою.
+                if (!opened || create.isPending) return;
                 create.mutate();
               }}
               data-report-add=""
@@ -313,7 +314,7 @@ export function ReportDefinitionsModal({
               variant="default"
               loading={addVersionLoading}
               onClick={() => {
-                if (addVersion.isPending) return;
+                if (!opened || addVersion.isPending) return;
                 addVersion.mutate();
               }}
             >

@@ -265,7 +265,12 @@ export function PeriodPolicyManager({
                           size="xs"
                           variant="subtle"
                           loading={update.isPending && update.variables.id === policy.id}
-                          onClick={() => update.mutate({ id: policy.id, body: draft })}
+                          onClick={() => {
+                            // ⛔ B149 (KIT §6.9): вікно змонтоване завжди — закритий `Modal` ще ~200 мс у DOM; і по
+                            // одному запиту на рядок (`loading` цього рядка настає лише з наступним рендером).
+                            if (!opened || (update.isPending && update.variables.id === policy.id)) return;
+                            update.mutate({ id: policy.id, body: draft });
+                          }}
                         >
                           {t('common.save')}
                         </Button>
@@ -337,7 +342,11 @@ export function PeriodPolicyManager({
             <Button
               disabled={draftCode.trim().length === 0 || Boolean(policies.error)}
               loading={create.isPending}
-              onClick={() => create.mutate()}
+              onClick={() => {
+                // ⛔ B149 (KIT §6.9): див. «Save» рядка вище.
+                if (!opened || create.isPending) return;
+                create.mutate();
+              }}
             >
               {t('periods.policyCreate')}
             </Button>

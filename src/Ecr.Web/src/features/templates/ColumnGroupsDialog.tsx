@@ -147,7 +147,15 @@ export function ColumnGroupsDialog({
           <Button variant="default" onClick={onClose}>
             {t('common.cancel')}
           </Button>
-          <Button disabled={!valid} loading={saveLoading} onClick={() => save.mutate()}>
+          <Button
+            disabled={!valid}
+            loading={saveLoading}
+            onClick={() => {
+              // ⛔ B149 (KIT §6.9): спінер вмикається лише через 100 мс — другий клік слав другий PUT.
+              if (save.isPending) return;
+              save.mutate();
+            }}
+          >
             {t('colgroups.save')}
           </Button>
         </Group>
