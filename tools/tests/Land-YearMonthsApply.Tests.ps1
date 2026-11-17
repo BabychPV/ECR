@@ -140,6 +140,21 @@ Describe 'Build-LandTemplate -Stage YearMonths: застосування пла�
         if ($r.Created -ne 1 -or @($script:Calls | Where-Object { $_ -like 'PUT*' }).Count -ne 0) { throw "DryRun пише: $($script:Calls -join ';')" }
     }
 
+    It "успадковані прив'язки (AU L8): прибрана базова колонка -> 12 місячних тієї ж методології й виходу; точний код; неповні/без місяців у звіт" {
+        $rows = @()
+        foreach ($m in 1..12) { $rows += [pscustomobject]@{ MethodologyId = 9; OutputCode = 'O_1'; TableCode = 'T5_08'; BaseCode = 'O_1'; MonthColumnId = 100 + $m; MonthCode = ('O_1_M{0:00}' -f $m); MonthNumber = $m } }
+        # LIKE-хибнопозитив: '_' у коді в SQL - шаблон; функція мусить відкинути
+        $rows += [pscustomobject]@{ MethodologyId = 9; OutputCode = 'O_1'; TableCode = 'T5_08'; BaseCode = 'O_1'; MonthColumnId = 999; MonthCode = 'OX1_M01'; MonthNumber = 1 }
+        foreach ($m in 1..3) { $rows += [pscustomobject]@{ MethodologyId = 11; OutputCode = 'P'; TableCode = 'T5_22'; BaseCode = 'P'; MonthColumnId = 200 + $m; MonthCode = ('P_M{0:00}' -f $m); MonthNumber = $m } }
+        $rows += [pscustomobject]@{ MethodologyId = 11; OutputCode = 'Q'; TableCode = 'T5_22'; BaseCode = 'Q'; MonthColumnId = [DBNull]::Value; MonthCode = [DBNull]::Value; MonthNumber = [DBNull]::Value }
+        $co = Get-LandCarryOverMonthBindings -Rows $rows
+        $w9 = @($co.Wanted[9]); $w11 = @($co.Wanted[11])
+        if ($w9.Count -ne 12 -or (@($w9 | ForEach-Object { $_.ColumnDefId }) -join ',') -ne ((101..112) -join ',') -or @($w9 | Where-Object { $_.OutputCode -ne 'O_1' -or -not $_.IsActive }).Count) { throw "методологія 9: $(@($w9 | ForEach-Object { "$($_.ColumnDefId)/$($_.OutputCode)" }) -join ',')" }
+        if ($w11.Count -ne 3 -or @($co.Incomplete).Count -ne 1 -or @($co.Incomplete)[0] -notlike 'T5_22/P/P*3') { throw "неповні: $(@($co.Incomplete) -join ';') / $($w11.Count)" }
+        if (@($co.NoMonths).Count -ne 1 -or @($co.NoMonths)[0] -notlike 'T5_22/Q/Q*') { throw "без місяців: $(@($co.NoMonths) -join ';')" }
+        if ($co.Wanted.Count -ne 2) { throw "методологій: $($co.Wanted.Count)" }
+    }
+
     It 'колонки клону: прибрати лише живі коди плану; порядок = модель, лише різниці; повтор - порожньо' {
         $mdl = New-YmFixture
         $months = (Read-LandMonthBandSource (Join-Path $land 'land-month-bands.json')).months

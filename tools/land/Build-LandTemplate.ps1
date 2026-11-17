@@ -1753,6 +1753,37 @@ function Stage-Methodologies {
         }
     }
     Bind-ResultColumns $mid
+    if ($script:YearMonthsPlan) { Bind-CarryOverMonthBindings ([int]$S.VersionId) }
+}
+
+# B5 (AU L8 17.11): прив'язки, які клон успадкував від місячної версії, але яких немає в моделі/списку збирача (методології,
+# додані на live пізніше: ECW_C07_07_01, ECW_C07_16). Читання - SQL (лише SELECT), запис - API (ідемпотентно, лише різниця).
+function Bind-CarryOverMonthBindings([int]$vid) {
+    $null = Assert-LocalSqlConnection $effectiveSqlConnection
+    $cn = New-Object System.Data.SqlClient.SqlConnection($effectiveSqlConnection)
+    $cn.Open()
+    try {
+        $dt = Sql-Query $cn @"
+SELECT b.MethodologyId, b.OutputCode, t.Code AS TableCode, c.Code AS BaseCode, m.Id AS MonthColumnId, m.Code AS MonthCode, m.MonthNumber
+FROM cfg.CalculationBinding b
+JOIN cfg.ColumnDef c ON c.Id = b.ColumnDefId
+JOIN cfg.TableDef t ON t.Id = c.TableDefId
+JOIN cfg.SheetDef sd ON sd.Id = t.SheetDefId
+LEFT JOIN cfg.ColumnDef m ON m.TableDefId = t.Id AND m.IsDeleted = 0 AND m.IsMonthColumn = 1
+    AND m.MonthNumber BETWEEN 1 AND 12 AND m.Code LIKE c.Code + '[_]M[01][0-9]'
+WHERE sd.TemplateVersionId = @vid AND t.IsDeleted = 0 AND b.IsActive = 1 AND c.IsDeleted = 1
+"@ @{ vid = $vid }
+    } finally { $cn.Close() }
+    $co = Get-LandCarryOverMonthBindings -Rows @($dt.Rows)
+    $cr = 0; $up = 0; $sm = 0; $fl = 0
+    foreach ($m in @($co.Wanted.Keys | Sort-Object)) {
+        $sb = Set-LandMethodologyBindings -MethodologyId $m -Wanted $co.Wanted[$m]
+        $cr += $sb.Created; $up += $sb.Updated; $sm += $sb.Same; $fl += $sb.Failed
+        foreach ($e in @($sb.Errors | Select-Object -First 10)) { Log "    ! $e" }
+    }
+    Log ("  успадковані прив'язки -> місячні колонки (версія {0}, методологій {1}): створено {2}, змінено {3}, без змін {4}, помилок {5}; неповні місяці {6}; без місячних колонок {7}" -f $vid, $co.Wanted.Count, $cr, $up, $sm, $fl, @($co.Incomplete).Count, @($co.NoMonths).Count)
+    foreach ($x in @($co.Incomplete | Select-Object -First 10)) { Log "    ! неповні місяці: $x" }
+    foreach ($x in @($co.NoMonths | Select-Object -First 5)) { Log "    (без місячних колонок) $x" }
 }
 
 # LP-08: прив'язка виходів методологій C08/C09/C11/C12 (імпортує окремий процес: tools/Ecr.MethodologyImport + POST /methodologies/import)
