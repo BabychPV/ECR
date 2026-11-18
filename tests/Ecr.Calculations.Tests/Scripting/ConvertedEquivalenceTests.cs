@@ -125,8 +125,8 @@ public sealed class ConvertedEquivalenceTests
         var oldModule = new DelegateModule(input => oldStand.RunAsync([.. input.Arguments]));
         var scriptModule = new DelegateModule(input => scriptStand.RunArgumentsAsync([.. input.Arguments]));
 
-        var oldRows = await ParityComparer.ExecuteRowsAsync(keys, inputs, oldModule, null!, CancellationToken.None);
-        var scriptRows = await ParityComparer.ExecuteRowsAsync(keys, inputs, scriptModule, null!, CancellationToken.None);
+        var oldRows = await ParityComparer.ExecuteRowsAsync(keys, inputs, oldModule, null!, false, CancellationToken.None);
+        var scriptRows = await ParityComparer.ExecuteRowsAsync(keys, inputs, scriptModule, null!, false, CancellationToken.None);
 
         // Контроль: набір не порожній і справді розрізняє результати (не «усі відхилено»).
         Assert.Equal(10m, oldRows["exact"].Values.First(v => v.SubstanceEntryId == 9001).Value);
@@ -135,6 +135,55 @@ public sealed class ConvertedEquivalenceTests
         Assert.True(oldRows["unknown"].Rejected);
 
         Assert.Equal(Show(oldRows), Show(scriptRows));
+    }
+
+    /// <summary>
+    /// Три стани обов'язкового аргументу: значення є / запис комірки є, але порожній / запису немає зовсім. Старий рушій
+    /// у другому стані дає <c>null</c> без помилки, <c>#ARG</c> — лише в третьому; перенесений скрипт — так само.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Порожній_запис_комірки_обовязкового_аргументу_дає_null_а_відсутній_запис_дає_ARG_як_у_старого_рушія()
+    {
+        var oldStand = new RuleStand(rule: null)
+            .WithSubstanceFormula("Total", "@X * CST.EF")
+            .WithSubstanceFormula("Pick", "if(@X > 0, 1, 2)")
+            .WithSubstanceCodes("0301", "0304")
+            .WithConstants(RuleStand.Number("EF", 2m, null!));
+
+        var source = new VersionSource
+        {
+            MethodologyCode = "WS",
+            NumericMode = NumericMode.Strict,
+            Formulas = [new SourceFormula("Total", "@X * CST.EF", 1), new SourceFormula("Pick", "if(@X > 0, 1, 2)", 2)],
+            Outputs = [new SourceOutput("Total", "kg"), new SourceOutput("Pick", "kg")],
+            Constants = [SourceConstant.OfNumber("EF", 2m)],
+            Substances = ["0301", "0304"],
+            RowsClauses = [new SourceRowsClause(["T1"], [new SourceRule([])], [])],
+        };
+        var converted = ScriptConverter.Convert(source);
+        Assert.True(converted.Text is not null, string.Join(" | ", converted.Issues.Select(i => i.Code + ": " + i.Message)));
+
+        var scriptStand = new ScriptStand(converted.Text, NumericMode.Strict)
+            .WithSubstances(("0301", (int)RuleStand.SubstanceA), ("0304", (int)RuleStand.SubstanceB));
+        scriptStand.AddTable("T1");
+
+        (string Key, CalculationArgument[] Arguments)[] rows =
+        [
+            ("value", [Number("X", 10m), Text("Other", "a")]),
+            ("emptyRecord", [new CalculationArgument("X", null, null, null), Text("Other", "a")]),
+            ("noRecord", [Text("Other", "a")]),
+        ];
+        var inputs = Inputs(rows);
+        var keys = rows.Select(r => r.Key).ToList();
+
+        var oldModule = new DelegateModule(input => oldStand.RunAsync([.. input.Arguments]));
+        var scriptModule = new DelegateModule(input => scriptStand.RunArgumentsAsync([.. input.Arguments]));
+        var oldRows = await ParityComparer.ExecuteRowsAsync(keys, inputs, oldModule, null!, false, CancellationToken.None);
+        var scriptRows = await ParityComparer.ExecuteRowsAsync(keys, inputs, scriptModule, null!, false, CancellationToken.None);
+
+        Assert.Equal(20m, oldRows["value"].Values.First(v => v.OutputCode == "Total").Value);
+        Assert.True(Show(oldRows) == Show(scriptRows), "OLD:\n" + Show(oldRows) + "\nNEW:\n" + Show(scriptRows));
     }
 
     /// <summary>Сама функція мови: прибирає будь-які пробільні символи, не чіпає не-текст.</summary>
@@ -244,8 +293,8 @@ public sealed class ConvertedEquivalenceTests
 
         var oldModule = new DelegateModule(input => stand.Module().ExecuteAsync(input, CancellationToken.None));
         var scriptModule = new DelegateModule(input => scriptStand.RunArgumentsAsync([.. input.Arguments]));
-        var oldRows = await ParityComparer.ExecuteRowsAsync(keys, oldInputs, oldModule, null!, CancellationToken.None);
-        var scriptRows = await ParityComparer.ExecuteRowsAsync(keys, scriptInputs, scriptModule, null!, CancellationToken.None);
+        var oldRows = await ParityComparer.ExecuteRowsAsync(keys, oldInputs, oldModule, null!, false, CancellationToken.None);
+        var scriptRows = await ParityComparer.ExecuteRowsAsync(keys, scriptInputs, scriptModule, null!, false, CancellationToken.None);
 
         // Контроль: рядок з Idle рахується, а без нього старий рушій не вигадує значення.
         Assert.NotEmpty(oldRows["both"].Values);

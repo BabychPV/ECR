@@ -308,11 +308,11 @@ internal sealed class ScriptEvaluationContext : IHostFunctionContext, IBudgetedE
             return optional ? ExpressionValue.Null : ExpressionValue.Error(ExpressionErrors.ArgumentNotFound);
         }
 
-        var value = key
+        // Запис комірки є, але порожній, — `null` без помилки (так само, як `@X` у старому рушії); `#ARG` лише тоді, коли
+        // аргументу немає зовсім (ScriptEvaluationContext, §3.5: «є, але порожнє» і «немає» — різні стани).
+        return key
             ? CalculationSteps.ToValue(argument, entryRef: true, legacyNumericText: false)
             : CalculationSteps.ToValue(argument, _entryRef, _legacyText);
-
-        return value.IsNull && !optional ? ExpressionValue.Error(ExpressionErrors.ArgumentNotFound) : value;
     }
 
     private static bool TryMonth(ExpressionValue value, out int month)
@@ -404,11 +404,12 @@ internal sealed class ScriptEvaluationContext : IHostFunctionContext, IBudgetedE
         }
 
         var optional = args[2].Value is true;
-        var value = _arguments.TryGetValue(column, out var argument)
-            ? CalculationSteps.ToValue(argument, _entryRef, _legacyText)
-            : ExpressionValue.Null;
+        if (_arguments.TryGetValue(column, out var argument))
+        {
+            return CalculationSteps.ToValue(argument, _entryRef, _legacyText);
+        }
 
-        return value.IsNull && !optional ? ExpressionValue.Error(ExpressionErrors.ArgumentNotFound) : value;
+        return optional ? ExpressionValue.Null : ExpressionValue.Error(ExpressionErrors.ArgumentNotFound);
     }
 
     private ExpressionValue Cell(IReadOnlyList<ExpressionValue> args)
