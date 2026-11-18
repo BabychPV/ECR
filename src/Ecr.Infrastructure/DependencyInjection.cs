@@ -174,6 +174,13 @@ public static class DependencyInjection
         services.AddScoped<Application.RegistryImport.IReferenceResolver, Application.Permits.AirLimits.SubstanceReferenceResolver>();
         services.AddScoped<IRegistryUseStore, RegistryUseStore>(); // RT-23b
         services.AddScoped<IRegistryImpactStore, RegistryImpactStore>(); // RT-25
+        services.AddScoped<IMethodologyRegistryEdges, DocumentDependencies.MethodologyRegistryEdges>(); // B179 L1: єдиний читач методологій графа
+        services.AddScoped<IDependencyGraphProvider>(sp => new DocumentDependencies.DependencyGraphProvider(
+            sp.GetRequiredService<EcrDbContext>(),
+            sp.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>(),
+            sp.GetRequiredService<IFormulaEngine>(),
+            sp.GetRequiredService<IMethodologyRegistryEdges>(),
+            sp.GetRequiredService<CacheLifetimes>())); // B179 L1
         services.AddSingleton(new Application.Registries.Nae.NaeTreeSettings(
             configuration["AirLimits:NaeRegistryCode"] is { Length: > 0 } naeTree ? naeTree : Application.Registries.Nae.NaeTreeSettings.Default.RegistryCode,
             configuration["NaeTree:RegionSourceRegistryCode"] is { Length: > 0 } regions ? regions : Application.Registries.Nae.NaeTreeSettings.Default.RegionSourceRegistryCode));
