@@ -44,6 +44,8 @@ public static class DependencyInjection
         services.AddScoped<ICalculationModule, MonthColumnArgumentsModule>();
         services.AddScoped<ICalculationModule, ScriptCalculationModule>();
         services.AddScoped<ICalculationModule, GenericCalculationModule>();
+        // ✎ MS: порівняння старого й скриптового шляхів версії (паритет, план §8.4); нічого не пише.
+        services.AddScoped<Scripting.Parity.ParityComparer>();
         services.AddScoped<CalculationOrchestrator>();
         services.AddScoped<ICalculationRunner>(p => p.GetRequiredService<CalculationOrchestrator>());
 
