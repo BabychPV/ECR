@@ -93,6 +93,11 @@ public static class ScriptConverter
                 return BuildLibrary(ordered);
             }
 
+            if (vs.IsModuleLevel)
+            {
+                return BuildModule(ordered);
+            }
+
             var rowFormulas = ordered.Where(f => f.Scope == MethodologyFormulaScope.Row).ToList();
             var substanceFormulas = ordered.Where(f => f.Scope != MethodologyFormulaScope.Row).ToList();
             ValidateOutputs(hasSubstances);
@@ -198,6 +203,81 @@ public static class ScriptConverter
             return sb.ToString().TrimEnd('\n') + "\n";
         }
 
+        /// <summary>
+        /// Рівень <c>Module</c>: формули в порядку обчислення, кожна — <c>output Код : одиниця = вираз;</c> (виходи
+        /// модуля — ті, що лягають у рядки <c>F_…</c>; хто куди лягає, знає лише модуль), без <c>rows</c>.
+        /// </summary>
+        private string? BuildModule(List<SourceFormula> ordered)
+        {
+            if (vs.Substances.Count > 0)
+            {
+                Error("moduleSubstances", "A Module-level version cannot have substances.");
+            }
+
+            if (ordered.Count == 0)
+            {
+                Error("moduleNoFormulas", "A Module-level version has no formulas: the script would have no outputs.");
+            }
+
+            var lines = new List<string>();
+            foreach (var f in ordered)
+            {
+                if (!_formulaNames.ContainsKey(f.Code))
+                {
+                    continue;
+                }
+
+                var translator = new ExpressionTranslator(
+                    code => _planner.Use(code, ConstContext.Row, null), RowFormulaReference, moduleLevel: true);
+                try
+                {
+                    var t = translator.Translate(f.Expression);
+                    _refs[f.Code] = [.. t.Formulas];
+                    if (t.ParsedInImportMode)
+                    {
+                        Info("parsedInImportMode", $"Formula «{f.Code}» contains bare argument names (import grammar).", f.Code);
+                    }
+
+                    // Одиниця: з виходу, а без неї — з формули; HSE400 одиниць не задає, тож «one» (безрозмірна):
+                    // модуль підставляє для неї одиницю колонки місяця, як для формули без одиниці.
+                    var unit = _outputs.TryGetValue(f.Code, out var o) && !string.IsNullOrEmpty(o.UnitCode)
+                        ? o.UnitCode
+                        : f.UnitCode ?? "one";
+                    if (!ScriptText.IsName(unit))
+                    {
+                        Error("invalidUnit", $"Formula «{f.Code}»: unit «{unit}» cannot be written as a script name.", f.Code);
+                        continue;
+                    }
+
+                    lines.Add("output " + _formulaNames[f.Code] + " : " + unit + " = " + t.Text + ";");
+                }
+                catch (ConversionException ex)
+                {
+                    Error(ex.Code, $"Formula «{f.Code}»: {ex.Message}", f.Code);
+                }
+            }
+
+            CheckOrder(ordered, []);
+            if (vs.RowsClauses.Count > 0)
+            {
+                _issues.Add(new ConversionIssue(
+                    IssueSeverity.Warning, "moduleRowsIgnored",
+                    "A Module-level script has no rows clause: the module takes every row of the month-column table."));
+            }
+
+            if (_issues.Any(i => i.Severity == IssueSeverity.Error))
+            {
+                return null;
+            }
+
+            var sb = new StringBuilder();
+            AppendHeader(sb);
+            AppendImports(sb);
+            AppendConstants(sb);
+            AppendBlock(sb, lines);
+            return sb.ToString().TrimEnd('\n') + "\n";
+        }
+
         // ---- Перевірки й реєстрація імен ----
 
         private void ValidateStructure()
@@ -209,7 +289,7 @@ public static class ScriptConverter
                     Error("outputInLibrary", "A library methodology has outputs; a library cannot declare output.");
                 }
             }
-            else if (vs.RowsClauses.Count == 0)
+            else if (vs.RowsClauses.Count == 0 && !vs.IsModuleLevel)
             {
                 Error("missingRows", "The version has no rows clause: nothing selects the rows to calculate.");
             }
@@ -597,7 +677,7 @@ public static class ScriptConverter
         private void AppendHeader(StringBuilder sb)
         {
             sb.Append("// Methodology ").Append(vs.MethodologyCode).Append(", version ").Append(vs.VersionLabel)
-              .Append(vs.IsLibrary ? " (library)" : string.Empty).Append('\n');
+              .Append(vs.IsLibrary ? " (library)" : vs.IsModuleLevel ? " (module level)" : string.Empty).Append('\n');
             sb.Append("// Effective from ").Append(vs.EffectiveFrom.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
             if (vs.NextEffectiveFrom is { } next)
             {
@@ -660,7 +740,9 @@ public static class ScriptConverter
             }
 
             var compiled = ScriptCompiler.Compile(
-                text, new ScriptCompileOptions(vs.NumericMode, vs.IsLibrary, code => stubs.GetValueOrDefault(code)));
+                text,
+                new ScriptCompileOptions(
+                    vs.NumericMode, vs.IsLibrary, code => stubs.GetValueOrDefault(code), IsModuleLevel: vs.IsModuleLevel));
             foreach (var d in compiled.Diagnostics)
             {
                 Error(

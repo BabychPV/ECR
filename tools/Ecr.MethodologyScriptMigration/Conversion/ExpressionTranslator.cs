@@ -38,18 +38,23 @@ public sealed class ExpressionTranslator
     private readonly Func<string, string> _constant;
     private readonly Func<string, string> _formula;
     private readonly bool _keyArguments;
+    private readonly bool _moduleLevel;
 
     /// <summary>Створює перекладач.</summary>
     /// <param name="constant">Код константи → вираз її читання у скрипті.</param>
     /// <param name="formula">Ім'я формули (<c>!F</c>) → вираз у скрипті (<c>F</c> або <c>Lib.F</c>).</param>
     /// <param name="keyArguments">Правило категорії: <c>@X</c> → <c>key(row.X)</c>.</param>
-    public ExpressionTranslator(Func<string, string> constant, Func<string, string> formula, bool keyArguments = false)
+    /// <param name="moduleLevel">Рівень <c>Module</c>: <c>@GCV.x_y_z</c> → <c>row.GCV_x_y_z</c> (крапка стає підкресленням —
+    /// модуль місячних колонок віддає обидва імені, а скрипт читає лише друге).</param>
+    public ExpressionTranslator(
+        Func<string, string> constant, Func<string, string> formula, bool keyArguments = false, bool moduleLevel = false)
     {
         ArgumentNullException.ThrowIfNull(constant);
         ArgumentNullException.ThrowIfNull(formula);
         _constant = constant;
         _formula = formula;
         _keyArguments = keyArguments;
+        _moduleLevel = moduleLevel;
     }
 
     /// <summary>Перекладає вираз.</summary>
@@ -237,13 +242,14 @@ public sealed class ExpressionTranslator
         {
             case SymbolKind.Argument:
             {
-                if (!ScriptText.IsName(symbol.Name))
+                var argument = _moduleLevel ? symbol.Name.Replace('.', '_') : symbol.Name;
+                if (!ScriptText.IsName(argument))
                 {
                     throw new ConversionException(
                         "invalidName", $"Argument «{symbol.Name}» is not a valid column name for row.<name>.");
                 }
 
-                var field = "row." + symbol.Name + (symbol.IsOptional ? "?" : string.Empty);
+                var field = "row." + argument + (symbol.IsOptional ? "?" : string.Empty);
                 return new Printed(_keyArguments ? "key(" + field + ")" : field, PrecAtom);
             }
 

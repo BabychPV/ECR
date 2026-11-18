@@ -171,11 +171,6 @@ public static class MigrationCli
         ReportEntry Skipped(string reason) => new(
             reference.MethodologyCode, reference.Version, reference.VersionId, ReportStatus.Skipped, null, null, reason, []);
 
-        if (reference.Level == CalculationLevel.Module)
-        {
-            return Skipped("Level Module");
-        }
-
         if (reference.Engine == MethodologyEngine.Script)
         {
             return Skipped("already Script");
@@ -192,6 +187,12 @@ public static class MigrationCli
         try
         {
             var loaded = await loader.LoadAsync(reference.VersionId, ct).ConfigureAwait(false);
+            if (loaded.Source.IsModuleLevel && loaded.Source.Formulas.Count == 0)
+            {
+                // MS Етап 7: версії рівня Module конвертуються, але порожній Module (без формул) нічого переносити.
+                return Skipped("Level Module");
+            }
+
             issues.AddRange(loaded.Issues);
             fingerprint = Fingerprint.ComputeHex(loaded.Source);
             if (!loaded.HasErrors)

@@ -97,6 +97,7 @@ public sealed class VersionSourceLoader(EcrDbContext db, IFormulaEngine formulaE
         }
 
         var isLibrary = methodology.Kind == MethodologyKind.Library;
+        var isModuleLevel = version.Level == CalculationLevel.Module;
 
         // ---- Формули ----
         var formulaEntities = await _store.GetFormulasAsync(versionId, ct).ConfigureAwait(false);
@@ -224,7 +225,7 @@ public sealed class VersionSourceLoader(EcrDbContext db, IFormulaEngine formulaE
         // ---- Правила й речення rows ----
         IReadOnlyList<SourceRule> rules = [];
         IReadOnlyList<SourceRowsClause> clauses = [];
-        if (!isLibrary)
+        if (!isLibrary && !isModuleLevel)
         {
             rules = await LoadRulesAsync(versionId, issues, ct).ConfigureAwait(false);
             clauses = await BuildRowsClausesAsync(versionId, methodology, rules, issues, ct).ConfigureAwait(false);
@@ -235,6 +236,7 @@ public sealed class VersionSourceLoader(EcrDbContext db, IFormulaEngine formulaE
             MethodologyCode = methodology.Code,
             VersionLabel = version.Version,
             IsLibrary = isLibrary,
+            IsModuleLevel = isModuleLevel && !isLibrary,
             NumericMode = version.NumericMode,
             CalendarMode = version.CalendarMode,
             EffectiveFrom = effectiveFrom,

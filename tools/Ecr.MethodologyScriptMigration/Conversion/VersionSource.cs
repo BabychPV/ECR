@@ -120,6 +120,12 @@ public sealed record VersionSource
     /// <summary>Методологія виду <c>Library</c>.</summary>
     public bool IsLibrary { get; init; }
 
+    /// <summary>
+    /// Версія рівня <c>Module</c> (HSE400, «місяці в колонках»): усі формули стають <c>output</c>, аргументи
+    /// <c>@GCV.x_y_z</c> — <c>row.GCV_x_y_z</c>, речення <c>rows</c> немає.
+    /// </summary>
+    public bool IsModuleLevel { get; init; }
+
     /// <summary>Числовий режим.</summary>
     public NumericMode NumericMode { get; init; } = NumericMode.Legacy;
 

@@ -48,7 +48,7 @@ public static class Fingerprint
         var root = new JsonObject
         {
             ["format"] = FormatVersion,
-            ["kind"] = source.IsLibrary ? "Library" : "Methodology",
+            ["kind"] = source.IsLibrary ? "Library" : source.IsModuleLevel ? "Module" : "Methodology",
             ["numericMode"] = source.NumericMode.ToString(),
             ["calendarMode"] = source.CalendarMode.ToString(),
             ["rowActivityFilter"] = source.RowActivityFilter,
