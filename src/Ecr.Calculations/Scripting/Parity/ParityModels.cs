@@ -39,6 +39,12 @@ public static class ParityAspect
     /// <summary>Наявність <c>StepError</c> різна.</summary>
     public const string StepErrorPresence = "stepError.presence";
 
+    /// <summary>
+    /// Кроки-причини рядка (місяць, провал чи замаскований нуль) різні — лише рівень <c>Module</c> (HSE400): там помилка
+    /// кроку живе в трасуванні, а не в <c>StepError</c>.
+    /// </summary>
+    public const string TraceSteps = "trace.steps";
+
     /// <summary>Рядок відхилено (<c>ECR-CALC-0422</c> правило категорії) лише однією зі сторін.</summary>
     public const string Rejected = "rejected";
 
@@ -67,13 +73,18 @@ public sealed record ParityValue(
 /// <param name="HasStepError">Є <c>StepError</c>.</param>
 /// <param name="Rejected">Рядок відхилено правилом категорії.</param>
 /// <param name="Error">Текст винятку, якщо виконання впало з іншої причини; <c>null</c> — ні.</param>
+/// <param name="Steps">
+/// Кроки-причини (код, провал, причина маскування) — лише для рівня <c>Module</c>; <c>null</c> — шлях їх не порівнює
+/// (текст виразу в кроці різниться між діалектами, тож порівнюється не він).
+/// </param>
 public sealed record ParityRowOutcome(
     string RowKey,
     IReadOnlyList<ParityValue> Values,
     IReadOnlyList<string>? MissingArguments = null,
     bool HasStepError = false,
     bool Rejected = false,
-    string? Error = null);
+    string? Error = null,
+    IReadOnlyList<string>? Steps = null);
 
 /// <summary>Один шлях (старий чи скрипт) для екземпляра таблиці: вибір рядків і результати відібраних.</summary>
 /// <param name="Selected">Відібрані рядки.</param>

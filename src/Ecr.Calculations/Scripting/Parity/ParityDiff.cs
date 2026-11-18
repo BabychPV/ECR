@@ -76,6 +76,16 @@ public static class ParityDiff
             add(rowKey, ParityAspect.StepErrorPresence, Flag(old.HasStepError), Flag(script.HasStepError));
         }
 
+        if (old.Steps is not null || script.Steps is not null)
+        {
+            var oldSteps = (old.Steps ?? []).Order(StringComparer.Ordinal).ToList();
+            var newSteps = (script.Steps ?? []).Order(StringComparer.Ordinal).ToList();
+            if (!oldSteps.SequenceEqual(newSteps, StringComparer.Ordinal))
+            {
+                add(rowKey, ParityAspect.TraceSteps, string.Join("; ", oldSteps), string.Join("; ", newSteps));
+            }
+        }
+
         var oldMissing = old.MissingArguments is { Count: > 0 } a ? a : null;
         var newMissing = script.MissingArguments is { Count: > 0 } b ? b : null;
         if ((oldMissing is null) != (newMissing is null))

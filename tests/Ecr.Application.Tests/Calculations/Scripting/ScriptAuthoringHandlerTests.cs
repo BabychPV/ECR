@@ -282,7 +282,7 @@ public sealed class ScriptAuthoringHandlerTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait("Requirement", "MS-8.5")]
-    public async Task Parity_невидимий_документ_404_не_місяць_422_не_Configuration_422_без_тексту_422()
+    public async Task Parity_невидимий_документ_404_не_місяць_422_без_тексту_422()
     {
         Grant(ParityMethodologyScriptHandler.Permission);
         var runner = Runner();
@@ -303,15 +303,6 @@ public sealed class ScriptAuthoringHandlerTests
         var empty = await RefusedAsync(
             Parity(runner).HandleAsync(VersionId, new ScriptParityRequestDto(DocumentId, 209901), CancellationToken.None));
         Assert.Equal("err.ECR-CALC-0422.scriptEmpty", empty.Details!["messageKey"]);
-
-        // Не рівень Configuration.
-        var other = new MethodologyVersion(
-            MethodologyId, "3.0", CalculationLevel.Module, 1, Now, MethodologyEngine.Formulas);
-        other.SetScript(Clean, ScriptCompiler.Hash(Clean));
-        _drafts.FindVersionAsync(52, Arg.Any<CancellationToken>()).Returns(other);
-        var level = await RefusedAsync(
-            Parity(runner).HandleAsync(52, new ScriptParityRequestDto(DocumentId, 209901), CancellationToken.None));
-        Assert.Equal("err.ECR-CALC-0422.parityNotApplicable", level.Details!["messageKey"]);
 
         await runner.DidNotReceiveWithAnyArgs().RunAsync(default!, default);
     }

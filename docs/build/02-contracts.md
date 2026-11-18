@@ -4188,7 +4188,7 @@ public interface IScriptPreviewRunner
   (реалізація — `ParityComparer` проєкту розрахунків): для кожного оригінального екземпляра таблиці документа за період, до
   якого методологію прив'язано активно, порівнює старий шлях із ЗБЕРЕЖЕНИМ (тіньовим) текстом версії. Відповідь `{ targets,
   rowsCompared, valuesCompared, mismatchCount, truncated, mismatches: [{ tableInstanceId, rowKey, aspect, old, new }] }`
-  (до 500 розбіжностей). Нічого не пише. `422 parityNotApplicable` — не рівень Configuration; `422 scriptEmpty` — текст порожній.
+  (до 500 розбіжностей). Нічого не пише. Працює для версій обох рівнів (Configuration — вибір рядків правилами/`rows`; Module/HSE400 — усі рядки таблиці «місяці в колонках», порівнюються ще й кроки-причини `trace.steps`); `422 scriptEmpty` — текст порожній.
 - `POST /methodologies/script-migration/apply?dryRun=` — тіло: пакет `pack` `{ format, formatVersion, entries:
   [{ methodologyCode, version, effectiveFrom, text, sourceFingerprint }] }`; відповідь `{ dryRun, applied, refused,
   entries: [{ methodologyCode, version, versionId, status: applied|wouldApply|refused, reason, message, details[] }] }`.

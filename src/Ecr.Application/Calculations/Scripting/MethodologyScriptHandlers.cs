@@ -452,7 +452,7 @@ public sealed class ParityMethodologyScriptHandler(
     /// <param name="ct">Токен скасування.</param>
     /// <exception cref="NotFoundException">Версії або документа (для цього користувача) немає.</exception>
     /// <exception cref="AccessDeniedException">Профіль із обмеженим доступом до колонок.</exception>
-    /// <exception cref="BusinessRuleException">Період не місяць, версія не рівня Configuration або без тексту.</exception>
+    /// <exception cref="BusinessRuleException">Період не місяць або версія без тексту.</exception>
     public async Task<ScriptParityDto> HandleAsync(
         int methodologyVersionId, ScriptParityRequestDto request, CancellationToken ct)
     {
@@ -484,17 +484,6 @@ public sealed class ParityMethodologyScriptHandler(
         }
 
         var (_, version) = await ScriptHandlerSupport.LoadAsync(drafts, methodologyVersionId, ct).ConfigureAwait(false);
-        if (version.Level != CalculationLevel.Configuration)
-        {
-            throw new BusinessRuleException(
-                "ECR-CALC-0422",
-                $"Версія {version.Version}: паритет на документі доступний лише для версій рівня Configuration.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-CALC-0422.parityNotApplicable",
-                    ["version"] = version.Version,
-                });
-        }
 
         if (string.IsNullOrWhiteSpace(version.ScriptText))
         {

@@ -24,7 +24,7 @@ public sealed record ParityInstance(long DocumentId, int PeriodKey, long TableIn
 public interface IParityTargetSource
 {
     /// <summary>
-    /// Опубліковані версії рівня <c>Configuration</c> з рушієм <c>Formulas</c> і непорожнім тіньовим текстом.
+    /// Опубліковані версії (рівні <c>Configuration</c> і <c>Module</c>) з рушієм <c>Formulas</c> і непорожнім тіньовим текстом.
     /// </summary>
     /// <param name="methodologyCode">Лише ця методологія; <c>null</c> — усі.</param>
     /// <param name="ct">Токен скасування.</param>

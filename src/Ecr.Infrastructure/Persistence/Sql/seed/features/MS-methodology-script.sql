@@ -564,9 +564,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'switch.problem.scriptMissing', N'ru', N'У версии {code} {version} нет текста скрипта: сначала примените пакет.'),
     (N'switch.problem.scriptMissing', N'kz', N'{code} {version} нұсқасында скрипт мәтіні жоқ: алдымен пакетті қолданыңыз.'),
     (N'switch.problem.substancesDiffer', N'ru', N'Версия {version}: вещества из скрипта отличаются от сохранённых (только в скрипте: {onlyInScript}; только сохранены: {onlyStored}).'),
-    (N'switch.problem.substancesDiffer', N'kz', N'{version} нұсқасы: скрипттен алынған заттар сақталғандардан өзгеше (тек скриптте: {onlyInScript}; тек сақталған: {onlyStored}).'),
-    (N'err.ECR-CALC-0422.parityNotApplicable', N'ru', N'Версия {version}: сравнение путей на документе доступно только для версий уровня Configuration.'),
-    (N'err.ECR-CALC-0422.parityNotApplicable', N'kz', N'{version} нұсқасы: құжатта жолдарды салыстыру тек Configuration деңгейіндегі нұсқалар үшін қолжетімді.')
+    (N'switch.problem.substancesDiffer', N'kz', N'{version} нұсқасы: скрипттен алынған заттар сақталғандардан өзгеше (тек скриптте: {onlyInScript}; тек сақталған: {onlyStored}).')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -660,8 +658,7 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'switch.problem.importsDiffer', N'en', N'Version {version}: the imports derived from the script differ from the stored ones (only in the script: {onlyInScript}; only stored: {onlyStored}).', 1),
     (N'switch.problem.outputsDiffer', N'en', N'Version {version}: the outputs derived from the script differ from the stored ones (only in the script: {onlyInScript}; only stored: {onlyStored}).', 1),
     (N'switch.problem.scriptMissing', N'en', N'Version {code} {version} has no script text: apply a package first.', 1),
-    (N'switch.problem.substancesDiffer', N'en', N'Version {version}: the substances derived from the script differ from the stored ones (only in the script: {onlyInScript}; only stored: {onlyStored}).', 1),
-    (N'err.ECR-CALC-0422.parityNotApplicable', N'en', N'Version {version}: comparing the engines on a document is available only for Configuration-level versions.', 1)
+    (N'switch.problem.substancesDiffer', N'en', N'Version {version}: the substances derived from the script differ from the stored ones (only in the script: {onlyInScript}; only stored: {onlyStored}).', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO

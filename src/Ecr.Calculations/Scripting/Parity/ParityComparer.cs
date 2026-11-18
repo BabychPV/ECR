@@ -11,6 +11,10 @@ namespace Ecr.Calculations.Scripting.Parity;
 /// (<see cref="ScriptRowSelector"/> + <see cref="ScriptCalculationModule"/>) на ОДНИХ вхідних даних (MS, план §8.4).
 /// </summary>
 /// <remarks>
+/// ✎ Рівень <c>Module</c> (HSE400): обидва шляхи рахує ОДИН <see cref="MonthColumnArgumentsModule"/> — формульний
+/// (<c>Engine = Formulas</c>, правила, <see cref="GenericCalculationModule"/> всередині) і скриптовий (<c>Engine = Script</c>,
+/// усі рядки таблиці, <see cref="ScriptCalculationModule"/> всередині), як кличе оркестратор. Додатково порівнюються
+/// кроки-причини рядка (<see cref="ParityAspect.TraceSteps"/>): у модулі помилка кроку живе в трасуванні.
 /// ⛔ Нічого не пише: ні результатів, ні проблем рядків, ні версії. Модулі повертають значення, запис робить
 /// <c>CalculationOutputWriter</c> — його тут немає.
 /// <para>
@@ -59,8 +63,15 @@ public sealed class ParityComparer(
 
         var oldModule = modules.FirstOrDefault(m => m.CanHandle(oldDescriptor))
             ?? throw new InvalidOperationException($"Немає модуля для старого шляху версії {methodology.Code} {version.Version}.");
-        var scriptModule = modules.OfType<ScriptCalculationModule>().FirstOrDefault()
-            ?? throw new InvalidOperationException("Модуль скрипта не зареєстровано.");
+        var isModule = version.Level == CalculationLevel.Module;
+        var monthModule = isModule
+            ? oldModule as MonthColumnArgumentsModule
+              ?? throw new InvalidOperationException($"Модуль рівня Module для версії {methodology.Code} {version.Version} — не «місяці в колонках».")
+            : null;
+        ICalculationModule scriptModule = isModule
+            ? monthModule!
+            : modules.OfType<ScriptCalculationModule>().FirstOrDefault()
+              ?? throw new InvalidOperationException("Модуль скрипта не зареєстровано.");
 
         // Один знімок довідників на порівняння, спільний для обох шляхів.
         var registries = new RegistrySnapshotCache(registryAsOfUtc: null);
@@ -69,9 +80,12 @@ public sealed class ParityComparer(
         CalculationBindingContext scriptContext;
         try
         {
-            scriptContext = await scriptModule
-                .PrepareAsync(scriptDescriptor, documentId, periodKey, registries, new ScriptPrepareOptions(scriptText, AllowShadowLibraries: true), ct)
-                .ConfigureAwait(false);
+            var options = new ScriptPrepareOptions(scriptText, AllowShadowLibraries: true);
+            scriptContext = monthModule is not null
+                ? await monthModule.PrepareScriptAsync(scriptDescriptor, documentId, periodKey, registries, options, ct).ConfigureAwait(false)
+                : await ((ScriptCalculationModule)scriptModule)
+                    .PrepareAsync(scriptDescriptor, documentId, periodKey, registries, options, ct)
+                    .ConfigureAwait(false);
         }
         catch (DomainException error)
         {
@@ -87,7 +101,7 @@ public sealed class ParityComparer(
         var oldOutcome = await resolver.MatchRowsDetailedAsync(methodologyVersionId, tableInstanceId, ct).ConfigureAwait(false);
         var runtime = scriptContext.ScriptRuntime as ScriptRuntime;
         var scriptOutcome = await selector
-            .MatchAsync(scriptContext.Script!, tableInstanceId, (registry, entry) => runtime?.EntryIdText(registry, entry), ct)
+            .MatchAsync(scriptContext.Script!, tableInstanceId, (registry, entry) => runtime?.EntryIdText(registry, entry), ct, allRows: isModule)
             .ConfigureAwait(false);
 
         IReadOnlyList<string> union =
@@ -104,9 +118,9 @@ public sealed class ParityComparer(
         var oldContext = await oldModule.PrepareAsync(oldDescriptor, documentId, periodKey, registries, ct).ConfigureAwait(false);
 
         var oldRows = await ExecuteAsync(
-            oldOutcome.Matches.Select(m => m.RowKey), byRow, oldModule, oldContext, ct).ConfigureAwait(false);
+            oldOutcome.Matches.Select(m => m.RowKey), byRow, oldModule, oldContext, isModule, ct).ConfigureAwait(false);
         var scriptRows = await ExecuteAsync(
-            scriptOutcome.Matches.Select(m => m.RowKey), byRow, scriptModule, scriptContext, ct).ConfigureAwait(false);
+            scriptOutcome.Matches.Select(m => m.RowKey), byRow, scriptModule, scriptContext, isModule, ct).ConfigureAwait(false);
 
         return ParityDiff.Compare(
             target,
@@ -121,6 +135,7 @@ public sealed class ParityComparer(
         Dictionary<string, CalculationInput> inputs,
         ICalculationModule module,
         CalculationBindingContext context,
+        bool withSteps,
         CancellationToken ct)
     {
         var result = new Dictionary<string, ParityRowOutcome>(StringComparer.Ordinal);
@@ -138,7 +153,8 @@ public sealed class ParityComparer(
                     rowKey,
                     [.. output.Values.Select(v => new ParityValue(v.OutputCode, v.SubstanceEntryId, v.Kind, v.Value, v.UnitId))],
                     output.MissingArguments is { Count: > 0 } missing ? missing : null,
-                    output.StepError is not null);
+                    output.StepError is not null,
+                    Steps: withSteps ? [.. output.Trace.Select(Step)] : null);
             }
             catch (DomainException error) when (GenericCalculationModule.IsCategoryRuleRowFailure(error))
             {
@@ -152,6 +168,11 @@ public sealed class ParityComparer(
 
         return result;
     }
+
+    private static string Step(CalculationTraceStep step)
+        => string.Create(
+            CultureInfo.InvariantCulture,
+            $"{step.StepCode}|{(step.TraceJson is not null ? "failed" : "-")}|{step.Masked}");
 
     private static string Describe(DomainException error)
         => string.Create(

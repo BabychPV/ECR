@@ -75,7 +75,7 @@ public sealed partial class MonthColumnArgumentsModule : ICalculationModule
     private readonly IMonthColumnRouter? _router;
 
     private readonly ConcurrentDictionary<(long DocumentId, int PeriodKey), Lazy<Task<IReadOnlyList<TableInstanceRef>>>> _instances = new();
-    private readonly ConcurrentDictionary<(int VersionId, long DocumentId, int PeriodKey, long SheetCopy), Lazy<Task<SheetRun>>> _runs = new();
+    private readonly ConcurrentDictionary<(int VersionId, MethodologyEngine Engine, object? Script, long DocumentId, int PeriodKey, long SheetCopy), Lazy<Task<SheetRun>>> _runs = new();
 
     /// <summary>Створює модуль; залежності рушія — ті самі, що в <see cref="GenericCalculationModule"/>.</summary>
     public MonthColumnArgumentsModule(
@@ -141,17 +141,36 @@ public sealed partial class MonthColumnArgumentsModule : ICalculationModule
             ? PrepareScriptAsync(methodology, documentId, periodKey, registries, ct)
             : _inner.PrepareAsync(methodology, documentId, periodKey, registries, ct);
 
-    private async Task<CalculationBindingContext> PrepareScriptAsync(
+    /// <summary>
+    /// Підготовка версії-скрипта з ЯВНИМ текстом (паритет, MS план §8.4): текст не з бази, а з параметра, бібліотеки-тіні
+    /// дозволені. Для чинного шляху — <see cref="PrepareAsync(MethodologyDescriptor, long, PeriodKey, RegistrySnapshotCache?, CancellationToken)"/>.
+    /// </summary>
+    /// <param name="methodology">Дескриптор з <c>Engine = Script</c>.</param>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="registries">Знімок довідників, спільний із іншим шляхом порівняння.</param>
+    /// <param name="options">Текст скрипта й дозвіл на тіньові бібліотеки.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task<CalculationBindingContext> PrepareScriptAsync(
+        MethodologyDescriptor methodology,
+        long documentId,
+        PeriodKey periodKey,
+        RegistrySnapshotCache? registries,
+        ScriptPrepareOptions? options,
+        CancellationToken ct)
+    {
+        var script = RequireScriptModule(methodology);
+        var binding = await script.PrepareAsync(methodology, documentId, periodKey, registries, options, ct).ConfigureAwait(false);
+        return binding with { StepDependencies = binding.Script?.StepDependencies };
+    }
+
+    private Task<CalculationBindingContext> PrepareScriptAsync(
         MethodologyDescriptor methodology,
         long documentId,
         PeriodKey periodKey,
         RegistrySnapshotCache? registries,
         CancellationToken ct)
-    {
-        var script = RequireScriptModule(methodology);
-        var binding = await script.PrepareAsync(methodology, documentId, periodKey, registries, ct).ConfigureAwait(false);
-        return binding with { StepDependencies = binding.Script?.StepDependencies };
-    }
+        => PrepareScriptAsync(methodology, documentId, periodKey, registries, options: null, ct);
 
     private ScriptCalculationModule RequireScriptModule(MethodologyDescriptor methodology)
         => _script ?? throw new Domain.Abstractions.DomainException(
@@ -208,7 +227,10 @@ public sealed partial class MonthColumnArgumentsModule : ICalculationModule
 
         var run = await _runs
             .GetOrAdd(
-                (binding.Methodology.MethodologyVersionId, input.DocumentId, input.PeriodKey.Value, own.SheetCopyId ?? 0),
+                // ⚠ Рушій і скомпільований скрипт — у ключі: паритет (ParityComparer) ганяє ОБИДВА рушії однієї версії в одному
+                // scope, і перевірка іншого тексту скрипта не повинна віддати закешований прогін попереднього.
+                (binding.Methodology.MethodologyVersionId, binding.Methodology.Engine, binding.Script, input.DocumentId,
+                    input.PeriodKey.Value, own.SheetCopyId ?? 0),
                 _ => new Lazy<Task<SheetRun>>(() => ComputeAsync(
                     binding, input, [.. instances.Where(i => i.SheetCopyId == own.SheetCopyId)], ct)))
             .Value.ConfigureAwait(false);

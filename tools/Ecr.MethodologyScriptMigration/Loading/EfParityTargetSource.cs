@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Ecr.MethodologyScriptMigration.Loading;
 
 /// <summary>
-/// Переліки для <see cref="ParityRunner"/> прямо з бази (лише читання): версії з тіньовим текстом на <c>Formulas</c> і
+/// Переліки для <see cref="ParityRunner"/> прямо з бази (лише читання): версії (Configuration і Module) з тіньовим текстом на <c>Formulas</c> і
 /// екземпляри таблиць-оригіналів, до яких активно прив'язана методологія.
 /// </summary>
 public sealed class EfParityTargetSource(EcrDbContext db) : IParityTargetSource
@@ -18,7 +18,6 @@ public sealed class EfParityTargetSource(EcrDbContext db) : IParityTargetSource
             from v in db.MethodologyVersions.AsNoTracking()
             join m in db.Methodologies.AsNoTracking() on v.MethodologyId equals m.Id
             where v.Engine == MethodologyEngine.Formulas
-                  && v.Level == CalculationLevel.Configuration
                   && v.Status == TemplateVersionStatus.Published
                   && v.EffectiveFrom != null
                   && v.ScriptText != null
