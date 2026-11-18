@@ -176,3 +176,82 @@ dotnet $t parity  --connection $m --out $sp\parity-all.json
 5. **Ємність таблиць у експортері**: брати з `MaxDynamicRows` кожної таблиці (T5_08).
 6. **Вода, відходи, факели**: входи `AF_Water_*`, `AF_Waste_*`, `AF_Flarings*`, `AF_Air_HSE401*` не переносились (немає завантажувача).
 7. Решта кроків розд. 8.6 (`pack`, `apply?dryRun`, вибірковий `parity` на живих даних, перерахунок «до/після») — у вікні за словом людини.
+
+## HSE400 на реальних даних (19.11.2026)
+
+Гілка `lane/ms-r-hsereal`. Джерело — та сама копія `EcrLegacyProd` (лише читання, `ApplicationIntent=ReadOnly`). Нова система для репетиції: окрема база `EcrHseMsLegacy`, API на порту 5095. Значень, імен і облікових записів прода тут немає: лише кількості й коди.
+
+### Як стара система рахує HSE400 і звідки бере входи
+
+- Вхід: одна таблиця `AF_AirGasCompositions_HSE400`, один рядок = один місяць (`EFID`, `Time`, 175 колонок вводу виду `<таблиця>_<компонент>` для шести таблиць `FG_Makat`, `FG_HMB`, `LPG_HMB`, `FG_Export`, `FG_Internal`, `LPG_Internal`, плюс два поля суми `*_HMB_TotalSumGasComposition`). У копії 9 рядків (2026-01…09), `_History` порожня. Місяці 01–07 мають ненульовий склад (на таблицю 13–35 ненульових полів), місяці 08–09 — усі нулі.
+- Результат: `CalcResult_AirGasCompositions_HSE400`, 9 рядків × 490 значень (175 з них — луна вводу, 315 — результати формул).
+- Формули: `AF_Formulas` методологія `HSE400` (341 рядок, 331 унікальне ім'я), спільна бібліотека `Common` (49 формул); константи `AF_Constants` HSE400 (23) і `Common` (281). Правил рядків немає (методологія зашита в `DllProject_Air_GasCompositions_HSE400`, B12). Формули мають версії за датою: 10 формул мають `V2` з 2025-01-01 (`GHGEmissionFactor` усіх шести таблиць, `TotalSulphurContent`/`MercaptanSulphurContent` у `*_HMB`); для 2026 діє `V2`.
+
+### 341 проти 369 формул — не розбіжність моделі
+
+| | Дзеркало прода | `hse400-model.json` |
+|---|---|---|
+| Формули HSE400 | 341 = 325 `HSE400_<таблиця>_<X>` + 6 `Common_LHV0_*` + **10 дублів `V2`** (одне ім'я — два тексти) | 331 імен (V2 замінює V1, версія методології `1.0.1.0` чинна з 2025-01-01) |
+| Спільні формули `Common` | 49, окремою бібліотекою | 38, вбудовані в модель (ті, на які HSE400 посилається через `!`) |
+| Разом | 341 + 49 | 331 + 38 = 369 |
+
+Звірка за даними прода (текст формул без пробілів, чинна версія на 2026): **з 369 формул моделі розбіжних 0**; усі 331 імен HSE400 є в моделі й навпаки; 37 з 38 вбудованих спільних формул досяжні з HSE400, одна (`Common_WtCi_C2H6S`) недосяжна (зайва, на числа не впливає); 11 формул `Common_WtCi_*` дзеркала в моделі немає — на них HSE400 не посилається. Константи: усі 224 константи моделі посилаються з досяжних формул і мають **ті самі значення**, що в дзеркалі (розбіжних 0); решти констант `Common` (інші методології) модель не тягне. Дефектів моделі не знайдено. Обмеження, а не дефект: модель не має формул `V1` (2024) — десять формул `V1` лишилися поза моделлю, а у двох з них (`*_Internal_GHGEmissionFactor`, `V1`) є посилання на формулу `Common_WtCi_DimethilSulfide`, якої немає ні в `HSE400`, ні в `Common`; у копії даних за 2024 немає (`_History` порожня, рядки лише 2026), тож як стара система поводилася б на 2024, перевірити нічим.
+
+Чому методологію взято з моделі, а не з імпорту дзеркала: `tools/Ecr.MethodologyImport --sql` дає пакет із 341 формулою рівня `Configuration` (без модуля місячних колонок), а `MonthColumnArgumentsModule` вимагає рівня `Module`; штатний будівник `Build-Hse400Template.ps1` створює саме його. Пакет із дзеркала побудовано й перевірено (HSE400: 341 формула, 23 константи, блокерів 0), але в `EcrHseMsLegacy` не імпортувався: код `HSE400` зайнятий Module-версією.
+
+### Мапінг колонок старої таблиці → колонки шаблону HSE400
+
+Код: `tools/hse400/Hse400Legacy.Lib.ps1` (тести `tools/tests/Hse400-Legacy.Tests.ps1`).
+
+- Ввід: колонка `<код таблиці>_<ключ рядка>` → рядок вводу шаблону (таблиця `<код таблиці>`, колонка місяця `M01`…`M12` за місяцем `Time`). Усі 175 рядків вводу мають однойменну колонку; колонки без рядка вводу: `EFID`, `ModifiedTime`, `Time`, два `*_HMB_TotalSumGasComposition` (у шаблоні це розрахунковий рядок).
+- Результат: колонка `<таблиця>_<X>` ↔ рядок `F_<X>` (315 з 325). Винятки: формула названа як рядок вводу (`Nitrogen` у `FG_Makat`/`FG_Export`, вісім імен у `*_Internal`) — результат у `<X>V2` (`NitrogenV2`) або `<X>_V2`; `Density20/0`, `FuelLowerHeating20/0` у `FG_Makat` — `Density_20` тощо; `MercaptanSulphurContent` у `*_HMB` зберігається як `TotalSulphurContentWithoutH2S`. 10 рядків `F_GHG1/F_GHG2` (проміжні кроки коефіцієнта викидів) у старій системі не зберігаються. Невикористаних колонок `CalcResult`, окрім луни вводу, немає (інакше звірка зупиняється з кодом 2).
+
+### Результат
+
+| Крок | Підсумок |
+|---|---|
+| Будівник (`Build-Hse400Template.ps1 -Stage All`) | шаблон 1.0.2.0, методологія 1.0.1.0 (Module, 369 формул, 224 константи) опублікована, 6 прив'язок, проєкти `HSE400_GOLD` і `HSE400_2026`; код виходу 0 |
+| Завантаження вводу | 1575 комірок у 6 таблиць (9 місяців; нульові місяці теж) |
+| `convert` | перетворено 1, відмов 0, зауважень 0 |
+| `shadow` + `parity` (формули ↔ скрипт) на документі з реальними даними | 6 екземплярів таблиць, 500 рядків, **2925 значень (325 виходів × 9 місяців), розбіжностей 0** (на золотому документі ще 38, 0) |
+| Контроль чутливості (у тіньовому тексті `k1_HSE400_` 0.8313 → 0.8314) | **1095 розбіжностей з 2925**; після повернення — 0 |
+| Звірка зі старою системою, формульний шлях | порівняно **2835 комірок** (315 рядків × 9 місяців), **збіг 2835, розбіжностей 0**; точна рівність 2022, решта 813 — нулі й значення з відносною різницею не більше 9,3e-14; ненульових 2040 |
+| `switch` на Script, перерахунок, звірка | той самий результат: 2835 / 2835 / 0, точна рівність 2022, максимум 9,3e-14 (усі лічильники звірки формульного й скриптового шляхів збігаються) |
+| Контроль звірки (у вибірку внесено 2e-9 і 5e-10 відносної різниці) | 1 розбіжність (2e-9), друга в допуску: звірка не «сліпа» |
+
+Групи розбіжностей зі старою системою: **немає** — класифікувати нічого. Властивість даних, яку звірка підтвердила: у нульових місяцях 08–09 стара система дає ненульові результати для `FG_Makat`, `FG_Export`, `FG_Internal`, `LPG_Internal` (залишковий азот 100 %: `NitrogenV2`, `MolecularWeight`, густини, об'єми — по 11 значень на таблицю), а для `*_HMB` — нулі (правило «нульова молекулярна вага → нулі»); нова система збігається в обох випадках.
+
+### Знайдений дефект
+
+`POST /api/v1/methodologies/script-migration/switch` відмовляв для версії рівня `Module` (HSE400) двома проблемами: `script.missingRows` (аналізатор скрипта в шляху авторства/`switch`/`apply` не передавав ознаку `IsModuleLevel`, хоча паритет і рантайм її передають) і `switch.problem.outputsDiffer` (скрипт `Module` оголошує вихід для кожної формули — 369, а збережена версія тримає лише виходи, прив'язані до якорів, і золотих тестів — 7). Виправлено: `ScriptAnalyzer` → `ScriptSourceCompiler.CompileAsync(isModuleLevel)`; для `Module` у `DiffAgainstStoredAsync` розбіжністю лишається лише збережений вихід, якого скрипт не дає. Тести: `ScriptMigrationHandlerTests` (`Switch_рівня_Module_приймає_скрипт_без_rows_…`, `…_збережений_вихід_якого_скрипт_не_дає_лишається_розбіжністю`, контроль `Switch_не_Module_без_rows_як_і_раніше_відмовляє_missingRows`). Корпус синтетики (3938 значень) цього не виявив, бо `switch` для `Module` там не запускався.
+
+### Що не покрито
+
+- Один об'єкт прода, один рік (9 місяців, з них 7 ненульових); 2024 (формули `V1`) у даних немає.
+- Публікація скрипта `Module` шляхом авторства (`ScriptPublishChecks`) досі компілює без ознаки рівня й дала б `missingRows`; на цьому шляху не перевірялось (перемикання `switch`/`apply` працюють).
+- Флейри, `HSE401*`, `Thermaloxidizer` не переносились.
+- Луну вводу в `CalcResult` (175 колонок) зі завантаженим вводом не звірено окремо.
+
+### Відтворення
+
+Передумови як у розд. 6; нижче лише відмінні кроки. Паролі — у файлі поза репозиторієм (рядок `користувач<TAB>пароль`), створеному за зразком `rehearsal/01-api-import.ps1` (bootstrap → роль з усіма правами → користувач).
+
+```powershell
+$sp = 'C:\...\hse'     # тека поза репозиторієм
+powershell -File tools\setup-dev-db.ps1 -Server localhost -Database EcrHseMsLegacy -Documents 0 -SmallFiles -DataPath F:\ecr-wt\upgdata-ms
+# API на порту 5095 (ECR_ConnectionStrings__Ecr -> EcrHseMsLegacy), далі:
+powershell -File tools\hse400\Build-Hse400Template.ps1 -Stage All -Year 2026 -BaseUrl http://localhost:5095 -Database EcrHseMsLegacy -ConfirmStand EcrHseMsLegacy -CredentialFile $sp\cred.tsv
+powershell -File tools\hse400\Export-Hse400LegacySample.ps1 -OutFile $sp\sample.json            # EcrLegacyProd, лише читання
+powershell -File tools\hse400\Compare-Hse400Legacy.ps1 -SampleFile $sp\sample.json -OutDir $sp\cmp -BaseUrl http://localhost:5095 `
+    -Database EcrHseMsLegacy -ConfirmStand EcrHseMsLegacy -CredentialFile $sp\cred.tsv -Label formulas -Fill -Recalc
+$m = 'Server=localhost;Database=EcrHseMsLegacy;Trusted_Connection=True;TrustServerCertificate=True'
+$t = 'tools\Ecr.MethodologyScriptMigration\bin\Debug\net10.0\Ecr.MethodologyScriptMigration.dll'
+dotnet $t convert --connection $m --out $sp\out
+dotnet $t shadow  --connection $m --in $sp\out --i-know-this-is-a-copy
+dotnet $t parity  --connection $m --out $sp\parity.json --document 2
+# POST /api/v1/methodologies/script-migration/switch, тіло {versionIds:[1], engine:"Script", reason:"..."}, потім:
+powershell -File tools\hse400\Compare-Hse400Legacy.ps1 -SampleFile $sp\sample.json -OutDir $sp\cmp -BaseUrl http://localhost:5095 `
+    -Database EcrHseMsLegacy -ConfirmStand EcrHseMsLegacy -CredentialFile $sp\cred.tsv -Label script -Recalc
+```
+
+Номери версії (1) і документа (2) — ідентифікатори в `EcrHseMsLegacy` на чистій базі. Вибірка й звіти розбіжностей лежать лише в `-OutFile`/`-OutDir` поза репозиторієм (скрипти відмовляють, якщо шлях усередині git-worktree).
