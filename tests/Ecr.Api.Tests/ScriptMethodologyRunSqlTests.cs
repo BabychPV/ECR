@@ -309,6 +309,33 @@ public sealed class ScriptMethodologyRunSqlTests(SqlServerFixture sql)
         Assert.Equal(["W|60", "Y|60", "Z|60"], await ShapeAsync(f));
     }
 
+    /// <summary>
+    /// MS (рецензія F13, C): C-5 — значення колонки за замовчуванням для незаповненої комірки діє й на скриптовому шляху
+    /// (прогін і перегляд), як у формул і правил: рядок без числа не стає "без входів", а бере дефолт колонки.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Дефолт_колонки_C5_діє_на_скриптовому_шляху_у_прогоні_і_в_перегляді()
+    {
+        var f = await ArrangeAsync(209908);
+        await InsertValuesAsync(f, ("gas", 10m), ("gas", null));
+        await using (var db = f.Builder.CreateContext())
+        {
+            var column = await db.ColumnDefs.SingleAsync(c => c.Id == f.Document.ColumnDefIds[1]);
+            column.SetPresentation("4", null, null);
+            await db.SaveChangesAsync();
+        }
+
+        var text = $"rows from {f.TableCode} where row.{f.C1} == \"gas\";\noutput Y: kg = row.{f.C2} * 2;";
+        var a = await PublishScriptAsync(f, "A", text, [("Y", f.OutAColumnId)]);
+
+        await RunJobAsync(f.Document, sheetDefId: null);
+
+        Assert.Equal(["Y|20", "Y|8"], await ShapeAsync(f));
+        Assert.Equal(["Y|20", "Y|8"], OutputsOf(await PreviewAsync(f, a.VersionId, text)));
+    }
+
     private async Task<ScriptPreviewResult> PreviewAsync(Fixture f, int versionId, string text)
     {
         await using var provider = Provider();
