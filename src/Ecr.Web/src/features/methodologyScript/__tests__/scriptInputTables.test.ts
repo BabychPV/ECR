@@ -142,8 +142,48 @@ describe('колонки з script/tables', () => {
           { code: 'Hours', header: null, dataType: 'Decimal', isMonthColumn: false },
           { code: 'Jan', header: null, dataType: 'Decimal', isMonthColumn: true },
         ],
+        monthAliases: [],
       },
     ]);
+  });
+
+  it('F13c: код таблиці в кількох шаблонах — колонки й псевдоніми місяців об’єднуються, а не береться перший', () => {
+    const column = (code: string, isMonthColumn = false) => ({
+      code, dataType: 'Decimal', isMonthColumn, monthNumber: null, unitCode: null,
+    });
+    const merged = inputTablesFromDtos([
+      { requested: 'Fuel', templateCode: 'HSE', tableCode: 'Fuel', columns: [column('Hours'), column('A')], monthAliases: ['Run'] },
+      { requested: 'Fuel', templateCode: 'ECO', tableCode: 'Fuel', columns: [column('Hours', true), column('B')], monthAliases: ['Run', 'Idle'] },
+      { requested: 'Stream', templateCode: 'ECO', tableCode: 'Stream', columns: [column('S')], monthAliases: [] },
+    ]);
+    expect(merged.map((t) => t.tableCode)).toEqual(['Fuel', 'Stream']);
+    expect(merged[0]?.columns.map((c) => c.code)).toEqual(['Hours', 'A', 'B']);
+    expect(merged[0]?.columns[0]?.isMonthColumn).toBe(true);
+    expect(merged[0]?.monthAliases).toEqual(['Run', 'Idle']);
+  });
+
+  it('F13c: подсказки `row.` містять колонки всіх шаблонів і псевдоніми місяців як `Alias[m]`', () => {
+    const column = (code: string) => ({ code, dataType: 'Decimal', isMonthColumn: false, monthNumber: null, unitCode: null });
+    const liveTables = inputTablesFromDtos([
+      { requested: 'Fuel', templateCode: 'HSE', tableCode: 'Fuel', columns: [column('A')], monthAliases: ['Run'] },
+      { requested: 'Fuel', templateCode: 'ECO', tableCode: 'Fuel', columns: [column('B')], monthAliases: [] },
+    ]);
+    const o = outline({ tables: [outlineTable('Fuel')] });
+    const base = assembleCompletionBase({ outline: o, sources: [], functions: [], headerFields: [], liveTables });
+    const text = 'rows from Fuel where row.';
+    const items = scriptCompletions({
+      text, offset: text.length, outline: base.outline, tables: base.tables, functions: [], headerFields: [],
+    });
+    expect(items.map((i) => i.label).sort()).toEqual(['A', 'B', 'Run']);
+    const run = items.find((i) => i.label === 'Run');
+    expect(run?.isSnippet).toBe(true);
+    expect(run?.insertText).toContain('Run[');
+
+    const aliased = 'table F = Fuel; var x = Sum(F.';
+    const viaAlias = scriptCompletions({
+      text: aliased, offset: aliased.length, outline: base.outline, tables: base.tables, functions: [], headerFields: [],
+    });
+    expect(viaAlias.map((i) => i.label).sort()).toEqual(['A', 'B', 'Run']);
   });
 
   it('assembleCompletionBase: живі таблиці мають перевагу, порожні — запасний шлях зі структур', () => {
