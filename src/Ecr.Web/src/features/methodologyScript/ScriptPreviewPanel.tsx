@@ -18,6 +18,7 @@ import {
   buildPreviewRequest,
   defaultPeriodKey,
   singleTemplateCode,
+  type PreviewSelection,
 } from './scriptPreviewRequest';
 import { testFromPreviewRow, type TestCaseForm } from './testCases';
 import type {
@@ -55,7 +56,9 @@ export function ScriptPreviewPanel(props: ScriptPreviewPanelProps): JSX.Element 
   const [tableInstanceId, setTableInstanceId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [debounced] = useDebouncedValue(search.trim(), 250);
-  const [result, setResult] = useState<ScriptPreviewDto | null>(null);
+  // ⛔ Результат прив'язаний до документа й періоду, для яких його порахували: інакше після зміни періоду
+  // (або відповіді, що прийшла вже після зміни) на екрані лежали б чужі числа, а «Створити тест» брало б новий період.
+  const [result, setResult] = useState<PreviewRun | null>(null);
 
   const templateCode = singleTemplateCode(outline);
 
@@ -104,18 +107,19 @@ export function ScriptPreviewPanel(props: ScriptPreviewPanelProps): JSX.Element 
   );
 
   const run = useMutation({
-    mutationFn: () => {
-      const request = buildPreviewRequest(getText(), {
-        documentId: selectedId,
-        periodKey,
-        tableInstanceId: tableInstanceId === null ? null : Number(tableInstanceId),
-      });
+    mutationFn: (selection: PreviewSelection) => {
+      const request = buildPreviewRequest(getText(), selection);
       if (request === null) return Promise.reject(new Error('preview selection is incomplete'));
       return previewMethodologyScript(methodologyId, versionId, request);
     },
-    onSuccess: setResult,
+    onSuccess: (preview, selection) => {
+      if (selection.documentId === null || selection.periodKey === null) return;
+      setResult({ preview, documentId: selection.documentId, periodKey: selection.periodKey });
+    },
     onError: showApiError,
   });
+  const shown =
+    result !== null && result.documentId === selectedId && result.periodKey === periodKey ? result : null;
   const runLoading = usePendingLoading(run.isPending);
 
   const outputNames = useMemo(
@@ -130,8 +134,8 @@ export function ScriptPreviewPanel(props: ScriptPreviewPanelProps): JSX.Element 
           onCreateTest(
             testFromPreviewRow(row, {
               outline: outline ?? EmptyOutline,
-              documentId: selectedId,
-              periodKey: periodKey ?? 0,
+              documentId: shown?.documentId ?? selectedId,
+              periodKey: shown?.periodKey ?? periodKey ?? 0,
               tableInstanceId: table.tableInstanceId,
               substanceEntryIds,
             }),
@@ -192,7 +196,11 @@ export function ScriptPreviewPanel(props: ScriptPreviewPanelProps): JSX.Element 
           loading={runLoading}
           onClick={() => {
             if (run.isPending) return;
-            run.mutate();
+            run.mutate({
+              documentId: selectedId,
+              periodKey,
+              tableInstanceId: tableInstanceId === null ? null : Number(tableInstanceId),
+            });
           }}
         >
           {t('methodologyScript.preview.run')}
@@ -203,21 +211,28 @@ export function ScriptPreviewPanel(props: ScriptPreviewPanelProps): JSX.Element 
         {t('methodologyScript.preview.hint')}
       </Text>
 
-      {result !== null && result.diagnostics.length > 0 && (
+      {shown !== null && shown.preview.diagnostics.length > 0 && (
         <Alert color="statusWarning" title={t('methodologyScript.preview.blocked')}>
-          <ScriptProblemsList diagnostics={result.diagnostics} onJump={props.onJump} />
+          <ScriptProblemsList diagnostics={shown.preview.diagnostics} onJump={props.onJump} />
         </Alert>
       )}
 
-      {result !== null && result.diagnostics.length === 0 && (
+      {shown !== null && shown.preview.diagnostics.length === 0 && (
         <ScriptPreviewTable
-          preview={result}
+          preview={shown.preview}
           outputNames={outputNames}
           {...(createTest === undefined ? {} : { onCreateTest: createTest })}
         />
       )}
     </Stack>
   );
+}
+
+/** Результат перегляду разом з вибором, для якого його порахували. */
+interface PreviewRun {
+  readonly preview: ScriptPreviewDto;
+  readonly documentId: number;
+  readonly periodKey: number;
 }
 
 const EmptyOutline: ScriptOutlineDto = {
