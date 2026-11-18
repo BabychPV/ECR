@@ -381,6 +381,9 @@ public sealed class SaveMethodologyFormulaHandler(
                     ["methodologyVersionId"] = methodologyVersionId.ToString(CultureInfo.InvariantCulture),
                 });
 
+        // ⛔ MS: версія-скрипт не редагується вручну — і тоді, коли обробник кличуть повз контролер.
+        MethodologyVersionScope.RequireHandEditable(version);
+
         // ⛔ B-01: неіснуюча одиниця — 422 з ключем, а не 500 на `FK_MF_Unit`.
         await MethodologyUnitChecks.RequireKnownAsync(units, outputUnitId, formulaCode.Value, ct)
             .ConfigureAwait(false);
@@ -471,6 +474,9 @@ public sealed class DeleteMethodologyFormulaHandler(
                     ["messageKey"] = "err.ECR-CALC-0404.version",
                     ["methodologyVersionId"] = methodologyVersionId.ToString(CultureInfo.InvariantCulture),
                 });
+
+        // ⛔ MS: версія-скрипт не редагується вручну — і тоді, коли обробник кличуть повз контролер.
+        MethodologyVersionScope.RequireHandEditable(version);
 
         var formula = await drafts.FindFormulaAsync(methodologyVersionId, code, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(

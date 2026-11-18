@@ -78,7 +78,25 @@ public sealed class MethodologyVersionScope(
     {
         var version = await drafts.FindVersionAsync(methodologyVersionId, ct).ConfigureAwait(false);
 
-        if (version is { Engine: MethodologyEngine.Script })
+        if (version is not null)
+        {
+            RequireHandEditable(version);
+        }
+    }
+
+    /// <summary>
+    /// Те саме для вже знайденої версії: обробники ручної правки кличуть це самі, щоб заборона трималася й тоді,
+    /// коли їх викликають повз контролер.
+    /// </summary>
+    /// <param name="version">Версія.</param>
+    /// <exception cref="BusinessRuleException">
+    /// <c>ECR-CALC-0409</c>, ключ <c>scriptManaged</c> — версія має рушій <c>Script</c>.
+    /// </exception>
+    public static void RequireHandEditable(Ecr.Domain.Entities.Calculations.MethodologyVersion version)
+    {
+        ArgumentNullException.ThrowIfNull(version);
+
+        if (version.Engine == MethodologyEngine.Script)
         {
             throw new BusinessRuleException(
                 "ECR-CALC-0409",
