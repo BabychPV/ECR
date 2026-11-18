@@ -34,7 +34,7 @@ public sealed class MethodologyScriptModuleLevelEndToEndTests(SqlServerFixture s
 
     private static readonly TimeSpan Deadline = TimeSpan.FromSeconds(90);
 
-    private sealed record Scene(TestDocumentBuilder Builder, TestDocument Document, int Period, string Table);
+    private sealed record Scene(TestDocumentBuilder Builder, TestDocument Document, int Period, string Table, IReadOnlyList<string> MonthCodes);
 
     private sealed record Created(int MethodologyId, int VersionId);
 
@@ -112,7 +112,7 @@ public sealed class MethodologyScriptModuleLevelEndToEndTests(SqlServerFixture s
         await JsonAsync(
             await author.PutAsJsonAsync(
                 new Uri(Root(m) + "/tests/case1", UriKind.Relative),
-                new { inputJson = input, expectedJson = $"{{\"M1_1\":14,\"M2_1\":2.5}}", tolerance = 0m }).ConfigureAwait(true),
+                new { inputJson = input, expectedJson = $"{{\"{s.MonthCodes[0]}\":14,\"{s.MonthCodes[1]}\":2.5}}", tolerance = 0m }).ConfigureAwait(true),
             HttpStatusCode.OK).ConfigureAwait(true);
 
         // Публікація: перевірки проходять (немає missingRows / noBoundOutput).
@@ -123,10 +123,10 @@ public sealed class MethodologyScriptModuleLevelEndToEndTests(SqlServerFixture s
 
         // Перерахунок → числа: M01 = Methane 10 + Nitrogen 4 = 14, Scaled = 14 * 3 = 42; M02 = 0 + 2.5 = 2.5, Scaled = 7.5.
         await RecalculateAsync(app, worker, s).ConfigureAwait(true);
-        Assert.Equal(14m, await CellAsync(worker, s, "F_Sum", "M1_1").ConfigureAwait(true));
-        Assert.Equal(42m, await CellAsync(worker, s, "F_Scaled", "M1_1").ConfigureAwait(true));
-        Assert.Equal(2.5m, await CellAsync(worker, s, "F_Sum", "M2_1").ConfigureAwait(true));
-        Assert.Equal(7.5m, await CellAsync(worker, s, "F_Scaled", "M2_1").ConfigureAwait(true));
+        Assert.Equal(14m, await CellAsync(worker, s, "F_Sum", s.MonthCodes[0]).ConfigureAwait(true));
+        Assert.Equal(42m, await CellAsync(worker, s, "F_Scaled", s.MonthCodes[0]).ConfigureAwait(true));
+        Assert.Equal(2.5m, await CellAsync(worker, s, "F_Sum", s.MonthCodes[1]).ConfigureAwait(true));
+        Assert.Equal(7.5m, await CellAsync(worker, s, "F_Scaled", s.MonthCodes[1]).ConfigureAwait(true));
     }
 
     // ───────────────────────────── стенд ─────────────────────────────
@@ -176,7 +176,14 @@ public sealed class MethodologyScriptModuleLevelEndToEndTests(SqlServerFixture s
             $"{v.Value.ToString(CultureInfo.InvariantCulture)}, 0, 0);");
         await ExecuteAsync(string.Join(Environment.NewLine, statements)).ConfigureAwait(false);
 
-        return new Scene(builder, document, periodKey, table.Code);
+        // Код місячної колонки містить лічильник побудови стенда (M1_<n>): не хардкодимо.
+        var monthCodes = new List<string>();
+        foreach (var id in document.MonthColumnDefIds)
+        {
+            monthCodes.Add((await db.ColumnDefs.AsNoTracking().SingleAsync(c => c.Id == id).ConfigureAwait(false)).Code);
+        }
+
+        return new Scene(builder, document, periodKey, table.Code, monthCodes);
     }
 
     private async Task ExecuteAsync(string statement)
