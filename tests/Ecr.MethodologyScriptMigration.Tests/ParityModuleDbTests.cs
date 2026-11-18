@@ -44,7 +44,7 @@ public sealed class ParityModuleDbTests(SqlServerFixture sql)
 
         Assert.True(equal.IsEqual, Describe(equal));
         Assert.Equal(1, equal.Targets);
-        Assert.Equal(8, equal.RowsCompared); // усі рядки таблиці: 3 входи й 5 рядків F_…
+        Assert.Equal(9, equal.RowsCompared); // усі рядки таблиці: 3 входи й 6 рядків F_…
         Assert.True(equal.ValuesCompared >= 8, $"values compared: {equal.ValuesCompared}");
 
         // Контроль чутливості: константа Factor 1.5 → 1.6 лише в тексті (старий шлях читає константи з бази).
@@ -189,7 +189,7 @@ public sealed class ParityModuleDbTests(SqlServerFixture sql)
         await ExecuteAsync($"UPDATE doc.Project SET PeriodKind = {(int)PeriodKind.Yearly} WHERE Id = {document.ProjectId};");
 
         // Рядки: вхід і розрахункові.
-        string[] keys = ["Methane", "Nitrogen", "Gas", "F_Sum", "F_Ratio", "F_Scaled", "F_MolecularWeight", "F_Inverse"];
+        string[] keys = ["Methane", "Nitrogen", "Gas", "F_Sum", "F_Ratio", "F_Scaled", "F_MolecularWeight", "F_Inverse", "F_Mass"];
         var first = await new BulkCellLoader(sql.ConnectionString, 1000).ReserveIdsAsync("doc.TableRowSeq", keys.Length, default);
         var rowIds = new Dictionary<string, long>(StringComparer.Ordinal);
         for (var i = 0; i < keys.Length; i++)
@@ -209,6 +209,7 @@ public sealed class ParityModuleDbTests(SqlServerFixture sql)
             (3, "Methane", 7m), (3, "Nitrogen", 1m), (3, "Gas", 0m),
             (4, "Methane", 8m), (4, "Nitrogen", 2m), (4, "Gas", 2m),
             (6, "Methane", 9m),
+            (7, "Methane", 6m), (7, "Nitrogen", 1m), (7, "Gas", 14.4721m),
         };
         var statements = inputs.Select(v =>
             "INSERT INTO doc.CellValue (PeriodKey, TableRowId, ColumnDefId, TableDefId, ValueNumeric, IsCalculated, IsEmpty) VALUES " +
@@ -234,6 +235,10 @@ public sealed class ParityModuleDbTests(SqlServerFixture sql)
             ($"X400_{t}_Scaled", $"Round(!X400_{t}_Sum * !Common_K, 1)"),
             ($"X400_{t}_MolecularWeight", $"@GCV.X400_{t}_Gas * 2"),
             ($"X400_{t}_Inverse", $"1 / !X400_{t}_MolecularWeight"),
+
+            // Регресія (HSE400 doc 3, F_H2S M09): константи з БД мають scale 16, і (double)34.0760002136230000m не дорівнює
+            // (double)34.076000213623m. Текст константи в скрипті мусить давати той самий double, що й значення з БД.
+            ($"X400_{t}_Mass", $"(CST.K1*CST.K2*@GCV.X400_{t}_Gas*CST.K3)/(CST.MW*CST.K4)"),
         ];
         for (var i = 0; i < formulas.Length; i++)
         {
@@ -244,6 +249,12 @@ public sealed class ParityModuleDbTests(SqlServerFixture sql)
 
         var constant = new MethodologyConstant(version.Id, EcrCode.Create("Factor"), 1.5m, unitOne);
         db.MethodologyConstants.Add(constant);
+        foreach (var (constantCode, constantValue) in new[]
+                 { ("K1", 0.8313m), ("K2", 273.15m), ("K3", 1000m), ("K4", 101325m), ("MW", 34.076000213623m) })
+        {
+            db.MethodologyConstants.Add(new MethodologyConstant(version.Id, EcrCode.Create(constantCode), constantValue, unitOne));
+        }
+
         db.MethodologyOutputs.Add(new MethodologyOutput(version.Id, EcrCode.Create($"X400_{t}_Sum"), unitOne, 1));
         db.MethodologyRules.Add(new MethodologyRule(version.Id, EcrCode.Create("R_ALL"), "{}", 10));
         await db.SaveChangesAsync();
