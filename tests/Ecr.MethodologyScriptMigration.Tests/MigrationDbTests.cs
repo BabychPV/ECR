@@ -62,7 +62,7 @@ public sealed class MigrationDbTests(SqlServerFixture sql)
 
         visible var Mass : t = row.Qty * 2;
 
-        var Category = key(row.Zone) == "North" ? "A" : "B";
+        var Category = StripSpaces(key(row.Zone) == "North" ? "A" : "B");
         reject when Category == null || Category == "" || !(Category in ("A", "B"));
 
         foreach substance S in ("0301", "0304") {

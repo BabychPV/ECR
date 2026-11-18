@@ -1114,6 +1114,12 @@ internal sealed class ScriptBinder
 
     // ───── виклики ─────
 
+    /// <summary>Ім'я власної функції скрипта «текст без пробілів».</summary>
+    public const string StripSpacesName = "StripSpaces";
+
+    /// <summary>Ім'я хостової функції, у яку лягає <see cref="StripSpacesName"/>.</summary>
+    public const string StripSpacesHost = "$stripSpaces";
+
     private AstNode LowerCall(CallExpr call)
     {
         var args = call.Args.Select(Lower).ToList();
@@ -1135,6 +1141,20 @@ internal sealed class ScriptBinder
             }
 
             return At(new FunctionNode("$call:" + name, args), call.Span);
+        }
+
+        // Власна функція скрипта (не діалекту методологій): текст без пробілів. Потрібна перетворювачеві, щоб ключ
+        // категорії читався так, як його читає старий рушій (там пробіли в ключі не мають значення).
+        if (string.Equals(name, StripSpacesName, StringComparison.Ordinal))
+        {
+            if (args.Count != 1)
+            {
+                Report(ScriptDiagnosticCodes.ArgumentCount, call.NameSpan,
+                    $"Function '{name}' takes 1 argument(s), got {args.Count}.",
+                    ("name", name), ("expected", "1"), ("actual", args.Count.ToString(CultureInfo.InvariantCulture)));
+            }
+
+            return At(new FunctionNode(StripSpacesHost, args), call.Span);
         }
 
         var signature = DialectCatalog.Find(name);
