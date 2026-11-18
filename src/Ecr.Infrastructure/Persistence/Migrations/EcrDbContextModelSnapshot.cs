@@ -940,12 +940,14 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasColumnType("int");
 
                     b.Property<byte[]>("ScriptHash")
+                        .IsConcurrencyToken()
                         .HasColumnType("varbinary(32)");
 
                     b.Property<string>("ScriptText")
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<byte>("Status")
+                        .IsConcurrencyToken()
                         .HasColumnType("tinyint");
 
                     b.Property<byte>("TraceLevel")

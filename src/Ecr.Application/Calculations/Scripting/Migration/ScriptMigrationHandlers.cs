@@ -305,6 +305,7 @@ public sealed class SwitchScriptEngineHandler(
     IScriptMigrationStore migrationStore,
     ScriptAnalyzer analyzer,
     ScriptMaterializer materializer,
+    IFormulaLinkRebuilder formulaLinks,
     IUnitOfWork uow,
     IAuditWriter audit,
     IAccessDecisionService access,
@@ -399,6 +400,14 @@ public sealed class SwitchScriptEngineHandler(
                     {
                         version.SwitchEngineForMigration(MethodologyEngine.Formulas);
                         await methodologies.ReplaceScriptReadTablesAsync(version.Id, [], token).ConfigureAwait(false);
+                    }
+
+                    // ⛔ F13a: скрипт при матеріалізації переписав ребра методологій і довідників за СВОЇМ текстом; формули
+                    // їх виводять із формул. Після повернення стан має збігатися зі станом до перемикання на скрипт, тож
+                    // ребра перебудовуються тією ж дорогою, що й публікація формул (після зміни рушія всієї групи).
+                    foreach (var (methodology, version) in group)
+                    {
+                        await formulaLinks.RebuildAsync(methodology, version, token).ConfigureAwait(false);
                     }
                 }
 

@@ -34,6 +34,7 @@ public sealed class ScriptMigrationHandlerTests
     private readonly IMethodologyStore _store;
     private readonly IVersionSourceReader _reader = Substitute.For<IVersionSourceReader>();
     private readonly IScriptMigrationStore _migration = Substitute.For<IScriptMigrationStore>();
+    private readonly IFormulaLinkRebuilder _links = Substitute.For<IFormulaLinkRebuilder>();
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
     private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
@@ -93,6 +94,7 @@ public sealed class ScriptMigrationHandlerTests
     private SwitchScriptEngineHandler Switch()
         => new(_store, _drafts, _migration, Analyzer(),
             new ScriptMaterializer(_store, _drafts, ScriptTestKit.Catalog(), Substitute.For<ICalculationBindingStore>()),
+            _links,
             _uow, _audit, _access, _user, _clock);
 
     private void Publish(MethodologyVersion version, string? shadow = Text)
@@ -378,6 +380,10 @@ public sealed class ScriptMigrationHandlerTests
         Assert.Equal(Text, _alphaVersion.ScriptText);
         await _store.Received(1).ReplaceScriptReadTablesAsync(
             AlphaV, Arg.Is<IReadOnlyList<string>>(t => t.Count == 0), Arg.Any<CancellationToken>());
+
+        // F13a: ребра методологій і довідників, переписані скриптом, перебудовано за формулами — і лише при поверненні
+        // (на Script їх пише матеріалізація).
+        await _links.Received(1).RebuildAsync(_alpha, _alphaVersion, Arg.Any<CancellationToken>());
     }
 
     [Fact]

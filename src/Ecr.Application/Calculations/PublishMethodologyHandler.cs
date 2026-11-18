@@ -37,7 +37,7 @@ public sealed class PublishMethodologyHandler(
     IUiStringCatalog? uiCatalog = null,
     RuleCoverageHandler? ruleCoverage = null,
     IEnumerable<ICalculationModule>? modules = null,
-    Scripting.ScriptPublishChecks? scriptChecks = null)
+    Scripting.ScriptPublishChecks? scriptChecks = null) : IFormulaLinkRebuilder
 {
     /// <summary>Ключ попередження: комбінації значень реальних рядків, яких не зачіпає жодне правило (ФВ-13.9).</summary>
     public const string CoverageGapsWarningKey = "publish.warning.ruleCoverageGaps";
@@ -195,6 +195,21 @@ public sealed class PublishMethodologyHandler(
         // побачить — а 186 попереджень у логах не прочитає ніхто.
         // ✎ L2-5: попередження diff (попередня версія не обчислилась) — до попереджень публікації.
         return diff with { Warnings = [.. diff.Warnings ?? [], .. warnings, .. coverageWarnings] };
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Той самий прохід, що й у публікації (<see cref="ApplyEvaluationOrderAsync"/>): ребра між методологіями та ребра
+    /// довідників виводяться з формул версії однією й тією самою дорогою, а не другим, «схожим» кодом. Дата імпортів —
+    /// дата чинності версії.
+    /// </remarks>
+    public async Task RebuildAsync(Methodology methodology, MethodologyVersion version, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(methodology);
+        ArgumentNullException.ThrowIfNull(version);
+
+        await ApplyEvaluationOrderAsync(methodology, version, version.EffectiveFrom ?? new DateOnly(2000, 1, 1), ct)
+            .ConfigureAwait(false);
     }
 
     /// <summary>

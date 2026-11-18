@@ -75,6 +75,25 @@ public sealed class ScriptPublishChecksTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "MS-F13a")]
+    public async Task Текст_у_базі_з_іншим_хешем_ніж_у_прочитаній_версії_не_матеріалізується_і_не_публікується()
+    {
+        const string text = "rows from T1;\nvar h = row.Hours;\noutput OUT_A : t = h;";
+        var (checks, store) = Build(text, MethodologyKind.DataDriven, Table());
+        store.GetScriptAsync(VersionId, Arg.Any<CancellationToken>())
+            .Returns(new MethodologyScript(text, [9, 9], MethodologyEngine.Script, false, NumericMode.Strict));
+        var (methodology, version) = Subject();
+        version.SetScript(text, [1, 1]);
+
+        var ex = await RejectedAsync(checks.RunAsync(methodology, version, From, default));
+
+        Assert.Equal("err.ECR-CALC-0409.scriptChanged", ex.Details!["messageKey"]);
+        await store.DidNotReceiveWithAnyArgs().ReplaceScriptOutputsAsync(default, default!, default);
+        Assert.Empty(_added);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
     [Trait("Requirement", "MS-T3.1")]
     public async Task Вихід_без_колонки_Calculated_дає_noBoundOutput()
     {
