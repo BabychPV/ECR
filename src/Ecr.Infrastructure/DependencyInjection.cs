@@ -452,8 +452,8 @@ public static class DependencyInjection
         services.AddScoped<IRecalculationJob, Jobs.RecalculationJob>();
         services.AddScoped<Jobs.IRecalculationCompletionHook, Jobs.SourceDocumentChangeHook>(); // B179 L2: зміна джерела за Any (обидві задачі перерахунку)
         services.AddScoped<ISourceApprovalChangeTrigger, Jobs.SourceApprovalChangeTrigger>(); // B80 N2a → B179 L2: Approve/Reopen/видалення джерела за ApprovedOnly
-        services.AddScoped<ISourceMonthApprovalGate>(sp => DocumentSourceMonthGate.Create(sp, configuration)); // B80 N2b: Submit/Approve споживача — лише з затвердженим місяцем джерела
-        services.AddScoped<ISourceIssueReader>(sp => DocumentSourceMonthGate.Create(sp, configuration)); // B80 N4: проблеми джерела в панелі проблем розрахунку
+        services.AddScoped<ISourceMonthApprovalGate>(sp => DocumentSourceMonthGate.Create(sp)); // B80 N2b: Submit/Approve споживача — лише з затвердженим місяцем джерела
+        services.AddScoped<ISourceIssueReader>(sp => DocumentSourceMonthGate.Create(sp)); // B80 N4: проблеми джерела в панелі проблем розрахунку
         services.AddScoped<IFormulaRecalculationJob, Jobs.FormulaRecalculationJob>();
         // WW-03: постановка перерахунку в періоди-читачі (міжперіодні посилання).
         services.AddScoped<Jobs.CrossPeriodFanOut>();
@@ -636,15 +636,15 @@ public static class DependencyInjection
             sp.GetRequiredService<RegistrySnapshotLoader>(),
             sp.GetRequiredService<EcrDbContext>(),
             sp.GetRequiredService<ICalculationResultStore>(),
-            // B80: явний ключ перекриває, не заданий — вирішує біт зв'язки cfg.DocumentSourceBinding.
-            Hse400CompositionSnapshotLoader.Override(configuration, Hse400CompositionSnapshotLoader.EnabledKey)));
+            // P-0118-31/33: лише біт зв'язки cfg.DocumentSourceBinding.ReadFromDocument (ключ виведено, не читається).
+            enabled: null));
 
         // PERMITS: types — типи дозволів над реєстрами (PM-03)
         services.AddScoped<IPermitTypeStore, PermitTypeStore>();
         services.AddScoped<IPermitListStore, PermitListStore>(); // PM-08e
         services.AddScoped<IPermitGroupStore, PermitGroupStore>(); // PRMG: групи типів як ціль Lookup
         services.AddScoped<IDocumentSourceBindingStore, DocumentSourceBindingStore>(); // B80 N1
-        services.AddSingleton<IDocumentSourceFlagOverrides>(new DocumentSourceFlagOverrides(configuration)); // B80 N1
+        services.AddSingleton<IDocumentSourceFlagOverrides>(new DocumentSourceFlagOverrides()); // B80 N1; P-0118-31/33: перекриття немає
         services.AddScoped<IPermitDataMonthsReader, PermitDataMonthsReader>(); // rule (h): months with data of a document
         services.AddSingleton<IPermitRegistryIndex, PermitRegistryIndex>(); // rule (h): permit-type targets, in memory (hot PATCH path)
 

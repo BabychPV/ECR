@@ -171,9 +171,8 @@ public static partial class EcrConfigurationValidation
         // Q-17: читається `GetValue<bool>` у DependencyInjection (Infrastructure).
         "Collection:MonthColumnRouting",
 
-        // HSE400: Land читає склад газу з документа HSE400, а не з довідника (типово вимкнено).
-        // ✎ B179 L2: ключа «перерахунок залежних Land» більше немає — залежні автоматичні, вимикач — біт зв'язки.
-        Ecr.Infrastructure.Persistence.Hse400CompositionSnapshotLoader.EnabledKey,
+        // ✎ B179 L2, P-0118-31/33: ключів HSE400 «перерахунок залежних Land» і «склад із документа» більше немає —
+        // вирішує лише біт зв'язки. Залишкова змінна середовища не перевіряється й не читається (старт не падає).
 
         // D-462: видалення сирих точок, яких PI більше не віддає (повністю перечитаний шматок вікна).
         Ecr.Adapters.PiAf.CollectionRunnerOptions.DeleteMissingPointsKey,
