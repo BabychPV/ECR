@@ -6517,3 +6517,9 @@ public sealed record RowDto(
   дані). `hse400CompositionSource` = `Binding`, коли ключ не задано, а значення дав біт зв'язки.
 - Порти: `IDocumentSourceBindingStore` (перелік, `UPDLOCK` зв'язки, обраний документ-джерело року з періодичністю проєкту й режимом погодження, роки джерела) і `IDocumentSourceFlagOverrides` (явні значення двох ключів або `null`).
 - Помилки — наявні коди (`ECR-CALC-0404/0409`, `ECR-REQ-0422`) з новими `messageKey`; §7 не змінюється.
+- ✎ B80 N2a — порт `ISourceApprovalChangeTrigger` (без нових ендпоінтів і полів): остаточне затвердження аркуша-джерела
+  × періоду (`ApproveSheetHandler`), повернення з `Approved` (`ReopenDocumentHandler`) і видалення документа-джерела
+  (`DeleteDocumentHandler`; роки читаються до видалення) ПІСЛЯ коміту ставлять ту саму злиту задачу
+  `IRegistryImpactRecalculationJob` на рік — лише коли зв'язка на `approvedOnly` і біт `recalculateDependents` (або ключ)
+  увімкнено; лише оригінал аркуша; збій постановки — лише в журнал. Хук завершення перерахунку HSE400 за `approvedOnly`
+  мовчить, за `any` — як доти.
