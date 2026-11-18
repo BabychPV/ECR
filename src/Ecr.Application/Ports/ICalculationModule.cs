@@ -158,6 +158,11 @@ public interface ICalculationModule
 /// MS: непрозорий для застосунку вантаж рушія скрипта (бібліотеки, Id записів <c>entry()</c>, таблиці-псевдоніми,
 /// карти місячних колонок); його тип живе в <c>Ecr.Calculations</c>, шар застосунку його не розбирає.
 /// </param>
+/// <param name="StepDependencies">
+/// MS Етап 7: для кожного кроку скрипта (<c>var</c>/<c>output</c> верхнього рівня) — кроки, які його вираз читає
+/// (<c>CompiledScript.StepDependencies</c>); модуль місячних колонок бере з нього залежності замість розбору тексту
+/// формул. <c>null</c> — формульна версія (залежності з тексту).
+/// </param>
 /// <param name="KnownCategories">
 /// ✎ F13 RC #806 (doc 95): категорії констант версії й її бібліотек (без <c>Common</c>, без пробілів) — ключ правила
 /// категорії, якого серед них немає (ні точно, ні префіксом <c>{ключ}_</c>), відхиляє рядок, а не дає мовчки
@@ -180,7 +185,8 @@ public sealed record CalculationBindingContext(
     IReadOnlySet<string>? KnownCategories = null,
     Ecr.Scripting.CompiledScript? Script = null,
     IReadOnlyDictionary<string, long>? SubstanceIds = null,
-    object? ScriptRuntime = null);
+    object? ScriptRuntime = null,
+    IReadOnlyDictionary<string, IReadOnlyList<string>>? StepDependencies = null);
 
 /// <summary>
 /// Замикання бібліотечних формул версії (HSE301 L): що з імпортованих методологій

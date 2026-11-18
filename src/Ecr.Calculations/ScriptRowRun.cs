@@ -170,6 +170,13 @@ internal sealed class ScriptRowRun(
             return;
         }
 
+        // Рівень Module: що саме емітувати й з якою одиницею, вирішує зовнішній модуль через binding.Outputs.
+        if (_version.Level == CalculationLevel.Module)
+        {
+            EmitModuleTarget(statement.Name, value);
+            return;
+        }
+
         if (statement.UnitCode is { } unitCode && runtime.UnitIds.TryGetValue(unitCode, out var unitId))
         {
             CalculationSteps.EmitValue(
@@ -184,11 +191,20 @@ internal sealed class ScriptRowRun(
 
     private void Output(OutputStatement statement)
     {
-        var value = Step(statement.Code, statement.SourceText, statement.Expr, statement.UnitCode, visible: true);
+        // Рівень Module: крок успішної формули на ErrorsOnly не пишеться (як у формульної версії без IsVisible).
+        var value = Step(
+            statement.Code, statement.SourceText, statement.Expr, statement.UnitCode,
+            visible: _version.Level != CalculationLevel.Module);
         context.SetVariable(statement.Code, value, statement.UnitCode);
         Record(statement.Code, ScriptValueKind.Output, value);
 
         var materialized = binding.Outputs.FirstOrDefault(o => string.Equals(o.Code, statement.Code, StringComparison.OrdinalIgnoreCase));
+        if (_version.Level == CalculationLevel.Module)
+        {
+            EmitModuleTarget(statement.Code, value);
+            return;
+        }
+
         int unitId;
         if (materialized is not null)
         {
@@ -205,6 +221,19 @@ internal sealed class ScriptRowRun(
         CalculationSteps.EmitValue(
             values, _version, binding, numeric, trace, statement.Code, value, unitId,
             statement.SubstanceVar is null ? null : _substance, CalculationResultKind.Output);
+    }
+
+    /// <summary>
+    /// Рівень <c>Module</c> (HSE400): виходи й масштаби задає зовнішній модуль (<c>binding.Outputs</c> /
+    /// <c>OutputScales</c>) — емітується рівно те, що в переліку, з його одиницею; решта кроків — лише проміжні.
+    /// </summary>
+    private void EmitModuleTarget(string code, ExpressionValue value)
+    {
+        if (binding.Outputs.FirstOrDefault(o => string.Equals(o.Code, code, StringComparison.OrdinalIgnoreCase)) is { } target)
+        {
+            CalculationSteps.EmitValue(
+                values, _version, binding, numeric, trace, code, value, target.UnitId, null, CalculationResultKind.Output);
+        }
     }
 
     private void Reject(RejectStatement statement)

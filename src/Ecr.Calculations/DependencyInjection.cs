@@ -42,7 +42,8 @@ public static class DependencyInjection
         services.AddScoped<ScriptRunContext>();
         services.AddScoped<ScriptRowSelector>();
         services.AddScoped<ICalculationModule, MonthColumnArgumentsModule>();
-        services.AddScoped<ICalculationModule, ScriptCalculationModule>();
+        services.AddScoped<ScriptCalculationModule>();
+        services.AddScoped<ICalculationModule>(p => p.GetRequiredService<ScriptCalculationModule>());
         services.AddScoped<ICalculationModule, GenericCalculationModule>();
         // ✎ MS: порівняння старого й скриптового шляхів версії (паритет, план §8.4); нічого не пише.
         services.AddScoped<Scripting.Parity.ParityComparer>();

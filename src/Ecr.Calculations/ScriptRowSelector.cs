@@ -29,6 +29,9 @@ public sealed class ScriptRowSelector(
     /// <c>null</c> результат — «запису немає» (нічому не дорівнює). Зазвичай <see cref="ScriptRuntime.EntryIdText"/>.
     /// </param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="allRows">
+    /// Рівень <c>Module</c> (HSE400): скрипт без <c>rows</c>, рахуються усі рядки таблиці (код правила — код таблиці).
+    /// </param>
     /// <returns>
     /// Збіги (код правила — код таблиці), ключі всіх рядків, «неактивні» рядки й уже прочитаний зріз.
     /// Екземпляр таблиці, коду якої в скрипті немає, — <c>RowMatchOutcome([], null)</c> (як версія без правил).
@@ -37,7 +40,8 @@ public sealed class ScriptRowSelector(
         CompiledScript script,
         long tableInstanceId,
         Func<string, string, string?> entryIdText,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool allRows = false)
     {
         ArgumentNullException.ThrowIfNull(script);
         ArgumentNullException.ThrowIfNull(entryIdText);
@@ -59,6 +63,16 @@ public sealed class ScriptRowSelector(
                 && (t.TemplateCode is null
                     || string.Equals(t.TemplateCode, templateCode, StringComparison.OrdinalIgnoreCase))))
             .ToList();
+        if (allRows)
+        {
+            return new RowMatchOutcome(
+                [.. table.RowIds.OrderBy(r => r.Value).Select(r => new RowRuleMatch(r.Key, tableCode))],
+                [.. table.RowIds.OrderBy(r => r.Value).Select(r => r.Key)])
+            {
+                Read = new TableSliceRead(tableInstanceId, table.Period, table.Slice, table.RowIds),
+            };
+        }
+
         if (clauses.Count == 0)
         {
             return new RowMatchOutcome([], null);

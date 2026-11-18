@@ -481,7 +481,8 @@ public sealed class CalculationOrchestrator(
                 .ConfigureAwait(false);
             var runtime = prepared.ScriptRuntime as ScriptRuntime;
             outcome = await scopedSelector
-                .MatchAsync(prepared.Script!, binding.TableInstanceId, (registry, entry) => runtime?.EntryIdText(registry, entry), ct)
+                .MatchAsync(prepared.Script!, binding.TableInstanceId, (registry, entry) => runtime?.EntryIdText(registry, entry), ct,
+                    allRows: binding.Descriptor.Level == CalculationLevel.Module)
                 .ConfigureAwait(false);
         }
         else

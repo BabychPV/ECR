@@ -92,7 +92,11 @@ internal sealed class ScriptProgramLoader(IMethodologyStore methodologies, Scrip
             key,
             () => CompileOrThrow(
                 text,
-                new ScriptCompileOptions(mode, script?.IsLibrary ?? false, code => libraries.GetValueOrDefault(code)?.Script),
+                new ScriptCompileOptions(
+                    mode,
+                    script?.IsLibrary ?? false,
+                    code => libraries.GetValueOrDefault(code)?.Script,
+                    IsModuleLevel: methodology.Level == CalculationLevel.Module),
                 methodology.Code));
 
         return new LoadedProgram(compiled, libraries, mode);
