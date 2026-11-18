@@ -6553,3 +6553,22 @@ public sealed record RowDto(
   (явний ключ `Calculations:Hse400CompositionFromDocument` перекриває біт); за `any` знахідок немає, а старі знахідки
   правила закриваються (прохід повний). Тексти en/ru/kz — сід `B80-stale-approved-dependent.sql`; переклад на клієнті —
   N6.
+
+## ✎ 2026-11-18 B179 L1: граф залежностей документів (без ендпоінтів, міграцій і сіду)
+
+Рішення людини P-0118-33 (дизайн B179 §2–§4, §7–§9). Лише читання того, що вже пише публікація; поведінка продукту не
+змінюється (споживач — L2+).
+
+- **Порт `IDependencyGraphProvider`** (`GetAsync` → `DependencyGraphSnapshot`): вузли шаблон/довідник/методологія;
+  ребра `Fills` (`cfg.DocumentSourceBinding`), `TemplateFormula` (`cfg.FormulaDependency` вид 2 без таблиці, `RowKey` =
+  код довідника; `REGFIELD([Lookup])` — довідник колонки; версія без жодного такого ребра — AST усіх формул),
+  `Methodology` (`cfg.RegistryUse` вид 1, опубліковані версії), `WritesInto` (`cfg.CalculationBinding`),
+  `RegistryRule` (`cfg.RegistryUse` вид 2) з доказами; згорнуті ребра «шаблон-джерело → шаблон-споживач» з
+  обсягом за періодом; рівні Кана над конденсацією і цикли (СЗК) — лише як зауваження. Версії шаблонів —
+  опубліковані плюс ті, що діють за незакритим періодом документа. `cfg.DocumentSourceBindingConsumer` граф не читає.
+  Кеш — `IMemoryCache` під ключем ревізії вхідних даних (вікно ревізії 5 с, стеля 30 хв), без явної інвалідації.
+- **Порт `IMethodologyRegistryEdges`**: єдиний читач таблиць методологій для графа (ревізія, читання довідників
+  опублікованими версіями з виразом формули, активні прив'язки); сторож `DependencyGraphMethodologyReadGuardTests`.
+- **`PeriodScope`** (`Ecr.Expressions`, `RegistryReadScopes`): `REGFIND` з ключами `[Period].Year` + `[Period].Sequence`
+  → `Month`; `[Period].Year` + літерал 1…12 (річна розкладка D-474) → `Year` з маскою місяця; лише рік → `Year`;
+  інакше → `All`. Області рядка — рівності `ROW.f = [Period].*` у ланцюжку `AND`.
