@@ -295,7 +295,7 @@ public sealed record CellStyleDto(
 /// </param>
 /// <param name="Defaults">
 /// ✎ B175: значення комірок рядка за замовчуванням (<c>RowDef.CellDefaults</c>), код колонки → сирий текст — той
-/// самий формат, що <see cref="ColumnDto.DefaultValue"/> (Lookup — код запису). Перекриває дефолт колонки для
+/// самий формат, що <c>ColumnDto.DefaultValue</c> (Lookup — код запису). Перекриває дефолт колонки для
 /// незаповненої комірки; <c>""</c> — дефолту колонки в цьому рядку немає. <c>null</c> — рядок без власних дефолтів.
 /// </param>
 public sealed record RowDto(
