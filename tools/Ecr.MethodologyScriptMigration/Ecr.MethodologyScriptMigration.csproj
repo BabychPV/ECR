@@ -20,4 +20,8 @@
     <ProjectReference Include="..\..\src\Ecr.Infrastructure\Ecr.Infrastructure.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Using Include="Ecr.Application.Calculations.Scripting.Migration" />
+  </ItemGroup>
+
 </Project>

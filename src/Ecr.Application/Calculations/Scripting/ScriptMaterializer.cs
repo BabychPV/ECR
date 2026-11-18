@@ -117,6 +117,117 @@ public sealed class ScriptMaterializer(
     }
 
     /// <summary>
+    /// Порівнює те, що дала б матеріалізація скрипта (виходи, речовини, імпорти), з ТИМ, що вже лежить у версії
+    /// (<c>calc.MethodologyOutput</c>, <c>calc.MethodologySubstance</c>, <c>calc.MethodologyImport</c>). Нічого не пише.
+    /// </summary>
+    /// <remarks>
+    /// Перемикання опублікованої версії на скрипт (MS, план 8.5) не має права змінити склад версії: інакше змінилися б
+    /// колонки, які вона пише, чи речовини, за якими рахує. Виходи порівнюються за (код без регістру, одиниця,
+    /// «по речовинах»); речовини й імпорти — за кодами без регістру.
+    /// </remarks>
+    /// <param name="versionId">Версія.</param>
+    /// <param name="script">Скомпільований скрипт версії.</param>
+    /// <param name="importsOnDate">Дата, на яку читаються оголошені імпорти (на склад не впливає).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Проблеми: порожньо — склад збігається.</returns>
+    public async Task<IReadOnlyList<PublishProblem>> DiffAgainstStoredAsync(
+        int versionId, CompiledScript script, DateOnly importsOnDate, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(script);
+
+        var problems = new List<PublishProblem>();
+        var catalog = await units.GetAsync(ct).ConfigureAwait(false);
+
+        var expectedOutputs = script.Outputs
+            .Select(o => OutputKey(o.Code, catalog.Units.TryGetValue(o.UnitCode, out var unit) ? unit.Id : -1, o.IsPerSubstance))
+            .ToList();
+        var actualOutputs = (await methodologies.GetOutputsAsync(versionId, ct).ConfigureAwait(false))
+            .Select(o => OutputKey(o.Code, o.UnitId, o.IsPerSubstance))
+            .ToList();
+        AddDifference(problems, "switch.problem.outputsDiffer", "outputs", versionId, expectedOutputs, actualOutputs);
+
+        var actualSubstances = (await methodologies.GetSubstanceCodesAsync(versionId, ct).ConfigureAwait(false)).Values.ToList();
+        AddDifference(problems, "switch.problem.substancesDiffer", "substances", versionId, script.Substances, actualSubstances);
+
+        var actualImports = (await methodologies.ResolveImportsAsync(versionId, importsOnDate, ct).ConfigureAwait(false))
+            .Select(i => i.MethodologyCode)
+            .ToList();
+        AddDifference(problems, "switch.problem.importsDiffer", "imports", versionId, script.Imports, actualImports);
+
+        return problems;
+    }
+
+    /// <summary>
+    /// Записує те, що перемикання на скрипт додає до версії: таблиці читання, залежності від методологій-джерел і
+    /// ребра довідників. Виходи, речовини й імпорти вже збігаються (<see cref="DiffAgainstStoredAsync"/>) і не
+    /// переписуються; прив'язки виходів не змінюються.
+    /// </summary>
+    /// <param name="versionId">Версія.</param>
+    /// <param name="methodologyId">Методологія-власник.</param>
+    /// <param name="script">Скомпільований скрипт.</param>
+    /// <param name="environment">Результат перевірки оточення.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task WriteForSwitchAsync(
+        int versionId, int methodologyId, CompiledScript script, ScriptEnvironment environment, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(script);
+        ArgumentNullException.ThrowIfNull(environment);
+
+        await methodologies.ReplaceScriptReadTablesAsync(versionId, script.ReadTables, ct).ConfigureAwait(false);
+
+        var importIds = new List<int>();
+        foreach (var code in script.Imports)
+        {
+            if (await drafts.FindByCodeAsync(code, ct).ConfigureAwait(false) is { } library)
+            {
+                importIds.Add(library.Id);
+            }
+        }
+
+        var dependencies = importIds
+            .Concat(environment.ResultSourceMethodologyIds)
+            .Where(id => id != methodologyId)
+            .Distinct()
+            .Order()
+            .ToList();
+        await methodologies.ReplaceDependenciesAsync(methodologyId, dependencies, ct).ConfigureAwait(false);
+        await ReplaceRegistryUsesAsync(versionId, script, ct).ConfigureAwait(false);
+    }
+
+    private static string OutputKey(string code, int unitId, bool perSubstance)
+        => string.Create(
+            CultureInfo.InvariantCulture,
+            $"{code.ToUpperInvariant()}[unit {unitId}{(perSubstance ? ", per substance" : string.Empty)}]");
+
+    private static void AddDifference(
+        List<PublishProblem> problems,
+        string messageKey,
+        string what,
+        int versionId,
+        IReadOnlyCollection<string> expected,
+        IReadOnlyCollection<string> actual)
+    {
+        var expectedSet = new HashSet<string>(expected, StringComparer.OrdinalIgnoreCase);
+        var actualSet = new HashSet<string>(actual, StringComparer.OrdinalIgnoreCase);
+        var fromScript = expectedSet.Where(x => !actualSet.Contains(x)).Order(StringComparer.Ordinal).ToList();
+        var stored = actualSet.Where(x => !expectedSet.Contains(x)).Order(StringComparer.Ordinal).ToList();
+        if (fromScript.Count == 0 && stored.Count == 0)
+        {
+            return;
+        }
+
+        problems.Add(Calculations.PublishProblem.Of(
+            messageKey,
+            $"Version {versionId.ToString(CultureInfo.InvariantCulture)}: the {what} derived from the script differ from the stored ones "
+            + $"(only in the script: {Join(fromScript)}; only stored: {Join(stored)}).",
+            ("version", versionId.ToString(CultureInfo.InvariantCulture)),
+            ("onlyInScript", Join(fromScript)),
+            ("onlyStored", Join(stored))));
+    }
+
+    private static string Join(List<string> items) => items.Count == 0 ? "-" : string.Join(", ", items);
+
+    /// <summary>
     /// Додає відсутні активні прив'язки <c>(колонка, методологія, вихід)</c> для колонок <c>Calculated</c> живих
     /// таблиць: код колонки дорівнює коду виходу або (місячна колонка) <c>&lt;вихід&gt;_M&lt;mm&gt;</c>.
     /// Наявні прив'язки не змінюються й не видаляються.

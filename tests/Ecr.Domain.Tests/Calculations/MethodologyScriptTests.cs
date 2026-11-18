@@ -123,6 +123,49 @@ public sealed class MethodologyScriptTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    public void SwitchEngineForMigration_перемикає_опубліковану_версію_туди_й_назад_не_чіпаючи_тексту()
+    {
+        var version = Draft();
+        version.SetScript("rows from T1;", Hash);
+        version.Publish(9, "Причина", new DateOnly(2099, 1, 1), testsPassed: true, Now);
+
+        version.SwitchEngineForMigration(MethodologyEngine.Script);
+        Assert.Equal(MethodologyEngine.Script, version.Engine);
+        Assert.Equal("rows from T1;", version.ScriptText);
+
+        version.SwitchEngineForMigration(MethodologyEngine.Formulas);
+        Assert.Equal(MethodologyEngine.Formulas, version.Engine);
+        Assert.Equal("rows from T1;", version.ScriptText);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    public void SwitchEngineForMigration_на_скрипт_без_тексту_відхиляється()
+    {
+        var version = Draft();
+        version.Publish(9, "Причина", new DateOnly(2099, 1, 1), testsPassed: true, Now);
+
+        var error = Assert.Throws<DomainException>(() => version.SwitchEngineForMigration(MethodologyEngine.Script));
+
+        Assert.Equal("ECR-CALC-0422", error.ErrorCode);
+        Assert.Equal(MethodologyEngine.Formulas, version.Engine);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    public void SwitchEngineForMigration_для_чернетки_відхиляється_її_перемикає_SwitchEngine()
+    {
+        var version = Draft();
+        version.SetScript("rows from T1;", Hash);
+
+        var error = Assert.Throws<DomainException>(() => version.SwitchEngineForMigration(MethodologyEngine.Script));
+
+        Assert.Equal("ECR-CALC-0409", error.ErrorCode);
+        Assert.Equal(MethodologyEngine.Formulas, version.Engine);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
     public void CloneAsDraft_переносить_рушій_текст_і_хеш()
     {
         var source = Draft(MethodologyEngine.Script);

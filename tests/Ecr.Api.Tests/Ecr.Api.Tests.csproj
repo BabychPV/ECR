@@ -8,6 +8,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Ecr.Api\Ecr.Api.csproj" />
+    <!-- MS 8.5: cutover-тест ганяє справжній перетворювач інструмента перенесення проти бази. -->
+    <ProjectReference Include="..\..\tools\Ecr.MethodologyScriptMigration\Ecr.MethodologyScriptMigration.csproj" />
     <ProjectReference Include="..\Ecr.TestKit\Ecr.TestKit.csproj" />
   </ItemGroup>
 

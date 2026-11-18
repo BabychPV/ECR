@@ -28,14 +28,26 @@ public sealed class ScriptSourceCompiler(IMethodologyDraftStore drafts, IMethodo
     /// <param name="isLibrary">Методологія — бібліотека.</param>
     /// <param name="onDate">Дата, на яку добираються версії бібліотек.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="shadowScripts">
+    /// Перенесення: бібліотека з рушієм <c>Formulas</c> і «тіньовим» скриптом теж годиться (текст зберігають ДО
+    /// перемикання рушія бібліотеки), а тексти версій, ще не збережені (пакет <c>apply</c>), беруться звідси замість
+    /// сховища (версія → скрипт). <c>null</c> — звичайне авторство: лише бібліотеки на рушії <c>Script</c>.
+    /// </param>
     /// <returns>Результат компіляції з діагностиками.</returns>
     public async Task<ScriptCompilation> CompileAsync(
-        string text, string ownerCode, NumericMode numericMode, bool isLibrary, DateOnly onDate, CancellationToken ct)
+        string text,
+        string ownerCode,
+        NumericMode numericMode,
+        bool isLibrary,
+        DateOnly onDate,
+        CancellationToken ct,
+        IReadOnlyDictionary<int, MethodologyScript>? shadowScripts = null)
     {
         ArgumentNullException.ThrowIfNull(text);
         ArgumentNullException.ThrowIfNull(ownerCode);
 
-        var (compilation, _) = await CompileCoreAsync(text, numericMode, isLibrary, onDate, [ownerCode], ct)
+        var (compilation, _) = await CompileCoreAsync(
+                text, numericMode, isLibrary, onDate, [ownerCode], shadowScripts, ct)
             .ConfigureAwait(false);
         return compilation;
     }
@@ -86,6 +98,7 @@ public sealed class ScriptSourceCompiler(IMethodologyDraftStore drafts, IMethodo
         bool isLibrary,
         DateOnly onDate,
         List<string> chain,
+        IReadOnlyDictionary<int, MethodologyScript>? shadowScripts,
         CancellationToken ct)
     {
         var requested = new List<string>();
@@ -125,9 +138,19 @@ public sealed class ScriptSourceCompiler(IMethodologyDraftStore drafts, IMethodo
             }
 
             var version = library.VersionOn(onDate);
-            var script = version is { Engine: MethodologyEngine.Script }
-                ? await methodologies.GetScriptAsync(version.Id, ct).ConfigureAwait(false)
-                : null;
+            MethodologyScript? script = null;
+            if (version is { } found)
+            {
+                if (shadowScripts is not null && shadowScripts.TryGetValue(found.Id, out var pending))
+                {
+                    script = pending;
+                }
+                else if (found.Engine == MethodologyEngine.Script || shadowScripts is not null)
+                {
+                    script = await methodologies.GetScriptAsync(found.Id, ct).ConfigureAwait(false);
+                }
+            }
+
             if (script is null)
             {
                 notScript.Add(name);
@@ -138,7 +161,7 @@ public sealed class ScriptSourceCompiler(IMethodologyDraftStore drafts, IMethodo
             try
             {
                 var (inner, innerCycle) = await CompileCoreAsync(
-                        script.Text, script.NumericMode, script.IsLibrary, onDate, chain, ct)
+                        script.Text, script.NumericMode, script.IsLibrary, onDate, chain, shadowScripts, ct)
                     .ConfigureAwait(false);
                 if (innerCycle is not null)
                 {

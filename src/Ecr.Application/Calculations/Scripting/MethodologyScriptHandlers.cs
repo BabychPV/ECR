@@ -32,8 +32,16 @@ public sealed class ScriptAnalyzer(ScriptSourceCompiler compiler, ScriptEnvironm
     /// <param name="methodology">Методологія-власник.</param>
     /// <param name="version">Версія (режим арифметики, дата для бібліотек).</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="shadowScripts">
+    /// Перенесення: бібліотеки з тіньовим скриптом теж годяться, а ще не збережені тексти версій беруться звідси;
+    /// <c>null</c> — звичайне авторство.
+    /// </param>
     public async Task<ScriptAnalysis> AnalyzeAsync(
-        string text, Methodology methodology, MethodologyVersion version, CancellationToken ct)
+        string text,
+        Methodology methodology,
+        MethodologyVersion version,
+        CancellationToken ct,
+        IReadOnlyDictionary<int, MethodologyScript>? shadowScripts = null)
     {
         ArgumentNullException.ThrowIfNull(text);
         ArgumentNullException.ThrowIfNull(methodology);
@@ -41,7 +49,9 @@ public sealed class ScriptAnalyzer(ScriptSourceCompiler compiler, ScriptEnvironm
 
         var onDate = version.EffectiveFrom ?? DateOnly.FromDateTime(clock.UtcNow);
         var compilation = await compiler
-            .CompileAsync(text, methodology.Code, version.NumericMode, methodology.Kind == MethodologyKind.Library, onDate, ct)
+            .CompileAsync(
+                text, methodology.Code, version.NumericMode, methodology.Kind == MethodologyKind.Library, onDate, ct,
+                shadowScripts)
             .ConfigureAwait(false);
 
         var diagnostics = new List<ScriptDiagnostic>(compilation.Diagnostics);

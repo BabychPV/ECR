@@ -1,6 +1,6 @@
 using Ecr.Domain.Enums;
 
-namespace Ecr.MethodologyScriptMigration.Conversion;
+namespace Ecr.Application.Calculations.Scripting.Migration;
 
 /// <summary>Формула версії (старий вираз у діалекті методологій).</summary>
 /// <param name="Code">Код формули.</param>
