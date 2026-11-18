@@ -72,11 +72,17 @@ interface Options {
   readonly state?: string;
   readonly permissions?: readonly string[];
   readonly rejectAll?: boolean;
+  /** ✎ L7c: діючі винятки року в картці (`reopenedPeriods`). */
+  readonly reopened?: readonly { readonly periodKey: number; readonly openUntil: string }[];
+  /** ✎ L7c: GET `/period-reopen` якоря повертає діючий виняток. */
+  readonly anchorActive?: boolean;
 }
 
 const requested: string[] = [];
 
-function mockFetch({ layout, state = 'Open', permissions = ['Document.View'], rejectAll = false }: Options): void {
+function mockFetch({
+  layout, state = 'Open', permissions = ['Document.View'], rejectAll = false, reopened, anchorActive = false,
+}: Options): void {
   requested.length = 0;
   vi.stubGlobal(
     'fetch',
@@ -98,7 +104,10 @@ function mockFetch({ layout, state = 'Open', permissions = ['Document.View'], re
         });
       }
       if (url.includes('/period-reopen')) {
-        return jsonResponse({ active: null, canOpen: false, defaultOpenUntil: '2099-12-31T00:00:00Z', denial: null, periodKey: Anchor });
+        const active = anchorActive
+          ? { openUntil: '2099-12-20T18:00:00Z', reason: 'L7c anchor', openedByUserId: 1, openedByName: 'tester' }
+          : null;
+        return jsonResponse({ active, canOpen: false, defaultOpenUntil: '2099-12-31T00:00:00Z', denial: null, periodKey: Anchor });
       }
       if (rejectAll && /\/api\/v1\/documents\/1(\?|\/tables\?)/.test(url)) return rejected();
 
@@ -132,6 +141,7 @@ function mockFetch({ layout, state = 'Open', permissions = ['Document.View'], re
         return jsonResponse({
           businessKey: 'DOC-0001', createdAt: '2099-01-01T00:00:00Z', id: 1, nameL10n: { values: {} }, projectId: 1,
           sheetCount: 1, sheetStates: { GEN: 'Draft' }, hasLateEdits: false, templateLayout: layout,
+          ...(reopened === undefined ? {} : { reopenedPeriods: reopened }),
         });
       }
 
@@ -385,6 +395,56 @@ describe('DocumentPage «рік» L7a: відкриття місяця для д
 
       await screen.findByText(/document\.lock\.periodClosed/, {}, { timeout: SlowEnvTimeout });
       expect(screen.queryByTestId('year-month-reopen')).toBeNull();
+    },
+    SlowEnvTimeout,
+  );
+});
+
+/**
+ * ✎ L7c (F13 AU до L7ab): банер «Reopened for this document until …» документа «рік» показує КОЖЕН відкритий місяць
+ * року з картки (`reopenedPeriods`), а не лише якір; банер якоря (GET `/period-reopen` січня) у «рік» не малюється.
+ * Мутації (локально): гілка `yearLayout` у DocumentPage → завжди `periodReopen.banner` — тест 1 червоний (немає
+ * переліку, є банер якоря); банер року без `periods.map` (лише перший) — тест 1 червоний.
+ */
+describe('DocumentPage «рік» L7c: банер відкритих місяців року', () => {
+  it(
+    'рік: усі відкриті місяці року з картки, банера якоря немає',
+    async () => {
+      show(`/documents/1?periodKey=${String(Anchor)}`, {
+        layout: 'YearWithMonthColumns', state: 'Closed', anchorActive: true,
+        reopened: [
+          { periodKey: 209903, openUntil: '2099-12-20T18:00:00Z' },
+          { periodKey: 209907, openUntil: '2099-12-21T18:00:00Z' },
+        ],
+      });
+
+      const banner = await screen.findByTestId('document-year-reopened', {}, { timeout: SlowEnvTimeout });
+      const months = [...banner.querySelectorAll('[data-year-reopened-month]')].map((el) => el.getAttribute('data-year-reopened-month'));
+      expect(months).toEqual(['209903', '209907']);
+      expect(screen.queryByTestId('document-period-reopened')).toBeNull();
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'рік без відкритих місяців: жодного банера відкриття',
+    async () => {
+      show(`/documents/1?periodKey=${String(Anchor)}`, { layout: 'YearWithMonthColumns', state: 'Closed', reopened: [] });
+
+      await screen.findByText(/document\.lock\.periodClosed/, {}, { timeout: SlowEnvTimeout });
+      expect(screen.queryByTestId('document-year-reopened')).toBeNull();
+      expect(screen.queryByTestId('document-period-reopened')).toBeNull();
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'копія на місяць: банер місяця, як було; перелік року не малюється',
+    async () => {
+      show(`/documents/1?periodKey=${String(Anchor)}`, { layout: 'PerMonthCopies', state: 'Closed', anchorActive: true });
+
+      expect(await screen.findByTestId('document-period-reopened', {}, { timeout: SlowEnvTimeout })).toBeTruthy();
+      expect(screen.queryByTestId('document-year-reopened')).toBeNull();
     },
     SlowEnvTimeout,
   );

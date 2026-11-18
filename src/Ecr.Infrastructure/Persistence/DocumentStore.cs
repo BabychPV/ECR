@@ -216,6 +216,17 @@ public sealed class DocumentStore(
             ? await StaleResultsYearCardAsync(documentId, document.ProjectId, viewKey / 100, ct).ConfigureAwait(false)
             : await StaleResultsDirectAsync([documentId], period, ct).ConfigureAwait(false);
 
+        // ✎ L7c (F13 AU до L7ab): картка документа «рік» несе діючі винятки «місяць відкрито для документа» за рік
+        // перегляду — банер сторінки показує КОЖЕН відкритий місяць року, а не лише якір. Той самий предикат, що в
+        // переліку (`ActiveReopens`); один вузький запит лише для річної розкладки, місячна картка — як і доти (`null`).
+        IReadOnlyList<DocumentReopenedPeriod>? reopened = null;
+        if (templateLayout == TemplateLayout.YearWithMonthColumns && period.Value is { } yearViewKey)
+        {
+            var year = yearViewKey / 100;
+            var all = await ReopenedPeriodsBatchAsync([documentId], new DocumentListFilter(null, null), ct).ConfigureAwait(false);
+            reopened = [.. (all.GetValueOrDefault(documentId) ?? []).Where(r => r.PeriodKey / 100 == year)];
+        }
+
         return new DocumentSummary(
             document.Id, document.ProjectId, document.BusinessKey, document.CreatedAt, sheetCount,
             ToStateMap(sheets), document.NameL10n,
@@ -234,6 +245,7 @@ public sealed class DocumentStore(
             ProjectIsReadOnly: document.ProjectReadOnly,
             PeriodKind: document.ProjectPeriodKind?.ToString(),
             TemplateLayout: templateLayout?.ToString(),
+            ReopenedPeriods: reopened,
             WorkflowMode: workflowMode?.ToString());
     }
 
