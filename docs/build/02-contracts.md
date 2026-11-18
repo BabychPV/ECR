@@ -6494,9 +6494,17 @@ public sealed record RowDto(
   дає рядки складу лише коли аркуш таблиці (оригінал) має `Approved` у періоді-власнику місяця (місячний проєкт —
   `yyyyMM`); інший місяць — без вводу, без `F_`, без нульового паритету, і довідник за рік документа не повертається.
   За `Any` — запиту станів немає, рядки ті самі, що до B80.
-- **Перекриття ключами.** `Calculations:Hse400CompositionFromDocument` і `Calculations:Hse400RecalculateLandDependents`,
-  задані явно (у т. ч. `appsettings.json`), діють як і доти; не задані — вирішують біти зв'язки (`ReadFromDocument`,
-  `RecalculateDependents`); зв'язки немає — вимкнено.
+- **Перекриття ключем.** `Calculations:Hse400CompositionFromDocument`, заданий явно (у т. ч. `appsettings.json`), діє як
+  і доти; не заданий — вирішує біт зв'язки `ReadFromDocument`; зв'язки немає — вимкнено. ✎ B179 L2 (P-0118-34): ключ
+  `Calculations:Hse400RecalculateLandDependents` прибрано (постачався `false` і вимикав біт `RecalculateDependents` —
+  корінь дефекту live); перерахунок залежних вимикає лише біт зв'язки.
+- ✎ **B179 L2 — автоматичні залежні.** Успіх `RecalculationJob` або `FormulaRecalculationJob` документа шаблону-джерела
+  зв'язки за `Any` (біт `RecalculateDependents`) ставить злиту `IRegistryImpactRecalculationJob` з ціллю
+  `source-change-b{binding}-y{year}-m{month}` (payload: `bindingId`, `year`, `month`, `hop`; старі форми розбираються);
+  споживачі — з графа залежностей (`IDependencyGraphProvider`, формули шаблонів і методології, що читають довідник),
+  документи × періоди за обсягом ребра (`Month` — період-власник місяця, `Year` — рік, `All` — усі відкриті), лише
+  `Open`/`Grace`; ланцюжок джерел — до 8 ланок; споживач у циклі з джерелом не ставиться. За `ApprovedOnly` — те саме
+  від Approve/Reopen/видалення джерела. `cfg.DocumentSourceBindingConsumer` не читається.
 - **`GET /api/v1/document-source-bindings`** → `DocumentSourceBindingDto[]` (`id`, `code`, `sourceTemplateCode`,
   `registryCode`, `sourceState` `any`|`approvedOnly`, `policy`, `readFromDocument`, `recalculateDependents`,
   `readFromDocumentEffective`, `readFromDocumentSource` `configuration`|`binding`, `consumerTemplateCodes`, `updatedAt`,
@@ -6509,13 +6517,13 @@ public sealed record RowDto(
   `ECR-REQ-0422` `sourceStateInvalid`; немає зв'язки — 404 `ECR-CALC-0404` `sourceBinding`. Справжня зміна: подія
   `DocumentSourceBindingChanged` у `aud.SecurityEvent` (`bindingId`, `code`, `oldState`, `newState`, `queuedYears`,
   автор) у тій самій транзакції і, коли читання з документа діє, злита задача `IRegistryImpactRecalculationJob` на
-  кожен рік джерела (`registry-impact-r{id}-y{year}`; затверджені аркуші Land не перераховуються, подані — з
+  кожен рік джерела (✎ B179 L2: `source-change-b{id}-y{year}`; затверджені аркуші Land не перераховуються, подані — з
   позначкою). Повтор того самого стану — `changed = false`, нічого не пише.
 - **`GET /api/v1/health/facts` → `calculations`** (додано): `hse400SourceState` (`any`|`approvedOnly`; `null` — зв'язки
   немає), `hse400ApprovedMonths` (затверджених місяців обраного документа поточного року; `null` — зв'язки чи документа
   немає), `hse400SourceWarning` (документ року є і зв'язка на `any` або на `approvedOnly` з незатвердженим місяцем, де є
   дані). `hse400CompositionSource` = `Binding`, коли ключ не задано, а значення дав біт зв'язки.
-- Порти: `IDocumentSourceBindingStore` (перелік, `UPDLOCK` зв'язки, обраний документ-джерело року з періодичністю проєкту й режимом погодження, роки джерела) і `IDocumentSourceFlagOverrides` (явні значення двох ключів або `null`).
+- Порти: `IDocumentSourceBindingStore` (перелік, `UPDLOCK` зв'язки, обраний документ-джерело року з періодичністю проєкту й режимом погодження, роки джерела) і `IDocumentSourceFlagOverrides` (явне значення ключа `Hse400CompositionFromDocument` або `null`; ✎ B179 L2 — лише одного).
 - Помилки — наявні коди (`ECR-CALC-0404/0409`, `ECR-REQ-0422`) з новими `messageKey`; §7 не змінюється.
 - ✎ B80 N2a — порт `ISourceApprovalChangeTrigger` (без нових ендпоінтів і полів): остаточне затвердження аркуша-джерела
   × періоду (`ApproveSheetHandler`), повернення з `Approved` (`ReopenDocumentHandler`) і видалення документа-джерела
