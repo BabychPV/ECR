@@ -120,8 +120,14 @@ public sealed class VersionMigrationFinishRaceTests(SqlServerFixture sql)
 
         for (var round = 0; round < Rounds; round++)
         {
-            // Над усіма наявними Id (остання прогалина обох індексів); унікально на прогін і раунд.
-            var baseId = 2_100_000_000 + Random.Shared.Next(0, 40_000_000);
+            // ✎ B172 (CI 44237587053, 1205): діапазон раунду — СПРАВДІ над усіма наявними ключами (остання прогалина обох
+            // індексів). Випадковий baseId у смузі 2.1e9…2.14e9 інколи лягав між рядками попередніх раундів (і тесту
+            // «повтор пари», що пише в ту саму смугу); тоді писарі брали RangeS-U на різних наявних ключах і сходились
+            // навхрест — це вже не сценарій тесту (одночасні переноси пишуть нові Id, які завжди найбільші), а 6b у
+            // продукті все одно серіалізує глобальний applock кроку 6 (B135). Рядки раунду прибираються в кінці, тож
+            // межа не росте від прогону до прогону.
+            var baseId = Math.Max(2_100_000_000, await MaxColumnRenameIdAsync() + 2_000);
+            Assert.True(baseId < int.MaxValue - 2_000, $"Немає місця над наявними ключами cfg.ColumnRename (база {baseId}).");
             var shared = (From: baseId + 1_000, To: baseId + 1_001);
             var sets = Enumerable.Range(0, Writers)
                 .Select(w => Enumerable.Range(0, PairsPerWriter)
@@ -153,8 +159,13 @@ public sealed class VersionMigrationFinishRaceTests(SqlServerFixture sql)
             var expected = sets.SelectMany(p => p).Distinct().ToList();
             var filter = string.Join(" OR ", expected.Select(p => $"(FromColumnDefId = {p.From} AND ToColumnDefId = {p.To})"));
             Assert.Equal(expected.Count, await CountAsync($"SELECT COUNT(*) FROM cfg.ColumnRename WHERE {filter}"));
+            await CountAsync($"DELETE cfg.ColumnRename WHERE {filter}; SELECT @@ROWCOUNT;");
         }
     }
+
+    /// <summary>Найбільший Id колонки в <c>cfg.ColumnRename</c> (з обох кінців пари); 0 — таблиця порожня.</summary>
+    private Task<int> MaxColumnRenameIdAsync()
+        => CountAsync("SELECT ISNULL(MAX(v), 0) FROM (SELECT MAX(FromColumnDefId) FROM cfg.ColumnRename UNION ALL SELECT MAX(ToColumnDefId) FROM cfg.ColumnRename) m(v)");
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
