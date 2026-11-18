@@ -1278,6 +1278,10 @@ public sealed partial class RecalculationJob(
                 g => g.Key,
                 g => g.SelectMany(i => methodologiesByTable.GetValueOrDefault(i.TableDefId) ?? []).ToHashSet());
 
+        // ✎ MS (план §13.1, §13.9): методології-скрипти, що ЧИТАЮТЬ таблицю активного екземпляра, і всі, хто читає
+        // результати перерахованих, — теж перераховуються (зайвий перерахунок безпечний, пропущений — ні).
+        await ExtendTouchedWithScriptReadersAsync(instances, IsActive, touchedByPeriod, ct).ConfigureAwait(false);
+
         var carryByPeriod = new Dictionary<int, IReadOnlyCollection<int>>();
         var partialByPeriod = new Dictionary<int, IReadOnlySet<long>>();
         foreach (var group in instances.GroupBy(i => i.PeriodKeyValue))
@@ -1342,6 +1346,79 @@ public sealed partial class RecalculationJob(
                 g => (IReadOnlyList<int>)[.. g.Select(i => i.SheetDefId).Distinct().Order()]);
 
         return new BindingPlan(byPeriod, carryByPeriod, recomputedOnSubmitted, activeSheets, partialByPeriod);
+    }
+
+    /// <summary>
+    /// Додає до «зачеплених» методологій періоду (а) ті, чиї опубліковані версії-скрипти читають код таблиці будь-якого
+    /// активного екземпляра цього періоду (<c>calc.MethodologyReadTable</c>), і (б) транзитивно всіх, хто читає
+    /// результати вже зачеплених (<c>calc.MethodologyDependency</c>).
+    /// </summary>
+    /// <param name="instances">Екземпляри таблиць документа в скоупі.</param>
+    /// <param name="isActive">Чи екземпляр перераховується цим прогоном.</param>
+    /// <param name="touchedByPeriod">Зачеплені методології за періодами; доповнюється на місці.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Формульний документ платить двома дрібними читаннями на прогін (коди таблиць, читачі) — ребер і читачів
+    /// там немає, і множини лишаються без змін. Читачі, прив'язок яких у документі нема, у перелік прив'язок не
+    /// потрапляють: його складають прив'язки, а не цей набір.
+    /// </remarks>
+    private async Task ExtendTouchedWithScriptReadersAsync(
+        IReadOnlyList<InstanceRow> instances,
+        Func<InstanceRow, bool> isActive,
+        Dictionary<int, HashSet<int>> touchedByPeriod,
+        CancellationToken ct)
+    {
+        var active = instances.Where(isActive).ToList();
+        if (active.Count == 0 || touchedByPeriod.Count == 0)
+        {
+            return;
+        }
+
+        var defIds = active.Select(i => i.TableDefId).Distinct().ToList();
+        var codeById = await db.TableDefs
+            .AsNoTracking()
+            .Where(t => defIds.Contains(t.Id))
+            .OrderBy(t => t.Id)
+            .Select(t => new { t.Id, t.Code })
+            .Take(MaxBindings)
+            .ToDictionaryAsync(t => t.Id, t => t.Code, ct)
+            .ConfigureAwait(false);
+
+        var store = new ScriptRuntimeStore(db);
+        var readers = await store
+            .GetReadersOfTablesAsync([.. codeById.Values.Distinct(StringComparer.OrdinalIgnoreCase)], ct)
+            .ConfigureAwait(false);
+        var edges = await store.GetDependencyEdgesAsync(ct).ConfigureAwait(false);
+        if (readers.Count == 0 && edges.Count == 0)
+        {
+            return;
+        }
+
+        var readersOfSource = edges.ToLookup(e => e.ToMethodologyId, e => e.FromMethodologyId);
+        foreach (var (period, touched) in touchedByPeriod)
+        {
+            var codes = active
+                .Where(i => i.PeriodKeyValue == period)
+                .Select(i => codeById.GetValueOrDefault(i.TableDefId))
+                .OfType<string>()
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var reader in readers.Where(r => codes.Contains(r.TableCode)))
+            {
+                touched.Add(reader.MethodologyId);
+            }
+
+            var frontier = new Queue<int>(touched);
+            while (frontier.TryDequeue(out var source))
+            {
+                foreach (var reader in readersOfSource[source])
+                {
+                    if (touched.Add(reader))
+                    {
+                        frontier.Enqueue(reader);
+                    }
+                }
+            }
+        }
     }
 
     /// <summary>Прив'язки методологій за періодами, що переносити з попереднього прогону, і лічильник для журналу.</summary>

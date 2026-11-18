@@ -30,6 +30,7 @@ public sealed class ScriptRuntimeStore(EcrDbContext db) : IScriptRuntimeStore
                 from v in db.TemplateVersions.AsNoTracking()
                 join t in db.Templates.AsNoTracking() on v.TemplateId equals t.Id
                 where ids.Contains(v.Id)
+                orderby v.Id
                 select new { v.Id, t.Code })
             .Take(Max)
             .ToListAsync(ct)
@@ -80,6 +81,8 @@ public sealed class ScriptRuntimeStore(EcrDbContext db) : IScriptRuntimeStore
                       && (v.Status == TemplateVersionStatus.Published || v.Status == TemplateVersionStatus.Deprecated)
                 select new { r.TableCode, v.MethodologyId })
             .Distinct()
+            .OrderBy(r => r.TableCode)
+            .ThenBy(r => r.MethodologyId)
             .Take(Max)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -92,6 +95,8 @@ public sealed class ScriptRuntimeStore(EcrDbContext db) : IScriptRuntimeStore
         => await db.MethodologyDependencies
             .AsNoTracking()
             .Where(d => d.FromMethodologyId != d.ToMethodologyId)
+            .OrderBy(d => d.FromMethodologyId)
+            .ThenBy(d => d.ToMethodologyId)
             .Select(d => new MethodologyEdge(d.FromMethodologyId, d.ToMethodologyId))
             .Take(Max)
             .ToListAsync(ct)
@@ -146,6 +151,7 @@ public sealed class ScriptRuntimeStore(EcrDbContext db) : IScriptRuntimeStore
                     .Where(d => current.Contains(d.FromMethodologyId))
                     .Select(d => d.ToMethodologyId)
                     .Distinct()
+                    .OrderBy(id => id)
                     .Take(Max)
                     .ToListAsync(ct)
                     .ConfigureAwait(false)
@@ -154,6 +160,7 @@ public sealed class ScriptRuntimeStore(EcrDbContext db) : IScriptRuntimeStore
                     .Where(d => current.Contains(d.ToMethodologyId))
                     .Select(d => d.FromMethodologyId)
                     .Distinct()
+                    .OrderBy(id => id)
                     .Take(Max)
                     .ToListAsync(ct)
                     .ConfigureAwait(false);
