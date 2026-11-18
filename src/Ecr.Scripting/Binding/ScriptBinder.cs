@@ -43,6 +43,12 @@ internal sealed class ScriptBinder
     private readonly List<VisibleInfo> visibles = [];
     private readonly List<string> substances = [];
     private readonly List<RowFieldBuilder> rowFields = [];
+    private readonly Dictionary<string, RowFieldBuilder> rowFieldIndex = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> rowTableKeys = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> registryCodeSet = new(StringComparer.Ordinal);
+    private readonly HashSet<string> matchColumnSet = new(StringComparer.Ordinal);
+    private readonly HashSet<(string, string)> registryEntrySet = [];
+    private readonly HashSet<string> visibleCodes = new(StringComparer.Ordinal);
     private readonly List<string> matchColumns = [];
     private readonly List<RegistryEntryRef> registryEntries = [];
     private readonly List<string> registryCodes = [];
@@ -76,6 +82,15 @@ internal sealed class ScriptBinder
         public Scope? Parent { get; } = parent;
 
         public Dictionary<string, Sym> Names { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>Те саме без урахування регістру: перевірка «ім'я вже видиме» — O(1), а не обхід усіх імен.</summary>
+        public HashSet<string> FoldedNames { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public void Declare(string name, Sym kind)
+        {
+            Names[name] = kind;
+            FoldedNames.Add(name);
+        }
     }
 
     private sealed class OutputRecord(OutputInfo info, List<(int, int)> path, bool topLevel)
@@ -119,7 +134,12 @@ internal sealed class ScriptBinder
     // ───── допоміжне ─────
 
     private void Report(string code, ScriptSpan span, string message, params (string, string)[] pairs)
-        => diagnostics.Add(ScriptDiagnostic.At(code, span, message, pairs));
+    {
+        if (diagnostics.Count < ScriptDiagnostic.MaxPerCompilation)
+        {
+            diagnostics.Add(ScriptDiagnostic.At(code, span, message, pairs));
+        }
+    }
 
     private static LiteralNode Null() => new LiteralNode(null, ExpressionValueType.Null);
 
@@ -138,7 +158,7 @@ internal sealed class ScriptBinder
 
     private void AddRegistryCode(string code)
     {
-        if (!registryCodes.Contains(code, StringComparer.Ordinal))
+        if (registryCodeSet.Add(code))
         {
             registryCodes.Add(code);
         }
@@ -161,7 +181,7 @@ internal sealed class ScriptBinder
     {
         for (var s = scope; s is not null; s = s.Parent)
         {
-            if (s.Names.Keys.Any(k => string.Equals(k, name, StringComparison.OrdinalIgnoreCase)))
+            if (s.FoldedNames.Contains(name))
             {
                 return true;
             }
@@ -227,7 +247,7 @@ internal sealed class ScriptBinder
         }
 
         // Ім'я видиме далі як змінна верхнього рівня; значення бере рушій у змінної імпортера (§3.8).
-        scope.Names[pd.Name] = Sym.Var;
+        scope.Declare(pd.Name, Sym.Var);
         paramNames.Add(pd.Name);
     }
 
@@ -475,8 +495,7 @@ internal sealed class ScriptBinder
         foreach (var table in r.Tables)
         {
             var key = table.ToString();
-            var seen = rows.SelectMany(c => c.Tables).Concat(r.Tables.TakeWhile(t => !ReferenceEquals(t, table)));
-            if (seen.Any(t => string.Equals(t.ToString(), key, StringComparison.OrdinalIgnoreCase)))
+            if (!rowTableKeys.Add(key))
             {
                 Report(ScriptDiagnosticCodes.DuplicateTable, table.Span,
                     $"Table '{key}' is already used in another 'rows' clause.", ("table", key));
@@ -531,7 +550,7 @@ internal sealed class ScriptBinder
 
     private void AddMatchColumn(string column)
     {
-        if (!matchColumns.Contains(column, StringComparer.Ordinal))
+        if (matchColumnSet.Add(column))
         {
             matchColumns.Add(column);
         }
@@ -549,7 +568,7 @@ internal sealed class ScriptBinder
     {
         needsRegistries = true;
         AddRegistryCode(registry);
-        if (!registryEntries.Any(e => e.RegistryCode == registry && e.EntryCode == code))
+        if (registryEntrySet.Add((registry, code)))
         {
             registryEntries.Add(new RegistryEntryRef(registry, code) { Span = span });
         }
@@ -577,7 +596,7 @@ internal sealed class ScriptBinder
             }
 
             names.Add(p.Name);
-            scope.Names[p.Name] = Sym.Param;
+            scope.Declare(p.Name, Sym.Param);
         }
 
         var body = Lower(f.Body);
@@ -594,36 +613,10 @@ internal sealed class ScriptBinder
 
     private void CheckRecursion()
     {
+        var recursive = FindRecursiveFunctions();
         foreach (var (name, syntax) in functionSyntax)
         {
-            var seen = new HashSet<string>(StringComparer.Ordinal);
-            var stack = new Stack<string>();
-            stack.Push(name);
-            var cyclic = false;
-            while (stack.Count > 0 && !cyclic)
-            {
-                var current = stack.Pop();
-                if (!callGraph.TryGetValue(current, out var targets))
-                {
-                    continue;
-                }
-
-                foreach (var target in targets)
-                {
-                    if (target == name)
-                    {
-                        cyclic = true;
-                        break;
-                    }
-
-                    if (seen.Add(target))
-                    {
-                        stack.Push(target);
-                    }
-                }
-            }
-
-            if (cyclic)
+            if (recursive.Contains(name))
             {
                 Report(ScriptDiagnosticCodes.RecursiveFunction, syntax.NameSpan,
                     $"Function '{name}' calls itself (directly or through other functions); recursion is not allowed.",
@@ -631,6 +624,96 @@ internal sealed class ScriptBinder
             }
         }
     }
+
+    /// <summary>
+    /// Функції, що лежать на циклі виклику (пряма або взаємна рекурсія): компоненти сильної зв'язності розміру понад 1
+    /// і функції з викликом самої себе. Ітеративний Тар'ян, O(функції + виклики): попередній обхід «від кожної функції»
+    /// був квадратичним (8 000 функцій у ланцюжку — секунди).
+    /// </summary>
+    private HashSet<string> FindRecursiveFunctions()
+    {
+        var recursive = new HashSet<string>(StringComparer.Ordinal);
+        var order = new Dictionary<string, int>(StringComparer.Ordinal);
+        var low = new Dictionary<string, int>(StringComparer.Ordinal);
+        var onStack = new HashSet<string>(StringComparer.Ordinal);
+        var component = new Stack<string>();
+        var counter = 0;
+
+        foreach (var root in functionSyntax.Keys)
+        {
+            if (order.ContainsKey(root))
+            {
+                continue;
+            }
+
+            var frames = new Stack<(string Node, IEnumerator<string> Targets)>();
+            order[root] = low[root] = counter++;
+            component.Push(root);
+            onStack.Add(root);
+            frames.Push((root, TargetsOf(root)));
+
+            while (frames.Count > 0)
+            {
+                var (node, targets) = frames.Peek();
+                if (targets.MoveNext())
+                {
+                    var target = targets.Current;
+                    if (target == node)
+                    {
+                        recursive.Add(node);
+                    }
+
+                    if (!order.TryGetValue(target, out var targetOrder))
+                    {
+                        order[target] = low[target] = counter++;
+                        component.Push(target);
+                        onStack.Add(target);
+                        frames.Push((target, TargetsOf(target)));
+                    }
+                    else if (onStack.Contains(target))
+                    {
+                        low[node] = Math.Min(low[node], targetOrder);
+                    }
+
+                    continue;
+                }
+
+                frames.Pop();
+                if (frames.Count > 0)
+                {
+                    var parent = frames.Peek().Node;
+                    low[parent] = Math.Min(low[parent], low[node]);
+                }
+
+                if (low[node] != order[node])
+                {
+                    continue;
+                }
+
+                var members = new List<string>();
+                string member;
+                do
+                {
+                    member = component.Pop();
+                    onStack.Remove(member);
+                    members.Add(member);
+                }
+                while (member != node);
+
+                if (members.Count > 1)
+                {
+                    recursive.UnionWith(members);
+                }
+            }
+        }
+
+        return recursive;
+    }
+
+    private IEnumerator<string> TargetsOf(string function)
+        => callGraph.TryGetValue(function, out var targets)
+            ? targets.Where(functionSyntax.ContainsKey).GetEnumerator()
+            : Enumerable.Empty<string>().GetEnumerator();
 
     // ───── оператори ─────
 
@@ -704,13 +787,13 @@ internal sealed class ScriptBinder
                 $"'visible var {v.Name}' needs a unit: 'visible var {v.Name} : unit = …'.", ("name", v.Name));
         }
 
-        scope.Names[v.Name] = Sym.Var;
+        scope.Declare(v.Name, Sym.Var);
         if (topLevel)
         {
             members.Add(new MemberInfo(v.Name, MemberKind.Var, v.NameSpan.Line, v.Unit?.Code));
         }
 
-        if (v.IsVisible && v.Unit is { } vu && !visibles.Any(x => x.Code == v.Name))
+        if (v.IsVisible && v.Unit is { } vu && visibleCodes.Add(v.Name))
         {
             visibles.Add(new VisibleInfo(v.Name, vu.Code));
         }
@@ -753,7 +836,7 @@ internal sealed class ScriptBinder
         }
 
         RegisterOutput(o, topLevel);
-        scope.Names[o.Code] = Sym.Output;
+        scope.Declare(o.Code, Sym.Output);
         return new OutputStatement(o.Code, o.Unit.Code, o.PerVar, init, Slice(o.Init.Span), o.CodeSpan.Line);
     }
 
@@ -855,7 +938,7 @@ internal sealed class ScriptBinder
 
         var parent = scope;
         scope = new Scope(parent);
-        scope.Names[f.VarName] = Sym.Substance;
+        scope.Declare(f.VarName, Sym.Substance);
         var savedVar = foreachVar;
         foreachVar = f.VarName;
         var outerSkipAllowed = skipAllowed;
@@ -868,7 +951,32 @@ internal sealed class ScriptBinder
 
     // ───── вирази ─────
 
+    /// <summary>Виняток переповнення глибини дерева виразу: ловить <see cref="ScriptCompiler"/> і дає <c>tooDeep</c>.</summary>
+    internal sealed class ExpressionTooDeepException : Exception;
+
+    private int lowerDepth;
+
     private AstNode Lower(Expr e)
+    {
+        // Лівий ланцюг «1+1+…+1» парсер будує циклом, тож межа вкладеності парсера його не бачить, а глибину стека
+        // тоді визначав би лише EnsureSufficientExecutionStack, тобто розмір стека потока: той самий текст то
+        // компілювався б, то ні. Детермінована межа глибини дерева стоїть перед ним.
+        if (++lowerDepth > ScriptCompiler.MaxExpressionDepth)
+        {
+            throw new ExpressionTooDeepException();
+        }
+
+        try
+        {
+            return LowerCore(e);
+        }
+        finally
+        {
+            lowerDepth--;
+        }
+    }
+
+    private AstNode LowerCore(Expr e)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
         switch (e)
@@ -919,11 +1027,11 @@ internal sealed class ScriptBinder
 
     private void AddRowField(string name, bool optional, bool monthly, ScriptSpan span)
     {
-        var field = rowFields.Find(f => string.Equals(f.Name, name, StringComparison.OrdinalIgnoreCase));
-        if (field is null)
+        if (!rowFieldIndex.TryGetValue(name, out var field))
         {
             field = new RowFieldBuilder(name, span);
             rowFields.Add(field);
+            rowFieldIndex[name] = field;
         }
 
         field.AnyRequired |= !optional;

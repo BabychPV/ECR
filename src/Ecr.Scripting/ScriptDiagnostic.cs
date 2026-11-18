@@ -27,14 +27,61 @@ public sealed record ScriptDiagnostic(
     /// <summary>Ключ каталогу перекладів: <c>script.&lt;code&gt;</c>.</summary>
     public string MessageKey => "script." + Code;
 
+    /// <summary>Найбільша кількість діагностик однієї компіляції: далі лексер, парсер і binder мовчать (текст-«сміття» не мусить давати відповідь на мегабайти).</summary>
+    public const int MaxPerCompilation = 200;
+
+    /// <summary>Найбільша довжина підстановки діагностики, символів (довші ідентифікатори й рядки скорочуються з «…»).</summary>
+    public const int MaxTextChars = 200;
+
+    /// <summary>
+    /// Робить рядок придатним для JSON і інтерфейсу: непарні сурогати замінюються на U+FFFD
+    /// (серіалізатор JSON відмовляється кодувати їх і валить відповідь), довгий текст скорочується.
+    /// </summary>
+    /// <param name="value">Рядок.</param>
+    /// <param name="max">Найбільша довжина.</param>
+    public static string Sanitize(string value, int max)
+    {
+        var text = value;
+        if (text.Length > max)
+        {
+            var cut = max;
+            if (char.IsHighSurrogate(text[cut - 1]))
+            {
+                cut--;
+            }
+
+            text = string.Concat(text.AsSpan(0, cut), "…");
+        }
+
+        System.Text.StringBuilder? builder = null;
+        for (var i = 0; i < text.Length; i++)
+        {
+            var c = text[i];
+            var valid = !char.IsSurrogate(c)
+                        || (char.IsHighSurrogate(c) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]))
+                        || (char.IsLowSurrogate(c) && i > 0 && char.IsHighSurrogate(text[i - 1]));
+            if (!valid)
+            {
+                builder ??= new System.Text.StringBuilder(text, 0, i, text.Length);
+                builder.Append('�');
+            }
+            else
+            {
+                builder?.Append(c);
+            }
+        }
+
+        return builder?.ToString() ?? text;
+    }
+
     /// <summary>Створює діагностику з позиції й набору підстановок.</summary>
     /// <param name="code">Код.</param>
     /// <param name="span">Позиція.</param>
     /// <param name="message">Англійський текст.</param>
     /// <param name="pairs">Пари «ім'я, значення» підстановок.</param>
     public static ScriptDiagnostic At(string code, ScriptSpan span, string message, params (string Key, string Value)[] pairs)
-        => new(code, span.Line, span.Column, span.Length, message,
-            pairs.ToDictionary(p => p.Key, p => p.Value, StringComparer.Ordinal));
+        => new(code, span.Line, span.Column, span.Length, Sanitize(message, MaxTextChars * 3),
+            pairs.ToDictionary(p => p.Key, p => Sanitize(p.Value, MaxTextChars), StringComparer.Ordinal));
 }
 
 /// <summary>Коди діагностик (METHODOLOGY-SCRIPT-PLAN §3.9, §5.2, §13.7).</summary>

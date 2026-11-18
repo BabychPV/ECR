@@ -128,7 +128,12 @@ public static class ScriptLexer
         }
 
         private void Report(string code, int start, int length, string message, params (string, string)[] pairs)
-            => diagnostics.Add(ScriptDiagnostic.At(code, Span(start, length), message, pairs));
+        {
+            if (diagnostics.Count < ScriptDiagnostic.MaxPerCompilation)
+            {
+                diagnostics.Add(ScriptDiagnostic.At(code, Span(start, length), message, pairs));
+            }
+        }
 
         private void BlockComment()
         {
