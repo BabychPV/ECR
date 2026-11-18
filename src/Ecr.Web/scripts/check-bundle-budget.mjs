@@ -144,7 +144,7 @@ function nameOf(key) {
   const source = manifest[key].src;
   if (source !== undefined) return path.basename(source).replace(/\.tsx?$/, '');
 
-  return path.basename(key).replace(/^_/, '').replace(/-[A-Za-z0-9_-]{8}\.js$/, '');
+  return path.basename(key).replace(/^_/, '').replace(/-[A-Za-z0-9_-]{7,8}\.js$/, '');
 }
 
 const rows = routes
