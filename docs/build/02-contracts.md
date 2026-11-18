@@ -4131,6 +4131,27 @@ public interface IScriptPreviewRunner
 }
 ```
 
+#### Перенесення методологій на скрипт (MS 8.5) і допоміжні читання
+
+Порти: `IVersionSourceReader` (`LoadAsync(versionId)` → `LoadedVersion`: старий вміст версії в моделі `VersionSource` — з нього рахується відбиток джерела) і `IScriptMigrationStore` (`GetImporterVersionsAsync(libraryMethodologyId)` — версії, що імпортують бібліотеку, для перевірки групи перемикання).
+
+- `ScriptPreviewRow` має `inputs: [{ name, value, text, unitId }]` — входи вибраного рядка (поля, які читає скрипт,
+  місячні — розв'язаними іменами аргументів) для золотого тесту «з рядка»; для решти рядків порожньо.
+- `GET /methodologies/script/tables?codes=` → `ScriptTableDto[]`: `{ requested, templateCode, tableCode, columns:
+  [{ code, dataType, isMonthColumn, monthNumber, unitCode }], monthAliases[] }` (живі таблиці; код без живої таблиці
+  у відповіді відсутній; `422 scriptTablesCodesInvalid` — кодів немає чи понад 50).
+- `POST /methodologies/script-migration/apply?dryRun=` — тіло: пакет `pack` `{ format, formatVersion, entries:
+  [{ methodologyCode, version, effectiveFrom, text, sourceFingerprint }] }`; відповідь `{ dryRun, applied, refused,
+  entries: [{ methodologyCode, version, versionId, status: applied|wouldApply|refused, reason, message, details[] }] }`.
+  Відбиток джерела рахується з БАЗИ тим самим `Fingerprint`, що й в інструменті; текст мусить компілюватися без
+  діагностик (бібліотеки з тіньовим скриптом із цього ж пакета годяться, порядок не важить). Рушій не змінюється.
+- `POST /methodologies/script-migration/switch` — тіло `{ versionIds[], engine: Script|Formulas, reason }`; відповідь
+  `{ engine, versions: [{ versionId, methodologyCode, version }] }`. Одна транзакція; на `Script` — текст без
+  діагностик, склад зі скрипта (виходи/речовини/імпорти) збігається з наявним (`422 switchChecksFailed`, `problems[]`),
+  бібліотека й усі імпортери в одній групі (`422 switchGroupIncomplete`); пише таблиці читання й залежності. Версія
+  має бути опублікованою чи виведеною з обігу (`409 scriptSwitchNotPublished`). Домен: `MethodologyVersion.SwitchEngineForMigration`.
+  Подія журналу публікацій на кожну версію (`ChangeReason` = причина).
+
 #### `IUnitCatalog`
 
 Довідник одиниць uom.* у формі, потрібній перевірці публікації.
@@ -4976,6 +4997,9 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/methodologies/{id}/versions/{vid}/script/validate` | `Calculation.View` | 7 |
 | `POST` | `/api/v1/methodologies/{id}/versions/{vid}/script/preview` | `Calculation.View` (+ доступ до документа) | 7 |
 | `POST` | `/api/v1/methodologies/{id}/versions/{vid}/script/format-const` | `Calculation.View` | 7 |
+| `GET` | `/api/v1/methodologies/script/tables?codes=T1,Шаблон.T2` | `Calculation.View` | 7 |
+| `POST` | `/api/v1/methodologies/script-migration/apply?dryRun=` | `Calculation.Publish` | 7 |
+| `POST` | `/api/v1/methodologies/script-migration/switch` | `Calculation.Publish` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/bindings` | `Calculation.View` | 7 |
 | `PUT` | `/api/v1/methodologies/{id}/bindings/{columnDefId}/{outputCode}` | `Calculation.EditRule` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/publications` | `Calculation.View` | 7 |

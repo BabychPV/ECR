@@ -36,18 +36,31 @@ public sealed class ScriptPreviewRunner(
             ?? throw new DomainException(
                 "ECR-CALC-0422",
                 "Модуль скриптів не зареєстровано.",
-                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-CALC-0422.noModule" });
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.noModule",
+                    ["code"] = "script",
+                    ["level"] = "Configuration",
+                });
 
         var version = await drafts.FindVersionAsync(request.MethodologyVersionId, ct).ConfigureAwait(false)
             ?? throw new DomainException(
                 "ECR-CALC-0404",
                 $"Версії методології {request.MethodologyVersionId} не існує.",
-                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-CALC-0404.version" });
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0404.version",
+                    ["methodologyVersionId"] = request.MethodologyVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         var methodology = await drafts.FindAsync(version.MethodologyId, ct).ConfigureAwait(false)
             ?? throw new DomainException(
                 "ECR-CALC-0404",
                 $"Методології {version.MethodologyId} не існує.",
-                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-CALC-0404.methodology" });
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0404.methodology",
+                    ["methodologyId"] = version.MethodologyId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
 
         var descriptor = new MethodologyDescriptor(
             methodology.Id,
@@ -147,13 +160,35 @@ public sealed class ScriptPreviewRunner(
             .GroupBy(i => i.SourceRowKey ?? string.Empty, StringComparer.Ordinal)
             .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
 
+        // Поля, які читає скрипт (і бібліотеки); місячні — за префіксом `<ім'я>_M`.
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var monthly = new List<string>();
+        foreach (var script in ScriptRuntime.AllScripts(((ScriptRuntime)prepared.ScriptRuntime!).Program))
+        {
+            foreach (var field in script.RowFields)
+            {
+                names.Add(field.Name);
+                if (field.IsMonthly)
+                {
+                    monthly.Add(field.Name + "_M");
+                }
+            }
+        }
+
+        IReadOnlyList<ScriptPreviewInput> InputsOf(CalculationInput input)
+            => [.. input.Arguments
+                .Where(a => names.Contains(a.ArgumentCode)
+                            || monthly.Any(p => a.ArgumentCode.StartsWith(p, StringComparison.OrdinalIgnoreCase)))
+                .DistinctBy(a => a.ArgumentCode, StringComparer.OrdinalIgnoreCase)
+                .Select(a => new ScriptPreviewInput(a.ArgumentCode, a.Value, a.ValueString, a.UnitId))];
+
         var result = new List<ScriptPreviewRow>();
         foreach (var key in runKeys)
         {
             var position = number.GetValueOrDefault(key);
             if (!byKey.TryGetValue(key, out var input))
             {
-                result.Add(new ScriptPreviewRow(key, position, "selected", null, null, []));
+                result.Add(new ScriptPreviewRow(key, position, "selected", null, null, [], []));
                 continue;
             }
 
@@ -177,18 +212,18 @@ public sealed class ScriptPreviewRunner(
                     issue = "stepError";
                 }
 
-                result.Add(new ScriptPreviewRow(key, position, "selected", issue, missing, mapped));
+                result.Add(new ScriptPreviewRow(key, position, "selected", issue, missing, mapped, InputsOf(input)));
             }
             catch (DomainException error) when (GenericCalculationModule.IsCategoryRuleRowFailure(error))
             {
-                result.Add(new ScriptPreviewRow(key, position, "rejected", "rejected", null, []));
+                result.Add(new ScriptPreviewRow(key, position, "rejected", "rejected", null, [], InputsOf(input)));
             }
         }
 
         foreach (var key in rest)
         {
             result.Add(new ScriptPreviewRow(
-                key, number.GetValueOrDefault(key), inactive.Contains(key) ? "inactive" : "notSelected", null, null, []));
+                key, number.GetValueOrDefault(key), inactive.Contains(key) ? "inactive" : "notSelected", null, null, [], []));
         }
 
         return new ScriptPreviewTable(

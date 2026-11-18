@@ -1418,6 +1418,10 @@ public sealed partial class EndpointCoverageTests
         "POST /api/v1/methodologies/{p}/versions/{p}/script/validate",
         "POST /api/v1/methodologies/{p}/versions/{p}/script/preview",
         "POST /api/v1/methodologies/{p}/versions/{p}/script/format-const",
+        "GET /api/v1/methodologies/script/tables",
+        // MS 8.5: перенесення на проді викликає оператор у вікні (curl/скрипт), екрана немає й не планується.
+        "POST /api/v1/methodologies/script-migration/apply",
+        "POST /api/v1/methodologies/script-migration/switch",
 
         // D-425 (Land «лише Running»): прапорець фільтра активності рядків ставить скрипт розгортання шаблону
         // (`tools/land/Build-LandTemplate.ps1`, етап RowFilter) за переліком `tools/land/land-row-filter.json`;

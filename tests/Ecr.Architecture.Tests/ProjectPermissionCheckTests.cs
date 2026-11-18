@@ -156,6 +156,7 @@ public sealed class ProjectPermissionCheckTests
                 "Ecr.Application.Calculations.RuleCoverageHandler::HandleAsync",
                 "Ecr.Application.Calculations.Scripting.FormatScriptConstHandler::HandleAsync",
                 "Ecr.Application.Calculations.Scripting.GetMethodologyScriptHandler::HandleAsync",
+                "Ecr.Application.Calculations.Scripting.GetScriptTablesHandler::HandleAsync",
                 "Ecr.Application.Calculations.Scripting.ValidateMethodologyScriptHandler::HandleAsync",
                 "Ecr.Application.Calculations.SimulateMethodologyHandler::HandleAsync",
                 "Ecr.Application.Expressions.GetExpressionMetadataHandler::HandleAsync",

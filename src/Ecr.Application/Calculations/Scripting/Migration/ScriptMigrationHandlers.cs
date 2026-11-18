@@ -129,7 +129,7 @@ public sealed class ApplyScriptPackageHandler(
             foreach (var index in pending.ToList())
             {
                 var outcome = await EvaluateAsync(entries[index], overlay, ct).ConfigureAwait(false);
-                results[index] = outcome.Result;
+                results[index] = outcome.Entry;
                 if (outcome.Retry)
                 {
                     continue;
@@ -189,7 +189,7 @@ public sealed class ApplyScriptPackageHandler(
     }
 
     private sealed record Outcome(
-        ScriptMigrationEntryResultDto Result,
+        ScriptMigrationEntryResultDto Entry,
         bool Retry = false,
         MethodologyVersion? Version = null,
         string? Fingerprint = null,

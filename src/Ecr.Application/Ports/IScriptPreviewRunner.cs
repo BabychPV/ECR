@@ -54,13 +54,25 @@ public sealed record ScriptPreviewTable(
 /// <param name="Issue"><c>missingInputs</c>, <c>stepError</c> або <c>rejected</c>; <c>null</c> — без проблем.</param>
 /// <param name="Missing">Обов'язкові поля, яких бракує (для <c>missingInputs</c>).</param>
 /// <param name="Values">Значення величин; для <c>notSelected</c>/<c>inactive</c> — порожньо.</param>
+/// <param name="Inputs">
+/// Входи вибраного рядка — поля, які читає скрипт (разом із місячними як розв'язані імена аргументів): з них клієнт
+/// складає золотий тест (<c>arguments[{argumentCode, value, valueString, unitId}]</c>). Для решти рядків — порожньо.
+/// </param>
 public sealed record ScriptPreviewRow(
     string RowKey,
     int RowNumber,
     string State,
     string? Issue,
     IReadOnlyList<string>? Missing,
-    IReadOnlyList<ScriptPreviewValue> Values);
+    IReadOnlyList<ScriptPreviewValue> Values,
+    IReadOnlyList<ScriptPreviewInput>? Inputs = null);
+
+/// <summary>Один вхід рядка в перегляді.</summary>
+/// <param name="Name">Ім'я аргументу (код колонки).</param>
+/// <param name="Value">Числове значення; <c>null</c> — немає.</param>
+/// <param name="Text">Текстове значення; <c>null</c> — немає.</param>
+/// <param name="UnitId">Одиниця значення; <c>null</c> — безрозмірне.</param>
+public sealed record ScriptPreviewInput(string Name, decimal? Value, string? Text, int? UnitId);
 
 /// <summary>Одне значення рядка в перегляді.</summary>
 /// <param name="Name">Ім'я величини (<c>var</c>/<c>output</c>).</param>

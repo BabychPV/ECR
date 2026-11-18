@@ -10377,6 +10377,234 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/methodologies/script-migration/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Звіряє пакет `package.json` з базою й записує тіньові тексти. Право `Calculation.Publish`.
+         * @description Для кожної версії відбиток джерела перераховується З БАЗИ тим самим алгоритмом, що й в інструменті
+         *     (`Fingerprint`); не збігся — відмова для цієї версії. Текст мусить компілюватися без діагностик, разом із
+         *     перевірками оточення. Версії обробляються незалежно: відповідь перелічує статус кожної
+         *     (`applied`, `wouldApply`, `refused` з ключем причини). Рушій версії не змінюється.
+         */
+        post: {
+            parameters: {
+                query?: {
+                    /** @description `true` — лише перевірити, нічого не записувати. */
+                    dryRun?: boolean;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["ApplyScriptPackageRequest"];
+                    "application/json": components["schemas"]["ApplyScriptPackageRequest"];
+                    "text/json": components["schemas"]["ApplyScriptPackageRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApplyScriptPackageResponse"];
+                        "text/json": components["schemas"]["ApplyScriptPackageResponse"];
+                        "text/plain": components["schemas"]["ApplyScriptPackageResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/methodologies/script-migration/switch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Перемикає рушій групи опублікованих версій однією транзакцією. Право `Calculation.Publish`.
+         * @description На `Script`: у кожної версії є текст, що компілюється без діагностик, а склад, виведений зі скрипта
+         *     (виходи з одиницею й ознакою «по речовинах», речовини, імпорти), збігається з наявним — інакше
+         *     `422 switchChecksFailed` з переліком розбіжностей; бібліотека й усі її імпортери — в одному запиті
+         *     (`422 switchGroupIncomplete` називає відсутні версії). Тоді записуються таблиці читання й залежності.
+         *     На `Formulas`: просте перемикання, таблиці читання знімаються. Старі формули не видаляються.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SwitchScriptEngineRequest"];
+                    "application/json": components["schemas"]["SwitchScriptEngineRequest"];
+                    "text/json": components["schemas"]["SwitchScriptEngineRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SwitchScriptEngineResponse"];
+                        "text/json": components["schemas"]["SwitchScriptEngineResponse"];
+                        "text/plain": components["schemas"]["SwitchScriptEngineResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/methodologies/script/tables": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Живі таблиці за кодами — колонки (тип, одиниця, місяць) і псевдоніми місячних входів для підказок редактора.
+         *     Право `Calculation.View`.
+         * @description Код, якого немає серед живих таблиць, у відповіді відсутній; код у кількох шаблонах дає кілька записів.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Коди таблиць через кому (до 50); `Шаблон.Таблиця` — з кодом шаблону. */
+                    codes?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ScriptTableDto"][];
+                        "text/json": components["schemas"]["ScriptTableDto"][];
+                        "text/plain": components["schemas"]["ScriptTableDto"][];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/methodologies/{id}/bindings": {
         parameters: {
             query?: never;
@@ -29957,6 +30185,35 @@ export interface components {
             /** @description Зрізи (1..12). */
             slices: components["schemas"]["EditAssignmentSliceDto"][];
         };
+        /** @description Пакет `package.json` — тіло `POST …/script-migration/apply`. */
+        ApplyScriptPackageRequest: {
+            /** @description Версії пакета. */
+            entries: null | components["schemas"]["ScriptPackageEntryDto"][];
+            /** @description Формат пакета (`ecr-methodology-script-package`); `null` — не звіряється. */
+            format: null | string;
+            /**
+             * Format: int32
+             * @description Версія формату; `null` — не звіряється.
+             */
+            formatVersion: null | number;
+        };
+        /** @description Відповідь `POST …/script-migration/apply`. */
+        ApplyScriptPackageResponse: {
+            /**
+             * Format: int32
+             * @description Скільки записано (або записалося б).
+             */
+            applied: number;
+            /** @description Сухий прогін: нічого не записано. */
+            dryRun: boolean;
+            /** @description Підсумок за версіями — у порядку пакета. */
+            entries: components["schemas"]["ScriptMigrationEntryResultDto"][];
+            /**
+             * Format: int32
+             * @description Скільки відмов.
+             */
+            refused: number;
+        };
         /** @description Сторінка черги «До погодження»: найдавніші подання першими. */
         ApprovalQueueDto: {
             /** @description Аркуші, які поточний користувач МОЖЕ затвердити зараз. */
@@ -41368,6 +41625,26 @@ export interface components {
                 [key: string]: string;
             };
         };
+        /** @description Підсумок щодо однієї версії пакета. */
+        ScriptMigrationEntryResultDto: {
+            /** @description Подробиці відмови (діагностики, відбитки); `null` — немає. */
+            details: null | string[];
+            /** @description Пояснення відмови англійською. */
+            message: null | string;
+            /** @description Код методології. */
+            methodologyCode: string;
+            /** @description Ключ причини відмови (`scriptMigration.refused.*`); `null` — відмови немає. */
+            reason: null | string;
+            /** @description `applied` — записано; `wouldApply` — сухий прогін, записалося б; `refused` — відмова. */
+            status: string;
+            /** @description Номер версії. */
+            version: string;
+            /**
+             * Format: int32
+             * @description Версія в базі; `null` — не знайдено.
+             */
+            versionId: null | number;
+        };
         /** @description Константа верхнього рівня. */
         ScriptOutlineConstantDto: {
             /** @description `scalar` або `map`. */
@@ -41446,6 +41723,19 @@ export interface components {
             /** @description Ім'я. */
             name: string;
         };
+        /** @description Одна версія в пакеті, який випускає `pack` інструмента перенесення. */
+        ScriptPackageEntryDto: {
+            /** @description Дата чинності (`yyyy-MM-dd`); `null` — не звіряється. */
+            effectiveFrom: null | string;
+            /** @description Код методології. */
+            methodologyCode: string;
+            /** @description Відбиток джерела (SHA-256, hex) на момент `pack`. */
+            sourceFingerprint: string;
+            /** @description Текст скрипта. */
+            text: string;
+            /** @description Номер версії. */
+            version: string;
+        };
         /** @description Відповідь перегляду на документі. */
         ScriptPreviewDto: {
             /** @description Діагностики тексту (перегляд виконується лише без них). */
@@ -41453,8 +41743,28 @@ export interface components {
             /** @description Таблиці з рядками й значеннями; порожньо, якщо текст має діагностики. */
             tables: components["schemas"]["ScriptPreviewTable"][];
         };
+        /** @description Один вхід рядка в перегляді. */
+        ScriptPreviewInput: {
+            /** @description Ім'я аргументу (код колонки). */
+            name: string;
+            /** @description Текстове значення; `null` — немає. */
+            text: null | string;
+            /**
+             * Format: int32
+             * @description Одиниця значення; `null` — безрозмірне.
+             */
+            unitId: null | number;
+            /**
+             * Format: decimal
+             * @description Числове значення; `null` — немає.
+             */
+            value: null | string;
+        };
         /** @description Рядок таблиці в перегляді. */
         ScriptPreviewRow: {
+            /** @description Входи вибраного рядка — поля, які читає скрипт (разом із місячними як розв'язані імена аргументів): з них клієнт
+             *     складає золотий тест (`arguments[{argumentCode, value, valueString, unitId}]`). Для решти рядків — порожньо. */
+            inputs?: null | components["schemas"]["ScriptPreviewInput"][];
             /** @description `missingInputs`, `stepError` або `rejected`; `null` — без проблем. */
             issue: null | string;
             /** @description Обов'язкові поля, яких бракує (для `missingInputs`). */
@@ -41510,6 +41820,35 @@ export interface components {
             substance: null | string;
             /** @description Значення текстом. */
             text: string;
+        };
+        /** @description Колонка живої таблиці для підказок редактора. */
+        ScriptTableColumnDto: {
+            /** @description Код колонки. */
+            code: string;
+            /** @description Тип даних колонки. */
+            dataType: string;
+            /** @description Місячна колонка. */
+            isMonthColumn: boolean;
+            /**
+             * Format: uint8
+             * @description Номер місяця (1…12); `null` — не місячна.
+             */
+            monthNumber: null | number;
+            /** @description Код одиниці колонки; `null` — одиниці немає. */
+            unitCode: null | string;
+        };
+        /** @description Жива таблиця для підказок редактора. */
+        ScriptTableDto: {
+            /** @description Колонки (без видалених). */
+            columns: components["schemas"]["ScriptTableColumnDto"][];
+            /** @description Псевдоніми місячних входів таблиці. */
+            monthAliases: string[];
+            /** @description Код із запиту (`Таблиця` або `Шаблон.Таблиця`). */
+            requested: string;
+            /** @description Код таблиці. */
+            tableCode: string;
+            /** @description Код шаблону. */
+            templateCode: string;
         };
         /** @description Тіло `POST …/script/validate` і `…/format-const`. */
         ScriptTextRequest: {
@@ -42765,6 +43104,22 @@ export interface components {
              */
             targetPeriodKey: null | number;
         };
+        /** @description Тіло `POST …/script-migration/switch`. */
+        SwitchScriptEngineRequest: {
+            /** @description `Script` або `Formulas`. */
+            engine: null | string;
+            /** @description Причина; обов'язкова, потрапляє в журнал. */
+            reason: null | string;
+            /** @description Версії групи. */
+            versionIds: null | number[];
+        };
+        /** @description Відповідь `POST …/script-migration/switch`. */
+        SwitchScriptEngineResponse: {
+            /** @description Рушій, на який перемкнуто. */
+            engine: string;
+            /** @description Перемкнені версії. */
+            versions: components["schemas"]["SwitchedVersionDto"][];
+        };
         /** @description Запит на перемикання master-джерела набору довідників. */
         SwitchSourceKindRequest: {
             /** @description Причина. Обов'язкова: через рік питання «навіщо перемикали цей набір
@@ -42775,6 +43130,18 @@ export interface components {
             registryCodes: string[];
             /** @description Нове джерело для всіх перелічених. */
             sourceKind: components["schemas"]["RegistrySourceKind"];
+        };
+        /** @description Версія, перемкнена групою. */
+        SwitchedVersionDto: {
+            /** @description Код методології. */
+            methodologyCode: string;
+            /** @description Номер версії. */
+            version: string;
+            /**
+             * Format: int32
+             * @description Версія.
+             */
+            versionId: number;
         };
         /** @description Блок «Про систему». */
         SystemFactsAboutDto: {

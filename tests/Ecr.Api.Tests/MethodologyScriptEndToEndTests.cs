@@ -81,6 +81,13 @@ public sealed class MethodologyScriptEndToEndTests(SqlServerFixture sql)
         Assert.Equal("20", ValueOf(first, "OUT_A"));
         Assert.Equal("notSelected", table.GetProperty("rows")[2].GetProperty("state").GetString());
 
+        // Входи вибраного рядка — для золотого тесту з перегляду: лише поля, які читає скрипт.
+        var inputs = first.GetProperty("inputs").EnumerateArray().ToDictionary(i => i.GetProperty("name").GetString()!, i => i);
+        // `where` читає колонку виду, але це умова вибору, а не поле рядка скрипта: у входах її немає.
+        Assert.Equal([s.ValueColumn], inputs.Keys);
+        Assert.Equal(10m, Num(inputs[s.ValueColumn].GetProperty("value")));
+        Assert.Empty(table.GetProperty("rows")[2].GetProperty("inputs").EnumerateArray());
+
         var tripled = text.Replace("* 2", "* 3", StringComparison.Ordinal);
         var overridden = await PreviewAsync(u.Worker, a, s, tripled).ConfigureAwait(true);
         Assert.Equal("30", ValueOf(Assert.Single(overridden.GetProperty("tables").EnumerateArray()).GetProperty("rows")[0], "OUT_A"));
@@ -114,6 +121,44 @@ public sealed class MethodologyScriptEndToEndTests(SqlServerFixture sql)
         Assert.Equal(["OUT_A|60", "OUT_A|10"], again.Select(r => $"{r.Output}|{r.Value:0.####}").ToArray());
         Assert.All(again, r => Assert.False(r.Stale));
         Assert.Equal(60m, await SliceValueAsync(u.Worker, s, 0, "OUT_A").ConfigureAwait(true));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "MS-T3.2")]
+    public async Task Живі_таблиці_за_кодами_для_підказок_редактора()
+    {
+        var s = await ArrangeAsync(209909, ["OUT_A"], [("gas", 10m)]).ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        var u = await SignInAllAsync(app, s).ConfigureAwait(true);
+        var url = $"/api/v1/methodologies/script/tables?codes={s.TableCode},NO_SUCH_TABLE";
+
+        var found = await JsonAsync(await u.Author.GetAsync(new Uri(url, UriKind.Relative)).ConfigureAwait(true), HttpStatusCode.OK).ConfigureAwait(true);
+        var table = Assert.Single(found.EnumerateArray());
+        Assert.Equal(s.TableCode, table.GetProperty("requested").GetString());
+        Assert.Equal(s.TableCode, table.GetProperty("tableCode").GetString());
+        var columns = table.GetProperty("columns").EnumerateArray().ToDictionary(c => c.GetProperty("code").GetString()!, c => c);
+        Assert.Equal("Calculated", columns["OUT_A"].GetProperty("dataType").GetString());
+        Assert.Equal("Decimal", columns[s.ValueColumn].GetProperty("dataType").GetString());
+        Assert.False(columns[s.ValueColumn].GetProperty("isMonthColumn").GetBoolean());
+        Assert.Empty(table.GetProperty("monthAliases").EnumerateArray());
+
+        // Шаблон.Таблиця — з кодом шаблону.
+        var templateCode = table.GetProperty("templateCode").GetString();
+        var qualified = await JsonAsync(
+            await u.Author.GetAsync(new Uri($"/api/v1/methodologies/script/tables?codes={templateCode}.{s.TableCode}", UriKind.Relative)).ConfigureAwait(true),
+            HttpStatusCode.OK).ConfigureAwait(true);
+        Assert.Single(qualified.EnumerateArray());
+
+        using (var none = await u.Author.GetAsync(new Uri("/api/v1/methodologies/script/tables?codes=", UriKind.Relative)).ConfigureAwait(true))
+        {
+            Assert.Equal(HttpStatusCode.UnprocessableEntity, none.StatusCode);
+        }
+
+        var nobody = await SignInAsync(app, [], s, grant: null).ConfigureAwait(true);
+        using var forbidden = await nobody.GetAsync(new Uri(url, UriKind.Relative)).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
     }
 
     // ───────────────────────────── сценарій 2 ─────────────────────────────
