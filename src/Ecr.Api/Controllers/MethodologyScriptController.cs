@@ -72,6 +72,7 @@ public sealed class MethodologyScriptController(
     [HttpPost("validate")]
     [ProducesResponseType<ScriptValidationDto>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<ActionResult<ScriptValidationDto>> Validate(
         int id, int vid, [FromBody] ScriptTextRequest request, CancellationToken ct)
     {
@@ -114,6 +115,7 @@ public sealed class MethodologyScriptController(
     [HttpPost("format-const")]
     [ProducesResponseType<FormatConstDto>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<ActionResult<FormatConstDto>> FormatConst(
         int id, int vid, [FromBody] ScriptTextRequest request, CancellationToken ct)
     {
