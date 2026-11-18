@@ -197,6 +197,42 @@ public sealed class ScriptMethodologyRunSqlTests(SqlServerFixture sql)
         Assert.Equal(["Z|60"], OutputsOf(await PreviewAsync(f, b.VersionBId, textB)));
     }
 
+    /// <summary>
+    /// MS (рецензія F13, A): джерело в ЦЬОМУ прогоні нічого не порахувало (вхід зник) — читач не бере числа ПОПЕРЕДНЬОГО
+    /// актуального прогону, бо в сітці після прогону джерело теж порожнє.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Читач_не_бачить_числа_попереднього_прогону_якщо_джерело_в_цьому_прогоні_нічого_не_дало()
+    {
+        var f = await ArrangeAsync(209905);
+        await InsertValuesAsync(f, ("gas", 10m), ("oil", 7m));
+        var a = await PublishScriptAsync(
+            f, "A",
+            $"rows from {f.TableCode} where row.{f.C1} == \"gas\";\noutput Y: kg = row.{f.C2} * 2;",
+            [("Y", f.OutAColumnId)]);
+        await ArrangeReaderAsync(f, a);
+
+        await RunJobAsync(f.Document, sheetDefId: null);
+        Assert.Equal(["Y|20", "Z|20"], await ShapeAsync(f));
+
+        // Вхід джерела зник: A нічого не дає. Без Y читачеві читати нічого — Z не може лишитись 20.
+        await using (var db = f.Builder.CreateContext())
+        {
+            var rowId = f.Document.RowIds[0];
+            var column = f.Document.ColumnDefIds[1];
+            await db.CellValues
+                .Where(c => c.PeriodKeyValue == f.Document.PeriodKey.Value && c.TableRowId == rowId && c.ColumnDefId == column)
+                .ExecuteDeleteAsync();
+        }
+
+        await RunJobAsync(f.Document, sheetDefId: null);
+
+        Assert.DoesNotContain(await ShapeAsync(f), s => s.StartsWith("Y|", StringComparison.Ordinal));
+        Assert.DoesNotContain("Z|20", await ShapeAsync(f));
+    }
+
     private async Task<ScriptPreviewResult> PreviewAsync(Fixture f, int versionId, string text)
     {
         await using var provider = Provider();
