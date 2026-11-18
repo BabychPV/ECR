@@ -72,6 +72,8 @@ public sealed partial class SheetCopyQuerySitesTests
             "B80: ворота «лише затверджене» — стан оригіналу аркуша (ApprovalState.SheetCopyId == null), як у завантажувачі складу",
         ["src/Ecr.Infrastructure/Persistence/DocumentSourceBindingStore.cs"] =
             "B80: обраний документ-джерело року — екземпляри оригіналу (SheetCopyId == null), як у завантажувачі складу",
+        ["src/Ecr.Infrastructure/Persistence/RegistryImpactStore.cs"] =
+            "B80 N3(b): «документ-споживач × період є» — екземпляри оригіналу (SheetCopyId == null); перерахунок методологій — лише оригінал",
         ["src/Ecr.Infrastructure/Jobs/Hse400LandDependentsTrigger.cs"] =
             "HSE400 3b: «чи документ HSE400» — за екземплярами оригіналу (SheetCopyId == null), як у завантажувачі складу",
         ["src/Ecr.Infrastructure/Persistence/SystemHealthStore.cs"] =
