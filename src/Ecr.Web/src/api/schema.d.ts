@@ -32946,6 +32946,13 @@ export interface components {
         };
         /** @description Звіт переносу документа на нову версію шаблону (ФВ-7.5). */
         DocumentVersionMigrationDto: {
+            /**
+             * Format: int64
+             * @description ✎ LAND-YEAR L3 (a′): скільки екземплярів таблиць цільової версії перенос створить (створив) у якорі року — УСІ відсутні
+             *     (оригінал і копії аркушів складу документа, з фіксованими рядками), щоб перерахунок року одразу після переносу їх
+             *     заповнив, а річний перегляд їх показав без попереднього відкриття аркуша. `null` — перенос не є переходом на рік.
+             */
+            anchorInstancesCreated?: null | number;
             /** @description Перенос виконано. */
             applied: boolean;
             /**
@@ -33111,6 +33118,32 @@ export interface components {
              *     змінює розкладку «копія на місяць» → «рік, місяці в колонках».
              */
             monthTransferredValues?: null | number;
+            /**
+             * Format: int64
+             * @description ✎ LAND-YEAR L3 (B-static): скільки рядків створить (створив) перенос у якорі року, бо якорю бракувало рядка (а то й
+             *     екземпляра таблиці) для немісячного значення: рядок береться з найпізнішого місяця (`RowKey`, опис рядка,
+             *     порядок). `null` — перенос не є переходом на рік.
+             */
+            nonMonthAnchorRowsCreated?: null | number;
+            /** @description ✎ LAND-YEAR L3 (B-static): комірки немісячних колонок, де якір порожній, а місяці року мають РІЗНІ значення —
+             *     причина відмови `nonMonthConflict` (система не вибирає мовчки). Не більше `MaxItems`; `null` — таких немає. */
+            nonMonthConflicts?: null | components["schemas"]["NonMonthConflictItem"][];
+            /** @description Перелік NonMonthConflicts обрізано стелею; `null` — переліку немає. */
+            nonMonthConflictsTruncated?: null | boolean;
+            /**
+             * Format: int64
+             * @description ✎ LAND-YEAR L3 (B-static): скільки введених значень немісячних колонок якір року (найменший період року в календарі
+             *     проєкту — його показує річний перегляд) дістане (дістав) з НАЙПІЗНІШОГО місяця, бо в якорі їх немає. Значення якоря
+             *     не перезаписується ніколи. `null` — перенос не є переходом на рік.
+             */
+            nonMonthCopiedToAnchor?: null | number;
+            /**
+             * Format: int64
+             * @description ⛔ B69 «архів незмінний»: скільки ДОКУМЕНТІВ (× рік) крок якоря пропустив, бо їхній якір заархівовано (немає жодного
+             *     гарячого екземпляра в якорі, є архівні): у них нічого не створюється й не копіюється — пропуск, не відмова. Рахуються
+             *     лише документи, у яких крок мав джерело (екземпляри пізніших місяців року). `null` — перенос не є переходом на рік.
+             */
+            nonMonthSkippedArchived?: null | number;
             /**
              * Format: int32
              * @description D-1b P3: скільки документів у цих проєктах.
@@ -35955,6 +35988,35 @@ export interface components {
             rowsRead: number;
             /** @description Sheet that was read. */
             sheetName: string;
+        };
+        /** @description ✎ LAND-YEAR L3 (B-static): комірка немісячної колонки, у якої якір року порожній, а місяці року не згодні
+         *     (причина відмови `nonMonthConflict`). Коди — цільової (річної) версії. */
+        NonMonthConflictItem: {
+            /** @description Код колонки. */
+            columnCode: string;
+            /**
+             * Format: int64
+             * @description Документ проєкту.
+             */
+            documentId: number;
+            /** @description Ключ рядка. */
+            rowKey: string;
+            /** @description Код аркуша. */
+            sheetCode: string;
+            /** @description Код таблиці. */
+            tableCode: string;
+            /** @description Значення по місяцях за зростанням періоду. */
+            values: components["schemas"]["NonMonthConflictValue"][];
+        };
+        /** @description Значення комірки в одному місяці (✎ LAND-YEAR L3, NonMonthConflictItem). */
+        NonMonthConflictValue: {
+            /**
+             * Format: int32
+             * @description Період.
+             */
+            periodKey: number;
+            /** @description Значення текстом (число — інваріантною культурою, дата — ISO 8601, запис довідника — `#id`). */
+            value: null | string;
         };
         /**
          * @description Транспорт каналу сповіщень. Числа зберігаються в базі — не перенумеровувати.

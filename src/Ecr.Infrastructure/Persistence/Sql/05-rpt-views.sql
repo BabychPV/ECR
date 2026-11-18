@@ -447,6 +447,7 @@ BEGIN
     DECLARE @colId int, @colCode nvarchar(64), @colType tinyint, @alias nvarchar(16), @n int;
     -- Q-17.7: власність значень MonthsInColumns (місячний стовпець M{m} — в екземплярі періоду m,
     -- введений не-місячний — в екземплярі-якорі року). @monthMask: біт m — потрібен власник-місяць m.
+    DECLARE @limCols int, @limText int;   -- B6 L8 / B170: бюджет 1024 колонок
     DECLARE @layout tinyint, @isMonth bit, @monthNo tinyint, @isInput bit, @monthMask int, @needAnchor bit,
             @ownerRows nvarchar(max), @ownerCells nvarchar(max), @valueCol nvarchar(128), @extra int, @mi int;
     -- Q-17.fix (B1): умовні агрегації значень власників - по одному OUTER APPLY на власника (OwnerNo: -1 власна копія,
@@ -511,6 +512,26 @@ BEGIN
                                          WHERE IsActive = 1 AND TableDefId = @id AND REPLACE(MatchJson, CHAR(32), N'') <> N'{}') THEN 1 ELSE 0 END;
         SET @rvRef = CASE WHEN @rvPred = 0 THEN N'r' ELSE N'rv' END;
         SELECT @fromSql = N'', @tiAp = N'', @rowApply = N'', @famAgg = N'';
+        -- B6 L8 (Аудит-2 17.11): ліміт SQL Server - 1024 колонки у вʼюсі. Річна Land T9_07 (590 колонок, 448 обчислюваних)
+        -- з супутниками `<Код>_Text` давала 1051 -> 4505 на CREATE VIEW, і помилка обривала генерацію РЕШТИ вʼюх версії
+        -- (41 з 83). Бюджет: колонки + супутники + запас 24 на службові (зараз 13).
+        -- B170 (людина 18.11 ~00:35Z, квіз «У всіх річних», D-547): у версії з річною розкладкою (Layout = 1, @rc) МІСЯЧНА
+        -- Formula/Calculated колонка (_Mnn) НІКОЛИ не має супутника _Text; супутники немісячних лишаються, місячні розкладки
+        -- (Layout = 0) - без змін, вʼюха одна на таблицю. Не вміщається й так - 50422 наприкінці, як для ліміту 250 таблиць
+        -- нижче: ця таблиця без вʼюхи, інші таблиці генеруються.
+        SELECT @limCols = COUNT(*),
+               @limText = COALESCE(SUM(CASE WHEN c.DataType IN (6, 8) AND NOT (@rc = 1 AND c.IsMonthColumn = 1) AND tx.Id IS NULL
+                                            THEN 1 ELSE 0 END), 0)
+        FROM cfg.ColumnDef AS c
+        LEFT JOIN cfg.ColumnDef AS tx ON tx.TableDefId = @id AND tx.IsDeleted = 0 AND tx.Code = c.Code + N'_Text'
+        WHERE c.TableDefId = @id AND c.IsDeleted = 0;
+        IF @limCols + @limText + 24 > 1024
+        BEGIN
+            SET @failure = COALESCE(@failure, CONCAT(N'rpt.usp_GenerateTemplateViews: ', @header, N' (таблиця ', @id,
+                                  N') має ', @limCols, N' колонок і ', @limText,
+                                  N' супутників _Text, вʼюха вміщує щонайбільше 1024 колонки.'));
+            GOTO next_table;
+        END
         SET @colId = (SELECT MIN(Id) FROM cfg.ColumnDef WHERE TableDefId = @id AND IsDeleted = 0);
         WHILE @colId IS NOT NULL
         BEGIN
@@ -701,7 +722,7 @@ LEFT JOIN doc.CellValue AS ' + @alias + N' ON ' + @alias + N'.PeriodKey = r.Peri
             -- власну комірку (c<n> / pc). Супутники
             -- ідуть У КІНЦІ списку колонок (позиції наявних колонок не зсуваються). Колізія імені: якщо в таблиці вже є
             -- колонка з кодом `<Код>_Text`, супутник для цієї колонки ПРОПУСКАЄТЬСЯ (наявна колонка не підміняється).
-            IF @colType IN (6, 8)
+            IF @colType IN (6, 8) AND NOT (@rc = 1 AND @isMonth = 1)   -- B170 / D-547: річна розкладка - місячні без _Text
                AND NOT EXISTS (SELECT 1 FROM cfg.ColumnDef
                                 WHERE TableDefId = @id AND IsDeleted = 0 AND Code = @colCode + N'_Text')
                 SET @selectText = @selectText + N',
@@ -709,7 +730,7 @@ LEFT JOIN doc.CellValue AS ' + @alias + N' ON ' + @alias + N'.PeriodKey = r.Peri
                                 + QUOTENAME(@colCode + N'_Text');
             -- Варіант з rv: для Calculated супутник заповнюється ЛИШЕ коли ПІДСУМКОВЕ число (результат методології, інакше
             -- матеріалізоване - те, що віддає числова колонка) порожнє; методологія дала число - супутник NULL.
-            IF @colType IN (6, 8)
+            IF @colType IN (6, 8) AND NOT (@rc = 1 AND @isMonth = 1)   -- B170 / D-547: річна розкладка - місячні без _Text
                AND NOT EXISTS (SELECT 1 FROM cfg.ColumnDef
                                 WHERE TableDefId = @id AND IsDeleted = 0 AND Code = @colCode + N'_Text')
                 SET @selectTextRv = @selectTextRv + N',
@@ -1549,6 +1570,7 @@ BEGIN
     DECLARE @agg nvarchar(max), @aggBody nvarchar(max), @famAgg nvarchar(max), @pkExpr nvarchar(16), @fromSql nvarchar(max), @rowApply nvarchar(max);
     DECLARE @selectRv nvarchar(max), @selectTextRv nvarchar(max), @rvIds nvarchar(max), @rvApply nvarchar(max), @rvAgg nvarchar(max), @rvPack nvarchar(max), @rvExprs nvarchar(max);
     DECLARE @rvPred bit, @rvRef nvarchar(8), @conflictCodes nvarchar(1500), @hasText bit, @hasId bit, @extra int;
+    DECLARE @limText int, @lastRc bit;   -- B6 L8 / B170: column budget; Rc of the latest version of the code
     -- RS (копії аркушів): службові колонки _SheetCopyOrdinal/_SheetDisplayName — у КІНЦІ списку (адитивні).
     DECLARE @sheetNameCase nvarchar(max), @copyCols nvarchar(max);
     -- Q-17.slotmap: як у rpt.usp_GenerateTemplateViews - агрегати за слотом і бажані рядки rpt.ViewSlot (усі Id коду й аліасів).
@@ -1667,13 +1689,25 @@ BEGIN
              WHERE x.Code <> y.Other
                AND NOT EXISTS (SELECT 1 FROM @alias AS z WHERE z.Scope = x.Scope AND z.Code = x.Code AND z.Other = y.Other);
 
+        -- B6 L8 (Audit-2 17.11): SQL Server allows 1024 columns per view. The yearly Land T9_07 with its <Code>_Text companions
+        -- went over it -> 4505 on CREATE VIEW, which stopped the run (the stable view stayed stale). The _Text companions (type
+        -- of the LATEST version of each code, as in the loop) now count towards the 1000-column check below -> 50422 at the end,
+        -- the other groups are generated.
+        -- B170 (human 18.11 ~00:35Z, quiz «У всіх річних», D-547): a MONTH Calculated/Formula column whose latest version is the
+        -- year layout (Rc = 1, Layout = 1) NEVER gets a _Text companion; non-month companions stay, monthly layouts unchanged.
+        WITH lt AS (SELECT Code, DataType, IsMonth, Rc, ROW_NUMBER() OVER (PARTITION BY Code ORDER BY Ord DESC) AS rn FROM @ci)
+        SELECT @limText = COALESCE(SUM(CASE WHEN lt.DataType IN (6, 8) AND NOT (lt.IsMonth = 1 AND lt.Rc = 1) AND tx.Seq IS NULL
+                                            THEN 1 ELSE 0 END), 0)
+          FROM lt LEFT JOIN @cols AS tx ON tx.Code = lt.Code + N'_Text'
+         WHERE lt.rn = 1;
+
         SET @seq = (SELECT MIN(Seq) FROM @cols);
         WHILE @seq IS NOT NULL
         BEGIN
             SET @colCode = (SELECT Code FROM @cols WHERE Seq = @seq);
             SET @n = @n + 1;
             -- Type / month placement come from the LATEST version that has the code.
-            SELECT TOP (1) @colType = DataType, @isMonth = IsMonth, @monthNo = MonthNo
+            SELECT TOP (1) @colType = DataType, @isMonth = IsMonth, @monthNo = MonthNo, @lastRc = Rc
               FROM @ci WHERE Code = @colCode ORDER BY Ord DESC;
             SET @conflict = CASE WHEN (SELECT COUNT(DISTINCT Fam) FROM @ci WHERE Code = @colCode) > 1 THEN 1 ELSE 0 END;
             DELETE FROM @cid;
@@ -1840,7 +1874,7 @@ BEGIN
 
             SET @select = @select + N',
        ' + @valueCol + N' AS ' + QUOTENAME(@colCode);
-            SET @hasText = CASE WHEN @colType IN (6, 8) AND NOT EXISTS (SELECT 1 FROM @cols WHERE Code = @colCode + N'_Text') THEN 1 ELSE 0 END;
+            SET @hasText = CASE WHEN @colType IN (6, 8) AND NOT (@isMonth = 1 AND @lastRc = 1) AND NOT EXISTS (SELECT 1 FROM @cols WHERE Code = @colCode + N'_Text') THEN 1 ELSE 0 END;
             IF @hasText = 1
             BEGIN
                 SET @selectText = @selectText + N',
@@ -1870,6 +1904,8 @@ BEGIN
         SET @select = @select + @selectText;
         SET @selectRv = @selectRv + @selectTextRv;
 
+        -- B6 L8: the _Text companions count too (they were not counted, and 4505 stopped the run instead of 50422).
+        SET @extra = @extra + @limText;
         IF @n + @extra > 1000
         BEGIN
             SET @failure = COALESCE(@failure, CONCAT(N'rpt.usp_GenerateStableViews: ', @header, N' has ', @n + @extra,
