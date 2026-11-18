@@ -5,7 +5,8 @@ import { ConstTableDialog } from '../ConstTableDialog';
 import { ScriptOutlineView } from '../ScriptOutlineView';
 import { ScriptPreviewTable } from '../ScriptPreviewTable';
 import { ScriptProblemsList } from '../ScriptProblemsList';
-import type { ScriptOutlineDto, ScriptPreviewDto } from '../types';
+import type { ScriptPreviewDto } from '../types';
+import { diagnostic, outline as outlineOf, outlineTable, previewRow, previewTable, previewValue } from './fixtures';
 
 /*
  * ⚠ Каталог рядків у тестах не завантажується, тому підписи відображаються як
@@ -21,15 +22,13 @@ describe('ScriptProblemsList', () => {
     rerender(
       <ScriptProblemsList
         diagnostics={[
-          {
+          diagnostic({
             code: 'script.unknownName',
-            messageKey: null,
-            params: null,
             line: 4,
             column: 7,
             length: 3,
             message: 'Unknown name "abc".',
-          },
+          }),
         ]}
         onJump={onJump}
       />,
@@ -41,17 +40,15 @@ describe('ScriptProblemsList', () => {
 });
 
 describe('ScriptOutlineView', () => {
-  const outline: ScriptOutlineDto = {
-    tables: [{ code: 'T3_00' }, { code: 'T10_03', alias: 'Gtu' }],
+  const outline = outlineOf({
+    tables: [outlineTable('T3_00'), outlineTable('T10_03', 'Gtu')],
     inputs: [{ name: 'Land_Hours', optional: true }],
     outputs: [
       { code: 'OUT_A', unit: 't', perSubstance: false },
       { code: 'OUT_B', unit: 't', perSubstance: true },
     ],
-    substances: [],
     imports: ['Common'],
-    constants: [],
-  };
+  });
 
   it('показує входи, виходи, таблиці, імпорти; «немає колонки» лише для виходів із набору', () => {
     renderWithMantine(
@@ -68,33 +65,30 @@ describe('ScriptPreviewTable', () => {
   const preview: ScriptPreviewDto = {
     diagnostics: [],
     tables: [
-      {
-        tableInstanceId: 1,
+      previewTable({
         tableCode: 'T3_00',
         totalRows: 3,
         selectedRows: 1,
         inactiveRows: 1,
         rows: [
-          {
+          previewRow({
             rowKey: 'a',
             rowNumber: 1,
-            state: 'selected',
             values: [
-              { name: 'hours', kind: 'number', text: '12' },
-              { name: 'OUT', kind: 'number', text: '3.5' },
+              previewValue({ name: 'hours', kind: 'var', text: '12' }),
+              previewValue({ name: 'OUT', text: '3.5' }),
             ],
-          },
-          { rowKey: 'b', rowNumber: 2, state: 'inactive', values: [] },
-          {
+          }),
+          previewRow({ rowKey: 'b', rowNumber: 2, state: 'inactive' }),
+          previewRow({
             rowKey: 'c',
             rowNumber: 3,
             state: 'rejected',
             issue: 'missingInputs',
             missing: ['Land_X'],
-            values: [],
-          },
+          }),
         ],
-      },
+      }),
     ],
   };
 
@@ -114,9 +108,7 @@ describe('ScriptPreviewTable', () => {
     expect(screen.getByText('hours')).toBeTruthy();
     expect(toggles[0]?.getAttribute('aria-expanded')).toBe('true');
 
-    const create = screen.getAllByRole('button').find((b) => b.textContent === '+');
-    expect(create).toBeDefined();
-    fireEvent.click(create as HTMLElement);
+    fireEvent.click(screen.getByRole('button', { name: /preview\.createTest/ }));
     expect(onCreateTest).toHaveBeenCalledWith(preview.tables[0]?.rows[0], preview.tables[0]);
   });
 
@@ -127,24 +119,22 @@ describe('ScriptPreviewTable', () => {
         preview={{
           diagnostics: [],
           tables: [
-            {
+            previewTable({
               tableInstanceId: 2,
               tableCode: 'T',
               totalRows: 1,
               selectedRows: 1,
-              inactiveRows: 0,
               rows: [
-                {
+                previewRow({
                   rowKey: 'r',
                   rowNumber: 1,
-                  state: 'selected',
                   values: [
-                    { name: 'S', substance: '301', kind: 'number', text: '1' },
-                    { name: 'S', substance: '304', kind: 'number', text: '2' },
+                    previewValue({ name: 'S', substance: '301', text: '1' }),
+                    previewValue({ name: 'S', substance: '304', text: '2' }),
                   ],
-                },
+                }),
               ],
-            },
+            }),
           ],
         }}
       />,

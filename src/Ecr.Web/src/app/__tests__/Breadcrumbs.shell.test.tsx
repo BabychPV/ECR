@@ -86,6 +86,24 @@ describe('UI-32: крихти у верхній смузі — «Group › Page�
     expect(screen.getByRole('link', { name: '⟦nav.methodologies⟧' }).getAttribute('href')).toBe('/admin/methodologies');
   });
 
+  it('редактор скрипта: «Methodologies › Версії › Скрипт», крихта версій веде на перелік версій методології', () => {
+    show(
+      '/admin/methodologies/3/versions/9/script',
+      '/admin/methodologies/:id/versions/:vid/script',
+      routes.adminMethodologyScript.handle,
+    );
+
+    expect(crumbsText()).toEqual([
+      '⟦nav.group.configure⟧',
+      '⟦nav.methodologies⟧',
+      '⟦methodologies.versionsTitle⟧',
+      '⟦methodologyScript.title⟧',
+    ]);
+    expect(screen.getByRole('link', { name: '⟦methodologies.versionsTitle⟧' }).getAttribute('href')).toBe(
+      '/admin/methodologies/3/versions',
+    );
+  });
+
   it('область навігації підписана (макет: nav aria-label="Breadcrumb")', () => {
     show('/admin/units', '/admin/units', routes.adminUnits.handle);
 

@@ -3,17 +3,17 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { loadCatalog } from '@/shared/i18n';
 import { localizedScriptMessage, scriptMarkers } from '../scriptMarkers';
 import type { ScriptDiagnosticDto } from '../types';
+import { diagnostic as makeDiagnostic } from './fixtures';
 
-const diagnostic = (patch: Partial<ScriptDiagnosticDto> = {}): ScriptDiagnosticDto => ({
-  code: 'script.unknownName',
-  messageKey: null,
-  params: null,
-  line: 3,
-  column: 5,
-  length: 4,
-  message: 'Unknown name "abc".',
-  ...patch,
-});
+const diagnostic = (patch: Partial<ScriptDiagnosticDto> = {}): ScriptDiagnosticDto =>
+  makeDiagnostic({
+    code: 'script.unknownName',
+    line: 3,
+    column: 5,
+    length: 4,
+    message: 'Unknown name "abc".',
+    ...patch,
+  });
 
 describe('маркери скрипта', () => {
   afterEach(() => {

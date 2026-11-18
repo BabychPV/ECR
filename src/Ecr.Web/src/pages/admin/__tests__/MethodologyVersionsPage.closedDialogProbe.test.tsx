@@ -112,7 +112,12 @@ afterEach(() => {
 // кількома лінивими панелями. Під повним vitest паралельно зі збіркою .NET «Remove formula» перевищив 15 с (F13).
 describe('B149: MethodologyVersionsPage — один запит на відкриття діалогу', { timeout: 30_000 }, () => {
   it('«New version»: один POST …/versions у всіх трьох вікнах', async () => {
-    const server = holdWrites({ read, write: () => ({ body: { ...Version, id: 11, versionNumber: '2.0' } }) });
+    // ⚠ Відповідь — версія з рушієм `Formulas`: версія-скрипт веде на інший екран (редактор скрипта), і діалог зникав би з
+    // дерева разом зі сторінкою — зонд «закрито, кнопка ще в DOM» цього не пережив би.
+    const server = holdWrites({
+      read,
+      write: () => ({ body: { ...Version, id: 11, versionNumber: '2.0', engine: 'Formulas' } }),
+    });
     const gate = gateReads();
     show();
 

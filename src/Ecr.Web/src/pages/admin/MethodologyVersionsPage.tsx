@@ -2,27 +2,23 @@ import { lazy, Suspense, useMemo, useState, type JSX } from 'react';
 import {
   Alert,
   Button,
-  Code,
   Group,
   Modal,
+  SegmentedControl,
   Select,
-  Skeleton,
   Stack,
   Table,
   Text,
   TextInput,
-  Textarea,
 } from '@mantine/core';
 import { ResizableModal } from '@/shared/ui/ResizableModal';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import type {
   CalculationLevel,
   ExpressionValidationDto,
   MethodologyDraftVersionDto,
   MethodologyFormulaDto,
-  MethodologyPublicationDiff,
-  PublishMethodologyRequest,
   UnitRef,
 } from '@/api/types';
 import { apiFetch } from '@/api/client';
@@ -35,7 +31,6 @@ import {
   deleteMethodologyFormula,
   methodologyFormulas,
   methodologyVersions,
-  publishMethodologyVersion,
   saveMethodologyFormula,
 } from '@/features/methodologies/api';
 import {
@@ -47,7 +42,14 @@ import { useDeleteVersionAction } from '@/features/methodologies/DeleteVersionAc
 import { DerivedArguments } from '@/features/methodologies/DerivedArguments';
 import { MethodologySection } from '@/features/methodologies/MethodologySection';
 import { VersionDiffModal } from '@/features/methodologies/VersionDiffModal';
-import { showPublishError } from '@/features/methodologies/publishError';
+import { usePublishVersion } from '@/features/methodologies/PublishVersionFlow';
+import {
+  DefaultNewVersionEngine,
+  engineForNewVersion,
+  opensScriptEditor,
+  showEngineChoice,
+  type VersionEngine,
+} from '@/features/methodologies/newVersionEngine';
 import { t } from '@/shared/i18n';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -57,11 +59,6 @@ import { StatusBadge, statusKey } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
-
-/** A1-02: поле дати — за `import()` (`D-132`), той самий прийом, що `DocumentHeaderPanel`. */
-const DateOnlyInput = lazy(async () => ({
-  default: (await import('@/shared/dates/DateInputWithStyles')).DateOnlyInput,
-}));
 
 /*
  * ⛔ Сім панелей змісту версії — за `import()`, і це вимога бюджету (`D-132`),
@@ -163,6 +160,7 @@ const MethodologyCoveragePanel = lazy(async () => {
  */
 export function MethodologyVersionsPage(): JSX.Element {
   const params = useParams();
+  const navigate = useNavigate();
   const methodologyId = Number(params['id']);
   const known = Number.isFinite(methodologyId);
 
@@ -185,17 +183,12 @@ export function MethodologyVersionsPage(): JSX.Element {
   const [creating, setCreating] = useState(false);
   const [newVersion, setNewVersion] = useState('');
   const [copyFrom, setCopyFrom] = useState<string | null>(null);
+  // ✎ MS: рушій НОВОЇ ПОРОЖНЬОЇ версії; при копіюванні рушій іде від джерела, вибір прихований.
+  const [engineChoice, setEngineChoice] = useState<VersionEngine>(DefaultNewVersionEngine);
 
-  // ⛔ Кнопка публікації жила лише на `MethodologiesPage.tsx` (перелік
-  // методологій), а не тут — на екрані, де версію насправді доводять до
-  // готовності (формули, константи, виходи, правила, обов'язкові колонки,
-  // золотий набір, прив'язки). Хто пройшов увесь цей шлях сторінка за
-  // сторінкою, не бачив жодного «Publish» ні в рядку версії, ні в
-  // розгорнутій панелі — доводилося здогадуватися повернутися в перелік.
-  const [publishing, setPublishing] = useState<{ versionId: number } | null>(null);
-  const [publishReason, setPublishReason] = useState('');
-  const [publishEffectiveFrom, setPublishEffectiveFrom] = useState('');
-  const [publishDiff, setPublishDiff] = useState<MethodologyPublicationDiff | null>(null);
+  // ⛔ Публікація — спільний потік із сторінкою скрипта (`PublishVersionFlow`): причина й дата
+  // обов'язкові на сервері (`ECR-CALC-0422`, ФВ-14.7), diff — результатів, не тексту (ФВ-9.6).
+  const publishFlow = usePublishVersion(methodologyId);
 
   // ⛔ Рівень драбини виразності (`ФВ-9.2`) став вибором, а не константою.
   // Тут стояло зашите `'Configuration'` із поясненням «клон бере рівень із
@@ -245,6 +238,8 @@ export function MethodologyVersionsPage(): JSX.Element {
   // ⚠ Дві умови разом: стан версії каже сервер, право — профіль. Кожна окремо
   // веде користувача у відмову — `ECR-CALC-0409` або `403`.
   const editable = mayEditContent(selected, mayEdit);
+  // ✎ MS: у версії-скрипта немає формул, констант, виходів, правил — лише текст скрипта.
+  const scriptSelected = opensScriptEditor(selected);
   const requiredInputsEditable = mayEditContent(selected, mayManageRequiredInputs);
   // PUT/DELETE category-rule сервер дозволяє лише з `Calculation.EditRule`.
   const categoryRuleEditable = mayEditContent(selected, can(session.data, 'Calculation.EditRule'));
@@ -261,11 +256,21 @@ export function MethodologyVersionsPage(): JSX.Element {
     staleTime: 60 * 60 * 1000,
   });
 
+  const requestedEngine = (): VersionEngine =>
+    engineForNewVersion({
+      copyFromVersionId: copyFrom === null ? null : Number(copyFrom),
+      versions: all,
+      choice: engineChoice,
+    });
+
   const create = useMutation({
     mutationFn: () =>
       createMethodologyVersion(methodologyId, {
         versionNumber: newVersion,
         copyFromVersionId: copyFrom === null ? null : Number(copyFrom),
+
+        // ⛔ Рушій — завжди явно: пропущений сервер читає як `Formulas`.
+        engine: requestedEngine(),
 
         // ⚠ Рівень має значення лише для ПОРОЖНЬОЇ чернетки: клон бере його з
         // джерела, бо версія, що змінила рівень, — уже інша методологія, а не
@@ -280,6 +285,11 @@ export function MethodologyVersionsPage(): JSX.Element {
       setCreating(false);
       setNewVersion('');
       showDone(t('methodologies.versionCreated'));
+
+      // Версія-скрипт править лише редактор скрипта: ведемо туди одразу.
+      if ((draft.engine ?? requestedEngine()) === 'Script') {
+        void navigate(`/admin/methodologies/${String(methodologyId)}/versions/${String(draft.id)}/script`);
+      }
     },
     onError: showApiError,
   });
@@ -313,42 +323,6 @@ export function MethodologyVersionsPage(): JSX.Element {
 
   const removeLoading = usePendingLoading(remove.isPending);
 
-  /**
-   * Публікація версії, відкритої на цьому екрані. Право `Calculation.Publish`.
-   *
-   * ⛔ Причина й дата обов'язкові на сервері (`ECR-CALC-0422`, ФВ-14.7); тут
-   * лише не пускають порожню форму — сама заборона лишається доменною.
-   */
-  const publish = useMutation({
-    mutationFn: () =>
-      publishMethodologyVersion(methodologyId, publishing?.versionId ?? 0, {
-        changeReason: publishReason,
-        // ⚠ `date`, не `Date`: `toISOString()` іде через UTC і ввечері
-        // зсуває дату на добу назад.
-        effectiveFrom: publishEffectiveFrom,
-      } satisfies PublishMethodologyRequest),
-    onSuccess: async (diff) => {
-      await queryClient.invalidateQueries({
-        queryKey: queryKeys.methodologies.versionsOf(methodologyId),
-      });
-      setPublishing(null);
-      setPublishReason('');
-      setPublishEffectiveFrom('');
-      setPublishDiff(diff);
-      showDone(t('methodologies.published'));
-    },
-
-    // ⚠ Публікація падає з переліком конкретних проблем — немає золотого
-    // тесту (ФВ-9.12), незайнята дата, цикл формул тощо (`ECR-CALC-0422`,
-    // `ECR-CALC-0409`). `showApiError` показує ТЕКСТ відмови сервера, а не
-    // узагальнене «не вдалося»: саме цей клас багів (проковтнута відповідь
-    // сервера) уже знайдено в іншому місці цього аудиту.
-    // ⚠ F-15/B-12: під назвою — перелік проблем із поля `problems`.
-    onError: showPublishError,
-  });
-
-  const publishLoading = usePendingLoading(publish.isPending);
-
   const placement = useMemo<ExpressionPlacement>(
     () => ({ methodologyVersionId: editing?.versionId }),
     [editing?.versionId],
@@ -366,7 +340,7 @@ export function MethodologyVersionsPage(): JSX.Element {
                 правила, обов'язкові колонки, золотий набір, прив'язки) і шукає
                 «що далі». */}
             {selected !== undefined && selected.status !== 'Published' && mayPublish && (
-              <Button onClick={() => setPublishing({ versionId: selected.id })}>
+              <Button onClick={() => publishFlow.open(selected.id)}>
                 {t('methodologies.publish')}
               </Button>
             )}
@@ -406,7 +380,15 @@ export function MethodologyVersionsPage(): JSX.Element {
             <Table.Tbody>
               {list.map((version) => (
                 <Table.Tr key={version.id}>
-                  <Table.Td>{version.versionNumber}</Table.Td>
+                  <Table.Td>
+                    {version.versionNumber}
+                    {opensScriptEditor(version) && (
+                      <Text span size="xs" c="dimmed">
+                        {' · '}
+                        {t('methodologyScript.engine.Script')}
+                      </Text>
+                    )}
+                  </Table.Td>
                   <Table.Td>
                     {/*
                      * ⛔ Тут стояв `<Badge variant={version.isEditable ? …}>
@@ -450,13 +432,25 @@ export function MethodologyVersionsPage(): JSX.Element {
                   </Table.Td>
                   <Table.Td>
                     <Group gap="xs" wrap="nowrap">
-                      <Button
-                        size="xs"
-                        variant={selected?.id === version.id ? 'filled' : 'subtle'}
-                        onClick={() => setSelectedId(String(version.id))}
-                      >
-                        {t('methodologies.openVersion')}
-                      </Button>
+                      {opensScriptEditor(version) ? (
+                        // ✎ MS: версія-скрипт відкривається в редакторі скрипта, а не в конфігураторі формул.
+                        <Button
+                          component={Link}
+                          to={`/admin/methodologies/${String(methodologyId)}/versions/${String(version.id)}/script`}
+                          size="xs"
+                          variant="subtle"
+                        >
+                          {t('methodologies.openVersion')}
+                        </Button>
+                      ) : (
+                        <Button
+                          size="xs"
+                          variant={selected?.id === version.id ? 'filled' : 'subtle'}
+                          onClick={() => setSelectedId(String(version.id))}
+                        >
+                          {t('methodologies.openVersion')}
+                        </Button>
+                      )}
 
                       {/* ⛔ Публікація — ЛИШЕ тут (L9-43: мертву копію з переліку
                           `MethodologiesPage.tsx` прибрано — він показує тільки
@@ -467,7 +461,7 @@ export function MethodologyVersionsPage(): JSX.Element {
                         <Button
                           size="xs"
                           variant="default"
-                          onClick={() => setPublishing({ versionId: version.id })}
+                          onClick={() => publishFlow.open(version.id)}
                         >
                           {t('methodologies.publish')}
                         </Button>
@@ -495,13 +489,28 @@ export function MethodologyVersionsPage(): JSX.Element {
         )}
       </AsyncBoundary>
 
-      {selected !== undefined && !selected.isEditable && (
+      {selected !== undefined && scriptSelected && (
+        <Alert color="statusInfo" data-testid="script-version-note">
+          <Group justify="space-between">
+            <Text size="sm">{t('methodologyScript.versions.note')}</Text>
+            <Button
+              component={Link}
+              to={`/admin/methodologies/${String(methodologyId)}/versions/${String(selected.id)}/script`}
+              size="xs"
+            >
+              {t('methodologyScript.versions.openEditor')}
+            </Button>
+          </Group>
+        </Alert>
+      )}
+
+      {selected !== undefined && !scriptSelected && !selected.isEditable && (
         <Alert color="statusWarning" title={t('methodologies.readOnly')}>
           {t('methodologies.readOnlyHint')}
         </Alert>
       )}
 
-      {selected !== undefined && (
+      {selected !== undefined && !scriptSelected && (
         /* ⚠ `fallback={null}`, а не заглушка: панель з'являється разом із
             обраною версією, і чанк іде мережею паралельно із запитом її
             змісту. Смужка-привид на цей час показувала б «щось вантажиться»
@@ -515,7 +524,7 @@ export function MethodologyVersionsPage(): JSX.Element {
         </Suspense>
       )}
 
-      {selected !== undefined && (
+      {selected !== undefined && !scriptSelected && (
         <>
           {/* ⚠ Формули — головна секція сторінки й тому перша; як і решта, згортається,
               а вибір пам'ятається на користувача (`MethodologySection`). */}
@@ -787,6 +796,19 @@ export function MethodologyVersionsPage(): JSX.Element {
           {/* ⛔ Показується лише для ПОРОЖНЬОЇ чернетки: клон бере рівень із
               джерела, і поле вводу поруч із обраним джерелом обіцяло б вибір,
               якого сервер не зробить. */}
+          {/* ✎ MS: рушій — лише для порожньої чернетки; клон бере його з джерела. */}
+          {showEngineChoice(copyFrom === null ? null : Number(copyFrom)) && (
+            <SegmentedControl
+              aria-label={t('methodologyScript.engine')}
+              value={engineChoice}
+              onChange={(value) => setEngineChoice(value === 'Formulas' ? 'Formulas' : 'Script')}
+              data={[
+                { value: 'Script', label: t('methodologyScript.engine.Script') },
+                { value: 'Formulas', label: t('methodologyScript.engine.Formulas') },
+              ]}
+            />
+          )}
+
           {copyFrom === null && (
             <Select
               label={t('methodologies.level')}
@@ -989,113 +1011,7 @@ export function MethodologyVersionsPage(): JSX.Element {
         </Group>
       </Modal>
 
-      {/*
-       * ⛔ Причина й дата — той самий патерн, що й публікація версії шаблону
-       * (`TemplateVersionPage.tsx`, `ReasonModal`): обидва поля обов'язкові на
-       * сервері (`ECR-CALC-0422`, ФВ-14.7), і кнопка тут вимкнена, доки вони
-       * порожні — не з ввічливості, а щоб не вести на гарантовану відмову.
-       */}
-      <ResizableModal
-        sizeKey="methodology.publish"
-        opened={publishing !== null}
-        onClose={() => setPublishing(null)}
-        title={t('methodologies.publishTitle')}
-      >
-        <Stack gap="sm">
-          <Textarea
-            label={t('methodologies.reason')}
-            description={t('methodologies.reasonHint')}
-            value={publishReason}
-            onChange={(event) => setPublishReason(event.currentTarget.value)}
-            minRows={3}
-            autosize
-            data-autofocus
-          />
-
-          <Suspense fallback={<Skeleton height="var(--ecr-ctl-height)" />}>
-            <DateOnlyInput
-              label={t('methodologies.effectiveFrom')}
-              description={t('methodologies.effectiveFromHint')}
-              value={publishEffectiveFrom}
-              onChange={setPublishEffectiveFrom}
-            />
-          </Suspense>
-
-          <Button
-            disabled={publishReason.trim().length === 0 || publishEffectiveFrom.length === 0}
-            loading={publishLoading}
-            onClick={() => {
-              // ⛔ B149 (KIT §6.9): діалог змонтований завжди, «Cancel» причину й дату не скидає — кнопка закритого `Modal`
-              // (~200 мс у DOM) публікувала версію вже після відмови.
-              if (publishing === null || publish.isPending) return;
-              publish.mutate();
-            }}
-          >
-            {t('methodologies.publish')}
-          </Button>
-        </Stack>
-      </ResizableModal>
-
-      {/*
-       * ⛔ Diff РЕЗУЛЬТАТІВ, не тексту формул (ФВ-9.6): змінений рядок виразу
-       * не каже нічого, змінена на 4 % емісія каже все. Єдине місце, де
-       * методологію публікують, — і єдиний показ diff після публікації (L9-43).
-       */}
-      <ResizableModal
-        sizeKey="methodology.publishDiff"
-        opened={publishDiff !== null}
-        onClose={() => setPublishDiff(null)}
-        title={t('methodologies.diffTitle')}
-        size="lg"
-      >
-        {publishDiff !== null && (
-          <Stack gap="sm">
-            <Text size="sm">
-              {t('methodologies.diffNumeric')}: {publishDiff.numeric.before} → {publishDiff.numeric.after}
-            </Text>
-            <Text size="sm">
-              {t('methodologies.diffCalendar')}: {publishDiff.calendar.before} → {publishDiff.calendar.after}
-            </Text>
-
-            <Text fw={600}>{t('methodologies.diffChanges')}</Text>
-            {publishDiff.changes.length === 0 ? (
-              <Text size="sm" c="dimmed">
-                {t('methodologies.diffNone')}
-              </Text>
-            ) : (
-              <Table striped withTableBorder>
-                <Table.Thead>
-                  <Table.Tr>
-                    <Table.Th>{t('methodologies.testCode')}</Table.Th>
-                    <Table.Th>{t('methodologies.output')}</Table.Th>
-                    <Table.Th>{t('methodologies.before')}</Table.Th>
-                    <Table.Th>{t('methodologies.after')}</Table.Th>
-                  </Table.Tr>
-                </Table.Thead>
-                <Table.Tbody>
-                  {publishDiff.changes.map((change) => (
-                    <Table.Tr
-                      key={`${change.testCode}:${change.outputCode}:${String(change.substanceEntryId)}`}
-                    >
-                      <Table.Td>{change.testCode}</Table.Td>
-                      <Table.Td>{change.outputCode}</Table.Td>
-                      <Table.Td>{change.before ?? '—'}</Table.Td>
-                      <Table.Td>{change.after}</Table.Td>
-                    </Table.Tr>
-                  ))}
-                </Table.Tbody>
-              </Table>
-            )}
-
-            {(publishDiff.warnings ?? []).length > 0 && (
-              <>
-                <Text fw={600}>{t('methodologies.warnings')}</Text>
-                <Code block>{(publishDiff.warnings ?? []).join('\n')}</Code>
-              </>
-            )}
-          </Stack>
-        )}
-      </ResizableModal>
+      {publishFlow.dialogs}
 
       {versionDeletion.dialog}
 

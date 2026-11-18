@@ -7,7 +7,8 @@ import {
   testFromPreviewRow,
   type TestCaseForm,
 } from '../testCases';
-import type { ScriptOutlineDto, ScriptPreviewRowDto } from '../types';
+import type { ScriptPreviewRowDto } from '../types';
+import { outline as outlineOf, previewRow, previewValue } from './fixtures';
 
 const inputJson = JSON.stringify({
   documentId: 12,
@@ -91,8 +92,7 @@ describe('тест методології: JSON ↔ форма', () => {
   });
 });
 
-const outline: ScriptOutlineDto = {
-  tables: [],
+const outline = outlineOf({
   inputs: [
     { name: 'Hours', optional: false },
     { name: 'Fuel', optional: false },
@@ -103,24 +103,21 @@ const outline: ScriptOutlineDto = {
     { code: 'OUT_S', unit: 't', perSubstance: true },
   ],
   substances: ['301', '304'],
-  imports: [],
-  constants: [],
-};
+});
 
 describe('тест із рядка перегляду', () => {
-  const row: ScriptPreviewRowDto = {
+  const row: ScriptPreviewRowDto = previewRow({
     rowKey: 'row-9',
     rowNumber: 9,
-    state: 'selected',
     values: [
-      { name: 'Hours', kind: 'number', text: '12,5' },
-      { name: 'Fuel', kind: 'text', text: 'Gasoline' },
-      { name: 'OUT', kind: 'number', text: '3.5' },
-      { name: 'OUT_S', substance: '301', kind: 'number', text: '1' },
-      { name: 'OUT_S', substance: '304', kind: 'number', text: '2' },
-      { name: 'OUT_S', substance: '999', kind: 'number', text: '9' },
+      previewValue({ name: 'Hours', kind: 'number', text: '12,5' }),
+      previewValue({ name: 'Fuel', kind: 'text', text: 'Gasoline' }),
+      previewValue({ name: 'OUT', kind: 'number', text: '3.5' }),
+      previewValue({ name: 'OUT_S', substance: '301', kind: 'number', text: '1' }),
+      previewValue({ name: 'OUT_S', substance: '304', kind: 'number', text: '2' }),
+      previewValue({ name: 'OUT_S', substance: '999', kind: 'number', text: '9' }),
     ],
-  };
+  });
 
   it('входи з контуру зі значеннями рядка; відсутні — null', () => {
     const form = testFromPreviewRow(row, {
@@ -160,16 +157,16 @@ describe('тест із рядка перегляду', () => {
   it('значення з помилкою не стає очікуванням', () => {
     const bad: ScriptPreviewRowDto = {
       ...row,
-      values: [{ name: 'OUT', kind: 'error', text: '#DIV/0', error: '#DIV/0' }],
+      values: [previewValue({ name: 'OUT', kind: 'error', text: '#DIV/0', error: '#DIV/0' })],
     };
     const form = testFromPreviewRow(bad, { outline, documentId: null, periodKey: 1, tableInstanceId: null });
     expect(form.expected).toEqual([]);
   });
 
   it('previewValueToInput: число, текст, порожнє, помилка', () => {
-    expect(previewValueToInput({ name: 'a', kind: 'number', text: '1,5' })).toBe(1.5);
-    expect(previewValueToInput({ name: 'a', kind: 'text', text: 'abc' })).toBe('abc');
-    expect(previewValueToInput({ name: 'a', kind: 'null', text: '' })).toBeNull();
-    expect(previewValueToInput({ name: 'a', kind: 'error', text: '#N/A', error: '#N/A' })).toBeNull();
+    expect(previewValueToInput(previewValue({ name: 'a', kind: 'number', text: '1,5' }))).toBe(1.5);
+    expect(previewValueToInput(previewValue({ name: 'a', kind: 'text', text: 'abc' }))).toBe('abc');
+    expect(previewValueToInput(previewValue({ name: 'a', kind: 'null', text: '' }))).toBeNull();
+    expect(previewValueToInput(previewValue({ name: 'a', kind: 'error', text: '#N/A', error: '#N/A' }))).toBeNull();
   });
 });

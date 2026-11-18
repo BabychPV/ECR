@@ -49,6 +49,8 @@ export interface ScriptEditorProps {
   readonly ariaLabel: string;
   readonly height?: number | string;
   readonly onSave?: () => void;
+  /** Курсор перемістився: нове зміщення в тексті (для кнопки «Редагувати як таблицю»). */
+  readonly onCursorChange?: (offset: number) => void;
   readonly readOnly?: boolean;
   readonly ref?: Ref<ScriptEditorHandle>;
 }
@@ -141,6 +143,8 @@ export function ScriptEditor(props: ScriptEditorProps): JSX.Element {
   onChangeRef.current = props.onChange;
   const onSaveRef = useRef(props.onSave);
   onSaveRef.current = props.onSave;
+  const onCursorRef = useRef(props.onCursorChange);
+  onCursorRef.current = props.onCursorChange;
   const completionRef = useRef(props.completion);
   completionRef.current = props.completion;
   const schemeRef = useRef(scheme);
@@ -235,6 +239,10 @@ export function ScriptEditor(props: ScriptEditorProps): JSX.Element {
 
         created.onDidChangeModelContent(() => {
           onChangeRef.current(created.getValue());
+        });
+        created.onDidChangeCursorPosition((event) => {
+          const current = created.getModel();
+          if (current !== null) onCursorRef.current?.(current.getOffsetAt(event.position));
         });
         created.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
           onSaveRef.current?.();

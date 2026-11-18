@@ -161,6 +161,7 @@ describe('prefetchRoute — прогрів даних (лише фабричні
       routes.adminRegistryDefinition,
       routes.adminMethodologies,
       routes.adminMethodologyVersions,
+      routes.adminMethodologyScript,
       routes.adminExpressions,
       routes.adminSecurity,
       routes.projects,

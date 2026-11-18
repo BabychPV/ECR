@@ -1,13 +1,13 @@
 import { apiFetch } from '@/api/client';
 import type {
-  FormatConstRequest,
-  FormatConstResponse,
+  FormatConstResultDto,
+  MethodologySubstancesDto,
   MethodologyScriptDto,
   PreviewScriptRequest,
   SaveScriptRequest,
   ScriptPreviewDto,
+  ScriptTextRequest,
   ScriptValidationDto,
-  ValidateScriptRequest,
 } from './types';
 
 /*
@@ -47,11 +47,17 @@ export function saveMethodologyScript(
 export function validateMethodologyScript(
   methodologyId: number,
   versionId: number,
-  body: ValidateScriptRequest,
+  body: ScriptTextRequest,
+  signal?: AbortSignal,
 ): Promise<ScriptValidationDto> {
   return apiFetch<ScriptValidationDto>(
     `/api/v1/methodologies/${String(methodologyId)}/versions/${String(versionId)}/script/validate`,
-    { method: 'POST', headers: JsonHeaders, body: JSON.stringify(body) },
+    {
+      method: 'POST',
+      headers: JsonHeaders,
+      body: JSON.stringify(body),
+      ...(signal === undefined ? {} : { signal }),
+    },
   );
 }
 
@@ -67,14 +73,24 @@ export function previewMethodologyScript(
   );
 }
 
-/** Канонічне форматування літерала `const`-мапи сервером. */
+/** Канонічне форматування літерала `const`-мапи сервером (`text = null` — не розібрано). */
 export function formatMethodologyScriptConst(
   methodologyId: number,
   versionId: number,
-  body: FormatConstRequest,
-): Promise<FormatConstResponse> {
-  return apiFetch<FormatConstResponse>(
+  body: ScriptTextRequest,
+): Promise<FormatConstResultDto> {
+  return apiFetch<FormatConstResultDto>(
     `/api/v1/methodologies/${String(methodologyId)}/versions/${String(versionId)}/script/format-const`,
     { method: 'POST', headers: JsonHeaders, body: JSON.stringify(body) },
+  );
+}
+
+/** Склад речовин версії: код речовини → Id запису довідника (для `OUT@<id>` у тестах). */
+export function methodologyScriptSubstances(
+  methodologyId: number,
+  versionId: number,
+): Promise<MethodologySubstancesDto> {
+  return apiFetch<MethodologySubstancesDto>(
+    `/api/v1/methodologies/${String(methodologyId)}/versions/${String(versionId)}/substances`,
   );
 }

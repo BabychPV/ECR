@@ -1,4 +1,4 @@
-import { ActionIcon, Badge, Group, Stack, Table, Text, Title } from '@mantine/core';
+import { ActionIcon, Badge, Button, Group, Stack, Table, Text, Title } from '@mantine/core';
 import { Fragment, useMemo, useState, type JSX } from 'react';
 import { t } from '@/shared/i18n';
 import type {
@@ -18,8 +18,8 @@ export interface ScriptPreviewTableProps {
   readonly onCreateTest?: (row: ScriptPreviewRowDto, table: ScriptPreviewTableDto) => void;
 }
 
-function stateLabel(state: ScriptPreviewRowState): string {
-  switch (state) {
+function stateLabel(state: string): string {
+  switch (state as ScriptPreviewRowState) {
     case 'selected':
       return t('methodologyScript.preview.state.selected');
     case 'inactive':
@@ -28,30 +28,34 @@ function stateLabel(state: ScriptPreviewRowState): string {
       return t('methodologyScript.preview.state.notSelected');
     case 'rejected':
       return t('methodologyScript.preview.state.rejected');
+    default:
+      return state;
   }
 }
 
-function stateColor(state: ScriptPreviewRowState): string {
-  switch (state) {
+function stateColor(state: string): string {
+  switch (state as ScriptPreviewRowState) {
     case 'selected':
       return 'green';
     case 'rejected':
       return 'statusError';
     case 'inactive':
       return 'statusWarning';
-    case 'notSelected':
+    default:
       return 'gray';
   }
 }
 
-function issueLabel(issue: ScriptPreviewIssue): string {
-  switch (issue) {
+function issueLabel(issue: string): string {
+  switch (issue as ScriptPreviewIssue) {
     case 'missingInputs':
       return t('methodologyScript.preview.issue.missingInputs');
     case 'stepError':
       return t('methodologyScript.preview.issue.stepError');
     case 'rejected':
       return t('methodologyScript.preview.issue.rejected');
+    default:
+      return issue;
   }
 }
 
@@ -187,16 +191,15 @@ function PreviewRow(props: {
                 </Table.Tbody>
               </Table>
               {onCreateTest !== undefined && row.state === 'selected' && (
-                <ActionIcon
+                <Button
+                  size="xs"
                   variant="light"
-                  aria-label={t('methodologyScript.preview.createTest')}
-                  title={t('methodologyScript.preview.createTest')}
                   onClick={() => {
                     onCreateTest(row, table);
                   }}
                 >
-                  +
-                </ActionIcon>
+                  {t('methodologyScript.preview.createTest')}
+                </Button>
               )}
             </Group>
           </Table.Td>
