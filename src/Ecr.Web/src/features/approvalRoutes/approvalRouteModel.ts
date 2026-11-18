@@ -67,13 +67,23 @@ export function projectTemplateRoutesKey(projectId: number): readonly unknown[] 
   return ['approval-route', 'project-templates', projectId];
 }
 
-const Sources = ['own', 'template', 'project', 'default', 'none'] as const;
-
-/** Ключ каталогу для джерела маршруту (`effectiveSource`); невідоме значення — «маршруту немає», а не сирий рядок. */
+/**
+ * Ключ каталогу для джерела маршруту (`effectiveSource`); невідоме значення — «маршруту немає», а не сирий рядок.
+ * ⚠ Ключі — літералами: сторож `EndpointCoverageTests` (ключ змінною) мусить бачити, які рядки доходять до `t`.
+ */
 export function sourceLabel(source: string): string {
-  const known = (Sources as readonly string[]).includes(source) ? source : 'none';
-
-  return t(`approvalRoutes.source.${known}`);
+  switch (source) {
+    case 'own':
+      return t('approvalRoutes.source.own');
+    case 'template':
+      return t('approvalRoutes.source.template');
+    case 'project':
+      return t('approvalRoutes.source.project');
+    case 'default':
+      return t('approvalRoutes.source.default');
+    default:
+      return t('approvalRoutes.source.none');
+  }
 }
 
 /** Назва ролі: локалізована назва, інакше код; позначка загального `Approver`. */

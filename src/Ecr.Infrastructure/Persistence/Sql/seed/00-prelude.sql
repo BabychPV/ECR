@@ -3349,7 +3349,14 @@ SELECT v.[Key], v.Lang, v.Val
     (N'workflow.routeAddStep', N'ru', N'Добавить шаг'),
     (N'workflow.routeAddStepHint', N'ru', N'Роль, которая утверждает на этом шаге. Одна и та же роль может встречаться дважды, но не два раза подряд.'),
     (N'workflow.routeSaved', N'ru', N'Шагов в маршруте: {count}.'),
-    (N'workflow.routeCleared', N'ru', N'Маршрут удалён: согласование снова одноэтапное.'),
+    (N'workflow.routeCleared', N'ru', N'Маршрут удалён: согласование снова одноэтапное.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
     -- B155:approval-routes ── ru: маршруты согласования шаблона, исключения проекта и типовой (вариант C); en — в features/CATALOG-en-base.sql ──
     (N'approvalRoutes.title', N'ru', N'Согласование'),
     (N'approvalRoutes.templateHint', N'ru', N'Кто утверждает листы этого шаблона во всех проектах, если проект не задал собственное исключение.'),
@@ -6400,7 +6407,14 @@ SELECT v.[Key], v.Lang, v.Val
     (N'workflow.routeAddStep', N'kz', N'Қадам қосу'),
     (N'workflow.routeAddStepHint', N'kz', N'Осы қадамда бекітетін рөл. Бір рөл екі рет кездесуі мүмкін, бірақ қатарынан екі рет емес.'),
     (N'workflow.routeSaved', N'kz', N'Маршруттағы қадамдар: {count}.'),
-    (N'workflow.routeCleared', N'kz', N'Маршрут жойылды: келісу қайтадан бір кезеңді.'),
+    (N'workflow.routeCleared', N'kz', N'Маршрут жойылды: келісу қайтадан бір кезеңді.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
     -- B155:approval-routes ── kz: үлгі, жоба ерекшелігі және әдепкі келісу маршруттары (C нұсқасы); ⚠ жұмыс аудармасы, терминологқа ──
     (N'approvalRoutes.title', N'kz', N'Келісу'),
     (N'approvalRoutes.templateHint', N'kz', N'Жоба өз ерекшелігін белгілемесе, барлық жобаларда осы үлгінің парақтарын кім бекітеді.'),
