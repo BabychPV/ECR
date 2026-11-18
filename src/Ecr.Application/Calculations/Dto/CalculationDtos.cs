@@ -41,6 +41,7 @@ public sealed record MethodologyDto(
 /// <param name="NumericMode">Арифметика; <c>Legacy</c> відтворює числа чинної системи.</param>
 /// <param name="CalendarMode">Джерело тривалості періоду.</param>
 /// <param name="TraceLevel">Скільки писати в <c>calc.CalculationStep</c>.</param>
+/// <param name="Engine">Рушій версії: формули чи скрипт (MS); для версій до MS — <c>Formulas</c>.</param>
 public sealed record MethodologyVersionDto(
     int Id,
     string VersionNumber,
@@ -50,7 +51,8 @@ public sealed record MethodologyVersionDto(
     DateOnly? EffectiveTo,
     NumericMode NumericMode,
     CalendarMode CalendarMode,
-    TraceLevel TraceLevel);
+    TraceLevel TraceLevel,
+    MethodologyEngine Engine = MethodologyEngine.Formulas);
 
 /// <summary>Стан прогону розрахунку.</summary>
 /// <remarks>

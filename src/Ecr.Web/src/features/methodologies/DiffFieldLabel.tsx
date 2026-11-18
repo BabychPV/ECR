@@ -47,6 +47,8 @@ export function DiffFieldLabel({ field }: { field: string }): JSX.Element {
       return <>{t('methodologyDiffField.expectedJson')}</>;
     case 'tolerance':
       return <>{t('methodologyDiffField.tolerance')}</>;
+    case 'scriptText':
+      return <>{t('methodologyDiffField.scriptText')}</>;
     default:
       return <Code>{field}</Code>;
   }

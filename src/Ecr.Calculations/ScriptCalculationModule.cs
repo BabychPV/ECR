@@ -13,13 +13,20 @@ namespace Ecr.Calculations;
 /// <summary>Параметри підготовки скрипта для живого перегляду.</summary>
 /// <param name="TextOverride">
 /// Текст скрипта замість збереженого (чернетка в редакторі); <c>null</c> — збережений. Бібліотеки беруться з
-/// матеріалізованих імпортів версії: імпорти, дописані в текст, але ще не збережені, перегляд не бачить.
+/// матеріалізованих імпортів версії, якщо не задано <paramref name="ImportResolver"/>.
 /// </param>
 /// <param name="AllowShadowLibraries">
 /// Паритет (план §8.4): бібліотека може бути ще на <c>Engine = Formulas</c> з тіньовим текстом — береться її тіньовий
 /// текст. Типово <c>false</c>: прогін версії-скрипта вимагає бібліотек на рушії <c>Script</c>.
 /// </param>
-public sealed record ScriptPrepareOptions(string? TextOverride = null, bool AllowShadowLibraries = false);
+/// <param name="ImportResolver">
+/// Імпорти ТЕКСТУ (<paramref name="TextOverride"/>) за бізнес-датою: незбережений <c>import X;</c> теж працює.
+/// Діє лише разом із <paramref name="TextOverride"/>.
+/// </param>
+public sealed record ScriptPrepareOptions(
+    string? TextOverride = null,
+    bool AllowShadowLibraries = false,
+    Func<DateOnly, CancellationToken, Task<IReadOnlyList<MethodologyLibrary>>>? ImportResolver = null);
 
 /// <summary>
 /// Модуль розрахунку версій методологій на рушії <see cref="MethodologyEngine.Script"/> (MS, план §4.4).
@@ -110,7 +117,7 @@ public sealed class ScriptCalculationModule(
         ArgumentNullException.ThrowIfNull(methodology);
 
         var period = await CalculationSteps.PeriodAsync(periods, calendar, methodology, documentId, periodKey, ct).ConfigureAwait(false);
-        var program = await _loader.LoadAsync(methodology, period.End, options?.TextOverride, ct, options?.AllowShadowLibraries ?? false).ConfigureAwait(false);
+        var program = await _loader.LoadAsync(methodology, period.End, options?.TextOverride, options?.ImportResolver, ct, options?.AllowShadowLibraries ?? false).ConfigureAwait(false);
         var script = program.Main;
 
         var substances = await methodologies.GetSubstancesAsync(methodology.MethodologyVersionId, ct).ConfigureAwait(false);
@@ -280,7 +287,7 @@ public sealed class ScriptCalculationModule(
     {
         ArgumentNullException.ThrowIfNull(methodology);
 
-        var program = await _loader.LoadAsync(methodology, onDate, textOverride: null, ct).ConfigureAwait(false);
+        var program = await _loader.LoadAsync(methodology, onDate, textOverride: null, importResolver: null, ct).ConfigureAwait(false);
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var monthly = new List<string>();
         foreach (var script in ScriptRuntime.AllScripts(program))

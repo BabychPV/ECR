@@ -90,6 +90,9 @@ public sealed class SaveMethodologyCategoryHandler(
         var version = await drafts.FindVersionAsync(methodologyVersionId, ct).ConfigureAwait(false)
             ?? throw SaveMethodologyCategoryRuleHandler.VersionNotFound(methodologyVersionId);
 
+        // ⛔ MS: версія-скрипт не редагується вручну — і тоді, коли обробник кличуть повз контролер.
+        MethodologyVersionScope.RequireHandEditable(version);
+
         var categories = await drafts.GetCategoriesTrackedAsync(methodologyVersionId, ct).ConfigureAwait(false);
         var usage = await drafts.CountConstantsByCategoryAsync(methodologyVersionId, ct).ConfigureAwait(false);
 
@@ -157,6 +160,9 @@ public sealed class DeleteMethodologyCategoryHandler(
 
         var version = await drafts.FindVersionAsync(methodologyVersionId, ct).ConfigureAwait(false)
             ?? throw SaveMethodologyCategoryRuleHandler.VersionNotFound(methodologyVersionId);
+
+        // ⛔ MS: версія-скрипт не редагується вручну — і тоді, коли обробник кличуть повз контролер.
+        MethodologyVersionScope.RequireHandEditable(version);
 
         var categories = await drafts.GetCategoriesTrackedAsync(methodologyVersionId, ct).ConfigureAwait(false);
         var category = categories.FirstOrDefault(c => string.Equals(c.Code, code, StringComparison.Ordinal))

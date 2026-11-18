@@ -165,6 +165,68 @@ public interface IMethodologyStore
     public Task ReplaceScriptReadTablesAsync(int versionId, IReadOnlyList<string> tableCodes, CancellationToken ct);
 
     /// <summary>
+    /// Повністю замінює виходи версії-скрипта (<c>calc.MethodologyOutput</c>) — рядок на кожен <c>output</c> (MS, план 5.1).
+    /// </summary>
+    /// <param name="versionId">Версія методології.</param>
+    /// <param name="rows">Виходи; коди без урахування регістру унікальні.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Задача заміни; збереження робить <c>IUnitOfWork</c>.</returns>
+    /// <remarks>Рядок, у якого код, одиниця, порядок і ознака «по речовині» не змінилися, лишається як є.</remarks>
+    public Task ReplaceScriptOutputsAsync(int versionId, IReadOnlyList<ScriptOutputRow> rows, CancellationToken ct);
+
+    /// <summary>
+    /// Повністю замінює речовини версії-скрипта (<c>calc.MethodologySubstance</c>); порядок — порядок переліку.
+    /// </summary>
+    /// <param name="versionId">Версія методології.</param>
+    /// <param name="substanceEntryIds">Id записів довідника речовин; дублікати зливаються.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Задача заміни; збереження робить <c>IUnitOfWork</c>.</returns>
+    public Task ReplaceScriptSubstancesAsync(int versionId, IReadOnlyList<long> substanceEntryIds, CancellationToken ct);
+
+    /// <summary>
+    /// Повністю замінює імпорти версії-скрипта (<c>calc.MethodologyImport</c>).
+    /// </summary>
+    /// <param name="versionId">Версія методології-власника.</param>
+    /// <param name="importedMethodologyIds">Імпортовані методології (бібліотеки); дублікати зливаються.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Задача заміни; збереження робить <c>IUnitOfWork</c>.</returns>
+    public Task ReplaceScriptImportsAsync(int versionId, IReadOnlyList<int> importedMethodologyIds, CancellationToken ct);
+
+    /// <summary>
+    /// Id записів довідника речовин за кодами речовин (те саме джерело, що <see cref="GetSubstanceCodesAsync"/>).
+    /// </summary>
+    /// <param name="codes">Коди речовин («301», «NOx»).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Код (як у запиті) → Id запису; невідомих кодів у словнику немає.</returns>
+    /// <remarks>
+    /// Код речовини — значення поля <c>SUBSTANCE_CODE</c> запису довідника, інакше код самого запису; шукаються лише
+    /// записи довідників, що мають таке поле. Збіг неточний за регістром, якщо так порівнює база. Кілька записів з одним
+    /// кодом — береться запис із найменшим Id.
+    /// </remarks>
+    public Task<IReadOnlyDictionary<string, long>> FindSubstanceEntryIdsAsync(
+        IReadOnlyCollection<string> codes, CancellationToken ct);
+
+    /// <summary>
+    /// «Живі» таблиці з цим кодом: таблиця останньої опублікованої версії кожного шаблону, разом із колонками й
+    /// псевдонімами місячних входів.
+    /// </summary>
+    /// <param name="tableCode">Код таблиці.</param>
+    /// <param name="templateCode">Код шаблону; <c>null</c> — будь-який шаблон.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Таблиці за кодом шаблону; порожньо — такої таблиці немає ні в одному опублікованому шаблоні.</returns>
+    public Task<IReadOnlyList<LiveTable>> FindLiveTablesByCodeAsync(
+        string tableCode, string? templateCode, CancellationToken ct);
+
+    /// <summary>
+    /// Залежності методологій від методологій-джерел (<c>calc.MethodologyDependency</c>): «хто → від кого».
+    /// </summary>
+    /// <param name="fromMethodologyIds">Методології, чиї ребра потрібні.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Методологія → ідентифікатори тих, від кого вона залежить; методології без ребер у словнику немає.</returns>
+    public Task<IReadOnlyDictionary<int, IReadOnlyList<int>>> GetMethodologyDependenciesAsync(
+        IReadOnlyCollection<int> fromMethodologyIds, CancellationToken ct);
+
+    /// <summary>
     /// Методології, що мають ОПУБЛІКОВАНУ або ВИВЕДЕНУ З ОБІГУ версію, яка читає бодай одну з
     /// названих таблиць.
     /// </summary>
@@ -510,3 +572,37 @@ public sealed record MethodologyPublicationEntry(
     int ChangedByUserId,
     string? ChangedByName,
     string? ResultDiffJson);
+
+/// <summary>Вихід версії-скрипта для матеріалізації (MS, план 5.3).</summary>
+/// <param name="Code">Код виходу.</param>
+/// <param name="UnitId">Одиниця виходу.</param>
+/// <param name="Ordinal">Порядок у тексті з 1.</param>
+/// <param name="IsPerSubstance">Вихід по речовині.</param>
+public sealed record ScriptOutputRow(string Code, int UnitId, int Ordinal, bool IsPerSubstance);
+
+/// <summary>Колонка «живої» таблиці.</summary>
+/// <param name="Id">Ідентифікатор колонки.</param>
+/// <param name="Code">Код колонки.</param>
+/// <param name="DataType">Тип даних.</param>
+/// <param name="IsMonthColumn">Місячна колонка.</param>
+/// <param name="MonthNumber">Номер місяця 1..12 для місячної колонки.</param>
+/// <param name="UnitId">Одиниця колонки.</param>
+public sealed record LiveColumn(
+    int Id, string Code, Ecr.Domain.Enums.CellDataType DataType, bool IsMonthColumn, byte? MonthNumber, int? UnitId);
+
+/// <summary>Таблиця з останньої опублікованої версії шаблону (MS, план 5.3).</summary>
+/// <param name="TemplateId">Шаблон.</param>
+/// <param name="TemplateCode">Код шаблону.</param>
+/// <param name="TemplateVersionId">Остання опублікована версія шаблону.</param>
+/// <param name="TableDefId">Таблиця.</param>
+/// <param name="TableCode">Код таблиці.</param>
+/// <param name="Columns">Колонки (без видалених).</param>
+/// <param name="MonthAliases">Псевдоніми місячних входів таблиці (<c>cfg.MonthInputAlias</c>), без повторів.</param>
+public sealed record LiveTable(
+    int TemplateId,
+    string TemplateCode,
+    int TemplateVersionId,
+    int TableDefId,
+    string TableCode,
+    IReadOnlyList<LiveColumn> Columns,
+    IReadOnlyList<string> MonthAliases);

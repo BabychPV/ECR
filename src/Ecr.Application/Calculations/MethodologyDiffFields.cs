@@ -56,6 +56,9 @@ public static class MethodologyDiffFields
     /// <summary>Тест: допуск.</summary>
     public const string Tolerance = "tolerance";
 
+    /// <summary>Скрипт версії: текст (MS).</summary>
+    public const string ScriptText = "scriptText";
+
     /// <summary>Усі поля — рефлексією, щоб новий член не треба було дописувати вдруге.</summary>
     public static IReadOnlyList<string> All { get; } =
         [.. typeof(MethodologyDiffFields)

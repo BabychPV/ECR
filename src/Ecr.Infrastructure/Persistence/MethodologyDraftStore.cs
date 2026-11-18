@@ -34,6 +34,9 @@ public sealed class MethodologyDraftStore(EcrDbContext db) : IMethodologyDraftSt
     public async Task<Methodology?> FindByCodeAsync(string code, CancellationToken ct)
         => await db.Methodologies
             .AsNoTracking()
+            // ⚠ Із версіями: компілятор скриптів вибирає версію бібліотеки на дату (`VersionOn`); без них
+            // жодна бібліотека не знаходилась би в реальній базі.
+            .Include(m => m.Versions)
             .FirstOrDefaultAsync(m => m.Code == code, ct)
             .ConfigureAwait(false);
 

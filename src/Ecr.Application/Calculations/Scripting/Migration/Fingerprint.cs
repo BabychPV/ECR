@@ -4,9 +4,8 @@ using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using Ecr.MethodologyScriptMigration.Conversion;
 
-namespace Ecr.MethodologyScriptMigration;
+namespace Ecr.Application.Calculations.Scripting.Migration;
 
 /// <summary>
 /// Відбиток джерела (план, розд. 8.1, 8.5): SHA-256 канонічного, не залежного від порядку рядків JSON СТАРОГО вмісту версії.

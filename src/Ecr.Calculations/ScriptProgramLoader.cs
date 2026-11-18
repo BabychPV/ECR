@@ -64,10 +64,18 @@ internal sealed class ScriptProgramLoader(IMethodologyStore methodologies, Scrip
     /// <param name="methodology">Версія методології.</param>
     /// <param name="onDate">Бізнес-дата: кінець періоду.</param>
     /// <param name="textOverride">Текст замість збереженого (живий перегляд); <c>null</c> — збережений.</param>
+    /// <param name="importResolver">
+    /// Імпорти ТЕКСТУ замість матеріалізованих (живий перегляд незбереженого тексту); <c>null</c> — збережені імпорти версії.
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
     /// <param name="allowShadowLibraries">Бібліотеки можуть бути на <c>Formulas</c> з тіньовим текстом (паритет).</param>
     public async Task<LoadedProgram> LoadAsync(
-        MethodologyDescriptor methodology, DateOnly onDate, string? textOverride, CancellationToken ct, bool allowShadowLibraries = false)
+        MethodologyDescriptor methodology,
+        DateOnly onDate,
+        string? textOverride,
+        Func<DateOnly, CancellationToken, Task<IReadOnlyList<MethodologyLibrary>>>? importResolver,
+        CancellationToken ct,
+        bool allowShadowLibraries = false)
     {
         ArgumentNullException.ThrowIfNull(methodology);
 
@@ -82,8 +90,11 @@ internal sealed class ScriptProgramLoader(IMethodologyStore methodologies, Scrip
         }
 
         var mode = script?.NumericMode ?? methodology.NumericMode;
+        IReadOnlyList<MethodologyLibrary>? topImports = importResolver is null || textOverride is null
+            ? null
+            : await importResolver(onDate, ct).ConfigureAwait(false);
         var libraries = await LoadLibrariesAsync(
-                methodology.MethodologyVersionId, onDate, 1, [methodology.Code], allowShadowLibraries, ct)
+                methodology.MethodologyVersionId, onDate, 1, [methodology.Code], topImports, allowShadowLibraries, ct)
             .ConfigureAwait(false);
 
         var hash = textOverride is null && script?.Hash is { } stored ? stored : ScriptCompiler.Hash(text);
@@ -103,10 +114,17 @@ internal sealed class ScriptProgramLoader(IMethodologyStore methodologies, Scrip
     }
 
     private async Task<Dictionary<string, LibraryProgram>> LoadLibrariesAsync(
-        int versionId, DateOnly onDate, int depth, IReadOnlyList<string> chain, bool allowShadowLibraries, CancellationToken ct)
+        int versionId,
+        DateOnly onDate,
+        int depth,
+        IReadOnlyList<string> chain,
+        IReadOnlyList<MethodologyLibrary>? importsOverride,
+        bool allowShadowLibraries,
+        CancellationToken ct)
     {
         var result = new Dictionary<string, LibraryProgram>(StringComparer.Ordinal);
-        var imports = await methodologies.ResolveImportsAsync(versionId, onDate, ct).ConfigureAwait(false);
+        var imports = importsOverride
+            ?? await methodologies.ResolveImportsAsync(versionId, onDate, ct).ConfigureAwait(false);
         if (imports.Count == 0)
         {
             return result;
@@ -141,7 +159,7 @@ internal sealed class ScriptProgramLoader(IMethodologyStore methodologies, Scrip
                     ("library", import.MethodologyCode));
             }
 
-            var nested = await LoadLibrariesAsync(libraryVersionId, onDate, depth + 1, [.. chain, import.MethodologyCode], allowShadowLibraries, ct)
+            var nested = await LoadLibrariesAsync(libraryVersionId, onDate, depth + 1, [.. chain, import.MethodologyCode], null, allowShadowLibraries, ct)
                 .ConfigureAwait(false);
             var hash = libraryScript.Hash ?? ScriptCompiler.Hash(libraryScript.Text);
             var key = ScriptProgramCache.Key(libraryVersionId, hash, Signature(nested));

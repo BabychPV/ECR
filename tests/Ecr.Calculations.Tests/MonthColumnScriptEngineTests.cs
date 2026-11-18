@@ -1,4 +1,5 @@
 // tests/Ecr.Calculations.Tests/MonthColumnScriptEngineTests.cs
+using Ecr.Application.Calculations.Scripting.Migration;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Calculations;

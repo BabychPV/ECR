@@ -182,6 +182,49 @@ public sealed class MethodologyVersion : Entity<int>
         Engine = engine;
     }
 
+    /// <summary>
+    /// Перемикає рушій ОПУБЛІКОВАНОЇ чи виведеної з обігу версії — лише для перенесення методологій на скрипт
+    /// (MS, план 8.5). Чернетку перемикає <see cref="SwitchEngine"/>.
+    /// </summary>
+    /// <param name="engine">Новий рушій.</param>
+    /// <exception cref="DomainException">
+    /// <c>ECR-CALC-0409</c> — версія чернетка (для неї є <see cref="SwitchEngine"/>);
+    /// <c>ECR-CALC-0422</c> — перемикання на <c>Script</c> без тексту скрипта.
+    /// </exception>
+    /// <remarks>
+    /// ⛔ Дозволено лише дорогою перенесення, яка перед викликом перевіряє: текст компілюється без діагностик, а
+    /// матеріалізація з нього збігається з наявними виходами, речовинами й імпортами. Сама сутність цього не знає.
+    /// Старі формули, константи й правила не змінюються: повернення на <c>Formulas</c> лишається можливим.
+    /// </remarks>
+    public void SwitchEngineForMigration(MethodologyEngine engine)
+    {
+        if (Status is not (TemplateVersionStatus.Published or TemplateVersionStatus.Deprecated))
+        {
+            throw new DomainException(
+                "ECR-CALC-0409",
+                $"Версія {Version} не опублікована: рушій чернетки перемикає SwitchEngine.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0409.scriptSwitchNotPublished",
+                    ["version"] = Version,
+                });
+        }
+
+        if (engine == MethodologyEngine.Script && string.IsNullOrWhiteSpace(ScriptText))
+        {
+            throw new DomainException(
+                "ECR-CALC-0422",
+                $"Версія {Version}: перемкнути на скрипт неможливо — тексту скрипта немає.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.scriptEmpty",
+                    ["version"] = Version,
+                });
+        }
+
+        Engine = engine;
+    }
+
     /// <summary>Фіксує контрольну суму вмісту. Лише для чернетки.</summary>
     /// <param name="hash">SHA-256 нормалізованого вмісту версії.</param>
     public void SetContentHash(byte[] hash)

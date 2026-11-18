@@ -112,18 +112,47 @@ public sealed class CompareMethodologyVersionsHandler(
                 nowRule));
         }
 
+        // ✎ MS: текст скрипта — один запис на версію, як і правило категорії. Порівнюється з нормалізацією переводів
+        // рядків: різниця лише в CRLF/LF не є зміною скрипта (хеш рахується так само).
+        var wasScript = NormalizeScript(before.ScriptText);
+        var nowScript = NormalizeScript(after.ScriptText);
+        if (!string.Equals(wasScript, nowScript, StringComparison.Ordinal))
+        {
+            items.Add(new MethodologyDiffItemDto(
+                MethodologyDiffItemKind.Script,
+                ScriptCode,
+                null,
+                null,
+                null,
+                wasScript is null
+                    ? MethodologyDiffChange.Added
+                    : nowScript is null ? MethodologyDiffChange.Removed : MethodologyDiffChange.Changed,
+                wasScript is null || nowScript is null ? [] : [MethodologyDiffFields.ScriptText],
+                before.ScriptText,
+                after.ScriptText));
+        }
+
         return items;
     }
 
     /// <summary>Код запису правила категорії в переліку відмінностей.</summary>
     public const string CategoryRuleCode = "category-rule";
 
+    /// <summary>Код запису тексту скрипта в переліку відмінностей.</summary>
+    public const string ScriptCode = "script";
+
+    private static string? NormalizeScript(string? text)
+        => string.IsNullOrWhiteSpace(text)
+            ? null
+            : text.ReplaceLineEndings("\n");
+
     private async Task<VersionContent> ReadAsync(int versionId, CancellationToken ct)
         => new(
             await methodologies.GetFormulasAsync(versionId, ct).ConfigureAwait(false),
             await methodologies.GetConstantsAsync(versionId, ct).ConfigureAwait(false),
             await drafts.GetTestCaseEntitiesAsync(versionId, ct).ConfigureAwait(false),
-            await methodologies.GetCategoryRuleAsync(versionId, ct).ConfigureAwait(false));
+            await methodologies.GetCategoryRuleAsync(versionId, ct).ConfigureAwait(false),
+            (await methodologies.GetScriptAsync(versionId, ct).ConfigureAwait(false))?.Text);
 
     private static void Diff<T>(
         List<MethodologyDiffItemDto> items,
@@ -173,8 +202,10 @@ public sealed class CompareMethodologyVersionsHandler(
 /// <param name="Constants">Константи з усіма варіантами.</param>
 /// <param name="TestCases">Тести золотого набору.</param>
 /// <param name="CategoryRule">Вираз правила категорії константи (L-2); <c>null</c> — правила немає.</param>
+/// <param name="ScriptText">Текст скрипта версії (MS); <c>null</c> — тексту немає.</param>
 public sealed record VersionContent(
     IReadOnlyList<MethodologyFormula> Formulas,
     IReadOnlyList<MethodologyConstant> Constants,
     IReadOnlyList<MethodologyTestCaseEntity> TestCases,
-    string? CategoryRule = null);
+    string? CategoryRule = null,
+    string? ScriptText = null);

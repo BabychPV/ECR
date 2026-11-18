@@ -94,6 +94,9 @@ public sealed class SaveMethodologySubstancesHandler(
         var version = await drafts.FindVersionAsync(methodologyVersionId, ct).ConfigureAwait(false)
             ?? throw VersionNotFound(methodologyVersionId);
 
+        // ⛔ MS: версія-скрипт не редагується вручну — і тоді, коли обробник кличуть повз контролер.
+        MethodologyVersionScope.RequireHandEditable(version);
+
         var wanted = Validate(substanceEntryIds);
 
         await RequireExistingAsync(wanted, ct).ConfigureAwait(false);

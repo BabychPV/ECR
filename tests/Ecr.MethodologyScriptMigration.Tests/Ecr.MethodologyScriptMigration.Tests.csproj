@@ -18,4 +18,8 @@
     <PackageReference Include="coverlet.collector" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Using Include="Ecr.Application.Calculations.Scripting.Migration" />
+  </ItemGroup>
+
 </Project>
