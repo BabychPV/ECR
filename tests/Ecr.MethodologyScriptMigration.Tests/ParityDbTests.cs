@@ -166,6 +166,36 @@ public sealed class ParityDbTests(SqlServerFixture sql)
         Assert.Contains("\"unproven\"", await File.ReadAllTextAsync(report), StringComparison.Ordinal);
     }
 
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Затінена_версія_що_не_чинна_в_жодному_періоді_документів_названа_недоведеною_а_решта_зелена()
+    {
+        var scene = await ArrangeAsync(209908);
+        await ShadowAsync(scene);
+        await using (var db = MigrationCli.CreateContext(sql.ConnectionString, readOnly: false))
+        {
+            var first = await db.MethodologyVersions.SingleAsync(v => v.Id == scene.MainVersionId);
+            // Майбутня версія з тим самим текстом: період 2099 її не обирає, тож жодного екземпляра для неї не порівнюється.
+            var future = new MethodologyVersion(first.MethodologyId, "V2", CalculationLevel.Configuration, 1, Now);
+            db.MethodologyVersions.Add(future);
+            await db.SaveChangesAsync();
+            future.Publish(1, "seed", new DateOnly(2100, 1, 1), true, Now);
+            future.SetScript(first.ScriptText!, ScriptCompiler.Hash(first.ScriptText!));
+            await db.SaveChangesAsync();
+        }
+
+        var report = await RunAsync(scene);
+
+        Assert.True(report.IsProven, string.Join("; ", report.Mismatches.Select(m => m.Aspect)));
+        Assert.Equal(1, report.Targets);
+        Assert.Equal(scene.MainCode + " V2", Assert.Single(report.UnprovenVersions).Split(':')[0]);
+
+        var output = Path.Combine(Path.GetTempPath(), "ecr-ms-parity-" + Guid.NewGuid().ToString("N"), "parity.json");
+        var cli = await CliAsync("parity", "--connection", sql.ConnectionString, "--methodology", scene.MainCode, "--out", output);
+        Assert.Equal(MigrationCli.Failures, cli.Code);
+        Assert.Contains("НЕДОВЕДЕНО " + scene.MainCode + " V2", cli.Output, StringComparison.Ordinal);
+    }
+
     // ───── стенд ─────
 
     private async Task<ParityRunReport> RunAsync(Scene scene)
