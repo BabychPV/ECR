@@ -1,4 +1,6 @@
-﻿$ErrorActionPreference='Stop'
+﻿# -MissingEvery N: у середньому кожна N-та комірка вводу лишається порожньою (за замовчуванням 15, як у репетиції); 0 — повний ввід.
+param([int]$MissingEvery=15)
+$ErrorActionPreference='Stop'
 $sp=$env:MS_REHEARSAL_DIR; if(-not $sp){ throw 'Задайте MS_REHEARSAL_DIR (тека для паролів і проміжних файлів, поза репозиторієм).' }
 $base='http://localhost:5092'
 $sess=New-Object Microsoft.PowerShell.Commands.WebRequestSession
@@ -23,7 +25,7 @@ foreach($tb in $model.tables){
     $cells=@()
     foreach($mn in 1..12){
       $v=[decimal][Math]::Round(0.1+$rng.NextDouble()*40,4)
-      if($rng.Next(0,15) -eq 0){ continue }   # пропущені місяці: порожні комірки
+      if($MissingEvery -gt 0 -and $rng.Next(0,$MissingEvery) -eq 0){ continue }   # пропущені місяці: порожні комірки
       $cells+=@{columnCode=('M{0:00}' -f $mn);isEmpty=$false;value=$v}
     }
     $rows+=@{rowKey=[string]$row.key;baseVersion=$null;cells=$cells}
