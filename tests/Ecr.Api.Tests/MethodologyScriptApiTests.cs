@@ -187,8 +187,13 @@ public sealed class MethodologyScriptApiTests(SqlServerFixture sql)
     /// <summary>Прибирає справжній модуль скрипта: фейк тесту має відповідати на <c>CanHandle</c> першим.</summary>
     private static void WithoutRealScriptModule(IServiceCollection services)
     {
+        // ⚠ Модуль скрипта зареєстровано ФАБРИКОЮ (`p => p.GetRequiredService<ScriptCalculationModule>()`), тож
+        // `ImplementationType` у нього порожній: звірка лише за типом реалізації його не знаходила, справжній модуль
+        // лишався першим за `CanHandle` і золотий набір ішов у нього (404 `ECR-DOC-0404` «Table instance 0»).
         foreach (var descriptor in services
-                     .Where(d => d.ServiceType == typeof(ICalculationModule) && d.ImplementationType == typeof(Ecr.Calculations.ScriptCalculationModule))
+                     .Where(d => d.ServiceType == typeof(ICalculationModule)
+                                 && (d.ImplementationType == typeof(Ecr.Calculations.ScriptCalculationModule)
+                                     || (d.ImplementationFactory is not null && d.ImplementationInstance is null)))
                      .ToList())
         {
             services.Remove(descriptor);
