@@ -33,6 +33,10 @@ public sealed class ScriptSourceCompiler(IMethodologyDraftStore drafts, IMethodo
     /// перемикання рушія бібліотеки), а тексти версій, ще не збережені (пакет <c>apply</c>), беруться звідси замість
     /// сховища (версія → скрипт). <c>null</c> — звичайне авторство: лише бібліотеки на рушії <c>Script</c>.
     /// </param>
+    /// <param name="isModuleLevel">
+    /// Версія рівня <c>Module</c> (HSE400): речення <c>rows</c> не вимагається (набір аргументів складає модуль). Стосується
+    /// лише самого скрипта-власника, а не його бібліотек.
+    /// </param>
     /// <returns>Результат компіляції з діагностиками.</returns>
     public async Task<ScriptCompilation> CompileAsync(
         string text,
@@ -41,14 +45,15 @@ public sealed class ScriptSourceCompiler(IMethodologyDraftStore drafts, IMethodo
         bool isLibrary,
         DateOnly onDate,
         CancellationToken ct,
-        IReadOnlyDictionary<int, MethodologyScript>? shadowScripts = null)
+        IReadOnlyDictionary<int, MethodologyScript>? shadowScripts = null,
+        bool isModuleLevel = false)
     {
         ArgumentNullException.ThrowIfNull(text);
         ArgumentNullException.ThrowIfNull(ownerCode);
 
         var result = await CompileCoreAsync(
                 text, numericMode, isLibrary, onDate, [ownerCode],
-                new Dictionary<string, Entry>(StringComparer.OrdinalIgnoreCase), shadowScripts, ct)
+                new Dictionary<string, Entry>(StringComparer.OrdinalIgnoreCase), shadowScripts, ct, isModuleLevel)
             .ConfigureAwait(false);
         return result.Compilation;
     }
@@ -130,7 +135,8 @@ public sealed class ScriptSourceCompiler(IMethodologyDraftStore drafts, IMethodo
         List<string> chain,
         Dictionary<string, Entry> memo,
         IReadOnlyDictionary<int, MethodologyScript>? shadowScripts,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool isModuleLevel = false)
     {
         var requested = new List<string>();
         var probe = ScriptCompiler.Compile(
@@ -143,7 +149,7 @@ public sealed class ScriptSourceCompiler(IMethodologyDraftStore drafts, IMethodo
                 }
 
                 return null;
-            }));
+            }, isModuleLevel));
 
         if (requested.Count == 0)
         {
@@ -205,7 +211,7 @@ public sealed class ScriptSourceCompiler(IMethodologyDraftStore drafts, IMethodo
 
         var final = ScriptCompiler.Compile(
             text,
-            new ScriptCompileOptions(numericMode, isLibrary, name => resolved.GetValueOrDefault(name)));
+            new ScriptCompileOptions(numericMode, isLibrary, name => resolved.GetValueOrDefault(name), isModuleLevel));
 
         if (cycles.Count == 0 && notScript.Count == 0)
         {

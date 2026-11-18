@@ -572,7 +572,9 @@ public sealed class SwitchScriptEngineHandler(
             if (analysis.Compilation.Script is { } script)
             {
                 var onDate = version.EffectiveFrom ?? new DateOnly(2000, 1, 1);
-                problems.AddRange(await materializer.DiffAgainstStoredAsync(version.Id, script, onDate, ct).ConfigureAwait(false));
+                problems.AddRange(await materializer
+                    .DiffAgainstStoredAsync(version.Id, script, onDate, ct, ScriptAnalyzer.IsModuleLevel(methodology, version))
+                    .ConfigureAwait(false));
             }
 
             analyses.Add((methodology, version, analysis));

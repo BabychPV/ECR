@@ -416,6 +416,73 @@ public sealed class ScriptMigrationHandlerTests
         Assert.Equal("Script", response.Engine);
     }
 
+    private const int Module = 7;
+    private const int ModuleV = 70;
+    private const string ModuleText = "output OUT_A : t = 1 + 1;\noutput OUT_B : t = 2 + 2;";
+
+    private MethodologyVersion ModuleVersion()
+    {
+        var methodology = ScriptTestKit.NewMethodology("MODA", Module);
+        var version = ScriptTestKit.NewVersion(methodology, ModuleV, MethodologyEngine.Formulas, level: CalculationLevel.Module);
+        _drafts.FindByCodeAsync("MODA", Arg.Any<CancellationToken>()).Returns(methodology);
+        _drafts.FindAsync(Module, Arg.Any<CancellationToken>()).Returns(methodology);
+        _drafts.FindVersionAsync(ModuleV, Arg.Any<CancellationToken>()).Returns(version);
+        _store.FindByVersionAsync(ModuleV, Arg.Any<CancellationToken>()).Returns(methodology);
+        Publish(version, ModuleText);
+        return version;
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "MS-8.5")]
+    public async Task Switch_рівня_Module_приймає_скрипт_без_rows_і_з_більшим_числом_виходів_ніж_збережено()
+    {
+        // HSE400 на реальних даних: скрипт Module-версії - без `rows` і з виходом на КОЖНУ формулу, а збережена версія
+        // тримає лише вихід(и), прив'язані до якорів таблиць. Раніше switch відмовляв missingRows + outputsDiffer.
+        var version = ModuleVersion();
+        _store.GetOutputsAsync(ModuleV, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<MethodologyOutput>>([Output("OUT_A", ScriptTestKit.Tonne, false)]));
+
+        var response = await Switch().HandleAsync(new SwitchScriptEngineRequest([ModuleV], "Script", "why"), default);
+
+        Assert.Equal("Script", response.Engine);
+        Assert.Equal(MethodologyEngine.Script, version.Engine);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "MS-8.5")]
+    public async Task Switch_рівня_Module_збережений_вихід_якого_скрипт_не_дає_лишається_розбіжністю()
+    {
+        var version = ModuleVersion();
+        _store.GetOutputsAsync(ModuleV, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<MethodologyOutput>>([Output("OUT_A", ScriptTestKit.Tonne, false), Output("OUT_GONE", ScriptTestKit.Tonne, false)]));
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Switch().HandleAsync(new SwitchScriptEngineRequest([ModuleV], "Script", "why"), default));
+
+        var problem = Assert.Single((IReadOnlyList<PublishProblem>)error.Details!["problems"]!);
+        Assert.Equal("switch.problem.outputsDiffer", problem.MessageKey);
+        Assert.Equal("-", problem.Args["onlyInScript"]);
+        Assert.Contains("OUT_GONE", problem.Args["onlyStored"], StringComparison.Ordinal);
+        Assert.NotNull(version);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "MS-8.5")]
+    public async Task Switch_не_Module_без_rows_як_і_раніше_відмовляє_missingRows()
+    {
+        // Контроль: послаблення лише для рівня Module, звичайна методологія без `rows` лишається помилкою.
+        Publish(_alphaVersion, ModuleText);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Switch().HandleAsync(new SwitchScriptEngineRequest([AlphaV], "Script", "why"), default));
+
+        Assert.Contains(
+            (IReadOnlyList<PublishProblem>)error.Details!["problems"]!, p => p.MessageKey == "script.missingRows");
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait("Requirement", "MS-8.5")]

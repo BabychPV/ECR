@@ -51,7 +51,7 @@ public sealed class ScriptAnalyzer(ScriptSourceCompiler compiler, ScriptEnvironm
         var compilation = await compiler
             .CompileAsync(
                 text, methodology.Code, version.NumericMode, methodology.Kind == MethodologyKind.Library, onDate, ct,
-                shadowScripts)
+                shadowScripts, IsModuleLevel(methodology, version))
             .ConfigureAwait(false);
 
         var diagnostics = new List<ScriptDiagnostic>(compilation.Diagnostics);
@@ -66,6 +66,19 @@ public sealed class ScriptAnalyzer(ScriptSourceCompiler compiler, ScriptEnvironm
             .Select((d, i) => (d, i)).OrderBy(x => x.d.Line).ThenBy(x => x.d.Column).ThenBy(x => x.i).Select(x => x.d)
             .ToList();
         return new ScriptAnalysis(compilation, environment, sorted, ScriptOutlineDto.From(compilation.Script));
+    }
+
+    /// <summary>
+    /// Версія рівня <c>Module</c> (HSE400): її скрипт без речення <c>rows</c> (набір аргументів складає модуль). Бібліотека
+    /// ніколи не є модульною.
+    /// </summary>
+    /// <param name="methodology">Методологія-власник.</param>
+    /// <param name="version">Версія.</param>
+    public static bool IsModuleLevel(Methodology methodology, MethodologyVersion version)
+    {
+        ArgumentNullException.ThrowIfNull(methodology);
+        ArgumentNullException.ThrowIfNull(version);
+        return methodology.Kind != MethodologyKind.Library && version.Level == CalculationLevel.Module;
     }
 
     /// <summary>
