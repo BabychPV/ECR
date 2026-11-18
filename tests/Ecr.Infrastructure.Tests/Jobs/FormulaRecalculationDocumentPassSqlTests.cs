@@ -421,8 +421,40 @@ public sealed class FormulaRecalculationDocumentPassSqlTests(SqlServerFixture sq
             $"WHERE PeriodKey = {Period(month)} AND TableRowId = {world.Instance(month).RowId} " +
             $"AND ColumnDefId = {world.Doc.ColumnDefIds[1]}");
 
+    /// <summary>
+    /// B179 L2 (Q1): успішний прохід задачі формул (єдина задача після правки комірки) кличе хук зміни документа-джерела —
+    /// з документом, періодами насіння й записаними читачами, ланка 0.
+    /// </summary>
+    /// <remarks>Мутація: прибрати виклик <c>completionHook.OnSucceededAsync</c> у <c>FormulaRecalculationJob</c> — червоний.</remarks>
+    [Fact]
+    [Trait("Directive", "B179")]
+    public async Task B179_успішний_прохід_кличе_хук_джерела_з_періодами_насіння_й_читачів()
+    {
+        var world = await ArrangeAsync(Chain);
+        await SetInputAsync(world, 4, 45m);
+
+        var hook = Substitute.For<IRecalculationCompletionHook>();
+        IReadOnlyDictionary<long, int[]>? seen = null;
+        var hop = -1;
+        hook.OnSucceededAsync(
+                Arg.Do<IReadOnlyDictionary<long, int[]>>(s => seen = s), Arg.Do<int>(h => hop = h), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+
+        await RunJobAsync(
+            world,
+            new FormulaRecalculationRequest(world.Instance(4).InstanceId, Period(4), [Seed(world, 4)], world.Doc.DocumentId),
+            new RecordingAuditWriter(),
+            hook);
+
+        await hook.ReceivedWithAnyArgs(1).OnSucceededAsync(default!, default, default);
+        Assert.NotNull(seen);
+        Assert.Equal([Period(4), Period(5), Period(6), Period(7)], seen[world.Doc.DocumentId]);
+        Assert.Equal(0, hop);
+    }
+
     private async Task<CapturingJobProgress> RunJobAsync(
-        World world, FormulaRecalculationRequest request, RecordingAuditWriter audit)
+        World world, FormulaRecalculationRequest request, RecordingAuditWriter audit,
+        IRecalculationCompletionHook? hook = null)
     {
         await using var db = world.Builder.CreateContext();
 
@@ -432,7 +464,7 @@ public sealed class FormulaRecalculationDocumentPassSqlTests(SqlServerFixture sq
         var fanOut = new CrossPeriodFanOut(
             new RowStore(db, bulk, new TestClock(Now)), Versions(world), periods, jobs, db);
 
-        var job = new FormulaRecalculationJob(Formulas(db, world, audit), db, fanOut, periods);
+        var job = new FormulaRecalculationJob(Formulas(db, world, audit), db, fanOut, periods, completionHook: hook);
         var progress = new CapturingJobProgress();
         await job.ExecuteAsync(request, progress, CancellationToken.None);
 

@@ -54,7 +54,7 @@ public sealed class DocumentSourceStateSwitchTests(SqlServerFixture sql) : DbJob
         Assert.Equal("err.ECR-CALC-0409.sourceBindingNotMonthly", refusal.Details!["messageKey"]);
         Assert.Equal(DocumentSourceState.Any, await StateAsync(a.BindingId));
         Assert.Equal(0, await EventsAsync(a.BindingId));
-        Assert.Equal(0, await QueuedAsync(a.RegistryId));
+        Assert.Equal(0, await QueuedAsync(a));
     }
 
     [Fact]
@@ -96,7 +96,7 @@ public sealed class DocumentSourceStateSwitchTests(SqlServerFixture sql) : DbJob
             Assert.Equal(a.UserId, binding.UpdatedByUserId);
         }
 
-        Assert.Equal(1, await QueuedAsync(a.RegistryId));
+        Assert.Equal(1, await QueuedAsync(a));
 
         // Той самий стан удруге — нічого: ні події, ні задачі.
         var again = await SwitchAsync(a, "approvedOnly");
@@ -109,7 +109,7 @@ public sealed class DocumentSourceStateSwitchTests(SqlServerFixture sql) : DbJob
         Assert.True(off.Changed);
         Assert.Equal(DocumentSourceState.Any, await StateAsync(a.BindingId));
         Assert.Equal(2, await EventsAsync(a.BindingId));
-        Assert.Equal(1, await QueuedAsync(a.RegistryId));
+        Assert.Equal(1, await QueuedAsync(a));
     }
 
     [Fact]
@@ -135,7 +135,7 @@ public sealed class DocumentSourceStateSwitchTests(SqlServerFixture sql) : DbJob
         Assert.Empty(on.QueuedYears);
         Assert.False(on.Binding.ReadFromDocumentEffective);
         Assert.Equal("configuration", on.Binding.ReadFromDocumentSource);
-        Assert.Equal(0, await QueuedAsync(a.RegistryId));
+        Assert.Equal(0, await QueuedAsync(a));
     }
 
     /// <summary>
@@ -153,7 +153,7 @@ public sealed class DocumentSourceStateSwitchTests(SqlServerFixture sql) : DbJob
         string payload;
         await using (var db = Sql.CreateContext())
         {
-            var target = $"{nameof(IRegistryImpactRecalculationJob)}~{RegistryImpactRecalculationTarget.ForYear(a.RegistryId, Year)}";
+            var target = $"{nameof(IRegistryImpactRecalculationJob)}~{RegistryImpactRecalculationTarget.ForSourceChange(a.BindingId, Year, null)}";
             payload = (await db.JobProgresses.AsNoTracking().SingleAsync(p => p.TargetKey == target)).Payload!;
         }
 
@@ -172,7 +172,8 @@ public sealed class DocumentSourceStateSwitchTests(SqlServerFixture sql) : DbJob
             var job = new RegistryImpactRecalculationJob(
                 new RegistryImpactStore(db),
                 new CalculationTrigger(
-                    jobs, new PeriodStore(db), new WorkflowStore(db), new DocumentStore(db), new DocumentSheetCopyStore(db)));
+                    jobs, new PeriodStore(db), new WorkflowStore(db), new DocumentStore(db), new DocumentSheetCopyStore(db)),
+                graph: SourceDependencyWorld.Graph(db));
             await job.ExecuteAsync(
                 RegistryImpactRecalculationRequest.Parse(payload), Substitute.For<IJobProgress>(), CancellationToken.None);
         }
@@ -269,24 +270,14 @@ public sealed class DocumentSourceStateSwitchTests(SqlServerFixture sql) : DbJob
             db.ApprovalStates.Add(approval);
         }
 
-        var methodology = new Methodology(EcrCode.Create($"HL{Guid.NewGuid().ToString("N")[..8].ToUpperInvariant()}"), Text("m"));
-        db.Methodologies.Add(methodology);
-        await db.SaveChangesAsync();
-        var version = new MethodologyVersion(methodology.Id, "1.0", CalculationLevel.Configuration, 1, Now);
-        db.MethodologyVersions.Add(version);
-        await db.SaveChangesAsync();
-        db.RegistryUses.Add(RegistryUse.ForMethodologyFormula(version.Id, "F1", registryId, "X"));
-
-        var run = new CalculationRun(document.ProjectId, document.PeriodKey.Value, null, Now, document.DocumentId);
-        db.CalculationRuns.Add(run);
-        await db.SaveChangesAsync();
-        run.Complete("Succeeded", Now, null, null);
-        run.MakeCurrent();
-        var unitId = await db.Units.AsNoTracking().OrderBy(u => u.Id).Select(u => u.Id).FirstAsync();
-        await new CalculationResultStore(db, new TestClock(Now)).WriteResultsAsync(
-            run.Id,
-            [new CalculationOutput(document.DocumentId, "R-1", [new CalculationOutputValue(version.Id, null, "tons", 1m, unitId)], [])],
-            CancellationToken.None);
+        // ✎ B179 L2: залежність — формула шаблону, що читає довідник зв'язки (граф), а не «є актуальний результат».
+        var registryCode = await db.RegistryDefs.Where(r => r.Id == registryId).Select(r => r.Code).SingleAsync();
+        var formula = new FormulaDef(
+            document.TableDefId, FormulaScope.Column,
+            $"REGFIELD(REGFIND('{registryCode}', [Period].Year, [Period].Sequence, 'S', 'I'), 'VALUE')",
+            ExpressionDialect.Template);
+        formula.AssignColumn(document.ColumnDefIds[1]);
+        db.FormulaDefs.Add(formula);
         await db.SaveChangesAsync();
         return (document.DocumentId, document.PeriodKey);
     }
@@ -318,9 +309,10 @@ public sealed class DocumentSourceStateSwitchTests(SqlServerFixture sql) : DbJob
         public string DetailsJson { get; set; } = string.Empty;
     }
 
-    private async Task<int> QueuedAsync(int registryId)
+    private async Task<int> QueuedAsync(Arranged a)
     {
-        var target = $"{nameof(IRegistryImpactRecalculationJob)}~{RegistryImpactRecalculationTarget.ForYear(registryId, Year)}";
+        // ✎ B179 L2: ціль «зв'язка × рік» (споживачі — з графа), а не «довідник × рік».
+        var target = $"{nameof(IRegistryImpactRecalculationJob)}~{RegistryImpactRecalculationTarget.ForSourceChange(a.BindingId, Year, null)}";
         await using var db = Sql.CreateContext();
         return await db.JobProgresses.AsNoTracking().CountAsync(p => p.TargetKey == target);
     }

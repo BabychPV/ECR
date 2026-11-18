@@ -67,13 +67,16 @@ public sealed record DocumentSourceBindingView(
 public sealed record SourceDocumentFacts(long DocumentId, PeriodKind PeriodKind, WorkflowMode WorkflowMode);
 
 /// <summary>
-/// B80: перекриття бітів зв'язки ключами конфігурації (ключ, заданий явно, діє один випуск; не заданий — <c>null</c>).
+/// B80: перекриття біта зв'язки «читати з документа» ключем конфігурації (ключ, заданий явно, діє один випуск; не
+/// заданий — <c>null</c>).
 /// </summary>
+/// <remarks>
+/// ✎ B179 L2 (P-0118-34): ключа <c>Calculations:Hse400RecalculateLandDependents</c> більше немає — він постачався
+/// <c>false</c> і мовчки перекривав біт <c>RecalculateDependents</c> (корінь дефекту live). Перерахунок залежних вимикає
+/// лише біт зв'язки.
+/// </remarks>
 public interface IDocumentSourceFlagOverrides
 {
     /// <summary>Явне значення <c>Calculations:Hse400CompositionFromDocument</c>; <c>null</c> — не задано.</summary>
     public bool? ReadFromDocument { get; }
-
-    /// <summary>Явне значення <c>Calculations:Hse400RecalculateLandDependents</c>; <c>null</c> — не задано.</summary>
-    public bool? RecalculateDependents { get; }
 }

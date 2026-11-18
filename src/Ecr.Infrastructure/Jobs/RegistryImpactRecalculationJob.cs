@@ -2,6 +2,7 @@
 using System.Globalization;
 using Ecr.Application.Ports;
 using Ecr.Domain.ValueObjects;
+using Ecr.Expressions.Binding;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -15,7 +16,7 @@ namespace Ecr.Infrastructure.Jobs;
 /// як є: між постановкою й виконанням період міг закритись, а прогін — втратити залежність. Закритий
 /// період сюди не потрапить навіть з payload (<c>D-39</c>), і <see cref="ICalculationTrigger"/>
 /// повторно перевіряє політику запису (закритий період; ✎ B63 — пропуск лише затверджених аркушів,
-/// <see cref="ICalculationTrigger.RequestDependentsAsync"/>).
+/// <see cref="ICalculationTrigger.RequestDependentsAsync(long, Ecr.Domain.ValueObjects.PeriodKey, CancellationToken)"/>).
 /// <para>
 /// ⚠ Право перевірено ПРИ ПОСТАНОВЦІ (<c>RecalculateImpactedHandler</c>); тут задача працює від імені
 /// системи, як і будь-який автоперерахунок. Завершення — «поставлено», не «перераховано»: кожен
@@ -29,7 +30,8 @@ namespace Ecr.Infrastructure.Jobs;
 public sealed partial class RegistryImpactRecalculationJob(
     IRegistryImpactStore impact,
     ICalculationTrigger trigger,
-    ILogger<RegistryImpactRecalculationJob>? logger = null) : IRegistryImpactRecalculationJob
+    ILogger<RegistryImpactRecalculationJob>? logger = null,
+    IDependencyGraphProvider? graph = null) : IRegistryImpactRecalculationJob
 {
     private readonly ILogger _logger = (ILogger?)logger ?? NullLogger.Instance;
 
@@ -56,19 +58,19 @@ public sealed partial class RegistryImpactRecalculationJob(
         // HSE400 3b: зміна документа-джерела — системна постановка без переліку людини; набір — усі залежні
         // документи року, тим самим запитом сховища (відкриті періоди, методологія читає довідник).
         IReadOnlyList<RegistryImpactRow> rows;
-        if (request.IsSourceChange)
+        if (request.IsSourceDocumentChange)
         {
-            var impacted = await impact
+            // B179 L2: споживачі — з графа залежностей (формули шаблонів і методології, що читають довідник зв'язки),
+            // а не з актуальних результатів: документ-споживач без жодного прогону теж залежний (дизайн §1.3, §4).
+            rows = await SourceDocumentConsumersAsync(request, ct).ConfigureAwait(false);
+            wanted = [.. rows.Select(r => r.DocumentId)];
+        }
+        else if (request.IsSourceChange)
+        {
+            // FLERT F6 (і задачі старої форми «довідник × рік» у черзі): залежні — за результатами методологій року.
+            rows = await impact
                 .ListImpactedForYearAsync(request.RegistryDefId, request.Year!.Value, ct)
                 .ConfigureAwait(false);
-
-            // B80 N3(b): за ApprovedOnly затвердження місяця джерела дає споживачеві дані, яких доти не було, тож
-            // документ-споживач БЕЗ результату (ще не рахувався) теж залежний. Рішення — у сховищі на момент виконання
-            // (стан зв'язки, біт/ключ читання), не в payload: злиті постановки payload не міняють. За Any — порожньо.
-            var consumers = await impact
-                .ListBoundConsumersForYearAsync(request.RegistryDefId, request.Year!.Value, ct)
-                .ConfigureAwait(false);
-            rows = [.. impacted.Concat(consumers)];
             wanted = [.. rows.Select(r => r.DocumentId)];
         }
         else
@@ -96,7 +98,10 @@ public sealed partial class RegistryImpactRecalculationJob(
             try
             {
                 // ⛔ B63: залежні — по аркушу (пропуск лише затверджених), а не «будь-який поданий знімає документ».
-                var jobId = await trigger.RequestDependentsAsync(documentId, new PeriodKey(periodKey), ct).ConfigureAwait(false);
+                // B179 L2: зміна джерела несе ланку далі — споживач, що сам є джерелом, поставить наступну.
+                var jobId = request.IsSourceDocumentChange
+                    ? await trigger.RequestDependentsAsync(documentId, new PeriodKey(periodKey), request.Hop + 1, ct).ConfigureAwait(false)
+                    : await trigger.RequestDependentsAsync(documentId, new PeriodKey(periodKey), ct).ConfigureAwait(false);
                 if (jobId is not null)
                 {
                     queued++;
@@ -137,8 +142,84 @@ public sealed partial class RegistryImpactRecalculationJob(
         }
     }
 
+    /// <summary>
+    /// B179 L2: документи × періоди споживачів зв'язки за графом залежностей і обсягом ребра (<see cref="PeriodScope"/>).
+    /// </summary>
+    /// <remarks>
+    /// <list type="bullet">
+    /// <item><c>Month</c> — лише період, що володіє місяцем зміни (без місяця — увесь рік);</item>
+    /// <item><c>Year</c> — усі періоди року; з літеральними місяцями (<c>MonthMask</c>) — лише коли маска містить
+    /// місяць зміни;</item>
+    /// <item><c>All</c> — усі відкриті періоди.</item>
+    /// </list>
+    /// ⛔ Ланка ≥ <see cref="RegistryImpactRecalculationRequest.MaxHops"/> — нічого (журнал помилки): ланцюжок джерел
+    /// глибший за стелю — це цикл чи помилка налаштування, а не робота. Споживач у тій самій компоненті циклу графа,
+    /// що й джерело (зокрема саме джерело), не ставиться зовсім (журнал): ланку циклу можна скинути правкою формули в
+    /// іншому періоді (задача формул не несе ланки), тож стеля сама цикл не зупинила б. Відмову публікації циклу дає L3.
+    /// </remarks>
+    private async Task<IReadOnlyList<RegistryImpactRow>> SourceDocumentConsumersAsync(
+        RegistryImpactRecalculationRequest request, CancellationToken ct)
+    {
+        if (request.Hop >= RegistryImpactRecalculationRequest.MaxHops)
+        {
+            LogHopCapReached(_logger, request.BindingId!.Value, request.Hop);
+            return [];
+        }
+
+        if (graph is null)
+        {
+            return [];
+        }
+
+        var snapshot = await graph.GetAsync(ct).ConfigureAwait(false);
+        var edges = snapshot.TemplateDependencies.Where(d => d.BindingId == request.BindingId).ToList();
+        if (edges.Count == 0)
+        {
+            return [];
+        }
+
+        var source = edges[0].SourceTemplateId;
+        var cycle = snapshot.Cycles.FirstOrDefault(c => c.Contains(source)) ?? [];
+        var year = request.Year!.Value;
+        var month = request.Month is >= 1 and <= 12 ? request.Month : null;
+
+        var rows = new List<RegistryImpactRow>();
+        foreach (var consumer in edges.GroupBy(e => e.ConsumerTemplateId))
+        {
+            if (cycle.Contains(consumer.Key))
+            {
+                LogCycleSkipped(_logger, request.BindingId!.Value, source, consumer.Key);
+                continue;
+            }
+
+            var scope = consumer.Select(e => e.Scope).Aggregate((a, b) => a.Join(b));
+            if (scope.Kind == PeriodScopeKind.Year && scope.MonthMask != 0 && month is { } m && (scope.MonthMask & (1 << m)) == 0)
+            {
+                continue;
+            }
+
+            var (first, last) = scope.Kind == PeriodScopeKind.All ? (int.MinValue, int.MaxValue) : (year * 100, (year * 100) + 99);
+            var onlyMonth = scope.Kind == PeriodScopeKind.Month ? month : null;
+            rows.AddRange(await impact
+                .ListTemplateConsumersAsync([consumer.Key], first, last, onlyMonth, ct)
+                .ConfigureAwait(false));
+        }
+
+        return rows;
+    }
+
     [LoggerMessage(
         Level = LogLevel.Error,
         Message = "Перерахунок зачеплених довідником: не вдалось поставити документ {DocumentId}, період {PeriodKey}.")]
     private static partial void LogRequestFailed(ILogger logger, long documentId, int periodKey, Exception exception);
+
+    [LoggerMessage(
+        Level = LogLevel.Error,
+        Message = "B179: ланцюжок документів-джерел зв'язки {BindingId} дійшов ланки {Hop} — стеля, залежних не поставлено (цикл чи помилка налаштування).")]
+    private static partial void LogHopCapReached(ILogger logger, int bindingId, int hop);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "B179: зв'язка {BindingId}: шаблон-споживач {ConsumerTemplateId} у циклі з джерелом {SourceTemplateId} — не ставиться.")]
+    private static partial void LogCycleSkipped(ILogger logger, int bindingId, int sourceTemplateId, int consumerTemplateId);
 }
