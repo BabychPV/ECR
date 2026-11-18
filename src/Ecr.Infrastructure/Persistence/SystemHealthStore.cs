@@ -22,7 +22,8 @@ public sealed partial class SystemHealthStore(
     ILogger<SystemHealthStore> logger,
     HealthProbeSql? probes = null,
     HealthCountCache? failedCache = null,
-    string hse400TemplateCode = Hse400CompositionMapping.TemplateCode) : ISystemHealthStore
+    string hse400TemplateCode = Hse400CompositionMapping.TemplateCode,
+    string hse400RegistryCode = Hse400CompositionMapping.RegistryCode) : ISystemHealthStore
 {
     /// <summary>Вікно «прогалин покриття».</summary>
     private static readonly TimeSpan GapWindow = TimeSpan.FromDays(7);
@@ -123,6 +124,7 @@ public sealed partial class SystemHealthStore(
         var freeGb = await ProbeAsync<long?>(_probes.FreeSpaceGb, ct).ConfigureAwait(false);
         var backup = await ProbeAsync<DateTime?>(_probes.LastBackupUtc, ct).ConfigureAwait(false);
         var hse400 = await Hse400DocumentInYearAsync(utcNow.Year, ct).ConfigureAwait(false);
+        var hse400Source = await Hse400SourceAsync(utcNow.Year, ct).ConfigureAwait(false);
 
         return new SystemHealthSnapshot(
             new HealthJobCounts(jobs?.Running ?? 0, jobs?.Queued ?? 0, jobs?.Failed ?? 0),
@@ -130,7 +132,83 @@ public sealed partial class SystemHealthStore(
             freeGb is { } gb ? Math.Max(0, gb) : null,
             backup is { } b ? DateTime.SpecifyKind(b, DateTimeKind.Utc) : null,
             Latest(lastJobError, lastRunError, lastScheduleError),
-            hse400);
+            hse400,
+            hse400Source);
+    }
+
+    /// <summary>
+    /// B80 (N1, RW.5): зв'язка HSE400 → склад Land за рік <paramref name="year"/>: стан-ворота, скільки місяців обраного
+    /// документа затверджено і чи є місяць із введеними даними без затвердження. Той самий вибір документа і ті самі
+    /// ворота, що в <see cref="Hse400CompositionSnapshotLoader"/>.
+    /// </summary>
+    private async Task<HealthHse400SourceFacts?> Hse400SourceAsync(int year, CancellationToken ct)
+    {
+        var binding = await DocumentSourceGate.FindBindingAsync(db, hse400TemplateCode, hse400RegistryCode, ct)
+            .ConfigureAwait(false);
+        if (binding is null)
+        {
+            return null;
+        }
+
+        var approvedOnly = binding.SourceState == Domain.Entities.Configuration.DocumentSourceState.ApprovedOnly;
+        var tables = await (
+                from t in db.Templates.AsNoTracking()
+                where t.Code == hse400TemplateCode
+                join v in db.TemplateVersions.AsNoTracking() on t.Id equals v.TemplateId
+                join s in db.SheetDefs.AsNoTracking() on v.Id equals s.TemplateVersionId
+                where !s.IsDeleted
+                join d in db.TableDefs.AsNoTracking() on s.Id equals d.SheetDefId
+                where !d.IsDeleted
+                select new { d.Id, d.Code })
+            .ToListAsync(ct).ConfigureAwait(false);
+        var tableIds = tables
+            .Where(t => Hse400CompositionMapping.Streams.Any(s => string.Equals(s, t.Code, StringComparison.OrdinalIgnoreCase)))
+            .Select(t => t.Id)
+            .ToList();
+
+        var yearStart = year * 100;
+        var yearEnd = (year + 1) * 100;
+        var documentId = tableIds.Count == 0
+            ? null
+            : await (
+                    from i in db.TableInstances.AsNoTracking()
+                    where tableIds.Contains(i.TableDefId) && i.SheetCopyId == null
+                          && i.PeriodKeyValue >= yearStart && i.PeriodKeyValue < yearEnd
+                    join doc in db.Documents.AsNoTracking() on i.DocumentId equals doc.Id
+                    join project in db.Projects.AsNoTracking() on doc.ProjectId equals project.Id
+                    where project.Code != Hse400CompositionMapping.GoldProjectCode
+                    select (long?)i.DocumentId)
+                .MaxAsync(ct).ConfigureAwait(false);
+        if (documentId is not { } chosen)
+        {
+            return new HealthHse400SourceFacts(approvedOnly, binding.ReadFromDocument, null, false);
+        }
+
+        var approved = (await DocumentSourceGate.ApprovedMonthsAsync(db, [chosen], tableIds, ct).ConfigureAwait(false))
+            .Where(a => a.Year == year)
+            .Select(a => a.Month)
+            .ToHashSet();
+
+        var monthsWithData = await (
+                from c in db.CellValues.AsNoTracking()
+                where c.PeriodKeyValue >= yearStart && c.PeriodKeyValue < yearEnd
+                      && tableIds.Contains(c.TableDefId) && !c.IsEmpty
+                join r in db.TableRows.AsNoTracking()
+                    on new { Id = c.TableRowId, c.PeriodKeyValue } equals new { r.Id, r.PeriodKeyValue }
+                join i in db.TableInstances.AsNoTracking()
+                    on new { Id = r.TableInstanceId, r.PeriodKeyValue } equals new { i.Id, i.PeriodKeyValue }
+                where i.DocumentId == chosen && i.SheetCopyId == null
+                join col in db.ColumnDefs.AsNoTracking() on c.ColumnDefId equals col.Id
+                where col.IsMonthColumn && col.MonthNumber != null
+                select (int)col.MonthNumber!.Value)
+            .Distinct()
+            .ToListAsync(ct).ConfigureAwait(false);
+
+        return new HealthHse400SourceFacts(
+            approvedOnly,
+            binding.ReadFromDocument,
+            approved.Count,
+            monthsWithData.Exists(m => !approved.Contains(m)));
     }
 
     /// <summary>

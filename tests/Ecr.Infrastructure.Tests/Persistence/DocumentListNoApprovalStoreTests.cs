@@ -581,6 +581,60 @@ public sealed class DocumentListNoApprovalStoreTests(SqlServerFixture sql)
     }
 
     /// <summary>
+    /// ✎ B162 (F13 AU до B147): ключі «без погодження» — не межа видимості. Читач, якому гранти дають лише проєкт 2,
+    /// не бачить документів проєкту 1 «без погодження» ні на смузі, ні у фільтрі <c>NoApproval</c>, ні в рядках, ні в
+    /// клітинках року — хоча <c>WorkflowNoneScope</c> ці ключі завантажує. Allow-пара: той самий етап з обома
+    /// проєктами показує їх.
+    /// </summary>
+    /// <remarks>
+    /// Deny-мутація (для AU, автор межі грантів не мутує): у <c>DocumentStore.ListAsync</c> / <c>WhereState</c> або
+    /// <c>DocumentListSummaryStore</c> прибрати обмеження видимими проєктами для гілки «без погодження» → червоний цей тест
+    /// (Deny-частина), Allow-частина лишається зеленою.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "B162")]
+    public async Task Без_погодження_не_виходить_за_межу_грантів_місяць_і_рік()
+    {
+        const int Key = 209901;
+        const int Year = 2099;
+        var stage = await ArrangeAsync(Key, started: 1).ConfigureAwait(true);
+        await using var db = stage.Builder.CreateContext();
+
+        var own = await DocumentAsync(db, stage.One, "GD", [stage.One.SheetDefId],
+            (stage.One.SheetDefId, Key, DocumentStatus.Submitted)).ConfigureAwait(true);
+        var control = await AttachAsync(db, stage.Two.DocumentId, [stage.Two.SheetDefId],
+            (stage.Two.SheetDefId, Key, DocumentStatus.Approved)).ConfigureAwait(true);
+        await WorkflowNoneCase.SwitchAsync(db, new WorkflowNoneCase.Binding(stage.One.TemplateVersionId, true)).ConfigureAwait(true);
+        long[] noneOfOne = Ids(own, stage.One.DocumentId);
+
+        // Allow: обидва проєкти видимі — документи проєкту 1 «без погодження» в місяці й році.
+        var monthAll = await MonthAsync(stage, Key).ConfigureAwait(true);
+        Assert.Equal(noneOfOne, monthAll.ByState[NoApproval]);
+        Assert.Equal(2, monthAll.Summary.NoApproval);
+        var yearAll = await YearAsync(stage, Year).ConfigureAwait(true);
+        Assert.Equal(noneOfOne, yearAll.ByState[NoApproval]);
+        Assert.Equal(2, yearAll.Summary.NoApproval);
+
+        // Deny: гранти лише на проєкт 2 — проєкту 1 немає ніде, «без погодження» порожнє.
+        int[] onlyTwo = [stage.Two.ProjectId];
+        var month = await MonthAsync(stage, Key, onlyTwo).ConfigureAwait(true);
+        AssertConsistent(month);
+        Assert.Empty(month.ByState[NoApproval]);
+        Assert.Equal(0, month.Summary.NoApproval);
+        Assert.Equal([control], month.Rows.Select(r => r.Id));
+        Assert.Equal((0, 0, 0, 1, 0, 0), Tiles(month.Summary));
+
+        var year = await YearAsync(stage, Year, onlyTwo).ConfigureAwait(true);
+        AssertTilesMatchFilter(year);
+        Assert.Empty(year.ByState[NoApproval]);
+        Assert.Equal(0, year.Summary.NoApproval);
+        Assert.Equal([control], year.Rows.Select(r => r.Id));
+        Assert.DoesNotContain(year.Rows.SelectMany(r => r.PeriodStates!), c => c.State == NoApproval);
+    }
+
+    /// <summary>
     /// Шкала версій ланцюга 1: січень — його версія (A), з лютого — нова версія того самого шаблону; повертає її Id.
     /// </summary>
     private static async Task<int> TimelineAsync(EcrDbContext db, Stage stage)
@@ -720,39 +774,43 @@ public sealed class DocumentListNoApprovalStoreTests(SqlServerFixture sql)
             _ => new DocumentListFilter(Enum.Parse<DocumentStatus>(state), null),
         };
 
-    private static async Task<Snapshot> MonthAsync(Stage stage, int periodKey)
+    // visible — межа грантів читача (видимі проєкти); null — обидва проєкти етапу.
+    private static async Task<Snapshot> MonthAsync(Stage stage, int periodKey, int[]? visible = null)
     {
+        visible ??= stage.Projects;
         await using var db = stage.Builder.CreateContext();
         var summary = await new DocumentListSummaryStore(db)
-            .SummarizeAsync(null, periodKey, stage.Projects, restrictions: null, currentUserId: null, CancellationToken.None)
+            .SummarizeAsync(null, periodKey, visible, restrictions: null, currentUserId: null, CancellationToken.None)
             .ConfigureAwait(false);
 
         return new Snapshot(
             summary,
-            await RowsAsync(db, stage, new PeriodKeyFilter(periodKey), default).ConfigureAwait(false),
-            await ByStateAsync(db, stage, new PeriodKeyFilter(periodKey), year: null).ConfigureAwait(false));
+            await RowsAsync(db, visible, new PeriodKeyFilter(periodKey), default).ConfigureAwait(false),
+            await ByStateAsync(db, visible, new PeriodKeyFilter(periodKey), year: null).ConfigureAwait(false));
     }
 
-    private static async Task<Snapshot> YearAsync(Stage stage, int year)
+    // visible — межа грантів читача (видимі проєкти); null — обидва проєкти етапу.
+    private static async Task<Snapshot> YearAsync(Stage stage, int year, int[]? visible = null)
     {
+        visible ??= stage.Projects;
         await using var db = stage.Builder.CreateContext();
         var summary = await new DocumentListSummaryStore(db)
-            .SummarizeYearAsync(null, year, stage.Projects, restrictions: null, currentUserId: null, CancellationToken.None)
+            .SummarizeYearAsync(null, year, visible, restrictions: null, currentUserId: null, CancellationToken.None)
             .ConfigureAwait(false);
 
         return new Snapshot(
             summary,
-            await RowsAsync(db, stage, new PeriodKeyFilter(null), new DocumentListFilter(null, null, Year: year)).ConfigureAwait(false),
-            await ByStateAsync(db, stage, new PeriodKeyFilter(null), year).ConfigureAwait(false));
+            await RowsAsync(db, visible, new PeriodKeyFilter(null), new DocumentListFilter(null, null, Year: year)).ConfigureAwait(false),
+            await ByStateAsync(db, visible, new PeriodKeyFilter(null), year).ConfigureAwait(false));
     }
 
     private static async Task<Dictionary<string, long[]>> ByStateAsync(
-        EcrDbContext db, Stage stage, PeriodKeyFilter period, int? year)
+        EcrDbContext db, int[] visible, PeriodKeyFilter period, int? year)
     {
         var result = new Dictionary<string, long[]>(StringComparer.Ordinal);
         foreach (var state in States)
         {
-            var rows = await RowsAsync(db, stage, period, FilterOf(state) with { Year = year }).ConfigureAwait(false);
+            var rows = await RowsAsync(db, visible, period, FilterOf(state) with { Year = year }).ConfigureAwait(false);
             result[state] = [.. rows.Select(r => r.Id).Order()];
         }
 
@@ -760,9 +818,9 @@ public sealed class DocumentListNoApprovalStoreTests(SqlServerFixture sql)
     }
 
     private static async Task<IReadOnlyList<DocumentSummary>> RowsAsync(
-        EcrDbContext db, Stage stage, PeriodKeyFilter period, DocumentListFilter filter)
+        EcrDbContext db, int[] visible, PeriodKeyFilter period, DocumentListFilter filter)
         => (await new DocumentStore(db).ListAsync(
-                null, period, filter, new CursorRequest(Limit: 50), stage.Projects, CancellationToken.None)
+                null, period, filter, new CursorRequest(Limit: 50), visible, CancellationToken.None)
             .ConfigureAwait(false)).Items;
 
     private static (int Draft, int Partly, int Submitted, int Approved, int Rejected, int NoApproval) Tiles(

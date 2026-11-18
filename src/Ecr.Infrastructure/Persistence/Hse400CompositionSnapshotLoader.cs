@@ -1,5 +1,6 @@
 using Ecr.Application.Ports;
 using Ecr.Application.Registries;
+using Ecr.Domain.Entities.Configuration;
 using Ecr.Expressions.Evaluation;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -22,25 +23,49 @@ namespace Ecr.Infrastructure.Persistence;
 /// Перерахунок залежних документів Land після зміни HSE400 — окремий крок (3b).
 ///
 /// ⚠ Якщо за рік є кілька документів шаблону, береться документ із найбільшим ідентифікатором (останній створений).
+///
+/// ✎ B80 (N1): ключ <see cref="EnabledKey"/>, заданий явно, — перекриття; не заданий — вирішує біт зв'язки
+/// <c>cfg.DocumentSourceBinding.ReadFromDocument</c> (немає зв'язки — вимкнено, як і було). Стан-ворота зв'язки
+/// <see cref="DocumentSourceState.ApprovedOnly"/> лишає з документа лише затверджені місяці (A2, варіант (a): місяць
+/// без затвердження — без рядків, і довідник за рік документа однаково відкинуто). За <see cref="DocumentSourceState.Any"/>
+/// запиту станів немає і рядки — ті самі, що до B80.
 /// </remarks>
 public sealed class Hse400CompositionSnapshotLoader(
     IRegistrySnapshotLoader inner,
     EcrDbContext db,
     ICalculationResultStore results,
-    bool enabled,
+    bool? enabled,
     string registryCode = Hse400CompositionMapping.RegistryCode,
     string templateCode = Hse400CompositionMapping.TemplateCode) : IRegistrySnapshotLoader
 {
     /// <summary>Ключ налаштування: <c>true</c> — Land читає склад газу з документа HSE400.</summary>
     public const string EnabledKey = "Calculations:Hse400CompositionFromDocument";
 
-    /// <summary>Чи ввімкнено читання складу з документа.</summary>
+    /// <summary>Чи ввімкнено читання складу з документа ЗА КЛЮЧЕМ (без зв'язки).</summary>
     /// <param name="configuration">Конфігурація застосунку.</param>
     /// <returns><c>true</c> лише для явного <c>true</c>.</returns>
     public static bool IsEnabled(IConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(configuration);
         return bool.TryParse(configuration[EnabledKey], out var value) && value;
+    }
+
+    /// <summary>
+    /// B80: перекриття ключем — значення, коли ключ ЗАДАНО (непарсабельне — <c>false</c>, як і було), інакше
+    /// <c>null</c>: вирішує біт зв'язки.
+    /// </summary>
+    /// <param name="configuration">Конфігурація застосунку.</param>
+    /// <param name="key">Ключ.</param>
+    public static bool? Override(IConfiguration configuration, string key)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+        var raw = configuration[key];
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return null;
+        }
+
+        return bool.TryParse(raw, out var value) && value;
     }
 
     /// <inheritdoc />
@@ -61,19 +86,26 @@ public sealed class Hse400CompositionSnapshotLoader(
         CancellationToken ct)
     {
         var source = await inner.LoadSourceAsync(registryDefIds, registryAsOfUtc, ct).ConfigureAwait(false);
-        if (!enabled
+        if (enabled == false
             || source is not RegistrySnapshotSource loaded
             || !loaded.Registries.Any(r => string.Equals(r.Code, registryCode, StringComparison.OrdinalIgnoreCase)))
         {
             return source;
         }
 
-        var (rows, years) = await ReadDocumentsAsync(ct).ConfigureAwait(false);
+        var binding = await DocumentSourceGate.FindBindingAsync(db, templateCode, registryCode, ct).ConfigureAwait(false);
+        if (!(enabled ?? binding?.ReadFromDocument ?? false))
+        {
+            return source;
+        }
+
+        var approvedOnly = binding?.SourceState == DocumentSourceState.ApprovedOnly;
+        var (rows, years) = await ReadDocumentsAsync(approvedOnly, ct).ConfigureAwait(false);
         return Hse400CompositionMapping.Overlay(loaded, registryCode, rows, years);
     }
 
     private async Task<(IReadOnlyList<Hse400CompositionRow> Rows, IReadOnlyCollection<int> Years)> ReadDocumentsAsync(
-        CancellationToken ct)
+        bool approvedOnly, CancellationToken ct)
     {
         var allTables = await (
                 from t in db.Templates.AsNoTracking()
@@ -170,6 +202,16 @@ public sealed class Hse400CompositionSnapshotLoader(
         var instanceById = chosen.ToDictionary(i => i.Id);
         var found = new List<(int Year, int TableDefId, int Ordinal, Hse400DocumentCell Cell)>();
 
+        // B80 A2: за ApprovedOnly — один запит станів погодження обраних документів; місяць без затвердження
+        // (ніколи або після Reopen) не дає ні вводу, ні F_, ні нульового паритету. За Any запиту немає.
+        var approved = approvedOnly
+            ? await DocumentSourceGate.ApprovedMonthsAsync(
+                db, [.. chosen.Select(i => i.DocumentId)], chosenTableIds, ct).ConfigureAwait(false)
+            : null;
+
+        bool Passes(long documentId, int tableDefId, int year, int month)
+            => approved is null || approved.Contains((documentId, tableDefId, year, month));
+
         // Місяць таблиці, де введено хоч щось і ВСЕ введене — нуль: (рік, таблиця, місяць) → усі нулі?
         var inputMonths = new Dictionary<(int Year, int TableDefId, int Month), bool>();
 
@@ -188,6 +230,11 @@ public sealed class Hse400CompositionSnapshotLoader(
 
             var instance = instanceById[row.TableInstanceId];
             var year = instance.PeriodKeyValue / 100;
+            if (!Passes(instance.DocumentId, instance.TableDefId, year, monthByColumn[cell.ColumnDefId]))
+            {
+                continue;
+            }
+
             var inputMonth = (year, instance.TableDefId, monthByColumn[cell.ColumnDefId]);
             inputMonths[inputMonth] = (!inputMonths.TryGetValue(inputMonth, out var allZero) || allZero) && cell.Value == 0m;
             found.Add((year, instance.TableDefId, OrdinalOf(instance.TableDefId, row.RowKeyValue), new Hse400DocumentCell(
@@ -212,6 +259,11 @@ public sealed class Hse400CompositionSnapshotLoader(
                 }
 
                 var year = instance.PeriodKeyValue / 100;
+                if (!Passes(instance.DocumentId, instance.TableDefId, year, month))
+                {
+                    continue;
+                }
+
                 found.Add((year, instance.TableDefId, OrdinalOf(instance.TableDefId, rowKey), new Hse400DocumentCell(
                     year, month, streamByTable[instance.TableDefId], rowKey, result.Value)));
             }

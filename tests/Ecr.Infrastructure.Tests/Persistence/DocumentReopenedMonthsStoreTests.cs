@@ -2,6 +2,7 @@ using Ecr.Application.Common;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Enums;
+using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
 using Microsoft.EntityFrameworkCore;
@@ -105,6 +106,65 @@ public sealed class DocumentReopenedMonthsStoreTests(SqlServerFixture sql)
             chain.ProjectId, new PeriodKeyFilter(null), new DocumentListFilter(null, null, Year: year, HasReopenedMonths: true),
             new CursorRequest(Limit: 50), null, CancellationToken.None);
         Assert.Empty(closedPage.Items);
+    }
+
+    /// <summary>
+    /// ✎ L7c (F13 AU до L7ab): картка документа «рік» (<c>YearWithMonthColumns</c>) несе ВСІ діючі винятки року
+    /// перегляду — банер сторінки показує кожен відкритий місяць, а не лише якір. Закритий виняток, виняток іншого року
+    /// й іншого документа — ні. Контроль: місячна розкладка (<c>PerMonthCopies</c>) — <c>null</c>, як доти.
+    /// </summary>
+    /// <remarks>
+    /// Мутації (локально): умова розкладки в <c>FindAsync</c> → <c>false</c> — річна частина червона;
+    /// без фільтра року — виняток 2100-01 потрапляє в картку, червоний.
+    /// </remarks>
+    [Theory]
+    [InlineData(TemplateLayout.YearWithMonthColumns)]
+    [InlineData(TemplateLayout.PerMonthCopies)]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "L7c")]
+    public async Task Картка_року_несе_всі_відкриті_місяці_року_місячна_картка_ні(TemplateLayout layout)
+    {
+        const int Anchor = 209901;
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var chain = await builder.BuildAsync(periodKey: Anchor, ct: CancellationToken.None);
+        foreach (var key in new[] { 209903, 209905, 209907, 210001 })
+        {
+            await builder.AddPeriodAsync(chain, new PeriodKey(key));
+        }
+
+        var now = DateTime.UtcNow;
+        var until = DateTime.SpecifyKind(now.AddDays(3).Date.AddHours(18), DateTimeKind.Utc);
+        await using (var db = builder.CreateContext())
+        {
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE cfg.TemplateVersion SET Layout = {(int)layout} WHERE Id = {chain.TemplateVersionId};");
+            var user = await UserAsync(db);
+            var other = await DocumentAsync(db, chain.ProjectId, "RO");
+
+            db.DocumentPeriodReopens.Add(DocumentPeriodReopen.Open(chain.DocumentId, 209903, until, "L7c: березень", user, now));
+            db.DocumentPeriodReopens.Add(DocumentPeriodReopen.Open(chain.DocumentId, 209907, until.AddDays(1), "L7c: липень", user, now));
+            var closed = DocumentPeriodReopen.Open(chain.DocumentId, 209905, until, "L7c: травень", user, now);
+            closed.Close(now, user, DocumentPeriodReopen.ClosedManually);
+            db.DocumentPeriodReopens.Add(closed);
+            db.DocumentPeriodReopens.Add(DocumentPeriodReopen.Open(chain.DocumentId, 210001, until, "L7c: інший рік", user, now));
+            db.DocumentPeriodReopens.Add(DocumentPeriodReopen.Open(other, 209903, until, "L7c: інший документ", user, now));
+            await db.SaveChangesAsync();
+        }
+
+        await using var read = builder.CreateContext();
+        var card = await new DocumentStore(read).FindAsync(chain.DocumentId, new PeriodKeyFilter(Anchor), CancellationToken.None);
+        Assert.NotNull(card);
+
+        if (layout == TemplateLayout.PerMonthCopies)
+        {
+            Assert.Null(card.ReopenedPeriods);
+            return;
+        }
+
+        Assert.Equal([209903, 209907], card.ReopenedPeriods!.Select(r => r.PeriodKey));
+        Assert.Equal([until, until.AddDays(1)], card.ReopenedPeriods!.Select(r => r.OpenUntil));
+        Assert.All(card.ReopenedPeriods!, r => Assert.Equal(DateTimeKind.Utc, r.OpenUntil.Kind));
     }
 
     private static long[] Ids(PagedResult<DocumentSummary> page) => [.. page.Items.Select(d => d.Id).Order()];

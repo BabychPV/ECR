@@ -63,6 +63,7 @@ public sealed partial class MonthColumnArgumentsModule : ICalculationModule
     private readonly ICellStore _cells;
     private readonly IMetadataCache _metadata;
     private readonly IRowStore _rows;
+    private readonly IMonthColumnRouter? _router;
 
     private readonly ConcurrentDictionary<(long DocumentId, int PeriodKey), Lazy<Task<IReadOnlyList<TableInstanceRef>>>> _instances = new();
     private readonly ConcurrentDictionary<(int VersionId, long DocumentId, int PeriodKey, long SheetCopy), Lazy<Task<SheetRun>>> _runs = new();
@@ -80,7 +81,8 @@ public sealed partial class MonthColumnArgumentsModule : ICalculationModule
         IMetadataCache metadata,
         IRowStore rows,
         IRegistryStore? registryStore = null,
-        IRegistrySnapshotLoader? registryLoader = null)
+        IRegistrySnapshotLoader? registryLoader = null,
+        IMonthColumnRouter? monthRouter = null)
     {
         ArgumentNullException.ThrowIfNull(unitCatalog);
         ArgumentNullException.ThrowIfNull(cells);
@@ -93,6 +95,7 @@ public sealed partial class MonthColumnArgumentsModule : ICalculationModule
         _cells = cells;
         _metadata = metadata;
         _rows = rows;
+        _router = monthRouter;
     }
 
     [GeneratedRegex(@"!([A-Za-z][A-Za-z0-9_]*)", RegexOptions.CultureInvariant)]
@@ -443,6 +446,17 @@ public sealed partial class MonthColumnArgumentsModule : ICalculationModule
         IReadOnlyList<TableInstanceRef> group, PeriodKey periodKey, CancellationToken ct)
     {
         var tables = new List<MonthTable>();
+
+        // B80 N0: місячний проєкт з маршрутизованим зберіганням (Q-17, D-474) — зріз періоду m уже містить ввід УСІХ
+        // місяців з періодів-власників. Прогін періоду m рахує лише місяці, якими цей період володіє (місяць m), інакше
+        // кожен місяць року рахувався б у кожному періоді (дублі для читачів, свіжість місяця не своя). Той самий
+        // роутер і ті самі екземпляри, що й у MonthRoutedCellStore; річний проєкт і копії аркушів — без змін.
+        var routed = _router is null || group.Count == 0
+            ? new Dictionary<long, MonthRoutingInstance>()
+            : await _router
+                .ResolveInstancesAsync([.. group.Select(i => i.TableInstanceId)], periodKey, ct)
+                .ConfigureAwait(false);
+
         foreach (var instance in group)
         {
             var snapshot = await _metadata.GetAsync(instance.TemplateVersionId, ct).ConfigureAwait(false);
@@ -466,7 +480,12 @@ public sealed partial class MonthColumnArgumentsModule : ICalculationModule
                 continue;
             }
 
-            var rowIds = await _rows.GetRowIdsAsync(instance.TableInstanceId, periodKey, ct).ConfigureAwait(false);
+            if (routed.TryGetValue(instance.TableInstanceId, out var routing))
+            {
+                await KeepOwnMonthsAsync(routing, definition, monthColumns, ct).ConfigureAwait(false);
+            }
+
+            var rowIds =await _rows.GetRowIdsAsync(instance.TableInstanceId, periodKey, ct).ConfigureAwait(false);
             var slice = await _cells.ReadSliceAsync(instance.TableInstanceId, periodKey, ct).ConfigureAwait(false);
 
             var calculated = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -506,6 +525,32 @@ public sealed partial class MonthColumnArgumentsModule : ICalculationModule
         }
 
         return tables;
+    }
+
+    /// <summary>
+    /// B80 N0: прибирає з таблиці місяці, чиїм власником є інший період (<see cref="IMonthColumnRouter.ForeignColumnsAsync"/>):
+    /// їх ввід лишається поза аргументами, а результат — поза прогоном цього періоду.
+    /// </summary>
+    private async Task KeepOwnMonthsAsync(
+        MonthRoutingInstance routing, TableDef definition, Dictionary<int, ColumnDef> monthColumns, CancellationToken ct)
+    {
+        if (!_router!.AppliesToTable(definition))
+        {
+            return;
+        }
+
+        var foreign = await _router
+            .ForeignColumnsAsync(routing.Document, definition, routing.PeriodKey, ct)
+            .ConfigureAwait(false);
+        foreach (var column in foreign.Select(f => f.Column))
+        {
+            if (column.MonthNumber is { } month
+                && monthColumns.TryGetValue(month, out var own)
+                && own.Id == column.Id)
+            {
+                monthColumns.Remove(month);
+            }
+        }
     }
 
     /// <summary>

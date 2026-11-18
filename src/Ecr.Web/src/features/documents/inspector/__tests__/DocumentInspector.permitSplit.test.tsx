@@ -67,6 +67,47 @@ describe('Issues: PERMIT-SPLIT → Split <month> (j3)', () => {
     });
   });
 
+  /**
+   * ✎ L7c (координатор 18.11, варіант A): документ «рік» — зауваження вересня (`periodKey` прогону 209909) відкриває поділ
+   * від ЯКОРЯ (перегляд 209901) з колонкою вересня: сервер будує історію дозволів якоря з усіма місячними колонками року,
+   * а зріз сторінки в кеші — лише якоря. Серверний доказ — DocumentPermitHistoryTests (рік, L7c).
+   * Мутація (локально): `periodKey: finding.periodKey ?? periodKey` в onSplitIssue — тест червоний.
+   */
+  it('year layout: a September finding opens the split from the anchor with the September column', () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const september: ValidationFindingDto = { ...Split, columnCode: 'C_Sep', periodKey: 209909 };
+    render(
+      <MantineProvider theme={testTheme}>
+        <QueryClientProvider client={client}>
+          <MemoryRouter initialEntries={['/documents/2?panel=issues']}>
+            <DocumentInspector
+              documentId={2}
+              periodKey={209901}
+              yearLayout
+              tables={Tables}
+              messages={[september]}
+              onSelectFinding={() => undefined}
+            />
+          </MemoryRouter>
+        </QueryClientProvider>
+      </MantineProvider>,
+    );
+
+    const action = document.querySelector<HTMLButtonElement>('[data-inspector-split="C_Sep"]');
+    expect(action).not.toBeNull();
+    fireEvent.click(action!);
+
+    expect(cellSplitRequest()).toEqual({
+      documentId: 2,
+      periodKey: 209901,
+      tableInstanceId: 597,
+      tableDefId: 701,
+      sheetCopyId: null,
+      rowKey: 'R7001000',
+      columnCode: 'C_Sep',
+    });
+  });
+
   it('other findings have no split action', () => {
     show([{ ...Split, ruleCode: 'PERMIT-VALIDITY' }]);
 

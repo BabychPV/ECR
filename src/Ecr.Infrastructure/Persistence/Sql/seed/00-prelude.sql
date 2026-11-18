@@ -146,8 +146,14 @@ USING (VALUES
   -- сам; `TemplateAdministrator` і явна пара `SystemAdministrator` — секція `PERMITS: permissions` після роздач ролей.
   -- Рядок стоїть у єдиному каталозі (його читають сторожі). Перегляд типів лишається Registry.View.
   (N'Permit.EditType',          N'Permit',      0),
-  (N'Permit.PublishType',       N'Permit',      0)
+  (N'Permit.PublishType',       N'Permit',      0),
   -- PERMITS: permissions ── кінець секції ──
+  -- B80:source-binding ── право «Керувати зв'язками документа-джерела» (рішення координатора R4.6, 16.11) ──
+  -- Глобальне (`PermissionScopes.Global`): читання й перемикання стану-воріт `cfg.DocumentSourceBinding`
+  -- (`any` / `approvedOnly`). Не небезпечне (0): з вбудованих ролей його бере лише `SystemAdministrator` шаблоном `%`
+  -- (жоден інший шаблон ролей його не покриває); решті ролей адміністратор видає свідомо.
+  (N'Calculation.ManageSourceBinding', N'Calculation', 0)
+  -- B80:source-binding ── кінець секції ──
 ) AS s (Code, [Group], IsDangerous)
 ON t.Code = s.Code
 WHEN NOT MATCHED THEN INSERT (Code, [Group], NameL10n, IsDangerous)
@@ -1498,7 +1504,14 @@ DELETE t
     -- D6/D-223: розбіжність періоду на запису комірок віддає `err.ECR-PRD-0422.periodMismatch`; старий ключ ніхто не вживає.
     (N'err.ECR-REQ-0422.periodMismatch', N'en', N'The period {periodKey} in the request does not match period {expectedPeriodKey} of table instance {tableInstanceId}.'),
     (N'err.ECR-REQ-0422.periodMismatch', N'ru', N'Период {periodKey} в запросе не совпадает с периодом {expectedPeriodKey} экземпляра таблицы {tableInstanceId}.'),
-    (N'err.ECR-REQ-0422.periodMismatch', N'kz', N'Сұраудағы {periodKey} кезеңі {tableInstanceId} кесте данасының {expectedPeriodKey} кезеңіне сәйкес келмейді.')
+    (N'err.ECR-REQ-0422.periodMismatch', N'kz', N'Сұраудағы {periodKey} кезеңі {tableInstanceId} кесте данасының {expectedPeriodKey} кезеңіне сәйкес келмейді.'),
+    -- LAND-YEAR L7c: меню «Calculated: <місяць>» документа «рік» прибрано в L7a (перемикача місяця немає).
+    (N'calcResults.calculatedMonth',        N'en', N'Calculated: {month}'),
+    (N'calcResults.calculatedMonth',        N'ru', N'Рассчитано: {month}'),
+    (N'calcResults.calculatedMonth',        N'kz', N'Есептелген: {month}'),
+    (N'calcResults.calculatedMonthHeading', N'en', N'Calculated columns show results of'),
+    (N'calcResults.calculatedMonthHeading', N'ru', N'Рассчитанные столбцы показывают результаты за'),
+    (N'calcResults.calculatedMonthHeading', N'kz', N'Есептелген бағандар нәтижелерін көрсетеді')
   ) AS s ([Key], Lang, OldVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;

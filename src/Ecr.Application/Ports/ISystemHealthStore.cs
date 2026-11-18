@@ -36,13 +36,27 @@ public interface ISystemHealthStore
 /// B105: чи є опублікована версія шаблону HSE400 і документ HSE400 (не золотого проєкту) з періодом поточного
 /// року. Лише так/ні: із цим знанням і вимкненим прапором Land мовчки читає склад газу з довідника.
 /// </param>
+/// <param name="Hse400Source">
+/// B80 (N1): зв'язка HSE400 → склад газу Land; <c>null</c> — зв'язки немає (стан-ворота не визначено).
+/// </param>
 public sealed record SystemHealthSnapshot(
     HealthJobCounts Jobs,
     HealthSourceCounts Sources,
     long? FreeSpaceDataDiskGb,
     DateTime? LastBackupAt,
     DateTime? LastErrorAt,
-    bool Hse400DocumentInCurrentYear = false);
+    bool Hse400DocumentInCurrentYear = false,
+    HealthHse400SourceFacts? Hse400Source = null);
+
+/// <summary>B80 (N1): факти зв'язки HSE400 → Land за поточний рік.</summary>
+/// <param name="ApprovedOnly">Стан-ворота — «лише затверджене».</param>
+/// <param name="ReadFromDocument">Біт зв'язки «читати з документа».</param>
+/// <param name="ApprovedMonths">
+/// Затверджених місяців обраного документа поточного року (0–12); <c>null</c> — документа поточного року немає.
+/// </param>
+/// <param name="UnapprovedMonthWithData">Є місяць із введеними даними джерела, не затверджений.</param>
+public sealed record HealthHse400SourceFacts(
+    bool ApprovedOnly, bool ReadFromDocument, int? ApprovedMonths, bool UnapprovedMonthWithData);
 
 /// <summary>Лічильники черги фонових задач.</summary>
 /// <param name="Running">Виконуються зараз.</param>

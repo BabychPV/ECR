@@ -154,6 +154,8 @@ public static class DependencyInjection
         services.AddScoped<Templates.RenameTemplateHandler>();
         services.AddScoped<Templates.SetTemplateArchivedHandler>();
         services.AddScoped<Templates.SetTemplateDocumentPolicyHandler>(); // B151
+        services.AddScoped<Calculations.SourceBindings.ListDocumentSourceBindingsHandler>(); // B80 N1
+        services.AddScoped<Calculations.SourceBindings.SwitchDocumentSourceStateHandler>(); // B80 N1
 
         services.AddScoped<Projects.ListProjectsHandler>();
         services.AddScoped<Projects.CreateProjectHandler>();
