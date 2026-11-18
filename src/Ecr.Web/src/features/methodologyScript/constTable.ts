@@ -50,6 +50,21 @@ const IdentifierStart = /[A-Za-z_]/;
 const IdentifierPart = /[A-Za-z0-9_]/;
 const NumberRx = /\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/y;
 
+/** Екранування як на сервері: `\n`, `\\`, `\"`, `\'`; невідоме лишається як є — разом зі скісною. */
+function unescapeChar(e: string): string {
+  if (e === 'n') return '\n';
+  if (e === '"' || e === "'" || e === '\\') return e;
+  return `\\${e}`;
+}
+
+/** Ключ-число так, як його читає сервер (`ScriptNumbers.KeyText`): без зайвих нулів (`1.50` → `1.5`, `007` → `7`). */
+function numberKeyText(raw: string): string {
+  let text = raw.replace(/^0+(?=\d)/, '');
+  if (/[eE]/.test(text)) return String(Number(text));
+  if (text.includes('.')) text = text.replace(/0+$/, '').replace(/\.$/, '');
+  return text;
+}
+
 function tokenize(text: string): Token[] | { readonly error: number } {
   const tokens: Token[] = [];
   let i = 0;
@@ -72,7 +87,7 @@ function tokenize(text: string): Token[] | { readonly error: number } {
         const d = text[j] ?? '';
         if (d === '\\') {
           const e = text[j + 1] ?? '';
-          value += e === 'n' ? '\n' : e;
+          value += unescapeChar(e);
           j += 2;
         } else if (d === c) {
           closed = true;
@@ -201,10 +216,11 @@ function parseMap(cursor: Cursor): MapNode {
     cursor.position++;
     cursor.expectPunct(':');
     const value = parseValue(cursor);
-    if (entries.some((e) => e.key === keyToken.text)) {
+    const key = keyToken.kind === 'number' ? numberKeyText(keyToken.text) : keyToken.text;
+    if (entries.some((e) => e.key === key)) {
       throw new ParseFailure('duplicateKey', keyToken.start);
     }
-    entries.push({ key: keyToken.text, value, at: keyToken.start });
+    entries.push({ key, value, at: keyToken.start });
     if (cursor.isPunct(',')) cursor.position++;
     else if (!cursor.isPunct('}')) throw new ParseFailure('syntax', cursor.here());
   }
@@ -352,6 +368,9 @@ export function printConstGrid(grid: ConstGrid, indent = '    '): string {
 export function parseCellText(raw: string): ConstCell {
   const text = raw.trim();
   if (text === '') return null;
+  // Рядок у лапках — завжди рядок: так показується текст, який інакше прочитався б числом, булевим чи порожнім.
+  const quoted = /^"((?:[^"\\]|\\.)*)"$/.exec(text);
+  if (quoted !== null) return (quoted[1] ?? '').replace(/\\(.)/gs, (_, e: string) => unescapeChar(e));
   const lower = text.toLowerCase();
   if (lower === 'true') return true;
   if (lower === 'false') return false;
@@ -366,13 +385,23 @@ export function parseCellText(raw: string): ConstCell {
   return text;
 }
 
-/** Значення комірки → текст для поля сітки. */
+/**
+ * Значення комірки → текст для поля сітки. ⛔ Рядок, який `parseCellText` прочитав би інакше (`"007"`, `"1,5"`,
+ * `"true"`, `""`, з пробілами по краях), показується в лапках — інакше «Застосувати» мовчки змінило б його тип.
+ */
 export function cellToText(cell: ConstCell): string {
-  return cell === null ? '' : String(cell);
+  if (cell === null) return '';
+  if (typeof cell === 'string') return parseCellText(cell) === cell ? cell : printString(cell);
+  return String(cell);
 }
 
 /** Розбирає буфер обміну Excel у прямокутник комірок. */
 export function parseTsv(text: string): ConstCell[][] {
+  return parseTsvRaw(text).map((row) => row.map((field) => parseCellText(field)));
+}
+
+/** Буфер Excel → прямокутник РЯДКІВ без перетворень (для ключів: `01` не стає `1`). */
+export function parseTsvRaw(text: string): string[][] {
   const rows: string[][] = [];
   let row: string[] = [];
   let field = '';
@@ -425,7 +454,7 @@ export function parseTsv(text: string): ConstCell[][] {
   while (rows.length > 0 && (rows[rows.length - 1] ?? []).every((f) => f.trim() === '')) rows.pop();
 
   const width = Math.max(0, ...rows.map((r) => r.length));
-  return rows.map((r) => Array.from({ length: width }, (_, c) => parseCellText(r[c] ?? '')));
+  return rows.map((r) => Array.from({ length: width }, (_, c) => r[c] ?? ''));
 }
 
 /** Сітка з довільним типом комірки (у діалозі — текст поля вводу). */
@@ -491,28 +520,30 @@ export function pasteIntoGrid(
  * однорівнева мапа.
  */
 export function gridFromTsv(text: string, columnHeaders: boolean): ConstGrid | null {
-  const block = parseTsv(text);
-  if (block.length === 0) return null;
-  const width = block[0]?.length ?? 0;
+  const raw = parseTsvRaw(text);
+  if (raw.length === 0) return null;
+  const width = raw[0]?.length ?? 0;
   if (width < 2) return null;
 
-  const keyOf = (cell: ConstCell | undefined): string => cellToText(cell ?? null);
+  // ⛔ Ключі беруться з сирого тексту: `01`, `1.50` лишаються такими, як у Excel, а не числом.
+  const block = raw.map((row) => row.map((field) => parseCellText(field)));
+  const keyOf = (field: string | undefined): string => (field ?? '').trim();
+  const keys = raw.map((row) => keyOf(row[0]));
 
   if (columnHeaders) {
-    const header = block[0] ?? [];
-    const body = block.slice(1);
+    const header = raw[0] ?? [];
     return {
-      rowKeys: body.map((r) => keyOf(r[0])),
-      columnKeys: header.slice(1).map((c) => keyOf(c)),
-      cells: body.map((r) => r.slice(1)),
+      rowKeys: keys.slice(1),
+      columnKeys: header.slice(1).map((field) => keyOf(field)),
+      cells: block.slice(1).map((r) => r.slice(1)),
     };
   }
 
   if (width === 2) {
-    return { rowKeys: block.map((r) => keyOf(r[0])), columnKeys: null, cells: block.map((r) => [r[1] ?? null]) };
+    return { rowKeys: keys, columnKeys: null, cells: block.map((r) => [r[1] ?? null]) };
   }
   return {
-    rowKeys: block.map((r) => keyOf(r[0])),
+    rowKeys: keys,
     columnKeys: Array.from({ length: width - 1 }, (_, i) => `Col${String(i + 1)}`),
     cells: block.map((r) => r.slice(1)),
   };

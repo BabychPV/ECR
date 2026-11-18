@@ -8,6 +8,7 @@ import {
   parseConstLiteral,
   parseTsv,
   pasteIntoGrid,
+  printCell,
   printConstGrid,
   printKey,
   type ConstGrid,
@@ -247,5 +248,49 @@ describe('findConstAt', () => {
     expect(range).not.toBeNull();
     const literal = text.slice(range?.start, range?.end);
     expect(parseConstLiteral(literal).ok).toBe(true);
+  });
+});
+
+const BSL = String.fromCharCode(92);
+
+describe('F13: літерал і сервер читають одне й те саме', () => {
+  it('невідоме екранування лишається як є (сервер: невідома послідовність лишається двома літерами), а не з’їдає скісну', () => {
+    const grid = parse('{ k: "a@tb" }'.replace('@', BSL));
+    expect(grid.cells).toEqual([['a' + BSL + 'tb']]);
+    // друк → розбір не змінює значення
+    expect(parse(printConstGrid(grid)).cells).toEqual(grid.cells);
+  });
+
+  it('друк рядка екранує лапки, скісну й перенос', () => {
+    expect(printCell('a"b' + BSL + 'c' + String.fromCharCode(10) + 'd')).toBe('"a' + BSL + '"b' + BSL + BSL + 'c' + BSL + 'nd"');
+  });
+
+  it('`param` — ключове слово сервера: ключ друкується в лапках', () => {
+    expect(printKey('param')).toBe('"param"');
+    const printed = printConstGrid({ rowKeys: ['param'], columnKeys: null, cells: [[1]] });
+    expect(printed).toContain('"param": 1');
+  });
+
+  it('ключ-число читається, як на сервері: без зайвих нулів, дубль виявляється', () => {
+    expect(parse('{ 1.50: 1, 007: 2, 1e1: 3 }').rowKeys).toEqual(['1.5', '7', '10']);
+    const result = parseConstLiteral('{ 1.0: 1, 1: 2 }');
+    expect(result.ok ? 'ok' : result.code).toBe('duplicateKey');
+  });
+
+  it('рядок, схожий на число, булеве чи порожній, не змінює тип після «Застосувати»', () => {
+    const grid = parse('{ A: "007", B: "1,5", C: "true", D: "", E: " x ", F: 7 }');
+    const texts = grid.cells.map((row) => cellToText(row[0] ?? null));
+    expect(texts).toEqual(['"007"', '"1,5"', '"true"', '""', '" x "', '7']);
+    // те, що людина бачить у полі й не чіпала, повертається тим самим значенням
+    expect(texts.map((text) => parseCellText(text))).toEqual(['007', '1,5', 'true', '', ' x ', 7]);
+    expect(cellToText('abc')).toBe('abc');
+  });
+
+  it('вставка з Excel: ключі лишаються текстом (`01`, `1.50`), значення — числами', () => {
+    const grid = gridFromTsv('' + String.fromCharCode(9) + 'x' + String.fromCharCode(10) + '01' + String.fromCharCode(9) + '1,5' + String.fromCharCode(10) + '1.50' + String.fromCharCode(9) + '2', true);
+    expect(grid?.rowKeys).toEqual(['01', '1.50']);
+    expect(grid?.cells).toEqual([[1.5], [2]]);
+    const flat = gridFromTsv('01' + String.fromCharCode(9) + '5', false);
+    expect(flat?.rowKeys).toEqual(['01']);
   });
 });
