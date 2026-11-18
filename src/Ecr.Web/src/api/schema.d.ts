@@ -40758,20 +40758,33 @@ export interface components {
         /** @description ✎ B155: поданий аркуш, погодження якого почнеться (почалося) з першого кроку. */
         RestartedSheetDto: {
             /**
+             * Format: int16
+             * @description Номер у групі аркуша: 1 — оригінал, 2… — копії.
+             */
+            copyOrdinal?: null | number;
+            /** @description Код документа (`BusinessKey`). */
+            documentCode?: null | string;
+            /**
              * Format: int64
              * @description Документ.
              */
             documentId: number;
+            documentName?: null | components["schemas"]["LocalizedText"];
             /**
              * Format: int32
              * @description Період.
              */
             periodKey: number;
+            /** @description Код проєкту; `null` — назви не прочитано (показ відступає до ідентифікатора). */
+            projectCode?: null | string;
             /**
              * Format: int32
              * @description Проєкт.
              */
             projectId: number;
+            projectName?: null | components["schemas"]["LocalizedText"];
+            /** @description Код аркуша шаблону. */
+            sheetCode?: null | string;
             /**
              * Format: int64
              * @description Копія (RS); `null` — оригінал.
@@ -40782,6 +40795,8 @@ export interface components {
              * @description Аркуш.
              */
             sheetDefId: number;
+            sheetDisplayName?: null | components["schemas"]["LocalizedText"];
+            sheetName?: null | components["schemas"]["LocalizedText"];
         };
         /** @enum {unknown} */
         ResultsStaleUndeterminedReason: "PartiallyHidden" | null;

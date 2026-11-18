@@ -22,7 +22,7 @@ namespace Ecr.Api.Tests;
 /// <remarks>
 /// Свої дані: чотири документи (період 2099xx) — A (проєкт P1, шаблон T), B (P2, власний шаблон документа T, B74),
 /// C (P3, інший шаблон), D (P4, власний T, затверджений). Прибирання — у finally.
-/// ⛔ МУТАЦІЇ: <c>ApprovalRouteImpact.ToDto</c> без фільтра видимості — червоніє «видимих 1 із 2»; <c>ScopeGoverns</c>
+/// ⛔ МУТАЦІЇ: <c>ApprovalRouteImpact.ToDtoAsync</c> без фільтра видимості — червоніє «видимих 1 із 2»; <c>ScopeGoverns</c>
 /// без перевірки конкретнішого — червоніє «виняток P2 не перезапускається»; <c>AuthorizeAsync</c> з
 /// <c>Template.View</c> на запис — червоніє «Template.View → 403»; без <c>RequireProjectManageAsync</c>-гранта —
 /// червоніє «менеджер без гранта → 403».
@@ -56,6 +56,18 @@ public sealed class TemplateApprovalRouteHttpTests(SqlServerFixture sql)
             Assert.Equal((2, 0), (none.GetProperty("total").GetInt32(), none.GetProperty("visible").GetInt32()));
             Assert.Equal([stand.A.DocumentId], Documents(one.GetProperty("sheets")));
             Assert.Empty(Documents(none.GetProperty("sheets")));
+
+            // ✎ B155-names: перелік несе назви (код проєкту/документа/аркуша, показувана назва аркуша) — і лише видимих:
+            // код невидимого проєкту B у відповіді не з'являється.
+            var (codeA, codeB, docKeyA) = await CodesAsync(stand).ConfigureAwait(true);
+            var listedA = one.GetProperty("sheets").EnumerateArray().Single();
+            Assert.Equal(codeA, listedA.GetProperty("projectCode").GetString());
+            Assert.Equal(docKeyA, listedA.GetProperty("documentCode").GetString());
+            Assert.Equal(stand.A.SheetCode, listedA.GetProperty("sheetCode").GetString());
+            Assert.Equal(1, listedA.GetProperty("copyOrdinal").GetInt32());
+            Assert.False(string.IsNullOrEmpty(listedA.GetProperty("sheetDisplayName").GetProperty("values").GetProperty("en").GetString()));
+            Assert.DoesNotContain($"\"{codeB}\"", one.GetRawText(), StringComparison.Ordinal);
+            Assert.Contains($"\"{codeB}\"", all.GetRawText(), StringComparison.Ordinal);
 
             // PUT (–,T) [C1]: A і B — на перший крок нового маршруту; C (інший шаблон) і D (затверджений) — без змін.
             var put = await PutAsync(app, admin, TemplateRoute(stand.T), new[] { stand.C1 }).ConfigureAwait(true);
@@ -340,6 +352,15 @@ public sealed class TemplateApprovalRouteHttpTests(SqlServerFixture sql)
             UPDATE doc.Document SET TemplateId = NULL WHERE Id IN ({stand.B.DocumentId}, {stand.D.DocumentId});
             DELETE FROM doc.ProjectTemplate WHERE ProjectId IN ({stand.B.ProjectId}, {stand.D.ProjectId}) AND TemplateId = {stand.T};
             """).ConfigureAwait(false);
+    }
+
+    private async Task<(string ProjectA, string ProjectB, string DocumentA)> CodesAsync(StandData stand)
+    {
+        await using var db = Db();
+        var projectA = await db.Projects.Where(p => p.Id == stand.A.ProjectId).Select(p => p.Code).SingleAsync().ConfigureAwait(false);
+        var projectB = await db.Projects.Where(p => p.Id == stand.B.ProjectId).Select(p => p.Code).SingleAsync().ConfigureAwait(false);
+        var documentA = await db.Documents.Where(d => d.Id == stand.A.DocumentId).Select(d => d.BusinessKey).SingleAsync().ConfigureAwait(false);
+        return (projectA, projectB, documentA);
     }
 
     private async Task<bool> DefaultRouteExistsAsync()

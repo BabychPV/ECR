@@ -81,7 +81,30 @@ public sealed record ScopedApprovalRouteDto(
 /// <param name="SheetDefId">Аркуш.</param>
 /// <param name="SheetCopyId">Копія (RS); <c>null</c> — оригінал.</param>
 /// <param name="PeriodKey">Період.</param>
-public sealed record RestartedSheetDto(int ProjectId, long DocumentId, int SheetDefId, long? SheetCopyId, int PeriodKey);
+/// <param name="ProjectCode">Код проєкту; <c>null</c> — назви не прочитано (показ відступає до ідентифікатора).</param>
+/// <param name="ProjectName">Назва проєкту мовами каталогу.</param>
+/// <param name="DocumentCode">Код документа (<c>BusinessKey</c>).</param>
+/// <param name="DocumentName">Назва документа мовами каталогу; <c>null</c> — немає.</param>
+/// <param name="SheetCode">Код аркуша шаблону.</param>
+/// <param name="SheetName">Назва аркуша шаблону мовами каталогу.</param>
+/// <param name="CopyOrdinal">Номер у групі аркуша: 1 — оригінал, 2… — копії.</param>
+/// <param name="SheetDisplayName">
+/// Показувана назва аркуша в документі — «&lt;Назва&gt; N» за <see cref="SheetCopyNaming"/>, як у вкладці документа.
+/// </param>
+public sealed record RestartedSheetDto(
+    int ProjectId,
+    long DocumentId,
+    int SheetDefId,
+    long? SheetCopyId,
+    int PeriodKey,
+    string? ProjectCode = null,
+    LocalizedText? ProjectName = null,
+    string? DocumentCode = null,
+    LocalizedText? DocumentName = null,
+    string? SheetCode = null,
+    LocalizedText? SheetName = null,
+    short? CopyOrdinal = null,
+    LocalizedText? SheetDisplayName = null);
 
 /// <summary>✎ B155 (C-8): подані аркуші, які зміна маршруту області поверне на перший крок.</summary>
 /// <param name="Total">Усього таких аркушів (у всіх проєктах, де маршрут області діє, крім проєктів із власним винятком).</param>
@@ -256,18 +279,36 @@ public static class ApprovalRouteImpact
     /// Відповідь для викликача: загальна кількість і ЛИШЕ видимі йому аркуші (видимість проєкту — та сама, що в
     /// переліку проєктів, <see cref="Projects.ProjectVisibility"/>).
     /// </summary>
+    /// <remarks>
+    /// ✎ B155-names: назви проєкту, документа й аркуша — одним пакетним читанням лише для ПЕРЕЛІЧЕНИХ (видимих, ≤
+    /// <see cref="MaxListed"/>) аркушів: невидимі проєкти не читаються й не віддаються.
+    /// </remarks>
+    /// <param name="workflow">Сховище (назви).</param>
     /// <param name="affected">Аркуші.</param>
     /// <param name="profile">Профіль викликача.</param>
-    public static ApprovalRouteImpactDto ToDto(IReadOnlyList<InFlightSheet> affected, AccessProfile profile)
+    /// <param name="ct">Токен скасування.</param>
+    public static async Task<ApprovalRouteImpactDto> ToDtoAsync(
+        IWorkflowStore workflow, IReadOnlyList<InFlightSheet> affected, AccessProfile profile, CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(workflow);
         ArgumentNullException.ThrowIfNull(affected);
         ArgumentNullException.ThrowIfNull(profile);
 
         var visible = affected.Where(s => Projects.ProjectVisibility.IsVisible(profile, s.ProjectId)).ToList();
+        var listed = visible.Take(MaxListed).ToList();
+        var names = listed.Count == 0
+            ? new Dictionary<long, InFlightSheetNames>()
+            : await workflow.ListInFlightSheetNamesAsync(listed, ct).ConfigureAwait(false);
+
         return new ApprovalRouteImpactDto(
             affected.Count,
             visible.Count,
-            [.. visible.Take(MaxListed).Select(s => new RestartedSheetDto(s.ProjectId, s.DocumentId, s.SheetDefId, s.SheetCopyId, s.PeriodKey))],
+            [.. listed.Select(s => names.TryGetValue(s.StateId, out var n)
+                ? new RestartedSheetDto(
+                    s.ProjectId, s.DocumentId, s.SheetDefId, s.SheetCopyId, s.PeriodKey,
+                    n.ProjectCode, n.ProjectName, n.DocumentCode, n.DocumentName, n.SheetCode, n.SheetName,
+                    n.CopyOrdinal, n.SheetDisplayName)
+                : new RestartedSheetDto(s.ProjectId, s.DocumentId, s.SheetDefId, s.SheetCopyId, s.PeriodKey))],
             visible.Count > MaxListed);
     }
 }
@@ -464,7 +505,7 @@ public sealed class PreviewApprovalRouteImpactHandler(
         }
 
         var affected = await ApprovalRouteImpact.AffectedAsync(workflow, scope, ct).ConfigureAwait(false);
-        return ApprovalRouteImpact.ToDto(affected, profile);
+        return await ApprovalRouteImpact.ToDtoAsync(workflow, affected, profile, ct).ConfigureAwait(false);
     }
 }
 
@@ -594,7 +635,8 @@ public sealed class ReplaceScopedApprovalRouteHandler(
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 
-        return new ApprovalRouteChangeDto(roleIds.Count, ApprovalRouteImpact.ToDto(affected, profile));
+        return new ApprovalRouteChangeDto(
+            roleIds.Count, await ApprovalRouteImpact.ToDtoAsync(workflow, affected, profile, ct).ConfigureAwait(false));
     }
 
     /// <summary>Чи набір кроків нічого не змінює: той самий порядок ролей, або прибирання відсутнього маршруту.</summary>

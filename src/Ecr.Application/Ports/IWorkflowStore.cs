@@ -243,6 +243,19 @@ public interface IWorkflowStore
     public Task<IReadOnlyList<InFlightSheet>> ListInFlightSheetsAsync(int? projectId, int? templateId, CancellationToken ct)
         => throw new NotSupportedException("Маршрути областей (B155) не реалізовано цим сховищем.");
 
+    /// <summary>
+    /// ✎ B155 (назви в переліку перезапуску): проєкт, документ, аркуш і копія поданих аркушів — за ключем стану.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Фіксована кількість запитів на весь перелік (не запит на аркуш). Кличеться ЛИШЕ для вже видимих викликачу
+    /// аркушів. Аркуша, якого вже немає, у відповіді немає — показ відступає до кодів/ідентифікаторів.
+    /// </remarks>
+    /// <param name="sheets">Аркуші переліку (≤ <c>ApprovalRouteImpact.MaxListed</c>).</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyDictionary<long, InFlightSheetNames>> ListInFlightSheetNamesAsync(
+        IReadOnlyCollection<InFlightSheet> sheets, CancellationToken ct)
+        => throw new NotSupportedException("Маршрути областей (B155) не реалізовано цим сховищем.");
+
     /// <summary>✎ B155: стани за ключами — для перезапуску (відстежуються).</summary>
     public Task<IReadOnlyList<ApprovalState>> GetStatesAsync(IReadOnlyCollection<long> stateIds, CancellationToken ct)
         => throw new NotSupportedException("Маршрути областей (B155) не реалізовано цим сховищем.");
@@ -462,6 +475,25 @@ public sealed record InFlightSheet(
     int? TemplateId,
     int TemplateVersionId,
     int? CurrentStepId);
+
+/// <summary>✎ B155: назви поданого аркуша для переліку перезапуску.</summary>
+/// <param name="ProjectCode">Код проєкту.</param>
+/// <param name="ProjectName">Назва проєкту.</param>
+/// <param name="DocumentCode">Код документа (<c>BusinessKey</c>).</param>
+/// <param name="DocumentName">Назва документа; <c>null</c> — немає.</param>
+/// <param name="SheetCode">Код аркуша шаблону.</param>
+/// <param name="SheetName">Назва аркуша шаблону.</param>
+/// <param name="CopyOrdinal">Номер у групі: 1 — оригінал, 2… — копії.</param>
+/// <param name="SheetDisplayName">Показувана назва в документі — «&lt;Назва&gt; N» (<c>SheetCopyNaming</c>).</param>
+public sealed record InFlightSheetNames(
+    string ProjectCode,
+    LocalizedText ProjectName,
+    string DocumentCode,
+    LocalizedText? DocumentName,
+    string SheetCode,
+    LocalizedText SheetName,
+    short CopyOrdinal,
+    LocalizedText SheetDisplayName);
 
 /// <summary>✎ B155: шаблон для маршруту погодження.</summary>
 /// <param name="Id">Шаблон.</param>

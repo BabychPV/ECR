@@ -185,6 +185,74 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<long, InFlightSheetNames>> ListInFlightSheetNamesAsync(
+        IReadOnlyCollection<InFlightSheet> sheets, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(sheets);
+        if (sheets.Count == 0)
+        {
+            return new Dictionary<long, InFlightSheetNames>();
+        }
+
+        // ⛔ Три запити на весь перелік (≤ 200), незалежно від його довжини: документ із проєктом, аркуші шаблону,
+        // склад документів (назва групи, номер копії, «чи є копії»). Не запит на аркуш (B155-names).
+        var documentIds = sheets.Select(s => s.DocumentId).Distinct().ToList();
+        var sheetDefIds = sheets.Select(s => s.SheetDefId).Distinct().ToList();
+
+        var documents = await (
+                from d in db.Documents.AsNoTracking()
+                join p in db.Projects.AsNoTracking() on d.ProjectId equals p.Id
+                where documentIds.Contains(d.Id)
+                select new { d.Id, d.BusinessKey, d.NameL10n, ProjectCode = p.Code, ProjectName = p.NameL10n })
+            .ToDictionaryAsync(d => d.Id, ct)
+            .ConfigureAwait(false);
+
+        var sheetDefs = await db.SheetDefs.AsNoTracking()
+            .Where(s => sheetDefIds.Contains(s.Id))
+            .Select(s => new { s.Id, s.Code, s.NameL10n })
+            .ToDictionaryAsync(s => s.Id, ct)
+            .ConfigureAwait(false);
+
+        var composition = await db.DocumentSheets.AsNoTracking()
+            .Where(s => documentIds.Contains(s.DocumentId) && sheetDefIds.Contains(s.SheetDefId))
+            .Select(s => new { s.Id, s.DocumentId, s.SheetDefId, s.CopyOfId, s.CopyOrdinal, s.NameOverrideL10n })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var groups = composition
+            .GroupBy(s => (s.DocumentId, s.SheetDefId))
+            .ToDictionary(
+                g => g.Key,
+                g => (Override: g.FirstOrDefault(s => s.CopyOfId == null)?.NameOverrideL10n, HasCopies: g.Any(s => s.CopyOfId != null)));
+        var copyOrdinals = composition.Where(s => s.CopyOfId != null).ToDictionary(s => s.Id, s => s.CopyOrdinal);
+
+        var names = new Dictionary<long, InFlightSheetNames>(sheets.Count);
+        foreach (var sheet in sheets)
+        {
+            if (!documents.TryGetValue(sheet.DocumentId, out var document)
+                || !sheetDefs.TryGetValue(sheet.SheetDefId, out var sheetDef))
+            {
+                continue;
+            }
+
+            var group = groups.TryGetValue((sheet.DocumentId, sheet.SheetDefId), out var found) ? found : (Override: null, HasCopies: false);
+            var ordinal = sheet.SheetCopyId is { } copyId && copyOrdinals.TryGetValue(copyId, out var copyOrdinal)
+                ? copyOrdinal
+                : DocumentSheet.OriginalOrdinal;
+            var display = Domain.ValueObjects.SheetCopyNaming.Display(
+                Domain.ValueObjects.SheetCopyNaming.Effective(sheetDef.NameL10n, group.Override),
+                ordinal,
+                group.HasCopies || sheet.SheetCopyId is not null);
+
+            names[sheet.StateId] = new InFlightSheetNames(
+                document.ProjectCode, document.ProjectName, document.BusinessKey, document.NameL10n,
+                sheetDef.Code, sheetDef.NameL10n, ordinal, display);
+        }
+
+        return names;
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<ApprovalState>> GetStatesAsync(IReadOnlyCollection<long> stateIds, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(stateIds);

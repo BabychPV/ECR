@@ -5,6 +5,7 @@ import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ScopedApprovalRouteEditor } from '@/features/approvalRoutes/ScopedApprovalRouteEditor';
 import type { ApprovalRouteImpactDto, ScopedApprovalRouteDto } from '@/features/approvalRoutes/approvalRoutesApi';
+import { formatPeriodKey } from '@/shared/format/periodKey';
 import { testTheme } from '@/test/render';
 
 /**
@@ -252,8 +253,36 @@ describe('ScopedApprovalRouteEditor — збереження (варіант C)'
     visible: 2,
     truncated: true,
     sheets: [
-      { projectId: 1, documentId: 101, sheetDefId: 7, sheetCopyId: null, periodKey: 202609 },
-      { projectId: 2, documentId: 202, sheetDefId: 7, sheetCopyId: 9, periodKey: 202610 },
+      {
+        projectId: 1,
+        documentId: 101,
+        sheetDefId: 7,
+        sheetCopyId: null,
+        periodKey: 202609,
+        projectCode: 'P1',
+        projectName: { values: { en: 'North field' } },
+        documentCode: 'DOC-101',
+        documentName: { values: { en: 'Land 2026' } },
+        sheetCode: 'CONTRACT',
+        sheetName: { values: { en: 'Contract' } },
+        copyOrdinal: 1,
+        sheetDisplayName: { values: { en: 'Contract 1' } },
+      },
+      {
+        projectId: 2,
+        documentId: 202,
+        sheetDefId: 7,
+        sheetCopyId: 9,
+        periodKey: 202610,
+        projectCode: 'P2',
+        projectName: { values: {} },
+        documentCode: 'DOC-202',
+        documentName: null,
+        sheetCode: 'CONTRACT',
+        sheetName: { values: { en: 'Contract' } },
+        copyOrdinal: 2,
+        sheetDisplayName: { values: { en: 'Contract 2' } },
+      },
     ],
   };
 
@@ -277,7 +306,17 @@ describe('ScopedApprovalRouteEditor — збереження (варіант C)'
       '⟦approvalRoutes.restartTruncated (count=2)⟧',
     ]);
     expect(screen.getByRole('dialog', { name: '⟦approvalRoutes.restartTitle (total=5)⟧' })).toBeDefined();
-    expect(within(screen.getByTestId('approval-route-restart-sheets')).getAllByRole('listitem')).toHaveLength(2);
+    // ✎ B155-names: рядок переліку — назви, а не ідентифікатори; немає назви — код (проєкт P2, документ DOC-202);
+    // копія — показувана назва «Contract 2» і окремий ключ із позначкою копії.
+    // Мутація: повернути `project: sheet.projectId` — перший рядок показує «1», тест червоний.
+    expect(
+      within(screen.getByTestId('approval-route-restart-sheets'))
+        .getAllByRole('listitem')
+        .map((item) => item.textContent),
+    ).toEqual([
+      `⟦approvalRoutes.restartSheetLine (project=North field, document=Land 2026, sheet=Contract 1, period=${formatPeriodKey(202609)})⟧`,
+      `⟦approvalRoutes.restartSheetCopyLine (project=P2, document=DOC-202, sheet=Contract 2, period=${formatPeriodKey(202610)})⟧`,
+    ]);
 
     fireEvent.click(screen.getByTestId('confirm-verb'));
     await waitFor(() => expect(puts(calls)).toHaveLength(1));
@@ -311,6 +350,29 @@ describe('ScopedApprovalRouteEditor — збереження (варіант C)'
     expect(within(consequences).getAllByRole('listitem').map((item) => item.textContent)).toEqual([
       '⟦approvalRoutes.restartVisible (visible=2, total=2)⟧',
     ]);
+  });
+
+  it('назв немає (сервер їх не прочитав) — рядок відступає до ідентифікаторів', async () => {
+    serve({
+      route: () => Promise.resolve(json(own([11]))),
+      impact: {
+        total: 1,
+        visible: 1,
+        truncated: false,
+        sheets: [{ projectId: 5, documentId: 55, sheetDefId: 8, sheetCopyId: null, periodKey: 202609 }],
+      },
+    });
+    show();
+    await startEditing();
+    await pick('Controller');
+    fireEvent.click(saveButton());
+
+    await screen.findByTestId('confirm-consequences');
+    expect(
+      within(screen.getByTestId('approval-route-restart-sheets'))
+        .getAllByRole('listitem')
+        .map((item) => item.textContent),
+    ).toEqual([`⟦approvalRoutes.restartSheetLine (project=5, document=55, sheet=8, period=${formatPeriodKey(202609)})⟧`]);
   });
 
   it('поданих немає — PUT одразу, без підтвердження', async () => {
