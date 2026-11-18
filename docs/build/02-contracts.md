@@ -4118,6 +4118,19 @@ public interface ITemplateStructure
 }
 ```
 
+#### `IScriptPreviewRunner`
+
+Прогін скрипта методології на документі «насухо» для редактора (MS, `POST …/script/preview`): що вибрано, що
+пораховано, нічого не пишеться. Авторська сторона (право, доступ до документа, компіляція й перевірки) віддає
+виконавцю вже перевірений текст; реалізація живе в проєкті розрахунків.
+
+```csharp
+public interface IScriptPreviewRunner
+{
+    public Task<ScriptPreviewResult> RunAsync(ScriptPreviewRequest request, CancellationToken ct);
+}
+```
+
 #### `IUnitCatalog`
 
 Довідник одиниць uom.* у формі, потрібній перевірці публікації.
@@ -4958,6 +4971,11 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/rule-coverage` | `Calculation.View` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/diff` | `Calculation.View` | 7 |
 | `DELETE` | `/api/v1/methodologies/{id}/versions/{vid}` | `Calculation.EditFormula` | 7 |
+| `GET` | `/api/v1/methodologies/{id}/versions/{vid}/script` | `Calculation.View` | 7 |
+| `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/script` | `Calculation.EditFormula` | 7 |
+| `POST` | `/api/v1/methodologies/{id}/versions/{vid}/script/validate` | `Calculation.View` | 7 |
+| `POST` | `/api/v1/methodologies/{id}/versions/{vid}/script/preview` | `Calculation.View` (+ доступ до документа) | 7 |
+| `POST` | `/api/v1/methodologies/{id}/versions/{vid}/script/format-const` | `Calculation.View` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/bindings` | `Calculation.View` | 7 |
 | `PUT` | `/api/v1/methodologies/{id}/bindings/{columnDefId}/{outputCode}` | `Calculation.EditRule` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/publications` | `Calculation.View` | 7 |

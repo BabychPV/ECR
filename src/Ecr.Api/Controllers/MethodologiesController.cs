@@ -148,7 +148,7 @@ public sealed class MethodologiesController(
         ArgumentNullException.ThrowIfNull(request);
 
         return Ok(await createVersion
-            .HandleAsync(id, request.VersionNumber, request.CopyFromVersionId, request.Level, ct)
+            .HandleAsync(id, request.VersionNumber, request.CopyFromVersionId, request.Level, request.Engine, ct)
             .ConfigureAwait(false));
     }
 
@@ -194,6 +194,7 @@ public sealed class MethodologiesController(
     {
         ArgumentNullException.ThrowIfNull(request);
         await scope.RequireAsync(id, vid, SaveMethodologyFormulaHandler.Permission, ct).ConfigureAwait(false);
+        await scope.RequireHandEditableAsync(vid, ct).ConfigureAwait(false);
 
         return Ok(await saveFormula
             .HandleAsync(
@@ -281,6 +282,7 @@ public sealed class MethodologiesController(
     {
         ArgumentNullException.ThrowIfNull(request);
         await scope.RequireAsync(id, vid, SaveMethodologyCategoryHandler.Permission, ct).ConfigureAwait(false);
+        await scope.RequireHandEditableAsync(vid, ct).ConfigureAwait(false);
 
         return Ok(await saveCategory
             .HandleAsync(vid, code, request.Description, request.Ordinal, request.IsRetired, ct)
@@ -302,6 +304,7 @@ public sealed class MethodologiesController(
     public async Task<IActionResult> DeleteCategory(int id, int vid, string code, CancellationToken ct)
     {
         await scope.RequireAsync(id, vid, DeleteMethodologyCategoryHandler.Permission, ct).ConfigureAwait(false);
+        await scope.RequireHandEditableAsync(vid, ct).ConfigureAwait(false);
         await deleteCategory.HandleAsync(vid, code, ct).ConfigureAwait(false);
 
         return NoContent();
@@ -346,6 +349,7 @@ public sealed class MethodologiesController(
     {
         ArgumentNullException.ThrowIfNull(request);
         await scope.RequireAsync(id, vid, SaveMethodologyConstantHandler.Permission, ct).ConfigureAwait(false);
+        await scope.RequireHandEditableAsync(vid, ct).ConfigureAwait(false);
 
         return Ok(await saveConstant
             .HandleAsync(
@@ -415,6 +419,7 @@ public sealed class MethodologiesController(
     {
         ArgumentNullException.ThrowIfNull(request);
         await scope.RequireAsync(id, vid, SaveMethodologyRuleHandler.Permission, ct).ConfigureAwait(false);
+        await scope.RequireHandEditableAsync(vid, ct).ConfigureAwait(false);
 
         return Ok(await saveRule
             .HandleAsync(vid, code, request.MatchJson, request.Priority, request.IsActive, ct)
@@ -464,6 +469,7 @@ public sealed class MethodologiesController(
     {
         ArgumentNullException.ThrowIfNull(request);
         await scope.RequireAsync(id, vid, SaveMethodologyCategoryRuleHandler.Permission, ct).ConfigureAwait(false);
+        await scope.RequireHandEditableAsync(vid, ct).ConfigureAwait(false);
 
         return Ok(await saveCategoryRule.HandleAsync(vid, request.Expression, ct).ConfigureAwait(false));
     }
@@ -481,6 +487,7 @@ public sealed class MethodologiesController(
     public async Task<IActionResult> DeleteCategoryRule(int id, int vid, CancellationToken ct)
     {
         await scope.RequireAsync(id, vid, DeleteMethodologyCategoryRuleHandler.Permission, ct).ConfigureAwait(false);
+        await scope.RequireHandEditableAsync(vid, ct).ConfigureAwait(false);
         await deleteCategoryRule.HandleAsync(vid, ct).ConfigureAwait(false);
 
         return NoContent();
@@ -525,6 +532,7 @@ public sealed class MethodologiesController(
     {
         ArgumentNullException.ThrowIfNull(request);
         await scope.RequireAsync(id, vid, SaveMethodologySubstancesHandler.Permission, ct).ConfigureAwait(false);
+        await scope.RequireHandEditableAsync(vid, ct).ConfigureAwait(false);
 
         return Ok(await saveSubstances.HandleAsync(vid, request.SubstanceEntryIds, ct).ConfigureAwait(false));
     }
@@ -618,6 +626,7 @@ public sealed class MethodologiesController(
     {
         ArgumentNullException.ThrowIfNull(request);
         await scope.RequireAsync(id, vid, SaveMethodologyOutputHandler.Permission, ct).ConfigureAwait(false);
+        await scope.RequireHandEditableAsync(vid, ct).ConfigureAwait(false);
 
         return Ok(await saveOutput
             .HandleAsync(vid, code, request.UnitId, request.Ordinal, ct)
@@ -792,6 +801,7 @@ public sealed class MethodologiesController(
     public async Task<IActionResult> DeleteFormula(int id, int vid, string code, CancellationToken ct)
     {
         await scope.RequireAsync(id, vid, DeleteMethodologyFormulaHandler.Permission, ct).ConfigureAwait(false);
+        await scope.RequireHandEditableAsync(vid, ct).ConfigureAwait(false);
         await deleteFormula.HandleAsync(vid, code, ct).ConfigureAwait(false);
 
         return NoContent();
@@ -880,8 +890,12 @@ public sealed record PublishMethodologyRequest(string ChangeReason, DateOnly? Ef
 /// джерела: версія, що змінила рівень, — уже інша методологія, а не її нова
 /// редакція (ФВ-9.2).
 /// </param>
+/// <param name="Engine">
+/// Рушій ПОРОЖНЬОЇ чернетки (MS): <c>Script</c> — текст методології із заготовкою, <c>Formulas</c> — формули й
+/// константи. Не вказано — <c>Formulas</c> (поведінка до MS). Клон рушія не змінює: бере його разом зі скриптом із джерела.
+/// </param>
 public sealed record CreateMethodologyVersionRequest(
-    string VersionNumber, int? CopyFromVersionId, CalculationLevel Level);
+    string VersionNumber, int? CopyFromVersionId, CalculationLevel Level, MethodologyEngine? Engine = null);
 
 /// <summary>Запит на запис формули версії-чернетки.</summary>
 /// <param name="Expression">Вираз діалекту методологій.</param>

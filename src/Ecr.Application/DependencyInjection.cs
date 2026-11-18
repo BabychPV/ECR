@@ -450,6 +450,19 @@ public static class DependencyInjection
         // B-07: версія з маршруту мусить належати методології з маршруту.
         services.AddScoped<Calculations.MethodologyVersionScope>();
 
+        // MS: скрипт методології (авторство, перевірки, матеріалізація, перегляд). Рушій виконання й
+        // `IScriptPreviewRunner` реєструє проєкт розрахунків.
+        services.AddScoped<Calculations.Scripting.ScriptSourceCompiler>();
+        services.AddScoped<Calculations.Scripting.ScriptEnvironmentChecker>();
+        services.AddScoped<Calculations.Scripting.ScriptMaterializer>();
+        services.AddScoped<Calculations.Scripting.ScriptPublishChecks>();
+        services.AddScoped<Calculations.Scripting.ScriptAnalyzer>();
+        services.AddScoped<Calculations.Scripting.GetMethodologyScriptHandler>();
+        services.AddScoped<Calculations.Scripting.SaveMethodologyScriptHandler>();
+        services.AddScoped<Calculations.Scripting.ValidateMethodologyScriptHandler>();
+        services.AddScoped<Calculations.Scripting.FormatScriptConstHandler>();
+        services.AddScoped<Calculations.Scripting.PreviewMethodologyScriptHandler>();
+
         // Авторство методології з нуля (директива №09, `W6`): сама методологія,
         // константи, правила відбору, виходи, золотий набір, режими і прив'язка
         // до колонки документа.

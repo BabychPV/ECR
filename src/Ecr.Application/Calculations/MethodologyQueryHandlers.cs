@@ -126,7 +126,8 @@ public sealed class ListMethodologiesHandler(
                 next?.AddDays(-1),
                 ordered[i].NumericMode,
                 ordered[i].CalendarMode,
-                ordered[i].TraceLevel));
+                ordered[i].TraceLevel,
+                ordered[i].Engine));
         }
 
         // ⛔ Порожній `mapped` — ЛЕГІТИМНИЙ стан (щойно заведена методологія
@@ -146,7 +147,8 @@ public sealed class SimulateMethodologyHandler(
     IMethodologyStore methodologies,
     Security.IAccessDecisionService access,
     Common.ICurrentUser currentUser,
-    IPeriodStore periods)
+    IPeriodStore periods,
+    IEnumerable<ICalculationModule>? modules = null)
 {
     /// <summary>
     /// Право на симуляцію — <b>перегляд</b>, не публікація.
@@ -232,7 +234,7 @@ public sealed class SimulateMethodologyHandler(
                 Methodology = Descriptor(methodology, version, Domain.Enums.TraceLevel.Full),
             };
 
-            var simulated = await module.ExecuteAsync(input, ct).ConfigureAwait(false);
+            var simulated = await ModuleFor(input.Methodology).ExecuteAsync(input, ct).ConfigureAwait(false);
 
             // ⛔ Звірка з очікуваннями — ТИМ САМИМ правилом, яким публікація
             // вирішує, чи набір зелений (`GoldenSet`). Доти прогін проганяв
@@ -252,7 +254,7 @@ public sealed class SimulateMethodologyHandler(
                 continue;
             }
 
-            var baseline = await module
+            var baseline = await ModuleFor(Descriptor(methodology, published, Domain.Enums.TraceLevel.Off))
                 .ExecuteAsync(
                     testCase.Input with
                     {
@@ -309,6 +311,28 @@ public sealed class SimulateMethodologyHandler(
             : $"{line} [masked: {step.Masked}]";
     }
 
+    /// <summary>
+    /// Модуль версії: для скрипта — перший зареєстрований, що <c>CanHandle</c> її дескриптор (MS, план 4.6);
+    /// для формул — той самий єдиний модуль, що й до MS.
+    /// </summary>
+    private ICalculationModule ModuleFor(MethodologyDescriptor descriptor)
+    {
+        if (descriptor.Engine != Domain.Enums.MethodologyEngine.Script)
+        {
+            return module;
+        }
+
+        return modules?.FirstOrDefault(m => m.CanHandle(descriptor))
+               ?? throw new BusinessRuleException(
+                   "ECR-CALC-0422",
+                   $"Версія {descriptor.VersionNumber}: серед модулів розрахунку немає того, що рахує скрипти.",
+                   new Dictionary<string, object?>
+                   {
+                       ["messageKey"] = "err.ECR-CALC-0422.scriptModuleMissing",
+                       ["version"] = descriptor.VersionNumber,
+                   });
+    }
+
     private static MethodologyDescriptor Descriptor(
         Methodology methodology, MethodologyVersion version, Domain.Enums.TraceLevel trace)
         => new(
@@ -319,7 +343,8 @@ public sealed class SimulateMethodologyHandler(
             version.Level,
             version.NumericMode,
             version.CalendarMode,
-            trace);
+            trace,
+            version.Engine);
 
     /// <summary>Відхиляє ключ періоду, який не є ні періодом, ні номером 1..12.</summary>
     /// <param name="periodKey">Ключ періоду з запиту.</param>

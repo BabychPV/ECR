@@ -39,6 +39,9 @@ public enum MethodologyDiffItemKind
 
     /// <summary>Правило категорії константи версії (L-2); код запису — <c>category-rule</c>.</summary>
     CategoryRule = 4,
+
+    /// <summary>Текст скрипта версії (MS); код запису — <c>script</c>, поле — <c>scriptText</c>.</summary>
+    Script = 5,
 }
 
 /// <summary>Вид зміни.</summary>

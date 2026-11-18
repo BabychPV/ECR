@@ -703,6 +703,12 @@ public sealed partial class EndpointCoverageTests
         new("features/workflow/sheetDenial.ts", "reasonKey", 1, null, [],
             "A2-08: reasonKey тієї самої відмови (deny.*) — відкритий набір сервера, як WithLocalizedReason."),
 
+        // MS (скрипт методології): діагностики скрипта приходять із сервера з готовим messageKey (`script.<code>`,
+        // перелік — `ScriptDiagnosticCodes` + `ScriptEnvironmentCodes`; рядки каталогу — seed/features/MS-methodology-script.sql).
+        // ⚠ Ключі не перелічено: набір закритий сервером і перевіряється сідом, як `WithLocalizedReason`.
+        new("features/methodologyScript/scriptMarkers.ts", "diagnostic.messageKey", 1, null, [],
+            "messageKey діагностики скрипта методології."),
+
         // F-15/B-12 (четвертий раунд UX): перелік проблем публікації методології —
         // закритий набір, що його породжує сервер (MethodologyPublishChecks).
         new("features/methodologies/publishError.ts", "key", 1, "features/methodologies/publishError.ts",
@@ -1404,6 +1410,14 @@ public sealed partial class EndpointCoverageTests
         // ⚠ Звільнення тимчасове: прибрати в тому ж коміті, що додає виклик у `features/methodologies`.
         "GET /api/v1/methodologies/{p}/versions/{p}/substances",
         "PUT /api/v1/methodologies/{p}/versions/{p}/substances",
+
+        // MS (скрипт методології): серверна частина з'явилась раніше за сторінку скрипта (ms-web, `features/methodologyScript`).
+        // ⚠ Звільнення тимчасове: прибрати в тому ж коміті, що додає виклики в `features/methodologyScript/api.ts`.
+        "GET /api/v1/methodologies/{p}/versions/{p}/script",
+        "PUT /api/v1/methodologies/{p}/versions/{p}/script",
+        "POST /api/v1/methodologies/{p}/versions/{p}/script/validate",
+        "POST /api/v1/methodologies/{p}/versions/{p}/script/preview",
+        "POST /api/v1/methodologies/{p}/versions/{p}/script/format-const",
 
         // D-425 (Land «лише Running»): прапорець фільтра активності рядків ставить скрипт розгортання шаблону
         // (`tools/land/Build-LandTemplate.ps1`, етап RowFilter) за переліком `tools/land/land-row-filter.json`;

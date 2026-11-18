@@ -35,7 +35,9 @@ public sealed class PublishMethodologyHandler(
     IRegistryKeyStore? registryKeys = null,
     IRegistryUseStore? registryUses = null,
     IUiStringCatalog? uiCatalog = null,
-    RuleCoverageHandler? ruleCoverage = null)
+    RuleCoverageHandler? ruleCoverage = null,
+    IEnumerable<ICalculationModule>? modules = null,
+    Scripting.ScriptPublishChecks? scriptChecks = null)
 {
     /// <summary>Ключ попередження: комбінації значень реальних рядків, яких не зачіпає жодне правило (ФВ-13.9).</summary>
     public const string CoverageGapsWarningKey = "publish.warning.ruleCoverageGaps";
@@ -101,6 +103,14 @@ public sealed class PublishMethodologyHandler(
                     ["messageKey"] = "err.ECR-CALC-0422.publishNoEffectiveDate",
                     ["version"] = version.Version,
                 });
+        }
+
+        // ✎ MS (план 4.6): версія зі скриптом не має формул, констант, правил і правила категорії — замість
+        // формульних кроків тут перевірки скрипта, матеріалізація й той самий золотий набір (через модуль скрипта).
+        // Шлях формул нижче не змінений ні на рядок.
+        if (version.Engine == MethodologyEngine.Script)
+        {
+            return await PublishScriptAsync(methodology, version, changeReason, from, userId, ct).ConfigureAwait(false);
         }
 
         // ⛔ V-18: правила відбору рядків — ДО золотого набору. Версія, чиї
@@ -1046,7 +1056,7 @@ public sealed class PublishMethodologyHandler(
     {
         try
         {
-            return await module
+            return await ModuleFor(descriptor)
                 .ExecuteAsync(WithDescriptor(testCase.Input, descriptor), ct)
                 .ConfigureAwait(false);
         }
@@ -1671,6 +1681,89 @@ public sealed class PublishMethodologyHandler(
             : Localization.UiStringResolver.Format(Localization.UiStringResolver.Resolve(strings, key), values);
     }
 
+    /// <summary>
+    /// Модуль, що рахує версію: для скрипта — перший із зареєстрованих, що <c>CanHandle</c> її дескриптор;
+    /// для формул — той самий єдиний модуль, що й до MS.
+    /// </summary>
+    private ICalculationModule ModuleFor(MethodologyDescriptor descriptor)
+    {
+        if (descriptor.Engine != MethodologyEngine.Script)
+        {
+            return module;
+        }
+
+        return modules?.FirstOrDefault(m => m.CanHandle(descriptor))
+               ?? throw new BusinessRuleException(
+                   "ECR-CALC-0422",
+                   $"Версія {descriptor.VersionNumber}: серед модулів розрахунку немає того, що рахує скрипти.",
+                   new Dictionary<string, object?>
+                   {
+                       ["messageKey"] = "err.ECR-CALC-0422.scriptModuleMissing",
+                       ["version"] = descriptor.VersionNumber,
+                   });
+    }
+
+    /// <summary>
+    /// Публікація версії зі скриптом (MS, план 4.6, 5.2): перевірки скрипта й матеріалізація, золотий набір через модуль
+    /// скрипта, той самий diff результатів і аудит, що й для формул.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Перевірки, матеріалізація, золотий набір і публікація — ОДНІЄЮ транзакцією: модуль скрипта читає виходи,
+    /// речовини й прив'язки з бази, тож їх треба зберегти до прогону, а червоний набір чи відмова публікації мусять
+    /// відкотити і додані прив'язки, і решту. Закриті періоди тут не перераховуються — як і для формул (ФВ-9.7).
+    /// </remarks>
+    private async Task<MethodologyPublicationDiff> PublishScriptAsync(
+        Methodology methodology,
+        MethodologyVersion version,
+        string changeReason,
+        DateOnly from,
+        int userId,
+        CancellationToken ct)
+    {
+        if (scriptChecks is null)
+        {
+            throw new InvalidOperationException("Перевірки скриптів не підключено до публікації методології.");
+        }
+
+        var methodologyVersionId = version.Id;
+        var testCases = await methodologies.GetTestCasesAsync(methodologyVersionId, ct).ConfigureAwait(false);
+        RequireTestPeriods(testCases);
+
+        var previous = methodology.VersionOn(from.AddDays(-1));
+        await RejectBackdatedStrictAsync(methodology, version, previous, from, ct).ConfigureAwait(false);
+
+        MethodologyPublicationDiff? diff = null;
+        await uow.ExecuteInTransactionAsync(
+            async token =>
+            {
+                await scriptChecks.RunAsync(methodology, version, from, token).ConfigureAwait(false);
+                await uow.SaveChangesAsync(token).ConfigureAwait(false);
+
+                diff = await BuildDiffAsync(methodology, version, previous, testCases, token).ConfigureAwait(false);
+
+                var verdicts = await JudgeAsync(methodology, version, testCases, token).ConfigureAwait(false);
+                var greenTest = GoldenSet.IsGreen(verdicts, testCases);
+                RejectRedGoldenSet(version, verdicts, greenTest);
+
+                methodology.PublishVersion(version, userId, changeReason, from, greenTest, clock.UtcNow);
+
+                await audit.WritePublicationEventAsync(
+                    new PublicationEventRecord(
+                        ChangedAt: clock.UtcNow,
+                        EntityType: "calc.MethodologyVersion",
+                        EntityId: methodologyVersionId,
+                        ResultDiffJson: JsonSerializer.Serialize(diff),
+                        ChangeReason: changeReason,
+                        ChangedByUserId: userId),
+                    token).ConfigureAwait(false);
+
+                await uow.SaveChangesAsync(token).ConfigureAwait(false);
+            },
+            ct).ConfigureAwait(false);
+
+        return diff!;
+    }
+
     private static MethodologyDescriptor Descriptor(Methodology methodology, MethodologyVersion version)
         => new(
             methodology.Id,
@@ -1683,7 +1776,8 @@ public sealed class PublishMethodologyHandler(
 
             // Симуляція для diff завжди без трейсу: він тут нікому не потрібен,
             // а на золотому наборі коштує пам'яті на кожен випадок.
-            TraceLevel.Off);
+            TraceLevel.Off,
+            version.Engine);
 
     private static CalculationInput WithDescriptor(CalculationInput input, MethodologyDescriptor descriptor)
         => input with { Methodology = descriptor };

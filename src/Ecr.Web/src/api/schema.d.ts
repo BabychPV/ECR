@@ -12469,6 +12469,341 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/methodologies/{id}/versions/{vid}/script": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Скрипт версії: текст, хеш, діагностики, структура. Право `Calculation.View`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                    /** @description Версія. */
+                    vid: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MethodologyScriptDto"];
+                        "text/json": components["schemas"]["MethodologyScriptDto"];
+                        "text/plain": components["schemas"]["MethodologyScriptDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        /**
+         * Зберігає текст скрипта чернетки. Право `Calculation.EditFormula`.
+         * @description Текст зберігається завжди, навіть із помилками; виходи, речовини, імпорти й таблиці читання
+         *     матеріалізуються лише коли діагностик немає. Не чернетка чи не скрипт — `409 scriptNotEditable`;
+         *     `expectedHash` не збігся — `409 scriptChanged`.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                    /** @description Версія-чернетка з рушієм `Script`. */
+                    vid: number;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SaveMethodologyScriptRequest"];
+                    "application/json": components["schemas"]["SaveMethodologyScriptRequest"];
+                    "text/json": components["schemas"]["SaveMethodologyScriptRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MethodologyScriptDto"];
+                        "text/json": components["schemas"]["MethodologyScriptDto"];
+                        "text/plain": components["schemas"]["MethodologyScriptDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/methodologies/{id}/versions/{vid}/script/format-const": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Канонічний друк літерала константи для редактора таблиць коефіцієнтів. Право `Calculation.View`. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                    /** @description Версія. */
+                    vid: number;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["ScriptTextRequest"];
+                    "application/json": components["schemas"]["ScriptTextRequest"];
+                    "text/json": components["schemas"]["ScriptTextRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["FormatConstDto"];
+                        "text/json": components["schemas"]["FormatConstDto"];
+                        "text/plain": components["schemas"]["FormatConstDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/methodologies/{id}/versions/{vid}/script/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Прогін скрипта на документі «насухо»: що вибрано, що пораховано. Право `Calculation.View` і доступ до
+         *     документа, як для його результатів.
+         * @description Нічого не записує. Текст із діагностиками не виконується — повертаються лише діагностики.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                    /** @description Версія. */
+                    vid: number;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["PreviewMethodologyScriptRequest"];
+                    "application/json": components["schemas"]["PreviewMethodologyScriptRequest"];
+                    "text/json": components["schemas"]["PreviewMethodologyScriptRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ScriptPreviewDto"];
+                        "text/json": components["schemas"]["ScriptPreviewDto"];
+                        "text/plain": components["schemas"]["ScriptPreviewDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/methodologies/{id}/versions/{vid}/script/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Перевіряє текст, нічого не зберігаючи. Право `Calculation.View`. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                    /** @description Версія. */
+                    vid: number;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["ScriptTextRequest"];
+                    "application/json": components["schemas"]["ScriptTextRequest"];
+                    "text/json": components["schemas"]["ScriptTextRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ScriptValidationDto"];
+                        "text/json": components["schemas"]["ScriptValidationDto"];
+                        "text/plain": components["schemas"]["ScriptValidationDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/methodologies/{id}/versions/{vid}/substances": {
         parameters: {
             query?: never;
@@ -31578,6 +31913,7 @@ export interface components {
              *     методології, у якій ще нічого немає.
              */
             copyFromVersionId: null | number;
+            engine?: null | components["schemas"]["MethodologyEngine"];
             /** @description Рівень драбини виразності для ПОРОЖНЬОЇ чернетки. Клон бере рівень із
              *     джерела: версія, що змінила рівень, — уже інша методологія, а не її нова
              *     редакція (ФВ-9.2). */
@@ -33490,6 +33826,15 @@ export interface components {
             /** @description Коди довідників-дзеркала (`STREAM`, `STREAM_CASE`, `GAS_COMPOSITION`) — де показувати стан. */
             registryCodes: string[];
         };
+        /** @description Результат форматування літерала константи. */
+        FormatConstDto: {
+            /** @description Діагностики розбору (позиції — у вхідному тексті). */
+            diagnostics: components["schemas"]["ScriptDiagnosticDto"][];
+            /** @description `scalar` або `map`; `null` — не розібрано. */
+            kind: null | string;
+            /** @description Канонічний друк; `null`, якщо літерал не розібрано. */
+            text: null | string;
+        };
         /** @description Формула для відповіді клієнту. */
         FormulaDto: {
             /** @description ✎ D-461: «Дозволити ручне значення» (змінює `PUT …/formulas/{formulaId}/manual-override`). */
@@ -34796,7 +35141,7 @@ export interface components {
          * @description Що саме порівнюється у двох версіях.
          * @enum {unknown}
          */
-        MethodologyDiffItemKind: "Formula" | "Constant" | "TestCase" | "CategoryRule";
+        MethodologyDiffItemKind: "Formula" | "Constant" | "TestCase" | "CategoryRule" | "Script";
         /** @description Версія методології в **конфігураторі** — на відміну від
          *     MethodologyVersionDto, тут є і чернетки. */
         MethodologyDraftVersionDto: {
@@ -34812,6 +35157,8 @@ export interface components {
              * @description Початок вікна дії; `null` — чернетка.
              */
             effectiveFrom: null | string;
+            /** @description Рушій версії: формули чи скрипт (MS); для версій до MS — `Formulas`. */
+            engine?: components["schemas"]["MethodologyEngine"];
             /**
              * Format: int32
              * @description Ідентифікатор версії.
@@ -34848,6 +35195,13 @@ export interface components {
             /** @description Версії з їхніми вікнами дії. */
             versions: components["schemas"]["MethodologyVersionDto"][];
         };
+        /**
+         * @description Рушій версії методології: формули (кілька типів об'єктів) чи один скрипт.
+         *     Старі версії лишаються `Formulas`, доки їх не перенесено; нові — `Script`.
+         * @default Formulas
+         * @enum {unknown}
+         */
+        MethodologyEngine: "Formulas" | "Script";
         /** @description Елемент похідного списку аргументів формули (лише читання). */
         MethodologyFormulaArgumentDto: {
             /** @description Маркер `?` у виразі (`@A?`) — аргумент без комірки дає `null`. */
@@ -35284,6 +35638,21 @@ export interface components {
              */
             priority: number;
         };
+        /** @description Скрипт версії для редактора (`GET`/`PUT …/script`). */
+        MethodologyScriptDto: {
+            /** @description Діагностики компіляції й оточення. */
+            diagnostics: components["schemas"]["ScriptDiagnosticDto"][];
+            /** @description Рушій версії. */
+            engine: components["schemas"]["MethodologyEngine"];
+            /** @description SHA-256 тексту, hex малими літерами; порожній рядок — тексту ще немає. */
+            hash: string;
+            /** @description Версію можна правити (чернетка). */
+            isDraft: boolean;
+            /** @description Структура скрипта. */
+            outline: components["schemas"]["ScriptOutlineDto"];
+            /** @description Текст скрипта (порожній, якщо його ще немає). */
+            text: string;
+        };
         /** @description Речовина, яку рахує версія методології (`calc.MethodologySubstance`). */
         MethodologySubstanceDto: {
             /** @description Код запису довідника (`RegistryEntry.Code`, для повітряних речовин — 301, 304, …): те, що
@@ -35380,6 +35749,8 @@ export interface components {
              * @description Кінець вікна дії; `null` — без обмеження.
              */
             effectiveTo: null | string;
+            /** @description Рушій версії: формули чи скрипт (MS); для версій до MS — `Formulas`. */
+            engine?: components["schemas"]["MethodologyEngine"];
             /**
              * Format: int32
              * @description Ідентифікатор версії.
@@ -37796,6 +38167,31 @@ export interface components {
              * @description Ревізія; входить у ключ кешу метаданих (D-16).
              */
             presentationRevision: number;
+        };
+        /** @description Тіло `POST …/script/preview`. */
+        PreviewMethodologyScriptRequest: {
+            /**
+             * Format: int64
+             * @description Документ.
+             */
+            documentId: number;
+            /**
+             * Format: int32
+             * @description Скільки рядків з кожної таблиці (1…200, типово 50).
+             */
+            maxRows?: null | number;
+            /**
+             * Format: int32
+             * @description Період.
+             */
+            periodKey: number;
+            /**
+             * Format: int64
+             * @description Лише цей екземпляр таблиці.
+             */
+            tableInstanceId?: null | number;
+            /** @description Текст; порожній — збережений текст версії. */
+            text: null | string;
         };
         /** @description Тіло проби конфігурації мапінгу (ФВ-13.17). */
         ProbeDataSourceRequest: {
@@ -40652,6 +41048,13 @@ export interface components {
              */
             priority: number;
         };
+        /** @description Тіло `PUT …/script`. */
+        SaveMethodologyScriptRequest: {
+            /** @description Хеш тексту, з якого редактор виходив; не збігається — `409 scriptChanged`. */
+            expectedHash?: null | string;
+            /** @description Новий текст. */
+            text: string;
+        };
         /** @description Запит на заміну складу речовин версії-чернетки. */
         SaveMethodologySubstancesRequest: {
             /** @description Записи довідника речовин у порядку переліку; порожній перелік очищує склад, відсутній — 422. */
@@ -40936,6 +41339,189 @@ export interface components {
             scope: number;
             /** @description Рівень: `Info`, `Warning`, `Error`. */
             severity: components["schemas"]["ValidationSeverity"];
+        };
+        /** @description Діагностика скрипта в API (MS, план 5.4). */
+        ScriptDiagnosticDto: {
+            /** @description Код без префікса. */
+            code: string;
+            /**
+             * Format: int32
+             * @description Колонка з 1.
+             */
+            column: number;
+            /**
+             * Format: int32
+             * @description Довжина підкресленого фрагмента.
+             */
+            length: number;
+            /**
+             * Format: int32
+             * @description Рядок з 1.
+             */
+            line: number;
+            /** @description Англійський запасний текст. */
+            message: string;
+            /** @description Ключ каталогу: `script.&lt;code&gt;`. */
+            messageKey: string;
+            /** @description Підстановки для перекладу. */
+            params: {
+                [key: string]: string;
+            };
+        };
+        /** @description Константа верхнього рівня. */
+        ScriptOutlineConstantDto: {
+            /** @description `scalar` або `map`. */
+            kind: string;
+            /**
+             * Format: int32
+             * @description Рядок оголошення.
+             */
+            line: number;
+            /** @description Ім'я. */
+            name: string;
+        };
+        /** @description Структура скрипта для редактора: що читає, що пише, що оголошено. */
+        ScriptOutlineDto: {
+            /** @description Константи. */
+            constants: components["schemas"]["ScriptOutlineConstantDto"][];
+            /** @description Власні функції. */
+            functions: components["schemas"]["ScriptOutlineFunctionDto"][];
+            /** @description Імпортовані бібліотеки. */
+            imports: string[];
+            /** @description Поля рядка. */
+            inputs: components["schemas"]["ScriptOutlineInputDto"][];
+            /** @description Виходи. */
+            outputs: components["schemas"]["ScriptOutlineOutputDto"][];
+            /** @description Коди речовин. */
+            substances: string[];
+            /** @description Таблиці (`rows from` без псевдоніма, `table` із псевдонімом). */
+            tables: components["schemas"]["ScriptOutlineTableDto"][];
+            /** @description Змінні верхнього рівня. */
+            variables: components["schemas"]["ScriptOutlineVariableDto"][];
+        };
+        /** @description Власна функція скрипта. */
+        ScriptOutlineFunctionDto: {
+            /**
+             * Format: int32
+             * @description Рядок оголошення.
+             */
+            line: number;
+            /** @description Ім'я. */
+            name: string;
+            /** @description Імена параметрів. */
+            parameters: string[];
+        };
+        /** @description Поле рядка, яке читає скрипт. */
+        ScriptOutlineInputDto: {
+            /** @description Ім'я поля (код колонки). */
+            name: string;
+            /** @description Необов'язкове (`row.X?`). */
+            optional: boolean;
+        };
+        /** @description Вихід скрипта. */
+        ScriptOutlineOutputDto: {
+            /** @description Код виходу. */
+            code: string;
+            /** @description Вихід по речовині. */
+            perSubstance: boolean;
+            /** @description Код одиниці. */
+            unit: string;
+        };
+        /** @description Таблиця, з якої скрипт читає: рядки (`rows from`) або комірки (`table Alias = …`). */
+        ScriptOutlineTableDto: {
+            /** @description Псевдонім з оголошення `table`; `null` — таблиця з `rows from`. */
+            alias: null | string;
+            /** @description Код таблиці. */
+            code: string;
+            /** @description Код шаблону, якщо вказано (`Шаблон.Таблиця`). */
+            templateCode: null | string;
+        };
+        /** @description Змінна верхнього рівня. */
+        ScriptOutlineVariableDto: {
+            /**
+             * Format: int32
+             * @description Рядок оголошення.
+             */
+            line: number;
+            /** @description Ім'я. */
+            name: string;
+        };
+        /** @description Відповідь перегляду на документі. */
+        ScriptPreviewDto: {
+            /** @description Діагностики тексту (перегляд виконується лише без них). */
+            diagnostics: components["schemas"]["ScriptDiagnosticDto"][];
+            /** @description Таблиці з рядками й значеннями; порожньо, якщо текст має діагностики. */
+            tables: components["schemas"]["ScriptPreviewTable"][];
+        };
+        /** @description Рядок таблиці в перегляді. */
+        ScriptPreviewRow: {
+            /** @description `missingInputs`, `stepError` або `rejected`; `null` — без проблем. */
+            issue: null | string;
+            /** @description Обов'язкові поля, яких бракує (для `missingInputs`). */
+            missing: null | string[];
+            /** @description Ключ рядка. */
+            rowKey: string;
+            /**
+             * Format: int32
+             * @description Номер рядка в таблиці.
+             */
+            rowNumber: number;
+            /** @description `selected`, `inactive`, `notSelected` або `rejected`. */
+            state: string;
+            /** @description Значення величин; для `notSelected`/`inactive` — порожньо. */
+            values: components["schemas"]["ScriptPreviewValue"][];
+        };
+        /** @description Екземпляр таблиці в перегляді. */
+        ScriptPreviewTable: {
+            /**
+             * Format: int32
+             * @description Скільки рядків неактивні (`active when` хибне).
+             */
+            inactiveRows: number;
+            /** @description Рядки (не більше `MaxRows`). */
+            rows: components["schemas"]["ScriptPreviewRow"][];
+            /**
+             * Format: int32
+             * @description Скільки рядків вибрано до розрахунку.
+             */
+            selectedRows: number;
+            /** @description Код таблиці. */
+            tableCode: string;
+            /**
+             * Format: int64
+             * @description Екземпляр таблиці.
+             */
+            tableInstanceId: number;
+            /**
+             * Format: int32
+             * @description Усього рядків екземпляра.
+             */
+            totalRows: number;
+        };
+        /** @description Одне значення рядка в перегляді. */
+        ScriptPreviewValue: {
+            /** @description Код помилки значення (`#DIV/0` тощо); `null` — значення без помилки. */
+            error: null | string;
+            /** @description `var`, `visible` або `output`. */
+            kind: string;
+            /** @description Ім'я величини (`var`/`output`). */
+            name: string;
+            /** @description Код речовини для значень усередині `foreach substance`; інакше `null`. */
+            substance: null | string;
+            /** @description Значення текстом. */
+            text: string;
+        };
+        /** @description Тіло `POST …/script/validate` і `…/format-const`. */
+        ScriptTextRequest: {
+            /** @description Текст скрипта (для `format-const` — літерал константи). */
+            text: string;
+        };
+        /** @description Результат перевірки тексту без збереження. */
+        ScriptValidationDto: {
+            /** @description Діагностики. */
+            diagnostics: components["schemas"]["ScriptDiagnosticDto"][];
+            /** @description Структура. */
+            outline: components["schemas"]["ScriptOutlineDto"];
         };
         /** @description Один збіг пошуку палітри. Маршрут будує клієнт за Kind. */
         SearchHitDto: {

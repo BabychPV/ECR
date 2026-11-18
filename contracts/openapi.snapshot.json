@@ -5428,6 +5428,17 @@
               "integer"
             ]
           },
+          "engine": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MethodologyEngine",
+                "description": "Рушій ПОРОЖНЬОЇ чернетки (MS): `Script` — текст методології із заготовкою, `Formulas` — формули й\nконстанти. Не вказано — `Formulas` (поведінка до MS). Клон рушія не змінює: бере його разом зі скриптом із джерела."
+              }
+            ]
+          },
           "level": {
             "$ref": "#/components/schemas/CalculationLevel",
             "description": "Рівень драбини виразності для ПОРОЖНЬОЇ чернетки. Клон бере рівень із\nджерела: версія, що змінила рівень, — уже інша методологія, а не її нова\nредакція (ФВ-9.2)."
@@ -9293,6 +9304,38 @@
         ],
         "type": "object"
       },
+      "FormatConstDto": {
+        "description": "Результат форматування літерала константи.",
+        "properties": {
+          "diagnostics": {
+            "description": "Діагностики розбору (позиції — у вхідному тексті).",
+            "items": {
+              "$ref": "#/components/schemas/ScriptDiagnosticDto"
+            },
+            "type": "array"
+          },
+          "kind": {
+            "description": "`scalar` або `map`; `null` — не розібрано.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "text": {
+            "description": "Канонічний друк; `null`, якщо літерал не розібрано.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "text",
+          "kind",
+          "diagnostics"
+        ],
+        "type": "object"
+      },
       "FormulaDto": {
         "description": "Формула для відповіді клієнту.",
         "properties": {
@@ -12078,7 +12121,8 @@
           "Formula",
           "Constant",
           "TestCase",
-          "CategoryRule"
+          "CategoryRule",
+          "Script"
         ]
       },
       "MethodologyDraftVersionDto": {
@@ -12100,6 +12144,10 @@
               "null",
               "string"
             ]
+          },
+          "engine": {
+            "$ref": "#/components/schemas/MethodologyEngine",
+            "description": "Рушій версії: формули чи скрипт (MS); для версій до MS — `Formulas`."
           },
           "id": {
             "description": "Ідентифікатор версії.",
@@ -12184,6 +12232,14 @@
           "versions"
         ],
         "type": "object"
+      },
+      "MethodologyEngine": {
+        "default": "Formulas",
+        "description": "Рушій версії методології: формули (кілька типів об'єктів) чи один скрипт.\nСтарі версії лишаються `Formulas`, доки їх не перенесено; нові — `Script`.",
+        "enum": [
+          "Formulas",
+          "Script"
+        ]
       },
       "MethodologyFormulaArgumentDto": {
         "description": "Елемент похідного списку аргументів формули (лише читання).",
@@ -13169,6 +13225,47 @@
         ],
         "type": "object"
       },
+      "MethodologyScriptDto": {
+        "description": "Скрипт версії для редактора (`GET`/`PUT …/script`).",
+        "properties": {
+          "diagnostics": {
+            "description": "Діагностики компіляції й оточення.",
+            "items": {
+              "$ref": "#/components/schemas/ScriptDiagnosticDto"
+            },
+            "type": "array"
+          },
+          "engine": {
+            "$ref": "#/components/schemas/MethodologyEngine",
+            "description": "Рушій версії."
+          },
+          "hash": {
+            "description": "SHA-256 тексту, hex малими літерами; порожній рядок — тексту ще немає.",
+            "type": "string"
+          },
+          "isDraft": {
+            "description": "Версію можна правити (чернетка).",
+            "type": "boolean"
+          },
+          "outline": {
+            "$ref": "#/components/schemas/ScriptOutlineDto",
+            "description": "Структура скрипта."
+          },
+          "text": {
+            "description": "Текст скрипта (порожній, якщо його ще немає).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "engine",
+          "text",
+          "hash",
+          "isDraft",
+          "diagnostics",
+          "outline"
+        ],
+        "type": "object"
+      },
       "MethodologySubstanceDto": {
         "description": "Речовина, яку рахує версія методології (`calc.MethodologySubstance`).",
         "properties": {
@@ -13348,6 +13445,10 @@
               "null",
               "string"
             ]
+          },
+          "engine": {
+            "$ref": "#/components/schemas/MethodologyEngine",
+            "description": "Рушій версії: формули чи скрипт (MS); для версій до MS — `Formulas`."
           },
           "id": {
             "description": "Ідентифікатор версії.",
@@ -18587,6 +18688,50 @@
         },
         "required": [
           "presentationRevision"
+        ],
+        "type": "object"
+      },
+      "PreviewMethodologyScriptRequest": {
+        "description": "Тіло `POST …/script/preview`.",
+        "properties": {
+          "documentId": {
+            "description": "Документ.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "maxRows": {
+            "description": "Скільки рядків з кожної таблиці (1…200, типово 50).",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "periodKey": {
+            "description": "Період.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "tableInstanceId": {
+            "description": "Лише цей екземпляр таблиці.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "text": {
+            "description": "Текст; порожній — збережений текст версії.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "text",
+          "documentId",
+          "periodKey"
         ],
         "type": "object"
       },
@@ -24850,6 +24995,26 @@
         ],
         "type": "object"
       },
+      "SaveMethodologyScriptRequest": {
+        "description": "Тіло `PUT …/script`.",
+        "properties": {
+          "expectedHash": {
+            "description": "Хеш тексту, з якого редактор виходив; не збігається — `409 scriptChanged`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "text": {
+            "description": "Новий текст.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "type": "object"
+      },
       "SaveMethodologySubstancesRequest": {
         "description": "Запит на заміну складу речовин версії-чернетки.",
         "properties": {
@@ -25528,6 +25693,460 @@
           "messageL10n",
           "columnDefId",
           "isActive"
+        ],
+        "type": "object"
+      },
+      "ScriptDiagnosticDto": {
+        "description": "Діагностика скрипта в API (MS, план 5.4).",
+        "properties": {
+          "code": {
+            "description": "Код без префікса.",
+            "type": "string"
+          },
+          "column": {
+            "description": "Колонка з 1.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "length": {
+            "description": "Довжина підкресленого фрагмента.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "line": {
+            "description": "Рядок з 1.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "message": {
+            "description": "Англійський запасний текст.",
+            "type": "string"
+          },
+          "messageKey": {
+            "description": "Ключ каталогу: `script.&lt;code&gt;`.",
+            "type": "string"
+          },
+          "params": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Підстановки для перекладу.",
+            "type": "object"
+          }
+        },
+        "required": [
+          "code",
+          "messageKey",
+          "params",
+          "line",
+          "column",
+          "length",
+          "message"
+        ],
+        "type": "object"
+      },
+      "ScriptOutlineConstantDto": {
+        "description": "Константа верхнього рівня.",
+        "properties": {
+          "kind": {
+            "description": "`scalar` або `map`.",
+            "type": "string"
+          },
+          "line": {
+            "description": "Рядок оголошення.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "name": {
+            "description": "Ім'я.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "kind",
+          "line"
+        ],
+        "type": "object"
+      },
+      "ScriptOutlineDto": {
+        "description": "Структура скрипта для редактора: що читає, що пише, що оголошено.",
+        "properties": {
+          "constants": {
+            "description": "Константи.",
+            "items": {
+              "$ref": "#/components/schemas/ScriptOutlineConstantDto"
+            },
+            "type": "array"
+          },
+          "functions": {
+            "description": "Власні функції.",
+            "items": {
+              "$ref": "#/components/schemas/ScriptOutlineFunctionDto"
+            },
+            "type": "array"
+          },
+          "imports": {
+            "description": "Імпортовані бібліотеки.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "inputs": {
+            "description": "Поля рядка.",
+            "items": {
+              "$ref": "#/components/schemas/ScriptOutlineInputDto"
+            },
+            "type": "array"
+          },
+          "outputs": {
+            "description": "Виходи.",
+            "items": {
+              "$ref": "#/components/schemas/ScriptOutlineOutputDto"
+            },
+            "type": "array"
+          },
+          "substances": {
+            "description": "Коди речовин.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "tables": {
+            "description": "Таблиці (`rows from` без псевдоніма, `table` із псевдонімом).",
+            "items": {
+              "$ref": "#/components/schemas/ScriptOutlineTableDto"
+            },
+            "type": "array"
+          },
+          "variables": {
+            "description": "Змінні верхнього рівня.",
+            "items": {
+              "$ref": "#/components/schemas/ScriptOutlineVariableDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "tables",
+          "inputs",
+          "outputs",
+          "substances",
+          "imports",
+          "constants",
+          "variables",
+          "functions"
+        ],
+        "type": "object"
+      },
+      "ScriptOutlineFunctionDto": {
+        "description": "Власна функція скрипта.",
+        "properties": {
+          "line": {
+            "description": "Рядок оголошення.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "name": {
+            "description": "Ім'я.",
+            "type": "string"
+          },
+          "parameters": {
+            "description": "Імена параметрів.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "parameters",
+          "line"
+        ],
+        "type": "object"
+      },
+      "ScriptOutlineInputDto": {
+        "description": "Поле рядка, яке читає скрипт.",
+        "properties": {
+          "name": {
+            "description": "Ім'я поля (код колонки).",
+            "type": "string"
+          },
+          "optional": {
+            "description": "Необов'язкове (`row.X?`).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "optional"
+        ],
+        "type": "object"
+      },
+      "ScriptOutlineOutputDto": {
+        "description": "Вихід скрипта.",
+        "properties": {
+          "code": {
+            "description": "Код виходу.",
+            "type": "string"
+          },
+          "perSubstance": {
+            "description": "Вихід по речовині.",
+            "type": "boolean"
+          },
+          "unit": {
+            "description": "Код одиниці.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "unit",
+          "perSubstance"
+        ],
+        "type": "object"
+      },
+      "ScriptOutlineTableDto": {
+        "description": "Таблиця, з якої скрипт читає: рядки (`rows from`) або комірки (`table Alias = …`).",
+        "properties": {
+          "alias": {
+            "description": "Псевдонім з оголошення `table`; `null` — таблиця з `rows from`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "code": {
+            "description": "Код таблиці.",
+            "type": "string"
+          },
+          "templateCode": {
+            "description": "Код шаблону, якщо вказано (`Шаблон.Таблиця`).",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "code",
+          "templateCode",
+          "alias"
+        ],
+        "type": "object"
+      },
+      "ScriptOutlineVariableDto": {
+        "description": "Змінна верхнього рівня.",
+        "properties": {
+          "line": {
+            "description": "Рядок оголошення.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "name": {
+            "description": "Ім'я.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "line"
+        ],
+        "type": "object"
+      },
+      "ScriptPreviewDto": {
+        "description": "Відповідь перегляду на документі.",
+        "properties": {
+          "diagnostics": {
+            "description": "Діагностики тексту (перегляд виконується лише без них).",
+            "items": {
+              "$ref": "#/components/schemas/ScriptDiagnosticDto"
+            },
+            "type": "array"
+          },
+          "tables": {
+            "description": "Таблиці з рядками й значеннями; порожньо, якщо текст має діагностики.",
+            "items": {
+              "$ref": "#/components/schemas/ScriptPreviewTable"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "tables",
+          "diagnostics"
+        ],
+        "type": "object"
+      },
+      "ScriptPreviewRow": {
+        "description": "Рядок таблиці в перегляді.",
+        "properties": {
+          "issue": {
+            "description": "`missingInputs`, `stepError` або `rejected`; `null` — без проблем.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "missing": {
+            "description": "Обов'язкові поля, яких бракує (для `missingInputs`).",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "rowKey": {
+            "description": "Ключ рядка.",
+            "type": "string"
+          },
+          "rowNumber": {
+            "description": "Номер рядка в таблиці.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "state": {
+            "description": "`selected`, `inactive`, `notSelected` або `rejected`.",
+            "type": "string"
+          },
+          "values": {
+            "description": "Значення величин; для `notSelected`/`inactive` — порожньо.",
+            "items": {
+              "$ref": "#/components/schemas/ScriptPreviewValue"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "rowKey",
+          "rowNumber",
+          "state",
+          "issue",
+          "missing",
+          "values"
+        ],
+        "type": "object"
+      },
+      "ScriptPreviewTable": {
+        "description": "Екземпляр таблиці в перегляді.",
+        "properties": {
+          "inactiveRows": {
+            "description": "Скільки рядків неактивні (`active when` хибне).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "rows": {
+            "description": "Рядки (не більше `MaxRows`).",
+            "items": {
+              "$ref": "#/components/schemas/ScriptPreviewRow"
+            },
+            "type": "array"
+          },
+          "selectedRows": {
+            "description": "Скільки рядків вибрано до розрахунку.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "tableCode": {
+            "description": "Код таблиці.",
+            "type": "string"
+          },
+          "tableInstanceId": {
+            "description": "Екземпляр таблиці.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "totalRows": {
+            "description": "Усього рядків екземпляра.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tableInstanceId",
+          "tableCode",
+          "totalRows",
+          "selectedRows",
+          "inactiveRows",
+          "rows"
+        ],
+        "type": "object"
+      },
+      "ScriptPreviewValue": {
+        "description": "Одне значення рядка в перегляді.",
+        "properties": {
+          "error": {
+            "description": "Код помилки значення (`#DIV/0` тощо); `null` — значення без помилки.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "kind": {
+            "description": "`var`, `visible` або `output`.",
+            "type": "string"
+          },
+          "name": {
+            "description": "Ім'я величини (`var`/`output`).",
+            "type": "string"
+          },
+          "substance": {
+            "description": "Код речовини для значень усередині `foreach substance`; інакше `null`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "text": {
+            "description": "Значення текстом.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "substance",
+          "kind",
+          "text",
+          "error"
+        ],
+        "type": "object"
+      },
+      "ScriptTextRequest": {
+        "description": "Тіло `POST …/script/validate` і `…/format-const`.",
+        "properties": {
+          "text": {
+            "description": "Текст скрипта (для `format-const` — літерал константи).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "type": "object"
+      },
+      "ScriptValidationDto": {
+        "description": "Результат перевірки тексту без збереження.",
+        "properties": {
+          "diagnostics": {
+            "description": "Діагностики.",
+            "items": {
+              "$ref": "#/components/schemas/ScriptDiagnosticDto"
+            },
+            "type": "array"
+          },
+          "outline": {
+            "$ref": "#/components/schemas/ScriptOutlineDto",
+            "description": "Структура."
+          }
+        },
+        "required": [
+          "diagnostics",
+          "outline"
         ],
         "type": "object"
       },
@@ -49936,6 +50555,540 @@
         ]
       }
     },
+    "/api/v1/methodologies/{id}/versions/{vid}/script": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Методологія.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Версія.",
+            "in": "path",
+            "name": "vid",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyScriptDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyScriptDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyScriptDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Скрипт версії: текст, хеш, діагностики, структура. Право `Calculation.View`.",
+        "tags": [
+          "MethodologyScript"
+        ]
+      },
+      "put": {
+        "description": "Текст зберігається завжди, навіть із помилками; виходи, речовини, імпорти й таблиці читання\nматеріалізуються лише коли діагностик немає. Не чернетка чи не скрипт — `409 scriptNotEditable`;\n`expectedHash` не збігся — `409 scriptChanged`.",
+        "parameters": [
+          {
+            "description": "Методологія.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Версія-чернетка з рушієм `Script`.",
+            "in": "path",
+            "name": "vid",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveMethodologyScriptRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveMethodologyScriptRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveMethodologyScriptRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyScriptDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyScriptDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyScriptDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Зберігає текст скрипта чернетки. Право `Calculation.EditFormula`.",
+        "tags": [
+          "MethodologyScript"
+        ]
+      }
+    },
+    "/api/v1/methodologies/{id}/versions/{vid}/script/format-const": {
+      "post": {
+        "parameters": [
+          {
+            "description": "Методологія.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Версія.",
+            "in": "path",
+            "name": "vid",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScriptTextRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScriptTextRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScriptTextRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FormatConstDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FormatConstDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/FormatConstDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Канонічний друк літерала константи для редактора таблиць коефіцієнтів. Право `Calculation.View`.",
+        "tags": [
+          "MethodologyScript"
+        ]
+      }
+    },
+    "/api/v1/methodologies/{id}/versions/{vid}/script/preview": {
+      "post": {
+        "description": "Нічого не записує. Текст із діагностиками не виконується — повертаються лише діагностики.",
+        "parameters": [
+          {
+            "description": "Методологія.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Версія.",
+            "in": "path",
+            "name": "vid",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviewMethodologyScriptRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviewMethodologyScriptRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviewMethodologyScriptRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScriptPreviewDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScriptPreviewDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScriptPreviewDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Прогін скрипта на документі «насухо»: що вибрано, що пораховано. Право `Calculation.View` і доступ до\nдокумента, як для його результатів.",
+        "tags": [
+          "MethodologyScript"
+        ]
+      }
+    },
+    "/api/v1/methodologies/{id}/versions/{vid}/script/validate": {
+      "post": {
+        "parameters": [
+          {
+            "description": "Методологія.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Версія.",
+            "in": "path",
+            "name": "vid",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScriptTextRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScriptTextRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScriptTextRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScriptValidationDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScriptValidationDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScriptValidationDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Перевіряє текст, нічого не зберігаючи. Право `Calculation.View`.",
+        "tags": [
+          "MethodologyScript"
+        ]
+      }
+    },
     "/api/v1/methodologies/{id}/versions/{vid}/substances": {
       "get": {
         "description": "⚠ Порожній склад — законний стан (`200` з порожнім `items`); `404` — версії немає.",
@@ -73139,6 +74292,9 @@
     },
     {
       "name": "MethodologyPublications"
+    },
+    {
+      "name": "MethodologyScript"
     },
     {
       "name": "MethodologyVersions"

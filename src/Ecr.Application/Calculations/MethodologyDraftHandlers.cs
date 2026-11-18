@@ -79,7 +79,8 @@ public sealed class ListMethodologyVersionsHandler(
             version.CalendarMode,
             version.TraceLevel,
             version.Status == TemplateVersionStatus.Draft,
-            version.CreatedByUserId);
+            version.CreatedByUserId,
+            version.Engine);
     }
 }
 
@@ -121,11 +122,33 @@ public sealed class CreateMethodologyVersionHandler(
     /// <returns>Створену чернетку.</returns>
     /// <exception cref="NotFoundException">Методології або версії-джерела немає.</exception>
     /// <exception cref="BusinessRuleException">Номер версії вже зайнято.</exception>
+    public Task<MethodologyDraftVersionDto> HandleAsync(
+        int methodologyId,
+        string versionNumber,
+        int? copyFromVersionId,
+        CalculationLevel level,
+        CancellationToken ct)
+        => HandleAsync(methodologyId, versionNumber, copyFromVersionId, level, engine: null, ct);
+
+    /// <summary>Створює чернетку з вибором рушія порожньої версії (MS).</summary>
+    /// <param name="methodologyId">Методологія-контейнер.</param>
+    /// <param name="versionNumber">Номер нової версії; унікальний у межах методології.</param>
+    /// <param name="copyFromVersionId">Версія-джерело; <c>null</c> — порожня чернетка.</param>
+    /// <param name="level">Рівень драбини виразності для порожньої чернетки.</param>
+    /// <param name="engine">
+    /// Рушій порожньої чернетки; <c>null</c> — <c>Formulas</c> (як було до MS). Клон завжди лишає рушій і скрипт
+    /// джерела; порожня версія-скрипт отримує заготовку <see cref="Scripting.ScriptStarter.Text"/>.
+    /// </param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Створену чернетку.</returns>
+    /// <exception cref="NotFoundException">Методології або версії-джерела немає.</exception>
+    /// <exception cref="BusinessRuleException">Номер версії вже зайнято.</exception>
     public async Task<MethodologyDraftVersionDto> HandleAsync(
         int methodologyId,
         string versionNumber,
         int? copyFromVersionId,
         CalculationLevel level,
+        MethodologyEngine? engine,
         CancellationToken ct)
     {
         await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
@@ -160,7 +183,7 @@ public sealed class CreateMethodologyVersionHandler(
                     ["methodologyId"] = methodologyId.ToString(CultureInfo.InvariantCulture),
                 });
 
-        var draft = await BuildAsync(methodology, versionNumber, copyFromVersionId, level, userId, ct)
+        var draft = await BuildAsync(methodology, versionNumber, copyFromVersionId, level, engine, userId, ct)
             .ConfigureAwait(false);
 
         // ⛔ Номер версії перевіряє АГРЕГАТ, а не запит. Два однакові номери
@@ -178,6 +201,7 @@ public sealed class CreateMethodologyVersionHandler(
     /// <param name="versionNumber">Номер нової версії.</param>
     /// <param name="copyFromVersionId">Версія-джерело; <c>null</c> — порожня.</param>
     /// <param name="level">Рівень для порожньої чернетки.</param>
+    /// <param name="engine">Рушій порожньої чернетки; <c>null</c> — формули.</param>
     /// <param name="userId">Автор.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Чернетку, ще не додану до агрегату.</returns>
@@ -186,12 +210,22 @@ public sealed class CreateMethodologyVersionHandler(
         string versionNumber,
         int? copyFromVersionId,
         CalculationLevel level,
+        MethodologyEngine? engine,
         int userId,
         CancellationToken ct)
     {
         if (copyFromVersionId is not { } sourceId)
         {
-            return new MethodologyVersion(methodology.Id, versionNumber, level, userId, clock.UtcNow);
+            if (engine != MethodologyEngine.Script)
+            {
+                return new MethodologyVersion(methodology.Id, versionNumber, level, userId, clock.UtcNow);
+            }
+
+            // Порожня версія-скрипт: із заготовкою, щоб авторові було з чого почати (план 5.4).
+            var empty = new MethodologyVersion(
+                methodology.Id, versionNumber, level, userId, clock.UtcNow, MethodologyEngine.Script);
+            empty.SetScript(Scripting.ScriptStarter.Text, Ecr.Scripting.ScriptCompiler.Hash(Scripting.ScriptStarter.Text));
+            return empty;
         }
 
         var source = await drafts.FindVersionAsync(sourceId, ct).ConfigureAwait(false)

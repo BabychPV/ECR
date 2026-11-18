@@ -4,6 +4,7 @@ using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
+using Ecr.Domain.Enums;
 using Ecr.Domain.Errors;
 
 namespace Ecr.Application.Calculations;
@@ -56,6 +57,37 @@ public sealed class MethodologyVersionScope(
                     ["messageKey"] = "err.ECR-CALC-0404.version",
                     ["methodologyVersionId"] = methodologyVersionId.ToString(CultureInfo.InvariantCulture),
                     ["methodologyId"] = methodologyId.ToString(CultureInfo.InvariantCulture),
+                });
+        }
+    }
+
+    /// <summary>
+    /// Відмовляє, якщо версія керується скриптом: її формули, константи, категорії, правила, речовини й виходи
+    /// виводяться з тексту, і ручна правка розійшлася б із ним (MS, план 5.1).
+    /// </summary>
+    /// <param name="methodologyVersionId">Версія з маршруту.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="BusinessRuleException">
+    /// <c>ECR-CALC-0409</c>, ключ <c>scriptManaged</c> — версія має рушій <c>Script</c>.
+    /// </exception>
+    /// <remarks>
+    /// ⚠ Викликається ПІСЛЯ <see cref="RequireAsync"/>: версія вже знайдена й належить методології з адреси.
+    /// Тести, обов'язкові колонки, режими й прив'язки лишаються доступними — вони не виводяться зі скрипта.
+    /// </remarks>
+    public async Task RequireHandEditableAsync(int methodologyVersionId, CancellationToken ct)
+    {
+        var version = await drafts.FindVersionAsync(methodologyVersionId, ct).ConfigureAwait(false);
+
+        if (version is { Engine: MethodologyEngine.Script })
+        {
+            throw new BusinessRuleException(
+                "ECR-CALC-0409",
+                $"Версія {version.Version} керується скриптом: формули, константи, категорії, правила, речовини й "
+                + "виходи редагуються в тексті скрипта, а не окремо.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0409.scriptManaged",
+                    ["version"] = version.Version,
                 });
         }
     }
