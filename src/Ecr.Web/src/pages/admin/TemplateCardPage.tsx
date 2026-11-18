@@ -1,4 +1,4 @@
-import { useState, type JSX } from 'react';
+import { Suspense, lazy, useState, type JSX } from 'react';
 import { Button, Group, Modal, Stack } from '@mantine/core';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
@@ -26,6 +26,11 @@ import { PageHeader, type HeaderAction } from '@/shared/ui/PageHeader';
 import { useUrlState } from '@/shared/ui/useUrlState';
 import { showApiError, showDone, showUndo } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
+
+/* ✎ B155: розділ «Погодження» — за `import()`, як і інші панелі сторінок (бюджет маршруту). */
+const ApprovalRouteSection = lazy(async () => ({
+  default: (await import('@/features/approvalRoutes/ApprovalRouteSection')).ApprovalRouteSection,
+}));
 
 /**
  * Картка шаблону (`/admin/templates/:id`, крок `UI-09` директиви №15 §4).
@@ -334,6 +339,19 @@ export function TemplateCardPage(): JSX.Element {
                 раніше до редактора структури можна було дійти лише назад
                 через перелік шаблонів. */}
             <TemplateVersionsSection templateId={templateId} editable={editable} newVersionIsPrimary={draftVersion === undefined} />
+
+            {/* ✎ B155 (варіант C): маршрут погодження шаблону в усіх проєктах — читати з Template.View, змінювати з
+                Template.Edit (`canEdit` приходить від сервера). */}
+            {(editable || can(session.data, 'Template.View')) && (
+              <Suspense fallback={null}>
+                <ApprovalRouteSection
+                  id="template"
+                  title={t('approvalRoutes.title')}
+                  hint={t('approvalRoutes.templateHint')}
+                  scope={{ kind: 'template', templateId }}
+                />
+              </Suspense>
+            )}
           </Stack>
         )}
       </AsyncBoundary>

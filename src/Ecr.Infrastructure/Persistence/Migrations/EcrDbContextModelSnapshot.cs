@@ -7059,6 +7059,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.Property<int?>("ProjectId")
                         .HasColumnType("int");
 
+                    b.Property<int?>("TemplateId")
+                        .HasColumnType("int");
+
                     b.Property<int?>("TemplateVersionId")
                         .HasColumnType("int");
 
@@ -7068,7 +7071,12 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .IsUnique()
                         .HasDatabaseName("UQ_ApprovalRoute");
 
-                    b.HasIndex("ProjectId", "TemplateVersionId")
+                    b.HasIndex("ProjectId", "TemplateId")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_AR_Scope")
+                        .HasFilter("[TemplateVersionId] IS NULL");
+
+                    b.HasIndex("ProjectId", "TemplateId", "TemplateVersionId")
                         .HasDatabaseName("IX_ApprovalRoute_Scope");
 
                     b.ToTable("ApprovalRoute", "wf");
@@ -9208,6 +9216,12 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasForeignKey("ProjectId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("FK_AR_Project");
+
+                    b.HasOne("Ecr.Domain.Entities.Configuration.Template", null)
+                        .WithMany()
+                        .HasForeignKey("TemplateId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_AR_Template");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Workflow.ApprovalState", b =>

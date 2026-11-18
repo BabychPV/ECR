@@ -123,6 +123,7 @@ public sealed class ApprovalRouteConfiguration : IEntityTypeConfiguration<Approv
         // ⚠ Обчислювана властивість: у базі її немає і бути не має —
         // збережений пріоритет розійшовся б з областю дії при першій правці.
         builder.Ignore(x => x.Specificity);
+        builder.Ignore(x => x.AllowsGeneralApprover);
 
         // ⛔ Друга половина області дії маршруту (`ФВ-5.17`). FK на проєкт, а
         // не просто число: маршрут неіснуючого проєкту — це маршрут, який
@@ -133,11 +134,26 @@ public sealed class ApprovalRouteConfiguration : IEntityTypeConfiguration<Approv
                .HasForeignKey(x => x.ProjectId)
                .HasConstraintName("FK_AR_Project");
 
+        // ✎ B155: маршрут ШАБЛОНУ (усі версії) — FK з тієї самої причини, що й проєкт; видалення шаблону з маршрутом
+        // відмовляє (Restrict), а не мовчки лишає маршрут без адресата.
+        builder.HasOne<Domain.Entities.Configuration.Template>()
+               .WithMany()
+               .HasForeignKey(x => x.TemplateId)
+               .OnDelete(DeleteBehavior.Restrict)
+               .HasConstraintName("FK_AR_Template");
+
         // ⚠ Індекс саме за областю дії: резолюція маршруту — запит виду
         // «ProjectId = @p OR ProjectId IS NULL», і він виконується на КОЖНЕ
-        // подання та затвердження.
-        builder.HasIndex(x => new { x.ProjectId, x.TemplateVersionId })
+        // подання та затвердження. ✎ B155: + шаблон.
+        builder.HasIndex(x => new { x.ProjectId, x.TemplateId, x.TemplateVersionId })
                .HasDatabaseName("IX_ApprovalRoute_Scope");
+
+        // ✎ B155: один маршрут на область налаштування (проєкт?, шаблон?) без версії — NULL рівні між собою в
+        // унікальному індексі SQL Server, тож і типовий маршрут майданчика (NULL, NULL) лише один.
+        builder.HasIndex(x => new { x.ProjectId, x.TemplateId })
+               .IsUnique()
+               .HasFilter("[TemplateVersionId] IS NULL")
+               .HasDatabaseName("UQ_AR_Scope");
 
         // ⚠ Поведінка видалення НЕ перевизначається: у базі `FK_AS_Route`
         // оголошений `Restrict` ще від Етапу 3, і модель має казати те саме.

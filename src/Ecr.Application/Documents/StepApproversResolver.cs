@@ -64,7 +64,9 @@ public sealed class StepApproversResolver(IStepApproverStore store, IAccessDecis
             // Ролі, якої крок вимагає, кандидат не несе і не учасник — рішення відмовило б; не платимо за нього.
             var pending = users
                 .Where(u => !listed.Contains(u.Key) && profiles.ContainsKey(u.Key)
-                            && (step.RoleId is null || u.Any(c => c.RoleId is null || c.RoleId == step.RoleId)))
+                            && (step.RoleId is null
+                                || u.Any(c => c.RoleId is null || c.RoleId == step.RoleId
+                                              || (step.AlternativeRoleId is not null && c.RoleId == step.AlternativeRoleId))))
                 .ToList();
             if (pending.Count == 0)
             {
@@ -74,7 +76,7 @@ public sealed class StepApproversResolver(IStepApproverStore store, IAccessDecis
             // Одне пакетне рішення на крок: умови аркуша й маршрут читаються раз, а не на кожного кандидата.
             var decisions = await access
                 .CanApproveManyAsync(
-                    [.. pending.Select(u => profiles[u.Key])], documentId, step.SheetDefId, key, step.SheetCopyId, new KnownStepRole(step.RoleId), ct)
+                    [.. pending.Select(u => profiles[u.Key])], documentId, step.SheetDefId, key, step.SheetCopyId, new KnownStepRole(step.RoleId, step.AlternativeRoleId), ct)
                 .ConfigureAwait(false);
             for (var i = 0; i < pending.Count; i++)
             {

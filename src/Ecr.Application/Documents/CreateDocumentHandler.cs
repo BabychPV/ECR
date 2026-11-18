@@ -261,8 +261,8 @@ public sealed class CreateDocumentHandler(
     }
 
     /// <summary>
-    /// ✎ B151: відмова «документ цього шаблону в проєкті вже є» — <c>409 ECR-DOC-0409</c>
-    /// (<c>err.ECR-DOC-0409.documentExistsForTemplate</c>).
+    /// ✎ B151: відмова «документ цього шаблону в проєкті вже є» — <c>409 ECR-DOC-4092</c>, суфікс ключа
+    /// <c>documentExistsForTemplate</c> (✎ B165: власний код замість <c>ECR-DOC-0409</c> «подано»).
     /// </summary>
     /// <remarks>
     /// ⛔ <c>existingDocumentId</c> їде у відповідь ЛИШЕ тоді, коли наявний документ видно цьому користувачеві:
@@ -276,7 +276,7 @@ public sealed class CreateDocumentHandler(
 
         var details = new Dictionary<string, object?>
         {
-            ["messageKey"] = "err.ECR-DOC-0409.documentExistsForTemplate",
+            ["messageKey"] = "err.ECR-DOC-4092.documentExistsForTemplate",
             ["projectId"] = projectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["templateId"] = templateId.ToString(System.Globalization.CultureInfo.InvariantCulture),
         };
@@ -287,7 +287,7 @@ public sealed class CreateDocumentHandler(
         }
 
         return new DomainException(
-            Ecr.Domain.Errors.ErrorCodes.DocumentSubmitted,
+            Ecr.Domain.Errors.ErrorCodes.DocumentExistsForTemplate,
             $"У проєкті {projectId} документ шаблону {templateId} уже є: шаблон дозволяє один документ на проєкт.",
             details);
     }

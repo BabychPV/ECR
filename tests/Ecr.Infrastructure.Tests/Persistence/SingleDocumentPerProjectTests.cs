@@ -51,8 +51,8 @@ public sealed class SingleDocumentPerProjectTests(SqlServerFixture sql)
             async () => await (await CreateHandlerAsync(builder, db, doc, doc.ProjectId)).HandleAsync(
                 doc.ProjectId, templateVersionId: null, [doc.SheetDefId], name: null, CancellationToken.None));
 
-        Assert.Equal("ECR-DOC-0409", error.ErrorCode);
-        Assert.Equal("err.ECR-DOC-0409.documentExistsForTemplate", error.Details!["messageKey"]);
+        Assert.Equal("ECR-DOC-4092", error.ErrorCode);
+        Assert.Equal("err.ECR-DOC-4092.documentExistsForTemplate", error.Details!["messageKey"]);
         Assert.Equal(doc.DocumentId.ToString(System.Globalization.CultureInfo.InvariantCulture), error.Details["existingDocumentId"]);
         Assert.Equal(1, await DocumentCountAsync(builder, doc.ProjectId));
     }
@@ -108,7 +108,7 @@ public sealed class SingleDocumentPerProjectTests(SqlServerFixture sql)
 
         Assert.Single(outcomes, o => o is null);
         var refusal = Assert.IsType<DomainException>(Assert.Single(outcomes, o => o is not null));
-        Assert.Equal("ECR-DOC-0409", refusal.ErrorCode);
+        Assert.Equal("ECR-DOC-4092", refusal.ErrorCode);
         Assert.Equal(1, await DocumentCountAsync(builder, projectId));
     }
 

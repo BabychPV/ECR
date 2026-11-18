@@ -2,6 +2,7 @@ import { Suspense, lazy, useEffect, useMemo, useState, type JSX } from 'react';
 import {
   Alert,
   Badge,
+  Box,
   Button,
   Group,
   Switch,
@@ -90,6 +91,11 @@ const RoleBrowser = lazy(async () => ({
 /** Вкладка «Session» (D-471, вихід після бездіяльності) — за `import()`: бюджет маршруту, як і решта вкладок. */
 const SessionSettingsPanel = lazy(async () => ({
   default: (await import('@/features/security/SessionSettingsPanel')).SessionSettingsPanel,
+}));
+
+/** ✎ B155: типовий маршрут погодження — за `import()`, як і решта панелей: бюджет маршруту. */
+const ApprovalRouteSection = lazy(async () => ({
+  default: (await import('@/features/approvalRoutes/ApprovalRouteSection')).ApprovalRouteSection,
 }));
 
 /** Ролі груп каталогу — за `import()` з тієї ж причини, що й гранти: бюджет маршруту. */
@@ -323,6 +329,21 @@ export function SecurityPage(): JSX.Element {
               </Suspense>
             )}
           </AsyncBoundary>
+
+          {/* ✎ B155 (варіант C): типовий маршрут майданчика — там, де ні шаблон, ні проєкт не мають власного.
+              Читає й змінює лише `Security.ManageRoles` (так само стереже сервер). */}
+          {can(session.data, 'Security.ManageRoles') && (
+            <Box mt="lg">
+              <Suspense fallback={null}>
+                <ApprovalRouteSection
+                  id="default"
+                  title={t('approvalRoutes.defaultTitle')}
+                  hint={t('approvalRoutes.defaultHint')}
+                  scope={{ kind: 'default' }}
+                />
+              </Suspense>
+            </Box>
+          )}
         </Tabs.Panel>
 
         {/* ⛔ Ролі потрібні ВСІМ вкладкам (вибір ролі в грантах, групах, доступі),

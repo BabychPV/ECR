@@ -177,12 +177,14 @@ public interface IWorkflowStore
     /// придатних (<c>ФВ-5.17</c>).
     /// </summary>
     /// <remarks>
-    /// ⛔ Порядок від конкретного до загального:
+    /// ⛔ Порядок від конкретного до загального (✎ B155, <c>ApprovalRoute.Specificity</c>):
     /// <list type="number">
     /// <item>проєкт <b>і</b> версія;</item>
-    /// <item>проєкт, версія будь-яка;</item>
     /// <item>версія, проєкт будь-який;</item>
-    /// <item>типовий — обидві координати порожні;</item>
+    /// <item>проєкт <b>і</b> шаблон версії (виняток проєкту);</item>
+    /// <item>шаблон версії, усі проєкти;</item>
+    /// <item>проєкт, шаблон будь-який;</item>
+    /// <item>типовий — усі координати порожні;</item>
     /// <item>маршруту немає → затвердження ОДНОЕТАПНЕ, як було.</item>
     /// </list>
     ///
@@ -209,6 +211,49 @@ public interface IWorkflowStore
     /// маршрут» виглядало б як «нічого не змінилося».
     /// </remarks>
     public Task<ApprovalRoute?> FindProjectRouteAsync(int projectId, CancellationToken ct);
+
+    /// <summary>
+    /// ✎ B155: власний маршрут ОБЛАСТІ налаштування (проєкт?, шаблон?) без версії — для редагування (відстежується);
+    /// <c>null</c> — немає.
+    /// </summary>
+    /// <param name="projectId">Проєкт; <c>null</c> — усі.</param>
+    /// <param name="templateId">Шаблон; <c>null</c> — усі.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<ApprovalRoute?> FindScopedRouteAsync(int? projectId, int? templateId, CancellationToken ct)
+        => throw new NotSupportedException("Маршрути областей (B155) не реалізовано цим сховищем.");
+
+    /// <summary>✎ B155: усі чинні маршрути з кроками (без відстеження) — для показу успадкування й перезапуску.</summary>
+    public Task<IReadOnlyList<ApprovalRoute>> ListActiveRoutesAsync(CancellationToken ct)
+        => throw new NotSupportedException("Маршрути областей (B155) не реалізовано цим сховищем.");
+
+    /// <summary>
+    /// ✎ B155: вбудована загальна роль <c>Approver</c> (<c>IsBuiltIn</c>); <c>null</c> — її немає. Крок маршруту
+    /// ШАБЛОНУ задовольняє вона АБО роль кроку (слово людини 16.11).
+    /// </summary>
+    /// <remarks>⚠ Типова реалізація (тестові підміни) — <c>null</c>: без маршрутів шаблону альтернативи немає.</remarks>
+    public Task<int?> GeneralApproverRoleIdAsync(CancellationToken ct) => Task.FromResult<int?>(null);
+
+    /// <summary>
+    /// ✎ B155: подані (<c>Submitted</c>) аркуші й копії — кандидати на перезапуск погодження при зміні маршруту;
+    /// версії без погодження (B138) не входять.
+    /// </summary>
+    /// <param name="projectId">Лише цей проєкт; <c>null</c> — усі.</param>
+    /// <param name="templateId">Лише документи цього шаблону; <c>null</c> — усі.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<InFlightSheet>> ListInFlightSheetsAsync(int? projectId, int? templateId, CancellationToken ct)
+        => throw new NotSupportedException("Маршрути областей (B155) не реалізовано цим сховищем.");
+
+    /// <summary>✎ B155: стани за ключами — для перезапуску (відстежуються).</summary>
+    public Task<IReadOnlyList<ApprovalState>> GetStatesAsync(IReadOnlyCollection<long> stateIds, CancellationToken ct)
+        => throw new NotSupportedException("Маршрути областей (B155) не реалізовано цим сховищем.");
+
+    /// <summary>✎ B155: шаблон для маршруту; <c>null</c> — шаблону немає.</summary>
+    public Task<ApprovalTemplateRef?> FindTemplateAsync(int templateId, CancellationToken ct)
+        => throw new NotSupportedException("Маршрути областей (B155) не реалізовано цим сховищем.");
+
+    /// <summary>✎ B155 (C-5): шаблони проєкту — основний і приєднані (<c>doc.ProjectTemplate</c>, B74).</summary>
+    public Task<IReadOnlyList<ApprovalTemplateRef>> ListProjectTemplatesAsync(int projectId, CancellationToken ct)
+        => throw new NotSupportedException("Маршрути областей (B155) не реалізовано цим сховищем.");
 
     /// <summary>Додає маршрут.</summary>
     public Task AddRouteAsync(ApprovalRoute route, CancellationToken ct);
@@ -396,6 +441,34 @@ public sealed record ApprovalEventRecord(
     bool ApprovedBySubmitter = false,
     long Id = 0,
     long? SheetCopyId = null);
+
+/// <summary>✎ B155: поданий аркуш (копія) з областю вибору маршруту.</summary>
+/// <param name="StateId">Ключ стану.</param>
+/// <param name="DocumentId">Документ.</param>
+/// <param name="SheetDefId">Аркуш.</param>
+/// <param name="PeriodKey">Період.</param>
+/// <param name="SheetCopyId">Копія (RS); <c>null</c> — оригінал.</param>
+/// <param name="ProjectId">Проєкт документа.</param>
+/// <param name="TemplateId">Шаблон документа (власний, B74, або основний проєкту).</param>
+/// <param name="TemplateVersionId">Версія шаблону документа за період.</param>
+/// <param name="CurrentStepId">Поточний крок.</param>
+public sealed record InFlightSheet(
+    long StateId,
+    long DocumentId,
+    int SheetDefId,
+    int PeriodKey,
+    long? SheetCopyId,
+    int ProjectId,
+    int? TemplateId,
+    int TemplateVersionId,
+    int? CurrentStepId);
+
+/// <summary>✎ B155: шаблон для маршруту погодження.</summary>
+/// <param name="Id">Шаблон.</param>
+/// <param name="Code">Код.</param>
+/// <param name="NameL10n">Назва.</param>
+/// <param name="WorkflowNone">Найновіша версія шаблону — без подання й затвердження (B75).</param>
+public sealed record ApprovalTemplateRef(int Id, string Code, LocalizedText NameL10n, bool WorkflowNone);
 
 /// <summary>Календар подання аркуша (D-441): проєкт документа і стани періодів × аркуша.</summary>
 /// <param name="ProjectStatus">Стан проєкту.</param>

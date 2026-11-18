@@ -3079,7 +3079,7 @@ public sealed class AccessDecisionService(
                 documentId, sheetContext.SheetDefId, periodKey, sheetContext.SheetCopyId, ct)
             .ConfigureAwait(false);
 
-        return EditRules.CanApprove(profile, sheetContext, step?.RoleId).IsAllowed;
+        return EditRules.CanApprove(profile, sheetContext, step?.RoleId, step?.AlternativeRoleId).IsAllowed;
     }
 
     /// <inheritdoc />
@@ -3204,6 +3204,7 @@ public sealed class AccessDecisionService(
 
         var decisions = new EditDecision[profiles.Count];
         int? stepRoleId = knownStep?.RoleId;
+        int? alternativeRoleId = knownStep?.AlternativeRoleId;
         var stepRead = knownStep is not null;
         for (var i = 0; i < profiles.Count; i++)
         {
@@ -3217,12 +3218,14 @@ public sealed class AccessDecisionService(
             // про доступ: затверджують рідко, а комірки читають тисячами.
             if (!stepRead)
             {
-                stepRoleId = (await CurrentApprovalStepCoreAsync(documentId, sheetDefId, periodKey, sheetCopyId, ct)
-                    .ConfigureAwait(false))?.RoleId;
+                var step = await CurrentApprovalStepCoreAsync(documentId, sheetDefId, periodKey, sheetCopyId, ct)
+                    .ConfigureAwait(false);
+                stepRoleId = step?.RoleId;
+                alternativeRoleId = step?.AlternativeRoleId;
                 stepRead = true;
             }
 
-            decisions[i] = EditRules.CanApprove(profiles[i], contexts[i], stepRoleId);
+            decisions[i] = EditRules.CanApprove(profiles[i], contexts[i], stepRoleId, alternativeRoleId);
         }
 
         return decisions;
@@ -3349,37 +3352,68 @@ public sealed class AccessDecisionService(
         // (CurrentStepId після затвердження порожній). Маршруту немає — перевірки немає. Маршрут читається лише коли
         // стан дозволяє повернення й грант сягає Approve (чиста перевірка без бази) — решта не платить запитом.
         int? requiredRoleId = null;
+        int? alternativeRoleId = null;
         if (context.SheetStatus is DocumentStatus.Submitted or DocumentStatus.Approved
             && EditRules.Effective(profile, context with { TableDefId = 0, ColumnDefId = 0 }) >= GrantLevel.Approve)
         {
-            requiredRoleId = context.SheetStatus == DocumentStatus.Submitted
-                ? (await CurrentApprovalStepCoreAsync(documentId, sheetDefId, periodKey, sheetCopyId, ct).ConfigureAwait(false))?.RoleId
-                : await LastApprovalStepRoleAsync(documentId, periodKey, ct).ConfigureAwait(false);
+            if (context.SheetStatus == DocumentStatus.Submitted)
+            {
+                var step = await CurrentApprovalStepCoreAsync(documentId, sheetDefId, periodKey, sheetCopyId, ct)
+                    .ConfigureAwait(false);
+                (requiredRoleId, alternativeRoleId) = (step?.RoleId, step?.AlternativeRoleId);
+            }
+            else
+            {
+                (requiredRoleId, alternativeRoleId) = await LastApprovalStepRoleAsync(documentId, periodKey, ct)
+                    .ConfigureAwait(false);
+            }
         }
 
-        return EditRules.CanReopen(profile, context, requiredRoleId);
+        return EditRules.CanReopen(profile, context, requiredRoleId, alternativeRoleId);
     }
 
-    /// <summary>Роль ОСТАННЬОГО кроку маршруту документа за період; <c>null</c> — маршруту немає.</summary>
+    /// <summary>
+    /// Роль ОСТАННЬОГО кроку маршруту документа за період і ✎ B155 альтернативна роль (загальний <c>Approver</c> на
+    /// маршруті шаблону); обидві <c>null</c> — маршруту немає.
+    /// </summary>
     /// <remarks>
     /// ⛔ D2 (B155, 16.11): версія — та сама, що й для поточного кроку (<see cref="RouteScopeAsync"/>): версія
     /// ПЕРІОДУ шаблону документа (власного, B74, або основного). Доти тут стояла чинна версія ПРОЄКТУ, і для
     /// документа з власним шаблоном (або періоду іншої версії) роль повернення бралась із чужого маршруту.
     /// </remarks>
-    private async Task<int?> LastApprovalStepRoleAsync(long documentId, PeriodKey periodKey, CancellationToken ct)
+    private async Task<(int? RoleId, int? AlternativeRoleId)> LastApprovalStepRoleAsync(
+        long documentId, PeriodKey periodKey, CancellationToken ct)
     {
         var scope = await RouteScopeAsync(documentId, periodKey, ct).ConfigureAwait(false);
         if (scope is null)
         {
-            return null;
+            return (null, null);
         }
 
         var route = await workflow.FindRouteAsync(scope.Value.ProjectId, scope.Value.TemplateVersionId, ct)
             .ConfigureAwait(false);
-        return route is null || route.Steps.Count == 0
-            ? null
-            : route.Steps.OrderBy(s => s.Ordinal).Last().RoleId;
+        if (route is null || route.Steps.Count == 0)
+        {
+            return (null, null);
+        }
+
+        return (route.Steps.OrderBy(s => s.Ordinal).Last().RoleId,
+            await AlternativeRoleOfAsync(route, ct).ConfigureAwait(false));
     }
+
+    /// <summary>
+    /// ✎ B155: альтернативна роль кроків маршруту — вбудований загальний <c>Approver</c>, лише для маршруту ШАБЛОНУ
+    /// (<see cref="Domain.Entities.Workflow.ApprovalRoute.AllowsGeneralApprover"/>); інакше <c>null</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Одне місце для поточного кроку (затвердження, правка поданого, повернення поданого) і для повернення
+    /// затвердженого (<see cref="LastApprovalStepRoleAsync"/>): різні відповіді дали б аркуш, який загальний погоджувач
+    /// затверджує, але не може повернути.
+    /// </remarks>
+    private async Task<int?> AlternativeRoleOfAsync(Domain.Entities.Workflow.ApprovalRoute route, CancellationToken ct)
+        => route.AllowsGeneralApprover
+            ? await workflow.GeneralApproverRoleIdAsync(ct).ConfigureAwait(false)
+            : null;
 
     /// <inheritdoc />
     public Task<ApprovalStepView?> CurrentApprovalStepAsync(
@@ -3460,7 +3494,8 @@ public sealed class AccessDecisionService(
         var next = route.StepAfter(current.Id);
 
         return new ApprovalStepView(
-            current.Id, current.Ordinal, current.RoleId, next?.Id, route.Steps.Count);
+            current.Id, current.Ordinal, current.RoleId, next?.Id, route.Steps.Count,
+            await AlternativeRoleOfAsync(route, ct).ConfigureAwait(false));
     }
 
     /// <summary>Збирає умови доступу з бази в один <see cref="CellAccessContext"/>.</summary>

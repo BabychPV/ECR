@@ -41,16 +41,20 @@ public sealed class ApprovalRouteTests
     [Trait("Requirement", "ФВ-5.17")]
     public void Конкретніший_маршрут_має_більшу_вагу()
     {
-        // Порядок від конкретного до загального: проєкт+версія → проєкт →
-        // версія → типовий.
+        // Порядок від конкретного до загального (✎ B155, затверджено координатором 16.11): проєкт+версія → версія →
+        // проєкт+шаблон → шаблон → проєкт → типовий. Доти маршрут проєкту стояв вище за маршрут лише версії.
         var both = new ApprovalRoute(Code("BOTH"), Name, projectId: 5, templateVersionId: 7);
-        var project = new ApprovalRoute(Code("PRJ"), Name, projectId: 5);
         var version = new ApprovalRoute(Code("VER"), Name, templateVersionId: 7);
+        var projectTemplate = new ApprovalRoute(Code("PRJTPL"), Name, projectId: 5, templateId: 9);
+        var template = new ApprovalRoute(Code("TPL"), Name, templateId: 9);
+        var project = new ApprovalRoute(Code("PRJ"), Name, projectId: 5);
         var common = new ApprovalRoute(Code("ALL"), Name);
 
-        Assert.True(both.Specificity > project.Specificity);
-        Assert.True(project.Specificity > version.Specificity);
-        Assert.True(version.Specificity > common.Specificity);
+        Assert.True(both.Specificity > version.Specificity);
+        Assert.True(version.Specificity > projectTemplate.Specificity);
+        Assert.True(projectTemplate.Specificity > template.Specificity);
+        Assert.True(template.Specificity > project.Specificity);
+        Assert.True(project.Specificity > common.Specificity);
     }
 
     [Fact]

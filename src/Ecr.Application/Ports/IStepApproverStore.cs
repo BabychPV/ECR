@@ -5,7 +5,8 @@ namespace Ecr.Application.Ports;
 /// <param name="SheetDefId">Аркуш шаблону.</param>
 /// <param name="SheetCopyId">Копія аркуша (RS); <c>null</c> — оригінал.</param>
 /// <param name="RoleId">Роль поточного кроку; <c>null</c> — маршруту немає (затвердження одноетапне).</param>
-public sealed record SubmittedStepRef(int SheetDefId, long? SheetCopyId, int? RoleId);
+/// <param name="AlternativeRoleId">✎ B155: роль, що теж задовольняє крок (загальний Approver на маршруті шаблону).</param>
+public sealed record SubmittedStepRef(int SheetDefId, long? SheetCopyId, int? RoleId, int? AlternativeRoleId = null);
 
 /// <summary>Кандидат у погоджувачі: користувач і роль, через яку він потрапив у вибірку.</summary>
 /// <param name="UserId">Користувач (активний).</param>

@@ -1511,7 +1511,11 @@ DELETE t
     (N'calcResults.calculatedMonth',        N'kz', N'Есептелген: {month}'),
     (N'calcResults.calculatedMonthHeading', N'en', N'Calculated columns show results of'),
     (N'calcResults.calculatedMonthHeading', N'ru', N'Рассчитанные столбцы показывают результаты за'),
-    (N'calcResults.calculatedMonthHeading', N'kz', N'Есептелген бағандар нәтижелерін көрсетеді')
+    (N'calcResults.calculatedMonthHeading', N'kz', N'Есептелген бағандар нәтижелерін көрсетеді'),
+    -- B165(1): відмова «документ шаблону в проєкті вже є» отримала власний код ECR-DOC-4092 (ключ err.ECR-DOC-4092.documentExistsForTemplate).
+    (N'err.ECR-DOC-0409.documentExistsForTemplate', N'en', N'This project already has a document of this template: the template allows one document per project. Open the existing document.'),
+    (N'err.ECR-DOC-0409.documentExistsForTemplate', N'ru', N'В этом проекте документ этого шаблона уже есть: шаблон допускает один документ на проект. Откройте существующий документ.'),
+    (N'err.ECR-DOC-0409.documentExistsForTemplate', N'kz', N'Бұл жобада осы үлгінің құжаты бар: үлгі бір жобаға бір құжатқа рұқсат береді. Бар құжатты ашыңыз.')
   ) AS s ([Key], Lang, OldVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -3345,7 +3349,59 @@ SELECT v.[Key], v.Lang, v.Val
     (N'workflow.routeAddStep', N'ru', N'Добавить шаг'),
     (N'workflow.routeAddStepHint', N'ru', N'Роль, которая утверждает на этом шаге. Одна и та же роль может встречаться дважды, но не два раза подряд.'),
     (N'workflow.routeSaved', N'ru', N'Шагов в маршруте: {count}.'),
-    (N'workflow.routeCleared', N'ru', N'Маршрут удалён: согласование снова одноэтапное.'),
+    (N'workflow.routeCleared', N'ru', N'Маршрут удалён: согласование снова одноэтапное.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    -- B155:approval-routes ── ru: маршруты согласования шаблона, исключения проекта и типовой (вариант C); en — в features/CATALOG-en-base.sql ──
+    (N'approvalRoutes.title', N'ru', N'Согласование'),
+    (N'approvalRoutes.templateHint', N'ru', N'Кто утверждает листы этого шаблона во всех проектах, если проект не задал собственное исключение.'),
+    (N'approvalRoutes.defaultTitle', N'ru', N'Типовой маршрут согласования'),
+    (N'approvalRoutes.defaultHint', N'ru', N'Действует там, где ни у шаблона, ни у проекта нет собственного маршрута.'),
+    (N'approvalRoutes.projectTemplatesTitle', N'ru', N'Шаблоны: согласование'),
+    (N'approvalRoutes.projectTemplatesHint', N'ru', N'Маршрут, который действует для каждого шаблона этого проекта. Исключение, заданное здесь, действует только в этом проекте.'),
+    (N'approvalRoutes.source.own', N'ru', N'Собственный маршрут'),
+    (N'approvalRoutes.source.template', N'ru', N'Из шаблона'),
+    (N'approvalRoutes.source.project', N'ru', N'Из проекта'),
+    (N'approvalRoutes.source.default', N'ru', N'Типовой площадки'),
+    (N'approvalRoutes.source.none', N'ru', N'Маршрута нет'),
+    (N'approvalRoutes.generalApproverOption', N'ru', N'{role} (общий Approver)'),
+    (N'approvalRoutes.generalApproverHint', N'ru', N'Общая роль Approver тоже утверждает каждый шаг этого маршрута.'),
+    (N'approvalRoutes.roleId', N'ru', N'Роль №{id}'),
+    (N'approvalRoutes.workflowModeNone', N'ru', N'Последняя версия этого шаблона работает без подачи и утверждения, поэтому маршрут не действует.'),
+    (N'approvalRoutes.inheritedHint', N'ru', N'Собственного маршрута здесь нет: действует унаследованный. Сохранение шагов создаёт собственный маршрут.'),
+    (N'approvalRoutes.stepsLabel', N'ru', N'Шаги действующего маршрута'),
+    (N'approvalRoutes.readOnly', N'ru', N'Маршрут можно просматривать, но не изменять.'),
+    (N'approvalRoutes.edit', N'ru', N'Изменить маршрут'),
+    (N'approvalRoutes.draftEmpty', N'ru', N'Собственных шагов нет: сохранение удалит собственный маршрут, и будет действовать унаследованный.'),
+    (N'approvalRoutes.draftLabel', N'ru', N'Шаги собственного маршрута'),
+    (N'approvalRoutes.removeStep', N'ru', N'Удалить шаг {step}'),
+    (N'approvalRoutes.tooLong', N'ru', N'В маршруте не больше {max} шагов.'),
+    (N'approvalRoutes.consecutiveRole', N'ru', N'Одна и та же роль не может утверждать два шага подряд.'),
+    (N'approvalRoutes.removeOwn', N'ru', N'Удалить собственный маршрут'),
+    (N'approvalRoutes.saved', N'ru', N'Маршрут сохранён: шагов {steps}. Начали с первого шага: {restarted}.'),
+    (N'approvalRoutes.removed', N'ru', N'Собственный маршрут удалён: действует унаследованный. Начали с первого шага: {restarted}.'),
+    (N'approvalRoutes.restartTitle', N'ru', N'Начать заново с первого шага поданные листы ({total})?'),
+    (N'approvalRoutes.restartText', N'ru', N'Изменение маршрута возвращает каждый поданный лист, который он охватывает, на первый шаг нового маршрута. Проекты с собственным исключением не затрагиваются.'),
+    (N'approvalRoutes.restartVisible', N'ru', N'Вам видно {visible} из {total}.'),
+    (N'approvalRoutes.restartHidden', N'ru', N'Ещё {hidden} — в проектах, которые вам не видны.'),
+    (N'approvalRoutes.restartTruncated', N'ru', N'Показаны только первые {count}.'),
+    (N'approvalRoutes.restartListLabel', N'ru', N'Листы, которые начнут с первого шага'),
+    (N'approvalRoutes.restartSheet', N'ru', N'Проект {project}, документ {document}, лист {sheet}, {period}'),
+    (N'approvalRoutes.restartSheetCopy', N'ru', N'Проект {project}, документ {document}, лист {sheet} (копия {copy}), {period}'),
+    (N'approvalRoutes.restartVerb', N'ru', N'Сохранить и начать заново'),
+    (N'approvalRoutes.noTemplates', N'ru', N'В этом проекте нет шаблонов.'),
+    (N'approvalRoutes.colTemplate', N'ru', N'Шаблон'),
+    (N'approvalRoutes.colSource', N'ru', N'Источник маршрута'),
+    (N'approvalRoutes.colSteps', N'ru', N'Шаги'),
+    (N'approvalRoutes.colActions', N'ru', N'Действия'),
+    (N'approvalRoutes.editException', N'ru', N'Изменить исключение'),
+    (N'approvalRoutes.editExceptionFor', N'ru', N'Изменить исключение для шаблона {template}'),
+    -- B155:approval-routes ── кінець секції ru ──
     (N'workflow.history', N'ru', N'История'),
     (N'workflow.historyStep', N'ru', N'шаг {step}'),
     (N'security.access', N'ru', N'Доступ'),
@@ -6351,7 +6407,59 @@ SELECT v.[Key], v.Lang, v.Val
     (N'workflow.routeAddStep', N'kz', N'Қадам қосу'),
     (N'workflow.routeAddStepHint', N'kz', N'Осы қадамда бекітетін рөл. Бір рөл екі рет кездесуі мүмкін, бірақ қатарынан екі рет емес.'),
     (N'workflow.routeSaved', N'kz', N'Маршруттағы қадамдар: {count}.'),
-    (N'workflow.routeCleared', N'kz', N'Маршрут жойылды: келісу қайтадан бір кезеңді.'),
+    (N'workflow.routeCleared', N'kz', N'Маршрут жойылды: келісу қайтадан бір кезеңді.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    -- B155:approval-routes ── kz: үлгі, жоба ерекшелігі және әдепкі келісу маршруттары (C нұсқасы); ⚠ жұмыс аудармасы, терминологқа ──
+    (N'approvalRoutes.title', N'kz', N'Келісу'),
+    (N'approvalRoutes.templateHint', N'kz', N'Жоба өз ерекшелігін белгілемесе, барлық жобаларда осы үлгінің парақтарын кім бекітеді.'),
+    (N'approvalRoutes.defaultTitle', N'kz', N'Әдепкі келісу маршруты'),
+    (N'approvalRoutes.defaultHint', N'kz', N'Үлгіде де, жобада да өз маршруты болмаған жерде қолданылады.'),
+    (N'approvalRoutes.projectTemplatesTitle', N'kz', N'Үлгілер: келісу'),
+    (N'approvalRoutes.projectTemplatesHint', N'kz', N'Осы жобаның әр үлгісі үшін қолданылатын маршрут. Мұнда белгіленген ерекшелік тек осы жобада қолданылады.'),
+    (N'approvalRoutes.source.own', N'kz', N'Өз маршруты'),
+    (N'approvalRoutes.source.template', N'kz', N'Үлгіден'),
+    (N'approvalRoutes.source.project', N'kz', N'Жобадан'),
+    (N'approvalRoutes.source.default', N'kz', N'Алаңның әдепкісі'),
+    (N'approvalRoutes.source.none', N'kz', N'Маршрут жоқ'),
+    (N'approvalRoutes.generalApproverOption', N'kz', N'{role} (жалпы Approver)'),
+    (N'approvalRoutes.generalApproverHint', N'kz', N'Жалпы Approver рөлі де осы маршруттың әр қадамын бекітеді.'),
+    (N'approvalRoutes.roleId', N'kz', N'Рөл №{id}'),
+    (N'approvalRoutes.workflowModeNone', N'kz', N'Бұл үлгінің соңғы нұсқасы тапсырусыз және бекітусіз жұмыс істейді, сондықтан маршрут қолданылмайды.'),
+    (N'approvalRoutes.inheritedHint', N'kz', N'Мұнда өз маршруты жоқ: мұраға қалған маршрут қолданылады. Қадамдарды сақтау өз маршрутын жасайды.'),
+    (N'approvalRoutes.stepsLabel', N'kz', N'Қолданыстағы маршрут қадамдары'),
+    (N'approvalRoutes.readOnly', N'kz', N'Маршрутты көруге болады, бірақ өзгертуге болмайды.'),
+    (N'approvalRoutes.edit', N'kz', N'Маршрутты өзгерту'),
+    (N'approvalRoutes.draftEmpty', N'kz', N'Өз қадамдары жоқ: сақтау өз маршрутын жояды, мұраға қалған маршрут қолданылады.'),
+    (N'approvalRoutes.draftLabel', N'kz', N'Өз маршрутының қадамдары'),
+    (N'approvalRoutes.removeStep', N'kz', N'{step}-қадамды жою'),
+    (N'approvalRoutes.tooLong', N'kz', N'Маршрутта ең көбі {max} қадам болады.'),
+    (N'approvalRoutes.consecutiveRole', N'kz', N'Бір рөл қатарынан екі қадамды бекіте алмайды.'),
+    (N'approvalRoutes.removeOwn', N'kz', N'Өз маршрутын жою'),
+    (N'approvalRoutes.saved', N'kz', N'Маршрут сақталды: қадамдар {steps}. Бірінші қадамнан қайта басталды: {restarted}.'),
+    (N'approvalRoutes.removed', N'kz', N'Өз маршруты жойылды: мұраға қалған маршрут қолданылады. Бірінші қадамнан қайта басталды: {restarted}.'),
+    (N'approvalRoutes.restartTitle', N'kz', N'Тапсырылған парақтарды ({total}) бірінші қадамнан қайта бастау керек пе?'),
+    (N'approvalRoutes.restartText', N'kz', N'Маршрутты өзгерту ол қамтитын әр тапсырылған парақты жаңа маршруттың бірінші қадамына қайтарады. Өз ерекшелігі бар жобалар өзгермейді.'),
+    (N'approvalRoutes.restartVisible', N'kz', N'Сізге {total} ішінен {visible} көрінеді.'),
+    (N'approvalRoutes.restartHidden', N'kz', N'Тағы {hidden} — сізге көрінбейтін жобаларда.'),
+    (N'approvalRoutes.restartTruncated', N'kz', N'Тек алғашқы {count} көрсетілген.'),
+    (N'approvalRoutes.restartListLabel', N'kz', N'Бірінші қадамнан басталатын парақтар'),
+    (N'approvalRoutes.restartSheet', N'kz', N'Жоба {project}, құжат {document}, парақ {sheet}, {period}'),
+    (N'approvalRoutes.restartSheetCopy', N'kz', N'Жоба {project}, құжат {document}, парақ {sheet} (көшірме {copy}), {period}'),
+    (N'approvalRoutes.restartVerb', N'kz', N'Сақтау және қайта бастау'),
+    (N'approvalRoutes.noTemplates', N'kz', N'Бұл жобада үлгілер жоқ.'),
+    (N'approvalRoutes.colTemplate', N'kz', N'Үлгі'),
+    (N'approvalRoutes.colSource', N'kz', N'Маршрут көзі'),
+    (N'approvalRoutes.colSteps', N'kz', N'Қадамдар'),
+    (N'approvalRoutes.colActions', N'kz', N'Әрекеттер'),
+    (N'approvalRoutes.editException', N'kz', N'Ерекшелікті өзгерту'),
+    (N'approvalRoutes.editExceptionFor', N'kz', N'{template} үлгісі үшін ерекшелікті өзгерту'),
+    -- B155:approval-routes ── кінець секції kz ──
     (N'workflow.history', N'kz', N'Тарих'),
     (N'workflow.historyStep', N'kz', N'{step}-қадам'),
     (N'security.access', N'kz', N'Қолжетімділік'),
