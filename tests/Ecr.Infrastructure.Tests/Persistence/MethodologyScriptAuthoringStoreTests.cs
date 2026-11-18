@@ -379,4 +379,78 @@ public sealed class MethodologyScriptAuthoringStoreTests(SqlServerFixture sql)
         Assert.Equal("// A", stored.ScriptText);
         Assert.Equal([10], stored.ScriptHash);
     }
+
+    private async Task<int> SeedDraftScriptAsync(TestDocumentBuilder builder, string code)
+    {
+        await using var seed = builder.CreateContext();
+        var method = new Methodology(EcrCode.Create(code), Name("publish race"));
+        seed.Methodologies.Add(method);
+        await seed.SaveChangesAsync();
+        var version = new MethodologyVersion(
+            method.Id, "1.0", CalculationLevel.Configuration, 1, Now, MethodologyEngine.Script);
+        version.SetScript("// v0", [1]);
+        seed.MethodologyVersions.Add(version);
+        await seed.SaveChangesAsync();
+        return version.Id;
+    }
+
+    /// <summary>
+    /// F13a, гонка «Save проти Publish», бік збереження: публікація пише <c>Status</c>, але не <c>ScriptHash</c>, тож без
+    /// <c>Status</c> у токені паралельності збереження, що прочитало ще чернетку, проходило ПІСЛЯ коміту публікації й
+    /// міняло текст опублікованої (вже матеріалізованої) версії.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Збереження_що_прочитало_чернетку_після_публікації_отримує_конфлікт_і_текст_опублікованої_не_міняється()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var versionId = await SeedDraftScriptAsync(builder, $"MSP_{Guid.NewGuid().ToString("N")[..8]}");
+
+        await using var publisher = builder.CreateContext();
+        await using var saver = builder.CreateContext();
+        var publishing = await publisher.MethodologyVersions.SingleAsync(v => v.Id == versionId);
+        var saving = await saver.MethodologyVersions.SingleAsync(v => v.Id == versionId);
+
+        publishing.Publish(1, "race", new DateOnly(2099, 3, 1), testsPassed: true, Now);
+        await publisher.SaveChangesAsync();
+
+        saving.SetScript("// B", [20]);
+        await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() => saver.SaveChangesAsync());
+
+        await using var read = builder.CreateContext();
+        var stored = await read.MethodologyVersions.AsNoTracking().SingleAsync(v => v.Id == versionId);
+        Assert.Equal(TemplateVersionStatus.Published, stored.Status);
+        Assert.Equal("// v0", stored.ScriptText);
+        Assert.Equal([1], stored.ScriptHash);
+    }
+
+    /// <summary>
+    /// F13a, бік публікації: публікація, що працювала з уже застарілим текстом (збереження встигло), не публікує —
+    /// версія лишається чернеткою з новим текстом.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Публікація_що_працювала_із_застарілим_текстом_отримує_конфлікт_і_версія_лишається_чернеткою()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var versionId = await SeedDraftScriptAsync(builder, $"MSQ_{Guid.NewGuid().ToString("N")[..8]}");
+
+        await using var publisher = builder.CreateContext();
+        await using var saver = builder.CreateContext();
+        var publishing = await publisher.MethodologyVersions.SingleAsync(v => v.Id == versionId);
+        var saving = await saver.MethodologyVersions.SingleAsync(v => v.Id == versionId);
+
+        saving.SetScript("// B", [20]);
+        await saver.SaveChangesAsync();
+
+        publishing.Publish(1, "race", new DateOnly(2099, 3, 1), testsPassed: true, Now);
+        await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() => publisher.SaveChangesAsync());
+
+        await using var read = builder.CreateContext();
+        var stored = await read.MethodologyVersions.AsNoTracking().SingleAsync(v => v.Id == versionId);
+        Assert.Equal(TemplateVersionStatus.Draft, stored.Status);
+        Assert.Equal("// B", stored.ScriptText);
+    }
 }

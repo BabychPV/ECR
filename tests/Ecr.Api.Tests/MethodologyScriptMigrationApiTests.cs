@@ -187,6 +187,90 @@ public sealed class MethodologyScriptMigrationApiTests(SqlServerFixture sql)
         Assert.Equal(baseline, await ResultsAsync(u.Worker, s).ConfigureAwait(true));
     }
 
+    /// <summary>
+    /// F13a: Formulas → Script → Formulas повертає ті самі ребра методологій і довідників. Скрипт при матеріалізації
+    /// переписує їх за своїм текстом (тут — додаткове ребро до чужої методології й ребро довідника, як дав би скрипт, що
+    /// читає чужі результати й довідники); без перебудови за формулами вони лишалися б після повернення на формули.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "MS-8.5")]
+    public async Task Switch_Formulas_Script_Formulas_повертає_ті_самі_ребра_методологій_і_довідників()
+    {
+        var s = await ArrangeAsync(209909).ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        var u = await SignInAllAsync(app, s).ConfigureAwait(true);
+
+        // Стан «до»: ребро main → library (його пише публікація формул для посилання !Dens з імпорту).
+        int foreign;
+        int registryId;
+        await using (var db = Context())
+        {
+            var other = new Methodology(EcrCode.Create("MSXO" + Guid.NewGuid().ToString("N")[..6].ToUpperInvariant()), Name("foreign"));
+            db.Methodologies.Add(other);
+            db.MethodologyDependencies.Add(new MethodologyDependency(s.MainId, s.LibraryId));
+            await db.SaveChangesAsync().ConfigureAwait(true);
+            foreign = other.Id;
+            registryId = (await db.RegistryDefs.AsNoTracking().OrderByDescending(r => r.Id).FirstAsync().ConfigureAwait(true)).Id;
+        }
+
+        var before = await EdgesAsync(s, foreign, registryId).ConfigureAwait(true);
+        Assert.Equal(["dep:main->library"], before);
+
+        var main = await ConvertAsync(s.MainVersionId).ConfigureAwait(true);
+        var library = await ConvertAsync(s.LibraryVersionId).ConfigureAwait(true);
+        var package = new
+        {
+            format = "ecr-methodology-script-package",
+            formatVersion = 1,
+            entries = new object[]
+            {
+                new { methodologyCode = s.MainCode, version = "V1", effectiveFrom = "2099-01-01", text = main.Text, sourceFingerprint = main.Fingerprint },
+                new { methodologyCode = s.LibraryCode, version = "V1", effectiveFrom = "2099-01-01", text = library.Text, sourceFingerprint = library.Fingerprint },
+            },
+        };
+        await PostAsync(app, u.Publisher, Url + "/apply?dryRun=false", package, HttpStatusCode.OK).ConfigureAwait(true);
+        await PostAsync(
+            app, u.Publisher, Url + "/switch",
+            new { versionIds = new[] { s.MainVersionId, s.LibraryVersionId }, engine = "Script", reason = "туди" },
+            HttpStatusCode.OK).ConfigureAwait(true);
+
+        // Скрипт «читає» чужу методологію й довідник: такі ребра лягли б при його матеріалізації.
+        await using (var db = Context())
+        {
+            db.MethodologyDependencies.Add(new MethodologyDependency(s.MainId, foreign));
+            db.RegistryUses.Add(RegistryUse.ForMethodologyFormula(s.MainVersionId, "script", registryId, fieldPath: null));
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        Assert.Equal(3, (await EdgesAsync(s, foreign, registryId).ConfigureAwait(true)).Count);
+
+        await PostAsync(
+            app, u.Publisher, Url + "/switch",
+            new { versionIds = new[] { s.MainVersionId, s.LibraryVersionId }, engine = "Formulas", reason = "назад" },
+            HttpStatusCode.OK).ConfigureAwait(true);
+
+        Assert.Equal(before, await EdgesAsync(s, foreign, registryId).ConfigureAwait(true));
+    }
+
+    private async Task<List<string>> EdgesAsync(Stand s, int foreign, int registryId)
+    {
+        await using var db = Context();
+        var deps = await db.MethodologyDependencies.AsNoTracking()
+            .Where(d => d.FromMethodologyId == s.MainId || d.FromMethodologyId == s.LibraryId).ToListAsync().ConfigureAwait(false);
+        var uses = await db.RegistryUses.AsNoTracking()
+            .Where(r => r.SourceKind == RegistryUse.MethodologyVersionSource
+                        && (r.SourceId == s.MainVersionId || r.SourceId == s.LibraryVersionId))
+            .ToListAsync().ConfigureAwait(false);
+        string Name(int id) => id == s.MainId ? "main" : id == s.LibraryId ? "library" : id == foreign ? "foreign" : id.ToString(CultureInfo.InvariantCulture);
+        return
+        [
+            .. deps.Select(d => $"dep:{Name(d.FromMethodologyId)}->{Name(d.ToMethodologyId)}"),
+            .. uses.Select(r => $"use:{(r.SourceId == s.MainVersionId ? "main" : "library")}:{r.FormulaCode}->{(r.RegistryDefId == registryId ? "registry" : r.RegistryDefId.ToString(CultureInfo.InvariantCulture))}"),
+        ];
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait(TestCategories.Category, TestCategories.Integration)]

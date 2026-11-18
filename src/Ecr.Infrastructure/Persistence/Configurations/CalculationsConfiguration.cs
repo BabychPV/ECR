@@ -148,6 +148,12 @@ public sealed class MethodologyVersionConfiguration : IEntityTypeConfiguration<M
         // одним прочитаним хешем обидва її проходили, і другий мовчки затирав перший. З токеном UPDATE іде з
         // `WHERE ScriptHash = <прочитаний>` (для ще порожнього — `IS NULL`): другий отримує 409 з одиниці роботи.
         builder.Property(x => x.ScriptHash).HasColumnType("varbinary(32)").IsConcurrencyToken();
+
+        // ⛔ Токен паралельності (F13a): гонка «Save проти Publish». Публікація пише `Status`, але не `ScriptHash`, тож
+        // `UPDATE ... WHERE ScriptHash = <прочитаний>` збереження, що чекало на її блокування, проходило й після коміту
+        // публікації: текст опублікованої версії розходився з матеріалізованим. З `Status` у `WHERE` збереження чернетки,
+        // яку встигли опублікувати, отримує 409 з одиниці роботи, а публікація, що компілювала застарілий текст, — теж.
+        builder.Property(x => x.Status).IsConcurrencyToken();
         builder.Property(x => x.CreatedAt).HasColumnType("datetime2(3)").IsRequired();
         builder.Property(x => x.PublishedAt).HasColumnType("datetime2(3)");
 

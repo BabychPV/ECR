@@ -49,6 +49,22 @@ public sealed class ScriptPublishChecks(
                     ["version"] = version.Version,
                 });
 
+        // ⛔ F13a: публікується РІВНО той текст, який ця одиниця роботи прочитала разом із версією (токен паралельності
+        // `ScriptHash` стоїть на тій самій сутності). Збереження, що вклинилося між читанням версії й читанням тексту,
+        // дало б матеріалізацію з одного тексту й публікацію з іншого: відмова тут, а не мовчазне розходження.
+        if (script.Hash is not null && !script.Hash.AsSpan().SequenceEqual(version.ScriptHash))
+        {
+            throw new BusinessRuleException(
+                "ECR-CALC-0409",
+                $"Скрипт версії {version.Version} змінено під час публікації: повторіть публікацію.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0409.scriptChanged",
+                    ["version"] = version.Version,
+                    ["hash"] = ScriptAnalyzer.Hex(script.Hash),
+                });
+        }
+
         var isLibrary = methodology.Kind == MethodologyKind.Library;
         var compilation = await compiler
             .CompileAsync(script.Text, methodology.Code, version.NumericMode, isLibrary, effectiveFrom, ct)
