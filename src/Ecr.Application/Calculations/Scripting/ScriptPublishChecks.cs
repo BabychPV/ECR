@@ -67,7 +67,7 @@ public sealed class ScriptPublishChecks(
 
         var isLibrary = methodology.Kind == MethodologyKind.Library;
         var compilation = await compiler
-            .CompileAsync(script.Text, methodology.Code, version.NumericMode, isLibrary, effectiveFrom, ct)
+            .CompileForVersionAsync(script.Text, methodology, version, effectiveFrom, ct)
             .ConfigureAwait(false);
 
         var problems = compilation.Diagnostics.Select(ToProblem).ToList();

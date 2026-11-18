@@ -4142,7 +4142,7 @@ public interface IScriptPreviewRunner
 | `GET …/script` | `Calculation.View` | → `MethodologyScriptDto` | `404` |
 | `PUT …/script` | `Calculation.EditFormula` | `{ text, expectedHash? }` → `MethodologyScriptDto` | `404`; `409 ECR-CALC-0409` (`scriptNotEditable`, `scriptChanged`); `422 ECR-CALC-0422` (`scriptEmpty`, `scriptTooLarge`) |
 | `POST …/script/validate` | `Calculation.View` | `{ text }` → `ScriptValidationDto { diagnostics[], outline }` | `404`; `422 scriptTooLarge` |
-| `POST …/script/preview` | `Calculation.View` + доступ до документа | `{ text?, documentId, periodKey, tableInstanceId?, maxRows? }` → `ScriptPreviewDto { tables[], diagnostics[] }` | `403 ECR-AUTH-0403` (`scriptPreviewRestricted`); `404` (версія чи документ); `422 ECR-CALC-0422` (`simulatePeriodInvalid`, `scriptEmpty`, `scriptTooLarge`, `scriptPreviewUnavailable`) |
+| `POST …/script/preview` | `Calculation.View` + доступ до документа | `{ text?, documentId, periodKey, tableInstanceId?, maxRows? }` → `ScriptPreviewDto { tables[], diagnostics[] }` | `403 ECR-AUTH-0403` (`scriptPreviewRestricted`); `404` (версія чи документ); `422 ECR-CALC-0422` (`simulatePeriodInvalid`, `scriptEmpty`, `scriptTooLarge`, `scriptPreviewUnavailable`, `scriptPreviewModuleLevel` — версія рівня Module) |
 | `POST …/script/format-const` | `Calculation.View` | `{ text }` (літерал константи) → `FormatConstDto { text?, kind?, diagnostics[] }` | `404`; `422 scriptTooLarge` |
 
 - `MethodologyScriptDto`: `engine` (`Script`/`Formulas`), `text` (порожній, якщо тексту ще немає), `hash` (SHA-256

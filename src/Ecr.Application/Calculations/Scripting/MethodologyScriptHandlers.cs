@@ -49,9 +49,7 @@ public sealed class ScriptAnalyzer(ScriptSourceCompiler compiler, ScriptEnvironm
 
         var onDate = version.EffectiveFrom ?? DateOnly.FromDateTime(clock.UtcNow);
         var compilation = await compiler
-            .CompileAsync(
-                text, methodology.Code, version.NumericMode, methodology.Kind == MethodologyKind.Library, onDate, ct,
-                shadowScripts, IsModuleLevel(methodology, version))
+            .CompileForVersionAsync(text, methodology, version, onDate, ct, shadowScripts)
             .ConfigureAwait(false);
 
         var diagnostics = new List<ScriptDiagnostic>(compilation.Diagnostics);
@@ -68,18 +66,11 @@ public sealed class ScriptAnalyzer(ScriptSourceCompiler compiler, ScriptEnvironm
         return new ScriptAnalysis(compilation, environment, sorted, ScriptOutlineDto.From(compilation.Script));
     }
 
-    /// <summary>
-    /// Версія рівня <c>Module</c> (HSE400): її скрипт без речення <c>rows</c> (набір аргументів складає модуль). Бібліотека
-    /// ніколи не є модульною.
-    /// </summary>
+    /// <summary>Версія рівня <c>Module</c>; див. <see cref="ScriptSourceCompiler.IsModuleLevel"/>.</summary>
     /// <param name="methodology">Методологія-власник.</param>
     /// <param name="version">Версія.</param>
     public static bool IsModuleLevel(Methodology methodology, MethodologyVersion version)
-    {
-        ArgumentNullException.ThrowIfNull(methodology);
-        ArgumentNullException.ThrowIfNull(version);
-        return methodology.Kind != MethodologyKind.Library && version.Level == CalculationLevel.Module;
-    }
+        => ScriptSourceCompiler.IsModuleLevel(methodology, version);
 
     /// <summary>
     /// Найбільший текст скрипта, знаків. Скрипт компілюється кілька разів за запит (імпорти, перевірки оточення), тож
@@ -420,6 +411,16 @@ public sealed class PreviewMethodologyScriptHandler(
         if (analysis.Diagnostics.Count > 0)
         {
             return new ScriptPreviewDto([], diagnostics);
+        }
+
+        // Module (HSE400): у скрипта немає `rows`, а набір аргументів складає модуль «місяці в колонках»: перегляд за рядками
+        // нічого б не показав. Зрозуміла відмова замість порожньої відповіді (після діагностик: помилки тексту видно й тут).
+        if (ScriptAnalyzer.IsModuleLevel(methodology, version))
+        {
+            throw new BusinessRuleException(
+                "ECR-CALC-0422",
+                "Перегляд скрипта на документі недоступний для версії рівня Module: набір аргументів складає модуль розрахунку.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-CALC-0422.scriptPreviewModuleLevel" });
         }
 
         // Рушій перегляду підключає проєкт розрахунків; без нього перегляд недоступний, а не «порожній».

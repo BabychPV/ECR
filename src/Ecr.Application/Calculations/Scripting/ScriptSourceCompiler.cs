@@ -1,6 +1,7 @@
 // src/Ecr.Application/Calculations/Scripting/ScriptSourceCompiler.cs
 using System.Globalization;
 using Ecr.Application.Ports;
+using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Enums;
 using Ecr.Scripting;
 
@@ -20,6 +21,46 @@ public sealed class ScriptSourceCompiler(IMethodologyDraftStore drafts, IMethodo
 {
     /// <summary>Найбільша глибина вкладення імпортів (разом із самим скриптом).</summary>
     public const int MaxImportDepth = 8;
+
+    /// <summary>
+    /// ЄДИНА точка компіляції тексту ВЕРСІЇ: опції (бібліотека, рівень <c>Module</c>, режим арифметики) беруться з самої
+    /// версії, тож нове місце не може забути ознаку <c>IsModuleLevel</c> (її відсутність дає хибний <c>missingRows</c>).
+    /// Усі шляхи авторингу (<c>GET/PUT script</c>, <c>validate</c>, <c>preview</c>, публікація, перенесення) йдуть сюди.
+    /// </summary>
+    /// <param name="text">Текст скрипта.</param>
+    /// <param name="methodology">Методологія-власник.</param>
+    /// <param name="version">Версія.</param>
+    /// <param name="onDate">Дата, на яку добираються версії бібліотек.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <param name="shadowScripts">Перенесення: див. <see cref="CompileAsync"/>.</param>
+    public Task<ScriptCompilation> CompileForVersionAsync(
+        string text,
+        Methodology methodology,
+        MethodologyVersion version,
+        DateOnly onDate,
+        CancellationToken ct,
+        IReadOnlyDictionary<int, MethodologyScript>? shadowScripts = null)
+    {
+        ArgumentNullException.ThrowIfNull(methodology);
+        ArgumentNullException.ThrowIfNull(version);
+
+        return CompileAsync(
+            text, methodology.Code, version.NumericMode, methodology.Kind == MethodologyKind.Library, onDate, ct,
+            shadowScripts, IsModuleLevel(methodology, version));
+    }
+
+    /// <summary>
+    /// Версія рівня <c>Module</c> (HSE400): її скрипт без речення <c>rows</c> (набір аргументів складає модуль). Бібліотека
+    /// ніколи не є модульною.
+    /// </summary>
+    /// <param name="methodology">Методологія-власник.</param>
+    /// <param name="version">Версія.</param>
+    public static bool IsModuleLevel(Methodology methodology, MethodologyVersion version)
+    {
+        ArgumentNullException.ThrowIfNull(methodology);
+        ArgumentNullException.ThrowIfNull(version);
+        return methodology.Kind != MethodologyKind.Library && version.Level == CalculationLevel.Module;
+    }
 
     /// <summary>Компілює текст версії.</summary>
     /// <param name="text">Текст скрипта.</param>
