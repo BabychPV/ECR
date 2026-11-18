@@ -68,6 +68,32 @@ public sealed class ScriptAnalyzer(ScriptSourceCompiler compiler, ScriptEnvironm
         return new ScriptAnalysis(compilation, environment, sorted, ScriptOutlineDto.From(compilation.Script));
     }
 
+    /// <summary>
+    /// Найбільший текст скрипта, знаків. Скрипт компілюється кілька разів за запит (імпорти, перевірки оточення), тож
+    /// без межі один запит із десятками мегабайтів тримав би процесор і пам'ять; реальні методології — десятки КБ.
+    /// </summary>
+    public const int MaxTextLength = 1_000_000;
+
+    /// <summary>Відмовляє, якщо текст довший за <see cref="MaxTextLength"/>.</summary>
+    /// <param name="text">Текст скрипта (чи літерал константи).</param>
+    /// <exception cref="BusinessRuleException"><c>ECR-CALC-0422</c> <c>scriptTooLarge</c>.</exception>
+    public static void RequireTextSize(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+
+        if (text.Length > MaxTextLength)
+        {
+            throw new BusinessRuleException(
+                "ECR-CALC-0422",
+                $"Текст скрипта завеликий: понад {MaxTextLength.ToString(CultureInfo.InvariantCulture)} знаків.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.scriptTooLarge",
+                    ["limit"] = MaxTextLength.ToString(CultureInfo.InvariantCulture),
+                });
+        }
+    }
+
     /// <summary>Hex малими літерами; порожній рядок — хешу немає.</summary>
     /// <param name="hash">Хеш.</param>
     public static string Hex(byte[]? hash) => hash is null ? string.Empty : Convert.ToHexStringLower(hash);
@@ -167,6 +193,7 @@ public sealed class SaveMethodologyScriptHandler(
     {
         await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
         ArgumentNullException.ThrowIfNull(text);
+        ScriptAnalyzer.RequireTextSize(text);
 
         var (methodology, version) = await ScriptHandlerSupport.LoadAsync(drafts, methodologyVersionId, ct).ConfigureAwait(false);
 
@@ -252,6 +279,7 @@ public sealed class ValidateMethodologyScriptHandler(
     {
         await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
         ArgumentNullException.ThrowIfNull(text);
+        ScriptAnalyzer.RequireTextSize(text);
 
         var (methodology, version) = await ScriptHandlerSupport.LoadAsync(drafts, methodologyVersionId, ct).ConfigureAwait(false);
         var analysis = await analyzer.AnalyzeAsync(text, methodology, version, ct).ConfigureAwait(false);
@@ -274,6 +302,7 @@ public sealed class FormatScriptConstHandler(IAccessDecisionService access, ICur
     {
         await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
         ArgumentNullException.ThrowIfNull(literal);
+        ScriptAnalyzer.RequireTextSize(literal);
 
         // Літерал — на власному рядку після службового заголовка: номери рядків діагностик зсуваються рівно на один,
         // колонки лишаються тими, що у вхідному тексті.
@@ -352,6 +381,11 @@ public sealed class PreviewMethodologyScriptHandler(
                     ["messageKey"] = "err.ECR-CALC-0422.simulatePeriodInvalid",
                     ["periodKey"] = request.PeriodKey.ToString(CultureInfo.InvariantCulture),
                 });
+        }
+
+        if (request.Text is not null)
+        {
+            ScriptAnalyzer.RequireTextSize(request.Text);
         }
 
         var (methodology, version) = await ScriptHandlerSupport.LoadAsync(drafts, methodologyVersionId, ct).ConfigureAwait(false);

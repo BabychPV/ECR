@@ -143,7 +143,11 @@ public sealed class MethodologyVersionConfiguration : IEntityTypeConfiguration<M
                .HasDefaultValue(Domain.Enums.MethodologyEngine.Formulas)
                .ValueGeneratedNever();
         builder.Property(x => x.ScriptText).HasColumnType("nvarchar(max)");
-        builder.Property(x => x.ScriptHash).HasColumnType("varbinary(32)");
+
+        // ⛔ Токен паралельності (F13): звірка `expectedHash` в обробнику — «прочитав, потім записав», тож два редактори з
+        // одним прочитаним хешем обидва її проходили, і другий мовчки затирав перший. З токеном UPDATE іде з
+        // `WHERE ScriptHash = <прочитаний>` (для ще порожнього — `IS NULL`): другий отримує 409 з одиниці роботи.
+        builder.Property(x => x.ScriptHash).HasColumnType("varbinary(32)").IsConcurrencyToken();
         builder.Property(x => x.CreatedAt).HasColumnType("datetime2(3)").IsRequired();
         builder.Property(x => x.PublishedAt).HasColumnType("datetime2(3)");
 

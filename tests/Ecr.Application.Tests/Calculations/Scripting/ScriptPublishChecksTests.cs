@@ -279,4 +279,24 @@ public sealed class ScriptPublishChecksTests
             [ScriptDiagnosticCodes.LibraryNotScript, ScriptDiagnosticCodes.UnknownImport],
             result.Diagnostics.Select(d => d.Code));
     }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "MS-T3.1")]
+    [InlineData(7, false)]
+    [InlineData(8, true)]
+    public async Task Межа_глибини_імпортів_власник_і_сім_бібліотек_ще_можна_а_вісім_уже_importCycle(int count, bool cycle)
+    {
+        var libs = Enumerable.Range(1, count)
+            .Select(i => ($"L{i}", 950 + i, i < count ? $"import L{i + 1};\nconst c = 1;" : "const c = 1;", MethodologyEngine.Script))
+            .ToArray();
+        var compiler = CompilerWithLibraries(libs);
+
+        var result = await compiler.CompileAsync(
+            "import L1;\nrows from T1;\noutput O : t = 1;", "OWNER", NumericMode.Strict, false, From, default);
+
+        Assert.Equal(
+            cycle ? [ScriptDiagnosticCodes.ImportCycle] : Array.Empty<string>(),
+            result.Diagnostics.Select(d => d.Code));
+    }
 }

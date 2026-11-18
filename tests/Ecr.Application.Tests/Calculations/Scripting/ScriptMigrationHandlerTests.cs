@@ -417,4 +417,19 @@ public sealed class ScriptMigrationHandlerTests
         output.SetPerSubstance(perSubstance);
         return output;
     }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "MS-8.5")]
+    public async Task Apply_текст_понад_ліміт_відмова_по_версії_без_запису_тіні()
+    {
+        var huge = new string('x', ScriptAnalyzer.MaxTextLength + 1);
+
+        var result = await Apply().HandleAsync(Package(text: huge), dryRun: false, CancellationToken.None);
+
+        var entry = Assert.Single(result.Entries);
+        Assert.Equal(("refused", "scriptMigration.refused.textInvalid"), (entry.Status, entry.Reason));
+        Assert.Null(_alphaVersion.ScriptText);
+        await _audit.DidNotReceiveWithAnyArgs().WritePublicationEventAsync(default!, default);
+    }
 }
