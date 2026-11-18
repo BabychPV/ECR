@@ -7,7 +7,6 @@ import { Alert, Button, Code, Group, Skeleton, Stack, Tabs, Text } from '@mantin
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ServiceStatePage } from '@/app/ServiceStatePage';
 import { problemText } from '@/shared/ui/problemText';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { apiFetch, EcrApiError } from '@/api/client';
@@ -33,7 +32,6 @@ import { useDocumentLogActions } from '@/features/documents/DocumentLogActions';
 import { useStaleResultsReminderHost } from '@/features/documents/useStaleResultsReminder';
 import { useVersionMigrationAction } from '@/features/documents/VersionMigrationAction';
 import { useEditAssignmentsAction } from '@/features/editAssignments/EditAssignmentsAction';
-import { DocumentLockBanner } from '@/features/documents/DocumentLockBanner';
 import { documentLockOf, hasLockedSheet, locksDataActions } from '@/features/documents/documentLock';
 import { useDocumentPeriodReopen } from '@/features/documents/periodReopen/useDocumentPeriodReopen';
 import { DocumentProgress } from '@/features/documents/DocumentProgress';
@@ -188,6 +186,16 @@ const ProjectRecalcBannerSlot = lazy(async () => ({
 // PM-11: «З дозволу» + «Оновити з дозволу» — окремий чанк (бюджет маршруту D-132).
 const PermitRefreshStrip = lazy(async () => ({
   default: (await import('@/features/permits/bindings/PermitRefreshStrip')).PermitRefreshStrip,
+}));
+
+// D-132 (batch-1118-1, bundle budget 250.2 KB > 250): the lock banner shows on this page only WITHOUT an active sheet
+// (with a sheet the action bar draws it) — a rare path, so its own chunk instead of the route's static graph.
+const DocumentLockBanner = lazy(async () => ({
+  default: (await import('@/features/documents/DocumentLockBanner')).DocumentLockBanner,
+}));
+// The same D-132 fix: the service page is only for a missing document (404) - its own chunk.
+const ServiceStatePage = lazy(async () => ({
+  default: (await import('@/app/ServiceStatePage')).ServiceStatePage,
 }));
 
 // Feature (j) Ship 2 (jh2/jh3): rows to split after a mid-month header permit change — its own chunk.
@@ -1040,7 +1048,9 @@ export function DocumentPage(): JSX.Element {
           будь-якої сітки: сірі комірки без пояснення читаються як збій.
           ✎ UI-26: за наявного аркуша банер малює панель дій (з контекстом). */}
       {active === undefined && (
-        <DocumentLockBanner lock={lock} periodKey={periodKey} periodAction={periodReopen.lockAction} yearLayout={yearLayout} />
+        <Suspense fallback={null}>
+          <DocumentLockBanner lock={lock} periodKey={periodKey} periodAction={periodReopen.lockAction} yearLayout={yearLayout} />
+        </Suspense>
       )}
 
       {periodReopen.banner}
@@ -1428,18 +1438,20 @@ function DocumentNotFound({ error }: { readonly error: EcrApiError }): JSX.Eleme
   const shown = problemText(error);
 
   return (
-    <ServiceStatePage icon="route" title={shown.title}>
-      {shown.detail !== null && (
-        <Text size="sm" c="dimmed" ta="center">
-          {shown.detail}
+    <Suspense fallback={null}>
+      <ServiceStatePage icon="route" title={shown.title}>
+        {shown.detail !== null && (
+          <Text size="sm" c="dimmed" ta="center">
+            {shown.detail}
+          </Text>
+        )}
+        <Text size="xs">
+          <Code>{error.problem.errorCode}</Code> <Code>{error.problem.correlationId}</Code>
         </Text>
-      )}
-      <Text size="xs">
-        <Code>{error.problem.errorCode}</Code> <Code>{error.problem.correlationId}</Code>
-      </Text>
-      <Button component={Link} to="/">
-        {t('nav.goToDocuments')}
-      </Button>
-    </ServiceStatePage>
+        <Button component={Link} to="/">
+          {t('nav.goToDocuments')}
+        </Button>
+      </ServiceStatePage>
+    </Suspense>
   );
 }
