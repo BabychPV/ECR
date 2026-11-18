@@ -1,6 +1,6 @@
 import { useImperativeHandle, type Ref } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, screen, waitFor } from '@testing-library/react';
+import { act, configure, fireEvent, screen, waitFor } from '@testing-library/react';
 import { Route, Routes } from 'react-router-dom';
 import { MethodologyScriptPage } from '@/pages/admin/MethodologyScriptPage';
 import { scriptKeys } from '@/features/methodologyScript/scriptQueryKeys';
@@ -158,6 +158,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
   cursorAt = 0;
 });
+
+// ⚠ Сторінка тягне ліниві модулі й кілька запитів: під навантаженням (повний набір, Windows) типова секунда `waitFor`/`findBy`
+// замала — тест падав лише в повному прогоні, в ізоляції проходив. Умови очікування ті самі, довший лише строк.
+configure({ asyncUtilTimeout: 10_000 });
 
 describe('MethodologyScriptPage', { timeout: 30_000 }, () => {
   it('«Перезавантажити» за ідентичних даних повертає серверний текст і не лишає прапорця перезапису', async () => {
