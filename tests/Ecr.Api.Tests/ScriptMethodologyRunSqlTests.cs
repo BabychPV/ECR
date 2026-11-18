@@ -153,6 +153,207 @@ public sealed class ScriptMethodologyRunSqlTests(SqlServerFixture sql)
         Assert.Equal([a.MethodologyId, b.MethodologyBId], (await store.GetReaderClosureAsync([a.MethodologyId], default)).Order().ToArray());
     }
 
+    /// <summary>
+    /// MS (рецензія F13, D): перегляд скрипта (<c>ScriptPreviewRunner</c>) і справжній прогін після публікації дають ті самі
+    /// числа — для джерела й для читача його результату (читач у перегляді бере актуальні результати прогону).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Перегляд_дає_ті_самі_числа_що_прогін_після_публікації_для_джерела_і_читача()
+    {
+        var f = await ArrangeAsync(209904);
+        await InsertValuesAsync(f, ("gas", 10m), ("gas", null), ("oil", 7m));
+        var textA = $"rows from {f.TableCode} where row.{f.C1} == \"gas\";\noutput Y: kg = row.{f.C2} * 2;";
+        var a = await PublishScriptAsync(f, "A", textA, [("Y", f.OutAColumnId)]);
+        var b = await ArrangeReaderAsync(f, a);
+        string textB;
+        await using (var db = f.Builder.CreateContext())
+        {
+            textB = $"rows from {b.TableCode};\ntable Src = {f.TableCode};\noutput Z: kg = Sum(Src.{await ColumnCodeAsync(db, f.OutAColumnId)});";
+        }
+
+        await RunJobAsync(f.Document, sheetDefId: null);
+        var real = await ShapeAsync(f);
+        Assert.Equal(["Y|20", "Z|20"], real);
+
+        var previewA = await PreviewAsync(f, a.VersionId, textA);
+        var previewB = await PreviewAsync(f, b.VersionBId, textB);
+
+        Assert.Equal(real.Where(r => r.StartsWith("Y|", StringComparison.Ordinal)), OutputsOf(previewA));
+        Assert.Equal(real.Where(r => r.StartsWith("Z|", StringComparison.Ordinal)), OutputsOf(previewB));
+
+        // Рядок без числа й невибраний рядок — ті самі причини, що пише прогін (проблеми рядків).
+        var rowsA = Assert.Single(previewA.Tables).Rows;
+        Assert.Equal("missingInputs", rowsA.Single(r => r.RowNumber == 2).Issue);
+        Assert.Equal("notSelected", rowsA.Single(r => r.RowNumber == 3).State);
+
+        // Правка входу: перегляд бачить її одразу, і ті самі числа з'являються після перерахунку.
+        await SetValueAsync(f, rowIndex: 0, 30m);
+        var editedA = await PreviewAsync(f, a.VersionId, textA);
+        await RunJobAsync(f.Document, sheetDefId: f.Document.SheetDefId);
+        Assert.Equal(["Y|60", "Z|60"], await ShapeAsync(f));
+        Assert.Equal(["Y|60"], OutputsOf(editedA));
+        Assert.Equal(["Z|60"], OutputsOf(await PreviewAsync(f, b.VersionBId, textB)));
+    }
+
+    /// <summary>
+    /// MS (рецензія F13, A): джерело в ЦЬОМУ прогоні нічого не порахувало (вхід зник) — читач не бере числа ПОПЕРЕДНЬОГО
+    /// актуального прогону, бо в сітці після прогону джерело теж порожнє.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Читач_не_бачить_числа_попереднього_прогону_якщо_джерело_в_цьому_прогоні_нічого_не_дало()
+    {
+        var f = await ArrangeAsync(209905);
+        await InsertValuesAsync(f, ("gas", 10m), ("oil", 7m));
+        var a = await PublishScriptAsync(
+            f, "A",
+            $"rows from {f.TableCode} where row.{f.C1} == \"gas\";\noutput Y: kg = row.{f.C2} * 2;",
+            [("Y", f.OutAColumnId)]);
+        await ArrangeReaderAsync(f, a);
+
+        await RunJobAsync(f.Document, sheetDefId: null);
+        Assert.Equal(["Y|20", "Z|20"], await ShapeAsync(f));
+
+        // Вхід джерела зник: A нічого не дає. Без Y читачеві читати нічого — Z не може лишитись 20.
+        await using (var db = f.Builder.CreateContext())
+        {
+            var rowId = f.Document.RowIds[0];
+            var column = f.Document.ColumnDefIds[1];
+            await db.CellValues
+                .Where(c => c.PeriodKeyValue == f.Document.PeriodKey.Value && c.TableRowId == rowId && c.ColumnDefId == column)
+                .ExecuteDeleteAsync();
+        }
+
+        await RunJobAsync(f.Document, sheetDefId: null);
+
+        Assert.DoesNotContain(await ShapeAsync(f), s => s.StartsWith("Y|", StringComparison.Ordinal));
+        Assert.DoesNotContain("Z|20", await ShapeAsync(f));
+    }
+
+    /// <summary>
+    /// MS (рецензія F13, A): дві методології читають результати одна одної по колу (з'явилося пізнішою прив'язкою) —
+    /// прогін відмовляє <c>ECR-CALC-0422 scriptResultCycle</c>, нічого не записавши.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Цикл_читання_результатів_між_методологіями_відмовляє_прогін_і_нічого_не_пише()
+    {
+        var f = await ArrangeAsync(209906);
+        await InsertValuesAsync(f, ("gas", 10m));
+        var second = await CreateSecondTableAsync(f);
+        string outA;
+        await using (var db = f.Builder.CreateContext())
+        {
+            outA = await ColumnCodeAsync(db, f.OutAColumnId);
+        }
+
+        var outB = await ColumnCodeByIdAsync(f, second.OutBColumnId);
+        await PublishScriptAsync(
+            f, "A", $"rows from {f.TableCode};\ntable Src = {second.TableCode};\noutput Y: kg = Sum(Src.{outB});",
+            [("Y", f.OutAColumnId)]);
+        await PublishScriptAsync(
+            f, "B", $"rows from {second.TableCode};\ntable Src = {f.TableCode};\noutput Z: kg = Sum(Src.{outA});",
+            [("Z", second.OutBColumnId)], tableDefId: second.TableDefId);
+
+        var error = await Assert.ThrowsAsync<Ecr.Domain.Abstractions.DomainException>(
+            () => RunJobAsync(f.Document, sheetDefId: null));
+
+        Assert.Equal("ECR-CALC-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-CALC-0422.scriptResultCycle", error.Details!["messageKey"]);
+        Assert.Empty(await ShapeAsync(f));
+    }
+
+    private async Task<string> ColumnCodeByIdAsync(Fixture f, int columnId)
+    {
+        await using var db = f.Builder.CreateContext();
+        return await ColumnCodeAsync(db, columnId);
+    }
+
+    /// <summary>
+    /// MS (рецензія F13, A): читач результатів ЧИТАЧА (C → B → A) без власного читання таблиць перераховується, коли
+    /// перераховується аркуш-джерело A: замикання за ребрами <c>calc.MethodologyDependency</c> транзитивне.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Правка_входу_джерела_оновлює_читача_читача_через_транзитивне_замикання_ребер()
+    {
+        var f = await ArrangeAsync(209907);
+        await InsertValuesAsync(f, ("gas", 10m));
+        var a = await PublishScriptAsync(
+            f, "A", $"rows from {f.TableCode};\noutput Y: kg = row.{f.C2} * 2;", [("Y", f.OutAColumnId)]);
+        var b = await ArrangeReaderAsync(f, a);
+        var c = await CreateSecondTableAsync(f, "C");
+        var outB = await ColumnCodeByIdAsync(f, b.OutBColumnId);
+        var (methodologyCId, _) = await PublishScriptAsync(
+            f, "C", $"rows from {c.TableCode};\ntable Src = {b.TableCode};\noutput W: kg = Sum(Src.{outB});",
+            [("W", c.OutBColumnId)], tableDefId: c.TableDefId);
+
+        // Лише ребро C → B (читання таблиць у C немає): таблицю-джерело C не читає, його тягне замикання.
+        await using (var db = f.Builder.CreateContext())
+        {
+            db.MethodologyDependencies.Add(new MethodologyDependency(methodologyCId, b.MethodologyBId));
+            await db.SaveChangesAsync();
+        }
+
+        await RunJobAsync(f.Document, sheetDefId: null);
+        Assert.Equal(["W|20", "Y|20", "Z|20"], await ShapeAsync(f));
+
+        await SetValueAsync(f, rowIndex: 0, 30m);
+        await RunJobAsync(f.Document, sheetDefId: f.Document.SheetDefId);
+
+        Assert.Equal(["W|60", "Y|60", "Z|60"], await ShapeAsync(f));
+    }
+
+    /// <summary>
+    /// MS (рецензія F13, C): C-5 — значення колонки за замовчуванням для незаповненої комірки діє й на скриптовому шляху
+    /// (прогін і перегляд), як у формул і правил: рядок без числа не стає "без входів", а бере дефолт колонки.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Дефолт_колонки_C5_діє_на_скриптовому_шляху_у_прогоні_і_в_перегляді()
+    {
+        var f = await ArrangeAsync(209908);
+        await InsertValuesAsync(f, ("gas", 10m), ("gas", null));
+        await using (var db = f.Builder.CreateContext())
+        {
+            var column = await db.ColumnDefs.SingleAsync(c => c.Id == f.Document.ColumnDefIds[1]);
+            column.SetPresentation("4", null, null);
+            await db.SaveChangesAsync();
+        }
+
+        var text = $"rows from {f.TableCode} where row.{f.C1} == \"gas\";\noutput Y: kg = row.{f.C2} * 2;";
+        var a = await PublishScriptAsync(f, "A", text, [("Y", f.OutAColumnId)]);
+
+        await RunJobAsync(f.Document, sheetDefId: null);
+
+        Assert.Equal(["Y|20", "Y|8"], await ShapeAsync(f));
+        Assert.Equal(["Y|20", "Y|8"], OutputsOf(await PreviewAsync(f, a.VersionId, text)));
+    }
+
+    private async Task<ScriptPreviewResult> PreviewAsync(Fixture f, int versionId, string text)
+    {
+        await using var provider = Provider();
+        await using var scope = provider.CreateAsyncScope();
+        return await scope.ServiceProvider.GetRequiredService<IScriptPreviewRunner>().RunAsync(
+            new ScriptPreviewRequest(
+                versionId, text, f.Document.DocumentId, f.Document.PeriodKey.Value, TableInstanceId: null, MaxRows: 50),
+            CancellationToken.None);
+    }
+
+    private static List<string> OutputsOf(ScriptPreviewResult preview)
+        => [.. preview.Tables
+            .SelectMany(t => t.Rows)
+            .SelectMany(r => r.Values)
+            .Where(v => v.Kind == "output" && v.Error is null)
+            .Select(v => $"{v.Name}|{decimal.Parse(v.Text, System.Globalization.CultureInfo.InvariantCulture):0.####}")
+            .Order(StringComparer.Ordinal)];
+
     // ───── стенд ─────
 
     private async Task<Fixture> ArrangeAsync(int periodKey)
@@ -245,17 +446,34 @@ public sealed class ScriptMethodologyRunSqlTests(SqlServerFixture sql)
     /// <summary>Другий аркуш із таблицею й методологією-читачем B: <c>table Src = A; Sum(Src.OUTA)</c>.</summary>
     private async Task<Second> ArrangeReaderAsync(Fixture f, (int MethodologyId, int VersionId) a)
     {
+        var second = await CreateSecondTableAsync(f);
         await using var db = f.Builder.CreateContext();
-        var sheet = new SheetDef(f.Document.TemplateVersionId, EcrCode.Create("SHB" + f.Tag), Name("Sheet B"), 2);
+        var text = $"rows from {second.TableCode};\ntable Src = {f.TableCode};\noutput Z: kg = Sum(Src.{await ColumnCodeAsync(db, f.OutAColumnId)});";
+        var (methodologyBId, versionBId) = await PublishScriptAsync(
+            f, "B", text, [("Z", second.OutBColumnId)], tableDefId: second.TableDefId);
+
+        await using var extra = f.Builder.CreateContext();
+        extra.MethodologyReadTables.Add(new MethodologyReadTable(versionBId, f.TableCode));
+        extra.MethodologyDependencies.Add(new MethodologyDependency(methodologyBId, a.MethodologyId));
+        await extra.SaveChangesAsync();
+
+        return second with { MethodologyBId = methodologyBId, VersionBId = versionBId };
+    }
+
+    /// <summary>Другий аркуш: таблиця, колонка <c>Calculated</c> OUTB і один екземпляр з одним рядком; без методології.</summary>
+    private async Task<Second> CreateSecondTableAsync(Fixture f, string suffix = "B")
+    {
+        await using var db = f.Builder.CreateContext();
+        var sheet = new SheetDef(f.Document.TemplateVersionId, EcrCode.Create("SH" + suffix + f.Tag), Name("Sheet " + suffix), 2);
         db.SheetDefs.Add(sheet);
         await db.SaveChangesAsync();
 
         var table = new TableDef(
-            sheet.Id, EcrCode.Create("TBB" + f.Tag), Name("Table B"), 1, TableLayoutKind.PerPeriodInstance, TableRowMode.Fixed);
+            sheet.Id, EcrCode.Create("TB" + suffix + f.Tag), Name("Table " + suffix), 1, TableLayoutKind.PerPeriodInstance, TableRowMode.Fixed);
         db.TableDefs.Add(table);
         await db.SaveChangesAsync();
 
-        var outB = new ColumnDef(table.Id, EcrCode.Create("OUTB_" + f.Tag), Name("Out B"), 1, CellDataType.Calculated);
+        var outB = new ColumnDef(table.Id, EcrCode.Create("OUT" + suffix + "_" + f.Tag), Name("Out " + suffix), 1, CellDataType.Calculated);
         db.ColumnDefs.Add(outB);
         await db.SaveChangesAsync();
 
@@ -263,19 +481,10 @@ public sealed class ScriptMethodologyRunSqlTests(SqlServerFixture sql)
         var instanceId = await loader.ReserveIdsAsync("doc.TableInstanceSeq", 1, CancellationToken.None);
         var rowId = await loader.ReserveIdsAsync("doc.TableRowSeq", 1, CancellationToken.None);
         db.TableInstances.Add(new TableInstance(f.Document.PeriodKey, instanceId, f.Document.DocumentId, table.Id, Now));
-        db.TableRows.Add(new TableRow(f.Document.PeriodKey, rowId, instanceId, RowKey.Create("RB_" + f.Tag), 1, Now));
+        db.TableRows.Add(new TableRow(f.Document.PeriodKey, rowId, instanceId, RowKey.Create("R" + suffix + "_" + f.Tag), 1, Now));
         await db.SaveChangesAsync();
 
-        var text = $"rows from {table.Code};\ntable Src = {f.TableCode};\noutput Z: kg = Sum(Src.{await ColumnCodeAsync(db, f.OutAColumnId)});";
-        var (methodologyBId, versionBId) = await PublishScriptAsync(
-            f, "B", text, [("Z", outB.Id)], tableDefId: table.Id);
-
-        await using var extra = f.Builder.CreateContext();
-        extra.MethodologyReadTables.Add(new MethodologyReadTable(versionBId, f.TableCode));
-        extra.MethodologyDependencies.Add(new MethodologyDependency(methodologyBId, a.MethodologyId));
-        await extra.SaveChangesAsync();
-
-        return new Second(sheet.Id, table.Id, table.Code, instanceId, outB.Id, methodologyBId, versionBId);
+        return new Second(sheet.Id, table.Id, table.Code, instanceId, outB.Id, 0, 0);
     }
 
     private static async Task<string> ColumnCodeAsync(EcrDbContext db, int columnId)

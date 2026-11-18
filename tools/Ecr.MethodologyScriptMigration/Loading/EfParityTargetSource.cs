@@ -24,10 +24,33 @@ public sealed class EfParityTargetSource(EcrDbContext db) : IParityTargetSource
                   && v.ScriptText != string.Empty
                   && (methodologyCode == null || m.Code == methodologyCode)
             orderby m.Code, v.EffectiveFrom, v.Id
-            select new { MethodologyId = m.Id, m.Code, VersionId = v.Id, v.Version, v.ScriptText };
+            select new { MethodologyId = m.Id, m.Code, VersionId = v.Id, v.Version, v.ScriptText, m.Kind };
 
         var rows = await query.ToListAsync(ct).ConfigureAwait(false);
-        return [.. rows.Select(r => new ParityVersion(r.MethodologyId, r.Code, r.VersionId, r.Version, r.ScriptText!))];
+        return [.. rows.Select(r => new ParityVersion(
+            r.MethodologyId, r.Code, r.VersionId, r.Version, r.ScriptText!, r.Kind == MethodologyKind.Library))];
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<string>> ListUncoveredVersionsAsync(string? methodologyCode, CancellationToken ct)
+    {
+        var rows = await (
+                from v in db.MethodologyVersions.AsNoTracking()
+                join m in db.Methodologies.AsNoTracking() on v.MethodologyId equals m.Id
+                where v.Engine == MethodologyEngine.Formulas
+                      && v.Status == TemplateVersionStatus.Published
+                      && (methodologyCode == null || m.Code == methodologyCode)
+                      && (v.EffectiveFrom == null || v.ScriptText == null || v.ScriptText == string.Empty)
+                orderby m.Code, v.EffectiveFrom, v.Id
+                select new { m.Code, v.Version, v.Level, v.EffectiveFrom, v.ScriptText })
+            .ToListAsync(ct).ConfigureAwait(false);
+        return
+        [
+            .. rows.Select(r => r.Code + " " + r.Version + ": " + (
+                r.EffectiveFrom is null
+                    ? "no EffectiveFrom"
+                    : "no shadow text (not converted, or conversion failed)")),
+        ];
     }
 
     /// <inheritdoc />

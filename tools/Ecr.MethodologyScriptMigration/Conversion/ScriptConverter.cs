@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Enums;
+using Ecr.Expressions.Binding;
 using Ecr.Scripting;
 
 namespace Ecr.MethodologyScriptMigration.Conversion;
@@ -28,6 +29,7 @@ public static class ScriptConverter
         private readonly Dictionary<string, SourceFormula> _formulas = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, SourceOutput> _outputs = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, List<string>> _refs = new(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> _optional = new(StringComparer.OrdinalIgnoreCase);
         private ConstantPlanner _planner = null!;
 
         public ConversionResult Execute()
@@ -66,6 +68,12 @@ public static class ScriptConverter
         {
             ValidateStructure();
             ReserveImports();
+            if (!vs.IsModuleLevel)
+            {
+                // Рівень Module віддає аргументи іншим модулем: необов'язковість там — маркер у виразі.
+                CollectOptionalArguments();
+            }
+
             var ordered = vs.Formulas.OrderBy(f => f.EvaluationOrder).ToList();
             RegisterFormulas(ordered);
 
@@ -84,8 +92,13 @@ public static class ScriptConverter
             var substanceCategoryVar = perSubstanceRule ? _names.Allocate("SubstanceCategory", "_k", out _) : categoryVar;
             var substanceVar = hasSubstances ? _names.Allocate("S", "_s", out _) : "S";
 
+            var knownKeys = KnownCategoryKeys(ruleText is not null);
             var mapKeys = CategoryKeys(ruleText is not null);
-            var knownKeys = AcceptedCategoryKeys();
+            foreach (var key in knownKeys.Where(k => !mapKeys.Contains(k, StringComparer.Ordinal)))
+            {
+                mapKeys.Add(key);
+            }
+
             _planner = new ConstantPlanner(vs, _names, _issues, mapKeys, ruleText is not null, substanceVar);
 
             if (vs.IsLibrary)
@@ -412,6 +425,126 @@ public static class ScriptConverter
 
         // ---- Категорії ----
 
+        /// <summary>
+        /// «Відомі категорії» старого рушія (<c>GenericCalculationModule.KnownCategoriesOf</c>): категорії КОНСТАНТ версії й
+        /// бібліотек, без <c>Common</c>; таблиця <c>MethodologyCategory</c> на розрахунок не впливає (її читає лише публікація).
+        /// Порожньо — старий рушій ключ не перевіряє.
+        /// </summary>
+        private List<string> KnownCategoryKeys(bool hasRule)
+        {
+            if (!hasRule)
+            {
+                return [];
+            }
+
+            var raw = vs.Constants.Select(c => c.Category)
+                .Concat(vs.Imports.SelectMany(i => i.ConstantCategories ?? []))
+                .Where(c => !string.IsNullOrWhiteSpace(c) && !string.Equals(c, MethodologyConstant.CommonCategory, StringComparison.Ordinal))
+                .Select(c => c!)
+                .Distinct(StringComparer.Ordinal)
+                .Order(StringComparer.Ordinal)
+                .ToList();
+
+            var known = new List<string>(raw);
+            if (raw.Any(c => c.Any(char.IsWhiteSpace)))
+            {
+                // Старий IsKnownCategory порівнює ключ і категорії БЕЗ пробілів; скрипт порівнює літерали як є, тому
+                // додаємо обидва записи. Інший розподіл пробілів у ключі правила скрипт не прийме — паритет це покаже.
+                Warn(
+                    "categoryWhitespace",
+                    "A constant category contains whitespace: the old engine compares category keys ignoring whitespace; "
+                    + "the script accepts the exact and the whitespace-free spelling only.");
+                foreach (var c in raw)
+                {
+                    var bare = string.Concat(c.Where(ch => !char.IsWhiteSpace(ch)));
+                    if (!known.Contains(bare, StringComparer.Ordinal))
+                    {
+                        known.Add(bare);
+                    }
+                }
+            }
+
+            if (vs.Imports.Any(i => i.ConstantCategories is { Count: > 0 } cats
+                                    && cats.Any(c => !string.Equals(c, MethodologyConstant.CommonCategory, StringComparison.Ordinal)
+                                                     && !vs.Constants.Any(k => string.Equals(k.Category, c, StringComparison.Ordinal)))))
+            {
+                Info(
+                    "libraryCategories",
+                    "Categories of imported libraries' constants are added to the accepted category keys (the old engine takes them "
+                    + "from the libraries' closure; here all constants of the library version are used).");
+            }
+
+            foreach (var c in known.ToList())
+            {
+                for (var i = 1; i < c.Length; i++)
+                {
+                    if (c[i] == '_' && !known.Contains(c[..i], StringComparer.Ordinal))
+                    {
+                        known.Add(c[..i]);
+                    }
+                }
+            }
+
+            return known;
+        }
+
+        private void Warn(string code, string message, string? subject = null)
+            => _issues.Add(new ConversionIssue(IssueSeverity.Warning, code, message, subject));
+
+        /// <summary>
+        /// Необов'язкові аргументи (<c>OptionalArguments.Of</c>): імена з маркером <c>?</c> у <c>ArgumentsCsv</c> КОЖНОЇ формули
+        /// версії й бібліотек; властивість версії, а не формули. Маркер у самому виразі рантайм не читає.
+        /// Формула без збереженого списку (<c>ArgumentsCsv = null</c>) дає маркери зі свого виразу.
+        /// </summary>
+        private void CollectOptionalArguments()
+        {
+            var fromExpressions = new List<(string Formula, string Name)>();
+            foreach (var f in vs.Formulas)
+            {
+                if (f.ArgumentsCsv is not null)
+                {
+                    _optional.UnionWith(ArgumentDeclarationChecker.OptionalNamesFromCsv(f.ArgumentsCsv));
+                    foreach (var a in ArgumentDeclarationChecker.Derive(f.Expression)
+                                 .Where(a => a is { Kind: DeclaredArgumentKind.Argument, IsOptional: true }))
+                    {
+                        fromExpressions.Add((f.Code, ArgumentDeclarationChecker.NormalizeName(a.Name)));
+                    }
+                }
+                else
+                {
+                    _optional.UnionWith(ArgumentDeclarationChecker.Derive(f.Expression)
+                        .Where(a => a is { Kind: DeclaredArgumentKind.Argument, IsOptional: true })
+                        .Select(a => ArgumentDeclarationChecker.NormalizeName(a.Name)));
+                }
+            }
+
+            foreach (var import in vs.Imports.Where(i => i.OptionalArguments is { Count: > 0 }))
+            {
+                foreach (var name in import.OptionalArguments!)
+                {
+                    if (_optional.Add(ArgumentDeclarationChecker.NormalizeName(name)))
+                    {
+                        Info(
+                            "libraryOptionalArgument",
+                            $"Argument «{name}» is optional through the imported library «{import.LibraryCode}» (union semantics of the old engine; "
+                            + "all formulas of the library version are counted, the old engine counts only the needed ones).",
+                            import.LibraryCode);
+                    }
+                }
+            }
+
+            foreach (var (formula, name) in fromExpressions.Where(e => !_optional.Contains(e.Name)))
+            {
+                Warn(
+                    "optionalMarkerIgnored",
+                    $"Formula «{formula}»: «@{name}?» is marked optional in the expression only; the old engine reads optionality from ArgumentsCsv, "
+                    + "so the argument stays required in the script.",
+                    formula);
+            }
+        }
+
+        private bool IsOptionalArgument(string name) => _optional.Contains(ArgumentDeclarationChecker.NormalizeName(name));
+
         private List<string> AcceptedCategoryKeys()
         {
             var keys = new List<string>();
@@ -452,6 +585,7 @@ public static class ScriptConverter
                 .Where(c => !string.IsNullOrEmpty(c) && c != MethodologyConstant.CommonCategory)
                 .Select(c => c!)
                 .Distinct(StringComparer.Ordinal)
+                .Order(StringComparer.Ordinal)
                 .ToList();
             if (derived.Count > 0)
             {
@@ -474,7 +608,8 @@ public static class ScriptConverter
             List<SourceFormula> rowFormulas)
         {
             var translator = new ExpressionTranslator(
-                code => _planner.Use(code, ConstContext.Row, null), RowFormulaReference, keyArguments: true);
+                code => _planner.Use(code, ConstContext.Row, null), RowFormulaReference, keyArguments: true,
+                isOptional: IsOptionalArgument);
             TranslatedExpression translated;
             try
             {
@@ -553,7 +688,8 @@ public static class ScriptConverter
             }
 
             var translator = new ExpressionTranslator(
-                code => _planner.Use(code, context, categoryVar), RowFormulaReference, keyArguments);
+                code => _planner.Use(code, context, categoryVar), RowFormulaReference, keyArguments,
+                isOptional: IsOptionalArgument);
             try
             {
                 var translated = translator.Translate(f.Expression);

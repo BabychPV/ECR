@@ -15,14 +15,18 @@ namespace Ecr.Application.Calculations.Scripting.Migration;
 /// впорядковано за канонічним текстом елемента (порядок рядків у БД не важить); числа — інваріантно, без хвостових нулів;
 /// дати — <c>yyyy-MM-dd</c>; Id БД не входять — лише КОДИ (одиниць, довідників, записів, речовин, колонок).
 /// Склад: вид методології, режими (числовий, календарний), <c>RowActivityFilter</c>, правило категорії, категорії, речовини,
-/// формули (код, вираз, область, видимість, тип результату, код одиниці, порядок), виходи, константи (усі вікна чинності),
-/// активні правила відбору рядків (ключі — коди колонок), імпорти (код бібліотеки + її члени).
-/// Не входять: дати життя версії, прив'язки таблиць, тестові випадки.
+/// формули (код, вираз, область, видимість, тип результату, код одиниці, порядок, збережений список аргументів), виходи,
+/// константи (усі вікна чинності), активні правила відбору рядків (ключі — коди колонок), імпорти (код бібліотеки, її члени,
+/// категорії констант і необов'язкові аргументи), дати життя версії (початок і початок наступної: від них залежать вікна
+/// констант у тексті) і речення <c>rows</c> без правил (прив'язані таблиці й колонки статусу активності).
+/// Не входять: мітка версії (лише коментар заголовка) і тестові випадки та обов'язкові колонки (лишаються даними й не
+/// впливають на текст).
+/// Формат 2: додано <c>argumentsCsv</c>, дані імпортів, <c>life</c>, <c>rows</c>.
 /// </remarks>
 public static class Fingerprint
 {
     /// <summary>Версія формату канону: змінюється лише разом зі зміною складу чи форми.</summary>
-    public const int FormatVersion = 1;
+    public const int FormatVersion = 2;
 
     private static readonly JsonSerializerOptions Options = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
@@ -63,6 +67,7 @@ public static class Fingerprint
                 ["resultType"] = f.ResultType.ToString(),
                 ["unit"] = f.UnitCode,
                 ["order"] = f.EvaluationOrder,
+                ["argumentsCsv"] = f.ArgumentsCsv,
             })),
             ["outputs"] = Sorted(source.Outputs.Select(o => (JsonNode?)new JsonObject
             {
@@ -97,6 +102,27 @@ public static class Fingerprint
             {
                 ["library"] = i.LibraryCode,
                 ["members"] = Sorted(i.Members.Select(m => (JsonNode?)JsonValue.Create(m))),
+                ["constantCategories"] = i.ConstantCategories is null
+                    ? null
+                    : Sorted(i.ConstantCategories.Select(m => (JsonNode?)JsonValue.Create(m))),
+                ["optionalArguments"] = i.OptionalArguments is null
+                    ? null
+                    : Sorted(i.OptionalArguments.Select(m => (JsonNode?)JsonValue.Create(m))),
+            })),
+            ["life"] = new JsonObject
+            {
+                ["from"] = Date(source.EffectiveFrom),
+                ["next"] = Date(source.NextEffectiveFrom),
+            },
+            ["rows"] = Sorted(source.RowsClauses.Select(c => (JsonNode?)new JsonObject
+            {
+                ["tables"] = Sorted(c.TableCodes.Select(t => (JsonNode?)JsonValue.Create(t))),
+                ["active"] = Sorted(c.ActiveColumns.Select(a => (JsonNode?)new JsonObject
+                {
+                    ["column"] = a.ColumnCode,
+                    ["registry"] = a.RegistryCode,
+                    ["entry"] = a.EntryCode,
+                })),
             })),
         };
 

@@ -168,6 +168,9 @@ public sealed class CalculationOrchestrator(
                 scriptDependencies.GetValueOrDefault(r.Descriptor.MethodologyVersionId) ?? [])).ToList());
 
         var byVersion = resolved.ToLookup(r => r.Descriptor.MethodologyVersionId);
+        var runBindings = resolved
+            .Select(r => (r.Descriptor.MethodologyVersionId, r.TableInstanceId))
+            .ToHashSet();
         var done = 0;
 
         // L-4: хто що закрив — для діагностики «No matching rule … row N».
@@ -225,6 +228,7 @@ public sealed class CalculationOrchestrator(
                     if (scope.ServiceProvider.GetService<ScriptRunContext>() is { } scriptRun)
                     {
                         scriptRun.CalculationRunId = calculationRunId;
+                        scriptRun.RunBindings = runBindings;
                     }
 
                     foreach (var binding in byVersion[versionId])

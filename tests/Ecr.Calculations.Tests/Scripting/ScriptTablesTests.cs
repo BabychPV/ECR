@@ -320,6 +320,47 @@ public sealed class ScriptTablesTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public async Task Дві_прив_язки_однієї_колонки_виграє_найбільший_Id_що_дав_значення_як_у_накладенні_сітки()
+    {
+        var stand = WithCalculated("output Y: kg = row.Res * 2;", out var columnId);
+        // Пізніша прив'язка (більший Id) іншої методології до тієї самої колонки.
+        stand.WithBinding(new ColumnResultBinding(stand.Main.TableDefId, columnId, 98, "W", "{}", [9801]));
+        stand.Results.ReadCurrentAsync(ScriptStand.DocumentId, ScriptStand.PeriodValue, Arg.Any<CancellationToken>())
+            .Returns(
+            [
+                Result("R1", 3m),
+                new CalculationResultRow(9801, "R1", "W", 5m, 1, null, 500),
+                Result("R2", 4m),
+            ]);
+
+        var latest = (await stand.RunAsync("R1")).Output;
+        var fallback = (await stand.RunAsync("R2")).Output;
+
+        // R1: обидві мають значення — виграє пізніша (5); R2: пізніша не дала — береться раніша (4). Суми немає.
+        Assert.Equal(10m, ScriptStand.Value(latest, "Y"));
+        Assert.Equal(8m, ScriptStand.Value(fallback, "Y"));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public async Task Прив_язка_власної_методології_не_читається_навіть_коли_результат_є()
+    {
+        var stand = new ScriptStand("rows from T1;\noutput Y: kg = row.Res * 2;", NumericMode.Strict);
+        stand.AddTable("T1").Column("A").Column("Res", CellDataType.Calculated).Row("R1", ("A", 1m));
+        stand.WithBinding(new ColumnResultBinding(
+            stand.Main.TableDefId, stand.ColumnId("T1", "Res"), ScriptStand.MethodologyId, "Own", "{}", [7001]));
+        stand.Results.ReadCurrentAsync(ScriptStand.DocumentId, ScriptStand.PeriodValue, Arg.Any<CancellationToken>())
+            .Returns([new CalculationResultRow(7001, "R1", "Own", 50m, 1, null, 500)]);
+
+        var output = (await stand.RunAsync("R1")).Output;
+
+        // Читання власного виходу заборонено (script.readsOwnOutput): значення колонки — «немає», а не число з попереднього прогону.
+        Assert.Empty(output.Values);
+        Assert.Equal(["Res"], output.MissingArguments);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
     public async Task Читання_результатів_визначає_методології_джерела_і_ігнорує_власну()
     {
         var stand = WithCalculated("output Y: kg = row.Res * 2;", out var columnId);

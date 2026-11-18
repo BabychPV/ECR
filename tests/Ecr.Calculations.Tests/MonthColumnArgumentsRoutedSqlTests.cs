@@ -2,6 +2,7 @@
 using System.Globalization;
 using System.Text.Json;
 using Ecr.Application.Calculations;
+using Ecr.Application.Calculations.Scripting.Migration;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Calculations;
@@ -9,7 +10,10 @@ using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
+using Ecr.Expressions.Evaluation;
+using Ecr.Expressions.Functions;
 using Ecr.Infrastructure.Persistence;
+using Ecr.MethodologyScriptMigration.Conversion;
 using Ecr.TestKit;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
@@ -55,11 +59,14 @@ public sealed class MonthColumnArgumentsRoutedSqlTests(SqlServerFixture sql, ITe
 
     // ── прогін періоду m: лише місяць m ──────────────────────────────────
 
-    [Fact]
+    public static TheoryData<MethodologyEngine> Engines => new() { MethodologyEngine.Formulas, MethodologyEngine.Script };
+
+    [Theory]
+    [MemberData(nameof(Engines))]
     [Trait(TestCategories.Stage, TestCategories.Stage6)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "B80")]
-    public async Task Місячний_проєкт_прогін_періоду_m_пише_лише_місяць_m_без_дублів_і_як_річний()
+    public async Task Місячний_проєкт_прогін_періоду_m_пише_лише_місяць_m_без_дублів_і_як_річний(MethodologyEngine engine)
     {
         var monthly = await ArrangeAsync("TA", routed: true, [.. Inputs, "F_Sum", "F_Ratio"]);
         for (var m = 1; m <= 3; m++)
@@ -69,11 +76,11 @@ public sealed class MonthColumnArgumentsRoutedSqlTests(SqlServerFixture sql, ITe
 
         await AssertRoutedAsync(monthly);
 
-        var methodologies = Methodologies(Formulas, []);
+        var methodologies = Methodologies(Formulas, [], engine);
         var runs = new Dictionary<int, List<Result>>();
         for (var p = 1; p <= LastPeriod; p++)
         {
-            runs[p] = await RunPeriodAsync(monthly, p, methodologies);
+            runs[p] = await RunPeriodAsync(monthly, p, methodologies, engine);
         }
 
         for (var p = 1; p <= 3; p++)
@@ -97,17 +104,18 @@ public sealed class MonthColumnArgumentsRoutedSqlTests(SqlServerFixture sql, ITe
             await SetInputsAsync(yearly, period: 1, month: m, Synthetic(m));
         }
 
-        var year = await RunPeriodAsync(yearly, 1, methodologies);
+        var year = await RunPeriodAsync(yearly, 1, methodologies, engine);
         Assert.Equal(Map(year), Map(all));
     }
 
     // ── FAIL-3: рядки є в одному періоді й відсутні в іншому ─────────────
 
-    [Fact]
+    [Theory]
+    [MemberData(nameof(Engines))]
     [Trait(TestCategories.Stage, TestCategories.Stage6)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "B80")]
-    public async Task Місячний_проєкт_період_рахує_власні_рядки_навіть_коли_в_якорі_їх_немає()
+    public async Task Місячний_проєкт_період_рахує_власні_рядки_навіть_коли_в_якорі_їх_немає(MethodologyEngine engine)
     {
         // Якір має лише F_Sum; F_Ratio — у періодах 2–4, F_Double — лише в 3.
         var world = await ArrangeAsync(
@@ -118,11 +126,11 @@ public sealed class MonthColumnArgumentsRoutedSqlTests(SqlServerFixture sql, ITe
             await SetInputsAsync(world, period: m, month: m, Synthetic(m));
         }
 
-        var methodologies = Methodologies(Formulas, []);
+        var methodologies = Methodologies(Formulas, [], engine);
         var runs = new Dictionary<int, string>();
         for (var p = 1; p <= LastPeriod; p++)
         {
-            runs[p] = string.Join(", ", Map(await RunPeriodAsync(world, p, methodologies)));
+            runs[p] = string.Join(", ", Map(await RunPeriodAsync(world, p, methodologies, engine)));
         }
 
         Assert.Equal("F_Sum|M01|11", runs[1]);
@@ -133,11 +141,12 @@ public sealed class MonthColumnArgumentsRoutedSqlTests(SqlServerFixture sql, ITe
 
     // ── річний проєкт: без змін ──────────────────────────────────────────
 
-    [Fact]
+    [Theory]
+    [MemberData(nameof(Engines))]
     [Trait(TestCategories.Stage, TestCategories.Stage6)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "B80")]
-    public async Task Річний_проєкт_один_прогін_рахує_всі_місяці_як_доти()
+    public async Task Річний_проєкт_один_прогін_рахує_всі_місяці_як_доти(MethodologyEngine engine)
     {
         var yearly = await ArrangeAsync("TA", routed: false, [.. Inputs, "F_Sum", "F_Ratio"]);
         for (var m = 1; m <= 3; m++)
@@ -150,7 +159,7 @@ public sealed class MonthColumnArgumentsRoutedSqlTests(SqlServerFixture sql, ITe
             Assert.Null(await Router(db).GetDocumentAsync(yearly.Doc.DocumentId, CancellationToken.None));
         }
 
-        var run = await RunPeriodAsync(yearly, 1, Methodologies(Formulas, []));
+        var run = await RunPeriodAsync(yearly, 1, Methodologies(Formulas, [], engine), engine);
 
         Assert.Equal(
             "F_Ratio|M01|1.1, F_Ratio|M02|1.1, F_Ratio|M03|1.1, F_Sum|M01|11, F_Sum|M02|22, F_Sum|M03|33",
@@ -216,15 +225,16 @@ public sealed class MonthColumnArgumentsRoutedSqlTests(SqlServerFixture sql, ITe
 
     // ── золотий набір HSE400: річний і місячний ──────────────────────────
 
-    [Fact]
+    [Theory]
+    [MemberData(nameof(Engines))]
     [Trait(TestCategories.Stage, TestCategories.Stage6)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "B80")]
-    public async Task Золоті_тести_HSE400_проходять_на_річному_і_на_місячному_документі()
+    public async Task Золоті_тести_HSE400_проходять_на_річному_і_на_місячному_документі(MethodologyEngine engine)
     {
         var model = Hse400Model.Load();
         var table = model.Tables[model.GoldenTable];
-        var methodologies = Methodologies(model.Formulas, model.Constants);
+        var methodologies = Methodologies(model.Formulas, model.Constants, engine);
 
         var monthly = await ArrangeAsync(model.GoldenTable, routed: true, table);
         var yearly = await ArrangeAsync(model.GoldenTable, routed: false, table);
@@ -238,12 +248,12 @@ public sealed class MonthColumnArgumentsRoutedSqlTests(SqlServerFixture sql, ITe
         for (var p = 1; p <= LastPeriod; p++)
         {
             var watch = System.Diagnostics.Stopwatch.StartNew();
-            runs[p] = await RunPeriodAsync(monthly, p, methodologies);
+            runs[p] = await RunPeriodAsync(monthly, p, methodologies, engine);
             output.WriteLine($"perf monthly period {Period(p)}: {watch.ElapsedMilliseconds} ms, results {runs[p].Count}");
         }
 
         var yearWatch = System.Diagnostics.Stopwatch.StartNew();
-        var year = await RunPeriodAsync(yearly, 1, methodologies);
+        var year = await RunPeriodAsync(yearly, 1, methodologies, engine);
         output.WriteLine($"perf yearly period {Period(1)}: {yearWatch.ElapsedMilliseconds} ms, results {year.Count}");
 
         foreach (var test in model.Tests)
@@ -269,7 +279,8 @@ public sealed class MonthColumnArgumentsRoutedSqlTests(SqlServerFixture sql, ITe
     // ── прогін і перегляд ────────────────────────────────────────────────
 
     /// <summary>Як оркестратор: окремий scope на період, виклик модуля на кожен рядок кожного екземпляра періоду.</summary>
-    private async Task<List<Result>> RunPeriodAsync(World world, int period, IMethodologyStore methodologies)
+    private async Task<List<Result>> RunPeriodAsync(
+        World world, int period, IMethodologyStore methodologies, MethodologyEngine engine = MethodologyEngine.Formulas)
     {
         await using var db = world.Builder.CreateContext();
         var router = Router(db);
@@ -285,6 +296,20 @@ public sealed class MonthColumnArgumentsRoutedSqlTests(SqlServerFixture sql, ITe
             new Dictionary<string, UnitRef>(StringComparer.OrdinalIgnoreCase) { ["one"] = new(OneUnit, "one", 1, 1m) },
             new Dictionary<string, int>(StringComparer.Ordinal)));
 
+        var bindingStore = Substitute.For<ICalculationBindingStore>();
+        var script = new ScriptCalculationModule(
+            new Evaluator(new FunctionRegistry()),
+            methodologies,
+            new ScriptProgramCache(),
+            new CalendarContext(),
+            units,
+            periods,
+            bindingStore,
+            rows,
+            cells,
+            world.Metadata,
+            new CalculationInputBuilder(cells, world.Metadata, rows),
+            Substitute.For<ICalculationResultStore>());
         var module = new MonthColumnArgumentsModule(
             new RealFormulaEngine(),
             methodologies,
@@ -292,11 +317,12 @@ public sealed class MonthColumnArgumentsRoutedSqlTests(SqlServerFixture sql, ITe
             new CalendarContext(),
             units,
             periods,
-            Substitute.For<ICalculationBindingStore>(),
+            bindingStore,
             cells,
             world.Metadata,
             rows,
-            monthRouter: router);
+            monthRouter: router,
+            scriptModule: script);
 
         var key = Key(period);
         var results = new List<Result>();
@@ -305,7 +331,7 @@ public sealed class MonthColumnArgumentsRoutedSqlTests(SqlServerFixture sql, ITe
             foreach (var rowKey in (await rows.GetRowIdsAsync(instance.TableInstanceId, key, CancellationToken.None)).Keys)
             {
                 var outcome = await module.ExecuteAsync(
-                    new CalculationInput(Descriptor(), world.Doc.DocumentId, instance.TableInstanceId, key, rowKey, []),
+                    new CalculationInput(Descriptor(engine), world.Doc.DocumentId, instance.TableInstanceId, key, rowKey, []),
                     CancellationToken.None);
                 results.AddRange(outcome.Values.Select(v => new Result(instance.TableInstanceId, rowKey, v.OutputCode, v.Value)));
             }
@@ -491,11 +517,31 @@ public sealed class MonthColumnArgumentsRoutedSqlTests(SqlServerFixture sql, ITe
         return metadata;
     }
 
-    private static IMethodologyStore Methodologies(
-        IEnumerable<(string Code, string Expression)> formulas, IEnumerable<(string Code, decimal Value)> constants)
+    /// <summary>Скрипт, який дає конвертер на тих самих формулах і константах (шлях перенесення на проді).</summary>
+    private static string ConvertedScript(
+        IReadOnlyList<(string Code, string Expression)> formulas, IReadOnlyList<(string Code, decimal Value)> constants)
     {
+        var result = ScriptConverter.Convert(new VersionSource
+        {
+            MethodologyCode = "X400",
+            IsModuleLevel = true,
+            NumericMode = NumericMode.Legacy,
+            Formulas = [.. formulas.Select((f, i) => new SourceFormula(f.Code, f.Expression, i + 1))],
+            Constants = [.. constants.Select(c => SourceConstant.OfNumber(c.Code, c.Value, unitCode: "one"))],
+        });
+        Assert.True(result.Text is not null, string.Join("; ", result.Issues.Select(i => $"{i.Severity} {i.Code}: {i.Message}")));
+        return result.Text!;
+    }
+
+    private static IMethodologyStore Methodologies(
+        IEnumerable<(string Code, string Expression)> formulas,
+        IEnumerable<(string Code, decimal Value)> constants,
+        MethodologyEngine engine = MethodologyEngine.Formulas)
+    {
+        var formulaList = formulas.ToList();
+        var constantList = constants.ToList();
         var list = new List<MethodologyFormula>();
-        foreach (var (code, expression) in formulas)
+        foreach (var (code, expression) in formulaList)
         {
             var formula = new MethodologyFormula(VersionId, EcrCode.Create(code), expression);
             SetId(formula, list.Count + 1);   // порядок — топологічний, як у чернетки (EvaluationOrder = 0)
@@ -507,11 +553,20 @@ public sealed class MonthColumnArgumentsRoutedSqlTests(SqlServerFixture sql, ITe
         store.GetOutputsAsync(VersionId, Arg.Any<CancellationToken>()).Returns([]);
         store.GetSubstancesAsync(VersionId, Arg.Any<CancellationToken>()).Returns([]);
         store.GetConstantsAsync(VersionId, Arg.Any<CancellationToken>())
-            .Returns([.. constants.Select(c => new MethodologyConstant(VersionId, EcrCode.Create(c.Code), c.Value, OneUnit))]);
+            .Returns([.. constantList.Select(c => new MethodologyConstant(VersionId, EcrCode.Create(c.Code), c.Value, OneUnit))]);
+        if (engine == MethodologyEngine.Script)
+        {
+            store.GetScriptAsync(VersionId, Arg.Any<CancellationToken>())
+                .Returns(new MethodologyScript(ConvertedScript(
+                    [.. MethodologyFormulaOrder.Topological(list, new RealFormulaEngine()).Select(f => (f.Code, f.Expression))],
+                    constantList), null, MethodologyEngine.Script, false, NumericMode.Legacy));
+            store.ResolveImportsAsync(VersionId, Arg.Any<DateOnly>(), Arg.Any<CancellationToken>()).Returns([]);
+        }
+
         return store;
     }
 
-    private static MethodologyDescriptor Descriptor()
+    private static MethodologyDescriptor Descriptor(MethodologyEngine engine)
         => new(
             MethodologyId: 48,
             MethodologyVersionId: VersionId,
@@ -520,7 +575,8 @@ public sealed class MonthColumnArgumentsRoutedSqlTests(SqlServerFixture sql, ITe
             Level: CalculationLevel.Module,
             NumericMode: NumericMode.Legacy,
             CalendarMode: CalendarMode.Actual,
-            TraceLevel: TraceLevel.ErrorsOnly);
+            TraceLevel: TraceLevel.ErrorsOnly,
+            Engine: engine);
 
     private static Dictionary<string, decimal> Synthetic(int month)
         => new(StringComparer.Ordinal) { ["Methane"] = 10m * month, ["Nitrogen"] = month };

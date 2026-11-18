@@ -117,9 +117,9 @@ public sealed class ParityComparer(
 
         var oldContext = await oldModule.PrepareAsync(oldDescriptor, documentId, periodKey, registries, ct).ConfigureAwait(false);
 
-        var oldRows = await ExecuteAsync(
+        var oldRows = await ExecuteRowsAsync(
             oldOutcome.Matches.Select(m => m.RowKey), byRow, oldModule, oldContext, isModule, ct).ConfigureAwait(false);
-        var scriptRows = await ExecuteAsync(
+        var scriptRows = await ExecuteRowsAsync(
             scriptOutcome.Matches.Select(m => m.RowKey), byRow, scriptModule, scriptContext, isModule, ct).ConfigureAwait(false);
 
         return ParityDiff.Compare(
@@ -130,7 +130,19 @@ public sealed class ParityComparer(
                 [.. scriptOutcome.Matches.Select(m => m.RowKey)], [.. scriptOutcome.Excluded], scriptOutcome.AllRowKeys, scriptRows));
     }
 
-    private static async Task<Dictionary<string, ParityRowOutcome>> ExecuteAsync(
+    /// <summary>
+    /// Виконує модуль на відібраних рядках і зводить кожен у <see cref="ParityRowOutcome"/>: значення, відсутні аргументи,
+    /// наявність <c>StepError</c>; відхилення рядка правилом категорії — <see cref="ParityRowOutcome.Rejected"/>; будь-який
+    /// інший <see cref="DomainException"/> — <see cref="ParityRowOutcome.Error"/> з кодом і ключем, а не мовчазний пропуск.
+    /// Рядок, для якого немає входу, результату не дає (порівняння покаже це як розбіжність, а не як збіг).
+    /// </summary>
+    /// <param name="rowKeys">Рядки, відібрані шляхом.</param>
+    /// <param name="inputs">Входи за ключем рядка (спільні для обох шляхів).</param>
+    /// <param name="module">Модуль шляху.</param>
+    /// <param name="context">Контекст прив'язки модуля.</param>
+    /// <param name="withSteps">Порівнювати кроки-причини (рівень <c>Module</c>).</param>
+    /// <param name="ct">Токен скасування.</param>
+    public static async Task<Dictionary<string, ParityRowOutcome>> ExecuteRowsAsync(
         IEnumerable<string> rowKeys,
         Dictionary<string, CalculationInput> inputs,
         ICalculationModule module,

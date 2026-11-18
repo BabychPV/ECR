@@ -27,6 +27,13 @@ public static partial class ScriptParser
     /// <summary>Межа сумарної кількості розгорнутих операторів.</summary>
     public const int MaxExpandedStatements = 2000;
 
+    /// <summary>
+    /// Межа сумарної кількості лексем, які дає розгортання <c>foreach</c>. Межа в операторах цього не стримує:
+    /// тіло без жодної <c>;</c> лічиться як один оператор, а копіюється всеціло (1000 значень × 90 000 лексем тіла
+    /// — гігабайти пам'яті з тексту в 200 000 знаків).
+    /// </summary>
+    public const int MaxExpandedTokens = 200_000;
+
     /// <summary>Лексує й розбирає текст.</summary>
     /// <param name="text">Текст скрипта.</param>
     public static ScriptParseResult Parse(string text)
@@ -56,6 +63,7 @@ public static partial class ScriptParser
         private int pos;
         private int nesting;
         private int expanded;
+        private long expandedTokens;
 
         private ScriptToken Cur => tokens[pos];
 
@@ -69,6 +77,7 @@ public static partial class ScriptParser
 
         private ScriptToken Advance()
         {
+            ScriptWork.Step();
             var t = tokens[pos];
             if (t.Kind != ScriptTokenKind.EndOfInput)
             {
@@ -94,11 +103,24 @@ public static partial class ScriptParser
                 return;
             }
 
-            diagnostics.Add(ScriptDiagnostic.At(code, t.Span, message, pairs));
+            Add(ScriptDiagnostic.At(code, t.Span, message, pairs));
         }
 
         private void ReportSpan(string code, ScriptSpan span, string message, params (string, string)[] pairs)
-            => diagnostics.Add(ScriptDiagnostic.At(code, span, message, pairs));
+            => Add(ScriptDiagnostic.At(code, span, message, pairs));
+
+        /// <summary>
+        /// Записує діагностику; після <see cref="ScriptDiagnostic.MaxPerCompilation"/> розбір переривається:
+        /// кожне відновлення після помилки — виняток (десятки мікросекунд), а текст-«сміття» дає їх сотні тисяч.
+        /// </summary>
+        private void Add(ScriptDiagnostic diagnostic)
+        {
+            diagnostics.Add(diagnostic);
+            if (diagnostics.Count >= ScriptDiagnostic.MaxPerCompilation)
+            {
+                throw new Abort();
+            }
+        }
 
         private Recovery FailExpected(string what)
         {
@@ -326,7 +348,7 @@ public static partial class ScriptParser
             {
                 ReportAt(kw, ScriptDiagnosticCodes.ForeachTooLarge,
                     $"foreach is nested too deeply (more than {MaxForeachDepth} levels).",
-                    ("limit", MaxForeachDepth.ToString(CultureInfo.InvariantCulture)));
+                    ("limit", MaxForeachDepth.ToString(CultureInfo.InvariantCulture)), ("kind", "depth"));
                 throw new Abort();
             }
 
@@ -337,7 +359,16 @@ public static partial class ScriptParser
             {
                 ReportAt(kw, ScriptDiagnosticCodes.ForeachTooLarge,
                     $"foreach expands to more than {MaxExpandedStatements} statements.",
-                    ("limit", MaxExpandedStatements.ToString(CultureInfo.InvariantCulture)));
+                    ("limit", MaxExpandedStatements.ToString(CultureInfo.InvariantCulture)), ("kind", "statements"));
+                throw new Abort();
+            }
+
+            expandedTokens += (long)values.Count * inner.Count;
+            if (expandedTokens > MaxExpandedTokens)
+            {
+                ReportAt(kw, ScriptDiagnosticCodes.ForeachTooLarge,
+                    $"foreach expands to more than {MaxExpandedTokens} tokens.",
+                    ("limit", MaxExpandedTokens.ToString(CultureInfo.InvariantCulture)), ("kind", "tokens"));
                 throw new Abort();
             }
 

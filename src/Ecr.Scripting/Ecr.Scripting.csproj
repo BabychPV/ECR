@@ -10,6 +10,10 @@
     числа рахує Ecr.Expressions.Evaluation.Evaluator.
   -->
   <ItemGroup>
+    <InternalsVisibleTo Include="Ecr.Scripting.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Ecr.Expressions\Ecr.Expressions.csproj" />
   </ItemGroup>
 

@@ -46,6 +46,7 @@ public static class ScriptLexer
             var n = text.Length;
             while (i < n)
             {
+                ScriptWork.Step();
                 var c = text[i];
                 if (char.IsWhiteSpace(c))
                 {
@@ -128,7 +129,12 @@ public static class ScriptLexer
         }
 
         private void Report(string code, int start, int length, string message, params (string, string)[] pairs)
-            => diagnostics.Add(ScriptDiagnostic.At(code, Span(start, length), message, pairs));
+        {
+            if (diagnostics.Count < ScriptDiagnostic.MaxPerCompilation)
+            {
+                diagnostics.Add(ScriptDiagnostic.At(code, Span(start, length), message, pairs));
+            }
+        }
 
         private void BlockComment()
         {
@@ -276,8 +282,63 @@ public static class ScriptLexer
                 Report(ScriptDiagnosticCodes.InvalidNumber, start, i - start,
                     $"Number '{raw}' is out of the decimal range.", ("text", raw));
             }
+            else if (!IsExact(parseable, value))
+            {
+                // decimal тримає 28 значущих цифр і мовчки округлює решту (а надто малі числа — до 0): для коефіцієнтів
+                // методологій тиха зміна значення неприпустима.
+                Report(ScriptDiagnosticCodes.InvalidNumber, start, i - start,
+                    $"Number '{raw}' has more significant digits than decimal can hold (28), so its value would change.",
+                    ("text", raw));
+            }
 
             Add(ScriptTokenKind.NumberLiteral, start, i - start, value);
+        }
+
+        /// <summary>
+        /// Чи <paramref name="value"/> дорівнює числу в тексті точно (хвостові нулі не рахуються): порівнюються значущі
+        /// цифри й десятковий порядок. Текст — лексема без знака: <c>цифри[.цифри][e[±]цифри]</c>.
+        /// </summary>
+        private static bool IsExact(string parseable, decimal value)
+        {
+            var e = parseable.AsSpan().IndexOfAny('e', 'E');
+            var mantissa = e < 0 ? parseable.AsSpan() : parseable.AsSpan(0, e);
+            var dot = mantissa.IndexOf('.');
+            var fraction = dot < 0 ? 0 : mantissa.Length - dot - 1;
+            var digits = new StringBuilder(mantissa.Length);
+            foreach (var c in mantissa)
+            {
+                if (c != '.')
+                {
+                    digits.Append(c);
+                }
+            }
+
+            var all = digits.ToString().TrimStart('0');
+            if (all.Length == 0)
+            {
+                return true; // нуль у тексті — нуль точно
+            }
+
+            var significant = all.TrimEnd('0');
+            long order = -fraction + (all.Length - significant.Length);
+            if (e >= 0)
+            {
+                if (!long.TryParse(parseable.AsSpan(e + 1), NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var exponent))
+                {
+                    return false;
+                }
+
+                order += exponent;
+            }
+
+            var bits = decimal.GetBits(value);
+            var mid = ((UInt128)(uint)bits[2] << 64) | ((UInt128)(uint)bits[1] << 32) | (uint)bits[0];
+            var scale = (bits[3] >> 16) & 0xFF;
+            var actual = mid.ToString(CultureInfo.InvariantCulture);
+            var actualSignificant = actual.TrimEnd('0');
+            long actualOrder = -scale + (actual.Length - actualSignificant.Length);
+
+            return mid != 0 && significant == actualSignificant && order == actualOrder;
         }
 
         private void String(char quote)
