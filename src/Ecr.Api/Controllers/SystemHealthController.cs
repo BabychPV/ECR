@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.Reflection;
 using Ecr.Api.Startup;
 using Ecr.Application.Health;
-using Ecr.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.Negotiate;
@@ -25,8 +24,7 @@ public sealed class SystemHealthController(
     GetPartitionScriptHandler partitionScript,
     IHostEnvironment environment,
     Ecr.Api.Observability.FileLogStatus fileLog,
-    IAuthenticationSchemeProvider schemes,
-    IConfiguration configuration) : ControllerBase
+    IAuthenticationSchemeProvider schemes) : ControllerBase
 {
     /// <summary>
     /// Версія, час старту, середовище, транспорт сповіщень, тека журналу. Право <c>System.ViewHealth</c>.
@@ -54,10 +52,10 @@ public sealed class SystemHealthController(
             SystemHostFacts.SignInModeOf(
                 names.Contains(NegotiateDefaults.AuthenticationScheme),
                 names.Contains(CookieAuthenticationDefaults.AuthenticationScheme)),
-            // B105: те саме читання, що в реєстрації завантажувача складу (DependencyInjection), і мітка джерела —
-            // щоб після перезапуску було видно, чи значення живе лише в змінній скрипту вікна.
-            Hse400CompositionSnapshotLoader.IsEnabled(configuration),
-            ConfigurationSourceLabel.Of(configuration, Hse400CompositionSnapshotLoader.EnabledKey));
+            // B105 → P-0118-31/33: ключ Calculations:Hse400CompositionFromDocument виведено й НЕ читається — дієве значення
+            // й мітку Binding дає біт зв'язки ReadFromDocument (SystemFactsCalculationsDto.Of зі знімком).
+            Hse400CompositionFromDocument: false,
+            Hse400CompositionSource: SystemHostFacts.SourceDefault);
 
         return Ok(await facts.HandleAsync(host, ct).ConfigureAwait(false));
     }

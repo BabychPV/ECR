@@ -2762,6 +2762,8 @@ public interface IJobProgressStore
 `Calculations:Hse400CompositionFromDocument`), `hse400CompositionSource` (мітка
 джерела без шляху: `Default`, `Environment`, `ProgramData`, `AppSettings`,
 `CommandLine`, `Other`), `hse400CompositionWarning` (прапор вимкнено, а документ є).
+✎ P-0118-31/33: ключ виведено й не читається — `hse400CompositionFromDocument` — біт зв'язки
+`ReadFromDocument` з міткою `Binding`; зв'язки немає — `false` з міткою `Default`. Поля контракту ті самі.
 
 ```csharp
 public interface ISystemHealthStore
@@ -6494,8 +6496,9 @@ public sealed record RowDto(
   дає рядки складу лише коли аркуш таблиці (оригінал) має `Approved` у періоді-власнику місяця (місячний проєкт —
   `yyyyMM`); інший місяць — без вводу, без `F_`, без нульового паритету, і довідник за рік документа не повертається.
   За `Any` — запиту станів немає, рядки ті самі, що до B80.
-- **Перекриття ключем.** `Calculations:Hse400CompositionFromDocument`, заданий явно (у т. ч. `appsettings.json`), діє як
-  і доти; не заданий — вирішує біт зв'язки `ReadFromDocument`; зв'язки немає — вимкнено. ✎ B179 L2 (P-0118-34): ключ
+- **Перекриття ключем — виведено** (✎ P-0118-31/33, «один вимикач»): `Calculations:Hse400CompositionFromDocument`
+  прибрано з `appsettings.json` і переліку перевірки; застосунок його не читає, залишкова змінна оточення live без дії.
+  Вирішує лише біт зв'язки `ReadFromDocument`; зв'язки немає — вимкнено. ✎ B179 L2 (P-0118-34): ключ
   `Calculations:Hse400RecalculateLandDependents` прибрано (постачався `false` і вимикав біт `RecalculateDependents` —
   корінь дефекту live); перерахунок залежних вимикає лише біт зв'язки.
 - ✎ **B179 L2 — автоматичні залежні.** Успіх `RecalculationJob` або `FormulaRecalculationJob` документа шаблону-джерела
@@ -6523,7 +6526,7 @@ public sealed record RowDto(
   немає), `hse400ApprovedMonths` (затверджених місяців обраного документа поточного року; `null` — зв'язки чи документа
   немає), `hse400SourceWarning` (документ року є і зв'язка на `any` або на `approvedOnly` з незатвердженим місяцем, де є
   дані). `hse400CompositionSource` = `Binding`, коли ключ не задано, а значення дав біт зв'язки.
-- Порти: `IDocumentSourceBindingStore` (перелік, `UPDLOCK` зв'язки, обраний документ-джерело року з періодичністю проєкту й режимом погодження, роки джерела) і `IDocumentSourceFlagOverrides` (явне значення ключа `Hse400CompositionFromDocument` або `null`; ✎ B179 L2 — лише одного).
+- Порти: `IDocumentSourceBindingStore` (перелік, `UPDLOCK` зв'язки, обраний документ-джерело року з періодичністю проєкту й режимом погодження, роки джерела) і `IDocumentSourceFlagOverrides` (✎ P-0118-31/33: продукт завжди дає `null` — ключ виведено; порт лишається для тестів).
 - Помилки — наявні коди (`ECR-CALC-0404/0409`, `ECR-REQ-0422`) з новими `messageKey`; §7 не змінюється.
 - ✎ B80 N2a — порт `ISourceApprovalChangeTrigger` (без нових ендпоінтів і полів): остаточне затвердження аркуша-джерела
   × періоду (`ApproveSheetHandler`), повернення з `Approved` (`ReopenDocumentHandler`) і видалення документа-джерела
@@ -6558,7 +6561,7 @@ public sealed record RowDto(
   споживача): одна знахідка на документ-споживач × затверджений період у випадку `SourceChangedAfterApproval`; конверт
   `consistency.finding.STALE_APPROVED_DEPENDENT` з підстановками `documentId`, `periodKey`, `sourceDocumentId`,
   `sourcePeriodKey`, `reason` (`notApproved` | `reapproved`). Лише для зв'язок на `approvedOnly` з читанням з документа
-  (явний ключ `Calculations:Hse400CompositionFromDocument` перекриває біт); за `any` знахідок немає, а старі знахідки
+  (лише біт зв'язки; ключ `Calculations:Hse400CompositionFromDocument` виведено, P-0118-31/33); за `any` знахідок немає, а старі знахідки
   правила закриваються (прохід повний). Тексти en/ru/kz — сід `B80-stale-approved-dependent.sql`; переклад на клієнті —
   N6.
 

@@ -3,7 +3,6 @@ using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Ecr.Infrastructure.Persistence;
@@ -31,19 +30,15 @@ namespace Ecr.Infrastructure.Persistence;
 /// </para>
 /// </remarks>
 /// <param name="db">Контекст.</param>
-/// <param name="readOverride">Явний ключ <c>Calculations:Hse400CompositionFromDocument</c>; <c>null</c> — біт зв'язки.</param>
+/// <param name="readOverride">Перекриття для тестів; у DI — <c>null</c>: біт зв'язки (ключ виведено, P-0118-31/33).</param>
 public sealed class DocumentSourceMonthGate(EcrDbContext db, bool? readOverride) : ISourceMonthApprovalGate, ISourceIssueReader
 {
-    /// <summary>Ворота з перекриттям ключем завантажувача (не задано — біт <c>ReadFromDocument</c> зв'язки).</summary>
+    /// <summary>Ворота без перекриття: вирішує біт <c>ReadFromDocument</c> зв'язки (P-0118-31/33, ключ виведено).</summary>
     /// <param name="sp">Провайдер.</param>
-    /// <param name="configuration">Конфігурація.</param>
-    public static DocumentSourceMonthGate Create(IServiceProvider sp, IConfiguration configuration)
+    public static DocumentSourceMonthGate Create(IServiceProvider sp)
     {
         ArgumentNullException.ThrowIfNull(sp);
-        ArgumentNullException.ThrowIfNull(configuration);
-        return new DocumentSourceMonthGate(
-            sp.GetRequiredService<EcrDbContext>(),
-            Hse400CompositionSnapshotLoader.Override(configuration, Hse400CompositionSnapshotLoader.EnabledKey));
+        return new DocumentSourceMonthGate(sp.GetRequiredService<EcrDbContext>(), readOverride: null);
     }
 
     /// <inheritdoc />

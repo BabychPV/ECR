@@ -30,17 +30,23 @@ namespace Ecr.Api.Tests;
 /// Справжній хост, SQL Server і черга (виконавець тестового хоста). Зв'язка — <c>Any</c>, біти 1/1; рядка
 /// <c>cfg.DocumentSourceBindingConsumer</c> НЕМАЄ, ключа <c>Calculations:Hse400RecalculateLandDependents</c> НЕМАЄ (сам
 /// <c>appsettings.json</c> — постачений). Підміна в хості лише одна за суттю: завантажувач складу на коди шаблону й
-/// довідника цього тесту (робочих <c>HSE400</c>/<c>LAND_HSE400_COMPOSITION</c> у спільній базі тест не чіпає) і
-/// перекриття «читати з документа» знято (у постаченому <c>appsettings.json</c> воно <c>false</c>, на live — <c>true</c>
-/// з оточення).
+/// довідника цього тесту (робочих <c>HSE400</c>/<c>LAND_HSE400_COMPOSITION</c> у спільній базі тест не чіпає).
+/// Перекриття «читати з документа» (<see cref="IDocumentSourceFlagOverrides"/>) — СПРАВЖНЄ, з DI.
 /// </para>
 /// <para>
-/// Мутація (локально): прибрати виклик хука в <c>FormulaRecalculationJob</c> — значення споживача не змінюється, червоний.
+/// ✎ P-0118-31/33 («один вимикач»): ключ <c>Calculations:Hse400CompositionFromDocument</c> виведено. Прогін і без ключа
+/// (свіжа інсталяція), і із залишковою змінною <c>ECR_Calculations__Hse400CompositionFromDocument=false</c> (як на live,
+/// лише значення протилежне) — вирішує біт зв'язки <c>ReadFromDocument</c> = 1.
+/// </para>
+/// <para>
+/// Мутації (локально): прибрати виклик хука в <c>FormulaRecalculationJob</c> — значення споживача не змінюється, червоний;
+/// повернути читання ключа в <c>DocumentSourceFlagOverrides</c> — випадок <c>"false"</c> червоний.
 /// </para>
 /// </remarks>
 [Collection("SqlServer")]
 public sealed class SourceDocumentDependentsAcceptanceTests(SqlServerFixture sql)
 {
+    private const string RetiredKeyVariable = "ECR_Calculations__Hse400CompositionFromDocument";
     private const string Password = "Source-Dependents-B179-1!";
     private const int Year = 2099;
     private const int Month = 10;
@@ -48,11 +54,27 @@ public sealed class SourceDocumentDependentsAcceptanceTests(SqlServerFixture sql
     private static readonly TimeZoneInfo SiteZone = SiteTimeZone.Create("Asia/Atyrau").ToTimeZoneInfo();
     private static readonly TimeSpan Deadline = TimeSpan.FromSeconds(90);
 
-    [Fact]
+    [Theory]
+    [InlineData(null)]
+    [InlineData("false")]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Directive", "B179")]
-    public async Task Правка_джерела_за_жовтень_сама_змінює_жовтень_споживача_і_лише_його()
+    public async Task Правка_джерела_за_жовтень_сама_змінює_жовтень_споживача_і_лише_його(string? retiredKeyValue)
+    {
+        var previous = Environment.GetEnvironmentVariable(RetiredKeyVariable);
+        Environment.SetEnvironmentVariable(RetiredKeyVariable, retiredKeyValue);
+        try
+        {
+            await RunAsync().ConfigureAwait(true);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(RetiredKeyVariable, previous);
+        }
+    }
+
+    private async Task RunAsync()
     {
         var s = await ArrangeAsync().ConfigureAwait(true);
 
@@ -60,6 +82,7 @@ public sealed class SourceDocumentDependentsAcceptanceTests(SqlServerFixture sql
         {
             ExtraServices = services =>
             {
+                // Лише коди шаблону й довідника цього тесту; enabled: null — як у DI продукту.
                 services.AddScoped<IRegistrySnapshotLoader>(sp => new Hse400CompositionSnapshotLoader(
                     sp.GetRequiredService<RegistrySnapshotLoader>(),
                     sp.GetRequiredService<EcrDbContext>(),
@@ -67,9 +90,11 @@ public sealed class SourceDocumentDependentsAcceptanceTests(SqlServerFixture sql
                     enabled: null,
                     registryCode: s.RegistryCode,
                     templateCode: s.SourceTemplateCode));
-                services.AddSingleton<IDocumentSourceFlagOverrides>(new NoOverrides());
             },
         };
+
+        // Перекриття — справжнє з DI продукту: виведений ключ не дає значення.
+        Assert.Null(app.Services.GetRequiredService<IDocumentSourceFlagOverrides>().ReadFromDocument);
         using var client = await SignInAsync(app, s.UserName).ConfigureAwait(true);
 
         // 1. Перше значення складу за жовтень → формула жовтня споживача його показує (жодного ручного перерахунку).
@@ -115,11 +140,6 @@ public sealed class SourceDocumentDependentsAcceptanceTests(SqlServerFixture sql
         string RegistryCode,
         int BindingId,
         string UserName);
-
-    private sealed class NoOverrides : IDocumentSourceFlagOverrides
-    {
-        public bool? ReadFromDocument => null;
-    }
 
     private static async Task PatchAsync(EcrApiFactory app, HttpClient client, Scenario s, decimal value)
     {

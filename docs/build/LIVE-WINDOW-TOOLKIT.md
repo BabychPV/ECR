@@ -25,6 +25,7 @@
 
 ## ⛔ Обов'язково: прапорець HSE400 (B105)
 - Live працює з `ECR_Calculations__Hse400CompositionFromDocument=true` (у збірці `appsettings.json` — `false`).
+- ✎ P-0118-31/33: зі збірки з виведеним ключем змінна **без дії** (вирішує біт `ReadFromDocument` зв'язки `HSE400_LAND_COMPOSITION`; перед GO перевірити, що він = 1) — змінну й рядок у `live-env.json` прибрати в наступному вікні.
 - Джерело — **постійний** файл `F:\ecr-backup\land-ui\live-env.json` (лише live, поза git і теками застосунку;
   білий список ключів, значення `true`/`false`). `restart-w15u.ps1` читає його при КОЖНОМУ старті live, зокрема при
   відкаті; скретч його не читає.

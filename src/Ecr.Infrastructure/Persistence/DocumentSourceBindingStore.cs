@@ -3,7 +3,6 @@ using Ecr.Application.Ports;
 using Ecr.Application.Registries;
 using Ecr.Domain.Entities.Configuration;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
 
 namespace Ecr.Infrastructure.Persistence;
 
@@ -157,11 +156,12 @@ public sealed class DocumentSourceBindingStore(EcrDbContext db) : IDocumentSourc
     }
 }
 
-/// <summary>Перекриття бітів зв'язки ключами конфігурації (B80; див. <see cref="Hse400CompositionSnapshotLoader.Override"/>).</summary>
-/// <param name="configuration">Конфігурація застосунку.</param>
-public sealed class DocumentSourceFlagOverrides(IConfiguration configuration) : IDocumentSourceFlagOverrides
+/// <summary>
+/// Перекриття бітів зв'язки (B80). ✎ P-0118-31/33 («один вимикач»): ключ
+/// <see cref="Hse400CompositionSnapshotLoader.RetiredKey"/> виведено — перекриття немає, вирішує біт зв'язки.
+/// </summary>
+public sealed class DocumentSourceFlagOverrides : IDocumentSourceFlagOverrides
 {
     /// <inheritdoc />
-    public bool? ReadFromDocument { get; } =
-        Hse400CompositionSnapshotLoader.Override(configuration, Hse400CompositionSnapshotLoader.EnabledKey);
+    public bool? ReadFromDocument => null;
 }
