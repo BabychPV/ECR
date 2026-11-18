@@ -32,7 +32,10 @@ public sealed class ApproveSheetHandler(
     IMaterializationScheduler? materialization = null,
     // ✎ B80 (N2a, T-A): остаточне затвердження аркуша-джерела — перерахунок залежних (лише за ApprovedOnly), ПІСЛЯ
     // коміту; `null` — тестові фабрики обробника.
-    ISourceApprovalChangeTrigger? sourceTrigger = null)
+    ISourceApprovalChangeTrigger? sourceTrigger = null,
+    // ✎ B80 (N2b, A3): споживач зв'язки ApprovedOnly не затверджується (на жодному кроці маршруту), поки місяць джерела
+    // не затверджено; `null` — тестові фабрики обробника.
+    ISourceMonthApprovalGate? sourceMonthGate = null)
 {
     /// <summary>Затверджує або відхиляє аркуш.</summary>
     /// <param name="documentId">Документ.</param>
@@ -263,6 +266,13 @@ public sealed class ApproveSheetHandler(
 
         if (approved)
         {
+            // ✎ B80 (N2b, R3.1 A3): місяць документа-джерела не затверджено — затвердження неможливе на БУДЬ-ЯКОМУ кроці
+            // маршруту (підписувати дані без затвердженого джерела немає сенсу; проміжний підпис теж). Відхилення
+            // (approved = false) не блокується. Під блокуванням аркуша, до зрізу й зміни стану; за Any — нічого.
+            await SourceMonthApprovalCheck
+                .EnsureApprovedAsync(sourceMonthGate, documentId, periodKey, "Затвердження", ct)
+                .ConfigureAwait(false);
+
             // ⛔ Проміжний крок НЕ робить аркуш затвердженим (`ФВ-5.17`).
             // Документ, який став би `Approved` після першого підпису,
             // потрапив би у звітність для регулятора без решти погоджень

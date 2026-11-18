@@ -194,7 +194,7 @@ public sealed partial class WorkflowTransactionTests(SqlServerFixture sql)
     private SubmitSheetHandler Submit(
         World world, EcrDbContext db, IAccessDecisionService access, ISheetEditGate? gate = null,
         IReportSnapshotBuilder? reportSnapshots = null, SheetWorkflowNotifier? notifier = null,
-        IDocumentStore? documents = null)
+        IDocumentStore? documents = null, ISourceMonthApprovalGate? sourceMonthGate = null)
     {
         var cells = Substitute.For<ICellStore>();
         cells.ReadSliceAsync(Arg.Any<long>(), Arg.Any<CancellationToken>())
@@ -271,7 +271,8 @@ public sealed partial class WorkflowTransactionTests(SqlServerFixture sql)
             NSubstitute.Substitute.For<ITemplateVersionStore>(),
             NSubstitute.Substitute.For<IRegistryStore>(),
             new AuditWriter(db),
-            notifier);
+            notifier,
+            sourceMonthGate: sourceMonthGate);
     }
 
     private ApproveSheetHandler Approve(World world, EcrDbContext db, IReportSnapshotBuilder snapshots)

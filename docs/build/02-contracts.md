@@ -6523,3 +6523,11 @@ public sealed record RowDto(
   `IRegistryImpactRecalculationJob` на рік — лише коли зв'язка на `approvedOnly` і біт `recalculateDependents` (або ключ)
   увімкнено; лише оригінал аркуша; збій постановки — лише в журнал. Хук завершення перерахунку HSE400 за `approvedOnly`
   мовчить, за `any` — як доти.
+- ✎ B80 N2b — порт `ISourceMonthApprovalGate` (без нових ендпоінтів, полів і кодів): `POST /documents/{id}/submit` і
+  `POST /documents/{id}/approve` (`approved: true`, будь-який крок маршруту, і оригінал, і копія аркуша) відмовляють
+  422 `ECR-SUB-4221` з `messageKey` **`err.ECR-SUB-4221.sourceMonthNotApproved`** (деталі `sourceDocumentId`,
+  `sourcePeriodKey` `yyyyMM`, `sourceProjectCode`, `sourceDocumentKey`), коли водночас: шаблон документа є споживачем
+  зв'язки на `approvedOnly` і читання з документа діє (біт `readFromDocument` або ключ); документ-джерело року є (той
+  самий вибір, що в завантажувачі); місяць джерела, яким володіє період аркуша (річний якір — кожен із 12), не має
+  `Approved` на оригіналі аркуша. За `any`, без зв'язки, без документа-джерела року — як доти (один запит зв'язки).
+  Відхилення, відкликання і повернення в роботу не блокуються.
