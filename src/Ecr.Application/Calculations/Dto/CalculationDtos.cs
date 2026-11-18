@@ -117,15 +117,48 @@ public sealed record CalculationRunStatusDto(long? RunId, DateTime? FinishedAt, 
 /// <see cref="MaxFormulaErrors"/> записів; <c>null</c> — помилок немає.
 /// </param>
 /// <param name="FormulaErrorTotal">✎ C-1: скільки видимих комірок з помилкою (корені й залежні) всього; <c>null</c> — помилок немає.</param>
+/// <param name="SourceIssues">
+/// ✎ B80 N4 (R3.2): проблеми документа-джерела (HSE400) для споживача зв'язки в стані <c>approvedOnly</c> — місяць
+/// споживача не затверджено, а місяць джерела не затверджено; або місяць споживача затверджено, а джерело відтоді
+/// змінилося. <c>null</c> — проблем немає, а також ЗАВЖДИ за стану зв'язки <c>any</c>, без споживача чи без
+/// документа-джерела за рік.
+/// </param>
 public sealed record CalculationIssuesDto(
     IReadOnlyList<CalculationIssueDto> Items,
     IReadOnlyList<CalculationIssueTableHintDto>? Tables = null,
     IReadOnlyList<FormulaErrorIssueDto>? FormulaErrors = null,
-    int? FormulaErrorTotal = null)
+    int? FormulaErrorTotal = null,
+    IReadOnlyList<SourceIssueDto>? SourceIssues = null)
 {
     /// <summary>✎ C-1: стеля групи «Помилки формул» у відповіді (~150 КБ на найгірший рядок).</summary>
     public const int MaxFormulaErrors = 500;
 }
+
+/// <summary>✎ B80 N4 (R3.2): проблема документа-джерела для місяця документа-споживача.</summary>
+/// <param name="Kind">
+/// <c>SourceMonthNotApproved</c> — місяць споживача не затверджено, а місяць джерела не затверджено (подання й
+/// затвердження заблоковано, <c>sourceMonthNotApproved</c>); <c>SourceChangedAfterApproval</c> — місяць споживача
+/// затверджено, а місяць джерела зараз не затверджено або затверджено пізніше за споживача (консервативно: і тоді,
+/// коли числа ті самі).
+/// </param>
+/// <param name="MonthNumber">Місяць (1–12) документа-споживача, який читає місяць джерела.</param>
+/// <param name="SourcePeriodKey">Місяць документа-джерела <c>yyyyMM</c>.</param>
+/// <param name="SourceDocumentId">Документ-джерело; <c>null</c> — читач не може відкрити документ-джерело.</param>
+/// <param name="SourceProjectCode">Код проєкту документа-джерела; <c>null</c> — читач не може відкрити документ-джерело.</param>
+/// <param name="SourceDocumentKey">Бізнес-ключ документа-джерела; <c>null</c> — читач не може відкрити документ-джерело.</param>
+/// <param name="SourceApprovedAt">
+/// Коли затверджено місяць джерела (UTC); <c>null</c> — зараз не затверджено або читач не може відкрити документ-джерело.
+/// </param>
+/// <param name="ApprovedAt">Коли затверджено місяць споживача (UTC, найраніший аркуш); <c>null</c> — не затверджено.</param>
+public sealed record SourceIssueDto(
+    string Kind,
+    int MonthNumber,
+    int SourcePeriodKey,
+    long? SourceDocumentId,
+    string? SourceProjectCode,
+    string? SourceDocumentKey,
+    DateTime? SourceApprovedAt,
+    DateTime? ApprovedAt);
 
 /// <summary>✎ C-1 (D-475): запис групи «Помилки формул» — корінь помилки (або джерело «не оновлено», якого не видно).</summary>
 /// <param name="TableCode">Код таблиці.</param>

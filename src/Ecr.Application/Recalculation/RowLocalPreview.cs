@@ -107,12 +107,13 @@ public sealed class RowLocalPreview(
         // дає полям довідника свій запис.
         var defaults = await new ColumnDefaultValues(metadata, registryStore)
             .ForVersionAsync(instance.TemplateVersionId, ct).ConfigureAwait(false);
-        foreach (var (columnId, value) in defaults.Of(table.Id))
+        // ✎ B175: дефолти рядка перекривають дефолти колонки (OfRow).
+        foreach (var rowKey in editedRows.Keys)
         {
-            var asValue = CellValueMapping.ToExpressionValue(value, ExpressionValue.Null);
-            foreach (var rowKey in editedRows.Keys)
+            foreach (var (columnId, value) in defaults.OfRow(table.Id, rowKey))
             {
-                values.TryAdd(new CellKey(0, table.Id, rowKey, columnId), asValue);
+                values.TryAdd(
+                    new CellKey(0, table.Id, rowKey, columnId), CellValueMapping.ToExpressionValue(value, ExpressionValue.Null));
             }
         }
 

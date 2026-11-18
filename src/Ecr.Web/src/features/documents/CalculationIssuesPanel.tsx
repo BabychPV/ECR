@@ -5,6 +5,7 @@ import { calcErrorCause } from '@/features/grid/calcError';
 import { formatDateTime } from '@/shared/format/datetime';
 import { formatPeriodKey } from '@/shared/format/periodKey';
 import { language, t } from '@/shared/i18n';
+import { Timestamp } from '@/shared/ui/Timestamp';
 import { FormulaErrorsBanner } from './FormulaErrorsBanner';
 import { UnmatchedRowsBanner, plural } from './UnmatchedRowsBanner';
 import {
@@ -30,7 +31,27 @@ interface CalculationIssuesPanelProps {
    * Без обробника кнопки немає.
    */
   readonly onOpenHse400?: (() => Promise<boolean>) | undefined;
+  /**
+   * ✎ B80 N4: «Відкрити HSE400» причини джерела — перехід до місяця документа-джерела (`/documents/{id}?periodKey=…`).
+   * Лише коли читач може відкрити джерело (`sourceDocumentId` ≠ `null`); без обробника кнопки немає.
+   */
+  readonly onOpenSource?: ((documentId: number, periodKey: number) => void) | undefined;
   readonly narrow?: boolean;
+}
+
+/** «N місяців» (B80: бейдж причини джерела); ключі літералами — сторож каталогу. */
+function monthsText(count: number): string {
+  let category: string;
+  try {
+    category = new Intl.PluralRules(language() === 'kz' ? 'kk' : language()).select(count);
+  } catch {
+    category = count === 1 ? 'one' : 'other';
+  }
+  const params = { count: String(count) };
+  if (category === 'one') return t('document.calcIssues.months.one', params);
+  if (category === 'few') return t('document.calcIssues.months.few', params);
+
+  return t('document.calcIssues.months.other', params);
 }
 
 /**
@@ -54,6 +75,12 @@ function cellsText(count: number, atLeast = false): string {
 /** Заголовок причини — людськими словами, без формул і кодів. */
 function causeTitle(cause: IssueCause): string {
   switch (cause.kind) {
+    case 'sourceNotApproved':
+      return t('document.calcIssues.source.notApproved.title', { months: namesOf(cause.subjects, 4) });
+    case 'sourceChanged':
+      return t('document.calcIssues.source.changed.title', { months: namesOf(cause.subjects, 4) });
+    case 'sourceOther':
+      return t('document.calcIssues.source.other.title', { months: namesOf(cause.subjects, 4) });
     case 'hse400':
       return cause.subjects.length > 0
         ? t('document.calcIssues.hse400.title', { count: String(cause.subjects.length) })
@@ -77,6 +104,8 @@ function causeTitle(cause: IssueCause): string {
 
 /** Підрядок причини: що саме (паливо), які показники, де (таблиці). */
 function causeDetail(cause: IssueCause): string {
+  // ✎ B80 N4: місяці — уже в заголовку; у підрядку лише документ-джерело (недоступне — окрема примітка в рядку).
+  if (cause.source !== undefined) return cause.source.label ?? '';
   const parts: string[] = [];
   if (cause.subjects.length > 0) parts.push(namesOf(cause.subjects));
   if (cause.unit === 'cells' && cause.indicators.length > 0) {
@@ -120,6 +149,7 @@ export function CalculationIssuesPanel({
   tables,
   onOpenCell,
   onOpenHse400,
+  onOpenSource,
   narrow = false,
 }: CalculationIssuesPanelProps): JSX.Element | null {
   const causes = useMemo(() => buildIssueCauses(rows, tables), [rows, tables]);
@@ -129,7 +159,8 @@ export function CalculationIssuesPanel({
 
   if (causes.length === 0) return null;
 
-  const blocking = rows.formulaErrors.length > 0;
+  // ✎ B80 N4: не затверджений місяць джерела теж блокує подання й затвердження (`sourceMonthNotApproved`).
+  const blocking = rows.formulaErrors.length > 0 || causes.some((cause) => cause.kind === 'sourceNotApproved');
   const truncated = formulaErrorsTruncated(rows);
   const period = formatPeriodKey(periodKey);
   const detailsId = 'document-calc-issues-details';
@@ -177,7 +208,13 @@ export function CalculationIssuesPanel({
           const detail = causeDetail(cause);
           const atLeast = cause.unit === 'cells' && truncated;
           const badge =
-            cause.unit === 'cells' ? cellsText(cause.count, atLeast) : plural('document.unmatchedRows.rows', cause.count);
+            cause.unit === 'cells'
+              ? cellsText(cause.count, atLeast)
+              : cause.unit === 'months'
+                ? monthsText(cause.count)
+                : plural('document.unmatchedRows.rows', cause.count);
+          const source = cause.source;
+          const sourceId = source?.documentId ?? null;
 
           return (
             <Group
@@ -192,7 +229,7 @@ export function CalculationIssuesPanel({
             >
               <Badge
                 variant="light"
-                color={cause.unit === 'cells' ? 'statusError' : 'brand'}
+                color={cause.unit === 'rows' ? 'brand' : 'statusError'}
                 miw={88}
                 style={{ flexShrink: 0 }}
                 data-testid="document-calc-issue-count"
@@ -207,6 +244,22 @@ export function CalculationIssuesPanel({
                 {detail.length > 0 && (
                   <Text size="xs" c="dimmed" data-testid="document-calc-issue-detail">
                     {detail}
+                  </Text>
+                )}
+                {source !== undefined && source.documentId === null && (
+                  <Text size="xs" c="dimmed" data-testid="document-calc-issue-source-unavailable">
+                    {t('document.calcIssues.source.unavailable')}
+                  </Text>
+                )}
+                {cause.kind === 'sourceChanged' && source !== undefined && (
+                  <Text size="xs" c="dimmed" data-testid="document-calc-issue-source-dates">
+                    {source.sourceApprovedAt !== null && (
+                      <>
+                        {t('document.calcIssues.source.sourceApprovedAt')} <Timestamp value={source.sourceApprovedAt} />
+                        {' · '}
+                      </>
+                    )}
+                    {t('document.calcIssues.source.approvedAt')} <Timestamp value={source.approvedAt} />
                   </Text>
                 )}
                 {cause.kind === 'hse400' && hse400State === 'notFound' && (
@@ -229,6 +282,17 @@ export function CalculationIssuesPanel({
                     loading={hse400State === 'pending'}
                     aria-label={`${title} · ${t('document.calcIssues.openHse400')}`}
                     onClick={() => void openHse400()}
+                  >
+                    {t('document.calcIssues.openHse400')}
+                  </Button>
+                )}
+                {source !== undefined && sourceId !== null && onOpenSource !== undefined && (
+                  <Button
+                    size="xs"
+                    variant="light"
+                    data-testid="document-calc-issue-open-source"
+                    aria-label={`${title} · ${t('document.calcIssues.openHse400')}`}
+                    onClick={() => onOpenSource(sourceId, source.periodKey)}
                   >
                     {t('document.calcIssues.openHse400')}
                   </Button>

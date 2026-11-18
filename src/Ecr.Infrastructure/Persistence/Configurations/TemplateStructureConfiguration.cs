@@ -249,6 +249,10 @@ public sealed class RowDefConfiguration : IEntityTypeConfiguration<RowDef>
         builder.Property(x => x.IsDeleted).HasDefaultValue(false, "DF_RowDef_Del");
         builder.LocalizedText(x => x.LabelL10n);
 
+        // ✎ B175: дефолти комірок рядка — JSON без індексу й ключів (читає лише знімок версії).
+        builder.Property(x => x.CellDefaultsJson).HasColumnName("CellDefaultsJson");
+        builder.Ignore(x => x.CellDefaults);
+
         builder.HasIndex(x => new { x.TableDefId, x.RowKeyValue })
                .IsUnique().HasDatabaseName("UQ_RowDef");
 

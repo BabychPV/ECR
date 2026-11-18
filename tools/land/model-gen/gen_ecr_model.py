@@ -1518,6 +1518,35 @@ for _s in out['sheets']:
                 _c['default'] = 'NOTPASSEDOVERHAUL'
                 _d474['default'].append(_t['code'])
 print('D-474:', _d474)
+# ---- B175: дефолти комірок РЯДКА (rows[].cellDefaults = {код колонки: текст}; Lookup — код запису, '' — прибрати дефолт
+# колонки в рядку). Таблиця -> {ключ рядка | '*' (усі рядки Item): {колонка: значення}}. Білдер передає їх обома шляхами
+# (SQL CellDefaultsJson і API PUT rows).
+ROW_CELL_DEFAULTS = {}
+# B175 × B26 (P-0118-34): статус D-425 нового документа — дефолт рядка зі statusPresets (Running на рядках речовин,
+# нічого на emptyRows, напр. S3_9), тож -Stage T7bStatus потрібен лише документам, створеним до версії з B175.
+for _s in out['sheets']:
+    for _t in _s['tables']:
+        _sp = _t.get('statusPresets')
+        if _sp:
+            _rcd = ROW_CELL_DEFAULTS.setdefault(_t['code'], {})
+            for _k in _sp['rows']:
+                if _k not in _sp['emptyRows']:
+                    _rcd.setdefault(_k, {})[_sp['column']] = _sp['entry']
+_b175 = []
+for _s in out['sheets']:
+    for _t in _s['tables']:
+        _spec = ROW_CELL_DEFAULTS.get(_t['code'])
+        if not _spec:
+            continue
+        _codes = {_c['code'] for _c in _t['columns']}
+        for _rw in _t['rows']:
+            _own = dict(_spec.get('*', {})) if _rw.get('kind') == 'Item' else {}
+            _own.update(_spec.get(_rw['key'], {}))
+            _own = {k: v for k, v in _own.items() if k in _codes}
+            if _own:
+                _rw['cellDefaults'] = {k: _own[k] for k in sorted(_own)}
+                _b175.append('%s/%s' % (_t['code'], _rw['key']))
+print('B175 row cellDefaults:', len(_b175))
 print('styles:', len(out['styles']), [(s['code'], s['columns'], s['headers'], s['tables']) for s in out['styles']])
 print('cf row-scoped:', len(out['conditionalFormatsRowScoped']))
 out['registries'] = list(registries.values())

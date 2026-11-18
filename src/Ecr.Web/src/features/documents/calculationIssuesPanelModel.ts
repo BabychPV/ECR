@@ -1,5 +1,7 @@
 import type { DocumentTableDto } from '@/api/types';
+import type { SourceIssue } from '@/features/calculationIssues/api';
 import { copyFieldsOf } from '@/features/documents/sheetCopies/sheetCopyTypes';
+import { formatPeriodKey } from '@/shared/format/periodKey';
 import { localized } from '@/shared/i18n/localized';
 import type { UnmatchedRows } from './useUnmatchedRows';
 import { groupRowCount, groupUnmatchedRows } from './unmatchedRowsModel';
@@ -14,8 +16,13 @@ import { groupRowCount, groupUnmatchedRows } from './unmatchedRowsModel';
  * - `unmatched` / `rejected` / `missingInputs` — рядки, не взяті в розрахунок (колишній банер «Some rows…»);
  * - B66: `stepError` — крок методики рядка впав (`#VALUE`, `#ARG`…); `inactive` — рядки, відсіяні фільтром активності
  *   (D-425), лише кількістю.
+ * - ✎ B80 N4: `sourceNotApproved` / `sourceChanged` / `sourceOther` — місяці джерела HSE400 (`sourceIssues`): не
+ *   затверджено, змінено після затвердження цього місяця, інший (невідомий клієнту) вид.
  */
 export type IssueCauseKind =
+  | 'sourceNotApproved'
+  | 'sourceChanged'
+  | 'sourceOther'
   | 'hse400'
   | 'formula'
   | 'blocked'
@@ -32,13 +39,31 @@ export interface IssueTarget {
   readonly columnCode: string | null;
 }
 
+/**
+ * ✎ B80 N4: документ-джерело причини `source*`. Читач не може відкрити джерело — `documentId`, `label` і
+ * `sourceApprovedAt` порожні (сервер їх не віддає): ні назви, ні посилання, ні дати джерела.
+ */
+export interface IssueSource {
+  readonly documentId: number | null;
+  /** Перший (найраніший) місяць джерела `yyyyMM` — куди веде «Відкрити HSE400». */
+  readonly periodKey: number;
+  /** «<код проєкту> · <ключ документа>». */
+  readonly label: string | null;
+  /** Дати першого місяця: коли затверджено джерело і коли — місяць споживача (UTC). */
+  readonly sourceApprovedAt: string | null;
+  readonly approvedAt: string | null;
+}
+
 /** Рядок панелі — одна причина. */
 export interface IssueCause {
   readonly key: string;
   readonly kind: IssueCauseKind;
-  /** Бейдж: комірки (помилки формул, з не оновленими залежними) або рядки (не взяті в розрахунок). */
+  /**
+   * Бейдж: комірки (помилки формул, з не оновленими залежними), рядки (не взяті в розрахунок) або місяці (B80:
+   * різні місяці споживача з проблемою джерела).
+   */
   readonly count: number;
-  readonly unit: 'cells' | 'rows';
+  readonly unit: 'cells' | 'rows' | 'months';
   /** Код помилки (`formula`) — для людської причини (`calcErrorCause`). */
   readonly errorCode: string | null;
   /** Значення входів людськими назвами (паливо: «Diesel», не «37») — без повторів, у порядку появи. */
@@ -48,6 +73,8 @@ export interface IssueCause {
   /** Таблиці («Аркуш · Таблиця»). */
   readonly tables: readonly string[];
   readonly target: IssueTarget | null;
+  /** ✎ B80 N4: лише для `source*`. */
+  readonly source?: IssueSource;
 }
 
 /** Формула читає склад HSE400 (`LAND_HSE400_COMPOSITION`, `@GCV.HSE400_…`). */
@@ -211,18 +238,74 @@ export function buildIssueCauses(rows: UnmatchedRows, tables: readonly DocumentT
     }
   }
 
+  // ✎ B80 N4: причини джерела — ПЕРШИМИ: вони пояснюють причину `hse400` (складу газу немає, бо місяць не затверджено).
   const order: Record<IssueCauseKind, number> = {
-    hse400: 0,
-    formula: 1,
-    blocked: 2,
-    stepError: 3,
-    missingInputs: 4,
-    rejected: 5,
-    unmatched: 6,
-    inactive: 7,
+    sourceNotApproved: 0,
+    sourceChanged: 1,
+    sourceOther: 2,
+    hse400: 3,
+    formula: 4,
+    blocked: 5,
+    stepError: 6,
+    missingInputs: 7,
+    rejected: 8,
+    unmatched: 9,
+    inactive: 10,
   };
 
-  return [...causes.values()].map(freeze).sort((a, b) => order[a.kind] - order[b.kind]);
+  return [...sourceCauses(rows.sourceIssues ?? []), ...[...causes.values()].map(freeze)].sort(
+    (a, b) => order[a.kind] - order[b.kind],
+  );
+}
+
+/** Вид причини за `SourceIssueDto.kind`; невідомий вид — загальна причина джерела (новий вид сервера не ламає панель). */
+export function sourceKindOf(kind: string): IssueCauseKind {
+  if (kind === 'SourceMonthNotApproved') return 'sourceNotApproved';
+  if (kind === 'SourceChangedAfterApproval') return 'sourceChanged';
+
+  return 'sourceOther';
+}
+
+/**
+ * ✎ B80 N4: причини джерела — одна на (вид, документ-джерело); лічильник — РІЗНІ місяці споживача (`monthNumber`),
+ * назви — місяці джерела за зростанням. Недоступне читачеві джерело (усі поля джерела `null`) — окрема причина без
+ * назви, посилання й дати джерела.
+ */
+function sourceCauses(issues: readonly SourceIssue[]): IssueCause[] {
+  const groups = new Map<string, SourceIssue[]>();
+  for (const issue of issues) {
+    const key = `source:${sourceKindOf(issue.kind)}:${String(issue.sourceDocumentId ?? 'hidden')}`;
+    groups.set(key, [...(groups.get(key) ?? []), issue]);
+  }
+
+  return [...groups].map(([key, group]) => {
+    const sorted = [...group].sort((a, b) => a.sourcePeriodKey - b.sourcePeriodKey);
+    const first = sorted[0]!;
+    const visible = first.sourceDocumentId !== null;
+    const label =
+      visible && first.sourceDocumentKey !== null
+        ? [first.sourceProjectCode, first.sourceDocumentKey].filter((part) => part !== null && part !== '').join(' · ')
+        : null;
+
+    return {
+      key,
+      kind: sourceKindOf(first.kind),
+      count: new Set(group.map((issue) => issue.monthNumber)).size,
+      unit: 'months',
+      errorCode: null,
+      subjects: [...new Set(sorted.map((issue) => formatPeriodKey(issue.sourcePeriodKey) || String(issue.sourcePeriodKey)))],
+      indicators: [],
+      tables: [],
+      target: null,
+      source: {
+        documentId: visible ? first.sourceDocumentId : null,
+        periodKey: first.sourcePeriodKey,
+        label,
+        sourceApprovedAt: visible ? first.sourceApprovedAt : null,
+        approvedAt: first.approvedAt,
+      },
+    };
+  });
 }
 
 /**

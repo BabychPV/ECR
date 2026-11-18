@@ -57,6 +57,9 @@ export function formatDocumentTitle(chain: readonly Pick<CrumbEntry, 'text'>[]):
     // T1-15 (в): позначений ключ `⟦nav.security⟧` (каталог ще не доїхав) у заголовок вкладки
     // не йде — така частина пропускається, як і та, що ще резолвиться.
     .filter((text): text is string => text !== null && text.length > 0 && !text.includes('⟦'))
+    // ✎ B178: сусідні однакові частини — одна. `/documents/:id` без завантаженого документа (не знайдено) резолвить
+    // крихту документа в ту саму загальну назву, що й предок «Documents», — вкладка казала «Documents · Documents · ECR».
+    .filter((text, index, all) => index === 0 || text !== all[index - 1])
     .reverse();
 
   return parts.length > 0 ? `${parts.join(TitleSeparator)}${TitleSeparator}${AppTitleSuffix}` : AppTitleSuffix;

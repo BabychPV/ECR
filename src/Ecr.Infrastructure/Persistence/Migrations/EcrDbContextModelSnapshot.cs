@@ -2497,6 +2497,10 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<string>("CellDefaultsJson")
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("CellDefaultsJson");
+
                     b.Property<DateTime?>("DeletedAt")
                         .HasColumnType("datetime2(3)");
 

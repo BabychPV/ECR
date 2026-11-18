@@ -2761,12 +2761,12 @@ public sealed class RecalculationService(
             // дефолт не пишеться (D-283), а дефолтні колонки — входи, перерахунок їх не пише.
             if (extras is not null)
             {
-                foreach (var (columnId, value) in extras.Defaults.Of(table.TableDefId))
+                // ✎ B175: дефолти рядка перекривають дефолти колонки (OfRow); рядок без власних — ті самі значення.
+                foreach (var rowKey in keys.Keys)
                 {
-                    var asValue = FromCellValue(value);
-                    foreach (var rowKey in keys.Keys)
+                    foreach (var (columnId, value) in extras.Defaults.OfRow(table.TableDefId, rowKey))
                     {
-                        values.TryAdd(new CellKey(offset, table.TableDefId, rowKey, columnId), asValue);
+                        values.TryAdd(new CellKey(offset, table.TableDefId, rowKey, columnId), FromCellValue(value));
                     }
                 }
             }

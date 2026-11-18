@@ -43,6 +43,74 @@ public sealed class RowDef : Entity<int>
     public DateTime? DeletedAt { get; private set; }
     public int? DeletedByUserId { get; private set; }
 
+    /// <summary>
+    /// ✎ B175: значення комірок рядка за замовчуванням — JSON-об'єкт <c>{"&lt;код колонки&gt;":"&lt;текст&gt;"}</c>
+    /// (<c>cfg.RowDef.CellDefaultsJson</c>); <c>null</c> — немає. Дзеркало <see cref="ColumnDef.DefaultValue"/> на
+    /// рівні рядка: Lookup — КОД запису довідника; <c>""</c> — прибрати дефолт колонки в цьому рядку. Підставляється
+    /// лише при ЧИТАННІ (D-283 Q10=A), ніколи не пишеться в комірки.
+    /// </summary>
+    public string? CellDefaultsJson
+    {
+        get => _cellDefaultsJson;
+        private set
+        {
+            _cellDefaultsJson = value;
+            _cellDefaults = null;
+        }
+    }
+
+    private string? _cellDefaultsJson;
+    private IReadOnlyDictionary<string, string>? _cellDefaults;
+
+    /// <summary>
+    /// Типізований доступ до <see cref="CellDefaultsJson"/>: код колонки → текст (порожньо — дефолтів немає).
+    /// Непридатний JSON (рука в базі) читається як «немає» — показ і розрахунок не падають через конфігурацію.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> CellDefaults => _cellDefaults ??= ParseCellDefaults(_cellDefaultsJson);
+
+    /// <summary>
+    /// ✎ B175: задає дефолти комірок рядка (<c>null</c>/порожньо — прибрати). Коди й значення перевіряє обробник
+    /// (колонки цієї таблиці, тип, довідник) — сутність не бачить колонок таблиці.
+    /// </summary>
+    public void SetCellDefaults(IReadOnlyDictionary<string, string>? defaults)
+    {
+        if (defaults is null || defaults.Count == 0)
+        {
+            CellDefaultsJson = null;
+            return;
+        }
+
+        // Детермінований порядок ключів: та сама мапа — той самий текст (аудит і порівняння клонів без шуму).
+        var ordered = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (code, value) in defaults)
+        {
+            ordered[code] = value ?? string.Empty;
+        }
+
+        CellDefaultsJson = System.Text.Json.JsonSerializer.Serialize(ordered);
+    }
+
+    private static IReadOnlyDictionary<string, string> ParseCellDefaults(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return Empty;
+        }
+
+        try
+        {
+            return System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(json) is { Count: > 0 } map
+                ? new Dictionary<string, string>(map, StringComparer.Ordinal)
+                : Empty;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return Empty;
+        }
+    }
+
+    private static readonly IReadOnlyDictionary<string, string> Empty = new Dictionary<string, string>(StringComparer.Ordinal);
+
     /// <summary>Змінює порядок — презентаційна операція.</summary>
     public void Reorder(int ordinal) => Ordinal = ordinal;
 

@@ -109,6 +109,12 @@ export function diagnostics({ ready, db, facts, checkedAt }: DiagnosticsInput): 
       lines.push(
         `Hse400CompositionFromDocument: ${String(calculations.hse400CompositionFromDocument)} (${calculations.hse400CompositionSource})${calculations.hse400CompositionWarning ? ' · WARNING: off while an HSE400 document for the current year exists' : ''}`,
       );
+      // ✎ B80 N6: ворота зв'язки HSE400 → Land (N1) — у копію для підтримки, мовою сервера.
+      if (calculations.hse400SourceState != null) {
+        lines.push(
+          `Hse400SourceState: ${calculations.hse400SourceState} · approved months: ${calculations.hse400ApprovedMonths == null ? 'n/a' : String(calculations.hse400ApprovedMonths)}${calculations.hse400SourceWarning ? ' · WARNING: unapproved source' : ''}`,
+        );
+      }
     }
   }
 
@@ -347,6 +353,11 @@ export function HealthPage(): JSX.Element {
           />
         )}
 
+        {/* ✎ B80 N6: документ HSE400 поточного року є, а джерело Land не «чисте»: ворота ще `any` (Land читає й
+            незатверджене) або `approvedOnly`, але місяць із даними не затверджений (Land цього місяця без складу).
+            Текст — за станом воріт; без прапора сервера банера немає. */}
+        {hse400SourceBanner((facts.data as Partial<SystemFacts> | undefined)?.calculations)}
+
         {/* ⚠ Довідкові факти, не вміст екрана: доки їх немає (ще вантажаться,
             відмова, відповідь не тієї форми) — секція не малюється взагалі
             (`D15-06`), а про справжню біду вже кажуть дві межі поруч. */}
@@ -477,7 +488,52 @@ function factItems(facts: SystemFacts): { label: string; value: ReactNode }[] {
     { label: t('health.facts.logDirectory'), value: facts.logDirectory },
     // B105: дієвий прапор складу HSE400 для Land і його джерело (мітка сервера, не переклад — як `transport.kind`).
     { label: t('health.facts.hse400Composition'), value: hse400Composition(facts) },
+    // ✎ B80 N6: ворота зв'язки HSE400 → Land і затверджені місяці; немає зв'язки — рядка немає (`D15-06`).
+    { label: t('health.facts.hse400Source'), value: hse400Source(facts) },
   ];
+}
+
+type CalculationFacts = SystemFacts['calculations'];
+
+/**
+ * ✎ B80 N6: «Лише затверджені місяці · затверджено 11 з 12». `null` — зв'язки немає або старий процес без поля.
+ * Невідомий стан воріт показується міткою сервера (як `hse400CompositionSource`), а не вигаданим перекладом.
+ */
+function hse400Source(facts: SystemFacts): string | null {
+  const calculations = (facts as Partial<SystemFacts>).calculations;
+  const state = calculations?.hse400SourceState;
+
+  if (calculations === undefined || state == null) return null;
+
+  const label =
+    state === 'approvedOnly'
+      ? t('health.facts.hse400Source.approvedOnly')
+      : state === 'any'
+        ? t('health.facts.hse400Source.any')
+        : state;
+  const months = calculations.hse400ApprovedMonths;
+
+  return months == null ? label : `${label} · ${t('health.facts.hse400Source.approvedMonths', { count: months })}`;
+}
+
+/** ✎ B80 N6: банер «джерело HSE400 для Land не затверджене»; текст — за станом воріт (`any` / `approvedOnly`). */
+function hse400SourceBanner(calculations: CalculationFacts | undefined): JSX.Element | null {
+  if (calculations?.hse400SourceWarning !== true) return null;
+
+  return (
+    <Banner
+      tone="warning"
+      testId="health-hse400-source-warning"
+      title={t('health.hse400SourceWarning.title')}
+      text={
+        <Text size="sm">
+          {calculations.hse400SourceState === 'approvedOnly'
+            ? t('health.hse400SourceWarning.textApprovedOnly')
+            : t('health.hse400SourceWarning.textAny')}
+        </Text>
+      }
+    />
+  );
 }
 
 /**

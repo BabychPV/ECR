@@ -106,7 +106,10 @@ Methodologies) PUT-ить `/methodologies/{m}/bindings/{colId}/{output}` для 
 (у дужках — у річному шаблоні YearMonths дає `Volume_M01..M12` і псевдоніми); `DECIDED_STATUS` — колонка статусу D-425
 `Land_Status` (LAND_GENERIC_EQUIPSTATUS) і `statusPresets` (Running на S1_6/S2_7, S3_9 порожньо), а
 `tools/land/land-row-filter.json` ставить `ECW_C09_02_01` у `runningOnly`. Наявні документи отримують статус етапом
-`Build-LandTemplate.ps1 -Stage T7bStatus` (пресетів рядків у шаблоні немає; новий документ — повторний прогін етапу).
+`Build-LandTemplate.ps1 -Stage T7bStatus`. ✎ B175: генератор переносить `statusPresets` у дефолти рядка
+(`rows[].cellDefaults = {"Land_Status":"RUNNING"}` на S1_6/S2_7, S3_9 — нічого; `ROW_CELL_DEFAULTS` у `gen_ecr_model.py`),
+білдер пише їх у `cfg.RowDef.CellDefaultsJson` (SQL) і `cellDefaults` (PUT rows) — новий документ версії з B175 має
+статус без повтору етапу; для старіших версій новий документ — повторний прогін етапу.
 Модель методології (формула, аргументи, версія, правила) не змінюється; міграції немає.
 
 ## Мости аргументів методологій для аркушів 6, 9-11 (LP-10)
