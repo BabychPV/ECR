@@ -129,9 +129,13 @@ public sealed class ScriptMaterializer(
     /// <param name="script">Скомпільований скрипт версії.</param>
     /// <param name="importsOnDate">Дата, на яку читаються оголошені імпорти (на склад не впливає).</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="moduleLevel">
+    /// Версія рівня <c>Module</c>: скрипт може мати виходів більше, ніж збережено (див. коментар у тілі); зайвими вважаються
+    /// лише збережені виходи, яких скрипт не дає.
+    /// </param>
     /// <returns>Проблеми: порожньо — склад збігається.</returns>
     public async Task<IReadOnlyList<PublishProblem>> DiffAgainstStoredAsync(
-        int versionId, CompiledScript script, DateOnly importsOnDate, CancellationToken ct)
+        int versionId, CompiledScript script, DateOnly importsOnDate, CancellationToken ct, bool moduleLevel = false)
     {
         ArgumentNullException.ThrowIfNull(script);
 
@@ -150,7 +154,10 @@ public sealed class ScriptMaterializer(
         var actualOutputs = (await methodologies.GetOutputsAsync(versionId, ct).ConfigureAwait(false))
             .Select(o => OutputKey(o.Code, o.UnitId, perSubstanceMatters && o.IsPerSubstance))
             .ToList();
-        AddDifference(problems, "switch.problem.outputsDiffer", "outputs", versionId, expectedOutputs, actualOutputs);
+        // Рівень Module: скрипт оголошує вихід для КОЖНОЇ формули (по рядках F_… їх розкладає модуль), а збережена версія
+        // тримає лише виходи, прив'язані до якорів таблиць, і виходи золотих тестів. Тож скрипт може мати більше виходів,
+        // ніж збережено; а збережений вихід, якого скрипт не дає (чи з іншою одиницею), - справжня розбіжність.
+        AddDifference(problems, "switch.problem.outputsDiffer", "outputs", versionId, expectedOutputs, actualOutputs, ignoreOnlyInScript: moduleLevel);
 
         AddDifference(problems, "switch.problem.substancesDiffer", "substances", versionId, script.Substances, actualSubstances);
 
@@ -210,11 +217,14 @@ public sealed class ScriptMaterializer(
         string what,
         int versionId,
         IReadOnlyCollection<string> expected,
-        IReadOnlyCollection<string> actual)
+        IReadOnlyCollection<string> actual,
+        bool ignoreOnlyInScript = false)
     {
         var expectedSet = new HashSet<string>(expected, StringComparer.OrdinalIgnoreCase);
         var actualSet = new HashSet<string>(actual, StringComparer.OrdinalIgnoreCase);
-        var fromScript = expectedSet.Where(x => !actualSet.Contains(x)).Order(StringComparer.Ordinal).ToList();
+        var fromScript = ignoreOnlyInScript
+            ? []
+            : expectedSet.Where(x => !actualSet.Contains(x)).Order(StringComparer.Ordinal).ToList();
         var stored = actualSet.Where(x => !expectedSet.Contains(x)).Order(StringComparer.Ordinal).ToList();
         if (fromScript.Count == 0 && stored.Count == 0)
         {

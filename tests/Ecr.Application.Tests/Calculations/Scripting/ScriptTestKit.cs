@@ -55,11 +55,12 @@ internal static class ScriptTestKit
     }
 
     public static MethodologyVersion NewVersion(
-        Methodology methodology, int id, MethodologyEngine engine = MethodologyEngine.Script, string number = "1.0")
+        Methodology methodology, int id, MethodologyEngine engine = MethodologyEngine.Script, string number = "1.0",
+        CalculationLevel level = CalculationLevel.Configuration)
     {
         var version = WithId(
             new MethodologyVersion(
-                methodology.Id, number, CalculationLevel.Configuration, 1, new DateTime(2099, 1, 1, 0, 0, 0, DateTimeKind.Utc), engine),
+                methodology.Id, number, level, 1, new DateTime(2099, 1, 1, 0, 0, 0, DateTimeKind.Utc), engine),
             id);
         methodology.AddVersion(version);
         return version;
