@@ -30,7 +30,8 @@ public sealed class RegistriesController(
     DiscardRegistryDefinitionDraftHandler discardDraft,
     ImportRegistryEntriesHandler importEntries,
     IConfiguration configuration,
-    GetRegistryTargetHandler getTarget) : ControllerBase
+    GetRegistryTargetHandler getTarget,
+    RegistryWriteRetry retry) : ControllerBase
 {
     /// <summary>
     /// Мінімальні відомості про довідник-ЦІЛЬ Lookup за Id - для показу поточної цілі колонки чи поля шапки, якої немає
@@ -313,7 +314,9 @@ public sealed class RegistriesController(
         ArgumentNullException.ThrowIfNull(dto);
 
         var isNew = dto.Id is null;
-        var result = await upsert.HandleWithWarningsAsync(dto, code, ct).ConfigureAwait(false);
+        // B167: програш одночасному однаковому запиту — повтор у свіжій області (RegistryWriteRetry), відповідь послідовного повтору.
+        // ⚠ Параметр лямбди названо як обробник: сторож EndpointCoverageTests (СТАТИЧНО) бачить виклик того самого типу.
+        var result = await retry.RunAsync(upsert, upsert => upsert.HandleWithWarningsAsync(dto, code, ct)).ConfigureAwait(false);
         var id = result.Id;
         var body = new RegistryEntryIdResponse(id) { Warnings = result.Warnings };
 
@@ -374,8 +377,10 @@ public sealed class RegistriesController(
             }
         }
 
-        return Ok(await importEntries
-            .HandleAsync(code, content, file.Length, maxBytes, dryRun, ct, notUtf8)
+        // B167: програш одночасному однаковому файлу — повтор у свіжій області (RegistryWriteRetry): звіт послідовного повтору.
+        // dryRun нічого не пише й не конфліктує, тож повтор його не стосується.
+        return Ok(await retry
+            .RunAsync(importEntries, importEntries => importEntries.HandleAsync(code, content, file.Length, maxBytes, dryRun, ct, notUtf8))
             .ConfigureAwait(false));
     }
 

@@ -108,27 +108,27 @@ public sealed class NaeTreeProvisioner(
     internal async Task<bool> EnsureAsSystemAsync(string code, Permits.PermitTypeActor system, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(system);
-        if (await registries.FindDefinitionAsync(code, ct).ConfigureAwait(false) is not null)
-        {
-            // NAE node types (human 03.11): an existing tree from before the node types is upgraded once, idempotently.
-            await uow.ExecuteInTransactionAsync(token => UpgradeNodeTypesAsync(code, system.AuditUserId, token), ct).ConfigureAwait(false);
-            await uow.ExecuteInTransactionAsync(token => MakeSiteOptionalAsync(code, system.AuditUserId, token), ct).ConfigureAwait(false);
-            await uow.ExecuteInTransactionAsync(token => RepairScopeCodesAsync(code, system.AuditUserId, token), ct).ConfigureAwait(false);
-            return false;
-        }
-
+        // ⛔ B167: два старти інстансів одночасно — по черзі: замок розгортання цього дерева ПЕРШИМ кроком транзакції, і жодного
+        // читання дерева до нього (відстежений екземпляр, прочитаний до коміту першого, лишився б застарілим). Без замка обидва
+        // бачили «дерева / значення RegionCode немає», і другого відбивав унікальний індекс (UQ_RegistryDef, UQ_RegistryValue), хоча
+        // послідовний повтор — «нічого не змінено». Під замком другий читає закомічене першим і нічого не робить.
         var created = false;
         await uow.ExecuteInTransactionAsync(
             async token =>
             {
                 created = false;
-                if (await registries.FindDefinitionAsync(code, token).ConfigureAwait(false) is not null)
+                await registries.LockProvisioningAsync("nae-tree." + code, token).ConfigureAwait(false);
+                if (await registries.FindDefinitionAsync(code, token).ConfigureAwait(false) is null)
                 {
+                    _ = await CreateAsync(code, system, token).ConfigureAwait(false);
+                    created = true;
                     return;
                 }
 
-                _ = await CreateAsync(code, system, token).ConfigureAwait(false);
-                created = true;
+                // NAE node types (human 03.11): an existing tree from before the node types is upgraded once, idempotently.
+                await UpgradeNodeTypesAsync(code, system.AuditUserId, token).ConfigureAwait(false);
+                await MakeSiteOptionalAsync(code, system.AuditUserId, token).ConfigureAwait(false);
+                await RepairScopeCodesAsync(code, system.AuditUserId, token).ConfigureAwait(false);
             },
             ct).ConfigureAwait(false);
         return created;

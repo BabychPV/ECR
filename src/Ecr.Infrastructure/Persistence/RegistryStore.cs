@@ -70,6 +70,45 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Власник — транзакція (<c>@LockOwner = 'Transaction'</c>): замок знімає коміт чи відкат; поза транзакцією
+    /// <c>sp_getapplock</c> відмовляє, тож тут — явна відмова. Не дочекалися (<c>&lt; 0</c>) — та сама відмова 409
+    /// <c>lockTimeout</c>, що й на будь-якому вичерпаному очікуванні блокування: нічого не збережено, дію можна повторити.
+    /// </remarks>
+    public async Task LockProvisioningAsync(string resource, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(resource);
+        if (db.Database.CurrentTransaction is null)
+        {
+            throw new InvalidOperationException(
+                "Замок розгортання береться лише всередині транзакції: поза нею він звільнився б одразу.");
+        }
+
+        var result = new Microsoft.Data.SqlClient.SqlParameter("@rc", System.Data.SqlDbType.Int)
+        {
+            Direction = System.Data.ParameterDirection.Output,
+        };
+
+        await db.Database.ExecuteSqlRawAsync(
+            "EXEC @rc = sp_getapplock @Resource = @res, @LockMode = N'Exclusive', "
+            + "@LockOwner = N'Transaction', @LockTimeout = @timeout;",
+            [
+                result,
+                new Microsoft.Data.SqlClient.SqlParameter("@res", "ecr.provision." + resource.ToUpperInvariant()),
+                new Microsoft.Data.SqlClient.SqlParameter("@timeout", LockWaitGuard.LockTimeoutMs),
+            ],
+            ct).ConfigureAwait(false);
+
+        if (result.Value is not int rc || rc < 0)
+        {
+            throw new Application.Errors.ConcurrencyConflictException(
+                Domain.Errors.ErrorCodes.SheetBusy,
+                "Те саме розгортання саме виконує інший запит чи вузол. Нічого не збережено; повторіть дію за мить.",
+                new Dictionary<string, object?> { ["messageKey"] = LockWaitGuard.MessageKey });
+        }
+    }
+
+    /// <inheritdoc />
     public async Task<int?> FindFieldHoldingReferenceAsync(IReadOnlyCollection<int> registryFieldDefIds, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(registryFieldDefIds);
