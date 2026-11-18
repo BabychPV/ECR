@@ -117,32 +117,10 @@ public sealed class GetTableSliceHandler(
     /// бази (як і до L2: числа періоду перегляду). Доступ до періоду-власника тут не вирішується — комірки колонок, власник
     /// яких поза областю ролі читача, маскує <see cref="OwnerBlockedColumnsAsync"/> далі, після накладення.
     /// </remarks>
-    private async Task<IReadOnlyDictionary<int, int>?> CalculatedOwnerPeriodsAsync(
+    private Task<IReadOnlyDictionary<int, int>?> CalculatedOwnerPeriodsAsync(
         long documentId, TableInstanceRef instance, Domain.Entities.Configuration.TableDef table,
         HashSet<int> calculated, CancellationToken ct)
-    {
-        if (monthRouter is not { Enabled: true }
-            || instance.SheetCopyId is not null
-            || !monthRouter.RoutesComputedVersion(instance.TemplateVersionId)
-            || !monthRouter.AppliesToTable(table))
-        {
-            return null;
-        }
-
-        var routing = await monthRouter.GetDocumentAsync(documentId, ct).ConfigureAwait(false);
-        if (routing is null)
-        {
-            return null;
-        }
-
-        var foreign = await monthRouter
-            .ForeignColumnsAsync(routing, table, new Domain.ValueObjects.PeriodKey(instance.PeriodKey), ct)
-            .ConfigureAwait(false);
-        var owners = foreign
-            .Where(f => calculated.Contains(f.Column.Id))
-            .ToDictionary(f => f.Column.Id, f => f.OwnerPeriod.Value);
-        return owners.Count == 0 ? null : owners;
-    }
+        => Calculations.CalculatedOwnerRouting.OwnerPeriodsAsync(monthRouter, documentId, instance, table, calculated, ct);
 
     private readonly MethodologyRequiredColumnsCache _required = new(memory);
 

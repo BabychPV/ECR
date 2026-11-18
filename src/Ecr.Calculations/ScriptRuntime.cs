@@ -21,7 +21,8 @@ internal sealed record ScriptDataAccess(
     ICalculationResultStore Results,
     IScriptRuntimeStore? Templates,
     ScriptRunContext? Run,
-    CalculationLimits Limits);
+    CalculationLimits Limits,
+    IMonthColumnRouter? MonthRouter = null);
 
 /// <summary>Екземпляр таблиці, який читає скрипт: структура, карти місячних колонок, результати інших методологій.</summary>
 internal sealed class InstanceData(
@@ -218,7 +219,8 @@ public sealed class ScriptRuntime
             }
         }
 
-        var calculated = await LoadCalculatedAsync(reference, columns, ct).ConfigureAwait(false);
+        var table = snapshot.Sheets.SelectMany(sheet => sheet.Tables).FirstOrDefault(t => t.Id == reference.TableDefId);
+        var calculated = await LoadCalculatedAsync(reference, table, columns, ct).ConfigureAwait(false);
         return new InstanceData(reference, tableCode, codes, months, calculated);
     }
 
@@ -237,8 +239,14 @@ public sealed class ScriptRuntime
     /// Результати ІНШИХ методологій для колонок <c>Calculated</c>, які читає скрипт (§13.9): значення за правилом
     /// накладення сітки (<see cref="CalculatedResultMatching"/>), але з результатів поточного прогону.
     /// </summary>
+    /// <remarks>
+    /// ✎ LAND-YEAR L2b: колонка з ЧУЖИМ власником (місячна m версії YearWithMonthColumns → період m) читається з періоду-власника
+    /// — тим самим правилом, що в сітці (<see cref="CalculatedOwnerRouting"/>, <see cref="CalculatedOwnerResults"/>): числа
+    /// актуального прогону періоду-власника й його екземпляра цієї таблиці, а не числа поточного періоду. Період-власник —
+    /// інший прогін, тож поточний прогін його не рахує: «в прогоні» для такої колонки не буває.
+    /// </remarks>
     private async Task<IReadOnlyDictionary<string, IReadOnlyList<CalculationArgument>>> LoadCalculatedAsync(
-        TableInstanceRef reference, IReadOnlyList<ColumnDef> columns, CancellationToken ct)
+        TableInstanceRef reference, TableDef? table, IReadOnlyList<ColumnDef> columns, CancellationToken ct)
     {
         var wanted = columns
             .Where(c => c.DataType == CellDataType.Calculated && IsWanted(c.Code))
@@ -260,45 +268,75 @@ public sealed class ScriptRuntime
             return EmptyCalculated;
         }
 
-        var filter = new CurrentResultFilter(
-            [reference.TableInstanceId],
-            [.. bindings.Select(b => b.OutputCode).Distinct(StringComparer.OrdinalIgnoreCase)],
-            [.. bindings.SelectMany(b => b.VersionIds).Distinct()]);
+        // Колонки з чужим власником — окремо: їхні числа лежать в іншому періоді (те саме правило, що в сітці).
+        var owners = table is null
+            ? null
+            : await CalculatedOwnerRouting
+                .OwnerPeriodsAsync(_data.MonthRouter, reference.DocumentId, reference, table, wanted.Keys.ToHashSet(), ct)
+                .ConfigureAwait(false);
+        bool IsForeign(ColumnResultBinding binding) => owners?.ContainsKey(binding.ColumnDefId) == true;
+        var ownBindings = bindings.Where(b => !IsForeign(b)).ToList();
+        var foreignBindings = bindings.Where(IsForeign).ToList();
 
-        IReadOnlyList<CalculationResultRow> inRun = _data.Run?.CalculationRunId is { } run
-            ? await _data.Results.ReadRunAsync(run, reference.DocumentId, reference.PeriodKey, filter, ct).ConfigureAwait(false)
-            : [];
-
-        // Методологія-джерело, якої цей прогін не рахував (аркуш затверджено, прогін частковий), — її актуальні
-        // або перенесені результати.
-        // ⛔ «В прогоні» — те, що прогін РАХУЄ для цього екземпляра, а не лише те, що дало рядки: джерело без жодного
-        // результату все одно порожнє, а не «попередній актуальний прогін».
-        var runVersions = inRun.Select(r => r.MethodologyVersionId).ToHashSet();
-        if (_data.Run?.RunBindings is { } runBindings)
+        IReadOnlyList<CalculationResultRow> inRun = [];
+        IReadOnlyList<CalculationResultRow> current = [];
+        HashSet<int> runVersions = [];
+        if (ownBindings.Count > 0)
         {
-            runVersions.UnionWith(bindings
-                .SelectMany(b => b.VersionIds)
-                .Where(v => runBindings.Contains((v, reference.TableInstanceId))));
+            var filter = new CurrentResultFilter(
+                [reference.TableInstanceId],
+                [.. ownBindings.Select(b => b.OutputCode).Distinct(StringComparer.OrdinalIgnoreCase)],
+                [.. ownBindings.SelectMany(b => b.VersionIds).Distinct()]);
+
+            inRun = _data.Run?.CalculationRunId is { } run
+                ? await _data.Results.ReadRunAsync(run, reference.DocumentId, reference.PeriodKey, filter, ct).ConfigureAwait(false)
+                : [];
+
+            // Методологія-джерело, якої цей прогін не рахував (аркуш затверджено, прогін частковий), — її актуальні
+            // або перенесені результати.
+            // ⛔ «В прогоні» — те, що прогін РАХУЄ для цього екземпляра, а не лише те, що дало рядки: джерело без жодного
+            // результату все одно порожнє, а не «попередній актуальний прогін».
+            runVersions = inRun.Select(r => r.MethodologyVersionId).ToHashSet();
+            if (_data.Run?.RunBindings is { } runBindings)
+            {
+                runVersions.UnionWith(ownBindings
+                    .SelectMany(b => b.VersionIds)
+                    .Where(v => runBindings.Contains((v, reference.TableInstanceId))));
+            }
+
+            var needCurrent = ownBindings.Any(b => !b.VersionIds.Any(runVersions.Contains));
+            if (needCurrent)
+            {
+                current = _data.Results is ICurrentResultFilterReader narrow
+                    ? await narrow.ReadCurrentMatchingAsync(reference.DocumentId, reference.PeriodKey, filter, ct).ConfigureAwait(false)
+                    : [.. (await _data.Results.ReadCurrentAsync(reference.DocumentId, reference.PeriodKey, ct).ConfigureAwait(false))
+                        .Where(r => r.TableInstanceId is null || r.TableInstanceId == reference.TableInstanceId)];
+            }
         }
 
-        var needCurrent = bindings.Any(b => !b.VersionIds.Any(runVersions.Contains));
-        IReadOnlyList<CalculationResultRow> current = [];
-        if (needCurrent)
+        var ownerResults = CalculatedOwnerResults.Empty;
+        if (foreignBindings.Count > 0)
         {
-            current = _data.Results is ICurrentResultFilterReader narrow
-                ? await narrow.ReadCurrentMatchingAsync(reference.DocumentId, reference.PeriodKey, filter, ct).ConfigureAwait(false)
-                : [.. (await _data.Results.ReadCurrentAsync(reference.DocumentId, reference.PeriodKey, ct).ConfigureAwait(false))
-                    .Where(r => r.TableInstanceId is null || r.TableInstanceId == reference.TableInstanceId)];
+            // Читач залежить від числа ІНШОГО періоду: прогін мусить знати, що його результат може застаріти (RecalculationJob).
+            var ownerPeriods = foreignBindings.Select(b => owners![b.ColumnDefId]).Distinct().Order().ToList();
+            _data.Run?.NoteForeignOwnerRead(ownerPeriods);
+            ownerResults = await CalculatedOwnerResults
+                .ReadAsync(_data.Results, reference.DocumentId, [(reference.TableDefId, ownerPeriods)], ct)
+                .ConfigureAwait(false);
         }
 
         var runByKey = inRun.Where(r => r.SourceRowKey is not null)
             .ToLookup(r => (Row: r.SourceRowKey!, Output: r.OutputCode.ToUpperInvariant()));
         var currentByKey = current.Where(r => r.SourceRowKey is not null)
             .ToLookup(r => (Row: r.SourceRowKey!, Output: r.OutputCode.ToUpperInvariant()));
+        var ownerByRow = ownerResults.Results
+            .Where(r => r.SourceRowKey is not null)
+            .ToLookup(r => (Period: r.PeriodKey, Row: r.SourceRowKey!, Output: r.OutputCode.ToUpperInvariant()));
 
         var rowKeys = inRun.Concat(current)
             .Where(r => r.SourceRowKey is not null)
             .Select(r => r.SourceRowKey!)
+            .Concat(ownerResults.Results.Where(r => r.SourceRowKey is not null).Select(r => r.SourceRowKey!))
             .Distinct(StringComparer.Ordinal)
             .Order(StringComparer.Ordinal)
             .ToList();
@@ -339,11 +377,26 @@ public sealed class ScriptRuntime
                     continue;
                 }
 
-                var key = (rowKey, binding.OutputCode.ToUpperInvariant());
-                var source = binding.VersionIds.Any(runVersions.Contains) ? runByKey : currentByKey;
-                var candidates = source[key].Where(r => binding.VersionIds.Contains(r.MethodologyVersionId)).ToList();
+                var output = binding.OutputCode.ToUpperInvariant();
+                List<CalculationResultRow> candidates;
+                long? ownInstance = reference.TableInstanceId;
+                if (owners is not null && owners.TryGetValue(binding.ColumnDefId, out var ownerPeriod))
+                {
+                    // Колонка з чужим власником: екземпляр-власник цієї таблиці й числа його періоду.
+                    ownInstance = ownerResults.InstanceOf(ownerPeriod, reference.TableDefId);
+                    candidates = [.. ownerByRow[(ownerPeriod, rowKey, output)]
+                        .Where(r => binding.VersionIds.Contains(r.MethodologyVersionId))
+                        .Select(r => new CalculationResultRow(
+                            r.MethodologyVersionId, r.SourceRowKey, r.OutputCode, r.Value, r.UnitId, r.SubstanceEntryId,
+                            r.TableInstanceId))];
+                }
+                else
+                {
+                    var source = binding.VersionIds.Any(runVersions.Contains) ? runByKey : currentByKey;
+                    candidates = [.. source[(rowKey, output)].Where(r => binding.VersionIds.Contains(r.MethodologyVersionId))];
+                }
 
-                var matched = CalculatedResultMatching.Resolve(binding.MatchJson, candidates, reference.TableInstanceId, Texts);
+                var matched = CalculatedResultMatching.Resolve(binding.MatchJson, candidates, ownInstance, Texts);
                 if (matched.Kind == CalculatedMatchKind.NoValue)
                 {
                     continue;

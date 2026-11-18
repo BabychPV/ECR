@@ -23,4 +23,24 @@ public sealed class ScriptRunContext
     /// перемкнуть) — інакше читач розійшовся б із сіткою, де джерела вже немає.
     /// </remarks>
     public IReadOnlySet<(int MethodologyVersionId, long TableInstanceId)>? RunBindings { get; set; }
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, byte> _foreignOwnerPeriods = new();
+
+    /// <summary>
+    /// ✎ LAND-YEAR L2b: періоди-власники, чиї результати цей прогін читав колонками <c>Calculated</c> з чужим власником.
+    /// Число читача залежить від прогону ІНШОГО періоду й застаріває, якщо той перераховується (RecalculationJob).
+    /// </summary>
+    public IReadOnlyCollection<int> ForeignOwnerPeriods => [.. _foreignOwnerPeriods.Keys.Order()];
+
+    /// <summary>Позначає, що читалися результати періодів-власників (див. <see cref="ForeignOwnerPeriods"/>).</summary>
+    /// <param name="ownerPeriods">Періоди-власники.</param>
+    public void NoteForeignOwnerRead(IEnumerable<int> ownerPeriods)
+    {
+        ArgumentNullException.ThrowIfNull(ownerPeriods);
+
+        foreach (var period in ownerPeriods)
+        {
+            _foreignOwnerPeriods[period] = 0;
+        }
+    }
 }

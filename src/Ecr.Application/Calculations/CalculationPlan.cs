@@ -126,6 +126,7 @@ public sealed class ModuleProfile
     private readonly HashSet<long> _evaluatedTables = [];
     private readonly List<StepErrorRow> _stepErrors = [];
     private readonly List<InactiveRowsSummary> _inactive = [];
+    private readonly SortedSet<int> _foreignOwnerReads = [];
 
     /// <summary>Записує виконання одного модуля.</summary>
     /// <param name="moduleCode">Код модуля.</param>
@@ -170,6 +171,7 @@ public sealed class ModuleProfile
         }
 
         _evaluatedTables.UnionWith(other._evaluatedTables);
+        _foreignOwnerReads.UnionWith(other._foreignOwnerReads);
         RecordSkippedUnpublished(other._skippedUnpublished);
 
         foreach (var stat in other._stats.Values)
@@ -242,6 +244,21 @@ public sealed class ModuleProfile
         }
 
         _evaluatedTables.ExceptWith(tableInstanceIds);
+    }
+
+    /// <summary>
+    /// ✎ LAND-YEAR L2b: періоди-власники, чиї результати цей прогін читав методологіями-скриптами (колонки <c>Calculated</c>
+    /// з чужим власником). Число читача залежить від прогону періоду-власника — див. <c>RecalculationJob</c>.
+    /// </summary>
+    public IReadOnlyCollection<int> ForeignOwnerReads => _foreignOwnerReads;
+
+    /// <summary>Записує періоди-власники, чиї результати читав прогін.</summary>
+    /// <param name="ownerPeriods">Ключі періодів-власників.</param>
+    public void RecordForeignOwnerReads(IEnumerable<int> ownerPeriods)
+    {
+        ArgumentNullException.ThrowIfNull(ownerPeriods);
+
+        _foreignOwnerReads.UnionWith(ownerPeriods);
     }
 
     /// <summary>

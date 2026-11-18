@@ -57,7 +57,8 @@ public sealed class ScriptCalculationModule(
     IRegistryStore? registryStore = null,
     IRegistrySnapshotLoader? registryLoader = null,
     IScriptRuntimeStore? scriptStore = null,
-    CalculationLimits? limits = null) : ICalculationModule
+    CalculationLimits? limits = null,
+    IMonthColumnRouter? monthRouter = null) : ICalculationModule
 {
     private readonly ScriptProgramLoader _loader = new(methodologies, programs);
     private readonly Evaluator _strict = evaluator.WithArithmetic(EvaluationArithmetics.For(NumericMode.Strict));
@@ -145,7 +146,7 @@ public sealed class ScriptCalculationModule(
 
         var runtime = new ScriptRuntime(
             program,
-            new ScriptDataAccess(rows, cells, metadata, inputBuilder, methodologies, results, scriptStore, runContext, _limits),
+            new ScriptDataAccess(rows, cells, metadata, inputBuilder, methodologies, results, scriptStore, runContext, _limits, monthRouter),
             methodology,
             documentId,
             periodKey,
@@ -275,7 +276,7 @@ public sealed class ScriptCalculationModule(
 
     /// <summary>
     /// Методології, чиї РЕЗУЛЬТАТИ читає скрипт: колонки <c>Calculated</c> власної таблиці й таблиць-псевдонімів, прив'язані
-    /// до виходів інших методологій (MS, план §13.9). Потрібно оркестраторові для порядку розрахунку й виявлення циклів.
+    /// до виходів інших методологій (MS, план §13.9). Версійний зріз <see cref="ReadsBindingsAsync"/>.
     /// </summary>
     /// <param name="methodology">Версія-скрипт.</param>
     /// <param name="tableInstanceId">Екземпляр таблиці прив'язки.</param>
@@ -283,6 +284,23 @@ public sealed class ScriptCalculationModule(
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Ідентифікатори методологій (без самої себе).</returns>
     public async Task<IReadOnlySet<int>> ReadsMethodologyIdsAsync(
+        MethodologyDescriptor methodology, long tableInstanceId, DateOnly onDate, CancellationToken ct)
+        => (await ReadsBindingsAsync(methodology, tableInstanceId, onDate, ct).ConfigureAwait(false))
+            .Select(r => r.MethodologyId)
+            .ToHashSet();
+
+    /// <summary>
+    /// Точні читання результатів: пари (методологія-джерело, екземпляр таблиці), чиї числа прив'язка скрипта читає
+    /// колонками <c>Calculated</c> — власної таблиці й таблиць-псевдонімів (MS, план §13.9). Число колонки, прив'язаної
+    /// до виходу методології M, лежить у результатах прив'язки (M, екземпляр цієї таблиці), тож порядок розрахунку й
+    /// цикли будуються на цих парах, а не на цілих версіях.
+    /// </summary>
+    /// <param name="methodology">Версія-скрипт.</param>
+    /// <param name="tableInstanceId">Екземпляр таблиці прив'язки.</param>
+    /// <param name="onDate">Бізнес-дата: кінець періоду.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Пари (методологія, екземпляр), без власної методології.</returns>
+    public async Task<IReadOnlySet<(int MethodologyId, long TableInstanceId)>> ReadsBindingsAsync(
         MethodologyDescriptor methodology, long tableInstanceId, DateOnly onDate, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(methodology);
@@ -303,7 +321,7 @@ public sealed class ScriptCalculationModule(
         }
 
         var own = await rows.ResolveTableInstanceAsync(tableInstanceId, ct).ConfigureAwait(false);
-        var wanted = new HashSet<(int TableDefId, int ColumnDefId)>();
+        var wanted = new HashSet<(int TableDefId, int ColumnDefId, long InstanceId)>();
 
         async Task AddAsync(TableInstanceRef instance, IEnumerable<string> columnNames)
         {
@@ -315,7 +333,7 @@ public sealed class ScriptCalculationModule(
                     && (set.Contains(column.Code)
                         || monthly.Any(p => column.Code.StartsWith(p, StringComparison.OrdinalIgnoreCase))))
                 {
-                    wanted.Add((column.TableDefId, column.Id));
+                    wanted.Add((column.TableDefId, column.Id, instance.TableInstanceId));
                 }
             }
         }
@@ -348,17 +366,33 @@ public sealed class ScriptCalculationModule(
 
         if (wanted.Count == 0)
         {
-            return new HashSet<int>();
+            return new HashSet<(int, long)>();
         }
 
         var bindings = await methodologies
             .GetColumnResultBindingsAsync([.. wanted.Select(w => w.TableDefId).Distinct()], ct)
             .ConfigureAwait(false);
 
-        return bindings
-            .Where(b => wanted.Contains((b.TableDefId, b.ColumnDefId)) && b.MethodologyId != methodology.MethodologyId)
-            .Select(b => b.MethodologyId)
-            .ToHashSet();
+        var reads = new HashSet<(int MethodologyId, long TableInstanceId)>();
+        foreach (var binding in bindings.Where(b => b.MethodologyId != methodology.MethodologyId))
+        {
+            foreach (var read in wanted.Where(w => w.TableDefId == binding.TableDefId && w.ColumnDefId == binding.ColumnDefId))
+            {
+                reads.Add((binding.MethodologyId, read.InstanceId));
+            }
+        }
+
+        return reads;
+    }
+
+    /// <summary>Код таблиці екземпляра — для повідомлень оркестратора (цикл читання результатів).</summary>
+    /// <param name="tableInstanceId">Екземпляр таблиці.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task<string> TableCodeOfInstanceAsync(long tableInstanceId, CancellationToken ct)
+    {
+        var instance = await rows.ResolveTableInstanceAsync(tableInstanceId, ct).ConfigureAwait(false);
+        var snapshot = await metadata.GetAsync(instance.TemplateVersionId, ct).ConfigureAwait(false);
+        return ScriptRuntime.TableCodeOf(snapshot, instance.TableDefId);
     }
 
     // ───── допоміжне ─────

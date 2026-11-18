@@ -209,6 +209,9 @@ public sealed partial class RecalculationJob(
         // UAT-recalc-ux: періоди, які прогін рахував, за документами — для журналу пропущених/перерахованих поданих.
         var scopeByDocument = new Dictionary<long, int[]>();
 
+        // ✎ LAND-YEAR L2b: (документ, період-читач, періоди-власники), чиї результати читали скрипти цього періоду.
+        var foreignOwnerReads = new List<(long DocumentId, int Period, IReadOnlyCollection<int> Owners)>();
+
         // ✎ B79: подані аркуші, у яких прогін справді змінив хоч одне число (комірки формул — зі шляху запису; результати
         // методологій — порівнянням у транзакції перемикання). Лише вони отримують позначку «перераховано після подання».
         var submittedChanges = new SubmittedSheetChanges();
@@ -515,6 +518,11 @@ public sealed partial class RecalculationJob(
                             ct)
                         .ConfigureAwait(false);
 
+                    if (profile.ForeignOwnerReads.Count > 0)
+                    {
+                        foreignOwnerReads.Add((documentId, period, [.. profile.ForeignOwnerReads]));
+                    }
+
                     if (bindingPlan.PartialTables.TryGetValue(period, out var partialTables))
                     {
                         profile.ExcludeTables(partialTables);
@@ -583,6 +591,12 @@ public sealed partial class RecalculationJob(
                     }
                 }
             }
+
+            // ✎ LAND-YEAR L2b: читач (скрипт, колонка Calculated чужого місяця) порахований від результатів періоду-власника,
+            // який цей же прогін перераховував: «актуальними» результати стають лише на перемиканні вище, тож читач бачив
+            // ПОПЕРЕДНІ числа власника (як і формули з [Period:#k], WW-03). Другий прохід — coalesced-задача періоду-читача
+            // після перемикання; вона читає вже нові числа й сама нових не ставить (ForeignOwnerPass).
+            await EnqueueForeignOwnerReadersAsync(request, scopeByDocument, foreignOwnerReads, ct).ConfigureAwait(false);
 
             // ✎ UAT-recalc-ux: журнал аркушів — пропущені затверджені й перераховані подані (журнал змін + повідомлення
             // задачі). Після перемикання: записується лише те, що справді стало актуальним.
@@ -771,6 +785,51 @@ public sealed partial class RecalculationJob(
         if (completionHook is not null && scopeByDocument.Count > 0)
         {
             await completionHook.OnSucceededAsync(scopeByDocument, ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// ✎ LAND-YEAR L2b: ставить другий прохід для періодів-читачів, що читали результати періодів-власників, перерахованих
+    /// у ТОМУ САМОМУ прогоні (їхні нові числа стали актуальними лише після перемикання).
+    /// </summary>
+    /// <param name="request">Завдання; <see cref="RecalculationRequest.ForeignOwnerPass"/> — другий прохід нових не ставить.</param>
+    /// <param name="scopeByDocument">Періоди, які прогін рахував, за документами.</param>
+    /// <param name="reads">Читачі: документ, період, періоди-власники.</param>
+    /// <param name="ct">Токен скасування.</param>
+    private async Task EnqueueForeignOwnerReadersAsync(
+        RecalculationRequest request,
+        Dictionary<long, int[]> scopeByDocument,
+        List<(long DocumentId, int Period, IReadOnlyCollection<int> Owners)> reads,
+        CancellationToken ct)
+    {
+        if (jobs is null || request.ForeignOwnerPass || reads.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var (documentId, period, owners) in reads)
+        {
+            if (!scopeByDocument.TryGetValue(documentId, out var scope)
+                || !owners.Any(owner => owner != period && scope.Contains(owner)))
+            {
+                continue;
+            }
+
+            await jobs
+                .EnqueueCoalescedAsync<IRecalculationJob>(
+                    Ecr.Application.Documents.RecalculateDocumentHandler.TargetOf(documentId, new PeriodKey(period)),
+                    request with
+                    {
+                        DocumentId = documentId,
+                        PeriodKey = period,
+                        Year = null,
+                        SheetDefId = null,
+                        FanOutParentJobId = null,
+                        ForeignOwnerPass = true,
+                    },
+                    ct,
+                    request.TriggeredByUserId)
+                .ConfigureAwait(false);
         }
     }
 
@@ -2449,6 +2508,9 @@ public sealed partial class RecalculationJob(
 /// ✎ LAND-YEAR B59: лише з <paramref name="PeriodKey"/> = <c>null</c> — «увесь рік», звужений до ЦЬОГО календарного року
 /// (кнопка «Перерахувати» документа річної розкладки: усі 12 місяців). <c>null</c> — усі періоди документа (нічний розклад).
 /// </param>
+/// <param name="ForeignOwnerPass">
+/// ✎ LAND-YEAR L2b: другий прохід читача результатів іншого періоду (ставить сам прогін після перемикання); нових проходів не ставить.
+/// </param>
 public sealed record RecalculationRequest(
     int ProjectId,
     long DocumentId,
@@ -2457,7 +2519,8 @@ public sealed record RecalculationRequest(
     int? SheetDefId = null,
     string? FanOutParentJobId = null,
     bool RecalculateSubmitted = false,
-    int? Year = null)
+    int? Year = null,
+    bool ForeignOwnerPass = false)
 {
     /// <summary>✎ B59: нижня межа ключа періоду скоупу (включно); без року — <see cref="int.MinValue"/>.</summary>
     internal int FromKey => PeriodKey is null && Year is { } y ? y * 100 : int.MinValue;

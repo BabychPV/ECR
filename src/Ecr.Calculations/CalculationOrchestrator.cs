@@ -161,13 +161,23 @@ public sealed class CalculationOrchestrator(
         //    сюди мусять прийти реальні ребра.
         // ✎ MS (план §13.9): версія-скрипт, що читає результат іншої методології (колонка `Calculated`), рахується
         // у пізнішій пачці за неї; цикл — відмова всього прогону до першого розрахунку.
+        // Вузол розкладу — прив'язка (версія × екземпляр таблиці), а не ціла версія: версія з прив'язками на двох таблицях
+        // може стояти в різних пачках, і «A читає B, B читає A» на різних таблицях — не цикл значень.
         var scriptDependencies = await ScriptDependenciesAsync(resolved, onDate, ct).ConfigureAwait(false);
+        var nodes = resolved
+            .Select((r, index) => (Key: (Version: r.Descriptor.MethodologyVersionId, Instance: r.TableInstanceId), Index: index, Binding: r))
+            .GroupBy(n => n.Key)
+            .OrderBy(g => g.Key.Version)
+            .ThenBy(g => g.Key.Instance)
+            .Select((g, id) => (Id: id, g.Key, Bindings: g.OrderBy(n => n.Index).Select(n => n.Binding).ToList()))
+            .ToList();
+        var nodeIds = nodes.ToDictionary(n => n.Key, n => n.Id);
+        var nodeById = nodes.ToDictionary(n => n.Id);
         var batches = CalculationPlan.Build(
-            resolved.Select(r => new CalculationNode(
-                r.Descriptor.MethodologyVersionId,
-                scriptDependencies.GetValueOrDefault(r.Descriptor.MethodologyVersionId) ?? [])).ToList());
+            nodes.Select(n => new CalculationNode(
+                n.Id,
+                [.. (scriptDependencies.GetValueOrDefault(n.Key) ?? []).Select(d => nodeIds[d])])).ToList());
 
-        var byVersion = resolved.ToLookup(r => r.Descriptor.MethodologyVersionId);
         var runBindings = resolved
             .Select(r => (r.Descriptor.MethodologyVersionId, r.TableInstanceId))
             .ToHashSet();
@@ -185,6 +195,9 @@ public sealed class CalculationOrchestrator(
         // B66: рядки, у яких крок методики впав з помилкою (#VALUE, #ARG…), — одна проблема на рядок.
         var stepErrors = new ConcurrentBag<StepErrorRow>();
 
+        // ✎ LAND-YEAR L2b: періоди-власники, чиї результати читали скрипти цього періоду (колонки Calculated з чужим власником).
+        var foreignOwnerReads = new ConcurrentBag<int>();
+
         foreach (var batch in batches)
         {
             // 3. ⚠ Усередині пакета — ПАРАЛЕЛЬНО. Послідовний прогін у 10
@@ -193,10 +206,18 @@ public sealed class CalculationOrchestrator(
             //    де можна платити максимумом.
             var measured = new ConcurrentBag<(string Module, TimeSpan Elapsed, int Rows)>();
 
+            // Прив'язки пачки за версіями: версія в пачці — одна гілка (один scope) на всі свої екземпляри.
+            var branches = batch.MethodologyVersionIds
+                .Select(id => nodeById[id])
+                .GroupBy(n => n.Key.Version)
+                .OrderBy(g => g.Key)
+                .Select(g => (Version: g.Key, Bindings: g.SelectMany(n => n.Bindings).ToList()))
+                .ToList();
+
             await Parallel.ForEachAsync(
-                batch.MethodologyVersionIds,
+                branches,
                 new ParallelOptions { MaxDegreeOfParallelism = _limits.MaxParallelism, CancellationToken = ct },
-                async (versionId, token) =>
+                async (branch, token) =>
                 {
                     // 3a. ⛔ Q-249: `MethodologyResolver`/`CalculationInputBuilder`/
                     //     `CalculationOutputWriter`/`ICalculationModule` — Scoped
@@ -225,13 +246,14 @@ public sealed class CalculationOrchestrator(
                     // ✎ MS: модуль скрипта читає результати ЦЬОГО прогону (колонки `Calculated`, §13.9) і вибирає
                     // рядки власним селектором; обидва — зі scope гілки.
                     var scopedSelector = scope.ServiceProvider.GetService<ScriptRowSelector>();
-                    if (scope.ServiceProvider.GetService<ScriptRunContext>() is { } scriptRun)
+                    var scriptRun = scope.ServiceProvider.GetService<ScriptRunContext>();
+                    if (scriptRun is not null)
                     {
                         scriptRun.CalculationRunId = calculationRunId;
                         scriptRun.RunBindings = runBindings;
                     }
 
-                    foreach (var binding in byVersion[versionId])
+                    foreach (var binding in branch.Bindings)
                     {
                         var stat = await ExecuteAsync(
                             scopedResolver, scopedSelector, scopedModules, scopedInputBuilder, scopedOutputWriter,
@@ -240,6 +262,14 @@ public sealed class CalculationOrchestrator(
 
                         measured.Add(stat);
                     }
+
+                    if (scriptRun is not null)
+                    {
+                        foreach (var owner in scriptRun.ForeignOwnerPeriods)
+                        {
+                            foreignOwnerReads.Add(owner);
+                        }
+                    }
                 }).ConfigureAwait(false);
 
             foreach (var (module, elapsed, rowCount) in measured)
@@ -247,7 +277,7 @@ public sealed class CalculationOrchestrator(
                 profile.Record(module, elapsed, rowCount);
             }
 
-            done += batch.MethodologyVersionIds.Sum(id => byVersion[id].Count());
+            done += branches.Sum(b => b.Bindings.Count);
 
             await progress
                 .ReportKeyAsync(
@@ -262,6 +292,7 @@ public sealed class CalculationOrchestrator(
                 .ConfigureAwait(false);
         }
 
+        profile.RecordForeignOwnerReads(foreignOwnerReads);
         profile.RecordUnmatched(UnmatchedRowsOf(rowMatches, documentId));
 
         // B66: рядки, відсіяні фільтром активності (D-425), — не «непокриті», але й не мовчки: один підсумок на таблицю.
@@ -643,47 +674,67 @@ public sealed class CalculationOrchestrator(
     /// періоду, а не арифметику ключа).
     /// </remarks>
     /// <summary>
-    /// Залежності версій-скриптів за результатами (MS, план §13.9): версії інших методологій цього прогону, чиї виходи
-    /// скрипт читає колонками <c>Calculated</c>. Цикл — <c>ECR-CALC-0422 scriptResultCycle</c>, прогін не виконується.
+    /// Залежності прив'язок-скриптів за результатами (MS, план §13.9): прив'язки (версія × екземпляр таблиці) цього
+    /// прогону, чиї числа скрипт читає колонками <c>Calculated</c>. Ребро веде до прив'язки (методологія-джерело,
+    /// екземпляр), яку прогін справді рахує, — не до цілої версії. Цикл значень — <c>ECR-CALC-0422 scriptResultCycle</c>,
+    /// прогін не виконується.
     /// </summary>
-    private async Task<IReadOnlyDictionary<int, IReadOnlyList<int>>> ScriptDependenciesAsync(
+    private async Task<IReadOnlyDictionary<(int Version, long Instance), IReadOnlyList<(int Version, long Instance)>>> ScriptDependenciesAsync(
         List<ResolvedBinding> resolved, DateOnly onDate, CancellationToken ct)
     {
+        var none = new Dictionary<(int Version, long Instance), IReadOnlyList<(int Version, long Instance)>>();
         var scripts = resolved.Where(r => r.Descriptor.Engine == MethodologyEngine.Script).ToList();
         if (scripts.Count == 0)
         {
-            return new Dictionary<int, IReadOnlyList<int>>();
+            return none;
         }
 
         using var scope = scopeFactory.CreateScope();
         var module = scope.ServiceProvider.GetServices<ICalculationModule>().OfType<ScriptCalculationModule>().FirstOrDefault();
         if (module is null)
         {
-            return new Dictionary<int, IReadOnlyList<int>>();
+            return none;
         }
 
         var versionsByMethodology = resolved
             .GroupBy(r => r.Descriptor.MethodologyId)
             .ToDictionary(g => g.Key, g => g.Select(r => r.Descriptor.MethodologyVersionId).Distinct().ToList());
+        var inRun = resolved
+            .Select(r => (Version: r.Descriptor.MethodologyVersionId, Instance: r.TableInstanceId))
+            .ToHashSet();
+        var labels = resolved
+            .GroupBy(r => (Version: r.Descriptor.MethodologyVersionId, Instance: r.TableInstanceId))
+            .ToDictionary(
+                g => g.Key,
+                g => $"методологія {g.First().Descriptor.MethodologyId} (версія {g.First().Descriptor.Code})");
 
-        var graph = new SortedDictionary<int, SortedSet<int>>();
+        var graph = new SortedDictionary<(int Version, long Instance), SortedSet<(int Version, long Instance)>>();
         foreach (var binding in scripts)
         {
-            var version = binding.Descriptor.MethodologyVersionId;
+            var node = (Version: binding.Descriptor.MethodologyVersionId, Instance: binding.TableInstanceId);
             var reads = await module
-                .ReadsMethodologyIdsAsync(binding.Descriptor, binding.TableInstanceId, onDate, ct)
+                .ReadsBindingsAsync(binding.Descriptor, binding.TableInstanceId, onDate, ct)
                 .ConfigureAwait(false);
 
-            if (!graph.TryGetValue(version, out var edges))
+            if (!graph.TryGetValue(node, out var edges))
             {
-                graph[version] = edges = [];
+                graph[node] = edges = [];
             }
 
-            foreach (var methodologyId in reads)
+            foreach (var (methodologyId, instanceId) in reads)
             {
-                if (versionsByMethodology.TryGetValue(methodologyId, out var versions))
+                if (!versionsByMethodology.TryGetValue(methodologyId, out var versions))
                 {
-                    edges.UnionWith(versions.Where(v => v != version));
+                    continue;
+                }
+
+                foreach (var version in versions)
+                {
+                    var target = (Version: version, Instance: instanceId);
+                    if (target != node && inRun.Contains(target))
+                    {
+                        edges.Add(target);
+                    }
                 }
             }
         }
@@ -691,24 +742,37 @@ public sealed class CalculationOrchestrator(
         var cycle = FindCycle(graph);
         if (cycle is not null)
         {
+            var tables = new Dictionary<long, string>();
+            foreach (var instance in cycle.Select(c => c.Instance).Distinct())
+            {
+                tables[instance] = await module.TableCodeOfInstanceAsync(instance, ct).ConfigureAwait(false);
+            }
+
+            var path = string.Join(
+                " → ",
+                cycle.Select(c => $"{labels.GetValueOrDefault(c, c.Version.ToString(CultureInfo.InvariantCulture))}, таблиця {tables[c.Instance]}"));
             throw new Domain.Abstractions.DomainException(
                 "ECR-CALC-0422",
-                "Методології читають результати одна одної по колу: " + string.Join(", ", cycle),
+                "Методології читають результати одна одної по колу: " + path,
                 new Dictionary<string, object?>
                 {
                     ["messageKey"] = "err.ECR-CALC-0422.scriptResultCycle",
-                    ["methodologyVersionIds"] = cycle,
+                    ["methodologyVersionIds"] = cycle.Select(c => c.Version).ToList(),
+                    ["tableInstanceIds"] = cycle.Select(c => c.Instance).ToList(),
+                    ["tables"] = cycle.Select(c => tables[c.Instance]).ToList(),
+                    ["cyclePath"] = path,
                 });
         }
 
-        return graph.ToDictionary(p => p.Key, p => (IReadOnlyList<int>)[.. p.Value]);
+        return graph.ToDictionary(p => p.Key, p => (IReadOnlyList<(int Version, long Instance)>)[.. p.Value]);
     }
 
-    /// <summary>Знаходить цикл у графі залежностей версій; <c>null</c> — циклу немає.</summary>
-    private static List<int>? FindCycle(IReadOnlyDictionary<int, SortedSet<int>> graph)
+    /// <summary>Знаходить цикл у графі залежностей прив'язок; <c>null</c> — циклу немає.</summary>
+    private static List<(int Version, long Instance)>? FindCycle(
+        SortedDictionary<(int Version, long Instance), SortedSet<(int Version, long Instance)>> graph)
     {
         // 0 — не бачили, 1 — на стеку, 2 — завершено. Ітеративний обхід: глибина графа не обмежена стеком потоку.
-        var state = new Dictionary<int, byte>();
+        var state = new Dictionary<(int Version, long Instance), byte>();
         foreach (var start in graph.Keys)
         {
             if (state.GetValueOrDefault(start) != 0)
@@ -716,10 +780,10 @@ public sealed class CalculationOrchestrator(
                 continue;
             }
 
-            var path = new List<int> { start };
-            var cursors = new Stack<IEnumerator<int>>();
+            var path = new List<(int Version, long Instance)> { start };
+            var cursors = new Stack<IEnumerator<(int Version, long Instance)>>();
             state[start] = 1;
-            cursors.Push((graph.GetValueOrDefault(start) ?? []).GetEnumerator());
+            cursors.Push(((IEnumerable<(int Version, long Instance)>?)graph.GetValueOrDefault(start) ?? []).GetEnumerator());
 
             while (cursors.Count > 0)
             {
@@ -740,7 +804,7 @@ public sealed class CalculationOrchestrator(
                     case 0:
                         state[next] = 1;
                         path.Add(next);
-                        cursors.Push((graph.GetValueOrDefault(next) ?? []).GetEnumerator());
+                        cursors.Push(((IEnumerable<(int Version, long Instance)>?)graph.GetValueOrDefault(next) ?? []).GetEnumerator());
                         break;
                     default:
                         break;

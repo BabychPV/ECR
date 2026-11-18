@@ -6,6 +6,8 @@ using Ecr.Calculations;
 using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Documents;
+using Ecr.Domain.Entities.Security;
+using Ecr.Domain.Entities.Workflow;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure;
@@ -267,6 +269,210 @@ public sealed class ScriptMethodologyRunSqlTests(SqlServerFixture sql)
         Assert.Empty(await ShapeAsync(f));
     }
 
+    /// <summary>
+    /// MS (рецензія 2, п.2): граф залежностей результатів — на рівні (версія, екземпляр таблиці), а не версії. Методологія
+    /// A рахує і T1, і T3; на T3 вона читає власну колонку <c>Calculated</c> RES (вихід B), а B (рахує T3) читає колонку
+    /// A у T1. Значення не по колу: A@T1 → B@T3 → A@T3. На рівні версій це «A ↔ B» — хибний цикл, прогін відмовляв.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Хибний_цикл_на_рівні_версій_не_відмовляє_а_порядок_дає_обидва_числа_за_один_перерахунок()
+    {
+        var f = await ArrangeAsync(209909);
+        await InsertValuesAsync(f, ("gas", 10m));
+        var third = await CreateThirdTableAsync(f);
+
+        // У T1 колонка RES теж є, але нічим не прив'язана: A@T1 нічого не читає з чужих результатів.
+        await using (var db = f.Builder.CreateContext())
+        {
+            db.ColumnDefs.Add(new ColumnDef(f.Document.TableDefId, EcrCode.Create(third.ResCode), Name("Res"), 11, CellDataType.Calculated));
+            await db.SaveChangesAsync();
+        }
+
+        var aText = $"rows from {f.TableCode}, {third.TableCode};\n"
+            + $"output Y: kg = row.{f.C2} * 2 + (row.{third.ResCode}? == null ? 0 : row.{third.ResCode}?);";
+        var (a, _) = await PublishScriptAsync(f, "A", aText, [("Y", f.OutAColumnId)]);
+        await using (var db = f.Builder.CreateContext())
+        {
+            db.CalculationBindings.Add(new CalculationBinding(third.TableDefId, third.OutColumnId, a, "Y", "{}"));
+            await db.SaveChangesAsync();
+        }
+
+        var outA = await ColumnCodeByIdAsync(f, f.OutAColumnId);
+        await PublishScriptAsync(
+            f, "B", $"rows from {third.TableCode};\ntable Src = {f.TableCode};\noutput Z: kg = Sum(Src.{outA});",
+            [("Z", third.ResColumnId)], tableDefId: third.TableDefId);
+
+        await RunJobAsync(f.Document, sheetDefId: null);
+
+        // T1: Y = 10 × 2 = 20; B@T3: Z = 20 (результат A@T1); T3: Y = 7 × 2 + RES (= 20) = 34 — обидва числа правильні.
+        Assert.Equal(["Y|20", "Y|34", "Z|20"], await ShapeAsync(f));
+
+        // Той самий порядок після правки входу: одним перерахунком усе доходить (30 → Y=60, Z=60, Y(T3)=14+60).
+        await SetValueAsync(f, rowIndex: 0, 30m);
+        await RunJobAsync(f.Document, sheetDefId: null);
+        Assert.Equal(["Y|60", "Y|74", "Z|60"], await ShapeAsync(f));
+    }
+
+    /// <summary>
+    /// MS (рецензія 2, п.2): справжній цикл ЗНАЧЕНЬ лишається відмовою, а повідомлення називає методології й таблиці, що
+    /// утворюють його.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Справжній_цикл_відмова_називає_методології_і_таблиці()
+    {
+        var f = await ArrangeAsync(209910);
+        await InsertValuesAsync(f, ("gas", 10m));
+        var second = await CreateSecondTableAsync(f);
+        var outA = await ColumnCodeByIdAsync(f, f.OutAColumnId);
+        var outB = await ColumnCodeByIdAsync(f, second.OutBColumnId);
+        var (methodologyA, _) = await PublishScriptAsync(
+            f, "A", $"rows from {f.TableCode};\ntable Src = {second.TableCode};\noutput Y: kg = Sum(Src.{outB});",
+            [("Y", f.OutAColumnId)]);
+        var (methodologyB, _) = await PublishScriptAsync(
+            f, "B", $"rows from {second.TableCode};\ntable Src = {f.TableCode};\noutput Z: kg = Sum(Src.{outA});",
+            [("Z", second.OutBColumnId)], tableDefId: second.TableDefId);
+
+        var error = await Assert.ThrowsAsync<Ecr.Domain.Abstractions.DomainException>(
+            () => RunJobAsync(f.Document, sheetDefId: null));
+
+        Assert.Equal("err.ECR-CALC-0422.scriptResultCycle", error.Details!["messageKey"]);
+        Assert.Contains(f.TableCode, error.Message, StringComparison.Ordinal);
+        Assert.Contains(second.TableCode, error.Message, StringComparison.Ordinal);
+        Assert.Contains($"методологія {methodologyA} ", error.Message, StringComparison.Ordinal);
+        Assert.Contains($"методологія {methodologyB} ", error.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// MS (рецензія 2, п.3а): RL01 на скриптовому шляху. Активне блокування рядка (<c>doc.RowLock</c>) перерахунок «не
+    /// бачить» (контракт, Q2): рядок перераховується, як і без блокування, а сам перерахунок не чіпає ні введених
+    /// комірок заблокованого рядка, ні самого блокування.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Блокування_рядка_RL01_перерахунок_скрипта_не_бачить_і_не_чіпає_вхід_і_замок()
+    {
+        var f = await ArrangeAsync(209911);
+        await InsertValuesAsync(f, ("gas", 10m), ("gas", 5m), ("oil", 7m));
+        var a = await PublishScriptAsync(
+            f, "A",
+            $"rows from {f.TableCode} where row.{f.C1} == \"gas\";\noutput Y: kg = row.{f.C2} * 2;",
+            [("Y", f.OutAColumnId)]);
+        await ArrangeReaderAsync(f, a);
+
+        await RunJobAsync(f.Document, sheetDefId: null);
+        Assert.Equal(["Y|10", "Y|20", "Z|30"], await ShapeAsync(f));
+
+        // Рядок 1 блокує ІНША людина, а його вхід тим часом змінюється (збір), і перераховується весь документ.
+        await LockRowAsync(f, f.Document.RowIds[0]);
+        await SetValueAsync(f, rowIndex: 0, 30m);
+        var inputsBefore = await InputsAsync(f);
+
+        await RunJobAsync(f.Document, sheetDefId: null);
+
+        Assert.Equal(["Y|10", "Y|60", "Z|70"], await ShapeAsync(f));
+        Assert.Equal(inputsBefore, await InputsAsync(f));
+        Assert.Equal(1, await ActiveLocksAsync(f));
+
+        // Той самий результат, що й після зняття блокування: замок на числа перерахунку не діє.
+        await using (var db = f.Builder.CreateContext())
+        {
+            await db.RowLocks.Where(l => l.DocumentId == f.Document.DocumentId).ExecuteDeleteAsync();
+        }
+
+        await RunJobAsync(f.Document, sheetDefId: null);
+        Assert.Equal(["Y|10", "Y|60", "Z|70"], await ShapeAsync(f));
+    }
+
+    /// <summary>
+    /// MS (рецензія 2, п.3б): <c>WorkflowMode = None</c> на скриптовому шляху — як у формульного (<c>B138</c>): затверджений
+    /// аркуш (тут — джерело A) при ручному перерахунку пропускається, а після перемикання версії на «без погодження»
+    /// перераховується; читач B (інший аркуш) бере свіжі числа джерела.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Затверджений аркуш — саме ДЖЕРЕЛО: читач-скрипт (B) перераховується разом із будь-яким перерахованим джерелом
+    /// навіть на затвердженому аркуші (план §13.9, «зайвий перерахунок безпечний, пропущений — ні»), тож контроль
+    /// «затверджене пропущено» на аркуші читача невалідний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Версія_без_погодження_WorkflowMode_None_затверджений_аркуш_скрипта_перераховується()
+    {
+        var f = await ArrangeAsync(209912);
+        await InsertValuesAsync(f, ("gas", 10m), ("gas", 5m), ("oil", 7m));
+        var a = await PublishScriptAsync(
+            f, "A",
+            $"rows from {f.TableCode} where row.{f.C1} == \"gas\";\noutput Y: kg = row.{f.C2} * 2;",
+            [("Y", f.OutAColumnId)]);
+        await ArrangeReaderAsync(f, a);
+
+        await RunJobAsync(f.Document, sheetDefId: null);
+        Assert.Equal(["Y|10", "Y|20", "Z|30"], await ShapeAsync(f));
+
+        await using (var db = f.Builder.CreateContext())
+        {
+            var state = new ApprovalState(f.Document.DocumentId, f.Document.SheetDefId, f.Document.PeriodKey.Value);
+            state.Submit(userId: 5, Now);
+            state.Approve(userId: 6, Now);
+            db.ApprovalStates.Add(state);
+            await db.SaveChangesAsync();
+        }
+
+        // Контроль (з погодженням): аркуш джерела затверджений — пропускається, Y лишається від першого прогону.
+        await SetValueAsync(f, rowIndex: 0, 30m);
+        await RunJobAsync(f.Document, sheetDefId: null);
+        Assert.Equal(["Y|10", "Y|20", "Z|30"], await ShapeAsync(f));
+
+        await using (var db = f.Builder.CreateContext())
+        {
+            await db.Database.ExecuteSqlAsync(
+                $"UPDATE cfg.TemplateVersion SET WorkflowMode = 1 WHERE Id = {f.Document.TemplateVersionId}");
+        }
+
+        await RunJobAsync(f.Document, sheetDefId: null);
+        Assert.Equal(["Y|10", "Y|60", "Z|70"], await ShapeAsync(f));
+    }
+
+    private async Task LockRowAsync(Fixture f, long rowId)
+    {
+        await using var db = f.Builder.CreateContext();
+        var locker = new User($"rlm_{Guid.NewGuid():N}"[..20], "RL01 locker", AuthProvider.Local);
+        locker.SetPassword("not-a-real-hash");
+        db.Users.Add(locker);
+        await db.SaveChangesAsync();
+
+        var rowKey = await db.TableRows.Where(r => r.Id == rowId).Select(r => r.RowKey).SingleAsync();
+        db.RowLocks.Add(RowLock.Create(
+            f.Document.DocumentId, f.Document.PeriodKey.Value, null, f.Document.SheetCode, f.TableCode, rowKey.Value,
+            Now.AddDays(-1), Now.AddDays(5), locker.Id, "RL01", Now.AddDays(-2)));
+        await db.SaveChangesAsync();
+    }
+
+    private async Task<int> ActiveLocksAsync(Fixture f)
+    {
+        await using var db = f.Builder.CreateContext();
+        return await db.RowLocks.CountAsync(l => l.DocumentId == f.Document.DocumentId && l.ReleasedAt == null);
+    }
+
+    /// <summary>Введені комірки першої таблиці: <c>рядок|колонка|число</c>.</summary>
+    private async Task<List<string>> InputsAsync(Fixture f)
+    {
+        await using var db = f.Builder.CreateContext();
+        var cells = await db.CellValues
+            .AsNoTracking()
+            .Where(c => c.PeriodKeyValue == f.Document.PeriodKey.Value && c.TableDefId == f.Document.TableDefId)
+            .Select(c => new { c.TableRowId, c.ColumnDefId, c.ValueNumeric, c.ValueString })
+            .ToListAsync();
+        return [.. cells
+            .Select(c => $"{c.TableRowId}|{c.ColumnDefId}|{c.ValueNumeric:0.####}|{c.ValueString}")
+            .Order(StringComparer.Ordinal)];
+    }
+
     private async Task<string> ColumnCodeByIdAsync(Fixture f, int columnId)
     {
         await using var db = f.Builder.CreateContext();
@@ -485,6 +691,44 @@ public sealed class ScriptMethodologyRunSqlTests(SqlServerFixture sql)
         await db.SaveChangesAsync();
 
         return new Second(sheet.Id, table.Id, table.Code, instanceId, outB.Id, 0, 0);
+    }
+
+    private sealed record Third(
+        int TableDefId, string TableCode, long InstanceId, int OutColumnId, int ResColumnId, string ResCode);
+
+    /// <summary>
+    /// Третя таблиця (окремий аркуш): вхід з тим самим кодом, що в першій (<c>f.C2</c> = 7), вихід A (<c>Calculated</c>) і
+    /// колонка RES (<c>Calculated</c>) під вихід B; один екземпляр, один рядок.
+    /// </summary>
+    private async Task<Third> CreateThirdTableAsync(Fixture f)
+    {
+        await using var db = f.Builder.CreateContext();
+        var sheet = new SheetDef(f.Document.TemplateVersionId, EcrCode.Create("SH3" + f.Tag), Name("Sheet 3"), 3);
+        db.SheetDefs.Add(sheet);
+        await db.SaveChangesAsync();
+
+        var table = new TableDef(
+            sheet.Id, EcrCode.Create("TB3" + f.Tag), Name("Table 3"), 1, TableLayoutKind.PerPeriodInstance, TableRowMode.Fixed);
+        db.TableDefs.Add(table);
+        await db.SaveChangesAsync();
+
+        var input = new ColumnDef(table.Id, EcrCode.Create(f.C2), Name("Input"), 1, CellDataType.Decimal);
+        var outC = new ColumnDef(table.Id, EcrCode.Create("OUTC_" + f.Tag), Name("Out C"), 2, CellDataType.Calculated);
+        var res = new ColumnDef(table.Id, EcrCode.Create("RESB"), Name("Res"), 3, CellDataType.Calculated);
+        db.ColumnDefs.AddRange(input, outC, res);
+        await db.SaveChangesAsync();
+
+        var loader = new BulkCellLoader(sql.ConnectionString, 1000);
+        var instanceId = await loader.ReserveIdsAsync("doc.TableInstanceSeq", 1, CancellationToken.None);
+        var rowId = await loader.ReserveIdsAsync("doc.TableRowSeq", 1, CancellationToken.None);
+        db.TableInstances.Add(new TableInstance(f.Document.PeriodKey, instanceId, f.Document.DocumentId, table.Id, Now));
+        db.TableRows.Add(new TableRow(f.Document.PeriodKey, rowId, instanceId, RowKey.Create("R3_" + f.Tag), 1, Now));
+        await db.SaveChangesAsync();
+        db.CellValues.Add(new CellValue(
+            new CellAddress(f.Document.PeriodKey, rowId, input.Id), table.Id, new CellValueData { ValueNumeric = 7m }));
+        await db.SaveChangesAsync();
+
+        return new Third(table.Id, table.Code, instanceId, outC.Id, res.Id, res.Code);
     }
 
     private static async Task<string> ColumnCodeAsync(EcrDbContext db, int columnId)
