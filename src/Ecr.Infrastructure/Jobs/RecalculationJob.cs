@@ -944,26 +944,29 @@ public sealed partial class RecalculationJob(
             return [];
         }
 
-        var readers = await new ScriptRuntimeStore(db)
+        var runtime = new ScriptRuntimeStore(db);
+        var readers = await runtime
             .GetReadersOfTablesAsync([.. tables.Select(t => t.Code).Distinct(StringComparer.OrdinalIgnoreCase)], ct)
             .ConfigureAwait(false);
-        if (readers.Count == 0)
-        {
-            return [];
-        }
 
-        var readerIds = readers.Select(r => r.MethodologyId).Distinct().ToList();
+        // ✎ MS: читач ВЛАСНОЇ таблиці (`rows from TA; … row.X[m]`) таблицею читання не позначений (вона лише для
+        // псевдонімів `table Src = …`), зате публікація пише ребро «читач → джерело» (calc.MethodologyDependency) на
+        // методологію, чий вихід лежить у колонці X. Тож читачі колонки — ті, хто має ребро на її методології-джерела.
+        var edges = await runtime.GetDependencyEdgesAsync(ct).ConfigureAwait(false);
+
+        var tableIds = tables.Select(t => t.Id).ToList();
         var bound = await db.CalculationBindings
             .AsNoTracking()
-            .Where(b => b.IsActive && readerIds.Contains(b.MethodologyId))
-            .Select(b => new { b.TableDefId, b.MethodologyId })
+            .Where(b => b.IsActive && tableIds.Contains(b.TableDefId))
+            .Select(b => new { b.TableDefId, b.ColumnDefId, b.MethodologyId })
             .Distinct()
             .OrderBy(b => b.TableDefId)
+            .ThenBy(b => b.ColumnDefId)
             .ThenBy(b => b.MethodologyId)
             .Take(MaxBindings)
             .ToListAsync(ct)
             .ConfigureAwait(false);
-        if (bound.Count == 0)
+        if (bound.Count == 0 || (readers.Count == 0 && edges.Count == 0))
         {
             return [];
         }
@@ -1006,13 +1009,29 @@ public sealed partial class RecalculationJob(
                 .Select(r => r.TableCode)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-            foreach (var table in tables.Where(t => readCodes.Contains(t.Code)))
+            foreach (var table in tables.Where(t => tableDefIds.Contains(t.Id)))
             {
-                var foreign = await monthRouter!
-                    .ForeignColumnsAsync(routing, table, new PeriodKey(inPeriod.Key), ct)
-                    .ConfigureAwait(false);
-                if (foreign.Any(f => f.Column.DataType == Domain.Enums.CellDataType.Calculated
-                                     && scope.Contains(f.OwnerPeriod.Value)))
+                var foreign = (await monthRouter!
+                        .ForeignColumnsAsync(routing, table, new PeriodKey(inPeriod.Key), ct)
+                        .ConfigureAwait(false))
+                    .Where(f => f.Column.DataType == Domain.Enums.CellDataType.Calculated
+                                && scope.Contains(f.OwnerPeriod.Value))
+                    .Select(f => f.Column.Id)
+                    .ToHashSet();
+                if (foreign.Count == 0)
+                {
+                    continue;
+                }
+
+                // Читач через псевдонім таблиці (calc.MethodologyReadTable) або читач власної таблиці (ребро на джерело колонки).
+                var sources = bound
+                    .Where(b => b.TableDefId == table.Id && foreign.Contains(b.ColumnDefId))
+                    .Select(b => b.MethodologyId)
+                    .ToHashSet();
+                var ownReader = bound
+                    .Where(b => b.TableDefId == table.Id)
+                    .Any(b => edges.Any(e => e.FromMethodologyId == b.MethodologyId && sources.Contains(e.ToMethodologyId)));
+                if (ownReader || readCodes.Contains(table.Code))
                 {
                     result.Add(inPeriod.Key);
                     break;
