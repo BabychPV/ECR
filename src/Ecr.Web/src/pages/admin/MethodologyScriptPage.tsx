@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useReducer, useRef, useState, type JSX } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState, type JSX } from 'react';
 import { Alert, Badge, Box, Button, Group, Stack, Tabs, Text } from '@mantine/core';
 import { useDebouncedValue } from '@mantine/hooks';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -13,7 +13,6 @@ import {
 import { mayEditContent } from '@/features/methodologies/draft';
 import { usePublishVersion } from '@/features/methodologies/PublishVersionFlow';
 import {
-  formatMethodologyScriptConst,
   methodologyScript,
   methodologyScriptSubstances,
   saveMethodologyScript,
@@ -149,17 +148,16 @@ export function MethodologyScriptPage(): JSX.Element {
   // ⚠ Текст з сервера переходить у редактор ОДИН раз (і після явного «Перезавантажити»):
   // подальші оновлення кешу (збереження) не повинні затирати те, що людина набирає.
   const applied = useRef<MethodologyScriptDto | null>(null);
-  const reloading = useRef(false);
-  useEffect(() => {
-    const data = script.data;
-    if (data === undefined || data === applied.current) return;
-    if (applied.current !== null && !reloading.current) return;
-
+  const applyServerScript = useCallback((data: MethodologyScriptDto): void => {
     applied.current = data;
-    reloading.current = false;
     dispatch({ type: 'loaded', text: data.text, hash: data.hash });
     setLoaded(true);
-  }, [script.data]);
+  }, []);
+  useEffect(() => {
+    if (script.data !== undefined && applied.current === null) {
+      applyServerScript(script.data);
+    }
+  }, [script.data, applyServerScript]);
 
   const tests = useQuery({
     queryKey: queryKeys.methodologies.tests(versionId),
@@ -283,9 +281,12 @@ export function MethodologyScriptPage(): JSX.Element {
     };
   }, [dirty, readOnly, save]);
 
+  // «Перезавантажити» застосовує відповідь напряму: за ідентичних даних кеш не змінюється, ефект не спрацював би, і
+  // набраний текст лишився б замість серверного. Відмова мережі правок не чіпає.
   const reload = (): void => {
-    reloading.current = true;
-    void script.refetch();
+    void script.refetch().then((result) => {
+      if (!result.isError && result.data !== undefined) applyServerScript(result.data);
+    });
   };
 
   // ── Публікація ────────────────────────────────────────────────────────────
@@ -305,20 +306,13 @@ export function MethodologyScriptPage(): JSX.Element {
   const constLiteral =
     constRange === null ? '' : state.text.slice(constRange.start, constRange.end);
 
-  const applyConst = async (literal: string): Promise<void> => {
+  const applyConst = (literal: string): void => {
     const range = constRange;
     if (range === null) return;
 
-    // Канонічний друк — на сервері (`format-const`); недоступний чи не розібрав — клієнтський.
-    let canonical = literal;
-    try {
-      const formatted = await formatMethodologyScriptConst(methodologyId, versionId, {
-        text: literal,
-      });
-      if (formatted.text !== null) canonical = formatted.text;
-    } catch {
-      canonical = literal;
-    }
+    // ⛔ Літерал уже в каноні клієнта (`printConstGrid`) і несе коментарі та вихідний текст чисел; серверний
+    // `format-const` друкує зі значень — прибрав би коментарі й змінив би `1.0`/довгі `decimal`.
+    const canonical = literal;
 
     if (editor.current === null) {
       dispatch({
@@ -584,7 +578,7 @@ export function MethodologyScriptPage(): JSX.Element {
             onClose={() => setConstRange(null)}
             literal={constLiteral}
             constName={constRange.name}
-            onApply={(literal) => void applyConst(literal)}
+            onApply={applyConst}
           />
         </Suspense>
       )}
