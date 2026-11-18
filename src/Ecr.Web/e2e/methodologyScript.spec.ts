@@ -118,10 +118,11 @@ interface Arranged {
   readonly periodKey: number;
   readonly methodologyId: number;
   readonly versionId: number;
+  readonly context: BrowserContext;
 }
 
 /** Шаблон, документ із рядком, грант методологу, методологія з порожньою версією-скриптом. */
-async function arrange(page: Page, editor: APIRequestContext, roleId: number): Promise<Arranged> {
+async function arrange(page: Page, browser: Browser, roleId: number): Promise<Arranged> {
   const stamp = String(Date.now());
   const units = await ok<{ id: number; code: string }[]>(await page.request.get('/api/v1/units'), 'одиниці');
   const unitId = (units.find((unit) => unit.code === 't') ?? units[0])?.id ?? 0;
@@ -241,6 +242,10 @@ async function arrange(page: Page, editor: APIRequestContext, roleId: number): P
     'грант методолога на проєкт',
   );
 
+  // ⚠ Зміна грантів ролі робить наявний сеанс методолога недійсним (401 securityStampStale) — методолог входить ПІСЛЯ грантів, новим контекстом (вхід зі старою cookie теж дає 401).
+  const context = await editorContext(browser, Editor.password);
+  const editor = context.request;
+
   // 5. Методологія й порожня версія-скрипт (рушій — явно).
   const methodology = await ok<{ id: number }>(
     await editor.post('/api/v1/methodologies', {
@@ -255,7 +260,7 @@ async function arrange(page: Page, editor: APIRequestContext, roleId: number): P
     'чернетка-скрипт',
   );
 
-  return { documentId: document.documentId, businessKey: summary.businessKey, periodKey, methodologyId: methodology.id, versionId: draft.id };
+  return { documentId: document.documentId, businessKey: summary.businessKey, periodKey, methodologyId: methodology.id, versionId: draft.id, context };
 }
 
 /** Ставить перерахунок документа в чергу і чекає кінця задачі (Succeeded). */
@@ -314,9 +319,9 @@ async function runScenario(page: Page, browser: Browser, created: { roleId: numb
   created.roleId = ids.roleId;
   created.userId = ids.userId;
 
-  const context = await editorContext(browser, Editor.password);
+  const arranged = await arrange(page, browser, ids.roleId);
+  const context = arranged.context;
   try {
-    const arranged = await arrange(page, context.request, ids.roleId);
     const scriptUrl = `/api/v1/methodologies/${String(arranged.methodologyId)}/versions/${String(arranged.versionId)}/script`;
 
     const ui = await context.newPage();
@@ -337,7 +342,7 @@ async function runScenario(page: Page, browser: Browser, created: { roleId: numb
 
     // 3. Виправлення: перелік порожній, «Save» записує текст на сервері.
     await typeScript(ui, GoodScript);
-    await expect(ui.getByText('No problems found.')).toBeVisible({ timeout: 30_000 });
+    await expect(ui.getByRole('tabpanel', { name: /Problems/ }).getByText('No problems found.')).toBeVisible({ timeout: 30_000 });
     await expect(save).toBeEnabled();
     await save.click();
     await expect(ui.getByTestId('script-unsaved')).toBeHidden({ timeout: 30_000 });
@@ -359,7 +364,7 @@ async function runScenario(page: Page, browser: Browser, created: { roleId: numb
     const preview = ui.getByTestId('script-preview');
     await expect(preview, 'перегляд не показав таблицю').toBeVisible({ timeout: 60_000 });
     await expect(preview).toContainText(TableCode);
-    await expect(preview.getByText('Selected')).toBeVisible();
+    await expect(preview.getByText('Selected', { exact: true })).toBeVisible();
     await expect(preview.getByRole('cell', { name: /^8(\.0+)?$/ }), 'у перегляді має бути OUT = 8').toBeVisible();
 
     // 5. Тест із рядка: розгорнути рядок → «Create test from this row» → форма з очікуванням OUT = 8 → «Save».
@@ -376,7 +381,7 @@ async function runScenario(page: Page, browser: Browser, created: { roleId: numb
     await ui.getByRole('button', { name: 'Publish', exact: true }).click();
     const publish = ui.getByRole('dialog', { name: /Publish/ });
     await publish.getByLabel('Reason for the change').fill('e2e: methodology script');
-    const date = publish.getByLabel('Effective from');
+    const date = publish.getByRole('textbox', { name: 'Effective from' });
     await date.click();
     await date.press('ControlOrMeta+A');
     await date.pressSequentially(`${String(Math.floor(arranged.periodKey / 100) - 1)}-01-01`);
