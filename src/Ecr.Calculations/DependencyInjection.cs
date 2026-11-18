@@ -41,6 +41,7 @@ public static class DependencyInjection
         services.AddSingleton<ScriptProgramCache>();
         services.AddScoped<ScriptRunContext>();
         services.AddScoped<ScriptRowSelector>();
+        services.AddScoped<Application.Ports.IScriptPreviewRunner, ScriptPreviewRunner>();
         services.AddScoped<ICalculationModule, MonthColumnArgumentsModule>();
         services.AddScoped<ICalculationModule, ScriptCalculationModule>();
         services.AddScoped<ICalculationModule, GenericCalculationModule>();

@@ -40,6 +40,46 @@ public sealed class ScriptSourceCompiler(IMethodologyDraftStore drafts, IMethodo
         return compilation;
     }
 
+    /// <summary>
+    /// Бібліотеки, на які посилається ТЕКСТ (<c>import X;</c>), з версіями, чинними на дату. Імпорт без чинної версії
+    /// повертається з <c>MethodologyVersionId = null</c>; методологію, якої немає, пропущено (компіляція дала б
+    /// <c>unknownImport</c>). Рушій перегляду бере імпорти з тексту, а не з матеріалізованих рядків.
+    /// </summary>
+    /// <param name="text">Текст скрипта.</param>
+    /// <param name="numericMode">Режим арифметики версії.</param>
+    /// <param name="isLibrary">Методологія — бібліотека.</param>
+    /// <param name="onDate">Дата, на яку добираються версії бібліотек.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task<IReadOnlyList<MethodologyLibrary>> ResolveTextImportsAsync(
+        string text, NumericMode numericMode, bool isLibrary, DateOnly onDate, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+
+        var requested = new List<string>();
+        ScriptCompiler.Compile(
+            text,
+            new ScriptCompileOptions(numericMode, isLibrary, name =>
+            {
+                if (!requested.Contains(name, StringComparer.Ordinal))
+                {
+                    requested.Add(name);
+                }
+
+                return null;
+            }));
+
+        var result = new List<MethodologyLibrary>();
+        foreach (var name in requested.Order(StringComparer.Ordinal))
+        {
+            if (await drafts.FindByCodeAsync(name, ct).ConfigureAwait(false) is { } library)
+            {
+                result.Add(new MethodologyLibrary(library.Id, library.Code, library.VersionOn(onDate)?.Id, []));
+            }
+        }
+
+        return result;
+    }
+
     private async Task<(ScriptCompilation Compilation, string? CyclePath)> CompileCoreAsync(
         string text,
         NumericMode numericMode,
