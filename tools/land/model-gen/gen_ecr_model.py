@@ -1112,47 +1112,60 @@ stat_cols += _added_cols
 print('prodColumnMapping: tables %d, new columns %d' % (len(out['prodColumnMapping']['tables']), _added_cols))
 
 
-# ---- B26 (P-0118-23, рішення людини 18.11, відповідь (a)): ECW_C09_02_01 на T7b_00 рахує ECW_EC_tons =
+# ---- B26 (P-0118-24/25, рішення людини 18.11; замінює (a) P-0118-23): ECW_C09_02_01 на T7b_00 рахує ECW_EC_tons =
 # (@Concentration * @Volume) / k1 (k1 = 1e6: мг/л * м3 -> т). Аргументів з такими кодами в таблиці не було (банер
-# «бракує Concentration/Volume»). Volume - НОВА місячна колонка введення (м3, Volume_M01..M12 одразу після December);
-# Concentration - наявна місячна колонка концентрації (January..December) місяця розрахунку. Модель методології не
-# змінюється: лише колонки шаблону і мости аргументів (селектор місяця; у річному шаблоні 1.0.17.0 етап YearMonths
-# перетворює його на cfg.MonthInputAlias місяця m). Прод-відповідника для Volume немає - тому не prodColumnMapping.
-DECIDED_DECISION = 'P-0118-23 (B26, human answer (a))'
-DECIDED_NEW_MONTH_COLUMNS = {
-    # таблиця -> (база коду, одиниця, заголовок, після якої колонки вставити блок)
-    'T7b_00': [('Volume', 'm3', 'Volume (m3)', 'December')],
-}
+# «бракує Concentration/Volume»). Модель методології (формула/аргументи/версія/правила) НЕ змінюється.
+#   * Concentration - місячна колонка концентрації (January..December) місяця розрахунку (селектор, як інші мости);
+#   * Volume - значення рядка S3_9 («Volume of the water discharged to Caspian sea, m3», об'єм з Water Report) у колонці
+#     ТОГО САМОГО місяця, одне для всіх рядків речовин: Formula-міст із посиланням на фіксований рядок
+#     [T7b_00].[S3_9].[<Month>]. Вираз у дужках - не селектор YearMonths, а «змінна» формула: у річному шаблоні 1.0.17.0
+#     етап YearMonths робить Volume_M01..M12 (кожна читає S3_9 свого місяця) і псевдоніми Volume -> Volume_Mmm;
+#   * рядок S3_9 не має отримувати ECW_EC_tons: фільтр активності рядків D-425 (P-0118-25) - колонка статусу Land_Status
+#     (LAND_GENERIC_EQUIPSTATUS) у T7b_00, Running на рядках речовин, порожньо на S3_9 (statusPresets; у наявні документи
+#     пише етап Build-LandTemplate -Stage T7bStatus), ECW_C09_02_01 -> runningOnly у tools/land/land-row-filter.json.
+DECIDED_DECISION = 'P-0118-24/25 (B26: Volume = row S3_9 of the same month; S3_9 excluded by D-425 status filter)'
 DECIDED_MONTH_ARGS = {
-    # таблиця -> аргумент методології -> 12 колонок за місяцями
-    'T7b_00': {'Concentration': list(MONTHS), 'Volume': ['Volume_M%02d' % m for m in range(1, 13)]},
+    # таблиця -> аргумент методології -> 12 колонок за місяцями (селектор у тому самому рядку)
+    'T7b_00': {'Concentration': list(MONTHS)},
+}
+DECIDED_ROW_ARGS = {
+    # таблиця -> аргумент методології -> (фіксований рядок-джерело, 12 колонок за місяцями, одиниця)
+    'T7b_00': {'Volume': ('S3_9', list(MONTHS), 'm3')},
+}
+DECIDED_STATUS = {
+    # таблиця -> колонка статусу D-425: довідник, запис «активний», рядки без статусу (не рахуються методологіями)
+    'T7b_00': {'column': 'Land_Status', 'registry': 'LAND_GENERIC_EQUIPSTATUS', 'entry': 'RUNNING', 'emptyRows': ['S3_9']},
 }
 
 
-def _decided_input_columns():
+def _decided_status_columns():
     global stat_cols
     added = 0
     for s_ in out['sheets']:
         for t_ in s_['tables']:
-            for base, unit_, hdr, after in DECIDED_NEW_MONTH_COLUMNS.get(t_['code'], []):
-                codes = [c['code'] for c in t_['columns']]
-                if any(c.startswith(base + '_M') for c in codes):
-                    raise SystemExit('decided columns: %s.%s_Mnn уже є' % (t_['code'], base))
-                if after not in codes:
-                    raise SystemExit('decided columns: %s не має колонки %s' % (t_['code'], after))
-                at = codes.index(after) + 1
-                for m in range(1, 13):
-                    t_['columns'].insert(at + m - 1, {
-                        'code': '%s_M%02d' % (base, m), 'dataType': 'Decimal', 'headerEn': '%s, %s' % (hdr, MONTHS[m - 1]),
-                        'headerRu': '', 'unit': unit_, 'month': m, 'hidden': False, 'readOnly': False, 'excel': None,
-                        'precision': 28, 'scale': 12, 'decision': DECIDED_DECISION,
-                        'ecrAdded': 'manual input (not in the Excel sheet): %s' % DECIDED_DECISION})
-                    added += 1
+            spec = DECIDED_STATUS.get(t_['code'])
+            if not spec:
+                continue
+            codes = [c['code'] for c in t_['columns']]
+            if spec['column'] in codes:
+                raise SystemExit('decided status: %s.%s уже є' % (t_['code'], spec['column']))
+            keys = [r['key'] for r in t_['rows']]
+            if any(k not in keys for k in spec['emptyRows']):
+                raise SystemExit('decided status: %s не має рядків %s' % (t_['code'], spec['emptyRows']))
+            # видима колонка введення (як Land_Status таблиць 3-5): прихована не віддається зрізом GET, а read-only
+            # відхиляє PATCH - етап T7bStatus тоді не зміг би ні перевірити, ні записати статус наявних документів
+            t_['columns'].insert(0, {
+                'code': spec['column'], 'dataType': 'Lookup', 'registry': spec['registry'], 'headerEn': 'Status',
+                'headerRu': '', 'month': None, 'hidden': False, 'readOnly': False, 'excel': None,
+                'decision': DECIDED_DECISION, 'ecrAdded': 'D-425 row status (not in the Excel sheet): %s' % DECIDED_DECISION})
+            t_['statusPresets'] = {'column': spec['column'], 'registry': spec['registry'], 'entry': spec['entry'],
+                                   'rows': [k for k in keys if k not in spec['emptyRows']], 'emptyRows': list(spec['emptyRows'])}
+            added += 1
     stat_cols += added
-    print('decided input columns: %d' % added)
+    print('decided status columns: %d' % added)
 
 
-_decided_input_columns()
+_decided_status_columns()
 
 
 # ---- мости аргументів методологій C08/C09/C11/C12 для таблиць аркушів 6, 9-11 (LP-10).
@@ -1207,6 +1220,20 @@ def _arg_bridges():
                        'unit': cols[mc[0]].get('unit'), 'expression': month_expr(mc),
                        'ecrAdded': 'bridge: methodology argument %s = month column of the calculated period (decision %s)'
                                    % (name, DECIDED_DECISION)}
+            elif name in DECIDED_ROW_ARGS.get(tcode, {}):
+                # B26: аргумент = комірка ФІКСОВАНОГО рядка цієї таблиці в колонці місяця розрахунку. Дужки навколо виразу:
+                # не селектор YearMonths (той вимагає [Колонка] у кожній гілці), а змінна формула -> Volume_Mmm + псевдоніми.
+                src_row, mc, unit_ = DECIDED_ROW_ARGS[tcode][name]
+                if not (len(mc) == 12 and all(c in cols for c in mc) and [cols[c].get('month') for c in mc] == list(range(1, 13))):
+                    raise SystemExit('argumentBridges: %s.%s - колонки рішення не є 12 місячними колонками таблиці: %s' % (tcode, name, mc))
+                if src_row not in [r['key'] for r in t_['rows']]:
+                    raise SystemExit('argumentBridges: %s.%s - немає рядка %s' % (tcode, name, src_row))
+                refs = ['[%s].[%s].[%s]' % (tcode, src_row, c) for c in mc]
+                row_expr = ''.join('[Period].Sequence = %d ? %s : ' % (m, refs[m - 1]) for m in range(1, 12)) + refs[11]
+                new = {'code': name, 'dataType': 'Formula', 'headerEn': '%s (argument bridge: row %s, month column)' % (name, src_row),
+                       'unit': unit_, 'expression': '(' + row_expr + ')', 'sourceRow': src_row,
+                       'ecrAdded': 'bridge: methodology argument %s = row %s in the month column of the calculated period '
+                                   '(decision %s)' % (name, src_row, DECIDED_DECISION)}
             elif name in alias:
                 a = alias[name]
                 if a.get('monthColumns'):

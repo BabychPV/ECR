@@ -707,7 +707,7 @@
     "Concentration",
     "Volume"
    ],
-   "evidence": "структура методології на стенді EcrLandUi (збудована з AF_Formulas прода): одна формула ECW_EC_tons = (@Concentration * @Volume) / k1, k1 = 1 000 000 (мг/л * м3 -> т), Number, вихід у одиницях t; AF XML цієї методології не містить; рул прода AF_Water_Land_07b. B26 (P-0118-23, рішення людини (a)): Volume - нова місячна колонка введення T7b_00 (Volume_M01..M12, м3), Concentration - місячна колонка концентрації (January..December) місяця розрахунку"
+   "evidence": "структура методології на стенді EcrLandUi (збудована з AF_Formulas прода): одна формула ECW_EC_tons = (@Concentration * @Volume) / k1, k1 = 1 000 000 (мг/л * м3 -> т), Number, вихід у одиницях t; AF XML цієї методології не містить; рул прода AF_Water_Land_07b. B26 (P-0118-24/25): Volume - рядок S3_9 T7b_00 (об'єм Water Report) у колонці місяця розрахунку, Concentration - місячна колонка концентрації (January..December) свого рядка; S3_9 не рахується (фільтр D-425, колонка Land_Status)"
   }
  }
 }

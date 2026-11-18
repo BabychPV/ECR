@@ -235,7 +235,8 @@ public sealed class LandYearMonthsLibTests
             Write-Host ('T7B=' + ((@($t7b.columns | Where-Object { $_.yearMonthsOf -eq 'ECW_EC_tons' } | ForEach-Object { $_.code })) -join ','))
             foreach ($al in 'Concentration', 'Volume') { Write-Host ("T7BALIAS_$al=" + ((@($r.Aliases | Where-Object { $_.Table -eq 'T7b_00' -and $_.Alias -eq $al } | Sort-Object Month | ForEach-Object { "$($_.Month):$($_.Column)" })) -join ',')) }
             Write-Host ('T7BVOL=' + ((@($t7b.columns | Where-Object { $_.code -like 'Volume*' } | ForEach-Object { "$($_.code)|$($_.dataType)|$($_.month)|$($_.unit)|$($_.readOnly)" })) -join ','))
-            $t3 = Get-Table $r.Model 'T3_00'
+            foreach ($vm in 1, 9, 12) { Write-Host (('T7BV{0:00}=' -f $vm) + @($t7b.columns | Where-Object { $_.code -eq ('Volume_M{0:00}' -f $vm) })[0].expression) }
+            $t3 =Get-Table $r.Model 'T3_00'
             $i = [array]::IndexOf(@($t3.columns | ForEach-Object { $_.code }), 'ECW_EC_tons_NOx_M01')
             Write-Host ('T3NOX=' + ((@($t3.columns)[($i - 1)..($i + 11)] | ForEach-Object { $_.code }) -join ','))
             $s7 = @(@($r.Model.sheets | Where-Object { $_.code -eq 'S07_0_WATER_CONSOLIDATION' })[0].tables | Where-Object { $_.code -eq 'T7_00' })[0]
@@ -249,20 +250,32 @@ public sealed class LandYearMonthsLibTests
 
         Assert.Contains("ERR=\n", output, StringComparison.Ordinal);
         // план LAND-YEAR §a.1: 6 080 -> 14 119 (+8 904 = (669 + 73) × 12, −865 = 669 + 73 + 123);
-        // ✎ B26 (P-0118-23): +12 Volume_M01..M12 і +2 селектори T7b_00 (Concentration, Volume) -> 6 094 -> 14 131, селекторів 125
-        Assert.Contains("COLS=6094->14131\n", output, StringComparison.Ordinal);
-        Assert.Contains("STAT=53|8904|867|125|73|669|0\n", output, StringComparison.Ordinal);
-        // прив'язок-цілей 669 × 12; псевдонімів (125 + 73) × 12 = 2 376 (cfg.MonthInputAlias, L0); груп 669 + 73
-        Assert.Contains("PLAN=8028|2376|742\n", output, StringComparison.Ordinal);
+        // ✎ B26 (P-0118-24/25): T7b_00 +3 (Land_Status, селектор Concentration, змінна формула Volume) -> 6 083;
+        // YearMonths: −2 (Concentration, Volume) +12 (Volume_M01..M12) -> 14 132; селекторів 124, змінних 74
+        Assert.Contains("COLS=6083->14132\n", output, StringComparison.Ordinal);
+        Assert.Contains("STAT=53|8916|867|124|74|669|0\n", output, StringComparison.Ordinal);
+        // прив'язок-цілей 669 × 12; псевдонімів (124 + 74) × 12 = 2 376 (cfg.MonthInputAlias, L0); груп 669 + 74
+        Assert.Contains("PLAN=8028|2376|743\n", output, StringComparison.Ordinal);
         Assert.Contains("LEFT=0|0\n", output, StringComparison.Ordinal);
         Assert.Contains("T7B=" + M12("ECW_EC_tons") + "\n", output, StringComparison.Ordinal);
 
         // ✎ B26: аргументи ECW_C09_02_01 у річному шаблоні — псевдоніми місяця m: Concentration -> колонка концентрації
-        // місяця m (January…December), Volume -> нова колонка введення Volume_Mmm (м3); самі колонки Volume — введення
+        // місяця m (January…December) свого рядка; Volume -> Volume_Mmm (формула, read-only), що читає S3_9 місяця m
         var months = new[] { "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December" };
         Assert.Contains("T7BALIAS_Concentration=" + string.Join(",", months.Select((n, i) => $"{i + 1}:{n}")) + "\n", output, StringComparison.Ordinal);
         Assert.Contains("T7BALIAS_Volume=" + string.Join(",", Enumerable.Range(1, 12).Select(m => $"{m}:Volume_M{m:00}")) + "\n", output, StringComparison.Ordinal);
-        Assert.Contains("T7BVOL=" + string.Join(",", Enumerable.Range(1, 12).Select(m => $"Volume_M{m:00}|Decimal|{m}|m3|False")) + "\n", output, StringComparison.Ordinal);
+        Assert.Contains("T7BVOL=" + string.Join(",", Enumerable.Range(1, 12).Select(m => $"Volume_M{m:00}|Formula|{m}|m3|True")) + "\n", output, StringComparison.Ordinal);
+        foreach (var m in new[] { 1, 9, 12 })
+        {
+            // вираз місяця m: [Period].Sequence -> m, тож обирається рівно гілка [T7b_00].[S3_9].[<місяць m>]
+            // (для грудня — гілка «інакше» в кінці виразу)
+            var line = output.Split('\n').Single(l => l.StartsWith($"T7BV{m:00}=", StringComparison.Ordinal));
+            Assert.Contains(
+                m == 12 ? ": [T7b_00].[S3_9].[December])" : $"{m} = {m} ? [T7b_00].[S3_9].[{months[m - 1]}] :",
+                line,
+                StringComparison.Ordinal);
+            Assert.DoesNotContain("[Period]", line, StringComparison.Ordinal);
+        }
         // рішення 1: вихід за виходом — після M12 попереднього виходу йдуть 12 місяців NOx
         Assert.Contains("T3NOX=ECW_EC_tons_703_M12," + M12("ECW_EC_tons_NOx") + "\n", output, StringComparison.Ordinal);
         // два підсумки xlsm на своєму місці: 7.0 «Annual» після Q4, 9b «TOTAL» після December

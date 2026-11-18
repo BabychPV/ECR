@@ -6,19 +6,17 @@ using Xunit;
 namespace Ecr.Architecture.Tests;
 
 /// <summary>
-/// B26 (P-0118-23, рішення людини 18.11, відповідь (a)): методологія <c>ECW_C09_02_01</c> на <c>T7b_00</c> рахує
-/// <c>ECW_EC_tons = (@Concentration * @Volume) / k1</c>, але колонок із такими кодами в таблиці не було — банер «бракує
-/// входів Concentration/Volume». Тепер: нова місячна колонка введення <c>Volume_M01..M12</c> (м3) одразу після
-/// <c>December</c> і два мости-селектори місяця — <c>Concentration</c> (над January…December) і <c>Volume</c> (над
-/// Volume_Mmm); у річному шаблоні етап YearMonths робить із них псевдоніми місяця (<see cref="LandYearMonthsLibTests"/>).
-/// Модель методології не змінюється.
+/// B26 (P-0118-24/25, рішення людини 18.11; замінює (a) P-0118-23): методологія <c>ECW_C09_02_01</c> на <c>T7b_00</c>
+/// рахує <c>ECW_EC_tons = (@Concentration * @Volume) / k1</c>. <c>Concentration</c> — місячна колонка концентрації рядка
+/// (селектор над January…December); <c>Volume</c> — комірка рядка <c>S3_9</c> (об'єм із Water Report) у колонці ТОГО
+/// САМОГО місяця, одна для всіх рядків речовин (міст із посиланням на фіксований рядок). Рядок S3_9 сам не рахується:
+/// фільтр D-425 — колонка <c>Land_Status</c> (LAND_GENERIC_EQUIPSTATUS), Running на рядках речовин, S3_9 без статусу,
+/// <c>ECW_C09_02_01</c> у <c>runningOnly</c>. Ручних колонок Volume_Mmm (варіант (a)) немає. Модель методології не змінюється.
 /// </summary>
 /// <remarks>
-/// Мутаційні докази (лише локально, 18.11, генератор відпрацював — модель збудовано): у <c>gen_ecr_model.py</c> прибрати
-/// <c>'Volume'</c> з <c>DECIDED_MONTH_ARGS</c> і перегенерувати модель — червоніють «міст Volume», «немає в unresolved»,
-/// псевдоніми YearMonths і розрахунок (<c>LandT7bVolumeCalculationTests</c>); міст Volume на сусідній місяць
-/// (<c>month_expr(mc[1:] + mc[:1])</c>) — червоніють «міст Volume», псевдоніми YearMonths і всі три розрахункові.
-/// Зсув самого списку колонок генератор відхиляє сам (SystemExit: місяць джерела ≠ m).
+/// Мутаційні докази (лише локально; генератор відпрацював = «build OK», модель перегенеровано): (m1) у
+/// <c>DECIDED_ROW_ARGS</c> рядок <c>S2_7</c> замість <c>S3_9</c> — червоніє «Volume читає S3_9»; (m2) місяці зсунуто
+/// (<c>MONTHS[1:] + MONTHS[:1]</c>) — червоніє той самий тест.
 /// </remarks>
 public sealed class LandT7bVolumeModelTests
 {
@@ -48,55 +46,92 @@ public sealed class LandT7bVolumeModelTests
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
     [Trait("Requirement", "B26")]
-    public void Volume_нова_місячна_колонка_введення_в_м3_одразу_після_December()
+    public void Ручних_колонок_Volume_немає_концентрація_незмінна()
     {
         using var model = Load("land-template.model.json");
         var cols = Columns(T7b(model));
         var codes = cols.Select(Code).ToList();
-        var at = codes.IndexOf("December");
 
-        Assert.True(at >= 0);
-        for (var m = 1; m <= 12; m++)
-        {
-            var c = cols[at + m];
-            Assert.Equal($"Volume_M{m:00}", Code(c));
-            Assert.Equal("Decimal", c.GetProperty("dataType").GetString());
-            Assert.Equal("m3", c.GetProperty("unit").GetString());
-            Assert.Equal(m, Month(c));
-            Assert.False(c.GetProperty("readOnly").GetBoolean());
-            Assert.False(c.GetProperty("hidden").GetBoolean());
-            Assert.Contains("P-0118-23", c.GetProperty("decision").GetString(), StringComparison.Ordinal);
-        }
-
-        // концентрація лишилась тією самою (жодних перейменувань наявних колонок)
+        Assert.DoesNotContain(codes, c => c.StartsWith("Volume_M", StringComparison.Ordinal));
         Assert.Equal(MonthNames, codes.Where(x => MonthNames.Contains(x)));
         Assert.All(cols.Where(c => MonthNames.Contains(Code(c))), c => Assert.Equal("mg/l", c.GetProperty("unit").GetString()));
     }
 
-    [Theory]
+    [Fact]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
     [Trait("Requirement", "B26")]
-    [InlineData("Concentration", "mg/l", "")]
-    [InlineData("Volume", "m3", "Volume_M")]
-    public void Аргумент_ECW_C09_02_01_це_міст_що_вибирає_колонку_місяця_розрахунку(string argument, string unit, string prefix)
+    public void Volume_читає_S3_9_у_колонці_місяця_розрахунку_і_не_є_селектором()
     {
         using var model = Load("land-template.model.json");
-        var cols = Columns(T7b(model));
-        var byCode = cols.ToDictionary(Code, StringComparer.Ordinal);
-        var bridge = byCode[argument];
+        var table = T7b(model);
+        var byCode = Columns(table).ToDictionary(Code, StringComparer.Ordinal);
+        var bridge = byCode["Volume"];
 
         Assert.Equal("Formula", bridge.GetProperty("dataType").GetString());
         Assert.True(bridge.GetProperty("readOnly").GetBoolean());
-        Assert.Equal(unit, bridge.GetProperty("unit").GetString());
+        Assert.Equal("m3", bridge.GetProperty("unit").GetString());
+        Assert.Equal("S3_9", bridge.GetProperty("sourceRow").GetString());
 
-        var sources = SelectorSources(bridge.GetProperty("expression").GetString()!);
-        var expected = Enumerable.Range(1, 12).Select(m => prefix.Length == 0 ? MonthNames[m - 1] : $"{prefix}{m:00}").ToList();
-        Assert.Equal(expected, sources);
+        var expression = bridge.GetProperty("expression").GetString()!;
+
+        // у дужках: YearMonths класифікує як змінну формулу (Volume_Mmm + псевдоніми), а не як селектор
+        Assert.StartsWith("(", expression, StringComparison.Ordinal);
+
+        var sources = RowSources(expression);
+        Assert.Equal(12, sources.Count);
         for (var m = 1; m <= 12; m++)
         {
-            Assert.Equal(m, Month(byCode[sources[m - 1]]));
-            Assert.Equal("Decimal", byCode[sources[m - 1]].GetProperty("dataType").GetString());
+            Assert.Equal(("T7b_00", "S3_9", MonthNames[m - 1]), sources[m - 1]);
+            Assert.Equal(m, Month(byCode[sources[m - 1].Column]));
         }
+
+        var rowKeys = table.GetProperty("rows").EnumerateArray().Select(r => r.GetProperty("key").GetString()).ToList();
+        Assert.Contains("S3_9", rowKeys);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    [Trait("Requirement", "B26")]
+    public void Concentration_селектор_колонки_місяця_свого_рядка()
+    {
+        using var model = Load("land-template.model.json");
+        var byCode = Columns(T7b(model)).ToDictionary(Code, StringComparer.Ordinal);
+        var bridge = byCode["Concentration"];
+
+        Assert.Equal("Formula", bridge.GetProperty("dataType").GetString());
+        Assert.Equal("mg/l", bridge.GetProperty("unit").GetString());
+        var expression = bridge.GetProperty("expression").GetString()!;
+        var branches = Regex.Matches(expression, @"\[Period\]\.Sequence = (\d+) \? \[([^\]]+)\] : ");
+        Assert.Equal(MonthNames[..11], branches.Select(b => b.Groups[2].Value));
+        Assert.EndsWith(": [December]", expression, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    [Trait("Requirement", "B26")]
+    public void Статус_D425_Running_на_рядках_речовин_S3_9_без_статусу_і_методологія_в_runningOnly()
+    {
+        using var model = Load("land-template.model.json");
+        var table = T7b(model);
+        var status = Columns(table).Single(c => Code(c) == "Land_Status");
+
+        Assert.Equal("Lookup", status.GetProperty("dataType").GetString());
+        Assert.Equal("LAND_GENERIC_EQUIPSTATUS", status.GetProperty("registry").GetString());
+
+        var registry = model.RootElement.GetProperty("registries").EnumerateArray()
+            .Single(r => r.GetProperty("code").GetString() == "LAND_GENERIC_EQUIPSTATUS");
+        Assert.Contains("RUNNING", registry.GetProperty("entries").EnumerateArray().Select(e => e.GetProperty("code").GetString()));
+
+        var presets = table.GetProperty("statusPresets");
+        Assert.Equal("Land_Status", presets.GetProperty("column").GetString());
+        Assert.Equal("RUNNING", presets.GetProperty("entry").GetString());
+        Assert.Equal(["S1_6", "S2_7"], presets.GetProperty("rows").EnumerateArray().Select(x => x.GetString()!));
+        Assert.Equal(["S3_9"], presets.GetProperty("emptyRows").EnumerateArray().Select(x => x.GetString()!));
+
+        using var filter = JsonDocument.Parse(File.ReadAllText(Path.Combine(SourceTree.Root, "tools", "land", "land-row-filter.json")));
+        Assert.Equal("LAND_GENERIC_EQUIPSTATUS:Running", filter.RootElement.GetProperty("filter").GetString());
+        Assert.Contains("ECW_C09_02_01", filter.RootElement.GetProperty("runningOnly").EnumerateArray().Select(x => x.GetString()));
+        Assert.False(filter.RootElement.GetProperty("exempt").TryGetProperty("ECW_C09_02_01", out _));
     }
 
     [Fact]
@@ -116,27 +151,13 @@ public sealed class LandT7bVolumeModelTests
         Assert.Equal(["Concentration", "Volume"], bridged);
         Assert.False(bridges.GetProperty("unresolved").TryGetProperty("T7b_00", out _));
 
-        // методологія — та сама, вихід — той самий (модель методології не змінюється)
         var calc = T7b(model).GetProperty("calc");
         Assert.Equal(["ECW_C09_02_01"], calc.GetProperty("methodologies").EnumerateArray().Select(x => x.GetString()!));
         Assert.Equal(["ECW_EC_tons"], calc.GetProperty("outputs").EnumerateArray().Select(x => x.GetString()!));
     }
 
-    /// <summary>Джерела селектора «[Period].Sequence = 1 ? [A] : … : [L]» за місяцями (та сама форма, що Get-LandSelectorSources).</summary>
-    internal static List<string> SelectorSources(string expression)
-    {
-        var branches = Regex.Matches(expression, @"\[Period\]\.Sequence = (\d+) \? \[([^\]]+)\] : ");
-        Assert.Equal(11, branches.Count);
-        var result = new List<string>();
-        for (var i = 0; i < 11; i++)
-        {
-            Assert.Equal((i + 1).ToString(System.Globalization.CultureInfo.InvariantCulture), branches[i].Groups[1].Value);
-            result.Add(branches[i].Groups[2].Value);
-        }
-
-        var last = Regex.Match(expression, @": \[([^\]]+)\]$");
-        Assert.True(last.Success);
-        result.Add(last.Groups[1].Value);
-        return result;
-    }
+    /// <summary>Джерела «([Period].Sequence = 1 ? [T].[R].[C] : … : [T].[R].[C])» за місяцями: (таблиця, рядок, колонка).</summary>
+    internal static List<(string Table, string Row, string Column)> RowSources(string expression)
+        => [.. Regex.Matches(expression, @"\[([^\]]+)\]\.\[([^\]]+)\]\.\[([^\]]+)\]")
+            .Select(m => (m.Groups[1].Value, m.Groups[2].Value, m.Groups[3].Value))];
 }
