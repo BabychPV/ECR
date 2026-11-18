@@ -52,6 +52,9 @@
 | methodologyScript.constTable.firstRowHeaders | First row holds column names |
 | methodologyScript.constTable.replaceFromPaste | Replace table with pasted data |
 | methodologyScript.constTable.fixKeys | Keys must be non-empty and unique. |
+| methodologyScript.constTable.fixCells | Fix the marked cells: a number with a thousands separator is ambiguous. |
+| methodologyScript.constTable.commentsLost | Apply will remove {n} comment(s) (they were inside changed or deleted entries). Comments on untouched entries are kept. |
+| methodologyScript.constTable.error.ambiguousNumber | Ambiguous number: a comma or dot may be a thousands separator or a decimal mark. Write it without a thousands separator, or quote it as text. |
 | methodologyScript.constTable.cancel | Cancel |
 | methodologyScript.constTable.apply | Apply |
 | methodologyScript.constTable.error.emptyKey | Key is empty |

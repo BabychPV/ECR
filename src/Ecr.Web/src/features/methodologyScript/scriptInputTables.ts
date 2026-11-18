@@ -1,7 +1,7 @@
 import type { TemplateStructureDto } from '@/api/types';
 import { localized } from '@/shared/i18n/localized';
 import type { ScriptCompletionBase } from './ScriptEditor';
-import type { ScriptFunctionInfo, ScriptInputTable } from './scriptCompletion';
+import type { ScriptFunctionInfo, ScriptInputColumn, ScriptInputTable } from './scriptCompletion';
 import type { ScriptOutlineDto, ScriptTableDto } from './types';
 
 /**
@@ -79,24 +79,38 @@ export function scriptTableCodes(outline: ScriptOutlineDto | null): string[] {
   return [...codes].slice(0, MaxScriptTableCodes);
 }
 
-/** Відповідь `script/tables` → таблиці підказок (місячні колонки позначені сервером). */
+/**
+ * Відповідь `script/tables` → таблиці підказок. Сервер віддає запис на кожен шаблон, де є код таблиці (`Requested` без
+ * шаблону збігається з кількома): колонки й псевдоніми місяців ОБ'ЄДНУЮТЬСЯ за кодом таблиці — скрипт без шаблону
+ * (`rows from T`) читає будь-який із них. Колонки з однаковим кодом зливаються (місячна — якщо така хоч у одному).
+ */
 export function inputTablesFromDtos(tables: readonly ScriptTableDto[]): ScriptInputTable[] {
-  const result: ScriptInputTable[] = [];
-  const seen = new Set<string>();
+  const byCode = new Map<
+    string,
+    { columns: Map<string, ScriptInputColumn>; aliases: Set<string> }
+  >();
   for (const table of tables) {
-    if (seen.has(table.tableCode)) continue;
-    seen.add(table.tableCode);
-    result.push({
-      tableCode: table.tableCode,
-      columns: table.columns.map((column) => ({
+    let entry = byCode.get(table.tableCode);
+    if (entry === undefined) {
+      entry = { columns: new Map(), aliases: new Set() };
+      byCode.set(table.tableCode, entry);
+    }
+    for (const column of table.columns) {
+      const known = entry.columns.get(column.code);
+      entry.columns.set(column.code, {
         code: column.code,
         header: null,
-        dataType: column.dataType,
-        isMonthColumn: column.isMonthColumn,
-      })),
-    });
+        dataType: known?.dataType ?? column.dataType,
+        isMonthColumn: (known?.isMonthColumn ?? false) || column.isMonthColumn,
+      });
+    }
+    for (const alias of table.monthAliases) entry.aliases.add(alias);
   }
-  return result;
+  return [...byCode].map(([tableCode, entry]) => ({
+    tableCode,
+    columns: [...entry.columns.values()],
+    monthAliases: [...entry.aliases],
+  }));
 }
 
 /** Таблиці з outline → їхні колонки зі структур шаблонів. */

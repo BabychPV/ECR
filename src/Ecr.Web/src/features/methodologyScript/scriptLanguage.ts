@@ -14,7 +14,7 @@ export const ScriptLanguageId = 'ecr-script';
 export const ScriptKeywords: readonly string[] = [
   'import', 'rows', 'from', 'where', 'active', 'when', 'const', 'var', 'visible',
   'function', 'output', 'per', 'if', 'else', 'foreach', 'substance', 'in', 'reject',
-  'skip', 'true', 'false', 'null', 'row', 'period', 'header', 'key', 'entry', 'table',
+  'skip', 'true', 'false', 'null', 'row', 'period', 'header', 'key', 'entry', 'table', 'param',
 ];
 
 /** Агрегати (13.1) — конструкції мови, підсвічуються як вбудовані. */

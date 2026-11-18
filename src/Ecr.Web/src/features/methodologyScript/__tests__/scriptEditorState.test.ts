@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { EcrApiError } from '@/api/client';
+import { diagnostic } from './fixtures';
 import {
   canSaveScript,
   EmptyScriptEditorState,
   isScriptChangedError,
   isScriptDirty,
+  liveDiagnostics,
   replaceTextRange,
   saveScriptBody,
   scriptEditorReducer,
@@ -86,5 +88,24 @@ describe('стан тексту редактора', () => {
   it('replaceTextRange замінює літерал і не чіпає решту тексту', () => {
     const text = 'const A = { a: 1 };\nvar x = 1;';
     expect(replaceTextRange(text, 10, 18, '{ a: 2 }')).toBe('const A = { a: 2 };\nvar x = 1;');
+  });
+});
+
+describe('F13: збереження знімає конфлікт; діагностики не липнуть до чужого тексту', () => {
+  it('«saved» скидає conflict (інакше «Зберегти» лишилося б заблокованим)', () => {
+    const conflicted = scriptEditorReducer(loaded('a'), { type: 'conflict' });
+    expect(scriptEditorReducer(conflicted, { type: 'saved', submitted: 'a', hash: 'h2' }).conflict).toBe(false);
+  });
+
+  it('liveDiagnostics: відповідь перевірки; без неї — збережені лише для незміненого тексту; порожній текст — нічого', () => {
+    const fresh = [diagnostic({ code: 'fresh', line: 2 })];
+    const saved = [diagnostic({ code: 'saved', line: 9 })];
+
+    expect(liveDiagnostics({ text: 'x', savedText: 'x', validated: fresh, saved })).toBe(fresh);
+    expect(liveDiagnostics({ text: 'x', savedText: 'x', validated: undefined, saved })).toBe(saved);
+    // перевірка ще не відповіла/впала, а текст уже інший — рядки збережених діагностик не підходять
+    expect(liveDiagnostics({ text: 'xy', savedText: 'x', validated: undefined, saved })).toEqual([]);
+    // текст стерли: `validate` не викликається, стара відповідь не повинна лишатися
+    expect(liveDiagnostics({ text: '  ', savedText: 'x', validated: fresh, saved })).toEqual([]);
   });
 });

@@ -68,6 +68,8 @@ describe('токенізатор ecr-script', () => {
     }
     expect(ScriptKeywords).toContain('table');
     expect(ScriptKeywords).toContain('foreach');
+    // `param` — ключове слово сервера (`ScriptLexer.Keywords`): без нього підсвітка й друк ключів розходяться з ним.
+    expect(ScriptKeywords).toContain('param');
   });
 
   it('агрегати — predefined, не keyword', () => {

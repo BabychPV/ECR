@@ -37,6 +37,8 @@ export interface ScriptInputColumn {
 export interface ScriptInputTable {
   readonly tableCode: string;
   readonly columns: readonly ScriptInputColumn[];
+  /** Псевдоніми місячних входів таблиці (`cfg.MonthInputAlias`): `row.Alias[m]` (план 13.2). */
+  readonly monthAliases?: readonly string[];
 }
 
 export interface ScriptFunctionInfo {
@@ -195,13 +197,11 @@ export function declaredAliases(
   return map;
 }
 
-function columnItems(
-  columns: readonly ScriptInputColumn[],
-  tableCode: string,
-): ScriptCompletionItem[] {
+function columnItems(table: ScriptInputTable): ScriptCompletionItem[] {
+  const tableCode = table.tableCode;
   const seen = new Set<string>();
   const items: ScriptCompletionItem[] = [];
-  for (const column of columns) {
+  for (const column of table.columns) {
     const monthly = column.isMonthColumn || MonthSuffix.test(column.code);
     const name = monthly ? column.code.replace(MonthSuffix, '') : column.code;
     if (seen.has(name)) continue;
@@ -214,6 +214,18 @@ function columnItems(
       isSnippet: monthly,
       detail: monthly ? `${column.dataType}, ${tableCode}[m]` : `${column.dataType}, ${tableCode}`,
       ...(header === '' ? {} : { documentation: header }),
+    });
+  }
+  // Псевдонім місячного входу розв'язується першим (13.2): `row.Alias[m]` без колонки з таким кодом.
+  for (const alias of table.monthAliases ?? []) {
+    if (seen.has(alias)) continue;
+    seen.add(alias);
+    items.push({
+      label: alias,
+      kind: 'field',
+      insertText: `${alias}[\${1:period.Month}]`,
+      isSnippet: true,
+      detail: `${tableCode}[m]`,
     });
   }
   return items;
@@ -233,7 +245,7 @@ function rowColumns(context: ScriptCompletionContext): ScriptCompletionItem[] {
   const seen = new Set<string>();
   const items: ScriptCompletionItem[] = [];
   for (const table of source) {
-    for (const item of columnItems(table.columns, table.tableCode)) {
+    for (const item of columnItems(table)) {
       if (seen.has(item.label)) continue;
       seen.add(item.label);
       items.push(item);
@@ -329,7 +341,7 @@ function qualifiedItems(
   const aliasTable = declaredAliases(context.text, context.outline).get(qualifier);
   if (aliasTable !== undefined) {
     const table = context.tables.find((t) => t.tableCode === aliasTable);
-    return table === undefined ? [] : columnItems(table.columns, table.tableCode);
+    return table === undefined ? [] : columnItems(table);
   }
 
   const substanceVars = findNames(context.text, /\bforeach\s+substance\s+([A-Za-z_]\w*)\s+in\b/g);

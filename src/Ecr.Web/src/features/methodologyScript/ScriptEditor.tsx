@@ -137,6 +137,8 @@ export function ScriptEditor(props: ScriptEditorProps): JSX.Element {
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
 
+  // Тексти, які редактор уже віддав батькові, але батько ще не повернув їх у `value` (друк швидший за рендер).
+  const emitted = useRef<string[]>([]);
   const valueRef = useRef(value);
   valueRef.current = value;
   const onChangeRef = useRef(props.onChange);
@@ -238,7 +240,9 @@ export function ScriptEditor(props: ScriptEditorProps): JSX.Element {
         }
 
         created.onDidChangeModelContent(() => {
-          onChangeRef.current(created.getValue());
+          const text = created.getValue();
+          emitted.current.push(text);
+          onChangeRef.current(text);
         });
         created.onDidChangeCursorPosition((event) => {
           const current = created.getModel();
@@ -267,7 +271,21 @@ export function ScriptEditor(props: ScriptEditorProps): JSX.Element {
   // ── Зовнішня зміна тексту ─────────────────────────────────────────────────
   useEffect(() => {
     const current = editor.current;
-    if (current !== null && current.getValue() !== value) current.setValue(value);
+    if (current === null) return;
+    if (current.getValue() === value) {
+      emitted.current = [];
+      return;
+    }
+
+    // ⛔ `value` — відлуння того, що редактор сам щойно віддав (а друк уже пішов уперед): `setValue` стер би набране.
+    const own = emitted.current.lastIndexOf(value);
+    if (own !== -1) {
+      emitted.current = emitted.current.slice(own + 1);
+      return;
+    }
+
+    emitted.current = [];
+    current.setValue(value);
   }, [value, ready]);
 
   // ── Діагностики ───────────────────────────────────────────────────────────
