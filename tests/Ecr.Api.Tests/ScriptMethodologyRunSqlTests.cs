@@ -153,6 +153,68 @@ public sealed class ScriptMethodologyRunSqlTests(SqlServerFixture sql)
         Assert.Equal([a.MethodologyId, b.MethodologyBId], (await store.GetReaderClosureAsync([a.MethodologyId], default)).Order().ToArray());
     }
 
+    /// <summary>
+    /// MS (рецензія F13, D): перегляд скрипта (<c>ScriptPreviewRunner</c>) і справжній прогін після публікації дають ті самі
+    /// числа — для джерела й для читача його результату (читач у перегляді бере актуальні результати прогону).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Перегляд_дає_ті_самі_числа_що_прогін_після_публікації_для_джерела_і_читача()
+    {
+        var f = await ArrangeAsync(209904);
+        await InsertValuesAsync(f, ("gas", 10m), ("gas", null), ("oil", 7m));
+        var textA = $"rows from {f.TableCode} where row.{f.C1} == \"gas\";\noutput Y: kg = row.{f.C2} * 2;";
+        var a = await PublishScriptAsync(f, "A", textA, [("Y", f.OutAColumnId)]);
+        var b = await ArrangeReaderAsync(f, a);
+        string textB;
+        await using (var db = f.Builder.CreateContext())
+        {
+            textB = $"rows from {b.TableCode};\ntable Src = {f.TableCode};\noutput Z: kg = Sum(Src.{await ColumnCodeAsync(db, f.OutAColumnId)});";
+        }
+
+        await RunJobAsync(f.Document, sheetDefId: null);
+        var real = await ShapeAsync(f);
+        Assert.Equal(["Y|20", "Z|20"], real);
+
+        var previewA = await PreviewAsync(f, a.VersionId, textA);
+        var previewB = await PreviewAsync(f, b.VersionBId, textB);
+
+        Assert.Equal(real.Where(r => r.StartsWith("Y|", StringComparison.Ordinal)), OutputsOf(previewA));
+        Assert.Equal(real.Where(r => r.StartsWith("Z|", StringComparison.Ordinal)), OutputsOf(previewB));
+
+        // Рядок без числа й невибраний рядок — ті самі причини, що пише прогін (проблеми рядків).
+        var rowsA = Assert.Single(previewA.Tables).Rows;
+        Assert.Equal("missingInputs", rowsA.Single(r => r.RowNumber == 2).Issue);
+        Assert.Equal("notSelected", rowsA.Single(r => r.RowNumber == 3).State);
+
+        // Правка входу: перегляд бачить її одразу, і ті самі числа з'являються після перерахунку.
+        await SetValueAsync(f, rowIndex: 0, 30m);
+        var editedA = await PreviewAsync(f, a.VersionId, textA);
+        await RunJobAsync(f.Document, sheetDefId: f.Document.SheetDefId);
+        Assert.Equal(["Y|60", "Z|60"], await ShapeAsync(f));
+        Assert.Equal(["Y|60"], OutputsOf(editedA));
+        Assert.Equal(["Z|60"], OutputsOf(await PreviewAsync(f, b.VersionBId, textB)));
+    }
+
+    private async Task<ScriptPreviewResult> PreviewAsync(Fixture f, int versionId, string text)
+    {
+        await using var provider = Provider();
+        await using var scope = provider.CreateAsyncScope();
+        return await scope.ServiceProvider.GetRequiredService<IScriptPreviewRunner>().RunAsync(
+            new ScriptPreviewRequest(
+                versionId, text, f.Document.DocumentId, f.Document.PeriodKey.Value, TableInstanceId: null, MaxRows: 50),
+            CancellationToken.None);
+    }
+
+    private static List<string> OutputsOf(ScriptPreviewResult preview)
+        => [.. preview.Tables
+            .SelectMany(t => t.Rows)
+            .SelectMany(r => r.Values)
+            .Where(v => v.Kind == "output" && v.Error is null)
+            .Select(v => $"{v.Name}|{decimal.Parse(v.Text, System.Globalization.CultureInfo.InvariantCulture):0.####}")
+            .Order(StringComparer.Ordinal)];
+
     // ───── стенд ─────
 
     private async Task<Fixture> ArrangeAsync(int periodKey)
