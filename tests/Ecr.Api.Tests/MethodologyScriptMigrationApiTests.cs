@@ -128,14 +128,14 @@ public sealed class MethodologyScriptMigrationApiTests(SqlServerFixture sql)
             new { versionIds = new[] { s.MainVersionId }, engine = "Script", reason = "cutover" },
             HttpStatusCode.UnprocessableEntity).ConfigureAwait(true);
         Assert.Equal("err.ECR-CALC-0422.switchGroupIncomplete", onlyMain.GetProperty("messageKey").GetString());
-        Assert.Contains(s.LibraryCode, onlyMain.GetProperty("detail").GetString(), StringComparison.Ordinal);
+        Assert.Contains(s.LibraryCode, Assert.Single(onlyMain.GetProperty("missing").EnumerateArray()).GetString(), StringComparison.Ordinal);
 
         var onlyLibrary = await PostAsync(
             app, u.Publisher, Url + "/switch",
             new { versionIds = new[] { s.LibraryVersionId }, engine = "Script", reason = "cutover" },
             HttpStatusCode.UnprocessableEntity).ConfigureAwait(true);
         Assert.Equal("err.ECR-CALC-0422.switchGroupIncomplete", onlyLibrary.GetProperty("messageKey").GetString());
-        Assert.Contains(s.MainCode, onlyLibrary.GetProperty("detail").GetString(), StringComparison.Ordinal);
+        Assert.Contains(s.MainCode, Assert.Single(onlyLibrary.GetProperty("missing").EnumerateArray()).GetString(), StringComparison.Ordinal);
 
         var noReason = await PostAsync(
             app, u.Publisher, Url + "/switch",
