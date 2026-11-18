@@ -225,6 +225,66 @@ public sealed class MethodologyScriptMigrationApiTests(SqlServerFixture sql)
         Assert.Equal(0, await AuditCountAsync(s.MainVersionId, "cutover").ConfigureAwait(true));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "MS-8.4")]
+    public async Task Parity_endpoint_дає_нуль_розбіжностей_на_перетвореній_версії_і_розбіжність_після_зміни_тексту()
+    {
+        var s = await ArrangeAsync(209909).ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        var u = await SignInAllAsync(app, s).ConfigureAwait(true);
+        var checker = await SignInAsync(app, ["Calculation.View", "Calculation.Publish", "Document.View"], s, GrantLevel.Write).ConfigureAwait(true);
+        var url = $"/api/v1/methodologies/{s.MainId}/versions/{s.MainVersionId}/script/parity";
+        var body = new { documentId = s.Document.DocumentId, periodKey = s.PeriodKey };
+
+        // Тіньові тексти справжнього перетворювача (рушій лишається Formulas).
+        var main = await ConvertAsync(s.MainVersionId).ConfigureAwait(true);
+        var library = await ConvertAsync(s.LibraryVersionId).ConfigureAwait(true);
+        await SetShadowAsync(s, main.Text, library.Text).ConfigureAwait(true);
+
+        var equal = await PostAsync(app, checker, url, body, HttpStatusCode.OK).ConfigureAwait(true);
+        Assert.Equal(0, equal.GetProperty("mismatchCount").GetInt32());
+        Assert.Equal(1, equal.GetProperty("targets").GetInt32());
+        Assert.Equal(2, equal.GetProperty("rowsCompared").GetInt32()); // North ×2; South правилом не відібраний
+        Assert.True(equal.GetProperty("valuesCompared").GetInt32() >= 2, equal.ToString());
+        Assert.Empty(equal.GetProperty("mismatches").EnumerateArray());
+
+        // Прав немає — відмова; нічого не записується (рушій той самий).
+        using (var forbidden = await u.Viewer.PostAsJsonAsync(new Uri(url, UriKind.Relative), body).ConfigureAwait(true))
+        {
+            Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
+        }
+
+        // Змінена константа в збереженому тексті: розбіжність за числом.
+        var changed = main.Text.Replace("0.5", "0.6", StringComparison.Ordinal);
+        Assert.NotEqual(main.Text, changed);
+        await SetShadowAsync(s, changed, library.Text).ConfigureAwait(true);
+
+        var different = await PostAsync(app, checker, url, body, HttpStatusCode.OK).ConfigureAwait(true);
+        Assert.True(different.GetProperty("mismatchCount").GetInt32() > 0, different.ToString());
+        Assert.Contains(
+            different.GetProperty("mismatches").EnumerateArray(),
+            m => m.GetProperty("aspect").GetString() == "value.number" && m.GetProperty("rowKey").ValueKind == JsonValueKind.String);
+        Assert.Equal([MethodologyEngine.Formulas, MethodologyEngine.Formulas], await EnginesAsync(s).ConfigureAwait(true));
+
+        // Чужа версія за адресою методологи — 404.
+        var foreign = await PostAsync(
+            app, checker, $"/api/v1/methodologies/{s.LibraryId}/versions/{s.MainVersionId}/script/parity", body, HttpStatusCode.NotFound)
+            .ConfigureAwait(true);
+        Assert.Equal("err.ECR-CALC-0404.version", foreign.GetProperty("messageKey").GetString());
+    }
+
+    private async Task SetShadowAsync(Stand s, string mainText, string libraryText)
+    {
+        await using var db = Context();
+        var versions = await db.MethodologyVersions
+            .Where(v => v.Id == s.MainVersionId || v.Id == s.LibraryVersionId).ToListAsync().ConfigureAwait(false);
+        versions.Single(v => v.Id == s.MainVersionId).SetScript(mainText, Ecr.Scripting.ScriptCompiler.Hash(mainText));
+        versions.Single(v => v.Id == s.LibraryVersionId).SetScript(libraryText, Ecr.Scripting.ScriptCompiler.Hash(libraryText));
+        await db.SaveChangesAsync().ConfigureAwait(false);
+    }
+
     // ───────────────────────────── стенд ─────────────────────────────
 
     /// <summary>Формульна методологія-бібліотека з константою й методологія з імпортом, правилом і виходом.</summary>

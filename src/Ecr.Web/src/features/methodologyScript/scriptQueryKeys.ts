@@ -12,6 +12,9 @@ export const scriptKeys = {
   /** `GET /api/v1/expressions/metadata?dialect=Methodology` для редактора скрипта (функції, поля шапки). */
   metadata: (versionId: number) => ['methodologies', 'scriptMetadata', versionId] as const,
 
+  /** `GET /api/v1/methodologies/script/tables?codes=` — колонки таблиць для підказок (ключ — коди через кому). */
+  tables: (codes: string) => ['methodologies', 'scriptTables', codes] as const,
+
   /** `GET /api/v1/methodologies/{methodologyId}/versions/{versionId}/substances`. */
   substances: (versionId: number) => ['methodologies', 'substances', versionId] as const,
 

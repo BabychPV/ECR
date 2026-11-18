@@ -1,5 +1,6 @@
 import type {
   ScriptOutlineDto,
+  ScriptPreviewInputDto,
   ScriptPreviewRowDto,
   ScriptPreviewValueDto,
 } from './types';
@@ -166,9 +167,23 @@ export function previewValueToInput(value: ScriptPreviewValueDto): number | stri
   return text;
 }
 
+/** Вхід рядка перегляду → вхід тесту: текст, якщо є; інакше число (сервер віддає decimal рядком чи числом). */
+export function testInputFromPreviewInput(input: ScriptPreviewInputDto): TestInputField {
+  const unitId = input.unitId ?? null;
+  const text = input.text ?? null;
+  let value: number | string | null = null;
+  if (text !== null && text !== '') {
+    value = text;
+  } else if (input.value !== null && input.value !== undefined) {
+    const number = Number(input.value);
+    value = Number.isFinite(number) ? number : null;
+  }
+  return unitId === null ? { name: input.name, value } : { name: input.name, value, unitId };
+}
+
 /**
- * Тест із рядка перегляду: входи — з контуру (`outline.inputs`), значення — зі
- * списку значень рядка за іменем (де є); очікування — числові значення виходів.
+ * Тест із рядка перегляду: входи — `row.inputs` сервера (а за їх відсутності — контур `outline.inputs` зі значеннями
+ * рядка за іменем); очікування — числові значення виходів.
  */
 export function testFromPreviewRow(
   row: ScriptPreviewRowDto,
@@ -179,10 +194,15 @@ export function testFromPreviewRow(
     if (value.substance === undefined || value.substance === null) byName.set(value.name, value);
   }
 
-  const inputs: TestInputField[] = context.outline.inputs.map((input) => {
-    const found = byName.get(input.name);
-    return { name: input.name, value: found === undefined ? null : previewValueToInput(found) };
-  });
+  // Сервер віддає входи вибраного рядка (`inputs`): саме з них складається тест; значення величин рядка
+  // (`values`) — лише запасний шлях для відповіді без входів.
+  const inputs: TestInputField[] =
+    row.inputs !== undefined && row.inputs !== null && row.inputs.length > 0
+      ? row.inputs.map(testInputFromPreviewInput)
+      : context.outline.inputs.map((input) => {
+          const found = byName.get(input.name);
+          return { name: input.name, value: found === undefined ? null : previewValueToInput(found) };
+        });
 
   const expected: TestExpectedValue[] = [];
   for (const output of context.outline.outputs) {

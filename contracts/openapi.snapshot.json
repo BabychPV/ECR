@@ -26121,6 +26121,114 @@
         ],
         "type": "object"
       },
+      "ScriptParityDto": {
+        "description": "Відповідь паритету: лічильники й розбіжності.",
+        "properties": {
+          "mismatchCount": {
+            "description": "Скільки розбіжностей усього.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "mismatches": {
+            "description": "Розбіжності (не більше ліміту).",
+            "items": {
+              "$ref": "#/components/schemas/ScriptParityMismatch"
+            },
+            "type": "array"
+          },
+          "rowsCompared": {
+            "description": "Скільки рядків, відібраних обома шляхами, порівняно за значеннями.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "targets": {
+            "description": "Скільки екземплярів таблиць документа порівняно.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "truncated": {
+            "description": "Перелік Mismatches обрізано до ліміту.",
+            "type": "boolean"
+          },
+          "valuesCompared": {
+            "description": "Скільки значень порівняно.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "targets",
+          "rowsCompared",
+          "valuesCompared",
+          "mismatchCount",
+          "truncated",
+          "mismatches"
+        ],
+        "type": "object"
+      },
+      "ScriptParityMismatch": {
+        "description": "Одна розбіжність паритету.",
+        "properties": {
+          "aspect": {
+            "description": "Що розійшлося (`rows.selected`, `value.number`, …).",
+            "type": "string"
+          },
+          "new": {
+            "description": "Значення скрипта.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "old": {
+            "description": "Значення старого шляху.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "rowKey": {
+            "description": "Ключ рядка; `null` — розбіжність на рівні екземпляра.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "tableInstanceId": {
+            "description": "Екземпляр таблиці.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tableInstanceId",
+          "rowKey",
+          "aspect",
+          "old",
+          "new"
+        ],
+        "type": "object"
+      },
+      "ScriptParityRequestDto": {
+        "description": "Запит паритету старого й скриптового шляхів версії на документі.",
+        "properties": {
+          "documentId": {
+            "description": "Документ.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "periodKey": {
+            "description": "Період (місяць, РРРРММ).",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "documentId",
+          "periodKey"
+        ],
+        "type": "object"
+      },
       "ScriptPreviewDto": {
         "description": "Відповідь перегляду на документі.",
         "properties": {
@@ -51532,6 +51640,142 @@
         "summary": "Канонічний друк літерала константи для редактора таблиць коефіцієнтів. Право `Calculation.View`.",
         "tags": [
           "MethodologyScript"
+        ]
+      }
+    },
+    "/api/v1/methodologies/{id}/versions/{vid}/script/parity": {
+      "post": {
+        "description": "Нічого не записує. Точне порівняння без допусків: вибір рядків, значення, одиниці, відсутні аргументи,\nпомилки кроків. `mismatchCount = 0` при `targets &gt; 0` — шляхи збігаються на цих даних.",
+        "parameters": [
+          {
+            "description": "Методологія.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Версія.",
+            "in": "path",
+            "name": "vid",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScriptParityRequestDto"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScriptParityRequestDto"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScriptParityRequestDto"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScriptParityDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScriptParityDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScriptParityDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Паритет версії на документі: збережений (тіньовий) скрипт проти рушія формул на всіх таблицях документа за\nперіод, до яких прив'язана методологія. Право `Calculation.Publish` і доступ до документа.",
+        "tags": [
+          "MethodologyScriptMigration"
         ]
       }
     },

@@ -395,3 +395,103 @@ public sealed class PreviewMethodologyScriptHandler(
         return new ScriptPreviewDto(result.Tables, diagnostics);
     }
 }
+
+/// <summary>
+/// Паритет версії на документі: чи дає збережений (тіньовий) скрипт ті самі рядки й числа, що й рушій формул.
+/// Нічого не пише. Право, доступ до документа, версія й текст — тут; сам прогін — <see cref="IScriptParityRunner"/> рушія.
+/// </summary>
+public sealed class ParityMethodologyScriptHandler(
+    IMethodologyDraftStore drafts,
+    IAccessDecisionService access,
+    ICurrentUser currentUser,
+    IScriptParityRunner? runner = null)
+{
+    /// <summary>Право на перевірку паритету — те саме, що й на перемикання рушія.</summary>
+    public const string Permission = "Calculation.Publish";
+
+    /// <summary>Найбільше розбіжностей у відповіді.</summary>
+    public const int MaxMismatches = 500;
+
+    /// <summary>Порівнює шляхи версії на документі й періоді.</summary>
+    /// <param name="methodologyVersionId">Версія.</param>
+    /// <param name="request">Документ і період.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="NotFoundException">Версії або документа (для цього користувача) немає.</exception>
+    /// <exception cref="AccessDeniedException">Профіль із обмеженим доступом до колонок.</exception>
+    /// <exception cref="BusinessRuleException">Період не місяць, версія не рівня Configuration або без тексту.</exception>
+    public async Task<ScriptParityDto> HandleAsync(
+        int methodologyVersionId, ScriptParityRequestDto request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var profile = await PermissionCheck.RequireInAnyProjectAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
+        await DocumentVisibility.RequireVisibleAsync(access, profile, request.DocumentId, Permission, ct).ConfigureAwait(false);
+
+        // ⛔ Розбіжності показують значення входів рядків: читач із вужчим доступом до колонок їх бачити не може.
+        if (DocumentSheetVisibility.HasRestrictions(profile))
+        {
+            throw new AccessDeniedException(
+                "ECR-AUTH-0403",
+                "Паритет скрипта на документі недоступний із обмеженим доступом до колонок.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0403.scriptPreviewRestricted" });
+        }
+
+        var key = new PeriodKey(request.PeriodKey);
+        if (!key.IsValid || key.Sequence > 12)
+        {
+            throw new BusinessRuleException(
+                "ECR-CALC-0422",
+                $"Ключ періоду {request.PeriodKey} не є місяцем: очікується РРРРММ, напр. 202609.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.simulatePeriodInvalid",
+                    ["periodKey"] = request.PeriodKey.ToString(CultureInfo.InvariantCulture),
+                });
+        }
+
+        var (_, version) = await ScriptHandlerSupport.LoadAsync(drafts, methodologyVersionId, ct).ConfigureAwait(false);
+        if (version.Level != CalculationLevel.Configuration)
+        {
+            throw new BusinessRuleException(
+                "ECR-CALC-0422",
+                $"Версія {version.Version}: паритет на документі доступний лише для версій рівня Configuration.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.parityNotApplicable",
+                    ["version"] = version.Version,
+                });
+        }
+
+        if (string.IsNullOrWhiteSpace(version.ScriptText))
+        {
+            throw new BusinessRuleException(
+                "ECR-CALC-0422",
+                $"Версія {version.Version}: текст скрипта порожній.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.scriptEmpty",
+                    ["version"] = version.Version,
+                });
+        }
+
+        if (runner is null)
+        {
+            throw new BusinessRuleException(
+                "ECR-CALC-0422",
+                "Паритет скрипта на документі в цьому складанні недоступний: рушій розрахунків не підключено.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-CALC-0422.scriptPreviewUnavailable" });
+        }
+
+        var result = await runner
+            .RunAsync(new ScriptParityRequest(methodologyVersionId, version.ScriptText, request.DocumentId, request.PeriodKey), ct)
+            .ConfigureAwait(false);
+
+        return new ScriptParityDto(
+            result.Targets,
+            result.RowsCompared,
+            result.ValuesCompared,
+            result.Mismatches.Count,
+            result.Mismatches.Count > MaxMismatches,
+            [.. result.Mismatches.Take(MaxMismatches)]);
+    }
+}

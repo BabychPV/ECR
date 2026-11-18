@@ -34,7 +34,11 @@ export type PreviewScriptRequest = Schemas['PreviewMethodologyScriptRequest'];
 export type ScriptPreviewDto = Schemas['ScriptPreviewDto'];
 export type ScriptPreviewTableDto = Schemas['ScriptPreviewTable'];
 export type ScriptPreviewRowDto = Schemas['ScriptPreviewRow'];
+/** Жива таблиця з колонками для підказок: `GET /api/v1/methodologies/script/tables?codes=`. */
+export type ScriptTableDto = Schemas['ScriptTableDto'];
 export type ScriptPreviewValueDto = Schemas['ScriptPreviewValue'];
+/** Вхід вибраного рядка: `{ name, value, text, unitId }` — з нього складається тест «з рядка». */
+export type ScriptPreviewInputDto = Schemas['ScriptPreviewInput'];
 /** `{ text | null, kind | null, diagnostics[] }`: `text = null` — літерал не розібрано. */
 export type FormatConstResultDto = Schemas['FormatConstDto'];
 

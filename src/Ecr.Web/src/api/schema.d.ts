@@ -12884,6 +12884,94 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/methodologies/{id}/versions/{vid}/script/parity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Паритет версії на документі: збережений (тіньовий) скрипт проти рушія формул на всіх таблицях документа за
+         *     період, до яких прив'язана методологія. Право `Calculation.Publish` і доступ до документа.
+         * @description Нічого не записує. Точне порівняння без допусків: вибір рядків, значення, одиниці, відсутні аргументи,
+         *     помилки кроків. `mismatchCount = 0` при `targets &gt; 0` — шляхи збігаються на цих даних.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                    /** @description Версія. */
+                    vid: number;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["ScriptParityRequestDto"];
+                    "application/json": components["schemas"]["ScriptParityRequestDto"];
+                    "text/json": components["schemas"]["ScriptParityRequestDto"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ScriptParityDto"];
+                        "text/json": components["schemas"]["ScriptParityDto"];
+                        "text/plain": components["schemas"]["ScriptParityDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/methodologies/{id}/versions/{vid}/script/preview": {
         parameters: {
             query?: never;
@@ -41735,6 +41823,62 @@ export interface components {
             text: string;
             /** @description Номер версії. */
             version: string;
+        };
+        /** @description Відповідь паритету: лічильники й розбіжності. */
+        ScriptParityDto: {
+            /**
+             * Format: int32
+             * @description Скільки розбіжностей усього.
+             */
+            mismatchCount: number;
+            /** @description Розбіжності (не більше ліміту). */
+            mismatches: components["schemas"]["ScriptParityMismatch"][];
+            /**
+             * Format: int32
+             * @description Скільки рядків, відібраних обома шляхами, порівняно за значеннями.
+             */
+            rowsCompared: number;
+            /**
+             * Format: int32
+             * @description Скільки екземплярів таблиць документа порівняно.
+             */
+            targets: number;
+            /** @description Перелік Mismatches обрізано до ліміту. */
+            truncated: boolean;
+            /**
+             * Format: int32
+             * @description Скільки значень порівняно.
+             */
+            valuesCompared: number;
+        };
+        /** @description Одна розбіжність паритету. */
+        ScriptParityMismatch: {
+            /** @description Що розійшлося (`rows.selected`, `value.number`, …). */
+            aspect: string;
+            /** @description Значення скрипта. */
+            new: null | string;
+            /** @description Значення старого шляху. */
+            old: null | string;
+            /** @description Ключ рядка; `null` — розбіжність на рівні екземпляра. */
+            rowKey: null | string;
+            /**
+             * Format: int64
+             * @description Екземпляр таблиці.
+             */
+            tableInstanceId: number;
+        };
+        /** @description Запит паритету старого й скриптового шляхів версії на документі. */
+        ScriptParityRequestDto: {
+            /**
+             * Format: int64
+             * @description Документ.
+             */
+            documentId: number;
+            /**
+             * Format: int32
+             * @description Період (місяць, РРРРММ).
+             */
+            periodKey: number;
         };
         /** @description Відповідь перегляду на документі. */
         ScriptPreviewDto: {

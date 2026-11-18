@@ -177,3 +177,23 @@ public sealed record ScriptTextRequest(string Text);
 /// <param name="MaxRows">Скільки рядків з кожної таблиці (1…200, типово 50).</param>
 public sealed record PreviewMethodologyScriptRequest(
     string? Text, long DocumentId, int PeriodKey, long? TableInstanceId = null, int? MaxRows = null);
+
+/// <summary>Запит паритету старого й скриптового шляхів версії на документі.</summary>
+/// <param name="DocumentId">Документ.</param>
+/// <param name="PeriodKey">Період (місяць, РРРРММ).</param>
+public sealed record ScriptParityRequestDto(long DocumentId, int PeriodKey);
+
+/// <summary>Відповідь паритету: лічильники й розбіжності.</summary>
+/// <param name="Targets">Скільки екземплярів таблиць документа порівняно.</param>
+/// <param name="RowsCompared">Скільки рядків, відібраних обома шляхами, порівняно за значеннями.</param>
+/// <param name="ValuesCompared">Скільки значень порівняно.</param>
+/// <param name="MismatchCount">Скільки розбіжностей усього.</param>
+/// <param name="Truncated">Перелік <paramref name="Mismatches"/> обрізано до ліміту.</param>
+/// <param name="Mismatches">Розбіжності (не більше ліміту).</param>
+public sealed record ScriptParityDto(
+    int Targets,
+    int RowsCompared,
+    int ValuesCompared,
+    int MismatchCount,
+    bool Truncated,
+    IReadOnlyList<ScriptParityMismatch> Mismatches);

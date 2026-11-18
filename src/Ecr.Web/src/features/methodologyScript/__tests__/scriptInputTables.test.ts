@@ -3,8 +3,10 @@ import {
   assembleCompletionBase,
   functionInfo,
   inputTablesFor,
+  inputTablesFromDtos,
   liveTemplateVersionId,
   namedTemplateCodes,
+  scriptTableCodes,
   templatesToRead,
   type ScriptTemplateSource,
 } from '../scriptInputTables';
@@ -107,5 +109,54 @@ describe('контекст підказок із наявних API', () => {
 
     const header = scriptCompletions({ ...base, text: 'var x = header.', offset: 15 });
     expect(header.map((i) => i.label)).toEqual(['Company']);
+  });
+});
+
+describe('колонки з script/tables', () => {
+  const dtos = [
+    {
+      requested: 'HSE.Fuel',
+      templateCode: 'HSE',
+      tableCode: 'Fuel',
+      columns: [
+        { code: 'Hours', dataType: 'Decimal', isMonthColumn: false, monthNumber: null, unitCode: 'h' },
+        { code: 'Jan', dataType: 'Decimal', isMonthColumn: true, monthNumber: 1, unitCode: null },
+      ],
+      monthAliases: [],
+    },
+  ];
+
+  it('коди запиту: Шаблон.Таблиця, якщо шаблон названо; без повторів', () => {
+    const o = outline({
+      tables: [outlineTable('Fuel', null, 'HSE'), outlineTable('Stream'), outlineTable('Fuel', 'F2', 'HSE')],
+    });
+    expect(scriptTableCodes(o)).toEqual(['HSE.Fuel', 'Stream']);
+    expect(scriptTableCodes(null)).toEqual([]);
+  });
+
+  it('відповідь → таблиці підказок із місячними колонками', () => {
+    expect(inputTablesFromDtos(dtos)).toEqual([
+      {
+        tableCode: 'Fuel',
+        columns: [
+          { code: 'Hours', header: null, dataType: 'Decimal', isMonthColumn: false },
+          { code: 'Jan', header: null, dataType: 'Decimal', isMonthColumn: true },
+        ],
+      },
+    ]);
+  });
+
+  it('assembleCompletionBase: живі таблиці мають перевагу, порожні — запасний шлях зі структур', () => {
+    const o = outline({ tables: [outlineTable('Fuel')] });
+    const sources = [source('HSE', { Fuel: ['FromStructure'] })];
+    const live = assembleCompletionBase({
+      outline: o, sources, functions: [], headerFields: [], liveTables: inputTablesFromDtos(dtos),
+    });
+    expect(live.tables[0]?.columns.map((c) => c.code)).toEqual(['Hours', 'Jan']);
+
+    const fallback = assembleCompletionBase({
+      outline: o, sources, functions: [], headerFields: [], liveTables: [],
+    });
+    expect(fallback.tables[0]?.columns.map((c) => c.code)).toEqual(['FromStructure']);
   });
 });

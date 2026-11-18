@@ -137,6 +137,31 @@ describe('тест із рядка перегляду', () => {
     expect(form.tolerance).toBe(DefaultTolerance);
   });
 
+  it('входи рядка з сервера (inputs) мають перевагу: ім’я, число, текст, одиниця', () => {
+    const withInputs: ScriptPreviewRowDto = {
+      ...row,
+      inputs: [
+        { name: 'Hours', value: '12.5', text: null, unitId: 7 },
+        { name: 'Fuel', value: null, text: 'Gasoline', unitId: null },
+        { name: 'Jan', value: '0', text: null, unitId: null },
+        { name: 'Empty', value: null, text: null, unitId: null },
+      ],
+    };
+    const form = testFromPreviewRow(withInputs, { outline, documentId: 1, periodKey: 202604, tableInstanceId: 2 });
+    expect(form.inputs).toEqual([
+      { name: 'Hours', value: 12.5, unitId: 7 },
+      { name: 'Fuel', value: 'Gasoline' },
+      { name: 'Jan', value: 0 },
+      { name: 'Empty', value: null },
+    ]);
+  });
+
+  it('порожній inputs — запасний шлях через контур і values', () => {
+    const empty: ScriptPreviewRowDto = { ...row, inputs: [] };
+    const form = testFromPreviewRow(empty, { outline, documentId: 1, periodKey: 202604, tableInstanceId: 2 });
+    expect(form.inputs.map((i) => i.name)).toEqual(['Hours', 'Fuel', 'Unknown']);
+  });
+
   it('очікування: вихід і вихід по речовині (лише з відомим Id)', () => {
     const form = testFromPreviewRow(row, {
       outline,

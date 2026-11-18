@@ -571,6 +571,17 @@ public sealed partial class EndpointCoverageTests
             "Бейдж статусу: уся таблиця statusTable."),
         new("pages/admin/ExpressionsPage.tsx", "statusKey('version', v.status)", 1, "shared/ui/StatusBadge.tsx",
             StatusKeys("version"), "Статус версії виразу."),
+        new("features/methodologyScript/ScriptCompareModal.tsx", "statusKey('version', version.status)", 1,
+            "shared/ui/StatusBadge.tsx", StatusKeys("version"), "MS: статус версії в списку «з чим порівняти»."),
+        new("features/methodologyScript/ScriptTestsPanel.tsx", "`methodologyScript.tests.issue.${issue}`", 1, null,
+            ["methodologyScript.tests.issue.codeMissing", "methodologyScript.tests.issue.codeInvalid",
+             "methodologyScript.tests.issue.codeDuplicate", "methodologyScript.tests.issue.periodMissing",
+             "methodologyScript.tests.issue.noExpected", "methodologyScript.tests.issue.expectedNotNumber",
+             "methodologyScript.tests.issue.toleranceInvalid"],
+            "MS: помилка форми тесту — значення `TestFormIssue` (`testForm.ts`)."),
+        new("pages/admin/MethodologyScriptPage.tsx", "`methodologyScript.engine.${script.data?.engine ?? version.engine ?? 'Script'}`", 1,
+            null, ["methodologyScript.engine.Script", "methodologyScript.engine.Formulas"],
+            "MS: рушій версії (`Script` або `Formulas`), як віддає сервер."),
         new("pages/admin/MethodologyVersionsPage.tsx", "statusKey('version', version.status)", 1,
             "shared/ui/StatusBadge.tsx", StatusKeys("version"), "Статус версії методології."),
         new("features/projects/PeriodsOverview.tsx", "statusKey('period', shown)", 1,
@@ -1408,20 +1419,15 @@ public sealed partial class EndpointCoverageTests
         // LP-07 (форма B константи): склад речовин версії методології заводить скрипт
         // `tools/land/Import-LandAirSubstances.ps1` / розгортання шаблону; екрана «Речовини версії» ще немає.
         // ⚠ Звільнення тимчасове: прибрати в тому ж коміті, що додає виклик у `features/methodologies`.
-        "GET /api/v1/methodologies/{p}/versions/{p}/substances",
+        // (GET читає редактор скрипта — `features/methodologyScript/api.ts`; PUT клієнт не викликає.)
         "PUT /api/v1/methodologies/{p}/versions/{p}/substances",
 
-        // MS (скрипт методології): серверна частина з'явилась раніше за сторінку скрипта (ms-web, `features/methodologyScript`).
-        // ⚠ Звільнення тимчасове: прибрати в тому ж коміті, що додає виклики в `features/methodologyScript/api.ts`.
-        "GET /api/v1/methodologies/{p}/versions/{p}/script",
-        "PUT /api/v1/methodologies/{p}/versions/{p}/script",
-        "POST /api/v1/methodologies/{p}/versions/{p}/script/validate",
-        "POST /api/v1/methodologies/{p}/versions/{p}/script/preview",
-        "POST /api/v1/methodologies/{p}/versions/{p}/script/format-const",
-        "GET /api/v1/methodologies/script/tables",
         // MS 8.5: перенесення на проді викликає оператор у вікні (curl/скрипт), екрана немає й не планується.
         "POST /api/v1/methodologies/script-migration/apply",
         "POST /api/v1/methodologies/script-migration/switch",
+        // MS 8.4: паритет «формули проти скрипта» на документі запускає оператор перед перемиканням рушія (curl/скрипт, поруч
+        // із `script-migration/switch`); кнопки в редакторі немає й не планується — редактор працює з версіями на рушії Script.
+        "POST /api/v1/methodologies/{p}/versions/{p}/script/parity",
 
         // D-425 (Land «лише Running»): прапорець фільтра активності рядків ставить скрипт розгортання шаблону
         // (`tools/land/Build-LandTemplate.ps1`, етап RowFilter) за переліком `tools/land/land-row-filter.json`;

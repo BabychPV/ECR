@@ -2,6 +2,7 @@ import { useQueries, useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
+import { methodologyScriptTables } from './api';
 import { scriptKeys } from './scriptQueryKeys';
 import type {
   TemplatePage,
@@ -12,7 +13,9 @@ import { expressionMetadata } from '../expressions/api';
 import type { ScriptCompletionBase } from './ScriptEditor';
 import {
   assembleCompletionBase,
+  inputTablesFromDtos,
   liveTemplateVersionId,
+  scriptTableCodes,
   templatesToRead,
   type ScriptTemplateSource,
 } from './scriptInputTables';
@@ -21,12 +24,11 @@ import type { ScriptOutlineDto } from './types';
 const StaleMs = 5 * 60_000;
 
 /**
- * Дані для підказок редактора з НАЯВНИХ API (нового ендпоінта «колонки за кодом
- * таблиці» немає):
- *  • перелік шаблонів → чинні версії → структура версії (колонки таблиць);
+ * Дані для підказок редактора:
+ *  • колонки таблиць — одним запитом `GET /api/v1/methodologies/script/tables?codes=`;
+ *  • ЗАПАСНИЙ шлях (лише коли ендпоінт нічого не віддав чи впав): перелік шаблонів → чинні версії → структура версії;
  *  • метадані виразів діалекту `Methodology` (вбудовані функції, поля шапки).
- * Структури читаються лише коли скрипт уже називає таблиці, і лише для шаблонів,
- * які він називає (`Шаблон.Таблиця`), а без назви — для всіх неархівних.
+ * Усе читається лише коли скрипт уже називає таблиці.
  */
 export function useScriptCompletionData(
   outline: ScriptOutlineDto | null,
@@ -34,16 +36,33 @@ export function useScriptCompletionData(
 ): ScriptCompletionBase {
   const wantsTables = (outline?.tables.length ?? 0) > 0;
 
+  const tableCodes = useMemo(() => scriptTableCodes(outline), [outline]);
+  const tableCodesKey = tableCodes.join(',');
+  const liveTablesQuery = useQuery({
+    queryKey: scriptKeys.tables(tableCodesKey),
+    queryFn: () => methodologyScriptTables(tableCodes),
+    enabled: tableCodes.length > 0,
+    staleTime: StaleMs,
+  });
+  const liveTables = useMemo(
+    () => inputTablesFromDtos(liveTablesQuery.data ?? []),
+    [liveTablesQuery.data],
+  );
+  // Запасний шлях вмикається, лише коли ендпоінт відповів порожньо або помилкою.
+  const needsFallback =
+    wantsTables &&
+    (liveTablesQuery.isError || (liveTablesQuery.isSuccess && liveTables.length === 0));
+
   const templates = useQuery({
     queryKey: queryKeys.templates.list(),
     queryFn: () => apiFetch<TemplatePage>('/api/v1/templates?limit=100'),
-    enabled: wantsTables,
+    enabled: needsFallback,
     staleTime: StaleMs,
   });
 
   const toRead = useMemo(
-    () => templatesToRead(outline, templates.data?.items ?? []),
-    [outline, templates.data],
+    () => (needsFallback ? templatesToRead(outline, templates.data?.items ?? []) : []),
+    [outline, templates.data, needsFallback],
   );
   const ids = useMemo(() => toRead.map((template) => template.id), [toRead]);
 
@@ -53,7 +72,7 @@ export function useScriptCompletionData(
       apiFetch<TemplateVersionsForTemplate[]>(
         `/api/v1/templates/versions?${ids.map((id) => `ids=${String(id)}`).join('&')}`,
       ),
-    enabled: ids.length > 0,
+    enabled: needsFallback && ids.length > 0,
     staleTime: StaleMs,
   });
 
@@ -108,7 +127,8 @@ export function useScriptCompletionData(
         sources,
         functions: functions ?? [],
         headerFields: (headers ?? []).map((header) => header.name),
+        liveTables,
       }),
-    [outline, sources, functions, headers],
+    [outline, sources, functions, headers, liveTables],
   );
 }

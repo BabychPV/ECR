@@ -1,3 +1,5 @@
+using Ecr.Application.Calculations;
+using Ecr.Application.Calculations.Scripting;
 using Ecr.Application.Calculations.Scripting.Migration;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -9,11 +11,13 @@ namespace Ecr.Api.Controllers;
 /// <c>pack</c> і перемикання рушія групи версій. Право <c>Calculation.Publish</c>, кожна зміна — в журналі.
 /// </summary>
 [ApiController]
-[Route("api/v1/methodologies/script-migration")]
+[Route("api/v1/methodologies")]
 [Authorize]
 public sealed class MethodologyScriptMigrationController(
     ApplyScriptPackageHandler apply,
-    SwitchScriptEngineHandler switchEngine) : ControllerBase
+    SwitchScriptEngineHandler switchEngine,
+    ParityMethodologyScriptHandler parity,
+    MethodologyVersionScope scope) : ControllerBase
 {
     /// <summary>
     /// Звіряє пакет <c>package.json</c> з базою й записує тіньові тексти. Право <c>Calculation.Publish</c>.
@@ -27,7 +31,7 @@ public sealed class MethodologyScriptMigrationController(
     /// перевірками оточення. Версії обробляються незалежно: відповідь перелічує статус кожної
     /// (<c>applied</c>, <c>wouldApply</c>, <c>refused</c> з ключем причини). Рушій версії не змінюється.
     /// </remarks>
-    [HttpPost("apply")]
+    [HttpPost("script-migration/apply")]
     [ProducesResponseType<ApplyScriptPackageResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
@@ -47,7 +51,7 @@ public sealed class MethodologyScriptMigrationController(
     /// (<c>422 switchGroupIncomplete</c> називає відсутні версії). Тоді записуються таблиці читання й залежності.
     /// На <c>Formulas</c>: просте перемикання, таблиці читання знімаються. Старі формули не видаляються.
     /// </remarks>
-    [HttpPost("switch")]
+    [HttpPost("script-migration/switch")]
     [ProducesResponseType<SwitchScriptEngineResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -56,4 +60,30 @@ public sealed class MethodologyScriptMigrationController(
     public async Task<ActionResult<SwitchScriptEngineResponse>> Switch(
         [FromBody] SwitchScriptEngineRequest request, CancellationToken ct)
         => Ok(await switchEngine.HandleAsync(request, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Паритет версії на документі: збережений (тіньовий) скрипт проти рушія формул на всіх таблицях документа за
+    /// період, до яких прив'язана методологія. Право <c>Calculation.Publish</c> і доступ до документа.
+    /// </summary>
+    /// <param name="id">Методологія.</param>
+    /// <param name="vid">Версія.</param>
+    /// <param name="request">Документ і період.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// Нічого не записує. Точне порівняння без допусків: вибір рядків, значення, одиниці, відсутні аргументи,
+    /// помилки кроків. <c>mismatchCount = 0</c> при <c>targets &gt; 0</c> — шляхи збігаються на цих даних.
+    /// </remarks>
+    [HttpPost("{id:int}/versions/{vid:int}/script/parity")]
+    [ProducesResponseType<ScriptParityDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<ScriptParityDto>> Parity(
+        int id, int vid, [FromBody] ScriptParityRequestDto request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        await scope.RequireAsync(id, vid, ParityMethodologyScriptHandler.Permission, ct).ConfigureAwait(false);
+
+        return Ok(await parity.HandleAsync(vid, request, ct).ConfigureAwait(false));
+    }
 }

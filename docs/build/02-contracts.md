@@ -4140,6 +4140,12 @@ public interface IScriptPreviewRunner
 - `GET /methodologies/script/tables?codes=` → `ScriptTableDto[]`: `{ requested, templateCode, tableCode, columns:
   [{ code, dataType, isMonthColumn, monthNumber, unitCode }], monthAliases[] }` (живі таблиці; код без живої таблиці
   у відповіді відсутній; `422 scriptTablesCodesInvalid` — кодів немає чи понад 50).
+- `POST /methodologies/{id}/versions/{vid}/script/parity` — тіло `{ documentId, periodKey }`; право `Calculation.Publish` + доступ до
+  документа (як у перегляду; профіль з обмеженим доступом до колонок — `403 scriptPreviewRestricted`). Порт `IScriptParityRunner`
+  (реалізація — `ParityComparer` проєкту розрахунків): для кожного оригінального екземпляра таблиці документа за період, до
+  якого методологію прив'язано активно, порівнює старий шлях із ЗБЕРЕЖЕНИМ (тіньовим) текстом версії. Відповідь `{ targets,
+  rowsCompared, valuesCompared, mismatchCount, truncated, mismatches: [{ tableInstanceId, rowKey, aspect, old, new }] }`
+  (до 500 розбіжностей). Нічого не пише. `422 parityNotApplicable` — не рівень Configuration; `422 scriptEmpty` — текст порожній.
 - `POST /methodologies/script-migration/apply?dryRun=` — тіло: пакет `pack` `{ format, formatVersion, entries:
   [{ methodologyCode, version, effectiveFrom, text, sourceFingerprint }] }`; відповідь `{ dryRun, applied, refused,
   entries: [{ methodologyCode, version, versionId, status: applied|wouldApply|refused, reason, message, details[] }] }`.
@@ -4998,6 +5004,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/methodologies/{id}/versions/{vid}/script/preview` | `Calculation.View` (+ доступ до документа) | 7 |
 | `POST` | `/api/v1/methodologies/{id}/versions/{vid}/script/format-const` | `Calculation.View` | 7 |
 | `GET` | `/api/v1/methodologies/script/tables?codes=T1,Шаблон.T2` | `Calculation.View` | 7 |
+| `POST` | `/api/v1/methodologies/{id}/versions/{vid}/script/parity` | `Calculation.Publish` (+ доступ до документа) | 7 |
 | `POST` | `/api/v1/methodologies/script-migration/apply?dryRun=` | `Calculation.Publish` | 7 |
 | `POST` | `/api/v1/methodologies/script-migration/switch` | `Calculation.Publish` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/bindings` | `Calculation.View` | 7 |

@@ -6,6 +6,7 @@ import type {
   PreviewScriptRequest,
   SaveScriptRequest,
   ScriptPreviewDto,
+  ScriptTableDto,
   ScriptTextRequest,
   ScriptValidationDto,
 } from './types';
@@ -92,5 +93,15 @@ export function methodologyScriptSubstances(
 ): Promise<MethodologySubstancesDto> {
   return apiFetch<MethodologySubstancesDto>(
     `/api/v1/methodologies/${String(methodologyId)}/versions/${String(versionId)}/substances`,
+  );
+}
+
+/**
+ * Живі таблиці з колонками за кодами (`Таблиця` або `Шаблон.Таблиця`) для підказок редактора: один запит замість
+ * читання структур усіх шаблонів. Код без живої таблиці у відповіді відсутній.
+ */
+export function methodologyScriptTables(codes: readonly string[]): Promise<ScriptTableDto[]> {
+  return apiFetch<ScriptTableDto[]>(
+    `/api/v1/methodologies/script/tables?codes=${encodeURIComponent(codes.join(','))}`,
   );
 }

@@ -2,7 +2,7 @@ import type { TemplateStructureDto } from '@/api/types';
 import { localized } from '@/shared/i18n/localized';
 import type { ScriptCompletionBase } from './ScriptEditor';
 import type { ScriptFunctionInfo, ScriptInputTable } from './scriptCompletion';
-import type { ScriptOutlineDto } from './types';
+import type { ScriptOutlineDto, ScriptTableDto } from './types';
 
 /**
  * Збірка контексту підказок редактора з відповідей наявних API (структура
@@ -61,6 +61,42 @@ export function liveTemplateVersionId(versions: readonly VersionRef[]): number |
     if (best === null || version.id > best) best = version.id;
   }
   return best;
+}
+
+/** Найбільше кодів у запиті `script/tables` (так само на сервері). */
+export const MaxScriptTableCodes = 50;
+
+/** Коди таблиць скрипта для `script/tables`: `Шаблон.Таблиця`, якщо шаблон названо, інакше `Таблиця`; без повторів. */
+export function scriptTableCodes(outline: ScriptOutlineDto | null): string[] {
+  const codes = new Set<string>();
+  for (const table of outline?.tables ?? []) {
+    codes.add(
+      table.templateCode !== null && table.templateCode !== ''
+        ? `${table.templateCode}.${table.code}`
+        : table.code,
+    );
+  }
+  return [...codes].slice(0, MaxScriptTableCodes);
+}
+
+/** Відповідь `script/tables` → таблиці підказок (місячні колонки позначені сервером). */
+export function inputTablesFromDtos(tables: readonly ScriptTableDto[]): ScriptInputTable[] {
+  const result: ScriptInputTable[] = [];
+  const seen = new Set<string>();
+  for (const table of tables) {
+    if (seen.has(table.tableCode)) continue;
+    seen.add(table.tableCode);
+    result.push({
+      tableCode: table.tableCode,
+      columns: table.columns.map((column) => ({
+        code: column.code,
+        header: null,
+        dataType: column.dataType,
+        isMonthColumn: column.isMonthColumn,
+      })),
+    });
+  }
+  return result;
 }
 
 /** Таблиці з outline → їхні колонки зі структур шаблонів. */
@@ -126,10 +162,15 @@ export function assembleCompletionBase(parts: {
   readonly sources: readonly ScriptTemplateSource[];
   readonly functions: readonly MetadataFunction[];
   readonly headerFields: readonly string[];
+  /** Таблиці з `script/tables`; порожньо чи `undefined` — запасний шлях зі структур шаблонів. */
+  readonly liveTables?: readonly ScriptInputTable[];
 }): ScriptCompletionBase {
   return {
     outline: parts.outline,
-    tables: inputTablesFor(parts.outline, parts.sources),
+    tables:
+      parts.liveTables !== undefined && parts.liveTables.length > 0
+        ? parts.liveTables
+        : inputTablesFor(parts.outline, parts.sources),
     functions: parts.functions.map(functionInfo),
     headerFields: parts.headerFields,
   };

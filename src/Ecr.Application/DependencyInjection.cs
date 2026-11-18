@@ -462,6 +462,7 @@ public static class DependencyInjection
         services.AddScoped<Calculations.Scripting.ValidateMethodologyScriptHandler>();
         services.AddScoped<Calculations.Scripting.FormatScriptConstHandler>();
         services.AddScoped<Calculations.Scripting.PreviewMethodologyScriptHandler>();
+        services.AddScoped<Calculations.Scripting.ParityMethodologyScriptHandler>();
         services.AddScoped<Calculations.Scripting.GetScriptTablesHandler>();
         services.AddScoped<Calculations.Scripting.Migration.ApplyScriptPackageHandler>();
         services.AddScoped<Calculations.Scripting.Migration.SwitchScriptEngineHandler>();
