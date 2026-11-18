@@ -33,7 +33,9 @@ public sealed partial class PublishTemplateVersionHandler(
     Permits.Groups.IPermitGroupResolver? permitGroups = null,
     // ✎ P-4b (D-479): вʼюхи SSRS — фоновою задачею злиття на шаблон. `null` — збирання без черги (тести, інструменти):
     // тоді вʼюхи будуються синхронно після коміту, як до D-479.
-    IBackgroundJobScheduler? jobs = null)
+    IBackgroundJobScheduler? jobs = null,
+    // ✎ B179 L3: відмова на новий цикл залежностей документів; `null` — збирання без графа (тести, інструменти).
+    IDependencyGraphProvider? dependencyGraph = null)
 {
     /// <summary>Право на публікацію версії шаблону (`02-contracts.md` §9).</summary>
     public const string Permission = "Template.Publish";
@@ -330,6 +332,10 @@ public sealed partial class PublishTemplateVersionHandler(
         // перерахунок не бачить похідних комірок, числа лишаються старими —
         // без жодної помилки на екрані (`A7-63`).
         var dependencies = PublishChecks.Dependencies(version, formulaEngine);
+
+        // ✎ B179 L3 (дизайн §4): версія, що замкнула б цикл «шаблон → довідник → … → той самий шаблон», не публікується.
+        await DependencyCyclePublishCheck.RefuseAsync(dependencyGraph, version, dependencies, ct).ConfigureAwait(false);
+
         await versionStore
             .ReplaceFormulaDependenciesAsync(templateVersionId, dependencies, ct)
             .ConfigureAwait(false);

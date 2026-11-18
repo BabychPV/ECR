@@ -6508,6 +6508,13 @@ public sealed record RowDto(
   документи × періоди за обсягом ребра (`Month` — період-власник місяця, `Year` — рік, `All` — усі відкриті), лише
   `Open`/`Grace`; ланцюжок джерел — до 8 ланок; споживач у циклі з джерелом не ставиться. За `ApprovedOnly` — те саме
   від Approve/Reopen/видалення джерела. `cfg.DocumentSourceBindingConsumer` не читається.
+- ✎ **B179 L3 — відмова на цикл залежностей.** `POST /template-versions/{id}/publish` версії шаблону, що наповнює
+  довідник зв'язкою, відмовляє 422 `ECR-TMPL-0422` з `messageKey` **`err.ECR-TMPL-0422.dependencyCycle`** (деталь
+  `cycle` — шлях кодами шаблонів і довідників за порядком, `T → R → … → T`), коли граф «поточні ребра без формул цього
+  шаблону + довідники формул нової версії» має цикл через шаблон, якого до публікації не було. Наявні цикли, що не
+  проходять через шаблон (і цикл, на якому шаблон уже лежав), публікацію не блокують. Перемикання `source-state` ребер
+  не додає (стан не впливає на граф) — перевірки там немає; зв'язки заводить лише сід. Тексти — сід
+  `B179-dependency-cycle.sql`; нового коду й полів контракту немає.
 - **`GET /api/v1/document-source-bindings`** → `DocumentSourceBindingDto[]` (`id`, `code`, `sourceTemplateCode`,
   `registryCode`, `sourceState` `any`|`approvedOnly`, `policy`, `readFromDocument`, `recalculateDependents`,
   `readFromDocumentEffective`, `readFromDocumentSource` `configuration`|`binding`, `consumerTemplateCodes`, `updatedAt`,
