@@ -433,7 +433,7 @@ foreach S in (301, 304, 330) {
 - Те, що оголошено всередині, лишається **у зовнішній області**: імена не можуть
   повторюватися (`var v{N}` з однаковими `N` — `duplicateName`).
 - Вкладати можна до 3 рівнів, усього не більше 2000 розгорнутих операторів і
-  200 000 розгорнутих лексем (`foreachTooLarge`). `foreach` можна писати й усередині `foreach substance`.
+  200 000 розгорнутих лексем (`foreachTooLarge`; повідомлення прямо називає, яку з трьох меж перевищено). `foreach` можна писати й усередині `foreach substance`.
 
 Різниця з `foreach substance`: `foreach substance` — це справжній цикл за
 речовинами (виходи «по речовині»); `foreach X in (…)` — лише скорочення запису.
@@ -746,7 +746,7 @@ output ECW_Fuel : t = big + root + sign;
 | `expected` | Expected …, found '…' | пропущено `;`, дужку, `=`, ім'я; або ім'я збігається з зарезервованим словом (`var row = …`) |
 | `unterminatedString` | String is not closed | додайте закриваючу лапку |
 | `unterminatedComment` | Comment is not closed | додайте `*/` |
-| `invalidNumber` | Invalid number / out of the decimal range | пишіть `0.5`, а не `.5`; число завелике |
+| `invalidNumber` | Invalid number / out of the decimal range / too many significant digits | пишіть `0.5`, а не `.5`; число завелике; або в числі більше 28 значущих цифр, і значення мовчки змінилося б, тож скоротіть запис (хвостові нулі не рахуються) |
 | `caretNotPower` | The '^' operator does not exist | степінь — `Pow(a, b)` |
 | `assignInExpression` | Single '=' is an assignment | у порівнянні пишіть `==` |
 | `tooLarge` | Script is too large | скрипт довший за 200 000 символів: винесіть спільне в бібліотеку. Текст довший за 1 000 000 знаків система не приймає взагалі (див. 19.7) |
@@ -801,7 +801,7 @@ output ECW_Fuel : t = big + root + sign;
 | `aggregateNotAllowedHere` | An aggregate cannot be used in a function body | перенесіть агрегат у `var` |
 | `unknownTableAlias` | … expects a table alias declared with 'table Alias = Table;' | оголосіть `table Псевдонім = Таблиця;` |
 | `foreachNameNotIdentifier` | After substitution '…' is not a valid identifier | значення в імені дає недозволені символи |
-| `foreachTooLarge` | foreach is nested too deeply / expands to too many statements or tokens | менше вкладень, менше повторів, коротше тіло |
+| `foreachTooLarge` | foreach is nested too deeply / expands to too many statements / expands to too many tokens | повідомлення називає, яку межу перевищено: глибину (3 рівні), оператори (2000) або лексеми (200 000); менше вкладень, менше повторів, коротше тіло |
 
 ### 19.6. Перевірки середовища (при збереженні й публікації)
 

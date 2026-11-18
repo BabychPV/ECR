@@ -24,8 +24,11 @@ public sealed record ScriptDiagnostic(
     string Message,
     IReadOnlyDictionary<string, string> Params)
 {
-    /// <summary>Ключ каталогу перекладів: <c>script.&lt;code&gt;</c>.</summary>
-    public string MessageKey => "script." + Code;
+    /// <summary>Ключ каталогу перекладів: <c>script.&lt;code&gt;</c>; для <c>foreachTooLarge</c> — <c>script.foreachTooLarge.&lt;kind&gt;</c> (<c>depth</c>, <c>statements</c>, <c>tokens</c>): користувач бачить, яку саме межу перевищено.</summary>
+    public string MessageKey
+        => Code == ScriptDiagnosticCodes.ForeachTooLarge && Params.TryGetValue("kind", out var kind)
+            ? "script." + Code + "." + kind
+            : "script." + Code;
 
     /// <summary>Найбільша кількість діагностик однієї компіляції: далі лексер, парсер і binder мовчать (текст-«сміття» не мусить давати відповідь на мегабайти).</summary>
     public const int MaxPerCompilation = 200;
