@@ -216,6 +216,13 @@ public sealed class CompiledScript
     /// <summary>Оператори верхнього рівня.</summary>
     public IReadOnlyList<ScriptStatement> Statements { get; internal init; } = [];
 
+    /// <summary>
+    /// Для кожного <c>var</c>/<c>output</c> верхнього рівня — імена <c>var</c>/<c>output</c> верхнього рівня, які його
+    /// вираз читає безпосередньо (через власні функції теж); порожньо, якщо нічого. Ключі — у порядку оголошення.
+    /// </summary>
+    public IReadOnlyDictionary<string, IReadOnlyList<string>> StepDependencies { get; internal init; }
+        = new Dictionary<string, IReadOnlyList<string>>();
+
     /// <summary>Константи.</summary>
     public IReadOnlyDictionary<string, ScriptConst> Constants { get; internal init; } = new Dictionary<string, ScriptConst>();
 

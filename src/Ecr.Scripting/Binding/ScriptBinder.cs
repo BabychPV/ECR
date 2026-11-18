@@ -208,7 +208,7 @@ internal sealed class ScriptBinder
 
         CheckRecursion();
 
-        if (!options.IsLibrary && rows.Count == 0)
+        if (!options.IsLibrary && !options.IsModuleLevel && rows.Count == 0)
         {
             Report(ScriptDiagnosticCodes.MissingRows, new ScriptSpan(0, 0, 1, 1),
                 "A script must contain at least one 'rows from …;' clause.");
@@ -265,6 +265,7 @@ internal sealed class ScriptBinder
             Units = units,
             Members = members,
             Statements = topStatements,
+            StepDependencies = ComputeStepDependencies(),
             Constants = consts,
             Functions = functions,
             Tables = tables,
@@ -272,6 +273,94 @@ internal sealed class ScriptBinder
             TableColumns = tableColumnMap,
             Aggregates = aggregates,
         };
+    }
+
+    /// <summary>
+    /// Залежності кроків верхнього рівня: які <c>var</c>/<c>output</c> верхнього рівня читає вираз кожного з них
+    /// (прямо, через аргументи власних функцій і через агрегати).
+    /// </summary>
+    private Dictionary<string, IReadOnlyList<string>> ComputeStepDependencies()
+    {
+        var result = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+        foreach (var statement in topStatements)
+        {
+            var (name, expression) = statement switch
+            {
+                VarStatement v => (v.Name, v.Expr),
+                OutputStatement o => (o.Code, o.Expr),
+                _ => (null, null),
+            };
+            if (name is null || expression is null)
+            {
+                continue;
+            }
+
+            var found = new List<string>();
+            CollectStepReferences(expression, found, new HashSet<string>(StringComparer.Ordinal));
+            result[name] = [.. found.Where(n => n != name).Distinct(StringComparer.Ordinal)];
+        }
+
+        return result;
+    }
+
+    private void CollectStepReferences(AstNode node, List<string> found, HashSet<string> visitedFunctions)
+    {
+        switch (node)
+        {
+            case SymbolReferenceNode { Kind: SymbolKind.Formula } symbol:
+                if (topLevelNames.Contains(symbol.Name))
+                {
+                    found.Add(symbol.Name);
+                }
+
+                break;
+            case BinaryNode b:
+                CollectStepReferences(b.Left, found, visitedFunctions);
+                CollectStepReferences(b.Right, found, visitedFunctions);
+                break;
+            case UnaryNode u:
+                CollectStepReferences(u.Operand, found, visitedFunctions);
+                break;
+            case ConditionalNode c:
+                CollectStepReferences(c.Condition, found, visitedFunctions);
+                CollectStepReferences(c.WhenTrue, found, visitedFunctions);
+                CollectStepReferences(c.WhenFalse, found, visitedFunctions);
+                break;
+            case FunctionNode f:
+                foreach (var argument in f.Arguments)
+                {
+                    CollectStepReferences(argument, found, visitedFunctions);
+                }
+
+                if (f.Name.StartsWith("$call:", StringComparison.Ordinal)
+                    && functions.TryGetValue(f.Name["$call:".Length..], out var function)
+                    && visitedFunctions.Add(function.Name))
+                {
+                    // Тіло функції бачить лише параметри, тож верхніх імен там немає; обхід лишає контракт чесним.
+                    var inner = new List<string>();
+                    CollectStepReferences(function.Body, inner, visitedFunctions);
+                    found.AddRange(inner.Where(n => !function.Parameters.Contains(n, StringComparer.Ordinal)));
+                }
+
+                if (f.Name == "$agg" && f.Arguments is [LiteralNode { Value: decimal index }]
+                    && (int)index >= 0 && (int)index < aggregates.Count)
+                {
+                    var aggregate = aggregates[(int)index];
+                    if (aggregate.Value is { } value)
+                    {
+                        CollectStepReferences(value, found, visitedFunctions);
+                    }
+
+                    if (aggregate.Where is { } where)
+                    {
+                        CollectStepReferences(where, found, visitedFunctions);
+                    }
+                }
+
+                break;
+            default:
+                break;
+        }
     }
 
     private void PreDeclare()

@@ -11,10 +11,13 @@ namespace Ecr.Scripting;
 /// <param name="IsLibrary">Методологія виду <c>Library</c>: без <c>rows</c> і <c>output</c>.</param>
 /// <param name="ResolveImport">Код методології → скомпільована бібліотека; <c>null</c> — імпорт недоступний.
 /// Виявлення циклів між бібліотеками — справа викликача.</param>
+/// <param name="IsModuleLevel">Версія рівня <c>Module</c> (HSE400, «місяці в колонках»): речення <c>rows</c> не потрібне
+/// (набір аргументів — колонка місяця, його складає модуль), виходи лишаються обов'язковими.</param>
 public sealed record ScriptCompileOptions(
     NumericMode NumericMode,
     bool IsLibrary,
-    Func<string, CompiledScript?>? ResolveImport = null);
+    Func<string, CompiledScript?>? ResolveImport = null,
+    bool IsModuleLevel = false);
 
 /// <summary>Результат компіляції.</summary>
 /// <param name="Script">Скомпільований скрипт. <c>null</c>, якщо були синтаксичні помилки або перевищено межі
