@@ -271,7 +271,16 @@ public sealed class ScriptRuntime
 
         // Методологія-джерело, якої цей прогін не рахував (аркуш затверджено, прогін частковий), — її актуальні
         // або перенесені результати.
+        // ⛔ «В прогоні» — те, що прогін РАХУЄ для цього екземпляра, а не лише те, що дало рядки: джерело без жодного
+        // результату все одно порожнє, а не «попередній актуальний прогін».
         var runVersions = inRun.Select(r => r.MethodologyVersionId).ToHashSet();
+        if (_data.Run?.RunBindings is { } runBindings)
+        {
+            runVersions.UnionWith(bindings
+                .SelectMany(b => b.VersionIds)
+                .Where(v => runBindings.Contains((v, reference.TableInstanceId))));
+        }
+
         var needCurrent = bindings.Any(b => !b.VersionIds.Any(runVersions.Contains));
         IReadOnlyList<CalculationResultRow> current = [];
         if (needCurrent)
