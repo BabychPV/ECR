@@ -1,6 +1,7 @@
 // src/Ecr.Infrastructure/Persistence/DocumentSourceMonthGate.cs
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Configuration;
+using Ecr.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -31,7 +32,7 @@ namespace Ecr.Infrastructure.Persistence;
 /// </remarks>
 /// <param name="db">Контекст.</param>
 /// <param name="readOverride">Явний ключ <c>Calculations:Hse400CompositionFromDocument</c>; <c>null</c> — біт зв'язки.</param>
-public sealed class DocumentSourceMonthGate(EcrDbContext db, bool? readOverride) : ISourceMonthApprovalGate
+public sealed class DocumentSourceMonthGate(EcrDbContext db, bool? readOverride) : ISourceMonthApprovalGate, ISourceIssueReader
 {
     /// <summary>Ворота з перекриттям ключем завантажувача (не задано — біт <c>ReadFromDocument</c> зв'язки).</summary>
     /// <param name="sp">Провайдер.</param>
@@ -55,21 +56,7 @@ public sealed class DocumentSourceMonthGate(EcrDbContext db, bool? readOverride)
             return null;
         }
 
-        // Шаблон документа: власний (B74) або шаблон версії ПЕРІОДУ проєкту (шкала, EcrDbContext.VersionOf — сторож B74).
-        var bindings = await (
-                from d in db.Documents.AsNoTracking()
-                where d.Id == documentId
-                join p in db.Projects.AsNoTracking() on d.ProjectId equals p.Id
-                from pv in db.TemplateVersions.AsNoTracking()
-                where pv.Id == (d.TemplateId == null ? EcrDbContext.VersionOf(d.ProjectId, periodKey) : EcrDbContext.TemplateVersionOf(d.ProjectId, d.TemplateId.Value, periodKey))
-                from c in db.DocumentSourceBindingConsumers.AsNoTracking()
-                where c.TemplateId == (d.TemplateId ?? pv.TemplateId)
-                join b in db.DocumentSourceBindings.AsNoTracking() on c.BindingId equals b.Id
-                where b.SourceState == DocumentSourceState.ApprovedOnly
-                      && b.MappingKind == DocumentSourceBinding.Hse400CompositionMapping
-                orderby b.Id
-                select new { b.Id, b.ReadFromDocument, p.PeriodKind })
-            .ToListAsync(ct).ConfigureAwait(false);
+        var bindings = await ConsumerBindingsAsync(db, documentId, periodKey, ct).ConfigureAwait(false);
 
         var year = periodKey / 100;
         var store = new DocumentSourceBindingStore(db);
@@ -116,4 +103,46 @@ public sealed class DocumentSourceMonthGate(EcrDbContext db, bool? readOverride)
 
         return null;
     }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ✎ B80 N4: спільне тіло з консистентністю — <see cref="DocumentSourceIssues"/> (ті самі зв'язки споживача, обраний
+    /// документ і затверджені місяці, що в <see cref="FindUnapprovedSourceMonthAsync"/>).
+    /// </remarks>
+    public async Task<IReadOnlyList<SourceIssueRow>> ListSourceIssuesAsync(
+        long documentId, IReadOnlyCollection<int> periodKeys, CancellationToken ct)
+        => [.. (await new DocumentSourceIssues(db, readOverride).ListAsync(documentId, periodKeys, ct).ConfigureAwait(false))
+            .Select(f => f.Row)];
+
+    /// <summary>
+    /// Зв'язки в стані <c>ApprovedOnly</c> (склад HSE400), споживачем яких є шаблон документа за період: власний шаблон
+    /// документа (B74) або шаблон версії ПЕРІОДУ проєкту (шкала, <c>EcrDbContext.VersionOf</c> — сторож B74).
+    /// </summary>
+    /// <param name="db">Контекст.</param>
+    /// <param name="documentId">Документ-споживач.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>За зростанням id зв'язки; з періодичністю проєкту споживача.</returns>
+    internal static async Task<List<ConsumerBinding>> ConsumerBindingsAsync(
+        EcrDbContext db, long documentId, int periodKey, CancellationToken ct)
+        => await (
+                from d in db.Documents.AsNoTracking()
+                where d.Id == documentId
+                join p in db.Projects.AsNoTracking() on d.ProjectId equals p.Id
+                from pv in db.TemplateVersions.AsNoTracking()
+                where pv.Id == (d.TemplateId == null ? EcrDbContext.VersionOf(d.ProjectId, periodKey) : EcrDbContext.TemplateVersionOf(d.ProjectId, d.TemplateId.Value, periodKey))
+                from c in db.DocumentSourceBindingConsumers.AsNoTracking()
+                where c.TemplateId == (d.TemplateId ?? pv.TemplateId)
+                join b in db.DocumentSourceBindings.AsNoTracking() on c.BindingId equals b.Id
+                where b.SourceState == DocumentSourceState.ApprovedOnly
+                      && b.MappingKind == DocumentSourceBinding.Hse400CompositionMapping
+                orderby b.Id
+                select new ConsumerBinding(b.Id, b.ReadFromDocument, p.PeriodKind))
+            .ToListAsync(ct).ConfigureAwait(false);
 }
+
+/// <summary>Зв'язка <c>ApprovedOnly</c> документа-споживача.</summary>
+/// <param name="Id">Зв'язка.</param>
+/// <param name="ReadFromDocument">Біт «читати з документа».</param>
+/// <param name="PeriodKind">Періодичність проєкту СПОЖИВАЧА (які місяці володіє його період).</param>
+internal sealed record ConsumerBinding(int Id, bool ReadFromDocument, PeriodKind PeriodKind);

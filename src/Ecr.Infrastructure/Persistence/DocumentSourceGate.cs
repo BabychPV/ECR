@@ -60,12 +60,24 @@ public static class DocumentSourceGate
     /// <param name="ct">Токен скасування.</param>
     public static async Task<HashSet<(long DocumentId, int TableDefId, int Year, int Month)>> ApprovedMonthsAsync(
         EcrDbContext db, IReadOnlyCollection<long> documentIds, IReadOnlyCollection<int> tableDefIds, CancellationToken ct)
+        => [.. (await ApprovedMonthTimesAsync(db, documentIds, tableDefIds, ct).ConfigureAwait(false)).Keys];
+
+    /// <summary>
+    /// ✎ B80 N4 (R3.2): ті самі затверджені місяці, що <see cref="ApprovedMonthsAsync"/>, з моментом затвердження
+    /// (<c>ApprovalState.ApprovedAt</c> періоду-власника; кілька станів одного ключа — найпізніший). Той самий ОДИН запит.
+    /// </summary>
+    /// <param name="db">Контекст.</param>
+    /// <param name="documentIds">Обрані документи-джерела.</param>
+    /// <param name="tableDefIds">Таблиці зв'язки.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public static async Task<Dictionary<(long DocumentId, int TableDefId, int Year, int Month), DateTime?>> ApprovedMonthTimesAsync(
+        EcrDbContext db, IReadOnlyCollection<long> documentIds, IReadOnlyCollection<int> tableDefIds, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(documentIds);
         ArgumentNullException.ThrowIfNull(tableDefIds);
 
-        var approved = new HashSet<(long, int, int, int)>();
+        var approved = new Dictionary<(long, int, int, int), DateTime?>();
         if (documentIds.Count == 0 || tableDefIds.Count == 0)
         {
             return approved;
@@ -80,7 +92,7 @@ public static class DocumentSourceGate
                 where tableIds.Contains(t.Id)
                 join d in db.Documents.AsNoTracking() on s.DocumentId equals d.Id
                 join p in db.Projects.AsNoTracking() on d.ProjectId equals p.Id
-                select new { s.DocumentId, TableDefId = t.Id, s.PeriodKey, p.PeriodKind })
+                select new { s.DocumentId, TableDefId = t.Id, s.PeriodKey, p.PeriodKind, s.ApprovedAt })
             .ToListAsync(ct).ConfigureAwait(false);
 
         foreach (var state in states)
@@ -88,12 +100,19 @@ public static class DocumentSourceGate
             var year = state.PeriodKey / 100;
             foreach (var month in OwnedMonths(state.PeriodKind, state.PeriodKey % 100))
             {
-                approved.Add((state.DocumentId, state.TableDefId, year, month));
+                var key = (state.DocumentId, state.TableDefId, year, month);
+                approved[key] = approved.TryGetValue(key, out var seen) && Later(seen, state.ApprovedAt)
+                    ? seen
+                    : state.ApprovedAt;
             }
         }
 
         return approved;
     }
+
+    /// <summary>Чи <paramref name="left"/> не раніший за <paramref name="right"/> (<c>null</c> — найраніший).</summary>
+    private static bool Later(DateTime? left, DateTime? right)
+        => right is null || (left is { } l && l >= right.Value);
 
     /// <summary>Місяці, якими володіє період із першим місяцем <paramref name="startMonth"/>.</summary>
     /// <param name="kind">Періодичність проєкту.</param>

@@ -55,6 +55,12 @@ public sealed class ConsistencyCheckJob(
     /// <summary>Код правила: колонка <c>Formula</c> опублікованої версії без джерела значення.</summary>
     public const string UnsourcedFormulaRule = "UNSOURCED_FORMULA_COLUMN";
 
+    /// <summary>
+    /// Код правила (B80 N4): затверджений місяць документа-споживача зв'язки <c>ApprovedOnly</c>, чиє джерело змінилося
+    /// після затвердження.
+    /// </summary>
+    public const string StaleApprovedDependentRule = "STALE_APPROVED_DEPENDENT";
+
     /// <summary>Префікс ключа каталогу тексту знахідки; повний ключ — префікс + код правила.</summary>
     /// <remarks>
     /// ⛔ Текст знахідки — КОНВЕРТ <see cref="JobProgressMessageEnvelope"/> (<c>{"k":…,"p":{…}}</c>), той самий, що й
@@ -233,6 +239,9 @@ public sealed class ConsistencyCheckJob(
 
         var nonCurrent = await NonCurrentRunRowsAsync(periodKeys, ct).ConfigureAwait(false);
         Collect(nonCurrent.Issues, NonCurrentRunRowsRule, "calc.CalculationRun", nonCurrent.Evaluated && periodsComplete);
+
+        // B80 N4: затверджений місяць споживача зв'язки ApprovedOnly, чиє джерело змінилося після затвердження.
+        Collect(await StaleApprovedDependentsAsync(ct).ConfigureAwait(false), StaleApprovedDependentRule, StaleApprovedDependentCheck.EntityType, true);
 
         // ⚠ Перерахунок ознаки IsOrphaned — В ОБИДВА боки (ФВ-8.13a). Задача
         // симетрична: те, що ставить ознаку, її ж і знімає. Асиметрія тут не
@@ -511,6 +520,34 @@ public sealed class ConsistencyCheckJob(
                     ("instancesNow", t.Current.I)),
                 t.PeriodKey))
             .ToList();
+
+    /// <summary>
+    /// B80 N4 (R3.2): затверджені місяці документів-споживачів зв'язки <c>ApprovedOnly</c>, чий місяць джерела зараз не
+    /// затверджено (<c>notApproved</c>) або затверджено пізніше за споживача (<c>reapproved</c>).
+    /// </summary>
+    /// <returns>Знахідка на документ × період, вага 2 — дані розходяться, але нічого не зламано.</returns>
+    /// <remarks>Читання з документа — тим самим правилом, що ворота: явний ключ перекриває біт зв'язки.</remarks>
+    private async Task<List<ConsistencyIssue>> StaleApprovedDependentsAsync(CancellationToken ct)
+    {
+        var readOverride = configuration is null
+            ? null
+            : Hse400CompositionSnapshotLoader.Override(configuration, Hse400CompositionSnapshotLoader.EnabledKey);
+        var stale = await new StaleApprovedDependentCheck(db, readOverride).RunAsync(MaxIssues, ct).ConfigureAwait(false);
+
+        return [.. stale.Select(s => new ConsistencyIssue(
+            StaleApprovedDependentRule,
+            Severity: 2,
+            StaleApprovedDependentCheck.EntityType,
+            s.StateId,
+            FindingText(
+                StaleApprovedDependentRule,
+                ("documentId", s.DocumentId),
+                ("periodKey", s.PeriodKey),
+                ("sourceDocumentId", s.SourceDocumentId),
+                ("sourcePeriodKey", s.SourcePeriodKey),
+                ("reason", s.Reason)),
+            s.PeriodKey))];
+    }
 
     /// <summary>
     /// Колонки типу <c>Calculated</c>, до яких не веде жодна ЧИННА прив'язка

@@ -114,6 +114,28 @@ public sealed class RegistryImpactBoundConsumersTests(SqlServerFixture sql)
         Assert.Equal((unrated.DocumentId, PeriodKey, PeriodState.Open), (row.DocumentId, row.PeriodKey, row.PeriodState));
     }
 
+    /// <summary>
+    /// ✎ B80 N4 (дочищення N3): споживач без результату в періоді <c>Grace</c> (вікно після закінчення введення) за
+    /// <c>ApprovedOnly</c> ставиться, як і в <c>Open</c>.
+    /// </summary>
+    /// <remarks>Мутація: фільтр <c>Open || Grace</c> → лише <c>Open</c> у <c>ListBoundConsumersForYearAsync</c> — червоний.</remarks>
+    [Fact]
+    public async Task Споживач_без_результату_в_періоді_Grace_ставиться()
+    {
+        var registryId = await NewRegistryAsync();
+        var grace = await ArrangeLandAsync(registryId, withResult: false, PeriodState.Grace);
+        await NewBindingAsync(registryId, DocumentSourceState.ApprovedOnly, grace.TemplateId);
+
+        var queued = await RunAsync(new RegistryImpactRecalculationRequest(registryId, [], "HSE400 2099", Year));
+
+        Assert.Equal([Target(grace)], queued);
+
+        await using var db = sql.CreateContext();
+        var row = Assert.Single(
+            await new RegistryImpactStore(db).ListBoundConsumersForYearAsync(registryId, Year, CancellationToken.None));
+        Assert.Equal((grace.DocumentId, PeriodKey, PeriodState.Grace), (row.DocumentId, row.PeriodKey, row.PeriodState));
+    }
+
     [Theory]
     [InlineData("bit")]
     [InlineData("key")]
@@ -205,9 +227,9 @@ public sealed class RegistryImpactBoundConsumersTests(SqlServerFixture sql)
         var period = await db.Periods.SingleAsync(
             p => p.ProjectId == document.ProjectId && p.PeriodKeyValue == document.PeriodKey.Value);
         period.TransitionTo(PeriodState.Open, Now);
-        if (state == PeriodState.Closed)
+        if (state is PeriodState.Closed or PeriodState.Grace)
         {
-            period.TransitionTo(PeriodState.Closed, Now);
+            period.TransitionTo(state, Now);
         }
 
         await db.SaveChangesAsync();

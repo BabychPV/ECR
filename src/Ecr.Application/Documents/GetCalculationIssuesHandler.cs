@@ -33,7 +33,10 @@ public sealed class GetCalculationIssuesHandler(
 
     // ✎ C-1 (D-475): група «Помилки формул»; `null` (старі тести) — групи немає.
     IFormulaErrorStore? formulaErrors = null,
-    IMonthColumnRouter? monthRouter = null)
+    IMonthColumnRouter? monthRouter = null,
+
+    // ✎ B80 N4: проблеми документа-джерела (зв'язка ApprovedOnly); `null` (старі тести) — поля немає.
+    ISourceIssueReader? sourceIssues = null)
 {
     private readonly CalculationIssueHints? hints =
         rowStore is null || cellStore is null || metadata is null || periods is null || methodologies is null
@@ -81,7 +84,13 @@ public sealed class GetCalculationIssuesHandler(
                               && await YearDocumentPeriods.IsYearLayoutAsync(monthRouter, documentId, ct).ConfigureAwait(false)
                 ? view.Sequence
                 : (int?)null;
-            return await PeriodAsync(profile, documentId, periodKey, sheetCopyId, monthNumber, ct).ConfigureAwait(false);
+            var single = await PeriodAsync(profile, documentId, periodKey, sheetCopyId, monthNumber, ct).ConfigureAwait(false);
+            return single with
+            {
+                SourceIssues = view.IsValid
+                    ? await SourceIssuesAsync(profile, documentId, [periodKey], ct).ConfigureAwait(false)
+                    : null,
+            };
         }
 
         // Рік: проблеми кожного місяця — тим самим шляхом, що й один період (межі читання СВОГО місяця), потім разом.
@@ -99,7 +108,52 @@ public sealed class GetCalculationIssuesHandler(
             [.. parts.SelectMany(p => p.Items)],
             tables.Count == 0 ? null : tables,
             errors.Count == 0 ? null : [.. errors.Take(CalculationIssuesDto.MaxFormulaErrors)],
-            errors.Count == 0 ? null : parts.Sum(p => p.FormulaErrorTotal ?? 0));
+            errors.Count == 0 ? null : parts.Sum(p => p.FormulaErrorTotal ?? 0),
+            await SourceIssuesAsync(profile, documentId, months, ct).ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// ✎ B80 N4 (R3.2): проблеми документа-джерела для періодів документа. Документ-джерело, якого читач не може відкрити
+    /// (та сама видимість, що й <see cref="DocumentVisibility.RequireVisibleAsync(IAccessDecisionService, AccessProfile, long, CancellationToken)"/>),
+    /// не називається: id, код проєкту, ключ і момент затвердження джерела — <c>null</c>, вид і місяці лишаються (D-6, R4.5).
+    /// </summary>
+    /// <remarks>Копія аркуша на результат не впливає: затвердження місяця — за оригіналами аркушів.</remarks>
+    private async Task<IReadOnlyList<SourceIssueDto>?> SourceIssuesAsync(
+        AccessProfile profile, long documentId, IReadOnlyCollection<int> periodKeys, CancellationToken ct)
+    {
+        if (sourceIssues is null)
+        {
+            return null;
+        }
+
+        var rows = await sourceIssues.ListSourceIssuesAsync(documentId, periodKeys, ct).ConfigureAwait(false);
+        if (rows.Count == 0)
+        {
+            return null;
+        }
+
+        var visible = new Dictionary<long, bool>();
+        foreach (var sourceId in rows.Select(r => r.SourceDocumentId).Distinct())
+        {
+            visible[sourceId] = (await access.CanReadDocumentAsync(profile, sourceId, ct).ConfigureAwait(false)).IsAllowed;
+        }
+
+        return
+        [
+            .. rows.Select(r =>
+            {
+                var named = visible[r.SourceDocumentId];
+                return new SourceIssueDto(
+                    r.Kind,
+                    r.MonthNumber,
+                    r.SourcePeriodKey,
+                    named ? r.SourceDocumentId : null,
+                    named ? r.SourceProjectCode : null,
+                    named ? r.SourceDocumentKey : null,
+                    named ? r.SourceApprovedAt : null,
+                    r.ApprovedAt);
+            }),
+        ];
     }
 
     /// <summary>Проблеми одного періоду (межі читання цього періоду); <paramref name="monthNumber"/> — позначка рядків.</summary>

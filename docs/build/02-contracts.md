@@ -6531,3 +6531,25 @@ public sealed record RowDto(
   самий вибір, що в завантажувачі); місяць джерела, яким володіє період аркуша (річний якір — кожен із 12), не має
   `Approved` на оригіналі аркуша. За `any`, без зв'язки, без документа-джерела року — як доти (один запит зв'язки).
   Відхилення, відкликання і повернення в роботу не блокуються.
+- ✎ B80 N4 (R3.2) — `GET /documents/{id}/calculation-issues` (і `?year=true`): нове необов'язкове поле
+  **`sourceIssues`** (`SourceIssueDto[] | null`, лише додаванням) у `CalculationIssuesDto`. Запис: `kind`, `monthNumber`
+  (місяць споживача 1–12), `sourcePeriodKey` (`yyyyMM`), `sourceDocumentId`, `sourceProjectCode`, `sourceDocumentKey`,
+  `sourceApprovedAt`, `approvedAt` (UTC). Види: **`SourceMonthNotApproved`** — період споживача не затверджено, а місяць
+  джерела не затверджено (те саме правило, що відмова `sourceMonthNotApproved` N2b); **`SourceChangedAfterApproval`** —
+  період споживача затверджено, а місяць джерела зараз не `Approved` або його `ApprovedAt` пізніший за `ApprovedAt`
+  споживача (консервативно: і за тих самих чисел). Період споживача «затверджено» — стани оригіналів УСІХ його аркушів є
+  і всі `Approved`; `approvedAt` — найраніший із них; копії аркушів не враховуються; `sheetCopyId` запиту на поле не
+  впливає. Річний режим — місяці року разом. Лише коли шаблон документа є споживачем зв'язки на `approvedOnly`, читання
+  з документа діє і документ-джерело року є; інакше поле **`null`** (за `any` — один дрібний запит зв'язок і нічого
+  більше). `null` — і коли проблем немає. Документ-джерело, якого читач не може відкрити (`CanReadDocumentAsync`, та сама
+  видимість, що 404 читань документа), не називається: `sourceDocumentId`, `sourceProjectCode`, `sourceDocumentKey` і
+  `sourceApprovedAt` — `null`; вид і місяці лишаються (D-6). Порт `ISourceIssueReader` (реалізація — та сама
+  `DocumentSourceMonthGate`).
+- ✎ B80 N4 — правило нічної перевірки узгодженості **`STALE_APPROVED_DEPENDENT`** (вага 2, сутність
+  `wf.ApprovalState`, `EntityId` — найменший id стану оригіналу аркуша документа × періоду, `PeriodKey` — період
+  споживача): одна знахідка на документ-споживач × затверджений період у випадку `SourceChangedAfterApproval`; конверт
+  `consistency.finding.STALE_APPROVED_DEPENDENT` з підстановками `documentId`, `periodKey`, `sourceDocumentId`,
+  `sourcePeriodKey`, `reason` (`notApproved` | `reapproved`). Лише для зв'язок на `approvedOnly` з читанням з документа
+  (явний ключ `Calculations:Hse400CompositionFromDocument` перекриває біт); за `any` знахідок немає, а старі знахідки
+  правила закриваються (прохід повний). Тексти en/ru/kz — сід `B80-stale-approved-dependent.sql`; переклад на клієнті —
+  N6.
