@@ -6,6 +6,7 @@ using Ecr.Application.Recalculation;
 using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Integration;
+using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.Expressions.Evaluation;
 using Ecr.Infrastructure.Jobs;
@@ -188,6 +189,9 @@ public sealed class SourceDocumentChangeHookTests(SqlServerFixture sql) : DbJobQ
         await RecalculateAsync(builder, document, hook, fail: false, sourceHop: 3);
 
         await hook.ReceivedWithAnyArgs(1).OnSucceededAsync(default!, default, default);
+
+        // B179 L2b, запобіжник петлі: перерахунок НЕ є «правкою комірок» — інакше джерело ставило б сам себе.
+        await hook.DidNotReceiveWithAnyArgs().OnCellsEditedAsync(default!, default);
         Assert.NotNull(seen);
         Assert.Equal([document.PeriodKey.Value], seen[document.DocumentId]);
         Assert.Equal(3, hop);
@@ -196,6 +200,168 @@ public sealed class SourceDocumentChangeHookTests(SqlServerFixture sql) : DbJobQ
         var failed = Substitute.For<IRecalculationCompletionHook>();
         await Assert.ThrowsAsync<InvalidOperationException>(() => RecalculateAsync(builder, document, failed, fail: true, sourceHop: 0));
         await failed.DidNotReceiveWithAnyArgs().OnSucceededAsync(default!, default, default);
+    }
+
+    // ───────────── B179 L2b: правка комірок джерела → власний перерахунок методологій джерела ─────────────
+
+    /// <summary>
+    /// ПАРА (Q1 L2b): правка документа шаблону-джерела (Any, біти 1/1) ставить ВЛАСНИЙ перерахунок джерела за місяць
+    /// (злита ціль <c>doc{id}-p209910-auto</c>) і НЕ ставить батьківської задачі споживачів (їх поставить успіх того
+    /// перерахунку); правка документа іншого шаблону — нічого, ні перерахунку, ні батьківської.
+    /// </summary>
+    /// <remarks>
+    /// Мутації: прибрати постановку <c>sourceRecalculation.RequestAsync</c> — рядок «джерело» червоний (перерахунку немає,
+    /// а батьківська є); ставити перерахунок для будь-якого документа ДО воріт зв'язки — рядок «чужий» червоний.
+    /// </remarks>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Правка_джерела_ставить_власний_перерахунок_місяця_а_чужого_шаблону_нічого(bool isSource)
+    {
+        var world = new SourceDependencyWorld(Sql);
+        var (registryId, _) = await world.RegistryAsync();
+        var source = await world.DocumentAsync([Month]);
+        var stranger = await world.DocumentAsync([Month]);
+        var bindingId = await world.BindingAsync(source.TemplateId, registryId);
+        var edited = isSource ? source : stranger;
+
+        await RunEditHookAsync(edited, [Month]);
+
+        var own = await RecalculationRowsAsync(edited);
+        if (isSource)
+        {
+            var row = Assert.Single(own);
+            Assert.Equal($"{nameof(IRecalculationJob)}~{AutoTarget(source, Month)}", row.TargetKey);
+            Assert.Equal("Queued", row.State);
+            Assert.Contains("\"recalculateSubmitted\":true", row.Payload, StringComparison.Ordinal);
+        }
+        else
+        {
+            Assert.Empty(own);
+        }
+
+        Assert.Empty(await ParentRowsAsync(bindingId));
+    }
+
+    /// <summary>Ворота ті самі, що в L2: біт <c>RecalculateDependents</c> вимкнено чи <c>ApprovedOnly</c> — правка не ставить нічого.</summary>
+    /// <remarks>Мутація: перенести постановку власного перерахунку ДО фільтра зв'язок — обидва рядки червоні.</remarks>
+    [Theory]
+    [InlineData(DocumentSourceState.Any, false)]
+    [InlineData(DocumentSourceState.ApprovedOnly, true)]
+    public async Task Правка_джерела_за_вимкненим_бітом_чи_ApprovedOnly_нічого_не_ставить(DocumentSourceState state, bool bit)
+    {
+        var world = new SourceDependencyWorld(Sql);
+        var (registryId, _) = await world.RegistryAsync();
+        var source = await world.DocumentAsync([Month]);
+        var bindingId = await world.BindingAsync(source.TemplateId, registryId, state);
+        await world.SetRecalculateDependentsAsync(bindingId, bit);
+
+        await RunEditHookAsync(source, [Month]);
+
+        Assert.Empty(await RecalculationRowsAsync(source));
+        Assert.Empty(await ParentRowsAsync(bindingId));
+    }
+
+    /// <summary>Затверджений аркуш джерела за місяць: власного перерахунку немає (тригер відмовляє, рахувати нічого).</summary>
+    [Fact]
+    public async Task Правка_затвердженого_місяця_джерела_не_ставить_власного_перерахунку()
+    {
+        var world = new SourceDependencyWorld(Sql);
+        var (registryId, _) = await world.RegistryAsync();
+        var source = await world.DocumentAsync([Month]);
+        await world.BindingAsync(source.TemplateId, registryId);
+        await world.SetSheetAsync(source, Month, DocumentStatus.Approved);
+
+        await RunEditHookAsync(source, [Month]);
+
+        Assert.Empty(await RecalculationRowsAsync(source));
+    }
+
+    /// <summary>
+    /// ЗОНД ЗЛИТТЯ L2b: 50 правок джерела в одному місяці → рівно ОДИН власний перерахунок джерела; його успіх (хук шляху
+    /// <see cref="RecalculationJob"/>, ланка 0) → ОДНА батьківська задача → рівно ОДИН перерахунок споживача.
+    /// </summary>
+    /// <remarks>
+    /// Мутація: ціль постановки (<c>CalculationTrigger.RequestAsync</c> → <c>AutoTargetOf</c>) з унікальним Id — 50 задач,
+    /// червоний.
+    /// </remarks>
+    [Fact]
+    public async Task Пʼятдесят_правок_джерела_дають_один_власний_перерахунок_і_один_перерахунок_споживача()
+    {
+        var world = new SourceDependencyWorld(Sql);
+        var (registryId, code) = await world.RegistryAsync();
+        var source = await world.DocumentAsync([Month]);
+        var consumer = await world.DocumentAsync([9, Month, 11], code);
+        var bindingId = await world.BindingAsync(source.TemplateId, registryId);
+
+        for (var i = 0; i < 50; i++)
+        {
+            await RunEditHookAsync(source, [Month]);
+        }
+
+        var own = Assert.Single(await RecalculationRowsAsync(source));
+        Assert.Equal($"{nameof(IRecalculationJob)}~{AutoTarget(source, Month)}", own.TargetKey);
+        Assert.Empty(await ParentRowsAsync(bindingId));
+        Assert.Empty(await RecalculationRowsAsync(consumer));
+
+        // Успіх власного перерахунку (те, що кличе RecalculationJob — див. Перерахунок_кличе_хук_лише_після_успіху…).
+        await RunHookAsync(source, [Month], hop: 0, withTrigger: true);
+
+        var parent = Assert.Single(await ParentRowsAsync(bindingId));
+        await RunParentAsync(parent.Payload!);
+        var only = Assert.Single(await RecalculationRowsAsync(consumer));
+        Assert.Equal($"{nameof(IRecalculationJob)}~{SourceDependencyWorld.DependentsTarget(consumer, Month)}", only.TargetKey);
+
+        // Без петлі: успіх перерахунку джерела власного перерахунку джерела більше не ставить.
+        Assert.Single(await RecalculationRowsAsync(source));
+    }
+
+    /// <summary>
+    /// Без петлі: шлях <see cref="RecalculationJob"/> (<c>OnSucceededAsync</c>) на документі-джерелі власного перерахунку не
+    /// ставить — лише батьківську задачу споживачів.
+    /// </summary>
+    /// <remarks>Мутація: у хуку прибрати умову <c>cellsEdited</c> перед постановкою — червоний.</remarks>
+    [Fact]
+    public async Task Успіх_перерахунку_джерела_не_ставить_власного_перерахунку_знову()
+    {
+        var world = new SourceDependencyWorld(Sql);
+        var (registryId, _) = await world.RegistryAsync();
+        var source = await world.DocumentAsync([Month]);
+        var bindingId = await world.BindingAsync(source.TemplateId, registryId);
+
+        await RunHookAsync(source, [Month], hop: 0, withTrigger: true);
+
+        Assert.Empty(await RecalculationRowsAsync(source));
+        Assert.Single(await ParentRowsAsync(bindingId));
+    }
+
+    private async Task RunEditHookAsync(TestDocument document, int[] months)
+    {
+        await using var host = NewHost();
+        var jobs = Scheduler(host);
+        await new SourceDocumentChangeHook(host.Db, jobs, Trigger(host, jobs))
+            .OnCellsEditedAsync(
+                new Dictionary<long, int[]> { [document.DocumentId] = [.. months.Select(SourceDependencyWorld.Period)] },
+                CancellationToken.None);
+    }
+
+    private static CalculationTrigger Trigger(Host host, IBackgroundJobScheduler jobs)
+        => new(
+            jobs, new PeriodStore(host.Db), new WorkflowStore(host.Db), new DocumentStore(host.Db),
+            new DocumentSheetCopyStore(host.Db));
+
+    private static string AutoTarget(TestDocument document, int month)
+        => CalculationTrigger.AutoTargetOf(document.DocumentId, new PeriodKey(SourceDependencyWorld.Period(month)));
+
+    private async Task RunHookAsync(TestDocument document, int[] months, int hop, bool withTrigger)
+    {
+        await using var host = NewHost();
+        var jobs = Scheduler(host);
+        await new SourceDocumentChangeHook(host.Db, jobs, withTrigger ? Trigger(host, jobs) : null)
+            .OnSucceededAsync(
+                new Dictionary<long, int[]> { [document.DocumentId] = [.. months.Select(SourceDependencyWorld.Period)] },
+                hop,
+                CancellationToken.None);
     }
 
     private async Task RunHookAsync(TestDocument document, int[] months, int hop)

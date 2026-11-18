@@ -5,6 +5,8 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Ecr.Application.Ports;
 using Ecr.Application.Templates;
+using Ecr.Application.Calculations;
+using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Entities.Security;
@@ -126,6 +128,70 @@ public sealed class SourceDocumentDependentsAcceptanceTests(SqlServerFixture sql
             "Батьківської задачі «зв'язка × рік × місяць» немає.");
     }
 
+    /// <summary>
+    /// B179 L2b — ПРИЙМАННЯ (аудитор на копії live: правка HSE400 doc 98 «Gas composition» / Makat gas / Methane / M10
+    /// 80.756271→85.756271 запускала лише формули, Land doc 96 <c>Density_M10</c> лишався старим, бо Land читає рядок
+    /// <c>F_Density20</c> з РЕЗУЛЬТАТІВ МЕТОДОЛОГІЇ HSE400, а правка методологію не перераховувала).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Аналог у тесті: документ-джерело / аркуш будівника / таблиця <c>FG_Makat</c> (потік Makat gas) / рядок вводу
+    /// <c>Methane</c> / колонка <c>M10</c> (жовтень 2099); розрахунковий рядок <c>F_Density20</c> рахує МЕТОДОЛОГІЯ ТЕСТУ
+    /// (<see cref="DensityMethodology"/>: <c>Density20 = Round(Methane / 110.6, 4)</c>) у прогоні перерахунку джерела —
+    /// результат у <c>calc.CalculationResult</c> (вихід <c>M10</c>, рядок <c>F_Density20</c>), як у справжньої HSE400.
+    /// Споживач (аналог Land doc 96 <c>Density_M10</c>) читає <c>REGFIELD(REGFIND(…, 'FG_Makat', 'Density20'), 'VALUE')</c>.
+    /// Правка 80.756271 → споживач 0.7302; правка 85.756271 → споживач 0.7754 (те саме число, що на live). Жодного
+    /// ручного перерахунку: PATCH → формули → власний перерахунок джерела (ціль <c>doc{id}-p209910-auto</c>) → батьківська
+    /// задача → перерахунок споживача.
+    /// </para>
+    /// <para>
+    /// Мутація (локально): у <c>SourceDocumentChangeHook</c> прибрати постановку власного перерахунку
+    /// (<c>sourceRecalculation.RequestAsync</c>) — споживач без <c>F_Density20</c>, червоний.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "B179")]
+    public async Task L2b_правка_Methane_M10_джерела_перераховує_методологію_джерела_і_Density_M10_споживача()
+    {
+        var s = await ArrangeAsync(methodology: true).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql)
+        {
+            ExtraServices = services =>
+            {
+                services.AddScoped<IRegistrySnapshotLoader>(sp => new Hse400CompositionSnapshotLoader(
+                    sp.GetRequiredService<RegistrySnapshotLoader>(),
+                    sp.GetRequiredService<EcrDbContext>(),
+                    sp.GetRequiredService<ICalculationResultStore>(),
+                    enabled: null,
+                    registryCode: s.RegistryCode,
+                    templateCode: s.SourceTemplateCode));
+                services.AddScoped<ICalculationRunner>(sp => new DensityMethodology(
+                    sp.GetRequiredService<Ecr.Calculations.CalculationOrchestrator>(), sp.GetRequiredService<EcrDbContext>(), s));
+            },
+        };
+        using var client = await SignInAsync(app, s.UserName).ConfigureAwait(true);
+
+        // Methane M10 = 80.756271 → F_Density20 = 0.7302 → споживач 0.7302.
+        await PatchAsync(app, client, s, 80.756271m).ConfigureAwait(true);
+        await ExpectConsumerAsync(app, s, 0.7302m).ConfigureAwait(true);
+
+        // Methane M10 = 85.756271 → F_Density20 = 0.7754 → споживач 0.7754 (старе 0.7302).
+        await PatchAsync(app, client, s, 85.756271m).ConfigureAwait(true);
+        await ExpectConsumerAsync(app, s, 0.7754m).ConfigureAwait(true);
+
+        // Власний перерахунок джерела стояв саме на злитій цілі місяця (не кнопка, не ручний виклик).
+        await using var db = s.Builder.CreateContext();
+        var own = $"IRecalculationJob~{Ecr.Application.Calculations.CalculationTrigger.AutoTargetOf(s.Source.DocumentId, new PeriodKey(PeriodKeyValue))}";
+        Assert.True(
+            await db.JobProgresses.AsNoTracking()
+                .AnyAsync(p => p.JobId.StartsWith(own + "~") || p.TargetKey == own)
+                .ConfigureAwait(true),
+            "Власного перерахунку джерела за місяць правки немає.");
+    }
+
     // ───────────────────────────── допоміжне ─────────────────────────────
 
     private sealed record Scenario(
@@ -139,7 +205,52 @@ public sealed class SourceDocumentDependentsAcceptanceTests(SqlServerFixture sql
         int ConsumerColumnId,
         string RegistryCode,
         int BindingId,
-        string UserName);
+        string UserName,
+        long SourceRowId = 0,
+        int MonthColumnId = 0,
+        int MethodologyVersionId = 0);
+
+    /// <summary>
+    /// L2b: методологія тесту на документі-джерелі — <c>F_Density20</c> (вихід <c>M10</c>) = <c>Round(Methane / 110.6, 4)</c>
+    /// з комірки вводу, записана в поточний прогін перерахунку так, як пише результати модуль HSE400; решта
+    /// документів — справжній оркестратор.
+    /// </summary>
+    private sealed class DensityMethodology(ICalculationRunner inner, EcrDbContext db, Scenario s) : ICalculationRunner
+    {
+        public async Task<ModuleProfile> RunAsync(
+            long calculationRunId, long documentId, PeriodKey periodKey, IReadOnlyList<CalculationBindingRef> bindings,
+            IJobProgress progress, CancellationToken ct)
+        {
+            if (documentId != s.Source.DocumentId || periodKey.Value != PeriodKeyValue)
+            {
+                return await inner.RunAsync(calculationRunId, documentId, periodKey, bindings, progress, ct).ConfigureAwait(false);
+            }
+
+            var methane = await db.CellValues.AsNoTracking()
+                .Where(c => c.PeriodKeyValue == PeriodKeyValue && c.TableRowId == s.SourceRowId && c.ColumnDefId == s.MonthColumnId)
+                .Select(c => c.ValueNumeric)
+                .FirstOrDefaultAsync(ct)
+                .ConfigureAwait(false);
+            if (methane is { } value)
+            {
+                // ⚠ Число — рядком у CAST: параметр decimal без явного масштабу SQL обрізав би до 2 знаків (0.7300).
+                var density = Math.Round(value / 110.6m, 4);
+                var unit = await db.Units.AsNoTracking().OrderBy(u => u.Id).Select(u => u.Id).FirstAsync(ct).ConfigureAwait(false);
+                await db.Database.ExecuteSqlInterpolatedAsync(
+                        $"""
+                        INSERT INTO calc.CalculationResult
+                            (Id, CalculationRunId, MethodologyVersionId, PeriodKey, DocumentId, SourceRowKey, OutputCode, Value, UnitId, TableInstanceId)
+                        VALUES (NEXT VALUE FOR calc.CalculationResultSeq, {calculationRunId}, {s.MethodologyVersionId}, {PeriodKeyValue},
+                                {documentId}, {"F_Density20"}, {s.MonthColumnCode},
+                                CAST({density.ToString(CultureInfo.InvariantCulture)} AS decimal(34,16)), {unit}, {s.SourceInstanceId})
+                        """,
+                        ct)
+                    .ConfigureAwait(false);
+            }
+
+            return new ModuleProfile();
+        }
+    }
 
     private static async Task PatchAsync(EcrApiFactory app, HttpClient client, Scenario s, decimal value)
     {
@@ -228,9 +339,14 @@ public sealed class SourceDocumentDependentsAcceptanceTests(SqlServerFixture sql
     /// <c>FG_Internal</c> з місячною колонкою жовтня й рядком <c>Vddg</c>; споживач — формула колонки, що читає склад за
     /// місяцем, опублікована (ребра видобуває публікація), документ із періодами вересень–листопад; зв'язка <c>Any</c>.
     /// </summary>
-    private async Task<Scenario> ArrangeAsync()
+    private async Task<Scenario> ArrangeAsync(bool methodology = false)
     {
         var tag = Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
+
+        // L2b: потік Makat gas (FG_Makat), рядок вводу Methane і розрахунковий F_Density20 (його рахує методологія тесту).
+        var stream = methodology ? "FG_Makat" : "FG_Internal";
+        var rowKey = methodology ? "Methane" : "Vddg";
+        var indicator = methodology ? "Density20" : rowKey;
         var registryCode = $"LAND_HSE400_COMPOSITION_{tag}";
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var now = DateTime.UtcNow;
@@ -265,13 +381,15 @@ public sealed class SourceDocumentDependentsAcceptanceTests(SqlServerFixture sql
         // Джерело.
         var source = await builder.BuildAsync(PeriodKeyValue, columnCount: 1, rowCount: 1).ConfigureAwait(false);
         long sourceInstance;
-        const string rowKey = "Vddg";
+        long rowId;
+        int monthColumnId;
+        int methodologyVersionId = 0;
         const string monthCode = "M10";
         string sourceTemplateCode;
         await using (var db = builder.CreateContext())
         {
             var table = new TableDef(
-                source.SheetDefId, EcrCode.Create("FG_Internal"), Name("FG_Internal"), 50,
+                source.SheetDefId, EcrCode.Create(stream), Name(stream), 50,
                 TableLayoutKind.PerPeriodInstance, TableRowMode.Fixed);
             db.TableDefs.Add(table);
             await db.SaveChangesAsync().ConfigureAwait(false);
@@ -279,11 +397,24 @@ public sealed class SourceDocumentDependentsAcceptanceTests(SqlServerFixture sql
             month.SetMonth(true, (byte)Month);
             db.ColumnDefs.Add(month);
             db.RowDefs.Add(new RowDef(table.Id, RowKey.Create(rowKey), 1, Name(rowKey), RowKind.Item));
+            if (methodology)
+            {
+                db.RowDefs.Add(new RowDef(table.Id, RowKey.Create("F_Density20"), 2, Name("F_Density20"), RowKind.Item));
+                var calc = new Methodology(EcrCode.Create($"L2B{tag}"), Name("L2b density"));
+                db.Methodologies.Add(calc);
+                await db.SaveChangesAsync().ConfigureAwait(false);
+                var version = new MethodologyVersion(calc.Id, "1.0", CalculationLevel.Configuration, createdByUserId: 1, now);
+                db.MethodologyVersions.Add(version);
+                await db.SaveChangesAsync().ConfigureAwait(false);
+                methodologyVersionId = version.Id;
+            }
+
             await db.SaveChangesAsync().ConfigureAwait(false);
+            monthColumnId = month.Id;
 
             var loader = new BulkCellLoader(sql.ConnectionString, 1000);
             sourceInstance = await loader.ReserveIdsAsync("doc.TableInstanceSeq", 1, CancellationToken.None).ConfigureAwait(false);
-            var rowId = await loader.ReserveIdsAsync("doc.TableRowSeq", 1, CancellationToken.None).ConfigureAwait(false);
+            rowId = await loader.ReserveIdsAsync("doc.TableRowSeq", 1, CancellationToken.None).ConfigureAwait(false);
             var key = new PeriodKey(PeriodKeyValue);
             db.TableInstances.Add(new TableInstance(key, sourceInstance, source.DocumentId, table.Id, now));
             db.TableRows.Add(new TableRow(key, rowId, sourceInstance, RowKey.Create(rowKey), 1, now));
@@ -301,13 +432,19 @@ public sealed class SourceDocumentDependentsAcceptanceTests(SqlServerFixture sql
         await using (var db = builder.CreateContext())
         {
             var column = new ColumnDef(consumer.TableDefId, EcrCode.Create("DENS"), Name("DENS"), 10, CellDataType.Formula);
+            if (methodology)
+            {
+                // Густина — 4 знаки (Land Density_M10 0.7754); без масштабу формула пише 2.
+                column.SetNumericFormat(18, 4);
+            }
+
             db.ColumnDefs.Add(column);
             await db.SaveChangesAsync().ConfigureAwait(false);
             consumerColumn = column.Id;
 
             var formula = new FormulaDef(
                 consumer.TableDefId, FormulaScope.Column,
-                $"REGFIELD(REGFIND('{registryCode}', [Period].Year, [Period].Sequence, 'FG_Internal', '{rowKey}'), 'VALUE')",
+                $"REGFIELD(REGFIND('{registryCode}', [Period].Year, [Period].Sequence, '{stream}', '{indicator}'), 'VALUE')",
                 ExpressionDialect.Template);
             formula.AssignColumn(column.Id);
             db.FormulaDefs.Add(formula);
@@ -342,7 +479,7 @@ public sealed class SourceDocumentDependentsAcceptanceTests(SqlServerFixture sql
 
         return new Scenario(
             builder, source, sourceInstance, rowKey, monthCode, sourceTemplateCode, consumer, consumerColumn, registryCode,
-            bindingId, userName);
+            bindingId, userName, rowId, monthColumnId, methodologyVersionId);
     }
 
     /// <summary>Проєкт активний, усі його періоди відкриті з межами (як <c>CrossSheetFormulaRecalculationTests</c>).</summary>

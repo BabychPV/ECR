@@ -3,6 +3,7 @@ using System.Globalization;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
+using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -20,6 +21,15 @@ public interface IRecalculationCompletionHook
     /// </param>
     /// <param name="ct">Токен скасування.</param>
     public Task OnSucceededAsync(IReadOnlyDictionary<long, int[]> periodsByDocument, int sourceHop, CancellationToken ct);
+
+    /// <summary>
+    /// B179 L2b: успішний прохід <see cref="FormulaRecalculationJob"/> з НАСІННЯМ — правка комірок (PATCH, імпорт,
+    /// видалення рядка, пермітів…). На відміну від <see cref="OnSucceededAsync"/>, результати методологій документа ще
+    /// старі: документ-джерело спершу має перерахувати ВЛАСНІ методології.
+    /// </summary>
+    /// <param name="periodsByDocument">Документ правки і періоди, в які вона записала.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task OnCellsEditedAsync(IReadOnlyDictionary<long, int[]> periodsByDocument, CancellationToken ct);
 }
 
 /// <summary>
@@ -48,17 +58,37 @@ public interface IRecalculationCompletionHook
 /// <para>
 /// ⚠ Збій постановки не валить перерахунок джерела (його записи вже закомічено): помилка — у журнал.
 /// </para>
+/// <para>
+/// ✎ B179 L2b (рішення людини Q1: «тригер на кожну правку джерела»): правка комірки дає лише задачу формул, а споживачі
+/// (Land) читають і РЕЗУЛЬТАТИ МЕТОДОЛОГІЙ джерела (рядки складу <c>F_&lt;X&gt;</c>, <c>Hse400CompositionSnapshotLoader</c>).
+/// Тому для правки (<see cref="OnCellsEditedAsync"/>) за тими самими воротами хук ставить ВЛАСНИЙ перерахунок
+/// документа-джерела за період (<see cref="ICalculationTrigger.RequestAsync"/>: злита ціль <c>doc{id}-p{період}-auto</c>
+/// — 50 правок місяця дають одну задачу; затверджений/закритий період — відмова), а не батьківську задачу споживачів:
+/// споживачі зі старими <c>F_</c> рахувалися б марно. Успіх того перерахунку кличе <see cref="OnSucceededAsync"/> —
+/// звідти вже батьківська задача. Петлі немає: <see cref="OnSucceededAsync"/> (шлях <see cref="RecalculationJob"/>)
+/// власного перерахунку джерела не ставить ніколи. Період, де тригер відмовив, — батьківська задача одразу (як у L2).
+/// </para>
 /// </remarks>
 public sealed partial class SourceDocumentChangeHook(
     EcrDbContext db,
     IBackgroundJobScheduler jobs,
+    // B179 L2b: у DI завжди є; без нього (ручна збірка в тестах L2) правка поводиться як у L2 — одразу батьківська задача.
+    ICalculationTrigger? sourceRecalculation = null,
     IDocumentSourceFlagOverrides? overrides = null,
     ILogger<SourceDocumentChangeHook>? logger = null) : IRecalculationCompletionHook
 {
     private readonly ILogger _logger = (ILogger?)logger ?? NullLogger.Instance;
 
     /// <inheritdoc />
-    public async Task OnSucceededAsync(IReadOnlyDictionary<long, int[]> periodsByDocument, int sourceHop, CancellationToken ct)
+    public Task OnSucceededAsync(IReadOnlyDictionary<long, int[]> periodsByDocument, int sourceHop, CancellationToken ct)
+        => HandleAsync(periodsByDocument, sourceHop, cellsEdited: false, ct);
+
+    /// <inheritdoc />
+    public Task OnCellsEditedAsync(IReadOnlyDictionary<long, int[]> periodsByDocument, CancellationToken ct)
+        => HandleAsync(periodsByDocument, sourceHop: 0, cellsEdited: true, ct);
+
+    private async Task HandleAsync(
+        IReadOnlyDictionary<long, int[]> periodsByDocument, int sourceHop, bool cellsEdited, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(periodsByDocument);
         if (periodsByDocument.Count == 0)
@@ -106,8 +136,27 @@ public sealed partial class SourceDocumentChangeHook(
                 .ToListAsync(ct)
                 .ConfigureAwait(false);
 
+            var matched = found.Where(f => periodsByDocument[f.DocumentId].Contains(f.PeriodKeyValue)).ToList();
+
+            // B179 L2b: правка джерела — спершу ВЛАСНИЙ перерахунок документа за період (злита ціль), споживачі — після
+            // його успіху. Лишаються лише періоди, де тригер відмовив (затверджено все, закритий, архів): там одразу як у L2.
+            if (cellsEdited && sourceRecalculation is not null)
+            {
+                var declined = new HashSet<(long DocumentId, int PeriodKey)>();
+                foreach (var (documentId, periodKey) in matched.Select(f => (f.DocumentId, f.PeriodKeyValue)).Distinct())
+                {
+                    if (await sourceRecalculation.RequestAsync(documentId, new PeriodKey(periodKey), ct).ConfigureAwait(false)
+                        is null)
+                    {
+                        declined.Add((documentId, periodKey));
+                    }
+                }
+
+                matched = [.. matched.Where(f => declined.Contains((f.DocumentId, f.PeriodKeyValue)))];
+            }
+
             var targets = new SortedSet<(int BindingId, int RegistryDefId, int Year, int Month)>();
-            foreach (var f in found.Where(f => periodsByDocument[f.DocumentId].Contains(f.PeriodKeyValue)))
+            foreach (var f in matched)
             {
                 // Місяць — лише місячного проєкту (0 — увесь рік): період іншої довжини володіє кількома місяцями.
                 var month = f.PeriodKind == PeriodKind.Monthly ? f.PeriodKeyValue % 100 : 0;
