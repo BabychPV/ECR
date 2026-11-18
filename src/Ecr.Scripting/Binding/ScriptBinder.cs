@@ -305,6 +305,8 @@ internal sealed class ScriptBinder
 
     private void CollectStepReferences(AstNode node, List<string> found, HashSet<string> visitedFunctions)
     {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+
         switch (node)
         {
             case SymbolReferenceNode { Kind: SymbolKind.Formula } symbol:
