@@ -99,6 +99,16 @@ Methodologies) PUT-ить `/methodologies/{m}/bindings/{colId}/{output}` для 
 вони порожні (прод-даних для 9a немає). 7b: єдина таблиця аркуша 7b має код `T7b_00`; скрипт завантаження рулів мусить
 мапити `AF_Water_Land_07b` на `T7b_00` (`T7b` у шаблоні немає).
 
+✎ B26 (P-0118-24/25, рішення людини 18.11; замінює (a) P-0118-23): `ECW_C09_02_01` на `T7b_00` рахує
+`ECW_EC_tons = (@Concentration * @Volume) / k1` (k1 = 1e6). `gen_ecr_model.py`:
+`DECIDED_MONTH_ARGS` — міст-селектор `Concentration` (January…December свого рядка); `DECIDED_ROW_ARGS` — міст `Volume`
+= рядок `S3_9` (об'єм із Water Report) у колонці місяця розрахунку, `([Period].Sequence = 1 ? [T7b_00].[S3_9].[January] : …)`
+(у дужках — у річному шаблоні YearMonths дає `Volume_M01..M12` і псевдоніми); `DECIDED_STATUS` — колонка статусу D-425
+`Land_Status` (LAND_GENERIC_EQUIPSTATUS) і `statusPresets` (Running на S1_6/S2_7, S3_9 порожньо), а
+`tools/land/land-row-filter.json` ставить `ECW_C09_02_01` у `runningOnly`. Наявні документи отримують статус етапом
+`Build-LandTemplate.ps1 -Stage T7bStatus` (пресетів рядків у шаблоні немає; новий документ — повторний прогін етапу).
+Модель методології (формула, аргументи, версія, правила) не змінюється; міграції немає.
+
 ## Мости аргументів методологій для аркушів 6, 9-11 (LP-10)
 
 Таблиці 6, 9, 9a, 10, 10a, 11, 11a-d мають розкладку MonthsInColumns і не мали Formula-мостів, які на аркушах 3-5 дають

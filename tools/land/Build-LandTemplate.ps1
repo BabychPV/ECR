@@ -111,7 +111,7 @@ param(
     [switch]$ReuseDraft,
     [securestring]$BootstrapPassword,
     [string]$GoldenDir,
-    [ValidateSet('Accounts', 'Units', 'Registries', 'Contract', 'Template', 'Project', 'Documents', 'Methodologies', 'RowFilter', 'SubstanceApplicability', 'ParityBranch', 'OptionalArguments', 'ArgumentSuffix', 'LookupCompare', 'NaeType', 'BranchGate', 'RequiredInputs', 'YearMonths', 'Data', 'MassFraction', 'LandParity', 'CompositionMass', 'All')]
+    [ValidateSet('Accounts', 'Units', 'Registries', 'Contract', 'Template', 'Project', 'Documents', 'Methodologies', 'RowFilter', 'T7bStatus', 'SubstanceApplicability', 'ParityBranch', 'OptionalArguments', 'ArgumentSuffix', 'LookupCompare', 'NaeType', 'BranchGate', 'RequiredInputs', 'YearMonths', 'Data', 'MassFraction', 'LandParity', 'CompositionMass', 'All')]
     [string[]]$Stage = @('All'),
     [ValidateSet('Sql', 'Api')][string]$StructureMode = 'Sql',
     [string]$SqlConnection,
@@ -166,6 +166,7 @@ if (-not $afFile) { $afFile = Join-Path $repo 'docs\delivery\reference-data\land
 . (Join-Path $here 'LandTemplateDraft.Lib.ps1')
 . (Join-Path $here 'LandYearMonths.Lib.ps1')
 . (Join-Path $here 'LandYearMonthsApply.Lib.ps1')
+. (Join-Path $here 'LandT7bStatus.Lib.ps1')
 Set-StrictMode -Off
 
 # Безпека стенда: лише локальні API і SQL (база з іменем EcrLand*); мутації лише з явним
@@ -2188,6 +2189,43 @@ function Stage-RowFilter {
     Log "  прапорець поставлено: $set; знято (exempt): $cleared; пропущено: $skipped; помилок: $failed"
 }
 
+# B26 (P-0118-25, D-425): статус рядків T7b_00 у НАЯВНИХ документах проєкту. Колонка Land_Status нова, тож у старих
+# документах порожня, і фільтр «лише Running» (ECW_C09_02_01 у runningOnly) виключив би й рядки речовин. Пише Running у
+# statusPresets.rows лише там, де статусу ще немає (поставлене людиною не чіпає; S3_9 не пише ніколи). Повтор - 0 записів.
+# Лише явно (-Stage T7bStatus), ПІСЛЯ Template (колонка в документах) і ДО RowFilter (інакше між етапами перерахунок
+# тихо виключить рядки речовин); -DryRun - лише лічильники. Порядок вікна - runbook п. 8.9.1.
+# ⚠ Документ, створений ПІСЛЯ прогону, отримує статус лише повторним прогоном цього етапу (шаблон пресетів рядків не має).
+function Stage-T7bStatus {
+    Log '== T7bStatus (B26: статус рядків T7b_00 для фільтра D-425) =='
+    $t7b = $null; $t7bSheet = $null
+    foreach ($sh in @($Mdl.sheets)) { foreach ($tb in @($sh.tables)) { if ([string]$tb.code -eq 'T7b_00') { $t7b = $tb; $t7bSheet = [string]$sh.code } } }
+    if ($null -eq $t7b -or -not $t7b.PSObject.Properties['statusPresets']) { throw 'У моделі T7b_00 без statusPresets (перегенеруйте модель, B26).' }
+    $presets = $t7b.statusPresets
+    LoginAs $BuildUser
+    $entryId = [string](RegEntryId ([string]$presets.registry) ('code:' + [string]$presets.entry))
+    $pr = Items (Api GET '/api/v1/projects').Json | Where-Object { $_.code -eq $ProjectCode } | Select-Object -First 1
+    if (-not $pr) { throw "Немає проєкту $ProjectCode." }
+    $tot = [ordered]@{ Docs = 0; Instances = 0; Write = 0; Written = 0; Kept = 0; Missing = 0; EmptyRows = 0; EmptyWithValue = 0 }
+    foreach ($d in @(Items (Api GET "/api/v1/documents?projectId=$([int]$pr.id)&limit=100").Json)) {
+        $docId = [int]$d.id; $tot.Docs++
+        foreach ($mo in 1..12) {
+            $pk = $Year * 100 + $mo
+            $tis = TableInstances $docId $pk
+            $tkey = "$t7bSheet/T7b_00"
+            if (-not $tis.ContainsKey($tkey)) { continue }
+            $tot.Instances++
+            $g = (Api GET "/api/v1/documents/$docId/tables/$($tis[$tkey])?periodKey=$pk").Json
+            $plan = Get-LandStatusPresetPlan -Presets $presets -Rows @($g.rows) -EntryId $entryId
+            foreach ($k in 'Write', 'Kept', 'Missing', 'EmptyRows', 'EmptyWithValue') { $tot[$k] += [int]$plan.$k }
+            if ($plan.EmptyWithValue -gt 0) { Log "  ! документ $docId/$pk : у рядку без статусу (S3_9) хтось поставив статус - не чіпаю" }
+            if ($DryRun -or $plan.Write -eq 0) { continue }
+            $tot.Written += Patch-Rows $docId $pk $tis[$tkey] @($plan.Rows) "T7bStatus doc $docId/$pk"
+        }
+    }
+    Log ("  документів {0}, екземплярів T7b_00 {1}; записати {2}, записано {3}; уже мали статус {4}; рядків немає {5}; рядків без статусу {6} (з поставленим людиною {7}){8}" -f
+        $tot.Docs, $tot.Instances, $tot.Write, $tot.Written, $tot.Kept, $tot.Missing, $tot.EmptyRows, $tot.EmptyWithValue, $(if ($DryRun) { ' [DryRun: нічого не записано]' } else { '' }))
+}
+
 function Stage-OptionalArguments {
     Log '== OptionalArguments =='
     . (Join-Path $here 'LandOptionalArguments.Lib.ps1')
@@ -2913,6 +2951,8 @@ function Fill-FullDocument([int]$docId) {
     if (Want 'Methodologies') { Stage-Methodologies }
     # D-425: ПІСЛЯ Methodologies (методології мають існувати й бути опублікованими); не створює версій.
     if (Want 'RowFilter') { Stage-RowFilter }
+    # B26: лише явно; ПІСЛЯ Template і RowFilter (колонка статусу в документах, прапорець методології).
+    if ($Stage -contains 'T7bStatus') { Stage-T7bStatus }
     if (Want 'Data') { Stage-Data }
     # LP-07: LandParity лише явно (-Stage LandParity); у 'All' не входить, бо потребує імпортованих C11/C12 і LAND_AIR_SUBSTANCE.
     # ⚠ D1 (RC E): LandParity виконується ПЕРЕД Methodologies. Methodologies створює прив'язки колонок результатів (LP-08,

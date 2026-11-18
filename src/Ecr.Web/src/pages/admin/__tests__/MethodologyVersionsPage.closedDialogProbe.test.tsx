@@ -110,7 +110,10 @@ afterEach(() => {
 
 // ⚠ Бюджет 30 с (як `AppLayout.navbarCollapse`): три вікна зонда з паузою 300 мс перед вікном 3 на сторінці з
 // кількома лінивими панелями. Під повним vitest паралельно зі збіркою .NET «Remove formula» перевищив 15 с (F13).
-describe('B149: MethodologyVersionsPage — один запит на відкриття діалогу', { timeout: 30_000 }, () => {
+// ✎ B145: межа 30 → 90 с. Очікування — рендер діалогів у jsdom (CPU), без фіксованих пауз: вікна відкриваються
+// керованими воротами (holdWrites/gateReads). Окремо «Remove formula» 3.0–3.5 с; у повному прогоні Windows під
+// навантаженням >30 с (18.11). 90 с ≈ 26× окремого заміру.
+describe('B149: MethodologyVersionsPage — один запит на відкриття діалогу', { timeout: 90_000 }, () => {
   it('«New version»: один POST …/versions у всіх трьох вікнах', async () => {
     const server = holdWrites({ read, write: () => ({ body: { ...Version, id: 11, versionNumber: '2.0' } }) });
     const gate = gateReads();

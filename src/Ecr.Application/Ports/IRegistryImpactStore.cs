@@ -77,6 +77,22 @@ public interface IRegistryImpactStore
     /// задача в черзі, межа — рік.
     /// </remarks>
     public Task<IReadOnlyList<RegistryImpactRow>> ListImpactedForYearAsync(int registryDefId, int year, CancellationToken ct);
+
+    /// <summary>
+    /// B80 N3(b): документи шаблонів-споживачів зв'язки «документ-джерело → довідник» у відкритих періодах року
+    /// (<c>Open</c>/<c>Grace</c>, екземпляри таблиць оригіналу аркуша) — НЕЗАЛЕЖНО від того, чи є в них результат.
+    /// Порожньо, якщо зв'язки довідника немає, стан-ворота не <c>ApprovedOnly</c> або читання з документа вимкнене.
+    /// </summary>
+    /// <param name="registryDefId">Довідник зв'язки.</param>
+    /// <param name="year">Рік періодів.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Рядки «документ × період»; <c>MethodologyCode</c> — порожній (результату може не бути).</returns>
+    /// <remarks>
+    /// ⚠ Лише для зміни джерела (<see cref="ListImpactedForYearAsync"/>): за <c>ApprovedOnly</c> затвердження місяця
+    /// HSE400 дає Land дані, яких доти не було, тож Land без жодного прогону теж залежний. За <c>Any</c> набір —
+    /// той самий, що до N3 (порожньо).
+    /// </remarks>
+    public Task<IReadOnlyList<RegistryImpactRow>> ListBoundConsumersForYearAsync(int registryDefId, int year, CancellationToken ct);
 }
 
 /// <summary>Один зачеплений документ у періоді, через одну методологію.</summary>

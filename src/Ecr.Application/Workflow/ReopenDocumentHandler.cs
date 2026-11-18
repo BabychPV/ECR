@@ -30,7 +30,10 @@ public sealed class ReopenDocumentHandler(
     SheetWorkflowNotifier? notifier = null,
     // D-462: повернутий аркуш знову редагований — комірки наздоганяють сирий шар (SheetMaterializationTrigger);
     // `null` — тестові фабрики обробника без черги.
-    IMaterializationScheduler? materialization = null)
+    IMaterializationScheduler? materialization = null,
+    // ✎ B80 (N2a, T-B): повернення аркуша-джерела ІЗ ЗАТВЕРДЖЕНОГО — перерахунок залежних (лише за ApprovedOnly),
+    // ПІСЛЯ коміту; `null` — тестові фабрики обробника.
+    ISourceApprovalChangeTrigger? sourceTrigger = null)
 {
     /// <summary>Право, без якого повернення в роботу неможливе (ФВ-6.12).</summary>
     public const string Permission = "Document.Reopen";
@@ -124,8 +127,11 @@ public sealed class ReopenDocumentHandler(
         // його коміту Reopen бачить ще Open, дозволяє і комітить; задача потім
         // комітить перехід у Closed, тихо перекриваючи Reopen — конфлікту
         // немає, бо в `Period` немає RowVersion.
+        var reopenedFromApproved = false;
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            reopenedFromApproved = false;
+
             // ⚠ Період береться з UPDLOCK ДО будь-яких змін (ФВ-1.10a) — тепер
             // блокування справді тримається до кінця транзакції.
             // ⛔ R5-W1 / W1-04: ЕФЕКТИВНИЙ стан періоду, а не збережений (F-08).
@@ -150,6 +156,9 @@ public sealed class ReopenDocumentHandler(
             var fromStatus = state.Status;
             var now = clock.UtcNow;
             state.Reopen(userId, reason, now);
+
+            // ✎ B80 (T-B): лише вихід із Approved і лише оригінал; Reopen поданого джерело залежних не міняв.
+            reopenedFromApproved = sheetCopyId is null && fromStatus == DocumentStatus.Approved;
 
             // `BE-11`: перехід і його причина — у журнал тим самим комітом.
             await workflow.AddEventAsync(
@@ -178,6 +187,14 @@ public sealed class ReopenDocumentHandler(
         {
             await SheetMaterializationTrigger
                 .AfterCommitAsync(materialization, documentId, sheetDefId, periodKey, ct)
+                .ConfigureAwait(false);
+        }
+
+        // ✎ B80 (T-B): після коміту; тригер сам вирішує за зв'язкою (ApprovedOnly) і не кидає на збій постановки.
+        if (reopenedFromApproved && sourceTrigger is not null)
+        {
+            await sourceTrigger
+                .OnSourceSheetApprovalChangedAsync(documentId, sheetDefId, periodKey, SourceApprovalChange.Reopened, userId, ct)
                 .ConfigureAwait(false);
         }
 

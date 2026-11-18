@@ -6517,3 +6517,17 @@ public sealed record RowDto(
   дані). `hse400CompositionSource` = `Binding`, коли ключ не задано, а значення дав біт зв'язки.
 - Порти: `IDocumentSourceBindingStore` (перелік, `UPDLOCK` зв'язки, обраний документ-джерело року з періодичністю проєкту й режимом погодження, роки джерела) і `IDocumentSourceFlagOverrides` (явні значення двох ключів або `null`).
 - Помилки — наявні коди (`ECR-CALC-0404/0409`, `ECR-REQ-0422`) з новими `messageKey`; §7 не змінюється.
+- ✎ B80 N2a — порт `ISourceApprovalChangeTrigger` (без нових ендпоінтів і полів): остаточне затвердження аркуша-джерела
+  × періоду (`ApproveSheetHandler`), повернення з `Approved` (`ReopenDocumentHandler`) і видалення документа-джерела
+  (`DeleteDocumentHandler`; роки читаються до видалення) ПІСЛЯ коміту ставлять ту саму злиту задачу
+  `IRegistryImpactRecalculationJob` на рік — лише коли зв'язка на `approvedOnly` і біт `recalculateDependents` (або ключ)
+  увімкнено; лише оригінал аркуша; збій постановки — лише в журнал. Хук завершення перерахунку HSE400 за `approvedOnly`
+  мовчить, за `any` — як доти.
+- ✎ B80 N2b — порт `ISourceMonthApprovalGate` (без нових ендпоінтів, полів і кодів): `POST /documents/{id}/submit` і
+  `POST /documents/{id}/approve` (`approved: true`, будь-який крок маршруту, і оригінал, і копія аркуша) відмовляють
+  422 `ECR-SUB-4221` з `messageKey` **`err.ECR-SUB-4221.sourceMonthNotApproved`** (деталі `sourceDocumentId`,
+  `sourcePeriodKey` `yyyyMM`, `sourceProjectCode`, `sourceDocumentKey`), коли водночас: шаблон документа є споживачем
+  зв'язки на `approvedOnly` і читання з документа діє (біт `readFromDocument` або ключ); документ-джерело року є (той
+  самий вибір, що в завантажувачі); місяць джерела, яким володіє період аркуша (річний якір — кожен із 12), не має
+  `Approved` на оригіналі аркуша. За `any`, без зв'язки, без документа-джерела року — як доти (один запит зв'язки).
+  Відхилення, відкликання і повернення в роботу не блокуються.
