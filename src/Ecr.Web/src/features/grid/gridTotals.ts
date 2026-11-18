@@ -2,6 +2,7 @@ import type { ColumnDto, TableSliceDto } from '@/api/types';
 import { cellKey } from './permissions';
 import { formatLocale } from '@/shared/format';
 import { decimalTextOf } from './rounding';
+import { effectiveDefault } from './rowDefaults';
 
 /**
  * Рядок підсумків сітки документа (`UI-08`).
@@ -99,7 +100,8 @@ function valueAt(
 
   if (overlay.overrides?.has(key) === true) return overlay.overrides.get(key);
 
-  return row.cells[column.code] ?? column.defaultValue ?? '';
+  // ✎ B175: дефолт рядка перекриває дефолт колонки — той самий, що показує сітка (`gridRows`).
+  return row.cells[column.code] ?? effectiveDefault(row, column) ?? '';
 }
 
 /**
