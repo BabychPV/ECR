@@ -23900,6 +23900,15 @@
       "RowDefDto": {
         "description": "Рядок у відповіді на запис/читання через цей обробник.",
         "properties": {
+          "cellDefaults": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "object"
+            ]
+          },
           "id": {
             "format": "int32",
             "type": "integer"
@@ -23952,6 +23961,16 @@
             "additionalProperties": {},
             "description": "Значення; ключ — код колонки. Присутній ключ зі значенням\n            `null` означає <b>явну порожнечу</b>, відсутній ключ — «не заповнювали» (R-B4).",
             "type": "object"
+          },
+          "defaults": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "✎ B175: значення комірок рядка за замовчуванням (`RowDef.CellDefaults`), код колонки → сирий текст — той\nсамий формат, що `ColumnDto.DefaultValue` (Lookup — код запису). Перекриває дефолт колонки для\nнезаповненої комірки; `\"\"` — дефолту колонки в цьому рядку немає. `null` — рядок без власних дефолтів.",
+            "type": [
+              "null",
+              "object"
+            ]
           },
           "isOrphaned": {
             "default": false,
@@ -25684,6 +25703,16 @@
       "SaveRowDefRequest": {
         "description": "Налаштування рядка фіксованої таблиці чернетки (`W5.2`).",
         "properties": {
+          "cellDefaults": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "✎ B175: значення комірок рядка за замовчуванням, код колонки → текст (Lookup — код запису; `\"\"` — прибрати\nдефолт колонки). `null` — не чіпати наявні; `{}` — прибрати всі.",
+            "type": [
+              "null",
+              "object"
+            ]
+          },
           "isReadOnly": {
             "description": "Заборона ручного вводу.",
             "type": "boolean"

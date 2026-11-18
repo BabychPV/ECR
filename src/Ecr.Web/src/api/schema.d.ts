@@ -41009,6 +41009,9 @@ export interface components {
         };
         /** @description Рядок у відповіді на запис/читання через цей обробник. */
         RowDefDto: {
+            cellDefaults?: null | {
+                [key: string]: string;
+            };
             /** Format: int32 */
             id: number;
             isReadOnly: boolean;
@@ -41027,6 +41030,12 @@ export interface components {
              *                 `null` означає <b>явну порожнечу</b>, відсутній ключ — «не заповнювали» (R-B4). */
             cells: {
                 [key: string]: unknown;
+            };
+            /** @description ✎ B175: значення комірок рядка за замовчуванням (`RowDef.CellDefaults`), код колонки → сирий текст — той
+             *     самий формат, що `ColumnDto.DefaultValue` (Lookup — код запису). Перекриває дефолт колонки для
+             *     незаповненої комірки; `""` — дефолту колонки в цьому рядку немає. `null` — рядок без власних дефолтів. */
+            defaults?: null | {
+                [key: string]: string;
             };
             /**
              * @description Рядок посилається на запис реєстру, що втратив чинність (ФВ-8.13).
@@ -41819,6 +41828,11 @@ export interface components {
         };
         /** @description Налаштування рядка фіксованої таблиці чернетки (`W5.2`). */
         SaveRowDefRequest: {
+            /** @description ✎ B175: значення комірок рядка за замовчуванням, код колонки → текст (Lookup — код запису; `""` — прибрати
+             *     дефолт колонки). `null` — не чіпати наявні; `{}` — прибрати всі. */
+            cellDefaults?: null | {
+                [key: string]: string;
+            };
             /** @description Заборона ручного вводу. */
             isReadOnly: boolean;
             /** @description Підпис рядка мовами каталогу. */
