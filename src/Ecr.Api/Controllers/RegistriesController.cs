@@ -31,7 +31,7 @@ public sealed class RegistriesController(
     ImportRegistryEntriesHandler importEntries,
     IConfiguration configuration,
     GetRegistryTargetHandler getTarget,
-    IServiceScopeFactory scopes) : ControllerBase
+    RegistryWriteRetry retry) : ControllerBase
 {
     /// <summary>
     /// Мінімальні відомості про довідник-ЦІЛЬ Lookup за Id - для показу поточної цілі колонки чи поля шапки, якої немає
@@ -314,7 +314,8 @@ public sealed class RegistriesController(
         ArgumentNullException.ThrowIfNull(dto);
 
         var isNew = dto.Id is null;
-        var result = await upsert.HandleWithWarningsAsync(dto, code, ct).ConfigureAwait(false);
+        // B167: програш одночасному однаковому запиту — повтор у свіжій області (RegistryWriteRetry), відповідь послідовного повтору.
+        var result = await retry.RunAsync(upsert, h => h.HandleWithWarningsAsync(dto, code, ct)).ConfigureAwait(false);
         var id = result.Id;
         var body = new RegistryEntryIdResponse(id) { Warnings = result.Warnings };
 
@@ -375,24 +376,11 @@ public sealed class RegistriesController(
             }
         }
 
-        try
-        {
-            return Ok(await importEntries
-                .HandleAsync(code, content, file.Length, maxBytes, dryRun, ct, notUtf8)
-                .ConfigureAwait(false));
-        }
-        catch (Application.Errors.ConcurrencyConflictException ex) when (!dryRun && ex.ErrorCode == Domain.Errors.ErrorCodes.CellConflict)
-        {
-            // ⛔ B167: імпорт ідемпотентний і без токена версії — файл каже «стан має бути таким», а не «змінити ось цю
-            // версію». Наявні значення він читає ДО транзакції, тож другий із двох одночасних однакових файлів програвав
-            // унікальному індексу (UQ_RegistryValue) чи ревізії довідника — 409, хоча послідовний повтор того самого файлу
-            // — 200 «без змін». Один повтор усього імпорту в СВІЖІЙ області (новий DbContext; трекер першої спроби брудний)
-            // читає закомічене переможцем і дає ту саму відповідь, що й послідовний повтор. Інші відмови не повторюються.
-            await using var retry = scopes.CreateAsyncScope();
-            return Ok(await retry.ServiceProvider.GetRequiredService<ImportRegistryEntriesHandler>()
-                .HandleAsync(code, content, file.Length, maxBytes, dryRun, ct, notUtf8)
-                .ConfigureAwait(false));
-        }
+        // B167: програш одночасному однаковому файлу — повтор у свіжій області (RegistryWriteRetry): звіт послідовного повтору.
+        // dryRun нічого не пише й не конфліктує, тож повтор його не стосується.
+        return Ok(await retry
+            .RunAsync(importEntries, h => h.HandleAsync(code, content, file.Length, maxBytes, dryRun, ct, notUtf8))
+            .ConfigureAwait(false));
     }
 
     /// <summary>
