@@ -66,7 +66,7 @@ public sealed class ScriptEnvironmentChecker(
 
         var sources = await CheckResultReadsAsync(methodologyId, used, diagnostics, ct).ConfigureAwait(false);
 
-        diagnostics.AddRange(ScriptUnitChecker.Check(script, catalog));
+        diagnostics.AddRange(ScriptUnitChecker.Check(script, catalog, rowTables));
 
         return new ScriptEnvironment(
             [.. diagnostics.Select((d, i) => (d, i)).OrderBy(x => x.d.Line).ThenBy(x => x.d.Column).ThenBy(x => x.i).Select(x => x.d)],

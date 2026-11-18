@@ -15,13 +15,14 @@ namespace Ecr.Application.Calculations.Scripting;
 /// «результат в іншій розмірності, ніж оголошена одиниця» (MS, план 13.4).
 /// </summary>
 /// <remarks>
-/// ⛔ Строгість рівно як у методологій, не більша: одиницю дають лише константи (<c>const k : unit</c>) і оголошені
-/// чи виведені величини; аргумент рядка (<c>row.X</c>) одиниці не має — вона в колонці таблиці, до якої версію
-/// прив'язано, а таких таблиць може бути кілька (FP-4). Усе, чия одиниця невідома статично, — пошук у мапі, виклик
-/// своєї функції чи бібліотеки, агрегат, комірка іншої таблиці, текст, заголовок, змінна без одиниці, у виразі якої
-/// є щось невідоме, — для перевірки «невідоме», а не «безрозмірне»: воно ніколи не дає відмови. Чого немає й тут:
-/// одиниць колонок живих таблиць (<c>row.X</c> береться безрозмірним-невідомим, а не з <c>ColumnDef.UnitId</c>),
-/// перевірки тіл власних функцій і відповідності одиниць <c>visible var</c>-проміжних і виходів між версіями.
+/// ⛔ Строгість рівно як у методологій, не більша: одиницю дають константи (<c>const k : unit</c>), оголошені чи
+/// виведені величини й поля рядка. Поле <c>row.X</c> бере одиницю колонки в ЖИВІЙ таблиці (<c>rows from</c>); коли
+/// таблиць кілька й вони розходяться, або в колонці одиниці немає, — вона «невідома», а не «безрозмірна» (FP-4).
+/// Усе, чия одиниця невідома статично, — пошук у мапі, виклик своєї функції чи бібліотеки, агрегат, комірка іншої
+/// таблиці, текст, заголовок, змінна без одиниці, у виразі якої є щось невідоме, — для перевірки «невідоме», а не
+/// «безрозмірне»: воно ніколи не дає відмови. Тіла власних функцій перевіряються з параметрами невідомої одиниці
+/// (виявляються лише внутрішні розбіжності: константи між собою). Чого немає й тут: відповідності одиниць
+/// <c>visible var</c>-проміжних і виходів між версіями.
 /// </remarks>
 public static class ScriptUnitChecker
 {
@@ -31,15 +32,64 @@ public static class ScriptUnitChecker
     /// <summary>Перевіряє скрипт.</summary>
     /// <param name="script">Скомпільований скрипт.</param>
     /// <param name="catalog">Знімок довідника одиниць.</param>
+    /// <param name="rowTables">
+    /// Живі таблиці з <c>rows from</c>: з них поле <c>row.X</c> бере одиницю колонки; <c>null</c> — поля рядка
+    /// без відомої одиниці (як було).
+    /// </param>
     /// <returns>Діагностики <c>unitMismatch</c> із позицією оператора; порожньо — розбіжностей немає.</returns>
-    public static IReadOnlyList<ScriptDiagnostic> Check(CompiledScript script, UnitCatalogSnapshot catalog)
+    public static IReadOnlyList<ScriptDiagnostic> Check(
+        CompiledScript script, UnitCatalogSnapshot catalog, IReadOnlyList<LiveTable>? rowTables = null)
     {
         ArgumentNullException.ThrowIfNull(script);
         ArgumentNullException.ThrowIfNull(catalog);
 
-        var state = new State(script, catalog);
+        var rowUnits = RowFieldUnits(script, rowTables);
+        var diagnostics = new List<ScriptDiagnostic>();
+
+        // Тіла власних функцій: параметри невідомої одиниці, змінних верхнього рівня функція не бачить.
+        foreach (var function in script.Functions.Values)
+        {
+            var line = script.Members
+                .FirstOrDefault(m => m.Kind == MemberKind.Function && string.Equals(m.Name, function.Name, StringComparison.Ordinal))
+                ?.Line ?? 1;
+            var inner = new State(script, catalog, rowUnits, function.Parameters);
+            inner.Check(function.Name, function.Body, line);
+            diagnostics.AddRange(inner.Diagnostics);
+        }
+
+        var state = new State(script, catalog, rowUnits, parameters: null);
         state.Walk(script.Statements);
-        return state.Diagnostics;
+        diagnostics.AddRange(state.Diagnostics);
+        return diagnostics;
+    }
+
+    /// <summary>Одиниця поля рядка: однакова непорожня одиниця колонки в усіх живих таблицях, де колонка є.</summary>
+    private static Dictionary<string, int> RowFieldUnits(CompiledScript script, IReadOnlyList<LiveTable>? rowTables)
+    {
+        var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        if (rowTables is null or { Count: 0 })
+        {
+            return result;
+        }
+
+        foreach (var field in script.RowFields.Where(f => !f.IsMonthly))
+        {
+            var units = new HashSet<int?>();
+            foreach (var table in rowTables)
+            {
+                foreach (var column in table.Columns.Where(c => string.Equals(c.Code, field.Name, StringComparison.OrdinalIgnoreCase)))
+                {
+                    units.Add(column.UnitId);
+                }
+            }
+
+            if (units.Count == 1 && units.Single() is { } unit)
+            {
+                result[field.Name] = unit;
+            }
+        }
+
+        return result;
     }
 
     private sealed record VarInfo(int? Unit, bool Unknown);
@@ -51,10 +101,18 @@ public static class ScriptUnitChecker
         private readonly Dictionary<string, int?> _consts = new(StringComparer.Ordinal);
         private readonly Context _context;
         private readonly UnitChecker _checker = new();
+        private readonly IReadOnlyDictionary<string, int> _rowUnits;
+        private readonly HashSet<string> _parameters;
 
-        public State(CompiledScript script, UnitCatalogSnapshot catalog)
+        public State(
+            CompiledScript script,
+            UnitCatalogSnapshot catalog,
+            IReadOnlyDictionary<string, int> rowUnits,
+            IReadOnlyList<string>? parameters)
         {
             _catalog = catalog;
+            _rowUnits = rowUnits;
+            _parameters = new HashSet<string>(parameters ?? [], StringComparer.Ordinal);
             foreach (var (name, value) in script.Constants)
             {
                 if (!value.IsMap)
@@ -101,6 +159,9 @@ public static class ScriptUnitChecker
                 }
             }
         }
+
+        /// <summary>Перевіряє вираз без оголошеної одиниці (тіло функції).</summary>
+        public void Check(string name, AstNode expr, int line) => Expression(name, null, expr, line);
 
         private void Expression(string name, string? declaredCode, AstNode expr, int line)
         {
@@ -155,6 +216,18 @@ public static class ScriptUnitChecker
 
             switch (node)
             {
+                case SymbolReferenceNode { Kind: SymbolKind.Formula } symbol when _parameters.Contains(symbol.Name):
+                    // Параметр власної функції: одиниця невідома, навіть якщо ім'я збігається з константою.
+                    return Unknown();
+
+                case SymbolReferenceNode { Kind: SymbolKind.Argument } argument when _rowUnits.TryGetValue(argument.Name, out var rowUnit):
+                {
+                    // Поле рядка з одиницею колонки живої таблиці: синтетична величина з цією одиницею.
+                    var key = "\u0001row." + argument.Name;
+                    _vars[key] = new VarInfo(rowUnit, false);
+                    return new SymbolReferenceNode(SymbolKind.Formula, key) { Position = argument.Position };
+                }
+
                 case SymbolReferenceNode { Kind: SymbolKind.Formula } symbol:
                     // Змінна з одиницею чи без невідомого — лишається символом; константа — теж.
                     if (_vars.TryGetValue(symbol.Name, out var info))
