@@ -18,6 +18,11 @@ const PeriodPolicyManager = lazy(async () => ({
   default: (await import('@/features/projects/PeriodPolicyManager')).PeriodPolicyManager,
 }));
 
+/* ✎ B155: шаблони проєкту з маршрутом погодження — за `import()` з тієї ж причини (бюджет маршруту). */
+const ProjectTemplateRoutes = lazy(async () => ({
+  default: (await import('@/features/approvalRoutes/ProjectTemplateRoutes')).ProjectTemplateRoutes,
+}));
+
 /** Розділ вкладки: заголовок `h2` і вміст. */
 function Section({ id, title, children }: { readonly id: string; readonly title: string; readonly children: ReactNode }): JSX.Element {
   return (
@@ -125,6 +130,19 @@ export function ProjectSettingsPage({ projectId }: { readonly projectId: number 
               <ApprovalRouteEditor projectId={selected.id} openerLabel={t('projectSettings.routeAction')} describedBy={describedBy} />
             )}
           </SettingsAction>
+        </Section>
+      )}
+
+      {/* ✎ B155 (варіант C): маршрут, що діє для кожного шаблону проєкту, і виняток проєкту для шаблону. Права ті
+          самі, що в маршруту проєкту: `Project.Manage` + грант Manage. */}
+      {managesProject && (
+        <Section id="template-routes" title={t('approvalRoutes.projectTemplatesTitle')}>
+          <Text size="sm" c="dimmed">
+            {t('approvalRoutes.projectTemplatesHint')}
+          </Text>
+          <Suspense fallback={null}>
+            <ProjectTemplateRoutes projectId={selected.id} />
+          </Suspense>
         </Section>
       )}
 
