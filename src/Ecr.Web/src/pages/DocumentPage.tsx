@@ -148,6 +148,10 @@ const PeriodPicker = lazy(async () => ({ default: (await loadPeriodPicker()).Per
 const YearMonthReopen = lazy(async () => ({
   default: (await import('@/features/documents/periodReopen/YearMonthReopen')).YearMonthReopen,
 }));
+// ✎ L7c: банер усіх відкритих для документа місяців року — окремим чанком і лише коли такі є (D-132).
+const YearReopenedBanner = lazy(async () => ({
+  default: (await import('@/features/documents/periodReopen/YearReopenedBanner')).YearReopenedBanner,
+}));
 /*
  * B113: заглушка — та сама коробка, що й сам вибір періоду (`.ecr-period`: висота `--ecr-ctl-height`, 28/36 px за
  * щільністю). Була 52 px: поки чанк `PeriodPicker` ще вантажився, шапка була вищою за остаточну, і коли чанк доїжджав,
@@ -1053,7 +1057,14 @@ export function DocumentPage(): JSX.Element {
         </Suspense>
       )}
 
-      {periodReopen.banner}
+      {/* ✎ L7c: «рік» — усі відкриті місяці року з картки; банер якоря (лише січень) тут не показується. */}
+      {yearLayout
+        ? (summary.data?.reopenedPeriods?.length ?? 0) > 0 && (
+            <Suspense fallback={null}>
+              <YearReopenedBanner periods={summary.data?.reopenedPeriods ?? []} timeZoneId={calendar.data?.timeZoneId} />
+            </Suspense>
+          )
+        : periodReopen.banner}
       {periodReopen.dialog}
 
       {/* EA-5b: передача місяця - «Місяць передано вам», «Заповнено», коментар повернення. Права комірок рішає сервер. */}
