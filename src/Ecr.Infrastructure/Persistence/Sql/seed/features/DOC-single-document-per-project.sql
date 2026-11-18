@@ -2,8 +2,11 @@
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
-    (N'err.ECR-DOC-0409.documentExistsForTemplate', N'ru', N'В этом проекте документ этого шаблона уже есть: шаблон допускает один документ на проект. Откройте существующий документ.'),
-    (N'err.ECR-DOC-0409.documentExistsForTemplate', N'kz', N'Бұл жобада осы үлгінің құжаты бар: үлгі бір жобаға бір құжатқа рұқсат береді. Бар құжатты ашыңыз.'),
+    -- B165(1): власний код ECR-DOC-4092 (доти — ECR-DOC-0409 «подано»; старий ключ — у «Прибрані ключі» прологу).
+    (N'err.ECR-DOC-4092', N'ru', N'Документ этого шаблона уже есть'),
+    (N'err.ECR-DOC-4092', N'kz', N'Осы үлгінің құжаты бар'),
+    (N'err.ECR-DOC-4092.documentExistsForTemplate', N'ru', N'В этом проекте документ этого шаблона уже есть: шаблон допускает один документ на проект. Откройте существующий документ.'),
+    (N'err.ECR-DOC-4092.documentExistsForTemplate', N'kz', N'Бұл жобада осы үлгінің құжаты бар: үлгі бір жобаға бір құжатқа рұқсат береді. Бар құжатты ашыңыз.'),
     (N'err.ECR-TMPL-0409.singleDocumentDuplicates', N'ru', N'Нельзя включить «один документ на проект»: в некоторых проектах уже несколько документов этого шаблона. Сначала оставьте по одному.'),
     (N'err.ECR-TMPL-0409.singleDocumentDuplicates', N'kz', N'«Бір жобаға бір құжат» қосылмайды: кейбір жобаларда осы үлгінің бірнеше құжаты бар. Алдымен әрқайсысында біреуін қалдырыңыз.'),
     (N'templates.documentsPerProject', N'ru', N'Документов на проект'),
@@ -28,7 +31,8 @@ GO
 INSERT INTO #UiEn ([Key], Lang, Val, Scope)
 SELECT v.[Key], v.Lang, v.Val, v.Scope
   FROM (VALUES
-    (N'err.ECR-DOC-0409.documentExistsForTemplate', N'en', N'This project already has a document of this template: the template allows one document per project. Open the existing document.', 1),
+    (N'err.ECR-DOC-4092', N'en', N'A document of this template already exists', 1),
+    (N'err.ECR-DOC-4092.documentExistsForTemplate', N'en', N'This project already has a document of this template: the template allows one document per project. Open the existing document.', 1),
     (N'err.ECR-TMPL-0409.singleDocumentDuplicates', N'en', N'«One document per project» cannot be turned on: some projects already have several documents of this template. Keep one in each first.', 1),
     (N'templates.documentsPerProject', N'en', N'Documents per project', 1),
     (N'templates.documentsPerProjectOne', N'en', N'One', 1),

@@ -786,6 +786,11 @@ public sealed partial class ExceptionHandlingMiddleware(
         BusinessRuleException e =>
             (StatusCodes.Status422UnprocessableEntity, e.ErrorCode, e.Message, e.Details),
 
+        // ⛔ B151/B165: «документ цього шаблону в проєкті вже є» (`ECR-DOC-4092`) — конфлікт зі станом проєкту, а не
+        // невірні дані. ⚠ Правило суфікса нижче цей код теж ловить (`-4092`); арм — явна назва, не єдина опора.
+        DomainException e when e.ErrorCode == ErrorCodes.DocumentExistsForTemplate =>
+            (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
+
         // ⛔ Правило, а не арм на код: сутності `Ecr.Domain` кидають голий
         // `DomainException`, і кожен `…-0409` (`DOC`, `TMPL`, `CALC`, `PRD`, `RPT`)
         // без власного арма доїжджав як 422 — «дані невірні» там, де вводити

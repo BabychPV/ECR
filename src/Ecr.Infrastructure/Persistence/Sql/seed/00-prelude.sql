@@ -1511,7 +1511,11 @@ DELETE t
     (N'calcResults.calculatedMonth',        N'kz', N'Есептелген: {month}'),
     (N'calcResults.calculatedMonthHeading', N'en', N'Calculated columns show results of'),
     (N'calcResults.calculatedMonthHeading', N'ru', N'Рассчитанные столбцы показывают результаты за'),
-    (N'calcResults.calculatedMonthHeading', N'kz', N'Есептелген бағандар нәтижелерін көрсетеді')
+    (N'calcResults.calculatedMonthHeading', N'kz', N'Есептелген бағандар нәтижелерін көрсетеді'),
+    -- B165(1): відмова «документ шаблону в проєкті вже є» отримала власний код ECR-DOC-4092 (ключ err.ECR-DOC-4092.documentExistsForTemplate).
+    (N'err.ECR-DOC-0409.documentExistsForTemplate', N'en', N'This project already has a document of this template: the template allows one document per project. Open the existing document.'),
+    (N'err.ECR-DOC-0409.documentExistsForTemplate', N'ru', N'В этом проекте документ этого шаблона уже есть: шаблон допускает один документ на проект. Откройте существующий документ.'),
+    (N'err.ECR-DOC-0409.documentExistsForTemplate', N'kz', N'Бұл жобада осы үлгінің құжаты бар: үлгі бір жобаға бір құжатқа рұқсат береді. Бар құжатты ашыңыз.')
   ) AS s ([Key], Lang, OldVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
