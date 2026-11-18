@@ -15,6 +15,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Xunit;
 
 namespace Ecr.Api.Tests;
@@ -182,6 +183,17 @@ public sealed class MethodologyScriptApiTests(SqlServerFixture sql)
             var season = period.Month >= 4 && period.Month <= 9 ? "Summer" : "Winter";
             output OUT_A : t = twice(amount) * k1 * EF[season].NOx;
             """;
+
+    /// <summary>Прибирає справжній модуль скрипта: фейк тесту має відповідати на <c>CanHandle</c> першим.</summary>
+    private static void WithoutRealScriptModule(IServiceCollection services)
+    {
+        foreach (var descriptor in services
+                     .Where(d => d.ServiceType == typeof(ICalculationModule) && d.ImplementationType == typeof(Ecr.Calculations.ScriptCalculationModule))
+                     .ToList())
+        {
+            services.Remove(descriptor);
+        }
+    }
 
     private EcrDbContext Context()
         => new(new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).Options);
@@ -608,7 +620,10 @@ public sealed class MethodologyScriptApiTests(SqlServerFixture sql)
     public async Task Перегляд_без_підключеного_рушія_віддає_названу_відмову()
     {
         var stand = await ArrangeAsync().ConfigureAwait(true);
-        using var app = new EcrApiFactory(sql);
+
+        // Порт перегляду справді відсутній у цьому хості (у нормальному хості його реєструє AddEcrCalculations).
+        using var baseApp = new EcrApiFactory(sql);
+        using var app = baseApp.WithWebHostBuilder(b => b.ConfigureTestServices(s => s.RemoveAll<IScriptPreviewRunner>()));
         var (editor, _) = await SignInAsync(app, Editor).ConfigureAwait(true);
         var created = await CreateScriptVersionAsync(editor).ConfigureAwait(true);
         using (await JsonAsync(
@@ -666,7 +681,7 @@ public sealed class MethodologyScriptApiTests(SqlServerFixture sql)
         var stand = await ArrangeAsync(secondTable: true).ConfigureAwait(true);
         var module = new FakeScriptModule();
         using var baseApp = new EcrApiFactory(sql);
-        using var app = baseApp.WithWebHostBuilder(b => b.ConfigureTestServices(s => s.AddSingleton<ICalculationModule>(module)));
+        using var app = baseApp.WithWebHostBuilder(b => b.ConfigureTestServices(s => { WithoutRealScriptModule(s); s.AddSingleton<ICalculationModule>(module); }));
 
         var (author, _) = await SignInAsync(app, Editor).ConfigureAwait(true);
         var (publisher, _) = await SignInAsync(app, ["Calculation.View", "Calculation.Publish"]).ConfigureAwait(true);
@@ -758,7 +773,7 @@ public sealed class MethodologyScriptApiTests(SqlServerFixture sql)
     {
         var stand = await ArrangeAsync().ConfigureAwait(true);
         using var baseApp = new EcrApiFactory(sql);
-        using var app = baseApp.WithWebHostBuilder(b => b.ConfigureTestServices(s => s.AddSingleton<ICalculationModule>(new FakeScriptModule())));
+        using var app = baseApp.WithWebHostBuilder(b => b.ConfigureTestServices(s => { WithoutRealScriptModule(s); s.AddSingleton<ICalculationModule>(new FakeScriptModule()); }));
         var (author, _) = await SignInAsync(app, Editor).ConfigureAwait(true);
         var (publisher, _) = await SignInAsync(app, ["Calculation.View", "Calculation.Publish"]).ConfigureAwait(true);
         var created = await CreateScriptVersionAsync(author).ConfigureAwait(true);
