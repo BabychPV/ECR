@@ -87,6 +87,58 @@ public sealed class SourceDocumentFanOutTests(SqlServerFixture sql) : DbJobQueue
         Assert.Contains(SourceDependencyWorld.DependentsTarget(grace, Month), queued.Keys);
     }
 
+    /// <summary>
+    /// ✎ F13 batch-1118-8 (c), семантика B63/B79 названим тестом: затверджений аркуш споживача пропускається (не
+    /// ставиться), поданий — ставиться (позначку «перераховано після подання» ставить сам перерахунок лише за зміни
+    /// чисел, B79 — тут перевіряється постановка).
+    /// </summary>
+    /// <remarks>Мутація: у <c>CalculationTrigger.RequestDependentsAsync</c> не пропускати затверджені — червоний.</remarks>
+    [Fact]
+    public async Task Затверджений_аркуш_споживача_пропускається_поданий_ставиться()
+    {
+        var world = new SourceDependencyWorld(Sql);
+        var (registryId, code) = await world.RegistryAsync();
+        var source = await world.DocumentAsync([Month]);
+        var approved = await world.DocumentAsync([Month], code);
+        var submitted = await world.DocumentAsync([Month], code);
+        await world.SetSheetAsync(approved, Month, DocumentStatus.Approved);
+        await world.SetSheetAsync(submitted, Month, DocumentStatus.Submitted);
+        var bindingId = await world.BindingAsync(source.TemplateId, registryId);
+
+        var queued = await RunAsync(Request(registryId, bindingId, Month, hop: 0));
+
+        Assert.DoesNotContain(SourceDependencyWorld.DependentsTarget(approved, Month), queued.Keys);
+        Assert.Contains(SourceDependencyWorld.DependentsTarget(submitted, Month), queued.Keys);
+    }
+
+    /// <summary>
+    /// ✎ F13 batch-1118-8 (c): закритий період споживача не потрапляє ані в набір сховища
+    /// (<see cref="IRegistryImpactStore.ListTemplateConsumersAsync"/>), ані в постановку.
+    /// </summary>
+    /// <remarks>
+    /// Мутація: фільтр <c>Open || Grace</c> у <c>ListTemplateConsumersAsync</c> → без фільтра — червоний (набір сховища;
+    /// тригер відкидає закритий період і сам, тому перевіряється й набір).
+    /// </remarks>
+    [Fact]
+    public async Task Закритий_період_споживача_не_ставиться()
+    {
+        var world = new SourceDependencyWorld(Sql);
+        var (registryId, code) = await world.RegistryAsync();
+        var source = await world.DocumentAsync([Month]);
+        var closed = await world.DocumentAsync([Month], code);
+        await world.CloseAsync(closed, Month);
+        var bindingId = await world.BindingAsync(source.TemplateId, registryId);
+
+        var queued = await RunAsync(Request(registryId, bindingId, Month, hop: 0));
+        Assert.DoesNotContain(SourceDependencyWorld.DependentsTarget(closed, Month), queued.Keys);
+
+        await using var db = Sql.CreateContext();
+        var period = SourceDependencyWorld.Period(Month);
+        var rows = await new RegistryImpactStore(db).ListTemplateConsumersAsync(
+            [closed.TemplateId], period, period, null, CancellationToken.None);
+        Assert.DoesNotContain(rows, r => r.DocumentId == closed.DocumentId);
+    }
+
     /// <summary>Зміна за весь рік (видалення, перемикання стану — без місяця): усі відкриті періоди року споживача.</summary>
     [Fact]
     public async Task Без_місяця_ставиться_увесь_рік_споживача()
