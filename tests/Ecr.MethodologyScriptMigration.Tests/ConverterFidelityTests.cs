@@ -76,7 +76,7 @@ public sealed class ConverterFidelityTests
             categoryRule: "@Fuel",
             categories: ["X"]);
 
-        Assert.Contains("var Category = key(row.Fuel?);", Sup.ConvertOk(source).Text);
+        Assert.Contains("var Category = StripSpaces(key(row.Fuel?));", Sup.ConvertOk(source).Text);
     }
 
     // ---- відомі категорії ----
@@ -169,7 +169,7 @@ public sealed class ConverterFidelityTests
     }
 
     [Fact]
-    public void Пробіл_у_категорії_дає_Warning_і_обидва_написання()
+    public void Пробіл_у_категорії_нормалізується_в_тексті_ключ_без_пробілів_і_без_Warning()
     {
         var source = Sup.Version(
             [Sup.F("A", "CST.K", 1)],
@@ -178,8 +178,24 @@ public sealed class ConverterFidelityTests
 
         var result = Sup.ConvertOk(source);
 
-        Assert.Contains("\"Over hauled\", \"Overhauled\"", result.Text);
-        Assert.True(Sup.HasIssue(result, "categoryWhitespace", IssueSeverity.Warning));
+        Assert.Contains("var Category = StripSpaces(key(row.Fuel));", result.Text);
+        Assert.Contains("!(Category in (\"Overhauled\"))", result.Text);
+        Assert.DoesNotContain("Over hauled", result.Text);
+        Assert.False(Sup.HasIssue(result, "categoryWhitespace"));
+    }
+
+    [Fact]
+    public void Категорії_що_різняться_лише_пробілами_не_переносяться_точно_і_дають_Error()
+    {
+        var source = Sup.Version(
+            [Sup.F("A", "CST.K", 1)],
+            [SourceConstant.OfNumber("K", 1, "A B"), SourceConstant.OfNumber("K", 2, "AB")],
+            categoryRule: "@Fuel");
+
+        var result = ScriptConverter.Convert(source);
+
+        Assert.Null(result.Text);
+        Assert.True(Sup.HasIssue(result, "categoryWhitespaceCollision", IssueSeverity.Error));
     }
 
     // ---- непридатна константа ----

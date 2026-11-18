@@ -69,12 +69,12 @@ public sealed record SourceConstant(
 /// <param name="LibraryCode">Код методології-бібліотеки.</param>
 /// <param name="Members">Імена членів, які бібліотека відкриває (формули/<c>var</c>).</param>
 /// <param name="ConstantCategories">
-/// Категорії констант версії бібліотеки (без <c>Common</c>): старий рушій складає «відомі категорії» з констант
-/// версії й бібліотек замикання; <c>null</c> — не читалося.
+/// Категорії констант версій бібліотек, ДОСЯЖНИХ з формул версії-викликача через цей імпорт (замикання старого рушія,
+/// <see cref="ImportClosureSource"/>); порожньо — бібліотека недосяжна; <c>null</c> — не читалося.
 /// </param>
 /// <param name="OptionalArguments">
-/// Імена, позначені <c>Name?</c> у <c>ArgumentsCsv</c> формул версії бібліотеки: рантайм об'єднує такі маркери з маркерами
-/// викликача (<c>OptionalArguments.Of</c>); <c>null</c> — не читалося.
+/// Імена, позначені <c>Name?</c> у <c>ArgumentsCsv</c> ПОТРІБНИХ формул бібліотек (досяжних з формул версії-викликача):
+/// рантайм об'єднує такі маркери з маркерами викликача (<c>OptionalArguments.Of</c>); <c>null</c> — не читалося.
 /// </param>
 public sealed record SourceImport(
     string LibraryCode,

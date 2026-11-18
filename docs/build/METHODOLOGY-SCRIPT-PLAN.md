@@ -204,7 +204,7 @@ primary     := Number | String | "true" | "false" | "null" | "(" expr ")"
 
 **Поле рядка.** `row.X` — значення аргументу `X` входу рядка (`CalculationInput.Arguments`, пошук без урахування регістру; сюди ж входять місячні псевдоніми й похідні факельні аргументи — їх дає `CalculationInputBuilder`). Перетворення в значення — як `GenericCalculationModule.ToValue(argument, entryRef, legacyNumericText)`:
 `entryRef = NumericMode == Strict || скрипт потребує знімка довідників` (те саме правило, що `binding.Registries is not null` у старому модулі); `legacyNumericText = NumericMode == Legacy`.
-Поля немає або воно порожнє: `row.X` → `#ARG` (як зараз), `row.X?` → `null`.
+Поля немає: `row.X` → `#ARG`, `row.X?` → `null`. Запис комірки є, але порожній: і `row.X`, і `row.X?` → `null` (без помилки) — рівно як `@X` старого модуля, де `ToValue` дає `Null`, а `#ARG` лише коли аргументу немає (паритет, ConvertedEquivalenceTests).
 `key(row.X)` — «ключове» читання: `ToValue(argument, entryRef: true, legacyNumericText: false)` (так старий рушій читає аргументи правила категорії).
 
 **Мапа.** `M[k]`: ключ порівнюється як текст (число → інваріантний текст без хвостових нулів; Text — як є; регістр важливий). Немає ключа, ключ `null`/помилка, або результат — не скаляр (вкладена мапа без подальшого індексу) → `#N/A`. Якщо всі ключі індексу — літерали, відсутність ключа — помилка компіляції `script.unknownMapKey`.

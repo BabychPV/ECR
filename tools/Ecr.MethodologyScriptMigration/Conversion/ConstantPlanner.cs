@@ -337,6 +337,7 @@ internal sealed class ConstantPlanner
                 var libKeys = _version.Categories
                     .Concat(_version.Constants.Select(c => c.Category)
                         .Where(c => !string.IsNullOrEmpty(c) && c != MethodologyConstant.CommonCategory).Select(c => c!))
+                    .Select(ScriptText.BareCategory)
                     .Distinct(StringComparer.Ordinal);
                 var libSubKeys = _version.Substances
                     .Concat(_version.Constants.Select(c => c.SubstanceCode).Where(c => !string.IsNullOrEmpty(c)).Select(c => c!))

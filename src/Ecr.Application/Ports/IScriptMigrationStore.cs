@@ -26,4 +26,13 @@ public interface IScriptMigrationStore
     /// <param name="libraryMethodologyId">Методологія-бібліотека.</param>
     /// <param name="ct">Токен скасування.</param>
     public Task<IReadOnlyList<ImporterVersion>> GetImporterVersionsAsync(int libraryMethodologyId, CancellationToken ct);
+
+    /// <summary>
+    /// Дати всередині життя версії (<c>EffectiveFrom &lt; дата &lt; наступна версія тієї ж методології</c>), на які
+    /// набуває чинності будь-яка версія методології-бібліотеки: на цих межах версія бібліотеки, яку рантайм розв'язує для
+    /// періоду версії, може змінитися. Дати чинності самої версії тут немає; порожньо — у версії немає дати чинності.
+    /// </summary>
+    /// <param name="versionId">Версія (імпортер).</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<DateOnly>> GetLibraryEditionDatesAsync(int versionId, CancellationToken ct);
 }

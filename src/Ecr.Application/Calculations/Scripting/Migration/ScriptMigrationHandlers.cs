@@ -16,7 +16,9 @@ namespace Ecr.Application.Calculations.Scripting.Migration;
 internal static class ScriptMigrationKeys
 {
     public const string PackageFormat = "ecr-methodology-script-package";
-    public const int SupportedFormatVersion = 1;
+
+    /// <summary>Формат пакета збігається з форматом відбитка: змінився відбиток — старі пакети несумісні.</summary>
+    public const int SupportedFormatVersion = Fingerprint.FormatVersion;
     public const int MaxEntries = 2_000;
     public const int MaxSwitchVersions = 500;
     public const int MaxReasonLength = 500;
@@ -30,6 +32,7 @@ internal static class ScriptMigrationKeys
     public const string FingerprintMismatch = "scriptMigration.refused.fingerprintMismatch";
     public const string TextEmpty = "scriptMigration.refused.textEmpty";
     public const string TextInvalid = "scriptMigration.refused.textInvalid";
+    public const string PackageFormatUnsupported = "err.ECR-CALC-0422.migrationPackageFormatUnsupported";
 
     public static BusinessRuleException Invalid(string messageKey, string message, params (string Key, string Value)[] details)
     {
@@ -69,7 +72,8 @@ public sealed class ApplyScriptPackageHandler(
     /// <param name="request">Пакет.</param>
     /// <param name="dryRun"><c>true</c> — лише перевірити.</param>
     /// <param name="ct">Токен скасування.</param>
-    /// <exception cref="BusinessRuleException"><c>ECR-CALC-0422</c> <c>migrationPackageInvalid</c> — пакет порожній чи чужого формату.</exception>
+    /// <exception cref="BusinessRuleException"><c>ECR-CALC-0422</c> <c>migrationPackageInvalid</c> — пакет порожній чи чужої назви формату;
+    /// <c>migrationPackageFormatUnsupported</c> — інший номер формату (зокрема пакети формату 1 до зміни відбитка).</exception>
     public async Task<ApplyScriptPackageResponse> HandleAsync(ApplyScriptPackageRequest request, bool dryRun, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -81,13 +85,25 @@ public sealed class ApplyScriptPackageHandler(
                 "Анонімний запит не переносить методологій.",
                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
 
-        if ((request.Format is not null && !string.Equals(request.Format, ScriptMigrationKeys.PackageFormat, StringComparison.Ordinal))
-            || (request.FormatVersion is { } formatVersion && formatVersion != ScriptMigrationKeys.SupportedFormatVersion))
+        if (request.Format is not null && !string.Equals(request.Format, ScriptMigrationKeys.PackageFormat, StringComparison.Ordinal))
         {
             throw ScriptMigrationKeys.Invalid(
                 "err.ECR-CALC-0422.migrationPackageInvalid",
-                "Пакет має чужий формат: очікується ecr-methodology-script-package версії 1.",
-                ("format", request.Format ?? string.Empty));
+                "Пакет має чужий формат: очікується ecr-methodology-script-package.",
+                ("format", request.Format));
+        }
+
+        // Номер формату обов'язковий: відбиток джерела в пакеті має ту саму версію канону, що й пакет. Пакет іншого
+        // (старішого) формату має відбитки іншого канону — їх не звірити, тож відмова явна, а не «відбиток не збігся».
+        if (request.FormatVersion != ScriptMigrationKeys.SupportedFormatVersion)
+        {
+            var found = request.FormatVersion?.ToString(CultureInfo.InvariantCulture) ?? "-";
+            var supported = ScriptMigrationKeys.SupportedFormatVersion.ToString(CultureInfo.InvariantCulture);
+            throw ScriptMigrationKeys.Invalid(
+                ScriptMigrationKeys.PackageFormatUnsupported,
+                $"The package has format version {found}, this server accepts {supported}: make the package again with the current tool (convert, then pack).",
+                ("found", found),
+                ("supported", supported));
         }
 
         if (request.Entries is not { Count: > 0 } entries || entries.Count > ScriptMigrationKeys.MaxEntries)
@@ -447,19 +463,49 @@ public sealed class SwitchScriptEngineHandler(
 
         foreach (var (methodology, version) in group)
         {
-            // Імпортер: версія кожної бібліотеки на дату чинності має бути на скрипті або в групі.
-            var onDate = version.EffectiveFrom ?? new DateOnly(2000, 1, 1);
-            foreach (var library in await methodologies.ResolveImportsAsync(version.Id, onDate, ct).ConfigureAwait(false))
+            // Імпортер: КОЖНА версія бібліотеки, яку рантайм може розв'язати для будь-якого періоду життя версії (на дату
+            // чинності й на кожну дату виходу нової версії бібліотеки всередині життя; транзитивно через бібліотеки
+            // бібліотек), має бути на скрипті або в групі, — інакше історична версія лишилася б на Formulas і прогін
+            // періоду дав би scriptLibraryUnavailable.
+            var start = version.EffectiveFrom ?? new DateOnly(2000, 1, 1);
+            var dates = new SortedSet<DateOnly> { start };
+            foreach (var date in await migrationStore.GetLibraryEditionDatesAsync(version.Id, ct).ConfigureAwait(false) ?? [])
             {
-                if (library.MethodologyVersionId is not { } libraryVersionId || inGroup.Contains(libraryVersionId))
-                {
-                    continue;
-                }
+                dates.Add(date);
+            }
 
-                var libraryVersion = await drafts.FindVersionAsync(libraryVersionId, ct).ConfigureAwait(false);
-                if (libraryVersion is { Engine: not MethodologyEngine.Script })
+            var seen = new HashSet<int>();
+            foreach (var onDate in dates)
+            {
+                var pending = new Stack<int>();
+                pending.Push(version.Id);
+                var visited = new HashSet<int>();
+                while (pending.TryPop(out var currentId))
                 {
-                    missing.Add($"{library.MethodologyCode} {libraryVersion.Version} (library of {methodology.Code} {version.Version}, id {libraryVersionId.ToString(CultureInfo.InvariantCulture)})");
+                    if (!visited.Add(currentId))
+                    {
+                        continue;
+                    }
+
+                    foreach (var library in await methodologies.ResolveImportsAsync(currentId, onDate, ct).ConfigureAwait(false))
+                    {
+                        if (library.MethodologyVersionId is not { } libraryVersionId)
+                        {
+                            continue;
+                        }
+
+                        pending.Push(libraryVersionId);
+                        if (inGroup.Contains(libraryVersionId) || !seen.Add(libraryVersionId))
+                        {
+                            continue;
+                        }
+
+                        var libraryVersion = await drafts.FindVersionAsync(libraryVersionId, ct).ConfigureAwait(false);
+                        if (libraryVersion is { Engine: not MethodologyEngine.Script })
+                        {
+                            missing.Add($"{library.MethodologyCode} {libraryVersion.Version} (library of {methodology.Code} {version.Version}, id {libraryVersionId.ToString(CultureInfo.InvariantCulture)})");
+                        }
+                    }
                 }
             }
 

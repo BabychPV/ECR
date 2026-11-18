@@ -109,7 +109,7 @@ public sealed class ScriptMigrationHandlerTests
 
     private ApplyScriptPackageRequest Package(string? fingerprint = null, string text = Text, string? effectiveFrom = null)
         => new(
-            "ecr-methodology-script-package", 1,
+            "ecr-methodology-script-package", 3,
             [new ScriptPackageEntryDto("ALPHA", "1.0", effectiveFrom, text, fingerprint ?? Fingerprint.ComputeHex(_source))]);
 
     // ---------- apply ----------
@@ -173,7 +173,7 @@ public sealed class ScriptMigrationHandlerTests
     public async Task Apply_відмови_по_версіях_не_зупиняють_решту()
     {
         var fingerprint = Fingerprint.ComputeHex(_source);
-        ApplyScriptPackageRequest Of(params ScriptPackageEntryDto[] entries) => new(null, null, entries);
+        ApplyScriptPackageRequest Of(params ScriptPackageEntryDto[] entries) => new(null, 3, entries);
 
         var mixed = await Apply().HandleAsync(
             Of(
@@ -215,7 +215,7 @@ public sealed class ScriptMigrationHandlerTests
         var huge = "//" + new string('a', ScriptAnalyzer.MaxTextLength);
 
         var response = await Apply().HandleAsync(
-            new ApplyScriptPackageRequest(null, null, [new ScriptPackageEntryDto("ALPHA", "1.0", null, huge, fingerprint)]),
+            new ApplyScriptPackageRequest(null, 3, [new ScriptPackageEntryDto("ALPHA", "1.0", null, huge, fingerprint)]),
             dryRun: true,
             CancellationToken.None);
 
@@ -241,7 +241,7 @@ public sealed class ScriptMigrationHandlerTests
                 []));
 
         var request = new ApplyScriptPackageRequest(
-            null, null,
+            null, 3,
             [
                 // Імпортер ПЕРЕД бібліотекою: перший прохід його відхиляє, другий — приймає.
                 new ScriptPackageEntryDto("ALPHA", "1.0", null, "import LIB;\n" + Text, Fingerprint.ComputeHex(_source)),
@@ -258,7 +258,7 @@ public sealed class ScriptMigrationHandlerTests
 
         // Без бібліотеки в пакеті (і без її тіні в базі) імпортер не скомпілюється.
         var lone = await Apply().HandleAsync(
-            new ApplyScriptPackageRequest(null, null, [request.Entries![0]]), dryRun: true, CancellationToken.None);
+            new ApplyScriptPackageRequest(null, 3, [request.Entries![0]]), dryRun: true, CancellationToken.None);
         var refused = Assert.Single(lone.Entries);
         Assert.Equal("scriptMigration.refused.textInvalid", refused.Reason);
         Assert.Contains(refused.Details!, d => d.StartsWith("libraryNotScript", StringComparison.Ordinal));
@@ -276,12 +276,44 @@ public sealed class ScriptMigrationHandlerTests
         Assert.Equal("scriptMigration.refused.notFormulaVersion", Assert.Single(response.Entries).Reason);
 
         var wrong = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Apply().HandleAsync(new ApplyScriptPackageRequest("other", 1, Package().Entries), false, CancellationToken.None));
+            () => Apply().HandleAsync(new ApplyScriptPackageRequest("other", 3, Package().Entries), false, CancellationToken.None));
         Assert.Equal("err.ECR-CALC-0422.migrationPackageInvalid", wrong.Details!["messageKey"]);
 
         var empty = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Apply().HandleAsync(new ApplyScriptPackageRequest(null, null, []), false, CancellationToken.None));
+            () => Apply().HandleAsync(new ApplyScriptPackageRequest(null, 3, []), false, CancellationToken.None));
         Assert.Equal("err.ECR-CALC-0422.migrationPackageInvalid", empty.Details!["messageKey"]);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(4)]
+    [InlineData(null)]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "MS-8.5")]
+    public async Task Apply_пакет_іншого_номера_формату_відхиляється_явною_помилкою_і_нічого_не_пише(int? formatVersion)
+    {
+        var request = new ApplyScriptPackageRequest("ecr-methodology-script-package", formatVersion, Package().Entries);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Apply().HandleAsync(request, dryRun: false, CancellationToken.None));
+
+        Assert.Equal("err.ECR-CALC-0422.migrationPackageFormatUnsupported", error.Details!["messageKey"]);
+        Assert.Equal("3", error.Details["supported"]);
+        Assert.Null(_alphaVersion.ScriptText);
+        await _uow.DidNotReceiveWithAnyArgs().SaveChangesAsync(default);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "MS-8.5")]
+    public async Task Apply_пакет_формату_3_приймається()
+    {
+        var request = new ApplyScriptPackageRequest("ecr-methodology-script-package", 3, Package().Entries);
+
+        var response = await Apply().HandleAsync(request, dryRun: true, CancellationToken.None);
+
+        Assert.Equal("wouldApply", Assert.Single(response.Entries).Status);
     }
 
     [Fact]
@@ -435,6 +467,52 @@ public sealed class ScriptMigrationHandlerTests
 
         Assert.Equal(MethodologyEngine.Formulas, _alphaVersion.Engine);
         Assert.Equal(MethodologyEngine.Formulas, _libraryVersion.Engine);
+    }
+
+    /// <summary>
+    /// Бібліотеку перевидано всередині життя імпортера: на період після 2099-06-01 рантайм бере другу версію. Група
+    /// мусить містити ОБИДВІ (замикання по всіх періодах), інакше історична версія лишилась би на Formulas і прогін дав би
+    /// <c>scriptLibraryUnavailable</c>.
+    /// </summary>
+    /// <remarks>Мутація: у <c>RequireCompleteGroupAsync</c> дивитися лише дату чинності імпортера — червоніє.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "MS-8.5")]
+    public async Task Switch_група_мусить_містити_усі_версії_бібліотеки_що_діють_у_періодах_імпортера()
+    {
+        const int libraryV2 = 61;
+        var secondEdition = new DateOnly(2099, 6, 1);
+        var second = ScriptTestKit.NewVersion(_library, libraryV2, MethodologyEngine.Formulas, "2.0");
+        _drafts.FindVersionAsync(libraryV2, Arg.Any<CancellationToken>()).Returns(second);
+        _store.FindByVersionAsync(libraryV2, Arg.Any<CancellationToken>()).Returns(_library);
+        Publish(_alphaVersion, "import LIB;\nrows from T1;\noutput OUT_A : t = row.Hours;");
+        Publish(_libraryVersion, "function twice(a) = a * 2;");
+        Publish(second, "function twice(a) = a * 3;");
+
+        _store.ResolveImportsAsync(AlphaV, Arg.Any<DateOnly>(), Arg.Any<CancellationToken>())
+            .Returns(call => Task.FromResult<IReadOnlyList<MethodologyLibrary>>(
+                [new MethodologyLibrary(Library, "LIB", call.ArgAt<DateOnly>(1) < secondEdition ? LibraryV : libraryV2, [])]));
+        _migration.GetLibraryEditionDatesAsync(AlphaV, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<DateOnly>>([secondEdition]));
+        _migration.GetImporterVersionsAsync(Library, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<ImporterVersion>>(
+                [new ImporterVersion(AlphaV, Alpha, "ALPHA", "1.0", MethodologyEngine.Formulas, TemplateVersionStatus.Published)]));
+
+        // Імпортер і лише перша версія бібліотеки: друга (діє в пізніх періодах) відсутня.
+        var incomplete = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Switch().HandleAsync(new SwitchScriptEngineRequest([AlphaV, LibraryV], "Script", "why"), default));
+        Assert.Equal("err.ECR-CALC-0422.switchGroupIncomplete", incomplete.Details!["messageKey"]);
+        Assert.Contains("LIB 2.0", Assert.Single((IReadOnlyList<string>)incomplete.Details["missing"]!), StringComparison.Ordinal);
+        Assert.Equal(MethodologyEngine.Formulas, _alphaVersion.Engine);
+        Assert.Equal(MethodologyEngine.Formulas, second.Engine);
+
+        // Усі три версії — склад замкнений: відмови switchGroupIncomplete більше немає.
+        var closed = await Record.ExceptionAsync(
+            () => Switch().HandleAsync(new SwitchScriptEngineRequest([AlphaV, LibraryV, libraryV2], "Script", "why"), default));
+        Assert.True(
+            closed is not BusinessRuleException { Details: { } details }
+            || !Equals(details["messageKey"], "err.ECR-CALC-0422.switchGroupIncomplete"),
+            closed?.Message);
     }
 
     private static MethodologyOutput Output(string code, int unitId, bool perSubstance)

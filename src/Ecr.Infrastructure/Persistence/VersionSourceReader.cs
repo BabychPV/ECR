@@ -144,35 +144,20 @@ public sealed class VersionSourceReader(EcrDbContext db, IFormulaEngine formulaE
         var categoryRule = await _store.GetCategoryRuleAsync(versionId, ct).ConfigureAwait(false);
 
         // ---- Імпорти: версія бібліотеки, чинна на дату чинності цієї версії ----
-        var imports = new List<SourceImport>();
-        foreach (var library in await _store.ResolveImportsAsync(versionId, effectiveFrom, ct).ConfigureAwait(false))
+        var direct = await _store.ResolveImportsAsync(versionId, effectiveFrom, ct).ConfigureAwait(false);
+        foreach (var library in direct.Where(l => l.MethodologyVersionId is null))
         {
-            if (library.MethodologyVersionId is null)
-            {
-                issues.Add(new ConversionIssue(
-                    IssueSeverity.Warning, "importWithoutVersion",
-                    $"Library «{library.MethodologyCode}» has no version effective on {effectiveFrom:yyyy-MM-dd}: its members are unknown.",
-                    library.MethodologyCode));
-            }
-
-            var libraryCategories = new List<string>();
-            var libraryOptional = new List<string>();
-            if (library.MethodologyVersionId is { } libraryVersionId)
-            {
-                // Склад «відомих категорій» і необов'язкових імен старий рушій бере і з бібліотек замикання.
-                libraryCategories = await db.MethodologyConstants.AsNoTracking()
-                    .Where(c => c.MethodologyVersionId == libraryVersionId && c.Category != null && c.Category != string.Empty)
-                    .Select(c => c.Category!).Distinct().ToListAsync(ct).ConfigureAwait(false);
-                var csvs = await db.MethodologyFormulas.AsNoTracking()
-                    .Where(f => f.MethodologyVersionId == libraryVersionId && f.ArgumentsCsv != null)
-                    .Select(f => f.ArgumentsCsv!).ToListAsync(ct).ConfigureAwait(false);
-                libraryOptional = [.. csvs.SelectMany(csv => Ecr.Expressions.Binding.ArgumentDeclarationChecker.OptionalNamesFromCsv(csv))
-                    .Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase)];
-                libraryCategories.Sort(StringComparer.Ordinal);
-            }
-
-            imports.Add(new SourceImport(library.MethodologyCode, [.. library.FormulaCodes], libraryCategories, libraryOptional));
+            issues.Add(new ConversionIssue(
+                IssueSeverity.Warning, "importWithoutVersion",
+                $"Library «{library.MethodologyCode}» has no version effective on {effectiveFrom:yyyy-MM-dd}: its members are unknown.",
+                library.MethodologyCode));
         }
+
+        // Склад «відомих категорій» і необов'язкових імен — лише з бібліотек, досяжних з формул версії (замикання
+        // старого рушія), а не з усього вмісту версії бібліотеки.
+        var imports = await ImportClosureSource
+            .BuildAsync(_store, formulaEngine, version.MethodologyId, versionId, orderedFormulas, effectiveFrom, direct, ct)
+            .ConfigureAwait(false);
 
         // ---- Життя версії ----
         DateOnly? next = null;
@@ -185,6 +170,45 @@ public sealed class VersionSourceReader(EcrDbContext db, IFormulaEngine formulaE
                 .Select(v => v.EffectiveFrom)
                 .ToListAsync(ct).ConfigureAwait(false);
             next = later.Count == 0 ? null : later.Min();
+        }
+
+        // ---- Версії бібліотек протягом життя версії ----
+        // Скрипт має один текст на всі періоди версії, а старий рушій бере склад імпортів (відомі категорії, маркери `Name?`)
+        // з версії бібліотеки КОЖНОГО періоду. Якщо бібліотека перевидана всередині життя версії й склад змінився — точно
+        // перенести неможливо: це помилка читання (конвертер і apply відмовляють), а не мовчазна різниця чисел.
+        if (version.EffectiveFrom is { } lifeStart && direct.Count > 0)
+        {
+            var libraryDates = await LibraryEditionDates.LoadAsync(db, lifeStart, next, ct).ConfigureAwait(false);
+
+            var diverged = new Dictionary<string, List<DateOnly>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var date in libraryDates)
+            {
+                var directAt = await _store.ResolveImportsAsync(versionId, date, ct).ConfigureAwait(false);
+                var importsAt = await ImportClosureSource
+                    .BuildAsync(_store, formulaEngine, version.MethodologyId, versionId, orderedFormulas, date, directAt, ct)
+                    .ConfigureAwait(false);
+                foreach (var code in ImportClosureSource.Divergences(imports, importsAt))
+                {
+                    if (!diverged.TryGetValue(code, out var dates))
+                    {
+                        diverged[code] = dates = [];
+                    }
+
+                    dates.Add(date);
+                }
+            }
+
+            foreach (var (code, dates) in diverged)
+            {
+                issues.Add(new ConversionIssue(
+                    IssueSeverity.Error, "importLibraryVersionsDiffer",
+                    $"Library «{code}» has versions inside the life of this version whose constant categories or optional "
+                    + $"arguments differ from the version effective on {effectiveFrom:yyyy-MM-dd} (from "
+                    + string.Join(", ", dates.Select(d => d.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)))
+                    + "): one script text cannot reproduce the old engine for every period. Split this version at those "
+                    + "dates (publish a version per library edition) or align the library editions.",
+                    code));
+            }
         }
 
         // ---- Правила (речення rows будує інструмент: вони потрібні лише перетворювачеві) ----

@@ -92,6 +92,7 @@ public static class ScriptConverter
             var substanceCategoryVar = perSubstanceRule ? _names.Allocate("SubstanceCategory", "_k", out _) : categoryVar;
             var substanceVar = hasSubstances ? _names.Allocate("S", "_s", out _) : "S";
 
+            CheckCategoryCollisions(ruleText is not null);
             var knownKeys = KnownCategoryKeys(ruleText is not null);
             var mapKeys = CategoryKeys(ruleText is not null);
             foreach (var key in knownKeys.Where(k => !mapKeys.Contains(k, StringComparer.Ordinal)))
@@ -445,24 +446,9 @@ public static class ScriptConverter
                 .Order(StringComparer.Ordinal)
                 .ToList();
 
-            var known = new List<string>(raw);
-            if (raw.Any(c => c.Any(char.IsWhiteSpace)))
-            {
-                // Старий IsKnownCategory порівнює ключ і категорії БЕЗ пробілів; скрипт порівнює літерали як є, тому
-                // додаємо обидва записи. Інший розподіл пробілів у ключі правила скрипт не прийме — паритет це покаже.
-                Warn(
-                    "categoryWhitespace",
-                    "A constant category contains whitespace: the old engine compares category keys ignoring whitespace; "
-                    + "the script accepts the exact and the whitespace-free spelling only.");
-                foreach (var c in raw)
-                {
-                    var bare = string.Concat(c.Where(ch => !char.IsWhiteSpace(ch)));
-                    if (!known.Contains(bare, StringComparer.Ordinal))
-                    {
-                        known.Add(bare);
-                    }
-                }
-            }
+            // Старий IsKnownCategory порівнює ключ і категорії БЕЗ пробілів: у скрипті ключ береться без пробілів
+            // (StripSpaces у правилі), а всі відомі категорії записані так само.
+            var known = raw.Select(ScriptText.BareCategory).Distinct(StringComparer.Ordinal).ToList();
 
             if (vs.Imports.Any(i => i.ConstantCategories is { Count: > 0 } cats
                                     && cats.Any(c => !string.Equals(c, MethodologyConstant.CommonCategory, StringComparison.Ordinal)
@@ -470,8 +456,8 @@ public static class ScriptConverter
             {
                 Info(
                     "libraryCategories",
-                    "Categories of imported libraries' constants are added to the accepted category keys (the old engine takes them "
-                    + "from the libraries' closure; here all constants of the library version are used).");
+                    "Categories of imported libraries' constants are added to the accepted category keys (as the old engine does: "
+                    + "from the library versions its closure reaches from this version's formulas).");
             }
 
             foreach (var c in known.ToList())
@@ -486,6 +472,36 @@ public static class ScriptConverter
             }
 
             return known;
+        }
+
+        /// <summary>
+        /// Дві різні категорії констант, що різняться лише пробілами («A B» і «AB»), у скрипті зливаються в один ключ,
+        /// а старий рушій віддає точному збігу перевагу: вибір константи в них різний. Точно перенести такий розподіл
+        /// не можна — відмова, а не тихе розходження.
+        /// </summary>
+        private void CheckCategoryCollisions(bool hasRule)
+        {
+            if (!hasRule && !vs.IsLibrary)
+            {
+                return;
+            }
+
+            var clash = vs.Constants.Select(c => c.Category)
+                .Concat(vs.Imports.SelectMany(i => i.ConstantCategories ?? []))
+                .Where(c => !string.IsNullOrWhiteSpace(c) && !string.Equals(c, MethodologyConstant.CommonCategory, StringComparison.Ordinal))
+                .Select(c => c!)
+                .Distinct(StringComparer.Ordinal)
+                .GroupBy(ScriptText.BareCategory, StringComparer.Ordinal)
+                .FirstOrDefault(g => g.Count() > 1);
+            if (clash is not null)
+            {
+                Error(
+                    "categoryWhitespaceCollision",
+                    "Constant categories differ only by whitespace ("
+                    + string.Join(", ", clash.Select(c => "«" + c + "»"))
+                    + "): the old engine prefers the exact spelling, a script keys categories without whitespace, "
+                    + "so the choice of a constant cannot be reproduced.");
+            }
         }
 
         private void Warn(string code, string message, string? subject = null)
@@ -527,7 +543,7 @@ public static class ScriptConverter
                         Info(
                             "libraryOptionalArgument",
                             $"Argument «{name}» is optional through the imported library «{import.LibraryCode}» (union semantics of the old engine; "
-                            + "all formulas of the library version are counted, the old engine counts only the needed ones).",
+                            + "only the library formulas reachable from this version's formulas are counted, as the old engine does).",
                             import.LibraryCode);
                     }
                 }
@@ -548,7 +564,7 @@ public static class ScriptConverter
         private List<string> AcceptedCategoryKeys()
         {
             var keys = new List<string>();
-            foreach (var c in vs.Categories)
+            foreach (var c in vs.Categories.Select(ScriptText.BareCategory))
             {
                 if (!keys.Contains(c, StringComparer.Ordinal))
                 {
@@ -558,7 +574,7 @@ public static class ScriptConverter
 
             // Форма B: правило дає {ключ}, константи лежать під {ключ}_{код речовини}; старий IsKnownCategory приймає
             // й префікс перед «_».
-            foreach (var c in vs.Categories)
+            foreach (var c in keys.ToList())
             {
                 for (var i = 1; i < c.Length; i++)
                 {
@@ -583,7 +599,7 @@ public static class ScriptConverter
             var derived = vs.Constants
                 .Select(c => c.Category)
                 .Where(c => !string.IsNullOrEmpty(c) && c != MethodologyConstant.CommonCategory)
-                .Select(c => c!)
+                .Select(c => ScriptText.BareCategory(c!))
                 .Distinct(StringComparer.Ordinal)
                 .Order(StringComparer.Ordinal)
                 .ToList();
@@ -635,18 +651,21 @@ public static class ScriptConverter
                     "CategoryRule");
             }
 
+            // Ключ береться без пробілів, коли від нього залежить перевірка чи вибір константи (є відомі категорії):
+            // старий рушій зводить ключ так само (IsKnownCategory, ConstantResolver).
+            var keyText = knownKeys.Count > 0 ? "StripSpaces(" + translated.Text + ")" : translated.Text;
             var reject = categoryVar + " == null || " + categoryVar + " == \"\"";
             if (knownKeys.Count > 0)
             {
                 reject += WrapInList(categoryVar, knownKeys);
             }
 
-            categoryLines.Add("var " + categoryVar + " = " + translated.Text + ";");
+            categoryLines.Add("var " + categoryVar + " = " + keyText + ";");
             categoryLines.Add("reject when " + reject + ";");
 
             if (perSubstanceRule)
             {
-                substanceCategoryLines.Add("var " + substanceCategoryVar + " = " + translated.Text + ";");
+                substanceCategoryLines.Add("var " + substanceCategoryVar + " = " + keyText + ";");
                 substanceCategoryLines.Add(
                     "skip when " + substanceCategoryVar + " == null || " + substanceCategoryVar + " == \"\";");
             }

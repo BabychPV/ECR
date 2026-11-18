@@ -22,11 +22,13 @@ namespace Ecr.Application.Calculations.Scripting.Migration;
 /// Не входять: мітка версії (лише коментар заголовка) і тестові випадки та обов'язкові колонки (лишаються даними й не
 /// впливають на текст).
 /// Формат 2: додано <c>argumentsCsv</c>, дані імпортів, <c>life</c>, <c>rows</c>.
+/// Формат 3: дані імпортів (категорії, необов'язкові аргументи) — лише з бібліотек і формул, досяжних з формул версії
+/// (<see cref="ImportClosureSource"/>), а не з усього вмісту версії бібліотеки.
 /// </remarks>
 public static class Fingerprint
 {
     /// <summary>Версія формату канону: змінюється лише разом зі зміною складу чи форми.</summary>
-    public const int FormatVersion = 2;
+    public const int FormatVersion = 3;
 
     private static readonly JsonSerializerOptions Options = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
