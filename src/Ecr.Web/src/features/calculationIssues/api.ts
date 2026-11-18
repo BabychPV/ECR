@@ -13,6 +13,9 @@ export type CalculationIssueTableHint = components['schemas']['CalculationIssueT
 /** ✎ C-1 (D-475): рядок групи «Помилки формул» (комірка, формула, причина, входи, джерело). */
 export type FormulaErrorIssue = components['schemas']['FormulaErrorIssueDto'];
 
+/** ✎ B80 N4: місяць джерела (HSE400) зв'язки `ApprovedOnly`, який не затверджено або змінено після затвердження. */
+export type SourceIssue = components['schemas']['SourceIssueDto'];
+
 /**
  * Ключ кешу проблем розрахунку.
  *

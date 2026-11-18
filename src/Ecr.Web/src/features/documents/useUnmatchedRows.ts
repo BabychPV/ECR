@@ -6,6 +6,7 @@ import type {
   CalculationIssue,
   CalculationIssueTableHint,
   FormulaErrorIssue,
+  SourceIssue,
 } from '@/features/calculationIssues/api';
 import { useCalculationIssues } from '@/features/calculationIssues/useCalculationIssues';
 import { calculationResultsKey } from '@/features/methodologies/calculationResultsKey';
@@ -22,11 +23,14 @@ export interface UnmatchedRows {
   readonly formulaErrors: readonly FormulaErrorIssue[];
   /** ✎ C-1: скільки комірок з помилкою всього (сервер віддає не більше 500 рядків групи); без — довжина переліку. */
   readonly formulaErrorTotal?: number;
+  /** ✎ B80 N4: місяці джерела HSE400, не затверджені чи змінені після затвердження (документ, не копія); без — немає. */
+  readonly sourceIssues?: readonly SourceIssue[];
 }
 
 const Empty: readonly CalculationIssue[] = [];
 const NoHints: readonly CalculationIssueTableHint[] = [];
 const NoErrors: readonly FormulaErrorIssue[] = [];
+const NoSourceIssues: readonly SourceIssue[] = [];
 
 /**
  * Рядки документа, яким не підійшло жодне правило розрахунку (D14 + AN-69, UAT 08.11 b1).
@@ -92,5 +96,7 @@ export function useUnmatchedRows(
     finishedAt: run.data?.finishedAt ?? null,
     formulaErrors,
     formulaErrorTotal: Math.max(formulaErrorTotal, formulaErrors.length),
+    // ✎ B80 N4: проблеми джерела — рівня документа-місяця, тож лише з запиту оригіналу (копія дала б ті самі).
+    sourceIssues: originals.data?.sourceIssues ?? NoSourceIssues,
   };
 }
