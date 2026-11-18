@@ -321,11 +321,14 @@ describe('TemplateVersionPage — четвертий раунд UX (лінія D
 
     fireEvent.click(await screen.findByTestId('version-more'));
     fireEvent.click(await screen.findByRole('menuitem', { name: '⟦periodRules.title⟧' }));
-    await screen.findByRole('button', { name: '⟦periodRules.add⟧' });
+    // ✎ B145: очікування рендера діалогу правил (CPU, jsdom), не фіксована пауза. Окремо весь тест 0.67–0.71 с; у
+    // повному прогоні Windows під навантаженням кнопка не з'явилась за asyncUtilTimeout 5 с (18.11). Очікування 20 с,
+    // тест 60 с (загальна межа 15 с менша за очікування).
+    await screen.findByRole('button', { name: '⟦periodRules.add⟧' }, { timeout: 20_000 });
 
     const duplicate = errors.mock.calls.some((args) =>
       args.some((arg) => typeof arg === 'string' && arg.includes('same key')),
     );
     expect(duplicate).toBe(false);
-  });
+  }, 60_000);
 });
