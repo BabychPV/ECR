@@ -264,52 +264,15 @@ public sealed partial class CalculatedCellOverlay(
     /// Немає колонок із чужим власником (усі версії, крім YearWithMonthColumns) — жодного запиту. Сховище без читача року
     /// (тест-подвійник) — порожньо: такі колонки лишаються без числа, а не з числом періоду перегляду.
     /// </remarks>
-    private async Task<OwnerResults> OwnerResultsAsync(
+    private Task<CalculatedOwnerResults> OwnerResultsAsync(
         long documentId, IReadOnlyList<OverlayTable> tables, CancellationToken ct)
-    {
-        var foreign = tables.Where(t => t.CalculatedOwnerPeriods is { Count: > 0 }).ToList();
-        if (foreign.Count == 0 || results is not ICalculationYearReader year)
-        {
-            return OwnerResults.Empty;
-        }
-
-        var periods = foreign.SelectMany(t => t.CalculatedOwnerPeriods!.Values).Distinct().Order().ToList();
-        var tableDefIds = foreign.Select(t => t.TableDefId).ToHashSet();
-
-        // Оригінальний екземпляр таблиці в кожному періоді-власнику (копії аркушів власниками не бувають).
-        var instances = new Dictionary<(int PeriodKey, int TableDefId), long>();
-        foreach (var instance in await year.ReadTableInstancesAsync(documentId, periods, ct).ConfigureAwait(false))
-        {
-            if (instance.SheetCopyId is null && tableDefIds.Contains(instance.TableDefId))
-            {
-                instances.TryAdd((instance.PeriodKey, instance.TableDefId), instance.TableInstanceId);
-            }
-        }
-
-        if (instances.Count == 0)
-        {
-            return new OwnerResults([], instances);
-        }
-
-        var facts = await year
-            .ReadYearAsync(
-                new CalculationYearReadRequest(
-                    documentId, periods, [.. instances.Values], [], IncludeRows: false, SliceResults: true, Aggregate: false),
-                ct)
-            .ConfigureAwait(false);
-
-        return new OwnerResults(facts.Results, instances);
-    }
-
-    /// <summary>Числа періодів-власників і екземпляри-власники таблиць.</summary>
-    private sealed record OwnerResults(
-        IReadOnlyList<YearResult> Results, IReadOnlyDictionary<(int PeriodKey, int TableDefId), long> Instances)
-    {
-        public static OwnerResults Empty { get; } = new([], new Dictionary<(int PeriodKey, int TableDefId), long>());
-
-        public long? InstanceOf(int periodKey, int tableDefId)
-            => Instances.TryGetValue((periodKey, tableDefId), out var id) ? id : null;
-    }
+        => CalculatedOwnerResults.ReadAsync(
+            results,
+            documentId,
+            [.. tables
+                .Where(t => t.CalculatedOwnerPeriods is { Count: > 0 })
+                .Select(t => (t.TableDefId, (IReadOnlyCollection<int>)[.. t.CalculatedOwnerPeriods!.Values]))],
+            ct);
 
     /// <summary>Те саме для всього документа — шлях експорту (xlsx, csv, json).</summary>
     /// <param name="documentId">Документ.</param>

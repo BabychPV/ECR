@@ -195,6 +195,9 @@ public sealed class CalculationOrchestrator(
         // B66: рядки, у яких крок методики впав з помилкою (#VALUE, #ARG…), — одна проблема на рядок.
         var stepErrors = new ConcurrentBag<StepErrorRow>();
 
+        // ✎ LAND-YEAR L2b: періоди-власники, чиї результати читали скрипти цього періоду (колонки Calculated з чужим власником).
+        var foreignOwnerReads = new ConcurrentBag<int>();
+
         foreach (var batch in batches)
         {
             // 3. ⚠ Усередині пакета — ПАРАЛЕЛЬНО. Послідовний прогін у 10
@@ -243,7 +246,8 @@ public sealed class CalculationOrchestrator(
                     // ✎ MS: модуль скрипта читає результати ЦЬОГО прогону (колонки `Calculated`, §13.9) і вибирає
                     // рядки власним селектором; обидва — зі scope гілки.
                     var scopedSelector = scope.ServiceProvider.GetService<ScriptRowSelector>();
-                    if (scope.ServiceProvider.GetService<ScriptRunContext>() is { } scriptRun)
+                    var scriptRun = scope.ServiceProvider.GetService<ScriptRunContext>();
+                    if (scriptRun is not null)
                     {
                         scriptRun.CalculationRunId = calculationRunId;
                         scriptRun.RunBindings = runBindings;
@@ -257,6 +261,14 @@ public sealed class CalculationOrchestrator(
                             _limits.MaxInputCellsPerBinding, rowMatches, rejected, missingInputs, stepErrors, token).ConfigureAwait(false);
 
                         measured.Add(stat);
+                    }
+
+                    if (scriptRun is not null)
+                    {
+                        foreach (var owner in scriptRun.ForeignOwnerPeriods)
+                        {
+                            foreignOwnerReads.Add(owner);
+                        }
                     }
                 }).ConfigureAwait(false);
 
@@ -280,6 +292,7 @@ public sealed class CalculationOrchestrator(
                 .ConfigureAwait(false);
         }
 
+        profile.RecordForeignOwnerReads(foreignOwnerReads);
         profile.RecordUnmatched(UnmatchedRowsOf(rowMatches, documentId));
 
         // B66: рядки, відсіяні фільтром активності (D-425), — не «непокриті», але й не мовчки: один підсумок на таблицю.

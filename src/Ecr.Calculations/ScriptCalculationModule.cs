@@ -57,7 +57,8 @@ public sealed class ScriptCalculationModule(
     IRegistryStore? registryStore = null,
     IRegistrySnapshotLoader? registryLoader = null,
     IScriptRuntimeStore? scriptStore = null,
-    CalculationLimits? limits = null) : ICalculationModule
+    CalculationLimits? limits = null,
+    IMonthColumnRouter? monthRouter = null) : ICalculationModule
 {
     private readonly ScriptProgramLoader _loader = new(methodologies, programs);
     private readonly Evaluator _strict = evaluator.WithArithmetic(EvaluationArithmetics.For(NumericMode.Strict));
@@ -145,7 +146,7 @@ public sealed class ScriptCalculationModule(
 
         var runtime = new ScriptRuntime(
             program,
-            new ScriptDataAccess(rows, cells, metadata, inputBuilder, methodologies, results, scriptStore, runContext, _limits),
+            new ScriptDataAccess(rows, cells, metadata, inputBuilder, methodologies, results, scriptStore, runContext, _limits, monthRouter),
             methodology,
             documentId,
             periodKey,
