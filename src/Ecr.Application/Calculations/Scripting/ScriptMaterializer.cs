@@ -138,15 +138,20 @@ public sealed class ScriptMaterializer(
         var problems = new List<PublishProblem>();
         var catalog = await units.GetAsync(ct).ConfigureAwait(false);
 
+        var actualSubstances = (await methodologies.GetSubstanceCodesAsync(versionId, ct).ConfigureAwait(false)).Values.ToList();
+
+        // Версія без речовин: ознака «по речовинах» нічого не означає (виходу немає за чим множитися), а сховище
+        // версій, створених через API/збирач, часто тримає її true за замовчуванням, тоді як скрипт без `foreach
+        // substance` її не має. Без цього кожне таке перемикання відмовляло б через різницю, що не змінює жодного числа.
+        var perSubstanceMatters = script.Substances.Count > 0 || actualSubstances.Count > 0;
         var expectedOutputs = script.Outputs
-            .Select(o => OutputKey(o.Code, catalog.Units.TryGetValue(o.UnitCode, out var unit) ? unit.Id : -1, o.IsPerSubstance))
+            .Select(o => OutputKey(o.Code, catalog.Units.TryGetValue(o.UnitCode, out var unit) ? unit.Id : -1, perSubstanceMatters && o.IsPerSubstance))
             .ToList();
         var actualOutputs = (await methodologies.GetOutputsAsync(versionId, ct).ConfigureAwait(false))
-            .Select(o => OutputKey(o.Code, o.UnitId, o.IsPerSubstance))
+            .Select(o => OutputKey(o.Code, o.UnitId, perSubstanceMatters && o.IsPerSubstance))
             .ToList();
         AddDifference(problems, "switch.problem.outputsDiffer", "outputs", versionId, expectedOutputs, actualOutputs);
 
-        var actualSubstances = (await methodologies.GetSubstanceCodesAsync(versionId, ct).ConfigureAwait(false)).Values.ToList();
         AddDifference(problems, "switch.problem.substancesDiffer", "substances", versionId, script.Substances, actualSubstances);
 
         var actualImports = (await methodologies.ResolveImportsAsync(versionId, importsOnDate, ct).ConfigureAwait(false))
