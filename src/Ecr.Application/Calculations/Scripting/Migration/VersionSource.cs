@@ -10,6 +10,10 @@ namespace Ecr.Application.Calculations.Scripting.Migration;
 /// <param name="IsVisible">Проміжний результат видимий.</param>
 /// <param name="ResultType">Тип результату.</param>
 /// <param name="UnitCode">Код одиниці результату; <c>null</c> — немає.</param>
+/// <param name="ArgumentsCsv">
+/// Збережений список аргументів (<c>calc.MethodologyFormula.ArgumentsCsv</c>); <c>null</c> — немає. Рантайм старого рушія
+/// бере з нього ЄДИНЕ: маркери необов'язковості <c>Name?</c> (див. <c>OptionalArguments</c>), тому поле входить у відбиток.
+/// </param>
 public sealed record SourceFormula(
     string Code,
     string Expression,
@@ -17,7 +21,8 @@ public sealed record SourceFormula(
     MethodologyFormulaScope Scope = MethodologyFormulaScope.Substance,
     bool IsVisible = false,
     FormulaResultType ResultType = FormulaResultType.Number,
-    string? UnitCode = null);
+    string? UnitCode = null,
+    string? ArgumentsCsv = null);
 
 /// <summary>Вихід версії.</summary>
 /// <param name="Code">Код (збігається з кодом формули).</param>
@@ -63,7 +68,19 @@ public sealed record SourceConstant(
 /// <summary>Імпорт бібліотеки.</summary>
 /// <param name="LibraryCode">Код методології-бібліотеки.</param>
 /// <param name="Members">Імена членів, які бібліотека відкриває (формули/<c>var</c>).</param>
-public sealed record SourceImport(string LibraryCode, IReadOnlyList<string> Members);
+/// <param name="ConstantCategories">
+/// Категорії констант версії бібліотеки (без <c>Common</c>): старий рушій складає «відомі категорії» з констант
+/// версії й бібліотек замикання; <c>null</c> — не читалося.
+/// </param>
+/// <param name="OptionalArguments">
+/// Імена, позначені <c>Name?</c> у <c>ArgumentsCsv</c> формул версії бібліотеки: рантайм об'єднує такі маркери з маркерами
+/// викликача (<c>OptionalArguments.Of</c>); <c>null</c> — не читалося.
+/// </param>
+public sealed record SourceImport(
+    string LibraryCode,
+    IReadOnlyList<string> Members,
+    IReadOnlyList<string>? ConstantCategories = null,
+    IReadOnlyList<string>? OptionalArguments = null);
 
 /// <summary>Значення в правилі відбору рядків: текст або запис довідника.</summary>
 public sealed record SourceMatchValue

@@ -100,6 +100,102 @@ public sealed class ParityDbTests(SqlServerFixture sql)
         Assert.Contains("НІЧОГО ПОРІВНЮВАТИ", empty.Output, StringComparison.Ordinal);
     }
 
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Ділення_на_нуль_у_Legacy_маскується_в_нуль_однаково_в_обох_шляхах()
+    {
+        var plain = await ArrangeAsync(209903);
+        await ShadowAsync(plain);
+        var baseline = await RunAsync(plain);
+
+        var masked = await ArrangeAsync(209904, gap: true);
+        await ShadowAsync(masked);
+        var report = await RunAsync(masked);
+
+        Assert.True(report.IsEqual, string.Join("; ", report.Mismatches.Select(m => $"{m.RowKey} {m.Aspect} {m.Old} / {m.New}")));
+        Assert.True(baseline.IsProven);
+        // Проміжне Gap = Qty / 0 → 0 у двох рядках з кількістю (North, South): +2 значення порівняно.
+        Assert.Equal(baseline.ValuesCompared + 2, report.ValuesCompared);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Прогін_де_нічого_не_порівняно_не_дає_коду_0_навіть_без_розбіжностей()
+    {
+        var scene = await ArrangeAsync(209906, noMatch: true);
+        await ShadowAsync(scene);
+        var report = Path.Combine(Path.GetTempPath(), "ecr-ms-parity-" + Guid.NewGuid().ToString("N"), "parity.json");
+
+        var run = await CliAsync("parity", "--connection", sql.ConnectionString, "--methodology", scene.MainCode, "--out", report);
+
+        var result = await RunAsync(scene);
+        Assert.Equal(1, result.Targets);
+        Assert.Equal(0, result.ValuesCompared);
+        Assert.True(result.IsEqual);
+        Assert.False(result.IsProven);
+        Assert.Equal(MigrationCli.Failures, run.Code);
+        Assert.Contains("НІЧОГО ПОРІВНЮВАТИ", run.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Версія_яку_паритет_не_покриває_робить_результат_недоведеним_до_прапорця()
+    {
+        var scene = await ArrangeAsync(209907);
+        await ShadowAsync(scene);
+        await using (var db = MigrationCli.CreateContext(sql.ConnectionString, readOnly: false))
+        {
+            // Старіша опублікована версія без тіньового тексту (не конвертувалась): паритет її не бачить.
+            var methodologyId = (await db.MethodologyVersions.SingleAsync(v => v.Id == scene.MainVersionId)).MethodologyId;
+            var older = new MethodologyVersion(methodologyId, "V0", CalculationLevel.Configuration, 1, Now);
+            db.MethodologyVersions.Add(older);
+            await db.SaveChangesAsync();
+            older.Publish(1, "seed", new DateOnly(2098, 1, 1), true, Now);
+            await db.SaveChangesAsync();
+        }
+
+        var report = Path.Combine(Path.GetTempPath(), "ecr-ms-parity-" + Guid.NewGuid().ToString("N"), "parity.json");
+        var strict = await CliAsync("parity", "--connection", sql.ConnectionString, "--methodology", scene.MainCode, "--out", report);
+        var allowed = await CliAsync(
+            "parity", "--connection", sql.ConnectionString, "--methodology", scene.MainCode, "--out", report, "--allow-unproven");
+
+        Assert.Equal(MigrationCli.Failures, strict.Code);
+        Assert.Contains("НЕДОВЕДЕНО " + scene.MainCode + " V0", strict.Output, StringComparison.Ordinal);
+        Assert.Contains("no shadow text", strict.Output, StringComparison.Ordinal);
+        Assert.Equal(MigrationCli.Ok, allowed.Code);
+        Assert.Contains("\"unproven\"", await File.ReadAllTextAsync(report), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Затінена_версія_що_не_чинна_в_жодному_періоді_документів_названа_недоведеною_а_решта_зелена()
+    {
+        var scene = await ArrangeAsync(209908);
+        await ShadowAsync(scene);
+        await using (var db = MigrationCli.CreateContext(sql.ConnectionString, readOnly: false))
+        {
+            var first = await db.MethodologyVersions.SingleAsync(v => v.Id == scene.MainVersionId);
+            // Майбутня версія з тим самим текстом: період 2099 її не обирає, тож жодного екземпляра для неї не порівнюється.
+            var future = new MethodologyVersion(first.MethodologyId, "V2", CalculationLevel.Configuration, 1, Now);
+            db.MethodologyVersions.Add(future);
+            await db.SaveChangesAsync();
+            future.Publish(1, "seed", new DateOnly(2100, 1, 1), true, Now);
+            future.SetScript(first.ScriptText!, ScriptCompiler.Hash(first.ScriptText!));
+            await db.SaveChangesAsync();
+        }
+
+        var report = await RunAsync(scene);
+
+        Assert.True(report.IsProven, string.Join("; ", report.Mismatches.Select(m => m.Aspect)));
+        Assert.Equal(1, report.Targets);
+        Assert.Equal(scene.MainCode + " V2", Assert.Single(report.UnprovenVersions).Split(':')[0]);
+
+        var output = Path.Combine(Path.GetTempPath(), "ecr-ms-parity-" + Guid.NewGuid().ToString("N"), "parity.json");
+        var cli = await CliAsync("parity", "--connection", sql.ConnectionString, "--methodology", scene.MainCode, "--out", output);
+        Assert.Equal(MigrationCli.Failures, cli.Code);
+        Assert.Contains("НЕДОВЕДЕНО " + scene.MainCode + " V2", cli.Output, StringComparison.Ordinal);
+    }
+
     // ───── стенд ─────
 
     private async Task<ParityRunReport> RunAsync(Scene scene)
@@ -142,7 +238,7 @@ public sealed class ParityDbTests(SqlServerFixture sql)
         await db.SaveChangesAsync();
     }
 
-    private async Task<Scene> ArrangeAsync(int periodKey)
+    private async Task<Scene> ArrangeAsync(int periodKey, bool gap = false, bool noMatch = false)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var document = await builder.BuildAsync(periodKey: periodKey, columnCount: 3, rowCount: 4);
@@ -228,6 +324,17 @@ public sealed class ParityDbTests(SqlServerFixture sql)
         var emission = new MethodologyFormula(mainVersion.Id, EcrCode.Create("Emission"), "!Mass * CST.EF * !Dens");
         emission.SetEvaluationOrder(2);
         db.MethodologyFormulas.AddRange(mass, emission);
+        if (gap)
+        {
+            // Qty / 0: у Legacy NaN/∞ → 0 (маскування старого рушія), скрипт мусить дати те саме.
+            var zeroDivision = new MethodologyFormula(mainVersion.Id, EcrCode.Create("Gap"), $"@{qty.Code} / 0");
+            zeroDivision.SetScope(MethodologyFormulaScope.Row);
+            zeroDivision.SetVisible(true);
+            zeroDivision.SetOutputUnit(unitT);
+            zeroDivision.SetEvaluationOrder(3);
+            db.MethodologyFormulas.Add(zeroDivision);
+        }
+
         db.MethodologyOutputs.Add(new MethodologyOutput(mainVersion.Id, EcrCode.Create("Emission"), unitT, 1));
         db.MethodologyCategories.AddRange(
             new MethodologyCategory(mainVersion.Id, "A", 1), new MethodologyCategory(mainVersion.Id, "B", 2));
@@ -238,8 +345,8 @@ public sealed class ParityDbTests(SqlServerFixture sql)
         // Унікальний індекс констант не бачить речовини: другу розрізняємо початком чинності (до життя версії).
         AddConstant(db, mainVersion.Id, "EF", 0.7m, unitKg, substanceEntryId: e304.Id, validFrom: new DateOnly(2000, 1, 1));
         db.MethodologyRules.AddRange(
-            new MethodologyRule(mainVersion.Id, EcrCode.Create("R_NORTH"), $"{{\"{zone.Id}\":\"North\"}}", 1),
-            new MethodologyRule(mainVersion.Id, EcrCode.Create("R_SOUTH"), $"{{\"{zone.Id}\":\"South\"}}", 2));
+            new MethodologyRule(mainVersion.Id, EcrCode.Create("R_NORTH"), $"{{\"{zone.Id}\":\"{(noMatch ? "Nowhere" : "North")}\"}}", 1),
+            new MethodologyRule(mainVersion.Id, EcrCode.Create("R_SOUTH"), $"{{\"{zone.Id}\":\"{(noMatch ? "Elsewhere" : "South")}\"}}", 2));
         await db.SaveChangesAsync();
 
         db.CalculationBindings.Add(new CalculationBinding(document.TableDefId, output.Id, main.Id, "Emission", "{}"));

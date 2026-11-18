@@ -26,7 +26,7 @@ public sealed class FingerprintTests
         Substances = ["0301", "0304"],
         Formulas =
         [
-            new SourceFormula("Mass", "@Qty * 2", 1, MethodologyFormulaScope.Row, true, FormulaResultType.Number, "t"),
+            new SourceFormula("Mass", "@Qty * 2", 1, MethodologyFormulaScope.Row, true, FormulaResultType.Number, "t", "@Qty?"),
             new SourceFormula("Em", "!Mass * CST.EF", 2),
         ],
         Outputs = [new SourceOutput("Em", "t", true, 1), new SourceOutput("Mass", "t", false, 2)],
@@ -37,7 +37,18 @@ public sealed class FingerprintTests
             SourceConstant.OfText("Label", "x"),
         ],
         Rules = [RuleA, RuleB],
-        Imports = [new SourceImport("Lib", ["Dens", "Visc"]), new SourceImport("Lib2", ["Q"])],
+        Imports =
+        [
+            new SourceImport("Lib", ["Dens", "Visc"], ["A", "B"], ["Qty"]),
+            new SourceImport("Lib2", ["Q"], [], []),
+        ],
+        EffectiveFrom = new DateOnly(2024, 1, 1),
+        NextEffectiveFrom = new DateOnly(2026, 1, 1),
+        RowsClauses =
+        [
+            new SourceRowsClause(["T1", "T2"], [RuleA], [new SourceActiveColumn("State", "ST", "RUN")]),
+            new SourceRowsClause(["T3"], [RuleA], []),
+        ],
     };
 
     [Fact]
@@ -61,23 +72,26 @@ public sealed class FingerprintTests
             Outputs = [.. source.Outputs.Reverse()],
             Constants = [.. source.Constants.Reverse()],
             Rules = [.. source.Rules.Reverse().Select(r => new SourceRule([.. r.Pairs.Reverse()]))],
-            Imports = [.. source.Imports.Reverse().Select(i => new SourceImport(i.LibraryCode, [.. i.Members.Reverse()]))],
+            Imports =
+            [
+                .. source.Imports.Reverse().Select(i => new SourceImport(
+                    i.LibraryCode, [.. i.Members.Reverse()], [.. i.ConstantCategories!.Reverse()], [.. i.OptionalArguments!.Reverse()])),
+            ],
+            RowsClauses =
+            [
+                .. source.RowsClauses.Reverse().Select(c => new SourceRowsClause(
+                    [.. c.TableCodes.Reverse()], c.Rules, [.. c.ActiveColumns.Reverse()])),
+            ],
         };
 
         Assert.Equal(Fingerprint.ComputeHex(source), Fingerprint.ComputeHex(shuffled));
     }
 
     [Fact]
-    public void Мітка_версії_і_дати_життя_не_входять_у_відбиток()
+    public void Мітка_версії_у_відбиток_не_входить_бо_це_лише_коментар_заголовка()
     {
         var source = Base();
-        var changed = source with
-        {
-            VersionLabel = "V9",
-            EffectiveFrom = new DateOnly(2030, 1, 1),
-            NextEffectiveFrom = new DateOnly(2031, 1, 1),
-            RowsClauses = [new SourceRowsClause(["T"], [], [])],
-        };
+        var changed = source with { VersionLabel = "V9" };
 
         Assert.Equal(Fingerprint.ComputeHex(source), Fingerprint.ComputeHex(changed));
     }
@@ -93,6 +107,9 @@ public sealed class FingerprintTests
         "constant-to", "constant-kind", "constant-removed",
         "rule-text-value", "rule-entry-value", "rule-column", "rule-removed", "rule-pair-added",
         "import-library", "import-member", "import-removed",
+        "formula-arguments-csv", "formula-arguments-csv-null", "import-categories", "import-optional", "import-optional-null",
+        "life-from", "life-next", "life-next-null", "rows-table", "rows-table-added", "rows-active-column", "rows-active-entry",
+        "rows-active-removed", "rows-clause-removed",
     ];
 
     private static VersionSource Change(VersionSource s, string change) => change switch
@@ -142,6 +159,26 @@ public sealed class FingerprintTests
         "import-library" => s with { Imports = [new SourceImport("Other", ["Dens", "Visc"]), s.Imports[1]] },
         "import-member" => s with { Imports = [new SourceImport("Lib", ["Dens"]), s.Imports[1]] },
         "import-removed" => s with { Imports = [s.Imports[0]] },
+        "formula-arguments-csv" => ReplaceFormula(s, 0, f => f with { ArgumentsCsv = "@Qty" }),
+        "formula-arguments-csv-null" => ReplaceFormula(s, 0, f => f with { ArgumentsCsv = null }),
+        "import-categories" => s with { Imports = [new SourceImport("Lib", ["Dens", "Visc"], ["A"], ["Qty"]), s.Imports[1]] },
+        "import-optional" => s with { Imports = [new SourceImport("Lib", ["Dens", "Visc"], ["A", "B"], []), s.Imports[1]] },
+        "import-optional-null" => s with { Imports = [new SourceImport("Lib", ["Dens", "Visc"], ["A", "B"], null), s.Imports[1]] },
+        "life-from" => s with { EffectiveFrom = new DateOnly(2024, 1, 2) },
+        "life-next" => s with { NextEffectiveFrom = new DateOnly(2026, 1, 2) },
+        "life-next-null" => s with { NextEffectiveFrom = null },
+        "rows-table" => s with { RowsClauses = [new SourceRowsClause(["T1", "T9"], [RuleA], s.RowsClauses[0].ActiveColumns), s.RowsClauses[1]] },
+        "rows-table-added" => s with { RowsClauses = [.. s.RowsClauses, new SourceRowsClause(["T4"], [RuleA], [])] },
+        "rows-active-column" => s with
+        {
+            RowsClauses = [new SourceRowsClause(["T1", "T2"], [RuleA], [new SourceActiveColumn("Status", "ST", "RUN")]), s.RowsClauses[1]],
+        },
+        "rows-active-entry" => s with
+        {
+            RowsClauses = [new SourceRowsClause(["T1", "T2"], [RuleA], [new SourceActiveColumn("State", "ST", "STOP")]), s.RowsClauses[1]],
+        },
+        "rows-active-removed" => s with { RowsClauses = [new SourceRowsClause(["T1", "T2"], [RuleA], []), s.RowsClauses[1]] },
+        "rows-clause-removed" => s with { RowsClauses = [s.RowsClauses[0]] },
         _ => throw new ArgumentOutOfRangeException(nameof(change), change, null),
     };
 

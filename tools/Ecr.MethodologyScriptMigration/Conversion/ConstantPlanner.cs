@@ -384,8 +384,9 @@ internal sealed class ConstantPlanner
             catch (DomainException ex)
             {
                 _issues.Add(new ConversionIssue(
-                    IssueSeverity.Warning, "constantInvalid",
-                    $"CST.{group.Code} (value #{index}) is not loadable and is ignored: {ex.Message}", group.Code));
+                    IssueSeverity.Error, "constantInvalid",
+                    $"CST.{group.Code} (value #{index}) cannot be loaded as a constant: {ex.Message} "
+                    + "Dropping it would silently change the numbers, so the version is not converted.", group.Code));
             }
         }
 
