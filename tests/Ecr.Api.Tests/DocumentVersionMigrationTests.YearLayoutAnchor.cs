@@ -508,7 +508,236 @@ public sealed partial class DocumentVersionMigrationTests
         }
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-474")]
+    [Trait("Task", "LAND-YEAR-L3-STATIC")]
+    public async Task P3_таблицю_з_прив_язкою_дозволу_рядки_перенос_у_якорі_не_створює()
+    {
+        // F13 AU P3: T8B цільової версії має активну прив'язку дозволу «рядки» (Mode = 0) — рядки з дозволу планує лише шлях
+        // відкриття, тож перенос екземпляра не створює (його створить перше відкриття). Мутація: умову
+        // `NOT EXISTS (... cfg.PermitSheetBinding ...)` у @missingInst → `1 = 1` — екземпляр створено, тест червоний.
+        var y = await ArrangeYearAsync(targetMonths: 12, (db, versionId) =>
+            {
+                var t = AddStaticStructure(db, versionId);
+                var tag = versionId.ToString(CultureInfo.InvariantCulture);
+                var header = new RegistryDef(EcrCode.Create($"PRM_P3H{tag}"), Name("P3 permits"), isTemporal: true);
+                var rows = new RegistryDef(EcrCode.Create($"PRM_P3R{tag}"), Name("P3 rows"), isTemporal: false);
+                db.RegistryDefs.AddRange(header, rows);
+                db.SaveChanges();
+                var type = new PermitTypeDef(EcrCode.Create($"P3T{tag}"), Name("P3 type"), PermitCategory.Air, header.Id);
+                db.PermitTypeDefs.Add(type);
+                db.SaveChanges();
+                var typeTable = new PermitTypeTable(type.Id, EcrCode.Create($"P3TT{tag}"), Name("P3 table"), 1, rows.Id);
+                db.PermitTypeTables.Add(typeTable);
+                db.SaveChanges();
+                db.PermitSheetBindings.Add(new PermitSheetBinding(
+                    EcrCode.Create($"PMB{tag}"), versionId, t.Table, type.Id, typeTable.Id,
+                    PermitBindingMode.Rows, PermitSelectionRule.ByFacilityPeriodEnd, null));
+                db.SaveChanges();
+            })
+            .ConfigureAwait(true);
+        try
+        {
+            var target = await StaticTargetAsync(y).ConfigureAwait(true);
+            await AddStaticSheetAsync(y, target, [], 0m).ConfigureAwait(true);
+
+            var (dry, applied, app) = await DryAndApplyAsync(y).ConfigureAwait(true);
+            using (app)
+            {
+                Assert.Equal(0, dry.GetProperty("anchorInstancesCreated").GetInt64());
+                Assert.Equal(0, applied.GetProperty("anchorInstancesCreated").GetInt64());
+            }
+
+            Assert.Equal(0, await AnchorInstanceCountAsync(y, target.Table).ConfigureAwait(true));
+        }
+        finally
+        {
+            await CleanupYearAsync(y).ConfigureAwait(true);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-474")]
+    [Trait("Task", "LAND-YEAR-L3-STATIC")]
+    public async Task P4_заархівований_якір_без_гарячих_екземплярів_перенос_нічого_не_створює()
+    {
+        // F13 AU P4 (F-13): у якорі документа немає жодного гарячого екземпляра, але є arc.TableInstance — рік заархівовано,
+        // перенос не фабрикує нових порожніх екземплярів. Мутація: `NOT (NOT EXISTS (... doc.TableInstance h ...` →
+        // `NOT (1 = 0 AND ...` — екземпляр таблиці сценарію створено в якорі, тест червоний. Немісячних значень у місяцях
+        // немає (C2 травня прибрано), щоб крок копії не створював нічого сам.
+        var y = await ArrangeYearAsync(targetMonths: 12).ConfigureAwait(true);
+        var instanceId = y.Doc.TableInstanceId;
+        try
+        {
+            await using (var db = y.Builder.CreateContext())
+            {
+                var sourceC2 = y.Doc.ColumnDefIds[1];
+                await db.Database.ExecuteSqlInterpolatedAsync($"""
+                    DELETE FROM doc.CellValue WHERE ColumnDefId = {sourceC2};
+                    DELETE cv FROM doc.CellValue cv JOIN doc.TableRow r ON r.PeriodKey = cv.PeriodKey AND r.Id = cv.TableRowId
+                     WHERE r.PeriodKey = {YearAnchor} AND r.TableInstanceId = {instanceId};
+                    DELETE cs FROM doc.CellStyle cs JOIN doc.TableRow r ON r.PeriodKey = cs.PeriodKey AND r.Id = cs.TableRowId
+                     WHERE r.PeriodKey = {YearAnchor} AND r.TableInstanceId = {instanceId};
+                    DELETE fo FROM doc.CellFormulaOverride fo JOIN doc.TableRow r ON r.PeriodKey = fo.PeriodKey AND r.Id = fo.TableRowId
+                     WHERE r.PeriodKey = {YearAnchor} AND r.TableInstanceId = {instanceId};
+                    DELETE FROM doc.TableRow WHERE PeriodKey = {YearAnchor} AND TableInstanceId = {instanceId};
+                    DELETE FROM doc.TableInstance WHERE PeriodKey = {YearAnchor} AND Id = {instanceId};
+                    INSERT arc.TableInstance (PeriodKey, Id, DocumentId, TableDefId, CreatedAt, ModifiedAt)
+                    VALUES ({YearAnchor}, {instanceId}, {y.Doc.DocumentId}, {y.Doc.TableDefId}, SYSUTCDATETIME(), SYSUTCDATETIME());
+                    """).ConfigureAwait(true);
+                Assert.False(await db.TableInstances.AsNoTracking()
+                    .AnyAsync(t => t.PeriodKeyValue == YearAnchor && t.DocumentId == y.Doc.DocumentId).ConfigureAwait(true));
+            }
+
+            var (dry, applied, app) = await DryAndApplyAsync(y).ConfigureAwait(true);
+            using (app)
+            {
+                Assert.Equal(0, dry.GetProperty("anchorInstancesCreated").GetInt64());
+                Assert.Equal(0, applied.GetProperty("anchorInstancesCreated").GetInt64());
+            }
+
+            await using var check = y.Builder.CreateContext();
+            Assert.False(await check.TableInstances.AsNoTracking()
+                .AnyAsync(t => t.PeriodKeyValue == YearAnchor && t.DocumentId == y.Doc.DocumentId).ConfigureAwait(true));
+        }
+        finally
+        {
+            await using (var db = y.Builder.CreateContext())
+            {
+                await db.Database.ExecuteSqlInterpolatedAsync(
+                    $"DELETE FROM arc.TableInstance WHERE PeriodKey = {YearAnchor} AND DocumentId = {y.Doc.DocumentId}").ConfigureAwait(true);
+            }
+
+            await CleanupYearAsync(y).ConfigureAwait(true);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-474")]
+    [Trait("Task", "LAND-YEAR-L3-STATIC")]
+    public async Task P5_копія_аркуша_дістає_в_якорі_власний_екземпляр_поруч_з_оригіналом()
+    {
+        // F13 AU P5 (RS): STATB у документі — оригінал і копія; у якорі обидва без екземпляра T8B. Перенос створює ДВА:
+        // оригінал (SheetCopyId NULL) і копію (SheetCopyId = Id рядка складу копії). Мутація: `CASE WHEN s.CopyOfId IS NULL
+        // THEN 0 ELSE s.Id END` → `0` — копія злипається з оригіналом (1 екземпляр), тест червоний.
+        var y = await ArrangeYearAsync(targetMonths: 12, (db, versionId) => _ = AddStaticStructure(db, versionId))
+            .ConfigureAwait(true);
+        try
+        {
+            var target = await StaticTargetAsync(y).ConfigureAwait(true);
+            var stat = await AddStaticSheetAsync(y, target, [], 0m).ConfigureAwait(true);
+            long copyId;
+            await using (var db = y.Builder.CreateContext())
+            {
+                var original = await db.DocumentSheets
+                    .SingleAsync(s => s.DocumentId == y.Doc.DocumentId && s.SheetDefId == stat.SourceSheetId && s.CopyOfId == null)
+                    .ConfigureAwait(true);
+                var copy = original.CreateCopy(2);
+                db.DocumentSheets.Add(copy);
+                await db.SaveChangesAsync().ConfigureAwait(true);
+                copyId = copy.Id;
+            }
+
+            var (dry, applied, app) = await DryAndApplyAsync(y).ConfigureAwait(true);
+            using (app)
+            {
+                Assert.Equal(2, dry.GetProperty("anchorInstancesCreated").GetInt64());
+                Assert.Equal(2, applied.GetProperty("anchorInstancesCreated").GetInt64());
+            }
+
+            await using var check = y.Builder.CreateContext();
+            var copies = await check.TableInstances.AsNoTracking()
+                .Where(t => t.PeriodKeyValue == YearAnchor && t.DocumentId == y.Doc.DocumentId && t.TableDefId == target.Table)
+                .Select(t => t.SheetCopyId).ToListAsync().ConfigureAwait(true);
+            Assert.Equal(new long?[] { null, copyId }, copies.OrderBy(c => c ?? 0).ToArray());
+        }
+        finally
+        {
+            await CleanupYearAsync(y).ConfigureAwait(true);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-474")]
+    [Trait("Task", "LAND-YEAR-L3-STATIC")]
+    public async Task P9_динамічна_таблиця_зі_значенням_без_екземпляра_якоря_рівно_один_екземпляр_і_лічильники_як_у_плані()
+    {
+        // F13 AU P9: динамічна T8B (без описів рядків), травень і жовтень рядок D1 з VB = 55, у якорі екземпляра немає. Його
+        // створює крок (a′), а рядок D1 — крок копії; @needInst не мусить рахувати екземпляр удруге. Мутація: фільтр
+        // `NOT EXISTS (@missingInst ...)` у @needInst → `1 = 0` — сухий прогін каже 2 екземпляри, застосування — 1:
+        // 409 ECR-CELL-0409, тест червоний.
+        var y = await ArrangeYearAsync(targetMonths: 12, (db, versionId) => _ = AddStaticStructure(db, versionId, dynamic: true))
+            .ConfigureAwait(true);
+        try
+        {
+            var target = await StaticTargetAsync(y).ConfigureAwait(true);
+            await AddStaticSheetAsync(y, target, [209905, 209910], 55m, dynamic: true).ConfigureAwait(true);
+
+            var (dry, applied, app) = await DryAndApplyAsync(y).ConfigureAwait(true);
+            using (app)
+            {
+                foreach (var report in new[] { dry, applied })
+                {
+                    Assert.Equal(1, report.GetProperty("anchorInstancesCreated").GetInt64());
+                    Assert.Equal(1, report.GetProperty("nonMonthAnchorRowsCreated").GetInt64());
+                    Assert.Equal(1, report.GetProperty("nonMonthCopiedToAnchor").GetInt64());
+                }
+            }
+
+            Assert.Equal(1, await AnchorInstanceCountAsync(y, target.Table).ConfigureAwait(true));
+            await using var check = y.Builder.CreateContext();
+            var instance = await check.TableInstances.AsNoTracking()
+                .Where(t => t.PeriodKeyValue == YearAnchor && t.DocumentId == y.Doc.DocumentId && t.TableDefId == target.Table)
+                .Select(t => t.Id).SingleAsync().ConfigureAwait(true);
+            var row = await check.TableRows.AsNoTracking()
+                .SingleAsync(r => r.PeriodKeyValue == YearAnchor && r.TableInstanceId == instance && !r.IsDeleted).ConfigureAwait(true);
+            Assert.Equal(DynamicRowKey, row.RowKeyValue);
+            Assert.Equal(55m, (await check.CellValues.AsNoTracking()
+                .SingleAsync(c => c.PeriodKeyValue == YearAnchor && c.TableRowId == row.Id && c.ColumnDefId == target.Column)
+                .ConfigureAwait(true)).ValueNumeric);
+        }
+        finally
+        {
+            await CleanupYearAsync(y).ConfigureAwait(true);
+        }
+    }
+
     // ───────────────────────────── допоміжне (B-static) ─────────────────────────────
+
+    /// <summary>Сухий прогін і перенос (обидва 200); звіти й застосунок (викликач звільняє).</summary>
+    private async Task<(JsonElement Dry, JsonElement Applied, EcrApiFactory App)> DryAndApplyAsync(YearScenario y)
+    {
+        var app = CreateYearApp();
+        using var client = await SignedInAsync(app, y.UserName).ConfigureAwait(false);
+        var dry = await PostYearAsync(client, y, dryRun: true).ConfigureAwait(false);
+        var dryBody = await dry.Content.ReadAsStringAsync().ConfigureAwait(false);
+        Assert.True(dry.StatusCode == HttpStatusCode.OK, $"{dry.StatusCode}: {dryBody} {app.ErrorsText}");
+        var report = JsonDocument.Parse(dryBody).RootElement.Clone();
+        Assert.True(report.GetProperty("canApply").GetBoolean(), dryBody);
+
+        var applied = await PostYearAsync(client, y, dryRun: false).ConfigureAwait(false);
+        var body = await applied.Content.ReadAsStringAsync().ConfigureAwait(false);
+        Assert.True(applied.StatusCode == HttpStatusCode.OK, $"{applied.StatusCode}: {body} {app.ErrorsText}");
+        Assert.Equal(y.TargetVersionId, await YearProjectVersionAsync(y).ConfigureAwait(false));
+        return (report, JsonDocument.Parse(body).RootElement.Clone(), app);
+    }
+
+    /// <summary>Скільки екземплярів таблиці <paramref name="tableDefId"/> документа в якорі.</summary>
+    private static async Task<int> AnchorInstanceCountAsync(YearScenario y, int tableDefId)
+    {
+        await using var db = y.Builder.CreateContext();
+        return await db.TableInstances.AsNoTracking()
+            .CountAsync(t => t.PeriodKeyValue == YearAnchor && t.DocumentId == y.Doc.DocumentId && t.TableDefId == tableDefId)
+            .ConfigureAwait(false);
+    }
 
     /// <summary>Ідентифікатори статичного аркуша STATB цільової версії (додано до публікації в ArrangeYearAsync).</summary>
     private static async Task<(int Sheet, int Table, int Column, int Row)> StaticTargetAsync(YearScenario y)
@@ -518,7 +747,7 @@ public sealed partial class DocumentVersionMigrationTests
             .Where(s => s.TemplateVersionId == y.TargetVersionId && s.Code == "STATB").Select(s => s.Id).SingleAsync().ConfigureAwait(false);
         var table = await db.TableDefs.AsNoTracking().Where(t => t.SheetDefId == sheet).Select(t => t.Id).SingleAsync().ConfigureAwait(false);
         var column = await db.ColumnDefs.AsNoTracking().Where(c => c.TableDefId == table).Select(c => c.Id).SingleAsync().ConfigureAwait(false);
-        var row = await db.RowDefs.AsNoTracking().Where(r => r.TableDefId == table).Select(r => r.Id).SingleAsync().ConfigureAwait(false);
+        var row = await db.RowDefs.AsNoTracking().Where(r => r.TableDefId == table).Select(r => r.Id).SingleOrDefaultAsync().ConfigureAwait(false);
         return (sheet, table, column, row);
     }
 
@@ -530,39 +759,50 @@ public sealed partial class DocumentVersionMigrationTests
     /// <paramref name="versionId"/> — однакові коди в обох версіях (план переносить 1:1 і аркуш не зачіпає).
     /// </summary>
     private static (int Sheet, int Table, int Column, int Row) AddStaticStructure(
-        Ecr.Infrastructure.Persistence.EcrDbContext db, int versionId)
+        Ecr.Infrastructure.Persistence.EcrDbContext db, int versionId, bool dynamic = false)
     {
         var sheet = new SheetDef(versionId, EcrCode.Create("STATB"), Name("Static B"), 9);
         db.SheetDefs.Add(sheet);
         db.SaveChanges();
-        var table = new TableDef(sheet.Id, EcrCode.Create("T8B"), Name("T8 B"), 1, TableLayoutKind.Static, TableRowMode.Fixed);
+        var table = new TableDef(
+            sheet.Id, EcrCode.Create("T8B"), Name("T8 B"), 1, TableLayoutKind.Static, dynamic ? TableRowMode.Dynamic : TableRowMode.Fixed);
         db.TableDefs.Add(table);
         db.SaveChanges();
         var column = new ColumnDef(table.Id, EcrCode.Create("VB"), Name("V"), 1, CellDataType.Decimal);
-        var row = new RowDef(table.Id, RowKey.Create(StaticRowKey), 1, Name("Row S1"), RowKind.Item);
         db.ColumnDefs.Add(column);
-        db.RowDefs.Add(row);
+        RowDef? row = null;
+        if (!dynamic)
+        {
+            // Динамічна таблиця (P9) описів рядків не має: рядки заводить оператор.
+            row = new RowDef(table.Id, RowKey.Create(StaticRowKey), 1, Name("Row S1"), RowKind.Item);
+            db.RowDefs.Add(row);
+        }
+
         db.SaveChanges();
-        return (sheet.Id, table.Id, column.Id, row.Id);
+        return (sheet.Id, table.Id, column.Id, row?.Id ?? 0);
     }
 
     private const string StaticRowKey = "RSB1";
+
+    /// <summary>Ключ рядка динамічної T8B (P9) — без опису рядка.</summary>
+    private const string DynamicRowKey = "D1";
 
     /// <summary>
     /// Додає статичний аркуш у вихідну версію (ціль — <paramref name="target"/>, додана до публікації), вмикає його в
     /// документ і кладе VB = <paramref name="value"/> у екземпляри періодів <paramref name="periods"/> (якір — без екземпляра).
     /// </summary>
     private static async Task<StaticSheet> AddStaticSheetAsync(
-        YearScenario y, (int Sheet, int Table, int Column, int Row) target, int[] periods, decimal value)
+        YearScenario y, (int Sheet, int Table, int Column, int Row) target, int[] periods, decimal value, bool dynamic = false)
     {
         await using var db = y.Builder.CreateContext();
-        var source = AddStaticStructure(db, y.SourceVersionId);
+        var source = AddStaticStructure(db, y.SourceVersionId, dynamic);
 
         var document = await db.Documents.Include(d => d.Sheets).SingleAsync(d => d.Id == y.Doc.DocumentId).ConfigureAwait(false);
         document.IncludeSheet(source.Sheet);
         await db.SaveChangesAsync().ConfigureAwait(false);
 
-        var rowKey = StaticRowKey;
+        var rowKey = dynamic ? DynamicRowKey : StaticRowKey;
+        int? rowDefId = dynamic ? null : source.Row;
         foreach (var period in periods)
         {
             await db.Database.ExecuteSqlInterpolatedAsync($"""
@@ -571,7 +811,7 @@ public sealed partial class DocumentVersionMigrationTests
                 INSERT doc.TableInstance (PeriodKey, Id, DocumentId, TableDefId, CreatedAt, ModifiedAt, SheetCopyId)
                 VALUES ({period}, @i, {y.Doc.DocumentId}, {source.Table}, SYSUTCDATETIME(), SYSUTCDATETIME(), NULL);
                 INSERT doc.TableRow (PeriodKey, Id, TableInstanceId, RowKey, RowDefId, Ordinal, IsDeleted, IsOrphaned, ModifiedAt)
-                VALUES ({period}, @r, @i, {rowKey}, {source.Row}, 1, 0, 0, SYSUTCDATETIME());
+                VALUES ({period}, @r, @i, {rowKey}, {rowDefId}, 1, 0, 0, SYSUTCDATETIME());
                 INSERT doc.CellValue (PeriodKey, TableRowId, ColumnDefId, TableDefId, ValueNumeric, IsCalculated, IsEmpty)
                 VALUES ({period}, @r, {source.Column}, {source.Table}, {value}, 0, 0);
                 """).ConfigureAwait(false);
