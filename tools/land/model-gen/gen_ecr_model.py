@@ -1112,6 +1112,49 @@ stat_cols += _added_cols
 print('prodColumnMapping: tables %d, new columns %d' % (len(out['prodColumnMapping']['tables']), _added_cols))
 
 
+# ---- B26 (P-0118-23, рішення людини 18.11, відповідь (a)): ECW_C09_02_01 на T7b_00 рахує ECW_EC_tons =
+# (@Concentration * @Volume) / k1 (k1 = 1e6: мг/л * м3 -> т). Аргументів з такими кодами в таблиці не було (банер
+# «бракує Concentration/Volume»). Volume - НОВА місячна колонка введення (м3, Volume_M01..M12 одразу після December);
+# Concentration - наявна місячна колонка концентрації (January..December) місяця розрахунку. Модель методології не
+# змінюється: лише колонки шаблону і мости аргументів (селектор місяця; у річному шаблоні 1.0.17.0 етап YearMonths
+# перетворює його на cfg.MonthInputAlias місяця m). Прод-відповідника для Volume немає - тому не prodColumnMapping.
+DECIDED_DECISION = 'P-0118-23 (B26, human answer (a))'
+DECIDED_NEW_MONTH_COLUMNS = {
+    # таблиця -> (база коду, одиниця, заголовок, після якої колонки вставити блок)
+    'T7b_00': [('Volume', 'm3', 'Volume (m3)', 'December')],
+}
+DECIDED_MONTH_ARGS = {
+    # таблиця -> аргумент методології -> 12 колонок за місяцями
+    'T7b_00': {'Concentration': list(MONTHS), 'Volume': ['Volume_M%02d' % m for m in range(1, 13)]},
+}
+
+
+def _decided_input_columns():
+    global stat_cols
+    added = 0
+    for s_ in out['sheets']:
+        for t_ in s_['tables']:
+            for base, unit_, hdr, after in DECIDED_NEW_MONTH_COLUMNS.get(t_['code'], []):
+                codes = [c['code'] for c in t_['columns']]
+                if any(c.startswith(base + '_M') for c in codes):
+                    raise SystemExit('decided columns: %s.%s_Mnn уже є' % (t_['code'], base))
+                if after not in codes:
+                    raise SystemExit('decided columns: %s не має колонки %s' % (t_['code'], after))
+                at = codes.index(after) + 1
+                for m in range(1, 13):
+                    t_['columns'].insert(at + m - 1, {
+                        'code': '%s_M%02d' % (base, m), 'dataType': 'Decimal', 'headerEn': '%s, %s' % (hdr, MONTHS[m - 1]),
+                        'headerRu': '', 'unit': unit_, 'month': m, 'hidden': False, 'readOnly': False, 'excel': None,
+                        'precision': 28, 'scale': 12, 'decision': DECIDED_DECISION,
+                        'ecrAdded': 'manual input (not in the Excel sheet): %s' % DECIDED_DECISION})
+                    added += 1
+    stat_cols += added
+    print('decided input columns: %d' % added)
+
+
+_decided_input_columns()
+
+
 # ---- мости аргументів методологій C08/C09/C11/C12 для таблиць аркушів 6, 9-11 (LP-10).
 # Для аркушів 3-5 (PerPeriodInstance) місячна колонка `X_M01..X_M12` має Formula-міст `X`, що вибирає місяць за
 # [Period].Sequence; аргумент методології (імена з AF) знаходить колонку за кодом. Таблиці 6, 9-11 (MonthsInColumns) мостів
@@ -1155,6 +1198,15 @@ def _arg_bridges():
                 # Правило «DaysInCalcMonth = Land_Measure_OperTimeDays» (7.7) доведено для аркушів 3-5; для 6, 9-11 не доведено
                 # (календарні дні [Period].Days чи відпрацьовані дні - рішення власника методології): мост не створюємо.
                 left[name] = 'правило 7.7 (відпрацьовані дні чи календарні) доведено лише для аркушів 3-5; для цієї таблиці питання власнику'
+            elif name in DECIDED_MONTH_ARGS.get(tcode, {}):
+                # B26: місячні колонки аргументу названо рішенням людини (DECIDED_MONTH_ARGS), а не прод-аліасом
+                mc = DECIDED_MONTH_ARGS[tcode][name]
+                if not (len(mc) == 12 and all(c in cols for c in mc) and [cols[c].get('month') for c in mc] == list(range(1, 13))):
+                    raise SystemExit('argumentBridges: %s.%s - колонки рішення не є 12 місячними колонками таблиці: %s' % (tcode, name, mc))
+                new = {'code': name, 'dataType': 'Formula', 'headerEn': '%s (argument bridge: selects the month column)' % name,
+                       'unit': cols[mc[0]].get('unit'), 'expression': month_expr(mc),
+                       'ecrAdded': 'bridge: methodology argument %s = month column of the calculated period (decision %s)'
+                                   % (name, DECIDED_DECISION)}
             elif name in alias:
                 a = alias[name]
                 if a.get('monthColumns'):
