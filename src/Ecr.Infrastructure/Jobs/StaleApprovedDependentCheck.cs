@@ -58,7 +58,7 @@ internal sealed class StaleApprovedDependentCheck(EcrDbContext db, bool? readOve
         }
 
         // ⛔ Шаблон документа за період — d.TemplateId, інакше шаблон версії проєкту за період (B74:
-        // VersionOf/TemplateVersionOf, не Project.TemplateVersionId) — як у RegistryImpactStore.ListBoundConsumersForYearAsync.
+        // VersionOf/TemplateVersionOf, не Project.TemplateVersionId) — як у RegistryImpactStore.ListTemplateConsumersAsync (B179 L2).
         var candidates = await (
                 from s in db.ApprovalStates.AsNoTracking()
                 where s.SheetCopyId == null && s.Status == DocumentStatus.Approved
