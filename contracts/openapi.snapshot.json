@@ -2040,6 +2040,16 @@
             },
             "type": "array"
           },
+          "sourceIssues": {
+            "description": "✎ B80 N4 (R3.2): проблеми документа-джерела (HSE400) для споживача зв'язки в стані `approvedOnly` — місяць\nспоживача не затверджено, а місяць джерела не затверджено; або місяць споживача затверджено, а джерело відтоді\nзмінилося. `null` — проблем немає, а також ЗАВЖДИ за стану зв'язки `any`, без споживача чи без\nдокумента-джерела за рік.",
+            "items": {
+              "$ref": "#/components/schemas/SourceIssueDto"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
           "tables": {
             "description": "Що приймають правила методологій кожної таблиці з проблемами (UAT 08.11 b3): колонки, які згадують правила, і\nдопустимі комбінації значень. Таблиці немає — підказки немає (правил з колонками цієї таблиці немає, чинної версії\nнемає або хоч одна колонка прихована від читача).",
             "items": {
@@ -28519,6 +28529,74 @@
           "EventAttribute",
           "RowWindow"
         ]
+      },
+      "SourceIssueDto": {
+        "description": "✎ B80 N4 (R3.2): проблема документа-джерела для місяця документа-споживача.",
+        "properties": {
+          "approvedAt": {
+            "description": "Коли затверджено місяць споживача (UTC, найраніший аркуш); `null` — не затверджено.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "kind": {
+            "description": "`SourceMonthNotApproved` — місяць споживача не затверджено, а місяць джерела не затверджено (подання й\n        затвердження заблоковано, `sourceMonthNotApproved`); `SourceChangedAfterApproval` — місяць споживача\n        затверджено, а місяць джерела зараз не затверджено або затверджено пізніше за споживача (консервативно: і тоді,\n        коли числа ті самі).",
+            "type": "string"
+          },
+          "monthNumber": {
+            "description": "Місяць (1–12) документа-споживача, який читає місяць джерела.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "sourceApprovedAt": {
+            "description": "Коли затверджено місяць джерела (UTC); `null` — зараз не затверджено або читач не може відкрити документ-джерело.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "sourceDocumentId": {
+            "description": "Документ-джерело; `null` — читач не може відкрити документ-джерело.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "sourceDocumentKey": {
+            "description": "Бізнес-ключ документа-джерела; `null` — читач не може відкрити документ-джерело.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "sourcePeriodKey": {
+            "description": "Місяць документа-джерела `yyyyMM`.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "sourceProjectCode": {
+            "description": "Код проєкту документа-джерела; `null` — читач не може відкрити документ-джерело.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "monthNumber",
+          "sourcePeriodKey",
+          "sourceDocumentId",
+          "sourceProjectCode",
+          "sourceDocumentKey",
+          "sourceApprovedAt",
+          "approvedAt"
+        ],
+        "type": "object"
       },
       "SourcePathProbeResult": {
         "description": "Наслідок пробного читання одного значення мапінгу (ФВ-13.17).",

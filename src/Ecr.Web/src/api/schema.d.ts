@@ -30818,6 +30818,11 @@ export interface components {
             formulaErrors?: null | components["schemas"]["FormulaErrorIssueDto"][];
             /** @description Проблеми видимих читачеві таблиць; порожньо — проблем немає. */
             items: components["schemas"]["CalculationIssueDto"][];
+            /** @description ✎ B80 N4 (R3.2): проблеми документа-джерела (HSE400) для споживача зв'язки в стані `approvedOnly` — місяць
+             *     споживача не затверджено, а місяць джерела не затверджено; або місяць споживача затверджено, а джерело відтоді
+             *     змінилося. `null` — проблем немає, а також ЗАВЖДИ за стану зв'язки `any`, без споживача чи без
+             *     документа-джерела за рік. */
+            sourceIssues?: null | components["schemas"]["SourceIssueDto"][];
             /** @description Що приймають правила методологій кожної таблиці з проблемами (UAT 08.11 b3): колонки, які згадують правила, і
              *     допустимі комбінації значень. Таблиці немає — підказки немає (правил з колонками цієї таблиці немає, чинної версії
              *     немає або хоч одна колонка прихована від читача). */
@@ -43094,6 +43099,43 @@ export interface components {
          * @enum {unknown}
          */
         SourceEventVolumeMode: "None" | "EventAttribute" | "RowWindow";
+        /** @description ✎ B80 N4 (R3.2): проблема документа-джерела для місяця документа-споживача. */
+        SourceIssueDto: {
+            /**
+             * Format: date-time
+             * @description Коли затверджено місяць споживача (UTC, найраніший аркуш); `null` — не затверджено.
+             */
+            approvedAt: null | string;
+            /** @description `SourceMonthNotApproved` — місяць споживача не затверджено, а місяць джерела не затверджено (подання й
+             *             затвердження заблоковано, `sourceMonthNotApproved`); `SourceChangedAfterApproval` — місяць споживача
+             *             затверджено, а місяць джерела зараз не затверджено або затверджено пізніше за споживача (консервативно: і тоді,
+             *             коли числа ті самі). */
+            kind: string;
+            /**
+             * Format: int32
+             * @description Місяць (1–12) документа-споживача, який читає місяць джерела.
+             */
+            monthNumber: number;
+            /**
+             * Format: date-time
+             * @description Коли затверджено місяць джерела (UTC); `null` — зараз не затверджено або читач не може відкрити документ-джерело.
+             */
+            sourceApprovedAt: null | string;
+            /**
+             * Format: int64
+             * @description Документ-джерело; `null` — читач не може відкрити документ-джерело.
+             */
+            sourceDocumentId: null | number;
+            /** @description Бізнес-ключ документа-джерела; `null` — читач не може відкрити документ-джерело. */
+            sourceDocumentKey: null | string;
+            /**
+             * Format: int32
+             * @description Місяць документа-джерела `yyyyMM`.
+             */
+            sourcePeriodKey: number;
+            /** @description Код проєкту документа-джерела; `null` — читач не може відкрити документ-джерело. */
+            sourceProjectCode: null | string;
+        };
         /** @description Наслідок пробного читання одного значення мапінгу (ФВ-13.17). */
         SourcePathProbeResult: {
             /** @description `false` — шлях є в каталозі джерела, але в пробному вікні
