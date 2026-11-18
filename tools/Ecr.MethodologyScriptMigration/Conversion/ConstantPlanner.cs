@@ -19,7 +19,10 @@ internal enum ConstContext : byte
     /// <summary>Формули речовини: категорія з правила версії × речовини версії.</summary>
     Substance = 1,
 
-    /// <summary>Бібліотека: контекст імпортера невідомий — значення мусить бути однаковим для всіх комбінацій.</summary>
+    /// <summary>
+    /// Бібліотека: категорію й речовину задає імпортер. Категорія читається з <c>param Category;</c>, речовина — з
+    /// <c>CURRENT_SUBSTANCE()</c>.
+    /// </summary>
     Library = 2,
 }
 
@@ -32,7 +35,7 @@ internal sealed class ConstantPlanner
 {
     private enum ShapeKind : byte { Absent, Scalar, ByCategory, BySubstance, ByCategoryAndSubstance }
 
-    private sealed record Shape(ShapeKind Kind, ScriptConst? Value, string? Unit);
+    private sealed record Shape(ShapeKind Kind, ScriptConst? Value, string? Unit, bool DroppedNullKey = false);
 
     private sealed record Piece(DateOnly Start, Shape Shape);
 
@@ -68,6 +71,13 @@ internal sealed class ConstantPlanner
     private readonly List<Profile> _order = [];
     private string? _categoryParam;
     private string? _substanceParam;
+    private bool _libraryParamDeclared;
+
+    /// <summary>Ім'я змінної імпортера, яку бібліотека читає через <c>param</c> (мусить збігатися з ім'ям у імпортера).</summary>
+    public const string LibraryCategoryParam = "Category";
+
+    /// <summary>Вираз речовини в бібліотеці.</summary>
+    public const string LibrarySubstanceExpression = "CURRENT_SUBSTANCE()";
 
     public ConstantPlanner(
         VersionSource version,
@@ -117,6 +127,11 @@ internal sealed class ConstantPlanner
     public string RenderDeclarations()
     {
         var sb = new StringBuilder();
+        if (_libraryParamDeclared)
+        {
+            sb.Append("param ").Append(LibraryCategoryParam).Append(";\n");
+        }
+
         foreach (var profile in _order)
         {
             sb.Append(profile.Declaration);
@@ -126,7 +141,10 @@ internal sealed class ConstantPlanner
     }
 
     /// <summary>Чи прочитано хоч одну константу.</summary>
-    public bool HasDeclarations => _order.Count > 0;
+    public bool HasDeclarations => _order.Count > 0 || _libraryParamDeclared;
+
+    /// <summary>Чи бібліотека читає категорію імпортера (<c>param Category;</c> у тексті).</summary>
+    public bool UsesLibraryParam => _libraryParamDeclared;
 
     private Profile ProfileOf(Group group, ConstContext context)
     {
@@ -144,13 +162,21 @@ internal sealed class ConstantPlanner
     {
         var (pieces, anyAmbiguity, ambiguityExample) = Plan(group, context);
 
-        if (context == ConstContext.Library
-            && pieces.Any(p => p.Shape.Kind is not (ShapeKind.Scalar or ShapeKind.Absent)))
+        if (context == ConstContext.Library)
         {
-            throw new ConversionException(
-                "libraryConstantContextual",
-                $"Library constant «{group.Code}» depends on category or substance; a library cannot see the importer's "
-                + "category or substance loop variable, so it cannot be converted.");
+            if (pieces.Any(p => p.Shape.Kind is ShapeKind.ByCategory or ShapeKind.ByCategoryAndSubstance))
+            {
+                DeclareLibraryParam(group.Code);
+            }
+
+            if (pieces.Any(p => p.Shape.DroppedNullKey))
+            {
+                _issues.Add(new ConversionIssue(
+                    IssueSeverity.Warning, "libraryNullKeyIgnored",
+                    $"Library constant «{group.Code}» has a value for 'no category' / 'no substance' that differs from the keyed "
+                    + "values; a map cannot hold it, so an importer without a category or substance reads #N/A.",
+                    group.Code));
+            }
         }
 
         if (anyAmbiguity)
@@ -197,10 +223,28 @@ internal sealed class ConstantPlanner
             name = _names.Allocate(group.Name + "_" + context.ToString().ToLowerInvariant(), "_c", out _);
         }
 
-        var profile = Build(group, name, pieces);
+        var profile = Build(group, name, pieces, context);
         group.Profiles.Add(profile);
         _order.Add(profile);
         return profile;
+    }
+
+    private void DeclareLibraryParam(string constantCode)
+    {
+        if (_libraryParamDeclared)
+        {
+            return;
+        }
+
+        if (!_names.TryReserve(LibraryCategoryParam))
+        {
+            throw new ConversionException(
+                "libraryParamNameTaken",
+                $"Library constant «{constantCode}» varies by category, but the name «{LibraryCategoryParam}» (the importer's "
+                + "variable read by 'param') is already used by a formula, a constant or an import of this library.");
+        }
+
+        _libraryParamDeclared = true;
     }
 
     private static string SanitizeName(string code)
@@ -244,8 +288,13 @@ internal sealed class ConstantPlanner
                     catch (DomainException ex)
                     {
                         // «неоднозначно» / нерозібране число / мітка категорії: ключа в мапі не буде (читання дасть #N/A).
-                        ambiguity = true;
-                        example = example.Length == 0 ? ex.Message : example;
+                        // Бібліотека без категорії імпортера (null) не вибирає між категоріями — це очікувано, не зауваження.
+                        if (context != ConstContext.Library || categories[ci] is not null)
+                        {
+                            ambiguity = true;
+                            example = example.Length == 0 ? ex.Message : example;
+                        }
+
                         table[ci, si] = null;
                     }
                 }
@@ -283,8 +332,17 @@ internal sealed class ConstantPlanner
                 return (cats, subs);
 
             default:
-                List<string?> libCats = [null, .. _version.Categories];
-                List<string?> libSubs = [null, .. _version.Substances];
+                // Категорію й речовину бібліотеці дає імпортер: ключі — її власні категорії й речовини та ті,
+                // що названо в її константах.
+                var libKeys = _version.Categories
+                    .Concat(_version.Constants.Select(c => c.Category)
+                        .Where(c => !string.IsNullOrEmpty(c) && c != MethodologyConstant.CommonCategory).Select(c => c!))
+                    .Distinct(StringComparer.Ordinal);
+                var libSubKeys = _version.Substances
+                    .Concat(_version.Constants.Select(c => c.SubstanceCode).Where(c => !string.IsNullOrEmpty(c)).Select(c => c!))
+                    .Distinct(StringComparer.Ordinal);
+                List<string?> libCats = [null, .. libKeys];
+                List<string?> libSubs = [null, .. libSubKeys];
                 return (libCats, libSubs);
         }
     }
@@ -409,6 +467,7 @@ internal sealed class ConstantPlanner
     {
         var nc = categories.Count;
         var ns = substances.Count;
+        var dropped = false;
         var first = table[0, 0];
         var allSame = true;
         var anyPresent = false;
@@ -461,11 +520,17 @@ internal sealed class ConstantPlanner
             {
                 if (table[i, 0] is { } cell)
                 {
+                    if (categories[i] is null)
+                    {
+                        dropped |= DiffersFromKeyed(table, i, 0, nc, ns);
+                        continue;
+                    }
+
                     map[categories[i]!] = Scalar(cell);
                 }
             }
 
-            return new Shape(ShapeKind.ByCategory, ScriptConst.FromMap(map), unit);
+            return new Shape(ShapeKind.ByCategory, ScriptConst.FromMap(map), unit, dropped);
         }
 
         if (ns > 1 && colsUniform)
@@ -475,11 +540,17 @@ internal sealed class ConstantPlanner
             {
                 if (table[0, j] is { } cell)
                 {
+                    if (substances[j] is null)
+                    {
+                        dropped |= DiffersFromKeyed(table, 0, j, nc, ns);
+                        continue;
+                    }
+
                     map[substances[j]!] = Scalar(cell);
                 }
             }
 
-            return new Shape(ShapeKind.BySubstance, ScriptConst.FromMap(map), unit);
+            return new Shape(ShapeKind.BySubstance, ScriptConst.FromMap(map), unit, dropped);
         }
 
         var outer = new Dictionary<string, ScriptConst>(StringComparer.Ordinal);
@@ -490,6 +561,12 @@ internal sealed class ConstantPlanner
             {
                 if (table[i, j] is { } cell)
                 {
+                    if (substances[j] is null || categories[i] is null)
+                    {
+                        dropped |= DiffersFromKeyed(table, i, j, nc, ns);
+                        continue;
+                    }
+
                     inner[substances[j]!] = Scalar(cell);
                 }
             }
@@ -500,7 +577,24 @@ internal sealed class ConstantPlanner
             }
         }
 
-        return new Shape(ShapeKind.ByCategoryAndSubstance, ScriptConst.FromMap(outer), unit);
+        return new Shape(ShapeKind.ByCategoryAndSubstance, ScriptConst.FromMap(outer), unit, dropped);
+    }
+
+    /// <summary>Чи відрізняється клітинка «без категорії / без речовини» від решти (тоді мапа її втрачає).</summary>
+    private static bool DiffersFromKeyed(ResolvedConstant?[,] table, int i, int j, int nc, int ns)
+    {
+        for (var a = 0; a < nc; a++)
+        {
+            for (var b = 0; b < ns; b++)
+            {
+                if ((a != i || b != j) && !Equals(table[a, b], table[i, j]))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private static ScriptConst Scalar(ResolvedConstant cell)
@@ -522,7 +616,7 @@ internal sealed class ConstantPlanner
 
     // ---- Друк ----
 
-    private Profile Build(Group group, string name, List<Piece> pieces)
+    private Profile Build(Group group, string name, List<Piece> pieces, ConstContext context)
     {
         var signature = Signature(pieces);
         if (pieces.Count == 1)
@@ -534,7 +628,7 @@ internal sealed class ConstantPlanner
                 Name = name,
                 Signature = signature,
                 Declaration = declaration,
-                UseExpression = cat => StaticUse(name, shape, cat),
+                UseExpression = cat => StaticUse(name, shape, cat, context),
             };
         }
 
@@ -624,12 +718,12 @@ internal sealed class ConstantPlanner
                 var args = new List<string>();
                 if (needCat)
                 {
-                    args.Add(cat);
+                    args.Add(CategoryReference(cat, context));
                 }
 
                 if (needSub)
                 {
-                    args.Add(_substanceVar + ".code");
+                    args.Add(SubstanceReference(context));
                 }
 
                 return name + "(" + string.Join(", ", args) + ")";
@@ -637,12 +731,19 @@ internal sealed class ConstantPlanner
         };
     }
 
-    private string StaticUse(string name, Shape shape, string categoryVar)
+    private static string CategoryReference(string categoryVar, ConstContext context)
+        => context == ConstContext.Library ? LibraryCategoryParam : categoryVar;
+
+    private string SubstanceReference(ConstContext context)
+        => context == ConstContext.Library ? LibrarySubstanceExpression : _substanceVar + ".code";
+
+    private string StaticUse(string name, Shape shape, string categoryVar, ConstContext context)
         => shape.Kind switch
         {
-            ShapeKind.ByCategory => name + "[" + categoryVar + "]",
-            ShapeKind.BySubstance => name + "[" + _substanceVar + ".code]",
-            ShapeKind.ByCategoryAndSubstance => name + "[" + categoryVar + "][" + _substanceVar + ".code]",
+            ShapeKind.ByCategory => name + "[" + CategoryReference(categoryVar, context) + "]",
+            ShapeKind.BySubstance => name + "[" + SubstanceReference(context) + "]",
+            ShapeKind.ByCategoryAndSubstance =>
+                name + "[" + CategoryReference(categoryVar, context) + "][" + SubstanceReference(context) + "]",
             _ => name,
         };
 

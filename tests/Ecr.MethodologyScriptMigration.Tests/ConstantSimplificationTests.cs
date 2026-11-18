@@ -235,17 +235,81 @@ public sealed class ConstantSimplificationTests
         Assert.True(text.IndexOf("const M", StringComparison.Ordinal) < text.IndexOf("const A", StringComparison.Ordinal));
     }
 
-    [Fact]
-    public void Бібліотечна_константа_що_залежить_від_категорії_не_перетворюється()
-    {
-        var source = Sup.Version(
-            [Sup.F("V", "CST.K", 1)],
-            [SourceConstant.OfNumber("K", 1, "A"), SourceConstant.OfNumber("K", 2, "B")],
-            categories: ["A", "B"]) with { IsLibrary = true, RowsClauses = [] };
+    private static VersionSource Library(IEnumerable<SourceFormula> formulas, IEnumerable<SourceConstant> constants,
+        IEnumerable<string>? categories = null)
+        => Sup.Version(formulas, constants, categories: categories) with { IsLibrary = true, RowsClauses = [] };
 
-        var result = ScriptConverter.Convert(source);
+    [Fact]
+    public void Бібліотечна_константа_за_категорією_читає_param_Category()
+    {
+        var result = ScriptConverter.Convert(Library(
+            [Sup.F("V", "CST.K * 2", 1)],
+            [SourceConstant.OfNumber("K", 1, "A"), SourceConstant.OfNumber("K", 2, "B")],
+            ["A", "B"]));
+
+        Assert.NotNull(result.Text);
+        Assert.False(result.HasErrors);
+        Assert.Contains("param Category;\n", result.Text);
+        Assert.Contains("const K = {\n    A: 1,\n    B: 2,\n};", result.Text);
+        Assert.Contains("var V = K[Category] * 2;", result.Text);
+        Assert.True(Sup.HasIssue(result, "selfCheckSkippedParam", IssueSeverity.Info));
+        Assert.True(
+            result.Text!.IndexOf("param Category;", StringComparison.Ordinal)
+            < result.Text.IndexOf("const K", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Бібліотечна_константа_за_речовиною_читає_CURRENT_SUBSTANCE_без_param()
+    {
+        var result = ScriptConverter.Convert(Library(
+            [Sup.F("V", "CST.K", 1)],
+            [SourceConstant.OfNumber("K", 1, null, "0301"), SourceConstant.OfNumber("K", 2, null, "0304")]));
+
+        Assert.NotNull(result.Text);
+        Assert.DoesNotContain("param", result.Text);
+        Assert.Contains("var V = K[CURRENT_SUBSTANCE()];", result.Text);
+        Assert.False(Sup.HasIssue(result, "selfCheckSkippedParam"));
+        Sup.Compile(result.Text!, library: true);
+    }
+
+    [Fact]
+    public void Бібліотечна_константа_за_категорією_і_речовиною_і_param_оголошено_раз()
+    {
+        var result = ScriptConverter.Convert(Library(
+            [Sup.F("V", "CST.K + CST.M", 1)],
+            [
+                SourceConstant.OfNumber("K", 1, "A", "0301"), SourceConstant.OfNumber("K", 2, "A", "0304"),
+                SourceConstant.OfNumber("K", 3, "B", "0301"), SourceConstant.OfNumber("K", 4, "B", "0304"),
+                SourceConstant.OfNumber("M", 7, "A"), SourceConstant.OfNumber("M", 8, "B"),
+            ]));
+
+        Assert.NotNull(result.Text);
+        Assert.Contains("var V = K[Category][CURRENT_SUBSTANCE()] + M[Category];", result.Text);
+        Assert.Equal(1, System.Text.RegularExpressions.Regex.Count(result.Text!, "param Category;"));
+    }
+
+    [Fact]
+    public void Бібліотечна_константа_за_категорією_на_зайнятому_імені_Category_це_помилка()
+    {
+        var result = ScriptConverter.Convert(Library(
+            [Sup.F("Category", "1", 1), Sup.F("V", "CST.K", 2)],
+            [SourceConstant.OfNumber("K", 1, "A"), SourceConstant.OfNumber("K", 2, "B")],
+            ["A", "B"]));
+
         Assert.Null(result.Text);
-        Assert.True(Sup.HasIssue(result, "libraryConstantContextual", IssueSeverity.Error));
+        Assert.True(Sup.HasIssue(result, "libraryParamNameTaken", IssueSeverity.Error));
+    }
+
+    [Fact]
+    public void Бібліотечна_константа_із_значенням_без_категорії_що_відрізняється_дає_попередження()
+    {
+        var result = ScriptConverter.Convert(Library(
+            [Sup.F("V", "CST.K", 1)],
+            [SourceConstant.OfNumber("K", 1, "A")],
+            ["A", "B"]));
+
+        Assert.NotNull(result.Text);
+        Assert.True(Sup.HasIssue(result, "libraryNullKeyIgnored", IssueSeverity.Warning));
     }
 
     // ---- Прив'язка до справжнього ConstantResolver ----

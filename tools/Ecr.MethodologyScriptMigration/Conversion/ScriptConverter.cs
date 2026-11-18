@@ -39,6 +39,16 @@ public static class ScriptConverter
                 return new ConversionResult(null, _issues);
             }
 
+            if (_planner.UsesLibraryParam && !ConverterOptions.LanguageHasParam)
+            {
+                // ConverterOptions.LanguageHasParam = false: компілятор ще не знає `param`, тож текст не компілюємо.
+                Info(
+                    "selfCheckSkippedParam",
+                    "The script declares 'param'; the compiler does not support it yet (ConverterOptions.LanguageHasParam), "
+                    + "so the self-compile check is skipped.");
+                return new ConversionResult(text, _issues);
+            }
+
             var errorsBefore = _issues.Count;
             SelfCheck(text);
             return _issues.Skip(errorsBefore).Any(i => i.Severity == IssueSeverity.Error)
