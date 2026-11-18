@@ -394,9 +394,8 @@ public sealed class ScriptMethodologyRunSqlTests(SqlServerFixture sql)
     /// перераховується; читач B (інший аркуш) бере свіжі числа джерела.
     /// </summary>
     /// <remarks>
-    /// ⚠ Затверджений аркуш — саме ДЖЕРЕЛО: читач-скрипт (B) перераховується разом із будь-яким перерахованим джерелом
-    /// навіть на затвердженому аркуші (план §13.9, «зайвий перерахунок безпечний, пропущений — ні»), тож контроль
-    /// «затверджене пропущено» на аркуші читача невалідний.
+    /// ⚠ Затверджений аркуш тут — ДЖЕРЕЛО (перший); читач (другий аркуш) не затверджений. Затверджений читач
+    /// не перераховується ніколи (див. тест про читача на затвердженому аркуші).
     /// </remarks>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
@@ -436,6 +435,83 @@ public sealed class ScriptMethodologyRunSqlTests(SqlServerFixture sql)
 
         await RunJobAsync(f.Document, sheetDefId: null);
         Assert.Equal(["Y|10", "Y|60", "Z|70"], await ShapeAsync(f));
+    }
+
+    /// <summary>
+    /// MS (рецензія 3, п.1): читач (скрипт B) на ЗАТВЕРДЖЕНОМУ аркуші не перераховується разом із джерелом (D-328, D-493, B79:
+    /// затверджений аркуш не перераховується; формульний шлях його пропускає). Він лишається зі своїми числами, аркуш
+    /// отримує ту саму позначку «пропущено, затверджений» (<c>SheetRecalc</c>/<c>SkippedApproved</c>), що й формульний
+    /// залежний (для області аркуша-джерела — теж: тут система знає, що числа читача відстали); після повернення в роботу
+    /// перерахунок дає свіжі числа.
+    /// </summary>
+    /// <remarks>
+    /// Мутації: (а) у <c>ExtendTouchedWithScriptReadersAsync</c> прибрати перевірку <c>recalculable.Contains</c> — червоніє
+    /// (Z стає 70 при затвердженому читачі); (б) не писати <c>blockedReaders</c> у позначку — червоніє перевірка позначки
+    /// для області аркуша.
+    /// </remarks>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Читач_на_затвердженому_аркуші_не_перераховується_разом_із_джерелом_а_після_повернення_в_роботу_оновлюється(
+        bool areaRun)
+    {
+        var f = await ArrangeAsync(areaRun ? 209902 : 209901);
+        await InsertValuesAsync(f, ("gas", 10m), ("gas", 5m), ("oil", 7m));
+        var a = await PublishScriptAsync(
+            f, "A",
+            $"rows from {f.TableCode} where row.{f.C1} == \"gas\";\noutput Y: kg = row.{f.C2} * 2;",
+            [("Y", f.OutAColumnId)]);
+        var reader = await ArrangeReaderAsync(f, a);
+
+        await RunJobAsync(f.Document, sheetDefId: null);
+        Assert.Equal(["Y|10", "Y|20", "Z|30"], await ShapeAsync(f));
+
+        // Аркуш читача (другий) затверджено; джерело (перший) — чернетка.
+        await using (var db = f.Builder.CreateContext())
+        {
+            var state = new ApprovalState(f.Document.DocumentId, reader.SheetDefId, f.Document.PeriodKey.Value);
+            state.Submit(userId: 5, Now);
+            state.Approve(userId: 6, Now);
+            db.ApprovalStates.Add(state);
+            await db.SaveChangesAsync();
+        }
+
+        // Джерело змінилося (10 → 30) і перераховано: A дає 60 + 10, а затверджений читач лишає 30 (не 70).
+        await SetValueAsync(f, rowIndex: 0, 30m);
+        await RunJobAsync(f.Document, sheetDefId: areaRun ? f.Document.SheetDefId : null);
+        Assert.Equal(["Y|10", "Y|60", "Z|30"], await ShapeAsync(f));
+
+        // Та сама позначка, що й у затвердженого залежного: запис журналу «пропущено» на аркуші читача.
+        Assert.Equal(1, await SkippedMarksAsync(f, reader.SheetDefId));
+
+        // Повернення в роботу → перерахунок дає свіжі числа читача.
+        await using (var db = f.Builder.CreateContext())
+        {
+            var state = await db.ApprovalStates.SingleAsync(s =>
+                s.DocumentId == f.Document.DocumentId && s.SheetDefId == reader.SheetDefId);
+            state.Reopen(userId: 6, "правка", Now);
+            await db.SaveChangesAsync();
+        }
+
+        await RunJobAsync(f.Document, sheetDefId: areaRun ? f.Document.SheetDefId : null);
+        Assert.Equal(["Y|10", "Y|60", "Z|70"], await ShapeAsync(f));
+    }
+
+    private async Task<int> SkippedMarksAsync(Fixture f, int sheetDefId)
+    {
+        await using var db = f.Builder.CreateContext();
+        var correlation = Ecr.Application.Calculations.RecalculationSkips.AuditCorrelation(
+            f.Document.DocumentId, sheetDefId, f.Document.PeriodKey.Value);
+        var entityType = Ecr.Application.Calculations.RecalculationSkips.AuditEntityType;
+        var operation = Ecr.Application.Calculations.RecalculationSkips.AuditSkippedApproved;
+        return await db.Database
+            .SqlQuery<int>($"""
+                SELECT COUNT(*) AS Value FROM aud.StructureChange
+                 WHERE EntityType = {entityType} AND Operation = {operation} AND CorrelationId = {correlation}
+                """)
+            .SingleAsync();
     }
 
     private async Task LockRowAsync(Fixture f, long rowId)

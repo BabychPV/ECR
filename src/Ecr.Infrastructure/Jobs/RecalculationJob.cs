@@ -67,7 +67,8 @@ public sealed partial class RecalculationJob(
     CrossPeriodFanOut? fanOut = null,
     IRecalcCommandTimeout? commandTimeout = null,
     IAuditWriter? audit = null,
-    IRecalculationCompletionHook? completionHook = null) : IRecalculationJob
+    IRecalculationCompletionHook? completionHook = null,
+    IMonthColumnRouter? monthRouter = null) : IRecalculationJob
 {
     [LoggerMessage(
         Level = LogLevel.Error,
@@ -208,6 +209,9 @@ public sealed partial class RecalculationJob(
 
         // UAT-recalc-ux: періоди, які прогін рахував, за документами — для журналу пропущених/перерахованих поданих.
         var scopeByDocument = new Dictionary<long, int[]>();
+
+        // ✎ MS: затверджені аркуші читачів, яких не перераховано через затвердження, — для позначки «пропущено».
+        var blockedReaders = new Dictionary<long, IReadOnlySet<(int Period, int SheetDefId)>>();
 
         // ✎ LAND-YEAR L2b: (документ, період-читач, періоди-власники), чиї результати читали скрипти цього періоду.
         var foreignOwnerReads = new List<(long DocumentId, int Period, IReadOnlyCollection<int> Owners)>();
@@ -388,6 +392,7 @@ public sealed partial class RecalculationJob(
 
                 var bindingPlan = await BindingsAsync(docRequest, methodologyScope, skippedSheets, ct).ConfigureAwait(false);
                 var bindingsByPeriod = bindingPlan.Bindings;
+                blockedReaders[documentId] = bindingPlan.BlockedReaders;
                 if (logger is not null && bindingPlan.RecomputedOnInactive > 0)
                 {
                     LogRecomputedOutsideScope(logger, documentId, bindingPlan.RecomputedOnInactive);
@@ -598,10 +603,15 @@ public sealed partial class RecalculationJob(
             // після перемикання; вона читає вже нові числа й сама нових не ставить (ForeignOwnerPass).
             await EnqueueForeignOwnerReadersAsync(request, scopeByDocument, foreignOwnerReads, ct).ConfigureAwait(false);
 
+            // ✎ MS: прогін лише періоду-власника (кнопка «Перерахувати» місяця) не рахував читачів інших періодів — вони
+            // лишилися б зі старими числами власника. Читачів визначають матеріалізовані дані (calc.MethodologyReadTable,
+            // прив'язки, роутер місяців), нової таблиці-індексу немає.
+            await EnqueueOwnerPeriodReadersAsync(request, scopeByDocument, ct).ConfigureAwait(false);
+
             // ✎ UAT-recalc-ux: журнал аркушів — пропущені затверджені й перераховані подані (журнал змін + повідомлення
             // задачі). Після перемикання: записується лише те, що справді стало актуальним.
             // ✎ B79: поданий аркуш — лише якщо прогін змінив у ньому хоч одне число (`submittedChanges`).
-            var sheetLog = await SheetLogAsync(request, scopeByDocument, submittedChanges, ct).ConfigureAwait(false);
+            var sheetLog = await SheetLogAsync(request, scopeByDocument, submittedChanges, ct, blockedReaders).ConfigureAwait(false);
 
             // L-4: «No matching rule … row N». Не помилка й не відмова - решта рядків уже
             // пораховано; це слід у повідомленні задачі, щоб рядок без правила не зник мовчки.
@@ -815,22 +825,202 @@ public sealed partial class RecalculationJob(
                 continue;
             }
 
-            await jobs
-                .EnqueueCoalescedAsync<IRecalculationJob>(
-                    Ecr.Application.Documents.RecalculateDocumentHandler.TargetOf(documentId, new PeriodKey(period)),
-                    request with
-                    {
-                        DocumentId = documentId,
-                        PeriodKey = period,
-                        Year = null,
-                        SheetDefId = null,
-                        FanOutParentJobId = null,
-                        ForeignOwnerPass = true,
-                    },
-                    ct,
-                    request.TriggeredByUserId)
-                .ConfigureAwait(false);
+            await EnqueueReaderPassAsync(request, documentId, period, ct).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>Ставить coalesced-прохід періоду-читача; сам прохід нових не ставить (<c>ForeignOwnerPass</c>).</summary>
+    private async Task EnqueueReaderPassAsync(RecalculationRequest request, long documentId, int period, CancellationToken ct)
+        => _ = await jobs!
+            .EnqueueCoalescedAsync<IRecalculationJob>(
+                Ecr.Application.Documents.RecalculateDocumentHandler.TargetOf(documentId, new PeriodKey(period)),
+                ReaderPassRequest(request, documentId, period),
+                ct,
+                request.TriggeredByUserId)
+            .ConfigureAwait(false);
+
+    private static RecalculationRequest ReaderPassRequest(RecalculationRequest request, long documentId, int period)
+        => request with
+        {
+            DocumentId = documentId,
+            PeriodKey = period,
+            Year = null,
+            SheetDefId = null,
+            FanOutParentJobId = null,
+            ForeignOwnerPass = true,
+        };
+
+    /// <summary>
+    /// ✎ MS: ставить coalesced-прохід періодам-читачам, ЯКІ ПОЗА прогоном, коли прогін перерахував період-власник колонок
+    /// <c>Calculated</c> цих читачів (місячні колонки версії YearWithMonthColumns, не-місячні — якір року).
+    /// </summary>
+    /// <param name="request">Завдання; <see cref="RecalculationRequest.ForeignOwnerPass"/> — другий прохід нових не ставить.</param>
+    /// <param name="scopeByDocument">Періоди, які прогін рахував, за документами.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// <para>
+    /// Читач періоду Q — методологія-скрипт, що читає (<c>calc.MethodologyReadTable</c>) таблицю документа, у якої колонка
+    /// <c>Calculated</c> для Q має власника з перерахованих періодів (<see cref="IMonthColumnRouter.ForeignColumnsAsync"/>),
+    /// і яка прив'язана до екземпляра таблиці в Q. Документ не місячного проєкту й версії без розкладки року не платять
+    /// нічого, окрім одного читання роутера.
+    /// </para>
+    /// <para>
+    /// ⛔ Затверджені аркуші читача не перераховуються (D-328, D-493): прохід Q їх пропускає й лишає позначку
+    /// «пропущено» (<see cref="SheetLogAsync"/>). Період, де затверджено ВСЕ (чи закритий, чи проєкт архівний), прохід не
+    /// ставить — як розклад проєкту; позначку в разі «затверджено все» пишемо тут же, бо проходу, що її писав би, не буде.
+    /// </para>
+    /// </remarks>
+    private async Task EnqueueOwnerPeriodReadersAsync(
+        RecalculationRequest request, Dictionary<long, int[]> scopeByDocument, CancellationToken ct)
+    {
+        if (jobs is null || monthRouter is not { Enabled: true } || request.ForeignOwnerPass || scopeByDocument.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var (documentId, scope) in scopeByDocument)
+        {
+            if (scope.Length == 0)
+            {
+                continue;
+            }
+
+            var routing = await monthRouter.GetDocumentAsync(documentId, ct).ConfigureAwait(false);
+            if (routing is null || !monthRouter.RoutesComputedVersion(routing.TemplateVersionId))
+            {
+                continue;
+            }
+
+            foreach (var period in await ReaderPeriodsOfOwnersAsync(routing, scope, ct).ConfigureAwait(false))
+            {
+                var child = ReaderPassRequest(request, documentId, period);
+                var skip = await ReaderPassSkipAsync(child, ct).ConfigureAwait(false);
+                if (skip == RecalculationWriteDenial.None)
+                {
+                    await EnqueueReaderPassAsync(request, documentId, period, ct).ConfigureAwait(false);
+                }
+                else if (skip == RecalculationWriteDenial.SheetsSubmitted)
+                {
+                    await SheetLogAsync(
+                            child, new Dictionary<long, int[]> { [documentId] = [period] }, new SubmittedSheetChanges(), ct)
+                        .ConfigureAwait(false);
+                }
+            }
+        }
+    }
+
+    /// <summary>Чи ставити прохід читача: <see cref="RecalculationWriteDenial.None"/> — так.</summary>
+    private async Task<RecalculationWriteDenial> ReaderPassSkipAsync(RecalculationRequest child, CancellationToken ct)
+    {
+        try
+        {
+            return await FanOutSkipAsync(child, ct).ConfigureAwait(false);
+        }
+        catch (Ecr.Application.Errors.BusinessRuleException)
+        {
+            // Закритий період (D-468) тощо: прохід лише відмовив би; закритий місяць перераховується лише після Reopen.
+            return RecalculationWriteDenial.PeriodClosed;
+        }
+    }
+
+    /// <summary>Періоди року (поза <paramref name="scope"/>), де є читач колонки <c>Calculated</c> з власником у <paramref name="scope"/>.</summary>
+    private async Task<IReadOnlyList<int>> ReaderPeriodsOfOwnersAsync(
+        MonthRoutingDocument routing, int[] scope, CancellationToken ct)
+    {
+        var tables = (await db.TableDefs
+                .AsNoTracking()
+                .Include(t => t.Columns)
+                .Where(t => !t.IsDeleted
+                            && db.SheetDefs.Any(s => s.Id == t.SheetDefId && s.TemplateVersionId == routing.TemplateVersionId))
+                .OrderBy(t => t.Id)
+                .Take(MaxBindings)
+                .ToListAsync(ct)
+                .ConfigureAwait(false))
+            .Where(t => monthRouter!.AppliesToTable(t)
+                        && t.Columns.Any(c => !c.IsDeleted && c.DataType == Domain.Enums.CellDataType.Calculated))
+            .ToList();
+        if (tables.Count == 0)
+        {
+            return [];
+        }
+
+        var readers = await new ScriptRuntimeStore(db)
+            .GetReadersOfTablesAsync([.. tables.Select(t => t.Code).Distinct(StringComparer.OrdinalIgnoreCase)], ct)
+            .ConfigureAwait(false);
+        if (readers.Count == 0)
+        {
+            return [];
+        }
+
+        var readerIds = readers.Select(r => r.MethodologyId).Distinct().ToList();
+        var bound = await db.CalculationBindings
+            .AsNoTracking()
+            .Where(b => b.IsActive && readerIds.Contains(b.MethodologyId))
+            .Select(b => new { b.TableDefId, b.MethodologyId })
+            .Distinct()
+            .OrderBy(b => b.TableDefId)
+            .ThenBy(b => b.MethodologyId)
+            .Take(MaxBindings)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        if (bound.Count == 0)
+        {
+            return [];
+        }
+
+        var candidates = new List<int>();
+        foreach (var year in scope.Select(p => new PeriodKey(p).Year).Distinct())
+        {
+            candidates.AddRange(
+                (await monthRouter!.YearPeriodKeysAsync(routing.ProjectId, year, ct).ConfigureAwait(false))
+                .Where(key => !scope.Contains(key)));
+        }
+
+        if (candidates.Count == 0)
+        {
+            return [];
+        }
+
+        var boundTableDefIds = bound.Select(b => b.TableDefId).Distinct().ToList();
+        var instances = await db.TableInstances
+            .AsNoTracking()
+            .OriginalOnly()
+            .Where(i => i.DocumentId == routing.DocumentId
+                        && candidates.Contains(i.PeriodKeyValue)
+                        && boundTableDefIds.Contains(i.TableDefId))
+            .Select(i => new { i.PeriodKeyValue, i.TableDefId })
+            .Distinct()
+            .OrderBy(i => i.PeriodKeyValue)
+            .ThenBy(i => i.TableDefId)
+            .Take(MaxBindings)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var result = new List<int>();
+        foreach (var inPeriod in instances.GroupBy(i => i.PeriodKeyValue))
+        {
+            var tableDefIds = inPeriod.Select(i => i.TableDefId).ToHashSet();
+            var periodReaders = bound.Where(b => tableDefIds.Contains(b.TableDefId)).Select(b => b.MethodologyId).ToHashSet();
+            var readCodes = readers
+                .Where(r => periodReaders.Contains(r.MethodologyId))
+                .Select(r => r.TableCode)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var table in tables.Where(t => readCodes.Contains(t.Code)))
+            {
+                var foreign = await monthRouter!
+                    .ForeignColumnsAsync(routing, table, new PeriodKey(inPeriod.Key), ct)
+                    .ConfigureAwait(false);
+                if (foreign.Any(f => f.Column.DataType == Domain.Enums.CellDataType.Calculated
+                                     && scope.Contains(f.OwnerPeriod.Value)))
+                {
+                    result.Add(inPeriod.Key);
+                    break;
+                }
+            }
+        }
+
+        return result;
     }
 
     /// <summary>
@@ -929,6 +1119,7 @@ public sealed partial class RecalculationJob(
     /// <param name="scopeByDocument">Періоди, які прогін рахував, за документами.</param>
     /// <param name="changes">✎ B79: подані аркуші, у яких прогін змінив хоч одне число.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="blockedReaders">✎ MS: затверджені аркуші читачів, яких не перераховано (див. <c>BindingPlan.BlockedReaders</c>), за документами.</param>
     /// <returns>Скільки пропущено і скільки поданих перераховано зі зміною чисел.</returns>
     /// <remarks>
     /// ⚠ Запис на АРКУШ, а не один на задачу: позначку «перераховано після подання» читає картка документа саме за
@@ -943,7 +1134,7 @@ public sealed partial class RecalculationJob(
     /// </remarks>
     private async Task<(int Skipped, int RecalculatedSubmitted)> SheetLogAsync(
         RecalculationRequest request, Dictionary<long, int[]> scopeByDocument, SubmittedSheetChanges changes,
-        CancellationToken ct)
+        CancellationToken ct, Dictionary<long, IReadOnlySet<(int Period, int SheetDefId)>>? blockedReaders = null)
     {
         var entries = new List<StructureChangeRecord>();
         var skipped = 0;
@@ -964,11 +1155,17 @@ public sealed partial class RecalculationJob(
             // ✎ F13 p218 #788: по СКОУПУ (аркуш × копія, RS) — подана копія перераховується з позначкою й записом журналу,
             // затверджена — пропускається із записом, так само як оригінал (правило людини 07.11).
             // ✎ B138: версія без погодження — нічого не «пропущено» й не «перераховано після подання».
+            // ✎ MS: затверджений аркуш читача, якого не перераховано через затвердження, позначається і поза областю аркуша.
+            var blocked = blockedReaders is not null && blockedReaders.TryGetValue(documentId, out var blockedSet)
+                ? blockedSet
+                : new HashSet<(int Period, int SheetDefId)>();
+            var blockedSheetIds = blocked.Select(b => b.SheetDefId).Distinct().ToList();
             var rows = await db.ApprovalStates
                 .AsNoTracking()
                 .ExceptWorkflowNone(db)
                 .Where(a => a.DocumentId == documentId && periods.Contains(a.PeriodKey)
-                            && (request.SheetDefId == null || a.SheetDefId == request.SheetDefId)
+                            && (request.SheetDefId == null || a.SheetDefId == request.SheetDefId
+                                || blockedSheetIds.Contains(a.SheetDefId))
                             && (a.Status == Domain.Enums.DocumentStatus.Approved
                                 || a.Status == Domain.Enums.DocumentStatus.Submitted))
                 .Join(db.SheetDefs, a => a.SheetDefId, s => s.Id, (a, s) => new { a.SheetDefId, a.SheetCopyId, a.PeriodKey, a.Status, s.TemplateVersionId, s.Code })
@@ -979,6 +1176,12 @@ public sealed partial class RecalculationJob(
             foreach (var row in rows)
             {
                 var approvedRow = row.Status == Domain.Enums.DocumentStatus.Approved;
+
+                if (request.SheetDefId is { } areaSheet && row.SheetDefId != areaSheet
+                    && !(approvedRow && row.SheetCopyId is null && blocked.Contains((row.PeriodKey, row.SheetDefId))))
+                {
+                    continue;
+                }
 
                 // ✎ B79: поданий аркуш, у якому прогін не змінив жодного числа, — без запису й без позначки.
                 if (!approvedRow && !changes.Contains(documentId, row.PeriodKey, row.SheetDefId, row.SheetCopyId))
@@ -1338,8 +1541,13 @@ public sealed partial class RecalculationJob(
                 g => g.SelectMany(i => methodologiesByTable.GetValueOrDefault(i.TableDefId) ?? []).ToHashSet());
 
         // ✎ MS (план §13.1, §13.9): методології-скрипти, що ЧИТАЮТЬ таблицю активного екземпляра, і всі, хто читає
-        // результати перерахованих, — теж перераховуються (зайвий перерахунок безпечний, пропущений — ні).
-        await ExtendTouchedWithScriptReadersAsync(instances, IsActive, touchedByPeriod, ct).ConfigureAwait(false);
+        // результати перерахованих, — теж перераховуються, АЛЕ не на затверджених аркушах (D-328, D-493, B79):
+        // читач, що живе лише на затвердженому аркуші, лишається зі своїми числами (їх переносить CarryOver), а аркуш
+        // отримує ту саму позначку «пропущено, затверджений» (SheetLogAsync), що й формульний залежний.
+        var blockedReaders = new HashSet<(int Period, int SheetDefId)>();
+        await ExtendTouchedWithScriptReadersAsync(
+                instances, IsActive, skippedSheets, methodologiesByTable, touchedByPeriod, blockedReaders, ct)
+            .ConfigureAwait(false);
 
         var carryByPeriod = new Dictionary<int, IReadOnlyCollection<int>>();
         var partialByPeriod = new Dictionary<int, IReadOnlySet<long>>();
@@ -1404,7 +1612,7 @@ public sealed partial class RecalculationJob(
                 g => g.Key,
                 g => (IReadOnlyList<int>)[.. g.Select(i => i.SheetDefId).Distinct().Order()]);
 
-        return new BindingPlan(byPeriod, carryByPeriod, recomputedOnSubmitted, activeSheets, partialByPeriod);
+        return new BindingPlan(byPeriod, carryByPeriod, recomputedOnSubmitted, activeSheets, partialByPeriod, blockedReaders);
     }
 
     /// <summary>
@@ -1414,17 +1622,32 @@ public sealed partial class RecalculationJob(
     /// </summary>
     /// <param name="instances">Екземпляри таблиць документа в скоупі.</param>
     /// <param name="isActive">Чи екземпляр перераховується цим прогоном.</param>
+    /// <param name="approvedSheets">Затверджені аркуші за періодами (<see cref="ApprovedSheetsAsync"/>): їх не перераховує жоден прогін.</param>
+    /// <param name="methodologiesByTable">Методології, прив'язані до таблиць (за <c>TableDefId</c>).</param>
     /// <param name="touchedByPeriod">Зачеплені методології за періодами; доповнюється на місці.</param>
+    /// <param name="blockedReaders">
+    /// Затверджені аркуші (період, аркуш) із читачами, які довелося б перерахувати, але затвердження не дозволяє: для них
+    /// <see cref="SheetLogAsync"/> пише позначку «пропущено» навіть коли аркуш поза областю прогону.
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
     /// <remarks>
     /// ⚠ Формульний документ платить двома дрібними читаннями на прогін (коди таблиць, читачі) — ребер і читачів
     /// там немає, і множини лишаються без змін. Читачі, прив'язок яких у документі нема, у перелік прив'язок не
     /// потрапляють: його складають прив'язки, а не цей набір.
+    /// <para>
+    /// ⛔ Затверджений аркуш не перераховується (D-328, D-493: пропускаються лише затверджені; B79). Читач потрапляє в
+    /// набір періоду, лише коли має прив'язку на НЕзатвердженому екземплярі цього періоду (аркуш поза областю прогону —
+    /// так, затверджений — ні); через не доданого читача ланцюг далі не йде: його числа не змінилися. Читач, прив'язаний
+    /// і до затвердженої, і до незатвердженої таблиці, рахується цілком, як і кожна спільна методологія (RC15, D-328).
+    /// </para>
     /// </remarks>
     private async Task ExtendTouchedWithScriptReadersAsync(
         IReadOnlyList<InstanceRow> instances,
         Func<InstanceRow, bool> isActive,
+        Dictionary<int, HashSet<int>> approvedSheets,
+        Dictionary<int, List<int>> methodologiesByTable,
         Dictionary<int, HashSet<int>> touchedByPeriod,
+        HashSet<(int Period, int SheetDefId)> blockedReaders,
         CancellationToken ct)
     {
         var active = instances.Where(isActive).ToList();
@@ -1461,9 +1684,24 @@ public sealed partial class RecalculationJob(
                 .Select(i => codeById.GetValueOrDefault(i.TableDefId))
                 .OfType<string>()
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            // Методології, прив'язані до НЕзатверджених екземплярів періоду: лише їх можна перераховувати.
+            var recalculable = instances
+                .Where(i => i.PeriodKeyValue == period
+                            && !(approvedSheets.TryGetValue(period, out var approved) && approved.Contains(i.SheetDefId)))
+                .SelectMany(i => methodologiesByTable.GetValueOrDefault(i.TableDefId) ?? [])
+                .ToHashSet();
+            var blocked = new HashSet<int>();
             foreach (var reader in readers.Where(r => codes.Contains(r.TableCode)))
             {
-                touched.Add(reader.MethodologyId);
+                if (recalculable.Contains(reader.MethodologyId))
+                {
+                    touched.Add(reader.MethodologyId);
+                }
+                else if (!touched.Contains(reader.MethodologyId))
+                {
+                    blocked.Add(reader.MethodologyId);
+                }
             }
 
             var frontier = new Queue<int>(touched);
@@ -1471,11 +1709,26 @@ public sealed partial class RecalculationJob(
             {
                 foreach (var reader in readersOfSource[source])
                 {
-                    if (touched.Add(reader))
+                    if (recalculable.Contains(reader))
                     {
-                        frontier.Enqueue(reader);
+                        if (touched.Add(reader))
+                        {
+                            frontier.Enqueue(reader);
+                        }
+                    }
+                    else if (!touched.Contains(reader))
+                    {
+                        blocked.Add(reader);
                     }
                 }
+            }
+
+            foreach (var i in instances.Where(i => i.PeriodKeyValue == period
+                                                   && approvedSheets.TryGetValue(period, out var approved)
+                                                   && approved.Contains(i.SheetDefId)
+                                                   && (methodologiesByTable.GetValueOrDefault(i.TableDefId) ?? []).Any(m => blocked.Contains(m) && !touched.Contains(m))))
+            {
+                blockedReaders.Add((period, i.SheetDefId));
             }
         }
     }
@@ -1489,6 +1742,9 @@ public sealed partial class RecalculationJob(
     /// <param name="ActiveSheets">
     /// D2-03: аркуші, чиї таблиці прогін перераховує методологіями, за періодом (за зростанням Id).
     /// </param>
+    /// <param name="BlockedReaders">
+    /// Затверджені аркуші (період, аркуш), де читач результатів/таблиць перерахованого джерела НЕ перераховано, бо аркуш затверджено.
+    /// </param>
     /// <param name="PartialTables">
     /// Екземпляри таблиць періоду, де хоч одна прив'язана методологія переноситься, а не рахується. Їхні рядки прогін
     /// бачить не всіма методологіями, тож діагностика рядків (без правила, відхилені) і заміна проблем таблиці для них
@@ -1499,7 +1755,8 @@ public sealed partial class RecalculationJob(
         IReadOnlyDictionary<int, IReadOnlyCollection<int>> CarryOver,
         int RecomputedOnInactive,
         IReadOnlyDictionary<int, IReadOnlyList<int>> ActiveSheets,
-        IReadOnlyDictionary<int, IReadOnlySet<long>> PartialTables)
+        IReadOnlyDictionary<int, IReadOnlySet<long>> PartialTables,
+        IReadOnlySet<(int Period, int SheetDefId)> BlockedReaders)
     {
         /// <summary>Порожній план: нічого не рахується й не переноситься.</summary>
         public static readonly BindingPlan Empty = new(
@@ -1507,7 +1764,8 @@ public sealed partial class RecalculationJob(
             ReadOnlyDictionary<int, IReadOnlyCollection<int>>.Empty,
             0,
             ReadOnlyDictionary<int, IReadOnlyList<int>>.Empty,
-            ReadOnlyDictionary<int, IReadOnlySet<long>>.Empty);
+            ReadOnlyDictionary<int, IReadOnlySet<long>>.Empty,
+            new HashSet<(int Period, int SheetDefId)>());
     }
 
     /// <summary>Аркуші документа, які прогін періоду перерахував методологіями (D2-03).</summary>
