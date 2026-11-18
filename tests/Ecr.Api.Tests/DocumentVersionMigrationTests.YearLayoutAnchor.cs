@@ -2,12 +2,16 @@
 using System.Globalization;
 using System.Net;
 using System.Text.Json;
+using Ecr.Application.Documents.VersionMigration;
+using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
+using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Ecr.Api.Tests;
@@ -51,6 +55,7 @@ public sealed partial class DocumentVersionMigrationTests
             Assert.True(report.GetProperty("canApply").GetBoolean(), dryBody);
             Assert.Equal(2, report.GetProperty("nonMonthCopiedToAnchor").GetInt64());
             Assert.Equal(0, report.GetProperty("nonMonthAnchorRowsCreated").GetInt64());   // обидва рядки в якорі вже є
+            Assert.Equal(0, report.GetProperty("anchorInstancesCreated").GetInt64());     // екземпляр якоря вже є
             Assert.Equal(JsonValueKind.Null, report.GetProperty("nonMonthConflicts").ValueKind);
 
             var applied = await PostYearAsync(client, y, dryRun: false).ConfigureAwait(true);
@@ -195,8 +200,8 @@ public sealed partial class DocumentVersionMigrationTests
     public async Task Якір_без_екземпляра_таблиці_дістає_екземпляр_рядки_й_значення_найпізнішого_місяця()
     {
         // Як Land doc 96: T8_00 немає в 202601..202608, є лише в пізніших місяцях з тими самими RowKey.
-        // Мутаційний доказ: у AnchorFillSql вставка рядків якоря `WHERE NOT EXISTS (SELECT 1 FROM doc.TableRow y ...)` →
-        // `WHERE 1 = 0 AND NOT EXISTS (...)` — T2 відкочується (рядків 0 замість 2, ECR-CELL-0409), тест червоний.
+        // ✎ (a′): відсутній екземпляр якоря таблиці складу документа створює крок «усі екземпляри якоря» разом із фіксованими
+        // рядками шаблону; крок копії рядків уже не створює (nonMonthAnchorRowsCreated = 0), екземпляр — 1.
         var y = await ArrangeYearAsync(targetMonths: 12).ConfigureAwait(true);
         try
         {
@@ -226,7 +231,8 @@ public sealed partial class DocumentVersionMigrationTests
             var report = JsonDocument.Parse(dryBody).RootElement;
             Assert.True(report.GetProperty("canApply").GetBoolean(), dryBody);
             Assert.Equal(1, report.GetProperty("nonMonthCopiedToAnchor").GetInt64());
-            Assert.Equal(2, report.GetProperty("nonMonthAnchorRowsCreated").GetInt64());   // обидва рядки таблиці, не лише заповнений
+            Assert.Equal(0, report.GetProperty("nonMonthAnchorRowsCreated").GetInt64());   // фіксовані рядки — разом з екземпляром
+            Assert.Equal(1, report.GetProperty("anchorInstancesCreated").GetInt64());
 
             var applied = await PostYearAsync(client, y, dryRun: false).ConfigureAwait(true);
             var body = await applied.Content.ReadAsStringAsync().ConfigureAwait(true);
@@ -246,9 +252,12 @@ public sealed partial class DocumentVersionMigrationTests
                     .Where(r => r.PeriodKeyValue == 209911 && r.TableInstanceId == db.TableRows
                         .Where(x => x.PeriodKeyValue == 209911 && x.Id == y.Row1ByPeriod[209911]).Select(x => x.TableInstanceId).First())
                     .Select(r => new { r.RowKeyValue, r.RowDefId, r.Ordinal }).ToListAsync().ConfigureAwait(true);
+                // ✎ (a′): рядки якоря — фіксовані рядки шаблону цільової таблиці (як шлях відкриття), тож RowDefId — опис рядка
+                // цільової версії (рядки місяців у цьому будівнику без RowDefId); ключі й порядок — ті самі, що в місяцях.
                 Assert.Equal(
-                    monthRows.OrderBy(r => r.RowKeyValue, StringComparer.Ordinal).Select(r => (r.RowKeyValue, r.RowDefId, r.Ordinal)).ToList(),
-                    anchorRows.OrderBy(r => r.RowKeyValue, StringComparer.Ordinal).Select(r => (r.RowKeyValue, r.RowDefId, r.Ordinal)).ToList());
+                    monthRows.OrderBy(r => r.RowKeyValue, StringComparer.Ordinal).Select(r => (r.RowKeyValue, r.Ordinal)).ToList(),
+                    anchorRows.OrderBy(r => r.RowKeyValue, StringComparer.Ordinal).Select(r => (r.RowKeyValue, r.Ordinal)).ToList());
+                Assert.All(anchorRows, r => Assert.NotNull(r.RowDefId));
 
                 var row1 = anchorRows.Single(r => r.RowKeyValue == y.Row1Key).Id;
                 Assert.Equal(55m, (await db.CellValues.AsNoTracking()
@@ -337,7 +346,181 @@ public sealed partial class DocumentVersionMigrationTests
         }
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-474")]
+    [Trait("Task", "LAND-YEAR-L3-STATIC")]
+    public async Task Перехід_на_рік_створює_в_якорі_відсутній_екземпляр_статичної_таблиці_з_усіма_фіксованими_рядками()
+    {
+        // (f) Як S08 Land doc 96: аркуш STATB у складі документа ніколи не відкривали в січні — екземпляра T8B у якорі
+        // немає, значень у місяцях теж (крок копії тут нічого не робить). Перехід на рік створює екземпляр з фіксованими
+        // рядками, щоб перерахунок року одразу після переносу його заповнив.
+        // Мутаційний доказ: у AnchorFillSql `INSERT doc.TableInstance ... FROM @missingInst m` → `... FROM @missingInst m
+        // WHERE 1 = 0` — T2 відкочується (екземплярів 0 замість 1, ECR-CELL-0409), тест червоний.
+        var y = await ArrangeYearAsync(targetMonths: 12, (db, versionId) => _ = AddStaticStructure(db, versionId))
+            .ConfigureAwait(true);
+        try
+        {
+            var target = await StaticTargetAsync(y).ConfigureAwait(true);
+            await AddStaticSheetAsync(y, target, [], 0m).ConfigureAwait(true);
+
+            using var app = CreateYearApp();
+            using var client = await SignedInAsync(app, y.UserName).ConfigureAwait(true);
+
+            var dry = await PostYearAsync(client, y, dryRun: true).ConfigureAwait(true);
+            var dryBody = await dry.Content.ReadAsStringAsync().ConfigureAwait(true);
+            Assert.True(dry.StatusCode == HttpStatusCode.OK, $"{dry.StatusCode}: {dryBody} {app.ErrorsText}");
+            var report = JsonDocument.Parse(dryBody).RootElement;
+            Assert.True(report.GetProperty("canApply").GetBoolean(), dryBody);
+            Assert.Equal(1, report.GetProperty("anchorInstancesCreated").GetInt64());
+            Assert.Equal(0, report.GetProperty("nonMonthAnchorRowsCreated").GetInt64());
+
+            var applied = await PostYearAsync(client, y, dryRun: false).ConfigureAwait(true);
+            var body = await applied.Content.ReadAsStringAsync().ConfigureAwait(true);
+            Assert.True(applied.StatusCode == HttpStatusCode.OK, $"{applied.StatusCode}: {body} {app.ErrorsText}");
+            Assert.Equal(1, JsonDocument.Parse(body).RootElement.GetProperty("anchorInstancesCreated").GetInt64());
+            Assert.Equal(y.TargetVersionId, await YearProjectVersionAsync(y).ConfigureAwait(true));
+
+            await using var db = y.Builder.CreateContext();
+            var instance = await db.TableInstances.AsNoTracking()
+                .SingleAsync(t => t.PeriodKeyValue == YearAnchor && t.DocumentId == y.Doc.DocumentId && t.TableDefId == target.Table)
+                .ConfigureAwait(true);
+            Assert.Null(instance.SheetCopyId);
+            var rows = await db.TableRows.AsNoTracking()
+                .Where(r => r.PeriodKeyValue == YearAnchor && r.TableInstanceId == instance.Id && !r.IsDeleted)
+                .Select(r => new { r.RowKeyValue, r.RowDefId, r.Ordinal }).ToListAsync().ConfigureAwait(true);
+            var row = Assert.Single(rows);   // усі (тут — один) живі RowDef таблиці цільової версії
+            Assert.Equal((StaticRowKey, (int?)target.Row, 1), (row.RowKeyValue, row.RowDefId, row.Ordinal));
+        }
+        finally
+        {
+            await CleanupYearAsync(y).ConfigureAwait(true);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-474")]
+    [Trait("Task", "LAND-YEAR-L3-STATIC")]
+    public async Task Крок_якоря_після_застосування_ідемпотентний_нічого_не_створює_вдруге()
+    {
+        // (g) Після переносу (екземпляр T8B створено) повторний розрахунок кроку тим самим планом — як відновлення переносу
+        // чи повторне застосування — дає 0 екземплярів, 0 рядків і 0 комірок.
+        var y = await ArrangeYearAsync(targetMonths: 12, (db, versionId) => _ = AddStaticStructure(db, versionId))
+            .ConfigureAwait(true);
+        try
+        {
+            var target = await StaticTargetAsync(y).ConfigureAwait(true);
+            await AddStaticSheetAsync(y, target, [], 0m).ConfigureAwait(true);
+
+            using var app = CreateYearApp();
+            using var client = await SignedInAsync(app, y.UserName).ConfigureAwait(true);
+
+            // План — тим самим планувальником, що й обробник (до переносу: вихідна версія → річна).
+            VersionMigrationPlan plan;
+            await using (var scope = app.Services.CreateAsyncScope())
+            {
+                var cache = scope.ServiceProvider.GetRequiredService<IMetadataCache>();
+                var from = await cache.GetAsync(y.SourceVersionId, CancellationToken.None).ConfigureAwait(true);
+                var to = await cache.GetAsync(y.TargetVersionId, CancellationToken.None).ConfigureAwait(true);
+                await using var db0 = y.Builder.CreateContext();
+                var usage = await new DocumentVersionMigrationStore(db0).ReadScopeAsync(y.Doc.ProjectId, CancellationToken.None).ConfigureAwait(true);
+                plan = VersionMigrationPlanner.Plan(from, to, usage.Cells, usage.HeaderValues, monthColumns: true) with
+                {
+                    AnchorColumns = [.. to.Sheets.SelectMany(s => s.Tables).SelectMany(t => t.Columns)
+                        .Where(c => !c.IsDeleted && !c.IsMonthColumn && !c.IsComputed).Select(c => c.Id).Order()],
+                };
+            }
+
+            await using (var db1 = y.Builder.CreateContext())
+            {
+                var before = await new DocumentVersionMigrationStore(db1).ReadAnchorFillAsync(y.Doc.ProjectId, plan, 10, CancellationToken.None)
+                    .ConfigureAwait(true);
+                Assert.Equal(1, before.InstancesCreated);
+            }
+
+            var applied = await PostYearAsync(client, y, dryRun: false).ConfigureAwait(true);
+            var body = await applied.Content.ReadAsStringAsync().ConfigureAwait(true);
+            Assert.True(applied.StatusCode == HttpStatusCode.OK, $"{applied.StatusCode}: {body} {app.ErrorsText}");
+
+            await using var db = y.Builder.CreateContext();
+            var again = await new DocumentVersionMigrationStore(db).ReadAnchorFillAsync(y.Doc.ProjectId, plan, 10, CancellationToken.None)
+                .ConfigureAwait(true);
+            Assert.Equal((0L, 0L, 0L), (again.InstancesCreated, again.RowsCreated, again.Copies));
+            Assert.Equal(1, await db.TableInstances.AsNoTracking()
+                .CountAsync(t => t.PeriodKeyValue == YearAnchor && t.DocumentId == y.Doc.DocumentId && t.TableDefId == target.Table)
+                .ConfigureAwait(true));
+        }
+        finally
+        {
+            await CleanupYearAsync(y).ConfigureAwait(true);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-474")]
+    [Trait("Task", "LAND-YEAR-L3-STATIC")]
+    public async Task Поданий_якір_без_екземпляра_відмова_sheetsLocked_екземпляр_не_створено()
+    {
+        // (h) Як (f), але аркуш STATB якоря поданий: створення екземпляра — запис у поданий аркуш → sheetsLocked, нічого.
+        var y = await ArrangeYearAsync(targetMonths: 12, (db, versionId) => _ = AddStaticStructure(db, versionId))
+            .ConfigureAwait(true);
+        try
+        {
+            var target = await StaticTargetAsync(y).ConfigureAwait(true);
+            var stat = await AddStaticSheetAsync(y, target, [], 0m).ConfigureAwait(true);
+            await using (var db = y.Builder.CreateContext())
+            {
+                var state = new Ecr.Domain.Entities.Workflow.ApprovalState(y.Doc.DocumentId, stat.SourceSheetId, YearAnchor);
+                state.Submit(1, new DateTime(2026, 11, 18, 2, 0, 0, DateTimeKind.Utc));
+                db.ApprovalStates.Add(state);
+                await db.SaveChangesAsync().ConfigureAwait(true);
+            }
+
+            using var app = CreateYearApp();
+            using var client = await SignedInAsync(app, y.UserName).ConfigureAwait(true);
+
+            var dry = await PostYearAsync(client, y, dryRun: true).ConfigureAwait(true);
+            var dryBody = await dry.Content.ReadAsStringAsync().ConfigureAwait(true);
+            Assert.True(dry.StatusCode == HttpStatusCode.OK, $"{dry.StatusCode}: {dryBody} {app.ErrorsText}");
+            var report = JsonDocument.Parse(dryBody).RootElement;
+            Assert.False(report.GetProperty("canApply").GetBoolean(), dryBody);
+            Assert.Contains("sheetsLocked", report.GetProperty("refusals").EnumerateArray().Select(r => r.GetString()));
+            Assert.Equal(1, report.GetProperty("lockedSheetsAffected").GetInt32());
+
+            var refused = await PostYearAsync(client, y, dryRun: false).ConfigureAwait(true);
+            await AssertProblemAsync(
+                refused, HttpStatusCode.Conflict, "ECR-DOC-0409", "err.ECR-DOC-0409.migrateSheetsLocked").ConfigureAwait(true);
+
+            Assert.Equal(y.SourceVersionId, await YearProjectVersionAsync(y).ConfigureAwait(true));
+            await using var check = y.Builder.CreateContext();
+            Assert.False(await check.TableInstances.AsNoTracking()
+                .AnyAsync(t => t.PeriodKeyValue == YearAnchor && t.DocumentId == y.Doc.DocumentId
+                               && (t.TableDefId == stat.SourceTableId || t.TableDefId == stat.TargetTableId)).ConfigureAwait(true));
+        }
+        finally
+        {
+            await CleanupYearAsync(y).ConfigureAwait(true);
+        }
+    }
+
     // ───────────────────────────── допоміжне (B-static) ─────────────────────────────
+
+    /// <summary>Ідентифікатори статичного аркуша STATB цільової версії (додано до публікації в ArrangeYearAsync).</summary>
+    private static async Task<(int Sheet, int Table, int Column, int Row)> StaticTargetAsync(YearScenario y)
+    {
+        await using var db = y.Builder.CreateContext();
+        var sheet = await db.SheetDefs.AsNoTracking()
+            .Where(s => s.TemplateVersionId == y.TargetVersionId && s.Code == "STATB").Select(s => s.Id).SingleAsync().ConfigureAwait(false);
+        var table = await db.TableDefs.AsNoTracking().Where(t => t.SheetDefId == sheet).Select(t => t.Id).SingleAsync().ConfigureAwait(false);
+        var column = await db.ColumnDefs.AsNoTracking().Where(c => c.TableDefId == table).Select(c => c.Id).SingleAsync().ConfigureAwait(false);
+        var row = await db.RowDefs.AsNoTracking().Where(r => r.TableDefId == table).Select(r => r.Id).SingleAsync().ConfigureAwait(false);
+        return (sheet, table, column, row);
+    }
 
     /// <summary>Ідентифікатори статичного аркуша (e): аркуш/таблиця/колонка вихідної й цільової версій.</summary>
     private sealed record StaticSheet(int SourceSheetId, int SourceTableId, int SourceColumnId, int TargetTableId, int TargetColumnId);

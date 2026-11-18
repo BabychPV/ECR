@@ -147,6 +147,11 @@ namespace Ecr.Application.Documents.VersionMigration;
 /// екземпляра таблиці) для немісячного значення: рядок береться з найпізнішого місяця (<c>RowKey</c>, опис рядка,
 /// порядок). <c>null</c> — перенос не є переходом на рік.
 /// </param>
+/// <param name="AnchorInstancesCreated">
+/// ✎ LAND-YEAR L3 (a′): скільки екземплярів таблиць цільової версії перенос створить (створив) у якорі року — УСІ відсутні
+/// (оригінал і копії аркушів складу документа, з фіксованими рядками), щоб перерахунок року одразу після переносу їх
+/// заповнив, а річний перегляд їх показав без попереднього відкриття аркуша. <c>null</c> — перенос не є переходом на рік.
+/// </param>
 public sealed record DocumentVersionMigrationDto(
     long DocumentId,
     int ProjectId,
@@ -196,7 +201,8 @@ public sealed record DocumentVersionMigrationDto(
     long? NonMonthCopiedToAnchor = null,
     IReadOnlyList<NonMonthConflictItem>? NonMonthConflicts = null,
     bool? NonMonthConflictsTruncated = null,
-    long? NonMonthAnchorRowsCreated = null);
+    long? NonMonthAnchorRowsCreated = null,
+    long? AnchorInstancesCreated = null);
 
 /// <summary>
 /// ✎ LAND-YEAR L3 (B-static): комірка немісячної колонки, у якої якір року порожній, а місяці року не згодні
@@ -1846,7 +1852,8 @@ public sealed class MigrateDocumentVersionHandler(
             NonMonthCopiedToAnchor: yearTransition ? anchorFill.Copies : null,
             NonMonthConflicts: anchorFill.ConflictCells == 0 ? null : AnchorConflictItems(anchorFill, to),
             NonMonthConflictsTruncated: anchorFill.ConflictCells == 0 ? null : anchorFill.ConflictCells > anchorFill.Conflicts.Count,
-            NonMonthAnchorRowsCreated: yearTransition ? anchorFill.RowsCreated : null);
+            NonMonthAnchorRowsCreated: yearTransition ? anchorFill.RowsCreated : null,
+            AnchorInstancesCreated: yearTransition ? anchorFill.InstancesCreated : null);
 
         return new PlannedMigration(
             dto, plan, foreignKeys, extendedPlan.Remap with { CollectionMappingIds = collectionPlan.RemapIds }, lookup.Rows,

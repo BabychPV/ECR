@@ -1152,6 +1152,8 @@ public sealed partial class DocumentVersionMigrationStore(
                             ["actual"] = actual.Cells.ToString(System.Globalization.CultureInfo.InvariantCulture),
                             ["expectedRows"] = expected.Rows.ToString(System.Globalization.CultureInfo.InvariantCulture),
                             ["actualRows"] = actual.Rows.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            ["expectedInstances"] = expected.Instances.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            ["actualInstances"] = actual.Instances.ToString(System.Globalization.CultureInfo.InvariantCulture),
                         });
                 }
             }
@@ -2303,6 +2305,48 @@ public sealed partial class DocumentVersionMigrationStore(
         GROUP BY p.PeriodKey / 100;
         DELETE a FROM @anchors a WHERE NOT EXISTS (SELECT 1 FROM @periods s WHERE s.PeriodKey = a.PeriodKey);
 
+        -- ✎ LAND-YEAR L3 (a′, рішення координатора): УСІ відсутні екземпляри таблиць цільової версії в якорі року — як
+        -- RowStore.FindMissingTableDefsAsync для якоря: склад документа (оригінал і КОЖНА копія аркуша, SheetCopyId = Id
+        -- рядка складу копії), аркуш цільової версії (через мапу аркушів або вже перемаплений WorkflowSql), живі таблиці;
+        -- F-13: документ без жодного гарячого екземпляра в якорі, але з архівними — заархівований рік, нічого не створюється.
+        -- ⚠ Таблиці з активною прив'язкою дозволу «рядки» (PM-10) пропускаються: рядки з дозволу планує сервіс дозволів лише
+        -- на шляху відкриття (RowStore.CreateInstancesCoreAsync); такий екземпляр створить перше відкриття, як і раніше.
+        DECLARE @missingInst TABLE (AnchorPeriod int NOT NULL, DocumentId bigint NOT NULL, CopyId bigint NOT NULL, TableDefId int NOT NULL,
+                                    PRIMARY KEY (AnchorPeriod, DocumentId, CopyId, TableDefId));
+        INSERT @missingInst (AnchorPeriod, DocumentId, CopyId, TableDefId)
+        SELECT DISTINCT a.PeriodKey, s.DocumentId, CASE WHEN s.CopyOfId IS NULL THEN 0 ELSE s.Id END, td.Id
+        FROM   @anchors a
+        CROSS JOIN doc.DocumentSheet s
+        JOIN   @docs d ON d.Id = s.DocumentId
+        CROSS APPLY (SELECT COALESCE((SELECT m.n FROM @sheetMap m WHERE m.o = s.SheetDefId), s.SheetDefId) AS SheetId) k
+        JOIN   cfg.TableDef td ON td.SheetDefId = k.SheetId AND td.IsDeleted = 0
+        WHERE  EXISTS (SELECT 1 FROM @sheetMap m WHERE m.n = k.SheetId)
+          AND  NOT EXISTS (SELECT 1 FROM doc.TableInstance ti
+                           WHERE ti.PeriodKey = a.PeriodKey AND ti.DocumentId = s.DocumentId
+                             AND ISNULL(ti.SheetCopyId, 0) = CASE WHEN s.CopyOfId IS NULL THEN 0 ELSE s.Id END
+                             AND (ti.TableDefId = td.Id OR EXISTS (SELECT 1 FROM @tableMap tm WHERE tm.o = ti.TableDefId AND tm.n = td.Id)))
+          AND  NOT EXISTS (SELECT 1 FROM cfg.PermitSheetBinding b WHERE b.SheetTableDefId = td.Id AND b.IsActive = 1 AND b.Mode = 0)
+          AND  NOT (NOT EXISTS (SELECT 1 FROM doc.TableInstance h WHERE h.PeriodKey = a.PeriodKey AND h.DocumentId = s.DocumentId)
+                    AND EXISTS (SELECT 1 FROM arc.TableInstance x WHERE x.PeriodKey = a.PeriodKey AND x.DocumentId = s.DocumentId));
+
+        DECLARE @structInstances bigint = 0;
+        IF @apply = 1
+        BEGIN
+            -- Як RowStore.CreateInstancesCoreAsync + MaterializeFixedRowsAsync: екземпляр із послідовності, CreatedAt = ModifiedAt,
+            -- і рядки КОЖНОГО живого RowDef таблиці (RowKey, Ordinal, RowDefId) — у тій самій транзакції.
+            INSERT doc.TableInstance (PeriodKey, Id, DocumentId, TableDefId, CreatedAt, ModifiedAt, SheetCopyId)
+            SELECT m.AnchorPeriod, NEXT VALUE FOR doc.TableInstanceSeq, m.DocumentId, m.TableDefId, @now, @now, NULLIF(m.CopyId, 0)
+            FROM   @missingInst m;
+            SET @structInstances = @@ROWCOUNT;
+
+            INSERT doc.TableRow (PeriodKey, Id, TableInstanceId, RowKey, RowDefId, Ordinal, IsDeleted, IsOrphaned, ModifiedAt)
+            SELECT ti.PeriodKey, NEXT VALUE FOR doc.TableRowSeq, ti.Id, rd.RowKey, rd.Id, rd.Ordinal, 0, 0, @now
+            FROM   @missingInst m
+            JOIN   doc.TableInstance ti ON ti.PeriodKey = m.AnchorPeriod AND ti.DocumentId = m.DocumentId
+                                       AND ti.TableDefId = m.TableDefId AND ISNULL(ti.SheetCopyId, 0) = m.CopyId
+            JOIN   cfg.RowDef rd        ON rd.TableDefId = m.TableDefId AND rd.IsDeleted = 0;
+        END
+
         DECLARE @anchorInst TABLE (DocumentId bigint NOT NULL, CopyId bigint NOT NULL, TableDefId int NOT NULL,
                                    PeriodKey int NOT NULL, Id bigint NOT NULL);
         INSERT @anchorInst (DocumentId, CopyId, TableDefId, PeriodKey, Id)
@@ -2352,6 +2396,11 @@ public sealed partial class DocumentVersionMigrationStore(
                                    AND ar.RowKey = r.RowKey AND ar.IsDeleted = 0
         WHERE  r.IsDeleted = 0
           AND  (r.RowDefId IS NULL OR EXISTS (SELECT 1 FROM @rowMap m WHERE m.o = r.RowDefId OR m.n = r.RowDefId))
+          -- Таблиця з прив'язкою дозволу без екземпляра якоря — екземпляр створить відкриття (див. @missingInst).
+          AND  NOT (ai.Id IS NULL
+                    AND NOT EXISTS (SELECT 1 FROM @missingInst x WHERE x.AnchorPeriod = mi.AnchorPeriod AND x.DocumentId = mi.DocumentId
+                                      AND x.CopyId = mi.CopyId AND x.TableDefId = mi.TableDefId)
+                    AND EXISTS (SELECT 1 FROM cfg.PermitSheetBinding b WHERE b.SheetTableDefId = mi.TableDefId AND b.IsActive = 1 AND b.Mode = 0))
           AND  cv.IsEmpty = 0
           AND  cv.IsCalculated = 0
           AND  NOT EXISTS (SELECT 1 FROM doc.CellFormulaOverride fo
@@ -2390,12 +2439,21 @@ public sealed partial class DocumentVersionMigrationStore(
         WHERE  (r.RowDefId IS NULL OR EXISTS (SELECT 1 FROM @rowMap m WHERE m.o = r.RowDefId OR m.n = r.RowDefId))
           AND  NOT EXISTS (SELECT 1 FROM OPENJSON(@newRows) WITH (d int) nw WHERE nw.d = r.RowDefId)
           AND  NOT EXISTS (SELECT 1 FROM doc.TableRow ar
-                           WHERE ar.PeriodKey = ai.PeriodKey AND ar.TableInstanceId = ai.Id AND ar.RowKey = r.RowKey AND ar.IsDeleted = 0);
+                           WHERE ar.PeriodKey = ai.PeriodKey AND ar.TableInstanceId = ai.Id AND ar.RowKey = r.RowKey AND ar.IsDeleted = 0)
+          -- Фіксовані рядки екземпляра, який створює крок (a′), заводяться разом із ним (у сухому прогоні їх ще немає).
+          AND  NOT EXISTS (SELECT 1 FROM @missingInst x
+                           JOIN   cfg.RowDef rd ON rd.TableDefId = x.TableDefId AND rd.IsDeleted = 0
+                           WHERE  x.AnchorPeriod = mi.AnchorPeriod AND x.DocumentId = mi.DocumentId AND x.CopyId = mi.CopyId
+                             AND  x.TableDefId = mi.TableDefId AND rd.RowKey = r.RowKey);
 
         DECLARE @needInst TABLE (AnchorPeriod int NOT NULL, DocumentId bigint NOT NULL, CopyId bigint NOT NULL, TableDefId int NOT NULL,
                                  PRIMARY KEY (AnchorPeriod, DocumentId, CopyId, TableDefId));
         INSERT @needInst (AnchorPeriod, DocumentId, CopyId, TableDefId)
-        SELECT DISTINCT AnchorPeriod, DocumentId, CopyId, TableDefId FROM @needRows WHERE AnchorInstId IS NULL;
+        SELECT DISTINCT nr.AnchorPeriod, nr.DocumentId, nr.CopyId, nr.TableDefId
+        FROM   @needRows nr
+        WHERE  nr.AnchorInstId IS NULL
+          AND  NOT EXISTS (SELECT 1 FROM @missingInst x WHERE x.AnchorPeriod = nr.AnchorPeriod AND x.DocumentId = nr.DocumentId
+                             AND x.CopyId = nr.CopyId AND x.TableDefId = nr.TableDefId);
 
         SET @copied = 0;
         SET @rowsCreated = 0;
@@ -2403,7 +2461,7 @@ public sealed partial class DocumentVersionMigrationStore(
         IF @apply = 0
         BEGIN
             DECLARE @rc bigint = (SELECT COUNT_BIG(*) FROM @needRows);
-            DECLARE @ic bigint = (SELECT COUNT_BIG(*) FROM @needInst);
+            DECLARE @ic bigint = (SELECT COUNT_BIG(*) FROM @needInst) + (SELECT COUNT_BIG(*) FROM @missingInst);
             SELECT CAST(ISNULL(SUM(CASE WHEN Kinds = 1 THEN 1 ELSE 0 END), 0) AS bigint) AS Copies,
                    CAST(ISNULL(SUM(CASE WHEN Kinds > 1 THEN 1 ELSE 0 END), 0) AS bigint) AS Conflicts,
                    @rc AS RowsCreated,
@@ -2420,7 +2478,9 @@ public sealed partial class DocumentVersionMigrationStore(
                           AND c.TableDefId = g.TableDefId AND c.RowKey = g.RowKey AND c.ColumnDefId = g.ColumnDefId
             ORDER BY c.DocumentId, c.TableDefId, c.RowKey, c.ColumnDefId, c.AnchorPeriod, c.PeriodKey;
 
-            SELECT DISTINCT DocumentId, TableDefId, AnchorPeriod FROM @groups WHERE Kinds = 1;
+            SELECT DocumentId, TableDefId, AnchorPeriod FROM @groups WHERE Kinds = 1
+            UNION
+            SELECT DocumentId, TableDefId, AnchorPeriod FROM @missingInst;
         END
         ELSE
         BEGIN
@@ -2428,7 +2488,7 @@ public sealed partial class DocumentVersionMigrationStore(
             INSERT doc.TableInstance (PeriodKey, Id, DocumentId, TableDefId, CreatedAt, ModifiedAt, SheetCopyId)
             SELECT n.AnchorPeriod, NEXT VALUE FOR doc.TableInstanceSeq, n.DocumentId, n.TableDefId, @now, @now, NULLIF(n.CopyId, 0)
             FROM   @needInst n;
-            SET @instancesCreated = @@ROWCOUNT;
+            SET @instancesCreated = @@ROWCOUNT + @structInstances;
 
             UPDATE nr
             SET    nr.AnchorInstId = ti.Id
