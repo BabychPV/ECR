@@ -26,4 +26,29 @@ public sealed class ScriptMigrationStore(EcrDbContext db) : IScriptMigrationStor
 
         return [.. rows.Select(x => new ImporterVersion(x.VersionId, x.MethodologyId, x.MethodologyCode, x.Version, x.Engine, x.Status))];
     }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<DateOnly>> GetLibraryEditionDatesAsync(int versionId, CancellationToken ct)
+    {
+        var version = await db.MethodologyVersions.AsNoTracking()
+            .Where(v => v.Id == versionId)
+            .Select(v => new { v.MethodologyId, v.EffectiveFrom })
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+        if (version?.EffectiveFrom is not { } start)
+        {
+            return [];
+        }
+
+        var later = await db.MethodologyVersions.AsNoTracking()
+            .Where(v => v.MethodologyId == version.MethodologyId && v.Id != versionId
+                        && v.EffectiveFrom != null && v.EffectiveFrom > start
+                        && (v.Status == Domain.Enums.TemplateVersionStatus.Published
+                            || v.Status == Domain.Enums.TemplateVersionStatus.Deprecated))
+            .Select(v => v.EffectiveFrom)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return await LibraryEditionDates.LoadAsync(db, start, later.Count == 0 ? null : later.Min(), ct).ConfigureAwait(false);
+    }
 }

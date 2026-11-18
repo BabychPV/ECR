@@ -463,19 +463,49 @@ public sealed class SwitchScriptEngineHandler(
 
         foreach (var (methodology, version) in group)
         {
-            // Імпортер: версія кожної бібліотеки на дату чинності має бути на скрипті або в групі.
-            var onDate = version.EffectiveFrom ?? new DateOnly(2000, 1, 1);
-            foreach (var library in await methodologies.ResolveImportsAsync(version.Id, onDate, ct).ConfigureAwait(false))
+            // Імпортер: КОЖНА версія бібліотеки, яку рантайм може розв'язати для будь-якого періоду життя версії (на дату
+            // чинності й на кожну дату виходу нової версії бібліотеки всередині життя; транзитивно через бібліотеки
+            // бібліотек), має бути на скрипті або в групі, — інакше історична версія лишилася б на Formulas і прогін
+            // періоду дав би scriptLibraryUnavailable.
+            var start = version.EffectiveFrom ?? new DateOnly(2000, 1, 1);
+            var dates = new SortedSet<DateOnly> { start };
+            foreach (var date in await migrationStore.GetLibraryEditionDatesAsync(version.Id, ct).ConfigureAwait(false) ?? [])
             {
-                if (library.MethodologyVersionId is not { } libraryVersionId || inGroup.Contains(libraryVersionId))
-                {
-                    continue;
-                }
+                dates.Add(date);
+            }
 
-                var libraryVersion = await drafts.FindVersionAsync(libraryVersionId, ct).ConfigureAwait(false);
-                if (libraryVersion is { Engine: not MethodologyEngine.Script })
+            var seen = new HashSet<int>();
+            foreach (var onDate in dates)
+            {
+                var pending = new Stack<int>();
+                pending.Push(version.Id);
+                var visited = new HashSet<int>();
+                while (pending.TryPop(out var currentId))
                 {
-                    missing.Add($"{library.MethodologyCode} {libraryVersion.Version} (library of {methodology.Code} {version.Version}, id {libraryVersionId.ToString(CultureInfo.InvariantCulture)})");
+                    if (!visited.Add(currentId))
+                    {
+                        continue;
+                    }
+
+                    foreach (var library in await methodologies.ResolveImportsAsync(currentId, onDate, ct).ConfigureAwait(false))
+                    {
+                        if (library.MethodologyVersionId is not { } libraryVersionId)
+                        {
+                            continue;
+                        }
+
+                        pending.Push(libraryVersionId);
+                        if (inGroup.Contains(libraryVersionId) || !seen.Add(libraryVersionId))
+                        {
+                            continue;
+                        }
+
+                        var libraryVersion = await drafts.FindVersionAsync(libraryVersionId, ct).ConfigureAwait(false);
+                        if (libraryVersion is { Engine: not MethodologyEngine.Script })
+                        {
+                            missing.Add($"{library.MethodologyCode} {libraryVersion.Version} (library of {methodology.Code} {version.Version}, id {libraryVersionId.ToString(CultureInfo.InvariantCulture)})");
+                        }
+                    }
                 }
             }
 

@@ -469,6 +469,52 @@ public sealed class ScriptMigrationHandlerTests
         Assert.Equal(MethodologyEngine.Formulas, _libraryVersion.Engine);
     }
 
+    /// <summary>
+    /// Бібліотеку перевидано всередині життя імпортера: на період після 2099-06-01 рантайм бере другу версію. Група
+    /// мусить містити ОБИДВІ (замикання по всіх періодах), інакше історична версія лишилась би на Formulas і прогін дав би
+    /// <c>scriptLibraryUnavailable</c>.
+    /// </summary>
+    /// <remarks>Мутація: у <c>RequireCompleteGroupAsync</c> дивитися лише дату чинності імпортера — червоніє.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "MS-8.5")]
+    public async Task Switch_група_мусить_містити_усі_версії_бібліотеки_що_діють_у_періодах_імпортера()
+    {
+        const int libraryV2 = 61;
+        var secondEdition = new DateOnly(2099, 6, 1);
+        var second = ScriptTestKit.NewVersion(_library, libraryV2, MethodologyEngine.Formulas, "2.0");
+        _drafts.FindVersionAsync(libraryV2, Arg.Any<CancellationToken>()).Returns(second);
+        _store.FindByVersionAsync(libraryV2, Arg.Any<CancellationToken>()).Returns(_library);
+        Publish(_alphaVersion, "import LIB;\nrows from T1;\noutput OUT_A : t = row.Hours;");
+        Publish(_libraryVersion, "function twice(a) = a * 2;");
+        Publish(second, "function twice(a) = a * 3;");
+
+        _store.ResolveImportsAsync(AlphaV, Arg.Any<DateOnly>(), Arg.Any<CancellationToken>())
+            .Returns(call => Task.FromResult<IReadOnlyList<MethodologyLibrary>>(
+                [new MethodologyLibrary(Library, "LIB", call.ArgAt<DateOnly>(1) < secondEdition ? LibraryV : libraryV2, [])]));
+        _migration.GetLibraryEditionDatesAsync(AlphaV, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<DateOnly>>([secondEdition]));
+        _migration.GetImporterVersionsAsync(Library, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<ImporterVersion>>(
+                [new ImporterVersion(AlphaV, Alpha, "ALPHA", "1.0", MethodologyEngine.Formulas, TemplateVersionStatus.Published)]));
+
+        // Імпортер і лише перша версія бібліотеки: друга (діє в пізніх періодах) відсутня.
+        var incomplete = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Switch().HandleAsync(new SwitchScriptEngineRequest([AlphaV, LibraryV], "Script", "why"), default));
+        Assert.Equal("err.ECR-CALC-0422.switchGroupIncomplete", incomplete.Details!["messageKey"]);
+        Assert.Contains("LIB 2.0", Assert.Single((IReadOnlyList<string>)incomplete.Details["missing"]!), StringComparison.Ordinal);
+        Assert.Equal(MethodologyEngine.Formulas, _alphaVersion.Engine);
+        Assert.Equal(MethodologyEngine.Formulas, second.Engine);
+
+        // Усі три версії — склад замкнений: відмови switchGroupIncomplete більше немає.
+        var closed = await Record.ExceptionAsync(
+            () => Switch().HandleAsync(new SwitchScriptEngineRequest([AlphaV, LibraryV, libraryV2], "Script", "why"), default));
+        Assert.True(
+            closed is not BusinessRuleException { Details: { } details }
+            || !Equals(details["messageKey"], "err.ECR-CALC-0422.switchGroupIncomplete"),
+            closed?.Message);
+    }
+
     private static MethodologyOutput Output(string code, int unitId, bool perSubstance)
     {
         var output = new MethodologyOutput(AlphaV, EcrCode.Create(code), unitId, 1);

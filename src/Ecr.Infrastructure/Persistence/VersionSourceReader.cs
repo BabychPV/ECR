@@ -178,17 +178,7 @@ public sealed class VersionSourceReader(EcrDbContext db, IFormulaEngine formulaE
         // перенести неможливо: це помилка читання (конвертер і apply відмовляють), а не мовчазна різниця чисел.
         if (version.EffectiveFrom is { } lifeStart && direct.Count > 0)
         {
-            var libraryDates = await db.MethodologyVersions.AsNoTracking()
-                .Join(
-                    db.Methodologies.AsNoTracking().Where(m => m.Kind == MethodologyKind.Library),
-                    v => v.MethodologyId, m => m.Id, (v, m) => v)
-                .Where(v => v.EffectiveFrom != null && v.EffectiveFrom > lifeStart
-                            && (next == null || v.EffectiveFrom < next)
-                            && (v.Status == TemplateVersionStatus.Published || v.Status == TemplateVersionStatus.Deprecated))
-                .Select(v => v.EffectiveFrom!.Value)
-                .Distinct()
-                .OrderBy(d => d)
-                .ToListAsync(ct).ConfigureAwait(false);
+            var libraryDates = await LibraryEditionDates.LoadAsync(db, lifeStart, next, ct).ConfigureAwait(false);
 
             var diverged = new Dictionary<string, List<DateOnly>>(StringComparer.OrdinalIgnoreCase);
             foreach (var date in libraryDates)
