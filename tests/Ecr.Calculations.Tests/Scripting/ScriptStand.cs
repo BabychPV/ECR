@@ -73,6 +73,7 @@ internal sealed class ScriptStand
     };
 
     private readonly IMethodologyStore _store = Substitute.For<IMethodologyStore>();
+    private readonly Dictionary<string, byte?> _outputScales = new(StringComparer.OrdinalIgnoreCase);
     private readonly ICalculationResultStore _results = Substitute.For<ICalculationResultStore>();
     private readonly ScriptRunContext _run = new();
     private readonly ScriptProgramCache _cache = new();
@@ -132,6 +133,13 @@ internal sealed class ScriptStand
     public ScriptStand WithLibrary(string code, int versionId, string text, params string[] imports)
     {
         _libraries.Add((code, versionId, text, imports));
+        return this;
+    }
+
+    /// <summary>Масштаб колонки-приймача виходу (<c>cfg.CalculationBinding</c> → <c>ListOutputScalesAsync</c>); <c>null</c> — «усі знаки».</summary>
+    public ScriptStand WithOutputScale(string outputCode, byte? scale)
+    {
+        _outputScales[outputCode] = scale;
         return this;
     }
 
@@ -262,6 +270,10 @@ internal sealed class ScriptStand
                 return entry;
             });
 
+        var bindingStore = Substitute.For<ICalculationBindingStore>();
+        bindingStore.ListOutputScalesAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns((IReadOnlyDictionary<string, byte?>)new Dictionary<string, byte?>(_outputScales, StringComparer.OrdinalIgnoreCase));
+
         return new ScriptCalculationModule(
             new Evaluator(new FunctionRegistry()),
             _store,
@@ -269,7 +281,7 @@ internal sealed class ScriptStand
             new CalendarContext(),
             units,
             periods,
-            Substitute.For<ICalculationBindingStore>(),
+            bindingStore,
             rows,
             cells,
             metadata,

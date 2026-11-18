@@ -181,6 +181,25 @@ public sealed class ScriptTablesTests
         Assert.Equal(4, values.Count);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public async Task Псевдонім_місяця_має_перевагу_над_колонкою_X_Mmm_з_тим_самим_іменем()
+    {
+        var stand = new ScriptStand("rows from T1;\noutput Y: kg = row.Hours[1];", NumericMode.Strict);
+        stand.AddTable("T1")
+            .Column("Hours_M01", month: 1).Column("JanHours")
+            .Row("R1", ("Hours_M01", 100m), ("JanHours", 7m));
+
+        // Без псевдоніма — колонка за кодом; з псевдонімом `Hours` → `JanHours` перемагає псевдонім.
+        var (byColumn, _) = await stand.RunAsync("R1");
+        Assert.Equal(100m, ScriptStand.Value(byColumn, "Y"));
+
+        stand.WithMonthAlias("T1", "Hours", 1, "JanHours");
+        stand.Rebuild();
+        var (byAlias, _) = await stand.RunAsync("R1");
+        Assert.Equal(7m, ScriptStand.Value(byAlias, "Y"));
+    }
+
     [Theory]
     [InlineData("row.Vol[13]")]
     [InlineData("row.Vol[0]")]

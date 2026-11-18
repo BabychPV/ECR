@@ -257,6 +257,60 @@ public sealed class ScriptModuleTests
         Assert.Equal(2, output.Trace.Count(s => s.StepCode == "cur"));
     }
 
+    // ───── Legacy: маскування NaN/∞ у кроках скрипта й бібліотеки; масштаб виходу ─────
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public async Task Legacy_крок_скрипта_з_нескінченністю_стає_нулем_із_записом_у_трейс_а_Strict_дає_помилку()
+    {
+        const string body = "var d = row.A / row.B;\noutput Y: kg = d + 5;";
+        var legacy = Stand(body, NumericMode.Legacy);
+        legacy.Main.Row("R1", ("A", 1m), ("B", 0m));
+        var strict = Stand(body);
+        strict.Main.Row("R1", ("A", 1m), ("B", 0m));
+
+        var (masked, _) = await legacy.RunAsync("R1");
+        var (failed, _) = await strict.RunAsync("R1");
+
+        // 1/0 у Legacy → +∞ → 0 (крок `d` маскований і записаний), далі 0 + 5.
+        Assert.Equal(5m, ScriptStand.Value(masked, "Y"));
+        Assert.Contains(masked.Trace, s => s.StepCode == "d" && s.Masked != MaskedZeroReason.None);
+        Assert.Null(masked.StepError);
+
+        Assert.Empty(failed.Values);
+        Assert.Equal("#DIV/0", failed.StepError!.ErrorCode);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public async Task Legacy_величина_бібліотеки_з_нескінченністю_теж_стає_нулем_з_записом_у_трейс()
+    {
+        var legacy = Stand("output Y: kg = Common.q + 5;", NumericMode.Legacy, imports: "import Common;\n")
+            .WithLibrary("Common", 8020, "var q = row.A / row.B;");
+        legacy.Main.Row("R1", ("A", 1m), ("B", 0m));
+
+        var (output, _) = await legacy.RunAsync("R1");
+
+        Assert.Equal(5m, ScriptStand.Value(output, "Y"));
+        Assert.Contains(output.Trace, s => s.StepCode == "q" && s.Masked != MaskedZeroReason.None);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public async Task Масштаб_колонки_приймача_округлює_вихід_а_без_нього_несе_шістнадцять_знаків()
+    {
+        var scaled = Stand("output Y: kg = 1 / 3;").WithOutputScale("Y", 2);
+        scaled.Main.Row("R1", ("A", 1m));
+        var plain = Stand("output Y: kg = 1 / 3;");
+        plain.Main.Row("R1", ("A", 1m));
+
+        var (withScale, _) = await scaled.RunAsync("R1");
+        var (withoutScale, _) = await plain.RunAsync("R1");
+
+        Assert.Equal(0.33m, ScriptStand.Value(withScale, "Y"));
+        Assert.Equal(0.3333333333333333m, ScriptStand.Value(withoutScale, "Y"));
+    }
+
     private const string ParamLibrary =
         "param Category;\nconst EF = { Summer: 1.5, Winter: 3 };\nvar factor = EF[Category];";
 
