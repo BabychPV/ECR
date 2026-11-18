@@ -125,7 +125,7 @@ public sealed class VersionSourceReader(EcrDbContext db, IFormulaEngine formulaE
             position++;
             formulas.Add(new SourceFormula(
                 f.Code, f.Expression, reordered ? position : f.EvaluationOrder, f.Scope, f.IsVisible, f.ResultType,
-                UnitCode(f.OutputUnitId, f.Code)));
+                UnitCode(f.OutputUnitId, f.Code), f.ArgumentsCsv));
         }
 
         var outputs = outputEntities
@@ -155,7 +155,23 @@ public sealed class VersionSourceReader(EcrDbContext db, IFormulaEngine formulaE
                     library.MethodologyCode));
             }
 
-            imports.Add(new SourceImport(library.MethodologyCode, [.. library.FormulaCodes]));
+            var libraryCategories = new List<string>();
+            var libraryOptional = new List<string>();
+            if (library.MethodologyVersionId is { } libraryVersionId)
+            {
+                // Склад «відомих категорій» і необов'язкових імен старий рушій бере і з бібліотек замикання.
+                libraryCategories = await db.MethodologyConstants.AsNoTracking()
+                    .Where(c => c.MethodologyVersionId == libraryVersionId && c.Category != null && c.Category != string.Empty)
+                    .Select(c => c.Category!).Distinct().ToListAsync(ct).ConfigureAwait(false);
+                var csvs = await db.MethodologyFormulas.AsNoTracking()
+                    .Where(f => f.MethodologyVersionId == libraryVersionId && f.ArgumentsCsv != null)
+                    .Select(f => f.ArgumentsCsv!).ToListAsync(ct).ConfigureAwait(false);
+                libraryOptional = [.. csvs.SelectMany(csv => Ecr.Expressions.Binding.ArgumentDeclarationChecker.OptionalNamesFromCsv(csv))
+                    .Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase)];
+                libraryCategories.Sort(StringComparer.Ordinal);
+            }
+
+            imports.Add(new SourceImport(library.MethodologyCode, [.. library.FormulaCodes], libraryCategories, libraryOptional));
         }
 
         // ---- Життя версії ----
@@ -178,6 +194,12 @@ public sealed class VersionSourceReader(EcrDbContext db, IFormulaEngine formulaE
             rules = await LoadRulesAsync(versionId, issues, ct).ConfigureAwait(false);
         }
 
+        IReadOnlyList<SourceRowsClause> rowsClauses = [];
+        if (!isLibrary && !isModuleLevel)
+        {
+            rowsClauses = await BuildRowsClausesAsync(versionId, methodology, rules, issues, ct).ConfigureAwait(false);
+        }
+
         var source = new VersionSource
         {
             MethodologyCode = methodology.Code,
@@ -196,6 +218,7 @@ public sealed class VersionSourceReader(EcrDbContext db, IFormulaEngine formulaE
             Substances = substances,
             Imports = imports,
             Rules = rules,
+            RowsClauses = rowsClauses,
             RowActivityFilter = methodology.RowActivityFilter,
         };
         return new LoadedVersion(reference, source, issues);
@@ -352,5 +375,115 @@ public sealed class VersionSourceReader(EcrDbContext db, IFormulaEngine formulaE
         }
 
         return result;
+    }
+
+    // ---- Речення rows ----
+
+    private async Task<IReadOnlyList<SourceRowsClause>> BuildRowsClausesAsync(
+        int versionId, Methodology methodology, IReadOnlyList<SourceRule> rules, List<ConversionIssue> issues, CancellationToken ct)
+    {
+        // Усі прив'язки методології (активні й ні) → таблиці через ColumnDef → TableDef.
+        var tables = await (
+                from b in db.CalculationBindings.AsNoTracking()
+                join c in db.ColumnDefs.AsNoTracking() on b.ColumnDefId equals c.Id
+                join t in db.TableDefs.AsNoTracking() on c.TableDefId equals t.Id
+                join s in db.SheetDefs.AsNoTracking() on t.SheetDefId equals s.Id
+                join tv in db.TemplateVersions.AsNoTracking() on s.TemplateVersionId equals tv.Id
+                join tpl in db.Templates.AsNoTracking() on tv.TemplateId equals tpl.Id
+                where b.MethodologyId == methodology.Id
+                select new { TableDefId = t.Id, TableCode = t.Code, TemplateCode = tpl.Code })
+            .Distinct().ToListAsync(ct).ConfigureAwait(false);
+        if (tables.Count == 0)
+        {
+            return [];
+        }
+
+        var tableDefIds = tables.Select(t => t.TableDefId).Distinct().ToList();
+
+        // Код таблиці однозначний лише в межах шаблону: якщо той самий код у кількох шаблонах — пишемо Шаблон.Таблиця.
+        var templatesByTable = tables.GroupBy(t => t.TableCode, StringComparer.Ordinal)
+            .ToDictionary(
+                g => g.Key,
+                g => g.Select(x => x.TemplateCode).Distinct(StringComparer.Ordinal).ToList());
+        var tableNames = new Dictionary<int, string>();
+        foreach (var t in tables)
+        {
+            tableNames[t.TableDefId] = templatesByTable[t.TableCode].Count > 1 ? t.TemplateCode + "." + t.TableCode : t.TableCode;
+        }
+
+        var allColumns = await db.ColumnDefs.AsNoTracking().Where(c => tableDefIds.Contains(c.TableDefId) && !c.IsDeleted)
+            .Select(c => new { c.Id, c.Code, c.TableDefId }).ToListAsync(ct).ConfigureAwait(false);
+        var columnCodesByTableDef = allColumns.GroupBy(c => c.TableDefId)
+            .ToDictionary(g => g.Key, g => g.Select(c => c.Code).ToHashSet(StringComparer.Ordinal));
+
+        // ---- Фільтр активності: колонки статусу — так, як їх знаходить рантайм ----
+        var activeByTableDef = new Dictionary<int, List<SourceActiveColumn>>();
+        if (methodology.RowActivityFilter is not null)
+        {
+            var resolution = await _activity.ResolveForVersionAsync(versionId, tableDefIds, ct).ConfigureAwait(false);
+            if (resolution?.ActiveEntryIdText is null)
+            {
+                issues.Add(new ConversionIssue(
+                    IssueSeverity.Warning, "activityFilterInactive",
+                    $"Methodology.RowActivityFilter «{methodology.RowActivityFilter}» does not resolve to a registry entry: "
+                    + "the old engine ignores it, so no 'active when' is generated."));
+            }
+            else
+            {
+                var entryId = long.Parse(resolution.ActiveEntryIdText, CultureInfo.InvariantCulture);
+                var entry = await db.RegistryEntries.AsNoTracking().FirstAsync(e => e.Id == entryId, ct).ConfigureAwait(false);
+                var registryCode = await db.RegistryDefs.AsNoTracking().Where(r => r.Id == entry.RegistryDefId)
+                    .Select(r => r.Code).FirstAsync(ct).ConfigureAwait(false);
+                var codeById = allColumns.ToDictionary(c => c.Id, c => c.Code);
+                foreach (var tableDefId in tableDefIds)
+                {
+                    var statusColumns = resolution.ColumnsOf(tableDefId);
+                    if (statusColumns.Count > 0)
+                    {
+                        activeByTableDef[tableDefId] =
+                        [
+                            .. statusColumns.Select(id => codeById[id]).Distinct(StringComparer.Ordinal)
+                                .Order(StringComparer.Ordinal)
+                                .Select(code => new SourceActiveColumn(code, registryCode, entry.Code)),
+                        ];
+                    }
+                }
+            }
+        }
+
+        // ---- По коду таблиці: зведення за всіма її описами (версіями шаблону) ----
+        var ruleColumns = rules.SelectMany(r => r.Pairs).Select(p => p.ColumnCode).Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal).ToList();
+        var perTable = new List<(string Name, string Key, List<SourceActiveColumn> Active)>();
+        foreach (var group in tableDefIds.GroupBy(id => tableNames[id]).OrderBy(g => g.Key, StringComparer.Ordinal))
+        {
+            var activeSets = group
+                .Select(id => activeByTableDef.GetValueOrDefault(id) ?? [])
+                .Select(list => string.Join("|", list.Select(a => a.ColumnCode)))
+                .Distinct(StringComparer.Ordinal).ToList();
+            if (activeSets.Count > 1)
+            {
+                issues.Add(new ConversionIssue(
+                    IssueSeverity.Error, "statusColumnsVary",
+                    $"Table «{group.Key}»: its descriptions in different template versions have different status columns, "
+                    + "so one 'active when' cannot reproduce the old filter.",
+                    group.Key));
+            }
+
+            var active = activeByTableDef.GetValueOrDefault(group.First()) ?? [];
+            var availability = string.Concat(ruleColumns.Select(code =>
+                group.All(id => columnCodesByTableDef.GetValueOrDefault(id)?.Contains(code) == true) ? '1' : '0'));
+            var key = string.Join("|", active.Select(a => a.ColumnCode + "=" + a.RegistryCode + ":" + a.EntryCode)) + "#" + availability;
+            perTable.Add((group.Key, key, active));
+        }
+
+        // ---- Таблиці з однаковими статус-колонками й однаковою наявністю колонок правил — одне речення ----
+        var clauses = new List<SourceRowsClause>();
+        foreach (var group in perTable.GroupBy(t => t.Key, StringComparer.Ordinal).OrderBy(g => g.First().Name, StringComparer.Ordinal))
+        {
+            clauses.Add(new SourceRowsClause([.. group.Select(t => t.Name)], rules, group.First().Active));
+        }
+
+        return clauses;
     }
 }

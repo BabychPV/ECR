@@ -39,6 +39,7 @@ public sealed class ExpressionTranslator
     private readonly Func<string, string> _formula;
     private readonly bool _keyArguments;
     private readonly bool _moduleLevel;
+    private readonly Func<string, bool>? _isOptional;
 
     /// <summary>Створює перекладач.</summary>
     /// <param name="constant">Код константи → вираз її читання у скрипті.</param>
@@ -46,8 +47,13 @@ public sealed class ExpressionTranslator
     /// <param name="keyArguments">Правило категорії: <c>@X</c> → <c>key(row.X)</c>.</param>
     /// <param name="moduleLevel">Рівень <c>Module</c>: <c>@GCV.x_y_z</c> → <c>row.GCV_x_y_z</c> (крапка стає підкресленням —
     /// модуль місячних колонок віддає обидва імені, а скрипт читає лише друге).</param>
+    /// <param name="isOptional">
+    /// Чи ім'я аргументу необов'язкове для версії (старий рушій читає це зі списків <c>ArgumentsCsv</c> усіх формул версії й
+    /// бібліотек, а не з маркера в самому виразі); <c>null</c> — вірити маркеру <c>@X?</c> у виразі.
+    /// </param>
     public ExpressionTranslator(
-        Func<string, string> constant, Func<string, string> formula, bool keyArguments = false, bool moduleLevel = false)
+        Func<string, string> constant, Func<string, string> formula, bool keyArguments = false, bool moduleLevel = false,
+        Func<string, bool>? isOptional = null)
     {
         ArgumentNullException.ThrowIfNull(constant);
         ArgumentNullException.ThrowIfNull(formula);
@@ -55,6 +61,7 @@ public sealed class ExpressionTranslator
         _formula = formula;
         _keyArguments = keyArguments;
         _moduleLevel = moduleLevel;
+        _isOptional = isOptional;
     }
 
     /// <summary>Перекладає вираз.</summary>
@@ -249,7 +256,8 @@ public sealed class ExpressionTranslator
                         "invalidName", $"Argument «{symbol.Name}» is not a valid column name for row.<name>.");
                 }
 
-                var field = "row." + argument + (symbol.IsOptional ? "?" : string.Empty);
+                var optional = _isOptional is null ? symbol.IsOptional : _isOptional(symbol.Name);
+                var field = "row." + argument + (optional ? "?" : string.Empty);
                 return new Printed(_keyArguments ? "key(" + field + ")" : field, PrecAtom);
             }
 
