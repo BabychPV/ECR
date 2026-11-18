@@ -469,6 +469,10 @@ public sealed class GetTableSliceHandler(
             .Where(r => !r.IsDeleted)
             .ToDictionary(r => r.RowKeyValue, StringComparer.Ordinal);
 
+        // ✎ B175: дефолти рядка — тим самим сирим текстом, що `ColumnDto.DefaultValue` (Lookup — код запису), і лише
+        // на колонки, які прийшли в зріз (прихована/заборонена колонка не віддає й свого дефолту).
+        var visibleColumnCodes = columns.Select(c => c.Code).ToHashSet(StringComparer.Ordinal);
+
         var rows = rowIds
             .Select(pair => new
             {
@@ -486,7 +490,8 @@ public sealed class GetTableSliceHandler(
                 RowVersion: versions.GetValueOrDefault(r.RowKey) ?? string.Empty,
                 Cells: RowCells(cellsByRow.GetValueOrDefault(r.RowId), cellKeyByColumn),
                 IsOrphaned: orphans.TryGetValue(r.RowId, out var orph) && orph,
-                Style: StyleOf(styleById, r.Def?.StyleId)))
+                Style: StyleOf(styleById, r.Def?.StyleId),
+                Defaults: RowDefaults(r.Def, visibleColumnCodes)))
             .ToList();
 
         // 5. Компактні мапи: grid має одразу знати, що сіре і чому (заборони),
@@ -1027,6 +1032,24 @@ public sealed class GetTableSliceHandler(
     /// </remarks>
     private static string? SymbolOf(Dictionary<int, string> symbols, int? unitId)
         => unitId is { } id && symbols.TryGetValue(id, out var code) ? code : null;
+
+    /// <summary>
+    /// ✎ B175: дефолти комірок рядка шаблону для клієнта — лише на видимі колонки зрізу; <c>null</c> — рядок без них
+    /// (більшість рядків: поле не роздуває відповідь).
+    /// </summary>
+    internal static IReadOnlyDictionary<string, string>? RowDefaults(
+        Domain.Entities.Configuration.RowDef? row, IReadOnlySet<string> visibleColumnCodes)
+    {
+        if (row is null || row.CellDefaults.Count == 0)
+        {
+            return null;
+        }
+
+        var visible = row.CellDefaults
+            .Where(d => visibleColumnCodes.Contains(d.Key))
+            .ToDictionary(d => d.Key, d => d.Value, StringComparer.Ordinal);
+        return visible.Count == 0 ? null : visible;
+    }
 
     /// <summary>
     /// Оформлення колонки для клієнта (директива registry-lookup /

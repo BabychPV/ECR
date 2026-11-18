@@ -50,6 +50,8 @@ public sealed class TableSliceHeaderAndRowStyleTests
 
         var styled = new RowDef(TableDef, RowKey.Create("R1"), 0, Text("Styled"), RowKind.Item);
         styled.SetStyle(RowStyleId);
+        // ✎ B175: дефолт на видиму колонку і на код, якого в зрізі немає (не віддається).
+        styled.SetCellDefaults(new Dictionary<string, string> { ["Volume"] = "5", ["Gone"] = "x" });
         var plain = new RowDef(TableDef, RowKey.Create("R2"), 1, Text("Plain"), RowKind.Item);
         table.AddRow(styled);
         table.AddRow(plain);
@@ -102,6 +104,22 @@ public sealed class TableSliceHeaderAndRowStyleTests
         Assert.Equal(unchecked((int)0xFFFFFF00), byKey["R1"].Style!.BackgroundArgb);
         Assert.Null(byKey["R2"].Style);   // рядок шаблону без стилю
         Assert.Null(byKey["R3"].Style);   // динамічний рядок: RowDef немає
+    }
+
+    /// <remarks>✎ B175. Мутація: прибрати <c>Defaults:</c> у <c>GetTableSliceHandler</c> — червоний.</remarks>
+    [Fact]
+    [Trait("Requirement", "B175")]
+    public async Task Slice_returns_row_defaults_only_for_template_rows_that_have_them()
+    {
+        var slice = await Handler(KnownStyles()).HandleAsync(
+            Document, TableInstance, Profile(), "en", CancellationToken.None);
+
+        var byKey = slice.Rows.ToDictionary(r => r.RowKey);
+        var defaults = Assert.Single(byKey["R1"].Defaults!);
+        Assert.Equal("Volume", defaults.Key);
+        Assert.Equal("5", defaults.Value);
+        Assert.Null(byKey["R2"].Defaults);
+        Assert.Null(byKey["R3"].Defaults);
     }
 
     [Fact]
