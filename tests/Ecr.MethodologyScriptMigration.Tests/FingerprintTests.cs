@@ -14,6 +14,13 @@ public sealed class FingerprintTests
 
     private static readonly SourceRule RuleB = new([new SourceMatchPair("Zone", SourceMatchValue.OfText("South"))]);
 
+    [Fact]
+    public void Формат_пакета_дорівнює_формату_відбитка_щоб_старі_пакети_відхилялися()
+    {
+        Assert.Equal(3, Ecr.Application.Calculations.Scripting.Migration.Fingerprint.FormatVersion);
+        Assert.Equal(Ecr.Application.Calculations.Scripting.Migration.Fingerprint.FormatVersion, Cli.ScriptPackage.CurrentVersion);
+    }
+
     private static VersionSource Base() => new()
     {
         MethodologyCode = "M",

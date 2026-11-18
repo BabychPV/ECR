@@ -23,6 +23,17 @@ public static partial class ScriptText
     /// <param name="name">Ім'я.</param>
     public static bool IsKeyword(string name) => ScriptLexer.Keywords.Contains(name);
 
+    /// <summary>
+    /// Ключ категорії без пробільних символів: так старий рушій порівнює ключ правила з категоріями констант
+    /// (<c>GenericCalculationModule.IsKnownCategory</c>, <c>ConstantResolver</c>); у скрипті всі ключі пишуться саме так.
+    /// </summary>
+    /// <param name="key">Ключ.</param>
+    public static string BareCategory(string key)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        return string.Concat(key.Where(ch => !char.IsWhiteSpace(ch)));
+    }
+
     /// <summary>Рядковий літерал у лапках із екрануванням <c>\\ \" \n</c>.</summary>
     /// <param name="value">Значення.</param>
     public static string Quote(string value)

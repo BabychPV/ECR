@@ -109,7 +109,7 @@ public sealed class ScriptMigrationHandlerTests
 
     private ApplyScriptPackageRequest Package(string? fingerprint = null, string text = Text, string? effectiveFrom = null)
         => new(
-            "ecr-methodology-script-package", 1,
+            "ecr-methodology-script-package", 3,
             [new ScriptPackageEntryDto("ALPHA", "1.0", effectiveFrom, text, fingerprint ?? Fingerprint.ComputeHex(_source))]);
 
     // ---------- apply ----------
@@ -173,7 +173,7 @@ public sealed class ScriptMigrationHandlerTests
     public async Task Apply_відмови_по_версіях_не_зупиняють_решту()
     {
         var fingerprint = Fingerprint.ComputeHex(_source);
-        ApplyScriptPackageRequest Of(params ScriptPackageEntryDto[] entries) => new(null, null, entries);
+        ApplyScriptPackageRequest Of(params ScriptPackageEntryDto[] entries) => new(null, 3, entries);
 
         var mixed = await Apply().HandleAsync(
             Of(
@@ -215,7 +215,7 @@ public sealed class ScriptMigrationHandlerTests
         var huge = "//" + new string('a', ScriptAnalyzer.MaxTextLength);
 
         var response = await Apply().HandleAsync(
-            new ApplyScriptPackageRequest(null, null, [new ScriptPackageEntryDto("ALPHA", "1.0", null, huge, fingerprint)]),
+            new ApplyScriptPackageRequest(null, 3, [new ScriptPackageEntryDto("ALPHA", "1.0", null, huge, fingerprint)]),
             dryRun: true,
             CancellationToken.None);
 
@@ -241,7 +241,7 @@ public sealed class ScriptMigrationHandlerTests
                 []));
 
         var request = new ApplyScriptPackageRequest(
-            null, null,
+            null, 3,
             [
                 // Імпортер ПЕРЕД бібліотекою: перший прохід його відхиляє, другий — приймає.
                 new ScriptPackageEntryDto("ALPHA", "1.0", null, "import LIB;\n" + Text, Fingerprint.ComputeHex(_source)),
@@ -258,7 +258,7 @@ public sealed class ScriptMigrationHandlerTests
 
         // Без бібліотеки в пакеті (і без її тіні в базі) імпортер не скомпілюється.
         var lone = await Apply().HandleAsync(
-            new ApplyScriptPackageRequest(null, null, [request.Entries![0]]), dryRun: true, CancellationToken.None);
+            new ApplyScriptPackageRequest(null, 3, [request.Entries![0]]), dryRun: true, CancellationToken.None);
         var refused = Assert.Single(lone.Entries);
         Assert.Equal("scriptMigration.refused.textInvalid", refused.Reason);
         Assert.Contains(refused.Details!, d => d.StartsWith("libraryNotScript", StringComparison.Ordinal));
@@ -276,12 +276,44 @@ public sealed class ScriptMigrationHandlerTests
         Assert.Equal("scriptMigration.refused.notFormulaVersion", Assert.Single(response.Entries).Reason);
 
         var wrong = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Apply().HandleAsync(new ApplyScriptPackageRequest("other", 1, Package().Entries), false, CancellationToken.None));
+            () => Apply().HandleAsync(new ApplyScriptPackageRequest("other", 3, Package().Entries), false, CancellationToken.None));
         Assert.Equal("err.ECR-CALC-0422.migrationPackageInvalid", wrong.Details!["messageKey"]);
 
         var empty = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Apply().HandleAsync(new ApplyScriptPackageRequest(null, null, []), false, CancellationToken.None));
+            () => Apply().HandleAsync(new ApplyScriptPackageRequest(null, 3, []), false, CancellationToken.None));
         Assert.Equal("err.ECR-CALC-0422.migrationPackageInvalid", empty.Details!["messageKey"]);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(4)]
+    [InlineData(null)]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "MS-8.5")]
+    public async Task Apply_пакет_іншого_номера_формату_відхиляється_явною_помилкою_і_нічого_не_пише(int? formatVersion)
+    {
+        var request = new ApplyScriptPackageRequest("ecr-methodology-script-package", formatVersion, Package().Entries);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Apply().HandleAsync(request, dryRun: false, CancellationToken.None));
+
+        Assert.Equal("err.ECR-CALC-0422.migrationPackageFormatUnsupported", error.Details!["messageKey"]);
+        Assert.Equal("3", error.Details["supported"]);
+        Assert.Null(_alphaVersion.ScriptText);
+        await _uow.DidNotReceiveWithAnyArgs().SaveChangesAsync(default);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "MS-8.5")]
+    public async Task Apply_пакет_формату_3_приймається()
+    {
+        var request = new ApplyScriptPackageRequest("ecr-methodology-script-package", 3, Package().Entries);
+
+        var response = await Apply().HandleAsync(request, dryRun: true, CancellationToken.None);
+
+        Assert.Equal("wouldApply", Assert.Single(response.Entries).Status);
     }
 
     [Fact]

@@ -40,7 +40,7 @@ public sealed class ConstantSimplificationTests
 
         Assert.Contains("const K = {\n    Summer: 1.2,\n    Winter: 1.4,\n};", result.Text);
         Assert.Contains("var Calc = K[Category] * 2;", result.Text);
-        Assert.Contains("var Category = key(row.Month) > 3 ? \"Summer\" : \"Winter\";", result.Text);
+        Assert.Contains("var Category = StripSpaces(key(row.Month) > 3 ? \"Summer\" : \"Winter\");", result.Text);
         Assert.Contains("reject when Category == null || Category == \"\" || !(Category in (\"Summer\", \"Winter\"));", result.Text);
         Sup.Compile(result.Text!);
     }
@@ -369,7 +369,8 @@ public sealed class ConstantSimplificationTests
                         expected = null;
                     }
 
-                    var actual = Lookup(script, function, "K", category, substance, date);
+                    // Скрипт читає ключ без пробілів (StripSpaces у правилі); старий резолвер — як є, і числа збігаються.
+                    var actual = Lookup(script, function, "K", ScriptText.BareCategory(category), substance, date);
                     Assert.True(
                         expected == actual,
                         $"K[{category}][{substance}] on {date}: resolver {expected}, script {actual}\n{result.Text}");

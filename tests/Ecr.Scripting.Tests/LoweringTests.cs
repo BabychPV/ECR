@@ -173,6 +173,16 @@ public sealed class LoweringTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void StripSpaces_власна_функція_скрипта_один_аргумент()
+    {
+        var ok = T.WithRows("var x = StripSpaces(key(row.A));");
+        Assert.Empty(ok.Diagnostics);
+
+        var bad = T.WithRows("var x = StripSpaces(key(row.A), \"b\");");
+        Assert.Contains(bad.Diagnostics, d => d.Code == ScriptDiagnosticCodes.ArgumentCount);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
     public void Довідникові_функції_збирають_коди_довідників()
     {
         var c = T.WithRows("var x = REGFIND(\"COMP\", \"k\", row.A) + REGSUM(\"OTHER\", \"k\", \"v\");");

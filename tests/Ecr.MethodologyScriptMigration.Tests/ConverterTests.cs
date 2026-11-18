@@ -94,7 +94,7 @@ public sealed class ConverterTests
             categories: ["X", "Y"]);
 
         var text = Sup.ConvertOk(source).Text!;
-        Assert.Contains("var Category = key(row.Fuel) == \"a\" ? \"X\" : \"Y\";", text);
+        Assert.Contains("var Category = StripSpaces(key(row.Fuel) == \"a\" ? \"X\" : \"Y\");", text);
         Assert.Contains("reject when Category == null || Category == \"\" || !(Category in (\"X\", \"Y\"));", text);
     }
 
@@ -109,7 +109,7 @@ public sealed class ConverterTests
             substances: ["0301", "0304"]);
 
         var text = Sup.ConvertOk(source).Text!;
-        Assert.Contains("    var SubstanceCategory = SUBSTANCE_APPLICABLE(key(row.Fuel), \"a\", \"b\", \"c\") ? \"X\" : \"\";", text);
+        Assert.Contains("    var SubstanceCategory = StripSpaces(SUBSTANCE_APPLICABLE(key(row.Fuel), \"a\", \"b\", \"c\") ? \"X\" : \"\");", text);
         Assert.Contains("    skip when SubstanceCategory == null || SubstanceCategory == \"\";", text);
         Assert.Contains("var A = K[S.code];", text);
     }

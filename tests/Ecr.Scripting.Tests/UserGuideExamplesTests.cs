@@ -157,7 +157,10 @@ public sealed partial class UserGuideExamplesTests
         }
 
         // `if` і `in` — не функції скрипта: вони пишуться як `? :` та `x in (…)`.
-        var actual = DialectCatalog.Names.Where(n => n is not ("if" or "in")).Order(StringComparer.Ordinal);
+        // Власні функції скрипта (не діалекту) — окремо від каталогу діалекту.
+        var actual = DialectCatalog.Names.Where(n => n is not ("if" or "in"))
+            .Append(Ecr.Scripting.Binding.ScriptBinder.StripSpacesName)
+            .Order(StringComparer.Ordinal);
 
         Assert.Equal([.. actual], [.. documented]);
     }

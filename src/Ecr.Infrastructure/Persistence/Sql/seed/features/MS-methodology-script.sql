@@ -405,6 +405,8 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-CALC-0409.scriptSwitchNotPublished', N'kz', N'{version} нұсқасы жарияланбаған: бұл жолмен тек жарияланған нұсқалар ауыстырылады.'),
     (N'err.ECR-CALC-0422.migrationPackageInvalid', N'ru', N'Пакет переноса пуст или имеет другой формат.'),
     (N'err.ECR-CALC-0422.migrationPackageInvalid', N'kz', N'Көшіру пакеті бос немесе басқа форматта.'),
+    (N'err.ECR-CALC-0422.migrationPackageFormatUnsupported', N'ru', N'Пакет переноса создан в формате {found}, сервер принимает формат {supported}: сформируйте пакет заново текущим инструментом (convert, затем pack).'),
+    (N'err.ECR-CALC-0422.migrationPackageFormatUnsupported', N'kz', N'Көшіру пакеті {found} форматында жасалған, сервер {supported} форматын қабылдайды: пакетті ағымдағы құралмен қайта жасаңыз (convert, содан кейін pack).'),
     (N'err.ECR-CALC-0422.scriptCompileFailed', N'ru', N'Скрипт {code} не компилируется: {diagnostic}, строка {line}.'),
     (N'err.ECR-CALC-0422.scriptCompileFailed', N'kz', N'{code} скрипті компиляцияланбайды: {diagnostic}, {line}-жол.'),
     (N'err.ECR-CALC-0422.scriptMissing', N'ru', N'У версии {code} нет текста скрипта.'),
@@ -582,6 +584,7 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
   FROM (VALUES
     (N'err.ECR-CALC-0409.scriptSwitchNotPublished', N'en', N'Version {version} is not published: only published versions are switched this way.', 1),
     (N'err.ECR-CALC-0422.migrationPackageInvalid', N'en', N'The migration package is empty or has another format.', 1),
+    (N'err.ECR-CALC-0422.migrationPackageFormatUnsupported', N'en', N'The migration package has format version {found}, the server accepts {supported}: make the package again with the current tool (convert, then pack).', 1),
     (N'err.ECR-CALC-0422.scriptCompileFailed', N'en', N'The script {code} does not compile: {diagnostic} at line {line}.', 1),
     (N'err.ECR-CALC-0422.scriptMissing', N'en', N'Version {code} has no script text.', 1),
     (N'err.ECR-CALC-0422.scriptTablesCodesInvalid', N'en', N'Pass from 1 to {limit} table codes separated by commas.', 1),

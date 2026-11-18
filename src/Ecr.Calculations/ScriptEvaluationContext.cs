@@ -339,6 +339,10 @@ internal sealed class ScriptEvaluationContext : IHostFunctionContext, IBudgetedE
                 result = Lookup(args);
                 return true;
 
+            case "$stripSpaces":
+                result = StripSpaces(args);
+                return true;
+
             case "$key":
                 result = args.Count == 1 && args[0].Value is string field
                     ? RowField(field, key: true)
@@ -442,6 +446,24 @@ internal sealed class ScriptEvaluationContext : IHostFunctionContext, IBudgetedE
         }
 
         return CalculationSteps.ToValue(argument, _entryRef, _legacyText);
+    }
+
+    /// <summary>
+    /// <c>StripSpaces(текст)</c>: текст без жодного пробільного символу (<c>char.IsWhiteSpace</c>) — так старий рушій
+    /// зводить ключ категорії перед перевіркою «відомих категорій». Помилка й <c>null</c> проходять як є, не-текст
+    /// лишається собою (тип результату правила категорії перевіряють далі).
+    /// </summary>
+    private static ExpressionValue StripSpaces(IReadOnlyList<ExpressionValue> args)
+    {
+        if (args.Count != 1)
+        {
+            return ExpressionValue.Error(ExpressionErrors.BadValue);
+        }
+
+        var value = args[0];
+        return value is { Type: ExpressionValueType.Text, Value: string text }
+            ? ExpressionValue.Text(string.Concat(text.Where(ch => !char.IsWhiteSpace(ch))))
+            : value;
     }
 
     private ExpressionValue Lookup(IReadOnlyList<ExpressionValue> args)
