@@ -70,8 +70,9 @@ if ($null -eq $tableList) { $tableList = @($Tables) }
 foreach ($t in $tableList) { if ($t -notmatch '^AF_Air_Land_[A-Za-z0-9_]+$') { throw "Table name '$t' is not an AF_Air_Land_* table." } }
 # capacity of every table: the template limit (MaxDynamicRows) of the template table the legacy table maps to
 . (Join-Path $PSScriptRoot 'LandLegacyRules.Lib.ps1')
-if ([string]::IsNullOrWhiteSpace($ModelPath)) { $ModelPath = Join-Path $repoRoot 'docs\delivery\reference-data\land-template\land-template.model.json' }
-$model = Get-Content -LiteralPath $ModelPath -Raw -Encoding UTF8 | ConvertFrom-Json
+$modelFile = $ModelPath
+if ([string]::IsNullOrWhiteSpace($modelFile)) { $modelFile = Join-Path $repoRoot 'docs\delivery\reference-data\land-template\land-template.model.json' }
+$model = Get-Content -LiteralPath $modelFile -Raw -Encoding UTF8 | ConvertFrom-Json
 $tmap = Get-LandLegacyTableMap -Model $model -LegacyTables $tableList
 $limitOf = @{}
 foreach ($sh in @($model.sheets)) { foreach ($tb in @($sh.tables)) { if (-not $limitOf.ContainsKey([string]$tb.code) -and $null -ne $tb.maxRows) { $limitOf[[string]$tb.code] = [int]$tb.maxRows } } }

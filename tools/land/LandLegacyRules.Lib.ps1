@@ -145,28 +145,28 @@ function Convert-LandLegacyRule {
     )
 
     $reasons = New-Object System.Collections.Generic.List[string]
-    if ($null -eq $AliasesByTable) { $AliasesByTable = @{} }
+    $aliasMap = if ($null -eq $AliasesByTable) { @{} } else { $AliasesByTable }
     $tcode = $TableMap[[string]$Rule.table]
     if (-not $tcode) { return [pscustomobject]@{ Ok = $false; MatchJson = $null; TableCode = $null; Reasons = @("table:$($Rule.table)"); CatchAll = [bool]$Rule.catchAll } }
     $tb = $Tables[$tcode]
     $pred = [ordered]@{}
     foreach ($cond in @($Rule.conditions)) {
-        $colCode = Get-LandLegacyColumnCode -Parameter ([string]$cond.parameter) -Columns $tb.columns -Aliases $AliasesByTable[$tcode]
+        $colCode = Get-LandLegacyColumnCode -Parameter ([string]$cond.parameter) -Columns $tb.columns -Aliases $aliasMap[$tcode]
         if (-not $colCode) { [void]$reasons.Add("column:$tcode/$($cond.parameter)"); continue }
         $col = @($tb.columns | Where-Object { [string]$_.code -eq $colCode }) | Select-Object -First 1
         $cid = & $ColumnId $tcode $colCode
         if (-not $cid) { [void]$reasons.Add("columnId:$tcode/$colCode"); continue }
-        $value = [string]$cond.value
+        $condText = [string]$cond.value
         if ([string]$col.dataType -eq 'Lookup' -and $col.registry) {
             $reg = $Registries[[string]$col.registry]
-            $ec = if ($reg) { Find-LandLegacyEntryCode -Registry $reg -Value $value } else { $null }
+            $ec = if ($reg) { Find-LandLegacyEntryCode -Registry $reg -Value $condText } else { $null }
             if (-not $ec) { [void]$reasons.Add("entry:$($col.registry)/notFound"); continue }
             if ($ec -eq '#ambiguous') { [void]$reasons.Add("entry:$($col.registry)/ambiguous"); continue }
             $eid = & $EntryId ([string]$col.registry) $ec
             if (-not $eid) { [void]$reasons.Add("entryId:$($col.registry)/$ec"); continue }
-            $value = [string]$eid
+            $condText = [string]$eid
         }
-        $pred[[string][int]$cid] = $value
+        $pred[[string][int]$cid] = $condText
     }
     if ($reasons.Count -gt 0) { return [pscustomobject]@{ Ok = $false; MatchJson = $null; TableCode = $tcode; Reasons = $reasons.ToArray(); CatchAll = [bool]$Rule.catchAll } }
     if ($null -ne $StatusEntryId -and @($tb.columns | Where-Object { [string]$_.code -eq 'Land_Status' }).Count -gt 0) {
