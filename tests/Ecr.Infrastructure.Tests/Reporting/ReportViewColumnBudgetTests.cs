@@ -33,7 +33,10 @@ public sealed class ReportViewColumnBudgetTests(SqlServerFixture sql)
     /// <param name="monthCalculated">Скільки місячних Calculated колонок.</param>
     /// <param name="plainNonMonth">Скільки ще введених немісячних колонок (Decimal) - щоб таблиця не вмістилась і без супутників.</param>
     /// <param name="yearLayout">Версія з річною розкладкою (Layout = 1) чи місячною (0).</param>
-    private async Task<Built> BuildAsync(int monthCalculated = 12, int plainNonMonth = 0, bool yearLayout = true)
+    /// <param name="monthFormula">Скільки місячних Formula колонок (без Calculated таблиця йде гілкою без rv - <c>@select</c>).</param>
+    /// <param name="nonMonthFormula">Скільки немісячних Formula колонок (кожна має супутник _Text).</param>
+    private async Task<Built> BuildAsync(int monthCalculated = 12, int plainNonMonth = 0, bool yearLayout = true,
+        int monthFormula = 0, int nonMonthFormula = 0)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         // Як T9_07 річної Land: MonthsInColumns (вʼюхи зі слотами; без них раніше діє ліміт 250 таблиць у запиті).
@@ -51,6 +54,21 @@ public sealed class ReportViewColumnBudgetTests(SqlServerFixture sql)
             c.SetMonth(true, (byte)(i % 12 + 1));
             first ??= c.Code;
             db.ColumnDefs.Add(c);
+        }
+
+        for (var i = 0; i < monthFormula; i++)
+        {
+            var c = new ColumnDef(doc.TableDefId, EcrCode.Create($"FM{i:000}_M{i % 12 + 1:00}"),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "formula month" }), 5000 + i, CellDataType.Formula);
+            c.SetMonth(true, (byte)(i % 12 + 1));
+            first ??= c.Code;
+            db.ColumnDefs.Add(c);
+        }
+
+        for (var i = 0; i < nonMonthFormula; i++)
+        {
+            db.ColumnDefs.Add(new ColumnDef(doc.TableDefId, EcrCode.Create($"NF{i:0000}"),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "formula" }), 6000 + i, CellDataType.Formula));
         }
 
         for (var i = 0; i < plainNonMonth; i++)
@@ -107,7 +125,55 @@ public sealed class ReportViewColumnBudgetTests(SqlServerFixture sql)
         Assert.True(columns.Count > 0, $"{which}: вʼюху не створено");
         Assert.Contains(b.FirstMonthCode, columns);                      // числова місячна колонка є
         Assert.Contains(b.FormulaCode + "_Text", columns);               // супутник немісячної - є
-        Assert.DoesNotContain(columns, c => c.StartsWith("CM", StringComparison.Ordinal) && c.EndsWith("_Text", StringComparison.Ordinal));
+        Assert.DoesNotContain(columns, c => (c.StartsWith("CM", StringComparison.Ordinal) || c.StartsWith("FM", StringComparison.Ordinal))
+                                            && c.EndsWith("_Text", StringComparison.Ordinal));
+    }
+
+    // ── F13 AU 18.11 (B170, R1/R4/R6/R7): гілки, яких тести вище не торкались ─────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Year_layout_formula_only_table_takes_the_non_rv_branch_and_has_no_month_Text()
+    {
+        var b = await BuildAsync(monthCalculated: 0, monthFormula: 12);   // без Calculated - текст вʼюхи з @select, не @selectRv
+        await using var db = sql.CreateContext();
+
+        await new ReportViewGenerator(db).GenerateVersionViewsAsync(b.Doc.TemplateVersionId, CancellationToken.None);
+
+        AssertNoMonthText(await ColumnsAsync(b.WideView), b, "версійна без rv");
+    }
+
+    [Fact]
+    public async Task Year_layout_table_fits_1024_only_without_month_Text_and_both_views_are_created()
+    {
+        // 535 колонок + 520 місячних супутників + 24 > 1024; без місячних (D-547) - 535 + 1 + 24 - вміщується.
+        var b = await BuildAsync(monthCalculated: 520);
+        await using var db = sql.CreateContext();
+        var generator = new ReportViewGenerator(db);
+
+        await generator.GenerateVersionViewsAsync(b.Doc.TemplateVersionId, CancellationToken.None);
+        await generator.GenerateStableViewsAsync(b.TemplateId, b.Doc.TemplateVersionId, CancellationToken.None);
+
+        var versioned = await ColumnsAsync(b.WideView);
+        AssertNoMonthText(versioned, b, "широка версійна");
+        Assert.InRange(versioned.Count, 536, 1024);
+        var stable = await ColumnsAsync(b.WideStable);
+        AssertNoMonthText(stable, b, "широка стабільна");
+        Assert.InRange(stable.Count, 536, 1024);
+    }
+
+    [Fact]
+    public async Task Stable_group_over_1000_only_because_of_non_month_Text_fails_with_50422_and_the_other_groups_are_generated()
+    {
+        // 15 + 520 немісячних формул = 535 колонок; із 521 супутником _Text - понад 1000 (і понад 1024 у CREATE VIEW).
+        var b = await BuildAsync(monthCalculated: 0, nonMonthFormula: 520);
+        await using var db = sql.CreateContext();
+
+        var ex = await Assert.ThrowsAsync<SqlException>(
+            () => new ReportViewGenerator(db).GenerateStableViewsAsync(b.TemplateId, b.Doc.TemplateVersionId, CancellationToken.None));
+
+        Assert.Equal(50422, ex.Number);                                  // не 4505 посеред циклу
+        Assert.Empty(await ColumnsAsync(b.WideStable));
+        Assert.NotEmpty(await ColumnsAsync(b.NarrowStable));
     }
 
     [Fact]
