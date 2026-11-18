@@ -161,6 +161,7 @@ $afFile = $AfPackage
 if (-not $afFile) { $afFile = Join-Path $repo 'docs\delivery\reference-data\land-template\af-land-package.json' }
 . (Join-Path $here 'EcrApi.ps1')
 . (Join-Path $here 'Land-CfRules.ps1')
+. (Join-Path $here 'Land-RowCellDefaults.ps1')
 . (Join-Path $here 'LandTemplateDiff.Lib.ps1')
 . (Join-Path $here 'LandMonthBands.Lib.ps1')
 . (Join-Path $here 'LandTemplateDraft.Lib.ps1')
@@ -845,12 +846,19 @@ function Fill-StructureSql([int]$vid) {
         foreach ($r in (Sql-Query $cn 'SELECT r.TableDefId, r.RowKey FROM cfg.RowDef r JOIN cfg.TableDef t ON t.Id=r.TableDefId JOIN cfg.SheetDef s ON s.Id=t.SheetDefId WHERE s.TemplateVersionId=@v' @{ v = $vid }).Rows) {
             $haveRows["$($r.TableDefId)/$($r.RowKey)"] = $true
         }
+        # B175: колонка CellDefaultsJson іде в масову вставку лише коли модель має хоч один cellDefaults - тоді білдер
+        # працює й з базою до міграції B175RowDefCellDefaults, поки дефолтів рядків у моделі немає.
+        $withCellDefaults = $false
+        foreach ($sh in @($Mdl.sheets)) { foreach ($tb in @($sh.tables)) { foreach ($rw in @($tb.rows)) { if ($null -ne (Get-LandRowCellDefaults $rw)) { $withCellDefaults = $true } } } }
         $dr = New-Object System.Data.DataTable
         foreach ($n in 'TableDefId:int', 'RowKey:string', 'Ordinal:int', 'LabelL10n:string', 'RowKind:byte', 'IsReadOnly:bool', 'IsDeleted:bool') {
             $p = $n -split ':'
             $t = switch ($p[1]) { 'int' { [int] } 'byte' { [byte] } 'bool' { [bool] } default { [string] } }
             [void]$dr.Columns.Add($p[0], $t)
         }
+        if ($withCellDefaults) { [void]$dr.Columns.Add('CellDefaultsJson', [string]) }
+        $cdUpd = New-Object System.Data.DataTable
+        [void]$cdUpd.Columns.Add('TableDefId', [int]); [void]$cdUpd.Columns.Add('RowKey', [string]); [void]$cdUpd.Columns.Add('Json', [string])
         $nr = 0
         foreach ($sh in @($Mdl.sheets)) {
             foreach ($tb in @($sh.tables)) {
@@ -858,17 +866,32 @@ function Fill-StructureSql([int]$vid) {
                 $o = 0
                 foreach ($rw in @($tb.rows)) {
                     $o++
-                    if ($haveRows.ContainsKey("$tid/$($rw.key)")) { continue }
+                    $cdJson = ConvertTo-LandRowCellDefaultsJson $rw
+                    if ($haveRows.ContainsKey("$tid/$($rw.key)")) {
+                        # наявний рядок (повторний прогін / клон): дефолти з моделі доводяться окремим UPDATE нижче
+                        if ($null -ne $cdJson) { [void]$cdUpd.Rows.Add($tid, [string]$rw.key, $cdJson) }
+                        continue
+                    }
                     $row = $dr.NewRow()
                     $row['TableDefId'] = $tid; $row['RowKey'] = [string]$rw.key; $row['Ordinal'] = $o
                     $lab = [string]$rw.en; if ($lab.Length -gt 400) { $lab = $lab.Substring(0, 400) }
                     $row['LabelL10n'] = (Json-L10n $lab $rw.ru); $row['RowKind'] = [byte]$RowKindCode[[string]$rw.kind]; $row['IsReadOnly'] = $false; $row['IsDeleted'] = $false
+                    if ($withCellDefaults) { $row['CellDefaultsJson'] = $(if ($null -ne $cdJson) { $cdJson } else { [System.DBNull]::Value }) }
                     $dr.Rows.Add($row); $nr++
                 }
             }
         }
         Bulk-Insert $cn 'cfg.RowDef' $dr
         Log "  рядків вставлено: $nr"
+        if ($cdUpd.Rows.Count -gt 0) {
+            Assert-EcrMutationAllowed 'SQL-запис (UPDATE cfg.RowDef.CellDefaultsJson)'
+            $null = Sql-Exec $cn 'CREATE TABLE #CD (TableDefId int, RowKey nvarchar(100), Json nvarchar(max))'
+            $bc = New-Object System.Data.SqlClient.SqlBulkCopy($cn); $bc.DestinationTableName = '#CD'
+            foreach ($cdCol in 'TableDefId', 'RowKey', 'Json') { [void]$bc.ColumnMappings.Add($cdCol, $cdCol) }
+            $bc.WriteToServer($cdUpd); $bc.Close()
+            $ncd = Sql-Exec $cn 'UPDATE r SET CellDefaultsJson = d.Json FROM cfg.RowDef r JOIN #CD d ON d.TableDefId = r.TableDefId AND d.RowKey = r.RowKey WHERE ISNULL(r.CellDefaultsJson, N'''') <> d.Json; DROP TABLE #CD'
+            Log "  дефолти комірок рядків (B175): оновлено $ncd із $($cdUpd.Rows.Count)"
+        }
         # батьківські рядки
         foreach ($sh in @($Mdl.sheets)) {
             foreach ($tb in @($sh.tables)) {
@@ -1367,8 +1390,12 @@ function Stage-Template {
             $ro = 0
             foreach ($rw in @($tb.rows)) {
                 $ro++
-                $null = Api PUT "/api/v1/template-versions/$vid/tables/$tid/rows/$($rw.key)" @{
+                $rowBody = @{
                     labelL10n = (L10n ([string]$rw.en) $rw.ru); ordinal = $ro; rowKind = [string]$rw.kind; parentRowKey = $(if ($rw.parent) { [string]$rw.parent } else { $null }); isReadOnly = $false }
+                # B175: дефолти комірок рядка - лише коли модель їх має (відсутнє поле сервер читає як «не змінювати»).
+                $rowCellDefaults = Get-LandRowCellDefaults $rw
+                if ($null -ne $rowCellDefaults) { $rowBody['cellDefaults'] = $rowCellDefaults }
+                $null = Api PUT "/api/v1/template-versions/$vid/tables/$tid/rows/$($rw.key)" $rowBody
                 $nRows++
             }
             foreach ($ru in @($tb.rules)) {
