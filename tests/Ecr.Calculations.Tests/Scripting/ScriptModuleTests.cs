@@ -257,6 +257,81 @@ public sealed class ScriptModuleTests
         Assert.Equal(2, output.Trace.Count(s => s.StepCode == "cur"));
     }
 
+    private const string ParamLibrary =
+        "param Category;\nconst EF = { Summer: 1.5, Winter: 3 };\nvar factor = EF[Category];";
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public async Task Param_бібліотеки_бере_змінну_імпортера_і_мапа_за_категорією_дає_значення()
+    {
+        var stand = Stand(
+                "var Category = row.S;\noutput Y: kg = row.A * Common.factor;",
+                imports: "import Common;\n")
+            .WithLibrary("Common", 8010, ParamLibrary);
+        stand.Main.Row("R1", ("S", "Winter"), ("A", 2m)).Row("R2", ("S", "Summer"), ("A", 2m));
+
+        var (winter, _) = await stand.RunAsync("R1");
+        var (summer, _) = await stand.RunAsync("R2");
+
+        Assert.Equal(6m, ScriptStand.Value(winter, "Y"));
+        Assert.Equal(3m, ScriptStand.Value(summer, "Y"));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public async Task Param_Category_у_циклі_речовин_бере_SubstanceCategory_а_поза_циклом_Category()
+    {
+        var stand = new ScriptStand(
+                "import Common;\nrows from T1;\nvar Category = \"Winter\";\noutput Top: kg = Common.factor;\n"
+                + "foreach substance S in (\"0301\", \"0304\") {\n"
+                + "  var SubstanceCategory = S.code == \"0301\" ? \"Summer\" : \"Winter\";\n"
+                + "  output Q per S: kg = Common.factor;\n}",
+                NumericMode.Strict)
+            .WithLibrary("Common", 8011, ParamLibrary)
+            .WithSubstances(("0301", 9001), ("0304", 9002));
+        stand.AddTable("T1").Column("A");
+        stand.Main.Row("R1", ("A", 1m));
+
+        var (output, _) = await stand.RunAsync("R1");
+
+        // Пам'ять бібліотечної величини — окремо для рядка й для кожної речовини.
+        Assert.Equal(3m, ScriptStand.Value(output, "Top"));
+        Assert.Equal(1.5m, ScriptStand.Value(output, "Q", 9001));
+        Assert.Equal(3m, ScriptStand.Value(output, "Q", 9002));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public async Task Param_довільного_імені_береться_зі_змінної_блоку_речовини()
+    {
+        var stand = new ScriptStand(
+                "import Common;\nrows from T1;\nforeach substance S in (\"0301\") {\n"
+                + "  var Weight = 4;\n  output Q per S: kg = Common.weighted;\n}\n",
+                NumericMode.Strict)
+            .WithLibrary("Common", 8012, "param Weight;\nvar weighted = Weight * 2;")
+            .WithSubstances(("0301", 9001));
+        stand.AddTable("T1").Column("A");
+        stand.Main.Row("R1", ("A", 1m));
+
+        var (output, _) = await stand.RunAsync("R1");
+
+        Assert.Equal(8m, ScriptStand.Value(output, "Q", 9001));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public async Task Імпортер_без_змінної_param_дає_null_і_пошук_у_мапі_повертає_NA()
+    {
+        var stand = Stand("output Y: kg = Common.factor;", imports: "import Common;\n")
+            .WithLibrary("Common", 8013, ParamLibrary);
+        stand.Main.Row("R1", ("S", "Winter"), ("A", 2m));
+
+        var (output, _) = await stand.RunAsync("R1");
+
+        Assert.Empty(output.Values);
+        Assert.Equal("#N/A", output.StepError!.ErrorCode);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
     public async Task Бібліотека_без_версії_зі_скриптом_відмовляє_підготовці()

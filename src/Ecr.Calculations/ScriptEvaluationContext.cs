@@ -173,6 +173,10 @@ internal sealed class ScriptEvaluationContext : IHostFunctionContext, IBudgetedE
         {
             return LibraryVariable(frame.Library, own);
         }
+        else if (frame.Script.Params.Contains(name, StringComparer.Ordinal))
+        {
+            return ImporterVariable(name);
+        }
 
         if (frame.Script.Constants.TryGetValue(name, out var constant))
         {
@@ -208,6 +212,35 @@ internal sealed class ScriptEvaluationContext : IHostFunctionContext, IBudgetedE
         }
 
         return ExpressionValue.Error(ExpressionErrors.BadReference);
+    }
+
+    /// <summary>
+    /// Значення <c>param</c> бібліотеки (§3.8): змінна ІМПОРТЕРА з тим самим ім'ям, видима в місці обчислення
+    /// (від найвужчої області: у <c>foreach substance</c> змінна блоку важливіша за верхню); немає — <c>null</c>.
+    /// Для <c>Category</c> (як у старому рушії) бібліотека бачить категорію ПОТОЧНОЇ речовини, якщо в області є
+    /// <c>SubstanceCategory</c>.
+    /// </summary>
+    private ExpressionValue ImporterVariable(string name)
+    {
+        if (name == "Category" && FindVariable("SubstanceCategory") is { } perSubstance)
+        {
+            return perSubstance;
+        }
+
+        return FindVariable(name) ?? ExpressionValue.Null;
+    }
+
+    private ExpressionValue? FindVariable(string name)
+    {
+        for (var i = _scopes.Count - 1; i >= 0; i--)
+        {
+            if (_scopes[i].TryGetValue(name, out var variable))
+            {
+                return variable;
+            }
+        }
+
+        return null;
     }
 
     private LibraryProgram? FindLibrary(Frame frame, string alias)

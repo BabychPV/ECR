@@ -252,7 +252,7 @@ public sealed class ConstantSimplificationTests
         Assert.Contains("param Category;\n", result.Text);
         Assert.Contains("const K = {\n    A: 1,\n    B: 2,\n};", result.Text);
         Assert.Contains("var V = K[Category] * 2;", result.Text);
-        Assert.True(Sup.HasIssue(result, "selfCheckSkippedParam", IssueSeverity.Info));
+        Assert.False(Sup.HasIssue(result, "selfCheckSkippedParam"));
         Assert.True(
             result.Text!.IndexOf("param Category;", StringComparison.Ordinal)
             < result.Text.IndexOf("const K", StringComparison.Ordinal));

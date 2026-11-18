@@ -26,13 +26,8 @@ public sealed class CorpusTests(ITestOutputHelper output)
                 continue;
             }
 
-            // ConverterOptions.LanguageHasParam = false: компілятор ще не знає `param`. Доки так, змінну імпортера
-            // підміняємо звичайною `var Category = null;` — решта тексту компілюється як є.
-            var textToCompile = !ConverterOptions.LanguageHasParam
-                ? result.Text.Replace("param Category;", "var Category = null;", StringComparison.Ordinal)
-                : result.Text;
             var compiled = ScriptCompiler.Compile(
-                textToCompile,
+                result.Text,
                 new ScriptCompileOptions(source.NumericMode, source.IsLibrary, code => code == PackageCorpus.LibraryCode ? common : null));
             if (compiled.Diagnostics.Count > 0)
             {

@@ -369,4 +369,38 @@ public sealed class MetadataAndFeaturesTests
         Assert.Empty(c.Diagnostics);
         Assert.Equal("a_1x", Assert.IsType<VarStatement>(Assert.Single(c.Script!.Statements)).Name);
     }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Param_у_бібліотеці_компілюється_лишається_змінною_і_потрапляє_в_Params()
+    {
+        var script = T.Lib("param Category;\nparam Other;\nconst EF = { A: 1 };\nvar f = EF[Category];");
+
+        Assert.Equal(["Category", "Other"], script.Params);
+        Assert.DoesNotContain(script.Members, m => m.Name == "Category");
+        Assert.Equal("$lookup('EF', !Category)", AstPrinter.Print(((VarStatement)script.Statements.Single()).Expr));
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Param_поза_бібліотекою_дає_paramOutsideLibrary()
+    {
+        var c = T.WithRows("param Category;\nvar x = 1;");
+
+        Assert.Contains(ScriptDiagnosticCodes.ParamOutsideLibrary, T.Codes(c));
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Param_повторне_оголошення_і_використання_до_оголошення_діагностуються()
+    {
+        Assert.Contains(ScriptDiagnosticCodes.DuplicateName, T.Codes(T.Compile("param A;\nparam A;", library: true)));
+        Assert.Contains(ScriptDiagnosticCodes.DuplicateName, T.Codes(T.Compile("var A = 1;\nparam A;", library: true)));
+        Assert.Contains(ScriptDiagnosticCodes.ForwardReference, T.Codes(T.Compile("var v = A;\nparam A;", library: true)));
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Param_є_зарезервованим_словом_і_потребує_імені_та_крапки_з_комою()
+    {
+        Assert.Contains(ScriptDiagnosticCodes.Expected, T.Codes(T.Compile("var param = 1;", library: true)));
+        Assert.NotEmpty(T.Compile("param ;", library: true).Diagnostics);
+        Assert.NotEmpty(T.Compile("param X", library: true).Diagnostics);
+    }
 }

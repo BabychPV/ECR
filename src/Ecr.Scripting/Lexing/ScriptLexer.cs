@@ -22,7 +22,7 @@ public static class ScriptLexer
     {
         "import", "rows", "from", "where", "active", "when", "const", "var", "visible", "function", "output",
         "per", "if", "else", "foreach", "substance", "in", "reject", "skip", "true", "false", "null",
-        "row", "period", "header", "key", "entry", "table",
+        "row", "period", "header", "key", "entry", "table", "param",
     };
 
     /// <summary>Розбиває текст на лексеми.</summary>

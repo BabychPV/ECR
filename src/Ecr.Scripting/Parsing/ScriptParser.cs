@@ -212,7 +212,7 @@ public static partial class ScriptParser
 
         private static bool IsStatementStart(ScriptToken t)
             => t.Kind == ScriptTokenKind.Keyword
-               && t.Text is "var" or "visible" or "output" or "const" or "function" or "rows" or "table" or "import"
+               && t.Text is "var" or "visible" or "output" or "const" or "function" or "rows" or "table" or "import" or "param"
                    or "reject" or "skip" or "if" or "foreach";
 
         private void Sync(int start)
@@ -422,6 +422,14 @@ public static partial class ScriptParser
             return new ImportSyntax(name.Text, SpanFrom(first));
         }
 
+        private ParamDeclSyntax ParseParam()
+        {
+            var first = Advance();
+            var name = ExpectIdent();
+            Expect(ScriptTokenKind.Semicolon, "';'");
+            return new ParamDeclSyntax(name.Text, name.Span, SpanFrom(first));
+        }
+
         private ItemSyntax ParseItem()
         {
             if (Cur.Kind == ScriptTokenKind.Keyword)
@@ -438,6 +446,8 @@ public static partial class ScriptParser
                         return ParseConst();
                     case "function":
                         return ParseFunction();
+                    case "param":
+                        return ParseParam();
                     default:
                         break;
                 }
@@ -650,7 +660,7 @@ public static partial class ScriptParser
                         return ParseIf();
                     case "foreach":
                         return ParseForeachSubstance();
-                    case "rows" or "const" or "function" or "table" or "import":
+                    case "rows" or "const" or "function" or "table" or "import" or "param":
                         throw FailUnexpected($"'{first.Text}' is allowed only at the top level.");
                     default:
                         break;

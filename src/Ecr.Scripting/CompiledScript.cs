@@ -177,6 +177,9 @@ public sealed class CompiledScript
     /// <summary>Коди бібліотек.</summary>
     public IReadOnlyList<string> Imports { get; internal init; } = [];
 
+    /// <summary>Імена <c>param</c> бібліотеки (змінні імпортера з тими самими іменами).</summary>
+    public IReadOnlyList<string> Params { get; internal init; } = [];
+
     /// <summary>Речення <c>rows</c>.</summary>
     public IReadOnlyList<RowsClause> Rows { get; internal init; } = [];
 

@@ -33,6 +33,7 @@ internal sealed class ScriptBinder
     private readonly Dictionary<string, CompiledScript> imports = new(StringComparer.Ordinal);
     private readonly List<string> importList = [];
     private readonly Dictionary<string, TableRef> tables = new(StringComparer.Ordinal);
+    private readonly List<string> paramNames = [];
     private readonly HashSet<string> topLevelNames = new(StringComparer.Ordinal);
     private readonly Dictionary<string, HashSet<string>> callGraph = new(StringComparer.Ordinal);
 
@@ -194,6 +195,9 @@ internal sealed class ScriptBinder
                 case FunctionSyntax f:
                     BindFunction(f);
                     break;
+                case ParamDeclSyntax pd:
+                    BindParam(pd);
+                    break;
                 case StatementSyntax s:
                     topStatements.AddRange(BindStatements([s], topLevel: true));
                     break;
@@ -211,6 +215,20 @@ internal sealed class ScriptBinder
         }
 
         return (BuildResult(), diagnostics);
+    }
+
+    private void BindParam(ParamDeclSyntax pd)
+    {
+        if (!options.IsLibrary)
+        {
+            Report(ScriptDiagnosticCodes.ParamOutsideLibrary, pd.Span,
+                $"'param {pd.Name};' is allowed only in a library.", ("name", pd.Name));
+            return;
+        }
+
+        // Ім'я видиме далі як змінна верхнього рівня; значення бере рушій у змінної імпортера (§3.8).
+        scope.Names[pd.Name] = Sym.Var;
+        paramNames.Add(pd.Name);
     }
 
     private CompiledScript BuildResult()
@@ -234,6 +252,7 @@ internal sealed class ScriptBinder
         {
             IsLibrary = options.IsLibrary,
             Imports = importList,
+            Params = paramNames,
             Rows = rows,
             Outputs = outputs,
             Visibles = visibles,
@@ -304,6 +323,10 @@ internal sealed class ScriptBinder
                 case VarSyntax v:
                     RegisterGlobal(v.Name, "var", v.NameSpan);
                     topLevelNames.Add(v.Name);
+                    break;
+                case ParamDeclSyntax pd:
+                    RegisterGlobal(pd.Name, "param", pd.NameSpan);
+                    topLevelNames.Add(pd.Name);
                     break;
                 case OutputSyntax o:
                     RegisterGlobal(o.Code, "output", o.CodeSpan);

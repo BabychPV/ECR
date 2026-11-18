@@ -90,6 +90,9 @@ public sealed record RowsSyntax(IReadOnlyList<TableRef> Tables, MatchNode? Where
 /// <summary><c>table Alias = T;</c>.</summary>
 public sealed record TableSyntax(string Alias, ScriptSpan AliasSpan, TableRef Table, ScriptSpan Span) : ItemSyntax(Span);
 
+/// <summary><c>param X;</c> (лише бібліотека): ім'я змінної імпортера.</summary>
+public sealed record ParamDeclSyntax(string Name, ScriptSpan NameSpan, ScriptSpan Span) : ItemSyntax(Span);
+
 /// <summary><c>const</c>.</summary>
 public sealed record ConstSyntax(string Name, ScriptSpan NameSpan, UnitRef? Unit, ConstValueSyntax Value, ScriptSpan Span) : ItemSyntax(Span);
 

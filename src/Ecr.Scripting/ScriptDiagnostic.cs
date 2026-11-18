@@ -73,6 +73,9 @@ public static class ScriptDiagnosticCodes
     /// <summary>Лише константа: цикл бібліотек виявляє викликач (він бачить граф версій).</summary>
     public const string ImportCycle = "importCycle";
     public const string TooLarge = "tooLarge";
+
+    /// <summary><c>param</c> поза бібліотекою.</summary>
+    public const string ParamOutsideLibrary = "paramOutsideLibrary";
     public const string TooDeep = "tooDeep";
 
     // §13.7

@@ -560,6 +560,40 @@ output ECW_Rate : g_per_s = Common.summer ? rate * 1.2 : rate * 1.4;
 - `var` бібліотеки обчислюється в контексті **вашого** рядка: його `row`,
   `period` і поточна речовина.
 
+### 15.1. Змінна імпортера: `param`
+
+Бібліотека може **читати змінну того, хто її підключає**. Для цього в ній
+оголошують `param Ім'я;` (лише в бібліотеці — у звичайному скрипті це помилка
+`paramOutsideLibrary`). Далі `Ім'я` вживається як звичайна змінна.
+
+```csharp
+// бібліотека: Common
+param Category;
+
+const EF = { Summer: 1.2, Winter: 1.4 };
+
+var factor = EF[Category];
+```
+
+```csharp
+import Common;
+
+rows from T3_00;
+
+var Category = key(row.Land_Season);
+output ECW_Rate : g_per_s = row.Land_FuelConsumption * Common.factor;
+```
+
+- Значення `param` — змінна **імпортера з тим самим ім'ям**, видима в місці
+  звернення: у `foreach substance` змінна блоку важливіша за верхню.
+- Якщо в імпортера такої змінної немає, значення — порожнє (`null`); пошук у
+  мапі за порожнім ключем дає `#N/A`.
+- Виняток для `Category`: усередині `foreach substance`, де є змінна
+  `SubstanceCategory`, бібліотека бачить саме її — так, як це було в старих
+  методологіях з категорією речовини.
+- Величини бібліотеки, що читають `param`, запам'ятовуються окремо для
+  рядка й для кожної речовини, тому різні речовини дають різні значення.
+
 ## 16. Період і шапка документа
 
 | Запис | Що це |
@@ -740,6 +774,7 @@ output ECW_Fuel : t = big + root + sign;
 | `unknownImport` | Library '…' was not found | немає такої методології-бібліотеки або в неї немає чинної версії |
 | `unknownImportMember` | Library '…' has no … | у бібліотеці немає такого імені |
 | `importCycle` | (цикл бібліотек) | бібліотеки не можуть підключати одна одну по колу |
+| `paramOutsideLibrary` | 'param …;' is allowed only in a library | `param` пишуть лише в бібліотеці; у скрипті методології вживайте звичайну `var` |
 | `tableColumnOutsideAggregate` | '…' can be read only inside an aggregate | читайте колонку іншої таблиці лише в `Sum/Max/Count/…` |
 | `aggregateNeedsTable` | The value of …(…) must read a column of a declared table | у значенні агрегату має бути `Псевдонім.Колонка` |
 | `aggregateManyTables` | … must read exactly one table | значення читає кілька таблиць: залиште одну, решту — в `where` |
@@ -927,6 +962,7 @@ foreach substance S in ("0301") {
 
 ```text
 import Код;                                              // бібліотеки (на початку)
+param Ім'я;                                              // лише в бібліотеці: змінна імпортера
 rows from Т1, Т2 where … active when …;                  // вибір рядків
 table Псевдонім = Таблиця;                               // інша таблиця
 const Ім'я [: одиниця] = число | "текст" | true | { мапа };
