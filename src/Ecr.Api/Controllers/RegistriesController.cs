@@ -315,7 +315,8 @@ public sealed class RegistriesController(
 
         var isNew = dto.Id is null;
         // B167: програш одночасному однаковому запиту — повтор у свіжій області (RegistryWriteRetry), відповідь послідовного повтору.
-        var result = await retry.RunAsync(upsert, h => h.HandleWithWarningsAsync(dto, code, ct)).ConfigureAwait(false);
+        // ⚠ Параметр лямбди названо як обробник: сторож EndpointCoverageTests (СТАТИЧНО) бачить виклик того самого типу.
+        var result = await retry.RunAsync(upsert, upsert => upsert.HandleWithWarningsAsync(dto, code, ct)).ConfigureAwait(false);
         var id = result.Id;
         var body = new RegistryEntryIdResponse(id) { Warnings = result.Warnings };
 
@@ -379,7 +380,7 @@ public sealed class RegistriesController(
         // B167: програш одночасному однаковому файлу — повтор у свіжій області (RegistryWriteRetry): звіт послідовного повтору.
         // dryRun нічого не пише й не конфліктує, тож повтор його не стосується.
         return Ok(await retry
-            .RunAsync(importEntries, h => h.HandleAsync(code, content, file.Length, maxBytes, dryRun, ct, notUtf8))
+            .RunAsync(importEntries, importEntries => importEntries.HandleAsync(code, content, file.Length, maxBytes, dryRun, ct, notUtf8))
             .ConfigureAwait(false));
     }
 
