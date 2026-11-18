@@ -12,7 +12,16 @@ public static class AnalyzeCommand
     {
         var builder = new MethodologyModelBuilder();
         var readStats = AfXmlReader.Read(input, builder.Add);
-        var model = builder.Build();
+        return Analyze(builder.Build(), readStats, library, normalize);
+    }
+
+    /// <summary>
+    /// Аналіз готової моделі — спільна частина джерел (AF XML, дзеркала SQL старої системи): нормалізація посилань,
+    /// типи формул, блокери. Модель із будь-якого джерела проходить ТУ САМУ перевірку.
+    /// </summary>
+    public static (MethodologyModel Model, AnalysisReport Report) Analyze(
+        MethodologyModel model, AfReadStats readStats, string library = MethodologyAnalyzer.DefaultLibrary, bool normalize = true)
+    {
         var applied = (IReadOnlyList<NormalizationApplied>)[];
         if (normalize)
         {

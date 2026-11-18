@@ -6,6 +6,7 @@ using Ecr.MethodologyImport;
 using Ecr.MethodologyImport.Analysis;
 using Ecr.MethodologyImport.Export;
 using Ecr.MethodologyImport.Model;
+using Ecr.MethodologyImport.Reading;
 using Ecr.MethodologyImport.Reporting;
 
 // Коди виходу: 0 — блокерів немає; 2 — є блокери (нерезолвні посилання, цикли, нічого не розпізнано);
@@ -16,13 +17,19 @@ const int HasBlockers = 2;
 
 Console.OutputEncoding = new UTF8Encoding(false);
 
-if (args.Length < 2 || args[0] is not ("analyze" or "export" or "unresolved"))
+if (args.Length < 2 || args[0] is not ("analyze" or "export" or "unresolved") || (args[1] == "--sql" && args.Length < 3))
 {
     Console.Error.WriteLine("""
         Використання:
           Ecr.MethodologyImport analyze <AF.xml> [--json] [--top N] [--library Common] [--out report.json]
           Ecr.MethodologyImport export  <AF.xml> --out package.json [--library Common] [--allow-blockers]
           Ecr.MethodologyImport unresolved <AF.xml> [--out unresolved.md] [--library Common]
+
+        Джерело — AF XML (перший аргумент) АБО дзеркала SQL старої системи (AF_Formulas, AF_Constants) замість файла:
+          Ecr.MethodologyImport export --sql "<рядок з'єднання>" --out package.json [--timezone Asia/Atyrau] [--methodology <код>]
+        --sql читає лише SELECT … WITH (NOLOCK) (намір ReadOnly, копія бази старої системи, не live) і складає ту саму
+        модель, що й XML; дати дзеркала — локальний час майданчика, --timezone (за замовчуванням Asia/Atyrau) переводить
+        їх у UTC-рядки AF. Далі — той самий аналіз, нормалізація й пакет.
 
         analyze — сухий прогін: розбір AF XML (потоково), Trim, резолвінг !Формула і CST.Константа
         (власна версія → бібліотека), цикли. Код виходу 2, якщо є блокери. Запису в БД немає.
@@ -35,7 +42,11 @@ if (args.Length < 2 || args[0] is not ("analyze" or "export" or "unresolved"))
 }
 
 var command = args[0];
-var path = args[1];
+var sqlMode = args[1] == "--sql";
+var path = sqlMode ? string.Empty : args[1];
+string? sqlConnection = sqlMode ? args[2] : null;
+var siteTimeZone = LegacyMirrorReader.DefaultTimeZone;
+string? onlyMethodology = null;
 var json = false;
 var allowBlockers = false;
 var normalize = true;
@@ -43,7 +54,7 @@ var top = 20;
 var library = MethodologyAnalyzer.DefaultLibrary;
 string? outFile = null;
 
-for (var i = 2; i < args.Length; i++)
+for (var i = sqlMode ? 3 : 2; i < args.Length; i++)
 {
     switch (args[i])
     {
@@ -66,6 +77,12 @@ for (var i = 2; i < args.Length; i++)
         case "--out" when i + 1 < args.Length:
             outFile = args[++i];
             break;
+        case "--timezone" when i + 1 < args.Length && sqlMode:
+            siteTimeZone = args[++i];
+            break;
+        case "--methodology" when i + 1 < args.Length && sqlMode:
+            onlyMethodology = args[++i];
+            break;
         default:
             Console.Error.WriteLine($"Невідомий або неповний параметр: {args[i]}");
             return UsageOrInputError;
@@ -78,7 +95,7 @@ if (command == "export" && outFile is null)
     return UsageOrInputError;
 }
 
-if (!File.Exists(path))
+if (!sqlMode && !File.Exists(path))
 {
     Console.Error.WriteLine($"Файл не знайдено: {path}");
     return UsageOrInputError;
@@ -90,9 +107,33 @@ AnalysisReport report;
 long size;
 try
 {
-    using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20, FileOptions.SequentialScan);
-    size = stream.Length;
-    (model, report) = AnalyzeCommand.Run(stream, library, normalize);
+    if (sqlMode)
+    {
+        TimeZoneInfo zone;
+        try
+        {
+            zone = TimeZoneInfo.FindSystemTimeZoneById(siteTimeZone);
+        }
+        catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException)
+        {
+            Console.Error.WriteLine($"Невідомий часовий пояс: {siteTimeZone}");
+            return UsageOrInputError;
+        }
+
+        var (formulaRows, constantRows) = LegacySqlMirrorSource.Read(sqlConnection!);
+        var (mirrorModel, readStats, mirrorStats) = LegacyMirrorReader.Build(formulaRows, constantRows, zone, onlyMethodology);
+        size = 0;
+        Console.Error.WriteLine(string.Create(
+            CultureInfo.InvariantCulture,
+            $"Дзеркала: рядків формул {mirrorStats.FormulaRows}, констант {mirrorStats.ConstantRows}, пропущено {mirrorStats.SkippedRows}."));
+        (model, report) = AnalyzeCommand.Analyze(mirrorModel, readStats, library, normalize);
+    }
+    else
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20, FileOptions.SequentialScan);
+        size = stream.Length;
+        (model, report) = AnalyzeCommand.Run(stream, library, normalize);
+    }
 }
 catch (XmlException ex)
 {
@@ -102,6 +143,11 @@ catch (XmlException ex)
 catch (IOException ex)
 {
     Console.Error.WriteLine($"Помилка читання файла: {ex.Message}");
+    return UsageOrInputError;
+}
+catch (Microsoft.Data.SqlClient.SqlException ex)
+{
+    Console.Error.WriteLine($"Помилка читання дзеркал SQL: {ex.Message}");
     return UsageOrInputError;
 }
 

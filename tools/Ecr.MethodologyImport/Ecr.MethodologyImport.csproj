@@ -12,4 +12,9 @@
     <AssemblyName>Ecr.MethodologyImport</AssemblyName>
   </PropertyGroup>
 
+  <!-- Лише для читання дзеркал SQL старої системи (Reading/LegacySqlMirrorSource.cs); XML-шлях пакетів не потребує. -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.SqlClient" />
+  </ItemGroup>
+
 </Project>

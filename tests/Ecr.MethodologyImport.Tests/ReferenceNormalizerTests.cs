@@ -104,6 +104,24 @@ public sealed class ReferenceNormalizerTests
     }
 
     [Fact]
+    public void Правило_не_спрацьовує_коли_ім_я_джерела_визначене_в_моделі()
+    {
+        // Дзеркала SQL старої системи мають константу з тим самим іменем, що в посиланні: «виправляти» нічого.
+        var b = Library()
+            .Constant("ECW_C11_11_02", "V1", "Mh2s_ECW_C11_11_02_", "34")
+            .Formula("ECW_C11_11_02", "V1", "F3", "CST.Mh2s_ECW_C11_11_02_", "CST.Mh2s_ECW_C11_11_02_")
+            .Constant("ECW_C11_11_05", "V1", "k3_ECW_C11_11_05_", "3600")
+            .Formula("ECW_C11_11_05", "V1", "F4", "CST.k3_ECW_C11_11_05_", "CST.k3_ECW_C11_11_05_");
+
+        var (model, report) = Run(b);
+
+        Assert.Empty(report.Normalizations!);
+        Assert.Empty(report.Unresolved);
+        Assert.Equal("CST.Mh2s_ECW_C11_11_02_", model.Formulas.Single(x => x.Name == "F3").Text);
+        Assert.Equal("CST.k3_ECW_C11_11_05_", model.Formulas.Single(x => x.Name == "F4").Text);
+    }
+
+    [Fact]
     public void Таблиця_не_має_дублів_джерела_і_цілі_не_збігаються_з_джерелами()
     {
         var rules = ReferenceNormalizer.Rules;
