@@ -2,8 +2,10 @@
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
-    (N'err.ECR-CALC-0422.scriptEmpty', N'ru', N'Версию {version} нельзя переключить на скрипт: текста скрипта нет.'),
-    (N'err.ECR-CALC-0422.scriptEmpty', N'kz', N'{version} нұсқасын скриптке ауыстыруға болмайды: скрипт мәтіні жоқ.')
+    (N'err.ECR-CALC-0422.scriptEmpty', N'ru', N'Версия {version}: текст скрипта пуст.'),
+    (N'err.ECR-CALC-0422.scriptEmpty', N'kz', N'{version} нұсқасы: скрипт мәтіні бос.'),
+    (N'err.ECR-CALC-0422.scriptTooLarge', N'ru', N'Текст скрипта слишком большой: допустимо не более {limit} знаков.'),
+    (N'err.ECR-CALC-0422.scriptTooLarge', N'kz', N'Скрипт мәтіні тым үлкен: {limit} таңбадан аспауы керек.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -13,7 +15,8 @@ GO
 INSERT INTO #UiEn ([Key], Lang, Val, Scope)
 SELECT v.[Key], v.Lang, v.Val, v.Scope
   FROM (VALUES
-    (N'err.ECR-CALC-0422.scriptEmpty', N'en', N'Version {version} cannot be switched to a script: there is no script text.', 1)
+    (N'err.ECR-CALC-0422.scriptEmpty', N'en', N'Version {version}: the script text is empty.', 1),
+    (N'err.ECR-CALC-0422.scriptTooLarge', N'en', N'The script text is too large: at most {limit} characters are allowed.', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO

@@ -329,4 +329,54 @@ public sealed class MethodologyScriptAuthoringStoreTests(SqlServerFixture sql)
         Assert.False(edges.ContainsKey(c));
         Assert.Empty(await new MethodologyStore(read).GetMethodologyDependenciesAsync([], default));
     }
+
+    /// <summary>
+    /// Мутаційний доказ (F13): два редактори, що прочитали той самий хеш, не затирають один одного. Без
+    /// <c>IsConcurrencyToken</c> на <c>ScriptHash</c> друге збереження мовчки перезаписувало перше, а звірка
+    /// <c>expectedHash</c> в обробнику (читання, потім запис) цього не ловила.
+    /// </summary>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Два_редактори_з_одним_прочитаним_хешем_другий_отримує_конфлікт_а_не_затирає_перший(bool hadScript)
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        int versionId;
+
+        await using (var seed = builder.CreateContext())
+        {
+            var method = new Methodology(EcrCode.Create($"MSC_{tag}"), Name("concurrency"));
+            seed.Methodologies.Add(method);
+            await seed.SaveChangesAsync();
+            var version = new MethodologyVersion(
+                method.Id, "1.0", CalculationLevel.Configuration, 1, Now, MethodologyEngine.Script);
+            if (hadScript)
+            {
+                version.SetScript("// v0", [1]);
+            }
+
+            seed.MethodologyVersions.Add(version);
+            await seed.SaveChangesAsync();
+            versionId = version.Id;
+        }
+
+        await using var first = builder.CreateContext();
+        await using var second = builder.CreateContext();
+        var firstVersion = await first.MethodologyVersions.SingleAsync(v => v.Id == versionId);
+        var secondVersion = await second.MethodologyVersions.SingleAsync(v => v.Id == versionId);
+
+        firstVersion.SetScript("// A", [10]);
+        await first.SaveChangesAsync();
+
+        secondVersion.SetScript("// B", [20]);
+        await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() => second.SaveChangesAsync());
+
+        await using var read = builder.CreateContext();
+        var stored = await read.MethodologyVersions.AsNoTracking().SingleAsync(v => v.Id == versionId);
+        Assert.Equal("// A", stored.ScriptText);
+        Assert.Equal([10], stored.ScriptHash);
+    }
 }

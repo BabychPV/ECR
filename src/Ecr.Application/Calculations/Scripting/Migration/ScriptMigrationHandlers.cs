@@ -256,6 +256,15 @@ public sealed class ApplyScriptPackageHandler(
             return Refuse(ScriptMigrationKeys.TextEmpty, "The script text is empty.", version.Id);
         }
 
+        if (entry.Text.Length > ScriptAnalyzer.MaxTextLength)
+        {
+            return Refuse(
+                ScriptMigrationKeys.TextInvalid,
+                "The script text is longer than the limit.",
+                version.Id,
+                [$"limit: {ScriptAnalyzer.MaxTextLength.ToString(CultureInfo.InvariantCulture)} characters"]);
+        }
+
         // Бібліотеки з тіньовим скриптом годяться: текст зберігають ДО перемикання рушія бібліотеки.
         var analysis = await analyzer.AnalyzeAsync(entry.Text, methodology, version, ct, overlay).ConfigureAwait(false);
         if (analysis.Diagnostics.Count > 0)

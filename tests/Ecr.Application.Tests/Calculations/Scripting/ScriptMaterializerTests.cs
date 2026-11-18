@@ -18,6 +18,7 @@ public sealed class ScriptMaterializerTests
     private static readonly int[] ImportIds = [9];
     private static readonly string[] ReadTables = ["T2"];
     private static readonly int[] Dependencies = [9, 77];
+    private static readonly int[] OnlyForeign = [77];
 
     private readonly IMethodologyStore _store = ScriptTestKit.Store();
     private readonly IMethodologyDraftStore _drafts = Substitute.For<IMethodologyDraftStore>();
@@ -164,5 +165,64 @@ public sealed class ScriptMaterializerTests
         await _store.Received(1).ReplaceDependenciesAsync(
             MethodologyId, Arg.Is<IReadOnlyCollection<int>>(ids => ids.SequenceEqual(Dependencies)), Arg.Any<CancellationToken>());
         Assert.Equal([9, 77], result.DependencyMethodologyIds);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "MS-T3.1")]
+    public async Task Власна_методологія_не_потрапляє_у_власні_залежності_ні_при_публікації_ні_при_перемиканні()
+    {
+        var (script, _) = Prepare(Text, Table());
+
+        // Власний id серед джерел результатів (дубль 77 теж) — ребра «сама на себе» бути не може: це цикл.
+        var environment = new ScriptEnvironment([], [Table()], [MethodologyId, 77, 77]);
+
+        var published = await Materializer().MaterializeAsync(
+            VersionId, MethodologyId, script, environment, new ScriptMaterializeOptions(Publish: true), default);
+        await Materializer().WriteForSwitchAsync(VersionId, MethodologyId, script, environment, default);
+
+        Assert.Equal([77], published.DependencyMethodologyIds);
+        await _store.Received(2).ReplaceDependenciesAsync(
+            MethodologyId, Arg.Is<IReadOnlyCollection<int>>(ids => ids.SequenceEqual(OnlyForeign)), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "MS-13.9")]
+    public async Task Ребра_довідників_пишуться_при_публікації_і_при_перемиканні_але_не_при_збереженні_чернетки()
+    {
+        var registries = Substitute.For<IRegistryStore>();
+        var uses = Substitute.For<IRegistryUseStore>();
+        var definition = ScriptTestKit.WithId(
+            new Ecr.Domain.Entities.Configuration.RegistryDef(
+                Ecr.Domain.ValueObjects.EcrCode.Create("REG"),
+                new Ecr.Domain.ValueObjects.LocalizedText(new Dictionary<string, string> { ["en"] = "reg" }),
+                isTemporal: false),
+            33);
+        registries.FindDefinitionAsync("REG", Arg.Any<CancellationToken>()).Returns(definition);
+        var materializer = new ScriptMaterializer(_store, _drafts, ScriptTestKit.Catalog(), _bindings, registries, uses);
+
+        var compilation = ScriptTestKit.Compile(
+            "rows from T1\n    where row.Hours == entry(\"REG\", \"X\");\noutput OUT_A : t = row.Hours;");
+        Assert.Empty(compilation.Diagnostics);
+        var script = compilation.Script!;
+        var environment = new ScriptEnvironment([], [Table()], []);
+
+        await materializer.MaterializeAsync(
+            VersionId, MethodologyId, script, environment, new ScriptMaterializeOptions(Publish: false), default);
+        await uses.DidNotReceiveWithAnyArgs().ReplaceMethodologyUsesAsync(default, default!, default);
+
+        await materializer.MaterializeAsync(
+            VersionId, MethodologyId, script, environment, new ScriptMaterializeOptions(Publish: true), default);
+        await materializer.WriteForSwitchAsync(VersionId, MethodologyId, script, environment, default);
+
+        await uses.Received(2).ReplaceMethodologyUsesAsync(
+            VersionId,
+            Arg.Is<IReadOnlyCollection<Ecr.Domain.Entities.Configuration.RegistryUse>>(u =>
+                u.Count == 1
+                && u.Single().RegistryDefId == 33
+                && u.Single().SourceId == VersionId
+                && u.Single().FormulaCode == ScriptMaterializer.RegistryUseSource),
+            Arg.Any<CancellationToken>());
     }
 }
