@@ -36,7 +36,9 @@ public sealed class DeleteDocumentHandler(
     IAuditWriter audit,
     ICurrentUser currentUser,
     IClock clock,
-    Reporting.ReportSnapshotSync? reports = null)
+    Reporting.ReportSnapshotSync? reports = null,
+    // ✎ B80 (N2a, T-C): видалення документа-джерела — перерахунок залежних (лише за ApprovedOnly), ПІСЛЯ коміту.
+    ISourceApprovalChangeTrigger? sourceTrigger = null)
 {
     // ⚠ `reports` необов'язковий лише заради наявних прямих конструювань обробника в тестах; у застосунку
     // клас зареєстровано (`Ecr.Application.DependencyInjection`), і контейнер його передає.
@@ -89,6 +91,12 @@ public sealed class DeleteDocumentHandler(
                     ["projectId"] = document.ProjectId.ToString(CultureInfo.InvariantCulture),
                 });
         }
+
+        // ✎ B80 (T-C): роки документа-джерела — ДО видалення (після нього екземплярів таблиць уже немає); поза
+        // транзакцією, лише читання, збій — null (тригер не кидає).
+        var sourceDeletion = sourceTrigger is null
+            ? null
+            : await sourceTrigger.PrepareDocumentDeletionAsync(documentId, ct).ConfigureAwait(false);
 
         var cells = 0;
         await uow.ExecuteInTransactionAsync(async innerCt =>
@@ -156,6 +164,11 @@ public sealed class DeleteDocumentHandler(
                     currentUser.CorrelationId),
                 innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
+
+        if (sourceDeletion is not null)
+        {
+            await sourceTrigger!.OnSourceDocumentDeletedAsync(sourceDeletion, userId, ct).ConfigureAwait(false);
+        }
     }
 
     /// <summary>Відмовляє, якщо проєкт архівовано або документ має дані в закритому періоді.</summary>

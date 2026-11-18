@@ -74,6 +74,8 @@ public sealed partial class SheetCopyQuerySitesTests
             "B80: обраний документ-джерело року — екземпляри оригіналу (SheetCopyId == null), як у завантажувачі складу",
         ["src/Ecr.Infrastructure/Jobs/Hse400LandDependentsTrigger.cs"] =
             "HSE400 3b: «чи документ HSE400» — за екземплярами оригіналу (SheetCopyId == null), як у завантажувачі складу",
+        ["src/Ecr.Infrastructure/Jobs/Hse400SourceApprovalTrigger.cs"] =
+            "B80 N2a: роки документа-джерела перед видаленням — екземпляри оригіналу (SheetCopyId == null), як у завантажувачі складу",
         ["src/Ecr.Infrastructure/Persistence/SystemHealthStore.cs"] =
             "B105: «чи є документ HSE400 року» для попередження про прапор — екземпляри оригіналу (SheetCopyId == null), як у завантажувачі складу",
         ["src/Ecr.Infrastructure/Persistence/PermitHistoryUsage.cs"] =

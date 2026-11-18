@@ -444,6 +444,7 @@ public static class DependencyInjection
         services.AddSingleton<Jobs.RecalculationBudgetMonitor>();
         services.AddScoped<IRecalculationJob, Jobs.RecalculationJob>();
         services.AddScoped<Jobs.IRecalculationCompletionHook>(sp => Jobs.Hse400LandDependentsTrigger.Create(sp, configuration)); // HSE400 3b; B80: ключі — перекриття бітів зв'язки
+        services.AddScoped<ISourceApprovalChangeTrigger>(sp => Jobs.Hse400SourceApprovalTrigger.Create(sp, configuration)); // B80 N2a: Approve/Reopen/видалення джерела за ApprovedOnly
         services.AddScoped<IFormulaRecalculationJob, Jobs.FormulaRecalculationJob>();
         // WW-03: постановка перерахунку в періоди-читачі (міжперіодні посилання).
         services.AddScoped<Jobs.CrossPeriodFanOut>();
