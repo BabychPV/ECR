@@ -65,8 +65,9 @@ internal sealed class ScriptProgramLoader(IMethodologyStore methodologies, Scrip
     /// <param name="onDate">Бізнес-дата: кінець періоду.</param>
     /// <param name="textOverride">Текст замість збереженого (живий перегляд); <c>null</c> — збережений.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="allowShadowLibraries">Бібліотеки можуть бути на <c>Formulas</c> з тіньовим текстом (паритет).</param>
     public async Task<LoadedProgram> LoadAsync(
-        MethodologyDescriptor methodology, DateOnly onDate, string? textOverride, CancellationToken ct)
+        MethodologyDescriptor methodology, DateOnly onDate, string? textOverride, CancellationToken ct, bool allowShadowLibraries = false)
     {
         ArgumentNullException.ThrowIfNull(methodology);
 
@@ -82,7 +83,7 @@ internal sealed class ScriptProgramLoader(IMethodologyStore methodologies, Scrip
 
         var mode = script?.NumericMode ?? methodology.NumericMode;
         var libraries = await LoadLibrariesAsync(
-                methodology.MethodologyVersionId, onDate, 1, [methodology.Code], ct)
+                methodology.MethodologyVersionId, onDate, 1, [methodology.Code], allowShadowLibraries, ct)
             .ConfigureAwait(false);
 
         var hash = textOverride is null && script?.Hash is { } stored ? stored : ScriptCompiler.Hash(text);
@@ -98,7 +99,7 @@ internal sealed class ScriptProgramLoader(IMethodologyStore methodologies, Scrip
     }
 
     private async Task<Dictionary<string, LibraryProgram>> LoadLibrariesAsync(
-        int versionId, DateOnly onDate, int depth, IReadOnlyList<string> chain, CancellationToken ct)
+        int versionId, DateOnly onDate, int depth, IReadOnlyList<string> chain, bool allowShadowLibraries, CancellationToken ct)
     {
         var result = new Dictionary<string, LibraryProgram>(StringComparer.Ordinal);
         var imports = await methodologies.ResolveImportsAsync(versionId, onDate, ct).ConfigureAwait(false);
@@ -127,7 +128,7 @@ internal sealed class ScriptProgramLoader(IMethodologyStore methodologies, Scrip
 
             if (import.MethodologyVersionId is not { } libraryVersionId
                 || await methodologies.GetScriptAsync(libraryVersionId, ct).ConfigureAwait(false) is not { } libraryScript
-                || libraryScript.Engine != MethodologyEngine.Script
+                || (libraryScript.Engine != MethodologyEngine.Script && !allowShadowLibraries)
                 || string.IsNullOrWhiteSpace(libraryScript.Text))
             {
                 throw Failure(
@@ -136,7 +137,7 @@ internal sealed class ScriptProgramLoader(IMethodologyStore methodologies, Scrip
                     ("library", import.MethodologyCode));
             }
 
-            var nested = await LoadLibrariesAsync(libraryVersionId, onDate, depth + 1, [.. chain, import.MethodologyCode], ct)
+            var nested = await LoadLibrariesAsync(libraryVersionId, onDate, depth + 1, [.. chain, import.MethodologyCode], allowShadowLibraries, ct)
                 .ConfigureAwait(false);
             var hash = libraryScript.Hash ?? ScriptCompiler.Hash(libraryScript.Text);
             var key = ScriptProgramCache.Key(libraryVersionId, hash, Signature(nested));

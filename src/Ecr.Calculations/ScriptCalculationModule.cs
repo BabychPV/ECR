@@ -15,7 +15,11 @@ namespace Ecr.Calculations;
 /// Текст скрипта замість збереженого (чернетка в редакторі); <c>null</c> — збережений. Бібліотеки беруться з
 /// матеріалізованих імпортів версії: імпорти, дописані в текст, але ще не збережені, перегляд не бачить.
 /// </param>
-public sealed record ScriptPrepareOptions(string? TextOverride = null);
+/// <param name="AllowShadowLibraries">
+/// Паритет (план §8.4): бібліотека може бути ще на <c>Engine = Formulas</c> з тіньовим текстом — береться її тіньовий
+/// текст. Типово <c>false</c>: прогін версії-скрипта вимагає бібліотек на рушії <c>Script</c>.
+/// </param>
+public sealed record ScriptPrepareOptions(string? TextOverride = null, bool AllowShadowLibraries = false);
 
 /// <summary>
 /// Модуль розрахунку версій методологій на рушії <see cref="MethodologyEngine.Script"/> (MS, план §4.4).
@@ -106,7 +110,7 @@ public sealed class ScriptCalculationModule(
         ArgumentNullException.ThrowIfNull(methodology);
 
         var period = await CalculationSteps.PeriodAsync(periods, calendar, methodology, documentId, periodKey, ct).ConfigureAwait(false);
-        var program = await _loader.LoadAsync(methodology, period.End, options?.TextOverride, ct).ConfigureAwait(false);
+        var program = await _loader.LoadAsync(methodology, period.End, options?.TextOverride, ct, options?.AllowShadowLibraries ?? false).ConfigureAwait(false);
         var script = program.Main;
 
         var substances = await methodologies.GetSubstancesAsync(methodology.MethodologyVersionId, ct).ConfigureAwait(false);

@@ -70,7 +70,7 @@ public sealed class ParityComparer(
         try
         {
             scriptContext = await scriptModule
-                .PrepareAsync(scriptDescriptor, documentId, periodKey, registries, new ScriptPrepareOptions(scriptText), ct)
+                .PrepareAsync(scriptDescriptor, documentId, periodKey, registries, new ScriptPrepareOptions(scriptText, AllowShadowLibraries: true), ct)
                 .ConfigureAwait(false);
         }
         catch (DomainException error)

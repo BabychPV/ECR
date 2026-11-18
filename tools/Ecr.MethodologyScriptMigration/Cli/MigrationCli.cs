@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Ecr.Application.Ports;
+using Ecr.Calculations.Scripting.Parity;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Enums;
 using Ecr.Expressions.Evaluation;
@@ -15,6 +16,7 @@ using Ecr.MethodologyScriptMigration.Loading;
 using Ecr.Scripting;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Ecr.MethodologyScriptMigration.Cli;
 
@@ -54,13 +56,16 @@ public static class MigrationCli
           Ecr.MethodologyScriptMigration convert --connection <рядок> --out <тека> [--methodology <код>]
           Ecr.MethodologyScriptMigration shadow  --connection <рядок> --in <тека> [--i-know-this-is-a-copy]
           Ecr.MethodologyScriptMigration pack    --connection <рядок> --in <тека> --out <package.json>
-          Ecr.MethodologyScriptMigration parity  (ще не реалізовано)
+          Ecr.MethodologyScriptMigration parity  --connection <рядок> --out <report.json> [--methodology <код>] [--document <id>]
 
         convert — для кожної версії рівня Configuration з рушієм Formulas пише <Код>/<Версія>.ecrs і convert-report.json.
         shadow  — записує тексти як тіньові (SetScript) у базу; лише в базу з "copy|test|upg|dev|stand" в імені
                   або з прапорцем --i-know-this-is-a-copy.
         pack    — package.json: код методології, версія, дата чинності, текст, відбиток джерела.
-        Коди виходу: 0 — гаразд; 1 — є невдалі версії; 2 — помилка запуску чи середовища.
+        parity  — порівнює старий розрахунок із тіньовим скриптом на всіх документах і періодах копії, де версія чинна
+                  (нічого не пише в базу): звіт JSON + підсумок у консолі.
+        Коди виходу: 0 — гаразд (parity: 0 розбіжностей); 1 — є невдалі версії (parity: є розбіжності або нічого порівнювати);
+                     2 — помилка запуску чи середовища.
         """;
 
     /// <summary>Виконує команду.</summary>
@@ -81,15 +86,7 @@ public static class MigrationCli
         }
 
         var command = args[0];
-        if (command == "parity")
-        {
-            await error.WriteLineAsync(
-                "parity ще не реалізовано: порівняння старого модуля й модуля скрипта живе в іншому проєкті "
-                + "і буде підключене пізніше (план, розд. 8.4).").ConfigureAwait(false);
-            return UsageOrEnvironment;
-        }
-
-        if (command is not ("convert" or "shadow" or "pack"))
+        if (command is not ("convert" or "shadow" or "pack" or "parity"))
         {
             await error.WriteLineAsync($"Невідома команда: {command}").ConfigureAwait(false);
             await error.WriteLineAsync(Usage).ConfigureAwait(false);
@@ -109,6 +106,7 @@ public static class MigrationCli
             {
                 "convert" => await ConvertAsync(parsed, output, error, ct).ConfigureAwait(false),
                 "shadow" => await ShadowAsync(parsed, output, error, ct).ConfigureAwait(false),
+                "parity" => await ParityAsync(parsed, output, ct).ConfigureAwait(false),
                 _ => await PackAsync(parsed, output, error, ct).ConfigureAwait(false),
             };
         }
@@ -343,6 +341,53 @@ public static class MigrationCli
         return Ok;
     }
 
+    // ---- parity ----
+
+    private static async Task<int> ParityAsync(Options options, TextWriter output, CancellationToken ct)
+    {
+        await using var provider = ParityHost.Build(options.Connection!);
+        await using var scope = provider.CreateAsyncScope();
+        var report = await scope.ServiceProvider.GetRequiredService<ParityRunner>()
+            .RunAsync(options.Methodology, options.Document, ct)
+            .ConfigureAwait(false);
+
+        var directory = Path.GetDirectoryName(Path.GetFullPath(options.Out!));
+        if (!string.IsNullOrEmpty(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        await File.WriteAllTextAsync(options.Out!, JsonSerializer.Serialize(report, JsonOptions) + "\n", new UTF8Encoding(false), ct)
+            .ConfigureAwait(false);
+
+        await output.WriteLineAsync(
+            $"parity: екземплярів таблиць {report.Targets}, рядків {report.RowsCompared}, значень {report.ValuesCompared}, "
+            + $"розбіжностей {report.Mismatches.Count}. Звіт: {options.Out}").ConfigureAwait(false);
+        foreach (var mismatch in report.Mismatches.Take(20))
+        {
+            await output.WriteLineAsync(
+                $"  {mismatch.MethodologyCode} {mismatch.Version} doc {mismatch.DocumentId} period {mismatch.PeriodKey} "
+                + $"table {mismatch.TableInstanceId} row {mismatch.RowKey ?? "-"}: {mismatch.Aspect} old={mismatch.Old ?? "-"} new={mismatch.New ?? "-"}")
+                .ConfigureAwait(false);
+        }
+
+        if (report.Mismatches.Count > 20)
+        {
+            await output.WriteLineAsync($"  … ще {report.Mismatches.Count - 20} (повний перелік — у звіті)").ConfigureAwait(false);
+        }
+
+        if (report.Targets == 0)
+        {
+            // Порожній прогін нічого не доводить: не «гаразд».
+            await output.WriteLineAsync(
+                "parity: НІЧОГО ПОРІВНЮВАТИ — немає версій з тіньовим скриптом на Formulas, чинних у документах (або фільтр нічого не знайшов).")
+                .ConfigureAwait(false);
+            return Failures;
+        }
+
+        return report.Mismatches.Count > 0 ? Failures : Ok;
+    }
+
     // ---- спільне ----
 
     /// <summary>Контекст бази за рядком підключення.</summary>
@@ -364,7 +409,7 @@ public static class MigrationCli
         => new FormulaEngine(new Parser(), new Evaluator(new FunctionRegistry()), new TopologicalSorter());
 
     private sealed record Options(
-        string? Connection, string? Out, string? In, string? Methodology, bool IKnowThisIsACopy)
+        string? Connection, string? Out, string? In, string? Methodology, bool IKnowThisIsACopy, long? Document = null)
     {
         public static Options? Parse(string command, string[] args, TextWriter error)
         {
@@ -373,6 +418,7 @@ public static class MigrationCli
             string? inPath = null;
             string? methodology = null;
             var copy = false;
+            long? document = null;
             for (var i = 1; i < args.Length; i++)
             {
                 switch (args[i])
@@ -386,8 +432,17 @@ public static class MigrationCli
                     case "--in" when i + 1 < args.Length:
                         inPath = args[++i];
                         break;
-                    case "--methodology" when i + 1 < args.Length && command == "convert":
+                    case "--methodology" when i + 1 < args.Length && command is "convert" or "parity":
                         methodology = args[++i];
+                        break;
+                    case "--document" when i + 1 < args.Length && command == "parity":
+                        if (!long.TryParse(args[++i], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var id))
+                        {
+                            error.WriteLine($"--document: очікується число, отримано {args[i]}");
+                            return null;
+                        }
+
+                        document = id;
                         break;
                     case CopyFlag when command == "shadow":
                         copy = true;
@@ -404,7 +459,7 @@ public static class MigrationCli
                 missing.Add("--connection");
             }
 
-            if (command is "convert" or "pack" && string.IsNullOrWhiteSpace(outPath))
+            if (command is "convert" or "pack" or "parity" && string.IsNullOrWhiteSpace(outPath))
             {
                 missing.Add("--out");
             }
@@ -426,7 +481,7 @@ public static class MigrationCli
                 return null;
             }
 
-            return new Options(connection, outPath, inPath, methodology, copy);
+            return new Options(connection, outPath, inPath, methodology, copy, document);
         }
     }
 }

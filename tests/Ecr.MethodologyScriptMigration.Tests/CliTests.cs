@@ -26,12 +26,12 @@ public sealed class CliTests
     }
 
     [Fact]
-    public async Task Parity_ще_не_реалізовано_і_дає_код_2_з_зрозумілим_повідомленням()
+    public async Task Parity_без_рядка_підключення_дає_код_2_і_називає_параметр()
     {
         var run = await RunAsync("parity", "--out", "x.json");
 
         Assert.Equal(MigrationCli.UsageOrEnvironment, run.Code);
-        Assert.Contains("parity ще не реалізовано", run.Error);
+        Assert.Contains("--connection", run.Error);
     }
 
     [Theory]
@@ -42,6 +42,11 @@ public sealed class CliTests
     [InlineData("pack", "--connection", "x", "--in", "x")]
     [InlineData("convert", "--connection", "x", "--out", "y", "--bogus")]
     [InlineData("pack", "--connection", "x", "--in", "x", "--out", "p", "--i-know-this-is-a-copy")]
+    [InlineData("parity")]
+    [InlineData("parity", "--connection", "x")]
+    [InlineData("parity", "--connection", "x", "--out", "y", "--document", "abc")]
+    [InlineData("parity", "--connection", "x", "--out", "y", "--bogus")]
+    [InlineData("convert", "--connection", "x", "--out", "y", "--document", "5")]
     public async Task Неповні_й_невідомі_параметри_дають_код_2(params string[] args)
     {
         var run = await RunAsync(args);

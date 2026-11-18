@@ -9,7 +9,7 @@
   <!--
     Інструмент перенесення методологій у «ECR Script» (METHODOLOGY-SCRIPT-PLAN.md розд. 8).
     Conversion/ — чисте ядро перетворення (без БД); Loading/ — читання версії з БД лише на читання (EF Core);
-    Program.cs — команди convert / shadow / pack (parity ще не підключено).
+    Program.cs — команди convert / shadow / pack / parity.
   -->
   <ItemGroup>
     <ProjectReference Include="..\..\src\Ecr.Domain\Ecr.Domain.csproj" />
