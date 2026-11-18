@@ -194,4 +194,12 @@ describe('тест із рядка перегляду', () => {
     expect(previewValueToInput(previewValue({ name: 'a', kind: 'null', text: '' }))).toBeNull();
     expect(previewValueToInput(previewValue({ name: 'a', kind: 'error', text: '#N/A', error: '#N/A' }))).toBeNull();
   });
+
+  it('F13: ключ очікування без назви виходу перед `@` лишається виходом, а не речовиною', () => {
+    const form = parseTestCase('{}', JSON.stringify({ '@5': 1, 'OUT@abc': 2 }), '0.01');
+    expect(form?.expected).toEqual([
+      { output: '@5', value: 1 },
+      { output: 'OUT@abc', value: 2 },
+    ]);
+  });
 });

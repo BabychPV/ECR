@@ -31,6 +31,7 @@ import {
   EmptyScriptEditorState,
   isScriptChangedError,
   isScriptDirty,
+  liveDiagnostics,
   replaceTextRange,
   saveScriptBody,
   scriptEditorReducer,
@@ -86,8 +87,6 @@ const ScriptCompareModal = lazy(async () => ({
 type TabId = 'preview' | 'io' | 'tests' | 'required' | 'problems';
 
 const ValidationDelayMs = 500;
-
-const EmptyDiagnostics: readonly ScriptDiagnosticDto[] = [];
 
 /**
  * Редактор скрипта методології (`METHODOLOGY-SCRIPT-PLAN.md`, розд. 6).
@@ -199,8 +198,12 @@ export function MethodologyScriptPage(): JSX.Element {
     retry: false,
   });
 
-  const diagnostics: readonly ScriptDiagnosticDto[] =
-    validation.data?.diagnostics ?? script.data?.diagnostics ?? EmptyDiagnostics;
+  const diagnostics: readonly ScriptDiagnosticDto[] = liveDiagnostics({
+    text: state.text,
+    savedText: state.savedText,
+    validated: validation.data?.diagnostics,
+    saved: script.data?.diagnostics,
+  });
   const outline: ScriptOutlineDto | null = validation.data?.outline ?? script.data?.outline ?? null;
   const checking = loaded && (state.text !== debouncedText || validation.isFetching);
 

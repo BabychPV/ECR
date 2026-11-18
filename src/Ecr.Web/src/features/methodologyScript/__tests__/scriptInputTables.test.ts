@@ -159,4 +159,14 @@ describe('колонки з script/tables', () => {
     });
     expect(fallback.tables[0]?.columns.map((c) => c.code)).toEqual(['FromStructure']);
   });
+
+  it('F13: запит не має більше за ліміт сервера (50 кодів)', () => {
+    const many = outline({
+      tables: Array.from({ length: 60 }, (_, i) => outlineTable(`T${String(i)}`)),
+    });
+    const codes = scriptTableCodes(many);
+    expect(codes).toHaveLength(50);
+    expect(codes[0]).toBe('T0');
+    expect(codes[49]).toBe('T49');
+  });
 });

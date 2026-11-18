@@ -1,4 +1,5 @@
 import { EcrApiError } from '@/api/client';
+import type { ScriptDiagnosticDto } from './types';
 
 /**
  * Стан тексту редактора скрипта: що в полі, що лежить на сервері, який хеш
@@ -80,6 +81,24 @@ export function isScriptChangedError(error: unknown): boolean {
   if (error.problem.errorCode !== 'ECR-CALC-0409') return false;
 
   return error.problem.extensions2?.['messageKey'] === ScriptChangedMessageKey;
+}
+
+const NoDiagnostics: readonly ScriptDiagnosticDto[] = [];
+
+/**
+ * Діагностики для підкреслення й переліку проблем. ⛔ Діагностики збереженого тексту (рядки й колонки) показуються
+ * лише поки текст у редакторі ним і є: інакше підкреслення лягало б на чужі рядки (перевірка ще не відповіла, впала
+ * чи текст порожній — `validate` для порожнього не викликається, і попередня відповідь не повинна «прилипнути»).
+ */
+export function liveDiagnostics(args: {
+  readonly text: string;
+  readonly savedText: string;
+  readonly validated: readonly ScriptDiagnosticDto[] | undefined;
+  readonly saved: readonly ScriptDiagnosticDto[] | undefined;
+}): readonly ScriptDiagnosticDto[] {
+  if (args.text.trim() === '') return NoDiagnostics;
+  if (args.validated !== undefined) return args.validated;
+  return args.text === args.savedText ? (args.saved ?? NoDiagnostics) : NoDiagnostics;
 }
 
 /** Замінює `[start, end)` тексту: застосування «Редагувати як таблицю». */

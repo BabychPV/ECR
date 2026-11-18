@@ -3,6 +3,7 @@ import {
   formatMethodologyScriptConst,
   methodologyScript,
   methodologyScriptSubstances,
+  methodologyScriptTables,
   previewMethodologyScript,
   saveMethodologyScript,
   validateMethodologyScript,
@@ -66,5 +67,14 @@ describe('виклики API скрипта', () => {
 
     const formatted = await formatMethodologyScriptConst(3, 9, { text: '{ a: 1 }' });
     expect(formatted).toEqual({ text: 'x', kind: 'map', diagnostics: [] });
+  });
+
+  it('таблиці для підказок: коди через кому в одному закодованому параметрі (`Шаблон.Таблиця`, `&`/`#` не ламають запит)', async () => {
+    await methodologyScriptTables(['HSE.Fuel', 'Потік', 'a&b#c']);
+    expect(calls[0]?.url).toBe(
+      `/api/v1/methodologies/script/tables?codes=${encodeURIComponent('HSE.Fuel,Потік,a&b#c')}`,
+    );
+    expect(calls[0]?.url).not.toContain('&b');
+    expect(calls[0]?.init?.method ?? 'GET').toBe('GET');
   });
 });
