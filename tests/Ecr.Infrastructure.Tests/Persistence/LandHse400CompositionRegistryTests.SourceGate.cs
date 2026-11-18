@@ -82,6 +82,62 @@ public sealed partial class LandHse400CompositionRegistryTests
         Assert.Equal(0.82m, Eval(f, snapshot, ModelDensity20(), FuelGasInternal, month: 2).AsNumber());
     }
 
+    /// <summary>
+    /// ✎ F13 G3 (AU, batch-1118-2): затверджена КОПІЯ аркуша (Contract 2, …) не робить місяць джерела затвердженим —
+    /// ворота дивляться лише на оригінал аркуша. Січень: копія Approved, оригінал лише поданий → у Land січня немає даних.
+    /// </summary>
+    /// <remarks>Мутація (G3): у <c>DocumentSourceGate.ApprovedMonthsAsync</c> прибрати <c>s.SheetCopyId == null</c> —
+    /// копія зараховує січень, ворота пропускають 0.81, тест червоний.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "B80")]
+    public async Task ApprovedOnly_затверджена_копія_аркуша_не_робить_місяць_затвердженим()
+    {
+        var f = await ArrangeAsync();
+        var template = await BuildDocumentAsync(("FG_Internal", "Density_20", 1, 0.81m));
+        var doc = lastBuilt!;
+        await AddBindingAsync(f, doc.TemplateId, DocumentSourceState.ApprovedOnly);
+
+        long copyId;
+        await using (var db = sql.CreateContext())
+        {
+            var original = await db.DocumentSheets
+                .FirstOrDefaultAsync(s => s.DocumentId == doc.DocumentId && s.SheetDefId == doc.SheetDefId && s.CopyOfId == null);
+            if (original is null)
+            {
+                original = new Ecr.Domain.Entities.Documents.DocumentSheet(doc.DocumentId, doc.SheetDefId);
+                db.DocumentSheets.Add(original);
+                await db.SaveChangesAsync();
+            }
+
+            var copy = original.CreateCopy(2);
+            db.DocumentSheets.Add(copy);
+            await db.SaveChangesAsync();
+            copyId = copy.Id;
+        }
+
+        // Оригінал — лише поданий; копія того самого аркуша й місяця — затверджена.
+        await AddApprovalAsync(doc.DocumentId, doc.SheetDefId, 202601, DocumentStatus.Submitted);
+        await using (var db = sql.CreateContext())
+        {
+            var copyState = new ApprovalState(doc.DocumentId, doc.SheetDefId, 202601, copyId);
+            copyState.Submit(userId: 5, Stamp);
+            copyState.Approve(userId: 6, Stamp);
+            db.ApprovalStates.Add(copyState);
+            await db.SaveChangesAsync();
+        }
+
+        await using (var db = sql.CreateContext())
+        {
+            var tableIds = await db.TableDefs.Where(t => t.SheetDefId == doc.SheetDefId).Select(t => t.Id).ToListAsync();
+            Assert.Empty(await DocumentSourceGate.ApprovedMonthsAsync(db, [doc.DocumentId], tableIds, CancellationToken.None));
+        }
+
+        var snapshot = await LoadFromDocumentAsync(f, template);
+        Assert.Equal(ExpressionErrors.NotAvailable, Eval(f, snapshot, ModelDensity20(), FuelGasInternal, month: 1).ErrorCode);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
