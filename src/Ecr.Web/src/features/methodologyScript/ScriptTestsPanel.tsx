@@ -14,6 +14,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState, type JSX } from 'react';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
+import { scriptKeys } from './scriptQueryKeys';
 import type { DocumentSummary, MethodologyTestCaseDto } from '@/api/types';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { TestCaseRunner } from '@/features/expressions/TestCaseRunner';
@@ -63,7 +64,7 @@ function issueText(issue: TestFormIssue): string {
 function SourceLine({ form }: { readonly form: TestCaseForm }): JSX.Element | null {
   const documentId = form.documentId;
   const document = useQuery({
-    queryKey: queryKeys.methodologies.scriptDocument(documentId ?? 0, form.period),
+    queryKey: scriptKeys.document(documentId ?? 0, form.period),
     queryFn: () =>
       apiFetch<DocumentSummary>(`/api/v1/documents/${String(documentId)}?periodKey=${String(form.period)}`),
     enabled: documentId !== null && form.period > 0,

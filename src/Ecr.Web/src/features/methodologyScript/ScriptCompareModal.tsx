@@ -1,7 +1,7 @@
 import { Alert, Select, Stack, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState, type JSX } from 'react';
-import { queryKeys } from '@/api/queryKeys';
+import { scriptKeys } from './scriptQueryKeys';
 import type { MethodologyDraftVersionDto } from '@/api/types';
 import { t } from '@/shared/i18n';
 import { statusKey } from '@/shared/ui/StatusBadge';
@@ -52,7 +52,7 @@ export function ScriptCompareModal(props: ScriptCompareModalProps): JSX.Element 
   const other = otherId === null ? null : Number(otherId);
 
   const script = useQuery({
-    queryKey: queryKeys.methodologies.script(other ?? 0),
+    queryKey: scriptKeys.script(other ?? 0),
     queryFn: () => methodologyScript(methodologyId, other ?? 0),
     enabled: opened && other !== null,
   });

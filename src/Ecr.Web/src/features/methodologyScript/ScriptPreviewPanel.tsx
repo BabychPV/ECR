@@ -3,7 +3,7 @@ import { useDebouncedValue } from '@mantine/hooks';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useMemo, useState, type JSX } from 'react';
 import { apiFetch } from '@/api/client';
-import { queryKeys } from '@/api/queryKeys';
+import { scriptKeys } from './scriptQueryKeys';
 import type { DocumentTableDto } from '@/api/types';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { listDocuments } from '@/features/documents/api';
@@ -60,7 +60,7 @@ export function ScriptPreviewPanel(props: ScriptPreviewPanelProps): JSX.Element 
   const templateCode = singleTemplateCode(outline);
 
   const documents = useQuery({
-    queryKey: queryKeys.methodologies.scriptDocuments(templateCode, debounced),
+    queryKey: scriptKeys.documents(templateCode, debounced),
     queryFn: () =>
       listDocuments({
         periodKey: null,
@@ -85,7 +85,7 @@ export function ScriptPreviewPanel(props: ScriptPreviewPanelProps): JSX.Element 
   const selectedId = documentId === null ? null : Number(documentId);
 
   const tables = useQuery({
-    queryKey: queryKeys.methodologies.scriptDocumentTables(selectedId ?? 0, periodKey ?? 0),
+    queryKey: scriptKeys.documentTables(selectedId ?? 0, periodKey ?? 0),
     queryFn: () =>
       apiFetch<DocumentTableDto[]>(
         `/api/v1/documents/${String(selectedId)}/tables?periodKey=${String(periodKey)}`,

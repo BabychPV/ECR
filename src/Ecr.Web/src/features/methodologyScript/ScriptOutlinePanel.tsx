@@ -1,3 +1,4 @@
+import { scriptKeys } from './scriptQueryKeys';
 import { Stack, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { useMemo, type JSX } from 'react';
@@ -21,7 +22,7 @@ export function ScriptOutlinePanel({
 }: ScriptOutlinePanelProps): JSX.Element {
   // ⚠ Той самий ключ, що в `MethodologyCoveragePanel`: кеш спільний.
   const coverage = useQuery({
-    queryKey: ['methodologies', 'coverage', methodologyId, versionId],
+    queryKey: scriptKeys.coverage(methodologyId, versionId),
     queryFn: () => methodologyCoverage(methodologyId, versionId),
   });
 

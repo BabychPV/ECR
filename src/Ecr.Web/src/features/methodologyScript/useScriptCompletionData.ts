@@ -2,6 +2,7 @@ import { useQueries, useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
+import { scriptKeys } from './scriptQueryKeys';
 import type {
   TemplatePage,
   TemplateStructureDto,
@@ -80,7 +81,7 @@ export function useScriptCompletionData(
   });
 
   const metadata = useQuery({
-    queryKey: queryKeys.methodologies.scriptMetadata(methodologyVersionId),
+    queryKey: scriptKeys.metadata(methodologyVersionId),
     queryFn: () => expressionMetadata('Methodology', { methodologyVersionId }),
     staleTime: StaleMs,
   });

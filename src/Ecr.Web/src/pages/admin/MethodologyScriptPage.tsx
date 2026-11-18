@@ -4,6 +4,7 @@ import { useDebouncedValue } from '@mantine/hooks';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 import { queryKeys } from '@/api/queryKeys';
+import { scriptKeys } from '@/features/methodologyScript/scriptQueryKeys';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import {
   methodologyVersions,
@@ -18,16 +19,12 @@ import {
   saveMethodologyScript,
   validateMethodologyScript,
 } from '@/features/methodologyScript/api';
-import { ConstTableDialog } from '@/features/methodologyScript/ConstTableDialog';
 import { findConstAt } from '@/features/methodologyScript/constTable';
-import { ScriptCompareModal } from '@/features/methodologyScript/ScriptCompareModal';
 import {
   ScriptEditor,
   type ScriptCompletionBase,
   type ScriptEditorHandle,
 } from '@/features/methodologyScript/ScriptEditor';
-import { ScriptOutlinePanel } from '@/features/methodologyScript/ScriptOutlinePanel';
-import { ScriptPreviewPanel } from '@/features/methodologyScript/ScriptPreviewPanel';
 import { ScriptProblemsList } from '@/features/methodologyScript/ScriptProblemsList';
 import {
   canSaveScript,
@@ -38,10 +35,7 @@ import {
   saveScriptBody,
   scriptEditorReducer,
 } from '@/features/methodologyScript/scriptEditorState';
-import {
-  ScriptTestsPanel,
-  type ScriptTestEditing,
-} from '@/features/methodologyScript/ScriptTestsPanel';
+import type { ScriptTestEditing } from '@/features/methodologyScript/ScriptTestsPanel';
 import { suggestTestCode } from '@/features/methodologyScript/testForm';
 import type { TestCaseForm } from '@/features/methodologyScript/testCases';
 import type {
@@ -67,6 +61,27 @@ const MethodologyRequiredInputsPanel = lazy(async () => {
 
   return { default: loaded.MethodologyRequiredInputsPanel };
 });
+
+/*
+ * ⛔ Усе, що не потрібне для першого кадру, — за `import()`: бюджет маршруту 250 КБ gzip (`D-132`). Редактор, шапка,
+ * збереження й перевірка — у чанку сторінки; перегляд (вибір документа, період, таблиця), форма тестів, діалоги
+ * «таблиця коефіцієнтів» і «порівняння» вантажаться паралельно з даними (вкладки) або за дією (діалоги).
+ */
+const ScriptPreviewPanel = lazy(async () => ({
+  default: (await import('@/features/methodologyScript/ScriptPreviewPanel')).ScriptPreviewPanel,
+}));
+const ScriptTestsPanel = lazy(async () => ({
+  default: (await import('@/features/methodologyScript/ScriptTestsPanel')).ScriptTestsPanel,
+}));
+const ScriptOutlinePanel = lazy(async () => ({
+  default: (await import('@/features/methodologyScript/ScriptOutlinePanel')).ScriptOutlinePanel,
+}));
+const ConstTableDialog = lazy(async () => ({
+  default: (await import('@/features/methodologyScript/ConstTableDialog')).ConstTableDialog,
+}));
+const ScriptCompareModal = lazy(async () => ({
+  default: (await import('@/features/methodologyScript/ScriptCompareModal')).ScriptCompareModal,
+}));
 
 type TabId = 'preview' | 'io' | 'tests' | 'required' | 'problems';
 
@@ -126,7 +141,7 @@ export function MethodologyScriptPage(): JSX.Element {
   const methodology = methodologies.data?.find((item) => item.id === methodologyId);
 
   const script = useQuery({
-    queryKey: queryKeys.methodologies.script(versionId),
+    queryKey: scriptKeys.script(versionId),
     queryFn: () => methodologyScript(methodologyId, versionId),
     enabled: known,
     refetchOnWindowFocus: false,
@@ -153,7 +168,7 @@ export function MethodologyScriptPage(): JSX.Element {
     enabled: known,
   });
   const substances = useQuery({
-    queryKey: queryKeys.methodologies.substances(versionId),
+    queryKey: scriptKeys.substances(versionId),
     queryFn: () => methodologyScriptSubstances(methodologyId, versionId),
     enabled: known,
   });
@@ -174,7 +189,7 @@ export function MethodologyScriptPage(): JSX.Element {
   // ── Перевірка живого тексту ───────────────────────────────────────────────
   const [debouncedText] = useDebouncedValue(state.text, ValidationDelayMs);
   const validation = useQuery({
-    queryKey: queryKeys.methodologies.scriptValidation(versionId, debouncedText),
+    queryKey: scriptKeys.validation(versionId, debouncedText),
     queryFn: ({ signal }) =>
       validateMethodologyScript(methodologyId, versionId, { text: debouncedText }, signal),
     enabled: known && loaded && isScript && debouncedText.trim() !== '',
@@ -206,9 +221,9 @@ export function MethodologyScriptPage(): JSX.Element {
     onSuccess: (saved, submitted) => {
       applied.current = saved;
       dispatch({ type: 'saved', submitted, hash: saved.hash });
-      queryClient.setQueryData(queryKeys.methodologies.script(versionId), saved);
+      queryClient.setQueryData(scriptKeys.script(versionId), saved);
       // Збереження матеріалізує виходи: покриття й перелік тестів можуть змінитися.
-      void queryClient.invalidateQueries({ queryKey: ['methodologies', 'coverage', methodologyId, versionId] });
+      void queryClient.invalidateQueries({ queryKey: scriptKeys.coverage(methodologyId, versionId) });
       if (saved.diagnostics.length > 0) {
         showWarning(t('methodologyScript.savedWithProblems', { count: saved.diagnostics.length }));
       } else {
@@ -272,7 +287,7 @@ export function MethodologyScriptPage(): JSX.Element {
 
   // ── Публікація ────────────────────────────────────────────────────────────
   const publishFlow = usePublishVersion(methodologyId, () => {
-    void queryClient.invalidateQueries({ queryKey: queryKeys.methodologies.script(versionId) });
+    void queryClient.invalidateQueries({ queryKey: scriptKeys.script(versionId) });
     reload();
   });
   const publishVisible = version !== undefined && version.status !== 'Published' && mayPublish && isScript;
@@ -467,7 +482,7 @@ export function MethodologyScriptPage(): JSX.Element {
             {checking
               ? t('methodologyScript.checking')
               : problemCount === 0
-                ? t('methodologyScript.noProblems')
+                ? t('methodologyScript.problems.none')
                 : t('methodologyScript.problemCount', { count: problemCount })}
           </Text>
         </Box>
@@ -495,11 +510,12 @@ export function MethodologyScriptPage(): JSX.Element {
                   ) : undefined
                 }
               >
-                {t('methodologyScript.tab.problems')}
+                {t('methodologyScript.problems.title')}
               </Tabs.Tab>
             </Tabs.List>
 
             <Tabs.Panel value="preview" pt="sm">
+              <Suspense fallback={null}>
               <ScriptPreviewPanel
                 methodologyId={methodologyId}
                 versionId={versionId}
@@ -510,17 +526,21 @@ export function MethodologyScriptPage(): JSX.Element {
                 onPeriodChange={setPreviewPeriod}
                 onJump={(line, column) => editor.current?.reveal(line, column)}
               />
+              </Suspense>
             </Tabs.Panel>
 
             <Tabs.Panel value="io" pt="sm">
-              <ScriptOutlinePanel
-                methodologyId={methodologyId}
-                versionId={versionId}
-                outline={outline}
-              />
+              <Suspense fallback={null}>
+                <ScriptOutlinePanel
+                  methodologyId={methodologyId}
+                  versionId={versionId}
+                  outline={outline}
+                />
+              </Suspense>
             </Tabs.Panel>
 
             <Tabs.Panel value="tests" pt="sm">
+              <Suspense fallback={null}>
               <ScriptTestsPanel
                 methodologyId={methodologyId}
                 versionId={versionId}
@@ -531,6 +551,7 @@ export function MethodologyScriptPage(): JSX.Element {
                 editing={testEditing}
                 onEditingChange={setTestEditing}
               />
+              </Suspense>
             </Tabs.Panel>
 
             <Tabs.Panel value="required" pt="sm">
@@ -553,22 +574,30 @@ export function MethodologyScriptPage(): JSX.Element {
         </Box>
       </Group>
 
-      <ConstTableDialog
-        opened={constRange !== null}
-        onClose={() => setConstRange(null)}
-        literal={constLiteral}
-        {...(constRange === null ? {} : { constName: constRange.name })}
-        onApply={(literal) => void applyConst(literal)}
-      />
+      {constRange !== null && (
+        <Suspense fallback={null}>
+          <ConstTableDialog
+            opened
+            onClose={() => setConstRange(null)}
+            literal={constLiteral}
+            constName={constRange.name}
+            onApply={(literal) => void applyConst(literal)}
+          />
+        </Suspense>
+      )}
 
-      <ScriptCompareModal
-        opened={comparing}
-        onClose={() => setComparing(false)}
-        methodologyId={methodologyId}
-        currentVersionId={versionId}
-        currentText={state.text}
-        versions={versions.data ?? []}
-      />
+      {comparing && (
+        <Suspense fallback={null}>
+          <ScriptCompareModal
+            opened
+            onClose={() => setComparing(false)}
+            methodologyId={methodologyId}
+            currentVersionId={versionId}
+            currentText={state.text}
+            versions={versions.data ?? []}
+          />
+        </Suspense>
+      )}
 
       {publishFlow.dialogs}
     </Stack>
