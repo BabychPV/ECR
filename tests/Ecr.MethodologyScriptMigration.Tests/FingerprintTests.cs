@@ -17,7 +17,7 @@ public sealed class FingerprintTests
     [Fact]
     public void Формат_пакета_дорівнює_формату_відбитка_щоб_старі_пакети_відхилялися()
     {
-        Assert.Equal(2, Ecr.Application.Calculations.Scripting.Migration.Fingerprint.FormatVersion);
+        Assert.Equal(3, Ecr.Application.Calculations.Scripting.Migration.Fingerprint.FormatVersion);
         Assert.Equal(Ecr.Application.Calculations.Scripting.Migration.Fingerprint.FormatVersion, Cli.ScriptPackage.CurrentVersion);
     }
 

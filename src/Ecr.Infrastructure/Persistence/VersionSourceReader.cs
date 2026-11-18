@@ -144,35 +144,20 @@ public sealed class VersionSourceReader(EcrDbContext db, IFormulaEngine formulaE
         var categoryRule = await _store.GetCategoryRuleAsync(versionId, ct).ConfigureAwait(false);
 
         // ---- Імпорти: версія бібліотеки, чинна на дату чинності цієї версії ----
-        var imports = new List<SourceImport>();
-        foreach (var library in await _store.ResolveImportsAsync(versionId, effectiveFrom, ct).ConfigureAwait(false))
+        var direct = await _store.ResolveImportsAsync(versionId, effectiveFrom, ct).ConfigureAwait(false);
+        foreach (var library in direct.Where(l => l.MethodologyVersionId is null))
         {
-            if (library.MethodologyVersionId is null)
-            {
-                issues.Add(new ConversionIssue(
-                    IssueSeverity.Warning, "importWithoutVersion",
-                    $"Library «{library.MethodologyCode}» has no version effective on {effectiveFrom:yyyy-MM-dd}: its members are unknown.",
-                    library.MethodologyCode));
-            }
-
-            var libraryCategories = new List<string>();
-            var libraryOptional = new List<string>();
-            if (library.MethodologyVersionId is { } libraryVersionId)
-            {
-                // Склад «відомих категорій» і необов'язкових імен старий рушій бере і з бібліотек замикання.
-                libraryCategories = await db.MethodologyConstants.AsNoTracking()
-                    .Where(c => c.MethodologyVersionId == libraryVersionId && c.Category != null && c.Category != string.Empty)
-                    .Select(c => c.Category!).Distinct().ToListAsync(ct).ConfigureAwait(false);
-                var csvs = await db.MethodologyFormulas.AsNoTracking()
-                    .Where(f => f.MethodologyVersionId == libraryVersionId && f.ArgumentsCsv != null)
-                    .Select(f => f.ArgumentsCsv!).ToListAsync(ct).ConfigureAwait(false);
-                libraryOptional = [.. csvs.SelectMany(csv => Ecr.Expressions.Binding.ArgumentDeclarationChecker.OptionalNamesFromCsv(csv))
-                    .Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase)];
-                libraryCategories.Sort(StringComparer.Ordinal);
-            }
-
-            imports.Add(new SourceImport(library.MethodologyCode, [.. library.FormulaCodes], libraryCategories, libraryOptional));
+            issues.Add(new ConversionIssue(
+                IssueSeverity.Warning, "importWithoutVersion",
+                $"Library «{library.MethodologyCode}» has no version effective on {effectiveFrom:yyyy-MM-dd}: its members are unknown.",
+                library.MethodologyCode));
         }
+
+        // Склад «відомих категорій» і необов'язкових імен — лише з бібліотек, досяжних з формул версії (замикання
+        // старого рушія), а не з усього вмісту версії бібліотеки.
+        var imports = await ImportClosureSource
+            .BuildAsync(_store, formulaEngine, version.MethodologyId, versionId, orderedFormulas, effectiveFrom, direct, ct)
+            .ConfigureAwait(false);
 
         // ---- Життя версії ----
         DateOnly? next = null;

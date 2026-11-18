@@ -456,8 +456,8 @@ public static class ScriptConverter
             {
                 Info(
                     "libraryCategories",
-                    "Categories of imported libraries' constants are added to the accepted category keys (the old engine takes them "
-                    + "from the libraries' closure; here all constants of the library version are used).");
+                    "Categories of imported libraries' constants are added to the accepted category keys (as the old engine does: "
+                    + "from the library versions its closure reaches from this version's formulas).");
             }
 
             foreach (var c in known.ToList())
@@ -543,7 +543,7 @@ public static class ScriptConverter
                         Info(
                             "libraryOptionalArgument",
                             $"Argument «{name}» is optional through the imported library «{import.LibraryCode}» (union semantics of the old engine; "
-                            + "all formulas of the library version are counted, the old engine counts only the needed ones).",
+                            + "only the library formulas reachable from this version's formulas are counted, as the old engine does).",
                             import.LibraryCode);
                     }
                 }

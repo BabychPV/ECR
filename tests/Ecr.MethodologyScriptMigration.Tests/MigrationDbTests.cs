@@ -142,6 +142,9 @@ public sealed class MigrationDbTests(SqlServerFixture sql)
         var import = Assert.Single(source.Imports);
         Assert.Equal("MsLib", import.LibraryCode);
         Assert.Equal(["Dens"], import.Members);
+        // Склад імпорту — з замикання (Emission читає !Dens): категорії констант бібліотеки досяжні, маркерів немає.
+        Assert.Equal(["A", "B"], import.ConstantCategories);
+        Assert.Empty(import.OptionalArguments!);
     }
 
     [Fact]
@@ -506,7 +509,7 @@ public sealed class MigrationDbTests(SqlServerFixture sql)
         await using var _ = db;
         using var package = JsonDocument.Parse(await File.ReadAllTextAsync(packagePath));
         Assert.Equal("ecr-methodology-script-package", package.RootElement.GetProperty("format").GetString());
-        Assert.Equal(2, package.RootElement.GetProperty("formatVersion").GetInt32());
+        Assert.Equal(3, package.RootElement.GetProperty("formatVersion").GetInt32());
         var entries = package.RootElement.GetProperty("entries").EnumerateArray().ToList();
         Assert.Equal(["MsLib", "MsMain"], entries.Select(e => e.GetProperty("methodologyCode").GetString()));
 

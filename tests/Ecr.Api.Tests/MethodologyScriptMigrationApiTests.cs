@@ -86,7 +86,7 @@ public sealed class MethodologyScriptMigrationApiTests(SqlServerFixture sql)
         object Package(string mainFingerprint) => new
         {
             format = "ecr-methodology-script-package",
-            formatVersion = 2,
+            formatVersion = 3,
             entries = new object[]
             {
                 new { methodologyCode = s.MainCode, version = "V1", effectiveFrom = "2099-01-01", text = main.Text, sourceFingerprint = mainFingerprint },
@@ -223,7 +223,7 @@ public sealed class MethodologyScriptMigrationApiTests(SqlServerFixture sql)
         var package = new
         {
             format = "ecr-methodology-script-package",
-            formatVersion = 2,
+            formatVersion = 3,
             entries = new object[]
             {
                 new { methodologyCode = s.MainCode, version = "V1", effectiveFrom = "2099-01-01", text = main.Text, sourceFingerprint = main.Fingerprint },

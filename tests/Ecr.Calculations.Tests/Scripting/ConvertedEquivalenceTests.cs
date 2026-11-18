@@ -2,6 +2,7 @@ using System.Globalization;
 using Ecr.Application.Calculations.Scripting.Migration;
 using Ecr.Application.Ports;
 using Ecr.Calculations.Scripting.Parity;
+using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.MethodologyScriptMigration.Conversion;
@@ -45,12 +46,15 @@ public sealed class ConvertedEquivalenceTests
 
     private static CalculationArgument Number(string code, decimal value) => new(code, value, null, null);
 
-    private static Dictionary<string, CalculationInput> Inputs(IReadOnlyList<(string Key, CalculationArgument[] Arguments)> rows)
+    private static Dictionary<string, CalculationInput> Inputs(
+        IReadOnlyList<(string Key, CalculationArgument[] Arguments)> rows,
+        MethodologyDescriptor? descriptor = null,
+        long documentId = ScriptStand.DocumentId,
+        int period = ScriptStand.PeriodValue)
         => rows.ToDictionary(
             r => r.Key,
             r => new CalculationInput(
-                ScriptStand.Descriptor(NumericMode.Strict), ScriptStand.DocumentId, 500,
-                new PeriodKey(ScriptStand.PeriodValue), r.Key, r.Arguments),
+                descriptor ?? ScriptStand.Descriptor(NumericMode.Strict), documentId, 500, new PeriodKey(period), r.Key, r.Arguments),
             StringComparer.Ordinal);
 
     private static string Show(IReadOnlyDictionary<string, ParityRowOutcome> outcomes)
@@ -147,5 +151,104 @@ public sealed class ConvertedEquivalenceTests
 
         Assert.Equal(1m, ScriptStand.Value(output, "Q"));
         Assert.Equal(5m, ScriptStand.Value(output, "N"));
+    }
+
+    /// <summary>
+    /// Необов'язковість «викликач → бібліотека»: маркер <c>Idle?</c> стоїть у формулі бібліотеки, на яку викликач не
+    /// посилається, — старий рушій його не бачить (бере лише ПОТРІБНІ формули), тож <c>@Idle</c> у викликача обов'язковий.
+    /// Імпорти будує справжній <see cref="ImportClosureSource"/> над тим самим сховищем, що й старий рушій.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Маркер_необовязковості_у_невикористаній_формулі_бібліотеки_не_діє_на_імпортера()
+    {
+        var stand = new Library.LibraryStand();
+        const int commonVersion = Library.LibraryStand.CommonVersionId;
+        const int callerVersion = Library.LibraryStand.CallerVersionId;
+        var libraryFormulas = new List<MethodologyFormula>
+        {
+            Library.LibraryStand.Formula(commonVersion, "Common_M", "@Volume * CST.RHO", 1, MethodologyFormulaScope.Row, true),
+            Library.LibraryStand.Formula(commonVersion, "Common_W", "!Common_M * CST.EF", 2, MethodologyFormulaScope.Substance, true),
+            Library.LibraryStand.Formula(commonVersion, "Common_Spare", "@Idle * 2", 3, MethodologyFormulaScope.Row),
+        };
+        libraryFormulas[2].SetArguments("Idle?");
+        var content = Library.LibraryStand.CommonContent(libraryFormulas);
+
+        var callerFormulas = new List<MethodologyFormula>
+        {
+            Library.LibraryStand.Formula(callerVersion, "M_total", "!Common_M * 2 + @Idle", 1, MethodologyFormulaScope.Row),
+            Library.LibraryStand.Formula(callerVersion, "tons", "!Common_W + CST.RHO", 2, MethodologyFormulaScope.Substance),
+        };
+        callerFormulas[0].SetArguments("Idle");
+        stand.Caller(
+            callerFormulas,
+            [Library.LibraryStand.Output("M_total", perSubstance: false), Library.LibraryStand.Output("tons", perSubstance: true)]);
+        stand.Imports(callerVersion, content);
+
+        var imports = await ImportClosureSource.BuildAsync(
+            stand.Store, new RealFormulaEngine(), Library.LibraryStand.CallerId, callerVersion,
+            callerFormulas, Library.LibraryStand.BusinessDate, [content.Library], CancellationToken.None);
+        Assert.Empty(Assert.Single(imports).OptionalArguments!);
+
+        var caller = new VersionSource
+        {
+            MethodologyCode = "HSE400",
+            NumericMode = NumericMode.Strict,
+            Formulas =
+            [
+                new SourceFormula("M_total", "!Common_M * 2 + @Idle", 1, MethodologyFormulaScope.Row, false, FormulaResultType.Number, "t", "Idle"),
+                new SourceFormula("tons", "!Common_W + CST.RHO", 2, MethodologyFormulaScope.Substance, false, FormulaResultType.Number, "t"),
+            ],
+            Outputs = [new SourceOutput("M_total", "t", false, 1), new SourceOutput("tons", "t", true, 2)],
+            Constants = [SourceConstant.OfNumber("RHO", 0.5m)],
+            Substances = ["S901", "S902"],
+            Imports = imports,
+            RowsClauses = [new SourceRowsClause(["T1"], [new SourceRule([])], [])],
+        };
+        var library = new VersionSource
+        {
+            MethodologyCode = "Common",
+            IsLibrary = true,
+            NumericMode = NumericMode.Strict,
+            Formulas =
+            [
+                new SourceFormula("Common_M", "@Volume * CST.RHO", 1, MethodologyFormulaScope.Row, true),
+                new SourceFormula("Common_W", "!Common_M * CST.EF", 2, MethodologyFormulaScope.Substance, true),
+                new SourceFormula("Common_Spare", "@Idle * 2", 3, MethodologyFormulaScope.Row, false, FormulaResultType.Number, null, "Idle?"),
+            ],
+            Constants =
+            [
+                SourceConstant.OfNumber("RHO", 0.8m),
+                SourceConstant.OfNumber("EF", 0.1m, substanceCode: "S901"),
+                SourceConstant.OfNumber("EF", 0.2m, substanceCode: "S902"),
+            ],
+        };
+        var callerText = ScriptConverter.Convert(caller);
+        var libraryText = ScriptConverter.Convert(library);
+        Assert.True(callerText.Text is not null, string.Join(" | ", callerText.Issues.Select(i => i.Code + ": " + i.Message)));
+        Assert.True(libraryText.Text is not null, string.Join(" | ", libraryText.Issues.Select(i => i.Code + ": " + i.Message)));
+
+        var scriptStand = new ScriptStand(callerText.Text, NumericMode.Strict)
+            .WithLibrary("Common", 910, libraryText.Text)
+            .WithSubstances(("S901", 901), ("S902", 902));
+        scriptStand.AddTable("T1");
+
+        (string Key, CalculationArgument[] Arguments)[] rows =
+        [
+            ("both", [Number("Volume", 100m), Number("Idle", 5m)]),
+            ("noIdle", [Number("Volume", 100m)]),
+        ];
+        var keys = rows.Select(r => r.Key).ToList();
+        var oldInputs = Inputs(rows, Library.LibraryStand.Input(TraceLevel.Full).Methodology, 700, 202601);
+        var scriptInputs = Inputs(rows);
+
+        var oldModule = new DelegateModule(input => stand.Module().ExecuteAsync(input, CancellationToken.None));
+        var scriptModule = new DelegateModule(input => scriptStand.RunArgumentsAsync([.. input.Arguments]));
+        var oldRows = await ParityComparer.ExecuteRowsAsync(keys, oldInputs, oldModule, null!, CancellationToken.None);
+        var scriptRows = await ParityComparer.ExecuteRowsAsync(keys, scriptInputs, scriptModule, null!, CancellationToken.None);
+
+        // Контроль: рядок з Idle рахується, а без нього старий рушій не вигадує значення.
+        Assert.NotEmpty(oldRows["both"].Values);
+        Assert.True(Show(oldRows) == Show(scriptRows), "OLD:\n" + Show(oldRows) + "\nNEW:\n" + Show(scriptRows));
     }
 }
