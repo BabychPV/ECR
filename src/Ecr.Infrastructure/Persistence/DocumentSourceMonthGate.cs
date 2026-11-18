@@ -61,7 +61,7 @@ public sealed class DocumentSourceMonthGate(EcrDbContext db, bool? readOverride)
                 where d.Id == documentId
                 join p in db.Projects.AsNoTracking() on d.ProjectId equals p.Id
                 from pv in db.TemplateVersions.AsNoTracking()
-                where pv.Id == EcrDbContext.VersionOf(d.ProjectId, periodKey)
+                where pv.Id == (d.TemplateId == null ? EcrDbContext.VersionOf(d.ProjectId, periodKey) : EcrDbContext.TemplateVersionOf(d.ProjectId, d.TemplateId.Value, periodKey))
                 from c in db.DocumentSourceBindingConsumers.AsNoTracking()
                 where c.TemplateId == (d.TemplateId ?? pv.TemplateId)
                 join b in db.DocumentSourceBindings.AsNoTracking() on c.BindingId equals b.Id
