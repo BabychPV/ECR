@@ -25,8 +25,28 @@ namespace Ecr.Infrastructure.Tests.Reporting;
 /// розкладки) - тест 2 червоний; версійний бюджет <c>IF @limCols + @limText + 24 &gt; 1024</c> -> <c>IF 1 = 0</c> - тест 4 червоний.
 /// </remarks>
 [Collection("SqlServer")]
-public sealed class ReportViewColumnBudgetTests(SqlServerFixture sql)
+public sealed class ReportViewColumnBudgetTests(SqlServerFixture sql) : IAsyncLifetime
 {
+    /// <summary>
+    /// Широкі таблиці цього класу - сотні Calculated/Formula колонок без прив'язок і формул у ОПУБЛІКОВАНИХ версіях. Лишені в
+    /// спільній базі колекції SqlServer, вони стають знахідками <c>UNBOUND_CALCULATED_COLUMN</c> / <c>UNSOURCED_FORMULA_COLUMN</c>
+    /// задачі <c>ConsistencyCheckJob</c> і ламають чужий тест (batch-1118-1: <c>ConsistencyCheckJobWriteTests</c> - 3 MERGE
+    /// пакети по 250 замість 1). Тому після кожного тесту колонки широкої таблиці мʼяко видаляються (правила їх пропускають).
+    /// </summary>
+    private readonly List<int> _wideTables = [];
+
+    public Task InitializeAsync() => Task.CompletedTask;
+
+    public async Task DisposeAsync()
+    {
+        await using var db = sql.CreateContext();
+        foreach (var tableId in _wideTables)
+        {
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE cfg.ColumnDef SET IsDeleted = 1, DeletedAt = SYSUTCDATETIME() WHERE TableDefId = {tableId} AND IsDeleted = 0");
+        }
+    }
+
     private sealed record Built(TestDocument Doc, int TemplateId, string WideView, string NarrowView, string WideStable,
         string NarrowStable, string FormulaCode, string FirstMonthCode);
 
@@ -41,6 +61,7 @@ public sealed class ReportViewColumnBudgetTests(SqlServerFixture sql)
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         // Як T9_07 річної Land: MonthsInColumns (вʼюхи зі слотами; без них раніше діє ліміт 250 таблиць у запиті).
         var doc = await builder.BuildAsync(202601, columnCount: 2, rowCount: 1, layoutKind: TableLayoutKind.MonthsInColumns, monthColumns: 12);
+        _wideTables.Add(doc.TableDefId);
 
         await using var db = sql.CreateContext();
         var formula = new ColumnDef(doc.TableDefId, EcrCode.Create("FRM" + Guid.NewGuid().ToString("N")[..8]),
