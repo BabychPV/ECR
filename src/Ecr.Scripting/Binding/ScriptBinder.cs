@@ -676,12 +676,12 @@ internal sealed class ScriptBinder
     private ScriptBlock BindBlock(BlockSyntax block, bool allowSkip)
     {
         var parent = scope;
-        var savedSkip = skipAllowed;
+        var outerSkipAllowed = skipAllowed;
         scope = new Scope(parent);
         skipAllowed = allowSkip;
         var statements = BindStatements(block.Statements, topLevel: false);
         scope = parent;
-        skipAllowed = savedSkip;
+        skipAllowed = outerSkipAllowed;
         return new ScriptBlock(statements);
     }
 
@@ -858,10 +858,10 @@ internal sealed class ScriptBinder
         scope.Names[f.VarName] = Sym.Substance;
         var savedVar = foreachVar;
         foreachVar = f.VarName;
-        var savedSkip = skipAllowed;
+        var outerSkipAllowed = skipAllowed;
         var body = BindBlock(f.Body, allowSkip: true);
         foreachVar = savedVar;
-        skipAllowed = savedSkip;
+        skipAllowed = outerSkipAllowed;
         scope = parent;
         return new ForeachSubstanceStatement(f.VarName, codes, body);
     }
