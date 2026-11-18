@@ -1,0 +1,154 @@
+// src/Ecr.Infrastructure/Jobs/SourceDocumentChangeHook.cs
+using System.Globalization;
+using Ecr.Application.Ports;
+using Ecr.Domain.Entities.Configuration;
+using Ecr.Domain.Enums;
+using Ecr.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+
+namespace Ecr.Infrastructure.Jobs;
+
+/// <summary>Що зробити після УСПІШНОГО прогону <see cref="RecalculationJob"/> чи <see cref="FormulaRecalculationJob"/>.</summary>
+public interface IRecalculationCompletionHook
+{
+    /// <summary>Прогін завершився успішно; його записи вже закомічено.</summary>
+    /// <param name="periodsByDocument">Документи прогону і періоди, які він рахував (чи в які записала правка).</param>
+    /// <param name="sourceHop">
+    /// B179 L2: ланка ланцюжка джерел, з якою поставлено прогін (0 — правка людини чи власний перерахунок документа).
+    /// </param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task OnSucceededAsync(IReadOnlyDictionary<long, int[]> periodsByDocument, int sourceHop, CancellationToken ct);
+}
+
+/// <summary>
+/// B179 L2 (рішення людини P-0118-33, Q1/Q2): після успішного перерахунку документа, шаблон якого — ДЖЕРЕЛО зв'язки
+/// <c>cfg.DocumentSourceBinding</c> у стані <see cref="DocumentSourceState.Any"/> з бітом <c>RecalculateDependents</c>,
+/// — одна злита задача <see cref="IRegistryImpactRecalculationJob"/> на (зв'язку, рік, місяць); споживачів вона бере з
+/// графа залежностей у момент виконання.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Замінює <c>Hse400LandDependentsTrigger</c> (HSE400 3b): той був лише для коду HSE400, лише після повного
+/// перерахунку і за ключем <c>Calculations:Hse400RecalculateLandDependents</c>, який постачався <c>false</c> і вимикав
+/// біт зв'язки (корінь дефекту live, B179 §1). Тепер — будь-яка зв'язка, обидві задачі перерахунку (правка комірки дає
+/// лише <see cref="FormulaRecalculationJob"/>), без ключа; аварійний вимикач — лише біт зв'язки.
+/// </para>
+/// <para>
+/// ⛔ Злиття: ціль <see cref="RegistryImpactRecalculationTarget.ForSourceChange"/> — сплеск правок одного місяця, поки
+/// задача чекає, дає ОДНУ задачу; виконувана не переривається (нова — позаду неї).
+/// </para>
+/// <para>
+/// ⚠ За <see cref="DocumentSourceState.ApprovedOnly"/> мовчить: споживачі читають лише затверджені місяці, а
+/// затверджений аркуш перерахунком не змінюється — тригер там Approve/Reopen/видалення (<see cref="SourceApprovalChangeTrigger"/>).
+/// Читання з документа вимкнене (біт <c>ReadFromDocument</c> чи явний ключ <c>Hse400CompositionFromDocument</c>) —
+/// споживачі джерела не бачать, ставити нічого.
+/// </para>
+/// <para>
+/// ⚠ Збій постановки не валить перерахунок джерела (його записи вже закомічено): помилка — у журнал.
+/// </para>
+/// </remarks>
+public sealed partial class SourceDocumentChangeHook(
+    EcrDbContext db,
+    IBackgroundJobScheduler jobs,
+    IDocumentSourceFlagOverrides? overrides = null,
+    ILogger<SourceDocumentChangeHook>? logger = null) : IRecalculationCompletionHook
+{
+    private readonly ILogger _logger = (ILogger?)logger ?? NullLogger.Instance;
+
+    /// <inheritdoc />
+    public async Task OnSucceededAsync(IReadOnlyDictionary<long, int[]> periodsByDocument, int sourceHop, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(periodsByDocument);
+        if (periodsByDocument.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            // Один дрібний запит: зв'язок одиниці; немає жодної активної — більше нічого не читаємо.
+            var bindings = (await db.DocumentSourceBindings.AsNoTracking()
+                    .Where(b => b.SourceState == DocumentSourceState.Any && b.RecalculateDependents)
+                    .Select(b => new { b.Id, b.SourceTemplateId, b.RegistryDefId, b.ReadFromDocument })
+                    .ToListAsync(ct)
+                    .ConfigureAwait(false))
+                .Where(b => overrides?.ReadFromDocument ?? b.ReadFromDocument)
+                .ToList();
+            if (bindings.Count == 0)
+            {
+                return;
+            }
+
+            if (sourceHop >= RegistryImpactRecalculationRequest.MaxHops)
+            {
+                LogHopCap(_logger, string.Join(", ", periodsByDocument.Keys), sourceHop);
+                return;
+            }
+
+            var templates = bindings.Select(b => b.SourceTemplateId).Distinct().ToList();
+            var documentIds = periodsByDocument.Keys.ToList();
+            var periodKeys = periodsByDocument.Values.SelectMany(p => p).Distinct().ToList();
+
+            // Документ × період × шаблон: екземпляри оригіналу аркуша (як у завантажувачі складу).
+            var found = await (
+                    from i in db.TableInstances.AsNoTracking()
+                    where documentIds.Contains(i.DocumentId) && periodKeys.Contains(i.PeriodKeyValue) && i.SheetCopyId == null
+                    join t in db.TableDefs.AsNoTracking() on i.TableDefId equals t.Id
+                    join s in db.SheetDefs.AsNoTracking() on t.SheetDefId equals s.Id
+                    join v in db.TemplateVersions.AsNoTracking() on s.TemplateVersionId equals v.Id
+                    where templates.Contains(v.TemplateId)
+                    join d in db.Documents.AsNoTracking() on i.DocumentId equals d.Id
+                    join p in db.Projects.AsNoTracking() on d.ProjectId equals p.Id
+                    select new { i.DocumentId, i.PeriodKeyValue, v.TemplateId, p.PeriodKind })
+                .Distinct()
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+
+            var targets = new SortedSet<(int BindingId, int RegistryDefId, int Year, int Month)>();
+            foreach (var f in found.Where(f => periodsByDocument[f.DocumentId].Contains(f.PeriodKeyValue)))
+            {
+                // Місяць — лише місячного проєкту (0 — увесь рік): період іншої довжини володіє кількома місяцями.
+                var month = f.PeriodKind == PeriodKind.Monthly ? f.PeriodKeyValue % 100 : 0;
+                foreach (var binding in bindings.Where(b => b.SourceTemplateId == f.TemplateId))
+                {
+                    targets.Add((binding.Id, binding.RegistryDefId, f.PeriodKeyValue / 100, month));
+                }
+            }
+
+            foreach (var (bindingId, registryDefId, year, month) in targets)
+            {
+                int? targetMonth = month == 0 ? null : month;
+                await jobs
+                    .EnqueueCoalescedAsync<IRegistryImpactRecalculationJob>(
+                        RegistryImpactRecalculationTarget.ForSourceChange(bindingId, year, targetMonth),
+                        new RegistryImpactRecalculationRequest(
+                            registryDefId,
+                            [],
+                            string.Create(CultureInfo.InvariantCulture, $"source binding {bindingId}: {year}/{month} changed"),
+                            year,
+                            bindingId,
+                            targetMonth,
+                            sourceHop),
+                        ct,
+                        createdByUserId: null)
+                    .ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogEnqueueFailed(_logger, string.Join(", ", periodsByDocument.Keys), ex);
+        }
+    }
+
+    [LoggerMessage(
+        Level = LogLevel.Error,
+        Message = "B179: не вдалось поставити перерахунок залежних після перерахунку документів-джерел {DocumentIds}.")]
+    private static partial void LogEnqueueFailed(ILogger logger, string documentIds, Exception exception);
+
+    [LoggerMessage(
+        Level = LogLevel.Error,
+        Message = "B179: ланцюжок документів-джерел дійшов ланки {Hop} (документи {DocumentIds}) — стеля, залежних не поставлено.")]
+    private static partial void LogHopCap(ILogger logger, string documentIds, int hop);
+}

@@ -91,18 +91,26 @@ public sealed class CalculationTrigger(
     /// документа однаково не йдуть разом — лок документа бере сама задача.
     /// </para>
     /// </remarks>
-    public async Task<string?> RequestDependentsAsync(long documentId, PeriodKey periodKey, CancellationToken ct)
+    public Task<string?> RequestDependentsAsync(long documentId, PeriodKey periodKey, CancellationToken ct)
+        => RequestDependentsAsync(documentId, periodKey, sourceHop: 0, ct);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// B179 L2: ланка їде в payload (<c>SourceHop</c>); перерахунок споживача передає її хуку завершення. Ціль та сама
+    /// (<see cref="DependentsTargetOf"/>): злиття лишає ланку останньої постановки.
+    /// </remarks>
+    public async Task<string?> RequestDependentsAsync(long documentId, PeriodKey periodKey, int sourceHop, CancellationToken ct)
     {
         if (!await WritableAsync(documentId, periodKey, ct).ConfigureAwait(false))
         {
             return null;
         }
 
-        return await EnqueueSubmittedAsync(DependentsTargetOf(documentId, periodKey), documentId, periodKey, ct)
+        return await EnqueueSubmittedAsync(DependentsTargetOf(documentId, periodKey), documentId, periodKey, ct, sourceHop)
             .ConfigureAwait(false);
     }
 
-    /// <summary>Ціль перерахунку залежних: окрема від автоперерахунку збору й кнопки (див. <see cref="RequestDependentsAsync"/>).</summary>
+    /// <summary>Ціль перерахунку залежних: окрема від автоперерахунку збору й кнопки (див. <see cref="RequestDependentsAsync(long, Ecr.Domain.ValueObjects.PeriodKey, CancellationToken)"/>).</summary>
     /// <param name="documentId">Документ.</param>
     /// <param name="periodKey">Період.</param>
     /// <returns><c>doc{id}-p{період}-dependents</c>.</returns>
@@ -185,17 +193,29 @@ public sealed class CalculationTrigger(
     /// системна задача, людини, що натиснула кнопку, немає (Q-156). <c>RecalculateSubmitted</c> — подані
     /// перераховуються з журналом і позначкою, затверджені пропускає сама задача.
     /// </remarks>
-    private Task<string> EnqueueSubmittedAsync(string target, long documentId, PeriodKey periodKey, CancellationToken ct)
+    private Task<string> EnqueueSubmittedAsync(
+        string target, long documentId, PeriodKey periodKey, CancellationToken ct, int sourceHop = 0)
         => jobs.EnqueueCoalescedAsync<IRecalculationJob>(
             target,
-            new
-            {
-                DocumentId = documentId,
-                PeriodKey = periodKey.Value,
-                TriggeredByUserId = (int?)null,
-                SheetDefId = (int?)null,
-                RecalculateSubmitted = true,
-            },
+            // B179 L2: ланка — лише коли вона є (форма payload без ланки — та сама, що доти).
+            sourceHop > 0
+                ? (object)new
+                {
+                    DocumentId = documentId,
+                    PeriodKey = periodKey.Value,
+                    TriggeredByUserId = (int?)null,
+                    SheetDefId = (int?)null,
+                    RecalculateSubmitted = true,
+                    SourceHop = sourceHop,
+                }
+                : new
+                {
+                    DocumentId = documentId,
+                    PeriodKey = periodKey.Value,
+                    TriggeredByUserId = (int?)null,
+                    SheetDefId = (int?)null,
+                    RecalculateSubmitted = true,
+                },
             ct,
             createdByUserId: null);
 }

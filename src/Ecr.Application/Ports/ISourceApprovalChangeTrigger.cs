@@ -13,9 +13,9 @@ public enum SourceApprovalChange
 
 /// <summary>Що треба знати про документ-джерело ДО його видалення (після видалення його вже немає).</summary>
 /// <param name="DocumentId">Документ.</param>
-/// <param name="RegistryDefId">Довідник зв'язки.</param>
+/// <param name="BindingIds">✎ B179 L2: зв'язки <c>ApprovedOnly</c>, джерелом яких є шаблон документа.</param>
 /// <param name="Years">Роки, у яких документ мав екземпляри таблиць (оригінал аркуша).</param>
-public sealed record SourceDocumentDeletion(long DocumentId, int RegistryDefId, IReadOnlyList<int> Years);
+public sealed record SourceDocumentDeletion(long DocumentId, IReadOnlyList<int> BindingIds, IReadOnlyList<int> Years);
 
 /// <summary>
 /// B80 (N2a, RW.2 T-A/T-B/T-C): за зв'язкою джерела в стані <c>ApprovedOnly</c> залежні бачать лише затверджені

@@ -17,9 +17,9 @@ namespace Ecr.Infrastructure.Jobs;
 /// документи» на кожен змінений довідник-дзеркало × рік, у якому він має залежних.
 /// </summary>
 /// <remarks>
-/// ⚠ Задача — та сама <see cref="IRegistryImpactRecalculationJob"/>, що й у HSE400 3b (<see cref="Hse400LandDependentsTrigger"/>):
+/// ⚠ Задача — та сама <see cref="IRegistryImpactRecalculationJob"/>, що й у зміни документа-джерела (<see cref="SourceDocumentChangeHook"/>):
 /// той самий пошук залежних (<see cref="IRegistryImpactStore.ListImpactedForYearAsync"/>: <c>cfg.RegistryUse</c>, лише
-/// <c>Open</c>/<c>Grace</c>) і та сама постановка (<see cref="ICalculationTrigger.RequestDependentsAsync"/>: ✎ B63 —
+/// <c>Open</c>/<c>Grace</c>) і та сама постановка (<see cref="ICalculationTrigger.RequestDependentsAsync(long, Ecr.Domain.ValueObjects.PeriodKey, CancellationToken)"/>: ✎ B63 —
 /// пропускається лише затверджений аркуш, поданий перераховується з позначкою). Тут — лише які роки: ті, де актуальний прогін методології, що читає довідник, лежить у
 /// відкритому періоді. Закритий період не дає року взагалі.
 /// <para>

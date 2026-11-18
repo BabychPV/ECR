@@ -164,8 +164,4 @@ public sealed class DocumentSourceFlagOverrides(IConfiguration configuration) : 
     /// <inheritdoc />
     public bool? ReadFromDocument { get; } =
         Hse400CompositionSnapshotLoader.Override(configuration, Hse400CompositionSnapshotLoader.EnabledKey);
-
-    /// <inheritdoc />
-    public bool? RecalculateDependents { get; } =
-        Hse400CompositionSnapshotLoader.Override(configuration, Jobs.Hse400LandDependentsTrigger.EnabledKey);
 }

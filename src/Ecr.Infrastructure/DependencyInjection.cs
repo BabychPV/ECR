@@ -450,8 +450,8 @@ public static class DependencyInjection
         services.AddSingleton(Jobs.RecalculationBudgetOptions.Read(configuration));
         services.AddSingleton<Jobs.RecalculationBudgetMonitor>();
         services.AddScoped<IRecalculationJob, Jobs.RecalculationJob>();
-        services.AddScoped<Jobs.IRecalculationCompletionHook>(sp => Jobs.Hse400LandDependentsTrigger.Create(sp, configuration)); // HSE400 3b; B80: ключі — перекриття бітів зв'язки
-        services.AddScoped<ISourceApprovalChangeTrigger>(sp => Jobs.Hse400SourceApprovalTrigger.Create(sp, configuration)); // B80 N2a: Approve/Reopen/видалення джерела за ApprovedOnly
+        services.AddScoped<Jobs.IRecalculationCompletionHook, Jobs.SourceDocumentChangeHook>(); // B179 L2: зміна джерела за Any (обидві задачі перерахунку)
+        services.AddScoped<ISourceApprovalChangeTrigger, Jobs.SourceApprovalChangeTrigger>(); // B80 N2a → B179 L2: Approve/Reopen/видалення джерела за ApprovedOnly
         services.AddScoped<ISourceMonthApprovalGate>(sp => DocumentSourceMonthGate.Create(sp, configuration)); // B80 N2b: Submit/Approve споживача — лише з затвердженим місяцем джерела
         services.AddScoped<IFormulaRecalculationJob, Jobs.FormulaRecalculationJob>();
         // WW-03: постановка перерахунку в періоди-читачі (міжперіодні посилання).
