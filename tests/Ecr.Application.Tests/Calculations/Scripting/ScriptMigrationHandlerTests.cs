@@ -209,6 +209,26 @@ public sealed class ScriptMigrationHandlerTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait("Requirement", "MS-8.5")]
+    public async Task Apply_завеликий_текст_відхиляється_до_компіляції_з_назвою_межі()
+    {
+        var fingerprint = Fingerprint.ComputeHex(_source);
+        var huge = "//" + new string('a', ScriptAnalyzer.MaxTextLength);
+
+        var response = await Apply().HandleAsync(
+            new ApplyScriptPackageRequest(null, null, [new ScriptPackageEntryDto("ALPHA", "1.0", null, huge, fingerprint)]),
+            dryRun: true,
+            CancellationToken.None);
+
+        var refused = Assert.Single(response.Entries);
+        Assert.Equal("scriptMigration.refused.textInvalid", refused.Reason);
+        Assert.Equal(
+            [$"limit: {ScriptAnalyzer.MaxTextLength.ToString(System.Globalization.CultureInfo.InvariantCulture)} characters"],
+            refused.Details);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "MS-8.5")]
     public async Task Apply_імпортер_бачить_бібліотеку_з_того_самого_пакета_незалежно_від_порядку()
     {
         Publish(_libraryVersion, shadow: null);
