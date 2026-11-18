@@ -67,6 +67,26 @@ public sealed class SourceDocumentFanOutTests(SqlServerFixture sql) : DbJobQueue
         Assert.DoesNotContain(SourceDependencyWorld.DependentsTarget(stranger, Month), queued.Keys);
     }
 
+    /// <summary>
+    /// ✎ B179 L2 (перенесено з N4-тесту <c>RegistryImpactBoundConsumersTests</c>, метод якого прибрано): споживач без
+    /// результату в періоді Grace ставиться так само, як в Open.
+    /// </summary>
+    /// <remarks>Мутація: фільтр <c>Open || Grace</c> → лише <c>Open</c> у <c>ListTemplateConsumersAsync</c> — червоний.</remarks>
+    [Fact]
+    public async Task Споживач_без_результату_в_періоді_Grace_ставиться()
+    {
+        var world = new SourceDependencyWorld(Sql);
+        var (registryId, code) = await world.RegistryAsync();
+        var source = await world.DocumentAsync([Month]);
+        var grace = await world.DocumentAsync([Month], code);
+        await world.GraceAsync(grace, Month);
+        var bindingId = await world.BindingAsync(source.TemplateId, registryId);
+
+        var queued = await RunAsync(Request(registryId, bindingId, Month, hop: 0));
+
+        Assert.Contains(SourceDependencyWorld.DependentsTarget(grace, Month), queued.Keys);
+    }
+
     /// <summary>Зміна за весь рік (видалення, перемикання стану — без місяця): усі відкриті періоди року споживача.</summary>
     [Fact]
     public async Task Без_місяця_ставиться_увесь_рік_споживача()

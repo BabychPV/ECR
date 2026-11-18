@@ -121,6 +121,15 @@ internal sealed class SourceDependencyWorld(SqlServerFixture sql)
         await db.SaveChangesAsync();
     }
 
+    /// <summary>✎ B179 L2 (замість N4-тесту RegistryImpactBoundConsumersTests): період документа — у пільговому стані Grace.</summary>
+    public async Task GraceAsync(TestDocument document, int month)
+    {
+        await using var db = sql.CreateContext();
+        var period = await db.Periods.SingleAsync(p => p.ProjectId == document.ProjectId && p.PeriodKeyValue == Period(month));
+        period.TransitionTo(PeriodState.Grace, Now);
+        await db.SaveChangesAsync();
+    }
+
     /// <summary>Справжній граф залежностей (без вікна ревізії — свіжі дані тесту видно одразу).</summary>
     public static DependencyGraphProvider Graph(EcrDbContext db)
         => new(
