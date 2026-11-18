@@ -82,7 +82,31 @@ function SourceLine({ form }: { readonly form: TestCaseForm }): JSX.Element | nu
   );
 }
 
-function TestFormBody(props: {
+/**
+ * Поле значення входу тесту. ⛔ Текст, який друкує людина, не підміняється канонічним виглядом значення: інакше
+ * `1.0` ставало `1` посеред набору, і `1.05` неможливо було набрати (виходило `15`).
+ */
+function ValueTextInput(props: {
+  readonly value: number | string | null;
+  readonly onValue: (value: number | string | null) => void;
+}): JSX.Element {
+  const [text, setText] = useState(valueText(props.value));
+  const shown = parseValueText(text) === props.value ? text : valueText(props.value);
+
+  return (
+    <TextInput
+      aria-label={t('methodologyScript.tests.value')}
+      value={shown}
+      onChange={(event) => {
+        const next = event.currentTarget.value;
+        setText(next);
+        props.onValue(parseValueText(next));
+      }}
+    />
+  );
+}
+
+export function TestFormBody(props: {
   readonly editing: ScriptTestEditing;
   readonly existingCodes: readonly string[];
   readonly outline: ScriptOutlineDto | null;
@@ -155,7 +179,8 @@ function TestFormBody(props: {
             </Table.Thead>
             <Table.Tbody>
               {inputs.map((input, index) => (
-                <Table.Tr key={`${String(index)}-${input.name}`}>
+                // ⚠ Ключ — лише індекс: з іменем у ключі поле імені перемонтовувалося на кожен символ і губило фокус.
+                <Table.Tr key={index}>
                   <Table.Td>
                     <TextInput
                       aria-label={t('methodologyScript.tests.field')}
@@ -164,12 +189,9 @@ function TestFormBody(props: {
                     />
                   </Table.Td>
                   <Table.Td>
-                    <TextInput
-                      aria-label={t('methodologyScript.tests.value')}
-                      value={valueText(input.value)}
-                      onChange={(event) =>
-                        setInput(index, { value: parseValueText(event.currentTarget.value) })
-                      }
+                    <ValueTextInput
+                      value={input.value}
+                      onValue={(value) => setInput(index, { value })}
                     />
                   </Table.Td>
                   <Table.Td>
@@ -212,7 +234,7 @@ function TestFormBody(props: {
             </Table.Thead>
             <Table.Tbody>
               {rows.map((row, index) => (
-                <Table.Tr key={`${String(index)}-${row.output}`}>
+                <Table.Tr key={index}>
                   <Table.Td>
                     <Select
                       aria-label={t('methodologyScript.tests.output')}
