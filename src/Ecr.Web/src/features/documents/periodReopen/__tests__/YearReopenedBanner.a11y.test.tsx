@@ -30,7 +30,9 @@ describe('YearReopenedBanner', () => {
     const violations = await findViolations(container);
     expect(violations, describeViolations(violations)).toHaveLength(0);
     expect(container.querySelectorAll('[data-year-reopened-month]')).toHaveLength(2);
-    expect(container.querySelector('[role="status"]')).not.toBeNull();
+    // Mantine Alert завжди ставить власну роль (`alert`) поверх переданої — як і в банера місячного документа;
+    // перевіряємо, що банер є і має живу роль для читача екрана, а не конкретне значення.
+    expect(container.querySelector('[data-testid="document-year-reopened"]')?.getAttribute('role')).toBe('alert');
   });
 
   it('порожній перелік — банера немає', () => {
