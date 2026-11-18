@@ -1,5 +1,6 @@
 // src/Ecr.Application/Calculations/Scripting/ScriptUnitChecker.cs
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using Ecr.Application.Ports;
 using Ecr.Expressions.Ast;
 using Ecr.Expressions.Binding;
@@ -149,6 +150,9 @@ public static class ScriptUnitChecker
 
         private AstNode Rewrite(AstNode node)
         {
+            // ⛔ L7-01: лівий гребінь ланцюга — рекурсія глибиною в кількість ланок.
+            RuntimeHelpers.EnsureSufficientExecutionStack();
+
             switch (node)
             {
                 case SymbolReferenceNode { Kind: SymbolKind.Formula } symbol:
@@ -199,6 +203,13 @@ public static class ScriptUnitChecker
         private static SymbolReferenceNode Unknown() => new(SymbolKind.Argument, "?");
 
         private bool IsCertainlyDimensionless(AstNode node)
+        {
+            // ⛔ L7-01: окремий від Rewrite рекурсивний спуск по тому самому піддереву.
+            RuntimeHelpers.EnsureSufficientExecutionStack();
+            return IsDimensionless(node);
+        }
+
+        private bool IsDimensionless(AstNode node)
             => node switch
             {
                 LiteralNode or PeriodPropertyNode => true,
