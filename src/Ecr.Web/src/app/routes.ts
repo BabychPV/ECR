@@ -479,6 +479,18 @@ export const routes = {
       crumb: { ancestorIds: ['admin-methodologies'] },
     },
   },
+  adminMethodologyScript: {
+    id: 'admin-methodology-script',
+    path: '/admin/methodologies/:id/versions/:vid/script',
+    // ⚠ Лист — фізичний сусід `admin-methodology-versions` у `router.tsx`, не його нащадок; крихта «версії»
+    // додається явно (`ancestorIds`), як у `admin-template-version-relations`.
+    handle: {
+      labelKey: 'methodologyScript.title',
+      permission: 'Calculation.View',
+      numericParams: ['id', 'vid'],
+      crumb: { ancestorIds: ['admin-methodologies', 'admin-methodology-versions'] },
+    },
+  },
   adminExpressions: {
     id: 'admin-expressions',
     path: '/admin/expressions',

@@ -5,7 +5,7 @@ import {
   type ScriptCompletionContext,
   type ScriptInputTable,
 } from '../scriptCompletion';
-import type { ScriptOutlineDto } from '../types';
+import { outline as outlineOf, outlineTable } from './fixtures';
 
 const tables: ScriptInputTable[] = [
   {
@@ -22,17 +22,15 @@ const tables: ScriptInputTable[] = [
   },
 ];
 
-const outline: ScriptOutlineDto = {
-  tables: [{ code: 'T3_00' }, { code: 'T10_03', alias: 'Gtu' }],
-  inputs: [],
+const outline = outlineOf({
+  tables: [outlineTable('T3_00'), outlineTable('T10_03', 'Gtu')],
   outputs: [{ code: 'OUT_A', unit: 'g_per_s', perSubstance: false }],
-  substances: [],
   imports: ['Common'],
   constants: [
     { name: 'k1', kind: 'scalar', line: 1 },
     { name: 'EF', kind: 'map', line: 2 },
   ],
-};
+});
 
 function at(text: string, extra: Partial<ScriptCompletionContext> = {}): ReturnType<typeof scriptCompletions> {
   const marker = text.indexOf('|');

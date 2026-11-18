@@ -85,6 +85,11 @@ const MethodologyVersionsPageLoader = async () => ({
 });
 export const MethodologyVersionsPage = lazy(MethodologyVersionsPageLoader);
 
+const MethodologyScriptPageLoader = async () => ({
+  default: (await import('@/pages/admin/MethodologyScriptPage')).MethodologyScriptPage,
+});
+export const MethodologyScriptPage = lazy(MethodologyScriptPageLoader);
+
 const ExpressionsPageLoader = async () => ({
   default: (await import('@/pages/admin/ExpressionsPage')).ExpressionsPage,
 });
@@ -187,6 +192,7 @@ const routeChunkLoaders: Partial<Record<string, () => Promise<unknown>>> = {
   [routes.adminPermits.id]: PermitsPageLoader,
   [routes.adminMethodologies.id]: MethodologiesPageLoader,
   [routes.adminMethodologyVersions.id]: MethodologyVersionsPageLoader,
+  [routes.adminMethodologyScript.id]: MethodologyScriptPageLoader,
   [routes.adminExpressions.id]: ExpressionsPageLoader,
   [routes.adminSecurity.id]: SecurityPageLoader,
   [routes.projects.id]: ProjectsPageLoader,

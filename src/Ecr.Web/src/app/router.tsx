@@ -21,6 +21,7 @@ import {
   PiDataPage,
   PipelinePage,
   MethodologiesPage,
+  MethodologyScriptPage,
   MethodologyVersionsPage,
   MyGroupsPage,
   NotificationsPage,
@@ -519,6 +520,11 @@ export const router = createBrowserRouter([
             path: relativePath(routes.adminMethodologyVersions, 'admin'),
             element: guarded(routes.adminMethodologyVersions.handle, <MethodologyVersionsPage />),
             handle: routes.adminMethodologyVersions.handle,
+          },
+          {
+            path: relativePath(routes.adminMethodologyScript, 'admin'),
+            element: guarded(routes.adminMethodologyScript.handle, <MethodologyScriptPage />),
+            handle: routes.adminMethodologyScript.handle,
           },
           {
             path: relativePath(routes.adminExpressions, 'admin'),

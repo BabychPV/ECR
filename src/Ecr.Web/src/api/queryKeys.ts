@@ -143,6 +143,31 @@ const methodologies = {
   /** `GET /api/v1/methodologies` — перелік методологій. */
   list: () => ['methodologies', 'list'] as const,
 
+  /** `GET /api/v1/methodologies/{methodologyId}/versions/{versionId}/script` — текст і структура скрипта версії. */
+  script: (versionId: number) => ['methodologies', 'script', versionId] as const,
+
+  /** `GET /api/v1/expressions/metadata?dialect=Methodology` для редактора скрипта (функції, поля шапки). */
+  scriptMetadata: (versionId: number) => ['methodologies', 'scriptMetadata', versionId] as const,
+
+  /** `GET /api/v1/methodologies/{methodologyId}/versions/{versionId}/substances`. */
+  substances: (versionId: number) => ['methodologies', 'substances', versionId] as const,
+
+  /** Документи для перегляду скрипта (`GET /api/v1/documents?templateCode&q`). */
+  scriptDocuments: (templateCode: string | null, q: string) =>
+    ['methodologies', 'scriptDocuments', templateCode, q] as const,
+
+  /** Підсумок документа в періоді (підпис джерела тесту скрипта). */
+  scriptDocument: (documentId: number, periodKey: number) =>
+    ['methodologies', 'scriptDocument', documentId, periodKey] as const,
+
+  /** Результат перевірки тексту скрипта без збереження (`POST …/script/validate`). */
+  scriptValidation: (versionId: number, text: string) =>
+    ['methodologies', 'scriptValidation', versionId, text] as const,
+
+  /** Екземпляри таблиць документа в періоді для перегляду скрипта. */
+  scriptDocumentTables: (documentId: number, periodKey: number) =>
+    ['methodologies', 'scriptDocumentTables', documentId, periodKey] as const,
+
   /** `GET /api/v1/methodologies/{methodologyId}/versions`. */
   versionsOf: (methodologyId: number) => ['methodologies', 'versionsOf', methodologyId] as const,
 
