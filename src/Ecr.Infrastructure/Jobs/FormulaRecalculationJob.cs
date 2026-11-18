@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Text.Json;
 using Ecr.Application.Errors;
 using Ecr.Application.Integration;
@@ -350,6 +350,9 @@ public sealed partial class FormulaRecalculationJob(
         // B179 L2 (Q1): УСПІШНИЙ прохід — документ-джерело змінився в періодах насіння й записаних; хук сам вирішує, чи
         // документ — джерело зв'язки за Any. Відкладений чи провалений прохід сюди не доходить. Ланка — 0: правка
         // людини (чи читача іншого періоду) починає ланцюжок заново.
+        // ✎ B179 L2b: прохід із НАСІННЯМ (правка комірок) — `OnCellsEditedAsync`: хук ставить власний перерахунок методологій
+        // джерела, а споживачів — уже його успіх. Прохід лише з міжперіодних джерел (його ставить `CrossPeriodFanOut`, зокрема
+        // сам `RecalculationJob`) — як у L2: власного перерахунку не ставить, тож петлі «перерахунок → формули → перерахунок» немає.
         if (completionHook is not null && documentId != 0)
         {
             var changedPeriods = writtenPeriods.Union(seedPeriods).Order().ToArray();
@@ -361,7 +364,10 @@ public sealed partial class FormulaRecalculationJob(
                     [documentId] = changedPeriods,
                     TemplateVersionIds = shared.TemplateVersionsOf(documentId, changedPeriods),
                 };
-                await completionHook.OnSucceededAsync(changed, sourceHop: 0, ct).ConfigureAwait(false);
+                await (seedPeriods.Count > 0
+                        ? completionHook.OnCellsEditedAsync(changed, ct)
+                        : completionHook.OnSucceededAsync(changed, sourceHop: 0, ct))
+                    .ConfigureAwait(false);
             }
         }
     }
