@@ -548,6 +548,7 @@ public sealed partial class DocumentVersionMigrationStore(
             long conflictCells = 0;
             long rowsCreated = 0;
             long instancesCreated = 0;
+            long skippedArchived = 0;
             var conflicts = new List<VersionMigrationAnchorConflict>();
             var targets = new List<VersionMigrationAnchorTarget>();
             await using (var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false))
@@ -558,6 +559,7 @@ public sealed partial class DocumentVersionMigrationStore(
                     conflictCells = reader.GetInt64(1);
                     rowsCreated = reader.GetInt64(2);
                     instancesCreated = reader.GetInt64(3);
+                    skippedArchived = reader.GetInt64(4);
                 }
 
                 await reader.NextResultAsync(ct).ConfigureAwait(false);
@@ -593,7 +595,10 @@ public sealed partial class DocumentVersionMigrationStore(
                 }
             }
 
-            return new VersionMigrationAnchorFill(copies, conflictCells, conflicts, rowsCreated, instancesCreated, targets);
+            return new VersionMigrationAnchorFill(copies, conflictCells, conflicts, rowsCreated, instancesCreated, targets)
+            {
+                SkippedArchived = skippedArchived,
+            };
         }
         finally
         {
@@ -2329,6 +2334,18 @@ public sealed partial class DocumentVersionMigrationStore(
           AND  NOT (NOT EXISTS (SELECT 1 FROM doc.TableInstance h WHERE h.PeriodKey = a.PeriodKey AND h.DocumentId = s.DocumentId)
                     AND EXISTS (SELECT 1 FROM arc.TableInstance x WHERE x.PeriodKey = a.PeriodKey AND x.DocumentId = s.DocumentId));
 
+        -- ⛔ B69 «архів незмінний» (рішення людини 13.11): той самий охоронець F-13, що й для @missingInst, — документ без
+        -- жодного гарячого екземпляра в якорі, але з arc.TableInstance, має заархівований якір. Для нього крок копії
+        -- пропускається ЦІЛКОМ (ні екземплярів, ні рядків, ні комірок) — пропуск, не відмова, як і для (a′). Рахується ДО
+        -- створення екземплярів (на заархівований документ воно однаково не пише).
+        DECLARE @archivedDocs TABLE (AnchorPeriod int NOT NULL, DocumentId bigint NOT NULL, PRIMARY KEY (AnchorPeriod, DocumentId));
+        INSERT @archivedDocs (AnchorPeriod, DocumentId)
+        SELECT a.PeriodKey, d.Id
+        FROM   @anchors a
+        CROSS JOIN @docs d
+        WHERE  NOT EXISTS (SELECT 1 FROM doc.TableInstance h WHERE h.PeriodKey = a.PeriodKey AND h.DocumentId = d.Id)
+          AND  EXISTS (SELECT 1 FROM arc.TableInstance x WHERE x.PeriodKey = a.PeriodKey AND x.DocumentId = d.Id);
+
         DECLARE @structInstances bigint = 0;
         IF @apply = 1
         BEGIN
@@ -2366,6 +2383,16 @@ public sealed partial class DocumentVersionMigrationStore(
         JOIN   doc.TableInstance ti ON ti.PeriodKey = i.PeriodKey AND ti.Id = i.Id
         LEFT JOIN @tableMap tm      ON tm.o = ti.TableDefId
         WHERE  tm.o IS NOT NULL OR EXISTS (SELECT 1 FROM @tableMap x WHERE x.n = ti.TableDefId);
+
+        -- B69: документи із заархівованим якорем (× рік), у яких крок мав би джерело (екземпляри пізніших місяців), —
+        -- у звіт (NonMonthSkippedArchived), а їхні місяці — геть із кроку.
+        DECLARE @skippedArchived bigint =
+            (SELECT COUNT_BIG(*) FROM (SELECT DISTINCT mi.AnchorPeriod, mi.DocumentId
+                                       FROM   @monthInst mi
+                                       JOIN   @archivedDocs ad ON ad.AnchorPeriod = mi.AnchorPeriod AND ad.DocumentId = mi.DocumentId) z);
+        DELETE mi
+        FROM   @monthInst mi
+        WHERE  EXISTS (SELECT 1 FROM @archivedDocs ad WHERE ad.AnchorPeriod = mi.AnchorPeriod AND ad.DocumentId = mi.DocumentId);
 
         DECLARE @cand TABLE (
             DocumentId bigint NOT NULL, CopyId bigint NOT NULL, TableDefId int NOT NULL, RowKey nvarchar(100) NOT NULL,
@@ -2465,7 +2492,8 @@ public sealed partial class DocumentVersionMigrationStore(
             SELECT CAST(ISNULL(SUM(CASE WHEN Kinds = 1 THEN 1 ELSE 0 END), 0) AS bigint) AS Copies,
                    CAST(ISNULL(SUM(CASE WHEN Kinds > 1 THEN 1 ELSE 0 END), 0) AS bigint) AS Conflicts,
                    @rc AS RowsCreated,
-                   @ic AS InstancesCreated
+                   @ic AS InstancesCreated,
+                   @skippedArchived AS SkippedArchived
             FROM   @groups;
 
             SELECT c.DocumentId, c.TableDefId, c.RowKey, c.ColumnDefId, c.PeriodKey,

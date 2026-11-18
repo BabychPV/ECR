@@ -570,28 +570,9 @@ public sealed partial class DocumentVersionMigrationTests
         // `NOT (1 = 0 AND ...` — екземпляр таблиці сценарію створено в якорі, тест червоний. Немісячних значень у місяцях
         // немає (C2 травня прибрано), щоб крок копії не створював нічого сам.
         var y = await ArrangeYearAsync(targetMonths: 12).ConfigureAwait(true);
-        var instanceId = y.Doc.TableInstanceId;
         try
         {
-            await using (var db = y.Builder.CreateContext())
-            {
-                var sourceC2 = y.Doc.ColumnDefIds[1];
-                await db.Database.ExecuteSqlInterpolatedAsync($"""
-                    DELETE FROM doc.CellValue WHERE ColumnDefId = {sourceC2};
-                    DELETE cv FROM doc.CellValue cv JOIN doc.TableRow r ON r.PeriodKey = cv.PeriodKey AND r.Id = cv.TableRowId
-                     WHERE r.PeriodKey = {YearAnchor} AND r.TableInstanceId = {instanceId};
-                    DELETE cs FROM doc.CellStyle cs JOIN doc.TableRow r ON r.PeriodKey = cs.PeriodKey AND r.Id = cs.TableRowId
-                     WHERE r.PeriodKey = {YearAnchor} AND r.TableInstanceId = {instanceId};
-                    DELETE fo FROM doc.CellFormulaOverride fo JOIN doc.TableRow r ON r.PeriodKey = fo.PeriodKey AND r.Id = fo.TableRowId
-                     WHERE r.PeriodKey = {YearAnchor} AND r.TableInstanceId = {instanceId};
-                    DELETE FROM doc.TableRow WHERE PeriodKey = {YearAnchor} AND TableInstanceId = {instanceId};
-                    DELETE FROM doc.TableInstance WHERE PeriodKey = {YearAnchor} AND Id = {instanceId};
-                    INSERT arc.TableInstance (PeriodKey, Id, DocumentId, TableDefId, CreatedAt, ModifiedAt)
-                    VALUES ({YearAnchor}, {instanceId}, {y.Doc.DocumentId}, {y.Doc.TableDefId}, SYSUTCDATETIME(), SYSUTCDATETIME());
-                    """).ConfigureAwait(true);
-                Assert.False(await db.TableInstances.AsNoTracking()
-                    .AnyAsync(t => t.PeriodKeyValue == YearAnchor && t.DocumentId == y.Doc.DocumentId).ConfigureAwait(true));
-            }
+            await ArchiveAnchorAsync(y, removeC2: true).ConfigureAwait(true);
 
             var (dry, applied, app) = await DryAndApplyAsync(y).ConfigureAwait(true);
             using (app)
@@ -606,14 +587,97 @@ public sealed partial class DocumentVersionMigrationTests
         }
         finally
         {
-            await using (var db = y.Builder.CreateContext())
-            {
-                await db.Database.ExecuteSqlInterpolatedAsync(
-                    $"DELETE FROM arc.TableInstance WHERE PeriodKey = {YearAnchor} AND DocumentId = {y.Doc.DocumentId}").ConfigureAwait(true);
-            }
-
+            await UnarchiveAnchorAsync(y).ConfigureAwait(true);
             await CleanupYearAsync(y).ConfigureAwait(true);
         }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-474")]
+    [Trait("Task", "LAND-YEAR-L3-STATIC")]
+    public async Task P4b_заархівований_якір_з_немісячними_значеннями_крок_копії_пропускає_документ_B69()
+    {
+        // ⛔ B69 «архів незмінний»: як P4, але в місяцях є що копіювати (C2 = 55 у травні й жовтні). Крок копії мусить
+        // пропустити документ цілком (0 екземплярів, 0 рядків, 0 комірок) і сказати про це (nonMonthSkippedArchived = 1);
+        // версія перемикається. Мутація: прибрати `DELETE mi FROM @monthInst mi WHERE EXISTS (@archivedDocs ...)` —
+        // крок копії створює екземпляр, рядки й комірку в заархівованому якорі, тест червоний.
+        var y = await ArrangeYearAsync(targetMonths: 12).ConfigureAwait(true);
+        try
+        {
+            await ArchiveAnchorAsync(y, removeC2: false).ConfigureAwait(true);
+            await PutC2Async(y, 209910, rowIndex: 0, 55m).ConfigureAwait(true);
+
+            var (dry, applied, app) = await DryAndApplyAsync(y).ConfigureAwait(true);
+            using (app)
+            {
+                foreach (var report in new[] { dry, applied })
+                {
+                    Assert.Equal(0, report.GetProperty("nonMonthCopiedToAnchor").GetInt64());
+                    Assert.Equal(0, report.GetProperty("nonMonthAnchorRowsCreated").GetInt64());
+                    Assert.Equal(0, report.GetProperty("anchorInstancesCreated").GetInt64());
+                    Assert.Equal(1, report.GetProperty("nonMonthSkippedArchived").GetInt64());
+                }
+            }
+
+            // Версія перемкнулась (DryAndApplyAsync), а в якорі документа — жодного гарячого екземпляра, рядка чи комірки.
+            await using var check = y.Builder.CreateContext();
+            Assert.False(await check.TableInstances.AsNoTracking()
+                .AnyAsync(t => t.PeriodKeyValue == YearAnchor && t.DocumentId == y.Doc.DocumentId).ConfigureAwait(true));
+            Assert.Equal(0, await check.Database
+                .SqlQuery<int>($"""
+                    SELECT COUNT(*) AS Value FROM doc.TableRow r
+                    WHERE r.PeriodKey = {YearAnchor}
+                      AND NOT EXISTS (SELECT 1 FROM doc.TableInstance ti WHERE ti.PeriodKey = r.PeriodKey AND ti.Id = r.TableInstanceId)
+                    """).SingleAsync().ConfigureAwait(true));
+            Assert.False(await check.CellValues.AsNoTracking()
+                .AnyAsync(c => c.PeriodKeyValue == YearAnchor && (c.ColumnDefId == y.TargetC2 || c.ColumnDefId == y.Doc.ColumnDefIds[1]))
+                .ConfigureAwait(true));
+        }
+        finally
+        {
+            await UnarchiveAnchorAsync(y).ConfigureAwait(true);
+            await CleanupYearAsync(y).ConfigureAwait(true);
+        }
+    }
+
+    /// <summary>
+    /// «Архівує» якір документа (F-13): прибирає гарячий екземпляр таблиці якоря з рядками й комірками і кладе рядок у
+    /// arc.TableInstance; <paramref name="removeC2"/> — ще й усі значення C2 (крок копії не має джерела).
+    /// </summary>
+    private static async Task ArchiveAnchorAsync(YearScenario y, bool removeC2)
+    {
+        var instanceId = y.Doc.TableInstanceId;
+        await using var db = y.Builder.CreateContext();
+        if (removeC2)
+        {
+            var sourceC2 = y.Doc.ColumnDefIds[1];
+            await db.Database.ExecuteSqlInterpolatedAsync($"DELETE FROM doc.CellValue WHERE ColumnDefId = {sourceC2};").ConfigureAwait(false);
+        }
+
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            DELETE cv FROM doc.CellValue cv JOIN doc.TableRow r ON r.PeriodKey = cv.PeriodKey AND r.Id = cv.TableRowId
+             WHERE r.PeriodKey = {YearAnchor} AND r.TableInstanceId = {instanceId};
+            DELETE cs FROM doc.CellStyle cs JOIN doc.TableRow r ON r.PeriodKey = cs.PeriodKey AND r.Id = cs.TableRowId
+             WHERE r.PeriodKey = {YearAnchor} AND r.TableInstanceId = {instanceId};
+            DELETE fo FROM doc.CellFormulaOverride fo JOIN doc.TableRow r ON r.PeriodKey = fo.PeriodKey AND r.Id = fo.TableRowId
+             WHERE r.PeriodKey = {YearAnchor} AND r.TableInstanceId = {instanceId};
+            DELETE FROM doc.TableRow WHERE PeriodKey = {YearAnchor} AND TableInstanceId = {instanceId};
+            DELETE FROM doc.TableInstance WHERE PeriodKey = {YearAnchor} AND Id = {instanceId};
+            INSERT arc.TableInstance (PeriodKey, Id, DocumentId, TableDefId, CreatedAt, ModifiedAt)
+            VALUES ({YearAnchor}, {instanceId}, {y.Doc.DocumentId}, {y.Doc.TableDefId}, SYSUTCDATETIME(), SYSUTCDATETIME());
+            """).ConfigureAwait(false);
+        Assert.False(await db.TableInstances.AsNoTracking()
+            .AnyAsync(t => t.PeriodKeyValue == YearAnchor && t.DocumentId == y.Doc.DocumentId).ConfigureAwait(false));
+    }
+
+    /// <summary>Прибирає рядок arc.TableInstance якоря, покладений <see cref="ArchiveAnchorAsync"/>.</summary>
+    private static async Task UnarchiveAnchorAsync(YearScenario y)
+    {
+        await using var db = y.Builder.CreateContext();
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"DELETE FROM arc.TableInstance WHERE PeriodKey = {YearAnchor} AND DocumentId = {y.Doc.DocumentId}").ConfigureAwait(false);
     }
 
     [Fact]

@@ -152,6 +152,11 @@ namespace Ecr.Application.Documents.VersionMigration;
 /// (оригінал і копії аркушів складу документа, з фіксованими рядками), щоб перерахунок року одразу після переносу їх
 /// заповнив, а річний перегляд їх показав без попереднього відкриття аркуша. <c>null</c> — перенос не є переходом на рік.
 /// </param>
+/// <param name="NonMonthSkippedArchived">
+/// ⛔ B69 «архів незмінний»: скільки ДОКУМЕНТІВ (× рік) крок якоря пропустив, бо їхній якір заархівовано (немає жодного
+/// гарячого екземпляра в якорі, є архівні): у них нічого не створюється й не копіюється — пропуск, не відмова. Рахуються
+/// лише документи, у яких крок мав джерело (екземпляри пізніших місяців року). <c>null</c> — перенос не є переходом на рік.
+/// </param>
 public sealed record DocumentVersionMigrationDto(
     long DocumentId,
     int ProjectId,
@@ -202,7 +207,8 @@ public sealed record DocumentVersionMigrationDto(
     IReadOnlyList<NonMonthConflictItem>? NonMonthConflicts = null,
     bool? NonMonthConflictsTruncated = null,
     long? NonMonthAnchorRowsCreated = null,
-    long? AnchorInstancesCreated = null);
+    long? AnchorInstancesCreated = null,
+    long? NonMonthSkippedArchived = null);
 
 /// <summary>
 /// ✎ LAND-YEAR L3 (B-static): комірка немісячної колонки, у якої якір року порожній, а місяці року не згодні
@@ -1853,7 +1859,8 @@ public sealed class MigrateDocumentVersionHandler(
             NonMonthConflicts: anchorFill.ConflictCells == 0 ? null : AnchorConflictItems(anchorFill, to),
             NonMonthConflictsTruncated: anchorFill.ConflictCells == 0 ? null : anchorFill.ConflictCells > anchorFill.Conflicts.Count,
             NonMonthAnchorRowsCreated: yearTransition ? anchorFill.RowsCreated : null,
-            AnchorInstancesCreated: yearTransition ? anchorFill.InstancesCreated : null);
+            AnchorInstancesCreated: yearTransition ? anchorFill.InstancesCreated : null,
+            NonMonthSkippedArchived: yearTransition ? anchorFill.SkippedArchived : null);
 
         return new PlannedMigration(
             dto, plan, foreignKeys, extendedPlan.Remap with { CollectionMappingIds = collectionPlan.RemapIds }, lookup.Rows,

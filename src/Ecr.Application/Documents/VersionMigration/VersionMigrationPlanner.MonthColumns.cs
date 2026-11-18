@@ -84,6 +84,12 @@ public sealed record VersionMigrationAnchorFill(
 {
     /// <summary>Кроку немає (не перехід на рік).</summary>
     public static VersionMigrationAnchorFill None { get; } = new(0, 0, []);
+
+    /// <summary>
+    /// ⛔ B69 «архів незмінний»: скільки документів (× рік) крок пропустив, бо їхній якір заархівовано (жодного гарячого
+    /// екземпляра в якорі, є <c>arc.TableInstance</c>) — і мали джерело в пізніших місяцях. Нічого в них не пишеться.
+    /// </summary>
+    public long SkippedArchived { get; init; }
 }
 
 /// <summary>Пара «документ × таблиця цільової версії × період якоря», куди пише крок якоря.</summary>
