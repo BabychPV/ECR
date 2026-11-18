@@ -167,6 +167,39 @@ public sealed class ParityDiffTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public void Рядок_відібраний_обома_але_без_результату_в_одного_шляху_це_розбіжність_а_не_пропуск()
+    {
+        var withOutcome = One(Row("R1", V("Y", 1m)));
+        var withoutOutcome = Side(["R1"]);
+
+        var oldMissing = Compare(withoutOutcome, withOutcome);
+        var scriptMissing = Compare(withOutcome, withoutOutcome);
+        var bothMissing = Compare(withoutOutcome, Side(["R1"]));
+
+        Assert.Contains(oldMissing.Mismatches, m => m is { Aspect: ParityAspect.Error, RowKey: "R1", Old: "no outcome", New: "outcome" });
+        Assert.Contains(scriptMissing.Mismatches, m => m is { Aspect: ParityAspect.Error, RowKey: "R1", Old: "outcome", New: "no outcome" });
+        // Жодна сторона не дала результату — це теж не збіг: порівняти нічого, і це видно.
+        Assert.Contains(bothMissing.Mismatches, m => m is { Aspect: ParityAspect.Error, RowKey: "R1" });
+        Assert.Equal(0, bothMissing.RowsCompared);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public void Прогін_без_жодного_порівняного_значення_не_вважається_доведеним()
+    {
+        var empty = new ParityRunReport(3, 0, 0, []);
+        var compared = new ParityRunReport(3, 2, 5, []);
+        var differing = new ParityRunReport(3, 2, 5, [new ParityMismatch("M", "1", 1, 1, 1, 1, null, ParityAspect.RowAll, null, null)]);
+
+        Assert.True(empty.IsEqual);
+        Assert.False(empty.IsProven);
+        Assert.False(new ParityRunReport(0, 0, 0, []).IsProven);
+        Assert.True(compared.IsProven);
+        Assert.False(differing.IsProven);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
     public void Дубль_трійки_в_одній_зі_сторін_видно()
     {
         var report = Compare(One(Row("R1", V("Y", 1m))), One(Row("R1", V("Y", 1m), V("Y", 1m))));
