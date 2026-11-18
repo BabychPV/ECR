@@ -1949,6 +1949,33 @@ public sealed record CurrentResultFilter(
 > стеля 50 000 тепер діє на відфільтрований набір (документ з багатьма чужими числами більше не дає 422 на зрізі).
 
 ```csharp
+// src/Ecr.Application/Ports/IScriptRuntimeStore.cs  (MS, METHODOLOGY-SCRIPT-PLAN §13.1, §13.9)
+public interface IScriptRuntimeStore
+{
+    // коди шаблонів за версіями шаблонів (для rows from Шаблон.Таблиця)
+    public Task<IReadOnlyDictionary<int, string>> GetTemplateCodesAsync(IReadOnlyCollection<int> templateVersionIds, CancellationToken ct);
+
+    // коди таблиць, які читають опубліковані версії-скрипти методологій (calc.MethodologyReadTable)
+    public Task<IReadOnlyList<string>> GetReadTableCodesAsync(IReadOnlyCollection<int> methodologyIds, CancellationToken ct);
+
+    // транзитивні замикання за calc.MethodologyDependency: до джерел результатів і до читачів результатів
+    public Task<IReadOnlyList<int>> GetSourceClosureAsync(IReadOnlyCollection<int> methodologyIds, CancellationToken ct);
+    public Task<IReadOnlyList<int>> GetReaderClosureAsync(IReadOnlyCollection<int> methodologyIds, CancellationToken ct);
+
+    // читачі таблиць (код таблиці + методологія) і всі ребра залежностей — для перерахунку (RecalculationJob.BindingsAsync)
+    public Task<IReadOnlyList<ReadTableReader>> GetReadersOfTablesAsync(IReadOnlyCollection<string> tableCodes, CancellationToken ct);
+    public Task<IReadOnlyList<MethodologyEdge>> GetDependencyEdgesAsync(CancellationToken ct);
+
+    // таблиці, до яких активно прив'язані виходи методологій
+    public Task<IReadOnlyList<int>> GetBoundTableDefIdsAsync(IReadOnlyCollection<int> methodologyIds, CancellationToken ct);
+}
+```
+
+> MS: порт для рушія скриптів і застарілості (нова таблиця `calc.MethodologyReadTable`, ребра `calc.MethodologyDependency`).
+> `ICalculationResultStore.ReadRunAsync` читає результати КОНКРЕТНОГО прогону (методологія-читач бачить результат
+> джерела з того самого прогону); реалізація за замовчуванням порожня.
+
+```csharp
 // src/Ecr.Application/Ports/ICalculationYearReader.cs  (CALC-RESULTS: «Calculation results» — усі місяці року)
 public interface ICalculationYearReader
 {
