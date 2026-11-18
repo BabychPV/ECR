@@ -506,6 +506,7 @@ public sealed class MigrationDbTests(SqlServerFixture sql)
         await using var _ = db;
         using var package = JsonDocument.Parse(await File.ReadAllTextAsync(packagePath));
         Assert.Equal("ecr-methodology-script-package", package.RootElement.GetProperty("format").GetString());
+        Assert.Equal(2, package.RootElement.GetProperty("formatVersion").GetInt32());
         var entries = package.RootElement.GetProperty("entries").EnumerateArray().ToList();
         Assert.Equal(["MsLib", "MsMain"], entries.Select(e => e.GetProperty("methodologyCode").GetString()));
 

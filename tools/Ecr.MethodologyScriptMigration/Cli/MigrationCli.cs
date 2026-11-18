@@ -618,5 +618,5 @@ public sealed record ScriptPackage(string Format, int FormatVersion, IReadOnlyLi
     public const string FormatName = "ecr-methodology-script-package";
 
     /// <summary>Поточна версія формату.</summary>
-    public const int CurrentVersion = 1;
+    public const int CurrentVersion = Ecr.Application.Calculations.Scripting.Migration.Fingerprint.FormatVersion;
 }
