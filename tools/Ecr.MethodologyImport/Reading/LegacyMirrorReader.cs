@@ -31,12 +31,29 @@ public sealed record LegacyConstantRow(
     string? Unit,
     string RowId);
 
+/// <summary>Рядок дзеркала <c>AF_EmissionCalculationWork_Rules</c>: правило відбору рядків таблиці для методології.</summary>
+public sealed record LegacyRuleRow(
+    string? Methodology,
+    string? MethodologyVersion,
+    string? Name,
+    string? Version,
+    string? UniqueName,
+    bool IsAvailable,
+    DateTime? StartDate,
+    DateTime? EndDate,
+    string? Table,
+    string? Parameters,
+    string? Values,
+    string RowId);
+
 /// <summary>Лічильники читання дзеркал (що пропущено й чому).</summary>
 public sealed class LegacyMirrorStats
 {
     public long FormulaRows { get; internal set; }
 
     public long ConstantRows { get; internal set; }
+
+    public long RuleRows { get; internal set; }
 
     /// <summary>Рядки без коду методології/версії/імені — не потрапляють у модель.</summary>
     public long SkippedRows { get; internal set; }
@@ -65,7 +82,8 @@ public static class LegacyMirrorReader
         IEnumerable<LegacyFormulaRow> formulas,
         IEnumerable<LegacyConstantRow> constants,
         TimeZoneInfo timeZone,
-        string? onlyMethodology = null)
+        string? onlyMethodology = null,
+        IEnumerable<LegacyRuleRow>? rules = null)
     {
         ArgumentNullException.ThrowIfNull(formulas);
         ArgumentNullException.ThrowIfNull(constants);
@@ -139,6 +157,40 @@ public static class LegacyMirrorReader
                 $"sql:AF_Constants/{row.RowId}"));
         }
 
+        var ruleDefs = new List<RuleDef>();
+        foreach (var row in rules ?? [])
+        {
+            stats.RuleRows++;
+            var (m, mv, name, ver) = (T(row.Methodology), T(row.MethodologyVersion), T(row.Name), T(row.Version));
+            if (m.Length == 0 || mv.Length == 0 || name.Length == 0)
+            {
+                stats.SkippedRows++;
+                continue;
+            }
+
+            if (Skip(m, onlyMethodology))
+            {
+                continue;
+            }
+
+            var table = T(row.Table);
+            var (conditions, problem) = ParseConditions(T(row.Parameters), T(row.Values), table);
+            ruleDefs.Add(new RuleDef(
+                m, mv, name, ver.Length == 0 ? "V1" : ver, T(row.UniqueName), table, conditions,
+                row.IsAvailable,
+                Utc(row.StartDate, timeZone), Utc(row.EndDate, timeZone),
+                problem,
+                $"sql:AF_EmissionCalculationWork_Rules/{row.RowId}"));
+        }
+
+        ruleDefs = ruleDefs
+            .OrderBy(r => r.Methodology, StringComparer.Ordinal)
+            .ThenBy(r => r.MethodologyVersion, StringComparer.Ordinal)
+            .ThenBy(r => r.Name, StringComparer.Ordinal)
+            .ThenBy(r => r.Version, StringComparer.Ordinal)
+            .ThenBy(r => r.Path, StringComparer.Ordinal)
+            .ToList();
+
         buildStats.TrimmedFields = stats.TrimmedFields;
         formulaDefs = formulaDefs
             .OrderBy(f => f.Methodology, StringComparer.Ordinal)
@@ -159,9 +211,57 @@ public static class LegacyMirrorReader
             .GroupBy(f => f.Key, StringComparer.Ordinal)
             .Sum(g => g.Count() - 1);
 
-        var model = new MethodologyModel { Formulas = formulaDefs, Constants = constantDefs, BuildStats = buildStats };
+        var model = new MethodologyModel { Formulas = formulaDefs, Constants = constantDefs, Rules = ruleDefs, BuildStats = buildStats };
         var readStats = new AfReadStats { Elements = formulaDefs.Count + constantDefs.Count };
         return (model, readStats, stats);
+    }
+
+    /// <summary>Розбір <c>RuleArg_Parameters</c> / <c>RuleArg_Values</c>: списки через «;» (кінцевий «;» порожнього елемента не дає).</summary>
+    /// <remarks>
+    /// <c>*</c> у параметрах — «уся таблиця» (умов немає). Кількість параметрів і значень мусить збігатися, інакше пари
+    /// не відновити (стара система зіставляла їх за позицією): рядок позначається <c>Problem</c>, умови не вгадуються.
+    /// </remarks>
+    internal static (IReadOnlyList<RuleCondition> Conditions, string? Problem) ParseConditions(string parameters, string values, string table)
+    {
+        if (table.Length == 0)
+        {
+            return ([], "noTable");
+        }
+
+        if (parameters.Length == 0)
+        {
+            return ([], "noParameters");
+        }
+
+        if (parameters == "*")
+        {
+            return ([], null);
+        }
+
+        var names = SplitList(parameters);
+        var vals = SplitList(values);
+        if (names.Count != vals.Count)
+        {
+            return ([], string.Create(CultureInfo.InvariantCulture, $"parameterValueCountMismatch:{names.Count}/{vals.Count}"));
+        }
+
+        if (names.Any(n => n.Length == 0 || n == "*"))
+        {
+            return ([], "emptyOrWildcardParameterInList");
+        }
+
+        return ([.. names.Select((n, i) => new RuleCondition(n, vals[i]))], null);
+    }
+
+    private static List<string> SplitList(string text)
+    {
+        var parts = text.Split(';').Select(p => p.Trim()).ToList();
+        if (parts.Count > 0 && parts[^1].Length == 0)
+        {
+            parts.RemoveAt(parts.Count - 1);
+        }
+
+        return parts;
     }
 
     private static bool Skip(string methodology, string? only)

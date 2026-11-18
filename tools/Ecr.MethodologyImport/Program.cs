@@ -26,7 +26,10 @@ if (args.Length < 2 || args[0] is not ("analyze" or "export" or "unresolved") ||
           Ecr.MethodologyImport unresolved <AF.xml> [--out unresolved.md] [--library Common]
 
         Джерело — AF XML (перший аргумент) АБО дзеркала SQL старої системи (AF_Formulas, AF_Constants) замість файла:
-          Ecr.MethodologyImport export --sql "<рядок з'єднання>" --out package.json [--timezone Asia/Atyrau] [--methodology <код>]
+          Ecr.MethodologyImport export --sql "<рядок з'єднання>" --out package.json [--rules-out rules.json] [--timezone Asia/Atyrau] [--methodology <код>]
+        --rules-out (лише --sql) додатково пише пакет правил рядків ecr-methodology-rules v1 з AF_EmissionCalculationWork_Rules
+        (умови «параметр = значення» і таблиця старої системи; Id колонок і довідників підставляє застосувальник проти шаблону).
+        Файл містить значення з прода — писати лише поза репозиторієм.
         --sql читає лише SELECT … WITH (NOLOCK) (намір ReadOnly, копія бази старої системи, не live) і складає ту саму
         модель, що й XML; дати дзеркала — локальний час майданчика, --timezone (за замовчуванням Asia/Atyrau) переводить
         їх у UTC-рядки AF. Далі — той самий аналіз, нормалізація й пакет.
@@ -53,6 +56,7 @@ var normalize = true;
 var top = 20;
 var library = MethodologyAnalyzer.DefaultLibrary;
 string? outFile = null;
+string? rulesOutFile = null;
 
 for (var i = sqlMode ? 3 : 2; i < args.Length; i++)
 {
@@ -76,6 +80,9 @@ for (var i = sqlMode ? 3 : 2; i < args.Length; i++)
             break;
         case "--out" when i + 1 < args.Length:
             outFile = args[++i];
+            break;
+        case "--rules-out" when i + 1 < args.Length && sqlMode:
+            rulesOutFile = args[++i];
             break;
         case "--timezone" when i + 1 < args.Length && sqlMode:
             siteTimeZone = args[++i];
@@ -121,11 +128,12 @@ try
         }
 
         var (formulaRows, constantRows) = LegacySqlMirrorSource.Read(sqlConnection!);
-        var (mirrorModel, readStats, mirrorStats) = LegacyMirrorReader.Build(formulaRows, constantRows, zone, onlyMethodology);
+        var ruleRows = LegacySqlMirrorSource.ReadRules(sqlConnection!);
+        var (mirrorModel, readStats, mirrorStats) = LegacyMirrorReader.Build(formulaRows, constantRows, zone, onlyMethodology, ruleRows);
         size = 0;
         Console.Error.WriteLine(string.Create(
             CultureInfo.InvariantCulture,
-            $"Дзеркала: рядків формул {mirrorStats.FormulaRows}, констант {mirrorStats.ConstantRows}, пропущено {mirrorStats.SkippedRows}."));
+            $"Дзеркала: рядків формул {mirrorStats.FormulaRows}, констант {mirrorStats.ConstantRows}, правил {mirrorStats.RuleRows}, пропущено {mirrorStats.SkippedRows}."));
         (model, report) = AnalyzeCommand.Analyze(mirrorModel, readStats, library, normalize);
     }
     else
@@ -164,6 +172,20 @@ if (command == "export")
         }
 
         return HasBlockers;
+    }
+
+    if (rulesOutFile is not null)
+    {
+        var rulesPackage = MethodologyRulesPackage.From(model);
+        File.WriteAllText(rulesOutFile, rulesPackage.ToJson() + "\n", new UTF8Encoding(false));
+        var t = rulesPackage.Totals;
+        Console.Out.WriteLine(string.Create(
+            CultureInfo.InvariantCulture,
+            $"Правила {MethodologyRulesPackage.FormatName} v{MethodologyRulesPackage.CurrentVersion} записано: правил {t.Rules} (доступних {t.Available}, недоступних {t.Unavailable}; «уся таблиця» {t.CatchAll}, умовних {t.Conditional}), таблиць {t.Tables}, методологій {t.Methodologies}, проблем {t.Problems}."));
+        foreach (var kind in rulesPackage.Problems.GroupBy(p => p.Kind, StringComparer.Ordinal).OrderBy(g => g.Key, StringComparer.Ordinal))
+        {
+            Console.Out.WriteLine(string.Create(CultureInfo.InvariantCulture, $"  проблема {kind.Key}: {kind.Count()}"));
+        }
     }
 
     var package = MethodologyPackage.From(model, report, library);

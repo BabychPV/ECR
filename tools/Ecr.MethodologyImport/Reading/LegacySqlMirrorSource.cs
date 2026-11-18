@@ -19,6 +19,35 @@ public static class LegacySqlMirrorSource
         "CInfo_StartDate, CInfo_EndDate, CInfo_Unit, CONVERT(nvarchar(36), ID) " +
         "FROM dbo.AF_Constants WITH (NOLOCK)";
 
+    private const string RulesSql =
+        "SELECT MInfo_Name, MInfo_Version, RInfo_Name, RInfo_Version, RInfo_UniqueName, RInfo_IsAvailable, " +
+        "RInfo_StartDate, RInfo_EndDate, RuleArg_TableLandFromDB, RuleArg_Parameters, RuleArg_Values, CONVERT(nvarchar(36), ID) " +
+        "FROM dbo.AF_EmissionCalculationWork_Rules WITH (NOLOCK)";
+
+    /// <summary>Правила рядків (<c>AF_EmissionCalculationWork_Rules</c>): лише SELECT, ReadOnly.</summary>
+    public static IReadOnlyList<LegacyRuleRow> ReadRules(string connectionString)
+    {
+        var builder = new SqlConnectionStringBuilder(connectionString)
+        {
+            ApplicationIntent = ApplicationIntent.ReadOnly,
+            ApplicationName = "Ecr.MethodologyImport (read-only)",
+        };
+
+        using var connection = new SqlConnection(builder.ConnectionString);
+        connection.Open();
+        var rules = new List<LegacyRuleRow>();
+        using var command = new SqlCommand(RulesSql, connection) { CommandTimeout = 300 };
+        using var r = command.ExecuteReader();
+        while (r.Read())
+        {
+            rules.Add(new LegacyRuleRow(
+                Str(r, 0), Str(r, 1), Str(r, 2), Str(r, 3), Str(r, 4), !r.IsDBNull(5) && r.GetBoolean(5),
+                Date(r, 6), Date(r, 7), Str(r, 8), Str(r, 9), Str(r, 10), Str(r, 11) ?? string.Empty));
+        }
+
+        return rules;
+    }
+
     public static (IReadOnlyList<LegacyFormulaRow> Formulas, IReadOnlyList<LegacyConstantRow> Constants) Read(string connectionString)
     {
         var builder = new SqlConnectionStringBuilder(connectionString)

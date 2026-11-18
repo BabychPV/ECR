@@ -14,13 +14,18 @@
 
     Packing into documents: the rows of one legacy EFID (an event frame = one report of one facility for one month)
     always stay together; EFIDs of a month are packed first-fit into documents so that no table of a document-month
-    exceeds -MaxRowsPerDocTable (template row limit MaxDynamicRows; default 900, below 1000). Document numbers are
-    global per run (LAND-PROD-1..N), the same EFID set per month goes to the same document as far as capacity allows.
+    exceeds ITS OWN capacity: min(-MaxRowsPerDocTable, the template row limit MaxDynamicRows of the template table that
+    the legacy table maps to - T5_08 holds 100, T3_00 1000; a table without a limit uses -MaxRowsPerDocTable). One shared
+    limit of 900 let 154 rows of T5_08 be refused by the loader (ECR-ROW-0409). An EFID that alone exceeds a table's
+    capacity cannot be split (an event frame stays together): it is counted in the output ("alone over capacity").
+    Document numbers are global per run (LAND-PROD-1..N), the same EFID set per month goes to the same document as far
+    as capacity allows.
 .PARAMETER SourceDatabase   database of the LOCAL copy of the legacy system (default EcrLegacyProd)
 .PARAMETER Server           local SQL Server (default localhost)
 .PARAMETER OutDir           directory for LAND-PROD-<n>.json (must be OUTSIDE the repository)
 .PARAMETER Tables           AF table names to export (default: every AF_Air_Land_* table that is not *_History)
-.PARAMETER MaxRowsPerDocTable  capacity of one table of one document-month (default 900)
+.PARAMETER MaxRowsPerDocTable  upper bound of the capacity of one table of one document-month (default 900); the template limit of the table lowers it
+.PARAMETER ModelPath        land-template.model.json that gives the per-table limits (default: the model of the repository)
 .PARAMETER Year             only this year of Time (default 2026)
 .PARAMETER Summary          optional JSON file with the counters (documents, rows per table), no values
 #>
@@ -31,6 +36,7 @@ param(
     [Parameter(Mandatory)][string]$OutDir,
     [string[]]$Tables = @(),
     [int]$MaxRowsPerDocTable = 900,
+    [string]$ModelPath,
     [int]$Year = 2026,
     [string]$Summary
 )
@@ -53,20 +59,34 @@ function Invoke-Sql([string]$Text) {
     $cmd = $conn.CreateCommand(); $cmd.CommandText = $Text; $cmd.CommandTimeout = 600
     return $cmd
 }
+$tableList = $null
 if ($Tables.Count -eq 0) {
     $rd = (Invoke-Sql "SELECT name FROM sys.tables WHERE name LIKE 'AF[_]Air[_]Land[_]%' AND name NOT LIKE '%[_]History' ORDER BY name").ExecuteReader()
     $list = New-Object System.Collections.ArrayList
     while ($rd.Read()) { [void]$list.Add([string]$rd.GetString(0)) }
-    $rd.Close(); $Tables = @($list)
+    $rd.Close(); $tableList = @($list)
 }
-foreach ($t in $Tables) { if ($t -notmatch '^AF_Air_Land_[A-Za-z0-9_]+$') { throw "Table name '$t' is not an AF_Air_Land_* table." } }
+if ($null -eq $tableList) { $tableList = @($Tables) }
+foreach ($t in $tableList) { if ($t -notmatch '^AF_Air_Land_[A-Za-z0-9_]+$') { throw "Table name '$t' is not an AF_Air_Land_* table." } }
+# capacity of every table: the template limit (MaxDynamicRows) of the template table the legacy table maps to
+. (Join-Path $PSScriptRoot 'LandLegacyRules.Lib.ps1')
+if ([string]::IsNullOrWhiteSpace($ModelPath)) { $ModelPath = Join-Path $repoRoot 'docs\delivery\reference-data\land-template\land-template.model.json' }
+$model = Get-Content -LiteralPath $ModelPath -Raw -Encoding UTF8 | ConvertFrom-Json
+$tmap = Get-LandLegacyTableMap -Model $model -LegacyTables $tableList
+$limitOf = @{}
+foreach ($sh in @($model.sheets)) { foreach ($tb in @($sh.tables)) { if (-not $limitOf.ContainsKey([string]$tb.code) -and $null -ne $tb.maxRows) { $limitOf[[string]$tb.code] = [int]$tb.maxRows } } }
+$cap = @{}
+foreach ($t in $tableList) {
+    $tc = $tmap[$t]
+    $cap[$t] = if ($tc -and $limitOf.ContainsKey($tc)) { [Math]::Min($MaxRowsPerDocTable, $limitOf[$tc]) } else { $MaxRowsPerDocTable }
+}
 $skip = @('EFID', 'ATID', 'ModifiedTime', 'ModifiedBy', 'Time')
 $inv = [Globalization.CultureInfo]::InvariantCulture
 
 # table -> month -> efid -> rows (list of ordered dictionaries); rows already ordered by EFID, ID
 $data = @{}
 $counters = [ordered]@{}
-foreach ($t in $Tables) {
+foreach ($t in $tableList) {
     $q = "SELECT * FROM dbo.[$t] WITH (NOLOCK) WHERE Time >= '$Year-01-01' AND Time < '$($Year + 1)-01-01' ORDER BY EFID, Time"
     $r = (Invoke-Sql $q).ExecuteReader()
     $colNames = @(0..($r.FieldCount - 1) | ForEach-Object { $r.GetName($_) })
@@ -98,6 +118,7 @@ $conn.Close()
 
 # packing: per month, EFIDs first-fit into documents
 $months = @($data.Values | ForEach-Object { $_.Keys } | Sort-Object -Unique)
+$alone = @{}        # table -> EFIDs whose own rows exceed the capacity of the table
 $docOf = @{}        # month|efid -> doc number
 $load = @{}         # doc|month|table -> rows
 $maxDoc = 0
@@ -105,16 +126,17 @@ foreach ($m in $months) {
     $efids = @($data.Keys | ForEach-Object { if ($data[$_].ContainsKey($m)) { $data[$_][$m].Keys } } | Sort-Object -Unique)
     foreach ($e in $efids) {
         $need = @{}
-        foreach ($t in $Tables) { if ($data.ContainsKey($t) -and $data[$t].ContainsKey($m) -and $data[$t][$m].Contains($e)) { $need[$t] = $data[$t][$m][$e].Count } }
+        foreach ($t in $tableList) { if ($data.ContainsKey($t) -and $data[$t].ContainsKey($m) -and $data[$t][$m].Contains($e)) { $need[$t] = $data[$t][$m][$e].Count } }
         $placed = 0
         for ($d = 1; $d -le ($maxDoc + 1); $d++) {
             $fits = $true
-            foreach ($t in $need.Keys) { if (([int]$load["$d|$m|$t"] + $need[$t]) -gt $MaxRowsPerDocTable -and [int]$load["$d|$m|$t"] -gt 0) { $fits = $false } }
+            foreach ($t in $need.Keys) { if (([int]$load["$d|$m|$t"] + $need[$t]) -gt $cap[$t] -and [int]$load["$d|$m|$t"] -gt 0) { $fits = $false } }
             if ($fits) { $placed = $d; break }
         }
         if ($placed -eq 0) { $placed = $maxDoc + 1 }
         if ($placed -gt $maxDoc) { $maxDoc = $placed }
         $docOf["$m|$e"] = $placed
+        foreach ($t in $need.Keys) { if ($need[$t] -gt $cap[$t]) { $alone[$t] = 1 + [int]$alone[$t] } }
         foreach ($t in $need.Keys) { $load["$placed|$m|$t"] = [int]$load["$placed|$m|$t"] + $need[$t] }
     }
 }
@@ -126,7 +148,7 @@ for ($d = 1; $d -le $maxDoc; $d++) {
     $rowsInDoc = 0
     foreach ($m in $months) {
         $pm = [ordered]@{}
-        foreach ($t in $Tables) {
+        foreach ($t in $tableList) {
             if (-not ($data.ContainsKey($t) -and $data[$t].ContainsKey($m))) { continue }
             $rows = New-Object System.Collections.ArrayList
             $cols = @{}
@@ -147,6 +169,8 @@ for ($d = 1; $d -le $maxDoc; $d++) {
     Write-Host ("LAND-PROD-{0}: periods {1}, rows {2}" -f $d, $periods.Count, $rowsInDoc)
 }
 Write-Host ("Documents: {0}; rows per table: {1}" -f $maxDoc, (($counters.Keys | Where-Object { $counters[$_] -gt 0 } | ForEach-Object { "$_=$($counters[$_])" }) -join ', '))
+$capOut = [ordered]@{}; foreach ($t in ($tableList | Sort-Object)) { if ($counters[$t] -gt 0) { $capOut[$t] = $cap[$t] } }
+foreach ($t in ($alone.Keys | Sort-Object)) { Write-Host ("  {0}: {1} EFID(s) alone over capacity {2} (cannot be split)" -f $t, $alone[$t], $cap[$t]) }
 if ($Summary) {
-    [IO.File]::WriteAllText($Summary, ([ordered]@{ documents = $docStats; tables = $counters } | ConvertTo-Json -Depth 5), $utf8)
+    [IO.File]::WriteAllText($Summary, ([ordered]@{ documents = $docStats; tables = $counters; capacity = $capOut; efidsAloneOverCapacity = $alone } | ConvertTo-Json -Depth 5), $utf8)
 }

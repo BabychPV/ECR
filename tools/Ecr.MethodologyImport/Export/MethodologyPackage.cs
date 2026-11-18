@@ -36,7 +36,8 @@ public sealed record PackageVersion(
     string Version,
     IReadOnlyList<PackageFormula> Formulas,
     IReadOnlyList<PackageConstant> Constants,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] PackageCategoryRule? CategoryRule = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] PackageCategoryRule? CategoryRule = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Level = null);
 
 /// <summary>Правило категорії версії (вираз діалекту Methodology); у пакеті — вузол <c>categoryRule</c>.</summary>
 public sealed record PackageCategoryRule(string Expression);
@@ -69,6 +70,11 @@ public sealed record MethodologyPackage(
 
     /// <summary>Row-формули Land: категорію рядка задають три формули; автовизначення за замиканням правила немає.</summary>
     public const string RowScope = "Row";
+
+    /// <summary>Методологія-модуль (рівень Module): HSE400 рахує <c>MonthColumnArgumentsModule</c>, а не правила рядків; решта AF - Configuration.</summary>
+    public const string ModuleMethodology = "HSE400";
+
+    public const string ModuleLevel = "Module";
 
     public const string CategoryRuleFormula = "ECW_Location";
 
@@ -118,7 +124,8 @@ public sealed record MethodologyPackage(
                         CategoryRuleOf(
                             formulas[(g.Key, v)],
                             hasCategoryConstants: constants[(g.Key, v)]
-                                .Any(c => c.Category.Length > 0 && !string.Equals(c.Category, library, StringComparison.Ordinal)))))
+                                .Any(c => c.Category.Length > 0 && !string.Equals(c.Category, library, StringComparison.Ordinal))),
+                        string.Equals(g.Key, ModuleMethodology, StringComparison.Ordinal) ? ModuleLevel : null))
                     .ToList()))
             .ToList();
 

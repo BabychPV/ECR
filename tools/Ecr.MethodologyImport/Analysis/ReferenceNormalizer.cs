@@ -102,6 +102,7 @@ public static class ReferenceNormalizer
         {
             Formulas = formulas,
             Constants = model.Constants,
+            Rules = model.Rules,
             BuildStats = model.BuildStats,
         };
         return (normalized, applied);
