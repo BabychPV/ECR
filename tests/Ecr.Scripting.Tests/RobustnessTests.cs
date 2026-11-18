@@ -235,6 +235,16 @@ public sealed class RobustnessTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Межа_розгорнутих_операторів_точна_2000_проходить_2001_ні()
+    {
+        string Text(int n) => R + "foreach N in (" + string.Join(",", Enumerable.Range(1, n)) + ") { var v{N} = N; }";
+
+        Assert.Empty(T.Compile(Text(ScriptParser.MaxExpandedStatements)).Diagnostics);
+        Assert.Contains(T.Compile(Text(ScriptParser.MaxExpandedStatements + 1)).Diagnostics, d => d.Code == ScriptDiagnosticCodes.ForeachTooLarge);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
     public void Помірне_розгортання_foreach_за_межами_не_зачіпається()
     {
         var c = T.WithRows("foreach A in (1,2,3,4,5,6,7,8,9,10,11,12) { foreach B in (1,2,3,4,5,6,7,8,9,10,11,12) { foreach C in (1,2,3,4,5,6,7,8,9,10,11,12) { var v{A}_{B}_{C} = 1; } } }");

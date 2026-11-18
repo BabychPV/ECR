@@ -49,6 +49,22 @@ public sealed class StepDependenciesTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Залежності_проходять_крізь_значення_й_умову_агрегату()
+    {
+        var compiled = T.WithRows(
+            "table G = T2;"
+            + "var lim = row.X;"
+            + "var k = row.Y;"
+            + "var unused = 1;"
+            + "output c : one = Sum(G.A * k where G.B > lim);");
+        Assert.True(compiled.Diagnostics.Count == 0, T.Describe(compiled));
+        var s = compiled.Script!;
+
+        Assert.Equal(["k", "lim"], s.StepDependencies["c"].Order());
+        Assert.DoesNotContain("unused", s.StepDependencies["c"]);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
     public void Скрипт_рівня_Module_компілюється_без_rows_а_звичайний_ні()
     {
         const string text = "var a = row.GCV_X_T_A * 2;\noutput X_T_B : one = a + 1;\n";
