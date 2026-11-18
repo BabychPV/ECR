@@ -9,7 +9,9 @@ namespace Ecr.Calculations.Scripting.Parity;
 /// <param name="VersionId">Версія.</param>
 /// <param name="Version">Номер версії.</param>
 /// <param name="ScriptText">Тіньовий текст.</param>
-public sealed record ParityVersion(int MethodologyId, string MethodologyCode, int VersionId, string Version, string ScriptText);
+/// <param name="IsLibrary">Методологія-бібліотека: рядків і прив'язок не має, її доводять імпортери.</param>
+public sealed record ParityVersion(
+    int MethodologyId, string MethodologyCode, int VersionId, string Version, string ScriptText, bool IsLibrary = false);
 
 /// <summary>Екземпляр таблиці документа, до якої прив'язана методологія.</summary>
 /// <param name="DocumentId">Документ.</param>
@@ -37,6 +39,16 @@ public interface IParityTargetSource
     /// <param name="documentId">Лише цей документ; <c>null</c> — усі.</param>
     /// <param name="ct">Токен скасування.</param>
     public Task<IReadOnlyList<ParityInstance>> ListInstancesAsync(int methodologyId, long? documentId, CancellationToken ct);
+
+    /// <summary>
+    /// Опубліковані версії рушія <c>Formulas</c> (виведені з обігу рушій при виборі версії прив'язки не обирає), яких <see cref="ListShadowedVersionsAsync"/> не
+    /// повертає, тобто паритет їх не покриває: рівень <c>Module</c>, немає тіньового тексту, немає дати чинності.
+    /// Запис — «код версія: причина». За замовчуванням порожньо.
+    /// </summary>
+    /// <param name="methodologyCode">Лише ця методологія; <c>null</c> — усі.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<string>> ListUncoveredVersionsAsync(string? methodologyCode, CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<string>>([]);
 }
 
 /// <summary>
@@ -60,6 +72,7 @@ public sealed class ParityRunner(
     public async Task<ParityRunReport> RunAsync(string? methodologyCode, long? documentId, CancellationToken ct)
     {
         var mismatches = new List<ParityMismatch>();
+        var unproven = new List<string>();
         var compared = 0;
         var rows = 0;
         var values = 0;
@@ -68,6 +81,7 @@ public sealed class ParityRunner(
         foreach (var version in versions)
         {
             var resolved = new Dictionary<DateOnly, int?>();
+            var comparedForVersion = 0;
             var instances = await targets.ListInstancesAsync(version.MethodologyId, documentId, ct).ConfigureAwait(false);
             foreach (var instance in instances)
             {
@@ -98,12 +112,22 @@ public sealed class ParityRunner(
                     .CompareAsync(version.VersionId, version.ScriptText, instance.DocumentId, periodKey, instance.TableInstanceId, ct)
                     .ConfigureAwait(false);
                 compared++;
+                comparedForVersion++;
                 rows += report.RowsCompared;
                 values += report.ValuesCompared;
                 mismatches.AddRange(report.Mismatches);
             }
+
+            if (comparedForVersion == 0 && !version.IsLibrary)
+            {
+                unproven.Add(
+                    $"{version.MethodologyCode} {version.Version}: no table instance was compared "
+                    + "(no active binding with data, or the version is not the effective one on any document period)");
+            }
         }
 
-        return new ParityRunReport(compared, rows, values, mismatches);
+        unproven.AddRange(await targets.ListUncoveredVersionsAsync(methodologyCode, ct).ConfigureAwait(false));
+
+        return new ParityRunReport(compared, rows, values, mismatches, unproven);
     }
 }

@@ -137,10 +137,27 @@ public sealed record ParityReport(IReadOnlyList<ParityMismatch> Mismatches, int 
 /// <param name="RowsCompared">Скільки рядків порівняно.</param>
 /// <param name="ValuesCompared">Скільки значень порівняно.</param>
 /// <param name="Mismatches">Усі розбіжності.</param>
-public sealed record ParityRunReport(int Targets, int RowsCompared, int ValuesCompared, IReadOnlyList<ParityMismatch> Mismatches)
+/// <param name="Unproven">
+/// Версії, яких прогін НЕ довів: тіньова версія без жодного порівняного екземпляра, а також версії рушія <c>Formulas</c>,
+/// що паритет не покриває зовсім (рівень <c>Module</c>, без тіньового тексту, без дати чинності). Кожен запис — «код версія:
+/// причина». Бібліотеки сюди не потрапляють: їх доводять імпортери.
+/// </param>
+public sealed record ParityRunReport(
+    int Targets,
+    int RowsCompared,
+    int ValuesCompared,
+    IReadOnlyList<ParityMismatch> Mismatches,
+    IReadOnlyList<string>? Unproven = null)
 {
+    /// <summary>Версії, яких прогін не довів; ніколи не <c>null</c>.</summary>
+    public IReadOnlyList<string> UnprovenVersions => Unproven ?? [];
+
     /// <summary>
-    /// Розбіжностей немає. ⚠ Порожній прогін (<see cref="Targets"/> = 0) теж «без розбіжностей», але нічого не доводить.
+    /// Розбіжностей немає. ⚠ Порожній прогін (<see cref="Targets"/> = 0) теж «без розбіжностей», але нічого не доводить:
+    /// чесний підсумок — <see cref="IsProven"/>.
     /// </summary>
     public bool IsEqual => Mismatches.Count == 0;
+
+    /// <summary>Розбіжностей немає І щось справді порівняно (хоч одне значення).</summary>
+    public bool IsProven => Mismatches.Count == 0 && Targets > 0 && ValuesCompared > 0;
 }

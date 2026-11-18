@@ -245,6 +245,117 @@ public sealed class MigrationDbTests(SqlServerFixture sql)
         Assert.Equal(64, a.Length);
     }
 
+    /// <summary>Тимчасово змінює старий вміст MsMain V1 і повертає зміну назад.</summary>
+    private async Task<string> FingerprintWithChangeAsync(
+        SeedResult seed, Func<EcrDbContext, Task<Func<Task>>> change)
+    {
+        await using var write = MigrationCli.CreateContext(sql.ConnectionString, readOnly: false);
+        var revert = await change(write);
+        try
+        {
+            await using var read = MigrationCli.CreateContext(sql.ConnectionString, readOnly: true);
+            var loader = new VersionSourceLoader(read, MigrationCli.CreateFormulaEngine());
+            return Fingerprint.ComputeHex((await loader.LoadAsync(seed.MainV1Id, default)).Source);
+        }
+        finally
+        {
+            await revert();
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Відбиток_змінюється_від_списку_аргументів_формули()
+    {
+        var (seed, db, loader) = await OpenAsync();
+        await using var _ = db;
+        var before = Fingerprint.ComputeHex((await loader.LoadAsync(seed.MainV1Id, default)).Source);
+
+        var changed = await FingerprintWithChangeAsync(seed, async write =>
+        {
+            var mass = await write.MethodologyFormulas.SingleAsync(f => f.MethodologyVersionId == seed.MainV1Id && f.Code == "Mass");
+            var original = mass.ArgumentsCsv;
+            mass.SetArguments("@Qty?");
+            await write.SaveChangesAsync();
+            return async () =>
+            {
+                mass.SetArguments(original);
+                await write.SaveChangesAsync();
+            };
+        });
+
+        Assert.NotEqual(before, changed);
+        Assert.Equal(before, Fingerprint.ComputeHex((await loader.LoadAsync(seed.MainV1Id, default)).Source));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Відбиток_змінюється_від_зникнення_прив_язки_таблиці()
+    {
+        // Неактивна прив'язка на MS_T2 дає в тексті речення rows from MS_T2: її зникнення мусить розірвати пакет.
+        var (seed, db, loader) = await OpenAsync();
+        await using var _ = db;
+        var before = Fingerprint.ComputeHex((await loader.LoadAsync(seed.MainV1Id, default)).Source);
+
+        var changed = await FingerprintWithChangeAsync(seed, async write =>
+        {
+            var methodologyId = (await write.MethodologyVersions.SingleAsync(v => v.Id == seed.MainV1Id)).MethodologyId;
+            var binding = await write.CalculationBindings.SingleAsync(b => b.MethodologyId == methodologyId && !b.IsActive);
+            var (tableDefId, columnDefId) = (binding.TableDefId, binding.ColumnDefId);
+            write.CalculationBindings.Remove(binding);
+            await write.SaveChangesAsync();
+            return async () =>
+            {
+                var restored = new Ecr.Domain.Entities.Configuration.CalculationBinding(
+                    tableDefId, columnDefId, methodologyId, "Emission", "{}");
+                restored.Update("{}", false);
+                write.CalculationBindings.Add(restored);
+                await write.SaveChangesAsync();
+            };
+        });
+
+        Assert.NotEqual(before, changed);
+        Assert.Equal(before, Fingerprint.ComputeHex((await loader.LoadAsync(seed.MainV1Id, default)).Source));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Pack_відмовляє_якщо_джерело_змінилося_після_convert_і_якщо_немає_звіту_convert()
+    {
+        var (seed, db, _) = await OpenAsync();
+        await using var _ = db;
+        var dir = await ConvertAllAsync();
+        var packagePath = Path.Combine(TempDirectory(), "package.json");
+
+        await using (var write = MigrationCli.CreateContext(sql.ConnectionString, readOnly: false))
+        {
+            var mass = await write.MethodologyFormulas.SingleAsync(f => f.MethodologyVersionId == seed.MainV1Id && f.Code == "Mass");
+            var original = mass.ArgumentsCsv;
+            mass.SetArguments("@Qty?");
+            await write.SaveChangesAsync();
+            try
+            {
+                var stale = await RunAsync("pack", "--connection", sql.ConnectionString, "--in", dir, "--out", packagePath);
+
+                Assert.Equal(MigrationCli.Failures, stale.Code);
+                Assert.Contains("джерело змінилося після convert", stale.Error, StringComparison.Ordinal);
+                Assert.False(File.Exists(packagePath));
+            }
+            finally
+            {
+                mass.SetArguments(original);
+                await write.SaveChangesAsync();
+            }
+        }
+
+        File.Delete(Path.Combine(dir, "convert-report.json"));
+        var noReport = await RunAsync("pack", "--connection", sql.ConnectionString, "--in", dir, "--out", packagePath);
+
+        Assert.Equal(MigrationCli.Failures, noReport.Code);
+        Assert.Contains("convert-report.json", noReport.Error, StringComparison.Ordinal);
+        Assert.False(File.Exists(packagePath));
+    }
+
     // ---- convert ----
 
     [Fact]

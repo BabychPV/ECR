@@ -56,15 +56,17 @@ public static class MigrationCli
           Ecr.MethodologyScriptMigration convert --connection <рядок> --out <тека> [--methodology <код>]
           Ecr.MethodologyScriptMigration shadow  --connection <рядок> --in <тека> [--i-know-this-is-a-copy]
           Ecr.MethodologyScriptMigration pack    --connection <рядок> --in <тека> --out <package.json>
-          Ecr.MethodologyScriptMigration parity  --connection <рядок> --out <report.json> [--methodology <код>] [--document <id>]
+          Ecr.MethodologyScriptMigration parity  --connection <рядок> --out <report.json> [--methodology <код>] [--document <id>] [--allow-unproven]
 
         convert — для кожної версії рівня Configuration з рушієм Formulas пише <Код>/<Версія>.ecrs і convert-report.json.
         shadow  — записує тексти як тіньові (SetScript) у базу; лише в базу з "copy|test|upg|dev|stand" в імені
                   або з прапорцем --i-know-this-is-a-copy.
-        pack    — package.json: код методології, версія, дата чинності, текст, відбиток джерела.
+        pack    — package.json: код методології, версія, дата чинності, текст, відбиток джерела. Звіряє поточне джерело з
+                  відбитком у convert-report.json теки --in: змінилося після convert — версію не пакує.
         parity  — порівнює старий розрахунок із тіньовим скриптом на всіх документах і періодах копії, де версія чинна
-                  (нічого не пише в базу): звіт JSON + підсумок у консолі.
-        Коди виходу: 0 — гаразд (parity: 0 розбіжностей); 1 — є невдалі версії (parity: є розбіжності або нічого порівнювати);
+                  (нічого не пише в базу): звіт JSON + підсумок у консолі. Версії, яких паритет не довів (жодного порівняного
+                  екземпляра, рівень Module, немає тіньового тексту), перелічує й вважає невдачею, якщо немає --allow-unproven.
+        Коди виходу: 0 — гаразд (parity: 0 розбіжностей); 1 — є невдалі версії (parity: є розбіжності, нічого не порівняно чи є недоведені версії);
                      2 — помилка запуску чи середовища.
         """;
 
@@ -297,6 +299,7 @@ public static class MigrationCli
 
         var entries = new List<PackageEntry>();
         var failed = 0;
+        var convertFingerprints = await ReadConvertFingerprintsAsync(options.In!, ct).ConfigureAwait(false);
         foreach (var file in files)
         {
             ct.ThrowIfCancellationRequested();
@@ -310,12 +313,36 @@ public static class MigrationCli
 
             var text = await File.ReadAllTextAsync(file.FullPath, new UTF8Encoding(false), ct).ConfigureAwait(false);
             var loaded = await loader.LoadAsync(reference.VersionId, ct).ConfigureAwait(false);
+            var fingerprint = Fingerprint.ComputeHex(loaded.Source);
+
+            // Текст зроблено з джерела, що було на момент convert. Відбиток у пакеті — поточний; без звірки з convert зміна
+            // джерела між convert і pack дала б пакет зі старим текстом і «свіжим» відбитком, який apply пропустить.
+            if (convertFingerprints is null
+                || !convertFingerprints.TryGetValue(reference.VersionId, out var converted)
+                || string.IsNullOrEmpty(converted))
+            {
+                failed++;
+                await error.WriteLineAsync(
+                    $"  FAIL {file.RelativeName}: у convert-report.json теки --in немає відбитка цієї версії; "
+                    + "без нього не довести, що джерело не змінилося після convert.").ConfigureAwait(false);
+                continue;
+            }
+
+            if (!string.Equals(converted, fingerprint, StringComparison.OrdinalIgnoreCase))
+            {
+                failed++;
+                await error.WriteLineAsync(
+                    $"  FAIL {file.RelativeName}: джерело змінилося після convert (відбиток convert {converted}, зараз {fingerprint}); "
+                    + "виконайте convert заново.").ConfigureAwait(false);
+                continue;
+            }
+
             entries.Add(new PackageEntry(
                 reference.MethodologyCode,
                 reference.Version,
                 reference.EffectiveFrom?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
                 text,
-                Fingerprint.ComputeHex(loaded.Source)));
+                fingerprint));
         }
 
         if (failed > 0)
@@ -340,6 +367,27 @@ public static class MigrationCli
             .ConfigureAwait(false);
         await output.WriteLineAsync($"pack: у пакеті {package.Entries.Count} версій → {options.Out}").ConfigureAwait(false);
         return Ok;
+    }
+
+    /// <summary>Id версії → відбиток джерела з <c>convert-report.json</c> теки; <c>null</c> — звіту немає чи він не читається.</summary>
+    private static async Task<Dictionary<int, string?>?> ReadConvertFingerprintsAsync(string directory, CancellationToken ct)
+    {
+        var path = Path.Combine(directory, "convert-report.json");
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+
+        try
+        {
+            var json = await File.ReadAllTextAsync(path, new UTF8Encoding(false), ct).ConfigureAwait(false);
+            var report = JsonSerializer.Deserialize<ConvertReport>(json, JsonOptions);
+            return report?.Versions.GroupBy(v => v.VersionId).ToDictionary(g => g.Key, g => g.First().SourceFingerprint);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     // ---- parity ----
@@ -377,16 +425,36 @@ public static class MigrationCli
             await output.WriteLineAsync($"  … ще {report.Mismatches.Count - 20} (повний перелік — у звіті)").ConfigureAwait(false);
         }
 
-        if (report.Targets == 0)
+        foreach (var unproven in report.UnprovenVersions)
         {
-            // Порожній прогін нічого не доводить: не «гаразд».
+            await output.WriteLineAsync("  НЕДОВЕДЕНО " + unproven).ConfigureAwait(false);
+        }
+
+        if (report.Targets == 0 || report.ValuesCompared == 0)
+        {
+            // Порожній прогін нічого не доводить: не «гаразд» (навіть без розбіжностей: жодного значення не порівняно).
             await output.WriteLineAsync(
-                "parity: НІЧОГО ПОРІВНЮВАТИ — немає версій з тіньовим скриптом на Formulas, чинних у документах (або фільтр нічого не знайшов).")
+                "parity: НІЧОГО ПОРІВНЮВАТИ — немає версій з тіньовим скриптом на Formulas, чинних у документах з даними "
+                + "(або фільтр нічого не знайшов): жодного значення не порівняно.")
                 .ConfigureAwait(false);
             return Failures;
         }
 
-        return report.Mismatches.Count > 0 ? Failures : Ok;
+        if (report.Mismatches.Count > 0)
+        {
+            return Failures;
+        }
+
+        if (report.UnprovenVersions.Count > 0 && !options.AllowUnproven)
+        {
+            await output.WriteLineAsync(
+                $"parity: розбіжностей немає, але {report.UnprovenVersions.Count} версій паритет не довів (перелік вище). "
+                + "Це не доказ збігу; --allow-unproven приймає такий результат свідомо.")
+                .ConfigureAwait(false);
+            return Failures;
+        }
+
+        return Ok;
     }
 
     // ---- спільне ----
@@ -410,7 +478,8 @@ public static class MigrationCli
         => new FormulaEngine(new Parser(), new Evaluator(new FunctionRegistry()), new TopologicalSorter());
 
     private sealed record Options(
-        string? Connection, string? Out, string? In, string? Methodology, bool IKnowThisIsACopy, long? Document = null)
+        string? Connection, string? Out, string? In, string? Methodology, bool IKnowThisIsACopy, long? Document = null,
+        bool AllowUnproven = false)
     {
         public static Options? Parse(string command, string[] args, TextWriter error)
         {
@@ -419,6 +488,7 @@ public static class MigrationCli
             string? inPath = null;
             string? methodology = null;
             var copy = false;
+            var allowUnproven = false;
             long? document = null;
             for (var i = 1; i < args.Length; i++)
             {
@@ -447,6 +517,9 @@ public static class MigrationCli
                         break;
                     case CopyFlag when command == "shadow":
                         copy = true;
+                        break;
+                    case "--allow-unproven" when command == "parity":
+                        allowUnproven = true;
                         break;
                     default:
                         error.WriteLine($"Невідомий або неповний параметр: {args[i]}");
@@ -482,7 +555,7 @@ public static class MigrationCli
                 return null;
             }
 
-            return new Options(connection, outPath, inPath, methodology, copy, document);
+            return new Options(connection, outPath, inPath, methodology, copy, document, allowUnproven);
         }
     }
 }
