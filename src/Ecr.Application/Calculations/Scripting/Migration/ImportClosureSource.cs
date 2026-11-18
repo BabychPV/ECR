@@ -95,4 +95,38 @@ public static class ImportClosureSource
 
         return imports;
     }
+
+    /// <summary>
+    /// Імпорти, чий склад (категорії констант і маркери <c>Name?</c>) на іншу дату відрізняється від базового. Скрипт
+    /// переносить цей склад у текст ОДИН раз (правило «відомих категорій», <c>row.X?</c>), а старий рушій бере його заново
+    /// з версії бібліотеки кожного періоду, тож розбіжність означає, що точного переносу одним текстом немає.
+    /// </summary>
+    /// <param name="baseline">Склад на дату чинності версії-імпортера.</param>
+    /// <param name="other">Склад на іншу дату життя версії-імпортера.</param>
+    /// <returns>Коди бібліотек зі зміненим складом (порожньо — склад однаковий).</returns>
+    public static IReadOnlyList<string> Divergences(IReadOnlyList<SourceImport> baseline, IReadOnlyList<SourceImport> other)
+    {
+        ArgumentNullException.ThrowIfNull(baseline);
+        ArgumentNullException.ThrowIfNull(other);
+
+        static string Key(IReadOnlyList<string>? names, StringComparer comparer)
+            => names is null ? "-" : string.Join('', names.Select(n => comparer == StringComparer.Ordinal ? n : n.ToUpperInvariant()).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal));
+
+        var result = new List<string>();
+        var codes = baseline.Select(i => i.LibraryCode).Concat(other.Select(i => i.LibraryCode))
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+        foreach (var code in codes)
+        {
+            var a = baseline.FirstOrDefault(i => string.Equals(i.LibraryCode, code, StringComparison.OrdinalIgnoreCase));
+            var b = other.FirstOrDefault(i => string.Equals(i.LibraryCode, code, StringComparison.OrdinalIgnoreCase));
+            if (a is null || b is null
+                || Key(a.ConstantCategories, StringComparer.Ordinal) != Key(b.ConstantCategories, StringComparer.Ordinal)
+                || Key(a.OptionalArguments, StringComparer.OrdinalIgnoreCase) != Key(b.OptionalArguments, StringComparer.OrdinalIgnoreCase))
+            {
+                result.Add(code);
+            }
+        }
+
+        return result;
+    }
 }

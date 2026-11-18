@@ -172,6 +172,55 @@ public sealed class VersionSourceReader(EcrDbContext db, IFormulaEngine formulaE
             next = later.Count == 0 ? null : later.Min();
         }
 
+        // ---- Версії бібліотек протягом життя версії ----
+        // Скрипт має один текст на всі періоди версії, а старий рушій бере склад імпортів (відомі категорії, маркери `Name?`)
+        // з версії бібліотеки КОЖНОГО періоду. Якщо бібліотека перевидана всередині життя версії й склад змінився — точно
+        // перенести неможливо: це помилка читання (конвертер і apply відмовляють), а не мовчазна різниця чисел.
+        if (version.EffectiveFrom is { } lifeStart && direct.Count > 0)
+        {
+            var libraryDates = await db.MethodologyVersions.AsNoTracking()
+                .Join(
+                    db.Methodologies.AsNoTracking().Where(m => m.Kind == MethodologyKind.Library),
+                    v => v.MethodologyId, m => m.Id, (v, m) => v)
+                .Where(v => v.EffectiveFrom != null && v.EffectiveFrom > lifeStart
+                            && (next == null || v.EffectiveFrom < next)
+                            && (v.Status == TemplateVersionStatus.Published || v.Status == TemplateVersionStatus.Deprecated))
+                .Select(v => v.EffectiveFrom!.Value)
+                .Distinct()
+                .OrderBy(d => d)
+                .ToListAsync(ct).ConfigureAwait(false);
+
+            var diverged = new Dictionary<string, List<DateOnly>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var date in libraryDates)
+            {
+                var directAt = await _store.ResolveImportsAsync(versionId, date, ct).ConfigureAwait(false);
+                var importsAt = await ImportClosureSource
+                    .BuildAsync(_store, formulaEngine, version.MethodologyId, versionId, orderedFormulas, date, directAt, ct)
+                    .ConfigureAwait(false);
+                foreach (var code in ImportClosureSource.Divergences(imports, importsAt))
+                {
+                    if (!diverged.TryGetValue(code, out var dates))
+                    {
+                        diverged[code] = dates = [];
+                    }
+
+                    dates.Add(date);
+                }
+            }
+
+            foreach (var (code, dates) in diverged)
+            {
+                issues.Add(new ConversionIssue(
+                    IssueSeverity.Error, "importLibraryVersionsDiffer",
+                    $"Library «{code}» has versions inside the life of this version whose constant categories or optional "
+                    + $"arguments differ from the version effective on {effectiveFrom:yyyy-MM-dd} (from "
+                    + string.Join(", ", dates.Select(d => d.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)))
+                    + "): one script text cannot reproduce the old engine for every period. Split this version at those "
+                    + "dates (publish a version per library edition) or align the library editions.",
+                    code));
+            }
+        }
+
         // ---- Правила (речення rows будує інструмент: вони потрібні лише перетворювачеві) ----
         IReadOnlyList<SourceRule> rules = [];
         if (!isLibrary && !isModuleLevel)
