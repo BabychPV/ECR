@@ -897,8 +897,10 @@ function CellHistory({
 
   return (
     <>
-      {/* Q-17: зміни прийшли з періоду-власника — назвати його, щоб «змінено в січні» не читалося як чужий місяць. */}
-      {ownerPeriod !== null && (
+      {/* Q-17: зміни прийшли з періоду-власника — назвати його, щоб «змінено в січні» не читалося як чужий місяць.
+          ✎ B178: лише для НЕмісячного значення (якір року, L7c). Місячна колонка (`ownerPeriodKey` задано) належить
+          своєму місяцю — історія з її періоду не «спільна для всіх місяців року»; список той самий, примітки немає. */}
+      {ownerPeriod !== null && (cell.ownerPeriodKey ?? null) === null && (
         <Text size="xs" c="dimmed" px="sm" pt="xs" data-inspector-owner-period={ownerPeriod}>
           {t('inspector.history.ownerPeriodNote', { period: formatPeriodKey(ownerPeriod) || String(ownerPeriod) })}
         </Text>

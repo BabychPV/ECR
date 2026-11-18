@@ -432,6 +432,41 @@ describe('інспектор документа (UI-25)', () => {
     expect(screen.getAllByRole('listitem')).toHaveLength(1);
   });
 
+  it('B178: місячна колонка (ownerPeriodKey задано) — історія з її місяця БЕЗ примітки «спільне для всіх місяців»', async () => {
+    // UI-прохід на live doc 96: Land_RunningHoursMonthly_M09 у «This cell» казала «Changed in September 2026 — the value
+    // is shared by all months of the year». Примітка — лише для немісячного значення якоря року (L7c, тест вище).
+    const monthly = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes('/api/v1/audit/cells')) {
+        return jsonResponse({
+          items: [
+            {
+              changedAt: '2026-10-12T08:12:00Z', changedByUserId: 5, changedByDisplayName: 'Month editor', columnDefId: 33,
+              documentId: 1, isLateEdit: false, isOutOfWindow: false, newValue: '720', oldValue: '700', origin: 'UserEdit',
+              // ⚠ Місяць колонки ≠ відкритий період (обв'язка дивиться 202609): інакше примітки не було б і без фіксу.
+              periodKey: 202603, rowKey: 'R4',
+            },
+          ],
+          nextCursor: null,
+        });
+      }
+
+      return fetchMock(input);
+    });
+    vi.stubGlobal('fetch', monthly);
+    render(<Harness entry="/documents/1?panel=history" />);
+    act(() => publishInspectedCell({ ...Cell, ownerPeriodKey: 202603 }));
+    const cellRadio = screen.getByRole('radio', { name: '⟦inspector.history.modeCell⟧' }) as HTMLInputElement;
+    await waitFor(() => expect(cellRadio.disabled).toBe(false));
+    fireEvent.click(cellRadio);
+
+    // Зміна місяця показана (не «історії немає»), але без примітки про спільне значення року.
+    expect(await screen.findByText('Month editor')).toBeTruthy();
+    expect(screen.queryByText('⟦inspector.noHistoryTitle⟧')).toBeNull();
+    expect(screen.getAllByRole('listitem')).toHaveLength(1);
+    expect(document.querySelector('[data-inspector-owner-period]')).toBeNull();
+    expect(document.body.textContent).not.toContain('inspector.history.ownerPeriodNote');
+  });
+
   it('Q-17: зміни з періоду перегляду — без примітки про власника', async () => {
     vi.stubGlobal('fetch', fetchMock);
     render(<Harness entry="/documents/1?panel=history" />);

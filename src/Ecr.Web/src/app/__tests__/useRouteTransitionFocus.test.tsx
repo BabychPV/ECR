@@ -156,6 +156,14 @@ describe('formatDocumentTitle — та сама крихта, що й <Breadcrum
     expect(formatDocumentTitle([{ text: '⟦nav.security⟧' }])).toBe('ECR');
     expect(formatDocumentTitle([{ text: 'Шаблони' }, { text: '⟦nav.security⟧' }])).toBe('Шаблони · ECR');
   });
+
+  it('B178: сусідні однакові крихти (документ не знайдено → загальна назва) — одна частина, не «Documents · Documents»', () => {
+    expect(formatDocumentTitle([{ text: 'Documents' }, { text: 'Documents' }])).toBe('Documents · ECR');
+    // Однакові, але НЕ сусідні частини лишаються: прибирається лише повтор поспіль.
+    expect(formatDocumentTitle([{ text: 'A' }, { text: 'B' }, { text: 'A' }])).toBe('A · B · A · ECR');
+    // Пропущена частина (null) між однаковими не робить їх «несусідніми» в заголовку.
+    expect(formatDocumentTitle([{ text: 'Documents' }, { text: null }, { text: 'Documents' }])).toBe('Documents · ECR');
+  });
 });
 
 describe('useRouteTransitionFocus: document.title (PR nav-arch #7)', () => {
