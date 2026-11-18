@@ -187,4 +187,62 @@ describe('ConstTableDialog', () => {
     const apply = screen.getByText(/constTable\.apply/).closest('button');
     expect(apply?.hasAttribute('disabled')).toBe(true);
   });
+
+  it('F13c: коментарі й вихідний текст чисел переживають «Застосувати»', () => {
+    const onApply = vi.fn();
+    const literal = ['{', '    // зима', '    A: { x: 1.0, y: 0.10 }, // холодно', '    B: { x: 2,   y: 3 },', '}'].join('\n');
+    renderWithMantine(
+      <ConstTableDialog opened onClose={() => undefined} literal={literal} onApply={onApply} />,
+    );
+    // нічого не чіпали — ні попередження, ні втрат
+    expect(screen.queryByTestId('const-comments-lost')).toBeNull();
+    fireEvent.click(screen.getByText(/constTable\.apply/));
+    expect(onApply).toHaveBeenCalledWith(literal);
+  });
+
+  it('F13c: правка комірки лишає коментарі рядка; запис, якого не торкались, не змінюється', () => {
+    const onApply = vi.fn();
+    const literal = ['{', '    // зима', '    A: { x: 1.0 }, // холодно', '    B: { x: 2.50 },', '}'].join('\n');
+    renderWithMantine(
+      <ConstTableDialog opened onClose={() => undefined} literal={literal} onApply={onApply} />,
+    );
+    const cell = screen.getAllByRole('textbox').find((i) => (i as HTMLInputElement).value === '1.0');
+    fireEvent.change(cell as HTMLElement, { target: { value: '7' } });
+    fireEvent.click(screen.getByText(/constTable\.apply/));
+    expect(onApply).toHaveBeenCalledWith(
+      ['{', '    // зима', '    A: { x: 7 }, // холодно', '    B: { x: 2.50 },', '}'].join('\n'),
+    );
+    expect(screen.queryByTestId('const-comments-lost')).toBeNull();
+  });
+
+  it('F13c: коментар усередині запису, який змінюють, — попередження ДО «Застосувати»', () => {
+    const literal = ['{', '    A: { x: 1, // про x', '         y: 2 },', '}'].join('\n');
+    renderWithMantine(
+      <ConstTableDialog opened onClose={() => undefined} literal={literal} onApply={() => undefined} />,
+    );
+    expect(screen.queryByTestId('const-comments-lost')).toBeNull();
+    const cell = screen.getAllByRole('textbox').find((i) => (i as HTMLInputElement).value === '1');
+    fireEvent.change(cell as HTMLElement, { target: { value: '5' } });
+    expect(screen.getByTestId('const-comments-lost').textContent).toContain('constTable.commentsLost');
+  });
+
+  it('F13c: неоднозначне число (`1,234.56`) — помилка комірки, «Застосувати» заблоковано', () => {
+    const onApply = vi.fn();
+    renderWithMantine(
+      <ConstTableDialog opened onClose={() => undefined} literal="{ A: { x: 1 } }" onApply={onApply} />,
+    );
+    const cell = screen.getAllByRole('textbox').find((i) => (i as HTMLInputElement).value === '1');
+    fireEvent.change(cell as HTMLElement, { target: { value: '1,234.56' } });
+    expect(screen.getAllByText(/error\.ambiguousNumber/).length).toBeGreaterThan(0);
+    const apply = screen.getByText(/constTable\.apply/).closest('button');
+    expect(apply?.hasAttribute('disabled')).toBe(true);
+    fireEvent.click(apply as HTMLElement);
+    expect(onApply).not.toHaveBeenCalled();
+
+    // у лапках — свідомий рядок
+    fireEvent.change(cell as HTMLElement, { target: { value: '"1,234.56"' } });
+    expect(screen.queryAllByText(/error\.ambiguousNumber/)).toHaveLength(0);
+    fireEvent.click(screen.getByText(/constTable\.apply/));
+    expect(onApply).toHaveBeenCalledWith('{\n    A: { x: "1,234.56" },\n}');
+  });
 });

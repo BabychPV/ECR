@@ -15,14 +15,19 @@ import {
 import { useMemo, useState, type ClipboardEvent, type JSX } from 'react';
 import { t } from '@/shared/i18n';
 import {
+  ambiguousCells,
+  carryNotes,
   cellToText,
-  gridFromTsv,
+  countComments,
+  dropNotesRow,
   gridIssues,
   parseCellText,
   parseConstLiteral,
-  parseTsv,
+  parseTsvRaw,
+  pastedCellText,
   pasteBlock,
   printConstGrid,
+  textGridFromTsv,
   type ConstGrid,
   type ConstParseErrorCode,
   type GridOf,
@@ -46,6 +51,7 @@ function toTextGrid(grid: ConstGrid): TextGrid {
     rowKeys: grid.rowKeys,
     columnKeys: grid.columnKeys,
     cells: grid.cells.map((row) => row.map((cell) => cellToText(cell))),
+    notes: grid.notes,
   };
 }
 
@@ -54,6 +60,7 @@ function toConstGrid(grid: TextGrid): ConstGrid {
     rowKeys: grid.rowKeys,
     columnKeys: grid.columnKeys,
     cells: grid.cells.map((row) => row.map((text) => parseCellText(text))),
+    notes: grid.notes,
   };
 }
 
@@ -74,6 +81,8 @@ function parseErrorText(code: ConstParseErrorCode): string {
 
 function Editor(props: {
   readonly initial: TextGrid;
+  /** Скільки коментарів було в літералі — щоб попередити, якщо «Застосувати» якісь прибере. */
+  readonly initialComments: number;
   readonly onApply: (literal: string) => void;
   readonly onClose: () => void;
 }): JSX.Element {
@@ -81,6 +90,9 @@ function Editor(props: {
   const [pasteText, setPasteText] = useState('');
   const [headers, setHeaders] = useState(true);
   const issues = useMemo(() => gridIssues(toConstGrid(grid)), [grid]);
+  const cellIssues = useMemo(() => ambiguousCells(grid.cells), [grid.cells]);
+  const printed = useMemo(() => printConstGrid(toConstGrid(grid)), [grid]);
+  const lostComments = Math.max(0, props.initialComments - countComments(printed));
 
   const keyError = (axis: 'row' | 'column', index: number): string | undefined => {
     const issue = issues.find((i) => i.axis === axis && i.index === index);
@@ -89,6 +101,11 @@ function Editor(props: {
       ? t('methodologyScript.constTable.error.emptyKey')
       : t('methodologyScript.constTable.error.duplicateKey');
   };
+
+  const cellError = (r: number, c: number): string | undefined =>
+    cellIssues.some((i) => i.row === r && i.column === c)
+      ? t('methodologyScript.constTable.error.ambiguousNumber')
+      : undefined;
 
   const columnCount = grid.columnKeys === null ? 1 : grid.columnKeys.length;
 
@@ -124,6 +141,7 @@ function Editor(props: {
       ...g,
       rowKeys: g.rowKeys.filter((_, i) => i !== r),
       cells: g.cells.filter((_, i) => i !== r),
+      notes: dropNotesRow(g.notes, r),
     }));
   };
   const removeColumn = (c: number): void => {
@@ -149,18 +167,18 @@ function Editor(props: {
     const text = event.clipboardData.getData('text');
     if (!text.includes('\t') && !/\r?\n./.test(text)) return;
     event.preventDefault();
-    const block = parseTsv(text).map((row) => row.map((cell) => cellToText(cell)));
+    const block = parseTsvRaw(text).map((row) => row.map((field) => pastedCellText(field)));
     setGrid((g) => pasteBlock<string>(g, block, r, c, ''));
   };
 
   const insertTable = (): void => {
-    const parsed = gridFromTsv(pasteText, headers);
+    const parsed = textGridFromTsv(pasteText, headers);
     if (parsed === null) return;
-    setGrid(toTextGrid(parsed));
+    setGrid({ ...parsed, notes: carryNotes(grid.notes, grid.rowKeys, parsed.rowKeys) });
     setPasteText('');
   };
 
-  const blocked = issues.length > 0;
+  const blocked = issues.length > 0 || cellIssues.length > 0;
 
   return (
     <Stack gap="md">
@@ -229,6 +247,7 @@ function Editor(props: {
                     <TextInput
                       size="xs"
                       value={grid.cells[r]?.[c] ?? ''}
+                      error={cellError(r, c)}
                       aria-label={t('methodologyScript.constTable.cell', {
                         row: rowKey,
                         column: grid.columnKeys?.[c] ?? t('methodologyScript.constTable.value'),
@@ -303,10 +322,20 @@ function Editor(props: {
         </Group>
       </Stack>
 
-      {blocked && (
+      {issues.length > 0 && (
         <Text size="sm" c="statusError">
           {t('methodologyScript.constTable.fixKeys')}
         </Text>
+      )}
+      {cellIssues.length > 0 && (
+        <Text size="sm" c="statusError">
+          {t('methodologyScript.constTable.fixCells')}
+        </Text>
+      )}
+      {lostComments > 0 && (
+        <Alert color="yellow" data-testid="const-comments-lost">
+          {t('methodologyScript.constTable.commentsLost', { n: lostComments })}
+        </Alert>
       )}
 
       <Group justify="flex-end">
@@ -316,7 +345,7 @@ function Editor(props: {
         <Button
           disabled={blocked}
           onClick={() => {
-            props.onApply(printConstGrid(toConstGrid(grid)));
+            props.onApply(printed);
           }}
         >
           {t('methodologyScript.constTable.apply')}
@@ -345,7 +374,12 @@ export function ConstTableDialog(props: ConstTableDialogProps): JSX.Element {
       }
     >
       {parsed === null ? null : parsed.ok ? (
-        <Editor initial={toTextGrid(parsed.grid)} onApply={props.onApply} onClose={props.onClose} />
+        <Editor
+          initial={toTextGrid(parsed.grid)}
+          initialComments={countComments(props.literal)}
+          onApply={props.onApply}
+          onClose={props.onClose}
+        />
       ) : (
         <Stack gap="md">
           <Alert color="statusError" role="alert">
