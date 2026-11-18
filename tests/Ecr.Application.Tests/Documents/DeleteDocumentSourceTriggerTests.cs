@@ -13,7 +13,7 @@ namespace Ecr.Application.Tests.Documents;
 
 /// <summary>
 /// B80 (N2a, T-C): видалення документа-джерела — роки читаються ДО видалення, постановка — ПІСЛЯ коміту; невдале
-/// видалення нічого не ставить. Що саме ставить тригер — <c>Hse400SourceApprovalTriggerTests</c> (Infrastructure).
+/// видалення нічого не ставить. Що саме ставить тригер — <c>SourceApprovalChangeTriggerTests</c> (Infrastructure).
 /// </summary>
 [Trait("Directive", "B80")]
 public sealed class DeleteDocumentSourceTriggerTests
@@ -26,7 +26,7 @@ public sealed class DeleteDocumentSourceTriggerTests
     private readonly IDocumentDeletionStore _deletion = Substitute.For<IDocumentDeletionStore>();
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
     private readonly ISourceApprovalChangeTrigger _trigger = Substitute.For<ISourceApprovalChangeTrigger>();
-    private readonly SourceDocumentDeletion _prepared = new(DocumentId, RegistryDefId: 7, Years: [2099]);
+    private readonly SourceDocumentDeletion _prepared = new(DocumentId, BindingIds: [7], Years: [2099]);
 
     public DeleteDocumentSourceTriggerTests()
     {

@@ -149,7 +149,7 @@ public sealed class ListDocumentSourceBindingsHandler(
 /// <para>
 /// ⚠ Справжня зміна: подія <see cref="DocumentSourceBindings.ChangedEventType"/> у журналі безпеки в тій самій транзакції
 /// (старий і новий стан, автор) і — коли читання з документа діє — злита задача перерахунку залежних за кожен рік
-/// джерела (<see cref="RegistryImpactRecalculationTarget.ForYear"/>; та сама задача, що пропускає затверджені аркуші
+/// джерела (<see cref="RegistryImpactRecalculationTarget.ForSourceChange"/>; та сама задача, що пропускає затверджені аркуші
 /// Land і позначає подані). Повтор того самого стану нічого не пише.
 /// </para>
 /// </remarks>
@@ -230,15 +230,17 @@ public sealed class SwitchDocumentSourceStateHandler(
             {
                 foreach (var year in await store.SourceYearsAsync(id, innerCt).ConfigureAwait(false))
                 {
+                    // ✎ B179 L2: зміна джерела за зв'язкою — споживачі з графа (а не з ручного переліку/результатів), увесь рік.
                     await jobs.EnqueueCoalescedAsync<IRegistryImpactRecalculationJob>(
-                            RegistryImpactRecalculationTarget.ForYear(binding.RegistryDefId, year),
+                            RegistryImpactRecalculationTarget.ForSourceChange(binding.Id, year, month: null),
                             new RegistryImpactRecalculationRequest(
                                 binding.RegistryDefId,
                                 [],
                                 string.Create(
                                     CultureInfo.InvariantCulture,
                                     $"{binding.Code}: source state {DocumentSourceBindings.StateName(old)} -> {DocumentSourceBindings.StateName(target)}"),
-                                year),
+                                year,
+                                binding.Id),
                             innerCt,
                             createdByUserId: userId)
                         .ConfigureAwait(false);

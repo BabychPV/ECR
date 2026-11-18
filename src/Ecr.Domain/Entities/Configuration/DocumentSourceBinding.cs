@@ -39,8 +39,9 @@ public enum DocumentSourcePolicy : byte
 /// <para>
 /// ⚠ Відображення документа на рядки довідника лишається в коді (<see cref="MappingKind"/> = 1 —
 /// <c>Hse400CompositionMapping</c>); таблиця тримає лише ідентичність, політику, стан-ворота і два біти, які
-/// замінюють ключі <c>Calculations:Hse400CompositionFromDocument</c> і <c>Calculations:Hse400RecalculateLandDependents</c>
-/// (ключ, заданий явно, лишається перекриттям на один випуск).
+/// замінюють ключі <c>Calculations:Hse400CompositionFromDocument</c> (заданий явно — лишається перекриттям) і
+/// <c>Calculations:Hse400RecalculateLandDependents</c> (✎ B179 L2: прибрано; <see cref="RecalculateDependents"/> — аварійний
+/// вимикач автоматичних залежних).
 /// </para>
 /// <para>
 /// ⛔ Перемикання <see cref="SourceState"/> — лише явна дія адміністратора (ендпоінт із перевіркою «проєкт джерела
