@@ -35,6 +35,12 @@ public static class ScriptCompiler
     /// <summary>Найбільша довжина тексту, символів.</summary>
     public const int MaxTextLength = 200_000;
 
+    /// <summary>
+    /// Найбільша глибина дерева одного виразу (лівий ланцюг <c>1+1+…</c> теж додає рівні). Окрім межі вкладеності
+    /// парсера (<see cref="ScriptParser.MaxNesting"/>), яка ланцюгів не бачить.
+    /// </summary>
+    public const int MaxExpressionDepth = 500;
+
     /// <summary>Компілює текст скрипта.</summary>
     /// <param name="text">Текст.</param>
     /// <param name="options">Параметри.</param>
@@ -67,6 +73,13 @@ public static class ScriptCompiler
         {
             var d = ScriptDiagnostic.At(ScriptDiagnosticCodes.TooDeep, new ScriptSpan(0, 1, 1, 1),
                 "Expression nesting is too deep.", ("max", ScriptParser.MaxNesting.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+            return new ScriptCompilation(null, [d]);
+        }
+        catch (ScriptBinder.ExpressionTooDeepException)
+        {
+            var d = ScriptDiagnostic.At(ScriptDiagnosticCodes.TooDeep, new ScriptSpan(0, 1, 1, 1),
+                $"Expression is too deep (more than {MaxExpressionDepth} levels).",
+                ("max", MaxExpressionDepth.ToString(System.Globalization.CultureInfo.InvariantCulture)));
             return new ScriptCompilation(null, [d]);
         }
     }

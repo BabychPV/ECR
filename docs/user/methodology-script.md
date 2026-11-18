@@ -432,8 +432,8 @@ foreach S in (301, 304, 330) {
   (`"a b"`) — помилка `foreachNameNotIdentifier`.
 - Те, що оголошено всередині, лишається **у зовнішній області**: імена не можуть
   повторюватися (`var v{N}` з однаковими `N` — `duplicateName`).
-- Вкладати можна до 3 рівнів, усього не більше 2000 розгорнутих операторів
-  (`foreachTooLarge`). `foreach` можна писати й усередині `foreach substance`.
+- Вкладати можна до 3 рівнів, усього не більше 2000 розгорнутих операторів і
+  200 000 розгорнутих лексем (`foreachTooLarge`). `foreach` можна писати й усередині `foreach substance`.
 
 Різниця з `foreach substance`: `foreach substance` — це справжній цикл за
 речовинами (виходи «по речовині»); `foreach X in (…)` — лише скорочення запису.
@@ -750,7 +750,7 @@ output ECW_Fuel : t = big + root + sign;
 | `caretNotPower` | The '^' operator does not exist | степінь — `Pow(a, b)` |
 | `assignInExpression` | Single '=' is an assignment | у порівнянні пишіть `==` |
 | `tooLarge` | Script is too large | скрипт довший за 200 000 символів: винесіть спільне в бібліотеку. Текст довший за 1 000 000 знаків система не приймає взагалі (див. 19.7) |
-| `tooDeep` | Expression nesting is too deep | вираз вкладено глибше 64 рівнів: розбийте його на `var` |
+| `tooDeep` | Expression nesting is too deep | вираз вкладено глибше 64 рівнів, або дерево виразу (разом із довгим ланцюгом `a + b + …`) глибше 500: розбийте його на `var` |
 
 ### 19.2. Імена й область видимості
 
@@ -801,7 +801,7 @@ output ECW_Fuel : t = big + root + sign;
 | `aggregateNotAllowedHere` | An aggregate cannot be used in a function body | перенесіть агрегат у `var` |
 | `unknownTableAlias` | … expects a table alias declared with 'table Alias = Table;' | оголосіть `table Псевдонім = Таблиця;` |
 | `foreachNameNotIdentifier` | After substitution '…' is not a valid identifier | значення в імені дає недозволені символи |
-| `foreachTooLarge` | foreach is nested too deeply / expands to too many statements | менше вкладень, менше повторів |
+| `foreachTooLarge` | foreach is nested too deeply / expands to too many statements or tokens | менше вкладень, менше повторів, коротше тіло |
 
 ### 19.6. Перевірки середовища (при збереженні й публікації)
 
