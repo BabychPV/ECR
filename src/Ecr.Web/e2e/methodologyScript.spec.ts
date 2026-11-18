@@ -1,4 +1,4 @@
-import { expect, test, type type APIResponse, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type APIResponse, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { signIn } from './multiSheet';
 
 /**
