@@ -2899,6 +2899,153 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/document-source-bindings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Перелік зв'язок зі станом-воротами і дієвим читанням. Право `Calculation.ManageSourceBinding`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DocumentSourceBindingDto"][];
+                        "text/json": components["schemas"]["DocumentSourceBindingDto"][];
+                        "text/plain": components["schemas"]["DocumentSourceBindingDto"][];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/document-source-bindings/{id}/source-state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Явне перемикання стану-воріт: `any` (будь-який стан джерела) або `approvedOnly` (лише затверджений
+         *     місяць). Право `Calculation.ManageSourceBinding`; подія `DocumentSourceBindingChanged` у журналі безпеки.
+         * @description `approvedOnly` — `409 ECR-CALC-0409`, доки документ-джерело поточного року не лежить у місячному
+         *     проєкті з погодженням (`sourceBindingNoDocument`, `sourceBindingNotMonthly`,
+         *     `sourceBindingWorkflowNone`). Справжня зміна ставить злитий перерахунок залежних за кожен рік джерела.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Зв'язка. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SwitchDocumentSourceStateRequest"];
+                    "application/json": components["schemas"]["SwitchDocumentSourceStateRequest"];
+                    "text/json": components["schemas"]["SwitchDocumentSourceStateRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SwitchDocumentSourceStateResponse"];
+                        "text/json": components["schemas"]["SwitchDocumentSourceStateResponse"];
+                        "text/plain": components["schemas"]["SwitchDocumentSourceStateResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents": {
         parameters: {
             query?: never;
@@ -33137,6 +33284,44 @@ export interface components {
             /** @description Стан робочого процесу; аркуш без рядка стану — `Draft`. */
             state: string;
         };
+        /** @description Зв'язка «документ-джерело → довідник» для адміністратора (B80 N1). */
+        DocumentSourceBindingDto: {
+            /** @description Код зв'язки. */
+            code: string;
+            /** @description Коди шаблонів-споживачів. */
+            consumerTemplateCodes: string[];
+            /**
+             * Format: int32
+             * @description Зв'язка.
+             */
+            id: number;
+            /** @description Політика згоди: `None`, `Warn`, `ConfirmWithReason`, `Block`. */
+            policy: string;
+            /** @description Біт зв'язки «читати з документа». */
+            readFromDocument: boolean;
+            /** @description Дієве значення з урахуванням явного ключа конфігурації. */
+            readFromDocumentEffective: boolean;
+            /** @description `configuration` — діє явний ключ; `binding` — біт зв'язки. */
+            readFromDocumentSource: string;
+            /** @description Біт зв'язки «ставити перерахунок залежних». */
+            recalculateDependents: boolean;
+            /** @description Код довідника, рядки якого замінює документ. */
+            registryCode: string;
+            /** @description Стан-ворота: `any` або `approvedOnly`. */
+            sourceState: string;
+            /** @description Код шаблону-джерела. */
+            sourceTemplateCode: string;
+            /**
+             * Format: date-time
+             * @description Остання зміна стану-воріт, UTC; `null` — не змінювався.
+             */
+            updatedAt: null | string;
+            /**
+             * Format: int32
+             * @description Хто змінив востаннє.
+             */
+            updatedByUserId: null | number;
+        };
         /**
          * @description Стан документа у робочому процесі.
          * @enum {unknown}
@@ -33442,6 +33627,13 @@ export interface components {
         };
         /** @description Звіт переносу документа на нову версію шаблону (ФВ-7.5). */
         DocumentVersionMigrationDto: {
+            /**
+             * Format: int64
+             * @description ✎ LAND-YEAR L3 (a′): скільки екземплярів таблиць цільової версії перенос створить (створив) у якорі року — УСІ відсутні
+             *     (оригінал і копії аркушів складу документа, з фіксованими рядками), щоб перерахунок року одразу після переносу їх
+             *     заповнив, а річний перегляд їх показав без попереднього відкриття аркуша. `null` — перенос не є переходом на рік.
+             */
+            anchorInstancesCreated?: null | number;
             /** @description Перенос виконано. */
             applied: boolean;
             /**
@@ -33607,6 +33799,32 @@ export interface components {
              *     змінює розкладку «копія на місяць» → «рік, місяці в колонках».
              */
             monthTransferredValues?: null | number;
+            /**
+             * Format: int64
+             * @description ✎ LAND-YEAR L3 (B-static): скільки рядків створить (створив) перенос у якорі року, бо якорю бракувало рядка (а то й
+             *     екземпляра таблиці) для немісячного значення: рядок береться з найпізнішого місяця (`RowKey`, опис рядка,
+             *     порядок). `null` — перенос не є переходом на рік.
+             */
+            nonMonthAnchorRowsCreated?: null | number;
+            /** @description ✎ LAND-YEAR L3 (B-static): комірки немісячних колонок, де якір порожній, а місяці року мають РІЗНІ значення —
+             *     причина відмови `nonMonthConflict` (система не вибирає мовчки). Не більше `MaxItems`; `null` — таких немає. */
+            nonMonthConflicts?: null | components["schemas"]["NonMonthConflictItem"][];
+            /** @description Перелік NonMonthConflicts обрізано стелею; `null` — переліку немає. */
+            nonMonthConflictsTruncated?: null | boolean;
+            /**
+             * Format: int64
+             * @description ✎ LAND-YEAR L3 (B-static): скільки введених значень немісячних колонок якір року (найменший період року в календарі
+             *     проєкту — його показує річний перегляд) дістане (дістав) з НАЙПІЗНІШОГО місяця, бо в якорі їх немає. Значення якоря
+             *     не перезаписується ніколи. `null` — перенос не є переходом на рік.
+             */
+            nonMonthCopiedToAnchor?: null | number;
+            /**
+             * Format: int64
+             * @description ⛔ B69 «архів незмінний»: скільки ДОКУМЕНТІВ (× рік) крок якоря пропустив, бо їхній якір заархівовано (немає жодного
+             *     гарячого екземпляра в якорі, є архівні): у них нічого не створюється й не копіюється — пропуск, не відмова. Рахуються
+             *     лише документи, у яких крок мав джерело (екземпляри пізніших місяців року). `null` — перенос не є переходом на рік.
+             */
+            nonMonthSkippedArchived?: null | number;
             /**
              * Format: int32
              * @description D-1b P3: скільки документів у цих проєктах.
@@ -36486,6 +36704,35 @@ export interface components {
             rowsRead: number;
             /** @description Sheet that was read. */
             sheetName: string;
+        };
+        /** @description ✎ LAND-YEAR L3 (B-static): комірка немісячної колонки, у якої якір року порожній, а місяці року не згодні
+         *     (причина відмови `nonMonthConflict`). Коди — цільової (річної) версії. */
+        NonMonthConflictItem: {
+            /** @description Код колонки. */
+            columnCode: string;
+            /**
+             * Format: int64
+             * @description Документ проєкту.
+             */
+            documentId: number;
+            /** @description Ключ рядка. */
+            rowKey: string;
+            /** @description Код аркуша. */
+            sheetCode: string;
+            /** @description Код таблиці. */
+            tableCode: string;
+            /** @description Значення по місяцях за зростанням періоду. */
+            values: components["schemas"]["NonMonthConflictValue"][];
+        };
+        /** @description Значення комірки в одному місяці (✎ LAND-YEAR L3, NonMonthConflictItem). */
+        NonMonthConflictValue: {
+            /**
+             * Format: int32
+             * @description Період.
+             */
+            periodKey: number;
+            /** @description Значення текстом (число — інваріантною культурою, дата — ISO 8601, запис довідника — `#id`). */
+            value: null | string;
         };
         /**
          * @description Транспорт каналу сповіщень. Числа зберігаються в базі — не перенумеровувати.
@@ -43248,6 +43495,20 @@ export interface components {
              */
             targetPeriodKey: null | number;
         };
+        /** @description Запит перемикання стану-воріт. */
+        SwitchDocumentSourceStateRequest: {
+            /** @description `any` або `approvedOnly`. */
+            sourceState: string;
+        };
+        /** @description Результат перемикання. */
+        SwitchDocumentSourceStateResponse: {
+            /** @description Зв'язка після перемикання. */
+            binding: components["schemas"]["DocumentSourceBindingDto"];
+            /** @description `false` — стан уже був таким; нічого не записано й не поставлено. */
+            changed: boolean;
+            /** @description Роки, за які поставлено перерахунок залежних (злита задача на довідник × рік). */
+            queuedYears: number[];
+        };
         /** @description Тіло `POST …/script-migration/switch`. */
         SwitchScriptEngineRequest: {
             /** @description `Script` або `Formulas`. */
@@ -43303,6 +43564,12 @@ export interface components {
         };
         /** @description Прапори розрахунків цього процесу (B105). */
         SystemFactsCalculationsDto: {
+            /**
+             * Format: int32
+             * @description B80: затверджених місяців обраного документа HSE400 поточного року (0–12); `null` — зв'язки або документа
+             *     поточного року немає.
+             */
+            hse400ApprovedMonths?: null | number;
             /** @description Дієве значення `Calculations:Hse400CompositionFromDocument`: `true` — Land читає склад газу з
              *     документа HSE400, `false` — з довідника `LAND_HSE400_COMPOSITION`. */
             hse400CompositionFromDocument: boolean;
@@ -43312,6 +43579,14 @@ export interface components {
             /** @description `true` — прапор вимкнено, а опублікований шаблон HSE400 і документ HSE400 поточного року є: Land мовчки
              *             читає застарілий довідник. */
             hse400CompositionWarning: boolean;
+            /** @description B80 (N1): стан-ворота зв'язки HSE400 → Land — `any` або `approvedOnly`; `null` — зв'язки немає. */
+            hse400SourceState?: null | string;
+            /**
+             * @description B80: `true` — документ HSE400 поточного року є і зв'язка або ще на `any` (Land читає й незатверджене), або
+             *     на `approvedOnly`, а місяць із введеними даними не затверджений (Land цього місяця без складу).
+             * @default false
+             */
+            hse400SourceWarning: boolean;
         };
         /** @description Стан БД: лише число й мітки часу, без шляхів чи імен. */
         SystemFactsDbDto: {

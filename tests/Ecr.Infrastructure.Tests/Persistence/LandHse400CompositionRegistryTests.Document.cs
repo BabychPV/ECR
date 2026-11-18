@@ -193,7 +193,7 @@ public sealed partial class LandHse400CompositionRegistryTests
 
     private TestDocument? lastBuilt;
 
-    private async Task<IRegistrySnapshot> LoadFromDocumentAsync(Fixture f, string templateCode, bool enabled = true)
+    private async Task<IRegistrySnapshot> LoadFromDocumentAsync(Fixture f, string templateCode, bool? enabled = true)
     {
         await using var db = sql.CreateContext();
         var loader = new Hse400CompositionSnapshotLoader(

@@ -7,7 +7,6 @@ import { Alert, Button, Code, Group, Skeleton, Stack, Tabs, Text } from '@mantin
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ServiceStatePage } from '@/app/ServiceStatePage';
 import { problemText } from '@/shared/ui/problemText';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { apiFetch, EcrApiError } from '@/api/client';
@@ -33,7 +32,6 @@ import { useDocumentLogActions } from '@/features/documents/DocumentLogActions';
 import { useStaleResultsReminderHost } from '@/features/documents/useStaleResultsReminder';
 import { useVersionMigrationAction } from '@/features/documents/VersionMigrationAction';
 import { useEditAssignmentsAction } from '@/features/editAssignments/EditAssignmentsAction';
-import { DocumentLockBanner } from '@/features/documents/DocumentLockBanner';
 import { documentLockOf, hasLockedSheet, locksDataActions } from '@/features/documents/documentLock';
 import { useDocumentPeriodReopen } from '@/features/documents/periodReopen/useDocumentPeriodReopen';
 import { DocumentProgress } from '@/features/documents/DocumentProgress';
@@ -150,6 +148,10 @@ const PeriodPicker = lazy(async () => ({ default: (await loadPeriodPicker()).Per
 const YearMonthReopen = lazy(async () => ({
   default: (await import('@/features/documents/periodReopen/YearMonthReopen')).YearMonthReopen,
 }));
+// ✎ L7c: банер усіх відкритих для документа місяців року — окремим чанком і лише коли такі є (D-132).
+const YearReopenedBanner = lazy(async () => ({
+  default: (await import('@/features/documents/periodReopen/YearReopenedBanner')).YearReopenedBanner,
+}));
 /*
  * B113: заглушка — та сама коробка, що й сам вибір періоду (`.ecr-period`: висота `--ecr-ctl-height`, 28/36 px за
  * щільністю). Була 52 px: поки чанк `PeriodPicker` ще вантажився, шапка була вищою за остаточну, і коли чанк доїжджав,
@@ -188,6 +190,16 @@ const ProjectRecalcBannerSlot = lazy(async () => ({
 // PM-11: «З дозволу» + «Оновити з дозволу» — окремий чанк (бюджет маршруту D-132).
 const PermitRefreshStrip = lazy(async () => ({
   default: (await import('@/features/permits/bindings/PermitRefreshStrip')).PermitRefreshStrip,
+}));
+
+// D-132 (batch-1118-1, bundle budget 250.2 KB > 250): the lock banner shows on this page only WITHOUT an active sheet
+// (with a sheet the action bar draws it) — a rare path, so its own chunk instead of the route's static graph.
+const DocumentLockBanner = lazy(async () => ({
+  default: (await import('@/features/documents/DocumentLockBanner')).DocumentLockBanner,
+}));
+// The same D-132 fix: the service page is only for a missing document (404) - its own chunk.
+const ServiceStatePage = lazy(async () => ({
+  default: (await import('@/app/ServiceStatePage')).ServiceStatePage,
 }));
 
 // Feature (j) Ship 2 (jh2/jh3): rows to split after a mid-month header permit change — its own chunk.
@@ -1040,10 +1052,19 @@ export function DocumentPage(): JSX.Element {
           будь-якої сітки: сірі комірки без пояснення читаються як збій.
           ✎ UI-26: за наявного аркуша банер малює панель дій (з контекстом). */}
       {active === undefined && (
-        <DocumentLockBanner lock={lock} periodKey={periodKey} periodAction={periodReopen.lockAction} yearLayout={yearLayout} />
+        <Suspense fallback={null}>
+          <DocumentLockBanner lock={lock} periodKey={periodKey} periodAction={periodReopen.lockAction} yearLayout={yearLayout} />
+        </Suspense>
       )}
 
-      {periodReopen.banner}
+      {/* ✎ L7c: «рік» — усі відкриті місяці року з картки; банер якоря (лише січень) тут не показується. */}
+      {yearLayout
+        ? (summary.data?.reopenedPeriods?.length ?? 0) > 0 && (
+            <Suspense fallback={null}>
+              <YearReopenedBanner periods={summary.data?.reopenedPeriods ?? []} timeZoneId={calendar.data?.timeZoneId} />
+            </Suspense>
+          )
+        : periodReopen.banner}
       {periodReopen.dialog}
 
       {/* EA-5b: передача місяця - «Місяць передано вам», «Заповнено», коментар повернення. Права комірок рішає сервер. */}
@@ -1428,18 +1449,20 @@ function DocumentNotFound({ error }: { readonly error: EcrApiError }): JSX.Eleme
   const shown = problemText(error);
 
   return (
-    <ServiceStatePage icon="route" title={shown.title}>
-      {shown.detail !== null && (
-        <Text size="sm" c="dimmed" ta="center">
-          {shown.detail}
+    <Suspense fallback={null}>
+      <ServiceStatePage icon="route" title={shown.title}>
+        {shown.detail !== null && (
+          <Text size="sm" c="dimmed" ta="center">
+            {shown.detail}
+          </Text>
+        )}
+        <Text size="xs">
+          <Code>{error.problem.errorCode}</Code> <Code>{error.problem.correlationId}</Code>
         </Text>
-      )}
-      <Text size="xs">
-        <Code>{error.problem.errorCode}</Code> <Code>{error.problem.correlationId}</Code>
-      </Text>
-      <Button component={Link} to="/">
-        {t('nav.goToDocuments')}
-      </Button>
-    </ServiceStatePage>
+        <Button component={Link} to="/">
+          {t('nav.goToDocuments')}
+        </Button>
+      </ServiceStatePage>
+    </Suspense>
   );
 }

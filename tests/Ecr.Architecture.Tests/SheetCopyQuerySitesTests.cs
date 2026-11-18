@@ -68,6 +68,10 @@ public sealed partial class SheetCopyQuerySitesTests
 
         ["src/Ecr.Infrastructure/Persistence/Hse400CompositionSnapshotLoader.cs"] =
             "HSE400: склад газу для Land — лише екземпляри оригіналу (SheetCopyId == null); копії аркуша складу не дають",
+        ["src/Ecr.Infrastructure/Persistence/DocumentSourceGate.cs"] =
+            "B80: ворота «лише затверджене» — стан оригіналу аркуша (ApprovalState.SheetCopyId == null), як у завантажувачі складу",
+        ["src/Ecr.Infrastructure/Persistence/DocumentSourceBindingStore.cs"] =
+            "B80: обраний документ-джерело року — екземпляри оригіналу (SheetCopyId == null), як у завантажувачі складу",
         ["src/Ecr.Infrastructure/Jobs/Hse400LandDependentsTrigger.cs"] =
             "HSE400 3b: «чи документ HSE400» — за екземплярами оригіналу (SheetCopyId == null), як у завантажувачі складу",
         ["src/Ecr.Infrastructure/Persistence/SystemHealthStore.cs"] =

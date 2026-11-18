@@ -91,6 +91,14 @@ public sealed class ChildCompositionTests
         Assert.NotNull(sp.GetRequiredService<CalculationInputBuilder>());
         Assert.NotNull(sp.GetRequiredService<CalculationOutputWriter>());
         Assert.NotEmpty(sp.GetRequiredService<IEnumerable<ICalculationModule>>());
+
+        // B80 N0: модуль «місяці в колонках» отримує роутер Q-17 — без нього прогін періоду m на місячному проєкті
+        // рахував би всі місяці року (параметр необов'язковий, тож контейнер мовчки дав би null).
+        var monthModule = Assert.Single(
+            sp.GetRequiredService<IEnumerable<ICalculationModule>>().OfType<Ecr.Calculations.MonthColumnArgumentsModule>());
+        Assert.NotNull(typeof(Ecr.Calculations.MonthColumnArgumentsModule)
+            .GetField("_router", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+            .GetValue(monthModule));
         Assert.NotNull(sp.GetRequiredService<IJobQueue>());
         Assert.NotNull(sp.GetRequiredService<IJobProgressStore>());
         Assert.NotNull(sp.GetRequiredService<JobLeaseContext>());

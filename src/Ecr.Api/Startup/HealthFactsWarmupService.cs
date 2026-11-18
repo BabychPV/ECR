@@ -53,7 +53,7 @@ public sealed partial class HealthFactsWarmupService(
             var calculations = SystemFactsCalculationsDto.Of(
                 Hse400CompositionSnapshotLoader.IsEnabled(configuration),
                 ConfigurationSourceLabel.Of(configuration, Hse400CompositionSnapshotLoader.EnabledKey),
-                snapshot.Hse400DocumentInCurrentYear);
+                snapshot);
             if (calculations.Hse400CompositionWarning)
             {
                 LogHse400CompositionOff(logger, Hse400CompositionSnapshotLoader.EnabledKey);

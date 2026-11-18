@@ -446,7 +446,7 @@ public static class DependencyInjection
         services.AddSingleton(Jobs.RecalculationBudgetOptions.Read(configuration));
         services.AddSingleton<Jobs.RecalculationBudgetMonitor>();
         services.AddScoped<IRecalculationJob, Jobs.RecalculationJob>();
-        services.AddScoped<Jobs.IRecalculationCompletionHook>(sp => ActivatorUtilities.CreateInstance<Jobs.Hse400LandDependentsTrigger>(sp, Jobs.Hse400LandDependentsTrigger.IsEnabled(configuration))); // HSE400 3b
+        services.AddScoped<Jobs.IRecalculationCompletionHook>(sp => Jobs.Hse400LandDependentsTrigger.Create(sp, configuration)); // HSE400 3b; B80: ключі — перекриття бітів зв'язки
         services.AddScoped<IFormulaRecalculationJob, Jobs.FormulaRecalculationJob>();
         // WW-03: постановка перерахунку в періоди-читачі (міжперіодні посилання).
         services.AddScoped<Jobs.CrossPeriodFanOut>();
@@ -629,12 +629,15 @@ public static class DependencyInjection
             sp.GetRequiredService<RegistrySnapshotLoader>(),
             sp.GetRequiredService<EcrDbContext>(),
             sp.GetRequiredService<ICalculationResultStore>(),
-            Hse400CompositionSnapshotLoader.IsEnabled(configuration)));
+            // B80: явний ключ перекриває, не заданий — вирішує біт зв'язки cfg.DocumentSourceBinding.
+            Hse400CompositionSnapshotLoader.Override(configuration, Hse400CompositionSnapshotLoader.EnabledKey)));
 
         // PERMITS: types — типи дозволів над реєстрами (PM-03)
         services.AddScoped<IPermitTypeStore, PermitTypeStore>();
         services.AddScoped<IPermitListStore, PermitListStore>(); // PM-08e
         services.AddScoped<IPermitGroupStore, PermitGroupStore>(); // PRMG: групи типів як ціль Lookup
+        services.AddScoped<IDocumentSourceBindingStore, DocumentSourceBindingStore>(); // B80 N1
+        services.AddSingleton<IDocumentSourceFlagOverrides>(new DocumentSourceFlagOverrides(configuration)); // B80 N1
         services.AddScoped<IPermitDataMonthsReader, PermitDataMonthsReader>(); // rule (h): months with data of a document
         services.AddSingleton<IPermitRegistryIndex, PermitRegistryIndex>(); // rule (h): permit-type targets, in memory (hot PATCH path)
 

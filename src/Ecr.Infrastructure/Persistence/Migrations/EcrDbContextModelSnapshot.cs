@@ -1386,6 +1386,91 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
+            modelBuilder.Entity("Ecr.Domain.Entities.Configuration.DocumentSourceBinding", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<byte>("MappingKind")
+                        .HasColumnType("tinyint");
+
+                    b.Property<byte>("Policy")
+                        .HasColumnType("tinyint");
+
+                    b.Property<bool>("ReadFromDocument")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("RecalculateDependents")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("RegistryDefId")
+                        .HasColumnType("int");
+
+                    b.Property<byte>("SourceState")
+                        .HasColumnType("tinyint")
+                        .HasDefaultValue((byte)0, "DF_DocSrcBinding_State");
+
+                    b.Property<string>("SourceTableCodes")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("SourceTemplateId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<int?>("UpdatedByUserId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id")
+                        .HasName("PK_DocumentSourceBinding");
+
+                    b.HasIndex("Code")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_DocumentSourceBinding_Code");
+
+                    b.HasIndex("RegistryDefId")
+                        .HasDatabaseName("IX_DocumentSourceBinding_Registry");
+
+                    b.HasIndex("SourceTemplateId", "RegistryDefId")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_DocumentSourceBinding_Source");
+
+                    b.ToTable("DocumentSourceBinding", "cfg", t =>
+                        {
+                            t.HasCheckConstraint("CK_DocSrcBinding_Mapping", "[MappingKind] = 1");
+
+                            t.HasCheckConstraint("CK_DocSrcBinding_Policy", "[Policy] BETWEEN 0 AND 3");
+
+                            t.HasCheckConstraint("CK_DocSrcBinding_State", "[SourceState] IN (0, 1)");
+                        });
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Configuration.DocumentSourceBindingConsumer", b =>
+                {
+                    b.Property<int>("BindingId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("TemplateId")
+                        .HasColumnType("int");
+
+                    b.HasKey("BindingId", "TemplateId")
+                        .HasName("PK_DocumentSourceBindingConsumer");
+
+                    b.HasIndex("TemplateId")
+                        .HasDatabaseName("IX_DocSrcBindingConsumer_Template");
+
+                    b.ToTable("DocumentSourceBindingConsumer", "cfg");
+                });
+
             modelBuilder.Entity("Ecr.Domain.Entities.Configuration.FormulaDef", b =>
                 {
                     b.Property<int>("Id")
@@ -7570,6 +7655,46 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasConstraintName("FK_CondFmt_TV");
                 });
 
+            modelBuilder.Entity("Ecr.Domain.Entities.Configuration.DocumentSourceBinding", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Configuration.RegistryDef", null)
+                        .WithMany()
+                        .HasForeignKey("RegistryDefId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_DocSrcBinding_Registry");
+
+                    b.HasOne("Ecr.Domain.Entities.Configuration.Template", null)
+                        .WithMany()
+                        .HasForeignKey("SourceTemplateId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_DocSrcBinding_Template");
+
+                    b.HasOne("Ecr.Domain.Entities.Security.User", null)
+                        .WithMany()
+                        .HasForeignKey("UpdatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_DocSrcBinding_UpdatedBy");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Configuration.DocumentSourceBindingConsumer", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Configuration.DocumentSourceBinding", null)
+                        .WithMany("Consumers")
+                        .HasForeignKey("BindingId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_DocSrcBindingConsumer_Binding");
+
+                    b.HasOne("Ecr.Domain.Entities.Configuration.Template", null)
+                        .WithMany()
+                        .HasForeignKey("TemplateId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_DocSrcBindingConsumer_Template");
+                });
+
             modelBuilder.Entity("Ecr.Domain.Entities.Configuration.FormulaDef", b =>
                 {
                     b.HasOne("Ecr.Domain.Entities.Configuration.TableDef", null)
@@ -9186,6 +9311,11 @@ namespace Ecr.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("Ecr.Domain.Entities.Calculations.Methodology", b =>
                 {
                     b.Navigation("Versions");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Configuration.DocumentSourceBinding", b =>
+                {
+                    b.Navigation("Consumers");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Configuration.PermitGroup", b =>

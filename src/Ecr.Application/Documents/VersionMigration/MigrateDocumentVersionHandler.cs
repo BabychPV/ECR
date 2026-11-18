@@ -132,6 +132,31 @@ namespace Ecr.Application.Documents.VersionMigration;
 /// ✎ LAND-YEAR L3: шляхи <c>SHEET.TABLE.COLUMN</c> немісячних колонок зі значеннями без повного набору місячних цілей
 /// у річній версії (причина <c>dataLoss</c>), не більше <c>MaxItems</c>; <c>null</c> — таких немає.
 /// </param>
+/// <param name="NonMonthCopiedToAnchor">
+/// ✎ LAND-YEAR L3 (B-static): скільки введених значень немісячних колонок якір року (найменший період року в календарі
+/// проєкту — його показує річний перегляд) дістане (дістав) з НАЙПІЗНІШОГО місяця, бо в якорі їх немає. Значення якоря
+/// не перезаписується ніколи. <c>null</c> — перенос не є переходом на рік.
+/// </param>
+/// <param name="NonMonthConflicts">
+/// ✎ LAND-YEAR L3 (B-static): комірки немісячних колонок, де якір порожній, а місяці року мають РІЗНІ значення —
+/// причина відмови <c>nonMonthConflict</c> (система не вибирає мовчки). Не більше <c>MaxItems</c>; <c>null</c> — таких немає.
+/// </param>
+/// <param name="NonMonthConflictsTruncated">Перелік <paramref name="NonMonthConflicts"/> обрізано стелею; <c>null</c> — переліку немає.</param>
+/// <param name="NonMonthAnchorRowsCreated">
+/// ✎ LAND-YEAR L3 (B-static): скільки рядків створить (створив) перенос у якорі року, бо якорю бракувало рядка (а то й
+/// екземпляра таблиці) для немісячного значення: рядок береться з найпізнішого місяця (<c>RowKey</c>, опис рядка,
+/// порядок). <c>null</c> — перенос не є переходом на рік.
+/// </param>
+/// <param name="AnchorInstancesCreated">
+/// ✎ LAND-YEAR L3 (a′): скільки екземплярів таблиць цільової версії перенос створить (створив) у якорі року — УСІ відсутні
+/// (оригінал і копії аркушів складу документа, з фіксованими рядками), щоб перерахунок року одразу після переносу їх
+/// заповнив, а річний перегляд їх показав без попереднього відкриття аркуша. <c>null</c> — перенос не є переходом на рік.
+/// </param>
+/// <param name="NonMonthSkippedArchived">
+/// ⛔ B69 «архів незмінний»: скільки ДОКУМЕНТІВ (× рік) крок якоря пропустив, бо їхній якір заархівовано (немає жодного
+/// гарячого екземпляра в якорі, є архівні): у них нічого не створюється й не копіюється — пропуск, не відмова. Рахуються
+/// лише документи, у яких крок мав джерело (екземпляри пізніших місяців року). <c>null</c> — перенос не є переходом на рік.
+/// </param>
 public sealed record DocumentVersionMigrationDto(
     long DocumentId,
     int ProjectId,
@@ -177,7 +202,32 @@ public sealed record DocumentVersionMigrationDto(
     IReadOnlyList<LockedSheetItem>? LockedOverrideItems = null,
     long? MonthTransferredValues = null,
     long? RecomputedValues = null,
-    IReadOnlyList<string>? MonthColumnsUnmapped = null);
+    IReadOnlyList<string>? MonthColumnsUnmapped = null,
+    long? NonMonthCopiedToAnchor = null,
+    IReadOnlyList<NonMonthConflictItem>? NonMonthConflicts = null,
+    bool? NonMonthConflictsTruncated = null,
+    long? NonMonthAnchorRowsCreated = null,
+    long? AnchorInstancesCreated = null,
+    long? NonMonthSkippedArchived = null);
+
+/// <summary>
+/// ✎ LAND-YEAR L3 (B-static): комірка немісячної колонки, у якої якір року порожній, а місяці року не згодні
+/// (причина відмови <c>nonMonthConflict</c>). Коди — цільової (річної) версії.
+/// </summary>
+/// <param name="DocumentId">Документ проєкту.</param>
+/// <param name="SheetCode">Код аркуша.</param>
+/// <param name="TableCode">Код таблиці.</param>
+/// <param name="RowKey">Ключ рядка.</param>
+/// <param name="ColumnCode">Код колонки.</param>
+/// <param name="Values">Значення по місяцях за зростанням періоду.</param>
+public sealed record NonMonthConflictItem(
+    long DocumentId, string SheetCode, string TableCode, string RowKey, string ColumnCode,
+    IReadOnlyList<NonMonthConflictValue> Values);
+
+/// <summary>Значення комірки в одному місяці (✎ LAND-YEAR L3, <see cref="NonMonthConflictItem"/>).</summary>
+/// <param name="PeriodKey">Період.</param>
+/// <param name="Value">Значення текстом (число — інваріантною культурою, дата — ISO 8601, запис довідника — <c>#id</c>).</param>
+public sealed record NonMonthConflictValue(int PeriodKey, string? Value);
 
 /// <summary>Комірка, значення якої перезапише нова комірочна формула (ACC-OW).</summary>
 /// <param name="SheetCode">Код аркуша вихідної версії.</param>
@@ -1170,6 +1220,11 @@ public sealed class MigrateDocumentVersionHandler(
                                     .ToList(),
                             monthTransferredValues = planned.YearTransition ? plan.MonthTransferredValues : (long?)null,
                             recomputedValues = planned.YearTransition ? plan.RecomputedValues : (long?)null,
+
+                            // ✎ LAND-YEAR L3 (B-static): скільки немісячних значень якір року дістав з найпізнішого місяця.
+                            nonMonthCopiedToAnchor = planned.YearTransition ? plan.NonMonthCopiedToAnchor : (long?)null,
+                            nonMonthAnchorRowsCreated = planned.YearTransition ? plan.NonMonthAnchorRowsCreated : (long?)null,
+                            nonMonthAnchorInstancesCreated = planned.YearTransition ? plan.NonMonthAnchorInstancesCreated : (long?)null,
                         }),
                         profile.UserId, currentUser.CorrelationId),
                     innerCt).ConfigureAwait(false);
@@ -1482,6 +1537,26 @@ public sealed class MigrateDocumentVersionHandler(
         return lost;
     }
 
+    /// <summary>
+    /// ✎ LAND-YEAR L3 (B-static): конфлікти кроку якоря — у коди цільової версії (аркуш, таблиця, колонка). Невідомий
+    /// ідентифікатор (не мав би траплятися: колонки якоря взято з цього ж знімка) — сам ідентифікатор текстом.
+    /// </summary>
+    private static List<NonMonthConflictItem> AnchorConflictItems(VersionMigrationAnchorFill fill, TemplateVersionSnapshot to)
+    {
+        var tables = to.Sheets.SelectMany(s => s.Tables.Select(t => (Sheet: s.Code, Table: t)))
+            .ToDictionary(x => x.Table.Id, x => (x.Sheet, x.Table.Code));
+        return [.. fill.Conflicts.Select(c =>
+        {
+            var (sheet, table) = tables.TryGetValue(c.TableDefId, out var found)
+                ? found
+                : (string.Empty, c.TableDefId.ToString(CultureInfo.InvariantCulture));
+            var column = to.ColumnsById.TryGetValue(c.ColumnDefId, out var def)
+                ? def.Code
+                : c.ColumnDefId.ToString(CultureInfo.InvariantCulture);
+            return new NonMonthConflictItem(c.DocumentId, sheet, table, c.RowKey, column, c.Values);
+        })];
+    }
+
     /// <summary>RPT-STABLE B2: позначки ручних значень лише в періодах, які перенос зачіпає (0 - усі).</summary>
     private static IReadOnlyList<ProjectFormulaOverride> InScope(IReadOnlyList<ProjectFormulaOverride> marks, int fromPeriodKey)
         => fromPeriodKey == 0 ? marks : [.. marks.Where(m => m.Address.PeriodKey.Value >= fromPeriodKey)];
@@ -1528,6 +1603,21 @@ public sealed class MigrateDocumentVersionHandler(
             from, to, scope.Cells, scope.HeaderValues, renames, lookup.Input, monthColumns: yearTransition);
         plan = plan with { FromPeriodKey = range.FromPeriodKey, ColumnRenames = RenamePairs(plan, from, to) };
 
+        // ✎ LAND-YEAR L3 (B-static): річний перегляд читає немісячний ввід із ЯКОРЯ року, а «копія на місяць» могла тримати
+        // його лише в пізніших місяцях (Land doc 96, T8_00 — у 202609..202611, якір 202601 порожній). Колонки якоря — введені
+        // немісячні колонки цільової версії; сам крок (копія з найпізнішого місяця, конфлікт — відмова) рахує сховище.
+        if (yearTransition)
+        {
+            plan = plan with
+            {
+                AnchorColumns = [.. to.Sheets.Where(s => !s.IsDeleted).SelectMany(s => s.Tables).Where(t => !t.IsDeleted)
+                    .SelectMany(t => t.Columns)
+                    .Where(c => !c.IsDeleted && !c.IsMonthColumn && !c.IsComputed)
+                    .Select(c => c.Id)
+                    .Order()],
+            };
+        }
+
         // ✎ D-461: ручні значення, яких цільова формула не дозволяє, — пункти «OverrideLost» (перенос не блокують).
         var overrideMap = plan.Columns.ToDictionary(c => c.SourceColumnDefId, c => c.TargetColumnDefId);
         var lostOverrides = formulaOverrides is null
@@ -1549,7 +1639,27 @@ public sealed class MigrateDocumentVersionHandler(
         // нові `SheetDefId`, значення переїжджають за кодами, перерахунок Submitted/Approved не пише.
         // ⚠ Аркуш, якого немає серед живих вихідної версії (не потрапив у `plan.Sheets`), `WorkflowSql` ВИДАЛИВ би
         // разом зі станом, тому рахується зачепленим.
-        var locked = ClassifyLocked(scope, plan, from);
+        // ✎ LAND-YEAR L3 (B-static, рішення координатора): немісячна комірка без значення в якорі дістає значення
+        // НАЙПІЗНІШОГО місяця року (тією самою транзакцією перемикання версії; бракує екземпляра таблиці чи рядків у
+        // якорі — вони створюються); місяці не згодні — відмова з переліком, система мовчки не вибирає; значення якоря не
+        // чіпається ніколи. Рахується ДО LP-32: запис у поданий/затверджений аркуш якоря — це зачеплений аркуш.
+        var anchorFill = VersionMigrationAnchorFill.None;
+        if (yearTransition && plan.AnchorColumns.Count > 0)
+        {
+            anchorFill = await store.ReadAnchorFillAsync(projectId, plan, MaxItems, ct).ConfigureAwait(false);
+            plan = plan with
+            {
+                NonMonthCopiedToAnchor = anchorFill.Copies,
+                NonMonthAnchorRowsCreated = anchorFill.RowsCreated,
+                NonMonthAnchorInstancesCreated = anchorFill.InstancesCreated,
+            };
+            if (anchorFill.ConflictCells > 0)
+            {
+                refusals.Add("nonMonthConflict");
+            }
+        }
+
+        var locked = ClassifyLocked(scope, plan, from, AnchorWrittenSheets(anchorFill, plan, to));
         if (locked.Affected > 0)
         {
             refusals.Add("sheetsLocked");
@@ -1744,7 +1854,13 @@ public sealed class MigrateDocumentVersionHandler(
             LockedOverrideItems: lockedOverrides.Items.Count == 0 ? null : lockedOverrides.Items,
             MonthTransferredValues: yearTransition ? plan.MonthTransferredValues : null,
             RecomputedValues: yearTransition ? plan.RecomputedValues : null,
-            MonthColumnsUnmapped: plan.MonthColumnsUnmapped.Count == 0 ? null : [.. plan.MonthColumnsUnmapped.Take(MaxItems)]);
+            MonthColumnsUnmapped: plan.MonthColumnsUnmapped.Count == 0 ? null : [.. plan.MonthColumnsUnmapped.Take(MaxItems)],
+            NonMonthCopiedToAnchor: yearTransition ? anchorFill.Copies : null,
+            NonMonthConflicts: anchorFill.ConflictCells == 0 ? null : AnchorConflictItems(anchorFill, to),
+            NonMonthConflictsTruncated: anchorFill.ConflictCells == 0 ? null : anchorFill.ConflictCells > anchorFill.Conflicts.Count,
+            NonMonthAnchorRowsCreated: yearTransition ? anchorFill.RowsCreated : null,
+            AnchorInstancesCreated: yearTransition ? anchorFill.InstancesCreated : null,
+            NonMonthSkippedArchived: yearTransition ? anchorFill.SkippedArchived : null);
 
         return new PlannedMigration(
             dto, plan, foreignKeys, extendedPlan.Remap with { CollectionMappingIds = collectionPlan.RemapIds }, lookup.Rows,
@@ -1886,8 +2002,40 @@ public sealed class MigrateDocumentVersionHandler(
     private sealed record LockedClassification(
         int Carried, int Affected, IReadOnlyList<LockedSheetItem> Items, bool Truncated);
 
+    /// <summary>
+    /// ✎ LAND-YEAR L3 (B-static): пари «документ × аркуш ВИХІДНОЇ версії × період якоря», куди пише крок якоря (таблиця
+    /// цільової версії → її аркуш → аркуш-джерело за мапою аркушів плану). Подана/затверджена така пара — зачеплена (LP-32).
+    /// </summary>
+    private static HashSet<(long DocumentId, int SheetDefId, int PeriodKey)> AnchorWrittenSheets(
+        VersionMigrationAnchorFill fill, VersionMigrationPlan plan, TemplateVersionSnapshot to)
+    {
+        var result = new HashSet<(long, int, int)>();
+        if (fill.Targets is not { Count: > 0 } targets)
+        {
+            return result;
+        }
+
+        var targetSheetOfTable = to.Sheets.SelectMany(s => s.Tables.Select(t => (t.Id, SheetId: s.Id)))
+            .ToDictionary(x => x.Id, x => x.SheetId);
+        var sourceSheetsOf = plan.Sheets.GroupBy(p => p.Value).ToDictionary(g => g.Key, g => g.Select(p => p.Key).ToList());
+        foreach (var target in targets)
+        {
+            if (targetSheetOfTable.TryGetValue(target.TableDefId, out var sheet)
+                && sourceSheetsOf.TryGetValue(sheet, out var sources))
+            {
+                foreach (var source in sources)
+                {
+                    result.Add((target.DocumentId, source, target.PeriodKey));
+                }
+            }
+        }
+
+        return result;
+    }
+
     private static LockedClassification ClassifyLocked(
-        VersionMigrationScope scope, VersionMigrationPlan plan, TemplateVersionSnapshot from)
+        VersionMigrationScope scope, VersionMigrationPlan plan, TemplateVersionSnapshot from,
+        HashSet<(long DocumentId, int SheetDefId, int PeriodKey)>? anchorWritten = null)
     {
         if (scope.LockedSheets == 0)
         {
@@ -1909,7 +2057,8 @@ public sealed class MigrateDocumentVersionHandler(
                 codes.GetValueOrDefault(l.SheetDefId) ?? string.Create(CultureInfo.InvariantCulture, $"#{l.SheetDefId}"),
                 l.PeriodKey,
                 l.Status,
-                Affected: !plan.Sheets.ContainsKey(l.SheetDefId) || touched.Contains(l.SheetDefId)))
+                Affected: !plan.Sheets.ContainsKey(l.SheetDefId) || touched.Contains(l.SheetDefId)
+                          || anchorWritten?.Contains((l.DocumentId, l.SheetDefId, l.PeriodKey)) == true))
             .ToList();
 
         var affected = items.Count(i => i.Affected);
@@ -2144,7 +2293,9 @@ public sealed class MigrateDocumentVersionHandler(
                                         ? "err.ECR-SCHM-0422.migrateSheetCopiesNotMapped"
                                         : dto.Refusals.Contains("assignmentsConflict")
                                             ? "err.ECR-SCHM-0422.migrateAssignmentsConflict"
-                                            : "err.ECR-SCHM-0422.migrateDataLoss",
+                                            : dto.Refusals.Contains("nonMonthConflict") && dto.LostValues == 0 && guardedValues == 0
+                                                ? "err.ECR-SCHM-0422.migrateNonMonthConflict"
+                                                : "err.ECR-SCHM-0422.migrateDataLoss",
                 ["lostValues"] = dto.LostValues.ToString(CultureInfo.InvariantCulture),
                 ["lockedDocumentCount"] = dto.LockedDocumentCount > 0
                     ? dto.LockedDocumentCount.Value.ToString(CultureInfo.InvariantCulture)
@@ -2162,6 +2313,13 @@ public sealed class MigrateDocumentVersionHandler(
                 ["renameConflicts"] = renameConflicts is { Count: > 0 } ? renameConflicts : null,
                 // ✎ LAND-YEAR L3: немісячні колонки зі значеннями без місячних цілей у річній версії (лише шляхи шаблону).
                 ["monthColumnsUnmapped"] = dto.MonthColumnsUnmapped is { Count: > 0 } ? dto.MonthColumnsUnmapped : null,
+                // ✎ LAND-YEAR L3 (B-static): адреси немісячних комірок, де місяці не згодні (лише коди шаблону й ключ рядка;
+                // значення — у звіті сухого прогону, доступному тому самому адміністратору шаблону).
+                ["nonMonthConflicts"] = dto.NonMonthConflicts is { Count: > 0 } conflicts
+                    ? conflicts.Select(c => string.Create(
+                            CultureInfo.InvariantCulture, $"{c.DocumentId}|{c.SheetCode}.{c.TableCode}.{c.ColumnCode}|{c.RowKey}"))
+                        .ToList()
+                    : null,
                 // D-10-b: лише КІЛЬКІСТЬ передач, що зіткнулися б із наявними (без виконавців і зрізів).
                 ["assignmentConflicts"] = assignmentConflicts > 0
                     ? assignmentConflicts.ToString(CultureInfo.InvariantCulture)

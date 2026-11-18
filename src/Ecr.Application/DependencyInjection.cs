@@ -69,6 +69,9 @@ public static class DependencyInjection
         services.AddScoped<Permits.AirLimits.GetAirScopeFieldsHandler>();
         services.AddScoped<Permits.AirLimits.AirTypeSystemProvisioner>();
 
+        // B167: один повтор ідемпотентного запису даних довідника, що програв одночасному однаковому запиту.
+        services.AddScoped<Registries.RegistryWriteRetry>();
+
         // Paste/import of a permit table: saved column mapping, lookups by code or name, .xlsx sheet as text.
         services.AddScoped<Permits.Import.PermitImportMappingHandler>();
         services.AddScoped<Permits.Import.PermitImportLookupHandler>();
@@ -154,6 +157,8 @@ public static class DependencyInjection
         services.AddScoped<Templates.RenameTemplateHandler>();
         services.AddScoped<Templates.SetTemplateArchivedHandler>();
         services.AddScoped<Templates.SetTemplateDocumentPolicyHandler>(); // B151
+        services.AddScoped<Calculations.SourceBindings.ListDocumentSourceBindingsHandler>(); // B80 N1
+        services.AddScoped<Calculations.SourceBindings.SwitchDocumentSourceStateHandler>(); // B80 N1
 
         services.AddScoped<Projects.ListProjectsHandler>();
         services.AddScoped<Projects.CreateProjectHandler>();

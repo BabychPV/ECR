@@ -54,6 +54,9 @@ function Join-Root([string]$relative) {
 # ───────────────────────── Константи ключів із src/** ─────────────────────────
 
 $script:Consts = New-Object System.Collections.ArrayList
+# Індекс ім'я -> записи в порядку оголошення (B164: Resolve-Ref був лінійним проходом Where-Object по всіх ~2500 константах
+# на кожне посилання). Хеш-таблиця PowerShell нечутлива до регістру — як і -eq у попередньому фільтрі.
+$script:ConstsByName = @{}
 $script:Enums = @{}
 $script:ConstsLoaded = $false
 $script:Problems = New-Object System.Collections.ArrayList
@@ -63,10 +66,23 @@ function Load-Consts {
     $declRx = [regex]'(?m)\b(?:const|static\s+readonly)\s+(?:string|int)\s+(\w+)\s*=\s*([^;]+);'
     $clsRx = [regex]'\b(?:class|record|struct)\s+(\w+)'
     $enumRx = [regex]'(?s)\benum\s+(\w+)\s*(?::\s*\w+\s*)?\{(.*?)\}'
-    $files = Get-ChildItem -Path (Join-Root 'src') -Recurse -Filter '*.cs' |
-        Where-Object { $_.FullName -notmatch '[\\/](obj|bin)[\\/]' }
+    # Обхід у тому самому порядку, що й Get-ChildItem -Recurse (файли каталогу, потім підкаталоги), але каталоги
+    # obj/bin/node_modules відсікаються ДО спуску в них, а не фільтром після повного обходу (B164).
+    $files = New-Object System.Collections.Generic.List[string]
+    $pending = New-Object System.Collections.Generic.Stack[string]
+    $pending.Push((Join-Root 'src'))
+    while ($pending.Count -gt 0) {
+        $dir = $pending.Pop()
+        foreach ($f in [System.IO.Directory]::GetFiles($dir, '*.cs')) { $files.Add($f) }
+        $subdirs = [System.IO.Directory]::GetDirectories($dir)
+        for ($i = $subdirs.Length - 1; $i -ge 0; $i--) {
+            $leaf = [System.IO.Path]::GetFileName($subdirs[$i])
+            if ($leaf -eq 'obj' -or $leaf -eq 'bin' -or $leaf -eq 'node_modules') { continue }
+            $pending.Push($subdirs[$i])
+        }
+    }
     foreach ($file in $files) {
-        $text = Read-Text $file.FullName
+        $text = Read-Text $file
         if ($text -match '\benum\s+\w+') {
             foreach ($em in $enumRx.Matches($text)) {
                 $body = $em.Groups[2].Value -replace '(?m)//.*$', '' -replace '\[[^\]]*\]', ''
@@ -81,7 +97,11 @@ function Load-Consts {
             foreach ($c in $classes) {
                 if ($c.Index -lt $m.Index) { $cls = $c.Groups[1].Value } else { break }
             }
-            [void]$script:Consts.Add(@{ Class = $cls; Name = $m.Groups[1].Value; Expr = $m.Groups[2].Value.Trim(); State = 0; Value = $null })
+            $entry = @{ Class = $cls; Name = $m.Groups[1].Value; Expr = $m.Groups[2].Value.Trim(); State = 0; Value = $null }
+            [void]$script:Consts.Add($entry)
+            $bucket = $script:ConstsByName[$entry.Name]
+            if ($null -eq $bucket) { $bucket = New-Object System.Collections.ArrayList; $script:ConstsByName[$entry.Name] = $bucket }
+            [void]$bucket.Add($entry)
         }
     }
     $script:ConstsLoaded = $true
@@ -104,7 +124,7 @@ function Get-ConstValue($entry) {
 
 # Значення виразу з рядкових літералів, цілих, посилань на константи, конкатенації й інтерполяції; інакше $null.
 function Invoke-Expression-Const([string]$expr, [string]$cls) {
-    $tokens = @($script:TokenRx.Matches($expr) | ForEach-Object { $_.Value })
+    $tokens = @(foreach ($tm in $script:TokenRx.Matches($expr)) { $tm.Value })
     if ($tokens.Count -eq 0) { return $null }
     $sb = New-Object System.Text.StringBuilder
     foreach ($t in $tokens) {
@@ -142,13 +162,16 @@ function Resolve-Ref([string]$ref, [string]$cls) {
     $name = $parts[$parts.Count - 1]
     $qualifier = $null
     if ($parts.Count -gt 1) { $qualifier = $parts[$parts.Count - 2] }
-    $cands = @($script:Consts | Where-Object { $_.Name -eq $name -and ((-not $qualifier) -or $_.Class -eq $qualifier) })
+    $bucket = $script:ConstsByName[$name]
+    if ($null -eq $bucket) { return $null }
+    $cands = @(foreach ($c in $bucket) { if ((-not $qualifier) -or $c.Class -eq $qualifier) { $c } })
     if ($cands.Count -eq 0) { return $null }
     if (-not $qualifier -and $cands.Count -gt 1) {
-        $same = @($cands | Where-Object { $_.Class -eq $cls })
+        $same = @(foreach ($c in $cands) { if ($c.Class -eq $cls) { $c } })
         if ($same.Count -gt 0) { $cands = $same }
     }
-    $values = @($cands | ForEach-Object { Get-ConstValue $_ } | Where-Object { $null -ne $_ } | Select-Object -Unique)
+    $resolved = @(foreach ($c in $cands) { $cv = Get-ConstValue $c; if ($null -ne $cv) { $cv } })
+    $values = @($resolved | Select-Object -Unique)
     if ($values.Count -eq 1) { return [string]$values[0] }
     if ($values.Count -gt 1) {
         [void]$script:Problems.Add("константа '$ref' неоднозначна: " + ($values -join ' | ') + " — уточніть клас у вираженні")
@@ -451,6 +474,9 @@ function Sync-Blocks([bool]$checkOnly) {
         'prereqs'   = { New-PrereqsBlock }
     }
     $docs = Get-ChildItem -Path (Join-Root 'docs') -Recurse -Filter '*.md'
+    # Кожен документ читається один раз на весь прогін, а не раз на генератор (B164); після запису кеш оновлюється,
+    # тож наступний генератор бачить уже переписаний текст — як і при повторному читанні з диска.
+    $docText = @{}
     $changed = New-Object System.Collections.ArrayList
     foreach ($name in $generators.Keys) {
         $expected = & $generators[$name]
@@ -459,7 +485,8 @@ function Sync-Blocks([bool]$checkOnly) {
         $endRx = '(?m)^<!-- /generated:' + [regex]::Escape($name) + ' -->$'
         $found = @()
         foreach ($doc in $docs) {
-            $text = (Read-Text $doc.FullName)
+            $text = $docText[$doc.FullName]
+            if ($null -eq $text) { $text = Read-Text $doc.FullName; $docText[$doc.FullName] = $text }
             if ($text -notmatch ('generated:' + [regex]::Escape($name) + ' -->')) { continue }
             $relative = $doc.FullName.Substring($root.Length).TrimStart('\', '/') -replace '\\', '/'
             $found += $relative
@@ -481,6 +508,7 @@ function Sync-Blocks([bool]$checkOnly) {
             $updated = $normalized.Substring(0, $s[0].Index) + $expected + $normalized.Substring($endPos)
             if ($crlf) { $updated = $updated.Replace("`n", "`r`n") }
             [System.IO.File]::WriteAllText($doc.FullName, $updated, $utf8)
+            $docText[$doc.FullName] = $updated
             [void]$changed.Add("$relative [$name]")
         }
         foreach ($required in $RequiredDocs[$name]) {

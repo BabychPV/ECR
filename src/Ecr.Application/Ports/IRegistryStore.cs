@@ -45,6 +45,20 @@ public interface IRegistryStore
     public Task<bool> LockDefinitionIsStaleAsync(int registryDefId, int loadedVersion, CancellationToken ct);
 
     /// <summary>
+    /// B167: виключний замок ідемпотентного розгортання <paramref name="resource"/> до кінця поточної транзакції (між запитами й
+    /// інстансами застосунку).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Розгортання — «перевір, чи вже є, і створи». Без замка два одночасні виклики обидва бачать «немає» (RCSI) і обидва
+    /// створюють; другого відбиває унікальний індекс, тобто відмова там, де послідовний повтор — «нічого не змінено» (200).
+    /// Під замком другий чекає коміту першого, читає його рядки й нічого не робить — та сама відповідь, що й послідовно.
+    /// Лише всередині транзакції; не дочекалися — <c>409 lockTimeout</c>.
+    /// </remarks>
+    /// <param name="resource">Що розгортається (код типу чи довідника).</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task LockProvisioningAsync(string resource, CancellationToken ct);
+
+    /// <summary>
     /// Перше з полів набору, у якого є хоч одне збережене значення-посилання на запис довідника
     /// (<c>ValueRefEntryId</c> не порожній); <c>null</c> — жодного. Одним <c>EXISTS</c>-запитом
     /// по <c>dic.RegistryValue</c>: рахуються значення ВСІХ записів, включно з видаленими, і

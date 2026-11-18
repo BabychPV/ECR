@@ -5049,6 +5049,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/consistency/run` | `System.RunJob` | 5 |
 | `GET` | `/api/v1/health/facts` | `System.ViewHealth` | 5 |
 | `GET` | `/api/v1/health/partitions/script` | `System.ViewHealth` | 5 |
+| `GET` | `/api/v1/document-source-bindings` | `Calculation.ManageSourceBinding` | 5 |
+| `PUT` | `/api/v1/document-source-bindings/{id}/source-state` | `Calculation.ManageSourceBinding` | 5 |
 | `GET` | `/api/v1/jobs` | `System.ViewHealth` | 5 |
 | `GET` | `/api/v1/jobs?mine=true` | — (власні задачі) | 5 |
 | `GET` | `/api/v1/jobs/summary` | `System.ViewHealth` (або `mine=true` — власні задачі) | 5 |
@@ -6538,3 +6540,43 @@ public sealed record RowDto(
   lane 4 (до того їх доганяє нічний розклад чи кнопка, з позначкою за зміною чисел).
   Закривається lane 4 разом із налаштуванням на стовпець (`cfg.PeriodAccessRuleDef`, міграція).
 - **Ще не зроблено.** «Повернути місяці» (lane 2); налаштування на стовпець і методології (lane 4).
+
+## ✎ 2026-11-17 B80 N1: зв'язка документа-джерела і ворота «лише затверджене»
+
+Рішення людини 16.11: «так лише з погодженого HSE400»; сід лишає кожен стенд на `any`, `approvedOnly` — лише явне
+перемикання. Усе — лише додаванням; міграція `B80DocumentSourceBinding` (дві таблиці `cfg`).
+
+- **Таблиці.** `cfg.DocumentSourceBinding` (`Code` унікальний, `SourceTemplateId` → `cfg.Template`, `RegistryDefId` →
+  `cfg.RegistryDef`, унікальна пара; `MappingKind` = 1 — відображення складу HSE400 у коді; `SourceTableCodes` null;
+  `Policy` 0–3 `None`/`Warn`/`ConfirmWithReason`/`Block`; `SourceState` 0 `Any` / 1 `ApprovedOnly`, DEFAULT 0;
+  `ReadFromDocument`, `RecalculateDependents`; `UpdatedAt`, `UpdatedByUserId`) і `cfg.DocumentSourceBindingConsumer`
+  (`BindingId`, `TemplateId`). Сід (`99-epilogue.sql`, секція `B80:source-binding`): рядок `HSE400_LAND_COMPOSITION`
+  лише коли є шаблон `HSE400` і довідник `LAND_HSE400_COMPOSITION`, лише INSERT відсутнього (`Any`, `ConfirmWithReason`,
+  біти 1/1); споживач — шаблон `LAND_UI`.
+- **Ворота в завантажувачі.** `Hse400CompositionSnapshotLoader`: за `ApprovedOnly` місяць `MM` обраного документа HSE400
+  дає рядки складу лише коли аркуш таблиці (оригінал) має `Approved` у періоді-власнику місяця (місячний проєкт —
+  `yyyyMM`); інший місяць — без вводу, без `F_`, без нульового паритету, і довідник за рік документа не повертається.
+  За `Any` — запиту станів немає, рядки ті самі, що до B80.
+- **Перекриття ключами.** `Calculations:Hse400CompositionFromDocument` і `Calculations:Hse400RecalculateLandDependents`,
+  задані явно (у т. ч. `appsettings.json`), діють як і доти; не задані — вирішують біти зв'язки (`ReadFromDocument`,
+  `RecalculateDependents`); зв'язки немає — вимкнено.
+- **`GET /api/v1/document-source-bindings`** → `DocumentSourceBindingDto[]` (`id`, `code`, `sourceTemplateCode`,
+  `registryCode`, `sourceState` `any`|`approvedOnly`, `policy`, `readFromDocument`, `recalculateDependents`,
+  `readFromDocumentEffective`, `readFromDocumentSource` `configuration`|`binding`, `consumerTemplateCodes`, `updatedAt`,
+  `updatedByUserId`). Право `Calculation.ManageSourceBinding` (нове, глобальне, не небезпечне: з вбудованих ролей —
+  лише `SystemAdministrator`); без нього 403 `ECR-AUTH-0403`.
+- **`PUT /api/v1/document-source-bindings/{id}/source-state`** `{ sourceState }` → `SwitchDocumentSourceStateResponse`
+  (`binding`, `changed`, `queuedYears`). Те саме право. `approvedOnly` — 409 `ECR-CALC-0409`, доки документ-джерело
+  поточного року (UTC) не лежить у місячному проєкті з погодженням: `sourceBindingNoDocument`, `sourceBindingNotMonthly`,
+  `sourceBindingWorkflowNone` (деталі `bindingId`, `year`, `documentId`). `any` — завжди. Невідомий стан — 422
+  `ECR-REQ-0422` `sourceStateInvalid`; немає зв'язки — 404 `ECR-CALC-0404` `sourceBinding`. Справжня зміна: подія
+  `DocumentSourceBindingChanged` у `aud.SecurityEvent` (`bindingId`, `code`, `oldState`, `newState`, `queuedYears`,
+  автор) у тій самій транзакції і, коли читання з документа діє, злита задача `IRegistryImpactRecalculationJob` на
+  кожен рік джерела (`registry-impact-r{id}-y{year}`; затверджені аркуші Land не перераховуються, подані — з
+  позначкою). Повтор того самого стану — `changed = false`, нічого не пише.
+- **`GET /api/v1/health/facts` → `calculations`** (додано): `hse400SourceState` (`any`|`approvedOnly`; `null` — зв'язки
+  немає), `hse400ApprovedMonths` (затверджених місяців обраного документа поточного року; `null` — зв'язки чи документа
+  немає), `hse400SourceWarning` (документ року є і зв'язка на `any` або на `approvedOnly` з незатвердженим місяцем, де є
+  дані). `hse400CompositionSource` = `Binding`, коли ключ не задано, а значення дав біт зв'язки.
+- Порти: `IDocumentSourceBindingStore` (перелік, `UPDLOCK` зв'язки, обраний документ-джерело року з періодичністю проєкту й режимом погодження, роки джерела) і `IDocumentSourceFlagOverrides` (явні значення двох ключів або `null`).
+- Помилки — наявні коди (`ECR-CALC-0404/0409`, `ECR-REQ-0422`) з новими `messageKey`; §7 не змінюється.

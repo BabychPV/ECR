@@ -53,6 +53,9 @@ export function refusalText(reason: string): string {
       return t('documents.migrateRefusalSheetCopiesNotMapped');
     case 'assignmentsConflict':
       return t('documents.migrateRefusalAssignmentsConflict');
+    // ✎ LAND-YEAR L3 (B-static): якір року порожній, місяці року не згодні в немісячній комірці.
+    case 'nonMonthConflict':
+      return t('documents.migrateRefusalNonMonthConflict');
     default:
       return reason;
   }

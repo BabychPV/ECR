@@ -313,8 +313,9 @@ public sealed class GetTableSliceHandler(
         {
             if (results is not null)
             {
-                cells = await new Calculations.MonthRowResultOverlay(methodologies, results)
-                    .ApplyAsync(documentId, instance.PeriodKey, tableInstanceId, table.Id, rowIds, cells, monthColumns, ct)
+                // B80 N0: на маршрутизованому місячному документі місяць m — з екземпляра періоду-власника m.
+                cells = await new Calculations.MonthRowResultOverlay(methodologies, results, monthRouter)
+                    .ApplyAsync(documentId, instance.PeriodKey, tableInstanceId, table, rowIds, cells, monthColumns, ct)
                     .ConfigureAwait(false);
             }
 

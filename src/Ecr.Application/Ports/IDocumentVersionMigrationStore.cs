@@ -225,6 +225,21 @@ public interface IDocumentVersionMigrationStore
         => CountUnmappedBindingsAsync(sourceVersionId, columnMap, ct);
 
     /// <summary>
+    /// ✎ LAND-YEAR L3 (B-static): що зробить крок «немісячне значення → якір року» переходу на рік. Для кожної комірки
+    /// колонки з <see cref="VersionMigrationPlan.AnchorColumns"/>, якої немає в якорі (найменший період року календаря
+    /// проєкту, у межах переносу), — значення місяців того самого документа, таблиці й рядка (за <c>RowKey</c>): згодні —
+    /// копія з найпізнішого місяця; різні — конфлікт. Якір без такого рядка — поза кроком (нічого не копіюється).
+    /// </summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="plan">План (мапи колонок/таблиць, «з місяця», колонки якоря).</param>
+    /// <param name="maxConflicts">Стеля переліку конфліктів.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>Типова реалізація (обгортки в тестах) — кроку немає.</remarks>
+    public Task<VersionMigrationAnchorFill> ReadAnchorFillAsync(
+        int projectId, VersionMigrationPlan plan, int maxConflicts, CancellationToken ct)
+        => Task.FromResult(VersionMigrationAnchorFill.None);
+
+    /// <summary>
     /// Мапінги збору (<c>ext.EntityFieldMap</c>), що адресують колонки вихідної версії шаблону (D-1 RC20).
     /// </summary>
     /// <param name="sourceVersionId">Вихідна версія шаблону.</param>

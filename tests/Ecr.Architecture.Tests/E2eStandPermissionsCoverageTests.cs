@@ -43,6 +43,7 @@ public sealed partial class E2eStandPermissionsCoverageTests
         ["Calculation.EditConstant"] = "константи розрахунків e2e не змінює",
         ["Calculation.EditRule"] = "правила розрахунків e2e не змінює",
         ["Calculation.ManageRequiredInputs"] = "обов'язкові входи e2e не налаштовує",
+        ["Calculation.ManageSourceBinding"] = "B80 N1: перемикання зв'язки документа-джерела — екран у N6, e2e поки не перемикає",
         ["Report.Export"] = "експорт звітів e2e не перевіряє",
         ["Report.ViewSnapshot"] = "перегляд знімків звітів e2e не перевіряє (BuildSnapshot є)",
         ["Report.EditDefinition"] = "небезпечне (IsDangerous); видається явно, e2e не змінює визначення звітів",

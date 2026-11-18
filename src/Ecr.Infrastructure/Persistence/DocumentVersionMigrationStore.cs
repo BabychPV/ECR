@@ -482,6 +482,150 @@ public sealed partial class DocumentVersionMigrationStore(
         return collidesWithExisting + duplicatesAmongMoved;
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// Той самий текст <see cref="AnchorFillSql"/>, що виконує T2 (<c>@apply = 0</c> — лише рахує й перелічує). Комірки
+    /// зводяться до цільових ідентифікаторів (<c>@columnMap</c>/<c>@tableMap</c>, або вже цільові — відновлення після обриву
+    /// важкої частини), тож план до й після важкої частини однаковий.
+    /// </remarks>
+    public async Task<VersionMigrationAnchorFill> ReadAnchorFillAsync(
+        int projectId, VersionMigrationPlan plan, int maxConflicts, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        if (plan.AnchorColumns.Count == 0)
+        {
+            return VersionMigrationAnchorFill.None;
+        }
+
+        using var timeout = ExtendTimeout();
+        var connection = db.Database.GetDbConnection();
+        var opened = false;
+        if (connection.State != System.Data.ConnectionState.Open)
+        {
+            await db.Database.OpenConnectionAsync(ct).ConfigureAwait(false);
+            opened = true;
+        }
+
+        try
+        {
+            await using var command = connection.CreateCommand();
+            command.Transaction = db.Database.CurrentTransaction?.GetDbTransaction();
+            command.CommandTimeout = ApplyCommandTimeoutSeconds;
+            command.CommandText = Prelude + AnchorFillSql;
+            command.Parameters.AddRange(new SqlParameter[]
+            {
+                new("@projectId", projectId),
+                new("@fromPeriod", plan.FromPeriodKey),
+                new("@sheets", System.Data.SqlDbType.NVarChar, -1) { Value = JsonSerializer.Serialize(plan.Sheets.Select(p => new { o = p.Key, n = p.Value })) },
+                new("@tables", System.Data.SqlDbType.NVarChar, -1) { Value = JsonSerializer.Serialize(plan.Tables.Select(p => new { o = p.Key, n = p.Value })) },
+                new("@columns", System.Data.SqlDbType.NVarChar, -1)
+                {
+                    Value = JsonSerializer.Serialize(plan.Columns.Select(c => new { o = c.SourceColumnDefId, n = c.TargetColumnDefId, t = c.TargetTableDefId })),
+                },
+                new("@monthColumns", System.Data.SqlDbType.NVarChar, -1)
+                {
+                    Value = JsonSerializer.Serialize(plan.MonthColumns.Select(c => new
+                    {
+                        o = c.SourceColumnDefId, m = c.MonthNumber, n = c.TargetColumnDefId, t = c.TargetTableDefId,
+                    })),
+                },
+                new("@rows", System.Data.SqlDbType.NVarChar, -1) { Value = JsonSerializer.Serialize(plan.Rows.Select(p => new { o = p.Key, n = p.Value })) },
+                new("@headers", System.Data.SqlDbType.NVarChar, -1) { Value = JsonSerializer.Serialize(plan.HeaderFields.Select(p => new { o = p.Key, n = p.Value })) },
+                new("@anchorColumns", System.Data.SqlDbType.NVarChar, -1) { Value = JsonSerializer.Serialize(plan.AnchorColumns) },
+                new("@newRows", System.Data.SqlDbType.NVarChar, -1)
+                {
+                    Value = JsonSerializer.Serialize(plan.NewRows.Select(r => new { t = r.TargetTableDefId, d = r.TargetRowDefId, k = r.RowKey, s = r.Ordinal })),
+                },
+                new("@apply", false),
+                new("@maxConflicts", Math.Max(0, maxConflicts)),
+                new("@now", System.Data.SqlDbType.DateTime2) { Scale = 3, Value = DBNull.Value },   // лише гілка @apply = 1
+                new("@copied", System.Data.SqlDbType.BigInt) { Direction = System.Data.ParameterDirection.Output },
+                new("@rowsCreated", System.Data.SqlDbType.BigInt) { Direction = System.Data.ParameterDirection.Output },
+                new("@instancesCreated", System.Data.SqlDbType.BigInt) { Direction = System.Data.ParameterDirection.Output },
+            });
+
+            long copies = 0;
+            long conflictCells = 0;
+            long rowsCreated = 0;
+            long instancesCreated = 0;
+            long skippedArchived = 0;
+            var conflicts = new List<VersionMigrationAnchorConflict>();
+            var targets = new List<VersionMigrationAnchorTarget>();
+            await using (var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false))
+            {
+                if (await reader.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    copies = reader.GetInt64(0);
+                    conflictCells = reader.GetInt64(1);
+                    rowsCreated = reader.GetInt64(2);
+                    instancesCreated = reader.GetInt64(3);
+                    skippedArchived = reader.GetInt64(4);
+                }
+
+                await reader.NextResultAsync(ct).ConfigureAwait(false);
+                (long Doc, int Table, string RowKey, int Column)? current = null;
+                List<NonMonthConflictValue>? values = null;
+                while (await reader.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    var key = (reader.GetInt64(0), reader.GetInt32(1), reader.GetString(2), reader.GetInt32(3));
+                    if (current != key)
+                    {
+                        if (current is { } done && values is not null)
+                        {
+                            conflicts.Add(new VersionMigrationAnchorConflict(done.Doc, done.Table, done.RowKey, done.Column, values));
+                        }
+
+                        current = key;
+                        values = [];
+                    }
+
+                    values!.Add(new NonMonthConflictValue(reader.GetInt32(4), AnchorValueText(reader)));
+                }
+
+                if (current is { } last && values is not null)
+                {
+                    conflicts.Add(new VersionMigrationAnchorConflict(last.Doc, last.Table, last.RowKey, last.Column, values));
+                }
+
+                // Третій набір: куди крок пише (документ × таблиця × якір) — для перевірки поданих/затверджених аркушів.
+                await reader.NextResultAsync(ct).ConfigureAwait(false);
+                while (await reader.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    targets.Add(new VersionMigrationAnchorTarget(reader.GetInt64(0), reader.GetInt32(1), reader.GetInt32(2)));
+                }
+            }
+
+            return new VersionMigrationAnchorFill(copies, conflictCells, conflicts, rowsCreated, instancesCreated, targets)
+            {
+                SkippedArchived = skippedArchived,
+            };
+        }
+        finally
+        {
+            if (opened)
+            {
+                await db.Database.CloseConnectionAsync().ConfigureAwait(false);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Значення комірки текстом для переліку конфліктів (колонки 5..10 читача <see cref="AnchorFillSql"/>): текст як є,
+    /// число — інваріантно без хвостових нулів, дата — ISO 8601, логічне — <c>true</c>/<c>false</c>, запис довідника —
+    /// <c>#id</c>; одиниця (якщо є) — <c> [unit id]</c>.
+    /// </summary>
+    private static string? AnchorValueText(System.Data.Common.DbDataReader reader)
+    {
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        string? text = !reader.IsDBNull(5) ? reader.GetString(5)
+            : !reader.IsDBNull(6) ? reader.GetDecimal(6).ToString("G29", inv)
+            : !reader.IsDBNull(7) ? reader.GetDateTime(7).ToString("yyyy-MM-ddTHH:mm:ss.fff", inv)
+            : !reader.IsDBNull(8) ? (reader.GetBoolean(8) ? "true" : "false")
+            : !reader.IsDBNull(9) ? "#" + reader.GetInt32(9).ToString(inv)
+            : null;
+        return reader.IsDBNull(10) ? text : $"{text} [unit {reader.GetInt32(10).ToString(inv)}]";
+    }
+
     /// <summary>D-10: пари «аркуш, X → Y» з пунктів <c>Renamed</c> плану (код таблиці; шлях <c>SHEET.TABLE</c>).</summary>
     private static List<(string Sheet, string From, string To)> TableCodeRenames(VersionMigrationPlan plan)
         => plan.Items
@@ -538,6 +682,14 @@ public sealed partial class DocumentVersionMigrationStore(
             payload += "|mc" + JsonSerializer.Serialize(plan.MonthColumns
                 .OrderBy(c => c.SourceColumnDefId).ThenBy(c => c.MonthNumber)
                 .Select(c => new { c.SourceColumnDefId, c.MonthNumber, c.TargetColumnDefId, c.TargetTableDefId }));
+        }
+
+        // ✎ LAND-YEAR L3 (B-static): крок «немісячне → якір» і його колонки — теж лише коли є. ⚠ Кількість
+        // (NonMonthCopiedToAnchor) у відбиток НЕ входить, як і кількість значень Lookup: це дані, а не мапа; її звіряє сам
+        // крок у T2 з планом, перерахованим на старті (і при відновленні) під маркером, коли писарі вже заблоковані.
+        if (plan.AnchorColumns.Count > 0)
+        {
+            payload += "|ac" + JsonSerializer.Serialize(plan.AnchorColumns.Order());
         }
 
         return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(payload)))[..32];
@@ -961,6 +1113,54 @@ public sealed partial class DocumentVersionMigrationStore(
             if (hasNewRows)
             {
                 await BatchesAsync(VersionMigrationStages.NewRows, NewRowsBatchSql).ConfigureAwait(false);
+            }
+
+            // ✎ LAND-YEAR L3 (B-static): немісячний ввід, якого немає в якорі року, — з найпізнішого місяця, у ТІЙ САМІЙ
+            // транзакції перемикання версії (екземпляри й комірки вже на цільовій версії). Кількість мусить дорівнювати
+            // плану (сухому прогону): розбіжність — відкат T2 (ECR-CELL-0409), маркер лишається, повтор перераховує план.
+            if (plan.AnchorColumns.Count > 0)
+            {
+                await using var fill = db.Database.GetDbConnection().CreateCommand();
+                fill.Transaction = db.Database.CurrentTransaction!.GetDbTransaction();
+                fill.CommandTimeout = ApplyCommandTimeoutSeconds;
+                fill.CommandText = Prelude + AnchorFillSql;
+                var copied = new SqlParameter("@copied", System.Data.SqlDbType.BigInt) { Direction = System.Data.ParameterDirection.Output };
+                var rowsCreated = new SqlParameter("@rowsCreated", System.Data.SqlDbType.BigInt) { Direction = System.Data.ParameterDirection.Output };
+                var instancesCreated = new SqlParameter("@instancesCreated", System.Data.SqlDbType.BigInt) { Direction = System.Data.ParameterDirection.Output };
+                fill.Parameters.AddRange(Parameters(
+                    copied, BatchRows,
+                    new SqlParameter("@anchorColumns", System.Data.SqlDbType.NVarChar, -1) { Value = JsonSerializer.Serialize(plan.AnchorColumns) },
+                    new SqlParameter("@apply", true),
+                    // ⚠ Не `new SqlParameter(name, 0)`: літерал 0 обирає перевантаження (string, SqlDbType) — значення null.
+                    new SqlParameter("@maxConflicts", System.Data.SqlDbType.Int) { Value = 0 },
+                    rowsCreated,
+                    instancesCreated));
+                await fill.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+
+                // Екземпляри, рядки й комірки — кожне рівно як у плані; інакше відкат T2.
+                var expected = (Cells: plan.NonMonthCopiedToAnchor, Rows: plan.NonMonthAnchorRowsCreated, Instances: plan.NonMonthAnchorInstancesCreated);
+                var actual = (
+                    Cells: copied.Value is long c ? c : -1,
+                    Rows: rowsCreated.Value is long r ? r : -1,
+                    Instances: instancesCreated.Value is long i ? i : -1);
+                if (actual != expected)
+                {
+                    throw new Application.Errors.ConcurrencyConflictException(
+                        Domain.Errors.ErrorCodes.CellConflict,
+                        $"Перенос немісячних значень у якір року: комірок {actual.Cells}, рядків {actual.Rows}, екземплярів " +
+                        $"{actual.Instances} замість очікуваних {expected.Cells}/{expected.Rows}/{expected.Instances}: версію проєкту " +
+                        "не перемкнуто, повторіть перенос.",
+                        new Dictionary<string, object?>
+                        {
+                            ["messageKey"] = "err.ECR-CELL-0409.concurrentChange",
+                            ["expected"] = expected.Cells.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            ["actual"] = actual.Cells.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            ["expectedRows"] = expected.Rows.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            ["actualRows"] = actual.Rows.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            ["expectedInstances"] = expected.Instances.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            ["actualInstances"] = actual.Instances.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        });
+                }
             }
 
             await SingleAsync(VersionMigrationStages.Finish, FinishSql).ConfigureAwait(false);
@@ -2074,6 +2274,334 @@ public sealed partial class DocumentVersionMigrationStore(
         FROM   wf.ValidationResult v
         JOIN   @docs d ON d.Id = v.DocumentId
         WHERE  v.PeriodKey >= @fromPeriod;
+        """;
+
+    /// <summary>
+    /// ✎ LAND-YEAR L3 (B-static): немісячний ввід → якір року (після прелюдії). Якір — найменший ключ календаря проєкту
+    /// (<c>doc.Period</c>) у році (той самий, що в <c>MonthColumnRouter</c>/<c>PeriodCalendar.AnchorOf</c>), і лише якщо він у
+    /// межах переносу (<c>@periods</c>). Кандидат — введена (<c>IsCalculated = 0</c>, без позначки D-461) непорожня комірка
+    /// живого рядка пізнішого місяця того самого року, чия колонка (після мапи) — у <c>@anchorColumns</c>, а значення в
+    /// якорі (той самий документ, копія аркуша, таблиця після мапи й <c>RowKey</c>) немає. Групи «рядок якоря × колонка»:
+    /// одне значення по всіх місяцях — копія НАЙПІЗНІШОГО; різні — конфлікт.
+    /// </summary>
+    /// <remarks>
+    /// ✎ Land doc 96: якір може не мати ні екземпляра таблиці (T8_00 є лише у 202609..202611), ні рядків — тоді
+    /// екземпляр і рядки СТВОРЮЮТЬСЯ в якорі (лише для груп, які копіюються): екземпляр — <c>doc.TableInstanceSeq</c>,
+    /// <c>CreatedAt = ModifiedAt = @now</c>, <c>SheetCopyId</c> як у місяця (так, як <c>RowStore.CreateInstancesCoreAsync</c>);
+    /// рядок — <c>doc.TableRowSeq</c> і <c>@now</c>, як крок нових рядків (<c>NewRowsBatchSql</c>), з <c>RowKey</c>,
+    /// <c>RowDefId</c> і <c>Ordinal</c> НАЙПІЗНІШОГО місяця, де цей рядок живий. Знятий рядок якоря з тим самим ключем
+    /// (<c>UQ_TableRow_Key</c>) відновлюється, а не дублюється. Рядки, які heavy-частина знімає (<c>RowDefId</c> без
+    /// відповідника), не беруться ні до, ні після неї — план однаковий.
+    /// <c>@apply = 0</c> (сухий прогін, план) — три набори: (копій, конфліктних комірок, рядків, екземплярів), перелік
+    /// значень перших <c>@maxConflicts</c> конфліктних груп і пари «документ × таблиця × якір», куди писався б запис
+    /// (для перевірки поданих/затверджених аркушів). <c>@apply = 1</c> (T2, після екземплярів і нових рядків) — запис:
+    /// екземпляри, рядки, потім комірки (порожня заглушка оновлюється, відсутня вставляється, рядок — <c>ModifiedAt</c>);
+    /// кількості — у <c>@copied</c>, <c>@rowsCreated</c>, <c>@instancesCreated</c>. Конфліктні групи не пишуться ніколи.
+    /// </remarks>
+    private const string AnchorFillSql = """
+        DECLARE @anchorCols TABLE (n int PRIMARY KEY);
+        INSERT @anchorCols (n) SELECT DISTINCT CAST(value AS int) FROM OPENJSON(@anchorColumns);
+
+        DECLARE @anchors TABLE (Yr int PRIMARY KEY, PeriodKey int NOT NULL);
+        INSERT @anchors (Yr, PeriodKey)
+        SELECT p.PeriodKey / 100, MIN(p.PeriodKey)
+        FROM   doc.Period p
+        WHERE  p.ProjectId = @projectId
+        GROUP BY p.PeriodKey / 100;
+        DELETE a FROM @anchors a WHERE NOT EXISTS (SELECT 1 FROM @periods s WHERE s.PeriodKey = a.PeriodKey);
+
+        -- ✎ LAND-YEAR L3 (a′, рішення координатора): УСІ відсутні екземпляри таблиць цільової версії в якорі року — як
+        -- RowStore.FindMissingTableDefsAsync для якоря: склад документа (оригінал і КОЖНА копія аркуша, SheetCopyId = Id
+        -- рядка складу копії), аркуш цільової версії (через мапу аркушів або вже перемаплений WorkflowSql), живі таблиці;
+        -- F-13: документ без жодного гарячого екземпляра в якорі, але з архівними — заархівований рік, нічого не створюється.
+        -- ⚠ Таблиці з активною прив'язкою дозволу «рядки» (PM-10) пропускаються: рядки з дозволу планує сервіс дозволів лише
+        -- на шляху відкриття (RowStore.CreateInstancesCoreAsync); такий екземпляр створить перше відкриття, як і раніше.
+        DECLARE @missingInst TABLE (AnchorPeriod int NOT NULL, DocumentId bigint NOT NULL, CopyId bigint NOT NULL, TableDefId int NOT NULL,
+                                    PRIMARY KEY (AnchorPeriod, DocumentId, CopyId, TableDefId));
+        INSERT @missingInst (AnchorPeriod, DocumentId, CopyId, TableDefId)
+        SELECT DISTINCT a.PeriodKey, s.DocumentId, CASE WHEN s.CopyOfId IS NULL THEN 0 ELSE s.Id END, td.Id
+        FROM   @anchors a
+        CROSS JOIN doc.DocumentSheet s
+        JOIN   @docs d ON d.Id = s.DocumentId
+        CROSS APPLY (SELECT COALESCE((SELECT m.n FROM @sheetMap m WHERE m.o = s.SheetDefId), s.SheetDefId) AS SheetId) k
+        JOIN   cfg.TableDef td ON td.SheetDefId = k.SheetId AND td.IsDeleted = 0
+        WHERE  EXISTS (SELECT 1 FROM @sheetMap m WHERE m.n = k.SheetId)
+          AND  NOT EXISTS (SELECT 1 FROM doc.TableInstance ti
+                           WHERE ti.PeriodKey = a.PeriodKey AND ti.DocumentId = s.DocumentId
+                             AND ISNULL(ti.SheetCopyId, 0) = CASE WHEN s.CopyOfId IS NULL THEN 0 ELSE s.Id END
+                             AND (ti.TableDefId = td.Id OR EXISTS (SELECT 1 FROM @tableMap tm WHERE tm.o = ti.TableDefId AND tm.n = td.Id)))
+          AND  NOT EXISTS (SELECT 1 FROM cfg.PermitSheetBinding b WHERE b.SheetTableDefId = td.Id AND b.IsActive = 1 AND b.Mode = 0)
+          AND  NOT (NOT EXISTS (SELECT 1 FROM doc.TableInstance h WHERE h.PeriodKey = a.PeriodKey AND h.DocumentId = s.DocumentId)
+                    AND EXISTS (SELECT 1 FROM arc.TableInstance x WHERE x.PeriodKey = a.PeriodKey AND x.DocumentId = s.DocumentId));
+
+        -- ⛔ B69 «архів незмінний» (рішення людини 13.11): той самий охоронець F-13, що й для @missingInst, — документ без
+        -- жодного гарячого екземпляра в якорі, але з arc.TableInstance, має заархівований якір. Для нього крок копії
+        -- пропускається ЦІЛКОМ (ні екземплярів, ні рядків, ні комірок) — пропуск, не відмова, як і для (a′). Рахується ДО
+        -- створення екземплярів (на заархівований документ воно однаково не пише).
+        DECLARE @archivedDocs TABLE (AnchorPeriod int NOT NULL, DocumentId bigint NOT NULL, PRIMARY KEY (AnchorPeriod, DocumentId));
+        INSERT @archivedDocs (AnchorPeriod, DocumentId)
+        SELECT a.PeriodKey, d.Id
+        FROM   @anchors a
+        CROSS JOIN @docs d
+        WHERE  NOT EXISTS (SELECT 1 FROM doc.TableInstance h WHERE h.PeriodKey = a.PeriodKey AND h.DocumentId = d.Id)
+          AND  EXISTS (SELECT 1 FROM arc.TableInstance x WHERE x.PeriodKey = a.PeriodKey AND x.DocumentId = d.Id);
+
+        DECLARE @structInstances bigint = 0;
+        IF @apply = 1
+        BEGIN
+            -- Як RowStore.CreateInstancesCoreAsync + MaterializeFixedRowsAsync: екземпляр із послідовності, CreatedAt = ModifiedAt,
+            -- і рядки КОЖНОГО живого RowDef таблиці (RowKey, Ordinal, RowDefId) — у тій самій транзакції.
+            INSERT doc.TableInstance (PeriodKey, Id, DocumentId, TableDefId, CreatedAt, ModifiedAt, SheetCopyId)
+            SELECT m.AnchorPeriod, NEXT VALUE FOR doc.TableInstanceSeq, m.DocumentId, m.TableDefId, @now, @now, NULLIF(m.CopyId, 0)
+            FROM   @missingInst m;
+            SET @structInstances = @@ROWCOUNT;
+
+            INSERT doc.TableRow (PeriodKey, Id, TableInstanceId, RowKey, RowDefId, Ordinal, IsDeleted, IsOrphaned, ModifiedAt)
+            SELECT ti.PeriodKey, NEXT VALUE FOR doc.TableRowSeq, ti.Id, rd.RowKey, rd.Id, rd.Ordinal, 0, 0, @now
+            FROM   @missingInst m
+            JOIN   doc.TableInstance ti ON ti.PeriodKey = m.AnchorPeriod AND ti.DocumentId = m.DocumentId
+                                       AND ti.TableDefId = m.TableDefId AND ISNULL(ti.SheetCopyId, 0) = m.CopyId
+            JOIN   cfg.RowDef rd        ON rd.TableDefId = m.TableDefId AND rd.IsDeleted = 0;
+        END
+
+        DECLARE @anchorInst TABLE (DocumentId bigint NOT NULL, CopyId bigint NOT NULL, TableDefId int NOT NULL,
+                                   PeriodKey int NOT NULL, Id bigint NOT NULL);
+        INSERT @anchorInst (DocumentId, CopyId, TableDefId, PeriodKey, Id)
+        SELECT ti.DocumentId, ISNULL(ti.SheetCopyId, 0), COALESCE(tm.n, ti.TableDefId), ti.PeriodKey, ti.Id
+        FROM   @anchors a
+        JOIN   @instances i        ON i.PeriodKey = a.PeriodKey
+        JOIN   doc.TableInstance ti ON ti.PeriodKey = i.PeriodKey AND ti.Id = i.Id
+        LEFT JOIN @tableMap tm     ON tm.o = ti.TableDefId;
+
+        -- Пізніші місяці року: екземпляри таблиць, що лишаються в цільовій версії (ключ — таблиця ПІСЛЯ мапи).
+        DECLARE @monthInst TABLE (DocumentId bigint NOT NULL, CopyId bigint NOT NULL, TableDefId int NOT NULL,
+                                  PeriodKey int NOT NULL, Id bigint NOT NULL, AnchorPeriod int NOT NULL);
+        INSERT @monthInst (DocumentId, CopyId, TableDefId, PeriodKey, Id, AnchorPeriod)
+        SELECT ti.DocumentId, ISNULL(ti.SheetCopyId, 0), COALESCE(tm.n, ti.TableDefId), ti.PeriodKey, ti.Id, a.PeriodKey
+        FROM   @anchors a
+        JOIN   @instances i         ON i.PeriodKey > a.PeriodKey AND i.PeriodKey <= a.Yr * 100 + 12
+        JOIN   doc.TableInstance ti ON ti.PeriodKey = i.PeriodKey AND ti.Id = i.Id
+        LEFT JOIN @tableMap tm      ON tm.o = ti.TableDefId
+        WHERE  tm.o IS NOT NULL OR EXISTS (SELECT 1 FROM @tableMap x WHERE x.n = ti.TableDefId);
+
+        -- B69: документи із заархівованим якорем (× рік), у яких крок мав би джерело (екземпляри пізніших місяців), —
+        -- у звіт (NonMonthSkippedArchived), а їхні місяці — геть із кроку.
+        DECLARE @skippedArchived bigint =
+            (SELECT COUNT_BIG(*) FROM (SELECT DISTINCT mi.AnchorPeriod, mi.DocumentId
+                                       FROM   @monthInst mi
+                                       JOIN   @archivedDocs ad ON ad.AnchorPeriod = mi.AnchorPeriod AND ad.DocumentId = mi.DocumentId) z);
+        DELETE mi
+        FROM   @monthInst mi
+        WHERE  EXISTS (SELECT 1 FROM @archivedDocs ad WHERE ad.AnchorPeriod = mi.AnchorPeriod AND ad.DocumentId = mi.DocumentId);
+
+        DECLARE @cand TABLE (
+            DocumentId bigint NOT NULL, CopyId bigint NOT NULL, TableDefId int NOT NULL, RowKey nvarchar(100) NOT NULL,
+            ColumnDefId int NOT NULL, PeriodKey int NOT NULL, AnchorPeriod int NOT NULL,
+            AnchorInstId bigint NULL, AnchorRowId bigint NULL, H binary(32) NOT NULL,
+            ValueString nvarchar(1000) NULL, ValueNumeric decimal(34, 16) NULL, ValueDate datetime2(3) NULL, ValueBool bit NULL,
+            ValueRegistryEntryId int NULL, ValueUnitId int NULL);
+        INSERT @cand (DocumentId, CopyId, TableDefId, RowKey, ColumnDefId, PeriodKey, AnchorPeriod, AnchorInstId, AnchorRowId, H,
+                      ValueString, ValueNumeric, ValueDate, ValueBool, ValueRegistryEntryId, ValueUnitId)
+        SELECT mi.DocumentId, mi.CopyId, mi.TableDefId, r.RowKey, k.Col, cv.PeriodKey, mi.AnchorPeriod, ai.Id, ar.Id,
+               CAST(HASHBYTES('SHA2_256', CONCAT(
+                   N's', LEN(cv.ValueString), N':', cv.ValueString,
+                   N'|n', CONVERT(nvarchar(64), cv.ValueNumeric),
+                   N'|d', CONVERT(nvarchar(30), cv.ValueDate, 126),
+                   N'|b', CONVERT(nvarchar(1), cv.ValueBool),
+                   N'|r', cv.ValueRegistryEntryId,
+                   N'|u', cv.ValueUnitId)) AS binary(32)),
+               cv.ValueString, cv.ValueNumeric, cv.ValueDate, cv.ValueBool, cv.ValueRegistryEntryId, cv.ValueUnitId
+        FROM   @monthInst mi
+        JOIN   doc.TableRow r       ON r.PeriodKey = mi.PeriodKey AND r.TableInstanceId = mi.Id
+        JOIN   doc.CellValue cv     ON cv.PeriodKey = r.PeriodKey AND cv.TableRowId = r.Id
+        LEFT JOIN @columnMap cm     ON cm.o = cv.ColumnDefId
+        CROSS APPLY (SELECT COALESCE(cm.n, cv.ColumnDefId) AS Col) k
+        JOIN   @anchorCols ac       ON ac.n = k.Col
+        LEFT JOIN @anchorInst ai    ON ai.PeriodKey = mi.AnchorPeriod AND ai.DocumentId = mi.DocumentId
+                                   AND ai.CopyId = mi.CopyId AND ai.TableDefId = mi.TableDefId
+        LEFT JOIN doc.TableRow ar   ON ar.PeriodKey = ai.PeriodKey AND ar.TableInstanceId = ai.Id
+                                   AND ar.RowKey = r.RowKey AND ar.IsDeleted = 0
+        WHERE  r.IsDeleted = 0
+          AND  (r.RowDefId IS NULL OR EXISTS (SELECT 1 FROM @rowMap m WHERE m.o = r.RowDefId OR m.n = r.RowDefId))
+          -- Таблиця з прив'язкою дозволу без екземпляра якоря — екземпляр створить відкриття (див. @missingInst).
+          AND  NOT (ai.Id IS NULL
+                    AND NOT EXISTS (SELECT 1 FROM @missingInst x WHERE x.AnchorPeriod = mi.AnchorPeriod AND x.DocumentId = mi.DocumentId
+                                      AND x.CopyId = mi.CopyId AND x.TableDefId = mi.TableDefId)
+                    AND EXISTS (SELECT 1 FROM cfg.PermitSheetBinding b WHERE b.SheetTableDefId = mi.TableDefId AND b.IsActive = 1 AND b.Mode = 0))
+          AND  cv.IsEmpty = 0
+          AND  cv.IsCalculated = 0
+          AND  NOT EXISTS (SELECT 1 FROM doc.CellFormulaOverride fo
+                           WHERE fo.PeriodKey = cv.PeriodKey AND fo.TableRowId = cv.TableRowId AND fo.ColumnDefId = cv.ColumnDefId)
+          -- Значення якоря (на цільовій колонці або ще на вихідній, до важкої частини) — недоторканне.
+          AND  NOT EXISTS (SELECT 1 FROM doc.CellValue av
+                           WHERE av.PeriodKey = ar.PeriodKey AND av.TableRowId = ar.Id AND av.IsEmpty = 0
+                             AND (av.ColumnDefId = k.Col
+                                  OR EXISTS (SELECT 1 FROM @columnMap x WHERE x.n = k.Col AND x.o = av.ColumnDefId)))
+        OPTION (RECOMPILE);
+
+        DECLARE @groups TABLE (AnchorPeriod int NOT NULL, DocumentId bigint NOT NULL, CopyId bigint NOT NULL, TableDefId int NOT NULL,
+                               RowKey nvarchar(100) NOT NULL, ColumnDefId int NOT NULL, Kinds int NOT NULL,
+                               AnchorInstId bigint NULL, AnchorRowId bigint NULL,
+                               PRIMARY KEY (AnchorPeriod, DocumentId, CopyId, TableDefId, RowKey, ColumnDefId));
+        INSERT @groups (AnchorPeriod, DocumentId, CopyId, TableDefId, RowKey, ColumnDefId, Kinds, AnchorInstId, AnchorRowId)
+        SELECT AnchorPeriod, DocumentId, CopyId, TableDefId, RowKey, ColumnDefId, COUNT(DISTINCT H), MAX(AnchorInstId), MAX(AnchorRowId)
+        FROM   @cand
+        GROUP BY AnchorPeriod, DocumentId, CopyId, TableDefId, RowKey, ColumnDefId;
+
+        -- Рядки й екземпляри, яких бракує якорю: для КОЖНОЇ таблиці (документ × копія × таблиця × якір), куди крок копіює
+        -- хоч одне значення, — усі живі RowKey пізніших місяців, яких немає серед живих рядків якоря (фіксована T8_00
+        -- отримує всі свої рядки, а не лише заповнені). Рядки, які heavy-частина знімає, і рядки кроку нових рядків
+        -- (@newRows, з'являються лише в T2) не беруться — план до й після важкої частини однаковий.
+        DECLARE @needRows TABLE (AnchorPeriod int NOT NULL, DocumentId bigint NOT NULL, CopyId bigint NOT NULL, TableDefId int NOT NULL,
+                                 RowKey nvarchar(100) NOT NULL, AnchorInstId bigint NULL, RowDefId int NULL, Ordinal int NULL,
+                                 PRIMARY KEY (AnchorPeriod, DocumentId, CopyId, TableDefId, RowKey));
+        INSERT @needRows (AnchorPeriod, DocumentId, CopyId, TableDefId, RowKey, AnchorInstId)
+        SELECT DISTINCT mi.AnchorPeriod, mi.DocumentId, mi.CopyId, mi.TableDefId, r.RowKey, ai.Id
+        FROM   (SELECT DISTINCT AnchorPeriod, DocumentId, CopyId, TableDefId FROM @groups WHERE Kinds = 1) t
+        JOIN   @monthInst mi        ON mi.AnchorPeriod = t.AnchorPeriod AND mi.DocumentId = t.DocumentId
+                                   AND mi.CopyId = t.CopyId AND mi.TableDefId = t.TableDefId
+        JOIN   doc.TableRow r       ON r.PeriodKey = mi.PeriodKey AND r.TableInstanceId = mi.Id AND r.IsDeleted = 0
+        LEFT JOIN @anchorInst ai    ON ai.PeriodKey = mi.AnchorPeriod AND ai.DocumentId = mi.DocumentId
+                                   AND ai.CopyId = mi.CopyId AND ai.TableDefId = mi.TableDefId
+        WHERE  (r.RowDefId IS NULL OR EXISTS (SELECT 1 FROM @rowMap m WHERE m.o = r.RowDefId OR m.n = r.RowDefId))
+          AND  NOT EXISTS (SELECT 1 FROM OPENJSON(@newRows) WITH (d int) nw WHERE nw.d = r.RowDefId)
+          AND  NOT EXISTS (SELECT 1 FROM doc.TableRow ar
+                           WHERE ar.PeriodKey = ai.PeriodKey AND ar.TableInstanceId = ai.Id AND ar.RowKey = r.RowKey AND ar.IsDeleted = 0)
+          -- Фіксовані рядки екземпляра, який створює крок (a′), заводяться разом із ним (у сухому прогоні їх ще немає).
+          AND  NOT EXISTS (SELECT 1 FROM @missingInst x
+                           JOIN   cfg.RowDef rd ON rd.TableDefId = x.TableDefId AND rd.IsDeleted = 0
+                           WHERE  x.AnchorPeriod = mi.AnchorPeriod AND x.DocumentId = mi.DocumentId AND x.CopyId = mi.CopyId
+                             AND  x.TableDefId = mi.TableDefId AND rd.RowKey = r.RowKey);
+
+        DECLARE @needInst TABLE (AnchorPeriod int NOT NULL, DocumentId bigint NOT NULL, CopyId bigint NOT NULL, TableDefId int NOT NULL,
+                                 PRIMARY KEY (AnchorPeriod, DocumentId, CopyId, TableDefId));
+        INSERT @needInst (AnchorPeriod, DocumentId, CopyId, TableDefId)
+        SELECT DISTINCT nr.AnchorPeriod, nr.DocumentId, nr.CopyId, nr.TableDefId
+        FROM   @needRows nr
+        WHERE  nr.AnchorInstId IS NULL
+          AND  NOT EXISTS (SELECT 1 FROM @missingInst x WHERE x.AnchorPeriod = nr.AnchorPeriod AND x.DocumentId = nr.DocumentId
+                             AND x.CopyId = nr.CopyId AND x.TableDefId = nr.TableDefId);
+
+        SET @copied = 0;
+        SET @rowsCreated = 0;
+        SET @instancesCreated = 0;
+        IF @apply = 0
+        BEGIN
+            DECLARE @rc bigint = (SELECT COUNT_BIG(*) FROM @needRows);
+            DECLARE @ic bigint = (SELECT COUNT_BIG(*) FROM @needInst) + (SELECT COUNT_BIG(*) FROM @missingInst);
+            SELECT CAST(ISNULL(SUM(CASE WHEN Kinds = 1 THEN 1 ELSE 0 END), 0) AS bigint) AS Copies,
+                   CAST(ISNULL(SUM(CASE WHEN Kinds > 1 THEN 1 ELSE 0 END), 0) AS bigint) AS Conflicts,
+                   @rc AS RowsCreated,
+                   @ic AS InstancesCreated,
+                   @skippedArchived AS SkippedArchived
+            FROM   @groups;
+
+            SELECT c.DocumentId, c.TableDefId, c.RowKey, c.ColumnDefId, c.PeriodKey,
+                   c.ValueString, c.ValueNumeric, c.ValueDate, c.ValueBool, c.ValueRegistryEntryId, c.ValueUnitId
+            FROM   (SELECT TOP (@maxConflicts) AnchorPeriod, DocumentId, CopyId, TableDefId, RowKey, ColumnDefId
+                    FROM   @groups
+                    WHERE  Kinds > 1
+                    ORDER BY AnchorPeriod, DocumentId, CopyId, TableDefId, RowKey, ColumnDefId) g
+            JOIN   @cand c ON c.AnchorPeriod = g.AnchorPeriod AND c.DocumentId = g.DocumentId AND c.CopyId = g.CopyId
+                          AND c.TableDefId = g.TableDefId AND c.RowKey = g.RowKey AND c.ColumnDefId = g.ColumnDefId
+            ORDER BY c.DocumentId, c.TableDefId, c.RowKey, c.ColumnDefId, c.AnchorPeriod, c.PeriodKey;
+
+            SELECT DocumentId, TableDefId, AnchorPeriod FROM @groups WHERE Kinds = 1
+            UNION
+            SELECT DocumentId, TableDefId, AnchorPeriod FROM @missingInst;
+        END
+        ELSE
+        BEGIN
+            -- 1. Екземпляри якоря (як RowStore.CreateInstancesCoreAsync: послідовність, CreatedAt = ModifiedAt, копія аркуша).
+            INSERT doc.TableInstance (PeriodKey, Id, DocumentId, TableDefId, CreatedAt, ModifiedAt, SheetCopyId)
+            SELECT n.AnchorPeriod, NEXT VALUE FOR doc.TableInstanceSeq, n.DocumentId, n.TableDefId, @now, @now, NULLIF(n.CopyId, 0)
+            FROM   @needInst n;
+            SET @instancesCreated = @@ROWCOUNT + @structInstances;
+
+            UPDATE nr
+            SET    nr.AnchorInstId = ti.Id
+            FROM   @needRows nr
+            JOIN   doc.TableInstance ti ON ti.PeriodKey = nr.AnchorPeriod AND ti.DocumentId = nr.DocumentId
+                                       AND ti.TableDefId = nr.TableDefId AND ISNULL(ti.SheetCopyId, 0) = nr.CopyId
+            WHERE  nr.AnchorInstId IS NULL;
+
+            -- 2. Рядки: RowDefId і Ordinal — з НАЙПІЗНІШОГО місяця, де рядок живий.
+            UPDATE nr
+            SET    nr.RowDefId = src.RowDefId, nr.Ordinal = src.Ordinal
+            FROM   @needRows nr
+            CROSS APPLY (SELECT TOP (1) r.RowDefId, r.Ordinal
+                         FROM   @monthInst mi
+                         JOIN   doc.TableRow r ON r.PeriodKey = mi.PeriodKey AND r.TableInstanceId = mi.Id
+                         WHERE  mi.AnchorPeriod = nr.AnchorPeriod AND mi.DocumentId = nr.DocumentId
+                           AND  mi.CopyId = nr.CopyId AND mi.TableDefId = nr.TableDefId
+                           AND  r.RowKey = nr.RowKey AND r.IsDeleted = 0
+                         ORDER BY mi.PeriodKey DESC) src;
+
+            -- Знятий рядок якоря з тим самим ключем (UQ_TableRow_Key) — відновлюється замість вставки.
+            UPDATE r
+            SET    r.IsDeleted = 0, r.RowDefId = nr.RowDefId, r.Ordinal = nr.Ordinal, r.ModifiedAt = @now
+            FROM   doc.TableRow r
+            JOIN   @needRows nr ON r.PeriodKey = nr.AnchorPeriod AND r.TableInstanceId = nr.AnchorInstId AND r.RowKey = nr.RowKey
+            WHERE  r.IsDeleted = 1;
+            SET @rowsCreated = @@ROWCOUNT;
+
+            INSERT doc.TableRow (PeriodKey, Id, TableInstanceId, RowKey, RowDefId, Ordinal, IsDeleted, IsOrphaned, ModifiedAt)
+            SELECT nr.AnchorPeriod, NEXT VALUE FOR doc.TableRowSeq, nr.AnchorInstId, nr.RowKey, nr.RowDefId, nr.Ordinal, 0, 0, @now
+            FROM   @needRows nr
+            WHERE  NOT EXISTS (SELECT 1 FROM doc.TableRow y
+                               WHERE y.PeriodKey = nr.AnchorPeriod AND y.TableInstanceId = nr.AnchorInstId AND y.RowKey = nr.RowKey);
+            SET @rowsCreated += @@ROWCOUNT;
+
+            -- 3. Комірки: значення найпізнішого місяця груп без конфлікту, у рядок якоря (за RowKey).
+            DECLARE @pick TABLE (AnchorPeriod int NOT NULL, AnchorRowId bigint NOT NULL, ColumnDefId int NOT NULL, TableDefId int NOT NULL,
+                                 ValueString nvarchar(1000) NULL, ValueNumeric decimal(34, 16) NULL, ValueDate datetime2(3) NULL,
+                                 ValueBool bit NULL, ValueRegistryEntryId int NULL, ValueUnitId int NULL,
+                                 PRIMARY KEY (AnchorPeriod, AnchorRowId, ColumnDefId));
+            INSERT @pick (AnchorPeriod, AnchorRowId, ColumnDefId, TableDefId,
+                          ValueString, ValueNumeric, ValueDate, ValueBool, ValueRegistryEntryId, ValueUnitId)
+            SELECT x.AnchorPeriod, ar.Id, x.ColumnDefId, x.TableDefId,
+                   x.ValueString, x.ValueNumeric, x.ValueDate, x.ValueBool, x.ValueRegistryEntryId, x.ValueUnitId
+            FROM   (SELECT c.AnchorPeriod, c.DocumentId, c.CopyId, c.TableDefId, c.RowKey, c.ColumnDefId,
+                           c.ValueString, c.ValueNumeric, c.ValueDate, c.ValueBool, c.ValueRegistryEntryId, c.ValueUnitId,
+                           ROW_NUMBER() OVER (PARTITION BY c.AnchorPeriod, c.DocumentId, c.CopyId, c.TableDefId, c.RowKey, c.ColumnDefId
+                                              ORDER BY c.PeriodKey DESC) AS Latest
+                    FROM   @cand c) x
+            JOIN   @groups g ON g.AnchorPeriod = x.AnchorPeriod AND g.DocumentId = x.DocumentId AND g.CopyId = x.CopyId
+                            AND g.TableDefId = x.TableDefId AND g.RowKey = x.RowKey AND g.ColumnDefId = x.ColumnDefId AND g.Kinds = 1
+            JOIN   doc.TableInstance ai ON ai.PeriodKey = x.AnchorPeriod AND ai.DocumentId = x.DocumentId
+                                       AND ai.TableDefId = x.TableDefId AND ISNULL(ai.SheetCopyId, 0) = x.CopyId
+            JOIN   doc.TableRow ar ON ar.PeriodKey = ai.PeriodKey AND ar.TableInstanceId = ai.Id AND ar.RowKey = x.RowKey AND ar.IsDeleted = 0
+            WHERE  x.Latest = 1;
+
+            DECLARE @n bigint = 0;
+
+            -- Порожня комірка-заглушка якоря (IsEmpty = 1) — оновлюється; значення якоря (IsEmpty = 0) сюди не потрапляє.
+            UPDATE av
+            SET    av.ValueString = p.ValueString, av.ValueNumeric = p.ValueNumeric, av.ValueDate = p.ValueDate,
+                   av.ValueBool = p.ValueBool, av.ValueRegistryEntryId = p.ValueRegistryEntryId, av.ValueUnitId = p.ValueUnitId,
+                   av.TableDefId = p.TableDefId, av.IsCalculated = 0, av.IsEmpty = 0
+            FROM   doc.CellValue av
+            JOIN   @pick p ON av.PeriodKey = p.AnchorPeriod AND av.TableRowId = p.AnchorRowId AND av.ColumnDefId = p.ColumnDefId
+            WHERE  av.IsEmpty = 1;
+            SET @n += @@ROWCOUNT;
+
+            INSERT doc.CellValue (PeriodKey, TableRowId, ColumnDefId, TableDefId, ValueString, ValueNumeric, ValueDate,
+                                  ValueBool, ValueRegistryEntryId, ValueUnitId, IsCalculated, IsEmpty)
+            SELECT p.AnchorPeriod, p.AnchorRowId, p.ColumnDefId, p.TableDefId, p.ValueString, p.ValueNumeric, p.ValueDate,
+                   p.ValueBool, p.ValueRegistryEntryId, p.ValueUnitId, 0, 0
+            FROM   @pick p
+            WHERE  NOT EXISTS (SELECT 1 FROM doc.CellValue av
+                               WHERE av.PeriodKey = p.AnchorPeriod AND av.TableRowId = p.AnchorRowId AND av.ColumnDefId = p.ColumnDefId);
+            SET @n += @@ROWCOUNT;
+
+            -- Рядок якоря змінився: ModifiedAt піднімає RowVersion (оптимістичне блокування бачить зміну).
+            UPDATE r
+            SET    r.ModifiedAt = @now
+            FROM   doc.TableRow r
+            JOIN   (SELECT DISTINCT AnchorPeriod, AnchorRowId FROM @pick) p ON r.PeriodKey = p.AnchorPeriod AND r.Id = p.AnchorRowId;
+
+            SET @copied = @n;
+        END
         """;
 
     /// <summary>Екземпляри таблиць (їх мало: документи × таблиці × періоди) — одним оператором.</summary>
