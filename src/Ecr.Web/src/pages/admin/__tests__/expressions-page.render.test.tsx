@@ -22,6 +22,34 @@ import { testTheme } from '@/test/render';
  * `items`), а не голий масив — тест, який мокає голий масив, лишився б
  * зеленим і до, і після фіксу і не довів би нічого.
  */
+/**
+ * ✎ B114: Monaco — заглушка, як у тестах самого редактора (`ExpressionEditor.*.test.tsx`).
+ * ⛔ Без неї `ExpressionEditor` вантажив СПРАВЖНІЙ чанк `./monaco` (~818 КБ gzip) через `await import()`; у повному
+ * прогоні під навантаженням його обчислення в jsdom не встигало за 10 с, і `afterAll` з `settleDynamicImports`
+ * (`vi.dynamicImportSettled`) падав таймаутом — 3 з 3 повних прогонів на Windows 18.11, окремо зелений.
+ * Предмет тесту (Q-275: пагінована відповідь версій) від Monaco не залежить; редактор лишається справжнім.
+ */
+vi.mock('@/features/expressions/monaco', () => {
+  const model = { getValue: () => '', dispose: () => {} };
+
+  return {
+    LightTheme: 'ecr-light',
+    DarkTheme: 'ecr-dark',
+    prepare: () => 'ecr-methodology',
+    applyGrammar: () => {},
+    switchLanguage: () => {},
+    setTheme: () => {},
+    showDiagnostics: () => {},
+    create: () => ({
+      getValue: () => '',
+      setValue: () => {},
+      getModel: () => model,
+      onDidChangeModelContent: () => {},
+      dispose: () => {},
+    }),
+  };
+});
+
 function respond(routes: Record<string, unknown>): void {
   vi.stubGlobal(
     'fetch',
