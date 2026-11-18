@@ -233,6 +233,46 @@ public sealed class ScriptMethodologyRunSqlTests(SqlServerFixture sql)
         Assert.DoesNotContain("Z|20", await ShapeAsync(f));
     }
 
+    /// <summary>
+    /// MS (рецензія F13, A): дві методології читають результати одна одної по колу (з'явилося пізнішою прив'язкою) —
+    /// прогін відмовляє <c>ECR-CALC-0422 scriptResultCycle</c>, нічого не записавши.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Цикл_читання_результатів_між_методологіями_відмовляє_прогін_і_нічого_не_пише()
+    {
+        var f = await ArrangeAsync(209906);
+        await InsertValuesAsync(f, ("gas", 10m));
+        var second = await CreateSecondTableAsync(f);
+        string outA;
+        await using (var db = f.Builder.CreateContext())
+        {
+            outA = await ColumnCodeAsync(db, f.OutAColumnId);
+        }
+
+        var outB = await ColumnCodeByIdAsync(f, second.OutBColumnId);
+        await PublishScriptAsync(
+            f, "A", $"rows from {f.TableCode};\ntable Src = {second.TableCode};\noutput Y: kg = Sum(Src.{outB});",
+            [("Y", f.OutAColumnId)]);
+        await PublishScriptAsync(
+            f, "B", $"rows from {second.TableCode};\ntable Src = {f.TableCode};\noutput Z: kg = Sum(Src.{outA});",
+            [("Z", second.OutBColumnId)], tableDefId: second.TableDefId);
+
+        var error = await Assert.ThrowsAsync<Ecr.Domain.Abstractions.DomainException>(
+            () => RunJobAsync(f.Document, sheetDefId: null));
+
+        Assert.Equal("ECR-CALC-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-CALC-0422.scriptResultCycle", error.Details!["messageKey"]);
+        Assert.Empty(await ShapeAsync(f));
+    }
+
+    private async Task<string> ColumnCodeByIdAsync(Fixture f, int columnId)
+    {
+        await using var db = f.Builder.CreateContext();
+        return await ColumnCodeAsync(db, columnId);
+    }
+
     private async Task<ScriptPreviewResult> PreviewAsync(Fixture f, int versionId, string text)
     {
         await using var provider = Provider();
@@ -343,6 +383,23 @@ public sealed class ScriptMethodologyRunSqlTests(SqlServerFixture sql)
     /// <summary>Другий аркуш із таблицею й методологією-читачем B: <c>table Src = A; Sum(Src.OUTA)</c>.</summary>
     private async Task<Second> ArrangeReaderAsync(Fixture f, (int MethodologyId, int VersionId) a)
     {
+        var second = await CreateSecondTableAsync(f);
+        await using var db = f.Builder.CreateContext();
+        var text = $"rows from {second.TableCode};\ntable Src = {f.TableCode};\noutput Z: kg = Sum(Src.{await ColumnCodeAsync(db, f.OutAColumnId)});";
+        var (methodologyBId, versionBId) = await PublishScriptAsync(
+            f, "B", text, [("Z", second.OutBColumnId)], tableDefId: second.TableDefId);
+
+        await using var extra = f.Builder.CreateContext();
+        extra.MethodologyReadTables.Add(new MethodologyReadTable(versionBId, f.TableCode));
+        extra.MethodologyDependencies.Add(new MethodologyDependency(methodologyBId, a.MethodologyId));
+        await extra.SaveChangesAsync();
+
+        return second with { MethodologyBId = methodologyBId, VersionBId = versionBId };
+    }
+
+    /// <summary>Другий аркуш: таблиця, колонка <c>Calculated</c> OUTB і один екземпляр з одним рядком; без методології.</summary>
+    private async Task<Second> CreateSecondTableAsync(Fixture f)
+    {
         await using var db = f.Builder.CreateContext();
         var sheet = new SheetDef(f.Document.TemplateVersionId, EcrCode.Create("SHB" + f.Tag), Name("Sheet B"), 2);
         db.SheetDefs.Add(sheet);
@@ -364,16 +421,7 @@ public sealed class ScriptMethodologyRunSqlTests(SqlServerFixture sql)
         db.TableRows.Add(new TableRow(f.Document.PeriodKey, rowId, instanceId, RowKey.Create("RB_" + f.Tag), 1, Now));
         await db.SaveChangesAsync();
 
-        var text = $"rows from {table.Code};\ntable Src = {f.TableCode};\noutput Z: kg = Sum(Src.{await ColumnCodeAsync(db, f.OutAColumnId)});";
-        var (methodologyBId, versionBId) = await PublishScriptAsync(
-            f, "B", text, [("Z", outB.Id)], tableDefId: table.Id);
-
-        await using var extra = f.Builder.CreateContext();
-        extra.MethodologyReadTables.Add(new MethodologyReadTable(versionBId, f.TableCode));
-        extra.MethodologyDependencies.Add(new MethodologyDependency(methodologyBId, a.MethodologyId));
-        await extra.SaveChangesAsync();
-
-        return new Second(sheet.Id, table.Id, table.Code, instanceId, outB.Id, methodologyBId, versionBId);
+        return new Second(sheet.Id, table.Id, table.Code, instanceId, outB.Id, 0, 0);
     }
 
     private static async Task<string> ColumnCodeAsync(EcrDbContext db, int columnId)
