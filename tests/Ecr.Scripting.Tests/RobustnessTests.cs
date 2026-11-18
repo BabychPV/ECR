@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using Ecr.Domain.Enums;
@@ -19,25 +18,53 @@ public sealed class RobustnessTests
 {
     private const string R = "rows from T1;\n";
 
-    /// <summary>Найбільший час компіляції тексту межі розміру; у нормі — частки секунди, межа лишає запас на навантажений CI.</summary>
-    private const long BudgetMs = 3000;
+    /// <summary>
+    /// Стеля роботи на один знак тексту (кроки лексера, парсера, опускання й звернення binder'а до словників; див.
+    /// <see cref="ScriptWork"/>). Вимірюємо роботу, а не настінний час: час на завантаженому CI-раннері хиткий, а робота
+    /// детермінована. Лінійний алгоритм вкладається в стелю на будь-якому тексті межі; квадратичний на 200 000 знаків
+    /// перевищує її на порядки.
+    /// </summary>
+    private const long WorkPerChar = 3;
+
+    /// <summary>Додаткова робота, дозволена тестам розгортання <c>foreach</c>: розгортання копіює до <see cref="ScriptParser.MaxExpandedTokens"/> лексем незалежно від довжини тексту.</summary>
+    private const long ExpansionAllowance = 3L * ScriptParser.MaxExpandedTokens;
+
+    /// <summary>Найбільше відношення роботи на вході 2N до роботи на вході N: лінійний алгоритм дає ~2, квадратичний ~4.</summary>
+    private const double MaxDoublingRatio = 2.2;
 
     private static string Rep(string unit, int n) => new StringBuilder(unit.Length * n).Insert(0, unit, n).ToString();
 
-    private static ScriptCompilation Timed(string text, out long ms, bool library = false)
+    private static ScriptCompilation Run(string text, out long work, bool library = false)
     {
-        var sw = Stopwatch.StartNew();
+        ScriptWork.Reset();
         var c = ScriptCompiler.Compile(text, new ScriptCompileOptions(NumericMode.Strict, library));
-        ms = sw.ElapsedMilliseconds;
+        work = ScriptWork.Steps;
         return c;
     }
 
-    private static string Describe(ScriptCompilation c, long ms)
-        => $"{ms} мс; {T.Describe(c)}".Length > 500 ? $"{ms} мс; {c.Diagnostics.Count} діагностик" : $"{ms} мс; {T.Describe(c)}";
-
-    private static void AssertFast(string text, ScriptCompilation c, long ms)
+    private static long WorkOf(string text, bool library = false)
     {
-        Assert.True(ms < BudgetMs, $"компіляція {text.Length} знаків зайняла {ms} мс ({c.Diagnostics.Count} діагностик)");
+        Run(text, out var work, library);
+        return work;
+    }
+
+    private static string Describe(ScriptCompilation c, long work)
+        => $"{work} кроків; {T.Describe(c)}".Length > 500 ? $"{work} кроків; {c.Diagnostics.Count} діагностик" : $"{work} кроків; {T.Describe(c)}";
+
+    private static void AssertCheap(string text, ScriptCompilation c, long work, long allowance = 0)
+    {
+        Assert.True(
+            work <= WorkPerChar * text.Length + 1000 + allowance,
+            $"компіляція {text.Length} знаків зробила {work} кроків ({c.Diagnostics.Count} діагностик)");
+    }
+
+    /// <summary>Подвоєння входу збільшує роботу не більше ніж у ~2,2 раза (детермінований критерій лінійності).</summary>
+    private static void AssertLinear(string name, long small, long large)
+    {
+        Assert.True(small > 0, $"{name}: порожній лічильник — робота не вимірюється");
+        Assert.True(
+            (double)large / small <= MaxDoublingRatio,
+            $"{name}: подвоєння входу збільшило роботу у {(double)large / small:F2} раза ({small} → {large} кроків)");
     }
 
     // ───── вкладеність: діагностика, а не падіння ─────
@@ -68,11 +95,11 @@ public sealed class RobustnessTests
     {
         Assert.True(text.Length <= ScriptCompiler.MaxTextLength, name);
 
-        var c = Timed(text, out var ms);
+        var c = Run(text, out var work);
 
-        Assert.True(c.Diagnostics.Any(d => d.Code == ScriptDiagnosticCodes.TooDeep), $"{name}: {Describe(c, ms)}");
+        Assert.True(c.Diagnostics.Any(d => d.Code == ScriptDiagnosticCodes.TooDeep), $"{name}: {Describe(c, work)}");
         Assert.Null(c.Script);
-        AssertFast(text, c, ms);
+        AssertCheap(text, c, work);
     }
 
     [Fact]
@@ -130,8 +157,8 @@ public sealed class RobustnessTests
                      R + "var x = a" + Rep("[1]", 60_000) + ";",
                  })
         {
-            var c = Timed(text, out var ms);
-            AssertFast(text, c, ms);
+            var c = Run(text, out var work);
+            AssertCheap(text, c, work);
             Assert.NotEmpty(c.Diagnostics);
         }
     }
@@ -165,29 +192,6 @@ public sealed class RobustnessTests
         Assert.Equal(2, c.Diagnostics.Count(d => d.Code == ScriptDiagnosticCodes.RecursiveFunction));
     }
 
-    [Fact]
-    [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    public void Кільце_і_довгий_ланцюг_функцій_перевіряються_за_лінійний_час()
-    {
-        const int n = 5_500;
-        var chain = new StringBuilder(R);
-        var ring = new StringBuilder(R);
-        for (var i = 0; i < n; i++)
-        {
-            chain.Append("function f").Append(i).Append("(a) = ").Append(i == 0 ? "a" : $"f{i - 1}(a)").Append(";\n");
-            ring.Append("function f").Append(i).Append("(a) = f").Append((i + 1) % n).Append("(a);\n");
-        }
-
-        var okChain = Timed(chain.ToString(), out var chainMs);
-        var okRing = Timed(ring.ToString(), out var ringMs);
-
-        Assert.Empty(okChain.Diagnostics);
-        Assert.True(chainMs < BudgetMs, $"ланцюг: {chainMs} мс");
-        Assert.All(okRing.Diagnostics, d => Assert.Equal(ScriptDiagnosticCodes.RecursiveFunction, d.Code));
-        Assert.NotEmpty(okRing.Diagnostics);
-        Assert.True(ringMs < BudgetMs, $"кільце: {ringMs} мс");
-    }
-
     // ───── вибух розгортання foreach ─────
 
     [Fact]
@@ -198,13 +202,13 @@ public sealed class RobustnessTests
         var values = string.Join(",", Enumerable.Range(1, 100));
         var text = R + "foreach X in (" + values + ") { " + Rep("a ", 5_000) + " }";
 
-        var c = Timed(text, out var ms);
+        var c = Run(text, out var work);
 
         var d = Assert.Single(c.Diagnostics);
         Assert.Equal(ScriptDiagnosticCodes.ForeachTooLarge, d.Code);
         Assert.Equal(ScriptParser.MaxExpandedTokens.ToString(System.Globalization.CultureInfo.InvariantCulture), d.Params["limit"]);
         Assert.Null(c.Script);
-        AssertFast(text, c, ms);
+        AssertCheap(text, c, work, ExpansionAllowance);
     }
 
     [Fact]
@@ -214,11 +218,11 @@ public sealed class RobustnessTests
         var values = string.Join(",", Enumerable.Range(1, 20));
         var text = R + "foreach X in (" + values + ") { var v{X} = 1" + Rep(" + 1", 15_000) + "; }";
 
-        var c = Timed(text, out var ms);
+        var c = Run(text, out var work);
 
         Assert.Contains(c.Diagnostics, d => d.Code == ScriptDiagnosticCodes.ForeachTooLarge);
         Assert.Null(c.Script);
-        AssertFast(text, c, ms);
+        AssertCheap(text, c, work, ExpansionAllowance);
     }
 
     [Fact]
@@ -227,10 +231,10 @@ public sealed class RobustnessTests
     {
         var text = R + "foreach A in (1,2,3,4,5,6,7,8,9,10,11,12,13) { foreach B in (1,2,3,4,5,6,7,8,9,10,11,12,13) { foreach C in (1,2,3,4,5,6,7,8,9,10,11,12,13) { var v{A}_{B}_{C} = 1; } } }";
 
-        var c = Timed(text, out var ms);
+        var c = Run(text, out var work);
 
         Assert.Contains(c.Diagnostics, d => d.Code == ScriptDiagnosticCodes.ForeachTooLarge);
-        Assert.True(ms < BudgetMs, $"{ms} мс");
+        AssertCheap(text, c, work, ExpansionAllowance);
     }
 
     [Fact]
@@ -261,10 +265,10 @@ public sealed class RobustnessTests
     {
         foreach (var literal in new[] { Rep("9", 190_000), "1e" + Rep("9", 190_000), "1e999999999", "79228162514264337593543950336", "1e29" })
         {
-            var c = Timed(R + "var x = " + literal + ";", out var ms);
+            var c = Run(R + "var x = " + literal + ";", out var work);
 
             Assert.Contains(c.Diagnostics, d => d.Code == ScriptDiagnosticCodes.InvalidNumber);
-            Assert.True(ms < BudgetMs, $"{literal.Length}: {ms} мс");
+            AssertCheap(R + "var x = " + literal + ";", c, work);
         }
     }
 
@@ -289,9 +293,9 @@ public sealed class RobustnessTests
                      R + "var x = \"a\0b\";",
                  })
         {
-            var c = Timed(text, out var ms);
+            var c = Run(text, out var work);
 
-            AssertFast(text, c, ms);
+            AssertCheap(text, c, work);
             Assert.NotNull(c);
         }
     }
@@ -310,11 +314,11 @@ public sealed class RobustnessTests
                      R + Rep("\ud800", 90_000),
                  })
         {
-            var c = Timed(text, out var ms);
+            var c = Run(text, out var work);
 
             Assert.InRange(c.Diagnostics.Count, 1, ScriptDiagnostic.MaxPerCompilation);
             Assert.Null(c.Script);
-            AssertFast(text, c, ms);
+            AssertCheap(text, c, work);
         }
     }
 
@@ -324,10 +328,10 @@ public sealed class RobustnessTests
     {
         var text = R + Rep("var x = y;\n", 15_000);
 
-        var c = Timed(text, out var ms);
+        var c = Run(text, out var work);
 
         Assert.Equal(ScriptDiagnostic.MaxPerCompilation, c.Diagnostics.Count);
-        AssertFast(text, c, ms);
+        AssertCheap(text, c, work);
     }
 
     [Fact]
@@ -375,14 +379,14 @@ public sealed class RobustnessTests
     public void Довгий_ідентифікатор_скорочується_у_підстановці_діагностики()
     {
         var name = Rep("a", 190_000);
-        var c = Timed(R + "var x = " + name + ";", out var ms);
+        var c = Run(R + "var x = " + name + ";", out var work);
 
         var d = Assert.Single(c.Diagnostics);
         Assert.Equal(ScriptDiagnosticCodes.UnknownName, d.Code);
         Assert.True(d.Params["name"].Length <= ScriptDiagnostic.MaxTextChars + 1);
         Assert.True(d.Message.Length <= ScriptDiagnostic.MaxTextChars * 3 + 1);
         Assert.EndsWith("…", d.Params["name"], StringComparison.Ordinal);
-        Assert.True(ms < BudgetMs);
+        AssertCheap(name, c, work);
     }
 
     // ───── лінійність на великих текстах ─────
@@ -398,32 +402,71 @@ public sealed class RobustnessTests
         return sb.ToString();
     }
 
-    public static TheoryData<string, string> BigTexts() => new()
+    /// <summary>Скільки функцій уміщається в текст межі розміру (рядок функції ланцюга чи кільця — до ~32 знаків).</summary>
+    private static int FunctionCount(int limit) => limit / 32;
+
+    /// <summary>Генератори текстів «ширини»: кожен приймає орієнтовний розмір у знаках. Колишні квадратичності позначено.</summary>
+    private static readonly IReadOnlyDictionary<string, Func<int, string>> BigGenerators = new Dictionary<string, Func<int, string>>
     {
-        { "багато var у ланцюжку", Many(195_000, i => $"var v{i} = {(i == 0 ? "1" : "v" + (i - 1))} + 1;\n") },
-        { "багато const", Many(195_000, i => $"const c{i} = {i};\n") },
-        { "багато rows", Many(195_000, i => $"rows from Ta{i} where row.A == \"x\";\n", string.Empty) },
-        { "багато полів row", Many(195_000, i => $"var v{i} = row.C{i};\n") },
-        { "багато кодів довідників", Many(195_000, i => $"var v{i} = REGFIND(\"R{i}\", entry(\"R{i}\", \"c\"));\n") },
-        { "багато table", Many(195_000, i => $"table T{i} = X{i};\n") },
-        { "багато if із var у блоці", Many(195_000, i => $"if (1) {{ var q{i} = 1; }}\n") },
-        { "багато output у циклі", "rows from T1;\nforeach substance S in (\"a\") {\n" + Many(195_000, i => $"output O{i} per S : t = 1;\n", string.Empty) + "}" },
-        { "багато foreach для повторів", Many(195_000, i => $"foreach X in (1) {{ var z{i} = X; }}\n") },
-        { "функція викликається багатьма var", R + "function big(a) = a" + Rep(" + a", 400) + ";\n" + Many(195_000, i => $"var v{i} = big({i});\n", string.Empty) },
-        { "багато викликів власних функцій", R + "function g(a) = a;\n" + Many(195_000, i => $"var v{i} = g({i}) + g(1);\n", string.Empty) },
-        { "багато агрегатів", R + "table G = T2;\n" + Many(195_000, i => $"var s{i} = Sum(G.A where G.B == {i});\n", string.Empty) },
+        ["багато var у ланцюжку"] = limit => Many(limit, i => $"var v{i} = {(i == 0 ? "1" : "v" + (i - 1))} + 1;\n"),
+        ["багато const"] = limit => Many(limit, i => $"const c{i} = {i};\n"),
+        ["багато rows (було квадратично: duplicateTable)"] = limit => Many(limit, i => $"rows from Ta{i} where row.A == \"x\";\n", string.Empty),
+        ["багато полів row (було квадратично: AddRowField)"] = limit => Many(limit, i => $"var v{i} = row.C{i};\n"),
+        ["багато кодів довідників"] = limit => Many(limit, i => $"var v{i} = REGFIND(\"R{i}\", entry(\"R{i}\", \"c\"));\n"),
+        ["багато table"] = limit => Many(limit, i => $"table T{i} = X{i};\n"),
+        ["багато if із var у блоці"] = limit => Many(limit, i => $"if (1) {{ var q{i} = 1; }}\n"),
+        ["багато var зовні й у блоках (було квадратично: IsVisibleName)"] = limit =>
+            Many(limit, i => $"if (1) {{ var q{i} = 1; }}\n", Many(limit / 2, i => $"var t{i} = 1;\n")),
+        ["багато output у циклі"] = limit => "rows from T1;\nforeach substance S in (\"a\") {\n" + Many(limit, i => $"output O{i} per S : t = 1;\n", string.Empty) + "}",
+        ["багато foreach для повторів"] = limit => Many(limit, i => $"foreach X in (1) {{ var z{i} = X; }}\n"),
+        ["функція викликається багатьма var"] = limit => R + "function big(a) = a" + Rep(" + a", 400) + ";\n" + Many(limit, i => $"var v{i} = big({i});\n", string.Empty),
+        ["багато викликів власних функцій"] = limit => R + "function g(a) = a;\n" + Many(limit, i => $"var v{i} = g({i}) + g(1);\n", string.Empty),
+        ["багато агрегатів"] = limit => R + "table G = T2;\n" + Many(limit, i => $"var s{i} = Sum(G.A where G.B == {i});\n", string.Empty),
+        ["довгий ланцюг функцій (було квадратично: CheckRecursion)"] = limit => ChainOfFunctions(FunctionCount(limit), ring: false),
+        ["кільце функцій (було квадратично: CheckRecursion)"] = limit => ChainOfFunctions(FunctionCount(limit), ring: true),
     };
+
+    private static string ChainOfFunctions(int n, bool ring)
+    {
+        var sb = new StringBuilder(R);
+        for (var i = 0; i < n; i++)
+        {
+            sb.Append("function f").Append(i).Append("(a) = ");
+            sb.Append(ring ? $"f{(i + 1) % n}(a)" : i == 0 ? "a" : $"f{i - 1}(a)").Append(";\n");
+        }
+
+        return sb.ToString();
+    }
+
+    public static TheoryData<string> BigTexts() => [.. BigGenerators.Keys];
 
     [Theory]
     [MemberData(nameof(BigTexts))]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    public void Великий_текст_компілюється_за_секунди(string name, string text)
+    public void Великий_текст_компілюється_за_лінійну_роботу(string name)
     {
+        const int Limit = 195_000;
+        var text = BigGenerators[name](Limit);
+        var half = BigGenerators[name](Limit / 2);
         Assert.True(text.Length <= ScriptCompiler.MaxTextLength, name);
 
-        var c = Timed(text, out var ms);
+        var c = Run(text, out var work);
+        var halfWork = WorkOf(half);
 
-        Assert.True(ms < BudgetMs, $"{name}: {ms} мс ({c.Diagnostics.Count} діагностик)");
+        AssertCheap(text, c, work);
+        AssertLinear(name, halfWork, work);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Кільце_функцій_дає_діагностики_а_ланцюг_ні()
+    {
+        var chain = Run(ChainOfFunctions(2_500, ring: false), out _);
+        var ring = Run(ChainOfFunctions(2_500, ring: true), out _);
+
+        Assert.Empty(chain.Diagnostics);
+        Assert.NotEmpty(ring.Diagnostics);
+        Assert.All(ring.Diagnostics, d => Assert.Equal(ScriptDiagnosticCodes.RecursiveFunction, d.Code));
     }
 
     [Fact]
@@ -432,32 +475,42 @@ public sealed class RobustnessTests
     {
         var text = Rep("var abc1 = 1 + 2 * (x - y); // c\n", 30_000);
         Assert.True(text.Length > 900_000);
+        var half = Rep("var abc1 = 1 + 2 * (x - y); // c\n", 15_000);
 
-        var sw = Stopwatch.StartNew();
+        ScriptWork.Reset();
         var lex = ScriptLexer.Tokenize(text);
-        var lexMs = sw.ElapsedMilliseconds;
-        sw.Restart();
+        var lexWork = ScriptWork.Steps;
+        ScriptWork.Reset();
         var parsed = ScriptParser.Parse(lex);
-        var parseMs = sw.ElapsedMilliseconds;
+        var parseWork = ScriptWork.Steps;
+
+        ScriptWork.Reset();
+        var halfLex = ScriptLexer.Tokenize(half);
+        var halfLexWork = ScriptWork.Steps;
+        ScriptWork.Reset();
+        ScriptParser.Parse(halfLex);
+        var halfParseWork = ScriptWork.Steps;
 
         Assert.Empty(parsed.Diagnostics);
         Assert.Equal(30_000, parsed.Program.Items.Count);
-        Assert.True(lexMs < BudgetMs, $"лексер {lexMs} мс");
-        Assert.True(parseMs < BudgetMs, $"парсер {parseMs} мс");
+        AssertLinear("лексер", halfLexWork, lexWork);
+        AssertLinear("парсер", halfParseWork, parseWork);
+        Assert.True(lexWork <= text.Length, $"лексер: {lexWork} кроків на {text.Length} знаків");
+        Assert.True(parseWork <= text.Length, $"парсер: {parseWork} кроків на {text.Length} знаків");
     }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    public void Лексер_і_парсер_на_мільйоні_знаків_сміття_швидкі_і_обмежують_діагностики()
+    public void Лексер_і_парсер_на_мільйоні_знаків_сміття_обмежують_діагностики_і_роботу()
     {
         var text = Rep("^", 1_000_000);
 
-        var sw = Stopwatch.StartNew();
+        ScriptWork.Reset();
         var lex = ScriptLexer.Tokenize(text);
         var parsed = ScriptParser.Parse(lex);
 
         Assert.InRange(parsed.Diagnostics.Count, 1, ScriptDiagnostic.MaxPerCompilation + 1);
-        Assert.True(sw.ElapsedMilliseconds < BudgetMs, $"{sw.ElapsedMilliseconds} мс");
+        Assert.True(ScriptWork.Steps <= 3L * text.Length, $"{ScriptWork.Steps} кроків на {text.Length} знаків");
     }
 
     [Fact]
@@ -466,12 +519,12 @@ public sealed class RobustnessTests
     {
         var text = R + Rep("var a = 1;\n", 100_000);
 
-        var c = Timed(text, out var ms);
+        var c = Run(text, out var work);
 
         var d = Assert.Single(c.Diagnostics);
         Assert.Equal(ScriptDiagnosticCodes.TooLarge, d.Code);
         Assert.Null(c.Script);
-        Assert.True(ms < 200, $"{ms} мс");
+        Assert.Equal(0, work); // відхилено до лексера: жодного кроку розбору
     }
 
     [Fact]

@@ -158,6 +158,7 @@ internal sealed class ScriptBinder
 
     private void AddRegistryCode(string code)
     {
+        ScriptWork.Step();
         if (registryCodeSet.Add(code))
         {
             registryCodes.Add(code);
@@ -181,6 +182,7 @@ internal sealed class ScriptBinder
     {
         for (var s = scope; s is not null; s = s.Parent)
         {
+            ScriptWork.Step();
             if (s.FoldedNames.Contains(name))
             {
                 return true;
@@ -495,6 +497,7 @@ internal sealed class ScriptBinder
         foreach (var table in r.Tables)
         {
             var key = table.ToString();
+            ScriptWork.Step();
             if (!rowTableKeys.Add(key))
             {
                 Report(ScriptDiagnosticCodes.DuplicateTable, table.Span,
@@ -550,6 +553,7 @@ internal sealed class ScriptBinder
 
     private void AddMatchColumn(string column)
     {
+        ScriptWork.Step();
         if (matchColumnSet.Add(column))
         {
             matchColumns.Add(column);
@@ -568,6 +572,7 @@ internal sealed class ScriptBinder
     {
         needsRegistries = true;
         AddRegistryCode(registry);
+        ScriptWork.Step();
         if (registryEntrySet.Add((registry, code)))
         {
             registryEntries.Add(new RegistryEntryRef(registry, code) { Span = span });
@@ -657,6 +662,7 @@ internal sealed class ScriptBinder
                 var (node, targets) = frames.Peek();
                 if (targets.MoveNext())
                 {
+                    ScriptWork.Step();
                     var target = targets.Current;
                     if (target == node)
                     {
@@ -961,6 +967,7 @@ internal sealed class ScriptBinder
         // Лівий ланцюг «1+1+…+1» парсер будує циклом, тож межа вкладеності парсера його не бачить, а глибину стека
         // тоді визначав би лише EnsureSufficientExecutionStack, тобто розмір стека потока: той самий текст то
         // компілювався б, то ні. Детермінована межа глибини дерева стоїть перед ним.
+        ScriptWork.Step();
         if (++lowerDepth > ScriptCompiler.MaxExpressionDepth)
         {
             throw new ExpressionTooDeepException();
@@ -1027,6 +1034,7 @@ internal sealed class ScriptBinder
 
     private void AddRowField(string name, bool optional, bool monthly, ScriptSpan span)
     {
+        ScriptWork.Step();
         if (!rowFieldIndex.TryGetValue(name, out var field))
         {
             field = new RowFieldBuilder(name, span);

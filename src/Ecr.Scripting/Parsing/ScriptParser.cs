@@ -77,6 +77,7 @@ public static partial class ScriptParser
 
         private ScriptToken Advance()
         {
+            ScriptWork.Step();
             var t = tokens[pos];
             if (t.Kind != ScriptTokenKind.EndOfInput)
             {
@@ -347,7 +348,7 @@ public static partial class ScriptParser
             {
                 ReportAt(kw, ScriptDiagnosticCodes.ForeachTooLarge,
                     $"foreach is nested too deeply (more than {MaxForeachDepth} levels).",
-                    ("limit", MaxForeachDepth.ToString(CultureInfo.InvariantCulture)));
+                    ("limit", MaxForeachDepth.ToString(CultureInfo.InvariantCulture)), ("kind", "depth"));
                 throw new Abort();
             }
 
@@ -358,7 +359,7 @@ public static partial class ScriptParser
             {
                 ReportAt(kw, ScriptDiagnosticCodes.ForeachTooLarge,
                     $"foreach expands to more than {MaxExpandedStatements} statements.",
-                    ("limit", MaxExpandedStatements.ToString(CultureInfo.InvariantCulture)));
+                    ("limit", MaxExpandedStatements.ToString(CultureInfo.InvariantCulture)), ("kind", "statements"));
                 throw new Abort();
             }
 
@@ -367,7 +368,7 @@ public static partial class ScriptParser
             {
                 ReportAt(kw, ScriptDiagnosticCodes.ForeachTooLarge,
                     $"foreach expands to more than {MaxExpandedTokens} tokens.",
-                    ("limit", MaxExpandedTokens.ToString(CultureInfo.InvariantCulture)));
+                    ("limit", MaxExpandedTokens.ToString(CultureInfo.InvariantCulture)), ("kind", "tokens"));
                 throw new Abort();
             }
 
