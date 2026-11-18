@@ -152,4 +152,13 @@ public sealed record VersionSource
 
     /// <summary>Речення відбору рядків.</summary>
     public IReadOnlyList<SourceRowsClause> RowsClauses { get; init; } = [];
+
+    /// <summary>Усі активні правила відбору рядків за пріоритетом (без розкладу по реченнях): для відбитка.</summary>
+    public IReadOnlyList<SourceRule> Rules { get; init; } = [];
+
+    /// <summary>Фільтр активності рядків методології (<c>РЕЄСТР:ЗАПИС</c>); <c>null</c> — немає. Для відбитка.</summary>
+    public string? RowActivityFilter { get; init; }
+
+    /// <summary>Календарний режим версії. Для відбитка.</summary>
+    public CalendarMode CalendarMode { get; init; } = CalendarMode.Actual;
 }
