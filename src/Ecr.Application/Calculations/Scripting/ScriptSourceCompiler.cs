@@ -46,10 +46,11 @@ public sealed class ScriptSourceCompiler(IMethodologyDraftStore drafts, IMethodo
         ArgumentNullException.ThrowIfNull(text);
         ArgumentNullException.ThrowIfNull(ownerCode);
 
-        var (compilation, _) = await CompileCoreAsync(
-                text, numericMode, isLibrary, onDate, [ownerCode], shadowScripts, ct)
+        var result = await CompileCoreAsync(
+                text, numericMode, isLibrary, onDate, [ownerCode],
+                new Dictionary<string, Entry>(StringComparer.OrdinalIgnoreCase), shadowScripts, ct)
             .ConfigureAwait(false);
-        return compilation;
+        return result.Compilation;
     }
 
     /// <summary>
@@ -92,12 +93,42 @@ public sealed class ScriptSourceCompiler(IMethodologyDraftStore drafts, IMethodo
         return result;
     }
 
-    private async Task<(ScriptCompilation Compilation, string? CyclePath)> CompileCoreAsync(
+    /// <summary>Страховка від ланцюга бібліотек, що нескінченно росте: глибше розвідка не йде (результат однаково помилка).</summary>
+    private const int MaxExploreDepth = 64;
+
+    private enum EntryKind
+    {
+        Missing,
+        NotScript,
+        Compiled,
+    }
+
+    /// <summary>
+    /// Результат бібліотеки, не залежний від місця імпорту. <paramref name="Route"/> — найглибший маршрут імпортів
+    /// від неї (вона сама й нащадки): за ним межа глибини перевіряється при кожному використанні запису, бо один і той
+    /// самий запис дозволений неглибоко й заборонений глибоко.
+    /// </summary>
+    private sealed record Entry(EntryKind Kind, CompiledScript? Script, string? CyclePath, IReadOnlyList<string> Route)
+    {
+        public int Height => Route.Count - 1;
+    }
+
+    private sealed record CoreResult(ScriptCompilation Compilation, string? CyclePath, IReadOnlyList<string> Below);
+
+    private static IReadOnlyList<string> Longer(IReadOnlyList<string> a, IReadOnlyList<string> b) => b.Count > a.Count ? b : a;
+
+    /// <summary>
+    /// Компілює текст з імпортами. <paramref name="memo"/> — результати бібліотек у межах однієї компіляції: кожна
+    /// бібліотека завантажується й компілюється не більше разу (ромбоподібні імпорти інакше давали до F^глибина
+    /// повторів). Цикл виявляється за ланцюгом (<paramref name="chain"/>) раніше за кеш; межа глибини — за маршрутом запису.
+    /// </summary>
+    private async Task<CoreResult> CompileCoreAsync(
         string text,
         NumericMode numericMode,
         bool isLibrary,
         DateOnly onDate,
         List<string> chain,
+        Dictionary<string, Entry> memo,
         IReadOnlyDictionary<int, MethodologyScript>? shadowScripts,
         CancellationToken ct)
     {
@@ -116,65 +147,59 @@ public sealed class ScriptSourceCompiler(IMethodologyDraftStore drafts, IMethodo
 
         if (requested.Count == 0)
         {
-            return (probe, null);
+            return new CoreResult(probe, null, []);
         }
 
         var resolved = new Dictionary<string, CompiledScript>(StringComparer.Ordinal);
         var notScript = new HashSet<string>(StringComparer.Ordinal);
         var cycles = new Dictionary<string, string>(StringComparer.Ordinal);
+        IReadOnlyList<string> below = [];
 
         foreach (var name in requested)
         {
-            if (chain.Contains(name, StringComparer.OrdinalIgnoreCase) || chain.Count >= MaxImportDepth)
+            if (chain.Contains(name, StringComparer.OrdinalIgnoreCase))
             {
                 cycles[name] = Path([.. chain, name]);
+                below = Longer(below, [name]);
                 continue;
             }
 
-            var library = await drafts.FindByCodeAsync(name, ct).ConfigureAwait(false);
-            if (library is null)
+            if (chain.Count >= MaxExploreDepth)
             {
+                cycles[name] = Path([.. chain, name]);
+                below = Longer(below, [.. Enumerable.Repeat(name, MaxImportDepth + 1)]);
                 continue;
             }
 
-            var version = library.VersionOn(onDate);
-            MethodologyScript? script = null;
-            if (version is { } found)
+            if (!memo.TryGetValue(name, out var entry))
             {
-                if (shadowScripts is not null && shadowScripts.TryGetValue(found.Id, out var pending))
-                {
-                    script = pending;
-                }
-                else if (found.Engine == MethodologyEngine.Script || shadowScripts is not null)
-                {
-                    script = await methodologies.GetScriptAsync(found.Id, ct).ConfigureAwait(false);
-                }
+                entry = await ComputeEntryAsync(name, onDate, chain, memo, shadowScripts, ct).ConfigureAwait(false);
+                memo[name] = entry;
             }
 
-            if (script is null)
+            below = Longer(below, entry.Route);
+            if (entry.CyclePath is not null)
             {
-                notScript.Add(name);
+                cycles[name] = entry.CyclePath;
                 continue;
             }
 
-            chain.Add(name);
-            try
+            if (chain.Count + entry.Height >= MaxImportDepth)
             {
-                var (inner, innerCycle) = await CompileCoreAsync(
-                        script.Text, script.NumericMode, script.IsLibrary, onDate, chain, shadowScripts, ct)
-                    .ConfigureAwait(false);
-                if (innerCycle is not null)
-                {
-                    cycles[name] = innerCycle;
-                }
-                else if (inner.Script is not null)
-                {
-                    resolved[name] = inner.Script;
-                }
+                cycles[name] = Path(chain.Concat(entry.Route).Take(MaxImportDepth + 1));
+                continue;
             }
-            finally
+
+            switch (entry.Kind)
             {
-                chain.RemoveAt(chain.Count - 1);
+                case EntryKind.NotScript:
+                    notScript.Add(name);
+                    break;
+                case EntryKind.Compiled when entry.Script is not null:
+                    resolved[name] = entry.Script;
+                    break;
+                default:
+                    break;
             }
         }
 
@@ -184,14 +209,61 @@ public sealed class ScriptSourceCompiler(IMethodologyDraftStore drafts, IMethodo
 
         if (cycles.Count == 0 && notScript.Count == 0)
         {
-            return (final, null);
+            return new CoreResult(final, null, below);
         }
 
         var diagnostics = final.Diagnostics
             .Select(d => Rewrite(d, notScript, cycles))
             .ToList();
         var cycle = cycles.Values.FirstOrDefault();
-        return (new ScriptCompilation(final.Script, diagnostics), cycle);
+        return new CoreResult(new ScriptCompilation(final.Script, diagnostics), cycle, below);
+    }
+
+    private async Task<Entry> ComputeEntryAsync(
+        string name,
+        DateOnly onDate,
+        List<string> chain,
+        Dictionary<string, Entry> memo,
+        IReadOnlyDictionary<int, MethodologyScript>? shadowScripts,
+        CancellationToken ct)
+    {
+        var library = await drafts.FindByCodeAsync(name, ct).ConfigureAwait(false);
+        if (library is null)
+        {
+            return new Entry(EntryKind.Missing, null, null, [name]);
+        }
+
+        var version = library.VersionOn(onDate);
+        MethodologyScript? script = null;
+        if (version is { } found)
+        {
+            if (shadowScripts is not null && shadowScripts.TryGetValue(found.Id, out var pending))
+            {
+                script = pending;
+            }
+            else if (found.Engine == MethodologyEngine.Script || shadowScripts is not null)
+            {
+                script = await methodologies.GetScriptAsync(found.Id, ct).ConfigureAwait(false);
+            }
+        }
+
+        if (script is null)
+        {
+            return new Entry(EntryKind.NotScript, null, null, [name]);
+        }
+
+        chain.Add(name);
+        try
+        {
+            var inner = await CompileCoreAsync(
+                    script.Text, script.NumericMode, script.IsLibrary, onDate, chain, memo, shadowScripts, ct)
+                .ConfigureAwait(false);
+            return new Entry(EntryKind.Compiled, inner.Compilation.Script, inner.CyclePath, [name, .. inner.Below]);
+        }
+        finally
+        {
+            chain.RemoveAt(chain.Count - 1);
+        }
     }
 
     private static ScriptDiagnostic Rewrite(
