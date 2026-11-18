@@ -3,7 +3,32 @@ import { List, Text } from '@mantine/core';
 import { formatPeriodKey } from '@/shared/format/periodKey';
 import { t } from '@/shared/i18n';
 import { ConfirmModal } from '@/shared/ui/ConfirmModal';
+import { localized } from '@/shared/i18n/localized';
 import type { ApprovalRouteImpactDto } from './approvalRoutesApi';
+
+type RestartedSheet = ApprovalRouteImpactDto['sheets'][number];
+
+/** Перша непорожня назва: мовою інтерфейсу → код → ідентифікатор. */
+function firstOf(name: string, code: string | null | undefined, id: number): string {
+  if (name.length > 0) return name;
+  if (code !== null && code !== undefined && code.length > 0) return code;
+  return String(id);
+}
+
+/**
+ * ✎ B155-names: підстановки рядка переліку — назви проєкту, документа й аркуша («&lt;Назва&gt; N» копії, як у вкладці
+ * документа) з сервера; немає назви — код, немає коду — ідентифікатор.
+ */
+function restartSheetParams(sheet: RestartedSheet): Record<string, string> {
+  const display = localized(sheet.sheetDisplayName ?? null);
+
+  return {
+    project: firstOf(localized(sheet.projectName ?? null), sheet.projectCode, sheet.projectId),
+    document: firstOf(localized(sheet.documentName ?? null), sheet.documentCode, sheet.documentId),
+    sheet: firstOf(display.length > 0 ? display : localized(sheet.sheetName ?? null), sheet.sheetCode, sheet.sheetDefId),
+    period: formatPeriodKey(sheet.periodKey) || String(sheet.periodKey),
+  };
+}
 
 /**
  * ✎ B155 (варіант C): підтвердження «N поданих аркушів почнуть погодження з першого кроку».
@@ -50,13 +75,9 @@ export function RestartConfirm({
           {sheets.map((sheet) => (
             <List.Item key={`${String(sheet.documentId)}:${String(sheet.sheetDefId)}:${String(sheet.sheetCopyId ?? 0)}:${String(sheet.periodKey)}`}>
               <Text size="sm">
-                {t(sheet.sheetCopyId === null ? 'approvalRoutes.restartSheet' : 'approvalRoutes.restartSheetCopy', {
-                  project: sheet.projectId,
-                  document: sheet.documentId,
-                  sheet: sheet.sheetDefId,
-                  copy: sheet.sheetCopyId ?? 0,
-                  period: formatPeriodKey(sheet.periodKey) || String(sheet.periodKey),
-                })}
+                {sheet.sheetCopyId === null
+                  ?t('approvalRoutes.restartSheetLine', restartSheetParams(sheet))
+                  : t('approvalRoutes.restartSheetCopyLine', restartSheetParams(sheet))}
               </Text>
             </List.Item>
           ))}

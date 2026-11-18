@@ -23259,20 +23259,71 @@
       "RestartedSheetDto": {
         "description": "✎ B155: поданий аркуш, погодження якого почнеться (почалося) з першого кроку.",
         "properties": {
+          "copyOrdinal": {
+            "description": "Номер у групі аркуша: 1 — оригінал, 2… — копії.",
+            "format": "int16",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "documentCode": {
+            "description": "Код документа (`BusinessKey`).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "documentId": {
             "description": "Документ.",
             "format": "int64",
             "type": "integer"
+          },
+          "documentName": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Назва документа мовами каталогу; `null` — немає."
+              }
+            ]
           },
           "periodKey": {
             "description": "Період.",
             "format": "int32",
             "type": "integer"
           },
+          "projectCode": {
+            "description": "Код проєкту; `null` — назви не прочитано (показ відступає до ідентифікатора).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "projectId": {
             "description": "Проєкт.",
             "format": "int32",
             "type": "integer"
+          },
+          "projectName": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Назва проєкту мовами каталогу."
+              }
+            ]
+          },
+          "sheetCode": {
+            "description": "Код аркуша шаблону.",
+            "type": [
+              "null",
+              "string"
+            ]
           },
           "sheetCopyId": {
             "description": "Копія (RS); `null` — оригінал.",
@@ -23286,6 +23337,28 @@
             "description": "Аркуш.",
             "format": "int32",
             "type": "integer"
+          },
+          "sheetDisplayName": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Показувана назва аркуша в документі — «&lt;Назва&gt; N» за SheetCopyNaming, як у вкладці документа."
+              }
+            ]
+          },
+          "sheetName": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Назва аркуша шаблону мовами каталогу."
+              }
+            ]
           }
         },
         "required": [

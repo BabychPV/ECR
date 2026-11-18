@@ -1515,7 +1515,14 @@ DELETE t
     -- B165(1): відмова «документ шаблону в проєкті вже є» отримала власний код ECR-DOC-4092 (ключ err.ECR-DOC-4092.documentExistsForTemplate).
     (N'err.ECR-DOC-0409.documentExistsForTemplate', N'en', N'This project already has a document of this template: the template allows one document per project. Open the existing document.'),
     (N'err.ECR-DOC-0409.documentExistsForTemplate', N'ru', N'В этом проекте документ этого шаблона уже есть: шаблон допускает один документ на проект. Откройте существующий документ.'),
-    (N'err.ECR-DOC-0409.documentExistsForTemplate', N'kz', N'Бұл жобада осы үлгінің құжаты бар: үлгі бір жобаға бір құжатқа рұқсат береді. Бар құжатты ашыңыз.')
+    (N'err.ECR-DOC-0409.documentExistsForTemplate', N'kz', N'Бұл жобада осы үлгінің құжаты бар: үлгі бір жобаға бір құжатқа рұқсат береді. Бар құжатты ашыңыз.'),
+    -- B155-names: перелік перезапуску показує назви проєкту/документа/аркуша — ключі з ідентифікаторами замінено на approvalRoutes.restartSheetLine/restartSheetCopyLine.
+    (N'approvalRoutes.restartSheet',     N'en', N'Project {project}, document {document}, sheet {sheet}, {period}'),
+    (N'approvalRoutes.restartSheet',     N'ru', N'Проект {project}, документ {document}, лист {sheet}, {period}'),
+    (N'approvalRoutes.restartSheet',     N'kz', N'Жоба {project}, құжат {document}, парақ {sheet}, {period}'),
+    (N'approvalRoutes.restartSheetCopy', N'en', N'Project {project}, document {document}, sheet {sheet} (copy {copy}), {period}'),
+    (N'approvalRoutes.restartSheetCopy', N'ru', N'Проект {project}, документ {document}, лист {sheet} (копия {copy}), {period}'),
+    (N'approvalRoutes.restartSheetCopy', N'kz', N'Жоба {project}, құжат {document}, парақ {sheet} (көшірме {copy}), {period}')
   ) AS s ([Key], Lang, OldVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -3391,8 +3398,8 @@ SELECT v.[Key], v.Lang, v.Val
     (N'approvalRoutes.restartHidden', N'ru', N'Ещё {hidden} — в проектах, которые вам не видны.'),
     (N'approvalRoutes.restartTruncated', N'ru', N'Показаны только первые {count}.'),
     (N'approvalRoutes.restartListLabel', N'ru', N'Листы, которые начнут с первого шага'),
-    (N'approvalRoutes.restartSheet', N'ru', N'Проект {project}, документ {document}, лист {sheet}, {period}'),
-    (N'approvalRoutes.restartSheetCopy', N'ru', N'Проект {project}, документ {document}, лист {sheet} (копия {copy}), {period}'),
+    (N'approvalRoutes.restartSheetLine', N'ru', N'{project} · {document} · лист {sheet} · {period}'),
+    (N'approvalRoutes.restartSheetCopyLine', N'ru', N'{project} · {document} · лист {sheet} (копия) · {period}'),
     (N'approvalRoutes.restartVerb', N'ru', N'Сохранить и начать заново'),
     (N'approvalRoutes.noTemplates', N'ru', N'В этом проекте нет шаблонов.'),
     (N'approvalRoutes.colTemplate', N'ru', N'Шаблон'),
@@ -6449,8 +6456,8 @@ SELECT v.[Key], v.Lang, v.Val
     (N'approvalRoutes.restartHidden', N'kz', N'Тағы {hidden} — сізге көрінбейтін жобаларда.'),
     (N'approvalRoutes.restartTruncated', N'kz', N'Тек алғашқы {count} көрсетілген.'),
     (N'approvalRoutes.restartListLabel', N'kz', N'Бірінші қадамнан басталатын парақтар'),
-    (N'approvalRoutes.restartSheet', N'kz', N'Жоба {project}, құжат {document}, парақ {sheet}, {period}'),
-    (N'approvalRoutes.restartSheetCopy', N'kz', N'Жоба {project}, құжат {document}, парақ {sheet} (көшірме {copy}), {period}'),
+    (N'approvalRoutes.restartSheetLine', N'kz', N'{project} · {document} · парақ {sheet} · {period}'),
+    (N'approvalRoutes.restartSheetCopyLine', N'kz', N'{project} · {document} · парақ {sheet} (көшірме) · {period}'),
     (N'approvalRoutes.restartVerb', N'kz', N'Сақтау және қайта бастау'),
     (N'approvalRoutes.noTemplates', N'kz', N'Бұл жобада үлгілер жоқ.'),
     (N'approvalRoutes.colTemplate', N'kz', N'Үлгі'),
