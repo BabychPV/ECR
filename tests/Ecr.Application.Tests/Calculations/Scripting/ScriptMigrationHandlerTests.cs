@@ -405,6 +405,20 @@ public sealed class ScriptMigrationHandlerTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait("Requirement", "MS-8.5")]
+    public async Task Switch_версії_без_речовин_ігнорує_ознаку_по_речовинах_у_збереженому_виході()
+    {
+        Publish(_alphaVersion);
+        _store.GetOutputsAsync(AlphaV, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<MethodologyOutput>>([Output("OUT_A", ScriptTestKit.Tonne, true)]));
+
+        var response = await Switch().HandleAsync(new SwitchScriptEngineRequest([AlphaV], "Script", "why"), default);
+
+        Assert.Equal("Script", response.Engine);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "MS-8.5")]
     public async Task Switch_туди_й_назад_пише_таблиці_читання_залежності_і_журнал_із_причиною()
     {
         Publish(_alphaVersion);

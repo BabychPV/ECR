@@ -47,6 +47,14 @@ public static class ReferenceNormalizer
     {
         ArgumentNullException.ThrowIfNull(model);
         rules ??= Rules;
+
+        // Правило потрібне лише там, де токен-«з» НЕ резолвиться в самій моделі: AF XML називає константи/формули
+        // інакше, ніж посилаються на них формули, а дзеркала SQL старої системи (AF_Constants) мають ім'я, що
+        // збігається з посиланням, — тоді «виправлення» створило б нерезолвне посилання.
+        var definedConstants = model.Constants.Select(c => c.Name).ToHashSet(StringComparer.Ordinal);
+        var definedFormulas = model.Formulas.Select(f => f.Name).ToHashSet(StringComparer.Ordinal);
+        rules = [.. rules.Where(r => !IsDefined(r.From, definedConstants, definedFormulas))];
+
         var byFrom = rules.ToDictionary(r => r.From, StringComparer.Ordinal);
         var textRegex = rules.ToDictionary(r => r.Id, r => TextRegex(r.From), StringComparer.Ordinal);
         var inArgs = rules.ToDictionary(r => r.Id, _ => 0, StringComparer.Ordinal);
@@ -98,6 +106,11 @@ public static class ReferenceNormalizer
         };
         return (normalized, applied);
     }
+
+    private static bool IsDefined(string token, HashSet<string> constants, HashSet<string> formulas)
+        => token.StartsWith("CST.", StringComparison.Ordinal)
+            ? constants.Contains(token[4..])
+            : token.StartsWith('!') && formulas.Contains(token[1..]);
 
     // Межі імені: перед `!X` — не слово й не `!`; перед `CST.X` — не слово й не `.`; після — не слово (не префікс довшого імені).
     private static Regex TextRegex(string from)
