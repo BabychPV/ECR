@@ -1,0 +1,497 @@
+{
+ "tables": [
+  {
+   "code": "T3_00",
+   "columns": [
+    {
+     "code": "CalculationMonth",
+     "type": "Decimal"
+    },
+    {
+     "code": "Density",
+     "type": "Decimal"
+    },
+    {
+     "code": "FuelLowerHeating",
+     "type": "Decimal"
+    },
+    {
+     "code": "H2Smass",
+     "type": "Decimal"
+    },
+    {
+     "code": "Land_EF_KNO2",
+     "type": "Decimal"
+    },
+    {
+     "code": "Land_GasConsumption",
+     "type": "Decimal"
+    },
+    {
+     "code": "Land_Measure_FuelSubstanceConsumptionOrPumpedVolume",
+     "type": "Decimal"
+    },
+    {
+     "code": "Land_OverhauledEngines",
+     "type": "String"
+    },
+    {
+     "code": "Land_Power",
+     "type": "Decimal"
+    },
+    {
+     "code": "Land_Rotation",
+     "type": "String"
+    },
+    {
+     "code": "Land_RunningHoursMonthly",
+     "type": "Decimal"
+    },
+    {
+     "code": "MercaptanSulphurContent",
+     "type": "Decimal"
+    },
+    {
+     "code": "ECW_EC_gsec_1325",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_gsec_2704",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_gsec_2754",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_gsec_301",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_gsec_304",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_gsec_328",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_gsec_330",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_gsec_337",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_gsec_703",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_gsec_NOx",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_tons_1325",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_tons_2704",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_tons_2754",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_tons_301",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_tons_304",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_tons_328",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_tons_330",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_tons_337",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_tons_703",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_tons_NOx",
+     "type": "Calculated"
+    }
+   ]
+  },
+  {
+   "code": "T4_01",
+   "columns": [
+    {
+     "code": "Land_Measure_FuelConsumptionKgh",
+     "type": "Decimal"
+    },
+    {
+     "code": "Land_Measure_FuelConsumptionTonn",
+     "type": "Decimal"
+    },
+    {
+     "code": "Land_Measure_TotQuantTransport",
+     "type": "Decimal"
+    },
+    {
+     "code": "ECW_EC_gsec_184",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_gsec_2704",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_gsec_2754",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_gsec_301",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_gsec_328",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_gsec_330",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_gsec_337",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_gsec_703",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_tons_184",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_tons_2704",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_tons_2754",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_tons_301",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_tons_328",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_tons_330",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_tons_337",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_tons_703",
+     "type": "Calculated"
+    }
+   ]
+  },
+  {
+   "code": "T5_08",
+   "columns": [
+    {
+     "code": "DaysInCalcMonth",
+     "type": "Decimal"
+    },
+    {
+     "code": "DaysInCalcYear",
+     "type": "Decimal"
+    },
+    {
+     "code": "Land_ERG_ExpFactor",
+     "type": "Decimal"
+    },
+    {
+     "code": "Land_ERG_MaximumVolume",
+     "type": "Decimal"
+    },
+    {
+     "code": "Land_ERG_StorEmissions",
+     "type": "Decimal"
+    },
+    {
+     "code": "Land_Measure_OperTimeDays",
+     "type": "Decimal"
+    },
+    {
+     "code": "Land_Measure_QuantLiquid",
+     "type": "Decimal"
+    },
+    {
+     "code": "Winter",
+     "type": "Decimal"
+    },
+    {
+     "code": "ECW_EC_gsec_2732",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_gsec_2735",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_gsec_2754",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_gsec_333",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_gsec_415",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_gsec_416",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_gsec_501",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_gsec_602",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_gsec_616",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_gsec_621",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_gsec_627",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_tons_2732",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_tons_2735",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_tons_2754",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_tons_333",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_tons_415",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_tons_416",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_tons_501",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_tons_602",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_tons_616",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_tons_621",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_tons_627",
+     "type": "Calculated"
+    }
+   ]
+  },
+  {
+   "code": "T5_09",
+   "columns": [
+    {
+     "code": "Land_ERG_DurationAVGdischarge",
+     "type": "Decimal"
+    },
+    {
+     "code": "Land_ERG_Vsl",
+     "type": "Decimal"
+    },
+    {
+     "code": "Land_Measure_QuantFuel",
+     "type": "Decimal"
+    },
+    {
+     "code": "Land_TypePetrStation",
+     "type": "String"
+    },
+    {
+     "code": "Winter",
+     "type": "Decimal"
+    },
+    {
+     "code": "ECW_EC_gsec_2732",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_gsec_2735",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_gsec_2754",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_gsec_333",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_gsec_415",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_gsec_416",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_gsec_501",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_gsec_602",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_gsec_616",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_gsec_621",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_gsec_627",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_tons_2732",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_tons_2735",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_tons_2754",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_tons_333",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_tons_415",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_tons_416",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_tons_501",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_tons_602",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_tons_616",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_tons_621",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_tons_627",
+     "type": "Calculated"
+    }
+   ]
+  },
+  {
+   "code": "T5_27",
+   "columns": [
+    {
+     "code": "Con_Region",
+     "type": "String"
+    },
+    {
+     "code": "Land_Measure_IgnitionsNumber",
+     "type": "Decimal"
+    },
+    {
+     "code": "Land_TypeBurnFuel",
+     "type": "String"
+    },
+    {
+     "code": "ECW_EC_tons_301",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_tons_304",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_tons_328",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_tons_330",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_tons_337",
+     "type": "Calculated"
+    },
+    {
+     "code": "ECW_EC_tons_410",
+     "type": "Calculated"
+    }
+   ]
+  }
+ ]
+}

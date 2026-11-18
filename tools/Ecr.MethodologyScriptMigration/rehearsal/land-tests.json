@@ -1,0 +1,20 @@
+{
+ "ECW_C05_01": {"case":"P1","tol":"0.000001","inp":{"Land_Power":500,"Land_Rotation":"<1500","Land_OverhauledEngines":"Not passed overhaul - Не прошел капитальный ремонт","Land_RunningHoursMonthly":100,"Land_Measure_FuelSubstanceConsumptionOrPumpedVolume":20},
+   "exp":{"ECW_EC_tons_NOx":0.8,"ECW_EC_tons_301":0.64,"ECW_EC_tons_304":0.104,"ECW_EC_tons_337":0.52,"ECW_EC_gsec_NOx":1.333333,"ECW_EC_gsec_301":1.066667}},
+ "ECW_C05_02": {"case":"P2","tol":"0.000000001","inp":{"CalculationMonth":6,"Land_RunningHoursMonthly":50,"Land_Measure_FuelSubstanceConsumptionOrPumpedVolume":0},
+   "exp":{"ECW_EC_tons_NOx":0.00000875,"ECW_EC_tons_301":0.000007,"ECW_EC_tons_304":0.0000011375,"ECW_EC_gsec_NOx":0.000048611,"ECW_EC_tons_337":0.00046875}},
+ "ECW_C05_03": {"case":"P3","tol":"0.00000001","inp":{"Land_RunningHoursMonthly":10,"Land_Measure_FuelSubstanceConsumptionOrPumpedVolume":0.01},
+   "exp":{"ECW_EC_tons_NOx":0.000006,"ECW_EC_tons_301":0.0000048,"ECW_EC_gsec_NOx":0.00016667}},
+ "ECW_C05_04": {"case":"ST025","tol":"0.000001","inp":{"Land_Measure_FuelSubstanceConsumptionOrPumpedVolume":4.684,"Land_RunningHoursMonthly":52,"Land_EF_KNO2":0.113767,"Land_TypeFuel":"Diesel"},
+   "exp":{"ECW_EC_tons_301":0.0182247,"ECW_EC_gsec_301":0.0973543,"ECW_EC_tons_337":0.0640771}},
+ "ECW_C05_05": {"case":"P4","tol":"0.000001","inp":{"Density":0.75,"FuelLowerHeating":36,"H2Smass":2,"MercaptanSulphurContent":0.5,"Land_EF_KNO2":0.1,"Land_GasConsumption":100000,"Land_RunningHoursMonthly":100},
+   "exp":{"ECW_EC_tons_301":0.288,"ECW_EC_tons_337":0.9,"ECW_EC_tons_330":3.57}},
+ "ECW_C06_01": {"case":"P5","tol":"0.000001","inp":{"Land_Measure_FuelConsumptionTonn":2.5,"Land_Measure_FuelConsumptionKgh":40,"Land_Measure_TotQuantTransport":1,"Land_TypeFuel":"Diesel"},
+   "exp":{"ECW_EC_tons_301":0.025,"ECW_EC_tons_330":0.05,"ECW_EC_tons_337":0.25,"ECW_EC_gsec_301":0.111111,"ECW_EC_gsec_337":1.111111}},
+ "ECW_C07_07": {"case":"D5","tol":"0.00000001","inp":{"DaysInCalcMonth":24,"DaysInCalcYear":365,"Land_ERG_ExpFactor":0.8,"Land_ERG_MaximumVolume":5,"Land_ERG_StorEmissions":0.081,"Land_Measure_OperTimeDays":24,"Land_Measure_QuantLiquid":0,"Winter":0,"Land_TypeStorMaterial":"Diesel"},
+   "exp":{"ECW_EC_tons_333":0.000000043247,"ECW_EC_gsec_333":0.0000121956,"ECW_EC_gsec_2754":0.00434336}},
+ "ECW_C07_21": {"case":"IGN","tol":"0.0000001","inp":{"Con_Region":"Mangistau - Мангистау","Land_TypeBurnFuel":"Diesel - Дизель","Land_Measure_IgnitionsNumber":10},
+   "exp":{"ECW_EC_tons_301":0.000139,"ECW_EC_tons_337":0.02175,"ECW_EC_tons_328":0.00261}},
+ "ECW_C07_08": {"case":"OT021","tol":"0.000000001","inp":{"Land_Measure_QuantFuel":897.045,"Land_ERG_Vsl":45,"Land_ERG_DurationAVGdischarge":3600,"Winter":0,"Land_TypePetrStation":"Ground level tank - Наземный резервуар","Land_TypePumpedLiquid":"Diesel"},
+   "exp":{"ECW_EC_tons_333":0.0001566508652414,"ECW_EC_gsec_333":0.00007875,"ECW_EC_tons_2754":0.0557900867209655,"ECW_EC_gsec_2754":0.02804625}}
+}
