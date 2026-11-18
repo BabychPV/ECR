@@ -58,9 +58,17 @@ public sealed partial class RegistryImpactRecalculationJob(
         IReadOnlyList<RegistryImpactRow> rows;
         if (request.IsSourceChange)
         {
-            rows = await impact
+            var impacted = await impact
                 .ListImpactedForYearAsync(request.RegistryDefId, request.Year!.Value, ct)
                 .ConfigureAwait(false);
+
+            // B80 N3(b): за ApprovedOnly затвердження місяця джерела дає споживачеві дані, яких доти не було, тож
+            // документ-споживач БЕЗ результату (ще не рахувався) теж залежний. Рішення — у сховищі на момент виконання
+            // (стан зв'язки, біт/ключ читання), не в payload: злиті постановки payload не міняють. За Any — порожньо.
+            var consumers = await impact
+                .ListBoundConsumersForYearAsync(request.RegistryDefId, request.Year!.Value, ct)
+                .ConfigureAwait(false);
+            rows = [.. impacted.Concat(consumers)];
             wanted = [.. rows.Select(r => r.DocumentId)];
         }
         else
