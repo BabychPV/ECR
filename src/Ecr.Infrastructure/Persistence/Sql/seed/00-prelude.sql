@@ -1504,7 +1504,14 @@ DELETE t
     -- D6/D-223: розбіжність періоду на запису комірок віддає `err.ECR-PRD-0422.periodMismatch`; старий ключ ніхто не вживає.
     (N'err.ECR-REQ-0422.periodMismatch', N'en', N'The period {periodKey} in the request does not match period {expectedPeriodKey} of table instance {tableInstanceId}.'),
     (N'err.ECR-REQ-0422.periodMismatch', N'ru', N'Период {periodKey} в запросе не совпадает с периодом {expectedPeriodKey} экземпляра таблицы {tableInstanceId}.'),
-    (N'err.ECR-REQ-0422.periodMismatch', N'kz', N'Сұраудағы {periodKey} кезеңі {tableInstanceId} кесте данасының {expectedPeriodKey} кезеңіне сәйкес келмейді.')
+    (N'err.ECR-REQ-0422.periodMismatch', N'kz', N'Сұраудағы {periodKey} кезеңі {tableInstanceId} кесте данасының {expectedPeriodKey} кезеңіне сәйкес келмейді.'),
+    -- LAND-YEAR L7c: меню «Calculated: <місяць>» документа «рік» прибрано в L7a (перемикача місяця немає).
+    (N'calcResults.calculatedMonth',        N'en', N'Calculated: {month}'),
+    (N'calcResults.calculatedMonth',        N'ru', N'Рассчитано: {month}'),
+    (N'calcResults.calculatedMonth',        N'kz', N'Есептелген: {month}'),
+    (N'calcResults.calculatedMonthHeading', N'en', N'Calculated columns show results of'),
+    (N'calcResults.calculatedMonthHeading', N'ru', N'Рассчитанные столбцы показывают результаты за'),
+    (N'calcResults.calculatedMonthHeading', N'kz', N'Есептелген бағандар нәтижелерін көрсетеді')
   ) AS s ([Key], Lang, OldVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
