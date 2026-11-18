@@ -16,7 +16,7 @@ interface FakeEditor {
 
 const state = vi.hoisted(() => ({ editors: [] as unknown[] }));
 
-vi.mock('../../expressions/monaco', () => ({
+vi.mock('@/features/expressions/monaco', () => ({
   prepare: () => undefined,
   LightTheme: 'light',
   DarkTheme: 'dark',

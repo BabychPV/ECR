@@ -6,7 +6,7 @@ import { outline as outlineOf, previewRow, previewTable, previewValue } from './
 
 const preview = vi.hoisted(() => vi.fn());
 
-vi.mock('../api', () => ({ previewMethodologyScript: preview }));
+vi.mock('@/features/methodologyScript/api', () => ({ previewMethodologyScript: preview }));
 vi.mock('@/features/documents/api', () => ({
   listDocuments: () =>
     Promise.resolve({
