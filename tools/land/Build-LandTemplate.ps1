@@ -111,7 +111,7 @@ param(
     [switch]$ReuseDraft,
     [securestring]$BootstrapPassword,
     [string]$GoldenDir,
-    [ValidateSet('Accounts', 'Units', 'Registries', 'Contract', 'Template', 'Project', 'Documents', 'Methodologies', 'RowFilter', 'SubstanceApplicability', 'ParityBranch', 'OptionalArguments', 'ArgumentSuffix', 'LookupCompare', 'NaeType', 'BranchGate', 'RequiredInputs', 'YearMonths', 'Data', 'MassFraction', 'LandParity', 'CompositionMass', 'T7bStatus', 'All')]
+    [ValidateSet('Accounts', 'Units', 'Registries', 'Contract', 'Template', 'Project', 'Documents', 'Methodologies', 'RowFilter', 'T7bStatus', 'SubstanceApplicability', 'ParityBranch', 'OptionalArguments', 'ArgumentSuffix', 'LookupCompare', 'NaeType', 'BranchGate', 'RequiredInputs', 'YearMonths', 'Data', 'MassFraction', 'LandParity', 'CompositionMass', 'All')]
     [string[]]$Stage = @('All'),
     [ValidateSet('Sql', 'Api')][string]$StructureMode = 'Sql',
     [string]$SqlConnection,
