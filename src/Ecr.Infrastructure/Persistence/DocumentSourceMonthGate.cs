@@ -55,12 +55,13 @@ public sealed class DocumentSourceMonthGate(EcrDbContext db, bool? readOverride)
             return null;
         }
 
-        // Шаблон документа: власний (B74) або основний шаблон проєкту.
+        // Шаблон документа: власний (B74) або шаблон версії ПЕРІОДУ проєкту (шкала, EcrDbContext.VersionOf — сторож B74).
         var bindings = await (
                 from d in db.Documents.AsNoTracking()
                 where d.Id == documentId
                 join p in db.Projects.AsNoTracking() on d.ProjectId equals p.Id
-                join pv in db.TemplateVersions.AsNoTracking() on p.TemplateVersionId equals pv.Id
+                from pv in db.TemplateVersions.AsNoTracking()
+                where pv.Id == EcrDbContext.VersionOf(d.ProjectId, periodKey)
                 from c in db.DocumentSourceBindingConsumers.AsNoTracking()
                 where c.TemplateId == (d.TemplateId ?? pv.TemplateId)
                 join b in db.DocumentSourceBindings.AsNoTracking() on c.BindingId equals b.Id
