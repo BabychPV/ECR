@@ -4131,6 +4131,49 @@ public interface IScriptPreviewRunner
 }
 ```
 
+#### Скрипт версії методології (MS): ендпоінти редактора
+
+Контролер `MethodologyScriptController`, маршрут `api/v1/methodologies/{id}/versions/{vid}/script`. Кожна дія
+спершу перевіряє право, потім що версія `vid` належить методології `id` (чужа чи неіснуюча версія — одна
+`404 ECR-CALC-0404`, `messageKey` `err.ECR-CALC-0404.version`). Без права — `403`; без входу — `401`.
+
+| Метод і шлях | Право | Тіло → відповідь | Коди помилок |
+|---|---|---|---|
+| `GET …/script` | `Calculation.View` | → `MethodologyScriptDto` | `404` |
+| `PUT …/script` | `Calculation.EditFormula` | `{ text, expectedHash? }` → `MethodologyScriptDto` | `404`; `409 ECR-CALC-0409` (`scriptNotEditable`, `scriptChanged`); `422 ECR-CALC-0422` (`scriptEmpty`, `scriptTooLarge`) |
+| `POST …/script/validate` | `Calculation.View` | `{ text }` → `ScriptValidationDto { diagnostics[], outline }` | `404`; `422 scriptTooLarge` |
+| `POST …/script/preview` | `Calculation.View` + доступ до документа | `{ text?, documentId, periodKey, tableInstanceId?, maxRows? }` → `ScriptPreviewDto { tables[], diagnostics[] }` | `403 ECR-AUTH-0403` (`scriptPreviewRestricted`); `404` (версія чи документ); `422 ECR-CALC-0422` (`simulatePeriodInvalid`, `scriptEmpty`, `scriptTooLarge`, `scriptPreviewUnavailable`) |
+| `POST …/script/format-const` | `Calculation.View` | `{ text }` (літерал константи) → `FormatConstDto { text?, kind?, diagnostics[] }` | `404`; `422 scriptTooLarge` |
+
+- `MethodologyScriptDto`: `engine` (`Script`/`Formulas`), `text` (порожній, якщо тексту ще немає), `hash` (SHA-256
+  тексту в hex малими літерами, переводи рядків нормалізовано до `\n`; порожній рядок — тексту ще немає), `isDraft`,
+  `diagnostics[]`, `outline`. Діагностика: `{ code, messageKey (script.<code>), params, line, column, length, message }`
+  (рядок і колонка з 1; `message` — англійський запасний текст). `outline`: `{ tables[{ code, templateCode, alias }],
+  inputs[{ name, optional }], outputs[{ code, unit, perSubstance }], substances[], imports[], constants[{ name, kind:
+  scalar|map, line }], variables[{ name, line }], functions[{ name, parameters[], line }] }`.
+- `PUT`: текст зберігається ЗАВЖДИ, навіть із діагностиками; виходи, речовини, імпорти й таблиці читання
+  матеріалізуються лише коли діагностик немає. `expectedHash` — хеш, з якого виходив редактор: не збігся —
+  `409 scriptChanged` (у `details` — поточний `hash`); порожній чи відсутній — звірки немає. `409 scriptNotEditable` — версія не
+  чернетка або не рушія `Script`. Порожній (чи з самих пробілів) текст — `422 scriptEmpty`.
+- ⛔ Межа тексту **1 000 000 знаків** (`ScriptAnalyzer.MaxTextLength`): довший — `422 ECR-CALC-0422`, `messageKey`
+  `err.ECR-CALC-0422.scriptTooLarge`, `details.limit` = `"1000000"`; діє для `PUT`, `validate`, `preview` (якщо `text`
+  передано) і `format-const`. Межа компілятора — 200 000 знаків (діагностика `tooLarge`, не помилка запиту): текст між
+  двома межами зберігається, але з діагностикою.
+- `preview`: порожній `text` — береться збережений текст версії. Текст з діагностиками не виконується — повертаються
+  `tables: []` і діагностики. `maxRows` обмежується до 1…200 (типово 50). `periodKey` — місяць `РРРРММ` (інакше
+  `simulatePeriodInvalid`). Нічого не записує. Доступ як до результатів розрахунку документа; профіль з обмеженим
+  доступом до колонок — `403 scriptPreviewRestricted`.
+- `format-const`: друкує літерал із розібраних значень (коментарі й вихідний запис чисел губить). Редактор таблиць
+  коефіцієнтів ним НЕ користується: клієнт друкує сам, зберігаючи коментарі й запис чисел, а ендпоінт лишається для
+  сторонніх клієнтів. Нерозібраний літерал — `200` із `text: null` і `diagnostics[]` (позиції — у вхідному тексті).
+- У OpenAPI-знімку (`contracts/openapi.snapshot.json`) для `validate` і `format-const` оголошено лише `200`/`404`;
+  `422 scriptTooLarge` і `403` повертаються, але атрибутами `ProducesResponseType` не описані.
+- Публікація версії зі скриптом — спільний `POST /api/v1/methodologies/{id}/versions/{vid}/publish` (права
+  `Calculation.Publish`; автор може публікувати власну версію, `D-440`): помилки скрипта дають `422 ECR-CALC-0422` з
+  переліком `problems[]` (`messageKey` кожної — `script.<code>`, підстановки — параметри діагностики плюс `line`/`col`).
+  Старі маршрути правки формул, констант, категорій, правил, речовин і виходів для такої версії — `409 ECR-CALC-0409`
+  (`scriptManaged`).
+
 #### Перенесення методологій на скрипт (MS 8.5) і допоміжні читання
 
 Порти: `IVersionSourceReader` (`LoadAsync(versionId)` → `LoadedVersion`: старий вміст версії в моделі `VersionSource` — з нього рахується відбиток джерела) і `IScriptMigrationStore` (`GetImporterVersionsAsync(libraryMethodologyId)` — версії, що імпортують бібліотеку, для перевірки групи перемикання).
