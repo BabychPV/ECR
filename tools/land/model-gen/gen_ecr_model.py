@@ -1520,8 +1520,18 @@ for _s in out['sheets']:
 print('D-474:', _d474)
 # ---- B175: дефолти комірок РЯДКА (rows[].cellDefaults = {код колонки: текст}; Lookup — код запису, '' — прибрати дефолт
 # колонки в рядку). Таблиця -> {ключ рядка | '*' (усі рядки Item): {колонка: значення}}. Білдер передає їх обома шляхами
-# (SQL CellDefaultsJson і API PUT rows). Наповнення конкретних таблиць (T7b_00 Land_Status зі statusPresets) — окремо.
+# (SQL CellDefaultsJson і API PUT rows).
 ROW_CELL_DEFAULTS = {}
+# B175 × B26 (P-0118-34): статус D-425 нового документа — дефолт рядка зі statusPresets (Running на рядках речовин,
+# нічого на emptyRows, напр. S3_9), тож -Stage T7bStatus потрібен лише документам, створеним до версії з B175.
+for _s in out['sheets']:
+    for _t in _s['tables']:
+        _sp = _t.get('statusPresets')
+        if _sp:
+            _rcd = ROW_CELL_DEFAULTS.setdefault(_t['code'], {})
+            for _k in _sp['rows']:
+                if _k not in _sp['emptyRows']:
+                    _rcd.setdefault(_k, {})[_sp['column']] = _sp['entry']
 _b175 = []
 for _s in out['sheets']:
     for _t in _s['tables']:

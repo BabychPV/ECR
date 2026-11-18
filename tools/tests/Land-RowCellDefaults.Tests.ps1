@@ -30,4 +30,32 @@ Describe 'Land-RowCellDefaults: rows[].cellDefaults -> CellDefaultsJson / cellDe
         if ($null -ne (ConvertTo-LandRowCellDefaultsJson $plain)) { throw 'plain row produced JSON' }
         if ($null -ne (Get-LandRowCellDefaults $empty)) { throw 'empty cellDefaults produced map' }
     }
+
+    It 'модель Land (B26 x B175): T7b_00 S1_6/S2_7 -> {"Land_Status":"RUNNING"} для SQL і API, S3_9 -> нічого' {
+        $repo = (Resolve-Path (Join-Path (Join-Path $PSScriptRoot '..') '..')).Path
+        . (Join-Path $repo 'tools/land/Land-RowCellDefaults.ps1')
+        $model = Get-Content -LiteralPath (Join-Path $repo 'docs/delivery/reference-data/land-template/land-template.model.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+        $t7b = $null
+        foreach ($sh in @($model.sheets)) { foreach ($tb in @($sh.tables)) { if ([string]$tb.code -eq 'T7b_00') { $t7b = $tb } } }
+        if ($null -eq $t7b) { throw 'T7b_00 not in model' }
+        $byKey = @{}; foreach ($rw in @($t7b.rows)) { $byKey[[string]$rw.key] = $rw }
+        foreach ($k in 'S1_6', 'S2_7') {
+            $json = ConvertTo-LandRowCellDefaultsJson $byKey[$k]
+            if ($json -ne '{"Land_Status":"RUNNING"}') { throw "$k SQL JSON: $json" }
+            $api = Get-LandRowCellDefaults $byKey[$k]
+            if ($null -eq $api -or $api['Land_Status'] -ne 'RUNNING' -or @($api.Keys).Count -ne 1) { throw "$k API map wrong" }
+        }
+        if ($null -ne (ConvertTo-LandRowCellDefaultsJson $byKey['S3_9'])) { throw 'S3_9 got JSON' }
+        if ($null -ne (Get-LandRowCellDefaults $byKey['S3_9'])) { throw 'S3_9 got API map' }
+    }
+
+    It 'Build-LandTemplate передає дефолти рядка обома шляхами: SQL (CellDefaultsJson) і API (cellDefaults у PUT rows)' {
+        $repo = (Resolve-Path (Join-Path (Join-Path $PSScriptRoot '..') '..')).Path
+        $src = Get-Content -LiteralPath (Join-Path $repo 'tools/land/Build-LandTemplate.ps1') -Raw -Encoding UTF8
+        foreach ($needle in '. (Join-Path $here ''Land-RowCellDefaults.ps1'')', '$cdJson = ConvertTo-LandRowCellDefaultsJson $rw',
+                            '$row[''CellDefaultsJson''] =', 'UPDATE r SET CellDefaultsJson = d.Json',
+                            '$rowCellDefaults = Get-LandRowCellDefaults $rw', '$rowBody[''cellDefaults''] = $rowCellDefaults') {
+            if (-not $src.Contains($needle)) { throw "Build-LandTemplate.ps1 lacks: $needle" }
+        }
+    }
 }
