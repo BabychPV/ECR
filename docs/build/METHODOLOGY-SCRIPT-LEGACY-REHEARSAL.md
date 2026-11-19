@@ -134,3 +134,55 @@ dotnet tools\Ecr.MethodologyScriptMigration\bin\Debug\net10.0\Ecr.MethodologyScr
 & .\tools\land\Export-LandParityOracleFull.ps1 -Database EcrLegacyProd -Year 2026 -OutFile $sp\oracle.tsv
 & .\tools\land\Compare-LandParityFull.ps1 -JsonDir $sp\sample -OracleTsv $sp\oracle.tsv -SqlConnection $sql -OutPrefix $sp\cmp -AggregateBy NaePhase
 ```
+
+## 7. Коло 3 (19.11.2026): склад HSE400, поречовинні знімки, Common, вода
+
+Гілка `lane/ms-legacy3` (від `lane/ms-legacy2` + `235bbb29e`, `731bd989c`). Стенд `EcrLandMsLegacy3` зібрано з нуля з HEAD-моделі (пакет 49, довідники LAND_AIR_SUBSTANCE, склад HSE400 4 446 записів, потоки, речовини). Той самий зразок: 4 документи, 32 954 рядки, 0 відхилено. Значень, імен і номерів прода тут немає: лише агрегати й коди.
+
+### 7.1 Підсумок
+
+Опубліковано **31 з 49** (було 22): додалися `C11_01`, `C11_02`, `C11_10`, `C11_11_03`, `C11_20_01`, `C11_20_02`, `C12_01`, `C12_02`, `C12_04_01`. Перетворено в скрипт 29, тіньовий текст записано 29, **перемкнено на Script 26**. Порядок етапів: `LegacyRules` → … → `CompositionMass` → `SubstanceApplicability/ParityBranch/OptionalArguments/ArgumentSuffix` (повторно, бо `CompositionMass` змінює формули) → `LegacyBindings` → `LegacyPublish`.
+
+Не опубліковано 18: 12 без реального рядка в даних (`C07_07_01`, `C07_16`, `C11_06`, `C11_11_04`, `C11_11_05`, `C11_12_03`, `C11_14..19`), `Flert`/`HSE400`/`Thermaloxidizer` (інший шаблон), `Common`, `C09_02_01`, `C12_03`.
+
+### 7.2 Зміни інструмента (знімок рушія на реальному рядку)
+
+Причина порожніх знімків (усі виходи `null`, публікація `goldenSetDiverged`): вхід тесту не мав аргументів, яких у таблиці старої системи немає під тим самим іменем. Виправлено в `Stage-LegacyPublish` (чиста частина `tools/land/LandLegacyPublish.Lib.ps1`, тести `LandLegacyPublishLibTests`, мутаційні докази в описі класу):
+- суфіксні аргументи (`Land_Measure_OperatingTime__ECW_C11_01`) читають базову колонку рядка;
+- псевдонім `IDCodeNAEProject` -> `Land_NAE`; колонка шаблону-формула, що є лише `[X]` (`Land_TypeFuelOrStream` = `[TypeOfFuel]`), читає `X`;
+- колонка-формула вибору місяця над Lookup-колонками `X_Mnn` (`Land_Measure_ReleaseColdVent`) дістає запис довідника замість рядка (інакше `REGFIELD(@..., 'NAME')` дає `#REF`);
+- таблиця для рядка береться з найменшою кількістю відсутніх аргументів (мостові колонки складу HSE400 не рахуються відсутніми); журнал називає аргументи, яких у рядку немає;
+- прапор `-GoldenSyntheticBridgeArgs`: мостовий аргумент без колонки в старій системі (`Density20`, `Component_*`, `TotalSulphurContent` ...) дістає значення 1. **Знімок на таких вхідних значеннях доводить лише, що версія рахує**; застосовано до `C11_10`, `C12_02`. Перед виходом на прод замінити еталонами методолога.
+
+Слабкі знімки (виходів у знімку менше, ніж оголошено; решта `null` на цьому рядку): `C11_04` 5/10, `C11_05` 6/12, `C11_08` 4/8, `C11_11_01` 3/6, `C11_11_02` 2/26, `C11_13` 5/12, `C12_02` 10/20, `C12_04_02` 1/2.
+
+### 7.3 Паритет формула - скрипт і switch
+
+`parity`: цілей 1 792, рядків 31 668, значень 446 092, **розбіжностей значень 0**; 504 розбіжності діагностики `missingArguments.presence` лише в `C11_10` (формульний шлях повідомляє про відсутній `Land_Measure_SubstanceConsumption` (і `OperatingTime`) у T9_04, скриптовий мовчить; значення однакові). `C11_10` залишено на Formulas.
+
+Не перетворено (`scriptCompile`, `tooLarge`): `C11_01` (383 449 знаків) і `C12_01` (370 277) проти ліміту 200 000: фрагмент складу HSE400 розгортається в кожну гілку кожної формули. Лишаються на Formulas.
+
+Switch відмовляє (`switchChecksFailed`, 6 проблем, нічого не змінено) на `script.unitMismatch`, `reason: expr.unit.dimensionMismatch` (текст: "Incompatible units in '<вихід>': The result has a different dimension than the declared unit"):
+- `ECW_C05_05` V1: `ECW_EC_gsec_330` (рядок скрипта 35), `ECW_EC_gsec_337` (36), `ECW_EC_tons_330` (39), `ECW_EC_tons_337` (40);
+- `ECW_C11_07` V1: `ECW_EC_tons_330` (49), `ECW_EC_tons_337` (50).
+
+Решта 26 перемкнено одним викликом. `C05_05`, `C11_07` лишаються на Formulas.
+
+### 7.4 Звірка зі старою системою (`Compare-LandParityFull -AggregateBy NaePhase`)
+
+263 876 клітинок, документів 4. **MISMATCH 0.** Збіг (`AGG_MATCH`, `MATCH`, з втратою округлення) 196 068; `AGG_NEAR` 60 (як у колі 2: `C05_01` 44, `C05_02` 7, `C12_05` 5, `C05_04` 4); решта 67 748 пояснена класами: проміжні виходи ECR (`AGG_ECR_ONLY_INTERMEDIATE` 21 378 + `ECR_ONLY_INTERMEDIATE` 1 148), `AGG_ECR_ONLY_ZERO` 15 592, `AGG_MISSING_OUTPUT_ZERO` 14 034, `AGG_LEGACY_STATUS_SKIP` 5 276, `AGG_MISSING_ROW(_ZERO)` 5 474, `AGG_LEGACY_COPY_COUNT_DIFF` 1 064, `AGG_MISSING_BOUND_NO_RESULT(_ZERO)` 952, `AGG_MISSING_NOT_PUBLISHED(_ZERO)` 1 092.
+
+Нове проти кола 2: `C05_05` **896 з 896 збіг** (Density/FuelLowerHeating/H2Smass/Mercaptan тепер з бази складу HSE400, міст `T3_00`); `C11_01` 10 248 з 10 248 і `C11_02` 5 208 з 5 208 (формульний шлях); `C11_04` 2 520 і `C11_05` 1 512 повні; `C11_07` 280 з 490 (решта `MISSING_BOUND_NO_RESULT/ROW`). Не збігаються: `C11_10` (0 з 34 860: у старої системи нулі на T9_02, у ECR виходів немає або нулі в інших рядках; причина в непривязаному `Land_Measure_SubstanceConsumption` у T9_02/T9_04 і знімку на синтетиці; потрібен розбір), `C11_11_03` (28 з 224, `AGG_MISSING_ROW` 196), `C11_20_01/02` (0 з 56: прив'язка є, результатів немає), `C12_01` (0 з 1 134: `AGG_LEGACY_COPY_COUNT_DIFF` 1 064, поведінка старої системи), `C12_02` (630 з 1 470, решта `LEGACY_STATUS_SKIP`).
+
+### 7.5 Відкриті питання методологу / розробці
+
+1. `C05_05`, `C11_07`: одиниці констант (порожні `CInfo_Unit` у дзеркалі) для `ECW_EC_gsec_330/337`, `ECW_EC_tons_330/337` (C05_05) і `ECW_EC_tons_330/337` (C11_07): результат має іншу розмірність, ніж заявлена одиниця виходу. Додатково для C05_05: сталий множник 0,25.
+2. `C12_03`: публікація відмовляє `ECR-CALC-0422`: правило категорії `if(SUBSTANCE_APPLICABLE('LAND_SUBSTANCE_APPLICABILITY','ECW_C12_03','TypeFuel',REGFIELD(@Land_TypeFuel,'NAME')),if(in(@IDCodeNAEProject,...),'0026',''),'')` дає "no category for this row: #REF" на тесті з усіма аргументами (також на записі Diesel). Те саме `REGFIELD(@Land_TypeFuel,'NAME')` без обгортки `SUBSTANCE_APPLICABLE` працює (`C05_04`). Підозра: вкладений `REGFIELD` усередині `SUBSTANCE_APPLICABLE` у контексті золотого тесту. Потрібен розбір рушія.
+3. `Common` (бібліотека): `constantAmbiguous` знято згортанням, але публікація відмовляє `goldenSetEmpty`: у бібліотеки немає виходів (оголосити вихід не вдається, `ECR-REQ-0422`), очікування задати нема чим, а набір без очікувань зеленим не є. Потрібне правило: як публікувати бібліотеку без виходів.
+4. `C11_01`, `C12_01`: ліміт 200 000 знаків скрипта. Підняти ліміт чи виносити фрагмент складу HSE400 у спільну функцію конвертера?
+5. `C11_10`: розбіжність діагностики `missingArguments.presence` (Formulas повідомляє, Script мовчить) і нульовий збіг зі старою; чи прив'язувати `Land_Measure_SubstanceConsumption` до T9_02/T9_04 (джерело в старій системі: `SubstanceConsumptionSm3` на 9_07)?
+6. `catchAllInMixedScope` (`C11_10`, `C12_04_02`) і золоті знімки (31 версія): замінити еталонами методолога.
+
+### 7.6 Вода `ECW_C09_02_01`
+
+Зіставлення з даних **неоднозначне**, тому не завантажено й не опубліковано (на тесті без `Concentration`, `Volume` публікація відмовляє `ECR-CALC-0422`). Що відомо: у шаблоні `T7b_00` (аркуш `S07B_WATER_MEASUREMENTS`) `Concentration` = значення місяця поточного рядка, `Volume` = місячна комірка рядка `S3_9` тієї ж таблиці. У прода за 2026: `AF_Water_Land_07a_16` 54 рядки (9 документів, 6 речовин, 9 місяців; даних `07a_1..15` немає), `AF_Water_Land_07` 15 750 рядків (175 EFID, 90 номерів рядків `Land_No` на EFID щомісяця; `Land_Measure_Volume` заповнений лише для `Land_No` = 9, 3-9 рядків на місяць). Завантажувач воду не підтримує (`SKIPPED_WATER_WASTE`). Запитання методологу: (1) підтвердити, що `S3_9` = `Land_No` 9 таблиці `07`; (2) що робити, коли для одного місяця кілька значень `Land_Measure_Volume` на документ (сума, перше, окремі рядки); (3) що `Concentration` рядка `T7b_00` береться з `07a_16` за `Land_SubstanceId` = `SubstanceId`, місяць `Time` -> колонка місяця; (4) які EFID таблиць `07` і `07a_16` належать одному документу.
