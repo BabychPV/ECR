@@ -204,7 +204,7 @@ public sealed class MethodologyCyclePublishApiTests(SqlServerFixture sql)
         using var response = await publisher.PostAsJsonAsync(
             new Uri(PublishUrl(created), UriKind.Relative), new { changeReason = "B179", effectiveFrom = "2099-01-01" }).ConfigureAwait(true);
         var body = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
-        Assert.True(response.StatusCode == HttpStatusCode.OK, $"{(int)response.StatusCode}: {body}");
+        Assert.True(response.StatusCode == HttpStatusCode.OK, $"{(int)response.StatusCode}: {body} | {baseApp.ErrorsText}");
 
         await using var db = Context();
         Assert.Equal(
