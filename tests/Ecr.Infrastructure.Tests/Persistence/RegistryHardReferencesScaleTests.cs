@@ -37,6 +37,7 @@ public sealed class RegistryHardReferencesScaleTests(SqlServerFixture sql)
     private const int Rows = 500;
     private const int Columns = 40;
     private const int Values = 2_000;
+    private const int PlanAttempts = 5;
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
@@ -99,15 +100,36 @@ public sealed class RegistryHardReferencesScaleTests(SqlServerFixture sql)
 
         try
         {
-            await PrepareMeasurementAsync();
-
             await using var db = builder.CreateContext();
             var store = new RegistryStore(db);
-            var none = await store.FindHardReferencesAsync(await db.RegistryEntries.SingleAsync(e => e.Id == unused), CancellationToken.None);
-            Assert.Empty(none);
+            var unusedEntry = await db.RegistryEntries.SingleAsync(e => e.Id == unused);
 
-            Assert.Equal(["[IX_CellValue_RegistryEntry]"], await IndexesInCachedPlanAsync(RegistryStore.HardReferenceCellsTag, "[CellValue]"));
-            Assert.Equal(["[IX_RegistryEntry_Parent]"], await IndexesInCachedPlanAsync(RegistryStore.HardReferenceChildrenTag, "[RegistryEntry]"));
+            // ⛔ 20.11: план запиту беруть із кешу ПЛАНІВ ЗА МІТКОЮ, а кеш планів SQL Server спільний на весь сервер й під
+            // навантаженням (інші прогони на тому самому сервері: Object Plans ~1,5 ГБ, SQL Plans чистяться годинниковою стрілкою)
+            // виселяє щойно виконаний план без повторного використання — у повному прогоні Infrastructure плани за міткою
+            // не знайшлися взагалі (`Actual: []`), хоча окремо клас зелений. Тому, коли планів за міткою НЕМАЄ, запит виконується
+            // знову (з чистим кешем) — до PlanAttempts разів; а коли план Є — індекс у ньому перевіряється суворо, без послаблень.
+            IReadOnlyList<string> cellsIndexes = [];
+            IReadOnlyList<string> childIndexes = [];
+            for (var attempt = 1; attempt <= PlanAttempts; attempt++)
+            {
+                await PrepareMeasurementAsync();
+
+                var none = await store.FindHardReferencesAsync(unusedEntry, CancellationToken.None);
+                Assert.Empty(none);
+
+                var cellsPlans = await PlanCache.PlansAsync(sql.ConnectionString, RegistryStore.HardReferenceCellsTag);
+                var childPlans = await PlanCache.PlansAsync(sql.ConnectionString, RegistryStore.HardReferenceChildrenTag);
+                if (cellsPlans.Count > 0 && childPlans.Count > 0)
+                {
+                    cellsIndexes = IndexesInPlans(cellsPlans, "[CellValue]");
+                    childIndexes = IndexesInPlans(childPlans, "[RegistryEntry]");
+                    break;
+                }
+            }
+
+            Assert.Equal(["[IX_CellValue_RegistryEntry]"], cellsIndexes);
+            Assert.Equal(["[IX_RegistryEntry_Parent]"], childIndexes);
 
             var all = await store.FindHardReferencesAsync(await db.RegistryEntries.SingleAsync(e => e.Id == used), CancellationToken.None);
             Assert.Equal(RegistryStore.HardReferenceCap, all[RegistryEntryHardReferences.Cells]);
@@ -134,10 +156,10 @@ public sealed class RegistryHardReferencesScaleTests(SqlServerFixture sql)
         await command.ExecuteNonQueryAsync();
     }
 
-    private async Task<IReadOnlyList<string>> IndexesInCachedPlanAsync(string tag, string table)
+    private static IReadOnlyList<string> IndexesInPlans(IReadOnlyList<string> plans, string table)
     {
         var indexes = new SortedSet<string>(StringComparer.Ordinal);
-        foreach (var text in await PlanCache.PlansAsync(sql.ConnectionString, tag))
+        foreach (var text in plans)
         {
             foreach (var target in XDocument.Parse(text).Descendants(XName.Get("Object", ShowPlanNs)))
             {
