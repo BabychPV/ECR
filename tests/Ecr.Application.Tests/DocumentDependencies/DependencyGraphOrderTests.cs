@@ -168,4 +168,33 @@ public sealed class DependencyGraphOrderTests
         Assert.Contains(graph.Cycles, c => c.Contains(10));
         Assert.Contains(graph.Diagnostics, d => d.Key == "cycle");
     }
+
+    /// <summary>
+    /// F13: методології, що читають результати одна одної (A читає B, B читає A), не мають зациклити обхід транзитивності:
+    /// обидві - споживачі довідника, граф збирається й показує цикл шаблонів, а не висне.
+    /// </summary>
+    /// <remarks>Мутація: у <c>AffectedMethodologies</c> прибрати <c>if (!expanded.Add(source)) continue;</c> - тест червоний (час).</remarks>
+    [Fact]
+    public async Task Взаємне_читання_результатів_між_методологіями_не_зациклює_обхід()
+    {
+        var task = Task.Run(() => DependencyGraphAssembler.Assemble(new DependencyGraphInputs(
+            "r1",
+            new Dictionary<int, string> { [10] = "HSE400", [20] = "LAND", [30] = "REPORT" },
+            new Dictionary<int, string> { [100] = "COMPOSITION" },
+            new Dictionary<int, string>(),
+            [new SourceBindingRow(1, 10, 100, DocumentSourceState.Any)],
+            [],
+            [new MethodologyScopedRead(7, 70, 100, "F1", PeriodScope.Year)],
+            [new MethodologyTemplateWrite(7, 20, 900, "t"), new MethodologyTemplateWrite(8, 30, 901, "t")],
+            [],
+            [])
+        {
+            MethodologyResultReads = [new MethodologyResultRead(8, 7), new MethodologyResultRead(7, 8)],
+        }));
+
+        var graph = await task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Equal([20, 30], graph.ConsumersOf(10).Select(d => d.ConsumerTemplateId).Order());
+        Assert.All(graph.ConsumersOf(10), d => Assert.Equal(PeriodScope.All, d.Scope));
+    }
 }

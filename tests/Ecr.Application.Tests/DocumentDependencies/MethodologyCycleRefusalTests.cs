@@ -113,4 +113,36 @@ public sealed class MethodologyCycleRefusalTests
         var before = await DependencyCyclePublishCheck.MethodologiesOnCycleAsync(null, Reader, default);
         await DependencyCyclePublishCheck.RefuseMethodologiesAsync(null, Reader, before, default);
     }
+
+    /// <summary>
+    /// F13: група перемикання (switch) має кілька методологій: відмова — якщо цикл замкнула БУДЬ-ЯКА з них (не лише перша),
+    /// а «вже на циклі» рахується окремо для кожної.
+    /// </summary>
+    /// <remarks>Мутація: у <c>RefuseMethodologiesAsync</c> перебирати лише <c>Take(1)</c> - перший тест червоний.</remarks>
+    [Fact]
+    public async Task Група_методологій_відмовляє_коли_цикл_замкнула_не_перша_з_них()
+    {
+        var provider = Provider(Graph(readerWritesInto: 10), Graph(readerWritesInto: 30));
+        int[] group = [99, 8];
+        var before = await DependencyCyclePublishCheck.MethodologiesOnCycleAsync(provider, group, default);
+        Assert.Empty(before);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => DependencyCyclePublishCheck.RefuseMethodologiesAsync(provider, group, before, default));
+        Assert.Equal("S → HSE400 → COMPOSITION → C → S", error.Details!["cycle"]);
+    }
+
+    [Fact]
+    public async Task У_групі_виправдана_лише_та_що_вже_лежала_на_циклі_інша_відмовляє()
+    {
+        // Обидві - С (7) і S (8) - лежать на циклі S → HSE400 → COMPOSITION → C → S.
+        var provider = Provider(Graph(readerWritesInto: 10));
+        int[] group = [7, 8];
+
+        await DependencyCyclePublishCheck.RefuseMethodologiesAsync(provider, group, new HashSet<int> { 7, 8 }, default);
+        await Assert.ThrowsAsync<BusinessRuleException>(
+            () => DependencyCyclePublishCheck.RefuseMethodologiesAsync(provider, group, new HashSet<int> { 8 }, default));
+        await Assert.ThrowsAsync<BusinessRuleException>(
+            () => DependencyCyclePublishCheck.RefuseMethodologiesAsync(provider, group, new HashSet<int> { 7 }, default));
+    }
 }

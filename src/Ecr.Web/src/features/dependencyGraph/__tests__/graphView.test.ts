@@ -118,4 +118,17 @@ describe('B179 L5: buildGraphView', () => {
     expect(view.truncated).toBe(true);
     expect(view.diagnostics).toEqual([{ key: 'astFallback', detail: 'template version 7' }]);
   });
+
+  it('F13: зв’язка джерела без жодного споживача лишається на екрані (перемикачі доступні), навіть коли споживачів у графі немає взагалі', () => {
+    const view = buildGraphView(
+      world({
+        templateDependencies: [],
+        levels: [{ level: 0, templateIds: [1, 2, 3, 4] }],
+      }),
+    );
+    const source = view.levels[0]?.templates.find((t) => t.code === 'HSE400');
+
+    expect(source?.fills).toEqual([{ bindingId: 5, registryCode: 'COMP', consumerCodes: [] }]);
+    expect(view.linkCount).toBe(0);
+  });
 });

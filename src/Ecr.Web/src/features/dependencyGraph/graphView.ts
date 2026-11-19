@@ -192,7 +192,7 @@ export function buildGraphView(graph: DependencyGraph): GraphView {
             })
             .sort((a, b) => a.sourceCode.localeCompare(b.sourceCode, 'en', { sensitivity: 'base' }));
 
-          const fills = graph.templateDependencies.length === 0 ? [] : fillsOf(graph, templates, registries, id);
+          const fills = fillsOf(graph, templates, registries, id);
 
           return { id, code: codeOf(id), level: level.level, onCycle: cycled.has(id), fills, reads };
         })
