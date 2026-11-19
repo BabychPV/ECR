@@ -2,6 +2,7 @@
 using System.Globalization;
 using Ecr.Application.Calculations;
 using Ecr.Application.Common;
+using Ecr.Application.DocumentDependencies;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
@@ -10,6 +11,7 @@ using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
+using Ecr.Expressions.Binding;
 using Ecr.Expressions.Graph;
 using Ecr.Expressions.Parsing;
 using Ecr.TestKit;
@@ -531,6 +533,79 @@ public sealed class MethodologyRegistryPublishTests
         _bindings.ListLookupRegistryCodesAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
                  .Returns(new Dictionary<string, string> { ["Stream"] = "STREAM" });
     }
+
+    // ─────────────── MS x B179: цикл залежностей документів при публікації формульної версії ───────────────
+
+    /// <summary>
+    /// Шаблон 10 наповнює довідник 100 (зв'язок джерела); методологія <see cref="OwnerId"/> читає довідник 100 і пише в
+    /// шаблон <paramref name="writesInto"/>: якщо це 10 - цикл 10 - довідник - методологія - 10.
+    /// </summary>
+    private static DependencyGraphSnapshot CycleGraph(int writesInto)
+        => DependencyGraphAssembler.Assemble(new DependencyGraphInputs(
+            "r",
+            new Dictionary<int, string> { [10] = "HSE400", [30] = "REPORT" },
+            new Dictionary<int, string> { [100] = "COMPOSITION" },
+            new Dictionary<int, string> { [OwnerId] = "HSE301" },
+            [new SourceBindingRow(1, 10, 100, DocumentSourceState.Any)],
+            [],
+            [new MethodologyScopedRead(OwnerId, VersionId, 100, "M", PeriodScope.Year)],
+            [new MethodologyTemplateWrite(OwnerId, writesInto, 900, "t")],
+            [],
+            []));
+
+    /// <summary>Граф: перший виклик <c>GetFreshAsync</c> - «до зміни», далі - «після» (усередині транзакції публікації).</summary>
+    private static IDependencyGraphProvider GraphProvider(DependencyGraphSnapshot before, DependencyGraphSnapshot after)
+    {
+        var provider = Substitute.For<IDependencyGraphProvider>();
+        provider.GetFreshAsync(Arg.Any<CancellationToken>()).Returns(before, after);
+        return provider;
+    }
+
+    private Task<MethodologyPublicationDiff> PublishWithGraph(IDependencyGraphProvider graph)
+    {
+        // Публікація й перевірка циклу - у транзакції: підставний uow виконує її тіло.
+        _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.Arg<Func<CancellationToken, Task>>()(call.Arg<CancellationToken>()));
+        Formulas([Formula(1, "M", "CST.A * 2")]);
+        return new PublishMethodologyHandler(
+                _module, _store, _formulas, _bindings, _units, _uow, _audit, _access, _user, _clock,
+                _registries, _keys, _uses, dependencyGraph: graph)
+            .HandleAsync(VersionId, "B179", From, CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Формульна версія, чиї ребра замкнули НОВИЙ цикл залежностей документів, - 422 <c>ECR-TMPL-0422</c> зі шляхом.
+    /// </summary>
+    /// <remarks>Мутація: прибрати <c>RefuseMethodologiesAsync</c> з формульного шляху <c>PublishMethodologyHandler</c> - червоний.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Directive", "B179")]
+    public async Task Формульна_публікація_що_замикає_цикл_документів_відмовляє_зі_шляхом()
+    {
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => PublishWithGraph(GraphProvider(CycleGraph(writesInto: 30), CycleGraph(writesInto: 10))));
+
+        Assert.Equal("ECR-TMPL-0422", error.ErrorCode);
+        Assert.Equal(Ecr.Application.Templates.DependencyCyclePublishCheck.MessageKey, error.Details!["messageKey"]);
+        Assert.Equal("HSE301 → HSE400 → COMPOSITION → HSE301", error.Details["cycle"]);
+    }
+
+    /// <summary>Без нового циклу формульна публікація проходить.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Directive", "B179")]
+    public async Task Формульна_публікація_без_циклу_проходить()
+        => await PublishWithGraph(GraphProvider(CycleGraph(writesInto: 30), CycleGraph(writesInto: 30)));
+
+    /// <summary>
+    /// Методологія, що ВЖЕ лежала на циклі (до публікації), не блокується: цикл створила не ця публікація.
+    /// </summary>
+    /// <remarks>Мутація: передати у <c>RefuseMethodologiesAsync</c> порожній набір замість <c>onCycle</c> - червоний.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Directive", "B179")]
+    public async Task Формульна_публікація_методології_що_вже_на_циклі_не_блокується()
+        => await PublishWithGraph(GraphProvider(CycleGraph(writesInto: 10), CycleGraph(writesInto: 10)));
 
     // ─────────────────────────────────────────────────────────────────────────
 
