@@ -17,7 +17,14 @@ import { invalidateSlices } from '@/features/grid/sliceCache';
 import { refreshSheetWorkflow } from './refreshSheetWorkflow';
 import { useStatusStale } from './statusStale';
 import { can, useSession, type MeDto } from '@/shared/session/useSession';
-import { LazyConfirmModal, LazyReasonModal } from './lazyDialogs';
+import { LazyConfirmModal, LazyReasonModal, LazySourceImpactModal } from './lazyDialogs';
+import {
+  fetchSourceImpact,
+  impactRefusal,
+  type ConfirmedImpact,
+  type SourceImpact,
+  type SourceImpactAction,
+} from './sourceImpact';
 import { Hint } from '@/shared/ui/Hint';
 import { notificationCloseButtonProps, showApiError, showDone, showWarning } from '@/shared/ui/notify';
 import { useApproverEditAvailability, useRecallAvailability, useSubmissionTarget, type RecallSheetRequest } from './api';
@@ -459,6 +466,18 @@ function copyPart(sheetCopyId: number | null): { sheetCopyId?: number } {
   return sheetCopyId === null ? {} : { sheetCopyId };
 }
 
+/** Поле `confirmedImpact` запиту: лише коли воно є — інакше тіло запиту таке, як було до B80 N5. */
+function impactPart(confirmed: ConfirmedImpact | undefined): { confirmedImpact?: ConfirmedImpact } {
+  return confirmed === undefined ? {} : { confirmedImpact: confirmed };
+}
+
+/** B80 N5: вплив, що чекає рішення людини (діалог впливу); `proceed` виконує саму дію з підтвердженням. */
+interface ImpactAsk {
+  readonly action: SourceImpactAction;
+  readonly impact: SourceImpact;
+  readonly proceed: (confirmed: ConfirmedImpact) => Promise<unknown>;
+}
+
 export function useSheetActions({
   documentId,
   sheetDefId,
@@ -484,6 +503,12 @@ export function useSheetActions({
   // ⚠ Адреса, для якої відкрито діалог: підтвердження діє на аркуш, що питали, а не на той, що відкритий
   // на мить підтвердження (вкладку можна перемкнути й під діалогом - історія браузера, гарячі клавіші).
   const askedAt = useRef<ActionTarget>(here);
+
+  // ✎ B80 N5 (D-554): вплив дії на залежні документи — діалог, що чекає підтвердження; `null` — немає.
+  const [impactAsk, setImpactAsk] = useState<ImpactAsk | null>(null);
+  // Іде запит впливу: діалог дії лишається зайнятим, щоб подвійний клік не пустив дію двічі.
+  const [impactChecking, setImpactChecking] = useState(false);
+
   const ask = (action: 'approve' | 'reject' | 'reopen' | 'recall'): void => {
     askedAt.current = here;
     setAsking(action);
@@ -546,7 +571,9 @@ export function useSheetActions({
   });
 
   const decide = useMutation({
-    mutationFn: (verdict: ActionTarget & { approved: boolean; reason: string | null }) =>
+    mutationFn: (
+      verdict: ActionTarget & { approved: boolean; reason: string | null; confirmedImpact?: ConfirmedImpact | undefined },
+    ) =>
       apiFetch(`/api/v1/documents/${documentId}/approve`, {
         method: 'POST',
         body: JSON.stringify({
@@ -555,31 +582,107 @@ export function useSheetActions({
           ...copyPart(verdict.sheetCopyId),
           approved: verdict.approved,
           reason: verdict.reason,
+          ...impactPart(verdict.confirmedImpact),
         } satisfies ApproveSheetRequest),
       }),
     onSuccess: async (_result, verdict) => {
       await refresh(verdict);
       setAsking(null);
+      setImpactAsk(null);
       showDone(verdict.approved ? t('workflow.approved') : t('workflow.rejected'));
     },
-    onError: (error, verdict) => showSheetError(error, verdict.sheetName),
+    // ✎ B80 N5: відмова через вплив на залежні (сервер вимагає підтвердження чи забороняє) — діалог впливу за відмовою.
+    onError: (error, verdict) => {
+      if (verdict.approved && impactRefusal(error) !== null) {
+        void askImpactAfterRefusal('approve', verdict, error, (confirmed) =>
+          decide.mutateAsync({ ...verdict, confirmedImpact: confirmed }),
+        );
+        return;
+      }
+      showSheetError(error, verdict.sheetName);
+    },
   });
 
   const reopen = useMutation({
-    mutationFn: ({ sheetDefId: sheet, periodKey: period, sheetCopyId: copy, reason }: ActionTarget & { reason: string }) =>
+    mutationFn: ({
+      sheetDefId: sheet,
+      periodKey: period,
+      sheetCopyId: copy,
+      reason,
+      confirmedImpact,
+    }: ActionTarget & { reason: string; confirmedImpact?: ConfirmedImpact | undefined }) =>
       apiFetch(`/api/v1/documents/${documentId}/reopen`, {
         method: 'POST',
-        body: JSON.stringify({ sheetDefId: sheet, periodKey: period, ...copyPart(copy), reason } satisfies ReopenDocumentRequest),
+        body: JSON.stringify({
+          sheetDefId: sheet,
+          periodKey: period,
+          ...copyPart(copy),
+          reason,
+          ...impactPart(confirmedImpact),
+        } satisfies ReopenDocumentRequest),
       }),
     onSuccess: async (_result, at) => {
       await refresh(at);
       setAsking(null);
+      setImpactAsk(null);
       showDone(t('workflow.reopened'));
     },
     // ⚠ Найчастіша відмова тут — `ECR-PRD-4223`: період закрито, і спершу
     // треба відкрити період, а це інше право (`D-67`). Текст веде саме туди.
-    onError: (error, at) => showSheetError(error, at.sheetName),
+    // ✎ B80 N5: відмова через вплив на залежні — діалог впливу за відмовою.
+    onError: (error, at) => {
+      if (impactRefusal(error) !== null) {
+        void askImpactAfterRefusal('reopen', at, error, (confirmed) =>
+          reopen.mutateAsync({ ...at, confirmedImpact: confirmed }),
+        );
+        return;
+      }
+      showSheetError(error, at.sheetName);
+    },
   });
+
+  /**
+   * ✎ B80 N5 (D-554): ПЕРЕД дією, що змінює джерело залежних документів (остаточне затвердження, повернення із
+   * затвердженого), питає вплив. Вплив не потрібен — дія йде одразу; потрібен — відкривається діалог впливу, і дію
+   * виконує його підтвердження (з відбитком, який людина бачила, і причиною за політикою зв'язки).
+   *
+   * ⚠ Збій запиту впливу дію не блокує: сервер однаково вимагає підтвердження (`409`), і діалог відкриється за відмовою.
+   */
+  async function guardImpact(
+    action: SourceImpactAction,
+    at: ActionTarget,
+    proceed: (confirmed: ConfirmedImpact | undefined) => Promise<unknown>,
+  ): Promise<unknown> {
+    setImpactChecking(true);
+    let impact: SourceImpact | null;
+    try {
+      impact = await fetchSourceImpact(documentId, at, action);
+    } finally {
+      setImpactChecking(false);
+    }
+    if (impact === null || !impact.required) return proceed(undefined);
+
+    setAsking(null);
+    setImpactAsk({ action, impact, proceed: (confirmed) => proceed(confirmed) });
+    return undefined;
+  }
+
+  /** Діалог впливу ЗА відмовою сервера (підтвердження застаріло чи його не було); вплив зник — звичайна відмова. */
+  async function askImpactAfterRefusal(
+    action: SourceImpactAction,
+    at: ActionTarget,
+    error: unknown,
+    proceed: (confirmed: ConfirmedImpact) => Promise<unknown>,
+  ): Promise<void> {
+    const impact = await fetchSourceImpact(documentId, at, action);
+    if (impact === null || !impact.required) {
+      showSheetError(error, at.sheetName);
+      return;
+    }
+
+    setAsking(null);
+    setImpactAsk({ action, impact, proceed });
+  }
 
   /*
    * `BE-31`: відкликання подання автором. ⛔ Чи показати кнопку, вирішує
@@ -1079,8 +1182,14 @@ export function useSheetActions({
         text={t('workflow.approveHint')}
         verb={t('workflow.approve')}
         danger={false}
-        isPending={decide.isPending || settled.settling}
-        onConfirm={() => settled.run(() => decide.mutateAsync({ ...askedAt.current, approved: true, reason: null }))}
+        isPending={decide.isPending || settled.settling || impactChecking}
+        onConfirm={() =>
+          settled.run(() =>
+            guardImpact('approve', askedAt.current, (confirmed) =>
+              decide.mutateAsync({ ...askedAt.current, approved: true, reason: null, confirmedImpact: confirmed }),
+            ),
+          )
+        }
         onClose={() => setAsking(null)}
       />
 
@@ -1112,9 +1221,30 @@ export function useSheetActions({
         label={t('workflow.reason')}
         description={t('workflow.reopenHint')}
         confirmLabel={t('workflow.reopen')}
-        isPending={reopen.isPending}
-        onConfirm={(reason) => reopen.mutate({ ...askedAt.current, reason })}
+        isPending={reopen.isPending || impactChecking}
+        onConfirm={(reason) => {
+          const at = askedAt.current;
+          // ✎ B80 N5: вплив питаємо лише при поверненні ІЗ затвердженого — інше джерела залежних не змінює.
+          if (state !== 'Approved') {
+            reopen.mutate({ ...at, reason });
+            return;
+          }
+          void guardImpact('reopen', at, (confirmed) =>
+            reopen.mutateAsync({ ...at, reason, confirmedImpact: confirmed }),
+          ).catch(() => undefined);
+        }}
         onClose={() => setAsking(null)}
+      />
+
+      <LazySourceImpactModal
+        opened={impactAsk !== null}
+        action={impactAsk?.action ?? 'approve'}
+        impact={impactAsk?.impact ?? null}
+        isPending={decide.isPending || reopen.isPending || settled.settling}
+        onConfirm={(confirmed) => {
+          if (impactAsk !== null) settled.run(() => impactAsk.proceed(confirmed));
+        }}
+        onClose={() => setImpactAsk(null)}
       />
     </>
   );

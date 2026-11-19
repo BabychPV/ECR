@@ -1,6 +1,7 @@
 import { lazy, Suspense, useState, type ComponentProps, type JSX } from 'react';
 import type { ConfirmModal as ConfirmModalImpl } from '@/shared/ui/ConfirmModal';
 import type { ReasonModal as ReasonModalImpl } from '@/shared/ui/ReasonModal';
+import type { SourceImpactModal as SourceImpactModalImpl } from './SourceImpactModal';
 
 /**
  * Діалоги підтвердження для екрана документа, що вантажаться при ПЕРШОМУ
@@ -61,6 +62,25 @@ export function LazyReasonModal(props: ComponentProps<typeof ReasonModalImpl>): 
   return (
     <Suspense fallback={null}>
       <ReasonModalChunk {...props} onConfirm={props.opened ? props.onConfirm : ignore} />
+    </Suspense>
+  );
+}
+
+const SourceImpactModalChunk = lazy(async () => ({
+  default: (await import('./SourceImpactModal')).SourceImpactModal,
+}));
+
+/**
+ * ✎ B80 N5 (D-554): діалог впливу дії над джерелом на залежні документи — окремим чанком (бюджет `D-132`): потрібен лише
+ * коли сервер каже, що вплив є. Закритий діалог не підтверджує (B145), як у решти.
+ */
+export function LazySourceImpactModal(props: ComponentProps<typeof SourceImpactModalImpl>): JSX.Element | null {
+  const mounted = useEverOpened(props.opened);
+  if (!mounted) return null;
+
+  return (
+    <Suspense fallback={null}>
+      <SourceImpactModalChunk {...props} onConfirm={props.opened ? props.onConfirm : ignore} />
     </Suspense>
   );
 }

@@ -8287,6 +8287,80 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{id}/source-impact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** B80 N5 (D-554): що зачепить затвердження чи повернення в роботу аркуша документа-джерела — залежні документи й
+         *     місяці (які вже затверджено), політика зв'язки (`None` | `Warn` | `ConfirmWithReason` | `Block`)
+         *     і відбиток впливу для `confirmedImpact`. Видимість — як у самої дії. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Аркуш. */
+                    sheetDefId?: number;
+                    /** @description Період. */
+                    periodKey?: number;
+                    /** @description `approve` чи `reopen`. */
+                    action?: string;
+                    /** @description Копія аркуша; не `null` — впливу немає. */
+                    sheetCopyId?: number;
+                };
+                header?: never;
+                path: {
+                    /** @description Документ-джерело. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SourceImpactDto"];
+                        "text/json": components["schemas"]["SourceImpactDto"];
+                        "text/plain": components["schemas"]["SourceImpactDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents/{id}/submission-target": {
         parameters: {
             query?: never;
@@ -31406,6 +31480,7 @@ export interface components {
         ApproveSheetRequest: {
             /** @description `true` — погодити, `false` — відхилити. */
             approved: boolean;
+            confirmedImpact?: null | components["schemas"]["ConfirmedImpactRequest"];
             /**
              * Format: int32
              * @description Період.
@@ -32985,6 +33060,13 @@ export interface components {
             value: null | string;
             /** @description Верхня межа — лише для between. */
             valueTo: null | string;
+        };
+        /** @description B80 N5 (D-554): підтвердження впливу дії над документом-джерелом на залежні документи. */
+        ConfirmedImpactRequest: {
+            /** @description Відбиток впливу з `GET …/source-impact` (`impactHash`); застарілий — `409 impactChanged`. */
+            hash: null | string;
+            /** @description Причина; обов'язкова за політики `ConfirmWithReason`, іде в журнал безпеки. */
+            reason: null | string;
         };
         /** @description Сторінка знахідок із загальними лічильниками. */
         ConsistencyIssuePage: {
@@ -41446,6 +41528,7 @@ export interface components {
         };
         /** @description Запит на відкриття поданого документа. */
         ReopenDocumentRequest: {
+            confirmedImpact?: null | components["schemas"]["ConfirmedImpactRequest"];
             /**
              * Format: int32
              * @description Період.
@@ -44485,6 +44568,63 @@ export interface components {
          * @enum {unknown}
          */
         SourceEventVolumeMode: "None" | "EventAttribute" | "RowWindow";
+        /** @description Залежний документ × період у відповіді оцінки впливу. */
+        SourceImpactConsumerDto: {
+            /** @description Період затверджено (перерахунок його не чіпає, він застаріє). */
+            approved: boolean;
+            /** @description Код зв'язки. */
+            bindingCode: string;
+            /**
+             * Format: int64
+             * @description Залежний документ.
+             */
+            documentId: number;
+            /** @description Бізнес-ключ документа. */
+            documentKey: string;
+            /**
+             * Format: int32
+             * @description Період залежного документа.
+             */
+            periodKey: number;
+            /** @description Код проєкту. */
+            projectCode: string;
+            /** @description Код шаблону залежного документа. */
+            templateCode: string;
+        };
+        /** @description Вплив дії над документом-джерелом на залежні документи (B80 N5, D-554). */
+        SourceImpactDto: {
+            /** @description `approve` | `reopen`. */
+            action: string;
+            /**
+             * Format: int32
+             * @description З них затверджених.
+             */
+            approvedCount: number;
+            /** @description Дію відхилить сервер (`Block` і є затверджені залежні). */
+            blocked: boolean;
+            /** @description Залежні, видимі користувачеві. */
+            consumers: components["schemas"]["SourceImpactConsumerDto"][];
+            /**
+             * Format: int32
+             * @description Усього залежних періодів.
+             */
+            dependentCount: number;
+            /**
+             * Format: int32
+             * @description Залежних, яких користувач не бачить (лише число).
+             */
+            hiddenCount: number;
+            /** @description Відбиток впливу: його клієнт повертає в `confirmedImpact.hash`. */
+            impactHash: string;
+            /** @description Політика: `None` | `Warn` | `ConfirmWithReason` | `Block`. */
+            policy: string;
+            /** @description Підтвердження потребує причини (`ConfirmWithReason`). */
+            reasonRequired: boolean;
+            /** @description Дія потребує підтвердження (чи відмовляє): політика не `None` і є затверджені залежні. */
+            required: boolean;
+            /** @description Зачеплені місяці джерела `yyyyMM`. */
+            sourceMonths: number[];
+        };
         /** @description ✎ B80 N4 (R3.2): проблема документа-джерела для місяця документа-споживача. */
         SourceIssueDto: {
             /**
