@@ -16,8 +16,11 @@ namespace Ecr.Application.Workflow;
 /// <param name="DocumentKey">Бізнес-ключ документа.</param>
 /// <param name="PeriodKey">Період залежного документа.</param>
 /// <param name="Approved">Період затверджено (перерахунок його не чіпає, він застаріє).</param>
+/// <param name="WillRecalculate">Період буде перераховано (незатверджений).</param>
+/// <param name="SkipReason">Чому не буде перераховано: <c>approved</c> — затверджений період перерахунок пропускає (D-493/D-510); інакше <c>null</c>.</param>
 public sealed record SourceImpactConsumerDto(
-    string BindingCode, string TemplateCode, long DocumentId, string ProjectCode, string DocumentKey, int PeriodKey, bool Approved);
+    string BindingCode, string TemplateCode, long DocumentId, string ProjectCode, string DocumentKey, int PeriodKey, bool Approved,
+    bool WillRecalculate, string? SkipReason);
 
 /// <summary>Вплив дії над документом-джерелом на залежні документи (B80 N5, D-554).</summary>
 /// <param name="Action"><c>approve</c> | <c>reopen</c>.</param>
@@ -29,8 +32,7 @@ public sealed record SourceImpactConsumerDto(
 /// <param name="SourceMonths">Зачеплені місяці джерела <c>yyyyMM</c>.</param>
 /// <param name="DependentCount">Усього залежних періодів.</param>
 /// <param name="ApprovedCount">З них затверджених.</param>
-/// <param name="Consumers">Залежні, видимі користувачеві.</param>
-/// <param name="HiddenCount">Залежних, яких користувач не бачить (лише число).</param>
+/// <param name="Consumers">УСІ залежні (метадані: документ, шаблон, період, статус; без даних комірок), не більше <see cref="GetSourceImpactHandler.MaxConsumers"/>; решту показує <c>DependentCount</c>.</param>
 public sealed record SourceImpactDto(
     string Action,
     string Policy,
@@ -41,16 +43,15 @@ public sealed record SourceImpactDto(
     IReadOnlyList<int> SourceMonths,
     int DependentCount,
     int ApprovedCount,
-    IReadOnlyList<SourceImpactConsumerDto> Consumers,
-    int HiddenCount);
+    IReadOnlyList<SourceImpactConsumerDto> Consumers);
 
 /// <summary>
 /// B80 N5 (D-554): <c>GET /documents/{id}/source-impact</c> — що зачепить затвердження чи повернення в роботу аркуша
 /// документа-джерела: залежні документи й місяці, які вже затверджено, політика зв'язки і відбиток впливу.
 /// </summary>
 /// <remarks>
-/// ⚠ Читання, без змін. Видимість — як у самої дії (документ і аркуш, <c>404</c> інакше); залежні документи, яких читач
-/// не бачить, лише лічаться (<see cref="SourceImpactDto.HiddenCount"/>), без назв. Відбиток рахується з повного переліку.
+/// ⚠ Читання, без змін. Видимість — як у самої дії (документ і аркуш, <c>404</c> інакше); залежні документи показуються УСІ
+/// (рішення людини 19.11: людина має бачити все, щоб розуміти, що станеться) — лише метадані, без даних комірок.
 /// </remarks>
 public sealed class GetSourceImpactHandler(
     IAccessDecisionService access,
@@ -60,7 +61,10 @@ public sealed class GetSourceImpactHandler(
     ISourceImpactAssessor assessor)
 {
     /// <summary>Скільки залежних віддає відповідь найбільше (решта лічиться).</summary>
-    public const int MaxConsumers = 200;
+    public const int MaxConsumers = 500;
+
+    /// <summary>Причина пропуску: період затверджено.</summary>
+    public const string SkipReasonApproved = "approved";
 
     /// <summary>Вплив дії.</summary>
     /// <param name="documentId">Документ-джерело.</param>
@@ -98,32 +102,19 @@ public sealed class GetSourceImpactHandler(
         if (sheetCopyId is not null
             || !await ActionChangesSourceAsync(documentId, sheetDefId, key, change, ct).ConfigureAwait(false))
         {
-            return new SourceImpactDto(name, nameof(DocumentSourcePolicy.None), false, false, false, string.Empty, [], 0, 0, [], 0);
+            return new SourceImpactDto(name, nameof(DocumentSourcePolicy.None), false, false, false, string.Empty, [], 0, 0, []);
         }
 
         var impact = await assessor.AssessAsync(documentId, sheetDefId, periodKey, change, ct).ConfigureAwait(false);
 
-        var visible = new List<SourceImpactConsumerDto>();
-        var hidden = 0;
-        var seen = new Dictionary<long, bool>();
-        foreach (var c in impact.Consumers)
-        {
-            if (!seen.TryGetValue(c.DocumentId, out var canRead))
-            {
-                canRead = (await access.CanReadDocumentAsync(profile, c.DocumentId, ct).ConfigureAwait(false)).IsAllowed;
-                seen[c.DocumentId] = canRead;
-            }
-
-            if (canRead && visible.Count < MaxConsumers)
-            {
-                visible.Add(new SourceImpactConsumerDto(
-                    c.BindingCode, c.TemplateCode, c.DocumentId, c.ProjectCode, c.DocumentKey, c.PeriodKey, c.Approved));
-            }
-            else
-            {
-                hidden++;
-            }
-        }
+        // ✎ Рішення людини 19.11 (D-554): людина бачить УСІХ залежних, щоб розуміти, що станеться, — лише метадані
+        // (документ, шаблон, період, статус), без даних комірок і без посилання на відкриття; права перегляду не питаємо.
+        var visible = impact.Consumers
+            .Take(MaxConsumers)
+            .Select(c => new SourceImpactConsumerDto(
+                c.BindingCode, c.TemplateCode, c.DocumentId, c.ProjectCode, c.DocumentKey, c.PeriodKey, c.Approved,
+                WillRecalculate: !c.Approved, SkipReason: c.Approved ? SkipReasonApproved : null))
+            .ToList();
 
         return new SourceImpactDto(
             name,
@@ -135,8 +126,7 @@ public sealed class GetSourceImpactHandler(
             impact.SourceMonths,
             impact.Consumers.Count,
             impact.ApprovedCount,
-            visible,
-            hidden);
+            visible);
     }
 
     private async Task<bool> ActionChangesSourceAsync(

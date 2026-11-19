@@ -207,6 +207,58 @@ public sealed class SourceImpactApiTests(SqlServerFixture sql)
         Assert.Equal(HttpStatusCode.NoContent, reject.StatusCode);
     }
 
+    /// <summary>
+    /// Споживачі читають лише документ, який обрав би завантажувач за рік (найбільший id): повернення ІНШОГО (старшого)
+    /// документа того ж шаблону-джерела залежних не зачіпає — підтвердження не потрібне.
+    /// </summary>
+    /// <remarks>Мутація: прибрати в <c>SourceImpactAssessor</c> перевірку <c>chosen?.DocumentId != documentId</c> — червоніє.</remarks>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-554")]
+    public async Task Не_обраний_документ_джерело_залежних_не_зачіпає_а_обраний_зачіпає()
+    {
+        var s = await ArrangeAsync(DocumentSourcePolicy.Block, sourceApproved: true, landApproved: true).ConfigureAwait(true);
+
+        // Новіший документ-джерело (більший id) із таблицею потоку за березень 2099 перебирає вибір завантажувача.
+        long newerId;
+        await using (var db = sql.CreateContext())
+        {
+            var newer = new Ecr.Domain.Entities.Documents.Document(
+                s.World.Source.ProjectId, $"NEWER{Guid.NewGuid():N}"[..20], 1, T0);
+            db.Documents.Add(newer);
+            await db.SaveChangesAsync().ConfigureAwait(true);
+            newerId = newer.Id;
+            var streamId = s.World.StreamTableId;
+            var instanceId = await new BulkCellLoader(sql.ConnectionString, 1000)
+                .ReserveIdsAsync("doc.TableInstanceSeq", 1, CancellationToken.None).ConfigureAwait(true);
+            db.TableInstances.Add(new Ecr.Domain.Entities.Documents.TableInstance(new PeriodKey(March), instanceId, newerId, streamId, T0));
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.User).ConfigureAwait(true);
+
+        // Старший (початковий) документ вже не обраний — Block на нього не діє.
+        var older = await ImpactAsync(app, client, s, "reopen").ConfigureAwait(true);
+        Assert.False(older.GetProperty("required").GetBoolean());
+        Assert.Equal(0, older.GetProperty("dependentCount").GetInt32());
+
+        // Обраний (новіший) — вплив є: його аркуш затверджено, Land березня 2099 затверджений, політика Block.
+        await ImpactWorld.AddStateAsync(sql, newerId, s.World.Source.SheetDefId, March, T0, T0).ConfigureAwait(true);
+        using var response = await client.GetAsync(new Uri(
+            string.Create(
+                CultureInfo.InvariantCulture,
+                $"/api/v1/documents/{newerId}/source-impact?sheetDefId={s.World.Source.SheetDefId}&periodKey={March}&action=reopen"),
+            UriKind.Relative)).ConfigureAwait(true);
+        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.True(response.StatusCode == HttpStatusCode.OK, $"{response.StatusCode}: {body}");
+        var chosen = JsonDocument.Parse(body).RootElement;
+        Assert.True(chosen.GetProperty("blocked").GetBoolean());
+        Assert.Equal(
+            s.World.Land.DocumentId,
+            Assert.Single(chosen.GetProperty("consumers").EnumerateArray()).GetProperty("documentId").GetInt64());
+    }
+
     /// <summary>Джерело, чиї залежні — інший документ того ж шаблону-споживача, не зачіпає чужий Land (інший документ-джерело).</summary>
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Integration)]
@@ -224,19 +276,21 @@ public sealed class SourceImpactApiTests(SqlServerFixture sql)
     }
 
 
-    /// <summary>Залежний документ, якого читач не бачить, лише лічиться: без назви, відбиток і вимога — ті самі.</summary>
+    /// <summary>Залежний документ, до якого читач не має доступу, показується метаданими (рішення 19.11): документ, період, статус; без даних.</summary>
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Decision", "D-554")]
-    public async Task Невидимий_читачу_Land_лічиться_без_назви_і_вимога_діє()
+    public async Task Невидимий_читачу_Land_показується_метаданими_і_вимога_діє()
     {
         var s = await ArrangeAsync(DocumentSourcePolicy.Warn, sourceApproved: true, landApproved: true, landVisible: false);
         using var app = new EcrApiFactory(sql);
         using var client = await SignedInAsync(app, s.User).ConfigureAwait(true);
         var impact = await ImpactAsync(app, client, s, "reopen").ConfigureAwait(true);
         Assert.True(impact.GetProperty("required").GetBoolean());
-        Assert.Empty(impact.GetProperty("consumers").EnumerateArray());
-        Assert.Equal(1, impact.GetProperty("hiddenCount").GetInt32());
+        var seen = Assert.Single(impact.GetProperty("consumers").EnumerateArray());
+        Assert.Equal(s.World.Land.DocumentId, seen.GetProperty("documentId").GetInt64());
+        Assert.False(seen.GetProperty("willRecalculate").GetBoolean());
+        Assert.Equal("approved", seen.GetProperty("skipReason").GetString());
         Assert.Equal(1, impact.GetProperty("approvedCount").GetInt32());
     }
     private sealed record Scenario(ImpactWorld.World World, string User);
@@ -407,12 +461,13 @@ internal static class ImpactWorld
         await DependencyGraphTestKit.MakeConsumerAsync(db, land, registry.Code).ConfigureAwait(false);
         await db.DocumentSourceBindings.Where(b => b.Id == binding.Id)
             .ExecuteUpdateAsync(s => s.SetProperty(b => b.SourceState, state)).ConfigureAwait(false);
-        return new World(source, land, binding.Id);
+        return new World(source, land, binding.Id, stream.Id);
     }
 
     /// <summary>Світ тесту.</summary>
     /// <param name="Source">Документ-джерело.</param>
     /// <param name="Land">Документ-споживач.</param>
     /// <param name="BindingId">Зв'язка.</param>
-    public sealed record World(TestDocument Source, TestDocument Land, int BindingId);
+    /// <param name="StreamTableId">Таблиця потоку джерела.</param>
+    public sealed record World(TestDocument Source, TestDocument Land, int BindingId, int StreamTableId);
 }
