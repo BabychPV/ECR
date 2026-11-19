@@ -176,6 +176,31 @@ describe('B179 L5: екран «Граф залежностей»', () => {
     expect(served.puts).toHaveLength(0);
   });
 
+  it('F13: вимкнення «читати з документа» — PUT /flags лише з readFromDocument=false', async () => {
+    const served = serve();
+    show();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole('switch', { name: /dependencyGraph.flag.readFromDocument/ }));
+    await user.click(await screen.findByRole('button', { name: '⟦dependencyGraph.confirm.verb⟧' }));
+    await waitFor(() => expect(served.puts).toHaveLength(1));
+    expect(served.puts[0]).toEqual({ url: '/api/v1/document-source-bindings/5/flags', body: { readFromDocument: false } });
+  });
+
+  it('F13: біт «читати з документа» вимкнено — перемикач вмикає, PUT з true', async () => {
+    const served = serve({ bindings: [{ ...binding, readFromDocument: false }] });
+    show();
+    const user = userEvent.setup();
+
+    const sw = await screen.findByRole('switch', { name: /dependencyGraph.flag.readFromDocument/ });
+    expect((sw as HTMLInputElement).checked).toBe(false);
+    await user.click(sw);
+    expect(await screen.findByText('⟦dependencyGraph.confirm.readOn⟧')).toBeDefined();
+    await user.click(screen.getByRole('button', { name: '⟦dependencyGraph.confirm.verb⟧' }));
+    await waitFor(() => expect(served.puts).toHaveLength(1));
+    expect(served.puts[0]?.body).toEqual({ readFromDocument: true });
+  });
+
   it('стан-ворота «лише затверджені» — PUT /source-state з approvedOnly', async () => {
     const served = serve();
     show();
