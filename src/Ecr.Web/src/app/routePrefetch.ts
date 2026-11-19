@@ -117,6 +117,11 @@ export const ProjectLifecycleTab = lazy(ProjectLifecycleTabLoader);
 const SourcesPageLoader = async () => ({ default: (await import('@/pages/admin/SourcesPage')).SourcesPage });
 export const SourcesPage = lazy(SourcesPageLoader);
 
+const DependencyGraphPageLoader = async () => ({
+  default: (await import('@/pages/admin/DependencyGraphPage')).DependencyGraphPage,
+});
+export const DependencyGraphPage = lazy(DependencyGraphPageLoader);
+
 const MappingPreviewPageLoader = async () => ({
   default: (await import('@/pages/admin/MappingPreviewPage')).MappingPreviewPage,
 });
@@ -197,6 +202,7 @@ const routeChunkLoaders: Partial<Record<string, () => Promise<unknown>>> = {
   [routes.adminSecurity.id]: SecurityPageLoader,
   [routes.projects.id]: ProjectsPageLoader,
   [routes.adminSources.id]: SourcesPageLoader,
+  [routes.adminDependencyGraph.id]: DependencyGraphPageLoader,
   [routes.adminMapping.id]: MappingPreviewPageLoader,
   [routes.adminPiData.id]: PiDataPageLoader,
   [routes.adminPipeline.id]: PipelinePageLoader,

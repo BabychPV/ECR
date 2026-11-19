@@ -746,7 +746,7 @@ public sealed partial class EndpointCoverageTests
         "nav.registries", "registries.constructor", "nav.methodologies", "methodologies.versionsTitle",
         "nav.expressions", "nav.units", "nav.security", "nav.projects", "nav.sources", "nav.mapping", "nav.pipeline",
         "nav.jobs", "nav.snapshots", "nav.campaign", "nav.audit", "nav.consistency", "nav.uiStrings",
-        "nav.notifications", "nav.health", "nav.myGroups", "documents.title",
+        "nav.notifications", "nav.health", "nav.myGroups", "documents.title", "nav.dependencyGraph",
         "registries.data.title",
         "nav.permits", "permits.types.title", "permits.typeEditor.title", "permits.lists.title",
         "permits.bindings.title", "permits.binding.title", "permits.detail.title",
@@ -765,7 +765,7 @@ public sealed partial class EndpointCoverageTests
         "nav.registries.description", "nav.methodologies.description", "nav.units.description",
         "nav.sources.description", "nav.mapping.description", "nav.projects.description",
         "nav.jobs.description", "nav.snapshots.description", "nav.audit.description",
-        "nav.consistency.description", "nav.uiStrings.description", "nav.health.description",
+        "nav.consistency.description", "nav.uiStrings.description", "nav.health.description", "nav.dependencyGraph.description",
         "nav.permits.description", "permits.types.description", "permits.lists.description",
         "permits.bindings.description", "nav.piData.description",
     ];
@@ -1397,12 +1397,6 @@ public sealed partial class EndpointCoverageTests
         // смуга показників сторінки «Аудит» ще не під'єднана — споживач з'явиться разом із UI-38.
         // ⚠ Звільнення тимчасове: прибрати в тому ж коміті, що додає виклик у `features/audit`.
         "GET /api/v1/audit/cells/summary",
-
-        // B80 N1: зв'язки документа-джерела (HSE400 → Land) і явне перемикання «лише затверджене». Екран — лінія N6
-        // (клієнт стартує від запушеного контракту, правило швидкості 6); до того перемикає адміністратор через API.
-        // ⚠ Звільнення тимчасове: прибрати в тому ж коміті, що додає виклик у `features` (N6).
-        "GET /api/v1/document-source-bindings",
-        "PUT /api/v1/document-source-bindings/{p}/source-state",
 
         // G13 (Land): пакетний запис колонок для скриптів розгортання шаблону (tools/land, імпорт з Excel), де
         // 5000 одиночних PUT = години. Екран структури правит колонку по одній, пачки в ньому немає.

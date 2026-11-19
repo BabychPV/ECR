@@ -1,6 +1,5 @@
 // src/Ecr.Application/DocumentDependencies/GetDependencyGraphHandler.cs
 using System.Globalization;
-using Ecr.Application.Calculations.SourceBindings;
 using Ecr.Application.Common;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
@@ -32,7 +31,7 @@ public sealed record DependencyEvidenceDto(string Source, int Id, int? VersionId
 /// <param name="ToId">Id вузла-кінця.</param>
 /// <param name="Scope">Обсяг за періодом: <c>month</c>, <c>year</c> (з <paramref name="MonthMask"/>) або <c>all</c>.</param>
 /// <param name="MonthMask">Для <c>year</c>: біти 1…12 літеральних місяців; 0 — увесь рік.</param>
-/// <param name="Evidence">Докази (не більше <see cref="GetDependencyGraphHandler.MaxEvidencePerEdge"/>).</param>
+/// <param name="Evidence">Докази (не більше 25).</param>
 /// <param name="EvidenceTotal">Скільки доказів усього (більше за <paramref name="Evidence"/> — перелік урізано).</param>
 public sealed record DependencyEdgeDto(
     string Kind,
@@ -86,7 +85,7 @@ public sealed record DependencyDiagnosticDto(string Key, string Detail);
 /// <param name="Levels">Рівні шаблонів у порядку обчислення.</param>
 /// <param name="Cycles">Цикли шаблонів (зауваження; публікація, що їх замикає, відхиляється).</param>
 /// <param name="Diagnostics">Зауваження побудови.</param>
-/// <param name="Truncated"><c>true</c> — ребер більше за стелю <see cref="GetDependencyGraphHandler.MaxEdges"/>, перелік урізано.</param>
+/// <param name="Truncated"><c>true</c> — ребер більше за стелю 5000, перелік урізано.</param>
 public sealed record DependencyGraphDto(
     string Revision,
     IReadOnlyList<DependencyNodeDto> Nodes,
@@ -111,6 +110,9 @@ public sealed class GetDependencyGraphHandler(
     IAccessDecisionService access,
     ICurrentUser currentUser)
 {
+    /// <summary>Право (те саме, що <c>DocumentSourceBindings.Permission</c>).</summary>
+    public const string Permission = "Calculation.ManageSourceBinding";
+
     /// <summary>Найбільше ребер у відповіді.</summary>
     public const int MaxEdges = 5000;
 
@@ -121,7 +123,7 @@ public sealed class GetDependencyGraphHandler(
     /// <param name="ct">Токен скасування.</param>
     public async Task<DependencyGraphDto> HandleAsync(CancellationToken ct)
     {
-        await PermissionCheck.RequireAsync(access, currentUser, DocumentSourceBindings.Permission, ct).ConfigureAwait(false);
+        await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
         return ToDto(await graph.GetAsync(ct).ConfigureAwait(false));
     }
 

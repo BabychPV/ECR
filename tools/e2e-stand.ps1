@@ -644,6 +644,8 @@ try {
             # ✎ P44: `Calculation.EditFormula` — `resizableModal.spec` заводить методологію з чернеткою й відкриває
             # вікно формули. Лише тестова роль стенда; ролі продукту не змінюються.
             'Calculation.View', 'Calculation.EditFormula', 'Calculation.Publish', 'Calculation.Recalculate',
+            # ✎ B179 L5: `dependencyGraph.spec` відкриває екран «Граф залежностей» і читає граф/зв'язки (перемикачів не чіпає).
+            'Calculation.ManageSourceBinding',
             'Security.ManageUsers', 'Security.ManageRoles', 'Security.ViewAudit',
             'Security.Simulate',
             'Report.ViewRegulatory', 'Report.BuildSnapshot', 'Report.ViewCampaign',

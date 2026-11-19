@@ -12,6 +12,7 @@ import {
   CampaignOverviewPage,
   ChangePasswordPage,
   ConsistencyIssuesPage,
+  DependencyGraphPage,
   DocumentPage,
   DocumentsPage,
   ExpressionsPage,
@@ -547,6 +548,11 @@ export const router = createBrowserRouter([
             path: relativePath(routes.adminSources, 'admin'),
             element: guarded(routes.adminSources.handle, <SourcesPage />),
             handle: routes.adminSources.handle,
+          },
+          {
+            path: relativePath(routes.adminDependencyGraph, 'admin'),
+            element: guarded(routes.adminDependencyGraph.handle, <DependencyGraphPage />),
+            handle: routes.adminDependencyGraph.handle,
           },
           {
             path: relativePath(routes.adminMapping, 'admin'),

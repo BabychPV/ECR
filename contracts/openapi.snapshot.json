@@ -6907,7 +6907,7 @@
         "description": "Ребро графа: дані течуть від `From` до `To`.",
         "properties": {
           "evidence": {
-            "description": "Докази (не більше int GetDependencyGraphHandler.MaxEvidencePerEdge).",
+            "description": "Докази (не більше 25).",
             "items": {
               "$ref": "#/components/schemas/DependencyEvidenceDto"
             },
@@ -7049,7 +7049,7 @@
             "type": "array"
           },
           "truncated": {
-            "description": "`true` — ребер більше за стелю int GetDependencyGraphHandler.MaxEdges, перелік урізано.",
+            "description": "`true` — ребер більше за стелю 5000, перелік урізано.",
             "type": "boolean"
           }
         },

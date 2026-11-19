@@ -33838,7 +33838,7 @@ export interface components {
         };
         /** @description Ребро графа: дані течуть від `From` до `To`. */
         DependencyEdgeDto: {
-            /** @description Докази (не більше int GetDependencyGraphHandler.MaxEvidencePerEdge). */
+            /** @description Докази (не більше 25). */
             evidence: components["schemas"]["DependencyEvidenceDto"][];
             /**
              * Format: int32
@@ -33903,7 +33903,7 @@ export interface components {
             revision: string;
             /** @description Згорнуті ребра «джерело → споживач» зі зв'язкою. */
             templateDependencies: components["schemas"]["DependencyTemplateLinkDto"][];
-            /** @description `true` — ребер більше за стелю int GetDependencyGraphHandler.MaxEdges, перелік урізано. */
+            /** @description `true` — ребер більше за стелю 5000, перелік урізано. */
             truncated: boolean;
         };
         /** @description Рівень графа шаблонів: усі шаблони рівня обчислюються після шаблонів нижчих рівнів. */
