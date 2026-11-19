@@ -8304,7 +8304,7 @@ export interface paths {
                     sheetDefId?: number;
                     /** @description Період. */
                     periodKey?: number;
-                    /** @description `approve` чи `reopen`. */
+                    /** @description `approve`, `reopen` чи `edit` (правка комірки джерела — лише відомості). */
                     action?: string;
                     /** @description Копія аркуша; не `null` — впливу немає. */
                     sheetCopyId?: number;
@@ -8355,6 +8355,100 @@ export interface paths {
         };
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{id}/source-impact/recalculate-approved": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** B80 N5 (D-554, рішення людини 19.11): адміністратор явно просить перерахувати і ЗАТВЕРДЖЕНІ залежні документи-споживачі
+         *     аркуша-джерела. Право `Calculation.RecalculateApprovedDependents` (інакше 403), причина обов'язкова (422),
+         *     відбиток впливу — з `GET …/source-impact?action=edit` (застарілий — 409). Усе логується. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Документ-джерело. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["RecalculateApprovedDependentsRequest"];
+                    "application/json": components["schemas"]["RecalculateApprovedDependentsRequest"];
+                    "text/json": components["schemas"]["RecalculateApprovedDependentsRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RecalculateApprovedDependentsResult"];
+                        "text/json": components["schemas"]["RecalculateApprovedDependentsResult"];
+                        "text/plain": components["schemas"]["RecalculateApprovedDependentsResult"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -33074,19 +33168,6 @@ export interface components {
              */
             recalculateApproved: boolean;
         };
-        /** @description Підсумок явного перерахунку затверджених залежних. */
-        RecalculateApprovedDependentsResult: {
-            /**
-             * Format: int32
-             * @description Скільки затверджених залежних періодів було на момент запиту.
-             */
-            approvedDependents: number;
-            /**
-             * Format: int32
-             * @description Скільки задач поставлено (по зв'язці × року × місяцю).
-             */
-            queued: number;
-        };
         /** @description Сторінка знахідок із загальними лічильниками. */
         ConsistencyIssuePage: {
             /** @description Елементи сторінки. */
@@ -40330,6 +40411,36 @@ export interface components {
              */
             totalPoints: number;
         };
+        /** @description B80 N5: запит явного перерахунку затверджених залежних. */
+        RecalculateApprovedDependentsRequest: {
+            /** @description Відбиток впливу (`GET …/source-impact?action=edit`). */
+            hash: null | string;
+            /**
+             * Format: int32
+             * @description Період аркуша.
+             */
+            periodKey: number;
+            /** @description Причина (обов'язкова). */
+            reason: null | string;
+            /**
+             * Format: int32
+             * @description Аркуш-джерело.
+             */
+            sheetDefId: number;
+        };
+        /** @description Підсумок явного перерахунку затверджених залежних. */
+        RecalculateApprovedDependentsResult: {
+            /**
+             * Format: int32
+             * @description Скільки затверджених залежних періодів було на момент запиту.
+             */
+            approvedDependents: number;
+            /**
+             * Format: int32
+             * @description Скільки задач поставлено (по зв'язці × року × місяцю); 0 — залежних із такою зв'язкою немає.
+             */
+            queued: number;
+        };
         /** @description Запит на перерахунок документа (Q-331). */
         RecalculateDocumentRequest: {
             /**
@@ -44608,7 +44719,7 @@ export interface components {
             /** @description Код проєкту. */
             projectCode: string;
             /** @description Чому не буде перераховано: `approved` — затверджений період перерахунок пропускає (D-493/D-510); інакше `null`. */
-            skipReason?: string | null;
+            skipReason: null | string;
             /** @description Код шаблону залежного документа. */
             templateCode: string;
             /** @description Період буде перераховано (незатверджений). */
@@ -44616,10 +44727,8 @@ export interface components {
         };
         /** @description Вплив дії над документом-джерелом на залежні документи (B80 N5, D-554). */
         SourceImpactDto: {
-            /** @description `approve` | `reopen` | `edit`. */
+            /** @description `approve` | `reopen`. */
             action: string;
-            /** @description Викликач має право `Calculation.RecalculateApprovedDependents` (діалог показує галочку «й затверджені»). */
-            canRecalculateApproved: boolean;
             /**
              * Format: int32
              * @description З них затверджених.
@@ -44627,7 +44736,9 @@ export interface components {
             approvedCount: number;
             /** @description Дію відхилить сервер (`Block` і є затверджені залежні). */
             blocked: boolean;
-            /** @description Залежні, видимі користувачеві. */
+            /** @description Викликач має право `Calculation.RecalculateApprovedDependents` (діалог показує галочку «й затверджені»). */
+            canRecalculateApproved: boolean;
+            /** @description УСІ залежні (метадані: документ, шаблон, період, статус; без даних комірок), не більше int GetSourceImpactHandler.MaxConsumers; решту показує `DependentCount`. */
             consumers: components["schemas"]["SourceImpactConsumerDto"][];
             /**
              * Format: int32

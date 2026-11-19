@@ -5046,6 +5046,11 @@
               "null",
               "string"
             ]
+          },
+          "recalculateApproved": {
+            "default": false,
+            "description": "B80 N5 (рішення людини 19.11): «перерахувати також затверджені залежні» — лише з правом\n`Calculation.RecalculateApprovedDependents` (інакше 403), причина обов'язкова (інакше 422), усе в журналі.",
+            "type": "boolean"
           }
         },
         "required": [
@@ -20328,6 +20333,62 @@
         ],
         "type": "object"
       },
+      "RecalculateApprovedDependentsRequest": {
+        "description": "B80 N5: запит явного перерахунку затверджених залежних.",
+        "properties": {
+          "hash": {
+            "description": "Відбиток впливу (`GET …/source-impact?action=edit`).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "periodKey": {
+            "description": "Період аркуша.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "reason": {
+            "description": "Причина (обов'язкова).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "sheetDefId": {
+            "description": "Аркуш-джерело.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sheetDefId",
+          "periodKey",
+          "hash",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "RecalculateApprovedDependentsResult": {
+        "description": "Підсумок явного перерахунку затверджених залежних.",
+        "properties": {
+          "approvedDependents": {
+            "description": "Скільки затверджених залежних періодів було на момент запиту.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "queued": {
+            "description": "Скільки задач поставлено (по зв'язці × року × місяцю); 0 — залежних із такою зв'язкою немає.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "queued",
+          "approvedDependents"
+        ],
+        "type": "object"
+      },
       "RecalculateDocumentRequest": {
         "description": "Запит на перерахунок документа (Q-331).",
         "properties": {
@@ -29957,9 +30018,20 @@
             "description": "Код проєкту.",
             "type": "string"
           },
+          "skipReason": {
+            "description": "Чому не буде перераховано: `approved` — затверджений період перерахунок пропускає (D-493/D-510); інакше `null`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "templateCode": {
             "description": "Код шаблону залежного документа.",
             "type": "string"
+          },
+          "willRecalculate": {
+            "description": "Період буде перераховано (незатверджений).",
+            "type": "boolean"
           }
         },
         "required": [
@@ -29969,7 +30041,9 @@
           "projectCode",
           "documentKey",
           "periodKey",
-          "approved"
+          "approved",
+          "willRecalculate",
+          "skipReason"
         ],
         "type": "object"
       },
@@ -29989,8 +30063,12 @@
             "description": "Дію відхилить сервер (`Block` і є затверджені залежні).",
             "type": "boolean"
           },
+          "canRecalculateApproved": {
+            "description": "Викликач має право `Calculation.RecalculateApprovedDependents` (діалог показує галочку «й затверджені»).",
+            "type": "boolean"
+          },
           "consumers": {
-            "description": "Залежні, видимі користувачеві.",
+            "description": "УСІ залежні (метадані: документ, шаблон, період, статус; без даних комірок), не більше int GetSourceImpactHandler.MaxConsumers; решту показує `DependentCount`.",
             "items": {
               "$ref": "#/components/schemas/SourceImpactConsumerDto"
             },
@@ -29998,11 +30076,6 @@
           },
           "dependentCount": {
             "description": "Усього залежних періодів.",
-            "format": "int32",
-            "type": "integer"
-          },
-          "hiddenCount": {
-            "description": "Залежних, яких користувач не бачить (лише число).",
             "format": "int32",
             "type": "integer"
           },
@@ -30042,7 +30115,7 @@
           "dependentCount",
           "approvedCount",
           "consumers",
-          "hiddenCount"
+          "canRecalculateApproved"
         ],
         "type": "object"
       },
@@ -46644,7 +46717,7 @@
             }
           },
           {
-            "description": "`approve` чи `reopen`.",
+            "description": "`approve`, `reopen` чи `edit` (правка комірки джерела — лише відомості).",
             "in": "query",
             "name": "action",
             "schema": {
@@ -46724,6 +46797,150 @@
           }
         },
         "summary": "B80 N5 (D-554): що зачепить затвердження чи повернення в роботу аркуша документа-джерела — залежні документи й\nмісяці (які вже затверджено), політика зв'язки (`None` | `Warn` | `ConfirmWithReason` | `Block`)\nі відбиток впливу для `confirmedImpact`. Видимість — як у самої дії.",
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/api/v1/documents/{id}/source-impact/recalculate-approved": {
+      "post": {
+        "parameters": [
+          {
+            "description": "Документ-джерело.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecalculateApprovedDependentsRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecalculateApprovedDependentsRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecalculateApprovedDependentsRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecalculateApprovedDependentsResult"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecalculateApprovedDependentsResult"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecalculateApprovedDependentsResult"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "B80 N5 (D-554, рішення людини 19.11): адміністратор явно просить перерахувати і ЗАТВЕРДЖЕНІ залежні документи-споживачі\nаркуша-джерела. Право `Calculation.RecalculateApprovedDependents` (інакше 403), причина обов'язкова (422),\nвідбиток впливу — з `GET …/source-impact?action=edit` (застарілий — 409). Усе логується.",
         "tags": [
           "Documents"
         ]
