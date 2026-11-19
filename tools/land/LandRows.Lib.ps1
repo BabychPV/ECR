@@ -244,8 +244,16 @@ function New-LandRowsTablePlan {
                     if ($null -eq $num) { $unmappedSet["$col(parse)"] = 1; $skip = $true } else { $cellValue = [int][Math]::Round($num) }
                 }
                 'Decimal' {
-                    $num = ConvertTo-LandInputNumber -Text ([string]$val)
-                    if ($null -eq $num) { $unmappedSet["$col(parse)"] = 1; $skip = $true } else { $cellValue = [double][Math]::Round([decimal]$num, 10) }
+                    # ⛔ Раніше тут було [double][Math]::Round(x, 10): вхідні числа втрачали знаки за десятим (EF прода має 16 знаків після коми),
+                    # і розрахунок ECR розходився зі старим системою на ~1e-10 відносно (клас NEAR порівняння з CalcResult_*).
+                    # Тепер число лишається decimal з усіма 16 знаками колонки (стара система теж decimal(25,16)); double - лише для
+                    # значень, що не розбираються як decimal (напр. надвеликі).
+                    $dec = [decimal]0
+                    if ([decimal]::TryParse(([string]$val).Trim(), [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$dec)) { $cellValue = [Math]::Round($dec, 16) }
+                    else {
+                        $num = ConvertTo-LandInputNumber -Text ([string]$val)
+                        if ($null -eq $num) { $unmappedSet["$col(parse)"] = 1; $skip = $true } else { $cellValue = [double]$num }
+                    }
                 }
                 'String' {
                     $cellValue = [string]$val

@@ -2891,9 +2891,14 @@ function Stage-LegacyPublish {
         $vid = [int]$ver.id
         LoginAs $owner
         $outs = @(Items (Api GET "/api/v1/methodologies/$m/versions/$vid/outputs").Json | ForEach-Object { [string]$_.code })
-        if ($outs.Count -eq 0) { Log "  ${code}: немає оголошених виходів"; & $bump 'немає виходів'; continue }
+        if ($outs.Count -eq 0) { Log "  ${lgCode}: немає оголошених виходів"; & $bump 'немає виходів'; continue }
         $fx = @(Items (Api GET "/api/v1/methodologies/$m/versions/$vid/formulas").Json)
         $extArgs = @($fx | ForEach-Object { @($_.arguments) } | Where-Object { [string]$_.kind -eq 'Argument' } | ForEach-Object { [string]$_.name } | Sort-Object -Unique)
+        # Аргументи правила категорії (@Land_NAE, @Land_TypeFuelOrStream ...) теж потрібні входу тесту: без них категорія не обчислюється.
+        $crj = Invoke-Ecr -Method GET -Path "/api/v1/methodologies/$m/versions/$vid/category-rule"
+        if ($crj.Status -eq 200 -and $crj.Json.expression) {
+            $extArgs = @(@($extArgs) + @([regex]::Matches([string]$crj.Json.expression, '@([A-Za-z_][A-Za-z0-9_]*)') | ForEach-Object { $_.Groups[1].Value }) | Sort-Object -Unique)
+        }
         $rulesOf = @(@($pm.versions) | ForEach-Object { @($_.rules) } | Where-Object { $_.isAvailable })
         $picked = $null
         foreach ($lt in @($rulesOf | ForEach-Object { [string]$_.table } | Sort-Object -Unique)) {
@@ -2925,7 +2930,7 @@ function Stage-LegacyPublish {
             }
             if ($picked) { break }
         }
-        if (-not $picked) { Log "  ${code}: у старій системі немає рядка за правилами"; & $bump 'немає рядка'; continue }
+        if (-not $picked) { Log "  ${lgCode}: у старій системі немає рядка за правилами"; & $bump 'немає рядка'; continue }
         $tb = $tables[$picked.TableCode]
         $argList = @()
         foreach ($a in $extArgs) {
@@ -2945,28 +2950,28 @@ function Stage-LegacyPublish {
         $inputJson = @{ documentId = [long]$GoldenTestDocumentId; periodKey = @{ value = [int]$GoldenTestPeriodKey }; arguments = $argList } | ConvertTo-Json -Depth 8 -Compress
         $sentinel = [ordered]@{}; foreach ($o in $outs) { $sentinel[$o] = -987654321 }
         $put = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/versions/$vid/tests/SNAP_1" -Body @{ inputJson = $inputJson; expectedJson = ($sentinel | ConvertTo-Json -Compress); tolerance = '0.000000001' }
-        if ($put.Status -ne 200) { Log "  ! ${code}: тест HTTP $($put.Status) $(Get-EcrErrorCode $put)"; & $bump ("тест: " + (Get-EcrErrorCode $put)); continue }
+        if ($put.Status -ne 200) { Log "  ! ${lgCode}: тест HTTP $($put.Status) $(Get-EcrErrorCode $put)"; & $bump ("тест: " + (Get-EcrErrorCode $put)); continue }
         LoginAs 'land-reviewer'
         $p1 = Invoke-Ecr -Method POST -Path "/api/v1/methodologies/$m/versions/$vid/publish" -Body @{ changeReason = 'Legacy rehearsal: snapshot golden'; effectiveFrom = '2024-01-01' }
-        if ($p1.Status -eq 200 -or $p1.Status -eq 204) { Log "  ${code}: опубліковано з першої спроби (?)"; & $bump 'опубліковано'; continue }
+        if ($p1.Status -eq 200 -or $p1.Status -eq 204) { Log "  ${lgCode}: опубліковано з першої спроби (?)"; & $bump 'опубліковано'; continue }
         $txt = [string]$p1.Text
         $actual = [ordered]@{}
         foreach ($rmatch in [regex]::Matches($txt, '(ECW_EC_[A-Za-z0-9_]+)[^\r\n]{0,80}?(?:got|отримали|actual)[^\d\-]{0,12}(-?\d+(?:[.,]\d+)?(?:[eE][+\-]?\d+)?)')) { $actual[$rmatch.Groups[1].Value] = $rmatch.Groups[2].Value.Replace(',', '.') }
         if ($actual.Count -eq 0) {
             $ec = Get-EcrErrorCode $p1
-            Log ("  ! ${code}: публікація (1) HTTP {0} {1}: {2}" -f $p1.Status, $ec, $txt.Substring(0, [Math]::Min(700, $txt.Length)))
+            Log ("  ! ${lgCode}: публікація (1) HTTP {0} {1}: {2}" -f $p1.Status, $ec, $txt.Substring(0, [Math]::Min(700, $txt.Length)))
             & $bump ("публікація: " + $ec); continue
         }
         LoginAs $owner
         $exp = [ordered]@{}
         foreach ($o in $outs) { if ($actual.Contains($o)) { $exp[$o] = [double]::Parse([string]$actual[$o], [Globalization.CultureInfo]::InvariantCulture) } }
         $put2 = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/versions/$vid/tests/SNAP_1" -Body @{ inputJson = $inputJson; expectedJson = ($exp | ConvertTo-Json -Compress); tolerance = '0.000000001' }
-        if ($put2.Status -ne 200) { Log "  ! ${code}: тест (2) HTTP $($put2.Status) $(Get-EcrErrorCode $put2)"; & $bump ("тест2: " + (Get-EcrErrorCode $put2)); continue }
+        if ($put2.Status -ne 200) { Log "  ! ${lgCode}: тест (2) HTTP $($put2.Status) $(Get-EcrErrorCode $put2)"; & $bump ("тест2: " + (Get-EcrErrorCode $put2)); continue }
         LoginAs 'land-reviewer'
         $p2 = Invoke-Ecr -Method POST -Path "/api/v1/methodologies/$m/versions/$vid/publish" -Body @{ changeReason = 'Legacy rehearsal: snapshot golden'; effectiveFrom = '2024-01-01' }
-        if ($p2.Status -eq 200 -or $p2.Status -eq 204) { Log "  ${code}: опубліковано (знімок виходів: $($exp.Count) з $($outs.Count))"; & $bump 'опубліковано'; continue }
+        if ($p2.Status -eq 200 -or $p2.Status -eq 204) { Log "  ${lgCode}: опубліковано (знімок виходів: $($exp.Count) з $($outs.Count))"; & $bump 'опубліковано'; continue }
         $t2 = [string]$p2.Text
-        Log ("  ! ${code}: публікація (2) HTTP {0} {1}: {2}" -f $p2.Status, (Get-EcrErrorCode $p2), $t2.Substring(0, [Math]::Min(700, $t2.Length)))
+        Log ("  ! ${lgCode}: публікація (2) HTTP {0} {1}: {2}" -f $p2.Status, (Get-EcrErrorCode $p2), $t2.Substring(0, [Math]::Min(700, $t2.Length)))
         & $bump ("публікація2: " + (Get-EcrErrorCode $p2))
     }
     $cn.Close()
