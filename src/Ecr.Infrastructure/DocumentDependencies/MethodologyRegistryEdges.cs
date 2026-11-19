@@ -14,6 +14,9 @@ namespace Ecr.Infrastructure.DocumentDependencies;
 /// </summary>
 public sealed class MethodologyRegistryEdges(EcrDbContext db) : IMethodologyRegistryEdges
 {
+    /// <summary>Стеля ребер «читає результати» (правило 6: не «віддати все»); ребер у рази менше, ніж методологій у квадраті.</summary>
+    private const int MaxResultReads = 50_000;
+
     /// <inheritdoc />
     public async Task<string> RevisionAsync(CancellationToken ct)
     {
@@ -66,6 +69,7 @@ public sealed class MethodologyRegistryEdges(EcrDbContext db) : IMethodologyRegi
                 join source in db.Methodologies.AsNoTracking() on dependency.ToMethodologyId equals source.Id
                 orderby dependency.Id
                 select new MethodologyResultReadRow(reader.Id, reader.Code, source.Id, source.Code))
+            .Take(MaxResultReads)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
