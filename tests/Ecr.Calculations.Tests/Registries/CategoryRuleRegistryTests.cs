@@ -78,9 +78,47 @@ public sealed class CategoryRuleRegistryTests
         await loader.DidNotReceiveWithAnyArgs().LoadAsync(default!, default, default, default);
     }
 
-    private static IRegistrySnapshotLoader Loader(string fuel)
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public async Task REGFIELD_усередині_SUBSTANCE_APPLICABLE_читає_поле_довідника()
+    {
+        var bindings = Substitute.For<ICalculationBindingStore>();
+        bindings.ListLookupRegistryIdsAsync(MethodologyId, Arg.Any<CancellationToken>()).Returns([StreamRegistryId]);
+        var loader = Loader(fuel: "Gas", withApplicability: true);
+
+        const string rule =
+            "if(SUBSTANCE_APPLICABLE('APPL', 'M1', 'Fuel', REGFIELD(@Stream, 'NAME')), REGFIELD(@Stream, 'NAME'), '')";
+        var module = Module(bindings, loader, rule, withSubstanceCode: "301");
+
+        var output = await module.ExecuteAsync(Input(), CancellationToken.None);
+
+        Assert.Equal(10m, Assert.Single(output.Values).Value);
+    }
+
+    private static IRegistrySnapshotLoader Loader(string fuel, bool withApplicability = false)
     {
         var snapshot = new InMemoryRegistrySnapshot().AddRegistry("STREAM", ["NAME"]);
+        if (withApplicability)
+        {
+            snapshot.AddRegistry(
+                "APPL", ["METHODOLOGY", "SELECTOR_KIND", "SELECTOR_VALUE", "SUBSTANCE_CODE"],
+                primaryKey: ["METHODOLOGY", "SELECTOR_KIND", "SELECTOR_VALUE", "SUBSTANCE_CODE"]);
+            long id = 700;
+            foreach (var (kind, value, code) in new[] { ("*", "*", "*"), ("Fuel", "Gas", "301") })
+            {
+                snapshot.AddEntry(
+                    "APPL", ++id, $"A{id}",
+                    new()
+                    {
+                        ["METHODOLOGY"] = ExpressionValue.Text("M1"),
+                        ["SELECTOR_KIND"] = ExpressionValue.Text(kind),
+                        ["SELECTOR_VALUE"] = ExpressionValue.Text(value),
+                        ["SUBSTANCE_CODE"] = ExpressionValue.Text(code),
+                    },
+                    ordinal: (int)id);
+            }
+        }
+
         snapshot.AddEntry("STREAM", StreamEntryId, "S1", new() { ["NAME"] = ExpressionValue.Text(fuel) }, ordinal: 1);
 
         var loader = Substitute.For<IRegistrySnapshotLoader>();
@@ -124,7 +162,8 @@ public sealed class CategoryRuleRegistryTests
         ICalculationBindingStore bindings,
         IRegistrySnapshotLoader loader,
         string rule,
-        IRegistryStore? registryStore = null)
+        IRegistryStore? registryStore = null,
+        string? withSubstanceCode = null)
     {
         // Формула НЕ читає довідників: лише константу категорії, яку вибирає правило.
         var formula = new MethodologyFormula(VersionId, EcrCode.Create("Mass"), "CST.EF * 2");
@@ -140,6 +179,11 @@ public sealed class CategoryRuleRegistryTests
         store.GetConstantsAsync(VersionId, Arg.Any<CancellationToken>())
              .Returns([Number("EF", 3m, "Diesel"), Number("EF", 5m, "Gas")]);
         store.GetCategoryRuleAsync(VersionId, Arg.Any<CancellationToken>()).Returns(rule);
+        if (withSubstanceCode is not null)
+        {
+            store.GetSubstanceCodesAsync(VersionId, Arg.Any<CancellationToken>())
+                 .Returns((IReadOnlyDictionary<long, string>)new Dictionary<long, string> { [9101] = withSubstanceCode });
+        }
 
         var periods = Substitute.For<IPeriodStore>();
         periods.FindPeriodBoundsAsync(Arg.Any<long>(), 202601, Arg.Any<CancellationToken>())

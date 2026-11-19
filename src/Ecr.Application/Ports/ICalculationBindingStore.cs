@@ -197,7 +197,7 @@ public interface ICalculationBindingStore
         IReadOnlyCollection<int> tableDefIds, CancellationToken ct);
 
     /// <summary>
-    /// Довідники <c>Lookup</c>-колонок таблиць, до яких методологію активно прив'язано, —
+    /// Довідники <c>Lookup</c>-колонок таблиць, до яких методологію прив'язано (активно чи ні), —
     /// звідки беруться записи аргументів <c>@Arg</c> (аудит L7-06).
     /// </summary>
     /// <param name="methodologyId">Методологія.</param>
@@ -206,6 +206,12 @@ public interface ICalculationBindingStore
     /// <remarks>
     /// ⛔ <c>REGFIELD(@Stream, 'NAME')</c> коду довідника літералом не має: без цього
     /// переліку знімок прив'язки його не містив, і кожен рядок давав <c>#REF</c>.
+    ///
+    /// ⛔ Неактивні прив'язки теж рахуються (D-556): прив'язки ще не опублікованої методології неактивні, поки її
+    /// версію не опубліковано, а золотий набір публікації рахується ДО цього. З фільтром <c>IsActive</c> знімок
+    /// золотого тесту не мав довідника Lookup-колонки, і <c>REGFIELD(@Land_TypeFuel, 'NAME')</c> давав
+    /// <c>#REF</c> (правило категорії C12_03). Зайвий довідник у знімку нічого не псує: це лише додатковий
+    /// перелік записів для читання.
     /// </remarks>
     public Task<IReadOnlyList<int>> ListLookupRegistryIdsAsync(int methodologyId, CancellationToken ct);
 

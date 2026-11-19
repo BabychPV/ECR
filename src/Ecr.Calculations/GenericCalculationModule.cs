@@ -666,7 +666,7 @@ public sealed class GenericCalculationModule(
         {
             // AN-164: рядок без жодного значення — назвати аргументи, яких бракує (інакше тихий нуль).
             MissingArguments = values.Count == 0 && outputs.Count > 0
-                ? MissingArgumentsOf(ordered, binding.Libraries, arguments)
+                ? MissingArgumentsOf(ordered, binding.Libraries, arguments, optionalArguments)
                 : null,
 
             // B66: вихід без результату через помилку — проблема рядка StepError (раніше лише трейс, а на Off — ніде).
@@ -686,7 +686,8 @@ public sealed class GenericCalculationModule(
     private List<string>? MissingArgumentsOf(
         IReadOnlyList<MethodologyFormula> formulas,
         CalculationLibraries? libraries,
-        Dictionary<string, ExpressionValue> arguments)
+        Dictionary<string, ExpressionValue> arguments,
+        IReadOnlySet<string> optionalArguments)
     {
         var missing = new List<string>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -700,7 +701,11 @@ public sealed class GenericCalculationModule(
 
             foreach (var reference in ReferenceCollector.Collect(parsed.Expression.Root))
             {
+                // ✎ D-556: необов'язковий аргумент (`Name?` в ArgumentsCsv) за визначенням може бути порожнім і НЕ є «відсутнім
+                // входом»: інакше рядок, якому просто не підійшла гілка, називав виною поле, яке методологія дозволила
+                // не заповнювати, а скрипт (`row.X?`) мовчав - 504 розбіжності діагностики C11_10 у колі 3.
                 if (reference.Kind == TraceInputKind.Argument
+                    && !optionalArguments.Contains(reference.Code)
                     && seen.Add(reference.Code)
                     && (!arguments.TryGetValue(reference.Code, out var value) || value.IsNull
                         || value.ErrorCode == Expressions.ExpressionErrors.ArgumentNotFound
