@@ -71,7 +71,7 @@ public sealed class UnitConcurrencyTests(SqlServerFixture sql)
         var first = Outcome(() => Update(firstDb, firstUow).HandleAsync(
             unitId, Text("u"), Text("Alpha"), 2m, 0m, version, CancellationToken.None));
 
-        await reachedSave.Task.WaitAsync(Ceiling);
+        await ReachedOrFailedAsync(reachedSave, first, "перший запис дійшов до паузи перед збереженням");
 
         var second = Outcome(() => Update(secondDb, new UnitOfWork(secondDb)).HandleAsync(
             unitId, Text("u"), Text("Beta"), 2m, 0m, version, CancellationToken.None));
@@ -160,7 +160,7 @@ public sealed class UnitConcurrencyTests(SqlServerFixture sql)
         var store = new PausingUnitStore(new UnitStore(db), checkedUsage, referenceDone.Task);
         var delete = Outcome(() => Delete(db, store).HandleAsync(unitId, CancellationToken.None));
 
-        await checkedUsage.Task.WaitAsync(Ceiling);
+        await ReachedOrFailedAsync(checkedUsage, delete, "видалення перевірило посилання");
 
         await using var referrerDb = sql.CreateContext();
         referrerDb.UnitConversions.Add(new UnitConversion(unitId, otherId, 0.5m, 0m, 0, null));
@@ -177,6 +177,30 @@ public sealed class UnitConcurrencyTests(SqlServerFixture sql)
         await using var read = sql.CreateContext();
         Assert.False(await read.Units.AnyAsync(u => u.Id == unitId));
         Assert.Equal(0, await read.UnitConversions.CountAsync(c => c.FromUnitId == unitId));
+    }
+
+    /// <summary>
+    /// Чекає, доки учасник гонки дійде до паузи, АЛЕ не довше, ніж він живий.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ B186 (гіпотеза, ще не доведено 20/20). Раніше тут було <c>reached.Task.WaitAsync(Ceiling)</c>: якщо учасник
+    /// падав ДО паузи (взаємоблокування SQL, обрив з'єднання, будь-який виняток поза <c>EcrException</c>/<c>DbUpdateException</c>,
+    /// що <see cref="Outcome"/> не ковтає), <c>reached</c> не спрацьовував ніколи, а справжня причина лишалася в
+    /// незчитаній задачі — тест висів рівно <see cref="Ceiling"/> (1 хв у CI) і падав голим <c>TimeoutException</c>.
+    /// Тепер завершення учасника раніше за паузу — негайний збій із його справжнім винятком (<c>await actor</c>
+    /// перекидає його) або з його результатом.
+    /// </remarks>
+    private static async Task ReachedOrFailedAsync(TaskCompletionSource reached, Task<Exception?> actor, string what)
+    {
+        var first = await Task.WhenAny(reached.Task, actor).WaitAsync(Ceiling);
+        if (ReferenceEquals(first, reached.Task))
+        {
+            return;
+        }
+
+        var outcome = await actor;
+        throw new Xunit.Sdk.XunitException(
+            $"Учасник гонки завершився, не дійшовши до паузи ({what}); результат: {outcome?.ToString() ?? "успіх без паузи"}");
     }
 
     /// <summary>Дві небазові одиниці однієї розмірності; перша — з множником 2.</summary>
