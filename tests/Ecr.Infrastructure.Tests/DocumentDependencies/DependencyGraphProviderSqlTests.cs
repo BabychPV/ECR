@@ -10,6 +10,7 @@ using Ecr.Infrastructure.Caching;
 using Ecr.Infrastructure.DocumentDependencies;
 using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Xunit;
 
@@ -93,6 +94,104 @@ public sealed class DependencyGraphProviderSqlTests(SqlServerFixture sql)
         Assert.Contains(second.ConsumersOf(source.TemplateId), d => d.ConsumerTemplateId == late.TemplateId);
     }
 
+    /// <summary>
+    /// MS x B179: методологія (скрипт чи формули), що читає РЕЗУЛЬТАТИ іншої методології й пише в ІНШИЙ шаблон, - споживач
+    /// довідника, який читає джерело результатів; ланцюг транзитивний, а без ребра читання шаблон у графі не з'являється.
+    /// </summary>
+    /// <remarks>
+    /// Мутації (локально): адаптер повертає порожній <c>ListResultReadsAsync</c> - червоний; провайдер не заповнює
+    /// <c>MethodologyResultReads</c> - червоний.
+    /// </remarks>
+    [Fact]
+    public async Task Читач_результатів_іншої_методології_є_споживачем_довідника_транзитивно_і_з_усіма_періодами()
+    {
+        var registryId = await NewRegistryAsync();
+        var source = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(periodKey: PeriodKey);
+        await NewBindingAsync(source.TemplateId, registryId);
+        var land = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(periodKey: PeriodKey);
+        var landMethodology = await MethodologyAsync(registryId, land);
+        var report = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(periodKey: PeriodKey);
+        var (reportMethodology, _) = await ResultReaderAsync(landMethodology, report, "A");
+        var total = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(periodKey: PeriodKey);
+        await ResultReaderAsync(reportMethodology, total, "B");
+        var unrelated = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(periodKey: PeriodKey);
+        await ResultReaderAsync(null, unrelated, "C");
+
+        var graph = await NewProvider(new MemoryCache(new MemoryCacheOptions())).GetAsync(CancellationToken.None);
+
+        var consumers = graph.ConsumersOf(source.TemplateId).ToDictionary(d => d.ConsumerTemplateId);
+        Assert.Equal(PeriodScope.Month, consumers[land.TemplateId].Scope);
+        Assert.Equal(PeriodScope.All, consumers[report.TemplateId].Scope);
+        Assert.True(consumers[report.TemplateId].ViaMethodology);
+        Assert.Contains(total.TemplateId, consumers.Keys);
+        Assert.DoesNotContain(unrelated.TemplateId, consumers.Keys);
+        Assert.Contains(graph.Edges, e => e.Kind == DependencyEdgeKind.MethodologyResult
+            && e.From == new DependencyNodeRef(DependencyNodeKind.Methodology, landMethodology)
+            && e.To == new DependencyNodeRef(DependencyNodeKind.Methodology, reportMethodology));
+    }
+
+    /// <summary>
+    /// MS x B179: перемикання рушія ОПУБЛІКОВАНОЇ версії (Formulas - Script) не чіпає статусу й <c>PublishedAt</c>, а
+    /// переписує ребра довідників і залежності методологій - ревізія графа мусить це бачити, інакше кеш лишає старі ребра.
+    /// </summary>
+    /// <remarks>
+    /// Мутації (локально, кожна по черзі прибирає свій складник ревізії в <c>MethodologyRegistryEdges.RevisionAsync</c>):
+    /// рушії - червоний перший крок; ребра довідників - другий; залежності - третій.
+    /// </remarks>
+    [Fact]
+    public async Task Ревізія_змінюється_при_перемиканні_рушія_ребрах_довідників_і_залежностях_методологій()
+    {
+        var registryId = await NewRegistryAsync();
+        var source = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(periodKey: PeriodKey);
+        await NewBindingAsync(source.TemplateId, registryId);
+        var land = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(periodKey: PeriodKey);
+        var landMethodology = await MethodologyAsync(registryId, land);
+        var report = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(periodKey: PeriodKey);
+        var (reportMethodology, reportVersion) = await ResultReaderAsync(null, report, "A");
+
+        var memory = new MemoryCache(new MemoryCacheOptions());
+        var before = await MethodologyRevisionAsync();
+        var firstGraph = await NewProvider(memory).GetAsync(CancellationToken.None);
+        Assert.DoesNotContain(firstGraph.ConsumersOf(source.TemplateId), d => d.ConsumerTemplateId == report.TemplateId);
+
+        // 1. Рушій версії - Script (як script-migration/switch): статус, PublishedAt і склад версій ті самі.
+        await using (var db = sql.CreateContext())
+        {
+            await db.Database.ExecuteSqlAsync($"UPDATE calc.MethodologyVersion SET Engine = 1 WHERE Id = {reportVersion}");
+        }
+
+        var afterEngine = await MethodologyRevisionAsync();
+        Assert.NotEqual(before, afterEngine);
+
+        // 2. Скрипт версії читає довідник (ребро cfg.RegistryUse з кодом "script", як у ScriptMaterializer).
+        await using (var db = sql.CreateContext())
+        {
+            db.RegistryUses.Add(RegistryUse.ForMethodologyFormula(reportVersion, "script", registryId, fieldPath: null));
+            await db.SaveChangesAsync();
+        }
+
+        var afterUses = await MethodologyRevisionAsync();
+        Assert.NotEqual(afterEngine, afterUses);
+        var secondGraph = await NewProvider(memory).GetAsync(CancellationToken.None);
+        var scriptConsumer = Assert.Single(secondGraph.ConsumersOf(source.TemplateId), d => d.ConsumerTemplateId == report.TemplateId);
+        Assert.Equal(PeriodScope.All, scriptConsumer.Scope);
+        Assert.True(scriptConsumer.ViaMethodology);
+
+        // 3. Залежність методологій (скрипт читає результати землі).
+        await using (var db = sql.CreateContext())
+        {
+            db.MethodologyDependencies.Add(new MethodologyDependency(reportMethodology, landMethodology));
+            await db.SaveChangesAsync();
+        }
+
+        var afterDependency = await MethodologyRevisionAsync();
+        Assert.NotEqual(afterUses, afterDependency);
+        Assert.Contains((await NewProvider(memory).GetAsync(CancellationToken.None)).Edges, e => e.Kind == DependencyEdgeKind.MethodologyResult);
+
+        // Контроль: нічого не змінилось - ревізія та сама.
+        Assert.Equal(afterDependency, await MethodologyRevisionAsync());
+    }
+
     private static IReadOnlyList<DependencyEvidence> Evidence(DependencyGraphSnapshot graph, int registryId, int templateId)
         => graph.Edges.Single(e => e.Kind == DependencyEdgeKind.TemplateFormula
                                    && e.From == new DependencyNodeRef(DependencyNodeKind.Registry, registryId)
@@ -156,7 +255,7 @@ public sealed class DependencyGraphProviderSqlTests(SqlServerFixture sql)
     }
 
     /// <summary>Опублікована методологія читає довідник за місяцем і пише в колонку шаблону документа.</summary>
-    private async Task MethodologyAsync(int registryId, TestDocument target)
+    private async Task<int> MethodologyAsync(int registryId, TestDocument target)
     {
         await using var db = sql.CreateContext();
         var methodology = new Methodology(EcrCode.Create($"M{_tag}"), Text("m"));
@@ -174,6 +273,37 @@ public sealed class DependencyGraphProviderSqlTests(SqlServerFixture sql)
         db.RegistryUses.Add(RegistryUse.ForMethodologyFormula(version.Id, "F1", registryId, "VALUE"));
         db.CalculationBindings.Add(new CalculationBinding(target.TableDefId, target.ColumnDefIds[2], methodology.Id, "tons", "{}"));
         await db.SaveChangesAsync();
+        return methodology.Id;
+    }
+
+    /// <summary>
+    /// Опублікована методологія БЕЗ читання довідників, що пише в колонку шаблону документа; <paramref name="sourceMethodologyId"/>
+    /// — методологія, чиї результати вона читає (<c>calc.MethodologyDependency</c>: скрипт чи формула). Повертає її версію.
+    /// </summary>
+    private async Task<(int MethodologyId, int VersionId)> ResultReaderAsync(int? sourceMethodologyId, TestDocument target, string suffix)
+    {
+        await using var db = sql.CreateContext();
+        var methodology = new Methodology(EcrCode.Create($"R{suffix}{_tag}"), Text("r"));
+        db.Methodologies.Add(methodology);
+        await db.SaveChangesAsync();
+        var version = new MethodologyVersion(methodology.Id, "1.0", CalculationLevel.Configuration, 1, Now);
+        db.MethodologyVersions.Add(version);
+        await db.SaveChangesAsync();
+        version.Publish(1, "B179", new DateOnly(2099, 1, 1), testsPassed: true, Now);
+        db.CalculationBindings.Add(new CalculationBinding(target.TableDefId, target.ColumnDefIds[2], methodology.Id, "tons", "{}"));
+        if (sourceMethodologyId is { } source)
+        {
+            db.MethodologyDependencies.Add(new MethodologyDependency(methodology.Id, source));
+        }
+
+        await db.SaveChangesAsync();
+        return (methodology.Id, version.Id);
+    }
+
+    private async Task<string> MethodologyRevisionAsync()
+    {
+        await using var db = sql.CreateContext();
+        return await new MethodologyRegistryEdges(db).RevisionAsync(CancellationToken.None);
     }
 
     private static LocalizedText Text(string en) => new(new Dictionary<string, string> { ["en"] = en });

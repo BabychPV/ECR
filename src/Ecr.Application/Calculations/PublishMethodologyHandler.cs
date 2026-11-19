@@ -37,7 +37,8 @@ public sealed class PublishMethodologyHandler(
     IUiStringCatalog? uiCatalog = null,
     RuleCoverageHandler? ruleCoverage = null,
     IEnumerable<ICalculationModule>? modules = null,
-    Scripting.ScriptPublishChecks? scriptChecks = null) : IFormulaLinkRebuilder
+    Scripting.ScriptPublishChecks? scriptChecks = null,
+    IDependencyGraphProvider? dependencyGraph = null) : IFormulaLinkRebuilder
 {
     /// <summary>Ключ попередження: комбінації значень реальних рядків, яких не зачіпає жодне правило (ФВ-13.9).</summary>
     public const string CoverageGapsWarningKey = "publish.warning.ruleCoverageGaps";
@@ -1751,8 +1752,14 @@ public sealed class PublishMethodologyHandler(
         await uow.ExecuteInTransactionAsync(
             async token =>
             {
+                // MS x B179: нові ребра скрипта (довідники, результати інших методологій, прив'язки) не мають замкнути цикл
+                // залежностей документів; перевірка — після збереження ребер, у цій транзакції (відмова її відкочує).
+                var onCycle = await Templates.DependencyCyclePublishCheck
+                    .MethodologiesOnCycleAsync(dependencyGraph, [methodology.Id], token).ConfigureAwait(false);
                 await scriptChecks.RunAsync(methodology, version, from, token).ConfigureAwait(false);
                 await uow.SaveChangesAsync(token).ConfigureAwait(false);
+                await Templates.DependencyCyclePublishCheck
+                    .RefuseMethodologiesAsync(dependencyGraph, [methodology.Id], onCycle, token).ConfigureAwait(false);
 
                 diff = await BuildDiffAsync(methodology, version, previous, testCases, token).ConfigureAwait(false);
 

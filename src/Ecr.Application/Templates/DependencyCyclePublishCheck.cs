@@ -77,4 +77,75 @@ public static class DependencyCyclePublishCheck
                 ["cycle"] = path,
             });
     }
+
+    /// <summary>
+    /// MS × B179: методології з <paramref name="methodologyIds"/>, що ВЖЕ лежать на циклі поточного графа (до зміни) —
+    /// такі публікації цикл не створюють і не блокуються (як для шаблонів).
+    /// </summary>
+    /// <param name="dependencyGraph">Граф; <c>null</c> — збирання без графа.</param>
+    /// <param name="methodologyIds">Методології.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public static async Task<IReadOnlySet<int>> MethodologiesOnCycleAsync(
+        IDependencyGraphProvider? dependencyGraph, IReadOnlyCollection<int> methodologyIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(methodologyIds);
+        if (dependencyGraph is null || methodologyIds.Count == 0)
+        {
+            return new HashSet<int>();
+        }
+
+        var graph = await dependencyGraph.GetFreshAsync(ct).ConfigureAwait(false);
+        return OnCycle(graph, methodologyIds);
+    }
+
+    /// <summary>
+    /// MS × B179: відмова публікації (чи перемикання на скрипт) методології, чиї ребра — читання довідників, читання
+    /// результатів інших методологій (<c>calc.MethodologyDependency</c>), прив'язки до колонок — замкнули НОВИЙ цикл
+    /// залежностей документів. Викликається ПІСЛЯ збереження нових ребер у транзакції викликача (граф читає базу):
+    /// відмова відкочує публікацію.
+    /// </summary>
+    /// <param name="dependencyGraph">Граф; <c>null</c> — перевірки немає.</param>
+    /// <param name="methodologyIds">Методології, чиї ребра змінено.</param>
+    /// <param name="alreadyOnCycle">Результат <see cref="MethodologiesOnCycleAsync"/> ДО зміни.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public static async Task RefuseMethodologiesAsync(
+        IDependencyGraphProvider? dependencyGraph,
+        IReadOnlyCollection<int> methodologyIds,
+        IReadOnlySet<int> alreadyOnCycle,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(methodologyIds);
+        ArgumentNullException.ThrowIfNull(alreadyOnCycle);
+        if (dependencyGraph is null || methodologyIds.Count == 0)
+        {
+            return;
+        }
+
+        var graph = await dependencyGraph.GetFreshAsync(ct).ConfigureAwait(false);
+        foreach (var id in methodologyIds.Where(id => !alreadyOnCycle.Contains(id)))
+        {
+            var anchor = new DependencyNodeRef(DependencyNodeKind.Methodology, id);
+            if (DependencyCycleCheck.CycleThrough(graph.Edges.Select(e => (e.From, e.To)), anchor) is not { } cycle)
+            {
+                continue;
+            }
+
+            var path = DependencyCycleCheck.Describe(graph, cycle);
+            throw new BusinessRuleException(
+                ErrorCodes.TemplateInvalid,
+                $"Публікацію відхилено: версія замкнула б цикл залежностей документів ({path}) — документ читав би сам себе.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = MessageKey,
+                    ["cycle"] = path,
+                });
+        }
+    }
+
+    private static HashSet<int> OnCycle(DependencyGraphSnapshot graph, IReadOnlyCollection<int> methodologyIds)
+    {
+        var edges = graph.Edges.Select(e => (e.From, e.To)).ToList();
+        return [.. methodologyIds.Where(id =>
+            DependencyCycleCheck.CycleThrough(edges, new DependencyNodeRef(DependencyNodeKind.Methodology, id)) is not null)];
+    }
 }

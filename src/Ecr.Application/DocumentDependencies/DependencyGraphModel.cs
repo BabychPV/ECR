@@ -34,6 +34,13 @@ public enum DependencyEdgeKind : byte
 
     /// <summary>Правило довідника читає інший довідник (<c>cfg.RegistryUse</c> вид 2).</summary>
     RegistryRule = 4,
+
+    /// <summary>
+    /// Методологія-читач бере РЕЗУЛЬТАТИ методології-джерела (<c>calc.MethodologyDependency</c>: скрипт читає чужий вихід,
+    /// формула посилається на вихід чи бібліотеку). Дані течуть від джерела до читача; читач — теж споживач довідників,
+    /// які читає джерело.
+    /// </summary>
+    MethodologyResult = 5,
 }
 
 /// <summary>Адреса вузла.</summary>
@@ -155,6 +162,11 @@ public sealed record MethodologyTemplateWrite(int MethodologyId, int TemplateId,
 /// <param name="ReadRegistryDefId">Довідник, який правило читає.</param>
 public sealed record RegistryRuleRead(int RuleId, int RuleRegistryDefId, int ReadRegistryDefId);
 
+/// <summary>Методологія <paramref name="ReaderMethodologyId"/> читає результати методології <paramref name="SourceMethodologyId"/>.</summary>
+/// <param name="ReaderMethodologyId">Читач.</param>
+/// <param name="SourceMethodologyId">Джерело результатів.</param>
+public sealed record MethodologyResultRead(int ReaderMethodologyId, int SourceMethodologyId);
+
 /// <summary>Сирі ребра, прочитані з бази, для <see cref="DependencyGraphAssembler"/>.</summary>
 /// <param name="Revision">Ревізія даних.</param>
 /// <param name="TemplateCodes">Шаблон → код.</param>
@@ -176,4 +188,8 @@ public sealed record DependencyGraphInputs(
     IReadOnlyList<MethodologyScopedRead> MethodologyReads,
     IReadOnlyList<MethodologyTemplateWrite> MethodologyWrites,
     IReadOnlyList<RegistryRuleRead> RuleReads,
-    IReadOnlyList<DependencyGraphDiagnostic> Diagnostics);
+    IReadOnlyList<DependencyGraphDiagnostic> Diagnostics)
+{
+    /// <summary>Читання результатів між методологіями (скрипт і формули); порожньо — ребер немає.</summary>
+    public IReadOnlyList<MethodologyResultRead> MethodologyResultReads { get; init; } = [];
+}

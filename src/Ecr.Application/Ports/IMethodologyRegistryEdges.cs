@@ -23,7 +23,22 @@ public interface IMethodologyRegistryEdges
     /// <summary>Активні прив'язки методологій до колонок шаблонів (<c>cfg.CalculationBinding</c>).</summary>
     /// <param name="ct">Токен скасування.</param>
     public Task<IReadOnlyList<MethodologyBindingRow>> ListBindingsAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Читання РЕЗУЛЬТАТІВ однієї методології іншою (<c>calc.MethodologyDependency</c>): скрипт («читання результатів
+    /// іншої методології», імпорт бібліотеки) і формули (посилання на вихід, бібліотека) пишуть те саме ребро.
+    /// </summary>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<MethodologyResultReadRow>> ListResultReadsAsync(CancellationToken ct);
 }
+
+/// <summary>Методологія-читач залежить від результатів методології-джерела (ребро рівня методологій, не версій).</summary>
+/// <param name="ReaderMethodologyId">Хто читає — рахується пізніше.</param>
+/// <param name="ReaderCode">Код читача.</param>
+/// <param name="SourceMethodologyId">Чиї результати (чи бібліотеку) читає.</param>
+/// <param name="SourceCode">Код джерела.</param>
+public sealed record MethodologyResultReadRow(
+    int ReaderMethodologyId, string ReaderCode, int SourceMethodologyId, string SourceCode);
 
 /// <summary>Формула версії методології читає довідник.</summary>
 /// <param name="MethodologyId">Методологія.</param>

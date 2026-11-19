@@ -86,4 +86,86 @@ public sealed class DependencyGraphOrderTests
         Assert.Equal(10, Assert.Single(Assert.Single(graph.Cycles)));
         Assert.Contains(graph.Diagnostics, d => d.Key == "cycle" && d.Detail.Contains("HSE400", StringComparison.Ordinal));
     }
+
+    /// <summary>
+    /// MS × B179: скриптова (чи формульна) методологія, що читає РЕЗУЛЬТАТИ іншої, теж споживач довідника, який читає
+    /// джерело результатів, — навіть коли сама довідника не читає і пише в ІНШИЙ шаблон; ланцюг транзитивний.
+    /// </summary>
+    /// <remarks>Мутація: у <c>Collapse</c> прибрати <c>AffectedMethodologies</c> (брати лише прямих читачів) — червоний.</remarks>
+    [Fact]
+    public void Читач_результатів_іншої_методології_є_споживачем_її_довідників_транзитивно_і_консервативно()
+    {
+        // HSE400 (10) → склад (100) ← методологія C (7, Year) пише в Land (20);
+        // скрипт S (8) читає результати C і пише в Звіт (40); скрипт T (9) читає результати S і пише в Підсумок (50).
+        var graph = DependencyGraphAssembler.Assemble(new DependencyGraphInputs(
+            "r1",
+            new Dictionary<int, string> { [10] = "HSE400", [20] = "LAND", [40] = "REPORT", [50] = "TOTAL" },
+            new Dictionary<int, string> { [100] = "COMPOSITION" },
+            new Dictionary<int, string>(),
+            [new SourceBindingRow(1, 10, 100, DocumentSourceState.Any)],
+            [],
+            [new MethodologyScopedRead(7, 70, 100, "F1", PeriodScope.Year)],
+            [
+                new MethodologyTemplateWrite(7, 20, 900, "t"),
+                new MethodologyTemplateWrite(8, 40, 901, "t"),
+                new MethodologyTemplateWrite(9, 50, 902, "t"),
+            ],
+            [],
+            [])
+        {
+            MethodologyResultReads = [new MethodologyResultRead(8, 7), new MethodologyResultRead(9, 8)],
+        });
+
+        Assert.Equal(PeriodScope.Year, Assert.Single(graph.ConsumersOf(10), d => d.ConsumerTemplateId == 20).Scope);
+        var report = Assert.Single(graph.ConsumersOf(10), d => d.ConsumerTemplateId == 40);
+        Assert.Equal(PeriodScope.All, report.Scope);
+        Assert.True(report.ViaMethodology);
+        Assert.False(report.ViaTemplateFormula);
+        Assert.Contains(graph.ConsumersOf(10), d => d.ConsumerTemplateId == 50);
+        Assert.Contains(graph.Edges, e => e.Kind == DependencyEdgeKind.MethodologyResult
+            && e.From == new DependencyNodeRef(DependencyNodeKind.Methodology, 7)
+            && e.To == new DependencyNodeRef(DependencyNodeKind.Methodology, 8));
+        Assert.Empty(graph.Cycles);
+    }
+
+    [Fact]
+    public void Без_ребра_читання_результатів_споживач_лише_через_свій_довідник()
+    {
+        var graph = DependencyGraphAssembler.Assemble(new DependencyGraphInputs(
+            "r1",
+            new Dictionary<int, string>(),
+            new Dictionary<int, string>(),
+            new Dictionary<int, string>(),
+            [new SourceBindingRow(1, 10, 100, DocumentSourceState.Any)],
+            [],
+            [new MethodologyScopedRead(7, 70, 100, "F1", PeriodScope.Year)],
+            [new MethodologyTemplateWrite(7, 20, 900, "t"), new MethodologyTemplateWrite(8, 40, 901, "t")],
+            [],
+            []));
+
+        Assert.Equal([20], graph.ConsumersOf(10).Select(d => d.ConsumerTemplateId));
+    }
+
+    /// <summary>Цикл через читання результатів: скрипт читає результати методології джерела й пише назад у шаблон-джерело.</summary>
+    [Fact]
+    public void Цикл_через_читання_результатів_ловиться_як_цикл_шаблонів()
+    {
+        var graph = DependencyGraphAssembler.Assemble(new DependencyGraphInputs(
+            "r1",
+            new Dictionary<int, string> { [10] = "HSE400", [20] = "LAND" },
+            new Dictionary<int, string> { [100] = "COMPOSITION" },
+            new Dictionary<int, string>(),
+            [new SourceBindingRow(1, 10, 100, DocumentSourceState.Any)],
+            [],
+            [new MethodologyScopedRead(7, 70, 100, "F1", PeriodScope.Year)],
+            [new MethodologyTemplateWrite(7, 20, 900, "t"), new MethodologyTemplateWrite(8, 10, 901, "t")],
+            [],
+            [])
+        {
+            MethodologyResultReads = [new MethodologyResultRead(8, 7)],
+        });
+
+        Assert.Contains(graph.Cycles, c => c.Contains(10));
+        Assert.Contains(graph.Diagnostics, d => d.Key == "cycle");
+    }
 }

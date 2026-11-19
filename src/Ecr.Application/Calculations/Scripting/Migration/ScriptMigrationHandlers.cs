@@ -326,7 +326,8 @@ public sealed class SwitchScriptEngineHandler(
     IAuditWriter audit,
     IAccessDecisionService access,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+    IDependencyGraphProvider? dependencyGraph = null)
 {
     /// <summary>Право на перемикання: те саме, що й на публікацію.</summary>
     public const string Permission = "Calculation.Publish";
@@ -406,6 +407,11 @@ public sealed class SwitchScriptEngineHandler(
         await uow.ExecuteInTransactionAsync(
             async token =>
             {
+                // MS x B179: перемикання переписує ребра довідників і залежності методологій; нове замикання циклу
+                // залежностей документів відмовляє (як L3) і відкочує всю групу.
+                var groupIds = group.Select(g => g.Methodology.Id).Distinct().ToList();
+                var onCycle = await Ecr.Application.Templates.DependencyCyclePublishCheck
+                    .MethodologiesOnCycleAsync(dependencyGraph, groupIds, token).ConfigureAwait(false);
                 if (engine == MethodologyEngine.Script)
                 {
                     await SwitchToScriptAsync(group, token).ConfigureAwait(false);
@@ -426,6 +432,10 @@ public sealed class SwitchScriptEngineHandler(
                         await formulaLinks.RebuildAsync(methodology, version, token).ConfigureAwait(false);
                     }
                 }
+
+                await uow.SaveChangesAsync(token).ConfigureAwait(false);
+                await Ecr.Application.Templates.DependencyCyclePublishCheck
+                    .RefuseMethodologiesAsync(dependencyGraph, groupIds, onCycle, token).ConfigureAwait(false);
 
                 foreach (var (_, version) in group)
                 {

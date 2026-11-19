@@ -53,9 +53,14 @@ public sealed class DependencyGraphProvider(
     private static readonly SingleFlight<DependencyGraphSnapshot> Flight = new();
 
     /// <inheritdoc />
-    public async Task<DependencyGraphSnapshot> GetAsync(CancellationToken ct)
+    public Task<DependencyGraphSnapshot> GetAsync(CancellationToken ct) => GetCoreAsync(fresh: false, ct);
+
+    /// <inheritdoc />
+    public Task<DependencyGraphSnapshot> GetFreshAsync(CancellationToken ct) => GetCoreAsync(fresh: true, ct);
+
+    private async Task<DependencyGraphSnapshot> GetCoreAsync(bool fresh, CancellationToken ct)
     {
-        var revision = await RevisionAsync(ct).ConfigureAwait(false);
+        var revision = await RevisionAsync(fresh, ct).ConfigureAwait(false);
         var key = "dependency-graph:" + revision;
         if (memory.TryGetValue(key, out DependencyGraphSnapshot? cached) && cached is not null)
         {
@@ -78,10 +83,10 @@ public sealed class DependencyGraphProvider(
     public Task<bool> FillsRegistryAsync(int templateId, CancellationToken ct)
         => db.DocumentSourceBindings.AsNoTracking().AnyAsync(b => b.SourceTemplateId == templateId, ct);
 
-    private async Task<string> RevisionAsync(CancellationToken ct)
+    private async Task<string> RevisionAsync(bool fresh, CancellationToken ct)
     {
         var window = (lifetimes ?? CacheLifetimes.Default).Revision;
-        if (window > TimeSpan.Zero && memory.TryGetValue(RevisionKey, out string? memoized) && memoized is not null)
+        if (!fresh && window > TimeSpan.Zero && memory.TryGetValue(RevisionKey, out string? memoized) && memoized is not null)
         {
             return memoized;
         }
@@ -190,6 +195,15 @@ public sealed class DependencyGraphProvider(
             methodologyReads.Add(new MethodologyScopedRead(row.MethodologyId, row.MethodologyVersionId, row.RegistryDefId, row.FormulaCode, scope));
         }
 
+        // Читання результатів між методологіями (скрипт і формули): читач стає споживачем довідників джерела.
+        var resultReads = new List<MethodologyResultRead>();
+        foreach (var row in await methodologies.ListResultReadsAsync(ct).ConfigureAwait(false))
+        {
+            methodologyCodes[row.ReaderMethodologyId] = row.ReaderCode;
+            methodologyCodes[row.SourceMethodologyId] = row.SourceCode;
+            resultReads.Add(new MethodologyResultRead(row.ReaderMethodologyId, row.SourceMethodologyId));
+        }
+
         var calculationBindings = await methodologies.ListBindingsAsync(ct).ConfigureAwait(false);
         var bindingTables = calculationBindings.Select(b => b.TableDefId).Distinct().ToList();
         var tableTemplates = await (
@@ -215,7 +229,10 @@ public sealed class DependencyGraphProvider(
             .ToDictionaryAsync(t => t.Id, t => t.Code, ct).ConfigureAwait(false);
 
         return new DependencyGraphInputs(
-            revision, templateCodes, registries, methodologyCodes, bindings, templateReads, methodologyReads, writes, rules, diagnostics);
+            revision, templateCodes, registries, methodologyCodes, bindings, templateReads, methodologyReads, writes, rules, diagnostics)
+        {
+            MethodologyResultReads = resultReads,
+        };
     }
 
     private async Task<List<TemplateRegistryRead>> TemplateReadsAsync(
