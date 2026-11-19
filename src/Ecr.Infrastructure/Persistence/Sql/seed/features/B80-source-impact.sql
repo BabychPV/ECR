@@ -55,6 +55,16 @@ SELECT v.[Key], v.Lang, v.Val
     (N'sourceImpact.approved.label', N'kz', N'Бекітілген тәуелді құжаттарды да қайта есептеу'),
     (N'sourceImpact.approved.hint', N'ru', N'Только для администратора. Утверждённые периоды будут изменены; укажите причину — она попадёт в журнал вместе с перечнем пересчитанных листов.'),
     (N'sourceImpact.approved.hint', N'kz', N'Тек әкімші үшін. Бекітілген кезеңдер өзгереді; себебін көрсетіңіз — ол қайта есептелген парақтар тізімімен бірге журналға түседі.'),
+    (N'sourceImpact.title.edit', N'ru', N'Вы правите лист — источник данных для других документов'),
+    (N'sourceImpact.title.edit', N'kz', N'Сіз басқа құжаттардың дерек көзі болатын парақты түзетудесіз'),
+    (N'sourceImpact.intro.info.edit', N'ru', N'Этот лист — источник данных для других документов ({total}). Зависимые документы пересчитаются автоматически; утверждённые периоды не пересчитываются.'),
+    (N'sourceImpact.intro.info.edit', N'kz', N'Бұл парақ — басқа құжаттардың дерек көзі ({total}). Тәуелді құжаттар автоматты түрде қайта есептеледі; бекітілген кезеңдер қайта есептелмейді.'),
+    (N'sourceImpact.confirm.edit', N'ru', N'Продолжить правку'),
+    (N'sourceImpact.confirm.edit', N'kz', N'Түзетуді жалғастыру'),
+    (N'sourceImpact.suppress.label', N'ru', N'Не спрашивать до конца сессии для этого листа'),
+    (N'sourceImpact.suppress.label', N'kz', N'Осы парақ үшін сессия соңына дейін сұрамау'),
+    (N'sourceImpact.approved.queued', N'ru', N'Пересчёт утверждённых зависимых документов поставлен в очередь: {queued}'),
+    (N'sourceImpact.approved.queued', N'kz', N'Бекітілген тәуелді құжаттарды қайта есептеу кезекке қойылды: {queued}'),
     (N'sourceImpact.loadFailed', N'ru', N'Не удалось проверить влияние на зависимые документы; сервер проверит его при выполнении действия.'),
     (N'sourceImpact.loadFailed', N'kz', N'Тәуелді құжаттарға әсерді тексеру мүмкін болмады; әрекет орындалғанда сервер оны тексереді.')
        ) AS v ([Key], Lang, Val)
@@ -92,6 +102,11 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'err.ECR-ACCS-0403.recalculateApproved', N'en', N'You are not allowed to recalculate approved dependent documents (the Calculation.RecalculateApprovedDependents permission is required).', 1),
     (N'sourceImpact.approved.label', N'en', N'Also recalculate approved dependent documents', 1),
     (N'sourceImpact.approved.hint', N'en', N'Administrators only. Approved periods will be changed; give a reason — it is logged together with the list of recalculated sheets.', 1),
+    (N'sourceImpact.title.edit', N'en', N'You are editing a sheet that is a data source for other documents', 1),
+    (N'sourceImpact.intro.info.edit', N'en', N'This sheet is a data source for other documents ({total}). Dependent documents are recalculated automatically; approved periods are not recalculated.', 1),
+    (N'sourceImpact.confirm.edit', N'en', N'Continue editing', 1),
+    (N'sourceImpact.suppress.label', N'en', N'Do not ask again for this sheet until the end of the session', 1),
+    (N'sourceImpact.approved.queued', N'en', N'Recalculation of approved dependent documents queued: {queued}', 1),
     (N'sourceImpact.loadFailed', N'en', N'Could not check the impact on dependent documents; the server will check it when the action runs.', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);

@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { act, render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { components } from '@/api/schema';
+import { discardPendingEdit, openDocument, putPendingEdit, resetPending } from '@/features/grid/pendingStore';
+import { isEditNoticeSuppressed, resetEditNoticeSuppression } from '../sourceImpact';
 import { SheetActions } from '../SheetActions';
 
 /**
@@ -42,6 +44,7 @@ function impact(overrides: Partial<Impact> = {}): Impact {
     sourceMonths: [202601],
     dependentCount: 1,
     approvedCount: 1,
+    canRecalculateApproved: false,
     consumers: [
       { bindingCode: 'B', templateCode: 'LAND', documentId: 5, projectCode: 'LAND-26', documentKey: 'DOC-LAND', periodKey: 202601, approved: true, willRecalculate: false, skipReason: 'approved' },
     ],
@@ -67,6 +70,11 @@ function show(options: {
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (url.includes('/recalculate-approved')) {
+        posts.push({ url, body: JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown> });
+
+        return json({ queued: 1, approvedDependents: 1 });
+      }
       if (url.includes('/source-impact')) {
         const next = options.impacts[Math.min(impactCalls, options.impacts.length - 1)];
         impactCalls += 1;
@@ -116,6 +124,8 @@ function show(options: {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  resetPending();
+  resetEditNoticeSuppression();
 });
 
 const ApproveButton = /workflow\.approve\W?$/i;
@@ -169,7 +179,7 @@ describe('SheetActions: вплив Approve на залежні документ�
     fireEvent.click(confirm);
 
     await waitFor(() => expect(posts).toHaveLength(1));
-    expect(posts[0]?.body['confirmedImpact']).toEqual({ hash: 'hash-1', reason: null });
+    expect(posts[0]?.body['confirmedImpact']).toEqual({ hash: 'hash-1', reason: null, recalculateApproved: false });
     expect(posts[0]?.body['approved']).toBe(true);
   });
 
@@ -184,7 +194,7 @@ describe('SheetActions: вплив Approve на залежні документ�
     fireEvent.click(screen.getByTestId('source-impact-confirm'));
 
     await waitFor(() => expect(posts).toHaveLength(1));
-    expect(posts[0]?.body['confirmedImpact']).toEqual({ hash: 'hash-1', reason: 'Узгоджено з Land' });
+    expect(posts[0]?.body['confirmedImpact']).toEqual({ hash: 'hash-1', reason: 'Узгоджено з Land', recalculateApproved: false });
   });
 
   it('d) Block: пояснення без кнопки підтвердження, POST не йде', async () => {
@@ -213,7 +223,7 @@ describe('SheetActions: вплив Approve на залежні документ�
     fireEvent.click(confirm);
 
     await waitFor(() => expect(posts).toHaveLength(2));
-    expect(posts[1]?.body['confirmedImpact']).toEqual({ hash: 'fresh', reason: null });
+    expect(posts[1]?.body['confirmedImpact']).toEqual({ hash: 'fresh', reason: null, recalculateApproved: false });
   });
 
   it('f) вплив змінився між оглядом і підтвердженням (409 impactChanged) — діалог оновлюється, а не мовчить', async () => {
@@ -227,7 +237,7 @@ describe('SheetActions: вплив Approve на залежні документ�
     fireEvent.click(await screen.findByTestId('source-impact-confirm'));
 
     await waitFor(() => expect(posts).toHaveLength(1));
-    expect(posts[0]?.body['confirmedImpact']).toEqual({ hash: 'old', reason: null });
+    expect(posts[0]?.body['confirmedImpact']).toEqual({ hash: 'old', reason: null, recalculateApproved: false });
 
     // Діалог лишився відкритим з новим впливом; друге підтвердження несе новий відбиток.
     await waitFor(() => expect(screen.getByTestId('source-impact-confirm')).toBeTruthy());
@@ -235,7 +245,7 @@ describe('SheetActions: вплив Approve на залежні документ�
     fireEvent.click(screen.getByTestId('source-impact-confirm'));
 
     await waitFor(() => expect(posts).toHaveLength(2));
-    expect(posts[1]?.body['confirmedImpact']).toEqual({ hash: 'new', reason: null });
+    expect(posts[1]?.body['confirmedImpact']).toEqual({ hash: 'new', reason: null, recalculateApproved: false });
   });
 });
 
@@ -261,7 +271,7 @@ describe('SheetActions: вплив Reopen із затвердженого на �
     await waitFor(() => expect(posts).toHaveLength(1));
     expect(posts[0]?.url).toContain('/reopen');
     expect(posts[0]?.body['reason']).toBe('Виправлення складу');
-    expect(posts[0]?.body['confirmedImpact']).toEqual({ hash: 'r1', reason: 'Акт 12' });
+    expect(posts[0]?.body['confirmedImpact']).toEqual({ hash: 'r1', reason: 'Акт 12', recalculateApproved: false });
   });
 
   it('h) Block: діалог пояснює відмову, POST reopen не йде', async () => {
@@ -271,5 +281,91 @@ describe('SheetActions: вплив Reopen із затвердженого на �
 
     expect(await screen.findByTestId('source-impact-blocked')).toBeTruthy();
     expect(posts).toHaveLength(0);
+  });
+});
+
+describe('SheetActions: перекриття «й затверджені залежні» (рішення 19.11, право на сервері)', () => {
+  it('i) адміністратор: галочка «й затверджені» вимагає причину і йде в запиті як recalculateApproved', async () => {
+    show({
+      state: 'Submitted',
+      impacts: [impact({ canRecalculateApproved: true })],
+    });
+
+    await approveViaDialog();
+
+    const confirm = await screen.findByTestId('source-impact-confirm');
+    // Галочка є лише з правом; причини ще не просить, доки її не ввімкнено (політика Warn).
+    expect(screen.queryByTestId('source-impact-reason')).toBeNull();
+    fireEvent.click(screen.getByTestId('source-impact-approved'));
+    expect((screen.getByTestId('source-impact-confirm') as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText(/sourceImpact\.reason\.label/), { target: { value: 'Акт 12' } });
+    fireEvent.click(confirm);
+
+    await waitFor(() => expect(posts).toHaveLength(1));
+    expect(posts[0]?.body['confirmedImpact']).toEqual({ hash: 'hash-1', reason: 'Акт 12', recalculateApproved: true });
+  });
+
+  it('j) без права галочки немає, а запит іде без recalculateApproved', async () => {
+    show({ state: 'Submitted', impacts: [impact({ canRecalculateApproved: false })] });
+
+    await approveViaDialog();
+    await screen.findByTestId('source-impact-confirm');
+
+    expect(screen.queryByTestId('source-impact-approved')).toBeNull();
+  });
+});
+
+const EditCell = { rowKey: 'R1', columnCode: 'C1', value: 1, isEmpty: false, baseVersion: 'V1' };
+
+describe('SheetActions: перша правка аркуша-джерела — хто буде перерахований (рішення 19.11)', () => {
+  const editImpact = (overrides: Partial<Impact> = {}): Impact =>
+    impact({ action: 'edit', required: false, policy: 'None', approvedCount: 1, ...overrides });
+
+  it('k) перша правка питає вплив правки один раз; «не питати до кінця сесії» запам\'ятовується', async () => {
+    show({ state: 'Draft' as 'Submitted', impacts: [editImpact()] });
+    openDocument(1);
+
+    act(() => putPendingEdit(7, 202601, EditCell));
+
+    const confirm = await screen.findByTestId('source-impact-confirm');
+    expect(screen.getByTestId('source-impact-policy-info')).toBeTruthy();
+    // Правку діалог не блокує: нічого не надсилав, лише відомості.
+    expect(posts).toHaveLength(0);
+    fireEvent.click(screen.getByTestId('source-impact-suppress'));
+    fireEvent.click(confirm);
+
+    await waitFor(() => expect(screen.queryByTestId('source-impact-confirm')).toBeNull());
+    expect(isEditNoticeSuppressed(1, 42)).toBe(true);
+  });
+
+  it('l) адміністратор: «й затверджені» з причиною — перерахунок іде ПІСЛЯ збереження правок з відбитком і причиною', async () => {
+    show({ state: 'Draft' as 'Submitted', impacts: [editImpact({ canRecalculateApproved: true, impactHash: 'edit-1' })] });
+    openDocument(1);
+
+    act(() => putPendingEdit(7, 202601, EditCell));
+    await screen.findByTestId('source-impact-confirm');
+    fireEvent.click(screen.getByTestId('source-impact-approved'));
+    fireEvent.change(screen.getByLabelText(/sourceImpact\.reason\.label/), { target: { value: 'Акт 12' } });
+    fireEvent.click(screen.getByTestId('source-impact-confirm'));
+
+    // Правки ще не збережено — запиту немає.
+    expect(posts).toHaveLength(0);
+
+    // Збереження завершилось (черга порожня) — іде явний запит.
+    act(() => discardPendingEdit(7, 202601, EditCell));
+
+    await waitFor(() => expect(posts).toHaveLength(1));
+    expect(posts[0]?.url).toContain('/source-impact/recalculate-approved');
+    expect(posts[0]?.body).toEqual({ sheetDefId: 42, periodKey: 202601, hash: 'edit-1', reason: 'Акт 12' });
+  });
+
+  it('m) залежних немає — діалогу немає', async () => {
+    show({ state: 'Draft' as 'Submitted', impacts: [editImpact({ dependentCount: 0, approvedCount: 0, consumers: [] })] });
+    openDocument(1);
+
+    act(() => putPendingEdit(7, 202601, EditCell));
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(screen.queryByTestId('source-impact-confirm')).toBeNull();
   });
 });

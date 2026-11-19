@@ -18,9 +18,13 @@ import { refreshSheetWorkflow } from './refreshSheetWorkflow';
 import { useStatusStale } from './statusStale';
 import { can, useSession, type MeDto } from '@/shared/session/useSession';
 import { LazyConfirmModal, LazyReasonModal, LazySourceImpactModal } from './lazyDialogs';
+import { usePendingCount } from '@/features/grid/pendingStore';
 import {
   fetchSourceImpact,
   impactRefusal,
+  isEditNoticeSuppressed,
+  recalculateApprovedDependents,
+  suppressEditNotice,
   type ConfirmedImpact,
   type SourceImpact,
   type SourceImpactAction,
@@ -467,8 +471,18 @@ function copyPart(sheetCopyId: number | null): { sheetCopyId?: number } {
 }
 
 /** Поле `confirmedImpact` запиту: лише коли воно є — інакше тіло запиту таке, як було до B80 N5. */
-function impactPart(confirmed: ConfirmedImpact | undefined): { confirmedImpact?: ConfirmedImpact } {
-  return confirmed === undefined ? {} : { confirmedImpact: confirmed };
+function impactPart(confirmed: ConfirmedImpact | undefined): {
+  confirmedImpact?: { hash: string | null; reason: string | null; recalculateApproved: boolean };
+} {
+  return confirmed === undefined
+    ? {}
+    : {
+        confirmedImpact: {
+          hash: confirmed.hash,
+          reason: confirmed.reason,
+          recalculateApproved: confirmed.recalculateApproved ?? false,
+        },
+      };
 }
 
 /** B80 N5: вплив, що чекає рішення людини (діалог впливу); `proceed` виконує саму дію з підтвердженням. */
@@ -809,6 +823,51 @@ export function useSheetActions({
    */
   const narrow = useNarrowScreen();
   const settled = useSettledAction(submit.isPending || decide.isPending || recalculate.isPending);
+
+  /*
+   * ✎ B80 N5 (D-554, рішення людини 19.11): ПЕРША правка аркуша-джерела за сесію показує, хто з залежних буде перерахований,
+   * а хто ні (затверджені пропускаються). Не блокує правку й збереження — лише відомості; «не питати до кінця сесії для
+   * цього аркуша» — у самому діалозі. Адміністратор з правом `Calculation.RecalculateApprovedDependents` може відмітити
+   * «й затверджені» — тоді перерахунок затверджених іде ПІСЛЯ збереження правок (явний запит із причиною, усе в журналі).
+   */
+  const pendingCount = usePendingCount();
+  const previousPending = useRef(0);
+  const editNoticeShown = useRef(false);
+  const [editNotice, setEditNotice] = useState<SourceImpact | null>(null);
+  const approvedRecalcRequest = useRef<{ hash: string; reason: string; sheetDefId: number; periodKey: number } | null>(null);
+
+  const runApprovedRecalc = (request: { hash: string; reason: string; sheetDefId: number; periodKey: number }): void => {
+    approvedRecalcRequest.current = null;
+    recalculateApprovedDependents(documentId, request, request.hash, request.reason).then(
+      (result) => showDone(t('sourceImpact.approved.queued', { queued: result.queued })),
+      (error: unknown) => showApiError(error),
+    );
+  };
+
+  useEffect(() => {
+    const was = previousPending.current;
+    previousPending.current = pendingCount;
+
+    // Перша правка (0 → є незбережене): питаємо вплив правки один раз на аркуш за життя екрана.
+    if (
+      was === 0 &&
+      pendingCount > 0 &&
+      sheetCopyId === null &&
+      !editNoticeShown.current &&
+      !isEditNoticeSuppressed(documentId, sheetDefId)
+    ) {
+      editNoticeShown.current = true;
+      void fetchSourceImpact(documentId, { sheetDefId, periodKey, sheetCopyId }, 'edit').then((impact) => {
+        if (impact !== null && impact.dependentCount > 0) setEditNotice(impact);
+      });
+    }
+
+    // Правки збережено (є що → нічого): виконуємо відкладений перерахунок затверджених.
+    if (was > 0 && pendingCount === 0 && approvedRecalcRequest.current !== null) {
+      runApprovedRecalc(approvedRecalcRequest.current);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingCount]);
   // ✎ UI-14: дії стали моделлю для панелі документа — спінер за порогом
   // `ФВ-14.26`, а не з першого кадру (храповик `pendingSpinner.ratchet`).
   const submitLoading = usePendingLoading(submit.isPending);
@@ -1235,6 +1294,23 @@ export function useSheetActions({
           ).catch(() => undefined);
         }}
         onClose={() => setAsking(null)}
+      />
+
+      <LazySourceImpactModal
+        opened={editNotice !== null}
+        action="edit"
+        impact={editNotice}
+        onConfirm={(confirmed, extras) => {
+          if (extras.suppress) suppressEditNotice(documentId, sheetDefId);
+          if (confirmed.recalculateApproved === true && confirmed.hash !== null) {
+            const request = { hash: confirmed.hash, reason: confirmed.reason ?? '', sheetDefId, periodKey };
+            // Правки вже збережено — виконуємо одразу; ні — після збереження (див. ефект вище).
+            if (pendingCount === 0) runApprovedRecalc(request);
+            else approvedRecalcRequest.current = request;
+          }
+          setEditNotice(null);
+        }}
+        onClose={() => setEditNotice(null)}
       />
 
       <LazySourceImpactModal

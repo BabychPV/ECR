@@ -38,6 +38,7 @@ interface Impact {
   policy: string;
   required: boolean;
   blocked: boolean;
+  canRecalculateApproved: boolean;
   reasonRequired: boolean;
   impactHash: string;
   dependentCount: number;
@@ -81,6 +82,33 @@ test.describe('Вплив Approve/Reopen джерела на залежні до
     expect([409, 422]).toContain(refused.status());
     const problem = (await refused.json()) as { errorCode: string };
     expect(problem.errorCode).toBe(impact.blocked ? 'ECR-SRC-0422' : 'ECR-SRC-0409');
+  });
+
+  test('B80 N5 / рішення 19.11: правка (action=edit) — лише відомості; явний перерахунок затверджених без причини відмовляється', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await signIn(page);
+
+    const response = await page.request.get(
+      `/api/v1/documents/${DocumentId}/source-impact?sheetDefId=${SheetDefId}&periodKey=${PeriodKey}&action=edit`,
+    );
+    expect(response.status(), 'GET source-impact?action=edit').toBe(200);
+    const impact = (await response.json()) as Impact;
+    // Правку сервер не блокує й підтвердження не вимагає; затверджений залежний — «не буде перераховано».
+    expect(impact.required).toBe(false);
+    expect(impact.blocked).toBe(false);
+    for (const c of impact.consumers) {
+      expect(c.willRecalculate).toBe(!c.approved);
+    }
+    // Роль E2EAdmin має Calculation.RecalculateApprovedDependents (tools/e2e-stand.ps1).
+    expect(impact.canRecalculateApproved).toBe(true);
+
+    // Без причини — 422 і нічого не ставиться.
+    const refused = await page.request.post(`/api/v1/documents/${DocumentId}/source-impact/recalculate-approved`, {
+      data: { sheetDefId: Number(SheetDefId), periodKey: Number(PeriodKey), hash: 'x', reason: '' },
+    });
+    expect(refused.status()).toBe(422);
   });
 
   test('діалог повернення показує залежні документи з відповіді сервера; «Cancel» нічого не змінює', async ({ page }) => {

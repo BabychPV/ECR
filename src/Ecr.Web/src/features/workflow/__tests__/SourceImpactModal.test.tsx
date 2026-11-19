@@ -26,6 +26,7 @@ function impact(overrides: Partial<SourceImpact> = {}): SourceImpact {
     sourceMonths: [202603],
     dependentCount: 2,
     approvedCount: 1,
+    canRecalculateApproved: false,
     consumers: [
       { bindingCode: 'HSE400_LAND', templateCode: 'LAND', documentId: 5, projectCode: 'LAND-2026', documentKey: 'DOC-LAND', periodKey: 202603, approved: true, willRecalculate: false, skipReason: 'approved' },
       { bindingCode: 'HSE400_LAND', templateCode: 'LAND', documentId: 6, projectCode: 'LAND-2026', documentKey: 'DOC-LAND-2', periodKey: 202603, approved: false, willRecalculate: true, skipReason: null },
@@ -34,7 +35,7 @@ function impact(overrides: Partial<SourceImpact> = {}): SourceImpact {
   };
 }
 
-function show(value: SourceImpact | null, onConfirm = vi.fn(), onClose = vi.fn(), action: 'approve' | 'reopen' = 'reopen') {
+function show(value: SourceImpact | null, onConfirm = vi.fn(), onClose = vi.fn(), action: 'approve' | 'reopen' | 'edit' = 'reopen') {
   render(
     <MantineProvider theme={theme}>
       <SourceImpactModal opened action={action} impact={value} onConfirm={onConfirm} onClose={onClose} />
@@ -121,5 +122,49 @@ describe('SourceImpactModal', () => {
     show(null);
 
     expect(screen.queryByRole('dialog')).toBeNull();
+  });
+});
+
+describe('SourceImpactModal: перекриття «й затверджені» і правка (рішення 19.11)', () => {
+  it('галочка «й затверджені» — лише з правом і коли є затверджені залежні; з нею причина обов’язкова', async () => {
+    const { onConfirm } = show(impact({ canRecalculateApproved: true }));
+
+    expect(await screen.findByTestId('source-impact-approved')).toBeTruthy();
+    expect(screen.queryByTestId('source-impact-reason')).toBeNull();
+    fireEvent.click(screen.getByTestId('source-impact-approved'));
+    expect((screen.getByTestId('source-impact-confirm') as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText(/sourceImpact\.reason\.label/), { target: { value: ' Акт 12 ' } });
+    fireEvent.click(screen.getByTestId('source-impact-confirm'));
+
+    expect(onConfirm).toHaveBeenCalledWith(
+      { hash: 'abc123', reason: 'Акт 12', recalculateApproved: true },
+      { suppress: false },
+    );
+  });
+
+  it('без права або без затверджених залежних галочки немає; за Block — теж', async () => {
+    show(impact({ canRecalculateApproved: false }));
+    expect(await screen.findByRole('dialog')).toBeTruthy();
+    expect(screen.queryByTestId('source-impact-approved')).toBeNull();
+    cleanup();
+
+    show(impact({ canRecalculateApproved: true, approvedCount: 0 }));
+    expect(await screen.findByRole('dialog')).toBeTruthy();
+    expect(screen.queryByTestId('source-impact-approved')).toBeNull();
+    cleanup();
+
+    show(impact({ canRecalculateApproved: true, policy: 'Block', blocked: true }));
+    expect(await screen.findByTestId('source-impact-blocked')).toBeTruthy();
+    expect(screen.queryByTestId('source-impact-approved')).toBeNull();
+  });
+
+  it('правка: «Continue editing» і «не питати до кінця сесії» передаються в extras', async () => {
+    const { onConfirm } = show(impact({ action: 'edit', required: false, policy: 'None' }), vi.fn(), vi.fn(), 'edit');
+
+    fireEvent.click(await screen.findByTestId('source-impact-suppress'));
+    expect(screen.getByTestId('source-impact-confirm').textContent).toContain('sourceImpact.confirm.edit');
+    fireEvent.click(screen.getByTestId('source-impact-confirm'));
+
+    expect(onConfirm).toHaveBeenCalledWith({ hash: 'abc123', reason: null }, { suppress: true });
   });
 });

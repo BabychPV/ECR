@@ -33067,6 +33067,25 @@ export interface components {
             hash: null | string;
             /** @description Причина; обов'язкова за політики `ConfirmWithReason`, іде в журнал безпеки. */
             reason: null | string;
+            /**
+             * @description B80 N5 (рішення людини 19.11): «перерахувати також затверджені залежні» — лише з правом
+             *     `Calculation.RecalculateApprovedDependents` (інакше 403), причина обов'язкова (інакше 422), усе в журналі.
+             * @default false
+             */
+            recalculateApproved: boolean;
+        };
+        /** @description Підсумок явного перерахунку затверджених залежних. */
+        RecalculateApprovedDependentsResult: {
+            /**
+             * Format: int32
+             * @description Скільки затверджених залежних періодів було на момент запиту.
+             */
+            approvedDependents: number;
+            /**
+             * Format: int32
+             * @description Скільки задач поставлено (по зв'язці × року × місяцю).
+             */
+            queued: number;
         };
         /** @description Сторінка знахідок із загальними лічильниками. */
         ConsistencyIssuePage: {
@@ -44597,8 +44616,10 @@ export interface components {
         };
         /** @description Вплив дії над документом-джерелом на залежні документи (B80 N5, D-554). */
         SourceImpactDto: {
-            /** @description `approve` | `reopen`. */
+            /** @description `approve` | `reopen` | `edit`. */
             action: string;
+            /** @description Викликач має право `Calculation.RecalculateApprovedDependents` (діалог показує галочку «й затверджені»). */
+            canRecalculateApproved: boolean;
             /**
              * Format: int32
              * @description З них затверджених.

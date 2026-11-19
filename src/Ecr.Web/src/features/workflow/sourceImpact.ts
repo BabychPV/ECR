@@ -5,9 +5,49 @@ import type { components } from '@/api/schema';
 export type SourceImpact = components['schemas']['SourceImpactDto'];
 
 /** Підтвердження впливу, що йде разом із дією (`confirmedImpact`). */
-export type ConfirmedImpact = components['schemas']['ConfirmedImpactRequest'];
+export type ConfirmedImpact = Omit<components['schemas']['ConfirmedImpactRequest'], 'recalculateApproved'> & {
+  /** ✎ Рішення 19.11: «й затверджені» (право на сервері); немає — як без галочки. */
+  readonly recalculateApproved?: boolean;
+};
 
-export type SourceImpactAction = 'approve' | 'reopen';
+export type SourceImpactAction = 'approve' | 'reopen' | 'edit';
+
+/** Аркуші-джерела, для яких людина вже відмовилась від нагадування про правку в цій сесії (`документ:аркуш`). */
+const suppressedEditNotices = new Set<string>();
+
+/** ✎ Рішення 19.11: «не питати до кінця сесії для цього аркуша» — сесія = життя сторінки. */
+export function suppressEditNotice(documentId: number, sheetDefId: number): void {
+  suppressedEditNotices.add(`${String(documentId)}:${String(sheetDefId)}`);
+}
+
+/** Чи людина вже відмовилась від нагадування про правку цього аркуша в цій сесії. */
+export function isEditNoticeSuppressed(documentId: number, sheetDefId: number): boolean {
+  return suppressedEditNotices.has(`${String(documentId)}:${String(sheetDefId)}`);
+}
+
+/** Лише для тестів: скидає відмови від нагадувань. */
+export function resetEditNoticeSuppression(): void {
+  suppressedEditNotices.clear();
+}
+
+/** Відповідь `POST …/source-impact/recalculate-approved`; тип — зі згенерованої схеми. */
+export type RecalculateApprovedResult = components['schemas']['RecalculateApprovedDependentsResult'];
+
+/**
+ * ✎ Рішення 19.11: адміністратор явно просить перерахувати й ЗАТВЕРДЖЕНІ залежні (після збереження правок). Право, причину й
+ * відбиток перевіряє сервер; відмова — виняток `EcrApiError` (403 / 422 / 409).
+ */
+export function recalculateApprovedDependents(
+  documentId: number,
+  at: { readonly sheetDefId: number; readonly periodKey: number },
+  hash: string,
+  reason: string,
+): Promise<RecalculateApprovedResult> {
+  return apiFetch<RecalculateApprovedResult>(
+    `/api/v1/documents/${String(documentId)}/source-impact/recalculate-approved`,
+    { method: 'POST', body: JSON.stringify({ sheetDefId: at.sheetDefId, periodKey: at.periodKey, hash, reason }) },
+  );
+}
 
 /**
  * Вплив дії над аркушем-джерелом. Копія аркуша залежних не годує — запиту немає (`null`).
