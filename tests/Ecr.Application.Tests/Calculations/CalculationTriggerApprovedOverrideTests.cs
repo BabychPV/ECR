@@ -76,7 +76,7 @@ public sealed class CalculationTriggerApprovedOverrideTests
 
         await Trigger().RequestDependentsAsync(DocumentId, Period, sourceHop: 2, Override, CancellationToken.None);
 
-        var json = System.Text.Json.JsonSerializer.Serialize(_payload, System.Text.Json.JsonSerializerOptions.Web);
+        var json = System.Text.Json.JsonSerializer.Serialize(_payload, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerOptions.Web) { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
         Assert.Equal(
             $$"""{"documentId":{{DocumentId}},"periodKey":{{Period.Value}},"triggeredByUserId":null,"sheetDefId":null,"recalculateSubmitted":true,"sourceHop":2,"includeApproved":true,"overrideUserId":9,"overrideReason":"Акт 12"}""",
             json);
