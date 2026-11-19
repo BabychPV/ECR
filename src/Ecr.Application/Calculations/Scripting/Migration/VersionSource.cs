@@ -111,7 +111,28 @@ public sealed record SourceMatchValue
 public sealed record SourceMatchPair(string ColumnCode, SourceMatchValue Value);
 
 /// <summary>Правило відбору рядків: усі рівності (<c>&amp;&amp;</c>). Порожнє — «усі рядки».</summary>
-public sealed record SourceRule(IReadOnlyList<SourceMatchPair> Pairs);
+/// <param name="Pairs">Рівності колонка = значення.</param>
+/// <param name="TableCodes">
+/// Коди таблиць, яким належать колонки правила (Id колонки в предикаті належить одній таблиці); <c>null</c> або порожньо —
+/// правило не прив'язане до таблиці (порожній предикат) і діє для кожної таблиці речення.
+/// </param>
+public sealed record SourceRule(IReadOnlyList<SourceMatchPair> Pairs, IReadOnlyList<string>? TableCodes = null)
+{
+    /// <summary>
+    /// Правила, що діють для таблиці: прив'язані до неї й непривʼязані. ⛔ D-556 (коло 4): у старій системі правило має таблицю,
+    /// тож правило однієї таблиці не відбирає рядки іншої, навіть коли колонка має той самий код.
+    /// </summary>
+    /// <param name="tableCode">Код таблиці.</param>
+    /// <param name="rules">Правила методології за пріоритетом.</param>
+    public static IReadOnlyList<SourceRule> For(string tableCode, IReadOnlyList<SourceRule> rules)
+    {
+        ArgumentNullException.ThrowIfNull(tableCode);
+        ArgumentNullException.ThrowIfNull(rules);
+
+        return [.. rules.Where(r => r.TableCodes is null or { Count: 0 }
+                                    || r.TableCodes.Contains(tableCode, StringComparer.Ordinal))];
+    }
+}
 
 /// <summary>Статус-колонка активності рядка: активний, коли її значення = запис довідника.</summary>
 public sealed record SourceActiveColumn(string ColumnCode, string RegistryCode, string EntryCode);

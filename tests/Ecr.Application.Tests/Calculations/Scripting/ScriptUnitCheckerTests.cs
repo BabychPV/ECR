@@ -99,4 +99,64 @@ public sealed class ScriptUnitCheckerTests
         Assert.False(Blocks(Check(
             "rows from T1;\nconst k : kg = 1;\nfunction f(p) = p + k;\nvar x = f(1);\noutput O : t = x;")));
     }
+
+    // ---- безрозмірні одиниці (D-556, репетиція кола 4): `one` не є «розмірною величиною» ----
+
+    private const int One = 7;
+
+    private static UnitCatalogSnapshot UnitsWithOne()
+        => new(
+            new Dictionary<string, UnitRef>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["kg"] = new(ScriptTestKit.Kg, "kg", 1, DimensionCode: "Mass"),
+                ["t"] = new(ScriptTestKit.Tonne, "t", 1, DimensionCode: "Mass"),
+                ["m3"] = new(ScriptTestKit.CubicMetre, "m3", 2, DimensionCode: "Volume"),
+                ["one"] = new(One, "one", 7, DimensionCode: ScriptUnitChecker.DimensionlessDimensionCode),
+            },
+            new Dictionary<string, int>(StringComparer.Ordinal));
+
+    private static IReadOnlyList<ScriptDiagnostic> CheckWithOne(string text, params LiveTable[] tables)
+    {
+        var compilation = ScriptTestKit.Compile(text);
+        Assert.NotNull(compilation.Script);
+        Assert.Empty(compilation.Diagnostics);
+        return ScriptUnitChecker.Check(compilation.Script, UnitsWithOne(), tables);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "MS-T3.1")]
+    public void Константи_одиниці_one_не_змінюють_розмірність_добутку()
+    {
+        var table = Table("T1", 1, WithUnit(1, "Mass", ScriptTestKit.Tonne));
+
+        // Непарна кількість безрозмірних множників (t x one x one): раніше «t x one» давало «добуток без одиниці»,
+        // а наступний множник підміняв одиницю на `one` -> «інша розмірність, ніж t».
+        Assert.False(Blocks(CheckWithOne(
+            "rows from T1;\nconst a : one = 2;\nconst b : one = 3;\noutput O : t = row.Mass * a * b;", table)));
+        Assert.False(Blocks(CheckWithOne(
+            "rows from T1;\nconst a : one = 2;\nconst b : one = 3;\nconst c : one = 4;\noutput O : t = a * row.Mass * b * c;", table)));
+
+        // Не послаблено: інша розмірність виходу блокує й з безрозмірними множниками.
+        Assert.True(Blocks(CheckWithOne(
+            "rows from T1;\nconst a : one = 2;\noutput O : m3 = row.Mass * a;", table)));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "MS-T3.1")]
+    public void Колонка_з_одиницею_one_безрозмірна_як_літерал()
+    {
+        var table = Table(
+            "T1", 1, WithUnit(1, "Mass", ScriptTestKit.Tonne), WithUnit(2, "Frac", One), WithUnit(3, "Frac2", One));
+
+        Assert.False(Blocks(CheckWithOne(
+            "rows from T1;\noutput O : t = row.Mass * row.Frac * row.Frac2;", table)));
+        Assert.False(Blocks(CheckWithOne(
+            "rows from T1;\nvar f : one = row.Frac * row.Frac2;\noutput O : t = row.Mass * f;", table)));
+
+        // Розмірність виходу й далі перевіряється.
+        Assert.True(Blocks(CheckWithOne(
+            "rows from T1;\noutput O : m3 = row.Mass * row.Frac;", table)));
+    }
 }

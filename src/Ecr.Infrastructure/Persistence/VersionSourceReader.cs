@@ -333,7 +333,14 @@ public sealed class VersionSourceReader(EcrDbContext db, IFormulaEngine formulaE
         var columns = wanted.Count == 0
             ? []
             : await db.ColumnDefs.AsNoTracking().Where(c => wanted.Contains(c.Id))
-                .Select(c => new { c.Id, c.Code, c.LookupRegistryDefId }).ToDictionaryAsync(c => c.Id, ct).ConfigureAwait(false);
+                .Select(c => new { c.Id, c.Code, c.LookupRegistryDefId, c.TableDefId }).ToDictionaryAsync(c => c.Id, ct).ConfigureAwait(false);
+
+        // Таблиці колонок правила (D-556, коло 4): правило старої системи має таблицю, тож скрипт не мусить відбирати за ним чужі.
+        var ruleTableDefIds = columns.Values.Select(c => c.TableDefId).Distinct().ToList();
+        var tableCodeById = ruleTableDefIds.Count == 0
+            ? []
+            : await db.TableDefs.AsNoTracking().Where(t => ruleTableDefIds.Contains(t.Id))
+                .ToDictionaryAsync(t => t.Id, t => t.Code, ct).ConfigureAwait(false);
 
         var registryIds = columns.Values.Where(c => c.LookupRegistryDefId is not null).Select(c => c.LookupRegistryDefId!.Value)
             .Distinct().ToList();
@@ -394,7 +401,14 @@ public sealed class VersionSourceReader(EcrDbContext db, IFormulaEngine formulaE
 
             if (ok)
             {
-                result.Add(new SourceRule(sourcePairs));
+                var ruleTables = pairs
+                    .Select(pair => int.TryParse(pair.Key, NumberStyles.None, CultureInfo.InvariantCulture, out var id)
+                                    && columns.TryGetValue(id, out var col) && tableCodeById.TryGetValue(col.TableDefId, out var tableCode)
+                        ? tableCode
+                        : null)
+                    .Where(code => code is not null).Select(code => code!)
+                    .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
+                result.Add(new SourceRule(sourcePairs, ruleTables));
             }
         }
 
@@ -478,7 +492,7 @@ public sealed class VersionSourceReader(EcrDbContext db, IFormulaEngine formulaE
         // ---- По коду таблиці: зведення за всіма її описами (версіями шаблону) ----
         var ruleColumns = rules.SelectMany(r => r.Pairs).Select(p => p.ColumnCode).Distinct(StringComparer.Ordinal)
             .Order(StringComparer.Ordinal).ToList();
-        var perTable = new List<(string Name, string Key, List<SourceActiveColumn> Active)>();
+        var perTable = new List<(string Name, string Key, List<SourceActiveColumn> Active, string PlainCode)>();
         foreach (var group in tableDefIds.GroupBy(id => tableNames[id]).OrderBy(g => g.Key, StringComparer.Ordinal))
         {
             var activeSets = group
@@ -497,15 +511,27 @@ public sealed class VersionSourceReader(EcrDbContext db, IFormulaEngine formulaE
             var active = activeByTableDef.GetValueOrDefault(group.First()) ?? [];
             var availability = string.Concat(ruleColumns.Select(code =>
                 group.All(id => columnCodesByTableDef.GetValueOrDefault(id)?.Contains(code) == true) ? '1' : '0'));
-            var key = string.Join("|", active.Select(a => a.ColumnCode + "=" + a.RegistryCode + ":" + a.EntryCode)) + "#" + availability;
-            perTable.Add((group.Key, key, active));
+
+            // Правила, що діють для таблиці (її власні й непривʼязані): різні набори - різні речення.
+            var plainCode = tables.First(t => tableNames[t.TableDefId] == group.Key).TableCode;
+            var applicable = SourceRule.For(plainCode, rules);
+            if (applicable.Count == 0)
+            {
+                applicable = rules;   // жодне правило не прив'язане до цієї таблиці: як і раніше, діють усі правила методології
+            }
+
+            var scope = string.Join(",", rules.Select((r, i) => applicable.Contains(r) ? i : -1).Where(i => i >= 0));
+            var key = string.Join("|", active.Select(a => a.ColumnCode + "=" + a.RegistryCode + ":" + a.EntryCode))
+                      + "#" + availability + "#" + scope;
+            perTable.Add((group.Key, key, active, plainCode));
         }
 
         // ---- Таблиці з однаковими статус-колонками й однаковою наявністю колонок правил — одне речення ----
         var clauses = new List<SourceRowsClause>();
         foreach (var group in perTable.GroupBy(t => t.Key, StringComparer.Ordinal).OrderBy(g => g.First().Name, StringComparer.Ordinal))
         {
-            clauses.Add(new SourceRowsClause([.. group.Select(t => t.Name)], rules, group.First().Active));
+            var clauseRules = SourceRule.For(group.First().PlainCode, rules);
+            clauses.Add(new SourceRowsClause([.. group.Select(t => t.Name)], clauseRules.Count == 0 ? rules : clauseRules, group.First().Active));
         }
 
         return clauses;

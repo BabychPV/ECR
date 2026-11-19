@@ -169,12 +169,30 @@ function Convert-LandLegacyRule {
         $pred[[string][int]$cid] = $condText
     }
     if ($reasons.Count -gt 0) { return [pscustomobject]@{ Ok = $false; MatchJson = $null; TableCode = $tcode; Reasons = $reasons.ToArray(); CatchAll = [bool]$Rule.catchAll } }
+    $wasEmpty = ($pred.Count -eq 0)
     if ($null -ne $StatusEntryId -and @($tb.columns | Where-Object { [string]$_.code -eq 'Land_Status' }).Count -gt 0) {
         $sid = & $ColumnId $tcode 'Land_Status'
         if ($sid) { $pred[[string][int]$sid] = [string]$StatusEntryId }
     }
+    # «Уся таблиця» (D-556, коло 4): правило нової системи НЕ прив'язане до таблиці, тож `{}` відбирав би рядки ВСІХ прив'язаних
+    # таблиць методології, а в старій системі правило має таблицю. Через наявні можливості MatchJson таблицю задає колонка
+    # статусу ЦІЄЇ таблиці (Id колонки належить одній таблиці): `{<Id статусу таблиці>: Running}`. Це рівнозначно «усій
+    # таблиці» лише для методологій з фільтром активності Running (land-row-filter.json: -StatusEntryId задано): рядки
+    # інших статусів фільтр відсікає однаково. Без колонки статусу або без -StatusEntryId лишається `{}` (CatchAll).
+    $scopedCatchAll = ($wasEmpty -and $pred.Count -gt 0)   # `Land_Status` уже додано блоком вище
+    if ($pred.Count -eq 0 -and $null -ne $StatusEntryId) {
+        $statusCode = $null
+        foreach ($cand in 'Land_Status', 'Status') {
+            $sc = @($tb.columns | Where-Object { [string]$_.code -eq $cand -and [string]$_.dataType -eq 'Lookup' }) | Select-Object -First 1
+            if ($sc) { $statusCode = $cand; break }
+        }
+        if ($statusCode) {
+            $sid2 = & $ColumnId $tcode $statusCode
+            if ($sid2) { $pred[[string][int]$sid2] = [string]$StatusEntryId; $scopedCatchAll = $true }
+        }
+    }
     $json = if ($pred.Count -eq 0) { '{}' } else { ($pred | ConvertTo-Json -Compress) }
-    return [pscustomobject]@{ Ok = $true; MatchJson = $json; TableCode = $tcode; Reasons = @(); CatchAll = ($pred.Count -eq 0) }
+    return [pscustomobject]@{ Ok = $true; MatchJson = $json; TableCode = $tcode; Reasons = @(); CatchAll = ($pred.Count -eq 0); TableScopedCatchAll = $scopedCatchAll }
 }
 
 function Get-LandLegacyRulePlan {
@@ -193,6 +211,7 @@ function Get-LandLegacyRulePlan {
     $plan = New-Object System.Collections.Generic.List[object]
     $unresolved = New-Object System.Collections.Generic.List[object]
     $skipped = 0; $merged = 0
+    $scoped = New-Object System.Collections.Generic.List[object]
     $catchAll = $null
     $k = 0
     # Пріоритет - за ПОЗИЦІЄЮ правила серед доступних правил пакета (а не серед перетворених): тоді перетворення раніше
@@ -206,9 +225,14 @@ function Get-LandLegacyRulePlan {
             else { $catchAll.Source++; $merged++ }
             continue
         }
-        [void]$plan.Add([pscustomobject]@{ Code = [string]$c.Rule.code; MatchJson = [string]$c.Result.MatchJson; Priority = $k * 10; Table = [string]$c.Rule.table; Source = 1 })
+        $entry = [pscustomobject]@{ Code = [string]$c.Rule.code; MatchJson = [string]$c.Result.MatchJson; Priority = $k * 10; Table = [string]$c.Rule.table; Source = 1 }
+        if ($c.Result.PSObject.Properties['TableScopedCatchAll'] -and [bool]$c.Result.TableScopedCatchAll) { [void]$scoped.Add($entry); continue }
+        [void]$plan.Add($entry)
     }
-    if ($null -ne $catchAll) { $catchAll.Priority = ($k + 1) * 10; [void]$plan.Add($catchAll) }
+    # «Уся таблиця» з таблицею-обмеженням: після всіх умовних правил (нижчий пріоритет), кожне зі своїм пріоритетом; не зливаються.
+    $n = 0
+    foreach ($sc in $scoped) { $n++; $sc.Priority = ($k + $n) * 10; [void]$plan.Add($sc) }
+    if ($null -ne $catchAll) { $catchAll.Priority = ($k + $n + 1) * 10; [void]$plan.Add($catchAll) }
     return [pscustomobject]@{ Rules = $plan.ToArray(); Unresolved = $unresolved.ToArray(); Skipped = $skipped; Merged = $merged }
 }
 

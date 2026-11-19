@@ -26,6 +26,9 @@ namespace Ecr.Application.Calculations.Scripting;
 /// </remarks>
 public static class ScriptUnitChecker
 {
+    /// <summary>Код розмірності «Безрозмірна» довідника <c>uom.Dimension</c> (одиниці <c>one</c>, <c>pct_vol</c>).</summary>
+    public const string DimensionlessDimensionCode = "Dimensionless";
+
     /// <summary>Код діагностики блокувальної розбіжності одиниць.</summary>
     public const string Code = ScriptDiagnosticCodes.UnitMismatch;
 
@@ -43,7 +46,7 @@ public static class ScriptUnitChecker
         ArgumentNullException.ThrowIfNull(script);
         ArgumentNullException.ThrowIfNull(catalog);
 
-        var rowUnits = RowFieldUnits(script, rowTables);
+        var rowUnits = RowFieldUnits(script, catalog, rowTables);
         var diagnostics = new List<ScriptDiagnostic>();
 
         // Тіла власних функцій: параметри невідомої одиниці, змінних верхнього рівня функція не бачить.
@@ -64,9 +67,14 @@ public static class ScriptUnitChecker
     }
 
     /// <summary>Одиниця поля рядка: однакова непорожня одиниця колонки в усіх живих таблицях, де колонка є.</summary>
-    private static Dictionary<string, int> RowFieldUnits(CompiledScript script, IReadOnlyList<LiveTable>? rowTables)
+    /// <remarks>
+    /// ⛔ Одиниця безрозмірної розмірності (<c>one</c>) — відомо, що величина безрозмірна: значення <c>null</c> у словнику
+    /// (як літерал). Інакше добуток «Sm3 × one» вважався б добутком двох розмірних величин («без оголошеної одиниці»),
+    /// а далі «невідоме × відоме» брало б одиницю відомого операнда й давало хибне «інша розмірність».
+    /// </remarks>
+    private static Dictionary<string, int?> RowFieldUnits(CompiledScript script, UnitCatalogSnapshot catalog, IReadOnlyList<LiveTable>? rowTables)
     {
-        var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var result = new Dictionary<string, int?>(StringComparer.OrdinalIgnoreCase);
         if (rowTables is null or { Count: 0 })
         {
             return result;
@@ -85,12 +93,16 @@ public static class ScriptUnitChecker
 
             if (units.Count == 1 && units.Single() is { } unit)
             {
-                result[field.Name] = unit;
+                result[field.Name] = IsDimensionlessUnit(catalog, unit) ? null : unit;
             }
         }
 
         return result;
     }
+
+    private static bool IsDimensionlessUnit(UnitCatalogSnapshot catalog, int unitId)
+        => catalog.Units.Values.Any(u => u.Id == unitId
+            && string.Equals(u.DimensionCode, DimensionlessDimensionCode, StringComparison.Ordinal));
 
     private sealed record VarInfo(int? Unit, bool Unknown);
 
@@ -101,13 +113,13 @@ public static class ScriptUnitChecker
         private readonly Dictionary<string, int?> _consts = new(StringComparer.Ordinal);
         private readonly Context _context;
         private readonly UnitChecker _checker = new();
-        private readonly IReadOnlyDictionary<string, int> _rowUnits;
+        private readonly IReadOnlyDictionary<string, int?> _rowUnits;
         private readonly HashSet<string> _parameters;
 
         public State(
             CompiledScript script,
             UnitCatalogSnapshot catalog,
-            IReadOnlyDictionary<string, int> rowUnits,
+            IReadOnlyDictionary<string, int?> rowUnits,
             IReadOnlyList<string>? parameters)
         {
             _catalog = catalog;
@@ -117,7 +129,7 @@ public static class ScriptUnitChecker
             {
                 if (!value.IsMap)
                 {
-                    _consts[name] = UnitId(value.UnitCode);
+                    _consts[name] = NonDimensionlessUnitId(value.UnitCode);
                 }
             }
 
@@ -203,11 +215,21 @@ public static class ScriptUnitChecker
 
             // Що лишається відомим про величину для наступних виразів.
             var unit = declared ?? actual;
-            _vars[name] = new VarInfo(unit, unit is null && !IsCertainlyDimensionless(rewritten));
+            var dimensionless = unit is { } u && IsDimensionlessUnit(_catalog, u);
+            if (dimensionless)
+            {
+                unit = null;
+            }
+
+            _vars[name] = new VarInfo(unit, unit is null && !dimensionless && !IsCertainlyDimensionless(rewritten));
         }
 
         private int? UnitId(string? code)
             => code is not null && _catalog.Units.TryGetValue(code, out var unit) ? unit.Id : null;
+
+        /// <summary>Одиниця константи; безрозмірна (<c>one</c>) і невказана — <c>null</c> (константа — як літерал).</summary>
+        private int? NonDimensionlessUnitId(string? code)
+            => UnitId(code) is { } id && !IsDimensionlessUnit(_catalog, id) ? id : null;
 
         private AstNode Rewrite(AstNode node)
         {

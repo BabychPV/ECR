@@ -172,6 +172,12 @@ public sealed class MigrationDbTests(SqlServerFixture sql)
         Assert.Equal(("State", "MS_STATUS", "RUNNING"), (active.ColumnCode, active.RegistryCode, active.EntryCode));
         var t2 = Assert.Single(source.RowsClauses, c => c.TableCodes.SequenceEqual(["MS_T2"]));
         Assert.Empty(t2.ActiveColumns);
+
+        // D-556 (коло 4): правило має таблицю колонок (T1), і речення T1 бере лише правила T1; для T2 немає жодного правила
+        // з її таблицею - діють усі правила методології, як і раніше.
+        Assert.All(source.Rules, r => Assert.Equal(["MS_T1"], r.TableCodes));
+        Assert.Equal(2, t1.Rules.Count);
+        Assert.Equal(2, t2.Rules.Count);
     }
 
     [Fact]
