@@ -9,8 +9,8 @@
 param([Parameter(Mandatory)][string]$Dir, [string]$Table)
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'LandScriptUnits.Lib.ps1')
-if (-not $Table) { $Table = Join-Path $PSScriptRoot 'land-script-units.json' }
-$cfg = Get-Content -LiteralPath $Table -Raw -Encoding UTF8 | ConvertFrom-Json
+$unitsFile = if ($Table) { $Table } else { Join-Path $PSScriptRoot 'land-script-units.json' }
+$cfg = Get-Content -LiteralPath $unitsFile -Raw -Encoding UTF8 | ConvertFrom-Json
 foreach ($m in $cfg.methodologies.PSObject.Properties) {
     $sub = Join-Path $Dir $m.Name
     if (-not (Test-Path -LiteralPath $sub)) { continue }

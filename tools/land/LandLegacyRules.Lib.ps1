@@ -231,7 +231,7 @@ function Get-LandLegacyRulePlan {
     }
     # «Уся таблиця» з таблицею-обмеженням: після всіх умовних правил (нижчий пріоритет), кожне зі своїм пріоритетом; не зливаються.
     $n = 0
-    foreach ($e in $scoped) { $n++; $e.Priority = ($k + $n) * 10; [void]$plan.Add($e) }
+    foreach ($sc in $scoped) { $n++; $sc.Priority = ($k + $n) * 10; [void]$plan.Add($sc) }
     if ($null -ne $catchAll) { $catchAll.Priority = ($k + $n + 1) * 10; [void]$plan.Add($catchAll) }
     return [pscustomobject]@{ Rules = $plan.ToArray(); Unresolved = $unresolved.ToArray(); Skipped = $skipped; Merged = $merged }
 }
