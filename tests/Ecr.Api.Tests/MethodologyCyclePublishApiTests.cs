@@ -44,7 +44,10 @@ public sealed class MethodologyCyclePublishApiTests(SqlServerFixture sql)
 
     private static readonly DateTime Now = new(2099, 1, 10, 9, 0, 0, DateTimeKind.Utc);
 
-    private sealed record Doc(TestDocument Document, string TableCode, int CalculatedColumnId);
+    private sealed record Doc(TestDocument Document, string TableCode, int CalculatedColumnId)
+    {
+        public int TableDefId => Document.TableDefId;
+    }
 
     private sealed record World(Doc Source, Doc Other, string RegistryCode, string SourceTemplateCode);
 
