@@ -29,6 +29,7 @@ public sealed class DocumentsController(
     ApproveSheetHandler approve,
     ReopenDocumentHandler reopen,
     GetSourceImpactHandler sourceImpact,
+    RecalculateApprovedDependentsHandler recalculateApprovedDependents,
     RecalculateDocumentHandler recalculate,
     GetDocumentTablesHandler tables,
     GetTableStatusHandler tableStatus,
@@ -549,7 +550,7 @@ public sealed class DocumentsController(
     /// <param name="id">Документ-джерело.</param>
     /// <param name="sheetDefId">Аркуш.</param>
     /// <param name="periodKey">Період.</param>
-    /// <param name="action"><c>approve</c> чи <c>reopen</c>.</param>
+    /// <param name="action"><c>approve</c>, <c>reopen</c> чи <c>edit</c> (правка комірки джерела — лише відомості).</param>
     /// <param name="sheetCopyId">Копія аркуша; не <c>null</c> — впливу немає.</param>
     /// <param name="ct">Токен скасування.</param>
     [HttpGet("{id:long}/source-impact")]
@@ -561,8 +562,30 @@ public sealed class DocumentsController(
         [FromQuery] long? sheetCopyId, CancellationToken ct)
         => Ok(await sourceImpact.HandleAsync(id, sheetDefId, periodKey, action, sheetCopyId, ct).ConfigureAwait(false));
 
+    /// <summary>
+    /// B80 N5 (D-554, рішення людини 19.11): адміністратор явно просить перерахувати і ЗАТВЕРДЖЕНІ залежні документи-споживачі
+    /// аркуша-джерела. Право <c>Calculation.RecalculateApprovedDependents</c> (інакше 403), причина обов'язкова (422),
+    /// відбиток впливу — з <c>GET …/source-impact?action=edit</c> (застарілий — 409). Усе логується.
+    /// </summary>
+    /// <param name="id">Документ-джерело.</param>
+    /// <param name="request">Аркуш, період, відбиток і причина.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpPost("{id:long}/source-impact/recalculate-approved")]
+    [ProducesResponseType<RecalculateApprovedDependentsResult>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<RecalculateApprovedDependentsResult>> RecalculateApprovedDependents(
+        long id, [FromBody] RecalculateApprovedDependentsRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return Ok(await recalculateApprovedDependents
+            .HandleAsync(id, request.SheetDefId, request.PeriodKey, request.Hash, request.Reason, ct).ConfigureAwait(false));
+    }
+
     private static Application.Ports.SourceImpactConfirmation? ToConfirmation(ConfirmedImpactRequest? request)
-        => request is null ? null : new Application.Ports.SourceImpactConfirmation(request.Hash, request.Reason);
+        => request is null ? null : new Application.Ports.SourceImpactConfirmation(request.Hash, request.Reason, request.RecalculateApproved);
 
     /// <summary>
     /// Відкриває поданий документ. Право <c>Document.Reopen</c>.
@@ -1025,10 +1048,21 @@ public sealed record ApproveSheetRequest(
     int SheetDefId, int PeriodKey, bool Approved, string? Reason, long? SheetCopyId = null,
     ConfirmedImpactRequest? ConfirmedImpact = null);
 
+/// <summary>B80 N5: запит явного перерахунку затверджених залежних.</summary>
+/// <param name="SheetDefId">Аркуш-джерело.</param>
+/// <param name="PeriodKey">Період аркуша.</param>
+/// <param name="Hash">Відбиток впливу (<c>GET …/source-impact?action=edit</c>).</param>
+/// <param name="Reason">Причина (обов'язкова).</param>
+public sealed record RecalculateApprovedDependentsRequest(int SheetDefId, int PeriodKey, string? Hash, string? Reason);
+
 /// <summary>B80 N5 (D-554): підтвердження впливу дії над документом-джерелом на залежні документи.</summary>
 /// <param name="Hash">Відбиток впливу з <c>GET …/source-impact</c> (<c>impactHash</c>); застарілий — <c>409 impactChanged</c>.</param>
 /// <param name="Reason">Причина; обов'язкова за політики <c>ConfirmWithReason</c>, іде в журнал безпеки.</param>
-public sealed record ConfirmedImpactRequest(string? Hash, string? Reason);
+/// <param name="RecalculateApproved">
+/// B80 N5 (рішення людини 19.11): «перерахувати також затверджені залежні» — лише з правом
+/// <c>Calculation.RecalculateApprovedDependents</c> (інакше 403), причина обов'язкова (інакше 422), усе в журналі.
+/// </param>
+public sealed record ConfirmedImpactRequest(string? Hash, string? Reason, bool RecalculateApproved = false);
 
 /// <summary>Запит на відкриття поданого документа.</summary>
 /// <param name="SheetDefId">Аркуш.</param>

@@ -56,7 +56,8 @@ internal sealed class SourceImpactAssessor(EcrDbContext db, IDependencyGraphProv
         var months = DocumentSourceGate.OwnedMonths(source.PeriodKind, periodKey % 100).Select(m => (year * 100) + m).ToList();
         var bindings = await db.DocumentSourceBindings.AsNoTracking()
             .Where(b => b.SourceTemplateId == source.TemplateId
-                        && b.SourceState == DocumentSourceState.ApprovedOnly
+                        // Правка комірки: залежні бачать джерело одразу лише за `any`; Approve/Reopen — за `approvedOnly`.
+                        && b.SourceState == (change == SourceApprovalChange.Edited ? DocumentSourceState.Any : DocumentSourceState.ApprovedOnly)
                         && b.ReadFromDocument
                         && b.MappingKind == DocumentSourceBinding.Hse400CompositionMapping)
             .OrderBy(b => b.Id)

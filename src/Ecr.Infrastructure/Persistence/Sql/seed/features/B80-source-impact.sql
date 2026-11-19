@@ -45,6 +45,16 @@ SELECT v.[Key], v.Lang, v.Val
     (N'sourceImpact.confirm.approve', N'kz', N'Бәрібір бекіту'),
     (N'sourceImpact.confirm.reopen', N'ru', N'Вернуть всё равно'),
     (N'sourceImpact.confirm.reopen', N'kz', N'Бәрібір қайтару'),
+    (N'permission.Calculation.RecalculateApprovedDependents', N'ru', N'Пересчитывать также утверждённые зависимые документы'),
+    (N'permission.Calculation.RecalculateApprovedDependents', N'kz', N'Бекітілген тәуелді құжаттарды да қайта есептеу'),
+    (N'err.ECR-SRC-0422.recalculateApprovedReasonRequired', N'ru', N'Укажите причину пересчёта утверждённых зависимых документов: она попадёт в журнал.'),
+    (N'err.ECR-SRC-0422.recalculateApprovedReasonRequired', N'kz', N'Бекітілген тәуелді құжаттарды қайта есептеу себебін көрсетіңіз: ол журналға түседі.'),
+    (N'err.ECR-ACCS-0403.recalculateApproved', N'ru', N'Недостаточно прав пересчитывать утверждённые зависимые документы (нужно право Calculation.RecalculateApprovedDependents).'),
+    (N'err.ECR-ACCS-0403.recalculateApproved', N'kz', N'Бекітілген тәуелді құжаттарды қайта есептеуге құқық жеткіліксіз (Calculation.RecalculateApprovedDependents құқығы керек).'),
+    (N'sourceImpact.approved.label', N'ru', N'Пересчитать также утверждённые зависимые документы'),
+    (N'sourceImpact.approved.label', N'kz', N'Бекітілген тәуелді құжаттарды да қайта есептеу'),
+    (N'sourceImpact.approved.hint', N'ru', N'Только для администратора. Утверждённые периоды будут изменены; укажите причину — она попадёт в журнал вместе с перечнем пересчитанных листов.'),
+    (N'sourceImpact.approved.hint', N'kz', N'Тек әкімші үшін. Бекітілген кезеңдер өзгереді; себебін көрсетіңіз — ол қайта есептелген парақтар тізімімен бірге журналға түседі.'),
     (N'sourceImpact.loadFailed', N'ru', N'Не удалось проверить влияние на зависимые документы; сервер проверит его при выполнении действия.'),
     (N'sourceImpact.loadFailed', N'kz', N'Тәуелді құжаттарға әсерді тексеру мүмкін болмады; әрекет орындалғанда сервер оны тексереді.')
        ) AS v ([Key], Lang, Val)
@@ -77,6 +87,11 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'sourceImpact.reason.label', N'en', N'Reason for the confirmation', 1),
     (N'sourceImpact.confirm.approve', N'en', N'Approve anyway', 1),
     (N'sourceImpact.confirm.reopen', N'en', N'Return anyway', 1),
+    (N'permission.Calculation.RecalculateApprovedDependents', N'en', N'Recalculate approved dependent documents too', 1),
+    (N'err.ECR-SRC-0422.recalculateApprovedReasonRequired', N'en', N'Enter a reason for recalculating approved dependent documents: it goes to the log.', 1),
+    (N'err.ECR-ACCS-0403.recalculateApproved', N'en', N'You are not allowed to recalculate approved dependent documents (the Calculation.RecalculateApprovedDependents permission is required).', 1),
+    (N'sourceImpact.approved.label', N'en', N'Also recalculate approved dependent documents', 1),
+    (N'sourceImpact.approved.hint', N'en', N'Administrators only. Approved periods will be changed; give a reason — it is logged together with the list of recalculated sheets.', 1),
     (N'sourceImpact.loadFailed', N'en', N'Could not check the impact on dependent documents; the server will check it when the action runs.', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);

@@ -40,6 +40,12 @@ public static class SourceImpactCheck
     /// <summary>Ключ каталогу: підтвердження на застарілий вплив.</summary>
     public const string ImpactChangedMessageKey = "err.ECR-SRC-0409.impactChanged";
 
+    /// <summary>Ключ каталогу: «перерахувати затверджені» без причини.</summary>
+    public const string RecalculateApprovedReasonRequiredMessageKey = "err.ECR-SRC-0422.recalculateApprovedReasonRequired";
+
+    /// <summary>Право на явний перерахунок і ЗАТВЕРДЖЕНИХ залежних (рішення людини 19.11; лише SystemAdministrator за умовчанням).</summary>
+    public const string RecalculateApprovedPermission = "Calculation.RecalculateApprovedDependents";
+
     /// <summary>Перевіряє підтвердження; кидає <see cref="BusinessRuleException"/> (409/422) чи пише аудит підтвердження.</summary>
     /// <param name="assessor">Оцінювач; <c>null</c> (тестові фабрики обробників) — перевірки немає.</param>
     /// <param name="audit">Журнал безпеки (запис підтвердження); <c>null</c> — без запису.</param>
@@ -52,7 +58,12 @@ public static class SourceImpactCheck
     /// <param name="now">Момент (UTC).</param>
     /// <param name="correlationId">Кореляція запиту.</param>
     /// <param name="ct">Токен скасування.</param>
-    public static async Task EnsureConfirmedAsync(
+    /// <param name="mayRecalculateApproved">Чи має викликач право <see cref="RecalculateApprovedPermission"/>.</param>
+    /// <returns>
+    /// Перекриття «перерахувати й затверджені» (хто й чому) — коли воно запитане, дозволене й має сенс (є затверджені
+    /// залежні); інакше <c>null</c>.
+    /// </returns>
+    public static async Task<ApprovedRecalculationOverride?> EnsureConfirmedAsync(
         ISourceImpactAssessor? assessor,
         IAuditWriter? audit,
         long documentId,
@@ -63,17 +74,19 @@ public static class SourceImpactCheck
         int userId,
         DateTime now,
         string? correlationId,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool mayRecalculateApproved = false)
     {
         if (assessor is null)
         {
-            return;
+            return null;
         }
 
         var impact = await assessor.AssessAsync(documentId, sheetDefId, periodKey, change, ct).ConfigureAwait(false);
-        if (!impact.Required)
+        var overrideRequested = confirmation?.RecalculateApproved == true && impact.ApprovedCount > 0;
+        if (!impact.Required && !overrideRequested)
         {
-            return;
+            return null;
         }
 
         var action = change == SourceApprovalChange.Approved ? "Затвердження" : "Повернення в роботу";
@@ -106,6 +119,31 @@ public static class SourceImpactCheck
         }
 
         var reason = confirmation.Reason?.Trim();
+
+        // ✎ B80 N5: «перерахувати також затверджені» — лише з правом, причина обов'язкова незалежно від політики.
+        if (overrideRequested)
+        {
+            if (!mayRecalculateApproved)
+            {
+                throw new AccessDeniedException(
+                    ErrorCodes.AccessDenied,
+                    $"Потрібне право {RecalculateApprovedPermission}.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-ACCS-0403.recalculateApproved",
+                        ["permission"] = RecalculateApprovedPermission,
+                    });
+            }
+
+            if (string.IsNullOrEmpty(reason))
+            {
+                throw new BusinessRuleException(
+                    ErrorCodes.SourceImpactRefused,
+                    "Потрібна причина перерахунку затверджених залежних.",
+                    Details(impact, RecalculateApprovedReasonRequiredMessageKey));
+            }
+        }
+
         if (impact.Policy == DocumentSourcePolicy.ConfirmWithReason && string.IsNullOrEmpty(reason))
         {
             throw new BusinessRuleException(
@@ -132,12 +170,15 @@ public static class SourceImpactCheck
                         impactHash = impact.Hash,
                         approvedDependents = impact.ApprovedCount,
                         dependents = impact.Consumers.Count,
+                        recalculateApproved = overrideRequested,
                         reason,
                     }),
                     userId,
                     correlationId),
                 ct).ConfigureAwait(false);
         }
+
+        return overrideRequested ? new ApprovedRecalculationOverride(userId, reason!) : null;
     }
 
     /// <summary>Тіло відмови: ключ, поточний відбиток (клієнт підтверджує саме його) і числа впливу.</summary>

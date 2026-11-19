@@ -135,10 +135,13 @@ public sealed class ApproveSheetHandler(
         // змінений першою спробою (`ApproveStep`), на повторі дав би
         // `wrongState` замість затвердження.
         var finalApproved = false;
+        // ✎ B80 N5: перекриття «й затверджені залежні» (право + причина перевірено в транзакції); після коміту — у тригер.
+        var approvedOverride = new System.Runtime.CompilerServices.StrongBox<ApprovedRecalculationOverride?>(null);
         await uow.ExecuteInTransactionAsync(
             async innerCt =>
             {
                 finalApproved = false;
+                approvedOverride.Value = null;
 
                 // ✎ D-442: ВИНЯТКОВЕ блокування аркуша — ПЕРШОЮ дією транзакції (порядок як у подання):
                 // правка погоджувача, що вже пише, зафіксується до зрізу нижче, а нова чекатиме коміту
@@ -164,7 +167,7 @@ public sealed class ApproveSheetHandler(
                 // ⚠ D-440: правило чотирьох очей (F-25, заборона самопогодження) скасоване безумовно —
                 // той, хто подав, погоджує сам, якщо роль поточного кроку і грант це дають (рішення вище).
                 // Слід лишається в журналі: `GetWorkflowHistoryHandler` позначає таке погодження.
-                await ApproveCoreAsync(state, documentId, sheetDefId, periodKey, approved, reason, userId, sheetCopyId, profile, confirmedImpact, innerCt)
+                await ApproveCoreAsync(state, documentId, sheetDefId, periodKey, approved, reason, userId, sheetCopyId, profile, confirmedImpact, approvedOverride, innerCt)
                     .ConfigureAwait(false);
 
                 // ✎ B80 (T-A): лише ОСТАТОЧНИЙ крок (стан став Approved) і лише оригінал аркуша; проміжний крок — ні.
@@ -191,8 +194,11 @@ public sealed class ApproveSheetHandler(
         // ✎ B80 (T-A): після коміту; тригер сам вирішує за зв'язкою (ApprovedOnly) і не кидає на збій постановки.
         if (finalApproved && sourceTrigger is not null)
         {
-            await sourceTrigger
-                .OnSourceSheetApprovalChangedAsync(documentId, sheetDefId, periodKey, SourceApprovalChange.Approved, userId, ct)
+            await (approvedOverride.Value is { } over
+                    ? sourceTrigger.OnSourceSheetApprovalChangedAsync(
+                        documentId, sheetDefId, periodKey, SourceApprovalChange.Approved, userId, over, ct)
+                    : sourceTrigger.OnSourceSheetApprovalChangedAsync(
+                        documentId, sheetDefId, periodKey, SourceApprovalChange.Approved, userId, ct))
                 .ConfigureAwait(false);
         }
 
@@ -277,6 +283,7 @@ public sealed class ApproveSheetHandler(
         long? sheetCopyId,
         AccessProfile profile,
         SourceImpactConfirmation? confirmedImpact,
+        System.Runtime.CompilerServices.StrongBox<ApprovedRecalculationOverride?> approvedOverride,
         CancellationToken ct)
     {
         var key = new PeriodKey(periodKey);
@@ -309,10 +316,11 @@ public sealed class ApproveSheetHandler(
             // копія — ні. Під блокуванням аркуша, до зрізу й зміни стану: відмова відкочує транзакцію, аркуш не змінено.
             if (sheetCopyId is null && step is not { NextStepId: not null })
             {
-                await SourceImpactCheck
+                approvedOverride.Value = await SourceImpactCheck
                     .EnsureConfirmedAsync(
                         sourceImpact, audit, documentId, sheetDefId, periodKey, SourceApprovalChange.Approved,
-                        confirmedImpact, userId, now, currentUser.CorrelationId, ct)
+                        confirmedImpact, userId, now, currentUser.CorrelationId, ct,
+                        mayRecalculateApproved: PermissionCheck.IsGranted(profile, SourceImpactCheck.RecalculateApprovedPermission))
                     .ConfigureAwait(false);
             }
 

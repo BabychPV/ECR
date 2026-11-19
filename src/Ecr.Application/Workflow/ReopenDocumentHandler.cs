@@ -148,9 +148,12 @@ public sealed class ReopenDocumentHandler(
         // комітить перехід у Closed, тихо перекриваючи Reopen — конфлікту
         // немає, бо в `Period` немає RowVersion.
         var reopenedFromApproved = false;
+        // ✎ B80 N5: перекриття «й затверджені залежні» (право + причина перевірено в транзакції); після коміту — у тригер.
+        ApprovedRecalculationOverride? approvedOverride = null;
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
             reopenedFromApproved = false;
+            approvedOverride = null;
 
             // ⚠ Період береться з UPDLOCK ДО будь-яких змін (ФВ-1.10a) — тепер
             // блокування справді тримається до кінця транзакції.
@@ -180,10 +183,11 @@ public sealed class ReopenDocumentHandler(
             // залежні застарівають; за політикою зв'язки потрібне підтвердження впливу. До зміни стану: відмова відкочує.
             if (sheetCopyId is null && fromStatus == DocumentStatus.Approved)
             {
-                await SourceImpactCheck
+                approvedOverride = await SourceImpactCheck
                     .EnsureConfirmedAsync(
                         sourceImpact, audit, documentId, sheetDefId, periodKey, SourceApprovalChange.Reopened,
-                        confirmedImpact, userId, now, currentUser.CorrelationId, innerCt)
+                        confirmedImpact, userId, now, currentUser.CorrelationId, innerCt,
+                        mayRecalculateApproved: PermissionCheck.IsGranted(profile, SourceImpactCheck.RecalculateApprovedPermission))
                     .ConfigureAwait(false);
             }
 
@@ -225,8 +229,11 @@ public sealed class ReopenDocumentHandler(
         // ✎ B80 (T-B): після коміту; тригер сам вирішує за зв'язкою (ApprovedOnly) і не кидає на збій постановки.
         if (reopenedFromApproved && sourceTrigger is not null)
         {
-            await sourceTrigger
-                .OnSourceSheetApprovalChangedAsync(documentId, sheetDefId, periodKey, SourceApprovalChange.Reopened, userId, ct)
+            await (approvedOverride is { } over
+                    ? sourceTrigger.OnSourceSheetApprovalChangedAsync(
+                        documentId, sheetDefId, periodKey, SourceApprovalChange.Reopened, userId, over, ct)
+                    : sourceTrigger.OnSourceSheetApprovalChangedAsync(
+                        documentId, sheetDefId, periodKey, SourceApprovalChange.Reopened, userId, ct))
                 .ConfigureAwait(false);
         }
 

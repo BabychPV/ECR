@@ -32,6 +32,7 @@ public sealed record SourceImpactConsumerDto(
 /// <param name="SourceMonths">Зачеплені місяці джерела <c>yyyyMM</c>.</param>
 /// <param name="DependentCount">Усього залежних періодів.</param>
 /// <param name="ApprovedCount">З них затверджених.</param>
+/// <param name="CanRecalculateApproved">Викликач має право <c>Calculation.RecalculateApprovedDependents</c> (діалог показує галочку «й затверджені»).</param>
 /// <param name="Consumers">УСІ залежні (метадані: документ, шаблон, період, статус; без даних комірок), не більше <see cref="GetSourceImpactHandler.MaxConsumers"/>; решту показує <c>DependentCount</c>.</param>
 public sealed record SourceImpactDto(
     string Action,
@@ -43,7 +44,8 @@ public sealed record SourceImpactDto(
     IReadOnlyList<int> SourceMonths,
     int DependentCount,
     int ApprovedCount,
-    IReadOnlyList<SourceImpactConsumerDto> Consumers);
+    IReadOnlyList<SourceImpactConsumerDto> Consumers,
+    bool CanRecalculateApproved);
 
 /// <summary>
 /// B80 N5 (D-554): <c>GET /documents/{id}/source-impact</c> — що зачепить затвердження чи повернення в роботу аркуша
@@ -80,6 +82,7 @@ public sealed class GetSourceImpactHandler(
         {
             "APPROVE" => SourceApprovalChange.Approved,
             "REOPEN" => SourceApprovalChange.Reopened,
+            "EDIT" => SourceApprovalChange.Edited,
             _ => throw new BusinessRuleException(
                 Ecr.Domain.Errors.ErrorCodes.RequestInvalid,
                 "action: approve | reopen.",
@@ -98,11 +101,17 @@ public sealed class GetSourceImpactHandler(
 
         // Дія, що джерела не змінює, впливу не має: копія аркуша; повернення НЕ із затвердженого; проміжний крок маршруту
         // (лише остаточне затвердження міняє те, що бачать залежні) — ті самі умови, що й у самої дії.
-        var name = change == SourceApprovalChange.Approved ? "approve" : "reopen";
+        var name = change switch
+        {
+            SourceApprovalChange.Approved => "approve",
+            SourceApprovalChange.Reopened => "reopen",
+            _ => "edit",
+        };
+        var canRecalculateApproved = PermissionCheck.IsGranted(profile, SourceImpactCheck.RecalculateApprovedPermission);
         if (sheetCopyId is not null
             || !await ActionChangesSourceAsync(documentId, sheetDefId, key, change, ct).ConfigureAwait(false))
         {
-            return new SourceImpactDto(name, nameof(DocumentSourcePolicy.None), false, false, false, string.Empty, [], 0, 0, []);
+            return new SourceImpactDto(name, nameof(DocumentSourcePolicy.None), false, false, false, string.Empty, [], 0, 0, [], canRecalculateApproved);
         }
 
         var impact = await assessor.AssessAsync(documentId, sheetDefId, periodKey, change, ct).ConfigureAwait(false);
@@ -119,19 +128,27 @@ public sealed class GetSourceImpactHandler(
         return new SourceImpactDto(
             name,
             impact.Policy.ToString(),
-            impact.Required,
-            impact.Required && impact.Policy == DocumentSourcePolicy.Block,
-            impact.Required && impact.Policy == DocumentSourcePolicy.ConfirmWithReason,
+            // Правка комірки — лише відомості: сервер її не блокує й підтвердження не вимагає (рішення людини 19.11).
+            change != SourceApprovalChange.Edited && impact.Required,
+            change != SourceApprovalChange.Edited && impact.Required && impact.Policy == DocumentSourcePolicy.Block,
+            change != SourceApprovalChange.Edited && impact.Required && impact.Policy == DocumentSourcePolicy.ConfirmWithReason,
             impact.Hash,
             impact.SourceMonths,
             impact.Consumers.Count,
             impact.ApprovedCount,
-            visible);
+            visible,
+            canRecalculateApproved);
     }
 
     private async Task<bool> ActionChangesSourceAsync(
         long documentId, int sheetDefId, PeriodKey key, SourceApprovalChange change, CancellationToken ct)
     {
+        // Правка комірки — стану аркуша не питаємо: чернетка може й не мати рядка стану.
+        if (change == SourceApprovalChange.Edited)
+        {
+            return true;
+        }
+
         var sheets = await workflow.GetSheetsAsync(documentId, key, ct).ConfigureAwait(false);
         var state = sheets.FirstOrDefault(s => s.SheetDefId == sheetDefId && s.SheetCopyId is null);
         if (state is null)
