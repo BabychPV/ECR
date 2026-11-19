@@ -37,8 +37,14 @@ public sealed partial class SourceApprovalChangeTrigger(
     private readonly ILogger _logger = (ILogger?)logger ?? NullLogger.Instance;
 
     /// <inheritdoc />
-    public async Task OnSourceSheetApprovalChangedAsync(
+    public Task OnSourceSheetApprovalChangedAsync(
         long documentId, int sheetDefId, int periodKey, SourceApprovalChange change, int? userId, CancellationToken ct)
+        => OnSourceSheetApprovalChangedAsync(documentId, sheetDefId, periodKey, change, userId, approvedOverride: null, ct);
+
+    /// <inheritdoc />
+    public async Task OnSourceSheetApprovalChangedAsync(
+        long documentId, int sheetDefId, int periodKey, SourceApprovalChange change, int? userId,
+        ApprovedRecalculationOverride? approvedOverride, CancellationToken ct)
     {
         try
         {
@@ -74,7 +80,7 @@ public sealed partial class SourceApprovalChangeTrigger(
                 await EnqueueAsync(
                         binding, periodKey / 100, monthly ? periodKey % 100 : null,
                         string.Create(CultureInfo.InvariantCulture, $"source binding {binding.Id}: {periodKey} {verb}"),
-                        userId, ct)
+                        userId, ct, approvedOverride)
                     .ConfigureAwait(false);
             }
         }
@@ -82,6 +88,43 @@ public sealed partial class SourceApprovalChangeTrigger(
         {
             LogEnqueueFailed(_logger, documentId, ex);
         }
+    }
+
+    /// <inheritdoc />
+    public async Task<int> RequestApprovedDependentsRecalculationAsync(
+        long documentId, int sheetDefId, int periodKey, ApprovedRecalculationOverride approvedOverride, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(approvedOverride);
+        var bindings = await ActiveBindingsAsync(ct, anyState: true).ConfigureAwait(false);
+        var sheet = await (
+                from s in db.SheetDefs.AsNoTracking()
+                where s.Id == sheetDefId
+                join v in db.TemplateVersions.AsNoTracking() on s.TemplateVersionId equals v.Id
+                select new { v.TemplateId })
+            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+        var matching = bindings.Where(b => b.SourceTemplateId == sheet?.TemplateId).ToList();
+        if (sheet is null || matching.Count == 0)
+        {
+            return 0;
+        }
+
+        var monthly = await (
+                from d in db.Documents.AsNoTracking()
+                where d.Id == documentId
+                join p in db.Projects.AsNoTracking() on d.ProjectId equals p.Id
+                select p.PeriodKind == PeriodKind.Monthly)
+            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+
+        foreach (var binding in matching)
+        {
+            await EnqueueAsync(
+                    binding, periodKey / 100, monthly ? periodKey % 100 : null,
+                    string.Create(CultureInfo.InvariantCulture, $"source binding {binding.Id}: {periodKey} approved dependents (admin)"),
+                    approvedOverride.UserId, ct, approvedOverride)
+                .ConfigureAwait(false);
+        }
+
+        return matching.Count;
     }
 
     /// <inheritdoc />
@@ -150,18 +193,24 @@ public sealed partial class SourceApprovalChangeTrigger(
     }
 
     /// <summary>Зв'язки в стані <c>ApprovedOnly</c> з бітом перерахунку й читанням з документа.</summary>
-    private async Task<List<ActiveBinding>> ActiveBindingsAsync(CancellationToken ct)
+    private async Task<List<ActiveBinding>> ActiveBindingsAsync(CancellationToken ct, bool anyState = false)
         => [.. (await db.DocumentSourceBindings.AsNoTracking()
-                .Where(b => b.SourceState == DocumentSourceState.ApprovedOnly && b.RecalculateDependents)
+                .Where(b => (anyState || b.SourceState == DocumentSourceState.ApprovedOnly) && b.RecalculateDependents)
                 .Select(b => new { b.Id, b.SourceTemplateId, b.RegistryDefId, b.ReadFromDocument })
                 .ToListAsync(ct).ConfigureAwait(false))
             .Where(b => overrides?.ReadFromDocument ?? b.ReadFromDocument)
             .Select(b => new ActiveBinding(b.Id, b.SourceTemplateId, b.RegistryDefId))];
 
-    private Task<string> EnqueueAsync(ActiveBinding binding, int year, int? month, string reason, int? userId, CancellationToken ct)
+    private Task<string> EnqueueAsync(
+        ActiveBinding binding, int year, int? month, string reason, int? userId, CancellationToken ct,
+        ApprovedRecalculationOverride? approvedOverride = null)
         => jobs.EnqueueCoalescedAsync<IRegistryImpactRecalculationJob>(
-            RegistryImpactRecalculationTarget.ForSourceChange(binding.Id, year, month),
-            new RegistryImpactRecalculationRequest(binding.RegistryDefId, [], reason, year, binding.Id, month),
+            RegistryImpactRecalculationTarget.ForSourceChange(binding.Id, year, month, includeApproved: approvedOverride is not null),
+            new RegistryImpactRecalculationRequest(
+                binding.RegistryDefId, [], reason, year, binding.Id, month,
+                IncludeApproved: approvedOverride is not null,
+                OverrideUserId: approvedOverride?.UserId,
+                OverrideReason: approvedOverride?.Reason),
             ct,
             createdByUserId: userId);
 

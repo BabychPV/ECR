@@ -9,6 +9,12 @@ public enum SourceApprovalChange
 
     /// <summary>Повернення в роботу ЗІ стану <c>Approved</c>.</summary>
     Reopened,
+
+    /// <summary>
+    /// B80 N5: правка комірки джерела (не перехід стану; лише оцінка впливу для діалогу: за <c>any</c> залежні
+    /// перераховуються самі, затверджені — пропускаються).
+    /// </summary>
+    Edited,
 }
 
 /// <summary>Що треба знати про документ-джерело ДО його видалення (після видалення його вже немає).</summary>
@@ -37,6 +43,39 @@ public interface ISourceApprovalChangeTrigger
     /// <param name="ct">Токен скасування.</param>
     public Task OnSourceSheetApprovalChangedAsync(
         long documentId, int sheetDefId, int periodKey, SourceApprovalChange change, int? userId, CancellationToken ct);
+
+    /// <summary>
+    /// B80 N5 (D-554): те саме, але з ЯВНИМ перекриттям адміністратора — залежні перераховуються і ЗАТВЕРДЖЕНІ
+    /// (право перевірено викликачем: <c>Calculation.RecalculateApprovedDependents</c>); хто й чому — в журнал записів аркушів.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="sheetDefId">Аркуш.</param>
+    /// <param name="periodKey">Період аркуша.</param>
+    /// <param name="change">Перехід.</param>
+    /// <param name="userId">Хто діяв.</param>
+    /// <param name="approvedOverride">Перекриття; <c>null</c> — як без нього.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>Типова реалізація перекриття відкидає (фейки тестів); справжня — <c>SourceApprovalChangeTrigger</c>.</remarks>
+    public Task OnSourceSheetApprovalChangedAsync(
+        long documentId, int sheetDefId, int periodKey, SourceApprovalChange change, int? userId,
+        ApprovedRecalculationOverride? approvedOverride, CancellationToken ct)
+        => OnSourceSheetApprovalChangedAsync(documentId, sheetDefId, periodKey, change, userId, ct);
+
+    /// <summary>
+    /// B80 N5 (D-554, рішення людини 19.11): адміністратор явно просить перерахувати ЗАТВЕРДЖЕНІ залежні документа-джерела
+    /// (після правки комірок). Зв'язки — будь-якого стану (<c>any</c> і <c>approvedOnly</c>), чий шаблон-джерело — шаблон
+    /// документа, з читанням з документа; ставиться та сама злита задача з перекриттям. Право й причину перевіряє
+    /// ендпоінт; збій постановки НЕ ковтається (дія явна).
+    /// </summary>
+    /// <param name="documentId">Документ-джерело.</param>
+    /// <param name="sheetDefId">Аркуш.</param>
+    /// <param name="periodKey">Період аркуша.</param>
+    /// <param name="approvedOverride">Хто й чому.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Скільки задач поставлено (по зв'язці × року × місяцю).</returns>
+    public Task<int> RequestApprovedDependentsRecalculationAsync(
+        long documentId, int sheetDefId, int periodKey, ApprovedRecalculationOverride approvedOverride, CancellationToken ct)
+        => Task.FromResult(0);
 
     /// <summary>ДО видалення: чи документ — джерело зв'язки <c>ApprovedOnly</c>, і які його роки; інакше <c>null</c>.</summary>
     /// <param name="documentId">Документ.</param>

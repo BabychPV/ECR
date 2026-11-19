@@ -55,8 +55,12 @@ public sealed record SourceImpact(
 
 /// <summary>Підтвердження впливу, що надсилає клієнт разом із дією.</summary>
 /// <param name="Hash">Відбиток впливу, який бачила людина (<see cref="SourceImpact.Hash"/>).</param>
-/// <param name="Reason">Причина; обов'язкова за політики <c>ConfirmWithReason</c>.</param>
-public sealed record SourceImpactConfirmation(string? Hash, string? Reason);
+/// <param name="Reason">Причина; обов'язкова за політики <c>ConfirmWithReason</c> і завжди — за <paramref name="RecalculateApproved"/>.</param>
+/// <param name="RecalculateApproved">
+/// B80 N5 (D-554, рішення людини 19.11): «перерахувати також затверджені» — лише з правом
+/// <c>Calculation.RecalculateApprovedDependents</c> (сервер перевіряє), причина обов'язкова, усе логується.
+/// </param>
+public sealed record SourceImpactConfirmation(string? Hash, string? Reason, bool RecalculateApproved = false);
 
 /// <summary>
 /// B80 N5: оцінка впливу дії над документом-джерелом на залежні документи — за зв'язками в стані <c>ApprovedOnly</c>,
