@@ -102,6 +102,49 @@ public sealed class MethodologyCyclePublishApiTests(SqlServerFixture sql)
             await db.MethodologyVersions.Where(v => v.Id == created.VersionId).Select(v => v.Status).SingleAsync().ConfigureAwait(true));
     }
 
+    /// <summary>
+    /// F13: методологія, що ВЖЕ лежала на циклі залежностей документів (цикл з'явився не через цю публікацію), не
+    /// блокується: нова версія без нових циклів публікується. Перевіряє проводку <c>onCycle</c> у <c>PublishMethodologyHandler</c>.
+    /// </summary>
+    /// <remarks>Мутація: передати у <c>RefuseMethodologiesAsync</c> порожній набір замість <c>onCycle</c> - тест червоний (422).</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "B179")]
+    public async Task Нова_версія_методології_що_вже_лежить_на_циклі_публікується()
+    {
+        var world = await ArrangeAsync().ConfigureAwait(true);
+        using var baseApp = new EcrApiFactory(sql);
+        using var app = WithFakeModule(baseApp);
+        var (author, publisher) = await UsersAsync(app).ConfigureAwait(true);
+        var created = await CreateAsync(author, world, world.Other).ConfigureAwait(true);
+
+        using var first = await publisher.PostAsJsonAsync(
+            new Uri(PublishUrl(created), UriKind.Relative), new { changeReason = "B179", effectiveFrom = "2099-01-01" }).ConfigureAwait(true);
+        Assert.True(first.StatusCode == HttpStatusCode.OK, $"{(int)first.StatusCode}: {await first.Content.ReadAsStringAsync().ConfigureAwait(true)}");
+
+        // Цикл виникає ззовні: шаблон, у який пише скрипт, сам наповнює довідник, який скрипт читає.
+        await using (var db = Context())
+        {
+            var registryId = await db.RegistryDefs.Where(r => r.Code == world.RegistryCode).Select(r => r.Id).SingleAsync().ConfigureAwait(true);
+            db.DocumentSourceBindings.Add(new DocumentSourceBinding($"B179CYC2_{Guid.NewGuid():N}"[..20], world.Other.Document.TemplateId, registryId));
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        using var copy = await JsonAsync(
+            await author.PostAsJsonAsync(
+                new Uri($"/api/v1/methodologies/{created.MethodologyId}/versions", UriKind.Relative),
+                new { versionNumber = "2.0", copyFromVersionId = created.VersionId, level = "Configuration", engine = "Script" })
+                .ConfigureAwait(true)).ConfigureAwait(true);
+        var secondVersionId = copy.RootElement.GetProperty("id").GetInt32();
+
+        using var second = await publisher.PostAsJsonAsync(
+            new Uri($"/api/v1/methodologies/{created.MethodologyId}/versions/{secondVersionId}/publish", UriKind.Relative),
+            new { changeReason = "B179 v2", effectiveFrom = "2099-02-01" }).ConfigureAwait(true);
+        var body = await second.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.True(second.StatusCode == HttpStatusCode.OK, $"{(int)second.StatusCode}: {body}");
+    }
+
     // ───────────────────────────── стенд ─────────────────────────────
 
     private sealed record Created(int MethodologyId, int VersionId, string Code);
