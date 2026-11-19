@@ -172,6 +172,7 @@ if (-not $afFile) { $afFile = Join-Path $repo 'docs\delivery\reference-data\land
 . (Join-Path $here 'LandYearMonths.Lib.ps1')
 . (Join-Path $here 'LandYearMonthsApply.Lib.ps1')
 . (Join-Path $here 'LandLegacyRules.Lib.ps1')
+. (Join-Path $here 'LandLegacyPublish.Lib.ps1')
 . (Join-Path $here 'LandT7bStatus.Lib.ps1')
 Set-StrictMode -Off
 
@@ -3020,16 +3021,15 @@ function Stage-LegacyPublish {
         $p1 = Invoke-Ecr -Method POST -Path "/api/v1/methodologies/$m/versions/$vid/publish" -Body @{ changeReason = 'Legacy rehearsal: snapshot golden'; effectiveFrom = '2024-01-01' }
         if ($p1.Status -eq 200 -or $p1.Status -eq 204) { Log "  ${lgCode}: опубліковано з першої спроби (?)"; & $bump 'опубліковано'; continue }
         $txt = [string]$p1.Text
-        $actual = [ordered]@{}
-        foreach ($rmatch in [regex]::Matches($txt, '(ECW_EC_[A-Za-z0-9_]+)[^\r\n]{0,80}?(?:got|отримали|actual)[^\d\-]{0,12}(-?\d+(?:[.,]\d+)?(?:[eE][+\-]?\d+)?)')) { $actual[$rmatch.Groups[1].Value] = $rmatch.Groups[2].Value.Replace(',', '.') }
+        $actuals = @(Get-LandGoldenActuals -Json $p1.Json -Text $txt)
+        $actual = New-LandSnapshotExpected -Actuals $actuals -Outputs $outs
         if ($actual.Count -eq 0) {
             $ec = Get-EcrErrorCode $p1
             Log ("  ! ${lgCode}: публікація (1) HTTP {0} {1}: {2}" -f $p1.Status, $ec, $txt.Substring(0, [Math]::Min(700, $txt.Length)))
             & $bump ("публікація: " + $ec); continue
         }
         LoginAs $owner
-        $exp = [ordered]@{}
-        foreach ($o in $outs) { if ($actual.Contains($o)) { $exp[$o] = [double]::Parse([string]$actual[$o], [Globalization.CultureInfo]::InvariantCulture) } }
+        $exp = $actual
         $put2 = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/versions/$vid/tests/SNAP_1" -Body @{ inputJson = $inputJson; expectedJson = ($exp | ConvertTo-Json -Compress); tolerance = '0.000000001' }
         if ($put2.Status -ne 200) { Log "  ! ${lgCode}: тест (2) HTTP $($put2.Status) $(Get-EcrErrorCode $put2)"; & $bump ("тест2: " + (Get-EcrErrorCode $put2)); continue }
         LoginAs 'land-reviewer'
