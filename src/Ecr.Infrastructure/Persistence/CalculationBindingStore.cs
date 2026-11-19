@@ -95,6 +95,8 @@ public sealed class CalculationBindingStore(EcrDbContext db) : ICalculationBindi
                 where tableDefIds.Contains(column.TableDefId) && !column.IsDeleted && column.LookupRegistryDefId != null
                 join registry in db.RegistryDefs.AsNoTracking() on column.LookupRegistryDefId equals registry.Id
                 select new { ColumnCode = column.Code, RegistryCode = registry.Code })
+            .OrderBy(r => r.ColumnCode)
+            .ThenBy(r => r.RegistryCode)
             .Take(MaxBindings)
             .ToListAsync(ct)
             .ConfigureAwait(false);
