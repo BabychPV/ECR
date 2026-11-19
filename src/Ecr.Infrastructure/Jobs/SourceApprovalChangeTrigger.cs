@@ -24,7 +24,7 @@ namespace Ecr.Infrastructure.Jobs;
 /// </para>
 /// <para>
 /// Ворота: стан <c>ApprovedOnly</c>, біт <c>RecalculateDependents</c> (ключа-перекриття більше немає, P-0118-34) і
-/// читання з документа (біт <c>ReadFromDocument</c> або явний ключ <c>Hse400CompositionFromDocument</c>). Затверджені
+/// читання з документа (біт зв'язки <c>ReadFromDocument</c>; ключ конфігурації виведено, P-0118-31/33). Затверджені
 /// аркуші споживачів задача пропускає, подані позначає лише за справжньою зміною чисел (B63/B79) — тут не змінюється.
 /// </para>
 /// </remarks>

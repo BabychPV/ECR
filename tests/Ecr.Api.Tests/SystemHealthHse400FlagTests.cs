@@ -1,18 +1,17 @@
 using System.Text.Json;
-using Ecr.Api.Startup;
 using Ecr.Application.Health;
 using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace Ecr.Api.Tests;
 
 /// <summary>
-/// B105: прапор <c>Calculations:Hse400CompositionFromDocument</c> видно в <c>GET /api/v1/health/facts</c>, а вимкнений
-/// прапор за наявного документа HSE400 поточного року дає попередження (Land інакше мовчки читає довідник).
+/// B105: читання складу HSE400 з документа видно в <c>GET /api/v1/health/facts</c>, а вимкнене читання за наявного
+/// документа HSE400 поточного року дає попередження (Land інакше мовчки читає довідник). ✎ P-0118-31/33: значення дає
+/// біт зв'язки <c>ReadFromDocument</c>, ключ <c>Calculations:Hse400CompositionFromDocument</c> виведено.
 /// </summary>
 /// <remarks>
 /// Червоні до фіксу (заглушки): <see cref="SystemFactsCalculationsDto.Of(bool, string, bool)"/> завжди без попередження —
@@ -37,47 +36,11 @@ public sealed class SystemHealthHse400FlagTests(SqlServerFixture sql)
     public void Попередження_лише_коли_прапор_вимкнено_а_документ_поточного_року_є(
         bool enabled, bool documentInYear, bool expectedWarning)
     {
-        var dto = SystemFactsCalculationsDto.Of(enabled, ConfigurationSourceLabel.Environment, documentInYear);
+        var dto = SystemFactsCalculationsDto.Of(enabled, SystemFactsCalculationsDto.SourceBinding, documentInYear);
 
         Assert.Equal(enabled, dto.Hse400CompositionFromDocument);
-        Assert.Equal(ConfigurationSourceLabel.Environment, dto.Hse400CompositionSource);
+        Assert.Equal(SystemFactsCalculationsDto.SourceBinding, dto.Hse400CompositionSource);
         Assert.Equal(expectedWarning, dto.Hse400CompositionWarning);
-    }
-
-    [Fact]
-    [Trait(TestCategories.Stage, TestCategories.Stage8)]
-    [Trait("Directive", "HSE400")]
-    public void Мітка_джерела_за_останнім_постачальником_що_задає_ключ()
-    {
-        // ConfigurationSourceLabel — загальний механізм міток; ключ узято довільний (виведений ключ HSE400 застосунок
-        // більше не читає — P-0118-31/33).
-        const string Key = "Calculations:B105LabelProbe";
-
-        // Власний префікс змінних — не зачіпає жодного іншого тесту процесу.
-        var prefix = $"ECRB105_{Guid.NewGuid():N}_";
-        var variable = prefix + Key.Replace(":", "__", StringComparison.Ordinal);
-        Environment.SetEnvironmentVariable(variable, "true");
-        try
-        {
-            var memory = new Dictionary<string, string?> { [Key] = "false" };
-
-            var none = new ConfigurationBuilder().Build();
-            Assert.Equal(SystemHostFacts.SourceDefault, ConfigurationSourceLabel.Of(none, Key));
-
-            var onlyMemory = new ConfigurationBuilder().AddInMemoryCollection(memory).Build();
-            Assert.Equal(ConfigurationSourceLabel.Other, ConfigurationSourceLabel.Of(onlyMemory, Key));
-
-            // Змінна оточення іде пізніше — вона й дієва (як ECR_ у Program.cs).
-            var withEnvironment = new ConfigurationBuilder()
-                .AddInMemoryCollection(memory)
-                .AddEnvironmentVariables(prefix)
-                .Build();
-            Assert.Equal(ConfigurationSourceLabel.Environment, ConfigurationSourceLabel.Of(withEnvironment, Key));
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable(variable, null);
-        }
     }
 
     [Fact]

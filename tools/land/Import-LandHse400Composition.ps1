@@ -33,7 +33,8 @@
     одразу, нічого не читаючи.
 
 .PARAMETER AllowDeprecatedRegistry
-    Свідомий імпорт у застарілий довідник - лише для стенда з Calculations:Hse400CompositionFromDocument = false.
+    Свідомий імпорт у застарілий довідник - лише для стенда, де біт зв'язки ReadFromDocument
+    (cfg.DocumentSourceBinding, HSE400_LAND_COMPOSITION) = 0 або зв'язки немає.
 
 .PARAMETER SourceDatabase
     База локальної копії прода, з якої читаємо (сервер - -SourceServer, за замовчуванням localhost).
@@ -68,12 +69,13 @@ param(
 $ErrorActionPreference = 'Stop'
 
 # HSE400 3c: довідник LAND_HSE400_COMPOSITION застарів - склад газу для Land читається з документа HSE400
-# (Calculations:Hse400CompositionFromDocument). Імпорт у довідник - лише свідомо, для стенда з вимкненим прапорцем,
-# і перевіряється ДО будь-якого читання джерела чи виклику API.
+# (біт зв'язки ReadFromDocument; ключ Calculations:Hse400CompositionFromDocument виведено, P-0118-31/33). Імпорт у
+# довідник - лише свідомо, для стенда з вимкненим бітом, і перевіряється ДО будь-якого читання джерела чи виклику API.
 if (-not $AllowDeprecatedRegistry) {
     throw ('Довідник LAND_HSE400_COMPOSITION застарів: склад газу HSE400 тепер вводиться в документ HSE400 ' +
-        '(tools/hse400/Build-Hse400Template.ps1), а Land читає його звідти (Calculations:Hse400CompositionFromDocument). ' +
-        'Імпорт у довідник - лише для стенда, де цей прапорець вимкнено: додайте -AllowDeprecatedRegistry. Відмова.')
+        '(tools/hse400/Build-Hse400Template.ps1), а Land читає його звідти (біт зв''язки ReadFromDocument, ' +
+        'cfg.DocumentSourceBinding HSE400_LAND_COMPOSITION). ' +
+        'Імпорт у довідник - лише для стенда, де цей біт = 0: додайте -AllowDeprecatedRegistry. Відмова.')
 }
 $here = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 . (Join-Path $here 'EcrApi.ps1')

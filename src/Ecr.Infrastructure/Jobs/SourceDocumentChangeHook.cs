@@ -53,7 +53,7 @@ public sealed class ChangedPeriodsDictionary : Dictionary<long, int[]>
 /// <para>
 /// ⚠ За <see cref="DocumentSourceState.ApprovedOnly"/> мовчить: споживачі читають лише затверджені місяці, а
 /// затверджений аркуш перерахунком не змінюється — тригер там Approve/Reopen/видалення (<see cref="SourceApprovalChangeTrigger"/>).
-/// Читання з документа вимкнене (біт <c>ReadFromDocument</c> чи явний ключ <c>Hse400CompositionFromDocument</c>) —
+/// Читання з документа вимкнене (біт зв'язки <c>ReadFromDocument</c>; ключ конфігурації виведено, P-0118-31/33) —
 /// споживачі джерела не бачать, ставити нічого.
 /// </para>
 /// <para>

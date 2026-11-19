@@ -138,12 +138,12 @@ public sealed class GetPartitionScriptHandler(IAccessDecisionService access, ICu
 /// <c>WindowsAndLocal</c> або <c>None</c> (лише мітка, без деталей схем).
 /// </param>
 /// <param name="Hse400CompositionFromDocument">
-/// B105: дієве значення <c>Calculations:Hse400CompositionFromDocument</c> цього процесу (Land читає склад газу з
-/// документа HSE400).
+/// B105: перекриття читання складу HSE400 з боку хоста. ✎ P-0118-31/33: ключ
+/// <c>Calculations:Hse400CompositionFromDocument</c> виведено — контролер передає <c>false</c>, а дієве значення дає біт
+/// зв'язки <c>ReadFromDocument</c> (<see cref="SystemFactsCalculationsDto.Of(bool, string, SystemHealthSnapshot)"/>).
 /// </param>
 /// <param name="Hse400CompositionSource">
-/// Звідки прийшло значення: <c>Default</c> (не задано), <c>Environment</c>, <c>ProgramData</c>,
-/// <c>AppSettings</c>, <c>CommandLine</c>, <c>Other</c> — лише мітка, без шляхів.
+/// Мітка джерела з боку хоста; ✎ P-0118-31/33 — завжди <c>Default</c>, і тоді мітку <c>Binding</c> ставить біт зв'язки.
 /// </param>
 public sealed record SystemHostFacts(
     string? InformationalVersion,
@@ -198,16 +198,18 @@ public sealed record SystemFactsResponse(
 
 /// <summary>Прапори розрахунків цього процесу (B105).</summary>
 /// <param name="Hse400CompositionFromDocument">
-/// Дієве значення <c>Calculations:Hse400CompositionFromDocument</c>: <c>true</c> — Land читає склад газу з
-/// документа HSE400, <c>false</c> — з довідника <c>LAND_HSE400_COMPOSITION</c>.
+/// Дієве значення біта зв'язки HSE400 → Land <c>ReadFromDocument</c>: <c>true</c> — Land читає склад газу з
+/// документа HSE400, <c>false</c> — з довідника <c>LAND_HSE400_COMPOSITION</c> (зокрема коли зв'язки немає). Ключ
+/// конфігурації <c>Calculations:Hse400CompositionFromDocument</c> виведено (P-0118-31/33) і не читається.
 /// </param>
 /// <param name="Hse400CompositionSource">
-/// Джерело значення: <c>Default</c>, <c>Environment</c>, <c>ProgramData</c>, <c>AppSettings</c>,
-/// <c>CommandLine</c>, <c>Other</c> (лише мітка, без шляху).
+/// Джерело значення: <c>Binding</c> — біт зв'язки; <c>Default</c> — зв'язки немає (читання вимкнено). Лише мітка, без
+/// шляху.
 /// </param>
 /// <param name="Hse400CompositionWarning">
-/// <c>true</c> — прапор вимкнено, а опублікований шаблон HSE400 і документ HSE400 поточного року є: Land мовчки
-/// читає застарілий довідник.
+/// <c>true</c> — читання з документа вимкнено (біт зв'язки <c>ReadFromDocument</c> = 0 або зв'язки немає), а
+/// опублікований шаблон HSE400 і документ HSE400 поточного року є: Land мовчки читає довідник. Увімкнення біта діє
+/// без перезапуску.
 /// </param>
 /// <param name="Hse400SourceState">
 /// B80 (N1): стан-ворота зв'язки HSE400 → Land — <c>any</c> або <c>approvedOnly</c>; <c>null</c> — зв'язки немає.
@@ -228,7 +230,7 @@ public sealed record SystemFactsCalculationsDto(
     int? Hse400ApprovedMonths = null,
     bool Hse400SourceWarning = false)
 {
-    /// <summary>Мітка джерела, коли ключ не задано, а значення дає біт зв'язки (B80).</summary>
+    /// <summary>Мітка джерела, коли значення дає біт зв'язки (B80; ✎ P-0118-31/33 — єдине джерело за наявної зв'язки).</summary>
     public const string SourceBinding = "Binding";
 
     /// <summary>Складає блок; попередження — лише за вимкненого прапора й наявного документа поточного року.</summary>

@@ -23,12 +23,15 @@ namespace Ecr.Infrastructure.Jobs;
 /// документ × період; сутність — найменший id стану оригіналу аркуша (<c>wf.ApprovalState</c>) цієї пари.
 /// </para>
 /// <para>
-/// ⛔ Жодної зв'язки <c>ApprovedOnly</c> (усі стенди за сідом — <c>Any</c>) або явний ключ «не читати з документа» —
+/// ⛔ Жодної зв'язки <c>ApprovedOnly</c> (усі стенди за сідом — <c>Any</c>) або перекриття «не читати з документа» —
 /// один дрібний запит і порожній результат; повний прохід, тож старі знахідки правила закриваються.
 /// </para>
 /// </remarks>
 /// <param name="db">Контекст.</param>
-/// <param name="readOverride">Явний ключ <c>Calculations:Hse400CompositionFromDocument</c>; <c>null</c> — біт зв'язки.</param>
+/// <param name="readOverride">
+/// Перекриття біта зв'язки <c>ReadFromDocument</c> (<see cref="Ecr.Application.Ports.IDocumentSourceFlagOverrides"/>;
+/// у DI завжди <c>null</c> — ключ конфігурації виведено, P-0118-31/33); <c>null</c> — біт зв'язки.
+/// </param>
 internal sealed class StaleApprovedDependentCheck(EcrDbContext db, bool? readOverride)
 {
     /// <summary>Сутність знахідки (EntityId — найменший id стану оригіналу аркуша документа × періоду).</summary>

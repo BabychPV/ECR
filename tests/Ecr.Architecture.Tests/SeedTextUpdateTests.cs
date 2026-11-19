@@ -97,6 +97,29 @@ public sealed partial class SeedTextUpdateTests
             + string.Join(", ", both));
     }
 
+    /// <remarks>
+    /// B183 (P-0118-31/33): ключ <c>Calculations:Hse400CompositionFromDocument</c> виведено — банер «Здоров'я системи» не
+    /// радить його задавати, а називає біт зв'язки <c>ReadFromDocument</c>. Мутація: повернути старий текст у будь-яку
+    /// мову каталогу — червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    [Trait("Directive", "HSE400")]
+    public void Попередження_складу_HSE400_називає_біт_зв_язки_а_не_виведений_ключ()
+    {
+        var catalog = CatalogRows(SeedSql.Text);
+
+        foreach (var lang in new[] { "en", "ru", "kz" })
+        {
+            Assert.True(
+                catalog.TryGetValue(("health.hse400CompositionOff.text", lang), out var value),
+                $"health.hse400CompositionOff.text ({lang}) немає в каталозі.");
+            Assert.Contains("ReadFromDocument", value, StringComparison.Ordinal);
+            Assert.DoesNotContain("Hse400CompositionFromDocument", value, StringComparison.Ordinal);
+        }
+    }
+
     /// <summary>
     /// Рядки змінених текстів: спільна секція прологу плюс порції
     /// <c>INSERT INTO #UiChanged</c> файлів <c>seed/features</c> (їх застосовує епілог).

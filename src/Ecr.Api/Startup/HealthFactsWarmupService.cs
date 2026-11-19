@@ -65,9 +65,10 @@ public sealed partial class HealthFactsWarmupService(
 
     [LoggerMessage(
         Level = LogLevel.Warning,
-        Message = "HSE400 composition reading (binding bit ReadFromDocument) is off, but a published HSE400 template and "
-                  + "an HSE400 document for the current year exist: Land reads the gas composition from the registry, "
-                  + "not from the HSE400 document. Switch the HSE400 -> Land source binding on (no restart needed).")]
+        Message = "HSE400 composition reading is off (binding bit ReadFromDocument = 0, or no HSE400 -> Land binding), but a "
+                  + "published HSE400 template and an HSE400 document for the current year exist: Land reads the gas "
+                  + "composition from the registry, not from the HSE400 document. Set ReadFromDocument = 1 on the binding "
+                  + "(no restart needed; a missing binding is created by the seed on the next start).")]
     private static partial void LogHse400CompositionOff(ILogger logger);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Health facts warm-up skipped: {ExceptionType}.")]

@@ -70,7 +70,7 @@ public interface IRegistryImpactStore
     /// <returns>Рядки, впорядковані за документом і періодом; один рядок на методологію.</returns>
     /// <remarks>
     /// ⚠ Для довідника, чиї дані підміняє документ (<c>LAND_HSE400_COMPOSITION</c> за
-    /// <c>Calculations:Hse400CompositionFromDocument</c>): рядки <c>dic.*</c> не змінюються, тож
+    /// біта зв'язки <c>cfg.DocumentSourceBinding.ReadFromDocument</c>): рядки <c>dic.*</c> не змінюються, тож
     /// <c>DataChangedAt</c> мовчить. Застарілий — кожен актуальний прогін на момент ВИКОНАННЯ задачі: черга лишає
     /// payload першої постановки, тож момент зміни з payload пропустив би документ, перерахований між двома змінами
     /// джерела. Решта правил — ті самі: лише <c>Open</c>/<c>Grace</c>, методологія читає довідник. Без стелі —

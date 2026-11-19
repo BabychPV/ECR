@@ -21,8 +21,13 @@ namespace Ecr.Application.Calculations.SourceBindings;
 /// <param name="Policy">Політика згоди: <c>None</c>, <c>Warn</c>, <c>ConfirmWithReason</c>, <c>Block</c>.</param>
 /// <param name="ReadFromDocument">Біт зв'язки «читати з документа».</param>
 /// <param name="RecalculateDependents">Біт зв'язки «ставити перерахунок залежних».</param>
-/// <param name="ReadFromDocumentEffective">Дієве значення з урахуванням явного ключа конфігурації.</param>
-/// <param name="ReadFromDocumentSource"><c>configuration</c> — діє явний ключ; <c>binding</c> — біт зв'язки.</param>
+/// <param name="ReadFromDocumentEffective">
+/// Дієве значення «читати з документа». Ключ конфігурації виведено (P-0118-31/33) — дорівнює біту зв'язки.
+/// </param>
+/// <param name="ReadFromDocumentSource">
+/// <c>binding</c> — біт зв'язки (єдине значення в продукті); <c>configuration</c> лишається в контракті для сумісності
+/// й більше не видається.
+/// </param>
 /// <param name="ConsumerTemplateCodes">Коди шаблонів-споживачів.</param>
 /// <param name="UpdatedAt">Остання зміна стану-воріт, UTC; <c>null</c> — не змінювався.</param>
 /// <param name="UpdatedByUserId">Хто змінив востаннє.</param>
