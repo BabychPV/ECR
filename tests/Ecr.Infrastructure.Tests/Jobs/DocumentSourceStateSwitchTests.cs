@@ -184,7 +184,42 @@ public sealed class DocumentSourceStateSwitchTests(SqlServerFixture sql) : DbJob
 
     private sealed record Arranged(int BindingId, int RegistryId, int UserId);
 
-    private async Task<SwitchDocumentSourceStateResponse> SwitchAsync(Arranged a, string state, bool? readOverride = true)
+    /// <summary>
+    /// B179 L2 perf: перемикач скидає процесний кеш воріт хука джерела — ApprovedOnly діє одразу (зв'язка зникає з
+    /// воріт без очікування TTL), назад на Any — повертається; повтор того самого стану кеш не скидає.
+    /// </summary>
+    /// <remarks>Мутація: прибрати <c>gate?.Invalidate()</c> в обробнику — зв'язка лишається у воротах, червоний.</remarks>
+    [Fact]
+    public async Task Перемикання_стану_скидає_кеш_воріт_хука_джерела_одразу()
+    {
+        var a = await ArrangeAsync();
+        var cache = new SourceBindingGateCache();
+
+        Assert.True(await InGateAsync(cache, a.BindingId));
+        var loads = cache.Loads;
+
+        await SwitchAsync(a, "approvedOnly", gate: cache);
+        Assert.False(await InGateAsync(cache, a.BindingId));
+        Assert.Equal(loads + 1, cache.Loads);
+
+        // Той самий стан — нічого не змінилось, кеш не скидається.
+        await SwitchAsync(a, "approvedOnly", gate: cache);
+        Assert.False(await InGateAsync(cache, a.BindingId));
+        Assert.Equal(loads + 1, cache.Loads);
+
+        await SwitchAsync(a, "any", gate: cache);
+        Assert.True(await InGateAsync(cache, a.BindingId));
+        Assert.Equal(loads + 2, cache.Loads);
+    }
+
+    private async Task<bool> InGateAsync(SourceBindingGateCache cache, int bindingId)
+    {
+        await using var db = Sql.CreateContext();
+        return (await cache.GetAsync(db, CancellationToken.None)).Bindings.Any(b => b.Id == bindingId);
+    }
+
+    private async Task<SwitchDocumentSourceStateResponse> SwitchAsync(
+        Arranged a, string state, bool? readOverride = true, ISourceBindingGateInvalidation? gate = null)
     {
         await using var host = NewHost();
         var access = Substitute.For<IAccessDecisionService>();
@@ -206,7 +241,8 @@ public sealed class DocumentSourceStateSwitchTests(SqlServerFixture sql) : DbJob
                 host.Queue,
                 new QuartzJobScheduler(null, new JobProgressStore(host.Db), new SystemClock()),
                 new JobQueueSignal()),
-            new TestClock(Now));
+            new TestClock(Now),
+            gate);
 
         return await handler.HandleAsync(a.BindingId, new SwitchDocumentSourceStateRequest(state), CancellationToken.None);
     }

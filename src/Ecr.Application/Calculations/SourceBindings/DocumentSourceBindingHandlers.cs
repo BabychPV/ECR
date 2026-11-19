@@ -161,7 +161,9 @@ public sealed class SwitchDocumentSourceStateHandler(
     IUnitOfWork uow,
     IAuditWriter audit,
     IBackgroundJobScheduler jobs,
-    IClock clock)
+    IClock clock,
+    // B179 L2 perf: скидання кешу воріт хука джерела цього процесу (інші — за TTL); без нього (ручна збірка) — нічого.
+    ISourceBindingGateInvalidation? gate = null)
 {
     /// <summary>Право (те саме, що <see cref="DocumentSourceBindings.Permission"/>).</summary>
     public const string Permission = "Calculation.ManageSourceBinding";
@@ -266,6 +268,12 @@ public sealed class SwitchDocumentSourceStateHandler(
                     currentUser.CorrelationId),
                 innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
+
+        // Після коміту: хук джерела бачить новий стан одразу (за ApprovedOnly мовчить, назад на Any — знову ставить).
+        if (changed)
+        {
+            gate?.Invalidate();
+        }
 
         var view = (await store.ListAsync(ct).ConfigureAwait(false)).FirstOrDefault(v => v.Id == id)
                    ?? throw DocumentSourceBindings.NotFound(id);

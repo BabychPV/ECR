@@ -451,6 +451,8 @@ public static class DependencyInjection
         services.AddSingleton<Jobs.RecalculationBudgetMonitor>();
         services.AddScoped<IRecalculationJob, Jobs.RecalculationJob>();
         services.AddScoped<Jobs.IRecalculationCompletionHook, Jobs.SourceDocumentChangeHook>(); // B179 L2: зміна джерела за Any (обидві задачі перерахунку)
+        services.AddSingleton<Jobs.SourceBindingGateCache>(); // B179 L2 perf: ворота хука джерела без бази (TTL + явне скидання)
+        services.AddSingleton<ISourceBindingGateInvalidation>(sp => sp.GetRequiredService<Jobs.SourceBindingGateCache>());
         services.AddScoped<ISourceApprovalChangeTrigger, Jobs.SourceApprovalChangeTrigger>(); // B80 N2a → B179 L2: Approve/Reopen/видалення джерела за ApprovedOnly
         services.AddScoped<ISourceMonthApprovalGate>(sp => DocumentSourceMonthGate.Create(sp)); // B80 N2b: Submit/Approve споживача — лише з затвердженим місяцем джерела
         services.AddScoped<ISourceIssueReader>(sp => DocumentSourceMonthGate.Create(sp)); // B80 N4: проблеми джерела в панелі проблем розрахунку

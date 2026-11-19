@@ -23,6 +23,17 @@ public interface IRecalculationCompletionHook
 }
 
 /// <summary>
+/// B179 L2 (perf): документи й періоди прогону РАЗОМ із версіями шаблонів їхніх екземплярів, уже прочитаними прогоном
+/// (<see cref="FormulaRecalculationJob"/>): хук відсіює не-джерело без звернення до бази.
+/// </summary>
+/// <remarks>Без версій (звичайний словник, <see cref="RecalculationJob"/>) хук читає шаблони документа сам, як доти.</remarks>
+public sealed class ChangedPeriodsDictionary : Dictionary<long, int[]>
+{
+    /// <summary>Версії шаблонів екземплярів документів у змінених періодах; <c>null</c> — невідомо.</summary>
+    public IReadOnlySet<int>? TemplateVersionIds { get; init; }
+}
+
+/// <summary>
 /// B179 L2 (рішення людини P-0118-33, Q1/Q2): після успішного перерахунку документа, шаблон якого — ДЖЕРЕЛО зв'язки
 /// <c>cfg.DocumentSourceBinding</c> у стані <see cref="DocumentSourceState.Any"/> з бітом <c>RecalculateDependents</c>,
 /// — одна злита задача <see cref="IRegistryImpactRecalculationJob"/> на (зв'язку, рік, місяць); споживачів вона бере з
@@ -53,7 +64,9 @@ public sealed partial class SourceDocumentChangeHook(
     EcrDbContext db,
     IBackgroundJobScheduler jobs,
     IDocumentSourceFlagOverrides? overrides = null,
-    ILogger<SourceDocumentChangeHook>? logger = null) : IRecalculationCompletionHook
+    ILogger<SourceDocumentChangeHook>? logger = null,
+    // B179 L2 (perf): у DI завжди є (singleton); без нього (ручна збірка в тестах) ворота читаються з бази щоразу.
+    SourceBindingGateCache? gateCache = null) : IRecalculationCompletionHook
 {
     private readonly ILogger _logger = (ILogger?)logger ?? NullLogger.Instance;
 
@@ -68,15 +81,30 @@ public sealed partial class SourceDocumentChangeHook(
 
         try
         {
-            // Один дрібний запит: зв'язок одиниці; немає жодної активної — більше нічого не читаємо.
-            var bindings = (await db.DocumentSourceBindings.AsNoTracking()
-                    .Where(b => b.SourceState == DocumentSourceState.Any && b.RecalculateDependents)
-                    .Select(b => new { b.Id, b.SourceTemplateId, b.RegistryDefId, b.ReadFromDocument })
-                    .ToListAsync(ct)
-                    .ConfigureAwait(false))
-                .Where(b => overrides?.ReadFromDocument ?? b.ReadFromDocument)
-                .ToList();
+            // ⛔ perf («perf max», FormulaJobFixedCostTests): ворота — з процесного кешу (0 звернень); задача формул
+            // НЕ-джерела далі не звертається до бази взагалі, джерела — одне звернення (екземпляри оригіналу нижче).
+            var versions = (periodsByDocument as ChangedPeriodsDictionary)?.TemplateVersionIds;
+            var gate = gateCache is null
+                ? await SourceBindingGate.LoadAsync(db, ct).ConfigureAwait(false)
+                : await gateCache.GetAsync(db, ct).ConfigureAwait(false);
+            if (gateCache is not null && gate.Bindings.Count > 0 && versions is not null
+                && versions.Any(v => v > gate.MaxVersionId))
+            {
+                // Нова версія шаблону після знімка (могла бути версією джерела) — перечитати один раз.
+                gate = await gateCache.ReloadAsync(db, ct).ConfigureAwait(false);
+            }
+
+            var bindings = gate.Bindings.Where(b => overrides?.ReadFromDocument ?? b.ReadFromDocument).ToList();
             if (bindings.Count == 0)
+            {
+                return;
+            }
+
+            var templates = bindings.Select(b => b.SourceTemplateId).Distinct().ToList();
+
+            // Версії шаблонів, уже прочитані прогоном: жодна не належить шаблону-джерелу — документ не джерело.
+            if (versions is not null
+                && !versions.Any(v => gate.SourceTemplateOfVersion.TryGetValue(v, out var t) && templates.Contains(t)))
             {
                 return;
             }
@@ -87,7 +115,6 @@ public sealed partial class SourceDocumentChangeHook(
                 return;
             }
 
-            var templates = bindings.Select(b => b.SourceTemplateId).Distinct().ToList();
             var documentIds = periodsByDocument.Keys.ToList();
             var periodKeys = periodsByDocument.Values.SelectMany(p => p).Distinct().ToList();
 

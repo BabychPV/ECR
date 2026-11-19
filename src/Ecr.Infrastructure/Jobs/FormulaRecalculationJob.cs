@@ -355,9 +355,13 @@ public sealed partial class FormulaRecalculationJob(
             var changedPeriods = writtenPeriods.Union(seedPeriods).Order().ToArray();
             if (changedPeriods.Length > 0)
             {
-                await completionHook
-                    .OnSucceededAsync(new Dictionary<long, int[]> { [documentId] = changedPeriods }, sourceHop: 0, ct)
-                    .ConfigureAwait(false);
+                // ⛔ perf: версії шаблонів — з уже прочитаних екземплярів проходу, щоб хук відсіяв не-джерело без бази.
+                var changed = new ChangedPeriodsDictionary
+                {
+                    [documentId] = changedPeriods,
+                    TemplateVersionIds = shared.TemplateVersionsOf(documentId, changedPeriods),
+                };
+                await completionHook.OnSucceededAsync(changed, sourceHop: 0, ct).ConfigureAwait(false);
             }
         }
     }
