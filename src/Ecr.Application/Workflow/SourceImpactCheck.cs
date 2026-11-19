@@ -97,7 +97,14 @@ public static class SourceImpactCheck
                 string.Create(
                     CultureInfo.InvariantCulture,
                     $"{action} неможливе: політика зв'язки забороняє, доки затверджено {impact.ApprovedCount} залежних періодів."),
-                Details(impact, BlockedMessageKey));
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-SRC-0422.sourceImpactBlocked",
+                    ["impactHash"] = impact.Hash,
+                    ["policy"] = impact.Policy.ToString(),
+                    ["approvedDependents"] = impact.ApprovedCount.ToString(CultureInfo.InvariantCulture),
+                    ["dependents"] = impact.Consumers.Count.ToString(CultureInfo.InvariantCulture),
+                });
         }
 
         if (string.IsNullOrWhiteSpace(confirmation?.Hash))
@@ -107,7 +114,14 @@ public static class SourceImpactCheck
                 string.Create(
                     CultureInfo.InvariantCulture,
                     $"{action} зачепить {impact.ApprovedCount} затверджених залежних періодів: потрібне підтвердження."),
-                Details(impact, ConfirmationRequiredMessageKey));
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-SRC-0409.impactConfirmationRequired",
+                    ["impactHash"] = impact.Hash,
+                    ["policy"] = impact.Policy.ToString(),
+                    ["approvedDependents"] = impact.ApprovedCount.ToString(CultureInfo.InvariantCulture),
+                    ["dependents"] = impact.Consumers.Count.ToString(CultureInfo.InvariantCulture),
+                });
         }
 
         if (!string.Equals(confirmation.Hash, impact.Hash, StringComparison.Ordinal))
@@ -115,7 +129,14 @@ public static class SourceImpactCheck
             throw new BusinessRuleException(
                 ErrorCodes.SourceImpactConflict,
                 "Вплив змінився після підтвердження: перегляньте його ще раз.",
-                Details(impact, ImpactChangedMessageKey));
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-SRC-0409.impactChanged",
+                    ["impactHash"] = impact.Hash,
+                    ["policy"] = impact.Policy.ToString(),
+                    ["approvedDependents"] = impact.ApprovedCount.ToString(CultureInfo.InvariantCulture),
+                    ["dependents"] = impact.Consumers.Count.ToString(CultureInfo.InvariantCulture),
+                });
         }
 
         var reason = confirmation.Reason?.Trim();
@@ -140,7 +161,14 @@ public static class SourceImpactCheck
                 throw new BusinessRuleException(
                     ErrorCodes.SourceImpactRefused,
                     "Потрібна причина перерахунку затверджених залежних.",
-                    Details(impact, RecalculateApprovedReasonRequiredMessageKey));
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-SRC-0422.recalculateApprovedReasonRequired",
+                        ["impactHash"] = impact.Hash,
+                        ["policy"] = impact.Policy.ToString(),
+                        ["approvedDependents"] = impact.ApprovedCount.ToString(CultureInfo.InvariantCulture),
+                        ["dependents"] = impact.Consumers.Count.ToString(CultureInfo.InvariantCulture),
+                    });
             }
         }
 
@@ -149,7 +177,14 @@ public static class SourceImpactCheck
             throw new BusinessRuleException(
                 ErrorCodes.SourceImpactRefused,
                 "Потрібна причина підтвердження.",
-                Details(impact, ReasonRequiredMessageKey));
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-SRC-0422.impactReasonRequired",
+                    ["impactHash"] = impact.Hash,
+                    ["policy"] = impact.Policy.ToString(),
+                    ["approvedDependents"] = impact.ApprovedCount.ToString(CultureInfo.InvariantCulture),
+                    ["dependents"] = impact.Consumers.Count.ToString(CultureInfo.InvariantCulture),
+                });
         }
 
         if (audit is not null)
@@ -180,15 +215,4 @@ public static class SourceImpactCheck
 
         return overrideRequested ? new ApprovedRecalculationOverride(userId, reason!) : null;
     }
-
-    /// <summary>Тіло відмови: ключ, поточний відбиток (клієнт підтверджує саме його) і числа впливу.</summary>
-    private static Dictionary<string, object?> Details(SourceImpact impact, string messageKey)
-        => new()
-        {
-            ["messageKey"] = messageKey,
-            ["impactHash"] = impact.Hash,
-            ["policy"] = impact.Policy.ToString(),
-            ["approvedDependents"] = impact.ApprovedCount.ToString(CultureInfo.InvariantCulture),
-            ["dependents"] = impact.Consumers.Count.ToString(CultureInfo.InvariantCulture),
-        };
 }

@@ -4622,6 +4622,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-REG-4094` | 409 | номер НАЕ вже зайнятий у своїй області (типи вузлів НАЕ, людина 03.11, Q3): `NaeCode` вузла SRC унікальний у межах (предок REGION, предок AREA), а де регіон без поділу On/Offshore — у межах REGION. Перевіряє upsert `POST /registries/{code}/entries` під блокуванням дерева; `messageKey` `naeCodeTaken` |
 | `ECR-REG-4222` | 422 | запис довідника без назви (D14 / AU-14, рішення координатора 19.10): ручний upsert `POST /registries/{code}/entries` створює запис без жодної непорожньої мови в `display` (немає мов, усі порожні чи з пробілів, або пласка мапа `{мова:текст}` замість `{"values":{…}}`) або правкою стирає всі мови наявної назви. Запис, що вже лежить без назви, правкою значень без назви в запиті не блокується. Константа — `ErrorCodes.RegistryEntryNameRequired`; `messageKey` `entryNameRequired` |
 | `ECR-DOC-4092` | 409 | B151/B165: `POST /documents` для шаблону «один документ на проєкт» (HSE400, HSE401), а документ цього шаблону в проєкті вже є. Окремий код, а не `ECR-DOC-0409` («подано, потрібен Reopen»): Reopen тут нічого не змінить, треба відкрити наявний документ (аудит F13). Константа — `ErrorCodes.DocumentExistsForTemplate`; `messageKey` `documentExistsForTemplate` |
+| `ECR-SRC-0409` | 409 | B80 N5 (D-554): дія над джерелом чекає підтвердження наслідків для залежних документів — `Warn` без `confirmedImpact.hash` (`impactConfirmationRequired`) або відбиток застарів, вплив змінився (`impactChanged`); тіло несе `impactHash`, `policy`, `approvedDependents`, `dependents` |
+| `ECR-SRC-0422` | 422 | B80 N5 (D-554): політика зв'язки забороняє дію, доки залежні періоди затверджені (`sourceImpactBlocked`, `Block`), або підтвердженню бракує причини (`impactReasonRequired`, `ConfirmWithReason`; `recalculateApprovedReasonRequired` — для «перерахувати також затверджені») |
 
 ### 7.1 Суфікси `messageKey` (`err.<код>.<суфікс>`) нових випадків
 
@@ -6769,6 +6771,7 @@ public sealed record RowDto(
     `sourceImpactActionInvalid`. Читання без змін. `required = false`, `impactHash = ""` і порожній перелік, коли дія
     джерела НЕ змінює: копія аркуша; `reopen` не із `Approved`; `approve` не з `Submitted` чи не остаточний крок маршруту.
     Рішення людини 19.11: у відповіді УСІ залежні (метадані: документ, шаблон, період, статус; без даних комірок і без посилання), навіть якщо читач не має права перегляду їхніх документів; `hiddenCount` немає; відповідь віддає до 500 залежних, повне число — `dependentCount`. Відбиток рахується з повного переліку.
+  - **Порт.** Обчислення впливу — порт `ISourceImpactAssessor` (`AssessAsync(documentId, sheetDefId, periodKey, change, ct)` → `SourceImpact`; реалізація `SourceImpactAssessor`, читання лише станів ОРИГІНАЛІВ аркушів, `SheetCopyId IS NULL`); ним користуються `GetSourceImpactHandler`, `SourceImpactCheck` (ворота `approve`/`reopen`) і `RecalculateApprovedDependentsHandler`.
   - **Що вважається впливом.** Зв'язки, чий шаблон-джерело — шаблон документа, у стані `approvedOnly`, з бітом
     «читати з документа», чий аркуш містить таблиці зв'язки, а документ — той, який завантажувач обрав би за рік. Споживачі —
     шаблони графа залежностей (`IDependencyGraphProvider`, як у воротах подання). Залежний період — документ × період,

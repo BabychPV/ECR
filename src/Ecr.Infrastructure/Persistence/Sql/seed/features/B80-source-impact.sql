@@ -3,6 +3,10 @@
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
+    (N'err.ECR-SRC-0409', N'ru', N'Влияние на зависимые документы требует подтверждения'),
+    (N'err.ECR-SRC-0409', N'kz', N'Тәуелді құжаттарға әсер растауды қажет етеді'),
+    (N'err.ECR-SRC-0422', N'ru', N'Действие по связи источника отклонено'),
+    (N'err.ECR-SRC-0422', N'kz', N'Дерек көзі байланысы бойынша әрекет қабылданбады'),
     (N'err.ECR-SRC-0409.impactConfirmationRequired', N'ru', N'Действие затронет утверждённые периоды зависимых документов ({approvedDependents} из {dependents}). Проверьте влияние и подтвердите действие.'),
     (N'err.ECR-SRC-0409.impactConfirmationRequired', N'kz', N'Әрекет тәуелді құжаттардың бекітілген кезеңдеріне әсер етеді ({dependents} ішінен {approvedDependents}). Әсерді қарап, әрекетті растаңыз.'),
     (N'err.ECR-SRC-0409.impactChanged', N'ru', N'Влияние изменилось с момента, когда вы его смотрели. Проверьте актуальное влияние и подтвердите заново.'),
@@ -76,6 +80,8 @@ GO
 INSERT INTO #UiEn ([Key], Lang, Val, Scope)
 SELECT v.[Key], v.Lang, v.Val, v.Scope
   FROM (VALUES
+    (N'err.ECR-SRC-0409', N'en', N'Impact on dependent documents needs confirmation', 1),
+    (N'err.ECR-SRC-0422', N'en', N'Action on the source binding was refused', 1),
     (N'err.ECR-SRC-0409.impactConfirmationRequired', N'en', N'This action affects approved periods of dependent documents ({approvedDependents} of {dependents}). Review the impact and confirm the action.', 1),
     (N'err.ECR-SRC-0409.impactChanged', N'en', N'The impact has changed since you reviewed it. Review the current impact and confirm again.', 1),
     (N'err.ECR-SRC-0422.sourceImpactBlocked', N'en', N'The binding policy forbids this action while dependent periods are approved ({approvedDependents}). Return those periods to work first.', 1),
