@@ -82,12 +82,14 @@ internal sealed class DocumentSourceIssues(EcrDbContext db, bool? readOverride, 
             .Select(s => new { s.Id, s.PeriodKey, s.Status, s.ApprovedAt })
             .ToListAsync(ct).ConfigureAwait(false);
 
+        // ✎ B80 N5 (F13): зв'язки споживача для ВСІХ періодів — один прохід поза циклом (раніше 2 запити на період).
+        var bindingsByPeriod = await DocumentSourceMonthGate
+            .ConsumerBindingsByPeriodAsync(db, graph, documentId, keys, ct).ConfigureAwait(false);
+
         var findings = new List<SourceIssueFinding>();
         foreach (var periodKey in keys)
         {
-            var bindings = await DocumentSourceMonthGate
-                .ConsumerBindingsAsync(db, graph, documentId, periodKey, ct).ConfigureAwait(false);
-            if (bindings.Count == 0)
+            if (!bindingsByPeriod.TryGetValue(periodKey, out var bindings) || bindings.Count == 0)
             {
                 continue;
             }

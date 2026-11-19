@@ -288,6 +288,8 @@ public static class DependencyInjection
         services.AddScoped<Workflow.ApprovalSnapshotRefresh>();
         services.AddScoped<Workflow.ApproveSheetHandler>();
         services.AddScoped<Workflow.ReopenDocumentHandler>();
+        services.AddScoped<Workflow.RecalculateApprovedDependentsHandler>(); // B80 N5: явний перерахунок затверджених залежних (адміністратор)
+        services.AddScoped<Workflow.GetSourceImpactHandler>(); // B80 N5: вплив затвердження/повернення джерела на залежні
         services.AddScoped<Documents.DeleteDocumentHandler>();
         services.AddScoped<Documents.DocumentSheetCopyHandler>();
         services.AddScoped<Documents.ChangeDocumentKeyHandler>();

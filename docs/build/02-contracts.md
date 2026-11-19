@@ -4947,6 +4947,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/documents/{id}/submit` | — | 3 |
 | `POST` | `/api/v1/documents/{id}/approve` | — | 3 |
 | `POST` | `/api/v1/documents/{id}/reopen` | `Document.Reopen` | 3 |
+| `POST` | `/api/v1/documents/{id}/source-impact/recalculate-approved` | `Calculation.RecalculateApprovedDependents` (✎ B80 N5, D-554, рішення людини 19.11: адміністратор явно просить перерахувати й ЗАТВЕРДЖЕНІ залежні після правки джерела; тіло `{ sheetDefId, periodKey, hash, reason }`; без права — 403, без причини — 422 `ECR-SRC-0422`, застарілий відбиток — 409 `ECR-SRC-0409`; → 200 `{ queued, approvedDependents }`; подія безпеки `ApprovedDependentsRecalculationRequested`) | 5 |
+| `GET` | `/api/v1/documents/{id}/source-impact` | `Document.View` (✎ B80 N5, D-554: вплив затвердження / повернення із затвердженого аркуша документа-джерела на залежні документи; невидимий документ чи аркуш — 404) | 5 |
 | `GET` | `/api/v1/documents/{id}/workflow/history` | `Document.View` | 3 |
 | `POST` | `/api/v1/documents/{id}/sheets/{sheetDefId}/copies` | `Document.Create` + запис у проєкті (додає порожню копію аркуша, позначеного в шаблоні `isCopyable`; → 201 `{ sheetCopyId, ordinal }`; не копіювальний аркуш — 422 `ECR-DOC-0422`; джерело завжди оригінал) | 8 |
 | `PUT` | `/api/v1/documents/{id}/sheets/{sheetDefId}/name` | `Document.Create` + запис у проєкті (перейменовує групу «<Назва> N» для всіх копій; тіло `{ nameL10n }`; → 204) | 8 |
@@ -6758,3 +6760,64 @@ public sealed record RowDto(
   відкочує публікацію; золотий набір відхиляється раніше за відмову циклу.
 - Клієнт: екран `/admin/dependency-graph` (право `Calculation.ManageSourceBinding`), ключі каталогу `dependencyGraph.*`,
   `nav.dependencyGraph`, `nav.dependencyGraph.description` — сід `B179-dependency-graph.sql` (en/ru/kz; kz — на звірку).
+- ✎ B80 N5 (D-554) — вплив затвердження й повернення аркуша-джерела на залежні документи; контракт лише додаванням:
+  - **`GET /api/v1/documents/{id}/source-impact?sheetDefId=&periodKey=&action=approve|reopen[&sheetCopyId=]`** →
+    `SourceImpactDto` (`action`, `policy` — `None|Warn|ConfirmWithReason|Block`, `required`, `blocked`, `reasonRequired`,
+    `impactHash`, `sourceMonths[]` `yyyyMM`, `dependentCount`, `approvedCount`, `consumers[]`
+    `{bindingCode, templateCode, documentId, projectCode, documentKey, periodKey, approved, willRecalculate, skipReason}`; `skipReason = approved` для затвердженого періоду, який перерахунок пропускає). Право
+    `Document.View`; невидимий документ чи аркуш — 404; неприпустимий `action` — 422 `ECR-REQ-0422`
+    `sourceImpactActionInvalid`. Читання без змін. `required = false`, `impactHash = ""` і порожній перелік, коли дія
+    джерела НЕ змінює: копія аркуша; `reopen` не із `Approved`; `approve` не з `Submitted` чи не остаточний крок маршруту.
+    Рішення людини 19.11: у відповіді УСІ залежні (метадані: документ, шаблон, період, статус; без даних комірок і без посилання), навіть якщо читач не має права перегляду їхніх документів; `hiddenCount` немає; відповідь віддає до 500 залежних, повне число — `dependentCount`. Відбиток рахується з повного переліку.
+  - **Що вважається впливом.** Зв'язки, чий шаблон-джерело — шаблон документа, у стані `approvedOnly`, з бітом
+    «читати з документа», чий аркуш містить таблиці зв'язки, а документ — той, який завантажувач обрав би за рік. Споживачі —
+    шаблони графа залежностей (`IDependencyGraphProvider`, як у воротах подання). Залежний період — документ × період,
+    що має стани оригіналів аркушів і володіє зачепленим місяцем джерела (за періодичністю СВОГО проєкту); `approved` —
+    усі стани затверджено. **Потребує рішення людини (`required`)** лише коли політика не `None` і є хоч один
+    **затверджений** залежний період: його перерахунок не чіпає (R3.2), він застаріє мовчки; незатверджені залежні
+    просто перерахуються.
+  - **`POST /documents/{id}/approve`** і **`POST /documents/{id}/reopen`**: нове необов'язкове поле тіла
+    **`confirmedImpact`** `{ hash, reason }` (у `ApproveSheetRequest` і `ReopenDocumentRequest`). Сервер перевіряє його сам,
+    у транзакції дії, ДО зміни стану (відмова відкочує, аркуш не змінено), лише для остаточного затвердження оригіналу
+    аркуша й повернення оригіналу ІЗ `Approved` (відхилення, проміжні кроки, копії, повернення з `Submitted` — без
+    перевірки):
+    - `None` — підтвердження не потрібне;
+    - `Warn` без `confirmedImpact.hash` — **409 `ECR-SRC-0409`** `err.ECR-SRC-0409.impactConfirmationRequired`;
+    - `ConfirmWithReason` без причини — **422 `ECR-SRC-0422`** `err.ECR-SRC-0422.impactReasonRequired`;
+    - `Block` — **422 `ECR-SRC-0422`** `err.ECR-SRC-0422.sourceImpactBlocked` (підтвердження не діє, доки є затверджений
+      залежний період);
+    - `hash` не збігається з відбитком, який сервер рахує ЗАРАЗ (вплив змінився) — **409 `ECR-SRC-0409`**
+      `err.ECR-SRC-0409.impactChanged`.
+    Тіло кожної відмови несе `impactHash` (актуальний відбиток), `policy`, `approvedDependents`, `dependents`. Відбиток —
+    SHA-256 (32 hex) від дії, адреси джерела, політики й відсортованого переліку залежних (зв'язка, документ, період,
+    затверджений).
+  - **✎ Рішення людини 19.11 (D-554) — «перерахувати також затверджені».** Нове право
+    **`Calculation.RecalculateApprovedDependents`** (глобальне; з вбудованих ролей лише `SystemAdministrator`; не небезпечне; каталог
+    прав 50 → 51; i18n `permission.Calculation.RecalculateApprovedDependents`, `err.ECR-ACCS-0403.recalculateApproved`).
+    `confirmedImpact.recalculateApproved` (необов'язкове, за умовчанням `false`) у `POST …/approve` і `POST …/reopen`:
+    без права — **403** `ECR-ACCS-0403` `err.ECR-ACCS-0403.recalculateApproved`; без причини (навіть за `Warn`) — **422**
+    `ECR-SRC-0422` `err.ECR-SRC-0422.recalculateApprovedReasonRequired`; `Block` відмовляє й з перекриттям; діє лише коли є
+    затверджені залежні (інакше ігнорується). Перекриття переходить у задачу перерахунку залежних: поле **`IncludeApproved`**
+    (+ `OverrideUserId`, `OverrideReason`) у `RegistryImpactRecalculationRequest` і `RecalculationRequest`, **без міграції**
+    (payload черги); ціль черги з перекриттям окрема (`…-approved` у `RegistryImpactRecalculationTarget.ForSourceChange`,
+    `…-dependents-approved` у `CalculationTrigger.DependentsApprovedTargetOf`) — задача з перекриттям не зливається з задачею без
+    нього. Тільки з `IncludeApproved` `RecalculationJob` не пропускає затверджені аркуші (`ApprovedSheetsAsync`,
+    `SkippedScopesAsync`) і `RecalculationService` пише їх (`writeApproved`); ланцюжок джерел далі йде БЕЗ перекриття.
+    Журнал записів аркушів (`aud.StructureChange`, `SheetRecalc`): на КОЖЕН фактично перерахований затверджений аркуш —
+    операція **`RecalculatedApproved`** (хто — `ChangedByUserId`, причина — `ChangeReason = recalc-approved-override: <причина>`,
+    `NewJson.reason = approvedOverride`); на пропущений без перекриття — як доти `SkippedApproved`.
+  - **`GET …/source-impact?action=edit`** (правка комірки джерела): лише відомості — залежні бачать джерело одразу лише за
+    зв'язки `any`, тож перелік береться за зв'язками `any`; `required`/`blocked`/`reasonRequired` завжди `false` (правку сервер
+    не блокує й підтвердження не вимагає). У `SourceImpactDto` нове поле **`canRecalculateApproved`** (є право) — діалог
+    показує галочку «й затверджені». Для правки перерахунок затверджених — явний **`POST …/source-impact/recalculate-approved`**
+    (після збереження правок; клієнт виконує його, коли черга незбереженого спорожніла), відбиток — з `action=edit`.
+  - **Аудит:** успішне підтвердження пише подію журналу безпеки `SourceImpactConfirmed` у тій самій транзакції
+    (`action`, `sourceDocumentId`, `sheetDefId`, `periodKey`, `policy`, `impactHash`, `approvedDependents`, `dependents`,
+    `recalculateApproved`, `reason`).
+  - **Правка комірки джерела** окремого підтвердження не має: затверджене джерело правити можна лише після
+    `reopen` (він під воротами вище); правка незатвердженого за `approvedOnly` залежних не зачіпає, за `any` залежні
+    перераховуються, а затверджені аркуші споживачів перерахунок пропускає.
+  - Помилка → ключі каталогу `err.ECR-SRC-0409.*`, `err.ECR-SRC-0422.*`, `err.ECR-REQ-0422.sourceImpactActionInvalid`,
+    клієнт `sourceImpact.*` — сід `B80-source-impact.sql` (en/ru/kz; **kz — робочий переклад, на звірку**).
+  - Продуктивність (F13): `DocumentSourceIssues.ListAsync` читає зв'язки споживача для ВСІХ періодів двома запитами поза
+    циклом (раніше 2 на період).

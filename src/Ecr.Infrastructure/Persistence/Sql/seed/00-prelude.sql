@@ -152,7 +152,13 @@ USING (VALUES
   -- Глобальне (`PermissionScopes.Global`): читання й перемикання стану-воріт `cfg.DocumentSourceBinding`
   -- (`any` / `approvedOnly`). Не небезпечне (0): з вбудованих ролей його бере лише `SystemAdministrator` шаблоном `%`
   -- (жоден інший шаблон ролей його не покриває); решті ролей адміністратор видає свідомо.
-  (N'Calculation.ManageSourceBinding', N'Calculation', 0)
+  (N'Calculation.ManageSourceBinding', N'Calculation', 0),
+  -- B80:source-impact ── право «Перераховувати також затверджені залежні» (рішення людини 19.11, D-554) ──
+  -- Глобальне (`PermissionScopes.Global`): явне перекриття пропуску затверджених аркушів при перерахунку залежних
+  -- (затвердження/повернення джерела з галочкою в діалозі впливу; адміністративний перерахунок). Не небезпечне (0), як
+  -- `Calculation.ManageSourceBinding`: з вбудованих ролей його бере лише `SystemAdministrator` шаблоном `%`; решті ролей
+  -- адміністратор видає свідомо. Кожне застосування — з обов'язковою причиною й записом у журнал аркушів.
+  (N'Calculation.RecalculateApprovedDependents', N'Calculation', 0)
   -- B80:source-binding ── кінець секції ──
 ) AS s (Code, [Group], IsDangerous)
 ON t.Code = s.Code

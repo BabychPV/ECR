@@ -81,4 +81,28 @@ public interface ICalculationTrigger
     /// <remarks>Типова реалізація ланку відкидає (фейки тестів); справжня — <c>CalculationTrigger</c>.</remarks>
     public Task<string?> RequestDependentsAsync(long documentId, PeriodKey periodKey, int sourceHop, CancellationToken ct)
         => RequestDependentsAsync(documentId, periodKey, ct);
+
+    /// <summary>
+    /// B80 N5 (D-554, рішення людини 19.11): те саме, що
+    /// <see cref="RequestDependentsAsync(long, PeriodKey, int, CancellationToken)"/>, але з ЯВНИМ перекриттям
+    /// адміністратора: перераховуються й ЗАТВЕРДЖЕНІ аркуші. Право на перекриття перевіряє ендпоінт, що його ввімкнув.
+    /// </summary>
+    /// <param name="documentId">Залежний документ.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="sourceHop">Ланка ланцюжка джерел.</param>
+    /// <param name="approvedOverride">Перекриття: хто й чому (журнал записів аркушів); <c>null</c> — як без нього.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Як у <see cref="RequestDependentsAsync(long, PeriodKey, CancellationToken)"/>.</returns>
+    /// <remarks>Типова реалізація перекриття відкидає (фейки тестів); справжня — <c>CalculationTrigger</c>.</remarks>
+    public Task<string?> RequestDependentsAsync(
+        long documentId, PeriodKey periodKey, int sourceHop, ApprovedRecalculationOverride? approvedOverride, CancellationToken ct)
+        => RequestDependentsAsync(documentId, periodKey, sourceHop, ct);
 }
+
+/// <summary>
+/// B80 N5 (D-554): явне перекриття «перерахувати також затверджені залежні» — лише адміністратор з правом
+/// <c>Calculation.RecalculateApprovedDependents</c>; причина обов'язкова й іде в журнал записів аркушів.
+/// </summary>
+/// <param name="UserId">Хто ввімкнув перекриття.</param>
+/// <param name="Reason">Причина (не порожня).</param>
+public sealed record ApprovedRecalculationOverride(int UserId, string Reason);

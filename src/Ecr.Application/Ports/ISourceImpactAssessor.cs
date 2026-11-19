@@ -1,0 +1,79 @@
+// src/Ecr.Application/Ports/ISourceImpactAssessor.cs
+using Ecr.Domain.Entities.Configuration;
+
+namespace Ecr.Application.Ports;
+
+/// <summary>Затверджений чи ні період залежного документа, якого зачепить дія над документом-джерелом.</summary>
+/// <param name="BindingId">Зв'язка, за якою документ залежний.</param>
+/// <param name="BindingCode">Код зв'язки.</param>
+/// <param name="TemplateCode">Код шаблону залежного документа.</param>
+/// <param name="DocumentId">Залежний документ.</param>
+/// <param name="ProjectCode">Код проєкту залежного документа.</param>
+/// <param name="DocumentKey">Бізнес-ключ залежного документа.</param>
+/// <param name="PeriodKey">Період залежного документа, що читає зачеплені місяці джерела.</param>
+/// <param name="Approved">Усі аркуші-оригінали періоду затверджено (такий період перерахунок не чіпає, він лише застаріє).</param>
+public sealed record SourceImpactConsumer(
+    int BindingId,
+    string BindingCode,
+    string TemplateCode,
+    long DocumentId,
+    string ProjectCode,
+    string DocumentKey,
+    int PeriodKey,
+    bool Approved);
+
+/// <summary>
+/// B80 N5 (D-554): вплив затвердження чи повернення із затвердженого аркуша документа-джерела на залежні документи.
+/// </summary>
+/// <param name="Change">Дія над джерелом.</param>
+/// <param name="DocumentId">Документ-джерело.</param>
+/// <param name="SheetDefId">Аркуш.</param>
+/// <param name="PeriodKey">Період джерела.</param>
+/// <param name="Policy">Найсуворіша політика серед зв'язок, що дали затверджених залежних (інакше найсуворіша серед усіх).</param>
+/// <param name="SourceMonths">Зачеплені місяці джерела <c>yyyyMM</c>.</param>
+/// <param name="Consumers">Залежні документи × періоди, що читають ці місяці (за зростанням зв'язки, документа, періоду).</param>
+/// <param name="Hash">Відбиток впливу: підтвердження діє лише на нього (не на застарілий).</param>
+public sealed record SourceImpact(
+    SourceApprovalChange Change,
+    long DocumentId,
+    int SheetDefId,
+    int PeriodKey,
+    DocumentSourcePolicy Policy,
+    IReadOnlyList<int> SourceMonths,
+    IReadOnlyList<SourceImpactConsumer> Consumers,
+    string Hash)
+{
+    /// <summary>Скільки залежних періодів уже затверджено.</summary>
+    public int ApprovedCount => Consumers.Count(c => c.Approved);
+
+    /// <summary>
+    /// Дія потребує рішення людини (підтвердження чи відмови): політика не <c>None</c> і є хоч один затверджений залежний
+    /// період — його перерахунок не чіпає, тож він застаріє мовчки. Незатверджені залежні просто перерахуються.
+    /// </summary>
+    public bool Required => Policy != DocumentSourcePolicy.None && ApprovedCount > 0;
+}
+
+/// <summary>Підтвердження впливу, що надсилає клієнт разом із дією.</summary>
+/// <param name="Hash">Відбиток впливу, який бачила людина (<see cref="SourceImpact.Hash"/>).</param>
+/// <param name="Reason">Причина; обов'язкова за політики <c>ConfirmWithReason</c> і завжди — за <paramref name="RecalculateApproved"/>.</param>
+/// <param name="RecalculateApproved">
+/// B80 N5 (D-554, рішення людини 19.11): «перерахувати також затверджені» — лише з правом
+/// <c>Calculation.RecalculateApprovedDependents</c> (сервер перевіряє), причина обов'язкова, усе логується.
+/// </param>
+public sealed record SourceImpactConfirmation(string? Hash, string? Reason, bool RecalculateApproved = false);
+
+/// <summary>
+/// B80 N5: оцінка впливу дії над документом-джерелом на залежні документи — за зв'язками в стані <c>ApprovedOnly</c>,
+/// споживачі — з графа залежностей (<see cref="IDependencyGraphProvider"/>).
+/// </summary>
+public interface ISourceImpactAssessor
+{
+    /// <summary>Вплив дії; без зв'язки (чи за <c>Any</c>) — порожній, політика <c>None</c>.</summary>
+    /// <param name="documentId">Документ-джерело.</param>
+    /// <param name="sheetDefId">Аркуш.</param>
+    /// <param name="periodKey">Період аркуша.</param>
+    /// <param name="change">Затвердження чи повернення із затвердженого.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<SourceImpact> AssessAsync(
+        long documentId, int sheetDefId, int periodKey, SourceApprovalChange change, CancellationToken ct);
+}

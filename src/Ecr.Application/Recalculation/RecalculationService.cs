@@ -408,15 +408,18 @@ public sealed class RecalculationService(
     /// «перераховано після подання» (<see cref="SubmittedSheetChanges"/>).
     /// </param>
     /// <param name="submittedYearWritten">✎ B79: подані місяці року при записі не-місячної комірки (див. <see cref="RecalculateAsync"/>).</param>
+    /// <param name="writeApproved">✎ B80 N5 (D-554): писати й ЗАТВЕРДЖЕНІ аркуші — лише явне перекриття адміністратора (<c>Calculation.RecalculateApprovedDependents</c>); інакше затверджені не пишуться ніколи.</param>
     public Task<int> RecalculateAllAsync(
         long documentId, PeriodKey periodKey, CancellationToken ct, int? sheetDefId = null,
         HashSet<(int TableDefId, int ColumnDefId)>? changedColumns = null, bool writeSubmitted = false,
         IReadOnlyList<int>? annualPeriods = null,
         HashSet<(int SheetDefId, long? CopyId)>? submittedWritten = null,
-        HashSet<(int PeriodKey, int SheetDefId)>? submittedYearWritten = null)
+        HashSet<(int PeriodKey, int SheetDefId)>? submittedYearWritten = null,
+        bool writeApproved = false)
         => RecalculateDocumentAsync(
             documentId, periodKey, sheetDefId, heldSheet: null, ScopeFilter.All, ct, changedColumns, writeSubmitted,
-            annualPeriods: annualPeriods, submittedWritten: submittedWritten, submittedYearWritten: submittedYearWritten);
+            annualPeriods: annualPeriods, submittedWritten: submittedWritten, submittedYearWritten: submittedYearWritten,
+            writeApproved: writeApproved);
 
     /// <inheritdoc />
     /// <remarks>
@@ -452,7 +455,8 @@ public sealed class RecalculationService(
         List<FormulaErrorCell>? errorSink = null,
         IReadOnlyList<int>? annualPeriods = null,
         HashSet<(int SheetDefId, long? CopyId)>? submittedWritten = null,
-        HashSet<(int PeriodKey, int SheetDefId)>? submittedYearWritten = null)
+        HashSet<(int PeriodKey, int SheetDefId)>? submittedYearWritten = null,
+        bool writeApproved = false)
     {
         var instances = await rowStore
             .GetTableInstancesAsync(documentId, periodKey, ct)
@@ -475,7 +479,8 @@ public sealed class RecalculationService(
                     errorSink: errorSink,
                     annualPeriods: annualPeriods,
                     submittedWritten: submittedWritten,
-                    submittedYearWritten: submittedYearWritten)
+                    submittedYearWritten: submittedYearWritten,
+                    writeApproved: writeApproved)
                 .ConfigureAwait(false);
         }
 
@@ -522,6 +527,7 @@ public sealed class RecalculationService(
     /// ✎ B79: річна розкладка — подані місяці року (ключ періоду × аркуш), коли прогін записав НЕ-МІСЯЧНУ комірку аркуша
     /// за агрегатом року (відкритий якір B60 або закритий B24); <c>null</c> — не збирати. Після коміту.
     /// </param>
+    /// <param name="writeApproved">✎ B80 N5 (D-554): писати й ЗАТВЕРДЖЕНІ аркуші — лише явне перекриття адміністратора; інакше затверджені не пишуться ніколи.</param>
     private async Task<int> RunAsync(
         TableInstanceRef instance, DirtySet? dirty, CancellationToken ct, int? sheetDefId = null,
         (int SheetDefId, long? CopyId)? heldSheet = null, IReadOnlyList<TableInstanceRef>? knownInstances = null,
@@ -533,7 +539,8 @@ public sealed class RecalculationService(
         List<FormulaErrorCell>? errorSink = null,
         IReadOnlyList<int>? annualPeriods = null,
         HashSet<(int SheetDefId, long? CopyId)>? submittedWritten = null,
-        HashSet<(int PeriodKey, int SheetDefId)>? submittedYearWritten = null)
+        HashSet<(int PeriodKey, int SheetDefId)>? submittedYearWritten = null,
+        bool writeApproved = false)
     {
         // ✎ LAND-YEAR B24: копії аркушів Q-17 не маршрутизуються — у закритому місяці їм писати нічого.
         if (annualPeriods is not null && instance.SheetCopyId is not null)
@@ -1310,6 +1317,7 @@ public sealed class RecalculationService(
 
             var writable = await EnterSheetsAsync(
                     instance.DocumentId, periodKey, sheetOfInstance.Values, heldSheet, token, approverEditSheets, writeSubmitted,
+                    writeApproved,
                     annualPeriods,
                     annualWritable is null ? null : (openAnchorYear!, annualSheets!, annualWritable),
                     submittedSheets,
@@ -1728,10 +1736,11 @@ public sealed class RecalculationService(
     /// року, де він ПОДАНИЙ (прочитано під блокуваннями цього ж входу; правка погоджувача D-442 — без місяців);
     /// <c>null</c> — не збирати.
     /// </param>
+    /// <param name="writeApproved">✎ B80 N5 (D-554): писати й ЗАТВЕРДЖЕНІ аркуші — лише явне перекриття адміністратора (<c>Calculation.RecalculateApprovedDependents</c>); інакше затверджені не пишуться ніколи.</param>
     private async Task<IReadOnlySet<(int SheetDefId, long? CopyId)>> EnterSheetsAsync(
         long documentId, PeriodKey periodKey, IEnumerable<(int SheetDefId, long? CopyId)> sheets,
         (int SheetDefId, long? CopyId)? heldSheet, CancellationToken ct,
-        IReadOnlySet<int>? approverEditSheets = null, bool writeSubmitted = false,
+        IReadOnlySet<int>? approverEditSheets = null, bool writeSubmitted = false, bool writeApproved = false,
         IReadOnlyList<int>? annualPeriods = null,
         (IReadOnlyList<int> Months, IReadOnlySet<(int SheetDefId, long? CopyId)> Sheets,
             HashSet<(int SheetDefId, long? CopyId)> Writable)? openAnchor = null,
@@ -1761,8 +1770,11 @@ public sealed class RecalculationService(
             months.Add(month);
         }
 
+        // ✎ B80 N5 (D-554): `writeApproved` — ЯВНИЙ перерахунок затверджених залежних адміністратором з правом
+        // `Calculation.RecalculateApprovedDependents` (рішення людини 19.11); без нього затверджений не пишеться ніколи.
         bool Writable(Domain.Enums.DocumentStatus status, int sheetDefId)
             => status is not (Domain.Enums.DocumentStatus.Submitted or Domain.Enums.DocumentStatus.Approved)
+               || (status == Domain.Enums.DocumentStatus.Approved && writeApproved)
                || (status == Domain.Enums.DocumentStatus.Submitted
                    && (writeSubmitted || approverEditSheets?.Contains(sheetDefId) == true));
 

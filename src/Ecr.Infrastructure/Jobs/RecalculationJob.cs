@@ -383,7 +383,9 @@ public sealed partial class RecalculationJob(
                 // ✎ B79 (слово людини 16.11): подані аркуші перераховує КОЖЕН прогін, і нічний теж; пропуск — лише затверджені.
                 // ✎ F13 p218: і для області аркуша — період із затвердженим оригіналом тепер допускається заради його
                 // копій-чернеток, а методології оригіналу (його прив'язки) мусять лишитися пропущеними.
-                var skippedSheets = await ApprovedSheetsAsync(docRequest, request.PeriodKey, ct).ConfigureAwait(false);
+                var skippedSheets = request.IncludeApproved
+                    ? new Dictionary<int, HashSet<int>>()
+                    : await ApprovedSheetsAsync(docRequest, request.PeriodKey, ct).ConfigureAwait(false);
                 var skippedPairs = skippedSheets.Where(pair => periods.Contains(pair.Key)).Sum(pair => pair.Value.Count);
                 if (logger is not null && skippedPairs > 0)
                 {
@@ -1131,6 +1133,14 @@ public sealed partial class RecalculationJob(
             .ConfigureAwait(false);
     }
 
+    /// <summary>Причина запису журналу для затвердженого аркуша, перерахованого за перекриттям адміністратора.</summary>
+    /// <param name="reason">Причина, введена адміністратором.</param>
+    private static string OverrideChangeReason(string? reason)
+    {
+        var text = "recalc-approved-override: " + (reason ?? string.Empty).Trim();
+        return text.Length <= 400 ? text : text[..400];
+    }
+
     /// <summary>
     /// ✎ UAT-recalc-ux (слово людини 07.11: «це також має логуватися»): пише в журнал змін кожен пропущений
     /// затверджений аркуш і кожен перерахований поданий (по запису на аркуш × період, <c>SheetRecalc</c>).
@@ -1197,6 +1207,10 @@ public sealed partial class RecalculationJob(
             {
                 var approvedRow = row.Status == Domain.Enums.DocumentStatus.Approved;
 
+                // ✎ B80 N5: перекриття адміністратора — затверджений аркуш НЕ пропущено, а перераховано; запис журналу
+                // називає, хто, чому й який затверджений аркуш (рішення людини 19.11: «все логується»).
+                var approvedRecalculated = approvedRow && request.IncludeApproved;
+
                 if (request.SheetDefId is { } areaSheet && row.SheetDefId != areaSheet
                     && !(approvedRow && row.SheetCopyId is null && blocked.Contains((row.PeriodKey, row.SheetDefId))))
                 {
@@ -1215,7 +1229,7 @@ public sealed partial class RecalculationJob(
                     continue;
                 }
 
-                if (approvedRow)
+                if (approvedRow && !approvedRecalculated)
                 {
                     skipped++;
                 }
@@ -1230,7 +1244,9 @@ public sealed partial class RecalculationJob(
                     EntityType: RecalculationSkips.AuditEntityType,
                     EntityId: row.SheetDefId,
                     ChangeClass: Domain.Enums.ChangeClass.Safe,
-                    Operation: approvedRow ? RecalculationSkips.AuditSkippedApproved : RecalculationSkips.AuditRecalculatedAfterSubmission,
+                    Operation: approvedRecalculated
+                        ? RecalculationSkips.AuditRecalculatedApproved
+                        : approvedRow ? RecalculationSkips.AuditSkippedApproved : RecalculationSkips.AuditRecalculatedAfterSubmission,
                     OldJson: null,
                     NewJson: JsonSerializer.Serialize(new
                     {
@@ -1240,10 +1256,13 @@ public sealed partial class RecalculationJob(
                         sheetCode = row.Code,
                         periodKey = row.PeriodKey,
                         state = row.Status.ToString(),
-                        reason = approvedRow ? "approved" : "recalculatedAfterSubmission",
+                        reason = approvedRecalculated ? "approvedOverride" : approvedRow ? "approved" : "recalculatedAfterSubmission",
+                        overrideReason = approvedRecalculated ? request.OverrideReason : null,
                     }),
-                    ChangeReason: approvedRow ? "recalc-skipped-approved" : "recalc-after-submission",
-                    ChangedByUserId: request.TriggeredByUserId ?? 0,
+                    ChangeReason: approvedRecalculated
+                        ? OverrideChangeReason(request.OverrideReason)
+                        : approvedRow ? "recalc-skipped-approved" : "recalc-after-submission",
+                    ChangedByUserId: approvedRecalculated ? request.OverrideUserId ?? request.TriggeredByUserId ?? 0 : request.TriggeredByUserId ?? 0,
                     CorrelationId: RecalculationSkips.AuditCorrelation(documentId, row.SheetDefId, row.PeriodKey, row.SheetCopyId)));
             }
         }
@@ -1322,6 +1341,7 @@ public sealed partial class RecalculationJob(
                 .RecalculateAllAsync(
                     request.DocumentId, new PeriodKey(period), ct, request.SheetDefId, changed,
                     writeSubmitted: true,
+                    writeApproved: request.IncludeApproved,
                     annualPeriods: annualOnly?.GetValueOrDefault(period),
                     submittedWritten: submittedWritten,
                     submittedYearWritten: submittedYearWritten)
@@ -2097,7 +2117,9 @@ public sealed partial class RecalculationJob(
         // Доти стан брався з оригіналу (`OriginalOnly`): затверджений оригінал відмовляв періодом (4221) і чернетці-копії
         // того самого аркуша (SHEETNAME після перейменування, ручний «Перерахувати» документа з копіями). Пропуск
         // затверджених — по аркушу у фазі формул (`RecalculationService.EnterSheetsAsync`) і методологій (`IsActive`).
-        var skippedScopes = await SkippedScopesAsync(request, ct).ConfigureAwait(false);
+        var skippedScopes = request.IncludeApproved
+            ? new HashSet<(int PeriodKey, int SheetDefId, long CopyKey)>()
+            : await SkippedScopesAsync(request, ct).ConfigureAwait(false);
         var candidatePeriods = skippedScopes.Select(s => s.PeriodKey).Distinct().ToList();
         HashSet<int> submittedKeys = [];
 
@@ -2793,6 +2815,13 @@ public sealed partial class RecalculationJob(
 /// B179 L2: ланка ланцюжка документів-джерел, з якою поставлено перерахунок залежного (<c>CalculationTrigger</c>); 0 —
 /// будь-яка інша постановка. Хук завершення несе її далі.
 /// </param>
+/// <param name="IncludeApproved">
+/// ✎ B80 N5 (D-554, рішення людини 19.11): ЯВНИЙ перерахунок і ЗАТВЕРДЖЕНИХ аркушів — лише адміністратор з правом
+/// <c>Calculation.RecalculateApprovedDependents</c> (право перевіряє ендпоінт). Без нього затверджені пропускаються завжди
+/// (D-493/D-510). Окрема ціль черги (<c>…-dependents-approved</c>): задача з перекриттям не зливається з задачею без нього.
+/// </param>
+/// <param name="OverrideUserId">Хто ввімкнув перекриття (для журналу записів аркушів).</param>
+/// <param name="OverrideReason">Причина перекриття (обов'язкова; у журнал записів аркушів).</param>
 public sealed record RecalculationRequest(
     int ProjectId,
     long DocumentId,
@@ -2803,7 +2832,10 @@ public sealed record RecalculationRequest(
     bool RecalculateSubmitted = false,
     int? Year = null,
     bool ForeignOwnerPass = false,
-    int SourceHop = 0)
+    int SourceHop = 0,
+    bool IncludeApproved = false,
+    int? OverrideUserId = null,
+    string? OverrideReason = null)
 {
     /// <summary>✎ B59: нижня межа ключа періоду скоупу (включно); без року — <see cref="int.MinValue"/>.</summary>
     internal int FromKey => PeriodKey is null && Year is { } y ? y * 100 : int.MinValue;

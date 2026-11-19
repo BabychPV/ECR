@@ -99,8 +99,14 @@ public sealed partial class RegistryImpactRecalculationJob(
             {
                 // ⛔ B63: залежні — по аркушу (пропуск лише затверджених), а не «будь-який поданий знімає документ».
                 // B179 L2: зміна джерела несе ланку далі — споживач, що сам є джерелом, поставить наступну.
+                // ✎ B80 N5: перекриття адміністратора (затверджені теж) несе хто й чому — у журнал записів аркушів.
                 var jobId = request.IsSourceDocumentChange
-                    ? await trigger.RequestDependentsAsync(documentId, new PeriodKey(periodKey), request.Hop + 1, ct).ConfigureAwait(false)
+                    ? request.IncludeApproved
+                        ? await trigger.RequestDependentsAsync(
+                                documentId, new PeriodKey(periodKey), request.Hop + 1,
+                                new ApprovedRecalculationOverride(request.OverrideUserId ?? 0, request.OverrideReason ?? string.Empty), ct)
+                            .ConfigureAwait(false)
+                        : await trigger.RequestDependentsAsync(documentId, new PeriodKey(periodKey), request.Hop + 1, ct).ConfigureAwait(false)
                     : await trigger.RequestDependentsAsync(documentId, new PeriodKey(periodKey), ct).ConfigureAwait(false);
                 if (jobId is not null)
                 {

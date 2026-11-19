@@ -33,7 +33,11 @@ public sealed class ReopenDocumentHandler(
     IMaterializationScheduler? materialization = null,
     // ✎ B80 (N2a, T-B): повернення аркуша-джерела ІЗ ЗАТВЕРДЖЕНОГО — перерахунок залежних (лише за ApprovedOnly),
     // ПІСЛЯ коміту; `null` — тестові фабрики обробника.
-    ISourceApprovalChangeTrigger? sourceTrigger = null)
+    ISourceApprovalChangeTrigger? sourceTrigger = null,
+    // ✎ B80 (N5, D-554): повернення аркуша-джерела ІЗ ЗАТВЕРДЖЕНОГО, що зачепить затверджені залежні місяці, — за політикою
+    // зв'язки (підтвердження впливу / причина / відмова), запис підтвердження в журнал безпеки; `null` — тестові фабрики.
+    ISourceImpactAssessor? sourceImpact = null,
+    IAuditWriter? audit = null)
 {
     /// <summary>Право, без якого повернення в роботу неможливе (ФВ-6.12).</summary>
     public const string Permission = "Document.Reopen";
@@ -57,8 +61,24 @@ public sealed class ReopenDocumentHandler(
     /// <param name="sheetCopyId">Копія аркуша; <c>null</c> — оригінал.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <exception cref="BusinessRuleException">Період закритий — <c>ECR-PRD-4223</c>.</exception>
-    public async Task HandleAsync(
+    public Task HandleAsync(
         long documentId, int sheetDefId, int periodKey, string reason, long? sheetCopyId, CancellationToken ct)
+        => HandleAsync(documentId, sheetDefId, periodKey, reason, sheetCopyId, confirmedImpact: null, ct);
+
+    /// <summary>
+    /// Повертає аркуш або копію в <c>Draft</c>; <paramref name="confirmedImpact"/> — підтвердження впливу на залежні
+    /// документи (B80 N5), коли повернення ІЗ затвердженого зачепить затверджені залежні місяці.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="sheetDefId">Аркуш.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="reason">Причина; обов'язкова.</param>
+    /// <param name="sheetCopyId">Копія аркуша; <c>null</c> — оригінал.</param>
+    /// <param name="confirmedImpact">Підтвердження впливу; <c>null</c> — немає.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task HandleAsync(
+        long documentId, int sheetDefId, int periodKey, string reason, long? sheetCopyId,
+        SourceImpactConfirmation? confirmedImpact, CancellationToken ct)
     {
         var userId = currentUser.UserId
                      ?? throw new AccessDeniedException(
@@ -128,9 +148,12 @@ public sealed class ReopenDocumentHandler(
         // комітить перехід у Closed, тихо перекриваючи Reopen — конфлікту
         // немає, бо в `Period` немає RowVersion.
         var reopenedFromApproved = false;
+        // ✎ B80 N5: перекриття «й затверджені залежні» (право + причина перевірено в транзакції); після коміту — у тригер.
+        ApprovedRecalculationOverride? approvedOverride = null;
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
             reopenedFromApproved = false;
+            approvedOverride = null;
 
             // ⚠ Період береться з UPDLOCK ДО будь-яких змін (ФВ-1.10a) — тепер
             // блокування справді тримається до кінця транзакції.
@@ -155,6 +178,19 @@ public sealed class ReopenDocumentHandler(
 
             var fromStatus = state.Status;
             var now = clock.UtcNow;
+
+            // ✎ B80 (N5, D-554): повернення ІЗ затвердженого оригіналу — місяць джерела перестає бути затвердженим, затверджені
+            // залежні застарівають; за політикою зв'язки потрібне підтвердження впливу. До зміни стану: відмова відкочує.
+            if (sheetCopyId is null && fromStatus == DocumentStatus.Approved)
+            {
+                approvedOverride = await SourceImpactCheck
+                    .EnsureConfirmedAsync(
+                        sourceImpact, audit, documentId, sheetDefId, periodKey, SourceApprovalChange.Reopened,
+                        confirmedImpact, userId, now, currentUser.CorrelationId, innerCt,
+                        mayRecalculateApproved: PermissionCheck.IsGranted(profile, SourceImpactCheck.RecalculateApprovedPermission))
+                    .ConfigureAwait(false);
+            }
+
             state.Reopen(userId, reason, now);
 
             // ✎ B80 (T-B): лише вихід із Approved і лише оригінал; Reopen поданого джерело залежних не міняв.
@@ -193,8 +229,11 @@ public sealed class ReopenDocumentHandler(
         // ✎ B80 (T-B): після коміту; тригер сам вирішує за зв'язкою (ApprovedOnly) і не кидає на збій постановки.
         if (reopenedFromApproved && sourceTrigger is not null)
         {
-            await sourceTrigger
-                .OnSourceSheetApprovalChangedAsync(documentId, sheetDefId, periodKey, SourceApprovalChange.Reopened, userId, ct)
+            await (approvedOverride is { } over
+                    ? sourceTrigger.OnSourceSheetApprovalChangedAsync(
+                        documentId, sheetDefId, periodKey, SourceApprovalChange.Reopened, userId, over, ct)
+                    : sourceTrigger.OnSourceSheetApprovalChangedAsync(
+                        documentId, sheetDefId, periodKey, SourceApprovalChange.Reopened, userId, ct))
                 .ConfigureAwait(false);
         }
 

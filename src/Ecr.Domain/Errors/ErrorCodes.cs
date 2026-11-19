@@ -485,6 +485,21 @@ public static class ErrorCodes
     /// </remarks>
     public const string UnitContextualCoefficient = "ECR-UOM-4221";
 
+    // B80 N5: вплив правки документа-джерела на залежні документи
+
+    /// <summary>
+    /// B80 N5 (D-554): дія над документом-джерелом (затвердження, повернення із затвердженого) зачіпає затверджені місяці
+    /// залежних документів, а підтвердження немає чи воно на застарілий вплив — <c>409</c>.
+    /// <c>err.ECR-SRC-0409.impactConfirmationRequired</c> | <c>err.ECR-SRC-0409.impactChanged</c>.
+    /// </summary>
+    public const string SourceImpactConflict = "ECR-SRC-0409";
+
+    /// <summary>
+    /// B80 N5 (D-554): політика зв'язки забороняє дію (<c>err.ECR-SRC-0422.sourceImpactBlocked</c>, <c>Block</c>) або
+    /// підтвердженню бракує причини (<c>err.ECR-SRC-0422.impactReasonRequired</c>, <c>ConfirmWithReason</c>) — <c>422</c>.
+    /// </summary>
+    public const string SourceImpactRefused = "ECR-SRC-0422";
+
     // Розрахунки
 
     /// <summary>

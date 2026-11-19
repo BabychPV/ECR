@@ -99,16 +99,37 @@ public sealed class CalculationTrigger(
     /// B179 L2: ланка їде в payload (<c>SourceHop</c>); перерахунок споживача передає її хуку завершення. Ціль та сама
     /// (<see cref="DependentsTargetOf"/>): злиття лишає ланку останньої постановки.
     /// </remarks>
-    public async Task<string?> RequestDependentsAsync(long documentId, PeriodKey periodKey, int sourceHop, CancellationToken ct)
+    public Task<string?> RequestDependentsAsync(long documentId, PeriodKey periodKey, int sourceHop, CancellationToken ct)
+        => RequestDependentsAsync(documentId, periodKey, sourceHop, approvedOverride: null, ct);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ✎ B80 N5 (D-554): з перекриттям адміністратора — «рахувати нічого, бо всі аркуші затверджені» НЕ відмовляє
+    /// (затверджені якраз і перераховуються); стан періоду й архів перевіряються як завжди. Ціль черги — своя
+    /// (<see cref="DependentsApprovedTargetOf"/>): задача з перекриттям не зливається з задачею без нього і навпаки.
+    /// </remarks>
+    public async Task<string?> RequestDependentsAsync(
+        long documentId, PeriodKey periodKey, int sourceHop, ApprovedRecalculationOverride? approvedOverride, CancellationToken ct)
     {
-        if (!await WritableAsync(documentId, periodKey, ct).ConfigureAwait(false))
+        if (!await WritableAsync(documentId, periodKey, ct, ignoreAllApproved: approvedOverride is not null).ConfigureAwait(false))
         {
             return null;
         }
 
-        return await EnqueueSubmittedAsync(DependentsTargetOf(documentId, periodKey), documentId, periodKey, ct, sourceHop)
+        return await EnqueueSubmittedAsync(
+                approvedOverride is null ? DependentsTargetOf(documentId, periodKey) : DependentsApprovedTargetOf(documentId, periodKey),
+                documentId, periodKey, ct, sourceHop, approvedOverride)
             .ConfigureAwait(false);
     }
+
+    /// <summary>Ціль перерахунку залежних З перекриттям адміністратора (затверджені теж): окрема від <see cref="DependentsTargetOf"/>.</summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <returns><c>doc{id}-p{період}-dependents-approved</c>.</returns>
+    public static string DependentsApprovedTargetOf(long documentId, PeriodKey periodKey)
+        => string.Create(
+            System.Globalization.CultureInfo.InvariantCulture,
+            $"{RecalculateDocumentHandler.TargetOf(documentId, periodKey)}-dependents-approved");
 
     /// <summary>Ціль перерахунку залежних: окрема від автоперерахунку збору й кнопки (див. <see cref="RequestDependentsAsync(long, Ecr.Domain.ValueObjects.PeriodKey, CancellationToken)"/>).</summary>
     /// <param name="documentId">Документ.</param>
@@ -145,7 +166,7 @@ public sealed class CalculationTrigger(
     /// піднімає закритий місяць до <c>Grace</c>, тож самого стану періоду не досить.
     /// </para>
     /// </remarks>
-    private async Task<bool> WritableAsync(long documentId, PeriodKey periodKey, CancellationToken ct)
+    private async Task<bool> WritableAsync(long documentId, PeriodKey periodKey, CancellationToken ct, bool ignoreAllApproved = false)
     {
         var state = await periods.FindPeriodStateAsync(documentId, periodKey.Value, ct).ConfigureAwait(false);
         if (state is not { } periodState || periodState == PeriodState.Scheduled
@@ -157,6 +178,11 @@ public sealed class CalculationTrigger(
         if (await periods.IsDocumentProjectArchivedOrArchivingAsync(documentId, ct).ConfigureAwait(false))
         {
             return false;
+        }
+
+        if (ignoreAllApproved)
+        {
+            return true;
         }
 
         var sheets = await workflow.GetSheetsAsync(documentId, periodKey, ct).ConfigureAwait(false);
@@ -194,9 +220,25 @@ public sealed class CalculationTrigger(
     /// перераховуються з журналом і позначкою, затверджені пропускає сама задача.
     /// </remarks>
     private Task<string> EnqueueSubmittedAsync(
-        string target, long documentId, PeriodKey periodKey, CancellationToken ct, int sourceHop = 0)
+        string target, long documentId, PeriodKey periodKey, CancellationToken ct, int sourceHop = 0,
+        ApprovedRecalculationOverride? approvedOverride = null)
         => jobs.EnqueueCoalescedAsync<IRecalculationJob>(
             target,
+            // B80 N5: перекриття адміністратора — затверджені теж (IncludeApproved) з автором і причиною для журналу.
+            approvedOverride is not null
+                ? (object)new
+                {
+                    DocumentId = documentId,
+                    PeriodKey = periodKey.Value,
+                    TriggeredByUserId = (int?)null,
+                    SheetDefId = (int?)null,
+                    RecalculateSubmitted = true,
+                    SourceHop = sourceHop,
+                    IncludeApproved = true,
+                    OverrideUserId = (int?)approvedOverride.UserId,
+                    OverrideReason = approvedOverride.Reason,
+                }
+                :
             // B179 L2: ланка — лише коли вона є (форма payload без ланки — та сама, що доти).
             sourceHop > 0
                 ? (object)new

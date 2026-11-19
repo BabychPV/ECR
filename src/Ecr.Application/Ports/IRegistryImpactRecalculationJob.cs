@@ -38,6 +38,13 @@ public interface IRegistryImpactRecalculationJob : IBackgroundJob;
 /// B179 L2: ланка ланцюжка джерел (0 — зміна людиною; споживач, що сам є джерелом, ставить наступну з +1); стеля —
 /// <see cref="MaxHops"/>.
 /// </param>
+/// <param name="IncludeApproved">
+/// B80 N5 (D-554, рішення людини 19.11): явне перекриття адміністратора — залежні перераховуються і ЗАТВЕРДЖЕНІ
+/// (право <c>Calculation.RecalculateApprovedDependents</c> перевіряє ендпоінт). Окрема ціль черги
+/// (<see cref="RegistryImpactRecalculationTarget.ForSourceChange"/>): не зливається з постановкою без нього.
+/// </param>
+/// <param name="OverrideUserId">Хто ввімкнув перекриття.</param>
+/// <param name="OverrideReason">Причина перекриття (обов'язкова, в журнал записів аркушів).</param>
 public sealed record RegistryImpactRecalculationRequest(
     int RegistryDefId,
     IReadOnlyList<long> DocumentIds,
@@ -45,7 +52,10 @@ public sealed record RegistryImpactRecalculationRequest(
     int? Year = null,
     int? BindingId = null,
     int? Month = null,
-    int Hop = 0)
+    int Hop = 0,
+    bool IncludeApproved = false,
+    int? OverrideUserId = null,
+    string? OverrideReason = null)
 {
     /// <summary>B179 L2: стеля ланцюжка «джерело → споживач-джерело → …» (як <c>CrossPeriodFanOut.MaxHops</c>).</summary>
     public const int MaxHops = 8;
@@ -124,13 +134,20 @@ public static class RegistryImpactRecalculationTarget
     /// <param name="bindingId">Зв'язка.</param>
     /// <param name="year">Рік.</param>
     /// <param name="month">Місяць; <c>null</c> — увесь рік.</param>
+    /// <param name="includeApproved">
+    /// B80 N5: перекриття адміністратора («й затверджені») — суфікс <c>-approved</c>: задача з перекриттям не зливається з
+    /// задачею без нього (злиття лишає payload ОДНІЄЇ постановки).
+    /// </param>
     /// <returns>Ключ цілі.</returns>
     /// <remarks>
     /// ⛔ Місяць — у КЛЮЧІ, а не в payload: злиття лишає payload однієї постановки, тож сплеск правок одного місяця дає
     /// одну задачу, а правки різних місяців — окремі (≤ 13 цілей на рік). Ні документа, ні ланки в ключі немає.
     /// </remarks>
-    public static string ForSourceChange(int bindingId, int year, int? month)
-        => month is { } m
+    public static string ForSourceChange(int bindingId, int year, int? month, bool includeApproved = false)
+    {
+        var key = month is { } m
             ? string.Create(CultureInfo.InvariantCulture, $"source-change-b{bindingId}-y{year}-m{m}")
             : string.Create(CultureInfo.InvariantCulture, $"source-change-b{bindingId}-y{year}");
+        return includeApproved ? key + "-approved" : key;
+    }
 }

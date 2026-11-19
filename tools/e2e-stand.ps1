@@ -646,6 +646,9 @@ try {
             'Calculation.View', 'Calculation.EditFormula', 'Calculation.Publish', 'Calculation.Recalculate',
             # ✎ B179 L5: `dependencyGraph.spec` відкриває екран «Граф залежностей» і читає граф/зв'язки (перемикачів не чіпає).
             'Calculation.ManageSourceBinding',
+            # ✎ B80 N5 (D-554): `sourceImpact.spec` — галочка «перерахувати також затверджені» в діалозі впливу й явний
+            # перерахунок затверджених залежних; без права галочки немає, а ендпоінт дає 403. Лише тестова роль стенда.
+            'Calculation.RecalculateApprovedDependents',
             'Security.ManageUsers', 'Security.ManageRoles', 'Security.ViewAudit',
             'Security.Simulate',
             'Report.ViewRegulatory', 'Report.BuildSnapshot', 'Report.ViewCampaign',
