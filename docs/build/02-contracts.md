@@ -5109,6 +5109,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/health/partitions/script` | `System.ViewHealth` | 5 |
 | `GET` | `/api/v1/document-source-bindings` | `Calculation.ManageSourceBinding` | 5 |
 | `PUT` | `/api/v1/document-source-bindings/{id}/source-state` | `Calculation.ManageSourceBinding` | 5 |
+| `PUT` | `/api/v1/document-source-bindings/{id}/flags` | `Calculation.ManageSourceBinding` | 5 |
+| `GET` | `/api/v1/dependency-graph` | `Calculation.ManageSourceBinding` | 5 |
 | `GET` | `/api/v1/jobs` | `System.ViewHealth` | 5 |
 | `GET` | `/api/v1/jobs?mine=true` | — (власні задачі) | 5 |
 | `GET` | `/api/v1/jobs/summary` | `System.ViewHealth` (або `mine=true` — власні задачі) | 5 |

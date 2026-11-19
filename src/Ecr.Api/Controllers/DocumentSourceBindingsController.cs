@@ -13,7 +13,8 @@ namespace Ecr.Api.Controllers;
 [Authorize]
 public sealed class DocumentSourceBindingsController(
     ListDocumentSourceBindingsHandler list,
-    SwitchDocumentSourceStateHandler switchState) : ControllerBase
+    SwitchDocumentSourceStateHandler switchState,
+    SwitchDocumentSourceFlagsHandler switchFlags) : ControllerBase
 {
     /// <summary>Перелік зв'язок зі станом-воротами і дієвим читанням. Право <c>Calculation.ManageSourceBinding</c>.</summary>
     /// <param name="ct">Токен скасування.</param>
@@ -46,5 +47,30 @@ public sealed class DocumentSourceBindingsController(
     {
         ArgumentNullException.ThrowIfNull(request);
         return Ok(await switchState.HandleAsync(id, request, ct).ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// Перемикання бітів зв'язки: <c>readFromDocument</c> (читати склад з документа-джерела) і
+    /// <c>recalculateDependents</c> (аварійний вимикач автоматичних залежних). Право
+    /// <c>Calculation.ManageSourceBinding</c>; подія <c>DocumentSourceBindingChanged</c> (<c>kind = flags</c>) у журналі безпеки.
+    /// </summary>
+    /// <remarks>
+    /// Хоч один біт має бути заданий (інакше 422 <c>ECR-REQ-0422</c> <c>sourceFlagsInvalid</c>). Зміна
+    /// <c>readFromDocument</c> за ввімкненого <c>recalculateDependents</c> ставить злитий перерахунок залежних за кожен
+    /// рік джерела.
+    /// </remarks>
+    /// <param name="id">Зв'язка.</param>
+    /// <param name="request">Нові біти.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpPut("{id:int}/flags")]
+    [ProducesResponseType<SwitchDocumentSourceFlagsResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<SwitchDocumentSourceFlagsResponse>> SwitchFlags(
+        int id, [FromBody] SwitchDocumentSourceFlagsRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return Ok(await switchFlags.HandleAsync(id, request, ct).ConfigureAwait(false));
     }
 }

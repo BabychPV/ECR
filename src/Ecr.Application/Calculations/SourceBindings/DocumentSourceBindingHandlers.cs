@@ -57,6 +57,18 @@ public sealed record SwitchDocumentSourceStateRequest(string SourceState);
 public sealed record SwitchDocumentSourceStateResponse(
     DocumentSourceBindingDto Binding, bool Changed, IReadOnlyList<int> QueuedYears);
 
+/// <summary>Запит перемикання бітів зв'язки (B179 L5); <c>null</c> — біт не чіпати, хоч один має бути заданий.</summary>
+/// <param name="ReadFromDocument">Читати склад з документа-джерела (<c>true</c>) чи з рядків довідника (<c>false</c>).</param>
+/// <param name="RecalculateDependents">Ставити автоматичний перерахунок залежних (аварійний вимикач).</param>
+public sealed record SwitchDocumentSourceFlagsRequest(bool? ReadFromDocument, bool? RecalculateDependents);
+
+/// <summary>Результат перемикання бітів.</summary>
+/// <param name="Binding">Зв'язка після перемикання.</param>
+/// <param name="Changed"><c>false</c> — біти вже були такими; нічого не записано й не поставлено.</param>
+/// <param name="QueuedYears">Роки, за які поставлено перерахунок залежних.</param>
+public sealed record SwitchDocumentSourceFlagsResponse(
+    DocumentSourceBindingDto Binding, bool Changed, IReadOnlyList<int> QueuedYears);
+
 /// <summary>Спільне для обробників зв'язок.</summary>
 public static class DocumentSourceBindings
 {
@@ -302,5 +314,130 @@ public sealed class SwitchDocumentSourceStateHandler(
             ErrorCodes.MethodologyConflict,
             $"Зв'язка {id}: «лише затверджене» не вмикається ({messageKey}, рік {year}).",
             details);
+    }
+}
+
+/// <summary>
+/// <c>PUT /api/v1/document-source-bindings/{id}/flags</c> — перемикання бітів «читати з документа» і «перераховувати
+/// залежних» (B179 L5). Право <see cref="DocumentSourceBindings.Permission"/>.
+/// </summary>
+/// <remarks>
+/// <para>
+/// ⚠ Справжня зміна: подія <see cref="DocumentSourceBindings.ChangedEventType"/> у журналі безпеки в тій самій транзакції
+/// (<c>kind = flags</c>, старі й нові біти, автор). Зміна «читати з документа» міняє склад, який бачать споживачі, тож —
+/// коли перерахунок залежних увімкнено — ставить ту саму злиту задачу на кожен рік джерела, що й перемикання стану.
+/// Зміна лише «перераховувати залежних» перерахунку не ставить (залежні документи, що застаріли за вимкнення,
+/// адміністратор перераховує сам).
+/// </para>
+/// <para>⚠ Процесний кеш воріт хука джерела скидається після коміту.</para>
+/// </remarks>
+public sealed class SwitchDocumentSourceFlagsHandler(
+    IDocumentSourceBindingStore store,
+    IDocumentSourceFlagOverrides overrides,
+    IAccessDecisionService access,
+    ICurrentUser currentUser,
+    IUnitOfWork uow,
+    IAuditWriter audit,
+    IBackgroundJobScheduler jobs,
+    IClock clock,
+    ISourceBindingGateInvalidation? gate = null)
+{
+    /// <summary>Право (те саме, що <see cref="DocumentSourceBindings.Permission"/>).</summary>
+    public const string Permission = "Calculation.ManageSourceBinding";
+
+    /// <summary>Перемикає.</summary>
+    /// <param name="id">Зв'язка.</param>
+    /// <param name="request">Запит.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task<SwitchDocumentSourceFlagsResponse> HandleAsync(
+        int id, SwitchDocumentSourceFlagsRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
+        var userId = currentUser.UserId
+                     ?? throw new AccessDeniedException(
+                         ErrorCodes.Unauthorized, "Потрібна автентифікація.",
+                         new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
+
+        if (request.ReadFromDocument is null && request.RecalculateDependents is null)
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.RequestInvalid,
+                "readFromDocument або recalculateDependents: потрібен хоч один.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REQ-0422.sourceFlagsInvalid",
+                    ["field"] = "readFromDocument",
+                });
+        }
+
+        var changed = false;
+        var queued = new List<int>();
+        await uow.ExecuteInTransactionAsync(async innerCt =>
+        {
+            var binding = await store.LockAsync(id, innerCt).ConfigureAwait(false)
+                          ?? throw DocumentSourceBindings.NotFound(id);
+
+            var oldRead = binding.ReadFromDocument;
+            var oldRecalculate = binding.RecalculateDependents;
+            changed = binding.SetFlags(request.ReadFromDocument, request.RecalculateDependents, userId, clock.UtcNow);
+            if (!changed)
+            {
+                return;
+            }
+
+            await store.SaveAsync(innerCt).ConfigureAwait(false);
+
+            if (binding.ReadFromDocument != oldRead && binding.RecalculateDependents)
+            {
+                foreach (var year in await store.SourceYearsAsync(id, innerCt).ConfigureAwait(false))
+                {
+                    await jobs.EnqueueCoalescedAsync<IRegistryImpactRecalculationJob>(
+                            RegistryImpactRecalculationTarget.ForSourceChange(binding.Id, year, month: null),
+                            new RegistryImpactRecalculationRequest(
+                                binding.RegistryDefId,
+                                [],
+                                string.Create(
+                                    CultureInfo.InvariantCulture,
+                                    $"{binding.Code}: readFromDocument {oldRead} -> {binding.ReadFromDocument}"),
+                                year,
+                                binding.Id),
+                            innerCt,
+                            createdByUserId: userId)
+                        .ConfigureAwait(false);
+                    queued.Add(year);
+                }
+            }
+
+            await audit.WriteSecurityEventAsync(
+                new SecurityEventRecord(
+                    clock.UtcNow,
+                    DocumentSourceBindings.ChangedEventType,
+                    TargetUserId: null,
+                    TargetRoleId: null,
+                    JsonSerializer.Serialize(new
+                    {
+                        kind = "flags",
+                        bindingId = id,
+                        code = binding.Code,
+                        oldReadFromDocument = oldRead,
+                        newReadFromDocument = binding.ReadFromDocument,
+                        oldRecalculateDependents = oldRecalculate,
+                        newRecalculateDependents = binding.RecalculateDependents,
+                        queuedYears = queued,
+                    }),
+                    userId,
+                    currentUser.CorrelationId),
+                innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
+
+        if (changed)
+        {
+            gate?.Invalidate();
+        }
+
+        var view = (await store.ListAsync(ct).ConfigureAwait(false)).FirstOrDefault(v => v.Id == id)
+                   ?? throw DocumentSourceBindings.NotFound(id);
+        return new SwitchDocumentSourceFlagsResponse(DocumentSourceBindings.ToDto(view, overrides), changed, queued);
     }
 }

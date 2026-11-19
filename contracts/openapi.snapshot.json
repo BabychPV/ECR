@@ -6868,6 +6868,303 @@
         ],
         "type": "object"
       },
+      "DependencyCycleDto": {
+        "description": "Цикл: сильно зв'язна компонента шаблонів.",
+        "properties": {
+          "templateIds": {
+            "description": "Шаблони циклу.",
+            "items": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "templateIds"
+        ],
+        "type": "object"
+      },
+      "DependencyDiagnosticDto": {
+        "description": "Зауваження побудови графа.",
+        "properties": {
+          "detail": {
+            "description": "Що саме.",
+            "type": "string"
+          },
+          "key": {
+            "description": "`cycle`, `astFallback`, `parseFailed`, `unknownRegistry`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "detail"
+        ],
+        "type": "object"
+      },
+      "DependencyEdgeDto": {
+        "description": "Ребро графа: дані течуть від `From` до `To`.",
+        "properties": {
+          "evidence": {
+            "description": "Докази (не більше int GetDependencyGraphHandler.MaxEvidencePerEdge).",
+            "items": {
+              "$ref": "#/components/schemas/DependencyEvidenceDto"
+            },
+            "type": "array"
+          },
+          "evidenceTotal": {
+            "description": "Скільки доказів усього (більше за Evidence — перелік урізано).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "fromId": {
+            "description": "Id вузла-початку.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "fromKind": {
+            "description": "Вид вузла-початку.",
+            "type": "string"
+          },
+          "kind": {
+            "description": "`fills`, `templateFormula`, `methodology`, `writesInto`, `registryRule`, `methodologyResult`.",
+            "type": "string"
+          },
+          "monthMask": {
+            "description": "Для `year`: біти 1…12 літеральних місяців; 0 — увесь рік.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "scope": {
+            "description": "Обсяг за періодом: `month`, `year` (з MonthMask) або `all`.",
+            "type": "string"
+          },
+          "toId": {
+            "description": "Id вузла-кінця.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "toKind": {
+            "description": "Вид вузла-кінця.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "fromKind",
+          "fromId",
+          "toKind",
+          "toId",
+          "scope",
+          "monthMask",
+          "evidence",
+          "evidenceTotal"
+        ],
+        "type": "object"
+      },
+      "DependencyEvidenceDto": {
+        "description": "Доказ ребра: звідки відомо.",
+        "properties": {
+          "detail": {
+            "description": "Таблиця/колонка або код формули методології.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "id": {
+            "description": "Id формули / версії методології / прив'язки / правила.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "source": {
+            "description": "`formulaDependency`, `ast`, `lookupColumn`, `registryUse`, `calculationBinding`,\n        `sourceBinding`, `registryRule`, `methodologyDependency`.",
+            "type": "string"
+          },
+          "versionId": {
+            "description": "Версія шаблону (для формул шаблону); інакше `null`.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "source",
+          "id",
+          "versionId",
+          "detail"
+        ],
+        "type": "object"
+      },
+      "DependencyGraphDto": {
+        "description": "Граф залежностей документів для екрана адміністратора (B179 L4).",
+        "properties": {
+          "cycles": {
+            "description": "Цикли шаблонів (зауваження; публікація, що їх замикає, відхиляється).",
+            "items": {
+              "$ref": "#/components/schemas/DependencyCycleDto"
+            },
+            "type": "array"
+          },
+          "diagnostics": {
+            "description": "Зауваження побудови.",
+            "items": {
+              "$ref": "#/components/schemas/DependencyDiagnosticDto"
+            },
+            "type": "array"
+          },
+          "edges": {
+            "description": "Ребра з доказами.",
+            "items": {
+              "$ref": "#/components/schemas/DependencyEdgeDto"
+            },
+            "type": "array"
+          },
+          "levels": {
+            "description": "Рівні шаблонів у порядку обчислення.",
+            "items": {
+              "$ref": "#/components/schemas/DependencyLevelDto"
+            },
+            "type": "array"
+          },
+          "nodes": {
+            "description": "Вузли: шаблони, довідники, методології.",
+            "items": {
+              "$ref": "#/components/schemas/DependencyNodeDto"
+            },
+            "type": "array"
+          },
+          "revision": {
+            "description": "Ревізія даних, з яких побудовано граф.",
+            "type": "string"
+          },
+          "templateDependencies": {
+            "description": "Згорнуті ребра «джерело → споживач» зі зв'язкою.",
+            "items": {
+              "$ref": "#/components/schemas/DependencyTemplateLinkDto"
+            },
+            "type": "array"
+          },
+          "truncated": {
+            "description": "`true` — ребер більше за стелю int GetDependencyGraphHandler.MaxEdges, перелік урізано.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "revision",
+          "nodes",
+          "edges",
+          "templateDependencies",
+          "levels",
+          "cycles",
+          "diagnostics",
+          "truncated"
+        ],
+        "type": "object"
+      },
+      "DependencyLevelDto": {
+        "description": "Рівень графа шаблонів: усі шаблони рівня обчислюються після шаблонів нижчих рівнів.",
+        "properties": {
+          "level": {
+            "description": "Номер рівня з 0 (без вхідних ребер).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "templateIds": {
+            "description": "Шаблони рівня.",
+            "items": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "level",
+          "templateIds"
+        ],
+        "type": "object"
+      },
+      "DependencyNodeDto": {
+        "description": "Вузол графа залежностей.",
+        "properties": {
+          "code": {
+            "description": "Код.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Id шаблону / довідника / методології.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "kind": {
+            "description": "`template`, `registry` або `methodology`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "code"
+        ],
+        "type": "object"
+      },
+      "DependencyTemplateLinkDto": {
+        "description": "Згорнуте ребро «документ шаблону-джерела → документи шаблону-споживача».",
+        "properties": {
+          "bindingId": {
+            "description": "Зв'язка джерела (`/document-source-bindings`).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "consumerTemplateId": {
+            "description": "Шаблон-споживач.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "monthMask": {
+            "description": "Для `year`: біти літеральних місяців; 0 — увесь рік.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "registryDefId": {
+            "description": "Довідник зв'язки.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "scope": {
+            "description": "Обсяг за періодом: `month`, `year` або `all`.",
+            "type": "string"
+          },
+          "sourceTemplateId": {
+            "description": "Шаблон-джерело.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "viaMethodology": {
+            "description": "Споживача знайдено за методологією.",
+            "type": "boolean"
+          },
+          "viaTemplateFormula": {
+            "description": "Споживача знайдено за формулою шаблону.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "sourceTemplateId",
+          "consumerTemplateId",
+          "bindingId",
+          "registryDefId",
+          "scope",
+          "monthMask",
+          "viaTemplateFormula",
+          "viaMethodology"
+        ],
+        "type": "object"
+      },
       "DependentMonthsBlockDto": {
         "description": "✎ B79 (квіз 16.11): аркуш, чиї затверджені місяці залежать від стовпця.",
         "properties": {
@@ -30041,6 +30338,57 @@
         ],
         "type": "object"
       },
+      "SwitchDocumentSourceFlagsRequest": {
+        "description": "Запит перемикання бітів зв'язки (B179 L5); `null` — біт не чіпати, хоч один має бути заданий.",
+        "properties": {
+          "readFromDocument": {
+            "description": "Читати склад з документа-джерела (`true`) чи з рядків довідника (`false`).",
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "recalculateDependents": {
+            "description": "Ставити автоматичний перерахунок залежних (аварійний вимикач).",
+            "type": [
+              "null",
+              "boolean"
+            ]
+          }
+        },
+        "required": [
+          "readFromDocument",
+          "recalculateDependents"
+        ],
+        "type": "object"
+      },
+      "SwitchDocumentSourceFlagsResponse": {
+        "description": "Результат перемикання бітів.",
+        "properties": {
+          "binding": {
+            "$ref": "#/components/schemas/DocumentSourceBindingDto",
+            "description": "Зв'язка після перемикання."
+          },
+          "changed": {
+            "description": "`false` — біти вже були такими; нічого не записано й не поставлено.",
+            "type": "boolean"
+          },
+          "queuedYears": {
+            "description": "Роки, за які поставлено перерахунок залежних.",
+            "items": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "binding",
+          "changed",
+          "queuedYears"
+        ],
+        "type": "object"
+      },
       "SwitchDocumentSourceStateRequest": {
         "description": "Запит перемикання стану-воріт.",
         "properties": {
@@ -38277,6 +38625,56 @@
         ]
       }
     },
+    "/api/v1/dependency-graph": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyGraphDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyGraphDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyGraphDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "Граф: вузли (шаблони, довідники, методології), ребра з видом і доказами, згорнуті зв'язки «джерело → споживач»,\nрівні порядку обчислення, цикли й зауваження побудови; `revision` — ревізія вхідних даних. Право\n`Calculation.ManageSourceBinding`.",
+        "tags": [
+          "DependencyGraph"
+        ]
+      }
+    },
     "/api/v1/document-source-bindings": {
       "get": {
         "responses": {
@@ -38331,6 +38729,131 @@
           }
         },
         "summary": "Перелік зв'язок зі станом-воротами і дієвим читанням. Право `Calculation.ManageSourceBinding`.",
+        "tags": [
+          "DocumentSourceBindings"
+        ]
+      }
+    },
+    "/api/v1/document-source-bindings/{id}/flags": {
+      "put": {
+        "description": "Хоч один біт має бути заданий (інакше 422 `ECR-REQ-0422` `sourceFlagsInvalid`). Зміна\n`readFromDocument` за ввімкненого `recalculateDependents` ставить злитий перерахунок залежних за кожен\nрік джерела.",
+        "parameters": [
+          {
+            "description": "Зв'язка.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SwitchDocumentSourceFlagsRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SwitchDocumentSourceFlagsRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SwitchDocumentSourceFlagsRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwitchDocumentSourceFlagsResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwitchDocumentSourceFlagsResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwitchDocumentSourceFlagsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Перемикання бітів зв'язки: `readFromDocument` (читати склад з документа-джерела) і\n`recalculateDependents` (аварійний вимикач автоматичних залежних). Право\n`Calculation.ManageSourceBinding`; подія `DocumentSourceBindingChanged` (`kind = flags`) у журналі безпеки.",
         "tags": [
           "DocumentSourceBindings"
         ]
@@ -77122,6 +77645,9 @@
     },
     {
       "name": "DataSources"
+    },
+    {
+      "name": "DependencyGraph"
     },
     {
       "name": "DocumentEditAssignments"

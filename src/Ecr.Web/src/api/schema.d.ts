@@ -3055,6 +3055,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/dependency-graph": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Граф: вузли (шаблони, довідники, методології), ребра з видом і доказами, згорнуті зв'язки «джерело → споживач»,
+         *     рівні порядку обчислення, цикли й зауваження побудови; `revision` — ревізія вхідних даних. Право
+         *     `Calculation.ManageSourceBinding`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DependencyGraphDto"];
+                        "text/json": components["schemas"]["DependencyGraphDto"];
+                        "text/plain": components["schemas"]["DependencyGraphDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/document-source-bindings": {
         parameters: {
             query?: never;
@@ -3097,6 +3148,94 @@ export interface paths {
             };
         };
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/document-source-bindings/{id}/flags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Перемикання бітів зв'язки: `readFromDocument` (читати склад з документа-джерела) і
+         *     `recalculateDependents` (аварійний вимикач автоматичних залежних). Право
+         *     `Calculation.ManageSourceBinding`; подія `DocumentSourceBindingChanged` (`kind = flags`) у журналі безпеки.
+         * @description Хоч один біт має бути заданий (інакше 422 `ECR-REQ-0422` `sourceFlagsInvalid`). Зміна
+         *     `readFromDocument` за ввімкненого `recalculateDependents` ставить злитий перерахунок залежних за кожен
+         *     рік джерела.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Зв'язка. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SwitchDocumentSourceFlagsRequest"];
+                    "application/json": components["schemas"]["SwitchDocumentSourceFlagsRequest"];
+                    "text/json": components["schemas"]["SwitchDocumentSourceFlagsRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SwitchDocumentSourceFlagsResponse"];
+                        "text/json": components["schemas"]["SwitchDocumentSourceFlagsResponse"];
+                        "text/plain": components["schemas"]["SwitchDocumentSourceFlagsResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
         post?: never;
         delete?: never;
         options?: never;
@@ -33685,6 +33824,144 @@ export interface components {
             /** @description Задача перерахунку, поставлена видаленням; `null` — таблиця без колонок. */
             recalculationJobId: null | string;
         };
+        /** @description Цикл: сильно зв'язна компонента шаблонів. */
+        DependencyCycleDto: {
+            /** @description Шаблони циклу. */
+            templateIds: number[];
+        };
+        /** @description Зауваження побудови графа. */
+        DependencyDiagnosticDto: {
+            /** @description Що саме. */
+            detail: string;
+            /** @description `cycle`, `astFallback`, `parseFailed`, `unknownRegistry`. */
+            key: string;
+        };
+        /** @description Ребро графа: дані течуть від `From` до `To`. */
+        DependencyEdgeDto: {
+            /** @description Докази (не більше int GetDependencyGraphHandler.MaxEvidencePerEdge). */
+            evidence: components["schemas"]["DependencyEvidenceDto"][];
+            /**
+             * Format: int32
+             * @description Скільки доказів усього (більше за Evidence — перелік урізано).
+             */
+            evidenceTotal: number;
+            /**
+             * Format: int32
+             * @description Id вузла-початку.
+             */
+            fromId: number;
+            /** @description Вид вузла-початку. */
+            fromKind: string;
+            /** @description `fills`, `templateFormula`, `methodology`, `writesInto`, `registryRule`, `methodologyResult`. */
+            kind: string;
+            /**
+             * Format: int32
+             * @description Для `year`: біти 1…12 літеральних місяців; 0 — увесь рік.
+             */
+            monthMask: number;
+            /** @description Обсяг за періодом: `month`, `year` (з MonthMask) або `all`. */
+            scope: string;
+            /**
+             * Format: int32
+             * @description Id вузла-кінця.
+             */
+            toId: number;
+            /** @description Вид вузла-кінця. */
+            toKind: string;
+        };
+        /** @description Доказ ребра: звідки відомо. */
+        DependencyEvidenceDto: {
+            /** @description Таблиця/колонка або код формули методології. */
+            detail: null | string;
+            /**
+             * Format: int32
+             * @description Id формули / версії методології / прив'язки / правила.
+             */
+            id: number;
+            /** @description `formulaDependency`, `ast`, `lookupColumn`, `registryUse`, `calculationBinding`,
+             *             `sourceBinding`, `registryRule`, `methodologyDependency`. */
+            source: string;
+            /**
+             * Format: int32
+             * @description Версія шаблону (для формул шаблону); інакше `null`.
+             */
+            versionId: null | number;
+        };
+        /** @description Граф залежностей документів для екрана адміністратора (B179 L4). */
+        DependencyGraphDto: {
+            /** @description Цикли шаблонів (зауваження; публікація, що їх замикає, відхиляється). */
+            cycles: components["schemas"]["DependencyCycleDto"][];
+            /** @description Зауваження побудови. */
+            diagnostics: components["schemas"]["DependencyDiagnosticDto"][];
+            /** @description Ребра з доказами. */
+            edges: components["schemas"]["DependencyEdgeDto"][];
+            /** @description Рівні шаблонів у порядку обчислення. */
+            levels: components["schemas"]["DependencyLevelDto"][];
+            /** @description Вузли: шаблони, довідники, методології. */
+            nodes: components["schemas"]["DependencyNodeDto"][];
+            /** @description Ревізія даних, з яких побудовано граф. */
+            revision: string;
+            /** @description Згорнуті ребра «джерело → споживач» зі зв'язкою. */
+            templateDependencies: components["schemas"]["DependencyTemplateLinkDto"][];
+            /** @description `true` — ребер більше за стелю int GetDependencyGraphHandler.MaxEdges, перелік урізано. */
+            truncated: boolean;
+        };
+        /** @description Рівень графа шаблонів: усі шаблони рівня обчислюються після шаблонів нижчих рівнів. */
+        DependencyLevelDto: {
+            /**
+             * Format: int32
+             * @description Номер рівня з 0 (без вхідних ребер).
+             */
+            level: number;
+            /** @description Шаблони рівня. */
+            templateIds: number[];
+        };
+        /** @description Вузол графа залежностей. */
+        DependencyNodeDto: {
+            /** @description Код. */
+            code: string;
+            /**
+             * Format: int32
+             * @description Id шаблону / довідника / методології.
+             */
+            id: number;
+            /** @description `template`, `registry` або `methodology`. */
+            kind: string;
+        };
+        /** @description Згорнуте ребро «документ шаблону-джерела → документи шаблону-споживача». */
+        DependencyTemplateLinkDto: {
+            /**
+             * Format: int32
+             * @description Зв'язка джерела (`/document-source-bindings`).
+             */
+            bindingId: number;
+            /**
+             * Format: int32
+             * @description Шаблон-споживач.
+             */
+            consumerTemplateId: number;
+            /**
+             * Format: int32
+             * @description Для `year`: біти літеральних місяців; 0 — увесь рік.
+             */
+            monthMask: number;
+            /**
+             * Format: int32
+             * @description Довідник зв'язки.
+             */
+            registryDefId: number;
+            /** @description Обсяг за періодом: `month`, `year` або `all`. */
+            scope: string;
+            /**
+             * Format: int32
+             * @description Шаблон-джерело.
+             */
+            sourceTemplateId: number;
+            /** @description Споживача знайдено за методологією. */
+            viaMethodology: boolean;
+            /** @description Споживача знайдено за формулою шаблону. */
+            viaTemplateFormula: boolean;
+        };
         /** @description ✎ B79 (квіз 16.11): аркуш, чиї затверджені місяці залежать від стовпця. */
         DependentMonthsBlockDto: {
             /** @description Ключі періодів затверджених місяців аркуша (`Рік*100+№`), за зростанням. */
@@ -44391,6 +44668,22 @@ export interface components {
              * @description Період, який подасть «Подати»: найраніший неподаний `Open`/`Grace`; `null` — подавати нічого.
              */
             targetPeriodKey: null | number;
+        };
+        /** @description Запит перемикання бітів зв'язки (B179 L5); `null` — біт не чіпати, хоч один має бути заданий. */
+        SwitchDocumentSourceFlagsRequest: {
+            /** @description Читати склад з документа-джерела (`true`) чи з рядків довідника (`false`). */
+            readFromDocument: null | boolean;
+            /** @description Ставити автоматичний перерахунок залежних (аварійний вимикач). */
+            recalculateDependents: null | boolean;
+        };
+        /** @description Результат перемикання бітів. */
+        SwitchDocumentSourceFlagsResponse: {
+            /** @description Зв'язка після перемикання. */
+            binding: components["schemas"]["DocumentSourceBindingDto"];
+            /** @description `false` — біти вже були такими; нічого не записано й не поставлено. */
+            changed: boolean;
+            /** @description Роки, за які поставлено перерахунок залежних. */
+            queuedYears: number[];
         };
         /** @description Запит перемикання стану-воріт. */
         SwitchDocumentSourceStateRequest: {
