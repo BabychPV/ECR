@@ -111,6 +111,35 @@ public sealed class SourceApprovalChangeTriggerTests(SqlServerFixture sql) : DbJ
             .PrepareDocumentDeletionAsync(world.Source.DocumentId, CancellationToken.None));
     }
 
+    /// <summary>
+    /// B181(2) H3: екземпляри таблиць КОПІЇ аркуша джерелом для залежних не є (завантажувач складу читає
+    /// <c>SheetCopyId = null</c>), тож видалення документа, що має лише копію аркуша шаблону-джерела, перерахунок не ставить.
+    /// </summary>
+    /// <remarks>Мутація: прибрати <c>&amp;&amp; i.SheetCopyId == null</c> у <c>PrepareDocumentDeletionAsync</c> — червоний.</remarks>
+    [Fact]
+    public async Task ApprovedOnly_видалення_документа_лише_з_копією_аркуша_джерела_нічого_не_готує()
+    {
+        var world = await ArrangeAsync(DocumentSourceState.ApprovedOnly);
+
+        await using (var db = Sql.CreateContext())
+        {
+            var original = new Ecr.Domain.Entities.Documents.DocumentSheet(world.Source.DocumentId, world.Source.SheetDefId);
+            db.DocumentSheets.Add(original);
+            await db.SaveChangesAsync();
+            var copy = original.CreateCopy(2);
+            db.DocumentSheets.Add(copy);
+            await db.SaveChangesAsync();
+
+            // Усі екземпляри документа — екземпляри копії: оригінального аркуша з даними немає.
+            await db.TableInstances.Where(i => i.DocumentId == world.Source.DocumentId)
+                .ExecuteUpdateAsync(s => s.SetProperty(i => i.SheetCopyId, (long?)copy.Id));
+        }
+
+        await using var check = Sql.CreateContext();
+        Assert.Null(await new SourceApprovalChangeTrigger(check, Substitute.For<IBackgroundJobScheduler>())
+            .PrepareDocumentDeletionAsync(world.Source.DocumentId, CancellationToken.None));
+    }
+
     /// <summary>Аварійний вимикач — біт <c>RecalculateDependents</c>: 0 — нічого з трьох дій.</summary>
     /// <remarks>Мутація: ігнорувати біт (прибрати <c>&amp;&amp; b.RecalculateDependents</c>) — червоний.</remarks>
     [Fact]
