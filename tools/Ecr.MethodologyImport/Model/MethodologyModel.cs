@@ -44,12 +44,49 @@ public sealed record ConstantDef(
     string Unit,
     string Path);
 
+/// <summary>
+/// Умова правила: параметр (колонка таблиці старої системи, напр. <c>Land_TypeFuel</c>) і значення (текст запису довідника
+/// або ознаки в тому вигляді, як його зберігає стара система). Рядки вже обрізані (Trim).
+/// </summary>
+public sealed record RuleCondition(string Parameter, string Value);
+
+/// <summary>
+/// Правило рядків методології — рядок дзеркала <c>AF_EmissionCalculationWork_Rules</c> (старий <c>RuleArg_*</c>).
+/// <see cref="Table"/> — таблиця старої системи (<c>RuleArg_TableLandFromDB</c>); <see cref="Conditions"/> — пари
+/// «параметр = значення» (кон'юнкція); порожній список = «уся таблиця» (<c>RuleArg_Parameters = *</c>).
+/// <see cref="Problem"/> непорожній, якщо рядок не вдалося розібрати (кількість параметрів і значень не збігається,
+/// немає таблиці): такий запис імпорт не застосовує, а звітує.
+/// </summary>
+public sealed record RuleDef(
+    string Methodology,
+    string MethodologyVersion,
+    string Name,
+    string Version,
+    string UniqueName,
+    string Table,
+    IReadOnlyList<RuleCondition> Conditions,
+    bool IsAvailable,
+    string StartDate,
+    string EndDate,
+    string? Problem,
+    string Path)
+{
+    /// <summary>Правило без умов — застосовується до всіх рядків таблиці.</summary>
+    public bool CatchAll => Problem is null && Conditions.Count == 0;
+}
+
 /// <summary>Нейтральна модель, зібрана з AF XML. Порядок списків — детермінований (сортування).</summary>
 public sealed class MethodologyModel
 {
     public required IReadOnlyList<FormulaDef> Formulas { get; init; }
 
     public required IReadOnlyList<ConstantDef> Constants { get; init; }
+
+    /// <summary>
+    /// Правила рядків (лише з дзеркал SQL, <c>--sql</c>): AF XML їх не містить. Не входять у пакет формул/констант
+    /// <c>ecr-methodology-package</c> — окремий вихід <c>ecr-methodology-rules</c> (<c>--rules-out</c>).
+    /// </summary>
+    public IReadOnlyList<RuleDef> Rules { get; init; } = [];
 
     /// <summary>Лічильники якості розбору (звідки взято ім'я/версію, скільки полів обрізано тощо).</summary>
     public required ModelBuildStats BuildStats { get; init; }
