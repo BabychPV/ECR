@@ -1,17 +1,34 @@
 {
   "formatVersion": 1,
   "decision": "D-556",
-  "about": "Одиниці аргументів і констант методологій Land, підібрані для переходу на Script (репетиція етапу 8, коло 4). НА ПІДТВЕРДЖЕННЯ МЕТОДОЛОГОМ. Накладаються на текст скрипта після convert (Apply-LandScriptUnits.ps1): одиницю колонки опублікованої версії шаблону змінити не можна (UnitId - структурне поле). Числа не змінюються: ECR перевіряє лише розмірність.",
+  "about": "Одиниці аргументів і констант та джерела аргументів методологій Land, підібрані для переходу на Script (репетиція етапу 8, коло 4). НА ПІДТВЕРДЖЕННЯ МЕТОДОЛОГОМ. Накладаються на текст скрипта після convert (Apply-LandScriptUnits.ps1): одиницю колонки опублікованої версії шаблону змінити не можна (UnitId - структурне поле). Числа не змінюються: ECR перевіряє лише розмірність.",
   "methodologies": {
     "ECW_C05_05": {
       "arguments": {
-        "Density": { "unit": "kg_per_Sm3", "why": "густина газу: (Land_GasConsumption Sm3) x Density / 1000 = кг -> т; FuelLowerHeating / Density = МДж/кг" },
-        "FuelLowerHeating": { "unit": "MJ_per_Sm3", "why": "нижча теплота згоряння на об'єм газу (ділиться на густину -> МДж/кг)" }
+        "Density": {
+          "unit": "kg_per_Sm3",
+          "why": "густина газу: (Land_GasConsumption Sm3) x Density / 1000 = кг -> т; FuelLowerHeating / Density = МДж/кг"
+        },
+        "FuelLowerHeating": {
+          "unit": "MJ_per_Sm3",
+          "why": "нижча теплота згоряння на об'єм газу (ділиться на густину -> МДж/кг)"
+        }
       }
     },
     "ECW_C11_07": {
       "constants": {
-        "Qr_ECW_C11_07_": { "unit": "MJ_per_kg", "why": "нижча теплота згоряння рідкого палива (42,75), множиться на витрату в тоннах" }
+        "Qr_ECW_C11_07_": {
+          "unit": "MJ_per_kg",
+          "why": "нижча теплота згоряння рідкого палива (42,75), множиться на витрату в тоннах"
+        }
+      }
+    },
+    "ECW_C11_10": {
+      "argumentSources": {
+        "Land_Measure_SubstanceConsumption": {
+          "alternative": "Land_Measure_SubstanceConsumptionSm3",
+          "why": "стара система читає на 9_07 колонку SubstanceConsumptionSm3 (на решті таблиць - Land_Measure_SubstanceConsumption); у шаблоні Land колонка-замінник T9_07.Land_Measure_SubstanceConsumptionSm3 є"
+        }
       }
     }
   }

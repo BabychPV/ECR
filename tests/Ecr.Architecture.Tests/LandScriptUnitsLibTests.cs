@@ -14,7 +14,9 @@ namespace Ecr.Architecture.Tests;
 /// <c>Аргумент_стає_змінною_з_одиницею_і_замінюється_у_виразах</c>; послабити межу слова (<c>(?![A-Za-z0-9_])</c> прибрати) —
 /// червоніє <c>Аргумент_із_спільним_початком_імені_не_чіпається</c>; прибрати перевірку «не знайдено» —
 /// червоніє <c>Відсутній_аргумент_чи_константа_дає_помилку</c>; прибрати вставку оголошень — червоніє перший тест;
-/// у гілці констант замінити ` : ` на ` = ` — червоніє <c>Константа_міняє_одиницю_а_число_лишається</c>.
+/// у гілці констант замінити ` : ` на ` = ` — червоніє <c>Константа_міняє_одиницю_а_число_лишається</c>; у
+/// <c>Set-LandScriptArgumentSources</c> замінити <c>row.$arg? == null ? row.$alt? : row.$arg?</c> на <c>row.$arg</c> — червоніє
+/// <c>Джерело_аргументу_читає_замінник_лише_коли_колонки_немає</c>.
 /// </remarks>
 public sealed class LandScriptUnitsLibTests
 {
@@ -117,5 +119,30 @@ public sealed class LandScriptUnitsLibTests
         var (exit2, output2) = RunPowerShell(Sample + "\nSet-LandScriptUnits -Text $t -Constants @{ zz = 'kg' }");
         Assert.NotEqual(0, exit2);
         Assert.Contains("zz", output2, StringComparison.Ordinal);
+    }
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Джерело_аргументу_читає_замінник_лише_коли_колонки_немає()
+    {
+        var (exit, output) = RunPowerShell(Sample + """
+
+            Set-LandScriptArgumentSources -Text $t -Sources @{ Rho = 'RhoAlt' }
+            """);
+        Assert.Equal(0, exit);
+        Assert.Contains("var s_Rho = row.Rho? == null ? row.RhoAlt? : row.Rho?;", output, StringComparison.Ordinal);
+        Assert.Contains("output O2 : t = s_Rho / q_M;", output, StringComparison.Ordinal);
+        Assert.Contains("s_Rho * k_M * row.RhoExtra", output, StringComparison.Ordinal);
+        Assert.True(
+            output.IndexOf("var s_Rho", StringComparison.Ordinal) < output.IndexOf("output O1", StringComparison.Ordinal),
+            "оголошення має стояти перед першим output");
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Джерело_аргументу_відсутнього_в_тексті_дає_помилку()
+    {
+        var (exit, output) = RunPowerShell(Sample + "\nSet-LandScriptArgumentSources -Text $t -Sources @{ Missing = 'Alt' }");
+        Assert.NotEqual(0, exit);
+        Assert.Contains("Missing", output, StringComparison.Ordinal);
     }
 }
