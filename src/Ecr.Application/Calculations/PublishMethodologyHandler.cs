@@ -177,13 +177,6 @@ public sealed class PublishMethodologyHandler(
         await uow.ExecuteInTransactionAsync(
             async token =>
             {
-                // ✎ MS x B179: нові ребра формул (довідники, результати інших методологій) не мають замкнути цикл
-                // залежностей документів. Граф читає лише ОПУБЛІКОВАНІ версії: перевірка - після збереження
-                // публікації в цій транзакції (відмова її відкочує цілком, як для скрипта).
-                await uow.SaveChangesAsync(token).ConfigureAwait(false);
-                await Templates.DependencyCyclePublishCheck
-                    .RefuseMethodologiesAsync(dependencyGraph, [methodology.Id], onCycle, token).ConfigureAwait(false);
-
                 // ⚠ У журнал іде diff РЕЗУЛЬТАТІВ, а не тексту формул (ФВ-9.6).
                 // Змінений рядок виразу не каже нічого; змінена на 4 % емісія каже все.
                 await audit.WritePublicationEventAsync(
@@ -197,6 +190,12 @@ public sealed class PublishMethodologyHandler(
                     token).ConfigureAwait(false);
 
                 await uow.SaveChangesAsync(token).ConfigureAwait(false);
+
+                // ✎ MS x B179: нові ребра формул (довідники, результати інших методологій) не мають замкнути цикл
+                // залежностей документів. Граф читає лише ОПУБЛІКОВАНІ версії: перевірка - ПІСЛЯ збереження публікації
+                // в цій транзакції (відмова відкочує і публікацію, і подію журналу, як для скрипта).
+                await Templates.DependencyCyclePublishCheck
+                    .RefuseMethodologiesAsync(dependencyGraph, [methodology.Id], onCycle, token).ConfigureAwait(false);
             },
             ct).ConfigureAwait(false);
 
