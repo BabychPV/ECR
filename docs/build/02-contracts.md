@@ -2786,7 +2786,7 @@ public interface IJobProgressStore
 ✎ B105: знімок несе ще `Hse400DocumentInCurrentYear` (є опублікована версія
 шаблону HSE400 і документ HSE400 поточного року, крім золотого проєкту); відповідь
 має блок `calculations` — `hse400CompositionFromDocument` (дієве значення
-`Calculations:Hse400CompositionFromDocument`), `hse400CompositionSource` (мітка
+біта зв'язки `ReadFromDocument`), `hse400CompositionSource` (мітка
 джерела без шляху: `Default`, `Environment`, `ProgramData`, `AppSettings`,
 `CommandLine`, `Other`), `hse400CompositionWarning` (прапор вимкнено, а документ є).
 ✎ P-0118-31/33: ключ виведено й не читається — `hse400CompositionFromDocument` — біт зв'язки

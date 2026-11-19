@@ -55,7 +55,7 @@
 ## 4. Live (стенд) і вікна
 
 - Live: `EcrLandUi`, API :5094, web :6094. Зараз це W15v, main `363dc0baa` (включно з #898), викочено 14.11 10:22Z.
-- ⛔ Перезапуск live — лише `.sync-local\ready\w15v-drafts\restart-w15v.ps1`. Скрипт читає `F:\ecr-backup\land-ui\live-env.json` з прапорцем `Calculations:Hse400CompositionFromDocument=true`. Якщо стартувати вручну, прапорець зникне, і Land мовчки втратить склад HSE400.
+- ⛔ Перезапуск live — лише `.sync-local\ready\w15v-drafts\restart-w15v.ps1`. Скрипт читає `F:\ecr-backup\land-ui\live-env.json`. (Ключ `Calculations:Hse400CompositionFromDocument` виведено, B183 — склад HSE400 вирішує біт зв'язки `ReadFromDocument`; залишковий рядок у `live-env.json` прибрати у вікні.)
 - Каденція: вікно не частіше ніж раз на добу. Перед вікном зливається все, що має зелений CI і F13 PASS.
 - Фінальна репетиція йде на кандидаті `merge-check/<вікно>-candidate`. На GO перевіряєш `git diff` кандидат → GO: якщо відрізняються лише tests/docs, репетиція чинна.
 - Між GO і DONE нічого не зливається.

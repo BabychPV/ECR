@@ -24,15 +24,9 @@
   MigIdxReplaced, MigFks, MigModules).
 
 ## ⛔ Обов'язково: прапорець HSE400 (B105)
-- Live працює з `ECR_Calculations__Hse400CompositionFromDocument=true` (у збірці `appsettings.json` — `false`).
-- ✎ P-0118-31/33: зі збірки з виведеним ключем змінна **без дії** (вирішує біт `ReadFromDocument` зв'язки `HSE400_LAND_COMPOSITION`; перед GO перевірити, що він = 1) — змінну й рядок у `live-env.json` прибрати в наступному вікні.
-- Джерело — **постійний** файл `F:\ecr-backup\land-ui\live-env.json` (лише live, поза git і теками застосунку;
-  білий список ключів, значення `true`/`false`). `restart-w15u.ps1` читає його при КОЖНОМУ старті live, зокрема при
-  відкаті; скретч його не читає.
-- Блок «B105: PERSISTENT live launch flags» у `restart-*.ps1` переносити в кожен новий набір. Перезапуск live — лише
-  через `restart-*.ps1`; ручний `dotnet` старт прапорець загубить (Land втратить склад газу, повернуться FormulaErrors).
-- Перевірка після старту: `launch-flags.json` → `hse400CompositionFromDocument: true` (після B105 від AN — ще й
-  `/health/facts`).
+- ✎ P-0118-31/33, B183: ключ `Calculations:Hse400CompositionFromDocument` (env `ECR_Calculations__Hse400CompositionFromDocument`) **виведено** й не читається; склад HSE400 для Land вирішує лише біт `ReadFromDocument` зв'язки `HSE400_LAND_COMPOSITION` (перед GO перевірити, що він = 1). Залишкову змінну й рядок у `live-env.json` та у списку дозволених скрипта перезапуску — прибрати у вікні.
+- Джерело залишкової змінної — файл `F:\ecr-backup\land-ui\live-env.json` (лише live, поза git). Ключ виведено: з білого списку ключів `restart-*.ps1` і з `live-env.json` його прибрати у вікні; ручний старт більше не губить склад газу (його вирішує біт зв'язки в БД).
+- Перевірка після старту: `/health/facts` → `calculations.hse400CompositionFromDocument` (= біт `ReadFromDocument`, джерело `Binding`) має бути `true`.
 
 ## Порядок вікна (перевірено в W15u)
 1. Репетиція на свіжому відновленні `PrevBak` у скретч-базу на E: (порти 5196/6196, `W15V_SCRATCH_DB`), спершу

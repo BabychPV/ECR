@@ -107,7 +107,7 @@ export function diagnostics({ ready, db, facts, checkedAt }: DiagnosticsInput): 
     const calculations = (facts as Partial<SystemFacts>).calculations;
     if (calculations !== undefined) {
       lines.push(
-        `Hse400CompositionFromDocument: ${String(calculations.hse400CompositionFromDocument)} (${calculations.hse400CompositionSource})${calculations.hse400CompositionWarning ? ' · WARNING: off while an HSE400 document for the current year exists' : ''}`,
+        `Hse400ReadFromDocument: ${String(calculations.hse400CompositionFromDocument)} (${calculations.hse400CompositionSource})${calculations.hse400CompositionWarning ? ' · WARNING: off while an HSE400 document for the current year exists' : ''}`,
       );
       // ✎ B80 N6: ворота зв'язки HSE400 → Land (N1) — у копію для підтримки, мовою сервера.
       if (calculations.hse400SourceState != null) {

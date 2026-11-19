@@ -100,6 +100,6 @@ describe('B105: прапор складу HSE400 на сторінці «Здо�
       checkedAt: null,
     });
 
-    expect(text).toContain('Hse400CompositionFromDocument: false (Environment) · WARNING');
+    expect(text).toContain('Hse400ReadFromDocument: false (Environment) · WARNING');
   });
 });
