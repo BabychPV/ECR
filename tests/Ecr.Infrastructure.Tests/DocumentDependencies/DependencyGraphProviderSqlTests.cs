@@ -192,6 +192,69 @@ public sealed class DependencyGraphProviderSqlTests(SqlServerFixture sql)
         Assert.Equal(afterDependency, await MethodologyRevisionAsync());
     }
 
+    /// <summary>
+    /// F13: <c>GetFreshAsync</c> обходить вікно мемоізації ревізії (<c>GetAsync</c> у вікні віддає старий граф, свіжий -
+    /// новий). Тестовий постачальник решти набору має вікно 0, тому цей шлях без цього тесту не покритий.
+    /// </summary>
+    /// <remarks>Мутація: у <c>RevisionAsync</c> прибрати <c>!fresh &amp;&amp;</c> - тест червоний.</remarks>
+    [Fact]
+    public async Task GetFreshAsync_обходить_вікно_ревізії_а_GetAsync_у_вікні_віддає_старий_граф()
+    {
+        var registryId = await NewRegistryAsync();
+        var source = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(periodKey: PeriodKey);
+        await NewBindingAsync(source.TemplateId, registryId);
+        var late = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(periodKey: PeriodKey);
+
+        var memory = new MemoryCache(new MemoryCacheOptions());
+        await using var db = sql.CreateContext();
+        var provider = WindowedProvider(db, memory);
+        var first = await provider.GetAsync(CancellationToken.None);
+        Assert.DoesNotContain(first.ConsumersOf(source.TemplateId), d => d.ConsumerTemplateId == late.TemplateId);
+
+        await AddFormulaAsync(late, $"REGFIND('{Registry}', [Period].Year, [Period].Sequence, 'FG', 'X')", extract: true, publish: true);
+
+        Assert.Same(first, await provider.GetAsync(CancellationToken.None));
+        var fresh = await provider.GetFreshAsync(CancellationToken.None);
+        Assert.Contains(fresh.ConsumersOf(source.TemplateId), d => d.ConsumerTemplateId == late.TemplateId);
+    }
+
+    /// <summary>
+    /// F13: відмова циклу відкочує транзакцію публікації, але свіжа ревізія, прочитана ВСЕРЕДИНІ транзакції, не має
+    /// потрапити в мемоізацію: інакше вікно ревізії віддає граф відкоченої (неіснуючої) зміни.
+    /// </summary>
+    /// <remarks>Мутація: у <c>RevisionAsync</c> писати ревізію у кеш і для <c>fresh</c> - тест червоний.</remarks>
+    [Fact]
+    public async Task Свіжа_ревізія_з_відкоченої_транзакції_не_отруює_вікно_мемоізації()
+    {
+        var registryId = await NewRegistryAsync();
+        var source = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(periodKey: PeriodKey);
+        var late = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(periodKey: PeriodKey);
+        await AddFormulaAsync(late, $"REGFIND('{Registry}', [Period].Year, [Period].Sequence, 'FG', 'X')", extract: true, publish: true);
+
+        var memory = new MemoryCache(new MemoryCacheOptions());
+        await using var db = sql.CreateContext();
+        var provider = WindowedProvider(db, memory);
+        var before = await provider.GetAsync(CancellationToken.None);
+        Assert.DoesNotContain(before.ConsumersOf(source.TemplateId), d => d.ConsumerTemplateId == late.TemplateId);
+
+        await using (var tx = await db.Database.BeginTransactionAsync())
+        {
+            db.DocumentSourceBindings.Add(new DocumentSourceBinding($"B179R_{_tag}", source.TemplateId, registryId));
+            await db.SaveChangesAsync();
+            var inside = await provider.GetFreshAsync(CancellationToken.None);
+            Assert.Contains(inside.ConsumersOf(source.TemplateId), d => d.ConsumerTemplateId == late.TemplateId);
+            await tx.RollbackAsync();
+        }
+
+        var after = await provider.GetAsync(CancellationToken.None);
+        Assert.DoesNotContain(after.ConsumersOf(source.TemplateId), d => d.ConsumerTemplateId == late.TemplateId);
+    }
+
+    private static DependencyGraphProvider WindowedProvider(EcrDbContext db, IMemoryCache memory)
+        => new(
+            db, memory, new RealFormulaEngine(), new MethodologyRegistryEdges(db),
+            new CacheLifetimes(TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(1)));
+
     private static IReadOnlyList<DependencyEvidence> Evidence(DependencyGraphSnapshot graph, int registryId, int templateId)
         => graph.Edges.Single(e => e.Kind == DependencyEdgeKind.TemplateFormula
                                    && e.From == new DependencyNodeRef(DependencyNodeKind.Registry, registryId)

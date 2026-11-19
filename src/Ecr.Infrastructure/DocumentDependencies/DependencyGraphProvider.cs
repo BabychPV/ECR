@@ -120,7 +120,13 @@ public sealed class DependencyGraphProvider(
             + $"|sb{bindings?.Count}:{bindings?.Sum}:{bindings?.Updated?.Ticks}|r{registries?.Count}:{registries?.Definition}:{registries?.Updated?.Ticks}"
             + $"|rr{rules?.Count}:{rules?.Max}|{methodology}");
 
-        if (window > TimeSpan.Zero)
+        if (fresh)
+        {
+            // ⚠ Свіжа ревізія читається часто ВСЕРЕДИНІ транзакції викликача (відмова циклу її відкочує): її не мемоїзуємо,
+            // а стару мемоїзацію скидаємо — наступний `GetAsync` перерахує ревізію вже від зафіксованого стану.
+            memory.Remove(RevisionKey);
+        }
+        else if (window > TimeSpan.Zero)
         {
             memory.Set(RevisionKey, revision, new MemoryCacheEntryOptions { AbsoluteExpirationRelativeToNow = window });
         }
