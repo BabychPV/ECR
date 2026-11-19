@@ -542,6 +542,13 @@ $env:ASPNETCORE_URLS = $base
 # процесу, тому досить виставити змінну тут, ДО кроку 10.
 $env:ECR_API_URL = $base
 
+# B80 N5 (D-554): `sourceImpact.spec.ts` сам заводить усе через API, окрім зв'язки джерела з політикою (API її не
+# створює): її вставляє `tools/e2e/source-impact-binding.sql` через `sqlcmd` у ЦЮ тимчасову базу. Адреса бази — тут;
+# пароль SQL-логіна, коли він є, `sqlcmd` бере з `SQLCMDPASSWORD`, виставленого вище.
+$env:ECR_E2E_SQL_SERVER = $Server
+$env:ECR_E2E_SQL_DATABASE = $Database
+$env:ECR_E2E_SQL_LOGIN = if ($Login) { $Login } else { '' }
+
 # ⛔ Cookie автентифікації типово `Secure` і по HTTP не надсилається — вхід
 # проходив би, а наступний виклик отримував 401. Змінна діє лише на цей
 # тимчасовий процес.
