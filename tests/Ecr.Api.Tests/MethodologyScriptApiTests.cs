@@ -146,7 +146,7 @@ public sealed class MethodologyScriptApiTests(SqlServerFixture sql)
     private static string Script(int methodologyId, int versionId, string tail = "")
         => $"/api/v1/methodologies/{methodologyId}/versions/{versionId}/script{tail}";
 
-    private async Task<Created> CreateScriptVersionAsync(HttpClient client, string? engine = "Script", string? tagOverride = null)
+    private async Task<Created> CreateScriptVersionAsync(HttpClient client, string? engine = "Script", string? tagOverride = null, int kind = 0)
     {
         var tag = tagOverride ?? Guid.NewGuid().ToString("N")[..10];
         var code = $"MS{tag}";
@@ -155,7 +155,7 @@ public sealed class MethodologyScriptApiTests(SqlServerFixture sql)
             {
                 code,
                 nameL10n = new Dictionary<string, string> { ["en"] = "Script methodology" },
-                kind = 0,
+                kind,
                 group = (string?)null,
             }).ConfigureAwait(false),
             HttpStatusCode.Created).ConfigureAwait(false);
@@ -768,6 +768,59 @@ public sealed class MethodologyScriptApiTests(SqlServerFixture sql)
         Assert.Equal(stand.Document.TableDefId, binding.TableDefId);
 
         Assert.True(await verify.AuditPublicationEventsAnyAsync(created.VersionId).ConfigureAwait(true));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-556")]
+    public async Task Публікація_скрипта_бібліотеки_проходить_без_золотого_набору_а_методології_без_нього_відмовляє()
+    {
+        var stand = await ArrangeAsync().ConfigureAwait(true);
+        using var baseApp = new EcrApiFactory(sql);
+        using var app = baseApp.WithWebHostBuilder(b => b.ConfigureTestServices(s => { WithoutRealScriptModule(s); s.AddSingleton<ICalculationModule>(new FakeScriptModule()); }));
+        var (author, _) = await SignInAsync(app, Editor).ConfigureAwait(true);
+        var (publisher, _) = await SignInAsync(app, ["Calculation.View", "Calculation.Publish"]).ConfigureAwait(true);
+
+        // Бібліотека (kind = 2): виходів немає, золотого набору немає - публікація проходить.
+        var library = await CreateScriptVersionAsync(author, kind: 2).ConfigureAwait(true);
+        using (var saved = await JsonAsync(
+                   await PutAsync(author, Script(library.MethodologyId, library.VersionId), new { text = "const k = 5; function twice(a) = a * 2;" }).ConfigureAwait(true),
+                   HttpStatusCode.OK).ConfigureAwait(true))
+        {
+            Assert.Empty(saved.RootElement.GetProperty("diagnostics").EnumerateArray());
+        }
+
+        using (var published = await JsonAsync(
+                   await PostAsync(
+                       publisher, $"/api/v1/methodologies/{library.MethodologyId}/versions/{library.VersionId}/publish",
+                       new { changeReason = "D-556", effectiveFrom = "2099-01-01" }).ConfigureAwait(true),
+                   HttpStatusCode.OK).ConfigureAwait(true))
+        {
+            Assert.Equal(library.VersionId, published.RootElement.GetProperty("methodologyVersionId").GetInt32());
+        }
+
+        await using (var db = Context())
+        {
+            Assert.Equal(
+                TemplateVersionStatus.Published,
+                (await db.MethodologyVersions.AsNoTracking().SingleAsync(v => v.Id == library.VersionId).ConfigureAwait(true)).Status);
+        }
+
+        // Методологія (kind = 0) без набору - як і було: goldenSetEmpty.
+        var regular = await CreateScriptVersionAsync(author).ConfigureAwait(true);
+        var text = $"rows from {stand.TableCode}; var amount = row.{stand.NumberColumn}; output OUT_A : t = amount;";
+        using (await JsonAsync(
+                   await PutAsync(author, Script(regular.MethodologyId, regular.VersionId), new { text }).ConfigureAwait(true),
+                   HttpStatusCode.OK).ConfigureAwait(true))
+        {
+        }
+
+        using var response = await PostAsync(
+            publisher, $"/api/v1/methodologies/{regular.MethodologyId}/versions/{regular.VersionId}/publish",
+            new { changeReason = "D-556", effectiveFrom = "2099-01-01" }).ConfigureAwait(true);
+        using var problem = await JsonAsync(response, HttpStatusCode.UnprocessableEntity).ConfigureAwait(true);
+        Assert.Equal("err.ECR-CALC-0422.goldenSetEmpty", problem.RootElement.GetProperty("messageKey").GetString());
     }
 
     [Fact]

@@ -124,7 +124,11 @@ public sealed class PublishMethodologyHandler(
         // ⛔ B-13: тест без періоду — людська відмова з назвою тесту ДО прогону.
         // Доти модуль падав глибоко всередині з `ECR-PRD-0404` «Періоду 0 для
         // документа 0 не існує…» — правда, але не про те, що має виправити автор.
-        var testCases = await methodologies.GetTestCasesAsync(methodologyVersionId, ct).ConfigureAwait(false);
+        // ✎ D-556: бібліотека золотого набору не має (її поведінку перевіряють набори методологій-імпортерів): тести,
+        // навіть якщо вони лишилися, не проганяються й не порівнюються - рахувати бібліотеці нема що.
+        var testCases = methodology.RequiresGoldenSet
+            ? await methodologies.GetTestCasesAsync(methodologyVersionId, ct).ConfigureAwait(false)
+            : [];
         RequireTestPeriods(testCases);
 
         // Diff рахується ДО публікації: після неї попередня версія вже не та,
@@ -155,7 +159,7 @@ public sealed class PublishMethodologyHandler(
         // Зелений тест — не прапорець, а факт: усі випадки золотого набору
         // зійшлися в межах допуску (ФВ-9.12, ФВ-13.7).
         var verdicts = await JudgeAsync(methodology, version, testCases, ct).ConfigureAwait(false);
-        var greenTest = GoldenSet.IsGreen(verdicts, testCases);
+        var greenTest = !methodology.RequiresGoldenSet || GoldenSet.IsGreen(verdicts, testCases);
 
         // ⛔ Відмова через золотий набір називає КОЖНУ розбіжність поіменно:
         // випадок, вихід, речовину й обидва числа. Домен теж її не пропустить
@@ -1753,7 +1757,9 @@ public sealed class PublishMethodologyHandler(
         }
 
         var methodologyVersionId = version.Id;
-        var testCases = await methodologies.GetTestCasesAsync(methodologyVersionId, ct).ConfigureAwait(false);
+        var testCases = methodology.RequiresGoldenSet
+            ? await methodologies.GetTestCasesAsync(methodologyVersionId, ct).ConfigureAwait(false)
+            : [];
         RequireTestPeriods(testCases);
 
         var previous = methodology.VersionOn(from.AddDays(-1));
@@ -1773,7 +1779,7 @@ public sealed class PublishMethodologyHandler(
                 diff = await BuildDiffAsync(methodology, version, previous, testCases, token).ConfigureAwait(false);
 
                 var verdicts = await JudgeAsync(methodology, version, testCases, token).ConfigureAwait(false);
-                var greenTest = GoldenSet.IsGreen(verdicts, testCases);
+                var greenTest = !methodology.RequiresGoldenSet || GoldenSet.IsGreen(verdicts, testCases);
                 RejectRedGoldenSet(version, verdicts, greenTest);
 
                 methodology.PublishVersion(version, userId, changeReason, from, greenTest, clock.UtcNow);

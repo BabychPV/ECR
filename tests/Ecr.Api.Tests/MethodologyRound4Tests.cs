@@ -134,6 +134,35 @@ public sealed class MethodologyRound4Tests(SqlServerFixture sql)
         Assert.Equal("1", item.GetProperty("args").GetProperty("count").GetString());
     }
 
+    // ── D-556 ─────────────────────────────────────────────────────────────
+
+    /// <remarks>
+    /// D-556: версія методології-БІБЛІОТЕКИ публікується без золотого набору (виходів у неї немає, очікувань нема
+    /// чим задати), а звичайна методологія без набору і далі відмовляє <c>goldenSetEmpty</c>. Мутація: прибрати
+    /// <c>RequiresGoldenSet</c> з умови в <c>PublishMethodologyHandler</c> — бібліотека отримує 422 goldenSetEmpty.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-556")]
+    public async Task D556_бібліотека_публікується_без_золотого_набору()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = (await SignedInAsync(app).ConfigureAwait(true)).Client;
+        var stand = await StandAsync(authorUserId: 1, library: true, libraryRules: false).ConfigureAwait(true);
+
+        var response = await client.PostAsJsonAsync(
+            new Uri($"{VersionUrl(stand)}/publish", UriKind.Relative),
+            new { changeReason = "D-556", effectiveFrom = "2026-01-01" }).ConfigureAwait(true);
+        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.True(response.StatusCode == HttpStatusCode.OK, $"{response.StatusCode}: {body}");
+
+        await using var db = new EcrDbContext(Options());
+        Assert.Equal(
+            TemplateVersionStatus.Published,
+            (await db.MethodologyVersions.AsNoTracking().SingleAsync(v => v.Id == stand.VersionId).ConfigureAwait(true)).Status);
+    }
+
     // ── F-16 ──────────────────────────────────────────────────────────────
 
     /// <remarks>
@@ -198,7 +227,7 @@ public sealed class MethodologyRound4Tests(SqlServerFixture sql)
     }
 
     /// <summary>Методологія з версією-чернеткою; вміст — повз обробники.</summary>
-    private async Task<Stand> StandAsync(int authorUserId, bool library = false)
+    private async Task<Stand> StandAsync(int authorUserId, bool library = false, bool libraryRules = true)
     {
         await using var db = new EcrDbContext(Options());
 
@@ -223,7 +252,7 @@ public sealed class MethodologyRound4Tests(SqlServerFixture sql)
 
         db.MethodologyConstants.Add(version.AddNumericConstant(EcrCode.Create("EF_CO2"), 2.5m, unit));
 
-        if (library)
+        if (library && libraryRules)
         {
             db.MethodologyRules.Add(new MethodologyRule(version.Id, EcrCode.Create("R_ALL"), "{}", 100));
         }

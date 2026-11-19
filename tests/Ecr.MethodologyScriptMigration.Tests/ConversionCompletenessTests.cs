@@ -33,6 +33,7 @@ public sealed class ConversionCompletenessTests
             [nameof(Methodology.Group)] = Data,
             [nameof(Methodology.Versions)] = Technical,
             [nameof(Methodology.RowActivityFilter)] = Text, // active when
+            [nameof(Methodology.RequiresGoldenSet)] = Derived, // вираз від Kind (D-556): не поле, у скрипт не переноситься
         },
         [typeof(MethodologyVersion)] = new()
         {
