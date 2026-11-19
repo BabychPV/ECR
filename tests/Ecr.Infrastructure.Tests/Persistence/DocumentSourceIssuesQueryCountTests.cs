@@ -29,6 +29,13 @@ public sealed class DocumentSourceIssuesQueryCountTests(SqlServerFixture sql)
     {
         var world = await SourceIssueWorld.ArrangeAsync(sql, DocumentSourceState.ApprovedOnly);
 
+        // Реальний документ має періоди проєкту в doc.Period: заводимо 12 місяців року.
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        foreach (var month in Enumerable.Range(1, 12))
+        {
+            await builder.AddPeriodAsync(world.Land, new Ecr.Domain.ValueObjects.PeriodKey((Year * 100) + month));
+        }
+
         var one = await CountAsync(world.Land.DocumentId, [(Year * 100) + 3]);
         var twelve = await CountAsync(world.Land.DocumentId, [.. Enumerable.Range(1, 12).Select(m => (Year * 100) + m)]);
 

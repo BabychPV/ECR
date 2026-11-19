@@ -191,32 +191,44 @@ public sealed class DocumentSourceMonthGate(EcrDbContext db, bool? readOverride,
         return result;
     }
 
+
     /// <summary>
-    /// Шаблон документа й періодичність проєкту за КОЖЕН період — ОДНИМ запитом: гілка на період (шкала версій
-    /// <c>VersionOf</c>/<c>TemplateVersionOf</c> залежить від періоду) зшита в <c>UNION ALL</c>. Колекція періодів у
-    /// приєднанні (<c>from key in keys</c>) EF не перекладає, тож список розкладено в запит.
+    /// Шаблон документа й періодичність проєкту за кожен період. Періоди проєкту, що існують у <c>doc.Period</c>, —
+    /// ОДНИМ запитом (приєднання до <c>doc.Period</c> із <c>Contains</c> по ключах; шкала версій <c>VersionOf</c> /
+    /// <c>TemplateVersionOf</c> залежить від періоду). Ключ, якого в <c>doc.Period</c> немає (рядок не заведено), —
+    /// окремий запит на такий ключ, як було доти: поведінка не змінюється, а кількість звернень росте лише з кількістю
+    /// ЗАВЕДЕНИХ-НЕ-ІСНУЮЧИХ ключів (у продукті періоди документа завжди є в <c>doc.Period</c>).
     /// </summary>
     private static async Task<List<OwnTemplate>> OwnTemplatesAsync(
         EcrDbContext db, long documentId, List<int> keys, CancellationToken ct)
     {
-        const int Chunk = 40;
-        var result = new List<OwnTemplate>();
-        foreach (var chunk in keys.Chunk(Chunk))
+        var found = await (
+                from d in db.Documents.AsNoTracking()
+                where d.Id == documentId
+                join p in db.Projects.AsNoTracking() on d.ProjectId equals p.Id
+                join per in db.Periods.AsNoTracking() on d.ProjectId equals per.ProjectId
+                where keys.Contains(per.PeriodKeyValue)
+                from pv in db.TemplateVersions.AsNoTracking()
+                where pv.Id == (d.TemplateId == null ? EcrDbContext.VersionOf(d.ProjectId, per.PeriodKeyValue) : EcrDbContext.TemplateVersionOf(d.ProjectId, d.TemplateId.Value, per.PeriodKeyValue))
+                select new { PeriodKey = per.PeriodKeyValue, TemplateId = d.TemplateId ?? pv.TemplateId, p.PeriodKind })
+            .ToListAsync(ct).ConfigureAwait(false);
+
+        var result = found.Select(r => new OwnTemplate(r.PeriodKey, r.TemplateId, r.PeriodKind)).ToList();
+        foreach (var key in keys.Except(result.Select(r => r.PeriodKey)))
         {
-            // ⚠ Проєкція — анонімний тип у самому запиті: запис-конструктор давав би клієнтську проєкцію, а набір операцій
-            // (UNION) після неї EF не будує.
-            var union = chunk
-                .Select(key => (
+            var periodKey = key;
+            var single = await (
                     from d in db.Documents.AsNoTracking()
                     where d.Id == documentId
                     join p in db.Projects.AsNoTracking() on d.ProjectId equals p.Id
                     from pv in db.TemplateVersions.AsNoTracking()
-                    where pv.Id == (d.TemplateId == null ? EcrDbContext.VersionOf(d.ProjectId, key) : EcrDbContext.TemplateVersionOf(d.ProjectId, d.TemplateId.Value, key))
-                    select new { PeriodKey = key, TemplateId = d.TemplateId ?? pv.TemplateId, p.PeriodKind }))
-                .Aggregate((left, right) => left.Concat(right));
-
-            result.AddRange((await union.ToListAsync(ct).ConfigureAwait(false))
-                .Select(r => new OwnTemplate(r.PeriodKey, r.TemplateId, r.PeriodKind)));
+                    where pv.Id == (d.TemplateId == null ? EcrDbContext.VersionOf(d.ProjectId, periodKey) : EcrDbContext.TemplateVersionOf(d.ProjectId, d.TemplateId.Value, periodKey))
+                    select new { TemplateId = d.TemplateId ?? pv.TemplateId, p.PeriodKind })
+                .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+            if (single is not null)
+            {
+                result.Add(new OwnTemplate(periodKey, single.TemplateId, single.PeriodKind));
+            }
         }
 
         return result;
