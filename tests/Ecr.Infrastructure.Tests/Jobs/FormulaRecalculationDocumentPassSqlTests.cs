@@ -421,8 +421,75 @@ public sealed class FormulaRecalculationDocumentPassSqlTests(SqlServerFixture sq
             $"WHERE PeriodKey = {Period(month)} AND TableRowId = {world.Instance(month).RowId} " +
             $"AND ColumnDefId = {world.Doc.ColumnDefIds[1]}");
 
+    /// <summary>
+    /// B179 L2 (Q1) ✎ L2b: успішний прохід задачі формул з НАСІННЯМ (правка комірки) кличе хук як «правку комірок» —
+    /// з документом, періодами насіння й записаними читачами; шлях «перерахунок завершено» (батьківська одразу) — ні.
+    /// </summary>
+    /// <remarks>
+    /// Мутація: у <c>FormulaRecalculationJob</c> кликати завжди <c>OnSucceededAsync</c> (як у L2) — червоний.
+    /// ✎ L2b: переписано з <c>B179_успішний_прохід_кличе_хук_джерела_з_періодами_насіння_й_читачів</c> (той чекав
+    /// <c>OnSucceededAsync</c>, ланка 0); пара без насіння — <c>B179_прохід_лише_з_міжперіодних_джерел_кличе_хук_як_у_L2</c>.
+    /// </remarks>
+    [Fact]
+    [Trait("Directive", "B179")]
+    public async Task B179_прохід_правки_кличе_хук_правки_комірок_з_періодами_насіння_й_читачів()
+    {
+        var world = await ArrangeAsync(Chain);
+        await SetInputAsync(world, 4, 45m);
+
+        var hook = Substitute.For<IRecalculationCompletionHook>();
+        IReadOnlyDictionary<long, int[]>? seen = null;
+        hook.OnCellsEditedAsync(Arg.Do<IReadOnlyDictionary<long, int[]>>(s => seen = s), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+
+        await RunJobAsync(
+            world,
+            new FormulaRecalculationRequest(world.Instance(4).InstanceId, Period(4), [Seed(world, 4)], world.Doc.DocumentId),
+            new RecordingAuditWriter(),
+            hook);
+
+        await hook.ReceivedWithAnyArgs(1).OnCellsEditedAsync(default!, default);
+        await hook.DidNotReceiveWithAnyArgs().OnSucceededAsync(default!, default, default);
+        Assert.NotNull(seen);
+        Assert.Equal([Period(4), Period(5), Period(6), Period(7)], seen[world.Doc.DocumentId]);
+    }
+
+    /// <summary>
+    /// B179 L2b, запобіжник петлі: прохід ЛИШЕ з міжперіодних джерел (його ставить <c>CrossPeriodFanOut</c>, зокрема сам
+    /// <c>RecalculationJob</c>) — не правка: хук як у L2 (<c>OnSucceededAsync</c>, ланка 0), власного перерахунку не просить.
+    /// </summary>
+    /// <remarks>Мутація: у <c>FormulaRecalculationJob</c> кликати завжди <c>OnCellsEditedAsync</c> — червоний.</remarks>
+    [Fact]
+    [Trait("Directive", "B179")]
+    public async Task B179_прохід_лише_з_міжперіодних_джерел_кличе_хук_як_у_L2()
+    {
+        var world = await ArrangeAsync(Chain);
+
+        // Похідна C періоду 4 змінилась (як після повного перерахунку) — читач 5 рахується від неї.
+        await ExecuteAsync(
+            $"UPDATE doc.CellValue SET ValueNumeric = 777 WHERE PeriodKey = {Period(4)} " +
+            $"AND TableRowId = {world.Instance(4).RowId} AND ColumnDefId = {world.Doc.ColumnDefIds[3]}");
+
+        var hook = Substitute.For<IRecalculationCompletionHook>();
+        var hop = -1;
+        hook.OnSucceededAsync(Arg.Any<IReadOnlyDictionary<long, int[]>>(), Arg.Do<int>(h => hop = h), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+
+        await RunJobAsync(
+            world,
+            new FormulaRecalculationRequest(
+                0, Period(5), [new DirtyCell(0, world.Doc.ColumnDefIds[3], world.Doc.TableDefId, 4, 0)], world.Doc.DocumentId),
+            new RecordingAuditWriter(),
+            hook);
+
+        await hook.ReceivedWithAnyArgs(1).OnSucceededAsync(default!, default, default);
+        await hook.DidNotReceiveWithAnyArgs().OnCellsEditedAsync(default!, default);
+        Assert.Equal(0, hop);
+    }
+
     private async Task<CapturingJobProgress> RunJobAsync(
-        World world, FormulaRecalculationRequest request, RecordingAuditWriter audit)
+        World world, FormulaRecalculationRequest request, RecordingAuditWriter audit,
+        IRecalculationCompletionHook? hook = null)
     {
         await using var db = world.Builder.CreateContext();
 
@@ -432,7 +499,7 @@ public sealed class FormulaRecalculationDocumentPassSqlTests(SqlServerFixture sq
         var fanOut = new CrossPeriodFanOut(
             new RowStore(db, bulk, new TestClock(Now)), Versions(world), periods, jobs, db);
 
-        var job = new FormulaRecalculationJob(Formulas(db, world, audit), db, fanOut, periods);
+        var job = new FormulaRecalculationJob(Formulas(db, world, audit), db, fanOut, periods, completionHook: hook);
         var progress = new CapturingJobProgress();
         await job.ExecuteAsync(request, progress, CancellationToken.None);
 

@@ -54,7 +54,7 @@ public sealed class DocumentSourceStateSwitchTests(SqlServerFixture sql) : DbJob
         Assert.Equal("err.ECR-CALC-0409.sourceBindingNotMonthly", refusal.Details!["messageKey"]);
         Assert.Equal(DocumentSourceState.Any, await StateAsync(a.BindingId));
         Assert.Equal(0, await EventsAsync(a.BindingId));
-        Assert.Equal(0, await QueuedAsync(a.RegistryId));
+        Assert.Equal(0, await QueuedAsync(a));
     }
 
     [Fact]
@@ -96,7 +96,7 @@ public sealed class DocumentSourceStateSwitchTests(SqlServerFixture sql) : DbJob
             Assert.Equal(a.UserId, binding.UpdatedByUserId);
         }
 
-        Assert.Equal(1, await QueuedAsync(a.RegistryId));
+        Assert.Equal(1, await QueuedAsync(a));
 
         // Той самий стан удруге — нічого: ні події, ні задачі.
         var again = await SwitchAsync(a, "approvedOnly");
@@ -109,7 +109,7 @@ public sealed class DocumentSourceStateSwitchTests(SqlServerFixture sql) : DbJob
         Assert.True(off.Changed);
         Assert.Equal(DocumentSourceState.Any, await StateAsync(a.BindingId));
         Assert.Equal(2, await EventsAsync(a.BindingId));
-        Assert.Equal(1, await QueuedAsync(a.RegistryId));
+        Assert.Equal(1, await QueuedAsync(a));
     }
 
     [Fact]
@@ -135,7 +135,7 @@ public sealed class DocumentSourceStateSwitchTests(SqlServerFixture sql) : DbJob
         Assert.Empty(on.QueuedYears);
         Assert.False(on.Binding.ReadFromDocumentEffective);
         Assert.Equal("configuration", on.Binding.ReadFromDocumentSource);
-        Assert.Equal(0, await QueuedAsync(a.RegistryId));
+        Assert.Equal(0, await QueuedAsync(a));
     }
 
     /// <summary>
@@ -153,7 +153,7 @@ public sealed class DocumentSourceStateSwitchTests(SqlServerFixture sql) : DbJob
         string payload;
         await using (var db = Sql.CreateContext())
         {
-            var target = $"{nameof(IRegistryImpactRecalculationJob)}~{RegistryImpactRecalculationTarget.ForYear(a.RegistryId, Year)}";
+            var target = $"{nameof(IRegistryImpactRecalculationJob)}~{RegistryImpactRecalculationTarget.ForSourceChange(a.BindingId, Year, null)}";
             payload = (await db.JobProgresses.AsNoTracking().SingleAsync(p => p.TargetKey == target)).Payload!;
         }
 
@@ -172,7 +172,8 @@ public sealed class DocumentSourceStateSwitchTests(SqlServerFixture sql) : DbJob
             var job = new RegistryImpactRecalculationJob(
                 new RegistryImpactStore(db),
                 new CalculationTrigger(
-                    jobs, new PeriodStore(db), new WorkflowStore(db), new DocumentStore(db), new DocumentSheetCopyStore(db)));
+                    jobs, new PeriodStore(db), new WorkflowStore(db), new DocumentStore(db), new DocumentSheetCopyStore(db)),
+                graph: SourceDependencyWorld.Graph(db));
             await job.ExecuteAsync(
                 RegistryImpactRecalculationRequest.Parse(payload), Substitute.For<IJobProgress>(), CancellationToken.None);
         }
@@ -183,7 +184,42 @@ public sealed class DocumentSourceStateSwitchTests(SqlServerFixture sql) : DbJob
 
     private sealed record Arranged(int BindingId, int RegistryId, int UserId);
 
-    private async Task<SwitchDocumentSourceStateResponse> SwitchAsync(Arranged a, string state, bool? readOverride = true)
+    /// <summary>
+    /// B179 L2 perf: перемикач скидає процесний кеш воріт хука джерела — ApprovedOnly діє одразу (зв'язка зникає з
+    /// воріт без очікування TTL), назад на Any — повертається; повтор того самого стану кеш не скидає.
+    /// </summary>
+    /// <remarks>Мутація: прибрати <c>gate?.Invalidate()</c> в обробнику — зв'язка лишається у воротах, червоний.</remarks>
+    [Fact]
+    public async Task Перемикання_стану_скидає_кеш_воріт_хука_джерела_одразу()
+    {
+        var a = await ArrangeAsync();
+        var cache = new SourceBindingGateCache();
+
+        Assert.True(await InGateAsync(cache, a.BindingId));
+        var loads = cache.Loads;
+
+        await SwitchAsync(a, "approvedOnly", gate: cache);
+        Assert.False(await InGateAsync(cache, a.BindingId));
+        Assert.Equal(loads + 1, cache.Loads);
+
+        // Той самий стан — нічого не змінилось, кеш не скидається.
+        await SwitchAsync(a, "approvedOnly", gate: cache);
+        Assert.False(await InGateAsync(cache, a.BindingId));
+        Assert.Equal(loads + 1, cache.Loads);
+
+        await SwitchAsync(a, "any", gate: cache);
+        Assert.True(await InGateAsync(cache, a.BindingId));
+        Assert.Equal(loads + 2, cache.Loads);
+    }
+
+    private async Task<bool> InGateAsync(SourceBindingGateCache cache, int bindingId)
+    {
+        await using var db = Sql.CreateContext();
+        return (await cache.GetAsync(db, CancellationToken.None)).Bindings.Any(b => b.Id == bindingId);
+    }
+
+    private async Task<SwitchDocumentSourceStateResponse> SwitchAsync(
+        Arranged a, string state, bool? readOverride = true, ISourceBindingGateInvalidation? gate = null)
     {
         await using var host = NewHost();
         var access = Substitute.For<IAccessDecisionService>();
@@ -205,7 +241,8 @@ public sealed class DocumentSourceStateSwitchTests(SqlServerFixture sql) : DbJob
                 host.Queue,
                 new QuartzJobScheduler(null, new JobProgressStore(host.Db), new SystemClock()),
                 new JobQueueSignal()),
-            new TestClock(Now));
+            new TestClock(Now),
+            gate);
 
         return await handler.HandleAsync(a.BindingId, new SwitchDocumentSourceStateRequest(state), CancellationToken.None);
     }
@@ -269,24 +306,14 @@ public sealed class DocumentSourceStateSwitchTests(SqlServerFixture sql) : DbJob
             db.ApprovalStates.Add(approval);
         }
 
-        var methodology = new Methodology(EcrCode.Create($"HL{Guid.NewGuid().ToString("N")[..8].ToUpperInvariant()}"), Text("m"));
-        db.Methodologies.Add(methodology);
-        await db.SaveChangesAsync();
-        var version = new MethodologyVersion(methodology.Id, "1.0", CalculationLevel.Configuration, 1, Now);
-        db.MethodologyVersions.Add(version);
-        await db.SaveChangesAsync();
-        db.RegistryUses.Add(RegistryUse.ForMethodologyFormula(version.Id, "F1", registryId, "X"));
-
-        var run = new CalculationRun(document.ProjectId, document.PeriodKey.Value, null, Now, document.DocumentId);
-        db.CalculationRuns.Add(run);
-        await db.SaveChangesAsync();
-        run.Complete("Succeeded", Now, null, null);
-        run.MakeCurrent();
-        var unitId = await db.Units.AsNoTracking().OrderBy(u => u.Id).Select(u => u.Id).FirstAsync();
-        await new CalculationResultStore(db, new TestClock(Now)).WriteResultsAsync(
-            run.Id,
-            [new CalculationOutput(document.DocumentId, "R-1", [new CalculationOutputValue(version.Id, null, "tons", 1m, unitId)], [])],
-            CancellationToken.None);
+        // ✎ B179 L2: залежність — формула шаблону, що читає довідник зв'язки (граф), а не «є актуальний результат».
+        var registryCode = await db.RegistryDefs.Where(r => r.Id == registryId).Select(r => r.Code).SingleAsync();
+        var formula = new FormulaDef(
+            document.TableDefId, FormulaScope.Column,
+            $"REGFIELD(REGFIND('{registryCode}', [Period].Year, [Period].Sequence, 'S', 'I'), 'VALUE')",
+            ExpressionDialect.Template);
+        formula.AssignColumn(document.ColumnDefIds[1]);
+        db.FormulaDefs.Add(formula);
         await db.SaveChangesAsync();
         return (document.DocumentId, document.PeriodKey);
     }
@@ -318,9 +345,10 @@ public sealed class DocumentSourceStateSwitchTests(SqlServerFixture sql) : DbJob
         public string DetailsJson { get; set; } = string.Empty;
     }
 
-    private async Task<int> QueuedAsync(int registryId)
+    private async Task<int> QueuedAsync(Arranged a)
     {
-        var target = $"{nameof(IRegistryImpactRecalculationJob)}~{RegistryImpactRecalculationTarget.ForYear(registryId, Year)}";
+        // ✎ B179 L2: ціль «зв'язка × рік» (споживачі — з графа), а не «довідник × рік».
+        var target = $"{nameof(IRegistryImpactRecalculationJob)}~{RegistryImpactRecalculationTarget.ForSourceChange(a.BindingId, Year, null)}";
         await using var db = Sql.CreateContext();
         return await db.JobProgresses.AsNoTracking().CountAsync(p => p.TargetKey == target);
     }

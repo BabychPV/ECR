@@ -1,7 +1,6 @@
 using Ecr.Application.Health;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
-using Ecr.Infrastructure.Persistence;
 
 namespace Ecr.Api.Startup;
 
@@ -48,15 +47,13 @@ public sealed partial class HealthFactsWarmupService(
 
             var snapshot = await store.ReadAsync(clock.UtcNow, stop.Token).ConfigureAwait(false);
 
-            // B105: прапор складу HSE400 вимкнено, а документ HSE400 поточного року є — Land мовчки читає довідник.
+            // B105: читання складу HSE400 вимкнено, а документ HSE400 поточного року є — Land мовчки читає довідник.
             // Один рядок на старт (той самий знімок, що прогрівається), а не на кожен запит фактів.
-            var calculations = SystemFactsCalculationsDto.Of(
-                Hse400CompositionSnapshotLoader.IsEnabled(configuration),
-                ConfigurationSourceLabel.Of(configuration, Hse400CompositionSnapshotLoader.EnabledKey),
-                snapshot);
+            // ✎ P-0118-31/33: ключ виведено й НЕ читається — дієве значення дає лише біт зв'язки ReadFromDocument.
+            var calculations = SystemFactsCalculationsDto.Of(false, SystemHostFacts.SourceDefault, snapshot);
             if (calculations.Hse400CompositionWarning)
             {
-                LogHse400CompositionOff(logger, Hse400CompositionSnapshotLoader.EnabledKey);
+                LogHse400CompositionOff(logger);
             }
         }
         catch (Exception ex)
@@ -68,10 +65,11 @@ public sealed partial class HealthFactsWarmupService(
 
     [LoggerMessage(
         Level = LogLevel.Warning,
-        Message = "{Key} is off, but a published HSE400 template and an HSE400 document for the current year exist: "
-                  + "Land reads the gas composition from the registry, not from the HSE400 document. "
-                  + "Set the key persistently (site config) and restart.")]
-    private static partial void LogHse400CompositionOff(ILogger logger, string key);
+        Message = "HSE400 composition reading is off (binding bit ReadFromDocument = 0, or no HSE400 -> Land binding), but a "
+                  + "published HSE400 template and an HSE400 document for the current year exist: Land reads the gas "
+                  + "composition from the registry, not from the HSE400 document. Set ReadFromDocument = 1 on the binding "
+                  + "(no restart needed; a missing binding is created by the seed on the next start).")]
+    private static partial void LogHse400CompositionOff(ILogger logger);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Health facts warm-up skipped: {ExceptionType}.")]
     private static partial void LogWarmupSkipped(ILogger logger, string exceptionType);

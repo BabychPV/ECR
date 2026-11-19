@@ -145,6 +145,58 @@ public sealed class DocumentSourceIssuesTests(SqlServerFixture sql)
         Assert.Equal((April, 4, April), (issue.PeriodKey, issue.MonthNumber, issue.SourcePeriodKey));
     }
 
+    /// <summary>
+    /// B182 (K2): з двох аркушів Land за період затверджено лише один — місяць споживача НЕ затверджено. Джерело не
+    /// затверджено — <c>SourceMonthNotApproved</c> (не <c>SourceChangedAfterApproval</c>); джерело затверджено пізніше за
+    /// затверджений аркуш — проблеми немає (не «reapproved»).
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Затверджено_лише_один_з_двох_аркушів_Land_місяць_не_затверджений(bool sourceApprovedLater)
+    {
+        var world = await ArrangeAsync(DocumentSourceState.ApprovedOnly);
+        var sheetB = await SourceIssueWorld.AddSheetAsync(sql, world.Land);
+        await AddStateAsync(
+            world.Source.DocumentId, world.Source.SheetDefId, March, submittedAt: T0,
+            approvedAt: sourceApprovedLater ? T2 : null);
+        await AddStateAsync(world.Land.DocumentId, world.Land.SheetDefId, March, submittedAt: T0, approvedAt: T1);
+        await AddStateAsync(world.Land.DocumentId, sheetB, March, submittedAt: T1);
+
+        var findings = await FindingsAsync(world.Land.DocumentId, March);
+
+        if (sourceApprovedLater)
+        {
+            Assert.Empty(findings);
+            return;
+        }
+
+        var finding = Assert.Single(findings);
+        Assert.Equal(ISourceIssueReader.SourceMonthNotApproved, finding.Row.Kind);
+        Assert.Null(finding.Reason);
+        Assert.Null(finding.Row.ApprovedAt);
+    }
+
+    /// <summary>
+    /// B182 (K3): два аркуші Land затверджено в T0 і T2, джерело — в T1 між ними. Момент затвердження споживача —
+    /// НАЙРАНІШИЙ (T0), тож джерело затверджено пізніше — <c>reapproved</c>.
+    /// </summary>
+    [Fact]
+    public async Task Два_аркуші_Land_момент_затвердження_найраніший()
+    {
+        var world = await ArrangeAsync(DocumentSourceState.ApprovedOnly);
+        var sheetB = await SourceIssueWorld.AddSheetAsync(sql, world.Land);
+        await AddStateAsync(world.Land.DocumentId, world.Land.SheetDefId, March, submittedAt: T0, approvedAt: T0);
+        await AddStateAsync(world.Land.DocumentId, sheetB, March, submittedAt: T0, approvedAt: T2);
+        await AddStateAsync(world.Source.DocumentId, world.Source.SheetDefId, March, submittedAt: T0, approvedAt: T1);
+
+        var finding = Assert.Single(await FindingsAsync(world.Land.DocumentId, March));
+        Assert.Equal(ISourceIssueReader.SourceChangedAfterApproval, finding.Row.Kind);
+        Assert.Equal(DocumentSourceIssues.ReasonReapproved, finding.Reason);
+        Assert.Equal(T0, finding.Row.ApprovedAt);
+        Assert.Equal(T1, finding.Row.SourceApprovedAt);
+    }
+
     /// <summary>Читання з документа вимкнено явним ключем — порожньо навіть за <c>ApprovedOnly</c>.</summary>
     [Fact]
     public async Task Явний_ключ_не_читати_з_документа_проблем_немає()
@@ -202,6 +254,42 @@ internal static class SourceIssueWorld
     {
         await using var db = fixture.CreateContext();
         var state = new ApprovalState(documentId, sheetDefId, periodKey);
+        state.Submit(userId: 5, submittedAt);
+        if (approvedAt is { } at)
+        {
+            state.Approve(userId: 6, at);
+        }
+
+        db.ApprovalStates.Add(state);
+        await db.SaveChangesAsync();
+        return state.Id;
+    }
+
+    /// <summary>Другий аркуш (оригінал) шаблону документа — для документа з кількома аркушами (B182).</summary>
+    public static async Task<int> AddSheetAsync(SqlServerFixture fixture, TestDocument document)
+    {
+        await using var db = fixture.CreateContext();
+        var sheet = new SheetDef(
+            document.TemplateVersionId, EcrCode.Create($"SHEETB{document.SheetDefId}"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Sheet B" }), 2);
+        db.SheetDefs.Add(sheet);
+        await db.SaveChangesAsync();
+        return sheet.Id;
+    }
+
+    /// <summary>Стан КОПІЇ аркуша (<c>SheetCopyId</c> задано): подано, за потреби затверджено (B182).</summary>
+    public static async Task<long> AddCopyStateAsync(
+        SqlServerFixture fixture, long documentId, int sheetDefId, int periodKey, DateTime submittedAt, DateTime? approvedAt = null)
+    {
+        await using var db = fixture.CreateContext();
+        var original = new DocumentSheet(documentId, sheetDefId);
+        db.DocumentSheets.Add(original);
+        await db.SaveChangesAsync();
+        var copy = original.CreateCopy(2);
+        db.DocumentSheets.Add(copy);
+        await db.SaveChangesAsync();
+
+        var state = new ApprovalState(documentId, sheetDefId, periodKey, copy.Id);
         state.Submit(userId: 5, submittedAt);
         if (approvedAt is { } at)
         {

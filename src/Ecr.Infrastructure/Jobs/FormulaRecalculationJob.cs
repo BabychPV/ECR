@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Text.Json;
 using Ecr.Application.Errors;
 using Ecr.Application.Integration;
@@ -36,7 +36,9 @@ public sealed partial class FormulaRecalculationJob(
     ILogger<FormulaRecalculationJob>? logger = null,
     // ✎ B79: журнал і годинник — для позначки «перераховано після подання»; без них (ручна збірка в тестах) позначки немає.
     IAuditWriter? audit = null,
-    Ecr.Domain.Abstractions.IClock? clock = null) : IFormulaRecalculationJob
+    Ecr.Domain.Abstractions.IClock? clock = null,
+    // B179 L2: зміна документа-джерела (правка комірки дає лише цю задачу) — перерахунок залежних.
+    IRecalculationCompletionHook? completionHook = null) : IFormulaRecalculationJob
 {
     /// <summary>Ключ каталогу відмови спільного блокування аркуша (<c>SheetEditGate.Busy</c>).</summary>
     private const string SheetBeingSubmittedKey = "err.ECR-DOC-4091.sheetBeingSubmitted";
@@ -91,6 +93,9 @@ public sealed partial class FormulaRecalculationJob(
         // перетворив би кожну правку на прогін по всьому документу.
         work = new SortedDictionary<int, PeriodWork>(
             work.Where(p => !p.Value.IsEmpty).ToDictionary(p => p.Key, p => p.Value));
+
+        // B179 L2: періоди правки (насіння) — вони змінились, навіть коли похідних формул немає (written = 0).
+        var seedPeriods = work.Where(p => !p.Value.Dirty.IsEmpty).Select(p => p.Key).ToList();
         if (work.Count == 0)
         {
             await progress.ReportKeyAsync(100, FormulaRecalcOutcome.NoneKey, ct).ConfigureAwait(false);
@@ -341,6 +346,30 @@ public sealed partial class FormulaRecalculationJob(
                 },
                 ct)
             .ConfigureAwait(false);
+
+        // B179 L2 (Q1): УСПІШНИЙ прохід — документ-джерело змінився в періодах насіння й записаних; хук сам вирішує, чи
+        // документ — джерело зв'язки за Any. Відкладений чи провалений прохід сюди не доходить. Ланка — 0: правка
+        // людини (чи читача іншого періоду) починає ланцюжок заново.
+        // ✎ B179 L2b: прохід із НАСІННЯМ (правка комірок) — `OnCellsEditedAsync`: хук ставить власний перерахунок методологій
+        // джерела, а споживачів — уже його успіх. Прохід лише з міжперіодних джерел (його ставить `CrossPeriodFanOut`, зокрема
+        // сам `RecalculationJob`) — як у L2: власного перерахунку не ставить, тож петлі «перерахунок → формули → перерахунок» немає.
+        if (completionHook is not null && documentId != 0)
+        {
+            var changedPeriods = writtenPeriods.Union(seedPeriods).Order().ToArray();
+            if (changedPeriods.Length > 0)
+            {
+                // ⛔ perf: версії шаблонів — з уже прочитаних екземплярів проходу, щоб хук відсіяв не-джерело без бази.
+                var changed = new ChangedPeriodsDictionary
+                {
+                    [documentId] = changedPeriods,
+                    TemplateVersionIds = shared.TemplateVersionsOf(documentId, changedPeriods),
+                };
+                await (seedPeriods.Count > 0
+                        ? completionHook.OnCellsEditedAsync(changed, ct)
+                        : completionHook.OnSucceededAsync(changed, sourceHop: 0, ct))
+                    .ConfigureAwait(false);
+            }
+        }
     }
 
     /// <summary>

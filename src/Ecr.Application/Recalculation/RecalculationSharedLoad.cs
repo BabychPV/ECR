@@ -45,6 +45,27 @@ public sealed class RecalculationSharedLoad(
         return loaded;
     }
 
+    /// <summary>
+    /// B179 L2 (perf): версії шаблонів екземплярів документа за періоди — з уже прочитаного в проході, без звернення до
+    /// бази; <c>null</c>, якщо котрийсь період у проході не читався (тоді відповіді немає — викликач читає сам).
+    /// </summary>
+    public IReadOnlySet<int>? TemplateVersionsOf(long documentId, IEnumerable<int> periods)
+    {
+        ArgumentNullException.ThrowIfNull(periods);
+        var result = new HashSet<int>();
+        foreach (var period in periods)
+        {
+            if (!_instances.TryGetValue((documentId, period), out var loaded))
+            {
+                return null;
+            }
+
+            result.UnionWith(loaded.Select(i => i.TemplateVersionId));
+        }
+
+        return result;
+    }
+
     /// <inheritdoc />
     public void Dispose() => _ownerSession?.Dispose();
 

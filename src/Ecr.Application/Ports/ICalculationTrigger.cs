@@ -67,4 +67,18 @@ public interface ICalculationTrigger
     /// <remarks>Типова реалізація — як <see cref="RequestAsync"/> (для фейків тестів); справжня — <c>CalculationTrigger</c>.</remarks>
     public Task<string?> RequestDependentsAsync(long documentId, PeriodKey periodKey, CancellationToken ct)
         => RequestAsync(documentId, periodKey, ct);
+
+    /// <summary>
+    /// B179 L2: те саме, що <see cref="RequestDependentsAsync(long, PeriodKey, CancellationToken)"/>, але з ланкою
+    /// ланцюжка джерел: перерахунок споживача, що сам є джерелом, понесе її далі (стеля
+    /// <see cref="RegistryImpactRecalculationRequest.MaxHops"/>).
+    /// </summary>
+    /// <param name="documentId">Залежний документ.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="sourceHop">Ланка (≥ 1 для залежного від зміненого джерела).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Як у <see cref="RequestDependentsAsync(long, PeriodKey, CancellationToken)"/>.</returns>
+    /// <remarks>Типова реалізація ланку відкидає (фейки тестів); справжня — <c>CalculationTrigger</c>.</remarks>
+    public Task<string?> RequestDependentsAsync(long documentId, PeriodKey periodKey, int sourceHop, CancellationToken ct)
+        => RequestDependentsAsync(documentId, periodKey, ct);
 }

@@ -74,6 +74,10 @@ public sealed class DependencyGraphProvider(
             .ConfigureAwait(false);
     }
 
+    /// <inheritdoc />
+    public Task<bool> FillsRegistryAsync(int templateId, CancellationToken ct)
+        => db.DocumentSourceBindings.AsNoTracking().AnyAsync(b => b.SourceTemplateId == templateId, ct);
+
     private async Task<string> RevisionAsync(CancellationToken ct)
     {
         var window = (lifetimes ?? CacheLifetimes.Default).Revision;

@@ -539,8 +539,8 @@ GO
 -- B80:source-binding ── зв'язка HSE400 → LAND_HSE400_COMPOSITION → Land (B80 N1, план R3.3) ──
 -- ⛔ Лише INSERT відсутнього (WHEN NOT MATCHED): наявний рядок — стан-ворота, політику й біти — сід НЕ змінює. Новий
 -- рядок завжди SourceState = 0 (Any): рішення людини «сід лишає кожен стенд на Any, ApprovedOnly — лише явне
--- перемикання» (ендпоінт PUT /api/v1/document-source-bindings/{id}/source-state). Біти 1/1 — дієві лише там, де ключі
--- Calculations:Hse400CompositionFromDocument / Hse400RecalculateLandDependents НЕ задано (appsettings.json їх задає).
+-- перемикання» (ендпоінт PUT /api/v1/document-source-bindings/{id}/source-state). Біти 1/1 — єдині вимикачі: ключі
+-- Calculations:Hse400CompositionFromDocument / Hse400RecalculateLandDependents виведено й не читаються (P-0118-31/33/34).
 -- Рядка немає, доки на стенді немає шаблону HSE400 і довідника; з'явиться на першому старті після них.
 MERGE cfg.DocumentSourceBinding AS t
 USING (

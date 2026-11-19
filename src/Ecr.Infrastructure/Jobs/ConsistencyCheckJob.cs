@@ -526,13 +526,10 @@ public sealed class ConsistencyCheckJob(
     /// затверджено (<c>notApproved</c>) або затверджено пізніше за споживача (<c>reapproved</c>).
     /// </summary>
     /// <returns>Знахідка на документ × період, вага 2 — дані розходяться, але нічого не зламано.</returns>
-    /// <remarks>Читання з документа — тим самим правилом, що ворота: явний ключ перекриває біт зв'язки.</remarks>
+    /// <remarks>Читання з документа — тим самим правилом, що ворота: лише біт зв'язки (P-0118-31/33).</remarks>
     private async Task<List<ConsistencyIssue>> StaleApprovedDependentsAsync(CancellationToken ct)
     {
-        var readOverride = configuration is null
-            ? null
-            : Hse400CompositionSnapshotLoader.Override(configuration, Hse400CompositionSnapshotLoader.EnabledKey);
-        var stale = await new StaleApprovedDependentCheck(db, readOverride).RunAsync(MaxIssues, ct).ConfigureAwait(false);
+        var stale = await new StaleApprovedDependentCheck(db, readOverride: null).RunAsync(MaxIssues, ct).ConfigureAwait(false);
 
         return [.. stale.Select(s => new ConsistencyIssue(
             StaleApprovedDependentRule,

@@ -1,4 +1,3 @@
-using Ecr.Api.Startup;
 using Ecr.Application.Health;
 using Ecr.Application.Ports;
 using Ecr.TestKit;
@@ -9,6 +8,10 @@ namespace Ecr.Api.Tests;
 /// <summary>B80 (N1, RW.5): факти зв'язки HSE400 → Land у блоці <c>calculations</c> фактів здоров'я.</summary>
 public sealed class SystemHealthHse400SourceTests
 {
+    // Мітка явного перекриття з боку хоста (не Default). ✎ P-0118-31/33: продукт її більше не передає — ключ виведено;
+    // тести тримають семантику DTO «перекриття не підміняється бітом».
+    private const string ExplicitSource = "Environment";
+
     /// <remarks>
     /// Мутація (B80-M12, попередження): <c>!facts.ApprovedOnly || …</c> → <c>facts.UnapprovedMonthWithData</c> — зв'язка на Any
     /// з документом без незатверджених даних більше не попереджає, червоний.
@@ -33,13 +36,13 @@ public sealed class SystemHealthHse400SourceTests
             Hse400DocumentInCurrentYear: approvedMonths is not null,
             hasBinding ? new HealthHse400SourceFacts(approvedOnly, true, approvedMonths, unapprovedWithData) : null);
 
-        var dto = SystemFactsCalculationsDto.Of(true, ConfigurationSourceLabel.AppSettings, snapshot);
+        var dto = SystemFactsCalculationsDto.Of(true, ExplicitSource, snapshot);
 
         Assert.Equal(expectedState, dto.Hse400SourceState);
         Assert.Equal(approvedMonths, dto.Hse400ApprovedMonths);
         Assert.Equal(expectedWarning, dto.Hse400SourceWarning);
         Assert.True(dto.Hse400CompositionFromDocument);
-        Assert.Equal(ConfigurationSourceLabel.AppSettings, dto.Hse400CompositionSource);
+        Assert.Equal(ExplicitSource, dto.Hse400CompositionSource);
     }
 
     /// <remarks>Мутація (B80-M13, перекриття в фактах): прибрати заміну за <c>Default</c> — мітка лишається Default, червоний.</remarks>
@@ -58,8 +61,8 @@ public sealed class SystemHealthHse400SourceTests
         Assert.Equal(SystemFactsCalculationsDto.SourceBinding, unset.Hse400CompositionSource);
         Assert.False(unset.Hse400CompositionWarning);
 
-        // Ключ задано явно — він і діє, біт зв'язки не підміняє.
-        var explicitOff = SystemFactsCalculationsDto.Of(false, ConfigurationSourceLabel.Environment, snapshot);
+        // Перекриття задано явно — воно і діє, біт зв'язки не підміняє.
+        var explicitOff = SystemFactsCalculationsDto.Of(false, ExplicitSource, snapshot);
         Assert.False(explicitOff.Hse400CompositionFromDocument);
         Assert.True(explicitOff.Hse400CompositionWarning);
     }

@@ -380,7 +380,9 @@ public sealed class LandHse400CompositionScriptTests
             import);
         Assert.Equal(7, deprecatedExit);
         Assert.Contains("-AllowDeprecatedRegistry", deprecated, StringComparison.Ordinal);
-        Assert.Contains("Hse400CompositionFromDocument", deprecated, StringComparison.Ordinal);
+        // ✎ B183 (P-0118-31/33): ключ виведено — відмова називає біт зв'язки, а не ключ.
+        Assert.Contains("ReadFromDocument", deprecated, StringComparison.Ordinal);
+        Assert.DoesNotContain("Hse400CompositionFromDocument", deprecated, StringComparison.Ordinal);
 
         var (remoteExit, remote) = RunPowerShell(
             "try { & $args[0] -AllowDeprecatedRegistry -BaseUrl 'https://ecr.example.com' -SourceDatabase CopyDb -ConfirmSource CopyDb -ConfirmStand 'ecr.example.com' -DryRun; exit 0 } catch { Write-Output $_.Exception.Message; exit 7 }",

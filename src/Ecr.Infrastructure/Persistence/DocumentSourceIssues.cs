@@ -30,7 +30,10 @@ namespace Ecr.Infrastructure.Persistence;
 /// </para>
 /// </remarks>
 /// <param name="db">Контекст.</param>
-/// <param name="readOverride">Явний ключ <c>Calculations:Hse400CompositionFromDocument</c>; <c>null</c> — біт зв'язки.</param>
+/// <param name="readOverride">
+/// Перекриття біта зв'язки <c>ReadFromDocument</c> (<see cref="Ecr.Application.Ports.IDocumentSourceFlagOverrides"/>;
+/// у DI завжди <c>null</c> — ключ конфігурації виведено, P-0118-31/33); <c>null</c> — біт зв'язки.
+/// </param>
 internal sealed class DocumentSourceIssues(EcrDbContext db, bool? readOverride)
 {
     /// <summary>Причина <c>SourceChangedAfterApproval</c>: місяць джерела зараз не затверджено.</summary>

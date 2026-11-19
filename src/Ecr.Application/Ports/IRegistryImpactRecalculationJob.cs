@@ -28,17 +28,37 @@ public interface IRegistryImpactRecalculationJob : IBackgroundJob;
 /// HSE400 3b: змінився документ-джерело даних довідника — рік періодів, у яких шукати залежні документи; тоді
 /// <paramref name="DocumentIds"/> порожній — набір визначає задача під час виконання.
 /// </param>
+/// <param name="BindingId">
+/// B179 L2: зв'язка <c>cfg.DocumentSourceBinding</c>, документ-джерело якої змінився (<c>SourceDocumentChanged</c>):
+/// споживачі — з графа залежностей (<see cref="IDependencyGraphProvider"/>), а не з результатів. <c>null</c> — старі
+/// форми (перелік людини; FLERT — довідник × рік).
+/// </param>
+/// <param name="Month">B179 L2: місяць зміни джерела (1…12); <c>null</c> — увесь рік <paramref name="Year"/>.</param>
+/// <param name="Hop">
+/// B179 L2: ланка ланцюжка джерел (0 — зміна людиною; споживач, що сам є джерелом, ставить наступну з +1); стеля —
+/// <see cref="MaxHops"/>.
+/// </param>
 public sealed record RegistryImpactRecalculationRequest(
     int RegistryDefId,
     IReadOnlyList<long> DocumentIds,
     string Reason,
-    int? Year = null)
+    int? Year = null,
+    int? BindingId = null,
+    int? Month = null,
+    int Hop = 0)
 {
+    /// <summary>B179 L2: стеля ланцюжка «джерело → споживач-джерело → …» (як <c>CrossPeriodFanOut.MaxHops</c>).</summary>
+    public const int MaxHops = 8;
+
     private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web);
 
     /// <summary>Чи це постановка «залежні від документа-джерела за рік» (HSE400 3b), а не перелік людини.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public bool IsSourceChange => Year is > 0;
+
+    /// <summary>B179 L2: змінився документ-джерело зв'язки <see cref="BindingId"/> (споживачі — з графа).</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsSourceDocumentChange => IsSourceChange && BindingId is > 0;
 
     /// <summary>Розбирає завдання черги: типізоване або JSON.</summary>
     /// <param name="payload">Завдання.</param>
@@ -99,4 +119,18 @@ public static class RegistryImpactRecalculationTarget
     /// </remarks>
     public static string ForYear(int registryDefId, int year)
         => string.Create(CultureInfo.InvariantCulture, $"registry-impact-r{registryDefId}-y{year}");
+
+    /// <summary>B179 L2: ціль «зв'язка × рік × місяць» для зміни документа-джерела.</summary>
+    /// <param name="bindingId">Зв'язка.</param>
+    /// <param name="year">Рік.</param>
+    /// <param name="month">Місяць; <c>null</c> — увесь рік.</param>
+    /// <returns>Ключ цілі.</returns>
+    /// <remarks>
+    /// ⛔ Місяць — у КЛЮЧІ, а не в payload: злиття лишає payload однієї постановки, тож сплеск правок одного місяця дає
+    /// одну задачу, а правки різних місяців — окремі (≤ 13 цілей на рік). Ні документа, ні ланки в ключі немає.
+    /// </remarks>
+    public static string ForSourceChange(int bindingId, int year, int? month)
+        => month is { } m
+            ? string.Create(CultureInfo.InvariantCulture, $"source-change-b{bindingId}-y{year}-m{m}")
+            : string.Create(CultureInfo.InvariantCulture, $"source-change-b{bindingId}-y{year}");
 }
