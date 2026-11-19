@@ -66,6 +66,45 @@ public sealed partial class WorkflowTransactionTests
         Assert.Equal(DocumentStatus.Rejected, await StatusAsync(world).ConfigureAwait(true));
     }
 
+    /// <summary>
+    /// B80 N5 (F13): повернення в роботу питає вплив лише ІЗ ЗАТВЕРДЖЕНОГО оригіналу — із поданого (<c>Submitted</c>) джерело
+    /// залежних не міняло, питати нічого. Із затвердженого за <c>Block</c> — відмова, аркуш лишається <c>Approved</c>.
+    /// </summary>
+    /// <remarks>Мутація: у <c>ReopenDocumentHandler</c> зняти умову <c>fromStatus == DocumentStatus.Approved</c> — червоніє перша половина.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "B80")]
+    public async Task B80_N5_повернення_з_поданого_впливу_не_питає_а_із_затвердженого_питає_і_Block_лишає_Approved()
+    {
+        var assessor = Impact(DocumentSourcePolicy.Block);
+
+        var submitted = await ArrangeAsync(submitted: true).ConfigureAwait(true);
+        await ReopenWithImpactAsync(submitted, assessor).ConfigureAwait(true);
+        await assessor.DidNotReceiveWithAnyArgs().AssessAsync(default, default, default, default, default);
+        Assert.Equal(DocumentStatus.Draft, await StatusAsync(submitted).ConfigureAwait(true));
+
+        var approved = await ArrangeAsync(submitted: true).ConfigureAwait(true);
+        await ApproveAsync(approved, Step(ordinal: 2, next: null), approved: true, reason: null).ConfigureAwait(true);
+        var error = await Assert.ThrowsAsync<Ecr.Application.Errors.BusinessRuleException>(
+            () => ReopenWithImpactAsync(approved, assessor)).ConfigureAwait(true);
+        Assert.Equal("ECR-SRC-0422", error.ErrorCode);
+        await assessor.Received(1).AssessAsync(
+            approved.DocumentId, approved.SheetDefId, PeriodKeyValue, SourceApprovalChange.Reopened, Arg.Any<CancellationToken>());
+        Assert.Equal(DocumentStatus.Approved, await StatusAsync(approved).ConfigureAwait(true));
+    }
+
+    private async Task ReopenWithImpactAsync(World world, ISourceImpactAssessor assessor)
+    {
+        await using var db = CreateContext();
+        await new ReopenDocumentHandler(
+                new WorkflowStore(db), AccessAt(step: null), new UnitOfWork(db), User(), new TestClock(Now), Documents(world),
+                new ReportSnapshotSync(NoSnapshots(), Documents(world)),
+                sourceImpact: assessor)
+            .HandleAsync(world.DocumentId, world.SheetDefId, PeriodKeyValue, "B80 N5: повернення", CancellationToken.None)
+            .ConfigureAwait(false);
+    }
+
     private static ISourceImpactAssessor Impact(DocumentSourcePolicy policy)
     {
         var assessor = Substitute.For<ISourceImpactAssessor>();
