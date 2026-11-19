@@ -58,7 +58,7 @@ describe('SourceImpactModal', () => {
 
     fireEvent.click(screen.getByTestId('source-impact-confirm'));
 
-    expect(onConfirm).toHaveBeenCalledWith({ hash: 'abc123', reason: null });
+    expect(onConfirm).toHaveBeenCalledWith({ hash: 'abc123', reason: null }, { suppress: false });
   });
 
   it('ConfirmWithReason: кнопка вимкнена, доки причина порожня; причина йде обрізаною', async () => {
@@ -74,7 +74,7 @@ describe('SourceImpactModal', () => {
     fireEvent.change(reason, { target: { value: '  Акт 12  ' } });
     fireEvent.click(screen.getByTestId('source-impact-confirm'));
 
-    expect(onConfirm).toHaveBeenCalledWith({ hash: 'abc123', reason: 'Акт 12' });
+    expect(onConfirm).toHaveBeenCalledWith({ hash: 'abc123', reason: 'Акт 12' }, { suppress: false });
   });
 
   it('Block: пояснення відмови, кнопки підтвердження немає', async () => {
@@ -94,7 +94,7 @@ describe('SourceImpactModal', () => {
 
     fireEvent.click(screen.getByTestId('source-impact-confirm'));
 
-    expect(onConfirm).toHaveBeenCalledWith({ hash: 'abc123', reason: null });
+    expect(onConfirm).toHaveBeenCalledWith({ hash: 'abc123', reason: null }, { suppress: false });
   });
 
   it('Cancel закриває діалог і не підтверджує', async () => {
