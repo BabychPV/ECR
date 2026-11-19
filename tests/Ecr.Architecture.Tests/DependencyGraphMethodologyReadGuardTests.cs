@@ -59,6 +59,7 @@ public sealed partial class DependencyGraphMethodologyReadGuardTests
     [InlineData("u.SourceKind == RegistryUse.MethodologyVersionSource", true)]
     [InlineData("where use.SourceKind == 1", true)]
     [InlineData("\"SELECT 1 FROM calc.MethodologyVersion\"", true)]
+    [InlineData("db.MethodologyDependencies.AsNoTracking()", true)]
     [InlineData("// db.MethodologyVersions — лише адаптер", false)]
     [InlineData("var rows = await methodologies.ListReadsAsync(ct);", false)]
     [InlineData("IMethodologyRegistryEdges edges", false)]
@@ -81,7 +82,7 @@ public sealed partial class DependencyGraphMethodologyReadGuardTests
     private static partial Regex LineComment();
 
     [GeneratedRegex(
-        @"\.\s*(?:MethodologyVersions|Methodologies|MethodologyFormulas|CalculationBindings)\b|\bMethodologyVersionSource\b|SourceKind\s*==\s*1\b|\b(?:calc\]?\.\[?Methodology\w*|cfg\]?\.\[?CalculationBinding)\b",
+        @"\.\s*(?:MethodologyVersions|Methodologies|MethodologyFormulas|CalculationBindings|MethodologyDependencies|MethodologyReadTables)\b|\bMethodologyVersionSource\b|SourceKind\s*==\s*1\b|\b(?:calc\]?\.\[?Methodology\w*|cfg\]?\.\[?CalculationBinding)\b",
         RegexOptions.None,
         matchTimeoutMilliseconds: 2000)]
     private static partial Regex MethodologyRead();

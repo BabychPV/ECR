@@ -6708,7 +6708,14 @@ public sealed record RowDto(
   опубліковані плюс ті, що діють за незакритим періодом документа. `cfg.DocumentSourceBindingConsumer` граф не читає.
   Кеш — `IMemoryCache` під ключем ревізії вхідних даних (вікно ревізії 5 с, стеля 30 хв), без явної інвалідації.
 - **Порт `IMethodologyRegistryEdges`**: єдиний читач таблиць методологій для графа (ревізія, читання довідників
-  опублікованими версіями з виразом формули, активні прив'язки); сторож `DependencyGraphMethodologyReadGuardTests`.
+  опублікованими версіями з виразом формули, активні прив'язки; ✎ MS × B179: `ListResultReadsAsync` — читання результатів між
+  методологіями, `calc.MethodologyDependency`; ревізія включає рушій опублікованих версій, ребра довідників методологій і
+  залежності); сторож `DependencyGraphMethodologyReadGuardTests`. Ребро графа `MethodologyResult` (джерело результатів →
+  читач) дає читача споживачем довідників джерела транзитивно з обсягом «усі періоди». `IDependencyGraphProvider.GetFreshAsync` —
+  граф без вікна мемоїзації ревізії (перевірка циклу після запису ребер у транзакції публікації методології).
+  Публікація версії-скрипта (`POST /methodologies/{id}/versions/{versionId}/publish`) і `script-migration/switch`, чиї ребра
+  замкнули б новий цикл залежностей документів, відмовляють 422 `ECR-TMPL-0422`, `messageKey`
+  `err.ECR-TMPL-0422.dependencyCycle`, `cycle` — шлях кодами; відкат транзакції. Нового коду й полів немає.
 - **`PeriodScope`** (`Ecr.Expressions`, `RegistryReadScopes`): `REGFIND` з ключами `[Period].Year` + `[Period].Sequence`
   → `Month`; `[Period].Year` + літерал 1…12 (річна розкладка D-474) → `Year` з маскою місяця; лише рік → `Year`;
   інакше → `All`. Області рядка — рівності `ROW.f = [Period].*` у ланцюжку `AND`.
