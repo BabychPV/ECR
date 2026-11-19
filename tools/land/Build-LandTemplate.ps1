@@ -136,6 +136,8 @@ param(
     # -Stage BranchGate: перевести еталонні тести чернетки на наявний документ/період (старий документ 1 видалено 10.11).
     [long]$GoldenTestDocumentId = 0,
     [int]$GoldenTestPeriodKey = 0,
+    # -Stage LegacyPublish: мостові аргументи, яких немає в рядку старої системи, дістають значення 1 (знімок на синтетиці; без прапора такий аргумент не передається).
+    [switch]$GoldenSyntheticBridgeArgs,
     # -Stage RequiredInputs: рівень вимоги (Warn - попередження, Block - відмова збереження людині) і дозвіл створити
     # чернетку V(n+1) з останньої опублікованої версії, коли чернетки V<n> немає.
     [ValidateSet('Warn', 'Block')][string]$RequiredInputSeverity = 'Warn',
@@ -2967,18 +2969,26 @@ function Stage-LegacyPublish {
         }
         $rulesOf = @(@($pm.versions) | ForEach-Object { @($_.rules) } | Where-Object { $_.isAvailable })
         $picked = $null
-        foreach ($lt in @($rulesOf | ForEach-Object { [string]$_.table } | Sort-Object -Unique)) {
+        # Таблиці з найменшою кількістю відсутніх аргументів - першими (вхід тесту має бути якомога повнішим).
+        $tablesOrdered = @($rulesOf | ForEach-Object { [string]$_.table } | Sort-Object -Unique | ForEach-Object {
+                $have0 = Get-LegacyColumns $_
+                [pscustomobject]@{ T = $_; Missing = @(Get-LandGoldenMissingArguments -Arguments $extArgs -Row $have0 -Columns @($tables[[string]$tmap[$_]].columns)).Count }
+            } | Sort-Object Missing, T | ForEach-Object { $_.T })
+        foreach ($lt in $tablesOrdered) {
             $have = Get-LegacyColumns $lt
             if ($have.Count -eq 0) { continue }
             $tcode = $tmap[$lt]
             foreach ($rule in @($rulesOf | Where-Object { [string]$_.table -eq $lt })) {
-                foreach ($strict in @($true, $false)) {
+                foreach ($mode in @('complete', 'strict', 'loose')) {
+                    $strict = ($mode -ne 'loose')
                     $where = @('Time IS NOT NULL'); $cmd = $cn.CreateCommand(); $i = 0
                     foreach ($c in @($rule.conditions)) {
                         if (-not $have.ContainsKey([string]$c.parameter)) { $where = $null; break }
                         $where += "[$($c.parameter)] = @p$i"; [void]$cmd.Parameters.AddWithValue("@p$i", [string]$c.value); $i++
                     }
                     if ($null -eq $where) { continue }
+                    # complete: таблиця має колонки (або псевдоніми) для УСІХ аргументів методології; інакше вхід тесту неповний і вихід порожній.
+                    if ($mode -eq 'complete' -and @(Get-LandGoldenMissingArguments -Arguments $extArgs -Row $have -Columns @($tables[$tcode].columns)).Count -gt 0) { continue }
                     if ($have.ContainsKey('Land_Status')) { $where += "Land_Status LIKE 'Running%'" }
                     if ($strict) { foreach ($a in $extArgs) { if ($have.ContainsKey($a)) { $where += "[$a] IS NOT NULL" } } }
                     $cmd.CommandText = "SELECT TOP 1 * FROM dbo.[$lt] WITH (NOLOCK) WHERE " + ($where -join ' AND ') + ' ORDER BY Time DESC'
@@ -2987,7 +2997,7 @@ function Stage-LegacyPublish {
                     if ($rd.Read()) {
                         $row = @{}
                         for ($ci = 0; $ci -lt $rd.FieldCount; $ci++) { if (-not $rd.IsDBNull($ci)) { $row[$rd.GetName($ci)] = $rd.GetValue($ci) } }
-                        $picked = [pscustomobject]@{ Table = $lt; TableCode = $tcode; Row = $row; Strict = $strict }
+                        $picked = [pscustomobject]@{ Table = $lt; TableCode = $tcode; Row = $row; Strict = $strict; Mode = $mode }
                     }
                     $rd.Close()
                     if ($picked) { break }
@@ -2998,15 +3008,26 @@ function Stage-LegacyPublish {
         }
         if (-not $picked) { Log "  ${lgCode}: у старій системі немає рядка за правилами"; & $bump 'немає рядка'; continue }
         $tb = $tables[$picked.TableCode]
+        if ($picked.Mode -ne 'complete') {
+            $absent = @(Get-LandGoldenMissingArguments -Arguments $extArgs -Row $picked.Row -Columns @($tb.columns))
+            Log "  ${lgCode}: рядок взято з неповним набором аргументів (режим $($picked.Mode)); немає в рядку: $($absent -join ', ')"
+        }
         $argList = @()
         foreach ($a in $extArgs) {
-            if (-not $picked.Row.ContainsKey($a)) { continue }
-            $v = $picked.Row[$a]
+            $srcCol = Get-LandGoldenRowColumn -Argument $a -Row $picked.Row -Columns @($tb.columns)
+            if ($null -eq $srcCol) {
+                # Мостовий аргумент (склад HSE400 за видом палива тощо) у таблиці старої системи колонки не має: лише за явним
+                # -GoldenSyntheticBridgeArgs - число 1 (знімок рушія, не еталон; журнал називає такі аргументи).
+                if ($GoldenSyntheticBridgeArgs) { $argList += @{ argumentCode = $a; value = [double]1; valueString = $null; unitId = $null } }
+                continue
+            }
+            $v = $picked.Row[$srcCol]
             $colDef = $null
-            if ($tb) { $colDef = @($tb.columns | Where-Object { [string]$_.code -eq $a }) | Select-Object -First 1 }
-            if ($colDef -and [string]$colDef.dataType -eq 'Lookup' -and $colDef.registry -and $regs.ContainsKey([string]$colDef.registry)) {
-                $ec = Find-LandLegacyEntryCode -Registry $regs[[string]$colDef.registry] -Value ([string]$v)
-                if ($ec -and $ec -ne '#ambiguous') { $argList += @{ argumentCode = $a; value = $null; valueString = $null; unitId = $null; entryId = [int](RegEntryId ([string]$colDef.registry) ('code:' + $ec)) }; continue }
+            if ($tb) { $colDef = @($tb.columns | Where-Object { [string]$_.code -eq $srcCol }) | Select-Object -First 1 }
+            $lookupReg = Get-LandGoldenLookupRegistry -Column $colDef -Columns @($tb.columns)
+            if ($lookupReg -and $regs.ContainsKey($lookupReg)) {
+                $ec = Find-LandLegacyEntryCode -Registry $regs[$lookupReg] -Value ([string]$v)
+                if ($ec -and $ec -ne '#ambiguous') { $argList += @{ argumentCode = $a; value = $null; valueString = $null; unitId = $null; entryId = [int](RegEntryId $lookupReg ('code:' + $ec)) }; continue }
             }
             if ($v -is [string]) { $argList += @{ argumentCode = $a; value = $null; valueString = [string]$v; unitId = $null } }
             elseif ($v -is [bool]) { $argList += @{ argumentCode = $a; value = $null; valueString = [string]$v; unitId = $null } }
