@@ -122,25 +122,42 @@ public sealed class DocumentSourceMonthGate(EcrDbContext db, bool? readOverride,
     /// <returns>За зростанням id зв'язки; з періодичністю проєкту споживача.</returns>
     internal static async Task<List<ConsumerBinding>> ConsumerBindingsAsync(
         EcrDbContext db, IDependencyGraphProvider graph, long documentId, int periodKey, CancellationToken ct)
+        => (await ConsumerBindingsByPeriodAsync(db, graph, documentId, [periodKey], ct).ConfigureAwait(false))
+            .GetValueOrDefault(periodKey) ?? [];
+
+    /// <summary>
+    /// ✎ B80 N5 (F13): <see cref="ConsumerBindingsAsync"/> для ВСІХ періодів одним проходом — запит шаблонів документа за
+    /// кожен період (одне приєднання до списку періодів) і один запит зв'язок, а не пара запитів на період. Кількість
+    /// звернень до БД від кількості періодів не залежить (граф — з кешу).
+    /// </summary>
+    /// <param name="db">Контекст.</param>
+    /// <param name="graph">Граф залежностей документів (споживачі зв'язки).</param>
+    /// <param name="documentId">Документ-споживач.</param>
+    /// <param name="periodKeys">Періоди.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Період → зв'язки за зростанням id; періоду без зв'язок у словнику немає.</returns>
+    internal static async Task<Dictionary<int, List<ConsumerBinding>>> ConsumerBindingsByPeriodAsync(
+        EcrDbContext db, IDependencyGraphProvider graph, long documentId, IReadOnlyCollection<int> periodKeys, CancellationToken ct)
     {
+        var keys = periodKeys.Distinct().ToList();
+        if (keys.Count == 0)
+        {
+            return [];
+        }
+
         // ✎ B179 L6: споживач зв'язки — шаблон, якого граф залежностей називає споживачем (а не ручний перелік).
-        var own = await (
-                from d in db.Documents.AsNoTracking()
-                where d.Id == documentId
-                join p in db.Projects.AsNoTracking() on d.ProjectId equals p.Id
-                from pv in db.TemplateVersions.AsNoTracking()
-                where pv.Id == (d.TemplateId == null ? EcrDbContext.VersionOf(d.ProjectId, periodKey) : EcrDbContext.TemplateVersionOf(d.ProjectId, d.TemplateId.Value, periodKey))
-                select new { TemplateId = d.TemplateId ?? pv.TemplateId, p.PeriodKind })
-            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
-        if (own is null)
+        var own = await OwnTemplatesAsync(db, documentId, keys, ct).ConfigureAwait(false);
+        if (own.Count == 0)
         {
             return [];
         }
 
         var snapshot = await graph.GetAsync(ct).ConfigureAwait(false);
-        var bindingIds = snapshot.TemplateDependencies
-            .Where(d => d.ConsumerTemplateId == own.TemplateId)
-            .Select(d => d.BindingId)
+        var templateBindings = snapshot.TemplateDependencies
+            .GroupBy(d => d.ConsumerTemplateId)
+            .ToDictionary(g => g.Key, g => g.Select(d => d.BindingId).Distinct().ToList());
+        var bindingIds = own
+            .SelectMany(o => templateBindings.GetValueOrDefault(o.TemplateId) ?? [])
             .Distinct()
             .ToList();
         if (bindingIds.Count == 0)
@@ -148,15 +165,64 @@ public sealed class DocumentSourceMonthGate(EcrDbContext db, bool? readOverride,
             return [];
         }
 
-        return await (
+        var bindings = await (
                 from b in db.DocumentSourceBindings.AsNoTracking()
                 where bindingIds.Contains(b.Id)
                       && b.SourceState == DocumentSourceState.ApprovedOnly
                       && b.MappingKind == DocumentSourceBinding.Hse400CompositionMapping
                 orderby b.Id
-                select new ConsumerBinding(b.Id, b.ReadFromDocument, own.PeriodKind))
+                select new { b.Id, b.ReadFromDocument })
             .ToListAsync(ct).ConfigureAwait(false);
+
+        var result = new Dictionary<int, List<ConsumerBinding>>();
+        foreach (var o in own)
+        {
+            var ids = templateBindings.GetValueOrDefault(o.TemplateId);
+            var found = bindings
+                .Where(b => ids is not null && ids.Contains(b.Id))
+                .Select(b => new ConsumerBinding(b.Id, b.ReadFromDocument, o.PeriodKind))
+                .ToList();
+            if (found.Count > 0)
+            {
+                result[o.PeriodKey] = found;
+            }
+        }
+
+        return result;
     }
+
+    /// <summary>
+    /// Шаблон документа й періодичність проєкту за КОЖЕН період — ОДНИМ запитом: гілка на період (шкала версій
+    /// <c>VersionOf</c>/<c>TemplateVersionOf</c> залежить від періоду) зшита в <c>UNION ALL</c>. Колекція періодів у
+    /// приєднанні (<c>from key in keys</c>) EF не перекладає, тож список розкладено в запит.
+    /// </summary>
+    private static async Task<List<OwnTemplate>> OwnTemplatesAsync(
+        EcrDbContext db, long documentId, List<int> keys, CancellationToken ct)
+    {
+        const int Chunk = 40;
+        var result = new List<OwnTemplate>();
+        foreach (var chunk in keys.Chunk(Chunk))
+        {
+            // ⚠ Проєкція — анонімний тип у самому запиті: запис-конструктор давав би клієнтську проєкцію, а набір операцій
+            // (UNION) після неї EF не будує.
+            var union = chunk
+                .Select(key => (
+                    from d in db.Documents.AsNoTracking()
+                    where d.Id == documentId
+                    join p in db.Projects.AsNoTracking() on d.ProjectId equals p.Id
+                    from pv in db.TemplateVersions.AsNoTracking()
+                    where pv.Id == (d.TemplateId == null ? EcrDbContext.VersionOf(d.ProjectId, key) : EcrDbContext.TemplateVersionOf(d.ProjectId, d.TemplateId.Value, key))
+                    select new { PeriodKey = key, TemplateId = d.TemplateId ?? pv.TemplateId, p.PeriodKind }))
+                .Aggregate((left, right) => left.Concat(right));
+
+            result.AddRange((await union.ToListAsync(ct).ConfigureAwait(false))
+                .Select(r => new OwnTemplate(r.PeriodKey, r.TemplateId, r.PeriodKind)));
+        }
+
+        return result;
+    }
+
+    private sealed record OwnTemplate(int PeriodKey, int TemplateId, PeriodKind PeriodKind);
 }
 
 /// <summary>Зв'язка <c>ApprovedOnly</c> документа-споживача.</summary>
