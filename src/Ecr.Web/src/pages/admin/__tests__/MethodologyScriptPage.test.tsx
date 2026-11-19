@@ -65,6 +65,7 @@ interface Setup {
   readonly isEditable?: boolean;
   readonly isDraft?: boolean;
   readonly text?: string;
+  readonly level?: string;
 }
 
 function server(setup: Setup = {}): {
@@ -84,7 +85,7 @@ function server(setup: Setup = {}): {
     calendarMode: 'Actual',
     traceLevel: 'Off',
     createdByUserId: 1,
-    level: 'Configuration',
+    level: setup.level ?? 'Configuration',
   };
   const outline = {
     tables: [], inputs: [], outputs: [], substances: [], imports: [], constants: [], functions: [], variables: [],
@@ -221,6 +222,37 @@ describe('MethodologyScriptPage', { timeout: 30_000 }, () => {
     expect(screen.getByText('⟦methodologies.readOnly⟧')).toBeTruthy();
     // Вкладки справа працюють і для читання.
     expect(screen.getByText('⟦methodologyScript.tab.preview⟧')).toBeTruthy();
+  });
+
+  /**
+   * Сервер на перегляд версії рівня Module відповідає 422 `scriptPreviewModuleLevel`: вкладку вимкнено з поясненням,
+   * відкрита за замовчуванням — «Входи й виходи». Для звичайної версії вкладка доступна й відкрита першою.
+   * Мутація: прибрати `disabled`/ефект перемикання на `io` у `MethodologyScriptPage` (або умову `version?.level === 'Module'`) — червоний.
+   */
+  it('версія рівня Module: вкладка перегляду вимкнена з поясненням, відкрито «Входи й виходи»', async () => {
+    server({ level: 'Module' });
+    show();
+    await loaded();
+
+    const tab = await screen.findByTestId('script-preview-tab-disabled');
+    expect(tab.hasAttribute('disabled') || tab.getAttribute('aria-disabled') === 'true' || tab.getAttribute('data-disabled') === 'true').toBe(true);
+    expect(screen.getByTestId('script-preview-module-level').textContent).toContain('⟦methodologyScript.preview.moduleLevel⟧');
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: '⟦methodologyScript.tab.io⟧' }).getAttribute('aria-selected')).toBe('true');
+    });
+
+    fireEvent.click(tab);
+    expect(screen.getByRole('tab', { name: '⟦methodologyScript.tab.io⟧' }).getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('версія рівня Configuration: вкладка перегляду доступна й відкрита першою, пояснення немає', async () => {
+    server();
+    show();
+    await loaded();
+
+    expect(screen.queryByTestId('script-preview-tab-disabled')).toBeNull();
+    expect(screen.queryByTestId('script-preview-module-level')).toBeNull();
+    expect(screen.getByRole('tab', { name: '⟦methodologyScript.tab.preview⟧' }).getAttribute('aria-selected')).toBe('true');
   });
 
   it('лише читання: чернетка, але користувач без права редагування формул', async () => {

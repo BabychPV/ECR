@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState, type JSX } from 'react';
-import { Alert, Badge, Box, Button, Group, Stack, Tabs, Text } from '@mantine/core';
+import { Alert, Badge, Box, Button, Group, Stack, Tabs, Text, Tooltip } from '@mantine/core';
 import { useDebouncedValue } from '@mantine/hooks';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
@@ -182,6 +182,13 @@ export function MethodologyScriptPage(): JSX.Element {
   const readOnly =
     !mayEditContent(version, mayEdit) || script.data?.isDraft === false || !isScript;
   const requiredInputsEditable = mayEditContent(version, mayManageRequiredInputs);
+
+  // Версія рівня Module (HSE400): сервер на перегляд відповідає 422 `scriptPreviewModuleLevel` (набір аргументів складає
+  // модуль, а не рядки скрипта) — вкладку вимкнено з поясненням, відкрита за замовчуванням — «Входи й виходи».
+  const previewUnavailable = version?.level === 'Module';
+  useEffect(() => {
+    if (previewUnavailable) setTab((current) => (current === 'preview' ? 'io' : current));
+  }, [previewUnavailable]);
 
   // ── Перевірка живого тексту ───────────────────────────────────────────────
   const [debouncedText] = useDebouncedValue(state.text, ValidationDelayMs);
@@ -493,7 +500,20 @@ export function MethodologyScriptPage(): JSX.Element {
             keepMounted
           >
             <Tabs.List>
-              <Tabs.Tab value="preview">{t('methodologyScript.tab.preview')}</Tabs.Tab>
+              {previewUnavailable ? (
+                <Tooltip label={t('methodologyScript.preview.moduleLevel')} multiline w={320} withArrow>
+                  <Tabs.Tab
+                    value="preview"
+                    disabled
+                    data-testid="script-preview-tab-disabled"
+                    aria-describedby="script-preview-module-level"
+                  >
+                    {t('methodologyScript.tab.preview')}
+                  </Tabs.Tab>
+                </Tooltip>
+              ) : (
+                <Tabs.Tab value="preview">{t('methodologyScript.tab.preview')}</Tabs.Tab>
+              )}
               <Tabs.Tab value="io">{t('methodologyScript.tab.io')}</Tabs.Tab>
               <Tabs.Tab value="tests">{t('methodologyScript.tab.tests')}</Tabs.Tab>
               <Tabs.Tab value="required">{t('methodologyScript.tab.required')}</Tabs.Tab>
@@ -512,6 +532,11 @@ export function MethodologyScriptPage(): JSX.Element {
             </Tabs.List>
 
             <Tabs.Panel value="preview" pt="sm">
+              {previewUnavailable ? (
+                <Alert color="gray" id="script-preview-module-level" data-testid="script-preview-module-level">
+                  {t('methodologyScript.preview.moduleLevel')}
+                </Alert>
+              ) : (
               <Suspense fallback={null}>
               <ScriptPreviewPanel
                 methodologyId={methodologyId}
@@ -524,6 +549,7 @@ export function MethodologyScriptPage(): JSX.Element {
                 onJump={(line, column) => editor.current?.reveal(line, column)}
               />
               </Suspense>
+              )}
             </Tabs.Panel>
 
             <Tabs.Panel value="io" pt="sm">
