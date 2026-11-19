@@ -1,4 +1,6 @@
 // src/Ecr.Application/Ports/IMethodologyRegistryEdges.cs
+using Ecr.Domain.Enums;
+
 namespace Ecr.Application.Ports;
 
 /// <summary>
@@ -48,7 +50,20 @@ public sealed record MethodologyResultReadRow(
 /// <param name="FormulaCode">Код формули версії.</param>
 /// <param name="Expression">Вираз формули (для обсягу за періодом); <c>null</c> — формули з таким кодом немає.</param>
 public sealed record MethodologyRegistryReadRow(
-    int MethodologyId, string MethodologyCode, int MethodologyVersionId, int RegistryDefId, string FormulaCode, string? Expression);
+    int MethodologyId, string MethodologyCode, int MethodologyVersionId, int RegistryDefId, string FormulaCode, string? Expression)
+{
+    /// <summary>Текст скрипта версії (<c>ScriptText</c>); <c>null</c> — версія формульна. Обсяг за періодом скрипта — з нього.</summary>
+    public string? ScriptText { get; init; }
+
+    /// <summary>Числовий режим версії (для компіляції скрипта).</summary>
+    public NumericMode NumericMode { get; init; }
+
+    /// <summary>Методологія — бібліотека (для компіляції скрипта).</summary>
+    public bool IsLibrary { get; init; }
+
+    /// <summary>Версія рівня <c>Module</c> (для компіляції скрипта).</summary>
+    public bool IsModuleLevel { get; init; }
+}
 
 /// <summary>Прив'язка виходу методології до колонки шаблону.</summary>
 /// <param name="CalculationBindingId">Прив'язка.</param>

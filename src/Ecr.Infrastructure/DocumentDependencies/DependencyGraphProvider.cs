@@ -180,6 +180,7 @@ public sealed class DependencyGraphProvider(
         var methodologyReads = new List<MethodologyScopedRead>();
         var methodologyCodes = new Dictionary<int, string>();
         var methodologySeen = new HashSet<(int Version, string Formula, int Registry)>();
+        var scriptScopes = new Dictionary<int, IReadOnlyDictionary<string, PeriodScope>>();
         foreach (var row in await methodologies.ListReadsAsync(ct).ConfigureAwait(false))
         {
             // Шляхи полів (FieldPath) однієї формули — один доказ.
@@ -190,7 +191,12 @@ public sealed class DependencyGraphProvider(
 
             methodologyCodes[row.MethodologyId] = row.MethodologyCode;
             var scope = PeriodScope.All;
-            if (row.Expression is not null && registries.TryGetValue(row.RegistryDefId, out var code))
+            if (row.ScriptText is not null && registries.TryGetValue(row.RegistryDefId, out var scriptRegistry))
+            {
+                // Скрипт: обсяг із AST скомпільованого тексту (REG* у виразах), невпевнено — All (ScriptRegistryScopes).
+                scope = ScriptScope(row, scriptRegistry, scriptScopes);
+            }
+            else if (row.Expression is not null && registries.TryGetValue(row.RegistryDefId, out var code))
             {
                 var parsed = formulaEngine.Parse(row.Expression, ExpressionDialect.Methodology);
                 scope = parsed.Expression is null
@@ -313,6 +319,19 @@ public sealed class DependencyGraphProvider(
 
         diagnostics.AddRange(fallbackVersions.Select(v => new DependencyGraphDiagnostic("astFallback", $"template version {v}")));
         return reads;
+    }
+
+    /// <summary>Обсяг довідника для скрипта версії; текст розбирається раз на версію.</summary>
+    private static PeriodScope ScriptScope(
+        MethodologyRegistryReadRow row, string registryCode, Dictionary<int, IReadOnlyDictionary<string, PeriodScope>> cache)
+    {
+        if (!cache.TryGetValue(row.MethodologyVersionId, out var scopes))
+        {
+            cache[row.MethodologyVersionId] = scopes = Ecr.Application.Calculations.Scripting.ScriptRegistryScopeReader.Read(
+                row.ScriptText!, row.NumericMode, row.IsLibrary, row.IsModuleLevel);
+        }
+
+        return scopes.GetValueOrDefault(registryCode, PeriodScope.All);
     }
 
     private IReadOnlyDictionary<string, PeriodScope>? Scopes(

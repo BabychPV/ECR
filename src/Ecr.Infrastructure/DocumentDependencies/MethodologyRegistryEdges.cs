@@ -91,7 +91,13 @@ public sealed class MethodologyRegistryEdges(EcrDbContext db) : IMethodologyRegi
                     db.MethodologyFormulas
                         .Where(f => f.MethodologyVersionId == version.Id && f.Code == use.FormulaCode)
                         .Select(f => f.Expression)
-                        .FirstOrDefault()))
+                        .FirstOrDefault())
+                {
+                    ScriptText = version.Engine == MethodologyEngine.Script ? version.ScriptText : null,
+                    NumericMode = version.NumericMode,
+                    IsLibrary = methodology.Kind == MethodologyKind.Library,
+                    IsModuleLevel = version.Level == CalculationLevel.Module,
+                })
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
