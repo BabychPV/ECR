@@ -231,7 +231,7 @@ public sealed class DocumentSourceStateSwitchTests(SqlServerFixture sql) : DbJob
         overrides.ReadFromDocument.Returns(readOverride);
 
         var handler = new SwitchDocumentSourceStateHandler(
-            new DocumentSourceBindingStore(host.Db),
+            new DocumentSourceBindingStore(host.Db, DependencyGraphTestKit.Provider(host.Db)),
             overrides,
             access,
             user,

@@ -31,14 +31,15 @@ namespace Ecr.Infrastructure.Persistence;
 /// </remarks>
 /// <param name="db">Контекст.</param>
 /// <param name="readOverride">Перекриття для тестів; у DI — <c>null</c>: біт зв'язки (ключ виведено, P-0118-31/33).</param>
-public sealed class DocumentSourceMonthGate(EcrDbContext db, bool? readOverride) : ISourceMonthApprovalGate, ISourceIssueReader
+/// <param name="graph">Граф залежностей документів: споживачі зв'язки (B179 L6; ручний перелік не читається).</param>
+public sealed class DocumentSourceMonthGate(EcrDbContext db, bool? readOverride, IDependencyGraphProvider graph) : ISourceMonthApprovalGate, ISourceIssueReader
 {
     /// <summary>Ворота без перекриття: вирішує біт <c>ReadFromDocument</c> зв'язки (P-0118-31/33, ключ виведено).</summary>
     /// <param name="sp">Провайдер.</param>
     public static DocumentSourceMonthGate Create(IServiceProvider sp)
     {
         ArgumentNullException.ThrowIfNull(sp);
-        return new DocumentSourceMonthGate(sp.GetRequiredService<EcrDbContext>(), readOverride: null);
+        return new DocumentSourceMonthGate(sp.GetRequiredService<EcrDbContext>(), readOverride: null, sp.GetRequiredService<IDependencyGraphProvider>());
     }
 
     /// <inheritdoc />
@@ -51,10 +52,10 @@ public sealed class DocumentSourceMonthGate(EcrDbContext db, bool? readOverride)
             return null;
         }
 
-        var bindings = await ConsumerBindingsAsync(db, documentId, periodKey, ct).ConfigureAwait(false);
+        var bindings = await ConsumerBindingsAsync(db, graph, documentId, periodKey, ct).ConfigureAwait(false);
 
         var year = periodKey / 100;
-        var store = new DocumentSourceBindingStore(db);
+        var store = new DocumentSourceBindingStore(db, graph);
         foreach (var binding in bindings)
         {
             if (!(readOverride ?? binding.ReadFromDocument))
@@ -106,7 +107,7 @@ public sealed class DocumentSourceMonthGate(EcrDbContext db, bool? readOverride)
     /// </remarks>
     public async Task<IReadOnlyList<SourceIssueRow>> ListSourceIssuesAsync(
         long documentId, IReadOnlyCollection<int> periodKeys, CancellationToken ct)
-        => [.. (await new DocumentSourceIssues(db, readOverride).ListAsync(documentId, periodKeys, ct).ConfigureAwait(false))
+        => [.. (await new DocumentSourceIssues(db, readOverride, graph).ListAsync(documentId, periodKeys, ct).ConfigureAwait(false))
             .Select(f => f.Row)];
 
     /// <summary>
@@ -114,26 +115,48 @@ public sealed class DocumentSourceMonthGate(EcrDbContext db, bool? readOverride)
     /// документа (B74) або шаблон версії ПЕРІОДУ проєкту (шкала, <c>EcrDbContext.VersionOf</c> — сторож B74).
     /// </summary>
     /// <param name="db">Контекст.</param>
+    /// <param name="graph">Граф залежностей документів (споживачі зв'язки).</param>
     /// <param name="documentId">Документ-споживач.</param>
     /// <param name="periodKey">Період.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>За зростанням id зв'язки; з періодичністю проєкту споживача.</returns>
     internal static async Task<List<ConsumerBinding>> ConsumerBindingsAsync(
-        EcrDbContext db, long documentId, int periodKey, CancellationToken ct)
-        => await (
+        EcrDbContext db, IDependencyGraphProvider graph, long documentId, int periodKey, CancellationToken ct)
+    {
+        // ✎ B179 L6: споживач зв'язки — шаблон, якого граф залежностей називає споживачем (а не ручний перелік).
+        var own = await (
                 from d in db.Documents.AsNoTracking()
                 where d.Id == documentId
                 join p in db.Projects.AsNoTracking() on d.ProjectId equals p.Id
                 from pv in db.TemplateVersions.AsNoTracking()
                 where pv.Id == (d.TemplateId == null ? EcrDbContext.VersionOf(d.ProjectId, periodKey) : EcrDbContext.TemplateVersionOf(d.ProjectId, d.TemplateId.Value, periodKey))
-                from c in db.DocumentSourceBindingConsumers.AsNoTracking()
-                where c.TemplateId == (d.TemplateId ?? pv.TemplateId)
-                join b in db.DocumentSourceBindings.AsNoTracking() on c.BindingId equals b.Id
-                where b.SourceState == DocumentSourceState.ApprovedOnly
+                select new { TemplateId = d.TemplateId ?? pv.TemplateId, p.PeriodKind })
+            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+        if (own is null)
+        {
+            return [];
+        }
+
+        var snapshot = await graph.GetAsync(ct).ConfigureAwait(false);
+        var bindingIds = snapshot.TemplateDependencies
+            .Where(d => d.ConsumerTemplateId == own.TemplateId)
+            .Select(d => d.BindingId)
+            .Distinct()
+            .ToList();
+        if (bindingIds.Count == 0)
+        {
+            return [];
+        }
+
+        return await (
+                from b in db.DocumentSourceBindings.AsNoTracking()
+                where bindingIds.Contains(b.Id)
+                      && b.SourceState == DocumentSourceState.ApprovedOnly
                       && b.MappingKind == DocumentSourceBinding.Hse400CompositionMapping
                 orderby b.Id
-                select new ConsumerBinding(b.Id, b.ReadFromDocument, p.PeriodKind))
+                select new ConsumerBinding(b.Id, b.ReadFromDocument, own.PeriodKind))
             .ToListAsync(ct).ConfigureAwait(false);
+    }
 }
 
 /// <summary>Зв'язка <c>ApprovedOnly</c> документа-споживача.</summary>

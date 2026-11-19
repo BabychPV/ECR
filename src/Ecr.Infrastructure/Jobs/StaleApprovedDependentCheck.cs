@@ -32,7 +32,8 @@ namespace Ecr.Infrastructure.Jobs;
 /// Перекриття біта зв'язки <c>ReadFromDocument</c> (<see cref="Ecr.Application.Ports.IDocumentSourceFlagOverrides"/>;
 /// у DI завжди <c>null</c> — ключ конфігурації виведено, P-0118-31/33); <c>null</c> — біт зв'язки.
 /// </param>
-internal sealed class StaleApprovedDependentCheck(EcrDbContext db, bool? readOverride)
+/// <param name="graph">Граф залежностей документів: споживачі зв'язки (B179 L6; ручний перелік не читається).</param>
+internal sealed class StaleApprovedDependentCheck(EcrDbContext db, bool? readOverride, IDependencyGraphProvider graph)
 {
     /// <summary>Сутність знахідки (EntityId — найменший id стану оригіналу аркуша документа × періоду).</summary>
     public const string EntityType = "wf.ApprovalState";
@@ -47,14 +48,17 @@ internal sealed class StaleApprovedDependentCheck(EcrDbContext db, bool? readOve
             return [];
         }
 
-        var consumers = await (
-                from b in db.DocumentSourceBindings.AsNoTracking()
-                where b.SourceState == DocumentSourceState.ApprovedOnly
-                      && b.MappingKind == DocumentSourceBinding.Hse400CompositionMapping
-                join c in db.DocumentSourceBindingConsumers.AsNoTracking() on b.Id equals c.BindingId
-                select c.TemplateId)
-            .Distinct()
+        // ✎ B179 L6: споживачі — з графа залежностей, а не з ручного cfg.DocumentSourceBindingConsumer.
+        var approvedOnly = await db.DocumentSourceBindings.AsNoTracking()
+            .Where(b => b.SourceState == DocumentSourceState.ApprovedOnly
+                        && b.MappingKind == DocumentSourceBinding.Hse400CompositionMapping)
+            .Select(b => b.Id)
             .ToListAsync(ct).ConfigureAwait(false);
+        var consumers = (await graph.GetAsync(ct).ConfigureAwait(false)).TemplateDependencies
+            .Where(d => approvedOnly.Contains(d.BindingId))
+            .Select(d => d.ConsumerTemplateId)
+            .Distinct()
+            .ToList();
         if (consumers.Count == 0)
         {
             return [];
@@ -75,7 +79,7 @@ internal sealed class StaleApprovedDependentCheck(EcrDbContext db, bool? readOve
             .Distinct()
             .ToListAsync(ct).ConfigureAwait(false);
 
-        var issues = new DocumentSourceIssues(db, readOverride);
+        var issues = new DocumentSourceIssues(db, readOverride, graph);
         var found = new List<StaleApprovedDependent>();
         foreach (var document in candidates.GroupBy(c => c.DocumentId).OrderBy(g => g.Key))
         {

@@ -205,21 +205,21 @@ public sealed class DocumentSourceIssuesTests(SqlServerFixture sql)
 
         Assert.NotEmpty(await ListAsync(world.Land.DocumentId, March));
         await using var db = sql.CreateContext();
-        Assert.Empty(await new DocumentSourceMonthGate(db, readOverride: false)
+        Assert.Empty(await new DocumentSourceMonthGate(db, readOverride: false, DependencyGraphTestKit.Provider(db))
             .ListSourceIssuesAsync(world.Land.DocumentId, [March], CancellationToken.None));
     }
 
     private async Task<IReadOnlyList<SourceIssueRow>> ListAsync(long documentId, params int[] periodKeys)
     {
         await using var db = sql.CreateContext();
-        return await new DocumentSourceMonthGate(db, readOverride: null)
+        return await new DocumentSourceMonthGate(db, readOverride: null, DependencyGraphTestKit.Provider(db))
             .ListSourceIssuesAsync(documentId, periodKeys, CancellationToken.None);
     }
 
     private async Task<List<SourceIssueFinding>> FindingsAsync(long documentId, params int[] periodKeys)
     {
         await using var db = sql.CreateContext();
-        return await new DocumentSourceIssues(db, readOverride: null)
+        return await new DocumentSourceIssues(db, readOverride: null, DependencyGraphTestKit.Provider(db))
             .ListAsync(documentId, periodKeys, CancellationToken.None);
     }
 
@@ -341,9 +341,9 @@ internal static class SourceIssueWorld
         await db.SaveChangesAsync();
 
         var binding = new DocumentSourceBinding($"B80N4_{registry.Code}", source.TemplateId, registry.Id);
-        binding.AddConsumer(land.TemplateId);
         db.DocumentSourceBindings.Add(binding);
         await db.SaveChangesAsync();
+        await DependencyGraphTestKit.MakeConsumerAsync(db, land, registry.Code);
         await db.DocumentSourceBindings.Where(b => b.Id == binding.Id)
             .ExecuteUpdateAsync(s => s.SetProperty(b => b.SourceState, state));
 
