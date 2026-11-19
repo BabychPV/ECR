@@ -135,6 +135,11 @@ public sealed class PublishMethodologyHandler(
         // ⛔ RC14 (L2-4): статичні перевірки формул і довідників (REGFIELD/REGFIND → ECR-TMPL-4222 з
         // позицією) — ДО золотого прогону. Інакше описка в правилі категорії падала на golden як
         // `categoryRuleFailed` (#REF), а не названою відмовою з позицією.
+        // ✎ MS x B179: стан «вже на циклі» - ДО того, як ApplyEvaluationOrderAsync перепише ребра методології
+        // (довідники, залежності методологій): такі публікації цикл не створюють і не блокуються.
+        var onCycle = await Templates.DependencyCyclePublishCheck
+            .MethodologiesOnCycleAsync(dependencyGraph, [methodology.Id], ct).ConfigureAwait(false);
+
         var warnings = await ApplyEvaluationOrderAsync(methodology, version, from, ct)
             .ConfigureAwait(false);
 
@@ -172,6 +177,13 @@ public sealed class PublishMethodologyHandler(
         await uow.ExecuteInTransactionAsync(
             async token =>
             {
+                // ✎ MS x B179: нові ребра формул (довідники, результати інших методологій) не мають замкнути цикл
+                // залежностей документів. Граф читає лише ОПУБЛІКОВАНІ версії: перевірка - після збереження
+                // публікації в цій транзакції (відмова її відкочує цілком, як для скрипта).
+                await uow.SaveChangesAsync(token).ConfigureAwait(false);
+                await Templates.DependencyCyclePublishCheck
+                    .RefuseMethodologiesAsync(dependencyGraph, [methodology.Id], onCycle, token).ConfigureAwait(false);
+
                 // ⚠ У журнал іде diff РЕЗУЛЬТАТІВ, а не тексту формул (ФВ-9.6).
                 // Змінений рядок виразу не каже нічого; змінена на 4 % емісія каже все.
                 await audit.WritePublicationEventAsync(
