@@ -7418,11 +7418,11 @@
             "type": "boolean"
           },
           "readFromDocumentEffective": {
-            "description": "Дієве значення з урахуванням явного ключа конфігурації.",
+            "description": "Дієве значення «читати з документа». Ключ конфігурації виведено (P-0118-31/33) — дорівнює біту зв'язки.",
             "type": "boolean"
           },
           "readFromDocumentSource": {
-            "description": "`configuration` — діє явний ключ; `binding` — біт зв'язки.",
+            "description": "`binding` — біт зв'язки (єдине значення в продукті); `configuration` лишається в контракті для сумісності\n        й більше не видається.",
             "type": "string"
           },
           "recalculateDependents": {
@@ -29128,15 +29128,15 @@
             ]
           },
           "hse400CompositionFromDocument": {
-            "description": "Дієве значення `Calculations:Hse400CompositionFromDocument`: `true` — Land читає склад газу з\nдокумента HSE400, `false` — з довідника `LAND_HSE400_COMPOSITION`.",
+            "description": "Дієве значення біта зв'язки HSE400 → Land `ReadFromDocument`: `true` — Land читає склад газу з\nдокумента HSE400, `false` — з довідника `LAND_HSE400_COMPOSITION` (зокрема коли зв'язки немає). Ключ\nконфігурації `Calculations:Hse400CompositionFromDocument` виведено (P-0118-31/33) і не читається.",
             "type": "boolean"
           },
           "hse400CompositionSource": {
-            "description": "Джерело значення: `Default`, `Environment`, `ProgramData`, `AppSettings`,\n`CommandLine`, `Other` (лише мітка, без шляху).",
+            "description": "Джерело значення: `Binding` — біт зв'язки; `Default` — зв'язки немає (читання вимкнено). Лише мітка, без\nшляху.",
             "type": "string"
           },
           "hse400CompositionWarning": {
-            "description": "`true` — прапор вимкнено, а опублікований шаблон HSE400 і документ HSE400 поточного року є: Land мовчки\n        читає застарілий довідник.",
+            "description": "`true` — читання з документа вимкнено (біт зв'язки `ReadFromDocument` = 0 або зв'язки немає), а\n        опублікований шаблон HSE400 і документ HSE400 поточного року є: Land мовчки читає довідник. Увімкнення біта діє\n        без перезапуску.",
             "type": "boolean"
           },
           "hse400SourceState": {

@@ -33342,9 +33342,10 @@ export interface components {
             policy: string;
             /** @description Біт зв'язки «читати з документа». */
             readFromDocument: boolean;
-            /** @description Дієве значення з урахуванням явного ключа конфігурації. */
+            /** @description Дієве значення «читати з документа». Ключ конфігурації виведено (P-0118-31/33) — дорівнює біту зв'язки. */
             readFromDocumentEffective: boolean;
-            /** @description `configuration` — діє явний ключ; `binding` — біт зв'язки. */
+            /** @description `binding` — біт зв'язки (єдине значення в продукті); `configuration` лишається в контракті для сумісності
+             *             й більше не видається. */
             readFromDocumentSource: string;
             /** @description Біт зв'язки «ставити перерахунок залежних». */
             recalculateDependents: boolean;
@@ -43344,14 +43345,16 @@ export interface components {
              *     поточного року немає.
              */
             hse400ApprovedMonths?: null | number;
-            /** @description Дієве значення `Calculations:Hse400CompositionFromDocument`: `true` — Land читає склад газу з
-             *     документа HSE400, `false` — з довідника `LAND_HSE400_COMPOSITION`. */
+            /** @description Дієве значення біта зв'язки HSE400 → Land `ReadFromDocument`: `true` — Land читає склад газу з
+             *     документа HSE400, `false` — з довідника `LAND_HSE400_COMPOSITION` (зокрема коли зв'язки немає). Ключ
+             *     конфігурації `Calculations:Hse400CompositionFromDocument` виведено (P-0118-31/33) і не читається. */
             hse400CompositionFromDocument: boolean;
-            /** @description Джерело значення: `Default`, `Environment`, `ProgramData`, `AppSettings`,
-             *     `CommandLine`, `Other` (лише мітка, без шляху). */
+            /** @description Джерело значення: `Binding` — біт зв'язки; `Default` — зв'язки немає (читання вимкнено). Лише мітка, без
+             *     шляху. */
             hse400CompositionSource: string;
-            /** @description `true` — прапор вимкнено, а опублікований шаблон HSE400 і документ HSE400 поточного року є: Land мовчки
-             *             читає застарілий довідник. */
+            /** @description `true` — читання з документа вимкнено (біт зв'язки `ReadFromDocument` = 0 або зв'язки немає), а
+             *             опублікований шаблон HSE400 і документ HSE400 поточного року є: Land мовчки читає довідник. Увімкнення біта діє
+             *             без перезапуску. */
             hse400CompositionWarning: boolean;
             /** @description B80 (N1): стан-ворота зв'язки HSE400 → Land — `any` або `approvedOnly`; `null` — зв'язки немає. */
             hse400SourceState?: null | string;
