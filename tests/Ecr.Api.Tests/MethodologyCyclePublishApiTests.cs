@@ -5,6 +5,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Ecr.Application.Ports;
 using Ecr.Application.Templates;
+using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Enums;
@@ -145,6 +146,69 @@ public sealed class MethodologyCyclePublishApiTests(SqlServerFixture sql)
         Assert.True(second.StatusCode == HttpStatusCode.OK, $"{(int)second.StatusCode}: {body}");
     }
 
+    /// <summary>
+    /// MS x B179: те саме для ФОРМУЛЬНОЇ версії - формула читає довідник (<c>REGFIELD(REGFIND(...))</c>) і результат пишеться в
+    /// колонку шаблону-джерела цього довідника: 422 <c>ECR-TMPL-0422</c> із шляхом, транзакція публікації відкочена.
+    /// </summary>
+    /// <remarks>
+    /// Мутація: прибрати <c>RefuseMethodologiesAsync</c> з формульного шляху <c>PublishMethodologyHandler</c> - тест червоний
+    /// (200 замість 422); відмовляти завжди, коли формула читає довідник - наступний тест червоний. Золотий набір рахує
+    /// фейк-модуль (як для скрипта), цикл виявляє перевірка ПІСЛЯ публікації.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "B179")]
+    public async Task Публікація_формульної_версії_що_читає_довідник_і_пише_в_шаблон_цього_довідника_відмовляє_422_з_циклом()
+    {
+        var world = await ArrangeAsync().ConfigureAwait(true);
+        using var baseApp = new EcrApiFactory(sql);
+        using var app = WithFakeModule(baseApp);
+        var (author, publisher) = await UsersAsync(app).ConfigureAwait(true);
+        var created = await CreateFormulaAsync(author, world, world.Source).ConfigureAwait(true);
+
+        using var response = await publisher.PostAsJsonAsync(
+            new Uri(PublishUrl(created), UriKind.Relative), new { changeReason = "B179", effectiveFrom = "2099-01-01" }).ConfigureAwait(true);
+        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.True(response.StatusCode == HttpStatusCode.UnprocessableEntity, $"{(int)response.StatusCode}: {body}");
+
+        var problem = JsonDocument.Parse(body).RootElement;
+        Assert.Equal("ECR-TMPL-0422", problem.GetProperty("errorCode").GetString());
+        Assert.Equal(DependencyCyclePublishCheck.MessageKey, problem.GetProperty("messageKey").GetString());
+        Assert.Equal(
+            $"{created.Code} → {world.SourceTemplateCode} → {world.RegistryCode} → {created.Code}",
+            problem.GetProperty("cycle").GetString());
+
+        await using var db = Context();
+        Assert.Equal(
+            TemplateVersionStatus.Draft,
+            await db.MethodologyVersions.Where(v => v.Id == created.VersionId).Select(v => v.Status).SingleAsync().ConfigureAwait(true));
+    }
+
+    /// <summary>Формульна версія, що читає довідник, але пише в ІНШИЙ шаблон, публікується.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "B179")]
+    public async Task Публікація_формульної_версії_що_читає_довідник_і_пише_в_інший_шаблон_проходить()
+    {
+        var world = await ArrangeAsync().ConfigureAwait(true);
+        using var baseApp = new EcrApiFactory(sql);
+        using var app = WithFakeModule(baseApp);
+        var (author, publisher) = await UsersAsync(app).ConfigureAwait(true);
+        var created = await CreateFormulaAsync(author, world, world.Other).ConfigureAwait(true);
+
+        using var response = await publisher.PostAsJsonAsync(
+            new Uri(PublishUrl(created), UriKind.Relative), new { changeReason = "B179", effectiveFrom = "2099-01-01" }).ConfigureAwait(true);
+        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.True(response.StatusCode == HttpStatusCode.OK, $"{(int)response.StatusCode}: {body}");
+
+        await using var db = Context();
+        Assert.Equal(
+            TemplateVersionStatus.Published,
+            await db.MethodologyVersions.Where(v => v.Id == created.VersionId).Select(v => v.Status).SingleAsync().ConfigureAwait(true));
+    }
+
     // ───────────────────────────── стенд ─────────────────────────────
 
     private sealed record Created(int MethodologyId, int VersionId, string Code);
@@ -256,6 +320,61 @@ public sealed class MethodologyCyclePublishApiTests(SqlServerFixture sql)
                 new Uri($"/api/v1/methodologies/{methodologyId}/versions/{versionId}/script", UriKind.Relative), new { text }).ConfigureAwait(false))
             .ConfigureAwait(false);
         Assert.Empty(saved.RootElement.GetProperty("diagnostics").EnumerateArray());
+
+        using var testCase = await JsonAsync(
+            await author.PutAsJsonAsync(
+                new Uri($"/api/v1/methodologies/{methodologyId}/versions/{versionId}/tests/case1", UriKind.Relative),
+                new
+                {
+                    inputJson = $$"""{"periodKey":{"value":{{PeriodKey}}},"documentId":{{target.Document.DocumentId}},"arguments":[]}""",
+                    expectedJson = """{"OUT_A":5}""",
+                    tolerance = 0m,
+                }).ConfigureAwait(false)).ConfigureAwait(false);
+        return new Created(methodologyId, versionId, code);
+    }
+
+    /// <summary>
+    /// Формульна версія (Strict, формула рівня рядка читає довідник), прив'язка виходу до <c>OUT_A</c> таблиці
+    /// <paramref name="target"/>; золотий набір - один випадок (рахує фейк-модуль).
+    /// </summary>
+    private async Task<Created> CreateFormulaAsync(HttpClient author, World world, Doc target)
+    {
+        var tag = Guid.NewGuid().ToString("N")[..10].ToUpperInvariant();
+        var code = $"MF{tag}";
+        using var methodology = await JsonAsync(
+            await author.PostAsJsonAsync(new Uri("/api/v1/methodologies", UriKind.Relative), new
+            {
+                code,
+                nameL10n = new Dictionary<string, string> { ["en"] = "Cycle formula" },
+                kind = 0,
+                group = (string?)null,
+            }).ConfigureAwait(false)).ConfigureAwait(false);
+        var methodologyId = methodology.RootElement.GetProperty("id").GetInt32();
+
+        using var version = await JsonAsync(
+            await author.PostAsJsonAsync(new Uri($"/api/v1/methodologies/{methodologyId}/versions", UriKind.Relative), new
+            {
+                versionNumber = "1.0",
+                copyFromVersionId = (int?)null,
+                level = "Configuration",
+                engine = "Formulas",
+            }).ConfigureAwait(false)).ConfigureAwait(false);
+        var versionId = version.RootElement.GetProperty("id").GetInt32();
+
+        await using (var db = Context())
+        {
+            var entity = await db.MethodologyVersions.SingleAsync(v => v.Id == versionId).ConfigureAwait(false);
+            entity.SetModes(NumericMode.Strict, CalendarMode.Actual, TraceLevel.ErrorsOnly);
+            var formula = entity.AddFormula(
+                EcrCode.Create("F1"),
+                $"REGFIELD(REGFIND('{world.RegistryCode}', [Period].Year, [Period].Sequence, 'a', 'b'), 'VALUE')",
+                FormulaResultType.Number,
+                null);
+            formula.SetScope(MethodologyFormulaScope.Row);
+            db.MethodologyFormulas.Add(formula);
+            db.CalculationBindings.Add(new CalculationBinding(target.TableDefId, target.CalculatedColumnId, methodologyId, "OUT_A", "{}"));
+            await db.SaveChangesAsync().ConfigureAwait(false);
+        }
 
         using var testCase = await JsonAsync(
             await author.PutAsJsonAsync(

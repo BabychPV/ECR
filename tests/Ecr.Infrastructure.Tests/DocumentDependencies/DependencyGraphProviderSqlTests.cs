@@ -6,6 +6,7 @@ using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.Expressions.Binding;
+using Ecr.Scripting;
 using Ecr.Infrastructure.Caching;
 using Ecr.Infrastructure.DocumentDependencies;
 using Ecr.Infrastructure.Persistence;
@@ -248,6 +249,56 @@ public sealed class DependencyGraphProviderSqlTests(SqlServerFixture sql)
 
         var after = await provider.GetAsync(CancellationToken.None);
         Assert.DoesNotContain(after.ConsumersOf(source.TemplateId), d => d.ConsumerTemplateId == late.TemplateId);
+    }
+
+    /// <summary>
+    /// MS x B179: обсяг читання довідника ОПУБЛІКОВАНИМ скриптом береться з AST його тексту (а не «усе»): місяць споживача =
+    /// місяць джерела, літеральний місяць, а невпевнений ключ (без <c>period.*</c>) лишається <c>All</c>.
+    /// </summary>
+    /// <remarks>
+    /// Мутації (локально): у <c>DependencyGraphProvider</c> не читати <c>row.ScriptText</c> (скрипт - завжди <c>All</c>) -
+    /// тест червоний; у <c>MethodologyRegistryEdges.ListReadsAsync</c> не заповнювати <c>ScriptText</c> - червоний.
+    /// </remarks>
+    [Fact]
+    public async Task Скрипт_читає_довідник_з_обсягом_за_періодом_із_AST_а_невпевнений_ключ_дає_All()
+    {
+        var registryId = await NewRegistryAsync();
+        var source = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(periodKey: PeriodKey);
+        await NewBindingAsync(source.TemplateId, registryId);
+
+        var month = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(periodKey: PeriodKey);
+        var fixedMonth = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(periodKey: PeriodKey);
+        var unknown = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(periodKey: PeriodKey);
+        await ScriptMethodologyAsync(registryId, month, "M", "period.Year, period.Month");
+        await ScriptMethodologyAsync(registryId, fixedMonth, "F", "period.Year, 10");
+        await ScriptMethodologyAsync(registryId, unknown, "U", "\"x\"");
+
+        var graph = await NewProvider(new MemoryCache(new MemoryCacheOptions())).GetAsync(CancellationToken.None);
+
+        var consumers = graph.ConsumersOf(source.TemplateId).ToDictionary(d => d.ConsumerTemplateId);
+        Assert.True(consumers[month.TemplateId].ViaMethodology);
+        Assert.Equal(PeriodScope.Month, consumers[month.TemplateId].Scope);
+        Assert.Equal(PeriodScope.FixedMonth(10), consumers[fixedMonth.TemplateId].Scope);
+        Assert.Equal(PeriodScope.All, consumers[unknown.TemplateId].Scope);
+    }
+
+    /// <summary>Опублікований скрипт читає довідник ключем <paramref name="keys"/> і пише в колонку шаблону документа.</summary>
+    private async Task ScriptMethodologyAsync(int registryId, TestDocument target, string suffix, string keys)
+    {
+        await using var db = sql.CreateContext();
+        var methodology = new Methodology(EcrCode.Create($"S{suffix}{_tag}"), Text("s"));
+        db.Methodologies.Add(methodology);
+        await db.SaveChangesAsync();
+        var version = new MethodologyVersion(methodology.Id, "1.0", CalculationLevel.Configuration, 1, Now, MethodologyEngine.Script);
+        var text = "rows from T1;\n"
+            + $"output OUT_A : kg = REGFIELD(REGFIND(\"{Registry}\", {keys}, \"a\"), \"VALUE\");";
+        version.SetScript(text, ScriptCompiler.Hash(text));
+        db.MethodologyVersions.Add(version);
+        await db.SaveChangesAsync();
+        version.Publish(1, "B179", new DateOnly(2099, 1, 1), testsPassed: true, Now);
+        db.RegistryUses.Add(RegistryUse.ForMethodologyFormula(version.Id, "script", registryId, fieldPath: null));
+        db.CalculationBindings.Add(new CalculationBinding(target.TableDefId, target.ColumnDefIds[2], methodology.Id, "OUT_A", "{}"));
+        await db.SaveChangesAsync();
     }
 
     private static DependencyGraphProvider WindowedProvider(EcrDbContext db, IMemoryCache memory)
