@@ -866,7 +866,6 @@ export function useSheetActions({
     if (was > 0 && pendingCount === 0 && approvedRecalcRequest.current !== null) {
       runApprovedRecalc(approvedRecalcRequest.current);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingCount]);
   // ✎ UI-14: дії стали моделлю для панелі документа — спінер за порогом
   // `ФВ-14.26`, а не з першого кадру (храповик `pendingSpinner.ratchet`).

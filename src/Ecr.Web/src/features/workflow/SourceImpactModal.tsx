@@ -2,6 +2,7 @@ import { useEffect, useState, type JSX } from 'react';
 import { Alert, Badge, Button, Checkbox, Group, List, Modal, Stack, Text, Textarea } from '@mantine/core';
 import { t } from '@/shared/i18n';
 import { formatPeriodKey } from '@/shared/format';
+import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { useRestoreFocus } from '@/shared/ui/useRestoreFocus';
 import type { ConfirmedImpact, SourceImpact, SourceImpactAction } from './sourceImpact';
 
@@ -39,6 +40,7 @@ export function SourceImpactModal({
   const [recalculateApproved, setRecalculateApproved] = useState(false);
   const [suppress, setSuppress] = useState(false);
   useRestoreFocus(opened);
+  const pendingLoading = usePendingLoading(isPending === true);
 
   // ⚠ Причина й галочки очищаються при КОЖНОМУ відкритті: причина попередньої дії не підписує наступну.
   useEffect(() => {
@@ -72,7 +74,7 @@ export function SourceImpactModal({
         </Text>
 
         {impact.consumers.length > 0 ? (
-          <Stack gap={4} component="section" aria-label={t('sourceImpact.list')}>
+          <Stack gap="xs" component="section" aria-label={t('sourceImpact.list')}>
             <Text size="sm" fw={600}>
               {t('sourceImpact.list')}
             </Text>
@@ -141,11 +143,11 @@ export function SourceImpactModal({
           {blocked ? null : (
             <Button
               {...(required ? { color: 'statusWarning' } : {})}
-              loading={isPending === true}
+              loading={pendingLoading}
               disabled={confirmDisabled}
               onClick={() => {
                 // ⛔ B145: закритий діалог не підтверджує (анімація закриття ще ~200 мс тримає кнопку в DOM).
-                if (opened) {
+                if (opened && isPending !== true) {
                   onConfirm(
                     {
                       hash: impact.impactHash,
