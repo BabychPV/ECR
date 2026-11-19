@@ -4,7 +4,7 @@ import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { components } from '@/api/schema';
 import { discardPendingEdit, openDocument, putPendingEdit, resetPending } from '@/features/grid/pendingStore';
-import { isEditNoticeSuppressed, resetEditNoticeSuppression } from '../sourceImpact';
+import { isEditNoticeSuppressed, resetEditNoticeSuppression, suppressEditNotice } from '../sourceImpact';
 import { SheetActions } from '../SheetActions';
 
 /**
@@ -336,6 +336,19 @@ describe('SheetActions: перша правка аркуша-джерела — 
 
     await waitFor(() => expect(screen.queryByTestId('source-impact-confirm')).toBeNull());
     expect(isEditNoticeSuppressed(1, 42)).toBe(true);
+  });
+
+  it('n) F13: аркуш, від нагадування про який людина вже відмовилась у сесії, правку приймає тихо — вплив правки не питається', async () => {
+    suppressEditNotice(1, 42);
+    show({ state: 'Draft' as 'Submitted', impacts: [editImpact()] });
+    openDocument(1);
+
+    act(() => putPendingEdit(7, 202601, EditCell));
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(screen.queryByTestId('source-impact-confirm')).toBeNull();
+    const asked = (fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.some((c) => String(c[0]).includes('/source-impact'));
+    expect(asked).toBe(false);
   });
 
   it('l) адміністратор: «й затверджені» з причиною — перерахунок іде ПІСЛЯ збереження правок з відбитком і причиною', async () => {

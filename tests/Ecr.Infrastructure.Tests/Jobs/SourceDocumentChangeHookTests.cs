@@ -364,6 +364,46 @@ public sealed class SourceDocumentChangeHookTests(SqlServerFixture sql) : DbJobQ
                 CancellationToken.None);
     }
 
+    /// <summary>
+    /// B80 N5 (F13, D-554): перекриття адміністратора («й затверджені») переживає родинну задачу: задача зв'язки несе
+    /// <c>IncludeApproved</c>/автора/причину, а перерахунок споживача, який вона ставить, іде на ОКРЕМУ ціль
+    /// (<c>…-dependents-approved</c>) з тими самими ознаками в payload.
+    /// </summary>
+    /// <remarks>
+    /// Мутація: у <c>RegistryImpactRecalculationJob</c> не передавати перекриття в <c>RequestDependentsAsync</c> (гілка
+    /// <c>request.IncludeApproved</c>) — ціль звичайна, без ознак, червоний.
+    /// </remarks>
+    [Fact]
+    public async Task Перекриття_адміністратора_доходить_від_задачі_зв_язки_до_перерахунку_споживача_на_окремій_цілі()
+    {
+        var world = new SourceDependencyWorld(Sql);
+        var (registryId, code) = await world.RegistryAsync();
+        var source = await world.DocumentAsync([Month]);
+        var consumer = await world.DocumentAsync([9, Month, 11], code);
+        var bindingId = await world.BindingAsync(source.TemplateId, registryId);
+
+        await using (var host = NewHost())
+        {
+            Assert.Equal(
+                1,
+                await new SourceApprovalChangeTrigger(host.Db, Scheduler(host)).RequestApprovedDependentsRecalculationAsync(
+                    source.DocumentId, source.SheetDefId, SourceDependencyWorld.Period(Month),
+                    new ApprovedRecalculationOverride(77, "Act 12"), CancellationToken.None));
+        }
+
+        var parent = Assert.Single(await ParentRowsAsync(bindingId));
+        Assert.EndsWith("-approved", parent.TargetKey, StringComparison.Ordinal);
+        await RunParentAsync(parent.Payload!);
+
+        var only = Assert.Single(await RecalculationRowsAsync(consumer));
+        Assert.Equal(
+            $"{nameof(IRecalculationJob)}~{CalculationTrigger.DependentsApprovedTargetOf(consumer.DocumentId, new PeriodKey(SourceDependencyWorld.Period(Month)))}",
+            only.TargetKey);
+        Assert.Contains("\"includeApproved\":true", only.Payload, StringComparison.Ordinal);
+        Assert.Contains("\"overrideUserId\":77", only.Payload, StringComparison.Ordinal);
+        Assert.Contains("\"overrideReason\":\"Act 12\"", only.Payload, StringComparison.Ordinal);
+    }
+
     private async Task RunHookAsync(TestDocument document, int[] months, int hop)
     {
         await using var host = NewHost();

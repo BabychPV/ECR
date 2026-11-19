@@ -436,11 +436,82 @@ public sealed class SourceImpactApiTests(SqlServerFixture sql)
         Assert.Equal(s.World.Land.DocumentId, dependent.GetProperty("DocumentId").GetInt64());
     }
 
+    /// <summary>
+    /// F13 (безпека): без доступу до документа-джерела і оцінка впливу, і явний перерахунок затверджених дають 404 — навіть
+    /// з правом <c>Calculation.RecalculateApprovedDependents</c>; перерахунок не ставиться, журнал безпеки порожній.
+    /// </summary>
+    /// <remarks>Мутація: прибрати <c>RequireSheetVisibleAsync</c> (чи <c>RequireVisibleAsync</c>) у <c>RecalculateApprovedDependentsHandler</c> — червоніє 404 на POST (стає 409).</remarks>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-554")]
+    public async Task Без_доступу_до_джерела_оцінка_впливу_і_явний_перерахунок_затверджених_дають_404_без_слідів()
+    {
+        var s = await ArrangeAsync(DocumentSourcePolicy.Warn, sourceApproved: false, landApproved: true, DocumentSourceState.Any,
+            recalculateApprovedPermission: true, sourceVisible: false).ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.User).ConfigureAwait(true);
+
+        using var impact = await client.GetAsync(new Uri(
+            string.Create(
+                CultureInfo.InvariantCulture,
+                $"/api/v1/documents/{s.World.Source.DocumentId}/source-impact?sheetDefId={s.World.Source.SheetDefId}&periodKey={March}&action=edit"),
+            UriKind.Relative)).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.NotFound, impact.StatusCode);
+
+        var post = await PostAsync(client, s, "source-impact/recalculate-approved", new
+        {
+            sheetDefId = s.World.Source.SheetDefId, periodKey = March, hash = "deadbeef", reason = "Акт",
+        }).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.NotFound, post.StatusCode);
+
+        await using var db = sql.CreateContext();
+        var needle = string.Create(CultureInfo.InvariantCulture, $"\"sourceDocumentId\":{s.World.Source.DocumentId},");
+        var rows = await db.Database.SqlQuery<string>(
+            $"SELECT DetailsJson AS Value FROM aud.SecurityEvent WHERE EventType = 'ApprovedDependentsRecalculationRequested'")
+            .ToListAsync().ConfigureAwait(true);
+        Assert.DoesNotContain(rows, r => r.Contains(needle, StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// F13: залежний період затверджений, лише коли затверджені УСІ його аркуші-оригінали: затверджений один із двох —
+    /// період не «затверджений», підтвердження не потрібне (перерахунок його перерахує).
+    /// </summary>
+    /// <remarks>Мутація: у <c>SourceImpactAssessor</c> <c>group.All(...)</c> → <c>group.Any(...)</c> — червоніє (required стає true).</remarks>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-554")]
+    public async Task Залежний_період_із_одним_із_двох_затверджених_аркушів_не_затверджений_і_підтвердження_не_вимагає()
+    {
+        var s = await ArrangeAsync(DocumentSourcePolicy.Warn, sourceApproved: true, landApproved: true).ConfigureAwait(true);
+        int secondSheet;
+        await using (var db = sql.CreateContext())
+        {
+            var sheet = new SheetDef(
+                s.World.Land.TemplateVersionId, EcrCode.Create($"SH2{Guid.NewGuid():N}"[..14]),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "Second" }), 2);
+            db.SheetDefs.Add(sheet);
+            await db.SaveChangesAsync().ConfigureAwait(true);
+            secondSheet = sheet.Id;
+        }
+
+        await ImpactWorld.AddStateAsync(sql, s.World.Land.DocumentId, secondSheet, March, T1).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.User).ConfigureAwait(true);
+        var impact = await ImpactAsync(app, client, s, "reopen").ConfigureAwait(true);
+
+        Assert.False(impact.GetProperty("required").GetBoolean());
+        Assert.Equal(0, impact.GetProperty("approvedCount").GetInt32());
+        var seen = Assert.Single(impact.GetProperty("consumers").EnumerateArray());
+        Assert.False(seen.GetProperty("approved").GetBoolean());
+        Assert.True(seen.GetProperty("willRecalculate").GetBoolean());
+    }
+
     private sealed record Scenario(ImpactWorld.World World, string User);
 
     private async Task<Scenario> ArrangeAsync(
         DocumentSourcePolicy policy, bool sourceApproved, bool landApproved, DocumentSourceState state = DocumentSourceState.ApprovedOnly,
-        bool landVisible = true, bool recalculateApprovedPermission = false)
+        bool landVisible = true, bool recalculateApprovedPermission = false, bool sourceVisible = true)
     {
         var world = await ImpactWorld.ArrangeAsync(sql, state).ConfigureAwait(false);
         await using (var db = sql.CreateContext())
@@ -476,7 +547,11 @@ public sealed class SourceImpactApiTests(SqlServerFixture sql)
         }
 
         ctx.RoleAssignments.Add(new RoleAssignment(role.Id, user.Id, null));
-        ctx.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Project, world.Source.ProjectId, GrantLevel.Manage));
+        if (sourceVisible)
+        {
+            ctx.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Project, world.Source.ProjectId, GrantLevel.Manage));
+        }
+
         if (landVisible)
         {
             ctx.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Project, world.Land.ProjectId, GrantLevel.Read));
