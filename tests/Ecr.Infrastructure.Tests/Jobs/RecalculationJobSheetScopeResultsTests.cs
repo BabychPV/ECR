@@ -438,6 +438,44 @@ public sealed class RecalculationJobSheetScopeResultsTests(SqlServerFixture sql)
     }
 
     /// <summary>
+    /// ✎ B80 N5 (D-554, рішення людини 19.11): з ЯВНИМ перекриттям адміністратора (<c>IncludeApproved</c>) затверджений аркуш
+    /// ПЕРЕРАХОВУЄТЬСЯ (числа й результат нові), у журналі — <c>RecalculatedApproved</c> із автором і причиною, а не
+    /// <c>SkippedApproved</c>. Без перекриття — як у сусідньому тесті (пропуск).
+    /// </summary>
+    /// <remarks>
+    /// Мутації: у <c>RecalculationJob</c> замінити <c>request.IncludeApproved</c> на <c>false</c> у <c>ApprovedSheetsAsync</c>-гілці
+    /// (методології) — «B|1001» (результат лишився старим); в <c>RecalculationService.Writable</c> прибрати
+    /// <c>&amp;&amp; writeApproved</c> — формули затвердженого не пишуться; у <c>SheetLogAsync</c> прибрати
+    /// <c>approvedRecalculated</c> — журнал <c>SkippedApproved</c> замість <c>RecalculatedApproved</c>.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "B80")]
+    public async Task Перекриття_адміністратора_перераховує_затверджений_аркуш_із_журналом_хто_і_чому()
+    {
+        var arranged = await ArrangeAsync(submitSecondSheet: false);
+        await RunJobAsync(arranged, SheetRequest(arranged, sheetDefId: null), label: 1_000m);
+        await SubmitSecondSheetAsync(arranged);
+
+        await using (var auditDb = arranged.Builder.CreateContext())
+        {
+            await RunJobAsync(
+                arranged,
+                SheetRequest(arranged, sheetDefId: null) with
+                {
+                    TriggeredByUserId = null, IncludeApproved = true, OverrideUserId = 9, OverrideReason = "Акт 12: виправлення складу",
+                },
+                label: 2_000m, audit: new AuditWriter(auditDb));
+        }
+
+        // ОБИДВА аркуші перераховано, затверджений теж.
+        Assert.Equal(["A|2001", "B|2001"], await ShapeAsync(arranged));
+        Assert.Equal(1, await SheetLogCountAsync(arranged, arranged.SecondSheetId, RecalculationSkips.AuditRecalculatedApproved));
+        Assert.Equal(0, await SheetLogCountAsync(arranged, arranged.SecondSheetId, RecalculationSkips.AuditSkippedApproved));
+    }
+
+    /// <summary>
     /// ✎ B79 (слово людини 16.11: «якщо документ поданий або інші статуси окрім погоджений ми маємо перераховувати його
     /// якщо вхідні дані для нього змінилися»): НІЧНИЙ розклад (без людини й без <c>RecalculateSubmitted</c>) перераховує
     /// поданий аркуш; числа змінились — запис журналу й позначка. Чернетковий аркуш перераховано без позначки.

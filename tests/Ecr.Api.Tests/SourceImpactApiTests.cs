@@ -293,11 +293,154 @@ public sealed class SourceImpactApiTests(SqlServerFixture sql)
         Assert.Equal("approved", seen.GetProperty("skipReason").GetString());
         Assert.Equal(1, impact.GetProperty("approvedCount").GetInt32());
     }
+    // ===== Рішення людини 19.11: «перерахувати також затверджені» (право Calculation.RecalculateApprovedDependents) =====
+
+    /// <summary>
+    /// Reopen із <c>recalculateApproved</c>: без права — 403 (аркуш не змінено); з правом без причини — 422; з правом,
+    /// причиною й відбитком — 204, а в журналі безпеки підтвердження з <c>recalculateApproved = true</c> і причиною.
+    /// </summary>
+    /// <remarks>Мутації: прибрати перевірку права в <c>SourceImpactCheck</c> — червоніє 403; прибрати вимогу причини — червоніє 422.</remarks>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-554")]
+    public async Task Reopen_з_перекриттям_затверджених_вимагає_право_і_причину_і_пише_аудит()
+    {
+        var denied = await ArrangeAsync(DocumentSourcePolicy.Warn, sourceApproved: true, landApproved: true).ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var deniedClient = await SignedInAsync(app, denied.User).ConfigureAwait(true);
+        var deniedImpact = await ImpactAsync(app, deniedClient, denied, "reopen").ConfigureAwait(true);
+        Assert.False(deniedImpact.GetProperty("canRecalculateApproved").GetBoolean());
+
+        var forbidden = await PostAsync(deniedClient, denied, "reopen", new
+        {
+            sheetDefId = denied.World.Source.SheetDefId, periodKey = March, reason = "правка",
+            confirmedImpact = new { hash = deniedImpact.GetProperty("impactHash").GetString(), reason = "Акт", recalculateApproved = true },
+        }).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
+        Assert.Equal(DocumentStatus.Approved, await SourceStatusAsync(denied).ConfigureAwait(true));
+
+        var s = await ArrangeAsync(DocumentSourcePolicy.Warn, sourceApproved: true, landApproved: true, recalculateApprovedPermission: true)
+            .ConfigureAwait(true);
+        using var app2 = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app2, s.User).ConfigureAwait(true);
+        var impact = await ImpactAsync(app2, client, s, "reopen").ConfigureAwait(true);
+        Assert.True(impact.GetProperty("canRecalculateApproved").GetBoolean());
+        var hash = impact.GetProperty("impactHash").GetString();
+
+        var noReason = await PostAsync(client, s, "reopen", new
+        {
+            sheetDefId = s.World.Source.SheetDefId, periodKey = March, reason = "правка",
+            confirmedImpact = new { hash, reason = " ", recalculateApproved = true },
+        }).ConfigureAwait(true);
+        await AssertRefusedAsync(noReason, HttpStatusCode.UnprocessableEntity, "ECR-SRC-0422", "err.ECR-SRC-0422.recalculateApprovedReasonRequired")
+            .ConfigureAwait(true);
+        Assert.Equal(DocumentStatus.Approved, await SourceStatusAsync(s).ConfigureAwait(true));
+
+        var ok = await PostAsync(client, s, "reopen", new
+        {
+            sheetDefId = s.World.Source.SheetDefId, periodKey = March, reason = "правка",
+            confirmedImpact = new { hash, reason = "Акт 12: виправлення складу", recalculateApproved = true },
+        }).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.NoContent, ok.StatusCode);
+        Assert.Equal(DocumentStatus.Draft, await SourceStatusAsync(s).ConfigureAwait(true));
+        var audit = JsonDocument.Parse(await ConfirmedEventAsync(s).ConfigureAwait(true)).RootElement;
+        Assert.True(audit.GetProperty("recalculateApproved").GetBoolean());
+        Assert.Equal("Акт 12: виправлення складу", audit.GetProperty("reason").GetString());
+    }
+
+    /// <summary>
+    /// <c>action=edit</c> (правка комірки джерела) за зв'язки <c>any</c>: лише відомості — затверджений Land позначено
+    /// «не буде перераховано» (<c>skipReason = approved</c>), підтвердження сервер не вимагає, <c>canRecalculateApproved</c> — за правом.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-554")]
+    public async Task Правка_комірки_джерела_any_показує_хто_буде_перераховано_а_хто_ні_без_вимоги_підтвердження()
+    {
+        var s = await ArrangeAsync(DocumentSourcePolicy.Block, sourceApproved: false, landApproved: true, DocumentSourceState.Any,
+            recalculateApprovedPermission: true).ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.User).ConfigureAwait(true);
+
+        var impact = await ImpactAsync(app, client, s, "edit").ConfigureAwait(true);
+
+        Assert.Equal("edit", impact.GetProperty("action").GetString());
+        Assert.False(impact.GetProperty("required").GetBoolean());
+        Assert.False(impact.GetProperty("blocked").GetBoolean());
+        Assert.True(impact.GetProperty("canRecalculateApproved").GetBoolean());
+        var consumer = Assert.Single(impact.GetProperty("consumers").EnumerateArray());
+        Assert.Equal(s.World.Land.DocumentId, consumer.GetProperty("documentId").GetInt64());
+        Assert.Equal(March, consumer.GetProperty("periodKey").GetInt32());
+        Assert.False(consumer.GetProperty("willRecalculate").GetBoolean());
+        Assert.Equal("approved", consumer.GetProperty("skipReason").GetString());
+    }
+
+    /// <summary>
+    /// <c>POST …/source-impact/recalculate-approved</c>: без права 403; без причини 422; застарілий відбиток 409; з усім — 200
+    /// із числом затверджених і поставлених задач, у журналі безпеки подія з причиною й затвердженими залежними.
+    /// </summary>
+    /// <remarks>Мутації: прибрати перевірку права в обробнику — червоніє 403; прибрати звірку відбитка — червоніє 409.</remarks>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-554")]
+    public async Task Явний_перерахунок_затверджених_залежних_право_причина_відбиток_і_аудит()
+    {
+        var plain = await ArrangeAsync(DocumentSourcePolicy.Warn, sourceApproved: false, landApproved: true, DocumentSourceState.Any)
+            .ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var plainClient = await SignedInAsync(app, plain.User).ConfigureAwait(true);
+        var plainImpact = await ImpactAsync(app, plainClient, plain, "edit").ConfigureAwait(true);
+        var denied = await PostAsync(plainClient, plain, "source-impact/recalculate-approved", new
+        {
+            sheetDefId = plain.World.Source.SheetDefId, periodKey = March, hash = plainImpact.GetProperty("impactHash").GetString(), reason = "Акт",
+        }).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+
+        var s = await ArrangeAsync(DocumentSourcePolicy.Warn, sourceApproved: false, landApproved: true, DocumentSourceState.Any,
+            recalculateApprovedPermission: true).ConfigureAwait(true);
+        using var app2 = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app2, s.User).ConfigureAwait(true);
+        var hash = (await ImpactAsync(app2, client, s, "edit").ConfigureAwait(true)).GetProperty("impactHash").GetString();
+
+        var noReason = await PostAsync(client, s, "source-impact/recalculate-approved", new
+        {
+            sheetDefId = s.World.Source.SheetDefId, periodKey = March, hash, reason = "  ",
+        }).ConfigureAwait(true);
+        await AssertRefusedAsync(noReason, HttpStatusCode.UnprocessableEntity, "ECR-SRC-0422", "err.ECR-SRC-0422.recalculateApprovedReasonRequired")
+            .ConfigureAwait(true);
+
+        var stale = await PostAsync(client, s, "source-impact/recalculate-approved", new
+        {
+            sheetDefId = s.World.Source.SheetDefId, periodKey = March, hash = "deadbeef", reason = "Акт 12",
+        }).ConfigureAwait(true);
+        await AssertRefusedAsync(stale, HttpStatusCode.Conflict, "ECR-SRC-0409", "err.ECR-SRC-0409.impactChanged").ConfigureAwait(true);
+
+        var ok = await PostAsync(client, s, "source-impact/recalculate-approved", new
+        {
+            sheetDefId = s.World.Source.SheetDefId, periodKey = March, hash, reason = "Акт 12",
+        }).ConfigureAwait(true);
+        var text = await ok.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.True(ok.StatusCode == HttpStatusCode.OK, $"{ok.StatusCode}: {text}");
+        var result = JsonDocument.Parse(text).RootElement;
+        Assert.Equal(1, result.GetProperty("approvedDependents").GetInt32());
+        Assert.Equal(1, result.GetProperty("queued").GetInt32());
+
+        await using var db = sql.CreateContext();
+        var needle = string.Create(CultureInfo.InvariantCulture, $"\"sourceDocumentId\":{s.World.Source.DocumentId},");
+        var rows = await db.Database.SqlQuery<string>(
+            $"SELECT DetailsJson AS Value FROM aud.SecurityEvent WHERE EventType = 'ApprovedDependentsRecalculationRequested'")
+            .ToListAsync().ConfigureAwait(true);
+        var audit = JsonDocument.Parse(Assert.Single(rows, r => r.Contains(needle, StringComparison.Ordinal))).RootElement;
+        Assert.Equal("Акт 12", audit.GetProperty("reason").GetString());
+        var dependent = Assert.Single(audit.GetProperty("approvedDependents").EnumerateArray());
+        Assert.Equal(s.World.Land.DocumentId, dependent.GetProperty("DocumentId").GetInt64());
+    }
+
     private sealed record Scenario(ImpactWorld.World World, string User);
 
     private async Task<Scenario> ArrangeAsync(
         DocumentSourcePolicy policy, bool sourceApproved, bool landApproved, DocumentSourceState state = DocumentSourceState.ApprovedOnly,
-        bool landVisible = true)
+        bool landVisible = true, bool recalculateApprovedPermission = false)
     {
         var world = await ImpactWorld.ArrangeAsync(sql, state).ConfigureAwait(false);
         await using (var db = sql.CreateContext())
@@ -327,6 +470,11 @@ public sealed class SourceImpactApiTests(SqlServerFixture sql)
         await ctx.SaveChangesAsync().ConfigureAwait(false);
         ctx.RolePermissions.Add(new RolePermission(role.Id, "Document.View"));
         ctx.RolePermissions.Add(new RolePermission(role.Id, "Document.Reopen"));
+        if (recalculateApprovedPermission)
+        {
+            ctx.RolePermissions.Add(new RolePermission(role.Id, "Calculation.RecalculateApprovedDependents"));
+        }
+
         ctx.RoleAssignments.Add(new RoleAssignment(role.Id, user.Id, null));
         ctx.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Project, world.Source.ProjectId, GrantLevel.Manage));
         if (landVisible)
