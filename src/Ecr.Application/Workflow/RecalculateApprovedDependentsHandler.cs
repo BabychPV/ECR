@@ -80,7 +80,13 @@ public sealed class RecalculateApprovedDependentsHandler(
             throw new BusinessRuleException(
                 ErrorCodes.SourceImpactRefused,
                 "Потрібна причина перерахунку затверджених залежних.",
-                Details(impact, SourceImpactCheck.RecalculateApprovedReasonRequiredMessageKey));
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-SRC-0422.recalculateApprovedReasonRequired",
+                    ["impactHash"] = impact.Hash,
+                    ["approvedDependents"] = impact.ApprovedCount.ToString(CultureInfo.InvariantCulture),
+                    ["dependents"] = impact.Consumers.Count.ToString(CultureInfo.InvariantCulture),
+                });
         }
 
         if (!string.Equals(hash, impact.Hash, StringComparison.Ordinal))
@@ -88,7 +94,13 @@ public sealed class RecalculateApprovedDependentsHandler(
             throw new BusinessRuleException(
                 ErrorCodes.SourceImpactConflict,
                 "Вплив змінився після підтвердження: перегляньте його ще раз.",
-                Details(impact, SourceImpactCheck.ImpactChangedMessageKey));
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-SRC-0409.impactChanged",
+                    ["impactHash"] = impact.Hash,
+                    ["approvedDependents"] = impact.ApprovedCount.ToString(CultureInfo.InvariantCulture),
+                    ["dependents"] = impact.Consumers.Count.ToString(CultureInfo.InvariantCulture),
+                });
         }
 
         var approved = impact.Consumers.Where(c => c.Approved).ToList();
@@ -118,13 +130,4 @@ public sealed class RecalculateApprovedDependentsHandler(
                 .ConfigureAwait(false);
         return new RecalculateApprovedDependentsResult(queued, approved.Count);
     }
-
-    private static Dictionary<string, object?> Details(SourceImpact impact, string messageKey)
-        => new()
-        {
-            ["messageKey"] = messageKey,
-            ["impactHash"] = impact.Hash,
-            ["approvedDependents"] = impact.ApprovedCount.ToString(CultureInfo.InvariantCulture),
-            ["dependents"] = impact.Consumers.Count.ToString(CultureInfo.InvariantCulture),
-        };
 }
