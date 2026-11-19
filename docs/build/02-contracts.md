@@ -6763,12 +6763,11 @@ public sealed record RowDto(
   - **`GET /api/v1/documents/{id}/source-impact?sheetDefId=&periodKey=&action=approve|reopen[&sheetCopyId=]`** →
     `SourceImpactDto` (`action`, `policy` — `None|Warn|ConfirmWithReason|Block`, `required`, `blocked`, `reasonRequired`,
     `impactHash`, `sourceMonths[]` `yyyyMM`, `dependentCount`, `approvedCount`, `consumers[]`
-    `{bindingCode, templateCode, documentId, projectCode, documentKey, periodKey, approved}`, `hiddenCount`). Право
+    `{bindingCode, templateCode, documentId, projectCode, documentKey, periodKey, approved, willRecalculate, skipReason}`; `skipReason = approved` для затвердженого періоду, який перерахунок пропускає). Право
     `Document.View`; невидимий документ чи аркуш — 404; неприпустимий `action` — 422 `ECR-REQ-0422`
     `sourceImpactActionInvalid`. Читання без змін. `required = false`, `impactHash = ""` і порожній перелік, коли дія
     джерела НЕ змінює: копія аркуша; `reopen` не із `Approved`; `approve` не з `Submitted` чи не остаточний крок маршруту.
-    Залежні документи, яких читач не бачить, лише лічаться в `hiddenCount` (без назв); відбиток рахується з повного
-    переліку.
+    Рішення людини 19.11: у відповіді УСІ залежні (метадані: документ, шаблон, період, статус; без даних комірок і без посилання), навіть якщо читач не має права перегляду їхніх документів; `hiddenCount` немає; відповідь віддає до 500 залежних, повне число — `dependentCount`. Відбиток рахується з повного переліку.
   - **Що вважається впливом.** Зв'язки, чий шаблон-джерело — шаблон документа, у стані `approvedOnly`, з бітом
     «читати з документа», чий аркуш містить таблиці зв'язки, а документ — той, який завантажувач обрав би за рік. Споживачі —
     шаблони графа залежностей (`IDependencyGraphProvider`, як у воротах подання). Залежний період — документ × період,
