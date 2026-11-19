@@ -6721,3 +6721,40 @@ public sealed record RowDto(
 - **`PeriodScope`** (`Ecr.Expressions`, `RegistryReadScopes`): `REGFIND` з ключами `[Period].Year` + `[Period].Sequence`
   → `Month`; `[Period].Year` + літерал 1…12 (річна розкладка D-474) → `Year` з маскою місяця; лише рік → `Year`;
   інакше → `All`. Області рядка — рівності `ROW.f = [Period].*` у ланцюжку `AND`.
+
+## ✎ 2026-11-19 B179 L4–L6: ендпоінт графа, перемикачі зв'язки, споживачі з графа (D-553)
+
+Лише додаванням; міграції немає. Право всіх трьох — `Calculation.ManageSourceBinding` (з вбудованих ролей — лише
+`SystemAdministrator`); без нього 403 `ECR-AUTH-0403`.
+
+- **`GET /api/v1/dependency-graph`** → `DependencyGraphDto`: `revision` (ревізія вхідних даних), `nodes[]`
+  (`kind` `template`|`registry`|`methodology`, `id`, `code`), `edges[]` (`kind` `fills`|`templateFormula`|`methodology`|
+  `writesInto`|`registryRule`|`methodologyResult`, `fromKind`/`fromId`, `toKind`/`toId`, `scope` `month`|`year`|`all`,
+  `monthMask` — біти 1…12 літеральних місяців для `year`, 0 — увесь рік, `evidence[]` {`source`, `id`, `versionId`,
+  `detail`}, `evidenceTotal`), `templateDependencies[]` (згорнуте ребро «джерело → споживач»: `sourceTemplateId`,
+  `consumerTemplateId`, `bindingId`, `registryDefId`, `scope`, `monthMask`, `viaTemplateFormula`, `viaMethodology`),
+  `levels[]` (`level` з 0, `templateIds[]` — порядок обчислення), `cycles[]` (`templateIds[]`), `diagnostics[]` (`key`
+  `cycle`|`astFallback`|`parseFailed`|`unknownRegistry`, `detail`), `truncated`. Стелі: 5000 ребер (`truncated`), 25
+  доказів на ребро (`evidenceTotal` — скільки всього). Граф кешований під ключем ревізії (до 5 с несвіжості).
+  Вид доказу `source`: `formulaDependency`, `ast`, `lookupColumn` (формула шаблону), `registryUse` (методологія;
+  `detail` — код формули), `calculationBinding`, `sourceBinding` (`id` — зв'язка, `detail` — стан), `registryRule`,
+  `methodologyDependency`.
+- **`PUT /api/v1/document-source-bindings/{id}/flags`** `{ readFromDocument?, recalculateDependents? }` →
+  `SwitchDocumentSourceFlagsResponse` (`binding`, `changed`, `queuedYears`). Обидва поля необов'язкові, хоч одне
+  обов'язкове — інакше 422 `ECR-REQ-0422`, `messageKey` `err.ECR-REQ-0422.sourceFlagsInvalid`; немає зв'язки — 404
+  `ECR-CALC-0404` `sourceBinding`. Справжня зміна: подія `DocumentSourceBindingChanged` у `aud.SecurityEvent` з
+  `kind = flags`, `oldReadFromDocument`/`newReadFromDocument`, `oldRecalculateDependents`/`newRecalculateDependents`,
+  `queuedYears`, автор — у тій самій транзакції; зміна `readFromDocument` за ввімкненого `recalculateDependents` ставить
+  злиту `IRegistryImpactRecalculationJob` на кожен рік джерела (як `source-state`); зміна лише `recalculateDependents`
+  перерахунку не ставить. Повтор тих самих бітів — `changed = false`, нічого не пише. Після коміту скидається процесний
+  кеш воріт хука джерела.
+- **Споживачі зв'язки — з графа (L6).** `GET /document-source-bindings` → `consumerTemplateCodes` тепер коди шаблонів-
+  споживачів з графа (прямі й транзитивні через `methodologyResult`), а не з `cfg.DocumentSourceBindingConsumer`; ворота
+  `POST /documents/{id}/submit` і `…/approve` (`ECR-SUB-4221`), `calculation-issues.sourceIssues` і правило
+  `STALE_APPROVED_DEPENDENT` вважають споживачем шаблон, якого називає граф. Таблицю `cfg.DocumentSourceBindingConsumer`
+  не читає жоден код (сторож `SourceBindingConsumerTableReadGuardTests`), сід її рядки лишає; зняття — L7.
+- **Відмова циклу при публікації версії-скрипта** (`POST /methodologies/{id}/versions/{versionId}/publish`) перевіряється
+  ПІСЛЯ публікації й збереження в транзакції (граф читає лише опубліковані версії): відмова `422 ECR-TMPL-0422`
+  відкочує публікацію; золотий набір відхиляється раніше за відмову циклу.
+- Клієнт: екран `/admin/dependency-graph` (право `Calculation.ManageSourceBinding`), ключі каталогу `dependencyGraph.*`,
+  `nav.dependencyGraph`, `nav.dependencyGraph.description` — сід `B179-dependency-graph.sql` (en/ru/kz; kz — на звірку).
