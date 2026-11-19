@@ -660,7 +660,8 @@ export function useSheetActions({
     } finally {
       setImpactChecking(false);
     }
-    if (impact === null || !impact.required) return proceed(undefined);
+    // ✎ Рішення 19.11: через UI діалог впливу ЗАВЖДИ, коли є хоч один залежний (сервер вимагає підтвердження лише за політикою).
+    if (impact === null || impact.dependentCount === 0) return proceed(undefined);
 
     setAsking(null);
     setImpactAsk({ action, impact, proceed: (confirmed) => proceed(confirmed) });
@@ -675,7 +676,7 @@ export function useSheetActions({
     proceed: (confirmed: ConfirmedImpact) => Promise<unknown>,
   ): Promise<void> {
     const impact = await fetchSourceImpact(documentId, at, action);
-    if (impact === null || !impact.required) {
+    if (impact === null || impact.dependentCount === 0) {
       showSheetError(error, at.sheetName);
       return;
     }

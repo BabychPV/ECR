@@ -43,9 +43,8 @@ function impact(overrides: Partial<Impact> = {}): Impact {
     dependentCount: 1,
     approvedCount: 1,
     consumers: [
-      { bindingCode: 'B', templateCode: 'LAND', documentId: 5, projectCode: 'LAND-26', documentKey: 'DOC-LAND', periodKey: 202601, approved: true },
+      { bindingCode: 'B', templateCode: 'LAND', documentId: 5, projectCode: 'LAND-26', documentKey: 'DOC-LAND', periodKey: 202601, approved: true, willRecalculate: false, skipReason: 'approved' },
     ],
-    hiddenCount: 0,
     ...overrides,
   };
 }
@@ -131,14 +130,31 @@ async function approveViaDialog(): Promise<void> {
 }
 
 describe('SheetActions: вплив Approve на залежні документи (B80 N5)', () => {
-  it('a) вплив не потрібен — POST approve одразу, без confirmedImpact, діалогу впливу немає', async () => {
-    show({ state: 'Submitted', impacts: [impact({ required: false, policy: 'None', approvedCount: 0 })] });
+  it('a) залежних немає — POST approve одразу, без confirmedImpact, діалогу впливу немає', async () => {
+    show({
+      state: 'Submitted',
+      impacts: [impact({ required: false, policy: 'None', approvedCount: 0, dependentCount: 0, consumers: [] })],
+    });
 
     await approveViaDialog();
 
     await waitFor(() => expect(posts).toHaveLength(1));
     expect(posts[0]?.body).not.toHaveProperty('confirmedImpact');
     expect(screen.queryByTestId('source-impact-confirm')).toBeNull();
+  });
+
+  it('a2) залежні є, але підтвердження за політикою не потрібне — діалог усе одно показується (рішення 19.11)', async () => {
+    show({ state: 'Submitted', impacts: [impact({ required: false, policy: 'None', approvedCount: 0 })] });
+
+    await approveViaDialog();
+
+    const confirm = await screen.findByTestId('source-impact-confirm');
+    expect(posts).toHaveLength(0);
+    expect(screen.getByTestId('source-impact-policy-info')).toBeTruthy();
+
+    fireEvent.click(confirm);
+
+    await waitFor(() => expect(posts).toHaveLength(1));
   });
 
   it('b) Warn: діалог впливу; POST лише після підтвердження і з відбитком', async () => {

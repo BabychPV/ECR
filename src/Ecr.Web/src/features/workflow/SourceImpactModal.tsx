@@ -44,13 +44,17 @@ export function SourceImpactModal({
   const needsReason = impact.reasonRequired;
   const trimmed = reason.trim();
   const confirmDisabled = needsReason && trimmed.length === 0;
-  const policyKey = blocked ? 'block' : needsReason ? 'confirmWithReason' : 'warn';
+  // ✎ Рішення людини 19.11: діалог показується ЗАВЖДИ, коли є залежні; `required = false` — лише відомості.
+  const required = impact.required;
+  const policyKey = blocked ? 'block' : needsReason ? 'confirmWithReason' : required ? 'warn' : 'info';
 
   return (
     <Modal opened={opened} onClose={onClose} title={t(`sourceImpact.title.${action}`)} returnFocus={false} size="lg">
       <Stack gap="sm">
         <Text size="sm">
-          {t(`sourceImpact.intro.${action}`, { approved: impact.approvedCount, total: impact.dependentCount })}
+          {required
+            ? t(`sourceImpact.intro.${action}`, { approved: impact.approvedCount, total: impact.dependentCount })
+            : t(`sourceImpact.intro.info.${action}`, { total: impact.dependentCount })}
         </Text>
 
         {impact.consumers.length > 0 ? (
@@ -65,20 +69,14 @@ export function SourceImpactModal({
                     <Text size="sm" span>
                       {c.projectCode} · {c.documentKey} · {formatPeriodKey(c.periodKey)}
                     </Text>
-                    <Badge size="sm" variant="light" color={c.approved ? 'statusWarning' : 'statusInfo'}>
-                      {t(c.approved ? 'sourceImpact.status.approved' : 'sourceImpact.status.pending')}
+                    <Badge size="sm" variant="light" color={c.willRecalculate ? 'statusInfo' : 'statusWarning'}>
+                      {t(c.willRecalculate ? 'sourceImpact.status.pending' : 'sourceImpact.status.approved')}
                     </Badge>
                   </Group>
                 </List.Item>
               ))}
             </List>
           </Stack>
-        ) : null}
-
-        {impact.hiddenCount > 0 ? (
-          <Text size="sm" c="dimmed" data-testid="source-impact-hidden">
-            {t('sourceImpact.hidden', { count: impact.hiddenCount })}
-          </Text>
         ) : null}
 
         {blocked ? (
@@ -109,7 +107,7 @@ export function SourceImpactModal({
           </Button>
           {blocked ? null : (
             <Button
-              color="statusWarning"
+              {...(required ? { color: 'statusWarning' } : {})}
               loading={isPending === true}
               disabled={confirmDisabled}
               onClick={() => {
@@ -118,7 +116,7 @@ export function SourceImpactModal({
               }}
               data-testid="source-impact-confirm"
             >
-              {t(`sourceImpact.confirm.${action}`)}
+              {required ? t(`sourceImpact.confirm.${action}`) : t(action === 'approve' ? 'workflow.approve' : 'workflow.reopen')}
             </Button>
           )}
         </Group>

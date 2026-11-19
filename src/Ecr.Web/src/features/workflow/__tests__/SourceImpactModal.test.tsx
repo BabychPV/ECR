@@ -27,10 +27,9 @@ function impact(overrides: Partial<SourceImpact> = {}): SourceImpact {
     dependentCount: 2,
     approvedCount: 1,
     consumers: [
-      { bindingCode: 'HSE400_LAND', templateCode: 'LAND', documentId: 5, projectCode: 'LAND-2026', documentKey: 'DOC-LAND', periodKey: 202603, approved: true },
-      { bindingCode: 'HSE400_LAND', templateCode: 'LAND', documentId: 6, projectCode: 'LAND-2026', documentKey: 'DOC-LAND-2', periodKey: 202603, approved: false },
+      { bindingCode: 'HSE400_LAND', templateCode: 'LAND', documentId: 5, projectCode: 'LAND-2026', documentKey: 'DOC-LAND', periodKey: 202603, approved: true, willRecalculate: false, skipReason: 'approved' },
+      { bindingCode: 'HSE400_LAND', templateCode: 'LAND', documentId: 6, projectCode: 'LAND-2026', documentKey: 'DOC-LAND-2', periodKey: 202603, approved: false, willRecalculate: true, skipReason: null },
     ],
-    hiddenCount: 0,
     ...overrides,
   };
 }
@@ -85,11 +84,16 @@ describe('SourceImpactModal', () => {
     expect(onConfirm).not.toHaveBeenCalled();
   });
 
-  it('залежні, яких читач не бачить, лише лічаться', async () => {
-    show(impact({ hiddenCount: 3, consumers: [] }));
+  it('required = false (політика None чи немає затверджених): лише відомості, кнопка — дія, без причини', async () => {
+    const { onConfirm } = show(impact({ policy: 'None', required: false, approvedCount: 0 }), vi.fn(), vi.fn(), 'approve');
 
-    expect((await screen.findByTestId('source-impact-hidden')).textContent).toContain('sourceImpact.hidden');
-    expect(screen.queryByTestId('source-impact-consumers')).toBeNull();
+    expect(await screen.findByTestId('source-impact-policy-info')).toBeTruthy();
+    expect(screen.queryByTestId('source-impact-reason')).toBeNull();
+    expect(screen.getByTestId('source-impact-confirm').textContent).toContain('workflow.approve');
+
+    fireEvent.click(screen.getByTestId('source-impact-confirm'));
+
+    expect(onConfirm).toHaveBeenCalledWith({ hash: 'abc123', reason: null });
   });
 
   it('Cancel закриває діалог і не підтверджує', async () => {

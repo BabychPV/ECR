@@ -44588,8 +44588,12 @@ export interface components {
             periodKey: number;
             /** @description Код проєкту. */
             projectCode: string;
+            /** @description Чому не буде перераховано: `approved` — затверджений період перерахунок пропускає (D-493/D-510); інакше `null`. */
+            skipReason?: string | null;
             /** @description Код шаблону залежного документа. */
             templateCode: string;
+            /** @description Період буде перераховано (незатверджений). */
+            willRecalculate: boolean;
         };
         /** @description Вплив дії над документом-джерелом на залежні документи (B80 N5, D-554). */
         SourceImpactDto: {
@@ -44609,11 +44613,6 @@ export interface components {
              * @description Усього залежних періодів.
              */
             dependentCount: number;
-            /**
-             * Format: int32
-             * @description Залежних, яких користувач не бачить (лише число).
-             */
-            hiddenCount: number;
             /** @description Відбиток впливу: його клієнт повертає в `confirmedImpact.hash`. */
             impactHash: string;
             /** @description Політика: `None` | `Warn` | `ConfirmWithReason` | `Block`. */

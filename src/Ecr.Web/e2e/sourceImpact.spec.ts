@@ -42,8 +42,7 @@ interface Impact {
   impactHash: string;
   dependentCount: number;
   approvedCount: number;
-  consumers: { documentId: number; periodKey: number; approved: boolean }[];
-  hiddenCount: number;
+  consumers: { documentId: number; periodKey: number; approved: boolean; willRecalculate: boolean; skipReason: string | null }[];
 }
 
 test.describe('Вплив Approve/Reopen джерела на залежні документи (B80 N5)', () => {
@@ -64,7 +63,12 @@ test.describe('Вплив Approve/Reopen джерела на залежні до
     expect(impactResponse.status(), 'GET source-impact').toBe(200);
     const impact = (await impactResponse.json()) as Impact;
     expect(['None', 'Warn', 'ConfirmWithReason', 'Block']).toContain(impact.policy);
-    expect(impact.consumers.length + impact.hiddenCount).toBe(impact.dependentCount);
+    expect(impact.consumers.length).toBe(impact.dependentCount);
+    // Рішення 19.11: видно ВСІХ залежних; затверджений пропускається з причиною, незатверджений перераховується.
+    for (const c of impact.consumers) {
+      expect(c.willRecalculate).toBe(!c.approved);
+      expect(c.skipReason).toBe(c.approved ? 'approved' : null);
+    }
     expect(impact.required).toBe(impact.policy !== 'None' && impact.approvedCount > 0);
     if (!impact.required) return;
 
