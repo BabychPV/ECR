@@ -33,7 +33,10 @@ public static class ScriptRegistryScopes
         ArgumentNullException.ThrowIfNull(script);
 
         var result = new Dictionary<string, PeriodScope>(StringComparer.OrdinalIgnoreCase);
-        if (script.Imports.Count > 0)
+
+        // ⛔ Новий вид оператора, якого обхід не знає, міг би сховати виклик REG* і звузити обсяг (пропущений
+        // перерахунок) — тоді «усе» для всіх довідників.
+        if (script.Imports.Count > 0 || !AllStatements(script.Statements).All(IsKnown))
         {
             foreach (var code in script.RegistryCodes)
             {
@@ -127,4 +130,26 @@ public static class ScriptRegistryScopes
     }
 
     private static IEnumerable<AstNode> BlockRoots(ScriptBlock block) => block.Statements.SelectMany(StatementRoots);
+
+    /// <summary>Оператори, чиї вирази обходить <see cref="StatementRoots"/>.</summary>
+    internal static bool IsKnown(ScriptStatement statement) =>
+        statement is VarStatement or OutputStatement or RejectStatement or SkipStatement or IfStatement or ForeachSubstanceStatement;
+
+    private static IEnumerable<ScriptStatement> AllStatements(IEnumerable<ScriptStatement> statements)
+    {
+        foreach (var statement in statements)
+        {
+            yield return statement;
+            IEnumerable<ScriptStatement> nested = statement switch
+            {
+                IfStatement i => i.Then.Statements.Concat(i.Else?.Statements ?? []),
+                ForeachSubstanceStatement f => f.Body.Statements,
+                _ => [],
+            };
+            foreach (var inner in AllStatements(nested))
+            {
+                yield return inner;
+            }
+        }
+    }
 }

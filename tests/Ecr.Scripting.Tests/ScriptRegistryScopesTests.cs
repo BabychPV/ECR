@@ -123,4 +123,23 @@ public sealed class ScriptRegistryScopesTests
     [Fact]
     public void Скрипт_без_довідників_дає_порожньо()
         => Assert.Empty(Scopes("var a = 1;"));
+
+    /// <summary>
+    /// Запобіжник обходу: кожен вид оператора скрипта має бути відомий аналізатору, інакше виклик REG* у новому
+    /// операторі звузив би обсяг (пропущений перерахунок). Новий вид → тест червоний, доки обхід його не врахує.
+    /// </summary>
+    [Fact]
+    public void Аналізатор_знає_кожен_вид_оператора_скрипта()
+    {
+        var kinds = typeof(ScriptStatement).Assembly.GetTypes()
+            .Where(t => t.IsSubclassOf(typeof(ScriptStatement)) && !t.IsAbstract)
+            .ToList();
+
+        Assert.NotEmpty(kinds);
+        foreach (var kind in kinds)
+        {
+            var instance = (ScriptStatement)System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(kind);
+            Assert.True(ScriptRegistryScopes.IsKnown(instance), $"{kind.Name} не обходиться ScriptRegistryScopes");
+        }
+    }
 }
