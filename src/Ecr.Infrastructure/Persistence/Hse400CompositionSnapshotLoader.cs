@@ -3,7 +3,6 @@ using Ecr.Application.Registries;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Expressions.Evaluation;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
 
 namespace Ecr.Infrastructure.Persistence;
 
@@ -15,7 +14,7 @@ namespace Ecr.Infrastructure.Persistence;
 /// Обгортка над <see cref="RegistrySnapshotLoader"/>: усі довідники читає він, а тут рядки складу за роки, що мають
 /// документ HSE400, підмінюються значеннями документа (<see cref="Hse400CompositionMapping.Overlay"/>).
 ///
-/// ⛔ Вимкнено (<see cref="EnabledKey"/> = <c>false</c>, умовчання) — жодного додаткового запиту й той самий знімок.
+/// ⛔ Вимкнено (біт зв'язки <c>ReadFromDocument</c> = 0 або зв'язки немає) — той самий знімок довідників.
 /// Запит до документів іде лише тоді, коли серед завантажених довідників справді є склад газу.
 ///
 /// ⚠ Документ читається ПОТОЧНИМ, а не «станом на» момент прогону: комірки вводу — з <c>doc.CellValue</c>,
@@ -24,8 +23,8 @@ namespace Ecr.Infrastructure.Persistence;
 ///
 /// ⚠ Якщо за рік є кілька документів шаблону, береться документ із найбільшим ідентифікатором (останній створений).
 ///
-/// ✎ B80 (N1): ключ <see cref="EnabledKey"/>, заданий явно, — перекриття; не заданий — вирішує біт зв'язки
-/// <c>cfg.DocumentSourceBinding.ReadFromDocument</c> (немає зв'язки — вимкнено, як і було). Стан-ворота зв'язки
+/// ✎ B80 (N1), P-0118-31/33: вирішує лише біт зв'язки <c>cfg.DocumentSourceBinding.ReadFromDocument</c> (немає
+/// зв'язки — вимкнено); ключ <see cref="RetiredKey"/> виведено. Параметр <c>enabled</c> — лише для тестів (у DI — <c>null</c>). Стан-ворота зв'язки
 /// <see cref="DocumentSourceState.ApprovedOnly"/> лишає з документа лише затверджені місяці (A2, варіант (a): місяць
 /// без затвердження — без рядків, і довідник за рік документа однаково відкинуто). За <see cref="DocumentSourceState.Any"/>
 /// запиту станів немає і рядки — ті самі, що до B80.
@@ -38,35 +37,12 @@ public sealed class Hse400CompositionSnapshotLoader(
     string registryCode = Hse400CompositionMapping.RegistryCode,
     string templateCode = Hse400CompositionMapping.TemplateCode) : IRegistrySnapshotLoader
 {
-    /// <summary>Ключ налаштування: <c>true</c> — Land читає склад газу з документа HSE400.</summary>
-    public const string EnabledKey = "Calculations:Hse400CompositionFromDocument";
-
-    /// <summary>Чи ввімкнено читання складу з документа ЗА КЛЮЧЕМ (без зв'язки).</summary>
-    /// <param name="configuration">Конфігурація застосунку.</param>
-    /// <returns><c>true</c> лише для явного <c>true</c>.</returns>
-    public static bool IsEnabled(IConfiguration configuration)
-    {
-        ArgumentNullException.ThrowIfNull(configuration);
-        return bool.TryParse(configuration[EnabledKey], out var value) && value;
-    }
-
     /// <summary>
-    /// B80: перекриття ключем — значення, коли ключ ЗАДАНО (непарсабельне — <c>false</c>, як і було), інакше
-    /// <c>null</c>: вирішує біт зв'язки.
+    /// ✎ P-0118-31/33 («один вимикач»): ВИВЕДЕНИЙ ключ. Застосунок його НЕ читає — читання складу з документа вирішує
+    /// лише біт зв'язки <c>cfg.DocumentSourceBinding.ReadFromDocument</c>. Залишкова змінна середовища
+    /// <c>ECR_Calculations__Hse400CompositionFromDocument</c> на майданчику — без дії; ім'я лишається для тестів-сторожів.
     /// </summary>
-    /// <param name="configuration">Конфігурація застосунку.</param>
-    /// <param name="key">Ключ.</param>
-    public static bool? Override(IConfiguration configuration, string key)
-    {
-        ArgumentNullException.ThrowIfNull(configuration);
-        var raw = configuration[key];
-        if (string.IsNullOrWhiteSpace(raw))
-        {
-            return null;
-        }
-
-        return bool.TryParse(raw, out var value) && value;
-    }
+    public const string RetiredKey = "Calculations:Hse400CompositionFromDocument";
 
     /// <inheritdoc />
     public async Task<IRegistrySnapshot> LoadAsync(

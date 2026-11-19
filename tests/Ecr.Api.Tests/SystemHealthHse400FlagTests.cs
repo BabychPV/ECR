@@ -1,25 +1,24 @@
 using System.Text.Json;
-using Ecr.Api.Startup;
 using Ecr.Application.Health;
 using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
-using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace Ecr.Api.Tests;
 
 /// <summary>
-/// B105: прапор <c>Calculations:Hse400CompositionFromDocument</c> видно в <c>GET /api/v1/health/facts</c>, а вимкнений
-/// прапор за наявного документа HSE400 поточного року дає попередження (Land інакше мовчки читає довідник).
+/// B105: читання складу HSE400 з документа видно в <c>GET /api/v1/health/facts</c>, а вимкнене читання за наявного
+/// документа HSE400 поточного року дає попередження (Land інакше мовчки читає довідник). ✎ P-0118-31/33: значення дає
+/// біт зв'язки <c>ReadFromDocument</c>, ключ <c>Calculations:Hse400CompositionFromDocument</c> виведено.
 /// </summary>
 /// <remarks>
 /// Червоні до фіксу (заглушки): <see cref="SystemFactsCalculationsDto.Of(bool, string, bool)"/> завжди без попередження —
 /// <see cref="Попередження_лише_коли_прапор_вимкнено_а_документ_поточного_року_є"/>; сховище завжди «документа
-/// немає» — <see cref="Сховище_бачить_документ_HSE400_року_лише_за_опублікованої_версії"/>; контролер без прапора —
-/// <see cref="Факти_показують_увімкнений_прапор_і_його_джерело"/>.
+/// немає» — <see cref="Сховище_бачить_документ_HSE400_року_лише_за_опублікованої_версії"/>.
+/// ✎ P-0118-31/33: ключ виведено — дієве значення й мітку <c>Binding</c> дає біт зв'язки; змінна оточення без дії —
+/// <see cref="Факти_ігнорують_виведений_ключ_значення_дає_лише_зв_язка"/>.
 /// </remarks>
 [Collection("SqlServer")]
 public sealed class SystemHealthHse400FlagTests(SqlServerFixture sql)
@@ -37,46 +36,11 @@ public sealed class SystemHealthHse400FlagTests(SqlServerFixture sql)
     public void Попередження_лише_коли_прапор_вимкнено_а_документ_поточного_року_є(
         bool enabled, bool documentInYear, bool expectedWarning)
     {
-        var dto = SystemFactsCalculationsDto.Of(enabled, ConfigurationSourceLabel.Environment, documentInYear);
+        var dto = SystemFactsCalculationsDto.Of(enabled, SystemFactsCalculationsDto.SourceBinding, documentInYear);
 
         Assert.Equal(enabled, dto.Hse400CompositionFromDocument);
-        Assert.Equal(ConfigurationSourceLabel.Environment, dto.Hse400CompositionSource);
+        Assert.Equal(SystemFactsCalculationsDto.SourceBinding, dto.Hse400CompositionSource);
         Assert.Equal(expectedWarning, dto.Hse400CompositionWarning);
-    }
-
-    [Fact]
-    [Trait(TestCategories.Stage, TestCategories.Stage8)]
-    [Trait("Directive", "HSE400")]
-    public void Мітка_джерела_за_останнім_постачальником_що_задає_ключ()
-    {
-        const string Key = Hse400CompositionSnapshotLoader.EnabledKey;
-
-        // Власний префікс змінних — не зачіпає жодного іншого тесту процесу.
-        var prefix = $"ECRB105_{Guid.NewGuid():N}_";
-        var variable = prefix + Key.Replace(":", "__", StringComparison.Ordinal);
-        Environment.SetEnvironmentVariable(variable, "true");
-        try
-        {
-            var memory = new Dictionary<string, string?> { [Key] = "false" };
-
-            var none = new ConfigurationBuilder().Build();
-            Assert.Equal(SystemHostFacts.SourceDefault, ConfigurationSourceLabel.Of(none, Key));
-
-            var onlyMemory = new ConfigurationBuilder().AddInMemoryCollection(memory).Build();
-            Assert.Equal(ConfigurationSourceLabel.Other, ConfigurationSourceLabel.Of(onlyMemory, Key));
-
-            // Змінна оточення іде пізніше — вона й дієва (як ECR_ у Program.cs).
-            var withEnvironment = new ConfigurationBuilder()
-                .AddInMemoryCollection(memory)
-                .AddEnvironmentVariables(prefix)
-                .Build();
-            Assert.Equal(ConfigurationSourceLabel.Environment, ConfigurationSourceLabel.Of(withEnvironment, Key));
-            Assert.True(Hse400CompositionSnapshotLoader.IsEnabled(withEnvironment));
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable(variable, null);
-        }
     }
 
     [Fact]
@@ -115,39 +79,38 @@ public sealed class SystemHealthHse400FlagTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Directive", "HSE400")]
-    public async Task Факти_показують_увімкнений_прапор_і_його_джерело()
+    public async Task Факти_ігнорують_виведений_ключ_значення_дає_лише_зв_язка()
     {
-        using var factory = new EcrApiFactory(sql);
-        using var app = factory.WithWebHostBuilder(
-            b => b.UseSetting(Hse400CompositionSnapshotLoader.EnabledKey, "true"));
-        using var client = await SystemHealthControllerTests.SignedInAsync(sql, app, ViewHealth);
-
-        var calculations = await ReadCalculationsAsync(client);
-
-        Assert.True(calculations.GetProperty("hse400CompositionFromDocument").GetBoolean());
-        Assert.False(calculations.GetProperty("hse400CompositionWarning").GetBoolean());
-        Assert.NotEqual(SystemHostFacts.SourceDefault, calculations.GetProperty("hse400CompositionSource").GetString());
-    }
-
-    [Fact]
-    [Trait(TestCategories.Stage, TestCategories.Stage8)]
-    [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Directive", "HSE400")]
-    public async Task Факти_показують_вимкнений_прапор_за_умовчання()
-    {
-        using var app = new EcrApiFactory(sql);
-        using var client = await SystemHealthControllerTests.SignedInAsync(sql, app, ViewHealth);
-
-        var calculations = await ReadCalculationsAsync(client);
-
-        Assert.False(calculations.GetProperty("hse400CompositionFromDocument").GetBoolean());
-        Assert.Contains(
-            calculations.GetProperty("hse400CompositionSource").GetString(),
-            new[]
+        // ✎ P-0118-31/33: залишкова змінна live (ECR_Calculations__Hse400CompositionFromDocument) — без дії. Факти без
+        // змінної, із "true" і з "false" однакові, а джерело — лише Default (зв'язки немає) або Binding (біт зв'язки).
+        // Мутація: повернути читання ключа в SystemHealthController — джерело Environment, червоний.
+        const string Variable = "ECR_" + "Calculations__Hse400CompositionFromDocument";
+        var previous = Environment.GetEnvironmentVariable(Variable);
+        var seen = new List<(bool Enabled, string? Source)>();
+        try
+        {
+            foreach (var value in new[] { null, "true", "false" })
             {
-                SystemHostFacts.SourceDefault, ConfigurationSourceLabel.AppSettings, ConfigurationSourceLabel.Environment,
-                ConfigurationSourceLabel.ProgramData, ConfigurationSourceLabel.CommandLine, ConfigurationSourceLabel.Other,
-            });
+                Environment.SetEnvironmentVariable(Variable, value);
+                using var app = new EcrApiFactory(sql);
+                using var client = await SystemHealthControllerTests.SignedInAsync(sql, app, ViewHealth);
+                var calculations = await ReadCalculationsAsync(client);
+                seen.Add((
+                    calculations.GetProperty("hse400CompositionFromDocument").GetBoolean(),
+                    calculations.GetProperty("hse400CompositionSource").GetString()));
+            }
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(Variable, previous);
+        }
+
+        Assert.All(seen, s => Assert.Contains(
+            s.Source, new[] { SystemHostFacts.SourceDefault, SystemFactsCalculationsDto.SourceBinding }));
+        Assert.All(seen, s => Assert.Equal(seen[0], s));
+
+        // Без зв'язки читання з документа немає.
+        Assert.All(seen, s => Assert.True(s.Source == SystemFactsCalculationsDto.SourceBinding || !s.Enabled));
     }
 
     private async Task<Ecr.Application.Ports.SystemHealthSnapshot> ReadAsync(string templateCode, DateTime utcNow)

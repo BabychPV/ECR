@@ -791,10 +791,11 @@ public sealed partial class RecalculationJob(
                 .ConfigureAwait(false);
         }
 
-        // HSE400 3b: після УСПІШНОГО прогону — документи й періоди, які він рахував (провалений сюди не доходить).
+        // B179 L2: після УСПІШНОГО прогону — документи й періоди, які він рахував (провалений сюди не доходить); ланка —
+        // з постановки залежного (ланцюжок документів-джерел).
         if (completionHook is not null && scopeByDocument.Count > 0)
         {
-            await completionHook.OnSucceededAsync(scopeByDocument, ct).ConfigureAwait(false);
+            await completionHook.OnSucceededAsync(scopeByDocument, request.SourceHop, ct).ConfigureAwait(false);
         }
     }
 
@@ -2788,6 +2789,10 @@ public sealed partial class RecalculationJob(
 /// <param name="ForeignOwnerPass">
 /// ✎ LAND-YEAR L2b: другий прохід читача результатів іншого періоду (ставить сам прогін після перемикання); нових проходів не ставить.
 /// </param>
+/// <param name="SourceHop">
+/// B179 L2: ланка ланцюжка документів-джерел, з якою поставлено перерахунок залежного (<c>CalculationTrigger</c>); 0 —
+/// будь-яка інша постановка. Хук завершення несе її далі.
+/// </param>
 public sealed record RecalculationRequest(
     int ProjectId,
     long DocumentId,
@@ -2797,7 +2802,8 @@ public sealed record RecalculationRequest(
     string? FanOutParentJobId = null,
     bool RecalculateSubmitted = false,
     int? Year = null,
-    bool ForeignOwnerPass = false)
+    bool ForeignOwnerPass = false,
+    int SourceHop = 0)
 {
     /// <summary>✎ B59: нижня межа ключа періоду скоупу (включно); без року — <see cref="int.MinValue"/>.</summary>
     internal int FromKey => PeriodKey is null && Year is { } y ? y * 100 : int.MinValue;

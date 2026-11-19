@@ -279,8 +279,6 @@ ORDER BY [Ts];
 | `Cache:SchemaName` | ні | `dbo` | Значення на старті не перевіряється. |
 | `Cache:TableName` | ні | `Cache` | Значення на старті не перевіряється. |
 | `Calculations:FullYearWarnSeconds` | ні | `600` | Ціле число, не менше 1. |
-| `Calculations:Hse400CompositionFromDocument` | ні | `false` | `true` або `false`. |
-| `Calculations:Hse400RecalculateLandDependents` | ні | `false` | `true` або `false`. |
 | `Calculations:MaxInputCellsPerBinding` | ні | `300000` | Ціле число, не менше 1. |
 | `Calculations:MaxParallelism` | ні | `4` | Ціле число, не менше 1. |
 | `Calculations:SupersededPurge:BatchSize` | ні | `500` | Ціле число, не менше 1. |
@@ -389,7 +387,9 @@ ORDER BY [Ts];
 | `Transport:Https:Port` | ні | `0` | Ціле число, не менше 0. |
 <!-- /generated:config -->
 
-✎ B105: `Calculations:Hse400CompositionFromDocument` на живому стенді задається **постійно** (файл майданчика `%ProgramData%\ECR\config\appsettings.Production.json` для Api і Worker), а не лише змінною в скрипті перезапуску вікна: перезапуск без неї мовчки повертає Land до складу газу з довідника. Дієве значення й джерело (`Environment`, `ProgramData`, `AppSettings`, `Default`…) видно в `GET /api/v1/health/facts` (блок `calculations`) і на сторінці «Здоров'я системи»; вимкнений прапор за наявного документа HSE400 поточного року дає там попередження і рядок `Warning` у журналі Api на старті.
+✎ P-0118-31/33 («один вимикач»): ключ `Calculations:Hse400CompositionFromDocument` **виведено** — застосунок його не читає й на старті не перевіряє. Чи читає Land склад газу з документа HSE400, вирішує лише біт зв'язки `ReadFromDocument` (`cfg.DocumentSourceBinding`, зв'язка `HSE400_LAND_COMPOSITION`; сід ставить 1), що перемикається наявним API зв'язок без перезапуску. Залишкова змінна `ECR_Calculations__Hse400CompositionFromDocument` на живому стенді без дії (старт не падає) — її можна прибрати в наступному вікні. Перед оновленням переконатися, що біт зв'язки на стенді = 1. Блок `calculations` у `GET /api/v1/health/facts` показує дієве значення біта з джерелом `Binding` (без зв'язки — `false`, `Default`). Абзац нижче — історія до виведення ключа.
+
+~~✎ B105: `Calculations:Hse400CompositionFromDocument` на живому стенді задається **постійно** (файл майданчика `%ProgramData%\ECR\config\appsettings.Production.json` для Api і Worker), а не лише змінною в скрипті перезапуску вікна: перезапуск без неї мовчки повертає Land до складу газу з довідника. Дієве значення й джерело (`Environment`, `ProgramData`, `AppSettings`, `Default`…) видно в `GET /api/v1/health/facts` (блок `calculations`) і на сторінці «Здоров'я системи»; вимкнений прапор за наявного документа HSE400 поточного року дає там попередження і рядок `Warning` у журналі Api на старті.~~
 
 ## 3. Моніторинг і логи
 

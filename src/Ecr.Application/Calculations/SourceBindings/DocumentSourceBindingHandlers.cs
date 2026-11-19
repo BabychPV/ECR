@@ -21,8 +21,13 @@ namespace Ecr.Application.Calculations.SourceBindings;
 /// <param name="Policy">Політика згоди: <c>None</c>, <c>Warn</c>, <c>ConfirmWithReason</c>, <c>Block</c>.</param>
 /// <param name="ReadFromDocument">Біт зв'язки «читати з документа».</param>
 /// <param name="RecalculateDependents">Біт зв'язки «ставити перерахунок залежних».</param>
-/// <param name="ReadFromDocumentEffective">Дієве значення з урахуванням явного ключа конфігурації.</param>
-/// <param name="ReadFromDocumentSource"><c>configuration</c> — діє явний ключ; <c>binding</c> — біт зв'язки.</param>
+/// <param name="ReadFromDocumentEffective">
+/// Дієве значення «читати з документа». Ключ конфігурації виведено (P-0118-31/33) — дорівнює біту зв'язки.
+/// </param>
+/// <param name="ReadFromDocumentSource">
+/// <c>binding</c> — біт зв'язки (єдине значення в продукті); <c>configuration</c> лишається в контракті для сумісності
+/// й більше не видається.
+/// </param>
 /// <param name="ConsumerTemplateCodes">Коди шаблонів-споживачів.</param>
 /// <param name="UpdatedAt">Остання зміна стану-воріт, UTC; <c>null</c> — не змінювався.</param>
 /// <param name="UpdatedByUserId">Хто змінив востаннє.</param>
@@ -149,7 +154,7 @@ public sealed class ListDocumentSourceBindingsHandler(
 /// <para>
 /// ⚠ Справжня зміна: подія <see cref="DocumentSourceBindings.ChangedEventType"/> у журналі безпеки в тій самій транзакції
 /// (старий і новий стан, автор) і — коли читання з документа діє — злита задача перерахунку залежних за кожен рік
-/// джерела (<see cref="RegistryImpactRecalculationTarget.ForYear"/>; та сама задача, що пропускає затверджені аркуші
+/// джерела (<see cref="RegistryImpactRecalculationTarget.ForSourceChange"/>; та сама задача, що пропускає затверджені аркуші
 /// Land і позначає подані). Повтор того самого стану нічого не пише.
 /// </para>
 /// </remarks>
@@ -161,7 +166,9 @@ public sealed class SwitchDocumentSourceStateHandler(
     IUnitOfWork uow,
     IAuditWriter audit,
     IBackgroundJobScheduler jobs,
-    IClock clock)
+    IClock clock,
+    // B179 L2 perf: скидання кешу воріт хука джерела цього процесу (інші — за TTL); без нього (ручна збірка) — нічого.
+    ISourceBindingGateInvalidation? gate = null)
 {
     /// <summary>Право (те саме, що <see cref="DocumentSourceBindings.Permission"/>).</summary>
     public const string Permission = "Calculation.ManageSourceBinding";
@@ -230,15 +237,17 @@ public sealed class SwitchDocumentSourceStateHandler(
             {
                 foreach (var year in await store.SourceYearsAsync(id, innerCt).ConfigureAwait(false))
                 {
+                    // ✎ B179 L2: зміна джерела за зв'язкою — споживачі з графа (а не з ручного переліку/результатів), увесь рік.
                     await jobs.EnqueueCoalescedAsync<IRegistryImpactRecalculationJob>(
-                            RegistryImpactRecalculationTarget.ForYear(binding.RegistryDefId, year),
+                            RegistryImpactRecalculationTarget.ForSourceChange(binding.Id, year, month: null),
                             new RegistryImpactRecalculationRequest(
                                 binding.RegistryDefId,
                                 [],
                                 string.Create(
                                     CultureInfo.InvariantCulture,
                                     $"{binding.Code}: source state {DocumentSourceBindings.StateName(old)} -> {DocumentSourceBindings.StateName(target)}"),
-                                year),
+                                year,
+                                binding.Id),
                             innerCt,
                             createdByUserId: userId)
                         .ConfigureAwait(false);
@@ -264,6 +273,12 @@ public sealed class SwitchDocumentSourceStateHandler(
                     currentUser.CorrelationId),
                 innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
+
+        // Після коміту: хук джерела бачить новий стан одразу (за ApprovedOnly мовчить, назад на Any — знову ставить).
+        if (changed)
+        {
+            gate?.Invalidate();
+        }
 
         var view = (await store.ListAsync(ct).ConfigureAwait(false)).FirstOrDefault(v => v.Id == id)
                    ?? throw DocumentSourceBindings.NotFound(id);

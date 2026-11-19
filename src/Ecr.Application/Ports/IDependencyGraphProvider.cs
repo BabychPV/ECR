@@ -18,4 +18,12 @@ public interface IDependencyGraphProvider
     /// <summary>Поточний граф.</summary>
     /// <param name="ct">Токен скасування.</param>
     public Task<DependencyGraphSnapshot> GetAsync(CancellationToken ct);
+
+    /// <summary>
+    /// B179 L3: чи наповнює шаблон хоч один довідник (<c>cfg.DocumentSourceBinding</c>) — один запит без побудови графа.
+    /// Шаблон без зв'язки не має вихідних ребер, тож цикл через нього неможливий.
+    /// </summary>
+    /// <param name="templateId">Шаблон.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<bool> FillsRegistryAsync(int templateId, CancellationToken ct);
 }

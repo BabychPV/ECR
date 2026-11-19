@@ -70,7 +70,7 @@ public interface IRegistryImpactStore
     /// <returns>Рядки, впорядковані за документом і періодом; один рядок на методологію.</returns>
     /// <remarks>
     /// ⚠ Для довідника, чиї дані підміняє документ (<c>LAND_HSE400_COMPOSITION</c> за
-    /// <c>Calculations:Hse400CompositionFromDocument</c>): рядки <c>dic.*</c> не змінюються, тож
+    /// біта зв'язки <c>cfg.DocumentSourceBinding.ReadFromDocument</c>): рядки <c>dic.*</c> не змінюються, тож
     /// <c>DataChangedAt</c> мовчить. Застарілий — кожен актуальний прогін на момент ВИКОНАННЯ задачі: черга лишає
     /// payload першої постановки, тож момент зміни з payload пропустив би документ, перерахований між двома змінами
     /// джерела. Решта правил — ті самі: лише <c>Open</c>/<c>Grace</c>, методологія читає довідник. Без стелі —
@@ -79,20 +79,23 @@ public interface IRegistryImpactStore
     public Task<IReadOnlyList<RegistryImpactRow>> ListImpactedForYearAsync(int registryDefId, int year, CancellationToken ct);
 
     /// <summary>
-    /// B80 N3(b): документи шаблонів-споживачів зв'язки «документ-джерело → довідник» у відкритих періодах року
-    /// (<c>Open</c>/<c>Grace</c>, екземпляри таблиць оригіналу аркуша) — НЕЗАЛЕЖНО від того, чи є в них результат.
-    /// Порожньо, якщо зв'язки довідника немає, стан-ворота не <c>ApprovedOnly</c> або читання з документа вимкнене.
+    /// B179 L2 (замінює N3 <c>ListBoundConsumersForYearAsync</c>): документи шаблонів <paramref name="templateIds"/> у
+    /// відкритих періодах діапазону (<c>Open</c>/<c>Grace</c>, екземпляри таблиць оригіналу аркуша) — НЕЗАЛЕЖНО від
+    /// того, чи є в них результат. Шаблон документа за період — <c>d.TemplateId</c>, інакше шаблон версії проєкту за
+    /// період (B74).
     /// </summary>
-    /// <param name="registryDefId">Довідник зв'язки.</param>
-    /// <param name="year">Рік періодів.</param>
+    /// <param name="templateIds">Шаблони-споживачі (з графа залежностей).</param>
+    /// <param name="firstPeriod">Найменший ключ періоду (включно).</param>
+    /// <param name="lastPeriod">Найбільший ключ періоду (включно).</param>
+    /// <param name="month">
+    /// Обсяг «місяць» (<c>PeriodScope.Month</c>): з періодів кожного документа лишається лише той, що ВОЛОДІЄ місяцем
+    /// (місячний проєкт — <c>(рік, m)</c>, зокрема власник колонки <c>M{m}</c> річної розкладки D-474; квартальний —
+    /// перший місяць кварталу; річний — якір року). <c>null</c> — усі періоди діапазону.
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Рядки «документ × період»; <c>MethodologyCode</c> — порожній (результату може не бути).</returns>
-    /// <remarks>
-    /// ⚠ Лише для зміни джерела (<see cref="ListImpactedForYearAsync"/>): за <c>ApprovedOnly</c> затвердження місяця
-    /// HSE400 дає Land дані, яких доти не було, тож Land без жодного прогону теж залежний. За <c>Any</c> набір —
-    /// той самий, що до N3 (порожньо).
-    /// </remarks>
-    public Task<IReadOnlyList<RegistryImpactRow>> ListBoundConsumersForYearAsync(int registryDefId, int year, CancellationToken ct);
+    public Task<IReadOnlyList<RegistryImpactRow>> ListTemplateConsumersAsync(
+        IReadOnlyCollection<int> templateIds, int firstPeriod, int lastPeriod, int? month, CancellationToken ct);
 }
 
 /// <summary>Один зачеплений документ у періоді, через одну методологію.</summary>

@@ -95,6 +95,42 @@ public sealed class StaleApprovedDependentCheckTests(SqlServerFixture sql)
         Assert.Empty(await OwnAsync(world.Land.DocumentId));
     }
 
+    /// <summary>
+    /// B182 (K4): затверджено лише КОПІЮ аркуша Land (оригінал лише подано), джерело не затверджено — знахідки немає:
+    /// копії аркушів не враховуються.
+    /// <para>
+    /// ⚠ Мутація K4 (без <c>SheetCopyId == null</c> у кандидатах) цим тестом НЕ червоніє і не може: кандидат лише з
+    /// копією далі читається <see cref="DocumentSourceIssues"/> за оригіналами, а оригінал не затверджено — вид
+    /// <c>SourceMonthNotApproved</c>, який правило відкидає. Мутація еквівалентна за результатом (лише зайвий кандидат).
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task Затверджено_лише_копію_аркуша_Land_знахідки_немає()
+    {
+        var world = await SourceIssueWorld.ArrangeAsync(sql, DocumentSourceState.ApprovedOnly);
+        await SourceIssueWorld.AddStateAsync(sql, world.Source.DocumentId, world.Source.SheetDefId, March, T0);
+        await SourceIssueWorld.AddStateAsync(sql, world.Land.DocumentId, world.Land.SheetDefId, March, T1);
+        await SourceIssueWorld.AddCopyStateAsync(sql, world.Land.DocumentId, world.Land.SheetDefId, March, T1, T1);
+
+        Assert.Empty(await OwnAsync(world.Land.DocumentId));
+    }
+
+    /// <summary>B182 (K5): стеля знахідок — рівно <c>limit</c>, не <c>limit + 1</c> (межа 1 і 2 за ≥ 2 знахідок у базі).</summary>
+    [Fact]
+    public async Task Стеля_знахідок_рівно_limit()
+    {
+        for (var i = 0; i < 2; i++)
+        {
+            var world = await SourceIssueWorld.ArrangeAsync(sql, DocumentSourceState.ApprovedOnly);
+            await SourceIssueWorld.AddStateAsync(sql, world.Land.DocumentId, world.Land.SheetDefId, March, T0, T1);
+            await SourceIssueWorld.AddStateAsync(sql, world.Source.DocumentId, world.Source.SheetDefId, March, T0, T2);
+        }
+
+        await using var db = sql.CreateContext();
+        Assert.Single(await new StaleApprovedDependentCheck(db, readOverride: null).RunAsync(1, CancellationToken.None));
+        Assert.Equal(2, (await new StaleApprovedDependentCheck(db, readOverride: null).RunAsync(2, CancellationToken.None)).Count);
+    }
+
     /// <summary>Наскрізно: нічна задача пише знахідку в <c>aud.ConsistencyIssue</c> конвертом каталогу з деталями.</summary>
     [Fact]
     public async Task Задача_узгодженості_пише_знахідку_STALE_APPROVED_DEPENDENT()

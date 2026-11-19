@@ -9,8 +9,7 @@ namespace Ecr.Infrastructure.Persistence;
 
 /// <summary>Реалізація <see cref="IRegistryImpactStore"/> над <see cref="EcrDbContext"/>.</summary>
 /// <param name="db">Контекст.</param>
-/// <param name="overrides">B80: перекриття бітів зв'язки ключами; <c>null</c> — вирішують біти (тести).</param>
-public sealed class RegistryImpactStore(EcrDbContext db, IDocumentSourceFlagOverrides? overrides = null) : IRegistryImpactStore
+public sealed class RegistryImpactStore(EcrDbContext db) : IRegistryImpactStore
 {
     /// <inheritdoc />
     /// <remarks>
@@ -78,48 +77,31 @@ public sealed class RegistryImpactStore(EcrDbContext db, IDocumentSourceFlagOver
 
     /// <inheritdoc />
     /// <remarks>
-    /// ⚠ Читання з документа — тим самим правилом, що завантажувач (<see cref="Hse400CompositionSnapshotLoader"/>): явний
-    /// ключ <see cref="Hse400CompositionSnapshotLoader.EnabledKey"/> перекриває біт зв'язки. За <c>Any</c> — один дрібний
-    /// запит до зв'язки й нічого більше.
-    /// <para>
     /// ⛔ Шаблон документа за період — <c>d.TemplateId</c>, інакше шаблон версії проєкту за період (B74:
     /// <c>VersionOf</c>/<c>TemplateVersionOf</c>, не <c>Project.TemplateVersionId</c>). «Документ × період є» — екземпляр
     /// таблиці оригіналу аркуша (<c>SheetCopyId = null</c>) у цьому періоді.
+    /// <para>
+    /// ✎ B179 L2: шаблони дає граф залежностей (а не ручний <c>cfg.DocumentSourceBindingConsumer</c>), і стан-ворота тут
+    /// не перевіряється — його перевірив той, хто поставив задачу (хук завершення за <c>Any</c>, тригер затвердження за
+    /// <c>ApprovedOnly</c>).
     /// </para>
     /// </remarks>
-    public async Task<IReadOnlyList<RegistryImpactRow>> ListBoundConsumersForYearAsync(
-        int registryDefId, int year, CancellationToken ct)
+    public async Task<IReadOnlyList<RegistryImpactRow>> ListTemplateConsumersAsync(
+        IReadOnlyCollection<int> templateIds, int firstPeriod, int lastPeriod, int? month, CancellationToken ct)
     {
-        var binding = await db.DocumentSourceBindings.AsNoTracking()
-            .Where(b => b.RegistryDefId == registryDefId && b.MappingKind == DocumentSourceBinding.Hse400CompositionMapping)
-            .OrderBy(b => b.Id)
-            .Select(b => new { b.Id, b.SourceState, b.ReadFromDocument })
-            .FirstOrDefaultAsync(ct)
-            .ConfigureAwait(false);
-        if (binding is null
-            || binding.SourceState != DocumentSourceState.ApprovedOnly
-            || !(overrides?.ReadFromDocument ?? binding.ReadFromDocument))
+        ArgumentNullException.ThrowIfNull(templateIds);
+        if (templateIds.Count == 0)
         {
             return [];
         }
 
-        var consumers = await db.DocumentSourceBindingConsumers.AsNoTracking()
-            .Where(c => c.BindingId == binding.Id)
-            .Select(c => c.TemplateId)
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
-        if (consumers.Count == 0)
-        {
-            return [];
-        }
-
-        var firstPeriod = year * 100;
-        var lastPeriod = (year * 100) + 99;
+        var consumers = templateIds.Distinct().ToList();
         var rows = await (
                 from instance in db.TableInstances.AsNoTracking()
                 where instance.SheetCopyId == null
                       && instance.PeriodKeyValue >= firstPeriod && instance.PeriodKeyValue <= lastPeriod
                 join d in db.Documents.AsNoTracking() on instance.DocumentId equals d.Id
+                join project in db.Projects.AsNoTracking() on d.ProjectId equals project.Id
                 join period in db.Periods.AsNoTracking()
                     on new { d.ProjectId, PeriodKey = instance.PeriodKeyValue }
                     equals new { period.ProjectId, PeriodKey = period.PeriodKeyValue }
@@ -129,13 +111,16 @@ public sealed class RegistryImpactStore(EcrDbContext db, IDocumentSourceFlagOver
                     && v.Id == (d.TemplateId == null
                         ? EcrDbContext.VersionOf(d.ProjectId, instance.PeriodKeyValue)
                         : EcrDbContext.TemplateVersionOf(d.ProjectId, d.TemplateId.Value, instance.PeriodKeyValue)))
-                select new { d.Id, d.BusinessKey, d.ProjectId, PeriodKey = instance.PeriodKeyValue, period.State })
+                select new { d.Id, d.BusinessKey, d.ProjectId, PeriodKey = instance.PeriodKeyValue, period.State, project.PeriodKind })
             .Distinct()
             .OrderBy(r => r.Id).ThenBy(r => r.PeriodKey)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        return [.. rows.Select(r => new RegistryImpactRow(r.Id, r.BusinessKey, r.ProjectId, r.PeriodKey, r.State, string.Empty))];
+        // B179 L2: обсяг «місяць» — лише період, що володіє місяцем (те саме правило, що ворота затверджених місяців).
+        return [.. rows
+            .Where(r => month is not { } m || DocumentSourceGate.OwnedMonths(r.PeriodKind, r.PeriodKey % 100).Contains(m))
+            .Select(r => new RegistryImpactRow(r.Id, r.BusinessKey, r.ProjectId, r.PeriodKey, r.State, string.Empty))];
     }
 
     /// <summary>Спільне тіло вибірок: документи — з <paramref name="documents"/>.</summary>
