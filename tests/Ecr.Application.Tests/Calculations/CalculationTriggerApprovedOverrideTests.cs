@@ -68,6 +68,9 @@ public sealed class CalculationTriggerApprovedOverrideTests
             CalculationTrigger.DependentsTargetOf(DocumentId, Period), CalculationTrigger.DependentsApprovedTargetOf(DocumentId, Period));
     }
 
+    private static readonly System.Text.Json.JsonSerializerOptions RelaxedJson =
+        new(System.Text.Json.JsonSerializerOptions.Web) { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+
     [Fact]
     [Trait("Directive", "B80")]
     public async Task Payload_перекриття_несе_ознаку_автора_і_причину()
@@ -76,7 +79,7 @@ public sealed class CalculationTriggerApprovedOverrideTests
 
         await Trigger().RequestDependentsAsync(DocumentId, Period, sourceHop: 2, Override, CancellationToken.None);
 
-        var json = System.Text.Json.JsonSerializer.Serialize(_payload, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerOptions.Web) { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
+        var json = System.Text.Json.JsonSerializer.Serialize(_payload, RelaxedJson);
         Assert.Equal(
             $$"""{"documentId":{{DocumentId}},"periodKey":{{Period.Value}},"triggeredByUserId":null,"sheetDefId":null,"recalculateSubmitted":true,"sourceHop":2,"includeApproved":true,"overrideUserId":9,"overrideReason":"Акт 12"}""",
             json);
