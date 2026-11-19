@@ -582,7 +582,7 @@ public sealed partial class RecalculationJob(
                                 run.Id, profile, ct, carryOvers.GetValueOrDefault(period),
                                 async token =>
                                 {
-                                    await GuardCompletionAsync(projectId, period, guards, token).ConfigureAwait(false);
+                                    await GuardCompletionAsync(projectId, period, guards, request.IncludeApproved, token).ConfigureAwait(false);
 
                                     // ✎ B79: після воріт (стан аркушів уже під блокуванням) і ДО переносу й перемикання —
                                     // поки є з чим порівнювати.
@@ -1822,6 +1822,7 @@ public sealed partial class RecalculationJob(
     /// <param name="projectId">Проєкт.</param>
     /// <param name="period">Період прогону.</param>
     /// <param name="guards">Перераховані аркуші за документами.</param>
+    /// <param name="includeApproved">✎ B80 N5: явне перекриття адміністратора — затверджені аркуші скоупу не відмовляють.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <exception cref="ConcurrencyConflictException">
     /// <c>ECR-CALC-0409</c> <c>recalcStateChanged</c>: аркуш ЗАТВЕРДЖЕНО або період
@@ -1843,7 +1844,7 @@ public sealed partial class RecalculationJob(
     /// </para>
     /// </remarks>
     private async Task GuardCompletionAsync(
-        int projectId, int period, IReadOnlyList<SheetGuard> guards, CancellationToken ct)
+        int projectId, int period, IReadOnlyList<SheetGuard> guards, bool includeApproved, CancellationToken ct)
     {
         // ⛔ B69: архівація могла початися, поки прогін рахував, — перемикання в архівованому проєкті не відбувається.
         var project = await db.Projects
@@ -1910,8 +1911,9 @@ public sealed partial class RecalculationJob(
                         .ConfigureAwait(false) ?? Domain.Enums.DocumentStatus.Draft;
                 holdsAny = true;
 
-                // ✎ B79 (слово людини 16.11): поданий аркуш перемикає будь-який прогін, і нічний теж; затверджений — ніколи.
-                if (status is Domain.Enums.DocumentStatus.Approved)
+                // ✎ B79 (слово людини 16.11): поданий аркуш перемикає будь-який прогін, і нічний теж; затверджений — ніколи,
+                // ✎ B80 N5 (D-554): крім явного перекриття адміністратора (`IncludeApproved`) — аркуш у скоупі саме через нього.
+                if (status is Domain.Enums.DocumentStatus.Approved && !includeApproved)
                 {
                     throw StateChanged(guard.DocumentId, period, sheetDefId);
                 }
