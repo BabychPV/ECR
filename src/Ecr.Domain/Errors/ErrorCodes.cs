@@ -1007,4 +1007,15 @@ public static class ErrorCodes
     /// його значень без назви в запиті — не відмова (назва лишається як була; X-03).
     /// </remarks>
     public const string RegistryEntryNameRequired = "ECR-REG-4222";
+
+    /// <summary>
+    /// Документ цього шаблону в проєкті вже є (<c>ECR-DOC-4092</c>, B151/B165): шаблон дозволяє один документ на проєкт
+    /// (HSE400, HSE401), а <c>POST /documents</c> створив би другий. У деталях — <c>projectId</c>, <c>templateId</c> і,
+    /// лише коли наявний документ видно викликачу, <c>existingDocumentId</c>; суфікс ключа — <c>documentExistsForTemplate</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Окремий код, а не <see cref="DocumentSubmitted"/>: той каже «аркуш подано, потрібен Reopen», а тут Reopen нічого
+    /// не змінить — треба відкрити наявний документ (аудит F13). 409 — явним армом в <c>ExceptionHandlingMiddleware</c>.
+    /// </remarks>
+    public const string DocumentExistsForTemplate = "ECR-DOC-4092";
 }

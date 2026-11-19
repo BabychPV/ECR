@@ -107,10 +107,23 @@ public sealed partial class TemplateVersionStore
     /// Перевіряється лише коли патч зачепив <c>Ordinal</c> або <c>HeaderGroupId</c> колонок. Викидає 422 — транзакція
     /// обробника відкотить весь патч.
     /// </summary>
+    /// <remarks>
+    /// ⛔ B169: перевіряються лише ТАБЛИЦІ ЗАЧЕПЛЕНИХ КОЛОНОК. Правила групи — в межах однієї таблиці (групи й
+    /// колонки фільтруються за <c>TableDefId</c>), а патч змінює лише рядки своїх колонок, тож валідність незачепленої
+    /// таблиці від нього не залежить. Раніше тут читалися колонки ВСІХ таблиць версії (LAND_UI: ~90 таблиць,
+    /// ~25 тис. <c>ColumnDef</c> в IN-списку) на кожен виклик — під навантаженням це перевищувало CommandTimeout
+    /// 60 с і давало 503, а будівник YearMonths кличе патч на кожну таблицю/смугу місяців.
+    /// </remarks>
     private async Task EnsureHeaderGroupsValidAsync(
         int templateVersionId, IReadOnlyList<PresentationChange> changes, CancellationToken ct)
     {
-        if (!changes.Any(c => c.EntityType == "ColumnDef" && c.Field is "Ordinal" or "HeaderGroupId"))
+        var touchedColumnIds = changes
+            .Where(c => c.EntityType == "ColumnDef" && c.Field is "Ordinal" or "HeaderGroupId")
+            .Select(c => c.EntityId)
+            .Distinct()
+            .ToList();
+
+        if (touchedColumnIds.Count == 0)
         {
             return;
         }
@@ -118,6 +131,7 @@ public sealed partial class TemplateVersionStore
         var tables = await (from t in db.TableDefs.AsNoTracking()
                             join s in db.SheetDefs.AsNoTracking() on t.SheetDefId equals s.Id
                             where s.TemplateVersionId == templateVersionId && !t.IsDeleted
+                                  && db.ColumnDefs.Any(c => c.TableDefId == t.Id && touchedColumnIds.Contains(c.Id))
                             select new { t.Id, t.Code }).ToListAsync(ct).ConfigureAwait(false);
         var tableIds = tables.Select(t => t.Id).ToList();
 

@@ -220,7 +220,9 @@ public sealed class LandProdColumnMappingModelTests
         // + 12 колонок GTU-мостів (2026-10-13: T10_03 і T11_03 по 6 = Land_GTU_MonthNo + 5 Land_Measure_Component_*)
         // + 16 мостів K1 (2026-10-13, ARGUMENT_SUFFIXES: 14 суфіксованих `<аргумент>__<методологія>` + 2 звичайні OperatingTime
         //   на T9a_17/T9a_27, LandArgumentSuffixModelTests)
-        const int resultColumns = 571 + 44 + 44 + 179 + 12 + 12 + 16;
+        // + 3 B26 (P-0118-24/25, gen_ecr_model.py DECIDED_*): колонка статусу D-425 Land_Status T7b_00 (рішення людини, не
+        //   прод-розрив, тому не newColumns) + 2 мости Concentration/Volume
+        const int resultColumns = 571 + 44 + 44 + 179 + 12 + 12 + 16 + 3;
         Assert.Equal(55, model.RootElement.GetProperty("stats").GetProperty("columns").GetInt32() - 5147 - resultColumns);
     }
 

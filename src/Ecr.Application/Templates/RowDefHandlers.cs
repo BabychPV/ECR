@@ -40,7 +40,8 @@ public sealed class SaveRowDefHandler(
     IClock clock,
     IAccessDecisionService access,
     Common.ICurrentUser currentUser,
-    IStyleCatalog? styles = null)
+    IStyleCatalog? styles = null,
+    IRegistryStore? registries = null)
 {
     /// <summary>Право на редагування структури версії (`02-contracts.md` §9).</summary>
     public const string Permission = "Template.Edit";
@@ -132,6 +133,12 @@ public sealed class SaveRowDefHandler(
 
         var parentRowDefId = ResolveParent(table, code, command.ParentRowKey);
 
+        // ✎ B175: дефолти комірок рядка — лише в чернетці (EnsureStructurallyMutable вище) і лише придатні.
+        if (command.CellDefaults is { Count: > 0 } cellDefaults)
+        {
+            await ValidateCellDefaultsAsync(table, code, cellDefaults, registries, ct).ConfigureAwait(false);
+        }
+
         // ⛔ CELL-STYLE L2 (за зразком A1-04 у SaveColumnDefHandler): `StyleId` приходить з тіла запиту, а ключа
         // на `cfg.StyleDef` у рядка немає. Стиль ЧУЖОЇ версії (чи неіснуючий) записувався б мовчки: показ читав би
         // чужий вигляд, клон версії лишав би посилання порожнім. Лише при створенні або зміні стилю.
@@ -183,6 +190,7 @@ public sealed class SaveRowDefHandler(
                 existing.SetReadOnly(command.IsReadOnly);
                 existing.SetParent(parentRowDefId);
                 existing.SetStyle(command.StyleId);
+                existing.SetCellDefaults(command.CellDefaults);
 
                 table.AddRow(existing);
 
@@ -208,6 +216,12 @@ public sealed class SaveRowDefHandler(
                 if (command.Ordinal is { } ordinal)
                 {
                     existing.Reorder(ordinal);
+                }
+
+                // ✎ B175: як стиль — `null`/відсутній НЕ чіпає (клієнтський rowBody їх не несе); `{}` — прибрати.
+                if (command.CellDefaults is { } defaults)
+                {
+                    existing.SetCellDefaults(defaults);
                 }
             }
 
@@ -277,6 +291,79 @@ public sealed class SaveRowDefHandler(
         return parent.Id;
     }
 
+    /// <summary>
+    /// ✎ B175: дефолти комірок рядка — код живої колонки ЦІЄЇ таблиці, вхідної (не Formula/Calculated, не Unit),
+    /// значення придатне для типу (той самий розбір, що в <see cref="Recalculation.ColumnDefaultValues"/>), Lookup —
+    /// код наявного запису довідника колонки. <c>""</c> — «прибрати дефолт колонки», завжди дозволено.
+    /// </summary>
+    /// <exception cref="BusinessRuleException"><c>ECR-TMPL-0422</c> з окремим <c>messageKey</c> на кожен випадок.</exception>
+    internal static async Task ValidateCellDefaultsAsync(
+        TableDef table, string rowKey, IReadOnlyDictionary<string, string> defaults,
+        IRegistryStore? registries, CancellationToken ct)
+    {
+        foreach (var (columnCode, raw) in defaults)
+        {
+            var column = table.Columns.FirstOrDefault(
+                c => !c.IsDeleted && string.Equals(c.Code, columnCode, StringComparison.Ordinal))
+                ?? throw RowDefaultRejected(
+                    $"Дефолт рядка «{rowKey}»: колонки «{columnCode}» у таблиці {table.Code} немає.",
+                    "err.ECR-TMPL-0422.rowDefaultUnknownColumn", rowKey, columnCode, value: null);
+
+            if (column.IsComputed || column.DataType == CellDataType.Unit)
+            {
+                throw RowDefaultRejected(
+                    $"Дефолт рядка «{rowKey}»: колонка «{columnCode}» ({column.DataType}) не приймає значення за "
+                    + "замовчуванням — вона обчислювана або тримає одиницю виміру.",
+                    "err.ECR-TMPL-0422.rowDefaultColumnNotInput", rowKey, columnCode, value: null);
+            }
+
+            var text = (raw ?? string.Empty).Trim();
+            if (text.Length == 0)
+            {
+                continue;
+            }
+
+            if (column.DataType == CellDataType.Lookup)
+            {
+                var entries = column.LookupRegistryDefId is { } registry && registries is not null
+                    ? await registries.FindEntriesByCodesAsync(registry, [text], ct).ConfigureAwait(false) ?? []
+                    : [];
+                if (!entries.Any(e => !e.IsDeleted && string.Equals(e.Code.ToString(), text, StringComparison.Ordinal)))
+                {
+                    throw RowDefaultRejected(
+                        $"Дефолт рядка «{rowKey}»: у довіднику колонки «{columnCode}» немає запису з кодом «{text}».",
+                        "err.ECR-TMPL-0422.rowDefaultLookupCodeUnknown", rowKey, columnCode, text);
+                }
+
+                continue;
+            }
+
+            if (Recalculation.ColumnDefaultValues.Parse(column, text) is null)
+            {
+                throw RowDefaultRejected(
+                    $"Дефолт рядка «{rowKey}»: «{text}» не є значенням типу {column.DataType} колонки «{columnCode}».",
+                    "err.ECR-TMPL-0422.rowDefaultValueInvalid", rowKey, columnCode, text);
+            }
+        }
+    }
+
+    private static BusinessRuleException RowDefaultRejected(
+        string message, string messageKey, string rowKey, string columnCode, string? value)
+    {
+        var details = new Dictionary<string, object?>
+        {
+            ["messageKey"] = messageKey,
+            ["rowKey"] = rowKey,
+            ["columnCode"] = columnCode,
+        };
+        if (value is not null)
+        {
+            details["value"] = value;
+        }
+
+        return new BusinessRuleException(ErrorCodes.TemplateInvalid, message, details);
+    }
+
     /// <summary>Складає DTO рядка для відповіді.</summary>
     internal static RowDefDto Map(RowDef row, TableDef table)
     {
@@ -285,7 +372,8 @@ public sealed class SaveRowDefHandler(
             : null;
 
         return new RowDefDto(
-            row.Id, row.RowKeyValue, row.LabelL10n, row.Ordinal, row.RowKind, parentKey, row.IsReadOnly, row.StyleId);
+            row.Id, row.RowKeyValue, row.LabelL10n, row.Ordinal, row.RowKind, parentKey, row.IsReadOnly, row.StyleId,
+            row.CellDefaults.Count == 0 ? null : row.CellDefaults);
     }
 
     /// <summary>Стан рядка для аудиту.</summary>
@@ -307,6 +395,12 @@ public sealed class SaveRowDefHandler(
             state["StyleId"] = styleId;
         }
 
+        // ✎ B175: так само — лише коли задані.
+        if (row.CellDefaults.Count > 0)
+        {
+            state["CellDefaults"] = row.CellDefaults;
+        }
+
         return System.Text.Json.JsonSerializer.Serialize(state);
     }
 }
@@ -321,13 +415,19 @@ public sealed class SaveRowDefHandler(
 /// Стиль рядка (<c>cfg.StyleDef</c> цієї версії). <c>null</c>/відсутній — НЕ чіпати наявний стиль (на відміну від
 /// колонки); скинути — <c>PATCH …/presentation</c> з <c>RowDef.StyleId = null</c>.
 /// </param>
+/// <param name="CellDefaults">
+/// ✎ B175: значення комірок рядка за замовчуванням, код колонки → текст (Lookup — код запису довідника; <c>""</c> —
+/// прибрати дефолт колонки в цьому рядку). <c>null</c>/відсутній — НЕ чіпати наявні; <c>{}</c> — прибрати всі.
+/// Лише в чернетці; підставляються при читанні, у комірки не пишуться.
+/// </param>
 public sealed record SaveRowDefCommand(
     IReadOnlyDictionary<string, string> LabelL10n,
     int? Ordinal,
     RowKind RowKind,
     string? ParentRowKey,
     bool IsReadOnly,
-    int? StyleId = null);
+    int? StyleId = null,
+    IReadOnlyDictionary<string, string>? CellDefaults = null);
 
 /// <summary>Рядок у відповіді на запис/читання через цей обробник.</summary>
 /// <remarks>
@@ -343,7 +443,8 @@ public sealed record RowDefDto(
     RowKind RowKind,
     string? ParentRowKey,
     bool IsReadOnly,
-    int? StyleId = null);
+    int? StyleId = null,
+    IReadOnlyDictionary<string, string>? CellDefaults = null);
 
 /// <summary>
 /// Прибирає рядок із таблиці версії-чернетки — м'яко (<c>ФВ-7.6</c>).

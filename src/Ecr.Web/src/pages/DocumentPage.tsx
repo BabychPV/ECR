@@ -635,6 +635,12 @@ export function DocumentPage(): JSX.Element {
 
     return true;
   }, [documentId, navigate, periodKey, projectId]);
+  // ✎ B80 N4: «Відкрити HSE400» причини джерела — місяць документа-джерела, який назвав сервер.
+  const openSource = useCallback(
+    (sourceId: number, sourcePeriod: number) =>
+      void navigate(`/documents/${String(sourceId)}?periodKey=${String(sourcePeriod)}`),
+    [navigate],
+  );
 
   const projects = useQuery({
     queryKey: queryKeys.projects.all(),
@@ -1028,7 +1034,9 @@ export function DocumentPage(): JSX.Element {
       )}
 
       {/* ✎ B78: помилки формул (C-1, блокують подання) і рядки поза розрахунком — одна панель, рядок на причину. */}
-      {(unmatchedRows.formulaErrors.length > 0 || unmatchedRows.issues.length > 0) && (
+      {(unmatchedRows.formulaErrors.length > 0 ||
+        unmatchedRows.issues.length > 0 ||
+        (unmatchedRows.sourceIssues?.length ?? 0) > 0) && (
         <Suspense fallback={null}>
           <CalculationIssuesPanel
             userId={session.data?.userId}
@@ -1037,6 +1045,7 @@ export function DocumentPage(): JSX.Element {
             tables={tables.data ?? []}
             onOpenCell={openUnmatchedRow}
             onOpenHse400={openHse400}
+            onOpenSource={openSource}
             narrow={narrow}
           />
         </Suspense>

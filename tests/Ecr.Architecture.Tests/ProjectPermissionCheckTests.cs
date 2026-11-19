@@ -110,6 +110,12 @@ public sealed class ProjectPermissionCheckTests
         ["Ecr.Api.Security.RequirePermissionsBeforeBodyAttribute::OnAuthorizationAsync"] =
             "S1-04: фільтр виконує ДО читання тіла ті самі глобальні права, що й обробник; перелік кодів задає дія "
             + "атрибутом (Calculation.EditFormula/EditConstant — глобальні), обробник перевіряє їх повторно літералами.",
+        ["Ecr.Application.Workflow.ApprovalRouteScopeAccess::AuthorizeAsync"] =
+            "B155: коди — константи обробника маршруту області (ApprovalRouteScopePermissions): Template.Edit/Template.View "
+            + "і Security.ManageRoles — глобальні; Project.Manage іде в RequireProjectManageAsync (пара в проєкті).",
+        ["Ecr.Application.Workflow.ApprovalRouteScopeAccess::RequireProjectManageAsync"] =
+            "B155: Project.Manage параметром від обробника винятку проєкту; у тому самому методі — пара "
+            + "RequireInAnyProjectAsync + RequireIn(projectId) і грант Manage на проєкт, як у маршруті проєкту.",
     };
 
     /// <summary>
@@ -173,6 +179,12 @@ public sealed class ProjectPermissionCheckTests
                 "Ecr.Application.Projects.ListPeriodPoliciesHandler::HandleAsync",
                 "Ecr.Application.Projects.UpdatePeriodPolicyHandler::HandleAsync",
             ]),
+        (
+            "Project.Manage",
+            "B155 (C-7): перелік ролей для кроків маршруту (ідентифікатор, код, назва — без прав ролей) — каталог без "
+            + "проєкту; менеджер проєкту бачить його, щоб скласти виняток маршруту в СВОЄМУ проєкті (той перевіряє право "
+            + "в проєкті).",
+            ["Ecr.Application.Workflow.ListApproverRolesHandler::HandleAsync"]),
         (
             "Report.ViewRegulatory",
             "Перелік ОПИСІВ державних звітів спільний для всіх проєктів; зрізи — з проєктом.",

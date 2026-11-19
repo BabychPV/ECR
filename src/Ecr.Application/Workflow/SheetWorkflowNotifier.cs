@@ -167,6 +167,13 @@ public sealed partial class SheetWorkflowNotifier(
             step is null
                 ? await store.ApproverRoleHoldersAsync(ct).ConfigureAwait(false)
                 : await store.RoleHoldersAsync(step.RoleId, ct).ConfigureAwait(false));
+
+        // ✎ B155: крок маршруту шаблону задовольняє й загальний Approver — його носії теж кандидати (рішення нижче).
+        if (step?.AlternativeRoleId is { } alternative)
+        {
+            candidates.UnionWith(await store.RoleHoldersAsync(alternative, ct).ConfigureAwait(false));
+        }
+
         candidates.UnionWith(await store
             .ParticipantsAsync(documentId, facts.SheetCode, periodKey, [GrantLevel.Approve], ct)
             .ConfigureAwait(false));

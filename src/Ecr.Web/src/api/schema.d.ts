@@ -399,6 +399,162 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/approval-route/default": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Типовий маршрут майданчика (шаблони без власного маршруту). Право `Security.ManageRoles`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ScopedApprovalRouteDto"];
+                        "text/json": components["schemas"]["ScopedApprovalRouteDto"];
+                        "text/plain": components["schemas"]["ScopedApprovalRouteDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        /** Замінює типовий маршрут майданчика. Право `Security.ManageRoles`. */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["ReplaceApprovalRouteRequest"];
+                    "application/json": components["schemas"]["ReplaceApprovalRouteRequest"];
+                    "text/json": components["schemas"]["ReplaceApprovalRouteRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApprovalRouteChangeDto"];
+                        "text/json": components["schemas"]["ApprovalRouteChangeDto"];
+                        "text/plain": components["schemas"]["ApprovalRouteChangeDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/approval-route/default/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Скільки поданих аркушів зміна типового маршруту поверне на перший крок. Право `Security.ManageRoles`. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["ApprovalRoutePreviewRequest"];
+                    "application/json": components["schemas"]["ApprovalRoutePreviewRequest"];
+                    "text/json": components["schemas"]["ApprovalRoutePreviewRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApprovalRouteImpactDto"];
+                        "text/json": components["schemas"]["ApprovalRouteImpactDto"];
+                        "text/plain": components["schemas"]["ApprovalRouteImpactDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/audit/cells": {
         parameters: {
             query?: never;
@@ -17929,6 +18085,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{id}/template-routes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Шаблони проєкту (основний і приєднані) з маршрутом, що діє для кожного. Право `Project.Manage` у проєкті й
+         *     грант `Manage` на проєкт. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Проєкт. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProjectTemplateRouteDto"][];
+                        "text/json": components["schemas"]["ProjectTemplateRouteDto"][];
+                        "text/plain": components["schemas"]["ProjectTemplateRouteDto"][];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{id}/template-versions": {
         parameters: {
             query?: never;
@@ -17980,6 +18200,210 @@ export interface paths {
         };
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{id}/templates/{templateId}/approval-route": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Виняток проєкту для шаблону. Право `Project.Manage` у проєкті й грант `Manage` на проєкт. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Проєкт. */
+                    id: number;
+                    /** @description Шаблон. */
+                    templateId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ScopedApprovalRouteDto"];
+                        "text/json": components["schemas"]["ScopedApprovalRouteDto"];
+                        "text/plain": components["schemas"]["ScopedApprovalRouteDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        /** Замінює виняток проєкту для шаблону. Право `Project.Manage` у проєкті й грант `Manage` на проєкт. */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Проєкт. */
+                    id: number;
+                    /** @description Шаблон. */
+                    templateId: number;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["ReplaceApprovalRouteRequest"];
+                    "application/json": components["schemas"]["ReplaceApprovalRouteRequest"];
+                    "text/json": components["schemas"]["ReplaceApprovalRouteRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApprovalRouteChangeDto"];
+                        "text/json": components["schemas"]["ApprovalRouteChangeDto"];
+                        "text/plain": components["schemas"]["ApprovalRouteChangeDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{id}/templates/{templateId}/approval-route/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Скільки поданих аркушів зміна винятку поверне на перший крок. Право `Project.Manage`. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Проєкт. */
+                    id: number;
+                    /** @description Шаблон. */
+                    templateId: number;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["ApprovalRoutePreviewRequest"];
+                    "application/json": components["schemas"]["ApprovalRoutePreviewRequest"];
+                    "text/json": components["schemas"]["ApprovalRoutePreviewRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApprovalRouteImpactDto"];
+                        "text/json": components["schemas"]["ApprovalRouteImpactDto"];
+                        "text/plain": components["schemas"]["ApprovalRouteImpactDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -21323,6 +21747,56 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/roles/approvers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Ролі для кроків маршруту (ідентифікатор, код, назва). Право `Security.ManageRoles`, `Template.Edit` або
+         *     `Project.Manage`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApproverRoleDto"][];
+                        "text/json": components["schemas"]["ApproverRoleDto"][];
+                        "text/plain": components["schemas"]["ApproverRoleDto"][];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -27997,6 +28471,204 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/templates/{id}/approval-route": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Маршрут шаблону в усіх проєктах. Право `Template.Edit` або `Template.View`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Шаблон. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ScopedApprovalRouteDto"];
+                        "text/json": components["schemas"]["ScopedApprovalRouteDto"];
+                        "text/plain": components["schemas"]["ScopedApprovalRouteDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        /** Замінює маршрут шаблону в усіх проєктах. Право `Template.Edit`. */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Шаблон. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["ReplaceApprovalRouteRequest"];
+                    "application/json": components["schemas"]["ReplaceApprovalRouteRequest"];
+                    "text/json": components["schemas"]["ReplaceApprovalRouteRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApprovalRouteChangeDto"];
+                        "text/json": components["schemas"]["ApprovalRouteChangeDto"];
+                        "text/plain": components["schemas"]["ApprovalRouteChangeDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/templates/{id}/approval-route/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Скільки поданих аркушів зміна маршруту шаблону поверне на перший крок. Право `Template.Edit`. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Шаблон. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["ApprovalRoutePreviewRequest"];
+                    "application/json": components["schemas"]["ApprovalRoutePreviewRequest"];
+                    "text/json": components["schemas"]["ApprovalRoutePreviewRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApprovalRouteImpactDto"];
+                        "text/json": components["schemas"]["ApprovalRouteImpactDto"];
+                        "text/plain": components["schemas"]["ApprovalRouteImpactDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/templates/{id}/archive": {
         parameters: {
             query?: never;
@@ -30531,6 +31203,16 @@ export interface components {
             /** @description Код шаблону проєкту. */
             templateCode: string;
         };
+        /** @description ✎ B155: відповідь заміни маршруту області. */
+        ApprovalRouteChangeDto: {
+            /** @description Подані аркуші, що почали погодження з першого кроку. */
+            restarted: components["schemas"]["ApprovalRouteImpactDto"];
+            /**
+             * Format: int32
+             * @description Скільки кроків тепер у власному маршруті області (0 — прибрано).
+             */
+            steps: number;
+        };
         /** @description Маршрут погодження проєкту. */
         ApprovalRouteDto: {
             /** @description Чи налаштований власний маршрут. `false` — затвердження одноетапне:
@@ -30543,6 +31225,28 @@ export interface components {
             projectId: number;
             /** @description Кроки в порядку проходження. */
             steps: components["schemas"]["ApprovalStepDto"][];
+        };
+        /** @description ✎ B155 (C-8): подані аркуші, які зміна маршруту області поверне на перший крок. */
+        ApprovalRouteImpactDto: {
+            /** @description Видимі аркуші (не більше int ApprovalRouteImpact.MaxListed). */
+            sheets: components["schemas"]["RestartedSheetDto"][];
+            /**
+             * Format: int32
+             * @description Усього таких аркушів (у всіх проєктах, де маршрут області діє, крім проєктів із власним винятком).
+             */
+            total: number;
+            /** @description Видимих більше, ніж у Sheets. */
+            truncated: boolean;
+            /**
+             * Format: int32
+             * @description Скільки з них у проєктах, видимих викликачу.
+             */
+            visible: number;
+        };
+        /** @description ✎ B155: запит підрахунку перезапуску (C-8). */
+        ApprovalRoutePreviewRequest: {
+            /** @description Запропоновані ролі кроків; `null` — будь-яка зміна; рівні наявним — 0. */
+            roleIds: null | number[];
         };
         /** @description Крок маршруту. */
         ApprovalStepDto: {
@@ -30587,6 +31291,21 @@ export interface components {
              *             доступний. `false` — аркуш не поданий або черга не його (автор, погоджувач іншого кроку). Лише підказка
              *             інтерфейсу: запис перевіряє те саме правило під блокуванням аркуша. */
             canApproverEdit: boolean;
+        };
+        /** @description ✎ B155 (C-7): роль для вибору в кроці маршруту. */
+        ApproverRoleDto: {
+            /** @description Код. */
+            code: string;
+            /**
+             * Format: int32
+             * @description Роль.
+             */
+            id: number;
+            /** @description Вбудована. */
+            isBuiltIn: boolean;
+            /** @description Вбудована загальна роль `Approver`. */
+            isGeneralApprover: boolean;
+            nameL10n: null | components["schemas"]["LocalizedText"];
         };
         /** @description Тіло призначення ролі групі. */
         AssignGroupRoleRequest: {
@@ -30801,6 +31520,11 @@ export interface components {
             formulaErrors?: null | components["schemas"]["FormulaErrorIssueDto"][];
             /** @description Проблеми видимих читачеві таблиць; порожньо — проблем немає. */
             items: components["schemas"]["CalculationIssueDto"][];
+            /** @description ✎ B80 N4 (R3.2): проблеми документа-джерела (HSE400) для споживача зв'язки в стані `approvedOnly` — місяць
+             *     споживача не затверджено, а місяць джерела не затверджено; або місяць споживача затверджено, а джерело відтоді
+             *     змінилося. `null` — проблем немає, а також ЗАВЖДИ за стану зв'язки `any`, без споживача чи без
+             *     документа-джерела за рік. */
+            sourceIssues?: null | components["schemas"]["SourceIssueDto"][];
             /** @description Що приймають правила методологій кожної таблиці з проблемами (UAT 08.11 b3): колонки, які згадують правила, і
              *     допустимі комбінації значень. Таблиці немає — підказки немає (правил з колонками цієї таблиці немає, чинної версії
              *     немає або хоч одна колонка прихована від читача). */
@@ -36080,6 +36804,9 @@ export interface components {
             constants: components["schemas"]["MethodologyPackageConstantDto"][];
             /** @description Формули (усі версії формул AF). */
             formulas: components["schemas"]["MethodologyPackageFormulaDto"][];
+            /** @description Рівень версії: `Configuration` (за замовчуванням) або `Module` (методологія-модуль HSE400, яку рахує
+             *     `MonthColumnArgumentsModule`). Необов'язкове: пакет без поля читається як і раніше. */
+            level?: null | string;
             /** @description Номер версії в AF. */
             version: string;
         };
@@ -38934,6 +39661,26 @@ export interface components {
             /** @description Пояс майданчика — ідентифікатор IANA (`Asia/Atyrau`). */
             timeZoneId: string;
         };
+        /** @description ✎ B155 (C-5): шаблон проєкту і маршрут, що для нього діє в цьому проєкті. */
+        ProjectTemplateRouteDto: {
+            /** @description Код шаблону. */
+            code: string;
+            /** @description Звідки маршрут: `own` (виняток проєкту) | `template` | `project` | `default` | `none`. */
+            effectiveSource: string;
+            /** @description Кроки маршруту, що діє. */
+            effectiveSteps: components["schemas"]["ApprovalStepDto"][];
+            /** @description Діє маршрут шаблону: загальний `Approver` теж затверджує. */
+            generalApproverAlsoApproves: boolean;
+            /** @description Назва. */
+            nameL10n: components["schemas"]["LocalizedText"];
+            /**
+             * Format: int32
+             * @description Шаблон.
+             */
+            templateId: number;
+            /** @description Найновіша версія — без подання й затвердження (B75). */
+            workflowModeNone: boolean;
+        };
         /** @description Часова шкала версій шаблону проєкту: з якого періоду яка версія діє. */
         ProjectTemplateTimelineDto: {
             /**
@@ -40779,6 +41526,49 @@ export interface components {
          * @enum {unknown}
          */
         ResourceKind: "Project" | "Sheet" | "Table" | "Column" | "Registry";
+        /** @description ✎ B155: поданий аркуш, погодження якого почнеться (почалося) з першого кроку. */
+        RestartedSheetDto: {
+            /**
+             * Format: int16
+             * @description Номер у групі аркуша: 1 — оригінал, 2… — копії.
+             */
+            copyOrdinal?: null | number;
+            /** @description Код документа (`BusinessKey`). */
+            documentCode?: null | string;
+            /**
+             * Format: int64
+             * @description Документ.
+             */
+            documentId: number;
+            documentName?: null | components["schemas"]["LocalizedText"];
+            /**
+             * Format: int32
+             * @description Період.
+             */
+            periodKey: number;
+            /** @description Код проєкту; `null` — назви не прочитано (показ відступає до ідентифікатора). */
+            projectCode?: null | string;
+            /**
+             * Format: int32
+             * @description Проєкт.
+             */
+            projectId: number;
+            projectName?: null | components["schemas"]["LocalizedText"];
+            /** @description Код аркуша шаблону. */
+            sheetCode?: null | string;
+            /**
+             * Format: int64
+             * @description Копія (RS); `null` — оригінал.
+             */
+            sheetCopyId: null | number;
+            /**
+             * Format: int32
+             * @description Аркуш.
+             */
+            sheetDefId: number;
+            sheetDisplayName?: null | components["schemas"]["LocalizedText"];
+            sheetName?: null | components["schemas"]["LocalizedText"];
+        };
         /** @enum {unknown} */
         ResultsStaleUndeterminedReason: "PartiallyHidden" | null;
         /** @description Retire a node (soft: closes the validity window, never deletes). */
@@ -40985,6 +41775,9 @@ export interface components {
         };
         /** @description Рядок у відповіді на запис/читання через цей обробник. */
         RowDefDto: {
+            cellDefaults?: null | {
+                [key: string]: string;
+            };
             /** Format: int32 */
             id: number;
             isReadOnly: boolean;
@@ -41003,6 +41796,12 @@ export interface components {
              *                 `null` означає <b>явну порожнечу</b>, відсутній ключ — «не заповнювали» (R-B4). */
             cells: {
                 [key: string]: unknown;
+            };
+            /** @description ✎ B175: значення комірок рядка за замовчуванням (`RowDef.CellDefaults`), код колонки → сирий текст — той
+             *     самий формат, що `ColumnDto.DefaultValue` (Lookup — код запису). Перекриває дефолт колонки для
+             *     незаповненої комірки; `""` — дефолту колонки в цьому рядку немає. `null` — рядок без власних дефолтів. */
+            defaults?: null | {
+                [key: string]: string;
             };
             /**
              * @description Рядок посилається на запис реєстру, що втратив чинність (ФВ-8.13).
@@ -41802,6 +42601,11 @@ export interface components {
         };
         /** @description Налаштування рядка фіксованої таблиці чернетки (`W5.2`). */
         SaveRowDefRequest: {
+            /** @description ✎ B175: значення комірок рядка за замовчуванням, код колонки → текст (Lookup — код запису; `""` — прибрати
+             *     дефолт колонки). `null` — не чіпати наявні; `{}` — прибрати всі. */
+            cellDefaults?: null | {
+                [key: string]: string;
+            };
             /** @description Заборона ручного вводу. */
             isReadOnly: boolean;
             /** @description Підпис рядка мовами каталогу. */
@@ -41953,6 +42757,39 @@ export interface components {
             scope: number;
             /** @description Рівень: `Info`, `Warning`, `Error`. */
             severity: components["schemas"]["ValidationSeverity"];
+        };
+        /** @description ✎ B155: маршрут області з тим, що в ній діє. */
+        ScopedApprovalRouteDto: {
+            /** @description Чи може викликач змінити маршрут цієї області. */
+            canEdit: boolean;
+            /** @description Звідки маршрут, що діє: `own` | `template` | `project` | `default` | `none`
+             *     (ApprovalRouteSource). Для області «шаблон, усі проєкти» маршрути окремих проєктів не враховуються. */
+            effectiveSource: string;
+            /** @description Кроки маршруту, що діє (власного або успадкованого). */
+            effectiveSteps: components["schemas"]["ApprovalStepDto"][];
+            /** @description Маршрут, що діє, — маршрут ШАБЛОНУ: кожен його крок затверджує роль кроку АБО вбудований загальний `Approver`. */
+            generalApproverAlsoApproves: boolean;
+            /**
+             * Format: int32
+             * @description Вбудована загальна роль `Approver`; `null` — її немає.
+             */
+            generalApproverRoleId: null | number;
+            /** @description Чи є ВЛАСНИЙ маршрут області. */
+            hasRoute: boolean;
+            /**
+             * Format: int32
+             * @description Проєкт області; `null` — усі.
+             */
+            projectId: null | number;
+            /** @description Кроки власного маршруту (порожньо — його немає). */
+            steps: components["schemas"]["ApprovalStepDto"][];
+            /**
+             * Format: int32
+             * @description Шаблон області; `null` — усі.
+             */
+            templateId: null | number;
+            /** @description Найновіша версія шаблону області — без подання й затвердження (B75): маршрут не діє. */
+            workflowModeNone: boolean;
         };
         /** @description Діагностика скрипта в API (MS, план 5.4). */
         ScriptDiagnosticDto: {
@@ -43370,6 +44207,43 @@ export interface components {
          * @enum {unknown}
          */
         SourceEventVolumeMode: "None" | "EventAttribute" | "RowWindow";
+        /** @description ✎ B80 N4 (R3.2): проблема документа-джерела для місяця документа-споживача. */
+        SourceIssueDto: {
+            /**
+             * Format: date-time
+             * @description Коли затверджено місяць споживача (UTC, найраніший аркуш); `null` — не затверджено.
+             */
+            approvedAt: null | string;
+            /** @description `SourceMonthNotApproved` — місяць споживача не затверджено, а місяць джерела не затверджено (подання й
+             *             затвердження заблоковано, `sourceMonthNotApproved`); `SourceChangedAfterApproval` — місяць споживача
+             *             затверджено, а місяць джерела зараз не затверджено або затверджено пізніше за споживача (консервативно: і тоді,
+             *             коли числа ті самі). */
+            kind: string;
+            /**
+             * Format: int32
+             * @description Місяць (1–12) документа-споживача, який читає місяць джерела.
+             */
+            monthNumber: number;
+            /**
+             * Format: date-time
+             * @description Коли затверджено місяць джерела (UTC); `null` — зараз не затверджено або читач не може відкрити документ-джерело.
+             */
+            sourceApprovedAt: null | string;
+            /**
+             * Format: int64
+             * @description Документ-джерело; `null` — читач не може відкрити документ-джерело.
+             */
+            sourceDocumentId: null | number;
+            /** @description Бізнес-ключ документа-джерела; `null` — читач не може відкрити документ-джерело. */
+            sourceDocumentKey: null | string;
+            /**
+             * Format: int32
+             * @description Місяць документа-джерела `yyyyMM`.
+             */
+            sourcePeriodKey: number;
+            /** @description Код проєкту документа-джерела; `null` — читач не може відкрити документ-джерело. */
+            sourceProjectCode: null | string;
+        };
         /** @description Наслідок пробного читання одного значення мапінгу (ФВ-13.17). */
         SourcePathProbeResult: {
             /** @description `false` — шлях є в каталозі джерела, але в пробному вікні

@@ -43,6 +43,7 @@ public sealed class ColumnDefaultValueRecalculationTests
     private ColumnDef _qty = null!;
     private ColumnDef _factor = null!;
     private ColumnDef _out = null!;
+    private RowDef _r1 = null!;
 
     private static PeriodKey Key(int sequence) => PeriodKey.Create(Year, sequence);
 
@@ -176,6 +177,24 @@ public sealed class ColumnDefaultValueRecalculationTests
         Assert.False(set.HasUnresolvedLookup);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "B175")]
+    public async Task Дефолт_рядка_перекриває_дефолт_колонки_у_фоновому_перерахунку()
+    {
+        // ✎ B175: RecalculationService.LoadPeriodAsync бере OfRow (не Of) — R1 рахує 10 * 3, R2 — 10 * 1.5.
+        // Мутація: повернути `extras.Defaults.Of(table.TableDefId)` — R1 дає 15.
+        Arrange("[Qty] * [Factor]", "1.5");
+        _r1.SetCellDefaults(new Dictionary<string, string> { ["Factor"] = "3" });
+        Put(2, Row1, _qty, 10m);
+        Put(2, Row2, _qty, 10m);
+
+        await Service().RecalculateAllAsync(DocumentId, Key(2), CancellationToken.None);
+
+        Assert.Equal(30m, Single(Row1).Value.ValueNumeric);
+        Assert.Equal(15m, Single(Row2).Value.ValueNumeric);
+    }
+
     private CellRecord Single(long rowId) => Assert.Single(Applied(), c => c.Address.TableRowId == rowId);
 
     private IReadOnlyList<CellRecord> Applied()
@@ -222,7 +241,7 @@ public sealed class ColumnDefaultValueRecalculationTests
         _factor = builder.Column(_table, "Factor");
         _factor.SetPresentation(factorDefault, null, null);
         _out = builder.Column(_table, "Out", CellDataType.Formula);
-        builder.Row(_table, "R1", 1);
+        _r1 = builder.Row(_table, "R1", 1);
         builder.Row(_table, "R2", 2);
         var formula = builder.Formula(_table, expression, column: _out);
 

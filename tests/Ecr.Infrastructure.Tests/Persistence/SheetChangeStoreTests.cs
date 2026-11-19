@@ -115,15 +115,21 @@ public sealed class SheetChangeStoreTests(ITestOutputHelper output)
 
             // Розігрів і замір «нічого не змінилось» (стан 99 % опитувань).
             await store.ProbeAsync(doc.DocumentId, doc.PeriodKey.Value, [doc.TableDefId], marker, 50, CancellationToken.None);
-            const int runs = 10;
-            var watch = Stopwatch.StartNew();
+            // ✎ B171: МЕДІАНА 11 замірів, а не середнє — одна пауза спільного CI-раннера (GC, сусідній job) більше не
+            // зсуває оцінку (CI 44226131188: середнє 130.2 мс при одиницях мс локально).
+            const int runs = 11;
+            var samples = new double[runs];
+            var watch = new Stopwatch();
             for (var i = 0; i < runs; i++)
             {
+                watch.Restart();
                 var probe = await store.ProbeAsync(doc.DocumentId, doc.PeriodKey.Value, [doc.TableDefId], marker, 50, CancellationToken.None);
+                samples[i] = watch.Elapsed.TotalMilliseconds;
                 Assert.Empty(probe.Rows);
             }
 
-            var idleMs = watch.Elapsed.TotalMilliseconds / runs;
+            Array.Sort(samples);
+            var idleMs = samples[runs / 2];
             var idleReads = await ProbeReadsAsync(database.ConnectionString, doc.DocumentId, doc.PeriodKey.Value, doc.TableDefId, marker);
 
             // Шуму вчетверо більше — проба читає стільки ж (скану партиції періоду немає).
@@ -173,14 +179,18 @@ public sealed class SheetChangeStoreTests(ITestOutputHelper output)
             Assert.Equal(50, attribution.ForeignRowIds.Count);
             Assert.Equal(777, attribution.LastForeignUserId);
 
-            output.WriteLine($"{SheetRows} рядків аркуша + {NoiseRows} шуму: без змін {idleMs:F1} мс, {idleReads} логічних читань TableRow");
+            output.WriteLine($"{SheetRows} рядків аркуша + {NoiseRows} шуму: без змін медіана {idleMs:F1} мс (макс {samples[^1]:F1}), {idleReads} логічних читань TableRow");
             output.WriteLine($"шум ×4: {moreNoiseReads} логічних читань TableRow");
             output.WriteLine($"300 змінених рядків: проба + авторство {changedMs:F1} мс");
 
+            // ⛔ ДОКАЗ — структурний і детермінований: логічні читання (стеля 4 × рядків свого аркуша) і незалежність від
+            // чужих даних (шум ×4 вище, ±10 читань). Скан партиції періоду (FORCESCAN замість FORCESEEK) червонить обидва.
             Assert.True(idleReads <= MaxProbeReads, $"проба без змін: {idleReads} логічних читань, стеля {MaxProbeReads}");
 
-            // ⚠ Час — запас для спільного CI-раннера; на робочій машині ≈ одиниці мс (див. вивід), Land ≈ 2,7 мс.
-            Assert.True(idleMs <= 100, $"проба без змін {idleMs:F1} мс на {SheetRows} рядках");
+            // ⚠ Час — лише грубий сторож катастрофи (напр. блокування, повторні проходи), не доказ форми плану. Заміри
+            // B171 (18.11): локально під навантаженням медіана 165 мс (макс 343), CI 44226131188 середнє 130 мс; Land у
+            // роботі ≈ 2,7 мс. Межа 500 мс медіани — запас ×3 над локальним виміром; форму плану тримають читання вище.
+            Assert.True(idleMs <= 500, $"проба без змін: медіана {idleMs:F1} мс на {SheetRows} рядках");
         }
         finally
         {

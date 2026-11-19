@@ -4619,6 +4619,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-AUTH-0409` | 409 | небезпечний запит (`POST`/`PUT`/`PATCH`/`DELETE`) несе заголовок `X-Ecr-User` (id користувача з `/me`, якого бачила вкладка), а cookie сеансу належить іншому користувачу — у сусідній вкладці увійшов інший (AN-108 / S2-05, `sessionUserChanged`); відмова до обробника (`SessionUserMiddleware`), клієнт покидає сеанс вкладки, як після виходу. Без заголовка (скрипти, служби, старі клієнти) і на вході/виході — не перевіряється. Константа — `ErrorCodes.SessionUserMismatch` |
 | `ECR-REG-4094` | 409 | номер НАЕ вже зайнятий у своїй області (типи вузлів НАЕ, людина 03.11, Q3): `NaeCode` вузла SRC унікальний у межах (предок REGION, предок AREA), а де регіон без поділу On/Offshore — у межах REGION. Перевіряє upsert `POST /registries/{code}/entries` під блокуванням дерева; `messageKey` `naeCodeTaken` |
 | `ECR-REG-4222` | 422 | запис довідника без назви (D14 / AU-14, рішення координатора 19.10): ручний upsert `POST /registries/{code}/entries` створює запис без жодної непорожньої мови в `display` (немає мов, усі порожні чи з пробілів, або пласка мапа `{мова:текст}` замість `{"values":{…}}`) або правкою стирає всі мови наявної назви. Запис, що вже лежить без назви, правкою значень без назви в запиті не блокується. Константа — `ErrorCodes.RegistryEntryNameRequired`; `messageKey` `entryNameRequired` |
+| `ECR-DOC-4092` | 409 | B151/B165: `POST /documents` для шаблону «один документ на проєкт» (HSE400, HSE401), а документ цього шаблону в проєкті вже є. Окремий код, а не `ECR-DOC-0409` («подано, потрібен Reopen»): Reopen тут нічого не змінить, треба відкрити наявний документ (аудит F13). Константа — `ErrorCodes.DocumentExistsForTemplate`; `messageKey` `documentExistsForTemplate` |
 
 ### 7.1 Суфікси `messageKey` (`err.<код>.<суфікс>`) нових випадків
 
@@ -4734,6 +4735,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `err.ECR-REG-0422.naeSourceLevelChange` | 422 | вузол SRC дерева НАЕ змінює тип на інший (move `levelCode` або upsert): джерело, на яке дивляться дозволи, не стає групою — його закривають і заводять групу; деталі `entryCode`, `levelCode`. Зміна типу В SRC: збережений номер обов'язковий (`requiredFieldsMissing`) і вільний (`ECR-REG-4094`), регіон/район — похідні |
 | `err.ECR-REG-4222.entryNameRequired` | 422 | D14: у назві запису довідника немає жодної непорожньої мови (створення або правка, що стирає всі мови); деталі `registryCode`, `code` |
 | `err.ECR-TMPL-0409.presentationRevisionConflict` | 409 | `PATCH …/presentation?expectedPresentationRevision=N`: ревізія вигляду версії вже не `N` (правка з іншої вкладки, `PUT …/header-groups`); нічого не змінено; деталі `expectedRevision` (від клієнта), `actualRevision` (поточна). Той самий ключ дає й `TemplateVersion.ApplyPresentationRevision` |
+| `err.ECR-DOC-4092.documentExistsForTemplate` | 409 | B151/B165: документ шаблону «один документ на проєкт» у проєкті вже є; нового не створено; деталі `projectId`, `templateId` і `existingDocumentId` — лише коли наявний документ видно викликачу. До B165 відмова їхала з кодом `ECR-DOC-0409` (той самий суфікс; старий ключ прибрано з сіду) |
 
 ---
 
@@ -4893,6 +4895,16 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PUT` | `/api/v1/projects/period-policies/{id}` | `Project.Manage` | 8 |
 | `GET` | `/api/v1/projects/{id}/approval-route` | `Project.Manage` | 3 |
 | `PUT` | `/api/v1/projects/{id}/approval-route` | `Project.Manage` | 3 |
+| `GET` | `/api/v1/projects/{id}/templates/{templateId}/approval-route` | `Project.Manage` | 3 |
+| `PUT` | `/api/v1/projects/{id}/templates/{templateId}/approval-route` | `Project.Manage` | 3 |
+| `POST` | `/api/v1/projects/{id}/templates/{templateId}/approval-route/preview` | `Project.Manage` | 3 |
+| `GET` | `/api/v1/projects/{id}/template-routes` | `Project.Manage` | 3 |
+| `GET` | `/api/v1/templates/{id}/approval-route` | `Template.Edit` або `Template.View` | 3 |
+| `PUT` | `/api/v1/templates/{id}/approval-route` | `Template.Edit` | 3 |
+| `POST` | `/api/v1/templates/{id}/approval-route/preview` | `Template.Edit` | 3 |
+| `GET` | `/api/v1/approval-route/default` | `Security.ManageRoles` | 3 |
+| `PUT` | `/api/v1/approval-route/default` | `Security.ManageRoles` | 3 |
+| `POST` | `/api/v1/approval-route/default/preview` | `Security.ManageRoles` | 3 |
 | `GET` | `/api/v1/projects/{id}/document-template` | `Document.Create` | 4 |
 | `POST` | `/api/v1/projects/{id}/activate` | `Project.Manage` | 1 |
 | `POST` | `/api/v1/projects/{id}/archive` | `Project.Manage` | 1 |
@@ -5064,6 +5076,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/expressions/validate` | `Calculation.View` | 4 |
 | `GET` | `/api/v1/expressions/metadata` | `Calculation.View` | 4 |
 | `GET` | `/api/v1/roles` | `Security.ManageRoles` | 3 |
+| `GET` | `/api/v1/roles/approvers` | `Security.ManageRoles`, `Template.Edit` або `Project.Manage` | 3 |
 | `GET` | `/api/v1/permissions` | `Security.ManageRoles` | 3 |
 | `POST` | `/api/v1/roles` | `Security.ManageRoles` | 3 |
 | `GET` | `/api/v1/users` | `Security.ManageUsers` | 3 |
@@ -6623,3 +6636,58 @@ public sealed record RowDto(
   дані). `hse400CompositionSource` = `Binding`, коли ключ не задано, а значення дав біт зв'язки.
 - Порти: `IDocumentSourceBindingStore` (перелік, `UPDLOCK` зв'язки, обраний документ-джерело року з періодичністю проєкту й режимом погодження, роки джерела) і `IDocumentSourceFlagOverrides` (явні значення двох ключів або `null`).
 - Помилки — наявні коди (`ECR-CALC-0404/0409`, `ECR-REQ-0422`) з новими `messageKey`; §7 не змінюється.
+- ✎ B80 N2a — порт `ISourceApprovalChangeTrigger` (без нових ендпоінтів і полів): остаточне затвердження аркуша-джерела
+  × періоду (`ApproveSheetHandler`), повернення з `Approved` (`ReopenDocumentHandler`) і видалення документа-джерела
+  (`DeleteDocumentHandler`; роки читаються до видалення) ПІСЛЯ коміту ставлять ту саму злиту задачу
+  `IRegistryImpactRecalculationJob` на рік — лише коли зв'язка на `approvedOnly` і біт `recalculateDependents` (або ключ)
+  увімкнено; лише оригінал аркуша; збій постановки — лише в журнал. Хук завершення перерахунку HSE400 за `approvedOnly`
+  мовчить, за `any` — як доти.
+- ✎ B80 N2b — порт `ISourceMonthApprovalGate` (без нових ендпоінтів, полів і кодів): `POST /documents/{id}/submit` і
+  `POST /documents/{id}/approve` (`approved: true`, будь-який крок маршруту, і оригінал, і копія аркуша) відмовляють
+  422 `ECR-SUB-4221` з `messageKey` **`err.ECR-SUB-4221.sourceMonthNotApproved`** (деталі `sourceDocumentId`,
+  `sourcePeriodKey` `yyyyMM`, `sourceProjectCode`, `sourceDocumentKey`), коли водночас: шаблон документа є споживачем
+  зв'язки на `approvedOnly` і читання з документа діє (біт `readFromDocument` або ключ); документ-джерело року є (той
+  самий вибір, що в завантажувачі); місяць джерела, яким володіє період аркуша (річний якір — кожен із 12), не має
+  `Approved` на оригіналі аркуша. За `any`, без зв'язки, без документа-джерела року — як доти (один запит зв'язки).
+  Відхилення, відкликання і повернення в роботу не блокуються.
+- ✎ B80 N4 (R3.2) — `GET /documents/{id}/calculation-issues` (і `?year=true`): нове необов'язкове поле
+  **`sourceIssues`** (`SourceIssueDto[] | null`, лише додаванням) у `CalculationIssuesDto`. Запис: `kind`, `monthNumber`
+  (місяць споживача 1–12), `sourcePeriodKey` (`yyyyMM`), `sourceDocumentId`, `sourceProjectCode`, `sourceDocumentKey`,
+  `sourceApprovedAt`, `approvedAt` (UTC). Види: **`SourceMonthNotApproved`** — період споживача не затверджено, а місяць
+  джерела не затверджено (те саме правило, що відмова `sourceMonthNotApproved` N2b); **`SourceChangedAfterApproval`** —
+  період споживача затверджено, а місяць джерела зараз не `Approved` або його `ApprovedAt` пізніший за `ApprovedAt`
+  споживача (консервативно: і за тих самих чисел). Період споживача «затверджено» — стани оригіналів УСІХ його аркушів є
+  і всі `Approved`; `approvedAt` — найраніший із них; копії аркушів не враховуються; `sheetCopyId` запиту на поле не
+  впливає. Річний режим — місяці року разом. Лише коли шаблон документа є споживачем зв'язки на `approvedOnly`, читання
+  з документа діє і документ-джерело року є; інакше поле **`null`** (за `any` — один дрібний запит зв'язок і нічого
+  більше). `null` — і коли проблем немає. Документ-джерело, якого читач не може відкрити (`CanReadDocumentAsync`, та сама
+  видимість, що 404 читань документа), не називається: `sourceDocumentId`, `sourceProjectCode`, `sourceDocumentKey` і
+  `sourceApprovedAt` — `null`; вид і місяці лишаються (D-6). Порт `ISourceIssueReader` (реалізація — та сама
+  `DocumentSourceMonthGate`).
+- ✎ B80 N4 — правило нічної перевірки узгодженості **`STALE_APPROVED_DEPENDENT`** (вага 2, сутність
+  `wf.ApprovalState`, `EntityId` — найменший id стану оригіналу аркуша документа × періоду, `PeriodKey` — період
+  споживача): одна знахідка на документ-споживач × затверджений період у випадку `SourceChangedAfterApproval`; конверт
+  `consistency.finding.STALE_APPROVED_DEPENDENT` з підстановками `documentId`, `periodKey`, `sourceDocumentId`,
+  `sourcePeriodKey`, `reason` (`notApproved` | `reapproved`). Лише для зв'язок на `approvedOnly` з читанням з документа
+  (явний ключ `Calculations:Hse400CompositionFromDocument` перекриває біт); за `any` знахідок немає, а старі знахідки
+  правила закриваються (прохід повний). Тексти en/ru/kz — сід `B80-stale-approved-dependent.sql`; переклад на клієнті —
+  N6.
+
+## ✎ 2026-11-18 B179 L1: граф залежностей документів (без ендпоінтів, міграцій і сіду)
+
+Рішення людини P-0118-33 (дизайн B179 §2–§4, §7–§9). Лише читання того, що вже пише публікація; поведінка продукту не
+змінюється (споживач — L2+).
+
+- **Порт `IDependencyGraphProvider`** (`GetAsync` → `DependencyGraphSnapshot`): вузли шаблон/довідник/методологія;
+  ребра `Fills` (`cfg.DocumentSourceBinding`), `TemplateFormula` (`cfg.FormulaDependency` вид 2 без таблиці, `RowKey` =
+  код довідника; `REGFIELD([Lookup])` — довідник колонки; версія без жодного такого ребра — AST усіх формул),
+  `Methodology` (`cfg.RegistryUse` вид 1, опубліковані версії), `WritesInto` (`cfg.CalculationBinding`),
+  `RegistryRule` (`cfg.RegistryUse` вид 2) з доказами; згорнуті ребра «шаблон-джерело → шаблон-споживач» з
+  обсягом за періодом; рівні Кана над конденсацією і цикли (СЗК) — лише як зауваження. Версії шаблонів —
+  опубліковані плюс ті, що діють за незакритим періодом документа. `cfg.DocumentSourceBindingConsumer` граф не читає.
+  Кеш — `IMemoryCache` під ключем ревізії вхідних даних (вікно ревізії 5 с, стеля 30 хв), без явної інвалідації.
+- **Порт `IMethodologyRegistryEdges`**: єдиний читач таблиць методологій для графа (ревізія, читання довідників
+  опублікованими версіями з виразом формули, активні прив'язки); сторож `DependencyGraphMethodologyReadGuardTests`.
+- **`PeriodScope`** (`Ecr.Expressions`, `RegistryReadScopes`): `REGFIND` з ключами `[Period].Year` + `[Period].Sequence`
+  → `Month`; `[Period].Year` + літерал 1…12 (річна розкладка D-474) → `Year` з маскою місяця; лише рік → `Year`;
+  інакше → `All`. Області рядка — рівності `ROW.f = [Period].*` у ланцюжку `AND`.

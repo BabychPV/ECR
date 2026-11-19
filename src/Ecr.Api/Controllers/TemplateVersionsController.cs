@@ -882,7 +882,7 @@ public sealed class TemplateVersionsController(
                 code,
                 new SaveRowDefCommand(
                     request.LabelL10n, request.Ordinal, request.RowKind,
-                    request.ParentRowKey, request.IsReadOnly, request.StyleId),
+                    request.ParentRowKey, request.IsReadOnly, request.StyleId, request.CellDefaults),
                 ct)
             .ConfigureAwait(false));
     }
@@ -1354,13 +1354,18 @@ public sealed record SaveStyleDefRequest(
 /// <param name="ParentRowKey">Ключ батьківського рядка в тій самій таблиці; <c>null</c> — корінь.</param>
 /// <param name="IsReadOnly">Заборона ручного вводу.</param>
 /// <param name="StyleId">Стиль рядка (<c>cfg.StyleDef</c> цієї версії); <c>null</c> — без стилю.</param>
+/// <param name="CellDefaults">
+/// ✎ B175: значення комірок рядка за замовчуванням, код колонки → текст (Lookup — код запису; <c>""</c> — прибрати
+/// дефолт колонки). <c>null</c> — не чіпати наявні; <c>{}</c> — прибрати всі.
+/// </param>
 public sealed record SaveRowDefRequest(
     IReadOnlyDictionary<string, string> LabelL10n,
     int? Ordinal,
     Ecr.Domain.Enums.RowKind RowKind,
     string? ParentRowKey,
     bool IsReadOnly,
-    int? StyleId = null);
+    int? StyleId = null,
+    IReadOnlyDictionary<string, string>? CellDefaults = null);
 
 /// <summary>Налаштування формули чернетки (<c>W5.3</c>).</summary>
 /// <param name="Dialect">Діалект, за яким читається вираз.</param>

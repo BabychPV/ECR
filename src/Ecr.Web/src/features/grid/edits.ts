@@ -4,6 +4,7 @@ import { parseNumber } from './clipboard';
 import { decide } from './permissions';
 import { columnIndexOf, rowIndexOf } from './rowIndex';
 import { decimalTextOf } from './rounding';
+import { effectiveDefault } from './rowDefaults';
 import type { CellEdit } from './undo';
 import type { PendingEdit } from './useCellPatch';
 
@@ -89,7 +90,10 @@ export function captureEdit(
   // AN-39/L8-15 (Q10=A / D-283): `defaultValue` порожньої комірки лише ПОКАЗУЄТЬСЯ. Клік повз
   // редактор без вводу повертає в `afteredit` саме його - це не введення. Явний ввід
   // (`untouched` не виставлено) пишеться навіть рівним default.
-  if (signal.untouched === true && echoesDefault(column, before, after)) return null;
+  // ✎ B175: показаний default — рядка, якщо він є (`effectiveDefault`), інакше колонки.
+  if (signal.untouched === true && echoesDefault(column.dataType, effectiveDefault(row, column), before, after)) {
+    return null;
+  }
 
   return {
     pending: {
@@ -106,17 +110,13 @@ export function captureEdit(
   };
 }
 
-/** Збережено «порожньо», а введене дорівнює `defaultValue` колонки (його лише показують). */
-function echoesDefault(
-  column: { dataType: string; defaultValue?: unknown },
-  before: unknown,
-  after: unknown,
-): boolean {
-  if (before !== null || column.defaultValue === null || column.defaultValue === undefined) return false;
+/** Збережено «порожньо», а введене дорівнює показаному default (рядка або колонки — його лише показують). */
+function echoesDefault(dataType: string, shownDefault: unknown, before: unknown, after: unknown): boolean {
+  if (before !== null || shownDefault === null || shownDefault === undefined) return false;
 
-  const fallback = coerce(String(column.defaultValue), column.dataType);
+  const fallback = coerce(String(shownDefault), dataType);
 
-  return sameColumnValue(column.dataType, after, fallback);
+  return sameColumnValue(dataType, after, fallback);
 }
 
 /**

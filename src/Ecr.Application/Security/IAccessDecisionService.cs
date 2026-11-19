@@ -15,12 +15,17 @@ namespace Ecr.Application.Security;
 /// <param name="RoleId">Роль, яка затверджує на цьому кроці.</param>
 /// <param name="NextStepId">Наступний крок; <c>null</c> — цей останній.</param>
 /// <param name="TotalSteps">Скільки кроків у маршруті — для підпису «крок 2 з 3».</param>
+/// <param name="AlternativeRoleId">
+/// ✎ B155: роль, що теж задовольняє крок, — вбудований загальний <c>Approver</c> на кроці маршруту ШАБЛОНУ;
+/// <c>null</c> — лише <paramref name="RoleId"/>.
+/// </param>
 public sealed record ApprovalStepView(
-    int StepId, int Ordinal, int RoleId, int? NextStepId, int TotalSteps);
+    int StepId, int Ordinal, int RoleId, int? NextStepId, int TotalSteps, int? AlternativeRoleId = null);
 
 /// <summary>Роль поточного кроку, відома викликачу наперед (AN-59): маршрут не читається вдруге.</summary>
 /// <param name="RoleId">Роль кроку; <c>null</c> — маршруту немає, затвердження одноетапне.</param>
-public sealed record KnownStepRole(int? RoleId);
+/// <param name="AlternativeRoleId">✎ B155: альтернативна роль кроку (див. <see cref="ApprovalStepView"/>).</param>
+public sealed record KnownStepRole(int? RoleId, int? AlternativeRoleId = null);
 
 /// <summary>Доступ до рядка, якого ще немає.</summary>
 /// <param name="Row">

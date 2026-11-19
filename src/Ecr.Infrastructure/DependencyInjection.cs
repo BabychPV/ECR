@@ -174,6 +174,13 @@ public static class DependencyInjection
         services.AddScoped<Application.RegistryImport.IReferenceResolver, Application.Permits.AirLimits.SubstanceReferenceResolver>();
         services.AddScoped<IRegistryUseStore, RegistryUseStore>(); // RT-23b
         services.AddScoped<IRegistryImpactStore, RegistryImpactStore>(); // RT-25
+        services.AddScoped<IMethodologyRegistryEdges, DocumentDependencies.MethodologyRegistryEdges>(); // B179 L1: єдиний читач методологій графа
+        services.AddScoped<IDependencyGraphProvider>(sp => new DocumentDependencies.DependencyGraphProvider(
+            sp.GetRequiredService<EcrDbContext>(),
+            sp.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>(),
+            sp.GetRequiredService<IFormulaEngine>(),
+            sp.GetRequiredService<IMethodologyRegistryEdges>(),
+            sp.GetRequiredService<CacheLifetimes>())); // B179 L1
         services.AddSingleton(new Application.Registries.Nae.NaeTreeSettings(
             configuration["AirLimits:NaeRegistryCode"] is { Length: > 0 } naeTree ? naeTree : Application.Registries.Nae.NaeTreeSettings.Default.RegistryCode,
             configuration["NaeTree:RegionSourceRegistryCode"] is { Length: > 0 } regions ? regions : Application.Registries.Nae.NaeTreeSettings.Default.RegionSourceRegistryCode));
@@ -447,6 +454,9 @@ public static class DependencyInjection
         services.AddSingleton<Jobs.RecalculationBudgetMonitor>();
         services.AddScoped<IRecalculationJob, Jobs.RecalculationJob>();
         services.AddScoped<Jobs.IRecalculationCompletionHook>(sp => Jobs.Hse400LandDependentsTrigger.Create(sp, configuration)); // HSE400 3b; B80: ключі — перекриття бітів зв'язки
+        services.AddScoped<ISourceApprovalChangeTrigger>(sp => Jobs.Hse400SourceApprovalTrigger.Create(sp, configuration)); // B80 N2a: Approve/Reopen/видалення джерела за ApprovedOnly
+        services.AddScoped<ISourceMonthApprovalGate>(sp => DocumentSourceMonthGate.Create(sp, configuration)); // B80 N2b: Submit/Approve споживача — лише з затвердженим місяцем джерела
+        services.AddScoped<ISourceIssueReader>(sp => DocumentSourceMonthGate.Create(sp, configuration)); // B80 N4: проблеми джерела в панелі проблем розрахунку
         services.AddScoped<IFormulaRecalculationJob, Jobs.FormulaRecalculationJob>();
         // WW-03: постановка перерахунку в періоди-читачі (міжперіодні посилання).
         services.AddScoped<Jobs.CrossPeriodFanOut>();

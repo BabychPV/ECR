@@ -166,6 +166,51 @@ public sealed class DocumentTemplateForProjectTests(SqlServerFixture sql)
         Assert.Equal("ECR-TMPL-0409", JsonDocument.Parse(body).RootElement.GetProperty("errorCode").GetString());
     }
 
+    /// <summary>
+    /// B151/B165(1): шаблон «один документ на проєкт», документ цього шаблону в проєкті вже є — <c>POST /documents</c>
+    /// дає 409 з ВЛАСНИМ кодом <c>ECR-DOC-4092</c> (а не <c>ECR-DOC-0409</c> «подано, потрібен Reopen»), ключем
+    /// <c>documentExistsForTemplate</c> і номером наявного документа (викликач його бачить).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Мутація: повернути <c>ErrorCodes.DocumentSubmitted</c> у <c>CreateDocumentHandler.SingleDocumentConflictAsync</c> —
+    /// червоний (код <c>ECR-DOC-0409</c>). Статус 409 тримає й явний арм <c>ExceptionHandlingMiddleware</c>, й правило
+    /// суфікса <c>-409N</c> (сторож <c>ErrorContractTests</c>), тож прибраний арм сам по собі червоним не стає.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "B165")]
+    public async Task Шаблон_один_документ_на_проєкт_другий_POST_409_ECR_DOC_4092()
+    {
+        var s = await ArrangeAsync(OperatorPermissions, deny: false).ConfigureAwait(true);
+
+        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            await Microsoft.EntityFrameworkCore.RelationalDatabaseFacadeExtensions.ExecuteSqlInterpolatedAsync(
+                db.Database,
+                $"UPDATE doc.Document SET TemplateId = {s.Document.TemplateId} WHERE Id = {s.Document.DocumentId}").ConfigureAwait(true);
+            await Microsoft.EntityFrameworkCore.RelationalDatabaseFacadeExtensions.ExecuteSqlInterpolatedAsync(
+                db.Database,
+                $"UPDATE cfg.Template SET SingleDocumentPerProject = 1 WHERE Id = {s.Document.TemplateId}").ConfigureAwait(true);
+        }
+
+        using var app = new EcrApiFactory(sql);
+        var client = await SignInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var create = await client.PostAsJsonAsync(
+            new Uri("/api/v1/documents", UriKind.Relative),
+            new { projectId = s.Document.ProjectId, sheetDefIds = new[] { s.Document.SheetDefId } }).ConfigureAwait(true);
+        var text = await create.Content.ReadAsStringAsync().ConfigureAwait(true);
+
+        Assert.True(create.StatusCode == HttpStatusCode.Conflict, $"{create.StatusCode}: {text}\n{app.ErrorsText}");
+        var body = JsonDocument.Parse(text).RootElement;
+        Assert.Equal("ECR-DOC-4092", body.GetProperty("errorCode").GetString());
+        Assert.Equal("err.ECR-DOC-4092.documentExistsForTemplate", body.GetProperty("messageKey").GetString());
+        Assert.Equal(
+            s.Document.DocumentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            body.GetProperty("existingDocumentId").GetString());
+    }
+
     private static async Task<HttpClient> SignInAsync(EcrApiFactory app, string userName)
     {
         var client = app.CreateClient();

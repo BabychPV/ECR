@@ -61,10 +61,21 @@ public sealed class DocumentSourceBindingStore(EcrDbContext db) : IDocumentSourc
 
     /// <inheritdoc />
     public async Task<SourceDocumentFacts?> ChosenSourceDocumentAsync(int bindingId, int year, CancellationToken ct)
+        => await ChosenSourceDocumentAsync(await BoundTableIdsAsync(bindingId, ct).ConfigureAwait(false), year, ct)
+            .ConfigureAwait(false);
+
+    /// <summary>
+    /// ✎ B80 N2b: той самий вибір документа за вже прочитаними таблицями зв'язки (<see cref="BoundTableIdsAsync"/>) —
+    /// для воріт подання й затвердження споживача (<see cref="DocumentSourceMonthGate"/>).
+    /// </summary>
+    /// <param name="tableIds">Таблиці зв'язки.</param>
+    /// <param name="year">Рік.</param>
+    /// <param name="ct">Токен скасування.</param>
+    internal async Task<SourceDocumentFacts?> ChosenSourceDocumentAsync(
+        IReadOnlyCollection<int> tableIds, int year, CancellationToken ct)
     {
         var yearStart = year * 100;
         var yearEnd = (year + 1) * 100;
-        var tableIds = await BoundTableIdsAsync(bindingId, ct).ConfigureAwait(false);
         if (tableIds.Count == 0)
         {
             return null;
@@ -124,7 +135,10 @@ public sealed class DocumentSourceBindingStore(EcrDbContext db) : IDocumentSourc
     /// <inheritdoc />
     public Task SaveAsync(CancellationToken ct) => db.SaveChangesAsync(ct);
 
-    private async Task<List<int>> BoundTableIdsAsync(int bindingId, CancellationToken ct)
+    /// <summary>Таблиці зв'язки: таблиці шаблону-джерела (усі версії), чий код — потік складу HSE400.</summary>
+    /// <param name="bindingId">Зв'язка.</param>
+    /// <param name="ct">Токен скасування.</param>
+    internal async Task<List<int>> BoundTableIdsAsync(int bindingId, CancellationToken ct)
     {
         var tables = await (
                 from b in db.DocumentSourceBindings.AsNoTracking()

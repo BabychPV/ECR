@@ -2,6 +2,7 @@
 using System.Globalization;
 using Ecr.Application.Ports;
 using Ecr.Application.Registries;
+using Ecr.Domain.Entities.Configuration;
 using Ecr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -43,7 +44,8 @@ public interface IRecalculationCompletionHook
 /// <para>
 /// ✎ B80 (N1): <c>enabled</c> — перекриття ключем <see cref="EnabledKey"/>, заданим явно; <c>null</c> — вирішує
 /// біт зв'язки <c>RecalculateDependents</c>. Читання складу (<c>readOverride</c>, ключ завантажувача) — так само:
-/// явний ключ, інакше біт <c>ReadFromDocument</c>. Хук вимикається в N2 (тригер — Approve/Reopen джерела).
+/// явний ключ, інакше біт <c>ReadFromDocument</c>. ✎ N2a: за <c>ApprovedOnly</c> хук мовчить (тригер —
+/// <see cref="Hse400SourceApprovalTrigger"/>); за <c>Any</c> і без зв'язки — як доти.
 /// </para>
 /// </remarks>
 public sealed partial class Hse400LandDependentsTrigger(
@@ -94,17 +96,22 @@ public sealed partial class Hse400LandDependentsTrigger(
             return;
         }
 
-        if (enabled is null || readOverride is null)
+        try
         {
             var binding = await DocumentSourceGate.FindBindingAsync(db, templateCode, registryCode, ct).ConfigureAwait(false);
+
+            // ✎ B80 (N2a): за ApprovedOnly Land читає лише затверджені місяці, а затверджений аркуш перерахунком не
+            // змінюється — тригер там Approve/Reopen/видалення джерела (Hse400SourceApprovalTrigger). За Any — як доти.
+            if (binding?.SourceState == DocumentSourceState.ApprovedOnly)
+            {
+                return;
+            }
+
             if (!(enabled ?? binding?.RecalculateDependents ?? false) || !(readOverride ?? binding?.ReadFromDocument ?? false))
             {
                 return;
             }
-        }
 
-        try
-        {
             var years = await Hse400YearsAsync(periodsByDocument, ct).ConfigureAwait(false);
             if (years.Count == 0)
             {

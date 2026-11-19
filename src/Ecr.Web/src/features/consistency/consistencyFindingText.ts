@@ -70,6 +70,10 @@ function render(key: string, params: Record<string, string>): string | null {
       return t('consistency.finding.UNSOURCED_FORMULA_COLUMN', params);
     case 'consistency.finding.NON_CURRENT_RUN_ROWS':
       return t('consistency.finding.NON_CURRENT_RUN_ROWS', params);
+    // ✎ B80 N4: затверджений місяць споживача, чиє джерело змінилося. Сід має ОДИН текст на обидві причини
+    // (`reason`: `notApproved` | `reapproved`) — «більше не затверджено або затверджено повторно пізніше».
+    case 'consistency.finding.STALE_APPROVED_DEPENDENT':
+      return t('consistency.finding.STALE_APPROVED_DEPENDENT', params);
     default:
       return null;
   }

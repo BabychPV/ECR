@@ -61,6 +61,14 @@ public sealed class LandArgBridgesModelTests
                         continue;
                     }
 
+                    // ✎ B26 (P-0118-24): [T7b_00].[S3_9].[January] - фіксований рядок ТІЄЇ САМОЇ таблиці; ключ рядка мусить
+                    // існувати в таблиці (колонка після нього перевіряється далі як звичайний токен)
+                    if (c.TryGetProperty("sourceRow", out var sourceRow) && token == sourceRow.GetString())
+                    {
+                        Assert.Contains(token, tables[table.Name].GetProperty("rows").EnumerateArray().Select(r => r.GetProperty("key").GetString()));
+                        continue;
+                    }
+
                     Assert.True(cols.ContainsKey(token), $"{table.Name}.{name}: [{token}] не колонка таблиці.");
                 }
             }

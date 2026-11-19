@@ -87,7 +87,11 @@ public sealed class SubmitSheetHandler(
 
     // ✎ MS (план §13.1, §13.9): таблиці, які ЧИТАЮТЬ скрипти методологій аркуша, і таблиці їхніх джерел результатів
     // входять у замикання застарілості. `null` — як до MS (тести без порту).
-    IScriptRuntimeStore? scriptRuntime = null)
+    IScriptRuntimeStore? scriptRuntime = null,
+
+    // ✎ B80 (N2b, A3): споживач зв'язки ApprovedOnly не подається, поки місяць джерела не затверджено. `null` (тестові
+    // фабрики) — перевірки немає.
+    ISourceMonthApprovalGate? sourceMonthGate = null)
 {
     /// <summary>✎ C-5: дефолти колонок версії для незаповнених комірок (02b §6.3), як у «Перевірити».</summary>
     private readonly Recalculation.ColumnDefaultValues columnDefaults = new(metadata, registries);
@@ -298,6 +302,13 @@ public sealed class SubmitSheetHandler(
                     },
                 });
         }
+
+        // ✎ B80 (N2b, R3.1 A3): місяць документа-джерела (HSE400) не затверджено — подання неможливе. Після рішення про
+        // права (не розповідати про джерело тому, хто подавати не може), до перерахунку й валідації. За Any, без зв'язки,
+        // без документа-джерела року — нічого (один запит зв'язки).
+        await SourceMonthApprovalCheck
+            .EnsureApprovedAsync(sourceMonthGate, documentId, periodKey, "Подання", ct)
+            .ConfigureAwait(false);
 
         // ⚠ Рядки з IsOrphaned блокують подання (ФВ-8.13). До Етапу 4 прапорець
         // ніхто не ставить — перевірка коректна і завжди пропускає; це не

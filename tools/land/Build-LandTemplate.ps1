@@ -115,7 +115,7 @@ param(
     [switch]$ReuseDraft,
     [securestring]$BootstrapPassword,
     [string]$GoldenDir,
-    [ValidateSet('LegacyRules', 'LegacyBindings', 'LegacyPublish', 'Accounts', 'Units', 'Registries', 'Contract', 'Template', 'Project', 'Documents', 'Methodologies', 'RowFilter', 'SubstanceApplicability', 'ParityBranch', 'OptionalArguments', 'ArgumentSuffix', 'LookupCompare', 'NaeType', 'BranchGate', 'RequiredInputs', 'YearMonths', 'Data', 'MassFraction', 'LandParity', 'CompositionMass', 'All')]
+    [ValidateSet('LegacyRules', 'LegacyBindings', 'LegacyPublish', 'Accounts', 'Units', 'Registries', 'Contract', 'Template', 'Project', 'Documents', 'Methodologies', 'RowFilter', 'T7bStatus', 'SubstanceApplicability', 'ParityBranch', 'OptionalArguments', 'ArgumentSuffix', 'LookupCompare', 'NaeType', 'BranchGate', 'RequiredInputs', 'YearMonths', 'Data', 'MassFraction', 'LandParity', 'CompositionMass', 'All')]
     [string[]]$Stage = @('All'),
     [ValidateSet('Sql', 'Api')][string]$StructureMode = 'Sql',
     [string]$SqlConnection,
@@ -165,12 +165,14 @@ $afFile = $AfPackage
 if (-not $afFile) { $afFile = Join-Path $repo 'docs\delivery\reference-data\land-template\af-land-package.json' }
 . (Join-Path $here 'EcrApi.ps1')
 . (Join-Path $here 'Land-CfRules.ps1')
+. (Join-Path $here 'Land-RowCellDefaults.ps1')
 . (Join-Path $here 'LandTemplateDiff.Lib.ps1')
 . (Join-Path $here 'LandMonthBands.Lib.ps1')
 . (Join-Path $here 'LandTemplateDraft.Lib.ps1')
 . (Join-Path $here 'LandYearMonths.Lib.ps1')
 . (Join-Path $here 'LandYearMonthsApply.Lib.ps1')
 . (Join-Path $here 'LandLegacyRules.Lib.ps1')
+. (Join-Path $here 'LandT7bStatus.Lib.ps1')
 Set-StrictMode -Off
 
 # Безпека стенда: лише локальні API і SQL (база з іменем EcrLand*); мутації лише з явним
@@ -849,12 +851,19 @@ function Fill-StructureSql([int]$vid) {
         foreach ($r in (Sql-Query $cn 'SELECT r.TableDefId, r.RowKey FROM cfg.RowDef r JOIN cfg.TableDef t ON t.Id=r.TableDefId JOIN cfg.SheetDef s ON s.Id=t.SheetDefId WHERE s.TemplateVersionId=@v' @{ v = $vid }).Rows) {
             $haveRows["$($r.TableDefId)/$($r.RowKey)"] = $true
         }
+        # B175: колонка CellDefaultsJson іде в масову вставку лише коли модель має хоч один cellDefaults - тоді білдер
+        # працює й з базою до міграції B175RowDefCellDefaults, поки дефолтів рядків у моделі немає.
+        $withCellDefaults = $false
+        foreach ($sh in @($Mdl.sheets)) { foreach ($tb in @($sh.tables)) { foreach ($rw in @($tb.rows)) { if ($null -ne (Get-LandRowCellDefaults $rw)) { $withCellDefaults = $true } } } }
         $dr = New-Object System.Data.DataTable
         foreach ($n in 'TableDefId:int', 'RowKey:string', 'Ordinal:int', 'LabelL10n:string', 'RowKind:byte', 'IsReadOnly:bool', 'IsDeleted:bool') {
             $p = $n -split ':'
             $t = switch ($p[1]) { 'int' { [int] } 'byte' { [byte] } 'bool' { [bool] } default { [string] } }
             [void]$dr.Columns.Add($p[0], $t)
         }
+        if ($withCellDefaults) { [void]$dr.Columns.Add('CellDefaultsJson', [string]) }
+        $cdUpd = New-Object System.Data.DataTable
+        [void]$cdUpd.Columns.Add('TableDefId', [int]); [void]$cdUpd.Columns.Add('RowKey', [string]); [void]$cdUpd.Columns.Add('Json', [string])
         $nr = 0
         foreach ($sh in @($Mdl.sheets)) {
             foreach ($tb in @($sh.tables)) {
@@ -862,17 +871,32 @@ function Fill-StructureSql([int]$vid) {
                 $o = 0
                 foreach ($rw in @($tb.rows)) {
                     $o++
-                    if ($haveRows.ContainsKey("$tid/$($rw.key)")) { continue }
+                    $cdJson = ConvertTo-LandRowCellDefaultsJson $rw
+                    if ($haveRows.ContainsKey("$tid/$($rw.key)")) {
+                        # наявний рядок (повторний прогін / клон): дефолти з моделі доводяться окремим UPDATE нижче
+                        if ($null -ne $cdJson) { [void]$cdUpd.Rows.Add($tid, [string]$rw.key, $cdJson) }
+                        continue
+                    }
                     $row = $dr.NewRow()
                     $row['TableDefId'] = $tid; $row['RowKey'] = [string]$rw.key; $row['Ordinal'] = $o
                     $lab = [string]$rw.en; if ($lab.Length -gt 400) { $lab = $lab.Substring(0, 400) }
                     $row['LabelL10n'] = (Json-L10n $lab $rw.ru); $row['RowKind'] = [byte]$RowKindCode[[string]$rw.kind]; $row['IsReadOnly'] = $false; $row['IsDeleted'] = $false
+                    if ($withCellDefaults) { $row['CellDefaultsJson'] = $(if ($null -ne $cdJson) { $cdJson } else { [System.DBNull]::Value }) }
                     $dr.Rows.Add($row); $nr++
                 }
             }
         }
         Bulk-Insert $cn 'cfg.RowDef' $dr
         Log "  рядків вставлено: $nr"
+        if ($cdUpd.Rows.Count -gt 0) {
+            Assert-EcrMutationAllowed 'SQL-запис (UPDATE cfg.RowDef.CellDefaultsJson)'
+            $null = Sql-Exec $cn 'CREATE TABLE #CD (TableDefId int, RowKey nvarchar(100), Json nvarchar(max))'
+            $bc = New-Object System.Data.SqlClient.SqlBulkCopy($cn); $bc.DestinationTableName = '#CD'
+            foreach ($cdCol in 'TableDefId', 'RowKey', 'Json') { [void]$bc.ColumnMappings.Add($cdCol, $cdCol) }
+            $bc.WriteToServer($cdUpd); $bc.Close()
+            $ncd = Sql-Exec $cn 'UPDATE r SET CellDefaultsJson = d.Json FROM cfg.RowDef r JOIN #CD d ON d.TableDefId = r.TableDefId AND d.RowKey = r.RowKey WHERE ISNULL(r.CellDefaultsJson, N'''') <> d.Json; DROP TABLE #CD'
+            Log "  дефолти комірок рядків (B175): оновлено $ncd із $($cdUpd.Rows.Count)"
+        }
         # батьківські рядки
         foreach ($sh in @($Mdl.sheets)) {
             foreach ($tb in @($sh.tables)) {
@@ -1371,8 +1395,12 @@ function Stage-Template {
             $ro = 0
             foreach ($rw in @($tb.rows)) {
                 $ro++
-                $null = Api PUT "/api/v1/template-versions/$vid/tables/$tid/rows/$($rw.key)" @{
+                $rowBody = @{
                     labelL10n = (L10n ([string]$rw.en) $rw.ru); ordinal = $ro; rowKind = [string]$rw.kind; parentRowKey = $(if ($rw.parent) { [string]$rw.parent } else { $null }); isReadOnly = $false }
+                # B175: дефолти комірок рядка - лише коли модель їх має (відсутнє поле сервер читає як «не змінювати»).
+                $rowCellDefaults = Get-LandRowCellDefaults $rw
+                if ($null -ne $rowCellDefaults) { $rowBody['cellDefaults'] = $rowCellDefaults }
+                $null = Api PUT "/api/v1/template-versions/$vid/tables/$tid/rows/$($rw.key)" $rowBody
                 $nRows++
             }
             foreach ($ru in @($tb.rules)) {
@@ -2191,6 +2219,43 @@ function Stage-RowFilter {
         else { Log "  ! ${code}: HTTP $($put.Status) $(Get-EcrErrorCode $put)"; $failed++ }
     }
     Log "  прапорець поставлено: $set; знято (exempt): $cleared; пропущено: $skipped; помилок: $failed"
+}
+
+# B26 (P-0118-25, D-425): статус рядків T7b_00 у НАЯВНИХ документах проєкту. Колонка Land_Status нова, тож у старих
+# документах порожня, і фільтр «лише Running» (ECW_C09_02_01 у runningOnly) виключив би й рядки речовин. Пише Running у
+# statusPresets.rows лише там, де статусу ще немає (поставлене людиною не чіпає; S3_9 не пише ніколи). Повтор - 0 записів.
+# Лише явно (-Stage T7bStatus), ПІСЛЯ Template (колонка в документах) і ДО RowFilter (інакше між етапами перерахунок
+# тихо виключить рядки речовин); -DryRun - лише лічильники. Порядок вікна - runbook п. 8.9.1.
+# ⚠ Документ, створений ПІСЛЯ прогону, отримує статус лише повторним прогоном цього етапу (шаблон пресетів рядків не має).
+function Stage-T7bStatus {
+    Log '== T7bStatus (B26: статус рядків T7b_00 для фільтра D-425) =='
+    $t7b = $null; $t7bSheet = $null
+    foreach ($sh in @($Mdl.sheets)) { foreach ($tb in @($sh.tables)) { if ([string]$tb.code -eq 'T7b_00') { $t7b = $tb; $t7bSheet = [string]$sh.code } } }
+    if ($null -eq $t7b -or -not $t7b.PSObject.Properties['statusPresets']) { throw 'У моделі T7b_00 без statusPresets (перегенеруйте модель, B26).' }
+    $presets = $t7b.statusPresets
+    LoginAs $BuildUser
+    $entryId = [string](RegEntryId ([string]$presets.registry) ('code:' + [string]$presets.entry))
+    $pr = Items (Api GET '/api/v1/projects').Json | Where-Object { $_.code -eq $ProjectCode } | Select-Object -First 1
+    if (-not $pr) { throw "Немає проєкту $ProjectCode." }
+    $tot = [ordered]@{ Docs = 0; Instances = 0; Write = 0; Written = 0; Kept = 0; Missing = 0; EmptyRows = 0; EmptyWithValue = 0 }
+    foreach ($d in @(Items (Api GET "/api/v1/documents?projectId=$([int]$pr.id)&limit=100").Json)) {
+        $docId = [int]$d.id; $tot.Docs++
+        foreach ($mo in 1..12) {
+            $pk = $Year * 100 + $mo
+            $tis = TableInstances $docId $pk
+            $tkey = "$t7bSheet/T7b_00"
+            if (-not $tis.ContainsKey($tkey)) { continue }
+            $tot.Instances++
+            $g = (Api GET "/api/v1/documents/$docId/tables/$($tis[$tkey])?periodKey=$pk").Json
+            $plan = Get-LandStatusPresetPlan -Presets $presets -Rows @($g.rows) -EntryId $entryId
+            foreach ($k in 'Write', 'Kept', 'Missing', 'EmptyRows', 'EmptyWithValue') { $tot[$k] += [int]$plan.$k }
+            if ($plan.EmptyWithValue -gt 0) { Log "  ! документ $docId/$pk : у рядку без статусу (S3_9) хтось поставив статус - не чіпаю" }
+            if ($DryRun -or $plan.Write -eq 0) { continue }
+            $tot.Written += Patch-Rows $docId $pk $tis[$tkey] @($plan.Rows) "T7bStatus doc $docId/$pk"
+        }
+    }
+    Log ("  документів {0}, екземплярів T7b_00 {1}; записати {2}, записано {3}; уже мали статус {4}; рядків немає {5}; рядків без статусу {6} (з поставленим людиною {7}){8}" -f
+        $tot.Docs, $tot.Instances, $tot.Write, $tot.Written, $tot.Kept, $tot.Missing, $tot.EmptyRows, $tot.EmptyWithValue, $(if ($DryRun) { ' [DryRun: нічого не записано]' } else { '' }))
 }
 
 function Stage-OptionalArguments {
@@ -3261,6 +3326,8 @@ function Fill-FullDocument([int]$docId) {
     if ($Stage -contains 'LegacyPublish') { Stage-LegacyPublish }
     # D-425: ПІСЛЯ Methodologies (методології мають існувати й бути опублікованими); не створює версій.
     if (Want 'RowFilter') { Stage-RowFilter }
+    # B26: лише явно; ПІСЛЯ Template і RowFilter (колонка статусу в документах, прапорець методології).
+    if ($Stage -contains 'T7bStatus') { Stage-T7bStatus }
     if (Want 'Data') { Stage-Data }
     # LP-07: LandParity лише явно (-Stage LandParity); у 'All' не входить, бо потребує імпортованих C11/C12 і LAND_AIR_SUBSTANCE.
     # ⚠ D1 (RC E): LandParity виконується ПЕРЕД Methodologies. Methodologies створює прив'язки колонок результатів (LP-08,

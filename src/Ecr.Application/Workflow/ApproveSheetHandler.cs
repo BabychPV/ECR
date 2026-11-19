@@ -4,6 +4,7 @@ using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Workflow;
+using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Workflow;
@@ -28,7 +29,13 @@ public sealed class ApproveSheetHandler(
     SheetWorkflowNotifier? notifier = null,
     // D-462: повернутий аркуш знову редагований — комірки наздоганяють сирий шар (SheetMaterializationTrigger);
     // `null` — тестові фабрики обробника без черги.
-    IMaterializationScheduler? materialization = null)
+    IMaterializationScheduler? materialization = null,
+    // ✎ B80 (N2a, T-A): остаточне затвердження аркуша-джерела — перерахунок залежних (лише за ApprovedOnly), ПІСЛЯ
+    // коміту; `null` — тестові фабрики обробника.
+    ISourceApprovalChangeTrigger? sourceTrigger = null,
+    // ✎ B80 (N2b, A3): споживач зв'язки ApprovedOnly не затверджується (на жодному кроці маршруту), поки місяць джерела
+    // не затверджено; `null` — тестові фабрики обробника.
+    ISourceMonthApprovalGate? sourceMonthGate = null)
 {
     /// <summary>Затверджує або відхиляє аркуш.</summary>
     /// <param name="documentId">Документ.</param>
@@ -107,9 +114,12 @@ public sealed class ApproveSheetHandler(
         // (1205) виконує його вдруге; стан, прочитаний до транзакції й уже
         // змінений першою спробою (`ApproveStep`), на повторі дав би
         // `wrongState` замість затвердження.
+        var finalApproved = false;
         await uow.ExecuteInTransactionAsync(
             async innerCt =>
             {
+                finalApproved = false;
+
                 // ✎ D-442: ВИНЯТКОВЕ блокування аркуша — ПЕРШОЮ дією транзакції (порядок як у подання):
                 // правка погоджувача, що вже пише, зафіксується до зрізу нижче, а нова чекатиме коміту
                 // і під своїм спільним блокуванням побачить новий крок чи `Approved` — і відмову.
@@ -137,6 +147,9 @@ public sealed class ApproveSheetHandler(
                 await ApproveCoreAsync(state, documentId, sheetDefId, periodKey, approved, reason, userId, sheetCopyId, profile, innerCt)
                     .ConfigureAwait(false);
 
+                // ✎ B80 (T-A): лише ОСТАТОЧНИЙ крок (стан став Approved) і лише оригінал аркуша; проміжний крок — ні.
+                finalApproved = approved && sheetCopyId is null && state.Status == DocumentStatus.Approved;
+
                 // ⛔ D-462: відхилення — аркуш знову редагований; черга в базі — постановка тут, останнім оператором.
                 // RS (Q5): збір пише лише в оригінал — повернута копія наздоганяти сирий шар не має чого.
                 if (!approved && sheetCopyId is null)
@@ -152,6 +165,14 @@ public sealed class ApproveSheetHandler(
         {
             await SheetMaterializationTrigger
                 .AfterCommitAsync(materialization, documentId, sheetDefId, periodKey, ct)
+                .ConfigureAwait(false);
+        }
+
+        // ✎ B80 (T-A): після коміту; тригер сам вирішує за зв'язкою (ApprovedOnly) і не кидає на збій постановки.
+        if (finalApproved && sourceTrigger is not null)
+        {
+            await sourceTrigger
+                .OnSourceSheetApprovalChangedAsync(documentId, sheetDefId, periodKey, SourceApprovalChange.Approved, userId, ct)
                 .ConfigureAwait(false);
         }
 
@@ -245,6 +266,13 @@ public sealed class ApproveSheetHandler(
 
         if (approved)
         {
+            // ✎ B80 (N2b, R3.1 A3): місяць документа-джерела не затверджено — затвердження неможливе на БУДЬ-ЯКОМУ кроці
+            // маршруту (підписувати дані без затвердженого джерела немає сенсу; проміжний підпис теж). Відхилення
+            // (approved = false) не блокується. Під блокуванням аркуша, до зрізу й зміни стану; за Any — нічого.
+            await SourceMonthApprovalCheck
+                .EnsureApprovedAsync(sourceMonthGate, documentId, periodKey, "Затвердження", ct)
+                .ConfigureAwait(false);
+
             // ⛔ Проміжний крок НЕ робить аркуш затвердженим (`ФВ-5.17`).
             // Документ, який став би `Approved` після першого підпису,
             // потрапив би у звітність для регулятора без решти погоджень

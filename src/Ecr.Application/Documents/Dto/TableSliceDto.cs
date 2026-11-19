@@ -293,6 +293,11 @@ public sealed record CellStyleDto(
 /// динамічного рядка, якого немає в шаблоні, — завжди <c>null</c>). Порядок шарів у сітці: стиль колонки, стиль
 /// рядка, користувацьке оформлення, умовний формат.
 /// </param>
+/// <param name="Defaults">
+/// ✎ B175: значення комірок рядка за замовчуванням (<c>RowDef.CellDefaults</c>), код колонки → сирий текст — той
+/// самий формат, що <c>ColumnDto.DefaultValue</c> (Lookup — код запису). Перекриває дефолт колонки для
+/// незаповненої комірки; <c>""</c> — дефолту колонки в цьому рядку немає. <c>null</c> — рядок без власних дефолтів.
+/// </param>
 public sealed record RowDto(
     string RowKey,
     int Ordinal,
@@ -301,4 +306,5 @@ public sealed record RowDto(
     string RowVersion,
     IReadOnlyDictionary<string, object?> Cells,
     bool IsOrphaned = false,
-    CellStyleDto? Style = null);
+    CellStyleDto? Style = null,
+    IReadOnlyDictionary<string, string>? Defaults = null);

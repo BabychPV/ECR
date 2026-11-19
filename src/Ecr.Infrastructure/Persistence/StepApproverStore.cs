@@ -52,9 +52,14 @@ public sealed class StepApproverStore(EcrDbContext db, IClock clock, IWorkflowSt
         var route = await workflow.FindRouteAsync(projectId, states[0].TemplateVersionId, ct).ConfigureAwait(false);
         var hasRoute = route is not null && route.Steps.Count > 0;
 
+        // ✎ B155: крок маршруту ШАБЛОНУ задовольняє й загальний Approver — той самий вибір, що в рішенні.
+        var alternative = hasRoute && route!.AllowsGeneralApprover
+            ? await workflow.GeneralApproverRoleIdAsync(ct).ConfigureAwait(false)
+            : null;
+
         var steps = states
             .Select(s => new SubmittedStepRef(
-                s.SheetDefId, s.SheetCopyId, hasRoute ? route!.StepAt(s.CurrentStepId)?.RoleId : null))
+                s.SheetDefId, s.SheetCopyId, hasRoute ? route!.StepAt(s.CurrentStepId)?.RoleId : null, alternative))
             .Where(s => !hasRoute || s.RoleId is not null)
             .ToList();
         if (steps.Count == 0)
@@ -62,7 +67,9 @@ public sealed class StepApproverStore(EcrDbContext db, IClock clock, IWorkflowSt
             return new StepApproverFacts([], [], Capped: false);
         }
 
-        var stepRoleIds = steps.Where(s => s.RoleId is not null).Select(s => s.RoleId!.Value).Distinct().ToList();
+        var stepRoleIds = steps.Where(s => s.RoleId is not null).Select(s => s.RoleId!.Value)
+            .Concat(alternative is { } general && hasRoute ? [general] : [])
+            .Distinct().ToList();
         var anyOneStage = steps.Any(s => s.RoleId is null);
         var sheetIds = steps.Select(s => s.SheetDefId).Distinct().ToList();
         var sheetCodes = states.Select(s => s.Code).Distinct().ToList();

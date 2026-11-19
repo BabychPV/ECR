@@ -1112,6 +1112,62 @@ stat_cols += _added_cols
 print('prodColumnMapping: tables %d, new columns %d' % (len(out['prodColumnMapping']['tables']), _added_cols))
 
 
+# ---- B26 (P-0118-24/25, рішення людини 18.11; замінює (a) P-0118-23): ECW_C09_02_01 на T7b_00 рахує ECW_EC_tons =
+# (@Concentration * @Volume) / k1 (k1 = 1e6: мг/л * м3 -> т). Аргументів з такими кодами в таблиці не було (банер
+# «бракує Concentration/Volume»). Модель методології (формула/аргументи/версія/правила) НЕ змінюється.
+#   * Concentration - місячна колонка концентрації (January..December) місяця розрахунку (селектор, як інші мости);
+#   * Volume - значення рядка S3_9 («Volume of the water discharged to Caspian sea, m3», об'єм з Water Report) у колонці
+#     ТОГО САМОГО місяця, одне для всіх рядків речовин: Formula-міст із посиланням на фіксований рядок
+#     [T7b_00].[S3_9].[<Month>]. Вираз у дужках - не селектор YearMonths, а «змінна» формула: у річному шаблоні 1.0.17.0
+#     етап YearMonths робить Volume_M01..M12 (кожна читає S3_9 свого місяця) і псевдоніми Volume -> Volume_Mmm;
+#   * рядок S3_9 не має отримувати ECW_EC_tons: фільтр активності рядків D-425 (P-0118-25) - колонка статусу Land_Status
+#     (LAND_GENERIC_EQUIPSTATUS) у T7b_00, Running на рядках речовин, порожньо на S3_9 (statusPresets; у наявні документи
+#     пише етап Build-LandTemplate -Stage T7bStatus), ECW_C09_02_01 -> runningOnly у tools/land/land-row-filter.json.
+DECIDED_DECISION = 'P-0118-24/25 (B26: Volume = row S3_9 of the same month; S3_9 excluded by D-425 status filter)'
+DECIDED_MONTH_ARGS = {
+    # таблиця -> аргумент методології -> 12 колонок за місяцями (селектор у тому самому рядку)
+    'T7b_00': {'Concentration': list(MONTHS)},
+}
+DECIDED_ROW_ARGS = {
+    # таблиця -> аргумент методології -> (фіксований рядок-джерело, 12 колонок за місяцями, одиниця)
+    'T7b_00': {'Volume': ('S3_9', list(MONTHS), 'm3')},
+}
+DECIDED_STATUS = {
+    # таблиця -> колонка статусу D-425: довідник, запис «активний», рядки без статусу (не рахуються методологіями)
+    'T7b_00': {'column': 'Land_Status', 'registry': 'LAND_GENERIC_EQUIPSTATUS', 'entry': 'RUNNING', 'emptyRows': ['S3_9']},
+}
+
+
+def _decided_status_columns():
+    global stat_cols
+    added = 0
+    for s_ in out['sheets']:
+        for t_ in s_['tables']:
+            spec = DECIDED_STATUS.get(t_['code'])
+            if not spec:
+                continue
+            codes = [c['code'] for c in t_['columns']]
+            if spec['column'] in codes:
+                raise SystemExit('decided status: %s.%s уже є' % (t_['code'], spec['column']))
+            keys = [r['key'] for r in t_['rows']]
+            if any(k not in keys for k in spec['emptyRows']):
+                raise SystemExit('decided status: %s не має рядків %s' % (t_['code'], spec['emptyRows']))
+            # видима колонка введення (як Land_Status таблиць 3-5): прихована не віддається зрізом GET, а read-only
+            # відхиляє PATCH - етап T7bStatus тоді не зміг би ні перевірити, ні записати статус наявних документів
+            t_['columns'].insert(0, {
+                'code': spec['column'], 'dataType': 'Lookup', 'registry': spec['registry'], 'headerEn': 'Status',
+                'headerRu': '', 'month': None, 'hidden': False, 'readOnly': False, 'excel': None,
+                'decision': DECIDED_DECISION, 'ecrAdded': 'D-425 row status (not in the Excel sheet): %s' % DECIDED_DECISION})
+            t_['statusPresets'] = {'column': spec['column'], 'registry': spec['registry'], 'entry': spec['entry'],
+                                   'rows': [k for k in keys if k not in spec['emptyRows']], 'emptyRows': list(spec['emptyRows'])}
+            added += 1
+    stat_cols += added
+    print('decided status columns: %d' % added)
+
+
+_decided_status_columns()
+
+
 # ---- мости аргументів методологій C08/C09/C11/C12 для таблиць аркушів 6, 9-11 (LP-10).
 # Для аркушів 3-5 (PerPeriodInstance) місячна колонка `X_M01..X_M12` має Formula-міст `X`, що вибирає місяць за
 # [Period].Sequence; аргумент методології (імена з AF) знаходить колонку за кодом. Таблиці 6, 9-11 (MonthsInColumns) мостів
@@ -1155,6 +1211,29 @@ def _arg_bridges():
                 # Правило «DaysInCalcMonth = Land_Measure_OperTimeDays» (7.7) доведено для аркушів 3-5; для 6, 9-11 не доведено
                 # (календарні дні [Period].Days чи відпрацьовані дні - рішення власника методології): мост не створюємо.
                 left[name] = 'правило 7.7 (відпрацьовані дні чи календарні) доведено лише для аркушів 3-5; для цієї таблиці питання власнику'
+            elif name in DECIDED_MONTH_ARGS.get(tcode, {}):
+                # B26: місячні колонки аргументу названо рішенням людини (DECIDED_MONTH_ARGS), а не прод-аліасом
+                mc = DECIDED_MONTH_ARGS[tcode][name]
+                if not (len(mc) == 12 and all(c in cols for c in mc) and [cols[c].get('month') for c in mc] == list(range(1, 13))):
+                    raise SystemExit('argumentBridges: %s.%s - колонки рішення не є 12 місячними колонками таблиці: %s' % (tcode, name, mc))
+                new = {'code': name, 'dataType': 'Formula', 'headerEn': '%s (argument bridge: selects the month column)' % name,
+                       'unit': cols[mc[0]].get('unit'), 'expression': month_expr(mc),
+                       'ecrAdded': 'bridge: methodology argument %s = month column of the calculated period (decision %s)'
+                                   % (name, DECIDED_DECISION)}
+            elif name in DECIDED_ROW_ARGS.get(tcode, {}):
+                # B26: аргумент = комірка ФІКСОВАНОГО рядка цієї таблиці в колонці місяця розрахунку. Дужки навколо виразу:
+                # не селектор YearMonths (той вимагає [Колонка] у кожній гілці), а змінна формула -> Volume_Mmm + псевдоніми.
+                src_row, mc, unit_ = DECIDED_ROW_ARGS[tcode][name]
+                if not (len(mc) == 12 and all(c in cols for c in mc) and [cols[c].get('month') for c in mc] == list(range(1, 13))):
+                    raise SystemExit('argumentBridges: %s.%s - колонки рішення не є 12 місячними колонками таблиці: %s' % (tcode, name, mc))
+                if src_row not in [r['key'] for r in t_['rows']]:
+                    raise SystemExit('argumentBridges: %s.%s - немає рядка %s' % (tcode, name, src_row))
+                refs = ['[%s].[%s].[%s]' % (tcode, src_row, c) for c in mc]
+                row_expr = ''.join('[Period].Sequence = %d ? %s : ' % (m, refs[m - 1]) for m in range(1, 12)) + refs[11]
+                new = {'code': name, 'dataType': 'Formula', 'headerEn': '%s (argument bridge: row %s, month column)' % (name, src_row),
+                       'unit': unit_, 'expression': '(' + row_expr + ')', 'sourceRow': src_row,
+                       'ecrAdded': 'bridge: methodology argument %s = row %s in the month column of the calculated period '
+                                   '(decision %s)' % (name, src_row, DECIDED_DECISION)}
             elif name in alias:
                 a = alias[name]
                 if a.get('monthColumns'):
@@ -1439,6 +1518,35 @@ for _s in out['sheets']:
                 _c['default'] = 'NOTPASSEDOVERHAUL'
                 _d474['default'].append(_t['code'])
 print('D-474:', _d474)
+# ---- B175: дефолти комірок РЯДКА (rows[].cellDefaults = {код колонки: текст}; Lookup — код запису, '' — прибрати дефолт
+# колонки в рядку). Таблиця -> {ключ рядка | '*' (усі рядки Item): {колонка: значення}}. Білдер передає їх обома шляхами
+# (SQL CellDefaultsJson і API PUT rows).
+ROW_CELL_DEFAULTS = {}
+# B175 × B26 (P-0118-34): статус D-425 нового документа — дефолт рядка зі statusPresets (Running на рядках речовин,
+# нічого на emptyRows, напр. S3_9), тож -Stage T7bStatus потрібен лише документам, створеним до версії з B175.
+for _s in out['sheets']:
+    for _t in _s['tables']:
+        _sp = _t.get('statusPresets')
+        if _sp:
+            _rcd = ROW_CELL_DEFAULTS.setdefault(_t['code'], {})
+            for _k in _sp['rows']:
+                if _k not in _sp['emptyRows']:
+                    _rcd.setdefault(_k, {})[_sp['column']] = _sp['entry']
+_b175 = []
+for _s in out['sheets']:
+    for _t in _s['tables']:
+        _spec = ROW_CELL_DEFAULTS.get(_t['code'])
+        if not _spec:
+            continue
+        _codes = {_c['code'] for _c in _t['columns']}
+        for _rw in _t['rows']:
+            _own = dict(_spec.get('*', {})) if _rw.get('kind') == 'Item' else {}
+            _own.update(_spec.get(_rw['key'], {}))
+            _own = {k: v for k, v in _own.items() if k in _codes}
+            if _own:
+                _rw['cellDefaults'] = {k: _own[k] for k in sorted(_own)}
+                _b175.append('%s/%s' % (_t['code'], _rw['key']))
+print('B175 row cellDefaults:', len(_b175))
 print('styles:', len(out['styles']), [(s['code'], s['columns'], s['headers'], s['tables']) for s in out['styles']])
 print('cf row-scoped:', len(out['conditionalFormatsRowScoped']))
 out['registries'] = list(registries.values())

@@ -243,8 +243,8 @@ public sealed class CreateDocumentHandlerTests
 
         var error = await Assert.ThrowsAsync<DomainException>(() => Create(name: null));
 
-        Assert.Equal("ECR-DOC-0409", error.ErrorCode);
-        Assert.Equal("err.ECR-DOC-0409.documentExistsForTemplate", error.Details!["messageKey"]);
+        Assert.Equal("ECR-DOC-4092", error.ErrorCode);
+        Assert.Equal("err.ECR-DOC-4092.documentExistsForTemplate", error.Details!["messageKey"]);
         Assert.Equal("77", error.Details["templateId"]);
         Assert.Equal("500", error.Details["existingDocumentId"]);
         Assert.DoesNotContain(
@@ -262,7 +262,8 @@ public sealed class CreateDocumentHandlerTests
 
         var error = await Assert.ThrowsAsync<DomainException>(() => Create(name: null));
 
-        Assert.Equal("err.ECR-DOC-0409.documentExistsForTemplate", error.Details!["messageKey"]);
+        Assert.Equal("ECR-DOC-4092", error.ErrorCode);
+        Assert.Equal("err.ECR-DOC-4092.documentExistsForTemplate", error.Details!["messageKey"]);
         Assert.False(error.Details.ContainsKey("existingDocumentId"));
     }
 

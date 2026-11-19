@@ -49,6 +49,11 @@ public static class DependencyInjection
         services.AddScoped<Projects.UpdatePeriodPolicyHandler>();
         services.AddScoped<Workflow.GetApprovalRouteHandler>();
         services.AddScoped<Workflow.ReplaceApprovalRouteHandler>();
+        services.AddScoped<Workflow.GetScopedApprovalRouteHandler>();
+        services.AddScoped<Workflow.ReplaceScopedApprovalRouteHandler>();
+        services.AddScoped<Workflow.PreviewApprovalRouteImpactHandler>();
+        services.AddScoped<Workflow.ListProjectTemplateRoutesHandler>();
+        services.AddScoped<Workflow.ListApproverRolesHandler>();
         services.AddScoped<Security.ListUserRolesHandler>();
         services.AddScoped<Security.ReplaceUserRolesHandler>();
         services.AddScoped<Security.SetUserEmailHandler>();

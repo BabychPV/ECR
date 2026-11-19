@@ -100,7 +100,14 @@ public sealed record ApprovalQueueProject(
 /// <param name="Routes">Маршрути з кроками.</param>
 /// <param name="RoleCodes">Код ролі за її ідентифікатором (ролі кроків).</param>
 public sealed record ApprovalQueueRoutes(
-    IReadOnlyList<ApprovalRoute> Routes, IReadOnlyDictionary<int, string> RoleCodes);
+    IReadOnlyList<ApprovalRoute> Routes, IReadOnlyDictionary<int, string> RoleCodes)
+{
+    /// <summary>✎ B155: шаблон версії — для маршрутів шаблону (лише версії, на які посилаються проєкти й документи).</summary>
+    public IReadOnlyDictionary<int, int> VersionTemplates { get; init; } = new Dictionary<int, int>();
+
+    /// <summary>✎ B155: вбудована загальна роль <c>Approver</c>; <c>null</c> — її немає.</summary>
+    public int? GeneralApproverRoleId { get; init; }
+}
 
 /// <summary>Подана пара «аркуш × період» документа.</summary>
 /// <param name="StateId">Ключ стану (тай-брейк порядку).</param>

@@ -24,6 +24,7 @@ import { useCellStyles } from './useCellStyles';
 import { OptimisticMaxCells, areaChunks, areaOf, colourableCells, headerStyleProps, scopeRange, userStyleOf, withRowStyle, withUserStyle, type StyleScope } from './userCellStyle';
 import { cellDisplayMemo, cellText, editorValueOf, isNumericColumn, isTextColumnType, sameColumnValue } from './cellValue';
 import { columnIndexOf, rowIndexOf } from './rowIndex';
+import { effectiveDefault } from './rowDefaults';
 import { planPaste, type PasteRejection } from './clipboard';
 import { parseClipboard, toClipboard } from './tsvClipboard';
 import {
@@ -4060,7 +4061,7 @@ function gridRows(slice: TableSliceDto, overrides?: ReadonlyMap<string, unknown>
       model[column.code] = editorValueOf(
         overrides?.has(key)
           ? overrides.get(key)
-          : (row.cells[column.code] ?? column.defaultValue ?? ''),
+          : (row.cells[column.code] ?? effectiveDefault(row, column) ?? ''),
         column,
       );
     }

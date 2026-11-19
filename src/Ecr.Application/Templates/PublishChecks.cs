@@ -549,9 +549,45 @@ public static class PublishChecks
             CheckComputedColumns(table, boundColumnIds, diagnostics);
             CheckFixedTableRows(table, diagnostics);
             CheckHeaderGroups(table, diagnostics);
+            CheckRowDefaults(table, diagnostics);
         }
 
         return diagnostics;
+    }
+
+    /// <summary>
+    /// ✎ B175: дефолти комірок рядка посилаються на колонки КОДОМ; після видалення/«перейменування» (видалити +
+    /// завести з іншим кодом) колонки чи зміни її на обчислювану код більше не розв'язується — і в опублікованій
+    /// (незмінній) версії дефолт мовчки зник би. Тому публікація відмовляє, доки дефолти рядка не виправлено.
+    /// </summary>
+    private static void CheckRowDefaults(TableDef table, List<ExpressionDiagnostic> diagnostics)
+    {
+        foreach (var row in table.Rows.Where(r => !r.IsDeleted && r.CellDefaults.Count > 0))
+        {
+            foreach (var columnCode in row.CellDefaults.Keys)
+            {
+                var column = table.Columns.FirstOrDefault(
+                    c => !c.IsDeleted && string.Equals(c.Code, columnCode, StringComparison.Ordinal));
+                if (column is not null && !column.IsComputed && column.DataType != CellDataType.Unit)
+                {
+                    continue;
+                }
+
+                diagnostics.Add(new ExpressionDiagnostic(
+                    ErrorCodes.TemplateInvalid,
+                    $"Дефолт рядка «{row.RowKeyValue}» таблиці {table.Code} посилається на колонку «{columnCode}», якої "
+                    + "вже немає (або вона не приймає дефолт). Виправте дефолти рядка перед публікацією.",
+                    0,
+                    1,
+                    "err.ECR-TMPL-0422.rowDefaultColumnMissing",
+                    new Dictionary<string, string>
+                    {
+                        ["tableCode"] = table.Code,
+                        ["rowKey"] = row.RowKeyValue,
+                        ["columnCode"] = columnCode,
+                    }));
+            }
+        }
     }
 
     /// <summary>
