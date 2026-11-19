@@ -22,7 +22,7 @@ function Set-LandScriptUnits {
         $unit = [string]$Arguments[$arg]
         if ($arg -notmatch '^[A-Za-z_][A-Za-z0-9_]*$' -or $unit -notmatch '^[A-Za-z_][A-Za-z0-9_]*$') { throw "Недопустиме ім'я: $arg / $unit" }
         $pattern = '(?<![A-Za-z0-9_])row\.' + [regex]::Escape($arg) + '(?![A-Za-z0-9_])'
-        if ($out -match ($pattern + '\?')) { throw "Необов'язковий аргумент row.$arg? не підтримується." }
+        if ($out -match ($pattern + '\?')) { throw "Необов'язковий аргумент row.${arg}? не підтримується." }
         if (-not [regex]::IsMatch($out, $pattern)) { throw "Аргумент row.$arg у тексті скрипта не знайдено." }
         $out = [regex]::Replace($out, $pattern, "u_$arg")
         [void]$decls.Add("var u_$arg : $unit = row.$arg;")
@@ -52,7 +52,8 @@ function Set-LandScriptArgumentSources {
     .DESCRIPTION
         `row.X` -> змінна `s_X`: `var s_X = row.X? == null ? row.Alt? : row.X?;`. Таблиця, де X є, читає X (порожня комірка = null,
         як було); таблиця без X (але з Alt) читає Alt. Необов'язкове читання `?` не падає на таблиці без колонки. Помилка,
-        якщо `row.X` у тексті немає або `row.X?` уже вжито.
+        якщо `row.X` у тексті немає. Необов'язкове `row.X?` теж замінюється. ⚠ Обов'язкове `row.X` на таблиці без X раніше давало #ARG
+        (рядок не рахувався), тепер дає null; для необов'язкового `row.X?` поведінка та сама.
     .PARAMETER Text     Текст скрипта.
     .PARAMETER Sources  Хеш «аргумент -> колонка-замінник».
     #>
@@ -64,9 +65,9 @@ function Set-LandScriptArgumentSources {
         $alt = [string]$Sources[$arg]
         if ($arg -notmatch '^[A-Za-z_][A-Za-z0-9_]*$' -or $alt -notmatch '^[A-Za-z_][A-Za-z0-9_]*$') { throw "Недопустиме ім'я: $arg / $alt" }
         $pattern = '(?<![A-Za-z0-9_])row\.' + [regex]::Escape($arg) + '(?![A-Za-z0-9_])'
-        if ($out -match ($pattern + '\?')) { throw "Необов'язковий аргумент row.$arg? не підтримується." }
         if (-not [regex]::IsMatch($out, $pattern)) { throw "Аргумент row.$arg у тексті скрипта не знайдено." }
-        $out = [regex]::Replace($out, $pattern, "s_$arg")
+        # і `row.X`, і необов'язкове `row.X?` (етап OptionalArguments) читаються через змінну
+        $out = [regex]::Replace($out, $pattern + '\??', "s_$arg")
         [void]$decls.Add("var s_${arg} = row.${arg}? == null ? row.${alt}? : row.${arg}?;")
     }
     if ($decls.Count -gt 0) {

@@ -139,6 +139,19 @@ public sealed class LandScriptUnitsLibTests
 
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Джерело_аргументу_замінює_й_необов_язкове_читання()
+    {
+        var (exit, output) = RunPowerShell("""
+            $t = "rows from T1;`n`noutput O1 : t = row.Rho? == 0 ? 0 : row.Rho? * 2;`noutput O2 : t = row.Rho + 1;`n"
+            Set-LandScriptArgumentSources -Text $t -Sources @{ Rho = 'RhoAlt' }
+            """);
+        Assert.Equal(0, exit);
+        Assert.Contains("output O1 : t = s_Rho == 0 ? 0 : s_Rho * 2;", output, StringComparison.Ordinal);
+        Assert.Contains("output O2 : t = s_Rho + 1;", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
     public void Джерело_аргументу_відсутнього_в_тексті_дає_помилку()
     {
         var (exit, output) = RunPowerShell(Sample + "\nSet-LandScriptArgumentSources -Text $t -Sources @{ Missing = 'Alt' }");
