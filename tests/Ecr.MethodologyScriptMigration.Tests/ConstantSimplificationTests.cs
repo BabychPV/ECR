@@ -59,6 +59,51 @@ public sealed class ConstantSimplificationTests
         Assert.Contains("var Calc = K;", result.Text);
     }
 
+    /// <summary>
+    /// D-556: константи «категорія x речовина» з однаковим значенням по речовинах категорії (так лежить склад у C11_01 і
+    /// C12_01: 13 констант по ~1300 записів, 383 тис. знаків проти ліміту компілятора 200 тис.) пишуться мапою
+    /// «категорія -> значення» і ОДНІЄЮ спільною картою наявності, тож текст на порядок менший і компілюється.
+    /// Мутація: вимкнути <c>WithPresence</c> у <c>ConstantPlanner.BuildShape</c> - текст виходить мапою мап і відмовляє
+    /// <c>scriptCompile</c> (<c>tooLarge</c>), тест червоний.
+    /// </summary>
+    [Fact]
+    public void Константи_категорія_речовина_з_однаковим_значенням_по_речовинах_не_роздувають_скрипт()
+    {
+        var categories = Enumerable.Range(1, 90).Select(i => "6" + i.ToString("D3", System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+        var substances = Enumerable.Range(1, 19).Select(i => "0" + (300 + i).ToString(System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+        var codes = Enumerable.Range(1, 13).Select(i => "K" + i.ToString(System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+
+        var constants = new List<SourceConstant>();
+        foreach (var code in codes)
+        {
+            for (var c = 0; c < categories.Length; c++)
+            {
+                // Речовин у категорії різна кількість (від 2 до 19), значення однакове по всіх.
+                foreach (var substance in substances.Take(2 + (c % 18)))
+                {
+                    constants.Add(SourceConstant.OfNumber(code, 0.0000029m + c, categories[c], substance));
+                }
+            }
+        }
+
+        var source = Sup.Version(
+            [Sup.F("Calc", string.Join(" + ", codes.Select(k => "CST." + k)), 1)],
+            constants,
+            [new SourceOutput("Calc", "t")],
+            categoryRule: "@X",
+            categories: categories,
+            substances: substances);
+
+        var result = ScriptConverter.Convert(source);
+
+        Assert.True(
+            result.Text is not null,
+            string.Join(" | ", result.Issues.Select(i => i.Code + ": " + i.Message.Split('\n')[0])));
+        Assert.True(result.Text.Length < 120_000, $"text length {result.Text.Length}");
+        Assert.Contains("(Present[Category][S.code] ? K1[Category] : null)", result.Text);
+        Assert.Single(result.Text.Split("const Present = ", StringSplitOptions.None).Skip(1));
+    }
+
     [Fact]
     public void Залежне_від_категорії_й_речовини_і_форма_категорія_підкреслення_код()
     {

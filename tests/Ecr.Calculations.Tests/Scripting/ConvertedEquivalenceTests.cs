@@ -186,6 +186,143 @@ public sealed class ConvertedEquivalenceTests
         Assert.True(Show(oldRows) == Show(scriptRows), "OLD:\n" + Show(oldRows) + "\nNEW:\n" + Show(scriptRows));
     }
 
+    /// <summary>
+    /// D-556: необов'язковий аргумент (<c>Y?</c>), якого немає в рядку, НЕ «відсутній обов'язковий вхід»: рядок без жодного
+    /// значення називає в <c>MissingArguments</c> лише обов'язкові поля, і старий рушій тут збігається зі скриптом
+    /// (у колі 3 це були 504 розбіжності діагностики C11_10). Обов'язковий <c>X</c> без запису називається в обох.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Необовязковий_аргумент_без_запису_не_потрапляє_в_відсутні_ні_в_старому_ні_в_скрипті()
+    {
+        var oldStand = new RuleStand(rule: null)
+            .WithSubstanceFormula("Total", "@X * @Y", argumentsCsv: "X;Y?")
+            .WithSubstanceCodes("0301", "0304");
+
+        var source = new VersionSource
+        {
+            MethodologyCode = "WS",
+            NumericMode = NumericMode.Strict,
+            Formulas = [new SourceFormula("Total", "@X * @Y", 1, ArgumentsCsv: "X;Y?")],
+            Outputs = [new SourceOutput("Total", "kg")],
+            Substances = ["0301", "0304"],
+            RowsClauses = [new SourceRowsClause(["T1"], [new SourceRule([])], [])],
+        };
+        var converted = ScriptConverter.Convert(source);
+        Assert.True(converted.Text is not null, string.Join(" | ", converted.Issues.Select(i => i.Code + ": " + i.Message)));
+
+        var scriptStand = new ScriptStand(converted.Text, NumericMode.Strict)
+            .WithSubstances(("0301", (int)RuleStand.SubstanceA), ("0304", (int)RuleStand.SubstanceB));
+        scriptStand.AddTable("T1");
+
+        (string Key, CalculationArgument[] Arguments)[] rows =
+        [
+            ("both", [Number("X", 2m), Number("Y", 3m)]),
+            ("noOptional", [Number("X", 2m)]),
+            ("noRequired", [Number("Y", 3m)]),
+            ("neither", [Text("Other", "a")]),
+        ];
+        var inputs = Inputs(rows);
+        var keys = rows.Select(r => r.Key).ToList();
+
+        var oldModule = new DelegateModule(input => oldStand.RunAsync([.. input.Arguments]));
+        var scriptModule = new DelegateModule(input => scriptStand.RunArgumentsAsync([.. input.Arguments]));
+        var oldRows = await ParityComparer.ExecuteRowsAsync(keys, inputs, oldModule, null!, false, CancellationToken.None);
+        var scriptRows = await ParityComparer.ExecuteRowsAsync(keys, inputs, scriptModule, null!, false, CancellationToken.None);
+
+        // Контроль: «noOptional» - порожній результат без назви відсутнього; обов'язковий X названо в обох.
+        Assert.Null(oldRows["noOptional"].MissingArguments);
+        Assert.Equal(["X"], oldRows["noRequired"].MissingArguments);
+        Assert.Equal(["X"], oldRows["neither"].MissingArguments);
+        Assert.True(Show(oldRows) == Show(scriptRows), "OLD:\n" + Show(oldRows) + "\nNEW:\n" + Show(scriptRows));
+    }
+
+    private static MethodologyConstant Scoped(string code, decimal value, string category, long substanceEntryId)
+    {
+        var constant = RuleStand.Number(code, value, category);
+        constant.SetScope(category, substanceEntryId);
+        return constant;
+    }
+
+    /// <summary>
+    /// D-556: константи «категорія x речовина» з однаковим значенням по речовинах категорії стискаються в мапу
+    /// «категорія -> значення» зі спільною картою наявності (у C11_01 це 383 тис. знаків проти ліміту 200 тис.). Результат
+    /// той самий, що в старого рушія: наявна пара дає значення, відсутня (у K2 немає речовини 0304 у категорії B) - ні, як і раніше;
+    /// категорія з різними значеннями по речовинах (D) лишається мапою мап.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Константи_категорія_речовина_зі_спільною_картою_наявності_дають_ті_самі_числа_що_старий_рушій()
+    {
+        const long a = RuleStand.SubstanceA;
+        const long b = RuleStand.SubstanceB;
+        MethodologyConstant[] constants =
+        [
+            Scoped("EF", 2m, "A", a), Scoped("EF", 2m, "A", b),
+            Scoped("EF", 5m, "B", a), Scoped("EF", 5m, "B", b),
+            Scoped("EF", 1m, "D", a), Scoped("EF", 9m, "D", b),
+            Scoped("K2", 10m, "A", a), Scoped("K2", 10m, "A", b),
+            Scoped("K2", 20m, "B", a),
+            Scoped("K2", 30m, "D", a), Scoped("K2", 30m, "D", b),
+        ];
+        var oldStand = new RuleStand(rule: "@" + Fuel)
+            .WithSubstanceFormula("Total", "@X * CST.EF / CST.K2")
+            .WithSubstanceCodes("0301", "0304")
+            .WithConstants(constants);
+
+        var source = new VersionSource
+        {
+            MethodologyCode = "WS",
+            NumericMode = NumericMode.Strict,
+            Formulas = [new SourceFormula("Total", "@X * CST.EF / CST.K2", 1)],
+            Outputs = [new SourceOutput("Total", "kg")],
+            Constants =
+            [
+                SourceConstant.OfNumber("EF", 2m, "A", "0301"), SourceConstant.OfNumber("EF", 2m, "A", "0304"),
+                SourceConstant.OfNumber("EF", 5m, "B", "0301"), SourceConstant.OfNumber("EF", 5m, "B", "0304"),
+                SourceConstant.OfNumber("EF", 1m, "D", "0301"), SourceConstant.OfNumber("EF", 9m, "D", "0304"),
+                SourceConstant.OfNumber("K2", 10m, "A", "0301"), SourceConstant.OfNumber("K2", 10m, "A", "0304"),
+                SourceConstant.OfNumber("K2", 20m, "B", "0301"),
+                SourceConstant.OfNumber("K2", 30m, "D", "0301"), SourceConstant.OfNumber("K2", 30m, "D", "0304"),
+            ],
+            CategoryRule = "@" + Fuel,
+            Substances = ["0301", "0304"],
+            RowsClauses = [new SourceRowsClause(["T1"], [new SourceRule([])], [])],
+        };
+        var converted = ScriptConverter.Convert(source);
+        Assert.True(converted.Text is not null, string.Join(" | ", converted.Issues.Select(i => i.Code + ": " + i.Message)));
+
+        // Компактна форма справді застосована (інакше тест нічого не доводить) і спільна карта оголошена один раз.
+        Assert.Contains("Present[", converted.Text, StringComparison.Ordinal);
+        Assert.Single(converted.Text.Split("const Present = ", StringSplitOptions.None).Skip(1));
+
+        var scriptStand = new ScriptStand(converted.Text, NumericMode.Strict)
+            .WithSubstances(("0301", (int)RuleStand.SubstanceA), ("0304", (int)RuleStand.SubstanceB));
+        scriptStand.AddTable("T1");
+
+        (string Key, CalculationArgument[] Arguments)[] rows =
+        [
+            ("A", [Number("X", 10m), Text(Fuel, "A")]),
+            ("B", [Number("X", 10m), Text(Fuel, "B")]),
+            ("D", [Number("X", 10m), Text(Fuel, "D")]),
+            ("unknown", [Number("X", 10m), Text(Fuel, "Z")]),
+        ];
+        var inputs = Inputs(rows);
+        var keys = rows.Select(r => r.Key).ToList();
+
+        var oldModule = new DelegateModule(input => oldStand.RunAsync([.. input.Arguments]));
+        var scriptModule = new DelegateModule(input => scriptStand.RunArgumentsAsync([.. input.Arguments]));
+        var oldRows = await ParityComparer.ExecuteRowsAsync(keys, inputs, oldModule, null!, false, CancellationToken.None);
+        var scriptRows = await ParityComparer.ExecuteRowsAsync(keys, inputs, scriptModule, null!, false, CancellationToken.None);
+
+        // Контроль: набір розрізняє категорії (A: 10*2/10 = 2; D: 0304 -> 10*9/30 = 3), а в B є лише речовина 0301 (у K2 немає 0304).
+        Assert.Equal(2m, oldRows["A"].Values.First(v => v.SubstanceEntryId == 9001).Value);
+        Assert.Equal(2m, oldRows["A"].Values.First(v => v.SubstanceEntryId == 9002).Value);
+        Assert.Equal(3m, oldRows["D"].Values.First(v => v.SubstanceEntryId == 9002).Value);
+        Assert.Single(oldRows["B"].Values);
+        Assert.True(Show(oldRows) == Show(scriptRows), "OLD:\n" + Show(oldRows) + "\nNEW:\n" + Show(scriptRows));
+    }
+
     /// <summary>Сама функція мови: прибирає будь-які пробільні символи, не чіпає не-текст.</summary>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]

@@ -33,9 +33,11 @@ internal enum ConstContext : byte
 /// </summary>
 internal sealed class ConstantPlanner
 {
-    private enum ShapeKind : byte { Absent, Scalar, ByCategory, BySubstance, ByCategoryAndSubstance }
+    private enum ShapeKind : byte { Absent, Scalar, ByCategory, BySubstance, ByCategoryAndSubstance, ByCategoryWithPresence }
 
-    private sealed record Shape(ShapeKind Kind, ScriptConst? Value, string? Unit, bool DroppedNullKey = false);
+    // Presence: лише ByCategoryWithPresence - карта «категорія -> речовини, для яких значення є» (D-556).
+    private sealed record Shape(
+        ShapeKind Kind, ScriptConst? Value, string? Unit, bool DroppedNullKey = false, ScriptConst? Presence = null);
 
     private sealed record Piece(DateOnly Start, Shape Shape);
 
@@ -68,6 +70,8 @@ internal sealed class ConstantPlanner
     private readonly Dictionary<string, Group> _groups = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, long> _substanceIds = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> _unitIds = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _presenceNames = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _presenceDeclared = new(StringComparer.Ordinal);
     private readonly List<Profile> _order = [];
     private string? _categoryParam;
     private string? _substanceParam;
@@ -164,7 +168,8 @@ internal sealed class ConstantPlanner
 
         if (context == ConstContext.Library)
         {
-            if (pieces.Any(p => p.Shape.Kind is ShapeKind.ByCategory or ShapeKind.ByCategoryAndSubstance))
+            if (pieces.Any(p => p.Shape.Kind is ShapeKind.ByCategory or ShapeKind.ByCategoryAndSubstance
+                    or ShapeKind.ByCategoryWithPresence))
             {
                 DeclareLibraryParam(group.Code);
             }
@@ -555,6 +560,11 @@ internal sealed class ConstantPlanner
             return new Shape(ShapeKind.BySubstance, ScriptConst.FromMap(map), unit, dropped);
         }
 
+        if (WithPresence(table, categories, substances, unit) is { } compact)
+        {
+            return compact;
+        }
+
         var outer = new Dictionary<string, ScriptConst>(StringComparer.Ordinal);
         for (var i = 0; i < nc; i++)
         {
@@ -580,6 +590,61 @@ internal sealed class ConstantPlanner
         }
 
         return new Shape(ShapeKind.ByCategoryAndSubstance, ScriptConst.FromMap(outer), unit, dropped);
+    }
+
+    /// <summary>
+    /// D-556: константа «за категорією × речовиною», у якої в КОЖНІЙ категорії всі наявні клітинки однакові (речовин у
+    /// категорії може бути менше, ніж у версії). Стара форма — мапа мап — повторює те саме значення для кожної речовини
+    /// категорії: у C11_01 це 13 констант по ~1300 записів і 383 тис. знаків, більше за ліміт компілятора. Нова форма:
+    /// мапа «категорія → значення» і СПІЛЬНА для всіх констант з тим самим складом карта наявності «категорія → речовина →
+    /// true». Читання те саме за результатом: ключа категорії чи речовини немає - <c>#N/A</c>, як і в мапі мап.
+    /// </summary>
+    /// <returns><c>null</c> - форма не підходить (є неоднакові клітинки в категорії, порожні ключі чи нічого не стискається).</returns>
+    private static Shape? WithPresence(
+        ResolvedConstant?[,] table, List<string?> categories, List<string?> substances, string? unit)
+    {
+        var nc = categories.Count;
+        var ns = substances.Count;
+        if (nc < 2 || ns < 2 || categories.Any(c => c is null) || substances.Any(x => x is null))
+        {
+            return null;
+        }
+
+        var values = new Dictionary<string, ScriptConst>(StringComparer.Ordinal);
+        var presence = new Dictionary<string, ScriptConst>(StringComparer.Ordinal);
+        var cells = 0;
+        for (var i = 0; i < nc; i++)
+        {
+            ResolvedConstant? value = null;
+            var present = new Dictionary<string, ScriptConst>(StringComparer.Ordinal);
+            for (var j = 0; j < ns; j++)
+            {
+                if (table[i, j] is not { } cell)
+                {
+                    continue;
+                }
+
+                if (value is not null && !Equals(value, cell))
+                {
+                    return null;
+                }
+
+                value = cell;
+                present[substances[j]!] = ScriptConst.FromScalar(ExpressionValue.Boolean(true));
+            }
+
+            if (value is not null)
+            {
+                values[categories[i]!] = Scalar(value);
+                presence[categories[i]!] = ScriptConst.FromMap(present);
+                cells += present.Count;
+            }
+        }
+
+        // Стискання є лише тоді, коли в категорії кілька речовин з одним значенням.
+        return values.Count == 0 || cells <= values.Count
+            ? null
+            : new Shape(ShapeKind.ByCategoryWithPresence, ScriptConst.FromMap(values), unit, false, ScriptConst.FromMap(presence));
     }
 
     /// <summary>Чи відрізняється клітинка «без категорії / без речовини» від решти (тоді мапа її втрачає).</summary>
@@ -610,6 +675,7 @@ internal sealed class ConstantPlanner
             sb.Append(piece.Start.ToString("yyyyMMdd", CultureInfo.InvariantCulture)).Append('|')
               .Append(piece.Shape.Kind).Append('|').Append(piece.Shape.Unit).Append('|')
               .Append(piece.Shape.Value is null ? string.Empty : ScriptFormatter.FormatConst(piece.Shape.Value))
+              .Append(piece.Shape.Presence is null ? string.Empty : "|" + ScriptFormatter.FormatConst(piece.Shape.Presence))
               .Append('\n');
         }
 
@@ -680,8 +746,10 @@ internal sealed class ConstantPlanner
         }
 
         // Мапа, що залежить від дати, — функція (var-мапу індексувати не можна).
-        var needCat = pieces.Any(p => p.Shape.Kind is ShapeKind.ByCategory or ShapeKind.ByCategoryAndSubstance);
-        var needSub = pieces.Any(p => p.Shape.Kind is ShapeKind.BySubstance or ShapeKind.ByCategoryAndSubstance);
+        var needCat = pieces.Any(p => p.Shape.Kind is ShapeKind.ByCategory or ShapeKind.ByCategoryAndSubstance
+            or ShapeKind.ByCategoryWithPresence);
+        var needSub = pieces.Any(p => p.Shape.Kind is ShapeKind.BySubstance or ShapeKind.ByCategoryAndSubstance
+            or ShapeKind.ByCategoryWithPresence);
         var parameters = new List<string>();
         if (needCat)
         {
@@ -704,6 +772,7 @@ internal sealed class ConstantPlanner
                 ShapeKind.Scalar => pieceNames[i],
                 ShapeKind.ByCategory => pieceNames[i] + "[" + _categoryParam + "]",
                 ShapeKind.BySubstance => pieceNames[i] + "[" + _substanceParam + "]",
+                ShapeKind.ByCategoryWithPresence => PresenceRead(pieceNames[i], shape, _categoryParam!, _substanceParam!),
                 _ => pieceNames[i] + "[" + _categoryParam + "][" + _substanceParam + "]",
             };
         }
@@ -742,6 +811,8 @@ internal sealed class ConstantPlanner
     private string StaticUse(string name, Shape shape, string categoryVar, ConstContext context)
         => shape.Kind switch
         {
+            ShapeKind.ByCategoryWithPresence =>
+                PresenceRead(name, shape, CategoryReference(categoryVar, context), SubstanceReference(context)),
             ShapeKind.ByCategory => name + "[" + CategoryReference(categoryVar, context) + "]",
             ShapeKind.BySubstance => name + "[" + SubstanceReference(context) + "]",
             ShapeKind.ByCategoryAndSubstance =>
@@ -749,7 +820,7 @@ internal sealed class ConstantPlanner
             _ => name,
         };
 
-    private static string StaticDeclaration(string name, Shape shape, bool forceVarForAbsent)
+    private string StaticDeclaration(string name, Shape shape, bool forceVarForAbsent)
     {
         if (shape.Kind == ShapeKind.Absent)
         {
@@ -757,6 +828,35 @@ internal sealed class ConstantPlanner
         }
 
         var unit = shape.Unit is not null && ScriptText.IsName(shape.Unit) ? " : " + shape.Unit : string.Empty;
-        return "const " + name + unit + " = " + ScriptFormatter.FormatConst(shape.Value!) + ";\n";
+        var declaration = "const " + name + unit + " = " + ScriptFormatter.FormatConst(shape.Value!) + ";\n";
+
+        // Карта наявності спільна для констант з тим самим складом: оголошується один раз, перед першим читачем.
+        return shape.Presence is null ? declaration : PresenceDeclaration(shape) + declaration;
     }
+
+    /// <summary>Ім'я спільної карти наявності цієї форми.</summary>
+    private string PresenceName(Shape shape)
+    {
+        var key = ScriptFormatter.FormatConst(shape.Presence!);
+        if (!_presenceNames.TryGetValue(key, out var name))
+        {
+            name = _names.Allocate("Present", "_c", out _);
+            _presenceNames[key] = name;
+        }
+
+        return name;
+    }
+
+    private string PresenceDeclaration(Shape shape)
+    {
+        var name = PresenceName(shape);
+        return _presenceDeclared.Add(name)
+            ? "const " + name + " = " + ScriptFormatter.FormatConst(shape.Presence!) + ";\n"
+            : string.Empty;
+    }
+
+    /// <summary>Читання значення форми «категорія → значення» з картою наявності.</summary>
+    private string PresenceRead(string valueName, Shape shape, string categoryExpression, string substanceExpression)
+        => "(" + PresenceName(shape) + "[" + categoryExpression + "][" + substanceExpression + "] ? "
+           + valueName + "[" + categoryExpression + "] : null)";
 }
