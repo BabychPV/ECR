@@ -28,6 +28,7 @@ public sealed class DocumentsController(
     SubmitSheetHandler submit,
     ApproveSheetHandler approve,
     ReopenDocumentHandler reopen,
+    GetSourceImpactHandler sourceImpact,
     RecalculateDocumentHandler recalculate,
     GetDocumentTablesHandler tables,
     GetTableStatusHandler tableStatus,
@@ -532,11 +533,36 @@ public sealed class DocumentsController(
         ArgumentNullException.ThrowIfNull(request);
 
         await approve
-            .HandleAsync(id, request.SheetDefId, request.PeriodKey, request.Approved, request.Reason, request.SheetCopyId, ct)
+            .HandleAsync(
+                id, request.SheetDefId, request.PeriodKey, request.Approved, request.Reason, request.SheetCopyId,
+                ToConfirmation(request.ConfirmedImpact), ct)
             .ConfigureAwait(false);
 
         return NoContent();
     }
+
+    /// <summary>
+    /// B80 N5 (D-554): що зачепить затвердження чи повернення в роботу аркуша документа-джерела — залежні документи й
+    /// місяці (які вже затверджено), політика зв'язки (<c>None</c> | <c>Warn</c> | <c>ConfirmWithReason</c> | <c>Block</c>)
+    /// і відбиток впливу для <c>confirmedImpact</c>. Видимість — як у самої дії.
+    /// </summary>
+    /// <param name="id">Документ-джерело.</param>
+    /// <param name="sheetDefId">Аркуш.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="action"><c>approve</c> чи <c>reopen</c>.</param>
+    /// <param name="sheetCopyId">Копія аркуша; не <c>null</c> — впливу немає.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpGet("{id:long}/source-impact")]
+    [ProducesResponseType<SourceImpactDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<SourceImpactDto>> GetSourceImpact(
+        long id, [FromQuery] int sheetDefId, [FromQuery] int periodKey, [FromQuery] string action,
+        [FromQuery] long? sheetCopyId, CancellationToken ct)
+        => Ok(await sourceImpact.HandleAsync(id, sheetDefId, periodKey, action, sheetCopyId, ct).ConfigureAwait(false));
+
+    private static Application.Ports.SourceImpactConfirmation? ToConfirmation(ConfirmedImpactRequest? request)
+        => request is null ? null : new Application.Ports.SourceImpactConfirmation(request.Hash, request.Reason);
 
     /// <summary>
     /// Відкриває поданий документ. Право <c>Document.Reopen</c>.
@@ -556,7 +582,9 @@ public sealed class DocumentsController(
         ArgumentNullException.ThrowIfNull(request);
 
         await reopen
-            .HandleAsync(id, request.SheetDefId, request.PeriodKey, request.Reason, request.SheetCopyId, ct)
+            .HandleAsync(
+                id, request.SheetDefId, request.PeriodKey, request.Reason, request.SheetCopyId,
+                ToConfirmation(request.ConfirmedImpact), ct)
             .ConfigureAwait(false);
 
         return NoContent();
@@ -992,15 +1020,24 @@ public sealed record SheetWorkflowRequest(
 /// <param name="Approved"><c>true</c> — погодити, <c>false</c> — відхилити.</param>
 /// <param name="Reason">Причина; обов'язкова при відхиленні.</param>
 /// <param name="SheetCopyId">RS: копія аркуша; <c>null</c> — оригінал.</param>
+/// <param name="ConfirmedImpact">B80 N5: підтвердження впливу на залежні документи (потрібне за політикою зв'язки джерела).</param>
 public sealed record ApproveSheetRequest(
-    int SheetDefId, int PeriodKey, bool Approved, string? Reason, long? SheetCopyId = null);
+    int SheetDefId, int PeriodKey, bool Approved, string? Reason, long? SheetCopyId = null,
+    ConfirmedImpactRequest? ConfirmedImpact = null);
+
+/// <summary>B80 N5 (D-554): підтвердження впливу дії над документом-джерелом на залежні документи.</summary>
+/// <param name="Hash">Відбиток впливу з <c>GET …/source-impact</c> (<c>impactHash</c>); застарілий — <c>409 impactChanged</c>.</param>
+/// <param name="Reason">Причина; обов'язкова за політики <c>ConfirmWithReason</c>, іде в журнал безпеки.</param>
+public sealed record ConfirmedImpactRequest(string? Hash, string? Reason);
 
 /// <summary>Запит на відкриття поданого документа.</summary>
 /// <param name="SheetDefId">Аркуш.</param>
 /// <param name="PeriodKey">Період.</param>
 /// <param name="Reason">Причина; обов'язкова.</param>
 /// <param name="SheetCopyId">RS: копія аркуша; <c>null</c> — оригінал.</param>
-public sealed record ReopenDocumentRequest(int SheetDefId, int PeriodKey, string Reason, long? SheetCopyId = null);
+/// <param name="ConfirmedImpact">B80 N5: підтвердження впливу на залежні документи (повернення із затвердженого джерела).</param>
+public sealed record ReopenDocumentRequest(
+    int SheetDefId, int PeriodKey, string Reason, long? SheetCopyId = null, ConfirmedImpactRequest? ConfirmedImpact = null);
 
 /// <summary>Нова назва групи аркуша (оригінал і копії).</summary>
 /// <param name="NameL10n">Назва за мовами — така сама форма, як <c>SaveSheetDefRequest.NameL10n</c>.</param>

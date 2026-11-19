@@ -1578,6 +1578,17 @@
             "description": "`true` — погодити, `false` — відхилити.",
             "type": "boolean"
           },
+          "confirmedImpact": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ConfirmedImpactRequest",
+                "description": "B80 N5: підтвердження впливу на залежні документи (потрібне за політикою зв'язки джерела)."
+              }
+            ]
+          },
           "periodKey": {
             "description": "Період.",
             "format": "int32",
@@ -5016,6 +5027,30 @@
           "backgroundHex",
           "foregroundHex",
           "isBold"
+        ],
+        "type": "object"
+      },
+      "ConfirmedImpactRequest": {
+        "description": "B80 N5 (D-554): підтвердження впливу дії над документом-джерелом на залежні документи.",
+        "properties": {
+          "hash": {
+            "description": "Відбиток впливу з `GET …/source-impact` (`impactHash`); застарілий — `409 impactChanged`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "reason": {
+            "description": "Причина; обов'язкова за політики `ConfirmWithReason`, іде в журнал безпеки.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "hash",
+          "reason"
         ],
         "type": "object"
       },
@@ -22978,6 +23013,17 @@
       "ReopenDocumentRequest": {
         "description": "Запит на відкриття поданого документа.",
         "properties": {
+          "confirmedImpact": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ConfirmedImpactRequest",
+                "description": "B80 N5: підтвердження впливу на залежні документи (повернення із затвердженого джерела)."
+              }
+            ]
+          },
           "periodKey": {
             "description": "Період.",
             "format": "int32",
@@ -29881,6 +29927,124 @@
           "EventAttribute",
           "RowWindow"
         ]
+      },
+      "SourceImpactConsumerDto": {
+        "description": "Залежний документ × період у відповіді оцінки впливу.",
+        "properties": {
+          "approved": {
+            "description": "Період затверджено (перерахунок його не чіпає, він застаріє).",
+            "type": "boolean"
+          },
+          "bindingCode": {
+            "description": "Код зв'язки.",
+            "type": "string"
+          },
+          "documentId": {
+            "description": "Залежний документ.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "documentKey": {
+            "description": "Бізнес-ключ документа.",
+            "type": "string"
+          },
+          "periodKey": {
+            "description": "Період залежного документа.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "projectCode": {
+            "description": "Код проєкту.",
+            "type": "string"
+          },
+          "templateCode": {
+            "description": "Код шаблону залежного документа.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bindingCode",
+          "templateCode",
+          "documentId",
+          "projectCode",
+          "documentKey",
+          "periodKey",
+          "approved"
+        ],
+        "type": "object"
+      },
+      "SourceImpactDto": {
+        "description": "Вплив дії над документом-джерелом на залежні документи (B80 N5, D-554).",
+        "properties": {
+          "action": {
+            "description": "`approve` | `reopen`.",
+            "type": "string"
+          },
+          "approvedCount": {
+            "description": "З них затверджених.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "blocked": {
+            "description": "Дію відхилить сервер (`Block` і є затверджені залежні).",
+            "type": "boolean"
+          },
+          "consumers": {
+            "description": "Залежні, видимі користувачеві.",
+            "items": {
+              "$ref": "#/components/schemas/SourceImpactConsumerDto"
+            },
+            "type": "array"
+          },
+          "dependentCount": {
+            "description": "Усього залежних періодів.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "hiddenCount": {
+            "description": "Залежних, яких користувач не бачить (лише число).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "impactHash": {
+            "description": "Відбиток впливу: його клієнт повертає в `confirmedImpact.hash`.",
+            "type": "string"
+          },
+          "policy": {
+            "description": "Політика: `None` | `Warn` | `ConfirmWithReason` | `Block`.",
+            "type": "string"
+          },
+          "reasonRequired": {
+            "description": "Підтвердження потребує причини (`ConfirmWithReason`).",
+            "type": "boolean"
+          },
+          "required": {
+            "description": "Дія потребує підтвердження (чи відмовляє): політика не `None` і є затверджені залежні.",
+            "type": "boolean"
+          },
+          "sourceMonths": {
+            "description": "Зачеплені місяці джерела `yyyyMM`.",
+            "items": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "action",
+          "policy",
+          "required",
+          "blocked",
+          "reasonRequired",
+          "impactHash",
+          "sourceMonths",
+          "dependentCount",
+          "approvedCount",
+          "consumers",
+          "hiddenCount"
+        ],
+        "type": "object"
       },
       "SourceIssueDto": {
         "description": "✎ B80 N4 (R3.2): проблема документа-джерела для місяця документа-споживача.",
@@ -46442,6 +46606,124 @@
           }
         },
         "summary": "Перейменовує групу аркуша: оригінал і всі копії стають «&lt;Назва&gt; N». Право `Document.Create` + запис у проєкт.",
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/api/v1/documents/{id}/source-impact": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Документ-джерело.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Аркуш.",
+            "in": "query",
+            "name": "sheetDefId",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Період.",
+            "in": "query",
+            "name": "periodKey",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "`approve` чи `reopen`.",
+            "in": "query",
+            "name": "action",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Копія аркуша; не `null` — впливу немає.",
+            "in": "query",
+            "name": "sheetCopyId",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceImpactDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceImpactDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceImpactDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "B80 N5 (D-554): що зачепить затвердження чи повернення в роботу аркуша документа-джерела — залежні документи й\nмісяці (які вже затверджено), політика зв'язки (`None` | `Warn` | `ConfirmWithReason` | `Block`)\nі відбиток впливу для `confirmedImpact`. Видимість — як у самої дії.",
         "tags": [
           "Documents"
         ]
