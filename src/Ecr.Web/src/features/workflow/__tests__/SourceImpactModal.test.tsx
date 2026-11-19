@@ -1,6 +1,6 @@
 import axe from 'axe-core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { theme } from '@/shared/theme/theme';
 import { SourceImpactModal } from '../SourceImpactModal';
@@ -156,6 +156,26 @@ describe('SourceImpactModal: перекриття «й затверджені» 
     show(impact({ canRecalculateApproved: true, policy: 'Block', blocked: true }));
     expect(await screen.findByTestId('source-impact-blocked')).toBeTruthy();
     expect(screen.queryByTestId('source-impact-approved')).toBeNull();
+  });
+
+  it('F13: при повторному відкритті причина й галочка «й затверджені» очищені — причина попередньої дії не підписує наступну', async () => {
+    const value = impact({ canRecalculateApproved: true, policy: 'ConfirmWithReason', reasonRequired: true });
+    const view = (opened: boolean) => (
+      <MantineProvider theme={theme}>
+        <SourceImpactModal opened={opened} action="reopen" impact={value} onConfirm={vi.fn()} onClose={vi.fn()} />
+      </MantineProvider>
+    );
+    const { rerender } = render(view(true));
+
+    fireEvent.click(await screen.findByTestId('source-impact-approved'));
+    fireEvent.change(screen.getByLabelText(/sourceImpact\.reason\.label/), { target: { value: 'стара причина' } });
+    expect((screen.getByLabelText(/sourceImpact\.reason\.label/) as HTMLTextAreaElement).value).toBe('стара причина');
+
+    rerender(view(false));
+    rerender(view(true));
+
+    await waitFor(() => expect((screen.getByLabelText(/sourceImpact\.reason\.label/) as HTMLTextAreaElement).value).toBe(''));
+    expect((screen.getByTestId('source-impact-approved') as HTMLInputElement).checked).toBe(false);
   });
 
   it('правка: «Continue editing» і «не питати до кінця сесії» передаються в extras', async () => {
