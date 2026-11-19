@@ -182,6 +182,137 @@ public sealed class DocumentSourceStateSwitchTests(SqlServerFixture sql) : DbJob
         Assert.DoesNotContain(CalculationTrigger.DependentsTargetOf(approved.DocumentId, approved.PeriodKey), queued);
     }
 
+    /// <summary>
+    /// F13 (B179 L5): перемикання біта «читати з документа» при ввімкненому перерахунку ставить злиту задачу року,
+    /// пише подію з <c>queuedYears</c> і скидає кеш воріт; те саме значення удруге - нічого.
+    /// </summary>
+    /// <remarks>
+    /// Мутації в <c>SwitchDocumentSourceFlagsHandler</c>: прибрати <c>EnqueueCoalescedAsync</c> - червоний (задача); прибрати
+    /// <c>gate?.Invalidate()</c> - червоний (кеш воріт); прибрати <c>queuedYears</c> з події - червоний.
+    /// </remarks>
+    [Fact]
+    public async Task Біт_читання_з_документа_ставить_злиту_задачу_року_пише_подію_і_скидає_кеш_воріт()
+    {
+        var a = await ArrangeAsync();
+        var cache = new SourceBindingGateCache();
+        Assert.Contains(await GateBindingsAsync(cache), b => b.Id == a.BindingId && b.ReadFromDocument);
+        var loads = cache.Loads;
+
+        var off = await SwitchFlagsAsync(a, new SwitchDocumentSourceFlagsRequest(ReadFromDocument: false, RecalculateDependents: null), cache);
+
+        Assert.True(off.Changed);
+        Assert.Equal([Year], off.QueuedYears);
+        Assert.Equal(1, await QueuedAsync(a));
+        await using (var db = Sql.CreateContext())
+        {
+            var evt = Assert.Single(await EventRowsAsync(db, a.BindingId));
+            Assert.Equal(a.UserId, evt.ChangedByUserId);
+            Assert.Contains("\"kind\":\"flags\"", evt.DetailsJson, StringComparison.Ordinal);
+            Assert.Contains("\"oldReadFromDocument\":true", evt.DetailsJson, StringComparison.Ordinal);
+            Assert.Contains("\"newReadFromDocument\":false", evt.DetailsJson, StringComparison.Ordinal);
+            Assert.Contains($"\"queuedYears\":[{Year}]", evt.DetailsJson, StringComparison.Ordinal);
+        }
+
+        // Кеш воріт скинуто: знімок перечитано й бачить новий біт.
+        Assert.Contains(await GateBindingsAsync(cache), b => b.Id == a.BindingId && !b.ReadFromDocument);
+        Assert.Equal(loads + 1, cache.Loads);
+
+        // Повтор: нічого не змінилося - ні події, ні нового скидання кешу.
+        var again = await SwitchFlagsAsync(a, new SwitchDocumentSourceFlagsRequest(false, null), cache);
+        Assert.False(again.Changed);
+        Assert.Empty(again.QueuedYears);
+        Assert.Equal(1, await EventsAsync(a.BindingId));
+        await GateBindingsAsync(cache);
+        Assert.Equal(loads + 1, cache.Loads);
+    }
+
+    /// <summary>
+    /// F13: аварійний вимикач «перераховувати залежних» перерахунку не ставить (ні вимкнення, ні повторне ввімкнення), але
+    /// подію пише й кеш воріт скидає - зв'язка з вимкненим бітом зникає з воріт одразу; а зміна «читати з документа» за
+    /// вимкненого перерахунку теж нічого не ставить.
+    /// </summary>
+    /// <remarks>
+    /// Мутації: у <c>SwitchDocumentSourceFlagsHandler</c> прибрати умову <c>binding.ReadFromDocument != oldRead</c> - перша
+    /// частина червона; прибрати умову <c>binding.RecalculateDependents</c> - друга частина червона.
+    /// </remarks>
+    [Fact]
+    public async Task Вимикач_перерахунку_залежних_не_ставить_задачі_але_скидає_кеш_воріт_і_пише_подію()
+    {
+        var a = await ArrangeAsync();
+        var cache = new SourceBindingGateCache();
+        Assert.Contains(await GateBindingsAsync(cache), b => b.Id == a.BindingId);
+
+        var off = await SwitchFlagsAsync(a, new SwitchDocumentSourceFlagsRequest(null, RecalculateDependents: false), cache);
+        Assert.True(off.Changed);
+        Assert.Empty(off.QueuedYears);
+        Assert.Equal(0, await QueuedAsync(a));
+        Assert.DoesNotContain(await GateBindingsAsync(cache), b => b.Id == a.BindingId);
+        Assert.Equal(1, await EventsAsync(a.BindingId));
+
+        // Перерахунок вимкнено: зміна біта читання задачі не ставить (залежні тепер не перераховуються автоматично).
+        var read = await SwitchFlagsAsync(a, new SwitchDocumentSourceFlagsRequest(ReadFromDocument: false, null), cache);
+        Assert.True(read.Changed);
+        Assert.Empty(read.QueuedYears);
+        Assert.Equal(0, await QueuedAsync(a));
+
+        // Повторне ввімкнення перерахунку само по собі нічого не ставить: застарілі залежні перераховує адміністратор.
+        var on = await SwitchFlagsAsync(a, new SwitchDocumentSourceFlagsRequest(null, RecalculateDependents: true), cache);
+        Assert.True(on.Changed);
+        Assert.Empty(on.QueuedYears);
+        Assert.Equal(0, await QueuedAsync(a));
+        Assert.Contains(await GateBindingsAsync(cache), b => b.Id == a.BindingId && !b.ReadFromDocument);
+        Assert.Equal(3, await EventsAsync(a.BindingId));
+    }
+
+    /// <summary>F13: обидва біти одним запитом (читання змінюється, перерахунок лишається) - одна подія, одна задача.</summary>
+    [Fact]
+    public async Task Обидва_біти_одним_запитом_дають_одну_подію_і_одну_задачу()
+    {
+        var a = await ArrangeAsync();
+
+        var both = await SwitchFlagsAsync(a, new SwitchDocumentSourceFlagsRequest(ReadFromDocument: false, RecalculateDependents: true), null);
+
+        Assert.True(both.Changed);
+        Assert.Equal([Year], both.QueuedYears);
+        Assert.Equal(1, await EventsAsync(a.BindingId));
+        Assert.Equal(1, await QueuedAsync(a));
+    }
+
+    private async Task<IReadOnlyList<SourceGateBinding>> GateBindingsAsync(SourceBindingGateCache cache)
+    {
+        await using var db = Sql.CreateContext();
+        return (await cache.GetAsync(db, CancellationToken.None)).Bindings;
+    }
+
+    private async Task<SwitchDocumentSourceFlagsResponse> SwitchFlagsAsync(
+        Arranged a, SwitchDocumentSourceFlagsRequest request, ISourceBindingGateInvalidation? gate)
+    {
+        await using var host = NewHost();
+        var access = Substitute.For<IAccessDecisionService>();
+        access.BuildProfileAsync(a.UserId, Arg.Any<CancellationToken>())
+            .Returns(new AccessBuilder { UserId = a.UserId }.Permission(DocumentSourceBindings.Permission).Build());
+        var user = Substitute.For<ICurrentUser>();
+        user.UserId.Returns(a.UserId);
+        var overrides = Substitute.For<IDocumentSourceFlagOverrides>();
+        overrides.ReadFromDocument.Returns((bool?)null);
+
+        var handler = new SwitchDocumentSourceFlagsHandler(
+            new DocumentSourceBindingStore(host.Db, DependencyGraphTestKit.Provider(host.Db)),
+            overrides,
+            access,
+            user,
+            new UnitOfWork(host.Db),
+            new AuditWriter(host.Db),
+            new DbBackgroundJobScheduler(
+                host.Queue,
+                new QuartzJobScheduler(null, new JobProgressStore(host.Db), new SystemClock()),
+                new JobQueueSignal()),
+            new TestClock(Now),
+            gate);
+
+        return await handler.HandleAsync(a.BindingId, request, CancellationToken.None);
+    }
+
     private sealed record Arranged(int BindingId, int RegistryId, int UserId);
 
     /// <summary>
