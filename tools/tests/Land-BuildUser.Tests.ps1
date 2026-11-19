@@ -29,7 +29,7 @@ Describe 'Build-LandTemplate: -BuildUser' {
         $bad = @($calls | Where-Object { $_.CommandElements[1].Extent.Text -eq "'land-owner'" -or $_.CommandElements[1].Extent.Text -eq '"land-owner"' })
         if ($bad.Count) { throw ('LoginAs land-owner літералом: рядки ' + (($bad | ForEach-Object { $_.Extent.StartLineNumber }) -join ', ')) }
         $mine = @($calls | Where-Object { $_.CommandElements[1].Extent.Text -eq '$BuildUser' })
-        if ($mine.Count -ne 24) { throw "LoginAs `$BuildUser: $($mine.Count), очікувалось 24 (усі колишні land-owner + Stage-BranchGate + Stage-RequiredInputs + Stage-T7bStatus)" }
+        if ($mine.Count -ne 27) { throw "LoginAs `$BuildUser: $($mine.Count), очікувалось 27 (усі колишні land-owner + Stage-BranchGate + Stage-RequiredInputs + Stage-T7bStatus + Stage-LegacyRules + Stage-LegacyBindings + Stage-LegacyPublish)" }
         $text = [IO.File]::ReadAllText((Join-Path $repo 'tools/land/Build-LandTemplate.ps1'))
         foreach ($s in 'Import-ContractDictionaries.ps1', 'Apply-ContractHeader.ps1') {
             $line = ($text -split "`n") | Where-Object { $_ -like "*$s'*" -and $_ -like '*-User*' }
