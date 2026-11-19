@@ -473,6 +473,14 @@ public sealed class RecalculationJobSheetScopeResultsTests(SqlServerFixture sql)
         Assert.Equal(["A|2001", "B|2001"], await ShapeAsync(arranged));
         Assert.Equal(1, await SheetLogCountAsync(arranged, arranged.SecondSheetId, RecalculationSkips.AuditRecalculatedApproved));
         Assert.Equal(0, await SheetLogCountAsync(arranged, arranged.SecondSheetId, RecalculationSkips.AuditSkippedApproved));
+
+        // F13: у записі журналу — ХТО (автор перекриття, а не «0»/ініціатор прогону) і ЧОМУ (причина).
+        var (changedBy, changeReason, newJson) = await SheetLogRowAsync(
+            arranged, arranged.SecondSheetId, RecalculationSkips.AuditRecalculatedApproved);
+        Assert.Equal(9, changedBy);
+        Assert.Contains("Акт 12: виправлення складу", changeReason, StringComparison.Ordinal);
+        Assert.StartsWith("recalc-approved-override: ", changeReason, StringComparison.Ordinal);
+        Assert.Contains("approvedOverride", newJson, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -950,6 +958,35 @@ public sealed class RecalculationJobSheetScopeResultsTests(SqlServerFixture sql)
              WHERE DocumentId = {arranged.Document.DocumentId} AND SheetDefId = {sheetDefId}
                AND PeriodKey = {arranged.Document.PeriodKey.Value} AND SheetCopyId IS NULL
             """);
+    }
+
+    private static async Task<(int ChangedBy, string ChangeReason, string NewJson)> SheetLogRowAsync(
+        Arranged arranged, int sheetDefId, string operation)
+    {
+        await using var db = arranged.Builder.CreateContext();
+        var correlation = RecalculationSkips.AuditCorrelation(
+            arranged.Document.DocumentId, sheetDefId, arranged.Document.PeriodKey.Value);
+        var entityType = RecalculationSkips.AuditEntityType;
+
+        var changedBy = await db.Database
+            .SqlQuery<int>($"""
+                SELECT CAST(ChangedByUserId AS int) AS Value FROM aud.StructureChange
+                 WHERE EntityType = {entityType} AND Operation = {operation} AND CorrelationId = {correlation}
+                """)
+            .SingleAsync();
+        var reason = await db.Database
+            .SqlQuery<string>($"""
+                SELECT ChangeReason AS Value FROM aud.StructureChange
+                 WHERE EntityType = {entityType} AND Operation = {operation} AND CorrelationId = {correlation}
+                """)
+            .SingleAsync();
+        var json = await db.Database
+            .SqlQuery<string>($"""
+                SELECT NewJson AS Value FROM aud.StructureChange
+                 WHERE EntityType = {entityType} AND Operation = {operation} AND CorrelationId = {correlation}
+                """)
+            .SingleAsync();
+        return (changedBy, reason, json);
     }
 
     private static async Task<int> SheetLogCountAsync(Arranged arranged, int sheetDefId, string operation)
