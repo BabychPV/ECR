@@ -87,6 +87,26 @@ public sealed class MethodologyCycleRefusalTests
         await DependencyCyclePublishCheck.RefuseMethodologiesAsync(provider, Reader, before, default);
     }
 
+    /// <summary>
+    /// A2: перевірка МУСИТЬ брати <c>GetFreshAsync</c> (ревізію не з вікна кешу): кешований <c>GetAsync</c> віддає граф
+    /// ДО щойно збережених ребер, і цикл лишився б непоміченим. Постачальник тут розрізняє виклики: <c>GetAsync</c> -
+    /// старий граф без циклу, <c>GetFreshAsync</c> - свіжий із циклом.
+    /// </summary>
+    /// <remarks>Мутація: у <c>RefuseMethodologiesAsync</c> замінити <c>GetFreshAsync</c> на <c>GetAsync</c> - тест червоний.</remarks>
+    [Fact]
+    public async Task Перевірка_бере_свіжий_граф_а_не_кешований()
+    {
+        var provider = Substitute.For<IDependencyGraphProvider>();
+        provider.GetAsync(Arg.Any<CancellationToken>()).Returns(Graph(readerWritesInto: 30));
+        provider.GetFreshAsync(Arg.Any<CancellationToken>()).Returns(Graph(readerWritesInto: 10));
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => DependencyCyclePublishCheck.RefuseMethodologiesAsync(provider, Reader, new HashSet<int>(), default));
+
+        Assert.Equal("S → HSE400 → COMPOSITION → C → S", error.Details!["cycle"]);
+        await provider.DidNotReceive().GetAsync(Arg.Any<CancellationToken>());
+    }
+
     [Fact]
     public async Task Без_графа_перевірки_немає()
     {

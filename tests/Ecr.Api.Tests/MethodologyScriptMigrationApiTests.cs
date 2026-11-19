@@ -309,6 +309,79 @@ public sealed class MethodologyScriptMigrationApiTests(SqlServerFixture sql)
         Assert.Equal(0, await AuditCountAsync(s.MainVersionId, "cutover").ConfigureAwait(true));
     }
 
+    /// <summary>
+    /// MS x B179 (закриття A1): перемикання Formulas - Script, після якого скрипт читає довідник, який наповнює шаблон його
+    /// ж виходу (цикл шаблон - довідник - методологія - шаблон), - 422 <c>ECR-TMPL-0422</c> із полем <c>cycle</c>,
+    /// рушії не змінені; той самий стенд без читання довідника перемикається.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "B179")]
+    public async Task Switch_на_Script_що_замикає_цикл_залежностей_документів_відмовляє_422_а_без_циклу_проходить()
+    {
+        var s = await ArrangeAsync(209906).ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        var u = await SignInAllAsync(app, s).ConfigureAwait(true);
+
+        var registryCode = "B179SW" + Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
+        string templateCode;
+        await using (var db = Context())
+        {
+            var registry = new RegistryDef(EcrCode.Create(registryCode), Name(registryCode), isTemporal: false);
+            db.RegistryDefs.Add(registry);
+            await db.SaveChangesAsync().ConfigureAwait(true);
+            var fields = new List<RegistryFieldDef>();
+            foreach (var (code, type, ordinal) in new[]
+                     {
+                         ("YEAR", CellDataType.Int, 1), ("MONTH", CellDataType.Int, 2), ("STREAM", CellDataType.String, 3),
+                         ("INDICATOR", CellDataType.String, 4), ("VALUE", CellDataType.Decimal, 5),
+                     })
+            {
+                var field = new RegistryFieldDef(registry.Id, EcrCode.Create(code), Name(code), type, ordinal);
+                field.Update(Name(code), ordinal, ordinal < 5);
+                db.RegistryFieldDefs.Add(field);
+                fields.Add(field);
+                await db.SaveChangesAsync().ConfigureAwait(true);
+            }
+
+            db.RegistryKeyDefs.Add(new RegistryKeyDef(
+                registry.Id, EcrCode.Create("PK"), Name("PK"), [.. fields.Take(4)], isPrimary: true, ignoreCase: true, 1, Now));
+            db.DocumentSourceBindings.Add(new DocumentSourceBinding("B179SW_" + registryCode, s.Document.TemplateId, registry.Id));
+            await db.SaveChangesAsync().ConfigureAwait(true);
+            templateCode = await db.Templates.Where(t => t.Id == s.Document.TemplateId).Select(t => t.Code).SingleAsync().ConfigureAwait(true);
+        }
+
+        var main = await ConvertAsync(s.MainVersionId).ConfigureAwait(true);
+        var library = await ConvertAsync(s.LibraryVersionId).ConfigureAwait(true);
+        var lines = main.Text.ReplaceLineEndings(Environment.NewLine).Split(Environment.NewLine).ToList();
+        var at = lines.FindIndex(l => l.TrimStart().StartsWith("output ", StringComparison.Ordinal));
+        Assert.True(at >= 0, main.Text);
+        lines.Insert(at, $"var reg = REGFIELD(REGFIND(\"{registryCode}\", period.Year, period.Month, \"a\", \"b\"), \"VALUE\");");
+        var cyclic = string.Join(Environment.NewLine, lines);
+
+        await SetShadowAsync(s, cyclic, library.Text).ConfigureAwait(true);
+        var refused = await PostAsync(
+            app, u.Publisher, Url + "/switch",
+            new { versionIds = new[] { s.MainVersionId, s.LibraryVersionId }, engine = "Script", reason = "cycle" },
+            HttpStatusCode.UnprocessableEntity).ConfigureAwait(true);
+        Assert.Equal("ECR-TMPL-0422", refused.GetProperty("errorCode").GetString());
+        Assert.Equal("err.ECR-TMPL-0422.dependencyCycle", refused.GetProperty("messageKey").GetString());
+        Assert.Equal(
+            $"{s.MainCode} → {templateCode} → {registryCode} → {s.MainCode}",
+            refused.GetProperty("cycle").GetString());
+        Assert.Equal([MethodologyEngine.Formulas, MethodologyEngine.Formulas], await EnginesAsync(s).ConfigureAwait(true));
+        Assert.Equal(0, await AuditCountAsync(s.MainVersionId, "cycle").ConfigureAwait(true));
+
+        // Без читання довідника (зв'язка джерела є) - перемикання проходить.
+        await SetShadowAsync(s, main.Text, library.Text).ConfigureAwait(true);
+        await PostAsync(
+            app, u.Publisher, Url + "/switch",
+            new { versionIds = new[] { s.MainVersionId, s.LibraryVersionId }, engine = "Script", reason = "no cycle" },
+            HttpStatusCode.OK).ConfigureAwait(true);
+        Assert.Equal([MethodologyEngine.Script, MethodologyEngine.Script], await EnginesAsync(s).ConfigureAwait(true));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait(TestCategories.Category, TestCategories.Integration)]

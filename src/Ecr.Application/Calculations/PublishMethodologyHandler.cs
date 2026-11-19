@@ -1753,13 +1753,11 @@ public sealed class PublishMethodologyHandler(
             async token =>
             {
                 // MS x B179: нові ребра скрипта (довідники, результати інших методологій, прив'язки) не мають замкнути цикл
-                // залежностей документів; перевірка — після збереження ребер, у цій транзакції (відмова її відкочує).
+                // залежностей документів; перевірка — після публікації й збереження в цій транзакції (відмова її відкочує).
                 var onCycle = await Templates.DependencyCyclePublishCheck
                     .MethodologiesOnCycleAsync(dependencyGraph, [methodology.Id], token).ConfigureAwait(false);
                 await scriptChecks.RunAsync(methodology, version, from, token).ConfigureAwait(false);
                 await uow.SaveChangesAsync(token).ConfigureAwait(false);
-                await Templates.DependencyCyclePublishCheck
-                    .RefuseMethodologiesAsync(dependencyGraph, [methodology.Id], onCycle, token).ConfigureAwait(false);
 
                 diff = await BuildDiffAsync(methodology, version, previous, testCases, token).ConfigureAwait(false);
 
@@ -1768,6 +1766,12 @@ public sealed class PublishMethodologyHandler(
                 RejectRedGoldenSet(version, verdicts, greenTest);
 
                 methodology.PublishVersion(version, userId, changeReason, from, greenTest, clock.UtcNow);
+
+                // ⚠ Граф читає лише ОПУБЛІКОВАНІ версії методологій: перевірка циклу — після того, як версія стала
+                // опублікованою й збереженою в цій транзакції (відмова відкочує публікацію цілком).
+                await uow.SaveChangesAsync(token).ConfigureAwait(false);
+                await Templates.DependencyCyclePublishCheck
+                    .RefuseMethodologiesAsync(dependencyGraph, [methodology.Id], onCycle, token).ConfigureAwait(false);
 
                 await audit.WritePublicationEventAsync(
                     new PublicationEventRecord(
