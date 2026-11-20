@@ -85,6 +85,35 @@ describe('SourceImpactModal', () => {
     expect(sheets.textContent).toContain('SH_DRAFT · ⟦sourceImpact.status.pending⟧');
   });
 
+  it('D-1: період з одним аркушем не показує бейджів аркушів (вони лише для кількох)', async () => {
+    const base = impact().consumers[1]!;
+    show(
+      impact({
+        consumers: [{ ...base, sheets: [{ sheetDefId: 1, sheetCode: 'SH_ONLY', approved: false, willRecalculate: true }] }],
+      }),
+    );
+
+    await screen.findByRole('dialog');
+    expect(screen.queryByTestId('source-impact-sheets')).toBeNull();
+    expect(screen.queryByText(/SH_ONLY/)).toBeNull();
+  });
+
+  it('D-1: понад 20 аркушів — перші 20 бейджів і «+N» для решти', async () => {
+    const base = impact().consumers[1]!;
+    const sheets = Array.from({ length: 23 }, (_, i) => ({
+      sheetDefId: i + 1,
+      sheetCode: `SH_${String(i + 1).padStart(2, '0')}`,
+      approved: false,
+      willRecalculate: true,
+    }));
+    show(impact({ consumers: [{ ...base, sheets }] }));
+
+    const list = await screen.findByTestId('source-impact-sheets');
+    expect(list.textContent).toContain('SH_20');
+    expect(list.textContent).not.toContain('SH_21');
+    expect(screen.getByTestId('source-impact-sheets-more').textContent).toContain('sourceImpact.sheets.more');
+  });
+
   it('ConfirmWithReason: кнопка вимкнена, доки причина порожня; причина йде обрізаною', async () => {
     const { onConfirm } = show(impact({ policy: 'ConfirmWithReason', reasonRequired: true }));
 

@@ -69,6 +69,7 @@ export interface SourceImpactConsumerDto {
   approved: boolean;
   willRecalculate: boolean;
   skipReason: string | null;
+  sheets: { sheetDefId: number; sheetCode: string; approved: boolean; willRecalculate: boolean }[];
 }
 
 export interface SourceImpactDto {
