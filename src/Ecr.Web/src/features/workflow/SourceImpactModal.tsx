@@ -10,6 +10,17 @@ import type { ConfirmedImpact, SourceImpact, SourceImpactAction } from './source
 const MAX_SHEET_BADGES = 20;
 
 /**
+ * ✎ D-7: стан залежного періоду. `approved` — період затверджено повністю (не буде перерахований); `partial` — період
+ * перерахується, але частина його аркушів затверджена й лишиться як є (підсумок «затверджених періодів» рахує і такі —
+ * бейдж не має суперечити йому); `pending` — перерахується повністю.
+ */
+function periodState(c: SourceImpact['consumers'][number]): 'approved' | 'partial' | 'pending' {
+  if (!c.willRecalculate) return 'approved';
+
+  return c.sheets.some((s) => !s.willRecalculate) ? 'partial' : 'pending';
+}
+
+/**
  * B80 N5 (D-554): діалог впливу затвердження / повернення аркуша-джерела на залежні документи.
  *
  * Показує, які залежні документи й періоди зачепить дія і які з них уже затверджено (затверджений період не
@@ -81,15 +92,27 @@ export function SourceImpactModal({
             <Text size="sm" fw={600}>
               {t('sourceImpact.list')}
             </Text>
-            <List size="sm" spacing={4} data-testid="source-impact-consumers">
+            {/*
+              * ✎ D-7: горизонтальний скрол тіла (scrollWidth 627 > clientWidth 620). Причина: `List` ставить маркер
+              * ВСЕРЕДИНІ (`list-style-position: inside`), а `li` має `white-space: nowrap` — маркер стає в тому ж рядку, що й
+              * `inline-flex`-обгортка з бейджами, і рядок не переноситься, а виходить за край на ширину маркера (≈7 px).
+              * Маркер ззовні (у відступі `withPadding`) не забирає ширину в рядка — Group з `wrap` вміщується в тіло.
+              */}
+            <List
+              size="sm"
+              spacing={4}
+              withPadding
+              styles={{ root: { listStylePosition: 'outside' } }}
+              data-testid="source-impact-consumers"
+            >
               {impact.consumers.map((c) => (
                 <List.Item key={`${String(c.documentId)}-${String(c.periodKey)}-${c.bindingCode}`}>
                   <Group gap="xs" wrap="wrap">
                     <Text size="sm" span>
                       {c.projectCode} · {c.documentKey} · {formatPeriodKey(c.periodKey)}
                     </Text>
-                    <Badge size="sm" variant="light" color={c.willRecalculate ? 'statusInfo' : 'statusWarning'}>
-                      {t(c.willRecalculate ? 'sourceImpact.status.pending' : 'sourceImpact.status.approved')}
+                    <Badge size="sm" variant="light" color={periodState(c) === 'pending' ? 'statusInfo' : 'statusWarning'}>
+                      {t(`sourceImpact.status.${periodState(c)}`)}
                     </Badge>
                   </Group>
                   {c.sheets.length > 1 ? (
