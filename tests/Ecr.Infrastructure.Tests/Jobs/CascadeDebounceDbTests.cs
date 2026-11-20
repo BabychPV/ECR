@@ -33,7 +33,6 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 [Trait(TestCategories.Stage, TestCategories.Stage5)]
 [Trait(TestCategories.Category, TestCategories.Integration)]
 [Trait("Finding", "PSS-07")]
-[Trait("Requirement", "ФВ-12.2")]
 public sealed class CascadeDebounceDbTests(SqlServerFixture sql) : DbJobQueueTestsBase(sql)
 {
     private const long Consumer = 9_400_001;
