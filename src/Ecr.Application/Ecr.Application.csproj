@@ -9,6 +9,8 @@
     <!-- BOOTSTRAP-FIX (Q-008): IFormulaEngine оперує типами Ecr.Expressions.
          tz/03 §3.3: «Ecr.Application ... Знає Domain і Expressions». -->
     <ProjectReference Include="..\Ecr.Expressions\Ecr.Expressions.csproj" />
+    <!-- MS: CompiledScript у CalculationBindingContext (METHODOLOGY-SCRIPT-PLAN §4.1) -->
+    <ProjectReference Include="..\Ecr.Scripting\Ecr.Scripting.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -34,6 +34,9 @@ public sealed class MethodologyDraftStore(EcrDbContext db) : IMethodologyDraftSt
     public async Task<Methodology?> FindByCodeAsync(string code, CancellationToken ct)
         => await db.Methodologies
             .AsNoTracking()
+            // ⚠ Із версіями: компілятор скриптів вибирає версію бібліотеки на дату (`VersionOn`); без них
+            // жодна бібліотека не знаходилась би в реальній базі.
+            .Include(m => m.Versions)
             .FirstOrDefaultAsync(m => m.Code == code, ct)
             .ConfigureAwait(false);
 
@@ -522,6 +525,15 @@ public sealed class MethodologyDraftStore(EcrDbContext db) : IMethodologyDraftSt
             clone.SetPerSubstance(source.IsPerSubstance);
 
             db.MethodologyOutputs.Add(clone);
+        }
+
+        // MS01: таблиці, які читає скрипт. Матеріалізуються зі скрипта, але клон мусить мати їх
+        // одразу: перерахунок шукає методології-читачі за цими рядками, а не за текстом.
+        foreach (var source in await ChildrenAsync(
+                     db.MethodologyReadTables.Where(t => t.MethodologyVersionId == sourceVersionId), ct)
+                     .ConfigureAwait(false))
+        {
+            db.MethodologyReadTables.Add(new MethodologyReadTable(targetVersionId, source.TableCode));
         }
 
         foreach (var source in await ChildrenAsync(

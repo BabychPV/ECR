@@ -235,6 +235,18 @@ function ConsistencyIcon(): JSX.Element {
   );
 }
 
+/** Dependency graph — три вузли, з'єднані стрілками (джерело → споживачі). */
+function DependencyGraphIcon(): JSX.Element {
+  return (
+    <Icon>
+      <circle cx="6" cy="6" r="2.5" />
+      <circle cx="18" cy="12" r="2.5" />
+      <circle cx="6" cy="18" r="2.5" />
+      <path d="M8.2 7.3 15.8 10.7M8.2 16.7l7.6-3.4" />
+    </Icon>
+  );
+}
+
 /** Interface texts — репліка з рядками тексту (каталог рядків). */
 function UiStringsIcon(): JSX.Element {
   return (
@@ -308,6 +320,7 @@ const navIcons: Record<string, () => JSX.Element> = {
   snapshots: SnapshotsIcon,
   audit: AuditIcon,
   consistency: ConsistencyIcon,
+  dependencyGraph: DependencyGraphIcon,
   uiStrings: UiStringsIcon,
   health: HealthIcon,
   notifications: NotificationsIcon,

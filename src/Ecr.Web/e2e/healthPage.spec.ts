@@ -70,7 +70,7 @@ test.describe('Health: банер, секції, Check now, Copy diagnostics (UI
     expect(text).toMatch(/^db: /m);
     expect(text).not.toMatch(/Password|Server=|Data Source=|unreadableKeyCertificates/i);
     expect(text).toMatch(
-      /^Hse400CompositionFromDocument: (true|false) \((Default|Binding|Environment|ProgramData|AppSettings|CommandLine|Other)\)/m,
+      /^Hse400ReadFromDocument: (true|false) \((Default|Binding|Environment|ProgramData|AppSettings|CommandLine|Other)\)/m,
     );
   });
 });

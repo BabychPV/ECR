@@ -79,6 +79,8 @@ export function createMethodologyVersion(
     readonly versionNumber: string;
     readonly copyFromVersionId: number | null;
     readonly level: CalculationLevel;
+    /** ⛔ Явно: пропущений рушій сервер читає як `Formulas`. */
+    readonly engine: 'Formulas' | 'Script';
   },
 ): Promise<MethodologyDraftVersionDto> {
   return apiFetch<MethodologyDraftVersionDto>(
@@ -90,6 +92,7 @@ export function createMethodologyVersion(
         versionNumber: body.versionNumber,
         copyFromVersionId: body.copyFromVersionId,
         level: body.level,
+        engine: body.engine,
       } satisfies CreateMethodologyVersionRequest),
     },
   );

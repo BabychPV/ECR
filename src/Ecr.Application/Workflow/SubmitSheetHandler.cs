@@ -85,6 +85,10 @@ public sealed class SubmitSheetHandler(
     // months block Submit (PERMIT-SPLIT). `null` (direct constructor in tests) — no history.
     IPermitHistoryStore? permitHistory = null,
 
+    // ✎ MS (план §13.1, §13.9): таблиці, які ЧИТАЮТЬ скрипти методологій аркуша, і таблиці їхніх джерел результатів
+    // входять у замикання застарілості. `null` — як до MS (тести без порту).
+    IScriptRuntimeStore? scriptRuntime = null,
+
     // ✎ B80 (N2b, A3): споживач зв'язки ApprovedOnly не подається, поки місяць джерела не затверджено. `null` (тестові
     // фабрики) — перевірки немає.
     ISourceMonthApprovalGate? sourceMonthGate = null)
@@ -407,11 +411,12 @@ public sealed class SubmitSheetHandler(
         // (`SubmitSheetQueryCountTests`). Семантика та сама — «бодай одна
         // таблиця аркуша прив'язана».
         var sheetHasMethodologyBinding = false;
+        IReadOnlyList<int> boundMethodologyIds = [];
         if (tables.Count > 0)
         {
-            var boundMethodologyIds = await methodologies
+            boundMethodologyIds = await methodologies
                 .GetMethodologyIdsBoundToTablesAsync(tables.Keys, ct)
-                .ConfigureAwait(false);
+                .ConfigureAwait(false) ?? [];
             sheetHasMethodologyBinding = boundMethodologyIds is { Count: > 0 };
         }
 
@@ -425,7 +430,7 @@ public sealed class SubmitSheetHandler(
             // у чужій таблиці. Без замикання подання проходило із застарілим
             // числом методології.
             var freshnessTables = await FreshnessTablesAsync(
-                snapshot, templateVersionId, tables.Keys, ct).ConfigureAwait(false);
+                snapshot, templateVersionId, tables.Keys, boundMethodologyIds, ct).ConfigureAwait(false);
             var freshness = await methodologies
                 .GetCalculationFreshnessAsync(documentId, periodKey, freshnessTables, ct)
                 .ConfigureAwait(false);
@@ -984,9 +989,16 @@ public sealed class SubmitSheetHandler(
         Domain.Entities.Configuration.TemplateVersionSnapshot snapshot,
         int templateVersionId,
         IEnumerable<int> sheetTableIds,
+        IReadOnlyCollection<int> boundMethodologyIds,
         CancellationToken ct)
     {
         var scope = new HashSet<int>(sheetTableIds);
+
+        // ✎ MS (§13.1, §13.9): методологія-скрипт аркуша читає й ІНШІ таблиці (`table T = …`) і результати інших
+        // методологій — правка там робить її число застарілим так само, як правка власної таблиці. Замикання: самі
+        // методології аркуша + джерела їхніх результатів (транзитивно); додаються таблиці, які вони читають, і
+        // таблиці, до яких прив'язані виходи джерел (там лежать входи джерел).
+        await ScriptFreshnessScope.ExtendAsync(scriptRuntime, snapshot, scope, boundMethodologyIds, ct).ConfigureAwait(false);
 
         var tableByFormula = snapshot.Sheets
             .SelectMany(s => s.Tables)

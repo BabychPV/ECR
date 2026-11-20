@@ -183,7 +183,7 @@ public sealed class DocumentSourceMonthGateTests(SqlServerFixture sql)
     private async Task<UnapprovedSourceMonth?> FindAsync(long documentId, int periodKey, bool? readOverride = null)
     {
         await using var db = sql.CreateContext();
-        return await new DocumentSourceMonthGate(db, readOverride)
+        return await new DocumentSourceMonthGate(db, readOverride: readOverride, DependencyGraphTestKit.Provider(db))
             .FindUnapprovedSourceMonthAsync(documentId, periodKey, CancellationToken.None);
     }
 
@@ -231,9 +231,9 @@ public sealed class DocumentSourceMonthGateTests(SqlServerFixture sql)
         await db.SaveChangesAsync();
 
         var binding = new DocumentSourceBinding($"B80N2B_{registry.Code}", source.TemplateId, registry.Id);
-        binding.AddConsumer(land.TemplateId);
         db.DocumentSourceBindings.Add(binding);
         await db.SaveChangesAsync();
+        await DependencyGraphTestKit.MakeConsumerAsync(db, land, registry.Code);
         await db.DocumentSourceBindings.Where(b => b.Id == binding.Id)
             .ExecuteUpdateAsync(s => s.SetProperty(b => b.SourceState, state));
 

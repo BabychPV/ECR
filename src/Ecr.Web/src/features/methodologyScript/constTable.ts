@@ -1,0 +1,903 @@
+import { ScriptKeywords } from './scriptLanguage';
+
+/**
+ * Розбір і друк літерала `const`-мапи (граматика `constValue`/`mapLit`, план MS
+ * 3.3) у сітку для `ConstTableDialog` (13.5). Чистий модуль без Monaco.
+ */
+
+/**
+ * Число літерала зберігається ВИХІДНИМ ТЕКСТОМ (`1.0`, `0.10`, 28 значущих цифр): ні `Number`, ні `String` його не
+ * чіпають; нормалізується лише десяткова кома → крапка.
+ */
+export interface ConstNumber {
+  readonly kind: 'number';
+  readonly num: string;
+}
+
+export type ConstCell = ConstNumber | string | boolean | null;
+
+export function constNumber(num: string): ConstNumber {
+  return { kind: 'number', num };
+}
+
+/** Коментарі й вихідний вигляд запису першого рівня — щоб «Застосувати» їх не губило. */
+export interface RowNote {
+  /** Коментарі над записом (кожен — окремий, дослівно). */
+  readonly leading: readonly string[];
+  /** Коментар у кінці рядка запису (кілька — через пробіл). */
+  readonly trailing: string;
+  /** Вихідний текст запису й підпис його вмісту: поки вміст не змінено, друкується байт-у-байт. */
+  readonly source: { readonly signature: string; readonly text: string } | null;
+}
+
+export interface ConstNotes {
+  /** Вирівняно з `rowKeys`. */
+  readonly rows: readonly RowNote[];
+  /** Коментарі після останнього запису. */
+  readonly end: readonly string[];
+}
+
+const EmptyRowNote: RowNote = { leading: [], trailing: '', source: null };
+
+/**
+ * Сітка: рядки — ключі першого рівня. `columnKeys === null` — однорівнева мапа
+ * (одна колонка значень, `cells[i][0]`).
+ */
+export interface ConstGrid {
+  readonly rowKeys: readonly string[];
+  readonly columnKeys: readonly string[] | null;
+  readonly cells: readonly (readonly ConstCell[])[];
+  readonly notes?: ConstNotes | undefined;
+}
+
+export type ConstParseErrorCode =
+  | 'notMap'
+  | 'syntax'
+  | 'mixedLevels'
+  | 'tooDeep'
+  | 'duplicateKey';
+
+export type ConstParseResult =
+  | { readonly ok: true; readonly grid: ConstGrid }
+  | {
+      readonly ok: false;
+      readonly code: ConstParseErrorCode;
+      readonly offset: number;
+    };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Лексер
+// ─────────────────────────────────────────────────────────────────────────────
+
+type TokenKind = 'ident' | 'number' | 'string' | 'punct';
+
+interface Token {
+  readonly kind: TokenKind;
+  /** Для рядка — розекранований вміст; інакше — вихідний текст. */
+  readonly text: string;
+  readonly start: number;
+  readonly end: number;
+}
+
+const IdentifierStart = /[A-Za-z_]/;
+const IdentifierPart = /[A-Za-z0-9_]/;
+const NumberRx = /\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/y;
+
+/** Екранування як на сервері: `\n`, `\\`, `\"`, `\'`; невідоме лишається як є — разом зі скісною. */
+function unescapeChar(e: string): string {
+  if (e === 'n') return '\n';
+  if (e === '"' || e === "'" || e === '\\') return e;
+  return `\\${e}`;
+}
+
+/** Ключ-число так, як його читає сервер (`ScriptNumbers.KeyText`): без зайвих нулів (`1.50` → `1.5`, `007` → `7`). */
+function numberKeyText(raw: string): string {
+  let text = raw.replace(/^0+(?=\d)/, '');
+  if (/[eE]/.test(text)) return String(Number(text));
+  if (text.includes('.')) text = text.replace(/0+$/, '').replace(/\.$/, '');
+  return text;
+}
+
+interface Comment {
+  readonly start: number;
+  readonly end: number;
+  /** Дослівно, від `//` чи `/*`; без кінцевого переносу рядка. */
+  readonly text: string;
+}
+
+interface Lexed {
+  readonly tokens: Token[];
+  readonly comments: Comment[];
+}
+
+function tokenize(text: string): Lexed | { readonly error: number } {
+  const tokens: Token[] = [];
+  const comments: Comment[] = [];
+  let i = 0;
+  while (i < text.length) {
+    const c = text[i] ?? '';
+    if (/\s/.test(c)) {
+      i++;
+    } else if (c === '/' && text[i + 1] === '/') {
+      const nl = text.indexOf('\n', i);
+      const end = nl === -1 ? text.length : nl;
+      comments.push({ start: i, end, text: text.slice(i, end).replace(/\s+$/, '') });
+      i = nl === -1 ? text.length : nl + 1;
+    } else if (c === '/' && text[i + 1] === '*') {
+      const close = text.indexOf('*/', i + 2);
+      if (close === -1) return { error: i };
+      comments.push({ start: i, end: close + 2, text: text.slice(i, close + 2) });
+      i = close + 2;
+    } else if (c === '"' || c === "'") {
+      // ⛔ Рівно як `ScriptLexer.String`: перенос рядка (`\n`, `\r\n`) закриває рядок помилкою; `\` перед `\n` — не
+      // екранування; `\` перед `\r\n` екранує `\r` (далі `\n` усе одно помилка).
+      let j = i + 1;
+      let value = '';
+      let closed = false;
+      while (j < text.length && text[j] !== '\n' && !(text[j] === '\r' && text[j + 1] === '\n')) {
+        const d = text[j] ?? '';
+        if (d === c) {
+          closed = true;
+          j++;
+          break;
+        }
+        if (d === '\\' && j + 1 < text.length && text[j + 1] !== '\n') {
+          value += unescapeChar(text[j + 1] ?? '');
+          j += 2;
+        } else {
+          value += d;
+          j++;
+        }
+      }
+      if (!closed) return { error: i };
+      tokens.push({ kind: 'string', text: value, start: i, end: j });
+      i = j;
+    } else if (IdentifierStart.test(c)) {
+      let j = i + 1;
+      while (j < text.length) {
+        const d = text[j] ?? '';
+        if (IdentifierPart.test(d)) {
+          j++;
+        } else if (d === '{') {
+          const close = text.indexOf('}', j);
+          if (close === -1 || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(text.slice(j + 1, close))) break;
+          j = close + 1;
+        } else break;
+      }
+      tokens.push({ kind: 'ident', text: text.slice(i, j), start: i, end: j });
+      i = j;
+    } else if (/[0-9]/.test(c)) {
+      NumberRx.lastIndex = i;
+      const m = NumberRx.exec(text);
+      const raw = m?.[0] ?? c;
+      tokens.push({ kind: 'number', text: raw, start: i, end: i + raw.length });
+      i += raw.length;
+    } else {
+      tokens.push({ kind: 'punct', text: c, start: i, end: i + 1 });
+      i++;
+    }
+  }
+  return { tokens, comments };
+}
+
+/** Кількість коментарів у тексті (0, якщо текст не розбирається). */
+export function countComments(text: string): number {
+  const lexed = tokenize(text);
+  return 'error' in lexed ? 0 : lexed.comments.length;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Розбір
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface Entry {
+  readonly key: string;
+  readonly value: ValueNode;
+  /** Початок ключа. */
+  readonly at: number;
+  /** Кінець значення, виключно. */
+  readonly valueEnd: number;
+}
+
+interface MapNode {
+  readonly entries: Entry[];
+}
+type ValueNode = ConstCell | MapNode;
+
+class ParseFailure extends Error {
+  constructor(
+    readonly code: ConstParseErrorCode,
+    readonly offset: number,
+  ) {
+    super(code);
+  }
+}
+
+function isMap(value: ValueNode): value is MapNode {
+  return typeof value === 'object' && value !== null && 'entries' in value;
+}
+
+class Cursor {
+  position = 0;
+  constructor(
+    readonly tokens: readonly Token[],
+    readonly length: number,
+  ) {}
+
+  peek(): Token | undefined {
+    return this.tokens[this.position];
+  }
+
+  here(): number {
+    return this.peek()?.start ?? this.length;
+  }
+
+  /** Кінець останнього спожитого токена. */
+  lastEnd(): number {
+    return this.tokens[this.position - 1]?.end ?? this.length;
+  }
+
+  isPunct(char: string): boolean {
+    const token = this.peek();
+    return token?.kind === 'punct' && token.text === char;
+  }
+
+  expectPunct(char: string): void {
+    if (!this.isPunct(char)) throw new ParseFailure('syntax', this.here());
+    this.position++;
+  }
+}
+
+function parseValue(cursor: Cursor): ValueNode {
+  const token = cursor.peek();
+  if (token === undefined) throw new ParseFailure('syntax', cursor.here());
+
+  if (token.kind === 'punct' && token.text === '{') return parseMap(cursor);
+
+  if (token.kind === 'punct' && token.text === '-') {
+    cursor.position++;
+    const next = cursor.peek();
+    if (next?.kind !== 'number') throw new ParseFailure('syntax', cursor.here());
+    cursor.position++;
+    return constNumber(`-${next.text}`);
+  }
+  if (token.kind === 'number') {
+    cursor.position++;
+    return constNumber(token.text);
+  }
+  if (token.kind === 'string') {
+    cursor.position++;
+    return token.text;
+  }
+  if (token.kind === 'ident' && (token.text === 'true' || token.text === 'false')) {
+    cursor.position++;
+    return token.text === 'true';
+  }
+  throw new ParseFailure('syntax', token.start);
+}
+
+function parseMap(cursor: Cursor): MapNode {
+  cursor.expectPunct('{');
+  const entries: Entry[] = [];
+  while (!cursor.isPunct('}')) {
+    const keyToken = cursor.peek();
+    if (keyToken === undefined || keyToken.kind === 'punct') {
+      throw new ParseFailure('syntax', cursor.here());
+    }
+    cursor.position++;
+    cursor.expectPunct(':');
+    const value = parseValue(cursor);
+    const valueEnd = cursor.lastEnd();
+    const key = keyToken.kind === 'number' ? numberKeyText(keyToken.text) : keyToken.text;
+    if (entries.some((e) => e.key === key)) {
+      throw new ParseFailure('duplicateKey', keyToken.start);
+    }
+    entries.push({ key, value, at: keyToken.start, valueEnd });
+    if (cursor.isPunct(',')) cursor.position++;
+    else if (!cursor.isPunct('}')) throw new ParseFailure('syntax', cursor.here());
+  }
+  cursor.expectPunct('}');
+  return { entries };
+}
+
+/** Розбирає літерал мапи (`{ … }`) у сітку. */
+export function parseConstLiteral(text: string): ConstParseResult {
+  const lexed = tokenize(text);
+  if ('error' in lexed) return { ok: false, code: 'syntax', offset: lexed.error };
+  const cursor = new Cursor(lexed.tokens, text.length);
+  try {
+    if (!cursor.isPunct('{')) return { ok: false, code: 'notMap', offset: cursor.here() };
+    const root = parseMap(cursor);
+    if (cursor.peek() !== undefined) throw new ParseFailure('syntax', cursor.here());
+    return { ok: true, grid: toGrid(root, text, lexed.comments) };
+  } catch (error) {
+    if (error instanceof ParseFailure) return { ok: false, code: error.code, offset: error.offset };
+    throw error;
+  }
+}
+
+function toGrid(root: MapNode, text: string, comments: readonly Comment[]): ConstGrid {
+  const rowKeys = root.entries.map((e) => e.key);
+  const nested = root.entries.filter((e) => isMap(e.value));
+
+  if (nested.length === 0) {
+    return {
+      rowKeys,
+      columnKeys: null,
+      cells: root.entries.map((e) => [e.value as ConstCell]),
+      notes: buildNotes(root, text, comments),
+    };
+  }
+  if (nested.length !== root.entries.length) {
+    const firstScalar = root.entries.find((e) => !isMap(e.value));
+    throw new ParseFailure('mixedLevels', firstScalar?.at ?? 0);
+  }
+
+  const columnKeys: string[] = [];
+  for (const entry of root.entries) {
+    for (const inner of (entry.value as MapNode).entries) {
+      if (isMap(inner.value)) throw new ParseFailure('tooDeep', inner.at);
+      if (!columnKeys.includes(inner.key)) columnKeys.push(inner.key);
+    }
+  }
+
+  const cells = root.entries.map((entry) => {
+    const inner = new Map((entry.value as MapNode).entries.map((e) => [e.key, e.value as ConstCell]));
+    return columnKeys.map((key) => inner.get(key) ?? null);
+  });
+  return { rowKeys, columnKeys, cells, notes: buildNotes(root, text, comments) };
+}
+
+/** Підпис вмісту запису: збігається з тим, що рахує друк, лише поки запис не змінено. */
+function rowSignature(key: string, body: string | readonly (readonly [string, string])[]): string {
+  return JSON.stringify([key, body]);
+}
+
+/**
+ * Коментарі прив'язуються до записів першого рівня: у тому ж рядку після запису — до нього (trailing), інакше — до
+ * наступного запису (leading), після останнього — в кінець. Коментарі всередині запису (`Key: { A: 1, // x … }`)
+ * лишаються в його вихідному тексті (`source`), який друкується як був, поки запис не змінено.
+ */
+function buildNotes(root: MapNode, text: string, comments: readonly Comment[]): ConstNotes {
+  const leading: string[][] = root.entries.map(() => []);
+  const trailing: string[][] = root.entries.map(() => []);
+  const end: string[] = [];
+
+  for (const comment of comments) {
+    if (root.entries.some((e) => e.at <= comment.start && comment.end <= e.valueEnd)) continue;
+    let prev = -1;
+    let next = -1;
+    root.entries.forEach((e, i) => {
+      if (e.valueEnd <= comment.start) prev = i;
+      if (next === -1 && e.at >= comment.end) next = i;
+    });
+    const prevEntry = prev === -1 ? undefined : root.entries[prev];
+    if (prevEntry !== undefined && !text.slice(prevEntry.valueEnd, comment.start).includes('\n')) {
+      trailing[prev]?.push(comment.text);
+    } else if (next !== -1) {
+      leading[next]?.push(comment.text);
+    } else {
+      end.push(comment.text);
+    }
+  }
+
+  return {
+    rows: root.entries.map((e, i) => ({
+      leading: leading[i] ?? [],
+      trailing: (trailing[i] ?? []).join(' '),
+      source: {
+        signature: rowSignature(
+          e.key,
+          isMap(e.value)
+            ? e.value.entries.map((inner) => [inner.key, printCell(inner.value as ConstCell)] as const)
+            : printCell(e.value),
+        ),
+        text: text.slice(e.at, e.valueEnd),
+      },
+    })),
+    end,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Друк
+// ─────────────────────────────────────────────────────────────────────────────
+
+const Reserved = new Set(ScriptKeywords);
+
+/** Ключ без лапок — лише коли це ідентифікатор і не ключове слово. */
+export function printKey(key: string): string {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(key) && !Reserved.has(key) ? key : printString(key);
+}
+
+function printString(value: string): string {
+  const escaped = value
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\r?\n/g, '\\n');
+  return `"${escaped}"`;
+}
+
+/** Друк значення комірки; `null` не друкується (запису немає). */
+export function printCell(cell: ConstCell): string {
+  if (cell === null) return '';
+  if (typeof cell === 'object') return cell.num;
+  if (typeof cell === 'boolean') return cell ? 'true' : 'false';
+  return printString(cell);
+}
+
+/** Збирає тіло літерала: коментарі над записами, у кінці рядка й після останнього; `null`-рядок не друкується. */
+function assemble(
+  grid: ConstGrid,
+  rowLines: readonly (string | null)[],
+  indent: string,
+): string {
+  const out: string[] = [];
+  let pending: string[] = [];
+  rowLines.forEach((line, r) => {
+    const note = grid.notes?.rows[r] ?? EmptyRowNote;
+    if (line === null) {
+      // Запис не друкується — його коментарі лишаються, окремими рядками перед наступним записом.
+      pending.push(...note.leading, ...(note.trailing === '' ? [] : [note.trailing]));
+      return;
+    }
+    for (const comment of [...pending, ...note.leading]) out.push(`${indent}${comment}`);
+    pending = [];
+    out.push(note.trailing === '' ? line : `${line} ${note.trailing}`);
+  });
+  for (const comment of [...pending, ...(grid.notes?.end ?? [])]) out.push(`${indent}${comment}`);
+  return out.length === 0 ? '{}' : `{\n${out.join('\n')}\n}`;
+}
+
+/**
+ * Канонічний вигляд: рядок на ключ першого рівня, вкладена мапа в тому ж
+ * рядку з вирівняними колонками, кінцеві коми. Порожні (`null`) комірки в
+ * літерал не потрапляють. Коментарі друкуються на своїх місцях; запис, вміст
+ * якого не змінено, друкується своїм вихідним текстом байт-у-байт.
+ */
+export function printConstGrid(grid: ConstGrid, indent = '    '): string {
+  const keyTexts = grid.rowKeys.map((k) => `${printKey(k)}:`);
+  const sourceOf = (r: number, signature: string): string | null => {
+    const source = grid.notes?.rows[r]?.source;
+    return source?.signature === signature ? source.text : null;
+  };
+
+  if (grid.columnKeys === null) {
+    // Однорівнева мапа: рядок без значення (`null`) у літерал не потрапляє.
+    const values = grid.rowKeys.map((_, r) => printCell(grid.cells[r]?.[0] ?? null));
+    const width = Math.max(0, ...keyTexts.filter((_, r) => values[r] !== '').map((k) => k.length));
+    return assemble(
+      grid,
+      grid.rowKeys.map((key, r) => {
+        const value = values[r] ?? '';
+        if (value === '') return null;
+        const raw = sourceOf(r, rowSignature(key, value));
+        return raw === null ? `${indent}${(keyTexts[r] ?? '').padEnd(width)} ${value},` : `${indent}${raw},`;
+      }),
+      indent,
+    );
+  }
+
+  const columnKeys = grid.columnKeys;
+  const keyWidth = Math.max(0, ...keyTexts.map((k) => k.length));
+  const texts = grid.rowKeys.map((_, r) =>
+    columnKeys.map((key, c) => {
+      const value = printCell(grid.cells[r]?.[c] ?? null);
+      return value === '' ? null : `${printKey(key)}: ${value}`;
+    }),
+  );
+  const widths = columnKeys.map((_, c) =>
+    Math.max(0, ...texts.map((row) => row[c]?.length ?? 0)),
+  );
+
+  return assemble(
+    grid,
+    texts.map((row, r) => {
+      const signature = rowSignature(
+        grid.rowKeys[r] ?? '',
+        columnKeys.flatMap((key, c) => {
+          const value = printCell(grid.cells[r]?.[c] ?? null);
+          return value === '' ? [] : [[key, value] as const];
+        }),
+      );
+      const raw = sourceOf(r, signature);
+      if (raw !== null) return `${indent}${raw},`;
+
+      let lastPresent = -1;
+      row.forEach((text, c) => {
+        if (text !== null) lastPresent = c;
+      });
+      const parts: string[] = [];
+      row.forEach((text, c) => {
+        const width = (widths[c] ?? 0) + 1;
+        if (text === null) {
+          parts.push(''.padEnd(width));
+        } else {
+          parts.push((c < lastPresent ? `${text},` : text).padEnd(width));
+        }
+      });
+      const body = parts.join(' ').trimEnd();
+      const inner = body === '' ? '{}' : `{ ${body} }`;
+      return `${indent}${(keyTexts[r] ?? '').padEnd(keyWidth)} ${inner},`;
+    }),
+    indent,
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Вставка з Excel (TSV)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Нормалізований текст числа або `null`: лише десяткова кома → крапка, прибрані роздільники груп (пробіл) і `+`,
+ * `.5` → `0.5`. ⛔ Цифри не чіпаються — без `Number`/`String`, тож `1.0` і 28 значущих цифр лишаються як є.
+ */
+function normalizeNumberText(text: string): string | null {
+  const grouped = /^[+-]?\d{1,3}(?:[ \u00A0\u202F]\d{3})+(?:[.,]\d+)?$/.test(text)
+    ? text.replace(/[ \u00A0\u202F]/g, '')
+    : text;
+  if (!/^[+-]?(?:\d+(?:[.,]\d+)?|[.,]\d+)(?:[eE][+-]?\d+)?$/.test(grouped)) return null;
+  const negative = grouped.startsWith('-');
+  let body = grouped.replace(/^[+-]/, '').replace(',', '.');
+  if (body.startsWith('.')) body = `0${body}`;
+  if (!Number.isFinite(Number(body))) return null;
+  return negative ? `-${body}` : body;
+}
+
+/**
+ * Число, у якому кома чи крапка може бути і роздільником тисяч, і десятковим знаком (`1,234.56`, `1.234,56`,
+ * `1,234,567`, `1.234.567`): мовчки вгадувати не можна — комірка дістає помилку, а рядок вводять у лапках.
+ */
+export function isAmbiguousNumberText(raw: string): boolean {
+  const text = raw.trim();
+  const commaGroups = /^[+-]?\d{1,3}(?:,\d{3})+(?:\.\d+)?$/.exec(text);
+  if (commaGroups !== null) return text.includes('.') || (text.match(/,/g)?.length ?? 0) >= 2;
+  const dotGroups = /^[+-]?\d{1,3}(?:\.\d{3})+(?:,\d+)?$/.exec(text);
+  if (dotGroups !== null) return text.includes(',') || (text.match(/\./g)?.length ?? 0) >= 2;
+  return false;
+}
+
+/** Текст комірки → значення: число (кома → крапка), `true`/`false`, рядок; порожнє — `null`. */
+export function parseCellText(raw: string): ConstCell {
+  const text = raw.trim();
+  if (text === '') return null;
+  // Рядок у лапках — завжди рядок: так показується текст, який інакше прочитався б числом, булевим чи порожнім.
+  const quoted = /^"((?:[^"\\]|\\.)*)"$/.exec(text);
+  if (quoted !== null) return (quoted[1] ?? '').replace(/\\(.)/gs, (_, e: string) => unescapeChar(e));
+  const lower = text.toLowerCase();
+  if (lower === 'true') return true;
+  if (lower === 'false') return false;
+
+  const number = normalizeNumberText(text);
+  return number === null ? text : constNumber(number);
+}
+
+/**
+ * Значення комірки → текст для поля сітки. ⛔ Рядок, який `parseCellText` прочитав би інакше (`"007"`, `"1,5"`,
+ * `"true"`, `""`, `"1,234.56"`, з пробілами по краях), показується в лапках — інакше «Застосувати» мовчки змінило б
+ * його тип.
+ */
+export function cellToText(cell: ConstCell): string {
+  if (cell === null) return '';
+  if (typeof cell === 'string') {
+    return parseCellText(cell) === cell && !isAmbiguousNumberText(cell) ? cell : printString(cell);
+  }
+  if (typeof cell === 'object') return cell.num;
+  return String(cell);
+}
+
+/**
+ * Текст поля, вставленого з Excel: те, що побачить користувач у комірці. Неоднозначне число лишається як є (комірка
+ * покаже помилку), решта — як `cellToText(parseCellText(…))`.
+ */
+export function pastedCellText(field: string): string {
+  return isAmbiguousNumberText(field) ? field.trim() : cellToText(parseCellText(field));
+}
+
+/** Комірки, текст яких не можна однозначно прочитати (див. `isAmbiguousNumberText`). */
+export function ambiguousCells(
+  cells: readonly (readonly string[])[],
+): { readonly row: number; readonly column: number }[] {
+  const result: { row: number; column: number }[] = [];
+  cells.forEach((row, r) =>
+    row.forEach((text, c) => {
+      if (isAmbiguousNumberText(text)) result.push({ row: r, column: c });
+    }),
+  );
+  return result;
+}
+
+/** Розбирає буфер обміну Excel у прямокутник комірок. */
+export function parseTsv(text: string): ConstCell[][] {
+  return parseTsvRaw(text).map((row) => row.map((field) => parseCellText(field)));
+}
+
+/** Буфер Excel → прямокутник РЯДКІВ без перетворень (для ключів: `01` не стає `1`). */
+export function parseTsvRaw(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = '';
+  let i = 0;
+  let atFieldStart = true;
+
+  const endRow = (): void => {
+    row.push(field);
+    rows.push(row);
+    row = [];
+    field = '';
+    atFieldStart = true;
+  };
+
+  while (i < text.length) {
+    const c = text[i] ?? '';
+    if (atFieldStart && c === '"') {
+      i++;
+      while (i < text.length) {
+        if (text[i] === '"') {
+          if (text[i + 1] === '"') {
+            field += '"';
+            i += 2;
+            continue;
+          }
+          i++;
+          break;
+        }
+        field += text[i];
+        i++;
+      }
+      atFieldStart = false;
+    } else if (c === '\t') {
+      row.push(field);
+      field = '';
+      atFieldStart = true;
+      i++;
+    } else if (c === '\r' || c === '\n') {
+      endRow();
+      i += c === '\r' && text[i + 1] === '\n' ? 2 : 1;
+    } else {
+      field += c;
+      atFieldStart = false;
+      i++;
+    }
+  }
+  if (field !== '' || row.length > 0) endRow();
+
+  // Excel завершує буфер порожнім рядком.
+  while (rows.length > 0 && (rows[rows.length - 1] ?? []).every((f) => f.trim() === '')) rows.pop();
+
+  const width = Math.max(0, ...rows.map((r) => r.length));
+  return rows.map((r) => Array.from({ length: width }, (_, c) => r[c] ?? ''));
+}
+
+/** Сітка з довільним типом комірки (у діалозі — текст поля вводу). */
+export interface GridOf<T> {
+  readonly rowKeys: readonly string[];
+  readonly columnKeys: readonly string[] | null;
+  readonly cells: readonly (readonly T[])[];
+  readonly notes?: ConstNotes | undefined;
+}
+
+/** Нотатки, вирівняні за кількістю рядків (нові рядки — без коментарів). */
+export function padNotes(notes: ConstNotes | undefined, rowCount: number): ConstNotes | undefined {
+  if (notes === undefined) return undefined;
+  const rows = notes.rows.slice(0, rowCount);
+  while (rows.length < rowCount) rows.push(EmptyRowNote);
+  return { rows, end: notes.end };
+}
+
+/** Нотатки без рядка `index` (разом із його коментарями). */
+export function dropNotesRow(notes: ConstNotes | undefined, index: number): ConstNotes | undefined {
+  return notes === undefined ? undefined : { rows: notes.rows.filter((_, i) => i !== index), end: notes.end };
+}
+
+/**
+ * Нотатки для нової сітки зі вставленої таблиці: коментарі переходять до рядків із тим самим ключем, коментарі в
+ * кінці лишаються; решта пропадає (рядка більше немає) — діалог попередить про це за лічильником коментарів.
+ */
+export function carryNotes(
+  notes: ConstNotes | undefined,
+  oldKeys: readonly string[],
+  newKeys: readonly string[],
+): ConstNotes | undefined {
+  if (notes === undefined) return undefined;
+  return {
+    rows: newKeys.map((key) => {
+      const old = notes.rows[oldKeys.indexOf(key)];
+      return old ?? EmptyRowNote;
+    }),
+    end: notes.end,
+  };
+}
+
+/**
+ * Вставляє прямокутник у сітку з клітинки `(row, col)`; нові рядки й колонки
+ * дістають імена `Key{n}` / `Col{n}`, порожні клітинки — `empty`. Для
+ * однорівневої сітки колонка лише одна.
+ */
+export function pasteBlock<T>(
+  grid: GridOf<T>,
+  block: readonly (readonly T[])[],
+  row: number,
+  col: number,
+  empty: T,
+): GridOf<T> {
+  const rowKeys = [...grid.rowKeys];
+  const columnKeys = grid.columnKeys === null ? null : [...grid.columnKeys];
+  const cells = grid.cells.map((r) => [...r]);
+  const maxCols = columnKeys === null ? 1 : Number.POSITIVE_INFINITY;
+
+  block.forEach((blockRow, dr) => {
+    const r = row + dr;
+    while (rowKeys.length <= r) {
+      rowKeys.push(freshKey(rowKeys, 'Key'));
+      cells.push(Array.from({ length: columnKeys?.length ?? 1 }, () => empty));
+    }
+    blockRow.forEach((value, dc) => {
+      const c = col + dc;
+      if (c >= maxCols) return;
+      if (columnKeys !== null) {
+        while (columnKeys.length <= c) {
+          columnKeys.push(freshKey(columnKeys, 'Col'));
+          for (const existing of cells) existing.push(empty);
+        }
+      }
+      const target = cells[r];
+      if (target !== undefined) target[c] = value;
+    });
+  });
+
+  return { rowKeys, columnKeys, cells, notes: padNotes(grid.notes, rowKeys.length) };
+}
+
+/** `pasteBlock` для готової сітки значень. */
+export function pasteIntoGrid(
+  grid: ConstGrid,
+  block: readonly (readonly ConstCell[])[],
+  row: number,
+  col: number,
+): ConstGrid {
+  return pasteBlock<ConstCell>(grid, block, row, col, null);
+}
+
+/**
+ * Усю таблицю з Excel: перший стовпець — ключі рядків; перший рядок — ключі
+ * колонок, якщо `columnHeaders`; без заголовків колонок і з двома стовпцями —
+ * однорівнева мапа.
+ */
+export function gridFromTsv(text: string, columnHeaders: boolean): ConstGrid | null {
+  const grid = textGridFromTsv(text, columnHeaders);
+  if (grid === null) return null;
+  return {
+    rowKeys: grid.rowKeys,
+    columnKeys: grid.columnKeys,
+    cells: grid.cells.map((row) => row.map((field) => parseCellText(field))),
+  };
+}
+
+/** `gridFromTsv` у вигляді тексту комірок — як їх бачить користувач (неоднозначні числа лишаються як є). */
+export function textGridFromTsv(text: string, columnHeaders: boolean): GridOf<string> | null {
+  const raw = parseTsvRaw(text);
+  if (raw.length === 0) return null;
+  const width = raw[0]?.length ?? 0;
+  if (width < 2) return null;
+
+  // ⛔ Ключі беруться з сирого тексту: `01`, `1.50` лишаються такими, як у Excel, а не числом.
+  const block = raw.map((row) => row.map((field) => pastedCellText(field)));
+  const keyOf = (field: string | undefined): string => (field ?? '').trim();
+  const keys = raw.map((row) => keyOf(row[0]));
+
+  if (columnHeaders) {
+    const header = raw[0] ?? [];
+    return {
+      rowKeys: keys.slice(1),
+      columnKeys: header.slice(1).map((field) => keyOf(field)),
+      cells: block.slice(1).map((r) => r.slice(1)),
+    };
+  }
+
+  if (width === 2) {
+    return { rowKeys: keys, columnKeys: null, cells: block.map((r) => [r[1] ?? '']) };
+  }
+  return {
+    rowKeys: keys,
+    columnKeys: Array.from({ length: width - 1 }, (_, i) => `Col${String(i + 1)}`),
+    cells: block.map((r) => r.slice(1)),
+  };
+}
+
+function freshKey(existing: readonly string[], prefix: string): string {
+  let n = existing.length + 1;
+  while (existing.includes(`${prefix}${String(n)}`)) n++;
+  return `${prefix}${String(n)}`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Перевірка сітки
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface ConstGridIssue {
+  readonly kind: 'emptyKey' | 'duplicateKey';
+  readonly axis: 'row' | 'column';
+  readonly index: number;
+}
+
+/** Порожні й повторні ключі — літерал із ними не побудувати. */
+export function gridIssues(grid: ConstGrid): ConstGridIssue[] {
+  const issues: ConstGridIssue[] = [];
+  const check = (keys: readonly string[], axis: 'row' | 'column'): void => {
+    const seen = new Set<string>();
+    keys.forEach((key, index) => {
+      if (key.trim() === '') issues.push({ kind: 'emptyKey', axis, index });
+      else if (seen.has(key)) issues.push({ kind: 'duplicateKey', axis, index });
+      seen.add(key);
+    });
+  };
+  check(grid.rowKeys, 'row');
+  if (grid.columnKeys !== null) check(grid.columnKeys, 'column');
+  return issues;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Пошук літерала під курсором
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface ConstRange {
+  /** Ім'я константи. */
+  readonly name: string;
+  /** Початок `const`. */
+  readonly declarationStart: number;
+  /** Початок літерала (`{`). */
+  readonly start: number;
+  /** Кінець літерала (після `}`), виключно. */
+  readonly end: number;
+}
+
+/**
+ * Літерал `const`-мапи під курсором: курсор у межах оголошення від `const` до
+ * `;` (включно). Скалярні константи й курсор поза ними дають `null`.
+ */
+export function findConstAt(text: string, offset: number): ConstRange | null {
+  const lexed = tokenize(text);
+  if ('error' in lexed) return null;
+  const tokens = lexed.tokens;
+
+  for (let i = 0; i < tokens.length; i++) {
+    const head = tokens[i];
+    if (head?.kind !== 'ident' || head.text !== 'const') continue;
+    const name = tokens[i + 1];
+    if (name?.kind !== 'ident') continue;
+
+    let j = i + 2;
+    if (tokens[j]?.text === ':' && tokens[j]?.kind === 'punct' && tokens[j + 1]?.kind === 'ident') j += 2;
+    const eq = tokens[j];
+    const open = tokens[j + 1];
+    if (eq?.kind !== 'punct' || eq.text !== '=' || open?.kind !== 'punct' || open.text !== '{') continue;
+
+    let depth = 0;
+    let k = j + 1;
+    let close: Token | undefined;
+    for (; k < tokens.length; k++) {
+      const token = tokens[k];
+      if (token?.kind !== 'punct') continue;
+      if (token.text === '{') depth++;
+      else if (token.text === '}') {
+        depth--;
+        if (depth === 0) {
+          close = token;
+          break;
+        }
+      }
+    }
+    if (close === undefined) return null;
+
+    const semicolon = tokens[k + 1];
+    const declarationEnd =
+      semicolon?.kind === 'punct' && semicolon.text === ';' ? semicolon.end : close.end;
+
+    if (offset >= head.start && offset <= declarationEnd) {
+      return { name: name.text, declarationStart: head.start, start: open.start, end: close.end };
+    }
+    i = k;
+  }
+  return null;
+}

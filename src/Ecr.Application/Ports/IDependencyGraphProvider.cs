@@ -20,6 +20,14 @@ public interface IDependencyGraphProvider
     public Task<DependencyGraphSnapshot> GetAsync(CancellationToken ct);
 
     /// <summary>
+    /// Граф за ревізією, прочитаною з бази ЗАРАЗ (без вікна мемоїзації ревізії): для перевірок усередині транзакції, що
+    /// щойно записала ребра (MS x B179: відмова публікації методології, що замкнула цикл) — звичайний <see cref="GetAsync"/>
+    /// до 5 с віддавав би граф до запису.
+    /// </summary>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<DependencyGraphSnapshot> GetFreshAsync(CancellationToken ct);
+
+    /// <summary>
     /// B179 L3: чи наповнює шаблон хоч один довідник (<c>cfg.DocumentSourceBinding</c>) — один запит без побудови графа.
     /// Шаблон без зв'язки не має вихідних ребер, тож цикл через нього неможливий.
     /// </summary>

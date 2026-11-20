@@ -35,7 +35,6 @@ import { useEditAssignmentsAction } from '@/features/editAssignments/EditAssignm
 import { documentLockOf, hasLockedSheet, locksDataActions } from '@/features/documents/documentLock';
 import { useDocumentPeriodReopen } from '@/features/documents/periodReopen/useDocumentPeriodReopen';
 import { DocumentProgress } from '@/features/documents/DocumentProgress';
-import { useDocumentPending } from '@/features/grid/autosave';
 import { permitRowWarningsOf, publishRowFindings } from '@/features/grid/rowAttentionStore';
 import type { HeldEdit } from '@/features/grid/pendingStore';
 import { editsDeferToServer, isEditable } from '@/features/workflow/sheetEditability';
@@ -246,9 +245,12 @@ const RestoreEditsBanner = lazy(async () => ({
 // ✎ `UI-22`: чанк той самий, вхід — робоче місце аркуша (дерево таблиць + одна таблиця), яке
 // всередині малює `SheetTables`.
 type SheetTablesComponent = typeof import('@/features/grid/SheetWorkspace')['SheetWorkspace'];
+type PendingHostComponent = typeof import('@/features/grid/DocumentPendingHost')['DocumentPendingHost'];
 
 interface GridModuleState {
   readonly component: SheetTablesComponent | null;
+  /** Хост незбережених правок (`D14-12`): приходить РАЗОМ із сіткою, монтується перед нею. */
+  readonly pendingHost: PendingHostComponent | null;
   readonly error: unknown;
 }
 
@@ -260,7 +262,7 @@ function useClearCellNavigationOnUnmount(): void {
 }
 
 function useSheetTablesModule(): GridModuleState & { readonly reload: () => void } {
-  const [state, setState] = useState<GridModuleState>({ component: null, error: null });
+  const [state, setState] = useState<GridModuleState>({ component: null, pendingHost: null, error: null });
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
@@ -269,15 +271,15 @@ function useSheetTablesModule(): GridModuleState & { readonly reload: () => void
     // ⚠ Компонент лежить у ПОЛІ об'єкта стану, а не в стані напряму: `useState`
     // трактує функцію як апдейтер, і компонент (він теж функція) інакше був би
     // ВИКЛИКАНИЙ замість того, щоб бути збереженим.
-    void import('@/features/grid/SheetWorkspace').then(
-      (module) => {
-        if (alive) setState({ component: module.SheetWorkspace, error: null });
+    void Promise.all([import('@/features/grid/SheetWorkspace'), import('@/features/grid/DocumentPendingHost')]).then(
+      ([module, host]) => {
+        if (alive) setState({ component: module.SheetWorkspace, pendingHost: host.DocumentPendingHost, error: null });
       },
       (error: unknown) => {
         // ⛔ Мовчазний провал тут коштував би дорожче за будь-який інший:
         // екран лишився б із заглушками назавжди, і це виглядало б рівно як
         // дефект, який ця картка й закриває.
-        if (alive) setState({ component: null, error });
+        if (alive) setState({ component: null, pendingHost: null, error });
       },
     );
 
@@ -812,10 +814,9 @@ export function DocumentPage(): JSX.Element {
    * це за себе: правка молодша за 500 мс зникала при перемиканні аркуша
    * мовчки, а `beforeunload` віз лише ту сітку, у якій стояв курсор (`W-02`).
    *
-   * ⚠ Імпорт статичний і бюджет чанка (`D-132`) не чіпає: `autosave.ts` не
-   * тягне ядро `RevoGrid` — воно лишається за виразом `import()` вище.
+   * ⚠ Хук тепер у `DocumentPendingHost` (лінивий чанк разом із сіткою, `useSheetTablesModule`): статичний
+   * `autosave.ts` важив ≈4 КБ gzip і виводив маршрут за межу `D-132`. Хост монтується нижче, перед сіткою.
    */
-  useDocumentPending(documentId, session.data?.userId);
 
   // Видалення чернетки: пункт — у меню «More», відмова сервера — банером під рядком дій.
   const deletion = useDeleteDocumentAction({
@@ -898,7 +899,14 @@ export function DocumentPage(): JSX.Element {
     return <DocumentNotFound error={missingError} />;
   }
 
-  return recovery ?? (
+  // ⚠ Хост правок — на рівні сторінки, а не всередині `AsyncBoundary`/`recovery`: правки, утримані при зміні періоду,
+  // переживають і відмову періоду, і перезапит (`DocumentPage.heldEditOtherPeriod`). Монтується перед сіткою.
+  const PendingHost = gridModule.pendingHost;
+
+  return (
+    <>
+    {PendingHost !== null && <PendingHost documentId={documentId} ownerUserId={session.data?.userId} />}
+    {recovery ?? (
     /*
      * ⛔ Обгортка навколо ВСЬОГО екрана: заголовок — це бізнес-ключ документа,
      * тобто теж дані. Помилки обох запитів зведені разом, бо екран без
@@ -1421,6 +1429,8 @@ export function DocumentPage(): JSX.Element {
     </Stack>
       )}
     </AsyncBoundary>
+    )}
+    </>
   );
 }
 

@@ -200,6 +200,9 @@ public static class DependencyInjection
         services.AddScoped<IConstantStore, ConstantStore>();
         services.AddSingleton<CalculationYearResultsCache>(); // CRY03: власне сховище зі стелею, сирі факти до звуження
         services.AddScoped<ICalculationResultStore, CalculationResultStore>();
+        services.AddScoped<IScriptRuntimeStore, ScriptRuntimeStore>();
+        services.AddScoped<IScriptMigrationStore, ScriptMigrationStore>();
+        services.AddScoped<IVersionSourceReader, VersionSourceReader>();
 
         // CALC-RESULTS: огляд року читає той самий екземпляр сховища (правило актуального прогону — одне).
         services.AddScoped<ICalculationYearReader>(sp => (CalculationResultStore)sp.GetRequiredService<ICalculationResultStore>());
@@ -456,6 +459,7 @@ public static class DependencyInjection
         services.AddScoped<ISourceApprovalChangeTrigger, Jobs.SourceApprovalChangeTrigger>(); // B80 N2a → B179 L2: Approve/Reopen/видалення джерела за ApprovedOnly
         services.AddScoped<ISourceMonthApprovalGate>(sp => DocumentSourceMonthGate.Create(sp)); // B80 N2b: Submit/Approve споживача — лише з затвердженим місяцем джерела
         services.AddScoped<ISourceIssueReader>(sp => DocumentSourceMonthGate.Create(sp)); // B80 N4: проблеми джерела в панелі проблем розрахунку
+        services.AddScoped<ISourceImpactAssessor, SourceImpactAssessor>(); // B80 N5 (D-554): вплив Approve/Reopen джерела на залежні + підтвердження
         services.AddScoped<IFormulaRecalculationJob, Jobs.FormulaRecalculationJob>();
         // WW-03: постановка перерахунку в періоди-читачі (міжперіодні посилання).
         services.AddScoped<Jobs.CrossPeriodFanOut>();

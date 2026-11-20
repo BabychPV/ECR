@@ -63,6 +63,12 @@ public static class DependencyGraphAssembler
                 new DependencyEvidence("calculationBinding", write.CalculationBindingId, null, write.Detail));
         }
 
+        foreach (var read in inputs.MethodologyResultReads)
+        {
+            Add(M(read.SourceMethodologyId), M(read.ReaderMethodologyId), DependencyEdgeKind.MethodologyResult, PeriodScope.All,
+                new DependencyEvidence("methodologyDependency", read.ReaderMethodologyId, null, null));
+        }
+
         foreach (var rule in inputs.RuleReads)
         {
             Add(R(rule.ReadRegistryDefId), R(rule.RuleRegistryDefId), DependencyEdgeKind.RegistryRule, PeriodScope.All,
@@ -111,6 +117,9 @@ public static class DependencyGraphAssembler
         var methodologyReaders = edges
             .Where(e => e.Key.Kind == DependencyEdgeKind.Methodology)
             .ToLookup(e => e.Key.From.Id, e => (Methodology: e.Key.To.Id, Scope: e.Value));
+        var resultReaders = edges
+            .Where(e => e.Key.Kind == DependencyEdgeKind.MethodologyResult)
+            .ToLookup(e => e.Key.From.Id, e => e.Key.To.Id);
         var writes = edges
             .Where(e => e.Key.Kind == DependencyEdgeKind.WritesInto)
             .ToLookup(e => e.Key.From.Id, e => e.Key.To.Id);
@@ -132,7 +141,7 @@ public static class DependencyGraphAssembler
             foreach (var (registry, direct) in reach)
             {
                 var consumers = templateReaders[registry].Select(r => (r.Template, r.Scope, Formula: true))
-                    .Concat(methodologyReaders[registry]
+                    .Concat(AffectedMethodologies(methodologyReaders[registry], resultReaders)
                         .SelectMany(m => writes[m.Methodology].Select(t => (Template: t, m.Scope, Formula: false))));
 
                 foreach (var (template, scope, formula) in consumers)
@@ -153,6 +162,41 @@ public static class DependencyGraphAssembler
         }
 
         return [.. result.Values.OrderBy(d => d.SourceTemplateId).ThenBy(d => d.ConsumerTemplateId).ThenBy(d => d.BindingId)];
+    }
+
+    /// <summary>
+    /// Методології, чиї результати змінюються, коли змінюється довідник: ті, що його читають, і — транзитивно — ті, що
+    /// читають їхні результати (<see cref="DependencyEdgeKind.MethodologyResult"/>: скрипт чи формула беруть чужий вихід,
+    /// зокрема з документа іншого шаблону). Обсяг читача результатів — <see cref="PeriodScope.All"/>: за який період
+    /// він бере чужий вихід, граф не знає (консервативно).
+    /// </summary>
+    private static IEnumerable<(int Methodology, PeriodScope Scope)> AffectedMethodologies(
+        IEnumerable<(int Methodology, PeriodScope Scope)> direct, ILookup<int, int> resultReaders)
+    {
+        var scopes = new Dictionary<int, PeriodScope>();
+        var queue = new Queue<int>();
+        foreach (var (methodology, scope) in direct)
+        {
+            scopes[methodology] = scopes.TryGetValue(methodology, out var known) ? known.Join(scope) : scope;
+            queue.Enqueue(methodology);
+        }
+
+        var expanded = new HashSet<int>();
+        while (queue.TryDequeue(out var source))
+        {
+            if (!expanded.Add(source))
+            {
+                continue;
+            }
+
+            foreach (var reader in resultReaders[source])
+            {
+                scopes[reader] = scopes.TryGetValue(reader, out var known) ? known.Join(PeriodScope.All) : PeriodScope.All;
+                queue.Enqueue(reader);
+            }
+        }
+
+        return scopes.Select(p => (p.Key, p.Value));
     }
 
     private static string CodeOf(DependencyGraphInputs inputs, DependencyNodeRef node)

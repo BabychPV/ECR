@@ -164,6 +164,8 @@ public static class DependencyInjection
         services.AddScoped<Templates.SetTemplateDocumentPolicyHandler>(); // B151
         services.AddScoped<Calculations.SourceBindings.ListDocumentSourceBindingsHandler>(); // B80 N1
         services.AddScoped<Calculations.SourceBindings.SwitchDocumentSourceStateHandler>(); // B80 N1
+        services.AddScoped<Calculations.SourceBindings.SwitchDocumentSourceFlagsHandler>(); // B179 L5
+        services.AddScoped<DocumentDependencies.GetDependencyGraphHandler>(); // B179 L4
 
         services.AddScoped<Projects.ListProjectsHandler>();
         services.AddScoped<Projects.CreateProjectHandler>();
@@ -286,6 +288,8 @@ public static class DependencyInjection
         services.AddScoped<Workflow.ApprovalSnapshotRefresh>();
         services.AddScoped<Workflow.ApproveSheetHandler>();
         services.AddScoped<Workflow.ReopenDocumentHandler>();
+        services.AddScoped<Workflow.RecalculateApprovedDependentsHandler>(); // B80 N5: явний перерахунок затверджених залежних (адміністратор)
+        services.AddScoped<Workflow.GetSourceImpactHandler>(); // B80 N5: вплив затвердження/повернення джерела на залежні
         services.AddScoped<Documents.DeleteDocumentHandler>();
         services.AddScoped<Documents.DocumentSheetCopyHandler>();
         services.AddScoped<Documents.ChangeDocumentKeyHandler>();
@@ -449,6 +453,7 @@ public static class DependencyInjection
         services.AddScoped<Units.ListUnitsHandler>();
         services.AddScoped<Calculations.ListMethodologiesHandler>();
         services.AddScoped<Calculations.PublishMethodologyHandler>();
+        services.AddScoped<Calculations.IFormulaLinkRebuilder>(sp => sp.GetRequiredService<Calculations.PublishMethodologyHandler>());
         services.AddScoped<Calculations.SimulateMethodologyHandler>();
         services.AddScoped<Calculations.ListMethodologyVersionsHandler>();
         services.AddScoped<Calculations.ListMethodologyPublicationsHandler>();
@@ -459,6 +464,23 @@ public static class DependencyInjection
 
         // B-07: версія з маршруту мусить належати методології з маршруту.
         services.AddScoped<Calculations.MethodologyVersionScope>();
+
+        // MS: скрипт методології (авторство, перевірки, матеріалізація, перегляд). Рушій виконання й
+        // `IScriptPreviewRunner` реєструє проєкт розрахунків.
+        services.AddScoped<Calculations.Scripting.ScriptSourceCompiler>();
+        services.AddScoped<Calculations.Scripting.ScriptEnvironmentChecker>();
+        services.AddScoped<Calculations.Scripting.ScriptMaterializer>();
+        services.AddScoped<Calculations.Scripting.ScriptPublishChecks>();
+        services.AddScoped<Calculations.Scripting.ScriptAnalyzer>();
+        services.AddScoped<Calculations.Scripting.GetMethodologyScriptHandler>();
+        services.AddScoped<Calculations.Scripting.SaveMethodologyScriptHandler>();
+        services.AddScoped<Calculations.Scripting.ValidateMethodologyScriptHandler>();
+        services.AddScoped<Calculations.Scripting.FormatScriptConstHandler>();
+        services.AddScoped<Calculations.Scripting.PreviewMethodologyScriptHandler>();
+        services.AddScoped<Calculations.Scripting.ParityMethodologyScriptHandler>();
+        services.AddScoped<Calculations.Scripting.GetScriptTablesHandler>();
+        services.AddScoped<Calculations.Scripting.Migration.ApplyScriptPackageHandler>();
+        services.AddScoped<Calculations.Scripting.Migration.SwitchScriptEngineHandler>();
 
         // Авторство методології з нуля (директива №09, `W6`): сама методологія,
         // константи, правила відбору, виходи, золотий набір, режими і прив'язка

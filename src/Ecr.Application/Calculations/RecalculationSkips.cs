@@ -63,6 +63,12 @@ public static class RecalculationSkips
     /// <summary>Операція журналу: затверджений аркуш пропущено.</summary>
     public const string AuditSkippedApproved = "SkippedApproved";
 
+    /// <summary>
+    /// B80 N5 (D-554): ЗАТВЕРДЖЕНИЙ аркуш перераховано за явним перекриттям адміністратора
+    /// (<c>Calculation.RecalculateApprovedDependents</c>); у записі — хто й причина.
+    /// </summary>
+    public const string AuditRecalculatedApproved = "RecalculatedApproved";
+
     /// <summary>Операція журналу: поданий аркуш перераховано після подання (позначка для погоджувача).</summary>
     public const string AuditRecalculatedAfterSubmission = "RecalculatedAfterSubmission";
 

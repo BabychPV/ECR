@@ -12,6 +12,7 @@ import {
   CampaignOverviewPage,
   ChangePasswordPage,
   ConsistencyIssuesPage,
+  DependencyGraphPage,
   DocumentPage,
   DocumentsPage,
   ExpressionsPage,
@@ -21,6 +22,7 @@ import {
   PiDataPage,
   PipelinePage,
   MethodologiesPage,
+  MethodologyScriptPage,
   MethodologyVersionsPage,
   MyGroupsPage,
   NotificationsPage,
@@ -521,6 +523,11 @@ export const router = createBrowserRouter([
             handle: routes.adminMethodologyVersions.handle,
           },
           {
+            path: relativePath(routes.adminMethodologyScript, 'admin'),
+            element: guarded(routes.adminMethodologyScript.handle, <MethodologyScriptPage />),
+            handle: routes.adminMethodologyScript.handle,
+          },
+          {
             path: relativePath(routes.adminExpressions, 'admin'),
             element: guarded(routes.adminExpressions.handle, <ExpressionsPage />),
             handle: routes.adminExpressions.handle,
@@ -541,6 +548,11 @@ export const router = createBrowserRouter([
             path: relativePath(routes.adminSources, 'admin'),
             element: guarded(routes.adminSources.handle, <SourcesPage />),
             handle: routes.adminSources.handle,
+          },
+          {
+            path: relativePath(routes.adminDependencyGraph, 'admin'),
+            element: guarded(routes.adminDependencyGraph.handle, <DependencyGraphPage />),
+            handle: routes.adminDependencyGraph.handle,
           },
           {
             path: relativePath(routes.adminMapping, 'admin'),

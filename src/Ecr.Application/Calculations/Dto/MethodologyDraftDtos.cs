@@ -31,6 +31,7 @@ namespace Ecr.Application.Calculations.Dto;
 /// стані версії.
 /// </param>
 /// <param name="CreatedByUserId">Автор; публікувати власну правку він не зможе (D-40).</param>
+/// <param name="Engine">Рушій версії: формули чи скрипт (MS); для версій до MS — <c>Formulas</c>.</param>
 public sealed record MethodologyDraftVersionDto(
     int Id,
     string VersionNumber,
@@ -41,7 +42,8 @@ public sealed record MethodologyDraftVersionDto(
     CalendarMode CalendarMode,
     TraceLevel TraceLevel,
     bool IsEditable,
-    int CreatedByUserId);
+    int CreatedByUserId,
+    MethodologyEngine Engine = MethodologyEngine.Formulas);
 
 /// <summary>Формула версії методології, як її бачить конфігуратор.</summary>
 /// <remarks>

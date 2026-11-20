@@ -8,6 +8,7 @@
     <ProjectReference Include="..\Ecr.Domain\Ecr.Domain.csproj" />
     <ProjectReference Include="..\Ecr.Application\Ecr.Application.csproj" />
     <ProjectReference Include="..\Ecr.Expressions\Ecr.Expressions.csproj" />
+    <ProjectReference Include="..\Ecr.Scripting\Ecr.Scripting.csproj" />
   </ItemGroup>
 
   <!--

@@ -95,6 +95,8 @@ public sealed class CalculationBindingStore(EcrDbContext db) : ICalculationBindi
                 where tableDefIds.Contains(column.TableDefId) && !column.IsDeleted && column.LookupRegistryDefId != null
                 join registry in db.RegistryDefs.AsNoTracking() on column.LookupRegistryDefId equals registry.Id
                 select new { ColumnCode = column.Code, RegistryCode = registry.Code })
+            .OrderBy(r => r.ColumnCode)
+            .ThenBy(r => r.RegistryCode)
             .Take(MaxBindings)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -274,7 +276,7 @@ public sealed class CalculationBindingStore(EcrDbContext db) : ICalculationBindi
     public async Task<IReadOnlyList<int>> ListLookupRegistryIdsAsync(int methodologyId, CancellationToken ct)
         => await (
                 from binding in db.CalculationBindings.AsNoTracking()
-                where binding.MethodologyId == methodologyId && binding.IsActive
+                where binding.MethodologyId == methodologyId
                 join target in db.ColumnDefs.AsNoTracking()
                     on binding.ColumnDefId equals target.Id
                 join column in db.ColumnDefs.AsNoTracking()

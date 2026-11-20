@@ -53,9 +53,14 @@ public sealed class DependencyGraphProvider(
     private static readonly SingleFlight<DependencyGraphSnapshot> Flight = new();
 
     /// <inheritdoc />
-    public async Task<DependencyGraphSnapshot> GetAsync(CancellationToken ct)
+    public Task<DependencyGraphSnapshot> GetAsync(CancellationToken ct) => GetCoreAsync(fresh: false, ct);
+
+    /// <inheritdoc />
+    public Task<DependencyGraphSnapshot> GetFreshAsync(CancellationToken ct) => GetCoreAsync(fresh: true, ct);
+
+    private async Task<DependencyGraphSnapshot> GetCoreAsync(bool fresh, CancellationToken ct)
     {
-        var revision = await RevisionAsync(ct).ConfigureAwait(false);
+        var revision = await RevisionAsync(fresh, ct).ConfigureAwait(false);
         var key = "dependency-graph:" + revision;
         if (memory.TryGetValue(key, out DependencyGraphSnapshot? cached) && cached is not null)
         {
@@ -78,10 +83,10 @@ public sealed class DependencyGraphProvider(
     public Task<bool> FillsRegistryAsync(int templateId, CancellationToken ct)
         => db.DocumentSourceBindings.AsNoTracking().AnyAsync(b => b.SourceTemplateId == templateId, ct);
 
-    private async Task<string> RevisionAsync(CancellationToken ct)
+    private async Task<string> RevisionAsync(bool fresh, CancellationToken ct)
     {
         var window = (lifetimes ?? CacheLifetimes.Default).Revision;
-        if (window > TimeSpan.Zero && memory.TryGetValue(RevisionKey, out string? memoized) && memoized is not null)
+        if (!fresh && window > TimeSpan.Zero && memory.TryGetValue(RevisionKey, out string? memoized) && memoized is not null)
         {
             return memoized;
         }
@@ -115,7 +120,13 @@ public sealed class DependencyGraphProvider(
             + $"|sb{bindings?.Count}:{bindings?.Sum}:{bindings?.Updated?.Ticks}|r{registries?.Count}:{registries?.Definition}:{registries?.Updated?.Ticks}"
             + $"|rr{rules?.Count}:{rules?.Max}|{methodology}");
 
-        if (window > TimeSpan.Zero)
+        if (fresh)
+        {
+            // ⚠ Свіжа ревізія читається часто ВСЕРЕДИНІ транзакції викликача (відмова циклу її відкочує): її не мемоїзуємо,
+            // а стару мемоїзацію скидаємо — наступний `GetAsync` перерахує ревізію вже від зафіксованого стану.
+            memory.Remove(RevisionKey);
+        }
+        else if (window > TimeSpan.Zero)
         {
             memory.Set(RevisionKey, revision, new MemoryCacheEntryOptions { AbsoluteExpirationRelativeToNow = window });
         }
@@ -169,6 +180,7 @@ public sealed class DependencyGraphProvider(
         var methodologyReads = new List<MethodologyScopedRead>();
         var methodologyCodes = new Dictionary<int, string>();
         var methodologySeen = new HashSet<(int Version, string Formula, int Registry)>();
+        var scriptScopes = new Dictionary<int, IReadOnlyDictionary<string, PeriodScope>>();
         foreach (var row in await methodologies.ListReadsAsync(ct).ConfigureAwait(false))
         {
             // Шляхи полів (FieldPath) однієї формули — один доказ.
@@ -179,7 +191,12 @@ public sealed class DependencyGraphProvider(
 
             methodologyCodes[row.MethodologyId] = row.MethodologyCode;
             var scope = PeriodScope.All;
-            if (row.Expression is not null && registries.TryGetValue(row.RegistryDefId, out var code))
+            if (row.ScriptText is not null && registries.TryGetValue(row.RegistryDefId, out var scriptRegistry))
+            {
+                // Скрипт: обсяг із AST скомпільованого тексту (REG* у виразах), невпевнено — All (ScriptRegistryScopes).
+                scope = ScriptScope(row, scriptRegistry, scriptScopes);
+            }
+            else if (row.Expression is not null && registries.TryGetValue(row.RegistryDefId, out var code))
             {
                 var parsed = formulaEngine.Parse(row.Expression, ExpressionDialect.Methodology);
                 scope = parsed.Expression is null
@@ -188,6 +205,15 @@ public sealed class DependencyGraphProvider(
             }
 
             methodologyReads.Add(new MethodologyScopedRead(row.MethodologyId, row.MethodologyVersionId, row.RegistryDefId, row.FormulaCode, scope));
+        }
+
+        // Читання результатів між методологіями (скрипт і формули): читач стає споживачем довідників джерела.
+        var resultReads = new List<MethodologyResultRead>();
+        foreach (var row in await methodologies.ListResultReadsAsync(ct).ConfigureAwait(false))
+        {
+            methodologyCodes[row.ReaderMethodologyId] = row.ReaderCode;
+            methodologyCodes[row.SourceMethodologyId] = row.SourceCode;
+            resultReads.Add(new MethodologyResultRead(row.ReaderMethodologyId, row.SourceMethodologyId));
         }
 
         var calculationBindings = await methodologies.ListBindingsAsync(ct).ConfigureAwait(false);
@@ -215,7 +241,10 @@ public sealed class DependencyGraphProvider(
             .ToDictionaryAsync(t => t.Id, t => t.Code, ct).ConfigureAwait(false);
 
         return new DependencyGraphInputs(
-            revision, templateCodes, registries, methodologyCodes, bindings, templateReads, methodologyReads, writes, rules, diagnostics);
+            revision, templateCodes, registries, methodologyCodes, bindings, templateReads, methodologyReads, writes, rules, diagnostics)
+        {
+            MethodologyResultReads = resultReads,
+        };
     }
 
     private async Task<List<TemplateRegistryRead>> TemplateReadsAsync(
@@ -290,6 +319,19 @@ public sealed class DependencyGraphProvider(
 
         diagnostics.AddRange(fallbackVersions.Select(v => new DependencyGraphDiagnostic("astFallback", $"template version {v}")));
         return reads;
+    }
+
+    /// <summary>Обсяг довідника для скрипта версії; текст розбирається раз на версію.</summary>
+    private static PeriodScope ScriptScope(
+        MethodologyRegistryReadRow row, string registryCode, Dictionary<int, IReadOnlyDictionary<string, PeriodScope>> cache)
+    {
+        if (!cache.TryGetValue(row.MethodologyVersionId, out var scopes))
+        {
+            cache[row.MethodologyVersionId] = scopes = Ecr.Application.Calculations.Scripting.ScriptRegistryScopeReader.Read(
+                row.ScriptText!, row.NumericMode, row.IsLibrary, row.IsModuleLevel);
+        }
+
+        return scopes.GetValueOrDefault(registryCode, PeriodScope.All);
     }
 
     private IReadOnlyDictionary<string, PeriodScope>? Scopes(

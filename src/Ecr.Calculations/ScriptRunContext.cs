@@ -1,0 +1,46 @@
+namespace Ecr.Calculations;
+
+/// <summary>
+/// Прогін, у межах якого працює модуль скрипта (MS, план §13.9). Scoped: оркестратор заповнює його у scope гілки
+/// перед <c>PrepareAsync</c>, і колонка <c>Calculated</c>, прив'язана до виходу іншої методології, читає результати
+/// САМЕ цього прогону.
+/// </summary>
+/// <remarks>
+/// ⚠ <c>null</c> — поза прогоном (перегляд, тест, симуляція): тоді читаються результати актуального прогону
+/// документа й періоду, тобто те, що користувач бачить у сітці.
+/// </remarks>
+public sealed class ScriptRunContext
+{
+    /// <summary>Прогін, що зараз рахується; <c>null</c> — поза прогоном.</summary>
+    public long? CalculationRunId { get; set; }
+
+    /// <summary>
+    /// Пари (версія методології, екземпляр таблиці), які ЦЕЙ прогін рахує; <c>null</c> — невідомо (поза прогоном).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Джерело, яке прогін порахував, але яке нічого не дало (вхід зник, усі рядки з помилкою), все одно «в прогоні»:
+    /// читач бачить порожньо, а не числа ПОПЕРЕДНЬОГО актуального прогону (воно лишається актуальним, доки прогін не
+    /// перемкнуть) — інакше читач розійшовся б із сіткою, де джерела вже немає.
+    /// </remarks>
+    public IReadOnlySet<(int MethodologyVersionId, long TableInstanceId)>? RunBindings { get; set; }
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, byte> _foreignOwnerPeriods = new();
+
+    /// <summary>
+    /// ✎ LAND-YEAR L2b: періоди-власники, чиї результати цей прогін читав колонками <c>Calculated</c> з чужим власником.
+    /// Число читача залежить від прогону ІНШОГО періоду й застаріває, якщо той перераховується (RecalculationJob).
+    /// </summary>
+    public IReadOnlyCollection<int> ForeignOwnerPeriods => [.. _foreignOwnerPeriods.Keys.Order()];
+
+    /// <summary>Позначає, що читалися результати періодів-власників (див. <see cref="ForeignOwnerPeriods"/>).</summary>
+    /// <param name="ownerPeriods">Періоди-власники.</param>
+    public void NoteForeignOwnerRead(IEnumerable<int> ownerPeriods)
+    {
+        ArgumentNullException.ThrowIfNull(ownerPeriods);
+
+        foreach (var period in ownerPeriods)
+        {
+            _foreignOwnerPeriods[period] = 0;
+        }
+    }
+}

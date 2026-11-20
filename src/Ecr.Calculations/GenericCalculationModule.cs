@@ -61,7 +61,10 @@ public sealed class GenericCalculationModule(
     public bool CanHandle(MethodologyDescriptor methodology)
     {
         ArgumentNullException.ThrowIfNull(methodology);
-        return methodology.Level == CalculationLevel.Configuration;
+
+        // MS: версії-скрипти рахує окремий модуль; цей лишається для формульних.
+        return methodology.Level == CalculationLevel.Configuration
+               && methodology.Engine == MethodologyEngine.Formulas;
     }
 
     /// <inheritdoc />
@@ -122,7 +125,7 @@ public sealed class GenericCalculationModule(
             .GetCategoryRuleAsync(methodology.MethodologyVersionId, ct).ConfigureAwait(false);
 
 
-        var period = await PeriodAsync(methodology, documentId, periodKey, ct).ConfigureAwait(false);
+        var period = await CalculationSteps.PeriodAsync(periods, calendar, methodology, documentId, periodKey, ct).ConfigureAwait(false);
 
         // ⛔ HSE301 L: формули імпортованих методологій, на які версія посилається
         // транзитивно, — ТУТ, раз на прив'язку, з версією бібліотеки, чинною на бізнес-дату
@@ -414,7 +417,7 @@ public sealed class GenericCalculationModule(
         // без REG* лишаються побітно як були.
         var entryRef = numeric.Mode == NumericMode.Strict || binding.Registries is not null;
         var arguments = input.Arguments.ToDictionary(
-            a => a.ArgumentCode, a => ToValue(a, entryRef, legacyNumericText: numeric.Mode == NumericMode.Legacy),
+            a => a.ArgumentCode, a => CalculationSteps.ToValue(a, entryRef, legacyNumericText: numeric.Mode == NumericMode.Legacy),
             StringComparer.OrdinalIgnoreCase);
 
         // ⛔ D-OA: необов'язковий аргумент (`Name?` у списку формули версії чи бібліотеки) без комірки в рядку
@@ -493,7 +496,7 @@ public sealed class GenericCalculationModule(
         if (categoryRule is not null && numeric.Mode != NumericMode.Strict)
         {
             var ruleArguments = input.Arguments.ToDictionary(
-                a => a.ArgumentCode, a => ToValue(a, entryRef: true, legacyNumericText: false), StringComparer.OrdinalIgnoreCase);
+                a => a.ArgumentCode, a => CalculationSteps.ToValue(a, entryRef: true, legacyNumericText: false), StringComparer.OrdinalIgnoreCase);
             OptionalArguments.Fill(ruleArguments, optionalArguments);
             ruleArgumentValues = ruleArguments;
             ruleContext = new MethodologyEvaluationContext(
@@ -536,13 +539,13 @@ public sealed class GenericCalculationModule(
         // Рівень рядка: виходи «раз на рядок» і проміжні значення видимих Row-формул.
         foreach (var output in outputs.Where(o => !o.IsPerSubstance))
         {
-            Emit(values, version, binding, numeric, trace, output.Code, rowContext.GetFormulaResult(output.Code),
+            CalculationSteps.EmitValue(values, version, binding, numeric, trace, output.Code, rowContext.GetFormulaResult(output.Code),
                  output.UnitId, substance: null, CalculationResultKind.Output);
         }
 
         foreach (var formula in VisibleIntermediates(rowFormulas, outputCodes))
         {
-            Emit(values, version, binding, numeric, trace, formula.Code, rowContext.GetFormulaResult(formula.Code),
+            CalculationSteps.EmitValue(values, version, binding, numeric, trace, formula.Code, rowContext.GetFormulaResult(formula.Code),
                  formula.OutputUnitId!.Value, substance: null, CalculationResultKind.Intermediate);
         }
 
@@ -634,13 +637,13 @@ public sealed class GenericCalculationModule(
 
             foreach (var output in perSubstanceOutputs)
             {
-                Emit(values, version, binding, numeric, trace, output.Code, context.GetFormulaResult(output.Code),
+                CalculationSteps.EmitValue(values, version, binding, numeric, trace, output.Code, context.GetFormulaResult(output.Code),
                      output.UnitId, substance, CalculationResultKind.Output);
             }
 
             foreach (var formula in substanceIntermediates)
             {
-                Emit(values, version, binding, numeric, trace, formula.Code, context.GetFormulaResult(formula.Code),
+                CalculationSteps.EmitValue(values, version, binding, numeric, trace, formula.Code, context.GetFormulaResult(formula.Code),
                      formula.OutputUnitId!.Value, substance, CalculationResultKind.Intermediate);
             }
         }
@@ -663,7 +666,7 @@ public sealed class GenericCalculationModule(
         {
             // AN-164: рядок без жодного значення — назвати аргументи, яких бракує (інакше тихий нуль).
             MissingArguments = values.Count == 0 && outputs.Count > 0
-                ? MissingArgumentsOf(ordered, binding.Libraries, arguments)
+                ? MissingArgumentsOf(ordered, binding.Libraries, arguments, optionalArguments)
                 : null,
 
             // B66: вихід без результату через помилку — проблема рядка StepError (раніше лише трейс, а на Off — ніде).
@@ -683,7 +686,8 @@ public sealed class GenericCalculationModule(
     private List<string>? MissingArgumentsOf(
         IReadOnlyList<MethodologyFormula> formulas,
         CalculationLibraries? libraries,
-        Dictionary<string, ExpressionValue> arguments)
+        Dictionary<string, ExpressionValue> arguments,
+        IReadOnlySet<string> optionalArguments)
     {
         var missing = new List<string>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -697,7 +701,11 @@ public sealed class GenericCalculationModule(
 
             foreach (var reference in ReferenceCollector.Collect(parsed.Expression.Root))
             {
+                // ✎ D-556: необов'язковий аргумент (`Name?` в ArgumentsCsv) за визначенням може бути порожнім і НЕ є «відсутнім
+                // входом»: інакше рядок, якому просто не підійшла гілка, називав виною поле, яке методологія дозволила
+                // не заповнювати, а скрипт (`row.X?`) мовчав - 504 розбіжності діагностики C11_10 у колі 3.
                 if (reference.Kind == TraceInputKind.Argument
+                    && !optionalArguments.Contains(reference.Code)
                     && seen.Add(reference.Code)
                     && (!arguments.TryGetValue(reference.Code, out var value) || value.IsNull
                         || value.ErrorCode == Expressions.ExpressionErrors.ArgumentNotFound
@@ -756,98 +764,6 @@ public sealed class GenericCalculationModule(
     private static List<MethodologyFormula> VisibleIntermediates(
         IReadOnlyList<MethodologyFormula> formulas, HashSet<string> outputCodes)
         => [.. formulas.Where(f => f.IsVisible && f.OutputUnitId is not null && !outputCodes.Contains(f.Code))];
-
-    /// <summary>Пише одне значення — вихід або проміжне — у результати рядка.</summary>
-    /// <param name="values">Куди пишеться.</param>
-    /// <param name="version">Версія рядка — режим арифметики й ідентифікатор.</param>
-    /// <param name="binding">Контекст прив'язки — масштаби колонок-приймачів.</param>
-    /// <param name="numeric">Числова політика версії.</param>
-    /// <param name="trace">Трейс рядка.</param>
-    /// <param name="code">Код виходу або видимої формули.</param>
-    /// <param name="value">Значення з контексту обчислення.</param>
-    /// <param name="unitId">Одиниця результату.</param>
-    /// <param name="substance">Речовина; <c>null</c> — значення рівня рядка.</param>
-    /// <param name="kind">Вихід чи проміжне.</param>
-    private static void Emit(
-        List<CalculationOutputValue> values,
-        MethodologyDescriptor version,
-        CalculationBindingContext binding,
-        NumericPolicy numeric,
-        TraceRecorder trace,
-        string code,
-        ExpressionValue value,
-        int unitId,
-        MethodologySubstance? substance,
-        CalculationResultKind kind)
-    {
-        var masked = MaskedZero.Prepare(value, version.NumericMode);
-
-        if (masked.Value is not { } number)
-        {
-            // ⚠ У `Strict` сюди потрапляє і замаскований випадок:
-            // значення там `null`, а не нуль (`ФВ-9.14`). Причина
-            // однаково має бути названа, тому запис іде окремим
-            // кроком, а не загальним «#NULL».
-            if (masked.Reason != MaskedZeroReason.None)
-            {
-                trace.Masked(code, null, null, masked.Reason);
-                return;
-            }
-
-            // ⚠ Проміжне без числа — лише пропуск: крок формули з причиною вже
-            // записав `Evaluate`, а другий такий самий запис нічого б не додав.
-            if (kind == CalculationResultKind.Intermediate)
-            {
-                return;
-            }
-
-            // Вихід без числа не пишеться: нуль тут виглядав би як
-            // порахований результат. Причина вже в трейсі.
-            //
-            // ⚠ Аудит A2: ЧИСЛО без `decimal`-подання — це `Legacy`
-            // `double` за межею ≈7.9e28 (`Pow(10, 30)`). Колонка
-            // результату його не вмістить, а «#NULL» збрехав би, що
-            // значення не було; тому `#VALUE`, як у `Strict`.
-            var error = value.ErrorCode
-                ?? (value.Type == Expressions.Ast.ExpressionValueType.Number
-                    ? Expressions.ExpressionErrors.BadValue
-                    : "#NULL");
-
-            // B66: вихід без результату через помилку — причина нуля/неповного результату (StepError рядка).
-            trace.OutputFailed(code, error);
-            trace.Failed(code, null, error);
-            return;
-        }
-
-        // ⛔ Замаскований нуль пишеться в трейс ЗАВЖДИ, коли він
-        // стався. Число при цьому те саме, що дала б чинна система, —
-        // саме тому знайти ці випадки можна лише за записом, і саме
-        // вони обіцяні як найцінніший побічний результат міграції.
-        if (masked.Reason != MaskedZeroReason.None)
-        {
-            trace.Masked(code, null, number, masked.Reason);
-        }
-
-        // ⛔ Скільки знаків несе результат — КОНФІГУРАЦІЯ КОЛОНКИ, у
-        // яку він потрапляє (рішення людини 2026-09-20), а не спільна
-        // константа рушія. Колонка мовчить — беруться всі шістнадцять
-        // (`NumericPolicy.DefaultOutputScale`), бо саме стільки несе
-        // конвеєр чинної системи; обрізати до шести «на всяк випадок»
-        // означало б змінити число у звіті там, де ніхто про це не
-        // просив. Проміжне, прив'язане до колонки (`M_t` у сітці), бере
-        // масштаб тієї самої колонки тим самим кодом.
-        var scale = binding.OutputScales.TryGetValue(code, out var declared)
-            ? declared
-            : null;
-
-        values.Add(new CalculationOutputValue(
-            version.MethodologyVersionId,
-            substance is null ? null : checked((int)substance.SubstanceEntryId),
-            code,
-            numeric.RoundOutput(number, scale),
-            unitId,
-            kind));
-    }
 
     /// <summary>Довідник одиниць, прочитаний раз на прогін.</summary>
     /// <remarks>
@@ -924,57 +840,17 @@ public sealed class GenericCalculationModule(
             .Evaluate(parsed.Expression, context, numeric.Mode)
             .Value;
 
-        if (result.IsError)
-        {
-            trace.Failed(
-                formula.Code,
-                formula.Expression,
-                result.ErrorCode!,
-                trace.RecordsFailures ? Describe(formula, parsed.Expression, context, numeric, scope) : null,
-                source);
-            return result;
-        }
-
-        // ✎ D-427 (Q-088): у `Legacy` результат КОЖНОЇ формули з NaN/±∞ стає 0 ДО того, як наступна формула
-        // прочитає його через `!Name` — як чинна система (`Utilities.cs:58-71`: перевірка на кожній формулі).
-        // Причина — крок трейсу `MaskedZeroReason`. `Strict` не зачеплено: там #DIV/0 — помилка-значення.
-        if (numeric.Mode == NumericMode.Legacy && MaskedZero.ReasonFor(result) is var maskReason
-            && maskReason != MaskedZeroReason.None)
-        {
-            trace.Masked(formula.Code, formula.Expression, 0m, maskReason);
-            result = ExpressionValue.LegacyNumber(0d);
-        }
-
-        // ⚠ Входи збираються лише для кроку, який запишеться: на `ErrorsOnly` невидима
-        // формула не платить за обхід і повторне читання посилань нічим.
-        var detail = trace.Records(visible)
-            ? Describe(formula, parsed.Expression, context, numeric, scope)
-            : null;
-
-        if (result.AsNumber() is not { } number)
-        {
-            trace.Step(formula.Code, formula.Expression, null, visible, detail, source);
-            return result;
-        }
-
-        // ⛔ Проміжний крок НЕ округлюється. Тут стояло `numeric.RoundStep`
-        // з поясненням «Legacy округлює кожен крок, як чинна система» — і це
-        // було вигадано (директива №05 §6).
-        //
-        // Вихідні тексти `DllProject` показують протилежне: у всіх 148 файлах
-        // немає жодного `Math.Round`, жодного `MidpointRounding`, жодного
-        // `decimal.Round`. Округлення в чинній системі відбувається виключно
-        // всередині `Round()` самої формули; між формулами результат іде
-        // рядком у форматі `G17`, який для `double` круговий — тобто
-        // точність НЕ втрачається.
-        //
-        // ⚠ Друга і остання точка округлення — збереження проміжного
-        // результату між ЗАЛЕЖНИМИ методологіями, де число проходить через
-        // колонку і втрачає знаки за її типом. Це ребро графа
-        // `calc.MethodologyDependency`, а не крок усередині формули.
-        trace.Step(formula.Code, formula.Expression, number, visible, detail, source);
-
-        return result;
+        return CalculationSteps.FinishStep(
+            formula.Code,
+            formula.Expression,
+            result,
+            numeric,
+            trace,
+            visible,
+            source,
+            (module: this, formula, parsed: parsed.Expression, context, numeric, scope),
+            static state => state.module.Describe(
+                state.formula, state.parsed, state.context, state.numeric, state.scope));
     }
 
     /// <summary>Що формула прочитала: одиниця результату й входи для <c>TraceJson</c> v1.</summary>
@@ -1529,79 +1405,4 @@ public sealed class GenericCalculationModule(
             }
         }
     }
-
-    /// <summary>Календарний контекст періоду за режимом версії.</summary>
-    /// <remarks>
-    /// ⛔ Межі беруться з <c>doc.Period</c>, а НЕ виводяться з
-    /// <c>PeriodKey</c>. Вивести їх із ключа неможливо:
-    /// <c>PeriodKey = Year*100 + Sequence</c> (R-A6), і для квартального
-    /// проєкту <c>202602</c> — це другий КВАРТАЛ. Тлумачити <c>Sequence</c> як
-    /// місяць означало б поділити на 28 днів замість 91: усі <c>г/с</c> у
-    /// звіті стали б утричі більшими, і жодна перевірка цього не побачила б —
-    /// число залишається правдоподібним (ФВ-16.11a, D-112).
-    /// </remarks>
-    private async Task<Expressions.PeriodContext> PeriodAsync(
-        MethodologyDescriptor version, long documentId, PeriodKey periodKey, CancellationToken ct)
-    {
-        var bounds = await periods
-            .FindPeriodBoundsAsync(documentId, periodKey.Value, ct)
-            .ConfigureAwait(false)
-            ?? throw new Domain.Abstractions.DomainException(
-                "ECR-PRD-0404",
-                $"Періоду {periodKey.Value} для документа {documentId} не існує: "
-                + "тривалість обчислити нема з чого.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-PRD-0404.periodForDocument",
-                    ["periodKey"] = periodKey.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                });
-
-        // Sequence — порядковий номер періоду в році, і саме він, а не місяць:
-        // у квартальному проєкті їх чотири (R-A6, D-108).
-        var sequence = (byte)(periodKey.Value % 100);
-
-        return calendar.Build(
-            bounds.PeriodStart, bounds.PeriodEnd, version.CalendarMode,
-            periodKey.Value / 100, sequence);
-    }
-
-    /// <summary>Аргумент розрахунку як значення виразу.</summary>
-    /// <param name="argument">Аргумент рядка.</param>
-    /// <param name="entryRef">
-    /// Віддавати <c>EntryRef</c>: <c>true</c> — формули <c>Strict</c> і правило категорії будь-якого режиму;
-    /// <c>false</c> — формули <c>Legacy</c> (побітно як до RT-23a).
-    /// </param>
-    /// <param name="legacyNumericText">
-    /// Текст, що розбирається як <c>double</c> (інваріантна культура), подавати числом —
-    /// <c>true</c> лише для формул <c>Legacy</c>.
-    /// </param>
-    /// <remarks>
-    /// ⛔ C1-05 (аудит 2026-10-09c). Чинна збірка подає параметром <c>double</c> будь-яке
-    /// число і будь-який рядок, що розібрався <c>double.TryParse(InvariantCulture)</c>
-    /// (<c>Utilities.cs:188-215</c>, <c>NCalcLegacyTests</c>). Без цього текстова колонка
-    /// зі значенням <c>"1"</c> давала в <c>Legacy</c> <c>@X = 1</c> і <c>in(@X, 1, 2)</c>
-    /// мовчки FALSE, і <c>if</c> ішов в іншу гілку. <c>Strict</c> і правило категорії
-    /// лишаються як є: текст — це текст.
-    ///
-    /// ✎ RT-23a: <c>EntryRef</c> (<see cref="CalculationArgument.EntryId"/>) у рантаймі —
-    /// число, id запису (§5.3), той самий вибір, що вже діє для <c>Lookup</c>-комірок у
-    /// шаблонах. ✎ L2-3: <see cref="CalculationInputBuilder"/> заповнює його завжди, а тут
-    /// його ігнорують формули <c>Legacy</c> (<c>D-161</c>); правило категорії читає id в обох режимах.
-    /// </remarks>
-    private static ExpressionValue ToValue(CalculationArgument argument, bool entryRef, bool legacyNumericText)
-        => entryRef && argument.EntryId is { } entryId
-            ? ExpressionValue.Number(entryId)
-            : argument.Value is { } number
-                ? ExpressionValue.Number(number)
-                : argument.ValueString is { } text
-                    ? legacyNumericText
-                      && double.TryParse(
-                          text,
-                          System.Globalization.NumberStyles.Float,
-                          System.Globalization.CultureInfo.InvariantCulture,
-                          out var parsed)
-                        ? ExpressionValue.LegacyNumber(parsed)
-                        : ExpressionValue.Text(text)
-                    : ExpressionValue.Null;
 }

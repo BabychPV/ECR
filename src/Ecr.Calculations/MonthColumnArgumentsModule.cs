@@ -7,6 +7,7 @@ using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.Expressions;
+using Ecr.Scripting;
 
 namespace Ecr.Calculations;
 
@@ -41,6 +42,13 @@ namespace Ecr.Calculations;
 /// семантиці виразів.
 /// </para>
 /// <para>
+/// ✎ MS Етап 7: внутрішній модуль обирає <see cref="MethodologyDescriptor.Engine"/> — <c>Formulas</c> рахує
+/// <see cref="GenericCalculationModule"/>, <c>Script</c> — <see cref="ScriptCalculationModule"/>. Для скрипта «формули»
+/// модуля — верхні <c>output</c> і <c>visible var</c> (код = ім'я, одиниця з оголошення), залежності — з
+/// <c>CompiledScript.StepDependencies</c>, аргументи читаються як <c>row.GCV_&lt;простір&gt;_&lt;таблиця&gt;_&lt;рядок&gt;</c>.
+/// Маскування, зараження, правило нульової молекулярної ваги й порожній місяць — спільний код нижче, один на обидва рушії.
+/// </para>
+/// <para>
 /// У БД модуль не пише (D-69): результати повертаються оркестратору, запис робить
 /// <see cref="CalculationOutputWriter"/> у <c>calc.CalculationResult</c>.
 /// </para>
@@ -59,6 +67,7 @@ public sealed partial class MonthColumnArgumentsModule : ICalculationModule
     private const string DimensionlessUnitCode = "one";
 
     private readonly GenericCalculationModule _inner;
+    private readonly ScriptCalculationModule? _script;
     private readonly IUnitCatalog _unitCatalog;
     private readonly ICellStore _cells;
     private readonly IMetadataCache _metadata;
@@ -66,7 +75,7 @@ public sealed partial class MonthColumnArgumentsModule : ICalculationModule
     private readonly IMonthColumnRouter? _router;
 
     private readonly ConcurrentDictionary<(long DocumentId, int PeriodKey), Lazy<Task<IReadOnlyList<TableInstanceRef>>>> _instances = new();
-    private readonly ConcurrentDictionary<(int VersionId, long DocumentId, int PeriodKey, long SheetCopy), Lazy<Task<SheetRun>>> _runs = new();
+    private readonly ConcurrentDictionary<(int VersionId, MethodologyEngine Engine, object? Script, long DocumentId, int PeriodKey, long SheetCopy), Lazy<Task<SheetRun>>> _runs = new();
 
     /// <summary>Створює модуль; залежності рушія — ті самі, що в <see cref="GenericCalculationModule"/>.</summary>
     public MonthColumnArgumentsModule(
@@ -82,7 +91,8 @@ public sealed partial class MonthColumnArgumentsModule : ICalculationModule
         IRowStore rows,
         IRegistryStore? registryStore = null,
         IRegistrySnapshotLoader? registryLoader = null,
-        IMonthColumnRouter? monthRouter = null)
+        IMonthColumnRouter? monthRouter = null,
+        ScriptCalculationModule? scriptModule = null)
     {
         ArgumentNullException.ThrowIfNull(unitCatalog);
         ArgumentNullException.ThrowIfNull(cells);
@@ -91,6 +101,7 @@ public sealed partial class MonthColumnArgumentsModule : ICalculationModule
 
         _inner = new GenericCalculationModule(
             formulaEngine, methodologies, constants, calendar, unitCatalog, periods, bindingStore, registryStore, registryLoader);
+        _script = scriptModule;
         _unitCatalog = unitCatalog;
         _cells = cells;
         _metadata = metadata;
@@ -117,7 +128,7 @@ public sealed partial class MonthColumnArgumentsModule : ICalculationModule
     /// <inheritdoc />
     public Task<CalculationBindingContext> PrepareAsync(
         MethodologyDescriptor methodology, long documentId, PeriodKey periodKey, CancellationToken ct)
-        => _inner.PrepareAsync(methodology, documentId, periodKey, ct);
+        => PrepareAsync(methodology, documentId, periodKey, registries: null, ct);
 
     /// <inheritdoc />
     public Task<CalculationBindingContext> PrepareAsync(
@@ -126,7 +137,51 @@ public sealed partial class MonthColumnArgumentsModule : ICalculationModule
         PeriodKey periodKey,
         RegistrySnapshotCache? registries,
         CancellationToken ct)
-        => _inner.PrepareAsync(methodology, documentId, periodKey, registries, ct);
+        => methodology.Engine == MethodologyEngine.Script
+            ? PrepareScriptAsync(methodology, documentId, periodKey, registries, ct)
+            : _inner.PrepareAsync(methodology, documentId, periodKey, registries, ct);
+
+    /// <summary>
+    /// Підготовка версії-скрипта з ЯВНИМ текстом (паритет, MS план §8.4): текст не з бази, а з параметра, бібліотеки-тіні
+    /// дозволені. Для чинного шляху — <see cref="PrepareAsync(MethodologyDescriptor, long, PeriodKey, RegistrySnapshotCache?, CancellationToken)"/>.
+    /// </summary>
+    /// <param name="methodology">Дескриптор з <c>Engine = Script</c>.</param>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="registries">Знімок довідників, спільний із іншим шляхом порівняння.</param>
+    /// <param name="options">Текст скрипта й дозвіл на тіньові бібліотеки.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task<CalculationBindingContext> PrepareScriptAsync(
+        MethodologyDescriptor methodology,
+        long documentId,
+        PeriodKey periodKey,
+        RegistrySnapshotCache? registries,
+        ScriptPrepareOptions? options,
+        CancellationToken ct)
+    {
+        var script = RequireScriptModule(methodology);
+        var binding = await script.PrepareAsync(methodology, documentId, periodKey, registries, options, ct).ConfigureAwait(false);
+        return binding with { StepDependencies = binding.Script?.StepDependencies };
+    }
+
+    private Task<CalculationBindingContext> PrepareScriptAsync(
+        MethodologyDescriptor methodology,
+        long documentId,
+        PeriodKey periodKey,
+        RegistrySnapshotCache? registries,
+        CancellationToken ct)
+        => PrepareScriptAsync(methodology, documentId, periodKey, registries, options: null, ct);
+
+    private ScriptCalculationModule RequireScriptModule(MethodologyDescriptor methodology)
+        => _script ?? throw new Domain.Abstractions.DomainException(
+            "ECR-CALC-0422",
+            $"Для версії-скрипта {methodology.Code} рівня {methodology.Level} немає модуля скрипта.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-CALC-0422.noModule",
+                ["code"] = methodology.Code,
+                ["level"] = $"{methodology.Level}",
+            });
 
     /// <inheritdoc />
     public async Task<CalculationOutput> ExecuteAsync(CalculationInput input, CancellationToken ct)
@@ -172,7 +227,10 @@ public sealed partial class MonthColumnArgumentsModule : ICalculationModule
 
         var run = await _runs
             .GetOrAdd(
-                (binding.Methodology.MethodologyVersionId, input.DocumentId, input.PeriodKey.Value, own.SheetCopyId ?? 0),
+                // ⚠ Рушій і скомпільований скрипт — у ключі: паритет (ParityComparer) ганяє ОБИДВА рушії однієї версії в одному
+                // scope, і перевірка іншого тексту скрипта не повинна віддати закешований прогін попереднього.
+                (binding.Methodology.MethodologyVersionId, binding.Methodology.Engine, binding.Script, input.DocumentId,
+                    input.PeriodKey.Value, own.SheetCopyId ?? 0),
                 _ => new Lazy<Task<SheetRun>>(() => ComputeAsync(
                     binding, input, [.. instances.Where(i => i.SheetCopyId == own.SheetCopyId)], ct)))
             .Value.ConfigureAwait(false);
@@ -211,14 +269,19 @@ public sealed partial class MonthColumnArgumentsModule : ICalculationModule
         CancellationToken ct)
     {
         var tables = await LoadTablesAsync(group, input.PeriodKey, ct).ConfigureAwait(false);
-        var targets = MapFormulas(binding.Formulas, tables);
+        var catalog = await _unitCatalog.GetAsync(ct).ConfigureAwait(false);
+        var dimensionless = catalog.Units.TryGetValue(DimensionlessUnitCode, out var one) ? one.Id : (int?)null;
+        var isScript = binding.Methodology.Engine == MethodologyEngine.Script && binding.Script is not null;
+        var steps = isScript ? ScriptSteps(binding.Script!, catalog, dimensionless) : FormulaSteps(binding.Formulas);
+        var targets = MapFormulas(steps, tables);
         var namespaces = Namespaces(targets);
-        var dimensionless = (await _unitCatalog.GetAsync(ct).ConfigureAwait(false))
-            .Units.TryGetValue(DimensionlessUnitCode, out var one) ? one.Id : (int?)null;
-        var dependencies = binding.Formulas.ToDictionary(
-            f => f.Code,
-            f => FormulaReferenceRegex().Matches(f.Expression).Select(m => m.Groups[1].Value).ToList(),
-            StringComparer.OrdinalIgnoreCase);
+        var dependencies = isScript
+            ? ScriptDependencies(binding)
+            : binding.Formulas.ToDictionary(
+                f => f.Code,
+                f => FormulaReferenceRegex().Matches(f.Expression).Select(m => m.Groups[1].Value).ToList(),
+                StringComparer.OrdinalIgnoreCase);
+        ICalculationModule inner = isScript ? RequireScriptModule(binding.Methodology) : _inner;
 
         // ⚠ `Off` не пише кроків, а без кроку маскування не відрізнити замаскований нуль від справжнього.
         // Тому рушій іде на `ErrorsOnly`, а кроки назовні не віддаються — рівень версії дотримано.
@@ -274,7 +337,8 @@ public sealed partial class MonthColumnArgumentsModule : ICalculationModule
                     continue;
                 }
 
-                if ((target.Formula.OutputUnitId ?? column.UnitId ?? dimensionless) is not { } unitId)
+                if (target.Formula.BadUnit
+                    || (target.Formula.OutputUnitId ?? column.UnitId ?? dimensionless) is not { } unitId)
                 {
                     noUnit.Add(target.Formula.Code);
                     continue;
@@ -285,7 +349,7 @@ public sealed partial class MonthColumnArgumentsModule : ICalculationModule
                 scales[target.Formula.Code] = column.Scale;
             }
 
-            var result = await _inner.ExecuteAsync(
+            var result = await inner.ExecuteAsync(
                     binding with { Methodology = descriptor, Outputs = outputs, OutputScales = scales },
                     new CalculationInput(
                         descriptor, input.DocumentId, input.TableInstanceId, input.PeriodKey,
@@ -557,7 +621,7 @@ public sealed partial class MonthColumnArgumentsModule : ICalculationModule
     /// Формула <c>&lt;простір&gt;_&lt;таблиця&gt;_&lt;X&gt;</c> → рядок <c>F_&lt;X&gt;</c> таблиці; формула без такого
     /// рядка — проміжна (<c>Common_LHV0_*</c>).
     /// </summary>
-    private static List<FormulaTarget> MapFormulas(IReadOnlyList<MethodologyFormula> formulas, List<MonthTable> tables)
+    private static List<FormulaTarget> MapFormulas(IReadOnlyList<ModuleStep> formulas, List<MonthTable> tables)
     {
         var targets = new List<FormulaTarget>();
         var byLength = tables.OrderByDescending(t => t.Code.Length).ToList();
@@ -595,6 +659,50 @@ public sealed partial class MonthColumnArgumentsModule : ICalculationModule
         return table => own.TryGetValue(table.Instance.TableInstanceId, out var list) ? list : all;
     }
 
+    private static List<ModuleStep> FormulaSteps(IReadOnlyList<MethodologyFormula> formulas)
+        => [.. formulas.Select(f => new ModuleStep(f.Code, f.Expression, f.OutputUnitId))];
+
+    /// <summary>
+    /// «Формули» модуля для скрипта: верхні <c>output</c> і <c>visible var</c> за порядком тексту; одиниця — з оголошення.
+    /// Безрозмірна <c>one</c> означає «одиниця колонки місяця, а без неї — безрозмірна», як у формули без одиниці
+    /// (HSE400 не задає одиниць формулам).
+    /// </summary>
+    private static List<ModuleStep> ScriptSteps(CompiledScript script, UnitCatalogSnapshot catalog, int? dimensionless)
+    {
+        var steps = new List<ModuleStep>();
+        foreach (var statement in script.Statements)
+        {
+            var (code, unit, text) = statement switch
+            {
+                OutputStatement o => (o.Code, o.UnitCode, o.SourceText),
+                VarStatement { IsVisible: true, UnitCode: { } u } v => (v.Name, u, v.SourceText),
+                _ => (null, null, null),
+            };
+            if (code is null || unit is null)
+            {
+                continue;
+            }
+
+            if (!catalog.Units.TryGetValue(unit, out var known))
+            {
+                steps.Add(new ModuleStep(code, text!, null, BadUnit: true));
+                continue;
+            }
+
+            steps.Add(new ModuleStep(code, text!, known.Id == dimensionless ? null : known.Id));
+        }
+
+        return steps;
+    }
+
+    /// <summary>Залежності кроків скрипта (без регістру): з контексту прив'язки, а за його браком — зі скрипта.</summary>
+    private static Dictionary<string, List<string>> ScriptDependencies(CalculationBindingContext binding)
+    {
+        var source = binding.StepDependencies ?? binding.Script?.StepDependencies
+            ?? new Dictionary<string, IReadOnlyList<string>>();
+        return source.ToDictionary(p => p.Key, p => p.Value.ToList(), StringComparer.OrdinalIgnoreCase);
+    }
+
     private static string MonthKey(int month) => "M" + month.ToString("00", CultureInfo.InvariantCulture);
 
     private sealed record MonthTable(
@@ -604,7 +712,10 @@ public sealed partial class MonthColumnArgumentsModule : ICalculationModule
         Dictionary<string, string> CalculatedRows,
         Dictionary<int, List<(string RowKey, CellValueData Value)>> Inputs);
 
-    private sealed record FormulaTarget(MethodologyFormula Formula, MonthTable Table, string RowKey, string Namespace);
+    /// <summary>Крок модуля: код, текст виразу для трейсу й одиниця результату (спільна форма формули й кроку скрипта).</summary>
+    private sealed record ModuleStep(string Code, string Expression, int? OutputUnitId, bool BadUnit = false);
+
+    private sealed record FormulaTarget(ModuleStep Formula, MonthTable Table, string RowKey, string Namespace);
 
     private sealed record RowResult(List<CalculationOutputValue> Values, List<CalculationTraceStep> Steps);
 

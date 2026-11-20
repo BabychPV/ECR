@@ -14,6 +14,9 @@ namespace Ecr.Infrastructure.DocumentDependencies;
 /// </summary>
 public sealed class MethodologyRegistryEdges(EcrDbContext db) : IMethodologyRegistryEdges
 {
+    /// <summary>Стеля ребер «читає результати» (правило 6: не «віддати все»); ребер у рази менше, ніж методологій у квадраті.</summary>
+    private const int MaxResultReads = 50_000;
+
     /// <inheritdoc />
     public async Task<string> RevisionAsync(CancellationToken ct)
     {
@@ -31,10 +34,44 @@ public sealed class MethodologyRegistryEdges(EcrDbContext db) : IMethodologyRegi
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 
+        // Перемикання рушія опублікованої версії (Formulas ↔ Script, script-migration) НЕ чіпає ні її статусу, ні
+        // PublishedAt, але переписує ребра довідників і залежності методологій: ревізія бачить їх окремо — без цього
+        // граф лишався б зі старими ребрами до стелі життя запису.
+        var engines = await db.MethodologyVersions.AsNoTracking()
+            .Where(v => v.Status == TemplateVersionStatus.Published)
+            .GroupBy(_ => 1)
+            .Select(g => new { Sum = g.Sum(v => (long)v.Id * ((int)v.Engine + 1)) })
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+        var uses = await db.RegistryUses.AsNoTracking()
+            .Where(u => u.SourceKind == RegistryUse.MethodologyVersionSource)
+            .GroupBy(_ => 1)
+            .Select(g => new { Count = g.Count(), MaxId = g.Max(u => u.Id), Sum = g.Sum(u => (long)u.Id) })
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+        var dependencies = await db.MethodologyDependencies.AsNoTracking()
+            .GroupBy(_ => 1)
+            .Select(g => new { Count = g.Count(), MaxId = g.Max(d => d.Id), Sum = g.Sum(d => (long)d.Id) })
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
         return string.Create(
             CultureInfo.InvariantCulture,
-            $"mv{versions?.Count}:{versions?.MaxId}:{versions?.Last?.Ticks}|cb{bindings?.Count}:{bindings?.Sum}");
+            $"mv{versions?.Count}:{versions?.MaxId}:{versions?.Last?.Ticks}:{engines?.Sum}|cb{bindings?.Count}:{bindings?.Sum}"
+            + $"|mu{uses?.Count}:{uses?.MaxId}:{uses?.Sum}|md{dependencies?.Count}:{dependencies?.MaxId}:{dependencies?.Sum}");
     }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<MethodologyResultReadRow>> ListResultReadsAsync(CancellationToken ct)
+        => await (
+                from dependency in db.MethodologyDependencies.AsNoTracking()
+                join reader in db.Methodologies.AsNoTracking() on dependency.FromMethodologyId equals reader.Id
+                join source in db.Methodologies.AsNoTracking() on dependency.ToMethodologyId equals source.Id
+                orderby dependency.Id
+                select new MethodologyResultReadRow(reader.Id, reader.Code, source.Id, source.Code))
+            .Take(MaxResultReads)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<MethodologyRegistryReadRow>> ListReadsAsync(CancellationToken ct)
@@ -54,7 +91,13 @@ public sealed class MethodologyRegistryEdges(EcrDbContext db) : IMethodologyRegi
                     db.MethodologyFormulas
                         .Where(f => f.MethodologyVersionId == version.Id && f.Code == use.FormulaCode)
                         .Select(f => f.Expression)
-                        .FirstOrDefault()))
+                        .FirstOrDefault())
+                {
+                    ScriptText = version.Engine == MethodologyEngine.Script ? version.ScriptText : null,
+                    NumericMode = version.NumericMode,
+                    IsLibrary = methodology.Kind == MethodologyKind.Library,
+                    IsModuleLevel = version.Level == CalculationLevel.Module,
+                })
             .ToListAsync(ct)
             .ConfigureAwait(false);
 

@@ -76,6 +76,8 @@ public sealed partial class SheetCopyQuerySitesTests
             "B80 N4: затвердження місяця споживача — стани оригіналів аркушів (ApprovalState.SheetCopyId == null); копії не враховуються",
         ["src/Ecr.Infrastructure/Jobs/StaleApprovedDependentCheck.cs"] =
             "B80 N4: кандидати STALE_APPROVED_DEPENDENT — затверджені стани оригіналу аркуша (SheetCopyId == null), як у DocumentSourceIssues",
+        ["src/Ecr.Infrastructure/Persistence/SourceImpactAssessor.cs"] =
+            "B80 N5: наслідки зміни джерела (sourceImpact) — затверджені стани споживачів лише оригіналу аркуша (ApprovalState.SheetCopyId == null), як у DocumentSourceIssues",
         ["src/Ecr.Infrastructure/Persistence/RegistryImpactStore.cs"] =
             "B179 L2: «документ-споживач × період є» — екземпляри оригіналу (SheetCopyId == null); перерахунок методологій — лише оригінал",
         ["src/Ecr.Infrastructure/Jobs/SourceDocumentChangeHook.cs"] =

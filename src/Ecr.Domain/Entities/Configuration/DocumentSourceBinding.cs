@@ -146,6 +146,45 @@ public sealed class DocumentSourceBinding : Entity<int>
         return true;
     }
 
+    /// <summary>
+    /// B179 L5: перемикає біти зв'язки — «читати з документа» і «ставити перерахунок залежних» (аварійний вимикач).
+    /// <c>null</c> — біт не чіпати.
+    /// </summary>
+    /// <param name="readFromDocument">Новий біт «читати з документа» або <c>null</c>.</param>
+    /// <param name="recalculateDependents">Новий біт «перераховувати залежних» або <c>null</c>.</param>
+    /// <param name="userId">Хто перемикає.</param>
+    /// <param name="utcNow">Момент у UTC.</param>
+    /// <returns><c>true</c> — хоч один біт справді змінився.</returns>
+    public bool SetFlags(bool? readFromDocument, bool? recalculateDependents, int userId, DateTime utcNow)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(userId);
+        if (utcNow.Kind != DateTimeKind.Utc)
+        {
+            throw new ArgumentException("Момент має бути в UTC.", nameof(utcNow));
+        }
+
+        var changed = false;
+        if (readFromDocument is { } read && read != ReadFromDocument)
+        {
+            ReadFromDocument = read;
+            changed = true;
+        }
+
+        if (recalculateDependents is { } recalculate && recalculate != RecalculateDependents)
+        {
+            RecalculateDependents = recalculate;
+            changed = true;
+        }
+
+        if (changed)
+        {
+            UpdatedAt = utcNow;
+            UpdatedByUserId = userId;
+        }
+
+        return changed;
+    }
+
     /// <summary>Додає шаблон-споживач (для тестів; у базі — сід).</summary>
     /// <param name="templateId">Шаблон.</param>
     public void AddConsumer(int templateId)

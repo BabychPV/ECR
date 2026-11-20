@@ -90,6 +90,9 @@ public sealed class SaveMethodologyCategoryRuleHandler(
         var version = await drafts.FindVersionAsync(methodologyVersionId, ct).ConfigureAwait(false)
             ?? throw VersionNotFound(methodologyVersionId);
 
+        // ⛔ MS: версія-скрипт не редагується вручну — і тоді, коли обробник кличуть повз контролер.
+        MethodologyVersionScope.RequireHandEditable(version);
+
         RequireUsable(expression);
         await RequireReferencesAsync(version, expression, ct).ConfigureAwait(false);
 
@@ -256,6 +259,9 @@ public sealed class DeleteMethodologyCategoryRuleHandler(
 
         var version = await drafts.FindVersionAsync(methodologyVersionId, ct).ConfigureAwait(false)
             ?? throw SaveMethodologyCategoryRuleHandler.VersionNotFound(methodologyVersionId);
+
+        // ⛔ MS: версія-скрипт не редагується вручну — і тоді, коли обробник кличуть повз контролер.
+        MethodologyVersionScope.RequireHandEditable(version);
 
         var rule = await drafts.FindCategoryRuleAsync(methodologyVersionId, ct).ConfigureAwait(false);
         if (rule is null)

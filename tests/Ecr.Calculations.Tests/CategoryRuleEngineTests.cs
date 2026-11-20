@@ -242,8 +242,8 @@ internal sealed class RuleStand
     public RuleStand WithRowFormula(string code, string expression, FormulaResultType type)
         => Add(code, expression, MethodologyFormulaScope.Row, type, isOutput: false);
 
-    public RuleStand WithSubstanceFormula(string code, string expression)
-        => Add(code, expression, MethodologyFormulaScope.Substance, FormulaResultType.Number, isOutput: true);
+    public RuleStand WithSubstanceFormula(string code, string expression, string? argumentsCsv = null)
+        => Add(code, expression, MethodologyFormulaScope.Substance, FormulaResultType.Number, isOutput: true, argumentsCsv);
 
     public RuleStand WithConstants(params MethodologyConstant[] constants)
     {
@@ -390,9 +390,11 @@ internal sealed class RuleStand
     }
 
     private RuleStand Add(
-        string code, string expression, MethodologyFormulaScope scope, FormulaResultType type, bool isOutput)
+        string code, string expression, MethodologyFormulaScope scope, FormulaResultType type, bool isOutput,
+        string? argumentsCsv = null)
     {
         var formula = new MethodologyFormula(VersionId, EcrCode.Create(code), expression);
+        formula.SetArguments(argumentsCsv);
         formula.SetResultType(type);
         formula.SetScope(scope);
         formula.SetEvaluationOrder(++_order);

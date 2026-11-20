@@ -221,6 +221,9 @@ public sealed class SaveMethodologyConstantHandler(
                     ["methodologyVersionId"] = methodologyVersionId.ToString(CultureInfo.InvariantCulture),
                 });
 
+        // ⛔ MS: версія-скрипт не редагується вручну — і тоді, коли обробник кличуть повз контролер.
+        MethodologyVersionScope.RequireHandEditable(version);
+
         // ⛔ V-17(b): неіснуюча речовина доходила до бази і падала на
         // `FK_MC_Substance` — 500 «зверніться до адміністратора» на описку в
         // номері. Видалений логічно запис — теж «немає»: звужувати константу
@@ -408,6 +411,9 @@ public sealed class SaveMethodologyRuleHandler(
                     ["messageKey"] = "err.ECR-CALC-0404.version",
                     ["methodologyVersionId"] = methodologyVersionId.ToString(CultureInfo.InvariantCulture),
                 });
+
+        // ⛔ MS: версія-скрипт не редагується вручну — і тоді, коли обробник кличуть повз контролер.
+        MethodologyVersionScope.RequireHandEditable(version);
 
         // ⛔ V-18: предикат і узгодженість набору перевіряються ДО зміни
         // сутності. Доти зберігалося будь-що — `{not json`, `[1,2]`, однакові
@@ -700,6 +706,9 @@ public sealed class SaveMethodologyOutputHandler(
                     ["messageKey"] = "err.ECR-CALC-0404.version",
                     ["methodologyVersionId"] = methodologyVersionId.ToString(CultureInfo.InvariantCulture),
                 });
+
+        // ⛔ MS: версія-скрипт не редагується вручну — і тоді, коли обробник кличуть повз контролер.
+        MethodologyVersionScope.RequireHandEditable(version);
 
         // ⛔ B-01: неіснуюча одиниця — 422 з ключем, а не 500 на `FK_MO_Unit`.
         await MethodologyUnitChecks.RequireKnownAsync(units, unitId, outputCode.Value, ct)

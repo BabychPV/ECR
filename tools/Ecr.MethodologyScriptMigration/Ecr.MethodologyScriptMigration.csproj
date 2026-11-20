@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Ecr.MethodologyScriptMigration</RootNamespace>
+    <AssemblyName>Ecr.MethodologyScriptMigration</AssemblyName>
+  </PropertyGroup>
+
+  <!--
+    Інструмент перенесення методологій у «ECR Script» (METHODOLOGY-SCRIPT-PLAN.md розд. 8).
+    Conversion/ — чисте ядро перетворення (без БД); Loading/ — читання версії з БД лише на читання (EF Core);
+    Program.cs — команди convert / shadow / pack / parity.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Ecr.Domain\Ecr.Domain.csproj" />
+    <ProjectReference Include="..\..\src\Ecr.Expressions\Ecr.Expressions.csproj" />
+    <ProjectReference Include="..\..\src\Ecr.Scripting\Ecr.Scripting.csproj" />
+    <ProjectReference Include="..\..\src\Ecr.Calculations\Ecr.Calculations.csproj" />
+    <ProjectReference Include="..\..\src\Ecr.Application\Ecr.Application.csproj" />
+    <ProjectReference Include="..\..\src\Ecr.Infrastructure\Ecr.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Ecr.Application.Calculations.Scripting.Migration" />
+  </ItemGroup>
+
+</Project>

@@ -1,5 +1,5 @@
-import type { JSX, ReactNode } from 'react';
-import { Chip, MultiSelect, NativeSelect, Switch, Text, TextInput } from '@mantine/core';
+import { lazy, Suspense, type JSX, type ReactNode } from 'react';
+import { Chip, NativeSelect, Skeleton, Switch, Text, TextInput } from '@mantine/core';
 import { FilterInline, FilterRow, readerOnlyDescription } from '@/shared/ui/FilterBar';
 import { t } from '@/shared/i18n';
 import { statusKey } from '@/shared/ui/StatusBadge';
@@ -7,7 +7,18 @@ import { useFieldDraft } from '@/shared/ui/useFieldDraft';
 import type { DocumentStateFilter } from './api';
 import { useDocumentListSummary } from './api';
 import { DocumentStateFilters, parseStateFilter, type DocumentListFilters } from './documentListFilters';
-import { DocumentOwnerFilter } from './DocumentOwnerFilter';
+
+const DocumentVersionFilter = lazy(async () => ({
+  default: (await import('./DocumentVersionFilter')).DocumentVersionFilter,
+}));
+
+/**
+ * Фільтр «хто створив» — за `import()` (`D-132`): `Select` Mantine із пошуком важив ≈5 КБ gzip у чанку переліку
+ * документів, що стояв на межі 250 КБ. Поки чанк летить, на його місці — заглушка тієї ж висоти (без стрибка ряду).
+ */
+const DocumentOwnerFilter = lazy(async () => ({
+  default: (await import('./DocumentOwnerFilter')).DocumentOwnerFilter,
+}));
 
 interface DocumentListFilterBarProps {
   /** Обраний період (місяць); `null` — «усі місяці». */
@@ -143,23 +154,13 @@ export function DocumentListFilterBar({
             відповіді немає — версії завантаженої сторінки) + вже обрані з адреси, яких сервер більше не віддає, — щоб їх
             було чим зняти. Фільтр серверний (`filters.versions` → `templateVersions`). */}
         {(versionOptions.length > 0 || filters.versions.length > 0) && (
-          <MultiSelect
-            size="xs"
-            miw={160}
-            maw={260}
-            label={t('documents.versionColumn')}
-            description={t('documents.versionFilterHint')}
-            styles={readerOnlyDescription}
-            placeholder={filters.versions.length === 0 ? t('documents.versionAll') : undefined}
-            data={[...new Set([...versionOptions, ...filters.versions])].map((version) => ({
-              value: version,
-              label: t('documents.versionValue', { version }),
-            }))}
-            value={[...filters.versions]}
-            onChange={filters.setVersions}
-            clearable
-            data-version-filter=""
-          />
+          <Suspense fallback={<Skeleton height={50} width={160} data-version-filter-loading="" />}>
+            <DocumentVersionFilter
+              versionOptions={versionOptions}
+              versions={filters.versions}
+              onChange={filters.setVersions}
+            />
+          </Suspense>
         )}
 
         <NativeSelect
@@ -180,14 +181,16 @@ export function DocumentListFilterBar({
             або подані мною» (`documents.filterMine`). Макет: «Everyone's documents» / «Only mine».
             ✎ D-450 (рішення людини 24.10): ~~два варіанти `NativeSelect`~~ — плюс конкретна людина
             (`owner=<id>`), з пошуком; перелік людей читається лише з відкриттям списку. */}
-        <DocumentOwnerFilter
-          owner={filters.owner}
-          mine={filters.mine}
-          onChange={filters.setOwner}
-          projectId={filters.projectId}
-          periodKey={periodKey}
-          ownerName={ownerName}
-        />
+        <Suspense fallback={<Skeleton height={50} width={200} data-owner-filter-loading="" />}>
+          <DocumentOwnerFilter
+            owner={filters.owner}
+            mine={filters.mine}
+            onChange={filters.setOwner}
+            projectId={filters.projectId}
+            periodKey={periodKey}
+            ownerName={ownerName}
+          />
+        </Suspense>
 
         {/*
          * ⚠ На відміну від фільтра стану — НЕ вимкнений без періоду

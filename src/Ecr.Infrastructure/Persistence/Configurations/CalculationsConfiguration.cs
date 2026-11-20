@@ -134,6 +134,26 @@ public sealed class MethodologyVersionConfiguration : IEntityTypeConfiguration<M
         builder.Property(x => x.EffectiveFrom).HasColumnType("date");
         builder.Property(x => x.ChangeReason).HasMaxLength(1000);
         builder.Property(x => x.ContentHash).HasColumnType("varbinary(32)");
+
+        // MS01: рушій версії і текст скрипта. Лише додавання: наявні рядки лишаються `Formulas`.
+        // ⛔ `ValueGeneratedNever`, як у `TraceLevel`: `Formulas` (= 0, CLR-замовчування) EF вважав би
+        // «незаданим» і підставляв би DEFAULT схеми.
+        builder.Property(x => x.Engine)
+               .HasColumnType("tinyint")
+               .HasDefaultValue(Domain.Enums.MethodologyEngine.Formulas)
+               .ValueGeneratedNever();
+        builder.Property(x => x.ScriptText).HasColumnType("nvarchar(max)");
+
+        // ⛔ Токен паралельності (F13): звірка `expectedHash` в обробнику — «прочитав, потім записав», тож два редактори з
+        // одним прочитаним хешем обидва її проходили, і другий мовчки затирав перший. З токеном UPDATE іде з
+        // `WHERE ScriptHash = <прочитаний>` (для ще порожнього — `IS NULL`): другий отримує 409 з одиниці роботи.
+        builder.Property(x => x.ScriptHash).HasColumnType("varbinary(32)").IsConcurrencyToken();
+
+        // ⛔ Токен паралельності (F13a): гонка «Save проти Publish». Публікація пише `Status`, але не `ScriptHash`, тож
+        // `UPDATE ... WHERE ScriptHash = <прочитаний>` збереження, що чекало на її блокування, проходило й після коміту
+        // публікації: текст опублікованої версії розходився з матеріалізованим. З `Status` у `WHERE` збереження чернетки,
+        // яку встигли опублікувати, отримує 409 з одиниці роботи, а публікація, що компілювала застарілий текст, — теж.
+        builder.Property(x => x.Status).IsConcurrencyToken();
         builder.Property(x => x.CreatedAt).HasColumnType("datetime2(3)").IsRequired();
         builder.Property(x => x.PublishedAt).HasColumnType("datetime2(3)");
 
@@ -412,6 +432,26 @@ public sealed class MethodologyOutputConfiguration : IEntityTypeConfiguration<Me
                .HasConstraintName("FK_MO_Version");
         builder.HasOne<Unit>().WithMany().HasForeignKey(x => x.UnitId)
                .HasConstraintName("FK_MO_Unit");
+    }
+}
+
+/// <summary>Конфігурація <see cref="MethodologyReadTable"/> — таблиці, які читає скрипт версії (MS01).</summary>
+public sealed class MethodologyReadTableConfiguration : IEntityTypeConfiguration<MethodologyReadTable>
+{
+    /// <inheritdoc />
+    public void Configure(EntityTypeBuilder<MethodologyReadTable> builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        builder.ToTable("MethodologyReadTable", "calc");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.TableCode).HasMaxLength(128).IsRequired();
+
+        builder.HasIndex(x => new { x.MethodologyVersionId, x.TableCode })
+               .IsUnique().HasDatabaseName("UQ_MethodologyReadTable");
+
+        builder.HasOne<MethodologyVersion>().WithMany().HasForeignKey(x => x.MethodologyVersionId)
+               .HasConstraintName("FK_MRT_Version");
     }
 }
 

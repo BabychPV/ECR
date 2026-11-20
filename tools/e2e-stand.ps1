@@ -542,6 +542,13 @@ $env:ASPNETCORE_URLS = $base
 # процесу, тому досить виставити змінну тут, ДО кроку 10.
 $env:ECR_API_URL = $base
 
+# B80 N5 (D-554): `sourceImpact.spec.ts` сам заводить усе через API, окрім зв'язки джерела з політикою (API її не
+# створює): її вставляє `tools/e2e/source-impact-binding.sql` через `sqlcmd` у ЦЮ тимчасову базу. Адреса бази — тут;
+# пароль SQL-логіна, коли він є, `sqlcmd` бере з `SQLCMDPASSWORD`, виставленого вище.
+$env:ECR_E2E_SQL_SERVER = $Server
+$env:ECR_E2E_SQL_DATABASE = $Database
+$env:ECR_E2E_SQL_LOGIN = if ($Login) { $Login } else { '' }
+
 # ⛔ Cookie автентифікації типово `Secure` і по HTTP не надсилається — вхід
 # проходив би, а наступний виклик отримував 401. Змінна діє лише на цей
 # тимчасовий процес.
@@ -644,6 +651,11 @@ try {
             # ✎ P44: `Calculation.EditFormula` — `resizableModal.spec` заводить методологію з чернеткою й відкриває
             # вікно формули. Лише тестова роль стенда; ролі продукту не змінюються.
             'Calculation.View', 'Calculation.EditFormula', 'Calculation.Publish', 'Calculation.Recalculate',
+            # ✎ B179 L5: `dependencyGraph.spec` відкриває екран «Граф залежностей» і читає граф/зв'язки (перемикачів не чіпає).
+            'Calculation.ManageSourceBinding',
+            # ✎ B80 N5 (D-554): `sourceImpact.spec` — галочка «перерахувати також затверджені» в діалозі впливу й явний
+            # перерахунок затверджених залежних; без права галочки немає, а ендпоінт дає 403. Лише тестова роль стенда.
+            'Calculation.RecalculateApprovedDependents',
             'Security.ManageUsers', 'Security.ManageRoles', 'Security.ViewAudit',
             'Security.Simulate',
             'Report.ViewRegulatory', 'Report.BuildSnapshot', 'Report.ViewCampaign',

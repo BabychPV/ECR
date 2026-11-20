@@ -34,7 +34,8 @@ namespace Ecr.Infrastructure.Persistence;
 /// Перекриття біта зв'язки <c>ReadFromDocument</c> (<see cref="Ecr.Application.Ports.IDocumentSourceFlagOverrides"/>;
 /// у DI завжди <c>null</c> — ключ конфігурації виведено, P-0118-31/33); <c>null</c> — біт зв'язки.
 /// </param>
-internal sealed class DocumentSourceIssues(EcrDbContext db, bool? readOverride)
+/// <param name="graph">Граф залежностей документів: споживачі зв'язки (B179 L6; ручний перелік не читається).</param>
+internal sealed class DocumentSourceIssues(EcrDbContext db, bool? readOverride, IDependencyGraphProvider graph)
 {
     /// <summary>Причина <c>SourceChangedAfterApproval</c>: місяць джерела зараз не затверджено.</summary>
     public const string ReasonNotApproved = "notApproved";
@@ -81,12 +82,14 @@ internal sealed class DocumentSourceIssues(EcrDbContext db, bool? readOverride)
             .Select(s => new { s.Id, s.PeriodKey, s.Status, s.ApprovedAt })
             .ToListAsync(ct).ConfigureAwait(false);
 
+        // ✎ B80 N5 (F13): зв'язки споживача для ВСІХ періодів — один прохід поза циклом (раніше 2 запити на період).
+        var bindingsByPeriod = await DocumentSourceMonthGate
+            .ConsumerBindingsByPeriodAsync(db, graph, documentId, keys, ct).ConfigureAwait(false);
+
         var findings = new List<SourceIssueFinding>();
         foreach (var periodKey in keys)
         {
-            var bindings = await DocumentSourceMonthGate
-                .ConsumerBindingsAsync(db, documentId, periodKey, ct).ConfigureAwait(false);
-            if (bindings.Count == 0)
+            if (!bindingsByPeriod.TryGetValue(periodKey, out var bindings) || bindings.Count == 0)
             {
                 continue;
             }
@@ -161,7 +164,7 @@ internal sealed class DocumentSourceIssues(EcrDbContext db, bool? readOverride)
             return cached;
         }
 
-        var store = new DocumentSourceBindingStore(db);
+        var store = new DocumentSourceBindingStore(db, graph);
         var tableIds = await store.BoundTableIdsAsync(bindingId, ct).ConfigureAwait(false);
         var chosen = await store.ChosenSourceDocumentAsync(tableIds, year, ct).ConfigureAwait(false);
         SourceYear? result = null;

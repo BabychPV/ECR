@@ -37,8 +37,18 @@ public static class DependencyInjection
 
         // ⚠ Порядок: одиничний `ICalculationModule` (публікація, симуляція) — це ОСТАННЯ реєстрація, і нею
         // має лишатися Generic; оркестратор обирає модуль за `CanHandle` з колекції.
+        // ✎ MS: рушій скриптів — перед Generic (його `CanHandle` — лише `Engine == Script`); Generic лишається останнім.
+        services.AddSingleton<ScriptProgramCache>();
+        services.AddScoped<ScriptRunContext>();
+        services.AddScoped<ScriptRowSelector>();
+        services.AddScoped<Application.Ports.IScriptPreviewRunner, ScriptPreviewRunner>();
         services.AddScoped<ICalculationModule, MonthColumnArgumentsModule>();
+        services.AddScoped<ScriptCalculationModule>();
+        services.AddScoped<ICalculationModule>(p => p.GetRequiredService<ScriptCalculationModule>());
         services.AddScoped<ICalculationModule, GenericCalculationModule>();
+        // ✎ MS: порівняння старого й скриптового шляхів версії (паритет, план §8.4); нічого не пише.
+        services.AddScoped<Scripting.Parity.ParityComparer>();
+        services.AddScoped<Application.Ports.IScriptParityRunner, ScriptParityRunner>();
         services.AddScoped<CalculationOrchestrator>();
         services.AddScoped<ICalculationRunner>(p => p.GetRequiredService<CalculationOrchestrator>());
 

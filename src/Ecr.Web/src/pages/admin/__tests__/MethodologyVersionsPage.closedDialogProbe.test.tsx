@@ -115,7 +115,12 @@ afterEach(() => {
 // навантаженням >30 с (18.11). 90 с ≈ 26× окремого заміру.
 describe('B149: MethodologyVersionsPage — один запит на відкриття діалогу', { timeout: 90_000 }, () => {
   it('«New version»: один POST …/versions у всіх трьох вікнах', async () => {
-    const server = holdWrites({ read, write: () => ({ body: { ...Version, id: 11, versionNumber: '2.0' } }) });
+    // ⚠ Відповідь — версія з рушієм `Formulas`: версія-скрипт веде на інший екран (редактор скрипта), і діалог зникав би з
+    // дерева разом зі сторінкою — зонд «закрито, кнопка ще в DOM» цього не пережив би.
+    const server = holdWrites({
+      read,
+      write: () => ({ body: { ...Version, id: 11, versionNumber: '2.0', engine: 'Formulas' } }),
+    });
     const gate = gateReads();
     show();
 

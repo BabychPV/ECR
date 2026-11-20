@@ -85,6 +85,11 @@ const MethodologyVersionsPageLoader = async () => ({
 });
 export const MethodologyVersionsPage = lazy(MethodologyVersionsPageLoader);
 
+const MethodologyScriptPageLoader = async () => ({
+  default: (await import('@/pages/admin/MethodologyScriptPage')).MethodologyScriptPage,
+});
+export const MethodologyScriptPage = lazy(MethodologyScriptPageLoader);
+
 const ExpressionsPageLoader = async () => ({
   default: (await import('@/pages/admin/ExpressionsPage')).ExpressionsPage,
 });
@@ -111,6 +116,11 @@ export const ProjectLifecycleTab = lazy(ProjectLifecycleTabLoader);
 
 const SourcesPageLoader = async () => ({ default: (await import('@/pages/admin/SourcesPage')).SourcesPage });
 export const SourcesPage = lazy(SourcesPageLoader);
+
+const DependencyGraphPageLoader = async () => ({
+  default: (await import('@/pages/admin/DependencyGraphPage')).DependencyGraphPage,
+});
+export const DependencyGraphPage = lazy(DependencyGraphPageLoader);
 
 const MappingPreviewPageLoader = async () => ({
   default: (await import('@/pages/admin/MappingPreviewPage')).MappingPreviewPage,
@@ -187,10 +197,12 @@ const routeChunkLoaders: Partial<Record<string, () => Promise<unknown>>> = {
   [routes.adminPermits.id]: PermitsPageLoader,
   [routes.adminMethodologies.id]: MethodologiesPageLoader,
   [routes.adminMethodologyVersions.id]: MethodologyVersionsPageLoader,
+  [routes.adminMethodologyScript.id]: MethodologyScriptPageLoader,
   [routes.adminExpressions.id]: ExpressionsPageLoader,
   [routes.adminSecurity.id]: SecurityPageLoader,
   [routes.projects.id]: ProjectsPageLoader,
   [routes.adminSources.id]: SourcesPageLoader,
+  [routes.adminDependencyGraph.id]: DependencyGraphPageLoader,
   [routes.adminMapping.id]: MappingPreviewPageLoader,
   [routes.adminPiData.id]: PiDataPageLoader,
   [routes.adminPipeline.id]: PipelinePageLoader,

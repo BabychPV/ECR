@@ -37,12 +37,14 @@ public sealed class MethodologyVersion : Entity<int>
     /// <param name="level">Рівень драбини виразності (ФВ-13.5).</param>
     /// <param name="createdByUserId">Автор. Саме він **не зможе** опублікувати (D-40).</param>
     /// <param name="utcNow">Час створення в UTC.</param>
+    /// <param name="engine">Рушій версії; типово — формули.</param>
     public MethodologyVersion(
         int methodologyId,
         string version,
         CalculationLevel level,
         int createdByUserId,
-        DateTime utcNow)
+        DateTime utcNow,
+        MethodologyEngine engine = MethodologyEngine.Formulas)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(version);
 
@@ -51,6 +53,7 @@ public sealed class MethodologyVersion : Entity<int>
         Level = level;
         CreatedByUserId = createdByUserId;
         CreatedAt = utcNow;
+        Engine = engine;
 
         // ⚠ Legacy за замовчуванням, а не Strict. Нова версія має рахувати
         // так само, як чинна система, доки хтось свідомо не вирішить інакше:
@@ -95,6 +98,18 @@ public sealed class MethodologyVersion : Entity<int>
     public DateTime? PublishedAt { get; private set; }
     public string? ChangeReason { get; private set; }
 
+    /// <summary>Рушій версії: формули чи скрипт.</summary>
+    public MethodologyEngine Engine { get; private set; }
+
+    /// <summary>
+    /// Текст скрипта. Може бути заповнений і при <see cref="MethodologyEngine.Formulas"/> —
+    /// «тіньовий» скрипт на час перенесення.
+    /// </summary>
+    public string? ScriptText { get; private set; }
+
+    /// <summary>SHA-256 від UTF-8 тексту скрипта (без BOM, переводи рядків нормалізовано до LF).</summary>
+    public byte[]? ScriptHash { get; private set; }
+
     /// <summary>Чи опублікована версія.</summary>
     public bool IsPublished => Status == TemplateVersionStatus.Published;
 
@@ -115,6 +130,99 @@ public sealed class MethodologyVersion : Entity<int>
         NumericMode = numericMode;
         CalendarMode = calendarMode;
         TraceLevel = traceLevel;
+    }
+
+    /// <summary>Зберігає текст скрипта й його хеш.</summary>
+    /// <param name="text">Текст; не порожній.</param>
+    /// <param name="hash">SHA-256 тексту (рахує <c>ScriptCompiler.Hash</c>).</param>
+    /// <exception cref="DomainException">
+    /// <c>ECR-CALC-0409</c> — версія опублікована, а рушій уже <c>Script</c>.
+    /// </exception>
+    /// <remarks>
+    /// ⚠ Дозволено для чернетки АБО для версії з рушієм <c>Formulas</c> (тіньовий запис
+    /// скрипта під час перенесення: старі числа не змінюються, бо їх рахують формули).
+    /// Опублікована версія з рушієм <c>Script</c> незмінна, як і будь-яка опублікована.
+    /// </remarks>
+    public void SetScript(string text, byte[] hash)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(text);
+        ArgumentNullException.ThrowIfNull(hash);
+
+        if (Status != TemplateVersionStatus.Draft && Engine != MethodologyEngine.Formulas)
+        {
+            RequireDraft("текст скрипта");
+        }
+
+        ScriptText = text;
+        ScriptHash = hash;
+    }
+
+    /// <summary>Перемикає рушій версії. Лише для чернетки.</summary>
+    /// <param name="engine">Новий рушій.</param>
+    /// <exception cref="DomainException">
+    /// <c>ECR-CALC-0409</c> — версія не чернетка; <c>ECR-CALC-0422</c> — перемикання на
+    /// <c>Script</c> без тексту скрипта.
+    /// </exception>
+    public void SwitchEngine(MethodologyEngine engine)
+    {
+        RequireDraft("рушій");
+
+        if (engine == MethodologyEngine.Script && string.IsNullOrWhiteSpace(ScriptText))
+        {
+            throw new DomainException(
+                "ECR-CALC-0422",
+                $"Версія {Version}: перемкнути на скрипт неможливо — тексту скрипта немає.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.scriptEmpty",
+                    ["version"] = Version,
+                });
+        }
+
+        Engine = engine;
+    }
+
+    /// <summary>
+    /// Перемикає рушій ОПУБЛІКОВАНОЇ чи виведеної з обігу версії — лише для перенесення методологій на скрипт
+    /// (MS, план 8.5). Чернетку перемикає <see cref="SwitchEngine"/>.
+    /// </summary>
+    /// <param name="engine">Новий рушій.</param>
+    /// <exception cref="DomainException">
+    /// <c>ECR-CALC-0409</c> — версія чернетка (для неї є <see cref="SwitchEngine"/>);
+    /// <c>ECR-CALC-0422</c> — перемикання на <c>Script</c> без тексту скрипта.
+    /// </exception>
+    /// <remarks>
+    /// ⛔ Дозволено лише дорогою перенесення, яка перед викликом перевіряє: текст компілюється без діагностик, а
+    /// матеріалізація з нього збігається з наявними виходами, речовинами й імпортами. Сама сутність цього не знає.
+    /// Старі формули, константи й правила не змінюються: повернення на <c>Formulas</c> лишається можливим.
+    /// </remarks>
+    public void SwitchEngineForMigration(MethodologyEngine engine)
+    {
+        if (Status is not (TemplateVersionStatus.Published or TemplateVersionStatus.Deprecated))
+        {
+            throw new DomainException(
+                "ECR-CALC-0409",
+                $"Версія {Version} не опублікована: рушій чернетки перемикає SwitchEngine.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0409.scriptSwitchNotPublished",
+                    ["version"] = Version,
+                });
+        }
+
+        if (engine == MethodologyEngine.Script && string.IsNullOrWhiteSpace(ScriptText))
+        {
+            throw new DomainException(
+                "ECR-CALC-0422",
+                $"Версія {Version}: перемкнути на скрипт неможливо — тексту скрипта немає.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.scriptEmpty",
+                    ["version"] = Version,
+                });
+        }
+
+        Engine = engine;
     }
 
     /// <summary>Фіксує контрольну суму вмісту. Лише для чернетки.</summary>
@@ -277,8 +385,13 @@ public sealed class MethodologyVersion : Entity<int>
     /// </remarks>
     public MethodologyVersion CloneAsDraft(string newVersion, int createdByUserId, DateTime utcNow)
     {
-        var draft = new MethodologyVersion(MethodologyId, newVersion, Level, createdByUserId, utcNow);
+        var draft = new MethodologyVersion(MethodologyId, newVersion, Level, createdByUserId, utcNow, Engine);
         draft.SetModes(NumericMode, CalendarMode, TraceLevel);
+
+        // Рушій і скрипт переносяться, як і режими: клон скрипта без тексту — порожня
+        // методологія, клон формульної версії з тіньовим скриптом не втрачає його.
+        draft.ScriptText = ScriptText;
+        draft.ScriptHash = ScriptHash;
 
         return draft;
     }

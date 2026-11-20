@@ -36,7 +36,8 @@ public sealed record PackageVersion(
     string Version,
     IReadOnlyList<PackageFormula> Formulas,
     IReadOnlyList<PackageConstant> Constants,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] PackageCategoryRule? CategoryRule = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] PackageCategoryRule? CategoryRule = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Level = null);
 
 /// <summary>Правило категорії версії (вираз діалекту Methodology); у пакеті — вузол <c>categoryRule</c>.</summary>
 public sealed record PackageCategoryRule(string Expression);
@@ -69,6 +70,11 @@ public sealed record MethodologyPackage(
 
     /// <summary>Row-формули Land: категорію рядка задають три формули; автовизначення за замиканням правила немає.</summary>
     public const string RowScope = "Row";
+
+    /// <summary>Методологія-модуль (рівень Module): HSE400 рахує <c>MonthColumnArgumentsModule</c>, а не правила рядків; решта AF - Configuration.</summary>
+    public const string ModuleMethodology = "HSE400";
+
+    public const string ModuleLevel = "Module";
 
     public const string CategoryRuleFormula = "ECW_Location";
 
@@ -110,19 +116,66 @@ public sealed record MethodologyPackage(
                                 cg.Key,
                                 cg.Select(c => c.Parameter).FirstOrDefault(p => p.Length > 0) ?? string.Empty,
                                 CanonicalUnit(cg.Select(c => c.Unit).FirstOrDefault(u => u.Length > 0)),
-                                cg.Where(c => c.HasValue)
-                                    .OrderBy(c => c.Category, StringComparer.Ordinal).ThenBy(c => c.Version, StringComparer.Ordinal)
-                                    .Select(c => new PackageConstantValue(c.Category, c.Version, c.Value, c.StartDate, c.EndDate))
-                                    .ToList()))
+                                CollapseRedundantCategories(
+                                    cg.Where(c => c.HasValue)
+                                        .OrderBy(c => c.Category, StringComparer.Ordinal).ThenBy(c => c.Version, StringComparer.Ordinal)
+                                        .Select(c => new PackageConstantValue(c.Category, c.Version, c.Value, c.StartDate, c.EndDate))
+                                        .ToList(),
+                                    library,
+                                    isLibrary: string.Equals(g.Key, library, StringComparison.Ordinal))))
                             .ToList(),
                         CategoryRuleOf(
                             formulas[(g.Key, v)],
                             hasCategoryConstants: constants[(g.Key, v)]
-                                .Any(c => c.Category.Length > 0 && !string.Equals(c.Category, library, StringComparison.Ordinal)))))
+                                .Any(c => c.Category.Length > 0 && !string.Equals(c.Category, library, StringComparison.Ordinal))),
+                        string.Equals(g.Key, ModuleMethodology, StringComparison.Ordinal) ? ModuleLevel : null))
                     .ToList()))
             .ToList();
 
         return new MethodologyPackage(FormatName, CurrentVersion, library, methodologies, report.Blockers);
+    }
+
+    /// <summary>
+    /// Бібліотека: значення константи в категоріях, що дослівно збігаються зі значенням спільної категорії
+    /// (<paramref name="library"/>) на ті самі дати й версію AF, зайві й прибираються.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Лише для самої бібліотеки й лише коли ВСІ значення групи однакові: тоді кожен вибір категорії
+    /// (точний збіг, а за його відсутності — запасна спільна категорія, <c>ConstantResolver</c>) дає те саме число,
+    /// тож результат не змінюється. Без згортання версія бібліотеки з кількома однаковими категоріями (приклад — константа
+    /// складу газу факелів: шість категорій з одним значенням) на запуску без категорії давала <c>constantAmbiguous</c>
+    /// і не публікувалася. Група, де значення розрізняються, лишається як є — вибір між ними рішення методолога.
+    /// </remarks>
+    public static IReadOnlyList<PackageConstantValue> CollapseRedundantCategories(
+        IReadOnlyList<PackageConstantValue> values, string library, bool isLibrary)
+    {
+        if (!isLibrary || values.Count < 2)
+        {
+            return values;
+        }
+
+        var result = new List<PackageConstantValue>(values.Count);
+        var collapsed = false;
+        foreach (var group in values.GroupBy(v => (v.Version, v.StartDate, v.EndDate)))
+        {
+            var items = group.ToList();
+            var common = items.FirstOrDefault(v => string.Equals(v.Category, library, StringComparison.Ordinal));
+            var identical = common is not null
+                && items.All(v => string.Equals(v.Value, common.Value, StringComparison.Ordinal));
+            if (identical && items.Count > 1)
+            {
+                result.Add(common!);
+                collapsed = true;
+            }
+            else
+            {
+                result.AddRange(items);
+            }
+        }
+
+        return !collapsed
+            ? values
+            : result.OrderBy(v => v.Category, StringComparer.Ordinal).ThenBy(v => v.Version, StringComparer.Ordinal).ToList();
     }
 
     /// <summary>

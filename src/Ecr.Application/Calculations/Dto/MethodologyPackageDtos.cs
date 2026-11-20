@@ -39,11 +39,16 @@ public sealed record MethodologyPackageMethodologyDto(
 /// читається як і раніше (формат v1 зворотно сумісний). Експортер AF правило сам НЕ виводить — у AF
 /// категорію вибирає C#-клас методології, а не дані, — тож вузол дописує людина чи хмарна лінія.
 /// </param>
+/// <param name="Level">
+/// Рівень версії: <c>Configuration</c> (за замовчуванням) або <c>Module</c> (методологія-модуль HSE400, яку рахує
+/// <c>MonthColumnArgumentsModule</c>). Необов'язкове: пакет без поля читається як і раніше.
+/// </param>
 public sealed record MethodologyPackageVersionDto(
     string Version,
     IReadOnlyList<MethodologyPackageFormulaDto> Formulas,
     IReadOnlyList<MethodologyPackageConstantDto> Constants,
-    MethodologyPackageCategoryRuleDto? CategoryRule = null);
+    MethodologyPackageCategoryRuleDto? CategoryRule = null,
+    string? Level = null);
 
 /// <summary>Правило категорії константи версії пакета (L-2).</summary>
 /// <param name="Expression">

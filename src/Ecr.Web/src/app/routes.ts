@@ -479,6 +479,18 @@ export const routes = {
       crumb: { ancestorIds: ['admin-methodologies'] },
     },
   },
+  adminMethodologyScript: {
+    id: 'admin-methodology-script',
+    path: '/admin/methodologies/:id/versions/:vid/script',
+    // ⚠ Лист — фізичний сусід `admin-methodology-versions` у `router.tsx`, не його нащадок; крихта «версії»
+    // додається явно (`ancestorIds`), як у `admin-template-version-relations`.
+    handle: {
+      labelKey: 'methodologyScript.title',
+      permission: 'Calculation.View',
+      numericParams: ['id', 'vid'],
+      crumb: { ancestorIds: ['admin-methodologies', 'admin-methodology-versions'] },
+    },
+  },
   adminExpressions: {
     id: 'admin-expressions',
     path: '/admin/expressions',
@@ -577,6 +589,23 @@ export const routes = {
       permission: 'Integration.View',
       alsoPermittedBy: ['Integration.Manage'],
       icon: 'sources',
+    },
+    showInNav: true,
+  },
+  /**
+   * «Граф залежностей» (`B179 L5`): які документи читають дані яких документів-джерел, рівні порядку обчислення,
+   * докази ребер, цикли й перемикачі зв'язок джерел. ⚠ Право — `Calculation.ManageSourceBinding`, те саме, що вимагають
+   * `GET /api/v1/dependency-graph` і `/document-source-bindings` на сервері (з вбудованих ролей — лише SystemAdministrator).
+   */
+  adminDependencyGraph: {
+    id: 'admin-dependency-graph',
+    path: '/admin/dependency-graph',
+    handle: {
+      labelKey: 'nav.dependencyGraph',
+      descriptionKey: 'nav.dependencyGraph.description',
+      permission: 'Calculation.ManageSourceBinding',
+      icon: 'dependencyGraph',
+      skeletonShape: 'table',
     },
     showInNav: true,
   },
@@ -787,6 +816,7 @@ export const navGroups: readonly NavGroup[] = [
       routes.adminExpressions,
       routes.adminUnits,
       routes.adminSources,
+      routes.adminDependencyGraph,
       routes.adminMapping,
       routes.adminPipeline,
       routes.adminPiData,

@@ -130,13 +130,25 @@ public sealed class ImportMethodologyPackageHandler(
             return plan.ToReport(dryRun: false, applied: false);
         }
 
+        var levels = new Dictionary<(string, string), CalculationLevel>();
+        foreach (var pm in package.Methodologies ?? [])
+        {
+            foreach (var pv in pm.Versions ?? [])
+            {
+                if (string.Equals(pv.Level, nameof(CalculationLevel.Module), StringComparison.OrdinalIgnoreCase))
+                {
+                    levels[(pm.Name.Trim(), pv.Version.Trim())] = CalculationLevel.Module;
+                }
+            }
+        }
+
         var methodologyIds = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var versionIds = new Dictionary<(string, string), int>();
 
         await uow.ExecuteInTransactionAsync(
             async innerCt =>
             {
-                await WriteAsync(plan, existing, userId, methodologyIds, versionIds, innerCt).ConfigureAwait(false);
+                await WriteAsync(plan, existing, userId, methodologyIds, versionIds, levels, innerCt).ConfigureAwait(false);
 
                 var report = plan.ToReport(dryRun: false, applied: true, methodologyIds, versionIds);
 
@@ -176,6 +188,7 @@ public sealed class ImportMethodologyPackageHandler(
         int userId,
         Dictionary<string, int> methodologyIds,
         Dictionary<(string, string), int> versionIds,
+        IReadOnlyDictionary<(string, string), CalculationLevel> levels,
         CancellationToken ct)
     {
         methodologyIds.Clear();
@@ -214,7 +227,7 @@ public sealed class ImportMethodologyPackageHandler(
                     ?? throw new InvalidOperationException($"Методологія {methodologyId} зникла під час імпорту.");
 
                 var draft = new MethodologyVersion(
-                    methodologyId, v.Version, CalculationLevel.Configuration, userId, clock.UtcNow);
+                    methodologyId, v.Version, levels.GetValueOrDefault((m.Code, v.Version), CalculationLevel.Configuration), userId, clock.UtcNow);
 
                 // Номер версії перевіряє агрегат (`UQ_MethodologyVersion`), як і в конфігураторі.
                 aggregate.AddVersion(draft);

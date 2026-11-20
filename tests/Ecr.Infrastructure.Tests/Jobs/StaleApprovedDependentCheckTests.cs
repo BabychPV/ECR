@@ -127,8 +127,8 @@ public sealed class StaleApprovedDependentCheckTests(SqlServerFixture sql)
         }
 
         await using var db = sql.CreateContext();
-        Assert.Single(await new StaleApprovedDependentCheck(db, readOverride: null).RunAsync(1, CancellationToken.None));
-        Assert.Equal(2, (await new StaleApprovedDependentCheck(db, readOverride: null).RunAsync(2, CancellationToken.None)).Count);
+        Assert.Single(await new StaleApprovedDependentCheck(db, readOverride: null, DependencyGraphTestKit.Provider(db)).RunAsync(1, CancellationToken.None));
+        Assert.Equal(2, (await new StaleApprovedDependentCheck(db, readOverride: null, DependencyGraphTestKit.Provider(db)).RunAsync(2, CancellationToken.None)).Count);
     }
 
     /// <summary>Наскрізно: нічна задача пише знахідку в <c>aud.ConsistencyIssue</c> конвертом каталогу з деталями.</summary>
@@ -158,7 +158,7 @@ public sealed class StaleApprovedDependentCheckTests(SqlServerFixture sql)
     private async Task<List<StaleApprovedDependent>> OwnAsync(long documentId)
     {
         await using var db = sql.CreateContext();
-        var all = await new StaleApprovedDependentCheck(db, readOverride: null).RunAsync(int.MaxValue, CancellationToken.None);
+        var all = await new StaleApprovedDependentCheck(db, readOverride: null, DependencyGraphTestKit.Provider(db)).RunAsync(int.MaxValue, CancellationToken.None);
         return [.. all.Where(s => s.DocumentId == documentId)];
     }
 
@@ -173,7 +173,7 @@ public sealed class StaleApprovedDependentCheckTests(SqlServerFixture sql)
         await using var db = sql.CreateContext();
         var job = new ConsistencyCheckJob(
             db, Substitute.For<IOrphanScanner>(), new TestClock(new DateTime(2026, 11, 18, 3, 0, 0, DateTimeKind.Utc)),
-            Substitute.For<IConsistencyMetrics>());
+            Substitute.For<IConsistencyMetrics>(), dependencyGraph: DependencyGraphTestKit.Provider(db));
 
         await job.ExecuteAsync(null, Substitute.For<IJobProgress>(), CancellationToken.None);
     }

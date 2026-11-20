@@ -102,6 +102,10 @@ param(
     [string]$BaseUrl = $(if ($env:ECR_BASE_URL) { $env:ECR_BASE_URL } else { 'http://localhost:5094' }),
     [string]$ModelPath,
     [string]$AfPackage,
+    # -Stage LegacyRules: пакет правил рядків ecr-methodology-rules (tools/Ecr.MethodologyImport export --sql ... --rules-out), лише поза репозиторієм.
+    [string]$LegacyRules,
+    # -Stage LegacyPublish: рядок підключення до ЛОКАЛЬНОЇ копії старої системи (лише читання) - джерело одного реального рядка для золотого знімка.
+    [string]$LegacySqlConnection,
     [string]$AccountsFile,
     # Обліковий запис етапів збірки (вхід, Import-ContractDictionaries, Apply-ContractHeader); пароль - з -AccountsFile за
     # цим ключем. Етап Accounts і далі створює саме land-owner і land-reviewer.
@@ -111,7 +115,7 @@ param(
     [switch]$ReuseDraft,
     [securestring]$BootstrapPassword,
     [string]$GoldenDir,
-    [ValidateSet('Accounts', 'Units', 'Registries', 'Contract', 'Template', 'Project', 'Documents', 'Methodologies', 'RowFilter', 'T7bStatus', 'SubstanceApplicability', 'ParityBranch', 'OptionalArguments', 'ArgumentSuffix', 'LookupCompare', 'NaeType', 'BranchGate', 'RequiredInputs', 'YearMonths', 'Data', 'MassFraction', 'LandParity', 'CompositionMass', 'All')]
+    [ValidateSet('LegacyRules', 'LegacyBindings', 'LegacyPublish', 'Accounts', 'Units', 'Registries', 'Contract', 'Template', 'Project', 'Documents', 'Methodologies', 'RowFilter', 'T7bStatus', 'SubstanceApplicability', 'ParityBranch', 'OptionalArguments', 'ArgumentSuffix', 'LookupCompare', 'NaeType', 'BranchGate', 'RequiredInputs', 'YearMonths', 'Data', 'MassFraction', 'LandParity', 'CompositionMass', 'All')]
     [string[]]$Stage = @('All'),
     [ValidateSet('Sql', 'Api')][string]$StructureMode = 'Sql',
     [string]$SqlConnection,
@@ -132,6 +136,8 @@ param(
     # -Stage BranchGate: перевести еталонні тести чернетки на наявний документ/період (старий документ 1 видалено 10.11).
     [long]$GoldenTestDocumentId = 0,
     [int]$GoldenTestPeriodKey = 0,
+    # -Stage LegacyPublish: мостові аргументи, яких немає в рядку старої системи, дістають значення 1 (знімок на синтетиці; без прапора такий аргумент не передається).
+    [switch]$GoldenSyntheticBridgeArgs,
     # -Stage RequiredInputs: рівень вимоги (Warn - попередження, Block - відмова збереження людині) і дозвіл створити
     # чернетку V(n+1) з останньої опублікованої версії, коли чернетки V<n> немає.
     [ValidateSet('Warn', 'Block')][string]$RequiredInputSeverity = 'Warn',
@@ -167,6 +173,8 @@ if (-not $afFile) { $afFile = Join-Path $repo 'docs\delivery\reference-data\land
 . (Join-Path $here 'LandTemplateDraft.Lib.ps1')
 . (Join-Path $here 'LandYearMonths.Lib.ps1')
 . (Join-Path $here 'LandYearMonthsApply.Lib.ps1')
+. (Join-Path $here 'LandLegacyRules.Lib.ps1')
+. (Join-Path $here 'LandLegacyPublish.Lib.ps1')
 . (Join-Path $here 'LandT7bStatus.Lib.ps1')
 Set-StrictMode -Off
 
@@ -2704,6 +2712,361 @@ function Stage-Documents {
     }
 }
 
+# ==================== LegacyRules (правила рядків зі старої системи -> MethodologyRule) ====================
+# Лише явно: -Stage LegacyRules -LegacyRules <rules.json> (ПІСЛЯ Methodologies; у All не входить). Для кожної методології пакета правил
+# (tools/Ecr.MethodologyImport export --sql ... --rules-out): таблиця старої системи -> таблиця шаблону, параметр -> колонка,
+# значення -> Id запису довідника, предикат -> PUT .../versions/{vid}/rules/{code}. Чернетка: правила записуються (правило
+# версії, якого немає в плані, вимикається - видалення правил API не має); опублікована версія не змінюється, її правила лише
+# порівнюються з планом (як множина предикатів). Правило, яке не вдалося перетворити, не пишеться, а звітується з причиною.
+# Land_Status = Running додається так само, як у ручних правилах етапу Methodologies: лише для методологій land-row-filter.json
+# (runningOnly) і лише в таблицях зі стовпцем Land_Status. Повтор - 0 змін.
+function Stage-LegacyRules {
+    Log '== LegacyRules =='
+    if ([string]::IsNullOrWhiteSpace($LegacyRules) -or -not (Test-Path -LiteralPath $LegacyRules)) { throw 'Задайте -LegacyRules <файл ecr-methodology-rules>, створений Ecr.MethodologyImport --rules-out (поза репозиторієм).' }
+    $pkg = Get-Content -LiteralPath $LegacyRules -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ([string]$pkg.format -ne 'ecr-methodology-rules' -or [int]$pkg.version -ne 1) { throw "Очікується ecr-methodology-rules v1, у файлі: $($pkg.format) v$($pkg.version)." }
+    LoginAs $BuildUser
+    Load-Structure
+    Load-Registries
+    $tables = @{}
+    foreach ($sh in @($Mdl.sheets)) { foreach ($tb in @($sh.tables)) { if (-not $tables.ContainsKey([string]$tb.code)) { $tables[[string]$tb.code] = $tb } } }
+    $regs = @{}
+    foreach ($r in @($Mdl.registries)) { $regs[[string]$r.code] = $r }
+    $aliasesByTable = @{}
+    if ($Mdl.prodColumnMapping -and $Mdl.prodColumnMapping.tables) {
+        foreach ($sh in @($Mdl.sheets)) { foreach ($tb in @($sh.tables)) {
+                $e = $Mdl.prodColumnMapping.tables.PSObject.Properties["$($sh.code)|$($tb.code)"]
+                if ($e -and -not $aliasesByTable.ContainsKey([string]$tb.code)) { $aliasesByTable[[string]$tb.code] = @($e.Value.aliases) } } }
+    }
+    $rf = Get-Content -LiteralPath (Join-Path $here 'land-row-filter.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+    $runningOnly = @{}; foreach ($c in @($rf.runningOnly)) { $runningOnly[[string]$c] = $true }
+    $running = RegEntryId 'LAND_GENERIC_EQUIPSTATUS' 'Running'
+    $mid = @{}
+    foreach ($m in @(Items (Api GET '/api/v1/methodologies?limit=500').Json)) { $mid[[string]$m.code] = [int]$m.id }
+    $legacyTables = @(@($pkg.methodologies) | ForEach-Object { @($_.versions) } | ForEach-Object { @($_.rules) } | ForEach-Object { [string]$_.table } | Sort-Object -Unique)
+    $tmap = Get-LandLegacyTableMap -Model $Mdl -LegacyTables $legacyTables
+    $unmappedTables = @($tmap.Keys | Where-Object { -not $tmap[$_] })
+    Log ("  таблиць старої системи в правилах: {0}, зіставлено з таблицями шаблону: {1}, без відповідника: {2}" -f $legacyTables.Count, ($legacyTables.Count - $unmappedTables.Count), $unmappedTables.Count)
+    foreach ($t in $unmappedTables) { Log "    ! немає таблиці шаблону для $t" }
+    $colId = { param($tc, $cc) try { return (ColId $tc $cc) } catch { return $null } }
+    $entryId = { param($rq, $ecc) try { return (RegEntryId $rq ('code:' + $ecc)) } catch { return $null } }
+    $tot = @{ written = 0; same = 0; deactivated = 0; unresolved = 0; merged = 0; published = 0; pubSame = 0; pubDiff = 0; noMeth = 0 }
+    $reasonCount = @{}
+    foreach ($pm in @($pkg.methodologies)) {
+        $lgCode = [string]$pm.name
+        if ($OnlyMethodology.Count -gt 0 -and $OnlyMethodology -notcontains $lgCode) { continue }
+        $m = $mid[$lgCode]
+        if (-not $m) { Log "  ${code}: методології на сервері немає"; $tot.noMeth++; continue }
+        $vers = @(Items (Api GET "/api/v1/methodologies/$m/versions").Json | Sort-Object { [int]$_.id } -Descending)
+        foreach ($pv in @($pm.versions)) {
+            $ver = @($vers | Where-Object { [string]$_.versionNumber -eq [string]$pv.version }) | Select-Object -First 1
+            if (-not $ver) { $ver = $vers | Select-Object -First 1 }
+            if (-not $ver) { Log "  ${code}: версій немає"; continue }
+            $vid = [int]$ver.id
+            $statusId = if ($runningOnly.ContainsKey($lgCode)) { $running } else { $null }
+            $conv = @(foreach ($r in @($pv.rules)) {
+                    [pscustomobject]@{ Rule = $r; Result = (Convert-LandLegacyRule -Rule $r -TableMap $tmap -Tables $tables -Registries $regs -ColumnId $colId -EntryId $entryId -StatusEntryId $statusId -AliasesByTable $aliasesByTable) } })
+            $plan = Get-LandLegacyRulePlan -Converted $conv
+            foreach ($u in @($plan.Unresolved)) { $tot.unresolved++; foreach ($rs in @($u.Reasons)) { $reasonCount[$rs] = 1 + [int]$reasonCount[$rs] } }
+            $tot.merged += $plan.Merged
+            $existing = @(Items (Api GET "/api/v1/methodologies/$m/versions/$vid/rules").Json)
+            if ([string]$ver.status -eq 'Published') {
+                $tot.published++
+                $want = @($plan.Rules | ForEach-Object { ConvertTo-LandLegacyPredicateKey $_.MatchJson } | Sort-Object)
+                $have = @($existing | Where-Object { [bool]$_.isActive } | ForEach-Object { ConvertTo-LandLegacyPredicateKey ([string]$_.matchJson) } | Sort-Object)
+                $diff = @(Compare-Object -ReferenceObject $want -DifferenceObject $have)
+                if ($want.Count -eq $have.Count -and $diff.Count -eq 0) { $tot.pubSame++; Log ("  {0} (опублікована): правила збігаються з планом зі старої системи ({1})" -f $lgCode, $want.Count) }
+                else { $tot.pubDiff++; Log ("  ! {0} (опублікована): правил у плані {1}, у версії {2}, відмінних предикатів {3}" -f $lgCode, $want.Count, $have.Count, $diff.Count) }
+                continue
+            }
+            $haveByCode = @{}; foreach ($e in $existing) { $haveByCode[[string]$e.code] = $e }
+            $w = 0; $sm = 0
+            # Зсув пріоритетів уже записаних правил (з'явились нові) не повинен дати тимчасовий рівний пріоритет (422 при
+            # збереженні): `{}` спершу відсувається на найбільший пріоритет (він мусить бути останнім), решта змін іде через
+            # унікальні тимчасові значення; далі кожне правило отримує свій остаточний пріоритет.
+            $shift = @($plan.Rules | Where-Object { $c0 = $haveByCode[$_.Code]; $c0 -and [bool]$c0.isActive -and [int]$c0.priority -ne $_.Priority })
+            if ($shift.Count -gt 0 -and -not $DryRun) {
+                $t = 0
+                foreach ($e in $existing) {
+                    if ([bool]$e.isActive -and [string]$e.matchJson -replace '\s', '' -eq '{}') {
+                        $t++
+                        $null = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/versions/$vid/rules/$($e.code)" -Body @{ isActive = $true; matchJson = '{}'; priority = 990000 + 10 * $t }
+                        $haveByCode[[string]$e.code] = [pscustomobject]@{ matchJson = '{}'; priority = 990000 + 10 * $t; isActive = $true }
+                    }
+                }
+                $t = 0
+                foreach ($pr in $shift) {
+                    if ($pr.MatchJson -eq '{}') { continue }
+                    $cur = $haveByCode[$pr.Code]
+                    $t++
+                    $null = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/versions/$vid/rules/$($pr.Code)" -Body @{ isActive = $true; matchJson = [string]$cur.matchJson; priority = 800000 + 10 * $t }
+                    $haveByCode[$pr.Code] = [pscustomobject]@{ matchJson = [string]$cur.matchJson; priority = 800000 + 10 * $t; isActive = $true }
+                }
+            }
+            foreach ($pr in @($plan.Rules)) {
+                $cur = $haveByCode[$pr.Code]
+                if ($cur -and [string]$cur.matchJson -eq $pr.MatchJson -and [int]$cur.priority -eq $pr.Priority -and [bool]$cur.isActive) { $sm++; continue }
+                if ($DryRun) { $w++; continue }
+                $put = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/versions/$vid/rules/$($pr.Code)" -Body @{ isActive = $true; matchJson = $pr.MatchJson; priority = $pr.Priority }
+                if ($put.Status -eq 200) { $w++ } else { Log "  ! ${code}: правило $($pr.Code) HTTP $($put.Status) $(Get-EcrErrorCode $put)" }
+            }
+            $planCodes = @{}; foreach ($pr in @($plan.Rules)) { $planCodes[$pr.Code] = $true }
+            $off = 0
+            foreach ($e in $existing) {
+                if ($planCodes.ContainsKey([string]$e.code) -or -not [bool]$e.isActive) { continue }
+                if (-not $DryRun) { $null = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/versions/$vid/rules/$($e.code)" -Body @{ isActive = $false; matchJson = [string]$e.matchJson; priority = [int]$e.priority } }
+                $off++
+            }
+            $tot.written += $w; $tot.same += $sm; $tot.deactivated += $off
+            Log ("  {0}: у плані {1} (записано {2}, без змін {3}), вимкнено зайвих {4}, не перетворено {5}, злито {{}}-правил {6}" -f $lgCode, @($plan.Rules).Count, $w, $sm, $off, @($plan.Unresolved).Count, $plan.Merged)
+        }
+    }
+    foreach ($lgReason in ($reasonCount.Keys | Sort-Object)) { Log ("    не перетворено: {0} x{1}" -f $lgReason, $reasonCount[$lgReason]) }
+    Log ("  ПІДСУМОК: записано {0}, без змін {1}, вимкнено {2}; не перетворено {3}; злито {{}}-правил {4}; опублікованих версій {5} (збіг {6}, відмінність {7}); методологій на сервері немає {8}" -f $tot.written, $tot.same, $tot.deactivated, $tot.unresolved, $tot.merged, $tot.published, $tot.pubSame, $tot.pubDiff, $tot.noMeth)
+}
+
+# ==================== LegacyBindings (виходи й прив'язки методологій C06..C12 до колонок результатів) ====================
+# Лише явно: -Stage LegacyBindings (ПІСЛЯ Methodologies; у All не входить). Етап Methodologies оголошує виходи (PUT .../outputs/{код}) лише
+# для 9 методологій зі списку публікації; прив'язка ж колонки до виходу, якого версія не оголошує, відмовляє
+# (ECR-CALC-0422 bindingUnknownOutput). Для решти методологій моделі (tb.calc.methodologies: C07_07_01, C07_16, C08, C09, C11, C12) етап:
+#   1. у ЧЕРНЕТЦІ останньої версії оголошує вихід на кожну формулу ECW_EC_* (одиниця за іменем: *_tons_* -> t, *_gsec_* -> g/s;
+#      рівно як етап Methodologies); версію, що вже опублікована, не змінює (її виходи фіксовані);
+#   2. викликає Bind-ResultColumns: прив'язки колонок результатів (вимкнені, доки версія чернетка; активні - у опублікованої).
+# Повтор - 0 змін.
+function Stage-LegacyBindings {
+    Log '== LegacyBindings =='
+    LoginAs $BuildUser
+    Load-Structure
+    $S.Units = @{}
+    foreach ($u in @((Api GET '/api/v1/units').Json)) { $S.Units[[string]$u.code] = [int]$u.id }
+    $mid = @{}
+    foreach ($m in @(Items (Api GET '/api/v1/methodologies?limit=500').Json)) { $mid[[string]$m.code] = [int]$m.id }
+    $names = @{}
+    foreach ($sh in @($Mdl.sheets)) { foreach ($tb in @($sh.tables)) { if ($tb.calc) { foreach ($n in @($tb.calc.methodologies)) { $names[[string]$n] = $true } } } }
+    $declared = 0; $same = 0; $pub = 0; $miss = 0
+    foreach ($mname in ($names.Keys | Sort-Object)) {
+        if ($OnlyMethodology.Count -gt 0 -and $OnlyMethodology -notcontains $mname) { continue }
+        $m = $mid[$mname]
+        if (-not $m) { Log "  ${name}: методології на сервері немає"; $miss++; continue }
+        $v = @(Items (Api GET "/api/v1/methodologies/$m/versions").Json | Sort-Object { [int]$_.id } -Descending) | Select-Object -First 1
+        if ([string]$v.status -eq 'Published') { $pub++; continue }
+        $vid = [int]$v.id
+        $codes = @(@(Items (Api GET "/api/v1/methodologies/$m/versions/$vid/formulas").Json) | ForEach-Object { [string]$_.code } | Where-Object { $_ -match '^ECW_EC_' } | Sort-Object -Unique)
+        $have = @{}
+        foreach ($o in @(Items (Api GET "/api/v1/methodologies/$m/versions/$vid/outputs").Json)) { $have[[string]$o.code] = $true }
+        $ord = 0; $n = 0
+        foreach ($c in $codes) {
+            $ord++
+            if ($have.ContainsKey($c)) { $same++; continue }
+            $u = if ($c -match '_tons_') { $S.Units['t'] } else { $S.Units['g_per_s'] }
+            if ($DryRun) { $n++; continue }
+            $r = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/versions/$vid/outputs/$c" -Body @{ ordinal = $ord; unitId = $u }
+            if ($r.Status -eq 200) { $n++ } else { Log "  ! ${name}: вихід $c HTTP $($r.Status) $(Get-EcrErrorCode $r)" }
+        }
+        $declared += $n
+        if ($n -gt 0) { Log "  ${name}: оголошено виходів $n з $($codes.Count)" }
+    }
+    Log "  виходів оголошено $declared, без змін $same; версій уже опублікованих $pub; методологій на сервері немає $miss"
+    if (-not $DryRun) { Bind-ResultColumns $mid }
+    # Аркуші 3-5 (sheet.calc) Bind-ResultColumns пропускає: їхні методології зі списку публікації прив'язує Methodologies, решта
+    # (C07_07_01, C07_16) - тут, до місячних колонок так само, як Methodologies (IsActive - за станом версії).
+    $sb3 = 0; $sbFail = 0
+    foreach ($sh in @($Mdl.sheets)) {
+        if (-not $sh.calc) { continue }
+        foreach ($tb in @($sh.tables)) {
+            if (-not $tb.calc) { continue }
+            foreach ($mname in @($tb.calc.methodologies)) {
+                if ($PublishList -contains [string]$mname -or ($OnlyMethodology.Count -gt 0 -and $OnlyMethodology -notcontains [string]$mname)) { continue }
+                $m = $mid[[string]$mname]
+                if (-not $m) { continue }
+                $v = @(Items (Api GET "/api/v1/methodologies/$m/versions").Json | Sort-Object { [int]$_.id } -Descending) | Select-Object -First 1
+                $codesB = @(@(Items (Api GET "/api/v1/methodologies/$m/versions/$([int]$v.id)/formulas").Json) | ForEach-Object { [string]$_.code } | Where-Object { $_ -match '^ECW_EC_' } | Sort-Object -Unique)
+                $wantB = @()
+                foreach ($c in $codesB) {
+                    foreach ($colCode in (Get-LandResultColumnCodes -Table $tb -Output $c)) {
+                        $cid = $S.Cols[$S.ShortTable[[string]$tb.code]][$colCode]
+                        if (-not $cid) { Log "  ! немає колонки $($tb.code)/$colCode"; continue }
+                        $wantB += [pscustomobject]@{ ColumnDefId = [int]$cid; OutputCode = $c; IsActive = ([string]$v.status -eq 'Published'); Label = "$mname/$($tb.code)/$colCode" }
+                    }
+                }
+                if ($DryRun) { continue }
+                $r3 = Set-LandMethodologyBindings -MethodologyId $m -Wanted $wantB
+                $sb3 += ($r3.Created + $r3.Updated); $sbFail += $r3.Failed
+                Log ("  {0}/{1}: прив'язки до місячних колонок: створено {2}, змінено {3}, без змін {4}, помилок {5}" -f $mname, $tb.code, $r3.Created, $r3.Updated, $r3.Same, $r3.Failed)
+                foreach ($e in @($r3.Errors | Select-Object -First 5)) { Log "    ! $e" }
+            }
+        }
+    }
+}
+
+# ==================== LegacyPublish (золотий знімок з реального рядка + публікація чернеток зі старої системи) ====================
+# Лише явно: -Stage LegacyPublish -LegacyRules <rules.json> -LegacySqlConnection <копія старої системи, лише читання>
+# -GoldenTestDocumentId <doc> -GoldenTestPeriodKey <yyyymm> [-OnlyMethodology ...] (ПІСЛЯ LegacyRules і LegacyBindings; у All не входить).
+# Для кожної ЧЕРНЕТКИ методології пакета правил, що має оголошені виходи:
+#   1. береться ОДИН реальний рядок таблиці старої системи (SELECT TOP 1 ... WITH (NOLOCK), ReadOnly): таблиця й умови - з правил
+#      методології, Land_Status = Running, усі аргументи формул, які є колонками таблиці, не NULL; значення не логуються й не пишуться
+#      нікуди, крім тесту на локальному стенді;
+#   2. тест SNAP_1 з аргументами цього рядка й очікуваним виходом-заглушкою; публікація (акаунт-рецензент) відмовляє з переліком
+#      розбіжностей «очікували ... отримали ...» - з нього береться фактичне число кожного виходу, і тест переписується на нього;
+#   3. друга публікація; на успіх прив'язки колонок результатів вмикаються (як у Methodologies).
+# ⚠ Це ЗНІМОК рушія на реальному вході, а НЕ незалежний еталон: значення стару систему не питають. Незалежна звірка - паритет
+# і порівняння з CalcResult_* (Compare-LandParityFull). Знімок лише доводить, що версія рахує на реальному рядку й не падає.
+# Кожен відмовний результат (немає рядка, помилка тесту, відмова публікації) називається в підсумку з кодом помилки.
+function Stage-LegacyPublish {
+    Log '== LegacyPublish =='
+    if ([string]::IsNullOrWhiteSpace($LegacyRules) -or -not (Test-Path -LiteralPath $LegacyRules)) { throw 'Задайте -LegacyRules <rules.json>.' }
+    if ([string]::IsNullOrWhiteSpace($LegacySqlConnection)) { throw 'Задайте -LegacySqlConnection (копія старої системи, локальна, лише читання).' }
+    if ($GoldenTestDocumentId -le 0 -or $GoldenTestPeriodKey -le 0) { throw 'Задайте -GoldenTestDocumentId і -GoldenTestPeriodKey.' }
+    $lsb = New-Object System.Data.SqlClient.SqlConnectionStringBuilder($LegacySqlConnection)
+    if (@('localhost', '.', '(local)', '127.0.0.1', '::1', [Environment]::MachineName) -notcontains ([string]$lsb['Data Source']).Replace('tcp:', '')) { throw 'Копія старої системи має бути локальною.' }
+    if ([string]$lsb['Initial Catalog'] -match '^EcrLand') { throw 'LegacySqlConnection вказує на стенд ECR, а не на копію старої системи.' }
+    $lsb.ApplicationIntent = [System.Data.SqlClient.ApplicationIntent]::ReadOnly
+    $pkg = Get-Content -LiteralPath $LegacyRules -Raw -Encoding UTF8 | ConvertFrom-Json
+    LoginAs $BuildUser
+    Load-Structure
+    Load-Registries
+    $regs = @{}
+    foreach ($r in @($Mdl.registries)) { $regs[[string]$r.code] = $r }
+    $tables = @{}
+    foreach ($sh in @($Mdl.sheets)) { foreach ($tb in @($sh.tables)) { if (-not $tables.ContainsKey([string]$tb.code)) { $tables[[string]$tb.code] = $tb } } }
+    $legacyTables = @(@($pkg.methodologies) | ForEach-Object { @($_.versions) } | ForEach-Object { @($_.rules) } | ForEach-Object { [string]$_.table } | Sort-Object -Unique)
+    $tmap = Get-LandLegacyTableMap -Model $Mdl -LegacyTables $legacyTables
+    $cn = New-Object System.Data.SqlClient.SqlConnection($lsb.ConnectionString)
+    $cn.Open()
+    $colsOf = @{}
+    function Get-LegacyColumns([string]$t) {
+        if (-not $colsOf.ContainsKey($t)) {
+            $cmd = $cn.CreateCommand(); $cmd.CommandText = 'SELECT name FROM sys.columns WHERE object_id = OBJECT_ID(@t)'
+            [void]$cmd.Parameters.AddWithValue('@t', "dbo.$t")
+            $rd = $cmd.ExecuteReader(); $h = @{}
+            while ($rd.Read()) { $h[[string]$rd.GetString(0)] = $true }
+            $rd.Close(); $colsOf[$t] = $h
+        }
+        return $colsOf[$t]
+    }
+    $mid = @{}
+    foreach ($m in @(Items (Api GET '/api/v1/methodologies?limit=500').Json)) { $mid[[string]$m.code] = [int]$m.id }
+    $res = [ordered]@{}
+    $bump = { $res[[string]$args[0]] = 1 + [int]$res[[string]$args[0]] }
+    $owner = $BuildUser
+    foreach ($pm in @($pkg.methodologies)) {
+        $lgCode = [string]$pm.name
+        if ($OnlyMethodology.Count -gt 0 -and $OnlyMethodology -notcontains $lgCode) { continue }
+        $m = $mid[$lgCode]
+        if (-not $m) { continue }
+        $ver = @(Items (Api GET "/api/v1/methodologies/$m/versions").Json | Sort-Object { [int]$_.id } -Descending) | Select-Object -First 1
+        if ([string]$ver.status -eq 'Published') { & $bump 'вже опублікована'; continue }
+        $vid = [int]$ver.id
+        LoginAs $owner
+        $outs = @(Items (Api GET "/api/v1/methodologies/$m/versions/$vid/outputs").Json | ForEach-Object { [string]$_.code })
+        if ($outs.Count -eq 0) { Log "  ${lgCode}: немає оголошених виходів"; & $bump 'немає виходів'; continue }
+        $fx = @(Items (Api GET "/api/v1/methodologies/$m/versions/$vid/formulas").Json)
+        $extArgs = @($fx | ForEach-Object { @($_.arguments) } | Where-Object { [string]$_.kind -eq 'Argument' } | ForEach-Object { [string]$_.name } | Sort-Object -Unique)
+        # Аргументи правила категорії (@Land_NAE, @Land_TypeFuelOrStream ...) теж потрібні входу тесту: без них категорія не обчислюється.
+        $crj = Invoke-Ecr -Method GET -Path "/api/v1/methodologies/$m/versions/$vid/category-rule"
+        if ($crj.Status -eq 200 -and $crj.Json.expression) {
+            $extArgs = @(@($extArgs) + @([regex]::Matches([string]$crj.Json.expression, '@([A-Za-z_][A-Za-z0-9_]*)') | ForEach-Object { $_.Groups[1].Value }) | Sort-Object -Unique)
+        }
+        $rulesOf = @(@($pm.versions) | ForEach-Object { @($_.rules) } | Where-Object { $_.isAvailable })
+        $picked = $null
+        # Таблиці з найменшою кількістю відсутніх аргументів - першими (вхід тесту має бути якомога повнішим).
+        $tablesOrdered = @($rulesOf | ForEach-Object { [string]$_.table } | Sort-Object -Unique | ForEach-Object {
+                $have0 = Get-LegacyColumns $_
+                [pscustomobject]@{ T = $_; Missing = @(Get-LandGoldenMissingArguments -Arguments $extArgs -Row $have0 -Columns @($tables[[string]$tmap[$_]].columns)).Count }
+            } | Sort-Object Missing, T | ForEach-Object { $_.T })
+        foreach ($lt in $tablesOrdered) {
+            $have = Get-LegacyColumns $lt
+            if ($have.Count -eq 0) { continue }
+            $tcode = $tmap[$lt]
+            foreach ($rule in @($rulesOf | Where-Object { [string]$_.table -eq $lt })) {
+                foreach ($mode in @('complete', 'strict', 'loose')) {
+                    $strict = ($mode -ne 'loose')
+                    $where = @('Time IS NOT NULL'); $cmd = $cn.CreateCommand(); $i = 0
+                    foreach ($c in @($rule.conditions)) {
+                        if (-not $have.ContainsKey([string]$c.parameter)) { $where = $null; break }
+                        $where += "[$($c.parameter)] = @p$i"; [void]$cmd.Parameters.AddWithValue("@p$i", [string]$c.value); $i++
+                    }
+                    if ($null -eq $where) { continue }
+                    # complete: таблиця має колонки (або псевдоніми) для УСІХ аргументів методології; інакше вхід тесту неповний і вихід порожній.
+                    if ($mode -eq 'complete' -and @(Get-LandGoldenMissingArguments -Arguments $extArgs -Row $have -Columns @($tables[$tcode].columns)).Count -gt 0) { continue }
+                    if ($have.ContainsKey('Land_Status')) { $where += "Land_Status LIKE 'Running%'" }
+                    if ($strict) { foreach ($a in $extArgs) { if ($have.ContainsKey($a)) { $where += "[$a] IS NOT NULL" } } }
+                    $cmd.CommandText = "SELECT TOP 1 * FROM dbo.[$lt] WITH (NOLOCK) WHERE " + ($where -join ' AND ') + ' ORDER BY Time DESC'
+                    $cmd.CommandTimeout = 120
+                    $rd = $cmd.ExecuteReader()
+                    if ($rd.Read()) {
+                        $row = @{}
+                        for ($ci = 0; $ci -lt $rd.FieldCount; $ci++) { if (-not $rd.IsDBNull($ci)) { $row[$rd.GetName($ci)] = $rd.GetValue($ci) } }
+                        $picked = [pscustomobject]@{ Table = $lt; TableCode = $tcode; Row = $row; Strict = $strict; Mode = $mode }
+                    }
+                    $rd.Close()
+                    if ($picked) { break }
+                }
+                if ($picked) { break }
+            }
+            if ($picked) { break }
+        }
+        if (-not $picked) { Log "  ${lgCode}: у старій системі немає рядка за правилами"; & $bump 'немає рядка'; continue }
+        $tb = $tables[$picked.TableCode]
+        if ($picked.Mode -ne 'complete') {
+            $absent = @(Get-LandGoldenMissingArguments -Arguments $extArgs -Row $picked.Row -Columns @($tb.columns))
+            Log "  ${lgCode}: рядок взято з неповним набором аргументів (режим $($picked.Mode)); немає в рядку: $($absent -join ', ')"
+        }
+        $argList = @()
+        foreach ($a in $extArgs) {
+            $srcCol = Get-LandGoldenRowColumn -Argument $a -Row $picked.Row -Columns @($tb.columns)
+            if ($null -eq $srcCol) {
+                # Мостовий аргумент (склад HSE400 за видом палива тощо) у таблиці старої системи колонки не має: лише за явним
+                # -GoldenSyntheticBridgeArgs - число 1 (знімок рушія, не еталон; журнал називає такі аргументи).
+                if ($GoldenSyntheticBridgeArgs) { $argList += @{ argumentCode = $a; value = [double]1; valueString = $null; unitId = $null } }
+                continue
+            }
+            $v = $picked.Row[$srcCol]
+            $colDef = $null
+            if ($tb) { $colDef = @($tb.columns | Where-Object { [string]$_.code -eq $srcCol }) | Select-Object -First 1 }
+            $lookupReg = Get-LandGoldenLookupRegistry -Column $colDef -Columns @($tb.columns)
+            if ($lookupReg -and $regs.ContainsKey($lookupReg)) {
+                $ec = Find-LandLegacyEntryCode -Registry $regs[$lookupReg] -Value ([string]$v)
+                if ($ec -and $ec -ne '#ambiguous') { $argList += @{ argumentCode = $a; value = $null; valueString = $null; unitId = $null; entryId = [int](RegEntryId $lookupReg ('code:' + $ec)) }; continue }
+            }
+            if ($v -is [string]) { $argList += @{ argumentCode = $a; value = $null; valueString = [string]$v; unitId = $null } }
+            elseif ($v -is [bool]) { $argList += @{ argumentCode = $a; value = $null; valueString = [string]$v; unitId = $null } }
+            elseif ($v -is [datetime]) { $argList += @{ argumentCode = $a; value = $null; valueString = $v.ToString('s'); unitId = $null } }
+            else { $argList += @{ argumentCode = $a; value = [double]$v; valueString = $null; unitId = $null } }
+        }
+        $inputJson = @{ documentId = [long]$GoldenTestDocumentId; periodKey = @{ value = [int]$GoldenTestPeriodKey }; arguments = $argList } | ConvertTo-Json -Depth 8 -Compress
+        $sentinel = [ordered]@{}; foreach ($o in $outs) { $sentinel[$o] = -987654321 }
+        $put = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/versions/$vid/tests/SNAP_1" -Body @{ inputJson = $inputJson; expectedJson = ($sentinel | ConvertTo-Json -Compress); tolerance = '0.000000001' }
+        if ($put.Status -ne 200) { Log "  ! ${lgCode}: тест HTTP $($put.Status) $(Get-EcrErrorCode $put)"; & $bump ("тест: " + (Get-EcrErrorCode $put)); continue }
+        LoginAs 'land-reviewer'
+        $p1 = Invoke-Ecr -Method POST -Path "/api/v1/methodologies/$m/versions/$vid/publish" -Body @{ changeReason = 'Legacy rehearsal: snapshot golden'; effectiveFrom = '2024-01-01' }
+        if ($p1.Status -eq 200 -or $p1.Status -eq 204) { Log "  ${lgCode}: опубліковано з першої спроби (?)"; & $bump 'опубліковано'; continue }
+        $txt = [string]$p1.Text
+        $actuals = @(Get-LandGoldenActuals -Json $p1.Json -Text $txt)
+        $actual = New-LandSnapshotExpected -Actuals $actuals -Outputs $outs
+        if ($actual.Count -eq 0) {
+            $ec = Get-EcrErrorCode $p1
+            Log ("  ! ${lgCode}: публікація (1) HTTP {0} {1}: {2}" -f $p1.Status, $ec, $txt.Substring(0, [Math]::Min(700, $txt.Length)))
+            & $bump ("публікація: " + $ec); continue
+        }
+        LoginAs $owner
+        $exp = $actual
+        $put2 = Invoke-Ecr -Method PUT -Path "/api/v1/methodologies/$m/versions/$vid/tests/SNAP_1" -Body @{ inputJson = $inputJson; expectedJson = ($exp | ConvertTo-Json -Compress); tolerance = '0.000000001' }
+        if ($put2.Status -ne 200) { Log "  ! ${lgCode}: тест (2) HTTP $($put2.Status) $(Get-EcrErrorCode $put2)"; & $bump ("тест2: " + (Get-EcrErrorCode $put2)); continue }
+        LoginAs 'land-reviewer'
+        $p2 = Invoke-Ecr -Method POST -Path "/api/v1/methodologies/$m/versions/$vid/publish" -Body @{ changeReason = 'Legacy rehearsal: snapshot golden'; effectiveFrom = '2024-01-01' }
+        if ($p2.Status -eq 200 -or $p2.Status -eq 204) { Log "  ${lgCode}: опубліковано (знімок виходів: $($exp.Count) з $($outs.Count))"; & $bump 'опубліковано'; continue }
+        $t2 = [string]$p2.Text
+        Log ("  ! ${lgCode}: публікація (2) HTTP {0} {1}: {2}" -f $p2.Status, (Get-EcrErrorCode $p2), $t2.Substring(0, [Math]::Min(700, $t2.Length)))
+        & $bump ("публікація2: " + (Get-EcrErrorCode $p2))
+    }
+    $cn.Close()
+    foreach ($lgReason in $res.Keys) { Log ("    {0}: {1}" -f $lgReason, $res[$lgReason]) }
+    LoginAs $owner
+    # активація прив'язок опублікованих версій
+    Stage-LegacyBindings
+}
+
 function Stage-Data {
     Log '== Data (наповнення документів, стани, перерахунок) =='
     LoginAs $BuildUser
@@ -2976,6 +3339,12 @@ function Fill-FullDocument([int]$docId) {
     # D1: LandParity ПЕРЕД Methodologies (див. нижче).
     if ($Stage -contains 'LandParity') { Stage-LandParity }
     if (Want 'Methodologies') { Stage-Methodologies }
+    # Правила рядків зі старої системи - лише явно (-Stage LegacyRules -LegacyRules <файл>); ПІСЛЯ Methodologies.
+    if ($Stage -contains 'LegacyRules') { Stage-LegacyRules }
+    # Виходи й прив'язки методологій C07_07_01..C12 - лише явно (-Stage LegacyBindings); ПІСЛЯ Methodologies.
+    if ($Stage -contains 'LegacyBindings') { Stage-LegacyBindings }
+    # Золотий знімок з реального рядка + публікація чернеток - лише явно (-Stage LegacyPublish); ПІСЛЯ LegacyRules і LegacyBindings.
+    if ($Stage -contains 'LegacyPublish') { Stage-LegacyPublish }
     # D-425: ПІСЛЯ Methodologies (методології мають існувати й бути опублікованими); не створює версій.
     if (Want 'RowFilter') { Stage-RowFilter }
     # B26: лише явно; ПІСЛЯ Template і RowFilter (колонка статусу в документах, прапорець методології).

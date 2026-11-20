@@ -540,6 +540,22 @@ public sealed partial class EndpointCoverageTests
             ],
             "messageKey сервера, але лише з FieldOfKey — інші сюди не доходять."),
 
+        new("features/workflow/SourceImpactModal.tsx", "`sourceImpact.title.${action}`", 1, "features/workflow/SourceImpactModal.tsx",
+            ["sourceImpact.title.approve", "sourceImpact.title.reopen", "sourceImpact.title.edit"],
+            "B80 N5: заголовок діалогу впливу за дією (SourceImpactAction)."),
+        new("features/workflow/SourceImpactModal.tsx", "`sourceImpact.intro.${action}`", 1, "features/workflow/SourceImpactModal.tsx",
+            ["sourceImpact.intro.approve", "sourceImpact.intro.reopen"],
+            "B80 N5: вступ, коли потрібне рішення (required); для edit завжди required = false."),
+        new("features/workflow/SourceImpactModal.tsx", "`sourceImpact.intro.info.${action}`", 1, "features/workflow/SourceImpactModal.tsx",
+            ["sourceImpact.intro.info.approve", "sourceImpact.intro.info.reopen", "sourceImpact.intro.info.edit"],
+            "B80 N5: вступ «лише відомості» за дією."),
+        new("features/workflow/SourceImpactModal.tsx", "`sourceImpact.policy.${policyKey}`", 1, "features/workflow/SourceImpactModal.tsx",
+            ["sourceImpact.policy.block", "sourceImpact.policy.confirmWithReason", "sourceImpact.policy.warn", "sourceImpact.policy.info"],
+            "B80 N5: рядок політики; policyKey — block / confirmWithReason / warn / info."),
+        new("features/workflow/SourceImpactModal.tsx", "`sourceImpact.confirm.${action}`", 1, "features/workflow/SourceImpactModal.tsx",
+            ["sourceImpact.confirm.approve", "sourceImpact.confirm.reopen"],
+            "B80 N5: кнопка підтвердження (action edit має окремий літерал)."),
+
         new("features/notifications/ChannelsPanel.tsx", "`notifications.kind.${channel.kind}`", 1,
             "features/notifications/ChannelsPanel.tsx",
             ["notifications.kind.Smtp", "notifications.kind.TeamsWebhook"],
@@ -571,6 +587,17 @@ public sealed partial class EndpointCoverageTests
             "Бейдж статусу: уся таблиця statusTable."),
         new("pages/admin/ExpressionsPage.tsx", "statusKey('version', v.status)", 1, "shared/ui/StatusBadge.tsx",
             StatusKeys("version"), "Статус версії виразу."),
+        new("features/methodologyScript/ScriptCompareModal.tsx", "statusKey('version', version.status)", 1,
+            "shared/ui/StatusBadge.tsx", StatusKeys("version"), "MS: статус версії в списку «з чим порівняти»."),
+        new("features/methodologyScript/ScriptTestsPanel.tsx", "`methodologyScript.tests.issue.${issue}`", 1, null,
+            ["methodologyScript.tests.issue.codeMissing", "methodologyScript.tests.issue.codeInvalid",
+             "methodologyScript.tests.issue.codeDuplicate", "methodologyScript.tests.issue.periodMissing",
+             "methodologyScript.tests.issue.noExpected", "methodologyScript.tests.issue.expectedNotNumber",
+             "methodologyScript.tests.issue.toleranceInvalid"],
+            "MS: помилка форми тесту — значення `TestFormIssue` (`testForm.ts`)."),
+        new("pages/admin/MethodologyScriptPage.tsx", "`methodologyScript.engine.${script.data?.engine ?? version.engine ?? 'Script'}`", 1,
+            null, ["methodologyScript.engine.Script", "methodologyScript.engine.Formulas"],
+            "MS: рушій версії (`Script` або `Formulas`), як віддає сервер."),
         new("pages/admin/MethodologyVersionsPage.tsx", "statusKey('version', version.status)", 1,
             "shared/ui/StatusBadge.tsx", StatusKeys("version"), "Статус версії методології."),
         new("features/projects/PeriodsOverview.tsx", "statusKey('period', shown)", 1,
@@ -703,6 +730,12 @@ public sealed partial class EndpointCoverageTests
         new("features/workflow/sheetDenial.ts", "reasonKey", 1, null, [],
             "A2-08: reasonKey тієї самої відмови (deny.*) — відкритий набір сервера, як WithLocalizedReason."),
 
+        // MS (скрипт методології): діагностики скрипта приходять із сервера з готовим messageKey (`script.<code>`,
+        // перелік — `ScriptDiagnosticCodes` + `ScriptEnvironmentCodes`; рядки каталогу — seed/features/MS-methodology-script.sql).
+        // ⚠ Ключі не перелічено: набір закритий сервером і перевіряється сідом, як `WithLocalizedReason`.
+        new("features/methodologyScript/scriptMarkers.ts", "diagnostic.messageKey", 1, null, [],
+            "messageKey діагностики скрипта методології."),
+
         // F-15/B-12 (четвертий раунд UX): перелік проблем публікації методології —
         // закритий набір, що його породжує сервер (MethodologyPublishChecks).
         new("features/methodologies/publishError.ts", "key", 1, "features/methodologies/publishError.ts",
@@ -729,7 +762,7 @@ public sealed partial class EndpointCoverageTests
         "nav.registries", "registries.constructor", "nav.methodologies", "methodologies.versionsTitle",
         "nav.expressions", "nav.units", "nav.security", "nav.projects", "nav.sources", "nav.mapping", "nav.pipeline",
         "nav.jobs", "nav.snapshots", "nav.campaign", "nav.audit", "nav.consistency", "nav.uiStrings",
-        "nav.notifications", "nav.health", "nav.myGroups", "documents.title",
+        "nav.notifications", "nav.health", "nav.myGroups", "documents.title", "nav.dependencyGraph",
         "registries.data.title",
         "nav.permits", "permits.types.title", "permits.typeEditor.title", "permits.lists.title",
         "permits.bindings.title", "permits.binding.title", "permits.detail.title",
@@ -748,7 +781,7 @@ public sealed partial class EndpointCoverageTests
         "nav.registries.description", "nav.methodologies.description", "nav.units.description",
         "nav.sources.description", "nav.mapping.description", "nav.projects.description",
         "nav.jobs.description", "nav.snapshots.description", "nav.audit.description",
-        "nav.consistency.description", "nav.uiStrings.description", "nav.health.description",
+        "nav.consistency.description", "nav.uiStrings.description", "nav.health.description", "nav.dependencyGraph.description",
         "nav.permits.description", "permits.types.description", "permits.lists.description",
         "permits.bindings.description", "nav.piData.description",
     ];
@@ -1381,12 +1414,6 @@ public sealed partial class EndpointCoverageTests
         // ⚠ Звільнення тимчасове: прибрати в тому ж коміті, що додає виклик у `features/audit`.
         "GET /api/v1/audit/cells/summary",
 
-        // B80 N1: зв'язки документа-джерела (HSE400 → Land) і явне перемикання «лише затверджене». Екран — лінія N6
-        // (клієнт стартує від запушеного контракту, правило швидкості 6); до того перемикає адміністратор через API.
-        // ⚠ Звільнення тимчасове: прибрати в тому ж коміті, що додає виклик у `features` (N6).
-        "GET /api/v1/document-source-bindings",
-        "PUT /api/v1/document-source-bindings/{p}/source-state",
-
         // G13 (Land): пакетний запис колонок для скриптів розгортання шаблону (tools/land, імпорт з Excel), де
         // 5000 одиночних PUT = години. Екран структури правит колонку по одній, пачки в ньому немає.
         // ⚠ Звільнення тимчасове: прибрати в тому ж коміті, що додає виклик у `features/templates` (імпорт пачкою).
@@ -1408,8 +1435,15 @@ public sealed partial class EndpointCoverageTests
         // LP-07 (форма B константи): склад речовин версії методології заводить скрипт
         // `tools/land/Import-LandAirSubstances.ps1` / розгортання шаблону; екрана «Речовини версії» ще немає.
         // ⚠ Звільнення тимчасове: прибрати в тому ж коміті, що додає виклик у `features/methodologies`.
-        "GET /api/v1/methodologies/{p}/versions/{p}/substances",
+        // (GET читає редактор скрипта — `features/methodologyScript/api.ts`; PUT клієнт не викликає.)
         "PUT /api/v1/methodologies/{p}/versions/{p}/substances",
+
+        // MS 8.5: перенесення на проді викликає оператор у вікні (curl/скрипт), екрана немає й не планується.
+        "POST /api/v1/methodologies/script-migration/apply",
+        "POST /api/v1/methodologies/script-migration/switch",
+        // MS 8.4: паритет «формули проти скрипта» на документі запускає оператор перед перемиканням рушія (curl/скрипт, поруч
+        // із `script-migration/switch`); кнопки в редакторі немає й не планується — редактор працює з версіями на рушії Script.
+        "POST /api/v1/methodologies/{p}/versions/{p}/script/parity",
 
         // D-425 (Land «лише Running»): прапорець фільтра активності рядків ставить скрипт розгортання шаблону
         // (`tools/land/Build-LandTemplate.ps1`, етап RowFilter) за переліком `tools/land/land-row-filter.json`;

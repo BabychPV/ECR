@@ -1263,6 +1263,75 @@
         ],
         "type": "object"
       },
+      "ApplyScriptPackageRequest": {
+        "description": "Пакет `package.json` — тіло `POST …/script-migration/apply`.",
+        "properties": {
+          "entries": {
+            "description": "Версії пакета.",
+            "items": {
+              "$ref": "#/components/schemas/ScriptPackageEntryDto"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "format": {
+            "description": "Формат пакета (`ecr-methodology-script-package`); `null` — не звіряється.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "formatVersion": {
+            "description": "Версія формату; `null` — не звіряється.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "format",
+          "formatVersion",
+          "entries"
+        ],
+        "type": "object"
+      },
+      "ApplyScriptPackageResponse": {
+        "description": "Відповідь `POST …/script-migration/apply`.",
+        "properties": {
+          "applied": {
+            "description": "Скільки записано (або записалося б).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "dryRun": {
+            "description": "Сухий прогін: нічого не записано.",
+            "type": "boolean"
+          },
+          "entries": {
+            "description": "Підсумок за версіями — у порядку пакета.",
+            "items": {
+              "$ref": "#/components/schemas/ScriptMigrationEntryResultDto"
+            },
+            "type": "array"
+          },
+          "refused": {
+            "description": "Скільки відмов.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "dryRun",
+          "applied",
+          "refused",
+          "entries"
+        ],
+        "type": "object"
+      },
       "ApprovalQueueDto": {
         "description": "Сторінка черги «До погодження»: найдавніші подання першими.",
         "properties": {
@@ -1508,6 +1577,17 @@
           "approved": {
             "description": "`true` — погодити, `false` — відхилити.",
             "type": "boolean"
+          },
+          "confirmedImpact": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ConfirmedImpactRequest",
+                "description": "B80 N5: підтвердження впливу на залежні документи (потрібне за політикою зв'язки джерела)."
+              }
+            ]
           },
           "periodKey": {
             "description": "Період.",
@@ -4950,6 +5030,35 @@
         ],
         "type": "object"
       },
+      "ConfirmedImpactRequest": {
+        "description": "B80 N5 (D-554): підтвердження впливу дії над документом-джерелом на залежні документи.",
+        "properties": {
+          "hash": {
+            "description": "Відбиток впливу з `GET …/source-impact` (`impactHash`); застарілий — `409 impactChanged`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "reason": {
+            "description": "Причина; обов'язкова за політики `ConfirmWithReason`, іде в журнал безпеки.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "recalculateApproved": {
+            "default": false,
+            "description": "B80 N5 (рішення людини 19.11): «перерахувати також затверджені залежні» — лише з правом\n`Calculation.RecalculateApprovedDependents` (інакше 403), причина обов'язкова (інакше 422), усе в журналі.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "hash",
+          "reason"
+        ],
+        "type": "object"
+      },
       "ConsistencyIssuePage": {
         "description": "Сторінка знахідок із загальними лічильниками.",
         "properties": {
@@ -5549,6 +5658,17 @@
             "type": [
               "null",
               "integer"
+            ]
+          },
+          "engine": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MethodologyEngine",
+                "description": "Рушій ПОРОЖНЬОЇ чернетки (MS): `Script` — текст методології із заготовкою, `Formulas` — формули й\nконстанти. Не вказано — `Formulas` (поведінка до MS). Клон рушія не змінює: бере його разом зі скриптом із джерела."
+              }
             ]
           },
           "level": {
@@ -6785,6 +6905,303 @@
         },
         "required": [
           "recalculationJobId"
+        ],
+        "type": "object"
+      },
+      "DependencyCycleDto": {
+        "description": "Цикл: сильно зв'язна компонента шаблонів.",
+        "properties": {
+          "templateIds": {
+            "description": "Шаблони циклу.",
+            "items": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "templateIds"
+        ],
+        "type": "object"
+      },
+      "DependencyDiagnosticDto": {
+        "description": "Зауваження побудови графа.",
+        "properties": {
+          "detail": {
+            "description": "Що саме.",
+            "type": "string"
+          },
+          "key": {
+            "description": "`cycle`, `astFallback`, `parseFailed`, `unknownRegistry`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "detail"
+        ],
+        "type": "object"
+      },
+      "DependencyEdgeDto": {
+        "description": "Ребро графа: дані течуть від `From` до `To`.",
+        "properties": {
+          "evidence": {
+            "description": "Докази (не більше 25).",
+            "items": {
+              "$ref": "#/components/schemas/DependencyEvidenceDto"
+            },
+            "type": "array"
+          },
+          "evidenceTotal": {
+            "description": "Скільки доказів усього (більше за Evidence — перелік урізано).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "fromId": {
+            "description": "Id вузла-початку.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "fromKind": {
+            "description": "Вид вузла-початку.",
+            "type": "string"
+          },
+          "kind": {
+            "description": "`fills`, `templateFormula`, `methodology`, `writesInto`, `registryRule`, `methodologyResult`.",
+            "type": "string"
+          },
+          "monthMask": {
+            "description": "Для `year`: біти 1…12 літеральних місяців; 0 — увесь рік.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "scope": {
+            "description": "Обсяг за періодом: `month`, `year` (з MonthMask) або `all`.",
+            "type": "string"
+          },
+          "toId": {
+            "description": "Id вузла-кінця.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "toKind": {
+            "description": "Вид вузла-кінця.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "fromKind",
+          "fromId",
+          "toKind",
+          "toId",
+          "scope",
+          "monthMask",
+          "evidence",
+          "evidenceTotal"
+        ],
+        "type": "object"
+      },
+      "DependencyEvidenceDto": {
+        "description": "Доказ ребра: звідки відомо.",
+        "properties": {
+          "detail": {
+            "description": "Таблиця/колонка або код формули методології.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "id": {
+            "description": "Id формули / версії методології / прив'язки / правила.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "source": {
+            "description": "`formulaDependency`, `ast`, `lookupColumn`, `registryUse`, `calculationBinding`,\n        `sourceBinding`, `registryRule`, `methodologyDependency`.",
+            "type": "string"
+          },
+          "versionId": {
+            "description": "Версія шаблону (для формул шаблону); інакше `null`.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "source",
+          "id",
+          "versionId",
+          "detail"
+        ],
+        "type": "object"
+      },
+      "DependencyGraphDto": {
+        "description": "Граф залежностей документів для екрана адміністратора (B179 L4).",
+        "properties": {
+          "cycles": {
+            "description": "Цикли шаблонів (зауваження; публікація, що їх замикає, відхиляється).",
+            "items": {
+              "$ref": "#/components/schemas/DependencyCycleDto"
+            },
+            "type": "array"
+          },
+          "diagnostics": {
+            "description": "Зауваження побудови.",
+            "items": {
+              "$ref": "#/components/schemas/DependencyDiagnosticDto"
+            },
+            "type": "array"
+          },
+          "edges": {
+            "description": "Ребра з доказами.",
+            "items": {
+              "$ref": "#/components/schemas/DependencyEdgeDto"
+            },
+            "type": "array"
+          },
+          "levels": {
+            "description": "Рівні шаблонів у порядку обчислення.",
+            "items": {
+              "$ref": "#/components/schemas/DependencyLevelDto"
+            },
+            "type": "array"
+          },
+          "nodes": {
+            "description": "Вузли: шаблони, довідники, методології.",
+            "items": {
+              "$ref": "#/components/schemas/DependencyNodeDto"
+            },
+            "type": "array"
+          },
+          "revision": {
+            "description": "Ревізія даних, з яких побудовано граф.",
+            "type": "string"
+          },
+          "templateDependencies": {
+            "description": "Згорнуті ребра «джерело → споживач» зі зв'язкою.",
+            "items": {
+              "$ref": "#/components/schemas/DependencyTemplateLinkDto"
+            },
+            "type": "array"
+          },
+          "truncated": {
+            "description": "`true` — ребер більше за стелю 5000, перелік урізано.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "revision",
+          "nodes",
+          "edges",
+          "templateDependencies",
+          "levels",
+          "cycles",
+          "diagnostics",
+          "truncated"
+        ],
+        "type": "object"
+      },
+      "DependencyLevelDto": {
+        "description": "Рівень графа шаблонів: усі шаблони рівня обчислюються після шаблонів нижчих рівнів.",
+        "properties": {
+          "level": {
+            "description": "Номер рівня з 0 (без вхідних ребер).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "templateIds": {
+            "description": "Шаблони рівня.",
+            "items": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "level",
+          "templateIds"
+        ],
+        "type": "object"
+      },
+      "DependencyNodeDto": {
+        "description": "Вузол графа залежностей.",
+        "properties": {
+          "code": {
+            "description": "Код.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Id шаблону / довідника / методології.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "kind": {
+            "description": "`template`, `registry` або `methodology`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "code"
+        ],
+        "type": "object"
+      },
+      "DependencyTemplateLinkDto": {
+        "description": "Згорнуте ребро «документ шаблону-джерела → документи шаблону-споживача».",
+        "properties": {
+          "bindingId": {
+            "description": "Зв'язка джерела (`/document-source-bindings`).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "consumerTemplateId": {
+            "description": "Шаблон-споживач.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "monthMask": {
+            "description": "Для `year`: біти літеральних місяців; 0 — увесь рік.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "registryDefId": {
+            "description": "Довідник зв'язки.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "scope": {
+            "description": "Обсяг за періодом: `month`, `year` або `all`.",
+            "type": "string"
+          },
+          "sourceTemplateId": {
+            "description": "Шаблон-джерело.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "viaMethodology": {
+            "description": "Споживача знайдено за методологією.",
+            "type": "boolean"
+          },
+          "viaTemplateFormula": {
+            "description": "Споживача знайдено за формулою шаблону.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "sourceTemplateId",
+          "consumerTemplateId",
+          "bindingId",
+          "registryDefId",
+          "scope",
+          "monthMask",
+          "viaTemplateFormula",
+          "viaMethodology"
         ],
         "type": "object"
       },
@@ -9547,6 +9964,38 @@
           "enabled",
           "registryCodes",
           "lastRun"
+        ],
+        "type": "object"
+      },
+      "FormatConstDto": {
+        "description": "Результат форматування літерала константи.",
+        "properties": {
+          "diagnostics": {
+            "description": "Діагностики розбору (позиції — у вхідному тексті).",
+            "items": {
+              "$ref": "#/components/schemas/ScriptDiagnosticDto"
+            },
+            "type": "array"
+          },
+          "kind": {
+            "description": "`scalar` або `map`; `null` — не розібрано.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "text": {
+            "description": "Канонічний друк; `null`, якщо літерал не розібрано.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "text",
+          "kind",
+          "diagnostics"
         ],
         "type": "object"
       },
@@ -12335,7 +12784,8 @@
           "Formula",
           "Constant",
           "TestCase",
-          "CategoryRule"
+          "CategoryRule",
+          "Script"
         ]
       },
       "MethodologyDraftVersionDto": {
@@ -12357,6 +12807,10 @@
               "null",
               "string"
             ]
+          },
+          "engine": {
+            "$ref": "#/components/schemas/MethodologyEngine",
+            "description": "Рушій версії: формули чи скрипт (MS); для версій до MS — `Formulas`."
           },
           "id": {
             "description": "Ідентифікатор версії.",
@@ -12441,6 +12895,14 @@
           "versions"
         ],
         "type": "object"
+      },
+      "MethodologyEngine": {
+        "default": "Formulas",
+        "description": "Рушій версії методології: формули (кілька типів об'єктів) чи один скрипт.\nСтарі версії лишаються `Formulas`, доки їх не перенесено; нові — `Script`.",
+        "enum": [
+          "Formulas",
+          "Script"
+        ]
       },
       "MethodologyFormulaArgumentDto": {
         "description": "Елемент похідного списку аргументів формули (лише читання).",
@@ -13143,6 +13605,13 @@
             },
             "type": "array"
           },
+          "level": {
+            "description": "Рівень версії: `Configuration` (за замовчуванням) або `Module` (методологія-модуль HSE400, яку рахує\n`MonthColumnArgumentsModule`). Необов'язкове: пакет без поля читається як і раніше.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "version": {
             "description": "Номер версії в AF.",
             "type": "string"
@@ -13426,6 +13895,47 @@
         ],
         "type": "object"
       },
+      "MethodologyScriptDto": {
+        "description": "Скрипт версії для редактора (`GET`/`PUT …/script`).",
+        "properties": {
+          "diagnostics": {
+            "description": "Діагностики компіляції й оточення.",
+            "items": {
+              "$ref": "#/components/schemas/ScriptDiagnosticDto"
+            },
+            "type": "array"
+          },
+          "engine": {
+            "$ref": "#/components/schemas/MethodologyEngine",
+            "description": "Рушій версії."
+          },
+          "hash": {
+            "description": "SHA-256 тексту, hex малими літерами; порожній рядок — тексту ще немає.",
+            "type": "string"
+          },
+          "isDraft": {
+            "description": "Версію можна правити (чернетка).",
+            "type": "boolean"
+          },
+          "outline": {
+            "$ref": "#/components/schemas/ScriptOutlineDto",
+            "description": "Структура скрипта."
+          },
+          "text": {
+            "description": "Текст скрипта (порожній, якщо його ще немає).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "engine",
+          "text",
+          "hash",
+          "isDraft",
+          "diagnostics",
+          "outline"
+        ],
+        "type": "object"
+      },
       "MethodologySubstanceDto": {
         "description": "Речовина, яку рахує версія методології (`calc.MethodologySubstance`).",
         "properties": {
@@ -13605,6 +14115,10 @@
               "null",
               "string"
             ]
+          },
+          "engine": {
+            "$ref": "#/components/schemas/MethodologyEngine",
+            "description": "Рушій версії: формули чи скрипт (MS); для версій до MS — `Formulas`."
           },
           "id": {
             "description": "Ідентифікатор версії.",
@@ -18911,6 +19425,50 @@
         ],
         "type": "object"
       },
+      "PreviewMethodologyScriptRequest": {
+        "description": "Тіло `POST …/script/preview`.",
+        "properties": {
+          "documentId": {
+            "description": "Документ.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "maxRows": {
+            "description": "Скільки рядків з кожної таблиці (1…200, типово 50).",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "periodKey": {
+            "description": "Період.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "tableInstanceId": {
+            "description": "Лише цей екземпляр таблиці.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "text": {
+            "description": "Текст; порожній — збережений текст версії.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "text",
+          "documentId",
+          "periodKey"
+        ],
+        "type": "object"
+      },
       "ProbeDataSourceRequest": {
         "description": "Тіло проби конфігурації мапінгу (ФВ-13.17).",
         "properties": {
@@ -19772,6 +20330,62 @@
           "totalPoints",
           "numericPoints",
           "buckets"
+        ],
+        "type": "object"
+      },
+      "RecalculateApprovedDependentsRequest": {
+        "description": "B80 N5: запит явного перерахунку затверджених залежних.",
+        "properties": {
+          "hash": {
+            "description": "Відбиток впливу (`GET …/source-impact?action=edit`).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "periodKey": {
+            "description": "Період аркуша.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "reason": {
+            "description": "Причина (обов'язкова).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "sheetDefId": {
+            "description": "Аркуш-джерело.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sheetDefId",
+          "periodKey",
+          "hash",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "RecalculateApprovedDependentsResult": {
+        "description": "Підсумок явного перерахунку затверджених залежних.",
+        "properties": {
+          "approvedDependents": {
+            "description": "Скільки затверджених залежних періодів було на момент запиту.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "queued": {
+            "description": "Скільки задач поставлено (по зв'язці × року × місяцю); 0 — залежних із такою зв'язкою немає.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "queued",
+          "approvedDependents"
         ],
         "type": "object"
       },
@@ -22460,6 +23074,17 @@
       "ReopenDocumentRequest": {
         "description": "Запит на відкриття поданого документа.",
         "properties": {
+          "confirmedImpact": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ConfirmedImpactRequest",
+                "description": "B80 N5: підтвердження впливу на залежні документи (повернення із затвердженого джерела)."
+              }
+            ]
+          },
           "periodKey": {
             "description": "Період.",
             "format": "int32",
@@ -25351,6 +25976,26 @@
         ],
         "type": "object"
       },
+      "SaveMethodologyScriptRequest": {
+        "description": "Тіло `PUT …/script`.",
+        "properties": {
+          "expectedHash": {
+            "description": "Хеш тексту, з якого редактор виходив; не збігається — `409 scriptChanged`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "text": {
+            "description": "Новий текст.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "type": "object"
+      },
       "SaveMethodologySubstancesRequest": {
         "description": "Запит на заміну складу речовин версії-чернетки.",
         "properties": {
@@ -26115,6 +26760,791 @@
           "generalApproverRoleId",
           "canEdit",
           "workflowModeNone"
+        ],
+        "type": "object"
+      },
+      "ScriptDiagnosticDto": {
+        "description": "Діагностика скрипта в API (MS, план 5.4).",
+        "properties": {
+          "code": {
+            "description": "Код без префікса.",
+            "type": "string"
+          },
+          "column": {
+            "description": "Колонка з 1.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "length": {
+            "description": "Довжина підкресленого фрагмента.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "line": {
+            "description": "Рядок з 1.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "message": {
+            "description": "Англійський запасний текст.",
+            "type": "string"
+          },
+          "messageKey": {
+            "description": "Ключ каталогу: `script.&lt;code&gt;`.",
+            "type": "string"
+          },
+          "params": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Підстановки для перекладу.",
+            "type": "object"
+          }
+        },
+        "required": [
+          "code",
+          "messageKey",
+          "params",
+          "line",
+          "column",
+          "length",
+          "message"
+        ],
+        "type": "object"
+      },
+      "ScriptMigrationEntryResultDto": {
+        "description": "Підсумок щодо однієї версії пакета.",
+        "properties": {
+          "details": {
+            "description": "Подробиці відмови (діагностики, відбитки); `null` — немає.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "message": {
+            "description": "Пояснення відмови англійською.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "methodologyCode": {
+            "description": "Код методології.",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Ключ причини відмови (`scriptMigration.refused.*`); `null` — відмови немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "status": {
+            "description": "`applied` — записано; `wouldApply` — сухий прогін, записалося б; `refused` — відмова.",
+            "type": "string"
+          },
+          "version": {
+            "description": "Номер версії.",
+            "type": "string"
+          },
+          "versionId": {
+            "description": "Версія в базі; `null` — не знайдено.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "methodologyCode",
+          "version",
+          "versionId",
+          "status",
+          "reason",
+          "message",
+          "details"
+        ],
+        "type": "object"
+      },
+      "ScriptOutlineConstantDto": {
+        "description": "Константа верхнього рівня.",
+        "properties": {
+          "kind": {
+            "description": "`scalar` або `map`.",
+            "type": "string"
+          },
+          "line": {
+            "description": "Рядок оголошення.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "name": {
+            "description": "Ім'я.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "kind",
+          "line"
+        ],
+        "type": "object"
+      },
+      "ScriptOutlineDto": {
+        "description": "Структура скрипта для редактора: що читає, що пише, що оголошено.",
+        "properties": {
+          "constants": {
+            "description": "Константи.",
+            "items": {
+              "$ref": "#/components/schemas/ScriptOutlineConstantDto"
+            },
+            "type": "array"
+          },
+          "functions": {
+            "description": "Власні функції.",
+            "items": {
+              "$ref": "#/components/schemas/ScriptOutlineFunctionDto"
+            },
+            "type": "array"
+          },
+          "imports": {
+            "description": "Імпортовані бібліотеки.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "inputs": {
+            "description": "Поля рядка.",
+            "items": {
+              "$ref": "#/components/schemas/ScriptOutlineInputDto"
+            },
+            "type": "array"
+          },
+          "outputs": {
+            "description": "Виходи.",
+            "items": {
+              "$ref": "#/components/schemas/ScriptOutlineOutputDto"
+            },
+            "type": "array"
+          },
+          "substances": {
+            "description": "Коди речовин.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "tables": {
+            "description": "Таблиці (`rows from` без псевдоніма, `table` із псевдонімом).",
+            "items": {
+              "$ref": "#/components/schemas/ScriptOutlineTableDto"
+            },
+            "type": "array"
+          },
+          "variables": {
+            "description": "Змінні верхнього рівня.",
+            "items": {
+              "$ref": "#/components/schemas/ScriptOutlineVariableDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "tables",
+          "inputs",
+          "outputs",
+          "substances",
+          "imports",
+          "constants",
+          "variables",
+          "functions"
+        ],
+        "type": "object"
+      },
+      "ScriptOutlineFunctionDto": {
+        "description": "Власна функція скрипта.",
+        "properties": {
+          "line": {
+            "description": "Рядок оголошення.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "name": {
+            "description": "Ім'я.",
+            "type": "string"
+          },
+          "parameters": {
+            "description": "Імена параметрів.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "parameters",
+          "line"
+        ],
+        "type": "object"
+      },
+      "ScriptOutlineInputDto": {
+        "description": "Поле рядка, яке читає скрипт.",
+        "properties": {
+          "name": {
+            "description": "Ім'я поля (код колонки).",
+            "type": "string"
+          },
+          "optional": {
+            "description": "Необов'язкове (`row.X?`).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "optional"
+        ],
+        "type": "object"
+      },
+      "ScriptOutlineOutputDto": {
+        "description": "Вихід скрипта.",
+        "properties": {
+          "code": {
+            "description": "Код виходу.",
+            "type": "string"
+          },
+          "perSubstance": {
+            "description": "Вихід по речовині.",
+            "type": "boolean"
+          },
+          "unit": {
+            "description": "Код одиниці.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "unit",
+          "perSubstance"
+        ],
+        "type": "object"
+      },
+      "ScriptOutlineTableDto": {
+        "description": "Таблиця, з якої скрипт читає: рядки (`rows from`) або комірки (`table Alias = …`).",
+        "properties": {
+          "alias": {
+            "description": "Псевдонім з оголошення `table`; `null` — таблиця з `rows from`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "code": {
+            "description": "Код таблиці.",
+            "type": "string"
+          },
+          "templateCode": {
+            "description": "Код шаблону, якщо вказано (`Шаблон.Таблиця`).",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "code",
+          "templateCode",
+          "alias"
+        ],
+        "type": "object"
+      },
+      "ScriptOutlineVariableDto": {
+        "description": "Змінна верхнього рівня.",
+        "properties": {
+          "line": {
+            "description": "Рядок оголошення.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "name": {
+            "description": "Ім'я.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "line"
+        ],
+        "type": "object"
+      },
+      "ScriptPackageEntryDto": {
+        "description": "Одна версія в пакеті, який випускає `pack` інструмента перенесення.",
+        "properties": {
+          "effectiveFrom": {
+            "description": "Дата чинності (`yyyy-MM-dd`); `null` — не звіряється.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "methodologyCode": {
+            "description": "Код методології.",
+            "type": "string"
+          },
+          "sourceFingerprint": {
+            "description": "Відбиток джерела (SHA-256, hex) на момент `pack`.",
+            "type": "string"
+          },
+          "text": {
+            "description": "Текст скрипта.",
+            "type": "string"
+          },
+          "version": {
+            "description": "Номер версії.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "methodologyCode",
+          "version",
+          "effectiveFrom",
+          "text",
+          "sourceFingerprint"
+        ],
+        "type": "object"
+      },
+      "ScriptParityDto": {
+        "description": "Відповідь паритету: лічильники й розбіжності.",
+        "properties": {
+          "mismatchCount": {
+            "description": "Скільки розбіжностей усього.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "mismatches": {
+            "description": "Розбіжності (не більше ліміту).",
+            "items": {
+              "$ref": "#/components/schemas/ScriptParityMismatch"
+            },
+            "type": "array"
+          },
+          "rowsCompared": {
+            "description": "Скільки рядків, відібраних обома шляхами, порівняно за значеннями.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "targets": {
+            "description": "Скільки екземплярів таблиць документа порівняно.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "truncated": {
+            "description": "Перелік Mismatches обрізано до ліміту.",
+            "type": "boolean"
+          },
+          "valuesCompared": {
+            "description": "Скільки значень порівняно.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "targets",
+          "rowsCompared",
+          "valuesCompared",
+          "mismatchCount",
+          "truncated",
+          "mismatches"
+        ],
+        "type": "object"
+      },
+      "ScriptParityMismatch": {
+        "description": "Одна розбіжність паритету.",
+        "properties": {
+          "aspect": {
+            "description": "Що розійшлося (`rows.selected`, `value.number`, …).",
+            "type": "string"
+          },
+          "new": {
+            "description": "Значення скрипта.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "old": {
+            "description": "Значення старого шляху.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "rowKey": {
+            "description": "Ключ рядка; `null` — розбіжність на рівні екземпляра.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "tableInstanceId": {
+            "description": "Екземпляр таблиці.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tableInstanceId",
+          "rowKey",
+          "aspect",
+          "old",
+          "new"
+        ],
+        "type": "object"
+      },
+      "ScriptParityRequestDto": {
+        "description": "Запит паритету старого й скриптового шляхів версії на документі.",
+        "properties": {
+          "documentId": {
+            "description": "Документ.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "periodKey": {
+            "description": "Період (місяць, РРРРММ).",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "documentId",
+          "periodKey"
+        ],
+        "type": "object"
+      },
+      "ScriptPreviewDto": {
+        "description": "Відповідь перегляду на документі.",
+        "properties": {
+          "diagnostics": {
+            "description": "Діагностики тексту (перегляд виконується лише без них).",
+            "items": {
+              "$ref": "#/components/schemas/ScriptDiagnosticDto"
+            },
+            "type": "array"
+          },
+          "tables": {
+            "description": "Таблиці з рядками й значеннями; порожньо, якщо текст має діагностики.",
+            "items": {
+              "$ref": "#/components/schemas/ScriptPreviewTable"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "tables",
+          "diagnostics"
+        ],
+        "type": "object"
+      },
+      "ScriptPreviewInput": {
+        "description": "Один вхід рядка в перегляді.",
+        "properties": {
+          "name": {
+            "description": "Ім'я аргументу (код колонки).",
+            "type": "string"
+          },
+          "text": {
+            "description": "Текстове значення; `null` — немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "unitId": {
+            "description": "Одиниця значення; `null` — безрозмірне.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "value": {
+            "description": "Числове значення; `null` — немає.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "value",
+          "text",
+          "unitId"
+        ],
+        "type": "object"
+      },
+      "ScriptPreviewRow": {
+        "description": "Рядок таблиці в перегляді.",
+        "properties": {
+          "inputs": {
+            "description": "Входи вибраного рядка — поля, які читає скрипт (разом із місячними як розв'язані імена аргументів): з них клієнт\nскладає золотий тест (`arguments[{argumentCode, value, valueString, unitId}]`). Для решти рядків — порожньо.",
+            "items": {
+              "$ref": "#/components/schemas/ScriptPreviewInput"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "issue": {
+            "description": "`missingInputs`, `stepError` або `rejected`; `null` — без проблем.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "missing": {
+            "description": "Обов'язкові поля, яких бракує (для `missingInputs`).",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "rowKey": {
+            "description": "Ключ рядка.",
+            "type": "string"
+          },
+          "rowNumber": {
+            "description": "Номер рядка в таблиці.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "state": {
+            "description": "`selected`, `inactive`, `notSelected` або `rejected`.",
+            "type": "string"
+          },
+          "values": {
+            "description": "Значення величин; для `notSelected`/`inactive` — порожньо.",
+            "items": {
+              "$ref": "#/components/schemas/ScriptPreviewValue"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "rowKey",
+          "rowNumber",
+          "state",
+          "issue",
+          "missing",
+          "values"
+        ],
+        "type": "object"
+      },
+      "ScriptPreviewTable": {
+        "description": "Екземпляр таблиці в перегляді.",
+        "properties": {
+          "inactiveRows": {
+            "description": "Скільки рядків неактивні (`active when` хибне).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "rows": {
+            "description": "Рядки (не більше `MaxRows`).",
+            "items": {
+              "$ref": "#/components/schemas/ScriptPreviewRow"
+            },
+            "type": "array"
+          },
+          "selectedRows": {
+            "description": "Скільки рядків вибрано до розрахунку.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "tableCode": {
+            "description": "Код таблиці.",
+            "type": "string"
+          },
+          "tableInstanceId": {
+            "description": "Екземпляр таблиці.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "totalRows": {
+            "description": "Усього рядків екземпляра.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tableInstanceId",
+          "tableCode",
+          "totalRows",
+          "selectedRows",
+          "inactiveRows",
+          "rows"
+        ],
+        "type": "object"
+      },
+      "ScriptPreviewValue": {
+        "description": "Одне значення рядка в перегляді.",
+        "properties": {
+          "error": {
+            "description": "Код помилки значення (`#DIV/0` тощо); `null` — значення без помилки.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "kind": {
+            "description": "`var`, `visible` або `output`.",
+            "type": "string"
+          },
+          "name": {
+            "description": "Ім'я величини (`var`/`output`).",
+            "type": "string"
+          },
+          "substance": {
+            "description": "Код речовини для значень усередині `foreach substance`; інакше `null`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "text": {
+            "description": "Значення текстом.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "substance",
+          "kind",
+          "text",
+          "error"
+        ],
+        "type": "object"
+      },
+      "ScriptTableColumnDto": {
+        "description": "Колонка живої таблиці для підказок редактора.",
+        "properties": {
+          "code": {
+            "description": "Код колонки.",
+            "type": "string"
+          },
+          "dataType": {
+            "description": "Тип даних колонки.",
+            "type": "string"
+          },
+          "isMonthColumn": {
+            "description": "Місячна колонка.",
+            "type": "boolean"
+          },
+          "monthNumber": {
+            "description": "Номер місяця (1…12); `null` — не місячна.",
+            "format": "uint8",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "unitCode": {
+            "description": "Код одиниці колонки; `null` — одиниці немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "code",
+          "dataType",
+          "isMonthColumn",
+          "monthNumber",
+          "unitCode"
+        ],
+        "type": "object"
+      },
+      "ScriptTableDto": {
+        "description": "Жива таблиця для підказок редактора.",
+        "properties": {
+          "columns": {
+            "description": "Колонки (без видалених).",
+            "items": {
+              "$ref": "#/components/schemas/ScriptTableColumnDto"
+            },
+            "type": "array"
+          },
+          "monthAliases": {
+            "description": "Псевдоніми місячних входів таблиці.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "requested": {
+            "description": "Код із запиту (`Таблиця` або `Шаблон.Таблиця`).",
+            "type": "string"
+          },
+          "tableCode": {
+            "description": "Код таблиці.",
+            "type": "string"
+          },
+          "templateCode": {
+            "description": "Код шаблону.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "requested",
+          "templateCode",
+          "tableCode",
+          "columns",
+          "monthAliases"
+        ],
+        "type": "object"
+      },
+      "ScriptTextRequest": {
+        "description": "Тіло `POST …/script/validate` і `…/format-const`.",
+        "properties": {
+          "text": {
+            "description": "Текст скрипта (для `format-const` — літерал константи).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "type": "object"
+      },
+      "ScriptValidationDto": {
+        "description": "Результат перевірки тексту без збереження.",
+        "properties": {
+          "diagnostics": {
+            "description": "Діагностики.",
+            "items": {
+              "$ref": "#/components/schemas/ScriptDiagnosticDto"
+            },
+            "type": "array"
+          },
+          "outline": {
+            "$ref": "#/components/schemas/ScriptOutlineDto",
+            "description": "Структура."
+          }
+        },
+        "required": [
+          "diagnostics",
+          "outline"
         ],
         "type": "object"
       },
@@ -28559,6 +29989,136 @@
           "RowWindow"
         ]
       },
+      "SourceImpactConsumerDto": {
+        "description": "Залежний документ × період у відповіді оцінки впливу.",
+        "properties": {
+          "approved": {
+            "description": "Період затверджено (перерахунок його не чіпає, він застаріє).",
+            "type": "boolean"
+          },
+          "bindingCode": {
+            "description": "Код зв'язки.",
+            "type": "string"
+          },
+          "documentId": {
+            "description": "Залежний документ.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "documentKey": {
+            "description": "Бізнес-ключ документа.",
+            "type": "string"
+          },
+          "periodKey": {
+            "description": "Період залежного документа.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "projectCode": {
+            "description": "Код проєкту.",
+            "type": "string"
+          },
+          "skipReason": {
+            "description": "Чому не буде перераховано: `approved` — затверджений період перерахунок пропускає (D-493/D-510); інакше `null`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "templateCode": {
+            "description": "Код шаблону залежного документа.",
+            "type": "string"
+          },
+          "willRecalculate": {
+            "description": "Період буде перераховано (незатверджений).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "bindingCode",
+          "templateCode",
+          "documentId",
+          "projectCode",
+          "documentKey",
+          "periodKey",
+          "approved",
+          "willRecalculate",
+          "skipReason"
+        ],
+        "type": "object"
+      },
+      "SourceImpactDto": {
+        "description": "Вплив дії над документом-джерелом на залежні документи (B80 N5, D-554).",
+        "properties": {
+          "action": {
+            "description": "`approve` | `reopen`.",
+            "type": "string"
+          },
+          "approvedCount": {
+            "description": "З них затверджених.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "blocked": {
+            "description": "Дію відхилить сервер (`Block` і є затверджені залежні).",
+            "type": "boolean"
+          },
+          "canRecalculateApproved": {
+            "description": "Викликач має право `Calculation.RecalculateApprovedDependents` (діалог показує галочку «й затверджені»).",
+            "type": "boolean"
+          },
+          "consumers": {
+            "description": "УСІ залежні (метадані: документ, шаблон, період, статус; без даних комірок), не більше int GetSourceImpactHandler.MaxConsumers; решту показує `DependentCount`.",
+            "items": {
+              "$ref": "#/components/schemas/SourceImpactConsumerDto"
+            },
+            "type": "array"
+          },
+          "dependentCount": {
+            "description": "Усього залежних періодів.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "impactHash": {
+            "description": "Відбиток впливу: його клієнт повертає в `confirmedImpact.hash`.",
+            "type": "string"
+          },
+          "policy": {
+            "description": "Політика: `None` | `Warn` | `ConfirmWithReason` | `Block`.",
+            "type": "string"
+          },
+          "reasonRequired": {
+            "description": "Підтвердження потребує причини (`ConfirmWithReason`).",
+            "type": "boolean"
+          },
+          "required": {
+            "description": "Дія потребує підтвердження (чи відмовляє): політика не `None` і є затверджені залежні.",
+            "type": "boolean"
+          },
+          "sourceMonths": {
+            "description": "Зачеплені місяці джерела `yyyyMM`.",
+            "items": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "action",
+          "policy",
+          "required",
+          "blocked",
+          "reasonRequired",
+          "impactHash",
+          "sourceMonths",
+          "dependentCount",
+          "approvedCount",
+          "consumers",
+          "canRecalculateApproved"
+        ],
+        "type": "object"
+      },
       "SourceIssueDto": {
         "description": "✎ B80 N4 (R3.2): проблема документа-джерела для місяця документа-споживача.",
         "properties": {
@@ -29015,6 +30575,57 @@
         ],
         "type": "object"
       },
+      "SwitchDocumentSourceFlagsRequest": {
+        "description": "Запит перемикання бітів зв'язки (B179 L5); `null` — біт не чіпати, хоч один має бути заданий.",
+        "properties": {
+          "readFromDocument": {
+            "description": "Читати склад з документа-джерела (`true`) чи з рядків довідника (`false`).",
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "recalculateDependents": {
+            "description": "Ставити автоматичний перерахунок залежних (аварійний вимикач).",
+            "type": [
+              "null",
+              "boolean"
+            ]
+          }
+        },
+        "required": [
+          "readFromDocument",
+          "recalculateDependents"
+        ],
+        "type": "object"
+      },
+      "SwitchDocumentSourceFlagsResponse": {
+        "description": "Результат перемикання бітів.",
+        "properties": {
+          "binding": {
+            "$ref": "#/components/schemas/DocumentSourceBindingDto",
+            "description": "Зв'язка після перемикання."
+          },
+          "changed": {
+            "description": "`false` — біти вже були такими; нічого не записано й не поставлено.",
+            "type": "boolean"
+          },
+          "queuedYears": {
+            "description": "Роки, за які поставлено перерахунок залежних.",
+            "items": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "binding",
+          "changed",
+          "queuedYears"
+        ],
+        "type": "object"
+      },
       "SwitchDocumentSourceStateRequest": {
         "description": "Запит перемикання стану-воріт.",
         "properties": {
@@ -29055,6 +30666,63 @@
         ],
         "type": "object"
       },
+      "SwitchScriptEngineRequest": {
+        "description": "Тіло `POST …/script-migration/switch`.",
+        "properties": {
+          "engine": {
+            "description": "`Script` або `Formulas`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "reason": {
+            "description": "Причина; обов'язкова, потрапляє в журнал.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "versionIds": {
+            "description": "Версії групи.",
+            "items": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "required": [
+          "versionIds",
+          "engine",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "SwitchScriptEngineResponse": {
+        "description": "Відповідь `POST …/script-migration/switch`.",
+        "properties": {
+          "engine": {
+            "description": "Рушій, на який перемкнуто.",
+            "type": "string"
+          },
+          "versions": {
+            "description": "Перемкнені версії.",
+            "items": {
+              "$ref": "#/components/schemas/SwitchedVersionDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "engine",
+          "versions"
+        ],
+        "type": "object"
+      },
       "SwitchSourceKindRequest": {
         "description": "Запит на перемикання master-джерела набору довідників.",
         "properties": {
@@ -29078,6 +30746,30 @@
           "registryCodes",
           "sourceKind",
           "reason"
+        ],
+        "type": "object"
+      },
+      "SwitchedVersionDto": {
+        "description": "Версія, перемкнена групою.",
+        "properties": {
+          "methodologyCode": {
+            "description": "Код методології.",
+            "type": "string"
+          },
+          "version": {
+            "description": "Номер версії.",
+            "type": "string"
+          },
+          "versionId": {
+            "description": "Версія.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "versionId",
+          "methodologyCode",
+          "version"
         ],
         "type": "object"
       },
@@ -37170,6 +38862,56 @@
         ]
       }
     },
+    "/api/v1/dependency-graph": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyGraphDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyGraphDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/DependencyGraphDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "Граф: вузли (шаблони, довідники, методології), ребра з видом і доказами, згорнуті зв'язки «джерело → споживач»,\nрівні порядку обчислення, цикли й зауваження побудови; `revision` — ревізія вхідних даних. Право\n`Calculation.ManageSourceBinding`.",
+        "tags": [
+          "DependencyGraph"
+        ]
+      }
+    },
     "/api/v1/document-source-bindings": {
       "get": {
         "responses": {
@@ -37224,6 +38966,131 @@
           }
         },
         "summary": "Перелік зв'язок зі станом-воротами і дієвим читанням. Право `Calculation.ManageSourceBinding`.",
+        "tags": [
+          "DocumentSourceBindings"
+        ]
+      }
+    },
+    "/api/v1/document-source-bindings/{id}/flags": {
+      "put": {
+        "description": "Хоч один біт має бути заданий (інакше 422 `ECR-REQ-0422` `sourceFlagsInvalid`). Зміна\n`readFromDocument` за ввімкненого `recalculateDependents` ставить злитий перерахунок залежних за кожен\nрік джерела.",
+        "parameters": [
+          {
+            "description": "Зв'язка.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SwitchDocumentSourceFlagsRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SwitchDocumentSourceFlagsRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SwitchDocumentSourceFlagsRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwitchDocumentSourceFlagsResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwitchDocumentSourceFlagsResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwitchDocumentSourceFlagsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Перемикання бітів зв'язки: `readFromDocument` (читати склад з документа-джерела) і\n`recalculateDependents` (аварійний вимикач автоматичних залежних). Право\n`Calculation.ManageSourceBinding`; подія `DocumentSourceBindingChanged` (`kind = flags`) у журналі безпеки.",
         "tags": [
           "DocumentSourceBindings"
         ]
@@ -44817,6 +46684,268 @@
         ]
       }
     },
+    "/api/v1/documents/{id}/source-impact": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Документ-джерело.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Аркуш.",
+            "in": "query",
+            "name": "sheetDefId",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Період.",
+            "in": "query",
+            "name": "periodKey",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "`approve`, `reopen` чи `edit` (правка комірки джерела — лише відомості).",
+            "in": "query",
+            "name": "action",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Копія аркуша; не `null` — впливу немає.",
+            "in": "query",
+            "name": "sheetCopyId",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceImpactDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceImpactDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceImpactDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "B80 N5 (D-554): що зачепить затвердження чи повернення в роботу аркуша документа-джерела — залежні документи й\nмісяці (які вже затверджено), політика зв'язки (`None` | `Warn` | `ConfirmWithReason` | `Block`)\nі відбиток впливу для `confirmedImpact`. Видимість — як у самої дії.",
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/api/v1/documents/{id}/source-impact/recalculate-approved": {
+      "post": {
+        "parameters": [
+          {
+            "description": "Документ-джерело.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecalculateApprovedDependentsRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecalculateApprovedDependentsRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecalculateApprovedDependentsRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecalculateApprovedDependentsResult"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecalculateApprovedDependentsResult"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecalculateApprovedDependentsResult"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "B80 N5 (D-554, рішення людини 19.11): адміністратор явно просить перерахувати і ЗАТВЕРДЖЕНІ залежні документи-споживачі\nаркуша-джерела. Право `Calculation.RecalculateApprovedDependents` (інакше 403), причина обов'язкова (422),\nвідбиток впливу — з `GET …/source-impact?action=edit` (застарілий — 409). Усе логується.",
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
     "/api/v1/documents/{id}/submission-target": {
       "get": {
         "parameters": [
@@ -47878,6 +50007,310 @@
         "summary": "Імпортує пакет `ecr-methodology-package` v1: методології, версії-чернетки,\nформули, константи, імпорти між методологіями. Права `Calculation.EditFormula` і\n`Calculation.EditConstant`.",
         "tags": [
           "MethodologyImport"
+        ]
+      }
+    },
+    "/api/v1/methodologies/script-migration/apply": {
+      "post": {
+        "description": "Для кожної версії відбиток джерела перераховується З БАЗИ тим самим алгоритмом, що й в інструменті\n(`Fingerprint`); не збігся — відмова для цієї версії. Текст мусить компілюватися без діагностик, разом із\nперевірками оточення. Версії обробляються незалежно: відповідь перелічує статус кожної\n(`applied`, `wouldApply`, `refused` з ключем причини). Рушій версії не змінюється.",
+        "parameters": [
+          {
+            "description": "`true` — лише перевірити, нічого не записувати.",
+            "in": "query",
+            "name": "dryRun",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplyScriptPackageRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplyScriptPackageRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplyScriptPackageRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplyScriptPackageResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplyScriptPackageResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplyScriptPackageResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Звіряє пакет `package.json` з базою й записує тіньові тексти. Право `Calculation.Publish`.",
+        "tags": [
+          "MethodologyScriptMigration"
+        ]
+      }
+    },
+    "/api/v1/methodologies/script-migration/switch": {
+      "post": {
+        "description": "На `Script`: у кожної версії є текст, що компілюється без діагностик, а склад, виведений зі скрипта\n(виходи з одиницею й ознакою «по речовинах», речовини, імпорти), збігається з наявним — інакше\n`422 switchChecksFailed` з переліком розбіжностей; бібліотека й усі її імпортери — в одному запиті\n(`422 switchGroupIncomplete` називає відсутні версії). Тоді записуються таблиці читання й залежності.\nНа `Formulas`: просте перемикання, таблиці читання знімаються. Старі формули не видаляються.",
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SwitchScriptEngineRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SwitchScriptEngineRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SwitchScriptEngineRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwitchScriptEngineResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwitchScriptEngineResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwitchScriptEngineResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Перемикає рушій групи опублікованих версій однією транзакцією. Право `Calculation.Publish`.",
+        "tags": [
+          "MethodologyScriptMigration"
+        ]
+      }
+    },
+    "/api/v1/methodologies/script/tables": {
+      "get": {
+        "description": "Код, якого немає серед живих таблиць, у відповіді відсутній; код у кількох шаблонах дає кілька записів.",
+        "parameters": [
+          {
+            "description": "Коди таблиць через кому (до 50); `Шаблон.Таблиця` — з кодом шаблону.",
+            "in": "query",
+            "name": "codes",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ScriptTableDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ScriptTableDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ScriptTableDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Живі таблиці за кодами — колонки (тип, одиниця, місяць) і псевдоніми місячних входів для підказок редактора.\nПраво `Calculation.View`.",
+        "tags": [
+          "MethodologyScriptTables"
         ]
       }
     },
@@ -51062,6 +53495,716 @@
         "summary": "Записує правило відбору рядків. Право `Calculation.EditRule`.",
         "tags": [
           "Methodologies"
+        ]
+      }
+    },
+    "/api/v1/methodologies/{id}/versions/{vid}/script": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Методологія.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Версія.",
+            "in": "path",
+            "name": "vid",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyScriptDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyScriptDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyScriptDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Скрипт версії: текст, хеш, діагностики, структура. Право `Calculation.View`.",
+        "tags": [
+          "MethodologyScript"
+        ]
+      },
+      "put": {
+        "description": "Текст зберігається завжди, навіть із помилками; виходи, речовини, імпорти й таблиці читання\nматеріалізуються лише коли діагностик немає. Не чернетка чи не скрипт — `409 scriptNotEditable`;\n`expectedHash` не збігся — `409 scriptChanged`.",
+        "parameters": [
+          {
+            "description": "Методологія.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Версія-чернетка з рушієм `Script`.",
+            "in": "path",
+            "name": "vid",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveMethodologyScriptRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveMethodologyScriptRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveMethodologyScriptRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyScriptDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyScriptDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyScriptDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Зберігає текст скрипта чернетки. Право `Calculation.EditFormula`.",
+        "tags": [
+          "MethodologyScript"
+        ]
+      }
+    },
+    "/api/v1/methodologies/{id}/versions/{vid}/script/format-const": {
+      "post": {
+        "parameters": [
+          {
+            "description": "Методологія.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Версія.",
+            "in": "path",
+            "name": "vid",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScriptTextRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScriptTextRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScriptTextRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FormatConstDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FormatConstDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/FormatConstDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Канонічний друк літерала константи для редактора таблиць коефіцієнтів. Право `Calculation.View`.",
+        "tags": [
+          "MethodologyScript"
+        ]
+      }
+    },
+    "/api/v1/methodologies/{id}/versions/{vid}/script/parity": {
+      "post": {
+        "description": "Нічого не записує. Точне порівняння без допусків: вибір рядків, значення, одиниці, відсутні аргументи,\nпомилки кроків. `mismatchCount = 0` при `targets &gt; 0` — шляхи збігаються на цих даних.",
+        "parameters": [
+          {
+            "description": "Методологія.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Версія.",
+            "in": "path",
+            "name": "vid",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScriptParityRequestDto"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScriptParityRequestDto"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScriptParityRequestDto"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScriptParityDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScriptParityDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScriptParityDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Паритет версії на документі: збережений (тіньовий) скрипт проти рушія формул на всіх таблицях документа за\nперіод, до яких прив'язана методологія. Право `Calculation.Publish` і доступ до документа.",
+        "tags": [
+          "MethodologyScriptMigration"
+        ]
+      }
+    },
+    "/api/v1/methodologies/{id}/versions/{vid}/script/preview": {
+      "post": {
+        "description": "Нічого не записує. Текст із діагностиками не виконується — повертаються лише діагностики.",
+        "parameters": [
+          {
+            "description": "Методологія.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Версія.",
+            "in": "path",
+            "name": "vid",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviewMethodologyScriptRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviewMethodologyScriptRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviewMethodologyScriptRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScriptPreviewDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScriptPreviewDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScriptPreviewDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Прогін скрипта на документі «насухо»: що вибрано, що пораховано. Право `Calculation.View` і доступ до\nдокумента, як для його результатів.",
+        "tags": [
+          "MethodologyScript"
+        ]
+      }
+    },
+    "/api/v1/methodologies/{id}/versions/{vid}/script/validate": {
+      "post": {
+        "parameters": [
+          {
+            "description": "Методологія.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Версія.",
+            "in": "path",
+            "name": "vid",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScriptTextRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScriptTextRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScriptTextRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScriptValidationDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScriptValidationDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScriptValidationDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Перевіряє текст, нічого не зберігаючи. Право `Calculation.View`.",
+        "tags": [
+          "MethodologyScript"
         ]
       }
     },
@@ -75003,6 +78146,9 @@
       "name": "DataSources"
     },
     {
+      "name": "DependencyGraph"
+    },
+    {
       "name": "DocumentEditAssignments"
     },
     {
@@ -75076,6 +78222,15 @@
     },
     {
       "name": "MethodologyPublications"
+    },
+    {
+      "name": "MethodologyScript"
+    },
+    {
+      "name": "MethodologyScriptMigration"
+    },
+    {
+      "name": "MethodologyScriptTables"
     },
     {
       "name": "MethodologyVersions"

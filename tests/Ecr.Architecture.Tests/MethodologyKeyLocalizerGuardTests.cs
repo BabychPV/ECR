@@ -34,6 +34,8 @@ public sealed class MethodologyKeyLocalizerGuardTests
             "редагування й клон ЧЕРНЕТКИ методології: ключі лишаються як у джерелі (Id у сховищі - навмисно)",
         ["src/Ecr.Infrastructure/Persistence/MethodologyVersionDeletionStore.cs"] =
             "видалення версії методології",
+        ["src/Ecr.Infrastructure/Persistence/VersionSourceReader.cs"] =
+            "MS 8.5: читає СТАРИЙ вміст версії для відбитка джерела; правила переводяться в коди колонок за Id прямо з cfg.ColumnDef",
         ["src/Ecr.Infrastructure/Persistence/MethodologyStore.cs"] =
             "сховище, що віддає правила як є; переклад робить споживач",
         ["src/Ecr.Infrastructure/Persistence/EcrDbContext.cs"] = "оголошення DbSet",

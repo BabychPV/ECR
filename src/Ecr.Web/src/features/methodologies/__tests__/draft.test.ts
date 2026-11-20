@@ -180,6 +180,7 @@ describe('Звернення конфігуратора методологій',
       versionNumber: '2.0',
       copyFromVersionId: 9,
       level: 'Configuration',
+      engine: 'Formulas',
     });
 
     // ⛔ Без `copyFromVersionId` сервер зробив би ПОРОЖНЮ чернетку. Для
@@ -189,14 +190,18 @@ describe('Звернення конфігуратора методологій',
       versionNumber: '2.0',
       copyFromVersionId: 9,
       level: 'Configuration',
+      engine: 'Formulas',
     });
 
     await createMethodologyVersion(4, {
       versionNumber: '1.0',
       copyFromVersionId: null,
       level: 'Configuration',
+      engine: 'Script',
     });
 
     expect(JSON.parse(String(calls[1]?.init?.body)).copyFromVersionId).toBeNull();
+    // ⛔ Рушій іде завжди явно: пропущений сервер читає як `Formulas`.
+    expect(JSON.parse(String(calls[1]?.init?.body)).engine).toBe('Script');
   });
 });

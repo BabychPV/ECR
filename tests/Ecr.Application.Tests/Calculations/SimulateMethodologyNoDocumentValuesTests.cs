@@ -48,6 +48,10 @@ public sealed class SimulateMethodologyNoDocumentValuesTests
             {
                 typeof(ICalculationModule), typeof(IMethodologyStore), typeof(IAccessDecisionService),
                 typeof(ICurrentUser), typeof(IPeriodStore),
+
+                // MS (план 4.6): версію-скрипт рахує модуль, обраний за `CanHandle` серед усіх зареєстрованих;
+                // це теж лише модулі розрахунку, а не порти читання комірок чи документа.
+                typeof(IEnumerable<ICalculationModule>),
             },
             parameterTypes);
         Assert.DoesNotContain(typeof(ICellStore), parameterTypes);

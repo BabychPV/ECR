@@ -85,6 +85,69 @@ public sealed class SourceApprovalChangeTriggerTests(SqlServerFixture sql) : DbJ
         Assert.Equal(row.JobId, Assert.Single(await RowsAsync(world.BindingId)).JobId);
     }
 
+    /// <summary>
+    /// B80 N5 (F13, D-554): затвердження З перекриттям адміністратора ставить ОКРЕМУ задачу (ключ <c>…-approved</c>) з ознакою
+    /// <c>includeApproved</c>, автором і причиною в payload; без перекриття — звичайну; одна не зливається з іншою.
+    /// </summary>
+    /// <remarks>
+    /// Мутації: у <c>EnqueueAsync</c> передати <c>includeApproved: false</c> у ключ — одна злита задача замість двох, червоний;
+    /// не передавати <c>IncludeApproved</c>/<c>OverrideUserId</c>/<c>OverrideReason</c> у запит — червоний.
+    /// </remarks>
+    [Fact]
+    public async Task Перекриття_адміністратора_ставить_окрему_задачу_з_ознакою_автором_і_причиною()
+    {
+        var world = await ArrangeAsync(DocumentSourceState.ApprovedOnly);
+
+        await using var host = NewHost();
+        var trigger = new SourceApprovalChangeTrigger(host.Db, Scheduler(host));
+        var period = SourceDependencyWorld.Period(Month);
+        await trigger.OnSourceSheetApprovalChangedAsync(
+            world.Source.DocumentId, world.Source.SheetDefId, period, SourceApprovalChange.Approved, ActorId, CancellationToken.None);
+        await trigger.OnSourceSheetApprovalChangedAsync(
+            world.Source.DocumentId, world.Source.SheetDefId, period, SourceApprovalChange.Approved, ActorId,
+            new ApprovedRecalculationOverride(ActorId, "Act 12"), CancellationToken.None);
+
+        var rows = await RowsAsync(world.BindingId);
+        Assert.Equal(2, rows.Count);
+        var plain = Assert.Single(rows, r => r.TargetKey == TargetKey(world.BindingId, Month));
+        Assert.DoesNotContain("\"includeApproved\":true", plain.Payload, StringComparison.Ordinal);
+        var over = Assert.Single(rows, r => r.TargetKey == TargetKey(world.BindingId, Month) + "-approved");
+        Assert.Contains("\"includeApproved\":true", over.Payload, StringComparison.Ordinal);
+        Assert.Contains($"\"overrideUserId\":{ActorId}", over.Payload, StringComparison.Ordinal);
+        Assert.Contains("\"overrideReason\":\"Act 12\"", over.Payload, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// B80 N5 (F13, D-554): явний перерахунок затверджених ставить задачу за зв'язкою у БУДЬ-ЯКОМУ стані (правка комірки
+    /// пише за <c>Any</c>) з перекриттям; аркуш шаблону без зв'язки — 0 задач.
+    /// </summary>
+    /// <remarks>
+    /// Мутації: у <c>ActiveBindingsAsync</c> прибрати <c>anyState</c> (завжди <c>ApprovedOnly</c>) — за <c>Any</c> повертає 0, червоний;
+    /// прибрати фільтр <c>b.SourceTemplateId == sheet?.TemplateId</c> — чужий аркуш ставить задачу, червоний.
+    /// </remarks>
+    [Fact]
+    public async Task Явний_перерахунок_затверджених_ставить_задачу_перекриття_за_зв_язкою_у_будь_якому_стані_а_чужий_аркуш_нічого()
+    {
+        var world = await ArrangeAsync(DocumentSourceState.Any);
+        var other = await new SourceDependencyWorld(Sql).DocumentAsync([Month]);
+
+        await using var host = NewHost();
+        var trigger = new SourceApprovalChangeTrigger(host.Db, Scheduler(host));
+        var period = SourceDependencyWorld.Period(Month);
+        var ovr = new ApprovedRecalculationOverride(ActorId, "Act 12");
+
+        Assert.Equal(0, await trigger.RequestApprovedDependentsRecalculationAsync(
+            other.DocumentId, other.SheetDefId, period, ovr, CancellationToken.None));
+        Assert.Empty(await RowsAsync(world.BindingId));
+
+        Assert.Equal(1, await trigger.RequestApprovedDependentsRecalculationAsync(
+            world.Source.DocumentId, world.Source.SheetDefId, period, ovr, CancellationToken.None));
+        var row = Assert.Single(await RowsAsync(world.BindingId));
+        Assert.Equal(TargetKey(world.BindingId, Month) + "-approved", row.TargetKey);
+        Assert.Equal(ActorId, row.CreatedByUserId);
+        Assert.Contains("\"includeApproved\":true", row.Payload, StringComparison.Ordinal);
+    }
+
     /// <summary>Мутація: <c>PrepareDocumentDeletionAsync</c> повертає <c>null</c> завжди — червоний.</summary>
     [Fact]
     public async Task ApprovedOnly_видалення_документа_ставить_задачу_його_років_а_за_Any_нічого()
@@ -108,6 +171,35 @@ public sealed class SourceApprovalChangeTriggerTests(SqlServerFixture sql) : DbJ
         await SetStateAsync(world.BindingId, DocumentSourceState.Any);
         await using var db = Sql.CreateContext();
         Assert.Null(await new SourceApprovalChangeTrigger(db, Substitute.For<IBackgroundJobScheduler>())
+            .PrepareDocumentDeletionAsync(world.Source.DocumentId, CancellationToken.None));
+    }
+
+    /// <summary>
+    /// B181(2) H3: екземпляри таблиць КОПІЇ аркуша джерелом для залежних не є (завантажувач складу читає
+    /// <c>SheetCopyId = null</c>), тож видалення документа, що має лише копію аркуша шаблону-джерела, перерахунок не ставить.
+    /// </summary>
+    /// <remarks>Мутація: прибрати <c>&amp;&amp; i.SheetCopyId == null</c> у <c>PrepareDocumentDeletionAsync</c> — червоний.</remarks>
+    [Fact]
+    public async Task ApprovedOnly_видалення_документа_лише_з_копією_аркуша_джерела_нічого_не_готує()
+    {
+        var world = await ArrangeAsync(DocumentSourceState.ApprovedOnly);
+
+        await using (var db = Sql.CreateContext())
+        {
+            var original = new Ecr.Domain.Entities.Documents.DocumentSheet(world.Source.DocumentId, world.Source.SheetDefId);
+            db.DocumentSheets.Add(original);
+            await db.SaveChangesAsync();
+            var copy = original.CreateCopy(2);
+            db.DocumentSheets.Add(copy);
+            await db.SaveChangesAsync();
+
+            // Усі екземпляри документа — екземпляри копії: оригінального аркуша з даними немає.
+            await db.TableInstances.Where(i => i.DocumentId == world.Source.DocumentId)
+                .ExecuteUpdateAsync(s => s.SetProperty(i => i.SheetCopyId, (long?)copy.Id));
+        }
+
+        await using var check = Sql.CreateContext();
+        Assert.Null(await new SourceApprovalChangeTrigger(check, Substitute.For<IBackgroundJobScheduler>())
             .PrepareDocumentDeletionAsync(world.Source.DocumentId, CancellationToken.None));
     }
 

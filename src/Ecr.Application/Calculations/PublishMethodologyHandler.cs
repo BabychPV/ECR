@@ -35,7 +35,10 @@ public sealed class PublishMethodologyHandler(
     IRegistryKeyStore? registryKeys = null,
     IRegistryUseStore? registryUses = null,
     IUiStringCatalog? uiCatalog = null,
-    RuleCoverageHandler? ruleCoverage = null)
+    RuleCoverageHandler? ruleCoverage = null,
+    IEnumerable<ICalculationModule>? modules = null,
+    Scripting.ScriptPublishChecks? scriptChecks = null,
+    IDependencyGraphProvider? dependencyGraph = null) : IFormulaLinkRebuilder
 {
     /// <summary>Ключ попередження: комбінації значень реальних рядків, яких не зачіпає жодне правило (ФВ-13.9).</summary>
     public const string CoverageGapsWarningKey = "publish.warning.ruleCoverageGaps";
@@ -103,6 +106,14 @@ public sealed class PublishMethodologyHandler(
                 });
         }
 
+        // ✎ MS (план 4.6): версія зі скриптом не має формул, констант, правил і правила категорії — замість
+        // формульних кроків тут перевірки скрипта, матеріалізація й той самий золотий набір (через модуль скрипта).
+        // Шлях формул нижче не змінений ні на рядок.
+        if (version.Engine == MethodologyEngine.Script)
+        {
+            return await PublishScriptAsync(methodology, version, changeReason, from, userId, ct).ConfigureAwait(false);
+        }
+
         // ⛔ V-18: правила відбору рядків — ДО золотого набору. Версія, чиї
         // правила не збігаються ні з чим або збігаються не в тому порядку,
         // проходила б публікацію з зеленим тестом: тест рахує формули, а не те,
@@ -113,7 +124,11 @@ public sealed class PublishMethodologyHandler(
         // ⛔ B-13: тест без періоду — людська відмова з назвою тесту ДО прогону.
         // Доти модуль падав глибоко всередині з `ECR-PRD-0404` «Періоду 0 для
         // документа 0 не існує…» — правда, але не про те, що має виправити автор.
-        var testCases = await methodologies.GetTestCasesAsync(methodologyVersionId, ct).ConfigureAwait(false);
+        // ✎ D-556: бібліотека золотого набору не має (її поведінку перевіряють набори методологій-імпортерів): тести,
+        // навіть якщо вони лишилися, не проганяються й не порівнюються - рахувати бібліотеці нема що.
+        var testCases = methodology.RequiresGoldenSet
+            ? await methodologies.GetTestCasesAsync(methodologyVersionId, ct).ConfigureAwait(false)
+            : [];
         RequireTestPeriods(testCases);
 
         // Diff рахується ДО публікації: після неї попередня версія вже не та,
@@ -124,6 +139,11 @@ public sealed class PublishMethodologyHandler(
         // ⛔ RC14 (L2-4): статичні перевірки формул і довідників (REGFIELD/REGFIND → ECR-TMPL-4222 з
         // позицією) — ДО золотого прогону. Інакше описка в правилі категорії падала на golden як
         // `categoryRuleFailed` (#REF), а не названою відмовою з позицією.
+        // ✎ MS x B179: стан «вже на циклі» - ДО того, як ApplyEvaluationOrderAsync перепише ребра методології
+        // (довідники, залежності методологій): такі публікації цикл не створюють і не блокуються.
+        var onCycle = await Templates.DependencyCyclePublishCheck
+            .MethodologiesOnCycleAsync(dependencyGraph, [methodology.Id], ct).ConfigureAwait(false);
+
         var warnings = await ApplyEvaluationOrderAsync(methodology, version, from, ct)
             .ConfigureAwait(false);
 
@@ -139,7 +159,7 @@ public sealed class PublishMethodologyHandler(
         // Зелений тест — не прапорець, а факт: усі випадки золотого набору
         // зійшлися в межах допуску (ФВ-9.12, ФВ-13.7).
         var verdicts = await JudgeAsync(methodology, version, testCases, ct).ConfigureAwait(false);
-        var greenTest = GoldenSet.IsGreen(verdicts, testCases);
+        var greenTest = !methodology.RequiresGoldenSet || GoldenSet.IsGreen(verdicts, testCases);
 
         // ⛔ Відмова через золотий набір називає КОЖНУ розбіжність поіменно:
         // випадок, вихід, речовину й обидва числа. Домен теж її не пропустить
@@ -174,6 +194,12 @@ public sealed class PublishMethodologyHandler(
                     token).ConfigureAwait(false);
 
                 await uow.SaveChangesAsync(token).ConfigureAwait(false);
+
+                // ✎ MS x B179: нові ребра формул (довідники, результати інших методологій) не мають замкнути цикл
+                // залежностей документів. Граф читає лише ОПУБЛІКОВАНІ версії: перевірка - ПІСЛЯ збереження публікації
+                // в цій транзакції (відмова відкочує і публікацію, і подію журналу, як для скрипта).
+                await Templates.DependencyCyclePublishCheck
+                    .RefuseMethodologiesAsync(dependencyGraph, [methodology.Id], onCycle, token).ConfigureAwait(false);
             },
             ct).ConfigureAwait(false);
 
@@ -185,6 +211,21 @@ public sealed class PublishMethodologyHandler(
         // побачить — а 186 попереджень у логах не прочитає ніхто.
         // ✎ L2-5: попередження diff (попередня версія не обчислилась) — до попереджень публікації.
         return diff with { Warnings = [.. diff.Warnings ?? [], .. warnings, .. coverageWarnings] };
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Той самий прохід, що й у публікації (<see cref="ApplyEvaluationOrderAsync"/>): ребра між методологіями та ребра
+    /// довідників виводяться з формул версії однією й тією самою дорогою, а не другим, «схожим» кодом. Дата імпортів —
+    /// дата чинності версії.
+    /// </remarks>
+    public async Task RebuildAsync(Methodology methodology, MethodologyVersion version, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(methodology);
+        ArgumentNullException.ThrowIfNull(version);
+
+        await ApplyEvaluationOrderAsync(methodology, version, version.EffectiveFrom ?? new DateOnly(2000, 1, 1), ct)
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -1046,7 +1087,7 @@ public sealed class PublishMethodologyHandler(
     {
         try
         {
-            return await module
+            return await ModuleFor(descriptor)
                 .ExecuteAsync(WithDescriptor(testCase.Input, descriptor), ct)
                 .ConfigureAwait(false);
         }
@@ -1671,6 +1712,101 @@ public sealed class PublishMethodologyHandler(
             : Localization.UiStringResolver.Format(Localization.UiStringResolver.Resolve(strings, key), values);
     }
 
+    /// <summary>
+    /// Модуль, що рахує версію: для скрипта — перший із зареєстрованих, що <c>CanHandle</c> її дескриптор;
+    /// для формул — той самий єдиний модуль, що й до MS.
+    /// </summary>
+    private ICalculationModule ModuleFor(MethodologyDescriptor descriptor)
+    {
+        if (descriptor.Engine != MethodologyEngine.Script)
+        {
+            return module;
+        }
+
+        return modules?.FirstOrDefault(m => m.CanHandle(descriptor))
+               ?? throw new BusinessRuleException(
+                   "ECR-CALC-0422",
+                   $"Версія {descriptor.VersionNumber}: серед модулів розрахунку немає того, що рахує скрипти.",
+                   new Dictionary<string, object?>
+                   {
+                       ["messageKey"] = "err.ECR-CALC-0422.scriptModuleMissing",
+                       ["version"] = descriptor.VersionNumber,
+                   });
+    }
+
+    /// <summary>
+    /// Публікація версії зі скриптом (MS, план 4.6, 5.2): перевірки скрипта й матеріалізація, золотий набір через модуль
+    /// скрипта, той самий diff результатів і аудит, що й для формул.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Перевірки, матеріалізація, золотий набір і публікація — ОДНІЄЮ транзакцією: модуль скрипта читає виходи,
+    /// речовини й прив'язки з бази, тож їх треба зберегти до прогону, а червоний набір чи відмова публікації мусять
+    /// відкотити і додані прив'язки, і решту. Закриті періоди тут не перераховуються — як і для формул (ФВ-9.7).
+    /// </remarks>
+    private async Task<MethodologyPublicationDiff> PublishScriptAsync(
+        Methodology methodology,
+        MethodologyVersion version,
+        string changeReason,
+        DateOnly from,
+        int userId,
+        CancellationToken ct)
+    {
+        if (scriptChecks is null)
+        {
+            throw new InvalidOperationException("Перевірки скриптів не підключено до публікації методології.");
+        }
+
+        var methodologyVersionId = version.Id;
+        var testCases = methodology.RequiresGoldenSet
+            ? await methodologies.GetTestCasesAsync(methodologyVersionId, ct).ConfigureAwait(false)
+            : [];
+        RequireTestPeriods(testCases);
+
+        var previous = methodology.VersionOn(from.AddDays(-1));
+        await RejectBackdatedStrictAsync(methodology, version, previous, from, ct).ConfigureAwait(false);
+
+        MethodologyPublicationDiff? diff = null;
+        await uow.ExecuteInTransactionAsync(
+            async token =>
+            {
+                // MS x B179: нові ребра скрипта (довідники, результати інших методологій, прив'язки) не мають замкнути цикл
+                // залежностей документів; перевірка — після публікації й збереження в цій транзакції (відмова її відкочує).
+                var onCycle = await Templates.DependencyCyclePublishCheck
+                    .MethodologiesOnCycleAsync(dependencyGraph, [methodology.Id], token).ConfigureAwait(false);
+                await scriptChecks.RunAsync(methodology, version, from, token).ConfigureAwait(false);
+                await uow.SaveChangesAsync(token).ConfigureAwait(false);
+
+                diff = await BuildDiffAsync(methodology, version, previous, testCases, token).ConfigureAwait(false);
+
+                var verdicts = await JudgeAsync(methodology, version, testCases, token).ConfigureAwait(false);
+                var greenTest = !methodology.RequiresGoldenSet || GoldenSet.IsGreen(verdicts, testCases);
+                RejectRedGoldenSet(version, verdicts, greenTest);
+
+                methodology.PublishVersion(version, userId, changeReason, from, greenTest, clock.UtcNow);
+
+                // ⚠ Граф читає лише ОПУБЛІКОВАНІ версії методологій: перевірка циклу — після того, як версія стала
+                // опублікованою й збереженою в цій транзакції (відмова відкочує публікацію цілком).
+                await uow.SaveChangesAsync(token).ConfigureAwait(false);
+                await Templates.DependencyCyclePublishCheck
+                    .RefuseMethodologiesAsync(dependencyGraph, [methodology.Id], onCycle, token).ConfigureAwait(false);
+
+                await audit.WritePublicationEventAsync(
+                    new PublicationEventRecord(
+                        ChangedAt: clock.UtcNow,
+                        EntityType: "calc.MethodologyVersion",
+                        EntityId: methodologyVersionId,
+                        ResultDiffJson: JsonSerializer.Serialize(diff),
+                        ChangeReason: changeReason,
+                        ChangedByUserId: userId),
+                    token).ConfigureAwait(false);
+
+                await uow.SaveChangesAsync(token).ConfigureAwait(false);
+            },
+            ct).ConfigureAwait(false);
+
+        return diff!;
+    }
+
     private static MethodologyDescriptor Descriptor(Methodology methodology, MethodologyVersion version)
         => new(
             methodology.Id,
@@ -1683,7 +1819,8 @@ public sealed class PublishMethodologyHandler(
 
             // Симуляція для diff завжди без трейсу: він тут нікому не потрібен,
             // а на золотому наборі коштує пам'яті на кожен випадок.
-            TraceLevel.Off);
+            TraceLevel.Off,
+            version.Engine);
 
     private static CalculationInput WithDescriptor(CalculationInput input, MethodologyDescriptor descriptor)
         => input with { Methodology = descriptor };

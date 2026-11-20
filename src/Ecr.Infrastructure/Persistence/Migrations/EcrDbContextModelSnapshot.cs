@@ -724,6 +724,31 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.ToTable("MethodologyOutput", "calc");
                 });
 
+            modelBuilder.Entity("Ecr.Domain.Entities.Calculations.MethodologyReadTable", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("MethodologyVersionId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("TableCode")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MethodologyVersionId", "TableCode")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_MethodologyReadTable");
+
+                    b.ToTable("MethodologyReadTable", "calc");
+                });
+
             modelBuilder.Entity("Ecr.Domain.Entities.Calculations.MethodologyRequiredInput", b =>
                 {
                     b.Property<int>("Id")
@@ -892,6 +917,10 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.Property<DateOnly?>("EffectiveFrom")
                         .HasColumnType("date");
 
+                    b.Property<byte>("Engine")
+                        .HasColumnType("tinyint")
+                        .HasDefaultValue((byte)0);
+
                     b.Property<byte>("Level")
                         .HasColumnType("tinyint")
                         .HasColumnName("Level");
@@ -910,7 +939,15 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.Property<int?>("PublishedByUserId")
                         .HasColumnType("int");
 
+                    b.Property<byte[]>("ScriptHash")
+                        .IsConcurrencyToken()
+                        .HasColumnType("varbinary(32)");
+
+                    b.Property<string>("ScriptText")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<byte>("Status")
+                        .IsConcurrencyToken()
                         .HasColumnType("tinyint");
 
                     b.Property<byte>("TraceLevel")
@@ -7462,6 +7499,16 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("FK_MO_Unit");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Calculations.MethodologyReadTable", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Calculations.MethodologyVersion", null)
+                        .WithMany()
+                        .HasForeignKey("MethodologyVersionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_MRT_Version");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Calculations.MethodologyRequiredInput", b =>

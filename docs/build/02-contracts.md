@@ -1949,6 +1949,33 @@ public sealed record CurrentResultFilter(
 > стеля 50 000 тепер діє на відфільтрований набір (документ з багатьма чужими числами більше не дає 422 на зрізі).
 
 ```csharp
+// src/Ecr.Application/Ports/IScriptRuntimeStore.cs  (MS, METHODOLOGY-SCRIPT-PLAN §13.1, §13.9)
+public interface IScriptRuntimeStore
+{
+    // коди шаблонів за версіями шаблонів (для rows from Шаблон.Таблиця)
+    public Task<IReadOnlyDictionary<int, string>> GetTemplateCodesAsync(IReadOnlyCollection<int> templateVersionIds, CancellationToken ct);
+
+    // коди таблиць, які читають опубліковані версії-скрипти методологій (calc.MethodologyReadTable)
+    public Task<IReadOnlyList<string>> GetReadTableCodesAsync(IReadOnlyCollection<int> methodologyIds, CancellationToken ct);
+
+    // транзитивні замикання за calc.MethodologyDependency: до джерел результатів і до читачів результатів
+    public Task<IReadOnlyList<int>> GetSourceClosureAsync(IReadOnlyCollection<int> methodologyIds, CancellationToken ct);
+    public Task<IReadOnlyList<int>> GetReaderClosureAsync(IReadOnlyCollection<int> methodologyIds, CancellationToken ct);
+
+    // читачі таблиць (код таблиці + методологія) і всі ребра залежностей — для перерахунку (RecalculationJob.BindingsAsync)
+    public Task<IReadOnlyList<ReadTableReader>> GetReadersOfTablesAsync(IReadOnlyCollection<string> tableCodes, CancellationToken ct);
+    public Task<IReadOnlyList<MethodologyEdge>> GetDependencyEdgesAsync(CancellationToken ct);
+
+    // таблиці, до яких активно прив'язані виходи методологій
+    public Task<IReadOnlyList<int>> GetBoundTableDefIdsAsync(IReadOnlyCollection<int> methodologyIds, CancellationToken ct);
+}
+```
+
+> MS: порт для рушія скриптів і застарілості (нова таблиця `calc.MethodologyReadTable`, ребра `calc.MethodologyDependency`).
+> `ICalculationResultStore.ReadRunAsync` читає результати КОНКРЕТНОГО прогону (методологія-читач бачить результат
+> джерела з того самого прогону); реалізація за замовчуванням порожня.
+
+```csharp
 // src/Ecr.Application/Ports/ICalculationYearReader.cs  (CALC-RESULTS: «Calculation results» — усі місяці року)
 public interface ICalculationYearReader
 {
@@ -2759,7 +2786,7 @@ public interface IJobProgressStore
 ✎ B105: знімок несе ще `Hse400DocumentInCurrentYear` (є опублікована версія
 шаблону HSE400 і документ HSE400 поточного року, крім золотого проєкту); відповідь
 має блок `calculations` — `hse400CompositionFromDocument` (дієве значення
-`Calculations:Hse400CompositionFromDocument`), `hse400CompositionSource` (мітка
+біта зв'язки `ReadFromDocument`), `hse400CompositionSource` (мітка
 джерела без шляху: `Default`, `Environment`, `ProgramData`, `AppSettings`,
 `CommandLine`, `Other`), `hse400CompositionWarning` (прапор вимкнено, а документ є).
 ✎ P-0118-31/33: ключ виведено й не читається — `hse400CompositionFromDocument` — біт зв'язки
@@ -4093,6 +4120,89 @@ public interface ITemplateStructure
 }
 ```
 
+#### `IScriptPreviewRunner`
+
+Прогін скрипта методології на документі «насухо» для редактора (MS, `POST …/script/preview`): що вибрано, що
+пораховано, нічого не пишеться. Авторська сторона (право, доступ до документа, компіляція й перевірки) віддає
+виконавцю вже перевірений текст; реалізація живе в проєкті розрахунків.
+
+```csharp
+public interface IScriptPreviewRunner
+{
+    public Task<ScriptPreviewResult> RunAsync(ScriptPreviewRequest request, CancellationToken ct);
+}
+```
+
+#### Скрипт версії методології (MS): ендпоінти редактора
+
+Контролер `MethodologyScriptController`, маршрут `api/v1/methodologies/{id}/versions/{vid}/script`. Кожна дія
+спершу перевіряє право, потім що версія `vid` належить методології `id` (чужа чи неіснуюча версія — одна
+`404 ECR-CALC-0404`, `messageKey` `err.ECR-CALC-0404.version`). Без права — `403`; без входу — `401`.
+
+| Метод і шлях | Право | Тіло → відповідь | Коди помилок |
+|---|---|---|---|
+| `GET …/script` | `Calculation.View` | → `MethodologyScriptDto` | `404` |
+| `PUT …/script` | `Calculation.EditFormula` | `{ text, expectedHash? }` → `MethodologyScriptDto` | `404`; `409 ECR-CALC-0409` (`scriptNotEditable`, `scriptChanged`); `422 ECR-CALC-0422` (`scriptEmpty`, `scriptTooLarge`) |
+| `POST …/script/validate` | `Calculation.View` | `{ text }` → `ScriptValidationDto { diagnostics[], outline }` | `404`; `422 scriptTooLarge` |
+| `POST …/script/preview` | `Calculation.View` + доступ до документа | `{ text?, documentId, periodKey, tableInstanceId?, maxRows? }` → `ScriptPreviewDto { tables[], diagnostics[] }` | `403 ECR-AUTH-0403` (`scriptPreviewRestricted`); `404` (версія чи документ); `422 ECR-CALC-0422` (`simulatePeriodInvalid`, `scriptEmpty`, `scriptTooLarge`, `scriptPreviewUnavailable`, `scriptPreviewModuleLevel` — версія рівня Module) |
+| `POST …/script/format-const` | `Calculation.View` | `{ text }` (літерал константи) → `FormatConstDto { text?, kind?, diagnostics[] }` | `404`; `422 scriptTooLarge` |
+
+- `MethodologyScriptDto`: `engine` (`Script`/`Formulas`), `text` (порожній, якщо тексту ще немає), `hash` (SHA-256
+  тексту в hex малими літерами, переводи рядків нормалізовано до `\n`; порожній рядок — тексту ще немає), `isDraft`,
+  `diagnostics[]`, `outline`. Діагностика: `{ code, messageKey (script.<code>), params, line, column, length, message }`
+  (рядок і колонка з 1; `message` — англійський запасний текст). `outline`: `{ tables[{ code, templateCode, alias }],
+  inputs[{ name, optional }], outputs[{ code, unit, perSubstance }], substances[], imports[], constants[{ name, kind:
+  scalar|map, line }], variables[{ name, line }], functions[{ name, parameters[], line }] }`.
+- `PUT`: текст зберігається ЗАВЖДИ, навіть із діагностиками; виходи, речовини, імпорти й таблиці читання
+  матеріалізуються лише коли діагностик немає. `expectedHash` — хеш, з якого виходив редактор: не збігся —
+  `409 scriptChanged` (у `details` — поточний `hash`); порожній чи відсутній — звірки немає. `409 scriptNotEditable` — версія не
+  чернетка або не рушія `Script`. Порожній (чи з самих пробілів) текст — `422 scriptEmpty`.
+- ⛔ Межа тексту **1 000 000 знаків** (`ScriptAnalyzer.MaxTextLength`): довший — `422 ECR-CALC-0422`, `messageKey`
+  `err.ECR-CALC-0422.scriptTooLarge`, `details.limit` = `"1000000"`; діє для `PUT`, `validate`, `preview` (якщо `text`
+  передано) і `format-const`. Межа компілятора — 200 000 знаків (діагностика `tooLarge`, не помилка запиту): текст між
+  двома межами зберігається, але з діагностикою.
+- `preview`: порожній `text` — береться збережений текст версії. Текст з діагностиками не виконується — повертаються
+  `tables: []` і діагностики. `maxRows` обмежується до 1…200 (типово 50). `periodKey` — місяць `РРРРММ` (інакше
+  `simulatePeriodInvalid`). Нічого не записує. Доступ як до результатів розрахунку документа; профіль з обмеженим
+  доступом до колонок — `403 scriptPreviewRestricted`.
+- `format-const`: друкує літерал із розібраних значень (коментарі й вихідний запис чисел губить). Редактор таблиць
+  коефіцієнтів ним НЕ користується: клієнт друкує сам, зберігаючи коментарі й запис чисел, а ендпоінт лишається для
+  сторонніх клієнтів. Нерозібраний літерал — `200` із `text: null` і `diagnostics[]` (позиції — у вхідному тексті).
+- У OpenAPI-знімку (`contracts/openapi.snapshot.json`) для `validate` і `format-const` оголошено лише `200`/`404`;
+  `422 scriptTooLarge` і `403` повертаються, але атрибутами `ProducesResponseType` не описані.
+- Публікація версії зі скриптом — спільний `POST /api/v1/methodologies/{id}/versions/{vid}/publish` (права
+  `Calculation.Publish`; автор може публікувати власну версію, `D-440`): помилки скрипта дають `422 ECR-CALC-0422` з
+  переліком `problems[]` (`messageKey` кожної — `script.<code>`, підстановки — параметри діагностики плюс `line`/`col`).
+  Старі маршрути правки формул, констант, категорій, правил, речовин і виходів для такої версії — `409 ECR-CALC-0409`
+  (`scriptManaged`).
+
+#### Перенесення методологій на скрипт (MS 8.5) і допоміжні читання
+
+Порти: `IVersionSourceReader` (`LoadAsync(versionId)` → `LoadedVersion`: старий вміст версії в моделі `VersionSource` — з нього рахується відбиток джерела) і `IScriptMigrationStore` (`GetImporterVersionsAsync(libraryMethodologyId)` — версії, що імпортують бібліотеку, для перевірки групи перемикання).
+
+- `ScriptPreviewRow` має `inputs: [{ name, value, text, unitId }]` — входи вибраного рядка (поля, які читає скрипт,
+  місячні — розв'язаними іменами аргументів) для золотого тесту «з рядка»; для решти рядків порожньо.
+- `GET /methodologies/script/tables?codes=` → `ScriptTableDto[]`: `{ requested, templateCode, tableCode, columns:
+  [{ code, dataType, isMonthColumn, monthNumber, unitCode }], monthAliases[] }` (живі таблиці; код без живої таблиці
+  у відповіді відсутній; `422 scriptTablesCodesInvalid` — кодів немає чи понад 50).
+- `POST /methodologies/{id}/versions/{vid}/script/parity` — тіло `{ documentId, periodKey }`; право `Calculation.Publish` + доступ до
+  документа (як у перегляду; профіль з обмеженим доступом до колонок — `403 scriptPreviewRestricted`). Порт `IScriptParityRunner`
+  (реалізація — `ParityComparer` проєкту розрахунків): для кожного оригінального екземпляра таблиці документа за період, до
+  якого методологію прив'язано активно, порівнює старий шлях із ЗБЕРЕЖЕНИМ (тіньовим) текстом версії. Відповідь `{ targets,
+  rowsCompared, valuesCompared, mismatchCount, truncated, mismatches: [{ tableInstanceId, rowKey, aspect, old, new }] }`
+  (до 500 розбіжностей). Нічого не пише. Працює для версій обох рівнів (Configuration — вибір рядків правилами/`rows`; Module/HSE400 — усі рядки таблиці «місяці в колонках», порівнюються ще й кроки-причини `trace.steps`); `422 scriptEmpty` — текст порожній.
+- `POST /methodologies/script-migration/apply?dryRun=` — тіло: пакет `pack` `{ format, formatVersion, entries:
+  [{ methodologyCode, version, effectiveFrom, text, sourceFingerprint }] }`; відповідь `{ dryRun, applied, refused,
+  entries: [{ methodologyCode, version, versionId, status: applied|wouldApply|refused, reason, message, details[] }] }`.
+  Відбиток джерела рахується з БАЗИ тим самим `Fingerprint`, що й в інструменті; текст мусить компілюватися без
+  діагностик (бібліотеки з тіньовим скриптом із цього ж пакета годяться, порядок не важить). Рушій не змінюється.
+- `POST /methodologies/script-migration/switch` — тіло `{ versionIds[], engine: Script|Formulas, reason }`; відповідь
+  `{ engine, versions: [{ versionId, methodologyCode, version }] }`. Одна транзакція; на `Script` — текст без
+  діагностик, склад зі скрипта (виходи/речовини/імпорти) збігається з наявним (`422 switchChecksFailed`, `problems[]`),
+  бібліотека й усі імпортери в одній групі (`422 switchGroupIncomplete`); пише таблиці читання й залежності. Версія
+  має бути опублікованою чи виведеною з обігу (`409 scriptSwitchNotPublished`). Домен: `MethodologyVersion.SwitchEngineForMigration`.
+  Подія журналу публікацій на кожну версію (`ChangeReason` = причина).
+
 #### `IUnitCatalog`
 
 Довідник одиниць uom.* у формі, потрібній перевірці публікації.
@@ -4512,6 +4622,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-REG-4094` | 409 | номер НАЕ вже зайнятий у своїй області (типи вузлів НАЕ, людина 03.11, Q3): `NaeCode` вузла SRC унікальний у межах (предок REGION, предок AREA), а де регіон без поділу On/Offshore — у межах REGION. Перевіряє upsert `POST /registries/{code}/entries` під блокуванням дерева; `messageKey` `naeCodeTaken` |
 | `ECR-REG-4222` | 422 | запис довідника без назви (D14 / AU-14, рішення координатора 19.10): ручний upsert `POST /registries/{code}/entries` створює запис без жодної непорожньої мови в `display` (немає мов, усі порожні чи з пробілів, або пласка мапа `{мова:текст}` замість `{"values":{…}}`) або правкою стирає всі мови наявної назви. Запис, що вже лежить без назви, правкою значень без назви в запиті не блокується. Константа — `ErrorCodes.RegistryEntryNameRequired`; `messageKey` `entryNameRequired` |
 | `ECR-DOC-4092` | 409 | B151/B165: `POST /documents` для шаблону «один документ на проєкт» (HSE400, HSE401), а документ цього шаблону в проєкті вже є. Окремий код, а не `ECR-DOC-0409` («подано, потрібен Reopen»): Reopen тут нічого не змінить, треба відкрити наявний документ (аудит F13). Константа — `ErrorCodes.DocumentExistsForTemplate`; `messageKey` `documentExistsForTemplate` |
+| `ECR-SRC-0409` | 409 | B80 N5 (D-554): дія над джерелом чекає підтвердження наслідків для залежних документів — `Warn` без `confirmedImpact.hash` (`impactConfirmationRequired`) або відбиток застарів, вплив змінився (`impactChanged`); тіло несе `impactHash`, `policy`, `approvedDependents`, `dependents` |
+| `ECR-SRC-0422` | 422 | B80 N5 (D-554): політика зв'язки забороняє дію, доки залежні періоди затверджені (`sourceImpactBlocked`, `Block`), або підтвердженню бракує причини (`impactReasonRequired`, `ConfirmWithReason`; `recalculateApprovedReasonRequired` — для «перерахувати також затверджені») |
 
 ### 7.1 Суфікси `messageKey` (`err.<код>.<суфікс>`) нових випадків
 
@@ -4837,6 +4949,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/documents/{id}/submit` | — | 3 |
 | `POST` | `/api/v1/documents/{id}/approve` | — | 3 |
 | `POST` | `/api/v1/documents/{id}/reopen` | `Document.Reopen` | 3 |
+| `POST` | `/api/v1/documents/{id}/source-impact/recalculate-approved` | `Calculation.RecalculateApprovedDependents` (✎ B80 N5, D-554, рішення людини 19.11: адміністратор явно просить перерахувати й ЗАТВЕРДЖЕНІ залежні після правки джерела; тіло `{ sheetDefId, periodKey, hash, reason }`; без права — 403, без причини — 422 `ECR-SRC-0422`, застарілий відбиток — 409 `ECR-SRC-0409`; → 200 `{ queued, approvedDependents }`; подія безпеки `ApprovedDependentsRecalculationRequested`) | 5 |
+| `GET` | `/api/v1/documents/{id}/source-impact` | `Document.View` (✎ B80 N5, D-554: вплив затвердження / повернення із затвердженого аркуша документа-джерела на залежні документи; невидимий документ чи аркуш — 404) | 5 |
 | `GET` | `/api/v1/documents/{id}/workflow/history` | `Document.View` | 3 |
 | `POST` | `/api/v1/documents/{id}/sheets/{sheetDefId}/copies` | `Document.Create` + запис у проєкті (додає порожню копію аркуша, позначеного в шаблоні `isCopyable`; → 201 `{ sheetCopyId, ordinal }`; не копіювальний аркуш — 422 `ECR-DOC-0422`; джерело завжди оригінал) | 8 |
 | `PUT` | `/api/v1/documents/{id}/sheets/{sheetDefId}/name` | `Document.Create` + запис у проєкті (перейменовує групу «<Назва> N» для всіх копій; тіло `{ nameL10n }`; → 204) | 8 |
@@ -4945,6 +5059,15 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/rule-coverage` | `Calculation.View` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/diff` | `Calculation.View` | 7 |
 | `DELETE` | `/api/v1/methodologies/{id}/versions/{vid}` | `Calculation.EditFormula` | 7 |
+| `GET` | `/api/v1/methodologies/{id}/versions/{vid}/script` | `Calculation.View` | 7 |
+| `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/script` | `Calculation.EditFormula` | 7 |
+| `POST` | `/api/v1/methodologies/{id}/versions/{vid}/script/validate` | `Calculation.View` | 7 |
+| `POST` | `/api/v1/methodologies/{id}/versions/{vid}/script/preview` | `Calculation.View` (+ доступ до документа) | 7 |
+| `POST` | `/api/v1/methodologies/{id}/versions/{vid}/script/format-const` | `Calculation.View` | 7 |
+| `GET` | `/api/v1/methodologies/script/tables?codes=T1,Шаблон.T2` | `Calculation.View` | 7 |
+| `POST` | `/api/v1/methodologies/{id}/versions/{vid}/script/parity` | `Calculation.Publish` (+ доступ до документа) | 7 |
+| `POST` | `/api/v1/methodologies/script-migration/apply?dryRun=` | `Calculation.Publish` | 7 |
+| `POST` | `/api/v1/methodologies/script-migration/switch` | `Calculation.Publish` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/bindings` | `Calculation.View` | 7 |
 | `PUT` | `/api/v1/methodologies/{id}/bindings/{columnDefId}/{outputCode}` | `Calculation.EditRule` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/publications` | `Calculation.View` | 7 |
@@ -4990,6 +5113,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/health/partitions/script` | `System.ViewHealth` | 5 |
 | `GET` | `/api/v1/document-source-bindings` | `Calculation.ManageSourceBinding` | 5 |
 | `PUT` | `/api/v1/document-source-bindings/{id}/source-state` | `Calculation.ManageSourceBinding` | 5 |
+| `PUT` | `/api/v1/document-source-bindings/{id}/flags` | `Calculation.ManageSourceBinding` | 5 |
+| `GET` | `/api/v1/dependency-graph` | `Calculation.ManageSourceBinding` | 5 |
 | `GET` | `/api/v1/jobs` | `System.ViewHealth` | 5 |
 | `GET` | `/api/v1/jobs?mine=true` | — (власні задачі) | 5 |
 | `GET` | `/api/v1/jobs/summary` | `System.ViewHealth` (або `mine=true` — власні задачі) | 5 |
@@ -6589,7 +6714,113 @@ public sealed record RowDto(
   опубліковані плюс ті, що діють за незакритим періодом документа. `cfg.DocumentSourceBindingConsumer` граф не читає.
   Кеш — `IMemoryCache` під ключем ревізії вхідних даних (вікно ревізії 5 с, стеля 30 хв), без явної інвалідації.
 - **Порт `IMethodologyRegistryEdges`**: єдиний читач таблиць методологій для графа (ревізія, читання довідників
-  опублікованими версіями з виразом формули, активні прив'язки); сторож `DependencyGraphMethodologyReadGuardTests`.
+  опублікованими версіями з виразом формули, активні прив'язки; ✎ MS × B179: `ListResultReadsAsync` — читання результатів між
+  методологіями, `calc.MethodologyDependency`; ревізія включає рушій опублікованих версій, ребра довідників методологій і
+  залежності); сторож `DependencyGraphMethodologyReadGuardTests`. Ребро графа `MethodologyResult` (джерело результатів →
+  читач) дає читача споживачем довідників джерела транзитивно з обсягом «усі періоди». `IDependencyGraphProvider.GetFreshAsync` —
+  граф без вікна мемоїзації ревізії (перевірка циклу після запису ребер у транзакції публікації методології).
+  Публікація версії-скрипта (`POST /methodologies/{id}/versions/{versionId}/publish`) і `script-migration/switch`, чиї ребра
+  замкнули б новий цикл залежностей документів, відмовляють 422 `ECR-TMPL-0422`, `messageKey`
+  `err.ECR-TMPL-0422.dependencyCycle`, `cycle` — шлях кодами; відкат транзакції. Нового коду й полів немає.
 - **`PeriodScope`** (`Ecr.Expressions`, `RegistryReadScopes`): `REGFIND` з ключами `[Period].Year` + `[Period].Sequence`
   → `Month`; `[Period].Year` + літерал 1…12 (річна розкладка D-474) → `Year` з маскою місяця; лише рік → `Year`;
   інакше → `All`. Області рядка — рівності `ROW.f = [Period].*` у ланцюжку `AND`.
+
+## ✎ 2026-11-19 B179 L4–L6: ендпоінт графа, перемикачі зв'язки, споживачі з графа (D-553)
+
+Лише додаванням; міграції немає. Право всіх трьох — `Calculation.ManageSourceBinding` (з вбудованих ролей — лише
+`SystemAdministrator`); без нього 403 `ECR-AUTH-0403`.
+
+- **`GET /api/v1/dependency-graph`** → `DependencyGraphDto`: `revision` (ревізія вхідних даних), `nodes[]`
+  (`kind` `template`|`registry`|`methodology`, `id`, `code`), `edges[]` (`kind` `fills`|`templateFormula`|`methodology`|
+  `writesInto`|`registryRule`|`methodologyResult`, `fromKind`/`fromId`, `toKind`/`toId`, `scope` `month`|`year`|`all`,
+  `monthMask` — біти 1…12 літеральних місяців для `year`, 0 — увесь рік, `evidence[]` {`source`, `id`, `versionId`,
+  `detail`}, `evidenceTotal`), `templateDependencies[]` (згорнуте ребро «джерело → споживач»: `sourceTemplateId`,
+  `consumerTemplateId`, `bindingId`, `registryDefId`, `scope`, `monthMask`, `viaTemplateFormula`, `viaMethodology`),
+  `levels[]` (`level` з 0, `templateIds[]` — порядок обчислення), `cycles[]` (`templateIds[]`), `diagnostics[]` (`key`
+  `cycle`|`astFallback`|`parseFailed`|`unknownRegistry`, `detail`), `truncated`. Стелі: 5000 ребер (`truncated`), 25
+  доказів на ребро (`evidenceTotal` — скільки всього). Граф кешований під ключем ревізії (до 5 с несвіжості).
+  Вид доказу `source`: `formulaDependency`, `ast`, `lookupColumn` (формула шаблону), `registryUse` (методологія;
+  `detail` — код формули), `calculationBinding`, `sourceBinding` (`id` — зв'язка, `detail` — стан), `registryRule`,
+  `methodologyDependency`.
+- **`PUT /api/v1/document-source-bindings/{id}/flags`** `{ readFromDocument?, recalculateDependents? }` →
+  `SwitchDocumentSourceFlagsResponse` (`binding`, `changed`, `queuedYears`). Обидва поля необов'язкові, хоч одне
+  обов'язкове — інакше 422 `ECR-REQ-0422`, `messageKey` `err.ECR-REQ-0422.sourceFlagsInvalid`; немає зв'язки — 404
+  `ECR-CALC-0404` `sourceBinding`. Справжня зміна: подія `DocumentSourceBindingChanged` у `aud.SecurityEvent` з
+  `kind = flags`, `oldReadFromDocument`/`newReadFromDocument`, `oldRecalculateDependents`/`newRecalculateDependents`,
+  `queuedYears`, автор — у тій самій транзакції; зміна `readFromDocument` за ввімкненого `recalculateDependents` ставить
+  злиту `IRegistryImpactRecalculationJob` на кожен рік джерела (як `source-state`); зміна лише `recalculateDependents`
+  перерахунку не ставить. Повтор тих самих бітів — `changed = false`, нічого не пише. Після коміту скидається процесний
+  кеш воріт хука джерела.
+- **Споживачі зв'язки — з графа (L6).** `GET /document-source-bindings` → `consumerTemplateCodes` тепер коди шаблонів-
+  споживачів з графа (прямі й транзитивні через `methodologyResult`), а не з `cfg.DocumentSourceBindingConsumer`; ворота
+  `POST /documents/{id}/submit` і `…/approve` (`ECR-SUB-4221`), `calculation-issues.sourceIssues` і правило
+  `STALE_APPROVED_DEPENDENT` вважають споживачем шаблон, якого називає граф. Таблицю `cfg.DocumentSourceBindingConsumer`
+  не читає жоден код (сторож `SourceBindingConsumerTableReadGuardTests`), сід її рядки лишає; зняття — L7.
+- **Відмова циклу при публікації версії-скрипта** (`POST /methodologies/{id}/versions/{versionId}/publish`) перевіряється
+  ПІСЛЯ публікації й збереження в транзакції (граф читає лише опубліковані версії): відмова `422 ECR-TMPL-0422`
+  відкочує публікацію; золотий набір відхиляється раніше за відмову циклу.
+- Клієнт: екран `/admin/dependency-graph` (право `Calculation.ManageSourceBinding`), ключі каталогу `dependencyGraph.*`,
+  `nav.dependencyGraph`, `nav.dependencyGraph.description` — сід `B179-dependency-graph.sql` (en/ru/kz; kz — на звірку).
+- ✎ B80 N5 (D-554) — вплив затвердження й повернення аркуша-джерела на залежні документи; контракт лише додаванням:
+  - **`GET /api/v1/documents/{id}/source-impact?sheetDefId=&periodKey=&action=approve|reopen[&sheetCopyId=]`** →
+    `SourceImpactDto` (`action`, `policy` — `None|Warn|ConfirmWithReason|Block`, `required`, `blocked`, `reasonRequired`,
+    `impactHash`, `sourceMonths[]` `yyyyMM`, `dependentCount`, `approvedCount`, `consumers[]`
+    `{bindingCode, templateCode, documentId, projectCode, documentKey, periodKey, approved, willRecalculate, skipReason}`; `skipReason = approved` для затвердженого періоду, який перерахунок пропускає). Право
+    `Document.View`; невидимий документ чи аркуш — 404; неприпустимий `action` — 422 `ECR-REQ-0422`
+    `sourceImpactActionInvalid`. Читання без змін. `required = false`, `impactHash = ""` і порожній перелік, коли дія
+    джерела НЕ змінює: копія аркуша; `reopen` не із `Approved`; `approve` не з `Submitted` чи не остаточний крок маршруту.
+    Рішення людини 19.11: у відповіді УСІ залежні (метадані: документ, шаблон, період, статус; без даних комірок і без посилання), навіть якщо читач не має права перегляду їхніх документів; `hiddenCount` немає; відповідь віддає до 500 залежних, повне число — `dependentCount`. Відбиток рахується з повного переліку.
+  - **Порт.** Обчислення впливу — порт `ISourceImpactAssessor` (`AssessAsync(documentId, sheetDefId, periodKey, change, ct)` → `SourceImpact`; реалізація `SourceImpactAssessor`, читання лише станів ОРИГІНАЛІВ аркушів, `SheetCopyId IS NULL`); ним користуються `GetSourceImpactHandler`, `SourceImpactCheck` (ворота `approve`/`reopen`) і `RecalculateApprovedDependentsHandler`.
+  - **Що вважається впливом.** Зв'язки, чий шаблон-джерело — шаблон документа, у стані `approvedOnly`, з бітом
+    «читати з документа», чий аркуш містить таблиці зв'язки, а документ — той, який завантажувач обрав би за рік. Споживачі —
+    шаблони графа залежностей (`IDependencyGraphProvider`, як у воротах подання). Залежний період — документ × період,
+    що має стани оригіналів аркушів і володіє зачепленим місяцем джерела (за періодичністю СВОГО проєкту); `approved` —
+    усі стани затверджено. **Потребує рішення людини (`required`)** лише коли політика не `None` і є хоч один
+    **затверджений** залежний період: його перерахунок не чіпає (R3.2), він застаріє мовчки; незатверджені залежні
+    просто перерахуються.
+  - **`POST /documents/{id}/approve`** і **`POST /documents/{id}/reopen`**: нове необов'язкове поле тіла
+    **`confirmedImpact`** `{ hash, reason }` (у `ApproveSheetRequest` і `ReopenDocumentRequest`). Сервер перевіряє його сам,
+    у транзакції дії, ДО зміни стану (відмова відкочує, аркуш не змінено), лише для остаточного затвердження оригіналу
+    аркуша й повернення оригіналу ІЗ `Approved` (відхилення, проміжні кроки, копії, повернення з `Submitted` — без
+    перевірки):
+    - `None` — підтвердження не потрібне;
+    - `Warn` без `confirmedImpact.hash` — **409 `ECR-SRC-0409`** `err.ECR-SRC-0409.impactConfirmationRequired`;
+    - `ConfirmWithReason` без причини — **422 `ECR-SRC-0422`** `err.ECR-SRC-0422.impactReasonRequired`;
+    - `Block` — **422 `ECR-SRC-0422`** `err.ECR-SRC-0422.sourceImpactBlocked` (підтвердження не діє, доки є затверджений
+      залежний період);
+    - `hash` не збігається з відбитком, який сервер рахує ЗАРАЗ (вплив змінився) — **409 `ECR-SRC-0409`**
+      `err.ECR-SRC-0409.impactChanged`.
+    Тіло кожної відмови несе `impactHash` (актуальний відбиток), `policy`, `approvedDependents`, `dependents`. Відбиток —
+    SHA-256 (32 hex) від дії, адреси джерела, політики й відсортованого переліку залежних (зв'язка, документ, період,
+    затверджений).
+  - **✎ Рішення людини 19.11 (D-554) — «перерахувати також затверджені».** Нове право
+    **`Calculation.RecalculateApprovedDependents`** (глобальне; з вбудованих ролей лише `SystemAdministrator`; не небезпечне; каталог
+    прав 50 → 51; i18n `permission.Calculation.RecalculateApprovedDependents`, `err.ECR-ACCS-0403.recalculateApproved`).
+    `confirmedImpact.recalculateApproved` (необов'язкове, за умовчанням `false`) у `POST …/approve` і `POST …/reopen`:
+    без права — **403** `ECR-ACCS-0403` `err.ECR-ACCS-0403.recalculateApproved`; без причини (навіть за `Warn`) — **422**
+    `ECR-SRC-0422` `err.ECR-SRC-0422.recalculateApprovedReasonRequired`; `Block` відмовляє й з перекриттям; діє лише коли є
+    затверджені залежні (інакше ігнорується). Перекриття переходить у задачу перерахунку залежних: поле **`IncludeApproved`**
+    (+ `OverrideUserId`, `OverrideReason`) у `RegistryImpactRecalculationRequest` і `RecalculationRequest`, **без міграції**
+    (payload черги); ціль черги з перекриттям окрема (`…-approved` у `RegistryImpactRecalculationTarget.ForSourceChange`,
+    `…-dependents-approved` у `CalculationTrigger.DependentsApprovedTargetOf`) — задача з перекриттям не зливається з задачею без
+    нього. Тільки з `IncludeApproved` `RecalculationJob` не пропускає затверджені аркуші (`ApprovedSheetsAsync`,
+    `SkippedScopesAsync`) і `RecalculationService` пише їх (`writeApproved`); ланцюжок джерел далі йде БЕЗ перекриття.
+    Журнал записів аркушів (`aud.StructureChange`, `SheetRecalc`): на КОЖЕН фактично перерахований затверджений аркуш —
+    операція **`RecalculatedApproved`** (хто — `ChangedByUserId`, причина — `ChangeReason = recalc-approved-override: <причина>`,
+    `NewJson.reason = approvedOverride`); на пропущений без перекриття — як доти `SkippedApproved`.
+  - **`GET …/source-impact?action=edit`** (правка комірки джерела): лише відомості — залежні бачать джерело одразу лише за
+    зв'язки `any`, тож перелік береться за зв'язками `any`; `required`/`blocked`/`reasonRequired` завжди `false` (правку сервер
+    не блокує й підтвердження не вимагає). У `SourceImpactDto` нове поле **`canRecalculateApproved`** (є право) — діалог
+    показує галочку «й затверджені». Для правки перерахунок затверджених — явний **`POST …/source-impact/recalculate-approved`**
+    (після збереження правок; клієнт виконує його, коли черга незбереженого спорожніла), відбиток — з `action=edit`.
+  - **Аудит:** успішне підтвердження пише подію журналу безпеки `SourceImpactConfirmed` у тій самій транзакції
+    (`action`, `sourceDocumentId`, `sheetDefId`, `periodKey`, `policy`, `impactHash`, `approvedDependents`, `dependents`,
+    `recalculateApproved`, `reason`).
+  - **Правка комірки джерела** окремого підтвердження не має: затверджене джерело правити можна лише після
+    `reopen` (він під воротами вище); правка незатвердженого за `approvedOnly` залежних не зачіпає, за `any` залежні
+    перераховуються, а затверджені аркуші споживачів перерахунок пропускає.
+  - Помилка → ключі каталогу `err.ECR-SRC-0409.*`, `err.ECR-SRC-0422.*`, `err.ECR-REQ-0422.sourceImpactActionInvalid`,
+    клієнт `sourceImpact.*` — сід `B80-source-impact.sql` (en/ru/kz; **kz — робочий переклад, на звірку**).
+  - Продуктивність (F13): `DocumentSourceIssues.ListAsync` читає зв'язки споживача для ВСІХ періодів двома запитами поза
+    циклом (раніше 2 на період).

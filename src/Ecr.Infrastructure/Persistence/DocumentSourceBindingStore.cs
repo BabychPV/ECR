@@ -13,7 +13,7 @@ namespace Ecr.Infrastructure.Persistence;
 /// <see cref="Hse400CompositionSnapshotLoader"/>, і той самий вибір документа (найбільший id за рік, без проєкту
 /// золотих тестів).
 /// </remarks>
-public sealed class DocumentSourceBindingStore(EcrDbContext db) : IDocumentSourceBindingStore
+public sealed class DocumentSourceBindingStore(EcrDbContext db, IDependencyGraphProvider graph) : IDocumentSourceBindingStore
 {
     /// <inheritdoc />
     public async Task<IReadOnlyList<DocumentSourceBindingView>> ListAsync(CancellationToken ct)
@@ -30,13 +30,12 @@ public sealed class DocumentSourceBindingStore(EcrDbContext db) : IDocumentSourc
                 })
             .ToListAsync(ct).ConfigureAwait(false);
 
-        var ids = rows.Select(r => r.Id).ToList();
-        var consumers = await (
-                from c in db.DocumentSourceBindingConsumers.AsNoTracking()
-                where ids.Contains(c.BindingId)
-                join t in db.Templates.AsNoTracking() on c.TemplateId equals t.Id
-                select new { c.BindingId, t.Code })
-            .ToListAsync(ct).ConfigureAwait(false);
+        // ✎ B179 L6: споживачі беруться з графа залежностей (формули шаблонів і методології, що читають довідник),
+        // а не з ручного cfg.DocumentSourceBindingConsumer (його ніхто не читає; таблицю знімає L7).
+        var snapshot = await graph.GetAsync(ct).ConfigureAwait(false);
+        var templateCodes = snapshot.Nodes
+            .Where(n => n.Ref.Kind == Ecr.Application.DocumentDependencies.DependencyNodeKind.Template)
+            .ToDictionary(n => n.Ref.Id, n => n.Code);
 
         return [.. rows.Select(r => new DocumentSourceBindingView(
             r.Id,
@@ -47,7 +46,11 @@ public sealed class DocumentSourceBindingStore(EcrDbContext db) : IDocumentSourc
             r.Policy,
             r.ReadFromDocument,
             r.RecalculateDependents,
-            [.. consumers.Where(c => c.BindingId == r.Id).Select(c => c.Code).Order(StringComparer.Ordinal)],
+            [.. snapshot.TemplateDependencies
+                .Where(d => d.BindingId == r.Id && templateCodes.ContainsKey(d.ConsumerTemplateId))
+                .Select(d => templateCodes[d.ConsumerTemplateId])
+                .Distinct(StringComparer.Ordinal)
+                .Order(StringComparer.Ordinal)],
             r.UpdatedAt is { } at ? DateTime.SpecifyKind(at, DateTimeKind.Utc) : null,
             r.UpdatedByUserId))];
     }

@@ -35,7 +35,10 @@ public sealed class ApproveSheetHandler(
     ISourceApprovalChangeTrigger? sourceTrigger = null,
     // ✎ B80 (N2b, A3): споживач зв'язки ApprovedOnly не затверджується (на жодному кроці маршруту), поки місяць джерела
     // не затверджено; `null` — тестові фабрики обробника.
-    ISourceMonthApprovalGate? sourceMonthGate = null)
+    ISourceMonthApprovalGate? sourceMonthGate = null,
+    // ✎ B80 (N5, D-554): остаточне затвердження аркуша-джерела, що зачепить затверджені залежні місяці, — за політикою
+    // зв'язки (підтвердження впливу / причина / відмова); `null` — тестові фабрики обробника.
+    ISourceImpactAssessor? sourceImpact = null)
 {
     /// <summary>Затверджує або відхиляє аркуш.</summary>
     /// <param name="documentId">Документ.</param>
@@ -56,9 +59,26 @@ public sealed class ApproveSheetHandler(
     /// <param name="reason">Коментар; обов'язковий при відхиленні (ФВ-5.15).</param>
     /// <param name="sheetCopyId">Копія аркуша; <c>null</c> — оригінал.</param>
     /// <param name="ct">Токен скасування.</param>
-    public async Task HandleAsync(
+    public Task HandleAsync(
         long documentId, int sheetDefId, int periodKey, bool approved, string? reason, long? sheetCopyId,
         CancellationToken ct)
+        => HandleAsync(documentId, sheetDefId, periodKey, approved, reason, sheetCopyId, confirmedImpact: null, ct);
+
+    /// <summary>
+    /// Затверджує або відхиляє аркуш чи копію; <paramref name="confirmedImpact"/> — підтвердження впливу на залежні
+    /// документи (B80 N5): сервер вимагає його, коли остаточне затвердження джерела зачепить затверджені залежні місяці.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="sheetDefId">Аркуш.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="approved"><c>true</c> — затвердити, <c>false</c> — відхилити.</param>
+    /// <param name="reason">Коментар; обов'язковий при відхиленні (ФВ-5.15).</param>
+    /// <param name="sheetCopyId">Копія аркуша; <c>null</c> — оригінал.</param>
+    /// <param name="confirmedImpact">Підтвердження впливу; <c>null</c> — немає.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task HandleAsync(
+        long documentId, int sheetDefId, int periodKey, bool approved, string? reason, long? sheetCopyId,
+        SourceImpactConfirmation? confirmedImpact, CancellationToken ct)
     {
         var userId = currentUser.UserId
                      ?? throw new AccessDeniedException(
@@ -115,10 +135,13 @@ public sealed class ApproveSheetHandler(
         // змінений першою спробою (`ApproveStep`), на повторі дав би
         // `wrongState` замість затвердження.
         var finalApproved = false;
+        // ✎ B80 N5: перекриття «й затверджені залежні» (право + причина перевірено в транзакції); після коміту — у тригер.
+        var approvedOverride = new System.Runtime.CompilerServices.StrongBox<ApprovedRecalculationOverride?>(null);
         await uow.ExecuteInTransactionAsync(
             async innerCt =>
             {
                 finalApproved = false;
+                approvedOverride.Value = null;
 
                 // ✎ D-442: ВИНЯТКОВЕ блокування аркуша — ПЕРШОЮ дією транзакції (порядок як у подання):
                 // правка погоджувача, що вже пише, зафіксується до зрізу нижче, а нова чекатиме коміту
@@ -144,7 +167,7 @@ public sealed class ApproveSheetHandler(
                 // ⚠ D-440: правило чотирьох очей (F-25, заборона самопогодження) скасоване безумовно —
                 // той, хто подав, погоджує сам, якщо роль поточного кроку і грант це дають (рішення вище).
                 // Слід лишається в журналі: `GetWorkflowHistoryHandler` позначає таке погодження.
-                await ApproveCoreAsync(state, documentId, sheetDefId, periodKey, approved, reason, userId, sheetCopyId, profile, innerCt)
+                await ApproveCoreAsync(state, documentId, sheetDefId, periodKey, approved, reason, userId, sheetCopyId, profile, confirmedImpact, approvedOverride, innerCt)
                     .ConfigureAwait(false);
 
                 // ✎ B80 (T-A): лише ОСТАТОЧНИЙ крок (стан став Approved) і лише оригінал аркуша; проміжний крок — ні.
@@ -171,8 +194,11 @@ public sealed class ApproveSheetHandler(
         // ✎ B80 (T-A): після коміту; тригер сам вирішує за зв'язкою (ApprovedOnly) і не кидає на збій постановки.
         if (finalApproved && sourceTrigger is not null)
         {
-            await sourceTrigger
-                .OnSourceSheetApprovalChangedAsync(documentId, sheetDefId, periodKey, SourceApprovalChange.Approved, userId, ct)
+            await (approvedOverride.Value is { } over
+                    ? sourceTrigger.OnSourceSheetApprovalChangedAsync(
+                        documentId, sheetDefId, periodKey, SourceApprovalChange.Approved, userId, over, ct)
+                    : sourceTrigger.OnSourceSheetApprovalChangedAsync(
+                        documentId, sheetDefId, periodKey, SourceApprovalChange.Approved, userId, ct))
                 .ConfigureAwait(false);
         }
 
@@ -256,6 +282,8 @@ public sealed class ApproveSheetHandler(
         int userId,
         long? sheetCopyId,
         AccessProfile profile,
+        SourceImpactConfirmation? confirmedImpact,
+        System.Runtime.CompilerServices.StrongBox<ApprovedRecalculationOverride?> approvedOverride,
         CancellationToken ct)
     {
         var key = new PeriodKey(periodKey);
@@ -283,6 +311,18 @@ public sealed class ApproveSheetHandler(
             var step = await access
                 .CurrentApprovalStepOfAsync(documentId, sheetDefId, key, sheetCopyId, ct)
                 .ConfigureAwait(false);
+
+            // ✎ B80 (N5, D-554): лише ОСТАТОЧНЕ затвердження оригіналу аркуша змінює те, що бачать залежні; проміжний крок і
+            // копія — ні. Під блокуванням аркуша, до зрізу й зміни стану: відмова відкочує транзакцію, аркуш не змінено.
+            if (sheetCopyId is null && step is not { NextStepId: not null })
+            {
+                approvedOverride.Value = await SourceImpactCheck
+                    .EnsureConfirmedAsync(
+                        sourceImpact, audit, documentId, sheetDefId, periodKey, SourceApprovalChange.Approved,
+                        confirmedImpact, userId, now, currentUser.CorrelationId, ct,
+                        mayRecalculateApproved: PermissionCheck.IsGranted(profile, SourceImpactCheck.RecalculateApprovedPermission))
+                    .ConfigureAwait(false);
+            }
 
             // ✎ D-442: знімок даних — заново при погодженні, якщо погоджувач правив поданий аркуш (зріз
             // подання його правок не містить). ДО зміни стану: зріз не зберігся — аркуш не погоджено.

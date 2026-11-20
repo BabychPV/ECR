@@ -34,7 +34,8 @@ namespace Ecr.Infrastructure.Jobs;
 /// </remarks>
 public sealed class ConsistencyCheckJob(
     EcrDbContext db, IOrphanScanner scanner, IClock clock, IConsistencyMetrics metrics,
-    Microsoft.Extensions.Configuration.IConfiguration? configuration = null)
+    Microsoft.Extensions.Configuration.IConfiguration? configuration = null,
+    IDependencyGraphProvider? dependencyGraph = null)
     : IBackgroundJob, IConsistencyCheckJob
 {
     /// <summary>Код правила: рядки результатів/кроків/входів прогонів, що не <c>Current</c>/<c>Running</c> (Q-17).</summary>
@@ -529,7 +530,13 @@ public sealed class ConsistencyCheckJob(
     /// <remarks>Читання з документа — тим самим правилом, що ворота: лише біт зв'язки (P-0118-31/33).</remarks>
     private async Task<List<ConsistencyIssue>> StaleApprovedDependentsAsync(CancellationToken ct)
     {
-        var stale = await new StaleApprovedDependentCheck(db, readOverride: null).RunAsync(MaxIssues, ct).ConfigureAwait(false);
+        // ✎ B179 L6: споживачів дає граф; без графа (ручна збірка в тесті) правило нічого не знаходить.
+        if (dependencyGraph is null)
+        {
+            return [];
+        }
+
+        var stale = await new StaleApprovedDependentCheck(db, readOverride: null, dependencyGraph).RunAsync(MaxIssues, ct).ConfigureAwait(false);
 
         return [.. stale.Select(s => new ConsistencyIssue(
             StaleApprovedDependentRule,
