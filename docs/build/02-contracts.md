@@ -4819,6 +4819,11 @@ public sealed class NotFoundException(string errorCode, string message)
 (`reason`: `user` | `idle`, для `idle` — `by`: `client` | `server` і `idleTimeoutMinutes`), одну на сеанс.
 Порти: `IIdleTimeoutPolicy` (чинна межа з кешем вузла, мінімум) і `ISessionSettingsStore` (`sys_ecr.SystemSetting`).
 
+Журнал входів (PSS-24): порт `ILoginAuditJournal` пише в `aud.SecurityEvent` події `LoginSucceeded`, `LoginFailed` (подробиці:
+`userName`, `provider`, `outcome`, `reason`, `ip`, `suppressed`) і `AccountLocked`; для невідомого імені автор — `-1`.
+Запис ніколи не змінює відповідь входу. Строк зберігання оперативної `sec.LoginAttempt` — налаштування
+`Security.LoginAttemptRetentionDays` у `sys_ecr.SystemSetting` (400 днів за замовчуванням, межі 30–3650).
+
 ---
 
 <a id="api-endpoints"></a>

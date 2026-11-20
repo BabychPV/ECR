@@ -83,7 +83,7 @@ public sealed class LoginPathAuditCoverageTests
 
         foreach (var lang in new[] { "en", "ru", "kz" })
         {
-            Assert.Matches($"audit\.eventLabel\.{eventType}', N'{lang}'", seed);
+            Assert.Contains($"audit.eventLabel.{eventType}', N'{lang}'", seed, StringComparison.Ordinal);
         }
     }
 }

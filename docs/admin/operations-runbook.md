@@ -295,7 +295,7 @@ IF @@ROWCOUNT = 0
 | `AirLimits:NaeRegistryCode` | ні | `NAE_TREE` | Значення на старті не перевіряється. |
 | `AirLimits:RegionRegistryCode` | ні | `LAND_REGION` | Значення на старті не перевіряється. |
 | `AirLimits:SubstanceRegistryCode` | ні | `LAND_AIR_SUBSTANCE` | Значення на старті не перевіряється. |
-| `AllowedHosts` | ні | `*` | Значення на старті не перевіряється. |
+| `AllowedHosts` | ні | `*` | Формат перевіряється на старті (див. текст відмови служби). |
 | `Audit:ExportMaxRows` | ні | `100000` | Ціле число, не менше 1. |
 | `Auth:CookieName` | ні | `ecr.auth` | Значення на старті не перевіряється. |
 | `Auth:DataProtection:AllowUnprotectedKeys` | ні | — | `true` або `false`. |
