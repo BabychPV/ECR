@@ -251,6 +251,12 @@ public static partial class StartupSequence
         {
             LogReportViewsFailed(logger, ex.Message);
         }
+        catch (Infrastructure.Jobs.JobDeferredException ex)
+        {
+            // ✎ PSS-10 (рев'ю L6): синхронний шлях без планувальника — генератор відступив перед читачами вʼюх (50424) і
+            // просить повтору; задачі, що повторила б, тут немає. Не зупиняє старт: збій уже на картці `reportviews`.
+            LogReportViewsFailed(logger, ex.Message);
+        }
 
         Lap(logger, lap, "4b вʼюхи rpt.v_* (постановка)");
 

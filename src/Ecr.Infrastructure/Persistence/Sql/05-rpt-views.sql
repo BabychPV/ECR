@@ -347,12 +347,17 @@ GO
 -- до @DdlMaxAttempts (типово 3). Не вдалося - вʼюха лишається старою, рядок Action = N'Blocked', решта вʼюх генерується, відбиток
 -- НЕ пишеться, а наприкінці - THROW 50424 (повторювано: застосунок відкладає задачу і повторює; після 50409/50422, як і досі,
 -- кидаються вони). У транзакції викликача (@@TRANCOUNT > 0 на вході) повторів немає - помилка йде викликачу, як і раніше.
+-- ✎ рев'ю M3: спільний бюджет очікування @DdlTotalBudgetMs (типово 30000 мс) на ВЕСЬ виклик: ~17 с на вʼюху x кілька
+-- заблокованих вʼюх перевищували стелю команди клієнта (60 с) - клієнт отримував -2 замість 50424 і задача не повторювалась.
+-- Бюджет вичерпано - решта вʼюх, яким потрібен DDL, одразу Blocked (без спроб), наприкінці той самий 50424.
+-- ReportViewGenerator передає половину стелі команди.
 CREATE OR ALTER PROCEDURE rpt.usp_GenerateTemplateViews
     @TemplateVersionId int = NULL,
     @MonthRouting bit = 0,
     @OnlyIfChanged bit = 0,
     @DdlLockTimeoutMs int = NULL,
-    @DdlMaxAttempts int = 3
+    @DdlMaxAttempts int = 3,
+    @DdlTotalBudgetMs int = NULL
 WITH EXECUTE AS OWNER
 AS
 BEGIN
@@ -361,8 +366,9 @@ BEGIN
 
     -- PSS-10: межа очікування Sch-M на DDL однієї вʼюхи і кількість спроб.
     DECLARE @entryTran int = @@TRANCOUNT, @ddlWait int = COALESCE(@DdlLockTimeoutMs, 5000), @ddlTries int = COALESCE(@DdlMaxAttempts, 3);
-    IF @ddlWait < 1 OR @ddlTries < 1
-        THROW 50017, N'rpt.usp_GenerateTemplateViews: @DdlLockTimeoutMs і @DdlMaxAttempts мають бути додатними.', 1;
+    DECLARE @ddlBudget int = COALESCE(@DdlTotalBudgetMs, 30000), @ddlSpent int = 0, @ddlStart datetime2(3);
+    IF @ddlWait < 1 OR @ddlTries < 1 OR @ddlBudget < 1
+        THROW 50017, N'rpt.usp_GenerateTemplateViews: @DdlLockTimeoutMs, @DdlMaxAttempts і @DdlTotalBudgetMs мають бути додатними.', 1;
     DECLARE @ddlWrap nvarchar(200) = N'SET LOCK_TIMEOUT ' + CAST(@ddlWait AS nvarchar(10)) + N'; EXEC sys.sp_executesql @d;';
     DECLARE @ddlAttempt int, @blocked int = 0, @blockedWho nvarchar(2000);
 
@@ -1106,9 +1112,11 @@ WHERE ti.TableDefId = ', CAST(@id AS nvarchar(10)), N';');
         SET @ddlAttempt = 0;
         IF @ddl = 1 OR @mapDiff = 1
         BEGIN
-            SET @ddlAttempt = 1;
+            -- M3: бюджет очікування виклику вичерпано - без спроби, одразу Blocked.
+            SET @ddlAttempt = CASE WHEN @ddlSpent >= @ddlBudget THEN -1 ELSE 1 END;
             WHILE @ddlAttempt > 0
             BEGIN
+                SET @ddlStart = SYSUTCDATETIME();
                 BEGIN TRY
                     BEGIN TRANSACTION;
                     IF @mapDiff = 1
@@ -1127,12 +1135,14 @@ WHERE ti.TableDefId = ', CAST(@id AS nvarchar(10)), N';');
                         ROLLBACK TRANSACTION;
                     IF @entryTran > 0 OR ERROR_NUMBER() NOT IN (1222, 1205)
                         THROW;
-                    IF @ddlAttempt >= @ddlTries
-                        SET @ddlAttempt = -1;   -- спроби вичерпано
+                    SET @ddlSpent = @ddlSpent + DATEDIFF(MILLISECOND, @ddlStart, SYSUTCDATETIME());
+                    IF @ddlAttempt >= @ddlTries OR @ddlSpent >= @ddlBudget
+                        SET @ddlAttempt = -1;   -- спроби чи бюджет вичерпано
                     ELSE
                     BEGIN
                         SET @ddlAttempt = @ddlAttempt + 1;
                         WAITFOR DELAY '00:00:01';
+                        SET @ddlSpent = @ddlSpent + 1000;
                     END
                 END CATCH
             END
@@ -1177,7 +1187,8 @@ next_table:
     IF @blocked > 0
     BEGIN
         SET @message = LEFT(CONCAT(N'rpt.usp_GenerateTemplateViews: ', @blocked, N' view(s) kept the previous definition, readers held them longer than ',
-                                   @ddlWait, N' ms x ', @ddlTries, N' attempt(s): ', @blockedWho, N'. Run it again.'), 2048);
+                                   @ddlWait, N' ms x ', @ddlTries, N' attempt(s) (call budget ', @ddlBudget, N' ms, waited ', @ddlSpent,
+                                   N' ms): ', @blockedWho, N'. Run it again.'), 2048);
         THROW 50424, @message, 1;
     END
 

@@ -31,6 +31,101 @@ public sealed class ReportViewDdlLockTimeoutTests(SqlServerFixture sql)
     private const string TemplateMarker = "-- Згенеровано rpt.usp_GenerateTemplateViews";
     private const string StableMarker = "-- Згенеровано rpt.usp_GenerateStableViews";
 
+    /// <summary>База, на якій працюють помічники: спільна база колекції або власна (тест «усі шаблони»).</summary>
+    private SqlServerFixture target = sql;
+
+    /// <summary>
+    /// ✎ рев'ю M3: спільний бюджет очікування виклику (<c>@DdlTotalBudgetMs</c>) обриває повтори — 50424 приходить
+    /// вчасно, а не -2 від стелі команди клієнта. Без бюджету 10 спроб x (1 с очікування + 1 с паузи) ≈ 19 с.
+    /// Мутація: прибрати <c>OR @ddlSpent &gt;= @ddlBudget</c> — генератор чекає ~19 с, тест червоний за часом.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Бюджет_очікування_виклику_обриває_повтори_і_дає_50424_вчасно()
+    {
+        var (doc, view, _) = await PublishedAsync();
+        await RewriteWithoutMarkerAsync(view, TemplateMarker);
+
+        await using (var hold = await HoldReaderAsync(doc, view))
+        {
+            var watch = Stopwatch.StartNew();
+            var error = await Assert.ThrowsAsync<SqlException>(() => ExecuteAsync(string.Create(
+                CultureInfo.InvariantCulture,
+                $"EXEC rpt.usp_GenerateTemplateViews @TemplateVersionId = {doc.TemplateVersionId}, @DdlLockTimeoutMs = 1000, @DdlMaxAttempts = 10, @DdlTotalBudgetMs = 2500;")));
+            watch.Stop();
+
+            Assert.Equal(ReportViewGenerator.BlockedError, error.Number);
+            Assert.Contains("call budget 2500 ms", error.Message, StringComparison.Ordinal);
+            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(10), $"генератор чекав {watch.Elapsed}");
+        }
+
+        Assert.DoesNotContain(TemplateMarker, await DefinitionAsync(view), StringComparison.Ordinal);
+    }
+
+    /// <summary>Бюджет генератора — половина стелі команди (без стелі — від типових 30 с SqlClient).</summary>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [InlineData(60, 30_000)]
+    [InlineData(300, 150_000)]
+    [InlineData(null, 15_000)]
+    [InlineData(0, 15_000)]
+    [InlineData(1, 1_000)]
+    public void Генератор_дає_процедурі_половину_стелі_команди_на_очікування_DDL(int? timeoutSeconds, int expected)
+        => Assert.Equal(expected, ReportViewGenerator.DdlBudgetFor(timeoutSeconds));
+
+    /// <summary>
+    /// ✎ рев'ю L7: прогін «усі шаблони» (старт застосунку) — процедура стабільних вʼюх НЕ кидає, а повертає рядок
+    /// <c>Blocked</c>; генератор перетворює його на збій картки (ключ прогону по всіх) і відкладення задачі, а повтор
+    /// без читача знімає збій. Власна база: прогін «усі шаблони» в спільній базі зачепив би чужі шаблони (50422/50409
+    /// сусідніх тестів). Мутація: прибрати гілку <c>blocked is not null</c> у <c>ReportViewGenerator.RunAsync</c> —
+    /// генерація «успішна», тест червоний.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Усі_шаблони_рядок_Blocked_дає_збій_картки_і_відкладення_повтор_знімає()
+    {
+        var own = SqlServerFixture.WithOwnDatabase("_rvall");
+        await own.InitializeAsync();
+        try
+        {
+            target = own;
+            var (doc, _, _) = await PublishedAsync();
+            await ExecuteAsync(string.Create(
+                CultureInfo.InvariantCulture, $"EXEC rpt.usp_GenerateStableViews @TemplateVersionId = {doc.TemplateVersionId};"));
+            var stable = await StableViewAsync(doc);
+            await RewriteWithoutMarkerAsync(stable, StableMarker);
+
+            var status = new ReportViewStatus();
+            await using (var hold = await HoldReaderAsync(doc, stable))
+            {
+                await using var db = target.CreateContext();
+                db.Database.SetCommandTimeout(120);
+                var deferred = await Assert.ThrowsAsync<JobDeferredException>(
+                    () => new ReportViewGenerator(db, status).GenerateAllAsync(onlyIfChanged: false, CancellationToken.None));
+                Assert.Equal(ReportViewGenerator.BlockedRetryDelay, deferred.Delay);
+            }
+
+            var failure = Assert.Single(status.Snapshot(), f => f.TemplateVersionId is null && f.StableTemplateId is null);
+            Assert.Equal(ReportViewGenerator.BlockedError, failure.Code);
+            Assert.DoesNotContain(StableMarker, await DefinitionAsync(stable), StringComparison.Ordinal);
+
+            await using (var db = target.CreateContext())
+            {
+                db.Database.SetCommandTimeout(120);
+                await new ReportViewGenerator(db, status).GenerateAllAsync(onlyIfChanged: false, CancellationToken.None);
+            }
+
+            Assert.Contains(StableMarker, await DefinitionAsync(stable), StringComparison.Ordinal);
+            Assert.Empty(status.Snapshot());
+        }
+        finally
+        {
+            await own.DisposeAsync();
+        }
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
@@ -41,7 +136,7 @@ public sealed class ReportViewDdlLockTimeoutTests(SqlServerFixture sql)
 
         await using (var hold = await HoldReaderAsync(doc, view))
         {
-            await using var generator = new SqlConnection(sql.ConnectionString);
+            await using var generator = new SqlConnection(target.ConnectionString);
             await generator.OpenAsync();
             var spid = await SpidAsync(generator);
             await using var command = generator.CreateCommand();
@@ -87,7 +182,7 @@ public sealed class ReportViewDdlLockTimeoutTests(SqlServerFixture sql)
         var status = new ReportViewStatus();
         await using (var hold = await HoldReaderAsync(doc, stable))
         {
-            await using var db = sql.CreateContext();
+            await using var db = target.CreateContext();
             var watch = Stopwatch.StartNew();
             var deferred = await Assert.ThrowsAsync<JobDeferredException>(
                 () => new ReportViewGenerator(db, status).GenerateStableViewsAsync(templateId, doc.TemplateVersionId, CancellationToken.None));
@@ -102,7 +197,7 @@ public sealed class ReportViewDdlLockTimeoutTests(SqlServerFixture sql)
 
         // Відкат усієї транзакції шаблону: вʼюха лишилась «ручною»; повтор без читача — успіх, збій знято.
         Assert.DoesNotContain(StableMarker, await DefinitionAsync(stable), StringComparison.Ordinal);
-        await using (var db = sql.CreateContext())
+        await using (var db = target.CreateContext())
         {
             await new ReportViewGenerator(db, status).GenerateStableViewsAsync(templateId, doc.TemplateVersionId, CancellationToken.None);
         }
@@ -114,8 +209,8 @@ public sealed class ReportViewDdlLockTimeoutTests(SqlServerFixture sql)
     /// <summary>Опублікований документ з однією коміркою; вʼюха версії згенерована.</summary>
     private async Task<(TestDocument Doc, string View, int TemplateId)> PublishedAsync()
     {
-        var doc = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(columnCount: 2, rowCount: 1);
-        await using var db = sql.CreateContext();
+        var doc = await new TestDocumentBuilder(target.ConnectionString).BuildAsync(columnCount: 2, rowCount: 1);
+        await using var db = target.CreateContext();
         var version = await db.TemplateVersions.SingleAsync(v => v.Id == doc.TemplateVersionId);
         version.Publish(publishedByUserId: 1, new DateTime(2026, 2, 1, 10, 0, 0, DateTimeKind.Utc));
         await db.SaveChangesAsync();
@@ -153,7 +248,7 @@ public sealed class ReportViewDdlLockTimeoutTests(SqlServerFixture sql)
     /// <summary>Писач тримає X на <c>doc.CellValue</c>; довгий читач стоїть на ньому, тримаючи Sch-S на вʼюсі.</summary>
     private async Task<HeldReader> HoldReaderAsync(TestDocument doc, string view)
     {
-        var writer = new SqlConnection(sql.ConnectionString);
+        var writer = new SqlConnection(target.ConnectionString);
         await writer.OpenAsync();
         var tx = writer.BeginTransaction();
         await using (var update = writer.CreateCommand())
@@ -164,7 +259,7 @@ public sealed class ReportViewDdlLockTimeoutTests(SqlServerFixture sql)
             await update.ExecuteNonQueryAsync();
         }
 
-        var reader = new SqlConnection(sql.ConnectionString);
+        var reader = new SqlConnection(target.ConnectionString);
         await reader.OpenAsync();
         var readerSpid = await SpidAsync(reader);
         var select = reader.CreateCommand();
@@ -209,7 +304,7 @@ public sealed class ReportViewDdlLockTimeoutTests(SqlServerFixture sql)
 
     private async Task ExecuteAsync(string text)
     {
-        await using var connection = new SqlConnection(sql.ConnectionString);
+        await using var connection = new SqlConnection(target.ConnectionString);
         await connection.OpenAsync();
         await using var command = connection.CreateCommand();
         command.CommandTimeout = 120;
@@ -219,7 +314,7 @@ public sealed class ReportViewDdlLockTimeoutTests(SqlServerFixture sql)
 
     private async Task<long> ScalarAsync(string text)
     {
-        await using var connection = new SqlConnection(sql.ConnectionString);
+        await using var connection = new SqlConnection(target.ConnectionString);
         await connection.OpenAsync();
         await using var command = connection.CreateCommand();
         command.CommandTimeout = 30;
@@ -232,7 +327,7 @@ public sealed class ReportViewDdlLockTimeoutTests(SqlServerFixture sql)
 
     private async Task<string?> ScalarTextOrNullAsync(string text)
     {
-        await using var connection = new SqlConnection(sql.ConnectionString);
+        await using var connection = new SqlConnection(target.ConnectionString);
         await connection.OpenAsync();
         await using var command = connection.CreateCommand();
         command.CommandText = text;

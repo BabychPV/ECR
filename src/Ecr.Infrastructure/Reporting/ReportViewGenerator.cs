@@ -114,7 +114,7 @@ public sealed partial class ReportViewGenerator(
                 try
                 {
                     await db.Database.ExecuteSqlRawAsync(
-                        "EXEC rpt.usp_GenerateTemplateViews @TemplateVersionId, @MonthRouting, @OnlyIfChanged",
+                        "EXEC rpt.usp_GenerateTemplateViews @TemplateVersionId, @MonthRouting, @OnlyIfChanged, @DdlTotalBudgetMs = @DdlTotalBudgetMs",
                         [
                             new SqlParameter("@TemplateVersionId", System.Data.SqlDbType.Int)
                             {
@@ -122,6 +122,11 @@ public sealed partial class ReportViewGenerator(
                             },
                             new SqlParameter("@MonthRouting", System.Data.SqlDbType.Bit) { Value = routed },
                             new SqlParameter("@OnlyIfChanged", System.Data.SqlDbType.Bit) { Value = onlyIfChanged },
+                            // ✎ PSS-10 (рев'ю M3): бюджет очікування DDL — половина стелі команди, щоб 50424 встиг раніше за -2.
+                            new SqlParameter("@DdlTotalBudgetMs", System.Data.SqlDbType.Int)
+                            {
+                                Value = DdlBudgetFor(db.Database.GetCommandTimeout()),
+                            },
                         ],
                         ct).ConfigureAwait(false);
                 }
@@ -217,6 +222,15 @@ public sealed partial class ReportViewGenerator(
 
     /// <summary>✎ PSS-10: дія в результаті <c>rpt.usp_GenerateStableViews</c> для шаблону, чиї вʼюхи лишилися старими.</summary>
     public const string BlockedAction = "Blocked";
+
+    /// <summary>
+    /// ✎ PSS-10 (рев'ю M3): бюджет очікування DDL усього виклику <c>rpt.usp_GenerateTemplateViews</c> — половина стелі
+    /// команди (без стелі контексту — типові 30 с SqlClient), друга половина — генерації.
+    /// </summary>
+    /// <param name="commandTimeoutSeconds">Стеля команди, с; <c>null</c> — типова SqlClient (30 с).</param>
+    /// <returns>Мілісекунди (не менше 1 000).</returns>
+    internal static int DdlBudgetFor(int? commandTimeoutSeconds)
+        => Math.Max(1_000, (commandTimeoutSeconds is > 0 ? commandTimeoutSeconds.Value : 30) * 500);
 
     /// <summary>✎ PSS-10: через скільки повторити задачу вʼюх, коли DDL відступив перед читачами.</summary>
     public static readonly TimeSpan BlockedRetryDelay = TimeSpan.FromMinutes(2);
