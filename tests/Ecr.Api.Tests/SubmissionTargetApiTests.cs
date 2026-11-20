@@ -137,7 +137,129 @@ public sealed class SubmissionTargetApiTests(SqlServerFixture sql)
         Assert.DoesNotContain("targetPeriodKey", body, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// D-6 (D-559): права над місяцями річного аркуша — свої в кожного місяця. Маршрут «роль A → роль B»; подано січень і
+    /// лютий, січень уже підписав крок A. Погоджувач A вирішує лютий, а не січень; B — навпаки; автор відкликає лише лютий
+    /// (у січні крок підписано). Після затвердження січня кроком B повернути його може лише той, хто має <c>Document.Reopen</c>
+    /// і роль останнього кроку.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ На старому коді в місячних колонках не було прав зовсім: клієнт вважав кожен поданий місяць доступним і питав
+    /// право лише для обраного — січень (крок не мій) ставав ціллю, а лютий (мій) лишався недосяжним.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-559")]
+    public async Task Права_над_місяцями_різні_для_кожного_місяця_за_кроком_маршруту_й_автором()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        var submitter = await NewUserAsync(s.Doc, GrantLevel.Submit).ConfigureAwait(true);
+        var (approverA, roleA) = await RoleUserAsync(s.Doc, GrantLevel.Approve).ConfigureAwait(true);
+        var (approverB, roleB) = await RoleUserAsync(s.Doc, GrantLevel.Approve, ReopenDocumentHandlerPermission).ConfigureAwait(true);
+        await RouteAsync(s.Doc, roleA, roleB).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var submitterClient = await SignInAsync(app, submitter).ConfigureAwait(true);
+        using var clientA = await SignInAsync(app, approverA).ConfigureAwait(true);
+        using var clientB = await SignInAsync(app, approverB).ConfigureAwait(true);
+
+        foreach (var period in new[] { Jan, Feb })
+        {
+            using var submitted = await SubmitAsync(submitterClient, s.Doc, period).ConfigureAwait(true);
+            Assert.True(submitted.StatusCode == HttpStatusCode.NoContent, $"{period}: {(int)submitted.StatusCode}\n{app.ErrorsText}");
+        }
+
+        await ApproveAsync(app, clientA, s.Doc, Jan).ConfigureAwait(true);
+
+        var rightsA = await RightsAsync(app, clientA, s.Doc).ConfigureAwait(true);
+        Assert.Equal((false, false, false), rightsA["JAN"]);
+        Assert.Equal((true, false, false), rightsA["FEB"]);
+        Assert.Equal((false, false, false), rightsA["MAR"]);
+
+        var rightsB = await RightsAsync(app, clientB, s.Doc).ConfigureAwait(true);
+        Assert.Equal((true, false, false), rightsB["JAN"]);
+        Assert.Equal((false, false, false), rightsB["FEB"]);
+
+        var rightsSubmitter = await RightsAsync(app, submitterClient, s.Doc).ConfigureAwait(true);
+        Assert.Equal((false, false, false), rightsSubmitter["JAN"]);
+        Assert.Equal((false, true, false), rightsSubmitter["FEB"]);
+
+        // Січень затверджено останнім кроком: повернути — B (Document.Reopen, роль останнього кроку), не A.
+        await ApproveAsync(app, clientB, s.Doc, Jan).ConfigureAwait(true);
+        Assert.Equal(DocumentStatus.Approved, await StatusAsync(s.Doc, Jan).ConfigureAwait(true));
+
+        rightsB = await RightsAsync(app, clientB, s.Doc).ConfigureAwait(true);
+        Assert.Equal((false, false, true), rightsB["JAN"]);
+        Assert.Equal((false, false, false), rightsB["FEB"]);
+        rightsA = await RightsAsync(app, clientA, s.Doc).ConfigureAwait(true);
+        Assert.Equal((false, false, false), rightsA["JAN"]);
+        Assert.Equal((true, false, false), rightsA["FEB"]);
+    }
+
     // ───────────────────────────── допоміжне ─────────────────────────────
+
+    private const string ReopenDocumentHandlerPermission = Ecr.Application.Workflow.ReopenDocumentHandler.Permission;
+
+    /// <summary>Права місячних колонок (<c>canDecide</c>, <c>canRecall</c>, <c>canReturn</c>) за кодом колонки; відкрито лютий.</summary>
+    private static async Task<Dictionary<string, (bool Decide, bool Recall, bool Return)>> RightsAsync(
+        EcrApiFactory app, HttpClient client, TestDocument doc)
+        => (await TargetAsync(app, client, doc, Feb).ConfigureAwait(false))
+            .GetProperty("monthColumns").EnumerateArray()
+            .ToDictionary(
+                m => m.GetProperty("columnCode").GetString()!,
+                m => (m.GetProperty("canDecide").GetBoolean(), m.GetProperty("canRecall").GetBoolean(), m.GetProperty("canReturn").GetBoolean()));
+
+    private static async Task ApproveAsync(EcrApiFactory app, HttpClient client, TestDocument doc, int periodKey)
+    {
+        using var response = await client.PostAsJsonAsync(
+            new Uri($"/api/v1/documents/{doc.DocumentId}/approve", UriKind.Relative),
+            new { sheetDefId = doc.SheetDefId, periodKey, approved = true, reason = (string?)null }).ConfigureAwait(false);
+        Assert.True(
+            response.StatusCode == HttpStatusCode.NoContent,
+            $"approve {periodKey}: {(int)response.StatusCode}\n{await response.Content.ReadAsStringAsync().ConfigureAwait(false)}\n{app.ErrorsText}");
+    }
+
+    /// <summary>Маршрут ПРОЄКТУ документа з кроками за ролями в заданому порядку.</summary>
+    private async Task RouteAsync(TestDocument doc, params int[] roleIds)
+    {
+        await using var db = Context();
+        var route = new Ecr.Domain.Entities.Workflow.ApprovalRoute(
+            EcrCode.Create($"D6_{Guid.NewGuid():N}"[..20]), Name("D-6 route"), doc.ProjectId);
+        foreach (var roleId in roleIds)
+        {
+            route.AddStep(roleId);
+        }
+
+        db.ApprovalRoutes.Add(route);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>Користувач із власною роллю: грант на проєкт документа, <c>Document.View</c> і додаткові права.</summary>
+    private async Task<(string Name, int RoleId)> RoleUserAsync(TestDocument doc, GrantLevel level, params string[] permissions)
+    {
+        var name = $"d6_{Guid.NewGuid():N}"[..20];
+
+        await using var db = Context();
+        var user = new User(name, name, AuthProvider.Local);
+        user.SetPassword(new PasswordHasher().Hash(Password));
+        db.Users.Add(user);
+
+        var role = new Role(EcrCode.Create($"R{Guid.NewGuid():N}"[..12]), Name("D-6 approver"));
+        db.Roles.Add(role);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        foreach (var permission in permissions.Prepend("Document.View"))
+        {
+            db.RolePermissions.Add(new RolePermission(role.Id, permission));
+        }
+
+        db.RoleAssignments.Add(new RoleAssignment(role.Id, user.Id, principalSid: null));
+        db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Project, doc.ProjectId, level));
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        return (name, role.Id);
+    }
 
     private sealed record Scenario(TestDocument Doc, int MonthTableId);
 

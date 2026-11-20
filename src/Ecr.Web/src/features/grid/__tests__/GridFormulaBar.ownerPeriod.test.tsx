@@ -38,8 +38,8 @@ const Slice: TableSliceDto = {
 // Та сама форма, що дає `useMonthColumnMonths`: лише колонки цієї таблиці (tableDefId 5).
 const Months: ReadonlyMap<string, MonthOfColumn> = monthColumnsOf(
   [
-    { tableDefId: 5, columnCode: 'M10', monthNumber: 10, periodKey: 209910, sheetStatus: 'Draft' },
-    { tableDefId: 6, columnCode: 'NAME', monthNumber: 3, periodKey: 209903, sheetStatus: 'Draft' },
+    { tableDefId: 5, columnCode: 'M10', monthNumber: 10, periodKey: 209910, sheetStatus: 'Draft', canDecide: false, canRecall: false, canReturn: false },
+    { tableDefId: 6, columnCode: 'NAME', monthNumber: 3, periodKey: 209903, sheetStatus: 'Draft', canDecide: false, canRecall: false, canReturn: false },
   ] as Parameters<typeof monthColumnsOf>[0],
   5,
 );
