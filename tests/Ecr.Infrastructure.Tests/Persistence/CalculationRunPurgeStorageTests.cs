@@ -137,6 +137,43 @@ public sealed class CalculationRunPurgeStorageTests(CalcStorageUpgradeDatabase d
         Assert.Equal(rowsBefore, await RowsAsync());
     }
 
+    /// <summary>
+    /// M3: гілка Standard/Express (без <c>ONLINE</c>) індексів <c>*_Run</c> виконується. Справжньої Standard тут немає
+    /// (Developer, <c>EngineEdition = 3</c>), тож батч скрипта виконується з підставленою редакцією 2 (Standard) і 4
+    /// (Express) — той самий прийом, що в <c>U1UnitForeignKeysMigrationTests</c>.
+    /// </summary>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [InlineData("2")]
+    [InlineData("4")]
+    public async Task Гілка_Standard_будує_індекс_прогону_офлайн(string edition)
+    {
+        const string Expression = "CAST(SERVERPROPERTY('EngineEdition') AS int)";
+        var path = Path.Combine(AppContext.BaseDirectory, "Persistence", "Sql", "07-partition-tables.sql");
+        var batch = SqlBatches.Split(await File.ReadAllTextAsync(path))
+            .Single(b => b.Contains("CREATE NONCLUSTERED INDEX IX_CalculationInput_Run", StringComparison.Ordinal));
+        Assert.Contains(Expression, batch, StringComparison.Ordinal);
+
+        await ExecuteAsync("DROP INDEX IX_CalculationInput_Run ON calc.CalculationInput;");
+        try
+        {
+            await ExecuteAsync(batch.Replace(Expression, edition, StringComparison.Ordinal));
+            Assert.Equal(
+                "CalculationRunId|ps_ByPeriodKey|PAGE",
+                await IndexShapeAsync("calc.CalculationInput", "IX_CalculationInput_Run"));
+        }
+        finally
+        {
+            await ExecuteAsync("""
+                IF NOT EXISTS (SELECT 1 FROM sys.indexes
+                               WHERE object_id = OBJECT_ID(N'calc.CalculationInput') AND name = N'IX_CalculationInput_Run')
+                    CREATE NONCLUSTERED INDEX IX_CalculationInput_Run ON calc.CalculationInput (CalculationRunId)
+                        WITH (DATA_COMPRESSION = PAGE) ON ps_ByPeriodKey (PeriodKey);
+                """);
+        }
+    }
+
     private Task<string> RowsAsync() => ScalarStringAsync("""
         SELECT CONCAT((SELECT COUNT_BIG(*) FROM calc.CalculationResult), '|',
                       (SELECT COUNT_BIG(*) FROM calc.CalculationStep), '|',

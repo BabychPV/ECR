@@ -390,9 +390,10 @@ GO
 --   ALTER INDEX ALL ON calc.CalculationStep REBUILD PARTITION = <n> WITH (DATA_COMPRESSION = PAGE, ONLINE = ON);
 -- (`ONLINE = ON` — Enterprise/Developer/Azure; на Standard/Express без нього, у вікні). Скрипт лише називає їх у PRINT.
 --
--- ⚠ Перебудова бере Sch-M на таблицю: на живій базі з відкритими читачами — `LOCK_TIMEOUT` 30 с і пропуск партиції з
--- PRINT (наступний прогін скрипта повторить), а не зависання кроку оновлення.
-SET LOCK_TIMEOUT 30000;
+-- ⚠ Перебудова бере Sch-M на таблицю, і запит Sch-M у черзі блокує ВСІХ наступних читачів таблиці. 07 виконується при
+-- зупинених службах (крок 2 оновлення), але на випадок живої бази — `LOCK_TIMEOUT` 1 с і пропуск партиції з PRINT
+-- (наступний прогін скрипта повторить), а не черга за довгим читачем.
+SET LOCK_TIMEOUT 1000;
 
 DECLARE @cmp TABLE (TableName sysname, PartitionNumber int, RowCnt bigint);
 
