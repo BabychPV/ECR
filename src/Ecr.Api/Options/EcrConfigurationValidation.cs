@@ -79,8 +79,7 @@ public static partial class EcrConfigurationValidation
         (Ecr.Api.Startup.StaleMapWarmService.IntervalKey, Ecr.Api.Startup.StaleMapWarmService.MinIntervalSeconds),
         (Ecr.Api.Startup.StaleMapWarmService.RingIntervalKey, Ecr.Api.Startup.StaleMapWarmService.MinRingIntervalSeconds),
         (Ecr.Api.Startup.StaleMapWarmService.HotPeriodLimitKey, 1),
-        // Стеля DOP запитів карти застарілості; 0 — не ставити підказку.
-        (Infrastructure.Persistence.StaleMapQueryHintInterceptor.MaxDopKey, 0),
+        (Infrastructure.Persistence.StaleMapQueryHintInterceptor.MaxDopKey, 0), // Верхня межа паралелізму запитів карти застарілості (OPTION MAXDOP): діє min(значення, MAXDOP бази чи сервера), вище за налаштування сервера НІКОЛИ не піднімає; 0 — без підказки. Стенду з малою пам'яттю SQL Server — 2.
 
         // AN-190: нуль версій — не «вимкнути прогрів» (для цього Startup:WarmEditPath), а прогрів, що нічого не гріє.
         (Infrastructure.Jobs.EditPathWarmer.MaxVersionsKey, 1),
