@@ -164,10 +164,10 @@ Api й воркер на **одному** хості — різні ролі й 
 | `Retention:SubmissionSnapshots:BatchSize` | 10 | зрізів в одному `DELETE` (payload ~10 МБ на зріз, пакет ≈ 100 МБ журналу). Мінімум 1 |
 | `Retention:SubmissionSnapshots:PauseMilliseconds` | 500 | пауза між пакетами, мс. Мінімум 0 |
 | `Retention:SubmissionSnapshots:MaxBatchesPerRun` | 200 | стеля пакетів за нічний прогін; решту доїсть наступний. Мінімум 1 |
-| `Calculations:SupersededPurge:Enabled` | `false` | Q-17 (рішення людини 28.10: лишається лише останній розрахунок «документ × період»): швидкий шлях після перемикання прогону + нічна задача `superseded-results-sweep` + правило `NON_CURRENT_RUN_ROWS` перевірки узгодженості. Див. п. 4.2 |
-| `Calculations:SupersededPurge:DeleteEnabled` | `false` | ⛔ реальне видалення нічною задачею/разовим прибиранням; без нього задача лише ЛІЧИТЬ (dry-run). Швидкий шлях цього ключа не читає |
-| `Calculations:SupersededPurge:BatchSize` / `PauseMilliseconds` / `MaxBatchesPerRun` | 500 / 50 / 2000 | рядків в одному `DELETE` (≈ 5 замків на рядок, нижче порога ескалації 5000) / пауза між пакетами, мс / стеля пакетів за прохід. Мінімуми 1 / 0 / 1 |
-| `Calculations:SupersededPurge:IncludeTrace` | `true` | прибирати також `calc.CalculationStep` і `calc.CalculationInput` |
+| `Calculations:SupersededPurge:Enabled` | `true` | Q-17 / `D-560` (рішення людини 20.11: для «документ × період» лишається лише останній ланцюг — актуальний прогін): швидкий шлях після перемикання прогону + нічна задача `superseded-results-sweep` + правило `NON_CURRENT_RUN_ROWS` перевірки узгодженості. ⚠ Ключа немає — УВІМКНЕНО (і в `EcrWorker`, що `appsettings.json` Api не читає); вимкнути — лише явним `false`. Див. п. 4.2 |
+| `Calculations:SupersededPurge:DeleteEnabled` | `true` | реальне видалення нічною задачею; `false` — задача лише ЛІЧИТЬ (dry-run). Швидкий шлях цього ключа не читає |
+| `Calculations:SupersededPurge:BatchSize` / `PauseMilliseconds` / `MaxBatchesPerRun` | 500 / 50 / 60000 | рядків в одному `DELETE` (≈ 5 замків на рядок, нижче порога ескалації 5000) / пауза між пакетами, мс / стеля пакетів (операторів `DELETE`) за прохід — запобіжник тривалості, а не темп. Мінімуми 1 / 0 / 1 |
+| `Calculations:SupersededPurge:IncludeTrace` | `true` | прибирати також `calc.CalculationStep` і `calc.CalculationInput`; лише з ним видаляється й сам рядок `calc.CalculationRun` (на нього посилаються кроки й входи) |
 | `Calculations:SupersededPurge:LogPauseThresholdPercent` / `LogPauseSeconds` / `MaxLogPauses` / `CheckpointEveryBatches` | 60 / 30 / 20 / 50 | FULL recovery: пауза, поки журнал заповнений вище порога (після `MaxLogPauses` пауз прохід зупиняється, наступний продовжує); SIMPLE: `CHECKPOINT` кожні N пакетів |
 | `Calculations:SupersededPurge:RebuildAfter` | `false` | після повного прибирання перебудувати індекси зачеплених партицій і `UPDATE STATISTICS` |
 | `Audit:ExportMaxRows` | 100000 | межа експорту аудиту CSV |
@@ -283,12 +283,12 @@ ORDER BY [Ts];
 | `Calculations:MaxParallelism` | ні | `4` | Ціле число, не менше 1. |
 | `Calculations:SupersededPurge:BatchSize` | ні | `500` | Ціле число, не менше 1. |
 | `Calculations:SupersededPurge:CheckpointEveryBatches` | ні | `50` | Ціле число, не менше 1. |
-| `Calculations:SupersededPurge:DeleteEnabled` | ні | `false` | `true` або `false`. |
-| `Calculations:SupersededPurge:Enabled` | ні | `false` | `true` або `false`. |
+| `Calculations:SupersededPurge:DeleteEnabled` | ні | `true` | `true` або `false`. |
+| `Calculations:SupersededPurge:Enabled` | ні | `true` | `true` або `false`. |
 | `Calculations:SupersededPurge:IncludeTrace` | ні | `true` | `true` або `false`. |
 | `Calculations:SupersededPurge:LogPauseSeconds` | ні | `30` | Ціле число, не менше 0. |
 | `Calculations:SupersededPurge:LogPauseThresholdPercent` | ні | `60` | Ціле число, не менше 1. |
-| `Calculations:SupersededPurge:MaxBatchesPerRun` | ні | `2000` | Ціле число, не менше 1. |
+| `Calculations:SupersededPurge:MaxBatchesPerRun` | ні | `60000` | Ціле число, не менше 1. |
 | `Calculations:SupersededPurge:MaxLogPauses` | ні | `20` | Ціле число, не менше 0. |
 | `Calculations:SupersededPurge:PauseMilliseconds` | ні | `50` | Ціле число, не менше 0. |
 | `Calculations:SupersededPurge:RebuildAfter` | ні | `false` | `true` або `false`. |
@@ -538,7 +538,7 @@ Server Agent ідуть за локальним часом сервера SQL. �
 
 | Коли | Задачі |
 |---|---|
-| щоночі 02:15 | `PartitionCheckJob`, `ConsistencyCheckJob`, `OrphanScanJob`, `ReportRetentionJob`, `ReportSnapshotFormatJob`, `SubmissionSnapshotRetentionJob` (AN-134, за замовчуванням лише dry-run), `SupersededResultsSweepJob` (Q-17, вимкнено за замовчуванням) |
+| щоночі 02:15 | `PartitionCheckJob`, `ConsistencyCheckJob`, `OrphanScanJob`, `ReportRetentionJob`, `ReportSnapshotFormatJob`, `SubmissionSnapshotRetentionJob` (AN-134, за замовчуванням лише dry-run), `SupersededResultsSweepJob` (Q-17 / `D-560`, увімкнено й видаляє за замовчуванням, п. 4.2) |
 | кожні 10 хв, хх:02/12/… | `PeriodStateJob` (також один раз на старті) |
 | щогодини, хх:05 | `NotificationJob`, `RowWindowRefetchJob` (повторне підтягування вікон рядків за пізніми даними PI) |
 | щоночі 03:30 | нічний перерахунок, лише якщо `Jobs:NightlyRecalculation:Enabled=true` |
@@ -622,24 +622,93 @@ Server Agent немає — завдання обслуговування НЕ �
 `calc.SubmissionSnapshot` за `Id` (`SET IDENTITY_INSERT`). Кандидатів понад 200 за прогін списком не
 фіксується — повторюйте за резервною копією за трійкою.
 
-### 4.2. Прибирання результатів неактуальних прогонів (`SupersededResultsSweepJob`, Q-17)
+### 4.2. Прибирання неактуальних прогонів розрахунку (`SupersededResultsSweepJob`, Q-17, `D-560`)
 
-Рішення людини 28.10: у базі лишаються результати, кроки й входи лише ПОТОЧНОГО (`Current`) прогону на «документ × період»
-(`Running` не чіпається). Рядки `calc.CalculationRun` не видаляються ніколи. Зміна **незворотна**: старі числа
-показати знову не можна (лишаються зрізи подання з комірками, `aud.CellChange`, метадані прогонів і поточний результат).
+Рішення людини 20.11 (`D-560`, аудит PSS-01): для кожного «документ × період» лишається лише ОСТАННІЙ ланцюг —
+актуальний (`Current`) прогін з його результатами, кроками й входами; прогони, що ще рахуються (`Running`), не
+чіпаються. Витіснені (`Superseded`) і невдалі (`Failed`) прогони видаляються **повністю**: рядки
+`calc.CalculationResult`, `calc.CalculationStep`, `calc.CalculationInput` і сам рядок `calc.CalculationRun`. Зміна
+**незворотна**: старі числа показати знову не можна (лишаються зрізи подання з комірками, `aud.CellChange` і поточний
+результат). Увімкнено за замовчуванням (ключ, якого немає, — увімкнено; так само в `EcrWorker`).
 
-**Порядок вмикання** (кожен крок — окреме слово людини):
-1. залишок політики: запис `D-…` у `docs/tz/10-decisions.md` (D-25/D-71/ФВ-9.11/ФВ-9.13 кажуть «результати не видаляються»);
-2. зберегти `tools/land/postcheck` ДО прибирання (його лічильники рахують усі прогони);
-3. повний бекап; узгодити з DBA частоту резервних копій журналу (FULL) та вікно;
-4. `ECR_Calculations__SupersededPurge__Enabled=true` (без `DeleteEnabled`): нічна задача лише лічить —
-   `MaintenanceRun` `superseded-results-sweep`, `DetailsJson`: `statusHistogram`, `candidates` за таблицями.
-   Невідомий статус прогону (поза `Current, Running, Superseded, Failed`) зупиняє прохід (`mode=aborted`) — рішення за людиною;
-5. `ECR_Calculations__SupersededPurge__DeleteEnabled=true` у робоче вікно; прохід відновлюється (прогрес — самі дані),
-   `complete=false` означає «стеля пакетів або журнал»; повторюйте до `complete=true`, далі — `deleted` порожній;
-6. за потреби `RebuildAfter=true` (або перебудова індексів вручну), далі `UPDATE STATISTICS`; файли не стискати;
-7. після цього швидкий шлях (`Enabled=true`) прибирає замінені прогони одразу після кожного перерахунку;
-   `ConsistencyCheckJob` правило `NON_CURRENT_RUN_ROWS` (знахідка на «таблиця × період») очікувано нульове.
+**Актуальний результат є завжди.** Новий прогін стає актуальним лише на успіху, однією транзакцією перемикання, а
+прибирання ніколи не чіпає `Current`/`Running`: умова «підлягає прибиранню» перевіряється в КОЖНОМУ `DELETE`.
+Що підлягає прибиранню:
+- `Superseded` — одразу (стан кінцевий; прогін витіснив новіший);
+- `Failed` — лише старіший за `Current` того самого ланцюга (проєкт, період, документ) і стартований понад добу тому.
+  Новіша за актуальний невдала спроба лишається (діагностика) до наступного успішного перерахунку. Доба — тому, що
+  `AbandonedWorkSweeper` закриває «покинутий» `Running` за 2 год, а живий довгий прогін, завершившись, ще стане актуальним.
+
+**Як працює.**
+- Швидкий шлях: одразу після успішного перерахунку прогони, які він витіснив, прибираються (поза транзакцією
+  перемикання; збій прибирання прогін не валить — доїсть нічна задача).
+- Нічна задача `superseded-results-sweep` (02:15): страховка й перше велике прибирання. Прогін за прогоном, від
+  найстаршого: рядки пакетами по `BatchSize` (500) за індексами `IX_CalculationResult_Run`/`IX_CalculationStep_Run`/
+  `IX_CalculationInput_Run`, далі рядок прогону. Кожен пакет — окрема коротка транзакція (`DEADLOCK_PRIORITY LOW`,
+  `LOCK_TIMEOUT` 5 с, 3 повтори): перерахунки, що йдуть паралельно, мають перевагу. Стеля — `MaxBatchesPerRun`
+  (60 000) пакетів за прохід; решту доїсть наступна ніч (прогрес — самі дані, повтор безпечний).
+- `MaintenanceRun` `superseded-results-sweep`, `DetailsJson`: `mode` (`delete`/`dryRun`/`disabled`/`aborted`),
+  `statusHistogram`, `runCandidates`, `candidates` (dry-run) / `deleted` (за таблицями й `calc.CalculationRun`),
+  `batches`, `complete`, `stopReason` (`maxBatches`/`logFull`), `elapsedSeconds`, `recoveryModel`, `runIndexes`.
+  Журнал Api: прогін прибрано (Information), підсумок проходу (Warning).
+- `runIndexes=false` — у базі немає індексів `*_Run` (не виконано `07-partition-tables.sql` цієї версії): прохід
+  прибирає лише рядки (keyset за партиціями), рядки прогонів лишаються. Виконайте оновлення схеми.
+- Невідомий статус прогону (поза `Current, Running, Superseded, Failed`) зупиняє прохід (`mode=aborted`) — рішення за
+  людиною.
+- `ConsistencyCheckJob` правило `NON_CURRENT_RUN_ROWS` рахує рядки за тією самою умовою; після `complete=true` —
+  очікувано нуль.
+
+**Перше прибирання наявної бази** (оновлення до версії з `D-560` вмикає його саме — першої ж ночі):
+1. повний бекап до оновлення (зміна незворотна); `tools/land/postcheck` — ДО прибирання, якщо потрібні його лічильники
+   за всіма прогонами;
+2. оновлення схеми будує індекси `*_Run` (п. 8.2 — одне читання кожної таблиці; на Standard — офлайн);
+3. журнал транзакцій: видалення пише в журнал приблизно обсяг видалених рядків (стенд Land — ≈ 42 ГБ). FULL
+   recovery: узгодьте з DBA резервні копії журналу на ніч прибирання (щонайменше щогодини) і місце під журнал; задача
+   чекає, поки журнал зайнятий понад `LogPauseThresholdPercent` (60 %), і після `MaxLogPauses` пауз зупиняється
+   (`stopReason=logFull`) — наступна ніч продовжить. SIMPLE: `CHECKPOINT` кожні `CheckpointEveryBatches` (50) пакетів;
+4. провести прибирання в контрольоване вікно, а не першої ночі: до оновлення задайте
+   `ECR_Calculations__SupersededPurge__DeleteEnabled=false` (нічна задача лише лічить: `candidates`, `runCandidates`),
+   у вікні — приберіть змінну (або `true`) і перезапустіть `EcrApi`/`EcrWorker` (нічна задача 02:15 або
+   наздоганяння пропущеної ночі на старті `EcrApi`);
+5. повторюйте, доки `complete=true`; далі `deleted` порожній, `runCandidates` = 0;
+6. за потреби `RebuildAfter=true` (або перебудова індексів вручну), далі `UPDATE STATISTICS`. Файли не стискати
+   (`SHRINK` не потрібен: місце перевикористовується).
+
+**Оцінка першого прибирання — стенд Land** (`EcrLandMsLegacy3`, 20.11, лише читання): кандидатів —
+531 прогін (504 `Superseded`, 27 `Failed`, з них 23 старіші за актуальний), ≈ 17,8 млн рядків: кроків 10,7 млн
+(≈ 42 ГБ), результатів 5,9 млн, входів 1,1 млн; ≈ 36 тис. пакетів по 500 — одна ніч у межах стелі 60 000.
+Темп — синтетичний замір тим самим оператором (`DELETE TOP (500)` за індексом прогону, рядок кроку ≈ 4 КБ як на
+стенді, SIMPLE + `CHECKPOINT` кожні 50 пакетів, холодний кеш, ноутбук стенда під навантаженням інших процесів):
+кроки ≈ 1 170 рядків/с (≈ 0,4 с на пакет), результати (6 індексів) ≈ 2 600 рядків/с, рядок прогону з перевіркою FK
+по індексах — < 1 мс. Звідси для стенда: кроки ≈ 2,5 год, результати ≈ 40 хв, входи ≈ 10 хв, паузи по 50 мс ≈ 30 хв —
+**≈ 3,5–4 год**, тобто перша ніч (02:15 → ~06:00); на сервері замовника (20 ядер, окремий SQL) очікувано швидше,
+але це не заміряно. Щоб перше прибирання гарантовано вклалося в нічне вікно, зменште `MaxBatchesPerRun` (наприклад,
+25 000 ≈ 2,5 год) — решту доїдять наступні ночі. Стабільний стан після першого прибирання: щоночі лише залишки
+швидкого шляху (одиниці пакетів).
+
+**Стиснення** (крок DBA, необов'язковий, після п. 6). `07-partition-tables.sql` стискає PAGE лише ПОРОЖНІ партиції
+`calc.CalculationResult/Step/Input` (нова база — цілком); `SPLIT` успадковує стиснення, тож нові періоди пишуться
+стисненими. Непорожні партиції скрипт лише називає в PRINT («непорожні нестиснені партиції calc.*»): їх перебудова
+переписує дані. Після першого прибирання вони в рази менші:
+```sql
+-- що лишилося нестисненим
+SELECT OBJECT_NAME(p.object_id) AS tbl, p.partition_number, SUM(p.rows) AS rows_
+  FROM sys.partitions AS p
+ WHERE p.object_id IN (OBJECT_ID(N'calc.CalculationResult'), OBJECT_ID(N'calc.CalculationStep'), OBJECT_ID(N'calc.CalculationInput'))
+   AND p.index_id IN (0, 1) AND p.data_compression_desc <> N'PAGE'
+ GROUP BY p.object_id, p.partition_number ORDER BY 1, 2;
+-- оцінка вигоди
+EXEC sp_estimate_data_compression_savings N'calc', N'CalculationStep', NULL, <n>, N'PAGE';
+-- по одній партиції; ONLINE = ON — Enterprise/Developer/Azure; Standard/Express — без нього, у вікні
+ALTER INDEX ALL ON calc.CalculationStep REBUILD PARTITION = <n> WITH (DATA_COMPRESSION = PAGE, ONLINE = ON);
+```
+⚠ Вигоду на стенді не заміряно: `sp_estimate_data_compression_savings` читає таблицю з блокуваннями й 20.11 на
+`EcrLandMsLegacy3` 28 хв чекав `LCK_M_S` за перерахунками стенда (скасовано). Запускайте оцінку у вікні без
+перерахунків. `TraceJson` (`nvarchar(max)`) поза рядком (`LOB_DATA`, стенд ≈ 10 ГБ із 46) PAGE-стисненням не
+стискається.
+
+**Вимкнути:** `ECR_Calculations__SupersededPurge__Enabled=false` (і швидкий шлях, і нічна задача) у `EcrApi` і
+`EcrWorker`, перезапуск служб. Лише лічити: `DeleteEnabled=false`.
 
 ⚠ Гард `strictBackdated` (публікація Strict заднім числом) після прибирання бачить лише наявні рядки результатів і архів:
 версія, чиї єдині рядки були у замінених прогонах, більше не блокує — рішення людини (див. `ADR-Q17-READ-MODEL.md`).
@@ -1685,15 +1754,19 @@ Enterprise; Standard і Express переписують таблицю. Коже�
 | `IX_CalculationResult_DocRun` (R5-Q1-02, `47e92166`, після RC16) | `07-partition-tables.sql` | `(PeriodKey, DocumentId, CalculationRunId)` з INCLUDE (`MethodologyVersionId`, `OutputCode`, `SourceRowKey`, `Value`, `UnitId`, `SubstanceEntryId`), вирівняний по `ps_ByPeriodKey`: за обсягом близький до самої таблиці | **офлайн** (гілки `ONLINE` у скрипті немає) | офлайн |
 | `IX_CalculationResult_DocRun`, ключ CRY01 (✎ 2026-11-12) | `07-partition-tables.sql` | `DROP_EXISTING` у `(PeriodKey, DocumentId, CalculationRunId, Kind, TableInstanceId)`, INCLUDE без `TableInstanceId`: **перебудова** наявного індексу — один раз на кожній базі, оновлюваній з версії до CRY01 (заміняє перебудову D-401) | **офлайн** | офлайн |
 | `IX_CalculationResult_Version` (`f7eda9da`, є в RC16) | `07-partition-tables.sql` | `(MethodologyVersionId, PeriodKey)` з INCLUDE (`CalculationRunId`, `DocumentId`), вирівняний по `ps_ByPeriodKey` | **офлайн** | офлайн |
+| `IX_CalculationResult_Run`, `IX_CalculationStep_Run`, `IX_CalculationInput_Run` (✎ 2026-11-20, `D-560`, PSS-01) | `07-partition-tables.sql` | `(CalculationRunId)` на трьох таблицях, вирівняні по `ps_ByPeriodKey`, PAGE: видалення прогону й перевірка FK при видаленні рядка `calc.CalculationRun` (п. 4.2). Вузькі (~20 байт на рядок), але побудова читає всю таблицю: стенд Land — `calc.CalculationStep` 45,9 ГБ / 11,7 млн рядків | `ONLINE = ON` (гілка за `EngineEdition` 3, 5, 8) | офлайн: запис у таблицю чекає до кінця побудови |
+| PAGE-стиснення порожніх партицій `calc.CalculationResult/Step/Input` (✎ 2026-11-20, `D-560`) | `07-partition-tables.sql` | `ALTER INDEX ALL … REBUILD PARTITION = n WITH (DATA_COMPRESSION = PAGE)` лише для партицій без рядків (метадані, мілісекунди; `LOCK_TIMEOUT` 30 с — зайняту пропускає з PRINT). Непорожні не чіпає — PRINT їх переліку, крок DBA (п. 4.2) | те саме | те саме |
 | `IX_arc_CellValue_Row` (✎ 2026-11-14, R-1 аудиту 2026-11, `D-498`, #898) | `12-archive-tables.sql` | `(PeriodKey, TableRowId, ColumnDefId)` на `arc.CellValue`, файлова група `DATA_ARCHIVE`: seek архівної гілки вʼюх SSRS | **офлайн** | офлайн |
 | `IX_arc_TableRow_Instance` (✎ 2026-11-14, R-1, `D-498`, #898) | `12-archive-tables.sql` | `(PeriodKey, TableInstanceId)` на `arc.TableRow`, `DATA_ARCHIVE` | **офлайн** | офлайн |
 
 На відміну від U1, B18 і `IX_CellChange_LateEdit`, `07-partition-tables.sql` редакції сервера не
-визначає: `CREATE NONCLUSTERED INDEX` іде без `WITH (ONLINE = ON)` і на Enterprise теж. Кожен індекс
+визначає для `IX_CalculationResult_DocRun`/`IX_CalculationResult_Version`: `CREATE NONCLUSTERED INDEX` іде без
+`WITH (ONLINE = ON)` і на Enterprise теж (виняток — три індекси `*_Run` `D-560`, з гілкою `ONLINE`). Кожен індекс
 будується **один раз** — на першому оновленні бази, де його ще немає (`IF NOT EXISTS`):
 `IX_CalculationResult_DocRun` — на кожній базі, оновлюваній з RC16 чи старішої версії;
-`IX_CalculationResult_Version` — лише на базі, старішій за RC16. Результати розрахунку не видаляються
-(ЗБР-1), тож таблиця тримає всю історію прогонів, і тривалість росте з її обсягом. `sqlcmd` кроку 2
+`IX_CalculationResult_Version` — лише на базі, старішій за RC16; індекси `*_Run` — на кожній базі, оновлюваній з
+версії до `D-560`. До `D-560` історія прогонів не видалялася (ЗБР-1), тож таблиці тримають усю історію, і
+тривалість росте з її обсягом; після першого прибирання (п. 4.2) вони в рази менші. `sqlcmd` кроку 2
 запускається без тайм-ауту запиту (`-t` немає): скрипт чекає до кінця побудови, служби весь цей час
 зупинені.
 
