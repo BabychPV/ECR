@@ -59,6 +59,11 @@ internal sealed class ReviewStep(ICertificateSource certificates, Func<DateTime>
         AddRow("Port", state.Port.ToString(System.Globalization.CultureInfo.InvariantCulture));
         AddRow("Data Protection certificate", state.DataProtectionThumbprint ?? "not selected");
         AddRow("Transport", DescribeTransport(state));
+        AddRow(
+            "Allowed host names",
+            state.AllowedHosts is null or AllowedHostsRules.Any
+                ? "* (any host)"
+                : state.AllowedHosts);
         AddRow("Ecr.msi file", state.MsiPath ?? "not specified");
         AddRow(
             "Database schema",

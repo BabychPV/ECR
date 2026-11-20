@@ -124,6 +124,24 @@ public sealed class ForwardedClientAddress
         return socket?.ToString() ?? UnknownClient;
     }
 
+    /// <summary>
+    /// <c>true</c> — запит прийшов TCP-з'єднанням від адреси з <see cref="KnownProxiesKey"/>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Порожній перелік = жодного довіреного проксі (на відміну від <see cref="KeyOf"/>, де порожній перелік
+    /// означає «довіряти найправішому запису»): ця перевірка вирішує, чи вірити заголовку, який клієнт міг
+    /// підставити сам, тож «усім» тут не буває.
+    /// </remarks>
+    /// <param name="context">Запит.</param>
+    public bool IsFromKnownProxy(HttpContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        return _knownProxies.Count > 0
+            && context.Connection.RemoteIpAddress is { } remote
+            && _knownProxies.Contains(Normalize(remote));
+    }
+
     /// <summary>Перший справа запис, що не належить довіреному проксі; <c>null</c> — немає придатного.</summary>
     private IPAddress? FromForwardedFor(string header)
     {

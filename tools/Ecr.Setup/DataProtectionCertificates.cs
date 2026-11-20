@@ -12,8 +12,10 @@ namespace Ecr.Setup;
 /// <param name="NotBefore">Початок строку дії (місцевий час, як у сховищі Windows).</param>
 /// <param name="NotAfter">Кінець строку дії (місцевий час).</param>
 /// <param name="HasPrivateKey">Чи є закритий ключ.</param>
+/// <param name="DnsNames">DNS-імена сертифіката (SAN; без SAN — CN); <c>null</c> — невідомо (PSS-28).</param>
 internal sealed record CertificateInfo(
-    string Thumbprint, string Subject, DateTime NotBefore, DateTime NotAfter, bool HasPrivateKey);
+    string Thumbprint, string Subject, DateTime NotBefore, DateTime NotAfter, bool HasPrivateKey,
+    IReadOnlyList<string>? DnsNames = null);
 
 /// <summary>
 /// Шов до сховища сертифікатів: тести майстра не залежать від
@@ -46,7 +48,8 @@ internal sealed class LocalMachineCertificateSource : ICertificateSource
                         certificate.Subject,
                         certificate.NotBefore,
                         certificate.NotAfter,
-                        certificate.HasPrivateKey));
+                        certificate.HasPrivateKey,
+                        ReadDnsNames(certificate)));
                 }
             }
 
@@ -58,6 +61,30 @@ internal sealed class LocalMachineCertificateSource : ICertificateSource
         {
             // Недосяжне сховище = жодного сертифіката на вибір: крок покаже
             // порожній список і не пропустить далі — та сама відмова.
+            return [];
+        }
+    }
+
+    /// <summary>
+    /// DNS-імена з розширення Subject Alternative Name; без нього — DNS-ім'я з CN (так робить Windows).
+    /// </summary>
+    /// <remarks>Збій читання розширення — порожній перелік: майстер тоді просто не підставить імена.</remarks>
+    internal static IReadOnlyList<string> ReadDnsNames(X509Certificate2 certificate)
+    {
+        try
+        {
+            var names = certificate.Extensions.OfType<X509SubjectAlternativeNameExtension>()
+                .SelectMany(e => e.EnumerateDnsNames())
+                .ToList();
+            if (names.Count == 0 && certificate.GetNameInfo(X509NameType.DnsName, forIssuer: false) is { Length: > 0 } cn)
+            {
+                names.Add(cn);
+            }
+
+            return names;
+        }
+        catch (Exception unreadable) when (unreadable is CryptographicException or ArgumentException)
+        {
             return [];
         }
     }
@@ -179,5 +206,117 @@ internal static class DataProtectionCertificateRules
 
         error = string.Empty;
         return true;
+    }
+}
+
+/// <summary>
+/// ⛔ PSS-28: перелік дозволених імен хоста (<c>AllowedHosts</c> ASP.NET) — що пропонує майстер і що
+/// він пропускає далі в <c>deploy-ecr.ps1 -AllowedHosts</c>.
+/// </summary>
+/// <remarks>
+/// Хибне значення зачиняє користувачам вхід (запит з іншим <c>Host</c> дістає 400), тому порожнє значення
+/// не приймається: або імена, або явна <c>*</c> («будь-який хост», типове значення застосунку). Пропонується
+/// список DNS-імен вибраного сертифіката HTTPS плюс <c>localhost</c>: перевірку здоров'я наприкінці розгортання
+/// скрипт виконує на <c>localhost</c>, і без цього імені вона отримала б 400.
+/// </remarks>
+internal static class AllowedHostsRules
+{
+    /// <summary>«Будь-який хост» — типове значення застосунку.</summary>
+    public const string Any = "*";
+
+    private static readonly char[] Separators = [',', ';', ' ', '\t', '\r', '\n'];
+
+    // ім'я або `*.ім'я`, необов'язковий порт; `[IPv6]` — у квадратних дужках.
+    private static readonly System.Text.RegularExpressions.Regex EntryPattern = new(
+        @"^(?:(?:\*\.)?[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*|\[[0-9A-Fa-f:.]+\])(?::[0-9]{1,5})?$",
+        System.Text.RegularExpressions.RegexOptions.CultureInvariant,
+        TimeSpan.FromSeconds(1));
+
+    /// <summary>Значення за DNS-іменами сертифіката: унікальні імена + <c>localhost</c>; без імен — <c>*</c>.</summary>
+    /// <param name="dnsNames">DNS-імена сертифіката.</param>
+    public static string FromCertificate(IEnumerable<string>? dnsNames)
+    {
+        var names = (dnsNames ?? [])
+            .Select(n => n.Trim().ToLowerInvariant())
+            .Where(n => n.Length > 0)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        if (names.Count == 0)
+        {
+            return Any;
+        }
+
+        if (!names.Contains("localhost", StringComparer.Ordinal))
+        {
+            names.Add("localhost");
+        }
+
+        return string.Join(';', names);
+    }
+
+    /// <summary>Розбирає й перевіряє введене значення; <paramref name="normalized"/> — через <c>;</c>.</summary>
+    /// <param name="text">Текст поля (розділювачі: <c>;</c>, кома, пробіл).</param>
+    /// <param name="normalized">Нормалізоване значення.</param>
+    /// <param name="error">Зрозуміла причина відмови.</param>
+    public static bool TryNormalize(string? text, out string normalized, out string error)
+    {
+        normalized = string.Empty;
+        var entries = (text ?? string.Empty)
+            .Split(Separators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (entries.Count == 0)
+        {
+            error = "Enter the host names users type in the browser (separated by ';'), or '*' to allow any host. "
+                + "An empty value is not accepted.";
+            return false;
+        }
+
+        if (entries.Contains(Any, StringComparer.Ordinal))
+        {
+            if (entries.Count > 1)
+            {
+                error = "'*' means any host and cannot be combined with host names. Remove '*' or the other entries.";
+                return false;
+            }
+
+            normalized = Any;
+            error = string.Empty;
+            return true;
+        }
+
+        foreach (var entry in entries)
+        {
+            if (!IsValidEntry(entry))
+            {
+                error = $"'{entry}' is not a valid host name. Use names like ecr.example.com, *.example.com "
+                    + "or ecr.example.com:8443 (no scheme, no path).";
+                return false;
+            }
+        }
+
+        normalized = string.Join(';', entries);
+        error = string.Empty;
+        return true;
+    }
+
+    private static bool IsValidEntry(string entry)
+    {
+        try
+        {
+            if (!EntryPattern.IsMatch(entry))
+            {
+                return false;
+            }
+        }
+        catch (System.Text.RegularExpressions.RegexMatchTimeoutException)
+        {
+            return false;
+        }
+
+        var colon = entry.LastIndexOf(':');
+        return colon < 0 || entry.EndsWith(']') || int.Parse(entry[(colon + 1)..], CultureInfo.InvariantCulture) is >= 1 and <= 65535;
     }
 }

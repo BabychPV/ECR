@@ -1,8 +1,10 @@
 // tests/Ecr.Api.Tests/Security/CsrfOriginMiddlewareTests.cs
 
+using System.Net;
 using Ecr.Api.Security;
 using Ecr.Application.Errors;
 using Ecr.TestKit;
+using Microsoft.Extensions.Configuration;
 using Microsoft.AspNetCore.Http;
 using Xunit;
 
@@ -22,7 +24,7 @@ namespace Ecr.Api.Tests.Security;
 /// <see cref="SameSite_сусідній_хост_відхилено"/> (сама атака аудиту);</item>
 /// <item>завжди <c>true</c> або перевіряти й <c>GET</c> — червоніють
 /// <c>…_проходить</c>;</item>
-/// <item>не звіряти з <c>X-Forwarded-Host</c> — червоніють випадки проксі
+/// <item>не звіряти з <c>X-Forwarded-Host</c> від довіреного проксі — червоніють випадки проксі
 /// з <c>true</c>.</item>
 /// </list>
 /// </remarks>
@@ -116,25 +118,65 @@ public sealed class CsrfOriginMiddlewareTests
     [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait("Requirement", "L1-04")]
+    [Trait("Requirement", "PSS-28")]
     [InlineData("https://ecr.corp.local", "ecr.corp.local", true)]               // проксі переписав Host, зовнішній — у X-Forwarded-Host
     [InlineData("https://ecr.corp.local", "ecr.corp.local, inner.local", true)]  // ланцюжок проксі: перший — зовнішній
     [InlineData("https://ecr.corp.local:8443", "ecr.corp.local:8443", true)]
     [InlineData("https://evil.example", "ecr.corp.local", false)]
     [InlineData("https://ecr.corp.local", "", false)]                             // проксі переписав Host і нічого не передав
-    public async Task За_проксі_без_Sec_Fetch_Site_Origin_звіряється_і_з_X_Forwarded_Host(
+    public async Task За_довіреним_проксі_без_Sec_Fetch_Site_Origin_звіряється_і_з_X_Forwarded_Host(
         string origin, string forwardedHost, bool passes)
     {
         var (context, nextCalled) = Request("POST", origin: origin, host: "app01:5080");
         context.Request.Headers["X-Forwarded-Host"] = forwardedHost;
         context.Request.Headers["X-Forwarded-Proto"] = "https";
+        context.Connection.RemoteIpAddress = IPAddress.Parse("10.0.0.5");
 
+        await AssertOutcome(context, nextCalled, passes, ProxyConfig("10.0.0.5")).ConfigureAwait(true);
+    }
+
+    /// <summary>PSS-28: клієнт сам підставляє <c>X-Forwarded-Host</c>, що збігається з його <c>Origin</c>.</summary>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "PSS-28")]
+    [InlineData(null)]          // KnownProxies не задано
+    [InlineData("10.0.0.5")]    // задано, але з'єднання не від нього
+    public async Task X_Forwarded_Host_від_недовіреного_джерела_ігнорується(string? knownProxies)
+    {
+        var (context, nextCalled) = Request("POST", origin: "https://evil.example", host: "ecr.corp.local");
+        context.Request.Headers["X-Forwarded-Host"] = "evil.example";
+        context.Connection.RemoteIpAddress = IPAddress.Parse("203.0.113.9");
+
+        await AssertOutcome(context, nextCalled, passes: false, knownProxies is null ? null : ProxyConfig(knownProxies))
+            .ConfigureAwait(true);
+    }
+
+    /// <summary>Власний <c>Host</c> працює без жодних проксі: документований режим «проксі передає Host».</summary>
+    [Fact]
+    [Trait("Requirement", "PSS-28")]
+    public async Task Origin_що_збігається_з_Host_проходить_без_KnownProxies()
+    {
+        var (context, nextCalled) = Request("POST", origin: "https://ecr.corp.local");
+
+        await AssertOutcome(context, nextCalled, passes: true, configuration: null).ConfigureAwait(true);
+    }
+
+    private static IConfiguration ProxyConfig(string proxies)
+        => new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { [ForwardedClientAddress.KnownProxiesKey] = proxies })
+            .Build();
+
+    private static async Task AssertOutcome(
+        HttpContext context, StrongBox nextCalled, bool passes, IConfiguration? configuration)
+    {
         if (passes)
         {
-            await Invoke(context, nextCalled).ConfigureAwait(true);
+            await Invoke(context, nextCalled, configuration).ConfigureAwait(true);
         }
         else
         {
-            await Assert.ThrowsAsync<AccessDeniedException>(() => Invoke(context, nextCalled)).ConfigureAwait(true);
+            await Assert.ThrowsAsync<AccessDeniedException>(() => Invoke(context, nextCalled, configuration))
+                .ConfigureAwait(true);
         }
 
         Assert.Equal(passes, nextCalled.Value);
@@ -180,12 +222,14 @@ public sealed class CsrfOriginMiddlewareTests
         Assert.True(nextCalled.Value);
     }
 
-    private static Task Invoke(HttpContext context, StrongBox nextCalled)
-        => new CsrfOriginMiddleware(_ =>
-        {
-            nextCalled.Value = true;
-            return Task.CompletedTask;
-        }).InvokeAsync(context);
+    private static Task Invoke(HttpContext context, StrongBox nextCalled, IConfiguration? configuration = null)
+        => new CsrfOriginMiddleware(
+            _ =>
+            {
+                nextCalled.Value = true;
+                return Task.CompletedTask;
+            },
+            configuration).InvokeAsync(context);
 
     private static (HttpContext Context, StrongBox NextCalled) Request(
         string method, string? origin = null, string? site = null, string host = Host, string path = "/api/v1/documents")
