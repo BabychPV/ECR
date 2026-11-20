@@ -11,6 +11,7 @@ namespace Ecr.Application.Ports;
 /// <param name="ProjectCode">Код проєкту залежного документа.</param>
 /// <param name="DocumentKey">Бізнес-ключ залежного документа.</param>
 /// <param name="PeriodKey">Період залежного документа, що читає зачеплені місяці джерела.</param>
+/// <param name="Sheets">Усі аркуші-оригінали версії шаблону документа за період (без рядка стану — не затверджені).</param>
 /// <param name="Approved">Усі аркуші-оригінали періоду затверджено (такий період перерахунок не чіпає, він лише застаріє).</param>
 public sealed record SourceImpactConsumer(
     int BindingId,
@@ -20,7 +21,14 @@ public sealed record SourceImpactConsumer(
     string ProjectCode,
     string DocumentKey,
     int PeriodKey,
-    bool Approved);
+    bool Approved,
+    IReadOnlyList<SourceImpactSheet> Sheets);
+
+/// <summary>Аркуш-оригінал залежного документа в оцінці впливу: затверджений він не перераховується (D-554).</summary>
+/// <param name="SheetDefId">Аркуш.</param>
+/// <param name="SheetCode">Код аркуша.</param>
+/// <param name="Approved">Аркуш затверджено; аркуш без рядка стану — <c>Draft</c>, тобто не затверджений.</param>
+public sealed record SourceImpactSheet(int SheetDefId, string SheetCode, bool Approved);
 
 /// <summary>
 /// B80 N5 (D-554): вплив затвердження чи повернення із затвердженого аркуша документа-джерела на залежні документи.
