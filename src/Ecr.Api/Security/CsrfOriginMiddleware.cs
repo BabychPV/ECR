@@ -26,8 +26,8 @@ namespace Ecr.Api.Security;
 /// шле <c>same-origin</c> (замір Chromium: <c>Origin: http://localhost:5085</c>,
 /// <c>Host: localhost:5084</c>, <c>Sec-Fetch-Site: same-origin</c>).</item>
 /// <item>Заголовка немає (старий браузер) — <c>Origin</c>, якщо він є, має
-/// вказувати на той самий хост і порт, що й <c>Host</c> запиту або перший
-/// <c>X-Forwarded-Host</c> (проксі, що переписує <c>Host</c>); <c>null</c> —
+/// вказувати на той самий хост і порт, що й <c>Host</c> запиту або (лише від
+/// довіреного проксі з <c>KnownProxies</c>, PSS-28) перший <c>X-Forwarded-Host</c> (проксі, що переписує <c>Host</c>); <c>null</c> —
 /// відмова. Схема не порівнюється: за проксі, що знімає TLS, вона
 /// розходиться законно.</item>
 /// <item>Немає жодного — пропускається. Так ходять не браузери (скрипти,
@@ -46,8 +46,16 @@ namespace Ecr.Api.Security;
 /// cookie лише прочитано, нічого не змінено, а журнал відмов (ФВ-5.24) уже
 /// знає, від чийого імені була спроба.
 /// </remarks>
-public sealed class CsrfOriginMiddleware(RequestDelegate next)
+public sealed class CsrfOriginMiddleware(RequestDelegate next, IConfiguration? configuration = null)
 {
+    /// <summary>
+    /// ⛔ PSS-28: адреси довірених проксі (<c>Security:RateLimit:KnownProxies</c>). Без переліку
+    /// <c>X-Forwarded-Host</c> не читається взагалі.
+    /// </summary>
+    private readonly ForwardedClientAddress _proxies = configuration is null
+        ? new ForwardedClientAddress(trustForwardedFor: false)
+        : ForwardedClientAddress.FromConfiguration(configuration);
+
     /// <summary>Ключ причини відмови в каталозі рядків.</summary>
     public const string MessageKey = "err.ECR-AUTH-0403.csrfOrigin";
 
@@ -63,7 +71,7 @@ public sealed class CsrfOriginMiddleware(RequestDelegate next)
         var request = context.Request;
         if (IsStateChanging(request.Method)
             && !Exempt.Contains(request.Path.Value ?? string.Empty, StringComparer.OrdinalIgnoreCase)
-            && IsCrossSite(request))
+            && IsCrossSite(request, _proxies.IsFromKnownProxy(context)))
         {
             throw new AccessDeniedException(
                 "ECR-AUTH-0403",
@@ -79,7 +87,8 @@ public sealed class CsrfOriginMiddleware(RequestDelegate next)
 
     /// <summary><c>true</c> — браузер позначив запит як надісланий з чужого сайту.</summary>
     /// <param name="request">Запит.</param>
-    internal static bool IsCrossSite(HttpRequest request)
+    /// <param name="fromKnownProxy">З'єднання від довіреного проксі: лише тоді віримо <c>X-Forwarded-Host</c>.</param>
+    internal static bool IsCrossSite(HttpRequest request, bool fromKnownProxy = false)
     {
         var site = request.Headers["Sec-Fetch-Site"].ToString();
         if (site.Length > 0)
@@ -91,16 +100,18 @@ public sealed class CsrfOriginMiddleware(RequestDelegate next)
         var origin = request.Headers.Origin.ToString();
         return origin.Length > 0
             && !IsSameHost(origin, request.Host)
-            && !IsSameHost(origin, ForwardedHost(request));
+            && !(fromKnownProxy && IsSameHost(origin, ForwardedHost(request)));
     }
 
     /// <summary>Перший <c>X-Forwarded-Host</c> — зовнішній хост, який бачив браузер за проксі.</summary>
     /// <remarks>
-    /// ⚠ Застосунок не довіряє <c>X-Forwarded-*</c> ні для чого іншого
-    /// (<c>UseForwardedHeaders</c> не вмикається), і тут довіра не потрібна:
-    /// заголовок лише ДОДАЄ ще один збіг для свого запиту. Підставити його з
-    /// чужого сайту браузер не дасть без CORS-попереднього запиту, а CORS у
-    /// застосунку не ввімкнено; не-браузер і так проходить без <c>Origin</c>.
+    /// ⛔ PSS-28: читається ЛИШЕ від довіреного проксі (<c>Security:RateLimit:KnownProxies</c>, як і
+    /// <c>X-Forwarded-For</c>). Раніше — від будь-кого: клієнт міг сам підставити заголовок, що збігається з
+    /// його <c>Origin</c>, і обійти перевірку (практичної атаки браузер не дає — міжсайтовий запит не може
+    /// виставити цей заголовок без CORS, — але довіра без підстав не потрібна). Документований режим «за
+    /// проксі» (<c>11-install-guide.md</c>) вимагає від проксі передавати оригінальний <c>Host</c>, тож для
+    /// нього заголовок не потрібен; проксі, що переписує <c>Host</c>, мусить бути в <c>KnownProxies</c>.
+    /// <c>UseForwardedHeaders</c> не вмикається: <c>Host</c> лишається тим, що прислало з'єднання.
     /// </remarks>
     private static HostString ForwardedHost(HttpRequest request)
     {
