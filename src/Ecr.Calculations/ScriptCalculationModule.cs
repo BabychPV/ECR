@@ -66,6 +66,20 @@ public sealed class ScriptCalculationModule(
     private readonly CalculationLimits _limits = limits ?? new CalculationLimits();
     private UnitCatalogTables? _units;
 
+    /// <summary>
+    /// Бюджет кроків ОДНОГО рядка на всі його оператори (PSS-21): 100 стель одного оператора
+    /// (<see cref="Evaluator.MaxEvaluationSteps"/>), тобто 2 000 000.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Доти межа була лише на оператор, а кількість операторів — лише розміром тексту: ~4 000 операторів по 20 000 кроків
+    /// давали 80 млн кроків на рядок (хвилини процесора), помножені на рядки й екземпляри. Бюджет рядка діє і в перерахунку,
+    /// і в перегляді; він детермінований (рахується робота, а не час), тож той самий рядок дає той самий результат будь-де.
+    /// ⚠ Реальні методології далеко нижче: найбільші версії корпусу мають сотні операторів по десятки кроків (крім агрегатів
+    /// над таблицями-псевдонімами, кожен з яких однаково впирається у стелю оператора). Рядок, що вичерпав бюджет, отримує
+    /// <c>#BUDGET</c> на кожен наступний оператор — та сама помилка кроку, що й за стелю одного оператора.
+    /// </remarks>
+    public const int MaxRowEvaluationSteps = 100 * Evaluator.MaxEvaluationSteps;
+
     /// <inheritdoc />
     public string Code => "script";
 
@@ -196,11 +210,24 @@ public sealed class ScriptCalculationModule(
     /// <param name="binding">Контекст прив'язки з <see cref="PrepareAsync(MethodologyDescriptor, long, PeriodKey, RegistrySnapshotCache?, ScriptPrepareOptions?, CancellationToken)"/>.</param>
     /// <param name="input">Вхід рядка.</param>
     /// <param name="ct">Токен скасування.</param>
-    public async Task<(CalculationOutput Output, IReadOnlyList<ScriptValue> Values)> ExecuteDetailedAsync(
+    public Task<(CalculationOutput Output, IReadOnlyList<ScriptValue> Values)> ExecuteDetailedAsync(
         CalculationBindingContext binding, CalculationInput input, CancellationToken ct)
+        => ExecuteDetailedAsync(binding, input, ScriptRunLimits.Default, ct);
+
+    /// <summary>
+    /// Те саме, що <see cref="ExecuteDetailedAsync(CalculationBindingContext, CalculationInput, CancellationToken)"/>, з
+    /// межами запиту понад бюджет рядка (PSS-21): спільний бюджет кроків і стеля величин живого перегляду.
+    /// </summary>
+    /// <param name="binding">Контекст прив'язки з <see cref="PrepareAsync(MethodologyDescriptor, long, PeriodKey, RegistrySnapshotCache?, ScriptPrepareOptions?, CancellationToken)"/>.</param>
+    /// <param name="input">Вхід рядка.</param>
+    /// <param name="limits">Межі прогону.</param>
+    /// <param name="ct">Токен скасування: перевіряється й між операторами скрипта.</param>
+    public async Task<(CalculationOutput Output, IReadOnlyList<ScriptValue> Values)> ExecuteDetailedAsync(
+        CalculationBindingContext binding, CalculationInput input, ScriptRunLimits limits, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(binding);
         ArgumentNullException.ThrowIfNull(input);
+        ArgumentNullException.ThrowIfNull(limits);
 
         // ⛔ Контекст і рядок мусять бути з ОДНІЄЇ прив'язки (дефект D-112: число лишилось би правдоподібним).
         if (binding.Methodology.MethodologyVersionId != input.Methodology.MethodologyVersionId
@@ -251,7 +278,7 @@ public sealed class ScriptCalculationModule(
             }
         }
 
-        new ScriptRowRun(context, runtime, binding, input, numeric, trace, values, detail).Run();
+        new ScriptRowRun(context, runtime, binding, input, numeric, trace, values, detail, limits, ct).Run();
 
         var output = new CalculationOutput(
             input.DocumentId,

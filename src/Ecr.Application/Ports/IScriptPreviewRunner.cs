@@ -65,7 +65,11 @@ public sealed record ScriptPreviewRow(
     string? Issue,
     IReadOnlyList<string>? Missing,
     IReadOnlyList<ScriptPreviewValue> Values,
-    IReadOnlyList<ScriptPreviewInput>? Inputs = null);
+    IReadOnlyList<ScriptPreviewInput>? Inputs = null)
+{
+    /// <summary><c>true</c> — величини рядка урізано стелею відповіді перегляду (PSS-21: 50 000 на запит); <c>values</c> неповний.</summary>
+    public bool ValuesTruncated { get; init; }
+}
 
 /// <summary>Один вхід рядка в перегляді.</summary>
 /// <param name="Name">Ім'я аргументу (код колонки).</param>

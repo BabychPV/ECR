@@ -32,10 +32,30 @@ public sealed record ScriptValue(
     string Name, string? SubstanceCode, ScriptValueKind Kind, string ValueType, string? Text, string? ErrorCode);
 
 /// <summary>
+/// Межі одного прогону рядка понад типові (PSS-21): спільний бюджет кроків запиту й стеля величин живого перегляду.
+/// </summary>
+/// <param name="Pool">
+/// Спільний бюджет кроків усіх рядків запиту (живий перегляд): рядок бере не більше, ніж лишилося, і витрачене
+/// списується з нього. <c>null</c> — лише межа рядка (<see cref="ScriptCalculationModule.MaxRowEvaluationSteps"/>).
+/// </param>
+/// <param name="MaxValues">Скільки величин живого перегляду зібрати з рядка; решта не збирається.</param>
+public sealed record ScriptRunLimits(EvaluationBudget? Pool = null, int MaxValues = int.MaxValue)
+{
+    /// <summary>Типові межі: лише бюджет рядка, величин без стелі.</summary>
+    public static ScriptRunLimits Default { get; } = new();
+}
+
+/// <summary>
 /// Виконує оператори скрипта на ОДИН рядок згори вниз (MS, план §3.7). Числа — лише через
 /// <see cref="Evaluator"/> у контексті; маскування <c>Legacy</c>, кроки трейсу, шкали й округлення виходу —
 /// <see cref="CalculationSteps"/>, той самий код, що в старого модуля.
 /// </summary>
+/// <remarks>
+/// ⛔ PSS-21: бюджет кроків — не лише на оператор (<see cref="Evaluator.MaxEvaluationSteps"/>), а й на РЯДОК
+/// (<see cref="ScriptCalculationModule.MaxRowEvaluationSteps"/>): тисячі операторів по 20 000 кроків кожен інакше
+/// тримали б потік хвилинами на один рядок. Вичерпаний бюджет рядка — <c>#BUDGET</c> на кожен наступний оператор без
+/// обчислення (детерміновано: рахується робота, а не час). Скасування перевіряється перед кожним оператором.
+/// </remarks>
 internal sealed class ScriptRowRun(
     ScriptEvaluationContext context,
     ScriptRuntime runtime,
@@ -44,7 +64,9 @@ internal sealed class ScriptRowRun(
     NumericPolicy numeric,
     TraceRecorder trace,
     List<CalculationOutputValue> values,
-    List<ScriptValue>? detail)
+    List<ScriptValue>? detail,
+    ScriptRunLimits limits,
+    CancellationToken ct)
 {
     private enum Flow : byte
     {
@@ -53,19 +75,41 @@ internal sealed class ScriptRowRun(
     }
 
     private readonly MethodologyDescriptor _version = input.Methodology;
+    private readonly EvaluationBudget? _row = RowBudget(limits.Pool);
     private string? _substanceCode;
     private MethodologySubstance? _substance;
 
+    /// <summary>Скільки кроків витратив рядок.</summary>
+    public int Spent => _row?.Spent ?? 0;
+
     /// <summary>Виконує скрипт версії.</summary>
+    /// <exception cref="OperationCanceledException">Запит чи задачу скасовано між операторами.</exception>
     public void Run()
     {
         var script = binding.Script!;
-        foreach (var statement in script.Statements)
+        try
         {
-            Execute(statement);
+            foreach (var statement in script.Statements)
+            {
+                Execute(statement);
+            }
+        }
+        finally
+        {
+            // Витрачене рядком — зі спільного бюджету запиту, і тоді, коли рядок перервано.
+            limits.Pool?.TryConsume(Spent);
         }
 
         trace.EnterSubstance(null);
+    }
+
+    /// <summary>Бюджет рядка: межа рядка, але не більше, ніж лишилося в спільному; <c>null</c> — спільний вичерпано.</summary>
+    private static EvaluationBudget? RowBudget(EvaluationBudget? pool)
+    {
+        var allowed = pool is null
+            ? ScriptCalculationModule.MaxRowEvaluationSteps
+            : Math.Min(ScriptCalculationModule.MaxRowEvaluationSteps, pool.MaxSteps - pool.Spent);
+        return allowed > 0 ? new EvaluationBudget(allowed) : null;
     }
 
     private Flow ExecuteBlock(ScriptBlock block)
@@ -91,6 +135,9 @@ internal sealed class ScriptRowRun(
 
     private Flow Execute(ScriptStatement statement)
     {
+        // PSS-21: розірваний запит (клієнт пішов, вичерпано час перегляду) чи скасована задача не рахує решту операторів.
+        ct.ThrowIfCancellationRequested();
+
         switch (statement)
         {
             case VarStatement variable:
@@ -129,10 +176,18 @@ internal sealed class ScriptRowRun(
         return Flow.Skip;
     }
 
-    /// <summary>Один бюджет на оператор (план §3.7).</summary>
+    /// <summary>
+    /// Один бюджет на оператор (план §3.7), не більший за залишок бюджету рядка; витрачене списується з рядка.
+    /// Рядок, що вичерпав бюджет, — <c>#BUDGET</c> без обчислення.
+    /// </summary>
     private ExpressionValue Evaluate(AstNode node)
     {
-        var budget = new EvaluationBudget(Evaluator.MaxEvaluationSteps);
+        if (_row is null || _row.IsExhausted)
+        {
+            return ExpressionValue.Error(Expressions.ExpressionErrors.BudgetExceeded);
+        }
+
+        var budget = new EvaluationBudget(Math.Min(Evaluator.MaxEvaluationSteps, _row.MaxSteps - _row.Spent));
         context.Budget = budget;
         try
         {
@@ -141,6 +196,7 @@ internal sealed class ScriptRowRun(
         finally
         {
             context.Budget = null;
+            _row.TryConsume(budget.Spent);
         }
     }
 
@@ -315,6 +371,15 @@ internal sealed class ScriptRowRun(
     }
 
     private void Record(string name, ScriptValueKind kind, ExpressionValue value)
-        => detail?.Add(new ScriptValue(
+    {
+        // PSS-21: величин живого перегляду не більше стелі — тисячі операторів на сотні рядків інакше росли б у пам'яті
+        // й у відповіді без межі.
+        if (detail is null || detail.Count >= limits.MaxValues)
+        {
+            return;
+        }
+
+        detail.Add(new ScriptValue(
             name, _substanceCode, kind, value.Type.ToString(), ScriptEvaluationContext.Format(value), value.ErrorCode));
+    }
 }
