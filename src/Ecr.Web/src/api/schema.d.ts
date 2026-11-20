@@ -44969,6 +44969,8 @@ export interface components {
             binding: components["schemas"]["DocumentSourceBindingDto"];
             /** @description `false` — біти вже були такими; нічого не записано й не поставлено. */
             changed: boolean;
+            /** @description Роки, за які задачу НЕ вдалося поставити після коміту (черга недоступна): біти вже змінено, тож залежні за ці роки адміністратор перераховує вручну; порожньо — усе поставлено. */
+            failedYears: number[];
             /** @description Роки, за які поставлено перерахунок залежних. */
             queuedYears: number[];
         };
@@ -44983,6 +44985,8 @@ export interface components {
             binding: components["schemas"]["DocumentSourceBindingDto"];
             /** @description `false` — стан уже був таким; нічого не записано й не поставлено. */
             changed: boolean;
+            /** @description Роки, за які задачу НЕ вдалося поставити після коміту (черга недоступна): стан уже змінено, тож залежні за ці роки адміністратор перераховує вручну; порожньо — усе поставлено. */
+            failedYears: number[];
             /** @description Роки, за які поставлено перерахунок залежних (злита задача на довідник × рік). */
             queuedYears: number[];
         };
