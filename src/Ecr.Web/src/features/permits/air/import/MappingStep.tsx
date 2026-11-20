@@ -71,6 +71,10 @@ export interface MappingStepProps {
   readonly file?: File | null;
   /** «Edit profile» on the File step: the rules editor («Advanced») is shown open. */
   readonly openEditor?: boolean;
+  /** The mapping in hand is not the one the file was last read with (the checks shown are of the previous reading). */
+  readonly pending?: boolean;
+  /** A reading of the file is under way right now (not delayed for the spinner): the column pickers wait. */
+  readonly reading?: boolean;
   /** Збережений профіль (його специфікація — вихідна для редагування); `undefined`, поки читається. */
   readonly profile: ImportProfile | undefined;
   /** Редагована специфікація; `null` — працює профіль як є. */
@@ -101,6 +105,12 @@ export interface MappingStepProps {
   /** Names of the AIR type columns: labels of the added fields (`FILE_*`). */
   readonly columnNames?: ColumnNames;
 }
+
+/**
+ * Catalog key of «the column for the field was not found» (`RegistryImportKeys.ColumnMissing`); an error for a required field.
+ * It tells a missing column even before the profile (the rows' required flags) is read.
+ */
+const ColumnMissingKey = 'err.ECR-IMP-0422.regColumnMissing';
 
 /** The specification header rows apply to: the edited one, else the profile's. */
 function baseSpec(spec: ImportSpec | null, profile: ImportProfile | undefined): ImportSpec | null {
@@ -454,18 +464,27 @@ export function MappingStep(props: MappingStepProps): JSX.Element {
     setSeenOpenEditor(props.openEditor === true);
     if (props.openEditor === true) setAdvancedOpen(true);
   }
+  const rows = fieldRows(base, header?.mapped ?? [], body.issues);
+  const counts = fieldCounts(rows);
+  const verdict = mappingVerdict(counts, body.canContinue);
+  /*
+   * No source was read although every required column was found: then the rows of the table (header, first data row) are the
+   * likely cause. ⚠ Review 20.11 (M1): with a required column missing the server reads no row at all (empty stats,
+   * `RegistryImportParser.Parse`) — that is the column's problem, said by the verdict and its row, not «no source».
+   */
+  const requiredMissing =
+    counts.missing > 0 || body.issues.some((issue) => issue.severity === 'Error' && issue.messageKey === ColumnMissingKey);
+  const noRows = header !== null && body.stats.parents === 0 && !requiredMissing;
   // «Where the table is in the file»: closed while the file reads; open by itself when no source was read (also after a re-read).
-  const noRows = header !== null && body.stats.parents === 0;
   const [layoutOpen, setLayoutOpen] = useState(noRows);
   const [seenNoRows, setSeenNoRows] = useState(noRows);
   if (noRows !== seenNoRows) {
     setSeenNoRows(noRows);
     if (noRows) setLayoutOpen(true);
   }
-
-  const rows = fieldRows(base, header?.mapped ?? [], body.issues);
-  const counts = fieldCounts(rows);
-  const verdict = mappingVerdict(counts, body.canContinue);
+  // M4: an edit the profile cannot be saved with (a name missing or repeated, a field without any column) opens the rules
+  // editor by itself — the reason and the way to fix it are never folded away.
+  const editorProblem = problem !== null || unpointed !== null;
   const fileColumns = [...(header?.mapped ?? []), ...(header?.unmapped ?? [])];
   const samples = useColumnSamples(
     props.file,
@@ -485,7 +504,16 @@ export function MappingStep(props: MappingStepProps): JSX.Element {
 
   return (
     <div className="pi-page">
-      {verdict === 'missing' && (
+      {props.pending === true && (
+        // L3: the checks below are of the previous reading — no «ready» for a mapping the file was not read with yet.
+        <Banner
+          tone="info"
+          testId="air-mapping-verdict"
+          title={t('permits.air.import.verdict.pendingTitle')}
+          text={t('permits.air.import.verdict.pendingText')}
+        />
+      )}
+      {props.pending !== true && verdict === 'missing' && (
         <Banner
           tone="warning"
           testId="air-mapping-verdict"
@@ -493,7 +521,7 @@ export function MappingStep(props: MappingStepProps): JSX.Element {
           text={t('permits.air.import.verdict.missingText')}
         />
       )}
-      {verdict === 'blocked' && !noRows && (
+      {props.pending !== true && verdict === 'blocked' && !noRows && (
         <Banner
           tone="danger"
           testId="air-mapping-verdict"
@@ -501,7 +529,7 @@ export function MappingStep(props: MappingStepProps): JSX.Element {
           text={t('permits.air.import.verdict.blockedText')}
         />
       )}
-      {verdict === 'ready' && (
+      {props.pending !== true && verdict === 'ready' && (
         <Banner
           tone="success"
           testId="air-mapping-verdict"
@@ -526,7 +554,7 @@ export function MappingStep(props: MappingStepProps): JSX.Element {
           <b>{formatNumber(body.stats.distinctChildKeys)}</b>
         </div>
       </div>
-      {header !== null && body.stats.parents === 0 && (
+      {noRows && header !== null && (
         // Pass 3b (UAT P2-2): «0 / 0» with every column resolved said nothing; the first blocking finding says what to fix.
         <Banner
           tone="danger"
@@ -547,8 +575,8 @@ export function MappingStep(props: MappingStepProps): JSX.Element {
           samples={samples}
           columnNames={columnNames}
           mayPick={base !== null}
-          busy={reanalysing}
-          onPick={(index, letter) => base !== null && onApplySpec(withPickedColumn(base, index, letter))}
+          busy={props.reading ?? reanalysing}
+          onPick={(index, letter, owner) => base !== null && onApplySpec(withPickedColumn(base, index, letter, owner))}
         />
       )}
 
@@ -612,7 +640,7 @@ export function MappingStep(props: MappingStepProps): JSX.Element {
       <details
         className="pi-panel"
         data-testid="air-advanced"
-        open={advancedOpen}
+        open={advancedOpen || editorProblem}
         onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}
       >
         <summary>{t('permits.air.import.advanced')}</summary>
@@ -628,21 +656,6 @@ export function MappingStep(props: MappingStepProps): JSX.Element {
         ) : (
           <>
             <FieldEditor spec={spec} analysis={analysis} onSpec={onSpec} columnNames={columnNames} />
-            {problem !== null && (
-              <Banner
-                tone="warning"
-                title={t('permits.air.import.map.problemTitle')}
-                text={problem === 'nameRequired' ? t('permits.air.import.map.nameRequired') : t('permits.air.import.map.nameDuplicate')}
-              />
-            )}
-            {problem === null && unpointed !== null && (
-              <Banner
-                tone="warning"
-                title={t('permits.air.import.map.problemTitle')}
-                text={t('permits.air.import.map.columnRequired', { field: fieldLabel(unpointed, columnNames) })}
-                testId="air-field-without-column"
-              />
-            )}
             <div className="pi-actions">
               <Button variant="default" onClick={() => onSpec(null)}>
                 {t('permits.air.import.map.discard')}
@@ -655,6 +668,23 @@ export function MappingStep(props: MappingStepProps): JSX.Element {
         )}
       </details>
 
+      {/* M4: why «Save as profile…» is disabled stays next to it, outside the fold. */}
+      {problem !== null && (
+        <Banner
+          tone="warning"
+          testId="air-mapping-problem"
+          title={t('permits.air.import.map.problemTitle')}
+          text={problem === 'nameRequired' ? t('permits.air.import.map.nameRequired') : t('permits.air.import.map.nameDuplicate')}
+        />
+      )}
+      {problem === null && unpointed !== null && (
+        <Banner
+          tone="warning"
+          title={t('permits.air.import.map.problemTitle')}
+          text={t('permits.air.import.map.columnRequired', { field: fieldLabel(unpointed, columnNames) })}
+          testId="air-field-without-column"
+        />
+      )}
       {spec !== null && profile?.builtIn === true && (
         <Text size="sm" c="dimmed" data-testid="air-profile-builtin">
           {t('permits.air.import.profile.builtInNote', { code: profile.code })}

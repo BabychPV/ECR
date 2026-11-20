@@ -1,5 +1,5 @@
 import type { AirAnalysis, ImportIssue, ImportSpec } from '../airTypes';
-import { specFields, withField } from './importModel';
+import { specFields } from './importModel';
 
 /*
  * The «Mapping» step as the user sees it (UX 20.11): one row per field of the import, with the file column the server matched
@@ -26,6 +26,10 @@ export interface FieldRow {
   readonly issue: ImportIssue | null;
   /** The field has header texts: without an explicit column it is matched by them («automatic»). */
   readonly matchesByHeader: boolean;
+  /** The field names its column explicitly (`column`), not by header text. */
+  readonly explicit: boolean;
+  /** What one value belongs to: a source (`Parent`) or a substance row (`Child`); `null` — not known. */
+  readonly level: 'Parent' | 'Child' | null;
 }
 
 const StateOrder: Readonly<Record<FieldState, number>> = { missing: 0, found: 1, notInFile: 2 };
@@ -63,13 +67,25 @@ export function fieldRows(spec: ImportSpec | null, mapped: readonly MatchedColum
       state: column !== null ? 'found' : required ? 'missing' : 'notInFile',
       issue: column === null ? fieldIssue(issues, key) : null,
       matchesByHeader: (field.patterns ?? []).length > 0,
+      explicit: (field.column ?? '').trim() !== '',
+      level: column?.level ?? field.level ?? null,
     });
   });
   for (const column of mapped) {
     const key = column.field.trim().toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    rows.push({ name: column.field, index: null, required: false, column, state: 'found', issue: null, matchesByHeader: false });
+    rows.push({
+      name: column.field,
+      index: null,
+      required: false,
+      column,
+      state: 'found',
+      issue: null,
+      matchesByHeader: false,
+      explicit: false,
+      level: column.level,
+    });
   }
 
   return rows
@@ -109,20 +125,37 @@ export function mappingVerdict(counts: FieldCounts, canContinue: boolean): Mappi
   return canContinue ? 'ready' : 'blocked';
 }
 
-/**
- * The field at `index` reads the file column `letter` (an explicit column bypasses the header texts); `null` — back to matching
- * by the header texts. Another field that names the same column explicitly lets it go: one column is read by one field (the
- * server refuses a column claimed twice).
- */
-export function withPickedColumn(spec: ImportSpec, index: number, letter: string | null): ImportSpec {
-  const value = letter === null ? null : letter.trim().toUpperCase();
-  const freed = specFields(spec).reduce<ImportSpec>(
-    (current, field, at) =>
-      at !== index && value !== null && (field.column ?? '').trim().toUpperCase() === value ? withField(current, at, { column: null }) : current,
-    spec,
-  );
+/** The row that reads the file column `letter` now, other than the field `name`; `null` — nobody does. */
+export function columnOwner(rows: readonly FieldRow[], letter: string, name: string): FieldRow | null {
+  const value = letter.trim().toUpperCase();
 
-  return withField(freed, index, { column: value });
+  return rows.find((row) => row.column?.columnLetter === value && row.name.toLowerCase() !== name.toLowerCase()) ?? null;
+}
+
+/**
+ * The field at `index` reads the file column `letter` from now on (an explicit column bypasses the header texts); `null` — back
+ * to matching by the header texts.
+ *
+ * ⚠ Review 20.11 (M2): the server gives a column to the FIRST field in specification order that wants it, by name or by header
+ * text (`RegistryImportParser.MapColumns`); a later one is «not found / column used by …». So taking a column from its owner
+ * (`ownerIndex`, confirmed by the user beforehand) is made to hold whatever way the owner reads it:
+ * - every other field that names the column explicitly lets it go;
+ * - the picked field moves right before the owner when it stood after it — the owner then loses the column visibly (its row
+ *   says «not found» with the server's reason), never silently keeps it.
+ */
+export function withPickedColumn(spec: ImportSpec, index: number, letter: string | null, ownerIndex: number | null = null): ImportSpec {
+  const value = letter === null ? null : letter.trim().toUpperCase();
+  const fields = specFields(spec).map((field, at) => {
+    if (at === index) return { ...field, column: value };
+
+    return value !== null && (field.column ?? '').trim().toUpperCase() === value ? { ...field, column: null } : field;
+  });
+  if (value !== null && ownerIndex !== null && ownerIndex < index) {
+    const [picked] = fields.splice(index, 1);
+    if (picked !== undefined) fields.splice(ownerIndex, 0, picked);
+  }
+
+  return { ...spec, fields };
 }
 
 /** File column letter → the label of the field that reads it now (for «used for …» in the column picker). */

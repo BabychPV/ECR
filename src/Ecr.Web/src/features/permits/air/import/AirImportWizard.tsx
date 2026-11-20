@@ -482,6 +482,8 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
           analysis={analysis}
           file={draft.file}
           openEditor={editorOpen}
+          pending={pending}
+          reading={analyse.isPending}
           profile={profile.data}
           spec={draft.spec}
           onSpec={(spec) => patchDraft({ spec })}

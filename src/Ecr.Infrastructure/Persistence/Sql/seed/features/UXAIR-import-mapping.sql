@@ -78,7 +78,27 @@ SELECT v.[Key], v.Lang, v.Val
     (N'permits.air.import.save.codeLater', N'ru', N'Код будет создан из названия'),
     (N'permits.air.import.save.codeLater', N'kz', N'Код атаудан жасалады'),
     (N'permits.air.import.save.changeCode', N'ru', N'Изменить код'),
-    (N'permits.air.import.save.changeCode', N'kz', N'Кодты өзгерту')
+    (N'permits.air.import.save.changeCode', N'kz', N'Кодты өзгерту'),
+    (N'permits.air.import.fields.clearFor', N'ru', N'Снова искать колонку поля «{field}» по тексту заголовка'),
+    (N'permits.air.import.fields.clearFor', N'kz', N'«{field}» өрісінің бағанын қайтадан тақырып мәтіні бойынша іздеу'),
+    (N'permits.air.import.fields.perSource', N'ru', N'одно значение на источник'),
+    (N'permits.air.import.fields.perSource', N'kz', N'әр көзге бір мән'),
+    (N'permits.air.import.fields.perRow', N'ru', N'одно значение на строку вещества'),
+    (N'permits.air.import.fields.perRow', N'kz', N'әр зат жолына бір мән'),
+    (N'permits.air.import.fields.moveTitle', N'ru', N'Колонку {column} сейчас читает поле «{owner}»'),
+    (N'permits.air.import.fields.moveTitle', N'kz', N'{column} бағанын қазір «{owner}» өрісі оқиды'),
+    (N'permits.air.import.fields.moveText', N'ru', N'Перенести колонку {column} в «{field}»? У поля «{owner}» тогда не будет колонки — ему нужно будет выбрать другую.'),
+    (N'permits.air.import.fields.moveText', N'kz', N'{column} бағанын «{field}» өрісіне ауыстыру керек пе? Сонда «{owner}» өрісінің бағаны болмайды — оған басқасын таңдау керек.'),
+    (N'permits.air.import.fields.moveRequired', N'ru', N'«{owner}» — обязательное поле: импорт не продолжится, пока у него нет колонки.'),
+    (N'permits.air.import.fields.moveRequired', N'kz', N'«{owner}» — міндетті өріс: оның бағаны болмайынша импорт жалғаспайды.'),
+    (N'permits.air.import.fields.move', N'ru', N'Перенести колонку'),
+    (N'permits.air.import.fields.move', N'kz', N'Бағанды ауыстыру'),
+    (N'permits.air.import.fields.moveCancel', N'ru', N'Отмена — оставить колонку {column} полю «{owner}»'),
+    (N'permits.air.import.fields.moveCancel', N'kz', N'Болдырмау — {column} бағанын «{owner}» өрісінде қалдыру'),
+    (N'permits.air.import.verdict.pendingTitle', N'ru', N'Соответствие изменено'),
+    (N'permits.air.import.verdict.pendingTitle', N'kz', N'Сәйкестік өзгертілді'),
+    (N'permits.air.import.verdict.pendingText', N'ru', N'Ниже — результат прошлого чтения файла. Новое соответствие будет проверено, когда файл перечитается.'),
+    (N'permits.air.import.verdict.pendingText', N'kz', N'Төменде — файлды алдыңғы оқудың нәтижесі. Жаңа сәйкестік файл қайта оқылғанда тексеріледі.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -123,9 +143,19 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'permits.air.import.parser.code', N'en', N'Code', 1),
     (N'permits.air.import.parser.choice', N'en', N'One of a list', 1),
     (N'permits.air.import.parser.unit', N'en', N'Unit of measure', 1),
-    (N'permits.air.import.save.codeShown', N'en', N'It is saved under the code {code}', 1),
+    (N'permits.air.import.save.codeShown', N'en', N'Will be saved under the code {code}', 1),
     (N'permits.air.import.save.codeLater', N'en', N'The code is made from the name', 1),
-    (N'permits.air.import.save.changeCode', N'en', N'Change code', 1)
+    (N'permits.air.import.save.changeCode', N'en', N'Change code', 1),
+    (N'permits.air.import.fields.clearFor', N'en', N'Find the column of «{field}» by header text again', 1),
+    (N'permits.air.import.fields.perSource', N'en', N'one value per source', 1),
+    (N'permits.air.import.fields.perRow', N'en', N'one value per substance row', 1),
+    (N'permits.air.import.fields.moveTitle', N'en', N'Column {column} is read by «{owner}» now', 1),
+    (N'permits.air.import.fields.moveText', N'en', N'Move column {column} to «{field}»? «{owner}» will then have no column; choose another one for it.', 1),
+    (N'permits.air.import.fields.moveRequired', N'en', N'«{owner}» is required: the import does not go on until it has a column.', 1),
+    (N'permits.air.import.fields.move', N'en', N'Move column', 1),
+    (N'permits.air.import.fields.moveCancel', N'en', N'Cancel — keep column {column} in «{owner}»', 1),
+    (N'permits.air.import.verdict.pendingTitle', N'en', N'The mapping was changed', 1),
+    (N'permits.air.import.verdict.pendingText', N'en', N'What is shown below is from the previous reading of the file. The new mapping is checked when the file is read again.', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO
@@ -142,7 +172,8 @@ SELECT v.[Key], v.Lang, v.OldVal, v.NewVal
     (N'permits.air.import.hint.mapping', N'kz', N'Файл бағандары өрістерге қалай сәйкестендірілгенін тексеріңіз. Әзірге ештеңе сақталмайды.', N'Файл бағандары танылғанын тексеріңіз және бағанды тек сұралған жерде таңдаңыз. Әзірге ештеңе сақталмайды.'),
     (N'permits.air.import.map.level', N'en', N'Level', N'One value per'),
     (N'permits.air.import.map.level', N'ru', N'Уровень', N'Одно значение на'),
-    (N'permits.air.import.map.level', N'kz', N'Деңгей', N'Бір мән'),
+    (N'permits.air.import.map.level', N'kz', N'Деңгей', N'Әрқайсысына бір мән'),
+    (N'permits.air.import.add.level', N'kz', N'Бір мән', N'Әрқайсысына бір мән'),
     (N'permits.air.import.map.parser', N'en', N'Parser', N'Value type'),
     (N'permits.air.import.map.parser', N'ru', N'Разбор', N'Тип значения'),
     (N'permits.air.import.map.parser', N'kz', N'Талдау', N'Мән түрі'),
