@@ -453,13 +453,13 @@ $scripts = @(
 #
 # ⚠ Сід (`seed/`, колишній `09-seed.sql`) виконує сам застосунок (це DML,
 # `02-contracts.md` §14); він у підкаталозі, і `-Filter '*.sql'` його не бачить.
-    # ⚠ Виняток у переліку один і названий: `14-agent-jobs.sql` чіпає `msdb`, а не
+    # ⚠ Винятки в переліку названі: `16-resource-governor.sql` (PSS-03) — необов'язковий скрипт рівня інстансу, лише для DBA; `14-agent-jobs.sql` чіпає `msdb`, а не
 # базу застосунку: він створює завдання обслуговування під окремим
 # principal (`D-66`) і виконується DBA один раз, а не при кожній перевірці
 # розгортання.
 $onDisk = Get-ChildItem -Path $sql -Filter '*.sql' | Select-Object -ExpandProperty Name
 $missed = $onDisk | Where-Object {
-    $_ -notin $scripts -and $_ -ne '14-agent-jobs.sql'
+    $_ -notin $scripts -and $_ -notin '14-agent-jobs.sql', '16-resource-governor.sql'
 }
 
 if ($missed) {
