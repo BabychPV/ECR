@@ -225,6 +225,38 @@ public sealed class RecalculationJobSheetScopeResultsTests(SqlServerFixture sql)
     }
 
     /// <summary>
+    /// D-557 (D-2 стенда Land): методологія, СПІЛЬНА для чернеткового й ЗАТВЕРДЖЕНОГО аркушів, перераховується на
+    /// чернетковому, а числа затвердженого лишаються як були — і для документа, і для області аркуша, і при повторі.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ МУТАЦІЙНИЙ ДОКАЗ: у <c>BindingsAsync</c> прибрати <c>.Where(i =&gt; !IsApproved(i))</c> із <c>byPeriod</c> —
+    /// затверджений рядок A стає 2001/3001 (D-328), червоні всі три твердження.
+    /// </remarks>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "D-2")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Спільна_методологія_не_змінює_числа_затвердженого_аркуша_а_чернетковий_рахує(bool sheetScope)
+    {
+        var arranged = await ArrangeAsync(submitSecondSheet: false, sharedMethodology: true);
+        await RunJobAsync(arranged, SheetRequest(arranged, sheetDefId: null), label: 1_000m, stampTables: true);
+        Assert.Equal(["A|1001", "A|1001", "B|1001"], await ShapeAsync(arranged));
+
+        await SubmitSecondSheetAsync(arranged);
+        var request = SheetRequest(arranged, sheetScope ? arranged.Document.SheetDefId : null);
+        await RunJobAsync(arranged, request, label: 2_000m, stampTables: true);
+
+        // Таблиця першого аркуша — нові числа; таблиця затвердженого другого — старі (раніше обидва були 2001).
+        Assert.Equal(["A|1001", "A|2001", "B|1001"], await ShapeAsync(arranged));
+
+        // Повтор не множить і не губить перенесене.
+        await RunJobAsync(arranged, request, label: 3_000m, stampTables: true);
+        Assert.Equal(["A|1001", "A|3001", "B|1001"], await ShapeAsync(arranged));
+    }
+
+    /// <summary>
     /// AN-105 / D2-03: аркуш ПОДАНО Й ЗАТВЕРДЖЕНО, поки задача рахувала методології (після рішення «що рахувати»
     /// і до перемикання актуальності). Прогін не стає актуальним, числа затвердженого аркуша — від R1.
     /// ✎ B79: відмовляє саме затвердження (<c>SubmitSecondSheetAsync</c> затверджує); лише подання —

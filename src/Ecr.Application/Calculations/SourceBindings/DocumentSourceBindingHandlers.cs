@@ -211,8 +211,12 @@ public sealed class SwitchDocumentSourceStateHandler(
 
         var changed = false;
         var queued = new List<int>();
+        var enlist = jobs.EnlistsInCallerTransaction;
+        var pending = new List<(string Target, RegistryImpactRecalculationRequest Request)>();
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            pending.Clear();
+            queued.Clear();
             var binding = await store.LockAsync(id, innerCt).ConfigureAwait(false)
                           ?? throw DocumentSourceBindings.NotFound(id);
 
@@ -250,19 +254,26 @@ public sealed class SwitchDocumentSourceStateHandler(
                 foreach (var year in await store.SourceYearsAsync(id, innerCt).ConfigureAwait(false))
                 {
                     // ✎ B179 L2: зміна джерела за зв'язкою — споживачі з графа (а не з ручного переліку/результатів), увесь рік.
-                    await jobs.EnqueueCoalescedAsync<IRegistryImpactRecalculationJob>(
-                            RegistryImpactRecalculationTarget.ForSourceChange(binding.Id, year, month: null),
-                            new RegistryImpactRecalculationRequest(
-                                binding.RegistryDefId,
-                                [],
-                                string.Create(
-                                    CultureInfo.InvariantCulture,
-                                    $"{binding.Code}: source state {DocumentSourceBindings.StateName(old)} -> {DocumentSourceBindings.StateName(target)}"),
-                                year,
-                                binding.Id),
-                            innerCt,
-                            createdByUserId: userId)
-                        .ConfigureAwait(false);
+                    var pendingJob = (
+                        RegistryImpactRecalculationTarget.ForSourceChange(binding.Id, year, month: null),
+                        new RegistryImpactRecalculationRequest(
+                            binding.RegistryDefId,
+                            [],
+                            string.Create(
+                                CultureInfo.InvariantCulture,
+                                $"{binding.Code}: source state {DocumentSourceBindings.StateName(old)} -> {DocumentSourceBindings.StateName(target)}"),
+                            year,
+                            binding.Id));
+                    pending.Add(pendingJob);
+
+                    // ✎ D-557: черга в базі приєднується до транзакції; Quartz — ні (див. нижче, після коміту).
+                    if (enlist)
+                    {
+                        await jobs.EnqueueCoalescedAsync<IRegistryImpactRecalculationJob>(
+                                pendingJob.Item1, pendingJob.Item2, innerCt, createdByUserId: userId)
+                            .ConfigureAwait(false);
+                    }
+
                     queued.Add(year);
                 }
             }
@@ -285,6 +296,19 @@ public sealed class SwitchDocumentSourceStateHandler(
                     currentUser.CorrelationId),
                 innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
+
+        // ⛔ D-557 (D-3 стенда Land): задача Quartz стартує негайно, а її запис прогресу (`itg.JobProgress`, Queued) лежить
+        // у ще не завершеній транзакції — за RCSI задача його не бачила, її `StartAsync` вставляв дубль ключа й падав;
+        // рядок лишався `Queued` навіки, а залежні не перераховувались. Поза базою ставимо ПІСЛЯ коміту.
+        if (!enlist)
+        {
+            foreach (var (jobTarget, jobRequest) in pending)
+            {
+                await jobs.EnqueueCoalescedAsync<IRegistryImpactRecalculationJob>(
+                        jobTarget, jobRequest, ct, createdByUserId: userId)
+                    .ConfigureAwait(false);
+            }
+        }
 
         // Після коміту: хук джерела бачить новий стан одразу (за ApprovedOnly мовчить, назад на Any — знову ставить).
         if (changed)
@@ -373,8 +397,12 @@ public sealed class SwitchDocumentSourceFlagsHandler(
 
         var changed = false;
         var queued = new List<int>();
+        var enlist = jobs.EnlistsInCallerTransaction;
+        var pending = new List<(string Target, RegistryImpactRecalculationRequest Request)>();
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            pending.Clear();
+            queued.Clear();
             var binding = await store.LockAsync(id, innerCt).ConfigureAwait(false)
                           ?? throw DocumentSourceBindings.NotFound(id);
 
@@ -392,19 +420,26 @@ public sealed class SwitchDocumentSourceFlagsHandler(
             {
                 foreach (var year in await store.SourceYearsAsync(id, innerCt).ConfigureAwait(false))
                 {
-                    await jobs.EnqueueCoalescedAsync<IRegistryImpactRecalculationJob>(
-                            RegistryImpactRecalculationTarget.ForSourceChange(binding.Id, year, month: null),
-                            new RegistryImpactRecalculationRequest(
-                                binding.RegistryDefId,
-                                [],
-                                string.Create(
-                                    CultureInfo.InvariantCulture,
-                                    $"{binding.Code}: readFromDocument {oldRead} -> {binding.ReadFromDocument}"),
-                                year,
-                                binding.Id),
-                            innerCt,
-                            createdByUserId: userId)
-                        .ConfigureAwait(false);
+                    var pendingJob = (
+                        RegistryImpactRecalculationTarget.ForSourceChange(binding.Id, year, month: null),
+                        new RegistryImpactRecalculationRequest(
+                            binding.RegistryDefId,
+                            [],
+                            string.Create(
+                                CultureInfo.InvariantCulture,
+                                $"{binding.Code}: readFromDocument {oldRead} -> {binding.ReadFromDocument}"),
+                            year,
+                            binding.Id));
+                    pending.Add(pendingJob);
+
+                    // ✎ D-557: див. SwitchDocumentSourceStateHandler.
+                    if (enlist)
+                    {
+                        await jobs.EnqueueCoalescedAsync<IRegistryImpactRecalculationJob>(
+                                pendingJob.Item1, pendingJob.Item2, innerCt, createdByUserId: userId)
+                            .ConfigureAwait(false);
+                    }
+
                     queued.Add(year);
                 }
             }
@@ -430,6 +465,17 @@ public sealed class SwitchDocumentSourceFlagsHandler(
                     currentUser.CorrelationId),
                 innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
+
+        // ✎ D-557: поза базою — після коміту (див. SwitchDocumentSourceStateHandler).
+        if (!enlist)
+        {
+            foreach (var (jobTarget, jobRequest) in pending)
+            {
+                await jobs.EnqueueCoalescedAsync<IRegistryImpactRecalculationJob>(
+                        jobTarget, jobRequest, ct, createdByUserId: userId)
+                    .ConfigureAwait(false);
+            }
+        }
 
         if (changed)
         {
