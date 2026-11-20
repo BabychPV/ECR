@@ -217,6 +217,24 @@ export function ScriptPreviewPanel(props: ScriptPreviewPanelProps): JSX.Element 
         </Alert>
       )}
 
+      {/* PSS-21: межі ПЕРЕГЛЯДУ (у перерахунку їх немає) — окремим поясненням, щоб #BUDGET і неповні величини не
+          читалися як помилка скрипта. */}
+      {shown !== null && shown.preview.diagnostics.length === 0 && shown.preview.budgetExhausted === true && (
+        <Alert
+          color="statusWarning"
+          title={t('methodologyScript.preview.budgetExhausted.title')}
+          data-testid="script-preview-budget-exhausted"
+        >
+          {t('methodologyScript.preview.budgetExhausted')}
+        </Alert>
+      )}
+
+      {shown !== null && shown.preview.diagnostics.length === 0 && hasTruncatedValues(shown.preview) && (
+        <Alert color="gray" data-testid="script-preview-values-truncated">
+          {t('methodologyScript.preview.valuesTruncated')}
+        </Alert>
+      )}
+
       {shown !== null && shown.preview.diagnostics.length === 0 && (
         <ScriptPreviewTable
           preview={shown.preview}
@@ -226,6 +244,11 @@ export function ScriptPreviewPanel(props: ScriptPreviewPanelProps): JSX.Element 
       )}
     </Stack>
   );
+}
+
+/** Чи урізано величини хоч одного рядка стелею відповіді перегляду (50 000 на запит). */
+function hasTruncatedValues(preview: ScriptPreviewDto): boolean {
+  return preview.tables.some((table) => table.rows.some((row) => row.valuesTruncated === true));
 }
 
 /** Результат перегляду разом з вибором, для якого його порахували. */
