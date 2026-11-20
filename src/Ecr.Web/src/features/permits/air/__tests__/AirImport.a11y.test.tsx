@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Catalog, Shell, Themes } from '@/test/__tests__/a11yFixtures';
 import { describe as describeViolations, findViolations } from '@/test/a11y';
@@ -7,6 +7,7 @@ import * as airApi from '@/features/permits/air/airApi';
 import * as typesApi from '@/features/permits/api/typesApi';
 import { AirLimitsTab } from '../AirLimitsTab';
 import { AirImportWizard } from '../import/AirImportWizard';
+import { MappingStep } from '../import/MappingStep';
 import { airPermitType, analysis, card, preview, profile, profiles, result, scopeCodes, scopeFields, tree, xlsx } from './airFixtures';
 
 /**
@@ -106,10 +107,22 @@ describe('Air limits - доступність', { timeout: 300_000 }, () => {
       await screen.findByTestId('air-header-report');
       await clean(container);
 
+      // UX 20.11: the step's disclosures open (where the table is, the columns not imported) and «Change» of a found field.
+      fireEvent.click(within(screen.getByTestId('air-layout')).getByText(text('permits.air.import.rows.title'), { exact: false }));
+      fireEvent.click(screen.getByText('File columns not imported: 1'));
+      fireEvent.click(await screen.findByRole('button', { name: `Change the column of «${text('permits.air.import.field.naeCode')}»` }));
+      await screen.findByRole('textbox', { name: `File column for «${text('permits.air.import.field.naeCode')}»` });
+      await clean(container);
+      // The accessible names of «Change» / «Cancel» start with their visible text (WCAG 2.5.3).
+      fireEvent.click(screen.getByRole('button', { name: `Cancel — keep the column of «${text('permits.air.import.field.naeCode')}» as it is` }));
+
       fireEvent.click(screen.getByRole('button', { name: text('permits.air.import.map.saveProfile') }));
       await screen.findByRole('form', { name: text('permits.air.import.save.title') });
       await clean(container);
-      fireEvent.click(screen.getByRole('button', { name: text('common.cancel') }));
+      fireEvent.click(screen.getByRole('button', { name: text('permits.air.import.save.changeCode') }));
+      await screen.findByRole('textbox', { name: new RegExp(`^${text('permits.air.import.save.code')}`) });
+      await clean(container);
+      fireEvent.click(within(screen.getByRole('form', { name: text('permits.air.import.save.title') })).getByRole('button', { name: text('common.cancel') }));
 
       fireEvent.click(await screen.findByRole('button', { name: text('permits.air.import.map.edit') }));
       await screen.findAllByLabelText(text('permits.air.import.map.fieldName'));
@@ -128,6 +141,57 @@ describe('Air limits - доступність', { timeout: 300_000 }, () => {
 
       fireEvent.click(screen.getByRole('button', { name: text('permits.air.import.apply') }));
       await screen.findByTestId('air-import-result');
+      await clean(container);
+    });
+
+    it(`${colorScheme}: відповідність — обов'язкове поле не знайдено (вибір колонки в рядку), необов'язкові згорнуті`, async () => {
+      const missing = analysis({
+        canContinue: false,
+        // As the server answers a missing required column: no row read.
+        stats: { parents: 0, children: 0, distinctChildKeys: 0, groupRows: 0, skippedRows: 0 },
+        header: {
+          headerFromRow: 4,
+          headerToRow: 6,
+          dataFromRow: 9,
+          mapped: [{ column: 7, columnLetter: 'G', field: 'NaeCode', headerText: 'Source number', level: 'Parent' }],
+          unmapped: [
+            { column: 2, columnLetter: 'B', headerText: 'Shop', hasData: true },
+            { column: 27, columnLetter: 'AA', headerText: 'Tonnes a year', hasData: true },
+          ],
+        },
+        issues: [{ severity: 'Error', messageKey: 'err.ECR-IMP-0422.regColumnMissing', field: 'TonsPerYear', args: { field: 'TonsPerYear' } }],
+      });
+      const withOptional = { ...profile(), spec: { fields: [...(profile().spec.fields ?? []), { name: 'Height', patterns: ['Height'] }] } };
+      const noop = (): void => undefined;
+      const { container } = render(
+        <Shell colorScheme={colorScheme}>
+          <MappingStep
+            analysis={missing}
+            profile={withOptional}
+            spec={null}
+            onSpec={noop}
+            onReanalyse={noop}
+            reanalysing={false}
+            mayEditProfile
+            onSaveProfile={noop}
+            saving={false}
+            savedCode={null}
+            onApplySpec={noop}
+            mayAddColumn
+            onAddColumn={noop}
+            addingColumn={false}
+          />
+        </Shell>,
+      );
+      await screen.findByTestId('air-mapping-verdict');
+      fireEvent.click(within(screen.getByTestId('air-fields-absent')).getByText(/^Optional fields this file does not have/));
+      await clean(container);
+
+      // Review 20.11 (M2): taking a column another field reads asks first, in the row.
+      const tons = text('permits.air.substances.ty');
+      await userEvent.click(screen.getByRole('textbox', { name: `File column for «${tons}»` }));
+      await userEvent.click(await screen.findByRole('option', { name: /^G — Source number/ }));
+      await screen.findByTestId('air-column-move');
       await clean(container);
     });
   }

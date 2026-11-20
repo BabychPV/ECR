@@ -4,6 +4,7 @@ import { formatNumber } from '@/shared/format/number';
 import { t } from '@/shared/i18n';
 import type { AirAnalysis } from '../airTypes';
 import { NewColumnKinds, suggestedName, type NewColumnKind, type NewColumnLevel, type NewColumnRequest } from './addColumn';
+import type { ColumnSamples } from './xlsxSamples';
 
 export interface HeaderRows {
   readonly headerFrom: number;
@@ -31,6 +32,9 @@ function whole(value: string | number): number {
 /**
  * «Where the table is in the file»: the header block and the first data row, found automatically by the server. The user
  * changes the numbers when the file has extra rows at the top and re-reads the file with them.
+ *
+ * UX 20.11: the form lives in a disclosure of the step (its summary is the title and says what was found), so it has no title
+ * and no frame of its own.
  */
 export function HeaderRowsForm({
   detected,
@@ -60,7 +64,7 @@ export function HeaderRowsForm({
 
   return (
     <form
-      className="pi-panel"
+      className="pi-form"
       aria-label={t('permits.air.import.rows.title')}
       onSubmit={(event) => {
         event.preventDefault();
@@ -68,7 +72,6 @@ export function HeaderRowsForm({
         if ((valid || rowsAuto) && !busy) onApply(choose ? { ...rows, sheet, rowsAuto } : rows);
       }}
     >
-      <Text fw={600}>{t('permits.air.import.rows.title')}</Text>
       <Text size="sm" c="dimmed">
         {t('permits.air.import.rows.hint')}
       </Text>
@@ -207,17 +210,20 @@ export function UnmappedColumns({
   mayAdd,
   onAdd,
   busy,
+  samples = null,
 }: {
   readonly columns: readonly Unmapped[];
   readonly mayAdd: boolean;
   readonly onAdd: (request: NewColumnRequest) => void;
   readonly busy: boolean;
+  /** UX 20.11: values under each column (read from the chosen workbook), so the user recognises it; `null` — none. */
+  readonly samples?: ColumnSamples | null;
 }): JSX.Element | null {
   const [open, setOpen] = useState<string | null>(null);
   if (columns.length === 0) return null;
 
   return (
-    <details className="pi-panel" open={open !== null ? true : undefined}>
+    <details className="pi-panel" open={open !== null ? true : undefined} data-testid="air-unmapped">
       <summary>{t('permits.air.import.map.unmapped', { count: formatNumber(columns.length) })}</summary>
       <Text size="sm" c="dimmed">
         {t('permits.air.import.map.unmappedHint')}
@@ -229,6 +235,9 @@ export function UnmappedColumns({
             <span>
               {column.headerText}
               {column.hasData ? ` · ${t('permits.air.import.map.hasData')}` : ''}
+              {(samples?.get(column.column) ?? []).length > 0 && (
+                <span className="pi-samples">{t('permits.air.import.map.samples', { values: (samples?.get(column.column) ?? []).join(' · ') })}</span>
+              )}
             </span>
             {mayAdd && open !== column.columnLetter ? (
               <Button

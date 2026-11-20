@@ -337,6 +337,44 @@ export function fileColumnOptions(
     .map(([value, { label }]) => ({ value, label }));
 }
 
+/** A specification as text that does not depend on the order of keys; an absent value and `null` are the same. */
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+  if (value !== null && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, item]) => item !== undefined && item !== null)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+
+    return `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`).join(',')}}`;
+  }
+
+  return JSON.stringify(value) ?? 'null';
+}
+
+/**
+ * What the file was last read with: a specification, `null` — the profile of the draft, `UnknownRead` — not known any more (a
+ * profile was saved from edits the file was not re-read with): a re-read is due whatever the mapping in hand.
+ */
+export const UnknownRead = 'unknown';
+export type AnalysedSpec = ImportSpec | null | typeof UnknownRead;
+
+/**
+ * The file was read with another mapping than the one in hand: «Next: preview» waits for a re-read. `null` stands for the
+ * profile's own specification (`profileSpec`; `undefined` while it is read).
+ *
+ * ⚠ UX 20.11: compared by content, not by reference — «Edit mapping» opened and nothing changed (or a change undone) no longer
+ * asks for a re-read of the very same mapping.
+ */
+export function specPending(current: ImportSpec | null, analysed: AnalysedSpec, profileSpec: ImportSpec | undefined): boolean {
+  if (analysed === UnknownRead) return true;
+  if (current === analysed) return false;
+  const now = current ?? profileSpec;
+  const read = analysed ?? profileSpec;
+  if (now === undefined || read === undefined) return true;
+
+  return canonical(now) !== canonical(read);
+}
+
 /** Специфікацію можна зберегти/аналізувати: у кожного поля є ім'я, імена унікальні. */
 export function specProblem(spec: ImportSpec): 'nameRequired' | 'nameDuplicate' | null {
   const seen = new Set<string>();
@@ -381,12 +419,23 @@ export function profileCodeProblem(code: string): boolean {
   return !/^[A-Z][A-Z0-9_]{1,63}$/.test(code);
 }
 
+/** Cyrillic (ru, uk, kz) → Latin for a profile code: a Cyrillic name gives a readable code too (UX 20.11). */
+const Translit: Readonly<Record<string, string>> = {
+  а: 'a', б: 'b', в: 'v', г: 'g', ґ: 'g', д: 'd', е: 'e', ё: 'yo', є: 'ye', ж: 'zh', з: 'z', и: 'i', і: 'i', ї: 'yi', й: 'y',
+  к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p', р: 'r', с: 's', т: 't', у: 'u', ф: 'f', х: 'kh', ц: 'ts', ч: 'ch', ш: 'sh',
+  щ: 'shch', ъ: '', ы: 'y', ь: '', э: 'e', ю: 'yu', я: 'ya', ә: 'a', ғ: 'g', қ: 'q', ң: 'n', ө: 'o', ұ: 'u', ү: 'u', һ: 'h',
+};
+
+export function transliterate(text: string): string {
+  return [...text].map((char) => Translit[char.toLocaleLowerCase('ru-RU')] ?? char).join('');
+}
+
 /**
- * Code suggested from the profile name (the user may still change it): Latin letters and digits upper case, the rest `_`;
- * a name without Latin letters (Cyrillic) gives `''` — the user enters the code.
+ * Code generated from the profile name (UX 20.11: the user gives a name only, and may still change the code): Cyrillic is
+ * transliterated, Latin letters and digits upper case, the rest `_`; a name with nothing of that (only signs) gives `''`.
  */
 export function profileCodeFrom(name: string): string {
-  const code = name
+  const code = transliterate(name)
     .toLocaleUpperCase('en-US')
     .replace(/[^A-Z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '')

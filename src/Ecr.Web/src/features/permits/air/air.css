@@ -341,6 +341,66 @@
 }
 
 /*
+ * UX 20.11, step «Mapping»: the fields table. The state is said in words (found / not found / not in this file) and coloured
+ * with the status tokens (both schemes; contrast — `contrast.test.ts`); «not in this file» is not a problem, so it is dimmed.
+ */
+.pi-state {
+  font-weight: 600;
+}
+
+.pi-state[data-state='found'] {
+  color: var(--mantine-color-statusSuccess-text);
+}
+
+.pi-state[data-state='missing'] {
+  color: var(--mantine-color-statusError-text);
+}
+
+.pi-state[data-state='notInFile'] {
+  color: var(--mantine-color-dimmed);
+  font-weight: 400;
+}
+
+.pi-need[data-required='false'] {
+  color: var(--mantine-color-dimmed);
+}
+
+.pi-pick {
+  min-width: 16rem;
+}
+
+.pi-pick > .mantine-Button-root {
+  margin-inline-start: var(--mantine-spacing-xs);
+}
+
+.pi-column {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--mantine-spacing-xs);
+}
+
+.pi-samples,
+.pi-samples-cell {
+  color: var(--mantine-color-dimmed);
+  font-size: var(--mantine-font-size-xs);
+}
+
+.pi-samples {
+  display: block;
+}
+
+.pi-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mantine-spacing-sm);
+}
+
+.pi-panel details > summary {
+  cursor: pointer;
+}
+
+/*
  * U-8 (аудит 2026-11, ФВ-14.11): статус — токенами теми; `-text` сам перемикається між світлою й темною схемою, контраст —
  * `contrast.test.ts`. (Раніше тут стояли сирі hex і палітра red/orange: голі `red-text`/`orange-text` давали на сірому тлі
  * таблиці 3.06 і 2.39 — статусні токени темніші.)
