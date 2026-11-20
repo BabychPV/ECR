@@ -38,6 +38,18 @@ GO
 --
 -- ⚠ @Today — для тестів і ручного запуску «на дату»; NULL = поточна дата UTC
 --    (як і в `usp_EnsureAuditPartitions`, якій він передається далі).
+--
+-- ✎ PSS-09 (аудит 20.11; рішення людини 20.11 №6 — межі для поточного року):
+--  * діапазон — УСІ місяці поточного року Y (від січня), наступного року Y+1 і січень Y+2
+--    (він закриває грудень Y+1), а також @MonthsAhead місяців уперед, якщо це далі.
+--    Раніше бралися лише @MonthsAhead місяців від наступного: місяці поточного року, яких
+--    чомусь немає (база розгорнута пізно, завдання Agent не працювало), не додавались ніколи,
+--    а грудень наступного року ділив крайню праву партицію з усім майбутнім;
+--  * SPLIT партиції, у якій уже є рядки (будь-яка таблиця на ps_ByPeriodKey, купа чи
+--    кластерний індекс), НЕ виконується: це переміщення даних під Sch-M на всіх таблицях
+--    схеми. Межа пропускається, прогін пише `Degraded` зі списком `refused` і причиною;
+--    решта меж додається як звичайно. Розв'язка — вручну у вікні обслуговування (runbook);
+--    `PartitionCheckJob` окремо сигналізує про рядки в крайніх партиціях.
 CREATE OR ALTER PROCEDURE arc.usp_EnsurePartitions
     @MonthsAhead       int  = 6,
     @Today             date = NULL,
@@ -54,20 +66,42 @@ BEGIN
         THROW 50017, N'@LockTimeoutMs і @MaxAttempts мають бути додатними, @RetryDelaySeconds — від 0 до 3600.', 1;
 
     DECLARE @started datetime2(3) = SYSUTCDATETIME();
-    DECLARE @d date = DATEADD(MONTH, 1, COALESCE(@Today, CAST(GETUTCDATE() AS date)));
-    DECLARE @i int = 0, @key int, @sql nvarchar(600);
+    DECLARE @t date = COALESCE(@Today, CAST(GETUTCDATE() AS date));
+    -- PSS-09: від січня поточного року до пізнішого з «січень Y+2» і «поточний місяць + @MonthsAhead».
+    DECLARE @d date = DATEFROMPARTS(YEAR(@t), 1, 1);
+    DECLARE @last date = DATEADD(MONTH, COALESCE(@MonthsAhead, 0), DATEFROMPARTS(YEAR(@t), MONTH(@t), 1));
+    IF @last < DATEFROMPARTS(YEAR(@t) + 2, 1, 1)
+        SET @last = DATEFROMPARTS(YEAR(@t) + 2, 1, 1);
+    DECLARE @key int, @sql nvarchar(600), @p int, @rows bigint;
     DECLARE @attempt int, @done bit, @added int = 0, @retries int = 0;
+    DECLARE @refused nvarchar(max) = N'';
     DECLARE @delay char(8) =
         CONVERT(char(8), DATEADD(SECOND, @RetryDelaySeconds, CAST('00:00:00' AS time(0))), 108);
 
     BEGIN TRY
-        WHILE @i < @MonthsAhead
+        WHILE @d <= @last
         BEGIN
             SET @key = YEAR(@d) * 100 + MONTH(@d);
 
+            -- PSS-09: межа всередині партиції з рядками — не SPLIT (переміщення даних під Sch-M).
+            -- Рядки рахуються за sys.partitions (купа / кластерний індекс кожної таблиці на
+            -- ps_ByPeriodKey, включно з arc.*): метадані, без читання таблиць.
+            SET @rows = -1;   -- -1: межа вже є
             IF NOT EXISTS (SELECT 1 FROM sys.partition_range_values rv
                            JOIN sys.partition_functions pf ON pf.function_id = rv.function_id
                            WHERE pf.name = N'pf_ByPeriodKey' AND CAST(rv.value AS int) = @key)
+            BEGIN
+                SET @p = $PARTITION.pf_ByPeriodKey(@key);
+                SELECT @rows = ISNULL(SUM(prt.rows), 0)
+                  FROM sys.partitions AS prt
+                  JOIN sys.indexes AS ix ON ix.object_id = prt.object_id AND ix.index_id = prt.index_id
+                  JOIN sys.partition_schemes AS ps ON ps.data_space_id = ix.data_space_id
+                 WHERE ps.name = N'ps_ByPeriodKey' AND ix.index_id IN (0, 1) AND prt.partition_number = @p;
+            END
+
+            IF @rows > 0
+                SET @refused = @refused + N',' + CAST(@key AS nvarchar(10));
+            ELSE IF @rows = 0
             BEGIN
                 SET @sql = N'SET LOCK_TIMEOUT ' + CAST(@LockTimeoutMs AS nvarchar(10)) + N'; '
                          + N'ALTER PARTITION SCHEME ps_ByPeriodKey NEXT USED [DATA_HOT]; '
@@ -96,16 +130,22 @@ BEGIN
             END
 
             SET @d = DATEADD(MONTH, 1, @d);
-            SET @i = @i + 1;
         END
 
         -- Аудит: межі pf_AuditByMonth - на 12 місяців уперед (окрема функція, окрема процедура).
         EXEC arc.usp_EnsureAuditPartitions @MonthsAhead = 12, @Today = @Today;
 
+        -- PSS-09: пропущена межа — Degraded (зведення збоїв бере Status <> Succeeded), не провал кроку.
         INSERT INTO itg.MaintenanceRun (JobCode, StartedAt, FinishedAt, Status, DetailsJson)
-        VALUES (N'EnsurePartitions', @started, SYSUTCDATETIME(), N'Succeeded',
+        VALUES (N'EnsurePartitions', @started, SYSUTCDATETIME(),
+                CASE WHEN @refused = N'' THEN N'Succeeded' ELSE N'Degraded' END,
                 N'{"added":' + CAST(@added AS nvarchar(10))
-                + N',"retries":' + CAST(@retries AS nvarchar(10)) + N'}');
+                + N',"retries":' + CAST(@retries AS nvarchar(10))
+                + CASE WHEN @refused = N'' THEN N''
+                       ELSE N',"refused":[' + STUFF(@refused, 1, 1, N'')
+                            + N'],"reason":"партиція з рядками: SPLIT переміщував би дані під Sch-M; межу додати вручну у вікні обслуговування"'
+                  END
+                + N'}');
     END TRY
     BEGIN CATCH
         IF XACT_STATE() <> 0 ROLLBACK;
@@ -202,19 +242,22 @@ GO
 -- партиція НЕ переноситься, рядок 'Degraded' (потрібна ручна розв'язка, runbook).
 --
 -- ⚠ Ідемпотентна: порожні/уже перенесені партиції пропускаються мовчки (без
--- рядка журналу). Поточний і «гарячі» місяці (нові за @OlderThanMonths, мінімум 1
--- = поточний місяць ніколи не архівується) не чіпає. Читачі (AuditReader)
--- дивляться лише в aud.* — архівований період із UI історії зникає; тому дефолт
--- 24 місяці (припущення, не вказане в D-236; змінюється параметром).
+-- рядка журналу). Читачі (AuditReader) дивляться лише в aud.* — архівований
+-- період із UI історії зникає.
 --
--- ⚠ WITH EXECUTE AS OWNER: обліковому запису застосунку DDL-прав не треба (D-66)
--- — лише EXECUTE на процедуру; ALTER TABLE … SWITCH виконується від dbo.
-CREATE OR ALTER PROCEDURE arc.usp_ArchiveAudit
-    @OlderThanMonths int = 24,
-    @Today date = NULL,
+-- ✎ PSS-27 (аудит 20.11; рішення людини 20.11 №7 — мінімальна глибина аудиту 120
+-- місяців): механіка переносу — у ВНУТРІШНІЙ `arc.usp_ArchiveAuditBefore` (межа
+-- @Cutoff явно). Обліковий запис служби права EXECUTE на неї НЕ має (його немає в
+-- переліку прав служби, runbook) — її кличе лише `arc.usp_ArchiveAudit` нижче (від
+-- імені власника) і DBA вручну. Публічна `arc.usp_ArchiveAudit` сама рахує межу:
+-- @OlderThanMonths НЕ менше 120 (менше — піднімається до 120), @Today не пізніше
+-- завтрашнього дня сервера (THROW 50018). Раніше викликач з EXECUTE міг передати
+-- (1, '2099-01-01') і перенести з `aud.*` (і з UI історії) весь аудит.
+CREATE OR ALTER PROCEDURE arc.usp_ArchiveAuditBefore
+    @Cutoff datetime2(3),
+    @OlderThanMonths int,
     @PartitionsSwitched int = NULL OUTPUT,
     @RowsSwitched bigint = NULL OUTPUT
-WITH EXECUTE AS OWNER
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -226,13 +269,10 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM sys.partition_functions WHERE name = N'pf_AuditByMonth')
         RETURN;
 
-    IF @OlderThanMonths IS NULL OR @OlderThanMonths < 1
-        SET @OlderThanMonths = 1;
+    IF @Cutoff IS NULL
+        THROW 50018, N'arc.usp_ArchiveAuditBefore: @Cutoff обов''язковий.', 1;
 
-    DECLARE @t date = COALESCE(@Today, CAST(GETUTCDATE() AS date));
-    DECLARE @cutoff datetime2(3) =
-        DATEADD(MONTH, -@OlderThanMonths, DATEFROMPARTS(YEAR(@t), MONTH(@t), 1));
-    DECLARE @maxPart int = $PARTITION.pf_AuditByMonth(@cutoff) - 1;
+    DECLARE @maxPart int = $PARTITION.pf_AuditByMonth(@Cutoff) - 1;
 
     DECLARE @work TABLE
     (
@@ -291,7 +331,8 @@ BEGIN
                 + N',"periodStart":' + ISNULL(N'"' + CONVERT(nvarchar(10), @lo, 120) + N'"', N'null')
                 + N',"rows":' + CAST(@cnt AS nvarchar(20))
                 + N',"by":"' + STRING_ESCAPE(ORIGINAL_LOGIN(), N'json')
-                + N'","olderThanMonths":' + CAST(@OlderThanMonths AS nvarchar(10)) + N'}';
+                + N'","olderThanMonths":' + ISNULL(CAST(@OlderThanMonths AS nvarchar(10)), N'null')
+                + N',"cutoff":"' + CONVERT(nvarchar(10), @Cutoff, 120) + N'"}';
 
             IF @dstRows > 0
             BEGIN
@@ -327,5 +368,50 @@ BEGIN
             THROW;
         END CATCH
     END
+END;
+GO
+
+-- Публічна точка архівації аудиту (нічний `PartitionCheckJob`, DBA). PSS-27: межу рахує САМА,
+-- з обмеженнями, яких викликач не обійде:
+--  * @OlderThanMonths < 120 (або NULL) → 120: мінімальна глибина аудиту в `aud.*` — 120 місяців
+--    (рішення людини 20.11 №7). Застосунок передає налаштування `Retention.AuditMonths`
+--    (`sys_ecr.SystemSetting`, з тією самою підлогою), але підлога тут — остання лінія;
+--  * @Today пізніше за завтрашній день сервера (UTC) → THROW 50018: «сьогодні» з майбутнього
+--    зсунуло б межу вперед. День запасу — розбіжність годинників вузла застосунку і SQL Server.
+-- ⚠ WITH EXECUTE AS OWNER: обліковому запису застосунку DDL-прав не треба (D-66) — лише EXECUTE
+-- на ЦЮ процедуру; `arc.usp_ArchiveAuditBefore` і ALTER TABLE … SWITCH виконуються від dbo.
+CREATE OR ALTER PROCEDURE arc.usp_ArchiveAudit
+    @OlderThanMonths int = 120,
+    @Today date = NULL,
+    @PartitionsSwitched int = NULL OUTPUT,
+    @RowsSwitched bigint = NULL OUTPUT
+WITH EXECUTE AS OWNER
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET @PartitionsSwitched = 0;
+    SET @RowsSwitched = 0;
+
+    DECLARE @serverToday date = CAST(SYSUTCDATETIME() AS date);
+    IF @Today > DATEADD(DAY, 1, @serverToday)
+    BEGIN
+        DECLARE @future nvarchar(400) = N'arc.usp_ArchiveAudit: @Today ' + CONVERT(nvarchar(10), @Today, 120)
+            + N' пізніше за дату сервера ' + CONVERT(nvarchar(10), @serverToday, 120)
+            + N' (UTC); межа архівації рахується лише від поточної дати.';
+        THROW 50018, @future, 1;
+    END
+
+    IF @OlderThanMonths IS NULL OR @OlderThanMonths < 120
+        SET @OlderThanMonths = 120;
+
+    DECLARE @t date = COALESCE(@Today, @serverToday);
+    DECLARE @cutoff datetime2(3) =
+        DATEADD(MONTH, -@OlderThanMonths, DATEFROMPARTS(YEAR(@t), MONTH(@t), 1));
+
+    EXEC arc.usp_ArchiveAuditBefore
+        @Cutoff = @cutoff,
+        @OlderThanMonths = @OlderThanMonths,
+        @PartitionsSwitched = @PartitionsSwitched OUTPUT,
+        @RowsSwitched = @RowsSwitched OUTPUT;
 END;
 GO
