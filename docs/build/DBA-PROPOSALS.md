@@ -43,14 +43,14 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes
 | Альтернатива | Окремі транзакції по таблицях у `MigrationStore` — порушує атомарність переносу, **не рекомендується** |
 | Хто вирішує | DBA; замовнику не питаємо (рішення координатора 08.10) |
 | Статус | proposed |
+| Уточнення (аудит PSS-2026-11-20, PSS-05) | Ескалація на стенді **не спостерігалась** (DMV з 17.11: `doc.CellValue` 0 спроб / 0 промоцій, `aud.CellChange` 7 / 0) — пропозиція превентивна. Застосунок сам обмежує оператор запису ≤ 4000 рядків у тій самій транзакції (`NormalizedCellStore.CellWriteChunkSize`: `MERGE doc.CellValue`, `INSERT aud.CellChange`; тест `CellBatchEscalationTests`), тож типові пакети поза порогом ≈5000 замків. `LOCK_ESCALATION = AUTO` **не** рекомендується як заміна: уся конкуренція — в одній партиції (період), ескалація до партиції блокує ті самі записи |
 
 Приклад скрипта:
 
 ```sql
 ALTER TABLE doc.CellValue SET (LOCK_ESCALATION = DISABLE);
 ALTER TABLE doc.TableRow  SET (LOCK_ESCALATION = DISABLE);
--- для партиціонованих таблиць альтернатива:
--- ALTER TABLE doc.CellValue SET (LOCK_ESCALATION = AUTO);
+-- AUTO (ескалація до партиції) не допомагає: усе змагання в одній партиції, див. «Уточнення» вище
 -- перевірка:
 SELECT name, lock_escalation_desc FROM sys.tables
 WHERE object_id IN (OBJECT_ID(N'doc.CellValue'), OBJECT_ID(N'doc.TableRow'));
