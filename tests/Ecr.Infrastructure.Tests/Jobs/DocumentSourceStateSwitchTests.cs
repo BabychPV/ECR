@@ -343,6 +343,57 @@ public sealed class DocumentSourceStateSwitchTests(SqlServerFixture sql) : DbJob
         Assert.Equal(loads + 2, cache.Loads);
     }
 
+    /// <summary>
+    /// D-557 (D-3 стенда Land): черга ПОЗА базою (Quartz) ставить задачу після коміту, а не всередині транзакції:
+    /// задача стартує негайно, а її запис прогресу ще не видно (RCSI) — `StartAsync` вставляв дубль ключа, рядок
+    /// лишався `Queued` назавжди.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ МУТАЦІЙНИЙ ДОКАЗ: у обробниках повернути постановку всередину транзакції (умова <c>enlist</c> завжди
+    /// істинна) — «у транзакції» замість «після коміту», червоний обидва.
+    /// </remarks>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Черга_поза_базою_ставить_задачу_після_коміту_а_не_в_транзакції(bool flags)
+    {
+        var a = await ArrangeAsync();
+        await using var host = NewHost();
+        var access = Substitute.For<IAccessDecisionService>();
+        access.BuildProfileAsync(a.UserId, Arg.Any<CancellationToken>())
+            .Returns(new AccessBuilder { UserId = a.UserId }.Permission(DocumentSourceBindings.Permission).Build());
+        var user = Substitute.For<ICurrentUser>();
+        user.UserId.Returns(a.UserId);
+        var overrides = Substitute.For<IDocumentSourceFlagOverrides>();
+        overrides.ReadFromDocument.Returns((bool?)true);
+
+        var inTransaction = new List<bool>();
+        var jobs = Substitute.For<IBackgroundJobScheduler>();
+        jobs.EnlistsInCallerTransaction.Returns(false);
+        jobs.EnqueueCoalescedAsync<IRegistryImpactRecalculationJob>(
+                Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
+            .Returns(_ =>
+            {
+                inTransaction.Add(host.Db.Database.CurrentTransaction is not null);
+                return Task.FromResult("job");
+            });
+
+        var store = new DocumentSourceBindingStore(host.Db, DependencyGraphTestKit.Provider(host.Db));
+        var queued = flags
+            ? (await new SwitchDocumentSourceFlagsHandler(
+                    store, overrides, access, user, new UnitOfWork(host.Db), new AuditWriter(host.Db), jobs, new TestClock(Now))
+                .HandleAsync(
+                    a.BindingId,
+                    new SwitchDocumentSourceFlagsRequest(ReadFromDocument: false, RecalculateDependents: true),
+                    CancellationToken.None)).QueuedYears
+            : (await new SwitchDocumentSourceStateHandler(
+                    store, overrides, access, user, new UnitOfWork(host.Db), new AuditWriter(host.Db), jobs, new TestClock(Now))
+                .HandleAsync(a.BindingId, new SwitchDocumentSourceStateRequest("approvedOnly"), CancellationToken.None)).QueuedYears;
+
+        Assert.Equal([Year], queued);
+        Assert.Equal([false], inTransaction);
+    }
+
     private async Task<bool> InGateAsync(SourceBindingGateCache cache, int bindingId)
     {
         await using var db = Sql.CreateContext();
