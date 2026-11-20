@@ -13,7 +13,7 @@ namespace Ecr.Infrastructure.Jobs;
 /// Прибирання покинутої роботи: завислі <c>itg.JobProgress</c>,
 /// <c>itg.CollectionRun</c>, <c>itg.MaintenanceRun</c> (U4, U11) і
 /// <c>calc.CalculationRun</c> (P3) плюс
-/// ретенція завершених записів прогресу (аудит P2).
+/// ретенція завершених записів прогресу (аудит P2) і технічних журналів (PSS-13).
 /// </summary>
 /// <remarks>
 /// ⛔ Раніше прибирання було ОДНЕ — на старті, і лише для
@@ -185,7 +185,95 @@ public sealed class AbandonedWorkSweeper(EcrDbContext db, IJobProgressStore prog
             ? await PurgeAsync(utcNow - IJobProgressStore.RetainFinishedFor, ct).ConfigureAwait(false)
             : 0;
 
-        return new SweepOutcome(jobs, collection, maintenance, purged, calculation);
+        var logs = purge
+            ? await PurgeTechnicalLogsAsync(utcNow, ct).ConfigureAwait(false)
+            : 0;
+
+        return new SweepOutcome(jobs, collection, maintenance, purged, calculation, logs);
+    }
+
+    /// <summary>Код прогонів архівації аудиту (<c>arc.usp_ArchiveAuditBefore</c>): слід переносу аудиту.</summary>
+    public const string AuditArchiveJobCode = "audit-archive";
+
+    /// <summary>
+    /// PSS-13: ретенція технічних журналів — <c>itg.NotificationOutbox</c> (лише завершені: <c>Sent</c>/<c>Failed</c>),
+    /// <c>itg.NotificationDelivery</c>, <c>itg.MaintenanceRun</c> (лише закриті і не останні свого коду й стану).
+    /// </summary>
+    /// <param name="utcNow">Поточний момент у UTC.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <returns>Скільки рядків видалено.</returns>
+    /// <remarks>
+    /// ⚠ Строк — налаштування <see cref="RetentionSettings.TechnicalLogDaysKey"/> (типово 400 днів, рішення людини
+    /// 20.11 №7), читається на кожному проході: зміна діє з наступного проходу, без перевидання.
+    /// <para>
+    /// ⛔ Що НЕ видаляється і чому:
+    /// <list type="bullet">
+    /// <item><c>itg.CollectionRun</c> / <c>itg.CollectionCoverage</c> — не журнал, а походження даних: покриття
+    /// читає пошук прогалин збору (<c>ReadCoverageIslandsAsync</c> — без нього старі інтервали вважались би
+    /// незібраними і збиралися б знову) і «Звідки це значення» (D-463); на прогін посилаються
+    /// <c>ext.RawDataPoint.CollectionRunId</c> і FK покриття;</item>
+    /// <item><c>Pending</c>/<c>Sending</c> у черзі сповіщень — ще не доставлені;</item>
+    /// <item>останній рядок кожної пари (код задачі, стан) у <c>itg.MaintenanceRun</c> — його читають «останній
+    /// прогін» (<c>NightlyCatchUp</c>, <c>FlertSyncStatusReader</c>, <c>PeriodStateJob</c>, зведення); вік прогону —
+    /// за <c>FinishedAt</c> (щойно закритий цим же проходом покинутий прогін не зникає), відкриті не чіпаються;</item>
+    /// <item>рядки <see cref="AuditArchiveJobCode"/>, молодші за глибину аудиту
+    /// (<see cref="RetentionSettings.AuditMonthsKey"/>, не менше 120 міс.): це слід переносу аудиту, і живе він
+    /// стільки ж, скільки аудит;</item>
+    /// <item><c>aud.*</c>/<c>arc.Audit*</c> — не чіпаються взагалі (тригери незмінності; архівація — SWITCH);</item>
+    /// <item><c>sec.LoginAttempt</c> — ретенція в лані PSS-24 (той самий ключ, <see cref="RetentionSettings"/>).</item>
+    /// </list>
+    /// </para>
+    /// Пакетами по <see cref="PurgeBatch"/>, доки є кандидати, у спільній межі <see cref="PurgeTimeBudget"/>.
+    /// </remarks>
+    private async Task<int> PurgeTechnicalLogsAsync(DateTime utcNow, CancellationToken ct)
+    {
+        var policy = await RetentionSettings.ReadAsync(db, ct).ConfigureAwait(false);
+        var cutoff = utcNow.AddDays(-policy.TechnicalLogDays);
+        var auditCutoff = utcNow.AddMonths(-policy.AuditMonths);
+        var batch = PurgeBatch;
+        var auditCode = AuditArchiveJobCode;
+
+        Func<Task<int>>[] steps =
+        [
+            () => db.Database.ExecuteSqlAsync(
+                $"""
+                DELETE TOP ({batch}) FROM itg.NotificationOutbox
+                WHERE State IN (N'Sent', N'Failed') AND CreatedAt < {cutoff};
+                """,
+                ct),
+            () => db.Database.ExecuteSqlAsync(
+                $"""
+                WITH c AS (SELECT TOP ({batch}) Id FROM itg.NotificationDelivery WHERE At < {cutoff} ORDER BY Id)
+                DELETE d FROM itg.NotificationDelivery AS d JOIN c ON c.Id = d.Id;
+                """,
+                ct),
+            () => db.Database.ExecuteSqlAsync(
+                $"""
+                WITH c AS (
+                    SELECT TOP ({batch}) r.Id FROM itg.MaintenanceRun AS r
+                    WHERE r.FinishedAt < CASE WHEN r.JobCode = {auditCode} THEN {auditCutoff} ELSE {cutoff} END
+                      AND EXISTS (SELECT 1 FROM itg.MaintenanceRun AS n
+                                  WHERE n.JobCode = r.JobCode AND n.Status = r.Status AND n.Id > r.Id)
+                    ORDER BY r.Id)
+                DELETE m FROM itg.MaintenanceRun AS m JOIN c ON c.Id = m.Id;
+                """,
+                ct),
+        ];
+
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+        var purged = 0;
+        foreach (var step in steps)
+        {
+            int deleted;
+            do
+            {
+                deleted = await step().ConfigureAwait(false);
+                purged += deleted;
+            }
+            while (deleted >= PurgeBatch && System.Diagnostics.Stopwatch.GetElapsedTime(started) < PurgeTimeBudget);
+        }
+
+        return purged;
     }
 
     /// <summary>
@@ -391,8 +479,10 @@ public sealed class AbandonedWorkSweeper(EcrDbContext db, IJobProgressStore prog
 /// <param name="MaintenanceRuns">Прогонів обслуговування закрито.</param>
 /// <param name="Purged">Завершених записів прогресу видалено.</param>
 /// <param name="CalculationRuns">Прогонів розрахунку закрито (P3).</param>
-public sealed record SweepOutcome(int Jobs, int CollectionRuns, int MaintenanceRuns, int Purged, int CalculationRuns = 0)
+/// <param name="LogsPurged">Рядків технічних журналів видалено за строком зберігання (PSS-13).</param>
+public sealed record SweepOutcome(
+    int Jobs, int CollectionRuns, int MaintenanceRuns, int Purged, int CalculationRuns = 0, int LogsPurged = 0)
 {
     /// <summary>Чи зробив прохід хоч щось.</summary>
-    public bool Any => Jobs + CollectionRuns + MaintenanceRuns + Purged + CalculationRuns > 0;
+    public bool Any => Jobs + CollectionRuns + MaintenanceRuns + Purged + CalculationRuns + LogsPurged > 0;
 }
