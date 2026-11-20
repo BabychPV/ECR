@@ -82,6 +82,18 @@ public sealed class Evaluator(
     public const int MaxEvaluationSteps = 20_000;
 
     /// <summary>
+    /// Найдовший текст, який дає конкатенація (<c>&amp;</c> і <c>+</c> двох текстів), знаків: стовпець сховища
+    /// (<see cref="Ecr.Domain.Entities.Configuration.ColumnDef.MaxStringLength"/>, 1 000). Довший результат —
+    /// <c>#VALUE</c>, а не текст (PSS-31).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Межа кроків не бачить ДОВЖИНИ: <c>v1 = v0 &amp; v0; v2 = v1 &amp; v1; …</c> — по кроку на оператор, але текст
+    /// подвоюється щоразу, і тридцять операторів дають гігабайт. Текст довший за стовпець однаково не записався б, тож
+    /// межа не відбирає жодного значення, яке могло б дійти до комірки.
+    /// </remarks>
+    public const int MaxConcatenatedTextLength = Ecr.Domain.Entities.Configuration.ColumnDef.MaxStringLength;
+
+    /// <summary>
     /// Обчислювач із арифметикою <see cref="StrictDecimalArithmetic"/>.
     /// </summary>
     /// <param name="functions">Каталог функцій діалекту шаблонів.</param>
@@ -450,7 +462,7 @@ public sealed class Evaluator(
             // як порожній рядок. Інакше одна незаповнена комірка стирала б
             // увесь складений підпис.
             case BinaryOperator.Concat:
-                return ExpressionValue.Text(AsText(left) + AsText(right));
+                return Concatenate(AsText(left), AsText(right));
 
             // ⚠ ДРУГИЙ виняток: рівність порівнює саму порожнечу.
             // null = null → TRUE, null = 1 → FALSE (02b §6.2).
@@ -483,7 +495,7 @@ public sealed class Evaluator(
             && left.Type == ExpressionValueType.Text
             && right.Type == ExpressionValueType.Text)
         {
-            return ExpressionValue.Text(AsText(left) + AsText(right));
+            return Concatenate(AsText(left), AsText(right));
         }
 
         return op switch
@@ -500,6 +512,15 @@ public sealed class Evaluator(
             _ => ExpressionValue.Error(ExpressionErrors.BadValue),
         };
     }
+
+    /// <summary>
+    /// Конкатенація з межею довжини <see cref="MaxConcatenatedTextLength"/>: довжина перевіряється ДО склеювання, тож
+    /// довгий рядок не будується взагалі (PSS-31).
+    /// </summary>
+    private static ExpressionValue Concatenate(string left, string right)
+        => (long)left.Length + right.Length > MaxConcatenatedTextLength
+            ? ExpressionValue.Error(ExpressionErrors.BadValue)
+            : ExpressionValue.Text(left + right);
 
     /// <summary>
     /// Арифметика бінарного оператора.

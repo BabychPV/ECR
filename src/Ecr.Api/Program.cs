@@ -238,6 +238,7 @@ builder.Services.Configure<GzipCompressionProviderOptions>(
 // пояснення — в `Security/LoginRateLimiting.cs`, а не тут: межа, розмазана між
 // композицією і конвеєром, розходиться першою ж правкою.
 builder.Services.AddEcrRateLimiting(builder.Configuration);
+builder.Services.AddEcrScriptAuthoringLimits(); // PSS-21: межі прогонів і перевірок скрипта (Security/ScriptAuthoringRateLimitPolicy.cs)
 
 // ФВ-5.24: відмови в доступі (403) → aud.SecurityEvent. Синглтон: обмежувач флуду
 // тримає стан між запитами. Запис — в окремому scope, поза транзакцією запиту.

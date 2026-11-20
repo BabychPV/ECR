@@ -13442,7 +13442,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Канонічний друк літерала константи для редактора таблиць коефіцієнтів. Право `Calculation.View`. */
+        /** Канонічний друк літерала константи для редактора таблиць коефіцієнтів. Право `Calculation.View`; межа 120/хв на користувача (PSS-21). */
         post: {
             parameters: {
                 query?: never;
@@ -13488,6 +13488,17 @@ export interface paths {
                 };
                 /** @description Unprocessable Entity */
                 422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Too Many Requests */
+                429: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -13585,6 +13596,17 @@ export interface paths {
                         "text/plain": components["schemas"]["ProblemDetails"];
                     };
                 };
+                /** @description Too Many Requests */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
             };
         };
         delete?: never;
@@ -13603,9 +13625,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Прогін скрипта на документі «насухо»: що вибрано, що пораховано. Право `Calculation.View` і доступ до
-         *     документа, як для його результатів.
-         * @description Нічого не записує. Текст із діагностиками не виконується — повертаються лише діагностики.
+         * Прогін скрипта на документі «насухо»: що вибрано, що пораховано. Право `Calculation.View`, доступ до документа й `Document.View`; межа 30/хв на користувача (PSS-21).
+         * @description Нічого не записує. Текст із діагностиками не виконується — повертаються лише діагностики. Понад 30 с — 422 scriptPreviewTimeout.
          */
         post: {
             parameters: {
@@ -13672,6 +13693,17 @@ export interface paths {
                         "text/plain": components["schemas"]["ProblemDetails"];
                     };
                 };
+                /** @description Too Many Requests */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
             };
         };
         delete?: never;
@@ -13689,7 +13721,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Перевіряє текст, нічого не зберігаючи. Право `Calculation.View`. */
+        /** Перевіряє текст, нічого не зберігаючи. Право `Calculation.View`; межа 120/хв на користувача (PSS-21). */
         post: {
             parameters: {
                 query?: never;
@@ -13735,6 +13767,17 @@ export interface paths {
                 };
                 /** @description Unprocessable Entity */
                 422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Too Many Requests */
+                429: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -43499,6 +43542,8 @@ export interface components {
         };
         /** @description Відповідь перегляду на документі. */
         ScriptPreviewDto: {
+            /** @description `true` — вичерпано спільний бюджет кроків перегляду (PSS-21: 20 000 000 на запит); рядки з `#BUDGET` — межа перегляду, а не помилка скрипта, у перерахунку її немає. */
+            budgetExhausted?: boolean;
             /** @description Діагностики тексту (перегляд виконується лише без них). */
             diagnostics: components["schemas"]["ScriptDiagnosticDto"][];
             /** @description Таблиці з рядками й значеннями; порожньо, якщо текст має діагностики. */
@@ -43541,6 +43586,8 @@ export interface components {
             state: string;
             /** @description Значення величин; для `notSelected`/`inactive` — порожньо. */
             values: components["schemas"]["ScriptPreviewValue"][];
+            /** @description `true` — величини рядка урізано стелею відповіді перегляду (PSS-21: 50 000 на запит); `values` неповний. */
+            valuesTruncated?: boolean;
         };
         /** @description Екземпляр таблиці в перегляді. */
         ScriptPreviewTable: {

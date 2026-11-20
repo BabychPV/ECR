@@ -11,7 +11,7 @@ namespace Ecr.Calculations;
 /// </summary>
 /// <remarks>
 /// ⛔ Той самий шлях, що й у розрахунку: <see cref="ScriptRowSelector"/> вибирає рядки, <see cref="CalculationInputBuilder"/>
-/// будує входи, <see cref="ScriptCalculationModule.ExecuteDetailedAsync"/> рахує. Вихідний запис (<c>CalculationOutputWriter</c>)
+/// будує входи, <see cref="ScriptCalculationModule.ExecuteDetailedAsync(CalculationBindingContext, CalculationInput, ScriptRunLimits, CancellationToken)"/> рахує. Вихідний запис (<c>CalculationOutputWriter</c>)
 /// не викликається ніколи.
 /// <para>
 /// ⚠ Імпорти беруться з ТЕКСТУ, який переглядають (<see cref="ScriptSourceCompiler.ResolveTextImportsAsync"/>), а не з
@@ -27,10 +27,32 @@ public sealed class ScriptPreviewRunner(
     IMetadataCache metadata,
     ScriptSourceCompiler sourceCompiler) : IScriptPreviewRunner
 {
+    /// <summary>
+    /// Спільний бюджет кроків ОДНОГО перегляду на всі рядки всіх таблиць (PSS-21): тисяча стель одного оператора,
+    /// 20 000 000 кроків (кілька секунд процесора).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Без нього стеля перегляду була б «рядки × екземпляри × бюджет рядка». Рядки після вичерпання дають
+    /// <c>#BUDGET</c> на кожен оператор (проблема рядка <c>stepError</c>), а не тишу, а відповідь — прапорець
+    /// <see cref="ScriptPreviewResult.BudgetExhausted"/>: межа ПЕРЕГЛЯДУ (у перерахунку її немає) не має виглядати як
+    /// помилка скрипта. Детерміновано, як і бюджет рядка; годинник (<c>PreviewMethodologyScriptHandler.RunTimeout</c>) —
+    /// страховка понад нього. ⚠ Не залежить від бюджету рядка з конфігурації: один дорогий рядок може взяти весь бюджет
+    /// перегляду, решта рядків тоді — <c>#BUDGET</c> із прапорцем.
+    /// </remarks>
+    public const int MaxPreviewEvaluationSteps = 1_000 * Expressions.Evaluation.Evaluator.MaxEvaluationSteps;
+
+    /// <summary>Найбільше величин в одній відповіді перегляду (PSS-21); решта рядків — з <c>valuesTruncated</c>.</summary>
+    public const int MaxPreviewValues = 50_000;
+
+    /// <summary>Бюджет кроків одного перегляду; типово <see cref="MaxPreviewEvaluationSteps"/>, змінюється лише тестами.</summary>
+    public int PreviewEvaluationSteps { get; init; } = MaxPreviewEvaluationSteps;
+
     /// <inheritdoc />
     public async Task<ScriptPreviewResult> RunAsync(ScriptPreviewRequest request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
+
+        var budget = new PreviewBudget(new Expressions.Evaluation.EvaluationBudget(PreviewEvaluationSteps), MaxPreviewValues);
 
         var module = modules.OfType<ScriptCalculationModule>().FirstOrDefault()
             ?? throw new DomainException(
@@ -121,11 +143,12 @@ public sealed class ScriptPreviewRunner(
             }
 
             tables.Add(await PreviewTableAsync(
-                module, prepared, descriptor, instance.TableInstanceId, tableCode, outcome, allKeys, request, ct)
+                module, prepared, descriptor, instance.TableInstanceId, tableCode, outcome, allKeys, request, budget, ct)
                 .ConfigureAwait(false));
         }
 
-        return new ScriptPreviewResult(tables);
+        // Спільний бюджет вичерпано — якийсь рядок (і всі після нього) дістав #BUDGET через межу ПЕРЕГЛЯДУ, а не скрипта.
+        return new ScriptPreviewResult(tables) { BudgetExhausted = budget.Steps.IsExhausted };
     }
 
     private async Task<ScriptPreviewTable> PreviewTableAsync(
@@ -137,6 +160,7 @@ public sealed class ScriptPreviewRunner(
         RowMatchOutcome outcome,
         IReadOnlyList<string> allKeys,
         ScriptPreviewRequest request,
+        PreviewBudget budget,
         CancellationToken ct)
     {
         var selected = outcome.Matches.Select(m => m.RowKey).ToList();
@@ -194,11 +218,18 @@ public sealed class ScriptPreviewRunner(
 
             try
             {
-                var (output, values) = await module.ExecuteDetailedAsync(prepared, input, ct).ConfigureAwait(false);
+                // Стеля величин: на одну більше за залишок — так видно, що рядок урізано, без окремого прапорця рушія.
+                var room = budget.ValuesLeft;
+                var (output, values) = await module
+                    .ExecuteDetailedAsync(prepared, input, new ScriptRunLimits(budget.Steps, room + 1), ct)
+                    .ConfigureAwait(false);
+                var truncated = values.Count > room;
                 var mapped = values
+                    .Take(room)
                     .Select(v => new ScriptPreviewValue(
                         v.Name, v.SubstanceCode, v.Kind.ToString().ToLowerInvariant(), v.Text ?? string.Empty, v.ErrorCode))
                     .ToList();
+                budget.ValuesLeft -= mapped.Count;
 
                 string? issue = null;
                 IReadOnlyList<string>? missing = null;
@@ -212,7 +243,10 @@ public sealed class ScriptPreviewRunner(
                     issue = "stepError";
                 }
 
-                result.Add(new ScriptPreviewRow(key, position, "selected", issue, missing, mapped, InputsOf(input)));
+                result.Add(new ScriptPreviewRow(key, position, "selected", issue, missing, mapped, InputsOf(input))
+                {
+                    ValuesTruncated = truncated,
+                });
             }
             catch (DomainException error) when (GenericCalculationModule.IsCategoryRuleRowFailure(error))
             {
@@ -233,5 +267,13 @@ public sealed class ScriptPreviewRunner(
             selected.Count,
             inactive.Count,
             [.. result.OrderBy(r => r.RowNumber)]);
+    }
+
+    /// <summary>Спільні межі одного перегляду: бюджет кроків і залишок величин у відповіді.</summary>
+    private sealed class PreviewBudget(Expressions.Evaluation.EvaluationBudget steps, int values)
+    {
+        public Expressions.Evaluation.EvaluationBudget Steps { get; } = steps;
+
+        public int ValuesLeft { get; set; } = values;
     }
 }

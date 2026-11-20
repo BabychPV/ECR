@@ -38,6 +38,18 @@ const Value: FormulaError = { error: '#VALUE' };
 const Name: FormulaError = { error: '#NAME' };
 
 /**
+ * Найдовший текст, який дає конкатенація (`&` і `+` двох текстів), знаків — `Evaluator.MaxConcatenatedTextLength`
+ * сервера (стовпець сховища, 1 000; PSS-31). Довший результат — `#VALUE`, як на сервері: інакше підказка показала б
+ * текст, якого збережене значення не дасть. Довжина — у кодових одиницях UTF-16 і там, і тут (`string.Length` / `length`).
+ */
+export const MaxConcatenatedTextLength = 1_000;
+
+/** Склеює два тексти з межею довжини сервера; довжина перевіряється ДО склеювання. */
+function concatenate(left: string, right: string): FormulaValue {
+  return left.length + right.length > MaxConcatenatedTextLength ? Value : left + right;
+}
+
+/**
  * Обчислює вираз.
  *
  * ⚠ Синтаксична помилка — це **результат**, а не виняток: користувач друкує
@@ -240,7 +252,7 @@ class Parser {
       // ⚠ Порожнеча в конкатенації — порожній рядок, а не «результат
       // порожній»: `NULL & 'x'` дає `x`. Це єдине місце, де NULL не
       // поглинає вираз, і саме тому воно окремо в наборі еквівалентності.
-      left = `${text(left)}${text(right)}`;
+      left = concatenate(text(left), text(right));
     }
 
     return left;
@@ -431,7 +443,7 @@ function add(left: FormulaValue, right: FormulaValue): FormulaValue {
   if (isError(right)) return right;
   if (left === null || right === null) return null;
 
-  if (typeof left === 'string' && typeof right === 'string') return left + right;
+  if (typeof left === 'string' && typeof right === 'string') return concatenate(left, right);
   if (typeof left === 'string' || typeof right === 'string') return Value;
 
   return arithmetic('+', left, right);

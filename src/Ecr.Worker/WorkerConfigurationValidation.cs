@@ -30,6 +30,7 @@ internal static class WorkerConfigurationValidation
         ("Database:MaxPoolSize", 1),
         ("Calculations:MaxParallelism", 1),
         ("Calculations:MaxInputCellsPerBinding", 1),
+        ("Calculations:MaxRowEvaluationSteps", 20000), // PSS-21: бюджет рядка скрипта — не менше стелі одного оператора
     ];
 
     /// <summary>Ключі з переліком допустимих значень (без урахування регістру).</summary>

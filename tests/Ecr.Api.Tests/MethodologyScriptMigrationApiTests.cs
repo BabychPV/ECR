@@ -17,6 +17,7 @@ using Ecr.MethodologyScriptMigration.Conversion;
 using Ecr.MethodologyScriptMigration.Loading;
 using Ecr.TestKit;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Ecr.Api.Tests;
@@ -42,6 +43,9 @@ public sealed class MethodologyScriptMigrationApiTests(SqlServerFixture sql)
 
     private static readonly DateTime Now = new(2099, 1, 10, 9, 0, 0, DateTimeKind.Utc);
 
+    /// <summary>Ті самі налаштування, якими сховище читає вхід золотого випадку (<c>MethodologyStore.GetTestCasesAsync</c>).</summary>
+    private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
+
     private sealed record Stand(
         TestDocumentBuilder Builder,
         TestDocument Document,
@@ -61,6 +65,35 @@ public sealed class MethodologyScriptMigrationApiTests(SqlServerFixture sql)
     private const string Url = "/api/v1/methodologies/script-migration";
 
     // ───────────────────────────── сценарій ─────────────────────────────
+
+    /// <summary>
+    /// Рецензія PSS, п. 5: ворота золотого набору перемикання (<c>IGoldenSetGate</c>) зареєстровані ЯВНО — той самий
+    /// scoped <c>PublishMethodologyHandler</c>, що й <c>IFormulaLinkRebuilder</c>, — а не дістаються приведенням типу.
+    /// </summary>
+    /// <remarks>
+    /// Мутація: прибрати реєстрацію <c>IGoldenSetGate</c> з <c>AddEcrApplication</c> — <c>GetService</c> дає <c>null</c>, а
+    /// перемикання на Script відмовляє «ворота не підключено» (приведення типу прибрано).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Finding", "PSS-23")]
+    public void Ворота_золотого_набору_розв_язуються_з_DI_тим_самим_обробником_публікації()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var scope = app.Services.CreateScope();
+        var services = scope.ServiceProvider;
+
+        var gate = services.GetService<Ecr.Application.Calculations.IGoldenSetGate>();
+
+        Assert.NotNull(gate);
+        Assert.Same(services.GetRequiredService<Ecr.Application.Calculations.PublishMethodologyHandler>(), gate);
+        Assert.Same(services.GetRequiredService<Ecr.Application.Calculations.IFormulaLinkRebuilder>(), gate);
+        Assert.NotNull(services.GetRequiredService<SwitchScriptEngineHandler>());
+
+        // Scoped: інший запит — інший обробник (нічого не тече між запитами).
+        using var other = app.Services.CreateScope();
+        Assert.NotSame(gate, other.ServiceProvider.GetRequiredService<Ecr.Application.Calculations.IGoldenSetGate>());
+    }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
@@ -310,6 +343,50 @@ public sealed class MethodologyScriptMigrationApiTests(SqlServerFixture sql)
     }
 
     /// <summary>
+    /// PSS-23: перемикання на Script проганяє золотий набір версії рушієм скрипта. Червоний набір — 422
+    /// <c>switchGoldenSetDiverged</c>, рушії й журнал не змінені; виведена з ужитку версія — 409 <c>scriptSwitchDeprecated</c>.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "PSS-23")]
+    public async Task Switch_на_Script_з_червоним_золотим_набором_422_а_виведену_з_ужитку_версію_409()
+    {
+        var s = await ArrangeAsync(209905, goldenExpected: 31m).ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        var u = await SignInAllAsync(app, s).ConfigureAwait(true);
+
+        var main = await ConvertAsync(s.MainVersionId).ConfigureAwait(true);
+        var library = await ConvertAsync(s.LibraryVersionId).ConfigureAwait(true);
+        await SetShadowAsync(s, main.Text, library.Text).ConfigureAwait(true);
+
+        // Мутація: прибрати ворота з `SwitchToScriptAsync` — 200, рушії Script.
+        var red = await PostAsync(
+            app, u.Publisher, Url + "/switch",
+            new { versionIds = new[] { s.MainVersionId, s.LibraryVersionId }, engine = "Script", reason = "golden" },
+            HttpStatusCode.UnprocessableEntity).ConfigureAwait(true);
+        Assert.Equal("err.ECR-CALC-0422.switchGoldenSetDiverged", red.GetProperty("messageKey").GetString());
+        Assert.Equal("G_NORTH", red.GetProperty("tests").GetString());
+        Assert.Equal([MethodologyEngine.Formulas, MethodologyEngine.Formulas], await EnginesAsync(s).ConfigureAwait(true));
+        Assert.Equal(0, await AuditCountAsync(s.MainVersionId, "golden").ConfigureAwait(true));
+
+        // Виведена з ужитку версія на Script не перемикається взагалі — ще до перевірок.
+        await using (var db = Context())
+        {
+            var version = await db.MethodologyVersions.SingleAsync(v => v.Id == s.MainVersionId).ConfigureAwait(true);
+            version.Deprecate();
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        var deprecated = await PostAsync(
+            app, u.Publisher, Url + "/switch",
+            new { versionIds = new[] { s.MainVersionId, s.LibraryVersionId }, engine = "Script", reason = "deprecated" },
+            HttpStatusCode.Conflict).ConfigureAwait(true);
+        Assert.Equal("err.ECR-CALC-0409.scriptSwitchDeprecated", deprecated.GetProperty("messageKey").GetString());
+        Assert.Equal([MethodologyEngine.Formulas, MethodologyEngine.Formulas], await EnginesAsync(s).ConfigureAwait(true));
+    }
+
+    /// <summary>
     /// MS x B179 (закриття A1): перемикання Formulas - Script, після якого скрипт читає довідник, який наповнює шаблон його
     /// ж виходу (цикл шаблон - довідник - методологія - шаблон), - 422 <c>ECR-TMPL-0422</c> із полем <c>cycle</c>,
     /// рушії не змінені; той самий стенд без читання довідника перемикається.
@@ -444,8 +521,10 @@ public sealed class MethodologyScriptMigrationApiTests(SqlServerFixture sql)
 
     // ───────────────────────────── стенд ─────────────────────────────
 
-    /// <summary>Формульна методологія-бібліотека з константою й методологія з імпортом, правилом і виходом.</summary>
-    private async Task<Stand> ArrangeAsync(int periodKey)
+    /// <summary>Формульна методологія-бібліотека з константою й методологія з імпортом, правилом, виходом і золотим набором.</summary>
+    /// <param name="periodKey">Період стенда.</param>
+    /// <param name="goldenExpected">Очікуваний вихід золотого випадку; не 30 — набір червоний (PSS-23).</param>
+    private async Task<Stand> ArrangeAsync(int periodKey, decimal goldenExpected = 30m)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var document = await builder.BuildAsync(periodKey, columnCount: 2, rowCount: 3, rowMode: TableRowMode.Fixed).ConfigureAwait(false);
@@ -542,6 +621,26 @@ public sealed class MethodologyScriptMigrationApiTests(SqlServerFixture sql)
         await db.SaveChangesAsync().ConfigureAwait(false);
 
         db.CalculationBindings.Add(new CalculationBinding(table.Id, calculated.Id, main.Id, outputCode, "{}"));
+
+        // PSS-23: золотий набір імпортера (бібліотека його не має, D-556) — перемикання на Script проганяє його рушієм
+        // скрипта. Північний рядок: Mass = 10 × 2, EMIS = Mass × EF 0.5 × Dens (1.5 × 2) = 30.
+        var goldenInput = JsonSerializer.Serialize(
+            new Ecr.Application.Ports.CalculationInput(
+                new Ecr.Application.Ports.MethodologyDescriptor(
+                    main.Id, mainVersion.Id, mainCode, "V1", CalculationLevel.Configuration, NumericMode.Strict,
+                    CalendarMode.Actual, TraceLevel.Off, MethodologyEngine.Formulas),
+                document.DocumentId,
+                document.TableInstanceId,
+                document.PeriodKey,
+                rowKeys[0],
+                [
+                    new Ecr.Application.Ports.CalculationArgument(columns[0].Code, null, "North", null),
+                    new Ecr.Application.Ports.CalculationArgument(columns[1].Code, 10m, null, null),
+                ]),
+            WebJson);
+        db.MethodologyTestCases.Add(new MethodologyTestCaseEntity(
+            mainVersion.Id, "G_NORTH", goldenInput,
+            $"{{\"{outputCode}\":{goldenExpected.ToString(CultureInfo.InvariantCulture)}}}", 0.000001m));
         await db.SaveChangesAsync().ConfigureAwait(false);
 
         libraryVersion.Publish(1, "seed", new DateOnly(2099, 1, 1), true, Now);

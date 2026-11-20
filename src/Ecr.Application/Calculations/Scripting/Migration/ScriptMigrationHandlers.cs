@@ -327,18 +327,31 @@ public sealed class SwitchScriptEngineHandler(
     IAccessDecisionService access,
     ICurrentUser currentUser,
     IClock clock,
-    IDependencyGraphProvider? dependencyGraph = null)
+    IDependencyGraphProvider? dependencyGraph = null,
+    IGoldenSetGate? goldenSet = null)
 {
     /// <summary>Право на перемикання: те саме, що й на публікацію.</summary>
     public const string Permission = "Calculation.Publish";
+
+    /// <summary>
+    /// Ворота золотого набору (PSS-23). У складанні — явна реєстрація <see cref="IGoldenSetGate"/>
+    /// (<c>AddEcrApplication</c>: той самий scoped <see cref="PublishMethodologyHandler"/>, що й <c>formulaLinks</c>), а не
+    /// приведення типу; без воріт перемикання на <c>Script</c> не відбувається взагалі (закрито, а не відкрито).
+    /// </summary>
+    private IGoldenSetGate GoldenSet
+        => goldenSet
+           ?? throw new InvalidOperationException("Ворота золотого набору не підключено до перемикання рушія (PSS-23).");
 
     /// <summary>Перемикає групу версій.</summary>
     /// <param name="request">Версії, рушій, причина.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <exception cref="BusinessRuleException">
     /// <c>ECR-CALC-0422</c>: <c>switchReasonRequired</c>, <c>switchEngineInvalid</c>, <c>switchVersionsRequired</c>,
-    /// <c>switchGroupIncomplete</c> (немає бібліотеки чи імпортера в запиті), <c>switchChecksFailed</c> (є проблеми);
-    /// <c>ECR-CALC-0409</c>: <c>scriptSwitchNotPublished</c> — версія не опублікована.
+    /// <c>switchGroupIncomplete</c> (немає бібліотеки чи імпортера в запиті), <c>switchChecksFailed</c> (є проблеми),
+    /// <c>switchGoldenSetEmpty</c> / <c>switchGoldenNoExpectations</c> / <c>switchGoldenSetDiverged</c> (PSS-23: золотий набір
+    /// не зелений на Script);
+    /// <c>ECR-CALC-0409</c>: <c>scriptSwitchNotPublished</c> — версія не опублікована; <c>scriptSwitchDeprecated</c> —
+    /// виведену з ужитку не перемикають на Script (PSS-23).
     /// </exception>
     /// <exception cref="NotFoundException">Версії немає.</exception>
     public async Task<SwitchScriptEngineResponse> HandleAsync(SwitchScriptEngineRequest request, CancellationToken ct)
@@ -392,6 +405,21 @@ public sealed class SwitchScriptEngineHandler(
                     new Dictionary<string, object?>
                     {
                         ["messageKey"] = "err.ECR-CALC-0409.scriptSwitchNotPublished",
+                        ["version"] = version.Version,
+                    });
+            }
+
+            // ⛔ PSS-23 (рішення людини 20.11, §6 п. 9): виведена з ужитку версія на Script не перемикається — вона рахує
+            // лише історичні періоди, і змінювати їй рушій означало б тихо переписати вже подані числа. Назад на Formulas
+            // (повернення до перевірених формул) — дозволено.
+            if (engine == MethodologyEngine.Script && version.Status == TemplateVersionStatus.Deprecated)
+            {
+                throw new BusinessRuleException(
+                    "ECR-CALC-0409",
+                    $"Версія {methodology.Code} {version.Version} виведена з ужитку: на Script вона не перемикається.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-CALC-0409.scriptSwitchDeprecated",
                         ["version"] = version.Version,
                     });
             }
@@ -465,11 +493,20 @@ public sealed class SwitchScriptEngineHandler(
     }
 
     /// <summary>Бібліотека й усі її імпортери — в одній групі; імпортована бібліотека вже на скрипті або в групі.</summary>
+    /// <remarks>
+    /// ⛔ Виведені з ужитку (<c>Deprecated</c>) версії у склад групи НЕ входять — ні як імпортери, ні як бібліотеки
+    /// (рішення координатора 20.11 за рецензією M1). На Script вони не перемикаються ніколи (<c>scriptSwitchDeprecated</c>),
+    /// тож вимога «Deprecated теж у групі» блокувала б перемикання назавжди. Вони лишаються на Formulas (формули
+    /// зберігаються до етапу 9) і рахують свої історичні періоди старим рушієм. ⚠ Наслідок: період імпортера на Script,
+    /// для якого рантайм розв'язує саме Deprecated-версію бібліотеки на Formulas, відмовляє гучно
+    /// (<c>scriptLibraryUnavailable</c>), а не дає інших чисел.
+    /// </remarks>
     private async Task RequireCompleteGroupAsync(
         List<(Methodology Methodology, MethodologyVersion Version)> group, CancellationToken ct)
     {
         var inGroup = group.Select(g => g.Version.Id).ToHashSet();
         var missing = new SortedSet<string>(StringComparer.Ordinal);
+        var libraryVersions = new Dictionary<int, MethodologyVersion?>();
 
         foreach (var (methodology, version) in group)
         {
@@ -504,13 +541,30 @@ public sealed class SwitchScriptEngineHandler(
                             continue;
                         }
 
-                        pending.Push(libraryVersionId);
-                        if (inGroup.Contains(libraryVersionId) || !seen.Add(libraryVersionId))
+                        if (inGroup.Contains(libraryVersionId))
+                        {
+                            pending.Push(libraryVersionId);
+                            continue;
+                        }
+
+                        if (!libraryVersions.TryGetValue(libraryVersionId, out var libraryVersion))
+                        {
+                            libraryVersion = await drafts.FindVersionAsync(libraryVersionId, ct).ConfigureAwait(false);
+                            libraryVersions[libraryVersionId] = libraryVersion;
+                        }
+
+                        // M1: Deprecated-версія бібліотеки не перемикається й не вимагається; її власні імпорти — теж ні.
+                        if (libraryVersion is { Status: TemplateVersionStatus.Deprecated })
                         {
                             continue;
                         }
 
-                        var libraryVersion = await drafts.FindVersionAsync(libraryVersionId, ct).ConfigureAwait(false);
+                        pending.Push(libraryVersionId);
+                        if (!seen.Add(libraryVersionId))
+                        {
+                            continue;
+                        }
+
                         if (libraryVersion is { Engine: not MethodologyEngine.Script })
                         {
                             missing.Add($"{library.MethodologyCode} {libraryVersion.Version} (library of {methodology.Code} {version.Version}, id {libraryVersionId.ToString(CultureInfo.InvariantCulture)})");
@@ -519,13 +573,13 @@ public sealed class SwitchScriptEngineHandler(
                 }
             }
 
-            // Бібліотека: усі її імпортери (ще на формулах) — у групі.
+            // Бібліотека: усі її ОПУБЛІКОВАНІ імпортери (ще на формулах) — у групі; Deprecated лишаються на формулах (M1).
             if (methodology.Kind == MethodologyKind.Library)
             {
                 foreach (var importer in await migrationStore.GetImporterVersionsAsync(methodology.Id, ct).ConfigureAwait(false))
                 {
                     if (importer.Engine != MethodologyEngine.Script
-                        && importer.Status is TemplateVersionStatus.Published or TemplateVersionStatus.Deprecated
+                        && importer.Status == TemplateVersionStatus.Published
                         && !inGroup.Contains(importer.VersionId))
                     {
                         missing.Add($"{importer.MethodologyCode} {importer.Version} (imports {methodology.Code}, id {importer.VersionId.ToString(CultureInfo.InvariantCulture)})");
@@ -598,6 +652,16 @@ public sealed class SwitchScriptEngineHandler(
             await materializer
                 .WriteForSwitchAsync(version.Id, methodology.Id, analysis.Compilation.Script!, analysis.Environment!, ct)
                 .ConfigureAwait(false);
+        }
+
+        // ⛔ PSS-23: золотий набір КОЖНОЇ версії групи — уже рушієм Script, на матеріалізованому складі (модуль скрипта
+        // читає виходи й прив'язки з бази, тож спершу збереження). Червоний набір будь-якої версії відкочує всю групу:
+        // транзакцію тримає викликач. Ті самі вердикти, що в публікації (`PublishMethodologyHandler`).
+        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        var gate = GoldenSet;
+        foreach (var (methodology, version) in group)
+        {
+            await gate.RequireGreenForEngineSwitchAsync(methodology, version, ct).ConfigureAwait(false);
         }
     }
 

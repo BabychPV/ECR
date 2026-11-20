@@ -116,6 +116,15 @@ public static partial class EcrConfigurationValidation
         ("Calculations:MaxParallelism", 1),
         ("Calculations:MaxInputCellsPerBinding", 1),
 
+        // ── PSS-21 (лейн L7 pss-script-security): бюджет рядка скрипта й межі прогонів/перевірок скрипта ──
+        ("Calculations:MaxRowEvaluationSteps", 20000), // Менше за стелю одного оператора (20 000) обрізало б навіть один законний оператор.
+        (Ecr.Api.Security.ScriptAuthoringRateLimitPolicy.PermitKey, 1),
+        (Ecr.Api.Security.ScriptCheckRateLimitPolicy.PermitKey, 1),
+        (Ecr.Api.Security.ScriptRunGate.ConcurrencyKey, 1),
+        (Ecr.Api.Security.ScriptRunGate.QueueLimitKey, 0),
+        (Ecr.Api.Security.ScriptRunGate.QueueWaitSecondsKey, 1),
+        // ── кінець PSS-21 ──
+
         // ПРД-13: поріг сигналу «перерахунок довший за бюджет»; нуль зробив би сигналом кожну задачу.
         (Ecr.Infrastructure.Jobs.RecalculationBudgetOptions.WarnSecondsKey, 1),
 

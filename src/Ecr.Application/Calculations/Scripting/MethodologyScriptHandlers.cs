@@ -350,12 +350,31 @@ public sealed class PreviewMethodologyScriptHandler(
     /// <summary>Найбільша кількість рядків з таблиці.</summary>
     public const int MaxRowsLimit = 200;
 
+    /// <summary>Право читання документа — перегляд показує значення входів його рядків (PSS-25).</summary>
+    public const string DocumentPermission = "Document.View";
+
+    /// <summary>Скільки найдовше триває один перегляд, якщо не задано інше (PSS-21).</summary>
+    public static readonly TimeSpan DefaultRunTimeout = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// Стеля часу одного перегляду (компіляція з перевірками й прогін); понад — <c>422 scriptPreviewTimeout</c>.
+    /// Типово <see cref="DefaultRunTimeout"/>; змінюється лише тестами.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Страховка понад детерміновані бюджети кроків рушія (рядок і запит): годинник ловить і те, що кроками не
+    /// міряється (читання бази, побудова входів). Розірваний клієнтом запит скасовує прогін сам — токеном запиту.
+    /// </remarks>
+    public TimeSpan RunTimeout { get; init; } = DefaultRunTimeout;
+
     /// <summary>Проганяє текст на документі.</summary>
     /// <param name="methodologyVersionId">Версія.</param>
     /// <param name="request">Запит.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <exception cref="NotFoundException">Версії або документа (для цього користувача) немає.</exception>
-    /// <exception cref="AccessDeniedException">Профіль із обмеженим доступом до колонок.</exception>
+    /// <exception cref="AccessDeniedException">
+    /// Профіль із обмеженим доступом до колонок або без права <c>Document.View</c> у проєкті документа.
+    /// </exception>
+    /// <exception cref="BusinessRuleException"><c>ECR-CALC-0422</c> <c>scriptPreviewTimeout</c> — перегляд не вклався в час.</exception>
     public async Task<ScriptPreviewDto> HandleAsync(
         int methodologyVersionId, PreviewMethodologyScriptRequest request, CancellationToken ct)
     {
@@ -364,6 +383,12 @@ public sealed class PreviewMethodologyScriptHandler(
         // Той самий доступ, що й до результатів розрахунку документа (`GetCalculationResultsHandler`).
         var profile = await PermissionCheck.RequireInAnyProjectAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
         await DocumentVisibility.RequireVisibleAsync(access, profile, request.DocumentId, Permission, ct).ConfigureAwait(false);
+
+        // ⛔ PSS-25 (клас PT-8): перегляд віддає значення входів рядків — читання документа, тож і право читання документа,
+        // а не лише Calculation.View. Видимий документ без права — 403, як у `PatchCellsHandler`.
+        await DocumentVisibility
+            .RequirePermissionAsync(access, profile, request.DocumentId, DocumentPermission, ct)
+            .ConfigureAwait(false);
 
         // ⛔ Перегляд показує значення входів рядків: читач із вужчим доступом до колонок їх бачити не може.
         if (DocumentSheetVisibility.HasRestrictions(profile))
@@ -392,6 +417,28 @@ public sealed class PreviewMethodologyScriptHandler(
             ScriptAnalyzer.RequireTextSize(request.Text);
         }
 
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(RunTimeout);
+        try
+        {
+            return await RunAsync(methodologyVersionId, request, timeout.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (timeout.IsCancellationRequested && !ct.IsCancellationRequested)
+        {
+            throw new BusinessRuleException(
+                "ECR-CALC-0422",
+                $"Перегляд скрипта не вклався в {RunTimeout.TotalSeconds.ToString(CultureInfo.InvariantCulture)} с.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.scriptPreviewTimeout",
+                    ["seconds"] = RunTimeout.TotalSeconds.ToString(CultureInfo.InvariantCulture),
+                });
+        }
+    }
+
+    private async Task<ScriptPreviewDto> RunAsync(
+        int methodologyVersionId, PreviewMethodologyScriptRequest request, CancellationToken ct)
+    {
         var (methodology, version) = await ScriptHandlerSupport.LoadAsync(drafts, methodologyVersionId, ct).ConfigureAwait(false);
         var text = string.IsNullOrWhiteSpace(request.Text) ? version.ScriptText : request.Text;
         if (string.IsNullOrWhiteSpace(text))
@@ -440,7 +487,7 @@ public sealed class PreviewMethodologyScriptHandler(
                 ct)
             .ConfigureAwait(false);
 
-        return new ScriptPreviewDto(result.Tables, diagnostics);
+        return new ScriptPreviewDto(result.Tables, diagnostics) { BudgetExhausted = result.BudgetExhausted };
     }
 }
 
@@ -474,6 +521,11 @@ public sealed class ParityMethodologyScriptHandler(
 
         var profile = await PermissionCheck.RequireInAnyProjectAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
         await DocumentVisibility.RequireVisibleAsync(access, profile, request.DocumentId, Permission, ct).ConfigureAwait(false);
+
+        // PSS-25: розбіжності несуть значення рядків документа — і право його читання, як у перегляду.
+        await DocumentVisibility
+            .RequirePermissionAsync(access, profile, request.DocumentId, PreviewMethodologyScriptHandler.DocumentPermission, ct)
+            .ConfigureAwait(false);
 
         // ⛔ Розбіжності показують значення входів рядків: читач із вужчим доступом до колонок їх бачити не може.
         if (DocumentSheetVisibility.HasRestrictions(profile))

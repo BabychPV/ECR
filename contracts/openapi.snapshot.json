@@ -27253,6 +27253,10 @@
       "ScriptPreviewDto": {
         "description": "Відповідь перегляду на документі.",
         "properties": {
+          "budgetExhausted": {
+            "description": "`true` — вичерпано спільний бюджет кроків перегляду (PSS-21: 20 000 000 на запит); рядки з `#BUDGET` — межа перегляду, а не помилка скрипта, у перерахунку її немає.",
+            "type": "boolean"
+          },
           "diagnostics": {
             "description": "Діагностики тексту (перегляд виконується лише без них).",
             "items": {
@@ -27362,6 +27366,10 @@
               "$ref": "#/components/schemas/ScriptPreviewValue"
             },
             "type": "array"
+          },
+          "valuesTruncated": {
+            "description": "`true` — величини рядка урізано стелею відповіді перегляду (PSS-21: 50 000 на запит); `values` неповний.",
+            "type": "boolean"
           }
         },
         "required": [
@@ -53907,9 +53915,29 @@
               }
             },
             "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Too Many Requests"
           }
         },
-        "summary": "Канонічний друк літерала константи для редактора таблиць коефіцієнтів. Право `Calculation.View`.",
+        "summary": "Канонічний друк літерала константи для редактора таблиць коефіцієнтів. Право `Calculation.View`; межа 120/хв на користувача (PSS-21).",
         "tags": [
           "MethodologyScript"
         ]
@@ -54043,6 +54071,26 @@
               }
             },
             "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Too Many Requests"
           }
         },
         "summary": "Паритет версії на документі: збережений (тіньовий) скрипт проти рушія формул на всіх таблицях документа за\nперіод, до яких прив'язана методологія. Право `Calculation.Publish` і доступ до документа.",
@@ -54053,7 +54101,7 @@
     },
     "/api/v1/methodologies/{id}/versions/{vid}/script/preview": {
       "post": {
-        "description": "Нічого не записує. Текст із діагностиками не виконується — повертаються лише діагностики.",
+        "description": "Нічого не записує. Текст із діагностиками не виконується — повертаються лише діагностики. Понад 30 с — 422 scriptPreviewTimeout.",
         "parameters": [
           {
             "description": "Методологія.",
@@ -54179,9 +54227,29 @@
               }
             },
             "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Too Many Requests"
           }
         },
-        "summary": "Прогін скрипта на документі «насухо»: що вибрано, що пораховано. Право `Calculation.View` і доступ до\nдокумента, як для його результатів.",
+        "summary": "Прогін скрипта на документі «насухо»: що вибрано, що пораховано. Право `Calculation.View`, доступ до документа й `Document.View`; межа 30/хв на користувача (PSS-21).",
         "tags": [
           "MethodologyScript"
         ]
@@ -54294,9 +54362,29 @@
               }
             },
             "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Too Many Requests"
           }
         },
-        "summary": "Перевіряє текст, нічого не зберігаючи. Право `Calculation.View`.",
+        "summary": "Перевіряє текст, нічого не зберігаючи. Право `Calculation.View`; межа 120/хв на користувача (PSS-21).",
         "tags": [
           "MethodologyScript"
         ]
