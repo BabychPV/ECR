@@ -44966,6 +44966,11 @@ export interface components {
         };
         /** @description Цільовий період подання аркуша і статуси місячних колонок (D-441). */
         SubmissionTargetDto: {
+            /**
+             * Format: int32
+             * @description ✎ D-6: аркуш за період запиту поданий (у будь-якому стані періоду, зокрема закритому) — місяць документа-джерела HSE400, ще не затверджений, через який сервер відхилить його затвердження; null — перешкоди немає.
+             */
+            anchorUnapprovedSourcePeriodKey?: null | number;
             /** @description Місячні колонки таблиць `MonthsInColumns` аркуша зі станом свого періоду. */
             monthColumns: components["schemas"]["MonthColumnStatusDto"][];
             /**

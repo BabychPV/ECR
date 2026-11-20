@@ -44,11 +44,13 @@ public sealed record MonthColumnStatusDto(
 /// <param name="NextPeriodKey">Наступний неподаний після цільового — для попередження «наступний — …».</param>
 /// <param name="Periods">Відкриті періоди проєкту за зростанням (вибір іншого періоду — серед <c>Submittable</c>).</param>
 /// <param name="MonthColumns">Місячні колонки таблиць <c>MonthsInColumns</c> аркуша зі станом свого періоду.</param>
+/// <param name="AnchorUnapprovedSourcePeriodKey">✎ D-6: аркуш за період запиту поданий (у будь-якому стані періоду, зокрема закритому) — місяць документа-джерела HSE400, ще не затверджений, через який сервер відхилить його затвердження; null — перешкоди немає.</param>
 public sealed record SubmissionTargetDto(
     int? TargetPeriodKey,
     int? NextPeriodKey,
     IReadOnlyList<SubmissionPeriodDto> Periods,
-    IReadOnlyList<MonthColumnStatusDto> MonthColumns);
+    IReadOnlyList<MonthColumnStatusDto> MonthColumns,
+    int? AnchorUnapprovedSourcePeriodKey = null);
 
 /// <summary>
 /// Що подасть кнопка «Подати» на аркуші (D-441). Право <c>Document.View</c>.
@@ -130,11 +132,17 @@ public sealed class GetSubmissionTargetHandler(
                 .ConfigureAwait(false);
         }
 
-        var (periods, gatedMonths) = await SubmissionSourceGate
-            .ApplyAsync(sourceIssues, documentId, choice.Periods, months, ct)
+        // ⛔ L2: звичайний документ — ціль «Approve» це період сторінки, і його аркуш може бути поданий у ЗАКРИТОМУ періоді
+        // (у `periods[]` його немає): той самий пакет читає і його.
+        var anchorSubmitted = calendar.Periods.Any(p => p.PeriodKey == key.Value && p.SheetStatus == DocumentStatus.Submitted)
+            ? key.Value
+            : (int?)null;
+        var gated = await SubmissionSourceGate
+            .ApplyAsync(sourceIssues, documentId, choice.Periods, months, anchorSubmitted, ct)
             .ConfigureAwait(false);
 
-        return new SubmissionTargetDto(choice.TargetPeriodKey, choice.NextPeriodKey, periods, gatedMonths);
+        return new SubmissionTargetDto(
+            choice.TargetPeriodKey, choice.NextPeriodKey, gated.Periods, gated.Months, gated.AnchorUnapprovedSourcePeriodKey);
     }
 }
 
@@ -158,27 +166,30 @@ public static class SubmissionSourceGate
     /// <param name="documentId">Документ-споживач.</param>
     /// <param name="periods">Відкриті періоди відповіді.</param>
     /// <param name="months">Місячні колонки відповіді.</param>
+    /// <param name="anchorSubmittedKey">Період запиту, якщо його аркуш поданий (будь-який стан періоду); <c>null</c> — ні.</param>
     /// <param name="ct">Токен скасування.</param>
-    public static async Task<(IReadOnlyList<SubmissionPeriodDto> Periods, IReadOnlyList<MonthColumnStatusDto> Months)> ApplyAsync(
+    public static async Task<SourceGateResult> ApplyAsync(
         ISourceIssueReader? reader,
         long documentId,
         IReadOnlyList<SubmissionPeriodDto> periods,
         IReadOnlyList<MonthColumnStatusDto> months,
+        int? anchorSubmittedKey,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(periods);
         ArgumentNullException.ThrowIfNull(months);
 
-        // Ворота діють на подання (неподаний) і на затвердження (поданий); затвердженого й чернетки поза відкритим
-        // періодом — не стосуються.
+        // Ворота діють на подання (неподаний відкритий період) і на затвердження (поданий: відкритий період, місяць
+        // річного аркуша, період сторінки); затвердженого не стосуються.
         var keys = periods.Where(p => p.Submittable || p.SheetStatus == DocumentStatus.Submitted).Select(p => p.PeriodKey)
             .Concat(months.Where(m => m.SheetStatus == DocumentStatus.Submitted).Select(m => m.PeriodKey))
+            .Concat(anchorSubmittedKey is { } anchor ? new[] { anchor } : Array.Empty<int>())
             .Distinct()
             .Order()
             .ToList();
         if (reader is null || keys.Count == 0)
         {
-            return (periods, months);
+            return new SourceGateResult(periods, months, null);
         }
 
         var rows = await reader.ListSourceIssuesAsync(documentId, keys, ct).ConfigureAwait(false);
@@ -188,10 +199,10 @@ public static class SubmissionSourceGate
             .ToDictionary(g => g.Key, g => g.Min(r => r.SourcePeriodKey));
         if (blocked.Count == 0)
         {
-            return (periods, months);
+            return new SourceGateResult(periods, months, null);
         }
 
-        return (
+        return new SourceGateResult(
             [
                 .. periods.Select(p => (p.Submittable || p.SheetStatus == DocumentStatus.Submitted)
                                        && blocked.TryGetValue(p.PeriodKey, out var source)
@@ -202,6 +213,16 @@ public static class SubmissionSourceGate
                 .. months.Select(m => m.SheetStatus == DocumentStatus.Submitted && blocked.TryGetValue(m.PeriodKey, out var source)
                     ? m with { UnapprovedSourcePeriodKey = source }
                     : m),
-            ]);
+            ],
+            anchorSubmittedKey is { } submitted && blocked.TryGetValue(submitted, out var anchorSource) ? anchorSource : null);
     }
 }
+
+/// <summary>✎ D-6: результат <see cref="SubmissionSourceGate.ApplyAsync"/>.</summary>
+/// <param name="Periods">Відкриті періоди з місяцем джерела для подання / затвердження.</param>
+/// <param name="Months">Місячні колонки з місяцем джерела для затвердження поданого місяця.</param>
+/// <param name="AnchorUnapprovedSourcePeriodKey">Місяць джерела для затвердження поданого аркуша за період запиту.</param>
+public sealed record SourceGateResult(
+    IReadOnlyList<SubmissionPeriodDto> Periods,
+    IReadOnlyList<MonthColumnStatusDto> Months,
+    int? AnchorUnapprovedSourcePeriodKey);
