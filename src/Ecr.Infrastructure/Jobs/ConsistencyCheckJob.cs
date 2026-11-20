@@ -716,8 +716,8 @@ public sealed class ConsistencyCheckJob(
     }
 
     /// <summary>
-    /// Q-17: рядки <c>calc.CalculationResult/Step/Input</c> прогонів, що не <c>Current</c>/<c>Running</c>
-    /// (інваріант «лише актуальний розрахунок», рішення людини 28.10).
+    /// Q-17: рядки <c>calc.CalculationResult/Step/Input</c> прогонів, що підлягають прибиранню
+    /// (інваріант «лише актуальний розрахунок», рішення людини 28.10; умова — <c>D-560</c>).
     /// </summary>
     /// <remarks>
     /// ⚠ Перевіряється лише коли прибирання увімкнено (<c>Calculations:SupersededPurge:Enabled</c>): доти кожна база,
@@ -813,17 +813,34 @@ public sealed class ConsistencyCheckJob(
     }
 
     /// <summary>Прогони, неактуальні вже на момент <paramref name="cutoff"/> (див. <see cref="NonCurrentRunRowsAsync"/>).</summary>
+    /// <remarks>
+    /// ✎ <c>D-560</c>: «неактуальний» — та сама умова, за якою прибирає <c>SupersededResultsPurger.EligibleSql</c>:
+    /// <c>Superseded</c>; <c>Failed</c> — лише старіший за <c>Current</c> того самого ланцюга (проєкт, період, документ)
+    /// і стартований раніше за <c>SupersededPurgeOptions.FailedRunGrace</c> до межі. Новіший за актуальний <c>Failed</c>
+    /// прибирання свідомо лишає — і знахідкою він не є.
+    /// </remarks>
     private IQueryable<long> SettledNonCurrentRuns(DateTime cutoff)
-        => from run in db.CalculationRuns.AsNoTracking()
-           where run.Status != CalculationRun.CurrentStatus && run.Status != "Running"
-                 && (run.FinishedAt ?? run.StartedAt) < cutoff
-                 && !db.CalculationRuns.Any(newer =>
-                     newer.ProjectId == run.ProjectId
-                     && newer.PeriodKey == run.PeriodKey
-                     && newer.Id > run.Id
-                     && newer.FinishedAt != null
-                     && newer.FinishedAt >= cutoff)
-           select run.Id;
+    {
+        var failedBefore = cutoff - Persistence.SupersededPurgeOptions.FailedRunGrace;
+        return from run in db.CalculationRuns.AsNoTracking()
+               where (run.Status == CalculationRun.SupersededStatus
+                      || (run.Status == "Failed"
+                          && run.StartedAt < failedBefore
+                          && db.CalculationRuns.Any(current =>
+                              current.Status == CalculationRun.CurrentStatus
+                              && current.ProjectId == run.ProjectId
+                              && current.Id > run.Id
+                              && current.PeriodKey == run.PeriodKey
+                              && current.DocumentId == run.DocumentId)))
+                     && (run.FinishedAt ?? run.StartedAt) < cutoff
+                     && !db.CalculationRuns.Any(newer =>
+                         newer.ProjectId == run.ProjectId
+                         && newer.PeriodKey == run.PeriodKey
+                         && newer.Id > run.Id
+                         && newer.FinishedAt != null
+                         && newer.FinishedAt >= cutoff)
+               select run.Id;
+    }
 
     /// <summary>
     /// Записує знахідки, не плодячи дублікатів.

@@ -16,15 +16,16 @@ using Xunit;
 namespace Ecr.Infrastructure.Tests.Persistence;
 
 /// <summary>
-/// Q-17 (рішення людини 28.10: у базі лишаються результати лише актуального прогону): швидкий шлях прибирання
-/// після перемикання, інваріант «рядки лише для Current/Running», вимоги до читачів.
+/// Q-17 (рішення людини 28.10: у базі лишаються результати лише актуального прогону; <c>D-560</c>: прогін, що
+/// підлягає прибиранню, зникає повністю, разом із рядком <c>calc.CalculationRun</c>): швидкий шлях прибирання після
+/// перемикання, інваріант «Current/Running не чіпаються ніколи», вимоги до читачів.
 /// </summary>
 /// <remarks>
 /// Мутаційні докази: прибрати виклик <c>PurgeSupersededAsync</c> у <c>RunCalculationHandler.CompleteAsync</c> -
 /// інваріантні тести червоніють; прибрати перечитування прогонів після рядків у <c>ReadCurrentCoreAsync</c> - тест
 /// гонитви читання віддає порожньо; прибрати цикл <c>UPDLOCK</c> у <c>LockCurrentSourceRunsAsync</c> - тест гонитви
-/// переносу не блокується; прибрати страховку <c>NOT EXISTS ... Current/Running</c> у <c>SupersededResultsPurger</c> -
-/// тест «актуальний не прибирається» червоніє.
+/// переносу не блокується; додати <c>Current</c> до <c>SupersededResultsPurger.EligibleSql</c> - тест «актуальний не
+/// прибирається» червоніє; прибрати видалення рядка прогону - тести «рядок заміненого прогону зник» червоніють.
 /// </remarks>
 [Collection("SqlServer")]
 public sealed class SupersededResultsPurgeTests(SqlServerFixture sql)
@@ -51,10 +52,10 @@ public sealed class SupersededResultsPurgeTests(SqlServerFixture sql)
         Assert.Equal((0, 0, 0), await PurgeKit.CountsAsync(check, a));
         Assert.Equal((3, 2, 2), await PurgeKit.CountsAsync(check, b));
 
-        // calc.CalculationRun лишається: хто/коли/статус - це історія, а не результат.
+        // ✎ D-560: замінений прогін зникає повністю, разом із рядком calc.CalculationRun; актуальний - цілий.
         var runs = await check.CalculationRuns.AsNoTracking()
             .Where(r => r.Id == a || r.Id == b).ToDictionaryAsync(r => r.Id, r => r.Status);
-        Assert.Equal(CalculationRun.SupersededStatus, runs[a]);
+        Assert.False(runs.ContainsKey(a), "рядок заміненого прогону мав зникнути (D-560)");
         Assert.Equal(CalculationRun.CurrentStatus, runs[b]);
 
         // Читач віддає лише актуальний результат.
@@ -86,6 +87,8 @@ public sealed class SupersededResultsPurgeTests(SqlServerFixture sql)
         Assert.Equal((0, 0, 0), await PurgeKit.CountsAsync(check, older));
         Assert.Equal((2, 1, 1), await PurgeKit.CountsAsync(check, newer));
         Assert.Equal(0, await PurgeKit.NonCurrentRowsAsync(check, f));
+        Assert.False(await PurgeKit.RunExistsAsync(check, older));
+        Assert.True(await PurgeKit.RunExistsAsync(check, newer));
     }
 
     [Fact]
@@ -131,6 +134,8 @@ public sealed class SupersededResultsPurgeTests(SqlServerFixture sql)
         Assert.Equal(rows * 3, await store.PurgeSupersededRunsAsync([run], CancellationToken.None));
         Assert.Equal((0, 0, 0), await PurgeKit.CountsAsync(db, victim));
         Assert.Equal((5, 5, 5), await PurgeKit.CountsAsync(db, keep));
+        Assert.False(await PurgeKit.RunExistsAsync(db, victim));
+        Assert.True(await PurgeKit.RunExistsAsync(db, keep));
 
         // Ідемпотентність: повтор знаходить нуль.
         Assert.Equal(0, await store.PurgeSupersededRunsAsync([run], CancellationToken.None));
@@ -158,6 +163,8 @@ public sealed class SupersededResultsPurgeTests(SqlServerFixture sql)
 
         Assert.Equal((3, 2, 2), await PurgeKit.CountsAsync(db, current));
         Assert.Equal((3, 2, 2), await PurgeKit.CountsAsync(db, running));
+        Assert.True(await PurgeKit.RunExistsAsync(db, current));
+        Assert.True(await PurgeKit.RunExistsAsync(db, running));
     }
 
     [Fact]
@@ -174,6 +181,7 @@ public sealed class SupersededResultsPurgeTests(SqlServerFixture sql)
         var store = new CalculationResultStore(db, new TestClock(T0), purgeOptions: PurgeKit.On(3));
         Assert.Equal(10, await store.PurgeSupersededRunsAsync([new SupersededRun(victim, 0, null)], CancellationToken.None));
         Assert.Equal((0, 0, 0), await PurgeKit.CountsAsync(db, victim));
+        Assert.False(await PurgeKit.RunExistsAsync(db, victim));
     }
 
     [Fact]
@@ -192,6 +200,55 @@ public sealed class SupersededResultsPurgeTests(SqlServerFixture sql)
         await store.PurgeSupersededRunsAsync([new SupersededRun(victim, f.Period, f.Document.DocumentId)], CancellationToken.None);
 
         Assert.Equal((0, 2, 2), await PurgeKit.CountsAsync(db, victim));
+
+        // На прогін посилаються кроки й входи (FK) - його рядок лишається.
+        Assert.True(await PurgeKit.RunExistsAsync(db, victim));
+    }
+
+    /// <remarks>
+    /// ✎ D-560: швидкий шлях отримує лише прогони, щойно зняті з актуальності, але умова «підлягає прибиранню» стоїть
+    /// у кожному операторі. <c>Failed</c>, новіший за актуальний (остання спроба), і <c>Failed</c>, молодший за
+    /// <see cref="SupersededPurgeOptions.FailedRunGrace"/>, не чіпаються навіть передані явно; <c>Failed</c>, старіший
+    /// за актуальний того самого документа й старший за добу, прибирається повністю.
+    /// Мутація: прибрати з <c>EligibleSql</c> умову <c>cu.Id &gt; Id</c> або <c>StartedAt &lt; @failedBefore</c> — червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Failed_прибирається_лише_старіший_за_актуальний_і_старший_за_добу()
+    {
+        var f = await PurgeKit.ArrangeAsync(sql, 202601);
+        await using var db = f.Builder.CreateContext();
+
+        var failedOld = await PurgeKit.AddRunAsync(db, f, "Failed", T0.AddHours(-1));
+        await PurgeKit.InsertRowsAsync(db, f, failedOld, 2, 2, 2, "FO");
+        var current = await PurgeKit.AddRunAsync(db, f, "Current", T0);
+        await PurgeKit.InsertRowsAsync(db, f, current, 3, 1, 1, "C");
+        var failedNew = await PurgeKit.AddRunAsync(db, f, "Failed", T0.AddHours(1));
+        await PurgeKit.InsertRowsAsync(db, f, failedNew, 2, 2, 2, "FN");
+
+        SupersededRun[] passed =
+        [
+            new(failedOld, f.Period, f.Document.DocumentId),
+            new(failedNew, f.Period, f.Document.DocumentId),
+            new(current, f.Period, f.Document.DocumentId),
+        ];
+
+        // Годинник у межах доби від старту - жоден Failed ще не прибирається.
+        var young = new CalculationResultStore(db, new TestClock(T0.AddHours(2)), purgeOptions: PurgeKit.On());
+        Assert.Equal(0, await young.PurgeSupersededRunsAsync(passed, CancellationToken.None));
+        Assert.Equal((2, 2, 2), await PurgeKit.CountsAsync(db, failedOld));
+
+        // Через дві доби: старіший за актуальний - геть повністю; новіший і актуальний - цілі.
+        var later = new CalculationResultStore(db, new TestClock(T0.AddDays(2)), purgeOptions: PurgeKit.On());
+        Assert.Equal(6, await later.PurgeSupersededRunsAsync(passed, CancellationToken.None));
+
+        Assert.Equal((0, 0, 0), await PurgeKit.CountsAsync(db, failedOld));
+        Assert.False(await PurgeKit.RunExistsAsync(db, failedOld));
+        Assert.Equal((2, 2, 2), await PurgeKit.CountsAsync(db, failedNew));
+        Assert.True(await PurgeKit.RunExistsAsync(db, failedNew));
+        Assert.Equal((3, 1, 1), await PurgeKit.CountsAsync(db, current));
+        Assert.True(await PurgeKit.RunExistsAsync(db, current));
     }
 
     [Fact]
@@ -469,6 +526,10 @@ internal static class PurgeKit
                       FROM sys.all_objects AS a CROSS JOIN sys.all_objects AS b) AS n;
             """);
     }
+
+    /// <summary>Чи є ще рядок <c>calc.CalculationRun</c> (D-560: прибраний прогін зникає повністю).</summary>
+    public static Task<bool> RunExistsAsync(EcrDbContext db, long runId)
+        => db.CalculationRuns.AsNoTracking().AnyAsync(r => r.Id == runId);
 
     public static async Task<(int Results, int Steps, int Inputs)> CountsAsync(EcrDbContext db, long runId)
         => (

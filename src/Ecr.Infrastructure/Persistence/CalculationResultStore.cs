@@ -588,7 +588,8 @@ public sealed partial class CalculationResultStore(
 
         try
         {
-            var purger = new SupersededResultsPurger(db, purge, logger ?? NullLogger<CalculationResultStore>.Instance);
+            var purger = new SupersededResultsPurger(
+                db, purge, clock, logger ?? NullLogger<CalculationResultStore>.Instance);
             return await purger.PurgeRunsAsync(runs, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

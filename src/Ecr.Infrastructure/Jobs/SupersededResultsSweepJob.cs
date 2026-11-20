@@ -14,19 +14,18 @@ using Microsoft.Extensions.Logging;
 namespace Ecr.Infrastructure.Jobs;
 
 /// <summary>
-/// Нічний прохід і разове прибирання: видаляє результати, кроки й входи прогонів, що не <c>Current</c>/<c>Running</c>
-/// (Q-17, ADR «Deleting results of superseded runs», рішення людини 28.10: лишається лише останній розрахунок
-/// «документ × період»).
+/// Нічний прохід і разове прибирання: видаляє прогони, що підлягають прибиранню (<c>Superseded</c>; <c>Failed</c>,
+/// старіший за актуальний свого ланцюга), — результати, кроки, входи й сам рядок <c>calc.CalculationRun</c> (Q-17;
+/// <c>D-560</c> / PSS-01, рішення людини 20.11: для «документ × період» лишається лише останній ланцюг).
 /// </summary>
 /// <remarks>
 /// Страховка швидкого шляху (<c>RunCalculationHandler.CompleteAsync</c> → <c>PurgeSupersededRunsAsync</c>) і двигун
 /// разового прибирання наявної бази. Модель — <see cref="SubmissionSnapshotRetentionJob"/>: журнал
-/// <c>MaintenanceRun</c>, dry-run за замовчуванням, стеля пакетів за прохід.
+/// <c>MaintenanceRun</c> (лічильники за таблицями, прогонів, пакетів, тривалість), стеля пакетів за прохід.
 /// <para>
-/// ⛔ Видалення вимкнено за замовчуванням (<see cref="SupersededPurgeOptions.DeleteEnabled"/>) — зміна даних
-/// незворотна. Перший прохід лише лічить: гістограма статусів прогонів + кандидати за таблицями. Невідомий статус
-/// (поза <c>Current, Running, Superseded, Failed</c>) зупиняє прохід у БУДЬ-ЯКОМУ режимі: рішення про нього - за
-/// людиною, а не за виразом <c>NOT IN</c>.
+/// ✎ <c>D-560</c>: увімкнено й видаляє за замовчуванням; <see cref="SupersededPurgeOptions.DeleteEnabled"/> =
+/// <c>false</c> лишає прохід лічильником (dry-run). Невідомий статус (поза <c>Current, Running, Superseded,
+/// Failed</c>) зупиняє прохід у БУДЬ-ЯКОМУ режимі: рішення про нього - за людиною, а не за виразом <c>NOT IN</c>.
 /// </para>
 /// <para>
 /// ⚠ Відновлюваність і ідемпотентність - у самих даних: прогрес = рядки, що лишилися; повторний прохід знаходить
@@ -91,7 +90,7 @@ public sealed partial class SupersededResultsSweepJob(
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        var purger = new SupersededResultsPurger(db, options, logger);
+        var purger = new SupersededResultsPurger(db, options, clock, logger);
         await using var scope = await SupersededResultsPurger.ConnectionScope.OpenAsync(db, ct).ConfigureAwait(false);
 
         var histogram = await ReadStatusHistogramAsync(purger, ct).ConfigureAwait(false);
@@ -108,13 +107,157 @@ public sealed partial class SupersededResultsSweepJob(
         }
 
         var recovery = await ReadRecoveryModelAsync(purger, ct).ConfigureAwait(false);
-        var periods = await ReadPeriodsAsync(purger, ct).ConfigureAwait(false);
 
-        var outcome = options.DeleteEnabled
-            ? await DeleteAsync(purger, options, periods, progress, ct).ConfigureAwait(false)
-            : await CountAsync(purger, periods, ct).ConfigureAwait(false);
+        // ✎ D-560: основна форма — за прогоном (рядки + сам рядок прогону) по індексах з провідним CalculationRunId.
+        // Без них (база без повторного 07-partition-tables.sql) — запасна keyset-форма за партиціями, лише рядки.
+        SupersededSweepOutcome outcome;
+        if (await purger.RunIndexesPresentAsync(ct).ConfigureAwait(false))
+        {
+            var runs = await purger.ListEligibleRunsAsync(ct).ConfigureAwait(false);
+            outcome = options.DeleteEnabled
+                ? await DeleteRunsAsync(purger, options, runs, progress, ct).ConfigureAwait(false)
+                : await CountRunsAsync(purger, runs, ct).ConfigureAwait(false);
+        }
+        else
+        {
+            SupersededResultsPurger.LogRunIndexesMissing(logger);
+            var periods = await purger.ListEligiblePeriodsAsync(ct).ConfigureAwait(false);
+            outcome = options.DeleteEnabled
+                ? await DeleteAsync(purger, options, periods, progress, ct).ConfigureAwait(false)
+                : await CountAsync(purger, periods, ct).ConfigureAwait(false);
+            outcome = outcome with { RunIndexes = false };
+        }
 
         return outcome with { StatusHistogram = histogram, RecoveryModel = recovery };
+    }
+
+    /// <summary>Dry-run основної форми: скільки рядків і прогонів було б видалено.</summary>
+    private async Task<SupersededSweepOutcome> CountRunsAsync(
+        SupersededResultsPurger purger, List<SupersededResultsPurger.EligibleRun> runs, CancellationToken ct)
+    {
+        var counts = new Dictionary<string, long>(StringComparer.Ordinal);
+        foreach (var table in purger.Tables)
+        {
+            counts[table] = runs.Count == 0 ? 0 : await purger.CountEligibleRowsAsync(table, ct).ConfigureAwait(false);
+        }
+
+        if (purger.DeletesRunRows)
+        {
+            counts[SupersededResultsPurger.RunTable] = runs.Count;
+        }
+
+        var summary = string.Join("; ", counts.Select(c => $"{c.Key}={c.Value}"));
+        LogDryRun(logger, summary);
+        return new SupersededSweepOutcome(SupersededSweepOutcome.DryRunMode)
+        {
+            Candidates = counts,
+            Periods = runs.Select(r => r.PeriodKey).Distinct().Count(),
+            RunCandidates = runs.Count,
+            Complete = false,
+        };
+    }
+
+    /// <summary>
+    /// Видалення основної формою: прогін за прогоном від найстаршого — рядки пакетами, далі рядок прогону. Стеля пакетів
+    /// і журнал можуть зупинити посередині прогону; наступний прохід продовжить (прогрес — самі дані).
+    /// </summary>
+    private async Task<SupersededSweepOutcome> DeleteRunsAsync(
+        SupersededResultsPurger purger, SupersededPurgeOptions options, List<SupersededResultsPurger.EligibleRun> runs,
+        IJobProgress? progress, CancellationToken ct)
+    {
+        var budget = new SupersededResultsPurger.Budget(options.MaxBatchesPerRun);
+        var deleted = new Dictionary<string, long>(StringComparer.Ordinal);
+        var betweenBatches = await BetweenBatchesAsync(purger, options, budget, ct).ConfigureAwait(false);
+        var touched = new SortedSet<int>();
+        var finishedAll = true;
+        var started = System.Diagnostics.Stopwatch.StartNew();
+
+        for (var i = 0; i < runs.Count; i++)
+        {
+            if (!budget.CanContinue)
+            {
+                finishedAll = false;
+                break;
+            }
+
+            var run = runs[i];
+            var purge = await purger.PurgeRunAsync(run.RunId, budget, betweenBatches, ct).ConfigureAwait(false);
+            foreach (var (table, count) in purge.Deleted)
+            {
+                deleted[table] = deleted.GetValueOrDefault(table) + count;
+            }
+
+            if (purge.RunDeleted)
+            {
+                deleted[SupersededResultsPurger.RunTable] = deleted.GetValueOrDefault(SupersededResultsPurger.RunTable) + 1;
+            }
+
+            if (purge.Rows > 0)
+            {
+                touched.Add(run.PeriodKey);
+            }
+
+            if (!purge.Complete)
+            {
+                finishedAll = false;
+                break;
+            }
+
+            if (purge.Rows > 0 || purge.RunDeleted)
+            {
+                SupersededResultsPurger.LogRunPurged(logger, run.RunId, purge.Rows, purge.RunDeleted);
+            }
+
+            if (progress is not null && (i % 20 == 19 || i == runs.Count - 1))
+            {
+                await progress.ReportAsync(Math.Min(99, (i + 1) * 100 / Math.Max(1, runs.Count)), null, ct)
+                    .ConfigureAwait(false);
+            }
+        }
+
+        var outcome = new SupersededSweepOutcome(SupersededSweepOutcome.DeleteMode)
+        {
+            Deleted = deleted,
+            Periods = runs.Select(r => r.PeriodKey).Distinct().Count(),
+            RunCandidates = runs.Count,
+            Batches = budget.Done,
+            Complete = finishedAll,
+            StopReason = budget.StopReason ?? (finishedAll ? null : "maxBatches"),
+            ElapsedSeconds = (long)started.Elapsed.TotalSeconds,
+        };
+
+        var deletedSummary = string.Join("; ", deleted.Select(c => $"{c.Key}={c.Value}"));
+        LogDeleted(logger, deletedSummary, budget.Done, finishedAll);
+
+        if (finishedAll && options.RebuildAfter && touched.Count > 0)
+        {
+            await RebuildAsync(purger, touched, ct).ConfigureAwait(false);
+            outcome = outcome with { Rebuilt = true };
+        }
+
+        return outcome;
+    }
+
+    /// <summary>Перевірка між пакетами: SIMPLE — CHECKPOINT кожні N пакетів; FULL — пауза, поки журнал заповнений.</summary>
+    private async Task<Func<CancellationToken, Task<bool>>> BetweenBatchesAsync(
+        SupersededResultsPurger purger, SupersededPurgeOptions options, SupersededResultsPurger.Budget budget,
+        CancellationToken ct)
+    {
+        var recovery = await ReadRecoveryModelAsync(purger, ct).ConfigureAwait(false);
+        var simple = string.Equals(recovery, "SIMPLE", StringComparison.OrdinalIgnoreCase);
+        var full = string.Equals(recovery, "FULL", StringComparison.OrdinalIgnoreCase);
+        var sinceCheckpoint = 0;
+
+        return async token =>
+        {
+            if (simple && ++sinceCheckpoint >= options.CheckpointEveryBatches)
+            {
+                sinceCheckpoint = 0;
+                await CheckpointAsync(purger, token).ConfigureAwait(false);
+            }
+
+            return !full || await WaitForLogAsync(options, budget, token).ConfigureAwait(false);
+        };
     }
 
     private static async Task<Dictionary<string, long>> ReadStatusHistogramAsync(
@@ -147,22 +290,7 @@ public sealed partial class SupersededResultsSweepJob(
         }
     }
 
-    /// <summary>Партиції, де є рядки неактуальних прогонів (за таблицею прогонів, не за скануванням величезних таблиць).</summary>
-    private static async Task<List<int>> ReadPeriodsAsync(SupersededResultsPurger purger, CancellationToken ct)
-    {
-        await using var command = purger.CreateCommand(
-            $"SELECT DISTINCT ISNULL(PeriodKey, 0) FROM calc.CalculationRun WHERE Status NOT IN ({SupersededResultsPurger.KeepStatusesSql}) ORDER BY 1;",
-            []);
-        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        var periods = new List<int>();
-        while (await reader.ReadAsync(ct).ConfigureAwait(false))
-        {
-            periods.Add(reader.GetInt32(0));
-        }
-
-        return periods;
-    }
-
+    /// <summary>Dry-run запасної форми (індексів прогону немає): за партиціями, лише рядки.</summary>
     private async Task<SupersededSweepOutcome> CountAsync(
         SupersededResultsPurger purger, List<int> periods, CancellationToken ct)
     {
@@ -188,34 +316,16 @@ public sealed partial class SupersededResultsSweepJob(
         };
     }
 
+    /// <summary>Видалення запасною формою (індексів прогону немає): keyset за партиціями, лише рядки.</summary>
     private async Task<SupersededSweepOutcome> DeleteAsync(
         SupersededResultsPurger purger, SupersededPurgeOptions options, List<int> periods, IJobProgress? progress,
         CancellationToken ct)
     {
         var budget = new SupersededResultsPurger.Budget(options.MaxBatchesPerRun);
         var deleted = new Dictionary<string, long>(StringComparer.Ordinal);
-        var recovery = await ReadRecoveryModelAsync(purger, ct).ConfigureAwait(false);
-        var simple = string.Equals(recovery, "SIMPLE", StringComparison.OrdinalIgnoreCase);
-        var full = string.Equals(recovery, "FULL", StringComparison.OrdinalIgnoreCase);
-        var sinceCheckpoint = 0;
+        var betweenBatches = await BetweenBatchesAsync(purger, options, budget, ct).ConfigureAwait(false);
         var touched = new SortedSet<int>();
         var finishedAll = true;
-
-        async Task<bool> BetweenBatchesAsync(CancellationToken token)
-        {
-            if (simple && ++sinceCheckpoint >= options.CheckpointEveryBatches)
-            {
-                sinceCheckpoint = 0;
-                await CheckpointAsync(purger, token).ConfigureAwait(false);
-            }
-
-            if (full && !await WaitForLogAsync(options, budget, token).ConfigureAwait(false))
-            {
-                return false;
-            }
-
-            return true;
-        }
 
         foreach (var period in periods)
         {
@@ -227,7 +337,7 @@ public sealed partial class SupersededResultsSweepJob(
                     break;
                 }
 
-                var count = await purger.DeleteNonCurrentAsync(table, period, budget, BetweenBatchesAsync, ct)
+                var count = await purger.DeleteNonCurrentAsync(table, period, budget, betweenBatches, ct)
                     .ConfigureAwait(false);
                 if (count > 0)
                 {
@@ -450,7 +560,7 @@ public sealed record SupersededSweepOutcome(string Mode)
     /// <summary><c>true</c> - у режимі видалення кандидатів не лишилося (інакше стеля/журнал; наступний прохід продовжить).</summary>
     public bool Complete { get; init; }
 
-    /// <summary>Чому видалення зупинилось раніше (<c>logFull</c>), якщо так.</summary>
+    /// <summary>Чому видалення зупинилось раніше (<c>logFull</c>, <c>maxBatches</c>), якщо так.</summary>
     public string? StopReason { get; init; }
 
     /// <summary>Recovery model бази на момент проходу.</summary>
@@ -458,6 +568,18 @@ public sealed record SupersededSweepOutcome(string Mode)
 
     /// <summary>Чи перебудовано індекси після прибирання.</summary>
     public bool Rebuilt { get; init; }
+
+    /// <summary>Скільки прогонів підлягало прибиранню на початку проходу (основна форма).</summary>
+    public int RunCandidates { get; init; }
+
+    /// <summary>
+    /// <c>false</c> — індексів за <c>CalculationRunId</c> немає: прохід ішов запасною формою (лише рядки, рядки
+    /// прогонів лишилися). Потрібен повторний <c>07-partition-tables.sql</c>.
+    /// </summary>
+    public bool RunIndexes { get; init; } = true;
+
+    /// <summary>Тривалість видалення, секунд (основна форма).</summary>
+    public long ElapsedSeconds { get; init; }
 
     /// <summary>Підсумок для <c>MaintenanceRun.DetailsJson</c>.</summary>
     public string ToJson()
@@ -468,6 +590,7 @@ public sealed record SupersededSweepOutcome(string Mode)
                 abortReason = AbortReason,
                 statusHistogram = StatusHistogram,
                 candidates = Candidates,
+                runCandidates = RunCandidates,
                 deleted = Deleted,
                 periods = Periods,
                 batches = Batches,
@@ -475,6 +598,8 @@ public sealed record SupersededSweepOutcome(string Mode)
                 stopReason = StopReason,
                 recoveryModel = RecoveryModel,
                 rebuilt = Rebuilt,
+                runIndexes = RunIndexes,
+                elapsedSeconds = ElapsedSeconds,
             },
             System.Text.Json.JsonSerializerOptions.Web);
 }

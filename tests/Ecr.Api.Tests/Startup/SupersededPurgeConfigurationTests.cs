@@ -8,14 +8,15 @@ using Xunit;
 namespace Ecr.Api.Tests.Startup;
 
 /// <summary>
-/// Q-17: ключі <c>Calculations:SupersededPurge:*</c> - у файлі прибирання й видалення вимкнені (незворотна зміна
-/// даних вмикається словом людини), недійсне значення зупиняє старт з назвою ключа.
+/// Q-17 / <c>D-560</c>: ключі <c>Calculations:SupersededPurge:*</c> - прибирання й видалення УВІМКНЕНІ за
+/// замовчуванням (рішення людини 20.11, PSS-01) і у файлі, і в коді (ключа немає - увімкнено), недійсне значення
+/// зупиняє старт з назвою ключа.
 /// </summary>
 public sealed class SupersededPurgeConfigurationTests
 {
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
-    public void Типовий_файл_лишає_прибирання_і_видалення_вимкненими()
+    public void Типовий_файл_вмикає_прибирання_і_видалення()
     {
         var shipped = new ConfigurationBuilder()
             .AddJsonFile(Path.Combine(RepositoryRoot(), "src", "Ecr.Api", "appsettings.json"), optional: false)
@@ -23,14 +24,37 @@ public sealed class SupersededPurgeConfigurationTests
 
         var options = SupersededPurgeOptions.Read(shipped);
 
-        // Мутація: поставити Enabled/DeleteEnabled=true у appsettings.json - червоніє.
-        Assert.False(options.Enabled);
-        Assert.False(options.DeleteEnabled);
+        // Мутація: поставити Enabled/DeleteEnabled=false у appsettings.json - червоніє.
+        Assert.True(options.Enabled);
+        Assert.True(options.DeleteEnabled);
         Assert.Equal(500, options.BatchSize);
-        Assert.Equal(2000, options.MaxBatchesPerRun);
+        Assert.Equal(SupersededPurgeOptions.DefaultMaxBatchesPerRun, options.MaxBatchesPerRun);
         Assert.True(options.IncludeTrace);
         Assert.False(options.RebuildAfter);
         Assert.Empty(EcrConfigurationValidation.Validate(shipped));
+    }
+
+    /// <remarks>
+    /// ⛔ Служба <c>EcrWorker</c> <c>appsettings.json</c> Api не читає (<c>worker.settings.json</c> розділу
+    /// <c>Calculations</c> не має), а саме вона в режимі <c>Database</c> завершує перерахунки. Ключ, якого немає, -
+    /// увімкнено. Мутація: повернути <c>defaultValue: false</c> у <c>SupersededPurgeOptions.Read</c> - червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    public void Без_ключів_прибирання_увімкнене_а_без_конфігурації_вимкнене()
+    {
+        var empty = SupersededPurgeOptions.Read(new ConfigurationBuilder().Build());
+        Assert.True(empty.Enabled);
+        Assert.True(empty.DeleteEnabled);
+        Assert.True(empty.IncludeTrace);
+
+        var explicitOff = SupersededPurgeOptions.Read(new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { [SupersededPurgeOptions.EnabledKey] = "false" })
+            .Build());
+        Assert.False(explicitOff.Enabled);
+
+        // Сховище, створене вручну без конфігурації (тести), - вимкнено.
+        Assert.False(SupersededPurgeOptions.Read(null).Enabled);
     }
 
     [Theory]
