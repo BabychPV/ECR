@@ -606,7 +606,8 @@ public sealed partial class CalculationResultStore(
 
     /// <inheritdoc />
     public async Task<int> CarryOverResultsAsync(
-        long calculationRunId, long documentId, IReadOnlyCollection<int> methodologyIds, CancellationToken ct)
+        long calculationRunId, long documentId, IReadOnlyCollection<int> methodologyIds, CancellationToken ct,
+        IReadOnlyCollection<long>? tableInstanceIds = null)
     {
         ArgumentNullException.ThrowIfNull(methodologyIds);
         if (methodologyIds.Count == 0)
@@ -653,6 +654,13 @@ public sealed partial class CalculationResultStore(
                         && r.DocumentId == documentId
                         && currentRunIds.Contains(r.CalculationRunId)
                         && versionIds.Contains(r.MethodologyVersionId));
+
+        // ✎ D-557: спільна методологія — переносяться лише результати затверджених екземплярів.
+        if (tableInstanceIds is not null)
+        {
+            var instanceIds = tableInstanceIds.ToList();
+            sourceQuery = sourceQuery.Where(r => r.TableInstanceId != null && instanceIds.Contains(r.TableInstanceId.Value));
+        }
 
         // ⛔ N2-04: понад стелю — відмова, а не мовчазне обрізання. Раніше `Take(MaxResults)` губив хвіст:
         // прогін ставав актуальним, а частина чисел перенесених аркушів зникала з читання без жодної ознаки.

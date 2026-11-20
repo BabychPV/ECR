@@ -379,7 +379,7 @@ public sealed class RunCalculationHandler(
             if (item.MethodologyIds.Count > 0)
             {
                 await results
-                    .CarryOverResultsAsync(calculationRunId, item.DocumentId, item.MethodologyIds, ct)
+                    .CarryOverResultsAsync(calculationRunId, item.DocumentId, item.MethodologyIds, ct, item.TableInstanceIds)
                     .ConfigureAwait(false);
             }
         }
