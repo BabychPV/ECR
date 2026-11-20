@@ -243,6 +243,12 @@ public sealed class MethodologyScriptEndToEndTests(SqlServerFixture sql)
         await SaveTextAsync(u.Author, a, $"rows from {s.TableCode};\noutput OUT_A : t = row.{s.ValueColumn} * 2;").ConfigureAwait(true);
         await AddGoldenAsync(u.Author, a, s, 0, 10m, [], """{"OUT_A":20}""", tableInstanceId: 0).ConfigureAwait(true);
         await PublishAsync(u.Publisher, a).ConfigureAwait(true);
+
+        // Публікація справді відбулася: автоприв'язка створила активну прив'язку виходу (без асерту тест був би порожнім).
+        await using var db = s.Builder.CreateContext();
+        var binding = await db.CalculationBindings.AsNoTracking().SingleAsync(b => b.MethodologyId == a.MethodologyId).ConfigureAwait(true);
+        Assert.Equal("OUT_A", binding.OutputCode);
+        Assert.True(binding.IsActive);
     }
 
     // ───────────────────────────── стенд ─────────────────────────────
