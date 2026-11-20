@@ -37621,6 +37621,21 @@ export interface components {
         };
         /** @description Статус місячної колонки (D-441): стан аркуша за період місяця колонки. */
         MonthColumnStatusDto: {
+            /**
+             * @description ✎ D-6: поточний користувач може затвердити чи відхилити аркуш за цей місяць (те саме правило, що POST approve).
+             * @default false
+             */
+            canDecide: boolean;
+            /**
+             * @description ✎ D-6: поточний користувач може відкликати подання аркуша за цей місяць (те саме правило, що POST recall).
+             * @default false
+             */
+            canRecall: boolean;
+            /**
+             * @description ✎ D-6: поточний користувач може повернути ЗАТВЕРДЖЕНИЙ аркуш за цей місяць у роботу (те саме правило, що POST reopen).
+             * @default false
+             */
+            canReturn: boolean;
             /** @description Код колонки. */
             columnCode: string;
             /**
@@ -44938,6 +44953,11 @@ export interface components {
             state: components["schemas"]["PeriodState"];
             /** @description Аркуш за цей період можна подати зараз (неподаний, проєкт не архівний). */
             submittable: boolean;
+            /**
+             * Format: int32
+             * @description ✎ D-6: місяць документа-джерела HSE400, ще не затверджений, через який сервер відхилить подання цього періоду (sourceMonthNotApproved); null — перешкоди немає.
+             */
+            unapprovedSourcePeriodKey?: null | number;
         };
         /** @description Цільовий період подання аркуша і статуси місячних колонок (D-441). */
         SubmissionTargetDto: {

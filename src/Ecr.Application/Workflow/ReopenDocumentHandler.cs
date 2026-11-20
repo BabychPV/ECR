@@ -42,6 +42,25 @@ public sealed class ReopenDocumentHandler(
     /// <summary>Право, без якого повернення в роботу неможливе (ФВ-6.12).</summary>
     public const string Permission = "Document.Reopen";
 
+    /// <summary>
+    /// Чи має профіль право <see cref="Permission"/> для цього документа: глобально або (⛔ ФВ-6.14) роллю з областю
+    /// проєкту ЦЬОГО документа; проєкт питається лише тоді, коли права немає глобально. ✎ D-6: те саме правило дає
+    /// підказку «що можна повернути» по місяцях річного аркуша (<see cref="MonthDecisionRights"/>).
+    /// </summary>
+    /// <param name="access">Служба рішень доступу.</param>
+    /// <param name="profile">Профіль прав.</param>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public static async Task<bool> HasPermissionAsync(
+        IAccessDecisionService access, AccessProfile profile, long documentId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(access);
+
+        return PermissionCheck.IsGranted(profile, Permission)
+               || (await access.DocumentProjectIdAsync(documentId, ct).ConfigureAwait(false) is { } documentProject
+                   && PermissionCheck.IsGrantedIn(profile, Permission, documentProject));
+    }
+
     /// <summary>Повертає аркуш у <c>Draft</c>.</summary>
     /// <param name="documentId">Документ.</param>
     /// <param name="sheetDefId">Аркуш.</param>
@@ -108,12 +127,7 @@ public sealed class ReopenDocumentHandler(
 
         // Право небезпечне і тому перевіряється окремо від грантів: воно дає
         // змогу змінити вже подані числа (ФВ-6.12).
-        // ⛔ ФВ-6.14: у проєкті ЦЬОГО документа — роль з областю діє лише там.
-        // Проєкт питається лише тоді, коли права немає глобально.
-        var allowed = PermissionCheck.IsGranted(profile, Permission)
-                      || (await access.DocumentProjectIdAsync(documentId, ct).ConfigureAwait(false) is { } documentProject
-                          && PermissionCheck.IsGrantedIn(profile, Permission, documentProject));
-        if (!allowed)
+        if (!await HasPermissionAsync(access, profile, documentId, ct).ConfigureAwait(false))
         {
             throw new AccessDeniedException(
                 "ECR-ACCS-0403", $"Потрібне право {Permission}.",
