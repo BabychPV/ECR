@@ -105,8 +105,12 @@ public sealed class ScriptRuntime
         UnitIds = unitIds;
         _entries = entries;
 
+        // ✎ PSS-08: ліниво — до першої таблиці-псевдоніма оркестратор уже під'єднав кеш виклику (UsePhaseReads).
         _documentInstances = new Lazy<Task<IReadOnlyList<TableInstanceRef>>>(
-            () => _data.Rows.GetTableInstancesAsync(_documentId, _periodKey, CancellationToken.None));
+            () => _phaseReads is { } reads
+                ? reads.DocumentInstancesAsync(
+                    _documentId, _periodKey, () => _data.Rows.GetTableInstancesAsync(_documentId, _periodKey, CancellationToken.None))
+                : _data.Rows.GetTableInstancesAsync(_documentId, _periodKey, CancellationToken.None));
 
         _wantedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         _monthlyPrefixes = [];

@@ -250,6 +250,13 @@ public sealed class CalculationOrchestrator(
                     var scopedOutputWriter = scope.ServiceProvider.GetRequiredService<CalculationOutputWriter>();
                     var scopedModules = scope.ServiceProvider.GetRequiredService<IEnumerable<ICalculationModule>>();
 
+                    // PSS-08: збирач входів (той самий Scoped екземпляр бачить модуль скрипта) і модуль «місяці в колонках».
+                    scopedInputBuilder.PhaseReads = phaseReads;
+                    foreach (var monthModule in scopedModules.OfType<MonthColumnArgumentsModule>())
+                    {
+                        monthModule.PhaseReads = phaseReads;
+                    }
+
                     // ✎ MS: модуль скрипта читає результати ЦЬОГО прогону (колонки `Calculated`, §13.9) і вибирає
                     // рядки власним селектором; обидва — зі scope гілки.
                     var scopedSelector = scope.ServiceProvider.GetService<ScriptRowSelector>();

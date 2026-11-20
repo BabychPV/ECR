@@ -53,6 +53,9 @@ public sealed class MethodologyPhaseSliceReadCountTests
 
         await cells.Received(1).ReadSliceAsync(TableA, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
         await rows.Received(1).GetRowIdsAsync(TableA, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
+
+        // Збирач входів теж бере екземпляр з кешу виклику (до PSS-08: 1 + 5 — резолвер і кожна прив'язка).
+        await rows.Received(1).ResolveTableInstanceAsync(TableA, Arg.Any<CancellationToken>());
     }
 
     [Fact]

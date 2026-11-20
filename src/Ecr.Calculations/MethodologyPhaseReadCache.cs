@@ -38,6 +38,7 @@ internal sealed class MethodologyPhaseReadCache(long maxRetainedCells)
     private readonly ConcurrentDictionary<(long Instance, int Period), Lazy<Task<IReadOnlyDictionary<string, long>>>> _rowIds = new();
     private readonly ConcurrentDictionary<(long Instance, int Period), Lazy<Task<IReadOnlyList<CellRecord>>>> _slices = new();
     private readonly ConcurrentDictionary<long, Lazy<Task<TableRead>>> _tables = new();
+    private readonly ConcurrentDictionary<(long Document, int Period), Lazy<Task<IReadOnlyList<TableInstanceRef>>>> _documentInstances = new();
     private long _retainedCells;
 
     /// <summary>Найбільше комірок, які кеш утримує (≥ 0).</summary>
@@ -71,6 +72,11 @@ internal sealed class MethodologyPhaseReadCache(long maxRetainedCells)
     /// </summary>
     internal Task<TableRead> TableAsync(long tableInstanceId, Func<Task<TableRead>> load)
         => GetAsync(_tables, tableInstanceId, load, static t => t.Slice.Count);
+
+    /// <summary>Екземпляри таблиць документа за період (таблиці-псевдоніми скриптів, аркуш модуля «місяці в колонках»).</summary>
+    internal Task<IReadOnlyList<TableInstanceRef>> DocumentInstancesAsync(
+        long documentId, PeriodKey period, Func<Task<IReadOnlyList<TableInstanceRef>>> load)
+        => GetAsync(_documentInstances, (documentId, period.Value), load, static _ => 0);
 
     private async Task<T> GetAsync<TKey, T>(
         ConcurrentDictionary<TKey, Lazy<Task<T>>> map, TKey key, Func<Task<T>> load, Func<T, int> cellsOf)
