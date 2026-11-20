@@ -159,4 +159,19 @@ public sealed class ScriptUnitCheckerTests
         Assert.True(Blocks(CheckWithOne(
             "rows from T1;\noutput O : m3 = row.Mass * row.Frac;", table)));
     }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "MS-T3.1")]
+    public void Оголошена_безрозмірна_змінна_не_ховає_розбіжність_виходу()
+    {
+        // F13 (мутація: прибрати `!dimensionless` з VarInfo): змінна `one` із виразу без відомої одиниці
+        // (колонка без одиниці) лишалася б «невідомою» і глушила перевірку множення - m3 = t * one не блокувалося.
+        var table = Table("T1", 1, WithUnit(1, "Mass", ScriptTestKit.Tonne), WithUnit(2, "Raw", null));
+
+        Assert.True(Blocks(CheckWithOne(
+            "rows from T1;\nvar f : one = row.Raw;\noutput O : m3 = row.Mass * f;", table)));
+        Assert.False(Blocks(CheckWithOne(
+            "rows from T1;\nvar f : one = row.Raw;\noutput O : t = row.Mass * f;", table)));
+    }
 }
