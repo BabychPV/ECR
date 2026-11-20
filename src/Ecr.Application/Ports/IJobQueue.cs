@@ -64,9 +64,20 @@ public interface IJobQueue
     /// <see cref="RequestCancelAsync"/>, який виконуваній ставить запит скасування).
     /// </summary>
     /// <param name="targetKey">Ціль <c>{ТипМаркера}~{ціль}</c>.</param>
+    /// <param name="coveredByJobId">
+    /// Задача, що виконає цю роботу з надлишком: її <c>JobId</c> іде в повідомлення скасованої
+    /// (<see cref="CoveredByMessageKey"/>), щоб у переліку задач було видно ЧОМУ «скасовано», а не голий стан.
+    /// </param>
     /// <param name="ct">Скасування.</param>
     /// <returns><c>true</c> — задачу скасовано.</returns>
-    public Task<bool> CancelQueuedByTargetAsync(string targetKey, CancellationToken ct) => Task.FromResult(false);
+    public Task<bool> CancelQueuedByTargetAsync(string targetKey, string? coveredByJobId, CancellationToken ct)
+        => Task.FromResult(false);
+
+    /// <summary>
+    /// Ключ каталогу повідомлення задачі, скасованої <see cref="CancelQueuedByTargetAsync"/>: «покрито перерахунком
+    /// разом із затвердженими (задача {jobId})».
+    /// </summary>
+    public const string CoveredByMessageKey = "jobs.coveredByApprovedRecalculation";
 
     /// <summary>Подовжує оренду; заразом повідомляє про запит скасування.</summary>
     public Task<LeaseState> RenewAsync(JobClaimToken claim, TimeSpan lease, CancellationToken ct);
@@ -138,6 +149,20 @@ public interface IJobQueue
     /// </remarks>
     /// <returns>Скільки рядків змінено.</returns>
     public Task<int> ExpireAsync(int maxReclaims, CancellationToken ct);
+
+    /// <summary>
+    /// Те саме, що <see cref="ExpireAsync"/>, але повертає <c>JobId</c> закритих рядків — щоб виконавець міг
+    /// відреагувати на системне завершення задачі (B80 N5: провалена/скасована «залежні з затвердженими» повертає
+    /// звичайний перерахунок залежних, який вона покривала).
+    /// </summary>
+    /// <param name="maxReclaims">Як у <see cref="ExpireAsync"/>.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <returns>Закриті задачі; типова реалізація — порожньо (черга без підтримки).</returns>
+    public async Task<IReadOnlyList<string>> ExpireEndedAsync(int maxReclaims, CancellationToken ct)
+    {
+        await ExpireAsync(maxReclaims, ct).ConfigureAwait(false);
+        return [];
+    }
 }
 
 /// <summary>

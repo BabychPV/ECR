@@ -97,7 +97,12 @@ public sealed class CalculationTrigger(
     /// <inheritdoc />
     /// <remarks>
     /// B179 L2: ланка їде в payload (<c>SourceHop</c>); перерахунок споживача передає її хуку завершення. Ціль та сама
-    /// (<see cref="DependentsTargetOf"/>): злиття лишає ланку останньої постановки.
+    /// (<see cref="DependentsTargetOf"/>).
+    /// <para>
+    /// ⚠ Злиття в задачу, що ЧЕКАЄ, лишає payload (і ланку) ПЕРШОЇ постановки: черга в базі не переписує payload задачі без
+    /// масиву злиття (<c>DbJobQueue.EnqueueSql</c>, лише <c>AvailableAt</c>). Так само покриття задачею «з затвердженими»
+    /// лишає ЇЇ ланку. Ланка важить лише для стелі ланцюжка (<c>RegistryImpactRecalculationRequest.MaxHops</c>).
+    /// </para>
     /// </remarks>
     public Task<string?> RequestDependentsAsync(long documentId, PeriodKey periodKey, int sourceHop, CancellationToken ct)
         => RequestDependentsAsync(documentId, periodKey, sourceHop, approvedOverride: null, ct);
@@ -122,6 +127,11 @@ public sealed class CalculationTrigger(
         // прогони — обидва виконувались би повністю (на Land ≈ 12 хв кожен). Тому: звичайну, що чекає, скасовує постановка з
         // перекриттям; звичайна, що приходить, коли така вже чекає, не ставиться — вона виконає ту саму роботу з надлишком.
         // ⚠ Лише для задачі, що ЧЕКАЄ: виконувана могла прочитати входи до цієї зміни, тож її не скасовуємо й не покладаємось.
+        // ⛔ Пошук без локу: у НЕЗАКОМІЧЕНІЙ транзакції викликача планувальник у базі покриття не дає (`FindQueuedAsync`
+        // → null), бо знайдена задача могла б стартувати й прочитати входи до коміту зміни. Нині викликач (задача
+        // RegistryImpactRecalculationJob) транзакції не відкриває — це запобіжник на майбутнє, а не робочий шлях.
+        // ✎ Задача з перекриттям, що вже СТАРТУВАЛА (лок документа взято), сама скасовує звичайну, яка встигла стати в
+        // чергу, поки вона чекала лок (`RecalculationJob`): входи вона читає вже після того.
         if (approvedOverride is null
             && await jobs.FindQueuedAsync<IRecalculationJob>(DependentsApprovedTargetOf(documentId, periodKey), ct).ConfigureAwait(false)
                 is { Length: > 0 } coveringJobId)
@@ -136,12 +146,18 @@ public sealed class CalculationTrigger(
 
         if (approvedOverride is not null)
         {
-            // Після постановки, а не до: у жодний момент цілі без задачі, що виконає роботу, немає.
-            await jobs.CancelQueuedAsync<IRecalculationJob>(DependentsTargetOf(documentId, periodKey), ct).ConfigureAwait(false);
+            // Після постановки, а не до: у жодний момент цілі без задачі, що виконає роботу, немає. Скасована несе JobId
+            // покривної (повідомлення в переліку задач). ⚠ Покривна, що провалиться чи буде скасована, повертає звичайну
+            // (`ApprovedDependentsFallback`): інакше покрита робота губилася б разом із нею.
+            await jobs.CancelQueuedAsync<IRecalculationJob>(DependentsTargetOf(documentId, periodKey), jobId, ct)
+                .ConfigureAwait(false);
         }
 
         return jobId;
     }
+
+    /// <summary>Закінчення цілі <see cref="DependentsApprovedTargetOf"/> — дешевий відбір задач «з затвердженими» за ключем цілі.</summary>
+    public const string DependentsApprovedSuffix = "-dependents-approved";
 
     /// <summary>Ціль перерахунку залежних З перекриттям адміністратора (затверджені теж): окрема від <see cref="DependentsTargetOf"/>.</summary>
     /// <param name="documentId">Документ.</param>
@@ -150,7 +166,7 @@ public sealed class CalculationTrigger(
     public static string DependentsApprovedTargetOf(long documentId, PeriodKey periodKey)
         => string.Create(
             System.Globalization.CultureInfo.InvariantCulture,
-            $"{RecalculateDocumentHandler.TargetOf(documentId, periodKey)}-dependents-approved");
+            $"{RecalculateDocumentHandler.TargetOf(documentId, periodKey)}{DependentsApprovedSuffix}");
 
     /// <summary>Ціль перерахунку залежних: окрема від автоперерахунку збору й кнопки (див. <see cref="RequestDependentsAsync(long, Ecr.Domain.ValueObjects.PeriodKey, CancellationToken)"/>).</summary>
     /// <param name="documentId">Документ.</param>

@@ -640,7 +640,7 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
             """
             SELECT q.JobId
             FROM itg.JobProgress AS q WITH (INDEX(UX_JobProgress_Target_Queued))
-            WHERE q.TargetKey = @target AND q.TargetKey IS NOT NULL AND q.[State] = 'Queued';
+            WHERE q.TargetKey = @target AND q.TargetKey IS NOT NULL AND q.[State] = 'Queued' AND q.Lane IS NOT NULL;
             """,
             p => p.Add("@target", SqlDbType.NVarChar, JobProgress.MaxTargetKeyLength).Value = targetKey,
             async r => await r.ReadAsync(ct).ConfigureAwait(false) ? r.GetString(0) : null,
@@ -648,14 +648,23 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
     }
 
     /// <inheritdoc />
-    public Task<bool> CancelQueuedByTargetAsync(string targetKey, CancellationToken ct)
+    /// <remarks>
+    /// ⚠ Скасована несе конверт <see cref="IJobQueue.CoveredByMessageKey"/> з <c>JobId</c> покривної — як поглинута
+    /// ретраєм несе <c>jobs.absorbedBy</c>: у переліку задач видно ЧОМУ «скасовано», а не голий стан, схожий на дію людини.
+    /// </remarks>
+    public Task<bool> CancelQueuedByTargetAsync(string targetKey, string? coveredByJobId, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(targetKey);
+
+        var covered = coveredByJobId is { Length: > 0 } id
+            ? JobProgressMessageCodec.Encode(new JobProgressMessageEnvelope(
+                IJobQueue.CoveredByMessageKey, new Dictionary<string, string>(StringComparer.Ordinal) { ["jobId"] = id }))
+            : null;
 
         // Один UPDATE лише по Queued: гонки «стала Running між двома запитами» немає, виконувана не чіпається.
         return RunAsync(
             """
-            UPDATE q SET [State] = 'Cancelled', LeaseUntil = NULL, UpdatedAt = @shown
+            UPDATE q SET [State] = 'Cancelled', LeaseUntil = NULL, UpdatedAt = @shown, [Message] = ISNULL(@covered, q.[Message])
             OUTPUT 1
             FROM itg.JobProgress AS q WITH (INDEX(UX_JobProgress_Target_Queued))
             WHERE q.TargetKey = @target AND q.TargetKey IS NOT NULL AND q.[State] = 'Queued' AND q.Lane IS NOT NULL;
@@ -663,6 +672,7 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
             p =>
             {
                 p.Add("@target", SqlDbType.NVarChar, JobProgress.MaxTargetKeyLength).Value = targetKey;
+                p.Add("@covered", SqlDbType.NVarChar, JobProgressMessageCodec.MaxEncodedLength).Value = Db(covered);
                 AddShown(p);
             },
             r => r.ReadAsync(ct),
@@ -766,7 +776,11 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
     /// <c>Failed</c> з конвертом <c>jobs.leaseLostTooOften</c>, і та, яку просили
     /// скасувати, → <c>Cancelled</c>.
     /// </remarks>
-    public Task<int> ExpireAsync(int maxReclaims, CancellationToken ct)
+    public async Task<int> ExpireAsync(int maxReclaims, CancellationToken ct)
+        => (await ExpireEndedAsync(maxReclaims, ct).ConfigureAwait(false)).Count;
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<string>> ExpireEndedAsync(int maxReclaims, CancellationToken ct)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(maxReclaims);
 
@@ -779,17 +793,18 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
 
         return RunAsync(
             """
-            DECLARE @n int;
+            DECLARE @ended TABLE (JobId nvarchar(100) NOT NULL);
             UPDATE itg.JobProgress WITH (ROWLOCK, READPAST)
             SET [State] = 'Failed', [Message] = @poisoned, LeaseUntil = NULL, UpdatedAt = @shown
+            OUTPUT inserted.JobId INTO @ended
             WHERE Lane IS NOT NULL AND [State] = 'Running' AND LeaseUntil < CAST(SYSUTCDATETIME() AS datetime2(3))
               AND CancelRequestedAt IS NULL AND ISNULL(ReclaimCount, 0) >= @max;
-            SET @n = @@ROWCOUNT;
             UPDATE itg.JobProgress WITH (ROWLOCK, READPAST)
             SET [State] = 'Cancelled', LeaseUntil = NULL, UpdatedAt = @shown
+            OUTPUT inserted.JobId INTO @ended
             WHERE Lane IS NOT NULL AND [State] = 'Running' AND LeaseUntil < CAST(SYSUTCDATETIME() AS datetime2(3))
               AND CancelRequestedAt IS NOT NULL;
-            SELECT @n + @@ROWCOUNT;
+            SELECT JobId FROM @ended;
             """,
             p =>
             {
@@ -799,8 +814,13 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
             },
             async r =>
             {
-                await r.ReadAsync(ct).ConfigureAwait(false);
-                return r.GetInt32(0);
+                var ended = new List<string>();
+                while (await r.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    ended.Add(r.GetString(0));
+                }
+
+                return (IReadOnlyList<string>)ended;
             },
             ct);
     }

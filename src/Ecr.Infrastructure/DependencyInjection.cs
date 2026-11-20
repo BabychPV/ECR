@@ -339,6 +339,10 @@ public static class DependencyInjection
         services.AddScoped<Application.Ports.ICalculationTrigger, Application.Calculations.CalculationTrigger>();
         // HSE301:A4 — кінець
 
+        // B80 N5: провалена чи скасована «залежні з затвердженими» повертає звичайний перерахунок, який покривала
+        // (кличуть JobWorker і DbBackgroundJobScheduler.CancelAsync — лінивим резолвом, без циклу з тригером).
+        services.AddScoped<Jobs.ApprovedDependentsFallback>();
+
         // ⛔ P0: технічний автор задач інтеграції (`svc-integration`). Сам
         // `JobActorScope` реєструє `Program.cs` разом з обгорткою
         // `ICurrentUser` — обидва мусять бути ОДНИМ екземпляром на scope.

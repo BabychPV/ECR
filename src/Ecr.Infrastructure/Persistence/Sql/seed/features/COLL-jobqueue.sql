@@ -4,11 +4,24 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
   FROM (VALUES
     -- Ретрай задачі поглинула Queued позаду на ту саму ціль (вона вже несе актуальний стан цілі).
     (N'jobs.absorbedBy',                        N'en', N'Superseded by job {jobId}, queued for the same target.', 1),
+    -- B80 N5 (перф-аудит 20.11): звичайний перерахунок залежних скасовано — його виконає «з затвердженими» (`CancelQueuedByTargetAsync`).
+    (N'jobs.coveredByApprovedRecalculation',    N'en', N'Not needed: covered by the recalculation including approved sheets (job {jobId}).', 1),
     -- Отруйна задача: оренду втрачено {reclaims} разів поспіль — процес-виконавець щоразу зникав.
     (N'jobs.leaseLostTooOften',                 N'en', N'Stopped: the worker lost this job {reclaims} times in a row (its process stopped each time). Restart the job after checking the logs.', 1),
     -- Задача перевищила Jobs:Workers:MaxDuration (I1, `JobWorker`): скасовано, без ретраю.
     (N'jobs.maxDurationExceeded',               N'en', N'Stopped: the job ran longer than the limit of {limit}. Check the logs, then restart the job or raise the limit.', 1)
        ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- COLL:jobqueue ── кінець секції ──
+
+-- COLL:jobqueue ── ru/kz: B80 N5 (перф-аудит 20.11), скасована звичайна задача залежних, покрита «з затвердженими» ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'jobs.coveredByApprovedRecalculation', N'ru', N'Не требуется: эту работу выполнит пересчёт вместе с утверждёнными листами (задача {jobId}).'),
+    (N'jobs.coveredByApprovedRecalculation', N'kz', N'Қажет емес: бұл жұмысты бекітілген парақтармен бірге қайта есептеу орындайды ({jobId} тапсырмасы).')
+       ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
 -- COLL:jobqueue ── кінець секції ──

@@ -369,10 +369,17 @@ public sealed partial class JobWorker(
     {
         try
         {
-            await using var scope = scopes.CreateAsyncScope();
-            await scope.ServiceProvider.GetRequiredService<IJobQueue>()
-                .ExpireAsync(JobQueueLimits.MaxReclaims, CancellationToken.None)
-                .ConfigureAwait(false);
+            IReadOnlyList<string> ended;
+            await using (var scope = scopes.CreateAsyncScope())
+            {
+                ended = await scope.ServiceProvider.GetRequiredService<IJobQueue>()
+                    .ExpireEndedAsync(JobQueueLimits.MaxReclaims, CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
+
+            // B80 N5: системне закриття (отруйна, скасована з мертвим власником) «залежних з затвердженими» —
+            // покрита ними звичайна робота повертається.
+            await ReturnCoveredAsync(ended).ConfigureAwait(false);
         }
 #pragma warning disable CA1031 // Прибирання — не робота воркера: збій іде в журнал, цикл живе.
         catch (Exception ex)
@@ -423,6 +430,15 @@ public sealed partial class JobWorker(
         {
             // Свій потік: задача не займає цикл захоплення навіть до першого await.
             await Task.Run(() => ExecuteClaimedAsync(job, phases, stopping), CancellationToken.None).ConfigureAwait(false);
+
+            // ⛔ B80 N5: «залежні з затвердженими» покривала звичайний перерахунок залежних того самого документа й
+            // періоду (CalculationTrigger). Закінчилась Failed/Cancelled (провал, межа тривалості чи відкладень, скасування
+            // людиною виконуваної) — покрита робота повертається. Стан читається з бази після фіксації: відкладена,
+            // повернута в чергу чи втрачена оренда — не кінець, і повернення не буде.
+            if (ApprovedDependentsFallback.IsCandidate(job.JobCode, job.TargetKey))
+            {
+                await ReturnCoveredAsync([job.Claim.JobId]).ConfigureAwait(false);
+            }
         }
 #pragma warning disable CA1031 // Збій одного виконання не зупиняє воркер; причина — у журналі.
         catch (Exception ex)
@@ -875,6 +891,34 @@ public sealed partial class JobWorker(
         }
     }
 
+    /// <summary>
+    /// B80 N5: для задач, що щойно закінчились, — повернення роботи, яку покривала провалена/скасована «залежні з
+    /// затвердженими» (<see cref="ApprovedDependentsFallback"/>; решту задач він відсіює сам).
+    /// </summary>
+    /// <remarks>⚠ Не кидає: задачу вже закрито, збій повернення — у журнал (сам <see cref="ApprovedDependentsFallback"/>).</remarks>
+    private async Task ReturnCoveredAsync(IReadOnlyCollection<string> jobIds)
+    {
+        if (jobIds.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            await using var scope = scopes.CreateAsyncScope();
+            if (scope.ServiceProvider.GetService<ApprovedDependentsFallback>() is { } fallback)
+            {
+                await fallback.OnEndedAsync(jobIds, CancellationToken.None).ConfigureAwait(false);
+            }
+        }
+#pragma warning disable CA1031 // Повернення покритої роботи — страховка; задачу вже закрито, воркер живе.
+        catch (Exception ex)
+#pragma warning restore CA1031
+        {
+            LogReturnCoveredFailed(logger, string.Join(", ", jobIds), ex);
+        }
+    }
+
     /// <summary>Збій дороги до бази, а не вердикт: повтор має сенс.</summary>
     private static bool IsTransientDatabaseFault(Exception ex)
         => ex is System.Data.Common.DbException or TimeoutException
@@ -997,4 +1041,9 @@ public sealed partial class JobWorker(
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Збій виконавця черги на задачі {JobId}.")]
     private static partial void LogWorkerFault(ILogger logger, string jobId, Exception exception);
+
+    [LoggerMessage(
+        Level = LogLevel.Error,
+        Message = "B80 N5: не вдалося повернути роботу, покриту задачами «залежні з затвердженими» {JobIds}.")]
+    private static partial void LogReturnCoveredFailed(ILogger logger, string jobIds, Exception exception);
 }

@@ -68,7 +68,8 @@ public sealed partial class RecalculationJob(
     IRecalcCommandTimeout? commandTimeout = null,
     IAuditWriter? audit = null,
     IRecalculationCompletionHook? completionHook = null,
-    IMonthColumnRouter? monthRouter = null) : IRecalculationJob
+    IMonthColumnRouter? monthRouter = null,
+    IJobLeaseContext? lease = null) : IRecalculationJob
 {
     [LoggerMessage(
         Level = LogLevel.Error,
@@ -175,6 +176,11 @@ public sealed partial class RecalculationJob(
         commandTimeout?.Apply();
 
         await using var documentLock = await AcquireDocumentLockAsync(request.DocumentId, ct).ConfigureAwait(false);
+
+        // ✎ Перф-аудит 20.11 (B80 N5): «залежні з затвердженими» — надмножина звичайних залежних того самого документа й
+        // періоду. Звичайна, що стала в чергу, поки ця чекала лок (чи була на мить Running у циклі claim → відкладення), —
+        // постановкою не покрита; але лок уже наш і входи ще не читані, тож її робота буде зроблена тут із надлишком.
+        await CancelCoveredDependentsAsync(request, ct).ConfigureAwait(false);
 
         // ⛔ «CalculationRun ховає результати сусідніх документів» (третя
         // хвиля UX-PASS R4): прогін ОДНОГО документа (`request.DocumentId > 0`,
@@ -812,6 +818,45 @@ public sealed partial class RecalculationJob(
             await completionHook.OnSucceededAsync(scopeByDocument, request.SourceHop, ct).ConfigureAwait(false);
         }
     }
+
+    /// <summary>
+    /// ✎ Перф-аудит 20.11 (B80 N5): задача «з затвердженими» після взяття лока документа скасовує звичайну задачу
+    /// залежних того самого документа й періоду, що ЧЕКАЄ (конверт «покрито задачею {jobId}»).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Безпечно саме тут: тригер ставить звичайну ПІСЛЯ коміту зміни, що її викликала, а ця задача ще не прочитала
+    /// жодного входу — отже прочитає й ту зміну. Виконувану звичайну не чіпаємо (лок у нас — виконуваної немає).
+    /// <para>
+    /// ⚠ Оптимізація, а не умова коректності: збій скасування — у журнал, перерахунок іде далі (звичайна виконається
+    /// окремо, щонайбільше подвійна робота). Якщо ж ця задача сама провалиться, скасовану поверне
+    /// <see cref="ApprovedDependentsFallback"/>.
+    /// </para>
+    /// </remarks>
+    private async Task CancelCoveredDependentsAsync(RecalculationRequest request, CancellationToken ct)
+    {
+        if (!request.IncludeApproved || jobs is null || request.DocumentId <= 0 || request.PeriodKey is not { } period)
+        {
+            return;
+        }
+
+        try
+        {
+            await jobs
+                .CancelQueuedAsync<IRecalculationJob>(
+                    CalculationTrigger.DependentsTargetOf(request.DocumentId, new PeriodKey(period)), lease?.Current?.JobId, ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogCancelCoveredFailed(logger ?? NullLogger<RecalculationJob>.Instance, request.DocumentId, period, ex);
+        }
+    }
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "RecalculationJob: документ {DocumentId}, період {PeriodKey}: не вдалося скасувати звичайну задачу залежних, "
+                  + "покриту задачею «з затвердженими»; перерахунок іде далі (щонайбільше подвійна робота).")]
+    private static partial void LogCancelCoveredFailed(ILogger logger, long documentId, int periodKey, Exception exception);
 
     /// <summary>
     /// ✎ LAND-YEAR L2b: ставить другий прохід для періодів-читачів, що читали результати періодів-власників, перерахованих

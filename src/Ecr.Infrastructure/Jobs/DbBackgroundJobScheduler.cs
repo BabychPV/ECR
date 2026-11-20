@@ -42,11 +42,17 @@ public enum JobQueueMode
 /// <param name="cron">Quartz — для розкладу і для задач, поставлених до перемикання.</param>
 /// <param name="signal">Підказка локальному воркеру «є робота».</param>
 /// <param name="correlation">Кореляція запиту-постановника.</param>
+/// <param name="services">
+/// Провайдер scope — лише щоб ЛІНИВО взяти <see cref="ApprovedDependentsFallback"/> після скасування людиною (B80 N5):
+/// той залежить від тригера перерахунку, а тригер — від цього планувальника, тож пряма залежність була б циклом.
+/// <c>null</c> (ручна збірка в тестах) — без повернення покритих задач.
+/// </param>
 public sealed class DbBackgroundJobScheduler(
     IJobQueue queue,
     QuartzJobScheduler cron,
     JobQueueSignal signal,
-    ICorrelationIdAccessor? correlation = null) : IBackgroundJobScheduler
+    ICorrelationIdAccessor? correlation = null,
+    IServiceProvider? services = null) : IBackgroundJobScheduler
 {
     /// <summary>Ключ конфігурації режиму.</summary>
     public const string ModeKey = "Jobs:Queue:Mode";
@@ -109,7 +115,7 @@ public sealed class DbBackgroundJobScheduler(
     }
 
     /// <summary><c>{TypeName}~{target}</c> — одне визначення на обидві постановки з ціллю.</summary>
-    private static string TargetKeyOf<TJob>(string targetKey)
+    internal static string TargetKeyOf<TJob>(string targetKey)
         => $"{typeof(TJob).Name}{TargetSeparator}{targetKey.Replace(TargetSeparator, '_')}";
 
     private async Task<string> EnqueueCoreAsync<TJob>(
@@ -147,16 +153,23 @@ public sealed class DbBackgroundJobScheduler(
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(targetKey);
 
+        // ⛔ Див. зауваження порту: у відкритій транзакції викликача покриття без локу небезпечне — «немає».
+        if ((queue as DbJobQueue)?.Context.Database.CurrentTransaction is not null
+            || System.Transactions.Transaction.Current is not null)
+        {
+            return Task.FromResult<string?>(null);
+        }
+
         return queue.FindQueuedByTargetAsync(TargetKeyOf<TJob>(targetKey), ct);
     }
 
     /// <inheritdoc />
-    public Task<bool> CancelQueuedAsync<TJob>(string targetKey, CancellationToken ct)
+    public Task<bool> CancelQueuedAsync<TJob>(string targetKey, string? coveredByJobId, CancellationToken ct)
         where TJob : IBackgroundJob
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(targetKey);
 
-        return queue.CancelQueuedByTargetAsync(TargetKeyOf<TJob>(targetKey), ct);
+        return queue.CancelQueuedByTargetAsync(TargetKeyOf<TJob>(targetKey), coveredByJobId, ct);
     }
 
     /// <inheritdoc />
@@ -177,14 +190,27 @@ public sealed class DbBackgroundJobScheduler(
     /// <remarks>
     /// ⚠ Рядка черги немає (<see cref="CancelOutcome.NotFound"/>) — це задача Quartz
     /// (розклад або постановка до перемикання режиму): її скасовує Quartz.
+    /// <para>
+    /// ⛔ B80 N5: задача, що чекала, скасована ОДРАЗУ — якщо це «залежні з затвердженими», вона могла покривати звичайний
+    /// перерахунок залежних того самого документа й періоду; той повертається (<see cref="ApprovedDependentsFallback"/>).
+    /// Виконувану скасовує виконавець (запит скасування) — повернення там же, у <c>JobWorker</c>.
+    /// </para>
     /// </remarks>
     public async Task CancelAsync(string jobId, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
 
-        if (await queue.RequestCancelAsync(jobId, ct).ConfigureAwait(false) == CancelOutcome.NotFound)
+        var outcome = await queue.RequestCancelAsync(jobId, ct).ConfigureAwait(false);
+        if (outcome == CancelOutcome.NotFound)
         {
             await cron.CancelAsync(jobId, ct).ConfigureAwait(false);
+            return;
+        }
+
+        if (outcome == CancelOutcome.Cancelled
+            && services?.GetService(typeof(ApprovedDependentsFallback)) is ApprovedDependentsFallback fallback)
+        {
+            await fallback.OnEndedAsync([jobId], ct).ConfigureAwait(false);
         }
     }
 

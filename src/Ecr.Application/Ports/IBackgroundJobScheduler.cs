@@ -120,6 +120,12 @@ public interface IBackgroundJobScheduler
     /// ⚠ Для постановок, що знають: задача ІНШОЇ цілі робить ту саму роботу з надлишком (B80 N5: «залежні з затвердженими»
     /// покриває «залежні без них» для того самого документа й періоду). Черга, що не підтримує пошуку (Quartz у
     /// пам'яті), повертає <c>null</c> — постановка йде як завжди.
+    /// <para>
+    /// ⛔ Пошук іде БЕЗ локу (на відміну від злиття постановки, що тримає UPDLOCK/HOLDLOCK на рядку, який чекає, і так не
+    /// пускає його claim до коміту викликача). У НЕЗАКОМІЧЕНІЙ транзакції викликача знайдена задача могла б стартувати й
+    /// прочитати входи ДО коміту його зміни — і зміна лишилася б без перерахунку. Тому реалізація в базі у відкритій
+    /// транзакції (EF чи ambient) повертає <c>null</c>: покриття немає, постановка йде як завжди.
+    /// </para>
     /// </remarks>
     public Task<string?> FindQueuedAsync<TJob>(string targetKey, CancellationToken ct) where TJob : IBackgroundJob
         => Task.FromResult<string?>(null);
@@ -129,9 +135,11 @@ public interface IBackgroundJobScheduler
     /// </summary>
     /// <typeparam name="TJob">Маркер задачі.</typeparam>
     /// <param name="targetKey">Ціль.</param>
+    /// <param name="coveredByJobId">Задача, що покриває скасовану (у повідомлення скасованої; <c>null</c> — невідомо).</param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns><c>true</c> — скасовано; <c>false</c> — чекаючої не було (чи черга не підтримує).</returns>
-    public Task<bool> CancelQueuedAsync<TJob>(string targetKey, CancellationToken ct) where TJob : IBackgroundJob
+    public Task<bool> CancelQueuedAsync<TJob>(string targetKey, string? coveredByJobId, CancellationToken ct)
+        where TJob : IBackgroundJob
         => Task.FromResult(false);
 
     /// <summary>Планує задачу за cron-виразом.</summary>

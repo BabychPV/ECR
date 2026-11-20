@@ -217,9 +217,49 @@ public sealed class CalculationTriggerQueueTests(SqlServerFixture sql) : DbJobQu
         Assert.NotNull(regular);
         Assert.NotNull(approved);
         Assert.NotEqual(regular, approved);
-        Assert.Equal("Cancelled", (await RowAsync(regular!))?.State);
+        var cancelled = await RowAsync(regular!);
+        Assert.Equal("Cancelled", cancelled?.State);
         Assert.Equal("Queued", (await RowAsync(approved!))?.State);
         Assert.Equal(0, await CountAsync(RegularTarget(document), "Queued"));
+
+        // ⛔ Скасована — не «голий» стан, схожий на дію людини: конверт із JobId покривної (перелік задач резолвить його
+        // каталогом). ДОКАЗ (локально): прибрати `[Message] = ISNULL(@covered, …)` у CancelQueuedByTargetAsync — червоний.
+        AssertCoveredBy(cancelled?.Message, approved!);
+    }
+
+    /// <summary>
+    /// ⛔ Запобіжник: у НЕЗАКОМІЧЕНІЙ транзакції викликача покриття без локу не дається — знайдена задача могла б
+    /// стартувати й прочитати входи до коміту зміни. Звичайна ставиться як завжди (подвійна робота, але не втрата).
+    /// </summary>
+    /// <remarks>ДОКАЗ (локально): прибрати перевірку транзакції в <c>DbBackgroundJobScheduler.FindQueuedAsync</c> — червоний.</remarks>
+    [Fact]
+    [Trait("Finding", "PERF-DEPENDENTS-DUP")]
+    public async Task У_транзакції_викликача_звичайна_не_покривається_чекаючою_затвердженою()
+    {
+        const long document = 7805;
+        await using var host = NewHost();
+        var trigger = Trigger(host);
+
+        var approved = await trigger.RequestDependentsAsync(document, Period, sourceHop: 1, AdminOverride, CancellationToken.None);
+
+        string? regular;
+        await using (var tx = await host.Db.Database.BeginTransactionAsync())
+        {
+            regular = await trigger.RequestDependentsAsync(document, Period, sourceHop: 1, CancellationToken.None);
+            await tx.CommitAsync();
+        }
+
+        Assert.NotNull(regular);
+        Assert.NotEqual(approved, regular);
+        Assert.Equal("Queued", (await RowAsync(regular!))?.State);
+        Assert.Equal("Queued", (await RowAsync(approved!))?.State);
+    }
+
+    private static void AssertCoveredBy(string? message, string coveringJobId)
+    {
+        Assert.True(JobProgressMessageCodec.TryDecode(message, out var envelope), message);
+        Assert.Equal(IJobQueue.CoveredByMessageKey, envelope.Key);
+        Assert.Equal(coveringJobId, envelope.Params?["jobId"]);
     }
 
     /// <summary>Виконувана затверджена не покриває звичайну: та, що приходить, ставиться (виконувана могла прочитати входи до зміни).</summary>
