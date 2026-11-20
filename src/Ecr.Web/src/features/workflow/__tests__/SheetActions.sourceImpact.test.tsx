@@ -46,7 +46,7 @@ function impact(overrides: Partial<Impact> = {}): Impact {
     approvedCount: 1,
     canRecalculateApproved: false,
     consumers: [
-      { bindingCode: 'B', templateCode: 'LAND', documentId: 5, projectCode: 'LAND-26', documentKey: 'DOC-LAND', periodKey: 202601, approved: true, willRecalculate: false, skipReason: 'approved' },
+      { bindingCode: 'B', templateCode: 'LAND', documentId: 5, projectCode: 'LAND-26', documentKey: 'DOC-LAND', periodKey: 202601, approved: true, willRecalculate: false, skipReason: 'approved', sheets: [] },
     ],
     ...overrides,
   };
