@@ -13,6 +13,15 @@ public static partial class RegistryImportParser
     /// <summary>Findings kept per severity; the rest are only counted.</summary>
     public const int MaxIssues = 2000;
 
+    /// <summary>PSS-22: most used rows a sheet may have (a registry file is orders of magnitude smaller; larger is refused, not cut).</summary>
+    public const int MaxRows = 100_000;
+
+    /// <summary>PSS-22: most used columns a sheet may have.</summary>
+    public const int MaxColumns = 1_024;
+
+    /// <summary>PSS-22: most cells (rows × columns) the row loops may walk; keeps a tall AND wide sheet from being scanned cell by cell.</summary>
+    public const long MaxScanCells = 10_000_000;
+
     private const int MaxHeaderRows = 6;
     private const int MinHeaderCells = 5;
     private const int NumberRowScanLimit = 80;
@@ -20,12 +29,15 @@ public static partial class RegistryImportParser
     /// <summary>Reads the grid.</summary>
     /// <param name="grid">The worksheet.</param>
     /// <param name="spec">A validated spec.</param>
+    /// <param name="ct">Cancellation: checked once per row of every row loop (PSS-22).</param>
     /// <returns>Parents with children and findings. A missing required column ends the parse early (no rows are read).</returns>
-    /// <exception cref="BusinessRuleException"><c>ECR-IMP-0422</c> <c>regHeaderNotFound</c>.</exception>
-    public static ParsedImport Parse(IImportGrid grid, RegistryImportSpec spec)
+    /// <exception cref="BusinessRuleException"><c>ECR-IMP-0422</c> <c>regHeaderNotFound</c>, or <c>notAWorkbook</c> for a sheet above the limits.</exception>
+    public static ParsedImport Parse(IImportGrid grid, RegistryImportSpec spec, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(grid);
         ArgumentNullException.ThrowIfNull(spec);
+
+        EnsureWithinLimits(grid);
 
         var log = new IssueLog();
         var (headerFrom, headerTo, dataFrom) = LocateHeader(grid, spec);
@@ -33,14 +45,14 @@ public static partial class RegistryImportParser
         var columns = MapColumns(spec, headers, log);
         spec = MatchByHeaderName(spec, headers, columns);
 
-        var header = BuildReport(grid, spec, headers, columns, headerFrom, headerTo, dataFrom);
+        var header = BuildReport(grid, spec, headers, columns, headerFrom, headerTo, dataFrom, ct);
 
         if (log.HasErrors)
         {
             return new ParsedImport(header, [], [], log.Issues, new ImportStats(0, 0, 0, 0, 0), log.Dropped);
         }
 
-        return new RowReader(grid, spec, columns, log, header).Run();
+        return new RowReader(grid, spec, columns, log, header, ct).Run();
     }
 
     // ---------- header ----------
@@ -89,6 +101,23 @@ public static partial class RegistryImportParser
         }
 
         throw HeaderNotFound();
+    }
+
+    /// <summary>
+    /// PSS-22: a grid above the limits is refused BEFORE any row loop (same code and key as an unreadable workbook).
+    /// The Excel grid already refuses at construction; this guards every other <see cref="IImportGrid"/>.
+    /// </summary>
+    private static void EnsureWithinLimits(IImportGrid grid)
+    {
+        if (grid.RowCount > MaxRows
+            || grid.ColumnCount > MaxColumns
+            || (long)grid.RowCount * grid.ColumnCount > MaxScanCells)
+        {
+            throw new BusinessRuleException(
+                "ECR-IMP-0422",
+                $"Файл не читається як книга .xlsx: аркуш завеликий ({grid.RowCount} рядків, {grid.ColumnCount} стовпців).",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-IMP-0422.notAWorkbook" });
+        }
     }
 
     private static BusinessRuleException HeaderNotFound()
@@ -339,7 +368,7 @@ public static partial class RegistryImportParser
 
     private static ImportHeaderReport BuildReport(
         IImportGrid grid, RegistryImportSpec spec, ColumnHeader[] headers, Dictionary<string, int> columns,
-        int from, int to, int dataFrom)
+        int from, int to, int dataFrom, CancellationToken ct)
     {
         var mapped = spec.Fields
             .Where(f => columns.ContainsKey(f.Name))
@@ -356,6 +385,7 @@ public static partial class RegistryImportParser
             var hasData = false;
             for (var r = dataFrom; r <= grid.RowCount && !hasData; r++)
             {
+                ct.ThrowIfCancellationRequested();
                 hasData = !ImportText.IsEmpty(grid.Get(r, h.Column).Value);
             }
 
@@ -413,6 +443,7 @@ public static partial class RegistryImportParser
         private readonly Dictionary<string, int> _columns;
         private readonly IssueLog _log;
         private readonly ImportHeaderReport _header;
+        private readonly CancellationToken _ct;
         private readonly Dictionary<string, ImportFieldReader> _readers;
         private readonly Dictionary<int, object?> _carried = [];
         private readonly List<ImportedParent> _parents = [];
@@ -426,8 +457,9 @@ public static partial class RegistryImportParser
         private int _children;
         private bool _sawParentKey;
 
-        public RowReader(IImportGrid grid, RegistryImportSpec spec, Dictionary<string, int> columns, IssueLog log, ImportHeaderReport header)
+        public RowReader(IImportGrid grid, RegistryImportSpec spec, Dictionary<string, int> columns, IssueLog log, ImportHeaderReport header, CancellationToken ct)
         {
+            _ct = ct;
             _grid = grid;
             _spec = spec;
             _columns = columns;
@@ -462,6 +494,7 @@ public static partial class RegistryImportParser
 
             for (var r = _header.DataFromRow; r <= _grid.RowCount; r++)
             {
+                _ct.ThrowIfCancellationRequested();
                 var pCell = _grid.Get(r, pCol);
                 var cCell = _grid.Get(r, cCol);
                 var pEmpty = ImportText.IsEmpty(pCell.Value);
@@ -613,6 +646,7 @@ public static partial class RegistryImportParser
         {
             for (var r = _header.DataFromRow; r <= _grid.RowCount; r++)
             {
+                _ct.ThrowIfCancellationRequested();
                 if (RowHasContent(r))
                 {
                     return true;

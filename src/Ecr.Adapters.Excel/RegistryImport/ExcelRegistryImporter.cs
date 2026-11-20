@@ -16,7 +16,7 @@ public sealed class ExcelRegistryImporter(RegistryImportService service) : IRegi
         var opened = await OpenAsync(file, spec, ct).ConfigureAwait(false);
         using (opened.Owner)
         {
-            var parsed = RegistryImportParser.Parse(opened.Grid, spec);
+            var parsed = RegistryImportParser.Parse(opened.Grid, spec, ct);
             return new ImportAnalysis(
                 opened.Hash, opened.SheetName, opened.SheetNames, parsed.Header, parsed.Stats, parsed.Groups, parsed.Issues,
                 parsed.DroppedIssues, parsed.Header is not null && !parsed.HasErrors);

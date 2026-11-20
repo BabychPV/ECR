@@ -144,7 +144,7 @@ public sealed class RegistryImportService(IRegistryImportTarget target, IEnumera
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var parsed = RegistryImportParser.Parse(grid, spec);
+        var parsed = RegistryImportParser.Parse(grid, spec, ct);
         var issues = new List<ImportIssue>(parsed.Issues);
         var resolutions = (request.Resolutions ?? []).ToDictionary(r => (r.Kind, r.Code));
 
