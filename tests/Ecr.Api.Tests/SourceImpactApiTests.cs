@@ -655,6 +655,90 @@ public sealed class SourceImpactApiTests(SqlServerFixture sql)
         Assert.NotEqual(before, impact.GetProperty("impactHash").GetString());
     }
 
+    /// <summary>
+    /// D-554/D-558: зв'язка без затверджених залежних політику НЕ підвищує. A (<c>Warn</c>): період Land частково затверджений
+    /// (один аркуш із двох); B (<c>Block</c>): залежний документ узагалі не затверджений. Політика — <c>Warn</c>: вимагає
+    /// підтвердження, але не відмовляє.
+    /// </summary>
+    /// <remarks>
+    /// Мутація: у <c>SourceImpactAssessor</c> <c>found.Exists(c =&gt; c.HasApprovedSheets)</c> → <c>found.Exists(c =&gt; c.Approved)</c> —
+    /// частково затверджена A «без затверджених», обидві зв'язки без затверджених → найсуворіша серед діючих = <c>Block</c>, blocked=true, червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-558")]
+    public async Task Строга_зв_язка_без_затверджених_залежних_не_підвищує_політику_слабшої_із_затвердженими()
+    {
+        var s = await ArrangeAsync(DocumentSourcePolicy.Warn, sourceApproved: true, landApproved: true).ConfigureAwait(true);
+        await AddLandSheetAsync(s, visible: true, deleted: false, included: true).ConfigureAwait(true);
+        await AddSecondBindingAsync(s, DocumentSourcePolicy.Block, landApproved: false).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.User).ConfigureAwait(true);
+        var impact = await ImpactAsync(app, client, s, "reopen").ConfigureAwait(true);
+        Assert.Equal(2, impact.GetProperty("consumers").GetArrayLength());
+        Assert.Equal("Warn", impact.GetProperty("policy").GetString());
+        Assert.True(impact.GetProperty("required").GetBoolean());
+        Assert.False(impact.GetProperty("blocked").GetBoolean());
+        Assert.Equal(1, impact.GetProperty("approvedCount").GetInt32());
+    }
+
+    /// <summary>
+    /// D-554/D-558: A (<c>Block</c>) має період із ОДНИМ затвердженим аркушем із двох, B (<c>Warn</c>) — незатверджений
+    /// залежний: найсуворіша серед зв'язок із затвердженими — <c>Block</c>; дію відхилено.
+    /// </summary>
+    /// <remarks>
+    /// Мутація: у <c>SourceImpactAssessor</c> <c>policies.Where(p =&gt; p.HasApproved).Max(p =&gt; p.Policy)</c> → <c>policies.Min(p =&gt; p.Policy)</c> —
+    /// Warn замість Block, червоний. Мутацію <c>HasApprovedSheets</c> → <c>Approved</c> цей
+    /// сценарій НЕ вбиває (результат той самий — Block); її вбиває попередній тест.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-558")]
+    public async Task Частково_затверджена_Block_зв_язка_перемагає_Warn_без_затверджених()
+    {
+        var s = await ArrangeAsync(DocumentSourcePolicy.Block, sourceApproved: true, landApproved: true).ConfigureAwait(true);
+        await AddLandSheetAsync(s, visible: true, deleted: false, included: true).ConfigureAwait(true);
+        await AddSecondBindingAsync(s, DocumentSourcePolicy.Warn, landApproved: false).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.User).ConfigureAwait(true);
+        var impact = await ImpactAsync(app, client, s, "reopen").ConfigureAwait(true);
+        Assert.Equal(2, impact.GetProperty("consumers").GetArrayLength());
+        Assert.Equal("Block", impact.GetProperty("policy").GetString());
+        Assert.True(impact.GetProperty("required").GetBoolean());
+        Assert.True(impact.GetProperty("blocked").GetBoolean());
+    }
+
+    /// <summary>
+    /// Друга зв'язка від ТОГО САМОГО документа-джерела: свій довідник, свій Land-споживач (відкритий період, стан подано, за
+    /// потреби затверджено). Таблиці зв'язки ті самі (потік шаблону-джерела), тож обидві зв'язки діють на аркуш джерела.
+    /// </summary>
+    private async Task AddSecondBindingAsync(Scenario s, DocumentSourcePolicy policy, bool landApproved)
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var land = await builder.BuildAsync(periodKey: March).ConfigureAwait(false);
+        await using (var db = sql.CreateContext())
+        {
+            var registry = new RegistryDef(
+                EcrCode.Create($"HN{Guid.NewGuid().ToString("N")[..8].ToUpperInvariant()}"),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "Composition B" }),
+                isTemporal: false);
+            db.RegistryDefs.Add(registry);
+            await db.SaveChangesAsync().ConfigureAwait(false);
+            var binding = new DocumentSourceBinding($"B80N5_{registry.Code}", s.World.Source.TemplateId, registry.Id);
+            db.DocumentSourceBindings.Add(binding);
+            await db.SaveChangesAsync().ConfigureAwait(false);
+            await DependencyGraphTestKit.MakeConsumerAsync(db, land, registry.Code).ConfigureAwait(false);
+            await db.DocumentSourceBindings.Where(b => b.Id == binding.Id)
+                .ExecuteUpdateAsync(x => x.SetProperty(b => b.Policy, policy).SetProperty(b => b.SourceState, DocumentSourceState.ApprovedOnly))
+                .ConfigureAwait(false);
+        }
+
+        await builder.OpenPeriodAsync(land).ConfigureAwait(false);
+        await ImpactWorld.AddStateAsync(sql, land.DocumentId, land.SheetDefId, March, T1, landApproved ? T1 : null).ConfigureAwait(false);
+    }
+
     /// <summary>Додає до версії шаблону Land другий аркуш; перший аркуш завжди входить до складу, другий — коли <paramref name="included"/>.</summary>
     private async Task<int> AddLandSheetAsync(Scenario s, bool visible, bool deleted, bool included)
     {
