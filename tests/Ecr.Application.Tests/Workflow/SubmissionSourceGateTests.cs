@@ -52,7 +52,7 @@ public sealed class SubmissionSourceGateTests
     {
         var reader = Reader(Row(ISourceIssueReader.SourceMonthNotApproved, Feb, Feb, null));
 
-        var (periods, months) = await SubmissionSourceGate.ApplyAsync(reader, Document, Periods, Months, CancellationToken.None);
+        var (periods, months, _) = await SubmissionSourceGate.ApplyAsync(reader, Document, Periods, Months, null, CancellationToken.None);
 
         Assert.Null(periods.Single(p => p.PeriodKey == Jan).UnapprovedSourcePeriodKey);
         Assert.Equal(Feb, periods.Single(p => p.PeriodKey == Feb).UnapprovedSourcePeriodKey);
@@ -69,7 +69,7 @@ public sealed class SubmissionSourceGateTests
     {
         var reader = Reader(Row(ISourceIssueReader.SourceMonthNotApproved, Mar, Mar, null));
 
-        var (periods, months) = await SubmissionSourceGate.ApplyAsync(reader, Document, Periods, Months, CancellationToken.None);
+        var (periods, months, _) = await SubmissionSourceGate.ApplyAsync(reader, Document, Periods, Months, null, CancellationToken.None);
 
         Assert.Equal(Mar, periods.Single(p => p.PeriodKey == Mar).UnapprovedSourcePeriodKey);
         Assert.All(months.Where(m => m.PeriodKey == Mar), m => Assert.Equal(Mar, m.UnapprovedSourcePeriodKey));
@@ -84,12 +84,37 @@ public sealed class SubmissionSourceGateTests
     {
         var reader = Reader(Row(ISourceIssueReader.SourceMonthNotApproved, Mar, Mar, null));
 
-        var (periods, _) = await SubmissionSourceGate.ApplyAsync(reader, Document, Periods, [], CancellationToken.None);
+        var (periods, _, _) = await SubmissionSourceGate.ApplyAsync(reader, Document, Periods, [], null, CancellationToken.None);
 
         Assert.Equal(Mar, periods.Single(p => p.PeriodKey == Mar).UnapprovedSourcePeriodKey);
         Assert.Null(periods.Single(p => p.PeriodKey == Apr).UnapprovedSourcePeriodKey);
         await reader.Received(1).ListSourceIssuesAsync(
             Document, Arg.Is<IReadOnlyCollection<int>>(k => k.SequenceEqual(new[] { Jan, Feb, Mar })), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// L2: звичайний документ, аркуш поданий у ЗАКРИТОМУ періоді сторінки (у <c>periods[]</c> його немає) — той самий пакет
+    /// читає і його, відповідь несе місяць джерела для затвердження якоря.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Decision", "D-559")]
+    public async Task Поданий_якір_у_закритому_періоді_несе_місяць_джерела_затвердження()
+    {
+        const int Closed = 202512;
+        var reader = Reader(Row(ISourceIssueReader.SourceMonthNotApproved, Closed, Closed, null));
+
+        var gated = await SubmissionSourceGate.ApplyAsync(reader, Document, Periods, [], Closed, CancellationToken.None);
+
+        Assert.Equal(Closed, gated.AnchorUnapprovedSourcePeriodKey);
+        Assert.All(gated.Periods, p => Assert.Null(p.UnapprovedSourcePeriodKey));
+        await reader.Received(1).ListSourceIssuesAsync(
+            Document, Arg.Is<IReadOnlyCollection<int>>(k => k.SequenceEqual(new[] { Closed, Jan, Feb, Mar })), Arg.Any<CancellationToken>());
+
+        // Якір не поданий — питати нема чого, і поле порожнє.
+        var none = await SubmissionSourceGate.ApplyAsync(
+            Reader(Row(ISourceIssueReader.SourceMonthNotApproved, Closed, Closed, null)), Document, Periods, [], null, CancellationToken.None);
+        Assert.Null(none.AnchorUnapprovedSourcePeriodKey);
     }
 
     [Fact]
@@ -101,7 +126,7 @@ public sealed class SubmissionSourceGateTests
             Row(ISourceIssueReader.SourceChangedAfterApproval, Jan, Jan, new DateTime(2026, 2, 1, 0, 0, 0, DateTimeKind.Utc)),
             Row(ISourceIssueReader.SourceChangedAfterApproval, Mar, Mar, new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc)));
 
-        var (periods, months) = await SubmissionSourceGate.ApplyAsync(reader, Document, Periods, Months, CancellationToken.None);
+        var (periods, months, _) = await SubmissionSourceGate.ApplyAsync(reader, Document, Periods, Months, null, CancellationToken.None);
 
         Assert.All(periods, p => Assert.Null(p.UnapprovedSourcePeriodKey));
         Assert.All(months, m => Assert.Null(m.UnapprovedSourcePeriodKey));
@@ -116,7 +141,7 @@ public sealed class SubmissionSourceGateTests
             Row(ISourceIssueReader.SourceMonthNotApproved, Jan, 202603, null),
             Row(ISourceIssueReader.SourceMonthNotApproved, Jan, 202601, null));
 
-        var (periods, _) = await SubmissionSourceGate.ApplyAsync(reader, Document, Periods, Months, CancellationToken.None);
+        var (periods, _, _) = await SubmissionSourceGate.ApplyAsync(reader, Document, Periods, Months, null, CancellationToken.None);
 
         Assert.Equal(202601, periods.Single(p => p.PeriodKey == Jan).UnapprovedSourcePeriodKey);
     }
@@ -126,14 +151,14 @@ public sealed class SubmissionSourceGateTests
     [Trait("Decision", "D-559")]
     public async Task Без_читача_чи_без_періодів_для_подання_й_затвердження_нічого()
     {
-        var (samePeriods, sameMonths) = await SubmissionSourceGate.ApplyAsync(null, Document, Periods, Months, CancellationToken.None);
+        var (samePeriods, sameMonths, _) = await SubmissionSourceGate.ApplyAsync(null, Document, Periods, Months, null, CancellationToken.None);
         Assert.Same(Periods, samePeriods);
         Assert.Same(Months, sameMonths);
 
         var reader = Reader();
         IReadOnlyList<SubmissionPeriodDto> none = [new(Apr, PeriodState.Open, DocumentStatus.Approved, false)];
         IReadOnlyList<MonthColumnStatusDto> noMonths = [new(7, "APR", 4, Apr, DocumentStatus.Approved)];
-        var (p, m) = await SubmissionSourceGate.ApplyAsync(reader, Document, none, noMonths, CancellationToken.None);
+        var (p, m, _) = await SubmissionSourceGate.ApplyAsync(reader, Document, none, noMonths, null, CancellationToken.None);
         Assert.Same(none, p);
         Assert.Same(noMonths, m);
         Assert.Empty(reader.ReceivedCalls());

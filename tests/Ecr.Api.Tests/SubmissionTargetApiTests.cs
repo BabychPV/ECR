@@ -197,6 +197,45 @@ public sealed class SubmissionTargetApiTests(SqlServerFixture sql)
         Assert.Equal((true, false, false), rightsA["FEB"]);
     }
 
+    /// <summary>
+    /// D-6 (M1): затверджений січень у ЗАКРИТОМУ місяці й затверджений лютий у відкритому — повернути в роботу можна лише
+    /// лютий: «Return for edits» сервер відхилив би для січня (<c>ClosedPeriodGuard</c>, 422 <c>ECR-PRD-4223</c>).
+    /// </summary>
+    /// <remarks>⛔ До фіксу <c>canReturn</c> рахувався без воріт закритого періоду — січень пропонувався й відмовляв.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-559")]
+    public async Task Повернути_можна_лише_затверджений_місяць_відкритого_періоду()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        var submitter = await NewUserAsync(s.Doc, GrantLevel.Submit).ConfigureAwait(true);
+        var (approver, _) = await RoleUserAsync(s.Doc, GrantLevel.Approve, ReopenDocumentHandlerPermission).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var submitterClient = await SignInAsync(app, submitter).ConfigureAwait(true);
+        using var approverClient = await SignInAsync(app, approver).ConfigureAwait(true);
+
+        foreach (var period in new[] { Jan, Feb })
+        {
+            using var submitted = await SubmitAsync(submitterClient, s.Doc, period).ConfigureAwait(true);
+            Assert.True(submitted.StatusCode == HttpStatusCode.NoContent, $"{period}: {(int)submitted.StatusCode}\n{app.ErrorsText}");
+            await ApproveAsync(app, approverClient, s.Doc, period).ConfigureAwait(true);
+        }
+
+        // Січень закривається (Grace → Closed).
+        await using (var db = Context())
+        {
+            var jan = await db.Periods.SingleAsync(p => p.ProjectId == s.Doc.ProjectId && p.PeriodKeyValue == Jan).ConfigureAwait(true);
+            jan.AdvanceTo(PeriodState.Closed, Now);
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        var rights = await RightsAsync(app, approverClient, s.Doc).ConfigureAwait(true);
+        Assert.Equal((false, false, false), rights["JAN"]);
+        Assert.Equal((false, false, true), rights["FEB"]);
+    }
+
     // ───────────────────────────── допоміжне ─────────────────────────────
 
     private const string ReopenDocumentHandlerPermission = Ecr.Application.Workflow.ReopenDocumentHandler.Permission;

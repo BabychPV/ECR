@@ -85,7 +85,11 @@ interface MockOptions {
   /** `submission-target` відмовляє (500). */
   readonly failTarget?: boolean;
   /** Ціль подання й відкриті періоди відповіді. */
-  readonly submit?: { readonly targetPeriodKey: number | null; readonly periods: readonly unknown[] };
+  readonly submit?: {
+    readonly targetPeriodKey: number | null;
+    readonly periods: readonly unknown[];
+    readonly anchorUnapprovedSourcePeriodKey?: number | null;
+  };
   /** Статус відповіді на POST (`409` — стан змінився). */
   readonly postStatus?: number;
   /** Журнал переходів за період. */
@@ -119,6 +123,7 @@ function mockFetch(months: Months, options: MockOptions = {}): void {
           targetPeriodKey: options.submit?.targetPeriodKey ?? null,
           nextPeriodKey: null,
           periods: options.submit?.periods ?? [],
+          anchorUnapprovedSourcePeriodKey: options.submit?.anchorUnapprovedSourcePeriodKey ?? null,
           monthColumns: Object.entries(Codes).map(([month, code]) => {
             const spec = specOf(months[Number(month)]);
 
@@ -708,15 +713,17 @@ describe('«Approve» і місяць джерела HSE400 (борг коорд
     expect(await screen.findByRole('dialog')).toBeTruthy();
   });
 
-  it('звичайний документ: джерело періоду сторінки не затверджено — «Approve» недоступна', async () => {
+  it('звичайний документ: джерело періоду сторінки (і закритого) не затверджено — «Approve» недоступна', async () => {
     show(
       {},
       {
         state: 'Submitted',
         yearLayout: false,
         submit: {
+          // L2: період сторінки ЗАКРИТИЙ — серед відкритих `periods[]` його немає; ворота несе окреме поле.
           targetPeriodKey: null,
-          periods: [{ periodKey: Jan, state: 'Open', sheetStatus: 'Submitted', submittable: false, unapprovedSourcePeriodKey: Jan }],
+          periods: [],
+          anchorUnapprovedSourcePeriodKey: Jan,
         },
       },
     );
@@ -748,6 +755,41 @@ describe('«Approve» і місяць джерела HSE400 (борг коорд
     expect(approve.getAttribute('aria-disabled')).toBeNull();
     fireEvent.click(approve);
     expect(await screen.findByRole('dialog')).toBeTruthy();
+  });
+});
+
+describe('«Reject» над місяцем закритого періоду (UX)', () => {
+  const open = (key: number): unknown => ({ periodKey: key, state: 'Open', sheetStatus: 'Submitted', submittable: false });
+
+  it('закритий місяць: діалог відхилення попереджає, що період треба буде відкрити; відкритий — без примітки', async () => {
+    show(
+      { 4: 'Submitted', 5: 'Submitted' },
+      // Квітень серед відкритих періодів, травня немає — він закритий.
+      { submit: { targetPeriodKey: null, periods: [open(Apr)] } },
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: /workflow\.rejectPeriod \(period=April 2026\)/ }));
+    const aprDialog = await screen.findByRole('dialog');
+    expect(aprDialog.textContent).not.toContain('workflow.rejectClosedPeriodNote');
+    fireEvent.click(within(aprDialog).getByRole('button', { name: /^⟦common\.cancel⟧$|cancel/i }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+
+    fireEvent.click(await screen.findByRole('button', { name: '⟦workflow.pickApprovePeriod⟧' }));
+    const mayItem = await waitFor(() => {
+      const item = document.querySelector<HTMLElement>(`[data-decision-period="${String(May)}"]`);
+      expect(item).not.toBeNull();
+
+      return item as HTMLElement;
+    });
+    fireEvent.click(mayItem);
+    fireEvent.click(await screen.findByRole('button', { name: /workflow\.rejectPeriod \(period=May 2026\)/ }));
+    const mayDialog = await screen.findByRole('dialog');
+    expect(mayDialog.textContent).toContain('workflow.rejectClosedPeriodNote (period=May 2026)');
+    // Відхилення — як завжди: причина й запит за травнем.
+    fireEvent.change(within(mayDialog).getByRole('textbox'), { target: { value: 'wrong' } });
+    fireEvent.click(within(mayDialog).getByRole('button', { name: /^⟦workflow\.reject⟧$/ }));
+    await waitFor(() => expect(approvePosts()).toHaveLength(1));
+    expect(approvePosts()[0]?.body).toMatchObject({ periodKey: May, approved: false });
   });
 });
 
