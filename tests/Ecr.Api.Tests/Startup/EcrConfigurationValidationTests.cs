@@ -191,6 +191,41 @@ public sealed class EcrConfigurationValidationTests(SqlServerFixture sql)
     }
 
     /// <remarks>
+    /// PSS-28: у Production порожній або `*` в `AllowedHosts` — попередження (DNS rebinding на анонімні ендпоінти);
+    /// задані імена, чи не Production — мовчання. Старт не зупиняється. Мутація: прибрати умову `isProduction` —
+    /// червоніє перший рядок; не розпізнавати `*` серед кількох імен — червоніє `a;*`.
+    /// </remarks>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "PSS-28")]
+    [InlineData("*", true)]
+    [InlineData("", true)]
+    [InlineData("a.example;*", true)]
+    [InlineData("ecr.example.kz;localhost", false)]
+    [InlineData("ecr.example.kz:8443", false)]
+    public void AllowedHosts_зірочка_чи_порожньо_у_Production_попереджає(string hosts, bool warns)
+    {
+        var config = Config(("AllowedHosts", hosts));
+
+        var production = EcrConfigurationValidation.Warnings(config, isProduction: true);
+        Assert.Equal(warns, production.Any(w => w.Contains("AllowedHosts", StringComparison.Ordinal)));
+        if (warns)
+        {
+            var text = production.Single(w => w.Contains("AllowedHosts", StringComparison.Ordinal));
+            Assert.Contains("-AllowedHosts", text, StringComparison.Ordinal);
+            Assert.Contains("ECR_AllowedHosts", text, StringComparison.Ordinal);
+        }
+
+        // Не Production (Development, стенди, тести) — без попередження.
+        Assert.DoesNotContain(
+            EcrConfigurationValidation.Warnings(config, isProduction: false),
+            w => w.Contains("AllowedHosts", StringComparison.Ordinal));
+
+        // Старт не зупиняється: це не помилка конфігурації.
+        Assert.Empty(EcrConfigurationValidation.Validate(config));
+    }
+
+    /// <remarks>
     /// ⛔ U17: увімкнений експорт без адреси не має тихо слати на localhost:4317
     /// (дефолт бібліотеки) — старт зупиняється з поясненням, що задати.
     /// </remarks>
