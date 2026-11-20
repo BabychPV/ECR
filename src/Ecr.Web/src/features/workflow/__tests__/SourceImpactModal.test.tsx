@@ -187,4 +187,20 @@ describe('SourceImpactModal: перекриття «й затверджені» 
 
     expect(onConfirm).toHaveBeenCalledWith({ hash: 'abc123', reason: null }, { suppress: true });
   });
+
+  it('Поки дія виконується (isPending), повторне натискання не підтверджує вдруге', async () => {
+    // F13 (мутація: прибрати `&& isPending !== true` з обробника кнопки): до порогу usePendingLoading Mantine не
+    // блокує кнопку, тож без цього захисту швидкий подвійний клік слав би підтвердження двічі.
+    const onConfirm = vi.fn();
+    render(
+      <MantineProvider theme={theme}>
+        <SourceImpactModal opened action="reopen" impact={impact()} isPending onConfirm={onConfirm} onClose={vi.fn()} />
+      </MantineProvider>,
+    );
+
+    fireEvent.click(await screen.findByTestId('source-impact-confirm'));
+    fireEvent.click(screen.getByTestId('source-impact-confirm'));
+
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
 });
