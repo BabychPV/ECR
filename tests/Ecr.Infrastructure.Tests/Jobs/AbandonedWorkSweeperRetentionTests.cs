@@ -10,15 +10,15 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 /// <summary>
 /// PSS-13 (аудит 20.11; рішення людини 20.11 №7): періодичний прохід прибирання видаляє технічні журнали, старші за
 /// строк <c>Retention.TechnicalLogDays</c> (<c>sys_ecr.SystemSetting</c>, типово 400 днів, змінюється без перевидання),
-/// і не чіпає того, що ще живе: недоставлені сповіщення, останній прогін кожної задачі, слід архівації аудиту молодший
-/// за глибину аудиту (не менше 120 міс.), відкриті прогони.
+/// і не чіпає того, що ще живе: недоставлені сповіщення, останній прогін кожної задачі, слід архівації аудиту (ніколи —
+/// рев'ю L8), відкриті прогони. Неприйнятне значення налаштування («1» — нижче мінімуму) дає типові 400 днів (рев'ю M2).
 /// </summary>
 /// <remarks>
 /// ⚠ Власна база: прохід чистить таблиці цілком, а точні лічильники в спільній базі колекції залежали б від сусідів.
 /// Мутації: (1) прибрати фільтр <c>State IN ('Sent','Failed')</c> — червоне (Pending зник); (2) прибрати
-/// <c>EXISTS … n.Id &gt; r.Id</c> — червоне (єдиний Failed прогін y-job зник); (3) рахувати <c>audit-archive</c> за
-/// звичайним строком — червоне (слід переносу аудиту 500-денної давності зник); (4) читати строк константою — червоне
-/// (після налаштування 100 днів 200-денні рядки лишаються).
+/// <c>EXISTS … n.Id &gt; r.Id</c> — червоне (єдиний Failed прогін y-job зник); (3) не виключати <c>audit-archive</c> —
+/// червоне (слід переносу аудиту зник); (4) читати строк константою — червоне (після налаштування 100 днів 200-денні
+/// рядки лишаються); (5) притискати «1» до мінімуму 30 днів — червоне (200-денні рядки зникають завчасно).
 /// </remarks>
 [Collection("SqlServer")]
 [Trait("Audit", "PSS-13")]
@@ -62,25 +62,31 @@ public sealed class AbandonedWorkSweeperRetentionTests
             Assert.Equal(["pending-old", "sent-200", "sent-new"], await ListAsync(cs, "SELECT Subject FROM itg.NotificationOutbox ORDER BY Subject"));
             Assert.Equal(["d-200", "d-new"], await ListAsync(cs, "SELECT EventKey FROM itg.NotificationDelivery ORDER BY EventKey"));
             Assert.Equal(
-                ["arc-new", "arc-old", "x-200", "x-new", "y-only"],
+                ["arc-ancient", "arc-new", "arc-old", "x-200", "x-new", "y-only"],
                 await ListAsync(cs, "SELECT DetailsJson FROM itg.MaintenanceRun WHERE JobCode <> N'z-job' ORDER BY DetailsJson"));
 
             // Покинутий прогін закрито цим самим проходом (FinishedAt = зараз) — і він не зникає.
             Assert.Equal(1L, await ScalarAsync(cs, "SELECT COUNT(*) FROM itg.MaintenanceRun WHERE JobCode = N'z-job' AND FinishedAt IS NOT NULL"));
-            Assert.Equal(2 + 1 + 3, outcome.LogsPurged);
+            Assert.Equal(2 + 1 + 2, outcome.LogsPurged);
             Assert.True(outcome.Any);
 
-            // Налаштування змінюється «на льоту»: 100 днів — 200-денні рядки зникають наступним проходом.
+            // M2: «1» нижче мінімуму (30) — діє типове 400, а не 30: нічого нового не зникає.
             await ExecAsync(cs, $"""
                 INSERT INTO sys_ecr.SystemSetting ([Key], Value, ModifiedAt)
-                VALUES (N'{RetentionSettings.TechnicalLogDaysKey}', N'100', SYSUTCDATETIME());
+                VALUES (N'{RetentionSettings.TechnicalLogDaysKey}', N'1', SYSUTCDATETIME());
                 """);
+            outcome = await SweepAsync(database);
+            Assert.Equal(0, outcome.LogsPurged);
+            Assert.Equal(3L, await ScalarAsync(cs, "SELECT COUNT(*) FROM itg.NotificationOutbox"));
+
+            // Налаштування змінюється «на льоту»: 100 днів — 200-денні рядки зникають наступним проходом.
+            await ExecAsync(cs, $"UPDATE sys_ecr.SystemSetting SET Value = N'100' WHERE [Key] = N'{RetentionSettings.TechnicalLogDaysKey}';");
             outcome = await SweepAsync(database);
 
             Assert.Equal(["pending-old", "sent-new"], await ListAsync(cs, "SELECT Subject FROM itg.NotificationOutbox ORDER BY Subject"));
             Assert.Equal(["d-new"], await ListAsync(cs, "SELECT EventKey FROM itg.NotificationDelivery ORDER BY EventKey"));
             Assert.Equal(
-                ["arc-new", "arc-old", "x-new", "y-only"],
+                ["arc-ancient", "arc-new", "arc-old", "x-new", "y-only"],
                 await ListAsync(cs, "SELECT DetailsJson FROM itg.MaintenanceRun WHERE JobCode <> N'z-job' ORDER BY DetailsJson"));
             Assert.Equal(1L, await ScalarAsync(cs, "SELECT COUNT(*) FROM itg.MaintenanceRun WHERE JobCode = N'z-job'"));
             Assert.Equal(3, outcome.LogsPurged);

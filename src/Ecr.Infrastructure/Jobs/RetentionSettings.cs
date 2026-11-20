@@ -2,6 +2,7 @@
 using System.Globalization;
 using Ecr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Ecr.Infrastructure.Jobs;
 
@@ -11,9 +12,10 @@ namespace Ecr.Infrastructure.Jobs;
 /// </summary>
 /// <remarks>
 /// ⚠ Той самий механізм, що й межа бездіяльності сеансу (<c>D-471</c>, <c>SessionSettingsStore</c>): таблиця поза
-/// моделлю EF (<c>08-system-tables.sql</c>), рядок «ключ → значення». Рядка немає або значення не число —
-/// типове значення. Поза межами — притискається до межі (опечатка не має ні стерти журнали за добу, ні
-/// перенести аудит молодший за підлогу).
+/// моделлю EF (<c>08-system-tables.sql</c>), рядок «ключ → значення». Рядка немає — типове значення.
+/// ✎ рев'ю M2: не число, нижче мінімуму (0, -1, «40» замість «400») — ТИПОВЕ значення й попередження в журналі, а не
+/// притискання до мінімуму: притискання опечатки до 30 днів стерло б журнали за місяць. 0 НЕ означає «зберігати
+/// вічно». Вище максимуму — максимум і попередження.
 /// <para>
 /// Змінити (DBA або адміністратор із правом запису в базу):
 /// <c>UPDATE sys_ecr.SystemSetting SET Value = N'365', ModifiedAt = SYSUTCDATETIME() WHERE [Key] = N'Retention.TechnicalLogDays';</c>
@@ -24,7 +26,7 @@ namespace Ecr.Infrastructure.Jobs;
 /// лан) бере <see cref="RetentionPolicy.TechnicalLogDays"/> звідси ж, а не власний ключ.
 /// </para>
 /// </remarks>
-public static class RetentionSettings
+public static partial class RetentionSettings
 {
     /// <summary>Ключ: скільки днів зберігати технічні журнали (черга й доставки сповіщень, прогони обслуговування).</summary>
     public const string TechnicalLogDaysKey = "Retention.TechnicalLogDays";
@@ -56,8 +58,9 @@ public static class RetentionSettings
     /// <summary>Читає чинні строки (без кешу).</summary>
     /// <param name="db">Контекст бази.</param>
     /// <param name="ct">Скасування.</param>
-    /// <returns>Строки після притискання до меж.</returns>
-    public static async Task<RetentionPolicy> ReadAsync(EcrDbContext db, CancellationToken ct)
+    /// <param name="logger">Журнал для попереджень про неприйнятні значення; <c>null</c> — без запису.</param>
+    /// <returns>Чинні строки.</returns>
+    public static async Task<RetentionPolicy> ReadAsync(EcrDbContext db, CancellationToken ct, ILogger? logger = null)
     {
         ArgumentNullException.ThrowIfNull(db);
 
@@ -65,20 +68,63 @@ public static class RetentionSettings
         var auditMonths = await ReadRawAsync(db, AuditMonthsKey, ct).ConfigureAwait(false);
 
         return new RetentionPolicy(
-            Clamp(logDays, DefaultTechnicalLogDays, MinTechnicalLogDays, MaxTechnicalLogDays),
-            Clamp(auditMonths, DefaultAuditMonths, MinAuditMonths, MaxAuditMonths));
+            Resolve(TechnicalLogDaysKey, logDays, DefaultTechnicalLogDays, MinTechnicalLogDays, MaxTechnicalLogDays, logger),
+            Resolve(AuditMonthsKey, auditMonths, DefaultAuditMonths, MinAuditMonths, MaxAuditMonths, logger));
     }
 
-    /// <summary>Значення рядка → число в межах; не число (чи рядка немає) — типове.</summary>
+    /// <summary>
+    /// Значення рядка → чинне число: рядка немає — типове; не число чи нижче мінімуму — типове (і причина);
+    /// вище максимуму — максимум (і причина).
+    /// </summary>
     /// <param name="raw">Сире значення з таблиці.</param>
     /// <param name="fallback">Типове.</param>
     /// <param name="min">Нижня межа.</param>
     /// <param name="max">Верхня межа.</param>
+    /// <param name="problem">Чому значення не взято як є; <c>null</c> — взято (або рядка немає).</param>
     /// <returns>Чинне значення.</returns>
-    public static int Clamp(string? raw, int fallback, int min, int max)
-        => int.TryParse(raw?.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var value)
-            ? Math.Clamp(value, min, max)
-            : fallback;
+    public static int Resolve(string? raw, int fallback, int min, int max, out string? problem)
+    {
+        problem = null;
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return fallback;
+        }
+
+        if (!int.TryParse(raw.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var value))
+        {
+            problem = "not an integer";
+            return fallback;
+        }
+
+        if (value < min)
+        {
+            problem = string.Create(CultureInfo.InvariantCulture, $"below the minimum {min}");
+            return fallback;
+        }
+
+        if (value > max)
+        {
+            problem = string.Create(CultureInfo.InvariantCulture, $"above the maximum {max}");
+            return max;
+        }
+
+        return value;
+    }
+
+    private static int Resolve(string key, string? raw, int fallback, int min, int max, ILogger? logger)
+    {
+        var value = Resolve(raw, fallback, min, max, out var problem);
+        if (problem is not null && logger is not null)
+        {
+            LogRejected(logger, key, raw, problem, value);
+        }
+
+        return value;
+    }
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Налаштування {Key} = '{Raw}' не прийнято ({Problem}); діє {Effective}. Змініть рядок у sys_ecr.SystemSetting (admin-guide, п. 8.1).")]
+    private static partial void LogRejected(ILogger logger, string key, string? raw, string problem, int effective);
 
     private static Task<string?> ReadRawAsync(EcrDbContext db, string key, CancellationToken ct)
         => db.Database

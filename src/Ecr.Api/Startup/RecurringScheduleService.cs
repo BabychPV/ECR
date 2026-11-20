@@ -240,7 +240,7 @@ public sealed partial class RecurringScheduleService(
 
                     if (outcome.Any)
                     {
-                        LogSwept(logger, outcome.Jobs, outcome.CollectionRuns, outcome.MaintenanceRuns, outcome.Purged);
+                        LogSwept(logger, outcome.Jobs, outcome.CollectionRuns, outcome.MaintenanceRuns, outcome.Purged, outcome.LogsPurged);
                     }
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
@@ -285,7 +285,9 @@ public sealed partial class RecurringScheduleService(
         }
 
         var sweeper = new Infrastructure.Jobs.AbandonedWorkSweeper(
-            provider.GetRequiredService<EcrDbContext>(), progress);
+            provider.GetRequiredService<EcrDbContext>(),
+            progress,
+            provider.GetService<ILoggerFactory>()?.CreateLogger<Infrastructure.Jobs.AbandonedWorkSweeper>());
 
         return await sweeper
             .SweepAsync(
@@ -299,9 +301,10 @@ public sealed partial class RecurringScheduleService(
     [LoggerMessage(
         Level = LogLevel.Warning,
         Message = "Прибирання: задач позначено Failed — {Jobs}; прогонів збору закрито — {CollectionRuns}; "
-            + "прогонів обслуговування закрито — {MaintenanceRuns}; завершених записів прогресу видалено — {Purged}.")]
+            + "прогонів обслуговування закрито — {MaintenanceRuns}; завершених записів прогресу видалено — {Purged}; "
+            + "рядків технічних журналів видалено за строком зберігання — {LogsPurged}.")]
     private static partial void LogSwept(
-        ILogger logger, int jobs, int collectionRuns, int maintenanceRuns, int purged);
+        ILogger logger, int jobs, int collectionRuns, int maintenanceRuns, int purged, int logsPurged);
 
     [LoggerMessage(
         Level = LogLevel.Error,

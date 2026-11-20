@@ -6,6 +6,7 @@ using Ecr.Application.Integration;
 using Ecr.Application.Ports;
 using Ecr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Ecr.Infrastructure.Jobs;
 
@@ -29,7 +30,7 @@ namespace Ecr.Infrastructure.Jobs;
 /// рівно один раз.
 /// </para>
 /// </remarks>
-public sealed class AbandonedWorkSweeper(EcrDbContext db, IJobProgressStore progress)
+public sealed class AbandonedWorkSweeper(EcrDbContext db, IJobProgressStore progress, ILogger? logger = null)
 {
     /// <summary>Причина для задач, покинутих посеред роботи (періодичне прибирання).</summary>
     public const string AbandonedJobReason =
@@ -109,8 +110,12 @@ public sealed class AbandonedWorkSweeper(EcrDbContext db, IJobProgressStore prog
     private static readonly string[] CalculationJobNames =
         ["." + nameof(IRecalculationJob), "." + nameof(RecalculationJob)];
 
-    /// <summary>Скільки рядків прогресу видаляти одним запитом ретенції.</summary>
-    public const int PurgeBatch = 5_000;
+    /// <summary>Скільки рядків видаляти одним запитом ретенції (прогрес задач і технічні журнали).</summary>
+    /// <remarks>
+    /// ✎ рев'ю L4 (PSS-13): 4 000, а не 5 000 — нижче порогу ескалації блокувань (≈5 000 на один оператор), щоб
+    /// видалення не брало блокування таблиці, яку опитують екрани й диспетчер.
+    /// </remarks>
+    public const int PurgeBatch = 4_000;
 
     /// <summary>Стеля часу одного проходу ретенції (J1-05).</summary>
     /// <remarks>
@@ -192,7 +197,7 @@ public sealed class AbandonedWorkSweeper(EcrDbContext db, IJobProgressStore prog
         return new SweepOutcome(jobs, collection, maintenance, purged, calculation, logs);
     }
 
-    /// <summary>Код прогонів архівації аудиту (<c>arc.usp_ArchiveAuditBefore</c>): слід переносу аудиту.</summary>
+    /// <summary>Код прогонів архівації аудиту (<c>arc.usp_ArchiveAuditBefore</c>): слід переносу аудиту — не видаляється ніколи.</summary>
     public const string AuditArchiveJobCode = "audit-archive";
 
     /// <summary>
@@ -216,9 +221,8 @@ public sealed class AbandonedWorkSweeper(EcrDbContext db, IJobProgressStore prog
     /// <item>останній рядок кожної пари (код задачі, стан) у <c>itg.MaintenanceRun</c> — його читають «останній
     /// прогін» (<c>NightlyCatchUp</c>, <c>FlertSyncStatusReader</c>, <c>PeriodStateJob</c>, зведення); вік прогону —
     /// за <c>FinishedAt</c> (щойно закритий цим же проходом покинутий прогін не зникає), відкриті не чіпаються;</item>
-    /// <item>рядки <see cref="AuditArchiveJobCode"/>, молодші за глибину аудиту
-    /// (<see cref="RetentionSettings.AuditMonthsKey"/>, не менше 120 міс.): це слід переносу аудиту, і живе він
-    /// стільки ж, скільки аудит;</item>
+    /// <item>рядки <see cref="AuditArchiveJobCode"/> — ніколи (✎ рев'ю L8): це слід переносу аудиту (що, коли, хто
+    /// переніс у <c>arc.Audit*</c>), а архівний аудит теж не видаляється;</item>
     /// <item><c>aud.*</c>/<c>arc.Audit*</c> — не чіпаються взагалі (тригери незмінності; архівація — SWITCH);</item>
     /// <item><c>sec.LoginAttempt</c> — ретенція в лані PSS-24 (той самий ключ, <see cref="RetentionSettings"/>).</item>
     /// </list>
@@ -227,9 +231,8 @@ public sealed class AbandonedWorkSweeper(EcrDbContext db, IJobProgressStore prog
     /// </remarks>
     private async Task<int> PurgeTechnicalLogsAsync(DateTime utcNow, CancellationToken ct)
     {
-        var policy = await RetentionSettings.ReadAsync(db, ct).ConfigureAwait(false);
+        var policy = await RetentionSettings.ReadAsync(db, ct, logger).ConfigureAwait(false);
         var cutoff = utcNow.AddDays(-policy.TechnicalLogDays);
-        var auditCutoff = utcNow.AddMonths(-policy.AuditMonths);
         var batch = PurgeBatch;
         var auditCode = AuditArchiveJobCode;
 
@@ -243,7 +246,11 @@ public sealed class AbandonedWorkSweeper(EcrDbContext db, IJobProgressStore prog
                 ct),
             () => db.Database.ExecuteSqlAsync(
                 $"""
-                WITH c AS (SELECT TOP ({batch}) Id FROM itg.NotificationDelivery WHERE At < {cutoff} ORDER BY Id)
+                -- L3 (рев'ю): межа за Id — перший рядок, молодший за строк; без неї прохід щогодини сканував би
+                -- всю таблицю (індексу за At немає). Рядки пишуться в порядку часу, тож старші — нижче за межу.
+                DECLARE @upper bigint = (SELECT TOP (1) Id FROM itg.NotificationDelivery WHERE At >= {cutoff} ORDER BY Id);
+                WITH c AS (SELECT TOP ({batch}) Id FROM itg.NotificationDelivery
+                           WHERE (@upper IS NULL OR Id < @upper) AND At < {cutoff} ORDER BY Id)
                 DELETE d FROM itg.NotificationDelivery AS d JOIN c ON c.Id = d.Id;
                 """,
                 ct),
@@ -251,7 +258,7 @@ public sealed class AbandonedWorkSweeper(EcrDbContext db, IJobProgressStore prog
                 $"""
                 WITH c AS (
                     SELECT TOP ({batch}) r.Id FROM itg.MaintenanceRun AS r
-                    WHERE r.FinishedAt < CASE WHEN r.JobCode = {auditCode} THEN {auditCutoff} ELSE {cutoff} END
+                    WHERE r.FinishedAt < {cutoff} AND r.JobCode <> {auditCode}
                       AND EXISTS (SELECT 1 FROM itg.MaintenanceRun AS n
                                   WHERE n.JobCode = r.JobCode AND n.Status = r.Status AND n.Id > r.Id)
                     ORDER BY r.Id)

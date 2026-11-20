@@ -20,7 +20,7 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 /// Механіку SWITCH на коротких порогах доводить <see cref="AuditArchiveSwitchTests"/> (внутрішня процедура з явною межею).
 /// Мутації: (1) прибрати підлогу 120 у процедурі — перший тест червоний (лютий…вересень 2026 переїздять в архів);
 /// (2) прибрати перевірку @Today — другий червоний (50018 не кидається, усе переїздить); (3) задача передає
-/// <see cref="RetentionSettings.Clamp"/> без підлоги — третій червоний (<c>auditArchiveMonths</c> = 6).
+/// <c>RetentionSettings.Resolve</c> без підлоги — третій червоний (<c>auditArchiveMonths</c> = 6).
 /// </remarks>
 [Collection("SqlServer")]
 [Trait("Audit", "PSS-27")]
@@ -179,34 +179,50 @@ public sealed class AuditArchiveHorizonTests
     }
 }
 
-/// <summary>Притискання строків зберігання (без бази).</summary>
+/// <summary>
+/// Розбір строків зберігання (без бази). ✎ рев'ю M2: нижче мінімуму чи не число — ТИПОВЕ значення з причиною (а не
+/// мінімум: «0», «-1», «40» замість «400» інакше стерли б журнали за 30 днів); вище максимуму — максимум з причиною.
+/// Мутація: повернути притискання до мінімуму — рядки «1», «0», «-10», «40» червоні.
+/// </summary>
 public sealed class RetentionSettingsClampTests
 {
     [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    [InlineData(null, 400)]
-    [InlineData("", 400)]
-    [InlineData("abc", 400)]
-    [InlineData("365", 365)]
-    [InlineData(" 365 ", 365)]
-    [InlineData("1", 30)]
-    [InlineData("-10", 30)]
-    [InlineData("99999999", 36_500)]
-    public void Технічні_журнали(string? raw, int expected)
-        => Assert.Equal(
-            expected,
-            RetentionSettings.Clamp(
-                raw, RetentionSettings.DefaultTechnicalLogDays, RetentionSettings.MinTechnicalLogDays, RetentionSettings.MaxTechnicalLogDays));
+    [InlineData(null, 400, false)]
+    [InlineData("", 400, false)]
+    [InlineData("abc", 400, true)]
+    [InlineData("365", 365, false)]
+    [InlineData(" 365 ", 365, false)]
+    [InlineData("30", 30, false)]
+    [InlineData("1", 400, true)]
+    [InlineData("0", 400, true)]
+    [InlineData("-10", 400, true)]
+    [InlineData("40", 40, false)]
+    [InlineData("29", 400, true)]
+    [InlineData("99999999", 36_500, true)]
+    public void Технічні_журнали(string? raw, int expected, bool rejected)
+    {
+        var value = RetentionSettings.Resolve(
+            raw, RetentionSettings.DefaultTechnicalLogDays, RetentionSettings.MinTechnicalLogDays,
+            RetentionSettings.MaxTechnicalLogDays, out var problem);
+        Assert.Equal(expected, value);
+        Assert.Equal(rejected, problem is not null);
+    }
 
     [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    [InlineData(null, 120)]
-    [InlineData("24", 120)]
-    [InlineData("119", 120)]
-    [InlineData("121", 121)]
-    [InlineData("5000", 1_200)]
-    public void Глибина_аудиту_не_менша_за_120(string? raw, int expected)
-        => Assert.Equal(
-            expected,
-            RetentionSettings.Clamp(raw, RetentionSettings.DefaultAuditMonths, RetentionSettings.MinAuditMonths, RetentionSettings.MaxAuditMonths));
+    [InlineData(null, 120, false)]
+    [InlineData("24", 120, true)]
+    [InlineData("119", 120, true)]
+    [InlineData("0", 120, true)]
+    [InlineData("121", 121, false)]
+    [InlineData("5000", 1_200, true)]
+    public void Глибина_аудиту_не_менша_за_120(string? raw, int expected, bool rejected)
+    {
+        var value = RetentionSettings.Resolve(
+            raw, RetentionSettings.DefaultAuditMonths, RetentionSettings.MinAuditMonths, RetentionSettings.MaxAuditMonths,
+            out var problem);
+        Assert.Equal(expected, value);
+        Assert.Equal(rejected, problem is not null);
+    }
 }
