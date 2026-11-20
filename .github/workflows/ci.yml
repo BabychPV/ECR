@@ -547,6 +547,26 @@ jobs:
           cache: npm
           cache-dependency-path: src/Ecr.Web/package-lock.json
 
+      # PSS-30: `tools/Ecr.Setup` лежить ПОЗА `Ecr.sln` (net10.0-windows, пакуються в Ecr-Setup.exe),
+      # тож `NuGetAudit` + warnings-as-errors, що стережуть проєкти рішення, його не торкаються, а
+      # `Microsoft.PowerShell.SDK` із транзитивами їде до замовника. `dotnet list` завжди виходить
+      # нулем, навіть із вразливостями, тому код виходу НЕ довіряємо: падаємо за текстом звіту.
+      # Не крок `verify-all.ps1`: той самий виняток, що й для кроків MSI нижче (CiPipelineTests
+      # його не зачіпає). Швидкість: лише restore + запит до джерела, ~20 с, у цій самій джобі,
+      # що й так пропускається на `lane/*` і `rc/*`.
+      - name: Аудит вразливостей пакетів tools/Ecr.Setup
+        shell: pwsh
+        run: |
+          $report = dotnet list tools/Ecr.Setup/Ecr.Setup.csproj package --vulnerable --include-transitive 2>&1 | Out-String
+          Write-Host $report
+          if ($LASTEXITCODE -ne 0) { throw "dotnet list завершився з кодом $LASTEXITCODE" }
+          if ($report -match 'has the following vulnerable packages') {
+            throw 'tools/Ecr.Setup: є вразливі пакети (див. звіт вище).'
+          }
+          if ($report -notmatch 'has no vulnerable packages') {
+            throw 'tools/Ecr.Setup: звіт аудиту не розпізнано — гейт не може підтвердити відсутність вразливостей.'
+          }
+
       - name: WiX 5.0.2 (dotnet tool, лише ранер)
         run: |
           dotnet tool install --global wix --version 5.0.2

@@ -1,0 +1,34 @@
+# PSS-30: автоматичні PR оновлень. Гейти вразливостей (`npm audit`, NuGetAudit, аудит
+# tools/Ecr.Setup у ci.yml) ловлять лише відомі CVE; дрейф версій без CVE бачить тільки це.
+#
+# ⚠ Свідомо тихо: раз на тиждень, minor+patch однією групою, мало відкритих PR. Мажорні
+# оновлення (EF Core, Mantine, React, Vite) приходять окремими PR і йдуть тим самим шляхом,
+# що й будь-яка ручна зміна версії: людина вирішує, коли.
+version: 2
+updates:
+  - package-ecosystem: nuget
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    groups:
+      nuget-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: "/src/Ecr.Web"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    groups:
+      npm-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 2
+    groups:
+      actions-minor-patch:
+        update-types: [minor, patch]
