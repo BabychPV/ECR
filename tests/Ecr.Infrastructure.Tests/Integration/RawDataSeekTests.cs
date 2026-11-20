@@ -29,8 +29,15 @@ namespace Ecr.Infrastructure.Tests.Integration;
 /// </para>
 /// </remarks>
 [Collection("SqlServer")]
-public sealed class RawDataSeekTests(SqlServerFixture sql, ITestOutputHelper output)
+public sealed class RawDataSeekTests(SqlServerFixture sql, ITestOutputHelper output) : IAsyncLifetime
 {
+    /// <summary>Сутності, створені розкладкою тесту: їхні 22 тис. точок і покриття прибираються в <see cref="DisposeAsync"/> (піку файла бази не лишаємо).</summary>
+    private readonly List<int> _sourceEntityIds = [];
+
+    public Task InitializeAsync() => Task.CompletedTask;
+
+    public Task DisposeAsync() => SharedDataCleanup.DeleteRawPointsAndCoverageAsync(sql.ConnectionString, _sourceEntityIds);
+
     private static readonly XNamespace Showplan = "http://schemas.microsoft.com/sqlserver/2004/07/showplan";
     private static readonly DateTime From = new(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc);
 
@@ -110,6 +117,7 @@ public sealed class RawDataSeekTests(SqlServerFixture sql, ITestOutputHelper out
         other.Deactivate();
         db.SourceEntities.AddRange(target, other);
         await db.SaveChangesAsync();
+        _sourceEntityIds.AddRange([target.Id, other.Id]);
 
         var run = new CollectionRun(other.Id, From, From.AddDays(1), false, null, From);
         db.CollectionRuns.Add(run);
