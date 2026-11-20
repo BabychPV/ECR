@@ -101,13 +101,21 @@ public sealed class RegistryHardReferencesScaleTests(SqlServerFixture sql)
         {
             await PrepareMeasurementAsync();
 
-            await using var db = builder.CreateContext();
+            // ⛔ 20.11: план беремо НЕ з кешу планів за міткою, а фактичним планом (SET STATISTICS XML) ТОГО САМОГО тексту й
+            // параметрів, які щойно виконав EF (перехоплено; параметри передаються так само, тож план під ті самі значення). У повному прогоні Infrastructure (53 хв, спільний сервер) план
+            // запиту комірок за міткою в кеші не зʼявлявся ЖОДНОГО з 5 повторів поспіль (планів `cells = 0`, `children = 1`),
+            // хоча окремо клас зелений, а ті самі запити в базі після прогону дають index seek: стан кешу планів — не те, що
+            // перевіряє тест. Форма плану (Index Seek по IX_…) від кешу не залежить, і перевіряється так само суворо.
+            var capture = new TaggedCommandCapture(RegistryStore.HardReferenceCellsTag, RegistryStore.HardReferenceChildrenTag);
+            await using var db = sql.CreateContext(capture);
             var store = new RegistryStore(db);
             var none = await store.FindHardReferencesAsync(await db.RegistryEntries.SingleAsync(e => e.Id == unused), CancellationToken.None);
             Assert.Empty(none);
 
-            Assert.Equal(["[IX_CellValue_RegistryEntry]"], await IndexesInCachedPlanAsync(RegistryStore.HardReferenceCellsTag, "[CellValue]"));
-            Assert.Equal(["[IX_RegistryEntry_Parent]"], await IndexesInCachedPlanAsync(RegistryStore.HardReferenceChildrenTag, "[RegistryEntry]"));
+            var cellsPlan = await ActualPlanAsync(capture.Get(RegistryStore.HardReferenceCellsTag));
+            var childPlan = await ActualPlanAsync(capture.Get(RegistryStore.HardReferenceChildrenTag));
+            Assert.Equal(["[IX_CellValue_RegistryEntry]"], IndexesInPlans([cellsPlan], "[CellValue]"));
+            Assert.Equal(["[IX_RegistryEntry_Parent]"], IndexesInPlans([childPlan], "[RegistryEntry]"));
 
             var all = await store.FindHardReferencesAsync(await db.RegistryEntries.SingleAsync(e => e.Id == used), CancellationToken.None);
             Assert.Equal(RegistryStore.HardReferenceCap, all[RegistryEntryHardReferences.Cells]);
@@ -134,10 +142,10 @@ public sealed class RegistryHardReferencesScaleTests(SqlServerFixture sql)
         await command.ExecuteNonQueryAsync();
     }
 
-    private async Task<IReadOnlyList<string>> IndexesInCachedPlanAsync(string tag, string table)
+    private static IReadOnlyList<string> IndexesInPlans(IReadOnlyList<string> plans, string table)
     {
         var indexes = new SortedSet<string>(StringComparer.Ordinal);
-        foreach (var text in await PlanCache.PlansAsync(sql.ConnectionString, tag))
+        foreach (var text in plans)
         {
             foreach (var target in XDocument.Parse(text).Descendants(XName.Get("Object", ShowPlanNs)))
             {
@@ -149,6 +157,115 @@ public sealed class RegistryHardReferencesScaleTests(SqlServerFixture sql)
         }
 
         return [.. indexes];
+    }
+
+    /// <summary>
+    /// Фактичний план (<c>SET STATISTICS XML</c>) перехопленої команди EF: текст і параметри ті самі, виконується так само (RPC із
+    /// параметрами), тож план компілюється під ті самі значення параметрів, що й у бойовому виклику.
+    /// </summary>
+    private async Task<string> ActualPlanAsync(CapturedCommand command)
+    {
+        var connectionString = new SqlConnectionStringBuilder(sql.ConnectionString) { Pooling = false }.ConnectionString;
+        await using var connection = new SqlConnection(connectionString);
+        await connection.OpenAsync();
+        await ExecuteAsync(connection, "SET STATISTICS XML ON;");
+        try
+        {
+            await using var plan = connection.CreateCommand();
+            plan.CommandText = command.Text;
+            foreach (var (name, value, type) in command.Parameters)
+            {
+                plan.Parameters.Add(new SqlParameter(name, type) { Value = value ?? DBNull.Value });
+            }
+
+            await using var reader = await plan.ExecuteReaderAsync();
+            do
+            {
+                if (reader.FieldCount == 1 && reader.GetName(0).StartsWith("Microsoft SQL Server", StringComparison.Ordinal) && await reader.ReadAsync())
+                {
+                    return reader.GetString(0);
+                }
+            }
+            while (await reader.NextResultAsync());
+
+            throw new Xunit.Sdk.XunitException("SET STATISTICS XML не повернув плану.");
+        }
+        finally
+        {
+            await ExecuteAsync(connection, "SET STATISTICS XML OFF;");
+        }
+    }
+
+    private static async Task ExecuteAsync(SqlConnection connection, string text)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = text;
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private sealed record CapturedCommand(string Text, IReadOnlyList<(string Name, object? Value, System.Data.DbType Type)> Parameters);
+
+    /// <summary>Запамʼятовує останню команду EF, текст якої містить одну з міток.</summary>
+    private sealed class TaggedCommandCapture(params string[] tags) : Microsoft.EntityFrameworkCore.Diagnostics.DbCommandInterceptor
+    {
+        private readonly Dictionary<string, CapturedCommand> _byTag = [];
+
+        public CapturedCommand Get(string tag)
+            => _byTag.TryGetValue(tag, out var command)
+                ? command
+                : throw new Xunit.Sdk.XunitException($"EF не виконав запиту з міткою '{tag}'.");
+
+        public override Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<System.Data.Common.DbDataReader> ReaderExecuting(
+            System.Data.Common.DbCommand command,
+            Microsoft.EntityFrameworkCore.Diagnostics.CommandEventData eventData,
+            Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<System.Data.Common.DbDataReader> result)
+        {
+            Capture(command);
+            return result;
+        }
+
+        public override ValueTask<Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<System.Data.Common.DbDataReader>> ReaderExecutingAsync(
+            System.Data.Common.DbCommand command,
+            Microsoft.EntityFrameworkCore.Diagnostics.CommandEventData eventData,
+            Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<System.Data.Common.DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            Capture(command);
+            return ValueTask.FromResult(result);
+        }
+
+        public override Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<object> ScalarExecuting(
+            System.Data.Common.DbCommand command,
+            Microsoft.EntityFrameworkCore.Diagnostics.CommandEventData eventData,
+            Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<object> result)
+        {
+            Capture(command);
+            return result;
+        }
+
+        public override ValueTask<Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<object>> ScalarExecutingAsync(
+            System.Data.Common.DbCommand command,
+            Microsoft.EntityFrameworkCore.Diagnostics.CommandEventData eventData,
+            Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<object> result,
+            CancellationToken cancellationToken = default)
+        {
+            Capture(command);
+            return ValueTask.FromResult(result);
+        }
+
+        private void Capture(System.Data.Common.DbCommand command)
+        {
+            foreach (var tag in tags)
+            {
+                if (command.CommandText.Contains(tag, StringComparison.Ordinal))
+                {
+                    var parameters = command.Parameters.Cast<System.Data.Common.DbParameter>()
+                        .Select(p => (p.ParameterName, p.Value, p.DbType))
+                        .ToList();
+                    _byTag[tag] = new CapturedCommand(command.CommandText, parameters);
+                }
+            }
+        }
     }
 
     /// <summary>The test DB has a size ceiling (TestDatabaseSizeTests): the 20 000 cells and 2 000 values go, in chunks.</summary>

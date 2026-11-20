@@ -92,6 +92,14 @@ afterEach(() => {
 });
 
 describe('ProjectTemplateRoutes', () => {
+  it('таблиця — у контейнері прокрутки: на 375 px сторінка не їде вбік (fg5, /projects/{id}/settings)', async () => {
+    serve();
+    show();
+
+    const table = await screen.findByTestId('project-template-routes');
+    expect(table.closest('[data-testid="project-template-routes-scroll"]'), 'таблиця поза контейнером прокрутки').not.toBeNull();
+  });
+
   it('рядок на шаблон: код, назва, джерело, кроки, підказка Approver і «маршрут не діє»', async () => {
     serve();
     show();

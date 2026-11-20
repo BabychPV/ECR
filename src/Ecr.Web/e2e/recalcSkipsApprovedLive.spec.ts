@@ -1,5 +1,5 @@
-import { expect, test, type APIResponse } from '@playwright/test';
-import { createMultiSheetDocument, signIn } from './multiSheet';
+import { expect, test, type APIResponse, type Page } from '@playwright/test';
+import { signIn } from './multiSheet';
 
 /**
  * ✎ UAT-recalc-ux (UAT 07.11; слово людини: «тільки погоджені не мають перераховуватися … це також має логуватися»)
@@ -16,6 +16,7 @@ import { createMultiSheetDocument, signIn } from './multiSheet';
  */
 
 interface DocumentTable {
+  tableInstanceId: number;
   sheetDefId: number;
   sheetCode: string;
 }
@@ -33,6 +34,135 @@ async function ok<T>(response: APIResponse, what: string): Promise<T> {
   return (body.length > 0 ? JSON.parse(body) : {}) as T;
 }
 
+interface Slice {
+  tableInstanceId: number;
+  rows: { rowKey: string; rowVersion: string; cells: Record<string, unknown> }[];
+}
+
+const column = (ordinal: number, header: string, dataType: string): Record<string, unknown> => ({
+  headerL10n: { en: header },
+  ordinal,
+  dataType,
+  isRequired: false,
+  isReadOnly: false,
+  isHidden: false,
+  precision: 18,
+  scale: 2,
+  defaultValue: null,
+  displayFormat: null,
+  lookupFilter: null,
+  lookupRegistryDefId: null,
+  styleId: null,
+  unitId: null,
+});
+
+/**
+ * ✎ B79: позначку «перераховано після подання» ставлять лише поданому аркушу, де перерахунок ЗМІНИВ число. Тому фікстура:
+ * S1 (подамо) має формулу Y = [S3].[T3].[R1].[A], що читає джерело на чернетці S3; S2 (затвердимо) — порожній.
+ * Джерело S3 змінюють ПІСЛЯ подання — число S1 розходиться зі збереженим, і перерахунок його оновлює.
+ */
+async function createSourceDocument(page: Page): Promise<{ documentId: number; periodKey: number; projectId: number }> {
+  const stamp = String(Date.now());
+  const template = await ok<{ templateId: number }>(
+    await page.request.post('/api/v1/templates', { data: { code: `E2ERc${stamp}`, nameL10n: { en: `E2E recalc ${stamp}` } } }),
+    'шаблон',
+  );
+  const version = await ok<{ versionId: number }>(
+    await page.request.post(`/api/v1/templates/${String(template.templateId)}/versions`, {
+      data: { versionNumber: '1.0.0.0', cloneFromVersionId: null },
+    }),
+    'версія',
+  );
+  const base = `/api/v1/template-versions/${String(version.versionId)}`;
+  const tableIds: number[] = [];
+  for (let n = 1; n <= 3; n += 1) {
+    await ok(
+      await page.request.put(`${base}/sheets/S${String(n)}`, {
+        data: { nameL10n: { en: `Sheet ${String(n)}` }, ordinal: n, isMandatory: true, isVisible: true, sheetGroup: null },
+      }),
+      `аркуш S${String(n)}`,
+    );
+    const table = await ok<{ id: number }>(
+      await page.request.put(`${base}/sheets/S${String(n)}/tables/T${String(n)}`, {
+        data: { nameL10n: { en: `Table ${String(n)}` }, ordinal: 0, layoutKind: 'PerPeriodInstance', rowMode: 'Fixed', maxDynamicRows: null },
+      }),
+      `таблиця T${String(n)}`,
+    );
+    tableIds.push(table.id);
+    await ok(
+      await page.request.put(`${base}/tables/${String(table.id)}/rows/R1`, {
+        data: { labelL10n: { en: 'Row 1' }, ordinal: 1, rowKind: 'Item', parentRowKey: null, isReadOnly: false },
+      }),
+      `рядок R1 таблиці T${String(n)}`,
+    );
+  }
+  const [t1, t2, t3] = tableIds as [number, number, number];
+  await ok(await page.request.put(`${base}/tables/${String(t1)}/columns/Y`, { data: column(0, 'Y', 'Formula') }), 'колонка Y');
+  await ok(await page.request.put(`${base}/tables/${String(t2)}/columns/C1`, { data: column(0, 'C1', 'String') }), 'колонка C1');
+  await ok(await page.request.put(`${base}/tables/${String(t3)}/columns/A`, { data: column(0, 'A', 'Decimal') }), 'колонка A');
+  const draft = await ok<{ sheets: { tables: { id: number; columns: { id: number; code: string }[] }[] }[] }>(
+    await page.request.get(`${base}/structure`),
+    'структура',
+  );
+  const yId = draft.sheets[0]?.tables[0]?.columns.find((c) => c.code === 'Y')?.id ?? 0;
+  await ok(
+    await page.request.put(`${base}/tables/${String(t1)}/formulas/column/${String(yId)}`, {
+      data: { dialect: 'Template', expression: '[S3].[T3].[R1].[A]' },
+    }),
+    'формула Y',
+  );
+  await ok(await page.request.post(`${base}/publish`, { data: { reason: 'e2e: перерахунок поданого аркуша' } }), 'публікація');
+
+  const policies = await ok<{ id: number; code: string }[]>(await page.request.get('/api/v1/projects/period-policies'), 'політики');
+  const policy = policies.find((item) => item.code === 'ECR-Standard') ?? policies[0];
+  const project = await ok<{ projectId: number }>(
+    await page.request.post('/api/v1/projects', {
+      data: {
+        code: `E2ERcPrj${stamp}`,
+        nameL10n: { en: `E2E recalc project ${stamp}` },
+        periodKind: 'Monthly',
+        timeZoneId: 'UTC',
+        templateVersionId: version.versionId,
+        periodPolicyId: policy?.id,
+        year: new Date().getUTCFullYear(),
+      },
+    }),
+    'проєкт',
+  );
+  await ok(await page.request.post(`/api/v1/projects/${String(project.projectId)}/activate`), 'активація');
+  const structure = await ok<{ sheets: { id: number }[] }>(await page.request.get(`${base}/structure`), 'структура версії');
+  const document = await ok<{ documentId: number }>(
+    await page.request.post('/api/v1/documents', {
+      data: { projectId: project.projectId, sheetDefIds: structure.sheets.map((x) => x.id), templateVersionId: version.versionId },
+    }),
+    'документ',
+  );
+  const calendar = await ok<{ periods: { periodKey: number; state: string }[] }>(
+    await page.request.get(`/api/v1/projects/${String(project.projectId)}/periods`),
+    'календар',
+  );
+  const periodKey = (calendar.periods.find((item) => item.state === 'Open') ?? calendar.periods[0])?.periodKey ?? 0;
+
+  return { documentId: document.documentId, periodKey, projectId: project.projectId };
+}
+
+/** Ставить A у рядку R1 таблиці-джерела S3. */
+async function setSource(page: Page, documentId: number, tableInstanceId: number, periodKey: number, value: string): Promise<void> {
+  const slice = await ok<Slice>(await page.request.get(`/api/v1/documents/${String(documentId)}/tables/${String(tableInstanceId)}`), 'зріз S3');
+  const row = slice.rows.find((candidate) => candidate.rowKey === 'R1');
+  await ok(
+    await page.request.patch(`/api/v1/documents/${String(documentId)}/cells`, {
+      data: {
+        tableInstanceId,
+        periodKey,
+        origin: 'UserEdit',
+        rows: [{ rowKey: 'R1', baseVersion: row?.rowVersion, cells: [{ columnCode: 'A', value, isEmpty: false }] }],
+      },
+    }),
+    `джерело A=${value}`,
+  );
+}
+
 test.describe('Recalculation skips approved sheets and marks recalculated submitted sheets', () => {
   test.describe.configure({ mode: 'serial', timeout: 300_000 });
 
@@ -40,7 +170,7 @@ test.describe('Recalculation skips approved sheets and marks recalculated submit
     page,
   }) => {
     await signIn(page);
-    const { documentId, periodKey } = await createMultiSheetDocument(page, 3, 2);
+    const { documentId, periodKey } = await createSourceDocument(page);
     const id = String(documentId);
     const period = String(periodKey);
 
@@ -52,6 +182,18 @@ test.describe('Recalculation skips approved sheets and marks recalculated submit
     const sheets = [...new Map(tables.map((table) => [table.sheetDefId, table])).values()];
     expect(sheets.length, 'документ без трьох аркушів').toBeGreaterThanOrEqual(3);
     const [submitted, approved] = sheets as [DocumentTable, DocumentTable];
+
+    // Джерело S3 = 1 → Y на S1 = 1 (збережене число), ДО подання.
+    const source = tables.find((table) => table.sheetCode === 'S3');
+    const reader = tables.find((table) => table.sheetCode === 'S1');
+    expect(source, 'немає таблиці-джерела S3').toBeDefined();
+    expect(reader, 'немає таблиці-читача S1').toBeDefined();
+    await setSource(page, documentId, source?.tableInstanceId ?? 0, periodKey, '1');
+    const readY = async (): Promise<number> => {
+      const slice = await ok<Slice>(await page.request.get(`/api/v1/documents/${id}/tables/${String(reader?.tableInstanceId)}`), 'зріз S1');
+      return Number(slice.rows[0]?.cells['Y'] ?? Number.NaN);
+    };
+    await expect.poll(readY, { message: 'Y на S1 не порахувалась з джерела', timeout: 60_000 }).toBe(1);
 
     const submit = async (sheet: DocumentTable): Promise<void> => {
       await ok(
@@ -70,6 +212,9 @@ test.describe('Recalculation skips approved sheets and marks recalculated submit
       }),
       `approve ${approved.sheetCode}`,
     );
+
+    // Джерело змінюють ПІСЛЯ подання: збережене Y=1 розходиться з обчисленим 2 — перерахунок має його змінити.
+    await setSource(page, documentId, source?.tableInstanceId ?? 0, periodKey, '2');
 
     const card = await ok<DocumentCard>(
       await page.request.get(`/api/v1/documents/${id}?periodKey=${period}`),

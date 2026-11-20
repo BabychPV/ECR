@@ -2,6 +2,7 @@
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
+using Ecr.Infrastructure.Persistence;
 using Ecr.Infrastructure.Reporting;
 using Ecr.TestKit;
 using Microsoft.Data.SqlClient;
@@ -39,12 +40,29 @@ public sealed class ReportViewColumnBudgetTests(SqlServerFixture sql) : IAsyncLi
 
     public async Task DisposeAsync()
     {
-        await using var db = sql.CreateContext();
+        await using var db = GeneratorContext();
         foreach (var tableId in _wideTables)
         {
             await db.Database.ExecuteSqlInterpolatedAsync(
                 $"UPDATE cfg.ColumnDef SET IsDeleted = 1, DeletedAt = SYSUTCDATETIME() WHERE TableDefId = {tableId} AND IsDeleted = 0");
         }
+    }
+
+    /// <summary>
+    /// Контекст із стелею команди 300 с для генерації вʼюх ШИРОКИХ таблиць (1035 колонок).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ 20.11: стабільна вʼюха на таблицю з 1035 колонками рахується ~16-25 с (цикл по колонках у <c>rpt.usp_GenerateStableViews</c>
+    /// квадратичний по змінних-таблицях) проти типових 30 с команди: поодинці тест був на межі, під навантаженням повного прогону
+    /// (інші агенти на тому самому SQL Server) команда падала по таймауту (SqlException.Number = -2) замість 50422 — і саме це
+    /// червоніло `Table_over_1024_columns_fails_with_50422…`. Предмет тесту — номер помилки й що решта таблиць згенерована, а не
+    /// швидкість; стеля команди — як у генерації версії з маршрутизацією (<see cref="ReportViewGenerator.RoutedGenerationTimeoutSeconds"/>).
+    /// </remarks>
+    private EcrDbContext GeneratorContext()
+    {
+        var db = sql.CreateContext();
+        db.Database.SetCommandTimeout(ReportViewGenerator.RoutedGenerationTimeoutSeconds);
+        return db;
     }
 
     private sealed record Built(TestDocument Doc, int TemplateId, string WideView, string NarrowView, string WideStable,
@@ -63,7 +81,7 @@ public sealed class ReportViewColumnBudgetTests(SqlServerFixture sql) : IAsyncLi
         var doc = await builder.BuildAsync(202601, columnCount: 2, rowCount: 1, layoutKind: TableLayoutKind.MonthsInColumns, monthColumns: 12);
         _wideTables.Add(doc.TableDefId);
 
-        await using var db = sql.CreateContext();
+        await using var db = GeneratorContext();
         var formula = new ColumnDef(doc.TableDefId, EcrCode.Create("FRM" + Guid.NewGuid().ToString("N")[..8]),
             new LocalizedText(new Dictionary<string, string> { ["en"] = "Formula" }), 9999, CellDataType.Formula);
         db.ColumnDefs.Add(formula);
@@ -156,7 +174,7 @@ public sealed class ReportViewColumnBudgetTests(SqlServerFixture sql) : IAsyncLi
     public async Task Year_layout_formula_only_table_takes_the_non_rv_branch_and_has_no_month_Text()
     {
         var b = await BuildAsync(monthCalculated: 0, monthFormula: 12);   // без Calculated - текст вʼюхи з @select, не @selectRv
-        await using var db = sql.CreateContext();
+        await using var db = GeneratorContext();
 
         await new ReportViewGenerator(db).GenerateVersionViewsAsync(b.Doc.TemplateVersionId, CancellationToken.None);
 
@@ -168,7 +186,7 @@ public sealed class ReportViewColumnBudgetTests(SqlServerFixture sql) : IAsyncLi
     {
         // 535 колонок + 520 місячних супутників + 24 > 1024; без місячних (D-547) - 535 + 1 + 24 - вміщується.
         var b = await BuildAsync(monthCalculated: 520);
-        await using var db = sql.CreateContext();
+        await using var db = GeneratorContext();
         var generator = new ReportViewGenerator(db);
 
         await generator.GenerateVersionViewsAsync(b.Doc.TemplateVersionId, CancellationToken.None);
@@ -187,7 +205,7 @@ public sealed class ReportViewColumnBudgetTests(SqlServerFixture sql) : IAsyncLi
     {
         // 15 + 520 немісячних формул = 535 колонок; із 521 супутником _Text - понад 1000 (і понад 1024 у CREATE VIEW).
         var b = await BuildAsync(monthCalculated: 0, nonMonthFormula: 520);
-        await using var db = sql.CreateContext();
+        await using var db = GeneratorContext();
 
         var ex = await Assert.ThrowsAsync<SqlException>(
             () => new ReportViewGenerator(db).GenerateStableViewsAsync(b.TemplateId, b.Doc.TemplateVersionId, CancellationToken.None));
@@ -201,7 +219,7 @@ public sealed class ReportViewColumnBudgetTests(SqlServerFixture sql) : IAsyncLi
     public async Task Year_layout_versioned_view_has_no_month_Text_companions()
     {
         var b = await BuildAsync();
-        await using var db = sql.CreateContext();
+        await using var db = GeneratorContext();
 
         await new ReportViewGenerator(db).GenerateVersionViewsAsync(b.Doc.TemplateVersionId, CancellationToken.None);
 
@@ -212,7 +230,7 @@ public sealed class ReportViewColumnBudgetTests(SqlServerFixture sql) : IAsyncLi
     public async Task Monthly_layout_versioned_view_keeps_month_Text_companions()
     {
         var b = await BuildAsync(yearLayout: false);
-        await using var db = sql.CreateContext();
+        await using var db = GeneratorContext();
 
         await new ReportViewGenerator(db).GenerateVersionViewsAsync(b.Doc.TemplateVersionId, CancellationToken.None);
 
@@ -225,7 +243,7 @@ public sealed class ReportViewColumnBudgetTests(SqlServerFixture sql) : IAsyncLi
     public async Task Year_layout_stable_view_has_no_month_Text_companions()
     {
         var b = await BuildAsync();
-        await using var db = sql.CreateContext();
+        await using var db = GeneratorContext();
 
         await new ReportViewGenerator(db).GenerateStableViewsAsync(b.TemplateId, b.Doc.TemplateVersionId, CancellationToken.None);
 
@@ -236,7 +254,7 @@ public sealed class ReportViewColumnBudgetTests(SqlServerFixture sql) : IAsyncLi
     public async Task Table_over_1024_columns_fails_with_50422_and_the_other_tables_are_generated()
     {
         var b = await BuildAsync(monthCalculated: 520, plainNonMonth: 500);   // 1035 колонок і без жодного супутника місяців
-        await using var db = sql.CreateContext();
+        await using var db = GeneratorContext();
         var generator = new ReportViewGenerator(db);
 
         var ex = await Assert.ThrowsAsync<SqlException>(

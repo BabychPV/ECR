@@ -22,9 +22,29 @@ namespace Ecr.Infrastructure.Tests.Persistence;
 /// перший тест (великий текст у відповіді БД) і другий (великий текст розібрано, а не опубліковане зведення).
 /// </remarks>
 [Collection("SqlServer")]
-public sealed class PermitTypeListProjectionTests(SqlServerFixture sql, ITestOutputHelper output)
+public sealed class PermitTypeListProjectionTests(SqlServerFixture sql, ITestOutputHelper output) : IAsyncLifetime
 {
     private readonly string _tag = Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
+
+    public Task InitializeAsync() => Task.CompletedTask;
+
+    /// <summary>
+    /// Прибирає чернетки типів цього класу (до 7 типів по ~3,4 МБ тексту) — самі типи й їхні малі рядки лишаються.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ 20.11: вісім чернеток по 3,4 МБ — 26 МБ файла <c>PRIMARY</c> спільної бази до кінця прогону; разом з іншими такими класами це
+    /// піднімало файл до 232 МБ проти стелі 192 МБ наприкінці колекції (<see cref="SharedDataCleanup"/>). Чернетка типа без
+    /// чернетки (<c>DraftJson = NULL</c>) — звичайний стан опублікованого типу.
+    /// </remarks>
+    public async Task DisposeAsync()
+    {
+        await using var connection = new Microsoft.Data.SqlClient.SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE cfg.PermitTypeDef SET DraftJson = NULL WHERE Code LIKE N'%' + @tag AND DraftJson IS NOT NULL;";
+        command.Parameters.Add("@tag", System.Data.SqlDbType.NVarChar, 20).Value = _tag;
+        await command.ExecuteNonQueryAsync();
+    }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
