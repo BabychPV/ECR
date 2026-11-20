@@ -6824,3 +6824,30 @@ public sealed record RowDto(
     клієнт `sourceImpact.*` — сід `B80-source-impact.sql` (en/ru/kz; **kz — робочий переклад, на звірку**).
   - Продуктивність (F13): `DocumentSourceIssues.ListAsync` читає зв'язки споживача для ВСІХ періодів двома запитами поза
     циклом (раніше 2 на період).
+
+- **✎ 2026-11-20 (аудит PSS, лан L7 script-security) — межі авторства скрипта й ворота перемикання рушія.**
+  - **PSS-21 — межі прогонів скрипта.** Право не змінюється (рішення людини §6 п. 8: перегляд/перевірка довільного
+    тексту — з `Calculation.View`, збереження/публікація/перемикання — як і доти, з правами редагування). Додано:
+    - `POST …/script/preview` і `POST /methodologies/{id}/versions/{vid}/script/parity` — політика **`script-run`**,
+      30/хв на користувача, ОДИН кошик (`Security:RateLimit:ScriptRunPermitPerMinute`); понад — **429 `ECR-REQ-0429`**
+      `err.ECR-REQ-0429.tooManyScriptRuns` із `Retry-After`. Одночасних прогонів на процес — 4, черга 8
+      (`Security:RateLimit:ScriptRunConcurrency` / `ScriptRunQueueLimit`); понад чергу — **429** `err.ECR-REQ-0429.scriptRunBusy`.
+    - `POST …/script/validate` і `POST …/script/format-const` — політика **`script-check`**, 120/хв на користувача
+      (`Security:RateLimit:ScriptCheckPermitPerMinute`); понад — **429** `err.ECR-REQ-0429.tooManyScriptChecks`.
+    - Перегляд обмежено **30 с** (компіляція з перевірками й прогін) — понад це **422 `ECR-CALC-0422`**
+      `err.ECR-CALC-0422.scriptPreviewTimeout` (`seconds`); розірваний клієнтом запит скасовує прогін токеном запиту.
+    - Рушій: бюджет кроків **рядка** 2 000 000 (`ScriptCalculationModule.MaxRowEvaluationSteps`, діє і в перерахунку):
+      рядок, що його вичерпав, дає `#BUDGET` на кожен наступний оператор (проблема рядка `stepError`); спільний бюджет
+      **запиту перегляду** 20 000 000 кроків; скасування перевіряється перед кожним оператором.
+    - Відповідь перегляду: не більше **50 000** величин на запит; рядок, чий перелік урізано, несе нове необов'язкове
+      поле **`ScriptPreviewRow.valuesTruncated: boolean`** (`true` — `values` неповний).
+  - **PSS-25 (частина скрипта)** — `POST …/script/preview` і `POST …/script/parity` вимагають ще й **`Document.View`** у
+    проєкті документа (видимий документ без права — **403 `ECR-AUTH-0403`**): обидва віддають значення входів рядків.
+  - **PSS-23 — перемикання на Script лише з зеленим золотим набором** (рішення людини §6 п. 9).
+    `POST /methodologies/script-migration/switch` з `engine = Script`: після компіляції, звірки складу й матеріалізації
+    золотий набір КОЖНОЇ версії групи (крім бібліотек, D-556) проганяється вже рушієм Script тими самими вердиктами, що
+    й публікація; не зелений — **422 `ECR-CALC-0422`** `err.ECR-CALC-0422.switchGoldenSetEmpty` /
+    `switchGoldenNoExpectations` / `switchGoldenSetDiverged` (`version`, `count`, `tests`, `goldenSet`), уся група
+    відкочується. Версія в стані **Deprecated** на Script не перемикається — **409 `ECR-CALC-0409`**
+    `err.ECR-CALC-0409.scriptSwitchDeprecated`; назад на `Formulas` — дозволено.
+  - Ключі каталогу — сід `MS-pss-script-security.sql` (en/ru/kz; **kz — робочий переклад, на звірку**).
