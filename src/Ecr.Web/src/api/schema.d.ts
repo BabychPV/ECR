@@ -43522,6 +43522,8 @@ export interface components {
         };
         /** @description Відповідь перегляду на документі. */
         ScriptPreviewDto: {
+            /** @description `true` — вичерпано спільний бюджет кроків перегляду (PSS-21: 20 000 000 на запит); рядки з `#BUDGET` — межа перегляду, а не помилка скрипта, у перерахунку її немає. */
+            budgetExhausted?: boolean;
             /** @description Діагностики тексту (перегляд виконується лише без них). */
             diagnostics: components["schemas"]["ScriptDiagnosticDto"][];
             /** @description Таблиці з рядками й значеннями; порожньо, якщо текст має діагностики. */
