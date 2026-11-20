@@ -215,6 +215,12 @@ internal sealed class WizardState
     }
 
     /// <summary>
+    /// ⛔ PSS-28: <c>AllowedHosts</c> — імена хоста, на які застосунок відповідає (нормалізоване, через <c>;</c>,
+    /// або <c>*</c>). <c>null</c> — крок «Транспорт» ще не показано: параметр у <c>deploy-ecr.ps1</c> не йде.
+    /// </summary>
+    public string? AllowedHosts { get; set; }
+
+    /// <summary>
     /// Чи годиться вибраний транспорт зараз: для HTTPS — сертифікат у сховищі, із ключем, чинний;
     /// для проксі й HTTP перевіряти нічого.
     /// </summary>

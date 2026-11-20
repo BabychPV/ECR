@@ -22,15 +22,21 @@ internal sealed class TransportStep(ICertificateSource source, Func<DateTime> no
     private Label? _emptyLabel;
     private Button? _refreshButton;
     private string? _selected;
+    private TextBox? _hostsBox;
+    private bool _hostsEdited;
+    private bool _settingHosts;
+    private Dictionary<string, IReadOnlyList<string>> _dnsNames = new(StringComparer.Ordinal);
 
     public string Title => "Transport (HTTPS)";
 
     public Control BuildView()
     {
-        var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 8 };
+        var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 10 };
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -74,7 +80,10 @@ internal sealed class TransportStep(ICertificateSource source, Func<DateTime> no
         _list.Columns.Add("Valid until", 90);
         _list.Columns.Add("Thumbprint", 300);
         _list.SelectedIndexChanged += (_, _) =>
+        {
             _selected = _list.SelectedItems.Count == 1 ? (string?)_list.SelectedItems[0].Tag : null;
+            SuggestHosts();
+        };
 
         _emptyLabel = new Label { AutoSize = true, ForeColor = Color.DarkRed, Visible = false };
 
@@ -101,21 +110,56 @@ internal sealed class TransportStep(ICertificateSource source, Func<DateTime> no
         root.Controls.Add(_httpOption, 0, 6);
         root.Controls.Add(hint, 0, 7);
 
+        // ⛔ PSS-28: імена хоста. Пропонуються з DNS-імен вибраного сертифіката; редагуються; `*` — явно.
+        var hostsLabel = new Label
+        {
+            AutoSize = true,
+            MaximumSize = new Size(640, 0),
+            Margin = new Padding(0, 12, 0, 4),
+            Text = "Host names the application answers to (AllowedHosts), separated by ';'. Suggested from the DNS names "
+                + "of the selected certificate plus localhost (used by the post-install health check). "
+                + "Requests with any other Host header get HTTP 400, so list every name users type in the browser "
+                + "(and the proxy's name behind a proxy). Type * to allow any host (default of the application).",
+        };
+        _hostsBox = new TextBox { Dock = DockStyle.Fill, Text = AllowedHostsRules.Any };
+        _hostsBox.TextChanged += (_, _) =>
+        {
+            if (!_settingHosts)
+            {
+                _hostsEdited = true;
+            }
+        };
+        root.Controls.Add(hostsLabel, 0, 8);
+        root.Controls.Add(_hostsBox, 0, 9);
+
         return root;
     }
 
     public void OnShow(WizardState state)
     {
         _selected ??= state.HttpsThumbprint;
+        if (state.AllowedHosts is not null && !_hostsEdited)
+        {
+            SetHosts(state.AllowedHosts);
+            _hostsEdited = true;
+        }
+
         _httpsOption!.Checked = state.Transport == WizardTransport.Https;
         _proxyOption!.Checked = state.Transport == WizardTransport.Proxy;
         _httpOption!.Checked = state.Transport == WizardTransport.Http;
         UpdateEnabled();
         Reload();
+        SuggestHosts();
     }
 
     public bool Validate(out string error)
     {
+        // ⛔ PSS-28: пусте чи хибне значення не пропускаємо — воно зачинило б вхід (400 на кожен запит).
+        if (!AllowedHostsRules.TryNormalize(_hostsBox!.Text, out _, out error))
+        {
+            return false;
+        }
+
         if (!_httpsOption!.Checked)
         {
             error = string.Empty;
@@ -135,6 +179,38 @@ internal sealed class TransportStep(ICertificateSource source, Func<DateTime> no
 
         // Відбиток лишається в стані й після перемикання на інший режим: повернення "Назад" не губить вибір.
         state.HttpsThumbprint = _selected;
+
+        if (AllowedHostsRules.TryNormalize(_hostsBox!.Text, out var hosts, out _))
+        {
+            state.AllowedHosts = hosts;
+        }
+    }
+
+    // Підставляє імена сертифіката, доки адміністратор не змінив поле сам.
+    private void SuggestHosts()
+    {
+        if (_hostsEdited || _hostsBox is null || _selected is null || !_httpsOption!.Checked)
+        {
+            return;
+        }
+
+        if (_dnsNames.TryGetValue(_selected, out var names))
+        {
+            SetHosts(AllowedHostsRules.FromCertificate(names));
+        }
+    }
+
+    private void SetHosts(string value)
+    {
+        _settingHosts = true;
+        try
+        {
+            _hostsBox!.Text = value;
+        }
+        finally
+        {
+            _settingHosts = false;
+        }
     }
 
     private void UpdateEnabled()
@@ -147,6 +223,10 @@ internal sealed class TransportStep(ICertificateSource source, Func<DateTime> no
     private void Reload()
     {
         var selectable = DataProtectionCertificateRules.Selectable(source.List());
+        _dnsNames = selectable.ToDictionary(
+            c => DataProtectionCertificateRules.Normalize(c.Thumbprint),
+            c => c.DnsNames ?? [],
+            StringComparer.Ordinal);
 
         _list!.BeginUpdate();
         _list.Items.Clear();
