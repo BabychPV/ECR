@@ -226,9 +226,11 @@ internal static class AllowedHostsRules
 
     private static readonly char[] Separators = [',', ';', ' ', '\t', '\r', '\n'];
 
-    // ім'я або `*.ім'я`, необов'язковий порт; `[IPv6]` — у квадратних дужках.
+    // ім'я або `*.ім'я`; `[IPv6]` — у квадратних дужках. ⛔ БЕЗ порту: фільтр хостів ASP.NET Core відкидає порт
+    // із заголовка Host, а записи AllowedHosts порівнює як є — запис `ecr.example.com:8443` не збігся б НІКОЛИ
+    // (усі користувачі отримали б 400, а перевірка розгортання на localhost лишилась би зеленою; рецензія L9 H1).
     private static readonly System.Text.RegularExpressions.Regex EntryPattern = new(
-        @"^(?:(?:\*\.)?[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*|\[[0-9A-Fa-f:.]+\])(?::[0-9]{1,5})?$",
+        @"^(?:(?:\*\.)?[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*|\[[0-9A-Fa-f:.]+\])$",
         System.Text.RegularExpressions.RegexOptions.CultureInvariant,
         TimeSpan.FromSeconds(1));
 
@@ -289,10 +291,17 @@ internal static class AllowedHostsRules
 
         foreach (var entry in entries)
         {
+            if (HasPort(entry))
+            {
+                error = $"'{entry}' contains a port. Enter the host name without the port (for example ecr.example.com): "
+                    + "the server compares host names without ports, so an entry with a port would never match.";
+                return false;
+            }
+
             if (!IsValidEntry(entry))
             {
-                error = $"'{entry}' is not a valid host name. Use names like ecr.example.com, *.example.com "
-                    + "or ecr.example.com:8443 (no scheme, no path).";
+                error = $"'{entry}' is not a valid host name. Use names like ecr.example.com or *.example.com "
+                    + "(no scheme, no port, no path).";
                 return false;
             }
         }
@@ -306,17 +315,17 @@ internal static class AllowedHostsRules
     {
         try
         {
-            if (!EntryPattern.IsMatch(entry))
-            {
-                return false;
-            }
+            return EntryPattern.IsMatch(entry);
         }
         catch (System.Text.RegularExpressions.RegexMatchTimeoutException)
         {
             return false;
         }
-
-        var colon = entry.LastIndexOf(':');
-        return colon < 0 || entry.EndsWith(']') || int.Parse(entry[(colon + 1)..], CultureInfo.InvariantCulture) is >= 1 and <= 65535;
     }
+
+    /// <summary>Запис із портом: <c>ім'я:порт</c> або <c>[IPv6]:порт</c> (двокрапки всередині дужок — частина адреси).</summary>
+    private static bool HasPort(string entry)
+        => entry.StartsWith('[')
+            ? entry.IndexOf(']', StringComparison.Ordinal) is var close and >= 0 && close < entry.Length - 1 && entry[close + 1] == ':'
+            : entry.Contains(':', StringComparison.Ordinal);
 }

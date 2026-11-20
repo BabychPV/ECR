@@ -13,7 +13,8 @@ namespace Ecr.Architecture.Tests.Setup;
 /// Мутації (прогнано): <c>FromCertificate</c> без <c>localhost</c> → червоний
 /// <c>Пропозиція_з_сертифіката_містить_імена_і_localhost</c>; <c>TryNormalize</c> приймає порожній рядок →
 /// червоний <c>Порожнє_значення_відхиляється</c>; <c>DeployArguments</c> не додає <c>AllowedHosts</c> →
-/// червоний <c>Імена_хоста_передаються_скрипту_явно</c>.
+/// червоний <c>Імена_хоста_передаються_скрипту_явно</c>; порт знову дозволено в шаблоні й без <c>HasPort</c> →
+/// червоний <c>Ім_я_з_портом_відхиляється_з_поясненням</c>.
 /// </remarks>
 public sealed class SetupWizardAllowedHostsTests
 {
@@ -43,7 +44,7 @@ public sealed class SetupWizardAllowedHostsTests
     [Trait(TestCategories.Category, TestCategories.Architecture)]
     [InlineData("*", "*")]
     [InlineData(" ecr.example.com ; *.example.com,localhost ", "ecr.example.com;*.example.com;localhost")]
-    [InlineData("ecr.example.com:8443", "ecr.example.com:8443")]
+    [InlineData("[::1];localhost", "[::1];localhost")]
     [InlineData("ECR.example.com ecr.example.com", "ECR.example.com")]
     public void Коректне_значення_нормалізується(string input, string expected)
     {
@@ -68,6 +69,24 @@ public sealed class SetupWizardAllowedHostsTests
         Assert.False(AllowedHostsRules.TryNormalize(input, out var normalized, out var error));
         Assert.Empty(normalized);
         Assert.NotEmpty(error);
+    }
+
+    /// <summary>
+    /// ⛔ Рецензія L9 H1: фільтр хостів ASP.NET Core порівнює записи AllowedHosts БЕЗ порту запиту, тож запис із портом
+    /// не збігається ніколи — усі користувачі отримали б 400, а перевірка розгортання на <c>localhost</c> лишилась би
+    /// зеленою. Порт відхиляється з поясненням, а не мовчки.
+    /// </summary>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    [InlineData("ecr.example.com:8443")]
+    [InlineData("localhost:5000;ecr")]
+    [InlineData("[::1]:8443")]
+    public void Ім_я_з_портом_відхиляється_з_поясненням(string input)
+    {
+        Assert.False(AllowedHostsRules.TryNormalize(input, out var normalized, out var error));
+        Assert.Empty(normalized);
+        Assert.Contains("port", error, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
