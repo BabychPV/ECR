@@ -142,9 +142,11 @@ public sealed class AuditReaderArchiveSwitchTests
         await using var c = new SqlConnection(cs);
         await c.OpenAsync();
         await using var cmd = c.CreateCommand();
-        cmd.CommandText = "EXEC arc.usp_ArchiveAudit @OlderThanMonths = @m, @Today = @t;";
+        // ✎ PSS-27: публічна arc.usp_ArchiveAudit тримає підлогу 120 міс. і не приймає «сьогодні» з майбутнього — механіку
+        // SWITCH на коротких порогах перевіряє внутрішня процедура з явною межею (перше число місяця Today мінус поріг).
+        cmd.CommandText = "EXEC arc.usp_ArchiveAuditBefore @Cutoff = @c, @OlderThanMonths = @m;";
+        cmd.Parameters.Add("@c", SqlDbType.DateTime2).Value = new DateTime(Today.Year, Today.Month, 1, 0, 0, 0, DateTimeKind.Utc).AddMonths(-olderThanMonths);
         cmd.Parameters.AddWithValue("@m", olderThanMonths);
-        cmd.Parameters.Add("@t", SqlDbType.Date).Value = Today;
         await cmd.ExecuteNonQueryAsync();
     }
 

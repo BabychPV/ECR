@@ -341,15 +341,36 @@ GO
 -- версій (@TemplateVersionId IS NULL), якщо відбиток входів (rpt.fn_ViewsFingerprint) збігається з відбитком останньої
 -- УСПІШНОЇ повної генерації (розширена властивість схеми rpt, без таблиці й міграції) і всі очікувані вʼюхи є в базі.
 -- Пропуск повертає один рядок (0, N'', N'Skipped'). Відбиток пишеться ЛИШЕ після успішної повної генерації.
+-- ✎ PSS-10 (аудит 20.11): CREATE OR ALTER VIEW бере Sch-M на вʼюху і стає в чергу за найдовшим читачем (звіт SSRS), а за ним -
+-- УСІ нові читачі цієї вʼюхи. Тепер DDL кожної вʼюхи чекає не довше @DdlLockTimeoutMs (типово 5000 мс; SET LOCK_TIMEOUT у
+-- динамічному пакеті - діє рівно на DDL), 1222/1205 - відкат транзакції ЦІЄЇ вʼюхи (мапа слотів + DDL), пауза 1 с і нова спроба,
+-- до @DdlMaxAttempts (типово 3). Не вдалося - вʼюха лишається старою, рядок Action = N'Blocked', решта вʼюх генерується, відбиток
+-- НЕ пишеться, а наприкінці - THROW 50424 (повторювано: застосунок відкладає задачу і повторює; після 50409/50422, як і досі,
+-- кидаються вони). У транзакції викликача (@@TRANCOUNT > 0 на вході) повторів немає - помилка йде викликачу, як і раніше.
+-- ✎ рев'ю M3: спільний бюджет очікування @DdlTotalBudgetMs (типово 30000 мс) на ВЕСЬ виклик: ~17 с на вʼюху x кілька
+-- заблокованих вʼюх перевищували стелю команди клієнта (60 с) - клієнт отримував -2 замість 50424 і задача не повторювалась.
+-- Бюджет вичерпано - решта вʼюх, яким потрібен DDL, одразу Blocked (без спроб), наприкінці той самий 50424.
+-- ReportViewGenerator передає половину стелі команди.
 CREATE OR ALTER PROCEDURE rpt.usp_GenerateTemplateViews
     @TemplateVersionId int = NULL,
     @MonthRouting bit = 0,
-    @OnlyIfChanged bit = 0
+    @OnlyIfChanged bit = 0,
+    @DdlLockTimeoutMs int = NULL,
+    @DdlMaxAttempts int = 3,
+    @DdlTotalBudgetMs int = NULL
 WITH EXECUTE AS OWNER
 AS
 BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
+
+    -- PSS-10: межа очікування Sch-M на DDL однієї вʼюхи і кількість спроб.
+    DECLARE @entryTran int = @@TRANCOUNT, @ddlWait int = COALESCE(@DdlLockTimeoutMs, 5000), @ddlTries int = COALESCE(@DdlMaxAttempts, 3);
+    DECLARE @ddlBudget int = COALESCE(@DdlTotalBudgetMs, 30000), @ddlSpent int = 0, @ddlStart datetime2(3);
+    IF @ddlWait < 1 OR @ddlTries < 1 OR @ddlBudget < 1
+        THROW 50017, N'rpt.usp_GenerateTemplateViews: @DdlLockTimeoutMs, @DdlMaxAttempts і @DdlTotalBudgetMs мають бути додатними.', 1;
+    DECLARE @ddlWrap nvarchar(200) = N'SET LOCK_TIMEOUT ' + CAST(@ddlWait AS nvarchar(10)) + N'; EXEC sys.sp_executesql @d;';
+    DECLARE @ddlAttempt int, @blocked int = 0, @blockedWho nvarchar(2000);
 
     -- Відбиток входів рахується ДО генерації: зміна шаблону посеред неї не загубиться (наступний старт побачить різницю).
     DECLARE @fp varchar(64) = rpt.fn_ViewsFingerprint(@MonthRouting);
@@ -1088,20 +1109,52 @@ WHERE ti.TableDefId = ', CAST(@id AS nvarchar(10)), N';');
                                          EXCEPT SELECT ColumnDefId, Slot, Mo FROM @slot WHERE @useSlots = 1)
                             THEN 1 ELSE 0 END;
 
+        SET @ddlAttempt = 0;
         IF @ddl = 1 OR @mapDiff = 1
         BEGIN
-            BEGIN TRANSACTION;
-            IF @mapDiff = 1
+            -- M3: бюджет очікування виклику вичерпано - без спроби, одразу Blocked.
+            SET @ddlAttempt = CASE WHEN @ddlSpent >= @ddlBudget THEN -1 ELSE 1 END;
+            WHILE @ddlAttempt > 0
             BEGIN
-                DELETE FROM rpt.ViewSlot WHERE ViewName = @view;
-                INSERT INTO rpt.ViewSlot (ViewName, ColumnDefId, Slot, Mo) SELECT @view, ColumnDefId, Slot, Mo FROM @slot WHERE @useSlots = 1;
+                SET @ddlStart = SYSUTCDATETIME();
+                BEGIN TRY
+                    BEGIN TRANSACTION;
+                    IF @mapDiff = 1
+                    BEGIN
+                        DELETE FROM rpt.ViewSlot WHERE ViewName = @view;
+                        INSERT INTO rpt.ViewSlot (ViewName, ColumnDefId, Slot, Mo) SELECT @view, ColumnDefId, Slot, Mo FROM @slot WHERE @useSlots = 1;
+                    END
+                    IF @ddl = 1
+                        EXEC sys.sp_executesql @ddlWrap, N'@d nvarchar(max)', @d = @sql;
+                    COMMIT TRANSACTION;
+                    SET @ddlAttempt = 0;
+                END TRY
+                BEGIN CATCH
+                    -- PSS-10: лише ВЛАСНА транзакція вʼюхи і лише очікування замка (1222) чи дедлок (1205) - повтор; інше - як і досі.
+                    IF @entryTran = 0 AND XACT_STATE() <> 0
+                        ROLLBACK TRANSACTION;
+                    IF @entryTran > 0 OR ERROR_NUMBER() NOT IN (1222, 1205)
+                        THROW;
+                    SET @ddlSpent = @ddlSpent + DATEDIFF(MILLISECOND, @ddlStart, SYSUTCDATETIME());
+                    IF @ddlAttempt >= @ddlTries OR @ddlSpent >= @ddlBudget
+                        SET @ddlAttempt = -1;   -- спроби чи бюджет вичерпано
+                    ELSE
+                    BEGIN
+                        SET @ddlAttempt = @ddlAttempt + 1;
+                        WAITFOR DELAY '00:00:01';
+                        SET @ddlSpent = @ddlSpent + 1000;
+                    END
+                END CATCH
             END
-            IF @ddl = 1
-                EXEC sys.sp_executesql @sql;
-            COMMIT TRANSACTION;
         END
 
-        IF @existing IS NULL
+        IF @ddlAttempt = -1
+        BEGIN
+            SET @blocked = @blocked + 1;
+            SET @blockedWho = LEFT(COALESCE(@blockedWho + N', ', N'') + N'rpt.' + @view, 2000);
+            INSERT INTO @result VALUES (@id, @view, N'Blocked');
+        END
+        ELSE IF @existing IS NULL
             INSERT INTO @result VALUES (@id, @view, N'Created');
         ELSE IF @ddl = 1 OR @mapDiff = 1
             INSERT INTO @result VALUES (@id, @view, N'Altered');
@@ -1129,6 +1182,15 @@ next_table:
 
     IF @failure IS NOT NULL
         THROW 50422, @failure, 1;
+
+    -- PSS-10: вʼюхи, DDL яких не дочекався Sch-M за читачами, лишилися старими - повторюваний збій; відбиток не пишеться.
+    IF @blocked > 0
+    BEGIN
+        SET @message = LEFT(CONCAT(N'rpt.usp_GenerateTemplateViews: ', @blocked, N' view(s) kept the previous definition, readers held them longer than ',
+                                   @ddlWait, N' ms x ', @ddlTries, N' attempt(s) (call budget ', @ddlBudget, N' ms, waited ', @ddlSpent,
+                                   N' ms): ', @blockedWho, N'. Run it again.'), 2048);
+        THROW 50424, @message, 1;
+    END
 
     -- AN-155d: відбиток пишемо лише після успішної ПОВНОЇ генерації; збій запису не ламає генерацію (наступний старт перегенерує).
     IF @TemplateVersionId IS NULL
@@ -1195,6 +1257,10 @@ GO
 --     Sch-M на змінених вʼюхах шаблону тримається до кінця генерації шаблону (одна транзакція): SSRS чекає довше, а запит,
 --     що зʼєднує дві стабільні вʼюхи одного шаблону, може стати жертвою дедлоку.
 -- @Nested / @ResultJson / @ErrorNumber / @ErrorMessage - лише для вкладеного виклику з цієї ж процедури.
+-- ✎ PSS-10 (аудит 20.11): CREATE OR ALTER VIEW чекає Sch-M не довше @DdlLockTimeoutMs (типово 5000 мс): інакше він стояв би в
+-- черзі за довгим читачем (SSRS), а за ним - усі нові читачі вʼюхи. Не дочекався (1222) чи дедлок (1205) - відкат транзакції
+-- шаблону (набір лишається узгодженим, B126), 50424 (повторюваний збій; застосунок відкладає задачу), у прогоні «усі шаблони» -
+-- рядок Action = N'Blocked' з причиною і без відбитка. Повтор усередині процедури не робиться: він перегенерував би весь шаблон.
 CREATE OR ALTER PROCEDURE rpt.usp_GenerateStableViews
     @TemplateVersionId int = NULL,
     @MonthRouting bit = 0,
@@ -1203,12 +1269,19 @@ CREATE OR ALTER PROCEDURE rpt.usp_GenerateStableViews
     @Nested bit = 0,
     @ResultJson nvarchar(max) = NULL OUTPUT,
     @ErrorNumber int = NULL OUTPUT,
-    @ErrorMessage nvarchar(2048) = NULL OUTPUT
+    @ErrorMessage nvarchar(2048) = NULL OUTPUT,
+    @DdlLockTimeoutMs int = NULL
 WITH EXECUTE AS OWNER
 AS
 BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
+
+    -- PSS-10: межа очікування Sch-M на DDL однієї вʼюхи.
+    DECLARE @ddlWait int = COALESCE(@DdlLockTimeoutMs, 5000);
+    IF @ddlWait < 1
+        THROW 50017, N'rpt.usp_GenerateStableViews: @DdlLockTimeoutMs має бути додатним.', 1;
+    DECLARE @ddlWrap nvarchar(200) = N'SET LOCK_TIMEOUT ' + CAST(@ddlWait AS nvarchar(10)) + N'; EXEC sys.sp_executesql @d;';
 
     DECLARE @fp varchar(64) = rpt.fn_ViewsFingerprint(@MonthRouting);
     DECLARE @fpName sysname = N'ecr.stableviews.fingerprint';
@@ -1483,7 +1556,7 @@ BEGIN
     IF @TemplateVersionId IS NULL
     BEGIN
         DECLARE @dTid int, @dAnchor int, @dCode nvarchar(64), @dJson nvarchar(max), @dNo int, @dMsg nvarchar(2048);
-        DECLARE @dClash nvarchar(2048), @dFail nvarchar(2048), @dBusy int = 0, @dWait int = COALESCE(@LockTimeoutMs, 15000);
+        DECLARE @dClash nvarchar(2048), @dFail nvarchar(2048), @dBusy int = 0, @dBlocked int = 0, @dWait int = COALESCE(@LockTimeoutMs, 15000);
         DECLARE cur_tpl CURSOR LOCAL FAST_FORWARD FOR
             SELECT TemplateId, MIN(TemplateVersionId), MIN(TemplateCode) FROM @gt GROUP BY TemplateId ORDER BY TemplateId;
         OPEN cur_tpl;
@@ -1494,7 +1567,7 @@ BEGIN
             BEGIN TRY
                 EXEC rpt.usp_GenerateStableViews @TemplateVersionId = @dAnchor, @MonthRouting = @MonthRouting, @OnlyIfChanged = 0,
                      @LockTimeoutMs = @dWait, @Nested = 1, @ResultJson = @dJson OUTPUT, @ErrorNumber = @dNo OUTPUT,
-                     @ErrorMessage = @dMsg OUTPUT;
+                     @ErrorMessage = @dMsg OUTPUT, @DdlLockTimeoutMs = @ddlWait;
             END TRY
             BEGIN CATCH
                 IF XACT_STATE() = -1 OR @@TRANCOUNT > @entryTran
@@ -1505,9 +1578,11 @@ BEGIN
             INSERT INTO @result (ViewName, Action, Warning)
             SELECT j.ViewName, j.Action, j.Warning
               FROM OPENJSON(COALESCE(@dJson, N'[]')) WITH (ViewName sysname, Action nvarchar(16), Warning nvarchar(2000)) AS j;
-            IF @dNo = 50423
+            IF @dNo IN (50423, 50424)
             BEGIN
-                SET @dBusy += 1;
+                -- 50423 - замок шаблону в іншого записувача (той сам запише свіжий стан): Busy. PSS-10: 50424 - DDL не дочекався
+                -- Sch-M за читачами, шаблон лишився старим і сам НЕ допишеться: Blocked (застосунок повторить задачу).
+                IF @dNo = 50423 SET @dBusy += 1; ELSE SET @dBlocked += 1;
                 -- Ім'я - префікс стабільних вʼюх шаблону за тим самим правилом очищення (не-[A-Za-z0-9_] -> '_').
                 SET @raw = CONCAT(N'v_', @dCode, N'_');
                 SET @pos = PATINDEX(N'%[^A-Za-z0-9_]%', @raw COLLATE Latin1_General_BIN2);
@@ -1516,7 +1591,7 @@ BEGIN
                     SET @raw = STUFF(@raw, @pos, 1, N'_');
                     SET @pos = PATINDEX(N'%[^A-Za-z0-9_]%', @raw COLLATE Latin1_General_BIN2);
                 END
-                INSERT INTO @result VALUES (LEFT(@raw, 128), N'Busy', LEFT(@dMsg, 2000));
+                INSERT INTO @result VALUES (LEFT(@raw, 128), CASE WHEN @dNo = 50423 THEN N'Busy' ELSE N'Blocked' END, LEFT(@dMsg, 2000));
             END
             ELSE IF @dNo = 50409
                 SET @dClash = COALESCE(@dClash, @dMsg);
@@ -1543,7 +1618,7 @@ BEGIN
             THROW 50422, @dFail, 1;
 
         -- Відбиток - лише коли згенеровано ВСІ шаблони (пропущений через замок - повторить наступний старт).
-        IF @dBusy = 0
+        IF @dBusy = 0 AND @dBlocked = 0
         BEGIN TRY
             IF EXISTS (SELECT 1 FROM sys.extended_properties WHERE class = 3 AND major_id = SCHEMA_ID(N'rpt') AND minor_id = 0 AND name = @fpName)
                 EXEC sys.sp_updateextendedproperty @name = @fpName, @value = @fp, @level0type = N'SCHEMA', @level0name = N'rpt';
@@ -2207,7 +2282,7 @@ UNION ALL
                                          EXCEPT SELECT ColumnDefId, Slot, Mo, Scope FROM @slot WHERE @useSlots = 1)
                             THEN 1 ELSE 0 END;
         IF @ddl = 1 OR @mapDiff = 1
-        BEGIN
+        BEGIN TRY
             BEGIN TRANSACTION;
             IF @mapDiff = 1
             BEGIN
@@ -2215,9 +2290,29 @@ UNION ALL
                 INSERT INTO rpt.ViewSlot (ViewName, ColumnDefId, Slot, Mo, Scope) SELECT @view, ColumnDefId, Slot, Mo, Scope FROM @slot WHERE @useSlots = 1;
             END
             IF @ddl = 1
-                EXEC sys.sp_executesql @sql;
+                EXEC sys.sp_executesql @ddlWrap, N'@d nvarchar(max)', @d = @sql;
             COMMIT TRANSACTION;
-        END
+        END TRY
+        BEGIN CATCH
+            -- PSS-10: Sch-M на вʼюху не дано за @DdlLockTimeoutMs (1222) чи дедлок (1205) - відкат УСІЄЇ транзакції шаблону
+            -- (B126: набір вʼюх шаблону лишається узгодженим - увесь старий), 50424 викликачу: застосунок відкладає задачу й
+            -- повторює, прогін «усі шаблони» пише рядок Blocked і не зберігає відбиток. Інша помилка - як і досі.
+            IF @entryTran = 0 AND XACT_STATE() <> 0
+                ROLLBACK TRANSACTION;
+            IF @entryTran > 0 OR ERROR_NUMBER() NOT IN (1222, 1205)
+                THROW;
+            CLOSE cur_views;
+            DEALLOCATE cur_views;
+            SET @message = LEFT(CONCAT(N'rpt.usp_GenerateStableViews: the stable views of template ', @tid,
+                                       N' kept the previous definitions, readers held rpt.', @view, N' longer than ', @ddlWait,
+                                       N' ms (error ', ERROR_NUMBER(), N'); run it again.'), 2048);
+            IF @Nested = 1
+            BEGIN
+                SELECT @ErrorNumber = 50424, @ErrorMessage = @message, @ResultJson = N'[]';
+                RETURN;
+            END;
+            THROW 50424, @message, 1;
+        END CATCH
 
         IF @existing IS NULL
             INSERT INTO @result VALUES (@view, N'Created', @warning);

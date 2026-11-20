@@ -203,6 +203,30 @@ public sealed class ServiceAccountLeastPrivilegeTests(ServiceAccountLeastPrivile
     }
 
     /// <summary>
+    /// PSS-27 (аудит 20.11): служба кличе лише публічну <c>arc.usp_ArchiveAudit</c> (підлога 120 міс., «сьогодні» не з
+    /// майбутнього); внутрішня <c>arc.usp_ArchiveAuditBefore</c> з довільною межею їй НЕ видана — інакше обмеження
+    /// публічної обходилися б одним викликом. Мутація: додати процедуру в <see cref="ServiceAccountGrants.Procedures"/> —
+    /// виклик проходить, тест червоний.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Audit", "PSS-27")]
+    public async Task Служба_не_має_внутрішньої_архівації_аудиту_а_публічна_відхиляє_дату_з_майбутнього()
+    {
+        await using var db = database.LowPrivContext();
+
+        Assert.Equal(0, await ScalarAsync<int>(db, "SELECT ISNULL(HAS_PERMS_BY_NAME(N'arc.usp_ArchiveAuditBefore', 'OBJECT', 'EXECUTE'), 0) AS Value"));
+        var denied = await Assert.ThrowsAsync<SqlException>(() => db.Database.ExecuteSqlRawAsync(
+            "EXEC arc.usp_ArchiveAuditBefore @Cutoff = '2099-01-01', @OlderThanMonths = 1;"));
+        Assert.Equal(229, denied.Number);
+
+        var future = await Assert.ThrowsAsync<SqlException>(() => db.Database.ExecuteSqlRawAsync(
+            "EXEC arc.usp_ArchiveAudit @OlderThanMonths = 1, @Today = '2099-01-01';"));
+        Assert.Equal(50018, future.Number);
+    }
+
+    /// <summary>
     /// ✎ D-560 (H2): нічне прибирання неактуальних прогонів під службою (db_datareader + db_datawriter): заповненість
     /// журналу читається без VIEW SERVER STATE (не <c>logUnknown</c>), прогін і його рядки видаляються, а
     /// <c>CHECKPOINT</c>/перебудова, на які в служби немає права, пропускаються з ознакою, а не падають і не мовчать.
