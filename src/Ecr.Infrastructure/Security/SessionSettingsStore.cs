@@ -33,14 +33,10 @@ public sealed class SessionSettingsStore(EcrDbContext db) : ISessionSettingsStor
             byUserId, at, ct);
 
     /// <inheritdoc />
-    public async Task<int?> ReadTechnicalLogRetentionDaysAsync(CancellationToken ct)
-    {
-        var raw = await db.Database
+    public Task<string?> ReadTechnicalLogRetentionDaysAsync(CancellationToken ct)
+        => db.Database
             .SqlQuery<string?>($"SELECT Value AS [Value] FROM sys_ecr.SystemSetting WHERE [Key] = {SessionSettings.TechnicalLogRetentionKey}")
-            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
-
-        return int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var days) ? days : null;
-    }
+            .FirstOrDefaultAsync(ct);
 
     /// <inheritdoc />
     public Task WriteTechnicalLogRetentionDaysAsync(int days, int byUserId, DateTime at, CancellationToken ct)
@@ -49,14 +45,10 @@ public sealed class SessionSettingsStore(EcrDbContext db) : ISessionSettingsStor
             byUserId, at, ct);
 
     /// <inheritdoc />
-    public async Task<int?> ReadAuditRetentionMonthsAsync(CancellationToken ct)
-    {
-        var raw = await db.Database
+    public Task<string?> ReadAuditRetentionMonthsAsync(CancellationToken ct)
+        => db.Database
             .SqlQuery<string?>($"SELECT Value AS [Value] FROM sys_ecr.SystemSetting WHERE [Key] = {SessionSettings.AuditRetentionKey}")
-            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
-
-        return int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var months) ? months : null;
-    }
+            .FirstOrDefaultAsync(ct);
 
     /// <inheritdoc />
     public Task WriteAuditRetentionMonthsAsync(int months, int byUserId, DateTime at, CancellationToken ct)

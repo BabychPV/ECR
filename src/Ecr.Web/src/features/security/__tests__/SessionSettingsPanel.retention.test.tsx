@@ -50,7 +50,10 @@ function serve(puts: string[]): void {
         );
       }
       void input;
-      return new Response(JSON.stringify(view), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      return new Response(JSON.stringify(view), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
     }),
   );
 }
@@ -79,6 +82,14 @@ describe('SessionSettingsPanel — строк зберігання спроб в
     const input = (await screen.findByTestId('technical-log-retention')) as HTMLInputElement;
     expect(input.value).toContain('400');
     expect(submit().disabled).toBe(true);
+  });
+
+  it('строки зберігання — окремий розділ із заголовком і попередженням про незворотне видалення', async () => {
+    serve([]);
+    show(true);
+
+    expect((await screen.findByTestId('retention-heading')).textContent).toContain('security.session.retentionSection');
+    expect(screen.getByTestId('retention-warning').textContent).toContain('security.session.retentionWarning');
   });
 
   it('поза межами сервера (29 < 30) — збереження вимкнене', async () => {

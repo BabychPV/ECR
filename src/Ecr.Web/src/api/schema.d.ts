@@ -43666,8 +43666,7 @@ export interface components {
             idleTimeoutMinutes: number;
             /**
              * Format: int32
-             * @description Строк зберігання `sec.LoginAttempt` у днях (30–36500); `null` — не змінювати (старі клієнти шлють лише
-             *     IdleTimeoutMinutes).
+             * @description Строк зберігання технічних журналів, днів (30–36500); `null` — не змінювати.
              */
             technicalLogRetentionDays?: null | number;
         };
@@ -43730,7 +43729,7 @@ export interface components {
             minTechnicalLogRetentionDays: number;
             /**
              * Format: int32
-             * @description Скільки днів зберігається оперативний журнал спроб входу `sec.LoginAttempt` (PSS-24).
+             * @description Скільки днів зберігаються технічні журнали, зокрема `sec.LoginAttempt` (`Retention.TechnicalLogDays`).
              */
             technicalLogRetentionDays: number;
         };

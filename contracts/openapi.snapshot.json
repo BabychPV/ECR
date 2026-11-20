@@ -27666,7 +27666,7 @@
             "type": "integer"
           },
           "technicalLogRetentionDays": {
-            "description": "Строк зберігання `sec.LoginAttempt` у днях (30–36500); `null` — не змінювати (старі клієнти шлють лише\nIdleTimeoutMinutes).",
+            "description": "Строк зберігання технічних журналів, днів (30–36500); `null` — не змінювати.",
             "format": "int32",
             "type": [
               "null",
@@ -27738,7 +27738,7 @@
             "type": "integer"
           },
           "technicalLogRetentionDays": {
-            "description": "Скільки днів зберігається оперативний журнал спроб входу `sec.LoginAttempt` (PSS-24).",
+            "description": "Скільки днів зберігаються технічні журнали, зокрема `sec.LoginAttempt` (`Retention.TechnicalLogDays`).",
             "format": "int32",
             "type": "integer"
           }

@@ -287,7 +287,13 @@ public static class LoginRateLimiting
         // PSS-24: журнал входів бере ту саму адресу клієнта, що й межа (див. `AuthController.RemoteIp`).
         services.AddSingleton(clientAddress);
 
-        // PSS-24: успішні входи, невдалі спроби й блокування — у незмінний `aud.SecurityEvent`.
+        // PSS-24: успішні входи, невдалі спроби й блокування — у незмінний `aud.SecurityEvent`; ім'я без облікового запису
+        // маскується (ключований хеш, ключ — під Data Protection).
+        //
+        // ⚠ Реєстрація тут, а не в `Ecr.Infrastructure/DependencyInjection.cs` / `Program.cs`: ці файли — спільні гарячі
+        // (лан L5 та інші), а це єдине місце лану PSS-24, що вже виконується один раз на старті. Інтегратор може
+        // перенести три рядки (журнал, маскувальник, фонове прибирання) у `Program.cs` без зміни поведінки.
+        services.AddSingleton<ILoginNameMasker, DataProtectedLoginNameMasker>();
         services.AddSingleton<ILoginAuditJournal, LoginAuditJournal>();
 
         // PSS-24: прибирання оперативного `sec.LoginAttempt` за налаштовуваним строком (400 днів за замовчуванням).

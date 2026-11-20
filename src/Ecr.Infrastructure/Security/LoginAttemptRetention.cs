@@ -46,55 +46,51 @@ public static class LoginAttemptRetention
     /// <summary>400 днів — слово людини 20.11.</summary>
     public const int DefaultDays = Ecr.Application.Security.SessionSettings.DefaultTechnicalLogRetentionDays;
 
-    /// <summary>Підлога: жодні налаштування не стирають спроби молодші за 30 днів.</summary>
+    /// <summary>Підлога: менше 30 днів — опечатка, а не політика (рядок із меншим значенням дає типове 400 з попередженням).</summary>
     public const int MinDays = Ecr.Application.Security.SessionSettings.MinTechnicalLogRetentionDays;
 
-    /// <summary>Стеля: 10 років.</summary>
+    /// <summary>Стеля: 100 років (36 500 днів).</summary>
     public const int MaxDays = Ecr.Application.Security.SessionSettings.MaxTechnicalLogRetentionDays;
 
     /// <summary>Інтервал між проходами за замовчуванням, хв.</summary>
     public const int DefaultIntervalMinutes = 60;
 
-    /// <summary>Чинний строк у днях: збережене значення, інакше 400; завжди в межах.</summary>
+    /// <summary>Чинний строк у днях: правило L6 — немає рядка 400; не число чи менше 30 — 400 з попередженням; більше 36500 — 36500 з попередженням.</summary>
     /// <param name="stored">Значення з <c>SystemSetting</c>; <c>null</c> — рядка немає.</param>
-    /// <returns>Дні в межах <see cref="MinDays"/>–<see cref="MaxDays"/>.</returns>
-    public static int Resolve(string? stored)
-        => Ecr.Application.Security.SessionSettings.ResolveTechnicalLogRetentionDays(stored);
+    /// <param name="logger">Куди йде попередження; <c>null</c> — нікуди.</param>
+    /// <returns>Дні.</returns>
+    public static int Resolve(string? stored, ILogger? logger = null)
+        => Ecr.Application.Security.SessionSettings.ResolveTechnicalLogRetentionDays(stored, logger);
 }
 
 /// <summary>Один прохід прибирання <c>sec.LoginAttempt</c> за чинним строком.</summary>
 /// <remarks>
-/// ⚠ Пакетами (<see cref="Batch"/> рядків), у межах <see cref="TimeBudget"/>: сканування без індексу за
-/// <c>AttemptedAt</c> іде від найстаріших (ключ <c>Id</c> росте з часом), тож пакет знаходить кандидатів одразу, а
-/// довгий хвіст дочищається наступним проходом. Безпечний для кількох вузлів одночасно: <c>DELETE</c> умовний.
+/// ⚠ Пакетами (<see cref="Batch"/> рядків), у межах <see cref="TimeBudget"/>. Індексу за <c>AttemptedAt</c> немає, тож
+/// проти повного сканування — межа за <c>Id</c> (як у L6, PSS-13): один раз на прохід береться <c>Id</c> першого рядка, що
+/// молодший за строк, і пакети видаляють лише нижче нього (рядки пишуться в порядку часу). Старий рядок над межею
+/// (зсув годинників вузлів) дочищається наступним проходом. Безпечний для кількох вузлів: <c>DELETE</c> умовний.
 /// </remarks>
-public sealed class LoginAttemptPurger(EcrDbContext db, IClock clock)
+public sealed class LoginAttemptPurger(EcrDbContext db, IClock clock, ILogger? logger = null)
 {
-    /// <summary>Рядків за один <c>DELETE</c>.</summary>
-    public const int Batch = 5000;
+    /// <summary>Рядків за один <c>DELETE</c>: 4 000 — нижче порогу ескалації блокувань (≈5 000), як у L6.</summary>
+    public const int Batch = 4000;
 
     /// <summary>Скільки часу один прохід має право працювати.</summary>
     public static readonly TimeSpan TimeBudget = TimeSpan.FromSeconds(60);
 
     /// <summary>Чинний строк у днях (читає базу при КОЖНОМУ виклику).</summary>
     /// <param name="ct">Скасування.</param>
+    /// <remarks>
+    /// ⛔ Збій читання НЕ підмінюється типовим значенням: людина могла поставити 1000, і мовчазні 400 стерли б дані між
+    /// 400 і 1000 днями. Виняток іде нагору — прохід пропускається (службa пише Warning), наступний повторить.
+    /// </remarks>
     public async Task<int> ReadRetentionDaysAsync(CancellationToken ct)
     {
-        string? stored;
-        try
-        {
-            stored = await db.Database
-                .SqlQuery<string?>($"SELECT Value AS [Value] FROM sys_ecr.SystemSetting WHERE [Key] = {LoginAttemptRetention.SettingKey}")
-                .FirstOrDefaultAsync(ct).ConfigureAwait(false);
-        }
-        catch (Exception failure) when (failure is not OperationCanceledException)
-        {
-            // ⛔ Збій читання налаштування не має ні вимкнути прибирання, ні скоротити строк: діє значення за
-            // замовчуванням (400), тобто СТАРІШЕ, ніж могла поставити людина, а не молодше.
-            stored = null;
-        }
+        var stored = await db.Database
+            .SqlQuery<string?>($"SELECT Value AS [Value] FROM sys_ecr.SystemSetting WHERE [Key] = {LoginAttemptRetention.SettingKey}")
+            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
 
-        return LoginAttemptRetention.Resolve(stored);
+        return LoginAttemptRetention.Resolve(stored, logger);
     }
 
     /// <summary>Видаляє спроби старші за чинний строк.</summary>
@@ -108,10 +104,17 @@ public sealed class LoginAttemptPurger(EcrDbContext db, IClock clock)
         var total = 0;
         int batch;
 
+        // Межа за Id: перший рядок, молодший за строк (немає такого — усі рядки старі, межі немає).
+        var newer = await db.Database
+            .SqlQuery<long?>($"SELECT (SELECT TOP (1) Id FROM sec.LoginAttempt WHERE AttemptedAt >= {cutoff} ORDER BY Id) AS [Value]")
+            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+        var upper = newer ?? long.MaxValue;
+
         do
         {
             batch = await db.Database.ExecuteSqlInterpolatedAsync(
-                $"DELETE TOP ({Batch}) FROM sec.LoginAttempt WHERE AttemptedAt < {cutoff}", ct).ConfigureAwait(false);
+                $"DELETE TOP ({Batch}) FROM sec.LoginAttempt WHERE Id < {upper} AND AttemptedAt < {cutoff}", ct)
+                .ConfigureAwait(false);
             total += batch;
         }
         while (batch >= Batch && System.Diagnostics.Stopwatch.GetElapsedTime(started) < TimeBudget);
@@ -173,7 +176,7 @@ public sealed partial class LoginAttemptRetentionService(IServiceProvider servic
             }
 
             await using var scope = services.CreateAsyncScope();
-            var purged = await ActivatorUtilities.CreateInstance<LoginAttemptPurger>(scope.ServiceProvider)
+            var purged = await ActivatorUtilities.CreateInstance<LoginAttemptPurger>(scope.ServiceProvider, logger)
                 .PurgeAsync(ct).ConfigureAwait(false);
 
             if (purged > 0)

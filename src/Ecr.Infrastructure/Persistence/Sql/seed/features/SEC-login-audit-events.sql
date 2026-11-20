@@ -18,20 +18,28 @@ SELECT v.[Key], v.Lang, v.Val
     (N'security.session.retentionLabel', N'kz', N'Техникалық журналдарды сақтау мерзімі'),
     (N'security.session.retentionHint', N'ru', N'От {min} до {max} дней, по умолчанию {default}.'),
     (N'security.session.retentionHint', N'kz', N'{min} мен {max} күн аралығында, әдепкі {default}.'),
-    (N'security.session.retentionExplain', N'ru', N'Технические журналы (попытки входа, очередь и доставки уведомлений, прогоны обслуживания) очищаются автоматически по этому сроку; новое значение действует со следующей очистки (не позже чем через час), без перезапуска.'),
-    (N'security.session.retentionExplain', N'kz', N'Техникалық журналдар (кіру әрекеттері, хабарландыру кезегі мен жеткізулер, қызмет көрсету іске қосулары) осы мерзім бойынша автоматты түрде тазартылады; жаңа мән келесі тазалаудан бастап (бір сағаттан кешіктірмей) қайта іске қоспай-ақ күшіне енеді.'),
+    (N'security.session.retentionExplain', N'ru', N'Технические журналы старше этого срока могут автоматически удаляться фоновой очисткой; новое значение применяется при следующем проходе очистки, без перезапуска.'),
+    (N'security.session.retentionExplain', N'kz', N'Осы мерзімнен ескі техникалық журналдарды фондық тазалау автоматты түрде жоюы мүмкін; жаңа мән тазалаудың келесі өтуінде қайта іске қоспай-ақ қолданылады.'),
     (N'security.session.daysSuffix', N'ru', N'дн.'),
     (N'security.session.daysSuffix', N'kz', N'күн'),
     (N'security.session.auditLabel', N'ru', N'Минимальная глубина аудита'),
     (N'security.session.auditLabel', N'kz', N'Аудиттің ең аз тереңдігі'),
     (N'security.session.auditHint', N'ru', N'От {min} до {max} месяцев, по умолчанию {default}.'),
     (N'security.session.auditHint', N'kz', N'{min} мен {max} ай аралығында, әдепкі {default}.'),
-    (N'security.session.auditExplain', N'ru', N'Неизменяемый журнал аудита (в том числе успешные входы, неудачные попытки и блокировки) не архивируется и не удаляется раньше этого срока. Меньше 120 месяцев задать нельзя.'),
-    (N'security.session.auditExplain', N'kz', N'Өзгермейтін аудит журналы (сәтті кірулер, сәтсіз әрекеттер мен бұғаттауларды қоса) осы мерзімнен бұрын мұрағатталмайды және жойылмайды. 120 айдан аз мән беруге болмайды.'),
+    (N'security.session.auditExplain', N'ru', N'Записи аудита (в том числе успешные входы, неудачные попытки и блокировки) хранятся не меньше этого срока и не удаляются раньше. Меньше 120 месяцев задать нельзя.'),
+    (N'security.session.auditExplain', N'kz', N'Аудит жазбалары (сәтті кірулер, сәтсіз әрекеттер мен бұғаттауларды қоса) кемінде осы мерзім сақталады және одан бұрын жойылмайды. 120 айдан аз мән беруге болмайды.'),
     (N'security.session.monthsSuffix', N'ru', N'мес.'),
     (N'security.session.monthsSuffix', N'kz', N'ай'),
-    (N'security.session.savedAll', N'ru', N'Настройки сеанса сохранены.'),
-    (N'security.session.savedAll', N'kz', N'Сеанс баптаулары сақталды.')
+    (N'security.session.retentionSection', N'ru', N'Сроки хранения данных'),
+    (N'security.session.retentionSection', N'kz', N'Деректерді сақтау мерзімдері'),
+    (N'security.session.retentionWarning', N'ru', N'Сокращение срока хранения необратимо удаляет более старые записи при следующей очистке.'),
+    (N'security.session.retentionWarning', N'kz', N'Сақтау мерзімін қысқарту келесі тазалау кезінде ескі жазбаларды қайтарымсыз жояды.'),
+    (N'security.session.retentionSaved', N'ru', N'Сроки хранения данных сохранены. Новые значения применятся при следующей очистке.'),
+    (N'security.session.retentionSaved', N'kz', N'Деректерді сақтау мерзімдері сақталды. Жаңа мәндер келесі тазалау кезінде қолданылады.'),
+    (N'audit.eventLabel.LoginFailedSuppressed', N'ru', N'Пропущено неудачных попыток входа (сводка)'),
+    (N'audit.eventLabel.LoginFailedSuppressed', N'kz', N'Өткізіп жіберілген сәтсіз кіру әрекеттері (жиынтық)'),
+    (N'audit.eventLabel.LoginAuditOverflow', N'ru', N'Журнал входов переполнен: часть попыток не записана'),
+    (N'audit.eventLabel.LoginAuditOverflow', N'kz', N'Кіру журналы толып кетті: кейбір әрекеттер жазылмады')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -48,13 +56,17 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'err.ECR-REQ-0422.auditRetentionOutOfRange', N'en', N'Audit depth: from {min} to {max} months.', 1),
     (N'security.session.retentionLabel', N'en', N'Technical logs retention', 1),
     (N'security.session.retentionHint', N'en', N'From {min} to {max} days, default {default}.', 1),
-    (N'security.session.retentionExplain', N'en', N'Technical logs (sign-in attempts, the notification queue and deliveries, maintenance runs) are cleaned up automatically after this period; a new value applies from the next cleanup (within an hour), without a restart.', 1),
+    (N'security.session.retentionExplain', N'en', N'Technical logs older than this period may be removed automatically by background cleanup; a new value applies at the next cleanup pass, without a restart.', 1),
     (N'security.session.daysSuffix', N'en', N'days', 1),
     (N'security.session.auditLabel', N'en', N'Minimum audit depth', 1),
     (N'security.session.auditHint', N'en', N'From {min} to {max} months, default {default}.', 1),
-    (N'security.session.auditExplain', N'en', N'The immutable audit journal (including successful sign-ins, failed attempts and lockouts) is not archived or deleted before this period. Less than 120 months cannot be set.', 1),
+    (N'security.session.auditExplain', N'en', N'Audit records (including successful sign-ins, failed attempts and lockouts) are kept for at least this period and are not deleted earlier. Less than 120 months cannot be set.', 1),
     (N'security.session.monthsSuffix', N'en', N'months', 1),
-    (N'security.session.savedAll', N'en', N'Session settings saved.', 1)
+    (N'security.session.retentionSection', N'en', N'Data retention', 1),
+    (N'security.session.retentionWarning', N'en', N'Shortening a retention period permanently deletes older records at the next cleanup.', 1),
+    (N'security.session.retentionSaved', N'en', N'Data retention saved. The new values apply at the next cleanup.', 1),
+    (N'audit.eventLabel.LoginFailedSuppressed', N'en', N'Failed sign-in attempts not recorded (summary)', 1),
+    (N'audit.eventLabel.LoginAuditOverflow', N'en', N'Sign-in journal overloaded: some attempts not recorded', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO

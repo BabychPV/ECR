@@ -31,10 +31,13 @@ public sealed class LoginAttemptRetentionTests(SqlServerFixture sql)
     [InlineData("не-число", 400)]
     [InlineData("200", 200)]
     [InlineData("30", 30)]
-    [InlineData("1", 30)] // підлога: свіжі спроби не стираються
-    [InlineData("0", 30)]
-    [InlineData("-5", 30)]
-    [InlineData("99999", 36500)] // стеля
+    // ⛔ M1 (правило L6): нижче мінімуму — ТИПОВЕ (400), а не мінімум: «0»/«1»/«-5» — опечатка, а не політика.
+    [InlineData("1", 400)]
+    [InlineData("29", 400)]
+    [InlineData("0", 400)]
+    [InlineData("-5", 400)]
+    [InlineData("99999", 36500)] // вище максимуму — максимум
+    [InlineData("36501", 36500)]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait("Requirement", "PSS-24")]
     public void Строк_береться_з_налаштування_інакше_400_і_завжди_в_межах(string? stored, int expected)
@@ -44,7 +47,7 @@ public sealed class LoginAttemptRetentionTests(SqlServerFixture sql)
     [InlineData(null, 120)]
     [InlineData("не-число", 120)]
     [InlineData("240", 240)]
-    [InlineData("119", 120)] // підлога 120 місяців (рішення людини 20.11 п. 7)
+    [InlineData("119", 120)] // нижче мінімуму — типове (воно ж підлога 120 місяців, рішення людини 20.11 п. 7)
     [InlineData("0", 120)]
     [InlineData("-1", 120)]
     [InlineData("1201", 1200)]
@@ -60,6 +63,9 @@ public sealed class LoginAttemptRetentionTests(SqlServerFixture sql)
     public async Task За_замовчуванням_прибираються_спроби_старші_за_400_днів_а_свіжі_лишаються()
     {
         await ClearSettingAsync();
+        // ⚠ Межа за Id у прибиранні спирається на порядок рядків «Id росте з часом»; спільна база має чужі свіжі рядки з
+        // нижчими Id, тож тест спершу очищає таблицю (DELETE дозволений) і сіє від старого до свіжого.
+        await ClearAttemptsAsync();
         var tag = Tag();
         await SeedAsync(tag, ageDays: 500, "old");
         await SeedAsync(tag, ageDays: 399, "kept399");
@@ -77,6 +83,9 @@ public sealed class LoginAttemptRetentionTests(SqlServerFixture sql)
     [Trait("Requirement", "PSS-24")]
     public async Task Людина_змінила_строк_у_налаштуванні_і_наступний_прохід_діє_без_перевидання()
     {
+        // ⚠ Межа за Id у прибиранні спирається на порядок рядків «Id росте з часом»; спільна база має чужі свіжі рядки з
+        // нижчими Id, тож тест спершу очищає таблицю (DELETE дозволений) і сіє від старого до свіжого.
+        await ClearAttemptsAsync();
         var tag = Tag();
         await SeedAsync(tag, ageDays: 500, "old");
         await SeedAsync(tag, ageDays: 100, "mid");
@@ -103,11 +112,14 @@ public sealed class LoginAttemptRetentionTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "PSS-24")]
-    public async Task Рядок_налаштування_з_нулем_не_стирає_свіжих_спроб_підлога_30_днів()
+    public async Task Рядок_налаштування_з_нулем_діє_як_типові_400_днів_а_не_стирає_журнал_за_добу()
     {
+        // ⚠ Межа за Id у прибиранні спирається на порядок рядків «Id росте з часом»; спільна база має чужі свіжі рядки з
+        // нижчими Id, тож тест спершу очищає таблицю (DELETE дозволений) і сіє від старого до свіжого.
+        await ClearAttemptsAsync();
         var tag = Tag();
-        await SeedAsync(tag, ageDays: 31, "older");
-        await SeedAsync(tag, ageDays: 29, "recent");
+        await SeedAsync(tag, ageDays: 401, "older");
+        await SeedAsync(tag, ageDays: 31, "recent");
 
         try
         {
@@ -125,8 +137,46 @@ public sealed class LoginAttemptRetentionTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "PSS-24")]
+    public async Task Прибирання_іде_пакетами_по_4000_і_видаляє_старі_рядки_нижче_межі_за_Id()
+    {
+        Assert.Equal(4000, LoginAttemptPurger.Batch);
+
+        // Більше за один пакет: старі рядки вставляються першими (нижчі Id), свіжі — після. Межа за Id відсікає свіжі.
+        // ⚠ Межа за Id у прибиранні спирається на порядок рядків «Id росте з часом»; спільна база має чужі свіжі рядки з
+        // нижчими Id, тож тест спершу очищає таблицю (DELETE дозволений) і сіє від старого до свіжого.
+        await ClearAttemptsAsync();
+        var tag = Tag();
+        await using (var connection = new SqlConnection(sql.ConnectionString))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText =
+                "INSERT INTO sec.LoginAttempt (UserName, Provider, IsSuccess, AttemptedAt, IpAddress, FailReason) "
+                + "SELECT TOP (4500) @tag + N'-old', 1, 0, @old, N'203.0.113.9', N'BadPassword' FROM sys.all_objects a CROSS JOIN sys.all_objects b; "
+                + "INSERT INTO sec.LoginAttempt (UserName, Provider, IsSuccess, AttemptedAt, IpAddress, FailReason) "
+                + "VALUES (@tag + N'-fresh', 1, 0, @fresh, N'203.0.113.9', N'BadPassword');";
+            command.Parameters.AddWithValue("@tag", tag);
+            command.Parameters.AddWithValue("@old", Now.AddDays(-500));
+            command.Parameters.AddWithValue("@fresh", Now.AddDays(-1));
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await ClearSettingAsync();
+        var purged = await PurgeAsync();
+
+        Assert.True(purged >= 4500, $"видалено {purged}");
+        Assert.Equal(["fresh"], await SurvivorsAsync(tag));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "PSS-24")]
     public async Task UPDATE_спроби_входу_відхиляється_тригером_а_рядок_лишається_цілим_DELETE_за_строком_дозволений()
     {
+        // ⚠ Межа за Id у прибиранні спирається на порядок рядків «Id росте з часом»; спільна база має чужі свіжі рядки з
+        // нижчими Id, тож тест спершу очищає таблицю (DELETE дозволений) і сіє від старого до свіжого.
+        await ClearAttemptsAsync();
         var tag = Tag();
         await SeedAsync(tag, ageDays: 1, "row");
 
@@ -192,6 +242,13 @@ public sealed class LoginAttemptRetentionTests(SqlServerFixture sql)
         command.Parameters.AddWithValue("@k", LoginAttemptRetention.SettingKey);
         command.Parameters.AddWithValue("@v", value);
         await command.ExecuteNonQueryAsync();
+    }
+
+    private async Task ClearAttemptsAsync()
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+        await ExecAsync(connection, "DELETE FROM sec.LoginAttempt");
     }
 
     private async Task ClearSettingAsync()

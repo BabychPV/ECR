@@ -214,8 +214,10 @@
 
 .PARAMETER AllowedHosts
     PSS-28: імена вузла, які приймає служба в заголовку `Host` (`AllowedHosts` ASP.NET Core), — ЛИБО рівно `*`
-    (будь-яке ім'я), ЛИБО перелік через `;` (`ecr.example.kz;ecr`): імена без схеми й шляху, за потреби з портом
-    (`ecr.example.kz:8443`), допускається провідний `*.` (`*.example.kz`). Пишеться змінною
+    (будь-яке ім'я), ЛИБО перелік через `;` (`ecr.example.kz;ecr`): імена вузла БЕЗ схеми, шляху й ПОРТУ, допускається провідний `*.`
+    (`*.example.kz`) і IPv6 у дужках (`[::1]`). ⛔ Порт заборонено: HostFiltering ASP.NET Core порівнює записи з
+    іменем без порту, тож `ecr.example.kz:8443` не збігся б з жодним запитом, і всі, крім localhost, отримали б 400.
+    Пишеться змінною
     `ECR_AllowedHosts` в Environment служби EcrApi. Закриває DNS rebinding на анонімні ендпоінти: чуже ім'я в `Host`
     дає `400`. ⛔ Хибне ім'я замикає користувачів (вхід за іншим іменем перестане працювати) — вказуйте всі імена, за
     якими вузол відкривають, а ім'я з балансувальника — теж. Не `*` — скрипт ДОДАЄ `localhost`, якщо його немає:
@@ -959,7 +961,7 @@ function Resolve-AllowedHosts {
     if ($trimmed -eq '*') { return [pscustomobject]@{ Value = '*'; Problem = $null } }
 
     $label = '[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?'
-    $pattern = "^(?:(?:\*\.)?$label(?:\.$label)*|\[[0-9A-Fa-f:.]+\])(?::[0-9]{1,5})?$"
+    $pattern = "^(?:(?:\*\.)?$label(?:\.$label)*|\[[0-9A-Fa-f:.]+\])$"
     $names = [System.Collections.Generic.List[string]]::new()
     foreach ($raw in ($trimmed -split ';')) {
         $name = $raw.Trim()
@@ -968,14 +970,20 @@ function Resolve-AllowedHosts {
             return [pscustomobject]@{ Value = $null; Problem = "-AllowedHosts: `*` не поєднується з іменами — або рівно `*`, або перелік імен." }
         }
         if ($name -notmatch $pattern) {
-            return [pscustomobject]@{ Value = $null; Problem = "-AllowedHosts: «$name» не ім'я вузла (без схеми й шляху; необов'язковий порт; провідний `*.` допускається)." }
+            $hasPort = if ($name.StartsWith('[')) { $name.Contains(']:') } else { $name.Contains(':') -and -not $name.Contains('://') }
+            $why = if ($hasPort) {
+                "«$name» містить порт: HostFiltering ASP.NET Core порівнює імена БЕЗ порту, тому такий запис не збігається з жодним запитом і замкне всіх користувачів. Вкажіть ім'я без порту (наприклад ecr.example.kz)."
+            } else {
+                "«$name» не ім'я вузла (без схеми, шляху й порту; провідний `*.` допускається)."
+            }
+            return [pscustomobject]@{ Value = $null; Problem = "-AllowedHosts: $why" }
         }
         if (-not ($names | Where-Object { $_ -ieq $name })) { $names.Add($name) }
     }
     if (-not $names.Count) {
         return [pscustomobject]@{ Value = $null; Problem = "-AllowedHosts не містить жодного імені: вкажіть `*` або імена вузла через `;`." }
     }
-    if (-not ($names | Where-Object { $_ -ieq 'localhost' -or $_ -ilike 'localhost:*' })) { $names.Add('localhost') }
+    if (-not ($names | Where-Object { $_ -ieq 'localhost' })) { $names.Add('localhost') }
     return [pscustomobject]@{ Value = ($names -join ';'); Problem = $null }
 }
 

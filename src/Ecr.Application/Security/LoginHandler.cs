@@ -78,6 +78,12 @@ public sealed partial class LoginHandler(
     /// </remarks>
     private static readonly ConcurrentDictionary<Type, Lazy<string>> DecoyHashes = new();
 
+    /// <summary>
+    /// Адреса сокета поточного входу для журналу безпеки (PSS-24). ⚠ Поле, а не параметр кожної відмови: обробник —
+    /// Scoped, тобто на один запит, і пише його лише на початку входу.
+    /// </summary>
+    private string? _socketIp;
+
     /// <summary>Довжина колонок імені входу (<c>sec.User.UserName</c>, <c>sec.LoginAttempt.UserName</c>).</summary>
     public const int UserNameMaxLength = 200;
 
@@ -86,12 +92,14 @@ public sealed partial class LoginHandler(
     /// <param name="password">Пароль.</param>
     /// <param name="ipAddress">Адреса клієнта для журналу спроб.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="socketIp">Адреса сокета для журналу безпеки (лише коли відрізняється від <paramref name="ipAddress"/>).</param>
     /// <exception cref="AccessDeniedException">Невірні дані — <c>ECR-AUTH-0401</c>.</exception>
     /// <exception cref="BusinessRuleException">Запис заблоковано — <c>ECR-AUTH-0423</c>.</exception>
     public async Task<LoginResult> HandleAsync(
-        string userName, string password, string? ipAddress, CancellationToken ct)
+        string userName, string password, string? ipAddress, CancellationToken ct, string? socketIp = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(userName);
+        _socketIp = socketIp;
 
         var now = clock.UtcNow;
 
@@ -117,9 +125,15 @@ public sealed partial class LoginHandler(
             // ім'я приходила б помітно швидше.
             Decoy(password);
 
-            // ⚠ Id наявного запису в журнал входів НЕ йде, коли відмова — «немає такого»: службовий, вимкнений чи не
-            // локальний запис для форми входу так само «невідомий», і журнал безпеки не має підтверджувати, що він є.
-            await FailAsync(userName, "UnknownUser", ipAddress, now, ct).ConfigureAwait(false);
+            // ⚠ PSS-24 (рев'ю): відповідь і час — як на невідоме ім'я, але журнал безпеки (його читають лише власники
+            // `Security.ViewAudit`) пише СПРАВЖНЮ причину й користувача: спроба ввійти під вимкненим, службовим чи не
+            // локальним записом — саме те, що розслідувачеві треба бачити. `sec.LoginAttempt` лишає `UnknownUser`.
+            var realReason = user is null ? "UnknownUser"
+                : user.IsServiceAccount ? "ServiceAccount"
+                : user.Provider != AuthProvider.Local ? "NotLocal"
+                : "Disabled";
+            await FailAsync(userName, "UnknownUser", ipAddress, now, ct, userId: user?.Id, journalReason: realReason)
+                .ConfigureAwait(false);
             throw InvalidCredentials();
         }
 
@@ -185,7 +199,11 @@ public sealed partial class LoginHandler(
             // «іншого» запиту розрізняв би правильний пароль у пачці підбору (оракул). Законний власник на
             // наступній спробі однаково отримає 423 — з гілки IsLockedOut вище. Саму гонку «пачка перевіряє
             // більше за Max паролів» закриває резервування спроби до Verify (AN-90) вище.
-            await FailAsync(userName, "LockedOut", ipAddress, now, ct, userId: user.Id).ConfigureAwait(false);
+            // ⚠ PSS-24 (рев'ю): ПРАВИЛЬНИЙ пароль у гонці з блокуванням — окрема причина в журналі безпеки (хоч відповідь
+            // клієнтові лишається 401, як на хибний): для розслідувача це «пароль підібрано, але запис уже заблоковано».
+            await FailAsync(
+                userName, "LockedOut", ipAddress, now, ct, userId: user.Id, journalReason: "LockedOutCorrectPassword")
+                .ConfigureAwait(false);
             throw InvalidCredentials();
         }
 
@@ -235,6 +253,7 @@ public sealed partial class LoginHandler(
     /// <param name="groupSids">SID груп безпеки з квитка; для діагностики доступу.</param>
     /// <param name="ipAddress">Адреса клієнта.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="socketIp">Адреса сокета для журналу безпеки (лише коли відрізняється від <paramref name="ipAddress"/>).</param>
     /// <remarks>
     /// Нижче рівня входу різниці між провайдерами немає ніде: обидва дають ту
     /// саму cookie і той самий <c>ICurrentUser</c> (ФВ-6.2).
@@ -250,9 +269,11 @@ public sealed partial class LoginHandler(
         string displayName,
         IReadOnlyList<string> groupSids,
         string? ipAddress,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? socketIp = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sid);
+        _socketIp = socketIp;
         ArgumentNullException.ThrowIfNull(groupSids);
 
         var now = clock.UtcNow;
@@ -495,7 +516,8 @@ public sealed partial class LoginHandler(
     /// </remarks>
     private async Task FailAsync(
         string userName, string reason, string? ipAddress, DateTime now, CancellationToken ct,
-        AuthProvider provider = AuthProvider.Local, int? userId = null, bool lockedNow = false)
+        AuthProvider provider = AuthProvider.Local, int? userId = null, bool lockedNow = false,
+        string? journalReason = null)
     {
         // ⛔ У журнал іде КАТЕГОРІЯ відмови, а не подробиці: ні введеного
         // пароля, ні його довжини, ні фрагмента (ФВ-6.11).
@@ -504,13 +526,14 @@ public sealed partial class LoginHandler(
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
-        await JournalAsync(LoginAuditEventTypes.Failed, userName, provider, reason, ipAddress, userId, now, ct)
+        await JournalAsync(
+            LoginAuditEventTypes.Failed, userName, provider, journalReason ?? reason, ipAddress, userId, now, ct)
             .ConfigureAwait(false);
 
         if (lockedNow)
         {
             await JournalAsync(
-                LoginAuditEventTypes.AccountLocked, userName, provider, reason, ipAddress, userId, now, ct)
+                LoginAuditEventTypes.AccountLocked, userName, provider, journalReason ?? reason, ipAddress, userId, now, ct)
                 .ConfigureAwait(false);
         }
     }
@@ -522,7 +545,7 @@ public sealed partial class LoginHandler(
         => journal is null
             ? Task.CompletedTask
             : journal.RecordAsync(
-                new LoginAuditEntry(eventType, userName, provider, reason, ipAddress, userId, now), ct);
+                new LoginAuditEntry(eventType, userName, provider, reason, ipAddress, userId, now, _socketIp), ct);
 
     /// <summary>«Перевірка» пароля неіснуючого користувача — заради часу відповіді.</summary>
     private void Decoy(string password)

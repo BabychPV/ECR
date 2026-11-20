@@ -266,6 +266,14 @@ public static partial class EcrConfigurationValidation
             }
         }
 
+        // ⛔ PSS-28: `AllowedHosts` — імена БЕЗ порту. HostFiltering ASP.NET Core порівнює налаштовані записи лише з іменем
+        // вузла (порт із заголовка Host відкидається), тож запис `ecr.example.kz:8443` не збігається з жодним запитом:
+        // усі, крім localhost, отримують 400, а розгортання виглядає зеленим. Службу з таким значенням не запускаємо.
+        if (Value(configuration, AllowedHostsKey) is { } hosts && AllowedHostsProblem(hosts) is { } hostsProblem)
+        {
+            problems.Add(Describe(AllowedHostsKey, hosts, hostsProblem));
+        }
+
         foreach (var (key, allowed) in Choices)
         {
             if (Value(configuration, key) is { } text
@@ -455,6 +463,39 @@ public static partial class EcrConfigurationValidation
 
     /// <summary>Ключ конфігурації ASP.NET Core: перелік дозволених заголовків Host через <c>;</c>.</summary>
     public const string AllowedHostsKey = "AllowedHosts";
+
+    private static readonly System.Text.RegularExpressions.Regex AllowedHostName = new(
+        @"^(?:(?:\*\.)?[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*|\[[0-9A-Fa-f:.]+\])\z",
+        System.Text.RegularExpressions.RegexOptions.CultureInvariant,
+        TimeSpan.FromSeconds(1));
+
+    /// <summary>
+    /// Причина, з якої <c>AllowedHosts</c> недійсний, або <c>null</c>. Записи — через <c>;</c>: <c>*</c>, ім'я вузла
+    /// (провідний <c>*.</c> допускається) чи IPv6 у дужках; БЕЗ порту й схеми.
+    /// </summary>
+    /// <param name="allowedHosts">Значення ключа.</param>
+    public static string? AllowedHostsProblem(string allowedHosts)
+    {
+        ArgumentNullException.ThrowIfNull(allowedHosts);
+
+        foreach (var entry in allowedHosts.Split(';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (entry == "*" || AllowedHostName.IsMatch(entry))
+            {
+                continue;
+            }
+
+            var hasPort = entry.StartsWith('[') ? entry.Contains("]:", StringComparison.Ordinal)
+                : entry.Contains(':', StringComparison.Ordinal) && !entry.Contains("://", StringComparison.Ordinal);
+
+            return hasPort
+                ? $"запис «{entry}» містить порт: HostFiltering ASP.NET Core порівнює імена БЕЗ порту, тому такий запис не збігається "
+                  + "з жодним запитом і замкне всіх користувачів; вкажіть ім'я без порту (наприклад ecr.example.kz)"
+                : $"запис «{entry}» не ім'я вузла (очікується * або ім'я без схеми, шляху й порту; провідний *. допускається)";
+        }
+
+        return null;
+    }
 
     /// <summary>Порожній перелік чи елемент <c>*</c> — дозволено будь-який Host.</summary>
     /// <param name="allowedHosts">Значення <c>AllowedHosts</c>; <c>null</c> — не задано.</param>

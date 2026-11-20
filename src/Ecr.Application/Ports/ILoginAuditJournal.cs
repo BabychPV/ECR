@@ -30,9 +30,16 @@ public static class LoginAuditEventTypes
     /// <summary>Обліковий запис заблоковано ЦІЄЮ спробою (вичерпано бюджет невдалих спроб).</summary>
     public const string AccountLocked = "AccountLocked";
 
+    /// <summary>Підсумок пропущених обмежувачем флуду невдалих спроб (ключі, що більше не повертаються).</summary>
+    public const string SuppressedSummary = "LoginFailedSuppressed";
+
+    /// <summary>Таблиця ключів обмежувача флуду переповнена: частину невдалих спроб не записано (кількість — у подробицях).</summary>
+    public const string AuditOverflow = "LoginAuditOverflow";
+
     /// <summary>
-    /// <c>aud.SecurityEvent.ChangedByUserId</c> для спроби під невідомим іменем: колонка <c>NOT NULL</c>, а користувача
-    /// з таким Id не буває. Клієнт показує «Не виконав вхід» (<c>audit.anonymousActor</c>); ім'я — у подробицях.
+    /// <c>aud.SecurityEvent.ChangedByUserId</c> для невдалої спроби, блокування й службових подій журналу входів: людина
+    /// не ввійшла, користувача-автора немає (колонка <c>NOT NULL</c>, а Id -1 не буває). Клієнт показує «Вхід не
+    /// виконано» (<c>audit.anonymousActor</c>); кого стосується спроба — <c>TargetUserId</c>, ім'я — у подробицях.
     /// </summary>
     public const int AnonymousActorId = -1;
 }
@@ -45,6 +52,7 @@ public static class LoginAuditEventTypes
 /// <param name="IpAddress">Адреса клієнта (та сама, що в <c>sec.LoginAttempt</c>); <c>null</c> — невідома.</param>
 /// <param name="UserId">Наш <c>UserId</c>, якщо ім'я належить наявному запису; <c>null</c> — невідоме ім'я.</param>
 /// <param name="At">Момент у UTC.</param>
+/// <param name="SocketIp">Адреса сокета; пишеться в подробиці лише коли відрізняється від <paramref name="IpAddress"/> (за проксі).</param>
 public sealed record LoginAuditEntry(
     string EventType,
     string UserName,
@@ -52,4 +60,5 @@ public sealed record LoginAuditEntry(
     string? Reason,
     string? IpAddress,
     int? UserId,
-    DateTime At);
+    DateTime At,
+    string? SocketIp = null);

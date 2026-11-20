@@ -89,19 +89,82 @@ public sealed class LoginAuditJournalingTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait("Requirement", "PSS-24")]
-    public async Task Вимкнений_запис_для_журналу_входів_теж_невідомий_без_ідентифікатора()
+    public async Task Вимкнений_запис_у_журналі_безпеки_має_справжню_причину_і_користувача_а_відповідь_та_сама()
     {
         var disabled = new User("disabled", "Вимкнений", AuthProvider.Local);
         disabled.SetPassword(RealHash);
         disabled.DisableAsBootstrap();
         _users.Seed(disabled);
 
-        await Assert.ThrowsAsync<AccessDeniedException>(
+        var refusal = await Assert.ThrowsAsync<AccessDeniedException>(
             () => NewHandler().HandleAsync("disabled", "x", "198.51.100.1", CancellationToken.None));
+        var unknown = await Assert.ThrowsAsync<AccessDeniedException>(
+            () => NewHandler().HandleAsync("ghost", "x", "198.51.100.1", CancellationToken.None));
+
+        // 401 і текст ті самі, що на невідоме ім'я (форма входу не розкриває існування запису).
+        Assert.Equal(unknown.ErrorCode, refusal.ErrorCode);
+        Assert.Equal(unknown.Message, refusal.Message);
+
+        // M3: журнал безпеки пише справжню причину й користувача; sec.LoginAttempt лишає UnknownUser.
+        var entry = _journal.Entries[0];
+        Assert.Equal("Disabled", entry.Reason);
+        Assert.Equal(disabled.Id, entry.UserId);
+        Assert.Equal("UnknownUser", _users.Attempts.First(a => a.UserName == "disabled").FailReason);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "PSS-24")]
+    public async Task Службовий_і_нелокальний_записи_мають_свої_причини_в_журналі_безпеки()
+    {
+        var service = new User(User.IntegrationServiceUserName, "Служба", AuthProvider.Local);
+        service.SetPassword(RealHash);
+        _users.Seed(service);
+        var windows = new User("domain.user", "Доменний", AuthProvider.Windows);
+        _users.Seed(windows);
+
+        await Assert.ThrowsAsync<AccessDeniedException>(
+            () => NewHandler().HandleAsync(User.IntegrationServiceUserName, "x", "198.51.100.1", CancellationToken.None));
+        await Assert.ThrowsAsync<AccessDeniedException>(
+            () => NewHandler().HandleAsync("domain.user", "x", "198.51.100.1", CancellationToken.None));
+
+        Assert.Equal("ServiceAccount", _journal.Entries[0].Reason);
+        Assert.Equal(service.Id, _journal.Entries[0].UserId);
+        Assert.Equal("NotLocal", _journal.Entries[1].Reason);
+        Assert.Equal(windows.Id, _journal.Entries[1].UserId);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "PSS-24")]
+    public async Task Правильний_пароль_у_гонці_з_блокуванням_має_окрему_причину_а_відповідь_401()
+    {
+        _hasher.Accept = true;
+        // Блокування лягає ПІСЛЯ резервування спроби й до успішної реєстрації — під час перевірки пароля.
+        _hasher.OnVerify = () => typeof(User).GetProperty(nameof(User.LockedUntil))!
+            .SetValue(_user, Now.AddMinutes(15));
+
+        var refusal = await Assert.ThrowsAsync<AccessDeniedException>(
+            () => NewHandler().HandleAsync("petrenko", "right", "198.51.100.1", CancellationToken.None));
+
+        Assert.Equal("ECR-AUTH-0401", refusal.ErrorCode);
+        var entry = Assert.Single(_journal.Entries);
+        Assert.Equal(LoginAuditEventTypes.Failed, entry.EventType);
+        Assert.Equal("LockedOutCorrectPassword", entry.Reason);
+        Assert.Equal(_user.Id, entry.UserId);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "PSS-24")]
+    public async Task Адреса_сокета_передається_журналу_поряд_з_адресою_клієнта()
+    {
+        await Assert.ThrowsAsync<AccessDeniedException>(
+            () => NewHandler().HandleAsync("petrenko", "wrong", "203.0.113.7", CancellationToken.None, socketIp: "10.0.0.5"));
 
         var entry = Assert.Single(_journal.Entries);
-        Assert.Equal("UnknownUser", entry.Reason);
-        Assert.Null(entry.UserId);
+        Assert.Equal("203.0.113.7", entry.IpAddress);
+        Assert.Equal("10.0.0.5", entry.SocketIp);
     }
 
     [Fact]
@@ -149,7 +212,13 @@ public sealed class LoginAuditJournalingTests
 
         public string Hash(string password) => "decoy-hash";
 
-        public bool Verify(string password, string hash) => Accept && hash == RealHash;
+        public Action? OnVerify { get; set; }
+
+        public bool Verify(string password, string hash)
+        {
+            OnVerify?.Invoke();
+            return Accept && hash == RealHash;
+        }
 
         public bool NeedsRehash(string hash) => false;
     }

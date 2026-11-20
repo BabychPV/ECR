@@ -5,6 +5,7 @@ using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Errors;
+using Microsoft.Extensions.Logging;
 
 namespace Ecr.Application.Security;
 
@@ -18,7 +19,7 @@ namespace Ecr.Application.Security;
 /// Мінімум знижується до 1 хв ЛИШЕ конфігурацією одноразового стенда (<c>Auth:IdleTimeout:MinimumMinutes</c>,
 /// <c>tools/e2e-stand.ps1</c>) — щоб e2e не чекав п'ять хвилин; у продукті ключа немає.
 /// </remarks>
-public static class SessionSettings
+public static partial class SessionSettings
 {
     /// <summary>Ключ у <c>sys_ecr.SystemSetting</c>.</summary>
     public const string IdleTimeoutKey = "Security.IdleTimeoutMinutes";
@@ -49,10 +50,10 @@ public static class SessionSettings
     /// <summary>За замовчуванням — 400 днів (слово людини 20.11).</summary>
     public const int DefaultTechnicalLogRetentionDays = 400;
 
-    /// <summary>Підлога: жодне налаштування не стирає спроби молодші за 30 днів.</summary>
+    /// <summary>Підлога: менше 30 днів — опечатка, а не політика.</summary>
     public const int MinTechnicalLogRetentionDays = 30;
 
-    /// <summary>Стеля: 10 років.</summary>
+    /// <summary>Стеля: 100 років (36 500 днів) — далі «не видаляти» по суті.</summary>
     public const int MaxTechnicalLogRetentionDays = 36500;
 
     /// <summary>Ключ у <c>sys_ecr.SystemSetting</c>: мінімальна глибина аудиту в <c>aud.*</c>, місяців (рішення людини 20.11 п. 7).</summary>
@@ -74,28 +75,77 @@ public static class SessionSettings
     /// <summary>Ключ відмови «глибина аудиту поза межами».</summary>
     public const string AuditRetentionOutOfRangeKey = "err.ECR-REQ-0422.auditRetentionOutOfRange";
 
-    /// <summary>Чинна глибина аудиту: збережене значення в межах 120–1200, інакше — 120.</summary>
-    /// <param name="stored">Значення з <c>SystemSetting</c>; <c>null</c> — рядка немає.</param>
-    public static int ResolveAuditRetentionMonths(string? stored)
-        => int.TryParse(stored, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var months)
-            ? Math.Clamp(months, MinAuditRetentionMonths, MaxAuditRetentionMonths)
-            : DefaultAuditRetentionMonths;
+    /// <summary>Чинна глибина аудиту: нижче 120 чи не число — 120 (типове) з попередженням; вище 1200 — 1200 з попередженням.</summary>
+    /// <param name="stored">Сире значення з <c>SystemSetting</c>; <c>null</c> — рядка немає (мовчки типове).</param>
+    /// <param name="logger">Куди йде попередження про відкинуте значення; <c>null</c> — нікуди.</param>
+    public static int ResolveAuditRetentionMonths(string? stored, ILogger? logger = null)
+        => ResolveRetention(
+            AuditRetentionKey, stored, DefaultAuditRetentionMonths, MinAuditRetentionMonths, MaxAuditRetentionMonths, logger);
+
+    /// <summary>
+    /// Спільне правило строків зберігання — ТЕ САМЕ, що в <c>Ecr.Infrastructure.Jobs.RetentionSettings</c> (лан L6): немає рядка —
+    /// типове (мовчки); не число чи нижче мінімуму — типове з попередженням у лозі; вище максимуму — максимум з попередженням.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Нижче мінімуму — саме типове, а не мінімум: рядок «0»/«1»/«-5» — опечатка, і мовчазне «30 днів» стерло б
+    /// журнали за добу замість обережних 400. Те, що показує екран і що діє у прибиранні, — одне й те саме число.
+    /// </remarks>
+    internal static int ResolveRetention(string key, string? stored, int fallback, int min, int max, ILogger? logger)
+    {
+        if (string.IsNullOrWhiteSpace(stored))
+        {
+            return fallback;
+        }
+
+        if (!int.TryParse(
+                stored.Trim(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture,
+                out var value))
+        {
+            if (logger is not null)
+            {
+                LogRejected(logger, key, stored, "не число", fallback);
+            }
+
+            return fallback;
+        }
+
+        if (value < min)
+        {
+            if (logger is not null)
+            {
+                LogRejected(logger, key, stored, $"менше мінімуму {min.ToString(System.Globalization.CultureInfo.InvariantCulture)}", fallback);
+            }
+
+            return fallback;
+        }
+
+        if (value > max)
+        {
+            if (logger is not null)
+            {
+                LogRejected(logger, key, stored, $"більше максимуму {max.ToString(System.Globalization.CultureInfo.InvariantCulture)}", max);
+            }
+
+            return max;
+        }
+
+        return value;
+    }
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Налаштування {Key} = «{Raw}» відкинуто ({Problem}); діє {Effective}.")]
+    private static partial void LogRejected(ILogger logger, string key, string raw, string problem, int effective);
 
     /// <summary>Ключ відмови «строк зберігання технічних журналів (спроб входу) поза межами».</summary>
     public const string RetentionOutOfRangeKey = "err.ECR-REQ-0422.technicalLogRetentionOutOfRange";
 
-    /// <summary>
-    /// Чинний строк зберігання спроб входу: збережене значення в межах 30–36500, інакше (немає рядка, не число) — 400.
-    /// </summary>
-    /// <remarks>
-    /// ⛔ Рядок, змінений руками в обхід екрана (0, −5, 99999), не вимикає прибирання й не стирає свіжі спроби: він
-    /// обмежується межами, а не відкидається.
-    /// </remarks>
-    /// <param name="stored">Значення з <c>SystemSetting</c>; <c>null</c> — рядка немає.</param>
-    public static int ResolveTechnicalLogRetentionDays(string? stored)
-        => int.TryParse(stored, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var days)
-            ? Math.Clamp(days, MinTechnicalLogRetentionDays, MaxTechnicalLogRetentionDays)
-            : DefaultTechnicalLogRetentionDays;
+    /// <summary>Чинний строк зберігання технічних журналів: нижче 30 чи не число — 400 з попередженням; вище 36500 — 36500 з попередженням.</summary>
+    /// <param name="stored">Сире значення з <c>SystemSetting</c>; <c>null</c> — рядка немає (мовчки 400).</param>
+    /// <param name="logger">Куди йде попередження про відкинуте значення; <c>null</c> — нікуди.</param>
+    public static int ResolveTechnicalLogRetentionDays(string? stored, ILogger? logger = null)
+        => ResolveRetention(
+            TechnicalLogRetentionKey, stored, DefaultTechnicalLogRetentionDays,
+            MinTechnicalLogRetentionDays, MaxTechnicalLogRetentionDays, logger);
 }
 
 /// <summary>Налаштування сеансу для екрана «Безпека».</summary>
@@ -103,7 +153,7 @@ public static class SessionSettings
 /// <param name="MinIdleTimeoutMinutes">Найменше допустиме значення.</param>
 /// <param name="MaxIdleTimeoutMinutes">Найбільше допустиме значення.</param>
 /// <param name="DefaultIdleTimeoutMinutes">Значення за замовчуванням.</param>
-/// <param name="TechnicalLogRetentionDays">Скільки днів зберігається оперативний журнал спроб входу <c>sec.LoginAttempt</c> (PSS-24).</param>
+/// <param name="TechnicalLogRetentionDays">Скільки днів зберігаються технічні журнали, зокрема <c>sec.LoginAttempt</c> (<c>Retention.TechnicalLogDays</c>).</param>
 /// <param name="MinTechnicalLogRetentionDays">Найменше допустиме значення.</param>
 /// <param name="MaxTechnicalLogRetentionDays">Найбільше допустиме значення.</param>
 /// <param name="DefaultTechnicalLogRetentionDays">Значення за замовчуванням (400).</param>
@@ -120,17 +170,15 @@ public sealed record SessionSettingsView(
 
 /// <summary>Запит на зміну налаштувань сеансу.</summary>
 /// <param name="IdleTimeoutMinutes">Вихід після стількох хвилин без дій.</param>
-/// <param name="TechnicalLogRetentionDays">
-/// Строк зберігання <c>sec.LoginAttempt</c> у днях (30–36500); <c>null</c> — не змінювати (старі клієнти шлють лише
-/// <paramref name="IdleTimeoutMinutes"/>).
-/// </param>
+/// <param name="TechnicalLogRetentionDays">Строк зберігання технічних журналів, днів (30–36500); <c>null</c> — не змінювати.</param>
 /// <param name="AuditRetentionMonths">Мінімальна глибина аудиту, місяців (120–1200); <c>null</c> — не змінювати.</param>
 public sealed record SessionSettingsInput(
     int IdleTimeoutMinutes, int? TechnicalLogRetentionDays = null, int? AuditRetentionMonths = null);
 
 /// <summary>Читання налаштувань сеансу. Право <c>Security.ManageUsers</c>.</summary>
 public sealed class GetSessionSettingsHandler(
-    IIdleTimeoutPolicy policy, ISessionSettingsStore store, IAccessDecisionService access, ICurrentUser currentUser)
+    IIdleTimeoutPolicy policy, ISessionSettingsStore store, IAccessDecisionService access, ICurrentUser currentUser,
+    ILogger<GetSessionSettingsHandler>? logger = null)
 {
     /// <summary>Поточне значення й межі.</summary>
     /// <param name="ct">Токен скасування.</param>
@@ -138,22 +186,20 @@ public sealed class GetSessionSettingsHandler(
     {
         await PermissionCheck.RequireAsync(access, currentUser, "Security.ManageUsers", ct).ConfigureAwait(false);
 
-        return await ViewAsync(policy, store, ct).ConfigureAwait(false);
+        return await ViewAsync(policy, store, logger, ct).ConfigureAwait(false);
     }
 
     internal static async Task<SessionSettingsView> ViewAsync(
-        IIdleTimeoutPolicy policy, ISessionSettingsStore store, CancellationToken ct)
+        IIdleTimeoutPolicy policy, ISessionSettingsStore store, ILogger? logger, CancellationToken ct)
         => new(
             await policy.GetMinutesAsync(ct).ConfigureAwait(false), policy.MinimumMinutes,
             SessionSettings.MaxIdleTimeoutMinutes, SessionSettings.DefaultIdleTimeoutMinutes,
             SessionSettings.ResolveTechnicalLogRetentionDays(
-                (await store.ReadTechnicalLogRetentionDaysAsync(ct).ConfigureAwait(false))
-                ?.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+                await store.ReadTechnicalLogRetentionDaysAsync(ct).ConfigureAwait(false), logger),
             SessionSettings.MinTechnicalLogRetentionDays, SessionSettings.MaxTechnicalLogRetentionDays,
             SessionSettings.DefaultTechnicalLogRetentionDays,
             SessionSettings.ResolveAuditRetentionMonths(
-                (await store.ReadAuditRetentionMonthsAsync(ct).ConfigureAwait(false))
-                ?.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+                await store.ReadAuditRetentionMonthsAsync(ct).ConfigureAwait(false), logger),
             SessionSettings.MinAuditRetentionMonths, SessionSettings.MaxAuditRetentionMonths,
             SessionSettings.DefaultAuditRetentionMonths);
 }
@@ -165,7 +211,7 @@ public sealed class GetSessionSettingsHandler(
 /// </remarks>
 public sealed class SaveSessionSettingsHandler(
     IIdleTimeoutPolicy policy, ISessionSettingsStore store, IAccessDecisionService access, IUnitOfWork uow,
-    IAuditWriter audit, ICurrentUser currentUser, IClock clock)
+    IAuditWriter audit, ICurrentUser currentUser, IClock clock, ILogger<SaveSessionSettingsHandler>? logger = null)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
@@ -232,12 +278,10 @@ public sealed class SaveSessionSettingsHandler(
         }
 
         var previousAudit = SessionSettings.ResolveAuditRetentionMonths(
-            (await store.ReadAuditRetentionMonthsAsync(ct).ConfigureAwait(false))
-            ?.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            await store.ReadAuditRetentionMonthsAsync(ct).ConfigureAwait(false), logger);
         var previous = await store.ReadIdleTimeoutMinutesAsync(ct).ConfigureAwait(false);
         var previousRetention = SessionSettings.ResolveTechnicalLogRetentionDays(
-            (await store.ReadTechnicalLogRetentionDaysAsync(ct).ConfigureAwait(false))
-            ?.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            await store.ReadTechnicalLogRetentionDaysAsync(ct).ConfigureAwait(false), logger);
         var now = clock.UtcNow;
 
         await uow.ExecuteInTransactionAsync(
@@ -285,6 +329,6 @@ public sealed class SaveSessionSettingsHandler(
 
         policy.Invalidate();
 
-        return await GetSessionSettingsHandler.ViewAsync(policy, store, ct).ConfigureAwait(false);
+        return await GetSessionSettingsHandler.ViewAsync(policy, store, logger, ct).ConfigureAwait(false);
     }
 }

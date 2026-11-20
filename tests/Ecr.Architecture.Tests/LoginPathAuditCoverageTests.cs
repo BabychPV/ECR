@@ -36,7 +36,7 @@ public sealed class LoginPathAuditCoverageTests
         Assert.Contains("IF OBJECT_ID(N'sec.LoginAttempt', N'U') IS NOT NULL", sql, StringComparison.Ordinal);
 
         var retention = Flat(Read("src", "Ecr.Infrastructure", "Security", "LoginAttemptRetention.cs"));
-        Assert.Contains("DELETE TOP ({Batch}) FROM sec.LoginAttempt WHERE AttemptedAt < {cutoff}", retention, StringComparison.Ordinal);
+        Assert.Contains("DELETE TOP ({Batch}) FROM sec.LoginAttempt WHERE Id < {upper} AND AttemptedAt < {cutoff}", retention, StringComparison.Ordinal);
         var settings = Flat(Read("src", "Ecr.Application", "Security", "SessionSettingsHandlers.cs"));
         Assert.Contains("TechnicalLogRetentionKey = \"Retention.TechnicalLogDays\"", settings, StringComparison.Ordinal);
         Assert.Contains("DefaultTechnicalLogRetentionDays = 400", settings, StringComparison.Ordinal);
@@ -77,6 +77,8 @@ public sealed class LoginPathAuditCoverageTests
     [InlineData("LoginSucceeded")]
     [InlineData("LoginFailed")]
     [InlineData("AccountLocked")]
+    [InlineData("LoginFailedSuppressed")]
+    [InlineData("LoginAuditOverflow")]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
     public void Тип_події_входу_має_підписи_en_ru_kz_у_сіді(string eventType)

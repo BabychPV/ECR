@@ -141,6 +141,16 @@ public sealed class ForwardedClientAddress
         return string.Equals(key, UnknownClient, StringComparison.Ordinal) ? null : key;
     }
 
+    /// <summary>Адреса СОКЕТА (без заголовків) — у журнал входів поряд з адресою клієнта, коли вони різні (PSS-24).</summary>
+    /// <param name="context">Запит.</param>
+    /// <returns>IP-адреса сокета рядком (IPv4 в IPv6-вигляді зведено до IPv4); <c>null</c> — немає.</returns>
+    public static string? SocketAddressOf(HttpContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        return context.Connection.RemoteIpAddress is { } remote ? Normalize(remote).ToString() : null;
+    }
+
     /// <summary>Перший справа запис, що не належить довіреному проксі; <c>null</c> — немає придатного.</summary>
     private IPAddress? FromForwardedFor(string header)
     {

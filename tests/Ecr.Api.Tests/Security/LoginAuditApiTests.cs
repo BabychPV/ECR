@@ -54,7 +54,8 @@ public sealed class LoginAuditApiTests(SqlServerFixture sql)
 
         foreach (var row in rows)
         {
-            Assert.Equal(userId, row.ChangedByUserId);
+            // ⚠ Автор невдалої спроби — анонімний актор; користувач, якого стосується спроба, — у TargetUserId.
+            Assert.Equal(LoginAuditEventTypes.AnonymousActorId, row.ChangedByUserId);
             Assert.Equal(userId, row.TargetUserId);
             Assert.False(string.IsNullOrEmpty(row.CorrelationId));
 
@@ -75,22 +76,48 @@ public sealed class LoginAuditApiTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "PSS-24")]
-    public async Task Невідоме_ім_я_пишеться_з_анонімним_автором_і_іменем_у_подробицях()
+    public async Task Невідоме_ім_я_пишеться_в_незмінний_журнал_лише_маскою_а_не_сирим_іменем()
     {
+        // ⛔ M4 (рішення координатора): люди вводять пароль у поле імені. У незмінному aud.SecurityEvent — маска
+        // (два перші символи, довжина, ключований хеш); сире ім'я лишається лише в sec.LoginAttempt.
         var name = $"nobody_{Guid.NewGuid():N}"[..20];
         using var app = new EcrApiFactory(sql);
         using var host = WithRemoteIp(app);
         using var client = Client(host, "198.51.100.12");
 
-        Assert.Equal(HttpStatusCode.Unauthorized, (await LoginAsync(client, name, WrongPassword).ConfigureAwait(true)).StatusCode);
+        var first = await LoginAsync(client, name, WrongPassword).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Unauthorized, first.StatusCode);
+        var second = await LoginAsync(client, name, WrongPassword).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Unauthorized, second.StatusCode);
 
-        var row = Assert.Single(await EventsAsync(LoginAuditEventTypes.Failed, name).ConfigureAwait(true));
-        Assert.Equal(LoginAuditEventTypes.AnonymousActorId, row.ChangedByUserId);
-        Assert.Null(row.TargetUserId);
+        var rows = new List<EventRow>();
+        foreach (var response in new[] { first, second })
+        {
+            var correlation = Assert.Single(response.Headers.GetValues("X-Correlation-Id"));
+            rows.Add(Assert.Single(await EventsByCorrelationAsync(LoginAuditEventTypes.Failed, correlation).ConfigureAwait(true)));
+        }
 
-        var details = JsonDocument.Parse(row.DetailsJson!).RootElement;
-        Assert.Equal("UnknownUser", details.GetProperty("reason").GetString());
-        Assert.Equal("198.51.100.12", details.GetProperty("ip").GetString());
+        foreach (var row in rows)
+        {
+            Assert.Equal(LoginAuditEventTypes.AnonymousActorId, row.ChangedByUserId);
+            Assert.Null(row.TargetUserId);
+            Assert.DoesNotContain(name, row.DetailsJson!, StringComparison.OrdinalIgnoreCase);
+
+            var details = JsonDocument.Parse(row.DetailsJson!).RootElement;
+            Assert.False(details.TryGetProperty("userName", out _));
+            Assert.Equal(name[..2], details.GetProperty("userNamePrefix").GetString());
+            Assert.Equal(name.Length, details.GetProperty("userNameLength").GetInt32());
+            Assert.Matches("^[0-9a-f]{32}$", details.GetProperty("userNameHash").GetString()!);
+            Assert.Equal("UnknownUser", details.GetProperty("reason").GetString());
+            Assert.Equal("198.51.100.12", details.GetProperty("ip").GetString());
+        }
+
+        // Той самий ввід — той самий хеш (кореляція «один і той самий підбір»); сире ім'я — в оперативній таблиці.
+        Assert.Equal(
+            JsonDocument.Parse(rows[0].DetailsJson!).RootElement.GetProperty("userNameHash").GetString(),
+            JsonDocument.Parse(rows[1].DetailsJson!).RootElement.GetProperty("userNameHash").GetString());
+        await using var db = NewDb();
+        Assert.Equal(2, await db.LoginAttempts.CountAsync(a => a.UserName == name).ConfigureAwait(true));
     }
 
     [Fact]
@@ -135,7 +162,8 @@ public sealed class LoginAuditApiTests(SqlServerFixture sql)
         }
 
         var locked = Assert.Single(await EventsAsync(LoginAuditEventTypes.AccountLocked, name).ConfigureAwait(true));
-        Assert.Equal(userId, locked.ChangedByUserId);
+        Assert.Equal(LoginAuditEventTypes.AnonymousActorId, locked.ChangedByUserId);
+        Assert.Equal(userId, locked.TargetUserId);
 
         var details = JsonDocument.Parse(locked.DetailsJson!).RootElement;
         Assert.Equal("Locked", details.GetProperty("outcome").GetString());
@@ -171,7 +199,11 @@ public sealed class LoginAuditApiTests(SqlServerFixture sql)
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.SendAsync(request).ConfigureAwait(true)).StatusCode);
 
         var row = Assert.Single(await EventsAsync(LoginAuditEventTypes.Failed, name).ConfigureAwait(true));
-        Assert.Equal("203.0.113.77", JsonDocument.Parse(row.DetailsJson!).RootElement.GetProperty("ip").GetString());
+        var forwardedDetails = JsonDocument.Parse(row.DetailsJson!).RootElement;
+        Assert.Equal("203.0.113.77", forwardedDetails.GetProperty("ip").GetString());
+
+        // Адреса сокета (проксі) — окремо, бо відрізняється від адреси клієнта.
+        Assert.Equal("10.0.0.5", forwardedDetails.GetProperty("socketIp").GetString());
 
         // ⛔ Мутаційний доказ: повернути `Connection.RemoteIpAddress` в `AuthController.RemoteIp` — тут буде 10.0.0.5, і
         // так само в `sec.LoginAttempt`: обидва журнали тепер мають одну й ту саму адресу.
@@ -270,6 +302,32 @@ public sealed class LoginAuditApiTests(SqlServerFixture sql)
             + "WHERE EventType = @t AND JSON_VALUE(DetailsJson, '$.userName') = @n ORDER BY Id;";
         command.Parameters.AddWithValue("@t", eventType);
         command.Parameters.AddWithValue("@n", userName);
+
+        var rows = new List<EventRow>();
+        await using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+        while (await reader.ReadAsync().ConfigureAwait(false))
+        {
+            rows.Add(new EventRow(
+                reader.GetInt64(0),
+                reader.GetInt32(1),
+                reader.IsDBNull(2) ? null : reader.GetInt32(2),
+                reader.IsDBNull(3) ? null : reader.GetString(3),
+                reader.IsDBNull(4) ? null : reader.GetString(4)));
+        }
+
+        return rows;
+    }
+
+    private async Task<List<EventRow>> EventsByCorrelationAsync(string eventType, string correlationId)
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync().ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            "SELECT Id, ChangedByUserId, TargetUserId, DetailsJson, CorrelationId FROM aud.SecurityEvent "
+            + "WHERE EventType = @t AND CorrelationId = @c ORDER BY Id;";
+        command.Parameters.AddWithValue("@t", eventType);
+        command.Parameters.AddWithValue("@c", correlationId);
 
         var rows = new List<EventRow>();
         await using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);

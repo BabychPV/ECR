@@ -176,6 +176,35 @@ public sealed class IdleSignOutApiTests(SqlServerFixture sql) : IDisposable
     }
 
     /// <remarks>
+    /// PSS-24: без права <c>Security.ManageUsers</c> ні читання, ні зміна налаштувань (зокрема строків зберігання) не
+    /// проходять — 403, і нічого не записується. Мутація: прибрати <c>PermissionCheck</c> із
+    /// <c>SaveSessionSettingsHandler</c> — червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "PSS-24")]
+    public async Task Без_права_ManageUsers_PUT_зі_строками_зберігання_дає_403_і_нічого_не_пише()
+    {
+        await ArrangeUserAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var client = app.CreateClient();
+        Assert.True((await LoginAsync(client).ConfigureAwait(true)).IsSuccessStatusCode);
+
+        var put = await client.PutAsJsonAsync(Settings, new SessionSettingsInput(30, 36500, 1200)).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Forbidden, put.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync(Settings).ConfigureAwait(true)).StatusCode);
+
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync().ConfigureAwait(true);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM sys_ecr.SystemSetting WHERE [Key] IN (@a, @b) AND Value IN (N'36500', N'1200');";
+        command.Parameters.AddWithValue("@a", SessionSettings.TechnicalLogRetentionKey);
+        command.Parameters.AddWithValue("@b", SessionSettings.AuditRetentionKey);
+        Assert.Equal(0, (int)(await command.ExecuteScalarAsync().ConfigureAwait(true))!);
+    }
+
+    /// <remarks>
     /// PSS-24: строк зберігання спроб входу змінюється на тому самому екрані й тим самим PUT, що й межа бездіяльності
     /// (право <c>Security.ManageUsers</c>): 30–36500, поза межами — 422 з ключем і без запису; подія журналу несе нове й
     /// попереднє значення; прибирання бачить нове значення без перезапуску; старий клієнт (лише idle) строк не чіпає.

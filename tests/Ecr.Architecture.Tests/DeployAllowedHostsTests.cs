@@ -4,7 +4,7 @@ using Xunit;
 namespace Ecr.Architecture.Tests;
 
 /// <summary>
-/// PSS-28: <c>deploy-ecr.ps1 -AllowedHosts</c> — перевірка значення, додавання <c>localhost</c> для проб кроку 7 і
+/// PSS-28: <c>deploy-ecr.ps1 -AllowedHosts</c> — перевірка значення (БЕЗ порту), додавання <c>localhost</c> для проб кроку 7 і
 /// збереження <c>ECR_AllowedHosts</c> через MSI-оновлення (знімок Environment).
 /// </summary>
 /// <remarks>
@@ -26,7 +26,9 @@ public sealed class DeployAllowedHostsTests
         Out-Hosts 'port'     'ecr.example.kz:8443'
         Out-Hosts 'localport' 'localhost:5000;ecr'
         Out-Hosts 'wild'     '*.example.kz'
-        Out-Hosts 'ipv6'     '[::1]:8443'
+        Out-Hosts 'ipv6port' '[::1]:8443'
+        Out-Hosts 'ipv6'     '[::1]'
+        Out-Hosts 'localsuffix' 'localhost.example.kz'
         Out-Hosts 'dup'      'ecr;ECR;ecr'
         Out-Hosts 'trail'    'ecr;;'
         Out-Hosts 'empty'    ''
@@ -50,10 +52,14 @@ public sealed class DeployAllowedHostsTests
     [InlineData("starsp", "*")]
     [InlineData("names", "ecr.example.kz;ecr;localhost")]
     [InlineData("haslocal", "ecr.example.kz;LocalHost")]
-    [InlineData("port", "ecr.example.kz:8443;localhost")]
-    [InlineData("localport", "localhost:5000;ecr")]
+    // ⛔ H1 (рев'ю): HostFiltering порівнює записи БЕЗ порту, тож запис із портом замикає всіх, крім localhost, -> відмова.
+    [InlineData("port", "PROBLEM")]
+    [InlineData("localport", "PROBLEM")]
+    [InlineData("ipv6port", "PROBLEM")]
+    [InlineData("ipv6", "[::1];localhost")]
+    // `localhost` перевіряється ТОЧНИМ збігом, а не префіксом.
+    [InlineData("localsuffix", "localhost.example.kz;localhost")]
     [InlineData("wild", "*.example.kz;localhost")]
-    [InlineData("ipv6", "[::1]:8443;localhost")]
     [InlineData("dup", "ecr;localhost")]
     [InlineData("trail", "ecr;localhost")]
     [InlineData("empty", "PROBLEM")]

@@ -90,10 +90,19 @@ function SessionSettingsForm({
 
   const save = useMutation({
     mutationFn: (input: SessionSettingsInput) =>
-      apiFetch<SessionSettingsView>(SessionSettingsPath, { method: 'PUT', body: JSON.stringify(input) }),
+      apiFetch<SessionSettingsView>(SessionSettingsPath, {
+        method: 'PUT',
+        body: JSON.stringify(input),
+      }),
     onSuccess: async (saved) => {
       await onSaved(saved);
-      showDone(t('security.session.savedAll'));
+      // PSS-24: окреме повідомлення про строки зберігання — вони видаляють дані, а не лише міняють поведінку сеансу.
+      const idleChanged = saved.idleTimeoutMinutes !== view.idleTimeoutMinutes;
+      const retentionChanged =
+        saved.technicalLogRetentionDays !== view.technicalLogRetentionDays ||
+        saved.auditRetentionMonths !== view.auditRetentionMonths;
+      if (idleChanged) showDone(t('security.session.saved', { minutes: saved.idleTimeoutMinutes }));
+      if (retentionChanged) showDone(t('security.session.retentionSaved'));
     },
     onError: showApiError,
   });
@@ -121,11 +130,13 @@ function SessionSettingsForm({
       data-testid="session-settings"
       onSubmit={(event) => {
         event.preventDefault();
-        if (valid) save.mutate({
+        if (valid) {
+          save.mutate({
             idleTimeoutMinutes: minutes,
             technicalLogRetentionDays: retentionDays,
             auditRetentionMonths: auditMonths,
           });
+        }
       }}
     >
       <Stack gap="sm" maw={420}>
@@ -146,6 +157,13 @@ function SessionSettingsForm({
         />
         <Text size="sm" c="dimmed">
           {t('security.session.idleExplain')}
+        </Text>
+        {/* PSS-24: строки зберігання — окремий розділ: вони видаляють дані, а не міняють поведінку сеансу. */}
+        <Text fw={600} mt="md" data-testid="retention-heading">
+          {t('security.session.retentionSection')}
+        </Text>
+        <Text size="sm" c="statusWarning" data-testid="retention-warning">
+          {t('security.session.retentionWarning')}
         </Text>
         <NumberInput
           data-testid="technical-log-retention"
@@ -187,11 +205,7 @@ function SessionSettingsForm({
         </Text>
         {canManage && (
           <Group>
-            <Button
-              type="submit"
-              loading={saving}
-              disabled={!valid || !changed}
-            >
+            <Button type="submit" loading={saving} disabled={!valid || !changed}>
               {t('security.session.save')}
             </Button>
           </Group>

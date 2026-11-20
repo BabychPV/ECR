@@ -4820,15 +4820,20 @@ public sealed class NotFoundException(string errorCode, string message)
 Порти: `IIdleTimeoutPolicy` (чинна межа з кешем вузла, мінімум) і `ISessionSettingsStore` (`sys_ecr.SystemSetting`).
 
 Журнал входів (PSS-24): порт `ILoginAuditJournal` пише в `aud.SecurityEvent` події `LoginSucceeded`, `LoginFailed` (подробиці:
-`userName`, `provider`, `outcome`, `reason`, `ip`, `suppressed`) і `AccountLocked`; для невідомого імені автор — `-1`.
-Запис ніколи не змінює відповідь входу. Строк зберігання оперативної `sec.LoginAttempt` — налаштування
+`userName`, `provider`, `outcome`, `reason`, `ip`, `socketIp` (лише коли відрізняється від `ip`), `suppressed`) і `AccountLocked`;
+також службові `LoginFailedSuppressed` (підсумок пропущених флудом) і `LoginAuditOverflow`. Автор `LoginSucceeded` — користувач;
+автор відмови й блокування — `-1` («Вхід не виконано»), користувач — у `TargetUserId`. Для імені БЕЗ облікового запису
+(`reason` `UnknownUser`) `userName` НЕ пишеться: `userNamePrefix` (2 символи), `userNameLength`, `userNameHash` (HMAC-SHA256, ключ
+під Data Protection) — сире ім'я лишається лише в `sec.LoginAttempt`. Причини: `BadPassword`, `UnknownUser`, `NotLocal`,
+`Disabled`, `ServiceAccount`, `LockedOut`, `LockedOutCorrectPassword`, `SidMismatch`. Запис ніколи не змінює відповідь входу. Строк зберігання оперативної `sec.LoginAttempt` — налаштування
 `Retention.TechnicalLogDays` у `sys_ecr.SystemSetting` (400 днів за замовчуванням, межі 30–36500); змінюється
 тим самим `PUT /api/v1/security/session-settings` (`technicalLogRetentionDays`, необов'язкове; поза межами — `422 ECR-REQ-0422`,
 `messageKey` `err.ECR-REQ-0422.technicalLogRetentionOutOfRange`; право `Security.ManageUsers`; подія `SessionSettingsUpdated` несе
 `technicalLogRetentionDays` і `previousTechnicalLogRetentionDays`), `GET` віддає `technicalLogRetentionDays` і межі.
 Ключ `Retention.TechnicalLogDays` (30–36500, 400) і `Retention.AuditMonths` (`auditRetentionMonths`, 120–1200, 120; поза межами —
 `422`, `messageKey` `err.ECR-REQ-0422.auditRetentionOutOfRange`) — ті самі, що в `RetentionSettings` (лан L6): один рядок
-налаштувань, два читачі.
+налаштувань, два читачі. Нечисло або нижче мінімуму — типове значення (400 / 120) з попередженням у логу, вище максимуму —
+максимум; `GET` показує те значення, що фактично діє.
 
 ---
 
