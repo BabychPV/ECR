@@ -33,7 +33,9 @@ SELECT v.[Key], v.Lang, v.Val
     (N'workflow.submitSourceNotApproved', N'ru', N'{period} пока нельзя отправить: месяц источника HSE400 {source} не утверждён (см. «Проблемы расчёта»).'),
     (N'workflow.submitSourceNotApproved', N'kz', N'{period} әзірге жіберу мүмкін емес: HSE400 көзінің {source} айы бекітілмеген («Есептеу мәселелері» бөлімін қараңыз).'),
     (N'workflow.approveSourceNotApproved', N'ru', N'{period} нельзя утвердить, пока не утверждён месяц источника HSE400 {source} (см. «Проблемы расчёта»).'),
-    (N'workflow.approveSourceNotApproved', N'kz', N'HSE400 көзінің {source} айы бекітілмейінше {period} бекіту мүмкін емес («Есептеу мәселелері» бөлімін қараңыз).')
+    (N'workflow.approveSourceNotApproved', N'kz', N'HSE400 көзінің {source} айы бекітілмейінше {period} бекіту мүмкін емес («Есептеу мәселелері» бөлімін қараңыз).'),
+    (N'workflow.rejectClosedPeriodNote', N'ru', N'Период {period} закрыт: после возврата его нужно переоткрыть (Period.Reopen), иначе автор не сможет исправить и снова отправить данные.'),
+    (N'workflow.rejectClosedPeriodNote', N'kz', N'{period} кезеңі жабық: қайтарғаннан кейін оны қайта ашу керек (Period.Reopen), әйтпесе автор деректерді түзетіп, қайта жібере алмайды.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -57,7 +59,8 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'document.banner.monthSubmitted', N'en', N'{period} is submitted; its column is read-only.', 1),
     (N'document.banner.monthApproved', N'en', N'{period} is approved; its column is read-only until it is returned for edits.', 1),
     (N'workflow.submitSourceNotApproved', N'en', N'{period} can''t be submitted yet: the HSE400 source month {source} isn''t approved (see Calculation issues).', 1),
-    (N'workflow.approveSourceNotApproved', N'en', N'{period} cannot be approved until the HSE400 source month {source} is approved (see Calculation issues).', 1)
+    (N'workflow.approveSourceNotApproved', N'en', N'{period} cannot be approved until the HSE400 source month {source} is approved (see Calculation issues).', 1),
+    (N'workflow.rejectClosedPeriodNote', N'en', N'{period} is closed: after rejection the period must be reopened (Period.Reopen) before the author can edit and resubmit.', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO

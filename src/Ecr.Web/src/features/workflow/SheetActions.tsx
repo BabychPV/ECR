@@ -1378,9 +1378,9 @@ export function useSheetActions({
   // кроці маршруту); відхилення — ні. Ціль: місяць рішення (річна розкладка) чи період сторінки; дані — лише непідставні.
   const approveSource = monthly
     ? (months.find((m) => m.periodKey === decideMonthKey)?.unapprovedSource ?? null)
-    : anchorMode && !submissionTarget.isPlaceholderData
-      ? (target?.periods.find((period) => period.periodKey === periodKey && period.sheetStatus === 'Submitted')
-          ?.unapprovedSourcePeriodKey ?? null)
+    : // ⛔ L2: період сторінки — і тоді, коли він закритий (у `periods[]` лише відкриті): окреме поле відповіді.
+      anchorMode && !submissionTarget.isPlaceholderData && state === 'Submitted'
+      ? (submissionTarget.data?.anchorUnapprovedSourcePeriodKey ?? null)
       : null;
   const approveTargetPeriod = monthly ? decideMonthKey : periodKey;
   const approveBlockedReason =
@@ -1529,6 +1529,14 @@ export function useSheetActions({
         ? { periodKey, state, canDecide: !workflowOff && (canApprove || canReject) }
         : null;
 
+  /*
+   * ✎ D-6 (UX): відхилений місяць ЗАКРИТОГО періоду автор не зможе правити й подати знову, доки період не відкриють
+   * (`Period.Reopen`) — діалог відхилення каже це заздалегідь (поведінка та сама). Закритий = поданий період, якого немає
+   * серед відкритих (`periods[]`: Open/Grace з винятком «відкрито для документа»; поданий місяць не буває Scheduled).
+   */
+  const rejectPeriodClosed =
+    asking === 'reject' && target !== undefined && !target.periods.some((period) => period.periodKey === askedPeriod);
+
   // ✎ LIVE-STATUS: діалог проти застарілого стану не відкривається.
   const askFresh = (action: 'approve' | 'reject' | 'reopen' | 'recall', targetPeriod: number): void => {
     if (!statusStale) ask(action, targetPeriod);
@@ -1591,7 +1599,11 @@ export function useSheetActions({
         opened={asking === 'reject'}
         title={monthly ? t('workflow.rejectPeriodTitle', { period: periodLabel(askedPeriod) }) : t('workflow.rejectTitle')}
         label={t('workflow.reason')}
-        description={t('workflow.rejectHint')}
+        description={
+          rejectPeriodClosed
+            ? `${t('workflow.rejectHint')} ${t('workflow.rejectClosedPeriodNote', { period: periodLabel(askedPeriod) })}`
+            : t('workflow.rejectHint')
+        }
         confirmLabel={t('workflow.reject')}
         isPending={decide.isPending || settled.settling}
         onConfirm={(reason) => settled.run(() => decide.mutateAsync({ ...askedAt.current, approved: false, reason }))}
