@@ -38,6 +38,12 @@ public sealed partial class PrincipleTests
             var text = File.ReadAllText(file);
             var name = Path.GetFileName(file);
 
+            // ⚠ Рядкові коментарі `--` не рахуються: вони можуть містити приклади запитів
+            // (`COUNT(*)` у перевірочному запиті `16-resource-governor.sql`, де SCHEMABINDING
+            // вимагає сам Resource Governor для функції-класифікатора — вона нічого не агрегує).
+            var code = Regex.Replace(text, @"--[^
+]*", string.Empty);
+
             // CLR: `CREATE ASSEMBLY`, `EXTERNAL NAME`, вмикання `clr enabled`.
             if (ClrRegex.IsMatch(text))
             {
@@ -46,8 +52,8 @@ public sealed partial class PrincipleTests
 
             // Індексована в'юха з обчисленням: `WITH SCHEMABINDING` разом із
             // агрегатом. Проєкція без агрегатів дозволена — вона не рахує.
-            if (text.Contains("SCHEMABINDING", StringComparison.OrdinalIgnoreCase)
-                && AggregateRegex.IsMatch(text))
+            if (code.Contains("SCHEMABINDING", StringComparison.OrdinalIgnoreCase)
+                && AggregateRegex.IsMatch(code))
             {
                 offenders.Add($"{name}: індексована вʼюха з агрегатом");
             }

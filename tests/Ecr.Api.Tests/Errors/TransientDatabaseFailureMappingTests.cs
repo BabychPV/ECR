@@ -25,6 +25,7 @@ public sealed class TransientDatabaseFailureMappingTests
     [InlineData(53)]      // E1-05: мережевий шлях не знайдено
     [InlineData(121)]     // E1-05: тайм-аут семафора
     [InlineData(1205)]
+    [InlineData(8645)]    // PSS-12: тайм-аут memory grant
     [InlineData(10054)]
     [InlineData(10061)]   // E1-05: з'єднання відхилено
     [InlineData(40613)]
