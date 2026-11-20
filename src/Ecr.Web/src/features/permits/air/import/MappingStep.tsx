@@ -225,7 +225,7 @@ function SaveProfileForm({
           </Text>
           <Button
             variant="subtle"
-            size="compact-sm"
+            size="xs"
             onClick={() => {
               setCodeOpen(true);
               setFocusCode(true);

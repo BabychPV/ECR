@@ -208,7 +208,7 @@ function Row({
           <Button
             ref={change}
             variant="subtle"
-            size="compact-xs"
+            size="xs"
             disabled={props.busy}
             aria-label={t('permits.air.import.fields.changeFor', { field: label })}
             onClick={() => setChanging(true)}
@@ -219,7 +219,7 @@ function Row({
         {changing && move === null && (
           <Button
             variant="subtle"
-            size="compact-xs"
+            size="xs"
             aria-label={t('permits.air.import.fields.keepFor', { field: label })}
             onClick={() => setChanging(false)}
           >
@@ -240,13 +240,13 @@ function Row({
             <div className="pi-actions">
               <Button
                 variant="default"
-                size="compact-sm"
+                size="xs"
                 aria-label={t('permits.air.import.fields.moveCancel', { column: move.letter, owner: ownerLabel })}
                 onClick={() => setMove(null)}
               >
                 {t('common.cancel')}
               </Button>
-              <Button ref={moveButton} size="compact-sm" disabled={props.busy} onClick={() => apply(move.letter, move.owner)}>
+              <Button ref={moveButton} size="xs" disabled={props.busy} onClick={() => apply(move.letter, move.owner)}>
                 {t('permits.air.import.fields.move')}
               </Button>
             </div>
