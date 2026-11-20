@@ -327,18 +327,31 @@ public sealed class SwitchScriptEngineHandler(
     IAccessDecisionService access,
     ICurrentUser currentUser,
     IClock clock,
-    IDependencyGraphProvider? dependencyGraph = null)
+    IDependencyGraphProvider? dependencyGraph = null,
+    IGoldenSetGate? goldenSet = null)
 {
     /// <summary>Право на перемикання: те саме, що й на публікацію.</summary>
     public const string Permission = "Calculation.Publish";
+
+    /// <summary>
+    /// Ворота золотого набору (PSS-23). У складанні це <see cref="PublishMethodologyHandler"/> — той самий екземпляр, що й
+    /// <c>formulaLinks</c>, тож окремої реєстрації не потрібно; без воріт перемикання на <c>Script</c> не
+    /// відбувається взагалі (закрито, а не відкрито).
+    /// </summary>
+    private IGoldenSetGate GoldenSet
+        => goldenSet ?? formulaLinks as IGoldenSetGate
+           ?? throw new InvalidOperationException("Ворота золотого набору не підключено до перемикання рушія (PSS-23).");
 
     /// <summary>Перемикає групу версій.</summary>
     /// <param name="request">Версії, рушій, причина.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <exception cref="BusinessRuleException">
     /// <c>ECR-CALC-0422</c>: <c>switchReasonRequired</c>, <c>switchEngineInvalid</c>, <c>switchVersionsRequired</c>,
-    /// <c>switchGroupIncomplete</c> (немає бібліотеки чи імпортера в запиті), <c>switchChecksFailed</c> (є проблеми);
-    /// <c>ECR-CALC-0409</c>: <c>scriptSwitchNotPublished</c> — версія не опублікована.
+    /// <c>switchGroupIncomplete</c> (немає бібліотеки чи імпортера в запиті), <c>switchChecksFailed</c> (є проблеми),
+    /// <c>switchGoldenSetEmpty</c> / <c>switchGoldenNoExpectations</c> / <c>switchGoldenSetDiverged</c> (PSS-23: золотий набір
+    /// не зелений на Script);
+    /// <c>ECR-CALC-0409</c>: <c>scriptSwitchNotPublished</c> — версія не опублікована; <c>scriptSwitchDeprecated</c> —
+    /// виведену з ужитку не перемикають на Script (PSS-23).
     /// </exception>
     /// <exception cref="NotFoundException">Версії немає.</exception>
     public async Task<SwitchScriptEngineResponse> HandleAsync(SwitchScriptEngineRequest request, CancellationToken ct)
@@ -392,6 +405,21 @@ public sealed class SwitchScriptEngineHandler(
                     new Dictionary<string, object?>
                     {
                         ["messageKey"] = "err.ECR-CALC-0409.scriptSwitchNotPublished",
+                        ["version"] = version.Version,
+                    });
+            }
+
+            // ⛔ PSS-23 (рішення людини 20.11, §6 п. 9): виведена з ужитку версія на Script не перемикається — вона рахує
+            // лише історичні періоди, і змінювати їй рушій означало б тихо переписати вже подані числа. Назад на Formulas
+            // (повернення до перевірених формул) — дозволено.
+            if (engine == MethodologyEngine.Script && version.Status == TemplateVersionStatus.Deprecated)
+            {
+                throw new BusinessRuleException(
+                    "ECR-CALC-0409",
+                    $"Версія {methodology.Code} {version.Version} виведена з ужитку: на Script вона не перемикається.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-CALC-0409.scriptSwitchDeprecated",
                         ["version"] = version.Version,
                     });
             }
@@ -598,6 +626,16 @@ public sealed class SwitchScriptEngineHandler(
             await materializer
                 .WriteForSwitchAsync(version.Id, methodology.Id, analysis.Compilation.Script!, analysis.Environment!, ct)
                 .ConfigureAwait(false);
+        }
+
+        // ⛔ PSS-23: золотий набір КОЖНОЇ версії групи — уже рушієм Script, на матеріалізованому складі (модуль скрипта
+        // читає виходи й прив'язки з бази, тож спершу збереження). Червоний набір будь-якої версії відкочує всю групу:
+        // транзакцію тримає викликач. Ті самі вердикти, що в публікації (`PublishMethodologyHandler`).
+        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        var gate = GoldenSet;
+        foreach (var (methodology, version) in group)
+        {
+            await gate.RequireGreenForEngineSwitchAsync(methodology, version, ct).ConfigureAwait(false);
         }
     }
 

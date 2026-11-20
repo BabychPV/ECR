@@ -35,6 +35,7 @@ public sealed class ScriptMigrationHandlerTests
     private readonly IVersionSourceReader _reader = Substitute.For<IVersionSourceReader>();
     private readonly IScriptMigrationStore _migration = Substitute.For<IScriptMigrationStore>();
     private readonly IFormulaLinkRebuilder _links = Substitute.For<IFormulaLinkRebuilder>();
+    private readonly IGoldenSetGate _gate = Substitute.For<IGoldenSetGate>();
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
     private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
@@ -95,7 +96,7 @@ public sealed class ScriptMigrationHandlerTests
         => new(_store, _drafts, _migration, Analyzer(),
             new ScriptMaterializer(_store, _drafts, ScriptTestKit.Catalog(), Substitute.For<ICalculationBindingStore>()),
             _links,
-            _uow, _audit, _access, _user, _clock);
+            _uow, _audit, _access, _user, _clock, goldenSet: _gate);
 
     private void Publish(MethodologyVersion version, string? shadow = Text)
     {
@@ -517,6 +518,81 @@ public sealed class ScriptMigrationHandlerTests
         // F13a: ребра методологій і довідників, переписані скриптом, перебудовано за формулами — і лише при поверненні
         // (на Script їх пише матеріалізація).
         await _links.Received(1).RebuildAsync(_alpha, _alphaVersion, Arg.Any<CancellationToken>());
+
+        // PSS-23: на Script — ворота золотого набору (уже на рушії Script); назад на формули — без них.
+        await _gate.Received(1).RequireGreenForEngineSwitchAsync(_alpha, _alphaVersion, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Finding", "PSS-23")]
+    public async Task Switch_на_Script_з_червоним_золотим_набором_відмовляє_і_не_пише_журналу()
+    {
+        Publish(_alphaVersion);
+        _store.GetOutputsAsync(AlphaV, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<MethodologyOutput>>([Output("OUT_A", ScriptTestKit.Tonne, false)]));
+        var engineAtGate = MethodologyEngine.Formulas;
+        _gate.RequireGreenForEngineSwitchAsync(_alpha, _alphaVersion, Arg.Any<CancellationToken>())
+            .Returns(_ =>
+            {
+                engineAtGate = _alphaVersion.Engine;
+                throw new BusinessRuleException(
+                    "ECR-CALC-0422",
+                    "red",
+                    new Dictionary<string, object?> { ["messageKey"] = "err.ECR-CALC-0422.switchGoldenSetDiverged" });
+            });
+
+        // Мутація: прибрати виклик воріт із `SwitchToScriptAsync` — перемикання проходить, журнал пишеться.
+        Assert.Equal(
+            "err.ECR-CALC-0422.switchGoldenSetDiverged",
+            await KeyAsync(() => Switch().HandleAsync(new SwitchScriptEngineRequest([AlphaV], "Script", "why"), default)));
+
+        // Набір проганяється вже рушієм Script, на матеріалізованому складі (транзакцію відкочує викликач).
+        Assert.Equal(MethodologyEngine.Script, engineAtGate);
+        await _store.Received(1).ReplaceScriptReadTablesAsync(AlphaV, Arg.Any<IReadOnlyList<string>>(), Arg.Any<CancellationToken>());
+        await _audit.DidNotReceiveWithAnyArgs().WritePublicationEventAsync(default!, default);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Finding", "PSS-23")]
+    public async Task Switch_виведеної_з_ужитку_версії_на_Script_409_а_назад_на_Formulas_дозволено()
+    {
+        Publish(_alphaVersion);
+        _alphaVersion.Deprecate();
+        _store.GetOutputsAsync(AlphaV, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<MethodologyOutput>>([Output("OUT_A", ScriptTestKit.Tonne, false)]));
+
+        // Мутація: прибрати перевірку Deprecated — перемикання проходить (ворота-заглушка зелені).
+        Assert.Equal(
+            "err.ECR-CALC-0409.scriptSwitchDeprecated",
+            await KeyAsync(() => Switch().HandleAsync(new SwitchScriptEngineRequest([AlphaV], "Script", "why"), default)));
+        Assert.Equal(MethodologyEngine.Formulas, _alphaVersion.Engine);
+        await _gate.DidNotReceiveWithAnyArgs().RequireGreenForEngineSwitchAsync(default!, default!, default);
+        await _audit.DidNotReceiveWithAnyArgs().WritePublicationEventAsync(default!, default);
+
+        // Повернення на перевірені формули рішення не забороняє.
+        var back = await Switch().HandleAsync(new SwitchScriptEngineRequest([AlphaV], "Formulas", "відкат"), default);
+        Assert.Equal("Formulas", back.Engine);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Finding", "PSS-23")]
+    public async Task Switch_без_воріт_золотого_набору_не_перемикає_на_Script()
+    {
+        Publish(_alphaVersion);
+        _store.GetOutputsAsync(AlphaV, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<MethodologyOutput>>([Output("OUT_A", ScriptTestKit.Tonne, false)]));
+        var unguarded = new SwitchScriptEngineHandler(
+            _store, _drafts, _migration, Analyzer(),
+            new ScriptMaterializer(_store, _drafts, ScriptTestKit.Catalog(), Substitute.For<ICalculationBindingStore>()),
+            _links, _uow, _audit, _access, _user, _clock);
+
+        // Закрито, а не відкрито: складання без воріт не перемикає мовчки.
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => unguarded.HandleAsync(new SwitchScriptEngineRequest([AlphaV], "Script", "why"), default));
+        await _audit.DidNotReceiveWithAnyArgs().WritePublicationEventAsync(default!, default);
     }
 
     [Fact]
