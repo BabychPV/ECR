@@ -1,5 +1,6 @@
 import type { JSX } from 'react';
 import { Alert, Text } from '@mantine/core';
+import { periodLabel } from '@/features/workflow/SheetActions';
 import { isEventOfSheet, useWorkflowHistory, type WorkflowEvent } from '@/features/workflow/api';
 import { formatDate } from '@/shared/format/datetime';
 import { t } from '@/shared/i18n';
@@ -27,6 +28,11 @@ interface DocumentSheetBannerProps {
   readonly periodAction?: JSX.Element | null;
   /** ✎ LAND-YEAR L7a: документ «рік» — ширші причини банера називають «Year YYYY» (`DocumentLockBanner`). */
   readonly yearLayout?: boolean;
+  /**
+   * ✎ D-6: документ «рік» — місяць, про який банер (`state`/`lock` уже його); журнал переходів читається за ним, а
+   * заголовок називає місяць. `null`/не задано — банер про період сторінки, як було.
+   */
+  readonly decisionPeriodKey?: number | null;
 }
 
 /**
@@ -55,10 +61,13 @@ export function DocumentSheetBanner({
   recalculatedAfterSubmission = false,
   periodAction = null,
   yearLayout = false,
+  decisionPeriodKey = null,
 }: DocumentSheetBannerProps): JSX.Element | null {
   const contextual =
     !widerLock(lock) && (lock === 'sheetSubmitted' || lock === 'sheetApproved' || state === 'Rejected');
-  const history = useWorkflowHistory(documentId, periodKey, contextual, sheetCopyId);
+  const history = useWorkflowHistory(documentId, decisionPeriodKey ?? periodKey, contextual, sheetCopyId);
+  // ✎ D-6: «Submitted 17 Sep by D. Akhmetova · April 2026» — місяць у заголовку, щоб не читалося як про якір.
+  const monthSuffix = decisionPeriodKey === null ? '' : ` · ${periodLabel(decisionPeriodKey)}`;
 
   if (!contextual) {
     return <DocumentLockBanner lock={lock} periodKey={periodKey} periodAction={periodAction} yearLayout={yearLayout} />;
@@ -75,7 +84,7 @@ export function DocumentSheetBanner({
         role="status"
         data-document-lock={lock}
         data-testid="document-sheet-banner"
-        title={who === null ? t('document.banner.submitted') : t('document.banner.submittedBy', who)}
+        title={(who === null ? t('document.banner.submitted') : t('document.banner.submittedBy', who)) + monthSuffix}
       >
         {/* ⚠ Речення посібника — окремим текстом, крок — окремим елементом:
             людина (і тест) знаходить те саме речення, що в розділі 5.3. */}
@@ -98,7 +107,7 @@ export function DocumentSheetBanner({
         role="status"
         data-document-lock={lock}
         data-testid="document-sheet-banner"
-        title={who === null ? t('document.banner.approved') : t('document.banner.approvedBy', who)}
+        title={(who === null ? t('document.banner.approved') : t('document.banner.approvedBy', who)) + monthSuffix}
       >
         {t('document.lock.sheetApproved')}
       </Alert>

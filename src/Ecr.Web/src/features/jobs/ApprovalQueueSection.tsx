@@ -182,7 +182,7 @@ function ApprovalRow({
           )}
         </div>
         <Group justify="flex-end">
-          <Anchor component={Link} to={approvalQueueHref(item)} size="sm" data-action="review" onClick={onNavigate}>
+          <Anchor component={Link} to={approvalQueueHref(item, { decide: true })} size="sm" data-action="review" onClick={onNavigate}>
             {t('myTasks.approval.open')}
           </Anchor>
         </Group>

@@ -1,7 +1,7 @@
 import { lazy, Suspense, useRef, useState, type JSX, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import { Button, Menu, Text } from '@mantine/core';
 import { exportFormatOptions, type ExportFormat } from '@/features/export/exportFormat';
-import { RecalculateKbd, submitLabel, useSheetActions, type SheetActionsModel } from '@/features/workflow/SheetActions';
+import { decisionLabel, RecalculateKbd, submitLabel, useSheetActions, type SheetActionsModel } from '@/features/workflow/SheetActions';
 import { Hint } from '@/shared/ui/Hint';
 import type { DocumentLock } from './documentLock';
 import { DocumentSheetBanner } from './DocumentSheetBanner';
@@ -11,6 +11,7 @@ import { DocumentToolbar } from './DocumentToolbar';
 // що припадав на зсув (натиск на старому місці «More», відпуск — уже поза нею), губився: меню не
 // відкривалось (e2e-stand 39994116932, 40023308269 — «Edit access» не з'являвся 45 с). Модуль — кілька
 // сотень байтів із `Menu`/`Button`/`Text`, що вже в чанку маршруту (`D-132`).
+import { DecisionPeriodPicker } from './DecisionPeriodPicker';
 import { SubmitPeriodPicker } from './SubmitPeriodPicker';
 import { useStaleResultsReminder, type StaleReminderState } from './useStaleResultsReminder';
 import { t } from '@/shared/i18n';
@@ -68,6 +69,8 @@ interface DocumentActionBarProps {
   readonly periodAction?: JSX.Element | null;
   /** ✎ LAND-YEAR L7a: документ «рік» — банер замка називає «Year YYYY» замість місяця-якоря. */
   readonly yearLayout?: boolean;
+  /** ✎ D-6: місяць із посилання черги погодження (`?decide=`) — ціль «Approve» за замовчуванням, якщо він чекає затвердження. */
+  readonly decideMonth?: number | null;
 }
 
 /**
@@ -107,8 +110,9 @@ export function DocumentActionBar({
   staleReminderHost,
   periodAction = null,
   yearLayout = false,
+  decideMonth = null,
 }: DocumentActionBarProps): JSX.Element {
-  const actions = useSheetActions({ documentId, sheetDefId, sheetCopyId, sheetName, periodKey, state, lock });
+  const actions = useSheetActions({ documentId, sheetDefId, sheetCopyId, sheetName, periodKey, state, lock, yearLayout, decideMonth });
   useStaleResultsReminder(documentId, resultsStale === true, actions.recalculate !== null, staleReminderHost);
   // ✎ D-441 CLS: доки сервер не відповів, ЧИ і ЯКИЙ період подавати, остаточна форма рядка дій невідома
   // (кнопка «Подати: <період>», ▾, «Next to submit: …» або нічого) — скелет замість дій (`DocumentToolbar`,
@@ -197,7 +201,7 @@ export function DocumentActionBar({
     ) : null,
     actions.recall !== null ? (
       <Menu.Item key="recall" disabled={actions.stale} onClick={actions.recall.ask}>
-        {t('workflow.recall')}
+        {decisionLabel('recall', actions.recall.periodKey)}
       </Menu.Item>
     ) : null,
   ];
@@ -215,17 +219,33 @@ export function DocumentActionBar({
       // ⚠ `variant="filled"` явно: за ним екранний тест рахує головні дії (`L1`).
       <SubmitAction submit={actions.submit} variant="filled" />
     ) : actions.approve !== null ? (
-      // ⛔ `X-05`: `statusSuccess` підібрано до AA 4.5:1 (`theme.ts`, `contrast.test.ts`).
-      <Button
-        variant="filled"
-        color="statusSuccess"
-        loading={actions.approve.loading}
-        onClick={actions.approve.ask}
-        {...staleProps}
-      >
-        {t('workflow.approve')}
-      </Button>
+      <>
+        {/* ⛔ `X-05`: `statusSuccess` підібрано до AA 4.5:1 (`theme.ts`, `contrast.test.ts`). */}
+        <Button
+          variant="filled"
+          color="statusSuccess"
+          loading={actions.approve.loading}
+          onClick={actions.approve.ask}
+          data-testid="document-approve"
+          data-period-key={actions.approve.periodKey ?? undefined}
+          {...staleProps}
+        >
+          {decisionLabel('approve', actions.approve.periodKey)}
+        </Button>
+        {/* ✎ D-6: річна розкладка — вибір іншого місяця, що чекає затвердження (як ▾ біля «Submit»). */}
+        <DecisionPeriodPicker decision={actions.approve} action="approve" />
+      </>
     ) : null;
+
+  // ✎ D-6: річна розкладка — банер описує ЦІЛЬОВИЙ місяць (поданий/затверджений), а не якір сторінки. Ширші причини
+  // (архівний проєкт, закритий період) важливіші за стан місяця — їх не підміняємо.
+  const bannerTarget = yearLayout ? actions.decisionTarget : null;
+  const bannerLock: DocumentLock | null =
+    bannerTarget === null || lock === 'projectArchived' || lock === 'periodClosed' || lock === 'periodNotOpen'
+      ? lock
+      : bannerTarget.state === 'Submitted'
+        ? 'sheetSubmitted'
+        : 'sheetApproved';
 
   return (
     <>
@@ -257,17 +277,27 @@ export function DocumentActionBar({
 
         {/* ⛔ Затвердження і відхилення — пара: «Reject» поруч з «Approve». */}
         {actions.reject !== null && (
-          <Button color="statusError" variant="outline" onClick={actions.reject.ask} {...staleProps}>
-            {t('workflow.reject')}
+          <Button color="statusError" variant="outline" onClick={actions.reject.ask} data-testid="document-reject" {...staleProps}>
+            {decisionLabel('reject', actions.reject.periodKey)}
           </Button>
         )}
 
         {/* ⚠ На затвердженому аркуші головної дії немає — повернення в роботу
             (окреме небезпечне право, причина обов'язкова) лишається видимим. */}
         {actions.reopen !== null && (
-          <Button variant="default" onClick={actions.reopen.ask} {...staleProps}>
-            {t('workflow.reopen')}
-          </Button>
+          <>
+            <Button
+              variant="default"
+              onClick={actions.reopen.ask}
+              data-testid="document-reopen"
+              data-period-key={actions.reopen.periodKey ?? undefined}
+              {...staleProps}
+            >
+              {decisionLabel('reopen', actions.reopen.periodKey)}
+            </Button>
+            {/* ✎ D-6: річна розкладка — вибір іншого затвердженого місяця. */}
+            <DecisionPeriodPicker decision={actions.reopen} action="reopen" />
+          </>
         )}
       </DocumentToolbar>
 
@@ -279,8 +309,9 @@ export function DocumentActionBar({
         periodKey={periodKey}
         sheetCode={sheetCode}
         sheetCopyId={sheetCopyId}
-        state={state}
-        lock={lock}
+        state={bannerTarget?.state ?? state}
+        lock={bannerLock}
+        decisionPeriodKey={bannerTarget?.periodKey ?? null}
         canDecide={actions.approve !== null || actions.reject !== null}
         recalculatedAfterSubmission={recalculatedAfterSubmission}
         periodAction={periodAction}

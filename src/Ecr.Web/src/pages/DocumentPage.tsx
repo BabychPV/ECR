@@ -315,6 +315,8 @@ export function DocumentPage(): JSX.Element {
   // `UI-22`: вибрана таблиця й режим показу читаються тут лише для заглушки чанка сітки.
   const [tableParam] = useUrlState('table');
   const [viewParam] = useUrlState('view');
+  // ✎ D-6: місяць із посилання черги погодження — `?periodKey` річної сторінки нормалізується до якоря, тож місяць окремо.
+  const [decideParam] = useUrlNumber('decide');
   const periodKey = urlPeriod ?? currentPeriodKey();
   const setPeriodKey = setUrlPeriod;
 
@@ -1016,6 +1018,7 @@ export function DocumentPage(): JSX.Element {
             staleReminderHost={staleReminderHost}
             periodAction={periodReopen.lockAction}
             yearLayout={yearLayout}
+            decideMonth={decideParam}
             status={
               <>
                 {/* ✎ UI-15: чип стану аркуша і заповненість одним рядком
