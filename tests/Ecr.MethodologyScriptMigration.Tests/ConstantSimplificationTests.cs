@@ -104,6 +104,55 @@ public sealed class ConstantSimplificationTests
         Assert.Single(result.Text.Split("const Present = ", StringSplitOptions.None).Skip(1));
     }
 
+    /// <summary>
+    /// F13 (D-556): стиснення «категорія -> значення + карта наявності» не міняє читання. Пара «категорія x речовина»,
+    /// якої у складі немає, лишається поза картою наявності (читання - <c>#N/A</c>, як у мапі мап), а категорія з різними
+    /// значеннями по речовинах стиснення не отримує. Мутації: прибрати перевірку <c>!Equals(value, cell)</c> у
+    /// <c>WithPresence</c> (числа різних речовин зливаються) або класти в карту наявності всі речовини - червоні.
+    /// </summary>
+    [Fact]
+    public void Стиснення_констант_не_вигадує_відсутні_пари_і_не_зливає_різні_значення()
+    {
+        string[] substances = ["0301", "0304", "0330"];
+
+        // A: 0301 і 0304 однакові, 0330 немає; B: усі три однакові.
+        var compact = Convert(Sup.Version(
+            OneFormula("CST.K"),
+            [
+                SourceConstant.OfNumber("K", 5, "A", "0301"), SourceConstant.OfNumber("K", 5, "A", "0304"),
+                SourceConstant.OfNumber("K", 7, "B", "0301"), SourceConstant.OfNumber("K", 7, "B", "0304"),
+                SourceConstant.OfNumber("K", 7, "B", "0330"),
+            ],
+            categoryRule: "'A'",
+            categories: ["A", "B"],
+            substances: substances));
+
+        Assert.Contains("Present", compact.Text);
+        var script = Sup.Compile(compact.Text!);
+        var values = script.Constants["K"].Map!;
+        Assert.Equal(5m, values["A"].Scalar!.Value.Value);
+        Assert.Equal(7m, values["B"].Scalar!.Value.Value);
+        var present = script.Constants["Present"].Map!;
+        Assert.Equal(["0301", "0304"], present["A"].Map!.Keys.Order());
+        Assert.Equal(["0301", "0304", "0330"], present["B"].Map!.Keys.Order());
+
+        // Різні значення в одній категорії - стиснення немає, значення кожної речовини своє.
+        var plain = Convert(Sup.Version(
+            OneFormula("CST.K"),
+            [
+                SourceConstant.OfNumber("K", 5, "A", "0301"), SourceConstant.OfNumber("K", 6, "A", "0304"),
+                SourceConstant.OfNumber("K", 7, "B", "0301"), SourceConstant.OfNumber("K", 7, "B", "0304"),
+            ],
+            categoryRule: "'A'",
+            categories: ["A", "B"],
+            substances: ["0301", "0304"]));
+
+        Assert.DoesNotContain("Present", plain.Text);
+        var map = Sup.Compile(plain.Text!).Constants["K"].Map!;
+        Assert.Equal(5m, map["A"].Map!["0301"].Scalar!.Value.Value);
+        Assert.Equal(6m, map["A"].Map!["0304"].Scalar!.Value.Value);
+    }
+
     [Fact]
     public void Залежне_від_категорії_й_речовини_і_форма_категорія_підкреслення_код()
     {
