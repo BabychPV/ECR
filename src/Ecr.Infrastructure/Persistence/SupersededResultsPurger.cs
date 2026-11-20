@@ -75,12 +75,12 @@ internal sealed partial class SupersededResultsPurger(
     /// <list type="bullet">
     /// <item><c>Superseded</c> — завжди: стан кінцевий (назад у <c>Current</c> не повертається) і за побудовою старіший
     /// за актуальний — його витіснив новіший прогін або новіший уже був актуальним (відмова «старіший за актуальний»).</item>
-    /// <item><c>Failed</c> — лише коли (а) у ТОМУ САМОМУ ланцюгу (проєкт, період, документ — рівно, з <c>NULL</c>)
-    /// є НОВІШИЙ <c>Current</c> і (б) прогін стартував раніше за <see cref="SupersededPurgeOptions.FailedRunGrace"/>.
-    /// (а): такий прогін, навіть якщо його помилково закрив <c>AbandonedWorkSweeper</c> і він ще живий, актуальним уже
-    /// не стане — перемикання відмовить йому як старішому (<c>SwitchCurrentRunAsync</c>, та сама вісь документа);
-    /// новіший за актуальний <c>Failed</c> (остання спроба) лишається для діагностики, доки ланцюг не завершиться
-    /// успіхом. (б): страховка від гонитви з таким «живим» прогоном за будь-якої зміни актуальності.</item>
+    /// <item><c>Failed</c> — лише коли (а) для того самого «документ × період» є НОВІШИЙ <c>Current</c> за будь-якою
+    /// віссю: того самого документа (рівно, з <c>NULL</c>) або прогін усього проєкту (<c>DocumentId IS NULL</c>), що
+    /// покриває документ; і (б) прогін стартував раніше за <see cref="SupersededPurgeOptions.FailedRunGrace"/>.
+    /// Актуальним такий прогін уже не стане: <c>SwitchCurrentRunAsync</c> перечитує статус під <c>UPDLOCK</c> і відмовляє
+    /// всьому, що не <c>Running</c>. (б) — додаткова страховка. <c>Failed</c> без новішого <c>Current</c> (остання
+    /// спроба; або актуального немає зовсім) лишається — це єдина діагностика ланцюга.</item>
     /// <item><c>Current</c>, <c>Running</c> і будь-який інший статус — ніколи.</item>
     /// </list>
     /// </remarks>
@@ -93,7 +93,7 @@ internal sealed partial class SupersededResultsPurger(
                             AND cu.ProjectId = {alias}.ProjectId
                             AND cu.Id > {alias}.Id
                             AND (cu.PeriodKey = {alias}.PeriodKey OR (cu.PeriodKey IS NULL AND {alias}.PeriodKey IS NULL))
-                            AND (cu.DocumentId = {alias}.DocumentId OR (cu.DocumentId IS NULL AND {alias}.DocumentId IS NULL)))))
+                            AND (cu.DocumentId = {alias}.DocumentId OR cu.DocumentId IS NULL))))
         """;
 
     /// <summary>Таблиці, які зачіпає правило, з урахуванням <see cref="SupersededPurgeOptions.IncludeTrace"/>.</summary>
@@ -311,7 +311,8 @@ internal sealed partial class SupersededResultsPurger(
     /// <param name="ct">Скасування.</param>
     internal async Task<int> PurgeRunsAsync(IReadOnlyList<SupersededRun> runs, CancellationToken ct)
     {
-        var budget = new Budget(options.MaxBatchesPerRun);
+        // ✎ D-560: власна мала стеля швидкого шляху; накопиченого він не чіпає (лише передані прогони).
+        var budget = new Budget(SupersededPurgeOptions.FastPathMaxBatches);
         await using var scope = await ConnectionScope.OpenAsync(db, ct).ConfigureAwait(false);
 
         if (await RunIndexesPresentAsync(ct).ConfigureAwait(false))

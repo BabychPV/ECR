@@ -16,7 +16,10 @@ namespace Ecr.Infrastructure.Persistence;
 /// </param>
 /// <param name="BatchSize">Скільки рядків видаляє один оператор <c>DELETE</c> (500: ≈ 5 замків на рядок &lt; 5000 порога ескалації).</param>
 /// <param name="PauseBetweenBatches">Пауза між пакетами, щоб не тримати таблицю, яку читають і пишуть перерахунки.</param>
-/// <param name="MaxBatchesPerRun">Стеля пакетів за один прохід нічної задачі; решту доїсть наступний.</param>
+/// <param name="MaxBatchesPerRun">
+/// Нічний бюджет: стеля пакетів, які нічна задача видаляє за ОДНЕ нічне вікно (накопичене дочищується за кілька ночей).
+/// Швидкий шлях має власну стелю <see cref="FastPathMaxBatches"/>.
+/// </param>
 /// <param name="IncludeTrace">
 /// Чи прибирати також <c>calc.CalculationStep</c> і <c>calc.CalculationInput</c> (ті самі правила, що для результатів).
 /// <c>false</c> — рядок прогону лишається: на нього посилаються кроки й входи (FK).
@@ -49,6 +52,81 @@ public sealed record SupersededPurgeOptions(
     int CheckpointEveryBatches,
     bool RebuildAfter)
 {
+    /// <summary>
+    /// Нічне вікно (місцевий час сервера), лише в якому нічна задача ВИДАЛЯЄ накопичене; поза ним — лише лічить.
+    /// Початок; кінець — <see cref="NightWindowEnd"/> (вікно може переходити через північ).
+    /// </summary>
+    public TimeSpan NightWindowStart { get; init; } = DefaultNightWindowStart;
+
+    /// <summary>Кінець нічного вікна (місцевий час сервера); прохід, що до нього не доїв, зупиняється (<c>windowEnd</c>).</summary>
+    public TimeSpan NightWindowEnd { get; init; } = DefaultNightWindowEnd;
+
+    /// <summary>Ключ: нічне вікно видалення, <c>HH:mm-HH:mm</c> місцевого часу сервера.</summary>
+    public const string NightWindowKey = "Calculations:SupersededPurge:NightWindow";
+
+    /// <summary>Дефолт початку нічного вікна — 01:00.</summary>
+    public static readonly TimeSpan DefaultNightWindowStart = TimeSpan.FromHours(1);
+
+    /// <summary>Дефолт кінця нічного вікна — 05:00.</summary>
+    public static readonly TimeSpan DefaultNightWindowEnd = TimeSpan.FromHours(5);
+
+    /// <summary>
+    /// Стеля пакетів ШВИДКОГО шляху (одне перемикання): він прибирає лише щойно витіснені прогони — одиниці, рідко
+    /// сотні пакетів; накопиченого (backlog) не чіпає ніколи, його дочищує нічна задача у своєму вікні.
+    /// </summary>
+    public const int FastPathMaxBatches = 2000;
+
+    /// <summary>Чи момент <paramref name="localTime"/> (місцевий час сервера) — усередині нічного вікна.</summary>
+    /// <param name="localTime">Час доби.</param>
+    public bool InNightWindow(TimeSpan localTime)
+        => NightWindowStart <= NightWindowEnd
+            ? localTime >= NightWindowStart && localTime < NightWindowEnd
+            : localTime >= NightWindowStart || localTime < NightWindowEnd;
+
+    /// <summary>
+    /// Межі поточного входження нічного вікна (місцевий час), якщо <paramref name="local"/> у ньому; інакше <c>null</c>.
+    /// </summary>
+    /// <param name="local">Місцевий час сервера.</param>
+    public (DateTime Start, DateTime End)? NightWindowAround(DateTime local)
+    {
+        if (!InNightWindow(local.TimeOfDay))
+        {
+            return null;
+        }
+
+        var start = local.Date + NightWindowStart;
+        if (start > local)
+        {
+            start = start.AddDays(-1);
+        }
+
+        var end = start.Date + NightWindowEnd;
+        if (end <= start)
+        {
+            end = end.AddDays(1);
+        }
+
+        return (start, end);
+    }
+
+    /// <summary>Розбирає <c>HH:mm-HH:mm</c>; недійсне — <c>null</c>.</summary>
+    /// <param name="text">Значення ключа.</param>
+    public static (TimeSpan Start, TimeSpan End)? ParseNightWindow(string? text)
+    {
+        var parts = text?.Split('-', StringSplitOptions.TrimEntries);
+        if (parts is not { Length: 2 }
+            || !TimeSpan.TryParseExact(parts[0], @"hh\:mm", CultureInfo.InvariantCulture, out var start)
+            || !TimeSpan.TryParseExact(parts[1], @"hh\:mm", CultureInfo.InvariantCulture, out var end)
+            || start == end
+            || start >= TimeSpan.FromDays(1)
+            || end >= TimeSpan.FromDays(1))
+        {
+            return null;
+        }
+
+        return (start, end);
+    }
+
     /// <summary>Ключ: чи прибирати взагалі.</summary>
     public const string EnabledKey = "Calculations:SupersededPurge:Enabled";
 
@@ -89,19 +167,19 @@ public sealed record SupersededPurgeOptions(
     public const int DefaultPauseMilliseconds = 50;
 
     /// <summary>
-    /// Дефолт стелі пакетів за прохід. ✎ <c>D-560</c>: перше прибирання стенда Land — ≈ 17,8 млн рядків
-    /// (≈ 36 тис. пакетів по 500) — мусить вміститися в одну ніч; стеля — запобіжник тривалості, а не темп.
+    /// Дефолт нічного бюджету пакетів. ✎ <c>D-560</c>: накопичене (стенд Land — ≈ 36 тис. пакетів по 500) дочищується
+    /// за кілька ночей; 5 000 пакетів ≈ 30–40 хв на кроках трейсу (замір 20.11) — гарантовано в межах вікна.
     /// </summary>
-    public const int DefaultMaxBatchesPerRun = 60000;
+    public const int DefaultMaxBatchesPerRun = 5000;
 
     /// <summary>
     /// Скільки має минути від СТАРТУ <c>Failed</c>-прогону, перш ніж його можна прибрати (<c>D-560</c>).
     /// </summary>
     /// <remarks>
-    /// ⛔ <c>Failed</c> — не завжди мертвий прогін: <c>AbandonedWorkSweeper</c> закриває «покинутий» <c>Running</c>
-    /// за 2 год, поки живі інші перерахунки, а довгий перерахунок документа-року живе й довше. Такий прогін, завершившись,
-    /// ще зробить себе актуальним (<c>CalculationResultStore.SwitchCurrentRunAsync</c> перезаписує статус). Прибрати
-    /// його рядки раніше — лишити період з актуальним прогоном без чисел. Доба — з запасом понад будь-яку задачу.
+    /// <c>AbandonedWorkSweeper</c> закриває «покинутий» <c>Running</c> за 2 год, поки живі інші перерахунки, а довгий
+    /// перерахунок документа-року живе й довше. Актуальним такий прогін не стане (<c>SwitchCurrentRunAsync</c>
+    /// перечитує статус під <c>UPDLOCK</c> і відмовляє не-<c>Running</c>); доба — додаткова страховка, щоб не забирати
+    /// рядки в ще живого прогону.
     /// </remarks>
     public static readonly TimeSpan FailedRunGrace = TimeSpan.FromHours(24);
 
@@ -155,8 +233,18 @@ public sealed record SupersededPurgeOptions(
             MaxLogPauses: Math.Max(0, Number(configuration, MaxLogPausesKey, DefaultMaxLogPauses)),
             CheckpointEveryBatches: Math.Max(
                 1, Number(configuration, CheckpointEveryBatchesKey, DefaultCheckpointEveryBatches)),
-            RebuildAfter: Flag(configuration, RebuildAfterKey, defaultValue: false));
+            RebuildAfter: Flag(configuration, RebuildAfterKey, defaultValue: false))
+        {
+            // Недійсне вікно — дефолт 01:00-05:00 (задача пише попередження в журнал, NightWindowInvalid).
+            NightWindowStart = ParseNightWindow(configuration[NightWindowKey])?.Start ?? DefaultNightWindowStart,
+            NightWindowEnd = ParseNightWindow(configuration[NightWindowKey])?.End ?? DefaultNightWindowEnd,
+            NightWindowInvalid = !string.IsNullOrWhiteSpace(configuration[NightWindowKey])
+                                 && ParseNightWindow(configuration[NightWindowKey]) is null,
+        };
     }
+
+    /// <summary>Значення <see cref="NightWindowKey"/> задано, але не розібрано (діє дефолт).</summary>
+    public bool NightWindowInvalid { get; init; }
 
     private static bool Flag(IConfiguration configuration, string key, bool defaultValue)
         => bool.TryParse(configuration[key]?.Trim(), out var parsed) ? parsed : defaultValue;

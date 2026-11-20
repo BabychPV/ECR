@@ -62,7 +62,21 @@ public sealed partial class SupersededResultsSweepJob(
             SupersededSweepOutcome outcome;
             if (options.Enabled)
             {
-                outcome = await RunAsync(options, progress, ct).ConfigureAwait(false);
+                if (options.NightWindowInvalid)
+                {
+                    LogNightWindowInvalid(logger, SupersededPurgeOptions.NightWindowKey, configuration[SupersededPurgeOptions.NightWindowKey]);
+                }
+
+                // ✎ D-560 (H1): накопичене видаляється ЛИШЕ в нічному вікні і не більше одного проходу видалення за вікно
+                // (нічний бюджет). Поза вікном (наздоганяння на старті служби, ручний запуск удень) — лише лічить.
+                var gate = await DeleteGateAsync(options, run.Id, ct).ConfigureAwait(false);
+                var effective = options.DeleteEnabled && gate.Allowed ? options : options with { DeleteEnabled = false };
+                outcome = await RunAsync(effective, progress, ct, gate.UntilUtc).ConfigureAwait(false);
+                if (options.DeleteEnabled && !gate.Allowed)
+                {
+                    LogDeleteDeferred(logger, gate.Reason!);
+                    outcome = outcome with { DeleteDeferred = gate.Reason };
+                }
             }
             else
             {
@@ -81,12 +95,50 @@ public sealed partial class SupersededResultsSweepJob(
         }
     }
 
+    /// <summary>Причина, з якої видалення цього проходу заборонене (<c>null</c> — дозволене), і межа часу видалення.</summary>
+    /// <param name="Allowed">Чи можна видаляти.</param>
+    /// <param name="Reason"><c>outsideWindow</c> або <c>nightBudgetSpent</c>.</param>
+    /// <param name="UntilUtc">Кінець поточного нічного вікна (UTC): далі прохід зупиняється (<c>windowEnd</c>).</param>
+    private sealed record DeleteGate(bool Allowed, string? Reason, DateTime? UntilUtc);
+
+    /// <summary>Чи можна цьому проходу видаляти: зараз нічне вікно і в ньому ще не було проходу видалення.</summary>
+    private async Task<DeleteGate> DeleteGateAsync(SupersededPurgeOptions options, long thisRunId, CancellationToken ct)
+    {
+        var utcNow = clock.UtcNow;
+        var localNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utcNow, DateTimeKind.Utc), TimeZoneInfo.Local);
+        if (options.NightWindowAround(localNow) is not { } window)
+        {
+            return new DeleteGate(false, SupersededSweepOutcome.OutsideWindow, null);
+        }
+
+        // Межі вікна в UTC — різницею від «тепер», без перетворення інших моментів (перехід на літній час не зсуває).
+        var windowStartUtc = utcNow - (localNow - window.Start);
+        var untilUtc = utcNow + (window.End - localNow);
+
+        var spent = await db.MaintenanceRuns
+            .AsNoTracking()
+            .AnyAsync(
+                r => r.JobCode == Code && r.Id != thisRunId && r.StartedAt >= windowStartUtc && r.StartedAt <= utcNow
+                     && r.DetailsJson != null && r.DetailsJson.Contains("\"mode\":\"delete\""),
+                ct)
+            .ConfigureAwait(false);
+
+        return spent
+            ? new DeleteGate(false, SupersededSweepOutcome.NightBudgetSpent, null)
+            : new DeleteGate(true, null, untilUtc);
+    }
+
     /// <summary>Один прохід: перевірки, dry-run (лічить) або видалення пакетами. Публічний для тестів і ручного запуску.</summary>
     /// <param name="options">Налаштування.</param>
     /// <param name="progress">Канал прогресу; <c>null</c> - без звіту.</param>
     /// <param name="ct">Скасування.</param>
+    /// <param name="deleteUntilUtc">Межа часу видалення (кінець нічного вікна); <c>null</c> — без межі (тести, ручний).</param>
+    /// <remarks>
+    /// ⛔ Нічне вікно й нічний бюджет перевіряє <see cref="ExecuteAsync"/> (вхід задачі з розкладу й наздоганяння):
+    /// поза ним сюди приходить <c>DeleteEnabled=false</c>.
+    /// </remarks>
     public async Task<SupersededSweepOutcome> RunAsync(
-        SupersededPurgeOptions options, IJobProgress? progress, CancellationToken ct)
+        SupersededPurgeOptions options, IJobProgress? progress, CancellationToken ct, DateTime? deleteUntilUtc = null)
     {
         ArgumentNullException.ThrowIfNull(options);
 
@@ -115,7 +167,7 @@ public sealed partial class SupersededResultsSweepJob(
         {
             var runs = await purger.ListEligibleRunsAsync(ct).ConfigureAwait(false);
             outcome = options.DeleteEnabled
-                ? await DeleteRunsAsync(purger, options, runs, progress, ct).ConfigureAwait(false)
+                ? await DeleteRunsAsync(purger, options, runs, progress, deleteUntilUtc, ct).ConfigureAwait(false)
                 : await CountRunsAsync(purger, runs, ct).ConfigureAwait(false);
         }
         else
@@ -123,7 +175,7 @@ public sealed partial class SupersededResultsSweepJob(
             SupersededResultsPurger.LogRunIndexesMissing(logger);
             var periods = await purger.ListEligiblePeriodsAsync(ct).ConfigureAwait(false);
             outcome = options.DeleteEnabled
-                ? await DeleteAsync(purger, options, periods, progress, ct).ConfigureAwait(false)
+                ? await DeleteAsync(purger, options, periods, progress, deleteUntilUtc, ct).ConfigureAwait(false)
                 : await CountAsync(purger, periods, ct).ConfigureAwait(false);
             outcome = outcome with { RunIndexes = false };
         }
@@ -163,14 +215,21 @@ public sealed partial class SupersededResultsSweepJob(
     /// </summary>
     private async Task<SupersededSweepOutcome> DeleteRunsAsync(
         SupersededResultsPurger purger, SupersededPurgeOptions options, List<SupersededResultsPurger.EligibleRun> runs,
-        IJobProgress? progress, CancellationToken ct)
+        IJobProgress? progress, DateTime? deleteUntilUtc, CancellationToken ct)
     {
         var budget = new SupersededResultsPurger.Budget(options.MaxBatchesPerRun);
         var deleted = new Dictionary<string, long>(StringComparer.Ordinal);
-        var betweenBatches = await BetweenBatchesAsync(purger, options, budget, ct).ConfigureAwait(false);
+        var guard = await GuardAsync(purger, options, budget, deleteUntilUtc, ct).ConfigureAwait(false);
+        var betweenBatches = guard.BetweenBatches;
         var touched = new SortedSet<int>();
         var finishedAll = true;
         var started = System.Diagnostics.Stopwatch.StartNew();
+
+        // ⛔ H2: журнал і вікно перевіряються ще ДО першого пакета, а не лише після нього (fail closed).
+        if (runs.Count > 0 && !await betweenBatches(ct).ConfigureAwait(false))
+        {
+            budget.Stopped = true;
+        }
 
         for (var i = 0; i < runs.Count; i++)
         {
@@ -224,6 +283,7 @@ public sealed partial class SupersededResultsSweepJob(
             Complete = finishedAll,
             StopReason = budget.StopReason ?? (finishedAll ? null : "maxBatches"),
             ElapsedSeconds = (long)started.Elapsed.TotalSeconds,
+            CheckpointSkipped = guard.CheckpointSkipped,
         };
 
         var deletedSummary = string.Join("; ", deleted.Select(c => $"{c.Key}={c.Value}"));
@@ -231,33 +291,88 @@ public sealed partial class SupersededResultsSweepJob(
 
         if (finishedAll && options.RebuildAfter && touched.Count > 0)
         {
-            await RebuildAsync(purger, touched, ct).ConfigureAwait(false);
-            outcome = outcome with { Rebuilt = true };
+            outcome = await RebuildIfPermittedAsync(purger, touched, outcome, ct).ConfigureAwait(false);
         }
 
         return outcome;
     }
 
-    /// <summary>Перевірка між пакетами: SIMPLE — CHECKPOINT кожні N пакетів; FULL — пауза, поки журнал заповнений.</summary>
-    private async Task<Func<CancellationToken, Task<bool>>> BetweenBatchesAsync(
+    /// <summary>Перевірки між пакетами одного проходу і що з них пропущено через брак права.</summary>
+    private sealed class BatchGuard
+    {
+        /// <summary>Перевірка; <c>false</c> — зупинитися (причина — у бюджеті).</summary>
+        public required Func<CancellationToken, Task<bool>> BetweenBatches { get; init; }
+
+        /// <summary>SIMPLE, але <c>CHECKPOINT</c> пропущено: немає права (db_owner/db_backupoperator).</summary>
+        public bool CheckpointSkipped { get; set; }
+    }
+
+    /// <summary>
+    /// Перевірки між пакетами: межа нічного вікна; SIMPLE — <c>CHECKPOINT</c> кожні N пакетів (якщо є право);
+    /// будь-яка інша модель відновлення (FULL, BULK_LOGGED, невідома) — пауза, поки журнал заповнений, а журнал, який
+    /// не вдалося прочитати, — СТОП (<c>logUnknown</c>): fail closed.
+    /// </summary>
+    private async Task<BatchGuard> GuardAsync(
         SupersededResultsPurger purger, SupersededPurgeOptions options, SupersededResultsPurger.Budget budget,
-        CancellationToken ct)
+        DateTime? deleteUntilUtc, CancellationToken ct)
     {
         var recovery = await ReadRecoveryModelAsync(purger, ct).ConfigureAwait(false);
         var simple = string.Equals(recovery, "SIMPLE", StringComparison.OrdinalIgnoreCase);
-        var full = string.Equals(recovery, "FULL", StringComparison.OrdinalIgnoreCase);
+        var canCheckpoint = simple && await CanCheckpointAsync(purger, ct).ConfigureAwait(false);
         var sinceCheckpoint = 0;
 
-        return async token =>
+        if (simple && !canCheckpoint)
         {
-            if (simple && ++sinceCheckpoint >= options.CheckpointEveryBatches)
-            {
-                sinceCheckpoint = 0;
-                await CheckpointAsync(purger, token).ConfigureAwait(false);
-            }
+            LogCheckpointSkipped(logger);
+        }
 
-            return !full || await WaitForLogAsync(options, budget, token).ConfigureAwait(false);
+        var guard = new BatchGuard
+        {
+            CheckpointSkipped = simple && !canCheckpoint,
+            BetweenBatches = async token =>
+            {
+                if (deleteUntilUtc is { } until && clock.UtcNow >= until)
+                {
+                    budget.StopReason = SupersededSweepOutcome.WindowEnd;
+                    LogWindowEnd(logger);
+                    return false;
+                }
+
+                if (simple)
+                {
+                    if (canCheckpoint && ++sinceCheckpoint >= options.CheckpointEveryBatches)
+                    {
+                        sinceCheckpoint = 0;
+                        await CheckpointAsync(purger, token).ConfigureAwait(false);
+                    }
+
+                    return true;
+                }
+
+                return await WaitForLogAsync(options, budget, token).ConfigureAwait(false);
+            },
         };
+
+        return guard;
+    }
+
+    /// <summary>Чи може обліковий запис служби виконати <c>CHECKPOINT</c> (sysadmin, db_owner, db_backupoperator).</summary>
+    private static async Task<bool> CanCheckpointAsync(SupersededResultsPurger purger, CancellationToken ct)
+    {
+        try
+        {
+            await using var command = purger.CreateCommand(
+                """
+                SELECT CASE WHEN IS_SRVROLEMEMBER(N'sysadmin') = 1 OR IS_ROLEMEMBER(N'db_owner') = 1
+                                 OR IS_ROLEMEMBER(N'db_backupoperator') = 1 THEN 1 ELSE 0 END;
+                """,
+                []);
+            return Convert.ToInt32(await command.ExecuteScalarAsync(ct).ConfigureAwait(false), CultureInfo.InvariantCulture) == 1;
+        }
+        catch (DbException)
+        {
+            return false;
+        }
     }
 
     private static async Task<Dictionary<string, long>> ReadStatusHistogramAsync(
@@ -319,13 +434,19 @@ public sealed partial class SupersededResultsSweepJob(
     /// <summary>Видалення запасною формою (індексів прогону немає): keyset за партиціями, лише рядки.</summary>
     private async Task<SupersededSweepOutcome> DeleteAsync(
         SupersededResultsPurger purger, SupersededPurgeOptions options, List<int> periods, IJobProgress? progress,
-        CancellationToken ct)
+        DateTime? deleteUntilUtc, CancellationToken ct)
     {
         var budget = new SupersededResultsPurger.Budget(options.MaxBatchesPerRun);
         var deleted = new Dictionary<string, long>(StringComparer.Ordinal);
-        var betweenBatches = await BetweenBatchesAsync(purger, options, budget, ct).ConfigureAwait(false);
+        var guard = await GuardAsync(purger, options, budget, deleteUntilUtc, ct).ConfigureAwait(false);
+        var betweenBatches = guard.BetweenBatches;
         var touched = new SortedSet<int>();
         var finishedAll = true;
+
+        if (periods.Count > 0 && !await betweenBatches(ct).ConfigureAwait(false))
+        {
+            budget.Stopped = true;
+        }
 
         foreach (var period in periods)
         {
@@ -372,6 +493,7 @@ public sealed partial class SupersededResultsSweepJob(
             Batches = budget.Done,
             Complete = finishedAll,
             StopReason = budget.StopReason,
+            CheckpointSkipped = guard.CheckpointSkipped,
         };
 
         var deletedSummary = string.Join("; ", deleted.Select(c => $"{c.Key}={c.Value}"));
@@ -380,11 +502,32 @@ public sealed partial class SupersededResultsSweepJob(
         // Перебудова - лише коли ВСЕ прибрано: частково прибрана партиція перебудовувалась би щоразу.
         if (finishedAll && options.RebuildAfter && touched.Count > 0)
         {
-            await RebuildAsync(purger, touched, ct).ConfigureAwait(false);
-            outcome = outcome with { Rebuilt = true };
+            outcome = await RebuildIfPermittedAsync(purger, touched, outcome, ct).ConfigureAwait(false);
         }
 
         return outcome;
+    }
+
+    /// <summary>
+    /// Перебудова після повного прибирання — лише з правом <c>ALTER</c> на всі таблиці правила; без нього — пропуск із
+    /// записом у журнал (<c>rebuildSkipped</c>), а не збій проходу: служба за замовчуванням має лише читання й запис.
+    /// </summary>
+    private async Task<SupersededSweepOutcome> RebuildIfPermittedAsync(
+        SupersededResultsPurger purger, SortedSet<int> touched, SupersededSweepOutcome outcome, CancellationToken ct)
+    {
+        foreach (var table in purger.Tables)
+        {
+            await using var command = purger.CreateCommand(
+                $"SELECT ISNULL(HAS_PERMS_BY_NAME(N'{table}', N'OBJECT', N'ALTER'), 0);", []);
+            if (Convert.ToInt32(await command.ExecuteScalarAsync(ct).ConfigureAwait(false), CultureInfo.InvariantCulture) != 1)
+            {
+                LogRebuildSkipped(logger, table);
+                return outcome with { RebuildSkipped = true };
+            }
+        }
+
+        await RebuildAsync(purger, touched, ct).ConfigureAwait(false);
+        return outcome with { Rebuilt = true };
     }
 
     private async Task<bool> WaitForLogAsync(
@@ -393,7 +536,17 @@ public sealed partial class SupersededResultsSweepJob(
         for (var pause = 0; ; pause++)
         {
             var percent = await ReadLogUsedPercentAsync(ct).ConfigureAwait(false);
-            if (percent is not { } used || used <= options.LogPauseThresholdPercent)
+
+            // ⛔ H2: невідома заповненість журналу — СТОП, а не «продовжити» (fail closed): видалення десятків ГБ при
+            // FULL без резервних копій журналу заповнило б диск.
+            if (percent is not { } used)
+            {
+                budget.StopReason = SupersededSweepOutcome.LogUnknown;
+                LogLogUnknown(logger);
+                return false;
+            }
+
+            if (used <= options.LogPauseThresholdPercent)
             {
                 return true;
             }
@@ -417,10 +570,17 @@ public sealed partial class SupersededResultsSweepJob(
             return await logUsedPercent(ct).ConfigureAwait(false);
         }
 
+        // ✎ H2: `sys.database_files` + FILEPROPERTY — доступні користувачу бази (db_datareader); `sys.dm_db_log_space_usage`
+        // вимагає VIEW SERVER STATE і для служби давав збій → null → прохід продовжував наосліп.
         try
         {
             await using var command = db.Database.GetDbConnection().CreateCommand();
-            command.CommandText = "SELECT used_log_space_in_percent FROM sys.dm_db_log_space_usage;";
+            command.CommandText = """
+                SELECT CAST(SUM(CAST(FILEPROPERTY(name, 'SpaceUsed') AS bigint)) AS float) * 100.0
+                       / NULLIF(SUM(CAST(size AS bigint)), 0)
+                  FROM sys.database_files
+                 WHERE type = 1;
+                """;
             command.Transaction = db.Database.CurrentTransaction?.GetDbTransaction();
             var value = await command.ExecuteScalarAsync(ct).ConfigureAwait(false);
             return value is null or DBNull ? null : Convert.ToDouble(value, CultureInfo.InvariantCulture);
@@ -431,16 +591,17 @@ public sealed partial class SupersededResultsSweepJob(
         }
     }
 
-    private static async Task CheckpointAsync(SupersededResultsPurger purger, CancellationToken ct)
+    private async Task CheckpointAsync(SupersededResultsPurger purger, CancellationToken ct)
     {
         try
         {
             await using var command = purger.CreateCommand("CHECKPOINT;", []);
             await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         }
-        catch (DbException)
+        catch (DbException ex)
         {
-            // Немає права на CHECKPOINT - пакети все одно йдуть; журнал чистить DBA.
+            // Право перевірено заздалегідь (CanCheckpointAsync); збій тут — не привід зупиняти, але не мовчки.
+            LogCheckpointFailed(logger, ex.Message);
         }
     }
 
@@ -488,6 +649,41 @@ public sealed partial class SupersededResultsSweepJob(
         Level = LogLevel.Information,
         Message = "Прибирання рядків неактуальних прогонів (mode=disabled): вимкнено ключем {Key}, нічого не пораховано й не видалено.")]
     private static partial void LogDisabled(ILogger logger, string key);
+
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "Прибирання неактуальних прогонів: видалення відкладено ({Reason}) - прохід лише лічить; накопичене видаляється в нічному вікні.")]
+    private static partial void LogDeleteDeferred(ILogger logger, string reason);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Прибирання неактуальних прогонів: {Key} = «{Value}» не розібрано (очікується HH:mm-HH:mm) - діє 01:00-05:00.")]
+    private static partial void LogNightWindowInvalid(ILogger logger, string key, string? value);
+
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "Прибирання неактуальних прогонів зупинено: нічне вікно скінчилося; решту доїсть наступна ніч.")]
+    private static partial void LogWindowEnd(ILogger logger);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Прибирання неактуальних прогонів зупинено: заповненість журналу транзакцій не прочитано (logUnknown) - без неї видалення не йде.")]
+    private static partial void LogLogUnknown(ILogger logger);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Прибирання неактуальних прогонів: SIMPLE recovery, але CHECKPOINT пропущено - у служби немає права (db_owner/db_backupoperator); журнал звільняють автоматичні контрольні точки.")]
+    private static partial void LogCheckpointSkipped(ILogger logger);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Прибирання неактуальних прогонів: CHECKPOINT не вдався ({Error}).")]
+    private static partial void LogCheckpointFailed(ILogger logger, string error);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Прибирання неактуальних прогонів: перебудову індексів пропущено - у служби немає ALTER на {Table}; виконує DBA (runbook §4.2).")]
+    private static partial void LogRebuildSkipped(ILogger logger, string table);
 
     [LoggerMessage(
         Level = LogLevel.Information,
@@ -560,7 +756,7 @@ public sealed record SupersededSweepOutcome(string Mode)
     /// <summary><c>true</c> - у режимі видалення кандидатів не лишилося (інакше стеля/журнал; наступний прохід продовжить).</summary>
     public bool Complete { get; init; }
 
-    /// <summary>Чому видалення зупинилось раніше (<c>logFull</c>, <c>maxBatches</c>), якщо так.</summary>
+    /// <summary>Чому видалення зупинилось раніше (<c>logFull</c>, <c>logUnknown</c>, <c>maxBatches</c>, <c>windowEnd</c>), якщо так.</summary>
     public string? StopReason { get; init; }
 
     /// <summary>Recovery model бази на момент проходу.</summary>
@@ -581,6 +777,30 @@ public sealed record SupersededSweepOutcome(string Mode)
     /// <summary>Тривалість видалення, секунд (основна форма).</summary>
     public long ElapsedSeconds { get; init; }
 
+    /// <summary>Причина зупинки: скінчилося нічне вікно.</summary>
+    public const string WindowEnd = "windowEnd";
+
+    /// <summary>Причина зупинки: заповненість журналу не прочитано (fail closed).</summary>
+    public const string LogUnknown = "logUnknown";
+
+    /// <summary>Видалення відкладено: зараз поза нічним вікном.</summary>
+    public const string OutsideWindow = "outsideWindow";
+
+    /// <summary>Видалення відкладено: у цьому нічному вікні прохід видалення вже був (нічний бюджет).</summary>
+    public const string NightBudgetSpent = "nightBudgetSpent";
+
+    /// <summary>
+    /// Чому прохід з увімкненим видаленням лише лічив (<see cref="OutsideWindow"/>, <see cref="NightBudgetSpent"/>);
+    /// <c>null</c> — не відкладалось.
+    /// </summary>
+    public string? DeleteDeferred { get; init; }
+
+    /// <summary>SIMPLE, але <c>CHECKPOINT</c> пропущено: немає права.</summary>
+    public bool CheckpointSkipped { get; init; }
+
+    /// <summary>Перебудову пропущено: немає <c>ALTER</c> на таблиці.</summary>
+    public bool RebuildSkipped { get; init; }
+
     /// <summary>Підсумок для <c>MaintenanceRun.DetailsJson</c>.</summary>
     public string ToJson()
         => System.Text.Json.JsonSerializer.Serialize(
@@ -600,6 +820,9 @@ public sealed record SupersededSweepOutcome(string Mode)
                 rebuilt = Rebuilt,
                 runIndexes = RunIndexes,
                 elapsedSeconds = ElapsedSeconds,
+                deleteDeferred = DeleteDeferred,
+                checkpointSkipped = CheckpointSkipped,
+                rebuildSkipped = RebuildSkipped,
             },
             System.Text.Json.JsonSerializerOptions.Web);
 }

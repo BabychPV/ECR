@@ -1640,38 +1640,17 @@ public sealed partial class RecalculationJob(
         // без власних результатів у документі, де такі «безприв'язні» є, лишається за старим правилом (рахується).
         var approvedIds = instances.Where(i => skippedSheets.TryGetValue(i.PeriodKeyValue, out var approved)
                                                && approved.Contains(i.SheetDefId)).Select(i => i.Id).ToList();
-        var attributed = new HashSet<long>();
-        var legacyPeriods = new HashSet<int>();
-        if (approvedIds.Count > 0)
-        {
-            // ⛔ Джерело результатів — те саме, що в `CarryOverResultsAsync` (`CurrentRunSelection`: документний прогін
-            // періоду має перевагу над проєктним). Вибір «будь-який прогін зі статусом Current» розходився з переносом:
-            // екземпляр виключався з розрахунку за результатами одного прогону, а переносити брали б з іншого — числа зникали.
-            var currentRuns = await CurrentRunSelection.RunsOfDocumentAsync(db, request.DocumentId, ct).ConfigureAwait(false);
-            foreach (var period in instances.Where(i => approvedIds.Contains(i.Id)).Select(i => i.PeriodKeyValue).Distinct())
-            {
-                var runIds = CurrentRunSelection.Effective(currentRuns, request.DocumentId, period).Select(r => r.Id).ToList();
-                if (runIds.Count == 0)
-                {
-                    continue;
-                }
-
-                var periodResults = db.CalculationResults
-                    .AsNoTracking()
-                    .Where(r => r.DocumentId == request.DocumentId && r.PeriodKey == period
-                                && runIds.Contains(r.CalculationRunId));
-                attributed.UnionWith(await periodResults
-                    .Where(r => r.TableInstanceId != null && approvedIds.Contains(r.TableInstanceId.Value))
-                    .Select(r => r.TableInstanceId!.Value)
-                    .Distinct()
-                    .ToListAsync(ct)
-                    .ConfigureAwait(false));
-                if (await periodResults.AnyAsync(r => r.TableInstanceId == null, ct).ConfigureAwait(false))
-                {
-                    legacyPeriods.Add(period);
-                }
-            }
-        }
+        // ⛔ Джерело результатів — те саме, що в `CarryOverResultsAsync` (`CurrentRunSelection`: документний прогін
+        // періоду має перевагу над проєктним). ✎ D-560: з перечитуванням прогонів (прибирання витіснених одразу).
+        var (attributed, legacyPeriods) = approvedIds.Count == 0
+            ? ([], [])
+            : await CurrentRunSelection.ApprovedAttributionAsync(
+                    db,
+                    request.DocumentId,
+                    [.. instances.Where(i => approvedIds.Contains(i.Id)).Select(i => i.PeriodKeyValue).Distinct()],
+                    approvedIds,
+                    ct)
+                .ConfigureAwait(false);
 
         bool IsApproved(InstanceRow row)
             => skippedSheets.TryGetValue(row.PeriodKeyValue, out var approved) && approved.Contains(row.SheetDefId)

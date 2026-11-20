@@ -350,7 +350,9 @@ public sealed class SupersededResultsSweepJobTests(SweepDatabase database) : ICl
             Assert.False(stopped.Complete);
             Assert.Equal("logFull", stopped.StopReason);
             Assert.Equal("FULL", stopped.RecoveryModel);
-            Assert.Equal(1, stopped.Batches);
+
+            // ✎ H2: журнал перевіряється ще ДО першого пакета.
+            Assert.Equal(0, stopped.Batches);
 
             var resumed = await RunAsync(options, logUsed: _ => Task.FromResult<double?>(10));
             Assert.True(resumed.Complete);
@@ -390,7 +392,8 @@ public sealed class SupersededResultsSweepJobTests(SweepDatabase database) : ICl
             await using (var db = data.Stand.Builder.CreateContext())
             {
                 var job = new SupersededResultsSweepJob(
-                    db, new TestClock(T0), configuration, NullLogger<SupersededResultsSweepJob>.Instance);
+                    db, new TestClock(LocalToUtc(T0.Date.AddHours(2))), configuration,
+                    NullLogger<SupersededResultsSweepJob>.Instance);
                 await job.ExecuteAsync(null, Substitute.For<IJobProgress>(), CancellationToken.None);
             }
 
@@ -431,6 +434,112 @@ public sealed class SupersededResultsSweepJobTests(SweepDatabase database) : ICl
         Assert.Equal((0, 0, 0), await PurgeKit.CountsAsync(after, data.Superseded));
         Assert.False(await PurgeKit.RunExistsAsync(after, data.Superseded));
     }
+
+    /// <summary>
+    /// ✎ D-560 (H1): накопичене видаляється ЛИШЕ в нічному вікні (місцевий час сервера) і не більше одного проходу
+    /// видалення за вікно. Поза вікном (наздоганяння на старті служби вдень) і другий прохід у тому самому вікні — лише
+    /// лічать (<c>deleteDeferred</c>); прохід, що дійшов до кінця вікна, зупиняється (<c>windowEnd</c>).
+    /// Мутація: прибрати перевірку вікна в <c>DeleteGateAsync</c> - денний прохід видаляє, тест червоніє.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Видалення_лише_в_нічному_вікні_і_один_прохід_за_ніч()
+    {
+        var data = await ArrangeAsync(202702);
+        var night = T0.Date.AddDays(10);
+
+        async Task<string> RunJobAsync(DateTime localTime)
+        {
+            await using (var db = data.Stand.Builder.CreateContext())
+            {
+                var job = new SupersededResultsSweepJob(
+                    db, new TestClock(LocalToUtc(localTime)), new ConfigurationBuilder().Build(),
+                    NullLogger<SupersededResultsSweepJob>.Instance);
+                await job.ExecuteAsync(null, Substitute.For<IJobProgress>(), CancellationToken.None);
+            }
+
+            await using var verify = data.Stand.Builder.CreateContext();
+            return (await verify.MaintenanceRuns.AsNoTracking()
+                .Where(r => r.JobCode == SupersededResultsSweepJob.Code)
+                .OrderByDescending(r => r.Id)
+                .FirstAsync()).DetailsJson!;
+        }
+
+        // Удень (наздоганяння на старті служби): лише лічить, нічого не видалено.
+        var day = await RunJobAsync(night.AddHours(13));
+        Assert.Contains("\"mode\":\"dryRun\"", day, StringComparison.Ordinal);
+        Assert.Contains("\"deleteDeferred\":\"outsideWindow\"", day, StringComparison.Ordinal);
+        await using (var db = data.Stand.Builder.CreateContext())
+        {
+            Assert.True(await PurgeKit.RunExistsAsync(db, data.Superseded));
+        }
+
+        // Уночі (02:00): видаляє.
+        Assert.Contains("\"mode\":\"delete\"", await RunJobAsync(night.AddDays(1).AddHours(2)), StringComparison.Ordinal);
+        await using (var db = data.Stand.Builder.CreateContext())
+        {
+            Assert.False(await PurgeKit.RunExistsAsync(db, data.Superseded));
+        }
+
+        // Другий прохід того самого вікна (03:00): нічний бюджет витрачено - лише лічить.
+        var second = await RunJobAsync(night.AddDays(1).AddHours(3));
+        Assert.Contains("\"deleteDeferred\":\"nightBudgetSpent\"", second, StringComparison.Ordinal);
+
+        // Наступна ніч - знову можна.
+        Assert.Contains("\"mode\":\"delete\"", await RunJobAsync(night.AddDays(2).AddHours(1)), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Кінець_нічного_вікна_зупиняє_видалення()
+    {
+        var data = await ArrangeAsync(202703);
+
+        await using var db = new EcrDbContext(
+            new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(database.ConnectionString).Options);
+        var job = new SupersededResultsSweepJob(
+            db, new TestClock(SweepNow), new ConfigurationBuilder().Build(), NullLogger<SupersededResultsSweepJob>.Instance);
+        var outcome = await job.RunAsync(PurgeKit.On(), progress: null, CancellationToken.None, deleteUntilUtc: SweepNow);
+
+        Assert.False(outcome.Complete);
+        Assert.Equal(SupersededSweepOutcome.WindowEnd, outcome.StopReason);
+        Assert.Equal(0, outcome.Batches);
+        await using var check = data.Stand.Builder.CreateContext();
+        Assert.Equal((3, 2, 2), await PurgeKit.CountsAsync(check, data.Superseded));
+    }
+
+    /// <summary>
+    /// ✎ D-560 (H2): FULL (і будь-яка не-SIMPLE модель) без прочитаної заповненості журналу - СТОП до першого пакета
+    /// (<c>logUnknown</c>), а не «продовжити наосліп». Мутація: повернути «null → продовжити» - тест червоніє.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Невідома_заповненість_журналу_зупиняє_видалення()
+    {
+        var data = await ArrangeAsync(202704);
+        await SetRecoveryAsync("FULL");
+        try
+        {
+            var outcome = await RunAsync(PurgeKit.On(), logUsed: _ => Task.FromResult<double?>(null));
+
+            Assert.False(outcome.Complete);
+            Assert.Equal(SupersededSweepOutcome.LogUnknown, outcome.StopReason);
+            Assert.Equal(0, outcome.Batches);
+            await using var db = data.Stand.Builder.CreateContext();
+            Assert.Equal((3, 2, 2), await PurgeKit.CountsAsync(db, data.Superseded));
+        }
+        finally
+        {
+            await SetRecoveryAsync("SIMPLE");
+        }
+    }
+
+    /// <summary>Місцевий час сервера → UTC (нічне вікно рахується в місцевому часі).</summary>
+    private static DateTime LocalToUtc(DateTime local)
+        => TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(local, DateTimeKind.Unspecified), TimeZoneInfo.Local);
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
@@ -526,7 +635,7 @@ public sealed class SupersededResultsSweepJobTests(SweepDatabase database) : ICl
     {
         await using var db = stand.Builder.CreateContext();
         var run = new MaintenanceRun(SupersededResultsSweepJob.Code, at);
-        run.Complete("Succeeded", "{}", at.AddMinutes(1));
+        run.Complete("Succeeded", "{\"mode\":\"delete\",\"complete\":true}", at.AddMinutes(1));
         db.MaintenanceRuns.Add(run);
         await db.SaveChangesAsync();
     }

@@ -31,7 +31,45 @@ public sealed class SupersededPurgeConfigurationTests
         Assert.Equal(SupersededPurgeOptions.DefaultMaxBatchesPerRun, options.MaxBatchesPerRun);
         Assert.True(options.IncludeTrace);
         Assert.False(options.RebuildAfter);
+        Assert.Equal(TimeSpan.FromHours(1), options.NightWindowStart);
+        Assert.Equal(TimeSpan.FromHours(5), options.NightWindowEnd);
+        Assert.False(options.NightWindowInvalid);
         Assert.Empty(EcrConfigurationValidation.Validate(shipped));
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [InlineData("01:00-05:00", "02:30", true)]
+    [InlineData("01:00-05:00", "05:00", false)]
+    [InlineData("01:00-05:00", "00:59", false)]
+    [InlineData("22:00-04:00", "23:30", true)]
+    [InlineData("22:00-04:00", "03:59", true)]
+    [InlineData("22:00-04:00", "12:00", false)]
+    public void Нічне_вікно_розбирається_і_може_переходити_через_північ(string window, string at, bool inside)
+    {
+        var options = SupersededPurgeOptions.Read(new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { [SupersededPurgeOptions.NightWindowKey] = window })
+            .Build());
+
+        Assert.False(options.NightWindowInvalid);
+        Assert.Equal(inside, options.InNightWindow(TimeSpan.Parse(at, System.Globalization.CultureInfo.InvariantCulture)));
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [InlineData("1-5")]
+    [InlineData("01:00")]
+    [InlineData("03:00-03:00")]
+    [InlineData("25:00-04:00")]
+    public void Недійсне_нічне_вікно_дає_дефолт_і_ознаку(string window)
+    {
+        var options = SupersededPurgeOptions.Read(new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { [SupersededPurgeOptions.NightWindowKey] = window })
+            .Build());
+
+        Assert.True(options.NightWindowInvalid);
+        Assert.Equal(SupersededPurgeOptions.DefaultNightWindowStart, options.NightWindowStart);
+        Assert.Equal(SupersededPurgeOptions.DefaultNightWindowEnd, options.NightWindowEnd);
     }
 
     /// <remarks>

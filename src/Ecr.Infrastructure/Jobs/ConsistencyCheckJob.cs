@@ -801,9 +801,16 @@ public sealed class ConsistencyCheckJob(
     private async Task<DateTime> NonCurrentCutoffAsync(CancellationToken ct)
     {
         var sweepCode = SupersededResultsSweepJob.Code;
+
+        // ✎ D-560: лише прохід, що ДОЇВ усе (видалення, complete=true). Прохід поза нічним вікном лише лічить, а прохід
+        // з нічним бюджетом лишає решту наступним ночам — рядки, яких прибирання ще не мало права/часу прибрати, не
+        // порушення (інакше багатонічне перше прибирання щоночі давало б знахідки).
         var lastSweep = await db.MaintenanceRuns
             .AsNoTracking()
-            .Where(r => r.JobCode == sweepCode && r.Status == "Succeeded" && r.FinishedAt != null)
+            .Where(r => r.JobCode == sweepCode && r.Status == "Succeeded" && r.FinishedAt != null
+                        && r.DetailsJson != null
+                        && r.DetailsJson.Contains("\"mode\":\"delete\"")
+                        && r.DetailsJson.Contains("\"complete\":true"))
             .OrderByDescending(r => r.StartedAt)
             .Select(r => (DateTime?)r.StartedAt)
             .FirstOrDefaultAsync(ct)
@@ -815,9 +822,10 @@ public sealed class ConsistencyCheckJob(
     /// <summary>Прогони, неактуальні вже на момент <paramref name="cutoff"/> (див. <see cref="NonCurrentRunRowsAsync"/>).</summary>
     /// <remarks>
     /// ✎ <c>D-560</c>: «неактуальний» — та сама умова, за якою прибирає <c>SupersededResultsPurger.EligibleSql</c>:
-    /// <c>Superseded</c>; <c>Failed</c> — лише старіший за <c>Current</c> того самого ланцюга (проєкт, період, документ)
-    /// і стартований раніше за <c>SupersededPurgeOptions.FailedRunGrace</c> до межі. Новіший за актуальний <c>Failed</c>
-    /// прибирання свідомо лишає — і знахідкою він не є.
+    /// <c>Superseded</c>; <c>Failed</c> — лише старіший за <c>Current</c> того самого «документ × період» (документний
+    /// прогін того самого документа або прогін усього проєкту) і стартований раніше за
+    /// <c>SupersededPurgeOptions.FailedRunGrace</c> до межі. Новіший за актуальний <c>Failed</c> прибирання свідомо
+    /// лишає — і знахідкою він не є.
     /// </remarks>
     private IQueryable<long> SettledNonCurrentRuns(DateTime cutoff)
     {
@@ -831,7 +839,7 @@ public sealed class ConsistencyCheckJob(
                               && current.ProjectId == run.ProjectId
                               && current.Id > run.Id
                               && current.PeriodKey == run.PeriodKey
-                              && current.DocumentId == run.DocumentId)))
+                              && (current.DocumentId == run.DocumentId || current.DocumentId == null))))
                      && (run.FinishedAt ?? run.StartedAt) < cutoff
                      && !db.CalculationRuns.Any(newer =>
                          newer.ProjectId == run.ProjectId
