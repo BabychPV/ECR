@@ -30018,6 +30018,13 @@
             "description": "Код проєкту.",
             "type": "string"
           },
+          "sheets": {
+            "description": "Аркуші залежного документа за період: які буде, а які не буде перераховано (затверджені пропускаються).",
+            "items": {
+              "$ref": "#/components/schemas/SourceImpactSheetDto"
+            },
+            "type": "array"
+          },
           "skipReason": {
             "description": "Чому не буде перераховано: `approved` — затверджений період перерахунок пропускає (D-493/D-510); інакше `null`.",
             "type": [
@@ -30043,7 +30050,8 @@
           "periodKey",
           "approved",
           "willRecalculate",
-          "skipReason"
+          "skipReason",
+          "sheets"
         ],
         "type": "object"
       },
@@ -30116,6 +30124,35 @@
           "approvedCount",
           "consumers",
           "canRecalculateApproved"
+        ],
+        "type": "object"
+      },
+      "SourceImpactSheetDto": {
+        "description": "Аркуш залежного періоду в оцінці впливу.",
+        "properties": {
+          "approved": {
+            "description": "Аркуш затверджено (без рядка стану — ні).",
+            "type": "boolean"
+          },
+          "sheetCode": {
+            "description": "Код аркуша.",
+            "type": "string"
+          },
+          "sheetDefId": {
+            "description": "Аркуш.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "willRecalculate": {
+            "description": "Аркуш буде перераховано (не затверджений).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "sheetDefId",
+          "sheetCode",
+          "approved",
+          "willRecalculate"
         ],
         "type": "object"
       },

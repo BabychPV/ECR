@@ -111,7 +111,7 @@ public sealed partial class WorkflowTransactionTests
         assessor.AssessAsync(Arg.Any<long>(), Arg.Any<int>(), Arg.Any<int>(), Arg.Any<SourceApprovalChange>(), Arg.Any<CancellationToken>())
             .Returns(call => new SourceImpact(
                 call.Arg<SourceApprovalChange>(), call.ArgAt<long>(0), call.ArgAt<int>(1), call.ArgAt<int>(2), policy, [202601],
-                [new SourceImpactConsumer(1, "B", "LAND", 5, "LAND-26", "DOC-LAND", 202601, Approved: true)], "hash-1"));
+                [new SourceImpactConsumer(1, "B", "LAND", 5, "LAND-26", "DOC-LAND", 202601, Approved: true, Sheets: [])], "hash-1"));
         return assessor;
     }
 

@@ -89,6 +89,15 @@ export function SourceImpactModal({
                       {t(c.willRecalculate ? 'sourceImpact.status.pending' : 'sourceImpact.status.approved')}
                     </Badge>
                   </Group>
+                  {c.sheets.length > 1 ? (
+                    <Group gap={4} wrap="wrap" data-testid="source-impact-sheets">
+                      {c.sheets.map((sh) => (
+                        <Badge key={sh.sheetDefId} size="xs" variant="outline" color={sh.willRecalculate ? 'statusInfo' : 'statusWarning'}>
+                          {sh.sheetCode} · {t(sh.willRecalculate ? 'sourceImpact.status.pending' : 'sourceImpact.status.approved')}
+                        </Badge>
+                      ))}
+                    </Group>
+                  ) : null}
                 </List.Item>
               ))}
             </List>

@@ -22,8 +22,8 @@ namespace Ecr.Infrastructure.Persistence;
 /// </para>
 /// <para>
 /// Залежний період — документ × період, що має стани оригіналів аркушів за рік джерела й володіє хоч одним зачепленим
-/// місяцем за періодичністю СВОГО проєкту (<see cref="DocumentSourceGate.OwnedMonths"/>); затверджений — усі стани
-/// затверджено. Період без жодного стану (ще не відкривався) не перелічується: затвердити нічого, перерахунок його не
+/// місяцем за періодичністю СВОГО проєкту (<see cref="DocumentSourceGate.OwnedMonths"/>); затверджений — затверджено ВСІ аркуші-оригінали версії шаблону
+/// за період (аркуш без рядка стану — Draft). Період без жодного стану (ще не відкривався) не перелічується: затвердити нічого, перерахунок його не
 /// шкодить.
 /// </para>
 /// <para>
@@ -139,12 +139,24 @@ internal sealed class SourceImpactAssessor(EcrDbContext db, IDependencyGraphProv
                     s.DocumentId,
                     s.PeriodKey,
                     s.Status,
+                    s.SheetDefId,
+                    VersionId = pv.Id,
                     TemplateId = templateId,
                     p.PeriodKind,
                     ProjectCode = p.Code,
                     d.BusinessKey,
                 })
             .ToListAsync(ct).ConfigureAwait(false);
+
+        // Рядки стану створюються ліниво (лише для аркушів, яких торкнулися), тож «усі затверджені» по існуючих рядках
+        // хибно затверджує період із одним затвердженим аркушем із двадцяти. Перелік — усі аркуші версії шаблону.
+        var versionIds = states.Select(s => s.VersionId).Distinct().ToList();
+        var sheetsByVersion = (await db.SheetDefs.AsNoTracking()
+                .Where(sd => versionIds.Contains(sd.TemplateVersionId) && !sd.IsDeleted)
+                .OrderBy(sd => sd.Ordinal).ThenBy(sd => sd.Id)
+                .Select(sd => new { sd.Id, sd.Code, sd.TemplateVersionId })
+                .ToListAsync(ct).ConfigureAwait(false))
+            .ToLookup(sd => sd.TemplateVersionId);
 
         var result = new List<SourceImpactConsumer>();
         foreach (var group in states.GroupBy(s => (s.DocumentId, s.PeriodKey)).OrderBy(g => g.Key.DocumentId).ThenBy(g => g.Key.PeriodKey))
@@ -156,6 +168,10 @@ internal sealed class SourceImpactAssessor(EcrDbContext db, IDependencyGraphProv
                 continue;
             }
 
+            var approvedIds = group.Where(s => s.Status == DocumentStatus.Approved).Select(s => s.SheetDefId).ToHashSet();
+            var sheets = sheetsByVersion[first.VersionId]
+                .Select(sd => new SourceImpactSheet(sd.Id, sd.Code, approvedIds.Contains(sd.Id)))
+                .ToList();
             result.Add(new SourceImpactConsumer(
                 bindingId,
                 bindingCode,
@@ -164,7 +180,8 @@ internal sealed class SourceImpactAssessor(EcrDbContext db, IDependencyGraphProv
                 first.ProjectCode,
                 first.BusinessKey,
                 first.PeriodKey,
-                group.All(s => s.Status == DocumentStatus.Approved)));
+                sheets.Count > 0 && sheets.TrueForAll(sh => sh.Approved),
+                sheets));
         }
 
         return result;
@@ -183,7 +200,7 @@ internal sealed class SourceImpactAssessor(EcrDbContext db, IDependencyGraphProv
             .Append(CultureInfo.InvariantCulture, $"{change}|{documentId}|{sheetDefId}|{periodKey}|{policy}");
         foreach (var c in consumers.OrderBy(c => c.BindingId).ThenBy(c => c.DocumentId).ThenBy(c => c.PeriodKey))
         {
-            text.Append(CultureInfo.InvariantCulture, $"|{c.BindingId}:{c.DocumentId}:{c.PeriodKey}:{(c.Approved ? 1 : 0)}");
+            text.Append(CultureInfo.InvariantCulture, $"|{c.BindingId}:{c.DocumentId}:{c.PeriodKey}:{(c.Approved ? 1 : 0)}:{c.Sheets.Count(sh => sh.Approved)}/{c.Sheets.Count}");
         }
 
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text.ToString()))).ToLowerInvariant()[..32];

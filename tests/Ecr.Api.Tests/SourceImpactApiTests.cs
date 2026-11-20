@@ -507,6 +507,50 @@ public sealed class SourceImpactApiTests(SqlServerFixture sql)
         Assert.True(seen.GetProperty("willRecalculate").GetBoolean());
     }
 
+    /// <summary>
+    /// D-1: рядки стану аркушів створюються ліниво. Land із двома аркушами, затверджений один (рядка стану другого немає) —
+    /// період НЕ затверджений: другий аркуш — Draft; перелік по аркушах показує, хто буде, а хто не буде перераховано.
+    /// </summary>
+    /// <remarks>Мутація: у <c>SourceImpactAssessor</c> перелік аркушів версії → лише рядки стану (<c>sheetsByVersion</c> → <c>approvedIds</c>) — червоніє.</remarks>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-554")]
+    public async Task Залежний_період_де_другий_аркуш_без_рядка_стану_не_затверджений_і_перелічує_аркуші()
+    {
+        var s = await ArrangeAsync(DocumentSourcePolicy.Warn, sourceApproved: true, landApproved: true).ConfigureAwait(true);
+        int secondSheet;
+        await using (var db = sql.CreateContext())
+        {
+            var sheet = new SheetDef(
+                s.World.Land.TemplateVersionId, EcrCode.Create($"SH3{Guid.NewGuid():N}"[..14]),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "Second" }), 2);
+            db.SheetDefs.Add(sheet);
+            await db.SaveChangesAsync().ConfigureAwait(true);
+            secondSheet = sheet.Id;
+        }
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.User).ConfigureAwait(true);
+        foreach (var action in new[] { "reopen" })
+        {
+            var impact = await ImpactAsync(app, client, s, action).ConfigureAwait(true);
+            Assert.False(impact.GetProperty("required").GetBoolean());
+            Assert.Equal(0, impact.GetProperty("approvedCount").GetInt32());
+            var seen = Assert.Single(impact.GetProperty("consumers").EnumerateArray());
+            Assert.False(seen.GetProperty("approved").GetBoolean());
+            Assert.True(seen.GetProperty("willRecalculate").GetBoolean());
+            Assert.Equal(JsonValueKind.Null, seen.GetProperty("skipReason").ValueKind);
+            var sheets = seen.GetProperty("sheets").EnumerateArray().ToList();
+            Assert.Equal(2, sheets.Count);
+            var approvedSheet = Assert.Single(sheets, x => x.GetProperty("approved").GetBoolean());
+            Assert.Equal(s.World.Land.SheetDefId, approvedSheet.GetProperty("sheetDefId").GetInt32());
+            Assert.False(approvedSheet.GetProperty("willRecalculate").GetBoolean());
+            var draft = Assert.Single(sheets, x => !x.GetProperty("approved").GetBoolean());
+            Assert.Equal(secondSheet, draft.GetProperty("sheetDefId").GetInt32());
+            Assert.True(draft.GetProperty("willRecalculate").GetBoolean());
+        }
+    }
+
     private sealed record Scenario(ImpactWorld.World World, string User);
 
     private async Task<Scenario> ArrangeAsync(
