@@ -1644,23 +1644,33 @@ public sealed partial class RecalculationJob(
         var legacyPeriods = new HashSet<int>();
         if (approvedIds.Count > 0)
         {
-            var currentResults = db.CalculationResults
-                .AsNoTracking()
-                .Where(r => r.DocumentId == request.DocumentId && scopeKeys.Contains(r.PeriodKey)
-                            && db.CalculationRuns.Any(run => run.Id == r.CalculationRunId
-                                                             && run.Status == Domain.Entities.Calculations.CalculationRun.CurrentStatus));
-            attributed = [.. await currentResults
-                .Where(r => r.TableInstanceId != null && approvedIds.Contains(r.TableInstanceId.Value))
-                .Select(r => r.TableInstanceId!.Value)
-                .Distinct()
-                .ToListAsync(ct)
-                .ConfigureAwait(false)];
-            legacyPeriods = [.. await currentResults
-                .Where(r => r.TableInstanceId == null)
-                .Select(r => r.PeriodKey)
-                .Distinct()
-                .ToListAsync(ct)
-                .ConfigureAwait(false)];
+            // ⛔ Джерело результатів — те саме, що в `CarryOverResultsAsync` (`CurrentRunSelection`: документний прогін
+            // періоду має перевагу над проєктним). Вибір «будь-який прогін зі статусом Current» розходився з переносом:
+            // екземпляр виключався з розрахунку за результатами одного прогону, а переносити брали б з іншого — числа зникали.
+            var currentRuns = await CurrentRunSelection.RunsOfDocumentAsync(db, request.DocumentId, ct).ConfigureAwait(false);
+            foreach (var period in instances.Where(i => approvedIds.Contains(i.Id)).Select(i => i.PeriodKeyValue).Distinct())
+            {
+                var runIds = CurrentRunSelection.Effective(currentRuns, request.DocumentId, period).Select(r => r.Id).ToList();
+                if (runIds.Count == 0)
+                {
+                    continue;
+                }
+
+                var periodResults = db.CalculationResults
+                    .AsNoTracking()
+                    .Where(r => r.DocumentId == request.DocumentId && r.PeriodKey == period
+                                && runIds.Contains(r.CalculationRunId));
+                attributed.UnionWith(await periodResults
+                    .Where(r => r.TableInstanceId != null && approvedIds.Contains(r.TableInstanceId.Value))
+                    .Select(r => r.TableInstanceId!.Value)
+                    .Distinct()
+                    .ToListAsync(ct)
+                    .ConfigureAwait(false));
+                if (await periodResults.AnyAsync(r => r.TableInstanceId == null, ct).ConfigureAwait(false))
+                {
+                    legacyPeriods.Add(period);
+                }
+            }
         }
 
         bool IsApproved(InstanceRow row)

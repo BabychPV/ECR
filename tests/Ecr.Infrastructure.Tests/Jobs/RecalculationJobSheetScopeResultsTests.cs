@@ -257,6 +257,37 @@ public sealed class RecalculationJobSheetScopeResultsTests(SqlServerFixture sql)
     }
 
     /// <summary>
+    /// D-557, шлях legacy: результати до D-401 не мають <c>TableInstanceId</c> (NULL) — затверджений екземпляр у такому
+    /// документі не відрізнити за результатами, тож він лишається за старим правилом (рахується), а не губить числа
+    /// (перенос за екземплярами нічого б не знайшов).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ МУТАЦІЙНИЙ ДОКАЗ: у <c>BindingsAsync</c> прибрати <c>legacyPeriods</c>/<c>attributed</c> (<c>IsApproved</c> = лише «аркуш затверджено») —
+    /// затверджений екземпляр виключено з розрахунку, а переносити нема що: рядок A затвердженого аркуша зникає, червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "D-2")]
+    public async Task Результати_без_екземпляра_таблиці_не_гублять_числа_затвердженого_аркуша()
+    {
+        var arranged = await ArrangeAsync(submitSecondSheet: false, sharedMethodology: true);
+        await RunJobAsync(arranged, SheetRequest(arranged, sheetDefId: null), label: 1_000m, stampTables: true);
+        await using (var db = arranged.Builder.CreateContext())
+        {
+            await db.CalculationResults
+                .Where(r => r.DocumentId == arranged.Document.DocumentId)
+                .ExecuteUpdateAsync(s => s.SetProperty(r => r.TableInstanceId, (long?)null));
+        }
+
+        await SubmitSecondSheetAsync(arranged);
+        await RunJobAsync(arranged, SheetRequest(arranged, sheetDefId: null), label: 2_000m, stampTables: true);
+
+        // Старе правило: обидві таблиці спільної методології перераховано, жодне число не зникло.
+        Assert.Equal(["A|2001", "A|2001", "B|1001"], await ShapeAsync(arranged));
+    }
+
+    /// <summary>
     /// AN-105 / D2-03: аркуш ПОДАНО Й ЗАТВЕРДЖЕНО, поки задача рахувала методології (після рішення «що рахувати»
     /// і до перемикання актуальності). Прогін не стає актуальним, числа затвердженого аркуша — від R1.
     /// ✎ B79: відмовляє саме затвердження (<c>SubmitSecondSheetAsync</c> затверджує); лише подання —
