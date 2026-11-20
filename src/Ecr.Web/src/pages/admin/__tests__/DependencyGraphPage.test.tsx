@@ -29,7 +29,7 @@ const graph = {
     },
     {
       kind: 'templateFormula', fromKind: 'registry', fromId: 10, toKind: 'template', toId: 2, scope: 'month', monthMask: 0, evidenceTotal: 1,
-      evidence: [{ source: 'ast', id: 7, versionId: 70, detail: 'T1.CNT' }],
+      evidence: [{ source: 'ast', id: 7, versionId: 70, detail: 'LAND_T1/CNT: REGFIELD(REGFIND(HC, 1), "VALUE")' }],
     },
   ],
   templateDependencies: [
@@ -137,7 +137,9 @@ describe('B179 L5: екран «Граф залежностей»', () => {
     expect(within(consumer).getByText('⟦dependencyGraph.scope.month⟧')).toBeDefined();
     expect(within(consumer).getByText('⟦dependencyGraph.via.formula⟧')).toBeDefined();
     expect(within(consumer).queryByText('⟦dependencyGraph.via.methodology⟧')).toBeNull();
-    expect(within(consumer).getByText(/T1\.CNT/)).toBeDefined();
+    // T-25: у доказі — коди таблиці/колонки й формула, а не службові id.
+    expect(within(consumer).getByText(/· LAND_T1\/CNT: REGFIELD\(REGFIND\(HC, 1\), "VALUE"\)$/)).toBeDefined();
+    expect(within(consumer).queryByText(/table \d+ column \d+/)).toBeNull();
   });
 
   it('вимкнення «перераховувати залежних» — підтвердження, потім PUT /flags лише з цим бітом', async () => {
