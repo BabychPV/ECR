@@ -76,6 +76,12 @@ public sealed class ScriptCheckRateLimitPolicy(IConfiguration configuration)
 /// <remarks>
 /// ⚠ Межа на процес, а не на користувача: прогін синхронно тримає потік пулу, і десять користувачів по одному прогону
 /// виснажують його так само, як один із десятьма. Дозвіл береться в дії, ПІСЛЯ прив'язки тіла.
+/// <para>
+/// ⛔ Очікування в черзі обмежене власною межею (<see cref="QueueWaitSecondsKey"/>, типово 10 с): годинник перегляду
+/// (30 с, <c>PreviewMethodologyScriptHandler.RunTimeout</c>) починається лише ПІСЛЯ входу, тож без межі черги запит
+/// висів би «чотири прогони × 30 с» перед своїм. Не дочекався — та сама відмова, що й за повної черги
+/// (429 <c>scriptRunBusy</c>); найдовший запит перегляду — межа черги + 30 с.
+/// </para>
 /// </remarks>
 public sealed class ScriptRunGate : IDisposable
 {
@@ -85,11 +91,17 @@ public sealed class ScriptRunGate : IDisposable
     /// <summary>Скільки прогонів чекає в черзі, якщо конфігурація мовчить.</summary>
     public const int DefaultQueueLimit = 8;
 
+    /// <summary>Скільки секунд найдовше чекати місця в черзі, якщо конфігурація мовчить.</summary>
+    public const int DefaultQueueWaitSeconds = 10;
+
     /// <summary>Ключ конфігурації: одночасних прогонів.</summary>
     public const string ConcurrencyKey = "Security:RateLimit:ScriptRunConcurrency";
 
     /// <summary>Ключ конфігурації: довжина черги.</summary>
     public const string QueueLimitKey = "Security:RateLimit:ScriptRunQueueLimit";
+
+    /// <summary>Ключ конфігурації: найдовше очікування місця в черзі, с.</summary>
+    public const string QueueWaitSecondsKey = "Security:RateLimit:ScriptRunQueueWaitSeconds";
 
     /// <summary>Ключ каталогу подробиці відмови (повним літералом — так його шукає сторож каталогу).</summary>
     public const string DetailKey = "err.ECR-REQ-0429.scriptRunBusy";
@@ -98,6 +110,7 @@ public sealed class ScriptRunGate : IDisposable
     public const string DetailFallback = "The server is busy running other script previews. Try again in a minute.";
 
     private readonly ConcurrencyLimiter _limiter;
+    private readonly TimeSpan _queueWait;
 
     /// <summary>Будує обмежувач з конфігурації.</summary>
     /// <param name="configuration">Конфігурація застосунку.</param>
@@ -111,15 +124,32 @@ public sealed class ScriptRunGate : IDisposable
             QueueLimit = Math.Max(0, configuration.GetValue(QueueLimitKey, DefaultQueueLimit)),
             QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
         });
+        _queueWait = TimeSpan.FromSeconds(Math.Max(1, configuration.GetValue(QueueWaitSecondsKey, DefaultQueueWaitSeconds)));
     }
 
-    /// <summary>Чекає місця прогону (у черзі, якщо вона не повна); понад чергу — відмова 429.</summary>
+    /// <summary>
+    /// Чекає місця прогону (у черзі, якщо вона не повна, і не довше за межу очікування); понад чергу чи межу — 429.
+    /// </summary>
     /// <param name="ct">Скасування — звільняє місце в черзі.</param>
     /// <returns>Оренда; звільнити (<c>Dispose</c>) після прогону.</returns>
     /// <exception cref="BusinessRuleException"><c>ECR-REQ-0429</c>, ключ <c>scriptRunBusy</c>.</exception>
+    /// <exception cref="OperationCanceledException">Запит скасовано (клієнт пішов) — це не відмова 429.</exception>
     public async Task<RateLimitLease> EnterAsync(CancellationToken ct)
     {
-        var lease = await _limiter.AcquireAsync(1, ct).ConfigureAwait(false);
+        using var wait = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        wait.CancelAfter(_queueWait);
+
+        RateLimitLease lease;
+        try
+        {
+            lease = await _limiter.AcquireAsync(1, wait.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            // Межу очікування вичерпано: місце в черзі звільнено скасуванням, відмова — та сама, що за повної черги.
+            throw Busy();
+        }
+
         if (lease.IsAcquired)
         {
             return lease;
@@ -127,11 +157,14 @@ public sealed class ScriptRunGate : IDisposable
 
         lease.Dispose();
 
-        throw new BusinessRuleException(
+        throw Busy();
+    }
+
+    private static BusinessRuleException Busy()
+        => new(
             ErrorCodes.TooManyRequests,
             DetailFallback,
             new Dictionary<string, object?> { ["messageKey"] = DetailKey });
-    }
 
     /// <inheritdoc />
     public void Dispose() => _limiter.Dispose();

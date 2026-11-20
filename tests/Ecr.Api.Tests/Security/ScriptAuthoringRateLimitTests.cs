@@ -106,6 +106,52 @@ public sealed class ScriptAuthoringRateLimitTests(SqlServerFixture sql)
         Assert.Equal(4, ScriptRunGate.DefaultConcurrency);
     }
 
+    /// <summary>
+    /// Рецензія PSS, п. 7: очікування в ЧЕРЗІ воріт обмежене (типово 10 с; годинник перегляду 30 с починається лише після
+    /// входу) — не дочекався місця за межу, та сама відмова 429 <c>scriptRunBusy</c>, що й за повної черги; місце в черзі
+    /// звільнено. Скасування самого запиту — не 429.
+    /// </summary>
+    /// <remarks>Мутація: <c>AcquireAsync(1, ct)</c> без межі очікування — другий вхід висить, доки не звільнять перший.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Finding", "PSS-21")]
+    public async Task Ворота_прогонів_не_тримають_запит_у_черзі_довше_за_межу_очікування()
+    {
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            [ScriptRunGate.ConcurrencyKey] = "1",
+            [ScriptRunGate.QueueLimitKey] = "1",
+            [ScriptRunGate.QueueWaitSecondsKey] = "1",
+        }).Build();
+        using var gate = new ScriptRunGate(configuration);
+        var running = await gate.EnterAsync(CancellationToken.None);
+
+        // Другий стає в чергу й за межу (1 с) отримує 429 — а не чекає, доки звільнять перший.
+        var waiting = gate.EnterAsync(CancellationToken.None);
+        var finished = await Task.WhenAny(waiting, Task.Delay(TimeSpan.FromSeconds(15)));
+        Assert.Same(waiting, finished);
+        var refused = await Assert.ThrowsAsync<BusinessRuleException>(() => waiting);
+        Assert.Equal("ECR-REQ-0429", refused.ErrorCode);
+        Assert.Equal(ScriptRunGate.DetailKey, refused.Details!["messageKey"]);
+
+        // Місце в черзі звільнено: наступний знову стає в чергу й дочікується, щойно перший вийде.
+        var queued = gate.EnterAsync(CancellationToken.None);
+        Assert.False(queued.IsCompleted);
+        running.Dispose();
+        using (var next = await queued)
+        {
+            Assert.True(next.IsAcquired);
+
+            // Скасований клієнтом запит у черзі — скасування, а не відмова 429.
+            using var aborted = new CancellationTokenSource();
+            var abandoned = gate.EnterAsync(aborted.Token);
+            await aborted.CancelAsync();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => abandoned);
+        }
+
+        Assert.Equal(10, ScriptRunGate.DefaultQueueWaitSeconds);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
