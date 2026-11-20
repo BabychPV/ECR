@@ -259,6 +259,15 @@ public sealed class ReopenDocumentHandler(
                 ["sheetDefId"] = sheetDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 ["reason"] = decision.Reason.ToString(),
                 // PM-PASS-A-P3 п.7a: ключ каталогу, як у Approve/Submit - `detail` локалізується, а не сире ім'я enum.
-                ["reasonKey"] = $"deny.{decision.Reason}",
+                // ✎ UI-тест 20.11: гранти — власний текст дії («немає права повернути лист у роботу»), а не «редагувати комірку».
+                ["reasonKey"] = DenyReasonKey(decision.Reason),
             });
+
+    /// <summary>Ключ причини відмови повернення: гранти — текст дії, решта — загальний <c>deny.*</c>.</summary>
+    /// <param name="reason">Причина рішення про права.</param>
+    internal static string DenyReasonKey(EditDenyReason reason) => reason switch
+    {
+        EditDenyReason.NoGrant or EditDenyReason.InsufficientGrantLevel => "deny.reopen.NoRight",
+        _ => $"deny.{reason}",
+    };
 }

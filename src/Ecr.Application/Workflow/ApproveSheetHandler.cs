@@ -266,10 +266,23 @@ public sealed class ApproveSheetHandler(
                     ["messageKey"] = "err.ECR-ACCS-0403.approveDenied",
                     ["sheetDefId"] = sheetDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                     ["reason"] = decision.Reason.ToString(),
-                    ["reasonKey"] = $"deny.{decision.Reason}",
+                    // ✎ UI-тест 20.11: «немає гранту» для ЗАТВЕРДЖЕННЯ має власний текст — загальний `deny.NoGrant`
+                    // говорить «немає права редагувати цю комірку» (як і в клієнті, `sheetDenial.ts`, D4).
+                    ["reasonKey"] = DenyReasonKey(decision.Reason),
                 });
         }
     }
+
+    /// <summary>Ключ причини відмови затвердження/відхилення: гранти — текст дії, решта — загальний <c>deny.*</c>.</summary>
+    /// <param name="reason">Причина рішення про права.</param>
+    internal static string DenyReasonKey(EditDenyReason reason) => reason switch
+    {
+        EditDenyReason.NoGrant or EditDenyReason.InsufficientGrantLevel => NoRightReasonKey,
+        _ => $"deny.{reason}",
+    };
+
+    /// <summary>Ключ каталогу: немає права затвердити або відхилити аркуш.</summary>
+    internal const string NoRightReasonKey = "deny.approve.NoRight";
 
     /// <summary>Зміна стану, аудит проміжного кроку і статус зрізу — під транзакцією.</summary>
     private async Task ApproveCoreAsync(
