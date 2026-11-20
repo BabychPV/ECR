@@ -454,10 +454,13 @@ DEALLOCATE cmpParts;
 
 SET LOCK_TIMEOUT -1;
 
+-- ⛔ FOR XML PATH, а не агрегатна функція 2017+ (сторож SqlServer2016FloorTests).
 DECLARE @cPending nvarchar(max) =
-    (SELECT STRING_AGG(CONVERT(nvarchar(max), TableName + N'#' + CAST(PartitionNumber AS nvarchar(10))
-                       + N' (' + CAST(RowCnt AS nvarchar(20)) + N' rows)'), N', ')
-       FROM @cmp WHERE RowCnt > 0);
+    STUFF((SELECT N', ' + TableName + N'#' + CAST(PartitionNumber AS nvarchar(10))
+                  + N' (' + CAST(RowCnt AS nvarchar(20)) + N' rows)'
+             FROM @cmp WHERE RowCnt > 0
+            ORDER BY TableName, PartitionNumber
+              FOR XML PATH(''), TYPE).value(N'.', N'nvarchar(max)'), 1, 2, N'');
 
 PRINT N'D-560: стиснуто PAGE (таблиць/партицій): ' + CAST(@cDone AS nvarchar(10))
     + N'; пропущено через блокування: ' + CAST(@cSkipped AS nvarchar(10)) + N'.';
