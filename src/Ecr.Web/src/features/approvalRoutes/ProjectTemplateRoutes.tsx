@@ -50,6 +50,7 @@ export function ProjectTemplateRoutes({ projectId }: { readonly projectId: numbe
       onRetry={() => void routes.refetch()}
     >
       {(all) => (
+        <Table.ScrollContainer minWidth={420} data-testid="project-template-routes-scroll">
         <Table data-testid="project-template-routes" verticalSpacing="xs">
           <Table.Thead>
             <Table.Tr>
@@ -130,6 +131,7 @@ export function ProjectTemplateRoutes({ projectId }: { readonly projectId: numbe
             })}
           </Table.Tbody>
         </Table>
+        </Table.ScrollContainer>
       )}
     </AsyncBoundary>
   );
