@@ -66,7 +66,8 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
         OUTPUT inserted.JobId, inserted.JobCode, inserted.Lane, inserted.Payload, inserted.TargetKey,
                ISNULL(inserted.Attempt, 0), ISNULL(inserted.ReclaimCount, 0), inserted.LeaseUntil,
                inserted.CreatedByUserId, inserted.CorrelationId, inserted.DocumentId,
-               DATEDIFF_BIG(millisecond, inserted.AvailableAt, SYSUTCDATETIME())
+               CASE WHEN (CASE WHEN ISJSON(inserted.Payload) = 1 THEN JSON_VALUE(inserted.Payload, '$.chainAfter') END) IS NOT NULL
+                    THEN NULL ELSE DATEDIFF_BIG(millisecond, inserted.AvailableAt, SYSUTCDATETIME()) END
         """;
 
     /// <summary>Переклейм простроченої <c>Running</c>: Attempt не чіпає, ReclaimCount + 1 (правка Б).</summary>
@@ -110,7 +111,11 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
             ORDER BY q.AvailableAt, q.JobId)
         UPDATE candidate SET
             [State] = 'Running', Attempt = ISNULL(Attempt, 0) + 1, ReclaimCount = ISNULL(ReclaimCount, 0),
-            CancelRequestedAt = NULL, StartedAt = @shown, [Percent] = 0, [Message] = NULL, Error = NULL, ErrorCode = NULL,
+            CancelRequestedAt = NULL, [Message] = NULL, Error = NULL, ErrorCode = NULL,
+            StartedAt = CASE WHEN (CASE WHEN ISJSON(Payload) = 1 THEN JSON_VALUE(Payload, '$.chainAfter') END) IS NOT NULL
+                             THEN ISNULL(StartedAt, @shown) ELSE @shown END,
+            [Percent] = CASE WHEN (CASE WHEN ISJSON(Payload) = 1 THEN JSON_VALUE(Payload, '$.chainAfter') END) IS NOT NULL
+                             THEN [Percent] ELSE 0 END,
         """ + "\n" + ClaimSet + "\n" + ClaimOutput + ";";
 
     /// <summary>
@@ -125,6 +130,16 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
     /// </remarks>
     internal static readonly string ClaimPriorityQueuedSql = ClaimQueuedSql.Replace(
         "AND q.[State] = 'Queued'", "AND q.JobCode = @priorityCode AND q.[State] = 'Queued'", StringComparison.Ordinal);
+
+    /// <summary>
+    /// ✎ PSS-02 (<c>D-561</c>, огляд H2): умова проходу «спершу ручні» в лейні перерахунку — задача, яку поставила
+    /// людина (<c>CreatedByUserId</c>), не дитина розкладу й не прохід читача (той несе автора свого прогону, але це
+    /// каскад). Ручна задача не стоїть у FIFO за дітьми річного розкладу і за кроками ланцюжків.
+    /// </summary>
+    internal const string ManualFilter = """
+              AND q.CreatedByUserId IS NOT NULL AND q.FanOutParentJobId IS NULL
+              AND ISNULL(CASE WHEN ISJSON(q.Payload) = 1 THEN JSON_VALUE(q.Payload, '$.foreignOwnerPass') END, N'false') <> N'true'
+        """;
 
     /// <summary>Момент «запарковано» в <c>AvailableAt</c>: claim такий рядок не бере ніколи (PSS-06).</summary>
     internal const string ParkedAt = "CAST(N'9999-12-31T00:00:00' AS datetime2(3))";
@@ -153,6 +168,18 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
         """;
 
     /// <summary>
+    /// ✎ PSS-04 (огляд H2): у лейні перерахунку — не брати задачу документа, на який ЧЕКАЄ доступна задача формул
+    /// (правка комірки, лейн <see cref="JobLanes.Interactive"/>): її бере воркер Api, а крок ланцюжка, що стоїть у FIFO
+    /// попереду (зберігає своє місце), бере документ одразу після неї. Пряма правка не чекає місяця перерахунку.
+    /// </summary>
+    internal const string EditFirstExclusion = """
+              AND (q.DocumentId IS NULL OR q.DocumentId <= 0 OR NOT EXISTS (
+                  SELECT 1 FROM itg.JobProgress AS e WITH (INDEX(IX_JobProgress_Document_Active))
+                  WHERE e.DocumentId = q.DocumentId AND e.DocumentId IS NOT NULL AND e.[State] = 'Queued'
+                    AND e.Lane = @docLaneB AND e.AvailableAt <= CAST(SYSUTCDATETIME() AS datetime2(3))))
+        """;
+
+    /// <summary>
     /// ✎ PSS-02 (<c>D-561</c>): скільки дітей розкладу проєкту (<c>FanOutParentJobId IS NOT NULL</c>) уже виконується
     /// в лейні — під applock транзакції, тож два claim не займуть одне й те саме останнє місце.
     /// </summary>
@@ -161,21 +188,32 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
     /// дітей річного розкладу — відхід від <c>D-232</c>/<c>D-473</c>, рішення людини 20.11). Лок — лише на час claim
     /// (мілісекунди), не дочекались за 5 с — дітей цим claim не беремо (<c>@fanOutRoom = 0</c>).
     /// </remarks>
+    /// <remarks>
+    /// ✎ Огляд M4 (рішення координатора за §6 п. 2): обганяють лише ручні й автоперерахунок. Системні залежні
+    /// (ціль <c>…-dependents</c>, <c>@cascadeLike</c>) поки діє розклад (є діти, що чекають чи виконуються) — під тією
+    /// самою межею й рахуються в ній; без розкладу — як доти.
+    /// </remarks>
     internal const string FanOutCapPrologue = """
+        SET XACT_ABORT ON;
         BEGIN TRANSACTION;
-        DECLARE @fanOutRoom bit = 0, @capLock int = -1;
+        DECLARE @fanOutRoom bit = 0, @capLock int = -1, @scheduleActive bit = 0;
         EXEC @capLock = sys.sp_getapplock @Resource = N'ecr:jobqueue:recalc-fanout-cap', @LockMode = 'Exclusive',
             @LockOwner = 'Transaction', @LockTimeout = 5000;
+        IF EXISTS (SELECT 1 FROM itg.JobProgress AS s
+                   WHERE s.Lane = @lane AND s.Lane IS NOT NULL AND s.[State] IN ('Queued', 'Running')
+                     AND s.FanOutParentJobId IS NOT NULL)
+            SET @scheduleActive = 1;
         IF @capLock >= 0
             AND (SELECT COUNT(*) FROM itg.JobProgress AS c
                  WHERE c.Lane = @lane AND c.Lane IS NOT NULL AND c.[State] = 'Running'
-                   AND c.FanOutParentJobId IS NOT NULL) < @fanOutCap
+                   AND (c.FanOutParentJobId IS NOT NULL OR (@scheduleActive = 1 AND ISNULL(c.TargetKey, N'') LIKE @cascadeLike))) < @fanOutCap
             SET @fanOutRoom = 1;
         """;
 
     /// <summary>Умова кандидата під межею дітей розкладу (<see cref="FanOutCapPrologue"/>).</summary>
     internal const string FanOutCapFilter = """
-              AND (q.FanOutParentJobId IS NULL OR @fanOutRoom = 1)
+              AND ((q.FanOutParentJobId IS NULL AND NOT (@scheduleActive = 1 AND ISNULL(q.TargetKey, N'') LIKE @cascadeLike))
+                   OR @fanOutRoom = 1)
         """;
 
     /// <summary>
@@ -185,10 +223,16 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
     /// <param name="documentExclusive">Лейн із локом документа.</param>
     /// <param name="fanOutCap">Межа дітей розкладу діє.</param>
     /// <param name="priority">Прохід лише пріоритетного коду.</param>
-    internal static string ClaimQueuedSqlFor(bool documentExclusive, bool fanOutCap, bool priority)
+    /// <param name="recalcLane">Лейн перерахунку: поступитися правці комірки документа (<see cref="EditFirstExclusion"/>).</param>
+    /// <param name="manualOnly">Прохід «спершу ручні» (<see cref="ManualFilter"/>).</param>
+    internal static string ClaimQueuedSqlFor(
+        bool documentExclusive, bool fanOutCap, bool priority, bool recalcLane = false, bool manualOnly = false)
     {
         var sql = priority ? ClaimPriorityQueuedSql : ClaimQueuedSql;
-        var extra = (documentExclusive ? DocumentExclusion : string.Empty) + (fanOutCap ? FanOutCapFilter : string.Empty);
+        var extra = (documentExclusive ? DocumentExclusion : string.Empty)
+                    + (recalcLane ? EditFirstExclusion : string.Empty)
+                    + (manualOnly ? ManualFilter : string.Empty)
+                    + (fanOutCap ? FanOutCapFilter : string.Empty);
         if (extra.Length > 0)
         {
             // ⛔ Якір — ORDER BY кандидата; не знайшовся (текст claim змінили) — гучна відмова, а не тихий claim без умов.
@@ -199,10 +243,20 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
             }
 
             sql = sql.Replace(Anchor, extra.Trim() + "\n    " + Anchor, StringComparison.Ordinal);
+            if (sql.Contains(Anchor + "\n" + Anchor, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("Claim черги: якір ORDER BY повторився.");
+            }
         }
 
         return fanOutCap ? FanOutCapPrologue + "\n" + sql + "\nCOMMIT TRANSACTION;" : sql;
     }
+
+    /// <summary>
+    /// ✎ Огляд M4: шаблон <c>LIKE</c> цілі системних залежних (<c>…-dependents</c>, <c>CalculationTrigger.DependentsTargetOf</c>),
+    /// що під межею розкладу, поки той діє. «З затвердженими» (<c>…-dependents-approved</c>) — явна дія адміністратора, не під нею.
+    /// </summary>
+    internal const string CascadeTargetLike = "%-dependents";
 
     /// <summary>Чи лейн бере лок документа перерахунку (виключення документа на claim, PSS-04).</summary>
     internal static bool IsDocumentExclusiveLane(string lane)
@@ -218,18 +272,85 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
         + " AND JSON_VALUE(p.[Message], '$.k') = @parkKey AND JSON_VALUE(p.[Message], '$.p.jobId') = @id";
 
     /// <summary>
-    /// Робота покривної задачі <c>@id</c> зроблена: запарковані нею — <c>Succeeded</c> (лише ті, чий період не пізніший
-    /// за <c>@settleThrough</c>; <c>NULL</c> — усі).
+    /// ✎ Огляд M1: період <c>@settlePeriod</c> покривна СПРАВДІ порахувала (і він уже актуальний): запарковані нею на
+    /// цей період — <c>Succeeded</c>. Лише поки оренда покривної жива.
     /// </summary>
     private const string SettleParkedSql =
         "UPDATE p SET [State] = 'Succeeded', [Percent] = 100, UpdatedAt = @shown, HeartbeatAt = @shown "
         + "FROM itg.JobProgress AS p WITH (INDEX(IX_JobProgress_Claim)) WHERE " + ParkedBy
-        + " AND (@settleThrough IS NULL OR TRY_CAST(JSON_VALUE(p.[Message], '$.p.period') AS int) <= @settleThrough);";
+        + " AND TRY_CAST(JSON_VALUE(p.[Message], '$.p.period') AS int) = @settlePeriod"
+        + " AND EXISTS (SELECT 1 FROM itg.JobProgress AS c WHERE c.JobId = @id AND c.ClaimToken = @token AND c.[State] = 'Running');";
 
-    /// <summary>Покривна задача <c>@id</c> не виконала роботу: запарковані нею — знову в черзі, одразу.</summary>
+    /// <summary>
+    /// Момент, на який повертається запаркована (огляд L8): її власний <c>AvailableAt</c> до паркування (<c>$.p.at</c>
+    /// конверта) — місце в FIFO не губиться; без нього — зараз.
+    /// </summary>
+    private const string ParkedOriginalAt = "TRY_CAST(JSON_VALUE(p.[Message], '$.p.at') AS datetime2(3))";
+
+    /// <summary>
+    /// Покривна задача не порахувала їхній період: запарковані нею — знову в черзі на своє колишнє місце FIFO.
+    /// ✎ Огляд M1: це й доля всього, що лишилось запаркованим на кінці покривної, — закриває <c>Succeeded</c> лише явне
+    /// <see cref="SettleParkedAsync"/> за порахованим періодом.
+    /// </summary>
     private const string RestoreParkedSql =
-        "UPDATE p SET AvailableAt = SYSUTCDATETIME(), [Message] = NULL, UpdatedAt = @shown "
+        "UPDATE p SET AvailableAt = ISNULL(" + ParkedOriginalAt + ", SYSUTCDATETIME()), [Message] = NULL, UpdatedAt = @shown "
         + "FROM itg.JobProgress AS p WITH (INDEX(IX_JobProgress_Claim)) WHERE " + ParkedBy + ";";
+
+    /// <summary>Те саме, що <see cref="RestoreParkedSql"/>, лише для періодів не пізніших за <c>@restoreThrough</c> (крок ланцюжка).</summary>
+    private const string RestoreParkedThroughSql =
+        "UPDATE p SET AvailableAt = ISNULL(" + ParkedOriginalAt + ", SYSUTCDATETIME()), [Message] = NULL, UpdatedAt = @shown "
+        + "FROM itg.JobProgress AS p WITH (INDEX(IX_JobProgress_Claim)) WHERE " + ParkedBy
+        + " AND TRY_CAST(JSON_VALUE(p.[Message], '$.p.period') AS int) <= @restoreThrough;";
+
+    /// <summary>
+    /// ✎ Огляд H1: payload <c>{0}</c> без полів ланцюжка (PSS-04) — нова постановка на ціль ланцюжка, що чекає між
+    /// кроками, починає його з ПЕРШОГО періоду: її зміна могла торкнутися вже зроблених місяців.
+    /// </summary>
+    internal const string ChainResetTemplate =
+        "JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY({0}, '$.chainAfter', NULL), '$.chainDone', NULL), "
+        + "'$.chainReaders', NULL), '$.chainStartedAt', NULL), '$.chainElapsedMs', NULL)";
+
+    /// <summary>
+    /// Злиття в рядок, що чекає (<c>@payload</c> — тіло нової постановки): знято поля ланцюжка (H1) і, якщо нова
+    /// постановка — дитина ІНШОГО розкладу, позначка батька переходить до нового розкладу (його статус її рахує).
+    /// Ставить <c>@existing</c> і <c>@rewrite</c>; <c>{0}</c> — змінна з <c>JobId</c> рядка.
+    /// </summary>
+    private const string CoalescePayloadTemplate = """
+            SELECT @existing = Payload FROM itg.JobProgress WHERE JobId = {0};
+            IF (CASE WHEN ISJSON(@existing) = 1 THEN JSON_VALUE(@existing, '$.chainAfter') END) IS NOT NULL
+            BEGIN
+                SET @existing = <<RESET>>;
+                SET @rewrite = 1;
+            END
+            IF ISJSON(@existing) = 1 AND ISJSON(@payload) = 1
+            BEGIN
+                IF JSON_VALUE(@payload, '$.fanOutParentJobId') IS NOT NULL
+                   AND ISNULL(JSON_VALUE(@existing, '$.fanOutParentJobId'), N'') <> JSON_VALUE(@payload, '$.fanOutParentJobId')
+                BEGIN
+                    SET @existing = JSON_MODIFY(@existing, '$.fanOutParentJobId', JSON_VALUE(@payload, '$.fanOutParentJobId'));
+                    SET @rewrite = 1;
+                END
+            END
+        """;
+
+    /// <summary>Злиття: <see cref="CoalescePayloadTemplate"/> для рядка <paramref name="jobVar"/>.</summary>
+    internal static string CoalescePayloadSql(string jobVar)
+        => CoalescePayloadTemplate
+            .Replace("{0}", jobVar, StringComparison.Ordinal)
+            .Replace("<<RESET>>", ChainReset("@existing"), StringComparison.Ordinal);
+
+    /// <summary><see cref="ChainResetTemplate"/> над виразом <paramref name="payloadExpression"/>.</summary>
+    internal static string ChainReset(string payloadExpression)
+        => ChainResetTemplate.Replace("{0}", payloadExpression, StringComparison.Ordinal);
+
+    /// <summary>
+    /// Новий <c>AvailableAt</c> рядка, у який зливається постановка з моментом <c>{0}</c>: раніший із двох; запаркований
+    /// (огляд L8) — раніший із його колишнього місця й <c>{0}</c>.
+    /// </summary>
+    internal static string RevivedAvailableAt(string available)
+        => $"CASE WHEN AvailableAt = {ParkedAt} THEN CASE WHEN TRY_CAST(JSON_VALUE([Message], '$.p.at') AS datetime2(3)) < {available} "
+           + $"THEN TRY_CAST(JSON_VALUE([Message], '$.p.at') AS datetime2(3)) ELSE {available} END "
+           + $"WHEN AvailableAt > {available} THEN {available} ELSE AvailableAt END";
 
     /// <summary>Змінні злиття масиву payload (<see cref="MergeArraysSql"/>).</summary>
     private const string MergeDeclarations = """
@@ -279,10 +400,11 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
     /// підказкою діапазон — лише ключ цілі; якщо фільтр індексу колись перестане
     /// збігатися із запитом, SQL Server відмовить (8622), а не просканує мовчки.
     /// </remarks>
-    internal const string EnqueueSql = """
+    internal static readonly string EnqueueSql = """
         /* ecr:jobqueue-enqueue */
         BEGIN TRANSACTION;
         DECLARE @jobId nvarchar(100) = NULL, @outcome int = 0;
+        DECLARE @existing nvarchar(max) = NULL, @rewrite bit = 0;
         DECLARE @available datetime2(3) = DATEADD(millisecond, @delayMs, SYSUTCDATETIME());
         """ + "\n" + MergeDeclarations + "\n" + """
         IF @target IS NOT NULL
@@ -309,10 +431,12 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
         END
         IF @jobId IS NOT NULL
         BEGIN
+        """ + "\n" + CoalescePayloadSql("@jobId") + "\n" + """
             -- PSS-06: запаркована (її робота — у задачі, що вже читає входи) — знову звичайна: ця постановка новіша.
             UPDATE itg.JobProgress
-            SET AvailableAt = CASE WHEN AvailableAt > @available THEN @available ELSE AvailableAt END,
-                [Message] = CASE WHEN AvailableAt = CAST(N'9999-12-31T00:00:00' AS datetime2(3)) THEN NULL ELSE [Message] END
+        """ + "\n    SET AvailableAt = " + RevivedAvailableAt("@available") + ",\n" + """
+                [Message] = CASE WHEN AvailableAt = CAST(N'9999-12-31T00:00:00' AS datetime2(3)) THEN NULL ELSE [Message] END,
+                Payload = CASE WHEN @rewrite = 1 THEN @existing ELSE Payload END
             WHERE JobId = @jobId;
             SET @outcome = 1;
         END
@@ -443,14 +567,20 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
             p.Add("@docLaneA", SqlDbType.VarChar, JobLanes.MaxLength).Value = JobLanes.Recalc;
             p.Add("@docLaneB", SqlDbType.VarChar, JobLanes.MaxLength).Value = JobLanes.Interactive;
             p.Add("@fanOutCap", SqlDbType.Int).Value = fanOutCap;
+            p.Add("@cascadeLike", SqlDbType.NVarChar, JobProgress.MaxTargetKeyLength).Value = CascadeTargetLike;
             AddShown(p);
         }
 
-        string QueuedSqlOf(string lane, bool priority)
-            => ClaimQueuedSqlFor(
+        string QueuedSqlOf(string lane, bool priority, bool manualOnly = false)
+        {
+            var recalc = string.Equals(lane, JobLanes.Recalc, StringComparison.Ordinal);
+            return ClaimQueuedSqlFor(
                 documentExclusive: IsDocumentExclusiveLane(lane),
-                fanOutCap: fanOutCap > 0 && string.Equals(lane, JobLanes.Recalc, StringComparison.Ordinal),
-                priority);
+                fanOutCap: fanOutCap > 0 && recalc && !manualOnly,
+                priority,
+                recalcLane: recalc,
+                manualOnly: manualOnly);
+        }
 
         async Task<ClaimedJob?> Read(SqlDataReader r, bool reclaimed)
             => await r.ReadAsync(ct).ConfigureAwait(false)
@@ -490,6 +620,19 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
                         if (first is not null)
                         {
                             return first;
+                        }
+                    }
+
+                    // ✎ Огляд H2 (§6 п. 2, ФВ-12.2 < 5 с ручний): у лейні перерахунку спершу задача, яку поставила людина, —
+                    // вона не стоїть у FIFO за дітьми річного розкладу й кроками ланцюжків.
+                    if (!reclaimed && string.Equals(lane, JobLanes.Recalc, StringComparison.Ordinal))
+                    {
+                        var manual = await RunAsync(
+                                QueuedSqlOf(lane, priority: false, manualOnly: true), p => Bind(p, lane), r => Read(r, false), ct)
+                            .ConfigureAwait(false);
+                        if (manual is not null)
+                        {
+                            return manual;
                         }
                     }
 
@@ -557,11 +700,14 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
     }
 
     /// <inheritdoc />
-    /// <remarks>PSS-06: запарковані цією задачею (<see cref="ParkCoveredAsync"/>) закриваються <c>Succeeded</c> тим самим пакетом.</remarks>
+    /// <remarks>
+    /// ✎ Огляд M1: запарковані цією задачею, яких вона не закрила явно (<see cref="SettleParkedAsync"/> за порахованим
+    /// періодом), тим самим пакетом повертаються в чергу — свого періоду вона не рахувала, хай кажуть свій результат самі.
+    /// </remarks>
     public Task<bool> CompleteAsync(JobClaimToken claim, CancellationToken ct)
         => OwnedActionAsync(
             "UPDATE itg.JobProgress SET [State] = 'Succeeded', [Percent] = 100, LeaseUntil = NULL, UpdatedAt = @shown",
-            claim, null, ct, ParkedOutcome.Settle);
+            claim, null, ct, ParkedOutcome.Restore);
 
     /// <inheritdoc />
     public Task<bool> FailAsync(JobClaimToken claim, string reason, string? errorCode, CancellationToken ct)
@@ -639,6 +785,7 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
             BEGIN TRANSACTION;
             DECLARE @target nvarchar(200), @behind nvarchar(100), @ok int = 0, @code nvarchar(64), @absorb int = 0;
             DECLARE @available datetime2(3) = DATEADD(millisecond, @delayMs, SYSUTCDATETIME());
+            DECLARE @existing nvarchar(max) = NULL, @rewrite bit = 0, @payload nvarchar(max) = NULL;
             {MergeDeclarations}
             SELECT @target = TargetKey, @ok = 1, @code = JobCode, @addPayload = Payload
             FROM itg.JobProgress WITH (UPDLOCK) {OwnedBy};
@@ -680,9 +827,11 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
                 {OwnedBy};
                 -- ⛔ Д-1 (O1): свій відлік стелі в задачу позаду НЕ переноситься — у ній
                 -- свіжа правка, і чужий відлік валив би її раніше, ніж та чекала б сама.
+                {CoalescePayloadSql("@behind")}
                 UPDATE itg.JobProgress
-                SET AvailableAt = CASE WHEN AvailableAt > @available THEN @available ELSE AvailableAt END,
-                    [Message] = CASE WHEN AvailableAt = {ParkedAt} THEN NULL ELSE [Message] END
+                SET AvailableAt = {RevivedAvailableAt("@available")},
+                    [Message] = CASE WHEN AvailableAt = {ParkedAt} THEN NULL ELSE [Message] END,
+                    Payload = CASE WHEN @rewrite = 1 THEN @existing ELSE Payload END
                 WHERE JobId = @behind;
             END
             ELSE IF @ok = 1
@@ -737,7 +886,7 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
     /// <remarks>
     /// ⚠ Той самий пакет, що <see cref="RequeueAsync"/>, з трьома відмінностями: payload — НОВИЙ (наступний крок),
     /// спроба й переклейми не рахуються (кожен крок — свіжа серія), а запарковані задачею на вже зроблені періоди
-    /// (<paramref name="settleThrough"/>) закриваються <c>Succeeded</c>. <c>AvailableAt</c> — зараз (+ <paramref name="delay"/>):
+    /// (<paramref name="stepPeriod"/>), яких крок не закрив явно (<see cref="SettleParkedAsync"/>), — знову в черзі. <c>AvailableAt</c> — зараз (+ <paramref name="delay"/>):
     /// крок стає в кінець FIFO лейна, тож задачі того самого документа, що чекали, ідуть між місяцями.
     /// <para>
     /// ⚠ Позаду на ту саму ціль уже чекає інша задача — вона новіша й порахує ВСІ періоди своєї цілі: наш рядок
@@ -745,7 +894,7 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
     /// </para>
     /// </remarks>
     public Task<bool> ContinueAsync(
-        JobClaimToken claim, string payloadJson, TimeSpan delay, int settleThrough, CancellationToken ct)
+        JobClaimToken claim, string payloadJson, TimeSpan delay, int stepPeriod, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(claim);
         ArgumentException.ThrowIfNullOrWhiteSpace(payloadJson);
@@ -757,16 +906,20 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
 
         return RunAsync(
             $"""
+            SET XACT_ABORT ON;
             BEGIN TRANSACTION;
             DECLARE @target nvarchar(200), @behind nvarchar(100), @ok int = 0;
+            DECLARE @existing nvarchar(max) = NULL, @rewrite bit = 0, @payload nvarchar(max) = NULL;
             SELECT @target = TargetKey, @ok = 1 FROM itg.JobProgress WITH (UPDLOCK) {OwnedBy};
             IF @ok = 1 AND @target IS NOT NULL
                 SELECT @behind = JobId
                 FROM itg.JobProgress WITH (UPDLOCK, HOLDLOCK, INDEX(UX_JobProgress_Target_Queued))
                 WHERE TargetKey = @target AND TargetKey IS NOT NULL AND [State] = 'Queued';
+            -- ✎ Огляд M1: запарковані на зроблені періоди, яких крок не закрив явно (період не порахували — закрили між
+            -- кроками тощо), — знову в черзі; на пізніші — чекають своїх кроків.
             IF @ok = 1
             BEGIN
-                {SettleParkedSql}
+                {RestoreParkedThroughSql}
             END
             IF @ok = 1 AND @behind IS NOT NULL
             BEGIN
@@ -774,17 +927,21 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
                 SET [State] = 'Cancelled', LeaseUntil = NULL, UpdatedAt = @shown,
                     [Message] = REPLACE(@absorbed, N'{AbsorbedMarker}', STRING_ESCAPE(@behind, 'json'))
                 {OwnedBy};
+                {CoalescePayloadSql("@behind")}
                 UPDATE itg.JobProgress
-                SET AvailableAt = CASE WHEN AvailableAt > SYSUTCDATETIME() THEN SYSUTCDATETIME() ELSE AvailableAt END,
-                    [Message] = CASE WHEN AvailableAt = {ParkedAt} THEN NULL ELSE [Message] END
+                SET AvailableAt = {RevivedAvailableAt("SYSUTCDATETIME()")},
+                    [Message] = CASE WHEN AvailableAt = {ParkedAt} THEN NULL ELSE [Message] END,
+                    Payload = CASE WHEN @rewrite = 1 THEN @existing ELSE Payload END
                 WHERE JobId = @behind;
             END
             ELSE IF @ok = 1
                 -- ⛔ L2-01: запит скасування, що прийшов під час кроку, не губиться — рядок закривається Cancelled.
                 UPDATE itg.JobProgress
                 SET [State] = CASE WHEN CancelRequestedAt IS NULL THEN 'Queued' ELSE 'Cancelled' END,
-                    AvailableAt = DATEADD(millisecond, @delayMs, SYSUTCDATETIME()),
-                    Payload = @payload, ClaimToken = NULL, LeaseUntil = NULL, UpdatedAt = @shown, HeartbeatAt = @shown,
+                    -- ✎ Огляд H2: крок зберігає місце ланцюжка в FIFO (його AvailableAt) — рік документа йде вглиб, а не
+                    -- «перший місяць кожного документа, потім другий». Відкладення — лише явне.
+                    AvailableAt = CASE WHEN @delayMs > 0 THEN DATEADD(millisecond, @delayMs, SYSUTCDATETIME()) ELSE AvailableAt END,
+                    Payload = @nextPayload, ClaimToken = NULL, LeaseUntil = NULL, UpdatedAt = @shown, HeartbeatAt = @shown,
                     Attempt = CASE WHEN ISNULL(Attempt, 0) > 0 THEN Attempt - 1 ELSE Attempt END,
                     ReclaimCount = 0
                 {OwnedBy};
@@ -800,13 +957,31 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
             {
                 BindClaim(p, claim);
                 BindPark(p);
-                p.Add("@settleThrough", SqlDbType.Int).Value = settleThrough;
-                p.Add("@payload", SqlDbType.NVarChar, -1).Value = payloadJson;
+                p.Add("@restoreThrough", SqlDbType.Int).Value = stepPeriod;
+                p.Add("@nextPayload", SqlDbType.NVarChar, -1).Value = payloadJson;
                 p.Add("@delayMs", SqlDbType.Int).Value = checked((int)delay.TotalMilliseconds);
                 p.Add("@absorbed", SqlDbType.NVarChar, JobProgressMessageCodec.MaxEncodedLength).Value = absorbed;
                 AddShown(p);
             },
             async r => await r.ReadAsync(ct).ConfigureAwait(false) && r.GetInt32(0) == 1,
+            ct);
+    }
+
+    /// <inheritdoc />
+    public Task<int> SettleParkedAsync(JobClaimToken coverer, int periodKey, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(coverer);
+
+        return RunAsync(
+            SettleParkedSql + "\nSELECT @@ROWCOUNT;",
+            p =>
+            {
+                BindClaim(p, coverer);
+                BindPark(p);
+                p.Add("@settlePeriod", SqlDbType.Int).Value = periodKey;
+                AddShown(p);
+            },
+            async r => await r.ReadAsync(ct).ConfigureAwait(false) ? r.GetInt32(0) : 0,
             ct);
     }
 
@@ -821,7 +996,9 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
 
         return RunAsync(
             $"""
-            SELECT TOP (@max) q.JobId, q.JobCode, q.Lane, q.TargetKey, q.Payload,
+            SELECT TOP (@max) q.JobId, q.JobCode, q.Lane, q.TargetKey,
+                   -- ✎ Огляд L4: тіло — лише задач перерахунку (рішення «що покрито»); задачі формул несуть комірки правки.
+                   CASE WHEN q.Lane = @docLaneA THEN q.Payload END,
                    DATEDIFF_BIG(millisecond, SYSUTCDATETIME(), q.AvailableAt)
             FROM itg.JobProgress AS q WITH (INDEX(IX_JobProgress_Document_Active))
             WHERE q.DocumentId = @doc AND q.DocumentId IS NOT NULL AND q.[State] = 'Queued'
@@ -887,10 +1064,13 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
 
         return RunAsync(
             $"""
-            UPDATE q SET AvailableAt = {ParkedAt}, [Message] = j.m, UpdatedAt = @shown
+            UPDATE q SET AvailableAt = {ParkedAt}, UpdatedAt = @shown,
+                -- ✎ Огляд L8: колишнє місце в FIFO — у конверті, повернення його відновлює.
+                [Message] = JSON_MODIFY(j.m, '$.p.at', CONVERT(nvarchar(30), q.AvailableAt, 126))
             OUTPUT inserted.JobId
-            FROM itg.JobProgress AS q
-            JOIN OPENJSON(@rows) WITH (id nvarchar(100) '$.id', m nvarchar(400) '$.m') AS j ON j.id = q.JobId
+            FROM OPENJSON(@rows) WITH (id nvarchar(100) '$.id', m nvarchar(400) '$.m') AS j
+            -- ✎ Огляд L5: лише пошук за ключем рядка — без скану таблиці з U-локами.
+            INNER LOOP JOIN itg.JobProgress AS q WITH (FORCESEEK) ON q.JobId = j.id
             WHERE q.Lane = @parkLane AND q.Lane IS NOT NULL AND q.[State] = 'Queued' AND q.AvailableAt <> {ParkedAt}
               AND q.JobId <> @id
               AND EXISTS (SELECT 1 FROM itg.JobProgress AS c WHERE c.JobId = @id AND c.ClaimToken = @token AND c.[State] = 'Running');
@@ -1104,11 +1284,15 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
                 ClaimToken = NULL, LeaseUntil = NULL, CancelRequestedAt = NULL, [Percent] = 0,
                 [Message] = NULL, Error = NULL, ErrorCode = NULL, UpdatedAt = @shown, HeartbeatAt = @shown,
                 -- Нова серія — і новий відлік стелі відкладень (борг O1).
-                Payload = CASE WHEN ISJSON(Payload) = 1 AND LEFT(LTRIM(Payload), 1) = N'{'
-                               THEN JSON_MODIFY(Payload, @sincePath, NULL) ELSE Payload END
+                -- ✎ Огляд L1: і поля ланцюжка (PSS-04) — перезапуск рахує всі періоди заново.
+                Payload = CASE WHEN ISJSON(Payload) = 1 AND LEFT(LTRIM(Payload), 1) = NCHAR(123)
+                               THEN <<RESETPAYLOAD>> ELSE Payload END
             OUTPUT 1
             WHERE JobId = @id AND Lane IS NOT NULL AND [State] IN ('Failed', 'Cancelled');
-            """,
+            """.Replace(
+                "<<RESETPAYLOAD>>",
+                ChainReset("JSON_MODIFY(Payload, @sincePath, NULL)"),
+                StringComparison.Ordinal),
             p =>
             {
                 p.Add("@id", SqlDbType.NVarChar, 100).Value = jobId;
@@ -1158,7 +1342,7 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
             -- долею запаркованих, ручна правка) — знову в черзі. Живу не чіпаємо: Running вирішить сам, Queued — ланцюжок
             -- між кроками (PSS-04), запарковані ним на пізніші періоди чекають його.
             UPDATE p
-            SET AvailableAt = SYSUTCDATETIME(), [Message] = NULL, UpdatedAt = @shown
+            SET AvailableAt = ISNULL({ParkedOriginalAt}, SYSUTCDATETIME()), [Message] = NULL, UpdatedAt = @shown
             FROM itg.JobProgress AS p WITH (ROWLOCK, READPAST, INDEX(IX_JobProgress_Claim))
             WHERE p.Lane = @parkLane AND p.Lane IS NOT NULL AND p.[State] = 'Queued' AND p.AvailableAt = {ParkedAt}
               AND JSON_VALUE(p.[Message], '$.k') = @parkKey
@@ -1224,6 +1408,7 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
         // назавжди (claim їх не бере) або закрив би їх, хоча роботу не зроблено. І лише якщо оренда ще наша.
         return RunAsync(
             $"""
+            SET XACT_ABORT ON;
             BEGIN TRANSACTION;
             DECLARE @owned TABLE (x int NOT NULL);
             {update}
@@ -1231,7 +1416,7 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
             {OwnedBy};
             IF EXISTS (SELECT 1 FROM @owned)
             BEGIN
-                {(parked == ParkedOutcome.Settle ? SettleParkedSql : RestoreParkedSql)}
+                {RestoreParkedSql}
             END
             COMMIT TRANSACTION;
             SELECT COUNT(*) FROM @owned;
@@ -1241,7 +1426,6 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
                 BindClaim(p, claim);
                 AddShown(p);
                 BindPark(p);
-                p.Add("@settleThrough", SqlDbType.Int).Value = DBNull.Value;
                 bind?.Invoke(p);
             },
             async r => await r.ReadAsync(ct).ConfigureAwait(false) && r.GetInt32(0) > 0,

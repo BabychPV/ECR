@@ -44,14 +44,29 @@ public sealed class RecalculationFanOutLimitDbTests(SqlServerFixture sql) : DbJo
         var hosts = Enumerable.Range(0, 10).Select(_ => CappedHost()).ToList();
         try
         {
-            var claimed = await Task.WhenAll(hosts.Select((h, i) => ClaimAsync(h, $"host/{i}")));
+            var claimed = (await Task.WhenAll(hosts.Select((h, i) => ClaimAsync(h, $"host/{i}"))))
+                .Where(c => c is not null)
+                .Select(c => c!.Claim.JobId)
+                .ToList();
 
-            var children = await RunningChildrenAsync();
-            Assert.Equal(Cap, children);
+            // Строгість: одночасний claim ніколи не перевищує межу (навіть якщо applock когось не пустив за 5 с).
+            Assert.True(await RunningChildrenAsync() <= Cap);
+
+            // ✎ Огляд L9: на навантаженій машині applock може не дочекатися — тоді той claim дітей не бере (так задумано).
+            // Добираємо послідовно, доки беруть, — і тоді межа рівно заповнена.
+            await using (var filler = CappedHost())
+            {
+                while (await ClaimAsync(filler, "host/fill") is { } more)
+                {
+                    claimed.Add(more.Claim.JobId);
+                }
+            }
+
+            Assert.Equal(Cap, await RunningChildrenAsync());
 
             // Ручний (без батька) узятий, хоча стояв у черзі ПІСЛЯ всіх десяти дітей.
-            Assert.Contains(manual, claimed.Where(c => c is not null).Select(c => c!.Claim.JobId));
-            Assert.Equal(Cap + 1, claimed.Count(c => c is not null));
+            Assert.Contains(manual, claimed);
+            Assert.Equal(Cap + 1, claimed.Count);
         }
         finally
         {
@@ -122,23 +137,103 @@ public sealed class RecalculationFanOutLimitDbTests(SqlServerFixture sql) : DbJo
         Assert.NotNull(await capped.Queue.ClaimAsync([JobLanes.Default], "host/c", JobQueueLimits.DefaultLease, CancellationToken.None));
     }
 
-    private Host CappedHost()
+    /// <summary>
+    /// ✎ Огляд M4 (рішення координатора за §6 п. 2): обганяють лише ручні й автоперерахунок. Системні залежні
+    /// (<c>…-dependents</c>), поки діє розклад, — під тією самою межею й займають у ній місце; без розкладу — як доти.
+    /// </summary>
+    /// <remarks>МУТАЦІЯ: <c>FanOutCapFilter</c> без умови цілі каскаду — залежні беруться повз межу, червоний.</remarks>
+    [Fact]
+    public async Task Залежні_під_межею_поки_діє_розклад_а_ручні_й_авто_обганяють()
+    {
+        await EnqueueRecalcAsync(documentId: 9_500_000, parent: Parent);
+        await EnqueueRecalcAsync(documentId: 9_500_001, parent: Parent);
+        await using var host = CappedHost(cap: 1);
+        var child = (await ClaimAsync(host, "host/a"))!;
+
+        var dependents = await EnqueueRecalcAsync(9_500_010, null, target: Cascade(9_500_010, "-dependents"));
+        var auto = await EnqueueRecalcAsync(9_500_011, null, target: Cascade(9_500_011, "-auto"));
+        var manual = await EnqueueRecalcAsync(9_500_012, null, user: 7);
+
+        var taken = new List<string>();
+        while (await ClaimAsync(host, "host/a") is { } next)
+        {
+            taken.Add(next.Claim.JobId);
+        }
+
+        // Ручний — першим (прохід «спершу ручні»), авто — повз межу; залежні й друга дитина чекають межі.
+        Assert.Equal([manual, auto], taken);
+        Assert.Equal("Queued", (await RowAsync(dependents))!.State);
+
+        // Межу звільнено — далі FIFO серед підмежових: друга дитина (раніша), потім залежні.
+        Assert.True(await host.Queue.CompleteAsync(child.Claim, CancellationToken.None));
+        var secondChild = (await ClaimAsync(host, "host/a"))!;
+        Assert.NotEqual(dependents, secondChild.Claim.JobId);
+        Assert.Null(await ClaimAsync(host, "host/a"));
+
+        // Розклад закінчився (дітей немає) — залежні як доти, без межі.
+        Assert.True(await host.Queue.CompleteAsync(secondChild.Claim, CancellationToken.None));
+        Assert.Equal(dependents, (await ClaimAsync(host, "host/a"))?.Claim.JobId);
+    }
+
+    /// <summary>
+    /// ✎ Огляд H2: річний розклад іде вглиб — крок ланцюжка лишає місце документа в FIFO, тож наступний claim бере той
+    /// самий документ, а не перший місяць наступного; ручний перерахунок (будь-якого документа й місяця) — попереду всіх.
+    /// </summary>
+    /// <remarks>
+    /// МУТАЦІЇ: <c>ContinueAsync</c> з <c>AvailableAt = зараз</c> — другий claim бере документ B, червоний; без проходу
+    /// «спершу ручні» — ручний за дітьми, червоний.
+    /// </remarks>
+    [Fact]
+    public async Task Рік_іде_вглиб_по_документу_а_ручний_пізнішого_місяця_попереду_дітей()
+    {
+        var a = await EnqueueRecalcAsync(9_600_001, Parent, target: Cascade(9_600_001, "-year"));
+        var b = await EnqueueRecalcAsync(9_600_002, Parent, target: Cascade(9_600_002, "-year"));
+        var c = await EnqueueRecalcAsync(9_600_003, Parent, target: Cascade(9_600_003, "-year"));
+        await using var host = CappedHost(cap: 1);
+
+        for (var month = 1; month <= 3; month++)
+        {
+            var step = (await ClaimAsync(host, "host/w"))!;
+            Assert.Equal(a, step.Claim.JobId);
+            Assert.True(await host.Queue.ContinueAsync(
+                step.Claim, $"{{\"documentId\":9600001,\"fanOutParentJobId\":\"{Parent}\",\"chainAfter\":20260{month}}}",
+                TimeSpan.Zero, 202600 + month, CancellationToken.None));
+        }
+
+        // Людина просить березень документа C, поки A посеред року, а B і C ще не починались.
+        var manual = await EnqueueRecalcAsync(9_600_003, null, target: Cascade(9_600_003, "-p202603"), user: 7, period: 202603);
+        Assert.Equal(manual, (await ClaimAsync(host, "host/w"))?.Claim.JobId);
+
+        // Далі — знову A (вглиб), а не B.
+        var next = (await ClaimAsync(host, "host/w"))!;
+        Assert.Equal(a, next.Claim.JobId);
+        Assert.Equal("Queued", (await RowAsync(b))!.State);
+        Assert.Equal("Queued", (await RowAsync(c))!.State);
+    }
+
+    private static string Cascade(long documentId, string suffix)
+        => $"{nameof(Ecr.Application.Ports.IRecalculationJob)}~doc{documentId}{suffix}";
+
+    private Host CappedHost(int cap = Cap)
     {
         var db = Sql.CreateContext();
-        return new Host(db, new DbJobQueue(db, new SystemClock(), new QuartzJobTypeLimiter(2, recalcFanOutMaxConcurrency: Cap)));
+        return new Host(db, new DbJobQueue(db, new SystemClock(), new QuartzJobTypeLimiter(2, recalcFanOutMaxConcurrency: cap)));
     }
 
     private static Task<ClaimedJob?> ClaimAsync(Host host, string owner)
         => host.Queue.ClaimAsync([JobLanes.Recalc], owner, JobQueueLimits.DefaultLease, CancellationToken.None);
 
-    private async Task<string> EnqueueRecalcAsync(long documentId, string? parent)
+    private async Task<string> EnqueueRecalcAsync(
+        long documentId, string? parent, string? target = null, int? user = null, int? period = null)
     {
         await using var host = NewHost();
+        var periodJson = period is { } p ? $",\"periodKey\":{p}" : string.Empty;
         var payload = parent is null
-            ? $"{{\"documentId\":{documentId}}}"
-            : $"{{\"documentId\":{documentId},\"fanOutParentJobId\":\"{parent}\"}}";
+            ? $"{{\"documentId\":{documentId}{periodJson}}}"
+            : $"{{\"documentId\":{documentId},\"fanOutParentJobId\":\"{parent}\"{periodJson}}}";
         return (await host.Queue.EnqueueAsync(
-                new JobEnqueueRequest(Code, JobLanes.Recalc, payload, DocumentId: documentId), CancellationToken.None))
+                new JobEnqueueRequest(Code, JobLanes.Recalc, payload, target, user, DocumentId: documentId),
+                CancellationToken.None))
             .JobId;
     }
 

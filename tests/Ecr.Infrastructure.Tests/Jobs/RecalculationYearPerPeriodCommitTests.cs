@@ -37,8 +37,9 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 /// МУТАЦІЇ (локально): (1) <c>chain = false</c> у <c>RecalculationJob.ExecuteAsync</c> — червоний
 /// <c>Місяці_стають_актуальними_по_одному…</c> (крок 1 рахує все й не продовжується); (2) <c>JobWorker</c> без
 /// гілки <c>JobContinuedException</c> (продовження йде провалом) — червоний <c>Межа_тривалості_діє_на_крок…</c>;
-/// (3) <c>ContinuationDelayAsync</c> завжди нуль — червоний перший тест (правку взяв би наступний крок, а не воркер Api);
-/// (4) без <c>ParkRemainingAsync</c> — червоний перший тест (залежні березня порахувались би окремо перед ланцюжком).
+/// (3) без <c>EditFirstExclusion</c> у claim лейна перерахунку — червоний перший тест (наступний крок узяв би документ
+/// раніше за правку); (4) без <c>ParkRemainingAsync</c> — червоний перший тест (залежні березня порахувались би окремо);
+/// (5) огляд H2: <c>ContinueAsync</c> з <c>AvailableAt = зараз</c> чи паркування ручних/авто на пізніший місяць — червоний.
 /// </para>
 /// </remarks>
 [Collection("SqlServer")]
@@ -77,9 +78,19 @@ public sealed class RecalculationYearPerPeriodCommitTests(SqlServerFixture sql) 
             new { document.DocumentId, PeriodKey = March.Value, RecalculateSubmitted = true, SourceHop = 1 },
             CalculationTrigger.CascadeDebounce, CancellationToken.None);
 
+        // Автоперерахунок березня (збір PI, D-174): огляд H2 — НЕ паркується на пізніший місяць ланцюжка.
+        var marchAuto = await scheduler.EnqueueCoalescedAsync<IRecalculationJob>(
+            CalculationTrigger.AutoTargetOf(document.DocumentId, March),
+            new { document.DocumentId, PeriodKey = March.Value, RecalculateSubmitted = true }, CancellationToken.None);
+
         // ── Крок 1: січень.
         var step = (await ClaimAsync(host, JobLanes.Recalc))!;
         Assert.Equal(jobId, step.Claim.JobId);
+
+        // Ручний перерахунок березня людиною — поставлений, поки крок іде: огляд H2 — теж НЕ паркується.
+        var marchManual = await scheduler.EnqueueCoalescedAsync<IRecalculationJob>(
+            RecalculateDocumentHandler.TargetOf(document.DocumentId, March),
+            new { document.DocumentId, PeriodKey = March.Value, TriggeredByUserId = 7 }, CancellationToken.None, 7);
 
         // Правка комірки під час кроку: задачу формул документа claim не бере, поки крок виконується.
         var edit = await EnqueueEditAsync(document.DocumentId);
@@ -88,7 +99,7 @@ public sealed class RecalculationYearPerPeriodCommitTests(SqlServerFixture sql) 
         var continued = await Assert.ThrowsAsync<JobContinuedException>(
             () => RunStepAsync(builder, scheduler, host.Queue, step));
         Assert.Equal(january.Value, continued.SettleThrough);
-        Assert.Equal(RecalculationJob.ContinuationYield, continued.Delay);
+        Assert.Equal(TimeSpan.Zero, continued.Delay);
         var next = JsonSerializer.Deserialize<RecalculationRequest>(continued.PayloadJson, Web)!;
         Assert.Equal(january.Value, next.ChainAfter);
         Assert.Equal([january.Value], next.ChainDone!);
@@ -96,13 +107,21 @@ public sealed class RecalculationYearPerPeriodCommitTests(SqlServerFixture sql) 
         // Січень уже актуальний, лютий і березень ще не рахувались.
         Assert.Equal([january.Value], await CurrentPeriodsAsync(document.DocumentId));
 
+        var availableBefore = (await RowAsync(jobId))!.AvailableAt;
         Assert.True(await host.Queue.ContinueAsync(
             step.Claim, continued.PayloadJson, continued.Delay, continued.SettleThrough, CancellationToken.None));
 
-        // Залежні березня — запарковані ланцюжком до його кроку березня.
-        AssertParked(await RowAsync(marchDependents), jobId);
+        // Огляд H2: крок зберігає місце ланцюжка в FIFO (рік документа — вглиб).
+        Assert.Equal(availableBefore, (await RowAsync(jobId))!.AvailableAt);
 
-        // Між місяцями: правку бере воркер Api (наступний крок поступився їй), лок документа вільний.
+        // Залежні березня — запарковані ланцюжком до його кроку березня; ручний і авто — ні.
+        AssertParked(await RowAsync(marchDependents), jobId);
+        Assert.Equal(("Queued", 2026), ((await RowAsync(marchManual))!.State, (await RowAsync(marchManual))!.AvailableAt!.Value.Year));
+        Assert.Equal(2026, (await RowAsync(marchAuto))!.AvailableAt!.Value.Year);
+
+        // Між місяцями: на документ чекає правка — лейн перерахунку документ не бере (поступається їй), її бере воркер Api;
+        // лок документа вільний.
+        Assert.Null(await ClaimAsync(host, JobLanes.Recalc));
         var editClaim = await ClaimAsync(host, JobLanes.Interactive);
         Assert.Equal(edit, editClaim?.Claim.JobId);
         Assert.Null(await ClaimAsync(host, JobLanes.Recalc));
@@ -114,7 +133,11 @@ public sealed class RecalculationYearPerPeriodCommitTests(SqlServerFixture sql) 
         }
 
         Assert.True(await host.Queue.CompleteAsync(editClaim!.Claim, CancellationToken.None));
-        await ExecAsync("UPDATE itg.JobProgress SET AvailableAt = SYSUTCDATETIME() WHERE JobId = @id;", jobId);
+
+        // Огляд H2: ручний березень іде попереду ланцюжка (людина не чекає року), автоперерахунок — у FIFO за ним.
+        var manualClaim = await ClaimAsync(host, JobLanes.Recalc);
+        Assert.Equal(marchManual, manualClaim?.Claim.JobId);
+        Assert.True(await host.Queue.CompleteAsync(manualClaim!.Claim, CancellationToken.None));
 
         // ── Крок 2: лютий — той самий рядок черги, спроба не рахується.
         step = (await ClaimAsync(host, JobLanes.Recalc))!;
@@ -126,7 +149,8 @@ public sealed class RecalculationYearPerPeriodCommitTests(SqlServerFixture sql) 
             step.Claim, continued.PayloadJson, continued.Delay, continued.SettleThrough, CancellationToken.None));
         AssertParked(await RowAsync(marchDependents), jobId);
 
-        // ── Крок 3: березень — останній, задача закінчується.
+        // ── Крок 3: березень — останній, задача закінчується. Автоперерахунок березня, що досі чекає, крок березня
+        // покриває на своєму старті (свій період).
         step = (await ClaimAsync(host, JobLanes.Recalc))!;
         Assert.Equal(jobId, step.Claim.JobId);
         await RunStepAsync(builder, scheduler, host.Queue, step);
@@ -135,8 +159,9 @@ public sealed class RecalculationYearPerPeriodCommitTests(SqlServerFixture sql) 
         Assert.Equal([january.Value, February.Value, March.Value], await CurrentPeriodsAsync(document.DocumentId));
         Assert.Equal("Succeeded", (await RowAsync(jobId))!.State);
 
-        // Залежні березня закрито разом із кроком березня, а не пораховано вдруге.
+        // Залежні й авто березня закрито кроком березня, а не пораховано вдруге.
         Assert.Equal("Succeeded", (await RowAsync(marchDependents))!.State);
+        Assert.Equal("Succeeded", (await RowAsync(marchAuto))!.State);
 
         // По одному прогону на період — жодного повтору.
         await using var db = builder.CreateContext();
@@ -147,6 +172,122 @@ public sealed class RecalculationYearPerPeriodCommitTests(SqlServerFixture sql) 
             .ToListAsync();
         Assert.All(runs, r => Assert.Equal(1, r.Count));
         Assert.Equal(3, runs.Count);
+    }
+
+    /// <summary>
+    /// ✎ Огляд H1: нова постановка на ціль ланцюжка, що чекає між кроками, зливається в нього — і він починає знову з
+    /// ПЕРШОГО періоду (зміна могла торкнутися вже зроблених місяців), а позначка батька — нового розкладу.
+    /// </summary>
+    /// <remarks>МУТАЦІЯ: без скидання полів ланцюжка в <c>CoalescePayloadSql</c> — крок 2 рахує лютий, тест червоний.</remarks>
+    [Fact]
+    public async Task Нова_постановка_на_ціль_ланцюжка_між_кроками_починає_його_з_першого_періоду()
+    {
+        var (builder, document) = await ArrangeAsync();
+        var january = document.PeriodKey;
+
+        await using var host = NewHost();
+        var scheduler = Scheduler(host);
+        var target = RecalculateDocumentHandler.YearTargetOf(document.DocumentId);
+        var jobId = await scheduler.EnqueueCoalescedAsync<IRecalculationJob>(
+            target, new { document.DocumentId, PeriodKey = (int?)null, FanOutParentJobId = "parent-old" }, CancellationToken.None);
+
+        var step = (await ClaimAsync(host, JobLanes.Recalc))!;
+        var continued = await Assert.ThrowsAsync<JobContinuedException>(() => RunStepAsync(builder, scheduler, host.Queue, step));
+        Assert.True(await host.Queue.ContinueAsync(
+            step.Claim, continued.PayloadJson, continued.Delay, continued.SettleThrough, CancellationToken.None));
+        Assert.Contains("\"chainAfter\"", (await RowAsync(jobId))!.Payload, StringComparison.Ordinal);
+
+        // Нічний розклад ставить рік документа знову (новий батько) — злиття в ланцюжок між кроками.
+        var again = await scheduler.EnqueueCoalescedAsync<IRecalculationJob>(
+            target, new { document.DocumentId, PeriodKey = (int?)null, FanOutParentJobId = "parent-new" }, CancellationToken.None);
+        Assert.Equal(jobId, again);
+
+        var row = await RowAsync(jobId);
+        Assert.DoesNotContain("chainAfter", row!.Payload, StringComparison.Ordinal);
+        Assert.Equal("parent-new", row.FanOutParentJobId);
+
+        // Наступний крок — знову січень.
+        step = (await ClaimAsync(host, JobLanes.Recalc))!;
+        continued = await Assert.ThrowsAsync<JobContinuedException>(() => RunStepAsync(builder, scheduler, host.Queue, step));
+        Assert.Equal(january.Value, continued.SettleThrough);
+    }
+
+    /// <summary>
+    /// ✎ Огляд M2: вимір ПРД-13 ланцюжка — сума часу РОБОТИ кроків (<c>ChainElapsedMs</c>), а не годинник від першого кроку
+    /// з очікуваннями в черзі між кроками (хибне «понад бюджет» і Degraded на /health/ready).
+    /// </summary>
+    /// <remarks>МУТАЦІЯ: виміряти <c>clock.UtcNow - (ChainStartedAt)</c> чи без <c>ChainElapsedMs</c> — червоний.</remarks>
+    [Fact]
+    public async Task Вимір_бюджету_ланцюжка_сумує_роботу_кроків_без_очікувань_між_ними()
+    {
+        var (builder, document) = await ArrangeAsync();
+        await using var host = NewHost();
+        var scheduler = Scheduler(host);
+
+        // Останній крок (березень) ланцюжка, що вже відпрацював 5 хв (сума кроків), а від старту минули години черги.
+        var jobId = await scheduler.EnqueueCoalescedAsync<IRecalculationJob>(
+            RecalculateDocumentHandler.YearTargetOf(document.DocumentId),
+            new RecalculationRequest(
+                document.ProjectId, document.DocumentId, null, null, ChainAfter: February.Value,
+                ChainDone: [document.PeriodKey.Value, February.Value], ChainElapsedMs: 5 * 60 * 1000),
+            CancellationToken.None);
+        var step = (await ClaimAsync(host, JobLanes.Recalc))!;
+        Assert.Equal(jobId, step.Claim.JobId);
+
+        var messages = new List<string?>();
+        using var budget = new RecalculationBudgetMonitor(
+            new RecalculationBudgetOptions(TimeSpan.FromMinutes(10), "Database"),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<RecalculationBudgetMonitor>.Instance);
+        await RunStepAsync(builder, scheduler, host.Queue, step, budget, messages);
+        Assert.DoesNotContain(messages, m => m?.Contains(RecalculationBudgetMonitor.OverBudgetKey, StringComparison.Ordinal) == true);
+
+        // Контроль: сума кроків понад поріг — сигнал є.
+        await host.Queue.CompleteAsync(step.Claim, CancellationToken.None);
+        await scheduler.EnqueueCoalescedAsync<IRecalculationJob>(
+            RecalculateDocumentHandler.YearTargetOf(document.DocumentId),
+            new RecalculationRequest(
+                document.ProjectId, document.DocumentId, null, null, ChainAfter: February.Value,
+                ChainDone: [document.PeriodKey.Value, February.Value], ChainElapsedMs: 11 * 60 * 1000),
+            CancellationToken.None);
+        step = (await ClaimAsync(host, JobLanes.Recalc))!;
+        messages.Clear();
+        await RunStepAsync(builder, scheduler, host.Queue, step, budget, messages);
+        Assert.Contains(messages, m => m?.Contains(RecalculationBudgetMonitor.OverBudgetKey, StringComparison.Ordinal) == true);
+    }
+
+    /// <summary>
+    /// ✎ Огляд M3: читач результатів ПІЗНІШОГО місяця ланцюжка отримує прохід одразу на своєму кроці (стоїть у FIFO за
+    /// ланцюжком) — і лишається в черзі, навіть якщо ланцюжок скасують посеред року.
+    /// </summary>
+    /// <remarks>МУТАЦІЯ: повернути перенос читачів до останнього кроку — після скасування проходу немає, червоний.</remarks>
+    [Fact]
+    public async Task Прохід_читача_пізнішого_місяця_ставиться_на_кроці_і_переживає_скасування_ланцюжка()
+    {
+        var (builder, document) = await ArrangeAsync();
+        var january = document.PeriodKey;
+        await using var host = NewHost();
+        var scheduler = Scheduler(host);
+        var jobId = await scheduler.EnqueueCoalescedAsync<IRecalculationJob>(
+            RecalculateDocumentHandler.YearTargetOf(document.DocumentId),
+            new { document.DocumentId, PeriodKey = (int?)null }, CancellationToken.None);
+
+        var step = (await ClaimAsync(host, JobLanes.Recalc))!;
+        await Assert.ThrowsAsync<JobContinuedException>(
+            () => RunStepAsync(builder, scheduler, host.Queue, step, readsOwner: (january, March)));
+
+        var passTarget = $"{nameof(IRecalculationJob)}~{RecalculateDocumentHandler.TargetOf(document.DocumentId, january)}";
+        await using (var db = Sql.CreateContext())
+        {
+            var pass = await db.JobProgresses.AsNoTracking().SingleAsync(p => p.TargetKey == passTarget && p.State == "Queued");
+            Assert.Contains("\"foreignOwnerPass\":true", pass.Payload, StringComparison.Ordinal);
+        }
+
+        // Ланцюжок скасовано посеред року (між кроками) — прохід січня лишається.
+        await ExecAsync("UPDATE itg.JobProgress SET [State] = 'Cancelled' WHERE JobId = @id;", jobId);
+        await using (var db = Sql.CreateContext())
+        {
+            Assert.Equal(1, await db.JobProgresses.CountAsync(p => p.TargetKey == passTarget && p.State == "Queued"));
+        }
     }
 
     [Fact]
@@ -214,21 +355,23 @@ public sealed class RecalculationYearPerPeriodCommitTests(SqlServerFixture sql) 
     }
 
     private async Task RunStepAsync(
-        TestDocumentBuilder builder, IBackgroundJobScheduler scheduler, IJobQueue queue, ClaimedJob step)
+        TestDocumentBuilder builder, IBackgroundJobScheduler scheduler, IJobQueue queue, ClaimedJob step,
+        RecalculationBudgetMonitor? budget = null, List<string?>? messages = null, (PeriodKey Reader, PeriodKey Owner)? readsOwner = null)
     {
         await using var db = builder.CreateContext();
         var clock = new TestClock(Now);
         var job = new RecalculationJob(
             db,
-            new WritingRunner(builder, _methodologyVersionId, _unitId),
+            new WritingRunner(builder, _methodologyVersionId, _unitId, readsOwner),
             RunHandler(db, clock),
             FormulaService(),
             clock,
             jobs: scheduler,
+            budget: budget,
             lease: new FixedLease(step.Claim),
             queue: queue);
 
-        await job.ExecuteAsync(step.PayloadJson, new NoOpProgress(), CancellationToken.None);
+        await job.ExecuteAsync(step.PayloadJson, new RecordingProgress(messages), CancellationToken.None);
     }
 
     private async Task<string> EnqueueEditAsync(long documentId)
@@ -343,7 +486,9 @@ public sealed class RecalculationYearPerPeriodCommitTests(SqlServerFixture sql) 
     }
 
     /// <summary>Фейк оркестратора: пише вихід через справжнє сховище, як <c>CalculationOutputWriter</c>.</summary>
-    private sealed class WritingRunner(TestDocumentBuilder builder, int methodologyVersionId, int unitId) : ICalculationRunner
+    private sealed class WritingRunner(
+        TestDocumentBuilder builder, int methodologyVersionId, int unitId, (PeriodKey Reader, PeriodKey Owner)? readsOwner = null)
+        : ICalculationRunner
     {
         public async Task<ModuleProfile> RunAsync(
             long calculationRunId, long documentId, PeriodKey periodKey,
@@ -352,6 +497,12 @@ public sealed class RecalculationYearPerPeriodCommitTests(SqlServerFixture sql) 
             if (bindings.Count == 0)
             {
                 return new ModuleProfile();
+            }
+
+            var profile = new ModuleProfile();
+            if (readsOwner is { } read && read.Reader == periodKey)
+            {
+                profile.RecordForeignOwnerReads([read.Owner.Value]);
             }
 
             await using var db = builder.CreateContext();
@@ -364,7 +515,7 @@ public sealed class RecalculationYearPerPeriodCommitTests(SqlServerFixture sql) 
                 ],
                 ct);
             await db.SaveChangesAsync(ct);
-            return new ModuleProfile();
+            return profile;
         }
     }
 
@@ -373,9 +524,13 @@ public sealed class RecalculationYearPerPeriodCommitTests(SqlServerFixture sql) 
         public JobClaimToken? Current { get; } = claim;
     }
 
-    private sealed class NoOpProgress : IJobProgress
+    private sealed class RecordingProgress(List<string?>? messages) : IJobProgress
     {
-        public Task ReportAsync(int percent, string? message, CancellationToken ct) => Task.CompletedTask;
+        public Task ReportAsync(int percent, string? message, CancellationToken ct)
+        {
+            messages?.Add(message);
+            return Task.CompletedTask;
+        }
     }
 }
 

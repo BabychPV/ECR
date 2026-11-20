@@ -59,7 +59,7 @@ public sealed class RecalculationCoveredByLaterRunTests(SqlServerFixture sql) : 
             1, Doc, 202603, null, SheetDefId: coverSheet, ForeignOwnerPass: coverPass, SourceHop: coverHop,
             IncludeApproved: coverApproved);
         var candidate = new RecalculationRequest(
-            1, Doc, 202603, 7, SheetDefId: sheet, ForeignOwnerPass: pass, SourceHop: hop, IncludeApproved: approved);
+            1, Doc, 202603, null, SheetDefId: sheet, ForeignOwnerPass: pass, SourceHop: hop, IncludeApproved: approved);
 
         Assert.Equal(covers, RecalculationJob.Covers(coverer, 202603, candidate));
 
@@ -70,23 +70,57 @@ public sealed class RecalculationCoveredByLaterRunTests(SqlServerFixture sql) : 
         Assert.False(RecalculationJob.Covers(coverer, 202603, candidate with { ChainAfter = 202602 }));
     }
 
+    /// <summary>✎ Огляд L6: задачу людини покриває лише прогін тієї самої людини (журнал і задача, яку вона опитує).</summary>
+    [Theory]
+    [InlineData(null, null, true)]
+    [InlineData(7, null, true)]
+    [InlineData(7, 7, true)]
+    [InlineData(null, 7, false)]
+    [InlineData(8, 7, false)]
+    public void Задачу_людини_покриває_лише_прогін_тієї_самої_людини(int? coverUser, int? candidateUser, bool covers)
+    {
+        var coverer = new RecalculationRequest(1, Doc, 202603, coverUser);
+        Assert.Equal(covers, RecalculationJob.Covers(coverer, 202603, new RecalculationRequest(1, Doc, 202603, candidateUser)));
+
+        // Перекриття адміністратора: те саме за автором перекриття.
+        var approvedCoverer = coverer with { IncludeApproved = true, OverrideUserId = 9 };
+        var approved = new RecalculationRequest(1, Doc, 202603, null, IncludeApproved: true, OverrideUserId: 9);
+        Assert.True(RecalculationJob.Covers(approvedCoverer, 202603, approved));
+        Assert.False(RecalculationJob.Covers(approvedCoverer, 202603, approved with { OverrideUserId = 10 }));
+    }
+
+    /// <remarks>
+    /// ✎ Огляд M1: <c>Succeeded</c> — лише за періодом, який покривна явно назвала порахованим (<see cref="IJobQueue.SettleParkedAsync"/>);
+    /// решту її кінець повертає в чергу — на колишнє місце FIFO (огляд L8).
+    /// </remarks>
     [Fact]
-    public async Task Запаркована_не_береться_а_успіх_покривної_закриває_її_Succeeded_тим_самим_пакетом()
+    public async Task Запаркована_не_береться_закривається_лише_за_порахованим_періодом_решта_повертається_на_своє_місце()
     {
         await using var host = NewHost();
         var coverer = await ClaimCovererAsync(host);
         var covered = await EnqueueRecalcAsync("auto");
+        var notComputed = await EnqueueRecalcAsync("other-period");
+        var originalAt = (await RowAsync(notComputed))!.AvailableAt;
 
-        Assert.Equal([covered], await host.Queue.ParkCoveredAsync(coverer, [new CoveredJob(covered, 202603)], CancellationToken.None));
+        Assert.Equal(
+            new[] { covered, notComputed }.Order(),
+            (await host.Queue.ParkCoveredAsync(
+                coverer, [new CoveredJob(covered, 202603), new CoveredJob(notComputed, 202605)], CancellationToken.None)).Order());
         AssertParked(await RowAsync(covered), coverer.JobId);
         Assert.Null(await ClaimRecalcAsync(host));
 
+        Assert.Equal(1, await host.Queue.SettleParkedAsync(coverer, 202603, CancellationToken.None));
         Assert.True(await host.Queue.CompleteAsync(coverer, CancellationToken.None));
 
         var done = await RowAsync(covered);
         Assert.Equal(("Succeeded", 100), (done!.State, done.Percent));
         Assert.True(JobProgressMessageCodec.TryDecode(done.Message, out var envelope));
         Assert.Equal(IJobQueue.ParkedMessageKey, envelope.Key);
+
+        // Період 202605 покривна не рахувала — задача знову в черзі, на тому самому місці FIFO.
+        var back = await RowAsync(notComputed);
+        AssertQueuedPlain(back);
+        Assert.Equal(originalAt, back!.AvailableAt);
     }
 
     [Fact]
@@ -95,9 +129,11 @@ public sealed class RecalculationCoveredByLaterRunTests(SqlServerFixture sql) : 
         await using var host = NewHost();
         var failing = await ClaimCovererAsync(host);
         var a = await EnqueueRecalcAsync("a");
+        var aAt = (await RowAsync(a))!.AvailableAt;
         await host.Queue.ParkCoveredAsync(failing, [new CoveredJob(a, 202603)], CancellationToken.None);
         Assert.True(await host.Queue.FailAsync(failing, "впала", null, CancellationToken.None));
         AssertQueuedPlain(await RowAsync(a));
+        Assert.Equal(aAt, (await RowAsync(a))!.AvailableAt);
         Assert.Equal(a, (await ClaimRecalcAsync(host))?.Claim.JobId);
 
         var cancelled = await ClaimCovererAsync(host);
@@ -152,17 +188,23 @@ public sealed class RecalculationCoveredByLaterRunTests(SqlServerFixture sql) : 
     }
 
     [Fact]
-    public async Task Крок_ланцюжка_закриває_лише_запарковані_на_зроблені_періоди_решта_чекає_наступних()
+    public async Task Крок_ланцюжка_закриває_лише_порахований_період_незроблені_раніші_повертає_пізніші_чекають()
     {
         await using var host = NewHost();
         var chain = await ClaimCovererAsync(host);
+        var february = await EnqueueRecalcAsync("m2");
         var march = await EnqueueRecalcAsync("m3");
         var may = await EnqueueRecalcAsync("m5");
         await host.Queue.ParkCoveredAsync(
-            chain, [new CoveredJob(march, 202603), new CoveredJob(may, 202605)], CancellationToken.None);
+            chain,
+            [new CoveredJob(february, 202602), new CoveredJob(march, 202603), new CoveredJob(may, 202605)],
+            CancellationToken.None);
 
+        // Крок порахував березень; лютий (запаркований раніше) ланцюжок не рахував — напр. період закрили.
+        await host.Queue.SettleParkedAsync(chain, 202603, CancellationToken.None);
         Assert.True(await host.Queue.ContinueAsync(chain, "{\"step\":2}", TimeSpan.Zero, 202603, CancellationToken.None));
         Assert.Equal("Succeeded", (await RowAsync(march))!.State);
+        AssertQueuedPlain(await RowAsync(february));
         AssertParked(await RowAsync(may), chain.JobId);
 
         // Ланцюжок між кроками — Queued; прибирання осиротілих його запаркованих не чіпає.
@@ -172,8 +214,10 @@ public sealed class RecalculationCoveredByLaterRunTests(SqlServerFixture sql) : 
         // Наступний крок — той самий рядок, новий payload, спроба не рахується.
         var step2 = await ClaimDefaultAsync(host);
         Assert.Equal((chain.JobId, "{\"step\":2}", 1), (step2!.Claim.JobId, step2.PayloadJson, step2.Attempt));
+
+        // Травень ланцюжок так і не порахував (закінчився раніше) — кінець повертає його в чергу, а не «Succeeded».
         Assert.True(await host.Queue.CompleteAsync(step2.Claim, CancellationToken.None));
-        Assert.Equal("Succeeded", (await RowAsync(may))!.State);
+        AssertQueuedPlain(await RowAsync(may));
     }
 
     [Fact]
@@ -227,7 +271,10 @@ public sealed class RecalculationCoveredByLaterRunTests(SqlServerFixture sql) : 
             RecalculateDocumentHandler.ScopedTargetOf(document.DocumentId, period, 77),
             new { document.DocumentId, PeriodKey = period.Value, SheetDefId = 77 }, CancellationToken.None);
 
-        // Не покриті: «з затвердженими» (ширша), інший період.
+        // Не покриті: «з затвердженими» (ширша), інший період, кнопка ІНШОЇ людини (огляд L6).
+        var otherUser = await scheduler.EnqueueCoalescedAsync<IRecalculationJob>(
+            RecalculateDocumentHandler.ScopedTargetOf(document.DocumentId, period, 78),
+            new { document.DocumentId, PeriodKey = period.Value, SheetDefId = 78, TriggeredByUserId = 8 }, CancellationToken.None, 8);
         var approved = await scheduler.EnqueueCoalescedAsync<IRecalculationJob>(
             CalculationTrigger.DependentsApprovedTargetOf(document.DocumentId, period),
             new { document.DocumentId, PeriodKey = period.Value, IncludeApproved = true, OverrideUserId = 9, OverrideReason = "Акт" },
@@ -244,7 +291,7 @@ public sealed class RecalculationCoveredByLaterRunTests(SqlServerFixture sql) : 
                 return;
             }
 
-            foreach (var id in new[] { auto, dependents, sheet, approved, otherPeriod })
+            foreach (var id in new[] { auto, dependents, sheet, approved, otherPeriod, otherUser })
             {
                 atFirstRead[id] = IsParked(RowAsync(id).GetAwaiter().GetResult(), claim.JobId);
             }
@@ -255,6 +302,7 @@ public sealed class RecalculationCoveredByLaterRunTests(SqlServerFixture sql) : 
         Assert.True(atFirstRead[sheet], "аркуш не запарковано до першого читання");
         Assert.False(atFirstRead[approved], "«з затвердженими» не покривається звичайним прогоном");
         Assert.False(atFirstRead[otherPeriod], "інший період не покривається");
+        Assert.False(atFirstRead[otherUser], "кнопку іншої людини не покриває прогін цієї");
 
         // Прогін на заглушках падає — виконавець закрив би покривну Failed, і запарковані повертаються.
         Assert.True(await host.Queue.FailAsync(claim, "заглушки", null, CancellationToken.None));

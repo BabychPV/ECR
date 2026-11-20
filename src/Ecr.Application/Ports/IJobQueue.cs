@@ -93,18 +93,29 @@ public interface IJobQueue
 
     /// <summary>
     /// ✎ PSS-04 (<c>D-561</c>): крок задачі зроблено, вона продовжується НАСТУПНИМ кроком — той самий рядок
-    /// (<c>JobId</c>) знову <c>Queued</c> з новим payload; лок документа й місце виконавця звільнено, межа тривалості
-    /// діє на крок. Запарковані задачею на періоди до <paramref name="settleThrough"/> включно — <c>Succeeded</c>.
+    /// (<c>JobId</c>) знову <c>Queued</c> з новим payload і на тому самому місці FIFO (огляд H2: рік документа — вглиб);
+    /// лок документа й місце виконавця звільнено, межа тривалості діє на крок. Запарковані задачею на періоди до
+    /// <paramref name="stepPeriod"/> включно, яких вона не закрила явно (<see cref="SettleParkedAsync"/>), — знову в черзі.
     /// </summary>
     /// <param name="claim">Оренда кроку.</param>
     /// <param name="payloadJson">Тіло наступного кроку.</param>
-    /// <param name="delay">Відкласти наступний крок (поступитися задачам документа, що чекають).</param>
-    /// <param name="settleThrough">Останній зроблений період ланцюжка (ключ періоду).</param>
+    /// <param name="delay">Відкласти наступний крок (нуль — лишити місце в FIFO).</param>
+    /// <param name="stepPeriod">Період, який рахував цей крок (ключ періоду).</param>
     /// <param name="ct">Скасування.</param>
     /// <returns><c>false</c> — оренду втрачено (чи черга не вміє).</returns>
     public Task<bool> ContinueAsync(
-        JobClaimToken claim, string payloadJson, TimeSpan delay, int settleThrough, CancellationToken ct)
+        JobClaimToken claim, string payloadJson, TimeSpan delay, int stepPeriod, CancellationToken ct)
         => Task.FromResult(false);
+
+    /// <summary>
+    /// ✎ Огляд M1: покривна СПРАВДІ порахувала період <paramref name="periodKey"/> (і він уже актуальний) — запарковані
+    /// нею на нього закриваються <c>Succeeded</c>. Решту запаркованих її кінець поверне в чергу.
+    /// </summary>
+    /// <param name="coverer">Оренда покривної (жива).</param>
+    /// <param name="periodKey">Порахований період.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <returns>Скільки закрито.</returns>
+    public Task<int> SettleParkedAsync(JobClaimToken coverer, int periodKey, CancellationToken ct) => Task.FromResult(0);
 
     /// <summary>
     /// ✎ PSS-06: задачі документа, що ЧЕКАЮТЬ у лейнах із локом документа (<c>recalc</c>, <c>interactive</c>); запарковані

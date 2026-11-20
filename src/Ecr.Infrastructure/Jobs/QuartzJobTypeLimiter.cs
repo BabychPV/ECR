@@ -61,6 +61,10 @@ public sealed class QuartzJobTypeLimiter(
     /// за межу, на ВСІ процеси пулу воркерів разом (лічильник у базі, не в процесі). Ручний перерахунок, автоперерахунок і
     /// залежні межу не бачать і обганяють дітей (відхід від <c>D-232</c>/<c>D-473</c>, рішення людини). У воркері ключ читає
     /// дочірній процес (<c>worker.settings.json</c>, файл майданчика, <c>ECR_Jobs__Recalculation__FanOutMaxConcurrency</c>).
+    /// ✎ Огляд L10: діє значення процесу, що бере лейн <c>recalc</c> (у режимі Worker — дочірній, інакше Api); обидва
+    /// його одночасно не беруть (<see cref="JobLaneMap.ApiLanes"/>), тож розбіжність значень Api і воркера двох меж не дає —
+    /// значення Api в режимі Worker просто не діє (див. D-561, інструкцію встановлення §2.6). Огляд M4: під межею й системні
+    /// залежні, поки діє розклад.
     /// </remarks>
     public const string RecalcFanOutMaxConcurrencyKey = "Jobs:Recalculation:FanOutMaxConcurrency";
 

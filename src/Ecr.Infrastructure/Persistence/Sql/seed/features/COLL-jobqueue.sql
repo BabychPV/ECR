@@ -8,6 +8,8 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'jobs.coveredByApprovedRecalculation',    N'en', N'Not needed: covered by the recalculation including approved sheets (job {jobId}).', 1),
     -- PSS-06 (D-561): задачу запарковано — ту саму роботу (документ і період {period}) робить задача {jobId}; закривається разом із нею.
     (N'jobs.coveredByRecalculation',            N'en', N'Covered: recalculation job {jobId} recalculates this document for period {period}; this job completes together with it.', 1),
+    -- PSS-04 (D-561, огляд L2): крок ланцюжка перерахунку документа за кілька періодів — «період k з N» над повідомленням кроку.
+    (N'jobs.chainStep',                         N'en', N'Period {step} of {total}: {message}', 1),
     -- Отруйна задача: оренду втрачено {reclaims} разів поспіль — процес-виконавець щоразу зникав.
     (N'jobs.leaseLostTooOften',                 N'en', N'Stopped: the worker lost this job {reclaims} times in a row (its process stopped each time). Restart the job after checking the logs.', 1),
     -- Задача перевищила Jobs:Workers:MaxDuration (I1, `JobWorker`): скасовано, без ретраю.
@@ -25,7 +27,10 @@ SELECT v.[Key], v.Lang, v.Val
     (N'jobs.coveredByApprovedRecalculation', N'kz', N'Қажет емес: бұл жұмысты бекітілген парақтармен бірге қайта есептеу орындайды ({jobId} тапсырмасы).'),
     -- PSS-06 (D-561): запаркована задача, покрита іншою задачею перерахунку того самого документа й періоду.
     (N'jobs.coveredByRecalculation', N'ru', N'Покрыто: задача пересчёта {jobId} пересчитывает этот документ за период {period}; эта задача завершится вместе с ней.'),
-    (N'jobs.coveredByRecalculation', N'kz', N'Қамтылған: {jobId} қайта есептеу тапсырмасы осы құжатты {period} кезеңі үшін қайта есептейді; бұл тапсырма онымен бірге аяқталады.')
+    (N'jobs.coveredByRecalculation', N'kz', N'Қамтылған: {jobId} қайта есептеу тапсырмасы осы құжатты {period} кезеңі үшін қайта есептейді; бұл тапсырма онымен бірге аяқталады.'),
+    -- PSS-04 (огляд L2): крок ланцюжка.
+    (N'jobs.chainStep', N'ru', N'Период {step} из {total}: {message}'),
+    (N'jobs.chainStep', N'kz', N'{total} кезеңнің {step}-сі: {message}')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO

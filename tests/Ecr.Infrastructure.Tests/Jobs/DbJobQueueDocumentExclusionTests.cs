@@ -76,6 +76,32 @@ public sealed class DbJobQueueDocumentExclusionTests(SqlServerFixture sql) : DbJ
         Assert.Equal(0, row.Attempt ?? 0);
     }
 
+    /// <summary>
+    /// ✎ Огляд H2: лейн перерахунку поступається правці комірки документа, що чекає (задача формул, interactive), —
+    /// навіть кроку ланцюжка, що стоїть у FIFO попереду. Відкладена правка (майбутній <c>AvailableAt</c>) не заважає.
+    /// </summary>
+    /// <remarks>МУТАЦІЯ: <c>recalcLane: false</c> у <c>QueuedSqlOf</c> — recalc бере документ попереду правки, червоний.</remarks>
+    [Fact]
+    public async Task Перерахунок_поступається_правці_документа_що_чекає()
+    {
+        await using var host = NewHost();
+        var recalc = await EnqueueToAsync(JobLanes.Recalc, Doc);
+        var edit = await EnqueueToAsync(JobLanes.Interactive, Doc);
+
+        Assert.Null(await ClaimAsync(host, JobLanes.Recalc));
+        var editClaim = await ClaimAsync(host, JobLanes.Interactive);
+        Assert.Equal(edit, editClaim?.Claim.JobId);
+        Assert.True(await host.Queue.CompleteAsync(editClaim!.Claim, CancellationToken.None));
+        Assert.Equal(recalc, (await ClaimAsync(host, JobLanes.Recalc))?.Claim.JobId);
+
+        // Відкладена правка іншого документа його перерахунку не тримає.
+        var later = await EnqueueToAsync(JobLanes.Recalc, OtherDoc);
+        await ExecAsync(
+            "UPDATE itg.JobProgress SET AvailableAt = DATEADD(minute, 5, SYSUTCDATETIME()) WHERE JobId = @id;",
+            await EnqueueToAsync(JobLanes.Interactive, OtherDoc));
+        Assert.Equal(later, (await ClaimAsync(host, JobLanes.Recalc))?.Claim.JobId);
+    }
+
     [Fact]
     public async Task Інші_лейни_і_задачі_без_документа_не_виключаються()
     {
