@@ -2359,6 +2359,7 @@ public sealed class DocumentStore(
 
         var rows = await StaleResultsQuery.Documents(db, periodKey)
             .Where(r => ids.Contains(r.DocumentId))
+            .TagWith(StaleResultsMapCache.DirectTag)
             .OrderBy(r => r.DocumentId)
             .Take(documentIds.Count)
             .ToListAsync(ct)

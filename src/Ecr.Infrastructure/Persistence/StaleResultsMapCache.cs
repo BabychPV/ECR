@@ -107,6 +107,12 @@ internal sealed partial class StaleResultsMapCache(
     /// <summary>Тег повного згрупованого запиту «автори».</summary>
     public const string AuthorsTag = "StaleMap:authors";
 
+    /// <summary>Тег повного запиту карти періоду (без кешу); під ним <see cref="StaleMapQueryHintInterceptor"/> ставить стелю DOP.</summary>
+    public const string FullTag = "StaleMap:full";
+
+    /// <summary>Тег поштучного запиту сторінки переліку (<c>StaleResultsDirectAsync</c>), коли карта переповнена.</summary>
+    public const string DirectTag = "StaleMap:direct";
+
     private const string RegistryFingerprintKey = "doc-stale-map:registry-fingerprint";
     private const string InFlightKey = "doc-stale-map:in-flight";
     private const string OverflowWarnedKey = "doc-stale-map:overflow-warned";
@@ -650,6 +656,7 @@ internal sealed partial class StaleResultsMapCache(
     private async Task<IReadOnlyDictionary<long, DateTime?>?> LoadAsync(int periodKey, int? byUserId, CancellationToken ct)
     {
         var rows = await StaleResultsQuery.Documents(db, periodKey, byUserId)
+            .TagWith(FullTag)
             .OrderBy(r => r.DocumentId)
             .Take(maxDocuments + 1)
             .ToListAsync(ct)

@@ -63,11 +63,15 @@ public static class DependencyInjection
         services.AddSingleton<StaleCountsEpoch>();
         // B125: сигнал черги — перехоплювач транзакцій: постановка в транзакції будить воркер лише після коміту.
         services.AddSingleton<Jobs.JobQueueSignal>();
+        // Стеля DOP запитів карти застарілості (`-- StaleMap:*`): малий мінімальний грант пам'яті, без черги RESOURCE_SEMAPHORE.
+        services.AddSingleton(_ => new StaleMapQueryHintInterceptor(
+            ReadInt(configuration, StaleMapQueryHintInterceptor.MaxDopKey, StaleMapQueryHintInterceptor.DefaultMaxDop)));
         services.AddDbContext<EcrDbContext>((sp, options) =>
             options.AddInterceptors(
                 sp.GetRequiredService<SecurityStampCacheInvalidator>(),
                 sp.GetRequiredService<StaleCountsEpoch>(),
-                sp.GetRequiredService<Jobs.JobQueueSignal>()).ConfigureEfFailureLogLevels().UseSqlServer(connectionString, sql =>
+                sp.GetRequiredService<Jobs.JobQueueSignal>(),
+                sp.GetRequiredService<StaleMapQueryHintInterceptor>()).ConfigureEfFailureLogLevels().UseSqlServer(connectionString, sql =>
             {
                 sql.MigrationsHistoryTable("__EFMigrationsHistory", "dbo");
                 // ⛔ Саме `Database:`, а не `Sql:` (`S-11`). Префікс у файлі
