@@ -557,6 +557,9 @@ jobs:
       - name: Аудит вразливостей пакетів tools/Ecr.Setup
         shell: pwsh
         run: |
+          # `dotnet list package` читає project.assets.json — без restore падає «No assets file».
+          dotnet restore tools/Ecr.Setup/Ecr.Setup.csproj
+          if ($LASTEXITCODE -ne 0) { throw "dotnet restore tools/Ecr.Setup завершився з кодом $LASTEXITCODE" }
           $report = dotnet list tools/Ecr.Setup/Ecr.Setup.csproj package --vulnerable --include-transitive 2>&1 | Out-String
           Write-Host $report
           if ($LASTEXITCODE -ne 0) { throw "dotnet list завершився з кодом $LASTEXITCODE" }
