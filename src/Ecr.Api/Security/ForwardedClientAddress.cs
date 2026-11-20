@@ -124,6 +124,23 @@ public sealed class ForwardedClientAddress
         return socket?.ToString() ?? UnknownClient;
     }
 
+    /// <summary>
+    /// Адреса клієнта для ЖУРНАЛУ входів (<c>sec.LoginAttempt</c>, <c>aud.SecurityEvent</c>) — та сама, що ключ межі
+    /// частоти (<see cref="KeyOf"/>), а не сира адреса сокета (PSS-24).
+    /// </summary>
+    /// <param name="context">Запит.</param>
+    /// <returns>IP-адреса рядком; <c>null</c>, коли адреси немає (тестовий хост).</returns>
+    /// <remarks>
+    /// ⛔ Одна функція на межу й на журнал: за зворотним проксі журнал із сирою адресою сокета писав би адресу проксі
+    /// для ВСІХ входів, тоді як межа рахувала б справжнього клієнта, — розслідування «звідки перебір» упиралося б у
+    /// адресу, яка нічого не каже.
+    /// </remarks>
+    public string? AddressOf(HttpContext context)
+    {
+        var key = KeyOf(context);
+        return string.Equals(key, UnknownClient, StringComparison.Ordinal) ? null : key;
+    }
+
     /// <summary>Перший справа запис, що не належить довіреному проксі; <c>null</c> — немає придатного.</summary>
     private IPAddress? FromForwardedFor(string header)
     {

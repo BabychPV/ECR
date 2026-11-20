@@ -18,7 +18,8 @@ public sealed class AuthController(
     GetCurrentUserHandler currentUserHandler,
     Ecr.Application.Common.ICurrentUser currentUser,
     Ecr.Application.Ports.ISimulationService simulation,
-    Ecr.Application.Ports.IIdleTimeoutPolicy idleTimeout) : ControllerBase
+    Ecr.Application.Ports.IIdleTimeoutPolicy idleTimeout,
+    Ecr.Api.Security.ForwardedClientAddress clientAddress) : ControllerBase
 {
     /// <summary>Вхід доменного користувача.</summary>
     /// <remarks>
@@ -215,7 +216,14 @@ public sealed class AuthController(
             "1",
             StringComparison.Ordinal);
 
-    private string? RemoteIp => HttpContext.Connection.RemoteIpAddress?.ToString();
+    /// <summary>
+    /// Адреса клієнта для журналу входів.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ PSS-24: той самий визначник, що й у межі частоти (<see cref="Ecr.Api.Security.ForwardedClientAddress"/>), а не
+    /// <c>Connection.RemoteIpAddress</c>: за довіреним проксі журнал і межа інакше бачили б різних «клієнтів».
+    /// </remarks>
+    private string? RemoteIp => clientAddress.AddressOf(HttpContext);
 
     /// <summary>Підписує **ту саму** cookie для обох провайдерів (ФВ-6.1).</summary>
     private Task SignInAsync(LoginResult result)

@@ -464,3 +464,27 @@ BEGIN
     END
 END;
 GO
+
+-- ⛔ PSS-24: слід входів. Незмінний слід — `aud.SecurityEvent` (LoginSucceeded / LoginFailed / AccountLocked; тригер
+-- `TR_SecurityEvent_Immutable` вище, живе не менше 120 місяців). Оперативна таблиця `sec.LoginAttempt` (схема `sec`, не `aud`,
+-- створена міграцією EF, тому жодних `aud.*`-тригерів на неї не було) чиститься за налаштовуваним строком (за замовчуванням
+-- 400 днів; `Security.LoginAttemptRetentionDays` у sys_ecr.SystemSetting, `LoginAttemptRetention`), тож DELETE їй потрібен,
+-- а UPDATE — ніколи: жоден код застосунку рядків спроб не переписує. Тригер забороняє UPDATE (THROW 50060 — той самий код,
+-- що в `aud.*`), щоб скомпрометований обліковий запис служби не міг «виправити» ім'я чи адресу у вже записаній спробі.
+-- DELETE свідомо дозволений: його робить прибирання за строком, а доказ під загрозою — копія в `aud.SecurityEvent`, яку
+-- видалити не можна. Апгрейд наявних баз: `CREATE OR ALTER` — ідемпотентний, наявні рядки не чіпаються (DDL не запускає
+-- тригер). Динамічний SQL — бо `CREATE TRIGGER` має бути першим оператором пакета, а за відсутності таблиці (скрипт ішов
+-- би раніше міграції EF) пропуск мовчки лишив би дірку, яку ловить `LoginAttemptGuardTests`.
+IF OBJECT_ID(N'sec.LoginAttempt', N'U') IS NOT NULL
+BEGIN
+    EXEC(N'
+CREATE OR ALTER TRIGGER sec.TR_LoginAttempt_NoUpdate
+ON sec.LoginAttempt
+AFTER UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+    THROW 50060, N''Спроби входу sec.LoginAttempt не переписуються: UPDATE заборонений (PSS-24); їх лише прибирають за строком.'', 1;
+END;');
+END
+GO

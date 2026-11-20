@@ -45,13 +45,18 @@ public sealed record LoginResult(
 /// Вимкнення bootstrap після Windows-входу доменного адміністратора (S1-01).
 /// У продукті його завжди дає DI; <c>null</c> — лише в тестах, яким цей крок не потрібен.
 /// </param>
+/// <param name="journal">
+/// Журнал входів у <c>aud.SecurityEvent</c> (PSS-24): успішні входи, невдалі спроби й блокування. У продукті його
+/// завжди дає DI; <c>null</c> — лише в тестах, яким цей запис не потрібен. Запис не кидає (див. порт).
+/// </param>
 public sealed partial class LoginHandler(
     IUserStore users,
     IPasswordHasher hasher,
     IUnitOfWork uow,
     IClock clock,
     ILogger<LoginHandler> logger,
-    DisableBootstrapAdminHandler? disableBootstrap = null)
+    DisableBootstrapAdminHandler? disableBootstrap = null,
+    ILoginAuditJournal? journal = null)
 {
     /// <summary>
     /// Хеш, об який «перевіряється» пароль неіснуючого користувача.
@@ -111,13 +116,16 @@ public sealed partial class LoginHandler(
             // Пароль однаково «перевіряється»: без цього відповідь на невідоме
             // ім'я приходила б помітно швидше.
             Decoy(password);
+
+            // ⚠ Id наявного запису в журнал входів НЕ йде, коли відмова — «немає такого»: службовий, вимкнений чи не
+            // локальний запис для форми входу так само «невідомий», і журнал безпеки не має підтверджувати, що він є.
             await FailAsync(userName, "UnknownUser", ipAddress, now, ct).ConfigureAwait(false);
             throw InvalidCredentials();
         }
 
         if (user.IsLockedOut(now))
         {
-            await FailAsync(userName, "LockedOut", ipAddress, now, ct).ConfigureAwait(false);
+            await FailAsync(userName, "LockedOut", ipAddress, now, ct, userId: user.Id).ConfigureAwait(false);
 
             // ⚠ Тут відповідь НАВМИСНО відрізняється від невірного пароля:
             // законний власник має дізнатися, що запис заблоковано, інакше він
@@ -140,10 +148,11 @@ public sealed partial class LoginHandler(
             // ⚠ Бюджет вичерпано, а блокування ще немає (спроби в польоті або поріг у політиці знизили нижче
             // лічильника): без цього рядка запис лишився б без блокування і без жодної можливості резервування.
             // Виклик ідемпотентний — чинне блокування не змінює.
-            await users.RegisterReservedFailureAsync(
+            var exhausted = await users.RegisterReservedFailureAsync(
                 user.Id, policy.MaxFailedAttempts, policy.LockoutMinutes, now, ct).ConfigureAwait(false);
 
-            await FailAsync(userName, "LockedOut", ipAddress, now, ct).ConfigureAwait(false);
+            await FailAsync(userName, "LockedOut", ipAddress, now, ct, userId: user.Id, lockedNow: exhausted.LockedNow)
+                .ConfigureAwait(false);
             throw InvalidCredentials();
         }
 
@@ -160,8 +169,9 @@ public sealed partial class LoginHandler(
             var outcome = await users.RegisterReservedFailureAsync(
                 user.Id, policy.MaxFailedAttempts, policy.LockoutMinutes, now, ct).ConfigureAwait(false);
 
-            await FailAsync(userName, outcome.LockedNow ? "LockedOut" : "BadPassword", ipAddress, now, ct)
-                .ConfigureAwait(false);
+            await FailAsync(
+                userName, outcome.LockedNow ? "LockedOut" : "BadPassword", ipAddress, now, ct,
+                userId: user.Id, lockedNow: outcome.LockedNow).ConfigureAwait(false);
 
             throw InvalidCredentials();
         }
@@ -175,12 +185,15 @@ public sealed partial class LoginHandler(
             // «іншого» запиту розрізняв би правильний пароль у пачці підбору (оракул). Законний власник на
             // наступній спробі однаково отримає 423 — з гілки IsLockedOut вище. Саму гонку «пачка перевіряє
             // більше за Max паролів» закриває резервування спроби до Verify (AN-90) вище.
-            await FailAsync(userName, "LockedOut", ipAddress, now, ct).ConfigureAwait(false);
+            await FailAsync(userName, "LockedOut", ipAddress, now, ct, userId: user.Id).ConfigureAwait(false);
             throw InvalidCredentials();
         }
 
         users.RecordAttempt(new LoginAttempt(userName, AuthProvider.Local, true, now, ipAddress));
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        await JournalAsync(
+            LoginAuditEventTypes.Succeeded, userName, AuthProvider.Local, null, ipAddress, user.Id, now, ct)
+            .ConfigureAwait(false);
 
         return new LoginResult(
             user.Id, user.UserName, user.DisplayName, user.SecurityStamp, user.MustChangePassword, GroupSids: []);
@@ -272,7 +285,7 @@ public sealed partial class LoginHandler(
             }
             else if (taken is not null)
             {
-                await FailAsync(userName, "SidMismatch", ipAddress, now, ct, AuthProvider.Windows).ConfigureAwait(false);
+                await FailAsync(userName, "SidMismatch", ipAddress, now, ct, AuthProvider.Windows, taken.Id).ConfigureAwait(false);
                 LogSidMismatch(logger, userName, taken.Id, sid);
                 throw SidMismatch(userName, sid);
             }
@@ -304,7 +317,7 @@ public sealed partial class LoginHandler(
                     // `userNameTaken`, який людині на екрані входу нічого не каже.
                     if (await users.FindByUserNameAsync(userName, ct).ConfigureAwait(false) is { } nameHolder)
                     {
-                        await FailAsync(userName, "SidMismatch", ipAddress, now, ct, AuthProvider.Windows).ConfigureAwait(false);
+                        await FailAsync(userName, "SidMismatch", ipAddress, now, ct, AuthProvider.Windows, nameHolder.Id).ConfigureAwait(false);
                         LogSidMismatch(logger, userName, nameHolder.Id, sid);
                         throw SidMismatch(userName, sid);
                     }
@@ -318,7 +331,7 @@ public sealed partial class LoginHandler(
 
         if (!user.IsActive)
         {
-            await FailAsync(userName, "Disabled", ipAddress, now, ct, AuthProvider.Windows).ConfigureAwait(false);
+            await FailAsync(userName, "Disabled", ipAddress, now, ct, AuthProvider.Windows, user.Id).ConfigureAwait(false);
             throw InvalidCredentials();
         }
 
@@ -327,13 +340,16 @@ public sealed partial class LoginHandler(
         // сам знімає LockedUntil.
         if (user.IsLockedOut(now))
         {
-            await FailAsync(userName, "LockedOut", ipAddress, now, ct, AuthProvider.Windows).ConfigureAwait(false);
+            await FailAsync(userName, "LockedOut", ipAddress, now, ct, AuthProvider.Windows, user.Id).ConfigureAwait(false);
             throw Locked(user);
         }
 
         user.RegisterSuccessfulLogin(now);
         users.RecordAttempt(new LoginAttempt(userName, AuthProvider.Windows, true, now, ipAddress));
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        await JournalAsync(
+            LoginAuditEventTypes.Succeeded, userName, AuthProvider.Windows, null, ipAddress, user.Id, now, ct)
+            .ConfigureAwait(false);
 
         var assigned = await MatchGroupsAsync(user.Id, userName, groupSids, now, ct).ConfigureAwait(false);
 
@@ -471,9 +487,15 @@ public sealed partial class LoginHandler(
     /// ⛔ S1-05 (аудит 5): провайдер — параметр. Відмови Windows-входу писалися як <c>Local</c>, і журнал
     /// входів (фільтр за провайдером, облік спроб на доменний запис) їх губив.
     /// </remarks>
+    /// <remarks>
+    /// ✎ PSS-24: те саме йде й у журнал безпеки (<c>aud.SecurityEvent</c>, незмінний): <c>LoginFailed</c> завжди, а
+    /// коли ця спроба вичерпала бюджет і заблокувала запис (<paramref name="lockedNow"/>) — ще й <c>AccountLocked</c>.
+    /// <paramref name="userId"/> — лише для ІСНУЮЧОГО запису, чиє існування відповідь входу й так не приховує (хибний
+    /// пароль, блокування); для «немає такого» — <c>null</c> (див. виклики).
+    /// </remarks>
     private async Task FailAsync(
         string userName, string reason, string? ipAddress, DateTime now, CancellationToken ct,
-        AuthProvider provider = AuthProvider.Local)
+        AuthProvider provider = AuthProvider.Local, int? userId = null, bool lockedNow = false)
     {
         // ⛔ У журнал іде КАТЕГОРІЯ відмови, а не подробиці: ні введеного
         // пароля, ні його довжини, ні фрагмента (ФВ-6.11).
@@ -481,7 +503,26 @@ public sealed partial class LoginHandler(
             new LoginAttempt(userName, provider, false, now, ipAddress, reason));
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        await JournalAsync(LoginAuditEventTypes.Failed, userName, provider, reason, ipAddress, userId, now, ct)
+            .ConfigureAwait(false);
+
+        if (lockedNow)
+        {
+            await JournalAsync(
+                LoginAuditEventTypes.AccountLocked, userName, provider, reason, ipAddress, userId, now, ct)
+                .ConfigureAwait(false);
+        }
     }
+
+    /// <summary>Подія входу в журнал безпеки; <c>null</c>-журнал (тести) — нічого.</summary>
+    private Task JournalAsync(
+        string eventType, string userName, AuthProvider provider, string? reason, string? ipAddress, int? userId,
+        DateTime now, CancellationToken ct)
+        => journal is null
+            ? Task.CompletedTask
+            : journal.RecordAsync(
+                new LoginAuditEntry(eventType, userName, provider, reason, ipAddress, userId, now), ct);
 
     /// <summary>«Перевірка» пароля неіснуючого користувача — заради часу відповіді.</summary>
     private void Decoy(string password)
