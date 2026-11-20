@@ -167,6 +167,15 @@ public sealed class DocumentSourceStateSwitchTests(SqlServerFixture sql) : DbJob
                 return "recalc";
             });
 
+        // ✎ PSS-07 (D-561): залежні — каскад, ставляться відкладеною постановкою; той самий облік.
+        jobs.EnqueueCoalescedDelayedAsync<IRecalculationJob>(
+                Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
+            .Returns(call =>
+            {
+                queued.Add(call.ArgAt<string>(0));
+                return "recalc";
+            });
+
         await using (var db = Sql.CreateContext())
         {
             var job = new RegistryImpactRecalculationJob(

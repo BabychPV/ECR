@@ -139,9 +139,14 @@ public sealed class CalculationTrigger(
             return coveringJobId;
         }
 
+        // ✎ PSS-07 (D-561, рішення людини 20.11): залежні — КАСКАД від зміни іншого документа чи довідника, не пряма
+        // правка: ставляться з відкладенням CascadeDebounce, і завершення кількох джерел за це вікно дають ОДИН перерахунок
+        // споживача за період (злиття лишає перший момент доступності — вікно не подовжується). «З затвердженими» — явна дія
+        // адміністратора: без відкладення.
         var jobId = await EnqueueSubmittedAsync(
                 approvedOverride is null ? DependentsTargetOf(documentId, periodKey) : DependentsApprovedTargetOf(documentId, periodKey),
-                documentId, periodKey, ct, sourceHop, approvedOverride)
+                documentId, periodKey, ct, sourceHop, approvedOverride,
+                approvedOverride is null ? CascadeDebounce : TimeSpan.Zero)
             .ConfigureAwait(false);
 
         if (approvedOverride is not null)
@@ -155,6 +160,21 @@ public sealed class CalculationTrigger(
 
         return jobId;
     }
+
+    /// <summary>
+    /// ✎ PSS-07 (<c>D-561</c>): відкладення каскадного перерахунку (залежні від зміни документа-джерела чи довідника) — вікно, за яке постановки
+    /// на ту саму ціль зливаються в одну.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Рішення людини 20.11: не більше <see cref="MaxCascadeDebounce"/> (не 30–60 с аудиту); пряма правка (задача формул
+    /// після PATCH), автоперерахунок після збору PI (<c>D-174</c>, <c>-auto</c>) і ручний перерахунок не відкладаються —
+    /// <c>ФВ-12.2</c> (&lt; 10 с авто, &lt; 5 с ручний) для них діє як доти. 10 с, а не 15: claim опитує чергу раз на
+    /// секунду, тож старт каскаду лишається в межах 15 с з запасом.
+    /// </remarks>
+    public static readonly TimeSpan CascadeDebounce = TimeSpan.FromSeconds(10);
+
+    /// <summary>Межа відкладення каскаду з рішення людини 20.11 (<c>D-561</c>); сторож — тест <c>CascadeDebounceDbTests</c>.</summary>
+    public static readonly TimeSpan MaxCascadeDebounce = TimeSpan.FromSeconds(15);
 
     /// <summary>Закінчення цілі <see cref="DependentsApprovedTargetOf"/> — дешевий відбір задач «з затвердженими» за ключем цілі.</summary>
     public const string DependentsApprovedSuffix = "-dependents-approved";
@@ -258,9 +278,9 @@ public sealed class CalculationTrigger(
     /// </remarks>
     private Task<string> EnqueueSubmittedAsync(
         string target, long documentId, PeriodKey periodKey, CancellationToken ct, int sourceHop = 0,
-        ApprovedRecalculationOverride? approvedOverride = null)
-        => jobs.EnqueueCoalescedAsync<IRecalculationJob>(
-            target,
+        ApprovedRecalculationOverride? approvedOverride = null, TimeSpan delay = default)
+    {
+        var payload =
             // B80 N5: перекриття адміністратора — затверджені теж (IncludeApproved) з автором і причиною для журналу.
             approvedOverride is not null
                 ? (object)new
@@ -294,7 +314,11 @@ public sealed class CalculationTrigger(
                     TriggeredByUserId = (int?)null,
                     SheetDefId = (int?)null,
                     RecalculateSubmitted = true,
-                },
-            ct,
-            createdByUserId: null);
+                };
+
+        // Без відкладення — та сама постановка, що доти (PSS-07 відкладає лише каскад).
+        return delay > TimeSpan.Zero
+            ? jobs.EnqueueCoalescedDelayedAsync<IRecalculationJob>(target, payload, delay, ct, createdByUserId: null)
+            : jobs.EnqueueCoalescedAsync<IRecalculationJob>(target, payload, ct, createdByUserId: null);
+    }
 }

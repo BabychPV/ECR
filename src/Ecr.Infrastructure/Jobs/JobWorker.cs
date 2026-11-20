@@ -589,6 +589,7 @@ public sealed partial class JobWorker(
 
         Exception? failure = null;
         JobDeferredException? deferred = null;
+        JobContinuedException? continued = null;
         var cancelled = false;
         var runStarted = Stopwatch.GetTimestamp();
         phases.BodyStarted = runStarted;
@@ -604,6 +605,12 @@ public sealed partial class JobWorker(
         catch (JobDeferredException ex)
         {
             deferred = ex;
+        }
+        catch (JobContinuedException ex)
+        {
+            // ✎ PSS-04: крок зроблено й закомічено ДО винятку — продовження, а не провал. Навіть якщо токен уже
+            // скасовано (межа тривалості спрацювала після кінця кроку): фіксуємо зроблене нижче.
+            continued = ex;
         }
         // ⛔ L2-01: скасування — за станом ВЛАСНОГО токена, а не за типом винятку. Драйвер
         // посеред запиту кидає SqlException «Operation cancelled by user», а не OCE; як
@@ -645,6 +652,19 @@ public sealed partial class JobWorker(
             && (cancelled || failure is not null))
         {
             await FailOvertimeAsync(job, clock).ConfigureAwait(false);
+            return;
+        }
+
+        // ✎ PSS-04 (D-561): крок зроблено, задача продовжується наступним — той самий рядок знову Queued з новим payload,
+        // слот і лок документа вільні; запит скасування, що прийшов під час кроку, закриває рядок Cancelled (ContinueAsync).
+        if (continued is not null)
+        {
+            Observability.InfrastructureMetrics.RecordJobRun(
+                job.JobCode, "ok", Stopwatch.GetElapsedTime(runStarted).TotalSeconds);
+            LogJobContinued(logger, claim.JobId, job.JobCode, continued.SettleThrough, continued.Delay);
+            await SettleAsync(claim.JobId, q => q.ContinueAsync(
+                    claim, continued.PayloadJson, continued.Delay, continued.SettleThrough, CancellationToken.None))
+                .ConfigureAwait(false);
             return;
         }
 
@@ -1014,6 +1034,9 @@ public sealed partial class JobWorker(
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Задача {JobId} ({TypeName}) впала; повернуто в чергу з затримкою.")]
     private static partial void LogJobRetrying(ILogger logger, string jobId, string typeName, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Задача {JobId} ({TypeName}): крок до періоду {Period} зроблено й закомічено; наступний крок — у черзі через {Delay} (PSS-04).")]
+    private static partial void LogJobContinued(ILogger logger, string jobId, string typeName, int period, TimeSpan delay);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Задача {JobId} ({TypeName}) відкладена на {Delay}: ресурс зайнятий; спробу не зараховано.")]
     private static partial void LogJobDeferred(ILogger logger, string jobId, string typeName, TimeSpan delay);

@@ -169,6 +169,16 @@ public sealed class FlertSyncDependentsTriggerTests(SqlServerFixture sql) : DbJo
                 return "recalc-1";
             });
 
+        // ✎ PSS-07 (D-561): залежні — каскад, ставляться відкладеною постановкою; той самий облік.
+        recalcJobs.EnqueueCoalescedDelayedAsync<IRecalculationJob>(
+                Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
+            .Returns(call =>
+            {
+                payloads[call.ArgAt<string>(0)] = System.Text.Json.JsonSerializer.Serialize(
+                    call.ArgAt<object?>(1), System.Text.Json.JsonSerializerOptions.Web);
+                return "recalc-1";
+            });
+
         await using (var db = Sql.CreateContext())
         {
             var trigger = new CalculationTrigger(

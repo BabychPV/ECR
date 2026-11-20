@@ -300,8 +300,14 @@ public sealed class CalculationTriggerQueueTests(SqlServerFixture sql) : DbJobQu
         Assert.Equal("Queued", (await RowAsync(second!))?.State);
     }
 
-    private static async Task ClaimAsync(Host host, string? expectedJobId)
+    private async Task ClaimAsync(Host host, string? expectedJobId)
     {
+        // ✎ PSS-07 (D-561): звичайні залежні стають доступними через вікно каскаду (10 с) — тест його не чекає.
+        if (expectedJobId is not null)
+        {
+            await ExecAsync("UPDATE itg.JobProgress SET AvailableAt = SYSUTCDATETIME() WHERE JobId = @id AND [State] = 'Queued';", expectedJobId);
+        }
+
         var claimed = await host.Queue.ClaimAsync([JobLanes.Recalc], "test/host", JobQueueLimits.DefaultLease, CancellationToken.None);
         Assert.Equal(expectedJobId, claimed?.Claim.JobId);
     }

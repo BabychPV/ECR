@@ -6,6 +6,8 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'jobs.absorbedBy',                        N'en', N'Superseded by job {jobId}, queued for the same target.', 1),
     -- B80 N5 (перф-аудит 20.11): звичайний перерахунок залежних скасовано — його виконає «з затвердженими» (`CancelQueuedByTargetAsync`).
     (N'jobs.coveredByApprovedRecalculation',    N'en', N'Not needed: covered by the recalculation including approved sheets (job {jobId}).', 1),
+    -- PSS-06 (D-561): задачу запарковано — ту саму роботу (документ і період {period}) робить задача {jobId}; закривається разом із нею.
+    (N'jobs.coveredByRecalculation',            N'en', N'Covered: recalculation job {jobId} recalculates this document for period {period}; this job completes together with it.', 1),
     -- Отруйна задача: оренду втрачено {reclaims} разів поспіль — процес-виконавець щоразу зникав.
     (N'jobs.leaseLostTooOften',                 N'en', N'Stopped: the worker lost this job {reclaims} times in a row (its process stopped each time). Restart the job after checking the logs.', 1),
     -- Задача перевищила Jobs:Workers:MaxDuration (I1, `JobWorker`): скасовано, без ретраю.
@@ -20,7 +22,10 @@ INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
     (N'jobs.coveredByApprovedRecalculation', N'ru', N'Не требуется: эту работу выполнит пересчёт вместе с утверждёнными листами (задача {jobId}).'),
-    (N'jobs.coveredByApprovedRecalculation', N'kz', N'Қажет емес: бұл жұмысты бекітілген парақтармен бірге қайта есептеу орындайды ({jobId} тапсырмасы).')
+    (N'jobs.coveredByApprovedRecalculation', N'kz', N'Қажет емес: бұл жұмысты бекітілген парақтармен бірге қайта есептеу орындайды ({jobId} тапсырмасы).'),
+    -- PSS-06 (D-561): запаркована задача, покрита іншою задачею перерахунку того самого документа й періоду.
+    (N'jobs.coveredByRecalculation', N'ru', N'Покрыто: задача пересчёта {jobId} пересчитывает этот документ за период {period}; эта задача завершится вместе с ней.'),
+    (N'jobs.coveredByRecalculation', N'kz', N'Қамтылған: {jobId} қайта есептеу тапсырмасы осы құжатты {period} кезеңі үшін қайта есептейді; бұл тапсырма онымен бірге аяқталады.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO

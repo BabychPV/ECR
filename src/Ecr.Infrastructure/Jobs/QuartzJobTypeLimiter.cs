@@ -55,11 +55,20 @@ public sealed class QuartzJobTypeLimiter(
     public const int DefaultThreadCount = 16;
 
     /// <summary>Ключ межі одночасних дочірніх задач розкладу перерахунку проєкту (F1).</summary>
+    /// <remarks>
+    /// ✎ PSS-02 (аудит 20.11, <c>D-561</c>): той самий ключ і те саме значення діють і в режимі черги в базі — claim
+    /// лейна <c>recalc</c> (<see cref="DbJobQueue.FanOutCapPrologue"/>) бере дитину розкладу лише поки їх виконується менше
+    /// за межу, на ВСІ процеси пулу воркерів разом (лічильник у базі, не в процесі). Ручний перерахунок, автоперерахунок і
+    /// залежні межу не бачать і обганяють дітей (відхід від <c>D-232</c>/<c>D-473</c>, рішення людини). У воркері ключ читає
+    /// дочірній процес (<c>worker.settings.json</c>, файл майданчика, <c>ECR_Jobs__Recalculation__FanOutMaxConcurrency</c>).
+    /// </remarks>
     public const string RecalcFanOutMaxConcurrencyKey = "Jobs:Recalculation:FanOutMaxConcurrency";
 
     /// <summary>
     /// Межа дітей розкладу, коли ключ не задано: чотири документи одночасно — стільки, скільки слотів у черги
     /// в базі (<c>JobWorkerOptions.MaxConcurrency</c>), тож режими Quartz і Database ведуть себе однаково.
+    /// ✎ PSS-02: у пулі воркерів (10 процесів × до 4 гілок оркестратора) — ≈ 16 важких сеансів SQL на річний розклад
+    /// замість ≈ 40, що давали очікування <c>RESOURCE_SEMAPHORE</c> на стенді.
     /// </summary>
     public const int DefaultRecalcFanOutMaxConcurrency = 4;
 

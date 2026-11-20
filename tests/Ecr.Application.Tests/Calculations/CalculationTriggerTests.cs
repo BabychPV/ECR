@@ -37,6 +37,11 @@ public sealed class CalculationTriggerTests
         _jobs.EnqueueCoalescedAsync<IRecalculationJob>(
                 Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
             .Returns("IRecalculationJob~auto");
+
+        // ✎ PSS-07 (D-561): залежні — каскад, ставляться з відкладенням.
+        _jobs.EnqueueCoalescedDelayedAsync<IRecalculationJob>(
+                Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
+            .Returns("IRecalculationJob~auto");
         _workflow.GetSheetsAsync(DocumentId, Period, Arg.Any<CancellationToken>())
             .Returns(Array.Empty<ApprovalState>());
         _documents.GetIncludedSheetIdsAsync(DocumentId, Arg.Any<CancellationToken>()).Returns(Array.Empty<int>());
@@ -189,16 +194,20 @@ public sealed class CalculationTriggerTests
         State(PeriodState.Open);
         Sheets(Approved(1), Submitted(2), Draft(3));
         object? payload = null;
-        _jobs.EnqueueCoalescedAsync<IRecalculationJob>(
-                Arg.Any<string>(), Arg.Do<object?>(p => payload = p), Arg.Any<CancellationToken>(), Arg.Any<int?>())
+        _jobs.EnqueueCoalescedDelayedAsync<IRecalculationJob>(
+                Arg.Any<string>(), Arg.Do<object?>(p => payload = p), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>(),
+                Arg.Any<int?>())
             .Returns("IRecalculationJob~dep");
 
         var jobId = await Trigger().RequestDependentsAsync(DocumentId, Period, CancellationToken.None);
 
         Assert.Equal("IRecalculationJob~dep", jobId);
-        await _jobs.Received(1).EnqueueCoalescedAsync<IRecalculationJob>(
+
+        // ✎ PSS-07 (D-561): залежні — каскад, з відкладенням CascadeDebounce (≤ 15 с, рішення людини).
+        await _jobs.Received(1).EnqueueCoalescedDelayedAsync<IRecalculationJob>(
             CalculationTrigger.DependentsTargetOf(DocumentId, Period),
-            Arg.Any<object?>(), Arg.Any<CancellationToken>(), null);
+            Arg.Any<object?>(), CalculationTrigger.CascadeDebounce, Arg.Any<CancellationToken>(), null);
+        await _jobs.DidNotReceiveWithAnyArgs().EnqueueCoalescedAsync<IRecalculationJob>(default!, default, default, default);
         var json = System.Text.Json.JsonSerializer.Serialize(payload, System.Text.Json.JsonSerializerOptions.Web);
         Assert.Equal(
             $$"""{"documentId":{{DocumentId}},"periodKey":{{Period.Value}},"triggeredByUserId":null,"sheetDefId":null,"recalculateSubmitted":true}""",

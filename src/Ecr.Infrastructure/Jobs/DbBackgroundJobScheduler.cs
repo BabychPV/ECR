@@ -114,12 +114,28 @@ public sealed class DbBackgroundJobScheduler(
         return EnqueueCoreAsync<TJob>(payload, TargetKeyOf<TJob>(targetKey), supersede: false, createdByUserId, ct);
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ <see cref="JobEnqueueRequest.Delay"/>: <c>AvailableAt = зараз + delay</c>; злиття з тією, що чекає, лишає
+    /// раніший момент (<c>DbJobQueue.EnqueueSql</c>), тож вікно не подовжується (PSS-07).
+    /// </remarks>
+    public Task<string> EnqueueCoalescedDelayedAsync<TJob>(
+        string targetKey, object? payload, TimeSpan delay, CancellationToken ct, int? createdByUserId = null)
+        where TJob : IBackgroundJob
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetKey);
+        ArgumentOutOfRangeException.ThrowIfLessThan(delay, TimeSpan.Zero);
+
+        return EnqueueCoreAsync<TJob>(payload, TargetKeyOf<TJob>(targetKey), supersede: false, createdByUserId, ct, delay);
+    }
+
     /// <summary><c>{TypeName}~{target}</c> — одне визначення на обидві постановки з ціллю.</summary>
     internal static string TargetKeyOf<TJob>(string targetKey)
         => $"{typeof(TJob).Name}{TargetSeparator}{targetKey.Replace(TargetSeparator, '_')}";
 
     private async Task<string> EnqueueCoreAsync<TJob>(
-        object? payload, string? targetKey, bool supersede, int? createdByUserId, CancellationToken ct)
+        object? payload, string? targetKey, bool supersede, int? createdByUserId, CancellationToken ct,
+        TimeSpan? delay = null)
         where TJob : IBackgroundJob
     {
         var json = JsonSerializer.Serialize(payload, PayloadOptions);
@@ -135,6 +151,7 @@ public sealed class DbBackgroundJobScheduler(
                     createdByUserId,
                     correlation?.CorrelationId is { Length: > 0 } id ? id : Guid.NewGuid().ToString("N"),
                     DocumentIdOf(json),
+                    Delay: delay is { } d && d > TimeSpan.Zero ? d : null,
                     SupersedeRunning: supersede),
                 ct)
             .ConfigureAwait(false);

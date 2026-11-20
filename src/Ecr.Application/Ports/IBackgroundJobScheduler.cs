@@ -111,6 +111,28 @@ public interface IBackgroundJobScheduler
         where TJob : IBackgroundJob;
 
     /// <summary>
+    /// ✎ PSS-07 (<c>D-561</c>): те саме, що <see cref="EnqueueCoalescedAsync{TJob}(string, object?, CancellationToken, int?)"/>,
+    /// але задача стає доступною не раніше ніж через <paramref name="delay"/> — постановки на ту саму ціль за це вікно
+    /// зливаються в одну (каскад: залежні від зміни документа-джерела чи довідника).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Злиття лишає РАНІШИЙ момент доступності (черга в базі: <c>AvailableAt</c> — MIN), тож вікно не подовжується
+    /// новими постановками: перша постановка каскаду чекає щонайбільше <paramref name="delay"/>. Типова реалізація
+    /// (Quartz у пам'яті) затримки не має — ставить одразу.
+    /// </remarks>
+    /// <typeparam name="TJob">Маркер задачі.</typeparam>
+    /// <param name="targetKey">Ціль.</param>
+    /// <param name="payload">Завдання.</param>
+    /// <param name="delay">Затримка доступності.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <param name="createdByUserId">Хто поставив; <c>null</c> — системна.</param>
+    /// <returns>Ідентифікатор задачі, яка виконає роботу.</returns>
+    public Task<string> EnqueueCoalescedDelayedAsync<TJob>(
+        string targetKey, object? payload, TimeSpan delay, CancellationToken ct, int? createdByUserId = null)
+        where TJob : IBackgroundJob
+        => EnqueueCoalescedAsync<TJob>(targetKey, payload, ct, createdByUserId);
+
+    /// <summary>
     /// Ідентифікатор задачі, що ЧЕКАЄ (ще не стартувала) на ціль; <c>null</c> — такої немає. Виконувана не рахується.
     /// </summary>
     /// <typeparam name="TJob">Маркер задачі.</typeparam>

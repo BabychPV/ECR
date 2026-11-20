@@ -232,6 +232,15 @@ public sealed class SourceDocumentFanOutTests(SqlServerFixture sql) : DbJobQueue
                 return "recalc";
             });
 
+        // ✎ PSS-07 (D-561): залежні — каскад, ставляться відкладеною постановкою; той самий облік.
+        jobs.EnqueueCoalescedDelayedAsync<IRecalculationJob>(
+                Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
+            .Returns(call =>
+            {
+                queued[call.ArgAt<string>(0)] = JsonSerializer.Serialize(call.ArgAt<object?>(1), JsonSerializerOptions.Web);
+                return "recalc";
+            });
+
         await using var db = Sql.CreateContext();
         await Job(db, jobs).ExecuteAsync(request, Substitute.For<IJobProgress>(), CancellationToken.None);
         return queued;

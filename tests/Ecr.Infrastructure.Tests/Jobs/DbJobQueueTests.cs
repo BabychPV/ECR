@@ -71,11 +71,11 @@ public abstract class DbJobQueueTestsBase(SqlServerFixture sql) : IAsyncLifetime
     }
 
     /// <summary>Хост черги: власний контекст і власне з'єднання.</summary>
-    protected sealed class Host(EcrDbContext db) : IAsyncDisposable
+    protected sealed class Host(EcrDbContext db, DbJobQueue? queue = null) : IAsyncDisposable
     {
         public EcrDbContext Db { get; } = db;
 
-        public DbJobQueue Queue { get; } = new(db, new SystemClock());
+        public DbJobQueue Queue { get; } = queue ?? new(db, new SystemClock());
 
         public Task<ClaimedJob?> ClaimAsync(string owner = "test/host")
             => Queue.ClaimAsync(DefaultLane, owner, JobQueueLimits.DefaultLease, CancellationToken.None);
