@@ -56,6 +56,8 @@ interface MonthSpec {
   readonly decide?: boolean;
   readonly recall?: boolean;
   readonly ret?: boolean;
+  /** Місяць джерела HSE400, ще не затверджений (затвердження цього місяця сервер відхилить). */
+  readonly source?: number;
 }
 
 type Months = Record<number, string | MonthSpec>;
@@ -129,6 +131,7 @@ function mockFetch(months: Months, options: MockOptions = {}): void {
               canDecide: spec.decide === true,
               canRecall: spec.recall === true,
               canReturn: spec.ret === true,
+              unapprovedSourcePeriodKey: spec.source ?? null,
             };
           }),
         });
@@ -659,6 +662,91 @@ describe('«Submit» і місяць джерела HSE400 (рецензія №
     await waitFor(() => expect(submit.getAttribute('data-period-key')).toBe(String(Feb)));
     expect(submit.getAttribute('aria-disabled')).toBeNull();
     fireEvent.click(submit);
+    expect(await screen.findByRole('dialog')).toBeTruthy();
+  });
+});
+
+describe('«Approve» і місяць джерела HSE400 (борг координатора)', () => {
+  const describedText = (element: HTMLElement): string =>
+    document.getElementById(element.getAttribute('aria-describedby') ?? '')?.textContent ?? '';
+
+  it('річний документ: джерело місяця-цілі не затверджено — «Approve» недоступна з поясненням, «Reject» доступна', async () => {
+    show({ 4: { status: 'Submitted', decide: true, source: Apr }, 5: 'Submitted' });
+
+    const approve = await approveButton('April 2026');
+    await waitFor(() => expect(approve.getAttribute('aria-disabled')).toBe('true'));
+    expect(approve.getAttribute('data-blocked')).toBe('true');
+    expect(describedText(approve)).toContain('workflow.approveSourceNotApproved (period=April 2026, source=April 2026)');
+
+    fireEvent.click(approve);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.queryByRole('dialog')).toBeNull();
+
+    // Відхилення ворота не стосуються.
+    const reject = screen.getByRole('button', { name: /workflow\.rejectPeriod \(period=April 2026\)/ });
+    expect(reject.getAttribute('aria-disabled')).toBeNull();
+    fireEvent.click(reject);
+    expect(await screen.findByRole('dialog')).toBeTruthy();
+  });
+
+  it('річний документ: інший місяць-ціль (джерело затверджене) — «Approve» знову доступна', async () => {
+    show({ 4: { status: 'Submitted', decide: true, source: Apr }, 5: 'Submitted' });
+
+    await approveButton('April 2026');
+    fireEvent.click(await screen.findByRole('button', { name: '⟦workflow.pickApprovePeriod⟧' }));
+    const mayItem = await waitFor(() => {
+      const item = document.querySelector<HTMLElement>(`[data-decision-period="${String(May)}"]`);
+      expect(item).not.toBeNull();
+
+      return item as HTMLElement;
+    });
+    fireEvent.click(mayItem);
+
+    const may = await approveButton('May 2026');
+    expect(may.getAttribute('aria-disabled')).toBeNull();
+    fireEvent.click(may);
+    expect(await screen.findByRole('dialog')).toBeTruthy();
+  });
+
+  it('звичайний документ: джерело періоду сторінки не затверджено — «Approve» недоступна', async () => {
+    show(
+      {},
+      {
+        state: 'Submitted',
+        yearLayout: false,
+        submit: {
+          targetPeriodKey: null,
+          periods: [{ periodKey: Jan, state: 'Open', sheetStatus: 'Submitted', submittable: false, unapprovedSourcePeriodKey: Jan }],
+        },
+      },
+    );
+
+    const approve = await screen.findByRole('button', { name: '⟦workflow.approve⟧' });
+    await waitFor(() => expect(approve.getAttribute('aria-disabled')).toBe('true'));
+    expect(describedText(approve)).toContain('workflow.approveSourceNotApproved (period=January 2026, source=January 2026)');
+    expect(screen.getByRole('button', { name: '⟦workflow.reject⟧' }).getAttribute('aria-disabled')).toBeNull();
+  });
+
+  it('звичайний документ: незатверджене джерело ІНШОГО періоду затвердження не блокує', async () => {
+    show(
+      {},
+      {
+        state: 'Submitted',
+        yearLayout: false,
+        submit: {
+          targetPeriodKey: Feb,
+          periods: [
+            { periodKey: Jan, state: 'Open', sheetStatus: 'Submitted', submittable: false, unapprovedSourcePeriodKey: null },
+            { periodKey: Feb, state: 'Open', sheetStatus: 'Draft', submittable: true, unapprovedSourcePeriodKey: Feb },
+          ],
+        },
+      },
+    );
+
+    const approve = await screen.findByRole('button', { name: '⟦workflow.approve⟧' });
+    await waitFor(() => expect(gets.some((u) => u.includes('/submission-target'))).toBe(true));
+    expect(approve.getAttribute('aria-disabled')).toBeNull();
+    fireEvent.click(approve);
     expect(await screen.findByRole('dialog')).toBeTruthy();
   });
 });
