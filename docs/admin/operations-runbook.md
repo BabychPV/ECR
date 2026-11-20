@@ -135,6 +135,9 @@ Api й воркер на **одному** хості — різні ролі й 
 | `Security:RateLimit:ImportPreviewConcurrency` / `ImportPreviewQueueLimit` | 2 / 4 | скільки розборів книги `.xlsx` (перегляд імпорту документа, імпорт лімітів повітря — analyse/preview/apply, дерево НАЕ — analyse/preview/apply, книга таблиці дозволу) — одна спільна межа на процес — розбирається одночасно на процес і скільки чекає в черзі; понад чергу — `429` (`ECR-REQ-0429`, ключ `err.ECR-REQ-0429.importBusy`). Розбір тримає всю книгу в пам'яті (до ~1,5 ГБ на книгу на стелі `XlsxSafetyGate`), тож піднімати першу межу — лише з запасом RAM (P1-04/S1-02). Мінімум — 1 / 0 |
 | `Security:RateLimit:SearchPermit` / `SearchWindowSeconds` | 30 / 10 | обмеження пошуку |
 | `Security:RateLimit:CspReportPermitPerMinute` | 120 | звітів про порушення CSP за хвилину з однієї адреси (`POST /api/v1/csp-report`); понад межу — `429` без тіла |
+| `Security:RateLimit:AnonymousReadPermitPerMinute` | 120 | анонімних читань `GET /api/v1/public/bootstrap` і `GET /api/v1/ui-strings/{lang}` (вони ходять у базу) за хвилину з однієї адреси; понад межу — `429` без тіла з `Retry-After`. Автентифікованих користувачів межа не стосується (PSS-29). Мінімум — 1 |
+| `Security:LoginAttemptRetention:DefaultDays` | 400 | строк зберігання `sec.LoginAttempt` у днях, коли рядка `Security.LoginAttemptRetentionDays` у `sys_ecr.SystemSetting` немає; див. п. 2.3. Не менше 30 |
+| `Security:LoginAttemptRetention:IntervalMinutes` / `Enabled` | 60 / `true` | як часто фонове прибирання `sec.LoginAttempt` читає налаштування й чистить; `Enabled=false` вимикає прибирання (лише для розслідувань). Мінімум — 1 |
 | `Security:RateLimit:RecalculatePermitPerMinute` | 6 | запитів `POST /api/v1/documents/{id}/recalculate` на користувача й документ за хвилину (спільно для власників права `Calculation.Recalculate` і читачів); понад межу — `429` (`ECR-REQ-0429`, `Retry-After`). Лічильник у пам'яті процесу: перезапуск скидає, на кількох вузлах межа діє на кожному окремо. Запити, відхилені `4xx` (`403`/`404`/`422`), межу не витрачають; `5xx` і скасований клієнтом запит — витрачають (робота могла вже статися; ent7 P3-1). Мінімум — 1 |
 | `Security:RateLimit:RecalculateUserPermitPerMinute` | 30 | запитів `POST /api/v1/documents/{id}/recalculate` на КОРИСТУВАЧА (усі документи разом) за хвилину; діє поруч із межею на пару «користувач + документ» (ent7 P3-2). Мінімум — 1 |
 | `Security:RateLimit:SmtpTestPermitPerMinute` / `SmtpTestSystemPermitPerHour` | 5 / 30 | проб поштового транспорту (`POST /api/v1/notifications/smtp/test` і `POST /api/v1/notifications/channels/{id}/test`): на користувача за хвилину і на всю систему за годину; понад межу — `429` (`ECR-REQ-0429`, `Retry-After`). Системна межа списується за проби, ПРИЙНЯТІ межею користувача й перевіркою права `System.ManageNotifications`; запити, відхилені цими двома перевірками (`429`, `403`), її не витрачають, а квота рахує лише проби, що пройшли валідацію й пошук каналу: запити, що завершилися будь-яким статусом `4xx` пізніше (`422`, `404` та ін., зокрема винятком), токен повертають, `5xx` — ні (рев'ю ent6 S6). Межа діє і для проби каналу Teams. Рахуються проби, а не листи: проба каналу шле до 20 адресатів РАЗОМ (явні адреси, потім ролі; D-263, ent6 S3); канал зберігає не більше 50 явних адрес. Квоти живуть у пам'яті кожного процесу: перезапуск скидає, а на кількох вузлах межа діє на кожному окремо. Мінімум для обох — 1 (`notifications-runbook.md` п. 2.5) |
@@ -253,6 +256,34 @@ ORDER BY [Ts];
 мають іти неспадно, інакше адаптер відмовляє помилкою `ECR-INT-0422`
 (`timestampsOutOfOrder`) замість мовчазного сортування в пам'яті.
 
+### 2.3. Журнал входів і строк зберігання спроб (✎ 2026-11-20, PSS-24)
+
+**Що пишеться.** Кожен вхід лишає слід у незмінному журналі безпеки `aud.SecurityEvent` (екран Audit → Security events):
+
+| Подія | Коли | Хто в колонці «Хто» |
+|---|---|---|
+| `LoginSucceeded` | успішний вхід, локальний чи Windows | користувач |
+| `LoginFailed` | невдала спроба; причина — `reason` у подробицях (`BadPassword`, `UnknownUser`, `LockedOut`, `Disabled`, `SidMismatch`, `ServiceAccount`) | користувач, якщо запис існує й відмова про пароль/блокування; «Вхід не виконано» для невідомого імені |
+| `AccountLocked` | ЦЯ спроба вичерпала бюджет і заблокувала запис | користувач |
+
+У подробицях: `userName`, `provider`, `outcome`, `reason`, `ip`, лічильник `suppressed`; час — «Коли», кореляція — колонка кореляції (той самий `X-Correlation-Id`). Пароля, його довжини чи фрагмента немає. Адреса `ip` — та сама, що рахує межа частоти (`Security:RateLimit:TrustForwardedFor`/`KnownProxies`), а не адреса проксі. Однакові невдалі спроби («ім'я + причина + адреса») пишуться не більше 20 разів за хвилину, решта додається числом `suppressed` до наступного запису. Збій запису журналу ніколи не змінює відповідь входу (Warning у логу).
+
+**Скільки живе.** Незмінний слід у `aud.SecurityEvent` (тригер `TR_SecurityEvent_Immutable`) тримається не менше мінімальної глибини аудиту (120 місяців, `arc.usp_ArchiveAudit`). Оперативна таблиця спроб `sec.LoginAttempt` чиститься фоновим прибиранням за строком — **400 днів за замовчуванням, і це налаштування**, яке можна змінити будь-коли без перевидання й без перезапуску (діє на наступному проході, до `IntervalMinutes` хв):
+
+```sql
+-- поточне значення (немає рядка — діє Security:LoginAttemptRetention:DefaultDays, типово 400)
+SELECT [Key], Value, ModifiedAt FROM sys_ecr.SystemSetting WHERE [Key] = N'Security.LoginAttemptRetentionDays';
+
+-- змінити строк (дні; межі 30–3650: менше піднімається до 30, більше обрізається до 3650)
+UPDATE sys_ecr.SystemSetting SET Value = N'200', ModifiedAt = SYSUTCDATETIME()
+ WHERE [Key] = N'Security.LoginAttemptRetentionDays';
+IF @@ROWCOUNT = 0
+    INSERT INTO sys_ecr.SystemSetting ([Key], Value, Description, ModifiedAt)
+    VALUES (N'Security.LoginAttemptRetentionDays', N'200', N'Retention of sec.LoginAttempt, days (PSS-24)', SYSUTCDATETIME());
+```
+
+`UPDATE` рядків `sec.LoginAttempt` заборонений тригером `TR_LoginAttempt_NoUpdate` (`THROW 50060`); `DELETE` дозволений — його робить прибирання за строком. Скорочення строку стирає старіше вже на наступному проході (необоротно для `sec.LoginAttempt`, але не для `aud.SecurityEvent`).
+
 ### Усі ключі конфігурації {#2-ключі-конфігурації}
 
 <!-- generated:config -->
@@ -356,6 +387,10 @@ ORDER BY [Ts];
 | `Security:Csp:Enforce` | ні | `false` | `true` або `false`. |
 | `Security:Csp:ReportOnly` | ні | `true` | `true` або `false`. |
 | `Security:Csp:ReportUri` | ні | `/api/v1/csp-report` | Формат перевіряється на старті (див. текст відмови служби). |
+| `Security:LoginAttemptRetention:DefaultDays` | ні | `400` | Ціле число, не менше 30. PSS-24 |
+| `Security:LoginAttemptRetention:Enabled` | ні | `true` | `true` або `false`. |
+| `Security:LoginAttemptRetention:IntervalMinutes` | ні | `60` | Ціле число, не менше 1. PSS-24 |
+| `Security:RateLimit:AnonymousReadPermitPerMinute` | ні | `120` | Ціле число, не менше 1. PSS-29 |
 | `Security:RateLimit:ChangePasswordPermitPerMinute` | ні | — | Ціле число, не менше 1. |
 | `Security:RateLimit:CspReportPermitPerMinute` | ні | `120` | Ціле число, не менше 1. |
 | `Security:RateLimit:DiscussionPostPermitPerMinute` | ні | `20` | Ціле число, не менше 1. |
