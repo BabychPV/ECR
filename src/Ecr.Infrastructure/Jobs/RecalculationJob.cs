@@ -509,6 +509,18 @@ public sealed partial class RecalculationJob(
                         periodCarry.Add(new ResultCarryOver(documentId, carryMethodologies));
                     }
 
+                    // ✎ D-557: затверджені екземпляри спільних методологій — їхні числа лишаються старими.
+                    if (bindingPlan.CarryOverInstances.TryGetValue(period, out var sharedMethodologies)
+                        && bindingPlan.CarryOverInstanceIds.TryGetValue(period, out var sharedInstances))
+                    {
+                        if (!carryOvers.TryGetValue(period, out var periodCarry))
+                        {
+                            carryOvers[period] = periodCarry = [];
+                        }
+
+                        periodCarry.Add(new ResultCarryOver(documentId, sharedMethodologies, sharedInstances));
+                    }
+
                     var profile = await orchestrator
                         .RunAsync(
                             run.Id,
@@ -1621,8 +1633,74 @@ public sealed partial class RecalculationJob(
         // однакова пара (екземпляр, методологія) неможлива в двох періодах,
         // бо екземпляр належить рівно одному періоду, але робити `Distinct`
         // після групування чесніше — воно тоді означає рівно те, що написано.
+        // ✎ D-557: СПІЛЬНА методологія (прив'язана і до затвердженої, і до незатвердженої таблиці) рахується на
+        // незатверджених, а затверджені екземпляри лишаються зі старими числами: результат має `TableInstanceId`, тож
+        // прив'язку затвердженого екземпляра прогін не рахує, а її результати переносяться (`CarryOverInstances`).
+        // ⚠ Результати до D-401 не мають `TableInstanceId` (NULL) — їх не віднести до таблиці, тож затверджений екземпляр
+        // без власних результатів у документі, де такі «безприв'язні» є, лишається за старим правилом (рахується).
+        var approvedIds = instances.Where(i => skippedSheets.TryGetValue(i.PeriodKeyValue, out var approved)
+                                               && approved.Contains(i.SheetDefId)).Select(i => i.Id).ToList();
+        var attributed = new HashSet<long>();
+        var legacyPeriods = new HashSet<int>();
+        if (approvedIds.Count > 0)
+        {
+            // ⛔ Джерело результатів — те саме, що в `CarryOverResultsAsync` (`CurrentRunSelection`: документний прогін
+            // періоду має перевагу над проєктним). Вибір «будь-який прогін зі статусом Current» розходився з переносом:
+            // екземпляр виключався з розрахунку за результатами одного прогону, а переносити брали б з іншого — числа зникали.
+            var currentRuns = await CurrentRunSelection.RunsOfDocumentAsync(db, request.DocumentId, ct).ConfigureAwait(false);
+            foreach (var period in instances.Where(i => approvedIds.Contains(i.Id)).Select(i => i.PeriodKeyValue).Distinct())
+            {
+                var runIds = CurrentRunSelection.Effective(currentRuns, request.DocumentId, period).Select(r => r.Id).ToList();
+                if (runIds.Count == 0)
+                {
+                    continue;
+                }
+
+                var periodResults = db.CalculationResults
+                    .AsNoTracking()
+                    .Where(r => r.DocumentId == request.DocumentId && r.PeriodKey == period
+                                && runIds.Contains(r.CalculationRunId));
+                attributed.UnionWith(await periodResults
+                    .Where(r => r.TableInstanceId != null && approvedIds.Contains(r.TableInstanceId.Value))
+                    .Select(r => r.TableInstanceId!.Value)
+                    .Distinct()
+                    .ToListAsync(ct)
+                    .ConfigureAwait(false));
+                if (await periodResults.AnyAsync(r => r.TableInstanceId == null, ct).ConfigureAwait(false))
+                {
+                    legacyPeriods.Add(period);
+                }
+            }
+        }
+
+        bool IsApproved(InstanceRow row)
+            => skippedSheets.TryGetValue(row.PeriodKeyValue, out var approved) && approved.Contains(row.SheetDefId)
+               && (attributed.Contains(row.Id) || !legacyPeriods.Contains(row.PeriodKeyValue));
+
+        var carryInstances = new Dictionary<int, (HashSet<int> Methodologies, HashSet<long> Instances)>();
+        foreach (var i in instances.Where(IsApproved))
+        {
+            var touchedHere = touchedByPeriod.GetValueOrDefault(i.PeriodKeyValue);
+            var shared = (methodologiesByTable.GetValueOrDefault(i.TableDefId) ?? [])
+                .Where(m => touchedHere?.Contains(m) ?? false)
+                .ToList();
+            if (shared.Count == 0)
+            {
+                continue;
+            }
+
+            if (!carryInstances.TryGetValue(i.PeriodKeyValue, out var entry))
+            {
+                carryInstances[i.PeriodKeyValue] = entry = ([], []);
+            }
+
+            entry.Methodologies.UnionWith(shared);
+            entry.Instances.Add(i.Id);
+        }
+
         var recomputedOnSubmitted = 0;
         var byPeriod = instances
+            .Where(i => !IsApproved(i))
             .SelectMany(i => bindings
                 .Where(b => b.TableDefId == i.TableDefId
                             && (touchedByPeriod.GetValueOrDefault(i.PeriodKeyValue)?.Contains(b.MethodologyId) ?? false))
@@ -1652,7 +1730,15 @@ public sealed partial class RecalculationJob(
                 g => g.Key,
                 g => (IReadOnlyList<int>)[.. g.Select(i => i.SheetDefId).Distinct().Order()]);
 
-        return new BindingPlan(byPeriod, carryByPeriod, recomputedOnSubmitted, activeSheets, partialByPeriod, blockedReaders);
+        return new BindingPlan(byPeriod, carryByPeriod, recomputedOnSubmitted, activeSheets, partialByPeriod, blockedReaders)
+        {
+            CarryOverInstances = carryInstances.ToDictionary(
+                pair => pair.Key,
+                pair => (IReadOnlyCollection<int>)[.. pair.Value.Methodologies.Order()],
+                EqualityComparer<int>.Default),
+            CarryOverInstanceIds = carryInstances.ToDictionary(
+                pair => pair.Key, pair => (IReadOnlyCollection<long>)[.. pair.Value.Instances.Order()]),
+        };
     }
 
     /// <summary>
@@ -1798,6 +1884,14 @@ public sealed partial class RecalculationJob(
         IReadOnlyDictionary<int, IReadOnlySet<long>> PartialTables,
         IReadOnlySet<(int Period, int SheetDefId)> BlockedReaders)
     {
+        /// <summary>✎ D-557: спільні методології періоду, чиї результати ЗАТВЕРДЖЕНИХ екземплярів переносяться (а не рахуються).</summary>
+        public IReadOnlyDictionary<int, IReadOnlyCollection<int>> CarryOverInstances { get; init; }
+            = ReadOnlyDictionary<int, IReadOnlyCollection<int>>.Empty;
+
+        /// <summary>✎ D-557: ті затверджені екземпляри таблиць, за якими переносяться <see cref="CarryOverInstances"/>.</summary>
+        public IReadOnlyDictionary<int, IReadOnlyCollection<long>> CarryOverInstanceIds { get; init; }
+            = ReadOnlyDictionary<int, IReadOnlyCollection<long>>.Empty;
+
         /// <summary>Порожній план: нічого не рахується й не переноситься.</summary>
         public static readonly BindingPlan Empty = new(
             ReadOnlyDictionary<int, IReadOnlyList<CalculationBindingRef>>.Empty,

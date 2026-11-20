@@ -224,6 +224,33 @@ public sealed class MethodologyScriptEndToEndTests(SqlServerFixture sql)
         Assert.Equal(61m, await SliceValueAsync(u.Worker, s, 0, "OUT_C").ConfigureAwait(true));
     }
 
+    /// <summary>
+    /// D-4: тест золотого набору без екземпляра таблиці (<c>tableInstanceId = 0</c>, як у методологів на річній розкладці)
+    /// публікується: скрипт рахує на порожньому власному екземплярі, а не падає <c>404 ECR-DOC-0404 tableInstance</c>.
+    /// </summary>
+    /// <remarks>Мутація: у <c>ScriptRuntime.InstanceAsync</c> умову <c>tableInstanceId &gt; 0</c> замінити на <c>true</c> — червоніє (404 на публікації).</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-558")]
+    public async Task Золотий_набір_скрипта_без_екземпляра_таблиці_публікується()
+    {
+        var s = await ArrangeAsync(209912, ["OUT_A"], [("gas", 10m), ("gas", 5m)]).ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        var u = await SignInAllAsync(app, s).ConfigureAwait(true);
+
+        var a = await CreateScriptVersionAsync(u.Author, "A").ConfigureAwait(true);
+        await SaveTextAsync(u.Author, a, $"rows from {s.TableCode};\noutput OUT_A : t = row.{s.ValueColumn} * 2;").ConfigureAwait(true);
+        await AddGoldenAsync(u.Author, a, s, 0, 10m, [], """{"OUT_A":20}""", tableInstanceId: 0).ConfigureAwait(true);
+        await PublishAsync(u.Publisher, a).ConfigureAwait(true);
+
+        // Публікація справді відбулася: автоприв'язка створила активну прив'язку виходу (без асерту тест був би порожнім).
+        await using var db = s.Builder.CreateContext();
+        var binding = await db.CalculationBindings.AsNoTracking().SingleAsync(b => b.MethodologyId == a.MethodologyId).ConfigureAwait(true);
+        Assert.Equal("OUT_A", binding.OutputCode);
+        Assert.True(binding.IsActive);
+    }
+
     // ───────────────────────────── стенд ─────────────────────────────
 
     private async Task<Stand> ArrangeAsync(int periodKey, string[] calculated, (string Kind, decimal Value)[] rows)
@@ -362,7 +389,8 @@ public sealed class MethodologyScriptEndToEndTests(SqlServerFixture sql)
     }
 
     private static async Task AddGoldenAsync(
-        HttpClient client, Created m, Stand s, int rowIndex, decimal value, (string Code, decimal Value)[] extra, string expected)
+        HttpClient client, Created m, Stand s, int rowIndex, decimal value, (string Code, decimal Value)[] extra, string expected,
+        long? tableInstanceId = null)
     {
         var arguments = new List<object>
         {
@@ -375,7 +403,7 @@ public sealed class MethodologyScriptEndToEndTests(SqlServerFixture sql)
         {
             periodKey = new { value = s.PeriodKey },
             documentId = s.Document.DocumentId,
-            tableInstanceId = s.Document.TableInstanceId,
+            tableInstanceId = tableInstanceId ?? s.Document.TableInstanceId,
             sourceRowKey = s.RowKeys[rowIndex],
             arguments,
         });

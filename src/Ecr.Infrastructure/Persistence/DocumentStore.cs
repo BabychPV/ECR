@@ -1570,9 +1570,9 @@ public sealed class DocumentStore(
     /// — у SQL, до <c>Take</c>: стеля обрізає хвіст, а не випадкові аркуші.
     /// </remarks>
     private IQueryable<SheetStateRow> SheetStatesQuery(long[] documentIds, int periodKey)
-        => db.DocumentSheets
+        => ApprovalSheetScope.InScope(db)   // D-558: єдине правило «аркуші, що затверджуються» (без видалених логічно)
             .AsNoTracking()
-            .Where(s => documentIds.Contains(s.DocumentId) && s.IsIncluded)
+            .Where(s => documentIds.Contains(s.DocumentId))
             .Join(
                 db.SheetDefs,
                 s => s.SheetDefId,
@@ -1769,7 +1769,7 @@ public sealed class DocumentStore(
         // інакше `state=Rejected` знаходив би документ, відхилений лише схованим аркушем.
         // ⛔ N1-01: схований — ПАРА «проєкт, аркуш»: версія шаблону спільна для кількох проєктів, а `Deny Sheet`
         // може стояти лише в A. Плаский `SheetDefId IN (...)` ховав би цей аркуш і в документах B.
-        var sheets = db.DocumentSheets.Where(s => s.IsIncluded);
+        var sheets = ApprovalSheetScope.InScope(db);
         if (hiddenSheetDefIds is { Count: > 0 })
         {
             var hiddenRows = HiddenSheetRows(hiddenSheetDefIds);
@@ -1818,7 +1818,7 @@ public sealed class DocumentStore(
         IReadOnlyCollection<(int ProjectId, int Id)>? hiddenSheetDefIds,
         IReadOnlyCollection<(long DocumentId, int SheetDefId)>? hiddenParticipantSheets)
     {
-        var sheets = db.DocumentSheets.Where(s => s.IsIncluded);
+        var sheets = ApprovalSheetScope.InScope(db);
         if (hiddenSheetDefIds is { Count: > 0 })
         {
             var hiddenRows = HiddenSheetRows(hiddenSheetDefIds);

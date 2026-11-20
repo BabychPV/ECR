@@ -6,6 +6,9 @@ import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { useRestoreFocus } from '@/shared/ui/useRestoreFocus';
 import type { ConfirmedImpact, SourceImpact, SourceImpactAction } from './sourceImpact';
 
+/** Скільки бейджів аркушів показує період; решта — «+N» (документ може мати десятки аркушів). */
+const MAX_SHEET_BADGES = 20;
+
 /**
  * B80 N5 (D-554): діалог впливу затвердження / повернення аркуша-джерела на залежні документи.
  *
@@ -89,6 +92,20 @@ export function SourceImpactModal({
                       {t(c.willRecalculate ? 'sourceImpact.status.pending' : 'sourceImpact.status.approved')}
                     </Badge>
                   </Group>
+                  {c.sheets.length > 1 ? (
+                    <Group gap="xs" wrap="wrap" data-testid="source-impact-sheets">
+                      {c.sheets.slice(0, MAX_SHEET_BADGES).map((sh) => (
+                        <Badge key={sh.sheetDefId} size="xs" variant="outline" color={sh.willRecalculate ? 'statusInfo' : 'statusWarning'}>
+                          {sh.sheetCode} · {t(sh.willRecalculate ? 'sourceImpact.status.pending' : 'sourceImpact.status.approved')}
+                        </Badge>
+                      ))}
+                      {c.sheets.length > MAX_SHEET_BADGES ? (
+                        <Text size="xs" span data-testid="source-impact-sheets-more">
+                          {t('sourceImpact.sheets.more', { count: c.sheets.length - MAX_SHEET_BADGES })}
+                        </Text>
+                      ) : null}
+                    </Group>
+                  ) : null}
                 </List.Item>
               ))}
             </List>

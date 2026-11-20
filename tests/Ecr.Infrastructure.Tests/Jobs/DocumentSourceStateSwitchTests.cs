@@ -343,6 +343,125 @@ public sealed class DocumentSourceStateSwitchTests(SqlServerFixture sql) : DbJob
         Assert.Equal(loads + 2, cache.Loads);
     }
 
+    /// <summary>
+    /// D-557 (D-3 стенда Land): черга ПОЗА базою (Quartz) ставить задачу після коміту, а не всередині транзакції:
+    /// задача стартує негайно, а її запис прогресу ще не видно (RCSI) — `StartAsync` вставляв дубль ключа, рядок
+    /// лишався `Queued` назавжди.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ МУТАЦІЙНИЙ ДОКАЗ: у обробниках повернути постановку всередину транзакції (умова <c>enlist</c> завжди
+    /// істинна) — «у транзакції» замість «після коміту», червоний обидва.
+    /// </remarks>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Черга_поза_базою_ставить_задачу_після_коміту_а_не_в_транзакції(bool flags)
+    {
+        var a = await ArrangeAsync();
+        await using var host = NewHost();
+        var access = Substitute.For<IAccessDecisionService>();
+        access.BuildProfileAsync(a.UserId, Arg.Any<CancellationToken>())
+            .Returns(new AccessBuilder { UserId = a.UserId }.Permission(DocumentSourceBindings.Permission).Build());
+        var user = Substitute.For<ICurrentUser>();
+        user.UserId.Returns(a.UserId);
+        var overrides = Substitute.For<IDocumentSourceFlagOverrides>();
+        overrides.ReadFromDocument.Returns((bool?)true);
+
+        var inTransaction = new List<bool>();
+        var jobs = Substitute.For<IBackgroundJobScheduler>();
+        jobs.EnlistsInCallerTransaction.Returns(false);
+        jobs.EnqueueCoalescedAsync<IRegistryImpactRecalculationJob>(
+                Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
+            .Returns(_ =>
+            {
+                inTransaction.Add(host.Db.Database.CurrentTransaction is not null);
+                return Task.FromResult("job");
+            });
+
+        var store = new DocumentSourceBindingStore(host.Db, DependencyGraphTestKit.Provider(host.Db));
+        var queued = flags
+            ? (await new SwitchDocumentSourceFlagsHandler(
+                    store, overrides, access, user, new UnitOfWork(host.Db), new AuditWriter(host.Db), jobs, new TestClock(Now))
+                .HandleAsync(
+                    a.BindingId,
+                    new SwitchDocumentSourceFlagsRequest(ReadFromDocument: false, RecalculateDependents: true),
+                    CancellationToken.None)).QueuedYears
+            : (await new SwitchDocumentSourceStateHandler(
+                    store, overrides, access, user, new UnitOfWork(host.Db), new AuditWriter(host.Db), jobs, new TestClock(Now))
+                .HandleAsync(a.BindingId, new SwitchDocumentSourceStateRequest("approvedOnly"), CancellationToken.None)).QueuedYears;
+
+        Assert.Equal([Year], queued);
+        Assert.Equal([false], inTransaction);
+    }
+
+    /// <summary>
+    /// D-557 (рецензія): збій постановки задачі ПІСЛЯ коміту (Quartz/JobProgress) не дає 500 й не губить решту: стан
+    /// закомічено, перший рік іде у <c>FailedYears</c>, другий поставлено, кеш воріт скинуто.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ МУТАЦІЙНИЙ ДОКАЗ: прибрати <c>try/catch</c> у <c>EnqueueAfterCommitAsync</c> — виняток першого року летить
+    /// клієнтові (500), другий рік не ставиться, <c>Invalidate</c> не викликається: червоний.
+    /// </remarks>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Збій_постановки_після_коміту_не_губить_решту_років_і_скидання_кешу(bool flags)
+    {
+        var a = await ArrangeAsync(extraYear: true);
+        await using var host = NewHost();
+        var access = Substitute.For<IAccessDecisionService>();
+        access.BuildProfileAsync(a.UserId, Arg.Any<CancellationToken>())
+            .Returns(new AccessBuilder { UserId = a.UserId }.Permission(DocumentSourceBindings.Permission).Build());
+        var user = Substitute.For<ICurrentUser>();
+        user.UserId.Returns(a.UserId);
+        var overrides = Substitute.For<IDocumentSourceFlagOverrides>();
+        overrides.ReadFromDocument.Returns((bool?)true);
+
+        var calls = 0;
+        var jobs = Substitute.For<IBackgroundJobScheduler>();
+        jobs.EnlistsInCallerTransaction.Returns(false);
+        jobs.EnqueueCoalescedAsync<IRegistryImpactRecalculationJob>(
+                Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
+            .Returns(_ =>
+            {
+                if (calls++ == 0)
+                {
+                    throw new InvalidOperationException("Quartz недоступний");
+                }
+
+                return Task.FromResult("job");
+            });
+        var gate = Substitute.For<ISourceBindingGateInvalidation>();
+
+        var store = new DocumentSourceBindingStore(host.Db, DependencyGraphTestKit.Provider(host.Db));
+        IReadOnlyList<int> queued;
+        IReadOnlyList<int> failed;
+        if (flags)
+        {
+            var response = await new SwitchDocumentSourceFlagsHandler(
+                    store, overrides, access, user, new UnitOfWork(host.Db), new AuditWriter(host.Db), jobs, new TestClock(Now), gate)
+                .HandleAsync(
+                    a.BindingId,
+                    new SwitchDocumentSourceFlagsRequest(ReadFromDocument: false, RecalculateDependents: true),
+                    CancellationToken.None);
+            (queued, failed) = (response.QueuedYears, response.FailedYears);
+        }
+        else
+        {
+            var response = await new SwitchDocumentSourceStateHandler(
+                    store, overrides, access, user, new UnitOfWork(host.Db), new AuditWriter(host.Db), jobs, new TestClock(Now), gate)
+                .HandleAsync(a.BindingId, new SwitchDocumentSourceStateRequest("approvedOnly"), CancellationToken.None);
+            (queued, failed) = (response.QueuedYears, response.FailedYears);
+            Assert.Equal(DocumentSourceState.ApprovedOnly, await StateAsync(a.BindingId));
+        }
+
+        Assert.Equal([Year + 1], queued);
+        Assert.Equal([Year], failed);
+        Assert.Equal(2, calls);
+        gate.Received(1).Invalidate();
+        Assert.Equal(1, await EventsAsync(a.BindingId));
+    }
+
     private async Task<bool> InGateAsync(SourceBindingGateCache cache, int bindingId)
     {
         await using var db = Sql.CreateContext();
@@ -380,7 +499,8 @@ public sealed class DocumentSourceStateSwitchTests(SqlServerFixture sql) : DbJob
 
     /// <summary>Джерело: документ шаблону з таблицею-потоком <c>FG_Internal</c> за рік; зв'язка на Any; користувач.</summary>
     private async Task<Arranged> ArrangeAsync(
-        PeriodKind kind = PeriodKind.Monthly, WorkflowMode workflow = WorkflowMode.SubmitApprove, int documentYear = Year)
+        PeriodKind kind = PeriodKind.Monthly, WorkflowMode workflow = WorkflowMode.SubmitApprove, int documentYear = Year,
+        bool extraYear = false)
     {
         var periodKey = (documentYear * 100) + 1;
         var doc = await new TestDocumentBuilder(Sql.ConnectionString).BuildAsync(periodKey: periodKey);
@@ -395,6 +515,13 @@ public sealed class DocumentSourceStateSwitchTests(SqlServerFixture sql) : DbJob
         var instanceId = await new BulkCellLoader(Sql.ConnectionString, 1000)
             .ReserveIdsAsync("doc.TableInstanceSeq", 1, CancellationToken.None);
         db.TableInstances.Add(new TableInstance(new PeriodKey(periodKey), instanceId, doc.DocumentId, table.Id, Now));
+        if (extraYear)
+        {
+            // Джерело з двох років: обробник ставить задачу за кожен (SourceYearsAsync читає роки екземплярів таблиць зв'язки).
+            var extraId = await new BulkCellLoader(Sql.ConnectionString, 1000)
+                .ReserveIdsAsync("doc.TableInstanceSeq", 1, CancellationToken.None);
+            db.TableInstances.Add(new TableInstance(new PeriodKey(periodKey + 100), extraId, doc.DocumentId, table.Id, Now));
+        }
 
         var registry = new RegistryDef(EcrCode.Create($"HC{tag}"), Text("Composition"), isTemporal: false);
         db.RegistryDefs.Add(registry);

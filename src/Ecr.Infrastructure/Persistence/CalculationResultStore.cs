@@ -606,7 +606,8 @@ public sealed partial class CalculationResultStore(
 
     /// <inheritdoc />
     public async Task<int> CarryOverResultsAsync(
-        long calculationRunId, long documentId, IReadOnlyCollection<int> methodologyIds, CancellationToken ct)
+        long calculationRunId, long documentId, IReadOnlyCollection<int> methodologyIds, CancellationToken ct,
+        IReadOnlyCollection<long>? tableInstanceIds = null)
     {
         ArgumentNullException.ThrowIfNull(methodologyIds);
         if (methodologyIds.Count == 0)
@@ -653,6 +654,13 @@ public sealed partial class CalculationResultStore(
                         && r.DocumentId == documentId
                         && currentRunIds.Contains(r.CalculationRunId)
                         && versionIds.Contains(r.MethodologyVersionId));
+
+        // ✎ D-557: спільна методологія — переносяться лише результати затверджених екземплярів.
+        if (tableInstanceIds is not null)
+        {
+            var instanceIds = tableInstanceIds.ToList();
+            sourceQuery = sourceQuery.Where(r => r.TableInstanceId != null && instanceIds.Contains(r.TableInstanceId.Value));
+        }
 
         // ⛔ N2-04: понад стелю — відмова, а не мовчазне обрізання. Раніше `Take(MaxResults)` губив хвіст:
         // прогін ставав актуальним, а частина чисел перенесених аркушів зникала з читання без жодної ознаки.
@@ -1028,31 +1036,13 @@ public sealed partial class CalculationResultStore(
     }
 
     /// <summary>Актуальні прогони проєкту документа: власні документні та прогони всього проєкту (усіх періодів).</summary>
-    private async Task<List<CurrentRunRow>> CurrentRunsOfDocumentAsync(long documentId, CancellationToken ct)
-        => await (
-                from d in db.Documents.AsNoTracking()
-                where d.Id == documentId
-                join r in db.CalculationRuns.AsNoTracking() on d.ProjectId equals r.ProjectId
-                where r.Status == CalculationRun.CurrentStatus
-                      && (r.DocumentId == documentId || r.DocumentId == null)
-                select new CurrentRunRow(r.Id, r.DocumentId, r.PeriodKey, r.FinishedAt))
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
+    private Task<List<CurrentRunRow>> CurrentRunsOfDocumentAsync(long documentId, CancellationToken ct)
+        => CurrentRunSelection.RunsOfDocumentAsync(db, documentId, ct);
 
-    /// <summary>
-    /// Правило UX-PASS R4 для одного періоду: власний документний прогін ЦЬОГО періоду має перевагу; без нього —
-    /// прогони всього проєкту.
-    /// </summary>
+    /// <summary>Правило вибору актуальних прогонів періоду — єдине в <see cref="CurrentRunSelection"/>.</summary>
     private static IEnumerable<CurrentRunRow> EffectiveRuns(
         IReadOnlyList<CurrentRunRow> current, long documentId, int periodKey)
-    {
-        var hasDedicatedCurrent = current.Any(r => r.DocumentId == documentId && r.PeriodKey == periodKey);
-
-        return current.Where(r => r.DocumentId == documentId || (!hasDedicatedCurrent && r.DocumentId == null));
-    }
-
-    /// <summary>Актуальний прогін (проєкція для вибору).</summary>
-    private sealed record CurrentRunRow(long Id, long? DocumentId, int? PeriodKey, DateTime? FinishedAt);
+        => CurrentRunSelection.Effective(current, documentId, periodKey);
 
     /// <summary>
     /// Резервує безперервний діапазон ідентифікаторів кроків трейсу й

@@ -28,8 +28,8 @@ function impact(overrides: Partial<SourceImpact> = {}): SourceImpact {
     approvedCount: 1,
     canRecalculateApproved: false,
     consumers: [
-      { bindingCode: 'HSE400_LAND', templateCode: 'LAND', documentId: 5, projectCode: 'LAND-2026', documentKey: 'DOC-LAND', periodKey: 202603, approved: true, willRecalculate: false, skipReason: 'approved' },
-      { bindingCode: 'HSE400_LAND', templateCode: 'LAND', documentId: 6, projectCode: 'LAND-2026', documentKey: 'DOC-LAND-2', periodKey: 202603, approved: false, willRecalculate: true, skipReason: null },
+      { bindingCode: 'HSE400_LAND', templateCode: 'LAND', documentId: 5, projectCode: 'LAND-2026', documentKey: 'DOC-LAND', periodKey: 202603, approved: true, willRecalculate: false, skipReason: 'approved', sheets: [] },
+      { bindingCode: 'HSE400_LAND', templateCode: 'LAND', documentId: 6, projectCode: 'LAND-2026', documentKey: 'DOC-LAND-2', periodKey: 202603, approved: false, willRecalculate: true, skipReason: null, sheets: [] },
     ],
     ...overrides,
   };
@@ -59,6 +59,59 @@ describe('SourceImpactModal', () => {
     fireEvent.click(screen.getByTestId('source-impact-confirm'));
 
     expect(onConfirm).toHaveBeenCalledWith({ hash: 'abc123', reason: null }, { suppress: false });
+  });
+
+  it('D-1: період із кількома аркушами показує, які аркуші затверджені (не перераховуються), а які будуть перераховані', async () => {
+    const base = impact().consumers[1]!;
+    show(
+      impact({
+        consumers: [
+          {
+            ...base,
+            sheets: [
+              { sheetDefId: 1, sheetCode: 'SH_APPROVED', approved: true, willRecalculate: false },
+              { sheetDefId: 2, sheetCode: 'SH_DRAFT', approved: false, willRecalculate: true },
+            ],
+          },
+        ],
+      }),
+    );
+
+    const sheets = await screen.findByTestId('source-impact-sheets');
+    expect(sheets.textContent).toContain('SH_APPROVED');
+    expect(sheets.textContent).toContain('SH_DRAFT');
+    // Стан аркуша — не лише кольором (a11y): текстом поруч із кодом.
+    expect(sheets.textContent).toContain('SH_APPROVED · ⟦sourceImpact.status.approved⟧');
+    expect(sheets.textContent).toContain('SH_DRAFT · ⟦sourceImpact.status.pending⟧');
+  });
+
+  it('D-1: період з одним аркушем не показує бейджів аркушів (вони лише для кількох)', async () => {
+    const base = impact().consumers[1]!;
+    show(
+      impact({
+        consumers: [{ ...base, sheets: [{ sheetDefId: 1, sheetCode: 'SH_ONLY', approved: false, willRecalculate: true }] }],
+      }),
+    );
+
+    await screen.findByRole('dialog');
+    expect(screen.queryByTestId('source-impact-sheets')).toBeNull();
+    expect(screen.queryByText(/SH_ONLY/)).toBeNull();
+  });
+
+  it('D-1: понад 20 аркушів — перші 20 бейджів і «+N» для решти', async () => {
+    const base = impact().consumers[1]!;
+    const sheets = Array.from({ length: 23 }, (_, i) => ({
+      sheetDefId: i + 1,
+      sheetCode: `SH_${String(i + 1).padStart(2, '0')}`,
+      approved: false,
+      willRecalculate: true,
+    }));
+    show(impact({ consumers: [{ ...base, sheets }] }));
+
+    const list = await screen.findByTestId('source-impact-sheets');
+    expect(list.textContent).toContain('SH_20');
+    expect(list.textContent).not.toContain('SH_21');
+    expect(screen.getByTestId('source-impact-sheets-more').textContent).toContain('sourceImpact.sheets.more');
   });
 
   it('ConfirmWithReason: кнопка вимкнена, доки причина порожня; причина йде обрізаною', async () => {

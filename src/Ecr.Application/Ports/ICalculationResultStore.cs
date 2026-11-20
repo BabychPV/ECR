@@ -130,8 +130,13 @@ public interface ICalculationResultStore
     /// лишається актуальним.
     /// </para>
     /// </remarks>
+    /// <param name="tableInstanceIds">
+    /// ✎ D-557: лише результати цих екземплярів таблиць (методологія, СПІЛЬНА із затвердженим аркушем, перерахована на
+    /// інших таблицях, а затверджені лишаються зі старими числами); <c>null</c> — усі екземпляри методологій.
+    /// </param>
     public Task<int> CarryOverResultsAsync(
-        long calculationRunId, long documentId, IReadOnlyCollection<int> methodologyIds, CancellationToken ct);
+        long calculationRunId, long documentId, IReadOnlyCollection<int> methodologyIds, CancellationToken ct,
+        IReadOnlyCollection<long>? tableInstanceIds = null);
 
     /// <summary>
     /// ✎ B79: де числа нового прогону ВІДРІЗНЯЮТЬСЯ від актуальних — єдина підстава позначки «перераховано після
@@ -238,7 +243,12 @@ public sealed record CurrentRunProfile(long RunId, DateTime? FinishedAt, string?
 /// <summary>Які результати попереднього актуального прогону перенести в новий (RC14, P2-4).</summary>
 /// <param name="DocumentId">Документ прогону.</param>
 /// <param name="MethodologyIds">Методології, яких прогін області не перераховував.</param>
-public sealed record ResultCarryOver(long DocumentId, IReadOnlyCollection<int> MethodologyIds);
+/// <param name="TableInstanceIds">
+/// ✎ D-557: звузити перенос екземплярами таблиць (затверджені аркуші, чию СПІЛЬНУ методологію прогін перерахував на
+/// інших таблицях); <c>null</c> — усі результати методологій.
+/// </param>
+public sealed record ResultCarryOver(
+    long DocumentId, IReadOnlyCollection<int> MethodologyIds, IReadOnlyCollection<long>? TableInstanceIds = null);
 
 /// <summary>Один рядок актуального результату розрахунку.</summary>
 /// <param name="MethodologyVersionId">Версія, що дала число: без неї його неможливо пояснити.</param>

@@ -162,7 +162,25 @@ public sealed class ScriptRuntime
     internal static string EntryKey(string registryCode, string entryCode)
         => registryCode.ToUpperInvariant() + "\u0001" + entryCode.ToUpperInvariant();
 
+    /// <summary>
+    /// Дані екземпляра рядка. ✎ D-4: тест золотого набору не має екземпляра (<c>tableInstanceId = 0</c>, документ і період
+    /// задано) — як і формульний модуль, скрипт рахує його на ПОРОЖНЬОМУ власному екземплярі: таблиці-псевдоніми
+    /// (<c>rows from</c>) шукаються за документом і періодом (<see cref="AliasRowsAsync"/>), а не за власним екземпляром.
+    /// Без цього <c>ResolveTableInstanceAsync(0)</c> давав <c>404 ECR-DOC-0404 tableInstance</c> і скрипт із річною
+    /// розкладкою (<c>YearWithMonthColumns</c>) не публікувався.
+    /// </summary>
     internal Task<InstanceData> InstanceAsync(long tableInstanceId, CancellationToken ct)
+        => tableInstanceId > 0 ? ResolvedInstanceAsync(tableInstanceId, ct) : Task.FromResult(VirtualInstance());
+
+    private InstanceData VirtualInstance()
+        => new(
+            new TableInstanceRef(0, _documentId, 0, 0, _periodKey.Value),
+            string.Empty,
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+            new Dictionary<(string Name, int Month), string>(),
+            EmptyCalculated);
+
+    private Task<InstanceData> ResolvedInstanceAsync(long tableInstanceId, CancellationToken ct)
         => _instances.GetOrAdd(
             tableInstanceId,
             id => new Lazy<Task<InstanceData>>(() => LoadInstanceAsync(id, ct))).Value;

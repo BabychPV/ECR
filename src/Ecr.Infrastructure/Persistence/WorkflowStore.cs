@@ -857,10 +857,12 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
 
         // Є що рахувати: документ без складу або з рядком складу, що не затверджений. ✎ F13 p218 #788: рядок складу —
         // оригінал АБО копія (RS: стан копії свій, SheetCopyId = Id рядка); копія-чернетка затвердженого оригіналу — є що рахувати.
+        // D-558: склад — єдине правило ApprovalSheetScope (логічно видалений аркуш не затверджується й не блокує «усі затверджені»).
+        var scope = ApprovalSheetScope.InScope(db);
         var recalculable = await documents
             .AnyAsync(
-                d => !db.DocumentSheets.Any(s => s.DocumentId == d.Id && s.IsIncluded && s.CopyOfId == null)
-                     || db.DocumentSheets.Any(s => s.DocumentId == d.Id && s.IsIncluded
+                d => !scope.Any(s => s.DocumentId == d.Id && s.CopyOfId == null)
+                     || scope.Any(s => s.DocumentId == d.Id
                          && !db.ApprovalStates.Any(a => a.DocumentId == d.Id && a.SheetDefId == s.SheetDefId
                              && ((s.CopyOfId == null && a.SheetCopyId == null) || a.SheetCopyId == s.Id)
                              && a.PeriodKey == periodKey

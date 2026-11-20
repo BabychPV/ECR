@@ -31,12 +31,12 @@ public sealed class SourceImpactCheckTests
         var consumers = new List<SourceImpactConsumer>();
         for (var i = 0; i < approved; i++)
         {
-            consumers.Add(new SourceImpactConsumer(1, "B", "LAND", 100 + i, "P", "K", PeriodKey, Approved: true));
+            consumers.Add(new SourceImpactConsumer(1, "B", "LAND", 100 + i, "P", "K", PeriodKey, Approved: true, Sheets: []));
         }
 
         for (var i = 0; i < pending; i++)
         {
-            consumers.Add(new SourceImpactConsumer(1, "B", "LAND", 200 + i, "P", "K", PeriodKey, Approved: false));
+            consumers.Add(new SourceImpactConsumer(1, "B", "LAND", 200 + i, "P", "K", PeriodKey, Approved: false, Sheets: []));
         }
 
         var assessor = Substitute.For<ISourceImpactAssessor>();

@@ -69,6 +69,7 @@ export interface SourceImpactConsumerDto {
   approved: boolean;
   willRecalculate: boolean;
   skipReason: string | null;
+  sheets: { sheetDefId: number; sheetCode: string; approved: boolean; willRecalculate: boolean }[];
 }
 
 export interface SourceImpactDto {
@@ -182,7 +183,14 @@ async function createProject(page: Page, code: string, versionId: number): Promi
   return project.projectId;
 }
 
-async function createDocument(page: Page, projectId: number, versionId: number, base: string): Promise<DocRef> {
+/** Документ у проєкті; `projectCode` — код, з яким проєкт щойно створено (сервер віддає його в оцінці впливу). */
+async function createDocument(
+  page: Page,
+  project: { readonly id: number; readonly code: string },
+  versionId: number,
+  base: string,
+): Promise<DocRef> {
+  const projectId = project.id;
   const structure = await ok<{ sheets: { id: number; code: string }[] }>(await page.request.get(`${base}/structure`), 'структура');
   const sheet = structure.sheets[0];
   expect(sheet, 'у шаблоні немає аркуша').toBeDefined();
@@ -193,15 +201,21 @@ async function createDocument(page: Page, projectId: number, versionId: number, 
     'документ',
   );
 
-  return describeDocument(page, created.documentId, sheet?.id ?? 0, sheet?.code ?? '');
-}
+  const card = await ok<DocumentCard>(
+    await page.request.get(`/api/v1/documents/${String(created.documentId)}`),
+    'картка документа',
+  );
+  expect(card.projectId, 'документ не в тому проєкті').toBe(projectId);
 
-async function describeDocument(page: Page, documentId: number, sheetDefId: number, sheetCode: string): Promise<DocRef> {
-  const card = await ok<DocumentCard>(await page.request.get(`/api/v1/documents/${String(documentId)}`), 'картка документа');
-  const projects = await ok<{ items: { id: number; code: string }[] }>(await page.request.get('/api/v1/projects'), 'проєкти');
-  const project = projects.items.find((item) => item.id === card.projectId);
-
-  return { documentId, projectCode: project?.code ?? '', documentKey: card.businessKey, sheetDefId, sheetCode };
+  // ⛔ Не шукати код у `GET /projects`: він сторінковий (50 за замовчуванням), і на стенді з сотнями проєктів
+  // свіжого проєкту на першій сторінці немає — код ставав порожнім і тест падав не з вини продукту.
+  return {
+    documentId: created.documentId,
+    projectCode: project.code,
+    documentKey: card.businessKey,
+    sheetDefId: sheet?.id ?? 0,
+    sheetCode: sheet?.code ?? '',
+  };
 }
 
 /** Подає (і за потреби затверджує) оригінал аркуша документа за період. */
@@ -343,14 +357,16 @@ export async function createImpactWorld(page: Page, policy: Policy): Promise<Imp
     );
   });
 
-  const sourceProject = await createProject(page, `E2ESISP${stamp}`, source.versionId);
-  const consumerProject = await createProject(page, `E2ESICP${stamp}`, consumer.versionId);
+  const sourceProjectCode = `E2ESISP${stamp}`;
+  const consumerProjectCode = `E2ESICP${stamp}`;
+  const sourceProject = { id: await createProject(page, sourceProjectCode, source.versionId), code: sourceProjectCode };
+  const consumerProject = { id: await createProject(page, consumerProjectCode, consumer.versionId), code: consumerProjectCode };
   const sourceDoc = await createDocument(page, sourceProject, source.versionId, source.base);
   const approvedConsumer = await createDocument(page, consumerProject, consumer.versionId, consumer.base);
   const pendingConsumer = await createDocument(page, consumerProject, consumer.versionId, consumer.base);
 
   const calendar = await ok<{ periods: { periodKey: number; state: string }[] }>(
-    await page.request.get(`/api/v1/projects/${String(sourceProject)}/periods`),
+    await page.request.get(`/api/v1/projects/${String(sourceProject.id)}/periods`),
     'календар джерела',
   );
   const periodKey = (calendar.periods.find((item) => item.state === 'Open') ?? calendar.periods[0])?.periodKey ?? 0;

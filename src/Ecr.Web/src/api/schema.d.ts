@@ -44718,6 +44718,8 @@ export interface components {
             periodKey: number;
             /** @description Код проєкту. */
             projectCode: string;
+            /** @description Аркуші залежного документа за період: які буде, а які не буде перераховано (затверджені пропускаються). */
+            sheets: components["schemas"]["SourceImpactSheetDto"][];
             /** @description Чому не буде перераховано: `approved` — затверджений період перерахунок пропускає (D-493/D-510); інакше `null`. */
             skipReason: null | string;
             /** @description Код шаблону залежного документа. */
@@ -44755,6 +44757,20 @@ export interface components {
             required: boolean;
             /** @description Зачеплені місяці джерела `yyyyMM`. */
             sourceMonths: number[];
+        };
+        /** @description Аркуш залежного періоду в оцінці впливу. */
+        SourceImpactSheetDto: {
+            /** @description Аркуш затверджено (без рядка стану — ні). */
+            approved: boolean;
+            /** @description Код аркуша. */
+            sheetCode: string;
+            /**
+             * Format: int32
+             * @description Аркуш.
+             */
+            sheetDefId: number;
+            /** @description Аркуш буде перераховано (не затверджений). */
+            willRecalculate: boolean;
         };
         /** @description ✎ B80 N4 (R3.2): проблема документа-джерела для місяця документа-споживача. */
         SourceIssueDto: {
@@ -44953,6 +44969,8 @@ export interface components {
             binding: components["schemas"]["DocumentSourceBindingDto"];
             /** @description `false` — біти вже були такими; нічого не записано й не поставлено. */
             changed: boolean;
+            /** @description Роки, за які задачу НЕ вдалося поставити після коміту (черга недоступна): біти вже змінено, тож залежні за ці роки адміністратор перераховує вручну; порожньо — усе поставлено. */
+            failedYears: number[];
             /** @description Роки, за які поставлено перерахунок залежних. */
             queuedYears: number[];
         };
@@ -44967,6 +44985,8 @@ export interface components {
             binding: components["schemas"]["DocumentSourceBindingDto"];
             /** @description `false` — стан уже був таким; нічого не записано й не поставлено. */
             changed: boolean;
+            /** @description Роки, за які задачу НЕ вдалося поставити після коміту (черга недоступна): стан уже змінено, тож залежні за ці роки адміністратор перераховує вручну; порожньо — усе поставлено. */
+            failedYears: number[];
             /** @description Роки, за які поставлено перерахунок залежних (злита задача на довідник × рік). */
             queuedYears: number[];
         };

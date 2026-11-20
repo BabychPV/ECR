@@ -30018,6 +30018,13 @@
             "description": "Код проєкту.",
             "type": "string"
           },
+          "sheets": {
+            "description": "Аркуші залежного документа за період: які буде, а які не буде перераховано (затверджені пропускаються).",
+            "items": {
+              "$ref": "#/components/schemas/SourceImpactSheetDto"
+            },
+            "type": "array"
+          },
           "skipReason": {
             "description": "Чому не буде перераховано: `approved` — затверджений період перерахунок пропускає (D-493/D-510); інакше `null`.",
             "type": [
@@ -30043,7 +30050,8 @@
           "periodKey",
           "approved",
           "willRecalculate",
-          "skipReason"
+          "skipReason",
+          "sheets"
         ],
         "type": "object"
       },
@@ -30116,6 +30124,35 @@
           "approvedCount",
           "consumers",
           "canRecalculateApproved"
+        ],
+        "type": "object"
+      },
+      "SourceImpactSheetDto": {
+        "description": "Аркуш залежного періоду в оцінці впливу.",
+        "properties": {
+          "approved": {
+            "description": "Аркуш затверджено (без рядка стану — ні).",
+            "type": "boolean"
+          },
+          "sheetCode": {
+            "description": "Код аркуша.",
+            "type": "string"
+          },
+          "sheetDefId": {
+            "description": "Аркуш.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "willRecalculate": {
+            "description": "Аркуш буде перераховано (не затверджений).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "sheetDefId",
+          "sheetCode",
+          "approved",
+          "willRecalculate"
         ],
         "type": "object"
       },
@@ -30610,6 +30647,14 @@
             "description": "`false` — біти вже були такими; нічого не записано й не поставлено.",
             "type": "boolean"
           },
+          "failedYears": {
+            "description": "Роки, за які задачу НЕ вдалося поставити після коміту (черга недоступна): біти вже змінено, тож залежні за ці роки адміністратор перераховує вручну; порожньо — усе поставлено.",
+            "items": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": "array"
+          },
           "queuedYears": {
             "description": "Роки, за які поставлено перерахунок залежних.",
             "items": {
@@ -30622,7 +30667,8 @@
         "required": [
           "binding",
           "changed",
-          "queuedYears"
+          "queuedYears",
+          "failedYears"
         ],
         "type": "object"
       },
@@ -30650,6 +30696,14 @@
             "description": "`false` — стан уже був таким; нічого не записано й не поставлено.",
             "type": "boolean"
           },
+          "failedYears": {
+            "description": "Роки, за які задачу НЕ вдалося поставити після коміту (черга недоступна): стан уже змінено, тож залежні за ці роки адміністратор перераховує вручну; порожньо — усе поставлено.",
+            "items": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": "array"
+          },
           "queuedYears": {
             "description": "Роки, за які поставлено перерахунок залежних (злита задача на довідник × рік).",
             "items": {
@@ -30662,7 +30716,8 @@
         "required": [
           "binding",
           "changed",
-          "queuedYears"
+          "queuedYears",
+          "failedYears"
         ],
         "type": "object"
       },

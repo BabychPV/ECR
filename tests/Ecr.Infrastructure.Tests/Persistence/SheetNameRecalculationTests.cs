@@ -434,6 +434,40 @@ public sealed class SheetNameRecalculationTests(SqlServerFixture sql)
         Assert.True(await store.AllSheetsApprovedAsync(world.Doc.ProjectId, world.Doc.PeriodKey.Value, CancellationToken.None));
     }
 
+    /// <summary>
+    /// D-558: логічно видалений (<c>IsDeleted</c>) аркуш у складі документа затвердити не можна — він не блокує «усі аркуші
+    /// затверджені» (те саме правило <c>ApprovalSheetScope</c>, що й в оцінці впливу джерела: див. SourceImpactApiTests).
+    /// </summary>
+    /// <remarks>
+    /// Мутація: у <c>ApprovalSheetScope.InScope</c> прибрати <c>&amp;&amp; !db.SheetDefs.Any(sd =&gt; sd.Id == s.SheetDefId &amp;&amp; sd.IsDeleted)</c> —
+    /// видалений аркуш лишається без стану, <c>AllSheetsApprovedAsync</c> повертає false, червоний (і в оцінці впливу
+    /// червоніє «Видалений_або_не_включений_аркуш_не_блокує_затвердження_періоду»).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-558")]
+    public async Task Перерахунок_проєкту_не_чекає_затвердження_логічно_видаленого_аркуша()
+    {
+        var world = await ArrangeAsync();
+        await ApproveOriginalAsync(world.Doc);
+
+        await using var db = new EcrDbContext(
+            new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).Options);
+        var dead = new SheetDef(world.Doc.TemplateVersionId, EcrCode.Create($"DEL{Guid.NewGuid():N}"[..14]), Name("Deleted"), 9);
+        db.SheetDefs.Add(dead);
+        await db.SaveChangesAsync();
+        db.DocumentSheets.Add(new DocumentSheet(world.Doc.DocumentId, dead.Id));
+        await db.SaveChangesAsync();
+
+        var store = new WorkflowStore(db);
+        Assert.False(await store.AllSheetsApprovedAsync(world.Doc.ProjectId, world.Doc.PeriodKey.Value, CancellationToken.None));
+
+        dead.SoftDelete(userId: 1, Now);
+        await db.SaveChangesAsync();
+        Assert.True(await store.AllSheetsApprovedAsync(world.Doc.ProjectId, world.Doc.PeriodKey.Value, CancellationToken.None));
+    }
+
     private async Task AddBindingAsync(TestDocument doc)
     {
         await using var db = new EcrDbContext(

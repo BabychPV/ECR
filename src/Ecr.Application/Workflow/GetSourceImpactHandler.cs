@@ -17,10 +17,18 @@ namespace Ecr.Application.Workflow;
 /// <param name="PeriodKey">Період залежного документа.</param>
 /// <param name="Approved">Період затверджено (перерахунок його не чіпає, він застаріє).</param>
 /// <param name="WillRecalculate">Період буде перераховано (незатверджений).</param>
+/// <param name="Sheets">Аркуші залежного документа за період: які буде, а які не буде перераховано (затверджені пропускаються).</param>
 /// <param name="SkipReason">Чому не буде перераховано: <c>approved</c> — затверджений період перерахунок пропускає (D-493/D-510); інакше <c>null</c>.</param>
 public sealed record SourceImpactConsumerDto(
     string BindingCode, string TemplateCode, long DocumentId, string ProjectCode, string DocumentKey, int PeriodKey, bool Approved,
-    bool WillRecalculate, string? SkipReason);
+    bool WillRecalculate, string? SkipReason, IReadOnlyList<SourceImpactSheetDto> Sheets);
+
+/// <summary>Аркуш залежного періоду в оцінці впливу.</summary>
+/// <param name="SheetDefId">Аркуш.</param>
+/// <param name="SheetCode">Код аркуша.</param>
+/// <param name="Approved">Аркуш затверджено (без рядка стану — ні).</param>
+/// <param name="WillRecalculate">Аркуш буде перераховано (не затверджений).</param>
+public sealed record SourceImpactSheetDto(int SheetDefId, string SheetCode, bool Approved, bool WillRecalculate);
 
 /// <summary>Вплив дії над документом-джерелом на залежні документи (B80 N5, D-554).</summary>
 /// <param name="Action"><c>approve</c> | <c>reopen</c>.</param>
@@ -122,7 +130,8 @@ public sealed class GetSourceImpactHandler(
             .Take(MaxConsumers)
             .Select(c => new SourceImpactConsumerDto(
                 c.BindingCode, c.TemplateCode, c.DocumentId, c.ProjectCode, c.DocumentKey, c.PeriodKey, c.Approved,
-                WillRecalculate: !c.Approved, SkipReason: c.Approved ? SkipReasonApproved : null))
+                WillRecalculate: !c.Approved, SkipReason: c.Approved ? SkipReasonApproved : null,
+                Sheets: c.Sheets.Select(sh => new SourceImpactSheetDto(sh.SheetDefId, sh.SheetCode, sh.Approved, !sh.Approved)).ToList()))
             .ToList();
 
         return new SourceImpactDto(

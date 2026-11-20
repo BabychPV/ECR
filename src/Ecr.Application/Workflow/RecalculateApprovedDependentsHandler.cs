@@ -103,7 +103,7 @@ public sealed class RecalculateApprovedDependentsHandler(
                 });
         }
 
-        var approved = impact.Consumers.Where(c => c.Approved).ToList();
+        var approved = impact.Consumers.Where(c => c.HasApprovedSheets).ToList();
         await audit.WriteSecurityEventAsync(
             new SecurityEventRecord(
                 clock.UtcNow,
