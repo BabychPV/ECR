@@ -70,7 +70,7 @@ async function toMapping(page: Page, file: Buffer): Promise<void> {
 
 /** «Add file column B as a new column» with the name, Text, one value per Source; waits for the re-read. */
 async function addWorkshop(page: Page): Promise<void> {
-  await page.getByText(/^Unmapped columns:/).click();
+  await page.getByText(/^File columns not imported:/).click();
   await page.getByRole('button', { name: 'Add file column B as a new column' }).click();
   await page.getByRole('textbox', { name: 'Column name' }).fill(Workshop);
   await page.getByRole('button', { name: 'Add column', exact: true }).click();
@@ -154,7 +154,14 @@ test.describe('Air real shape', () => {
     await signIn(page);
     await toMapping(page, realShapeWorkbook(RealShapeSources));
 
-    // 1. Where the table is: found by itself, editable.
+    // 0. UX 20.11: the common case is «check and continue» — the verdict, every required field found, examples from the file.
+    await expect(page.getByTestId('air-mapping-verdict')).toContainText('All required columns were found');
+    const fields = page.getByRole('region', { name: 'Matched columns' });
+    await expect(fields.getByRole('row').filter({ hasText: 'Not found' })).toHaveCount(0);
+    await expect(fields.getByRole('columnheader', { name: 'Examples from the file' })).toBeVisible({ timeout: 30_000 });
+
+    // 1. Where the table is: found by itself (folded, the summary says what was found), editable.
+    await page.getByTestId('air-layout').locator('summary').click();
     await expect(page.getByRole('textbox', { name: 'Header starts at row' })).toHaveValue('4');
     await expect(page.getByRole('textbox', { name: 'Header ends at row' })).toHaveValue('6');
     await expect(page.getByRole('textbox', { name: 'Data starts at row' })).toHaveValue('8');
@@ -294,6 +301,8 @@ test.describe('Air real shape', () => {
     const save = async (name: string, profileCode: string): Promise<void> => {
       await page.getByRole('button', { name: 'Save as profile…' }).click();
       await page.getByRole('textbox', { name: 'Profile name' }).fill(name);
+      // UX 20.11: the code is generated from the name; «Change code» opens its field.
+      await page.getByRole('button', { name: 'Change code' }).click();
       await page.getByRole('textbox', { name: /^Profile code/ }).fill(profileCode);
       await page.getByRole('button', { name: 'Save profile', exact: true }).click();
     };
@@ -467,6 +476,8 @@ test.describe('Air real shape', () => {
     await toMapping(page, realShapeWorkbook(sources));
     await addWorkshop(page);
 
+    // The rules editor is folded under «Advanced» (UX 20.11: also after «Add as new column»).
+    await page.getByText('Advanced: edit the mapping rules', { exact: true }).click();
     const added = page.getByRole('textbox', { name: 'Field name', exact: true }).last();
     await expect(added).toHaveValue(/^FILE_B/);
     await added.fill(Workshop.toLowerCase());
@@ -519,7 +530,7 @@ test.describe('Air real shape', () => {
     const file = realShapeWorkbook(RealShapeSources, name);
     await signIn(page);
     await toMapping(page, file);
-    await page.getByText(/^Unmapped columns:/).click();
+    await page.getByText(/^File columns not imported:/).click();
     await page.getByRole('button', { name: 'Add file column B as a new column' }).click();
     await expect(page.getByRole('textbox', { name: 'Column name' })).toHaveValue(name);
     await page.getByRole('button', { name: 'Add column', exact: true }).click();
@@ -579,11 +590,12 @@ test.describe('Air real shape', () => {
     const code = `P3BSAVE_${Stamp}`;
     await signIn(page);
     await toMapping(page, realShapeWorkbook(RealShapeSources));
-    const before = 'Check how the columns of the file are matched to fields. Nothing is saved yet.';
+    const before = 'Check that the columns of the file were recognised, and choose a column only where you are asked to. Nothing is saved yet.';
     await expect(page.getByText(before, { exact: true })).toBeVisible();
 
     await page.getByRole('button', { name: 'Save as profile…' }).click();
     await page.getByRole('textbox', { name: /^Profile name/ }).fill('Pass3b save e2e');
+    await page.getByRole('button', { name: 'Change code' }).click();
     await page.getByRole('textbox', { name: /^Profile code/ }).fill(code);
     await page.getByRole('button', { name: 'Save profile', exact: true }).click();
     await expect(page.getByText(`Profile ${code} saved and selected.`)).toBeVisible({ timeout: 30_000 });

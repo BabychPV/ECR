@@ -223,6 +223,7 @@ describe('Air pass3b: no source rows and the subtitle after a save', () => {
 
     fireEvent.click(button('permits.air.import.map.saveProfile'));
     await userEvent.type(screen.getByRole('textbox', { name: new RegExp(`^${text('permits.air.import.save.name')}`) }), 'test2');
+    fireEvent.click(button('permits.air.import.save.changeCode'));
     const code = screen.getByRole('textbox', { name: new RegExp(`^${text('permits.air.import.save.code')}`) });
     await userEvent.clear(code);
     await userEvent.type(code, 'TEST2');
