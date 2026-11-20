@@ -19,11 +19,18 @@ interface AuthoredRow {
 export const SystemUserId = 0;
 
 /**
+ * PSS-24: спроба входу під ІМЕНЕМ, якого в системі немає (`LoginFailed`), не має автора, а колонка автора в журналі
+ * `NOT NULL` — сервер пише `-1` (`LoginAuditEventTypes.AnonymousActorId`). Ім'я, яке ввели, — у подробицях події.
+ */
+export const AnonymousUserId = -1;
+
+/**
  * Ім'я автора рядка; зниклий запис — чесне «користувач #id» (`R-18`); системний запис (`0`) — «Система»
  * (F13-p213 i5: автозакриття показувало «User #0 (no longer exists)»).
  */
 export function authorName(row: AuthoredRow): string {
   if (row.changedByUserId === SystemUserId) return t('audit.systemActor');
+  if (row.changedByUserId === AnonymousUserId) return t('audit.anonymousActor');
   return row.changedByDisplayName ?? t('audit.userGone', { id: row.changedByUserId });
 }
 
