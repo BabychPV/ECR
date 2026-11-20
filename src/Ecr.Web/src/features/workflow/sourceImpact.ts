@@ -73,6 +73,29 @@ export async function fetchSourceImpact(
   }
 }
 
+/**
+ * ✎ D-5: місяці (періоди-власники), яких стосуються незбережені правки. Річна сторінка пише правки в зріз ПЕРІОДУ СТОРІНКИ
+ * (якір, 202601), а місяць кодується КОЛОНКОЮ (`M05`): сервер маршрутизує комірку місячної колонки в період цього місяця
+ * (`PatchCellsHandler.MonthRouting`), решту — у якір. Тут те саме правило, що й у чипа стану місяця в сітці
+ * (`monthColumnsOf`): колонка, яку `submission-target.monthColumns` знає, дає свій `periodKey`; інша — період зрізу.
+ *
+ * ⚠ Зріз правок не знає `tableDefId` (лише `tableInstanceId`), тож колонка шукається за кодом серед місячних колонок аркуша.
+ */
+export function editedPeriods(
+  slices: readonly { readonly periodKey: number; readonly edits: readonly { readonly columnCode: string }[] }[],
+  monthColumns: readonly { readonly columnCode: string; readonly periodKey: number }[] | undefined,
+): number[] {
+  const owner = new Map<string, number>();
+  for (const month of monthColumns ?? []) owner.set(month.columnCode, month.periodKey);
+
+  const periods = new Set<number>();
+  for (const slice of slices) {
+    for (const edit of slice.edits) periods.add(owner.get(edit.columnCode) ?? slice.periodKey);
+  }
+
+  return [...periods];
+}
+
 /** Відмова сервера через вплив на залежні (`ECR-SRC-0409` / `ECR-SRC-0422`)? Тоді діалог впливу відкривається за відмовою. */
 export function impactRefusal(error: unknown): string | null {
   if (!(error instanceof EcrApiError)) return null;
