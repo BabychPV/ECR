@@ -7,8 +7,8 @@ import { useSyncExternalStore } from 'react';
  *
  * - ВХІД (`picks`): місяць, який людина вибрала (▾ чи клік по позначці стану колонки). Рядок дій перевіряє його
  *   проти місяців, що справді чекають дії, — зайвий вибір ігнорується.
- * - ВИХІД (`view`): що опублікував рядок дій — для яких місяців колонку можна зробити ціллю (`eligible`) і яка колонка
- *   є ціллю зараз (`highlight`; підсвічується в заголовку).
+ * - ВИХІД (`view`): що опублікував рядок дій — для яких місяців колонку можна зробити ціллю (`eligible`) і які колонки
+ *   є цілями зараз (`targets`: ціль «Approve/Reject» і ціль «Return for edits» — кожна зі своєю підсвіткою в заголовку).
  *
  * ⚠ Модуль без залежностей від сітки й від `SheetActions`: його читають обидва, і цикл імпортів тут був би помилкою.
  */
@@ -20,8 +20,11 @@ export type DecisionKind = 'Submitted' | 'Approved';
 export interface DecisionView {
   /** Місяці, які цій людині можна зробити ціллю рішення. */
   readonly eligible: ReadonlyMap<number, DecisionKind>;
-  /** Місяць-ціль, що показується в заголовку колонки; `null` — підсвічувати нічого. */
-  readonly highlight: number | null;
+  /**
+   * Місяці-цілі за видом рішення: `Submitted` — ціль Approve/Reject, `Approved` — ціль Return for edits; `null` — цілі
+   * цього виду немає. Обидві підсвічуються в заголовку колонки (кожна своїм виглядом) і дають позначці `aria-pressed`.
+   */
+  readonly targets: { readonly Submitted: number | null; readonly Approved: number | null };
 }
 
 interface Entry {
@@ -29,7 +32,7 @@ interface Entry {
   view: DecisionView;
 }
 
-const Empty: DecisionView = { eligible: new Map(), highlight: null };
+const Empty: DecisionView = { eligible: new Map(), targets: { Submitted: null, Approved: null } };
 
 const entries = new Map<string, Entry>();
 const listeners = new Set<() => void>();
@@ -71,7 +74,8 @@ export function decisionPicks(documentId: number, sheetDefId: number): { readonl
 export function publishDecisionView(documentId: number, sheetDefId: number, view: DecisionView): void {
   const entry = entryOf(keyOf(documentId, sheetDefId));
   const same =
-    entry.view.highlight === view.highlight &&
+    entry.view.targets.Submitted === view.targets.Submitted &&
+    entry.view.targets.Approved === view.targets.Approved &&
     entry.view.eligible.size === view.eligible.size &&
     [...view.eligible].every(([key, kind]) => entry.view.eligible.get(key) === kind);
   if (same) return;

@@ -29,10 +29,14 @@ interface DocumentSheetBannerProps {
   /** ✎ LAND-YEAR L7a: документ «рік» — ширші причини банера називають «Year YYYY» (`DocumentLockBanner`). */
   readonly yearLayout?: boolean;
   /**
-   * ✎ D-6: документ «рік» — місяць, про який банер (`state`/`lock` уже його); журнал переходів читається за ним, а
-   * заголовок називає місяць. `null`/не задано — банер про період сторінки, як було.
+   * ✎ D-6: документ «рік» — поданий чи затверджений МІСЯЦЬ, про який банер (ціль рішення людини, інакше найраніший
+   * поданий / затверджений); `canDecide` — ця людина його вирішує. `null` — такого місяця немає (чи ще невідомо).
+   * `undefined` — не річна розкладка: банер про аркуш за період сторінки, як було.
    */
-  readonly decisionPeriodKey?: number | null;
+  readonly monthTarget?:
+    | { readonly periodKey: number; readonly state: 'Submitted' | 'Approved'; readonly canDecide: boolean }
+    | null
+    | undefined;
 }
 
 /**
@@ -61,22 +65,98 @@ export function DocumentSheetBanner({
   recalculatedAfterSubmission = false,
   periodAction = null,
   yearLayout = false,
-  decisionPeriodKey = null,
+  monthTarget,
 }: DocumentSheetBannerProps): JSX.Element | null {
+  // ✎ D-6: річна розкладка — стан свій у кожного місяця: банер каже про МІСЯЦЬ, а не «аркуш поданий, правка закрита».
+  if (monthTarget !== undefined && !widerLock(lock)) {
+    const rejected = state === 'Rejected';
+    if (!rejected && monthTarget === null) return null;
+
+    return (
+      <>
+        {/* Відхилений якір лишається видимим разом із причиною — навіть коли інший місяць поданий. */}
+        {rejected && (
+          <SheetStateBanner
+            documentId={documentId}
+            periodKey={periodKey}
+            sheetCode={sheetCode}
+            sheetCopyId={sheetCopyId}
+            state="Rejected"
+            canDecide={false}
+            month
+          />
+        )}
+        {monthTarget !== null && (
+          <SheetStateBanner
+            documentId={documentId}
+            periodKey={monthTarget.periodKey}
+            sheetCode={sheetCode}
+            sheetCopyId={sheetCopyId}
+            state={monthTarget.state}
+            canDecide={monthTarget.canDecide}
+            // Позначка «перераховано після подання» — про якір (картка документа), тож лише коли банер про якір.
+            recalculatedAfterSubmission={recalculatedAfterSubmission && monthTarget.periodKey === periodKey}
+            month
+          />
+        )}
+      </>
+    );
+  }
+
   const contextual =
     !widerLock(lock) && (lock === 'sheetSubmitted' || lock === 'sheetApproved' || state === 'Rejected');
-  const history = useWorkflowHistory(documentId, decisionPeriodKey ?? periodKey, contextual, sheetCopyId);
-  // ✎ D-6: «Submitted 17 Sep by D. Akhmetova · April 2026» — місяць у заголовку, щоб не читалося як про якір.
-  const monthSuffix = decisionPeriodKey === null ? '' : ` · ${periodLabel(decisionPeriodKey)}`;
 
   if (!contextual) {
     return <DocumentLockBanner lock={lock} periodKey={periodKey} periodAction={periodAction} yearLayout={yearLayout} />;
   }
 
+  return (
+    <SheetStateBanner
+      documentId={documentId}
+      periodKey={periodKey}
+      sheetCode={sheetCode}
+      sheetCopyId={sheetCopyId}
+      state={lock === 'sheetSubmitted' ? 'Submitted' : lock === 'sheetApproved' ? 'Approved' : 'Rejected'}
+      canDecide={canDecide}
+      recalculatedAfterSubmission={recalculatedAfterSubmission}
+      month={false}
+    />
+  );
+}
+
+/**
+ * Банер одного стану аркуша за період: хто й коли (журнал переходів цього періоду), що далі цій ролі.
+ * ✎ D-6: `month` — річна розкладка: заголовок називає місяць, а текст каже про колонку місяця, а не про весь аркуш.
+ */
+function SheetStateBanner({
+  documentId,
+  periodKey,
+  sheetCode,
+  sheetCopyId,
+  state,
+  canDecide,
+  recalculatedAfterSubmission = false,
+  month,
+}: {
+  readonly documentId: number;
+  readonly periodKey: number;
+  readonly sheetCode: string;
+  readonly sheetCopyId: number | null;
+  readonly state: 'Submitted' | 'Approved' | 'Rejected';
+  readonly canDecide: boolean;
+  readonly recalculatedAfterSubmission?: boolean;
+  readonly month: boolean;
+}): JSX.Element {
+  const history = useWorkflowHistory(documentId, periodKey, true, sheetCopyId);
+  const period = periodLabel(periodKey);
+  // ✎ D-6: «Submitted 17 Sep by D. Akhmetova · April 2026» — місяць у заголовку, щоб не читалося як про якір.
+  const monthSuffix = month ? ` · ${period}` : '';
+
   const event = latestInto(history.data, sheetCode, sheetCopyId, state);
   const who = event === null ? null : { name: event.byDisplayName, date: formatDate(event.at) };
+  const lock = state === 'Submitted' ? 'sheetSubmitted' : state === 'Approved' ? 'sheetApproved' : undefined;
 
-  if (lock === 'sheetSubmitted') {
+  if (state === 'Submitted') {
     return (
       <Alert
         color="statusWarning"
@@ -84,11 +164,12 @@ export function DocumentSheetBanner({
         role="status"
         data-document-lock={lock}
         data-testid="document-sheet-banner"
+        data-banner-period={month ? periodKey : undefined}
         title={(who === null ? t('document.banner.submitted') : t('document.banner.submittedBy', who)) + monthSuffix}
       >
         {/* ⚠ Речення посібника — окремим текстом, крок — окремим елементом:
             людина (і тест) знаходить те саме речення, що в розділі 5.3. */}
-        {t('grid.submittedReadOnlyHint')}{' '}
+        {month ? t('document.banner.monthSubmitted', { period }) : t('grid.submittedReadOnlyHint')}{' '}
         <span>{canDecide ? t('document.banner.submittedDecide') : t('document.banner.submittedWait')}</span>
         {recalculatedAfterSubmission && (
           <Text component="strong" display="block" fw={700} mt="xs" size="sm" data-recalculated-after-submission="">
@@ -99,7 +180,7 @@ export function DocumentSheetBanner({
     );
   }
 
-  if (lock === 'sheetApproved') {
+  if (state === 'Approved') {
     return (
       <Alert
         color="statusWarning"
@@ -107,9 +188,10 @@ export function DocumentSheetBanner({
         role="status"
         data-document-lock={lock}
         data-testid="document-sheet-banner"
+        data-banner-period={month ? periodKey : undefined}
         title={(who === null ? t('document.banner.approved') : t('document.banner.approvedBy', who)) + monthSuffix}
       >
-        {t('document.lock.sheetApproved')}
+        {month ? t('document.banner.monthApproved', { period }) : t('document.lock.sheetApproved')}
       </Alert>
     );
   }
@@ -123,7 +205,8 @@ export function DocumentSheetBanner({
       variant="light"
       role="status"
       data-testid="document-sheet-banner"
-      title={who === null ? t('document.banner.rejected') : t('document.banner.rejectedBy', who)}
+      data-banner-period={month ? periodKey : undefined}
+      title={(who === null ? t('document.banner.rejected') : t('document.banner.rejectedBy', who)) + monthSuffix}
     >
       {reason.length === 0 ? t('document.banner.rejectedNext') : `«${reason}» ${t('document.banner.rejectedNext')}`}
     </Alert>

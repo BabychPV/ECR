@@ -1485,7 +1485,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   const monthDecision = useMemo<MonthDecision | undefined>(
     () =>
       sheetDefId === undefined || decisionView.eligible.size === 0
-        ? decisionView.highlight === null
+        ? decisionView.targets.Submitted === null && decisionView.targets.Approved === null
           ? undefined
           : { view: decisionView, periodOf: columnMonths, choose: () => undefined }
         : {
@@ -3538,7 +3538,17 @@ export function gridColumns(
     const monthState = monthStatus.get(column.code) ?? null;
     // ✎ D-6: період колонки й чи вона — ціль рішення / чи її можна зробити ціллю.
     const monthPeriod = monthDecision?.periodOf.get(column.code)?.periodKey ?? null;
-    const decisionTarget = monthPeriod !== null && monthPeriod === monthDecision?.view.highlight;
+    // ✎ D-6 (п. 7): ціль «Approve/Reject» (поданий місяць) і ціль «Return for edits» (затверджений) — різні цілі зі своїм
+    // виглядом; позначка натиснута (`aria-pressed`), коли її місяць — ціль ЇЇ виду.
+    const targetKind: 'Submitted' | 'Approved' | null =
+      monthPeriod === null || monthDecision === undefined
+        ? null
+        : monthPeriod === monthDecision.view.targets.Submitted
+          ? 'Submitted'
+          : monthPeriod === monthDecision.view.targets.Approved
+            ? 'Approved'
+            : null;
+    const decisionTarget = targetKind !== null;
     const decisionKind = monthPeriod === null ? undefined : monthDecision?.view.eligible.get(monthPeriod);
 
     /*
@@ -3569,13 +3579,14 @@ export function gridColumns(
                   class: [
                     isNumeric ? 'ecr-header-numeric' : null,
                     headerStyled?.class ?? null,
-                    decisionTarget ? 'ecr-header-decision-target' : null,
+                    targetKind === 'Submitted' ? 'ecr-header-decision-target' : null,
+                    targetKind === 'Approved' ? 'ecr-header-return-target' : null,
                   ]
                     .filter((c) => c !== null)
                     .join(' '),
                 }
               : {}),
-            ...(decisionTarget ? { 'data-decision-target': 'true' } : {}),
+            ...(targetKind === null ? {} : { 'data-decision-target': targetKind === 'Submitted' ? 'decide' : 'return' }),
             ...(headerStyled === null ? {} : { style: headerStyled.style }),
           };
 
@@ -3649,8 +3660,18 @@ export function gridColumns(
                               type: 'button',
                               class: `ecr-header-month-status ecr-header-month-status--${monthState.toLowerCase()} ecr-header-month-status--action`,
                               'data-month-status': monthState,
-                              'aria-label': t('grid.monthMakeDecision', { period: formatPeriodKey(monthPeriod) || String(monthPeriod) }),
-                              'aria-pressed': decisionTarget ? 'true' : 'false',
+                              // ⛔ WCAG 2.5.3: доступна назва починається з видимого тексту позначки («Submitted — …»).
+                              'aria-label':
+                                decisionKind === 'Approved'
+                                  ? t('grid.monthMakeReturn', {
+                                      status: t('status.sheet.Approved'),
+                                      period: formatPeriodKey(monthPeriod) || String(monthPeriod),
+                                    })
+                                  : t('grid.monthMakeDecision', {
+                                      status: t('status.sheet.Submitted'),
+                                      period: formatPeriodKey(monthPeriod) || String(monthPeriod),
+                                    }),
+                              'aria-pressed': targetKind === decisionKind ? 'true' : 'false',
                               onClick: (event: Event) => {
                                 event.stopPropagation();
                                 monthDecision.choose(monthPeriod, decisionKind);

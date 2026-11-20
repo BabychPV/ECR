@@ -316,7 +316,7 @@ export function DocumentPage(): JSX.Element {
   const [tableParam] = useUrlState('table');
   const [viewParam] = useUrlState('view');
   // ✎ D-6: місяць із посилання черги погодження — `?periodKey` річної сторінки нормалізується до якоря, тож місяць окремо.
-  const [decideParam] = useUrlNumber('decide');
+  const [decideParam, setDecideParam] = useUrlNumber('decide');
   const periodKey = urlPeriod ?? currentPeriodKey();
   const setPeriodKey = setUrlPeriod;
 
@@ -1019,6 +1019,8 @@ export function DocumentPage(): JSX.Element {
             periodAction={periodReopen.lockAction}
             yearLayout={yearLayout}
             decideMonth={decideParam}
+            // ✎ D-6 (п. 9): `?decide` діє один раз — застосовано (чи аркуш змінився) — прибрати з адреси.
+            onDecideConsumed={() => setDecideParam(null)}
             status={
               <>
                 {/* ✎ UI-15: чип стану аркуша і заповненість одним рядком

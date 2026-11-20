@@ -212,13 +212,19 @@
 }
 
 /*
- * ✎ D-6: місяць, який погоджувач зараз вирішує (ціль Approve/Reject/Return for edits), — колонка підсвічена в заголовку.
+ * ✎ D-6: місяць, який погоджувач зараз вирішує (ціль Approve/Reject), — колонка підсвічена в заголовку.
  * Лише внутрішня тінь і тло з токенів теми: розміри не змінюються (без зсуву сітки), обидві схеми — без власного контрасту.
  * Позначка стану доступного місяця — кнопка: скинуті рамка/тло кнопки, вигляд тексту лишається.
  */
 :root revo-grid[theme] revogr-header .rgHeaderCell.ecr-header-decision-target {
   background-color: var(--mantine-primary-color-light);
   box-shadow: inset 0 -3px 0 var(--mantine-primary-color-filled);
+}
+
+/* ✎ D-6 (п. 7): ціль «Return for edits» (затверджений місяць) — інша ціль, інший вигляд: нейтральне тло й риска. */
+:root revo-grid[theme] revogr-header .rgHeaderCell.ecr-header-return-target {
+  background-color: var(--mantine-color-default-hover);
+  box-shadow: inset 0 -3px 0 var(--mantine-color-dimmed);
 }
 
 :root revo-grid[theme] revogr-header .rgHeaderCell .ecr-header-month-status--action {
