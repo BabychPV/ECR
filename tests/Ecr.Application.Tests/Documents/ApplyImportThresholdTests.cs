@@ -39,7 +39,7 @@ public sealed class ApplyImportThresholdTests
     {
         _user.UserId.Returns(9);
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
-            .Returns(new AccessBuilder { UserId = 9 }.Permission("Document.Import").Build());
+            .Returns(new AccessBuilder { UserId = 9 }.Permission("Document.Import").Permission("Document.View").Build());
         _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), DocumentId, Arg.Any<CancellationToken>())
             .Returns(EditDecision.Allow());
     }

@@ -44,6 +44,7 @@ public sealed class NaeTreeWorkbook : INaeTreeWorkbook
             for (var r = 1; r <= grid.RowCount; r++)
             {
                 var row = new string?[width];
+                ct.ThrowIfCancellationRequested();
                 for (var c = 1; c <= width; c++)
                 {
                     row[c - 1] = Text(grid.Get(r, c).Value);
