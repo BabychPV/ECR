@@ -11,8 +11,8 @@ namespace Ecr.Application.Ports;
 /// <param name="ProjectCode">Код проєкту залежного документа.</param>
 /// <param name="DocumentKey">Бізнес-ключ залежного документа.</param>
 /// <param name="PeriodKey">Період залежного документа, що читає зачеплені місяці джерела.</param>
-/// <param name="Sheets">Усі аркуші-оригінали версії шаблону документа за період (без рядка стану — не затверджені).</param>
-/// <param name="Approved">Усі аркуші-оригінали періоду затверджено (такий період перерахунок не чіпає, він лише застаріє).</param>
+/// <param name="Sheets">Аркуші складу документа за період (без рядка стану — не затверджені; приховані теж: їх затверджують так само).</param>
+/// <param name="Approved">Усі аркуші періоду затверджено (такий період перерахунок не чіпає цілком).</param>
 public sealed record SourceImpactConsumer(
     int BindingId,
     string BindingCode,
@@ -22,7 +22,14 @@ public sealed record SourceImpactConsumer(
     string DocumentKey,
     int PeriodKey,
     bool Approved,
-    IReadOnlyList<SourceImpactSheet> Sheets);
+    IReadOnlyList<SourceImpactSheet> Sheets)
+{
+    /// <summary>
+    /// У періоді є хоч один затверджений аркуш (D-554): його перерахунок не чіпає, тож він застаріє мовчки. Саме ця ознака,
+    /// а не <see cref="Approved"/> («усі»), вмикає політику зв'язки й лічиться в <see cref="SourceImpact.ApprovedCount"/>.
+    /// </summary>
+    public bool HasApprovedSheets => Approved || Sheets.Any(s => s.Approved);
+}
 
 /// <summary>Аркуш-оригінал залежного документа в оцінці впливу: затверджений він не перераховується (D-554).</summary>
 /// <param name="SheetDefId">Аркуш.</param>
@@ -51,8 +58,8 @@ public sealed record SourceImpact(
     IReadOnlyList<SourceImpactConsumer> Consumers,
     string Hash)
 {
-    /// <summary>Скільки залежних періодів уже затверджено.</summary>
-    public int ApprovedCount => Consumers.Count(c => c.Approved);
+    /// <summary>Скільки залежних періодів мають затверджені аркуші (їх перерахунок не чіпає; період, затверджений частково, теж рахується).</summary>
+    public int ApprovedCount => Consumers.Count(c => c.HasApprovedSheets);
 
     /// <summary>
     /// Дія потребує рішення людини (підтвердження чи відмови): політика не <c>None</c> і є хоч один затверджений залежний

@@ -511,7 +511,7 @@ public sealed class SourceImpactApiTests(SqlServerFixture sql)
     /// D-1: рядки стану аркушів створюються ліниво. Land із двома аркушами, затверджений один (рядка стану другого немає) —
     /// період НЕ затверджений: другий аркуш — Draft; перелік по аркушах показує, хто буде, а хто не буде перераховано.
     /// </summary>
-    /// <remarks>Мутація: у <c>SourceImpactAssessor</c> перелік аркушів версії → лише рядки стану (<c>sheetsByVersion</c> → <c>approvedIds</c>) — червоніє.</remarks>
+    /// <remarks>Мутація: у <c>SourceImpactAssessor</c> перелік аркушів версії → лише рядки стану (склад документа → рядки стану) — червоніє.</remarks>
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Decision", "D-554")]
@@ -549,6 +549,130 @@ public sealed class SourceImpactApiTests(SqlServerFixture sql)
             Assert.Equal(secondSheet, draft.GetProperty("sheetDefId").GetInt32());
             Assert.True(draft.GetProperty("willRecalculate").GetBoolean());
         }
+    }
+
+    /// <summary>
+    /// D-1: склад документа — те саме правило, що в процесі затвердження: ПРИХОВАНИЙ (<c>IsVisible = false</c>) аркуш входить
+    /// у «усі аркуші» (його затверджують так само), тож незатверджений прихований аркуш не дає вважати період затвердженим.
+    /// </summary>
+    /// <remarks>Мутація: у <c>ApprovalSheetScope</c> додати фільтр <c>sd.IsVisible</c> — прихований аркуш зникає, період «затверджений», червоний.</remarks>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-558")]
+    public async Task Прихований_незатверджений_аркуш_входить_у_склад_і_період_не_затверджений()
+    {
+        var s = await ArrangeAsync(DocumentSourcePolicy.Warn, sourceApproved: true, landApproved: true).ConfigureAwait(true);
+        var hidden = await AddLandSheetAsync(s, visible: false, deleted: false, included: true).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.User).ConfigureAwait(true);
+        var seen = Assert.Single((await ImpactAsync(app, client, s, "reopen").ConfigureAwait(true)).GetProperty("consumers").EnumerateArray());
+        Assert.False(seen.GetProperty("approved").GetBoolean());
+        var sheets = seen.GetProperty("sheets").EnumerateArray().ToList();
+        Assert.Equal(2, sheets.Count);
+        Assert.Contains(sheets, x => x.GetProperty("sheetDefId").GetInt32() == hidden && !x.GetProperty("approved").GetBoolean());
+    }
+
+    /// <summary>
+    /// D-1: логічно видалений аркуш шаблону затвердити вже не можна — він не блокує «усі затверджені»; аркуш, якого немає
+    /// у складі документа, теж не входить.
+    /// </summary>
+    /// <remarks>
+    /// Мутації: прибрати <c>!sd.IsDeleted</c> у <c>ApprovalSheetScope</c> — видалений аркуш лишається Draft, період не затверджений, червоний;
+    /// брати аркуші версії замість складу — не включений аркуш повертається, червоний.
+    /// </remarks>
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-558")]
+    public async Task Видалений_або_не_включений_аркуш_не_блокує_затвердження_періоду(bool deleted, bool included)
+    {
+        var s = await ArrangeAsync(DocumentSourcePolicy.Warn, sourceApproved: true, landApproved: true).ConfigureAwait(true);
+        await AddLandSheetAsync(s, visible: true, deleted: deleted, included: included).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.User).ConfigureAwait(true);
+        var seen = Assert.Single((await ImpactAsync(app, client, s, "reopen").ConfigureAwait(true)).GetProperty("consumers").EnumerateArray());
+        Assert.True(seen.GetProperty("approved").GetBoolean());
+        Assert.Equal(s.World.Land.SheetDefId, Assert.Single(seen.GetProperty("sheets").EnumerateArray()).GetProperty("sheetDefId").GetInt32());
+    }
+
+    /// <summary>
+    /// D-1/D-554: період, затверджений ЧАСТКОВО (другий аркуш — Draft), вмикає політику: затверджений аркуш не перерахується й
+    /// застаріє, тож за <c>Block</c> дію відхилено, <c>required</c> істинне, <c>approvedCount = 1</c>; сам період не «затверджений».
+    /// </summary>
+    /// <remarks>Мутація: у <c>SourceImpactAssessor</c> політика за <c>found.Exists(c =&gt; c.Approved)</c> (замість <c>HasApprovedSheets</c>) — required=false, червоний.</remarks>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-558")]
+    public async Task Частково_затверджений_період_за_Block_вимагає_рішення_і_відхиляє_дію()
+    {
+        var s = await ArrangeAsync(DocumentSourcePolicy.Block, sourceApproved: true, landApproved: true).ConfigureAwait(true);
+        await AddLandSheetAsync(s, visible: true, deleted: false, included: true).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.User).ConfigureAwait(true);
+        var impact = await ImpactAsync(app, client, s, "reopen").ConfigureAwait(true);
+        Assert.True(impact.GetProperty("required").GetBoolean());
+        Assert.True(impact.GetProperty("blocked").GetBoolean());
+        Assert.Equal(1, impact.GetProperty("approvedCount").GetInt32());
+        Assert.False(Assert.Single(impact.GetProperty("consumers").EnumerateArray()).GetProperty("approved").GetBoolean());
+
+        var refused = await PostAsync(client, s, "reopen", new { sheetDefId = s.World.Source.SheetDefId, periodKey = March, reason = "правка" })
+            .ConfigureAwait(true);
+        await AssertRefusedAsync(refused, HttpStatusCode.UnprocessableEntity, "ECR-SRC-0422", "err.ECR-SRC-0422.sourceImpactBlocked").ConfigureAwait(true);
+        Assert.Equal(DocumentStatus.Approved, await SourceStatusAsync(s).ConfigureAwait(true));
+    }
+
+    /// <summary>
+    /// D-1: відбиток чутливий до того, ЯКИЙ аркуш затверджено, а не лише до кількості: з двох аркушів затверджений один —
+    /// «1/2»; затвердили другий і повернули перший — знову «1/2», але відбиток інший.
+    /// </summary>
+    /// <remarks>Мутація: у відбитку лишити лише кількість затверджених (<c>Count(sh =&gt; sh.Approved)</c>) — відбитки збігаються, червоний.</remarks>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-558")]
+    public async Task Відбиток_змінюється_коли_затверджений_інший_аркуш_за_тієї_самої_кількості()
+    {
+        var s = await ArrangeAsync(DocumentSourcePolicy.ConfirmWithReason, sourceApproved: true, landApproved: true).ConfigureAwait(true);
+        var second = await AddLandSheetAsync(s, visible: true, deleted: false, included: true).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.User).ConfigureAwait(true);
+        var before = (await ImpactAsync(app, client, s, "reopen").ConfigureAwait(true)).GetProperty("impactHash").GetString();
+
+        await ImpactWorld.AddStateAsync(sql, s.World.Land.DocumentId, second, March, T1, T1).ConfigureAwait(true);
+        await SetStatusAsync(s.World.Land.DocumentId, s.World.Land.SheetDefId, DocumentStatus.Draft).ConfigureAwait(true);
+
+        var impact = await ImpactAsync(app, client, s, "reopen").ConfigureAwait(true);
+        Assert.Equal(1, impact.GetProperty("approvedCount").GetInt32());
+        Assert.NotEqual(before, impact.GetProperty("impactHash").GetString());
+    }
+
+    /// <summary>Додає до версії шаблону Land другий аркуш; перший аркуш завжди входить до складу, другий — коли <paramref name="included"/>.</summary>
+    private async Task<int> AddLandSheetAsync(Scenario s, bool visible, bool deleted, bool included)
+    {
+        await using var db = sql.CreateContext();
+        var sheet = new SheetDef(
+            s.World.Land.TemplateVersionId, EcrCode.Create($"SH4{Guid.NewGuid():N}"[..14]),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Second" }), 2);
+        sheet.SetVisible(visible);
+        db.SheetDefs.Add(sheet);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+        if (deleted)
+        {
+            sheet.SoftDelete(userId: 1, DateTime.UtcNow);
+        }
+
+        db.DocumentSheets.Add(new DocumentSheet(s.World.Land.DocumentId, s.World.Land.SheetDefId));
+        if (included)
+        {
+            db.DocumentSheets.Add(new DocumentSheet(s.World.Land.DocumentId, sheet.Id));
+        }
+
+        await db.SaveChangesAsync().ConfigureAwait(false);
+        return sheet.Id;
     }
 
     private sealed record Scenario(ImpactWorld.World World, string User);

@@ -28,7 +28,8 @@ namespace Ecr.Infrastructure.Persistence;
 /// </para>
 /// <para>
 /// Відбиток — SHA-256 від дії, адреси джерела, політики й відсортованого переліку залежних (зв'язка, документ, період,
-/// затверджений): змінилось що-небудь із цього — підтвердження застаріло.
+/// затверджений, відсортовані <c>SheetDefId</c> затверджених аркушів і кількість аркушів): змінилось що-небудь із цього —
+/// підтвердження застаріло (інший затверджений аркуш при тій самій кількості — теж інший відбиток).
 /// </para>
 /// </remarks>
 /// <param name="db">Контекст.</param>
@@ -99,7 +100,8 @@ internal sealed class SourceImpactAssessor(EcrDbContext db, IDependencyGraphProv
             var found = await ConsumersAsync(binding.Id, binding.Code, consumerTemplates, templateCodes, year, months, ct)
                 .ConfigureAwait(false);
             consumers.AddRange(found);
-            policies.Add((binding.Policy, found.Exists(c => c.Approved)));
+            // D-554: політика захищає затверджені дані — вмикає її період, де затверджений ХОЧ ОДИН аркуш (він не перерахується й застаріє).
+            policies.Add((binding.Policy, found.Exists(c => c.HasApprovedSheets)));
         }
 
         // Політика — найсуворіша серед зв'язок із затвердженими залежними; без таких — найсуворіша серед тих, що діють.
@@ -134,12 +136,13 @@ internal sealed class SourceImpactAssessor(EcrDbContext db, IDependencyGraphProv
                 where pv.Id == (d.TemplateId == null ? EcrDbContext.VersionOf(d.ProjectId, s.PeriodKey) : EcrDbContext.TemplateVersionOf(d.ProjectId, d.TemplateId.Value, s.PeriodKey))
                 let templateId = d.TemplateId ?? pv.TemplateId
                 where consumerTemplates.Contains(templateId)
+                join sd in db.SheetDefs.AsNoTracking() on s.SheetDefId equals sd.Id
                 select new
                 {
                     s.DocumentId,
                     s.PeriodKey,
                     s.Status,
-                    s.SheetDefId,
+                    SheetCode = sd.Code,
                     VersionId = pv.Id,
                     TemplateId = templateId,
                     p.PeriodKind,
@@ -149,14 +152,26 @@ internal sealed class SourceImpactAssessor(EcrDbContext db, IDependencyGraphProv
             .ToListAsync(ct).ConfigureAwait(false);
 
         // Рядки стану створюються ліниво (лише для аркушів, яких торкнулися), тож «усі затверджені» по існуючих рядках
-        // хибно затверджує період із одним затвердженим аркушем із двадцяти. Перелік — усі аркуші версії шаблону.
+        // хибно затверджує період із одним затвердженим аркушем із двадцяти. Перелік аркушів — СКЛАД документа за тим
+        // самим правилом, що й у процесі затвердження (див. ApprovalSheetScope).
+        var documentIds = states.Select(s => s.DocumentId).Distinct().ToList();
+        var composition = (await ApprovalSheetScope.RowsAsync(db, documentIds, ct).ConfigureAwait(false))
+            .ToLookup(r => r.DocumentId);
+        // Історичний документ без складу (рядків `doc.DocumentSheet` немає) — аркуші версії шаблону періоду, не видалені.
         var versionIds = states.Select(s => s.VersionId).Distinct().ToList();
-        var sheetsByVersion = (await db.SheetDefs.AsNoTracking()
+        var versionSheets = (await db.SheetDefs.AsNoTracking()
                 .Where(sd => versionIds.Contains(sd.TemplateVersionId) && !sd.IsDeleted)
                 .OrderBy(sd => sd.Ordinal).ThenBy(sd => sd.Id)
                 .Select(sd => new { sd.Id, sd.Code, sd.TemplateVersionId })
                 .ToListAsync(ct).ConfigureAwait(false))
             .ToLookup(sd => sd.TemplateVersionId);
+        var approvedCopies = (await db.ApprovalStates.AsNoTracking()
+                .Where(s => s.SheetCopyId != null && documentIds.Contains(s.DocumentId)
+                            && s.PeriodKey >= yearStart && s.PeriodKey < yearEnd && s.Status == DocumentStatus.Approved)
+                .Select(s => new { s.DocumentId, s.PeriodKey, CopyId = s.SheetCopyId!.Value })
+                .ToListAsync(ct).ConfigureAwait(false))
+            .Select(s => (s.DocumentId, s.PeriodKey, s.CopyId))
+            .ToHashSet();
 
         var result = new List<SourceImpactConsumer>();
         foreach (var group in states.GroupBy(s => (s.DocumentId, s.PeriodKey)).OrderBy(g => g.Key.DocumentId).ThenBy(g => g.Key.PeriodKey))
@@ -168,9 +183,22 @@ internal sealed class SourceImpactAssessor(EcrDbContext db, IDependencyGraphProv
                 continue;
             }
 
-            var approvedIds = group.Where(s => s.Status == DocumentStatus.Approved).Select(s => s.SheetDefId).ToHashSet();
-            var sheets = sheetsByVersion[first.VersionId]
-                .Select(sd => new SourceImpactSheet(sd.Id, sd.Code, approvedIds.Contains(sd.Id)))
+            // Аркуш (за кодом: склад тримає чинну версію, а період міг лишитися на старій) затверджений, коли затверджено
+            // оригінал і кожну включену копію (стан копії свій, RS) — як у `WorkflowStore.AllSheetsApprovedAsync`.
+            var approvedCodes = group.Where(s => s.Status == DocumentStatus.Approved).Select(s => s.SheetCode).ToHashSet(StringComparer.Ordinal);
+            var rows = composition[first.DocumentId].ToList();
+            if (rows.Count == 0)
+            {
+                rows = [.. versionSheets[first.VersionId].Select(sd => new ApprovalSheetRow(0, first.DocumentId, sd.Id, sd.Code, null))];
+            }
+
+            var sheets = rows
+                .Where(r => r.CopyOfId == null)
+                .Select(r => new SourceImpactSheet(
+                    r.SheetDefId,
+                    r.SheetCode,
+                    approvedCodes.Contains(r.SheetCode)
+                    && rows.Where(c => c.CopyOfId == r.Id).All(c => approvedCopies.Contains((first.DocumentId, first.PeriodKey, c.Id)))))
                 .ToList();
             result.Add(new SourceImpactConsumer(
                 bindingId,
@@ -200,7 +228,7 @@ internal sealed class SourceImpactAssessor(EcrDbContext db, IDependencyGraphProv
             .Append(CultureInfo.InvariantCulture, $"{change}|{documentId}|{sheetDefId}|{periodKey}|{policy}");
         foreach (var c in consumers.OrderBy(c => c.BindingId).ThenBy(c => c.DocumentId).ThenBy(c => c.PeriodKey))
         {
-            text.Append(CultureInfo.InvariantCulture, $"|{c.BindingId}:{c.DocumentId}:{c.PeriodKey}:{(c.Approved ? 1 : 0)}:{c.Sheets.Count(sh => sh.Approved)}/{c.Sheets.Count}");
+            text.Append(CultureInfo.InvariantCulture, $"|{c.BindingId}:{c.DocumentId}:{c.PeriodKey}:{(c.Approved ? 1 : 0)}:{string.Join(',', c.Sheets.Where(sh => sh.Approved).Select(sh => sh.SheetDefId).Order())}/{c.Sheets.Count}");
         }
 
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text.ToString()))).ToLowerInvariant()[..32];
