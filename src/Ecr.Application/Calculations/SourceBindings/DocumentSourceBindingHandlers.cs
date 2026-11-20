@@ -56,10 +56,7 @@ public sealed record SwitchDocumentSourceStateRequest(string SourceState);
 /// <param name="Binding">Зв'язка після перемикання.</param>
 /// <param name="Changed"><c>false</c> — стан уже був таким; нічого не записано й не поставлено.</param>
 /// <param name="QueuedYears">Роки, за які поставлено перерахунок залежних (злита задача на довідник × рік).</param>
-/// <param name="FailedYears">
-/// Роки, за які задачу НЕ вдалося поставити після коміту (черга недоступна): стан уже змінено, тож залежні за ці роки
-/// адміністратор перераховує вручну; порожньо — усе поставлено.
-/// </param>
+/// <param name="FailedYears">Роки, за які задачу НЕ вдалося поставити після коміту (черга недоступна): стан уже змінено, тож залежні за ці роки адміністратор перераховує вручну; порожньо — усе поставлено.</param>
 public sealed record SwitchDocumentSourceStateResponse(
     DocumentSourceBindingDto Binding, bool Changed, IReadOnlyList<int> QueuedYears, IReadOnlyList<int> FailedYears);
 
@@ -72,10 +69,7 @@ public sealed record SwitchDocumentSourceFlagsRequest(bool? ReadFromDocument, bo
 /// <param name="Binding">Зв'язка після перемикання.</param>
 /// <param name="Changed"><c>false</c> — біти вже були такими; нічого не записано й не поставлено.</param>
 /// <param name="QueuedYears">Роки, за які поставлено перерахунок залежних.</param>
-/// <param name="FailedYears">
-/// Роки, за які задачу НЕ вдалося поставити після коміту (черга недоступна): біти вже змінено, тож залежні за ці роки
-/// адміністратор перераховує вручну; порожньо — усе поставлено.
-/// </param>
+/// <param name="FailedYears">Роки, за які задачу НЕ вдалося поставити після коміту (черга недоступна): біти вже змінено, тож залежні за ці роки адміністратор перераховує вручну; порожньо — усе поставлено.</param>
 public sealed record SwitchDocumentSourceFlagsResponse(
     DocumentSourceBindingDto Binding, bool Changed, IReadOnlyList<int> QueuedYears, IReadOnlyList<int> FailedYears);
 

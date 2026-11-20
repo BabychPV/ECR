@@ -93,7 +93,7 @@ export function SourceImpactModal({
                     </Badge>
                   </Group>
                   {c.sheets.length > 1 ? (
-                    <Group gap={4} wrap="wrap" data-testid="source-impact-sheets">
+                    <Group gap="xs" wrap="wrap" data-testid="source-impact-sheets">
                       {c.sheets.slice(0, MAX_SHEET_BADGES).map((sh) => (
                         <Badge key={sh.sheetDefId} size="xs" variant="outline" color={sh.willRecalculate ? 'statusInfo' : 'statusWarning'}>
                           {sh.sheetCode} · {t(sh.willRecalculate ? 'sourceImpact.status.pending' : 'sourceImpact.status.approved')}
