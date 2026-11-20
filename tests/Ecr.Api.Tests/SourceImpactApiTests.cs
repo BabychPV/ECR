@@ -474,13 +474,16 @@ public sealed class SourceImpactApiTests(SqlServerFixture sql)
 
     /// <summary>
     /// F13: залежний період затверджений, лише коли затверджені УСІ його аркуші-оригінали: затверджений один із двох —
-    /// період не «затверджений», підтвердження не потрібне (перерахунок його перерахує).
+    /// період не «затверджений» і буде перерахований, АЛЕ затверджений аркуш перерахунок пропустить (він застаріє), тож
+    /// політика вимагає підтвердження і він рахується в <c>approvedCount</c> (D-558).
     /// </summary>
-    /// <remarks>Мутація: у <c>SourceImpactAssessor</c> <c>group.All(...)</c> → <c>group.Any(...)</c> — червоніє (required стає true).</remarks>
+    /// <remarks>Мутації: <c>Approved</c> періоду «будь-який» замість «усі» — червоніє (approved/willRecalculate);
+    /// політика за <c>c.Approved</c> замість <c>HasApprovedSheets</c> — червоніє (required стає false).</remarks>
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Decision", "D-554")]
-    public async Task Залежний_період_із_одним_із_двох_затверджених_аркушів_не_затверджений_і_підтвердження_не_вимагає()
+    [Trait("Decision", "D-558")]
+    public async Task Залежний_період_із_одним_із_двох_затверджених_аркушів_не_затверджений_але_вимагає_підтвердження()
     {
         var s = await ArrangeAsync(DocumentSourcePolicy.Warn, sourceApproved: true, landApproved: true).ConfigureAwait(true);
         int secondSheet;
@@ -500,8 +503,9 @@ public sealed class SourceImpactApiTests(SqlServerFixture sql)
         using var client = await SignedInAsync(app, s.User).ConfigureAwait(true);
         var impact = await ImpactAsync(app, client, s, "reopen").ConfigureAwait(true);
 
-        Assert.False(impact.GetProperty("required").GetBoolean());
-        Assert.Equal(0, impact.GetProperty("approvedCount").GetInt32());
+        Assert.True(impact.GetProperty("required").GetBoolean());
+        Assert.False(impact.GetProperty("blocked").GetBoolean());
+        Assert.Equal(1, impact.GetProperty("approvedCount").GetInt32());
         var seen = Assert.Single(impact.GetProperty("consumers").EnumerateArray());
         Assert.False(seen.GetProperty("approved").GetBoolean());
         Assert.True(seen.GetProperty("willRecalculate").GetBoolean());
@@ -534,8 +538,9 @@ public sealed class SourceImpactApiTests(SqlServerFixture sql)
         foreach (var action in new[] { "reopen" })
         {
             var impact = await ImpactAsync(app, client, s, action).ConfigureAwait(true);
-            Assert.False(impact.GetProperty("required").GetBoolean());
-            Assert.Equal(0, impact.GetProperty("approvedCount").GetInt32());
+            // Затверджений аркуш застаріє (D-558): політика вимагає підтвердження, хоч період і буде перераховано.
+            Assert.True(impact.GetProperty("required").GetBoolean());
+            Assert.Equal(1, impact.GetProperty("approvedCount").GetInt32());
             var seen = Assert.Single(impact.GetProperty("consumers").EnumerateArray());
             Assert.False(seen.GetProperty("approved").GetBoolean());
             Assert.True(seen.GetProperty("willRecalculate").GetBoolean());
