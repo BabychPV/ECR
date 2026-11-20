@@ -25,6 +25,12 @@ namespace Ecr.Infrastructure.Persistence;
 public sealed partial class CalculationResultStore : ICalculationYearReader
 {
     /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ D-560 (прибирання витіснених прогонів одразу після перемикання): прогони й числа читаються КІЛЬКОМА запитами;
+    /// між ними перемикання + прибирання могли б лишити огляду неповну множину чисел. Тому актуальні прогони
+    /// перечитуються ПІСЛЯ читання: збіглися — факти узгоджені; ні — повтор (до <see cref="ReadAttempts"/>), як у
+    /// <see cref="ReadCurrentCoreAsync"/>.
+    /// </remarks>
     public async Task<CalculationYearFacts> ReadYearAsync(CalculationYearReadRequest request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -33,9 +39,30 @@ public sealed partial class CalculationResultStore : ICalculationYearReader
             return CalculationYearFacts.Empty;
         }
 
+        var facts = CalculationYearFacts.Empty;
+        for (var attempt = 1; attempt <= ReadAttempts; attempt++)
+        {
+            var current = await CurrentRunsOfDocumentAsync(request.DocumentId, ct).ConfigureAwait(false);
+            facts = await ReadYearOnceAsync(request, current, ct).ConfigureAwait(false);
+            var after = await CurrentRunsOfDocumentAsync(request.DocumentId, ct).ConfigureAwait(false);
+            if (SameRunIds(current, after))
+            {
+                break;
+            }
+        }
+
+        return facts;
+    }
+
+    /// <summary>Чи та сама множина актуальних прогонів (порядок не важить).</summary>
+    private static bool SameRunIds(IEnumerable<CurrentRunRow> before, IEnumerable<CurrentRunRow> after)
+        => before.Select(r => r.Id).Order().SequenceEqual(after.Select(r => r.Id).Order());
+
+    private async Task<CalculationYearFacts> ReadYearOnceAsync(
+        CalculationYearReadRequest request, List<CurrentRunRow> current, CancellationToken ct)
+    {
         var documentId = request.DocumentId;
         var keys = request.PeriodKeys.Distinct().Order().ToList();
-        var current = await CurrentRunsOfDocumentAsync(documentId, ct).ConfigureAwait(false);
 
         // Прогін кожного періоду — тим самим правилом, що й ReadCurrentAsync; рядок числа належить періоду лише тоді,
         // коли його прогін у наборі саме цього періоду (проєктний прогін іншого періоду тут не рахується).

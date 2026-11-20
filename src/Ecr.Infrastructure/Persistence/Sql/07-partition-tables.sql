@@ -247,8 +247,72 @@ IF OBJECT_ID(N'calc.CalculationResult', N'U') IS NOT NULL
     CREATE NONCLUSTERED INDEX IX_CalculationResult_DocRun
         ON calc.CalculationResult (PeriodKey, DocumentId, CalculationRunId, Kind, TableInstanceId)
         INCLUDE (MethodologyVersionId, OutputCode, SourceRowKey, Value, UnitId, SubstanceEntryId)
-        WITH (DROP_EXISTING = ON, SORT_IN_TEMPDB = ON)
+        WITH (DROP_EXISTING = ON, SORT_IN_TEMPDB = ON, DATA_COMPRESSION = PAGE)
         ON ps_ByPeriodKey (PeriodKey);
+GO
+
+-- ── D-560 / PSS-01: індекси ЗА ПРОГОНОМ на трьох таблицях `calc.*` ─────────
+--
+-- Прибирання неактуальних прогонів (`SupersededResultsPurger`) видаляє прогін ПОВНІСТЮ: рядки результатів, кроків,
+-- входів і сам рядок `calc.CalculationRun`. Без індексу з провідним `CalculationRunId`:
+--   * `DELETE … WHERE CalculationRunId = @run` сканує партицію кластерного індексу на кожен пакет;
+--   * перевірка FK (`FK_CRes_Run`, `FK_CStep_Run`, `FK_CIn_Run`, NO ACTION) при видаленні рядка прогону сканує ВСЮ
+--     дочірню таблицю (усі партиції) блокувальним читанням — на стенді Land `calc.CalculationStep` = 45,9 ГБ.
+-- Індекс вузький (ключ `CalculationRunId` + локатор `PeriodKey, Id`), вирівняний по `ps_ByPeriodKey` (інакше 50031 нижче
+-- й архівація), PAGE-стиснений. Вставка нових рядків пише в кінець діапазону свого прогону.
+--
+-- ⚠ Будується ОДИН раз на базі, де його ще немає. Enterprise/Developer/Azure (`EngineEdition` 3, 5, 8) — `ONLINE = ON`;
+-- Standard/Express — офлайн (запис у таблицю чекає до кінця побудови; оновлення й так зупиняє служби, runbook §8.2).
+-- Обсяг побудови — одне читання таблиці; після першого прибирання таблиці в рази менші.
+IF OBJECT_ID(N'calc.CalculationResult', N'U') IS NOT NULL
+   AND NOT EXISTS (SELECT 1 FROM sys.indexes
+                   WHERE object_id = OBJECT_ID(N'calc.CalculationResult') AND name = N'IX_CalculationResult_Run')
+BEGIN
+    IF CAST(SERVERPROPERTY('EngineEdition') AS int) IN (3, 5, 8)
+        CREATE NONCLUSTERED INDEX IX_CalculationResult_Run
+            ON calc.CalculationResult (CalculationRunId)
+            WITH (ONLINE = ON, SORT_IN_TEMPDB = ON, DATA_COMPRESSION = PAGE)
+            ON ps_ByPeriodKey (PeriodKey);
+    ELSE
+        CREATE NONCLUSTERED INDEX IX_CalculationResult_Run
+            ON calc.CalculationResult (CalculationRunId)
+            WITH (SORT_IN_TEMPDB = ON, DATA_COMPRESSION = PAGE)
+            ON ps_ByPeriodKey (PeriodKey);
+END
+GO
+
+IF OBJECT_ID(N'calc.CalculationStep', N'U') IS NOT NULL
+   AND NOT EXISTS (SELECT 1 FROM sys.indexes
+                   WHERE object_id = OBJECT_ID(N'calc.CalculationStep') AND name = N'IX_CalculationStep_Run')
+BEGIN
+    IF CAST(SERVERPROPERTY('EngineEdition') AS int) IN (3, 5, 8)
+        CREATE NONCLUSTERED INDEX IX_CalculationStep_Run
+            ON calc.CalculationStep (CalculationRunId)
+            WITH (ONLINE = ON, SORT_IN_TEMPDB = ON, DATA_COMPRESSION = PAGE)
+            ON ps_ByPeriodKey (PeriodKey);
+    ELSE
+        CREATE NONCLUSTERED INDEX IX_CalculationStep_Run
+            ON calc.CalculationStep (CalculationRunId)
+            WITH (SORT_IN_TEMPDB = ON, DATA_COMPRESSION = PAGE)
+            ON ps_ByPeriodKey (PeriodKey);
+END
+GO
+
+IF OBJECT_ID(N'calc.CalculationInput', N'U') IS NOT NULL
+   AND NOT EXISTS (SELECT 1 FROM sys.indexes
+                   WHERE object_id = OBJECT_ID(N'calc.CalculationInput') AND name = N'IX_CalculationInput_Run')
+BEGIN
+    IF CAST(SERVERPROPERTY('EngineEdition') AS int) IN (3, 5, 8)
+        CREATE NONCLUSTERED INDEX IX_CalculationInput_Run
+            ON calc.CalculationInput (CalculationRunId)
+            WITH (ONLINE = ON, SORT_IN_TEMPDB = ON, DATA_COMPRESSION = PAGE)
+            ON ps_ByPeriodKey (PeriodKey);
+    ELSE
+        CREATE NONCLUSTERED INDEX IX_CalculationInput_Run
+            ON calc.CalculationInput (CalculationRunId)
+            WITH (SORT_IN_TEMPDB = ON, DATA_COMPRESSION = PAGE)
+            ON ps_ByPeriodKey (PeriodKey);
+END
 GO
 
 -- ── Повернення довіри зовнішнім ключам ───────────────────────────────────
@@ -312,4 +376,95 @@ IF EXISTS
       AND ds.type_desc <> N'PARTITION_SCHEME'   -- type_desc, а не type: у type код 'PS'
 )
     THROW 50031, N'Частина індексів партиційованих таблиць лишилася поза схемою партиціонування.', 1;
+GO
+
+-- ── D-560 / PSS-01: PAGE-стиснення великих таблиць розрахунку — лише там, де це безпечно онлайн ──
+--
+-- `calc.CalculationStep` (трейс, ~3 КБ на рядок), `calc.CalculationResult`, `calc.CalculationInput` — найбільші таблиці
+-- бази (стенд Land: 45,9 / 4,0 / 0,2 ГБ, усе NONE). Скрипт стискає САМ лише ПОРОЖНІ партиції (і таблицю цілком, поки вона
+-- порожня, — нова база): перебудова порожньої партиції — метадані, мілісекунди. Нові дані лягають у майбутні періоди,
+-- а `SPLIT` (`usp_EnsurePartitions`) успадковує стиснення партиції, яку ділить, — тож усе нове пишеться стисненим.
+--
+-- ⛔ НЕПОРОЖНІ партиції скрипт НЕ чіпає: перебудова переписує дані (на Standard — офлайн під Sch-M, таблиця недоступна;
+-- на стенді — десятки ГБ). Це крок DBA після першого прибирання неактуальних прогонів (runbook §4.2, «Стиснення»):
+--   ALTER INDEX ALL ON calc.CalculationStep REBUILD PARTITION = <n> WITH (DATA_COMPRESSION = PAGE, ONLINE = ON);
+-- (`ONLINE = ON` — Enterprise/Developer/Azure; на Standard/Express без нього, у вікні). Скрипт лише називає їх у PRINT.
+--
+-- ⚠ Перебудова бере Sch-M на таблицю, і запит Sch-M у черзі блокує ВСІХ наступних читачів таблиці. 07 виконується при
+-- зупинених службах (крок 2 оновлення), але на випадок живої бази — `LOCK_TIMEOUT` 1 с і пропуск партиції з PRINT
+-- (наступний прогін скрипта повторить), а не черга за довгим читачем.
+SET LOCK_TIMEOUT 1000;
+
+DECLARE @cmp TABLE (TableName sysname, PartitionNumber int, RowCnt bigint);
+
+INSERT @cmp (TableName, PartitionNumber, RowCnt)
+SELECT t.name, p.partition_number, MAX(CASE WHEN p.index_id IN (0, 1) THEN p.rows END)
+FROM sys.tables AS t
+JOIN sys.partitions AS p ON p.object_id = t.object_id
+WHERE SCHEMA_NAME(t.schema_id) = N'calc'
+  AND t.name IN (N'CalculationResult', N'CalculationStep', N'CalculationInput')
+GROUP BY t.name, p.partition_number
+HAVING SUM(CASE WHEN p.data_compression_desc <> N'PAGE' THEN 1 ELSE 0 END) > 0;
+
+DECLARE @cTable sysname, @cPartition int, @cSql nvarchar(max), @cDone int = 0, @cSkipped int = 0;
+
+-- Порожня таблиця (нова база): один оператор на таблицю.
+DECLARE cmpTables CURSOR LOCAL FAST_FORWARD FOR
+    SELECT TableName FROM @cmp GROUP BY TableName HAVING SUM(RowCnt) = 0;
+OPEN cmpTables;
+FETCH NEXT FROM cmpTables INTO @cTable;
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    SET @cSql = N'ALTER INDEX ALL ON calc.' + QUOTENAME(@cTable) + N' REBUILD WITH (DATA_COMPRESSION = PAGE);';
+    BEGIN TRY
+        EXEC sys.sp_executesql @cSql;
+        DELETE @cmp WHERE TableName = @cTable;
+        SET @cDone += 1;
+    END TRY
+    BEGIN CATCH
+        IF ERROR_NUMBER() <> 1222 THROW;
+        PRINT N'  D-560: ' + @cTable + N' зайнята (LOCK_TIMEOUT) — стиснення пропущено, повторить наступний прогін 07.';
+        DELETE @cmp WHERE TableName = @cTable;
+    END CATCH;
+    FETCH NEXT FROM cmpTables INTO @cTable;
+END
+CLOSE cmpTables;
+DEALLOCATE cmpTables;
+
+-- Наявна база: лише порожні партиції.
+DECLARE cmpParts CURSOR LOCAL FAST_FORWARD FOR
+    SELECT TableName, PartitionNumber FROM @cmp WHERE RowCnt = 0 ORDER BY TableName, PartitionNumber;
+OPEN cmpParts;
+FETCH NEXT FROM cmpParts INTO @cTable, @cPartition;
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    SET @cSql = N'ALTER INDEX ALL ON calc.' + QUOTENAME(@cTable) + N' REBUILD PARTITION = '
+              + CAST(@cPartition AS nvarchar(10)) + N' WITH (DATA_COMPRESSION = PAGE);';
+    BEGIN TRY
+        EXEC sys.sp_executesql @cSql;
+        SET @cDone += 1;
+    END TRY
+    BEGIN CATCH
+        IF ERROR_NUMBER() <> 1222 THROW;
+        SET @cSkipped += 1;
+    END CATCH;
+    FETCH NEXT FROM cmpParts INTO @cTable, @cPartition;
+END
+CLOSE cmpParts;
+DEALLOCATE cmpParts;
+
+SET LOCK_TIMEOUT -1;
+
+-- ⛔ FOR XML PATH, а не агрегатна функція 2017+ (сторож SqlServer2016FloorTests).
+DECLARE @cPending nvarchar(max) =
+    STUFF((SELECT N', ' + TableName + N'#' + CAST(PartitionNumber AS nvarchar(10))
+                  + N' (' + CAST(RowCnt AS nvarchar(20)) + N' rows)'
+             FROM @cmp WHERE RowCnt > 0
+            ORDER BY TableName, PartitionNumber
+              FOR XML PATH(''), TYPE).value(N'.', N'nvarchar(max)'), 1, 2, N'');
+
+PRINT N'D-560: стиснуто PAGE (таблиць/партицій): ' + CAST(@cDone AS nvarchar(10))
+    + N'; пропущено через блокування: ' + CAST(@cSkipped AS nvarchar(10)) + N'.';
+IF @cPending IS NOT NULL
+    PRINT N'D-560: непорожні нестиснені партиції calc.* — крок DBA (runbook §4.2, «Стиснення»): ' + @cPending;
 GO

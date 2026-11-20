@@ -17,6 +17,8 @@ using Ecr.Infrastructure.Startup;
 using Ecr.TestKit;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using Xunit;
 
@@ -198,6 +200,52 @@ public sealed class ServiceAccountLeastPrivilegeTests(ServiceAccountLeastPrivile
         var details = await database.AdminScalarAsync<string>(
             $"SELECT TOP (1) DetailsJson FROM itg.MaintenanceRun WHERE JobCode = N'{PartitionCheckJob.Code}' ORDER BY Id DESC");
         Assert.DoesNotContain("Failed", details, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// ✎ D-560 (H2): нічне прибирання неактуальних прогонів під службою (db_datareader + db_datawriter): заповненість
+    /// журналу читається без VIEW SERVER STATE (не <c>logUnknown</c>), прогін і його рядки видаляються, а
+    /// <c>CHECKPOINT</c>/перебудова, на які в служби немає права, пропускаються з ознакою, а не падають і не мовчать.
+    /// Мутація: повернути <c>sys.dm_db_log_space_usage</c> - при не-SIMPLE прохід зупиняється logUnknown, тест червоніє.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Прибирання_неактуальних_прогонів_проходить_під_службою()
+    {
+        var stand = await PurgeKit.ArrangeAsync(database.AdminConnectionString, 202602);
+        long superseded;
+        await using (var admin = database.AdminContext())
+        {
+            superseded = await PurgeKit.AddRunAsync(admin, stand, "Superseded", Now);
+            await PurgeKit.InsertRowsAsync(admin, stand, superseded, 3, 2, 2, "S");
+        }
+
+        var recovery = await database.AdminScalarAsync<string>(
+            "SELECT recovery_model_desc FROM sys.databases WHERE name = DB_NAME()");
+
+        SupersededSweepOutcome outcome;
+        await using (var db = database.LowPrivContext())
+        {
+            var job = new SupersededResultsSweepJob(
+                db, new FixedClock(Now.AddDays(2)), new ConfigurationBuilder().Build(),
+                NullLogger<SupersededResultsSweepJob>.Instance);
+            // Поріг журналу 100 %: тест доводить, що заповненість ЧИТАЄТЬСЯ (інакше logUnknown), а не чекає, поки
+            // маленький журнал тестової бази (FULL без копій) звільниться.
+            outcome = await job.RunAsync(
+                PurgeKit.On() with { RebuildAfter = true, LogPauseThresholdPercent = 100, MaxLogPauses = 0 },
+                progress: null,
+                CancellationToken.None);
+        }
+
+        Assert.Equal(SupersededSweepOutcome.DeleteMode, outcome.Mode);
+        Assert.True(outcome.Complete, $"stopReason={outcome.StopReason}, recovery={recovery}");
+        Assert.NotEqual(SupersededSweepOutcome.LogUnknown, outcome.StopReason);
+        Assert.True(outcome.RebuildSkipped);
+        Assert.False(outcome.Rebuilt);
+        Assert.Equal(string.Equals(recovery, "SIMPLE", StringComparison.OrdinalIgnoreCase), outcome.CheckpointSkipped);
+        Assert.Equal(0, await database.AdminScalarAsync<int>(
+            $"SELECT COUNT(*) FROM calc.CalculationRun WHERE Id = {superseded}"));
     }
 
     /// <summary>
@@ -565,6 +613,9 @@ public sealed class ServiceAccountLeastPrivilegeTests(ServiceAccountLeastPrivile
 
         /// <summary>Контекст від імені власника — підготовка даних, яких документ-конструктор не робить.</summary>
         public EcrDbContext AdminContext() => Context(_sql.ConnectionString);
+
+        /// <summary>Рядок підключення власника (підготовка даних помічниками інших тестів).</summary>
+        public string AdminConnectionString => _sql.ConnectionString;
 
         /// <summary>Контекст на заданий рядок — так само, як його будує застосунок.</summary>
         public static EcrDbContext Context(string connectionString)
