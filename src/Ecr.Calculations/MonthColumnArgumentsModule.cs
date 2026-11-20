@@ -112,6 +112,12 @@ public sealed partial class MonthColumnArgumentsModule : ICalculationModule
     [GeneratedRegex(@"!([A-Za-z][A-Za-z0-9_]*)", RegexOptions.CultureInvariant)]
     private static partial Regex FormulaReferenceRegex();
 
+    /// <summary>
+    /// PSS-08: кеш читань фази методологій поточного виклику оркестратора; <c>null</c> — кожне читання йде в сховище
+    /// (перегляд, паритет, тести модуля). Ставить оркестратор на екземпляр зі scope гілки.
+    /// </summary>
+    internal MethodologyPhaseReadCache? PhaseReads { get; set; }
+
     /// <inheritdoc />
     public string Code => "month-columns";
 
@@ -219,7 +225,10 @@ public sealed partial class MonthColumnArgumentsModule : ICalculationModule
             .GetOrAdd(
                 (input.DocumentId, input.PeriodKey.Value),
                 _ => new Lazy<Task<IReadOnlyList<TableInstanceRef>>>(
-                    () => _rows.GetTableInstancesAsync(input.DocumentId, input.PeriodKey, ct)))
+                    () => PhaseReads is { } reads
+                        ? reads.DocumentInstancesAsync(
+                            input.DocumentId, input.PeriodKey, () => _rows.GetTableInstancesAsync(input.DocumentId, input.PeriodKey, ct))
+                        : _rows.GetTableInstancesAsync(input.DocumentId, input.PeriodKey, ct)))
             .Value.ConfigureAwait(false);
 
         var own = instances.FirstOrDefault(i => i.TableInstanceId == input.TableInstanceId)
@@ -549,8 +558,15 @@ public sealed partial class MonthColumnArgumentsModule : ICalculationModule
                 await KeepOwnMonthsAsync(routing, definition, monthColumns, ct).ConfigureAwait(false);
             }
 
-            var rowIds =await _rows.GetRowIdsAsync(instance.TableInstanceId, periodKey, ct).ConfigureAwait(false);
-            var slice = await _cells.ReadSliceAsync(instance.TableInstanceId, periodKey, ct).ConfigureAwait(false);
+            // ✎ PSS-08: у прогоні оркестратора — з кешу виклику (раз на екземпляр, а не на кожну прив'язку рівня Module).
+            var tableInstanceId = instance.TableInstanceId;
+            var reads = PhaseReads;
+            var rowIds = reads is null
+                ? await _rows.GetRowIdsAsync(tableInstanceId, periodKey, ct).ConfigureAwait(false)
+                : await reads.RowIdsAsync(tableInstanceId, periodKey, () => _rows.GetRowIdsAsync(tableInstanceId, periodKey, ct)).ConfigureAwait(false);
+            var slice = reads is null
+                ? await _cells.ReadSliceAsync(tableInstanceId, periodKey, ct).ConfigureAwait(false)
+                : await reads.SliceAsync(tableInstanceId, periodKey, () => _cells.ReadSliceAsync(tableInstanceId, periodKey, ct)).ConfigureAwait(false);
 
             var calculated = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             var inputRows = new Dictionary<long, string>();
