@@ -672,6 +672,95 @@ public sealed class ScriptMigrationHandlerTests
             closed?.Message);
     }
 
+    /// <summary>
+    /// M1: виведений з ужитку імпортер на Formulas (на Script його не перемкнути ніколи — <c>scriptSwitchDeprecated</c>) не
+    /// входить у склад групи бібліотеки; опублікований імпортер на Formulas — як і раніше, обов'язковий.
+    /// </summary>
+    /// <remarks>Мутація: повернути <c>Published or Deprecated</c> у перевірку імпортерів — бібліотека лишається заблокованою.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Finding", "PSS-23")]
+    public async Task Switch_бібліотеки_не_вимагає_виведеного_з_ужитку_імпортера_а_опублікований_вимагає()
+    {
+        const int retiredV = 51;
+        Publish(_alphaVersion, "import LIB;\nrows from T1;\noutput OUT_A : t = row.Hours;");
+        Publish(_libraryVersion, "function twice(a) = a * 2;");
+        _store.GetScriptAsync(LibraryV, Arg.Any<CancellationToken>())
+            .Returns(new MethodologyScript("function twice(a) = a * 2;", null, MethodologyEngine.Script, true, _libraryVersion.NumericMode));
+        _store.ResolveImportsAsync(AlphaV, Arg.Any<DateOnly>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<MethodologyLibrary>>([new MethodologyLibrary(Library, "LIB", LibraryV, [])]));
+        _store.GetOutputsAsync(AlphaV, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<MethodologyOutput>>([Output("OUT_A", ScriptTestKit.Tonne, false)]));
+        _migration.GetImporterVersionsAsync(Library, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<ImporterVersion>>(
+            [
+                new ImporterVersion(retiredV, Alpha, "ALPHA", "0.9", MethodologyEngine.Formulas, TemplateVersionStatus.Deprecated),
+                new ImporterVersion(AlphaV, Alpha, "ALPHA", "1.0", MethodologyEngine.Formulas, TemplateVersionStatus.Published),
+            ]));
+
+        // Без опублікованого імпортера — відмова, і в переліку відсутніх лише він, а не виведений з ужитку.
+        var onlyLibrary = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Switch().HandleAsync(new SwitchScriptEngineRequest([LibraryV], "Script", "why"), default));
+        Assert.Equal("err.ECR-CALC-0422.switchGroupIncomplete", onlyLibrary.Details!["messageKey"]);
+        Assert.Contains("ALPHA 1.0", Assert.Single((IReadOnlyList<string>)onlyLibrary.Details["missing"]!), StringComparison.Ordinal);
+
+        // Бібліотека разом з опублікованим імпортером перемикається; виведений з ужитку лишається на формулах.
+        var response = await Switch().HandleAsync(new SwitchScriptEngineRequest([LibraryV, AlphaV], "Script", "why"), default);
+
+        Assert.Equal("Script", response.Engine);
+        Assert.Equal(MethodologyEngine.Script, _libraryVersion.Engine);
+        Assert.Equal(MethodologyEngine.Script, _alphaVersion.Engine);
+    }
+
+    /// <summary>
+    /// M1: у періодах життя імпортера рантайм розв'язує виведену з ужитку версію бібліотеки на Formulas — вона не
+    /// вимагається в групі (її не перемкнути), а чинна версія бібліотеки — вимагається, як і раніше.
+    /// </summary>
+    /// <remarks>Мутація: прибрати пропуск Deprecated у замиканні імпортів — у відсутніх з'являється «LIB 1.0», перемикання заблоковане.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Finding", "PSS-23")]
+    public async Task Switch_імпортера_не_вимагає_виведеної_з_ужитку_версії_бібліотеки_з_його_періодів()
+    {
+        const int libraryV2 = 61;
+        var secondEdition = new DateOnly(2099, 6, 1);
+        var second = ScriptTestKit.NewVersion(_library, libraryV2, MethodologyEngine.Formulas, "2.0");
+        _drafts.FindVersionAsync(libraryV2, Arg.Any<CancellationToken>()).Returns(second);
+        _store.FindByVersionAsync(libraryV2, Arg.Any<CancellationToken>()).Returns(_library);
+        Publish(_alphaVersion, "import LIB;\nrows from T1;\noutput OUT_A : t = row.Hours;");
+        Publish(_libraryVersion, "function twice(a) = a * 2;");
+        Publish(second, "function twice(a) = a * 3;");
+        _libraryVersion.Deprecate();
+        _store.GetScriptAsync(libraryV2, Arg.Any<CancellationToken>())
+            .Returns(new MethodologyScript("function twice(a) = a * 3;", null, MethodologyEngine.Script, true, second.NumericMode));
+        _store.GetOutputsAsync(AlphaV, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<MethodologyOutput>>([Output("OUT_A", ScriptTestKit.Tonne, false)]));
+
+        // Перша (виведена з ужитку, на Formulas) — до 2099-06-01, друга — після.
+        _store.ResolveImportsAsync(AlphaV, Arg.Any<DateOnly>(), Arg.Any<CancellationToken>())
+            .Returns(call => Task.FromResult<IReadOnlyList<MethodologyLibrary>>(
+                [new MethodologyLibrary(Library, "LIB", call.ArgAt<DateOnly>(1) < secondEdition ? LibraryV : libraryV2, [])]));
+        _migration.GetLibraryEditionDatesAsync(AlphaV, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<DateOnly>>([secondEdition]));
+        _migration.GetImporterVersionsAsync(Library, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<ImporterVersion>>(
+                [new ImporterVersion(AlphaV, Alpha, "ALPHA", "1.0", MethodologyEngine.Formulas, TemplateVersionStatus.Published)]));
+
+        // Лише імпортер: відсутня тільки чинна друга версія — виведена з ужитку перша не названа.
+        var incomplete = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Switch().HandleAsync(new SwitchScriptEngineRequest([AlphaV], "Script", "why"), default));
+        Assert.Equal("err.ECR-CALC-0422.switchGroupIncomplete", incomplete.Details!["messageKey"]);
+        Assert.Contains("LIB 2.0", Assert.Single((IReadOnlyList<string>)incomplete.Details["missing"]!), StringComparison.Ordinal);
+
+        // Імпортер і чинна версія бібліотеки — перемикаються; виведена з ужитку лишається на формулах.
+        var response = await Switch().HandleAsync(new SwitchScriptEngineRequest([AlphaV, libraryV2], "Script", "why"), default);
+
+        Assert.Equal("Script", response.Engine);
+        Assert.Equal(MethodologyEngine.Script, _alphaVersion.Engine);
+        Assert.Equal(MethodologyEngine.Script, second.Engine);
+        Assert.Equal(MethodologyEngine.Formulas, _libraryVersion.Engine);
+    }
+
     private static MethodologyOutput Output(string code, int unitId, bool perSubstance)
     {
         var output = new MethodologyOutput(AlphaV, EcrCode.Create(code), unitId, 1);

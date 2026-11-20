@@ -17,6 +17,7 @@ using Ecr.MethodologyScriptMigration.Conversion;
 using Ecr.MethodologyScriptMigration.Loading;
 using Ecr.TestKit;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Ecr.Api.Tests;
@@ -64,6 +65,35 @@ public sealed class MethodologyScriptMigrationApiTests(SqlServerFixture sql)
     private const string Url = "/api/v1/methodologies/script-migration";
 
     // ───────────────────────────── сценарій ─────────────────────────────
+
+    /// <summary>
+    /// Рецензія PSS, п. 5: ворота золотого набору перемикання (<c>IGoldenSetGate</c>) зареєстровані ЯВНО — той самий
+    /// scoped <c>PublishMethodologyHandler</c>, що й <c>IFormulaLinkRebuilder</c>, — а не дістаються приведенням типу.
+    /// </summary>
+    /// <remarks>
+    /// Мутація: прибрати реєстрацію <c>IGoldenSetGate</c> з <c>AddEcrApplication</c> — <c>GetService</c> дає <c>null</c>, а
+    /// перемикання на Script відмовляє «ворота не підключено» (приведення типу прибрано).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Finding", "PSS-23")]
+    public void Ворота_золотого_набору_розв_язуються_з_DI_тим_самим_обробником_публікації()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var scope = app.Services.CreateScope();
+        var services = scope.ServiceProvider;
+
+        var gate = services.GetService<Ecr.Application.Calculations.IGoldenSetGate>();
+
+        Assert.NotNull(gate);
+        Assert.Same(services.GetRequiredService<Ecr.Application.Calculations.PublishMethodologyHandler>(), gate);
+        Assert.Same(services.GetRequiredService<Ecr.Application.Calculations.IFormulaLinkRebuilder>(), gate);
+        Assert.NotNull(services.GetRequiredService<SwitchScriptEngineHandler>());
+
+        // Scoped: інший запит — інший обробник (нічого не тече між запитами).
+        using var other = app.Services.CreateScope();
+        Assert.NotSame(gate, other.ServiceProvider.GetRequiredService<Ecr.Application.Calculations.IGoldenSetGate>());
+    }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
