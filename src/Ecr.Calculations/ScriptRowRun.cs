@@ -36,7 +36,7 @@ public sealed record ScriptValue(
 /// </summary>
 /// <param name="Pool">
 /// Спільний бюджет кроків усіх рядків запиту (живий перегляд): рядок бере не більше, ніж лишилося, і витрачене
-/// списується з нього. <c>null</c> — лише межа рядка (<see cref="ScriptCalculationModule.MaxRowEvaluationSteps"/>).
+/// списується з нього. <c>null</c> — лише межа рядка (<see cref="CalculationLimits.MaxRowEvaluationSteps"/>).
 /// </param>
 /// <param name="MaxValues">Скільки величин живого перегляду зібрати з рядка; решта не збирається.</param>
 public sealed record ScriptRunLimits(EvaluationBudget? Pool = null, int MaxValues = int.MaxValue)
@@ -52,9 +52,14 @@ public sealed record ScriptRunLimits(EvaluationBudget? Pool = null, int MaxValue
 /// </summary>
 /// <remarks>
 /// ⛔ PSS-21: бюджет кроків — не лише на оператор (<see cref="Evaluator.MaxEvaluationSteps"/>), а й на РЯДОК
-/// (<see cref="ScriptCalculationModule.MaxRowEvaluationSteps"/>): тисячі операторів по 20 000 кроків кожен інакше
+/// (<see cref="CalculationLimits.MaxRowEvaluationSteps"/>): тисячі операторів по 20 000 кроків кожен інакше
 /// тримали б потік хвилинами на один рядок. Вичерпаний бюджет рядка — <c>#BUDGET</c> на кожен наступний оператор без
 /// обчислення (детерміновано: рахується робота, а не час). Скасування перевіряється перед кожним оператором.
+/// <para>
+/// ⛔ <c>reject when</c>, умова якого не порахувалася через вичерпаний бюджет, — не відхилення рядка, а помилка кроку
+/// <c>#BUDGET</c> (рецензія PSS, п. 4): невідомо, відхилив би скрипт рядок чи ні, тож рядок не дає жодного числа й
+/// має проблему <c>StepError</c>, а не «відхилено правилом».
+/// </para>
 /// </remarks>
 internal sealed class ScriptRowRun(
     ScriptEvaluationContext context,
@@ -66,6 +71,7 @@ internal sealed class ScriptRowRun(
     List<CalculationOutputValue> values,
     List<ScriptValue>? detail,
     ScriptRunLimits limits,
+    int rowSteps,
     CancellationToken ct)
 {
     private enum Flow : byte
@@ -75,9 +81,12 @@ internal sealed class ScriptRowRun(
     }
 
     private readonly MethodologyDescriptor _version = input.Methodology;
-    private readonly EvaluationBudget? _row = RowBudget(limits.Pool);
+    private readonly EvaluationBudget? _row = RowBudget(limits.Pool, rowSteps);
     private string? _substanceCode;
     private MethodologySubstance? _substance;
+
+    // Рядок зупинено відмовою з #BUDGET (BudgetFailedReject): решта операторів не виконується.
+    private bool _halted;
 
     /// <summary>Скільки кроків витратив рядок.</summary>
     public int Spent => _row?.Spent ?? 0;
@@ -104,11 +113,11 @@ internal sealed class ScriptRowRun(
     }
 
     /// <summary>Бюджет рядка: межа рядка, але не більше, ніж лишилося в спільному; <c>null</c> — спільний вичерпано.</summary>
-    private static EvaluationBudget? RowBudget(EvaluationBudget? pool)
+    private static EvaluationBudget? RowBudget(EvaluationBudget? pool, int rowSteps)
     {
         var allowed = pool is null
-            ? ScriptCalculationModule.MaxRowEvaluationSteps
-            : Math.Min(ScriptCalculationModule.MaxRowEvaluationSteps, pool.MaxSteps - pool.Spent);
+            ? rowSteps
+            : Math.Min(rowSteps, pool.MaxSteps - pool.Spent);
         return allowed > 0 ? new EvaluationBudget(allowed) : null;
     }
 
@@ -137,6 +146,11 @@ internal sealed class ScriptRowRun(
     {
         // PSS-21: розірваний запит (клієнт пішов, вичерпано час перегляду) чи скасована задача не рахує решту операторів.
         ct.ThrowIfCancellationRequested();
+
+        if (_halted)
+        {
+            return Flow.Skip;
+        }
 
         switch (statement)
         {
@@ -300,6 +314,15 @@ internal sealed class ScriptRowRun(
             return;
         }
 
+        // ⛔ Бюджет вичерпано (рецензія PSS, п. 4): умову не пораховано, тож невідомо, чи скрипт відхилив би рядок.
+        // Це помилка кроку #BUDGET, а не відхилення правилом: жодного числа рядка (навіть уже пораховані виходи — їх
+        // відхилення могло б скасувати), кожен вихід — без результату з #BUDGET, проблема рядка — StepError.
+        if (condition.ErrorCode == Expressions.ExpressionErrors.BudgetExceeded)
+        {
+            BudgetFailedReject(statement);
+            return;
+        }
+
         // ⛔ Той самий виняток і ключ, що в правила категорії: оркестратор відхиляє лише цей рядок
         // (`GenericCalculationModule.IsCategoryRuleRowFailure`) і пише проблему CategoryRuleRejected.
         throw new DomainException(
@@ -311,6 +334,25 @@ internal sealed class ScriptRowRun(
                 ["expression"] = statement.SourceText,
                 ["reason"] = condition.IsError ? condition.ErrorCode : "reject",
             });
+    }
+
+    /// <summary>
+    /// <c>reject when</c> із умовою <c>#BUDGET</c>: рядок без чисел, кожен вихід скрипта — без результату з
+    /// <c>#BUDGET</c> (звідси <c>StepError</c> рядка), крок відмови — у трейсі.
+    /// </summary>
+    private void BudgetFailedReject(RejectStatement statement)
+    {
+        trace.Failed("reject", statement.SourceText, Expressions.ExpressionErrors.BudgetExceeded);
+        foreach (var output in binding.Script!.Outputs)
+        {
+            trace.OutputFailed(output.Code, Expressions.ExpressionErrors.BudgetExceeded);
+        }
+
+        values.Clear();
+
+        // Решта операторів не виконується: #BUDGET умови буває й від стелі ОДНОГО оператора, коли бюджет рядка ще є, —
+        // наступні виходи інакше дали б числа рядку, долю якого відмова мала вирішити.
+        _halted = true;
     }
 
     private void If(IfStatement statement)

@@ -67,18 +67,14 @@ public sealed class ScriptCalculationModule(
     private UnitCatalogTables? _units;
 
     /// <summary>
-    /// Бюджет кроків ОДНОГО рядка на всі його оператори (PSS-21): 100 стель одного оператора
-    /// (<see cref="Evaluator.MaxEvaluationSteps"/>), тобто 2 000 000.
+    /// Бюджет кроків ОДНОГО рядка на всі його оператори (PSS-21) — з конфігурації,
+    /// <see cref="CalculationLimits.MaxRowEvaluationSteps"/> (типово <see cref="CalculationLimits.DefaultMaxRowEvaluationSteps"/>).
     /// </summary>
     /// <remarks>
-    /// ⛔ Доти межа була лише на оператор, а кількість операторів — лише розміром тексту: ~4 000 операторів по 20 000 кроків
-    /// давали 80 млн кроків на рядок (хвилини процесора), помножені на рядки й екземпляри. Бюджет рядка діє і в перерахунку,
-    /// і в перегляді; він детермінований (рахується робота, а не час), тож той самий рядок дає той самий результат будь-де.
-    /// ⚠ Реальні методології далеко нижче: найбільші версії корпусу мають сотні операторів по десятки кроків (крім агрегатів
-    /// над таблицями-псевдонімами, кожен з яких однаково впирається у стелю оператора). Рядок, що вичерпав бюджет, отримує
-    /// <c>#BUDGET</c> на кожен наступний оператор — та сама помилка кроку, що й за стелю одного оператора.
+    /// ⛔ Діє і в перерахунку, і в перегляді; детермінований (рахується робота, а не час). Рядок, що вичерпав бюджет,
+    /// отримує <c>#BUDGET</c> на кожен наступний оператор — та сама помилка кроку, що й за стелю одного оператора.
     /// </remarks>
-    public const int MaxRowEvaluationSteps = 100 * Evaluator.MaxEvaluationSteps;
+    public int MaxRowEvaluationSteps => _limits.MaxRowEvaluationSteps;
 
     /// <inheritdoc />
     public string Code => "script";
@@ -278,7 +274,7 @@ public sealed class ScriptCalculationModule(
             }
         }
 
-        new ScriptRowRun(context, runtime, binding, input, numeric, trace, values, detail, limits, ct).Run();
+        new ScriptRowRun(context, runtime, binding, input, numeric, trace, values, detail, limits, MaxRowEvaluationSteps, ct).Run();
 
         var output = new CalculationOutput(
             input.DocumentId,

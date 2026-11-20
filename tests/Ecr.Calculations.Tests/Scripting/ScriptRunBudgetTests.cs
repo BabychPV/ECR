@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using Ecr.Application.Ports;
 using Ecr.Domain.Enums;
 using Ecr.Expressions;
 using Ecr.Expressions.Evaluation;
@@ -10,32 +11,45 @@ namespace Ecr.Calculations.Tests.Scripting;
 
 /// <summary>
 /// PSS-21: межі прогону скрипта понад стелю одного оператора — бюджет РЯДКА
-/// (<see cref="ScriptCalculationModule.MaxRowEvaluationSteps"/>), спільний бюджет запиту, стеля величин перегляду й
-/// скасування між операторами.
+/// (<see cref="CalculationLimits.MaxRowEvaluationSteps"/>, з конфігурації), спільний бюджет запиту, стеля величин
+/// перегляду, скасування між операторами, <c>reject when</c> із вичерпаним бюджетом і прапорець вичерпаного бюджету
+/// перегляду.
 /// </summary>
 /// <remarks>
 /// Важкий оператор — вкладений агрегат над двома псевдонімами однієї таблиці на 150 рядків: ~150×150 звернень, тобто
-/// кожен впирається у стелю оператора (<see cref="Evaluator.MaxEvaluationSteps"/>) і витрачає рівно її. Сто таких
-/// операторів вичерпують бюджет рядка; дешевий вихід після них показує, чи рядок ще рахує.
+/// кожен впирається у стелю оператора (<see cref="Evaluator.MaxEvaluationSteps"/>) і витрачає рівно її. Стенд ставить
+/// бюджет рядка 2 000 000 (<see cref="RowSteps"/>) — сто таких операторів його вичерпують; дешевий вихід після них
+/// показує, чи рядок ще рахує.
 /// </remarks>
 public sealed class ScriptRunBudgetTests
 {
     private const int HeavyRows = 150;
 
-    private static string Script(int heavyStatements)
+    /// <summary>Бюджет рядка стенда — сто стель оператора (типовий у продукті — тисяча).</summary>
+    private const int RowSteps = 100 * Evaluator.MaxEvaluationSteps;
+
+    private const string Tail = "output O: kg = 1;\n";
+
+    private static string Script(int heavyStatements, string tail = Tail, string head = "")
     {
-        var text = new StringBuilder("rows from T1;\ntable G = T2;\ntable H = T2;\n");
+        var text = new StringBuilder("rows from T1;\ntable G = T2;\ntable H = T2;\n").Append(head);
         for (var i = 0; i < heavyStatements; i++)
         {
             text.Append(CultureInfo.InvariantCulture, $"var v{i} = Count(G where Count(H where H.K == G.K) > 0);\n");
         }
 
-        return text.Append("output O: kg = 1;\n").ToString();
+        return text.Append(tail).ToString();
     }
 
-    private static ScriptStand Stand(int heavyStatements)
+    private static ScriptStand Stand(int heavyStatements, string tail = Tail, int? rowSteps = RowSteps, string head = "")
+        => Arrange(new ScriptStand(Script(heavyStatements, tail, head), NumericMode.Strict)
+        {
+            Limits = rowSteps is { } steps ? new CalculationLimits { MaxRowEvaluationSteps = steps } : null,
+        });
+
+    /// <summary>Таблиця рядків T1 (R1: K = "a", R2: K = "b") і таблиця-псевдонім T2 на <see cref="HeavyRows"/> рядків.</summary>
+    private static ScriptStand Arrange(ScriptStand stand)
     {
-        var stand = new ScriptStand(Script(heavyStatements), NumericMode.Strict);
         stand.AddTable("T1").Column("K", CellDataType.String).Row("R1", ("K", "a")).Row("R2", ("K", "b"));
         var alias = stand.AddTable("T2").Column("K", CellDataType.String);
         for (var i = 0; i < HeavyRows; i++)
@@ -75,7 +89,99 @@ public sealed class ScriptRunBudgetTests
         Assert.Equal(ExpressionErrors.BudgetExceeded, Output(values).ErrorCode);
         Assert.Null(ScriptStand.Value(output, "O"));
         Assert.NotNull(output.StepError);
-        Assert.Equal(2_000_000, ScriptCalculationModule.MaxRowEvaluationSteps);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Finding", "PSS-21")]
+    public async Task Бюджет_рядка_береться_з_конфігурації_типово_20_мільйонів()
+    {
+        Assert.Equal(20_000_000, CalculationLimits.DefaultMaxRowEvaluationSteps);
+        Assert.Equal(20_000_000, new CalculationLimits().MaxRowEvaluationSteps);
+
+        // Той самий скрипт: з типовим бюджетом (20 млн) 120 важких операторів (2,4 млн) вкладаються й вихід пораховано…
+        // Мутація: ScriptRowRun бере стару константу (2 млн) замість CalculationLimits — вихід #BUDGET.
+        var (byDefault, defaultValues) = await Stand(120, rowSteps: null).RunAsync();
+        Assert.Null(Output(defaultValues).ErrorCode);
+        Assert.Equal(1m, ScriptStand.Value(byDefault, "O"));
+        Assert.Null(byDefault.StepError);
+
+        // …а з налаштованим (2 млн) — ні: детерміновано, за роботою, а не часом.
+        var (configured, configuredValues) = await Stand(120, rowSteps: 2_000_000).RunAsync();
+        Assert.Equal(ExpressionErrors.BudgetExceeded, Output(configuredValues).ErrorCode);
+        Assert.NotNull(configured.StepError);
+
+        // Менше за стелю одного оператора — недійсно (старт служби зупиняє EcrConfigurationValidation).
+        Assert.Equal(Evaluator.MaxEvaluationSteps, CalculationLimits.MinRowEvaluationSteps);
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => new CalculationLimits { MaxRowEvaluationSteps = Evaluator.MaxEvaluationSteps - 1 }.EnsureValid());
+        var edge = new CalculationLimits { MaxRowEvaluationSteps = Evaluator.MaxEvaluationSteps };
+        Assert.Same(edge, edge.EnsureValid());
+    }
+
+    /// <summary>
+    /// Рецензія PSS, п. 4: умова <c>reject when</c> не порахувалася, бо бюджет рядка вичерпано, — рядок НЕ «відхилено
+    /// правилом» (невідомо, чи скрипт його відхилив би), а помилка кроку <c>#BUDGET</c>: жодного числа, <c>StepError</c>.
+    /// </summary>
+    /// <remarks>
+    /// Мутація: прибрати гілку <c>BudgetExceeded</c> у <c>ScriptRowRun.Reject</c> — виняток <c>categoryRuleFailed</c>
+    /// (рядок «відхилено»).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Finding", "PSS-21")]
+    public async Task Reject_після_вичерпаного_бюджету_рядка_дає_BUDGET_і_StepError_а_не_відхилення()
+    {
+        // Вихід ДО відмови вже пораховано — відмова з невідомим результатом скасовує й його; вихід після — не рахується.
+        var stand = Stand(120, tail: "reject when row.K == \"zzz\";\n" + Tail, head: "output A: kg = 1;\n");
+
+        var (output, values) = await stand.RunAsync();
+
+        Assert.NotNull(output.StepError);
+        Assert.Equal(ExpressionErrors.BudgetExceeded, output.StepError!.ErrorCode);
+        Assert.Equal(2, output.StepError.FailedSteps); // A і O — обидва виходи без результату
+        Assert.Empty(output.Values);
+        Assert.DoesNotContain(values, v => v.Name == "O");
+        Assert.Contains(output.Trace, s => s.StepCode == "reject");
+
+        // Контроль: та сама відмова з бюджетом — справжнє відхилення правилом (рядок R1 має K = "a").
+        var rejecting = Stand(0, tail: "reject when row.K == \"a\";\n" + Tail);
+        var rejected = await Assert.ThrowsAsync<Ecr.Domain.Abstractions.DomainException>(() => rejecting.RunAsync());
+        Assert.Equal("err.ECR-CALC-0422.categoryRuleFailed", rejected.Details!["messageKey"]);
+    }
+
+    /// <summary>
+    /// Рецензія PSS, M2: вичерпаний СПІЛЬНИЙ бюджет перегляду позначено у відповіді (<c>budgetExhausted</c>) — інакше
+    /// <c>#BUDGET</c> пізніх рядків не відрізнити від помилки скрипта; вичерпаний бюджет РЯДКА (є і в перерахунку) прапорця
+    /// не ставить.
+    /// </summary>
+    /// <remarks>Мутація: <c>BudgetExhausted = false</c> у <c>ScriptPreviewRunner.RunAsync</c> — перше твердження червоне.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Finding", "PSS-21")]
+    public async Task Перегляд_позначає_вичерпаний_спільний_бюджет_а_не_бюджет_рядка()
+    {
+        var stand = Stand(60);
+        static ScriptPreviewRequest Request(ScriptStand s)
+            => new(ScriptStand.VersionId, s.Text, ScriptStand.DocumentId, ScriptStand.PeriodValue, TableInstanceId: null, MaxRows: 50);
+
+        // 1 500 000 на запит: R1 бере 1 200 000, R2 вичерпує решту.
+        var exhausted = await stand.PreviewRunner(previewSteps: 1_500_000).RunAsync(Request(stand), CancellationToken.None);
+        Assert.True(exhausted.BudgetExhausted);
+        var rows = Assert.Single(exhausted.Tables).Rows;
+        Assert.Null(rows.Single(r => r.RowKey == "R1").Issue);
+        Assert.Equal("stepError", rows.Single(r => r.RowKey == "R2").Issue);
+
+        // Типовий бюджет перегляду (20 млн): обидва рядки пораховано, прапорця немає.
+        var whole = await stand.PreviewRunner().RunAsync(Request(stand), CancellationToken.None);
+        Assert.False(whole.BudgetExhausted);
+        Assert.All(Assert.Single(whole.Tables).Rows, r => Assert.Null(r.Issue));
+
+        // Бюджет РЯДКА вичерпано (120 × 20 000 > 2 000 000) — stepError, але це помилка скрипта, не межа перегляду.
+        var heavy = Stand(120);
+        var rowLimited = await heavy.PreviewRunner().RunAsync(Request(heavy), CancellationToken.None);
+        Assert.False(rowLimited.BudgetExhausted);
+        Assert.All(Assert.Single(rowLimited.Tables).Rows, r => Assert.Equal("stepError", r.Issue));
     }
 
     [Fact]

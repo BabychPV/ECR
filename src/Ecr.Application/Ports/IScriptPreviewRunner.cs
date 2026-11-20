@@ -30,7 +30,11 @@ public sealed record ScriptPreviewRequest(
 
 /// <summary>Відповідь перегляду: таблиці.</summary>
 /// <param name="Tables">Екземпляри таблиць, на яких скрипт вибирає рядки.</param>
-public sealed record ScriptPreviewResult(IReadOnlyList<ScriptPreviewTable> Tables);
+public sealed record ScriptPreviewResult(IReadOnlyList<ScriptPreviewTable> Tables)
+{
+    /// <summary><c>true</c> — вичерпано спільний бюджет кроків перегляду (PSS-21: 20 000 000 на запит); рядки з <c>#BUDGET</c> — межа перегляду, а не помилка скрипта.</summary>
+    public bool BudgetExhausted { get; init; }
+}
 
 /// <summary>Екземпляр таблиці в перегляді.</summary>
 /// <param name="TableInstanceId">Екземпляр таблиці.</param>

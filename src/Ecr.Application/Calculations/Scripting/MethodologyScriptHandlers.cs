@@ -487,7 +487,7 @@ public sealed class PreviewMethodologyScriptHandler(
                 ct)
             .ConfigureAwait(false);
 
-        return new ScriptPreviewDto(result.Tables, diagnostics);
+        return new ScriptPreviewDto(result.Tables, diagnostics) { BudgetExhausted = result.BudgetExhausted };
     }
 }
 

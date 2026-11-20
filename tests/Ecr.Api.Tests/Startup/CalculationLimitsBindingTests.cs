@@ -30,12 +30,14 @@ public sealed class CalculationLimitsBindingTests(SqlServerFixture sql)
         using var app = new EcrApiFactory(sql);
         using var configured = app.WithWebHostBuilder(b => b
             .UseSetting("Calculations:MaxParallelism", "2")
-            .UseSetting("Calculations:MaxInputCellsPerBinding", "12345"));
+            .UseSetting("Calculations:MaxInputCellsPerBinding", "12345")
+            .UseSetting("Calculations:MaxRowEvaluationSteps", "4000000"));
 
         var limits = configured.Services.GetRequiredService<CalculationLimits>();
 
         Assert.Equal(2, limits.MaxParallelism);
         Assert.Equal(12345, limits.MaxInputCellsPerBinding);
+        Assert.Equal(4_000_000, limits.MaxRowEvaluationSteps); // PSS-21: бюджет рядка скрипта
     }
 
     [Fact]
@@ -51,5 +53,6 @@ public sealed class CalculationLimitsBindingTests(SqlServerFixture sql)
 
         Assert.Equal(4, limits.MaxParallelism);
         Assert.Equal(300_000, limits.MaxInputCellsPerBinding);
+        Assert.Equal(20_000_000, limits.MaxRowEvaluationSteps);
     }
 }

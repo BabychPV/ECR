@@ -83,6 +83,8 @@ public sealed class WorkerSiteConfigurationTests
     [InlineData("Calculations:MaxParallelism", "0")]
     [InlineData("Calculations:MaxParallelism", "-1")]
     [InlineData("Calculations:MaxInputCellsPerBinding", "0")]
+    [InlineData("Calculations:MaxRowEvaluationSteps", "19999")]
+    [InlineData("Calculations:MaxRowEvaluationSteps", "20 млн")]
     [InlineData("Database:EditionMode", "Enterprse")]
     public void Недійсне_значення_ключа_дочірнього_зупиняє_воркер_з_іменем_ключа(string key, string value)
     {
