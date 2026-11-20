@@ -562,7 +562,7 @@ B79, саме на подані аркуші (найбільше — перед 
 @MonthsAhead = 12` — межі аудиту `pf_AuditByMonth` на 12 місяців уперед (`D-246`, п. 7.4);
 2) `arc.usp_ArchiveAudit @OlderThanMonths = <Retention.AuditMonths>` (п. 7.3); 3) перевіряє запас
 `pf_ByPeriodKey` (≥ 2 межі попереду) і рядки в крайніх партиціях (`edgeRows` — PSS-09: ліва — дані
-років без меж, права — дані за останньою межею; будь-який рядок там — `Degraded`). Межі `pf_ByPeriodKey`
+років без меж, права — дані за останньою межею; це попередження `"edgeWarning":true`, статус не змінює — п. 7.5). Межі `pf_ByPeriodKey`
 задача **не** додає — це робить Agent-задача нижче або DBA. Число 12 — константа в коді; глибина
 аудиту — налаштування `Retention.AuditMonths` у `sys_ecr.SystemSetting` (типово й щонайменше 120 міс.,
 змінюється без перезапуску — `admin-guide.md` п. 8.1).
@@ -574,7 +574,7 @@ Server Agent немає — завдання обслуговування НЕ �
 
 | Задача Agent | Коли | Що робить |
 |---|---|---|
-| `ECR: Partitions ahead [<база>]` | 1-го числа, 02:40 | `arc.usp_EnsurePartitions @MonthsAhead = 6`: межі `pf_ByPeriodKey` усього поточного року, наступного і січня ще наступного (✎ PSS-09), а також на 6 міс. уперед, якщо це далі; межу всередині партиції, де вже є рядки, **не** додає (SPLIT переміщував би дані під Sch-M) — прогін тоді `Degraded` зі списком `refused`, межу додає DBA у вікні обслуговування; усередині — `arc.usp_EnsureAuditPartitions @MonthsAhead = 12`. Кожен `SPLIT` чекає Sch-M не довше `@LockTimeoutMs` (5 с), після 1222/1205 — пауза `@RetryDelaySeconds` (60 с) і повтор, до `@MaxAttempts` (10) разів; між спробами запити користувачів не стоять у черзі за Sch-M (аудит 09.10c, U1-02). Результат — рядок `itg.MaintenanceRun` `EnsurePartitions`: `Succeeded` (`added`, `retries`) або `Failed` (номер помилки; потрапляє у зведення збоїв) |
+| `ECR: Partitions ahead [<база>]` | 1-го числа, 02:40 | `arc.usp_EnsurePartitions @MonthsAhead = 6`: межі `pf_ByPeriodKey` усього поточного року, наступного і січня ще наступного (✎ PSS-09), а також на 6 міс. уперед, якщо це далі; від найвищої межі до найнижчої; межу, SPLIT якої переніс би понад `@MaxRowsToMove` (типово 5000) рядків — переїжджають лише рядки `>=` межі — **не** додає: прогін тоді `Degraded` зі списком `refused`, межу додає DBA у вікні обслуговування (п. 7.5); усередині — `arc.usp_EnsureAuditPartitions @MonthsAhead = 12`. Кожен `SPLIT` чекає Sch-M не довше `@LockTimeoutMs` (5 с), після 1222/1205 — пауза `@RetryDelaySeconds` (60 с) і повтор, до `@MaxAttempts` (10) разів; між спробами запити користувачів не стоять у черзі за Sch-M (аудит 09.10c, U1-02). Результат — рядок `itg.MaintenanceRun` `EnsurePartitions`: `Succeeded` (`added`, `retries`, `movedRows`), `Degraded` (`refused`) або `Failed` (номер помилки; потрапляє у зведення збоїв) |
 | `ECR: Physical checks [<база>]` | щодня 03:10 | недовірені/вимкнені FK (50041), невирівняні індекси (50042) |
 
 ✎ R11-S2-06: ім'я завдання несе назву бази (`ECR: Partitions ahead [ECR]`): ім'я в `msdb` унікальне на весь
@@ -706,7 +706,8 @@ GRANT EXECUTE ON OBJECT::[dbo].[usp_GetAllStreamDataFlattened] TO [ecr_flert_rea
 | служба не стартує: «Transport:Https:CertificateThumbprint: …» | сертифіката HTTPS немає в `LocalMachine\My`, він без закритого ключа або відбиток не 40 hex | п. 11: поставити сертифікат із закритим ключем, повторити `deploy-ecr.ps1` |
 | служба не стартує: «Certificate … cannot be used as an SSL server certificate» | у сертифіката HTTPS розширене використання ключа без Server Authentication | видати сертифікат із EKU Server Authentication |
 | `transport` Degraded | `-AllowHttp` у Production, або сертифікат HTTPS спливає / прострочений | п. 11 |
-| `db` Degraded: менше 2 партицій попереду | не працює Agent-задача (Express) | `EXEC arc.usp_EnsurePartitions @MonthsAhead = 6;` або скрипт `GET /api/v1/health/partitions/script` (заодно продовжує межі аудиту на 12 міс.). Виконує DBA: процедура без `EXECUTE AS`, потрібні права `ALTER` на функцію й схему партиціонування |
+| `db` Degraded: менше 2 партицій попереду | не працює Agent-задача (Express) | `EXEC arc.usp_EnsurePartitions @MonthsAhead = 6;` або скрипт `GET /api/v1/health/partitions/script` (заодно продовжує межі аудиту на 12 міс.). Виконує DBA: процедура без `EXECUTE AS`, потрібні права `ALTER` на функцію й схему партиціонування. Процедура додає межі поточного року, наступного і січня ще наступного; межу, SPLIT якої переніс би понад `@MaxRowsToMove` (типово 5000) рядків, пропускає — прогін `EnsurePartitions` тоді `Degraded` з `refused` (п. 7.5) |
+| `EnsurePartitions` `Degraded` з `refused`, або в `partition-check` `"edgeWarning":true` (`edgeRows`) | є рядки за останньою межею (документ «далекого» року, дозволено до 2100) чи до першої (історичні роки — дозволені, рішення людини 20.11 №6) | п. 7.5: запит, що це за періоди; вибір — видалити помилковий документ або SPLIT у вікні обслуговування. `edgeWarning` статусу не псує й щоночі у зведення не йде |
 | `partition-check` `Failed` щоночі, у помилці — відмова в `EXECUTE` на `usp_EnsureAuditPartitions` | службовому акаунту не видано `EXECUTE` (`deploy-ecr.ps1` `GRANT` не робить) | DBA: `GRANT EXECUTE` (п. 7.4). Поки не видано, не виконуються ні архівація аудиту, ні перевірка запасу партицій |
 | `db` Unhealthy: RCSI | базу відновили або створили без `06-rcsi.sql` | виконати `06-rcsi.sql`. Перезапуск не потрібен: перевірка читає RCSI щоразу, а не з проби старту |
 | служба не стартує: «Недійсна конфігурація — служба не стартує» | значення ключа не того типу чи поза межами (`"60s"` замість `60`, друкарська помилка в `Database:EditionMode`) | виправити названий ключ у `appsettings.Production.json` або в `ECR_…` змінній служби. Той самий текст — у журналі подій (джерело `ECR`) і в лозі |
@@ -1060,7 +1061,10 @@ attempt of this first deployment (skip)» на кроці бази (майсте
 Це **не** `arc.CellChange` (columnstore на `DATA_ARCHIVE`): SWITCH у нього неможливий.
 
 Механіку переносу з явною межею виконує внутрішня `arc.usp_ArchiveAuditBefore @Cutoff` — службі вона **не**
-видана (інакше обмеження публічної обходилися б), її кличе лише `arc.usp_ArchiveAudit` і DBA вручну.
+видана (інакше обмеження публічної обходилися б), її кличе лише `arc.usp_ArchiveAudit` і DBA вручну, напр.
+`EXEC arc.usp_ArchiveAuditBefore @Cutoff = '2016-01-01';` (`@OlderThanMonths` — необов'язковий, лише для журналу).
+Межа з `@Today` рахується від меншої з дат `@Today` і сьогодні сервера: день допуску на розбіжність годинників не
+скорочує 120 місяців.
 
 Межа відсічення — «перше число поточного місяця (UTC) мінус `@OlderThanMonths` місяців»;
 переносяться партиції, що **цілком** лежать раніше за неї (`04-partition-maintenance.sql`,
@@ -1168,7 +1172,7 @@ FROM itg.MaintenanceRun WHERE JobCode = 'partition-check' ORDER BY Id DESC;
 ```
 
 Поля `DetailsJson`: `boundariesAhead`, `minimum` (запас `pf_ByPeriodKey`), `edgeRows.first`/`edgeRows.last`
-(рядки в крайніх партиціях `pf_ByPeriodKey`, PSS-09), `auditBoundariesAdded` (скільки меж аудиту додано тієї
+(рядки в крайніх партиціях `pf_ByPeriodKey`, PSS-09; ненульові — ще й `"edgeWarning":true`, без зміни статусу), `auditBoundariesAdded` (скільки меж аудиту додано тієї
 ночі), `auditArchiveMonths` (чинна глибина аудиту), `auditArchivedPartitions`, `auditArchivedRows`,
 `auditArchiveFailed`. `Status = 'Failed'` означає, що й межі аудиту не продовжено.
 
@@ -1224,9 +1228,72 @@ DECLARE @a int; EXEC arc.usp_EnsureAuditPartitions @MonthsAhead = 12, @Added = @
 **Якщо межі закінчились.** Записи аудиту не губляться: усе після останньої межі лягає в
 крайню праву партицію, і вона росте (висновок із `RANGE RIGHT`, на стенді не відтворено).
 Наслідки: архівація переносить цю партицію лише цілком і лише коли вона вся старша за поріг;
-процедура додає межі від наступного місяця, тож поточний і пропущені місяці лишаються в одній
-партиції; `SPLIT` непорожньої партиції переміщує дані з блокуванням. Що робити: продовжити
+процедура аудиту додає межі від наступного місяця, тож поточний і пропущені місяці лишаються в одній
+партиції; `SPLIT` переміщує рядки `>=` нової межі з блокуванням (для `pf_ByPeriodKey` — п. 7.5). Що робити: продовжити
 межі якнайшвидше, у вікно обслуговування, з бекапом.
+
+### 7.5. Рядки в крайніх партиціях `pf_ByPeriodKey` і `refused` (✎ PSS-09, рев'ю 21.11)
+
+**Що бачимо.** `partition-check` пише в `DetailsJson` `edgeRows.first` / `edgeRows.last` і `"edgeWarning":true`,
+коли в першій (до 202601) чи останній (від останньої межі) партиції є рядки, — це попередження, статус прогону
+не змінюється. `arc.usp_EnsurePartitions` пропускає межу, SPLIT якої переніс би понад `@MaxRowsToMove` (типово
+5000) рядків: прогін `EnsurePartitions` — `Degraded`, `"refused":[…]`, `"maxRowsToMove"`, і `"movedRows"`
+(скільки рядків переїхало в прийнятих SPLIT).
+
+**Скільки коштує SPLIT** (замір рев'ю на копії): переїжджають ЛИШЕ рядки з ключем `>=` нової межі. 200 тис. рядків
+нижче межі — 0,4 с і 2,7 КБ журналу; 200 тис. рядків вище — 38 с і 76 МБ журналу, увесь цей час Sch-M на всіх
+таблицях `ps_ByPeriodKey` (користувачі чекають). Орієнтир: ~5 тис. рядків на секунду Sch-M.
+
+**1. Які періоди в крайніх партиціях** (по таблицях, лише читання):
+
+```sql
+DECLARE @first int = (SELECT MIN(CAST(rv.value AS int)) FROM sys.partition_range_values rv
+                      JOIN sys.partition_functions pf ON pf.function_id = rv.function_id WHERE pf.name = N'pf_ByPeriodKey');
+DECLARE @last  int = (SELECT MAX(CAST(rv.value AS int)) FROM sys.partition_range_values rv
+                      JOIN sys.partition_functions pf ON pf.function_id = rv.function_id WHERE pf.name = N'pf_ByPeriodKey');
+SELECT N'doc.TableInstance' AS tbl, PeriodKey, COUNT_BIG(*) AS rows_ FROM doc.TableInstance
+ WHERE PeriodKey < @first OR PeriodKey >= @last GROUP BY PeriodKey
+UNION ALL
+SELECT N'doc.TableRow', PeriodKey, COUNT_BIG(*) FROM doc.TableRow WHERE PeriodKey < @first OR PeriodKey >= @last GROUP BY PeriodKey
+UNION ALL
+SELECT N'doc.CellValue', PeriodKey, COUNT_BIG(*) FROM doc.CellValue WHERE PeriodKey < @first OR PeriodKey >= @last GROUP BY PeriodKey
+ORDER BY 2, 1;
+-- документи цих періодів:
+SELECT DISTINCT d.Id, d.BusinessKey, p.Code AS Project, ti.PeriodKey
+  FROM doc.TableInstance ti JOIN doc.Document d ON d.Id = ti.DocumentId JOIN doc.Project p ON p.Id = d.ProjectId
+ WHERE ti.PeriodKey < @first OR ti.PeriodKey >= @last;
+```
+
+(Решта таблиць на `ps_ByPeriodKey` — `calc.*`, `ext.RowWindowValue` — мають ті самі ключі; повний перелік —
+`SELECT OBJECT_SCHEMA_NAME(i.object_id) + N'.' + OBJECT_NAME(i.object_id) FROM sys.indexes i JOIN sys.partition_schemes ps
+ON ps.data_space_id = i.data_space_id WHERE ps.name = N'ps_ByPeriodKey' AND i.index_id IN (0, 1);`.)
+
+**2. Вибір.**
+- **Документ помилковий** (рік введено хибно, тестовий проєкт): видалити його штатно (екран документа чи проєкту) —
+  рядки зникають, наступна ніч додає межі без переносу. Це найдешевше.
+- **Документ справжній** (історичний рік чи далекий план): лишити; для правої партиції — додати межі у вікні
+  обслуговування скриптом нижче, для лівої (історія до 202601) — нічого робити не треба, доки рік не архівують
+  (`usp_ArchiveYear` вимагає 12 меж року — тоді ті самі кроки з межами цього року).
+
+**3. SPLIT у вікні обслуговування** (бекап перед тим; від найменшого переносу — межі ВИЩЕ за дані йдуть першими й
+порожні, межа над самими даними — останньою):
+
+```sql
+-- приклад: дані в 203003, бракує меж 203001…203003. Спершу оцінка переносу для кожної межі:
+SELECT k.K, (SELECT COUNT_BIG(*) FROM doc.CellValue WHERE PeriodKey >= k.K
+              AND PeriodKey < ISNULL((SELECT MIN(CAST(rv.value AS int)) FROM sys.partition_range_values rv
+                                      JOIN sys.partition_functions pf ON pf.function_id = rv.function_id
+                                      WHERE pf.name = N'pf_ByPeriodKey' AND CAST(rv.value AS int) > k.K), 2147483647)) AS cell_rows_moved
+  FROM (VALUES (203003), (203002), (203001)) AS k (K);
+-- потім, від найвищої (кожна наступна вже нічого не переносить):
+SET LOCK_TIMEOUT 30000;
+ALTER PARTITION SCHEME ps_ByPeriodKey NEXT USED [DATA_HOT]; ALTER PARTITION FUNCTION pf_ByPeriodKey() SPLIT RANGE (203003);
+ALTER PARTITION SCHEME ps_ByPeriodKey NEXT USED [DATA_HOT]; ALTER PARTITION FUNCTION pf_ByPeriodKey() SPLIT RANGE (203002);
+ALTER PARTITION SCHEME ps_ByPeriodKey NEXT USED [DATA_HOT]; ALTER PARTITION FUNCTION pf_ByPeriodKey() SPLIT RANGE (203001);
+```
+
+Або та сама процедура з вищою стелею у вікні: `EXEC arc.usp_EnsurePartitions @MonthsAhead = 6, @MaxRowsToMove = 1000000;`
+(вона сама йде від найвищої межі). `@MaxRowsToMove = 0` — суворий режим: жодного переносу.
 
 ## 8. Оновлення версії
 
