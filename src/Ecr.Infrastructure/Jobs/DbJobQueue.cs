@@ -631,6 +631,45 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
     }
 
     /// <inheritdoc />
+    public Task<string?> FindQueuedByTargetAsync(string targetKey, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetKey);
+
+        // Підказка індексу й `TargetKey IS NOT NULL` — як у EnqueueSql: діапазон лише ключа цілі.
+        return RunAsync<string?>(
+            """
+            SELECT q.JobId
+            FROM itg.JobProgress AS q WITH (INDEX(UX_JobProgress_Target_Queued))
+            WHERE q.TargetKey = @target AND q.TargetKey IS NOT NULL AND q.[State] = 'Queued';
+            """,
+            p => p.Add("@target", SqlDbType.NVarChar, JobProgress.MaxTargetKeyLength).Value = targetKey,
+            async r => await r.ReadAsync(ct).ConfigureAwait(false) ? r.GetString(0) : null,
+            ct);
+    }
+
+    /// <inheritdoc />
+    public Task<bool> CancelQueuedByTargetAsync(string targetKey, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetKey);
+
+        // Один UPDATE лише по Queued: гонки «стала Running між двома запитами» немає, виконувана не чіпається.
+        return RunAsync(
+            """
+            UPDATE q SET [State] = 'Cancelled', LeaseUntil = NULL, UpdatedAt = @shown
+            OUTPUT 1
+            FROM itg.JobProgress AS q WITH (INDEX(UX_JobProgress_Target_Queued))
+            WHERE q.TargetKey = @target AND q.TargetKey IS NOT NULL AND q.[State] = 'Queued' AND q.Lane IS NOT NULL;
+            """,
+            p =>
+            {
+                p.Add("@target", SqlDbType.NVarChar, JobProgress.MaxTargetKeyLength).Value = targetKey;
+                AddShown(p);
+            },
+            r => r.ReadAsync(ct),
+            ct);
+    }
+
+    /// <inheritdoc />
     public Task<bool> IsCancelRequestedAsync(string jobId, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(jobId);

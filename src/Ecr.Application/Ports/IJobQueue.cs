@@ -53,6 +53,21 @@ public interface IJobQueue
     public Task<ClaimedJob?> ClaimAsync(
         IReadOnlyCollection<string> lanes, string owner, TimeSpan lease, CancellationToken ct);
 
+    /// <summary><c>JobId</c> задачі, що ЧЕКАЄ (<c>Queued</c>) на ціль; <c>null</c> — такої немає (виконувана не рахується).</summary>
+    /// <param name="targetKey">Ціль <c>{ТипМаркера}~{ціль}</c>.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <remarks>Типова реалізація — «немає» (черги без підтримки не зливають цілі між собою).</remarks>
+    public Task<string?> FindQueuedByTargetAsync(string targetKey, CancellationToken ct) => Task.FromResult<string?>(null);
+
+    /// <summary>
+    /// Скасовує задачу, що ЧЕКАЄ (<c>Queued</c>) на ціль, і НЕ чіпає виконувану (на відміну від
+    /// <see cref="RequestCancelAsync"/>, який виконуваній ставить запит скасування).
+    /// </summary>
+    /// <param name="targetKey">Ціль <c>{ТипМаркера}~{ціль}</c>.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <returns><c>true</c> — задачу скасовано.</returns>
+    public Task<bool> CancelQueuedByTargetAsync(string targetKey, CancellationToken ct) => Task.FromResult(false);
+
     /// <summary>Подовжує оренду; заразом повідомляє про запит скасування.</summary>
     public Task<LeaseState> RenewAsync(JobClaimToken claim, TimeSpan lease, CancellationToken ct);
 

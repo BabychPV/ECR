@@ -116,10 +116,31 @@ public sealed class CalculationTrigger(
             return null;
         }
 
-        return await EnqueueSubmittedAsync(
+        // ✎ Перф-аудит 20.11: «залежні з затвердженими» (`-dependents-approved`) — НАДМНОЖИНА «залежних» (`-dependents`) для
+        // того самого документа й періоду: ті самі подані й чернетки (`RecalculateSubmitted`), плюс затверджені, які звичайна
+        // задача пропускає. Дві цілі не зливаються (payload одного не годиться іншому), а лок документа лише СЕРІАЛІЗУЄ
+        // прогони — обидва виконувались би повністю (на Land ≈ 12 хв кожен). Тому: звичайну, що чекає, скасовує постановка з
+        // перекриттям; звичайна, що приходить, коли така вже чекає, не ставиться — вона виконає ту саму роботу з надлишком.
+        // ⚠ Лише для задачі, що ЧЕКАЄ: виконувана могла прочитати входи до цієї зміни, тож її не скасовуємо й не покладаємось.
+        if (approvedOverride is null
+            && await jobs.FindQueuedAsync<IRecalculationJob>(DependentsApprovedTargetOf(documentId, periodKey), ct).ConfigureAwait(false)
+                is { Length: > 0 } coveringJobId)
+        {
+            return coveringJobId;
+        }
+
+        var jobId = await EnqueueSubmittedAsync(
                 approvedOverride is null ? DependentsTargetOf(documentId, periodKey) : DependentsApprovedTargetOf(documentId, periodKey),
                 documentId, periodKey, ct, sourceHop, approvedOverride)
             .ConfigureAwait(false);
+
+        if (approvedOverride is not null)
+        {
+            // Після постановки, а не до: у жодний момент цілі без задачі, що виконає роботу, немає.
+            await jobs.CancelQueuedAsync<IRecalculationJob>(DependentsTargetOf(documentId, periodKey), ct).ConfigureAwait(false);
+        }
+
+        return jobId;
     }
 
     /// <summary>Ціль перерахунку залежних З перекриттям адміністратора (затверджені теж): окрема від <see cref="DependentsTargetOf"/>.</summary>

@@ -142,6 +142,24 @@ public sealed class DbBackgroundJobScheduler(
     }
 
     /// <inheritdoc />
+    public Task<string?> FindQueuedAsync<TJob>(string targetKey, CancellationToken ct)
+        where TJob : IBackgroundJob
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetKey);
+
+        return queue.FindQueuedByTargetAsync(TargetKeyOf<TJob>(targetKey), ct);
+    }
+
+    /// <inheritdoc />
+    public Task<bool> CancelQueuedAsync<TJob>(string targetKey, CancellationToken ct)
+        where TJob : IBackgroundJob
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetKey);
+
+        return queue.CancelQueuedByTargetAsync(TargetKeyOf<TJob>(targetKey), ct);
+    }
+
+    /// <inheritdoc />
     public Task ScheduleAsync<TJob>(string cronExpression, object? payload, CancellationToken ct)
         where TJob : IBackgroundJob
         => cron.ScheduleAsync<TJob>(cronExpression, payload, ct);

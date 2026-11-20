@@ -110,6 +110,30 @@ public interface IBackgroundJobScheduler
         string targetKey, object? payload, CancellationToken ct, int? createdByUserId = null)
         where TJob : IBackgroundJob;
 
+    /// <summary>
+    /// Ідентифікатор задачі, що ЧЕКАЄ (ще не стартувала) на ціль; <c>null</c> — такої немає. Виконувана не рахується.
+    /// </summary>
+    /// <typeparam name="TJob">Маркер задачі.</typeparam>
+    /// <param name="targetKey">Ціль — той самий ключ, що в <see cref="EnqueueCoalescedAsync{TJob}"/>.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Для постановок, що знають: задача ІНШОЇ цілі робить ту саму роботу з надлишком (B80 N5: «залежні з затвердженими»
+    /// покриває «залежні без них» для того самого документа й періоду). Черга, що не підтримує пошуку (Quartz у
+    /// пам'яті), повертає <c>null</c> — постановка йде як завжди.
+    /// </remarks>
+    public Task<string?> FindQueuedAsync<TJob>(string targetKey, CancellationToken ct) where TJob : IBackgroundJob
+        => Task.FromResult<string?>(null);
+
+    /// <summary>
+    /// Скасовує задачу, що ЧЕКАЄ на ціль, не чіпаючи виконуваної.
+    /// </summary>
+    /// <typeparam name="TJob">Маркер задачі.</typeparam>
+    /// <param name="targetKey">Ціль.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns><c>true</c> — скасовано; <c>false</c> — чекаючої не було (чи черга не підтримує).</returns>
+    public Task<bool> CancelQueuedAsync<TJob>(string targetKey, CancellationToken ct) where TJob : IBackgroundJob
+        => Task.FromResult(false);
+
     /// <summary>Планує задачу за cron-виразом.</summary>
     /// <remarks>
     /// Ключ періодичної задачі — тип плюс payload; cron у нього НЕ входить, тож

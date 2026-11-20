@@ -165,6 +165,107 @@ public sealed class CalculationTriggerQueueTests(SqlServerFixture sql) : DbJobQu
         Assert.Contains("\"sheetDefId\":5", (await RowAsync(first))?.Payload);
     }
 
+    private static readonly ApprovedRecalculationOverride AdminOverride = new(9, "Акт 12");
+
+    private static string RegularTarget(long documentId) => $"{nameof(IRecalculationJob)}~{CalculationTrigger.DependentsTargetOf(documentId, Period)}";
+
+    private static string ApprovedTarget(long documentId) => $"{nameof(IRecalculationJob)}~{CalculationTrigger.DependentsApprovedTargetOf(documentId, Period)}";
+
+    private async Task<int> CountAsync(string target, string state)
+    {
+        await using var db = Sql.CreateContext();
+        return await db.JobProgresses.CountAsync(p => p.TargetKey == target && p.State == state);
+    }
+
+    /// <summary>
+    /// Перф-аудит 20.11: «залежні з затвердженими» (D-554) — надмножина «залежних»; звичайна, що приходить, коли така вже ЧЕКАЄ,
+    /// не ставиться (інакше обидві виконувались би повністю, ≈ 12 хв кожна на Land).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ ДОКАЗ (локально): прибрати блок <c>FindQueuedAsync</c> у <c>CalculationTrigger.RequestDependentsAsync</c> — друга задача
+    /// з'являється на цілі <c>-dependents</c>, червоний.
+    /// </remarks>
+    [Fact]
+    [Trait("Finding", "PERF-DEPENDENTS-DUP")]
+    public async Task Звичайні_залежні_не_ставляться_коли_затверджені_того_ж_документа_й_періоду_вже_чекають()
+    {
+        const long document = 7801;
+        await using var host = NewHost();
+        var trigger = Trigger(host);
+
+        var approved = await trigger.RequestDependentsAsync(document, Period, sourceHop: 1, AdminOverride, CancellationToken.None);
+        var regular = await trigger.RequestDependentsAsync(document, Period, sourceHop: 1, CancellationToken.None);
+
+        Assert.NotNull(approved);
+        Assert.Equal(approved, regular);
+        Assert.Equal(0, await CountAsync(RegularTarget(document), "Queued"));
+        Assert.Equal(1, await CountAsync(ApprovedTarget(document), "Queued"));
+    }
+
+    /// <summary>Зворотний порядок: звичайна вже чекає, приходить перекриття адміністратора — звичайна скасовується (покрита).</summary>
+    [Fact]
+    [Trait("Finding", "PERF-DEPENDENTS-DUP")]
+    public async Task Затверджені_залежні_скасовують_звичайні_того_ж_документа_й_періоду_що_чекають()
+    {
+        const long document = 7802;
+        await using var host = NewHost();
+        var trigger = Trigger(host);
+
+        var regular = await trigger.RequestDependentsAsync(document, Period, sourceHop: 1, CancellationToken.None);
+        var approved = await trigger.RequestDependentsAsync(document, Period, sourceHop: 1, AdminOverride, CancellationToken.None);
+
+        Assert.NotNull(regular);
+        Assert.NotNull(approved);
+        Assert.NotEqual(regular, approved);
+        Assert.Equal("Cancelled", (await RowAsync(regular!))?.State);
+        Assert.Equal("Queued", (await RowAsync(approved!))?.State);
+        Assert.Equal(0, await CountAsync(RegularTarget(document), "Queued"));
+    }
+
+    /// <summary>Виконувана затверджена не покриває звичайну: та, що приходить, ставиться (виконувана могла прочитати входи до зміни).</summary>
+    [Fact]
+    [Trait("Finding", "PERF-DEPENDENTS-DUP")]
+    public async Task Виконувана_затверджена_не_покриває_звичайну_і_та_ставиться()
+    {
+        const long document = 7803;
+        await using var host = NewHost();
+        var trigger = Trigger(host);
+
+        var approved = await trigger.RequestDependentsAsync(document, Period, sourceHop: 1, AdminOverride, CancellationToken.None);
+        await ClaimAsync(host, approved);
+        var regular = await trigger.RequestDependentsAsync(document, Period, sourceHop: 1, CancellationToken.None);
+
+        Assert.NotEqual(approved, regular);
+        Assert.Equal("Running", (await RowAsync(approved!))?.State);
+        Assert.Equal("Queued", (await RowAsync(regular!))?.State);
+    }
+
+    /// <summary>Виконувана звичайна не скасовується постановкою перекриття (ні запиту скасування): вона лише чекатиме затверджену позаду.</summary>
+    [Fact]
+    [Trait("Finding", "PERF-DEPENDENTS-DUP")]
+    public async Task Виконувана_звичайна_не_скасовується_постановкою_затверджених()
+    {
+        const long document = 7804;
+        await using var host = NewHost();
+        var trigger = Trigger(host);
+
+        var first = await trigger.RequestDependentsAsync(document, Period, sourceHop: 1, CancellationToken.None);
+        await ClaimAsync(host, first);
+        var second = await trigger.RequestDependentsAsync(document, Period, sourceHop: 1, AdminOverride, CancellationToken.None);
+
+        Assert.NotEqual(first, second);
+        var running = await RowAsync(first!);
+        Assert.Equal("Running", running?.State);
+        Assert.Null(running?.CancelRequestedAt);
+        Assert.Equal("Queued", (await RowAsync(second!))?.State);
+    }
+
+    private static async Task ClaimAsync(Host host, string? expectedJobId)
+    {
+        var claimed = await host.Queue.ClaimAsync([JobLanes.Recalc], "test/host", JobQueueLimits.DefaultLease, CancellationToken.None);
+        Assert.Equal(expectedJobId, claimed?.Claim.JobId);
+    }
+
     private static DbBackgroundJobScheduler Scheduler(Host host)
         => new(
             host.Queue,
