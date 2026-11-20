@@ -560,9 +560,12 @@ B79, саме на подані аркуші (найбільше — перед 
 
 `PartitionCheckJob` (`partition-check`) щоночі: 1) `arc.usp_EnsureAuditPartitions
 @MonthsAhead = 12` — межі аудиту `pf_AuditByMonth` на 12 місяців уперед (`D-246`, п. 7.4);
-2) `arc.usp_ArchiveAudit @OlderThanMonths = 24` (п. 7.3); 3) перевіряє запас `pf_ByPeriodKey`
-(≥ 2 межі попереду). Межі `pf_ByPeriodKey` задача **не** додає — це робить Agent-задача
-нижче або DBA. Числа 12 і 24 — константи в коді, ключа конфігурації немає.
+2) `arc.usp_ArchiveAudit @OlderThanMonths = <Retention.AuditMonths>` (п. 7.3); 3) перевіряє запас
+`pf_ByPeriodKey` (≥ 2 межі попереду) і рядки в крайніх партиціях (`edgeRows` — PSS-09: ліва — дані
+років без меж, права — дані за останньою межею; будь-який рядок там — `Degraded`). Межі `pf_ByPeriodKey`
+задача **не** додає — це робить Agent-задача нижче або DBA. Число 12 — константа в коді; глибина
+аудиту — налаштування `Retention.AuditMonths` у `sys_ecr.SystemSetting` (типово й щонайменше 120 міс.,
+змінюється без перезапуску — `admin-guide.md` п. 8.1).
 
 SQL Server Agent (`14-agent-jobs.sql`) ставиться лише з `deploy-ecr.ps1
 -FirstDeployment`. На Express скрипт задач не створює (друкує «SQL Server Express: SQL
@@ -571,7 +574,7 @@ Server Agent немає — завдання обслуговування НЕ �
 
 | Задача Agent | Коли | Що робить |
 |---|---|---|
-| `ECR: Partitions ahead [<база>]` | 1-го числа, 02:40 | `arc.usp_EnsurePartitions @MonthsAhead = 6`: межі `pf_ByPeriodKey` на 6 міс. уперед; усередині — `arc.usp_EnsureAuditPartitions @MonthsAhead = 12`. Кожен `SPLIT` чекає Sch-M не довше `@LockTimeoutMs` (5 с), після 1222/1205 — пауза `@RetryDelaySeconds` (60 с) і повтор, до `@MaxAttempts` (10) разів; між спробами запити користувачів не стоять у черзі за Sch-M (аудит 09.10c, U1-02). Результат — рядок `itg.MaintenanceRun` `EnsurePartitions`: `Succeeded` (`added`, `retries`) або `Failed` (номер помилки; потрапляє у зведення збоїв) |
+| `ECR: Partitions ahead [<база>]` | 1-го числа, 02:40 | `arc.usp_EnsurePartitions @MonthsAhead = 6`: межі `pf_ByPeriodKey` усього поточного року, наступного і січня ще наступного (✎ PSS-09), а також на 6 міс. уперед, якщо це далі; межу всередині партиції, де вже є рядки, **не** додає (SPLIT переміщував би дані під Sch-M) — прогін тоді `Degraded` зі списком `refused`, межу додає DBA у вікні обслуговування; усередині — `arc.usp_EnsureAuditPartitions @MonthsAhead = 12`. Кожен `SPLIT` чекає Sch-M не довше `@LockTimeoutMs` (5 с), після 1222/1205 — пауза `@RetryDelaySeconds` (60 с) і повтор, до `@MaxAttempts` (10) разів; між спробами запити користувачів не стоять у черзі за Sch-M (аудит 09.10c, U1-02). Результат — рядок `itg.MaintenanceRun` `EnsurePartitions`: `Succeeded` (`added`, `retries`) або `Failed` (номер помилки; потрапляє у зведення збоїв) |
 | `ECR: Physical checks [<база>]` | щодня 03:10 | недовірені/вимкнені FK (50041), невирівняні індекси (50042) |
 
 ✎ R11-S2-06: ім'я завдання несе назву бази (`ECR: Partitions ahead [ECR]`): ім'я в `msdb` унікальне на весь
@@ -1049,12 +1052,15 @@ attempt of this first deployment (skip)» на кроці бази (майсте
 ### 7.3. Архівація аудиту `arc.usp_ArchiveAudit` (✎ 2026-10-01, `D-247`, `D-236`, `НФ-8.4b`)
 
 **Що робить.** Партиції `aud.CellChange`, `aud.StructureChange`, `aud.SecurityEvent`,
-`aud.PublicationEvent`, **повністю** старші за `@OlderThanMonths` (дефолт **24**; NULL або < 1 мовчки стає 1),
-перемикає (`ALTER TABLE … SWITCH PARTITION`) у
+`aud.PublicationEvent`, **повністю** старші за `@OlderThanMonths` (✎ PSS-27: дефолт і **підлога 120**; NULL
+або < 120 мовчки стає 120; `@Today` пізніше за завтрашній день сервера — `THROW 50018`), перемикає (`ALTER TABLE … SWITCH PARTITION`) у
 дзеркала `arc.AuditCellChange`, `arc.AuditStructureChange`, `arc.AuditSecurityEvent`,
 `arc.AuditPublicationEvent` (`12-archive-tables.sql`; та сама `ps_AuditByMonth`, ті самі
 індекси). Рядки не копіюються і не видаляються — це метаданкова операція; `Id` зберігаються.
 Це **не** `arc.CellChange` (columnstore на `DATA_ARCHIVE`): SWITCH у нього неможливий.
+
+Механіку переносу з явною межею виконує внутрішня `arc.usp_ArchiveAuditBefore @Cutoff` — службі вона **не**
+видана (інакше обмеження публічної обходилися б), її кличе лише `arc.usp_ArchiveAudit` і DBA вручну.
 
 Межа відсічення — «перше число поточного місяця (UTC) мінус `@OlderThanMonths` місяців»;
 переносяться партиції, що **цілком** лежать раніше за неї (`04-partition-maintenance.sql`,
@@ -1068,9 +1074,10 @@ attempt of this first deployment (skip)» на кроці бази (майсте
 
 **Хто й коли запускає.** Нічна задача `partition-check` (`PartitionCheckJob`, щоночі 02:15
 за часом сервера) спершу продовжує межі аудиту (`arc.usp_EnsureAuditPartitions
-@MonthsAhead = 12`, п. 7.4), потім викликає `arc.usp_ArchiveAudit @OlderThanMonths = 24`.
-Поріг — константа `PartitionCheckJob.AuditArchiveOlderThanMonths`, **ключа конфігурації
-немає**; місяць рахується за UTC. Ідемпотентно, у C# DDL немає.
+@MonthsAhead = 12`, п. 7.4), потім викликає `arc.usp_ArchiveAudit @OlderThanMonths = <поріг>`.
+Поріг — налаштування `Retention.AuditMonths` у `sys_ecr.SystemSetting` (✎ PSS-27; типово й щонайменше
+120, читається щоночі без перезапуску — `admin-guide.md` п. 8.1); місяць рахується за UTC.
+Ідемпотентно, у C# DDL немає.
 
 - Збій **архівації** (помилка SQL) не ховає перевірку запасу партицій: прогін
   `partition-check` стає `Degraded` з `"auditArchiveFailed":true` у `DetailsJson`, подробиці —
@@ -1087,7 +1094,7 @@ attempt of this first deployment (skip)» на кроці бази (майсте
 
 ```sql
 DECLARE @p int, @r bigint;
-EXEC arc.usp_ArchiveAudit @OlderThanMonths = 24, @PartitionsSwitched = @p OUTPUT, @RowsSwitched = @r OUTPUT;
+EXEC arc.usp_ArchiveAudit @OlderThanMonths = 120, @PartitionsSwitched = @p OUTPUT, @RowsSwitched = @r OUTPUT;
 SELECT @p AS Partitions, @r AS [Rows];
 ```
 
@@ -1119,8 +1126,8 @@ DECLARE @sql nvarchar(400) = N'ALTER TABLE arc.AuditSecurityEvent SWITCH PARTITI
 EXEC sp_executesql @sql;
 ```
 
-⚠ Нічна задача завжди викликає процедуру з порогом 24 (константа в коді). Тому відновлена
-партиція, старша за 24 місяці, буде знову заархівована найближчої ночі о 02:15. Для аналізу
+⚠ Нічна задача викликає процедуру з порогом `Retention.AuditMonths` (не менше 120). Тому відновлена
+партиція, старша за цей поріг, буде знову заархівована найближчої ночі о 02:15. Для аналізу
 краще не відновлювати, а читати архів: журнал змін комірок (`/admin/audit`, історія комірки)
 читає `arc.AuditCellChange` сам (НФ-8.9.6, рядок з позначкою «Archive»); журнали структури,
 подій безпеки й публікацій та CSV-експорт архів поки не бачать — їх читають прямо:
@@ -1135,8 +1142,8 @@ SELECT * FROM arc.AuditSecurityEvent WHERE ChangedAt >= '2024-03-01' AND Changed
   період з UI не зникає, рядок з архіву має позначку. Гаряче вікно (що архіву не зачіпає)
   читається, як і раніше, лише з `aud.*`. Журнали структури (`aud.StructureChange`), подій
   безпеки (`aud.SecurityEvent`) і публікацій архів **не читають**: заархівований період з них
-  зникає з UI. Дефолт 24 міс. — **припущення**, не вказане в `D-236`; потрібне рішення
-  замовника про глибину «гарячого» аудиту.
+  зникає з UI. ✎ 2026-11-20: глибина «гарячого» аудиту — рішення людини (20.11 №7): щонайменше
+  120 місяців; налаштування `Retention.AuditMonths`, підлогу 120 тримає й сама процедура (PSS-27).
 - Службовому обліковому запису для читання архіву потрібен `SELECT` на `arc.AuditCellChange`
   (членство в `db_datareader` дає його на всі схеми; обмежений акаунт — `GRANT SELECT ON
   OBJECT::arc.AuditCellChange`, DBA замовника, `D-264`). Без нього відмова 229/230 не
@@ -1160,8 +1167,9 @@ SELECT TOP (10) Id, Status, FinishedAt, DetailsJson
 FROM itg.MaintenanceRun WHERE JobCode = 'partition-check' ORDER BY Id DESC;
 ```
 
-Поля `DetailsJson`: `boundariesAhead`, `minimum` (запас `pf_ByPeriodKey`), `auditBoundariesAdded`
-(скільки меж аудиту додано тієї ночі), `auditArchivedPartitions`, `auditArchivedRows`,
+Поля `DetailsJson`: `boundariesAhead`, `minimum` (запас `pf_ByPeriodKey`), `edgeRows.first`/`edgeRows.last`
+(рядки в крайніх партиціях `pf_ByPeriodKey`, PSS-09), `auditBoundariesAdded` (скільки меж аудиту додано тієї
+ночі), `auditArchiveMonths` (чинна глибина аудиту), `auditArchivedPartitions`, `auditArchivedRows`,
 `auditArchiveFailed`. `Status = 'Failed'` означає, що й межі аудиту не продовжено.
 
 ### 7.4. Межі партицій аудиту `pf_AuditByMonth` (`D-246`)

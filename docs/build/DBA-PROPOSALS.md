@@ -1,14 +1,22 @@
 # Пропозиції для DBA — з вимірами (2026-10-08)
 
-Єдине місце для пропозицій, що потребують DDL або рішення DBA. Рядки 1-2 мають статус **proposed**: у `Sql/` і в міграції EF для них нічого не додано; рядок 3 виконано (AN-112, дозвіл людини 09.10) (D-66 — застосунок без DDL; D-264 — DBA на замовнику). Скрипти нижче — **приклади**, не виконувались на прод-базі. Задачі в черзі — `docs/build/WORK-QUEUE.md`, `DB-5`, `DB-6`. Походження: `docs/build/TODO-REMAINING.md` B3.6/B3.7.
+Єдине місце для пропозицій, що потребують DDL або рішення DBA. Рядки 2 і 4 мають статус **proposed**: у `Sql/` і в міграції EF для них нічого не додано; рядок 1 заміщено індексом розгортання (PSS-14); рядок 3 виконано (AN-112, дозвіл людини 09.10) (D-66 — застосунок без DDL; D-264 — DBA на замовнику). Скрипти нижче — **приклади**, не виконувались на прод-базі. Задачі в черзі — `docs/build/WORK-QUEUE.md`, `DB-5`, `DB-6`. Походження: `docs/build/TODO-REMAINING.md` B3.6/B3.7.
 
 | # | Пропозиція | Хто вирішує | Статус |
 |---|---|---|---|
-| 1 | Індекс `IX_CellChange_Doc_Period_ChangedAt` на `aud.CellChange` | замовник/DBA (К10) | proposed |
+| 1 | Індекс `IX_CellChange_Doc_Period_ChangedAt` на `aud.CellChange` | замовник/DBA (К10) | **заміщено** (`IX_CellChange_DocPeriodChanged`, CL-10b; PSS-14) |
 | 2 | `LOCK_ESCALATION` на `doc.CellValue` / `doc.TableRow` | DBA (замовника не питаємо — рішення координатора 08.10) | proposed |
 | 3 | Фільтрований індекс `IX_CellChange_LateEdit` на `aud.CellChange` | людина (09.10, HU-12/HU-13, `D-343`) | **виконано** (AN-112) |
+| 4 | Стиснення `PAGE` некластерних індексів (`calc.*`, `aud.*`, `doc.*`) | DBA (PSS-14) | proposed |
 
 ## 1. Індекс `aud.CellChange` для resultsStale (DB-5)
+
+> ✎ 2026-11-20 (аудит PSS-14): **заміщено, DBA нічого не робить.** Той самий ключ
+> `(DocumentId, PeriodKey, ChangedAt)` з `INCLUDE (Origin, ChangedByUserId)` на `ps_AuditByMonth(ChangedAt)` уже
+> створює розгортання — індекс `IX_CellChange_DocPeriodChanged` (`Sql/11-audit-tables.sql`, CL-10b, разом із
+> дзеркалом у `Sql/12-archive-tables.sql` для SWITCH архіву). Скрипт нижче створив би другий, майже ідентичний індекс
+> (ще один запис на кожну правку комірки) — **не виконувати**. Різниця лише в `INCLUDE (ColumnDefId)`, якого запити
+> resultsStale не читають. Таблицю нижче лишено як історію замірів.
 
 | Поле | Зміст |
 |---|---|
@@ -18,9 +26,9 @@
 | Ризик | Низький для даних (лише індекс). Побудова на великій таблиці тримає ресурси; рекомендується поза піком. Скрипт ідемпотентний |
 | Поточне пом'якшення | Кеш лічильників, TTL 45 с (`DocumentListSummaryStore.StaleCountsTtl`); `GET /documents?resultsStale=true` не кешується, rate limit для нього немає (борг B3.7) |
 | Хто вирішує | Замовник/DBA (К10) |
-| Статус | proposed |
+| Статус | ~~proposed~~ **заміщено** `IX_CellChange_DocPeriodChanged` (2026-11-20, PSS-14) |
 
-Приклад скрипта (потрібен `sqlcmd -I`, бо індекс вимагає `QUOTED_IDENTIFIER ON`):
+~~Приклад скрипта~~ (історія — не виконувати; потрібен був би `sqlcmd -I`, бо індекс вимагає `QUOTED_IDENTIFIER ON`):
 
 ```sql
 IF NOT EXISTS (SELECT 1 FROM sys.indexes
@@ -78,4 +86,31 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_CellChange_LateEdit'
         INCLUDE (ColumnDefId)
         WHERE IsLateEdit = 1
         ON ps_AuditByMonth(ChangedAt);
+```
+
+## 4. Стиснення `PAGE` некластерних індексів (PSS-14)
+
+| Поле | Зміст |
+|---|---|
+| Навіщо | Розгортання стискає лише кластерні ключі, позначені в карті `Sql/07-partition-tables.sql` (`CompressPk`); некластерні індекси лишаються `NONE`. На стенді Land (`EcrLandMsLegacy3`, 20.11, лише читання DMV): 810 із 810 партицій некластерних індексів без стиснення, разом ≈3,2 ГБ; найбільші — `calc.CalculationResult` `IX_CalculationResult_DocRun` ≈1,1 ГБ, `_Lookup` ≈1,0 ГБ, `_Version` ≈0,4 ГБ, `_UnitId` ≈0,4 ГБ; `aud.CellChange` `IX_CellChange_Cell` і `IX_CellChange_DocPeriodChanged` по ≈70 МБ |
+| Виміри | Економію не міряно (на стенді — лише розміри). DBA міряє перед рішенням: `EXEC sp_estimate_data_compression_savings @schema_name = N'calc', @object_name = N'CalculationResult', @index_id = NULL, @partition_number = NULL, @data_compression = N'PAGE';` — і так для `aud.CellChange`, `doc.CellValue`, `doc.TableRow` |
+| Ціна | CPU на запис і читання стиснених сторінок; перебудова індексу (`ALTER INDEX … REBUILD PARTITION = ALL WITH (DATA_COMPRESSION = PAGE)`) — вікно, журнал транзакцій, на Standard — офлайн |
+| Ризик | Низький для даних. ⛔ Індекси `aud.CellChange`/`aud.StructureChange`/`aud.SecurityEvent`/`aud.PublicationEvent` стискати ЛИШЕ разом із дзеркалами в `arc.Audit*` (`Sql/12-archive-tables.sql`): SWITCH архівації аудиту вимагає однакового стиснення партицій джерела й цілі (інакше Msg 4947 і рядок `audit-archive`/`Failed`) |
+| Зв'язок | Стиснення кластерних `calc.*` (PSS-01, лан L3) — окремо, у `07-partition-tables.sql`; цей рядок — лише некластерні індекси, які розгортання не чіпає |
+| Хто вирішує | DBA |
+| Статус | proposed |
+
+Приклад скрипта (після виміру; поза піком):
+
+```sql
+-- calc.*: без дзеркал, по одному індексу
+ALTER INDEX IX_CalculationResult_DocRun ON calc.CalculationResult
+    REBUILD PARTITION = ALL WITH (DATA_COMPRESSION = PAGE);
+-- aud.*: ЛИШЕ парою з дзеркалом arc.Audit* (SWITCH архіву)
+ALTER INDEX IX_CellChange_Cell ON aud.CellChange REBUILD PARTITION = ALL WITH (DATA_COMPRESSION = PAGE);
+ALTER INDEX IX_CellChange_Cell ON arc.AuditCellChange REBUILD PARTITION = ALL WITH (DATA_COMPRESSION = PAGE);
+-- перевірка:
+SELECT OBJECT_SCHEMA_NAME(p.object_id) + N'.' + OBJECT_NAME(p.object_id) AS tbl, i.name, p.partition_number, p.data_compression_desc
+FROM sys.partitions AS p JOIN sys.indexes AS i ON i.object_id = p.object_id AND i.index_id = p.index_id
+WHERE i.type = 2 AND p.data_compression = 0 AND OBJECTPROPERTY(p.object_id, 'IsUserTable') = 1;
 ```
