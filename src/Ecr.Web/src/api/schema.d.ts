@@ -37655,6 +37655,11 @@ export interface components {
              * @description Таблиця.
              */
             tableDefId: number;
+            /**
+             * Format: int32
+             * @description ✎ D-6: поданий місяць — місяць документа-джерела HSE400, ще не затверджений, через який сервер відхилить затвердження цього місяця (sourceMonthNotApproved); null — перешкоди немає.
+             */
+            unapprovedSourcePeriodKey?: null | number;
         };
         /** @description Псевдонім місячного входу у відповіді. */
         MonthInputAliasDto: {
@@ -44955,7 +44960,7 @@ export interface components {
             submittable: boolean;
             /**
              * Format: int32
-             * @description ✎ D-6: місяць документа-джерела HSE400, ще не затверджений, через який сервер відхилить подання цього періоду (sourceMonthNotApproved); null — перешкоди немає.
+             * @description ✎ D-6: місяць документа-джерела HSE400, ще не затверджений, через який сервер відхилить подання (аркуш неподаний) чи затвердження (аркуш поданий) цього періоду (sourceMonthNotApproved); null — перешкоди немає.
              */
             unapprovedSourcePeriodKey?: null | number;
         };

@@ -14365,6 +14365,14 @@
             "description": "Таблиця.",
             "format": "int32",
             "type": "integer"
+          },
+          "unapprovedSourcePeriodKey": {
+            "description": "✎ D-6: поданий місяць — місяць документа-джерела HSE400, ще не затверджений, через який сервер відхилить затвердження цього місяця (sourceMonthNotApproved); null — перешкоди немає.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           }
         },
         "required": [
@@ -30577,7 +30585,7 @@
             "type": "boolean"
           },
           "unapprovedSourcePeriodKey": {
-            "description": "✎ D-6: місяць документа-джерела HSE400, ще не затверджений, через який сервер відхилить подання цього періоду (sourceMonthNotApproved); null — перешкоди немає.",
+            "description": "✎ D-6: місяць документа-джерела HSE400, ще не затверджений, через який сервер відхилить подання (аркуш неподаний) чи затвердження (аркуш поданий) цього періоду (sourceMonthNotApproved); null — перешкоди немає.",
             "format": "int32",
             "type": [
               "null",

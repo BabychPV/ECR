@@ -243,18 +243,25 @@ export function DocumentActionBar({
       <SubmitAction submit={actions.submit} variant="filled" />
     ) : actions.approve !== null ? (
       <>
-        {/* ⛔ `X-05`: `statusSuccess` підібрано до AA 4.5:1 (`theme.ts`, `contrast.test.ts`). */}
-        <Button
-          variant="filled"
-          color="statusSuccess"
-          loading={actions.approve.loading}
-          onClick={actions.approve.ask}
-          data-testid="document-approve"
-          data-period-key={actions.approve.periodKey ?? undefined}
-          {...staleProps}
-        >
-          {decisionLabel('approve', actions.approve.periodKey)}
-        </Button>
+        {/* ⛔ `X-05`: `statusSuccess` підібрано до AA 4.5:1 (`theme.ts`, `contrast.test.ts`).
+            ✎ D-6: сервер відхилить затвердження цілі (місяць джерела HSE400 не затверджено) — кнопка на місці, але
+            недоступна, підказка й опис для читача кажуть чому; ▾ лишається (інший місяць), «Reject» — доступна.
+            ⚠ `Hint` завжди (лише `disabled`): умовна обгортка перемонтовувала б кнопку й губила фокус. */}
+        <Hint label={actions.approve.blockedReason ?? ''} disabled={actions.approve.blockedReason === null}>
+          <Button
+            variant="filled"
+            color="statusSuccess"
+            loading={actions.approve.loading}
+            onClick={actions.approve.ask}
+            data-testid="document-approve"
+            data-period-key={actions.approve.periodKey ?? undefined}
+            data-blocked={actions.approve.blockedReason !== null || undefined}
+            {...staleProps}
+            {...(actions.approve.blockedReason !== null ? { 'data-disabled': true, 'aria-disabled': true } : {})}
+          >
+            {decisionLabel('approve', actions.approve.periodKey)}
+          </Button>
+        </Hint>
         {/* ✎ D-6: річна розкладка — вибір іншого місяця, що чекає затвердження (як ▾ біля «Submit»). */}
         <DecisionPeriodPicker decision={actions.approve} action="approve" />
       </>

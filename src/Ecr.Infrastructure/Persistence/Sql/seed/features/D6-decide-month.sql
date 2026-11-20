@@ -31,7 +31,9 @@ SELECT v.[Key], v.Lang, v.Val
     (N'document.banner.monthApproved', N'ru', N'{period} утверждён; его столбец доступен только для чтения, пока его не вернут в работу.'),
     (N'document.banner.monthApproved', N'kz', N'{period} бекітілді; ол жұмысқа қайтарылғанға дейін оның бағаны тек оқуға арналған.'),
     (N'workflow.submitSourceNotApproved', N'ru', N'{period} пока нельзя отправить: месяц источника HSE400 {source} не утверждён (см. «Проблемы расчёта»).'),
-    (N'workflow.submitSourceNotApproved', N'kz', N'{period} әзірге жіберу мүмкін емес: HSE400 көзінің {source} айы бекітілмеген («Есептеу мәселелері» бөлімін қараңыз).')
+    (N'workflow.submitSourceNotApproved', N'kz', N'{period} әзірге жіберу мүмкін емес: HSE400 көзінің {source} айы бекітілмеген («Есептеу мәселелері» бөлімін қараңыз).'),
+    (N'workflow.approveSourceNotApproved', N'ru', N'{period} нельзя утвердить, пока не утверждён месяц источника HSE400 {source} (см. «Проблемы расчёта»).'),
+    (N'workflow.approveSourceNotApproved', N'kz', N'HSE400 көзінің {source} айы бекітілмейінше {period} бекіту мүмкін емес («Есептеу мәселелері» бөлімін қараңыз).')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -54,7 +56,8 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'grid.monthMakeReturn', N'en', N'{status} — make {period} the month to return for edits', 1),
     (N'document.banner.monthSubmitted', N'en', N'{period} is submitted; its column is read-only.', 1),
     (N'document.banner.monthApproved', N'en', N'{period} is approved; its column is read-only until it is returned for edits.', 1),
-    (N'workflow.submitSourceNotApproved', N'en', N'{period} can''t be submitted yet: the HSE400 source month {source} isn''t approved (see Calculation issues).', 1)
+    (N'workflow.submitSourceNotApproved', N'en', N'{period} can''t be submitted yet: the HSE400 source month {source} isn''t approved (see Calculation issues).', 1),
+    (N'workflow.approveSourceNotApproved', N'en', N'{period} cannot be approved until the HSE400 source month {source} is approved (see Calculation issues).', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO

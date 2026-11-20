@@ -360,9 +360,18 @@ export function SheetActions(props: SheetActionsProps): JSX.Element {
           «Reject» і «Return for edits» питають. Затверджені дані йдуть у
           звітність регулятору — це та сама вага рішення. */}
       {approve !== null && (
-        <Button color="statusSuccess" loading={approve.loading} onClick={approve.ask} {...staleProps}>
-          {t('workflow.approve')}
-        </Button>
+        // ✎ D-6: сервер відхилить затвердження (місяць джерела не затверджено) — недоступна з причиною.
+        <Hint label={approve.blockedReason ?? ''} disabled={approve.blockedReason === null}>
+          <Button
+            color="statusSuccess"
+            loading={approve.loading}
+            onClick={approve.ask}
+            {...staleProps}
+            {...(approve.blockedReason !== null ? { 'data-disabled': true, 'aria-disabled': true } : {})}
+          >
+            {t('workflow.approve')}
+          </Button>
+        </Hint>
       )}
 
       {/* ✎ 2026-10-06: у панелі дій — лише варіанти з рамкою чи заливкою
@@ -456,6 +465,8 @@ interface MonthState {
   readonly canRecall: boolean;
   /** Повернути затверджений місяць у роботу. */
   readonly canReturn: boolean;
+  /** Місяць джерела HSE400, ще не затверджений, через який сервер відхилить затвердження цього (поданого) місяця. */
+  readonly unapprovedSource: number | null;
 }
 
 /** ✎ D-6: стани місяців річного аркуша за зростанням — з `monthColumns` (колонки різних таблиць одного місяця зливаються). */
@@ -472,6 +483,7 @@ function monthStatesOf(data: SubmissionTarget | undefined): readonly MonthState[
       canDecide: (seen?.canDecide ?? false) || column.canDecide === true,
       canRecall: (seen?.canRecall ?? false) || column.canRecall === true,
       canReturn: (seen?.canReturn ?? false) || column.canReturn === true,
+      unapprovedSource: seen?.unapprovedSource ?? column.unapprovedSourcePeriodKey ?? null,
     });
   }
 
@@ -570,7 +582,18 @@ export interface SheetActionsModel {
    * або обраний у ▾ / позначкою колонки / з посилання черги); `null` — період сторінки, підпис без місяця. `options` —
    * місяці, над якими людина може цю дію, `pick` — вибір.
    */
-  readonly approve: (DecisionPeriod & { readonly loading: boolean; readonly ask: () => void }) | null;
+  readonly approve:
+    | (DecisionPeriod & {
+        readonly loading: boolean;
+        readonly ask: () => void;
+        /**
+         * ✎ D-6 (борг координатора): чому затвердження цілі сервер зараз відхилить — місяць документа-джерела HSE400 не
+         * затверджено (`submission-target`: `monthColumns[]` / `periods[].unapprovedSourcePeriodKey`, те саме правило,
+         * що ворота затвердження на будь-якому кроці); кнопка недоступна, `ask` нічого не робить. «Reject» — доступна.
+         */
+        readonly blockedReason: string | null;
+      })
+    | null;
   readonly reject: { readonly ask: () => void; readonly periodKey: number | null } | null;
   readonly reopen: (DecisionPeriod & { readonly ask: () => void }) | null;
   /**
@@ -1351,6 +1374,19 @@ export function useSheetActions({
   const notSimulating = me !== undefined && !me.isSimulation;
   const canApprove = monthly ? decideMonthKey !== null && notSimulating : anchorMode && isAllowed('approve', state) && mayDecide;
   const canReject = monthly ? decideMonthKey !== null && notSimulating : anchorMode && isAllowed('reject', state) && mayDecide;
+  // ✎ D-6 (борг координатора): місяць джерела HSE400 для ЦІЛІ затвердження не затверджено — сервер відмовить (на будь-якому
+  // кроці маршруту); відхилення — ні. Ціль: місяць рішення (річна розкладка) чи період сторінки; дані — лише непідставні.
+  const approveSource = monthly
+    ? (months.find((m) => m.periodKey === decideMonthKey)?.unapprovedSource ?? null)
+    : anchorMode && !submissionTarget.isPlaceholderData
+      ? (target?.periods.find((period) => period.periodKey === periodKey && period.sheetStatus === 'Submitted')
+          ?.unapprovedSourcePeriodKey ?? null)
+      : null;
+  const approveTargetPeriod = monthly ? decideMonthKey : periodKey;
+  const approveBlockedReason =
+    approveSource === null || approveTargetPeriod === null
+      ? null
+      : t('workflow.approveSourceNotApproved', { period: periodLabel(approveTargetPeriod), source: periodLabel(approveSource) });
 
   // ⛔ Аудит Етапу 3, лана "Documents core" (`lane3-workflow-buttons-not-grouped`,
   // знахідка людини зі скріншотом): `DocumentPage.tsx` рендерить ОДИН
@@ -1654,7 +1690,10 @@ export function useSheetActions({
       !workflowOff && canApprove
         ? {
             loading: decideLoading || settled.settling,
-            ask: () => askFresh('approve', decideMonthKey ?? periodKey),
+            blockedReason: approveBlockedReason,
+            ask: () => {
+              if (approveBlockedReason === null) askFresh('approve', decideMonthKey ?? periodKey);
+            },
             periodKey: monthly ? decideMonthKey : null,
             options: decideOptions,
             pick: (key: number) => pickDecisionMonth(documentId, sheetDefId, key, 'Submitted'),
