@@ -76,6 +76,48 @@ public sealed class DependencyGraphProviderSqlTests(SqlServerFixture sql)
     }
 
     [Fact]
+    public async Task Доказ_формули_шаблону_несе_коди_таблиці_й_колонки_та_уривок_формули_а_не_id()
+    {
+        var registryId = await NewRegistryAsync();
+        var source = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(periodKey: PeriodKey);
+        await NewBindingAsync(source.TemplateId, registryId);
+        var expression = $"REGFIELD(REGFIND('{Registry}', [Period].Year, [Period].Sequence, 'FG', 'Density'), 'VALUE')";
+        var land = await ConsumerAsync(expression, extract: true);
+        var landAst = await ConsumerAsync($"REGFIELD(REGFIND('{Registry}', [Period].Year, 10, 'FG', 'Density'), 'VALUE')", extract: false);
+
+        string tableCode;
+        string columnCode;
+        string astTableCode;
+        await using (var db = sql.CreateContext())
+        {
+            tableCode = await db.TableDefs.AsNoTracking().Where(t => t.Id == land.TableDefId).Select(t => t.Code).SingleAsync();
+            columnCode = await db.ColumnDefs.AsNoTracking().Where(c => c.Id == land.ColumnDefIds[1]).Select(c => c.Code).SingleAsync();
+            astTableCode = await db.TableDefs.AsNoTracking().Where(t => t.Id == landAst.TableDefId).Select(t => t.Code).SingleAsync();
+        }
+
+        var graph = await NewProvider(new MemoryCache(new MemoryCacheOptions())).GetAsync(CancellationToken.None);
+
+        var detail = Evidence(graph, registryId, land.TemplateId).Single().Detail;
+        Assert.StartsWith($"{tableCode}/{columnCode}: REGFIELD(REGFIND('{Registry}'", detail);
+        Assert.DoesNotContain($"column {land.ColumnDefIds[1]}", detail);
+        Assert.StartsWith($"{astTableCode}/", Evidence(graph, registryId, landAst.TemplateId).Single().Detail);
+    }
+
+    [Theory]
+    [InlineData("T1", "C1", "A + B", "T1/C1: A + B")]
+    [InlineData("T1", null, "A", "T1: A")]
+    [InlineData(null, null, "  A \n +\t B ", "?: A + B")]
+    public void Деталь_доказу_стискає_формулу_й_ховає_відсутні_коди(string? table, string? column, string expression, string expected)
+        => Assert.Equal(expected, DependencyGraphProvider.FormulaEvidenceDetail(table, column, expression));
+
+    [Fact]
+    public void Деталь_доказу_обрізає_довгу_формулу()
+    {
+        var detail = DependencyGraphProvider.FormulaEvidenceDetail("T", "C", new string('x', 500));
+        Assert.Equal("T/C: " + new string('x', DependencyGraphProvider.ExpressionSnippetLength) + "…", detail);
+    }
+
+    [Fact]
     public async Task Публікація_шаблону_змінює_ревізію_і_кеш_віддає_новий_граф()
     {
         var registryId = await NewRegistryAsync();

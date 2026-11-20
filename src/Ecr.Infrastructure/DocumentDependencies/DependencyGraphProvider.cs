@@ -273,13 +273,35 @@ public sealed class DependencyGraphProvider(
             .Where(c => lookupColumns.Contains(c.Id) && c.LookupRegistryDefId != null)
             .ToDictionaryAsync(c => c.Id, c => c.LookupRegistryDefId!.Value, ct).ConfigureAwait(false);
 
+        // Запасний шлях: версія без жодного ребра «довідник за кодом» (публікація до RT-21) — AST усіх її формул.
+        var covered = rows.Where(r => r.TableDefId is null).Select(r => r.Formula.TemplateVersionId).ToHashSet();
+        var fallbackIds = versionIds.Where(v => !covered.Contains(v)).ToList();
+        var fallbackFormulas = await formulas.Where(f => fallbackIds.Contains(f.TemplateVersionId)).ToListAsync(ct).ConfigureAwait(false);
+
+        // Людські коди для доказів (один запит на таблиці й один на колонки — без N+1; граф кешується разом із ними).
+        var evidenceFormulas = rows.Select(r => r.Formula).Concat(fallbackFormulas).ToList();
+        var tableIds = evidenceFormulas.Select(f => f.TableDefId).Distinct().ToList();
+        var tableCodes = await db.TableDefs.AsNoTracking()
+            .Where(t => tableIds.Contains(t.Id))
+            .Select(t => new { t.Id, t.Code })
+            .ToDictionaryAsync(t => t.Id, t => t.Code, ct).ConfigureAwait(false);
+        var columnIds = evidenceFormulas.Where(f => f.ColumnDefId is not null).Select(f => f.ColumnDefId!.Value).Distinct().ToList();
+        var columnCodes = await db.ColumnDefs.AsNoTracking()
+            .Where(c => columnIds.Contains(c.Id))
+            .Select(c => new { c.Id, c.Code })
+            .ToDictionaryAsync(c => c.Id, c => c.Code, ct).ConfigureAwait(false);
+
+        string Detail(int tableId, int? columnId, string expression)
+            => FormulaEvidenceDetail(
+                tableCodes.GetValueOrDefault(tableId), columnId is { } c ? columnCodes.GetValueOrDefault(c) : null, expression);
+
         var reads = new List<TemplateRegistryRead>();
         var scopes = new Dictionary<int, IReadOnlyDictionary<string, PeriodScope>?>();
         var seen = new HashSet<(int Formula, int Registry)>();
         foreach (var row in rows)
         {
             var f = row.Formula;
-            var detail = $"table {f.TableDefId} column {f.ColumnDefId}";
+            var detail = Detail(f.TableDefId, f.ColumnDefId, f.Expression);
             if (row.TableDefId is null && row.RowKey is not null)
             {
                 if (!scopes.TryGetValue(f.Id, out var parsed))
@@ -300,18 +322,15 @@ public sealed class DependencyGraphProvider(
             }
         }
 
-        // Запасний шлях: версія без жодного ребра «довідник за кодом» (публікація до RT-21) — AST усіх її формул.
-        var covered = rows.Where(r => r.TableDefId is null).Select(r => r.Formula.TemplateVersionId).ToHashSet();
-        var fallbackIds = versionIds.Where(v => !covered.Contains(v)).ToList();
         var fallbackVersions = new SortedSet<int>();
-        foreach (var f in await formulas.Where(f => fallbackIds.Contains(f.TemplateVersionId)).ToListAsync(ct).ConfigureAwait(false))
+        foreach (var f in fallbackFormulas)
         {
             foreach (var (code, scope) in Scopes(f.Expression, f.Dialect, f.Id, diagnostics) ?? new Dictionary<string, PeriodScope>())
             {
                 if (Registry(code, registryByCode, diagnostics) is { } registryId)
                 {
                     reads.Add(new TemplateRegistryRead(versions[f.TemplateVersionId], f.TemplateVersionId, registryId, scope, f.Id, "ast",
-                        $"table {f.TableDefId} column {f.ColumnDefId}"));
+                        Detail(f.TableDefId, f.ColumnDefId, f.Expression)));
                     fallbackVersions.Add(f.TemplateVersionId);
                 }
             }
@@ -319,6 +338,25 @@ public sealed class DependencyGraphProvider(
 
         diagnostics.AddRange(fallbackVersions.Select(v => new DependencyGraphDiagnostic("astFallback", $"template version {v}")));
         return reads;
+    }
+
+    /// <summary>Довжина уривка формули в доказі.</summary>
+    internal const int ExpressionSnippetLength = 60;
+
+    /// <summary>
+    /// Доказ формули шаблону для людини: <c>КодТаблиці/КодКолонки: уривок формули</c> (колонки може не бути — формула рядка).
+    /// Службові id не показуються (T-25).
+    /// </summary>
+    internal static string FormulaEvidenceDetail(string? tableCode, string? columnCode, string expression)
+    {
+        var snippet = string.Join(' ', expression.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        if (snippet.Length > ExpressionSnippetLength)
+        {
+            snippet = snippet[..ExpressionSnippetLength].TrimEnd() + "…";
+        }
+
+        var where = columnCode is null ? tableCode ?? "?" : $"{tableCode ?? "?"}/{columnCode}";
+        return snippet.Length == 0 ? where : $"{where}: {snippet}";
     }
 
     /// <summary>Обсяг довідника для скрипта версії; текст розбирається раз на версію.</summary>
