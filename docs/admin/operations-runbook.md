@@ -267,18 +267,19 @@ ORDER BY [Ts];
 
 У подробицях: `userName`, `provider`, `outcome`, `reason`, `ip`, лічильник `suppressed`; час — «Коли», кореляція — колонка кореляції (той самий `X-Correlation-Id`). Пароля, його довжини чи фрагмента немає. Адреса `ip` — та сама, що рахує межа частоти (`Security:RateLimit:TrustForwardedFor`/`KnownProxies`), а не адреса проксі. Однакові невдалі спроби («ім'я + причина + адреса») пишуться не більше 20 разів за хвилину, решта додається числом `suppressed` до наступного запису. Збій запису журналу ніколи не змінює відповідь входу (Warning у логу).
 
-**Скільки живе.** Незмінний слід у `aud.SecurityEvent` (тригер `TR_SecurityEvent_Immutable`) тримається не менше мінімальної глибини аудиту (120 місяців, `arc.usp_ArchiveAudit`). Оперативна таблиця спроб `sec.LoginAttempt` чиститься фоновим прибиранням за строком — **400 днів за замовчуванням, і це налаштування**: його змінює адміністратор з правом `Security.ManageUsers` на екрані **Безпека → Сеанс** (поле «Срок хранения попыток входа» (en: Sign-in attempts retention), 30–3650 днів; `PUT /api/v1/security/session-settings`, подія журналу `SessionSettingsUpdated` із новим і попереднім значенням) — без перевидання й без перезапуску, діє на наступному проході прибирання (до `IntervalMinutes` хв). Те саме можна зробити SQL-ом (рядок `sys_ecr.SystemSetting`):
+**Скільки живе.** Незмінний слід у `aud.SecurityEvent` (тригер `TR_SecurityEvent_Immutable`) тримається не менше мінімальної глибини аудиту (120 місяців, `arc.usp_ArchiveAudit`). Оперативна таблиця спроб `sec.LoginAttempt` чиститься фоновим прибиранням за строком — **400 днів за замовчуванням, і це налаштування**: його змінює адміністратор з правом `Security.ManageUsers` на екрані **Безпека → Сеанс** (поле «Срок хранения технических журналов» (en: Technical logs retention), 30–36500 днів; поруч — «Минимальная глубина аудита» (en: Minimum audit depth), 120–1200 місяців, ключ `Retention.AuditMonths`, підлога 120 — рішення людини; саму архівацію аудиту веде `arc.usp_ArchiveAudit`; `PUT /api/v1/security/session-settings`, подія журналу `SessionSettingsUpdated` із новим і попереднім значенням) — без перевидання й без перезапуску, діє на наступному проході прибирання (до `IntervalMinutes` хв). Те саме можна зробити SQL-ом (рядок `sys_ecr.SystemSetting`):
 
 ```sql
 -- поточне значення (немає рядка — діє 400)
-SELECT [Key], Value, ModifiedAt FROM sys_ecr.SystemSetting WHERE [Key] = N'Security.LoginAttemptRetentionDays';
+SELECT [Key], Value, ModifiedAt FROM sys_ecr.SystemSetting WHERE [Key] = N'Retention.TechnicalLogDays';
 
--- змінити строк (дні; межі 30–3650: менше піднімається до 30, більше обрізається до 3650)
+-- змінити строк (дні; межі 30–36500: менше піднімається до 30, більше обрізається до 36500); глибина аудиту — так само,
+-- ключ N'Retention.AuditMonths' (місяці, 120–1200)
 UPDATE sys_ecr.SystemSetting SET Value = N'200', ModifiedAt = SYSUTCDATETIME()
- WHERE [Key] = N'Security.LoginAttemptRetentionDays';
+ WHERE [Key] = N'Retention.TechnicalLogDays';
 IF @@ROWCOUNT = 0
     INSERT INTO sys_ecr.SystemSetting ([Key], Value, Description, ModifiedAt)
-    VALUES (N'Security.LoginAttemptRetentionDays', N'200', N'Retention of sec.LoginAttempt, days (PSS-24)', SYSUTCDATETIME());
+    VALUES (N'Retention.TechnicalLogDays', N'200', N'Retention of sec.LoginAttempt, days (PSS-24)', SYSUTCDATETIME());
 ```
 
 `UPDATE` рядків `sec.LoginAttempt` заборонений тригером `TR_LoginAttempt_NoUpdate` (`THROW 50060`); `DELETE` дозволений — його робить прибирання за строком. Скорочення строку стирає старіше вже на наступному проході (необоротно для `sec.LoginAttempt`, але не для `aud.SecurityEvent`).

@@ -34,11 +34,24 @@ public sealed class LoginAttemptRetentionTests(SqlServerFixture sql)
     [InlineData("1", 30)] // підлога: свіжі спроби не стираються
     [InlineData("0", 30)]
     [InlineData("-5", 30)]
-    [InlineData("99999", 3650)] // стеля
+    [InlineData("99999", 36500)] // стеля
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait("Requirement", "PSS-24")]
     public void Строк_береться_з_налаштування_інакше_400_і_завжди_в_межах(string? stored, int expected)
         => Assert.Equal(expected, LoginAttemptRetention.Resolve(stored));
+
+    [Theory]
+    [InlineData(null, 120)]
+    [InlineData("не-число", 120)]
+    [InlineData("240", 240)]
+    [InlineData("119", 120)] // підлога 120 місяців (рішення людини 20.11 п. 7)
+    [InlineData("0", 120)]
+    [InlineData("-1", 120)]
+    [InlineData("1201", 1200)]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "PSS-24")]
+    public void Глибина_аудиту_не_менше_120_місяців_і_не_більше_1200(string? stored, int expected)
+        => Assert.Equal(expected, Ecr.Application.Security.SessionSettings.ResolveAuditRetentionMonths(stored));
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]

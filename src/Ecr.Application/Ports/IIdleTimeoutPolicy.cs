@@ -36,12 +36,23 @@ public interface ISessionSettingsStore
 
     /// <summary>Збережений строк зберігання <c>sec.LoginAttempt</c> у днях; <c>null</c> — рядка немає або він не число (PSS-24).</summary>
     /// <param name="ct">Токен скасування.</param>
-    public Task<int?> ReadLoginAttemptRetentionDaysAsync(CancellationToken ct);
+    public Task<int?> ReadTechnicalLogRetentionDaysAsync(CancellationToken ct);
 
     /// <summary>Записує строк зберігання <c>sec.LoginAttempt</c> (вставка або оновлення) у поточній транзакції.</summary>
     /// <param name="days">Дні.</param>
     /// <param name="byUserId">Хто змінив.</param>
     /// <param name="at">Момент у UTC.</param>
     /// <param name="ct">Токен скасування.</param>
-    public Task WriteLoginAttemptRetentionDaysAsync(int days, int byUserId, DateTime at, CancellationToken ct);
+    public Task WriteTechnicalLogRetentionDaysAsync(int days, int byUserId, DateTime at, CancellationToken ct);
+
+    /// <summary>Збережена мінімальна глибина аудиту в місяцях (<c>Retention.AuditMonths</c>); <c>null</c> — рядка немає або він не число.</summary>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<int?> ReadAuditRetentionMonthsAsync(CancellationToken ct);
+
+    /// <summary>Записує мінімальну глибину аудиту (вставка або оновлення) у поточній транзакції.</summary>
+    /// <param name="months">Місяці.</param>
+    /// <param name="byUserId">Хто змінив.</param>
+    /// <param name="at">Момент у UTC.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task WriteAuditRetentionMonthsAsync(int months, int byUserId, DateTime at, CancellationToken ct);
 }

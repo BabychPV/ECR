@@ -41,7 +41,7 @@ export function SessionSettingsPanel({ canManage }: { canManage: boolean }): JSX
       {(view) => (
         // ⚠ `key` — щоб збережене (чи чуже) значення з сервера скидало чернетку поля без ефекту.
         <SessionSettingsForm
-          key={`${String(view.idleTimeoutMinutes)}:${String(view.loginAttemptRetentionDays)}`}
+          key={`${String(view.idleTimeoutMinutes)}:${String(view.technicalLogRetentionDays)}:${String(view.auditRetentionMonths)}`}
           view={view}
           canManage={canManage}
           onSaved={async (saved) => {
@@ -65,7 +65,9 @@ function SessionSettingsForm({
 }): JSX.Element {
   const [value, setValue] = useState<number | string>(view.idleTimeoutMinutes);
   // PSS-24: строк зберігання спроб входу — на тому самому екрані, з тими самими правом і збереженням.
-  const [retentionValue, setRetentionValue] = useState<number | string>(view.loginAttemptRetentionDays);
+  const [retentionValue, setRetentionValue] = useState<number | string>(view.technicalLogRetentionDays);
+
+  const [auditValue, setAuditValue] = useState<number | string>(view.auditRetentionMonths);
 
   const minutes = typeof value === 'number' ? value : Number.NaN;
   const idleValid =
@@ -73,10 +75,18 @@ function SessionSettingsForm({
   const retentionDays = typeof retentionValue === 'number' ? retentionValue : Number.NaN;
   const retentionValid =
     Number.isInteger(retentionDays) &&
-    retentionDays >= view.minLoginAttemptRetentionDays &&
-    retentionDays <= view.maxLoginAttemptRetentionDays;
-  const valid = idleValid && retentionValid;
-  const changed = minutes !== view.idleTimeoutMinutes || retentionDays !== view.loginAttemptRetentionDays;
+    retentionDays >= view.minTechnicalLogRetentionDays &&
+    retentionDays <= view.maxTechnicalLogRetentionDays;
+  const auditMonths = typeof auditValue === 'number' ? auditValue : Number.NaN;
+  const auditValid =
+    Number.isInteger(auditMonths) &&
+    auditMonths >= view.minAuditRetentionMonths &&
+    auditMonths <= view.maxAuditRetentionMonths;
+  const valid = idleValid && retentionValid && auditValid;
+  const changed =
+    minutes !== view.idleTimeoutMinutes ||
+    retentionDays !== view.technicalLogRetentionDays ||
+    auditMonths !== view.auditRetentionMonths;
 
   const save = useMutation({
     mutationFn: (input: SessionSettingsInput) =>
@@ -95,10 +105,15 @@ function SessionSettingsForm({
     max: view.maxIdleTimeoutMinutes,
     default: view.defaultIdleTimeoutMinutes,
   });
+  const auditHint = t('security.session.auditHint', {
+    min: view.minAuditRetentionMonths,
+    max: view.maxAuditRetentionMonths,
+    default: view.defaultAuditRetentionMonths,
+  });
   const retentionHint = t('security.session.retentionHint', {
-    min: view.minLoginAttemptRetentionDays,
-    max: view.maxLoginAttemptRetentionDays,
-    default: view.defaultLoginAttemptRetentionDays,
+    min: view.minTechnicalLogRetentionDays,
+    max: view.maxTechnicalLogRetentionDays,
+    default: view.defaultTechnicalLogRetentionDays,
   });
 
   return (
@@ -106,7 +121,11 @@ function SessionSettingsForm({
       data-testid="session-settings"
       onSubmit={(event) => {
         event.preventDefault();
-        if (valid) save.mutate({ idleTimeoutMinutes: minutes, loginAttemptRetentionDays: retentionDays });
+        if (valid) save.mutate({
+            idleTimeoutMinutes: minutes,
+            technicalLogRetentionDays: retentionDays,
+            auditRetentionMonths: auditMonths,
+          });
       }}
     >
       <Stack gap="sm" maw={420}>
@@ -129,13 +148,13 @@ function SessionSettingsForm({
           {t('security.session.idleExplain')}
         </Text>
         <NumberInput
-          data-testid="login-attempt-retention"
+          data-testid="technical-log-retention"
           label={t('security.session.retentionLabel')}
           description={retentionHint}
           value={retentionValue}
           onChange={setRetentionValue}
-          min={view.minLoginAttemptRetentionDays}
-          max={view.maxLoginAttemptRetentionDays}
+          min={view.minTechnicalLogRetentionDays}
+          max={view.maxTechnicalLogRetentionDays}
           step={30}
           allowDecimal={false}
           allowNegative={false}
@@ -146,6 +165,25 @@ function SessionSettingsForm({
         />
         <Text size="sm" c="dimmed">
           {t('security.session.retentionExplain')}
+        </Text>
+        <NumberInput
+          data-testid="audit-retention"
+          label={t('security.session.auditLabel')}
+          description={auditHint}
+          value={auditValue}
+          onChange={setAuditValue}
+          min={view.minAuditRetentionMonths}
+          max={view.maxAuditRetentionMonths}
+          step={12}
+          allowDecimal={false}
+          allowNegative={false}
+          clampBehavior="none"
+          disabled={!canManage}
+          error={auditValue !== '' && !auditValid ? auditHint : undefined}
+          suffix={` ${t('security.session.monthsSuffix')}`}
+        />
+        <Text size="sm" c="dimmed">
+          {t('security.session.auditExplain')}
         </Text>
         {canManage && (
           <Group>

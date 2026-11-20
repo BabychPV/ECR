@@ -43656,18 +43656,33 @@ export interface components {
         SessionSettingsInput: {
             /**
              * Format: int32
+             * @description Мінімальна глибина аудиту, місяців (120–1200); `null` — не змінювати.
+             */
+            auditRetentionMonths?: null | number;
+            /**
+             * Format: int32
              * @description Вихід після стількох хвилин без дій.
              */
             idleTimeoutMinutes: number;
             /**
              * Format: int32
-             * @description Строк зберігання `sec.LoginAttempt` у днях (30–3650); `null` — не змінювати (старі клієнти шлють лише
+             * @description Строк зберігання `sec.LoginAttempt` у днях (30–36500); `null` — не змінювати (старі клієнти шлють лише
              *     IdleTimeoutMinutes).
              */
-            loginAttemptRetentionDays?: null | number;
+            technicalLogRetentionDays?: null | number;
         };
         /** @description Налаштування сеансу для екрана «Безпека». */
         SessionSettingsView: {
+            /**
+             * Format: int32
+             * @description Мінімальна глибина аудиту в `aud.*`, місяців (`Retention.AuditMonths`).
+             */
+            auditRetentionMonths: number;
+            /**
+             * Format: int32
+             * @description Значення за замовчуванням (120).
+             */
+            defaultAuditRetentionMonths: number;
             /**
              * Format: int32
              * @description Значення за замовчуванням.
@@ -43677,7 +43692,7 @@ export interface components {
              * Format: int32
              * @description Значення за замовчуванням (400).
              */
-            defaultLoginAttemptRetentionDays: number;
+            defaultTechnicalLogRetentionDays: number;
             /**
              * Format: int32
              * @description Вихід після стількох хвилин без дій.
@@ -43685,9 +43700,9 @@ export interface components {
             idleTimeoutMinutes: number;
             /**
              * Format: int32
-             * @description Скільки днів зберігається оперативний журнал спроб входу `sec.LoginAttempt` (PSS-24).
+             * @description Найбільше допустиме значення.
              */
-            loginAttemptRetentionDays: number;
+            maxAuditRetentionMonths: number;
             /**
              * Format: int32
              * @description Найбільше допустиме значення.
@@ -43697,7 +43712,12 @@ export interface components {
              * Format: int32
              * @description Найбільше допустиме значення.
              */
-            maxLoginAttemptRetentionDays: number;
+            maxTechnicalLogRetentionDays: number;
+            /**
+             * Format: int32
+             * @description Найменше допустиме значення (120).
+             */
+            minAuditRetentionMonths: number;
             /**
              * Format: int32
              * @description Найменше допустиме значення.
@@ -43707,7 +43727,12 @@ export interface components {
              * Format: int32
              * @description Найменше допустиме значення.
              */
-            minLoginAttemptRetentionDays: number;
+            minTechnicalLogRetentionDays: number;
+            /**
+             * Format: int32
+             * @description Скільки днів зберігається оперативний журнал спроб входу `sec.LoginAttempt` (PSS-24).
+             */
+            technicalLogRetentionDays: number;
         };
         /** @description Запит на зміну отримання алертів. */
         SetAlertsRequest: {

@@ -18,10 +18,14 @@ const view: SessionSettingsView = {
   minIdleTimeoutMinutes: 5,
   maxIdleTimeoutMinutes: 480,
   defaultIdleTimeoutMinutes: 30,
-  loginAttemptRetentionDays: 400,
-  minLoginAttemptRetentionDays: 30,
-  maxLoginAttemptRetentionDays: 3650,
-  defaultLoginAttemptRetentionDays: 400,
+  technicalLogRetentionDays: 400,
+  minTechnicalLogRetentionDays: 30,
+  maxTechnicalLogRetentionDays: 36500,
+  defaultTechnicalLogRetentionDays: 400,
+  auditRetentionMonths: 120,
+  minAuditRetentionMonths: 120,
+  maxAuditRetentionMonths: 1200,
+  defaultAuditRetentionMonths: 120,
 };
 
 function serve(puts: string[]): void {
@@ -30,9 +34,18 @@ function serve(puts: string[]): void {
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === 'PUT') {
         puts.push(String(init.body));
-        const sent = JSON.parse(String(init.body)) as { idleTimeoutMinutes: number; loginAttemptRetentionDays: number };
+        const sent = JSON.parse(String(init.body)) as {
+          idleTimeoutMinutes: number;
+          technicalLogRetentionDays: number;
+          auditRetentionMonths: number;
+        };
         return new Response(
-          JSON.stringify({ ...view, idleTimeoutMinutes: sent.idleTimeoutMinutes, loginAttemptRetentionDays: sent.loginAttemptRetentionDays }),
+          JSON.stringify({
+            ...view,
+            idleTimeoutMinutes: sent.idleTimeoutMinutes,
+            technicalLogRetentionDays: sent.technicalLogRetentionDays,
+            auditRetentionMonths: sent.auditRetentionMonths,
+          }),
           { status: 200, headers: { 'Content-Type': 'application/json' } },
         );
       }
@@ -63,7 +76,7 @@ describe('SessionSettingsPanel — строк зберігання спроб в
     serve([]);
     show(true);
 
-    const input = (await screen.findByTestId('login-attempt-retention')) as HTMLInputElement;
+    const input = (await screen.findByTestId('technical-log-retention')) as HTMLInputElement;
     expect(input.value).toContain('400');
     expect(submit().disabled).toBe(true);
   });
@@ -72,7 +85,7 @@ describe('SessionSettingsPanel — строк зберігання спроб в
     serve([]);
     show(true);
 
-    const input = await screen.findByTestId('login-attempt-retention');
+    const input = await screen.findByTestId('technical-log-retention');
     await userEvent.clear(input);
     await userEvent.type(input, '29');
 
@@ -84,22 +97,57 @@ describe('SessionSettingsPanel — строк зберігання спроб в
     serve(puts);
     show(true);
 
-    const input = await screen.findByTestId('login-attempt-retention');
+    const input = await screen.findByTestId('technical-log-retention');
     await userEvent.clear(input);
     await userEvent.type(input, '120');
     await waitFor(() => expect(submit().disabled).toBe(false));
     await userEvent.click(submit());
 
     await waitFor(() => expect(puts).toHaveLength(1));
-    expect(JSON.parse(puts[0] ?? '{}')).toEqual({ idleTimeoutMinutes: 30, loginAttemptRetentionDays: 120 });
+    expect(JSON.parse(puts[0] ?? '{}')).toEqual({
+      idleTimeoutMinutes: 30,
+      technicalLogRetentionDays: 120,
+      auditRetentionMonths: 120,
+    });
+  });
+
+  it('глибина аудиту нижче підлоги сервера (119 < 120) — збереження вимкнене', async () => {
+    serve([]);
+    show(true);
+
+    const input = await screen.findByTestId('audit-retention');
+    await userEvent.clear(input);
+    await userEvent.type(input, '119');
+
+    await waitFor(() => expect(submit().disabled).toBe(true));
+  });
+
+  it('глибина аудиту 240 — PUT несе її разом з рештою', async () => {
+    const puts: string[] = [];
+    serve(puts);
+    show(true);
+
+    const input = await screen.findByTestId('audit-retention');
+    await userEvent.clear(input);
+    await userEvent.type(input, '240');
+    await waitFor(() => expect(submit().disabled).toBe(false));
+    await userEvent.click(submit());
+
+    await waitFor(() => expect(puts).toHaveLength(1));
+    expect(JSON.parse(puts[0] ?? '{}')).toEqual({
+      idleTimeoutMinutes: 30,
+      technicalLogRetentionDays: 400,
+      auditRetentionMonths: 240,
+    });
   });
 
   it('без права керування поле вимкнене і кнопки немає', async () => {
     serve([]);
     show(false);
 
-    const input = (await screen.findByTestId('login-attempt-retention')) as HTMLInputElement;
+    const input = (await screen.findByTestId('technical-log-retention')) as HTMLInputElement;
     expect(input.disabled).toBe(true);
+    expect(((await screen.findByTestId('audit-retention')) as HTMLInputElement).disabled).toBe(true);
     expect(document.querySelector('button[type="submit"]')).toBeNull();
   });
 });

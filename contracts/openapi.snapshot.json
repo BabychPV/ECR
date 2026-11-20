@@ -27652,13 +27652,21 @@
       "SessionSettingsInput": {
         "description": "Запит на зміну налаштувань сеансу.",
         "properties": {
+          "auditRetentionMonths": {
+            "description": "Мінімальна глибина аудиту, місяців (120–1200); `null` — не змінювати.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "idleTimeoutMinutes": {
             "description": "Вихід після стількох хвилин без дій.",
             "format": "int32",
             "type": "integer"
           },
-          "loginAttemptRetentionDays": {
-            "description": "Строк зберігання `sec.LoginAttempt` у днях (30–3650); `null` — не змінювати (старі клієнти шлють лише\nIdleTimeoutMinutes).",
+          "technicalLogRetentionDays": {
+            "description": "Строк зберігання `sec.LoginAttempt` у днях (30–36500); `null` — не змінювати (старі клієнти шлють лише\nIdleTimeoutMinutes).",
             "format": "int32",
             "type": [
               "null",
@@ -27674,12 +27682,22 @@
       "SessionSettingsView": {
         "description": "Налаштування сеансу для екрана «Безпека».",
         "properties": {
+          "auditRetentionMonths": {
+            "description": "Мінімальна глибина аудиту в `aud.*`, місяців (`Retention.AuditMonths`).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "defaultAuditRetentionMonths": {
+            "description": "Значення за замовчуванням (120).",
+            "format": "int32",
+            "type": "integer"
+          },
           "defaultIdleTimeoutMinutes": {
             "description": "Значення за замовчуванням.",
             "format": "int32",
             "type": "integer"
           },
-          "defaultLoginAttemptRetentionDays": {
+          "defaultTechnicalLogRetentionDays": {
             "description": "Значення за замовчуванням (400).",
             "format": "int32",
             "type": "integer"
@@ -27689,8 +27707,8 @@
             "format": "int32",
             "type": "integer"
           },
-          "loginAttemptRetentionDays": {
-            "description": "Скільки днів зберігається оперативний журнал спроб входу `sec.LoginAttempt` (PSS-24).",
+          "maxAuditRetentionMonths": {
+            "description": "Найбільше допустиме значення.",
             "format": "int32",
             "type": "integer"
           },
@@ -27699,8 +27717,13 @@
             "format": "int32",
             "type": "integer"
           },
-          "maxLoginAttemptRetentionDays": {
+          "maxTechnicalLogRetentionDays": {
             "description": "Найбільше допустиме значення.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "minAuditRetentionMonths": {
+            "description": "Найменше допустиме значення (120).",
             "format": "int32",
             "type": "integer"
           },
@@ -27709,8 +27732,13 @@
             "format": "int32",
             "type": "integer"
           },
-          "minLoginAttemptRetentionDays": {
+          "minTechnicalLogRetentionDays": {
             "description": "Найменше допустиме значення.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "technicalLogRetentionDays": {
+            "description": "Скільки днів зберігається оперативний журнал спроб входу `sec.LoginAttempt` (PSS-24).",
             "format": "int32",
             "type": "integer"
           }
@@ -27720,10 +27748,14 @@
           "minIdleTimeoutMinutes",
           "maxIdleTimeoutMinutes",
           "defaultIdleTimeoutMinutes",
-          "loginAttemptRetentionDays",
-          "minLoginAttemptRetentionDays",
-          "maxLoginAttemptRetentionDays",
-          "defaultLoginAttemptRetentionDays"
+          "technicalLogRetentionDays",
+          "minTechnicalLogRetentionDays",
+          "maxTechnicalLogRetentionDays",
+          "defaultTechnicalLogRetentionDays",
+          "auditRetentionMonths",
+          "minAuditRetentionMonths",
+          "maxAuditRetentionMonths",
+          "defaultAuditRetentionMonths"
         ],
         "type": "object"
       },

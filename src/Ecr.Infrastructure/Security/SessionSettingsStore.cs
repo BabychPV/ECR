@@ -33,19 +33,35 @@ public sealed class SessionSettingsStore(EcrDbContext db) : ISessionSettingsStor
             byUserId, at, ct);
 
     /// <inheritdoc />
-    public async Task<int?> ReadLoginAttemptRetentionDaysAsync(CancellationToken ct)
+    public async Task<int?> ReadTechnicalLogRetentionDaysAsync(CancellationToken ct)
     {
         var raw = await db.Database
-            .SqlQuery<string?>($"SELECT Value AS [Value] FROM sys_ecr.SystemSetting WHERE [Key] = {SessionSettings.LoginAttemptRetentionKey}")
+            .SqlQuery<string?>($"SELECT Value AS [Value] FROM sys_ecr.SystemSetting WHERE [Key] = {SessionSettings.TechnicalLogRetentionKey}")
             .FirstOrDefaultAsync(ct).ConfigureAwait(false);
 
         return int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var days) ? days : null;
     }
 
     /// <inheritdoc />
-    public Task WriteLoginAttemptRetentionDaysAsync(int days, int byUserId, DateTime at, CancellationToken ct)
+    public Task WriteTechnicalLogRetentionDaysAsync(int days, int byUserId, DateTime at, CancellationToken ct)
         => UpsertAsync(
-            SessionSettings.LoginAttemptRetentionKey, days, "Retention of sec.LoginAttempt, days (PSS-24)",
+            SessionSettings.TechnicalLogRetentionKey, days, "Retention of sec.LoginAttempt, days (PSS-24)",
+            byUserId, at, ct);
+
+    /// <inheritdoc />
+    public async Task<int?> ReadAuditRetentionMonthsAsync(CancellationToken ct)
+    {
+        var raw = await db.Database
+            .SqlQuery<string?>($"SELECT Value AS [Value] FROM sys_ecr.SystemSetting WHERE [Key] = {SessionSettings.AuditRetentionKey}")
+            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+
+        return int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var months) ? months : null;
+    }
+
+    /// <inheritdoc />
+    public Task WriteAuditRetentionMonthsAsync(int months, int byUserId, DateTime at, CancellationToken ct)
+        => UpsertAsync(
+            SessionSettings.AuditRetentionKey, months, "Minimum audit depth in aud.*, months (PSS-27)",
             byUserId, at, ct);
 
     private async Task UpsertAsync(string key, int number, string description, int byUserId, DateTime at, CancellationToken ct)

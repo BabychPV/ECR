@@ -24,6 +24,10 @@ namespace Ecr.Infrastructure.Security;
 /// ⛔ Стеля й підлога: значення з бази обмежується межами <see cref="MinDays"/>–<see cref="MaxDays"/> (рядок, змінений
 /// руками в обхід, — 0, −5, 99999 — не вимикає прибирання й не стирає свіжі спроби).
 ///
+/// ⛔ Ключ <c>Retention.TechnicalLogDays</c> і межі 30–36500 (типово 400) — ТІ САМІ, що в <c>RetentionSettings</c> (лан L6,
+/// PSS-13): один рядок налаштувань на всі технічні журнали. Цей клас має власне читання (<see cref="LoginAttemptPurger.ReadRetentionDaysAsync"/>)
+/// лише тому, що файл L6 у цій гілці ще відсутній; при злитті звести до <c>RetentionSettings.ReadAsync(...).TechnicalLogDays</c>.
+///
 /// ⚠ Що це НЕ чіпає. Прибирається лише оперативний <c>sec.LoginAttempt</c>. Незмінний слід входів — у
 /// <c>aud.SecurityEvent</c> (<c>LoginSucceeded</c> / <c>LoginFailed</c> / <c>AccountLocked</c>): його не чистить ніщо в цьому
 /// файлі, а архівація тримає його не менше 120 місяців (PSS-27, <c>arc.usp_ArchiveAudit</c>).
@@ -31,7 +35,7 @@ namespace Ecr.Infrastructure.Security;
 public static class LoginAttemptRetention
 {
     /// <summary>Ключ у <c>sys_ecr.SystemSetting</c> (число днів).</summary>
-    public const string SettingKey = Ecr.Application.Security.SessionSettings.LoginAttemptRetentionKey;
+    public const string SettingKey = Ecr.Application.Security.SessionSettings.TechnicalLogRetentionKey;
 
     /// <summary>Ключ конфігурації: інтервал між проходами, хв.</summary>
     public const string IntervalMinutesKey = "Security:LoginAttemptRetention:IntervalMinutes";
@@ -40,13 +44,13 @@ public static class LoginAttemptRetention
     public const string EnabledKey = "Security:LoginAttemptRetention:Enabled";
 
     /// <summary>400 днів — слово людини 20.11.</summary>
-    public const int DefaultDays = Ecr.Application.Security.SessionSettings.DefaultLoginAttemptRetentionDays;
+    public const int DefaultDays = Ecr.Application.Security.SessionSettings.DefaultTechnicalLogRetentionDays;
 
     /// <summary>Підлога: жодні налаштування не стирають спроби молодші за 30 днів.</summary>
-    public const int MinDays = Ecr.Application.Security.SessionSettings.MinLoginAttemptRetentionDays;
+    public const int MinDays = Ecr.Application.Security.SessionSettings.MinTechnicalLogRetentionDays;
 
     /// <summary>Стеля: 10 років.</summary>
-    public const int MaxDays = Ecr.Application.Security.SessionSettings.MaxLoginAttemptRetentionDays;
+    public const int MaxDays = Ecr.Application.Security.SessionSettings.MaxTechnicalLogRetentionDays;
 
     /// <summary>Інтервал між проходами за замовчуванням, хв.</summary>
     public const int DefaultIntervalMinutes = 60;
@@ -55,7 +59,7 @@ public static class LoginAttemptRetention
     /// <param name="stored">Значення з <c>SystemSetting</c>; <c>null</c> — рядка немає.</param>
     /// <returns>Дні в межах <see cref="MinDays"/>–<see cref="MaxDays"/>.</returns>
     public static int Resolve(string? stored)
-        => Ecr.Application.Security.SessionSettings.ResolveLoginAttemptRetentionDays(stored);
+        => Ecr.Application.Security.SessionSettings.ResolveTechnicalLogRetentionDays(stored);
 }
 
 /// <summary>Один прохід прибирання <c>sec.LoginAttempt</c> за чинним строком.</summary>
