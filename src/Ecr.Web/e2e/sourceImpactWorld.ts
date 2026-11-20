@@ -357,10 +357,10 @@ export async function createImpactWorld(page: Page, policy: Policy): Promise<Imp
     );
   });
 
-  const sourceCode = `E2ESISP${stamp}`;
-  const consumerCode = `E2ESICP${stamp}`;
-  const sourceProject = { id: await createProject(page, sourceCode, source.versionId), code: sourceCode };
-  const consumerProject = { id: await createProject(page, consumerCode, consumer.versionId), code: consumerCode };
+  const sourceProjectCode = `E2ESISP${stamp}`;
+  const consumerProjectCode = `E2ESICP${stamp}`;
+  const sourceProject = { id: await createProject(page, sourceProjectCode, source.versionId), code: sourceProjectCode };
+  const consumerProject = { id: await createProject(page, consumerProjectCode, consumer.versionId), code: consumerProjectCode };
   const sourceDoc = await createDocument(page, sourceProject, source.versionId, source.base);
   const approvedConsumer = await createDocument(page, consumerProject, consumer.versionId, consumer.base);
   const pendingConsumer = await createDocument(page, consumerProject, consumer.versionId, consumer.base);
