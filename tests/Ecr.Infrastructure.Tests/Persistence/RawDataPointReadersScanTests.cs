@@ -29,8 +29,15 @@ namespace Ecr.Infrastructure.Tests.Persistence;
 /// читання ростуть на сотні сторінок, обидва тести червоні.
 /// </remarks>
 [Collection("SqlServer")]
-public sealed class RawDataPointReadersScanTests(SqlServerFixture sql)
+public sealed class RawDataPointReadersScanTests(SqlServerFixture sql) : IAsyncLifetime
 {
+    /// <summary>Сутності тесту: їхні 40 тис. чужих точок прибираються в <see cref="DisposeAsync"/> (піку файла спільної бази не лишаємо).</summary>
+    private readonly List<int> _sourceEntityIds = [];
+
+    public Task InitializeAsync() => Task.CompletedTask;
+
+    public Task DisposeAsync() => SharedDataCleanup.DeleteRawPointsAndCoverageAsync(sql.ConnectionString, _sourceEntityIds);
+
     private const int ForeignRows = 40_000;
     private const int Slack = 4;
 
@@ -43,6 +50,7 @@ public sealed class RawDataPointReadersScanTests(SqlServerFixture sql)
     public async Task Використання_одиниці_сирими_точками_не_читає_чужих_рядків()
     {
         var (entityId, runId, used, unused) = await ArrangeUnitsAsync();
+        _sourceEntityIds.Add(entityId);
 
         // Точка в одиниці `used` по змапленому шляху; мапінг називає `used` джерелом.
         Assert.True(await UsesRawAsync(used));
@@ -97,6 +105,7 @@ public sealed class RawDataPointReadersScanTests(SqlServerFixture sql)
             db.SourceEntities.Add(entity);
             await db.SaveChangesAsync(CancellationToken.None);
             entityId = entity.Id;
+            _sourceEntityIds.Add(entityId);
 
             var rowKey = await db.TableRows
                 .Where(r => r.PeriodKeyValue == chain.PeriodKey.Value && r.Id == chain.RowIds[0])

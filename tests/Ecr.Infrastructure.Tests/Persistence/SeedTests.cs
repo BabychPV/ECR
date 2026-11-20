@@ -164,9 +164,14 @@ public sealed class SeedTests(SqlServerFixture sql)
     [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Document_Discuss_видано_кожній_ролі_з_View_одноразово_і_повторний_сід_не_повертає_знятого()
     {
-        // TC:discuss — кожна роль, що має Document.View, має й Document.Discuss.
+        // TC:discuss — кожна ВБУДОВАНА роль, що має Document.View, має й Document.Discuss.
+        // ⛔ Лише IsBuiltIn: сід видає право ролям, що існували на момент сіду; ролі, які інші тести колекції створюють у спільній
+        // базі пізніше (DR_*, SRV_*, DRA_*: View без Discuss), права не мають і мати не мусять («Роль, створена ПІСЛЯ першого сіду,
+        // права не отримує»). Без цього відбору перевірка залежала від того, які класи встигли відпрацювати до неї: у повному
+        // прогоні Infrastructure — 26 таких ролей, окремо Persistence — 0.
         Assert.Equal(0, await ScalarAsync("""
             SELECT COUNT(*) FROM sec.RolePermission AS v
+            JOIN sec.Role AS vr ON vr.Id = v.RoleId AND vr.IsBuiltIn = 1
             WHERE v.PermissionCode = N'Document.View'
               AND NOT EXISTS (SELECT 1 FROM sec.RolePermission AS d WHERE d.RoleId = v.RoleId AND d.PermissionCode = N'Document.Discuss')
             """));

@@ -403,6 +403,7 @@ public sealed class SqlServerFixture : IAsyncLifetime
                 """).ConfigureAwait(false);
         }).ConfigureAwait(false);
 
+        await ShrinkInheritedLogAsync(master).ConfigureAwait(false);
         await MarkAsSmallAsync(serverConnection).ConfigureAwait(false);
         await MarkDataPathAsync(serverConnection).ConfigureAwait(false);
 
@@ -414,6 +415,36 @@ public sealed class SqlServerFixture : IAsyncLifetime
 
         return target.ConnectionString;
     }
+
+    /// <summary>Розмір журналу новоствореної тестової бази, МБ (початковий розмір файла даних <c>model</c> на чистому сервері — 8).</summary>
+    private const int BirthLogMb = 8;
+
+    /// <summary>
+    /// Повертає журналу новоствореної бази розмір <see cref="BirthLogMb"/>: <c>CREATE DATABASE</c> без явного <c>SIZE</c> бере
+    /// розмір файлів із <c>model</c>, а <c>model</c> на машині розробника може мати журнал, що колись виріс.
+    /// </summary>
+    /// <param name="master">Підключення до <c>master</c> того самого сервера.</param>
+    /// <remarks>
+    /// ⛔ 20.11: повний прогін Infrastructure на інтеграційній гілці падав сторожем <c>TestDatabaseSizeTests</c>
+    /// («журнал = 136 МБ») ще ДО першого тесту, а за ним — і сторожем наприкінці колекції, що в xUnit 2 червоніє КОЖЕН тест
+    /// колекції (3042 тести по 1 мс, «Test Collection Cleanup Failure»). Журнал у 136 МБ тестова база успадкувала від
+    /// <c>model</c> (<c>modellog = 136 МБ</c>, <c>model</c> у FULL) — розмір народження залежав від чужого стану сервера, а не
+    /// від схеми чи сіду (журнал був 136 МБ уже перед <c>01-filegroups.sql</c>). Скорочення — на щойно створеній базі, де журнал
+    /// порожній; сам сторож (стеля <see cref="MaxFileMb"/>) не змінено.
+    /// </remarks>
+    private Task ShrinkInheritedLogAsync(SqlConnectionStringBuilder master) => RetryDdlAsync(
+        "DBCC SHRINKFILE " + DatabaseName + " (журнал)",
+        async () =>
+        {
+            var target = new SqlConnectionStringBuilder(master.ConnectionString) { InitialCatalog = DatabaseName };
+            await using var connection = new SqlConnection(target.ConnectionString);
+            await connection.OpenAsync().ConfigureAwait(false);
+            await ExecuteAsync(connection, $"""
+                DECLARE @log sysname = (SELECT name FROM sys.database_files WHERE type = 1);
+                IF (SELECT size FROM sys.database_files WHERE type = 1) > {BirthLogMb} * 128
+                    EXEC (N'DBCC SHRINKFILE (N''' + @log + N''', {BirthLogMb}) WITH NO_INFOMSGS;');
+                """).ConfigureAwait(false);
+        });
 
     /// <summary>
     /// Позначає базу як тестову — щоб <c>01-filegroups.sql</c> робив малі файли.
