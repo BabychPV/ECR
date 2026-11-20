@@ -112,7 +112,13 @@ export function SourceImpactModal({
                       {c.projectCode} · {c.documentKey} · {formatPeriodKey(c.periodKey)}
                     </Text>
                     <Badge size="sm" variant="light" color={periodState(c) === 'pending' ? 'statusInfo' : 'statusWarning'}>
-                      {t(`sourceImpact.status.${periodState(c)}`)}
+                      {t(
+                        periodState(c) === 'approved'
+                          ? 'sourceImpact.status.approved'
+                          : periodState(c) === 'partial'
+                            ? 'sourceImpact.status.partial'
+                            : 'sourceImpact.status.pending',
+                      )}
                     </Badge>
                   </Group>
                   {c.sheets.length > 1 ? (
