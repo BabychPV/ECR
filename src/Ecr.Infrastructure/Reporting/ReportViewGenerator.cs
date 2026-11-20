@@ -108,6 +108,7 @@ public sealed partial class ReportViewGenerator(
             // ✎ RPT-STABLE: спершу _vN (без змін), потім стабільні вʼюхи без версії. Збій першого не відміняє другого
             // (одна задовга таблиця не лишає без вʼюх решту), але перша помилка кидається викликачу.
             SqlException? first = null;
+            string? blocked = null;
             if (templateViews)
             {
                 try
@@ -134,7 +135,9 @@ public sealed partial class ReportViewGenerator(
             {
                 try
                 {
-                    var skipped = await GenerateStableAsync(templateVersionId, routed, onlyIfChanged, ct).ConfigureAwait(false);
+                    var (skipped, blockedRow) =
+                        await GenerateStableAsync(templateVersionId, routed, onlyIfChanged, ct).ConfigureAwait(false);
+                    blocked = blockedRow;
                     if (logger is not null && onlyIfChanged)
                     {
                         LogStartupViews(logger, skipped ? "пропущено: входи не змінилися" : "перегенеровано");
@@ -149,6 +152,14 @@ public sealed partial class ReportViewGenerator(
             if (first is not null)
             {
                 System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(first).Throw();
+            }
+
+            if (blocked is not null)
+            {
+                // ✎ PSS-10: прогін «усі шаблони» без помилки, але з рядком Blocked (DDL шаблону не дочекався Sch-M за
+                // читачами, шаблон лишився старим). Той самий наслідок, що й 50424 нижче: збій на картці й відкладення.
+                status?.Failed(new ReportViewFailure(templateVersionId, BlockedError, blocked, stableTemplateId));
+                throw Deferred(blocked);
             }
         }
         catch (SqlException ex)
@@ -169,6 +180,15 @@ public sealed partial class ReportViewGenerator(
             }
 
             status?.Failed(new ReportViewFailure(templateVersionId, ex.Number, SafeMessage(ex, correlationId), stableTemplateId));
+
+            // ✎ PSS-10: 50424 — DDL вʼюхи не дочекався Sch-M за довгими читачами (SSRS) і відступив, щоб не тримати
+            // чергу нових читачів. Це не провал, а «пізніше»: задача (ReportViewsJob) відкладається й повторюється
+            // (JobWorker, стеля відкладень JobDeferral). Поза задачею (публікація) виняток так само глушиться викликачем.
+            if (ex.Number == BlockedError)
+            {
+                throw Deferred(ex.Message);
+            }
+
             throw;
         }
         finally
@@ -190,12 +210,35 @@ public sealed partial class ReportViewGenerator(
     }
 
     /// <summary>
+    /// ✎ PSS-10: номер повторюваного збою процедур вʼюх — DDL не дочекався Sch-M за читачами за <c>@DdlLockTimeoutMs</c>
+    /// (<c>05-rpt-views.sql</c>); у прогоні «усі шаблони» — рядок <see cref="BlockedAction"/>.
+    /// </summary>
+    public const int BlockedError = 50424;
+
+    /// <summary>✎ PSS-10: дія в результаті <c>rpt.usp_GenerateStableViews</c> для шаблону, чиї вʼюхи лишилися старими.</summary>
+    public const string BlockedAction = "Blocked";
+
+    /// <summary>✎ PSS-10: через скільки повторити задачу вʼюх, коли DDL відступив перед читачами.</summary>
+    public static readonly TimeSpan BlockedRetryDelay = TimeSpan.FromMinutes(2);
+
+    /// <summary>Ресурс у конверті вичерпаної стелі відкладень.</summary>
+    private const string BlockedResource = "rpt.views (Sch-M)";
+
+    private static Infrastructure.Jobs.JobDeferredException Deferred(string reason)
+        => new(BlockedRetryDelay, "Report views were not regenerated, readers held them; retrying later. " + reason, BlockedResource);
+
+    /// <summary>
     /// ✎ RPT-STABLE: <c>rpt.usp_GenerateStableViews</c> — вʼюхи без версії (шаблон, аркуш, таблиця) по всіх опублікованих версіях.
     /// Попередження процедури (конфлікт типу колонки між версіями → nvarchar) пишуться в журнал.
     /// </summary>
-    private async Task<bool> GenerateStableAsync(int? templateVersionId, bool routed, bool onlyIfChanged, CancellationToken ct)
+    /// <returns>
+    /// Чи пропущено генерацію (AN-155d) і причина першого рядка <see cref="BlockedAction"/> (PSS-10), якщо такий був.
+    /// </returns>
+    private async Task<(bool Skipped, string? Blocked)> GenerateStableAsync(
+        int? templateVersionId, bool routed, bool onlyIfChanged, CancellationToken ct)
     {
         var skipped = false;
+        string? blocked = null;
         var connection = db.Database.GetDbConnection();
         var wasClosed = connection.State != System.Data.ConnectionState.Open;
         if (wasClosed)
@@ -231,6 +274,12 @@ public sealed partial class ReportViewGenerator(
                     skipped = true;
                 }
 
+                if (string.Equals(reader.GetString(1), BlockedAction, StringComparison.Ordinal))
+                {
+                    blocked ??= reader.IsDBNull(2) ? $"rpt.{reader.GetString(0)}*" : reader.GetString(2);
+                    continue;
+                }
+
                 if (!reader.IsDBNull(2) && logger is not null)
                 {
                     LogStableWarning(logger, reader.GetString(0), reader.GetString(2));
@@ -245,7 +294,7 @@ public sealed partial class ReportViewGenerator(
             }
         }
 
-        return skipped;
+        return (skipped, blocked);
     }
 
     /// <summary>
