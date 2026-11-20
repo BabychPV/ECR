@@ -52,16 +52,16 @@ internal sealed class MethodologyPhaseReadCache(long maxRetainedCells)
         => new((long)limits.MaxParallelism * limits.MaxInputCellsPerBinding);
 
     /// <summary>Екземпляр таблиці (незмінний за прогін: документ, період, таблиця, версія шаблону).</summary>
-    public Task<TableInstanceRef> InstanceAsync(long tableInstanceId, Func<Task<TableInstanceRef>> load)
+    internal Task<TableInstanceRef> InstanceAsync(long tableInstanceId, Func<Task<TableInstanceRef>> load)
         => GetAsync(_instances, tableInstanceId, load, static _ => 0);
 
     /// <summary>Ключ рядка → <c>TableRow.Id</c> екземпляра за періодом, з яким читають.</summary>
-    public Task<IReadOnlyDictionary<string, long>> RowIdsAsync(
+    internal Task<IReadOnlyDictionary<string, long>> RowIdsAsync(
         long tableInstanceId, PeriodKey period, Func<Task<IReadOnlyDictionary<string, long>>> load)
         => GetAsync(_rowIds, (tableInstanceId, period.Value), load, static _ => 0);
 
     /// <summary>Зріз комірок екземпляра як є у сховищі (без дефолтів колонок).</summary>
-    public Task<IReadOnlyList<CellRecord>> SliceAsync(
+    internal Task<IReadOnlyList<CellRecord>> SliceAsync(
         long tableInstanceId, PeriodKey period, Func<Task<IReadOnlyList<CellRecord>>> load)
         => GetAsync(_slices, (tableInstanceId, period.Value), load, static s => s.Count);
 
@@ -69,7 +69,7 @@ internal sealed class MethodologyPhaseReadCache(long maxRetainedCells)
     /// Екземпляр, рядки й зріз, доповнений дефолтами колонок (<see cref="MethodologyResolver.ReadTableAsync"/>), —
     /// за періодом самого екземпляра.
     /// </summary>
-    public Task<TableRead> TableAsync(long tableInstanceId, Func<Task<TableRead>> load)
+    internal Task<TableRead> TableAsync(long tableInstanceId, Func<Task<TableRead>> load)
         => GetAsync(_tables, tableInstanceId, load, static t => t.Slice.Count);
 
     private async Task<T> GetAsync<TKey, T>(
