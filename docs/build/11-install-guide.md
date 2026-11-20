@@ -614,7 +614,8 @@ Developer/Evaluation-подібному стенді, де ліцензія ці
 | `ECR_Jobs__Workers__Count` | `10` | 10 дочірніх процесів перерахунку; решта ядер — застосунку й ОС |
 | `ECR_Jobs__Workers__MemoryLimitMb` | `2048` | межа Job Object на один процес; перевищення — OOM у цьому процесі, а не на сервері |
 | `ECR_Jobs__Workers__JobMemoryLimitMb` | `22528` | межа на весь пул (22 ГБ): лишає ~4 ГБ застосунку й ~3 ГБ ОС |
-| `ECR_Jobs__Workers__MaxDuration` | `00:30:00` | найдовша задача до примусового зняття |
+| `ECR_Jobs__Workers__MaxDuration` | `00:30:00` | найдовша задача до примусового зняття; ✎ 2026-11-20 (`D-561`): перерахунок документа за рік іде кроками по одному місяцю, і межа діє на **крок** (місяць), а не на весь рік |
+| `ECR_Jobs__Recalculation__FanOutMaxConcurrency` | `4` | ✎ 2026-11-20 (`D-561`, PSS-02): скільки документів річного перерахунку проєкту рахуються одночасно — на весь пул разом. Ручний перерахунок, автоперерахунок і залежні в цю межу не входять і обганяють річний розклад. Кожен документ — до `Calculations:MaxParallelism` (4) важких запитів до SQL, тож 4 × 4 ≈ 16 сеансів замість ≈ 40 без межі |
 
 Записати (той самий прийом злиття, що в розділі 9 — чужі записи не
 чіпати), потім перезапустити службу:
@@ -625,6 +626,12 @@ $env0 = @((Get-ItemProperty $key -Name Environment -ErrorAction SilentlyContinue
 Set-ItemProperty $key -Name Environment -Type MultiString -Value ([string[]]($env0 + 'ECR_Jobs__Workers__Count=6'))
 Restart-Service EcrWorker
 ```
+
+**Профіль «малий SQL Server»** (✎ 2026-11-20, `D-561`): якщо SQL Server спільний або має менше ~16 ядер і 32 ГБ,
+а під час річного перерахунку сторінки документів відкриваються повільно (очікування `RESOURCE_SEMAPHORE` на
+сервері), зменшіть навантаження пулу: `ECR_Jobs__Workers__Count=4`, `ECR_Calculations__MaxParallelism=2`,
+`ECR_Jobs__Recalculation__FanOutMaxConcurrency=2` (той самий прийом запису, що вище). Річний перерахунок іде довше,
+але інтерактивна робота не чекає пам'яті SQL. Цільовий профіль (окремий SQL Server 20 ядер / 32 ГБ) — типові значення.
 
 Вимкнути, увімкнути назад, відкотити — `docs/admin/operations-runbook.md` §10.
 
