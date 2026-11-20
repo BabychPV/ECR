@@ -1,7 +1,7 @@
 import { lazy, Suspense, useRef, useState, type JSX, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import { Button, Menu, Text } from '@mantine/core';
 import { exportFormatOptions, type ExportFormat } from '@/features/export/exportFormat';
-import { RecalculateKbd, submitLabel, useSheetActions, type SheetActionsModel } from '@/features/workflow/SheetActions';
+import { decisionLabel, RecalculateKbd, submitLabel, useSheetActions, type SheetActionsModel } from '@/features/workflow/SheetActions';
 import { Hint } from '@/shared/ui/Hint';
 import type { DocumentLock } from './documentLock';
 import { DocumentSheetBanner } from './DocumentSheetBanner';
@@ -11,6 +11,7 @@ import { DocumentToolbar } from './DocumentToolbar';
 // що припадав на зсув (натиск на старому місці «More», відпуск — уже поза нею), губився: меню не
 // відкривалось (e2e-stand 39994116932, 40023308269 — «Edit access» не з'являвся 45 с). Модуль — кілька
 // сотень байтів із `Menu`/`Button`/`Text`, що вже в чанку маршруту (`D-132`).
+import { DecisionPeriodPicker } from './DecisionPeriodPicker';
 import { SubmitPeriodPicker } from './SubmitPeriodPicker';
 import { useStaleResultsReminder, type StaleReminderState } from './useStaleResultsReminder';
 import { t } from '@/shared/i18n';
@@ -68,6 +69,10 @@ interface DocumentActionBarProps {
   readonly periodAction?: JSX.Element | null;
   /** ✎ LAND-YEAR L7a: документ «рік» — банер замка називає «Year YYYY» замість місяця-якоря. */
   readonly yearLayout?: boolean;
+  /** ✎ D-6: місяць із посилання черги погодження (`?decide=`) — ціль «Approve» за замовчуванням, якщо він чекає затвердження. */
+  readonly decideMonth?: number | null;
+  /** ✎ D-6: `?decide` застосовано (чи аркуш змінився) — сторінка прибирає його з адреси. */
+  readonly onDecideConsumed?: () => void;
 }
 
 /**
@@ -107,8 +112,21 @@ export function DocumentActionBar({
   staleReminderHost,
   periodAction = null,
   yearLayout = false,
+  decideMonth = null,
+  onDecideConsumed,
 }: DocumentActionBarProps): JSX.Element {
-  const actions = useSheetActions({ documentId, sheetDefId, sheetCopyId, sheetName, periodKey, state, lock });
+  const actions = useSheetActions({
+    documentId,
+    sheetDefId,
+    sheetCopyId,
+    sheetName,
+    periodKey,
+    state,
+    lock,
+    yearLayout,
+    decideMonth,
+    onDecideConsumed,
+  });
   useStaleResultsReminder(documentId, resultsStale === true, actions.recalculate !== null, staleReminderHost);
   // ✎ D-441 CLS: доки сервер не відповів, ЧИ і ЯКИЙ період подавати, остаточна форма рядка дій невідома
   // (кнопка «Подати: <період>», ▾, «Next to submit: …» або нічого) — скелет замість дій (`DocumentToolbar`,
@@ -118,7 +136,8 @@ export function DocumentActionBar({
   // - ✎ зміна аркуша/періоду скелета НЕ дає: лишається відповідь попереднього ключа (`keepPreviousData`), рядок на
   //   місці, а «Подати» недоступна (`submit.checking`), доки не прийде ціль нового;
   // - ✎ людина без права подання скелета не бачить: «Подати» їй не буде за будь-якої відповіді.
-  const actionsPending = actions.submitPending;
+  // ✎ D-6 (п. 5): річна розкладка — і доки не відомі стани й права місяців (дій рішення ще немає, місце тримає скелет).
+  const actionsPending = actions.submitPending || actions.decisionPending;
   // ✎ LIVE-STATUS: чужий перехід, новий стан у дорозі — кнопки процесу на місці, але недоступні (фокус лишається).
   const staleProps = actions.stale ? { 'data-disabled': true, 'aria-disabled': true } : {};
   const openImport = useRef<((returnTo?: HTMLElement | null) => void) | null>(null);
@@ -171,7 +190,7 @@ export function DocumentActionBar({
           )),
         ]
       : []),
-    actions.recalculate !== null || actions.recall !== null ? <Menu.Divider key="workflow-divider" /> : null,
+    actions.recalculate !== null || actions.recall.length > 0 ? <Menu.Divider key="workflow-divider" /> : null,
     actions.recalculate !== null ? (
       <Menu.Item
         key="recalculate"
@@ -195,11 +214,19 @@ export function DocumentActionBar({
         </Text>
       </Menu.Item>
     ) : null,
-    actions.recall !== null ? (
-      <Menu.Item key="recall" disabled={actions.stale} onClick={actions.recall.ask}>
-        {t('workflow.recall')}
+    // ✎ D-6 (п. 4): відкликання — по пункту на кожен місяць, який людина може відкликати («Recall: <місяць>»), окремо
+    // від цілі «Approve»: автор не погоджує, і ціль рішення йому нічого не каже.
+    ...actions.recall.map((recall) => (
+      <Menu.Item
+        key={`recall-${String(recall.periodKey ?? 'sheet')}`}
+        disabled={actions.stale}
+        onClick={recall.ask}
+        data-testid="document-recall"
+        data-period-key={recall.periodKey ?? undefined}
+      >
+        {decisionLabel('recall', recall.periodKey)}
       </Menu.Item>
-    ) : null,
+    )),
   ];
 
   const rare = documentItems.filter((item) => item !== null);
@@ -215,16 +242,29 @@ export function DocumentActionBar({
       // ⚠ `variant="filled"` явно: за ним екранний тест рахує головні дії (`L1`).
       <SubmitAction submit={actions.submit} variant="filled" />
     ) : actions.approve !== null ? (
-      // ⛔ `X-05`: `statusSuccess` підібрано до AA 4.5:1 (`theme.ts`, `contrast.test.ts`).
-      <Button
-        variant="filled"
-        color="statusSuccess"
-        loading={actions.approve.loading}
-        onClick={actions.approve.ask}
-        {...staleProps}
-      >
-        {t('workflow.approve')}
-      </Button>
+      <>
+        {/* ⛔ `X-05`: `statusSuccess` підібрано до AA 4.5:1 (`theme.ts`, `contrast.test.ts`).
+            ✎ D-6: сервер відхилить затвердження цілі (місяць джерела HSE400 не затверджено) — кнопка на місці, але
+            недоступна, підказка й опис для читача кажуть чому; ▾ лишається (інший місяць), «Reject» — доступна.
+            ⚠ `Hint` завжди (лише `disabled`): умовна обгортка перемонтовувала б кнопку й губила фокус. */}
+        <Hint label={actions.approve.blockedReason ?? ''} disabled={actions.approve.blockedReason === null}>
+          <Button
+            variant="filled"
+            color="statusSuccess"
+            loading={actions.approve.loading}
+            onClick={actions.approve.ask}
+            data-testid="document-approve"
+            data-period-key={actions.approve.periodKey ?? undefined}
+            data-blocked={actions.approve.blockedReason !== null || undefined}
+            {...staleProps}
+            {...(actions.approve.blockedReason !== null ? { 'data-disabled': true, 'aria-disabled': true } : {})}
+          >
+            {decisionLabel('approve', actions.approve.periodKey)}
+          </Button>
+        </Hint>
+        {/* ✎ D-6: річна розкладка — вибір іншого місяця, що чекає затвердження (як ▾ біля «Submit»). */}
+        <DecisionPeriodPicker decision={actions.approve} action="approve" />
+      </>
     ) : null;
 
   return (
@@ -257,17 +297,27 @@ export function DocumentActionBar({
 
         {/* ⛔ Затвердження і відхилення — пара: «Reject» поруч з «Approve». */}
         {actions.reject !== null && (
-          <Button color="statusError" variant="outline" onClick={actions.reject.ask} {...staleProps}>
-            {t('workflow.reject')}
+          <Button color="statusError" variant="outline" onClick={actions.reject.ask} data-testid="document-reject" {...staleProps}>
+            {decisionLabel('reject', actions.reject.periodKey)}
           </Button>
         )}
 
         {/* ⚠ На затвердженому аркуші головної дії немає — повернення в роботу
             (окреме небезпечне право, причина обов'язкова) лишається видимим. */}
         {actions.reopen !== null && (
-          <Button variant="default" onClick={actions.reopen.ask} {...staleProps}>
-            {t('workflow.reopen')}
-          </Button>
+          <>
+            <Button
+              variant="default"
+              onClick={actions.reopen.ask}
+              data-testid="document-reopen"
+              data-period-key={actions.reopen.periodKey ?? undefined}
+              {...staleProps}
+            >
+              {decisionLabel('reopen', actions.reopen.periodKey)}
+            </Button>
+            {/* ✎ D-6: річна розкладка — вибір іншого затвердженого місяця. */}
+            <DecisionPeriodPicker decision={actions.reopen} action="reopen" />
+          </>
         )}
       </DocumentToolbar>
 
@@ -281,6 +331,8 @@ export function DocumentActionBar({
         sheetCopyId={sheetCopyId}
         state={state}
         lock={lock}
+        // ✎ D-6: річна розкладка — банер місяця (поданий / затверджений), а не «увесь аркуш»; якірний Rejected — свій.
+        monthTarget={yearLayout ? actions.monthBanner : undefined}
         canDecide={actions.approve !== null || actions.reject !== null}
         recalculatedAfterSubmission={recalculatedAfterSubmission}
         periodAction={periodAction}
@@ -378,19 +430,24 @@ function SubmitAction({
   // перемонтовувала б кнопку при кожному перемиканні, і фокус клавіатури падав би на `body` (WCAG 2.4.3).
   // ⚠ `data-period-key` — лише підтверджена ціль: під час перевірки атрибута немає.
   const checking = submit.checking;
+  // ✎ D-6 (п. 11): сервер відхилить подання цього періоду (місяць джерела HSE400 не затверджено) — кнопка на місці, але
+  // недоступна, а підказка (і опис для читача) каже чому й веде до панелі проблем розрахунку.
+  const blocked = !checking && submit.blockedReason !== null;
+  const inert = checking || blocked;
   return (
     <>
-      <Hint label={t('common.loading')} disabled={!checking}>
+      <Hint label={blocked ? (submit.blockedReason ?? '') : t('common.loading')} disabled={!inert}>
         <Button
           variant={variant}
           loading={submit.loading}
-          onClick={checking ? (event: MouseEvent<HTMLButtonElement>) => event.preventDefault() : submit.run}
-          data-disabled={checking}
-          aria-disabled={checking || undefined}
+          onClick={inert ? (event: MouseEvent<HTMLButtonElement>) => event.preventDefault() : submit.run}
+          data-disabled={inert}
+          aria-disabled={inert || undefined}
           aria-busy={checking || undefined}
           data-testid="document-submit"
           data-period-key={checking ? undefined : submit.periodKey}
           data-checking={checking || undefined}
+          data-blocked={blocked || undefined}
         >
           {submitLabel(submit.periodKey)}
         </Button>

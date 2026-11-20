@@ -192,11 +192,11 @@ describe('markedMonthColumns: позначаються лише подані й 
   it('Submitted/Approved — так; Draft/Rejected і чужа таблиця — ні', () => {
     const marked = markedMonthColumns(
       [
-        { tableDefId: 5, columnCode: 'JAN', monthNumber: 1, periodKey: Jan, sheetStatus: 'Submitted' },
-        { tableDefId: 5, columnCode: 'FEB', monthNumber: 2, periodKey: Feb, sheetStatus: 'Approved' },
-        { tableDefId: 5, columnCode: 'MAR', monthNumber: 3, periodKey: 202603, sheetStatus: 'Draft' },
-        { tableDefId: 5, columnCode: 'APR', monthNumber: 4, periodKey: 202604, sheetStatus: 'Rejected' },
-        { tableDefId: 6, columnCode: 'JAN', monthNumber: 1, periodKey: Jan, sheetStatus: 'Approved' },
+        { tableDefId: 5, columnCode: 'JAN', monthNumber: 1, periodKey: Jan, sheetStatus: 'Submitted', canDecide: false, canRecall: false, canReturn: false },
+        { tableDefId: 5, columnCode: 'FEB', monthNumber: 2, periodKey: Feb, sheetStatus: 'Approved', canDecide: false, canRecall: false, canReturn: false },
+        { tableDefId: 5, columnCode: 'MAR', monthNumber: 3, periodKey: 202603, sheetStatus: 'Draft', canDecide: false, canRecall: false, canReturn: false },
+        { tableDefId: 5, columnCode: 'APR', monthNumber: 4, periodKey: 202604, sheetStatus: 'Rejected', canDecide: false, canRecall: false, canReturn: false },
+        { tableDefId: 6, columnCode: 'JAN', monthNumber: 1, periodKey: Jan, sheetStatus: 'Approved', canDecide: false, canRecall: false, canReturn: false },
       ],
       5,
     );

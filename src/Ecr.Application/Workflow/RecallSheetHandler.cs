@@ -234,8 +234,24 @@ public sealed class RecallSheetHandler(
     }
 
     /// <summary>Перший крок ЧИННОГО маршруту — той самий вибір, що в <c>CurrentApprovalStepAsync</c>.</summary>
-    private async Task<int?> FirstStepIdAsync(long documentId, int? projectId, CancellationToken ct)
+    private Task<int?> FirstStepIdAsync(long documentId, int? projectId, CancellationToken ct)
+        => FirstStepIdAsync(workflow, documents, documentId, projectId, ct);
+
+    /// <summary>
+    /// Перший крок чинного маршруту документа (правило відкликання); ✎ D-6: спільний із підказкою «що можна відкликати»
+    /// по місяцях річного аркуша (<see cref="MonthDecisionRights"/>), щоб правило не роздвоїлось.
+    /// </summary>
+    /// <param name="workflow">Сховище процесу.</param>
+    /// <param name="documents">Сховище документів.</param>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="projectId">Проєкт документа; <c>null</c> — маршруту немає.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public static async Task<int?> FirstStepIdAsync(
+        IWorkflowStore workflow, IDocumentStore documents, long documentId, int? projectId, CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(workflow);
+        ArgumentNullException.ThrowIfNull(documents);
+
         if (projectId is not { } project)
         {
             return null;

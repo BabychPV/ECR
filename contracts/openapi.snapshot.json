@@ -14328,6 +14328,21 @@
       "MonthColumnStatusDto": {
         "description": "Статус місячної колонки (D-441): стан аркуша за період місяця колонки.",
         "properties": {
+          "canDecide": {
+            "default": false,
+            "description": "✎ D-6: поточний користувач може затвердити чи відхилити аркуш за цей місяць (те саме правило, що POST approve).",
+            "type": "boolean"
+          },
+          "canRecall": {
+            "default": false,
+            "description": "✎ D-6: поточний користувач може відкликати подання аркуша за цей місяць (те саме правило, що POST recall).",
+            "type": "boolean"
+          },
+          "canReturn": {
+            "default": false,
+            "description": "✎ D-6: поточний користувач може повернути ЗАТВЕРДЖЕНИЙ аркуш за цей місяць у роботу (те саме правило, що POST reopen).",
+            "type": "boolean"
+          },
           "columnCode": {
             "description": "Код колонки.",
             "type": "string"
@@ -14350,6 +14365,14 @@
             "description": "Таблиця.",
             "format": "int32",
             "type": "integer"
+          },
+          "unapprovedSourcePeriodKey": {
+            "description": "✎ D-6: поданий місяць — місяць документа-джерела HSE400, ще не затверджений, через який сервер відхилить затвердження цього місяця (sourceMonthNotApproved); null — перешкоди немає.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           }
         },
         "required": [
@@ -30560,6 +30583,14 @@
           "submittable": {
             "description": "Аркуш за цей період можна подати зараз (неподаний, проєкт не архівний).",
             "type": "boolean"
+          },
+          "unapprovedSourcePeriodKey": {
+            "description": "✎ D-6: місяць документа-джерела HSE400, ще не затверджений, через який сервер відхилить подання (аркуш неподаний) чи затвердження (аркуш поданий) цього періоду (sourceMonthNotApproved); null — перешкоди немає.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           }
         },
         "required": [
@@ -30573,6 +30604,14 @@
       "SubmissionTargetDto": {
         "description": "Цільовий період подання аркуша і статуси місячних колонок (D-441).",
         "properties": {
+          "anchorUnapprovedSourcePeriodKey": {
+            "description": "✎ D-6: аркуш за період запиту поданий (у будь-якому стані періоду, зокрема закритому) — місяць документа-джерела HSE400, ще не затверджений, через який сервер відхилить його затвердження; null — перешкоди немає.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "monthColumns": {
             "description": "Місячні колонки таблиць `MonthsInColumns` аркуша зі станом свого періоду.",
             "items": {

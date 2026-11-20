@@ -37621,6 +37621,21 @@ export interface components {
         };
         /** @description Статус місячної колонки (D-441): стан аркуша за період місяця колонки. */
         MonthColumnStatusDto: {
+            /**
+             * @description ✎ D-6: поточний користувач може затвердити чи відхилити аркуш за цей місяць (те саме правило, що POST approve).
+             * @default false
+             */
+            canDecide: boolean;
+            /**
+             * @description ✎ D-6: поточний користувач може відкликати подання аркуша за цей місяць (те саме правило, що POST recall).
+             * @default false
+             */
+            canRecall: boolean;
+            /**
+             * @description ✎ D-6: поточний користувач може повернути ЗАТВЕРДЖЕНИЙ аркуш за цей місяць у роботу (те саме правило, що POST reopen).
+             * @default false
+             */
+            canReturn: boolean;
             /** @description Код колонки. */
             columnCode: string;
             /**
@@ -37640,6 +37655,11 @@ export interface components {
              * @description Таблиця.
              */
             tableDefId: number;
+            /**
+             * Format: int32
+             * @description ✎ D-6: поданий місяць — місяць документа-джерела HSE400, ще не затверджений, через який сервер відхилить затвердження цього місяця (sourceMonthNotApproved); null — перешкоди немає.
+             */
+            unapprovedSourcePeriodKey?: null | number;
         };
         /** @description Псевдонім місячного входу у відповіді. */
         MonthInputAliasDto: {
@@ -44938,9 +44958,19 @@ export interface components {
             state: components["schemas"]["PeriodState"];
             /** @description Аркуш за цей період можна подати зараз (неподаний, проєкт не архівний). */
             submittable: boolean;
+            /**
+             * Format: int32
+             * @description ✎ D-6: місяць документа-джерела HSE400, ще не затверджений, через який сервер відхилить подання (аркуш неподаний) чи затвердження (аркуш поданий) цього періоду (sourceMonthNotApproved); null — перешкоди немає.
+             */
+            unapprovedSourcePeriodKey?: null | number;
         };
         /** @description Цільовий період подання аркуша і статуси місячних колонок (D-441). */
         SubmissionTargetDto: {
+            /**
+             * Format: int32
+             * @description ✎ D-6: аркуш за період запиту поданий (у будь-якому стані періоду, зокрема закритому) — місяць документа-джерела HSE400, ще не затверджений, через який сервер відхилить його затвердження; null — перешкоди немає.
+             */
+            anchorUnapprovedSourcePeriodKey?: null | number;
             /** @description Місячні колонки таблиць `MonthsInColumns` аркуша зі станом свого періоду. */
             monthColumns: components["schemas"]["MonthColumnStatusDto"][];
             /**

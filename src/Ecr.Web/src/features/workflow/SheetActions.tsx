@@ -46,6 +46,7 @@ import { isRecalculateKey, isTypingOrDialogTarget } from '@/features/grid/shortc
 import { useNarrowScreen } from '@/shared/narrowScreen';
 import type { RecalcRequestOutcome } from './RecalcSkippedList';
 import { isAllowed, type WorkflowAction } from './transitions';
+import { clearDecisionTarget, pickDecisionMonth, publishDecisionView, useDecisionPicks, type DecisionKind } from './decisionTarget';
 import { editsDeferToServer, isEditable } from './sheetEditability';
 import { GrantOrder, meetsGrant, type GrantLevelName } from './grantLevels';
 import { t } from '@/shared/i18n';
@@ -153,6 +154,26 @@ interface SheetActionsProps {
    * чи ще не відкритий період. `null`/не задано — нічого не заважає.
    */
   lock?: DocumentLock | null | undefined;
+
+  /**
+   * ✎ D-6: документ з розкладкою «рік, місяці в колонках» — один аркуш на всі 12 місяців, а стан погодження в кожного
+   * місяця свій. Сторінка стоїть на якорі року, тож `state`/`periodKey` — якірні; рішення (затвердити, відхилити,
+   * повернути, відкликати) беруть ЦІЛЬОВИЙ місяць зі `submission-target.monthColumns`, як подання свій (D-441).
+   */
+  yearLayout?: boolean | undefined;
+
+  /**
+   * ✎ D-6: місяць, який переглядач хоче вирішувати (`?decide=202604` з «My tasks → Awaiting my approval → Review»):
+   * `?periodKey` річної сторінки нормалізується до якоря, тож місяць черги йде окремим параметром. Діє, лише коли
+   * місяць справді чекає на затвердження; інакше — найраніший, що чекає.
+   */
+  decideMonth?: number | null | undefined;
+
+  /**
+   * ✎ D-6: `?decide` зроблено ціллю (чи він не підходить) або аркуш змінився — сторінка прибирає параметр з адреси, щоб
+   * він не діяв на наступні відкриття й інші аркуші.
+   */
+  onDecideConsumed?: (() => void) | undefined;
 }
 
 // Рівні гранта (`GrantOrder`, `meetsGrant`) — у `grantLevels.ts` (бюджет маршрутів, D-132); реекспорт для наявних імпортів.
@@ -277,7 +298,7 @@ export function SheetActions(props: SheetActionsProps): JSX.Element {
   const actions = useSheetActions(props);
   const { recalculate, submit, approve, reject, reopen, recall } = actions;
   const hasAnyAction =
-    recalculate !== null || submit !== null || approve !== null || reject !== null || reopen !== null || recall !== null;
+    recalculate !== null || submit !== null || approve !== null || reject !== null || reopen !== null || recall.length > 0;
   // ✎ LIVE-STATUS: застарілий стан — кнопки на місці, але недоступні.
   const staleProps = actions.stale ? { 'data-disabled': true, 'aria-disabled': true } : {};
 
@@ -311,12 +332,16 @@ export function SheetActions(props: SheetActionsProps): JSX.Element {
       {submit !== null && (
         // ✎ D-441: поки ціль — підставна відповідь попереднього аркуша/періоду, кнопка недоступна з поясненням.
         // ⚠ `Hint` завжди (лише `disabled`): умовна обгортка перемонтовувала б кнопку і губила фокус.
-        <Hint label={t('common.loading')} disabled={!submit.checking}>
+        // ✎ D-6 (п. 11): сервер відхилить подання (місяць джерела не затверджено) — недоступна з причиною.
+        <Hint
+          label={submit.blockedReason ?? t('common.loading')}
+          disabled={!submit.checking && submit.blockedReason === null}
+        >
           <Button
             loading={submit.loading}
             onClick={submit.run}
-            data-disabled={submit.checking}
-            aria-disabled={submit.checking || undefined}
+            data-disabled={submit.checking || submit.blockedReason !== null}
+            aria-disabled={submit.checking || submit.blockedReason !== null || undefined}
             aria-busy={submit.checking || undefined}
           >
             {submitLabel(submit.periodKey)}
@@ -335,9 +360,18 @@ export function SheetActions(props: SheetActionsProps): JSX.Element {
           «Reject» і «Return for edits» питають. Затверджені дані йдуть у
           звітність регулятору — це та сама вага рішення. */}
       {approve !== null && (
-        <Button color="statusSuccess" loading={approve.loading} onClick={approve.ask} {...staleProps}>
-          {t('workflow.approve')}
-        </Button>
+        // ✎ D-6: сервер відхилить затвердження (місяць джерела не затверджено) — недоступна з причиною.
+        <Hint label={approve.blockedReason ?? ''} disabled={approve.blockedReason === null}>
+          <Button
+            color="statusSuccess"
+            loading={approve.loading}
+            onClick={approve.ask}
+            {...staleProps}
+            {...(approve.blockedReason !== null ? { 'data-disabled': true, 'aria-disabled': true } : {})}
+          >
+            {t('workflow.approve')}
+          </Button>
+        </Hint>
       )}
 
       {/* ✎ 2026-10-06: у панелі дій — лише варіанти з рамкою чи заливкою
@@ -355,11 +389,11 @@ export function SheetActions(props: SheetActionsProps): JSX.Element {
         </Button>
       )}
 
-      {recall !== null && (
-        <Button variant="default" onClick={recall.ask} {...staleProps}>
-          {t('workflow.recall')}
+      {recall.map((item) => (
+        <Button key={String(item.periodKey ?? 'sheet')} variant="default" onClick={item.ask} {...staleProps}>
+          {decisionLabel('recall', item.periodKey)}
         </Button>
-      )}
+      ))}
 
       {actions.dialogs}
     </>
@@ -411,6 +445,87 @@ export function submitLabel(periodKey: number): string {
   return t('workflow.submitPeriod', { period: periodLabel(periodKey) });
 }
 
+/** ✎ D-6: місяць цілі рішення, перелік місяців для вибору й сам вибір (річна розкладка). */
+export interface DecisionPeriod {
+  readonly periodKey: number | null;
+  readonly options: readonly number[];
+  readonly pick: (periodKey: number) => void;
+}
+
+/**
+ * ✎ D-6: місяць річного аркуша — стан і права ЦІЄЇ людини над ним (сервер, `submission-target.monthColumns`: те саме
+ * правило, що й дія). Право в річному аркуші своє на кожен місяць: крок маршруту, автор подання.
+ */
+interface MonthState {
+  readonly periodKey: number;
+  readonly status: string;
+  /** Затвердити / відхилити (місяць `Submitted`). */
+  readonly canDecide: boolean;
+  /** Відкликати власне подання (місяць `Submitted`, перший крок не підписано). */
+  readonly canRecall: boolean;
+  /** Повернути затверджений місяць у роботу. */
+  readonly canReturn: boolean;
+  /** Місяць джерела HSE400, ще не затверджений, через який сервер відхилить затвердження цього (поданого) місяця. */
+  readonly unapprovedSource: number | null;
+}
+
+/** ✎ D-6: стани місяців річного аркуша за зростанням — з `monthColumns` (колонки різних таблиць одного місяця зливаються). */
+function monthStatesOf(data: SubmissionTarget | undefined): readonly MonthState[] {
+  if (data === undefined || !Array.isArray(data.monthColumns)) return [];
+
+  const byKey = new Map<number, MonthState>();
+  for (const column of data.monthColumns) {
+    const seen = byKey.get(column.periodKey);
+    // ⚠ Права місяця однакові в усіх його колонках; поле, якого немає (старіший сервер), — «не можна».
+    byKey.set(column.periodKey, {
+      periodKey: column.periodKey,
+      status: seen?.status ?? column.sheetStatus,
+      canDecide: (seen?.canDecide ?? false) || column.canDecide === true,
+      canRecall: (seen?.canRecall ?? false) || column.canRecall === true,
+      canReturn: (seen?.canReturn ?? false) || column.canReturn === true,
+      unapprovedSource: seen?.unapprovedSource ?? column.unapprovedSourcePeriodKey ?? null,
+    });
+  }
+
+  return [...byKey.values()].sort((a, b) => a.periodKey - b.periodKey);
+}
+
+/** ✎ D-6: відмова «стан змінився» (`409`) — стани місяців на екрані застаріли. */
+function isConflict(error: unknown): boolean {
+  return error instanceof EcrApiError && error.problem.status === 409;
+}
+
+/** Вибір місяця: явний вибір → місяць із посилання → найраніший; жоден не підходить — `null` (дії немає). */
+function chooseMonth(options: readonly number[], picked: number | null, preferred: number | null): number | null {
+  if (picked !== null && options.includes(picked)) return picked;
+  if (preferred !== null && options.includes(preferred)) return preferred;
+
+  return options[0] ?? null;
+}
+
+/** ✎ D-6: підпис рішення з місяцем — «Approve: April 2026»; без місяця (не річна розкладка) — як було. */
+export function decisionLabel(action: 'approve' | 'reject' | 'reopen' | 'recall', periodKey: number | null): string {
+  if (periodKey === null) {
+    return action === 'approve'
+      ? t('workflow.approve')
+      : action === 'reject'
+        ? t('workflow.reject')
+        : action === 'reopen'
+          ? t('workflow.reopen')
+          : t('workflow.recall');
+  }
+
+  const period = periodLabel(periodKey);
+
+  return action === 'approve'
+    ? t('workflow.approvePeriod', { period })
+    : action === 'reject'
+      ? t('workflow.rejectPeriod', { period })
+      : action === 'reopen'
+        ? t('workflow.reopenPeriod', { period })
+        : t('workflow.recallPeriod', { period });
+}
+
 /** Дія, що виконується одразу (з очікуванням збереження набраного). */
 export interface RunnableSheetAction {
   readonly loading: boolean;
@@ -443,6 +558,12 @@ export interface SheetActionsModel {
         readonly options: readonly number[];
         readonly pick: (periodKey: number) => void;
         readonly checking: boolean;
+        /**
+         * ✎ D-6 (п. 11): чому подання цього періоду сервер зараз відхилить — місяць документа-джерела HSE400 не
+         * затверджено (`submission-target.periods[].unapprovedSourcePeriodKey`, те саме правило, що ворота подання);
+         * кнопка недоступна, `run` нічого не робить. `null` — перешкоди немає. Помилки формул сюди не входять.
+         */
+        readonly blockedReason: string | null;
       })
     | null;
   /**
@@ -451,15 +572,46 @@ export interface SheetActionsModel {
    * одразу: «Подати» не буде за будь-якої відповіді, і скелет лише миготів би.
    */
   readonly submitPending: boolean;
-  readonly approve: { readonly loading: boolean; readonly ask: () => void } | null;
-  readonly reject: { readonly ask: () => void } | null;
-  readonly reopen: { readonly ask: () => void } | null;
-  readonly recall: { readonly ask: () => void } | null;
+  /**
+   * ✎ D-6 (п. 5): річна розкладка, перша відповідь зі станами й правами місяців ще в дорозі — дій рішення ще немає
+   * (не вгадуємо місяць за якорем), рядок тримає скелет.
+   */
+  readonly decisionPending: boolean;
+  /**
+   * ✎ D-6: `periodKey` — місяць, який вирішить кнопка (річна розкладка: найраніший, над яким ця людина МОЖЕ вирішувати,
+   * або обраний у ▾ / позначкою колонки / з посилання черги); `null` — період сторінки, підпис без місяця. `options` —
+   * місяці, над якими людина може цю дію, `pick` — вибір.
+   */
+  readonly approve:
+    | (DecisionPeriod & {
+        readonly loading: boolean;
+        readonly ask: () => void;
+        /**
+         * ✎ D-6 (борг координатора): чому затвердження цілі сервер зараз відхилить — місяць документа-джерела HSE400 не
+         * затверджено (`submission-target`: `monthColumns[]` / `periods[].unapprovedSourcePeriodKey`, те саме правило,
+         * що ворота затвердження на будь-якому кроці); кнопка недоступна, `ask` нічого не робить. «Reject» — доступна.
+         */
+        readonly blockedReason: string | null;
+      })
+    | null;
+  readonly reject: { readonly ask: () => void; readonly periodKey: number | null } | null;
+  readonly reopen: (DecisionPeriod & { readonly ask: () => void }) | null;
+  /**
+   * ✎ D-6 (п. 4): відкликання — окремо від цілі «Approve»: по пункту на кожен місяць, який ця людина може відкликати
+   * (річна розкладка, «Recall: <місяць>»); поза нею — один пункт без місяця (`periodKey: null`). Порожньо — нічого.
+   */
+  readonly recall: readonly { readonly ask: () => void; readonly periodKey: number | null }[];
   /**
    * ✎ LIVE-STATUS: стан аркуша на екрані застарів (чужий перехід, новий стан у дорозі) — дії процесу лишаються
    * на місці, але недоступні (`aria-disabled`), і їхні `run`/`ask` нічого не роблять.
    */
   readonly stale: boolean;
+  /**
+   * ✎ D-6: місяць, про який говорить банер стану річної розкладки: ціль «Approve» (людина вирішує), інакше ціль «Return
+   * for edits», інакше найраніший поданий, інакше найраніший затверджений. `canDecide` — ця людина вирішує цей місяць
+   * (крок для ролі в банері). `null` — поданих/затверджених місяців немає або вони ще невідомі.
+   */
+  readonly monthBanner: { readonly periodKey: number; readonly state: DecisionKind; readonly canDecide: boolean } | null;
   readonly dialogs: JSX.Element;
 }
 
@@ -508,6 +660,9 @@ export function useSheetActions({
   state,
   sheetName = null,
   lock = null,
+  yearLayout = false,
+  decideMonth = null,
+  onDecideConsumed,
 }: SheetActionsProps): SheetActionsModel {
   const queryClient = useQueryClient();
   const session = useSession();
@@ -531,8 +686,11 @@ export function useSheetActions({
   // Іде запит впливу: діалог дії лишається зайнятим, щоб подвійний клік не пустив дію двічі.
   const [impactChecking, setImpactChecking] = useState(false);
 
-  const ask = (action: 'approve' | 'reject' | 'reopen' | 'recall'): void => {
-    askedAt.current = here;
+  const ask = (action: 'approve' | 'reject' | 'reopen' | 'recall', targetPeriod: number): void => {
+    // ✎ D-6: адреса — ЦІЛЬОВИЙ місяць рішення, знятий у мить кліку (N3-01); поза річною розкладкою це `periodKey` сторінки.
+    const at = { ...here, periodKey: targetPeriod };
+    askedAt.current = at;
+    setAskedPeriod(at.periodKey);
     setAsking(action);
   };
 
@@ -540,7 +698,22 @@ export function useSheetActions({
    * Перечитує стан документа після кожної зміни робочого процесу - ТОГО аркуша й періоду, над якими була дія.
    * ✎ LIVE-STATUS: перелік ключів — один (`refreshSheetWorkflow`), спільний із живим опитуванням чужих переходів.
    */
-  const refresh = (at: SheetAddress): Promise<void> => refreshSheetWorkflow(queryClient, documentId, at);
+  const refresh = async (at: SheetAddress): Promise<void> => {
+    await refreshSheetWorkflow(queryClient, documentId, at);
+    // ✎ D-6: річна сторінка стоїть на якорі, а дія була над іншим місяцем — стан сторінки (резюме, кнопки) теж перечитати.
+    if (yearLayout && at.periodKey !== periodKey) {
+      await refreshSheetWorkflow(queryClient, documentId, { sheetDefId: at.sheetDefId, periodKey });
+    }
+  };
+
+  /*
+   * ✎ D-6 (п. 10): живе опитування стежить лише за якорем, а рішення річної сторінки — над іншими місяцями. Відмова
+   * «стан змінився» (`409`: хтось устиг затвердити, відкликати, повернути) — перечитати стани й права місяців, щоб
+   * кнопки й позначки стали правдивими; саму відмову людина бачить, як завжди.
+   */
+  const refreshMonthsOnConflict = (error: unknown): void => {
+    if (isConflict(error)) void queryClient.invalidateQueries({ queryKey: ['submission-target', documentId] });
+  };
 
   // ✎ LIVE-STATUS: хтось інший щойно змінив стан аркуша, і новий стан ще в дорозі — дія проти старого стану
   // недоступна (кнопки лишаються на місці з `aria-disabled`, клік нічого не шле).
@@ -615,6 +788,7 @@ export function useSheetActions({
     },
     // ✎ B80 N5: відмова через вплив на залежні (сервер вимагає підтвердження чи забороняє) — діалог впливу за відмовою.
     onError: (error, verdict) => {
+      refreshMonthsOnConflict(error);
       if (verdict.approved && impactRefusal(error) !== null) {
         void askImpactAfterRefusal('approve', verdict, error, (confirmed) =>
           decide.mutateAsync({ ...verdict, confirmedImpact: confirmed }),
@@ -653,6 +827,7 @@ export function useSheetActions({
     // треба відкрити період, а це інше право (`D-67`). Текст веде саме туди.
     // ✎ B80 N5: відмова через вплив на залежні — діалог впливу за відмовою.
     onError: (error, at) => {
+      refreshMonthsOnConflict(error);
       if (impactRefusal(error) !== null) {
         void askImpactAfterRefusal('reopen', at, error, (confirmed) =>
           reopen.mutateAsync({ ...at, confirmedImpact: confirmed }),
@@ -708,19 +883,64 @@ export function useSheetActions({
   }
 
   /*
-   * `BE-31`: відкликання подання автором. ⛔ Чи показати кнопку, вирішує
-   * СЕРВЕР (`GET …/recall`): «автор подання» і «жоден крок не підписано» з
-   * `/api/v1/me` і стану аркуша не виводяться. Запит іде лише на поданому
-   * аркуші; доки відповіді немає — кнопки немає.
+   * ✎ D-6: цільовий місяць рішень на річній сторінці. Сторінка стоїть на якорі (січень), а подано може бути квітень.
+   * Стани місяців І ПРАВА ЦІЄЇ ЛЮДИНИ над кожним (затвердити/відхилити, відкликати, повернути) — `monthColumns`
+   * відповіді `submission-target` (той самий запит, що й у подання; один ключ): право в річному аркуші своє на кожен
+   * місяць (крок маршруту, автор подання), тож ціль, ▾ і позначки колонок — лише з місяців, над якими людина МОЖЕ діяти.
+   * Ціль за замовчуванням — найраніший такий місяць; далі вибір ▾ / позначкою колонки / місяць із посилання черги.
+   *
+   * ⛔ Поки відповіді немає (перша чи підставна — чужого аркуша, `keepPreviousData`) — дій рішення НЕМАЄ: «Approve» за
+   * якорем вирішив би не той місяць. Збій запиту чи відповідь без місяців — стара поведінка за якірним станом.
+   */
+  const submissionTarget = useSubmissionTarget(documentId, sheetDefId, periodKey, sheetCopyId);
+  const yearPending =
+    yearLayout && !submissionTarget.isError && (submissionTarget.isLoading || submissionTarget.isPlaceholderData);
+  const months = yearLayout && !yearPending ? monthStatesOf(submissionTarget.data) : [];
+  const monthly = months.length > 0;
+  // Якірний режим: звичайний документ, або річний, чиї місяці невідомі (збій, відповідь без місяців).
+  const anchorMode = !yearPending && !monthly;
+  // Вибір людини (▾ чи позначка стану в заголовку колонки) — у спільному сховищі: сітка живе в іншій гілці дерева.
+  const picks = useDecisionPicks(documentId, sheetDefId);
+  const decideOptions = months.filter((m) => m.status === 'Submitted' && m.canDecide).map((m) => m.periodKey);
+  const reopenOptions = months.filter((m) => m.status === 'Approved' && m.canReturn).map((m) => m.periodKey);
+  const recallMonths = months.filter((m) => m.status === 'Submitted' && m.canRecall).map((m) => m.periodKey);
+  const decideMonthKey = monthly ? chooseMonth(decideOptions, picks.decide, decideMonth) : null;
+  const reopenMonthKey = monthly ? chooseMonth(reopenOptions, picks.reopen, null) : null;
+
+  /*
+   * ✎ D-6 (п. 9): `?decide` діє один раз — щойно місяці відомі, він стає вибором людини (якщо цей місяць вона може
+   * вирішувати) і зникає з адреси; зміна аркуша теж прибирає його. Звичайний документ параметра не вживає — теж прибрати.
+   */
+  const decideConsumed = useRef(onDecideConsumed);
+  decideConsumed.current = onDecideConsumed;
+  const decideKnown = monthly || (!yearLayout && queryClient.getQueryData(['document', documentId, periodKey]) !== undefined);
+  useEffect(() => {
+    if (decideMonth === null || !decideKnown) return;
+    if (monthly && decideOptions.includes(decideMonth)) pickDecisionMonth(documentId, sheetDefId, decideMonth, 'Submitted');
+    decideConsumed.current?.();
+  }, [decideMonth, decideKnown]);
+  const decideSheet = useRef(sheetDefId);
+  const decidePending = useRef(decideMonth);
+  decidePending.current = decideMonth;
+  useEffect(() => {
+    if (decideSheet.current === sheetDefId) return;
+    decideSheet.current = sheetDefId;
+    if (decidePending.current !== null) decideConsumed.current?.();
+  }, [sheetDefId]);
+
+  /*
+   * `BE-31`: відкликання подання автором. ⛔ Чи показати пункт, вирішує СЕРВЕР: «автор подання» і «жоден крок не
+   * підписано» з `/api/v1/me` і стану аркуша не виводяться. Якірний режим — `GET …/recall` (лише на поданому аркуші;
+   * доки відповіді немає — пункту немає); річна розкладка — `canRecall` кожного місяця.
    */
   const recallAvailability = useRecallAvailability(
     documentId,
     sheetDefId,
     periodKey,
-    isAllowed('recall', state),
+    anchorMode && isAllowed('recall', state),
     sheetCopyId,
   );
-  const canRecall = isAllowed('recall', state) && recallAvailability.data?.canRecall === true;
+  const canRecall = anchorMode && isAllowed('recall', state) && recallAvailability.data?.canRecall === true;
 
   const recall = useMutation({
     mutationFn: ({ sheetDefId: sheet, periodKey: period, sheetCopyId: copy, reason }: ActionTarget & { reason: string }) =>
@@ -734,7 +954,10 @@ export function useSheetActions({
       showDone(t('workflow.recalled'));
     },
     // ⚠ `409` тут — не збій: погоджувач устиг підписати крок, і текст каже саме це.
-    onError: (error, at) => showSheetError(error, at.sheetName),
+    onError: (error, at) => {
+      refreshMonthsOnConflict(error);
+      showSheetError(error, at.sheetName);
+    },
   });
 
   /**
@@ -1076,7 +1299,6 @@ export function useSheetActions({
    * до відповіді подав би відкритий період, тобто саме те, що D-441 скасовує. Збій запиту — стара поведінка
    * (відкритий на екрані період), щоб робочий процес не зупинявся через недоступну підказку.
    */
-  const submissionTarget = useSubmissionTarget(documentId, sheetDefId, periodKey, sheetCopyId);
   // ⚠ Відповідь без переліку періодів (старіший сервер, проксі, порожнє тіло) — та сама невідомість, що й збій.
   const target = Array.isArray(submissionTarget.data?.periods) ? submissionTarget.data : undefined;
   const targetUnknown = submissionTarget.isError || (submissionTarget.isSuccess && target === undefined);
@@ -1104,6 +1326,15 @@ export function useSheetActions({
   // ні: подається інший період, і його стан уже врахував сервер.
   const maySubmit = lock !== 'projectArchived' && mayWorkflow('submit');
   const canSubmit = submitPeriod !== null && maySubmit;
+  // ✎ D-6 (п. 11): місяць джерела HSE400 для ЦІЛІ подання (не для відкритого періоду) не затверджено — сервер відмовить.
+  const unapprovedSource =
+    submitPeriod === null
+      ? null
+      : (target?.periods.find((period) => period.periodKey === submitPeriod)?.unapprovedSourcePeriodKey ?? null);
+  const submitBlockedReason =
+    submitPeriod === null || unapprovedSource === null
+      ? null
+      : t('workflow.submitSourceNotApproved', { period: periodLabel(submitPeriod), source: periodLabel(unapprovedSource) });
 
   /*
    * ✎ D-441 «миготіння скелета»: `keepPreviousData` (`useSubmissionTarget`) тримає відповідь попереднього
@@ -1131,10 +1362,31 @@ export function useSheetActions({
    * сервера `GET …/approver-edit` (`CanApproveOfAsync`, те саме правило, що й `POST …/approve`); поки її немає чи
    * вона збійна — кнопок немає (відмова закрита). Запит той самий, що в `DocumentPage` (той самий ключ, один запит).
    */
-  const approverCheck = useApproverEditAvailability(documentId, sheetDefId, periodKey, editsDeferToServer(state), sheetCopyId);
+  // ✎ D-6: річна розкладка цього запиту не робить — право кожного місяця вже в `monthColumns` (без миготіння на виборі).
+  const approverCheck = useApproverEditAvailability(
+    documentId,
+    sheetDefId,
+    periodKey,
+    anchorMode && editsDeferToServer(state),
+    sheetCopyId,
+  );
   const mayDecide = me !== undefined && !me.isSimulation && approverCheck.data?.canApproverEdit === true;
-  const canApprove = isAllowed('approve', state) && mayDecide;
-  const canReject = isAllowed('reject', state) && mayDecide;
+  const notSimulating = me !== undefined && !me.isSimulation;
+  const canApprove = monthly ? decideMonthKey !== null && notSimulating : anchorMode && isAllowed('approve', state) && mayDecide;
+  const canReject = monthly ? decideMonthKey !== null && notSimulating : anchorMode && isAllowed('reject', state) && mayDecide;
+  // ✎ D-6 (борг координатора): місяць джерела HSE400 для ЦІЛІ затвердження не затверджено — сервер відмовить (на будь-якому
+  // кроці маршруту); відхилення — ні. Ціль: місяць рішення (річна розкладка) чи період сторінки; дані — лише непідставні.
+  const approveSource = monthly
+    ? (months.find((m) => m.periodKey === decideMonthKey)?.unapprovedSource ?? null)
+    : // ⛔ L2: період сторінки — і тоді, коли він закритий (у `periods[]` лише відкриті): окреме поле відповіді.
+      anchorMode && !submissionTarget.isPlaceholderData && state === 'Submitted'
+      ? (submissionTarget.data?.anchorUnapprovedSourcePeriodKey ?? null)
+      : null;
+  const approveTargetPeriod = monthly ? decideMonthKey : periodKey;
+  const approveBlockedReason =
+    approveSource === null || approveTargetPeriod === null
+      ? null
+      : t('workflow.approveSourceNotApproved', { period: periodLabel(approveTargetPeriod), source: periodLabel(approveSource) });
 
   // ⛔ Аудит Етапу 3, лана "Documents core" (`lane3-workflow-buttons-not-grouped`,
   // знахідка людини зі скріншотом): `DocumentPage.tsx` рендерить ОДИН
@@ -1227,14 +1479,67 @@ export function useSheetActions({
    * Тому для Submitted — відповідь сервера `approver-edit` (`mayDecide`, роль кроку + грант Approve) разом із правом
    * `Document.Reopen`. Для Approved (крок — останній маршруту) `approver-edit` не відповідає — лишається грант.
    */
-  const canReopen =
-    isAllowed('reopen', state) &&
-    can(me, 'Document.Reopen') &&
-    (editsDeferToServer(state) ? mayDecide : mayWorkflow('approve'));
+  // ✎ D-6: річна розкладка — `canReturn` місяця (сервер: `Document.Reopen` + `CanReopenOfAsync`, як `POST …/reopen`).
+  // Повернення ПОДАНОГО місяця там — «Reject» (свідома відмінність, D-559): «Return for edits» лише над затвердженими.
+  const canReopen = monthly
+    ? reopenMonthKey !== null && notSimulating
+    : anchorMode &&
+      isAllowed('reopen', state) &&
+      can(me, 'Document.Reopen') &&
+      (editsDeferToServer(state) ? mayDecide : mayWorkflow('approve'));
+
+  /*
+   * ✎ D-6: сітці — які місяці людина може зробити ціллю (позначка стану колонки стає кнопкою) і які колонки — цілі
+   * (підсвічуються): ціль «Approve/Reject» і, окремо, ціль «Return for edits» (п. 7: свій вигляд і `aria-pressed`).
+   * Права відомі наперед для всіх місяців, тож вибір не перетворює кнопку на текст (п. 2: фокус лишається на позначці).
+   */
+  const decideTarget = monthly && !workflowOff && canApprove ? decideMonthKey : null;
+  const returnTarget = monthly && canReopen ? reopenMonthKey : null;
+  const eligibleMonths = new Map<number, DecisionKind>();
+  if (decideTarget !== null) decideOptions.forEach((key) => eligibleMonths.set(key, 'Submitted'));
+  if (returnTarget !== null) reopenOptions.forEach((key) => eligibleMonths.set(key, 'Approved'));
+  const viewSignature = `${String(decideTarget)}|${String(returnTarget)}|${[...eligibleMonths]
+    .map(([key, kind]) => `${String(key)}${kind}`)
+    .join(',')}`;
+  useEffect(() => {
+    publishDecisionView(documentId, sheetDefId, {
+      eligible: eligibleMonths,
+      targets: { Submitted: decideTarget, Approved: returnTarget },
+    });
+  }, [documentId, sheetDefId, viewSignature]);
+  useEffect(() => () => clearDecisionTarget(documentId, sheetDefId), [documentId, sheetDefId]);
+
+  // ✎ D-6: банер річної розкладки говорить про місяць — ціль людини, інакше найраніший поданий / затверджений.
+  const firstSubmitted = months.find((m) => m.status === 'Submitted')?.periodKey ?? null;
+  const firstApproved = months.find((m) => m.status === 'Approved')?.periodKey ?? null;
+  const monthBanner: SheetActionsModel['monthBanner'] = !yearLayout
+    ? null
+    : monthly
+      ? decideTarget !== null
+        ? { periodKey: decideTarget, state: 'Submitted', canDecide: true }
+        : returnTarget !== null
+          ? { periodKey: returnTarget, state: 'Approved', canDecide: false }
+          : firstSubmitted !== null
+            ? { periodKey: firstSubmitted, state: 'Submitted', canDecide: false }
+            : firstApproved !== null
+              ? { periodKey: firstApproved, state: 'Approved', canDecide: false }
+              : null
+      : // Місяці невідомі через збій — про якір, коли він сам поданий чи затверджений (поки вантажиться — нічого).
+        anchorMode && (state === 'Submitted' || state === 'Approved')
+        ? { periodKey, state, canDecide: !workflowOff && (canApprove || canReject) }
+        : null;
+
+  /*
+   * ✎ D-6 (UX): відхилений місяць ЗАКРИТОГО періоду автор не зможе правити й подати знову, доки період не відкриють
+   * (`Period.Reopen`) — діалог відхилення каже це заздалегідь (поведінка та сама). Закритий = поданий період, якого немає
+   * серед відкритих (`periods[]`: Open/Grace з винятком «відкрито для документа»; поданий місяць не буває Scheduled).
+   */
+  const rejectPeriodClosed =
+    asking === 'reject' && target !== undefined && !target.periods.some((period) => period.periodKey === askedPeriod);
 
   // ✎ LIVE-STATUS: діалог проти застарілого стану не відкривається.
-  const askFresh = (action: 'approve' | 'reject' | 'reopen' | 'recall'): void => {
-    if (!statusStale) ask(action);
+  const askFresh = (action: 'approve' | 'reject' | 'reopen' | 'recall', targetPeriod: number): void => {
+    if (!statusStale) ask(action, targetPeriod);
   };
 
   const dialogs = (
@@ -1264,7 +1569,7 @@ export function useSheetActions({
 
       <LazyConfirmModal
         opened={asking === 'approve'}
-        title={t('workflow.approveTitle')}
+        title={monthly ? t('workflow.approvePeriodTitle', { period: periodLabel(askedPeriod) }) : t('workflow.approveTitle')}
         text={t('workflow.approveHint')}
         verb={t('workflow.approve')}
         danger={false}
@@ -1281,7 +1586,7 @@ export function useSheetActions({
 
       <LazyReasonModal
         opened={asking === 'recall'}
-        title={t('workflow.recallTitle')}
+        title={monthly ? t('workflow.recallPeriodTitle', { period: periodLabel(askedPeriod) }) : t('workflow.recallTitle')}
         label={t('workflow.reason')}
         description={t('workflow.recallHint')}
         confirmLabel={t('workflow.recall')}
@@ -1292,9 +1597,13 @@ export function useSheetActions({
 
       <LazyReasonModal
         opened={asking === 'reject'}
-        title={t('workflow.rejectTitle')}
+        title={monthly ? t('workflow.rejectPeriodTitle', { period: periodLabel(askedPeriod) }) : t('workflow.rejectTitle')}
         label={t('workflow.reason')}
-        description={t('workflow.rejectHint')}
+        description={
+          rejectPeriodClosed
+            ? `${t('workflow.rejectHint')} ${t('workflow.rejectClosedPeriodNote', { period: periodLabel(askedPeriod) })}`
+            : t('workflow.rejectHint')
+        }
         confirmLabel={t('workflow.reject')}
         isPending={decide.isPending || settled.settling}
         onConfirm={(reason) => settled.run(() => decide.mutateAsync({ ...askedAt.current, approved: false, reason }))}
@@ -1303,7 +1612,7 @@ export function useSheetActions({
 
       <LazyReasonModal
         opened={asking === 'reopen'}
-        title={t('workflow.reopenTitle')}
+        title={monthly ? t('workflow.reopenPeriodTitle', { period: periodLabel(askedPeriod) }) : t('workflow.reopenTitle')}
         label={t('workflow.reason')}
         description={t('workflow.reopenHint')}
         confirmLabel={t('workflow.reopen')}
@@ -1311,7 +1620,8 @@ export function useSheetActions({
         onConfirm={(reason) => {
           const at = askedAt.current;
           // ✎ B80 N5: вплив питаємо лише при поверненні ІЗ затвердженого — інше джерела залежних не змінює.
-          if (state !== 'Approved') {
+          // ✎ D-6: річна розкладка повертає лише затверджені місяці.
+          if (!monthly && state !== 'Approved') {
             reopen.mutate({ ...at, reason });
             return;
           }
@@ -1376,8 +1686,9 @@ export function useSheetActions({
           // N3-01: адреса — знята в мить кліку; період — ЦІЛЬ подання, а не відкритий на екрані (D-441).
           // ⛔ Лише підтверджена ціль (`confirmedPeriod`): поки дані підставні, клік нічого не шле.
           // UAT-p3 №1: клік лише відкриває підтвердження з назвою місяця; подає — «Submit» у діалозі.
+          blockedReason: submitBlockedReason,
           run: () => {
-            if (confirmedPeriod === null) return;
+            if (confirmedPeriod === null || submitBlockedReason !== null) return;
             askedAt.current = { ...here, periodKey: confirmedPeriod };
             setAskedPeriod(confirmedPeriod);
             setAsking('submit');
@@ -1385,11 +1696,42 @@ export function useSheetActions({
         }
       : null,
     submitPending,
-    approve: !workflowOff && canApprove ? { loading: decideLoading || settled.settling, ask: () => askFresh('approve') } : null,
-    reject: !workflowOff && canReject ? { ask: () => askFresh('reject') } : null,
-    reopen: canReopen ? { ask: () => askFresh('reopen') } : null,
-    recall: !workflowOff && canRecall ? { ask: () => askFresh('recall') } : null,
+    decisionPending: yearLayout && !workflowOff && submissionTarget.isLoading && submissionTarget.failureCount === 0,
+    // ✎ D-6: `periodKey` — місяць, який вирішить кнопка (лише річна розкладка; `null` — період сторінки, підпис без місяця).
+    approve:
+      !workflowOff && canApprove
+        ? {
+            loading: decideLoading || settled.settling,
+            blockedReason: approveBlockedReason,
+            ask: () => {
+              if (approveBlockedReason === null) askFresh('approve', decideMonthKey ?? periodKey);
+            },
+            periodKey: monthly ? decideMonthKey : null,
+            options: decideOptions,
+            pick: (key: number) => pickDecisionMonth(documentId, sheetDefId, key, 'Submitted'),
+          }
+        : null,
+    reject:
+      !workflowOff && canReject
+        ? { ask: () => askFresh('reject', decideMonthKey ?? periodKey), periodKey: monthly ? decideMonthKey : null }
+        : null,
+    reopen: canReopen
+      ? {
+          ask: () => askFresh('reopen', reopenMonthKey ?? periodKey),
+          periodKey: monthly ? reopenMonthKey : null,
+          options: reopenOptions,
+          pick: (key: number) => pickDecisionMonth(documentId, sheetDefId, key, 'Approved'),
+        }
+      : null,
+    recall: workflowOff
+      ? []
+      : monthly
+        ? recallMonths.map((key) => ({ ask: () => askFresh('recall', key), periodKey: key }))
+        : canRecall
+          ? [{ ask: () => askFresh('recall', periodKey), periodKey: null }]
+          : [],
     stale: statusStale,
+    monthBanner,
     dialogs,
   };
 }

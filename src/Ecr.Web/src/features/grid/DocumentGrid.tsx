@@ -211,6 +211,8 @@ import { DeleteRowControl } from './DeleteRowControl';
 import { useRowHeight } from '@/shared/theme/preferences';
 import { t } from '@/shared/i18n';
 import { useMonthColumnMonths, useMonthColumnStatuses, type MarkedMonthStatus } from '@/features/grid/monthColumnStatus';
+import { formatPeriodKey } from '@/shared/format/periodKey';
+import { pickDecisionMonth, useDecisionView, type DecisionView } from '@/features/workflow/decisionTarget';
 // ⚠ Порядок стилів збережений: `cell-states.css` (раніше — у `App.tsx`) іде
 // РАНІШЕ за `cellEditors.css`, як і було в єдиному бандлі. Причина, чому файл
 // тут, а не у вхідному чанку, — бюджет маршруту (`D-132`).
@@ -1478,6 +1480,22 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   // ✎ D-441: колонка місяця k таблиці `MonthsInColumns` позначається станом аркуша за період k.
   const monthStatus = useMonthColumnStatuses(documentId, sheetDefId, periodKey, tableDefId, sheetCopyId);
 
+  // ✎ D-6: ціль рішень над місяцем (публікує рядок дій): колонка-ціль підсвічується, позначка стану доступного місяця — кнопка.
+  const decisionView = useDecisionView(documentId, sheetDefId);
+  const monthDecision = useMemo<MonthDecision | undefined>(
+    () =>
+      sheetDefId === undefined || decisionView.eligible.size === 0
+        ? decisionView.targets.Submitted === null && decisionView.targets.Approved === null
+          ? undefined
+          : { view: decisionView, periodOf: columnMonths, choose: () => undefined }
+        : {
+            view: decisionView,
+            periodOf: columnMonths,
+            choose: (month, kind) => pickDecisionMonth(documentId, sheetDefId, month, kind),
+          },
+    [decisionView, columnMonths, documentId, sheetDefId],
+  );
+
   const columns = useMemo(
     () =>
       data === undefined
@@ -1500,6 +1518,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
             rowLookupProblems,
             rowWarnings,
             tableDefId,
+            monthDecision,
           ),
     [
       data,
@@ -1519,6 +1538,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       rowLookupProblems,
       rowWarnings,
       tableDefId,
+      monthDecision,
     ],
   );
 
@@ -3433,6 +3453,15 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   );
 }
 
+/** ✎ D-6: ціль рішень над місяцем для заголовків місячних колонок (див. `workflow/decisionTarget.ts`). */
+export interface MonthDecision {
+  readonly view: DecisionView;
+  /** Код колонки → місяць (період) колонки. */
+  readonly periodOf: ReadonlyMap<string, { readonly periodKey: number }>;
+  /** Позначка стану доступного місяця натиснута: зробити його ціллю рішення. */
+  readonly choose: (periodKey: number, kind: 'Submitted' | 'Approved') => void;
+}
+
 /**
  * Колонки grid із опису зрізу.
  *
@@ -3488,6 +3517,9 @@ export function gridColumns(
   // ✎ F13-p210: рядок → попередження перевірки (текст сервера), і таблиця, до якої ведуть знахідки.
   rowWarnings: ReadonlyMap<string, string> = new Map(),
   tableDefId?: number,
+
+  // ✎ D-6: ціль рішень над місяцем (колонка-ціль підсвічується, позначка стану доступного місяця — кнопка).
+  monthDecision?: MonthDecision,
 ): ColumnRegular[] {
   // ⚠ Тип оголошений ЯВНО, а не виведений із `map`. Без нього лямбди
   // всередині (`readonly`, `cellProperties`, `cellTemplate`) втрачають
@@ -3504,6 +3536,20 @@ export function gridColumns(
     const isRequired = column.isRequired || column.isRequiredByMethodology;
     const requiredHint = isRequired ? t('grid.columnRequiredHint') : null;
     const monthState = monthStatus.get(column.code) ?? null;
+    // ✎ D-6: період колонки й чи вона — ціль рішення / чи її можна зробити ціллю.
+    const monthPeriod = monthDecision?.periodOf.get(column.code)?.periodKey ?? null;
+    // ✎ D-6 (п. 7): ціль «Approve/Reject» (поданий місяць) і ціль «Return for edits» (затверджений) — різні цілі зі своїм
+    // виглядом; позначка натиснута (`aria-pressed`), коли її місяць — ціль ЇЇ виду.
+    const targetKind: 'Submitted' | 'Approved' | null =
+      monthPeriod === null || monthDecision === undefined
+        ? null
+        : monthPeriod === monthDecision.view.targets.Submitted
+          ? 'Submitted'
+          : monthPeriod === monthDecision.view.targets.Approved
+            ? 'Approved'
+            : null;
+    const decisionTarget = targetKind !== null;
+    const decisionKind = monthPeriod === null ? undefined : monthDecision?.view.eligible.get(monthPeriod);
 
     /*
      * ⛔ `U-05`: вирівнювання числа вирішує ТИП КОЛОНКИ з сервера
@@ -3524,13 +3570,23 @@ export function gridColumns(
 
     const headerStyled = headerStyleProps(slice.headerStyle);
     const headerProperties =
-      requiredHint === null && !isNumeric && headerStyled === null
+      requiredHint === null && !isNumeric && headerStyled === null && !decisionTarget
         ? null
         : {
             ...(requiredHint === null ? {} : { title: requiredHint }),
-            ...(isNumeric || headerStyled !== null
-              ? { class: [isNumeric ? 'ecr-header-numeric' : null, headerStyled?.class ?? null].filter((c) => c !== null).join(' ') }
+            ...(isNumeric || headerStyled !== null || decisionTarget
+              ? {
+                  class: [
+                    isNumeric ? 'ecr-header-numeric' : null,
+                    headerStyled?.class ?? null,
+                    targetKind === 'Submitted' ? 'ecr-header-decision-target' : null,
+                    targetKind === 'Approved' ? 'ecr-header-return-target' : null,
+                  ]
+                    .filter((c) => c !== null)
+                    .join(' '),
+                }
               : {}),
+            ...(targetKind === null ? {} : { 'data-decision-target': targetKind === 'Submitted' ? 'decide' : 'return' }),
             ...(headerStyled === null ? {} : { style: headerStyled.style }),
           };
 
@@ -3588,14 +3644,43 @@ export function gridColumns(
                   : h('span', { class: 'ecr-header-name' }, [
                       h('span', {}, column.header + (isRequired ? ' *' : '')),
                       h('span', { class: 'ecr-header-sr' }, ', '),
-                      h(
-                        'span',
-                        {
-                          class: `ecr-header-month-status ecr-header-month-status--${monthState.toLowerCase()}`,
-                          'data-month-status': monthState,
-                        },
-                        monthState === 'Approved' ? t('status.sheet.Approved') : t('status.sheet.Submitted'),
-                      ),
+                      decisionKind === undefined || monthPeriod === null || monthDecision === undefined
+                        ? h(
+                            'span',
+                            {
+                              class: `ecr-header-month-status ecr-header-month-status--${monthState.toLowerCase()}`,
+                              'data-month-status': monthState,
+                            },
+                            monthState === 'Approved' ? t('status.sheet.Approved') : t('status.sheet.Submitted'),
+                          )
+                        : // ✎ D-6: справжня кнопка — Enter/Space її спрацьовують; клік не доходить до заголовка сітки (сортування, фокус).
+                          h(
+                            'button',
+                            {
+                              type: 'button',
+                              class: `ecr-header-month-status ecr-header-month-status--${monthState.toLowerCase()} ecr-header-month-status--action`,
+                              'data-month-status': monthState,
+                              // ⛔ WCAG 2.5.3: доступна назва починається з видимого тексту позначки («Submitted — …»).
+                              'aria-label':
+                                decisionKind === 'Approved'
+                                  ? t('grid.monthMakeReturn', {
+                                      status: t('status.sheet.Approved'),
+                                      period: formatPeriodKey(monthPeriod) || String(monthPeriod),
+                                    })
+                                  : t('grid.monthMakeDecision', {
+                                      status: t('status.sheet.Submitted'),
+                                      period: formatPeriodKey(monthPeriod) || String(monthPeriod),
+                                    }),
+                              'aria-pressed': targetKind === decisionKind ? 'true' : 'false',
+                              onClick: (event: Event) => {
+                                event.stopPropagation();
+                                monthDecision.choose(monthPeriod, decisionKind);
+                              },
+                              onKeyDown: (event: Event) => event.stopPropagation(),
+                              onMouseDown: (event: Event) => event.stopPropagation(),
+                            },
+                            monthState === 'Approved' ? t('status.sheet.Approved') : t('status.sheet.Submitted'),
+                          ),
                     ]),
                 ...(column.unitSymbol === null
                   ? []
