@@ -1,5 +1,5 @@
 /**
- * Гейт бюджету клієнта (`D-132`): чанк маршруту ≤ 250 КБ gzip.
+ * Гейт бюджету клієнта (`D-132`): чанк маршруту ≤ 250 КБ gzip; динамічні чанки — власні стелі (PSS-20).
  *
  * ⛔ Скрипт існує тому, що бюджет був записаний у двох документах і не
  * перевірявся НІДЕ. `07-checkpoints.md` §361 стверджував, що його стереже
@@ -15,10 +15,23 @@
  * важать одиниці кілобайт, а спільний вхідний чанк — 173 КБ, і жоден із них
  * поодинці межі не сягає.
  *
- * ⛔ Динамічні імпорти НЕ рахуються, і це не поблажка. `import()` — це те, чого
- * браузер на цьому маршруті може й не завантажити взагалі; порахувати його
- * означало б, що Monaco (818 КБ gzip) ламає бюджет п'ятнадцяти сторінок, які
- * про нього не знають. Саме заради цієї межі він і винесений.
+ * ⛔ Динамічні імпорти НЕ входять у вагу МАРШРУТУ, і це не поблажка. `import()` —
+ * це те, чого браузер на цьому маршруті може й не завантажити взагалі; порахувати
+ * його означало б, що Monaco (818 КБ gzip) ламає бюджет п'ятнадцяти сторінок,
+ * які про нього не знають. Саме заради цієї межі він і винесений.
+ *
+ * ⛔ Але «не входить у маршрут» не означало «без ліміту» (PSS-20): Monaco міг би
+ * вирости з 0.8 до 1.1 МБ (`editor.main` замість поіменних внесків, див.
+ * `04-environment.md`) — і жоден гейт цього б не помітив. Тому окремо стережеться
+ * ДОДАТКОВА вага кожного динамічного чанка, який НЕ є маршрутом: усе, що він
+ * тягне понад вхідний чанк і його статичні залежності (те, що вже в браузері).
+ *   - загальна стеля `DynamicCeiling` — 190 КБ gzip (найважчий нині не-Monaco —
+ *     `RowLockDialog` / внутрішні входи RevoGrid, ≈ 170 КБ, +12 % запасу);
+ *   - поіменні стелі `DynamicCeilings` — для того, що свідомо важчий. Нині лише
+ *     `monaco`: виміряно 795.5 КБ → стеля 820 КБ (+3 %). Піднімати стелю можна
+ *     тільки разом із записаним рішенням, чому чанк став важчим.
+ * Стеля стоїть на виміряному значенні з малим запасом, а не «з запасом на
+ * майбутнє»: запас на майбутнє — це і є відсутність ліміту.
  */
 import { gzipSync } from 'node:zlib';
 import { readFileSync, existsSync } from 'node:fs';
@@ -51,6 +64,18 @@ const Grandfathered = {
   //
   // ⚠ Рядок прибрано за єдиною законною підставою: маршрут опустився під
   // межу. Прибрати його інакше означало б зробити зі стелі звільнення.
+};
+
+/** Загальна стеля додаткової ваги динамічного чанка, що не є маршрутом, КБ gzip. */
+const DynamicCeiling = 190 * 1024;
+
+/**
+ * Поіменні стелі (за іменем вихідного файла без розширення). ⛔ Кожен рядок —
+ * визнано важкий чанк зі СВОЄЮ стелею на виміряному значенні, не звільнення.
+ */
+const DynamicCeilings = {
+  // Monaco, виміряно 795.5 КБ gzip (6 файлів із CSS). `editor.main` — 1 121 КБ.
+  monaco: 820 * 1024,
 };
 
 if (!existsSync(manifestPath)) {
@@ -180,9 +205,98 @@ for (const [name, held] of Object.entries(Grandfathered)) {
 }
 
 if (failures.length > 0) {
-  console.error(`\nПеревищено межу: ${String(failures.length)}.`);
+  console.error(`
+Перевищено межу: ${String(failures.length)}.`);
   console.error('Винести важке в `import()` — так, як винесений Monaco.');
-  process.exit(1);
 }
 
-console.log(`\nУсі ${String(rows.length)} маршрутів у своїх межах.`);
+// ── Динамічні чанки, що не є маршрутами (PSS-20) ────────────────────────────
+// Додаткова вага = файли замикання чанка МІНУС файли, які вже завантажені
+// вхідним чанком. Інакше кожен динамічний чанок «важив» би ще й вхідні 173 КБ.
+const routeKeys = new Set(routes);
+const loadedUpFront = new Set();
+for (const chunkKey of closureOf(entryKey)) {
+  const chunk = manifest[chunkKey];
+  if (chunk === undefined) continue;
+  loadedUpFront.add(chunk.file);
+  for (const css of chunk.css ?? []) loadedUpFront.add(css);
+}
+
+function weighExtra(key) {
+  const files = new Set();
+  for (const chunkKey of closureOf(key)) {
+    const chunk = manifest[chunkKey];
+    if (chunk === undefined) continue;
+    for (const file of [chunk.file, ...(chunk.css ?? [])]) {
+      if (!loadedUpFront.has(file)) files.add(file);
+    }
+  }
+  let total = 0;
+  for (const file of files) total += gzipSize(file);
+
+  return { total, files: files.size };
+}
+
+// ⚠ Чанк, який статично входить у замикання іншого динамічного чанка з поіменною
+// стелею (`_editor.api` усередині Monaco), вже зважений там: рахувати його вдруге
+// проти загальної стелі означало б хибне порушення на частині того самого Monaco.
+const coveredByNamed = new Set();
+for (const key of Object.keys(manifest)) {
+  if (manifest[key].isDynamicEntry !== true || routeKeys.has(key)) continue;
+  if (DynamicCeilings[nameOf(key)] === undefined) continue;
+  for (const inner of closureOf(key)) {
+    if (inner !== key) coveredByNamed.add(inner);
+  }
+}
+
+const dynamicRows = Object.keys(manifest)
+  .filter(
+    (key) =>
+      manifest[key].isDynamicEntry === true && !routeKeys.has(key) && !coveredByNamed.has(key),
+  )
+  .map((key) => ({ key, name: nameOf(key), ...weighExtra(key) }))
+  .sort((a, b) => b.total - a.total);
+
+const dynamicFailures = [];
+console.log(
+  `
+Динамічні чанки поза маршрутами (PSS-20): стеля ${(DynamicCeiling / 1024).toFixed(0)} КБ gzip, ` +
+    `поіменні: ${Object.entries(DynamicCeilings).map(([n, v]) => `${n} ${(v / 1024).toFixed(0)}`).join(', ')} КБ
+`,
+);
+
+const heaviestUnnamed = dynamicRows.findIndex((row) => DynamicCeilings[row.name] === undefined);
+
+// Друкуємо найважчий без поіменної стелі, усі з поіменною стелею й усі порушення: сотні дрібних рядків — шум.
+for (const [index, row] of dynamicRows.entries()) {
+  const limit = DynamicCeilings[row.name] ?? DynamicCeiling;
+  const failed = row.total > limit;
+  if (failed) dynamicFailures.push(row);
+  if (failed || index === heaviestUnnamed || DynamicCeilings[row.name] !== undefined) {
+    console.log(
+      `${failed ? '✗' : '✓'} ${kb(row.total)} КБ  ${row.name}  (${String(row.files)} файлів, стеля ${(limit / 1024).toFixed(0)})`,
+    );
+  }
+}
+
+// ⚠ Поіменна стеля на чанк, якого вже немає, — мертвий рядок, який мовчки
+// перестав щось стерегти (Monaco перейменували, а стеля лишилась).
+for (const name of Object.keys(DynamicCeilings)) {
+  if (!dynamicRows.some((row) => row.name === name)) {
+    console.error(`
+✗ Поіменна стеля «${name}» не відповідає жодному динамічному чанку.`);
+    dynamicFailures.push({ name, total: 0 });
+  }
+}
+
+if (dynamicFailures.length > 0) {
+  console.error(`
+Динамічних чанків над стелею: ${String(dynamicFailures.length)}.`);
+}
+
+if (failures.length > 0 || dynamicFailures.length > 0) process.exit(1);
+
+console.log(
+  `
+Усі ${String(rows.length)} маршрутів і ${String(dynamicRows.length)} динамічних чанків у своїх межах.`,
+);

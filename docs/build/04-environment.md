@@ -169,7 +169,7 @@ CI — виключно ubuntu-latest). Версії — у `Directory.Packages.
 | `react-hook-form` | 7.54.2 | MIT | форми |
 | ~~`zod`~~ | ~~3.24.1~~ | MIT | ✎ 2026-10-24: прибрано — у `src/` не імпортувався (`W-10`), а `GHSA-mrhx-c7xc-m3w5` (high) червонив гейт «Безпека залежностей» |
 | `react-router-dom` | 7.1.1 | MIT | маршрутизація |
-| `@formulajs/formulajs` | 4.4.9 | MIT | клієнтські формули — **лише підказка** (`D-20`) |
+| ~~`@formulajs/formulajs`~~ | ~~4.4.9~~ | MIT | ✎ 2026-11-20: прибрано (PSS-20) — у `src/`, `e2e/`, скриптах і конфігах не імпортувався; клієнтський обчислювач власний (`D6-01`, `src/shared/formula/evaluate.ts`) |
 | `openapi-typescript` | 7.5.0 | MIT | типи з нашого OpenAPI |
 | `vitest` | 2.1.8 | MIT | тести |
 | `@testing-library/react` | 16.1.0 | MIT | тести |
