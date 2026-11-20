@@ -195,19 +195,43 @@ public sealed class MethodologyResolver(
         return outcome.Matches;
     }
 
+    /// <summary>
+    /// PSS-08: прочитане фазою методологій поточного виклику оркестратора, спільне для прив'язок і гілок;
+    /// <c>null</c> — кожне читання йде в сховище (перегляд, матриця покриття, тести).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Ставить оркестратор на екземпляр зі scope ГІЛКИ (Scoped: той самий екземпляр бачить і
+    /// <see cref="ScriptRowSelector"/> цієї гілки) і лише на час виклику <c>RunAsync</c>.
+    /// </remarks>
+    internal MethodologyPhaseReadCache? PhaseReads { get; set; }
+
     /// <summary>Читає екземпляр таблиці, ключі його рядків і зріз комірок (з дефолтами колонок).</summary>
     /// <param name="tableInstanceId">Екземпляр таблиці документа.</param>
     /// <param name="ct">Токен скасування.</param>
-    internal async Task<TableRead> ReadTableAsync(long tableInstanceId, CancellationToken ct)
+    /// <remarks>
+    /// ✎ PSS-08: з <see cref="PhaseReads"/> — раз на екземпляр за виклик оркестратора, а не раз на прив'язку (п'ять
+    /// методологій на одній таблиці читали той самий зріз п'ять разів).
+    /// </remarks>
+    internal Task<TableRead> ReadTableAsync(long tableInstanceId, CancellationToken ct)
+        => PhaseReads is { } reads
+            ? reads.TableAsync(tableInstanceId, () => ReadTableCoreAsync(tableInstanceId, reads, ct))
+            : ReadTableCoreAsync(tableInstanceId, reads: null, ct);
+
+    private async Task<TableRead> ReadTableCoreAsync(long tableInstanceId, MethodologyPhaseReadCache? reads, CancellationToken ct)
     {
-        var instance = await rows.ResolveTableInstanceAsync(tableInstanceId, ct).ConfigureAwait(false);
+        var instance = reads is null
+            ? await rows.ResolveTableInstanceAsync(tableInstanceId, ct).ConfigureAwait(false)
+            : await reads.InstanceAsync(tableInstanceId, () => rows.ResolveTableInstanceAsync(tableInstanceId, ct)).ConfigureAwait(false);
         var period = new PeriodKey(instance.PeriodKey);
-        var rowIds = await rows
-            .GetRowIdsAsync(tableInstanceId, period, ct)
-            .ConfigureAwait(false);
+        var rowIds = reads is null
+            ? await rows.GetRowIdsAsync(tableInstanceId, period, ct).ConfigureAwait(false)
+            : await reads.RowIdsAsync(tableInstanceId, period, () => rows.GetRowIdsAsync(tableInstanceId, period, ct)).ConfigureAwait(false);
 
         // O3c: період екземпляра вже відомий — ключ партиції замість пошуку по всіх.
-        var slice = await cells.ReadSliceAsync(tableInstanceId, period, ct).ConfigureAwait(false);
+        // ✎ PSS-08: сирий зріз (без дефолтів) — той самий запис кешу, що читає ScriptRuntime для колонок Calculated.
+        var slice = reads is null
+            ? await cells.ReadSliceAsync(tableInstanceId, period, ct).ConfigureAwait(false)
+            : await reads.SliceAsync(tableInstanceId, period, () => cells.ReadSliceAsync(tableInstanceId, period, ct)).ConfigureAwait(false);
 
         // ✎ C-5 (рішення PO 11.11, 02b §6.3): правило бачить дефолт незаповненої комірки; той самий доповнений зріз іде
         // у входи (`Read` нижче → CalculationInputBuilder), тож зіставлення й аргументи не розходяться.

@@ -198,6 +198,10 @@ public sealed class CalculationOrchestrator(
         // ✎ LAND-YEAR L2b: періоди-власники, чиї результати читали скрипти цього періоду (колонки Calculated з чужим власником).
         var foreignOwnerReads = new ConcurrentBag<int>();
 
+        // ✎ PSS-08: екземпляри, рядки й зрізи таблиць — раз на ЦЕЙ виклик (документ × період), спільно для всіх прив'язок,
+        // пачок і паралельних гілок; не поле оркестратора й не за Id прогону (межі й безпека — MethodologyPhaseReadCache).
+        var phaseReads = MethodologyPhaseReadCache.For(_limits);
+
         foreach (var batch in batches)
         {
             // 3. ⚠ Усередині пакета — ПАРАЛЕЛЬНО. Послідовний прогін у 10
@@ -239,6 +243,9 @@ public sealed class CalculationOrchestrator(
                     scope.ServiceProvider.GetService<IRecalcCommandTimeout>()?.Apply();
 
                     var scopedResolver = scope.ServiceProvider.GetRequiredService<MethodologyResolver>();
+
+                    // PSS-08: той самий резолвер (Scoped) бачить і селектор рядків скрипта цієї гілки.
+                    scopedResolver.PhaseReads = phaseReads;
                     var scopedInputBuilder = scope.ServiceProvider.GetRequiredService<CalculationInputBuilder>();
                     var scopedOutputWriter = scope.ServiceProvider.GetRequiredService<CalculationOutputWriter>();
                     var scopedModules = scope.ServiceProvider.GetRequiredService<IEnumerable<ICalculationModule>>();
@@ -515,6 +522,13 @@ public sealed class CalculationOrchestrator(
                 .PrepareAsync(binding.Descriptor, documentId, periodKey, registries, ct)
                 .ConfigureAwait(false);
             var runtime = prepared.ScriptRuntime as ScriptRuntime;
+
+            // PSS-08: таблиці-псевдоніми й зрізи колонок Calculated — з читань цього виклику, а не заново на прив'язку.
+            if (scopedResolver.PhaseReads is { } phaseReads)
+            {
+                runtime?.UsePhaseReads(phaseReads, scopedResolver);
+            }
+
             outcome = await scopedSelector
                 .MatchAsync(prepared.Script!, binding.TableInstanceId, (registry, entry) => runtime?.EntryIdText(registry, entry), ct,
                     allRows: binding.Descriptor.Level == CalculationLevel.Module)
