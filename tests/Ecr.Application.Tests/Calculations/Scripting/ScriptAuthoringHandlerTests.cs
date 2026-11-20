@@ -254,7 +254,7 @@ public sealed class ScriptAuthoringHandlerTests
             () => Parity(runner).HandleAsync(VersionId, new ScriptParityRequestDto(DocumentId, 209901), CancellationToken.None));
         await runner.DidNotReceiveWithAnyArgs().RunAsync(default!, default);
 
-        Grant(ParityMethodologyScriptHandler.Permission);
+        Grant(ParityMethodologyScriptHandler.Permission, "Document.View");
         var result = await Parity(runner).HandleAsync(VersionId, new ScriptParityRequestDto(DocumentId, 209901), CancellationToken.None);
 
         Assert.Equal(3, result.ValuesCompared);
@@ -270,7 +270,7 @@ public sealed class ScriptAuthoringHandlerTests
     {
         _version.SetScript(Clean, ScriptCompiler.Hash(Clean));
         var runner = Runner();
-        GrantRestricted(ParityMethodologyScriptHandler.Permission);
+        GrantRestricted(ParityMethodologyScriptHandler.Permission, "Document.View");
 
         var denied = await Assert.ThrowsAsync<AccessDeniedException>(
             () => Parity(runner).HandleAsync(VersionId, new ScriptParityRequestDto(DocumentId, 209901), CancellationToken.None));
@@ -284,7 +284,7 @@ public sealed class ScriptAuthoringHandlerTests
     [Trait("Requirement", "MS-8.5")]
     public async Task Parity_невидимий_документ_404_не_місяць_422_без_тексту_422()
     {
-        Grant(ParityMethodologyScriptHandler.Permission);
+        Grant(ParityMethodologyScriptHandler.Permission, "Document.View");
         var runner = Runner();
 
         _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), 701, Arg.Any<CancellationToken>())
@@ -321,12 +321,12 @@ public sealed class ScriptAuthoringHandlerTests
         runner.RunAsync(Arg.Any<ScriptPreviewRequest>(), Arg.Any<CancellationToken>())
             .Returns(new ScriptPreviewResult([]));
 
-        GrantRestricted("Calculation.View");
+        GrantRestricted("Calculation.View", "Document.View");
         await Assert.ThrowsAsync<AccessDeniedException>(
             () => Preview(runner).HandleAsync(
                 VersionId, new PreviewMethodologyScriptRequest(Clean, DocumentId, 209901), CancellationToken.None));
 
-        Grant("Calculation.View");
+        Grant("Calculation.View", "Document.View");
         var broken = await Preview(runner).HandleAsync(
             VersionId,
             new PreviewMethodologyScriptRequest("rows from NO_SUCH_TABLE;\noutput OUT_A : t = 1;", DocumentId, 209901),
@@ -341,6 +341,77 @@ public sealed class ScriptAuthoringHandlerTests
             Arg.Any<CancellationToken>());
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Finding", "PSS-25")]
+    public async Task Preview_і_Parity_без_права_Document_View_у_проєкті_документа_403_і_рушій_не_викликається()
+    {
+        var runner = Substitute.For<IScriptPreviewRunner>();
+        runner.RunAsync(Arg.Any<ScriptPreviewRequest>(), Arg.Any<CancellationToken>()).Returns(new ScriptPreviewResult([]));
+        var parityRunner = Runner();
+        _version.SetScript(Clean, ScriptCompiler.Hash(Clean));
+        _access.DocumentProjectIdAsync(DocumentId, Arg.Any<CancellationToken>()).Returns((int?)3);
+
+        // Документ видимий (грант), Calculation.View є, Document.View — ні: перегляд віддав би значення входів рядків.
+        // Мутація: прибрати `RequirePermissionAsync(… DocumentPermission …)` з обробника — рушій викликається, 200.
+        Grant("Calculation.View", ParityMethodologyScriptHandler.Permission);
+        await Assert.ThrowsAsync<AccessDeniedException>(
+            () => Preview(runner).HandleAsync(
+                VersionId, new PreviewMethodologyScriptRequest(Clean, DocumentId, 209901), CancellationToken.None));
+        await Assert.ThrowsAsync<AccessDeniedException>(
+            () => Parity(parityRunner).HandleAsync(VersionId, new ScriptParityRequestDto(DocumentId, 209901), CancellationToken.None));
+        await runner.DidNotReceiveWithAnyArgs().RunAsync(default!, default);
+        await parityRunner.DidNotReceiveWithAnyArgs().RunAsync(default!, default);
+
+        // З правом — рушій викликається.
+        Grant("Calculation.View", ParityMethodologyScriptHandler.Permission, PreviewMethodologyScriptHandler.DocumentPermission);
+        await Preview(runner).HandleAsync(VersionId, new PreviewMethodologyScriptRequest(Clean, DocumentId, 209901), CancellationToken.None);
+        await runner.Received(1).RunAsync(Arg.Any<ScriptPreviewRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Finding", "PSS-21")]
+    public async Task Preview_що_не_вклався_в_час_дає_422_scriptPreviewTimeout_і_скасовує_прогін()
+    {
+        var cancelled = false;
+        var runner = Substitute.For<IScriptPreviewRunner>();
+        runner.RunAsync(Arg.Any<ScriptPreviewRequest>(), Arg.Any<CancellationToken>())
+            .Returns(async call =>
+            {
+                var token = call.Arg<CancellationToken>();
+                try
+                {
+                    await Task.Delay(Timeout.Infinite, token);
+                }
+                catch (OperationCanceledException)
+                {
+                    cancelled = true;
+                    throw;
+                }
+
+                return new ScriptPreviewResult([]);
+            });
+        Grant("Calculation.View", "Document.View");
+        var handler = new PreviewMethodologyScriptHandler(_drafts, Analyzer(), _access, _user, runner)
+        {
+            RunTimeout = TimeSpan.FromMilliseconds(200),
+        };
+
+        // Мутація: прибрати CancelAfter — прогін ніхто не перериває (тест не завершується).
+        var refused = await RefusedAsync(
+            handler.HandleAsync(VersionId, new PreviewMethodologyScriptRequest(Clean, DocumentId, 209901), CancellationToken.None));
+
+        Assert.Equal("err.ECR-CALC-0422.scriptPreviewTimeout", refused.Details!["messageKey"]);
+        Assert.True(cancelled, "токен прогону мав бути скасований");
+
+        // Скасування самим клієнтом — не «час вийшов», а звичайне скасування.
+        using var aborted = new CancellationTokenSource();
+        await aborted.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => handler.HandleAsync(VersionId, new PreviewMethodologyScriptRequest(Clean, DocumentId, 209901), aborted.Token));
+    }
+
     // ---------- розмір тексту ----------
 
     private static string Huge() => new('x', ScriptAnalyzer.MaxTextLength + 1);
@@ -350,7 +421,7 @@ public sealed class ScriptAuthoringHandlerTests
     [Trait("Requirement", "MS-5.1")]
     public async Task Завеликий_текст_відмовляє_422_у_Save_Validate_Preview_FormatConst_і_нічого_не_компілює()
     {
-        Grant(SaveMethodologyScriptHandler.Permission, "Calculation.View");
+        Grant(SaveMethodologyScriptHandler.Permission, "Calculation.View", "Document.View");
         var runner = Substitute.For<IScriptPreviewRunner>();
         _version.SetScript(Clean, ScriptCompiler.Hash(Clean));
 

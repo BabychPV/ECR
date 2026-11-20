@@ -1,8 +1,10 @@
+using Ecr.Api.Security;
 using Ecr.Application.Calculations;
 using Ecr.Application.Calculations.Scripting;
 using Ecr.Application.Calculations.Scripting.Migration;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace Ecr.Api.Controllers;
 
@@ -17,7 +19,8 @@ public sealed class MethodologyScriptMigrationController(
     ApplyScriptPackageHandler apply,
     SwitchScriptEngineHandler switchEngine,
     ParityMethodologyScriptHandler parity,
-    MethodologyVersionScope scope) : ControllerBase
+    MethodologyVersionScope scope,
+    ScriptRunGate gate) : ControllerBase
 {
     /// <summary>
     /// Звіряє пакет <c>package.json</c> з базою й записує тіньові тексти. Право <c>Calculation.Publish</c>.
@@ -74,16 +77,19 @@ public sealed class MethodologyScriptMigrationController(
     /// помилки кроків. <c>mismatchCount = 0</c> при <c>targets &gt; 0</c> — шляхи збігаються на цих даних.
     /// </remarks>
     [HttpPost("{id:int}/versions/{vid:int}/script/parity")]
+    [EnableRateLimiting(ScriptAuthoringRateLimitPolicy.PolicyName)] // PSS-21: кошик прогонів, спільний із переглядом
     [ProducesResponseType<ScriptParityDto>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
     public async Task<ActionResult<ScriptParityDto>> Parity(
         int id, int vid, [FromBody] ScriptParityRequestDto request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
         await scope.RequireAsync(id, vid, ParityMethodologyScriptHandler.Permission, ct).ConfigureAwait(false);
 
+        using var lease = await gate.EnterAsync(ct).ConfigureAwait(false);
         return Ok(await parity.HandleAsync(vid, request, ct).ConfigureAwait(false));
     }
 }

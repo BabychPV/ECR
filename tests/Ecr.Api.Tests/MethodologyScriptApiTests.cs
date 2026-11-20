@@ -549,9 +549,19 @@ public sealed class MethodologyScriptApiTests(SqlServerFixture sql)
         {
         }
 
-        var (reader, _) = await SignInAsync(app, ["Calculation.View"], stand.Document.ProjectId).ConfigureAwait(true);
+        var (reader, _) = await SignInAsync(app, ["Calculation.View", "Document.View"], stand.Document.ProjectId).ConfigureAwait(true);
         var (outsider, _) = await SignInAsync(app, ["Calculation.View"]).ConfigureAwait(true);
+        var (calculationOnly, _) = await SignInAsync(app, ["Calculation.View"], stand.Document.ProjectId).ConfigureAwait(true);
         var url = Script(created.MethodologyId, created.VersionId, "/preview");
+
+        // PSS-25: документ видимий, Calculation.View є, Document.View — ні: 403, рушій не викликано.
+        using (var noDocumentRight = await PostAsync(calculationOnly, url, new { documentId = stand.Document.DocumentId, periodKey = 209901 }).ConfigureAwait(true))
+        {
+            using var problem = await JsonAsync(noDocumentRight, HttpStatusCode.Forbidden).ConfigureAwait(true);
+            Assert.Equal("ECR-AUTH-0403", problem.RootElement.GetProperty("errorCode").GetString());
+        }
+
+        Assert.Empty(runner.Calls);
 
         await using (var before = Context())
         {
@@ -637,7 +647,7 @@ public sealed class MethodologyScriptApiTests(SqlServerFixture sql)
         {
         }
 
-        var (reader, _) = await SignInAsync(app, ["Calculation.View"], stand.Document.ProjectId).ConfigureAwait(true);
+        var (reader, _) = await SignInAsync(app, ["Calculation.View", "Document.View"], stand.Document.ProjectId).ConfigureAwait(true);
         using var response = await PostAsync(
             reader, Script(created.MethodologyId, created.VersionId, "/preview"),
             new { documentId = stand.Document.DocumentId, periodKey = 209901 }).ConfigureAwait(true);
