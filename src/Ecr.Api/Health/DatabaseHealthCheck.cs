@@ -89,6 +89,10 @@ public sealed class DatabaseHealthCheck(
             var partitionsAhead = await PartitionsAheadAsync(cancellationToken).ConfigureAwait(false);
             data["partitionsAhead"] = partitionsAhead;
 
+            // ✎ PSS-L6b: попередження нічної PartitionCheck про рядки в крайніх партиціях — лише дані для картки,
+            // статус не змінює (runbook §7.5).
+            await AddEdgeWarningAsync(data, cancellationToken).ConfigureAwait(false);
+
             // ⛔ U18: RCSI — ЖИВИМ запитом, а не з проби старту. Проба читає його
             // раз на процес, тож після `06-rcsi.sql` (runbook §5) перевірка
             // лишалася червоною до перезапуску служби, а RCSI, вимкнений на ходу,
@@ -251,6 +255,54 @@ public sealed class DatabaseHealthCheck(
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Кладе в <paramref name="data"/> <c>edgeWarning</c> (і, якщо він є, <c>edgeRowsFirst</c>/<c>edgeRowsLast</c>)
+    /// з подробиць останнього завершеного прогону <c>partition-check</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Довідковий показник: відсутність прогону, нечитний JSON чи збій читання дають <c>edgeWarning = false</c> і
+    /// не псують перевірку БД. Один рядок за індексом <c>JobCode</c>/<c>StartedAt</c>; результат живе в кеші перевірки.
+    /// </remarks>
+    private async Task AddEdgeWarningAsync(Dictionary<string, object> data, CancellationToken cancellationToken)
+    {
+        var warning = false;
+        try
+        {
+            var details = await db.MaintenanceRuns.AsNoTracking()
+                .Where(r => r.JobCode == Ecr.Infrastructure.Jobs.PartitionCheckJob.Code && r.FinishedAt != null)
+                .OrderByDescending(r => r.StartedAt)
+                .Select(r => r.DetailsJson)
+                .FirstOrDefaultAsync(cancellationToken).ConfigureAwait(false);
+
+            if (!string.IsNullOrWhiteSpace(details))
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(details);
+                var root = doc.RootElement;
+                warning = root.TryGetProperty("edgeWarning", out var flag) && flag.ValueKind == System.Text.Json.JsonValueKind.True;
+                if (warning && root.TryGetProperty("edgeRows", out var rows))
+                {
+                    if (rows.TryGetProperty("first", out var first) && first.TryGetInt64(out var firstRows))
+                    {
+                        data["edgeRowsFirst"] = firstRows;
+                    }
+
+                    if (rows.TryGetProperty("last", out var last) && last.TryGetInt64(out var lastRows))
+                    {
+                        data["edgeRowsLast"] = lastRows;
+                    }
+                }
+            }
+        }
+#pragma warning disable CA1031 // довідковий показник: збій не псує перевірку БД
+        catch (Exception ex) when (ex is not OperationCanceledException)
+#pragma warning restore CA1031
+        {
+            data["edgeWarningError"] = ex.GetType().Name;
+        }
+
+        data["edgeWarning"] = warning;
     }
 
     /// <summary>Чи увімкнено RCSI для поточної бази — зараз, а не на старті процесу.</summary>
