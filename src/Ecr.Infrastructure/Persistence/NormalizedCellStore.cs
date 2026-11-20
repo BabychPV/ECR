@@ -49,6 +49,19 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
     private const int ParameterChunkSize = 100;
 
     /// <summary>
+    /// PSS-05: найбільше рядків одного оператора запису в <c>doc.CellValue</c> / <c>aud.CellChange</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Профілактика ескалації блокувань: SQL Server пробує замінити рядкові/сторінкові замки таблицею
+    /// при ≈5000 замків ОДНОГО оператора (<c>LOCK_ESCALATION = TABLE</c>), а таблична блокування в
+    /// типовий момент тиші зупиняє ВСІХ письменників (409 <c>ECR-DOC-4091</c> через 15 с). Ліміт нижче порогу
+    /// тримає кожен оператор поза ескалацією; транзакція ЗАЛИШАЄТЬСЯ тією самою — чанки комітяться чи
+    /// відкочуються разом. Послідовність чанків зберігає порядок замків AN-139 (вхід уже впорядкований).
+    /// Не покладатися на <c>LOCK_ESCALATION = AUTO</c>: усе змагання — в одній партиції.
+    /// </remarks>
+    internal const int CellWriteChunkSize = 4000;
+
+    /// <summary>
     /// Форма <c>doc.CellValueTvp</c> — колонка в колонку зі скриптом
     /// <c>15-cell-tvp.sql</c>.
     /// </summary>
@@ -1202,55 +1215,62 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
         }
 
         LockOrder.Trace(() => $"upsert {string.Join(';', upserts.Select(u => $"{u.Address.PeriodKey.Value}/{u.Address.TableRowId}/{u.Address.ColumnDefId}"))}");
-        await using var command = connection.CreateCommand();
-        command.Transaction = tx;
+        // ⛔ PSS-05: чанки ≤ CellWriteChunkSize в тій самій транзакції — див. константу.
+        var affected = 0;
+        foreach (var chunk in upserts.Chunk(CellWriteChunkSize))
+        {
+            await using var command = connection.CreateCommand();
+            command.Transaction = tx;
 
-        var cells = command.Parameters.Add("@cells", SqlDbType.Structured);
-        cells.TypeName = CellTvpTypeName;
-        cells.Value = ToCellRecords(upserts);
+            var cells = command.Parameters.Add("@cells", SqlDbType.Structured);
+            cells.TypeName = CellTvpTypeName;
+            cells.Value = ToCellRecords(chunk);
 
-        command.CommandText = $"""
-                MERGE doc.CellValue WITH (HOLDLOCK) AS target
-                USING @cells AS source
-                ON  target.PeriodKey   = source.PeriodKey
-                AND target.TableRowId  = source.TableRowId
-                AND target.ColumnDefId = source.ColumnDefId
-                WHEN MATCHED AND EXISTS (
-                        SELECT target.TableDefId,
-                               target.ValueString COLLATE {ExactCollation}, DATALENGTH(target.ValueString),
-                               target.ValueNumeric, target.ValueDate, target.ValueBool,
-                               target.ValueRegistryEntryId, target.ValueUnitId,
-                               target.IsCalculated, target.IsEmpty
-                        EXCEPT
-                        SELECT source.TableDefId,
-                               source.ValueString COLLATE {ExactCollation}, DATALENGTH(source.ValueString),
-                               source.ValueNumeric, source.ValueDate, source.ValueBool,
-                               source.ValueRegistryEntryId, source.ValueUnitId,
-                               source.IsCalculated, source.IsEmpty)
-                    AND (source.IsCalculated = 0 OR NOT EXISTS (
-                        SELECT 1 FROM doc.CellFormulaOverride AS o WITH (READUNCOMMITTED)
-                         WHERE o.PeriodKey = target.PeriodKey
-                           AND o.TableRowId = target.TableRowId
-                           AND o.ColumnDefId = target.ColumnDefId))
-                THEN UPDATE SET
-                    TableDefId = source.TableDefId,
-                    ValueString = source.ValueString,
-                    ValueNumeric = source.ValueNumeric,
-                    ValueDate = source.ValueDate,
-                    ValueBool = source.ValueBool,
-                    ValueRegistryEntryId = source.ValueRegistryEntryId,
-                    ValueUnitId = source.ValueUnitId,
-                    IsCalculated = source.IsCalculated,
-                    IsEmpty = source.IsEmpty
-                WHEN NOT MATCHED THEN INSERT
-                    (PeriodKey, TableRowId, ColumnDefId, TableDefId, ValueString, ValueNumeric,
-                     ValueDate, ValueBool, ValueRegistryEntryId, ValueUnitId, IsCalculated, IsEmpty)
-                    VALUES (source.PeriodKey, source.TableRowId, source.ColumnDefId, source.TableDefId,
-                            source.ValueString, source.ValueNumeric, source.ValueDate, source.ValueBool,
-                            source.ValueRegistryEntryId, source.ValueUnitId, source.IsCalculated, source.IsEmpty);
-                """;
+            command.CommandText = $"""
+                    MERGE doc.CellValue WITH (HOLDLOCK) AS target
+                    USING @cells AS source
+                    ON  target.PeriodKey   = source.PeriodKey
+                    AND target.TableRowId  = source.TableRowId
+                    AND target.ColumnDefId = source.ColumnDefId
+                    WHEN MATCHED AND EXISTS (
+                            SELECT target.TableDefId,
+                                   target.ValueString COLLATE {ExactCollation}, DATALENGTH(target.ValueString),
+                                   target.ValueNumeric, target.ValueDate, target.ValueBool,
+                                   target.ValueRegistryEntryId, target.ValueUnitId,
+                                   target.IsCalculated, target.IsEmpty
+                            EXCEPT
+                            SELECT source.TableDefId,
+                                   source.ValueString COLLATE {ExactCollation}, DATALENGTH(source.ValueString),
+                                   source.ValueNumeric, source.ValueDate, source.ValueBool,
+                                   source.ValueRegistryEntryId, source.ValueUnitId,
+                                   source.IsCalculated, source.IsEmpty)
+                        AND (source.IsCalculated = 0 OR NOT EXISTS (
+                            SELECT 1 FROM doc.CellFormulaOverride AS o WITH (READUNCOMMITTED)
+                             WHERE o.PeriodKey = target.PeriodKey
+                               AND o.TableRowId = target.TableRowId
+                               AND o.ColumnDefId = target.ColumnDefId))
+                    THEN UPDATE SET
+                        TableDefId = source.TableDefId,
+                        ValueString = source.ValueString,
+                        ValueNumeric = source.ValueNumeric,
+                        ValueDate = source.ValueDate,
+                        ValueBool = source.ValueBool,
+                        ValueRegistryEntryId = source.ValueRegistryEntryId,
+                        ValueUnitId = source.ValueUnitId,
+                        IsCalculated = source.IsCalculated,
+                        IsEmpty = source.IsEmpty
+                    WHEN NOT MATCHED THEN INSERT
+                        (PeriodKey, TableRowId, ColumnDefId, TableDefId, ValueString, ValueNumeric,
+                         ValueDate, ValueBool, ValueRegistryEntryId, ValueUnitId, IsCalculated, IsEmpty)
+                        VALUES (source.PeriodKey, source.TableRowId, source.ColumnDefId, source.TableDefId,
+                                source.ValueString, source.ValueNumeric, source.ValueDate, source.ValueBool,
+                                source.ValueRegistryEntryId, source.ValueUnitId, source.IsCalculated, source.IsEmpty);
+                    """;
 
-        return await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    affected += await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+
+        return affected;
     }
 
     /// <summary>
