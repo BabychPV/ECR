@@ -6,7 +6,6 @@ using Ecr.Infrastructure.Security;
 using Ecr.TestKit;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
 using NSubstitute;
 using Xunit;
 
@@ -27,23 +26,19 @@ public sealed class LoginAttemptRetentionTests(SqlServerFixture sql)
     private static readonly DateTime Now = new(2026, 11, 20, 12, 0, 0, DateTimeKind.Utc);
 
     [Theory]
-    [InlineData(null, null, 400)]
-    [InlineData("", null, 400)]
-    [InlineData("не-число", null, 400)]
-    [InlineData("200", null, 200)]
-    [InlineData("30", null, 30)]
-    [InlineData("1", null, 30)] // підлога: свіжі спроби не стираються
-    [InlineData("0", null, 30)]
-    [InlineData("-5", null, 30)]
-    [InlineData("99999", null, 3650)] // стеля
-    [InlineData(null, 120, 120)] // значення за замовчуванням із конфігурації
-    [InlineData(null, 5, 30)]
-    [InlineData("250", 120, 250)] // база сильніша за конфігурацію
+    [InlineData(null, 400)]
+    [InlineData("", 400)]
+    [InlineData("не-число", 400)]
+    [InlineData("200", 200)]
+    [InlineData("30", 30)]
+    [InlineData("1", 30)] // підлога: свіжі спроби не стираються
+    [InlineData("0", 30)]
+    [InlineData("-5", 30)]
+    [InlineData("99999", 3650)] // стеля
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait("Requirement", "PSS-24")]
-    public void Строк_береться_з_налаштування_потім_з_конфігурації_потім_400_і_завжди_в_межах(
-        string? stored, int? configured, int expected)
-        => Assert.Equal(expected, LoginAttemptRetention.Resolve(stored, configured));
+    public void Строк_береться_з_налаштування_інакше_400_і_завжди_в_межах(string? stored, int expected)
+        => Assert.Equal(expected, LoginAttemptRetention.Resolve(stored));
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
@@ -117,22 +112,6 @@ public sealed class LoginAttemptRetentionTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "PSS-24")]
-    public async Task Конфігураційний_дефолт_діє_коли_рядка_налаштування_немає()
-    {
-        await ClearSettingAsync();
-        var tag = Tag();
-        await SeedAsync(tag, ageDays: 150, "older");
-        await SeedAsync(tag, ageDays: 90, "recent");
-
-        await PurgeAsync(new Dictionary<string, string?> { [LoginAttemptRetention.ConfiguredDefaultKey] = "120" });
-
-        Assert.Equal(["recent"], await SurvivorsAsync(tag));
-    }
-
-    [Fact]
-    [Trait(TestCategories.Stage, TestCategories.Stage1)]
-    [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "PSS-24")]
     public async Task UPDATE_спроби_входу_відхиляється_тригером_а_рядок_лишається_цілим_DELETE_за_строком_дозволений()
     {
         var tag = Tag();
@@ -163,14 +142,13 @@ public sealed class LoginAttemptRetentionTests(SqlServerFixture sql)
     private EcrDbContext NewDb()
         => new(new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).Options);
 
-    private async Task<int> PurgeAsync(Dictionary<string, string?>? configuration = null)
+    private async Task<int> PurgeAsync()
     {
         var clock = Substitute.For<IClock>();
         clock.UtcNow.Returns(Now);
-        var config = new ConfigurationBuilder().AddInMemoryCollection(configuration ?? []).Build();
 
         await using var db = NewDb();
-        return await new LoginAttemptPurger(db, clock, config).PurgeAsync(CancellationToken.None);
+        return await new LoginAttemptPurger(db, clock).PurgeAsync(CancellationToken.None);
     }
 
     private async Task SeedAsync(string tag, int ageDays, string label)

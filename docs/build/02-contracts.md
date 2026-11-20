@@ -4822,7 +4822,10 @@ public sealed class NotFoundException(string errorCode, string message)
 Журнал входів (PSS-24): порт `ILoginAuditJournal` пише в `aud.SecurityEvent` події `LoginSucceeded`, `LoginFailed` (подробиці:
 `userName`, `provider`, `outcome`, `reason`, `ip`, `suppressed`) і `AccountLocked`; для невідомого імені автор — `-1`.
 Запис ніколи не змінює відповідь входу. Строк зберігання оперативної `sec.LoginAttempt` — налаштування
-`Security.LoginAttemptRetentionDays` у `sys_ecr.SystemSetting` (400 днів за замовчуванням, межі 30–3650).
+`Security.LoginAttemptRetentionDays` у `sys_ecr.SystemSetting` (400 днів за замовчуванням, межі 30–3650); змінюється
+тим самим `PUT /api/v1/security/session-settings` (`loginAttemptRetentionDays`, необов'язкове; поза межами — `422 ECR-REQ-0422`,
+`messageKey` `err.ECR-REQ-0422.loginRetentionOutOfRange`; право `Security.ManageUsers`; подія `SessionSettingsUpdated` несе
+`loginAttemptRetentionDays` і `previousLoginAttemptRetentionDays`), `GET` віддає `loginAttemptRetentionDays` і межі.
 
 ---
 

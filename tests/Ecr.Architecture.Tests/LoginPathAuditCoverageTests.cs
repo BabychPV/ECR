@@ -37,8 +37,10 @@ public sealed class LoginPathAuditCoverageTests
 
         var retention = Flat(Read("src", "Ecr.Infrastructure", "Security", "LoginAttemptRetention.cs"));
         Assert.Contains("DELETE TOP ({Batch}) FROM sec.LoginAttempt WHERE AttemptedAt < {cutoff}", retention, StringComparison.Ordinal);
-        Assert.Contains("SettingKey = \"Security.LoginAttemptRetentionDays\"", retention, StringComparison.Ordinal);
-        Assert.Contains("DefaultDays = 400", retention, StringComparison.Ordinal);
+        var settings = Flat(Read("src", "Ecr.Application", "Security", "SessionSettingsHandlers.cs"));
+        Assert.Contains("LoginAttemptRetentionKey = \"Security.LoginAttemptRetentionDays\"", settings, StringComparison.Ordinal);
+        Assert.Contains("DefaultLoginAttemptRetentionDays = 400", settings, StringComparison.Ordinal);
+        Assert.Contains("MinLoginAttemptRetentionDays = 30", settings, StringComparison.Ordinal);
     }
 
     [Fact]

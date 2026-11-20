@@ -43659,6 +43659,12 @@ export interface components {
              * @description Вихід після стількох хвилин без дій.
              */
             idleTimeoutMinutes: number;
+            /**
+             * Format: int32
+             * @description Строк зберігання `sec.LoginAttempt` у днях (30–3650); `null` — не змінювати (старі клієнти шлють лише
+             *     IdleTimeoutMinutes).
+             */
+            loginAttemptRetentionDays?: null | number;
         };
         /** @description Налаштування сеансу для екрана «Безпека». */
         SessionSettingsView: {
@@ -43669,9 +43675,19 @@ export interface components {
             defaultIdleTimeoutMinutes: number;
             /**
              * Format: int32
+             * @description Значення за замовчуванням (400).
+             */
+            defaultLoginAttemptRetentionDays: number;
+            /**
+             * Format: int32
              * @description Вихід після стількох хвилин без дій.
              */
             idleTimeoutMinutes: number;
+            /**
+             * Format: int32
+             * @description Скільки днів зберігається оперативний журнал спроб входу `sec.LoginAttempt` (PSS-24).
+             */
+            loginAttemptRetentionDays: number;
             /**
              * Format: int32
              * @description Найбільше допустиме значення.
@@ -43679,9 +43695,19 @@ export interface components {
             maxIdleTimeoutMinutes: number;
             /**
              * Format: int32
+             * @description Найбільше допустиме значення.
+             */
+            maxLoginAttemptRetentionDays: number;
+            /**
+             * Format: int32
              * @description Найменше допустиме значення.
              */
             minIdleTimeoutMinutes: number;
+            /**
+             * Format: int32
+             * @description Найменше допустиме значення.
+             */
+            minLoginAttemptRetentionDays: number;
         };
         /** @description Запит на зміну отримання алертів. */
         SetAlertsRequest: {

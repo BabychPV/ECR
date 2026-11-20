@@ -175,6 +175,79 @@ public sealed class IdleSignOutApiTests(SqlServerFixture sql) : IDisposable
         }
     }
 
+    /// <remarks>
+    /// PSS-24: строк зберігання спроб входу змінюється на тому самому екрані й тим самим PUT, що й межа бездіяльності
+    /// (право <c>Security.ManageUsers</c>): 30–3650, поза межами — 422 з ключем і без запису; подія журналу несе нове й
+    /// попереднє значення; прибирання бачить нове значення без перезапуску; старий клієнт (лише idle) строк не чіпає.
+    /// Мутація: прибрати перевірку меж у <c>SaveSessionSettingsHandler</c> — червоніє 422; не писати строк у транзакції — червоніє рядок БД.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "PSS-24")]
+    public async Task Строк_зберігання_спроб_входу_змінюється_на_екрані_з_межами_подією_і_без_перезапуску()
+    {
+        var managerId = await ArrangeUserAsync(withPermission: "Security.ManageUsers").ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var client = app.CreateClient();
+
+        try
+        {
+            Assert.True((await LoginAsync(client).ConfigureAwait(true)).IsSuccessStatusCode);
+
+            var before = (await client.GetFromJsonAsync<SessionSettingsView>(Settings).ConfigureAwait(true))!;
+            Assert.Equal(400, before.LoginAttemptRetentionDays);
+            Assert.Equal(30, before.MinLoginAttemptRetentionDays);
+            Assert.Equal(3650, before.MaxLoginAttemptRetentionDays);
+            Assert.Equal(400, before.DefaultLoginAttemptRetentionDays);
+
+            foreach (var bad in new[] { 29, 0, -1, 3651 })
+            {
+                var refused = await client.PutAsJsonAsync(Settings, new SessionSettingsInput(30, bad)).ConfigureAwait(true);
+                Assert.Equal(HttpStatusCode.UnprocessableEntity, refused.StatusCode);
+                var problem = await refused.Content.ReadFromJsonAsync<JsonElement>().ConfigureAwait(true);
+                Assert.Equal("err.ECR-REQ-0422.loginRetentionOutOfRange", problem.GetProperty("messageKey").GetString());
+            }
+
+            Assert.Equal(
+                400,
+                (await client.GetFromJsonAsync<SessionSettingsView>(Settings).ConfigureAwait(true))!.LoginAttemptRetentionDays);
+
+            var saved = await client.PutAsJsonAsync(Settings, new SessionSettingsInput(30, 120)).ConfigureAwait(true);
+            Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+            Assert.Equal(120, (await saved.Content.ReadFromJsonAsync<SessionSettingsView>().ConfigureAwait(true))!.LoginAttemptRetentionDays);
+
+            var details = await LatestEventAsync("SessionSettingsUpdated", managerId).ConfigureAwait(true);
+            Assert.Contains("\"loginAttemptRetentionDays\":120", details, StringComparison.Ordinal);
+            Assert.Contains("\"previousLoginAttemptRetentionDays\":400", details, StringComparison.Ordinal);
+
+            // Прибирання читає те саме значення з бази — без перезапуску й без кешу.
+            await using (var scope = app.Services.CreateAsyncScope())
+            {
+                var purger = ActivatorUtilities.CreateInstance<LoginAttemptPurger>(scope.ServiceProvider);
+                Assert.Equal(120, await purger.ReadRetentionDaysAsync(CancellationToken.None).ConfigureAwait(true));
+            }
+
+            // Старий клієнт шле лише межу бездіяльності: строк зберігання лишається.
+            using var legacy = new StringContent("{\"idleTimeoutMinutes\":30}", System.Text.Encoding.UTF8, "application/json");
+            Assert.Equal(HttpStatusCode.OK, (await client.PutAsync(Settings, legacy).ConfigureAwait(true)).StatusCode);
+            Assert.Equal(
+                120,
+                (await client.GetFromJsonAsync<SessionSettingsView>(Settings).ConfigureAwait(true))!.LoginAttemptRetentionDays);
+        }
+        finally
+        {
+            await using var connection = new SqlConnection(sql.ConnectionString);
+            await connection.OpenAsync().ConfigureAwait(true);
+            await using var command = connection.CreateCommand();
+            command.CommandText = "DELETE FROM sys_ecr.SystemSetting WHERE [Key] IN (@a, @b);";
+            command.Parameters.AddWithValue("@a", SessionSettings.IdleTimeoutKey);
+            command.Parameters.AddWithValue("@b", SessionSettings.LoginAttemptRetentionKey);
+            await command.ExecuteNonQueryAsync().ConfigureAwait(true);
+            app.Services.GetRequiredService<IIdleTimeoutPolicy>().Invalidate();
+        }
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]

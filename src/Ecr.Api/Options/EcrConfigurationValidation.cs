@@ -72,7 +72,6 @@ public static partial class EcrConfigurationValidation
         (Ecr.Api.Security.DocumentExportRateLimitPolicy.PermitKey, 1),
         ("Security:RateLimit:HealthReadyPermitPerMinute", 1),
         (Ecr.Api.Security.LoginRateLimiting.AnonymousReadPermitKey, 1), // PSS-29
-        (Ecr.Infrastructure.Security.LoginAttemptRetention.ConfiguredDefaultKey, Ecr.Infrastructure.Security.LoginAttemptRetention.MinDays), // PSS-24
         (Ecr.Infrastructure.Security.LoginAttemptRetention.IntervalMinutesKey, 1), // PSS-24
         (Ecr.Api.Security.ImportPreviewRateLimitPolicy.PermitKey, 1),
         (Ecr.Api.Security.ImportPreviewRateLimitPolicy.QueueLimitKey, 0),

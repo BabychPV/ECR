@@ -41,7 +41,7 @@ export function SessionSettingsPanel({ canManage }: { canManage: boolean }): JSX
       {(view) => (
         // ⚠ `key` — щоб збережене (чи чуже) значення з сервера скидало чернетку поля без ефекту.
         <SessionSettingsForm
-          key={view.idleTimeoutMinutes}
+          key={`${String(view.idleTimeoutMinutes)}:${String(view.loginAttemptRetentionDays)}`}
           view={view}
           canManage={canManage}
           onSaved={async (saved) => {
@@ -64,17 +64,26 @@ function SessionSettingsForm({
   onSaved: (saved: SessionSettingsView) => Promise<void>;
 }): JSX.Element {
   const [value, setValue] = useState<number | string>(view.idleTimeoutMinutes);
+  // PSS-24: строк зберігання спроб входу — на тому самому екрані, з тими самими правом і збереженням.
+  const [retentionValue, setRetentionValue] = useState<number | string>(view.loginAttemptRetentionDays);
 
   const minutes = typeof value === 'number' ? value : Number.NaN;
-  const valid =
+  const idleValid =
     Number.isInteger(minutes) && minutes >= view.minIdleTimeoutMinutes && minutes <= view.maxIdleTimeoutMinutes;
+  const retentionDays = typeof retentionValue === 'number' ? retentionValue : Number.NaN;
+  const retentionValid =
+    Number.isInteger(retentionDays) &&
+    retentionDays >= view.minLoginAttemptRetentionDays &&
+    retentionDays <= view.maxLoginAttemptRetentionDays;
+  const valid = idleValid && retentionValid;
+  const changed = minutes !== view.idleTimeoutMinutes || retentionDays !== view.loginAttemptRetentionDays;
 
   const save = useMutation({
     mutationFn: (input: SessionSettingsInput) =>
       apiFetch<SessionSettingsView>(SessionSettingsPath, { method: 'PUT', body: JSON.stringify(input) }),
     onSuccess: async (saved) => {
       await onSaved(saved);
-      showDone(t('security.session.saved', { minutes: saved.idleTimeoutMinutes }));
+      showDone(t('security.session.savedAll'));
     },
     onError: showApiError,
   });
@@ -86,13 +95,18 @@ function SessionSettingsForm({
     max: view.maxIdleTimeoutMinutes,
     default: view.defaultIdleTimeoutMinutes,
   });
+  const retentionHint = t('security.session.retentionHint', {
+    min: view.minLoginAttemptRetentionDays,
+    max: view.maxLoginAttemptRetentionDays,
+    default: view.defaultLoginAttemptRetentionDays,
+  });
 
   return (
     <form
       data-testid="session-settings"
       onSubmit={(event) => {
         event.preventDefault();
-        if (valid) save.mutate({ idleTimeoutMinutes: minutes });
+        if (valid) save.mutate({ idleTimeoutMinutes: minutes, loginAttemptRetentionDays: retentionDays });
       }}
     >
       <Stack gap="sm" maw={420}>
@@ -108,18 +122,37 @@ function SessionSettingsForm({
           allowNegative={false}
           clampBehavior="none"
           disabled={!canManage}
-          error={value !== '' && !valid ? hint : undefined}
+          error={value !== '' && !idleValid ? hint : undefined}
           suffix={` ${t('security.session.minutesSuffix')}`}
         />
         <Text size="sm" c="dimmed">
           {t('security.session.idleExplain')}
+        </Text>
+        <NumberInput
+          data-testid="login-attempt-retention"
+          label={t('security.session.retentionLabel')}
+          description={retentionHint}
+          value={retentionValue}
+          onChange={setRetentionValue}
+          min={view.minLoginAttemptRetentionDays}
+          max={view.maxLoginAttemptRetentionDays}
+          step={30}
+          allowDecimal={false}
+          allowNegative={false}
+          clampBehavior="none"
+          disabled={!canManage}
+          error={retentionValue !== '' && !retentionValid ? retentionHint : undefined}
+          suffix={` ${t('security.session.daysSuffix')}`}
+        />
+        <Text size="sm" c="dimmed">
+          {t('security.session.retentionExplain')}
         </Text>
         {canManage && (
           <Group>
             <Button
               type="submit"
               loading={saving}
-              disabled={!valid || minutes === view.idleTimeoutMinutes}
+              disabled={!valid || !changed}
             >
               {t('security.session.save')}
             </Button>

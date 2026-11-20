@@ -27656,6 +27656,14 @@
             "description": "Вихід після стількох хвилин без дій.",
             "format": "int32",
             "type": "integer"
+          },
+          "loginAttemptRetentionDays": {
+            "description": "Строк зберігання `sec.LoginAttempt` у днях (30–3650); `null` — не змінювати (старі клієнти шлють лише\nIdleTimeoutMinutes).",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           }
         },
         "required": [
@@ -27671,8 +27679,18 @@
             "format": "int32",
             "type": "integer"
           },
+          "defaultLoginAttemptRetentionDays": {
+            "description": "Значення за замовчуванням (400).",
+            "format": "int32",
+            "type": "integer"
+          },
           "idleTimeoutMinutes": {
             "description": "Вихід після стількох хвилин без дій.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "loginAttemptRetentionDays": {
+            "description": "Скільки днів зберігається оперативний журнал спроб входу `sec.LoginAttempt` (PSS-24).",
             "format": "int32",
             "type": "integer"
           },
@@ -27681,7 +27699,17 @@
             "format": "int32",
             "type": "integer"
           },
+          "maxLoginAttemptRetentionDays": {
+            "description": "Найбільше допустиме значення.",
+            "format": "int32",
+            "type": "integer"
+          },
           "minIdleTimeoutMinutes": {
+            "description": "Найменше допустиме значення.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "minLoginAttemptRetentionDays": {
             "description": "Найменше допустиме значення.",
             "format": "int32",
             "type": "integer"
@@ -27691,7 +27719,11 @@
           "idleTimeoutMinutes",
           "minIdleTimeoutMinutes",
           "maxIdleTimeoutMinutes",
-          "defaultIdleTimeoutMinutes"
+          "defaultIdleTimeoutMinutes",
+          "loginAttemptRetentionDays",
+          "minLoginAttemptRetentionDays",
+          "maxLoginAttemptRetentionDays",
+          "defaultLoginAttemptRetentionDays"
         ],
         "type": "object"
       },

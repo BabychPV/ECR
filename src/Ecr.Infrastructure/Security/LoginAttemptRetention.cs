@@ -14,11 +14,12 @@ namespace Ecr.Infrastructure.Security;
 /// НАЛАШТУВАННЯ, а не константа.
 /// </summary>
 /// <remarks>
-/// ⛔ Де міняється. Той самий механізм, що й <c>Security.IdleTimeoutMinutes</c> (D-471): рядок
-/// <c>sys_ecr.SystemSetting</c> із ключем <see cref="SettingKey"/>. Значення читається ПРИ КОЖНОМУ проході прибирання
+/// ⛔ Де міняється. Той самий механізм і той самий екран, що й <c>Security.IdleTimeoutMinutes</c> (D-471): рядок
+/// <c>sys_ecr.SystemSetting</c> із ключем <see cref="SettingKey"/>, поле «Security → Session» (право
+/// <c>Security.ManageUsers</c>, подія <c>SessionSettingsUpdated</c>). Значення читається ПРИ КОЖНОМУ проході прибирання
 /// (раз на <see cref="DefaultIntervalMinutes"/> хв), тож нове число діє без перевидання і без перезапуску — не пізніше
-/// ніж за цей інтервал. Немає рядка (чи він не число) — діє <c>Security:LoginAttemptRetention:DefaultDays</c> з
-/// конфігурації, а за його відсутності — <see cref="DefaultDays"/>.
+/// ніж за цей інтервал. Немає рядка (чи він не число) — <see cref="DefaultDays"/>. Межі й розбір — в одному місці:
+/// <see cref="Ecr.Application.Security.SessionSettings"/>.
 ///
 /// ⛔ Стеля й підлога: значення з бази обмежується межами <see cref="MinDays"/>–<see cref="MaxDays"/> (рядок, змінений
 /// руками в обхід, — 0, −5, 99999 — не вимикає прибирання й не стирає свіжі спроби).
@@ -30,10 +31,7 @@ namespace Ecr.Infrastructure.Security;
 public static class LoginAttemptRetention
 {
     /// <summary>Ключ у <c>sys_ecr.SystemSetting</c> (число днів).</summary>
-    public const string SettingKey = "Security.LoginAttemptRetentionDays";
-
-    /// <summary>Ключ конфігурації: значення за замовчуванням, коли рядка в базі немає.</summary>
-    public const string ConfiguredDefaultKey = "Security:LoginAttemptRetention:DefaultDays";
+    public const string SettingKey = Ecr.Application.Security.SessionSettings.LoginAttemptRetentionKey;
 
     /// <summary>Ключ конфігурації: інтервал між проходами, хв.</summary>
     public const string IntervalMinutesKey = "Security:LoginAttemptRetention:IntervalMinutes";
@@ -42,30 +40,22 @@ public static class LoginAttemptRetention
     public const string EnabledKey = "Security:LoginAttemptRetention:Enabled";
 
     /// <summary>400 днів — слово людини 20.11.</summary>
-    public const int DefaultDays = 400;
+    public const int DefaultDays = Ecr.Application.Security.SessionSettings.DefaultLoginAttemptRetentionDays;
 
     /// <summary>Підлога: жодні налаштування не стирають спроби молодші за 30 днів.</summary>
-    public const int MinDays = 30;
+    public const int MinDays = Ecr.Application.Security.SessionSettings.MinLoginAttemptRetentionDays;
 
     /// <summary>Стеля: 10 років.</summary>
-    public const int MaxDays = 3650;
+    public const int MaxDays = Ecr.Application.Security.SessionSettings.MaxLoginAttemptRetentionDays;
 
     /// <summary>Інтервал між проходами за замовчуванням, хв.</summary>
     public const int DefaultIntervalMinutes = 60;
 
-    /// <summary>Чинний строк у днях: збережене значення, інакше налаштоване за замовчуванням, інакше 400; завжди в межах.</summary>
+    /// <summary>Чинний строк у днях: збережене значення, інакше 400; завжди в межах.</summary>
     /// <param name="stored">Значення з <c>SystemSetting</c>; <c>null</c> — рядка немає.</param>
-    /// <param name="configuredDefault">Значення за замовчуванням із конфігурації; <c>null</c> — не задано.</param>
     /// <returns>Дні в межах <see cref="MinDays"/>–<see cref="MaxDays"/>.</returns>
-    public static int Resolve(string? stored, int? configuredDefault)
-    {
-        if (int.TryParse(stored, NumberStyles.Integer, CultureInfo.InvariantCulture, out var days))
-        {
-            return Math.Clamp(days, MinDays, MaxDays);
-        }
-
-        return Math.Clamp(configuredDefault ?? DefaultDays, MinDays, MaxDays);
-    }
+    public static int Resolve(string? stored)
+        => Ecr.Application.Security.SessionSettings.ResolveLoginAttemptRetentionDays(stored);
 }
 
 /// <summary>Один прохід прибирання <c>sec.LoginAttempt</c> за чинним строком.</summary>
@@ -74,7 +64,7 @@ public static class LoginAttemptRetention
 /// <c>AttemptedAt</c> іде від найстаріших (ключ <c>Id</c> росте з часом), тож пакет знаходить кандидатів одразу, а
 /// довгий хвіст дочищається наступним проходом. Безпечний для кількох вузлів одночасно: <c>DELETE</c> умовний.
 /// </remarks>
-public sealed class LoginAttemptPurger(EcrDbContext db, IClock clock, IConfiguration configuration)
+public sealed class LoginAttemptPurger(EcrDbContext db, IClock clock)
 {
     /// <summary>Рядків за один <c>DELETE</c>.</summary>
     public const int Batch = 5000;
@@ -100,11 +90,7 @@ public sealed class LoginAttemptPurger(EcrDbContext db, IClock clock, IConfigura
             stored = null;
         }
 
-        int? configured = int.TryParse(
-            configuration[LoginAttemptRetention.ConfiguredDefaultKey], NumberStyles.Integer,
-            CultureInfo.InvariantCulture, out var parsed) ? parsed : null;
-
-        return LoginAttemptRetention.Resolve(stored, configured);
+        return LoginAttemptRetention.Resolve(stored);
     }
 
     /// <summary>Видаляє спроби старші за чинний строк.</summary>

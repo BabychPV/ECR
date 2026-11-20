@@ -40,6 +40,36 @@ public static class SessionSettings
 
     /// <summary>Тип події журналу безпеки про зміну налаштування.</summary>
     public const string UpdatedEventType = "SessionSettingsUpdated";
+
+    /// <summary>
+    /// Ключ у <c>sys_ecr.SystemSetting</c>: строк зберігання <c>sec.LoginAttempt</c> у днях (PSS-24, рішення людини 20.11 п. 7).
+    /// </summary>
+    public const string LoginAttemptRetentionKey = "Security.LoginAttemptRetentionDays";
+
+    /// <summary>За замовчуванням — 400 днів (слово людини 20.11).</summary>
+    public const int DefaultLoginAttemptRetentionDays = 400;
+
+    /// <summary>Підлога: жодне налаштування не стирає спроби молодші за 30 днів.</summary>
+    public const int MinLoginAttemptRetentionDays = 30;
+
+    /// <summary>Стеля: 10 років.</summary>
+    public const int MaxLoginAttemptRetentionDays = 3650;
+
+    /// <summary>Ключ відмови «строк зберігання спроб входу поза межами».</summary>
+    public const string RetentionOutOfRangeKey = "err.ECR-REQ-0422.loginRetentionOutOfRange";
+
+    /// <summary>
+    /// Чинний строк зберігання спроб входу: збережене значення в межах 30–3650, інакше (немає рядка, не число) — 400.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Рядок, змінений руками в обхід екрана (0, −5, 99999), не вимикає прибирання й не стирає свіжі спроби: він
+    /// обмежується межами, а не відкидається.
+    /// </remarks>
+    /// <param name="stored">Значення з <c>SystemSetting</c>; <c>null</c> — рядка немає.</param>
+    public static int ResolveLoginAttemptRetentionDays(string? stored)
+        => int.TryParse(stored, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var days)
+            ? Math.Clamp(days, MinLoginAttemptRetentionDays, MaxLoginAttemptRetentionDays)
+            : DefaultLoginAttemptRetentionDays;
 }
 
 /// <summary>Налаштування сеансу для екрана «Безпека».</summary>
@@ -47,16 +77,26 @@ public static class SessionSettings
 /// <param name="MinIdleTimeoutMinutes">Найменше допустиме значення.</param>
 /// <param name="MaxIdleTimeoutMinutes">Найбільше допустиме значення.</param>
 /// <param name="DefaultIdleTimeoutMinutes">Значення за замовчуванням.</param>
+/// <param name="LoginAttemptRetentionDays">Скільки днів зберігається оперативний журнал спроб входу <c>sec.LoginAttempt</c> (PSS-24).</param>
+/// <param name="MinLoginAttemptRetentionDays">Найменше допустиме значення.</param>
+/// <param name="MaxLoginAttemptRetentionDays">Найбільше допустиме значення.</param>
+/// <param name="DefaultLoginAttemptRetentionDays">Значення за замовчуванням (400).</param>
 public sealed record SessionSettingsView(
-    int IdleTimeoutMinutes, int MinIdleTimeoutMinutes, int MaxIdleTimeoutMinutes, int DefaultIdleTimeoutMinutes);
+    int IdleTimeoutMinutes, int MinIdleTimeoutMinutes, int MaxIdleTimeoutMinutes, int DefaultIdleTimeoutMinutes,
+    int LoginAttemptRetentionDays, int MinLoginAttemptRetentionDays, int MaxLoginAttemptRetentionDays,
+    int DefaultLoginAttemptRetentionDays);
 
 /// <summary>Запит на зміну налаштувань сеансу.</summary>
 /// <param name="IdleTimeoutMinutes">Вихід після стількох хвилин без дій.</param>
-public sealed record SessionSettingsInput(int IdleTimeoutMinutes);
+/// <param name="LoginAttemptRetentionDays">
+/// Строк зберігання <c>sec.LoginAttempt</c> у днях (30–3650); <c>null</c> — не змінювати (старі клієнти шлють лише
+/// <paramref name="IdleTimeoutMinutes"/>).
+/// </param>
+public sealed record SessionSettingsInput(int IdleTimeoutMinutes, int? LoginAttemptRetentionDays = null);
 
 /// <summary>Читання налаштувань сеансу. Право <c>Security.ManageUsers</c>.</summary>
 public sealed class GetSessionSettingsHandler(
-    IIdleTimeoutPolicy policy, IAccessDecisionService access, ICurrentUser currentUser)
+    IIdleTimeoutPolicy policy, ISessionSettingsStore store, IAccessDecisionService access, ICurrentUser currentUser)
 {
     /// <summary>Поточне значення й межі.</summary>
     /// <param name="ct">Токен скасування.</param>
@@ -64,13 +104,19 @@ public sealed class GetSessionSettingsHandler(
     {
         await PermissionCheck.RequireAsync(access, currentUser, "Security.ManageUsers", ct).ConfigureAwait(false);
 
-        return await ViewAsync(policy, ct).ConfigureAwait(false);
+        return await ViewAsync(policy, store, ct).ConfigureAwait(false);
     }
 
-    internal static async Task<SessionSettingsView> ViewAsync(IIdleTimeoutPolicy policy, CancellationToken ct)
+    internal static async Task<SessionSettingsView> ViewAsync(
+        IIdleTimeoutPolicy policy, ISessionSettingsStore store, CancellationToken ct)
         => new(
             await policy.GetMinutesAsync(ct).ConfigureAwait(false), policy.MinimumMinutes,
-            SessionSettings.MaxIdleTimeoutMinutes, SessionSettings.DefaultIdleTimeoutMinutes);
+            SessionSettings.MaxIdleTimeoutMinutes, SessionSettings.DefaultIdleTimeoutMinutes,
+            SessionSettings.ResolveLoginAttemptRetentionDays(
+                (await store.ReadLoginAttemptRetentionDaysAsync(ct).ConfigureAwait(false))
+                ?.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+            SessionSettings.MinLoginAttemptRetentionDays, SessionSettings.MaxLoginAttemptRetentionDays,
+            SessionSettings.DefaultLoginAttemptRetentionDays);
 }
 
 /// <summary>Зміна налаштувань сеансу. Право <c>Security.ManageUsers</c>.</summary>
@@ -109,23 +155,57 @@ public sealed class SaveSessionSettingsHandler(
                 });
         }
 
+        // ⛔ PSS-24: строк зберігання спроб входу — той самий екран і те саме право. Поза 30–3650 — 422, а не мовчазне
+        // обмеження: людина має знати, що її число не прийнято (обмеження мовчки лишається лише для рядка, зміненого в обхід).
+        if (input.LoginAttemptRetentionDays is { } retention
+            && (retention < SessionSettings.MinLoginAttemptRetentionDays
+                || retention > SessionSettings.MaxLoginAttemptRetentionDays))
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.RequestInvalid,
+                $"Строк зберігання спроб входу: від {SessionSettings.MinLoginAttemptRetentionDays} до "
+                + $"{SessionSettings.MaxLoginAttemptRetentionDays} днів.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = SessionSettings.RetentionOutOfRangeKey,
+                    ["name"] = "loginAttemptRetentionDays",
+                    ["min"] = SessionSettings.MinLoginAttemptRetentionDays,
+                    ["max"] = SessionSettings.MaxLoginAttemptRetentionDays,
+                });
+        }
+
         var previous = await store.ReadIdleTimeoutMinutesAsync(ct).ConfigureAwait(false);
+        var previousRetention = SessionSettings.ResolveLoginAttemptRetentionDays(
+            (await store.ReadLoginAttemptRetentionDaysAsync(ct).ConfigureAwait(false))
+            ?.ToString(System.Globalization.CultureInfo.InvariantCulture));
         var now = clock.UtcNow;
 
         await uow.ExecuteInTransactionAsync(
             async token =>
             {
                 await store.WriteIdleTimeoutMinutesAsync(minutes, profile.UserId, now, token).ConfigureAwait(false);
+                if (input.LoginAttemptRetentionDays is { } retentionDays)
+                {
+                    await store.WriteLoginAttemptRetentionDaysAsync(retentionDays, profile.UserId, now, token)
+                        .ConfigureAwait(false);
+                }
+
+                // ⚠ Подія одна на збереження; поля строку зберігання — лише коли його передано (без них JSON як був).
+                var details = new Dictionary<string, object?>
+                {
+                    ["idleTimeoutMinutes"] = minutes,
+                    ["previousIdleTimeoutMinutes"] = previous ?? SessionSettings.DefaultIdleTimeoutMinutes,
+                };
+                if (input.LoginAttemptRetentionDays is { } newRetention)
+                {
+                    details["loginAttemptRetentionDays"] = newRetention;
+                    details["previousLoginAttemptRetentionDays"] = previousRetention;
+                }
+
                 await audit.WriteSecurityEventAsync(
                     new SecurityEventRecord(
                         now, SessionSettings.UpdatedEventType, TargetUserId: null, TargetRoleId: null,
-                        JsonSerializer.Serialize(
-                            new
-                            {
-                                idleTimeoutMinutes = minutes,
-                                previousIdleTimeoutMinutes = previous ?? SessionSettings.DefaultIdleTimeoutMinutes,
-                            },
-                            Json),
+                        JsonSerializer.Serialize(details, Json),
                         profile.UserId, currentUser.CorrelationId),
                     token).ConfigureAwait(false);
             },
@@ -133,6 +213,6 @@ public sealed class SaveSessionSettingsHandler(
 
         policy.Invalidate();
 
-        return await GetSessionSettingsHandler.ViewAsync(policy, ct).ConfigureAwait(false);
+        return await GetSessionSettingsHandler.ViewAsync(policy, store, ct).ConfigureAwait(false);
     }
 }

@@ -33,4 +33,15 @@ public interface ISessionSettingsStore
     /// <param name="at">Момент у UTC.</param>
     /// <param name="ct">Токен скасування.</param>
     public Task WriteIdleTimeoutMinutesAsync(int minutes, int byUserId, DateTime at, CancellationToken ct);
+
+    /// <summary>Збережений строк зберігання <c>sec.LoginAttempt</c> у днях; <c>null</c> — рядка немає або він не число (PSS-24).</summary>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<int?> ReadLoginAttemptRetentionDaysAsync(CancellationToken ct);
+
+    /// <summary>Записує строк зберігання <c>sec.LoginAttempt</c> (вставка або оновлення) у поточній транзакції.</summary>
+    /// <param name="days">Дні.</param>
+    /// <param name="byUserId">Хто змінив.</param>
+    /// <param name="at">Момент у UTC.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task WriteLoginAttemptRetentionDaysAsync(int days, int byUserId, DateTime at, CancellationToken ct);
 }
