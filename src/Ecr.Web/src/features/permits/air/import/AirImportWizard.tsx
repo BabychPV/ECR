@@ -40,6 +40,9 @@ import {
   previewSignature,
   profileSaveConflict,
   sendFailureOf,
+  specPending,
+  UnknownRead,
+  type AnalysedSpec,
   type ImportDraft,
   type ImportStep,
   type ProfileSaveConflict,
@@ -107,7 +110,9 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
   const [draft, setDraft] = useState<ImportDraft>(EmptyDraft);
   const [analysis, setAnalysis] = useState<AirAnalysis | null>(null);
   // Специфікація, з якою файл розкладено востаннє: перегляд дозволено лише для неї (інакше бачили б чужу розкладку).
-  const [analysedSpec, setAnalysedSpec] = useState<ImportDraft['spec']>(null);
+  const [analysedSpec, setAnalysedSpec] = useState<AnalysedSpec>(null);
+  // «Edit profile» on the File step: the mapping step opens with the rules editor shown.
+  const [editorOpen, setEditorOpen] = useState(false);
   const [preview, setPreview] = useState<AirPreview | null>(null);
   const [previewSig, setPreviewSig] = useState('');
   const [forceStale, setForceStale] = useState(false);
@@ -169,6 +174,7 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
     if (step !== 'mapping' || !editIntent.current || editSpec === undefined) return;
     editIntent.current = false;
     setAnalysedSpec(editSpec);
+    setEditorOpen(true);
     patchDraft({ spec: editSpec });
   }, [step, editSpec, patchDraft]);
 
@@ -307,7 +313,7 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
     setSaveConflict(null);
     // A new save starts without the old status: its success (even for the same code — «Overwrite») closes the form again.
     setSavedCode(null);
-    const analysed = draft.spec === analysedSpec;
+    const analysed = !specPending(draft.spec, analysedSpec, profile.data?.spec);
     saveProfile.mutate(
       { code, body: { nameL10n: { ...names }, spec, rowVersion } },
       {
@@ -315,7 +321,7 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
           setSavedCode(saved.code);
           // The file was read with this very specification: it stays read (profile instead of spec). Edits that were not
           // re-read yet still ask for a re-read before the preview.
-          setAnalysedSpec(analysed ? null : spec);
+          setAnalysedSpec(analysed ? null : UnknownRead);
           patchDraft({ profileCode: saved.code, spec: null });
         },
         onError: (error) => {
@@ -366,6 +372,7 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
     } else if (step === 'file') {
       const found = fileStepProblem(draft);
       setProblem(found);
+      setEditorOpen(false);
       if (found === null) runAnalyse('mapping');
     } else if (step === 'mapping') {
       runPreview();
@@ -379,6 +386,8 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
   };
 
   const stale = forceStale || (preview !== null && previewSignature(draft, preview.preview.missing) !== previewSig);
+  // The mapping in hand is not the one the file was read with (compared by content): the preview waits for a re-read.
+  const pending = specPending(draft.spec, analysedSpec, profile.data?.spec);
   const index = ImportSteps.indexOf(step);
 
   return (
@@ -471,6 +480,8 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
         <Suspense fallback={<Skeleton height={240} role="status" aria-label={t('common.loading')} />}>
           <MappingStep
           analysis={analysis}
+          file={draft.file}
+          openEditor={editorOpen}
           profile={profile.data}
           spec={draft.spec}
           onSpec={(spec) => patchDraft({ spec })}
@@ -509,7 +520,7 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
       )}
       {step === 'apply' && result !== null && <ApplyStep result={result} permitId={permitId} />}
 
-      {step === 'mapping' && draft.spec !== analysedSpec && (
+      {step === 'mapping' && pending && !analysing && (
         // The way forward is right here: after a save or «Discard» the editor (and its own «Re-analyse») may be closed.
         <div className="pi-actions pi-end">
           <Text size="sm" c="dimmed" role="status">
@@ -543,9 +554,15 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
               {t('permits.air.import.analyse')}
             </Button>
           )}
+          {step === 'mapping' && analysis !== null && !analysis.analysis.canContinue && !pending && (
+            // UX 20.11: a disabled «Next» says why, next to it (the step marks what to fix).
+            <Text size="sm" c="dimmed" role="status" data-testid="air-next-blocked">
+              {t('permits.air.import.map.blockedHint')}
+            </Text>
+          )}
           {step === 'mapping' && (
             <Button
-              disabled={!mayImport || analysis === null || !analysis.analysis.canContinue || draft.spec !== analysedSpec}
+              disabled={!mayImport || analysis === null || !analysis.analysis.canContinue || pending}
               loading={previewing}
               onClick={next}
             >

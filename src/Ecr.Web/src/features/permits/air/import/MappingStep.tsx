@@ -1,4 +1,4 @@
-import { useId, useRef, useState, type JSX } from 'react';
+import { useEffect, useId, useRef, useState, type JSX } from 'react';
 import { Button, Checkbox, Select, Text, TextInput } from '@mantine/core';
 import { serverMessage } from '@/features/registries/rc816/serverMessage';
 import { formatNumber } from '@/shared/format/number';
@@ -22,6 +22,9 @@ import {
   type ProfileSaveConflict,
 } from './importModel';
 import { IssuesTable } from './IssuesTable';
+import { fieldCounts, fieldRows, mappingVerdict, withPickedColumn } from './fieldRows';
+import { FieldsTable } from './FieldsTable';
+import { useColumnSamples } from './xlsxSamples';
 import type { AddColumnProblem, NewColumnRequest } from './addColumn';
 import { fieldLabel, NoColumnNames, type ColumnNames } from './fieldLabels';
 import { InputOrder } from './inputOrder';
@@ -38,8 +41,36 @@ function levelOf(value: string | null | undefined): (typeof LevelOptions)[number
   return LevelOptions.find((option) => option === value) ?? 'Child';
 }
 
+/** UX 20.11: the parser in plain words («Value type»); the value sent stays the parser's name. Literal keys for the seed guard. */
+function parserLabel(parser: (typeof ParserOptions)[number]): string {
+  switch (parser) {
+    case 'Text':
+      return t('permits.air.import.add.kind.text');
+    case 'Decimal':
+      return t('permits.air.import.add.kind.number');
+    case 'Integer':
+      return t('permits.air.import.add.kind.whole');
+    case 'Code':
+      return t('permits.air.import.parser.code');
+    case 'Choice':
+      return t('permits.air.import.parser.choice');
+    case 'Date':
+      return t('permits.air.import.add.kind.date');
+    case 'Unit':
+      return t('permits.air.import.parser.unit');
+  }
+}
+
+const ParserData = (): { value: string; label: string }[] => ParserOptions.map((value) => ({ value, label: parserLabel(value) }));
+const LevelData = (): { value: string; label: string }[] =>
+  LevelOptions.map((value) => ({ value, label: value === 'Parent' ? t('permits.air.import.map.level.parent') : t('permits.air.import.map.level.child') }));
+
 export interface MappingStepProps {
   readonly analysis: AirAnalysis;
+  /** The chosen workbook: values under its columns are shown next to them (read in the browser); absent — no values. */
+  readonly file?: File | null;
+  /** «Edit profile» on the File step: the rules editor («Advanced») is shown open. */
+  readonly openEditor?: boolean;
   /** Збережений профіль (його специфікація — вихідна для редагування); `undefined`, поки читається. */
   readonly profile: ImportProfile | undefined;
   /** Редагована специфікація; `null` — працює профіль як є. */
@@ -94,6 +125,10 @@ export function withHeaderRows(spec: ImportSpec, rows: HeaderRows): ImportSpec {
 /**
  * The one «Save as profile…» form: name, and a code suggested from it (editable, checked by `profileCodeProblem`). The profile
  * keeps the whole specification — sheet, header rows, data start row, all fields including added columns.
+ *
+ * UX 20.11: the user gives a name only; the code is generated from it (Cyrillic transliterated) and shown as a line. «Change
+ * code» opens the code field; it also opens by itself when the generated code is not valid or the code was refused (taken /
+ * built-in) — exactly when the user has to decide about it.
  */
 function SaveProfileForm({
   onSave,
@@ -114,16 +149,26 @@ function SaveProfileForm({
   const [code, setCode] = useState('');
   const [codeEdited, setCodeEdited] = useState(false);
   const [touched, setTouched] = useState(false);
+  const [codeOpen, setCodeOpen] = useState(false);
+  const [focusCode, setFocusCode] = useState(false);
   const codeInput = useRef<HTMLInputElement>(null);
   const shownCode = codeEdited ? code : profileCodeFrom(name);
   const invalid = profileCodeProblem(shownCode);
   const missingName = name.trim() === '';
   // The refusal is about the code it was given: once the code is edited it no longer applies.
   const shownConflict = conflict !== null && conflict.code === shownCode ? conflict : null;
-  const chooseAnother = (): void => {
-    onChooseAnother();
+  const showCode = codeOpen || shownConflict !== null || (touched && invalid && !missingName);
+  useEffect(() => {
+    if (!focusCode || !showCode) return;
+    setFocusCode(false);
     codeInput.current?.focus();
     codeInput.current?.select();
+  }, [focusCode, showCode]);
+  const chooseAnother = (): void => {
+    onChooseAnother();
+    // The refusal goes away with the choice: the field stays open and takes the focus.
+    setCodeOpen(true);
+    setFocusCode(true);
   };
 
   return (
@@ -148,19 +193,38 @@ function SaveProfileForm({
           onChange={(event) => setName(event.currentTarget.value)}
           data-autofocus
         />
-        <TextInput
-          ref={codeInput}
-          label={t('permits.air.import.save.code')}
-          description={t('permits.air.import.save.codeHint')}
-          inputWrapperOrder={InputOrder}
-          value={shownCode}
-          error={touched && invalid ? t('permits.air.import.save.codeInvalid') : null}
-          onChange={(event) => {
-            setCodeEdited(true);
-            setCode(event.currentTarget.value.toLocaleUpperCase('en-US'));
-          }}
-        />
+        {showCode && (
+          <TextInput
+            ref={codeInput}
+            label={t('permits.air.import.save.code')}
+            description={t('permits.air.import.save.codeHint')}
+            inputWrapperOrder={InputOrder}
+            value={shownCode}
+            error={touched && invalid ? t('permits.air.import.save.codeInvalid') : null}
+            onChange={(event) => {
+              setCodeEdited(true);
+              setCode(event.currentTarget.value.toLocaleUpperCase('en-US'));
+            }}
+          />
+        )}
       </div>
+      {!showCode && (
+        <div className="pi-toolbar">
+          <Text size="sm" c="dimmed" data-testid="air-profile-code">
+            {shownCode === '' ? t('permits.air.import.save.codeLater') : t('permits.air.import.save.codeShown', { code: shownCode })}
+          </Text>
+          <Button
+            variant="subtle"
+            size="compact-sm"
+            onClick={() => {
+              setCodeOpen(true);
+              setFocusCode(true);
+            }}
+          >
+            {t('permits.air.import.save.changeCode')}
+          </Button>
+        </div>
+      )}
       {shownConflict !== null && (
         <Banner
           tone="warning"
@@ -279,7 +343,7 @@ function FieldEditor({
                   <td>
                     <Select
                       aria-label={t('permits.air.import.map.levelFor', { field: name })}
-                      data={[...LevelOptions]}
+                      data={LevelData()}
                       allowDeselect={false}
                       value={levelOf(field.level)}
                       onChange={(value) => onSpec(withField(spec, index, { level: levelOf(value) }))}
@@ -288,7 +352,7 @@ function FieldEditor({
                   <td>
                     <Select
                       aria-label={t('permits.air.import.map.parserFor', { field: name })}
-                      data={[...ParserOptions]}
+                      data={ParserData()}
                       allowDeselect={false}
                       value={parserOf(field.parser)}
                       onChange={(value) => onSpec(withField(spec, index, { parser: parserOf(value) }))}
@@ -356,17 +420,15 @@ function noRowsReason(issues: AirAnalysis['analysis']['issues']): string {
   return first === undefined ? t('permits.air.import.noRows.unknown') : serverMessage(first.messageKey, first.args ?? {});
 }
 
-function levelLabel(level: string): string {
-  if (level === 'Parent') return t('permits.air.import.map.level.parent');
-  if (level === 'Child') return t('permits.air.import.map.level.child');
-
-  return level;
-}
-
 /**
- * Крок 2: розкладка файлу (блок шапки, змаплені й незмаплені колонки) і редактор відповідності `RegistryImportSpec`.
- * Редагується копія специфікації профілю; «Re-analyse» перечитує файл з нею. «Save as profile…» — одна форма поза
- * «Advanced»: зберігає поточну специфікацію (змінену або профілю) з аркушем, рядками шапки й доданими полями.
+ * Крок 3 «Відповідність». UX 20.11 («the mapping interface looks a bit complicated»): типовий випадок — «перевір і далі».
+ * Згори — вердикт (усе знайдено / бракує обов'язкових колонок / файл не піде далі), лічильники, далі таблиця полів
+ * (`FieldsTable`: поле, обов'язкове чи ні, колонка файлу з прикладами значень, стан; обов'язкове незнайдене — вибір колонки
+ * прямо в рядку, вибір одразу перечитує файл). Решта — згорнуто: колонки файлу, що не імпортуються («Add as new column»),
+ * «Where the table is in the file» (аркуш, рядки шапки; само розкривається, коли не прочитано жодного джерела), «Advanced»
+ * (редактор `RegistryImportSpec`: тексти заголовків, рівень, тип значення, обов'язковість, нові поля, «Re-analyse»).
+ * «Save as profile…» — одна форма поза «Advanced»: зберігає поточну специфікацію (змінену або профілю) з аркушем, рядками
+ * шапки й доданими полями; людина дає лише назву, код генерується.
  */
 export function MappingStep(props: MappingStepProps): JSX.Element {
   const { analysis, profile, spec, onSpec, onReanalyse, reanalysing, mayEditProfile, onSaveProfile, saving, savedCode } = props;
@@ -385,6 +447,33 @@ export function MappingStep(props: MappingStepProps): JSX.Element {
   const mayResave =
     mayEditProfile && spec !== null && profile !== undefined && !profile.builtIn && problem === null && unpointed === null;
 
+  // The rules editor («Advanced»): closed by default; open when the user opens it or came here by «Edit profile».
+  const [advancedOpen, setAdvancedOpen] = useState(props.openEditor === true);
+  const [seenOpenEditor, setSeenOpenEditor] = useState(props.openEditor === true);
+  if ((props.openEditor === true) !== seenOpenEditor) {
+    setSeenOpenEditor(props.openEditor === true);
+    if (props.openEditor === true) setAdvancedOpen(true);
+  }
+  // «Where the table is in the file»: closed while the file reads; open by itself when no source was read (also after a re-read).
+  const noRows = header !== null && body.stats.parents === 0;
+  const [layoutOpen, setLayoutOpen] = useState(noRows);
+  const [seenNoRows, setSeenNoRows] = useState(noRows);
+  if (noRows !== seenNoRows) {
+    setSeenNoRows(noRows);
+    if (noRows) setLayoutOpen(true);
+  }
+
+  const rows = fieldRows(base, header?.mapped ?? [], body.issues);
+  const counts = fieldCounts(rows);
+  const verdict = mappingVerdict(counts, body.canContinue);
+  const fileColumns = [...(header?.mapped ?? []), ...(header?.unmapped ?? [])];
+  const samples = useColumnSamples(
+    props.file,
+    body.sheetName,
+    header?.dataFromRow ?? 0,
+    header === null ? [] : [...new Set(fileColumns.map((column) => column.column))].sort((a, b) => a - b),
+  );
+
   // A save that went through closes the form (the status line below says which profile is now selected).
   if (savedCode !== seenSaved) {
     setSeenSaved(savedCode);
@@ -396,28 +485,32 @@ export function MappingStep(props: MappingStepProps): JSX.Element {
 
   return (
     <div className="pi-page">
-      {header !== null && (
-        <HeaderRowsForm
-          // A new analysis (other rows or sheet) restarts the form with what the server found.
-          key={`${body.sheetName}-${String(header.headerFromRow)}-${String(header.headerToRow)}-${String(header.dataFromRow)}`}
-          detected={{ headerFrom: header.headerFromRow, headerTo: header.headerToRow, dataFrom: header.dataFromRow }}
-          sheets={body.sheetNames}
-          sheet={body.sheetName}
-          busy={reanalysing}
-          disabled={base === null}
-          onApply={(rows) => base !== null && onApplySpec(withHeaderRows(base, rows))}
+      {verdict === 'missing' && (
+        <Banner
+          tone="warning"
+          testId="air-mapping-verdict"
+          title={t('permits.air.import.verdict.missingTitle', { count: formatNumber(counts.missing) })}
+          text={t('permits.air.import.verdict.missingText')}
         />
       )}
-      {header !== null && (
-        <Text size="sm" data-testid="air-header-report">
-          {t('permits.air.import.map.header', {
-            from: formatNumber(header.headerFromRow),
-            to: formatNumber(header.headerToRow),
-            data: formatNumber(header.dataFromRow),
-            groups: formatNumber(body.stats.groupRows),
-            skipped: formatNumber(body.stats.skippedRows),
+      {verdict === 'blocked' && !noRows && (
+        <Banner
+          tone="danger"
+          testId="air-mapping-verdict"
+          title={t('permits.air.import.verdict.blockedTitle')}
+          text={t('permits.air.import.verdict.blockedText')}
+        />
+      )}
+      {verdict === 'ready' && (
+        <Banner
+          tone="success"
+          testId="air-mapping-verdict"
+          title={t('permits.air.import.verdict.readyTitle', {
+            found: formatNumber(counts.found),
+            total: formatNumber(counts.found + counts.notInFile),
           })}
-        </Text>
+          text={t('permits.air.import.verdict.readyText')}
+        />
       )}
       <div className="pi-stats">
         <div className="pi-stat">
@@ -447,30 +540,17 @@ export function MappingStep(props: MappingStepProps): JSX.Element {
         />
       )}
 
-      <div className="pi-panel">
-        <div className="pa-scroll" role="region" aria-label={t('permits.air.import.map.mappedAria')} tabIndex={0}>
-          <table className="pi-table">
-            <thead>
-              <tr>
-                <th scope="col">{t('permits.air.import.map.field')}</th>
-                <th scope="col">{t('permits.air.import.map.headerText')}</th>
-                <th scope="col">{t('permits.air.import.map.matched')}</th>
-                <th scope="col">{t('permits.air.import.map.level')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(header?.mapped ?? []).map((column) => (
-                <tr key={`${column.field}-${String(column.column)}`}>
-                  <th scope="row">{fieldLabel(column.field, columnNames)}</th>
-                  <td>{column.headerText}</td>
-                  <td className="pa-code">{column.columnLetter}</td>
-                  <td>{levelLabel(column.level)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      {header !== null && (
+        <FieldsTable
+          rows={rows}
+          columns={fileColumns}
+          samples={samples}
+          columnNames={columnNames}
+          mayPick={base !== null}
+          busy={reanalysing}
+          onPick={(index, letter) => base !== null && onApplySpec(withPickedColumn(base, index, letter))}
+        />
+      )}
 
       {unsaved.length > 0 && (
         <Banner
@@ -487,10 +567,58 @@ export function MappingStep(props: MappingStepProps): JSX.Element {
           text={props.addProblem === 'draftOpen' ? t('permits.air.import.add.draftOpen') : t('permits.air.import.add.noTable')}
         />
       )}
-      <UnmappedColumns columns={header?.unmapped ?? []} mayAdd={mayAddColumn && base !== null} onAdd={onAddColumn} busy={addingColumn} />
+      <UnmappedColumns
+        columns={header?.unmapped ?? []}
+        mayAdd={mayAddColumn && base !== null}
+        onAdd={onAddColumn}
+        busy={addingColumn}
+        samples={samples}
+      />
 
-      <details className="pi-panel" open={spec !== null ? true : undefined}>
+      {header !== null && (
+        <details
+          className="pi-panel"
+          data-testid="air-layout"
+          open={layoutOpen}
+          onToggle={(event) => setLayoutOpen(event.currentTarget.open)}
+        >
+          <summary>
+            {t('permits.air.import.rows.title')}
+            {': '}
+            {body.sheetNames.length > 1 && <span>{t('permits.air.import.rows.sheetRead', { sheet: body.sheetName })} · </span>}
+            <span data-testid="air-header-report">
+              {t('permits.air.import.map.header', {
+                from: formatNumber(header.headerFromRow),
+                to: formatNumber(header.headerToRow),
+                data: formatNumber(header.dataFromRow),
+                groups: formatNumber(body.stats.groupRows),
+                skipped: formatNumber(body.stats.skippedRows),
+              })}
+            </span>
+          </summary>
+          <HeaderRowsForm
+            // A new analysis (other rows or sheet) restarts the form with what the server found.
+            key={`${body.sheetName}-${String(header.headerFromRow)}-${String(header.headerToRow)}-${String(header.dataFromRow)}`}
+            detected={{ headerFrom: header.headerFromRow, headerTo: header.headerToRow, dataFrom: header.dataFromRow }}
+            sheets={body.sheetNames}
+            sheet={body.sheetName}
+            busy={reanalysing}
+            disabled={base === null}
+            onApply={(layout) => base !== null && onApplySpec(withHeaderRows(base, layout))}
+          />
+        </details>
+      )}
+
+      <details
+        className="pi-panel"
+        data-testid="air-advanced"
+        open={advancedOpen}
+        onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}
+      >
         <summary>{t('permits.air.import.advanced')}</summary>
+        <Text size="sm" c="dimmed">
+          {t('permits.air.import.advancedHint')}
+        </Text>
         {spec === null ? (
           <div className="pi-actions">
             <Button variant="default" disabled={profile === undefined} onClick={() => profile !== undefined && onSpec(profile.spec)}>
