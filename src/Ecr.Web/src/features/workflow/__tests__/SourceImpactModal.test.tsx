@@ -80,6 +80,9 @@ describe('SourceImpactModal', () => {
     const sheets = await screen.findByTestId('source-impact-sheets');
     expect(sheets.textContent).toContain('SH_APPROVED');
     expect(sheets.textContent).toContain('SH_DRAFT');
+    // Стан аркуша — не лише кольором (a11y): текстом поруч із кодом.
+    expect(sheets.textContent).toContain('SH_APPROVED · ⟦sourceImpact.status.approved⟧');
+    expect(sheets.textContent).toContain('SH_DRAFT · ⟦sourceImpact.status.pending⟧');
   });
 
   it('ConfirmWithReason: кнопка вимкнена, доки причина порожня; причина йде обрізаною', async () => {
