@@ -20,6 +20,7 @@ import { can, useSession, type MeDto } from '@/shared/session/useSession';
 import { LazyConfirmModal, LazyReasonModal, LazySourceImpactModal } from './lazyDialogs';
 import { pendingSlices, usePendingCount } from '@/features/grid/pendingStore';
 import {
+  editedPeriods,
   fetchSourceImpact,
   impactRefusal,
   isEditNoticeSuppressed,
@@ -31,7 +32,14 @@ import {
 } from './sourceImpact';
 import { Hint } from '@/shared/ui/Hint';
 import { notificationCloseButtonProps, showApiError, showDone, showWarning } from '@/shared/ui/notify';
-import { useApproverEditAvailability, useRecallAvailability, useSubmissionTarget, type RecallSheetRequest } from './api';
+import {
+  submissionTargetKey,
+  useApproverEditAvailability,
+  useRecallAvailability,
+  useSubmissionTarget,
+  type RecallSheetRequest,
+  type SubmissionTarget,
+} from './api';
 import { outcomeOf, pollInterval } from './jobFollow';
 import { useSettledAction } from '@/features/grid/settleEdits';
 import { isRecalculateKey, isTypingOrDialogTarget } from '@/features/grid/shortcutKey';
@@ -832,8 +840,8 @@ export function useSheetActions({
    */
   const pendingCount = usePendingCount();
   const previousPending = useRef(0);
-  // ✎ D-5: вплив питається за МІСЯЦЬ(і) справжніх правок (зріз незбережених має `periodKey`), а не за якірний період
-  // сторінки: річний шаблон показує місяці колонками, і сторінка завжди стоїть на січні. Місяць питається раз за життя екрана.
+  // ✎ D-5: вплив питається за МІСЯЦЬ(і) справжніх правок (місяць = колонка правки, `editedPeriods`), а не за якірний період
+  // сторінки: річний шаблон показує місяці колонками, і сторінка завжди стоїть на січні (зріз правок теж якірний). Місяць питається раз за життя екрана.
   const checkedEditPeriods = useRef(new Set<number>());
   const editCheckRunning = useRef(false);
   const [editNoticeState, setEditNotice] = useState<{ impact: SourceImpact; periodKey: number } | null>(null);
@@ -856,7 +864,8 @@ export function useSheetActions({
     // екрана; показуємо перший місяць із залежними. Послідовно, щоб не завалити сервер і не відкрити кілька діалогів.
     if (pendingCount > 0 && sheetCopyId === null && editNoticeState === null && !editCheckRunning.current && !isEditNoticeSuppressed(documentId, sheetDefId)) {
       const nextPeriod = (): number | undefined => {
-        const edited = pendingSlices().map((slice) => slice.periodKey);
+        const target = queryClient.getQueryData<SubmissionTarget>(submissionTargetKey(documentId, sheetDefId, periodKey, sheetCopyId));
+        const edited = editedPeriods(pendingSlices(), Array.isArray(target?.monthColumns) ? target.monthColumns : undefined);
         // Без зрізів (не має бути при pendingCount > 0) — період сторінки, як було до D-5.
         return (edited.length > 0 ? edited : [periodKey]).find((p) => !checkedEditPeriods.current.has(p));
       };
