@@ -41,7 +41,8 @@ public sealed class PartitionCheckJobDetectionTests
 
             Assert.Equal("Succeeded", status);
             Assert.Contains("boundariesAhead", details, StringComparison.Ordinal);
-            Assert.Contains("\"edgeRows\":{\"first\":0,\"last\":0}", details, StringComparison.Ordinal);
+            Assert.Contains("\"edgeRows\":{\"first\":0,\"last\":0},", details, StringComparison.Ordinal);
+            Assert.DoesNotContain("edgeWarning", details, StringComparison.Ordinal);
         });
     }
 
@@ -67,15 +68,15 @@ public sealed class PartitionCheckJobDetectionTests
     }
 
     /// <summary>
-    /// PSS-09: рядки в крайніх партиціях — Degraded навіть за достатнього запасу. Ліва: період до першої межі (202512 —
-    /// «історичний рік без меж»); права: період за останньою межею. Мутація: прибрати <c>edgesEmpty</c> з умови статусу —
-    /// обидва прогони Succeeded, тест червоний.
+    /// PSS-09: рядки в крайніх партиціях — лічильники й ПОПЕРЕДЖЕННЯ <c>edgeWarning</c>, але не Degraded (✎ рев'ю M1:
+    /// документи історичних і «далеких» років дозволені, щонічний Degraded був би шумом). Ліва: період до першої межі
+    /// (202512); права: період за останньою межею. Мутація: прибрати <c>edgeWarning</c> з подробиць — червоне.
     /// </summary>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Audit", "PSS-09")]
-    public async Task Рядки_в_крайній_партиції_дають_Degraded_з_лічильниками()
+    public async Task Рядки_в_крайній_партиції_дають_попередження_з_лічильниками_без_Degraded()
     {
         await WithDatabaseAsync("_pcd3", async cs =>
         {
@@ -83,13 +84,13 @@ public sealed class PartitionCheckJobDetectionTests
 
             await new TestDocumentBuilder(cs).BuildAsync(periodKey: 202512, rowCount: 1);
             var (status, details) = await RunAsync(cs, early);
-            Assert.Equal("Degraded", status);
-            Assert.Matches("\"edgeRows\":\\{\"first\":[1-9][0-9]*,\"last\":0\\}", details);
+            Assert.Equal("Succeeded", status);
+            Assert.Matches("\"edgeRows\":\\{\"first\":[1-9][0-9]*,\"last\":0\\},\"edgeWarning\":true", details);
 
             await new TestDocumentBuilder(cs).BuildAsync(periodKey: 209901, rowCount: 1);
             (status, details) = await RunAsync(cs, early);
-            Assert.Equal("Degraded", status);
-            Assert.Matches("\"edgeRows\":\\{\"first\":[1-9][0-9]*,\"last\":[1-9][0-9]*\\}", details);
+            Assert.Equal("Succeeded", status);
+            Assert.Matches("\"edgeRows\":\\{\"first\":[1-9][0-9]*,\"last\":[1-9][0-9]*\\},\"edgeWarning\":true", details);
         });
     }
 

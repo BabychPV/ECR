@@ -85,7 +85,7 @@ public sealed partial class PartitionCheckJob(
         // вже записала).
         // ✎ PSS-27: поріг — налаштування `Retention.AuditMonths` (sys_ecr.SystemSetting, читається щоночі без кешу,
         // підлога 120 міс. — рішення людини 20.11 №7); ту саму підлогу тримає й процедура.
-        var retention = await RetentionSettings.ReadAsync(db, ct).ConfigureAwait(false);
+        var retention = await RetentionSettings.ReadAsync(db, ct, log).ConfigureAwait(false);
         var (archivedPartitions, archivedRows, archiveError) =
             await ArchiveAuditAsync(retention.AuditMonths, ct).ConfigureAwait(false);
         var archiveJson = string.Create(
@@ -120,21 +120,27 @@ public sealed partial class PartitionCheckJob(
 
         var enough = ahead >= MinimumBoundariesAhead;
 
-        // ✎ PSS-09: рядки в КРАЙНІХ партиціях pf_ByPeriodKey — сигнал, а не норма. Ліва (до першої межі,
-        // 202601) наповнюється, коли дані історичних років потрапили в базу без меж для них; права (від
-        // останньої межі) — коли дані пішли далі за межі. Обидва випадки ламають наступні SPLIT
-        // (`arc.usp_EnsurePartitions` такі межі тепер пропускає з `Degraded`) і архівацію року (THROW 50013).
+        // ✎ PSS-09: рядки в КРАЙНІХ партиціях pf_ByPeriodKey. Ліва (до першої межі, 202601) — документи історичних
+        // років (дозволені: історію не мігруємо, рішення людини 20.11 №6); права (від останньої межі) — «далекий» рік
+        // (дозволено до 2100). ✎ рев'ю M1: це ПОПЕРЕДЖЕННЯ (`edgeWarning` у подробицях, рядок у журналі служби), а не
+        // Degraded: щонічний Degraded без дії, яку можна зробити зараз, лише привчає не читати зведення. Чим це
+        // загрожує — наступний SPLIT переносить рядки >= межі (`usp_EnsurePartitions` @MaxRowsToMove) і архівація року
+        // (THROW 50013); що робити — runbook, рядок «edgeRows/refused».
         var (firstRows, lastRows) = await EdgeRowsAsync(ct).ConfigureAwait(false);
-        var edgesEmpty = firstRows == 0 && lastRows == 0;
+        var edgeWarning = firstRows > 0 || lastRows > 0;
+        if (edgeWarning)
+        {
+            LogEdgeRows(log, firstRows, lastRows);
+        }
 
         // ⚠ Достатній запас НЕ породжує шуму: задача, що пише попередження
         // щоночі, привчає його не читати — і справжнє попередження губиться
         // серед звичних.
         run.Complete(
-            enough && edgesEmpty && !auditFailed ? "Succeeded" : "Degraded",
+            enough && !auditFailed ? "Succeeded" : "Degraded",
             string.Create(
                 CultureInfo.InvariantCulture,
-                $"{{\"boundariesAhead\":{ahead},\"minimum\":{MinimumBoundariesAhead},\"edgeRows\":{{\"first\":{firstRows},\"last\":{lastRows}}},\"auditBoundariesAdded\":{auditAdded}{archiveJson}}}"),
+                $"{{\"boundariesAhead\":{ahead},\"minimum\":{MinimumBoundariesAhead},\"edgeRows\":{{\"first\":{firstRows},\"last\":{lastRows}}}{(edgeWarning ? ",\"edgeWarning\":true" : string.Empty)},\"auditBoundariesAdded\":{auditAdded}{archiveJson}}}"),
             clock.UtcNow);
 
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -261,6 +267,11 @@ public sealed partial class PartitionCheckJob(
     [LoggerMessage(Level = LogLevel.Error,
         Message = "Продовження меж аудиту (arc.usp_EnsureAuditPartitions) не вдалося, помилка SQL {Number}; перевірка запасу pf_ByPeriodKey виконується далі.")]
     private static partial void LogAuditBoundariesFailed(ILogger logger, int number, Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Рядки в крайніх партиціях pf_ByPeriodKey: перша (до 202601) — {FirstRows}, остання — {LastRows}. "
+            + "Наступний SPLIT перенесе рядки >= межі; що робити — runbook, «edgeRows/refused».")]
+    private static partial void LogEdgeRows(ILogger logger, long firstRows, long lastRows);
 
     [LoggerMessage(Level = LogLevel.Error,
         Message = "Архівація аудиту (arc.usp_ArchiveAudit) не вдалася, помилка SQL {Number}.")]

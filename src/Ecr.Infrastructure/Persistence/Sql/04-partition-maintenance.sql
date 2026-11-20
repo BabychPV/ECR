@@ -45,17 +45,23 @@ GO
 --    Раніше бралися лише @MonthsAhead місяців від наступного: місяці поточного року, яких
 --    чомусь немає (база розгорнута пізно, завдання Agent не працювало), не додавались ніколи,
 --    а грудень наступного року ділив крайню праву партицію з усім майбутнім;
---  * SPLIT партиції, у якій уже є рядки (будь-яка таблиця на ps_ByPeriodKey, купа чи
---    кластерний індекс), НЕ виконується: це переміщення даних під Sch-M на всіх таблицях
---    схеми. Межа пропускається, прогін пише `Degraded` зі списком `refused` і причиною;
---    решта меж додається як звичайно. Розв'язка — вручну у вікні обслуговування (runbook);
---    `PartitionCheckJob` окремо сигналізує про рядки в крайніх партиціях.
+--  * ✎ PSS-09 H1 (рев'ю 21.11): SPLIT переміщує лише рядки з ключем >= нової межі (замір рев'ю:
+--    200 тис. рядків НИЖЧЕ межі — 0,4 с і 2,7 КБ журналу; ВИЩЕ — 38 с і 76 МБ). Тому рахуються саме
+--    рядки, що переїдуть: по кожній таблиці на ps_ByPeriodKey — `<колонка> >= @key AND < наступна межа`
+--    (seek: колонка партиціонування — перша в кластерному ключі), з TOP (@MaxRowsToMove + 1).
+--    Більше за @MaxRowsToMove — межа пропускається (`refused`, прогін `Degraded`), решта додається.
+--    @MaxRowsToMove = 5000 (типово): за заміром ≈1 с Sch-M — у межах LOCK_TIMEOUT 5 с і 8 с до 409
+--    PATCH; одна «далека» сторінка документа (рік до 2100 дозволено) — сотні рядків. 0 — жодного
+--    переміщення (суворо). Межі йдуть від НАЙВИЩОЇ до найнижчої: «далекі» рядки переїжджають один
+--    раз (у найвищу нову партицію), а нижчі SPLIT-и вже порожні — замість переїзду на кожній межі;
+--  * `PartitionCheckJob` окремо показує рядки в крайніх партиціях (попередження, не Degraded).
 CREATE OR ALTER PROCEDURE arc.usp_EnsurePartitions
     @MonthsAhead       int  = 6,
     @Today             date = NULL,
     @LockTimeoutMs     int  = 5000,
     @MaxAttempts       int  = 10,
-    @RetryDelaySeconds int  = 60
+    @RetryDelaySeconds int  = 60,
+    @MaxRowsToMove     int  = 5000
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -63,7 +69,8 @@ BEGIN
     IF @LockTimeoutMs IS NULL OR @LockTimeoutMs < 1
        OR @MaxAttempts IS NULL OR @MaxAttempts < 1
        OR @RetryDelaySeconds IS NULL OR @RetryDelaySeconds < 0 OR @RetryDelaySeconds > 3600
-        THROW 50017, N'@LockTimeoutMs і @MaxAttempts мають бути додатними, @RetryDelaySeconds — від 0 до 3600.', 1;
+       OR @MaxRowsToMove IS NULL OR @MaxRowsToMove < 0
+        THROW 50017, N'@LockTimeoutMs і @MaxAttempts мають бути додатними, @RetryDelaySeconds — від 0 до 3600, @MaxRowsToMove — не менше 0.', 1;
 
     DECLARE @started datetime2(3) = SYSUTCDATETIME();
     DECLARE @t date = COALESCE(@Today, CAST(GETUTCDATE() AS date));
@@ -72,36 +79,71 @@ BEGIN
     DECLARE @last date = DATEADD(MONTH, COALESCE(@MonthsAhead, 0), DATEFROMPARTS(YEAR(@t), MONTH(@t), 1));
     IF @last < DATEFROMPARTS(YEAR(@t) + 2, 1, 1)
         SET @last = DATEFROMPARTS(YEAR(@t) + 2, 1, 1);
-    DECLARE @key int, @sql nvarchar(600), @p int, @rows bigint;
+    DECLARE @key int, @sql nvarchar(600), @p int, @next int, @rows bigint, @moved bigint = 0, @c bigint;
+    DECLARE @tbl nvarchar(300), @col sysname, @countSql nvarchar(1000), @limit bigint = CAST(@MaxRowsToMove AS bigint) + 1;
     DECLARE @attempt int, @done bit, @added int = 0, @retries int = 0;
     DECLARE @refused nvarchar(max) = N'';
     DECLARE @delay char(8) =
         CONVERT(char(8), DATEADD(SECOND, @RetryDelaySeconds, CAST('00:00:00' AS time(0))), 108);
 
+    -- Відсутні межі діапазону — від найвищої (H1).
+    DECLARE @keys TABLE (K int NOT NULL PRIMARY KEY);
+    WHILE @d <= @last
+    BEGIN
+        SET @key = YEAR(@d) * 100 + MONTH(@d);
+        IF NOT EXISTS (SELECT 1 FROM sys.partition_range_values rv
+                       JOIN sys.partition_functions pf ON pf.function_id = rv.function_id
+                       WHERE pf.name = N'pf_ByPeriodKey' AND CAST(rv.value AS int) = @key)
+            INSERT INTO @keys (K) VALUES (@key);
+        SET @d = DATEADD(MONTH, 1, @d);
+    END
+    SET @key = NULL;
+
     BEGIN TRY
-        WHILE @d <= @last
+        WHILE EXISTS (SELECT 1 FROM @keys)
         BEGIN
-            SET @key = YEAR(@d) * 100 + MONTH(@d);
+            SELECT @key = MAX(K) FROM @keys;
+            DELETE FROM @keys WHERE K = @key;
 
-            -- PSS-09: межа всередині партиції з рядками — не SPLIT (переміщення даних під Sch-M).
-            -- Рядки рахуються за sys.partitions (купа / кластерний індекс кожної таблиці на
-            -- ps_ByPeriodKey, включно з arc.*): метадані, без читання таблиць.
-            SET @rows = -1;   -- -1: межа вже є
-            IF NOT EXISTS (SELECT 1 FROM sys.partition_range_values rv
-                           JOIN sys.partition_functions pf ON pf.function_id = rv.function_id
-                           WHERE pf.name = N'pf_ByPeriodKey' AND CAST(rv.value AS int) = @key)
-            BEGIN
-                SET @p = $PARTITION.pf_ByPeriodKey(@key);
-                SELECT @rows = ISNULL(SUM(prt.rows), 0)
-                  FROM sys.partitions AS prt
-                  JOIN sys.indexes AS ix ON ix.object_id = prt.object_id AND ix.index_id = prt.index_id
+            -- H1: скільки рядків ПЕРЕЇДЕ — лише >= @key у партиції, що розбивається (до наступної межі).
+            SET @p = $PARTITION.pf_ByPeriodKey(@key);
+            SELECT @next = MIN(CAST(rv.value AS int))
+              FROM sys.partition_range_values rv
+              JOIN sys.partition_functions pf ON pf.function_id = rv.function_id
+             WHERE pf.name = N'pf_ByPeriodKey' AND CAST(rv.value AS int) > @key;
+            SET @rows = 0;
+
+            DECLARE cur_t CURSOR LOCAL FAST_FORWARD FOR
+                SELECT QUOTENAME(SCHEMA_NAME(t.schema_id)) + N'.' + QUOTENAME(t.name), c.name
+                  FROM sys.indexes AS ix
                   JOIN sys.partition_schemes AS ps ON ps.data_space_id = ix.data_space_id
-                 WHERE ps.name = N'ps_ByPeriodKey' AND ix.index_id IN (0, 1) AND prt.partition_number = @p;
+                  JOIN sys.tables AS t ON t.object_id = ix.object_id
+                  JOIN sys.index_columns AS ic ON ic.object_id = ix.object_id AND ic.index_id = ix.index_id AND ic.partition_ordinal = 1
+                  JOIN sys.columns AS c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+                 WHERE ps.name = N'ps_ByPeriodKey' AND ix.index_id IN (0, 1)
+                   AND EXISTS (SELECT 1 FROM sys.partitions AS prt
+                                WHERE prt.object_id = ix.object_id AND prt.index_id = ix.index_id
+                                  AND prt.partition_number = @p AND prt.rows > 0);
+            OPEN cur_t;
+            FETCH NEXT FROM cur_t INTO @tbl, @col;
+            WHILE @@FETCH_STATUS = 0 AND @rows <= @MaxRowsToMove
+            BEGIN
+                SET @countSql = N'SELECT @c = COUNT_BIG(*) FROM (SELECT TOP (@lim) 1 AS x FROM ' + @tbl
+                              + N' WHERE ' + QUOTENAME(@col) + N' >= @k'
+                              + CASE WHEN @next IS NULL THEN N'' ELSE N' AND ' + QUOTENAME(@col) + N' < @n' END
+                              + N') AS q;';
+                SET @c = 0;
+                EXEC sys.sp_executesql @countSql, N'@c bigint OUTPUT, @lim bigint, @k int, @n int',
+                     @c = @c OUTPUT, @lim = @limit, @k = @key, @n = @next;
+                SET @rows = @rows + @c;
+                FETCH NEXT FROM cur_t INTO @tbl, @col;
             END
+            CLOSE cur_t;
+            DEALLOCATE cur_t;
 
-            IF @rows > 0
-                SET @refused = @refused + N',' + CAST(@key AS nvarchar(10));
-            ELSE IF @rows = 0
+            IF @rows > @MaxRowsToMove
+                SET @refused = N',' + CAST(@key AS nvarchar(10)) + @refused;   -- від найвищої: префікс дає зростання
+            ELSE
             BEGIN
                 SET @sql = N'SET LOCK_TIMEOUT ' + CAST(@LockTimeoutMs AS nvarchar(10)) + N'; '
                          + N'ALTER PARTITION SCHEME ps_ByPeriodKey NEXT USED [DATA_HOT]; '
@@ -116,6 +158,7 @@ BEGIN
                         EXEC sp_executesql @sql;
                         SET @done = 1;
                         SET @added = @added + 1;
+                        SET @moved = @moved + @rows;
                     END TRY
                     BEGIN CATCH
                         IF ERROR_NUMBER() NOT IN (1222, 1205) OR @attempt >= @MaxAttempts
@@ -128,8 +171,6 @@ BEGIN
                     END CATCH
                 END
             END
-
-            SET @d = DATEADD(MONTH, 1, @d);
         END
 
         -- Аудит: межі pf_AuditByMonth - на 12 місяців уперед (окрема функція, окрема процедура).
@@ -141,9 +182,11 @@ BEGIN
                 CASE WHEN @refused = N'' THEN N'Succeeded' ELSE N'Degraded' END,
                 N'{"added":' + CAST(@added AS nvarchar(10))
                 + N',"retries":' + CAST(@retries AS nvarchar(10))
+                + N',"movedRows":' + CAST(@moved AS nvarchar(20))
                 + CASE WHEN @refused = N'' THEN N''
                        ELSE N',"refused":[' + STUFF(@refused, 1, 1, N'')
-                            + N'],"reason":"партиція з рядками: SPLIT переміщував би дані під Sch-M; межу додати вручну у вікні обслуговування"'
+                            + N'],"maxRowsToMove":' + CAST(@MaxRowsToMove AS nvarchar(10))
+                            + N',"reason":"SPLIT переніс би більше рядків, ніж @MaxRowsToMove, під Sch-M; runbook: edgeRows/refused"'
                   END
                 + N'}');
     END TRY
@@ -255,7 +298,7 @@ GO
 -- (1, '2099-01-01') і перенести з `aud.*` (і з UI історії) весь аудит.
 CREATE OR ALTER PROCEDURE arc.usp_ArchiveAuditBefore
     @Cutoff datetime2(3),
-    @OlderThanMonths int,
+    @OlderThanMonths int = NULL,   -- лише для журналу (DBA вручну може не передавати)
     @PartitionsSwitched int = NULL OUTPUT,
     @RowsSwitched bigint = NULL OUTPUT
 AS
@@ -404,7 +447,8 @@ BEGIN
     IF @OlderThanMonths IS NULL OR @OlderThanMonths < 120
         SET @OlderThanMonths = 120;
 
-    DECLARE @t date = COALESCE(@Today, @serverToday);
+    -- L1 (рев'ю): «завтра» з допуску на розбіжність годинників не скорочує 120 місяців — межа від меншої дати.
+    DECLARE @t date = CASE WHEN @Today IS NOT NULL AND @Today < @serverToday THEN @Today ELSE @serverToday END;
     DECLARE @cutoff datetime2(3) =
         DATEADD(MONTH, -@OlderThanMonths, DATEFROMPARTS(YEAR(@t), MONTH(@t), 1));
 

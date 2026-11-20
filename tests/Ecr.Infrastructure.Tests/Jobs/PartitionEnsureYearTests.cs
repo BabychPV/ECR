@@ -7,13 +7,14 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 
 /// <summary>
 /// PSS-09 (аудит 20.11; рішення людини 20.11 №6 — межі для поточного року): <c>arc.usp_EnsurePartitions</c> тримає межі
-/// всього поточного року, наступного і січня Y+2, а партицію з рядками НЕ розбиває (SPLIT непорожньої партиції —
-/// переміщення даних під Sch-M на всіх таблицях <c>ps_ByPeriodKey</c>): межу пропускає, прогін — <c>Degraded</c>.
+/// всього поточного року, наступного і січня Y+2, а межу, SPLIT якої переніс би понад <c>@MaxRowsToMove</c> рядків
+/// (лише рядки >= межі — рев'ю H1), пропускає: прогін — <c>Degraded</c> зі списком <c>refused</c>.
 /// </summary>
 /// <remarks>
 /// ⚠ Власні бази: у спільній базі колекції крайня права партиція містить чужі рядки тестів (PeriodKey 2099xx).
 /// Мутації: (1) повернути початок діапазону на «наступний місяць» — перший тест червоний (немає 203501…203505);
-/// (2) прибрати перевірку рядків перед SPLIT — другий тест червоний (межі додано, статус Succeeded).
+/// (2) прибрати перевірку рядків, що переїдуть, — другий тест червоний (межі 203001…203003 додано, Succeeded);
+/// (3) рахувати всі рядки партиції, а не >= межі (як до рев'ю H1) — другий і третій червоні.
 /// </remarks>
 [Collection("SqlServer")]
 [Trait("Audit", "PSS-09")]
@@ -56,10 +57,15 @@ public sealed class PartitionEnsureYearTests
         }
     }
 
+    /// <summary>
+    /// ✎ рев'ю H1: SPLIT переносить лише рядки >= нової межі. Рядки 203003 у крайній правій партиції НЕ блокують межі
+    /// 203004…203201 (нижче за них — нічого не переїжджає); з @MaxRowsToMove = 0 пропускаються лише 203001…203003, бо
+    /// для них рядки 203003 переїхали б. Межі йдуть від найвищої.
+    /// </summary>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    public async Task Партиція_з_рядками_не_розбивається_межі_пропущено_прогін_Degraded()
+    public async Task Рядки_нижче_межі_не_блокують_SPLIT_пропускаються_лише_межі_що_переносили_б_рядки()
     {
         var database = SqlServerFixture.WithOwnDatabase("_pey2");
         await database.InitializeAsync();
@@ -70,28 +76,71 @@ public sealed class PartitionEnsureYearTests
             // Рядки за останньою межею (крайня права партиція).
             var doc = await new TestDocumentBuilder(cs).BuildAsync(periodKey: 203003, rowCount: 2);
             var rowsBefore = await ScalarAsync(cs, $"SELECT COUNT(*) FROM doc.TableRow WHERE PeriodKey = {doc.PeriodKey.Value}");
-            var boundariesBefore = await ScalarAsync(cs, BoundaryCount(0, 999999));
 
-            await ExecAsync(cs, "EXEC arc.usp_EnsurePartitions @MonthsAhead = 6, @Today = '2030-02-10', @RetryDelaySeconds = 0;");
+            await ExecAsync(cs, "EXEC arc.usp_EnsurePartitions @MonthsAhead = 6, @Today = '2030-02-10', @RetryDelaySeconds = 0, @MaxRowsToMove = 0;");
 
-            // Усі межі 203001…203201 лежать усередині непорожньої партиції — жодну не додано.
-            Assert.Equal(boundariesBefore, await ScalarAsync(cs, BoundaryCount(0, 999999)));
+            Assert.Equal(22L, await ScalarAsync(cs, BoundaryCount(203004, 203201)));
+            Assert.Equal(0L, await ScalarAsync(cs, BoundaryCount(203001, 203003)));
             Assert.Equal(rowsBefore, await ScalarAsync(cs, $"SELECT COUNT(*) FROM doc.TableRow WHERE PeriodKey = {doc.PeriodKey.Value}"));
 
-            var details = await ScalarTextAsync(cs, """
-                SELECT TOP (1) Status + N'|' + DetailsJson FROM itg.MaintenanceRun
-                WHERE JobCode = N'EnsurePartitions' ORDER BY Id DESC
-                """);
+            var details = await LastDetailsAsync(cs);
             Assert.StartsWith("Degraded|", details, StringComparison.Ordinal);
-            Assert.Contains("\"added\":0", details, StringComparison.Ordinal);
-            Assert.Contains("\"refused\":[203001,", details, StringComparison.Ordinal);
-            Assert.Contains("203201]", details, StringComparison.Ordinal);
+            Assert.Contains("\"added\":22,", details, StringComparison.Ordinal);
+            Assert.Contains("\"movedRows\":0,", details, StringComparison.Ordinal);
+            Assert.Contains("\"refused\":[203001,203002,203003]", details, StringComparison.Ordinal);
+
+            // Типова стеля (5000 рядків): решта меж додається з переносом цих кількох рядків; дані на місці.
+            await ExecAsync(cs, "EXEC arc.usp_EnsurePartitions @MonthsAhead = 6, @Today = '2030-02-10', @RetryDelaySeconds = 0;");
+            Assert.Equal(3L, await ScalarAsync(cs, BoundaryCount(203001, 203003)));
+            Assert.Equal(rowsBefore, await ScalarAsync(cs, $"SELECT COUNT(*) FROM doc.TableRow WHERE PeriodKey = {doc.PeriodKey.Value}"));
+            Assert.Equal(1L, await ScalarAsync(cs, $"""
+                SELECT COUNT(DISTINCT $PARTITION.pf_ByPeriodKey(PeriodKey)) FROM doc.TableRow WHERE PeriodKey = {doc.PeriodKey.Value}
+                """));
+            details = await LastDetailsAsync(cs);
+            Assert.StartsWith("Succeeded|", details, StringComparison.Ordinal);
+            Assert.DoesNotContain("\"movedRows\":0,", details, StringComparison.Ordinal);
         }
         finally
         {
             await database.DisposeAsync();
         }
     }
+
+    /// <summary>
+    /// ✎ рев'ю H1: дані НИЖЧЕ всіх нових меж (документ 203003, «сьогодні» 2031) — SPLIT дозволено навіть із
+    /// @MaxRowsToMove = 0: нічого не переїжджає, прогін Succeeded. Мутація: рахувати всі рядки партиції (як було) —
+    /// червоне (усі межі refused).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Дані_нижче_межі_SPLIT_дозволено_Succeeded()
+    {
+        var database = SqlServerFixture.WithOwnDatabase("_pey3");
+        await database.InitializeAsync();
+        try
+        {
+            var cs = database.ConnectionString;
+            await new TestDocumentBuilder(cs).BuildAsync(periodKey: 203003, rowCount: 2);
+
+            await ExecAsync(cs, "EXEC arc.usp_EnsurePartitions @MonthsAhead = 6, @Today = '2031-03-10', @RetryDelaySeconds = 0, @MaxRowsToMove = 0;");
+
+            Assert.Equal(25L, await ScalarAsync(cs, BoundaryCount(203101, 203301)));
+            var details = await LastDetailsAsync(cs);
+            Assert.StartsWith("Succeeded|", details, StringComparison.Ordinal);
+            Assert.Contains("\"movedRows\":0", details, StringComparison.Ordinal);
+            Assert.DoesNotContain("refused", details, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await database.DisposeAsync();
+        }
+    }
+
+    private static Task<string> LastDetailsAsync(string cs) => ScalarTextAsync(cs, """
+        SELECT TOP (1) Status + N'|' + DetailsJson FROM itg.MaintenanceRun
+        WHERE JobCode = N'EnsurePartitions' ORDER BY Id DESC
+        """);
 
     private static string BoundaryAggregate(string fn) => $"""
         SELECT {fn}(CAST(rv.value AS int)) FROM sys.partition_range_values rv
