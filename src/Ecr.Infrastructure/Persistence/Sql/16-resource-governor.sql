@@ -102,6 +102,7 @@ END
 DECLARE @functionSql nvarchar(max) = N'
 CREATE FUNCTION dbo.ecr_rg_classifier()
 RETURNS sysname
+WITH SCHEMABINDING
 AS
 BEGIN
     -- ⚠ Мінімум логіки: функція виконується при КОЖНОМУ вході. Без звернень до таблиць.

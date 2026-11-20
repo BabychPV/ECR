@@ -885,6 +885,7 @@ public sealed partial class ExceptionHandlingMiddleware(
         233,    // з'єднання встановлено, але розірвано під час входу
         121,    // тайм-аут семафора: розрив мережі під час запиту (E1-05)
         1205,   // deadlock victim
+        8645,   // PSS-12: тайм-аут очікування memory grant (сервер) — Api його не повторює, а відповідає 503
         1222,   // перевищено тайм-аут очікування блокування
         4060,   // база недоступна під час перемикання
         10053,  // з'єднання перервано програмою на хості
@@ -939,7 +940,7 @@ public sealed partial class ExceptionHandlingMiddleware(
         {
             switch (current)
             {
-                case Microsoft.Data.SqlClient.SqlException sql when sql.Number == -2:
+                case Microsoft.Data.SqlClient.SqlException sql when sql.Number is -2 or 8645:
                     return "timeout";
                 case Microsoft.Data.SqlClient.SqlException sql when sql.Number == 1205:
                     return "deadlock";
