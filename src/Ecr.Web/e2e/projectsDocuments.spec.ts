@@ -234,8 +234,18 @@ test.describe('Projects 08.11', () => {
     const cells = row.locator('[data-month]');
     await expect(cells).toHaveCount(12);
     // Смуга справді малюється: клітинки мають стани (не всі «unknown»), і хоч одна відрізняється від інших.
-    const states = await cells.evaluateAll((nodes) => nodes.map((n) => n.getAttribute('data-cell')));
-    expect(states.filter((s) => s === 'unknown'), `стани: ${states.join(',')}`).toHaveLength(0);
+    // ⚠ Поки календар проєкту довантажується, усі 12 клітинок — «unknown»: чекаємо їх стани, а не читаємо одразу.
+    await expect
+      .poll(
+        async () => {
+          const states = await cells.evaluateAll((nodes) => nodes.map((n) => n.getAttribute('data-cell')));
+          const unknown = states.filter((s) => s === 'unknown');
+
+          return unknown.length === 0 ? 'ok' : `стани: ${states.join(',')}`;
+        },
+        { timeout: 30_000 },
+      )
+      .toBe('ok');
     await expect(page.locator('[data-year-strip-legend]')).toBeVisible();
 
     await row.locator(`[data-month="${String(periodKey)}"]`).click();
