@@ -77,9 +77,7 @@ public sealed class ExcelExportJob(
                 .ExportAsync(task.DocumentId, options, ct)
                 .ConfigureAwait(false);
 
-            using var buffer = new MemoryStream();
-            await book.CopyToAsync(buffer, ct).ConfigureAwait(false);
-            content = buffer.ToArray();
+            content = await ReadAllBytesAsync(book, ct).ConfigureAwait(false);
         }
         else
         {
@@ -113,6 +111,29 @@ public sealed class ExcelExportJob(
         var sheets = Ecr.Application.Documents.CalculationYear.CalculationYearWorkbook.Sheets(view, spec, task.Options.Language);
 
         await using var book = await sheetWriter.WriteAsync(sheets, ct).ConfigureAwait(false);
+        return await ReadAllBytesAsync(book, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Читає книгу в ОДИН масив. ⚠ PSS-16: раніше потік → <c>MemoryStream</c> (росте подвоєнням) → <c>ToArray()</c> —
+    /// у пам'яті одночасно до трьох копій книги, а в API-процесі експортів буває два. Книга від рушія — тимчасовий
+    /// файл із відомою довжиною, тож масив виділяється точно й заповнюється напряму: одна копія.
+    /// </summary>
+    internal static async Task<byte[]> ReadAllBytesAsync(Stream book, CancellationToken ct)
+    {
+        if (book.CanSeek)
+        {
+            var remaining = book.Length - book.Position;
+            if (remaining > Array.MaxLength)
+            {
+                throw new InvalidOperationException("Книга експорту завелика для одного буфера.");
+            }
+
+            var exact = new byte[(int)remaining];
+            await book.ReadExactlyAsync(exact, ct).ConfigureAwait(false);
+            return exact;
+        }
+
         using var buffer = new MemoryStream();
         await book.CopyToAsync(buffer, ct).ConfigureAwait(false);
         return buffer.ToArray();
