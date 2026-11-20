@@ -159,6 +159,9 @@ test.describe('Air real shape', () => {
     const fields = page.getByRole('region', { name: 'Matched columns' });
     await expect(fields.getByRole('row').filter({ hasText: 'Not found' })).toHaveCount(0);
     await expect(fields.getByRole('columnheader', { name: 'Examples from the file' })).toBeVisible({ timeout: 30_000 });
+    // Review 20.11: what one value belongs to stays visible (read-only).
+    await expect(fields.getByText('one value per source', { exact: true }).first()).toBeVisible();
+    await expect(fields.getByText('one value per substance row', { exact: true }).first()).toBeVisible();
 
     // 1. Where the table is: found by itself (folded, the summary says what was found), editable.
     await page.getByTestId('air-layout').locator('summary').click();

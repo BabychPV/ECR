@@ -147,12 +147,17 @@ describe('Air limits - доступність', { timeout: 300_000 }, () => {
     it(`${colorScheme}: відповідність — обов'язкове поле не знайдено (вибір колонки в рядку), необов'язкові згорнуті`, async () => {
       const missing = analysis({
         canContinue: false,
+        // As the server answers a missing required column: no row read.
+        stats: { parents: 0, children: 0, distinctChildKeys: 0, groupRows: 0, skippedRows: 0 },
         header: {
           headerFromRow: 4,
           headerToRow: 6,
           dataFromRow: 9,
           mapped: [{ column: 7, columnLetter: 'G', field: 'NaeCode', headerText: 'Source number', level: 'Parent' }],
-          unmapped: [{ column: 27, columnLetter: 'AA', headerText: 'Tonnes a year', hasData: true }],
+          unmapped: [
+            { column: 2, columnLetter: 'B', headerText: 'Shop', hasData: true },
+            { column: 27, columnLetter: 'AA', headerText: 'Tonnes a year', hasData: true },
+          ],
         },
         issues: [{ severity: 'Error', messageKey: 'err.ECR-IMP-0422.regColumnMissing', field: 'TonsPerYear', args: { field: 'TonsPerYear' } }],
       });
@@ -180,6 +185,13 @@ describe('Air limits - доступність', { timeout: 300_000 }, () => {
       );
       await screen.findByTestId('air-mapping-verdict');
       fireEvent.click(within(screen.getByTestId('air-fields-absent')).getByText(/^Optional fields this file does not have/));
+      await clean(container);
+
+      // Review 20.11 (M2): taking a column another field reads asks first, in the row.
+      const tons = text('permits.air.substances.ty');
+      await userEvent.click(screen.getByRole('textbox', { name: `File column for «${tons}»` }));
+      await userEvent.click(await screen.findByRole('option', { name: /^G — Source number/ }));
+      await screen.findByTestId('air-column-move');
       await clean(container);
     });
   }

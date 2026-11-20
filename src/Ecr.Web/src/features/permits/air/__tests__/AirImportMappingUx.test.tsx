@@ -23,6 +23,9 @@ import { sampleWorkbook, withDecompression } from './xlsxZip';
  * - `FieldsTable` picker shown for found rows without «Change» → «auto-matched → Next» red (a picker in every row);
  * - `AirImportWizard` `pending` back to `draft.spec !== analysedSpec` → «Edit mapping opened and nothing changed» red;
  * - `useColumnSamples` returning `null` → «examples from the file» red.
+ * Review 20.11 (each red, restored): `noRows` without the missing-column check (M1); no «Move column?» confirmation (M2);
+ * «Advanced» not forced open on a problem (M4); level note hidden; focus not moved after the re-read (L1); the old `clearable`
+ * rule (L2); no pending verdict (L3); pickers on the delayed spinner state (L4).
  */
 vi.mock('@/shared/i18n', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/i18n')>()),
@@ -57,10 +60,14 @@ const button = (key: string): HTMLButtonElement => screen.getByRole('button', { 
 const NaeLabel = (): string => text('permits.air.import.field.naeCode');
 const TonsLabel = (): string => text('permits.air.substances.ty');
 
-/** The file has no «t/year» header the profile knows: AA is listed as a column nobody reads, the required field is not found. */
+/**
+ * The file has no «t/year» header the profile knows: AA is listed as a column nobody reads, the required field is not found. As
+ * the server answers it (review 20.11, M1): a required column missing is an error, and then NO row is read — empty stats.
+ */
 function missingTons(): AirAnalysis {
   return analysis({
     canContinue: false,
+    stats: { parents: 0, children: 0, distinctChildKeys: 0, groupRows: 0, skippedRows: 0 },
     header: {
       headerFromRow: 4,
       headerToRow: 6,
@@ -138,6 +145,9 @@ describe('UX 20.11 — the common case: check and continue', () => {
       expect(within(row).getByText(text('permits.air.import.fields.required'))).toBeTruthy();
     }
     expect(within(rows[0]!).getByText('Source number')).toBeTruthy();
+    // The level stays visible, in plain words and read-only.
+    expect(within(rows[0]!).getByText(text('permits.air.import.fields.perSource'))).toBeTruthy();
+    expect(within(rows[1]!).getByText(text('permits.air.import.fields.perRow'))).toBeTruthy();
     // Nothing to decide: no pickers, only «Change» per row; the technical parts are folded.
     expect(within(table).queryAllByRole('textbox')).toHaveLength(0);
     expect(within(table).getByRole('button', { name: fill('permits.air.import.fields.changeFor', { field: NaeLabel() }) })).toBeTruthy();
@@ -193,6 +203,9 @@ describe('UX 20.11 — a required field was not found', () => {
     expect(picker.getAttribute('aria-invalid')).toBe('true');
     expect(button('permits.air.import.toPreview').disabled).toBe(true);
     expect(screen.getByTestId('air-next-blocked').textContent).toBe(text('permits.air.import.map.blockedHint'));
+    // M1: the empty stats are the missing column's consequence — no «No source was read», the layout stays folded.
+    expect(screen.queryByTestId('air-no-rows-reason')).toBeNull();
+    expect(screen.getByTestId('air-layout').hasAttribute('open')).toBe(false);
   });
 
   it('pick the column from the file\'s columns (header text, the field reading one now): the file is re-read and Next opens', async () => {
@@ -229,6 +242,150 @@ describe('UX 20.11 — a required field was not found', () => {
     expect(screen.getByTestId('air-layout').hasAttribute('open')).toBe(true);
     expect(screen.getByTestId('air-no-rows-reason')).toBeTruthy();
     expect(screen.getByRole('textbox', { name: text('permits.air.import.rows.headerFrom') })).toBeTruthy();
+  });
+});
+
+const changeFor = (field: string): HTMLButtonElement =>
+  screen.getByRole('button', { name: fill('permits.air.import.fields.changeFor', { field }) });
+const pickerFor = (field: string): HTMLElement => screen.getByRole('textbox', { name: fill('permits.air.import.fields.pickFor', { field }) });
+
+/** A profile with a column added by «Add as new column»: it names its file column B and has no header texts. */
+function withAddedColumn(): ReturnType<typeof profile> {
+  const base = profile();
+
+  return { ...base, spec: { fields: [...(base.spec.fields ?? []), { name: 'FILE_B', column: 'B', patterns: [], level: 'Parent', parser: 'Text' }] } };
+}
+
+function readsB(): AirAnalysis {
+  return analysis({
+    header: {
+      headerFromRow: 4,
+      headerToRow: 6,
+      dataFromRow: 9,
+      mapped: [
+        { column: 2, columnLetter: 'B', field: 'FILE_B', headerText: 'Shop', level: 'Parent' },
+        { column: 7, columnLetter: 'G', field: 'NaeCode', headerText: 'Source number', level: 'Parent' },
+        { column: 27, columnLetter: 'AA', field: 'TonsPerYear', headerText: 't/year', level: 'Child' },
+      ],
+      unmapped: [],
+    },
+  });
+}
+
+describe('review 20.11 — taking a column another field reads (M2)', () => {
+  it('asks first, says the consequence; «Move column» re-reads with the picked field before the owner that read it by header text', async () => {
+    await toMapping();
+    fireEvent.click(changeFor(TonsLabel()));
+    await userEvent.click(pickerFor(TonsLabel()));
+    await userEvent.click(await screen.findByRole('option', { name: /^G — Source number/ }));
+
+    const ask = screen.getByTestId('air-column-move');
+    expect(within(ask).getByText(fill('permits.air.import.fields.moveTitle', { column: 'G', owner: NaeLabel() }))).toBeTruthy();
+    expect(within(ask).getByText(fill('permits.air.import.fields.moveText', { column: 'G', owner: NaeLabel(), field: TonsLabel() }))).toBeTruthy();
+    expect(within(ask).getByText(fill('permits.air.import.fields.moveRequired', { owner: NaeLabel() }))).toBeTruthy();
+    expect(document.activeElement).toBe(within(ask).getByRole('button', { name: text('permits.air.import.fields.move') }));
+    expect(api.analyseAirImport).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(within(ask).getByRole('button', { name: text('permits.air.import.fields.move') }));
+    await waitFor(() => expect(api.analyseAirImport).toHaveBeenCalledTimes(2));
+    const sent = api.analyseAirImport.mock.calls[1]![1].spec;
+    // NaeCode reads G by header text and comes first: the server would keep G for it — TonsPerYear goes before it.
+    expect(sent?.fields?.map((field) => [field.name, field.column ?? null])).toEqual([
+      ['TonsPerYear', 'G'],
+      ['NaeCode', null],
+    ]);
+  });
+
+  it('Cancel takes nothing: no re-read, the column stays with its owner', async () => {
+    await toMapping();
+    fireEvent.click(changeFor(TonsLabel()));
+    await userEvent.click(pickerFor(TonsLabel()));
+    await userEvent.click(await screen.findByRole('option', { name: /^G — Source number/ }));
+    fireEvent.click(
+      screen.getByRole('button', { name: fill('permits.air.import.fields.moveCancel', { column: 'G', owner: NaeLabel() }) }),
+    );
+
+    expect(screen.queryByTestId('air-column-move')).toBeNull();
+    expect(api.analyseAirImport).toHaveBeenCalledTimes(1);
+  });
+
+  it('an owner that names its column only (added column): after the move it has none — said next to «Save as profile…», the editor opens', async () => {
+    api.getImportProfile.mockResolvedValue(withAddedColumn());
+    api.analyseAirImport.mockResolvedValueOnce(readsB());
+    await toMapping();
+    await screen.findByText('FILE_B');
+    fireEvent.click(changeFor(NaeLabel()));
+    await userEvent.click(pickerFor(NaeLabel()));
+    await userEvent.click(await screen.findByRole('option', { name: /^B — Shop/ }));
+    fireEvent.click(within(screen.getByTestId('air-column-move')).getByRole('button', { name: text('permits.air.import.fields.move') }));
+
+    await waitFor(() => expect(api.analyseAirImport).toHaveBeenCalledTimes(2));
+    const sent = api.analyseAirImport.mock.calls[1]![1].spec;
+    expect(sent?.fields?.find((field) => field.name === 'FILE_B')?.column).toBeNull();
+    expect(sent?.fields?.find((field) => field.name === 'NaeCode')?.column).toBe('B');
+    const banner = await screen.findByTestId('air-field-without-column');
+    expect(banner.textContent).toContain('Field "FILE_B" has no file column');
+    expect(screen.getByTestId('air-advanced').contains(banner)).toBe(false);
+    expect(screen.getByTestId('air-advanced').hasAttribute('open')).toBe(true);
+    expect(button('permits.air.import.map.saveProfile').disabled).toBe(true);
+  });
+});
+
+describe('review 20.11 — the smaller ones', () => {
+  it('L1: after a pick and the re-read the focus is on that row\'s «Change»', async () => {
+    api.analyseAirImport.mockResolvedValueOnce(missingTons());
+    await toMapping();
+    await userEvent.click(pickerFor(TonsLabel()));
+    await userEvent.click(await screen.findByRole('option', { name: /^AA — Tonnes a year/ }));
+
+    await waitFor(() => expect(document.activeElement).toBe(changeFor(TonsLabel())));
+  });
+
+  it('L2: «back to header texts» (clear) only for a field with an explicit column and header texts', async () => {
+    api.getImportProfile.mockResolvedValue({
+      ...profile(),
+      spec: { fields: [{ ...profile().spec.fields![0]!, column: 'G' }, profile().spec.fields![1]!, ...(withAddedColumn().spec.fields ?? []).slice(2)] },
+    });
+    api.analyseAirImport.mockResolvedValueOnce(readsB());
+    await toMapping();
+    await screen.findByText('FILE_B');
+    for (const field of [NaeLabel(), TonsLabel(), 'FILE_B']) fireEvent.click(changeFor(field));
+
+    expect(screen.getByRole('button', { name: fill('permits.air.import.fields.clearFor', { field: NaeLabel() }) })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: fill('permits.air.import.fields.clearFor', { field: TonsLabel() }) })).toBeNull();
+    expect(screen.queryByRole('button', { name: fill('permits.air.import.fields.clearFor', { field: 'FILE_B' }) })).toBeNull();
+  });
+
+  it('L3 + L4: while the file is re-read the verdict says the checks are of the previous reading, and the pickers wait', async () => {
+    api.analyseAirImport.mockResolvedValueOnce(missingTons());
+    await toMapping();
+    let finish: (value: AirAnalysis) => void = () => undefined;
+    api.analyseAirImport.mockImplementationOnce(() => new Promise<AirAnalysis>((resolve) => (finish = resolve)));
+    await userEvent.click(pickerFor(TonsLabel()));
+    await userEvent.click(await screen.findByRole('option', { name: /^AA — Tonnes a year/ }));
+
+    await waitFor(() => expect(screen.getByTestId('air-mapping-verdict').getAttribute('data-tone')).toBe('info'));
+    expect(screen.getByText(text('permits.air.import.verdict.pendingTitle'))).toBeTruthy();
+    expect(changeFor(NaeLabel()).disabled).toBe(true);
+    expect((pickerFor(TonsLabel()) as HTMLInputElement).disabled).toBe(true);
+
+    finish(analysis());
+    await waitFor(() => expect(screen.getByTestId('air-mapping-verdict').getAttribute('data-tone')).toBe('success'));
+    expect(changeFor(NaeLabel()).disabled).toBe(false);
+  });
+
+  it('M4: an edit the profile cannot be saved with opens «Advanced» by itself; the reason stands next to the save button', async () => {
+    await toMapping();
+    fireEvent.click(button('permits.air.import.map.edit'));
+    const names = await screen.findAllByLabelText(text('permits.air.import.map.fieldName'));
+    expect(screen.getByTestId('air-advanced').hasAttribute('open')).toBe(false);
+    fireEvent.change(names[1]!, { target: { value: 'naecode' } });
+
+    const banner = await screen.findByTestId('air-mapping-problem');
+    expect(within(banner).getByText(text('permits.air.import.map.nameDuplicate'))).toBeTruthy();
+    expect(screen.getByTestId('air-advanced').contains(banner)).toBe(false);
+    expect(screen.getByTestId('air-advanced').hasAttribute('open')).toBe(true);
+    expect(button('permits.air.import.map.saveProfile').disabled).toBe(true);
   });
 });
 
@@ -316,6 +473,15 @@ describe('UX 20.11 — examples from the file', () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(within(table).queryByRole('columnheader', { name: text('permits.air.import.fields.examples') })).toBeNull();
     expect(within(table).getAllByRole('row')).toHaveLength(3);
+  });
+
+  it('L4: the pickers wait for the reading itself (`reading`), not for the delayed spinner state', () => {
+    mountStep({ analysis: missingTons(), reanalysing: false, reading: true });
+    expect((pickerFor(TonsLabel()) as HTMLInputElement).disabled).toBe(true);
+    expect(changeFor(NaeLabel()).disabled).toBe(true);
+    cleanup();
+    mountStep({ analysis: missingTons(), reanalysing: false, reading: false });
+    expect((pickerFor(TonsLabel()) as HTMLInputElement).disabled).toBe(false);
   });
 
   it('optional fields the file does not have are folded below the table, still with a picker each', () => {

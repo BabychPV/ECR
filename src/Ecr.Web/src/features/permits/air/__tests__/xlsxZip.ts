@@ -11,7 +11,7 @@ export function withDecompression(): void {
  * A real (tiny) .xlsx for the tests of the «Mapping» step samples (UX 20.11): a zip with deflated parts (`store` — names kept
  * uncompressed, as some writers do). CRC is not filled: the reader of the step does not check it.
  */
-export function zip(files: Readonly<Record<string, string>>, store: readonly string[] = []): Uint8Array {
+export function zip(files: Readonly<Record<string, string>>, store: readonly string[] = [], declared: Readonly<Record<string, number>> = {}): Uint8Array {
   const encoder = new TextEncoder();
   const locals: Uint8Array[] = [];
   const centrals: Uint8Array[] = [];
@@ -35,7 +35,7 @@ export function zip(files: Readonly<Record<string, string>>, store: readonly str
     cv.setUint32(0, 0x02014b50, true);
     cv.setUint16(10, stored ? 0 : 8, true);
     cv.setUint32(20, data.length, true);
-    cv.setUint32(24, raw.length, true);
+    cv.setUint32(24, declared[name] ?? raw.length, true);
     cv.setUint16(28, nameBytes.length, true);
     cv.setUint32(42, offset, true);
     central.set(nameBytes, 46);
@@ -85,23 +85,22 @@ export const SheetXml = `<worksheet xmlns="http://schemas.openxmlformats.org/spr
 <row r="13"><c r="B13" t="str"><v>far below</v></c><c r="G13"><v>4</v></c></row>
 </sheetData></worksheet>`;
 
-/** The workbook above as the file the user chose. */
-export function sampleWorkbook(name = 'limits.xlsx'): File {
-  return new File(
-    [
-      zip(
-        {
-          'xl/workbook.xml': WorkbookXml,
-          'xl/_rels/workbook.xml.rels': RelsXml,
-          'xl/sharedStrings.xml': SharedXml,
-          'xl/worksheets/sheet1.xml':
-            '<worksheet><sheetData><row r="9"><c r="B9" t="inlineStr"><is><t>summary</t></is></c></row></sheetData></worksheet>',
-          'xl/worksheets/sheet2.xml': SheetXml,
-        },
-        ['xl/workbook.xml'],
-      ),
-    ],
-    name,
-    { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
+/** The workbook above as bytes (`declared` — part sizes to declare in the zip directory instead of the real ones). */
+export function sampleWorkbookBytes(declared: Readonly<Record<string, number>> = {}): Uint8Array {
+  return zip(
+    {
+      'xl/workbook.xml': WorkbookXml,
+      'xl/_rels/workbook.xml.rels': RelsXml,
+      'xl/sharedStrings.xml': SharedXml,
+      'xl/worksheets/sheet1.xml': '<worksheet><sheetData><row r="9"><c r="B9" t="inlineStr"><is><t>summary</t></is></c></row></sheetData></worksheet>',
+      'xl/worksheets/sheet2.xml': SheetXml,
+    },
+    ['xl/workbook.xml'],
+    declared,
   );
+}
+
+/** The workbook above as the file the user chose. */
+export function sampleWorkbook(name = 'limits.xlsx', declared: Readonly<Record<string, number>> = {}): File {
+  return new File([sampleWorkbookBytes(declared)], name, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
 }

@@ -265,7 +265,7 @@ describe('MappingStep — where the table is, and «Add as new column»', () => 
     expect(screen.getAllByRole('button', { name: text('permits.air.import.map.saveProfile') })).toHaveLength(1);
     fireEvent.click(screen.getByRole('button', { name: text('permits.air.import.map.saveProfile') }));
     fireEvent.change(screen.getByRole('textbox', { name: text('permits.air.import.save.name') }), { target: { value: 'ERA 3.3 (Atyrau) v2' } });
-    expect(screen.getByTestId('air-profile-code').textContent).toBe('It is saved under the code ERA_3_3_ATYRAU_V2');
+    expect(screen.getByTestId('air-profile-code').textContent).toBe('Will be saved under the code ERA_3_3_ATYRAU_V2');
     expect(screen.queryByRole('textbox', { name: text('permits.air.import.save.code') })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: text('permits.air.import.save.submit') }));
     expect(props.onSaveProfile).toHaveBeenCalledWith('ERA_3_3_ATYRAU_V2', 'ERA 3.3 (Atyrau) v2');
@@ -276,7 +276,7 @@ describe('MappingStep — where the table is, and «Add as new column»', () => 
 
     fireEvent.click(screen.getByRole('button', { name: text('permits.air.import.map.saveProfile') }));
     fireEvent.change(screen.getByRole('textbox', { name: text('permits.air.import.save.name') }), { target: { value: 'Похожие файлы' } });
-    expect(screen.getByTestId('air-profile-code').textContent).toBe('It is saved under the code POKHOZHIE_FAYLY');
+    expect(screen.getByTestId('air-profile-code').textContent).toBe('Will be saved under the code POKHOZHIE_FAYLY');
     fireEvent.click(screen.getByRole('button', { name: text('permits.air.import.save.changeCode') }));
     const code = screen.getByRole<HTMLInputElement>('textbox', { name: text('permits.air.import.save.code') });
     expect(code.value).toBe('POKHOZHIE_FAYLY');
