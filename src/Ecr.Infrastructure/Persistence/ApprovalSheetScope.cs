@@ -1,4 +1,5 @@
 // src/Ecr.Infrastructure/Persistence/ApprovalSheetScope.cs
+using Ecr.Domain.Entities.Documents;
 using Microsoft.EntityFrameworkCore;
 
 namespace Ecr.Infrastructure.Persistence;
@@ -19,6 +20,14 @@ internal sealed record ApprovalSheetRow(long Id, long DocumentId, int SheetDefId
 /// </summary>
 internal static class ApprovalSheetScope
 {
+    /// <summary>
+    /// Рядки складу, що входять до «усіх аркушів»: включені, аркуш шаблону не видалений логічно. ЄДИНЕ місце правила —
+    /// його беруть оцінка впливу, <c>WorkflowStore.AllSheetsApprovedAsync</c>, перелік станів аркушів і фільтр/смуга стану документа.
+    /// </summary>
+    /// <param name="db">Контекст (підзапит до <c>cfg.SheetDef</c> перекладається в SQL).</param>
+    public static IQueryable<DocumentSheet> InScope(EcrDbContext db)
+        => db.DocumentSheets.Where(s => s.IsIncluded && !db.SheetDefs.Any(sd => sd.Id == s.SheetDefId && sd.IsDeleted));
+
     /// <summary>Склад документів за правилом затвердження; за зростанням документа, порядку аркуша, ідентифікатора.</summary>
     /// <param name="db">Контекст.</param>
     /// <param name="documentIds">Документи.</param>
@@ -27,9 +36,9 @@ internal static class ApprovalSheetScope
     {
         var ids = documentIds.ToList();
         return await (
-                from s in db.DocumentSheets.AsNoTracking()
+                from s in InScope(db).AsNoTracking()
                 join sd in db.SheetDefs.AsNoTracking() on s.SheetDefId equals sd.Id
-                where ids.Contains(s.DocumentId) && s.IsIncluded && !sd.IsDeleted
+                where ids.Contains(s.DocumentId)
                 orderby s.DocumentId, sd.Ordinal, sd.Id, s.CopyOrdinal
                 select new ApprovalSheetRow(s.Id, s.DocumentId, sd.Id, sd.Code, s.CopyOfId))
             .ToListAsync(ct)
