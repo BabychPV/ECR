@@ -1,5 +1,6 @@
 import { EcrApiError } from '@/api/client';
 import { hasText, t } from '@/shared/i18n';
+import { formatPeriodKey } from '@/shared/format/periodKey';
 
 /**
  * Що з відмови сервера МОЖНА показати людині.
@@ -135,7 +136,8 @@ function catalogDetailOf(problem: EcrApiError['problem']): string | null {
   const params: Record<string, string | number> = {};
   for (const [name, value] of Object.entries(problem.extensions2 ?? {})) {
     if (name !== 'messageKey' && (typeof value === 'string' || typeof value === 'number')) {
-      params[name] = value;
+      // Ключ періоду (`202601`) людині — назвою місяця, як на сервері (`WithLocalizedPeriods`).
+      params[name] = name === 'sourcePeriodKey' ? formatPeriodKey(Number(value)) || value : value;
     }
   }
 

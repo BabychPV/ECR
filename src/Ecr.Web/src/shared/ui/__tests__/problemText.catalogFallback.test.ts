@@ -16,6 +16,9 @@ const Strings: Record<string, string> = {
   'err.ECR-SYS-0503.databaseBusy.title': 'Database temporarily unavailable',
   'err.ECR-SYS-0503.databaseBusy': 'The database is temporarily busy. Try again in a few seconds.',
   'err.ECR-USR-0409': 'User name already in use',
+  'err.ECR-SUB-4221.sourceMonthNotApproved': 'Month {sourcePeriodKey} of {sourceProjectCode} is not approved.',
+  'periods.monthOf': '{month} {year}',
+  'periods.month.1': 'January',
   'err.ECR-USR-0409.windowsSidTaken': 'SID {sid} is already linked to the account "{userName}".',
 };
 
@@ -72,6 +75,25 @@ describe('problemText: сервер без каталогу — текст із 
 
     expect(shown.title).toBe('User name already in use');
     expect(shown.detail).toBe('SID S-1-5-21-1 is already linked to the account "CORP\\petro".');
+  });
+
+  it('sourcePeriodKey у підстановках — назва місяця, а не ключ 202601', () => {
+    const shown = problemText(
+      new EcrApiError({
+        title: 'ECR-SUB-4221',
+        status: 422,
+        errorCode: 'ECR-SUB-4221',
+        correlationId: 'cid-3',
+        extensions2: {
+          messageKey: 'err.ECR-SUB-4221.sourceMonthNotApproved',
+          sourcePeriodKey: '202601',
+          sourceProjectCode: 'HSE400_2026M',
+        },
+      }),
+    );
+
+    // ⛔ Мутація: прибрати `formatPeriodKey` у catalogDetailOf — «Month 202601 …».
+    expect(shown.detail).toBe('Month January 2026 of HSE400_2026M is not approved.');
   });
 
   it('ключа немає й у клієнта — лишається код і жодного `⟦…⟧`', () => {

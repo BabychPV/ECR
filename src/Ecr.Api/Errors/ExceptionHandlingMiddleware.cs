@@ -480,10 +480,12 @@ public sealed partial class ExceptionHandlingMiddleware(
             // користувачу `{maxLength}` фігурними дужками (клас `D1`).
             return UiStringResolver.Format(
                 template,
-                UiStringResolver.WithLocalizedStates(
+                UiStringResolver.WithLocalizedPeriods(
                     strings,
-                    messageKey,
-                    UiStringResolver.WithLocalizedReason(strings, UiStringResolver.Parameters(details))));
+                    UiStringResolver.WithLocalizedStates(
+                        strings,
+                        messageKey,
+                        UiStringResolver.WithLocalizedReason(strings, UiStringResolver.Parameters(details)))));
         }
 #pragma warning disable CA1031 // Причина — та сама, що й у LocalizedTitleAsync: обробник помилок не падає вдруге.
         catch (Exception)
