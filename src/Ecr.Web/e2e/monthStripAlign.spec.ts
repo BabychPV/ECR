@@ -171,7 +171,7 @@ test.describe('Month strip 10.11', () => {
       expectAligned(await measure(row.locator('[data-month] .ecr-year-strip-box')), `смуга (${scheme})`);
 
       const swatches = legend.locator('.ecr-year-strip-box');
-      await expect(swatches).toHaveCount(9);
+      await expect(swatches).toHaveCount(10);
       expectAligned(await measure(swatches), `легенда (${scheme})`);
     });
   }
