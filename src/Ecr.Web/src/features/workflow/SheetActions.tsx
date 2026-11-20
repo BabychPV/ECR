@@ -18,7 +18,7 @@ import { refreshSheetWorkflow } from './refreshSheetWorkflow';
 import { useStatusStale } from './statusStale';
 import { can, useSession, type MeDto } from '@/shared/session/useSession';
 import { LazyConfirmModal, LazyReasonModal, LazySourceImpactModal } from './lazyDialogs';
-import { usePendingCount } from '@/features/grid/pendingStore';
+import { pendingSlices, usePendingCount } from '@/features/grid/pendingStore';
 import {
   fetchSourceImpact,
   impactRefusal,
@@ -832,8 +832,12 @@ export function useSheetActions({
    */
   const pendingCount = usePendingCount();
   const previousPending = useRef(0);
-  const editNoticeShown = useRef(false);
-  const [editNotice, setEditNotice] = useState<SourceImpact | null>(null);
+  // ✎ D-5: вплив питається за МІСЯЦЬ(і) справжніх правок (зріз незбережених має `periodKey`), а не за якірний період
+  // сторінки: річний шаблон показує місяці колонками, і сторінка завжди стоїть на січні. Місяць питається раз за життя екрана.
+  const checkedEditPeriods = useRef(new Set<number>());
+  const editCheckRunning = useRef(false);
+  const [editNoticeState, setEditNotice] = useState<{ impact: SourceImpact; periodKey: number } | null>(null);
+  const editNotice = editNoticeState?.impact ?? null;
   const approvedRecalcRequest = useRef<{ hash: string; reason: string; sheetDefId: number; periodKey: number } | null>(null);
 
   const runApprovedRecalc = (request: { hash: string; reason: string; sheetDefId: number; periodKey: number }): void => {
@@ -848,18 +852,32 @@ export function useSheetActions({
     const was = previousPending.current;
     previousPending.current = pendingCount;
 
-    // Перша правка (0 → є незбережене): питаємо вплив правки один раз на аркуш за життя екрана.
-    if (
-      was === 0 &&
-      pendingCount > 0 &&
-      sheetCopyId === null &&
-      !editNoticeShown.current &&
-      !isEditNoticeSuppressed(documentId, sheetDefId)
-    ) {
-      editNoticeShown.current = true;
-      void fetchSourceImpact(documentId, { sheetDefId, periodKey, sheetCopyId }, 'edit').then((impact) => {
-        if (impact !== null && impact.dependentCount > 0) setEditNotice(impact);
-      });
+    // Правка є (нове значення в зрізі): питаємо вплив для кожного ще не питаного місяця правок, один раз на аркуш за життя
+    // екрана; показуємо перший місяць із залежними. Послідовно, щоб не завалити сервер і не відкрити кілька діалогів.
+    if (pendingCount > 0 && sheetCopyId === null && editNoticeState === null && !editCheckRunning.current && !isEditNoticeSuppressed(documentId, sheetDefId)) {
+      const nextPeriod = (): number | undefined => {
+        const edited = pendingSlices().map((slice) => slice.periodKey);
+        // Без зрізів (не має бути при pendingCount > 0) — період сторінки, як було до D-5.
+        return (edited.length > 0 ? edited : [periodKey]).find((p) => !checkedEditPeriods.current.has(p));
+      };
+      if (nextPeriod() !== undefined) {
+        editCheckRunning.current = true;
+        void (async () => {
+          try {
+            for (let p = nextPeriod(); p !== undefined; p = nextPeriod()) {
+              checkedEditPeriods.current.add(p);
+              if (isEditNoticeSuppressed(documentId, sheetDefId)) break;
+              const impact = await fetchSourceImpact(documentId, { sheetDefId, periodKey: p, sheetCopyId }, 'edit');
+              if (impact !== null && impact.dependentCount > 0) {
+                setEditNotice({ impact, periodKey: p });
+                break;
+              }
+            }
+          } finally {
+            editCheckRunning.current = false;
+          }
+        })();
+      }
     }
 
     // Правки збережено (є що → нічого): виконуємо відкладений перерахунок затверджених.
@@ -1302,7 +1320,7 @@ export function useSheetActions({
         onConfirm={(confirmed, extras) => {
           if (extras.suppress) suppressEditNotice(documentId, sheetDefId);
           if (confirmed.recalculateApproved === true && confirmed.hash !== null) {
-            const request = { hash: confirmed.hash, reason: confirmed.reason ?? '', sheetDefId, periodKey };
+            const request = { hash: confirmed.hash, reason: confirmed.reason ?? '', sheetDefId, periodKey: editNoticeState?.periodKey ?? periodKey };
             // Правки вже збережено — виконуємо одразу; ні — після збереження (див. ефект вище).
             if (pendingCount === 0) runApprovedRecalc(request);
             else approvedRecalcRequest.current = request;
