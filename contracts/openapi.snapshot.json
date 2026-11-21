@@ -11690,6 +11690,14 @@
               "string"
             ]
           },
+          "estimatedStartAt": {
+            "description": "✎ PERF-10: ОРІЄНТОВНИЙ старт (UTC) — медіана кроку за добу × кроки попереду ÷ місця; `null` — оцінити нема з чого.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "eventRemovalBlocked": {
             "oneOf": [
               {
@@ -11735,6 +11743,14 @@
             "description": "Прогрес у відсотках.",
             "format": "int32",
             "type": "integer"
+          },
+          "queuePosition": {
+            "description": "✎ PERF-10 (D-564c): `Queued` задача лейна перерахунку (черга в базі) — скільки задач буде взято раніше, плюс один;\n`null` — інший стан, лейн чи режим Quartz. Заповнює `GetJobStatusHandler` (IJobQueuePosition).",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "resultUrl": {
             "description": "Відносний шлях API до файлу результату (книга експорту) — лише для\n`Succeeded` з файлом і читача з `Document.Export`; інакше `null` (UX-09).",
@@ -11839,6 +11855,14 @@
               "string"
             ]
           },
+          "estimatedStartAt": {
+            "description": "✎ PERF-10: орієнтовний старт (як DateTime? JobStatus.EstimatedStartAt).",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "fanOut": {
             "oneOf": [
               {
@@ -11894,6 +11918,14 @@
           },
           "projectId": {
             "description": "Проєкт задачі: документної — проєкт її документа, перерахунку проєкту — з цілі; `null` — не відомо.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "queuePosition": {
+            "description": "✎ PERF-10: місце в черзі перерахунку (як int? JobStatus.QueuePosition).",
             "format": "int32",
             "type": [
               "null",
@@ -20422,6 +20454,11 @@
       "RecalculateDocumentRequest": {
         "description": "Запит на перерахунок документа (Q-331).",
         "properties": {
+          "full": {
+            "default": false,
+            "description": "✎ PERF-01 (D-564a): документ річної розкладки — «Повний перерахунок» усіх відкритих місяців року (право\n`Calculation.Recalculate`, інакше 403). `false` (типово) — лише місяці зі зміненими входами й місяць на екрані.",
+            "type": "boolean"
+          },
           "periodKey": {
             "description": "Період; `Рік*100 + Номер` (R-A6).",
             "format": "int32",

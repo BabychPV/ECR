@@ -36446,6 +36446,11 @@ export interface components {
             error: null | string;
             /** @description Код каталогу помилок провалу (BE-08). */
             errorCode?: null | string;
+            /**
+             * Format: date-time
+             * @description ✎ PERF-10: ОРІЄНТОВНИЙ старт (UTC) — медіана кроку за добу × кроки попереду ÷ місця; `null` — оцінити нема з чого.
+             */
+            estimatedStartAt?: null | string;
             eventRemovalBlocked?: null | components["schemas"]["SourceEventRemovalBlock"];
             fanOut?: null | components["schemas"]["FanOutStatus"];
             /** @description Ідентифікатор. */
@@ -36463,6 +36468,12 @@ export interface components {
              * @description Прогрес у відсотках.
              */
             percent: number;
+            /**
+             * Format: int32
+             * @description ✎ PERF-10 (D-564c): `Queued` задача лейна перерахунку (черга в базі) — скільки задач буде взято раніше, плюс один;
+             *     `null` — інший стан, лейн чи режим Quartz. Заповнює `GetJobStatusHandler` (IJobQueuePosition).
+             */
+            queuePosition?: null | number;
             /** @description Відносний шлях API до файлу результату (книга експорту) — лише для
              *     `Succeeded` з файлом і читача з `Document.Export`; інакше `null` (UX-09). */
             resultUrl?: null | string;
@@ -36512,6 +36523,11 @@ export interface components {
             effectiveState?: null | string;
             /** @description Код каталогу помилок провалу (BE-08). */
             errorCode?: null | string;
+            /**
+             * Format: date-time
+             * @description ✎ PERF-10: орієнтовний старт (як DateTime? JobStatus.EstimatedStartAt).
+             */
+            estimatedStartAt?: null | string;
             fanOut?: null | components["schemas"]["FanOutStatus"];
             /** @description Батько розкладу, якщо задача — дочірня (P4); інакше `null`. */
             fanOutParentJobId?: null | string;
@@ -36541,6 +36557,11 @@ export interface components {
              * @description Проєкт задачі: документної — проєкт її документа, перерахунку проєкту — з цілі; `null` — не відомо.
              */
             projectId?: null | number;
+            /**
+             * Format: int32
+             * @description ✎ PERF-10: місце в черзі перерахунку (як int? JobStatus.QueuePosition).
+             */
+            queuePosition?: null | number;
             /** @description Як string? JobStatus.ResultUrl (UX-09). */
             resultUrl?: null | string;
             /**
@@ -40511,6 +40532,12 @@ export interface components {
         };
         /** @description Запит на перерахунок документа (Q-331). */
         RecalculateDocumentRequest: {
+            /**
+             * @description ✎ PERF-01 (D-564a): документ річної розкладки — «Повний перерахунок» усіх відкритих місяців року (право
+             *     `Calculation.Recalculate`, інакше 403). `false` (типово) — лише місяці зі зміненими входами й місяць на екрані.
+             * @default false
+             */
+            full: boolean;
             /**
              * Format: int32
              * @description Період; `Рік*100 + Номер` (R-A6).

@@ -94,6 +94,13 @@ public static partial class EcrConfigurationValidation
         // F1 (WW-02): нуль дочірніх задач розкладу перерахунку — не «без межі», а документи, яких не бере ніхто.
         (Infrastructure.Jobs.QuartzJobTypeLimiter.RecalcFanOutMaxConcurrencyKey, 1),
 
+        // ✎ PERF-05 (D-564c): нуль — не «без стелі», а перерахунки, яких не бере ніхто.
+        (Infrastructure.Jobs.QuartzJobTypeLimiter.RecalcMaxConcurrentKey, 1),
+
+        // ✎ PERF-04 (D-564d): місця воркера Api — від одного.
+        (Infrastructure.Jobs.JobWorkerOptions.ApiMaxConcurrencyKey, 1),
+        (Infrastructure.Jobs.JobWorkerOptions.InteractiveReservedConcurrencyKey, 1),
+
         // AN-13 D4: нуль хвилин — не «без стелі», а Failed на першому ж повторному відкладенні.
         (Infrastructure.Jobs.JobDeferral.MaxDeferralMinutesKey, 1),
         ("Audit:ExportMaxRows", 1),
@@ -472,7 +479,21 @@ public static partial class EcrConfigurationValidation
     public static IReadOnlyList<string> Notes(IConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(configuration);
-        return FanOutCapacity(configuration).Information is { } fanOut ? [fanOut] : [];
+        var notes = new List<string>();
+        if (FanOutCapacity(configuration).Information is { } fanOut)
+        {
+            notes.Add(fanOut);
+        }
+
+        // ✎ PERF-05: межа дітей розкладу проти глобальної стелі важких перерахунків.
+        if (Infrastructure.Jobs.QuartzJobTypeLimiter.GlobalCapNote(
+                Infrastructure.Jobs.QuartzJobTypeLimiter.ReadRecalcFanOutMaxConcurrency(configuration),
+                Infrastructure.Jobs.QuartzJobTypeLimiter.ReadRecalcMaxConcurrent(configuration)) is { } global)
+        {
+            notes.Add(global);
+        }
+
+        return notes;
     }
 
     /// <summary>✎ L1b / D2: межа дітей розкладу проти місць виконавця перерахунку цього процесу (режим і виконавець Api).</summary>
@@ -483,7 +504,7 @@ public static partial class EcrConfigurationValidation
         {
             return Infrastructure.Jobs.JobLaneMap.ReadExecutor(configuration) == Infrastructure.Jobs.RecalculationExecutor.InProcess
                 ? Infrastructure.Jobs.QuartzJobTypeLimiter.FanOutCapacity(
-                    cap, Infrastructure.Jobs.JobWorkerOptions.DefaultMaxConcurrency, "місця воркера Api", lastSlotReserved: true)
+                    cap, Infrastructure.Jobs.JobWorkerOptions.ReadApiMaxConcurrency(configuration), "місця воркера Api", lastSlotReserved: true)
                 : (null, null);
         }
 

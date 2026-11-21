@@ -402,7 +402,10 @@ public static class DependencyInjection
         // F1 (WW-02): діти розкладу перерахунку проєкту — не більше Jobs:Recalculation:FanOutMaxConcurrency (типово 4).
         services.AddSingleton(new Jobs.QuartzJobTypeLimiter(
             Jobs.JobLaneMap.ReadExcelMaxConcurrency(configuration),
-            recalcFanOutMaxConcurrency: Jobs.QuartzJobTypeLimiter.ReadRecalcFanOutMaxConcurrency(configuration)));
+            recalcFanOutMaxConcurrency: Jobs.QuartzJobTypeLimiter.ReadRecalcFanOutMaxConcurrency(configuration),
+
+            // ✎ PERF-05 (D-564c): одна стеля на всі важкі перерахунки (Jobs:Recalculation:MaxConcurrent, типово 5).
+            recalcMaxConcurrent: Jobs.QuartzJobTypeLimiter.ReadRecalcMaxConcurrent(configuration)));
 
         services.AddQuartzHostedService(options =>
         {
@@ -437,12 +440,20 @@ public static class DependencyInjection
         if (Jobs.DbBackgroundJobScheduler.ReadMode(configuration) == Jobs.JobQueueMode.Database)
         {
             services.AddScoped<IBackgroundJobScheduler, Jobs.DbBackgroundJobScheduler>();
+
+            // ✎ PERF-10 (D-564c): місце в черзі перерахунку й орієнтовний старт (GET /jobs/{id}, «Мої задачі»).
+            services.AddScoped<IJobQueuePosition, Jobs.DbJobQueuePosition>();
             services.AddSingleton(new Jobs.JobWorkerOptions
             {
                 Lanes = Jobs.JobLaneMap.ApiLanes(Jobs.JobLaneMap.ReadExecutor(configuration)),
 
+                // ✎ PERF-04 (D-564d): спільні місця воркера Api (Jobs:Api:MaxConcurrency, типово 4) — налаштовувані.
+                MaxConcurrency = Jobs.JobWorkerOptions.ReadApiMaxConcurrency(configuration),
+
                 // P1-06 (AN-109): перерахунок формул після PATCH має своє місце понад спільні чотири.
+                // ✎ PERF-04: скільки таких місць — Jobs:Interactive:ReservedConcurrency (типово 1, поведінка як доти).
                 ReservedLanes = Jobs.JobLaneMap.ApiReservedLanes,
+                ReservedConcurrency = Jobs.JobWorkerOptions.ReadInteractiveReservedConcurrency(configuration),
 
                 // AN-116: експорт/імпорт Excel — лише окремим циклом з власною межею (Jobs:Excel:MaxConcurrency),
                 // не займає ні спільних місць, ні резерву перерахунку формул.

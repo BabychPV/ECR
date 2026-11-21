@@ -196,7 +196,7 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
     internal const string FanOutCapPrologue = """
         SET XACT_ABORT ON;
         BEGIN TRANSACTION;
-        DECLARE @fanOutRoom bit = 0, @capLock int = -1, @scheduleActive bit = 0;
+        DECLARE @fanOutRoom bit = 0, @capLock int = -1, @scheduleActive bit = 0, @heavyRoom bit = 1;
         EXEC @capLock = sys.sp_getapplock @Resource = N'ecr:jobqueue:recalc-fanout-cap', @LockMode = 'Exclusive',
             @LockOwner = 'Transaction', @LockTimeout = 5000;
         IF EXISTS (SELECT 1 FROM itg.JobProgress AS s
@@ -208,6 +208,38 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
                  WHERE c.Lane = @lane AND c.Lane IS NOT NULL AND c.[State] = 'Running'
                    AND (c.FanOutParentJobId IS NOT NULL OR (@scheduleActive = 1 AND ISNULL(c.TargetKey, N'') LIKE @cascadeLike))) < @fanOutCap
             SET @fanOutRoom = 1;
+        IF @heavyLimit > 0
+           AND (@capLock < 0
+                OR (SELECT COUNT(*) FROM itg.JobProgress AS hv WITH (INDEX(IX_JobProgress_Claim))
+                    WHERE hv.Lane = @lane AND hv.Lane IS NOT NULL AND hv.[State] = 'Running') >= @heavyLimit)
+            SET @heavyRoom = 0;
+        """;
+
+    /// <summary>
+    /// ✎ PERF-05 (<c>D-564c</c>, рішення людини 21.11 §6 п. 3): умова кандидата під ГЛОБАЛЬНОЮ стелею важких перерахунків
+    /// (<see cref="QuartzJobTypeLimiter.RecalcMaxConcurrentKey"/>): усі <c>Running</c> лейна (ручні, авто, каскад, діти, кроки
+    /// ланцюжків, проходи читачів) рахуються під тим самим applock, що межа дітей (<see cref="FanOutCapPrologue"/>), тож межа
+    /// строга на весь пул процесів. <c>@heavyLimit</c> — стеля для проходу «спершу ручні» і «стеля − 1» для решти: останнє
+    /// місце — людині (D-561 (з) на рівні пулу). Межа дітей — окрема межа над тими самими рядками, подвійного рахунку немає.
+    /// </summary>
+    internal const string HeavyCapFilter = """
+              AND @heavyRoom = 1
+        """;
+
+    /// <summary>
+    /// ✎ PERF-10 (<c>D-564c</c>): «черга людей» у проході «спершу ручні» — скільки задач ТІЄЇ САМОЇ людини вже виконується в
+    /// лейні чи стоїть у черзі ручних попереду цієї (<c>q</c>). Прохід бере найменший ранг, далі FIFO: людина з десятьма
+    /// натисканнями не займає всю чергу — інша людина з одним стає другою, а не одинадцятою. Системні задачі (FIFO-прохід) — на
+    /// своєму місці. Ланцюжок рахується одним рядком (крок — той самий рядок).
+    /// </summary>
+    internal const string FairRankSql = """
+        (SELECT COUNT(*) FROM itg.JobProgress AS fr
+          WHERE fr.Lane = @lane AND fr.Lane IS NOT NULL AND fr.[State] IN ('Queued', 'Running') AND fr.CreatedByUserId = q.CreatedByUserId
+            AND (fr.[State] = 'Running'
+                 OR (fr.[State] = 'Queued' AND fr.AvailableAt <> CAST(N'9999-12-31T00:00:00' AS datetime2(3))
+                     AND fr.FanOutParentJobId IS NULL
+                     AND ISNULL(CASE WHEN ISJSON(fr.Payload) = 1 THEN JSON_VALUE(fr.Payload, '$.foreignOwnerPass') END, N'false') <> N'true'
+                     AND (fr.AvailableAt < q.AvailableAt OR (fr.AvailableAt = q.AvailableAt AND fr.JobId < q.JobId)))))
         """;
 
     /// <summary>Умова кандидата під межею дітей розкладу (<see cref="FanOutCapPrologue"/>).</summary>
@@ -225,14 +257,18 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
     /// <param name="priority">Прохід лише пріоритетного коду.</param>
     /// <param name="recalcLane">Лейн перерахунку: поступитися правці комірки документа (<see cref="EditFirstExclusion"/>).</param>
     /// <param name="manualOnly">Прохід «спершу ручні» (<see cref="ManualFilter"/>).</param>
+    /// <param name="heavyCap">✎ PERF-05: глобальна стеля важких перерахунків діє (<see cref="HeavyCapFilter"/>).</param>
+    /// <param name="fair">✎ PERF-10: порядок «черга людей» (<see cref="FairRankSql"/>) — прохід «спершу ручні».</param>
     internal static string ClaimQueuedSqlFor(
-        bool documentExclusive, bool fanOutCap, bool priority, bool recalcLane = false, bool manualOnly = false)
+        bool documentExclusive, bool fanOutCap, bool priority, bool recalcLane = false, bool manualOnly = false,
+        bool heavyCap = false, bool fair = false)
     {
         var sql = priority ? ClaimPriorityQueuedSql : ClaimQueuedSql;
         var extra = (documentExclusive ? DocumentExclusion : string.Empty)
                     + (recalcLane ? EditFirstExclusion : string.Empty)
                     + (manualOnly ? ManualFilter : string.Empty)
-                    + (fanOutCap ? FanOutCapFilter : string.Empty);
+                    + (fanOutCap ? FanOutCapFilter : string.Empty)
+                    + (heavyCap ? HeavyCapFilter : string.Empty);
         if (extra.Length > 0)
         {
             // ⛔ Якір — ORDER BY кандидата; не знайшовся (текст claim змінили) — гучна відмова, а не тихий claim без умов.
@@ -249,7 +285,13 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
             }
         }
 
-        return fanOutCap ? FanOutCapPrologue + "\n" + sql + "\nCOMMIT TRANSACTION;" : sql;
+        if (fair)
+        {
+            const string Order = "ORDER BY q.AvailableAt, q.JobId)";
+            sql = sql.Replace(Order, "ORDER BY " + FairRankSql.Trim() + ", q.AvailableAt, q.JobId)", StringComparison.Ordinal);
+        }
+
+        return fanOutCap || heavyCap ? FanOutCapPrologue + "\n" + sql + "\nCOMMIT TRANSACTION;" : sql;
     }
 
     /// <summary>
@@ -641,6 +683,10 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
         // PSS-02: межа дітей розкладу — лише лейн перерахунку й лише коли її задано (DI; ручна збірка — без межі).
         var fanOutCap = limits?.RecalcFanOutMaxConcurrency ?? 0;
 
+        // ✎ PERF-05: глобальна стеля важких перерахунків — ручному проходу вся, решті — без останнього місця (якщо стеля ≥ 2).
+        var heavyCap = limits?.RecalcMaxConcurrent ?? 0;
+        var heavySystem = heavyCap >= 2 ? heavyCap - 1 : heavyCap;
+
         void Bind(SqlParameterCollection p, string lane)
         {
             p.Add("@lane", SqlDbType.VarChar, JobLanes.MaxLength).Value = lane;
@@ -663,7 +709,9 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
                 fanOutCap: (fanOutCap > 0 || exceptFanOut) && recalc && !manualOnly,
                 priority,
                 recalcLane: recalc,
-                manualOnly: manualOnly);
+                manualOnly: manualOnly,
+                heavyCap: heavyCap > 0 && recalc,
+                fair: manualOnly && recalc);
         }
 
         async Task<ClaimedJob?> Read(SqlDataReader r, bool reclaimed)
@@ -712,7 +760,14 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
                     if (!reclaimed && string.Equals(lane, JobLanes.Recalc, StringComparison.Ordinal))
                     {
                         var manual = await RunAsync(
-                                QueuedSqlOf(lane, priority: false, manualOnly: true), p => Bind(p, lane), r => Read(r, false), ct)
+                                QueuedSqlOf(lane, priority: false, manualOnly: true),
+                                p =>
+                                {
+                                    Bind(p, lane);
+                                    p.Add("@heavyLimit", SqlDbType.Int).Value = heavyCap;
+                                },
+                                r => Read(r, false),
+                                ct)
                             .ConfigureAwait(false);
                         if (manual is not null)
                         {
@@ -721,7 +776,14 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
                     }
 
                     var job = await RunAsync(
-                            reclaimed ? sql : QueuedSqlOf(lane, priority: false), p => Bind(p, lane), r => Read(r, reclaimed), ct)
+                            reclaimed ? sql : QueuedSqlOf(lane, priority: false),
+                            p =>
+                            {
+                                Bind(p, lane);
+                                p.Add("@heavyLimit", SqlDbType.Int).Value = heavySystem;
+                            },
+                            r => Read(r, reclaimed),
+                            ct)
                         .ConfigureAwait(false);
 
                     if (job is not null)

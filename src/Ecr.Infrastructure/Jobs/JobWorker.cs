@@ -29,6 +29,41 @@ public sealed record JobWorkerOptions
     /// <summary>Типове <see cref="MaxConcurrency"/> (воркер Api).</summary>
     public const int DefaultMaxConcurrency = 4;
 
+    /// <summary>
+    /// ✎ PERF-04 (аудит PERF1000 21.11, <c>D-564d</c>): спільні місця воркера Api (лейни interactive, default і — при
+    /// <c>InProcess</c> — recalc). Типово <see cref="DefaultMaxConcurrency"/>; розмір на вузол — runbook §4.4.
+    /// </summary>
+    public const string ApiMaxConcurrencyKey = "Jobs:Api:MaxConcurrency";
+
+    /// <summary>
+    /// ✎ PERF-04: власні місця лейна interactive (перерахунок формул після правки) понад спільні. Типово 1 (як доти). Кожне
+    /// місце — ≈ 1 задача формул за секунду (стенд: середнє 1,0 с), тож ФВ-12.2 (&lt; 10 с) тримається приблизно до
+    /// 15 × (місця) редакторів, що друкують одночасно, на вузол (аудит PERF1000 §2.3).
+    /// </summary>
+    public const string InteractiveReservedConcurrencyKey = "Jobs:Interactive:ReservedConcurrency";
+
+    /// <summary>✎ PERF-04: <see cref="ApiMaxConcurrencyKey"/>; не задано чи недійсне — <see cref="DefaultMaxConcurrency"/>.</summary>
+    /// <param name="configuration">Конфігурація.</param>
+    /// <remarks>Недійсне значення старт зупиняє раніше (<c>EcrConfigurationValidation.Integers</c>).</remarks>
+    public static int ReadApiMaxConcurrency(Microsoft.Extensions.Configuration.IConfiguration configuration)
+        => ReadPositive(configuration, ApiMaxConcurrencyKey, DefaultMaxConcurrency);
+
+    /// <summary>✎ PERF-04: <see cref="InteractiveReservedConcurrencyKey"/>; не задано чи недійсне — 1.</summary>
+    /// <param name="configuration">Конфігурація.</param>
+    /// <remarks>Недійсне значення старт зупиняє раніше (<c>EcrConfigurationValidation.Integers</c>).</remarks>
+    public static int ReadInteractiveReservedConcurrency(Microsoft.Extensions.Configuration.IConfiguration configuration)
+        => ReadPositive(configuration, InteractiveReservedConcurrencyKey, 1);
+
+    private static int ReadPositive(Microsoft.Extensions.Configuration.IConfiguration configuration, string key, int fallback)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+        return int.TryParse(
+                   configuration[key], System.Globalization.NumberStyles.Integer,
+                   System.Globalization.CultureInfo.InvariantCulture, out var value) && value >= 1
+            ? value
+            : fallback;
+    }
+
     /// <summary>Скільки задач виконується одночасно.</summary>
     public int MaxConcurrency { get; init; } = DefaultMaxConcurrency;
 

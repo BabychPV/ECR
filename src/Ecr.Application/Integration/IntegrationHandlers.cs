@@ -167,7 +167,8 @@ public sealed class GetJobStatusHandler(
     IAccessDecisionService access,
     ICurrentUser currentUser,
     IUiStringCatalog catalog,
-    IJobProgressStore? progressStore = null)
+    IJobProgressStore? progressStore = null,
+    IJobQueuePosition? queuePosition = null)
 {
     /// <summary>Право на перегляд стану системи (`02-contracts.md` §9).</summary>
     public const string Permission = "System.ViewHealth";
@@ -252,8 +253,15 @@ public sealed class GetJobStatusHandler(
             ? null
             : await progressStore.GetFanOutAsync(jobId, ct).ConfigureAwait(false);
 
+        // ✎ PERF-10 (D-564c): задача, що чекає в черзі перерахунку, — місце й орієнтовний старт.
+        var position = queuePosition is not null && string.Equals(status.State, "Queued", StringComparison.Ordinal)
+            ? await queuePosition.GetAsync(jobId, ct).ConfigureAwait(false)
+            : null;
+
         return status with
         {
+            QueuePosition = position?.Position,
+            EstimatedStartAt = position?.EstimatedStartAt,
             Message = resolvedMessage,
             ResultUrl = JobResultUrl.For(
                 profile, jobId, null, status.State, status.Message, status.DocumentId),
@@ -328,8 +336,12 @@ public sealed class ListJobsHandler(
     IBackgroundJobScheduler jobs,
     IAccessDecisionService access,
     ICurrentUser currentUser,
-    IUiStringCatalog catalog)
+    IUiStringCatalog catalog,
+    IJobQueuePosition? queuePosition = null)
 {
+    /// <summary>✎ PERF-10: стеля задач переліку, яким рахується місце в черзі (по запиту на задачу).</summary>
+    public const int MaxPositioned = 10;
+
     /// <summary>Стеля переліку: більше — сторінка, якої тут немає навмисно.</summary>
     /// <remarks>
     /// ⚠ Це журнал того, що ЩОЙНО сталося, не архів: адміністратор дивиться
@@ -489,11 +501,26 @@ public sealed class ListJobsHandler(
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
 
+        // ✎ PERF-10 (D-564c): «Мої задачі» — місце й орієнтовний старт задач, що чекають у черзі (перші MaxPositioned).
+        var positions = new Dictionary<string, JobQueuePosition>(StringComparer.Ordinal);
+        if (queuePosition is not null)
+        {
+            foreach (var queued in items.Where(i => string.Equals(i.State, "Queued", StringComparison.Ordinal)).Take(MaxPositioned))
+            {
+                if (await queuePosition.GetAsync(queued.JobId, ct).ConfigureAwait(false) is { } found)
+                {
+                    positions[queued.JobId] = found;
+                }
+            }
+        }
+
         return
         [
             .. items.Select((item, i) => item with
             {
                 Message = messages[i],
+                QueuePosition = positions.GetValueOrDefault(item.JobId)?.Position,
+                EstimatedStartAt = positions.GetValueOrDefault(item.JobId)?.EstimatedStartAt,
 
                 // ⛔ P4: батько розкладу `Succeeded` = «розкладено», не «пораховано» — як у `GetJobStatusHandler`.
                 EffectiveState = item.FanOut?.EffectiveStateOf(item.State)
