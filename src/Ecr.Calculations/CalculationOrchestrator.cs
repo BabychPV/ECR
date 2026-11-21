@@ -165,6 +165,11 @@ public sealed class CalculationOrchestrator(
                     }
                 }
             }
+
+            // ⛔ Факт ПРОГОНУ, а не поточний прапор: інструменти й панель проблем читають, чи ЦЕЙ прогін записав кроки
+            // методології (прапор, увімкнений пізніше, не робить відсутні кроки «нулем помилок»).
+            var methodologies = resolved.Select(r => r.Descriptor.MethodologyId).Distinct().ToList();
+            profile.RecordTraceSteps(methodologies.Where(traced.Contains), methodologies.Where(id => !traced.Contains(id)));
         }
 
         // 2. Пакети незалежних методологій. ⛔ Порожні залежності — не

@@ -271,6 +271,14 @@ public sealed class Hse301GoldenTests(Xunit.Abstractions.ITestOutputHelper log)
         Assert.NotEmpty(inputs);
         Assert.Equal(inputs, InputsOf(off.Traced));
 
+        // Факт прогону (D-565) — у профілі: чиї кроки записано, чиї ні.
+        var offFact = ModuleProfile.ReadTraceSteps(off.Profile.ToJson())!;
+        var onFact = ModuleProfile.ReadTraceSteps(on.Profile.ToJson())!;
+        Assert.Equal([MethodologyId, SecondMethodologyId], offFact.NotRecorded.Order());
+        Assert.Empty(offFact.Recorded);
+        Assert.Equal([MethodologyId, SecondMethodologyId], onFact.Recorded.Order());
+        Assert.Empty(onFact.NotRecorded);
+
         // Прапор читається ОДИН раз на прогін, а не на прив'язку.
         await on.Methodologies.Received(1).GetTraceStepMethodologyIdsAsync(
             Arg.Is<IReadOnlyCollection<int>>(ids => ids.Order().SequenceEqual(new[] { MethodologyId, SecondMethodologyId })),
@@ -285,6 +293,10 @@ public sealed class Hse301GoldenTests(Xunit.Abstractions.ITestOutputHelper log)
     {
         var run = await RunWithTraceStepsAsync([MethodologyId]);
 
+        var fact = ModuleProfile.ReadTraceSteps(run.Profile.ToJson())!;
+        Assert.True(fact.StepsRecorded(MethodologyId));
+        Assert.False(fact.StepsRecorded(SecondMethodologyId));
+
         var first = Assert.Single(run.Traced, o => o.Values.Any(v => v.MethodologyVersionId == VersionId));
         var second = Assert.Single(run.Traced, o => o.Values.Any(v => v.MethodologyVersionId == SecondVersionId));
         Assert.NotEmpty(first.Trace);
@@ -292,7 +304,7 @@ public sealed class Hse301GoldenTests(Xunit.Abstractions.ITestOutputHelper log)
         Assert.NotEmpty(second.Inputs ?? []);
     }
 
-    private static async Task<(List<CalculationOutput> Written, List<CalculationOutput> Traced, IMethodologyStore Methodologies)>
+    private static async Task<(List<CalculationOutput> Written, List<CalculationOutput> Traced, IMethodologyStore Methodologies, ModuleProfile Profile)>
         RunWithTraceStepsAsync(int[] tracedMethodologies)
     {
         var stand = new Stand(TraceLevel.Full);
@@ -312,7 +324,7 @@ public sealed class Hse301GoldenTests(Xunit.Abstractions.ITestOutputHelper log)
             stand.Periods,
             provider.GetRequiredService<IServiceScopeFactory>());
 
-        await orchestrator.RunAsync(
+        var profile = await orchestrator.RunAsync(
             calculationRunId: 1,
             DocumentId,
             new PeriodKey(Period),
@@ -324,7 +336,7 @@ public sealed class Hse301GoldenTests(Xunit.Abstractions.ITestOutputHelper log)
             new DateTime(2026, 2, 3, 10, 15, 30, DateTimeKind.Utc),
             CancellationToken.None);
 
-        return (written, traced, stand.Methodologies);
+        return (written, traced, stand.Methodologies, profile);
     }
 
     private static List<string> ValuesOf(IEnumerable<CalculationOutput> outputs)
