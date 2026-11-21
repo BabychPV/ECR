@@ -2,6 +2,8 @@ import type { QueryClient } from '@tanstack/react-query';
 import { apiFetch, EcrApiError } from '@/api/client';
 import type { JobStatus } from '@/api/types';
 import { invalidateSlices } from '@/features/grid/sliceCache';
+import { QueuedPollSteps, randomJittered, stepOf } from '@/shared/polling/pollBackoff';
+import { untilTabVisible } from '@/shared/polling/tabVisibility';
 import { outcomeOf, pollInterval, PollMs, type PlainJobOutcome } from '@/features/workflow/jobFollow';
 
 /**
@@ -68,7 +70,11 @@ export async function followImportJob(
 
   let outcome: PlainJobOutcome = 'unknown';
   let failures = 0;
+  let queuedStreak = 0;
   for (;;) {
+    // PERF-16: a hidden tab does not ask (the loop is not a TanStack interval, so it must pause itself); the first
+    // request after the tab returns tells the final state at once.
+    await untilTabVisible();
     try {
       const job = await queryClient.fetchQuery({
         queryKey: ['job', jobId],
@@ -77,6 +83,7 @@ export async function followImportJob(
         retry: false,
       });
       failures = 0;
+      queuedStreak = job.state === 'Queued' ? queuedStreak + 1 : 0;
 
       if (pollInterval(job.state) === false) {
         outcome = outcomeOf(job.state, false);
@@ -92,7 +99,9 @@ export async function followImportJob(
     }
 
     if (Date.now() - startedAt >= maxMs) break;
-    await wait(pollMs);
+    // PERF-08: while the import waits in the queue the beat backs off 2 -> 4 -> 8 -> 15 s (+-20 %); a started job
+    // is asked at `pollMs` again. An explicit `pollMs` (tests) keeps the fixed beat.
+    await wait(queuedStreak > 0 && options.pollMs === undefined ? randomJittered(stepOf(QueuedPollSteps, queuedStreak)) : pollMs);
   }
 
   await invalidateSlices(queryClient, { documentId, periodKey });

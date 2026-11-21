@@ -1,6 +1,7 @@
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { JobStatus } from '@/api/types';
+import { jobRefetchInterval } from '@/features/workflow/jobFollow';
 
 /*
  * ⚠ Окремим модулем, а не в `api.ts`: `api.ts` тягнуть шапка («My tasks») і
@@ -29,13 +30,8 @@ export function useJobStatus(jobId: string | null): UseQueryResult<JobStatus> {
     queryKey: ['job', jobId],
     queryFn: () => apiFetch<JobStatus>(`/api/v1/jobs/${encodeURIComponent(jobId ?? '')}`),
     enabled: jobId !== null,
-    refetchInterval: (query) => {
-      const data = query.state.data;
-
-      return data?.state === 'Queued' || data?.state === 'Running' || data?.effectiveState === 'FannedOut'
-        ? JobPollMs
-        : false;
-    },
+    // PERF-08: the same rule as every job poller (queue back-off, ±20 % spread, `FannedOut` keeps polling).
+    refetchInterval: (query) => jobRefetchInterval(query, JobPollMs),
     retry: false,
   });
 }

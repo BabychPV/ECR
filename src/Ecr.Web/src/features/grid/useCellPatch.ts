@@ -7,9 +7,10 @@ import { MoreConflictsExtension } from '@/api/types';
 // `jobFollow.ts` уже знає, які стани кінцеві, і саме він виник із двох копій
 // цього правила, що розійшлися (`Q-234`). Тут інший лише ІНТЕРВАЛ — див.
 // `RecalculationPollMs`.
-import { outcomeOf, pollInterval, type JobOutcome } from '@/features/workflow/jobFollow';
+import { jobRefetchInterval, outcomeOf, pollInterval, type JobOutcome } from '@/features/workflow/jobFollow';
 import { formatTime } from '@/shared/format';
-import { invalidateSlicesForPeriods } from './sliceCache';
+import { QueuedPollSteps, randomJittered, stepOf } from '@/shared/polling/pollBackoff';
+import { invalidateSlicesForPeriods, markDocumentPeriodStale } from './sliceCache';
 import { applyPatchLocally, patchCells, refreshStaleness } from './cellPatchRequest';
 
 // Запит патча й застосування до кешу — у `cellPatchRequest.ts` (`D-132`); реекспорт для сітки й тестів.
@@ -43,12 +44,44 @@ const SettledJobsLimit = 256;
 const pendingRecalculations = new Map<string, Map<string, number>>();
 let recalculationSeq = 0;
 
+/**
+ * PERF-16: стеля очікуваних задач. Запис знімається лише коли задача завершилась, а слідкувач, що здався
+ * (довга черга, обрив), лишав його назавжди — у вкладці, відкритій днями, мапа росла б із кожною правкою.
+ */
+const PendingJobsPerKeyLimit = 64;
+const PendingKeysLimit = 256;
+
+/**
+ * Позначка «стару задачу вилучено через стелю»: має порядковий номер 0, тобто старіша за будь-яку, тож завершення
+ * наступної задачі бачить «є невраховане старіше» й перечитує зрізи (гірше не буде — лише зайвий перезапит).
+ */
+const OverflowJobId = '#overflow';
+
 /** Запам'ятовує задачу перерахунку, поставлену правкою (AN-108 / P2-02). */
 function registerRecalculation(jobId: string, documentId: number, periodKey: number): void {
   const key = `${documentId}:${periodKey}`;
   const jobs = pendingRecalculations.get(key) ?? new Map<string, number>();
   if (!jobs.has(jobId)) jobs.set(jobId, (recalculationSeq += 1));
+  pruneJobs(jobs);
   pendingRecalculations.set(key, jobs);
+  while (pendingRecalculations.size > PendingKeysLimit) {
+    const oldest = pendingRecalculations.keys().next();
+    if (oldest.done === true || oldest.value === key) break;
+    pendingRecalculations.delete(oldest.value);
+  }
+}
+
+/** Лишає найновіші `PendingJobsPerKeyLimit` задач; про вилучені пам'ятає позначка `OverflowJobId`. */
+function pruneJobs(jobs: Map<string, number>): void {
+  if (jobs.size <= PendingJobsPerKeyLimit) return;
+  const ordered = [...jobs].filter(([id]) => id !== OverflowJobId).sort((a, b) => a[1] - b[1]);
+  for (const [id] of ordered.slice(0, ordered.length - (PendingJobsPerKeyLimit - 1))) jobs.delete(id);
+  jobs.set(OverflowJobId, 0);
+}
+
+/** Тест: скільки задач чекає по ключу `документ:період` (для перевірки стелі). */
+export function pendingRecalculationCount(documentId: number, periodKey: number): number {
+  return pendingRecalculations.get(`${documentId}:${periodKey}`)?.size ?? 0;
 }
 
 /**
@@ -127,6 +160,12 @@ const FollowMaxPolls = 60;
  */
 const FollowMaxMs = 10 * 60_000;
 
+/**
+ * PERF-08: пока остання відповідь — `Queued`, слідкувач не здається за 10 хв: довга черга (годину) не повинна
+ * мовчки губити оновлення. Ціна — один запит на документ×період раз на ~15 с (з розкидом), а не раз на 2 с.
+ */
+const FollowMaxQueuedMs = 60 * 60_000;
+
 /** Активні слідкувачі: ключ `документ:період` -> остання задача, за якою він стежить. */
 const activeFollowers = new Map<string, { jobId: string }>();
 
@@ -191,14 +230,20 @@ export function followRecalculation(
     try {
       const startedAt = Date.now();
       let attempt = 0;
-      while (attempt < FollowMaxPolls && Date.now() - startedAt < FollowMaxMs) {
+      /** Скільки відповідей поспіль було `Queued` (для відкладання наступного запиту). */
+      let queuedStreak = 0;
+      let lastQueued = false;
+      while (attempt < FollowMaxPolls && Date.now() - startedAt < (lastQueued ? FollowMaxQueuedMs : FollowMaxMs)) {
         // ⚠ Лише коли прихована: інакше перший запит іде синхронно зі стартом слідкувача, як і раніше.
         if (isHidden()) await untilVisible();
         if (follower.jobId !== polledJob) {
           polledJob = follower.jobId;
           attempt = 0;
+          queuedStreak = 0;
         }
-        attempt += 1;
+        // ⚠ Черга не з'їдає бюджет спроб: він міряє лише «Running»-опитування (≈ 2 хв), а чекання в черзі
+        // обмежене часом (`FollowMaxQueuedMs`).
+        if (!lastQueued) attempt += 1;
         const current = polledJob;
         const job = await queryClient.fetchQuery({
           queryKey: ['job', current],
@@ -213,7 +258,11 @@ export function followRecalculation(
           settleRecalculation(queryClient, current, documentId, periodKey, job.writtenCount, job.writtenPeriods);
           return;
         }
-        await new Promise((resolve) => setTimeout(resolve, RecalculationPollMs));
+        lastQueued = job.state === 'Queued';
+        queuedStreak = lastQueued ? queuedStreak + 1 : 0;
+        // PERF-08: у черзі — 2→4→8→15 с, «Running» — ~2 с; розкид ±20 %, щоб клієнти не йшли в ногу.
+        const delay = lastQueued ? stepOf(QueuedPollSteps, queuedStreak) : RecalculationPollMs;
+        await new Promise((resolve) => setTimeout(resolve, randomJittered(delay)));
       }
     } catch {
       // Помилка опитування: слідкувач завершується, сітка (якщо змонтована) підхоплює стеження — див. `finally`.
@@ -221,7 +270,13 @@ export function followRecalculation(
       if (activeFollowers.get(key) === follower) activeFollowers.delete(key);
       // ⚠ AN-108 / P2-03: поки слідкувач жив, змонтована сітка свого таймера не тримала (`isFollowedJob`). Пішов,
       // не дочекавшись кінця, — один перезапит змусить спостерігача сітки перерахувати інтервал і стежити самому.
-      if (!settled) void queryClient.invalidateQueries({ queryKey: ['job', polledJob], exact: true });
+      if (!settled) {
+        void queryClient.invalidateQueries({ queryKey: ['job', polledJob], exact: true });
+        // ⛔ PERF-08: сітки може не бути (відкрито інший аркуш) — тоді ніхто не дочекається задачі, і зрізи
+        // лишились би «свіжими» ще 5 хв з числами ДО перерахунку. Позначаємо їх застарілими БЕЗ перезапиту:
+        // перечитаються при наступному показі; змонтована сітка підхопить задачу сама (рядок вище).
+        void markDocumentPeriodStale(queryClient, documentId, periodKey);
+      }
     }
   })();
 }
@@ -466,10 +521,9 @@ export function useRecalculationStatus(jobId: string | null): RecalculationStatu
     // ⛔ AN-108 / P2-03: за задачею, яку веде фоновий слідкувач (`followRecalculation`), сітка НЕ тримає
     // другого таймера на той самий ключ — лише читає кеш, який той наповнює. Інтервал перераховується на
     // кожне оновлення запиту, тож коли слідкувач піде без кінцевого стану, сітка підхопить опитування сама.
+    // PERF-08: ≥ 2 с на «Running»; поки задача в черзі — 2→4→8→15 с, усе з розкидом ±20 %.
     refetchInterval: (query) =>
-      pollInterval(query.state.data?.state) === false || (active !== null && isFollowedJob(active))
-        ? false
-        : RecalculationPollMs,
+      active !== null && isFollowedJob(active) ? false : jobRefetchInterval(query, RecalculationPollMs),
     retry: false,
   });
 

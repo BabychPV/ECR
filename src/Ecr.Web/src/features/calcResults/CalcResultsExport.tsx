@@ -5,7 +5,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { JobStatus } from '@/api/types';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
-import { outcomeOf, pollInterval } from '@/features/workflow/jobFollow';
+import { jobRefetchInterval, outcomeOf } from '@/features/workflow/jobFollow';
 import { language, t } from '@/shared/i18n';
 import { notificationCloseButtonProps, showApiError } from '@/shared/ui/notify';
 import { errorCodeText } from '@/shared/ui/problemText';
@@ -59,7 +59,7 @@ export function CalcResultsExport({
     queryKey: ['job', jobId],
     queryFn: () => apiFetch<JobStatus>(`/api/v1/jobs/${encodeURIComponent(jobId ?? '')}`),
     enabled: jobId !== null,
-    refetchInterval: (query) => pollInterval(query.state.data?.state),
+    refetchInterval: (query) => jobRefetchInterval(query),
     retry: false,
   });
   const outcome = jobId === null ? null : outcomeOf(job.data?.state, job.isError);

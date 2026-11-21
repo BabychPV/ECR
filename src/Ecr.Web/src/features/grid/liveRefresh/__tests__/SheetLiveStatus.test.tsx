@@ -159,7 +159,9 @@ async function tick(ms: number): Promise<void> {
 const statusBanner = (): HTMLElement | null => document.querySelector('[data-testid="sheet-status-banner"]');
 const approveDisabled = (): boolean => document.querySelector('[data-testid="approve"]')?.getAttribute('aria-disabled') === 'true';
 
+// PERF-16: the poll beat carries a ±20 % spread; the middle of the range is exactly 30 s.
 beforeEach(() => {
+  vi.spyOn(Math, 'random').mockReturnValue(0.5);
   vi.useFakeTimers();
   answers = [];
   sheetState = 'Draft';
@@ -171,6 +173,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   cleanup();
   client.clear();
   vi.useRealTimers();

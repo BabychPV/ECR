@@ -1,5 +1,5 @@
 import type { JSX } from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -92,7 +92,13 @@ async function expectClean(root: HTMLElement): Promise<void> {
   expect(violations, describeViolations(violations)).toHaveLength(0);
 }
 
+// PERF-16: the poll beat carries a ±20 % spread; the middle of the range is exactly 30 s.
+beforeEach(() => {
+  vi.spyOn(Math, 'random').mockReturnValue(0.5);
+});
+
 afterEach(() => {
+  vi.restoreAllMocks();
   cleanup();
   vi.useRealTimers();
   vi.unstubAllGlobals();

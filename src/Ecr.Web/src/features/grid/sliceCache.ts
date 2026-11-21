@@ -98,17 +98,104 @@ export async function invalidateSlicesForPeriods(
   );
 }
 
-async function invalidateScopes(client: QueryClient, scopes: readonly SliceScope[]): Promise<void> {
-  const idsByPeriod = new Map<number, ReadonlySet<number> | null>();
-  for (const scope of scopes) idsByPeriod.set(scope.periodKey, tablesInScope(client, scope));
+/**
+ * PERF-09: стан «одного польоту» інвалідації на клієнт запитів.
+ *
+ * ⛔ Що виправляється. `invalidateQueries` за замовчуванням має `cancelRefetch: true`: кожен новий виклик ОБРИВАЄ
+ * запит зрізу, що вже летить, і шле такий самий знову. Сервер уже почав працювати над обірваним (≈ 20 послідовних
+ * звернень до БД на зріз), тож N подій поспіль (завершення задачі, чужий перехід статусу, перерахунок, імпорт)
+ * коштують серверу N повних зрізів на кожну видиму таблицю, а клієнту — жодного зайвого результату.
+ *
+ * ⚠ Тепер: поки перезапит летить, нові наміри лише ЗАПИСУЮТЬСЯ, а після його завершення виконуються ОДНИМ
+ * об'єднаним проходом. Тобто ≤ 2 запити на зріз на серію подій, і жодного відповіді «до події» під виглядом
+ * свіжої: проход, який стартував ПІСЛЯ події, бачить її наслідки.
+ */
+interface Flight {
+  running: boolean;
+  queued: { scopes: SliceScope[]; waiters: { resolve: () => void; reject: (reason: unknown) => void }[] } | null;
+}
+
+const flights = new WeakMap<QueryClient, Flight>();
+
+/** Наміри, відкладені, поки вкладка прихована: клієнт запитів → що перечитати, коли вкладка знову видима. */
+const deferredWhileTabHidden = new Map<QueryClient, SliceScope[]>();
+
+function isTabHidden(): boolean {
+  return typeof document !== 'undefined' && document.visibilityState === 'hidden';
+}
+
+/**
+ * PERF-09: прихована вкладка не перечитує зрізи (до 91 запиту заради екрана, якого ніхто не бачить) — усі зрізи лише
+ * стають застарілими, а наміри перечитуються ОДИН раз, коли вкладка знову видима.
+ */
+function deferWhileTabHidden(client: QueryClient, scopes: readonly SliceScope[]): Promise<void> {
+  const known = deferredWhileTabHidden.get(client);
+  if (known !== undefined) {
+    known.push(...scopes);
+  } else {
+    deferredWhileTabHidden.set(client, [...scopes]);
+    const onVisible = (): void => {
+      if (isTabHidden()) return;
+      document.removeEventListener('visibilitychange', onVisible);
+      const pending = deferredWhileTabHidden.get(client) ?? [];
+      deferredWhileTabHidden.delete(client);
+      void invalidateScopes(client, pending);
+    };
+    document.addEventListener('visibilitychange', onVisible);
+  }
+  recordMissedWhileHidden(client);
+
+  return client.invalidateQueries({ predicate: (query) => isSliceKey(query.queryKey), refetchType: 'none' });
+}
+
+function invalidateScopes(client: QueryClient, scopes: readonly SliceScope[]): Promise<void> {
+  if (isTabHidden()) return deferWhileTabHidden(client, scopes);
+
+  let flight = flights.get(client);
+  if (flight === undefined) {
+    flight = { running: false, queued: null };
+    flights.set(client, flight);
+  }
+
+  const current = flight;
+  if (current.running) {
+    const queued = (current.queued ??= { scopes: [], waiters: [] });
+    queued.scopes.push(...scopes);
+
+    return new Promise<void>((resolve, reject) => queued.waiters.push({ resolve, reject }));
+  }
+
+  current.running = true;
+
+  return runInvalidate(client, scopes).finally(() => void drainFlight(client, current));
+}
+
+/** Виконує накопичені за час польоту наміри одним проходом; повторює, доки нові не припиняться. */
+async function drainFlight(client: QueryClient, flight: Flight): Promise<void> {
+  while (flight.queued !== null) {
+    const queued = flight.queued;
+    flight.queued = null;
+    try {
+      await runInvalidate(client, queued.scopes);
+      for (const waiter of queued.waiters) waiter.resolve();
+    } catch (error) {
+      for (const waiter of queued.waiters) waiter.reject(error);
+    }
+  }
+  flight.running = false;
+}
+
+async function runInvalidate(client: QueryClient, scopes: readonly SliceScope[]): Promise<void> {
+  // ⚠ Наміри з різних документів/аркушів одного періоду НЕ зливаються за періодом: кожен має свій перелік таблиць.
+  const entries = scopes.map((scope) => ({ periodKey: scope.periodKey, ids: tablesInScope(client, scope) }));
 
   const inScope = (query: Query): boolean => {
     const address = sliceAddressOf(query.queryKey);
     if (address === null) return false;
-    const ids = idsByPeriod.get(address.periodKey);
-    if (ids === undefined) return false;
 
-    return ids === null || ids.has(address.tableInstanceId);
+    return entries.some(
+      (entry) => entry.periodKey === address.periodKey && (entry.ids === null || entry.ids.has(address.tableInstanceId)),
+    );
   };
 
   // C1-01: у межах наміру перезапитуються лише ВИДИМІ зрізи. Приховані сітки режиму «одна
@@ -241,4 +328,24 @@ export function markSliceHidden(tableInstanceId: number, periodKey: number): () 
 export async function markSlicesStale(client: QueryClient): Promise<void> {
   recordMissedWhileHidden(client);
   await client.invalidateQueries({ queryKey: queryKeys.slices.all(), refetchType: 'none' });
+}
+
+/**
+ * PERF-08: позначає зрізи документа за період застарілими БЕЗ перезапиту.
+ *
+ * ⚠ Для випадку «слідкувач за задачею здався, а чи є сітка, що доведе справу, невідомо»: змонтована видима
+ * сітка підхоплює задачу власним спостерігачем, а незмонтована прочитає свіже при монтуванні — на відміну від
+ * `invalidateSlicesForPeriods` це не б'є по сервері 91 запитом заради задачі, яка, можливо, ще в черзі.
+ */
+export async function markDocumentPeriodStale(client: QueryClient, documentId: number, periodKey: number): Promise<void> {
+  const ids = tablesInScope(client, { documentId, periodKey });
+  recordMissedWhileHidden(client);
+  await client.invalidateQueries({
+    predicate: (query) => {
+      const address = sliceAddressOf(query.queryKey);
+
+      return address !== null && address.periodKey === periodKey && (ids === null || ids.has(address.tableInstanceId));
+    },
+    refetchType: 'none',
+  });
 }

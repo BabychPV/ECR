@@ -17,6 +17,20 @@ const DocumentPeriodReopenDialog = lazy(async () => ({ default: (await loadDialo
 /** Найдовша пауза `setTimeout` (2^31 − 1 мс): довший строк перевіряється ще раз після неї. */
 const MaxTimerMs = 2_147_483_647;
 
+/**
+ * PERF-16: random 0..30 s added to the expiry timer. ⛔ Without it every viewer of a period whose reopen window ends
+ * (the same wall-clock moment for all of them) refetches `slices.all()` in the same second. The server enforces the
+ * lock regardless; the spread only delays the screen catching up.
+ */
+export const ReopenExpirySpreadMs = 30_000;
+
+/** Delay of the expiry refresh for a window that ends in `left` ms; `random` is injectable for tests. */
+export function reopenExpiryDelayMs(left: number, random: () => number = Math.random): number {
+  const spread = Math.floor(Math.min(Math.max(random(), 0), 0.999_999) * ReopenExpirySpreadMs);
+
+  return Math.min(Math.max(left, 0) + 1_000 + spread, MaxTimerMs);
+}
+
 interface DocumentPeriodReopenArgs {
   readonly documentId: number;
   readonly periodKey: number;
@@ -76,7 +90,7 @@ export function useDocumentPeriodReopen({ documentId, periodKey, periodState, ti
     const timer = setTimeout(() => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.document.ofDocument(documentId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.slices.all() });
-    }, Math.min(Math.max(left, 0) + 1_000, MaxTimerMs));
+    }, reopenExpiryDelayMs(left));
 
     return () => clearTimeout(timer);
   }, [openUntil, documentId, queryClient]);
