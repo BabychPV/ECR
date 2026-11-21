@@ -62,8 +62,33 @@ export interface UnmatchedRowRef {
   readonly ruleCode: string | null;
   /** ✎ 10.11: порожні колонки відхиленого рядка, які треба заповнити; порожньо — назвати нічого. */
   readonly missingColumns: readonly MissingColumnRef[];
-  /** B66: перший вихід без результату (`step` — код виходу), код помилки й кількість таких виходів (`StepError`). */
-  readonly stepError: { readonly step: string; readonly error: string; readonly failedSteps: number } | null;
+  /**
+   * B66: перший вихід без результату (`step` — код виходу), код помилки й кількість таких виходів (`StepError`).
+   * ✎ D-565: `trace` — чи записав ПРОГІН проблеми кроки її методології (`Recorded` — крок, що впав, можна відкрити;
+   * `NotRecorded` — трасування було вимкнено; `null` — невідомо); `methodologyId` — для переходу до прапора;
+   * `monthNumber` — місяць прогону (річна розкладка).
+   */
+  readonly stepError: {
+    readonly step: string;
+    readonly error: string;
+    readonly failedSteps: number;
+    readonly trace: TraceState;
+    readonly methodologyId: number | null;
+    readonly monthNumber: number | null;
+  } | null;
+}
+
+/** ✎ D-565: чи записав прогін кроки методології рядка. */
+export type TraceState = 'Recorded' | 'NotRecorded' | null;
+
+/** ✎ D-565: методологія, чиї кроки прогін не записав (група StepError). */
+export interface TraceOffMethodology {
+  readonly methodologyId: number;
+  readonly code: string | null;
+}
+
+function traceStateOf(value: string | null | undefined): TraceState {
+  return value === 'Recorded' || value === 'NotRecorded' ? value : null;
 }
 
 /** Що приймають правила методологій таблиці (UAT 08.11 b3). */
@@ -101,6 +126,11 @@ export interface UnmatchedTableGroup {
   readonly missingInputs: boolean;
   /** B66: рядки з помилкою кроку методики (`StepError`); рядок несе крок і код. */
   readonly stepError: boolean;
+  /**
+   * ✎ D-565: методології групи StepError, чиї кроки прогін НЕ записав (трасування вимкнено) — про них панель каже, що
+   * кроку, який упав, не видно, і хто може ввімкнути трасування. Порожньо — таких немає.
+   */
+  readonly traceOff: readonly TraceOffMethodology[];
   /**
    * B66: підсумок рядків, відсіяних фільтром активності (`RowInactive`): `rows` порожній (поштучно не показуємо — у Land
    * це виключення за задумом), кількість — `inactiveCount`.
@@ -145,6 +175,7 @@ export function groupUnmatchedRows(
       inactiveCount: number;
       tableKey: string;
       rows: Map<string, UnmatchedRowRef>;
+      traceOff: Map<number, TraceOffMethodology>;
     }
   >();
   for (const issue of issues) {
@@ -178,8 +209,16 @@ export function groupUnmatchedRows(
         inactiveCount: 0,
         tableKey,
         rows: new Map(),
+        traceOff: new Map(),
       };
       byKey.set(key, group);
+    }
+    const trace = stepError ? traceStateOf(issue.traceSteps) : null;
+    if (trace === 'NotRecorded' && issue.methodologyId !== null && issue.methodologyId !== undefined) {
+      group.traceOff.set(issue.methodologyId, {
+        methodologyId: issue.methodologyId,
+        code: issue.methodologyCode ?? null,
+      });
     }
     group.methodology ??= issue.methodologyCode ?? null;
     if (inactive) {
@@ -200,6 +239,9 @@ export function groupUnmatchedRows(
               step: issue.stepCode ?? '?',
               error: issue.errorCode ?? '?',
               failedSteps: Math.max(1, issue.affectedCount ?? 1),
+              trace,
+              methodologyId: issue.methodologyId ?? null,
+              monthNumber: issue.monthNumber ?? null,
             }
           : null,
       });
@@ -234,6 +276,7 @@ export function groupUnmatchedRows(
         rejected: group.rejected,
         missingInputs: group.missingInputs,
         stepError: group.stepError,
+        traceOff: [...group.traceOff.values()].sort((a, b) => a.methodologyId - b.methodologyId),
         inactive: group.inactive,
         inactiveCount: group.inactiveCount,
       };

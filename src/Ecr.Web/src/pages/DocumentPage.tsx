@@ -1046,6 +1046,7 @@ export function DocumentPage(): JSX.Element {
         <Suspense fallback={null}>
           <CalculationIssuesPanel
             userId={session.data?.userId}
+            documentId={can(session.data, 'Calculation.View') ? documentId : undefined}
             periodKey={periodKey}
             rows={unmatchedRows}
             tables={tables.data ?? []}

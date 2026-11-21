@@ -47,3 +47,52 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
 OPTION (RECOMPILE);
 GO
 -- PERF03:trace-steps ── кінець секції ──
+-- PERF03:trace-steps-diagnostics ── D-565: проблема рядка StepError — чи записано кроки, перехід до кроку, що впав; ru/kz ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'document.stepErrorRows.traceOff', N'ru', N'Шаг, где возникла ошибка, не виден: последний пересчёт не сохранял промежуточные шаги методологии ({methodologies}) — трассировка выключена. Пользователь с правом редактировать формулы методологии может её включить; после пересчёта здесь будет видно шаг с ошибкой и его входы.'),
+    (N'document.stepErrorRows.traceOffLink', N'ru', N'Трассировка методологии {methodology}'),
+    (N'document.stepErrorRows.showStep', N'ru', N'показать шаг'),
+    (N'document.stepTrace.title', N'ru', N'Шаг расчёта с ошибкой · {row}'),
+    (N'document.stepTrace.notRecorded', N'ru', N'Шаги этого расчёта не сохранены: трассировка методологии была выключена. Включите её в редакторе методологии и пересчитайте документ.'),
+    (N'document.stepTrace.noSteps', N'ru', N'Для этой строки в актуальном расчёте нет записанных шагов. Пересчитайте документ и откройте снова.'),
+    (N'document.stepTrace.input', N'ru', N'Вход'),
+    (N'document.stepTrace.value', N'ru', N'Значение'),
+    (N'document.stepTrace.unit', N'ru', N'Единица'),
+    (N'document.stepTrace.noInputs', N'ru', N'У шага нет входов.'),
+    (N'document.stepTrace.truncated', N'ru', N'Показаны не все шаги строки.'),
+    (N'document.stepErrorRows.traceOff', N'kz', N'Қате болған қадам көрінбейді: соңғы қайта есептеу әдістеменің ({methodologies}) аралық қадамдарын сақтамады — трассалау өшірулі. Әдістеме формулаларын өңдеу құқығы бар пайдаланушы оны қоса алады; қайта есептегеннен кейін мұнда қатесі бар қадам мен оның кірістері көрінеді.'),
+    (N'document.stepErrorRows.traceOffLink', N'kz', N'{methodology} әдістемесін трассалау'),
+    (N'document.stepErrorRows.showStep', N'kz', N'қадамды көрсету'),
+    (N'document.stepTrace.title', N'kz', N'Қатесі бар есептеу қадамы · {row}'),
+    (N'document.stepTrace.notRecorded', N'kz', N'Бұл есептеудің қадамдары сақталмаған: әдістемені трассалау өшірулі болған. Оны әдістеме редакторында қосып, құжатты қайта есептеңіз.'),
+    (N'document.stepTrace.noSteps', N'kz', N'Бұл жол үшін өзекті есептеуде жазылған қадамдар жоқ. Құжатты қайта есептеп, қайта ашыңыз.'),
+    (N'document.stepTrace.input', N'kz', N'Кіріс'),
+    (N'document.stepTrace.value', N'kz', N'Мән'),
+    (N'document.stepTrace.unit', N'kz', N'Бірлік'),
+    (N'document.stepTrace.noInputs', N'kz', N'Қадамның кірістері жоқ.'),
+    (N'document.stepTrace.truncated', N'kz', N'Жолдың барлық қадамдары көрсетілмеген.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- PERF03:trace-steps-diagnostics ── кінець секції ──
+-- PERF03:trace-steps-diagnostics ── D-565: діагностика StepError (en) ──
+INSERT INTO #UiEn ([Key], Lang, Val, Scope)
+SELECT v.[Key], v.Lang, v.Val, v.Scope
+  FROM (VALUES
+    (N'document.stepErrorRows.traceOff', N'en', N'The step that failed is not visible: the last recalculation did not store the intermediate steps of the methodology ({methodologies}) because tracing is off. A user with the right to edit methodology formulas can turn it on; after the next recalculation the failing step and its inputs will be shown here.', 1),
+    (N'document.stepErrorRows.traceOffLink', N'en', N'Tracing of methodology {methodology}', 1),
+    (N'document.stepErrorRows.showStep', N'en', N'show step', 1),
+    (N'document.stepTrace.title', N'en', N'Calculation step that failed · {row}', 1),
+    (N'document.stepTrace.notRecorded', N'en', N'The steps of this calculation were not stored: tracing of the methodology was off. Turn it on in the methodology editor and recalculate the document.', 1),
+    (N'document.stepTrace.noSteps', N'en', N'The current calculation has no stored steps for this row. Recalculate the document and open this again.', 1),
+    (N'document.stepTrace.input', N'en', N'Input', 1),
+    (N'document.stepTrace.value', N'en', N'Value', 1),
+    (N'document.stepTrace.unit', N'en', N'Unit', 1),
+    (N'document.stepTrace.noInputs', N'en', N'The step has no inputs.', 1),
+    (N'document.stepTrace.truncated', N'en', N'Not all steps of the row are shown.', 1)
+       ) AS v ([Key], Lang, Val, Scope)
+OPTION (RECOMPILE);
+GO
+-- PERF03:trace-steps-diagnostics ── кінець секції ──

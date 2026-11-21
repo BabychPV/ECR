@@ -7052,6 +7052,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{id}/calculation-steps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * ✎ D-565 (PERF-03): кроки розрахунку одного рядка в актуальному прогоні — «який крок упав і з якими входами» для
+         *     проблеми `StepError`. Право `Calculation.View`.
+         * @description ⚠ Кроків може не бути, бо прогін їх не записав (трасування методології вимкнено): факт прогону — у відповіді
+         *     (`notRecordedMethodologyIds`), а не порожнеча. Невидимий документ чи схована таблиця — 404.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    periodKey?: number;
+                    tableInstanceId?: number;
+                    rowKey?: string;
+                };
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CalculationStepsDto"];
+                        "text/json": components["schemas"]["CalculationStepsDto"];
+                        "text/plain": components["schemas"]["CalculationStepsDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents/{id}/compare": {
         parameters: {
             query?: never;
@@ -31911,6 +31971,11 @@ export interface components {
             methodologyCode: null | string;
             /**
              * Format: int32
+             * @description ✎ D-565: методологія проблеми — для переходу до її прапора трасування; `null` — невідома.
+             */
+            methodologyId?: null | number;
+            /**
+             * Format: int32
              * @description ✎ LAND-YEAR L6: місяць (1..12) періоду прогону, якому належить проблема, — лише документ річної розкладки
              *     (`YearWithMonthColumns`): рядок річного аркуша один, а прогони методологій — по місяцях. `null` — інша
              *     розкладка.
@@ -31935,6 +32000,10 @@ export interface components {
             stepCode?: null | string;
             /** @description Код таблиці шаблону. */
             tableCode: string;
+            /** @description ✎ D-565: лише для `StepError` — чи записав ПРОГІН, що дав проблему, кроки цієї методології
+             *     (string CalculationIssueDto.TraceStepsRecorded — показати крок, що впав, і його входи; string CalculationIssueDto.TraceStepsNotRecorded — трасування
+             *     було вимкнено, кроків немає); `null` — не `StepError` або факт невідомий. */
+            traceSteps?: null | string;
         };
         /** @description Методологія підказки таблиці. */
         CalculationIssueMethodologyDto: {
@@ -32056,6 +32125,65 @@ export interface components {
              */
             runId: null | number;
             unmatchedRows: null | components["schemas"]["UnmatchedRowsDto"];
+        };
+        /** @description ✎ D-565: один крок рядка. */
+        CalculationStepDto: {
+            /** @description Код помилки кроку (`#VALUE`…); `null` — крок порахувався. */
+            error: null | string;
+            /** @description Вираз. */
+            expression: null | string;
+            /** @description Крок упав: помилка, що не є «немає значення» (`#NULL`). */
+            failed: boolean;
+            /**
+             * Format: int64
+             * @description Ідентифікатор кроку.
+             */
+            id: number;
+            /** @description Входи кроку, як їх бачила формула. */
+            inputs: components["schemas"]["CalculationStepInputDto"][];
+            /** @description Причина маскування в нуль; `null` — не маскувалось. */
+            masked: null | string;
+            /** @description Код кроку (формула чи вихід). */
+            stepCode: string;
+            /**
+             * Format: int32
+             * @description Порядок.
+             */
+            stepOrder: number;
+            /**
+             * Format: int64
+             * @description Речовина кроку.
+             */
+            substanceEntryId: null | number;
+            /** @description Значення текстом (інваріантна культура); `null` — числа немає. */
+            value: null | string;
+        };
+        /** @description ✎ D-565: вхід кроку. */
+        CalculationStepInputDto: {
+            /** @description Код аргументу, константи чи формули; для періоду — властивість. */
+            code: string;
+            /** @description Вид: `arg`, `const`, `formula`, `period`. */
+            kind: string;
+            /** @description Код одиниці. */
+            unit: null | string;
+            /** @description Значення текстом; `null` — порожньо або приховано від читача. */
+            value: null | string;
+        };
+        /** @description ✎ D-565: кроки рядка в актуальному прогоні. */
+        CalculationStepsDto: {
+            /** @description Методології, чиї кроки прогін НЕ записав (трасування вимкнено); `null` — як вище. */
+            notRecordedMethodologyIds: null | number[];
+            /** @description Методології, чиї кроки прогін записав; `null` — прогін до D-565 (факту немає). */
+            recordedMethodologyIds: null | number[];
+            /**
+             * Format: int64
+             * @description Актуальний прогін; `null` — документ за період ще не рахували.
+             */
+            runId: null | number;
+            /** @description Кроки рядка за порядком. */
+            steps: components["schemas"]["CalculationStepDto"][];
+            /** @description Кроків більше за стелю — показано перші. */
+            truncated: boolean;
         };
         /** @description Розрахована колонка шаблону. */
         CalculationYearColumnDto: {
