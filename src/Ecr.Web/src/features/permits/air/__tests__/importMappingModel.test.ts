@@ -91,6 +91,15 @@ describe('fieldRows — what the step shows per field', () => {
     expect(rows.find((row) => row.name === 'NaeCode')?.issue).toBeNull();
   });
 
+  it('a matched column whose values cannot be read counts the unreadable cells (errors of the field with a row), a clean one is 0', () => {
+    const bad = (row: number): ImportIssue => ({ severity: 'Error', messageKey: 'err.ECR-IMP-0422.regValueInvalid', row, field: 'height', args: { field: 'height', value: 'Цех 1' } });
+    const other: ImportIssue = { severity: 'Warning', messageKey: 'err.ECR-IMP-0422.regValueInvalid', row: 9, field: 'height' };
+    const rows = fieldRows(spec(), [mapped('Height', 30, 'AD'), mapped('NaeCode', 7, 'G')], [bad(3), bad(4), other]);
+
+    expect(rows.find((row) => row.name === 'Height')?.unreadable).toBe(2);
+    expect(rows.find((row) => row.name === 'NaeCode')?.unreadable).toBe(0);
+  });
+
   it('without a specification (still read) the matched columns are the rows; unnamed and repeated fields are left out', () => {
     expect(fieldRows(null, [mapped('NaeCode', 7, 'G')], []).map((row) => row.name)).toEqual(['NaeCode']);
     const odd: ImportSpec = { fields: [{ name: '' }, { name: 'A' }, { name: 'a' }] };

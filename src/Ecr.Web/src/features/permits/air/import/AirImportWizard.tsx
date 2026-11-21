@@ -19,6 +19,7 @@ import {
   type NewColumnRequest,
 } from './addColumn';
 import {
+  useAirLimits,
   useAirScopeCodes,
   useAirScopeFields,
   useAnalyseAirImport,
@@ -29,7 +30,7 @@ import {
 } from '../useAirLimits';
 import { ApplyStep } from './ApplyStep';
 import { ScopeStep } from './ScopeStep';
-import { scopeFormFields, scopeProblem } from './scopeModel';
+import { priorScope, scopeFormFields, scopeProblem } from './scopeModel';
 import { FileStep } from './FileStep';
 import {
   buildOptions,
@@ -140,6 +141,16 @@ export function AirImportWizard({ permitId, permitNumber, mayImport, mayEditProf
   const saveProfile = useSaveImportProfile();
   const scopeFields = useAirScopeFields();
   const scopeCodes = useAirScopeCodes();
+  // Re-import: a permit that already has rows under ONE region/area starts the scope step from it (the same card query as the tab).
+  const card = useAirLimits(permitId);
+  const prefilled = useRef(false);
+  useEffect(() => {
+    if (prefilled.current || card.data === undefined || scopeFields.data === undefined) return;
+    prefilled.current = true;
+    const found = priorScope(card.data.sources, scopeFields.data);
+    // Never over a choice the user has already made while the card was loading.
+    if (found !== null) setDraft((current) => (current.region === '' && current.area === '' ? { ...current, ...found } : current));
+  }, [card.data, scopeFields.data]);
   const scopeForm = (snapshot: ImportDraft): Readonly<Record<string, string>> =>
     scopeFields.data === undefined || scopeCodes.data === undefined
       ? {}

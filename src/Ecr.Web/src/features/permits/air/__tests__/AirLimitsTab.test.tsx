@@ -7,7 +7,7 @@ import { Catalog } from '@/test/__tests__/a11yFixtures';
 import { TestProviders } from '@/test/render';
 import * as airApi from '@/features/permits/air/airApi';
 import { AirLimitsTab } from '../AirLimitsTab';
-import { card } from './airFixtures';
+import { card, scopeFields } from './airFixtures';
 
 /**
  * Вкладка «Air limits» картки дозволу (NAE-план N3). Тексти - справжні, з `09-seed.sql`.
@@ -24,13 +24,15 @@ vi.mock('@/shared/i18n', async (importOriginal) => ({
       params !== undefined && name in params ? String(params[name]) : match,
     ),
 }));
-vi.mock('@/features/permits/air/airApi', () => ({ getAirLimits: vi.fn() }));
+vi.mock('@/features/permits/air/airApi', () => ({ getAirLimits: vi.fn(), getAirScopeFields: vi.fn() }));
 
 const getAirLimits = vi.mocked(airApi.getAirLimits);
+const getAirScopeFields = vi.mocked(airApi.getAirScopeFields);
 const text = (key: string): string => Catalog[key] ?? key;
 
 beforeEach(() => {
   getAirLimits.mockResolvedValue(card());
+  getAirScopeFields.mockRejectedValue(new Error('scope fields are not part of this test'));
 });
 afterEach(() => {
   cleanup();
@@ -60,6 +62,20 @@ describe('вкладка «Air limits»', () => {
     const rows = screen.getAllByTestId('air-source-row');
     expect(within(rows[1]!).getByText(text('permits.air.type.diffuseShort'))).toBeTruthy();
     expect(getAirLimits).toHaveBeenCalledWith(5);
+  });
+
+  it('«Region / area» показує назву запису з довідника й код в дужках; без scope-fields - лише код', async () => {
+    const base = card().sources[0]!;
+    getAirLimits.mockResolvedValue(card({ sources: [{ ...base, area: '-', regionEntryCode: 'REG_001', regionEntryId: 11, areaEntryCode: null, areaEntryId: null }] }));
+    getAirScopeFields.mockResolvedValue(scopeFields());
+    render(mount(true));
+    await screen.findByText('Source 1085');
+    await vi.waitFor(() => expect(screen.getByTestId('air-source-scope').textContent).toBe('Atyrau (REG_001)'));
+    cleanup();
+    getAirScopeFields.mockRejectedValue(new Error('down'));
+    render(mount(true));
+    await screen.findByText('Source 1085');
+    expect(screen.getByTestId('air-source-scope').textContent).toBe('REG_001');
   });
 
   it('розкриття джерела показує речовини з повною точністю; повторний клік згортає', async () => {

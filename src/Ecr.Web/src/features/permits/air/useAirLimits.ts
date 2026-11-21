@@ -74,6 +74,9 @@ export function useNaeTree(enabled: boolean) {
     queryFn: getNaeTree,
     enabled,
     structuralSharing: false,
+    // The wizard sends the user to the NAE structure page in another tab to create nodes: coming back must re-read the tree even
+    // within the default 30 s `staleTime` (`'always'`), or the hint would keep saying there are no nodes.
+    refetchOnWindowFocus: 'always',
   });
 }
 
@@ -173,5 +176,5 @@ export function useAirScopeCodes() {
 
 /** AIR-ON-AIR: how REGION / AREA are configured on the AIR type, with their values (scope step). */
 export function useAirScopeFields() {
-  return useQuery<AirScopeFields>({ queryKey: airKeys.scopeFields, queryFn: getAirScopeFields });
+  return useQuery<AirScopeFields>({ queryKey: airKeys.scopeFields, queryFn: () => getAirScopeFields() });
 }

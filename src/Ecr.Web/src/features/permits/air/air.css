@@ -356,6 +356,10 @@
   color: var(--mantine-color-statusError-text);
 }
 
+.pi-state[data-state='unreadable'] {
+  color: var(--mantine-color-statusError-text);
+}
+
 .pi-state[data-state='notInFile'] {
   color: var(--mantine-color-dimmed);
   font-weight: 400;

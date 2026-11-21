@@ -1,5 +1,5 @@
 import { t } from '@/shared/i18n';
-import type { AirAddedColumn, AirLimitsPermit, AirSource, AirSubstance } from './airTypes';
+import type { AirAddedColumn, AirLimitsPermit, AirScopeFields, AirSource, AirSubstance } from './airTypes';
 
 /*
  * Модель картки «Air limits» (NAE-план N3): підпис типу джерела, прочерк для порожнього, пошук. Чиста, без React.
@@ -86,15 +86,43 @@ export function sourceKey(source: AirSource): string {
   return String(source.id);
 }
 
+/** Names of the scope registry entries by id (`GET /air-limits/scope-fields`): the card shows «Atyrau (REG_001)», not the code alone. */
+export interface ScopeNames {
+  readonly regions: ReadonlyMap<number, string>;
+  readonly areas: ReadonlyMap<number, string>;
+}
+
+export const NoScopeNames: ScopeNames = { regions: new Map(), areas: new Map() };
+
+function namesOf(field: AirScopeFields['region']): ReadonlyMap<number, string> {
+  const out = new Map<number, string>();
+  for (const option of field.options) if (option.entryId !== null && option.name.trim() !== '') out.set(option.entryId, option.name);
+
+  return out;
+}
+
+export function scopeNamesOf(fields: AirScopeFields | undefined): ScopeNames {
+  return fields === undefined ? NoScopeNames : { regions: namesOf(fields.region), areas: namesOf(fields.area) };
+}
+
+/** `Name (CODE)` when the name is known and differs from the code (as the import wizard's region picker); else the code. */
+function named(code: string, name: string | undefined): string {
+  return name === undefined || name === code ? code : `${name} (${code})`;
+}
+
 /**
- * AIR-ON-AIR: область рядка — код запису Region (Area) з імпорту (`regionEntryCode`/`areaEntryCode`), інакше текст REGION/AREA;
- * ділянка `-` (без ділянки) не показується. Порожньо — прочерк.
+ * AIR-ON-AIR: область рядка — запис Region (Area) з імпорту: назва з довідника й код в дужках, `names` — з
+ * `scope-fields` (поки їх немає чи запису в них нема — лише код `regionEntryCode`/`areaEntryCode`, інакше текст
+ * REGION/AREA); ділянка `-` (без ділянки) не показується. Порожньо — прочерк.
  */
-export function scopeLabel(source: AirSource): string {
-  const region = source.regionEntryCode ?? source.region;
-  const areaText = source.areaEntryCode ?? source.area;
-  const area = areaText === null || areaText === undefined || areaText === '' || areaText === '-' ? null : areaText;
-  if (region === null || region === undefined || region === '') return cell(area);
+export function scopeLabel(source: AirSource, names: ScopeNames = NoScopeNames): string {
+  const regionCode = source.regionEntryCode ?? source.region;
+  const regionName = source.regionEntryId === null || source.regionEntryId === undefined ? undefined : names.regions.get(source.regionEntryId);
+  const region = regionCode === null || regionCode === undefined || regionCode === '' ? null : named(regionCode, regionName);
+  const areaCode = source.areaEntryCode ?? source.area;
+  const areaName = source.areaEntryId === null || source.areaEntryId === undefined ? undefined : names.areas.get(source.areaEntryId);
+  const area = areaCode === null || areaCode === undefined || areaCode === '' || areaCode === '-' ? null : named(areaCode, areaName);
+  if (region === null) return cell(area);
 
   return area === null ? region : `${region} / ${area}`;
 }
