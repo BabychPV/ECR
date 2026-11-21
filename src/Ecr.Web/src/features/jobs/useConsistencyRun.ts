@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, EcrApiError } from '@/api/client';
 import type { JobStatus } from '@/api/types';
-import { outcomeOf, pollInterval, type PlainJobOutcome } from '@/features/workflow/jobFollow';
+import { jobRefetchInterval, outcomeOf, type PlainJobOutcome } from '@/features/workflow/jobFollow';
 import { problemText } from '@/shared/ui/problemText';
 import { runConsistencyCheck } from './api';
 
@@ -111,7 +111,7 @@ export function useConsistencyRun(): ConsistencyRun {
     queryKey: ['job', jobId],
     queryFn: () => apiFetch<JobStatus>(`/api/v1/jobs/${encodeURIComponent(jobId ?? '')}`),
     enabled: jobId !== null,
-    refetchInterval: (query) => pollInterval(query.state.data?.state),
+    refetchInterval: (query) => jobRefetchInterval(query),
     retry: false,
   });
 

@@ -24,7 +24,7 @@ import { ConfirmModal } from "@/shared/ui/ConfirmModal";
 import { ErrorAlert } from "@/shared/ui/ErrorAlert";
 import { FilterInline, FilterRow } from "@/shared/ui/FilterBar";
 import { PeriodPicker } from "@/shared/ui/PeriodPicker";
-import { outcomeOf, pollInterval } from "@/features/workflow/jobFollow";
+import { jobRefetchInterval, outcomeOf } from "@/features/workflow/jobFollow";
 import { humanizeJobId } from "@/features/workflow/jobLabel";
 import { documentLabel } from "./SourceEventMapsPanel";
 import {
@@ -297,7 +297,7 @@ export function SourceEventsTable({
     queryKey: ["job", syncJobId],
     queryFn: () => apiFetch<JobStatus>(`/api/v1/jobs/${encodeURIComponent(syncJobId ?? "")}`),
     enabled: syncJobId !== null,
-    refetchInterval: (q) => pollInterval(q.state.data?.state),
+    refetchInterval: (q) => jobRefetchInterval(q),
     retry: false,
   });
   const syncOutcome = syncJobId === null ? null : outcomeOf(syncJob.data?.state, syncJob.isError);

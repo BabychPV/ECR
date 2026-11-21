@@ -125,7 +125,9 @@ async function tick(ms: number): Promise<void> {
 
 const banner = (): HTMLElement | null => document.querySelector('[data-testid="sheet-live-banner"]');
 
+// PERF-16: the poll beat carries a ±20 % spread; the middle of the range is exactly 30 s.
 beforeEach(() => {
+  vi.spyOn(Math, 'random').mockReturnValue(0.5);
   vi.useFakeTimers();
   answers = [];
   seq = 0;
@@ -135,6 +137,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   cleanup();
   client.clear();
   vi.useRealTimers();
@@ -234,6 +237,9 @@ describe('change marker poll (LIVE-REFRESH B2)', () => {
     mount();
     await tick(10);
     await tick(30_000);
+    // PERF-08: after a failure the beat stretches to 60 s (a struggling server is not asked at the full rate).
+    await tick(30_000);
+    expect(requests).toHaveLength(2);
     await tick(30_000);
 
     expect(requests).toHaveLength(3);

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, type UseMutationResult, type UseQueryResult } from '@tanstack/react-query';
 import { apiEnqueue, apiFetch, type AcceptedJob } from '@/api/client';
 import type { JobSummary } from '@/api/types';
+import { UnchangedPollSteps, unchangedBackoffMs } from '@/shared/polling/pollBackoff';
 import { showApiError } from '@/shared/ui/notify';
 
 /*
@@ -87,8 +88,15 @@ export function useRecentJobs(mine: boolean, scope: JobsScope = {}): UseQueryRes
     queryFn: () => apiFetch<JobSummary[]>(recentJobsUrl(mine, { projectId, parentJobId })),
     refetchInterval: (query) => {
       const list = query.state.data ?? [];
+      const active = list.filter((j) => j.state === 'Queued' || j.state === 'Running');
+      if (active.length === 0) return false;
 
-      return list.some((j) => j.state === 'Queued' || j.state === 'Running') ? ListPollMs : false;
+      // PERF-08: ListPollMs (3 s) while something moves; the same answer again and again (a long queue wait)
+      // stretches the beat to ~15 s, and every interval carries a +-20 % spread.
+      return unchangedBackoffMs(query, query.state.dataUpdatedAt, JSON.stringify(active), [
+        ListPollMs,
+        ...UnchangedPollSteps.slice(1),
+      ]);
     },
   });
 }

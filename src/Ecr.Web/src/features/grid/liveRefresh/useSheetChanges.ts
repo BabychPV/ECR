@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { JitterFraction, failureBackoffMs } from '@/shared/polling/pollBackoff';
 import { usePollWhileVisible } from '@/shared/ui/usePollWhileVisible';
 import { getSheetChanges, isFinalChangesError, pollSheetChanges, SheetChangesPollMs, type SheetChanges } from './api';
 
@@ -32,6 +33,9 @@ export interface SheetChangesState {
   /** Move the marker to "now" and hide the banner (before a refresh of the whole sheet). */
   readonly rebase: () => Promise<void>;
 }
+
+/** Failure counter ceiling: 30 s × 2^2 = 120 s is the slowest beat. */
+const MaxFailureSteps = 2;
 
 /**
  * LIVE-REFRESH B2: polls the change marker of the sheet every 30 s while the tab is visible.
@@ -78,6 +82,11 @@ export function useSheetChanges(
     }
   }, []);
   const busy = useRef(false);
+  /**
+   * PERF-08: consecutive failed polls (5xx, 429, network) — the beat stretches 30 → 60 → 120 s instead of
+   * hammering a server that is already struggling; any answer (even `304`) resets it.
+   */
+  const [failures, setFailures] = useState(0);
   /** Bumped on every key change: answers that arrive for an older key are dropped. */
   const generation = useRef(0);
 
@@ -92,6 +101,7 @@ export function useSheetChanges(
     try {
       const fresh = await pollSheetChanges(documentId, sheetDefId, periodKey, marker.current, etag.current, sheetCopyId);
       if (mine !== generation.current) return;
+      setFailures((count) => (count === 0 ? count : 0));
       // ✎ LIVE-STATUS: `304` — neither the data nor the state changed for this reader; the marker stays.
       if (fresh === null) return;
 
@@ -111,6 +121,7 @@ export function useSheetChanges(
       if (mine !== generation.current) return;
       // ⚠ Errors are not shown: the marker is an accessory of the sheet; the grid itself reports its own reads.
       if (isFinalChangesError(error)) setStoppedKey(key);
+      else setFailures((count) => Math.min(count + 1, MaxFailureSteps));
     } finally {
       busy.current = false;
     }
@@ -125,6 +136,7 @@ export function useSheetChanges(
     busy.current = false;
     setChange(null);
     setStatusChange(null);
+    setFailures(0);
     if (key !== null) void poll();
 
     return () => {
@@ -132,7 +144,12 @@ export function useSheetChanges(
     };
   }, [key]);
 
-  usePollWhileVisible(poll, key === null || stopped ? null : SheetChangesPollMs);
+  // PERF-16: ±20 % spread per tick — a hundred editors who opened the sheet together do not poll in step.
+  usePollWhileVisible(
+    poll,
+    key === null || stopped ? null : failureBackoffMs(SheetChangesPollMs, failures, SheetChangesPollMs * 4),
+    JitterFraction,
+  );
 
   const clear = useCallback((): void => setChange(null), []);
 

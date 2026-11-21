@@ -242,3 +242,23 @@ export async function markSlicesStale(client: QueryClient): Promise<void> {
   recordMissedWhileHidden(client);
   await client.invalidateQueries({ queryKey: queryKeys.slices.all(), refetchType: 'none' });
 }
+
+/**
+ * PERF-08: позначає зрізи документа за період застарілими БЕЗ перезапиту.
+ *
+ * ⚠ Для випадку «слідкувач за задачею здався, а чи є сітка, що доведе справу, невідомо»: змонтована видима
+ * сітка підхоплює задачу власним спостерігачем, а незмонтована прочитає свіже при монтуванні — на відміну від
+ * `invalidateSlicesForPeriods` це не б'є по сервері 91 запитом заради задачі, яка, можливо, ще в черзі.
+ */
+export async function markDocumentPeriodStale(client: QueryClient, documentId: number, periodKey: number): Promise<void> {
+  const ids = tablesInScope(client, { documentId, periodKey });
+  recordMissedWhileHidden(client);
+  await client.invalidateQueries({
+    predicate: (query) => {
+      const address = sliceAddressOf(query.queryKey);
+
+      return address !== null && address.periodKey === periodKey && (ids === null || ids.has(address.tableInstanceId));
+    },
+    refetchType: 'none',
+  });
+}
