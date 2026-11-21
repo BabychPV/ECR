@@ -490,6 +490,41 @@ public sealed class NightlyRecalculationTests(SqlServerFixture sql)
         Assert.Equal("unapproved", Assert.Single(Reasons(woken.Details)).Key);
     }
 
+    /// <summary>
+    /// ✎ Огляд H2: виняток у рішенні про ОДИН документ не зриває розклад проєкту: той документ рахується (decisionError),
+    /// решта — за своїми рішеннями, прогін журналу — Succeeded.
+    /// </summary>
+    /// <remarks>МУТАЦІЯ: прибрати try/catch навколо NightlyDecisionAsync — виняток летить із задачі, червоний.</remarks>
+    [Fact]
+    public async Task Збій_рішення_про_документ_рахує_його_і_не_зупиняє_решту()
+    {
+        var arranged = await ArrangeAsync();
+        long other;
+        await using (var db = arranged.Builder.CreateContext())
+        {
+            var extra = new Document(arranged.Document.ProjectId, $"N15E-{Guid.NewGuid():N}"[..20], 1, QuietSlot);
+            db.Documents.Add(extra);
+            await db.SaveChangesAsync();
+            var loader = new BulkCellLoader(sql.ConnectionString, 1000);
+            var id = await loader.ReserveIdsAsync("doc.TableInstanceSeq", 1, CancellationToken.None);
+            db.TableInstances.Add(new TableInstance(January, id, extra.Id, arranged.Document.TableDefId, QuietSlot.AddYears(-40)));
+            await db.SaveChangesAsync();
+            other = extra.Id;
+        }
+
+        var failing = arranged.Document.DocumentId;
+        var result = await NightlyAsync(
+            arranged, QuietSlot.AddDays(60),
+            probe: child => child.DocumentId == failing
+                ? throw new InvalidOperationException("PSS-15 H2: змодельований збій рішення")
+                : Task.CompletedTask);
+
+        Assert.Equal([failing, other], result.Children.Select(c => c.DocumentId).Order());
+        var reasons = Reasons(result.Details).ToDictionary(p => p.Key, p => p.Value);
+        Assert.Equal(1, reasons["decisionError"]);
+        Assert.Equal(1, reasons["noBaseline"]);
+    }
+
     private static IReadOnlyList<KeyValuePair<string, int>> Reasons(JsonElement details)
         => [.. details.GetProperty("reasons").EnumerateObject().Select(p => new KeyValuePair<string, int>(p.Name, p.Value.GetInt32()))];
 
@@ -528,7 +563,8 @@ public sealed class NightlyRecalculationTests(SqlServerFixture sql)
     }
 
     private static async Task<NightlyResult> NightlyAsync(
-        Arranged arranged, DateTime at, int? year = Year, bool skipUnchanged = true, bool overrideApproved = false)
+        Arranged arranged, DateTime at, int? year = Year, bool skipUnchanged = true, bool overrideApproved = false,
+        Func<RecalculationRequest, Task>? probe = null)
     {
         var scheduler = new RecordingScheduler();
         var progress = new RecordingProgress($"IRecalculationJob-nightly-test-{Guid.NewGuid():N}");
@@ -542,7 +578,8 @@ public sealed class NightlyRecalculationTests(SqlServerFixture sql)
 
         await using (var db = arranged.Builder.CreateContext())
         {
-            await Job(db, new RecordingRunner(), scheduler.Substitute, at).ExecuteAsync(request, progress, CancellationToken.None);
+            var job = NightlyJobParts.Job(db, new RecordingRunner(), scheduler.Substitute, at, probe);
+            await job.ExecuteAsync(request, progress, CancellationToken.None);
         }
 
         Assert.All(scheduler.Calls, c =>
@@ -688,10 +725,15 @@ public sealed class NightlyRecalculationTests(SqlServerFixture sql)
 /// <summary>Збірка <see cref="RecalculationJob"/> для тестів нічного розкладу: фаза формул нічого не пише.</summary>
 internal static class NightlyJobParts
 {
-    public static RecalculationJob Job(EcrDbContext db, ICalculationRunner runner, IBackgroundJobScheduler jobs, DateTime at)
+    public static RecalculationJob Job(
+        EcrDbContext db, ICalculationRunner runner, IBackgroundJobScheduler jobs, DateTime at,
+        Func<RecalculationRequest, Task>? probe = null)
     {
         var clock = new TestClock(at);
-        return new RecalculationJob(db, runner, RunHandler(db, clock), FormulaService(), clock, jobs);
+        return new RecalculationJob(db, runner, RunHandler(db, clock), FormulaService(), clock, jobs)
+        {
+            NightlyDecisionProbe = probe,
+        };
     }
 
     private static RunCalculationHandler RunHandler(EcrDbContext db, TestClock clock)

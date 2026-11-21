@@ -86,6 +86,17 @@ public sealed partial class RecalculationJob
                   + "{Skipped}, без відкритих періодів року {NoScope}.")]
     private static partial void LogNightlyFannedOut(ILogger logger, int projectId, int year, int queued, int skipped, int noScope);
 
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Нічний перерахунок проєкту {ProjectId}: рішення про документ {DocumentId} не вдалося — документ рахується "
+                  + "(причина decisionError); решта розкладу йде далі.")]
+    private static partial void LogNightlyDecisionFailed(ILogger logger, int projectId, long documentId, Exception exception);
+
+    /// <summary>
+    /// Лише тести: виклик на початку рішення про документ (кинути — змоделювати збій рішення, огляд H2).
+    /// </summary>
+    internal Func<RecalculationRequest, Task>? NightlyDecisionProbe { get; init; }
+
     /// <summary>Поточний рік проєкту для нічного завдання без року (шлях без планувальника).</summary>
     private async Task<int?> NightlyYearOfProjectAsync(int projectId, CancellationToken ct)
     {
@@ -161,7 +172,25 @@ public sealed partial class RecalculationJob
                         OverrideReason = null,
                     };
 
-                    var decision = await NightlyDecisionAsync(child, context, ct).ConfigureAwait(false);
+                    // ✎ Огляд H2: збій рішення про ОДИН документ не зриває розклад решти проєкту — документ рахується
+                    // («сумніваєшся — рахуй»), причина в журналі обслуговування — decisionError.
+                    NightlyDecision decision;
+                    try
+                    {
+                        decision = await NightlyDecisionAsync(child, context, ct).ConfigureAwait(false);
+                    }
+#pragma warning disable CA1031 // Рішення — оптимізація: будь-який збій означає «рахувати», а не «пропустити» чи «впасти».
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+#pragma warning restore CA1031
+                    {
+                        if (logger is not null)
+                        {
+                            LogNightlyDecisionFailed(logger, request.ProjectId, documentId, ex);
+                        }
+
+                        decision = new NightlyDecision(NightlyVerdict.Recalculate, NightlyReason.DecisionError);
+                    }
+
                     outcome.Count(decision);
                     if (decision.Verdict == NightlyVerdict.Archived && logger is not null)
                     {
@@ -230,6 +259,11 @@ public sealed partial class RecalculationJob
     {
         ArgumentNullException.ThrowIfNull(child);
         ArgumentNullException.ThrowIfNull(context);
+
+        if (NightlyDecisionProbe is { } probe)
+        {
+            await probe(child).ConfigureAwait(false);
+        }
 
         var annualOnly = new Dictionary<int, IReadOnlyList<int>>();
         IReadOnlySet<int> refused;
@@ -499,6 +533,9 @@ public enum NightlyReason
     /// зміни, яких немає в журналах правок комірок і рядків.
     /// </summary>
     Document = 9,
+
+    /// <summary>✎ Огляд H2: рішення про документ впало винятком — документ рахується (див. журнал застосунку).</summary>
+    DecisionError = 23,
 
     /// <summary>Нема з чим порівнювати: у відкритого періоду немає актуального прогону документа.</summary>
     NoBaseline = 20,
