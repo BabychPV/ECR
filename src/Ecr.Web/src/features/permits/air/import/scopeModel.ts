@@ -1,4 +1,4 @@
-import type { AirScopeCodes, AirScopeEntry, AirScopeField, AirScopeFields } from '../airTypes';
+import type { AirScopeCodes, AirScopeEntry, AirScopeField, AirScopeFields, AirSource } from '../airTypes';
 import { NoArea } from './importModel';
 
 /*
@@ -84,4 +84,26 @@ export function scopeFormFields(
   if (areaChoice(fields, codes, region).show) put(fields.area, area, 'areaEntryId', 'area');
 
   return out;
+}
+
+/**
+ * The scope the permit already has rows for, as the draft values of the scope step: when ALL its sources sit under one region
+ * and one area (Registry — entry ids, List/Text — the stored text; an area `-` or empty is «no area»), the re-import starts from
+ * it. Several scopes, a row without a region or a value the pickers no longer offer — `null` (the user chooses as for a new permit).
+ */
+export function priorScope(sources: readonly Pick<AirSource, 'region' | 'regionEntryId' | 'area' | 'areaEntryId'>[], fields: AirScopeFields): { region: string; area: string } | null {
+  const valueOf = (field: AirScopeField, entryId: number | null | undefined, text: string | null | undefined): string => {
+    if (field.kind === ScopeKind.Registry) return entryId === null || entryId === undefined ? '' : String(entryId);
+    const trimmed = (text ?? '').trim();
+
+    return trimmed === NoArea ? '' : trimmed;
+  };
+  const scopes = new Set(sources.map((source) => JSON.stringify([valueOf(fields.region, source.regionEntryId, source.region), valueOf(fields.area, source.areaEntryId, source.area)])));
+  if (scopes.size !== 1) return null;
+  const [region, area] = JSON.parse([...scopes][0] ?? '[]') as [string, string];
+  if (region === '') return null;
+  if (fields.region.kind !== ScopeKind.Text && chosenOption(fields.region, region) === undefined) return null;
+  if (area !== '' && fields.area.kind !== ScopeKind.Text && chosenOption(fields.area, area) === undefined) return { region, area: '' };
+
+  return { region, area };
 }
