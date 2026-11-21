@@ -57,6 +57,26 @@ public sealed class DeleteDocumentSourceTriggerTests
         });
     }
 
+    /// <summary>
+    /// ✎ PSS-15 (огляд L-new-1, D-562): споживачів документа-джерела позначено ДО видалення, у тій самій транзакції, з
+    /// автором і моментом видалення — інакше нічний перерахунок споживача не побачив би, що джерела вже немає.
+    /// </summary>
+    /// <remarks>МУТАЦІЯ: прибрати виклик <c>TouchSourceConsumersAsync</c> в обробнику — червоний.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait("Finding", "PSS-15")]
+    public async Task Видалення_джерела_торкається_споживачів_до_видалення()
+    {
+        await Handler().HandleAsync(DocumentId, CancellationToken.None);
+
+        Received.InOrder(() =>
+        {
+            _ = _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>());
+            _ = _deletion.TouchSourceConsumersAsync(DocumentId, UserId, DateTime.UnixEpoch, Arg.Any<CancellationToken>());
+            _ = _deletion.DeleteAsync(DocumentId, Arg.Any<CancellationToken>());
+        });
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage6)]
     public async Task Невдале_видалення_нічого_не_ставить()

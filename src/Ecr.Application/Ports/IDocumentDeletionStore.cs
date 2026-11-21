@@ -34,6 +34,18 @@ public interface IDocumentDeletionStore
     /// <summary>Видаляє документ і всі його робочі дані.</summary>
     /// <returns>Скільки комірок видалено — для сліду в журналі безпеки.</returns>
     public Task<int> DeleteAsync(long documentId, CancellationToken ct);
+
+    /// <summary>
+    /// ✎ PSS-15 (огляд L-new-1, D-562): якщо документ — ДЖЕРЕЛО зв'язки B179 (<c>cfg.DocumentSourceBinding</c>, читання з
+    /// документа ввімкнене), торкається документів-споживачів (<c>doc.Document.ModifiedAt</c>): після видалення джерела
+    /// нічний перерахунок інакше не бачить зміни входу споживача (документа-джерела вже немає, щоб у ньому шукати зміни).
+    /// </summary>
+    /// <param name="documentId">Документ, що видаляється (кличеться ДО <see cref="DeleteAsync"/>: шаблон — за екземплярами).</param>
+    /// <param name="userId">Хто видаляє.</param>
+    /// <param name="utcNow">Момент.</param>
+    /// <param name="ct">Токен скасування (транзакції).</param>
+    /// <returns>Скільки споживачів позначено; 0 — документ не джерело.</returns>
+    public Task<int> TouchSourceConsumersAsync(long documentId, int userId, DateTime utcNow, CancellationToken ct);
 }
 
 /// <summary>Усе, з чого домен вирішує, чи документ — чернетка.</summary>
