@@ -421,16 +421,52 @@ public sealed class RecalculationYearPerPeriodCommitTests(SqlServerFixture sql) 
         Assert.Equal(percents.Order(), percents);
     }
 
+    /// <summary>
+    /// ✎ L1b / D4 (стенд Land 21.11): скасування задачі посеред кроку закриває його прогін одразу — <c>Failed</c> з причиною
+    /// «задачу скасовано», а не лишає <c>Running</c> до <c>AbandonedWorkSweeper</c> (2 год). Скасування проходить нагору як є.
+    /// </summary>
+    /// <remarks>
+    /// Обидві форми скасування, що бачить задача: <see cref="OperationCanceledException"/> і виняток драйвера посеред запиту
+    /// (не OCE) при скасованому токені. МУТАЦІЯ: прибрати гілку <c>catch … when (ct.IsCancellationRequested)</c> у
+    /// <c>RecalculationJob.ExecuteAsync</c> — червоні обидва випадки (прогін <c>Running</c>).
+    /// </remarks>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Скасування_кроку_закриває_його_прогін_з_причиною(bool driverError)
+    {
+        var (builder, document) = await ArrangeAsync();
+        await using var host = NewHost();
+        var scheduler = Scheduler(host);
+        await scheduler.EnqueueCoalescedAsync<IRecalculationJob>(
+            RecalculateDocumentHandler.YearTargetOf(document.DocumentId),
+            new { document.DocumentId, PeriodKey = (int?)null }, CancellationToken.None);
+        var step = (await ClaimAsync(host, JobLanes.Recalc))!;
+
+        using var cancel = new CancellationTokenSource();
+        var thrown = await Assert.ThrowsAnyAsync<Exception>(() => RunStepAsync(
+            builder, scheduler, host.Queue, step, runner: new CancellingRunner(cancel, driverError), ct: cancel.Token));
+        Assert.Equal(driverError, thrown is InvalidOperationException);
+
+        await using var db = Sql.CreateContext();
+        var runs = await db.CalculationRuns.AsNoTracking().Where(r => r.DocumentId == document.DocumentId).ToListAsync();
+        var run = Assert.Single(runs);
+        Assert.Equal(("Failed", document.PeriodKey.Value), (run.Status, run.PeriodKey!.Value));
+        Assert.NotNull(run.FinishedAt);
+        Assert.True(JobProgressMessageCodec.TryDecode(run.ErrorMessage, out var reason), run.ErrorMessage);
+        Assert.Equal(RecalculationJob.CancelledRunKey, reason.Key);
+    }
+
     private async Task RunStepAsync(
         TestDocumentBuilder builder, IBackgroundJobScheduler scheduler, IJobQueue queue, ClaimedJob step,
         RecalculationBudgetMonitor? budget = null, List<string?>? messages = null, (PeriodKey Reader, PeriodKey Owner)? readsOwner = null,
-        List<(int Percent, string? Message)>? reports = null)
+        List<(int Percent, string? Message)>? reports = null, ICalculationRunner? runner = null, CancellationToken ct = default)
     {
         await using var db = builder.CreateContext();
         var clock = new TestClock(Now);
         var job = new RecalculationJob(
             db,
-            new WritingRunner(builder, _methodologyVersionId, _unitId, readsOwner),
+            runner ?? new WritingRunner(builder, _methodologyVersionId, _unitId, readsOwner),
             RunHandler(db, clock),
             FormulaService(),
             clock,
@@ -439,7 +475,7 @@ public sealed class RecalculationYearPerPeriodCommitTests(SqlServerFixture sql) 
             lease: new FixedLease(step.Claim),
             queue: queue);
 
-        await job.ExecuteAsync(step.PayloadJson, new RecordingProgress(messages, reports), CancellationToken.None);
+        await job.ExecuteAsync(step.PayloadJson, new RecordingProgress(messages, reports), ct);
     }
 
     private async Task<string> EnqueueEditAsync(long documentId)
@@ -584,6 +620,26 @@ public sealed class RecalculationYearPerPeriodCommitTests(SqlServerFixture sql) 
                 ct);
             await db.SaveChangesAsync(ct);
             return profile;
+        }
+    }
+
+    /// <summary>Фейк оркестратора: посеред методологій «людина натискає Скасувати» — токен задачі скасовано.</summary>
+    /// <param name="cancel">Токен задачі.</param>
+    /// <param name="driverError">Виняток драйвера посеред запиту (не OCE), як SqlException «Operation cancelled by user».</param>
+    private sealed class CancellingRunner(CancellationTokenSource cancel, bool driverError) : ICalculationRunner
+    {
+        public async Task<ModuleProfile> RunAsync(
+            long calculationRunId, long documentId, PeriodKey periodKey,
+            IReadOnlyList<CalculationBindingRef> bindings, IJobProgress progress, CancellationToken ct)
+        {
+            await cancel.CancelAsync();
+            if (driverError)
+            {
+                throw new InvalidOperationException("Operation cancelled by user.");
+            }
+
+            ct.ThrowIfCancellationRequested();
+            return new ModuleProfile();
         }
     }
 

@@ -105,6 +105,61 @@ public sealed partial class RecalculationJob(
                   + "пропущено (B69/B81: архівні дані не перераховуються).")]
     private static partial void LogArchivedProjectSkipped(ILogger logger, int projectId, long documentId);
 
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "RecalculationJob: задачу скасовано, а {Runs} незавершений(і) прогін(и) закрити не вдалося; їх закриє AbandonedWorkSweeper.")]
+    private static partial void LogCloseCancelledFailed(ILogger logger, int runs, Exception exception);
+
+    /// <summary>Ключ каталогу причини: прогін закрито, бо задачу скасовано (L1b / D4).</summary>
+    public const string CancelledRunKey = "jobs.calculationRunCancelled";
+
+    /// <summary>Причина <c>calc.CalculationRun.ErrorMessage</c> прогону скасованої задачі — конверт мовою читача.</summary>
+    public static readonly string CancelledRunReason =
+        JobProgressMessageCodec.Encode(new JobProgressMessageEnvelope(CancelledRunKey));
+
+    /// <summary>
+    /// ✎ L1b / D4: прогони, які задача створила й не завершила, — <c>Failed</c> з причиною «скасовано» одразу на скасуванні.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Без токена задачі (він уже скасований) і лише ті, що ДОСІ <c>Running</c> у БАЗІ (стан у пам'яті міг лишитися від
+    /// відкоченого перемикання, тож умова — лише в UPDATE): завершений прогін періоду вже
+    /// актуальний (чи замінений) і чіпати його не можна; прогін, який паралельно закрив прибиральник, — теж. Збій тут лише в
+    /// журнал: скасування не підміняється новим винятком, а завислі прогони закриє <c>AbandonedWorkSweeper</c>, як доти.
+    /// </remarks>
+    private async Task CloseCancelledRunsAsync(IEnumerable<Domain.Entities.Calculations.CalculationRun?> runsOfJob)
+    {
+        var ids = runsOfJob
+            .OfType<Domain.Entities.Calculations.CalculationRun>()
+            .Where(run => run.Id > 0)
+            .Select(run => run.Id)
+            .ToList();
+        if (ids.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            db.ChangeTracker.Clear();
+            var utcNow = clock.UtcNow;
+            await db.CalculationRuns
+                .Where(r => ids.Contains(r.Id) && r.Status == "Running")
+                .ExecuteUpdateAsync(
+                    s => s
+                        .SetProperty(r => r.Status, "Failed")
+                        .SetProperty(r => r.FinishedAt, utcNow)
+                        .SetProperty(r => r.ErrorMessage, CancelledRunReason),
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+#pragma warning disable CA1031 // Закриття — другорядне: скасування не підміняється збоєм бази.
+        catch (Exception ex)
+#pragma warning restore CA1031
+        {
+            LogCloseCancelledFailed(logger ?? NullLogger<RecalculationJob>.Instance, ids.Count, ex);
+        }
+    }
+
     /// <summary>Стеля прив'язок на прогін: методологій у системі — десятки.</summary>
     private const int MaxBindings = 5_000;
 
@@ -769,6 +824,15 @@ public sealed partial class RecalculationJob(
                         ct)
                     .ConfigureAwait(false);
             }
+        }
+        catch (Exception) when (ct.IsCancellationRequested)
+        {
+            // ⛔ L1b / D4 (стенд Land 21.11): скасування (POST /jobs/{id}/cancel, межа тривалості, зупинка служби) — за
+            // станом ТОКЕНА, а не типом винятку (драйвер посеред запиту кидає SqlException «Operation cancelled by user»,
+            // див. JobWorker L2-01). Доти прогони кроку лишалися `Running` до AbandonedWorkSweeper (2 год): гілка нижче
+            // OCE не бачила, а SqlException вела в маркування токеном, що вже скасований. Закриваємо тут, без токена.
+            await CloseCancelledRunsAsync(periodRuns.Values.Select(entry => entry.Run).Append(yearRun)).ConfigureAwait(false);
+            throw;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
