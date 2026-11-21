@@ -673,12 +673,15 @@ public static class DependencyInjection
         // RT: expressions
         // RT-22; HSE400: склад газу LAND_HSE400_COMPOSITION за прапором читається з документа, а не з довідника.
         services.AddScoped<RegistrySnapshotLoader>();
+        services.AddSingleton<Hse400CompositionCache>(); // PERF-11
         services.AddScoped<IRegistrySnapshotLoader>(sp => new Hse400CompositionSnapshotLoader(
             sp.GetRequiredService<RegistrySnapshotLoader>(),
             sp.GetRequiredService<EcrDbContext>(),
             sp.GetRequiredService<ICalculationResultStore>(),
             // P-0118-31/33: лише біт зв'язки cfg.DocumentSourceBinding.ReadFromDocument (ключ виведено, не читається).
-            enabled: null));
+            enabled: null,
+            // PERF-11: склад із документів HSE400 не перечитується кожним прогоном (відбиток входів, пам'ять процесу).
+            cache: sp.GetRequiredService<Hse400CompositionCache>()));
 
         // PERMITS: types — типи дозволів над реєстрами (PM-03)
         services.AddScoped<IPermitTypeStore, PermitTypeStore>();

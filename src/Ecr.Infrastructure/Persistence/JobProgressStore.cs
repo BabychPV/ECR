@@ -776,6 +776,27 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
     }
 
     /// <inheritdoc />
+    public async Task<int> PurgeRoutineSucceededAsync(DateTime olderThan, int batch, CancellationToken ct)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(batch, 1);
+
+        // ⚠ Той самий предикат «рутини», що й `HideRoutine` у `ListRecentAsync` (код задачі формул + Succeeded), і
+        // та сама порційність, що в `PurgeFinishedAsync`. `IX_JobProgress_Stale (State, HeartbeatAt)` дає пошук за
+        // `State = Succeeded`; `UpdatedAt < межа` — щоб щойно закрита рутина не зникала раніше межі.
+        var code = FormulaRecalculationJobCode;
+        var victims = db.JobProgresses
+            .Where(p => p.State == SucceededState && p.JobCode == code && p.UpdatedAt < olderThan)
+            .OrderBy(p => p.HeartbeatAt)
+            .Take(batch)
+            .Select(p => p.JobId);
+
+        return await db.JobProgresses
+            .Where(p => victims.Contains(p.JobId))
+            .ExecuteDeleteAsync(ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
     public async Task<int> FailStaleAsync(string reason, DateTime utcNow, CancellationToken ct)
     {
         // ⛔ Поріг рахується ОДИН раз, до вибірки. Обчислення його всередині
