@@ -26,8 +26,11 @@ public sealed record JobWorkerOptions
     /// </summary>
     public string Role { get; init; } = JobProgressStore.RoleApi;
 
+    /// <summary>Типове <see cref="MaxConcurrency"/> (воркер Api).</summary>
+    public const int DefaultMaxConcurrency = 4;
+
     /// <summary>Скільки задач виконується одночасно.</summary>
-    public int MaxConcurrency { get; init; } = 4;
+    public int MaxConcurrency { get; init; } = DefaultMaxConcurrency;
 
     /// <summary>
     /// Лейни з власними місцями понад <see cref="MaxConcurrency"/> (P1-06, AN-109): задачі, на які чекає людина,
@@ -197,15 +200,19 @@ public sealed partial class JobWorker(
             // місця (резервний цикл): тоді перерахунок формул не втрачає гарантії старту, а `default`
             // (матеріалізація, синк подій, знімки звітів) не голодує під сталим потоком PATCH.
             List<Task> loops =
-                [PollAsync(owner, primaryLanes, slots, primary: true, rotateLanes: reservedCount > 0, stoppingToken)];
+                [PollAsync(
+                    owner, primaryLanes, slots, options.MaxConcurrency, primary: true, rotateLanes: reservedCount > 0,
+                    stoppingToken)];
             if (reservedCount > 0)
             {
-                loops.Add(PollAsync(owner, reserved, reservedSlots, primary: false, rotateLanes: false, stoppingToken));
+                loops.Add(PollAsync(
+                    owner, reserved, reservedSlots, Math.Max(1, reservedCount), primary: false, rotateLanes: false, stoppingToken));
             }
 
             if (separate.Length > 0)
             {
-                loops.Add(PollAsync(owner, separate, separateSlots, primary: false, rotateLanes: false, stoppingToken));
+                loops.Add(PollAsync(
+                    owner, separate, separateSlots, Math.Max(1, separateCount), primary: false, rotateLanes: false, stoppingToken));
             }
 
             await Task.WhenAll(loops).ConfigureAwait(false);
@@ -224,6 +231,7 @@ public sealed partial class JobWorker(
     /// <param name="owner">Власник оренди.</param>
     /// <param name="lanes">Лейни цього циклу.</param>
     /// <param name="slots">Місця цього циклу.</param>
+    /// <param name="capacity">Скільки місць у <paramref name="slots"/> (L1b / D2: резерв останнього місця).</param>
     /// <param name="primary">
     /// Основний цикл: лише він закриває прострочене (<see cref="ExpireAsync"/>) і чекає сигналу постановки.
     /// Резервний/окремий цикл спільного сигналу не бере: той будить ОДНОГО (<see cref="JobQueueSignal"/>), і такий
@@ -237,6 +245,7 @@ public sealed partial class JobWorker(
         string owner,
         string[] lanes,
         SemaphoreSlim slots,
+        int capacity,
         bool primary,
         bool rotateLanes,
         CancellationToken stopping)
@@ -244,6 +253,7 @@ public sealed partial class JobWorker(
         var lastExpire = 0L;
         var turn = 0;
         var queueUnusableReported = false;
+        var reserveLastSlot = ReservesLastSlot(lanes, capacity);
 
         // B85: окремий/резервний цикл чекає ВЛАСНОЇ підписки на свої лейни, а не спить PollInterval наосліп.
         using var wake = primary ? null : signal.Subscribe(lanes);
@@ -258,6 +268,15 @@ public sealed partial class JobWorker(
 
             await slots.WaitAsync(stopping).ConfigureAwait(false);
 
+            // ✎ L1b / D2 (стенд Land 21.11, D-561): ОСТАННЄ вільне місце циклу, що бере лейн перерахунку, дітям розкладу не
+            // віддається. Доти межа дітей (FanOutMaxConcurrency = 4) дорівнювала місцям виконавця (MaxConcurrency = 4):
+            // чотири діти займали всі, і ручний перерахунок чекав 4 хв 39 с, автоперерахунок — 71 с, вплив довідника (default)
+            // — до кінця дитини, хоча D-561 каже «ручні й авто обганяють дітей». Обігнати можна лише маючи вільне місце.
+            // Резерв — у виконавці, а не зменшенням межі в базі: межа рахує весь пул (дочірні процеси по одному місцю, де
+            // резерв неможливий і не потрібен — місця дає кількість процесів), а місце тримає й задача після свого рядка
+            // (прибирання після кроку, D5). Сам claim атомарний, тож «останнє» тут — за семафором цього циклу.
+            var exceptFanOut = reserveLastSlot && slots.CurrentCount == 0;
+
             ClaimedJob? job = null;
             TimeSpan? backoff = null;
             var claimStarted = 0L;
@@ -267,7 +286,7 @@ public sealed partial class JobWorker(
                 var claimLanes = rotateLanes ? Rotate(lanes, turn) : lanes;
                 turn = (turn + 1) % Math.Max(1, lanes.Length);
                 claimStarted = Stopwatch.GetTimestamp();
-                job = await ClaimAsync(owner, claimLanes).ConfigureAwait(false);
+                job = await ClaimAsync(owner, claimLanes, exceptFanOut).ConfigureAwait(false);
                 queueUnusableReported = false;
             }
             catch (InvalidOperationException ex) when (ex.GetType() == typeof(InvalidOperationException))
@@ -354,16 +373,25 @@ public sealed partial class JobWorker(
         }
     }
 
-    private async Task<ClaimedJob?> ClaimAsync(string owner, IReadOnlyCollection<string> lanes)
+    private async Task<ClaimedJob?> ClaimAsync(string owner, IReadOnlyCollection<string> lanes, bool exceptFanOut)
     {
         await using var scope = scopes.CreateAsyncScope();
+        var queue = scope.ServiceProvider.GetRequiredService<IJobQueue>();
 
         // ⚠ CancellationToken.None: скасований посеред UPDATE…OUTPUT claim міг би
         // закомітити захоплення, а задачу ніхто б не отримав — до кінця оренди.
-        return await scope.ServiceProvider.GetRequiredService<IJobQueue>()
-            .ClaimAsync(lanes, owner, options.Lease, CancellationToken.None)
+        return await (exceptFanOut
+                ? queue.ClaimExceptFanOutAsync(lanes, owner, options.Lease, CancellationToken.None)
+                : queue.ClaimAsync(lanes, owner, options.Lease, CancellationToken.None))
             .ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// ✎ L1b / D2: чи цикл тримає останнє місце для задач, що не є дітьми розкладу: він бере лейн перерахунку і має понад
+    /// одне місце (з одним місцем резерв означав би «дітей ніколи»; паралелізм пулу — кількість процесів).
+    /// </summary>
+    internal static bool ReservesLastSlot(IReadOnlyCollection<string> lanes, int capacity)
+        => capacity > 1 && lanes.Contains(JobLanes.Recalc, StringComparer.Ordinal);
 
     private async Task ExpireAsync()
     {

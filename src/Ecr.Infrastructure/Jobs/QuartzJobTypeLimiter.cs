@@ -137,6 +137,39 @@ public sealed class QuartzJobTypeLimiter(
     }
 
     /// <summary>
+    /// ✎ L1b / D2 (стенд Land 21.11): попередження старту, коли межа дітей розкладу не менша за місця виконавця перерахунку —
+    /// інакше діти займають усі місця, і ручний/авто перерахунок та інші лейни чекають хвилинами (D-561: вони обганяють дітей).
+    /// </summary>
+    /// <param name="fanOutCap">Межа дітей (<see cref="RecalcFanOutMaxConcurrencyKey"/>).</param>
+    /// <param name="slots">Місць виконавця, що бере лейн перерахунку.</param>
+    /// <param name="slotsKey">Ключ/опис місць для тексту.</param>
+    /// <param name="lastSlotReserved">
+    /// Виконавець сам тримає останнє місце не для дітей (<c>JobWorker</c> з кількома місцями): тоді попередження каже, скільки
+    /// дітей насправді; інакше (Quartz, пул процесів по одному місцю) — що межу варто знизити.
+    /// </param>
+    /// <returns>Текст попередження або <c>null</c>, коли межа менша за місця.</returns>
+    public static string? FanOutCapacityWarning(int fanOutCap, int slots, string slotsKey, bool lastSlotReserved)
+    {
+        if (fanOutCap < slots)
+        {
+            return null;
+        }
+
+        return lastSlotReserved && slots > 1
+            ? string.Format(
+                CultureInfo.InvariantCulture,
+                "{0} = {1} ≥ місць виконавця перерахунку ({2} = {3}): дітей розкладу на процес виконується не більше {4} — "
+                + "останнє місце виконавець тримає для ручного й автоперерахунку та інших лейнів (D-561). Щоб межа діяла як "
+                + "задано, вона має бути меншою за кількість місць.",
+                RecalcFanOutMaxConcurrencyKey, fanOutCap, slotsKey, slots, slots - 1)
+            : string.Format(
+                CultureInfo.InvariantCulture,
+                "{0} = {1} ≥ місць виконавця перерахунку ({2} = {3}): діти розкладу можуть зайняти всі місця, і ручний та "
+                + "автоперерахунок чекатимуть кінця дитини (D-561 каже — обганяють). Знизьте межу до {4} або додайте місць.",
+                RecalcFanOutMaxConcurrencyKey, fanOutCap, slotsKey, slots, Math.Max(1, slots - 1));
+    }
+
+    /// <summary>
     /// Займає місце для задачі типу <paramref name="jobType"/> без черги (задача без ідентифікатора): див.
     /// <see cref="TryEnter(Type, string?)"/>.
     /// </summary>

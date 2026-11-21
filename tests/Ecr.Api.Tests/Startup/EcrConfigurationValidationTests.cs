@@ -191,6 +191,45 @@ public sealed class EcrConfigurationValidationTests(SqlServerFixture sql)
     }
 
     /// <remarks>
+    /// ✎ L1b / D2 (стенд Land 21.11): межа дітей розкладу перерахунку не менша за місця виконавця, що бере лейн перерахунку,
+    /// — попередження старту (не зупинка). Черга в базі з InProcess — місця воркера Api (останнє тримає воркер, текст каже,
+    /// скільки дітей насправді); Quartz — потоки пулу; Executor = Worker — попереджає сам Ecr.Worker. Мутація: прибрати виклик
+    /// <c>FanOutCapacityWarning</c> з <c>Warnings</c> — червоні рядки з попередженням.
+    /// </remarks>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Finding", "L1b-D2")]
+    [InlineData("Database", "InProcess", "4", null, "не більше 3")]
+    [InlineData("Database", "InProcess", "6", null, "не більше 3")]
+    [InlineData("Database", "InProcess", "3", null, null)]
+    [InlineData("Database", "Worker", "40", null, null)]
+    [InlineData("Quartz", "InProcess", "4", "4", "Знизьте межу до 3")]
+    [InlineData("Quartz", "InProcess", "4", null, null)]
+    public void Межа_дітей_розкладу_не_менша_за_місця_виконавця_попереджає(
+        string mode, string executor, string cap, string? threads, string? expected)
+    {
+        var config = Config(
+            ("Jobs:Queue:Mode", mode),
+            ("Jobs:Recalculation:Executor", executor),
+            ("Jobs:Recalculation:FanOutMaxConcurrency", cap),
+            ("Jobs:Quartz:ThreadCount", threads ?? ""));
+
+        var warnings = EcrConfigurationValidation.Warnings(config)
+            .Where(w => w.Contains("Jobs:Recalculation:FanOutMaxConcurrency", StringComparison.Ordinal))
+            .ToList();
+        if (expected is null)
+        {
+            Assert.Empty(warnings);
+        }
+        else
+        {
+            Assert.Contains(expected, Assert.Single(warnings), StringComparison.Ordinal);
+        }
+
+        Assert.Empty(EcrConfigurationValidation.Validate(config));
+    }
+
+    /// <remarks>
     /// PSS-28: у Production порожній або `*` в `AllowedHosts` — попередження (DNS rebinding на анонімні ендпоінти);
     /// задані імена, чи не Production — мовчання. Старт не зупиняється. Мутація: прибрати умову `isProduction` —
     /// червоніє перший рядок; не розпізнавати `*` серед кількох імен — червоніє `a;*`.

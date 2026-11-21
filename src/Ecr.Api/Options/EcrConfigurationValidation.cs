@@ -438,6 +438,14 @@ public static partial class EcrConfigurationValidation
                 + "або перелічіть адреси проксі (runbook §2.1).");
         }
 
+        // ✎ L1b / D2: межа дітей розкладу перерахунку не менша за місця виконавця, що бере лейн перерахунку в цьому процесі.
+        // Черга в базі з виконавцем InProcess — місця воркера Api (останнє воркер тримає сам, попередження каже, скільки дітей
+        // насправді); Quartz — потоки пулу (резерву немає). Пул воркерів (Executor = Worker) попереджає сам (Ecr.Worker).
+        if (FanOutCapacityWarning(configuration) is { } fanOutWarning)
+        {
+            warnings.Add(fanOutWarning);
+        }
+
         // ⚠ S14: примусова CSP не проганялася браузерним набором (e2e-stand.ps1) —
         // вмикати її можна лише після прогону і спостереження за ecr.csp.violations.
         if (Value(configuration, CspEnforceKey) is { } enforce
@@ -449,6 +457,23 @@ public static partial class EcrConfigurationValidation
         }
 
         return warnings;
+    }
+
+    /// <summary>✎ L1b / D2: попередження «межа дітей розкладу ≥ місць виконавця перерахунку» для режиму й виконавця Api.</summary>
+    private static string? FanOutCapacityWarning(IConfiguration configuration)
+    {
+        var cap = Infrastructure.Jobs.QuartzJobTypeLimiter.ReadRecalcFanOutMaxConcurrency(configuration);
+        if (Infrastructure.Jobs.DbBackgroundJobScheduler.ReadMode(configuration) == Infrastructure.Jobs.JobQueueMode.Database)
+        {
+            return Infrastructure.Jobs.JobLaneMap.ReadExecutor(configuration) == Infrastructure.Jobs.RecalculationExecutor.InProcess
+                ? Infrastructure.Jobs.QuartzJobTypeLimiter.FanOutCapacityWarning(
+                    cap, Infrastructure.Jobs.JobWorkerOptions.DefaultMaxConcurrency, "місця воркера Api", lastSlotReserved: true)
+                : null;
+        }
+
+        return Infrastructure.Jobs.QuartzJobTypeLimiter.FanOutCapacityWarning(
+            cap, Infrastructure.Jobs.QuartzJobTypeLimiter.ReadThreadCount(configuration),
+            Infrastructure.Jobs.QuartzJobTypeLimiter.ThreadCountKey, lastSlotReserved: false);
     }
 
     /// <summary>Перевіряє конфігурацію; на недійсній — пише Critical і зупиняє старт.</summary>
