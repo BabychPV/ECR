@@ -284,6 +284,17 @@ public static partial class EcrConfigurationValidation
             problems.Add(Describe(AllowedHostsKey, hosts, hostsProblem));
         }
 
+        // PSS-01 (лан L3): нічне вікно прибирання витіснених результатів — `HH:mm-HH:mm`, може переходити через північ.
+        // Недійсне значення задача мовчки замінила б дефолтом 01:00-05:00 (і лише писала б попередження), тож службу з ним не запускаємо.
+        // Той самий розбір, що й у задачі, — `SupersededPurgeOptions.ParseNightWindow`.
+        if (Value(configuration, Ecr.Infrastructure.Persistence.SupersededPurgeOptions.NightWindowKey) is { } nightWindow
+            && Ecr.Infrastructure.Persistence.SupersededPurgeOptions.ParseNightWindow(nightWindow) is null)
+        {
+            problems.Add(Describe(
+                Ecr.Infrastructure.Persistence.SupersededPurgeOptions.NightWindowKey, nightWindow,
+                "очікується вікно HH:mm-HH:mm (початок і кінець різні, може переходити через північ), напр. 01:00-05:00"));
+        }
+
         foreach (var (key, allowed) in Choices)
         {
             if (Value(configuration, key) is { } text

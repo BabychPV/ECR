@@ -104,6 +104,9 @@ public sealed class SupersededPurgeConfigurationTests
     [InlineData("Calculations:SupersededPurge:Enabled", "1")]
     [InlineData("Calculations:SupersededPurge:DeleteEnabled", "yes")]
     [InlineData("Calculations:SupersededPurge:IncludeTrace", "так")]
+    [InlineData("Calculations:SupersededPurge:NightWindow", "1-5")]
+    [InlineData("Calculations:SupersededPurge:NightWindow", "03:00-03:00")]
+    [InlineData("Calculations:SupersededPurge:NightWindow", "25:00-04:00")]
     public void Недійсне_значення_називає_ключ(string key, string value)
     {
         var configuration = new ConfigurationBuilder()
@@ -112,6 +115,20 @@ public sealed class SupersededPurgeConfigurationTests
 
         var problem = Assert.Single(EcrConfigurationValidation.Validate(configuration));
         Assert.StartsWith(key + " = «" + value + "»", problem, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [InlineData("01:00-05:00")]
+    [InlineData("22:00-04:00")]
+    [InlineData(" 23:30 - 00:30 ")]
+    public void Дійсне_нічне_вікно_у_тому_числі_через_північ_старт_не_зупиняє(string window)
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { [SupersededPurgeOptions.NightWindowKey] = window })
+            .Build();
+
+        Assert.Empty(EcrConfigurationValidation.Validate(configuration));
     }
 
     private static string RepositoryRoot()
