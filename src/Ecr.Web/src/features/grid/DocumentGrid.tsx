@@ -22,9 +22,8 @@ import { cellFormatOf, withCellFormat } from './conditionalAppearance';
 import { CellColorMenu, type ColourTarget } from './CellColorMenu';
 import { useCellStyles } from './useCellStyles';
 import { OptimisticMaxCells, areaChunks, areaOf, colourableCells, headerStyleProps, scopeRange, userStyleOf, withRowStyle, withUserStyle, type StyleScope } from './userCellStyle';
-import { cellDisplayMemo, cellText, editorValueOf, isNumericColumn, isTextColumnType, sameColumnValue } from './cellValue';
+import { cellDisplayMemo, cellText, isNumericColumn, isTextColumnType, sameColumnValue } from './cellValue';
 import { columnIndexOf, rowIndexOf } from './rowIndex';
-import { effectiveDefault } from './rowDefaults';
 import { planPaste, type PasteRejection } from './clipboard';
 import { parseClipboard, toClipboard } from './tsvClipboard';
 import {
@@ -139,6 +138,7 @@ import {
 } from './autosave';
 import { beginInFlight, deferUntilInFlightSettles, inFlightEdit, splitByInFlight } from './inFlightEdits';
 import { saveInParts, type PartResult } from './patchParts';
+import { createGridRowsCache, RowLabelProp, rowLabelOf, type GridRow } from './gridRowModels';
 import { GridAriaPlugin } from './gridAria';
 import { attachStickyGroupLabels, withHeaderGroups } from './headerGroups';
 import { installTruncationTooltip } from './truncationTooltip';
@@ -309,38 +309,6 @@ interface DocumentGridProps {
    * (`markSliceHidden`), а дочитується в мить, коли сітку знову покажуть.
    */
   hidden?: boolean;
-}
-
-/** Рядок у моделі grid: значення за кодами колонок плюс службовий ключ. */
-type GridRow = Record<string, unknown> & { __rowKey: string };
-
-/**
- * Ім'я властивості моделі, під яким живе ПІДПИС рядка.
- *
- * ⛔ Подвійне підкреслення — та сама домовленість, що й у `__rowKey`: службове
- * поле не має права зіткнутися з кодом колонки таблиці. Код колонки —
- * латиниця, цифри й підкреслення (`EcrCode`), тож формально зіткнення
- * можливе; префікс робить його неможливим на практиці й водночас читається як
- * «це не дані».
- *
- * ⚠ Ця колонка НЕ входить у `slice.columns`, тому вставка з буфера
- * (`planPaste` отримує саме `slice.columns.map(c => c.code)`), збереження
- * (`PATCH` шле коди колонок) і стани комірок її не бачать узагалі. Це не
- * випадковість, а причина, чому підпис зроблено окремою колонкою, а не
- * псевдоколонкою в самому зрізі.
- */
-const RowLabelProp = '__rowLabel';
-
-/**
- * Підпис рядка, яким його бачить оператор.
- *
- * ⚠ Запасний варіант — `rowKey`, і це не вигадка: так само робить сторінка
- * версії шаблону (`TemplateVersionPage`, `row.label ?? row.rowKey`). Порожній
- * підпис у формі з фіксованими рядками гірший за технічний ключ: ключ
- * принаймні дає за що зачепитися очима й що назвати в листі підтримці.
- */
-function rowLabelOf(row: TableSliceDto['rows'][number]): string {
-  return row.label ?? row.rowKey;
 }
 
 /**
@@ -1699,8 +1667,11 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     return merged;
   }, [overrides, rejections, pending]);
 
+  // ⛔ PSS-18: модель рядка — з кешу на рядок (`gridRowModels.ts`): правка однієї комірки перебудовує лише свій
+  // рядок, а не 30 000 комірок таблиці 500×60 на кожне натискання.
+  const rowsCache = useRef(createGridRowsCache());
   const rows = useMemo(
-    () => (data === undefined ? [] : gridRows(data, shownOverrides)),
+    () => (data === undefined ? [] : rowsCache.current(data, shownOverrides)),
     [data, shownOverrides],
   );
 
@@ -4145,41 +4116,6 @@ export function gridColumns(
         ...dataColumns,
       ]
     : dataColumns;
-}
-
-/**
- * Рядки grid; порожні комірки беруться з `defaultValue` колонки (ФВ-3.8).
- *
- * @param overrides Значення, підтверджені оператором (`ФВ-2.16`, `#43`), яких
- * сервер ще не бачив — перекривають і збережене значення, і `defaultValue`,
- * бо мають ознаку «оператор це щойно ввів», а не «так було до нього».
- */
-function gridRows(slice: TableSliceDto, overrides?: ReadonlyMap<string, unknown>): GridRow[] {
-  return slice.rows.map((row) => {
-    const model: GridRow = { __rowKey: row.rowKey };
-
-    // ⚠ Підпис кладеться в модель ЗАВЖДИ, а колонка для нього з'являється лише
-    // там, де є що показати (`hasRowLabels`). Умовне поле зробило б форму
-    // рядка непостійною, а `RevoGrid` читає значення за іменем властивості —
-    // відсутність поля й порожній підпис виглядали б однаково.
-    model[RowLabelProp] = rowLabelOf(row);
-
-    for (const column of slice.columns) {
-      const key = cellKey(row.rowKey, column.code);
-
-      // ⛔ `U-24`: модель рядка — це те, що RevoGrid кладе в поле РЕДАКТОРА
-      // (подвійний клік, F2, початок друку). Тому тут десяткове вже без
-      // хвостових нулів сховища (`editorValueOf`, `cellValue.ts`).
-      model[column.code] = editorValueOf(
-        overrides?.has(key)
-          ? overrides.get(key)
-          : (row.cells[column.code] ?? effectiveDefault(row, column) ?? ''),
-        column,
-      );
-    }
-
-    return model;
-  });
 }
 
 /**
