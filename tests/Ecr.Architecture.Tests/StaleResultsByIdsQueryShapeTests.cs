@@ -24,6 +24,14 @@ public sealed class StaleResultsByIdsQueryShapeTests
 {
     private const string ByIdsPath = "src/Ecr.Infrastructure/Persistence/StaleResultsByIdsQuery.cs";
 
+    private const string MapCachePath = "src/Ecr.Infrastructure/Persistence/StaleResultsMapCache.cs";
+
+    /// <summary>Будь-який виклик плоскої форми періоду.</summary>
+    private static readonly Regex FlatPeriodCall = new(
+        @"\bStaleResultsQuery\s*\.\s*(?:Documents|AuthorDocuments)\s*\(",
+        RegexOptions.Compiled,
+        TimeSpan.FromSeconds(5));
+
     /// <summary><c>StaleResultsQuery.Documents(…)</c> чи <c>AuthorDocuments(…)</c>, одразу звужений по <c>DocumentId</c>.</summary>
     private static readonly Regex NarrowedPeriodShape = new(
         @"StaleResultsQuery\s*\.\s*(?:Documents|AuthorDocuments)\s*\([^;()]*\)\s*\.\s*Where\s*\(\s*\w+\s*=>\s*(?:[\w.]+\s*\.\s*Contains\s*\(\s*\w+\s*\.\s*DocumentId\s*\)|\w+\s*\.\s*DocumentId\s*==)",
@@ -56,11 +64,12 @@ public sealed class StaleResultsByIdsQueryShapeTests
         string Squeeze(string s) => Regex.Replace(s, @"\s+", " ", RegexOptions.None, TimeSpan.FromSeconds(5));
         var flat = Squeeze(sql);
 
-        // Явний набір документів, а не всі документи періоду.
-        Assert.Contains("FROM (VALUES", flat, StringComparison.Ordinal);
+        // Документи - явний набір (VALUES) або таблиця документів (період), а не агрегат по результатах періоду.
+        Assert.Contains("(VALUES {VALUES}) AS D (DOCUMENTID) JOIN DOC.DOCUMENT AS DD ON DD.ID = D.DOCUMENTID", flat, StringComparison.Ordinal);
+        Assert.Contains("PERIODSOURCE = \"DOC.DOCUMENT AS DD\"", flat, StringComparison.Ordinal);
 
         // Актуальний прогін: EXISTS по (період, документ, прогін) — не агрегат по всіх результатах документа.
-        Assert.Contains("CR.DOCUMENTID = D.DOCUMENTID AND CR.CALCULATIONRUNID = R0.ID", flat, StringComparison.Ordinal);
+        Assert.Contains("CR.DOCUMENTID = DD.ID AND CR.CALCULATIONRUNID = R0.ID", flat, StringComparison.Ordinal);
         Assert.DoesNotContain("GROUP BY CR.DOCUMENTID", flat, StringComparison.Ordinal);
 
         // Довідники: лише рядки актуального прогону документа — не множинний `used` по всьому періоду.
@@ -73,6 +82,35 @@ public sealed class StaleResultsByIdsQueryShapeTests
         Assert.Contains("FROM CALC.CALCULATIONRESULT AS CR {RESULTSEEK}", flat, StringComparison.Ordinal);
         Assert.Contains("FROM CALC.CALCULATIONRESULT AS CR2 {{RESULTSEEK}}", flat, StringComparison.Ordinal);
         Assert.Contains("SELECT DISTINCT TOP (2147483647) CR2.METHODOLOGYVERSIONID", flat, StringComparison.Ordinal);
+
+        // Пари «документ × прогін» - лише прогони-кандидати (проєкт документа; власний або проєктний), а не всі
+        // актуальні прогони періоду: інакше повна карта - документи × прогони періоду.
+        Assert.Contains("JOIN CALC.CALCULATIONRUN AS R0 ON R0.PROJECTID = DD.PROJECTID", flat, StringComparison.Ordinal);
+        Assert.Contains("AND (R0.DOCUMENTID IS NULL OR R0.DOCUMENTID = DD.ID)", flat, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// ⛔ Повна карта періоду (<c>StaleMap:full</c>, <c>StaleMap:authors</c>) - форма періоду того самого тексту, що картка
+    /// (<c>StaleResultsByIdsQuery.PeriodDocuments</c> / <c>PeriodAuthorDocuments</c>), а НЕ плоска форма <c>StaleResultsQuery</c>:
+    /// стенд Land 21.11 - <c>StaleMap:full</c> у середньому 1,8 с, до 58 с (історія результатів усього періоду тричі; 14-29 тис.
+    /// читань на теплому кеші проти 2,2-2,4 тис.). Мутація: повернути в <c>StaleResultsMapCache.LoadAsync</c> виклик
+    /// <c>StaleResultsQuery.Documents(db, periodKey, byUserId)</c> - червоний.
+    /// </summary>
+    [Fact]
+    public void Повна_карта_періоду_йде_формою_періоду_того_самого_тексту_що_картка()
+    {
+        var code = Code(SourceTree.Production("Ecr.Infrastructure").Single(f => f.Path == MapCachePath));
+        string Squeeze(string s) => Regex.Replace(s, @"\s+", string.Empty, RegexOptions.None, TimeSpan.FromSeconds(5));
+        var flat = Squeeze(code);
+
+        Assert.DoesNotMatch(FlatPeriodCall, code);
+        Assert.Contains("StaleResultsByIdsQuery.PeriodDocuments(db,periodKey).TagWith(FullTag)", flat, StringComparison.Ordinal);
+        Assert.Contains("StaleResultsByIdsQuery.PeriodAuthorDocuments(db,periodKey).TagWith(FullTag)", flat, StringComparison.Ordinal);
+        Assert.Contains("StaleResultsByIdsQuery.PeriodAuthorDocuments(db,periodKey).TagWith(AuthorsTag)", flat, StringComparison.Ordinal);
+
+        // Сторож живий: колишній виклик він ловить.
+        Assert.Matches(FlatPeriodCall, "var rows = await StaleResultsQuery.Documents(db, periodKey, byUserId)\n    .TagWith(FullTag)");
+        Assert.Matches(FlatPeriodCall, "await StaleResultsQuery.AuthorDocuments(db, periodKey).TagWith(AuthorsTag)");
     }
 
     /// <summary>Код без рядків-коментарів (опис колишньої форми в коментарях не рахується).</summary>

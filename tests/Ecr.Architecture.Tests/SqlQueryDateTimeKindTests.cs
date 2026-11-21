@@ -42,13 +42,14 @@ public sealed class SqlQueryDateTimeKindTests
                 "результат лишається IQueryable і компонується в підзапити; Kind ставить споживач "
                 + "DocumentStore.StaleResultsBatchAsync, де значення матеріалізується",
             [("src/Ecr.Infrastructure/Persistence/StaleResultsQuery.cs", "StaleAuthorRow")] =
-                "те саме, що StaleDocumentRow: IQueryable компонується в вузький запит накладки; Kind ставить "
-                + "StaleResultsMapCache.LoadAuthorsAsync, де значення матеріалізується (SpecifyKind)",
+                "те саме, що StaleDocumentRow: IQueryable (еталонна форма періоду для карти авторів); Kind ставить "
+                + "споживач, що матеріалізує значення (SpecifyKind)",
             [("src/Ecr.Infrastructure/Persistence/StaleResultsByIdsQuery.cs", "StaleDocumentRow")] =
-                "той самий предикат для набору документів: IQueryable компонується (картка, лікування карти); Kind ставлять "
-                + "DocumentStore.StaleResultsDirectAsync / StaleResultsYearCardAsync і StaleResultsMapCache.HealAllAsync",
+                "той самий предикат для набору документів: IQueryable компонується (картка, лікування й повна карта); Kind "
+                + "ставлять DocumentStore.StaleResultsDirectAsync / StaleResultsYearCardAsync і StaleResultsMapCache "
+                + "(HealAllAsync, LoadAsync)",
             [("src/Ecr.Infrastructure/Persistence/StaleResultsByIdsQuery.cs", "StaleAuthorRow")] =
-                "те саме для карти авторів: Kind ставить StaleResultsMapCache.HealAuthorsAsync (Utc)",
+                "те саме для карти авторів: Kind ставить StaleResultsMapCache (HealAuthorsAsync, LoadAuthorsAsync, Utc)",
             [("src/Ecr.Infrastructure/Persistence/DocumentVersionMigrationStore.cs", "DateTime")] =
                 "SYSUTCDATETIME() лише повертається в SQL параметром того самого переносу, у відповідь не йде",
         };
