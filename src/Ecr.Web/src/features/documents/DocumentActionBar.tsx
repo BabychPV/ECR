@@ -210,7 +210,21 @@ export function DocumentActionBar({
               : t('workflow.recalculate')}
         </Text>
         <Text size="xs" c="dimmed" maw={280}>
-          {actions.recalculate.blockedReason ?? t('workflow.recalculateHint')}
+          {actions.recalculate.blockedReason ?? actions.recalculate.queueText ?? t('workflow.recalculateHint')}
+        </Text>
+      </Menu.Item>
+    ) : null,
+    // ✎ PERF-01 (D-564a): «Повний перерахунок» року — лише з правом Calculation.Recalculate (межа — на сервері).
+    actions.recalculate?.runFull != null ? (
+      <Menu.Item
+        key="recalculate-full"
+        disabled={actions.recalculate.loading}
+        onClick={actions.recalculate.runFull}
+        data-testid="document-recalculate-full"
+      >
+        <Text size="sm">{t('workflow.recalculateFull')}</Text>
+        <Text size="xs" c="dimmed" maw={280}>
+          {t('workflow.recalculateFullHint')}
         </Text>
       </Menu.Item>
     ) : null,
