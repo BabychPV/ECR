@@ -28,9 +28,8 @@ export async function fetchAllProjects(context: { signal?: AbortSignal } = {}): 
  * Єдиний опис запиту «усі проєкти» (AN-91 / L8-10): ключ + `queryFn` разом, щоб жоден екран не клав під
  * `['projects']` власну форму (обрізаний `?limit=200` тощо). Вживати як `useQuery({ ...projectsQuery, enabled })`.
  *
- * ⚠ `DocumentPage` лишає ключ `queryKeys.projects.all()` і ледачий `import()` — статичний імпорт цього файлу
- * додав би ~1 КБ gzip до графа маршруту (бюджет D-132); сторож `projectsQueryKey.guard.test.ts` вимагає, щоб
- * `queryFn` там усе одно був `fetchAllProjects`.
+ * ⚠ `DocumentPage` переліку проєктів більше не читає (PSS-19a: стан проєкту — з картки документа); сторож
+ * `projectsQueryKey.guard.test.ts` вимагає, щоб кожен, хто бере ключ `['projects']`, брав і `fetchAllProjects`.
  */
 export const projectsQuery = {
   queryKey: queryKeys.projects.all(),

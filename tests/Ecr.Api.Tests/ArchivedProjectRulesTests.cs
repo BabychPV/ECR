@@ -79,6 +79,24 @@ public sealed class ArchivedProjectRulesTests(SqlServerFixture sql)
         Assert.Equal(CurrentPeriodMode.Auto, project.CurrentPeriodMode);
     }
 
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "PSS-19a")]
+    public async Task Картка_документа_несе_стан_проєкту()
+    {
+        // ⛔ PSS-19a: сторінка документа читала ВЕСЬ перелік проєктів, щоб дізнатися стан одного (замок архіву).
+        var (document, userName, _, _) = await ArrangeAsync().ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, userName).ConfigureAwait(true);
+
+        using var card = await client.GetAsync(
+            new Uri($"/api/v1/documents/{document.DocumentId}", UriKind.Relative)).ConfigureAwait(true);
+        var cardBody = await card.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.True(card.IsSuccessStatusCode, $"{(int)card.StatusCode}\n{cardBody}\n{app.ErrorsText}");
+        Assert.Equal("Archived", JsonDocument.Parse(cardBody).RootElement.GetProperty("projectStatus").GetString());
+    }
+
     private static async Task AssertConflictAsync(
         Task<HttpResponseMessage> call, string messageKey, string detail, EcrApiFactory app)
     {
