@@ -348,6 +348,7 @@ IF @@ROWCOUNT = 0
 | `Database:MaxPoolSize` | ні | `200` | Ціле число, не менше 1. |
 | `Database:RecalcCommandTimeoutSeconds` | ні | `180` | Ціле число, не менше 30. |
 | `Database:SheetLockTimeoutSeconds` | ні | `30` | Ціле число, не менше 0. |
+| `Documents:StaleMap:MaxDop` | ні | `4` | Ціле число, не менше 0. Верхня межа паралелізму запитів карти застарілості (OPTION MAXDOP): діє min(значення, MAXDOP бази чи сервера), вище за налаштування сервера НІКОЛИ не піднімає; 0 — без підказки. Стенду з малою пам'яттю SQL Server — 2. |
 | `Documents:StaleMapWarm:Enabled` | ні | `true` | `true` або `false`. |
 | `Documents:StaleMapWarm:HotPeriodLimit` | ні | `2` | Ціле число, не менше 1. |
 | `Documents:StaleMapWarm:IntervalSeconds` | ні | `60` | Ціле число, не менше 10. |

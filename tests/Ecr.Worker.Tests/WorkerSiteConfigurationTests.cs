@@ -128,7 +128,14 @@ public sealed class WorkerSiteConfigurationTests
         Assert.NotEmpty(WorkerConfigurationValidation.Integers);
         foreach (var (key, min) in WorkerConfigurationValidation.Integers)
         {
-            Assert.Contains($"(\"{key}\", {min})", api, StringComparison.Ordinal);
+            // ✎ PSS-02: ключ межі дітей розкладу Api перелічує константою (QuartzJobTypeLimiter), не літералом.
+            var viaConstant = key == Ecr.Infrastructure.Jobs.QuartzJobTypeLimiter.RecalcFanOutMaxConcurrencyKey
+                ? $"{nameof(Ecr.Infrastructure.Jobs.QuartzJobTypeLimiter.RecalcFanOutMaxConcurrencyKey)}, {min})"
+                : null;
+            Assert.True(
+                api.Contains($"(\"{key}\", {min})", StringComparison.Ordinal)
+                || (viaConstant is not null && api.Contains(viaConstant, StringComparison.Ordinal)),
+                key);
         }
     }
 

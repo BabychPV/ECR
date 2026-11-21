@@ -53,6 +53,99 @@ public interface IJobQueue
     public Task<ClaimedJob?> ClaimAsync(
         IReadOnlyCollection<string> lanes, string owner, TimeSpan lease, CancellationToken ct);
 
+    /// <summary><c>JobId</c> задачі, що ЧЕКАЄ (<c>Queued</c>) на ціль; <c>null</c> — такої немає (виконувана не рахується).</summary>
+    /// <param name="targetKey">Ціль <c>{ТипМаркера}~{ціль}</c>.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <remarks>Типова реалізація — «немає» (черги без підтримки не зливають цілі між собою).</remarks>
+    public Task<string?> FindQueuedByTargetAsync(string targetKey, CancellationToken ct) => Task.FromResult<string?>(null);
+
+    /// <summary>
+    /// Скасовує задачу, що ЧЕКАЄ (<c>Queued</c>) на ціль, і НЕ чіпає виконувану (на відміну від
+    /// <see cref="RequestCancelAsync"/>, який виконуваній ставить запит скасування).
+    /// </summary>
+    /// <param name="targetKey">Ціль <c>{ТипМаркера}~{ціль}</c>.</param>
+    /// <param name="coveredByJobId">
+    /// Задача, що виконає цю роботу з надлишком: її <c>JobId</c> іде в повідомлення скасованої
+    /// (<see cref="CoveredByMessageKey"/>), щоб у переліку задач було видно ЧОМУ «скасовано», а не голий стан.
+    /// </param>
+    /// <param name="ct">Скасування.</param>
+    /// <returns><c>true</c> — задачу скасовано.</returns>
+    public Task<bool> CancelQueuedByTargetAsync(string targetKey, string? coveredByJobId, CancellationToken ct)
+        => Task.FromResult(false);
+
+    /// <summary>
+    /// Ключ каталогу повідомлення задачі, скасованої <see cref="CancelQueuedByTargetAsync"/>: «покрито перерахунком
+    /// разом із затвердженими (задача {jobId})».
+    /// </summary>
+    public const string CoveredByMessageKey = "jobs.coveredByApprovedRecalculation";
+
+    /// <summary>
+    /// ✎ PSS-06 (<c>D-561</c>): ключ каталогу повідомлення ЗАПАРКОВАНОЇ задачі (<see cref="ParkCoveredAsync"/>) — «її роботу
+    /// виконує задача {jobId} (період {period})»; з ним вона й закривається <c>Succeeded</c>.
+    /// </summary>
+    public const string ParkedMessageKey = "jobs.coveredByRecalculation";
+
+    /// <summary>
+    /// ✎ PSS-04 (<c>D-561</c>): чи черга вміє продовжити задачу наступним кроком (<see cref="ContinueAsync"/>) і паркувати
+    /// покриту роботу (<see cref="ParkCoveredAsync"/>). Типова реалізація — ні (Quartz у пам'яті).
+    /// </summary>
+    public bool SupportsContinuation => false;
+
+    /// <summary>
+    /// ✎ PSS-04 (<c>D-561</c>): крок задачі зроблено, вона продовжується НАСТУПНИМ кроком — той самий рядок
+    /// (<c>JobId</c>) знову <c>Queued</c> з новим payload і на тому самому місці FIFO (огляд H2: рік документа — вглиб);
+    /// лок документа й місце виконавця звільнено, межа тривалості діє на крок. Запарковані задачею на періоди до
+    /// <paramref name="stepPeriod"/> включно, яких вона не закрила явно (<see cref="SettleParkedAsync"/>), — знову в черзі.
+    /// </summary>
+    /// <param name="claim">Оренда кроку.</param>
+    /// <param name="payloadJson">Тіло наступного кроку.</param>
+    /// <param name="delay">Відкласти наступний крок (нуль — лишити місце в FIFO).</param>
+    /// <param name="stepPeriod">Період, який рахував цей крок (ключ періоду).</param>
+    /// <param name="ct">Скасування.</param>
+    /// <returns><c>false</c> — оренду втрачено (чи черга не вміє).</returns>
+    public Task<bool> ContinueAsync(
+        JobClaimToken claim, string payloadJson, TimeSpan delay, int stepPeriod, CancellationToken ct)
+        => Task.FromResult(false);
+
+    /// <summary>
+    /// ✎ Огляд M1: покривна СПРАВДІ порахувала період <paramref name="periodKey"/> (і він уже актуальний) — запарковані
+    /// нею на нього закриваються <c>Succeeded</c>. Решту запаркованих її кінець поверне в чергу.
+    /// </summary>
+    /// <param name="coverer">Оренда покривної (жива).</param>
+    /// <param name="periodKey">Порахований період.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <returns>Скільки закрито.</returns>
+    public Task<int> SettleParkedAsync(JobClaimToken coverer, int periodKey, CancellationToken ct) => Task.FromResult(0);
+
+    /// <summary>
+    /// ✎ PSS-06: задачі документа, що ЧЕКАЮТЬ у лейнах із локом документа (<c>recalc</c>, <c>interactive</c>); запарковані
+    /// не входять. Порядок — черги (FIFO).
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="ct">Скасування.</param>
+    public Task<IReadOnlyList<QueuedDocumentJob>> ListQueuedForDocumentAsync(long documentId, CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<QueuedDocumentJob>>([]);
+
+    /// <summary>
+    /// ✎ PSS-06 (<c>D-561</c>): «паркує» задачі, роботу яких виконає <paramref name="coverer"/> (той самий документ і
+    /// період, обсяг не ширший): claim їх не бере; кінець покривної вирішує їхню долю — зроблено (<c>Succeeded</c>) чи
+    /// ні (знову в черзі). Нова постановка на ціль запаркованої повертає її в чергу (вона новіша за читання покривної).
+    /// </summary>
+    /// <param name="coverer">Оренда покривної задачі (має бути живою).</param>
+    /// <param name="covered">Кандидати; паркуються лише ті, що досі звичайні <c>Queued</c>.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <returns>Запарковані.</returns>
+    /// <remarks>⛔ Кликати лише ДО першого читання входів покривної.</remarks>
+    public Task<IReadOnlyList<string>> ParkCoveredAsync(
+        JobClaimToken coverer, IReadOnlyCollection<CoveredJob> covered, CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<string>>([]);
+
+    /// <summary>✎ PSS-06: повертає в чергу всі задачі, запарковані <paramref name="coverer"/> (план кроку змінився).</summary>
+    /// <param name="coverer">Оренда покривної.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <returns>Скільки повернуто.</returns>
+    public Task<int> UnparkAsync(JobClaimToken coverer, CancellationToken ct) => Task.FromResult(0);
+
     /// <summary>Подовжує оренду; заразом повідомляє про запит скасування.</summary>
     public Task<LeaseState> RenewAsync(JobClaimToken claim, TimeSpan lease, CancellationToken ct);
 
@@ -123,6 +216,20 @@ public interface IJobQueue
     /// </remarks>
     /// <returns>Скільки рядків змінено.</returns>
     public Task<int> ExpireAsync(int maxReclaims, CancellationToken ct);
+
+    /// <summary>
+    /// Те саме, що <see cref="ExpireAsync"/>, але повертає <c>JobId</c> закритих рядків — щоб виконавець міг
+    /// відреагувати на системне завершення задачі (B80 N5: провалена/скасована «залежні з затвердженими» повертає
+    /// звичайний перерахунок залежних, який вона покривала).
+    /// </summary>
+    /// <param name="maxReclaims">Як у <see cref="ExpireAsync"/>.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <returns>Закриті задачі; типова реалізація — порожньо (черга без підтримки).</returns>
+    public async Task<IReadOnlyList<string>> ExpireEndedAsync(int maxReclaims, CancellationToken ct)
+    {
+        await ExpireAsync(maxReclaims, ct).ConfigureAwait(false);
+        return [];
+    }
 }
 
 /// <summary>
@@ -236,6 +343,21 @@ public sealed record JobEnqueueResult(string JobId, JobEnqueueOutcome Outcome);
 /// <param name="JobId">Задача.</param>
 /// <param name="Token">Токен, виданий <see cref="IJobQueue.ClaimAsync"/>; кожен переклейм — новий.</param>
 public sealed record JobClaimToken(string JobId, Guid Token);
+
+/// <summary>Задача документа, що чекає (<see cref="IJobQueue.ListQueuedForDocumentAsync"/>, PSS-06).</summary>
+/// <param name="JobId">Задача.</param>
+/// <param name="JobCode">Код задачі.</param>
+/// <param name="Lane">Лейн.</param>
+/// <param name="TargetKey">Ціль; <c>null</c> — без цілі.</param>
+/// <param name="PayloadJson">Тіло.</param>
+/// <param name="AvailableIn">Скільки ще до доступності (нуль — уже доступна).</param>
+public sealed record QueuedDocumentJob(
+    string JobId, string JobCode, string Lane, string? TargetKey, string? PayloadJson, TimeSpan AvailableIn);
+
+/// <summary>Задача, яку покриває інша, і період, за який її робота буде зроблена (<see cref="IJobQueue.ParkCoveredAsync"/>).</summary>
+/// <param name="JobId">Покрита задача.</param>
+/// <param name="PeriodKey">Період покритої роботи.</param>
+public sealed record CoveredJob(string JobId, int PeriodKey);
 
 /// <summary>Захоплена задача.</summary>
 /// <param name="Claim">Оренда.</param>

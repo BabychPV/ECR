@@ -9,6 +9,12 @@
       "MemoryLimitMb": 2048,
       "JobMemoryLimitMb": 22528,
       "MaxDuration": "00:30:00"
+    },
+    // PSS-02 (D-561): дітей розкладу перерахунку проєкту (річний перерахунок) одночасно — не більше
+    // FanOutMaxConcurrency на весь пул (лічильник у базі); ручний, авто й залежні обганяють їх.
+    // MaxDuration вище діє на КРОК (один період) перерахунку документа за рік (PSS-04).
+    "Recalculation": {
+      "FanOutMaxConcurrency": 4
     }
   },
   // Рівні журналу — як у appsettings.json Ecr.Api. Без цього розділу воркер

@@ -31,6 +31,9 @@ internal static class WorkerConfigurationValidation
         ("Calculations:MaxParallelism", 1),
         ("Calculations:MaxInputCellsPerBinding", 1),
         ("Calculations:MaxRowEvaluationSteps", 20000), // PSS-21: бюджет рядка скрипта — не менше стелі одного оператора
+
+        // ✎ PSS-02 (D-561): межу дітей розкладу перерахунку в режимі черги в базі тримає claim ДОЧІРНЬОГО процесу.
+        ("Jobs:Recalculation:FanOutMaxConcurrency", 1),
     ];
 
     /// <summary>Ключі з переліком допустимих значень (без урахування регістру).</summary>

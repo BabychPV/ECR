@@ -97,7 +97,12 @@ public sealed class CalculationTrigger(
     /// <inheritdoc />
     /// <remarks>
     /// B179 L2: ланка їде в payload (<c>SourceHop</c>); перерахунок споживача передає її хуку завершення. Ціль та сама
-    /// (<see cref="DependentsTargetOf"/>): злиття лишає ланку останньої постановки.
+    /// (<see cref="DependentsTargetOf"/>).
+    /// <para>
+    /// ⚠ Злиття в задачу, що ЧЕКАЄ, лишає payload (і ланку) ПЕРШОЇ постановки: черга в базі не переписує payload задачі без
+    /// масиву злиття (<c>DbJobQueue.EnqueueSql</c>, лише <c>AvailableAt</c>). Так само покриття задачею «з затвердженими»
+    /// лишає ЇЇ ланку. Ланка важить лише для стелі ланцюжка (<c>RegistryImpactRecalculationRequest.MaxHops</c>).
+    /// </para>
     /// </remarks>
     public Task<string?> RequestDependentsAsync(long documentId, PeriodKey periodKey, int sourceHop, CancellationToken ct)
         => RequestDependentsAsync(documentId, periodKey, sourceHop, approvedOverride: null, ct);
@@ -116,11 +121,63 @@ public sealed class CalculationTrigger(
             return null;
         }
 
-        return await EnqueueSubmittedAsync(
+        // ✎ Перф-аудит 20.11: «залежні з затвердженими» (`-dependents-approved`) — НАДМНОЖИНА «залежних» (`-dependents`) для
+        // того самого документа й періоду: ті самі подані й чернетки (`RecalculateSubmitted`), плюс затверджені, які звичайна
+        // задача пропускає. Дві цілі не зливаються (payload одного не годиться іншому), а лок документа лише СЕРІАЛІЗУЄ
+        // прогони — обидва виконувались би повністю (на Land ≈ 12 хв кожен). Тому: звичайну, що чекає, скасовує постановка з
+        // перекриттям; звичайна, що приходить, коли така вже чекає, не ставиться — вона виконає ту саму роботу з надлишком.
+        // ⚠ Лише для задачі, що ЧЕКАЄ: виконувана могла прочитати входи до цієї зміни, тож її не скасовуємо й не покладаємось.
+        // ⛔ Пошук без локу: у НЕЗАКОМІЧЕНІЙ транзакції викликача планувальник у базі покриття не дає (`FindQueuedAsync`
+        // → null), бо знайдена задача могла б стартувати й прочитати входи до коміту зміни. Нині викликач (задача
+        // RegistryImpactRecalculationJob) транзакції не відкриває — це запобіжник на майбутнє, а не робочий шлях.
+        // ✎ Задача з перекриттям, що вже СТАРТУВАЛА (лок документа взято), сама скасовує звичайну, яка встигла стати в
+        // чергу, поки вона чекала лок (`RecalculationJob`): входи вона читає вже після того.
+        if (approvedOverride is null
+            && await jobs.FindQueuedAsync<IRecalculationJob>(DependentsApprovedTargetOf(documentId, periodKey), ct).ConfigureAwait(false)
+                is { Length: > 0 } coveringJobId)
+        {
+            return coveringJobId;
+        }
+
+        // ✎ PSS-07 (D-561, рішення людини 20.11): залежні — КАСКАД від зміни іншого документа чи довідника, не пряма
+        // правка: ставляться з відкладенням CascadeDebounce, і завершення кількох джерел за це вікно дають ОДИН перерахунок
+        // споживача за період (злиття лишає перший момент доступності — вікно не подовжується). «З затвердженими» — явна дія
+        // адміністратора: без відкладення.
+        var jobId = await EnqueueSubmittedAsync(
                 approvedOverride is null ? DependentsTargetOf(documentId, periodKey) : DependentsApprovedTargetOf(documentId, periodKey),
-                documentId, periodKey, ct, sourceHop, approvedOverride)
+                documentId, periodKey, ct, sourceHop, approvedOverride,
+                approvedOverride is null ? CascadeDebounce : TimeSpan.Zero)
             .ConfigureAwait(false);
+
+        if (approvedOverride is not null)
+        {
+            // Після постановки, а не до: у жодний момент цілі без задачі, що виконає роботу, немає. Скасована несе JobId
+            // покривної (повідомлення в переліку задач). ⚠ Покривна, що провалиться чи буде скасована, повертає звичайну
+            // (`ApprovedDependentsFallback`): інакше покрита робота губилася б разом із нею.
+            await jobs.CancelQueuedAsync<IRecalculationJob>(DependentsTargetOf(documentId, periodKey), jobId, ct)
+                .ConfigureAwait(false);
+        }
+
+        return jobId;
     }
+
+    /// <summary>
+    /// ✎ PSS-07 (<c>D-561</c>): відкладення каскадного перерахунку (залежні від зміни документа-джерела чи довідника) — вікно, за яке постановки
+    /// на ту саму ціль зливаються в одну.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Рішення людини 20.11: не більше <see cref="MaxCascadeDebounce"/> (не 30–60 с аудиту); пряма правка (задача формул
+    /// після PATCH), автоперерахунок після збору PI (<c>D-174</c>, <c>-auto</c>) і ручний перерахунок не відкладаються —
+    /// <c>ФВ-12.2</c> (&lt; 10 с авто, &lt; 5 с ручний) для них діє як доти. 10 с, а не 15: claim опитує чергу раз на
+    /// секунду, тож старт каскаду лишається в межах 15 с з запасом.
+    /// </remarks>
+    public static readonly TimeSpan CascadeDebounce = TimeSpan.FromSeconds(10);
+
+    /// <summary>Межа відкладення каскаду з рішення людини 20.11 (<c>D-561</c>); сторож — тест <c>CascadeDebounceDbTests</c>.</summary>
+    public static readonly TimeSpan MaxCascadeDebounce = TimeSpan.FromSeconds(15);
+
+    /// <summary>Закінчення цілі <see cref="DependentsApprovedTargetOf"/> — дешевий відбір задач «з затвердженими» за ключем цілі.</summary>
+    public const string DependentsApprovedSuffix = "-dependents-approved";
 
     /// <summary>Ціль перерахунку залежних З перекриттям адміністратора (затверджені теж): окрема від <see cref="DependentsTargetOf"/>.</summary>
     /// <param name="documentId">Документ.</param>
@@ -129,7 +186,7 @@ public sealed class CalculationTrigger(
     public static string DependentsApprovedTargetOf(long documentId, PeriodKey periodKey)
         => string.Create(
             System.Globalization.CultureInfo.InvariantCulture,
-            $"{RecalculateDocumentHandler.TargetOf(documentId, periodKey)}-dependents-approved");
+            $"{RecalculateDocumentHandler.TargetOf(documentId, periodKey)}{DependentsApprovedSuffix}");
 
     /// <summary>Ціль перерахунку залежних: окрема від автоперерахунку збору й кнопки (див. <see cref="RequestDependentsAsync(long, Ecr.Domain.ValueObjects.PeriodKey, CancellationToken)"/>).</summary>
     /// <param name="documentId">Документ.</param>
@@ -221,9 +278,9 @@ public sealed class CalculationTrigger(
     /// </remarks>
     private Task<string> EnqueueSubmittedAsync(
         string target, long documentId, PeriodKey periodKey, CancellationToken ct, int sourceHop = 0,
-        ApprovedRecalculationOverride? approvedOverride = null)
-        => jobs.EnqueueCoalescedAsync<IRecalculationJob>(
-            target,
+        ApprovedRecalculationOverride? approvedOverride = null, TimeSpan delay = default)
+    {
+        var payload =
             // B80 N5: перекриття адміністратора — затверджені теж (IncludeApproved) з автором і причиною для журналу.
             approvedOverride is not null
                 ? (object)new
@@ -257,7 +314,11 @@ public sealed class CalculationTrigger(
                     TriggeredByUserId = (int?)null,
                     SheetDefId = (int?)null,
                     RecalculateSubmitted = true,
-                },
-            ct,
-            createdByUserId: null);
+                };
+
+        // Без відкладення — та сама постановка, що доти (PSS-07 відкладає лише каскад).
+        return delay > TimeSpan.Zero
+            ? jobs.EnqueueCoalescedDelayedAsync<IRecalculationJob>(target, payload, delay, ct, createdByUserId: null)
+            : jobs.EnqueueCoalescedAsync<IRecalculationJob>(target, payload, ct, createdByUserId: null);
+    }
 }
