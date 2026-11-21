@@ -83,15 +83,23 @@ public static partial class SessionSettings
             AuditRetentionKey, stored, DefaultAuditRetentionMonths, MinAuditRetentionMonths, MaxAuditRetentionMonths, logger);
 
     /// <summary>
-    /// Спільне правило строків зберігання — ТЕ САМЕ, що в <c>Ecr.Infrastructure.Jobs.RetentionSettings</c> (лан L6): немає рядка —
-    /// типове (мовчки); не число чи нижче мінімуму — типове з попередженням у лозі; вище максимуму — максимум з попередженням.
+    /// ЄДИНЕ правило строків зберігання (<c>Retention.*</c>): на нього спираються і L6 (<c>Ecr.Infrastructure.Jobs.RetentionSettings</c>),
+    /// і прибирання <c>sec.LoginAttempt</c>. Немає рядка — типове (мовчки); не число чи нижче мінімуму — типове з причиною;
+    /// вище максимуму — максимум з причиною.
     /// </summary>
     /// <remarks>
     /// ⛔ Нижче мінімуму — саме типове, а не мінімум: рядок «0»/«1»/«-5» — опечатка, і мовчазне «30 днів» стерло б
     /// журнали за добу замість обережних 400. Те, що показує екран і що діє у прибиранні, — одне й те саме число.
     /// </remarks>
-    internal static int ResolveRetention(string key, string? stored, int fallback, int min, int max, ILogger? logger)
+    /// <param name="stored">Сире значення з <c>SystemSetting</c>; <c>null</c> — рядка немає.</param>
+    /// <param name="fallback">Типове.</param>
+    /// <param name="min">Нижня межа.</param>
+    /// <param name="max">Верхня межа.</param>
+    /// <param name="problem">Чому значення не взято як є; <c>null</c> — взято (або рядка немає).</param>
+    /// <returns>Чинне значення.</returns>
+    public static int ResolveRetention(string? stored, int fallback, int min, int max, out string? problem)
     {
+        problem = null;
         if (string.IsNullOrWhiteSpace(stored))
         {
             return fallback;
@@ -101,32 +109,39 @@ public static partial class SessionSettings
                 stored.Trim(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture,
                 out var value))
         {
-            if (logger is not null)
-            {
-                LogRejected(logger, key, stored, "не число", fallback);
-            }
-
+            problem = "не число";
             return fallback;
         }
 
         if (value < min)
         {
-            if (logger is not null)
-            {
-                LogRejected(logger, key, stored, $"менше мінімуму {min.ToString(System.Globalization.CultureInfo.InvariantCulture)}", fallback);
-            }
-
+            problem = $"менше мінімуму {min.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
             return fallback;
         }
 
         if (value > max)
         {
-            if (logger is not null)
-            {
-                LogRejected(logger, key, stored, $"більше максимуму {max.ToString(System.Globalization.CultureInfo.InvariantCulture)}", max);
-            }
-
+            problem = $"більше максимуму {max.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
             return max;
+        }
+
+        return value;
+    }
+
+    /// <summary>Те саме правило, але відкинуте значення пишеться попередженням у журнал.</summary>
+    /// <param name="key">Ключ налаштування (для журналу).</param>
+    /// <param name="stored">Сире значення.</param>
+    /// <param name="fallback">Типове.</param>
+    /// <param name="min">Нижня межа.</param>
+    /// <param name="max">Верхня межа.</param>
+    /// <param name="logger">Журнал; <c>null</c> — без запису.</param>
+    /// <returns>Чинне значення.</returns>
+    public static int ResolveRetention(string key, string? stored, int fallback, int min, int max, ILogger? logger)
+    {
+        var value = ResolveRetention(stored, fallback, min, max, out var problem);
+        if (problem is not null && logger is not null)
+        {
+            LogRejected(logger, key, stored ?? string.Empty, problem, value);
         }
 
         return value;

@@ -1,5 +1,5 @@
 // src/Ecr.Infrastructure/Jobs/RetentionSettings.cs
-using System.Globalization;
+using Ecr.Application.Security;
 using Ecr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -26,34 +26,34 @@ namespace Ecr.Infrastructure.Jobs;
 /// лан) бере <see cref="RetentionPolicy.TechnicalLogDays"/> звідси ж, а не власний ключ.
 /// </para>
 /// </remarks>
-public static partial class RetentionSettings
+public static class RetentionSettings
 {
     /// <summary>Ключ: скільки днів зберігати технічні журнали (черга й доставки сповіщень, прогони обслуговування).</summary>
-    public const string TechnicalLogDaysKey = "Retention.TechnicalLogDays";
+    public const string TechnicalLogDaysKey = SessionSettings.TechnicalLogRetentionKey;
 
     /// <summary>Типово — 400 днів (рішення людини 20.11 №7).</summary>
-    public const int DefaultTechnicalLogDays = 400;
+    public const int DefaultTechnicalLogDays = SessionSettings.DefaultTechnicalLogRetentionDays;
 
     /// <summary>Нижня межа, днів: менше — опечатка, а не політика (зведення й перевірки читають журнали за тижні).</summary>
-    public const int MinTechnicalLogDays = 30;
+    public const int MinTechnicalLogDays = SessionSettings.MinTechnicalLogRetentionDays;
 
     /// <summary>Верхня межа, днів (100 років): далі — «не видаляти» по суті.</summary>
-    public const int MaxTechnicalLogDays = 36_500;
+    public const int MaxTechnicalLogDays = SessionSettings.MaxTechnicalLogRetentionDays;
 
     /// <summary>Ключ: мінімальна глибина аудиту в <c>aud.*</c>, місяців (поріг архівації <c>arc.usp_ArchiveAudit</c>).</summary>
-    public const string AuditMonthsKey = "Retention.AuditMonths";
+    public const string AuditMonthsKey = SessionSettings.AuditRetentionKey;
 
     /// <summary>
     /// Підлога глибини аудиту, місяців (рішення людини 20.11 №7). Ту саму підлогу тримає й сама процедура
     /// <c>arc.usp_ArchiveAudit</c> (PSS-27): менше значення будь-звідки стає 120.
     /// </summary>
-    public const int MinAuditMonths = 120;
+    public const int MinAuditMonths = SessionSettings.MinAuditRetentionMonths;
 
     /// <summary>Типово — рівно підлога.</summary>
-    public const int DefaultAuditMonths = MinAuditMonths;
+    public const int DefaultAuditMonths = SessionSettings.DefaultAuditRetentionMonths;
 
     /// <summary>Верхня межа, місяців (100 років).</summary>
-    public const int MaxAuditMonths = 1_200;
+    public const int MaxAuditMonths = SessionSettings.MaxAuditRetentionMonths;
 
     /// <summary>Читає чинні строки (без кешу).</summary>
     /// <param name="db">Контекст бази.</param>
@@ -84,47 +84,23 @@ public static partial class RetentionSettings
     /// <returns>Чинне значення.</returns>
     public static int Resolve(string? raw, int fallback, int min, int max, out string? problem)
     {
-        problem = null;
-        if (string.IsNullOrWhiteSpace(raw))
-        {
-            return fallback;
-        }
-
-        if (!int.TryParse(raw.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var value))
-        {
-            problem = "not an integer";
-            return fallback;
-        }
-
-        if (value < min)
-        {
-            problem = string.Create(CultureInfo.InvariantCulture, $"below the minimum {min}");
-            return fallback;
-        }
-
-        if (value > max)
-        {
-            problem = string.Create(CultureInfo.InvariantCulture, $"above the maximum {max}");
-            return max;
-        }
-
-        return value;
+        return SessionSettings.ResolveRetention(raw, fallback, min, max, out problem);
     }
 
     private static int Resolve(string key, string? raw, int fallback, int min, int max, ILogger? logger)
+        => SessionSettings.ResolveRetention(key, raw, fallback, min, max, logger);
+
+    /// <summary>Читає лише строк технічних журналів (без кешу); збій читання йде нагору, а не підміняється типовим.</summary>
+    /// <param name="db">Контекст бази.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <param name="logger">Журнал для попереджень; <c>null</c> — без запису.</param>
+    /// <returns>Чинний строк, днів.</returns>
+    public static async Task<int> ReadTechnicalLogDaysAsync(EcrDbContext db, CancellationToken ct, ILogger? logger = null)
     {
-        var value = Resolve(raw, fallback, min, max, out var problem);
-        if (problem is not null && logger is not null)
-        {
-            LogRejected(logger, key, raw, problem, value);
-        }
-
-        return value;
+        ArgumentNullException.ThrowIfNull(db);
+        var raw = await ReadRawAsync(db, TechnicalLogDaysKey, ct).ConfigureAwait(false);
+        return Resolve(TechnicalLogDaysKey, raw, DefaultTechnicalLogDays, MinTechnicalLogDays, MaxTechnicalLogDays, logger);
     }
-
-    [LoggerMessage(Level = LogLevel.Warning,
-        Message = "Налаштування {Key} = '{Raw}' не прийнято ({Problem}); діє {Effective}. Змініть рядок у sys_ecr.SystemSetting (admin-guide, п. 8.1).")]
-    private static partial void LogRejected(ILogger logger, string key, string? raw, string problem, int effective);
 
     private static Task<string?> ReadRawAsync(EcrDbContext db, string key, CancellationToken ct)
         => db.Database

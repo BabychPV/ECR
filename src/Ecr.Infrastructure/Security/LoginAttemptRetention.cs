@@ -25,8 +25,9 @@ namespace Ecr.Infrastructure.Security;
 /// руками в обхід, — 0, −5, 99999 — не вимикає прибирання й не стирає свіжі спроби).
 ///
 /// ⛔ Ключ <c>Retention.TechnicalLogDays</c> і межі 30–36500 (типово 400) — ТІ САМІ, що в <c>RetentionSettings</c> (лан L6,
-/// PSS-13): один рядок налаштувань на всі технічні журнали. Цей клас має власне читання (<see cref="LoginAttemptPurger.ReadRetentionDaysAsync"/>)
-/// лише тому, що файл L6 у цій гілці ще відсутній; при злитті звести до <c>RetentionSettings.ReadAsync(...).TechnicalLogDays</c>.
+/// PSS-13): один рядок налаштувань на всі технічні журнали. Читання й розбір — ОДНЕ правило: ключ, межі й <c>Resolve</c> живуть
+/// у <c>SessionSettings</c> (Application), <c>RetentionSettings</c> (L6) делегує йому, а <see cref="LoginAttemptPurger.ReadRetentionDaysAsync"/>
+/// читає через <c>RetentionSettings.ReadTechnicalLogDaysAsync</c>.
 ///
 /// ⚠ Що це НЕ чіпає. Прибирається лише оперативний <c>sec.LoginAttempt</c>. Незмінний слід входів — у
 /// <c>aud.SecurityEvent</c> (<c>LoginSucceeded</c> / <c>LoginFailed</c> / <c>AccountLocked</c>): його не чистить ніщо в цьому
@@ -85,13 +86,7 @@ public sealed class LoginAttemptPurger(EcrDbContext db, IClock clock, ILogger? l
     /// 400 і 1000 днями. Виняток іде нагору — прохід пропускається (службa пише Warning), наступний повторить.
     /// </remarks>
     public async Task<int> ReadRetentionDaysAsync(CancellationToken ct)
-    {
-        var stored = await db.Database
-            .SqlQuery<string?>($"SELECT Value AS [Value] FROM sys_ecr.SystemSetting WHERE [Key] = {LoginAttemptRetention.SettingKey}")
-            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
-
-        return LoginAttemptRetention.Resolve(stored, logger);
-    }
+        => await Jobs.RetentionSettings.ReadTechnicalLogDaysAsync(db, ct, logger).ConfigureAwait(false);
 
     /// <summary>Видаляє спроби старші за чинний строк.</summary>
     /// <param name="ct">Скасування.</param>
