@@ -16,6 +16,8 @@ import {
   isNumericColumn,
   num,
   scopeLabel,
+  scopeNamesOf,
+  type ScopeNames,
   sourceEditFields,
   sourceKey,
   sourceTypeLabel,
@@ -24,7 +26,7 @@ import {
 } from './airCardModel';
 import { AirRowEditor, type AirEditTarget } from './AirRowEditor';
 import type { AirAddedColumn, AirLimitsPermit, AirSource, AirSubstance, AirTotal } from './airTypes';
-import { useAirLimits } from './useAirLimits';
+import { useAirLimits, useAirScopeFields } from './useAirLimits';
 import './air.css';
 import './airCard.css';
 
@@ -35,6 +37,8 @@ interface CardContext {
   readonly sourceColumns: readonly AirAddedColumn[];
   readonly substanceColumns: readonly AirAddedColumn[];
   readonly lang: string;
+  /** Names of the region / area entries: the «Region / area» column shows the name with the code. */
+  readonly scopeNames: ScopeNames;
   readonly onEditSource: ((source: AirSource) => void) | null;
   readonly onEditSubstance: ((source: AirSource, substance: AirSubstance) => void) | null;
 }
@@ -122,7 +126,7 @@ function SubstancesTable({ source, id, context }: { readonly source: AirSource; 
 }
 
 function SourcesTable({ sources, context }: { readonly sources: readonly AirSource[]; readonly context: CardContext }): JSX.Element {
-  const { sourceColumns, lang, onEditSource } = context;
+  const { sourceColumns, lang, onEditSource, scopeNames } = context;
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   // Перший стовпчик (розкриття) лишається порожнім у рядку речовин; решта — під таблицю речовин.
   const spanned = 13 + sourceColumns.length + (onEditSource === null ? 0 : 1);
@@ -206,7 +210,7 @@ function SourcesTable({ sources, context }: { readonly sources: readonly AirSour
                     {source.naeCode}
                   </th>
                   <td className="pa-code" data-testid="air-source-scope">
-                    {scopeLabel(source)}
+                    {scopeLabel(source, scopeNames)}
                   </td>
                   <td>{cell(source.sourceName)}</td>
                   <td>{cell(source.emissionPointName)}</td>
@@ -284,15 +288,19 @@ function Card({ data, permitId, mayImport }: { readonly data: AirLimitsPermit; r
   const [view, setView] = useState<View>('sources');
   const [query, setQuery] = useState('');
   const [editing, setEditing] = useState<AirEditTarget | null>(null);
+  const scopeFields = useAirScopeFields();
   const shown = useMemo(() => filterSources(data.sources, query), [data.sources, query]);
   const empty = data.sources.length === 0;
   const lang = language();
+  // A failed or slow read only leaves the codes in the column (the same query as the import wizard's first step).
+  const scopeNames = useMemo(() => scopeNamesOf(scopeFields.data), [scopeFields.data]);
   const sourcesRegistry = data.sourcesRegistryCode ?? null;
   const substancesRegistry = data.substancesRegistryCode ?? null;
   const context: CardContext = {
     sourceColumns: addedColumnsOf(data, 'sources'),
     substanceColumns: addedColumnsOf(data, 'substances'),
     lang,
+    scopeNames,
     onEditSource:
       mayImport && sourcesRegistry !== null
         ? (source) => {

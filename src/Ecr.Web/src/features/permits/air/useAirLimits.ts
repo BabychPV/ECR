@@ -173,5 +173,5 @@ export function useAirScopeCodes() {
 
 /** AIR-ON-AIR: how REGION / AREA are configured on the AIR type, with their values (scope step). */
 export function useAirScopeFields() {
-  return useQuery<AirScopeFields>({ queryKey: airKeys.scopeFields, queryFn: getAirScopeFields });
+  return useQuery<AirScopeFields>({ queryKey: airKeys.scopeFields, queryFn: () => getAirScopeFields() });
 }
