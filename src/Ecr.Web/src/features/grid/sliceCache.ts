@@ -258,6 +258,26 @@ export function markSliceHidden(tableInstanceId: number, periodKey: number): () 
 }
 
 /**
+ * Структура зрізів змінилася повсюдно (перенос документів проєкту на нову версію шаблону, PSS-19b): ВИДИМІ
+ * змонтовані зрізи перезапитуються, приховані (`C1-01`) і незмонтовані лише стають застарілими й дочитуються самі —
+ * при показі (`takeMissedInvalidation`) чи монтуванні.
+ *
+ * ⛔ Не `invalidateQueries()` без фільтра: той перезапитував і кожну приховану сітку аркуша (до 91 найважчого `GET`
+ * системи одночасно) — рівно те, від чого `C1-01` береже решту намірів.
+ */
+export async function invalidateAllSlices(client: QueryClient): Promise<void> {
+  recordMissedWhileHidden(client);
+
+  await Promise.all([
+    client.invalidateQueries({ predicate: (query) => isSliceKey(query.queryKey) && !isHiddenSlice(query) }),
+    client.invalidateQueries({
+      predicate: (query) => isSliceKey(query.queryKey) && isHiddenSlice(query),
+      refetchType: 'none',
+    }),
+  ]);
+}
+
+/**
  * Позначає застарілими ВСІ зрізи, не запитуючи жодного.
  *
  * ⚠ Для намірів, ширших за період: перерахунок усього проєкту (`periodKey:
