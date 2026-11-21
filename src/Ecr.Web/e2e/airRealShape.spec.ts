@@ -575,16 +575,21 @@ test.describe('Air real shape', () => {
     await toFile(page, realShapeWorkbook(RealShapeSources));
     await chooseProfile(page, `Pass3b ${blocking} (${blocking})`);
     await page.getByRole('button', { name: /Next: analyse file/ }).click();
-    const reason = page.getByTestId('air-no-rows-reason');
-    await expect(reason).toContainText('No source was read (sheet', { timeout: 30_000 });
-    await expect(reason).toContainText('header rows 4–6');
-    await expect(reason).toContainText(claimed);
+    // ✎ Крок «Відповідність» (ux-permit-import, рецензія M1): обов'язкове поле без стовпця — вердикт «Required columns not
+    // found» і причина в рядку поля; порожня статистика тут лише наслідок, тому «No source was read» не показується.
+    await expect(page.getByTestId('air-mapping-verdict')).toContainText('Required columns not found: 1', { timeout: 30_000 });
+    await expect(page.getByRole('row', { name: /^test Required/ })).toContainText(claimed);
+    await expect(page.getByTestId('air-no-rows-reason')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /Next: preview/ })).toBeDisabled();
 
     await page.getByRole('list', { name: 'Import steps' }).getByRole('button', { name: '2 File' }).click();
     await chooseProfile(page, `Pass3b ${optional} (${optional})`);
     await page.getByRole('button', { name: /Next: analyse file/ }).click();
     await expect(page.getByRole('heading', { name: 'Mapping', level: 2 })).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByText(claimed)).toBeVisible({ timeout: 30_000 });
+    // Необов'язкове поле, якого немає у файлі, згорнуте під таблицею («Fields not in this file»): причина — там, після розкриття.
+    const absent = page.getByTestId('air-fields-absent');
+    await absent.locator('summary').click();
+    await expect(absent.getByRole('cell', { name: claimed })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId('air-no-rows-reason')).toHaveCount(0);
     await expect(page.getByRole('button', { name: /Next: preview/ })).toBeEnabled();
 
