@@ -60,7 +60,7 @@ export function cellAuthorHint(row: AuthoredRow & { readonly origin: string; rea
 export function useAuthorOptions(
   items: readonly AuthoredRow[] | undefined,
   selected: number | null,
-): { value: string; label: string }[] {
+): { value: string; label: string; disabled?: boolean }[] {
   const session = useSession();
   // ⛔ PSS-19c: усі користувачі (`allUsersQuery`), а не перші 200 мовчки — 201-й автор не мав імені у фільтрі.
   const users = useQuery({
@@ -100,8 +100,16 @@ export function useAuthorOptions(
       names.set(selected, authorName({ changedByUserId: selected }));
     }
 
-    return [...names.entries()]
-      .sort((a, b) => a[1].localeCompare(b[1]))
-      .map(([id, label]) => ({ value: String(id), label }));
+    return [
+      ...[...names.entries()]
+        .sort((a, b) => a[1].localeCompare(b[1]))
+        .map(([id, label]) => ({ value: String(id), label })),
+      // PSS-19c / L4: користувачів дочитано лише до запобіжника — останнім неактивним пунктом сказано прямо.
+      // ⚠ Те саме, що `truncatedOption` (`@/shared/ui/truncatedOption`), але рядком тут: `AuditPage` — біля межі
+      // бюджету `D-132`, а окремий спільний чанк ради трьох рядків коштував би маршруту ~0,2 КБ (рецензія L10, M3).
+      ...(users.data === undefined || users.data.nextCursor === null
+        ? []
+        : [{ value: '__list-truncated__', label: t('common.shownSoFar', { shown: users.data.items.length }), disabled: true }]),
+    ];
   }, [seen, users.data, selected]);
 }

@@ -82,6 +82,32 @@ describe('PSS-19c: fetchAllPages', () => {
     expect(all).toEqual({ items: [1, 2], nextCursor: 'same', totalCount: null });
   });
 
+  it('курсор колом A→B→A і перекриття сторінок: той самий запис (за `id`) не додається вдруге', async () => {
+    urls.length = 0;
+    const page = (ids: number[], nextCursor: string | null): Response =>
+      new Response(JSON.stringify({ items: ids.map((id) => ({ id })), nextCursor, totalCount: null }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        urls.push(url);
+        const cursor = new URL(url, 'http://x').searchParams.get('cursor');
+        if (cursor === null) return page([1, 2], 'A');
+        if (cursor === 'A') return page([2, 3], 'B');
+        return page([3, 1], 'A');
+      }),
+    );
+
+    const all = await fetchAllPages<{ id: number }>('/api/v1/users');
+
+    expect(all.items.map((item) => item.id)).toEqual([1, 2, 3]);
+    expect(all.nextCursor).toBe('A');
+    expect(urls).toHaveLength(3);
+  });
+
   it('скасування: `signal` доходить до запиту — покинутий екран не дочитує решту', async () => {
     serve({ '': { items: [1], nextCursor: 'a' }, a: { items: [2], nextCursor: null } });
     const controller = new AbortController();

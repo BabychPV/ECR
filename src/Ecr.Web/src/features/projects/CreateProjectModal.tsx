@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
 import { Button, Group, Modal, NumberInput, Select, TextInput } from '@mantine/core';
-import { useMutation, useQueries, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
-import { templatesListQuery, templateVersionsQuery } from '@/features/templates/templateQueries';
+import { templatesListQuery } from '@/features/templates/templateQueries';
+import { versionsOfTemplatesQuery } from '@/features/templates/versionsOfTemplates';
 import type {
   CreateProjectRequest,
   PeriodPolicyDto,
@@ -12,6 +13,7 @@ import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { LocalizedInput, hasAnyText, type LocalizedValue } from '@/shared/ui/LocalizedInput';
 import { showApiError } from '@/shared/ui/notify';
 import { StillNeeded } from '@/shared/ui/StillNeeded';
+import { truncatedOption } from '@/shared/ui/truncatedOption';
 import { t } from '@/shared/i18n';
 
 /** Види періоду; значення збігаються з `PeriodKind` домену. */
@@ -215,12 +217,13 @@ export function CreateProjectModal({
   // Тут стояв тип `TemplateVersionSummary[]`, тож `.data` при пагінованій
   // відповіді був ОБ'ЄКТОМ, не `undefined` — `?? []` не рятував, і
   // `.filter` нижче падав на кожному відкритті цієї форми (`ECR-WEB-8662`).
-  // Тепер — спільний `templateVersionsQuery` (усі сторінки, PSS-19c), `.data?.items`.
-  const versionQueries = useQueries({
-    queries: (templates.data?.items ?? []).map((template) => ({
-      ...templateVersionsQuery(template.id),
-      enabled: opened,
-    })),
+  // Тепер — `versionsOfTemplatesQuery`: повний перелік версій кожного шаблону (`templateVersionsQuery`), але
+  // не більше чотирьох запитів одночасно (рецензія L10, L5) — а не по запиту на шаблон в одну мить.
+  const queryClient = useQueryClient();
+  const templateItems = templates.data?.items ?? [];
+  const versionsOfAll = useQuery({
+    ...versionsOfTemplatesQuery(queryClient, templateItems.map((template) => template.id)),
+    enabled: opened && templateItems.length > 0,
   });
 
   const policies = useQuery({
@@ -230,8 +233,8 @@ export function CreateProjectModal({
   });
 
   /** Опубліковані версії всіх шаблонів, підписані кодом шаблону. */
-  const publishedVersions = (templates.data?.items ?? []).flatMap((template, index) =>
-    (versionQueries[index]?.data?.items ?? [])
+  const publishedVersions = templateItems.flatMap((template, index) =>
+    (versionsOfAll.data?.[index]?.items ?? [])
       .filter((version) => version.status === 'Published')
       .map((version) => ({
         value: String(version.id),
@@ -243,7 +246,7 @@ export function CreateProjectModal({
   // торкнулася поля (чи вже отримала значення), форма його більше не чіпає.
   const versionTouched = useRef(false);
   const defaultVersionId = latestPublishedVersionId(
-    versionQueries.flatMap((query) => query.data?.items ?? []),
+    (versionsOfAll.data ?? []).flatMap((page) => page.items),
   );
   useEffect(() => {
     if (!versionTouched.current && defaultVersionId !== null) setVersionId(defaultVersionId);
@@ -301,20 +304,20 @@ export function CreateProjectModal({
    * штовхає його робити зайву, а потім дублюючу конфігурацію, яку хтось
    * прибиратиме.
    *
-   * ⚠ Версії живуть у `useQueries` — по запиту на шаблон; береться ПЕРША
+   * ⚠ Версії — один запит `versionsOfAll` (пул по шаблонах); береться ПЕРША
    * відмова з усіх трьох джерел. Три банери поруч розповідали б про
    * влаштування клієнта замість того, що сталося.
    */
   const loadError =
     templates.error ??
     policies.error ??
-    versionQueries.find((query) => query.error !== null)?.error ??
+    versionsOfAll.error ??
     null;
 
   const refetchSources = (): void => {
     void templates.refetch();
     void policies.refetch();
-    versionQueries.forEach((query) => void query.refetch());
+    void versionsOfAll.refetch();
   };
 
   return (
@@ -404,7 +407,7 @@ export function CreateProjectModal({
         required
         label={t('periods.templateVersion')}
         description={t('periods.templateVersionHint')}
-        data={publishedVersions}
+        data={[...publishedVersions, ...truncatedOption(templates.data)]}
         value={versionId}
         onChange={(value) => {
           versionTouched.current = true;

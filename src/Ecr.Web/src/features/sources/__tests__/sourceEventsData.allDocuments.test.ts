@@ -32,8 +32,9 @@ describe('PSS-19c: документи для мапінгу подій — ус�
 
     const documents = await fetchDocuments();
 
-    expect(documents).toHaveLength(501);
-    expect(documents.at(-1)?.id).toBe(501);
+    expect(documents.items).toHaveLength(501);
+    expect(documents.items.at(-1)?.id).toBe(501);
+    expect(documents.nextCursor).toBeNull();
     expect(urls).toEqual(['/api/v1/documents?limit=500', '/api/v1/documents?limit=500&cursor=p2']);
   });
 });

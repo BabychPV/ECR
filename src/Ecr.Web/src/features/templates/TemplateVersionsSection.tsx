@@ -7,6 +7,7 @@ import type { TemplateVersionSummary } from '@/api/types';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
+import { TruncatedListNote } from '@/shared/ui/TruncatedListNote';
 import { t } from '@/shared/i18n';
 import { NewTemplateVersionModal } from './NewTemplateVersionModal';
 import './templateVersionsTimeline.css';
@@ -140,6 +141,8 @@ export function TemplateVersionsSection({
           </ol>
         )}
       </AsyncBoundary>
+      {/* PSS-19c / L4: версії дочитано лише до запобіжника — сказано прямо (новіші — у кінці переліку). */}
+      <TruncatedListNote list={versions.data} />
       <NewTemplateVersionModal
         templateId={creating ? templateId : null}
         cloneFrom={latest}

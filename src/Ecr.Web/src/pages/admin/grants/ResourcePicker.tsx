@@ -11,6 +11,7 @@ import type {
 } from '@/api/types';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
+import { truncatedOption } from '@/shared/ui/truncatedOption';
 import type { ResourceKind } from './grantLabels';
 
 /**
@@ -207,7 +208,7 @@ export function ResourcePicker({
       <Select
         {...common(t('grants.pickerTemplate'), Boolean(templates.error), templates.error)}
         aria-label={aria(t('grants.pickerTemplate'))}
-        data={(templates.data?.items ?? []).map((tp) => ({ value: String(tp.id), label: tp.code }))}
+        data={[...(templates.data?.items ?? []).map((tp) => ({ value: String(tp.id), label: tp.code })), ...truncatedOption(templates.data)]}
         value={path.templateId === null ? null : String(path.templateId)}
         onChange={(value) => pick(-1, null, undefined, { ...EmptyPath, templateId: idOrNull(value) })}
       />
@@ -215,7 +216,7 @@ export function ResourcePicker({
         {...common(t('grants.pickerVersion'), Boolean(versions.error), versions.error)}
         aria-label={aria(t('grants.pickerVersion'))}
         disabled={path.templateId === null}
-        data={(versions.data?.items ?? []).map((v) => ({ value: String(v.id), label: v.version }))}
+        data={[...(versions.data?.items ?? []).map((v) => ({ value: String(v.id), label: v.version })), ...truncatedOption(versions.data)]}
         value={path.versionId === null ? null : String(path.versionId)}
         onChange={(value) =>
           pick(0, null, undefined, { ...EmptyPath, templateId: path.templateId, versionId: idOrNull(value) })

@@ -48,6 +48,9 @@ export async function fetchAllPages<T>(path: string, options: FetchAllPagesOptio
 
   const items: T[] = [];
   const seen = new Set<string>();
+  // ⚠ Запис, що прийшов удруге (курсор пішов колом A→B→A, або сторінки перекрились, поки хтось додавав записи), —
+  // не другий запис: перелік вибору з двома однаковими пунктами гірший за коротший. Ключ — `id`, якщо він є.
+  const ids = new Set<unknown>();
   let cursor: string | null = null;
   let totalCount: number | null = null;
 
@@ -55,7 +58,14 @@ export async function fetchAllPages<T>(path: string, options: FetchAllPagesOptio
     const query: string = cursor === null ? '' : `&cursor=${encodeURIComponent(cursor)}`;
     const next: CursorPage<T> = await apiFetch<CursorPage<T>>(`${path}${separator}limit=${String(pageSize)}${query}`, init);
 
-    items.push(...next.items);
+    for (const item of next.items) {
+      const id = (item as { id?: unknown } | null)?.id;
+      if (id !== undefined && id !== null) {
+        if (ids.has(id)) continue;
+        ids.add(id);
+      }
+      items.push(item);
+    }
     totalCount = next.totalCount ?? totalCount;
     cursor = next.nextCursor ?? null;
 

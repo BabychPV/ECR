@@ -27,6 +27,7 @@ import { LocalizedInput, hasAnyText, type LocalizedValue } from '@/shared/ui/Loc
 import type { StatItem, StatStripItems } from '@/shared/ui/StatStrip';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
+import { TruncatedListNote } from '@/shared/ui/TruncatedListNote';
 import { TwoLine } from '@/shared/ui/TwoLine';
 import { useUrlParamsSetter, useUrlState } from '@/shared/ui/useUrlState';
 import { showApiError, showDone } from '@/shared/ui/notify';
@@ -390,6 +391,7 @@ export function TemplatesPage(): JSX.Element {
            * ⚠ `rows` — `undefined`, доки дані не прийшли: `?? []` перетворило б
            * «ще не питали» на «порожньо» (`DataTable` тримає стани сам).
            */
+          <>
           <DataTable<TemplateListRow>
             columns={columns}
             rows={visible}
@@ -409,6 +411,9 @@ export function TemplatesPage(): JSX.Element {
               void versionsBatch.refetch();
             }}
           />
+          {/* PSS-19c / L4: перелік дочитано лише до запобіжника — сказано прямо. */}
+          <TruncatedListNote list={templates.data} />
+          </>
         }
       />
 

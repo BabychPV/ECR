@@ -8,6 +8,7 @@ import { allUsersQuery } from '@/features/security/allUsers';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
+import { truncatedOption } from '@/shared/ui/truncatedOption';
 import { useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 
@@ -88,10 +89,13 @@ export function MyGroupsPage(): JSX.Element {
                   ? undefined
                   : t('state.errorTitle')
               }
-              data={(users.data?.items ?? []).map((user) => ({
-                value: String(user.id),
-                label: user.userName,
-              }))}
+              data={[
+                ...(users.data?.items ?? []).map((user) => ({
+                  value: String(user.id),
+                  label: user.userName,
+                })),
+                ...truncatedOption(users.data),
+              ]}
               value={subject}
               onChange={setSubject}
               searchable

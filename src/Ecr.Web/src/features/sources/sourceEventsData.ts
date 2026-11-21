@@ -1,5 +1,5 @@
 import { apiFetch, EcrApiError } from '@/api/client';
-import { fetchAllPages } from '@/api/fetchAllPages';
+import { fetchAllPages, type CursorPage } from '@/api/fetchAllPages';
 import type {
   DocumentSummary,
   DocumentTableDto,
@@ -40,10 +40,9 @@ export const SourceEventsKeys = {
  * Документи, які користувач бачить — УСІ сторінки (PSS-19c): мапінг подій прив'язується до документа ділянки, і
  * прив'язка до документа поза першою сторінкою (500) лишалась без назви й без вибору.
  */
-export async function fetchDocuments({ signal }: { signal?: AbortSignal } = {}): Promise<DocumentSummary[]> {
-  const all = await fetchAllPages<DocumentSummary>('/api/v1/documents', { signal });
-
-  return all.items;
+export function fetchDocuments({ signal }: { signal?: AbortSignal } = {}): Promise<CursorPage<DocumentSummary>> {
+  // ⚠ Сторінкою (`items` + `nextCursor`), а не масивом: вкладка каже «показано перші N», якщо спрацював запобіжник.
+  return fetchAllPages<DocumentSummary>('/api/v1/documents', { signal });
 }
 
 /**

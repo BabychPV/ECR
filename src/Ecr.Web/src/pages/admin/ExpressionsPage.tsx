@@ -19,6 +19,7 @@ import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { statusKey } from '@/shared/ui/StatusBadge';
+import { truncatedOption } from '@/shared/ui/truncatedOption';
 
 /**
  * Редактор виразів (`ФВ-9.15a`, область 10 у `ФВ-14.3`).
@@ -176,7 +177,7 @@ export function ExpressionsPage(): JSX.Element {
             allowDeselect={false}
             disabled={templates.isPending}
             value={selectedTemplateId === undefined ? null : String(selectedTemplateId)}
-            data={templateItems.map((x) => ({ value: String(x.id), label: x.code }))}
+            data={[...templateItems.map((x) => ({ value: String(x.id), label: x.code })), ...truncatedOption(templates.data)]}
             onChange={(value) => {
               setTemplateId(value);
               // Версія належить шаблону: попередня при зміні шаблону недійсна.
@@ -201,10 +202,13 @@ export function ExpressionsPage(): JSX.Element {
              * версія називалася б у переліку шаблонів мовою користувача, а
              * тут — англійським `Published`.
              */
-            data={(versions.data?.items ?? []).map((v) => ({
-              value: String(v.id),
-              label: `${v.version} · ${t(statusKey('version', v.status))}`,
-            }))}
+            data={[
+              ...(versions.data?.items ?? []).map((v) => ({
+                value: String(v.id),
+                label: `${v.version} · ${t(statusKey('version', v.status))}`,
+              })),
+              ...truncatedOption(versions.data),
+            ]}
             onChange={setTemplateVersionId}
           />
         )}
