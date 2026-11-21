@@ -82,6 +82,8 @@ public sealed class NightlyRecalculationTests(SqlServerFixture sql)
         SourceDocumentEdited,
         SourceDocumentRecalculated,
         EditJustBeforeBaseline,
+        HeaderEdited,
+        SheetCopyDeleted,
     }
 
     /// <summary>«Тиха» подія для <see cref="Власні_записи_перерахунку_й_нерелевантні_події_не_будять_документ"/>.</summary>
@@ -191,6 +193,8 @@ public sealed class NightlyRecalculationTests(SqlServerFixture sql)
     [InlineData(InputKind.SourceDocumentEdited, "source")]
     [InlineData(InputKind.SourceDocumentRecalculated, "source")]
     [InlineData(InputKind.EditJustBeforeBaseline, "cellEdits")]
+    [InlineData(InputKind.HeaderEdited, "document")]
+    [InlineData(InputKind.SheetCopyDeleted, "document")]
     public async Task Зміна_входу_будить_документ(InputKind kind, string reason)
     {
         var arranged = await ArrangeAsync();
@@ -265,6 +269,14 @@ public sealed class NightlyRecalculationTests(SqlServerFixture sql)
                     run.MakeCurrent();
                     db.CalculationRuns.Add(run);
                     await db.SaveChangesAsync();
+                    break;
+                case InputKind.HeaderEdited:
+                case InputKind.SheetCopyDeleted:
+                    // ✎ Огляд H1: шапка (HDR.*, DocumentHeaderHandlers) і склад копій аркушів (DocumentSheetCopyHandler —
+                    // видаляє екземпляри, рядки й комірки) не лишають ні aud.CellChange, ні aud.RowChange — лише
+                    // aud.SecurityEvent і дотик документа тим самим портом (обробник копій —
+                    // DocumentSheetCopyHandlersTests.Додавання_перейменування_й_видалення_копії_торкаються_документа).
+                    await new DocumentStore(db).TouchAsync(d.DocumentId, 1, at, CancellationToken.None);
                     break;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(kind), kind, null);

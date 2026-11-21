@@ -51,7 +51,12 @@ internal sealed record NightlyInputProbe(
 ///   <item>повернення затвердженого аркуша документа (<c>wf.ApprovalEvent.FromStatus = Approved</c>): поки аркуш був затверджений,
 ///   перерахунок його пропускав (D-493/D-510) — тепер його треба порахувати. Саме затвердження входом не є;</item>
 ///   <item>документ-джерело (B179): правка комірки, новий актуальний прогін (результати методологій джерела), будь-яка подія
-///   погодження (стан-ворота <c>ApprovedOnly</c>).</item>
+///   погодження (стан-ворота <c>ApprovedOnly</c>);</item>
+///   <item>✎ огляд H1: дотик документа (<c>doc.Document.ModifiedAt</c>, <c>IDocumentStore.TouchAsync</c>) — зміни, яких немає
+///   ні в <c>aud.CellChange</c>, ні в <c>aud.RowChange</c> (лише <c>aud.SecurityEvent</c>): шапка документа (<c>HDR.*</c>,
+///   <c>DocumentHeaderHandlers</c>), додавання/перейменування/видалення копії аркуша (<c>DocumentSheetCopyHandler</c> — видаляє
+///   екземпляри, рядки й комірки без журналу правок), видалення рядка події синком (<c>SourceEventSyncJob</c>). Перерахунок
+///   документ не торкає (перевіряє інтеграційний тест «без самопробудження»).</item>
 /// </list>
 /// </para>
 /// <para>
@@ -148,6 +153,10 @@ internal static class NightlyInputChangeQuery
                                                          AND sr.StartedAt >= {since})
                                            OR EXISTS (SELECT 1 FROM wf.ApprovalEvent AS se
                                                        WHERE se.DocumentId = CAST(s.[value] AS bigint) AND se.At >= {since}))
+                        UNION ALL
+                        SELECT 9
+                         WHERE EXISTS (SELECT 1 FROM doc.Document AS dm
+                                        WHERE dm.Id = {probe.DocumentId} AND dm.ModifiedAt >= {since})
                        ) AS t
                  ORDER BY t.Reason
                 """)

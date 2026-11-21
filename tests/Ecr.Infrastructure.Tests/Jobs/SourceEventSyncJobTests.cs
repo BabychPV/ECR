@@ -915,11 +915,18 @@ public sealed partial class SourceEventSyncJobTests(SqlServerFixture sql)
         var source = new FakeEventSource(Ev("E1", Start, End, volume: 10m), Ev("E2", Start.AddHours(1), End.AddHours(1)));
         await RunAsync(stand, source);
 
+        // ✎ PSS-15 (огляд H1, D-562): видалення рядка без aud.CellChange/aud.RowChange торкається документа — вхід нічного
+        // перерахунку. МУТАЦІЯ: прибрати UPDATE doc.Document у ApplyRemovalAsync — дата лишається 2020, червоний.
+        await ScalarAsync($"UPDATE doc.Document SET ModifiedAt = '2020-01-01' WHERE Id = {stand.DocumentId}; SELECT 1");
+
         source.Result = new SourceEventResult([Ev("E2", Start.AddHours(1), End.AddHours(1))], false, null);
         await RunAsync(stand, source);
 
         Assert.Equal(1, await JournalCountAsync(stand, "E1"));
         Assert.Equal(0, await JournalCountAsync(stand, "E2"));
+        Assert.True(
+            (DateTime)(await ScalarAsync($"SELECT ModifiedAt FROM doc.Document WHERE Id = {stand.DocumentId}"))!
+            > new DateTime(2020, 1, 2, 0, 0, 0, DateTimeKind.Unspecified));
 
         var json = (string)(await ScalarAsync(
             "SELECT TOP 1 OldJson FROM aud.StructureChange WHERE Operation = N'SourceEventRowRemoved' "

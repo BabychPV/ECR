@@ -97,6 +97,10 @@ public sealed class DocumentSheetCopyHandler(
                 new { documentId, projectId, sheetDefId, originalId = group.OriginalId, sheetCopyId = copyId, ordinal },
                 innerCt).ConfigureAwait(false);
 
+            // ✎ PSS-15 (огляд H1): склад документа змінився без журналу правок комірок — дотик документа є входом нічного
+            // перерахунку (D-562) і датою зміни на картці.
+            await documents.TouchAsync(documentId, userId, clock.UtcNow, innerCt).ConfigureAwait(false);
+
             // Перша копія робить оригінал «<Назва> 1».
             await EnqueueSheetNameRecalculationAsync(documentId, projectId, sheetDefId, userId, inTransaction: true, innerCt)
                 .ConfigureAwait(false);
@@ -144,6 +148,9 @@ public sealed class DocumentSheetCopyHandler(
                     oldName = group.NameOverride?.Values, newName = normalized.Values,
                 },
                 innerCt).ConfigureAwait(false);
+
+            // ✎ PSS-15 (огляд H1): назва групи — вхід SHEETNAME() формул; журналу правок комірок вона не лишає.
+            await documents.TouchAsync(documentId, userId, clock.UtcNow, innerCt).ConfigureAwait(false);
 
             await EnqueueSheetNameRecalculationAsync(documentId, projectId, sheetDefId, userId, inTransaction: true, innerCt)
                 .ConfigureAwait(false);
@@ -218,6 +225,9 @@ public sealed class DocumentSheetCopyHandler(
                     sheetCopyId, ordinal = copy.Ordinal, cells, chatMessages,
                 },
                 innerCt).ConfigureAwait(false);
+
+            // ✎ PSS-15 (огляд H1): видалено екземпляри, рядки й комірки копії без журналу правок — дотик документа.
+            await documents.TouchAsync(documentId, userId, clock.UtcNow, innerCt).ConfigureAwait(false);
 
             // Перенумерація (3→2) і остання видалена копія (оригінал знову без номера) міняють назви.
             sheetDefId = copy.SheetDefId;
