@@ -1594,6 +1594,9 @@ public sealed partial class RecalculationJob(
         return text.Length <= 400 ? text : text[..400];
     }
 
+    /// <summary>✎ Огляд L-4: стеля запису позначок перерваної задачі (<see cref="FlushSubmittedMarksAsync"/>).</summary>
+    private static readonly TimeSpan FlushMarksTimeout = TimeSpan.FromSeconds(15);
+
     /// <summary>
     /// Позначка «перераховано після подання» для задачі, перерваної до журналу аркушів (<see cref="SheetLogAsync"/>):
     /// скасування (витіснення кнопкою «Перерахувати», межа тривалості, зупинка служби), відкладення чи збій.
@@ -1612,6 +1615,10 @@ public sealed partial class RecalculationJob(
     /// Без токена задачі (він уже скасований) і без «пропущених затверджених»: їх журнал аркушів пише лише за прогін, що
     /// дійшов до кінця. Збій тут лише в журнал — початковий виняток (скасування, відкладення) не підміняється.
     /// </para>
+    /// <para>
+    /// ✎ Огляд L-4: власна стеля (<see cref="FlushMarksTimeout"/>), а не <c>CancellationToken.None</c>: зупинка служби чи
+    /// завислий SQL не тримають скасовану задачу (і слот виконавця) без кінця. Вичерпано — той самий шлях, що збій: журнал.
+    /// </para>
     /// </remarks>
     private async Task FlushSubmittedMarksAsync(RecalculationRequest request, SubmittedSheetChanges changes)
     {
@@ -1620,6 +1627,7 @@ public sealed partial class RecalculationJob(
             return;
         }
 
+        using var bounded = new CancellationTokenSource(FlushMarksTimeout);
         try
         {
             foreach (var group in changes.Items.GroupBy(c => (c.DocumentId, c.PeriodKey)))
@@ -1627,7 +1635,7 @@ public sealed partial class RecalculationJob(
                 await SubmittedSheetRecalcLog
                     .WriteAsync(
                         db, audit, clock, group.Key.DocumentId, group.Key.PeriodKey,
-                        [.. group.Select(c => (c.SheetDefId, c.SheetCopyId))], CancellationToken.None,
+                        [.. group.Select(c => (c.SheetDefId, c.SheetCopyId))], bounded.Token,
                         changedByUserId: request.TriggeredByUserId ?? 0, source: "interruptedRun")
                     .ConfigureAwait(false);
             }
