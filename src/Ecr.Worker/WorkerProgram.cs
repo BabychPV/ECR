@@ -110,9 +110,9 @@ internal static partial class WorkerProgram
 
         // ✎ L1b / D2: дочірні процеси — по одному місцю, тож резерву «останнього місця» в процесі немає; місця дає кількість
         // процесів пулу. Межа дітей розкладу не менша за неї — діти можуть зайняти весь пул (ручні й авто чекатимуть).
-        if (Infrastructure.Jobs.QuartzJobTypeLimiter.FanOutCapacityWarning(
+        if (Infrastructure.Jobs.QuartzJobTypeLimiter.FanOutCapacity(
                 Infrastructure.Jobs.QuartzJobTypeLimiter.ReadRecalcFanOutMaxConcurrency(builder.Configuration),
-                options.Count, "Jobs:Workers:Count", lastSlotReserved: false) is { } fanOutWarning)
+                options.Count, "Jobs:Workers:Count", lastSlotReserved: false).Warning is { } fanOutWarning)
         {
             LogConfigurationWarning(logger, fanOutWarning);
         }

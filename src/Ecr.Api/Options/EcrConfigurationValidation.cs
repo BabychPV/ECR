@@ -438,10 +438,11 @@ public static partial class EcrConfigurationValidation
                 + "або перелічіть адреси проксі (runbook §2.1).");
         }
 
-        // ✎ L1b / D2: межа дітей розкладу перерахунку не менша за місця виконавця, що бере лейн перерахунку в цьому процесі.
-        // Черга в базі з виконавцем InProcess — місця воркера Api (останнє воркер тримає сам, попередження каже, скільки дітей
-        // насправді); Quartz — потоки пулу (резерву немає). Пул воркерів (Executor = Worker) попереджає сам (Ecr.Worker).
-        if (FanOutCapacityWarning(configuration) is { } fanOutWarning)
+        // ✎ L1b / D2: межа дітей розкладу перерахунку не менша за місця виконавця, що бере лейн перерахунку в цьому процесі, —
+        // попередження лише там, де виконавець не тримає останнє місце для не-дітей (Quartz — потоки пулу). Черга в базі з
+        // InProcess резервує його сам (JobWorker), тож там — рядок Information (Notes), а не попередження на кожному старті
+        // типової конфігурації. Пул воркерів (Executor = Worker) попереджає сам (Ecr.Worker).
+        if (FanOutCapacity(configuration).Warning is { } fanOutWarning)
         {
             warnings.Add(fanOutWarning);
         }
@@ -459,19 +460,30 @@ public static partial class EcrConfigurationValidation
         return warnings;
     }
 
-    /// <summary>✎ L1b / D2: попередження «межа дітей розкладу ≥ місць виконавця перерахунку» для режиму й виконавця Api.</summary>
-    private static string? FanOutCapacityWarning(IConfiguration configuration)
+    /// <summary>
+    /// Рядки старту рівня Information: не проблема, але адміністратору варто знати фактичне значення (✎ L1b / D2 — скільки
+    /// дітей розкладу перерахунку виконується насправді, коли межа не менша за місця воркера Api).
+    /// </summary>
+    /// <param name="configuration">Зведена конфігурація застосунку.</param>
+    public static IReadOnlyList<string> Notes(IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+        return FanOutCapacity(configuration).Information is { } fanOut ? [fanOut] : [];
+    }
+
+    /// <summary>✎ L1b / D2: межа дітей розкладу проти місць виконавця перерахунку цього процесу (режим і виконавець Api).</summary>
+    private static (string? Warning, string? Information) FanOutCapacity(IConfiguration configuration)
     {
         var cap = Infrastructure.Jobs.QuartzJobTypeLimiter.ReadRecalcFanOutMaxConcurrency(configuration);
         if (Infrastructure.Jobs.DbBackgroundJobScheduler.ReadMode(configuration) == Infrastructure.Jobs.JobQueueMode.Database)
         {
             return Infrastructure.Jobs.JobLaneMap.ReadExecutor(configuration) == Infrastructure.Jobs.RecalculationExecutor.InProcess
-                ? Infrastructure.Jobs.QuartzJobTypeLimiter.FanOutCapacityWarning(
+                ? Infrastructure.Jobs.QuartzJobTypeLimiter.FanOutCapacity(
                     cap, Infrastructure.Jobs.JobWorkerOptions.DefaultMaxConcurrency, "місця воркера Api", lastSlotReserved: true)
-                : null;
+                : (null, null);
         }
 
-        return Infrastructure.Jobs.QuartzJobTypeLimiter.FanOutCapacityWarning(
+        return Infrastructure.Jobs.QuartzJobTypeLimiter.FanOutCapacity(
             cap, Infrastructure.Jobs.QuartzJobTypeLimiter.ReadThreadCount(configuration),
             Infrastructure.Jobs.QuartzJobTypeLimiter.ThreadCountKey, lastSlotReserved: false);
     }
@@ -488,6 +500,11 @@ public static partial class EcrConfigurationValidation
         foreach (var warning in Warnings(app.Configuration, app.Environment.IsProduction()))
         {
             LogConfigurationWarning(logger, warning);
+        }
+
+        foreach (var note in Notes(app.Configuration))
+        {
+            LogConfigurationNote(logger, note);
         }
 
         var problems = Validate(app.Configuration);
@@ -562,4 +579,7 @@ public static partial class EcrConfigurationValidation
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Конфігурація: {Warning}")]
     private static partial void LogConfigurationWarning(ILogger logger, string warning);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Конфігурація: {Note}")]
+    private static partial void LogConfigurationNote(ILogger logger, string note);
 }
