@@ -5,7 +5,8 @@ import { notifications } from '@mantine/notifications';
 import type { TableSliceDto } from '@/api/types';
 import { buildRequest, type PendingEdit } from '../cellPatchRequest';
 import { planPaste } from '../clipboard';
-import { PatchCellsMaxCells, saveInParts, splitIntoParts } from '../patchParts';
+import { PatchCellsMaxCells, saveInParts, splitIntoParts, type PartResult } from '../patchParts';
+import { discardPendingRows, openDocument, putPendingEdits, resetPending } from '../pendingStore';
 
 /**
  * PSS-17 (рішення людини №12): пакет понад стелю сервера ДІЛИТЬСЯ на послідовні частини ≤ 50 000 комірок.
@@ -183,9 +184,42 @@ function sliceWith(versions: Record<string, string>): TableSliceDto {
   } as TableSliceDto;
 }
 
+
+const Table = 1;
+const Period = 202609;
+
+/** Текст тоста: рядок або `<span role="status">текст</span>` (хід — у ввічливій області). */
+function textOf(message: unknown): string {
+  if (typeof message === 'string') return message;
+  const element = message as { props?: { children?: unknown } } | null;
+  return String(element?.props?.children ?? '');
+}
+
+function roleOf(message: unknown): string | undefined {
+  return (message as { props?: { role?: string } } | null)?.props?.role;
+}
+
+/** Правки лежать у сховищі — як завжди перед збереженням (`saveThroughStore`, автозбереження). */
+function stored(batch: PendingEdit[]): PendingEdit[] {
+  putPendingEdits(Table, Period, batch);
+  return batch;
+}
+
+const options = { tableInstanceId: Table, periodKey: Period, slice: () => undefined };
+const NoticeId = `ecr-patch-parts-partial-${String(Table)}:${String(Period)}`;
+
 describe('PSS-17: saveInParts', () => {
-  it('частини йдуть ПОСЛІДОВНО: наступна — лише після відповіді попередньої; хід видно', async () => {
-    const batch = edits(2000, 60);
+  beforeEach(() => {
+    resetPending();
+    openDocument(42);
+  });
+
+  afterEach(() => {
+    resetPending();
+  });
+
+  it('частини йдуть ПОСЛІДОВНО: наступна — лише після відповіді попередньої; хід — у ввічливій області', async () => {
+    const batch = stored(edits(2000, 60));
     const started: number[] = [];
     let release: (() => void) | null = null;
 
@@ -193,11 +227,11 @@ describe('PSS-17: saveInParts', () => {
       batch,
       (part) => {
         started.push(part.length);
-        return new Promise<boolean>((resolve) => {
-          release = () => resolve(true);
+        return new Promise<PartResult>((resolve) => {
+          release = () => resolve('saved');
         });
       },
-      { slice: () => undefined },
+      options,
     );
 
     await Promise.resolve();
@@ -212,55 +246,163 @@ describe('PSS-17: saveInParts', () => {
     await vi.waitFor(() => expect(started).toHaveLength(3));
     (release as unknown as () => void)();
 
-    await expect(done).resolves.toEqual({ total: 120_000, saved: 120_000, parts: 3, failedPart: null });
+    await expect(done).resolves.toEqual({
+      total: 120_000, saved: 120_000, superseded: 0, parts: 3, failedPart: null, stoppedBy: null,
+    });
 
     expect(show).toHaveBeenCalledTimes(1);
-    expect(String(show.mock.calls[0]?.[0].message)).toContain('grid.saveParts.progress');
-    const messages = update.mock.calls.map(([data]) => String(data.message));
+    expect(textOf(show.mock.calls[0]?.[0].message)).toContain('grid.saveParts.progress');
+    // L3: оновлення ліку — `role="status"` (ввічливо), а не лише `alert` кореня тоста.
+    expect(roleOf(show.mock.calls[0]?.[0].message)).toBe('status');
+    const messages = update.mock.calls.map(([data]) => textOf(data.message));
     expect(messages.filter((message) => message.includes('grid.saveParts.progress'))).toHaveLength(3);
     expect(messages.at(-1)).toContain('grid.saveParts.done');
   });
 
-  it('відмова частини 2: частина 3 не надсилається, підсумок — скільки збережено, тост каже, що решта НЕ збережена', async () => {
-    const batch = edits(2000, 60);
+  it('відмова частини 2: частина 3 не надсилається; тост зрізу — «збережено X з Y, решта НЕ збережена»', async () => {
+    const batch = stored(edits(2000, 60));
     const sent: number[] = [];
 
     const outcome = await saveInParts(
       batch,
       (part) => {
         sent.push(part.length);
-        return Promise.resolve(sent.length !== 2);
+        return Promise.resolve(sent.length === 2 ? 'refused' : 'saved');
       },
-      { slice: () => undefined },
+      options,
     );
 
     expect(sent).toEqual([49_980, 49_980]);
-    expect(outcome).toEqual({ total: 120_000, saved: 49_980, parts: 3, failedPart: 1 });
+    expect(outcome).toEqual({ total: 120_000, saved: 49_980, superseded: 0, parts: 3, failedPart: 1, stoppedBy: 'refused' });
 
-    const last = update.mock.calls.at(-1)?.[0];
-    expect(String(last?.message)).toContain('grid.saveParts.partial');
-    expect(last?.color).toBe('statusWarning');
-    expect(last?.autoClose).toBe(false);
+    const partial = show.mock.calls.at(-1)?.[0];
+    expect(textOf(partial?.message)).toContain('grid.saveParts.partial');
+    expect(partial?.id).toBe(NoticeId);
+    expect(partial?.color).toBe('statusWarning');
+    expect(partial?.autoClose).toBe(false);
   });
 
-  it('відмова ПЕРШОЇ частини: нічого не збережено — лічильний тост прибирається (причину показує зберігач)', async () => {
-    const outcome = await saveInParts(edits(1020, 50), () => Promise.resolve(false), { slice: () => undefined });
+  it('M1: тост «не збережено» оновлює лік і ГАСНЕ, щойно решту довезено (Retry, автозбереження)', async () => {
+    const batch = stored(edits(2000, 60));
+    let calls = 0;
 
-    expect(outcome).toEqual({ total: 51_000, saved: 0, parts: 2, failedPart: 0 });
+    // Як справжній зберігач: успіх частини знімає її рядки зі сховища (`discardPendingRows`).
+    await saveInParts(
+      batch,
+      (part) => {
+        calls += 1;
+        if (calls === 2) return Promise.resolve('refused');
+        discardPendingRows(Table, Period, new Set(part.map((edit) => edit.rowKey)));
+        return Promise.resolve('saved');
+      },
+      options,
+    );
+
+    hide.mockClear();
+    update.mockClear();
+
+    // Retry довіз другу частину — лік оновився, тост іще живий.
+    discardPendingRows(Table, Period, new Set(batch.slice(49_980, 99_960).map((edit) => edit.rowKey)));
+    const counted = update.mock.calls.filter(([data]) => data.id === NoticeId).map(([data]) => textOf(data.message));
+    expect(counted.at(-1)).toContain('grid.saveParts.stillUnsaved');
+    expect(counted.at(-1)).toContain('20');
+    expect(hide).not.toHaveBeenCalledWith(NoticeId);
+
+    // Решту довезено — тост гасне сам.
+    discardPendingRows(Table, Period, new Set(batch.slice(99_960).map((edit) => edit.rowKey)));
+    expect(hide).toHaveBeenCalledWith(NoticeId);
+  });
+
+  it('M1: наступний пакет частинами в тому самому зрізі прибирає старий тост — двох тостів із різними числами немає', async () => {
+    const batch = stored(edits(1020, 50));
+    let calls = 0;
+    await saveInParts(batch, () => Promise.resolve((calls += 1) === 2 ? 'refused' : 'saved'), options);
+    expect(show.mock.calls.some(([data]) => data.id === NoticeId)).toBe(true);
+    hide.mockClear();
+
+    await saveInParts(batch, () => Promise.resolve('saved'), options);
+
+    expect(hide).toHaveBeenCalledWith(NoticeId);
+  });
+
+  it('M1: «дані зайняті» з повтором — текст «чекає, повториться саме», а не «див. помилку» (її немає)', async () => {
+    const batch = stored(edits(1020, 50));
+    let calls = 0;
+    const outcome = await saveInParts(batch, () => Promise.resolve((calls += 1) === 2 ? 'waiting' : 'saved'), options);
+
+    expect(outcome.stoppedBy).toBe('waiting');
+    const partial = show.mock.calls.at(-1)?.[0];
+    expect(textOf(partial?.message)).toContain('grid.saveParts.waiting');
+    expect(textOf(partial?.message)).not.toContain('grid.saveParts.partial');
+  });
+
+  it('відмова ПЕРШОЇ частини: нічого не збережено — лічильний тост прибирається, тоста зрізу немає', async () => {
+    const outcome = await saveInParts(stored(edits(1020, 50)), () => Promise.resolve('refused'), options);
+
+    expect(outcome).toEqual({ total: 51_000, saved: 0, superseded: 0, parts: 2, failedPart: 0, stoppedBy: 'refused' });
     expect(hide).toHaveBeenCalledTimes(1);
+    expect(show).toHaveBeenCalledTimes(1);
   });
 
   it('пакет в одну частину — без тоста ходу', async () => {
-    await saveInParts(edits(10, 10), () => Promise.resolve(true), { slice: () => undefined });
+    await saveInParts(stored(edits(10, 10)), () => Promise.resolve('saved'), options);
 
     expect(show).not.toHaveBeenCalled();
     expect(update).not.toHaveBeenCalled();
+  });
+
+  it('M2: комірка, змінена чи скасована, доки йшла частина 1, у частині 2 НЕ їде; лік чесний', async () => {
+    const batch = stored(edits(1020, 50));
+    const sentParts: PendingEdit[][] = [];
+
+    const outcome = await saveInParts(
+      batch,
+      (part) => {
+        sentParts.push(part);
+        if (sentParts.length === 1) {
+          // Поки летить частина 1: людина ввела нове значення в r1000:C0 і скасувала r1001:C0 (Undo — значення «було»).
+          putPendingEdits(Table, Period, [
+            { rowKey: 'r1000', columnCode: 'C0', value: 'typed', isEmpty: false, baseVersion: 'v1' },
+            { rowKey: 'r1001', columnCode: 'C0', value: 0, isEmpty: false, baseVersion: 'v1' },
+          ]);
+        }
+        return Promise.resolve('saved');
+      },
+      options,
+    );
+
+    const second = sentParts[1] ?? [];
+    expect(second).toHaveLength(998);
+    expect(second.some((edit) => edit.rowKey === 'r1000' && edit.columnCode === 'C0')).toBe(false);
+    expect(second.some((edit) => edit.rowKey === 'r1001' && edit.columnCode === 'C0')).toBe(false);
+    expect(outcome).toMatchObject({ saved: 50_998, superseded: 2, failedPart: null });
+  });
+
+  it('L2: документ закрито посеред пакета — решта не їде, людині сказано прямо', async () => {
+    const batch = stored(edits(2000, 60));
+    let calls = 0;
+
+    const outcome = await saveInParts(
+      batch,
+      () => {
+        calls += 1;
+        // Людина вийшла з документа (діалог виходу → «піти»): сховище скинуто.
+        resetPending();
+        return Promise.resolve('saved');
+      },
+      options,
+    );
+
+    expect(calls).toBe(1);
+    expect(outcome).toMatchObject({ saved: 49_980, failedPart: 1, stoppedBy: 'left' });
+    expect(show.mock.calls.map(([data]) => textOf(data.message)).at(-1)).toContain('grid.saveParts.stopped');
   });
 
   it('наступна частина бере версію рядка з кешу після попередньої; «Keep mine» для вже надісланого рядка застарів', async () => {
     // Рядок `wide` (5 комірок) розірвано між частинами по 3; рядок `b` іде лише в другій частині.
     const wide = edits(1, 5).map((edit) => ({ ...edit, rowKey: 'wide' }));
     const b: PendingEdit = { rowKey: 'b', columnCode: 'C0', value: 1, isEmpty: false, baseVersion: 'b1' };
+    stored([...wide, b]);
     let cache = sliceWith({ wide: 'w1', b: 'b1' });
     const versionsSent: Record<string, string | null>[] = [];
 
@@ -270,9 +412,9 @@ describe('PSS-17: saveInParts', () => {
         versionsSent.push(Object.fromEntries(part.map((edit) => [edit.rowKey, edit.baseVersion])));
         // Відповідь сервера підняла версію надісланих рядків — так кеш оновлює `applyPatchLocally`.
         cache = sliceWith({ wide: 'w2', b: cache.rows.find((row) => row.rowKey === 'b')?.rowVersion ?? 'b1' });
-        return Promise.resolve(true);
+        return Promise.resolve('saved');
       },
-      { slice: () => cache, versionOverrides: new Map([['wide', 'w-keep'], ['b', 'b-keep']]), max: 3 },
+      { ...options, slice: () => cache, versionOverrides: new Map([['wide', 'w-keep'], ['b', 'b-keep']]), max: 3 },
     );
 
     // Перша частина — як її віддав зберігач (версії вже з «Keep mine»/кешу); далі: `wide` — з відповіді

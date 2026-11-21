@@ -11,6 +11,9 @@ const Keys: Record<string, readonly string[]> = {
   'grid.saveParts.progress': ['{saved}', '{total}'],
   'grid.saveParts.done': ['{total}', '{parts}'],
   'grid.saveParts.partial': ['{saved}', '{total}', '{rest}'],
+  'grid.saveParts.waiting': ['{saved}', '{total}', '{rest}'],
+  'grid.saveParts.stillUnsaved': ['{total}', '{rest}'],
+  'grid.saveParts.stopped': ['{saved}', '{total}', '{rest}'],
 };
 
 function catalogValue(key: string, lang: 'en' | 'ru' | 'kz'): string | undefined {

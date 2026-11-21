@@ -5,8 +5,8 @@ import { MantineProvider } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ColumnDto, TableSliceDto } from '@/api/types';
-import { cancelAutosave, useDocumentPending } from '../autosave';
-import { pendingSlice, resetPending } from '../pendingStore';
+import { cancelAutosave, scheduleAutosave, useDocumentPending } from '../autosave';
+import { pendingSlice, putPendingEdit, resetPending } from '../pendingStore';
 import { PatchCellsMaxCells } from '../patchParts';
 import { DocumentGrid } from '../DocumentGrid';
 
@@ -90,8 +90,12 @@ interface Patch {
 }
 
 const patches: Patch[] = [];
+/** Що їхало в кожному PATCH: `rowKey:columnCode` → значення. */
+const bodies: Map<string, number>[] = [];
 /** Примусові відповіді наступним PATCH (`500` — збій). */
 const forced: number[] = [];
+/** Перший PATCH чекає на цей проміс (поки «летить» — людина щось робить). */
+let gate: Promise<void> | null = null;
 
 function problem(status: number, errorCode: string): Response {
   return new Response(JSON.stringify({ title: 'x', status, detail: 'x', errorCode, correlationId: 'c' }), {
@@ -102,6 +106,7 @@ function problem(status: number, errorCode: string): Response {
 
 function mockServer(): void {
   patches.length = 0;
+  bodies.length = 0;
   server.cells.clear();
   server.versions.clear();
 
@@ -116,6 +121,13 @@ function mockServer(): void {
         rows: { rowKey: string; baseVersion: string | null; cells: { columnCode: string; value: number }[] }[];
       };
       const cells = request.rows.reduce((sum, row) => sum + row.cells.length, 0);
+      bodies.push(new Map(request.rows.flatMap((row) => row.cells.map((cell) => [`${row.rowKey}:${cell.columnCode}`, Number(cell.value)] as const))));
+
+      if (gate !== null) {
+        const wait = gate;
+        gate = null;
+        await wait;
+      }
 
       // ⛔ Як `PatchCellsRequest.EnsureWithinCellLimit`: понад стелю — відмова всього пакета.
       if (cells > PatchCellsMaxCells) {
@@ -192,11 +204,40 @@ function serverHoldsPaste(): boolean {
   return rowKeys.every((rowKey, r) => codes.every((code, c) => server.cells.get(`${rowKey}:${code}`) === r * Columns + c + 1));
 }
 
+/** Текст тоста: рядок або `<span role="status">текст</span>` (хід — у ввічливій області). */
+function textOf(message: unknown): string {
+  if (typeof message === 'string') return message;
+  return String((message as { props?: { children?: unknown } } | null)?.props?.children ?? '');
+}
+
 function messages(): string[] {
   return [
-    ...vi.mocked(notifications.show).mock.calls.map(([data]) => String(data.message)),
-    ...vi.mocked(notifications.update).mock.calls.map(([data]) => String(data.message)),
+    ...vi.mocked(notifications.show).mock.calls.map(([data]) => textOf(data.message)),
+    ...vi.mocked(notifications.update).mock.calls.map(([data]) => textOf(data.message)),
   ];
+}
+
+const NoticeId = `ecr-patch-parts-partial-${String(Table)}:${String(Period)}`;
+
+/** Друга PATCH — `500`. */
+function failSecondPatch(): void {
+  let calls = 0;
+  const fetchMock = vi.mocked(fetch);
+  const real = fetchMock.getMockImplementation();
+  fetchMock.mockImplementation(async (input, init) => {
+    if (init?.method === 'PATCH') {
+      calls += 1;
+      if (calls === 2) forced.push(500);
+    }
+    return (real as NonNullable<typeof real>)(input, init);
+  });
+}
+
+/** Чи їхало на сервер вставлене значення бодай однієї комірки рядків `r1000…` (друга частина). */
+function secondPartPasteSent(): boolean {
+  return bodies.some((body) =>
+    [...body].some(([key, value]) => Number(key.slice(1, key.indexOf(':'))) >= 1000 && value !== 0 && value !== 777),
+  );
 }
 
 beforeEach(() => {
@@ -207,6 +248,7 @@ beforeEach(() => {
 
 afterEach(() => {
   deniedCell = null;
+  gate = null;
   forced.length = 0;
   cancelAutosave();
   resetPending();
@@ -240,16 +282,7 @@ describe('PSS-17: вставка понад стелю сервера — час
     const firstPass = patches.length;
 
     // Перша частина пройде, друга — `500` (збій мережі/сервера).
-    let calls = 0;
-    const fetchMock = vi.mocked(fetch);
-    const real = fetchMock.getMockImplementation();
-    fetchMock.mockImplementation(async (input, init) => {
-      if (init?.method === 'PATCH') {
-        calls += 1;
-        if (calls === 2) forced.push(500);
-      }
-      return (real as NonNullable<typeof real>)(input, init);
-    });
+    failSecondPatch();
 
     pasteAll();
 
@@ -269,9 +302,64 @@ describe('PSS-17: вставка понад стелю сервера — час
     expect(server.cells.get('r1019:C49')).toBeUndefined();
 
     // Повтор («Retry save») довозить решту — тим самим шляхом, що й будь-яку відмову.
+    expect(vi.mocked(notifications.show).mock.calls.some(([data]) => data.id === NoticeId)).toBe(true);
+    expect(vi.mocked(notifications.hide)).not.toHaveBeenCalledWith(NoticeId);
+
     fireEvent.click(await screen.findByRole('button', { name: /grid\.retrySave/ }));
     await waitFor(() => expect(pendingSlice(Table, Period).size).toBe(0), { timeout: 10_000 });
     expect(serverHoldsPaste()).toBe(true);
+
+    // ⛔ M1 (рецензія): довезено — тост «решта не збережена» гасне, а не висить із неправдою.
+    expect(vi.mocked(notifications.hide)).toHaveBeenCalledWith(NoticeId);
+  }, 30_000);
+
+  it('M2: Ctrl+Z, доки летить частина 1, — друга частина НЕ везе вже скасованої вставки; сервер — як до вставки', async () => {
+    mockServer();
+    show();
+    const grid = await screen.findByTestId('revogrid-stub');
+    let release!: () => void;
+    gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    pasteAll();
+    await waitFor(() => expect(bodies).toHaveLength(1));
+    await act(async () => {
+      fireEvent.keyDown(grid, { key: 'z', ctrlKey: true });
+      await Promise.resolve();
+    });
+    release();
+
+    await waitFor(() => expect(pendingSlice(Table, Period).size).toBe(0), { timeout: 15_000 });
+
+    expect(secondPartPasteSent()).toBe(false);
+    expect(rowKeys.every((rowKey) => codes.every((code) => (server.cells.get(`${rowKey}:${code}`) ?? 0) === 0))).toBe(true);
+  }, 30_000);
+
+  it('M2: введення в рядок другої частини, доки летить перша, — їде НОВЕ значення, а вставлене — ні', async () => {
+    mockServer();
+    show();
+    await screen.findByTestId('revogrid-stub');
+    let release!: () => void;
+    gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    pasteAll();
+    await waitFor(() => expect(bodies).toHaveLength(1));
+    // Як `applyEditedValue`: правка в сховище + автозбереження (рядок «у дорозі» — правка чекає).
+    await act(async () => {
+      putPendingEdit(Table, Period, { rowKey: 'r1010', columnCode: 'C0', value: 777, isEmpty: false, baseVersion: 'v0' });
+      scheduleAutosave();
+      await Promise.resolve();
+    });
+    release();
+
+    await waitFor(() => expect(pendingSlice(Table, Period).size).toBe(0), { timeout: 15_000 });
+
+    expect(bodies.some((body) => body.get('r1010:C0') === 1010 * Columns + 1)).toBe(false);
+    expect(server.cells.get('r1010:C0')).toBe(777);
+    expect(server.cells.get('r1010:C1')).toBe(1010 * Columns + 2);
   }, 30_000);
 
   it('закрита комірка в ОСТАННІЙ частині відхиляє всю вставку ДО першого запиту — як і доти', async () => {
@@ -295,16 +383,7 @@ describe('PSS-17: вставка понад стелю сервера — час
     show();
     const grid = await screen.findByTestId('revogrid-stub');
 
-    let calls = 0;
-    const fetchMock = vi.mocked(fetch);
-    const real = fetchMock.getMockImplementation();
-    fetchMock.mockImplementation(async (input, init) => {
-      if (init?.method === 'PATCH') {
-        calls += 1;
-        if (calls === 2) forced.push(500);
-      }
-      return (real as NonNullable<typeof real>)(input, init);
-    });
+    failSecondPatch();
 
     pasteAll();
     await waitFor(() => expect(patches).toHaveLength(2), { timeout: 10_000 });

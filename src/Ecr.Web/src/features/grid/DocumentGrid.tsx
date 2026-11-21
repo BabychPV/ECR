@@ -138,7 +138,7 @@ import {
   useFailedSave,
 } from './autosave';
 import { beginInFlight, deferUntilInFlightSettles, inFlightEdit, splitByInFlight } from './inFlightEdits';
-import { saveInParts } from './patchParts';
+import { saveInParts, type PartResult } from './patchParts';
 import { GridAriaPlugin } from './gridAria';
 import { attachStickyGroupLabels, withHeaderGroups } from './headerGroups';
 import { installTruncationTooltip } from './truncationTooltip';
@@ -777,9 +777,9 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
        * ОДНА частина пакета (PSS-17, `patchParts.ts`): відповідь чи відмова стосується рівно її рядків — так само,
        * як доти стосувалася рядків єдиного запиту.
        *
-       * @returns Чи прийняв частину сервер; відмову вже показано тут (банер, маркери, конфлікт).
+       * @returns Що сталося з частиною (`PartResult`); відмову вже показано тут (банер, маркери, конфлікт).
        */
-      const savePart = async (part: PendingEdit[]): Promise<boolean> => {
+      const savePart = async (part: PendingEdit[]): Promise<PartResult> => {
         // ⚠ Рядки ЦЬОГО патчу — саме їх обов'язкові-вхідні позначки заміняються
         // нижче. Позначки інших рядків (з попереднього, ще не повтореного
         // збереження) лишаються як є: цей виклик про них нічого не знає.
@@ -853,7 +853,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           // ⛔ Y8-04: лише для ЦЬОГО зрізу — повтор іншого зрізу не скасовується.
           noteBusyRetryResolved(tableInstanceId, periodKey);
 
-          return true;
+          return 'saved';
         } catch (error) {
           // ⛔ `V-01`: відхилені правки ТРИМАЮТЬСЯ — лишаються незбереженими, з
           // маркером і причиною, але наступні пакети автозбереження їх уже не
@@ -918,7 +918,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           // вище вже показує причину користувачеві; повторний `throw` тут
           // давав ЛИШЕ необроблене знеструмлення проміса в консолі (саме
           // симптом, який документує Stage 1), без жодного адресата.
-          return false;
+          // ⚠ «Дані зайняті» з запланованим повтором — не відмова: людина бачить «чекає», а не банер (PSS-17, M1).
+          return error instanceof EcrApiError && error.isTransientBusy && isBusyRetryWaiting() ? 'waiting' : 'refused';
         }
       };
 
@@ -928,6 +929,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         // Наступна частина бере версії рядків із кешу, уже піднятого відповіддю попередньої; перша відмова
         // зупиняє решту (ненадіслане лишається незбереженим у сховищі) — `patchParts.ts`.
         await saveInParts(edits, savePart, {
+          tableInstanceId,
+          periodKey,
           slice: () => queryClient.getQueryData<TableSliceDto>(queryKeys.slices.one(tableInstanceId, periodKey)),
           versionOverrides,
         });

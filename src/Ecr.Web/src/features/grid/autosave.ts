@@ -36,7 +36,7 @@ import type { TableSliceDto } from '@/api/types';
 import { withKnownVersions } from './knownVersions';
 import { computedEditsOf, rejectionMarksOf } from './saveErrors';
 import { beginInFlight, deferUntilInFlightSettles, hasInFlight, splitByInFlight } from './inFlightEdits';
-import { saveInParts } from './patchParts';
+import { isSavingInParts, saveInParts, type PartResult } from './patchParts';
 import {
   applyPatchLocally,
   refreshStaleness,
@@ -501,6 +501,9 @@ export function holdRejectedEdits(
  */
 const AutosaveSettleMs = UnsavedSettleMs;
 
+/** Найдовше чекання виходу, доки йде пакет частинами (`flushAutosaveAndSettle`, PSS-17). */
+export const PartsSettleCeilingMs = 120_000;
+
 /** Ідентифікатор сітки в реєстрі джерел незбереженого (`unsavedSources.ts`). */
 const GridUnsavedSourceId = 'grid';
 
@@ -542,10 +545,20 @@ async function flushAutosaveAndSettle(
       unsubscribe = null;
     };
 
-    const timer = setTimeout(() => {
+    // ⛔ PSS-17 (рецензія L10, L2): пакет частинами (до ~6 с на частину) у 3 с не вкладається, і вихід зі сторінки
+    // питав «піти без збереження?» посеред збереження, що йде й видне (тост «збережено X з Y»). Доки пакет іде,
+    // чекаємо далі — але не довше `PartsSettleCeilingMs`: завислий запит не тримає людину на сторінці вічно.
+    const started = Date.now();
+    let timer: ReturnType<typeof setTimeout>;
+    const expire = (): void => {
+      if (isSavingInParts() && Date.now() - started < PartsSettleCeilingMs) {
+        timer = setTimeout(expire, timeoutMs);
+        return;
+      }
       stop();
       resolve(false);
-    }, timeoutMs);
+    };
+    timer = setTimeout(expire, timeoutMs);
 
     // ⚠ Відстоялось, коли вже нема чого ВЕЗТИ: решта (якщо є) — утримані
     // відмовою правки, і чекати на них далі означало б мовчати до таймауту.
@@ -626,15 +639,16 @@ async function saveOrphanSlice(
   const endInFlight = beginInFlight(slice.tableInstanceId, slice.periodKey, versioned);
 
   /** Одна частина пакета (PSS-17): успіх і відмова — рівно її рядків. */
-  const savePart = async (part: PendingEdit[]): Promise<boolean> => {
-    const request = buildRequest(slice.tableInstanceId, slice.periodKey, part);
-
+  const savePart = async (part: PendingEdit[]): Promise<PartResult> => {
     // ⚠ Знімок ТОГО, ЩО ПІШЛО: доки patch летить, у той самий зріз може
     // прийти нова правка з іншої сітки чи з відновленої черги — і підтверджувати
     // «усе, що було в рядку» означало б стерти значення, якого сервер не бачив.
     const sent = new Map(part.map((edit) => [cellKey(edit), edit]));
 
     try {
+      // ⚠ Запит будується ВСЕРЕДИНІ `try` (рецензія L10, L3): кидок тут інакше лишив би тост ходу частин
+      // вічно «завантажується», а правки — «у дорозі».
+      const request = buildRequest(slice.tableInstanceId, slice.periodKey, part);
       const response = await patchCells(documentId, request);
 
       applyPatchLocally(queryClient, request, response);
@@ -648,20 +662,24 @@ async function saveOrphanSlice(
       noteSaveSucceeded(slice.tableInstanceId, slice.periodKey);
       noteBusyRetryResolved(slice.tableInstanceId, slice.periodKey);
 
-      return true;
+      return 'saved';
     } catch (error) {
       holdRejectedEdits(slice.tableInstanceId, slice.periodKey, error, part);
-      // ⚠ AN-123: «дані зайняті» — не тост: повтор уже заплановано, а стан «чекає»
-      // показує індикатор (`useBusyRetryWaiting`).
-      if (!(error instanceof EcrApiError && error.isTransientBusy)) showApiError(error);
+      // ⚠ AN-123: «дані зайняті» з запланованим повтором — не тост: стан «чекає» показує індикатор
+      // (`useBusyRetryWaiting`). Повтор НЕ заплановано (`503` вичерпав спроби) — це вже відмова, і її причину
+      // людина має побачити (тост часткового збереження на неї посилається).
+      const waiting = error instanceof EcrApiError && error.isTransientBusy && isBusyRetryWaiting();
+      if (!waiting) showApiError(error);
 
-      return false;
+      return waiting ? 'waiting' : 'refused';
     }
   };
 
   try {
     // ⛔ PSS-17: понад стелю сервера — послідовними частинами, той самий поділ, що в сітці (`patchParts.ts`).
     await saveInParts(versioned, savePart, {
+      tableInstanceId: slice.tableInstanceId,
+      periodKey: slice.periodKey,
       slice: () => cachedSlice(queryClient, slice.tableInstanceId, slice.periodKey),
     });
   } finally {
