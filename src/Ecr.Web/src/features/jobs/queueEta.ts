@@ -32,6 +32,6 @@ export function queueText(info: QueueInfo, now: number = Date.now()): string | n
   const head = t('jobs.queuePosition', { position });
   const eta = queueEtaOf(info.estimatedStartAt, now);
   if (eta === null) return head;
-  const tail = 'params' in eta ? t(eta.key, eta.params) : t(eta.key);
+  const tail = 'params' in eta ? t('jobs.queueEta', eta.params) : t('jobs.queueEtaSoon');
   return `${head}. ${tail}`;
 }

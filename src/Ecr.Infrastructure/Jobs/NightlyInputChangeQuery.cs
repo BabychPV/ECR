@@ -316,10 +316,10 @@ internal static class NightlyInputChangeQuery
               FROM (VALUES {{values}}) AS m (P, Since, Finished)
             """;
 
-        var rows = await db.Database
-            .SqlQuery<MonthChangeRow>(System.Runtime.CompilerServices.FormattableStringFactory.Create(sql, [.. args]))
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
+        // Рядків рівно стільки, скільки місяців у VALUES (≤ 12 на рік) — межа в самому запиті.
+        var query = db.Database
+            .SqlQuery<MonthChangeRow>(System.Runtime.CompilerServices.FormattableStringFactory.Create(sql, [.. args]));
+        var rows = await query.ToListAsync(ct).ConfigureAwait(false);
 
         foreach (var row in rows)
         {

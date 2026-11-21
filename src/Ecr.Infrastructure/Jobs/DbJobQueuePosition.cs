@@ -25,8 +25,10 @@ namespace Ecr.Infrastructure.Jobs;
 /// </para>
 /// </remarks>
 /// <param name="db">Контекст.</param>
+/// <param name="clock">Годинник (зараз — для старту й кешу медіани).</param>
 /// <param name="limits">Межі (глобальна стеля перерахунку).</param>
-public sealed class DbJobQueuePosition(EcrDbContext db, QuartzJobTypeLimiter? limits = null) : IJobQueuePosition
+public sealed class DbJobQueuePosition(EcrDbContext db, Domain.Abstractions.IClock clock, QuartzJobTypeLimiter? limits = null)
+    : IJobQueuePosition
 {
     /// <summary>Скільки кешується медіана кроку.</summary>
     internal static readonly TimeSpan MedianCacheFor = TimeSpan.FromSeconds(30);
@@ -118,8 +120,9 @@ public sealed class DbJobQueuePosition(EcrDbContext db, QuartzJobTypeLimiter? li
                 (position, running) = (reader.GetInt32(0), reader.GetInt32(1));
             }
 
-            var median = await MedianAsync(connection, ct).ConfigureAwait(false);
-            return new JobQueuePosition(position, EstimateStart(position, running, Slots(), median, DateTime.UtcNow));
+            var now = clock.UtcNow;
+            var median = await MedianAsync(connection, now, ct).ConfigureAwait(false);
+            return new JobQueuePosition(position, EstimateStart(position, running, Slots(), median, now));
         }
         finally
         {
@@ -152,11 +155,11 @@ public sealed class DbJobQueuePosition(EcrDbContext db, QuartzJobTypeLimiter? li
 
     private int Slots() => limits?.RecalcMaxConcurrent is > 0 and var cap ? cap : QuartzJobTypeLimiter.DefaultRecalcMaxConcurrent;
 
-    private static async Task<double?> MedianAsync(SqlConnection connection, CancellationToken ct)
+    private static async Task<double?> MedianAsync(SqlConnection connection, DateTime now, CancellationToken ct)
     {
         lock (MedianSync)
         {
-            if (DateTime.UtcNow - _median.At < MedianCacheFor)
+            if (now - _median.At < MedianCacheFor && now >= _median.At)
             {
                 return _median.Ms;
             }
@@ -170,7 +173,7 @@ public sealed class DbJobQueuePosition(EcrDbContext db, QuartzJobTypeLimiter? li
 
         lock (MedianSync)
         {
-            _median = (DateTime.UtcNow, ms);
+            _median = (now, ms);
         }
 
         return ms;

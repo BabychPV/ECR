@@ -368,10 +368,13 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
                    AND EXISTS (SELECT [value] FROM OPENJSON(@payload, '$.screenPeriods')
                                EXCEPT SELECT [value] FROM OPENJSON(@existing, '$.screenPeriods'))
                 BEGIN
-                    SET @existing = JSON_MODIFY(@existing, '$.screenPeriods', JSON_QUERY(N'[' + (
-                        SELECT STRING_AGG(u.v, N',') WITHIN GROUP (ORDER BY TRY_CAST(u.v AS int))
+                    -- SQL Server 2016: без STRING_AGG — склейка FOR XML PATH (значення — числа ключів періодів).
+                    SET @existing = JSON_MODIFY(@existing, '$.screenPeriods', JSON_QUERY(N'[' + STUFF((
+                        SELECT N',' + u.v
                         FROM (SELECT [value] AS v FROM OPENJSON(@existing, '$.screenPeriods')
-                              UNION SELECT [value] FROM OPENJSON(@payload, '$.screenPeriods')) AS u) + N']'));
+                              UNION SELECT [value] FROM OPENJSON(@payload, '$.screenPeriods')) AS u
+                        ORDER BY TRY_CAST(u.v AS int)
+                        FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 1, N'') + N']'));
                     SET @rewrite = 1;
                 END
                 IF ISNULL(JSON_VALUE(@payload, '$.forceFull'), N'false') = N'true'

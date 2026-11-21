@@ -364,7 +364,9 @@ IF @@ROWCOUNT = 0
 | `Integration:AfTimeZoneId` | ні | — | Формат перевіряється на старті (див. текст відмови служби). |
 | `Integration:CatalogTimeoutSeconds` | ні | `10` | Ціле число, не менше 1. |
 | `Integration:RawDataExportMaxRows` | ні | `100000` | Ціле число, не менше 1. D-463: нуль — кожен експорт «Даних з PI» відмовою, а не «без стелі». |
+| `Jobs:Api:MaxConcurrency` | ні | — | Ціле число, не менше 1. |
 | `Jobs:Excel:MaxConcurrency` | ні | `2` | Ціле число, не менше 1. |
+| `Jobs:Interactive:ReservedConcurrency` | ні | — | Ціле число, не менше 1. |
 | `Jobs:NightlyRecalculation:Enabled` | ні | `true` | `true` або `false`. |
 | `Jobs:NightlyRecalculation:SkipUnchanged` | ні | `true` | `true` або `false`. |
 | `Jobs:Quartz:ThreadCount` | ні | `16` | Ціле число, не менше 1. |
@@ -372,6 +374,7 @@ IF @@ROWCOUNT = 0
 | `Jobs:QueueDepth:RefreshSeconds` | ні | `15` | Ціле число, не менше 5. |
 | `Jobs:Recalculation:Executor` | ні | `InProcess` | Одне з: InProcess, Worker. |
 | `Jobs:Recalculation:FanOutMaxConcurrency` | ні | — | Ціле число, не менше 1. |
+| `Jobs:Recalculation:MaxConcurrent` | ні | — | Ціле число, не менше 1. |
 | `Jobs:Recalculation:MaxDeferralMinutes` | ні | `30` | Ціле число, не менше 1. |
 | `Jobs:ShutdownTimeoutSeconds` | ні | `120` | Ціле число, не менше 1. |
 | `Localization:ImportMaxBytes` | ні | `1048576` | Ціле число, не менше 1. |

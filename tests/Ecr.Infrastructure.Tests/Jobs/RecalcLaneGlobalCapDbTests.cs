@@ -123,7 +123,7 @@ public sealed class RecalcLaneGlobalCapDbTests(SqlServerFixture sql) : DbJobQueu
         var system2 = await EnqueueRecalcAsync(user: null);
 
         await using var db = Sql.CreateContext();
-        var reader = new DbJobQueuePosition(db, new QuartzJobTypeLimiter(2, recalcMaxConcurrent: 2));
+        var reader = new DbJobQueuePosition(db, new SystemClock(), new QuartzJobTypeLimiter(2, recalcMaxConcurrent: 2));
         var positions = new Dictionary<string, JobQueuePosition?>();
         foreach (var id in new[] { system1, a1, a2, a3, b1, system2 })
         {
