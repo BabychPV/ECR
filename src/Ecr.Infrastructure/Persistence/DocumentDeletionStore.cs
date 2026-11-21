@@ -108,6 +108,55 @@ public sealed class DocumentDeletionStore(EcrDbContext db) : IDocumentDeletionSt
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Шаблони документа — за його екземплярами (як у хуку джерела, <c>SourceDocumentChangeHook</c>); не джерело — один
+    /// запит шаблонів, один зв'язок і нічого більше. Споживачі — документи з екземплярами версій шаблонів-споживачів; дотик
+    /// — у ТІЙ САМІЙ транзакції, що й видалення (відкат видалення відкочує й дотик).
+    /// </remarks>
+    public async Task<int> TouchSourceConsumersAsync(long documentId, int userId, DateTime utcNow, CancellationToken ct)
+    {
+        var templates = await (
+                from i in db.TableInstances.AsNoTracking()
+                where i.DocumentId == documentId
+                join t in db.TableDefs.AsNoTracking() on i.TableDefId equals t.Id
+                join s in db.SheetDefs.AsNoTracking() on t.SheetDefId equals s.Id
+                join v in db.TemplateVersions.AsNoTracking() on s.TemplateVersionId equals v.Id
+                select v.TemplateId)
+            .Distinct()
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        if (templates.Count == 0)
+        {
+            return 0;
+        }
+
+        var consumers = await db.DocumentSourceBindings.AsNoTracking()
+            .Where(b => b.ReadFromDocument && templates.Contains(b.SourceTemplateId))
+            .SelectMany(b => b.Consumers.Select(c => c.TemplateId))
+            .Distinct()
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        if (consumers.Count == 0)
+        {
+            return 0;
+        }
+
+        var json = System.Text.Json.JsonSerializer.Serialize(consumers);
+        return await db.Database.ExecuteSqlAsync($"""
+            UPDATE d SET d.ModifiedAt = {utcNow}, d.ModifiedByUserId = {userId}
+              FROM doc.Document AS d
+             WHERE d.Id <> {documentId}
+               AND EXISTS (SELECT 1
+                             FROM doc.TableInstance AS i
+                             JOIN cfg.TableDef AS t ON t.Id = i.TableDefId
+                             JOIN cfg.SheetDef AS s ON s.Id = t.SheetDefId
+                             JOIN cfg.TemplateVersion AS v ON v.Id = s.TemplateVersionId
+                            WHERE i.DocumentId = d.Id
+                              AND v.TemplateId IN (SELECT CAST([value] AS int) FROM OPENJSON({json})))
+            """, ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
     public async Task<int> DeleteAsync(long documentId, CancellationToken ct)
     {
         // ⛔ L10-06: мапа подій джерела (`ext.SourceEventMap`) — конфігурація

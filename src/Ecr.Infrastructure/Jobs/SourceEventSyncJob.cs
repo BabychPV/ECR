@@ -1588,7 +1588,13 @@ public sealed partial class SourceEventSyncJob(
             -- інакше повернена подія з тим самим ID дає рядок, який RowWindowFetchJob вважає вже підтягнутим.
             UPDATE ext.RowWindowValue SET IsCurrent = 0
              WHERE PeriodKey = @period AND TableInstanceId = @instance AND RowKey = @rowKey AND IsCurrent = 1;
+            -- ✎ PSS-15 (огляд H1): рядок із комірками видалено без aud.CellChange/aud.RowChange (журнал — aud.StructureChange
+            -- з TemplateVersionId = 0, поза входами нічного перерахунку) — дотик документа і є вхід (D-562).
+            UPDATE doc.Document SET ModifiedAt = @now, ModifiedByUserId = @user WHERE Id = @document;
             """;
+        delete.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@now", System.Data.SqlDbType.DateTime2) { Scale = 3, Value = now });
+        delete.Parameters.Add("@user", System.Data.SqlDbType.Int).Value = _actorUserId;
+        delete.Parameters.AddWithValue("@document", map.DocumentId);
         delete.Parameters.AddWithValue("@period", periodKey);
         delete.Parameters.AddWithValue("@instance", instance);
         delete.Parameters.AddWithValue("@rowKey", rowKey);

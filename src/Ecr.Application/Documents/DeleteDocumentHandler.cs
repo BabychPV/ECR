@@ -132,6 +132,9 @@ public sealed class DeleteDocumentHandler(
             DraftDocumentDeletion.EnsureDraft(
                 [.. facts.SheetStates.Except(hidden)],
                 facts.HasWorkflowHistory || hidden.Any(s => s.Status != DocumentStatus.Draft));
+            // ✎ PSS-15 (огляд L-new-1, D-562): споживачі документа-джерела B179 — дотик (вхід нічного перерахунку) ДО
+            // видалення (шаблон джерела — за його екземплярами), у тій самій транзакції.
+            await deletion.TouchSourceConsumersAsync(documentId, userId, clock.UtcNow, innerCt).ConfigureAwait(false);
             cells = await deletion.DeleteAsync(documentId, innerCt).ConfigureAwait(false);
 
             // ⛔ X1-02 (аудит R11): статус поточних зрізів проєкту успадковується від СКЛАДУ даних (D-65), а
