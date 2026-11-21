@@ -1,6 +1,5 @@
 import { useEffect, useId, useRef, useState, type JSX } from 'react';
 import { Button, Checkbox, Select, Text, TextInput } from '@mantine/core';
-import { serverMessage } from '@/features/registries/rc816/serverMessage';
 import { formatNumber } from '@/shared/format/number';
 import { t } from '@/shared/i18n';
 import { Banner } from '@/shared/ui/Banner';
@@ -26,7 +25,7 @@ import { fieldCounts, fieldRows, mappingVerdict, withPickedColumn } from './fiel
 import { FieldsTable } from './FieldsTable';
 import { useColumnSamples } from './xlsxSamples';
 import type { AddColumnProblem, NewColumnRequest } from './addColumn';
-import { fieldLabel, NoColumnNames, type ColumnNames } from './fieldLabels';
+import { fieldLabel, issueMessage, NoColumnNames, type ColumnNames } from './fieldLabels';
 import { InputOrder } from './inputOrder';
 import { HeaderRowsForm, UnmappedColumns, type HeaderRows } from './LayoutControls';
 
@@ -424,10 +423,10 @@ function FieldEditor({
 }
 
 /** Why no source row was read: the first error (errors first, a summary without a row before the per-row ones). */
-function noRowsReason(issues: AirAnalysis['analysis']['issues']): string {
+function noRowsReason(issues: AirAnalysis['analysis']['issues'], columnNames: ColumnNames): string {
   const first = sortIssues(issues).find((issue) => issue.severity === 'Error');
 
-  return first === undefined ? t('permits.air.import.noRows.unknown') : serverMessage(first.messageKey, first.args ?? {});
+  return first === undefined ? t('permits.air.import.noRows.unknown') : issueMessage(first, columnNames);
 }
 
 /**
@@ -564,7 +563,7 @@ export function MappingStep(props: MappingStepProps): JSX.Element {
             from: formatNumber(header.headerFromRow),
             to: formatNumber(header.headerToRow),
           })}
-          text={noRowsReason(body.issues)}
+          text={noRowsReason(body.issues, columnNames)}
         />
       )}
 

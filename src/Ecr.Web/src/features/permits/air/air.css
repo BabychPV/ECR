@@ -83,6 +83,11 @@
   font-weight: 600;
 }
 
+/* «Atyrau (REG_001) / Offshore (AREA_018)» stays on one line: a wrapped scope would make every row of a long card taller. */
+.pa-nowrap {
+  white-space: nowrap;
+}
+
 .pa-toggle {
   width: 36px;
   padding-inline: 2px !important;
@@ -353,6 +358,10 @@
 }
 
 .pi-state[data-state='missing'] {
+  color: var(--mantine-color-statusError-text);
+}
+
+.pi-state[data-state='unreadable'] {
   color: var(--mantine-color-statusError-text);
 }
 

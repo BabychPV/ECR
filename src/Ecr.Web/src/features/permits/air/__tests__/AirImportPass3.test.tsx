@@ -193,7 +193,7 @@ describe('Air pass3b: no source rows and the subtitle after a save', () => {
     fireEvent.click(button('permits.air.import.analyse'));
     const banner = await screen.findByTestId('air-no-rows-reason');
     expect(within(banner).getByText(fill('permits.air.import.noRows.title', { sheet: 'Sheet1', from: '4', to: '6' }))).toBeTruthy();
-    expect(within(banner).getByText(fill('err.ECR-IMP-0422.regColumnClaimed', claimed.args))).toBeTruthy();
+    expect(within(banner).getByText(fill('err.ECR-IMP-0422.regColumnClaimed', { ...claimed.args, other: text('permits.air.import.field.emissionPointName') }))).toBeTruthy();
   });
 
   it('0 sources: the summary without a row comes before the per-row findings', async () => {
@@ -210,7 +210,7 @@ describe('Air pass3b: no source rows and the subtitle after a save', () => {
     await toFile();
     fireEvent.click(button('permits.air.import.analyse'));
     const banner = await screen.findByTestId('air-no-rows-reason');
-    expect(within(banner).getByText(fill('err.ECR-IMP-0422.regNoParentRows', summary.args))).toBeTruthy();
+    expect(within(banner).getByText(fill('err.ECR-IMP-0422.regNoParentRows', { ...summary.args, field: text('permits.air.import.field.naeCode') }))).toBeTruthy();
   });
 
   it('after «Save as profile» the subtitle says the profile is saved and the data is not imported yet', async () => {

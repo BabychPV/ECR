@@ -368,7 +368,7 @@ $env:E2E_WEB_PORT = [string] $WebPort
 
 # ⛔ Прогрів Vite ДО Playwright. Без нього перший тест прогону
 # (`cellStates.spec.ts`, тема light) упирався в 30 с на `page.goto`: свіжий
-# чекаут не має кешу оптимізатора залежностей (`node_modules/.vite/deps`), і
+# чекаут не має кешу оптимізатора залежностей (`.vite-cache/deps`), і
 # перше відкриття сторінки чекало, доки esbuild збере 51 залежність.
 # Заміряно 2026-09-29: базова лінія — тест 1 `x … (30.4s)`, решта 28 зелені.
 #
@@ -388,7 +388,8 @@ $env:E2E_WEB_PORT = [string] $WebPort
 function Invoke-ViteWarmup {
     param([int] $TimeoutSec = 180)
 
-    $viteCache = Join-Path $client 'node_modules/.vite'
+    # ⛔ Має збігатися з `cacheDir` у vite.config.ts (кеш — у каталозі проєкту, не в node_modules).
+    $viteCache = Join-Path $client '.vite-cache'
     $metadata = Join-Path $viteCache 'deps/_metadata.json'
     $warmLog = Join-Path $root 'artifacts/e2e.vite-warmup.log'
     New-Item -ItemType Directory -Force (Split-Path $warmLog) | Out-Null

@@ -26,6 +26,8 @@ public sealed class EcrConfigurationValidationTests(SqlServerFixture sql)
     [InlineData("Jobs:ShutdownTimeoutSeconds", "0")]
     [InlineData("Auth:RequireHttps", "yes")]
     [InlineData("Jobs:NightlyRecalculation:Enabled", "1")]
+    [InlineData("Jobs:NightlyRecalculation:Enabled", "flase")]            // PSS-15: увімкнений за замовчуванням — опечатка не лишає його мовчки ввімкненим
+    [InlineData("Jobs:NightlyRecalculation:SkipUnchanged", "ture")]       // PSS-15 (D-562)
     [InlineData("Database:EditionMode", "Enterprse")]
     [InlineData("Database:EditionMode", "2")]
     [InlineData("Schema:StartupMode", "Migarte")]

@@ -265,6 +265,67 @@ public sealed class DocumentDeletionStoreTests(SqlServerFixture sql)
         Assert.All(accessed, n => Assert.True(n < fanout, $"прочитано {n} партицій calc.CalculationStep із {fanout}:\n{delete.Text}"));
     }
 
+    /// <summary>
+    /// ✎ PSS-15 (огляд L-new-1, D-562): документ-джерело B179 перед видаленням торкається документів-споживачів
+    /// (<c>ModifiedAt</c>) — вхід їхнього нічного перерахунку; сторонній документ і видалення не-джерела нічого не чіпають.
+    /// </summary>
+    /// <remarks>МУТАЦІЯ: прибрати UPDATE у <c>TouchSourceConsumersAsync</c> — дата споживача лишається старою, червоний.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "PSS-15")]
+    public async Task Видалення_джерела_торкається_споживачів_а_сторонніх_ні()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var source = await builder.BuildAsync(columnCount: 1, rowCount: 1);
+        var consumer = await builder.BuildAsync(columnCount: 1, rowCount: 1);
+        var stranger = await builder.BuildAsync(columnCount: 1, rowCount: 1);
+        var old = new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+        int bindingId;
+        int registryId;
+        await using (var seed = builder.CreateContext())
+        {
+            var tag = Guid.NewGuid().ToString("N")[..10];
+            var registry = new RegistryDef(EcrCode.Create($"N15D{tag}"), Name("source"), isTemporal: false);
+            seed.RegistryDefs.Add(registry);
+            await seed.SaveChangesAsync();
+            var binding = new DocumentSourceBinding($"N15D_{tag}", source.TemplateId, registry.Id);
+            binding.AddConsumer(consumer.TemplateId);
+            seed.DocumentSourceBindings.Add(binding);
+            await seed.SaveChangesAsync();
+            (bindingId, registryId) = (binding.Id, registry.Id);
+            await seed.Database.ExecuteSqlAsync(
+                $"UPDATE doc.Document SET ModifiedAt = {old} WHERE Id IN ({consumer.DocumentId}, {stranger.DocumentId})");
+        }
+
+        try
+        {
+            await using (var db = builder.CreateContext())
+            {
+                var store = new DocumentDeletionStore(db);
+                Assert.Equal(0, await store.TouchSourceConsumersAsync(stranger.DocumentId, 1, At, CancellationToken.None));
+                Assert.Equal(1, await store.TouchSourceConsumersAsync(source.DocumentId, 1, At, CancellationToken.None));
+            }
+
+            await using var check = builder.CreateContext();
+            var dates = await check.Documents.AsNoTracking()
+                .Where(d => d.Id == consumer.DocumentId || d.Id == stranger.DocumentId)
+                .ToDictionaryAsync(d => d.Id, d => d.ModifiedAt);
+            Assert.Equal(At, dates[consumer.DocumentId]);
+            Assert.Equal(old, dates[stranger.DocumentId]);
+        }
+        finally
+        {
+            await using var cleanup = builder.CreateContext();
+            await cleanup.Database.ExecuteSqlAsync($"""
+                DELETE FROM cfg.DocumentSourceBindingConsumer WHERE BindingId = {bindingId};
+                DELETE FROM cfg.DocumentSourceBinding WHERE Id = {bindingId};
+                DELETE FROM cfg.RegistryDef WHERE Id = {registryId};
+                """);
+        }
+    }
+
     private static async Task<int> NewSourceEntityAsync(TestDocumentBuilder builder, string prefix)
     {
         var tag = Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();

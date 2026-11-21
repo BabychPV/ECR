@@ -437,11 +437,11 @@ public sealed partial class RecurringScheduleService(
         await CatchUpNightlyAsync(db, scheduler, scope.ServiceProvider).ConfigureAwait(false);
 
         // ⛔ Прогалини 4+5 директиви паритету зі старою системою (Q-327 →
-        // Q-331): нічний повний перерахунок — ОПЦІЯ, вимкнена за
-        // замовчуванням (`NightlyRecalculationScheduling.EnabledKey`), не
-        // завжди-увімкнений режим для всіх проєктів одразу. Коли вимкнена
-        // (типовий стан) — нічого не ставиться, і поведінка проду не
-        // змінюється.
+        // Q-331): нічний перерахунок. ✎ PSS-15 (D-562, рішення людини 21.11):
+        // УВІМКНЕНИЙ за замовчуванням (`NightlyRecalculationScheduling.EnabledKey`,
+        // вимикає лише явне `false`), о 00:30 — до вікна прибирання замінених
+        // прогонів; рахує поточний рік (і попередній у пільговому строку проєкту)
+        // і лише документи зі зміненими входами.
         var nightlyRecalcCount = await NightlyRecalculationScheduling
             .ScheduleAsync(configuration, db, scheduler, CancellationToken.None)
             .ConfigureAwait(false);
@@ -708,7 +708,8 @@ public sealed partial class RecurringScheduleService(
     [LoggerMessage(
         Level = LogLevel.Information,
         Message = "Старт: постійні розклади поставлено, зокрема збору: {Count}; "
-            + "нічного перерахунку: {NightlyRecalcCount} проєктів (0 — опція вимкнена).")]
+            + "нічного перерахунку (00:30, поточний рік + пільговий строк попереднього, пропуск незмінних — D-562): {NightlyRecalcCount} проєктів "
+            + "(0 — вимкнено ключем Jobs:NightlyRecalculation:Enabled=false або немає активних проєктів).")]
     private static partial void LogSchedulesDone(ILogger logger, int count, int nightlyRecalcCount);
 
     [LoggerMessage(

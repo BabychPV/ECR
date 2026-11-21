@@ -9,12 +9,13 @@ import {
   filterSources,
   num,
   scopeLabel,
+  scopeNamesOf,
   sourceTypeLabel,
   sourceTypeShort,
   type EditField,
 } from '../airCardModel';
 import { nodeOptions } from '../import/naeNodes';
-import { card, tree } from './airFixtures';
+import { card, scopeFields, tree } from './airFixtures';
 
 vi.mock('@/shared/i18n', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/i18n')>()),
@@ -51,6 +52,15 @@ describe('airCardModel', () => {
     expect(scopeLabel({ ...base, region: 'ATYRAU', area: 'OFFSHORE', regionEntryCode: 'REG_001', areaEntryCode: 'AREA_018' })).toBe('REG_001 / AREA_018');
     expect(scopeLabel({ ...base, region: 'Atyrau', area: '-', regionEntryCode: null, areaEntryCode: null })).toBe('Atyrau');
     expect(scopeLabel({ ...base, region: null, area: null, regionEntryCode: null, areaEntryCode: null })).toBe(Dash);
+  });
+
+  it('область рядка: назва запису з scope-fields і код в дужках (як у майстрі), без назви - лише код', () => {
+    const base = card().sources[0]!;
+    const names = scopeNamesOf(scopeFields());
+    const source = { ...base, region: 'ATYRAU', area: 'OFFSHORE', regionEntryCode: 'REG_001', areaEntryCode: 'AREA_OFF', regionEntryId: 11, areaEntryId: 21 };
+    expect(scopeLabel(source, names)).toBe('Atyrau (REG_001) / Offshore complex (AREA_OFF)');
+    expect(scopeLabel({ ...source, regionEntryId: 99, areaEntryId: null }, names)).toBe('REG_001 / AREA_OFF');
+    expect(scopeLabel(source, scopeNamesOf(undefined))).toBe('REG_001 / AREA_OFF');
   });
 
   it('тип джерела: латинські T/P1 з сервера -> підписи каталогу; невідомий показується як є', () => {

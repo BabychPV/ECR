@@ -1,10 +1,9 @@
 import { useEffect, useId, useRef, useState, type JSX, type RefObject } from 'react';
 import { Button, Select, Text, Title } from '@mantine/core';
-import { serverMessage } from '@/features/registries/rc816/serverMessage';
 import { formatNumber } from '@/shared/format/number';
 import { t } from '@/shared/i18n';
 import { columnOwner, columnOwners, type FieldRow, type FieldState, type FileColumn } from './fieldRows';
-import { fieldLabel, type ColumnNames } from './fieldLabels';
+import { fieldLabel, issueMessage, type ColumnNames } from './fieldLabels';
 import { fileColumnOptions } from './importModel';
 import type { ColumnSamples } from './xlsxSamples';
 
@@ -255,12 +254,19 @@ function Row({
       </td>
       {props.samples !== null && <td className="pi-samples-cell">{values.join(' · ')}</td>}
       <td>
-        <span className="pi-state" data-state={row.state}>
-          {stateText(row.state)}
-        </span>
+        {row.unreadable > 0 ? (
+          // Found, but the values under the column cannot be read: the problem is said on the row, not only in the findings below.
+          <span className="pi-state" data-state="unreadable">
+            {t('permits.air.import.fields.unreadable', { count: formatNumber(row.unreadable) })}
+          </span>
+        ) : (
+          <span className="pi-state" data-state={row.state}>
+            {stateText(row.state)}
+          </span>
+        )}
         {row.issue !== null && (
           <Text size="xs" c="dimmed">
-            {serverMessage(row.issue.messageKey, row.issue.args ?? {})}
+            {issueMessage(row.issue, props.columnNames)}
           </Text>
         )}
       </td>

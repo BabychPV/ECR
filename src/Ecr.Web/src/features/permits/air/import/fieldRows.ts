@@ -24,6 +24,8 @@ export interface FieldRow {
   readonly state: FieldState;
   /** Why it was not found (the first finding about the field that is not about one row), for the row's hint. */
   readonly issue: ImportIssue | null;
+  /** How many cells of the matched column the server could not read (`regValueInvalid` errors of the field); 0 — none. */
+  readonly unreadable: number;
   /** The field has header texts: without an explicit column it is matched by them («automatic»). */
   readonly matchesByHeader: boolean;
   /** The field names its column explicitly (`column`), not by header text. */
@@ -33,6 +35,15 @@ export interface FieldRow {
 }
 
 const StateOrder: Readonly<Record<FieldState, number>> = { missing: 0, found: 1, notInFile: 2 };
+
+/** `regValueInvalid` (RegistryImportKeys.ValueInvalid): a cell does not read as the field's type. */
+const ValueInvalidKey = 'err.ECR-IMP-0422.regValueInvalid';
+
+function unreadableCount(issues: readonly ImportIssue[], key: string): number {
+  return issues.filter(
+    (issue) => issue.severity === 'Error' && issue.messageKey === ValueInvalidKey && (issue.field ?? '').trim().toLowerCase() === key,
+  ).length;
+}
 
 function fieldIssue(issues: readonly ImportIssue[], key: string): ImportIssue | null {
   return issues.find((issue) => (issue.row ?? null) === null && (issue.field ?? '').trim().toLowerCase() === key) ?? null;
@@ -66,6 +77,7 @@ export function fieldRows(spec: ImportSpec | null, mapped: readonly MatchedColum
       column,
       state: column !== null ? 'found' : required ? 'missing' : 'notInFile',
       issue: column === null ? fieldIssue(issues, key) : null,
+      unreadable: column === null ? 0 : unreadableCount(issues, key),
       matchesByHeader: (field.patterns ?? []).length > 0,
       explicit: (field.column ?? '').trim() !== '',
       level: column?.level ?? field.level ?? null,
@@ -82,6 +94,7 @@ export function fieldRows(spec: ImportSpec | null, mapped: readonly MatchedColum
       column,
       state: 'found',
       issue: null,
+      unreadable: unreadableCount(issues, key),
       matchesByHeader: false,
       explicit: false,
       level: column.level,

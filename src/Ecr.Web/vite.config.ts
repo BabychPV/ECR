@@ -117,6 +117,13 @@ const vitePort = Number(process.env.ECR_VITE_PORT ?? 5173);
 const apiUrl = process.env.ECR_API_URL ?? 'http://localhost:5080';
 
 export default defineConfig({
+  /*
+   * ⛔ Кеш оптимізованих залежностей — у каталозі проєкту, а не в `node_modules/.vite`.
+   * Робочі дерева git ділять `node_modules` через junction; спільний кеш дозволяв
+   * одному дереву переоптимізувати залежності під ногами іншого (дубль React —
+   * «Invalid hook call» у чужому dev-сервері).
+   */
+  cacheDir: '.vite-cache',
   plugins: [react(), pruneUnusedMantineCss(), patchMantineTransition()],
   resolve: {
     alias: {

@@ -105,6 +105,13 @@ public sealed partial class SheetCopyQuerySitesTests
         ["src/Ecr.Infrastructure/Jobs/RecalculationJob.cs"] =
             "формули — усі «види» (RecalculationService); методології, стани подання й гейти — лише оригінал",
         ["src/Ecr.Infrastructure/Jobs/FormulaRecalculationJob.cs"] = "насіння розкладається за видами (оригінал, кожна копія)",
+
+        // ✎ PSS-15 (D-562): пропуск нічного перерахунку — консервативно БЕЗ розрізнення копій: змінений екземпляр і повернення
+        // в роботу будь-якої копії — вхід документа; версії шаблону й документи-джерела — за екземплярами всіх видів.
+        ["src/Ecr.Infrastructure/Jobs/RecalculationJob.Nightly.cs"] =
+            "версії шаблону документа й документи шаблону-джерела — за екземплярами будь-якого виду (копія тієї ж версії)",
+        ["src/Ecr.Infrastructure/Jobs/NightlyInputChangeQuery.cs"] =
+            "зміни екземплярів і повернення затвердженого — будь-яка копія будить документ (надмножина, «сумніваєшся — рахуй»)",
         ["src/Ecr.Infrastructure/Jobs/CrossPeriodFanOut.cs"] =
             "читачі за (таблиця, колонка); вид розрізняє прогін періоду-читача; Distinct за періодами",
         ["src/Ecr.Infrastructure/Persistence/FormulaOverrideStore.cs"] = "позначки ручних значень — за Id рядка; лічильник за TableDefId",

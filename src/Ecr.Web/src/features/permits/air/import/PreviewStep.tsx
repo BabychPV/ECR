@@ -1,9 +1,10 @@
 import { useMemo, useState, type JSX } from 'react';
-import { Button, Checkbox, Select, Text, Title } from '@mantine/core';
+import { Anchor, Button, Checkbox, Select, Text, Title } from '@mantine/core';
 import { formatNumber } from '@/shared/format/number';
 import { t } from '@/shared/i18n';
 import { Banner } from '@/shared/ui/Banner';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
+import { PermitsPaths } from '../../shell/permitPaths';
 import type { AirPreview, MissingReference, OwnerReplace } from '../airTypes';
 import { useNaeTree } from '../useAirLimits';
 import {
@@ -46,6 +47,28 @@ function ownerLine(owner: OwnerReplace): string {
   });
 }
 
+/**
+ * The tree has no node a missing code could be created under: say where to make them (the NAE structure page, in a new tab —
+ * the wizard and its file stay as they are; `useNaeTree` re-reads the tree when the user comes back to this tab).
+ */
+function NoNodesHint(): JSX.Element {
+  return (
+    <Text size="sm" role="status" data-testid="air-no-nodes-hint">
+      {t('permits.air.import.missing.noNodesHint')}{' '}
+      <Anchor href={PermitsPaths.nae} target="_blank" rel="noopener noreferrer" size="sm">
+        {t('permits.air.import.missing.noNodesLink')}
+      </Anchor>
+    </Text>
+  );
+}
+
+/** Nothing in the file differs from what the permit already holds: no new, changed or removed source, no code to resolve. */
+export function nothingToChange(preview: AirPreview): boolean {
+  const { diff } = preview.preview;
+
+  return diff.newParents === 0 && diff.changedParents === 0 && diff.removedParents === 0 && preview.preview.missing.length === 0;
+}
+
 function MissingTable({
   missing,
   draft,
@@ -58,6 +81,8 @@ function MissingTable({
   const tree = useNaeTree(missing.length > 0);
   const options = useMemo(() => nodeOptions(tree.data?.nodes ?? []), [tree.data]);
   const open = unresolved(missing, draft.resolutions);
+  // Only once the tree is read: while it loads (or failed — the alert says so) an empty list means nothing.
+  const noNodes = tree.isSuccess && options.length === 0;
   const openNae = open.filter((item) => item.kind === NaeReferenceKind);
   const [bulkUnder, setBulkUnder] = useState<string | null>(null);
 
@@ -88,6 +113,7 @@ function MissingTable({
         {t('permits.air.import.missing.hint')}
       </Text>
       {tree.isError && <ErrorAlert error={tree.error} onRetry={() => void tree.refetch()} />}
+      {noNodes && <NoNodesHint />}
       {open.length > 0 && (
         <div className="pi-toolbar">
           {openNae.length > 0 && (
@@ -238,6 +264,9 @@ function ReplacePanel({
           <dd>{formatNumber(diff.skippedParents)}</dd>
         </div>
       </dl>
+      {nothingToChange(preview) && (
+        <Banner tone="info" testId="air-nothing-changes" text={t('permits.air.import.replace.nothing')} />
+      )}
       {replace.confirmationRequired && (
         <div role="group" aria-labelledby="pi-others-title" className="pi-others">
           <Text id="pi-others-title" fw={600} c="orange.8">
@@ -349,7 +378,13 @@ export function PreviewStep(props: PreviewStepProps): JSX.Element {
                 {t('permits.air.import.rerun')}
               </Button>
             )}
-            <Button disabled={!gate.allowed || !mayApply} loading={applying} onClick={onApply}>
+            <Button
+              // Nothing to change: Apply stays available (it would only confirm the same rows) but stops being the main action.
+              variant={nothingToChange(preview) ? 'default' : 'filled'}
+              disabled={!gate.allowed || !mayApply}
+              loading={applying}
+              onClick={onApply}
+            >
               {t('permits.air.import.apply')}
             </Button>
           </div>

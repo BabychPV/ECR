@@ -198,7 +198,7 @@ describe('UX 20.11 — a required field was not found', () => {
     // What needs a decision comes first.
     expect(within(first).getByRole('rowheader').textContent).toBe(TonsLabel());
     expect(within(first).getByText(text('permits.air.import.fields.missing'))).toBeTruthy();
-    expect(within(first).getByText('The column for "TonsPerYear" was not found in the file header.', { exact: false })).toBeTruthy();
+    expect(within(first).getByText(`The column for "${TonsLabel()}" was not found in the file header.`, { exact: false })).toBeTruthy();
     const picker = within(first).getByRole('textbox', { name: fill('permits.air.import.fields.pickFor', { field: TonsLabel() }) });
     expect(picker.getAttribute('aria-invalid')).toBe('true');
     expect(button('permits.air.import.toPreview').disabled).toBe(true);

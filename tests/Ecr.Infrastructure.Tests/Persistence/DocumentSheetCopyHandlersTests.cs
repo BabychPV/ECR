@@ -177,6 +177,47 @@ public sealed class DocumentSheetCopyHandlersTests(SqlServerFixture sql)
         Assert.True(await HasSecurityEventAsync(db, DocumentSheetCopyHandler.DeletedEventType, two.SheetCopyId));
     }
 
+    /// <summary>
+    /// ✎ PSS-15 (огляд H1, D-562): додавання, перейменування групи й видалення копії міняють склад документа без журналу
+    /// правок комірок — документ торкається (<c>ModifiedAt</c>), і нічний перерахунок бачить зміну.
+    /// </summary>
+    /// <remarks>МУТАЦІЯ: прибрати будь-який із трьох <c>TouchAsync</c> в обробнику — червоний відповідний крок.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "PSS-15")]
+    public async Task Додавання_перейменування_й_видалення_копії_торкаються_документа()
+    {
+        var world = await ArrangeAsync(copyable: true);
+        var old = new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+        await ResetModifiedAsync(world, old);
+        var copy = await world.Run(h => h.AddAsync(world.Chain.DocumentId, world.Chain.SheetDefId, default));
+        Assert.Equal(Now, await ModifiedAsync(world));
+
+        await ResetModifiedAsync(world, old);
+        await world.Run(h => h.RenameGroupAsync(
+            world.Chain.DocumentId, world.Chain.SheetDefId, new Dictionary<string, string> { ["en"] = "Renamed" }, default));
+        Assert.Equal(Now, await ModifiedAsync(world));
+
+        await ResetModifiedAsync(world, old);
+        await world.Run(h => h.DeleteCopyAsync(world.Chain.DocumentId, copy.SheetCopyId, default));
+        Assert.Equal(Now, await ModifiedAsync(world));
+    }
+
+    private static async Task ResetModifiedAsync(World world, DateTime at)
+    {
+        await using var db = world.Builder.CreateContext();
+        await db.Database.ExecuteSqlAsync($"UPDATE doc.Document SET ModifiedAt = {at} WHERE Id = {world.Chain.DocumentId}");
+    }
+
+    private static async Task<DateTime> ModifiedAsync(World world)
+    {
+        await using var db = world.Builder.CreateContext();
+        return await db.Documents.AsNoTracking()
+            .Where(d => d.Id == world.Chain.DocumentId).Select(d => d.ModifiedAt).SingleAsync();
+    }
+
     private static async Task<bool> HasSecurityEventAsync(EcrDbContext db, string eventType, long? sheetCopyId)
     {
         var rows = await db.Database

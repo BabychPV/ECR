@@ -3,6 +3,7 @@ import { cleanup, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { apiFetch, EcrApiError } from '@/api/client';
+import { showDone } from '@/shared/ui/notify';
 import { renderWithQuery } from '@/test/render';
 import { AddRegionModal } from '../AddRegionModal';
 import { NaeExcelImportPanel } from '../NaeExcelImportPanel';
@@ -18,6 +19,8 @@ vi.mock('@/shared/i18n', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/i18n')>()),
   t: (key: string, params?: Record<string, unknown>) => (params === undefined ? key : `${key} ${JSON.stringify(params)}`),
 }));
+
+vi.mock('@/shared/ui/notify', async (importOriginal) => ({ ...(await importOriginal<typeof import('@/shared/ui/notify')>()), showDone: vi.fn() }));
 
 const session = { permissions: ['Registry.View', 'Registry.EditData', 'Registry.EditDefinition', 'Registry.Publish'] };
 vi.mock('@/shared/session/useSession', async (importOriginal) => ({
@@ -44,6 +47,7 @@ const fullTree = {
 let treeBody: unknown;
 let definitionError: Error | null;
 let seedError: Error | null;
+let seedCreated: string[];
 
 const problem = (status: number, detail: string, messageKey = 'err.ECR-REG-0422.naeTreeNotEmpty'): EcrApiError =>
   new EcrApiError({ type: 'about:blank', title: 'x', status, detail, extensions2: { messageKey } } as never);
@@ -56,11 +60,13 @@ beforeEach(() => {
   treeBody = emptyTree;
   definitionError = null;
   seedError = null;
+  seedCreated = ['ATYRAU', 'MANGYSTAU'];
+  vi.mocked(showDone).mockClear();
   vi.mocked(apiFetch).mockReset();
   vi.mocked(apiFetch).mockImplementation((path: string) => {
     if (path === '/api/v1/nae-tree/roots') return Promise.resolve({ created: true, regionEntryId: 5, areaEntryId: null, registryCode: 'NAE_TREE', registryProvisioned: false });
     if (path === '/api/v1/nae-tree/seed-roots') {
-      return seedError === null ? Promise.resolve({ created: ['ATYRAU', 'MANGYSTAU'], registryCode: 'NAE_TREE', registryProvisioned: false, sourceRegistryCode: 'LAND_REGION' }) : Promise.reject(seedError);
+      return seedError === null ? Promise.resolve({ created: seedCreated, registryCode: 'NAE_TREE', registryProvisioned: false, sourceRegistryCode: 'LAND_REGION' }) : Promise.reject(seedError);
     }
     if (path.includes('/registries/LAND_REGION/rows')) {
       return Promise.resolve({ items: [{ id: 1, code: 'KZ-ATY', display: 'Атырау' }, { id: 2, code: 'KZ-MAN', display: 'Мангистау' }], nextCursor: null, totalCount: 2 });
@@ -164,6 +170,8 @@ describe('порожнє дерево НВ', () => {
     await user.click(await screen.findByText('permits.nae.manual.seed'));
     await waitFor(() => expect(calls('/api/v1/nae-tree/seed-roots')).toHaveLength(1));
     expect(calls('/api/v1/nae-tree/seed-roots')[0]?.method).toBe('POST');
+    // Success says how many regions were created.
+    await waitFor(() => expect(showDone).toHaveBeenCalledWith('permits.nae.manual.seeded {"count":2}'));
 
     seedError = problem(422, 'tree is not empty');
     await user.click(await screen.findByText('permits.nae.manual.seed'));
@@ -171,6 +179,16 @@ describe('порожнє дерево НВ', () => {
     // 422 не ламає сторінку: порожній стан лишається, кнопка знову доступна.
     expect(screen.getByText('permits.nae.manual.emptyTitle')).toBeTruthy();
     await waitFor(() => expect((document.querySelector('[data-nae-seed-roots]') as HTMLButtonElement).disabled).toBe(false));
+  });
+});
+
+describe('NaeSeedRootsButton: nothing new', () => {
+  it('seed-roots, що нічого не створив, сповіщає про це окремим повідомленням', async () => {
+    seedCreated = [];
+    const user = userEvent.setup();
+    mountPage();
+    await user.click(await screen.findByText('permits.nae.manual.seed'));
+    await waitFor(() => expect(showDone).toHaveBeenCalledWith('permits.nae.manual.seededNone'));
   });
 });
 
