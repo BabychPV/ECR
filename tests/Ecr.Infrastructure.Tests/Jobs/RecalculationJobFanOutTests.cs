@@ -229,6 +229,10 @@ public sealed class RecalculationJobFanOutTests(SqlServerFixture sql)
                     CancellationToken.None);
         }
 
+        // ⚠ 21.11: тест зрідка падав «Database stalled … deferred» — це був справжній дедлок 1205 перемикань двох
+        // документів (UPDATE витіснення читав рядки чужого документа під замками), а не таймінг тесту; виправлено в
+        // `CalculationResultStore.SwitchCurrentRunAsync`, детерміновано — `CalculationRunSwitchLockScopeTests`.
+        //
         // ⛔ Два виконання одночасно: кожен оркестратор чекає, доки обидва не
         // ввійдуть у свій перший період, — інакше «паралельно» було б лише назвою.
         var rendezvous = new Rendezvous(scheduler.Calls.Count);

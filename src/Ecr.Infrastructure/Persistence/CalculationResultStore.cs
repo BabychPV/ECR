@@ -452,6 +452,9 @@ public sealed partial class CalculationResultStore(
     /// </remarks>
     private const int MaxInvalidatedSnapshots = 1_000;
 
+    /// <summary>Скільки ключів витіснених прогонів в одному UPDATE перемикання (стеля параметрів SQL Server — 2100).</summary>
+    private const int SupersedeChunkSize = 1_000;
+
     /// <inheritdoc />
     public async Task<IReadOnlyList<SupersededRun>> SwitchCurrentRunAsync(
         long calculationRunId, string modulesProfileJson, CancellationToken ct)
@@ -583,11 +586,26 @@ public sealed partial class CalculationResultStore(
         // UPDATE за ключем. Лише СТАРІШІ (`Id <` свого): новіші прогони іншої
         // осі (документні — для прогону проєкту) лишаються актуальними, бо
         // рахують свій документ пізніше.
-        await previousQuery
-            .Where(r => r.Id < calculationRunId)
-            .ExecuteUpdateAsync(
-                setters => setters.SetProperty(r => r.Status, CalculationRun.SupersededStatus), ct)
-            .ConfigureAwait(false);
+        //
+        // ⛔ Fan-out 21.11 (дедлок 1205 двох документів одного проєкту й періоду): UPDATE — ЛИШЕ за ключами прогонів,
+        // які щойно вибрано (`superseded`), а не предикатом області. Ціль UPDATE під RCSI читається ЗАМКАМИ (U на кожен
+        // переглянутий рядок, не версією), а план предиката області (скан PK чи пошук за проєктом із дочитуванням
+        // `DocumentId` по ключу) проходить і рядки ЧУЖИХ документів: прогін документа B, який B тримає U-замком перевірки
+        // статусу вище (D-560), чи старий актуальний прогін B, який B щойно взяв X-замком цього ж UPDATE. B робить те
+        // саме з рядками A — цикл, жертва 1205 (system_health 21.11: обидва процеси — цей UPDATE, обидва чекають U на
+        // ключах `PK_CalculationRun`, якими володіє інший; задача — «Database stalled … deferred»). Який план, вирішує
+        // оптимізатор за обсягом таблиці — звідси «падає лише в повному прогоні». Пошук за `Id` торкається тільки своїх
+        // старіших актуальних рядків; решта предиката лишається й перевіряється вже під замком (рядок, який тим часом
+        // витіснив інший виклик, не чіпається). Порожньо — UPDATE не потрібен зовсім (перший прогін документа й періоду).
+        // Тест: `CalculationRunSwitchLockScopeTests`.
+        foreach (var chunk in superseded.Select(s => s.RunId).Chunk(SupersedeChunkSize))
+        {
+            await previousQuery
+                .Where(r => chunk.Contains(r.Id))
+                .ExecuteUpdateAsync(
+                    setters => setters.SetProperty(r => r.Status, CalculationRun.SupersededStatus), ct)
+                .ConfigureAwait(false);
+        }
 
         run.Complete(CalculationRun.CurrentStatus, clock.UtcNow, modulesProfileJson, errorMessage: null);
         run.MakeCurrent();
