@@ -429,13 +429,8 @@ public interface IMethodologyStore
     /// <param name="methodologyIds">Методології прогону.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Ідентифікатори методологій із прапором; порожньо — жодна кроків не пише.</returns>
-    /// <remarks>
-    /// ⚠ Реалізація за замовчуванням — «жодна»: це й типове значення прапора, тож подвійники порту в тестах,
-    /// що його не знають, поводяться як продуктив із прапором за замовчуванням.
-    /// </remarks>
     public Task<IReadOnlyList<int>> GetTraceStepMethodologyIdsAsync(
-        IReadOnlyCollection<int> methodologyIds, CancellationToken ct)
-        => Task.FromResult<IReadOnlyList<int>>([]);
+        IReadOnlyCollection<int> methodologyIds, CancellationToken ct);
 }
 
 /// <summary>

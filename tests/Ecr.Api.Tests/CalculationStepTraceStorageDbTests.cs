@@ -202,6 +202,77 @@ public sealed class CalculationStepTraceStorageDbTests(SqlServerFixture sql)
         Assert.Equal(["#DIV/0"], errors);
     }
 
+    /// <remarks>
+    /// Масовий запис кроків іде в транзакції записувача ДО <c>SaveChanges</c> входів: падіння збереження (вхід із кодом,
+    /// довшим за колонку) відкочує й кроки — методологія записана цілком або ніяк. ⛔ Мутація: писати кроки поза
+    /// транзакцією записувача (власне з'єднання / без <c>transaction</c>) — червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-565")]
+    public async Task Масово_записані_кроки_відкочуються_коли_падає_наступний_SaveChanges()
+    {
+        var f = await ArrangeAsync();
+        var outputs = Outputs(f);
+        outputs[^1] = outputs[^1] with { Inputs = [new CalculationArgument(new string('A', 200), 1m, null, null)] };
+        var run = await StartRunAsync(f);
+
+        var log = new StepBulkLog();
+        await using (var db = f.Builder.CreateContext())
+        {
+            var writer = new CalculationOutputWriter(
+                new CalculationResultStore(db, new TestClock(Now), logger: log), new UnitOfWork(db, new TestClock(Now)));
+            await Assert.ThrowsAnyAsync<Exception>(() => writer.WriteAsync(run, outputs, TraceLevel.Full, CancellationToken.None));
+        }
+
+        Assert.Equal(1, log.StepBulkWrites);
+        await using var check = f.Builder.CreateContext();
+        Assert.Equal(0, await check.CalculationSteps.CountAsync(s => s.CalculationRunId == run));
+        Assert.Equal(0, await check.CalculationResults.CountAsync(r => r.CalculationRunId == run));
+    }
+
+    /// <remarks>
+    /// <c>MethodologyStore.GetTraceStepMethodologyIdsAsync</c> на SQL: лише названі методології з прапором, без повторів;
+    /// порожній запит — без звернення. ⛔ Мутація: прибрати умову <c>TraceSteps</c> — червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-565")]
+    public async Task Сховище_віддає_лише_названі_методології_з_прапором()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        int on, off, other;
+        await using (var db = builder.CreateContext())
+        {
+            Methodology Make(string key)
+            {
+                var m = new Methodology(
+                    EcrCode.Create($"D565{key}_{Guid.NewGuid():N}"[..20]),
+                    new LocalizedText(new Dictionary<string, string> { ["en"] = "m" }));
+                db.Methodologies.Add(m);
+                return m;
+            }
+
+            var a = Make("A");
+            var b = Make("B");
+            var c = Make("C");
+            a.SetTraceSteps(true);
+            c.SetTraceSteps(true);
+            await db.SaveChangesAsync();
+            (on, off, other) = (a.Id, b.Id, c.Id);
+        }
+
+        await using var read = builder.CreateContext();
+        var store = new MethodologyStore(read, 1000);
+        Assert.Equal([on], await store.GetTraceStepMethodologyIdsAsync([on, off, on], CancellationToken.None));
+        Assert.Equal(
+            [on, other],
+            (await store.GetTraceStepMethodologyIdsAsync([on, off, other], CancellationToken.None)).Order());
+        Assert.Empty(await store.GetTraceStepMethodologyIdsAsync([], CancellationToken.None));
+    }
+
     private static async Task<long> NextIdAsync(EcrDbContext db)
         => (await db.Database.SqlQuery<long>($"""
                 DECLARE @first sql_variant;
