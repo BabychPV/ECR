@@ -26,7 +26,7 @@
     <!-- PI SQL Client (RTQP) ходить через ODBC, не OLE DB (D-46).
          System.Data.Odbc НЕ входить у спільний фреймворк .NET: тип у ньому
          лише переспрямований, і без цього пакета збірка падає з CS1069. -->
-    <PackageVersion Include="System.Data.Odbc" Version="10.0.0" />
+    <PackageVersion Include="System.Data.Odbc" Version="10.0.13" />
 
     <!-- HttpClientFactory: власноруч створений HttpClient тримає зʼєднання
          після зміни DNS, і збір ходить на адресу, якої вже немає. -->
@@ -44,6 +44,11 @@
          cookie одного інстанса другий не розшифрує, а під сервісною обліковкою
          без профілю вони ще й ефемерні, тобто рестарт служби розлогінює всіх. -->
     <PackageVersion Include="Microsoft.AspNetCore.DataProtection.EntityFrameworkCore" Version="10.0.13" />
+    <!-- PSS-30: Scalar мапиться лише в Development (Program.cs, Q-247), але пакет лежить у публікації.
+         Прибрати його з Release можна лише умовним посиланням/`#if`, а тести стенда й WebApplicationFactory
+         ганяються у Development — умовне посилання лише для Release розходилося б із конфігом, який тестується,
+         і ховало б код від компілятора там, де він шипиться. Поверхня в проді закрита гейтом середовища, а пакет сам
+         кінцевих точок не додає (їх створює лише `MapScalarApiReference`); виграш — розмір, не безпека, тож пакет лишається. -->
     <PackageVersion Include="Scalar.AspNetCore" Version="2.0.0" />
   </ItemGroup>
 

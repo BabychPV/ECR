@@ -517,7 +517,11 @@ public sealed record SubmissionCalendar(
 /// <param name="PeriodKey">Ключ періоду.</param>
 /// <param name="State">Ефективний стан періоду.</param>
 /// <param name="SheetStatus">Стан аркуша за цей період; рядка стану немає — <c>Draft</c>.</param>
+/// <param name="SubmittedByUserId">✎ D-6: хто подав аркуш за цей період; <c>null</c> — не подано чи рядка стану немає.</param>
+/// <param name="CurrentStepId">✎ D-6: поточний крок маршруту аркуша за цей період (правило відкликання).</param>
 public sealed record SubmissionCalendarPeriod(
     int PeriodKey,
     Ecr.Domain.Enums.PeriodState State,
-    Ecr.Domain.Enums.DocumentStatus SheetStatus);
+    Ecr.Domain.Enums.DocumentStatus SheetStatus,
+    int? SubmittedByUserId = null,
+    int? CurrentStepId = null);

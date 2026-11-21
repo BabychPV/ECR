@@ -30,7 +30,11 @@ public sealed record ScriptPreviewRequest(
 
 /// <summary>Відповідь перегляду: таблиці.</summary>
 /// <param name="Tables">Екземпляри таблиць, на яких скрипт вибирає рядки.</param>
-public sealed record ScriptPreviewResult(IReadOnlyList<ScriptPreviewTable> Tables);
+public sealed record ScriptPreviewResult(IReadOnlyList<ScriptPreviewTable> Tables)
+{
+    /// <summary><c>true</c> — вичерпано спільний бюджет кроків перегляду (PSS-21: 20 000 000 на запит); рядки з <c>#BUDGET</c> — межа перегляду, а не помилка скрипта.</summary>
+    public bool BudgetExhausted { get; init; }
+}
 
 /// <summary>Екземпляр таблиці в перегляді.</summary>
 /// <param name="TableInstanceId">Екземпляр таблиці.</param>
@@ -65,7 +69,11 @@ public sealed record ScriptPreviewRow(
     string? Issue,
     IReadOnlyList<string>? Missing,
     IReadOnlyList<ScriptPreviewValue> Values,
-    IReadOnlyList<ScriptPreviewInput>? Inputs = null);
+    IReadOnlyList<ScriptPreviewInput>? Inputs = null)
+{
+    /// <summary><c>true</c> — величини рядка урізано стелею відповіді перегляду (PSS-21: 50 000 на запит); <c>values</c> неповний.</summary>
+    public bool ValuesTruncated { get; init; }
+}
 
 /// <summary>Один вхід рядка в перегляді.</summary>
 /// <param name="Name">Ім'я аргументу (код колонки).</param>

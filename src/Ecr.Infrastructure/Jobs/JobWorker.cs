@@ -369,10 +369,17 @@ public sealed partial class JobWorker(
     {
         try
         {
-            await using var scope = scopes.CreateAsyncScope();
-            await scope.ServiceProvider.GetRequiredService<IJobQueue>()
-                .ExpireAsync(JobQueueLimits.MaxReclaims, CancellationToken.None)
-                .ConfigureAwait(false);
+            IReadOnlyList<string> ended;
+            await using (var scope = scopes.CreateAsyncScope())
+            {
+                ended = await scope.ServiceProvider.GetRequiredService<IJobQueue>()
+                    .ExpireEndedAsync(JobQueueLimits.MaxReclaims, CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
+
+            // B80 N5: системне закриття (отруйна, скасована з мертвим власником) «залежних з затвердженими» —
+            // покрита ними звичайна робота повертається.
+            await ReturnCoveredAsync(ended).ConfigureAwait(false);
         }
 #pragma warning disable CA1031 // Прибирання — не робота воркера: збій іде в журнал, цикл живе.
         catch (Exception ex)
@@ -423,6 +430,15 @@ public sealed partial class JobWorker(
         {
             // Свій потік: задача не займає цикл захоплення навіть до першого await.
             await Task.Run(() => ExecuteClaimedAsync(job, phases, stopping), CancellationToken.None).ConfigureAwait(false);
+
+            // ⛔ B80 N5: «залежні з затвердженими» покривала звичайний перерахунок залежних того самого документа й
+            // періоду (CalculationTrigger). Закінчилась Failed/Cancelled (провал, межа тривалості чи відкладень, скасування
+            // людиною виконуваної) — покрита робота повертається. Стан читається з бази після фіксації: відкладена,
+            // повернута в чергу чи втрачена оренда — не кінець, і повернення не буде.
+            if (ApprovedDependentsFallback.IsCandidate(job.JobCode, job.TargetKey))
+            {
+                await ReturnCoveredAsync([job.Claim.JobId]).ConfigureAwait(false);
+            }
         }
 #pragma warning disable CA1031 // Збій одного виконання не зупиняє воркер; причина — у журналі.
         catch (Exception ex)
@@ -573,6 +589,7 @@ public sealed partial class JobWorker(
 
         Exception? failure = null;
         JobDeferredException? deferred = null;
+        JobContinuedException? continued = null;
         var cancelled = false;
         var runStarted = Stopwatch.GetTimestamp();
         phases.BodyStarted = runStarted;
@@ -588,6 +605,12 @@ public sealed partial class JobWorker(
         catch (JobDeferredException ex)
         {
             deferred = ex;
+        }
+        catch (JobContinuedException ex)
+        {
+            // ✎ PSS-04: крок зроблено й закомічено ДО винятку — продовження, а не провал. Навіть якщо токен уже
+            // скасовано (межа тривалості спрацювала після кінця кроку): фіксуємо зроблене нижче.
+            continued = ex;
         }
         // ⛔ L2-01: скасування — за станом ВЛАСНОГО токена, а не за типом винятку. Драйвер
         // посеред запиту кидає SqlException «Operation cancelled by user», а не OCE; як
@@ -629,6 +652,19 @@ public sealed partial class JobWorker(
             && (cancelled || failure is not null))
         {
             await FailOvertimeAsync(job, clock).ConfigureAwait(false);
+            return;
+        }
+
+        // ✎ PSS-04 (D-561): крок зроблено, задача продовжується наступним — той самий рядок знову Queued з новим payload,
+        // слот і лок документа вільні; запит скасування, що прийшов під час кроку, закриває рядок Cancelled (ContinueAsync).
+        if (continued is not null)
+        {
+            Observability.InfrastructureMetrics.RecordJobRun(
+                job.JobCode, "ok", Stopwatch.GetElapsedTime(runStarted).TotalSeconds);
+            LogJobContinued(logger, claim.JobId, job.JobCode, continued.SettleThrough, continued.Delay);
+            await SettleAsync(claim.JobId, q => q.ContinueAsync(
+                    claim, continued.PayloadJson, continued.Delay, continued.SettleThrough, CancellationToken.None))
+                .ConfigureAwait(false);
             return;
         }
 
@@ -875,6 +911,34 @@ public sealed partial class JobWorker(
         }
     }
 
+    /// <summary>
+    /// B80 N5: для задач, що щойно закінчились, — повернення роботи, яку покривала провалена/скасована «залежні з
+    /// затвердженими» (<see cref="ApprovedDependentsFallback"/>; решту задач він відсіює сам).
+    /// </summary>
+    /// <remarks>⚠ Не кидає: задачу вже закрито, збій повернення — у журнал (сам <see cref="ApprovedDependentsFallback"/>).</remarks>
+    private async Task ReturnCoveredAsync(IReadOnlyCollection<string> jobIds)
+    {
+        if (jobIds.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            await using var scope = scopes.CreateAsyncScope();
+            if (scope.ServiceProvider.GetService<ApprovedDependentsFallback>() is { } fallback)
+            {
+                await fallback.OnEndedAsync(jobIds, CancellationToken.None).ConfigureAwait(false);
+            }
+        }
+#pragma warning disable CA1031 // Повернення покритої роботи — страховка; задачу вже закрито, воркер живе.
+        catch (Exception ex)
+#pragma warning restore CA1031
+        {
+            LogReturnCoveredFailed(logger, string.Join(", ", jobIds), ex);
+        }
+    }
+
     /// <summary>Збій дороги до бази, а не вердикт: повтор має сенс.</summary>
     private static bool IsTransientDatabaseFault(Exception ex)
         => ex is System.Data.Common.DbException or TimeoutException
@@ -971,6 +1035,9 @@ public sealed partial class JobWorker(
     [LoggerMessage(Level = LogLevel.Warning, Message = "Задача {JobId} ({TypeName}) впала; повернуто в чергу з затримкою.")]
     private static partial void LogJobRetrying(ILogger logger, string jobId, string typeName, Exception exception);
 
+    [LoggerMessage(Level = LogLevel.Information, Message = "Задача {JobId} ({TypeName}): крок до періоду {Period} зроблено й закомічено; наступний крок — у черзі через {Delay} (PSS-04).")]
+    private static partial void LogJobContinued(ILogger logger, string jobId, string typeName, int period, TimeSpan delay);
+
     [LoggerMessage(Level = LogLevel.Information, Message = "Задача {JobId} ({TypeName}) відкладена на {Delay}: ресурс зайнятий; спробу не зараховано.")]
     private static partial void LogJobDeferred(ILogger logger, string jobId, string typeName, TimeSpan delay);
 
@@ -997,4 +1064,9 @@ public sealed partial class JobWorker(
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Збій виконавця черги на задачі {JobId}.")]
     private static partial void LogWorkerFault(ILogger logger, string jobId, Exception exception);
+
+    [LoggerMessage(
+        Level = LogLevel.Error,
+        Message = "B80 N5: не вдалося повернути роботу, покриту задачами «залежні з затвердженими» {JobIds}.")]
+    private static partial void LogReturnCoveredFailed(ILogger logger, string jobIds, Exception exception);
 }

@@ -1,6 +1,8 @@
 using System.Data;
+using System.Runtime.CompilerServices;
 using Ecr.Application.Localization;
 using Ecr.Application.Ports;
+using Ecr.Infrastructure.Caching;
 using Ecr.Infrastructure.Persistence;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
@@ -28,17 +30,29 @@ public sealed class UiStringCatalogStore(EcrDbContext db, IMemoryCache memory) :
     /// </remarks>
     private static readonly TimeSpan Lifetime = TimeSpan.FromHours(1);
 
-    /// <summary>Ключ кешу переліку увімкнених мов (L1-02).</summary>
+    /// <summary>Ключ кешу переліку увімкнених мов (L1-02; PSS-29 — і для публічного початкового стану).</summary>
     internal const string EnabledLanguagesKey = "ui:languages:enabled";
+
+    /// <summary>Ключ мемо поточної ревізії каталогу (PSS-29).</summary>
+    internal const string RevisionKey = "ui:revision";
 
     /// <summary>
     /// Скільки живе перелік увімкнених мов у кеші.
     /// </summary>
     /// <remarks>
-    /// Хвилина: мови вмикаються рідко, а без кешу кожен анонімний запит із
-    /// вигаданою мовою знову бив би по базі — рівно те, від чого захищає L1-02.
+    /// Хвилина: мови вмикаються рідко (лише сідом — застосунок реєстр мов не пише), а без кешу кожен анонімний
+    /// запит із вигаданою мовою знову бив би по базі — рівно те, від чого захищає L1-02.
     /// </remarks>
     private static readonly TimeSpan EnabledLanguagesLifetime = TimeSpan.FromMinutes(1);
+
+    /// <summary>Вікно мемо ревізії — ті самі 5 с, що в <c>MetadataCache</c> і <c>SecurityStampValidator</c> (`RD-05`).</summary>
+    internal static readonly TimeSpan RevisionWindow = CacheLifetimes.DefaultRevision;
+
+    /// <summary>Польоти за сховищем кешу: тестові хости мають кожен своє сховище і не мають ділити побудов.</summary>
+    private static readonly ConditionalWeakTable<IMemoryCache, SingleFlight<object>> Flights = new();
+
+    /// <summary>Порівняння-і-запис мемо ревізії (<see cref="RememberRevision"/>).</summary>
+    private static readonly Lock RevisionGate = new();
 
     /// <inheritdoc />
     public Task<UiStringCatalog> GetAsync(string languageCode, CancellationToken ct)
@@ -49,17 +63,55 @@ public sealed class UiStringCatalogStore(EcrDbContext db, IMemoryCache memory) :
         => LoadAsync(languageCode, scope, ct);
 
     /// <inheritdoc />
+    /// <remarks>⚠ Свіже читання (імпорт перекладу звіряє ревізію) — і заодно освіжає мемо гарячого шляху.</remarks>
     public async Task<int> GetRevisionAsync(CancellationToken ct)
     {
         await using var connection = new SqlConnection(db.Database.GetConnectionString());
         await connection.OpenAsync(ct).ConfigureAwait(false);
-        return await ReadRevisionAsync(connection, ct).ConfigureAwait(false);
+        var revision = await ReadRevisionAsync(connection, ct).ConfigureAwait(false);
+        RememberRevision(revision);
+        return revision;
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ PSS-29: з кешу на <see cref="EnabledLanguagesLifetime"/> і одним польотом. Це читання анонімного
+    /// <c>GET /api/v1/public/bootstrap</c> (кожне відкриття екрана входу) — без кешу воно йшло в базу щоразу.
+    /// </remarks>
     public async Task<IReadOnlyList<LanguageDto>> ListLanguagesAsync(CancellationToken ct)
     {
-        await using var connection = new SqlConnection(db.Database.GetConnectionString());
+        if (memory.TryGetValue(EnabledLanguagesKey, out IReadOnlyList<LanguageDto>? cached) && cached is not null)
+        {
+            return cached;
+        }
+
+        var connectionString = ConnectionString;
+        var built = await Flight
+            .RunAsync(
+                EnabledLanguagesKey,
+                async token =>
+                {
+                    if (memory.TryGetValue(EnabledLanguagesKey, out IReadOnlyList<LanguageDto>? ready)
+                        && ready is not null)
+                    {
+                        return ready;
+                    }
+
+                    var languages = await ReadLanguagesAsync(connectionString, token).ConfigureAwait(false);
+                    memory.Set(EnabledLanguagesKey, languages, EnabledLanguagesLifetime);
+                    return languages;
+                },
+                ct)
+            .ConfigureAwait(false);
+
+        return (IReadOnlyList<LanguageDto>)built;
+    }
+
+    /// <summary>Читає увімкнені мови з реєстру.</summary>
+    private static async Task<IReadOnlyList<LanguageDto>> ReadLanguagesAsync(
+        string connectionString, CancellationToken ct)
+    {
+        await using var connection = new SqlConnection(connectionString);
         await connection.OpenAsync(ct).ConfigureAwait(false);
 
         await using var command = connection.CreateCommand();
@@ -79,7 +131,8 @@ public sealed class UiStringCatalogStore(EcrDbContext db, IMemoryCache memory) :
             result.Add(new LanguageDto(reader.GetString(0), reader.GetString(1), reader.GetBoolean(2)));
         }
 
-        return result;
+        // Спільний для всіх запитів екземпляр — лише для читання.
+        return result.AsReadOnly();
     }
 
     /// <inheritdoc />
@@ -122,14 +175,13 @@ public sealed class UiStringCatalogStore(EcrDbContext db, IMemoryCache memory) :
             return UiStringResolver.DefaultLanguage;
         }
 
-        if (!memory.TryGetValue(EnabledLanguagesKey, out IReadOnlyList<string>? enabled) || enabled is null)
-        {
-            enabled = (await ListLanguagesAsync(ct).ConfigureAwait(false)).Select(l => l.Code).ToList();
-            memory.Set(EnabledLanguagesKey, enabled, EnabledLanguagesLifetime);
-        }
+        // ⚠ Той самий кешований перелік, що й у публічному початковому стані: один запис, одне вікно свіжості.
+        var enabled = await ListLanguagesAsync(ct).ConfigureAwait(false);
 
         // Повертається код із РЕЄСТРУ, а не з запиту: «RU» і «ru» — один запис кешу.
-        return enabled.FirstOrDefault(code => string.Equals(code, languageCode, StringComparison.OrdinalIgnoreCase))
+        return enabled
+                   .Select(l => l.Code)
+                   .FirstOrDefault(code => string.Equals(code, languageCode, StringComparison.OrdinalIgnoreCase))
                ?? UiStringResolver.DefaultLanguage;
     }
 
@@ -219,6 +271,9 @@ public sealed class UiStringCatalogStore(EcrDbContext db, IMemoryCache memory) :
 
         await transaction.CommitAsync(ct).ConfigureAwait(false);
 
+        // ⚠ Мемо гарячого шляху — одразу: термінолог бачить свою правку без вікна свіжості.
+        RememberRevision(revision);
+
         return new UiStringWriteResult(revision, previous);
     }
 
@@ -291,7 +346,9 @@ public sealed class UiStringCatalogStore(EcrDbContext db, IMemoryCache memory) :
 
         if (writes.Count == 0)
         {
-            return await ReadRevisionAsync(connection, ct).ConfigureAwait(false);
+            var current = await ReadRevisionAsync(connection, ct).ConfigureAwait(false);
+            RememberRevision(current);
+            return current;
         }
 
         await using var transaction = (SqlTransaction)await connection
@@ -334,6 +391,7 @@ public sealed class UiStringCatalogStore(EcrDbContext db, IMemoryCache memory) :
         }
 
         await transaction.CommitAsync(ct).ConfigureAwait(false);
+        RememberRevision(revision);
         return revision;
     }
 
@@ -349,6 +407,14 @@ public sealed class UiStringCatalogStore(EcrDbContext db, IMemoryCache memory) :
     }
 
     /// <summary>Читає зріз мови з кешу або з бази.</summary>
+    /// <remarks>
+    /// ⛔ PSS-29 (e2e RC #988): гарячий шлях — БЕЗ бази. Тут відкривалося з'єднання й читалася ревізія на КОЖЕН
+    /// запит, навіть коли зріз лежав у кеші; анонімний екран входу тягне 3–5 таких запитів на завантаження, тож
+    /// базу «тримала» лише межа частоти на адресу — а вона ж клала екран входу всім за NAT. Тепер ревізія —
+    /// мемо на <see cref="RevisionWindow"/>, мови — на хвилину, зріз — до зміни ревізії, і кожне читання з бази
+    /// йде одним польотом (<see cref="SingleFlight{T}"/>) на ключ: скільки б запитів не прийшло з будь-скількох
+    /// адрес, база бачить ≤ 1 читання ревізії на вікно й ≤ 1 побудову зрізу на (мову, область, ревізію).
+    /// </remarks>
     private async Task<UiStringCatalog> LoadAsync(string languageCode, UiStringScope? scope, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(languageCode);
@@ -357,10 +423,7 @@ public sealed class UiStringCatalogStore(EcrDbContext db, IMemoryCache memory) :
         // обслуговується записом мови за замовчуванням, а не новим ключем.
         languageCode = await ResolveLanguageAsync(languageCode, ct).ConfigureAwait(false);
 
-        await using var connection = new SqlConnection(db.Database.GetConnectionString());
-        await connection.OpenAsync(ct).ConfigureAwait(false);
-
-        var revision = await ReadRevisionAsync(connection, ct).ConfigureAwait(false);
+        var revision = await CurrentRevisionAsync(ct).ConfigureAwait(false);
 
         // Ключ {lang}:{scope}:{revision} — нова версія дає новий ключ, тому
         // інвалідація не потрібна і два інстанси не розійдуться.
@@ -370,22 +433,104 @@ public sealed class UiStringCatalogStore(EcrDbContext db, IMemoryCache memory) :
             return cached;
         }
 
-        var requested = await ReadStringsAsync(connection, languageCode, scope, ct).ConfigureAwait(false);
+        var connectionString = ConnectionString;
+        var built = await Flight
+            .RunAsync(
+                key,
+                async token =>
+                {
+                    if (memory.TryGetValue(key, out UiStringCatalog? ready) && ready is not null)
+                    {
+                        return ready;
+                    }
 
-        // Fallback читається лише коли мова НЕ є мовою за замовчуванням —
-        // інакше кожен запит англійською коштував би два запити.
-        var defaults =
-            string.Equals(languageCode, UiStringResolver.DefaultLanguage, StringComparison.OrdinalIgnoreCase)
-                ? requested
-                : await ReadStringsAsync(connection, UiStringResolver.DefaultLanguage, scope, ct)
-                    .ConfigureAwait(false);
+                    await using var connection = new SqlConnection(connectionString);
+                    await connection.OpenAsync(token).ConfigureAwait(false);
 
-        var catalog = new UiStringCatalog(
-            languageCode, revision, UiStringResolver.Compose(defaults, requested));
+                    var requested = await ReadStringsAsync(connection, languageCode, scope, token)
+                        .ConfigureAwait(false);
 
-        memory.Set(key, catalog, Lifetime);
-        return catalog;
+                    // Fallback читається лише коли мова НЕ є мовою за замовчуванням —
+                    // інакше кожен запит англійською коштував би два запити.
+                    var defaults =
+                        string.Equals(languageCode, UiStringResolver.DefaultLanguage, StringComparison.OrdinalIgnoreCase)
+                            ? requested
+                            : await ReadStringsAsync(connection, UiStringResolver.DefaultLanguage, scope, token)
+                                .ConfigureAwait(false);
+
+                    var catalog = new UiStringCatalog(
+                        languageCode, revision, UiStringResolver.Compose(defaults, requested));
+
+                    memory.Set(key, catalog, Lifetime);
+                    return catalog;
+                },
+                ct)
+            .ConfigureAwait(false);
+
+        return (UiStringCatalog)built;
     }
+
+    /// <summary>Поточна ревізія каталогу — з мемо на <see cref="RevisionWindow"/>.</summary>
+    /// <remarks>
+    /// ⚠ Ціна названа прямо (як у <c>MetadataCache</c>, `RD-05`): правка перекладу на ІНШОМУ вузлі доходить сюди
+    /// за ≤ 5 с. На цьому вузлі — одразу: запис кладе в мемо нову ревізію сам (<see cref="RememberRevision"/>).
+    /// </remarks>
+    private async Task<int> CurrentRevisionAsync(CancellationToken ct)
+    {
+        if (memory.TryGetValue(RevisionKey, out int memoized))
+        {
+            return memoized;
+        }
+
+        var connectionString = ConnectionString;
+        var built = await Flight
+            .RunAsync(
+                RevisionKey,
+                async token =>
+                {
+                    if (memory.TryGetValue(RevisionKey, out int ready))
+                    {
+                        return ready;
+                    }
+
+                    await using var connection = new SqlConnection(connectionString);
+                    await connection.OpenAsync(token).ConfigureAwait(false);
+                    return RememberRevision(await ReadRevisionAsync(connection, token).ConfigureAwait(false));
+                },
+                ct)
+            .ConfigureAwait(false);
+
+        return (int)built;
+    }
+
+    /// <summary>Кладе ревізію в мемо, якщо вона не старша за ту, що вже там.</summary>
+    /// <remarks>
+    /// ⛔ Ревізія лише зростає, тому злиття — «більша перемагає». Без цього читання, що стартувало ДО запису й
+    /// закінчилося ПІСЛЯ нього, повернуло б у мемо стару ревізію на ціле вікно — і щойно збережений переклад не
+    /// був би видний навіть на вузлі, де його зберегли.
+    /// </remarks>
+    /// <param name="revision">Прочитана або щойно записана ревізія.</param>
+    /// <returns>Ревізія, що лежить у мемо після злиття.</returns>
+    private int RememberRevision(int revision)
+    {
+        lock (RevisionGate)
+        {
+            if (memory.TryGetValue(RevisionKey, out int known) && known >= revision)
+            {
+                return known;
+            }
+
+            memory.Set(RevisionKey, revision, RevisionWindow);
+            return revision;
+        }
+    }
+
+    /// <summary>Рядок з'єднання — рядком, а не <c>DbContext</c>: спільна побудова може пережити scope власника.</summary>
+    private string ConnectionString => db.Database.GetConnectionString()
+        ?? throw new InvalidOperationException("Рядок з'єднання з базою не задано.");
+
+    /// <summary>Один політ на ключ — свій на кожне сховище кешу (тестові хости не ділять побудов між собою).</summary>
+    private SingleFlight<object> Flight => Flights.GetValue(memory, static _ => new SingleFlight<object>());
 
     private static async Task<int> ReadRevisionAsync(SqlConnection connection, CancellationToken ct)
     {

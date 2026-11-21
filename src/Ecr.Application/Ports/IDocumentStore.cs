@@ -629,6 +629,31 @@ public interface IDocumentStore
     public Task<Domain.Enums.WorkflowMode> GetWorkflowModeForPeriodAsync(long documentId, int periodKey, CancellationToken ct)
         => Task.FromResult(Domain.Enums.WorkflowMode.SubmitApprove);
 
+    /// <summary>
+    /// ✎ D-6: <see cref="GetWorkflowModeForPeriodAsync"/> для КІЛЬКОХ періодів (місяці річного аркуша) — одним запитом;
+    /// типова реалізація (двійники в тестах) — цикл поштучних.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKeys">Періоди.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Періоди, версія шаблону яких — без подання й затвердження (<see cref="Domain.Enums.WorkflowMode.None"/>).</returns>
+    public async Task<IReadOnlySet<int>> GetWorkflowNonePeriodsAsync(
+        long documentId, IReadOnlyCollection<int> periodKeys, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(periodKeys);
+
+        var none = new HashSet<int>();
+        foreach (var key in periodKeys.Distinct())
+        {
+            if (await GetWorkflowModeForPeriodAsync(documentId, key, ct).ConfigureAwait(false) == Domain.Enums.WorkflowMode.None)
+            {
+                none.Add(key);
+            }
+        }
+
+        return none;
+    }
+
     /// <summary>Версія шаблону ПРОЄКТУ; <c>null</c> — проєкту немає.</summary>
     /// <remarks>
     /// ⛔ `V-11`: версія документа — це версія його проєкту (документ власної

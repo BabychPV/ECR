@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+﻿import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { MemoryRouter } from 'react-router-dom';
@@ -156,6 +156,32 @@ describe('LoginPage: публічні дані екрана входу (BE-07)',
     });
 
     expect(screen.queryByLabelText('Password')).toBeNull();
+  });
+
+  it('PSS-29: bootstrap відповів 429 — повтор за Retry-After, і сервер таки вирішує, що показувати', async () => {
+    localStorage.setItem('uiLanguage', 'be07-busy');
+    const calls = stubFetch('be07-busy', bootstrapOf({ windowsSignInEnabled: false, productVersion: '3.1.0' }));
+    const answer = calls.getMockImplementation() as (input: RequestInfo | URL) => Promise<Response>;
+    let refused = false;
+    calls.mockImplementation(async (input: RequestInfo | URL) => {
+      if (!refused && String(input).includes('/public/bootstrap')) {
+        refused = true;
+        return new Response(null, { status: 429, headers: { 'Retry-After': '0' } });
+      }
+
+      return answer(input);
+    });
+
+    render(
+      <Shell>
+        <LoginPage />
+      </Shell>,
+    );
+
+    // Без повтору екран лишився б на запасних значеннях: кнопка домену є, версії немає.
+    expect(await screen.findByText('3.1.0')).toBeDefined();
+    expect(screen.queryByRole('button', { name: 'Sign in with Windows' })).toBeNull();
+    expect(calls.mock.calls.filter(([input]) => String(input).includes('/public/bootstrap'))).toHaveLength(2);
   });
 
   it('bootstrap відмовив — форма входу лишається повною, без червоного', async () => {

@@ -166,3 +166,29 @@ public sealed class JobDeferredException(TimeSpan delay, string message, string?
     /// <summary>Зайнятий ресурс; <c>null</c> — не названо.</summary>
     public string? Resource { get; } = resource;
 }
+
+/// <summary>
+/// ✎ PSS-04 (<c>D-561</c>): крок задачі зроблено і закомічено, задача продовжується НАСТУПНИМ кроком — той самий рядок
+/// черги знову стає <c>Queued</c> з <see cref="PayloadJson"/> (<see cref="Ecr.Application.Ports.IJobQueue.ContinueAsync"/>).
+/// </summary>
+/// <remarks>
+/// ⛔ Не провал і не відкладення: спроба не рахується, відлік стелі відкладень починається з нуля, межа тривалості
+/// (<c>Jobs:Workers:MaxDuration</c>) діє на КРОК. Між кроками лок документа й місце виконавця вільні — інші задачі
+/// документа (правка комірки) ідуть між місяцями. Кидає лише задача, якій черга дала оренду
+/// (<see cref="Ecr.Application.Ports.IJobQueue.SupportsContinuation"/>); Quartz її не бачить.
+/// </remarks>
+/// <param name="payloadJson">Тіло наступного кроку.</param>
+/// <param name="delay">Відкласти наступний крок (поступитися задачам документа, що чекають).</param>
+/// <param name="settleThrough">Останній зроблений період: запарковані задачею до нього включно — зроблено.</param>
+public sealed class JobContinuedException(string payloadJson, TimeSpan delay, int settleThrough)
+    : Exception("Крок задачі зроблено; задача продовжується наступним кроком.")
+{
+    /// <summary>Тіло наступного кроку.</summary>
+    public string PayloadJson { get; } = payloadJson;
+
+    /// <summary>Відкласти наступний крок.</summary>
+    public TimeSpan Delay { get; } = delay;
+
+    /// <summary>Останній зроблений період ланцюжка.</summary>
+    public int SettleThrough { get; } = settleThrough;
+}

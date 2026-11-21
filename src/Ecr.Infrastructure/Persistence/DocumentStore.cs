@@ -1482,6 +1482,42 @@ public sealed class DocumentStore(
     }
 
     /// <inheritdoc />
+    /// <remarks>✎ D-6: та сама шкала версії за період, що й <see cref="GetWorkflowModeForPeriodAsync"/>, — один запит на всі періоди.</remarks>
+    public async Task<IReadOnlySet<int>> GetWorkflowNonePeriodsAsync(
+        long documentId, IReadOnlyCollection<int> periodKeys, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(periodKeys);
+        if (periodKeys.Count == 0)
+        {
+            return new HashSet<int>();
+        }
+
+        var keys = periodKeys.Distinct().ToList();
+        var document = await db.Documents.AsNoTracking()
+            .Where(d => d.Id == documentId)
+            .Select(d => new { d.ProjectId, d.TemplateId })
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+        if (document is null)
+        {
+            return new HashSet<int>();
+        }
+
+        var projectId = document.ProjectId;
+        var periods = db.Periods.AsNoTracking().Where(p => p.ProjectId == projectId && keys.Contains(p.PeriodKeyValue));
+        var none = await (document.TemplateId is { } own
+                ? periods.Where(p => db.TemplateVersions.Any(v =>
+                    v.Id == EcrDbContext.TemplateVersionOf(projectId, own, p.PeriodKeyValue) && v.WorkflowMode == WorkflowMode.None))
+                : periods.Where(p => db.TemplateVersions.Any(v =>
+                    v.Id == EcrDbContext.VersionOf(projectId, p.PeriodKeyValue) && v.WorkflowMode == WorkflowMode.None)))
+            .Select(p => p.PeriodKeyValue)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return none.ToHashSet();
+    }
+
+    /// <inheritdoc />
     /// <remarks>
     /// ⛔ `DAT-01`. Раніше документ брався ВІДСТЕЖУВАНИМ, і «дотик» їхав у
     /// базу звичайним <c>SaveChanges</c> — тобто
@@ -2359,6 +2395,7 @@ public sealed class DocumentStore(
 
         var rows = await StaleResultsQuery.Documents(db, periodKey)
             .Where(r => ids.Contains(r.DocumentId))
+            .TagWith(StaleResultsMapCache.DirectTag)
             .OrderBy(r => r.DocumentId)
             .Take(documentIds.Count)
             .ToListAsync(ct)

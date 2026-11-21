@@ -152,7 +152,11 @@ public sealed record ScriptValidationDto(IReadOnlyList<ScriptDiagnosticDto> Diag
 /// <param name="Tables">Таблиці з рядками й значеннями; порожньо, якщо текст має діагностики.</param>
 /// <param name="Diagnostics">Діагностики тексту (перегляд виконується лише без них).</param>
 public sealed record ScriptPreviewDto(
-    IReadOnlyList<ScriptPreviewTable> Tables, IReadOnlyList<ScriptDiagnosticDto> Diagnostics);
+    IReadOnlyList<ScriptPreviewTable> Tables, IReadOnlyList<ScriptDiagnosticDto> Diagnostics)
+{
+    /// <summary><c>true</c> — вичерпано спільний бюджет кроків перегляду (PSS-21: 20 000 000 на запит); рядки з <c>#BUDGET</c> — межа перегляду, а не помилка скрипта, у перерахунку її немає.</summary>
+    public bool BudgetExhausted { get; init; }
+}
 
 /// <summary>Результат форматування літерала константи.</summary>
 /// <param name="Text">Канонічний друк; <c>null</c>, якщо літерал не розібрано.</param>

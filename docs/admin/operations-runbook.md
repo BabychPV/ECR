@@ -127,7 +127,7 @@ Api й воркер на **одному** хості — різні ролі й 
 | `Auth:DataProtection:CertificateThumbprint` | немає | відбиток сертифіката з `LocalMachine\My` для захисту ключів Data Protection (п. 6.2). ⛔ **З 2026-09-29 (S11) у Production обов'язковий**: без нього служба не стартує. Один і той самий сертифікат (із закритим ключем, з правом читання для облікового запису служби) — на всіх вузлах |
 | `Auth:DataProtection:PreviousCertificateThumbprints` | немає | відбитки попередніх сертифікатів Data Protection (масив або список через `;`/`,`), сертифікати мають лишатися в `LocalMachine\My`. Пише `deploy-ecr.ps1 -PreviousDataProtectionCertificateThumbprints`; ненайдений — Warning у журналі. Заміна сертифіката — `https-certificate.md` §9.2–9.3 |
 | `Auth:DataProtection:AllowUnprotectedKeys` | `false` | лише для одноразових стендів (`smoke.ps1`, `e2e-stand.ps1`, `setup-dev-db.ps1`): дозволяє старт у Production без сертифіката. На майданчику не вмикати: старт пише Critical у журнал подій (джерело `ECR`), `db` — Degraded з причиною. `deploy-ecr.ps1` його не ставить ніколи |
-| `Security:RateLimit:LoginPermitPerMinute` | 60 | спроб входу за хвилину з однієї IP-адреси (`/api/v1/login/*`) |
+| `Security:RateLimit:LoginPermitPerMinute` | 60 | спроб входу за хвилину з однієї IP-адреси (`/api/v1/login/*`). ⚠ Адреса — це адреса КЛІЄНТА (`Security:RateLimit:TrustForwardedFor`/`KnownProxies`): за корпоративним NAT або зворотним проксі БЕЗ довіреного `X-Forwarded-For` увесь майданчик ділить одну адресу й одне вікно — для майданчика з N користувачами, що входять разом (початок зміни), підніміть межу до ~N (кожна спроба коштує ≈0,1 с одного ядра, див. `LoginRateLimiting`); та сама адреса йде в журнал входів. Читання екрана входу (`GET /api/v1/public/bootstrap`, каталог рядків) обслуговуються з пам'яті й межі на адресу не мають — для них підбирати нічого не треба; див. `Security:RateLimit:AnonymousReadPermitPerMinute` |
 | `Security:RateLimit:ChangePasswordPermitPerMinute` | 10 | змін пароля за хвилину на користувача |
 | `Security:RateLimit:TrustForwardedFor` | `false` | брати IP клієнта з `X-Forwarded-For` (вхід, CSP, `/health/ready`). Вмикати лише за зворотним проксі. Ланцюг читається **справа наліво**: IIS ARR і nginx (`$proxy_add_x_forwarded_for`) дописують адресу клієнта праворуч, а все лівіше надіслав сам клієнт, тож клієнт — найправіший запис, що не є адресою довіреного проксі (`KnownProxies`). Запис із портом (`203.0.113.7:51234`, типово для ARR) приймається; запис, що не є IP, — ні (тоді рахується адреса сокета). Без прапорця заголовок ігнорується, і всі за одним проксі/NAT/RDS ділять одне вікно `LoginPermitPerMinute` — для майданчика з N користувачами за однією адресою підніміть межу до N (S1-01) |
 | `Security:RateLimit:KnownProxies` | порожньо | IP-адреси довірених зворотних проксі через кому (`10.0.0.5, 10.0.0.6`). Задано — `X-Forwarded-For` читається лише від цих адрес (запит повз проксі рахується за адресою сокета), а їхні записи в ланцюгу пропускаються. Порожньо — довіряється найправіший запис (один проксі); старт пише попередження, якщо прапорець увімкнено без переліку. Не IP — служба не стартує |
@@ -135,6 +135,8 @@ Api й воркер на **одному** хості — різні ролі й 
 | `Security:RateLimit:ImportPreviewConcurrency` / `ImportPreviewQueueLimit` | 2 / 4 | скільки розборів книги `.xlsx` (перегляд імпорту документа, імпорт лімітів повітря — analyse/preview/apply, дерево НАЕ — analyse/preview/apply, книга таблиці дозволу) — одна спільна межа на процес — розбирається одночасно на процес і скільки чекає в черзі; понад чергу — `429` (`ECR-REQ-0429`, ключ `err.ECR-REQ-0429.importBusy`). Розбір тримає всю книгу в пам'яті (до ~1,5 ГБ на книгу на стелі `XlsxSafetyGate`), тож піднімати першу межу — лише з запасом RAM (P1-04/S1-02). Мінімум — 1 / 0 |
 | `Security:RateLimit:SearchPermit` / `SearchWindowSeconds` | 30 / 10 | обмеження пошуку |
 | `Security:RateLimit:CspReportPermitPerMinute` | 120 | звітів про порушення CSP за хвилину з однієї адреси (`POST /api/v1/csp-report`); понад межу — `429` без тіла |
+| `Security:RateLimit:AnonymousReadPermitPerMinute` | 120 | анонімних читань під `/api/v1/public` і `/api/v1/ui-strings`, що НЕ є читанням екрана входу (приватна область каталогу без входу, інші форми запиту), за хвилину з однієї адреси; понад межу — `429` без тіла з `Retry-After`. Самі читання екрана входу — `GET /api/v1/public/bootstrap` і `GET /api/v1/ui-strings/{lang}` з публічною областю — під межу НЕ потрапляють: вони обслуговуються з пам'яті процесу (база бачить ≤ 1 читання ревізії каталогу на 5 с і ≤ 1 читання мов на хвилину на вузол, хоч скільки людей відкриває вхід), тож офіс за одним NAT чи проксі без довіреного `X-Forwarded-For` межу НЕ вичерпує і піднімати її під кількість користувачів не треба. Клієнт на `429` чекає `Retry-After` і повторює сам. Автентифікованих користувачів межа не стосується (PSS-29). Мінімум — 1 |
+| `Security:LoginAttemptRetention:IntervalMinutes` / `Enabled` | 60 / `true` | як часто фонове прибирання `sec.LoginAttempt` читає налаштування й чистить; `Enabled=false` вимикає прибирання (лише для розслідувань). Мінімум — 1 |
 | `Security:RateLimit:RecalculatePermitPerMinute` | 6 | запитів `POST /api/v1/documents/{id}/recalculate` на користувача й документ за хвилину (спільно для власників права `Calculation.Recalculate` і читачів); понад межу — `429` (`ECR-REQ-0429`, `Retry-After`). Лічильник у пам'яті процесу: перезапуск скидає, на кількох вузлах межа діє на кожному окремо. Запити, відхилені `4xx` (`403`/`404`/`422`), межу не витрачають; `5xx` і скасований клієнтом запит — витрачають (робота могла вже статися; ent7 P3-1). Мінімум — 1 |
 | `Security:RateLimit:RecalculateUserPermitPerMinute` | 30 | запитів `POST /api/v1/documents/{id}/recalculate` на КОРИСТУВАЧА (усі документи разом) за хвилину; діє поруч із межею на пару «користувач + документ» (ent7 P3-2). Мінімум — 1 |
 | `Security:RateLimit:SmtpTestPermitPerMinute` / `SmtpTestSystemPermitPerHour` | 5 / 30 | проб поштового транспорту (`POST /api/v1/notifications/smtp/test` і `POST /api/v1/notifications/channels/{id}/test`): на користувача за хвилину і на всю систему за годину; понад межу — `429` (`ECR-REQ-0429`, `Retry-After`). Системна межа списується за проби, ПРИЙНЯТІ межею користувача й перевіркою права `System.ManageNotifications`; запити, відхилені цими двома перевірками (`429`, `403`), її не витрачають, а квота рахує лише проби, що пройшли валідацію й пошук каналу: запити, що завершилися будь-яким статусом `4xx` пізніше (`422`, `404` та ін., зокрема винятком), токен повертають, `5xx` — ні (рев'ю ent6 S6). Межа діє і для проби каналу Teams. Рахуються проби, а не листи: проба каналу шле до 20 адресатів РАЗОМ (явні адреси, потім ролі; D-263, ent6 S3); канал зберігає не більше 50 явних адрес. Квоти живуть у пам'яті кожного процесу: перезапуск скидає, а на кількох вузлах межа діє на кожному окремо. Мінімум для обох — 1 (`notifications-runbook.md` п. 2.5) |
@@ -142,6 +144,10 @@ Api й воркер на **одному** хості — різні ролі й 
 | `Security:RateLimit:ValidatePermitPerMinute` | 100 | запитів `POST /api/v1/documents/{id}/validate` («Перевірити документ») на КОРИСТУВАЧА за хвилину; фіксоване вікно 1 хв; понад межу — `429` (`ECR-REQ-0429`, ключ `err.ECR-REQ-0429.tooManyValidations`) із заголовком `Retry-After`. Лічильник у пам'яті процесу, на кількох вузлах рахується окремо. `POST /api/v1/expressions/validate` цією межею не обмежується. Мінімум — 1 |
 | `Security:RateLimit:DiscussionPostPermitPerMinute` | 20 | повідомлень `POST /api/v1/documents/{id}/tables/{tableCode}/messages` (запис у чат таблиці) на КОРИСТУВАЧА за хвилину; фіксоване вікно 1 хв; понад межу — `429` (`ECR-REQ-0429`, ключ `err.ECR-REQ-0429.tooManyChatMessages`) із `Retry-After`; повтор із тим самим `clientMessageId` теж рахується (S-6). Кандидати згадок (`GET …/mention-candidates`) власної межі не мають — ділять кошик `SearchPermit`/`SearchWindowSeconds` (30 за 10 с) із пошуком і кандидатами передач. Лічильник у пам'яті процесу: перезапуск скидає, на кількох вузлах межа діє на кожному окремо. Мінімум — 1 |
 | `Security:RateLimit:ExportPermitPerMinute` | 6 | постановок важкої задачі вивантаження в чергу на КОРИСТУВАЧА за хвилину: експорт документа `POST /api/v1/documents/{id}/export`, експорт огляду року `POST /api/v1/documents/{id}/calculation-results/year/export` і побудова зрізу `POST /api/v1/reports/{code}/build` — ОДИН кошик на всі три; фіксоване вікно 1 хв; понад межу — `429` (`ECR-REQ-0429`, ключ `err.ECR-REQ-0429.tooManyExports`) із `Retry-After` (PT-6). Межа не зводить однакові запити в один і не обмежує довжину черги (6/хв × 60 хв = 360 задач на годину від одного користувача). Лічильник у пам'яті процесу: перезапуск скидає, на кількох вузлах межа діє на кожному окремо. Мінімум — 1 |
+| `Security:RateLimit:ScriptRunPermitPerMinute` | 30 | прогонів скрипта методології на документі на КОРИСТУВАЧА за хвилину: перегляд `POST /api/v1/methodologies/{id}/versions/{vid}/script/preview` і паритет `POST …/script/parity` — ОДИН кошик; фіксоване вікно 1 хв; понад межу — `429` (`ECR-REQ-0429`, ключ `err.ECR-REQ-0429.tooManyScriptRuns`) із `Retry-After` (PSS-21). У `appsettings.json` ключа немає — умовчання з коду; задати можна змінною оточення `ECR_Security__RateLimit__ScriptRunPermitPerMinute` |
+| `Security:RateLimit:ScriptCheckPermitPerMinute` | 120 | перевірок тексту скрипта на КОРИСТУВАЧА за хвилину: `POST …/script/validate` і `POST …/script/format-const` — ОДИН кошик (редактор перевіряє текст сам після кожної паузи введення, тому межа щедріша); понад — `429` `err.ECR-REQ-0429.tooManyScriptChecks` із `Retry-After` (PSS-21); редактор тоді ставить перевірки на паузу («перевірки на паузі, повтор через N с») і сам перевіряє поточний текст після неї |
+| `Security:RateLimit:ScriptRunConcurrency` / `ScriptRunQueueLimit` / `ScriptRunQueueWaitSeconds` | 4 / 8 / 10 | одночасних прогонів скрипта (перегляд і паритет) на весь процес Api, довжина черги до них і найдовше очікування місця в черзі, с; понад чергу чи не дочекався за межу очікування — `429` `err.ECR-REQ-0429.scriptRunBusy` (PSS-21). Один перегляд після входу додатково обмежено 30 с (`422` `err.ECR-CALC-0422.scriptPreviewTimeout`), тож найдовший запит перегляду — межа очікування + 30 с; і детермінованими бюджетами кроків рушія: `Calculations:MaxRowEvaluationSteps` на рядок (і в перерахунку), 20 000 000 на запит перегляду (вичерпано — відповідь `budgetExhausted`, у редакторі пояснення), не більше 50 000 величин у відповіді. Мінімуми 1 / 0 / 1, перевіряються на старті |
+| `Calculations:MaxRowEvaluationSteps` | 20000000 | бюджет кроків ОДНОГО рядка скрипта методології на всі його оператори (PSS-21): діє в перерахунку (Api і `EcrWorker` — у воркера типово з коду, змінна служби `ECR_Calculations__MaxRowEvaluationSteps`) і в перегляді. Вичерпаний — `#BUDGET` на кожен наступний оператор рядка і проблема рядка `StepError`; детерміновано (рахується робота, а не час). Мінімум 20000 (стеля одного оператора); недійсне значення зупиняє старт |
 | `Security:Csp:ReportOnly` | `true` | віддавати сувору політику заголовком `Content-Security-Policy-Report-Only` (лише звіти, сторінки не блокуються). Порушення — рядки журналу `CSP violation: …` і лічильник `ecr.csp.violations` (тег `directive`) |
 | `Security:Csp:ReportUri` | `/api/v1/csp-report` | куди браузер шле звіти (`report-uri`, а на HTTPS ще й `report-to`). Порожньо — без звітування. Без `;`, пробілів і ком |
 | `Security:Csp:Enforce` | `false` | ⛔ лише задел: `true` робить повну політику примусовою (звітний заголовок зникає). Не вмикати, доки e2e-набір не пройшов під нею, а `ecr.csp.violations` не порожній |
@@ -164,10 +170,11 @@ Api й воркер на **одному** хості — різні ролі й 
 | `Retention:SubmissionSnapshots:BatchSize` | 10 | зрізів в одному `DELETE` (payload ~10 МБ на зріз, пакет ≈ 100 МБ журналу). Мінімум 1 |
 | `Retention:SubmissionSnapshots:PauseMilliseconds` | 500 | пауза між пакетами, мс. Мінімум 0 |
 | `Retention:SubmissionSnapshots:MaxBatchesPerRun` | 200 | стеля пакетів за нічний прогін; решту доїсть наступний. Мінімум 1 |
-| `Calculations:SupersededPurge:Enabled` | `false` | Q-17 (рішення людини 28.10: лишається лише останній розрахунок «документ × період»): швидкий шлях після перемикання прогону + нічна задача `superseded-results-sweep` + правило `NON_CURRENT_RUN_ROWS` перевірки узгодженості. Див. п. 4.2 |
-| `Calculations:SupersededPurge:DeleteEnabled` | `false` | ⛔ реальне видалення нічною задачею/разовим прибиранням; без нього задача лише ЛІЧИТЬ (dry-run). Швидкий шлях цього ключа не читає |
-| `Calculations:SupersededPurge:BatchSize` / `PauseMilliseconds` / `MaxBatchesPerRun` | 500 / 50 / 2000 | рядків в одному `DELETE` (≈ 5 замків на рядок, нижче порога ескалації 5000) / пауза між пакетами, мс / стеля пакетів за прохід. Мінімуми 1 / 0 / 1 |
-| `Calculations:SupersededPurge:IncludeTrace` | `true` | прибирати також `calc.CalculationStep` і `calc.CalculationInput` |
+| `Calculations:SupersededPurge:Enabled` | `true` | Q-17 / `D-560` (рішення людини 20.11: для «документ × період» лишається лише останній ланцюг — актуальний прогін): швидкий шлях після перемикання прогону + нічна задача `superseded-results-sweep` + правило `NON_CURRENT_RUN_ROWS` перевірки узгодженості. ⚠ Ключа немає — УВІМКНЕНО (і в `EcrWorker`, що `appsettings.json` Api не читає); вимкнути — лише явним `false`. Див. п. 4.2 |
+| `Calculations:SupersededPurge:DeleteEnabled` | `true` | реальне видалення нічною задачею; `false` — задача лише ЛІЧИТЬ (dry-run). Швидкий шлях цього ключа не читає |
+| `Calculations:SupersededPurge:BatchSize` / `PauseMilliseconds` / `MaxBatchesPerRun` | 500 / 50 / 5000 | рядків в одному `DELETE` (≈ 5 замків на рядок, нижче порога ескалації 5000) / пауза між пакетами, мс / нічний бюджет: пакетів (операторів `DELETE`) за ОДНЕ нічне вікно — накопичене дочищується за кілька ночей; швидкий шлях має власну стелю 2 000 і накопиченого не чіпає. Мінімуми 1 / 0 / 1 |
+| `Calculations:SupersededPurge:NightWindow` | `01:00-05:00` | `D-560`: нічне вікно (місцевий час сервера, `HH:mm-HH:mm`, може переходити через північ), лише в якому нічна задача ВИДАЛЯЄ накопичене — один прохід видалення за вікно; поза вікном (наздоганяння на старті служби, ручний запуск удень) прохід лише лічить (`deleteDeferred`). Нічний розклад задачі — 02:15: вікно має його містити. Недійсне значення — дефолт і попередження в журналі |
+| `Calculations:SupersededPurge:IncludeTrace` | `true` | прибирати також `calc.CalculationStep` і `calc.CalculationInput`; лише з ним видаляється й сам рядок `calc.CalculationRun` (на нього посилаються кроки й входи) |
 | `Calculations:SupersededPurge:LogPauseThresholdPercent` / `LogPauseSeconds` / `MaxLogPauses` / `CheckpointEveryBatches` | 60 / 30 / 20 / 50 | FULL recovery: пауза, поки журнал заповнений вище порога (після `MaxLogPauses` пауз прохід зупиняється, наступний продовжує); SIMPLE: `CHECKPOINT` кожні N пакетів |
 | `Calculations:SupersededPurge:RebuildAfter` | `false` | після повного прибирання перебудувати індекси зачеплених партицій і `UPDATE STATISTICS` |
 | `Audit:ExportMaxRows` | 100000 | межа експорту аудиту CSV |
@@ -205,7 +212,7 @@ Api й воркер на **одному** хості — різні ролі й 
 | `Logging:File:RetainedFiles` | 30 | скільки файлів зберігати |
 | `Logging:File:FileSizeLimitMb` | 100 | розмір файлу, після якого починається новий |
 | `Logging:File:Json` | `true` | поруч писати `ecr-yyyyMMdd.json` — рядок JSON на запис (п. 3.2) |
-| `AllowedHosts` | `*` | |
+| `AllowedHosts` | `*` | імена вузла через `;` БЕЗ порту й схеми (`ecr.example.kz;ecr;localhost`), або `*`. ⛔ Запис із портом (`ecr.example.kz:8443`) не збігається з жодним запитом (HostFiltering порівнює без порту) — службу з таким значенням старт не запускає. Чужий `Host` дає `400`. `deploy-ecr.ps1 -AllowedHosts` додає `localhost` (проби `/health/ready`); у Production зі `*` старт пише попередження (PSS-28) |
 
 Ключі з переліку `EcrConfigurationValidation.cs` (зокрема `Schema:StartupMode`,
 `Database:*`, `Auth:SlidingHours`, `Security:*`, `Logging:File:*`,
@@ -253,6 +260,40 @@ ORDER BY [Ts];
 мають іти неспадно, інакше адаптер відмовляє помилкою `ECR-INT-0422`
 (`timestampsOutOfOrder`) замість мовчазного сортування в пам'яті.
 
+### 2.3. Журнал входів і строк зберігання спроб (✎ 2026-11-20, PSS-24)
+
+**Що пишеться.** Кожен вхід лишає слід у незмінному журналі безпеки `aud.SecurityEvent` (екран Audit → Security events):
+
+| Подія | Коли | «Хто» | «Кого стосується» (`TargetUserId`) |
+|---|---|---|---|
+| `LoginSucceeded` | успішний вхід, локальний чи Windows | користувач | користувач |
+| `LoginFailed` | невдала спроба; причина — `reason` у подробицях: `BadPassword`, `UnknownUser`, `NotLocal` (запис не локальний), `Disabled`, `ServiceAccount`, `LockedOut`, `LockedOutCorrectPassword` (пароль правильний, але запис заблокувала паралельна спроба), `SidMismatch` | «Вхід не виконано» (анонімний актор, `-1`): людина не ввійшла, відмову не приписуємо користувачеві, чий пароль вгадують | користувач, якщо обліковий запис є (для `UnknownUser` — порожньо) |
+| `AccountLocked` | ЦЯ спроба вичерпала бюджет і заблокувала запис | «Вхід не виконано» | користувач |
+| `LoginFailedSuppressed` | підсумок пропущених обмежувачем флуду невдалих спроб ключів, що більше не повторилися (`suppressed`, `keys`) | «Вхід не виконано» | — |
+| `LoginAuditOverflow` | таблиця ключів обмежувача переповнена: частину невдалих спроб не записано (`dropped`, `limit`), не частіше за раз на хвилину | «Вхід не виконано» | — |
+
+У подробицях: `userName`, `provider`, `outcome`, `reason`, `ip`, `socketIp` (адреса сокета — лише коли відрізняється від `ip`, тобто за проксі), лічильник `suppressed`; час — «Коли», кореляція — колонка кореляції (той самий `X-Correlation-Id`). Пароля, його довжини чи фрагмента немає. Адреса `ip` — та сама, що рахує межа частоти (`Security:RateLimit:TrustForwardedFor`/`KnownProxies`), а не адреса проксі. Однакові невдалі спроби («ім'я + причина + адреса») пишуться не більше 20 разів за хвилину, решта додається числом `suppressed` до наступного запису (або підсумковою подією, якщо ключ не повернувся). Збій запису журналу ніколи не змінює відповідь входу (Warning у логу).
+
+⛔ **Приватність: невідоме ім'я не зберігається в незмінному журналі.** Люди іноді вводять пароль у поле імені, а `aud.SecurityEvent` не можна ні виправити, ні прибрати (мінімум 120 місяців). Тому для `UnknownUser` (облікового запису немає) замість `userName` пишеться маска: `userNamePrefix` (два перші символи), `userNameLength` і `userNameHash` — перші 32 hex-символи HMAC-SHA256 від імені у верхньому регістрі; той самий ввід дає той самий хеш, тож повторний підбір видно. Ключ HMAC — випадкові 32 байти, захищені Data Protection у `sys_ecr.SystemSetting` (`Security.LoginAuditHmacKey`, спільний для вузлів; рядок не видаляти й не міняти: хеші до заміни стануть непорівнянними). Для наявних облікових записів (`BadPassword`, `Disabled`, …) ім'я пишеться як є. **Сире введене ім'я лишається тільки в оперативній `sec.LoginAttempt`**, яка чиститься за строком нижче. Якщо ключ недоступний — маска без хеша, але ніколи не сире ім'я.
+
+**Скільки живе.** Незмінний слід у `aud.SecurityEvent` (тригер `TR_SecurityEvent_Immutable`) тримається не менше мінімальної глибини аудиту (120 місяців, `arc.usp_ArchiveAudit`). Оперативна таблиця спроб `sec.LoginAttempt` чиститься фоновим прибиранням за строком — **400 днів за замовчуванням, і це налаштування**: його змінює адміністратор з правом `Security.ManageUsers` на екрані **Безпека → Сеанс** (розділ «Сроки хранения данных» (en: Data retention) з попередженням, що скорочення необоротно видаляє старі записи; поле «Срок хранения технических журналов» (en: Technical logs retention), 30–36500 днів; поруч — «Минимальная глубина аудита» (en: Minimum audit depth), 120–1200 місяців, ключ `Retention.AuditMonths`, підлога 120 — рішення людини; саму архівацію аудиту веде `arc.usp_ArchiveAudit`; `PUT /api/v1/security/session-settings`, подія журналу `SessionSettingsUpdated` із новим і попереднім значенням) — без перевидання й без перезапуску, діє на наступному проході прибирання (до `IntervalMinutes` хв). Те саме можна зробити SQL-ом (рядок `sys_ecr.SystemSetting`):
+
+```sql
+-- поточне значення (немає рядка — діє 400)
+SELECT [Key], Value, ModifiedAt FROM sys_ecr.SystemSetting WHERE [Key] = N'Retention.TechnicalLogDays';
+
+-- змінити строк (дні; межі 30–36500: не число або менше 30 — діє типове 400 з попередженням у логу служби, більше 36500 —
+-- 36500 з попередженням); глибина аудиту — так само,
+-- ключ N'Retention.AuditMonths' (місяці, 120–1200; менше 120 — діє 120)
+UPDATE sys_ecr.SystemSetting SET Value = N'200', ModifiedAt = SYSUTCDATETIME()
+ WHERE [Key] = N'Retention.TechnicalLogDays';
+IF @@ROWCOUNT = 0
+    INSERT INTO sys_ecr.SystemSetting ([Key], Value, Description, ModifiedAt)
+    VALUES (N'Retention.TechnicalLogDays', N'200', N'Retention of sec.LoginAttempt, days (PSS-24)', SYSUTCDATETIME());
+```
+
+`UPDATE` рядків `sec.LoginAttempt` заборонений тригером `TR_LoginAttempt_NoUpdate` (`THROW 50060`); `DELETE` дозволений — його робить прибирання за строком. Скорочення строку стирає старіше вже на наступному проході (необоротно для `sec.LoginAttempt`, але не для `aud.SecurityEvent`).
+
 ### Усі ключі конфігурації {#2-ключі-конфігурації}
 
 <!-- generated:config -->
@@ -264,7 +305,7 @@ ORDER BY [Ts];
 | `AirLimits:NaeRegistryCode` | ні | `NAE_TREE` | Значення на старті не перевіряється. |
 | `AirLimits:RegionRegistryCode` | ні | `LAND_REGION` | Значення на старті не перевіряється. |
 | `AirLimits:SubstanceRegistryCode` | ні | `LAND_AIR_SUBSTANCE` | Значення на старті не перевіряється. |
-| `AllowedHosts` | ні | `*` | Значення на старті не перевіряється. |
+| `AllowedHosts` | ні | `*` | Формат перевіряється на старті (див. текст відмови служби). |
 | `Audit:ExportMaxRows` | ні | `100000` | Ціле число, не менше 1. |
 | `Auth:CookieName` | ні | `ecr.auth` | Значення на старті не перевіряється. |
 | `Auth:DataProtection:AllowUnprotectedKeys` | ні | — | `true` або `false`. |
@@ -281,15 +322,17 @@ ORDER BY [Ts];
 | `Calculations:FullYearWarnSeconds` | ні | `600` | Ціле число, не менше 1. |
 | `Calculations:MaxInputCellsPerBinding` | ні | `300000` | Ціле число, не менше 1. |
 | `Calculations:MaxParallelism` | ні | `4` | Ціле число, не менше 1. |
+| `Calculations:MaxRowEvaluationSteps` | ні | `20000000` | Ціле число, не менше 20000. Менше за стелю одного оператора (20 000) обрізало б навіть один законний оператор. |
 | `Calculations:SupersededPurge:BatchSize` | ні | `500` | Ціле число, не менше 1. |
 | `Calculations:SupersededPurge:CheckpointEveryBatches` | ні | `50` | Ціле число, не менше 1. |
-| `Calculations:SupersededPurge:DeleteEnabled` | ні | `false` | `true` або `false`. |
-| `Calculations:SupersededPurge:Enabled` | ні | `false` | `true` або `false`. |
+| `Calculations:SupersededPurge:DeleteEnabled` | ні | `true` | `true` або `false`. |
+| `Calculations:SupersededPurge:Enabled` | ні | `true` | `true` або `false`. |
 | `Calculations:SupersededPurge:IncludeTrace` | ні | `true` | `true` або `false`. |
 | `Calculations:SupersededPurge:LogPauseSeconds` | ні | `30` | Ціле число, не менше 0. |
 | `Calculations:SupersededPurge:LogPauseThresholdPercent` | ні | `60` | Ціле число, не менше 1. |
-| `Calculations:SupersededPurge:MaxBatchesPerRun` | ні | `2000` | Ціле число, не менше 1. |
+| `Calculations:SupersededPurge:MaxBatchesPerRun` | ні | `5000` | Ціле число, не менше 1. |
 | `Calculations:SupersededPurge:MaxLogPauses` | ні | `20` | Ціле число, не менше 0. |
+| `Calculations:SupersededPurge:NightWindow` | ні | `01:00-05:00` | Значення на старті не перевіряється. |
 | `Calculations:SupersededPurge:PauseMilliseconds` | ні | `50` | Ціле число, не менше 0. |
 | `Calculations:SupersededPurge:RebuildAfter` | ні | `false` | `true` або `false`. |
 | `Campaign:AtRiskDays` | ні | `3` | Ціле число, не менше 0. |
@@ -305,6 +348,7 @@ ORDER BY [Ts];
 | `Database:MaxPoolSize` | ні | `200` | Ціле число, не менше 1. |
 | `Database:RecalcCommandTimeoutSeconds` | ні | `180` | Ціле число, не менше 30. |
 | `Database:SheetLockTimeoutSeconds` | ні | `30` | Ціле число, не менше 0. |
+| `Documents:StaleMap:MaxDop` | ні | `4` | Ціле число, не менше 0. Верхня межа паралелізму запитів карти застарілості (OPTION MAXDOP): діє min(значення, MAXDOP бази чи сервера), вище за налаштування сервера НІКОЛИ не піднімає; 0 — без підказки. Стенду з малою пам'яттю SQL Server — 2. |
 | `Documents:StaleMapWarm:Enabled` | ні | `true` | `true` або `false`. |
 | `Documents:StaleMapWarm:HotPeriodLimit` | ні | `2` | Ціле число, не менше 1. |
 | `Documents:StaleMapWarm:IntervalSeconds` | ні | `60` | Ціле число, не менше 10. |
@@ -356,6 +400,9 @@ ORDER BY [Ts];
 | `Security:Csp:Enforce` | ні | `false` | `true` або `false`. |
 | `Security:Csp:ReportOnly` | ні | `true` | `true` або `false`. |
 | `Security:Csp:ReportUri` | ні | `/api/v1/csp-report` | Формат перевіряється на старті (див. текст відмови служби). |
+| `Security:LoginAttemptRetention:Enabled` | ні | `true` | `true` або `false`. |
+| `Security:LoginAttemptRetention:IntervalMinutes` | ні | `60` | Ціле число, не менше 1. PSS-24 |
+| `Security:RateLimit:AnonymousReadPermitPerMinute` | ні | `120` | Ціле число, не менше 1. PSS-29 |
 | `Security:RateLimit:ChangePasswordPermitPerMinute` | ні | — | Ціле число, не менше 1. |
 | `Security:RateLimit:CspReportPermitPerMinute` | ні | `120` | Ціле число, не менше 1. |
 | `Security:RateLimit:DiscussionPostPermitPerMinute` | ні | `20` | Ціле число, не менше 1. |
@@ -367,6 +414,11 @@ ORDER BY [Ts];
 | `Security:RateLimit:LoginPermitPerMinute` | ні | `60` | Ціле число, не менше 1. |
 | `Security:RateLimit:RecalculatePermitPerMinute` | ні | `6` | Ціле число, не менше 1. |
 | `Security:RateLimit:RecalculateUserPermitPerMinute` | ні | `30` | Ціле число, не менше 1. |
+| `Security:RateLimit:ScriptCheckPermitPerMinute` | ні | — | Ціле число, не менше 1. |
+| `Security:RateLimit:ScriptRunConcurrency` | ні | — | Ціле число, не менше 1. |
+| `Security:RateLimit:ScriptRunPermitPerMinute` | ні | — | Ціле число, не менше 1. |
+| `Security:RateLimit:ScriptRunQueueLimit` | ні | — | Ціле число, не менше 0. |
+| `Security:RateLimit:ScriptRunQueueWaitSeconds` | ні | — | Ціле число, не менше 1. |
 | `Security:RateLimit:SearchPermit` | ні | `30` | Ціле число, не менше 1. |
 | `Security:RateLimit:SearchWindowSeconds` | ні | `10` | Ціле число, не менше 1. |
 | `Security:RateLimit:SmtpTestPermitPerMinute` | ні | `5` | Ціле число, не менше 1. |
@@ -538,7 +590,7 @@ Server Agent ідуть за локальним часом сервера SQL. �
 
 | Коли | Задачі |
 |---|---|
-| щоночі 02:15 | `PartitionCheckJob`, `ConsistencyCheckJob`, `OrphanScanJob`, `ReportRetentionJob`, `ReportSnapshotFormatJob`, `SubmissionSnapshotRetentionJob` (AN-134, за замовчуванням лише dry-run), `SupersededResultsSweepJob` (Q-17, вимкнено за замовчуванням) |
+| щоночі 02:15 | `PartitionCheckJob`, `ConsistencyCheckJob`, `OrphanScanJob`, `ReportRetentionJob`, `ReportSnapshotFormatJob`, `SubmissionSnapshotRetentionJob` (AN-134, за замовчуванням лише dry-run), `SupersededResultsSweepJob` (Q-17 / `D-560`, увімкнено й видаляє за замовчуванням, п. 4.2) |
 | кожні 10 хв, хх:02/12/… | `PeriodStateJob` (також один раз на старті) |
 | щогодини, хх:05 | `NotificationJob`, `RowWindowRefetchJob` (повторне підтягування вікон рядків за пізніми даними PI) |
 | щоночі 03:30 | нічний перерахунок, лише якщо `Jobs:NightlyRecalculation:Enabled=true` |
@@ -560,9 +612,12 @@ B79, саме на подані аркуші (найбільше — перед 
 
 `PartitionCheckJob` (`partition-check`) щоночі: 1) `arc.usp_EnsureAuditPartitions
 @MonthsAhead = 12` — межі аудиту `pf_AuditByMonth` на 12 місяців уперед (`D-246`, п. 7.4);
-2) `arc.usp_ArchiveAudit @OlderThanMonths = 24` (п. 7.3); 3) перевіряє запас `pf_ByPeriodKey`
-(≥ 2 межі попереду). Межі `pf_ByPeriodKey` задача **не** додає — це робить Agent-задача
-нижче або DBA. Числа 12 і 24 — константи в коді, ключа конфігурації немає.
+2) `arc.usp_ArchiveAudit @OlderThanMonths = <Retention.AuditMonths>` (п. 7.3); 3) перевіряє запас
+`pf_ByPeriodKey` (≥ 2 межі попереду) і рядки в крайніх партиціях (`edgeRows` — PSS-09: ліва — дані
+років без меж, права — дані за останньою межею; це попередження `"edgeWarning":true`, статус не змінює — п. 7.5). Межі `pf_ByPeriodKey`
+задача **не** додає — це робить Agent-задача нижче або DBA. Число 12 — константа в коді; глибина
+аудиту — налаштування `Retention.AuditMonths` у `sys_ecr.SystemSetting` (типово й щонайменше 120 міс.,
+змінюється без перезапуску — `admin-guide.md` п. 8.1).
 
 SQL Server Agent (`14-agent-jobs.sql`) ставиться лише з `deploy-ecr.ps1
 -FirstDeployment`. На Express скрипт задач не створює (друкує «SQL Server Express: SQL
@@ -571,7 +626,7 @@ Server Agent немає — завдання обслуговування НЕ �
 
 | Задача Agent | Коли | Що робить |
 |---|---|---|
-| `ECR: Partitions ahead [<база>]` | 1-го числа, 02:40 | `arc.usp_EnsurePartitions @MonthsAhead = 6`: межі `pf_ByPeriodKey` на 6 міс. уперед; усередині — `arc.usp_EnsureAuditPartitions @MonthsAhead = 12`. Кожен `SPLIT` чекає Sch-M не довше `@LockTimeoutMs` (5 с), після 1222/1205 — пауза `@RetryDelaySeconds` (60 с) і повтор, до `@MaxAttempts` (10) разів; між спробами запити користувачів не стоять у черзі за Sch-M (аудит 09.10c, U1-02). Результат — рядок `itg.MaintenanceRun` `EnsurePartitions`: `Succeeded` (`added`, `retries`) або `Failed` (номер помилки; потрапляє у зведення збоїв) |
+| `ECR: Partitions ahead [<база>]` | 1-го числа, 02:40 | `arc.usp_EnsurePartitions @MonthsAhead = 6`: межі `pf_ByPeriodKey` усього поточного року, наступного і січня ще наступного (✎ PSS-09), а також на 6 міс. уперед, якщо це далі; від найвищої межі до найнижчої; межу, SPLIT якої переніс би понад `@MaxRowsToMove` (типово 5000) рядків — переїжджають лише рядки `>=` межі — **не** додає: прогін тоді `Degraded` зі списком `refused`, межу додає DBA у вікні обслуговування (п. 7.5); усередині — `arc.usp_EnsureAuditPartitions @MonthsAhead = 12`. Кожен `SPLIT` чекає Sch-M не довше `@LockTimeoutMs` (5 с), після 1222/1205 — пауза `@RetryDelaySeconds` (60 с) і повтор, до `@MaxAttempts` (10) разів; між спробами запити користувачів не стоять у черзі за Sch-M (аудит 09.10c, U1-02). Результат — рядок `itg.MaintenanceRun` `EnsurePartitions`: `Succeeded` (`added`, `retries`, `movedRows`), `Degraded` (`refused`) або `Failed` (номер помилки; потрапляє у зведення збоїв) |
 | `ECR: Physical checks [<база>]` | щодня 03:10 | недовірені/вимкнені FK (50041), невирівняні індекси (50042) |
 
 ✎ R11-S2-06: ім'я завдання несе назву бази (`ECR: Partitions ahead [ECR]`): ім'я в `msdb` унікальне на весь
@@ -622,24 +677,105 @@ Server Agent немає — завдання обслуговування НЕ �
 `calc.SubmissionSnapshot` за `Id` (`SET IDENTITY_INSERT`). Кандидатів понад 200 за прогін списком не
 фіксується — повторюйте за резервною копією за трійкою.
 
-### 4.2. Прибирання результатів неактуальних прогонів (`SupersededResultsSweepJob`, Q-17)
+### 4.2. Прибирання неактуальних прогонів розрахунку (`SupersededResultsSweepJob`, Q-17, `D-560`)
 
-Рішення людини 28.10: у базі лишаються результати, кроки й входи лише ПОТОЧНОГО (`Current`) прогону на «документ × період»
-(`Running` не чіпається). Рядки `calc.CalculationRun` не видаляються ніколи. Зміна **незворотна**: старі числа
-показати знову не можна (лишаються зрізи подання з комірками, `aud.CellChange`, метадані прогонів і поточний результат).
+Рішення людини 20.11 (`D-560`, аудит PSS-01): для кожного «документ × період» лишається лише ОСТАННІЙ ланцюг —
+актуальний (`Current`) прогін з його результатами, кроками й входами; прогони, що ще рахуються (`Running`), не
+чіпаються. Витіснені (`Superseded`) і невдалі (`Failed`) прогони видаляються **повністю**: рядки
+`calc.CalculationResult`, `calc.CalculationStep`, `calc.CalculationInput` і сам рядок `calc.CalculationRun`. Зміна
+**незворотна**: старі числа показати знову не можна (лишаються зрізи подання з комірками, `aud.CellChange` і поточний
+результат). Увімкнено за замовчуванням (ключ, якого немає, — увімкнено; так само в `EcrWorker`).
 
-**Порядок вмикання** (кожен крок — окреме слово людини):
-1. залишок політики: запис `D-…` у `docs/tz/10-decisions.md` (D-25/D-71/ФВ-9.11/ФВ-9.13 кажуть «результати не видаляються»);
-2. зберегти `tools/land/postcheck` ДО прибирання (його лічильники рахують усі прогони);
-3. повний бекап; узгодити з DBA частоту резервних копій журналу (FULL) та вікно;
-4. `ECR_Calculations__SupersededPurge__Enabled=true` (без `DeleteEnabled`): нічна задача лише лічить —
-   `MaintenanceRun` `superseded-results-sweep`, `DetailsJson`: `statusHistogram`, `candidates` за таблицями.
-   Невідомий статус прогону (поза `Current, Running, Superseded, Failed`) зупиняє прохід (`mode=aborted`) — рішення за людиною;
-5. `ECR_Calculations__SupersededPurge__DeleteEnabled=true` у робоче вікно; прохід відновлюється (прогрес — самі дані),
-   `complete=false` означає «стеля пакетів або журнал»; повторюйте до `complete=true`, далі — `deleted` порожній;
-6. за потреби `RebuildAfter=true` (або перебудова індексів вручну), далі `UPDATE STATISTICS`; файли не стискати;
-7. після цього швидкий шлях (`Enabled=true`) прибирає замінені прогони одразу після кожного перерахунку;
-   `ConsistencyCheckJob` правило `NON_CURRENT_RUN_ROWS` (знахідка на «таблиця × період») очікувано нульове.
+**Актуальний результат є завжди.** Новий прогін стає актуальним лише на успіху, однією транзакцією перемикання, а
+прибирання ніколи не чіпає `Current`/`Running`: умова «підлягає прибиранню» перевіряється в КОЖНОМУ `DELETE`.
+Перемикання перечитує статус прогону під `UPDLOCK` і відмовляє всьому, що не `Running` (прогін, закритий
+`AbandonedWorkSweeper` як покинутий, актуальним не стає). Що підлягає прибиранню:
+- `Superseded` — одразу (стан кінцевий; прогін витіснив новіший);
+- `Failed` — коли для того самого «документ × період» є новіший `Current` (того самого документа або прогін усього
+  проєкту) і прогін стартував понад добу тому. `Failed` без новішого актуального (остання спроба або актуального
+  немає зовсім) лишається — це єдина діагностика — до наступного успішного перерахунку.
+
+**Як працює.**
+- Швидкий шлях: одразу після успішного перерахунку прогони, які він витіснив, прибираються (поза транзакцією
+  перемикання; власна стеля 2 000 пакетів; збій прибирання прогін не валить). Накопиченого він не чіпає.
+- Нічна задача `superseded-results-sweep` (02:15): дочищує накопичене. Видаляє **лише в нічному вікні**
+  `NightWindow` (місцевий час сервера, типово `01:00-05:00`) і **один прохід видалення за вікно** з бюджетом
+  `MaxBatchesPerRun` (5 000 пакетів по 500 рядків); з кінцем вікна зупиняється (`stopReason=windowEnd`). Прогін за
+  прогоном від найстаршого: рядки пакетами за індексами `IX_CalculationResult_Run`/`IX_CalculationStep_Run`/
+  `IX_CalculationInput_Run`, далі рядок прогону. Кожен пакет — окрема коротка транзакція (`DEADLOCK_PRIORITY LOW`,
+  `LOCK_TIMEOUT` 5 с, 3 повтори): перерахунки, що йдуть паралельно, мають перевагу. Решту доїсть наступна ніч
+  (прогрес — самі дані, повтор безпечний).
+- **Наздоганяння на старті служби** (`NightlyCatchUp`: минуло понад 24 год від останнього проходу) і будь-який запуск
+  поза вікном — лише ЛІЧИТЬ (`mode=dryRun`, `deleteDeferred=outsideWindow`); другий прохід у тому самому вікні — так
+  само (`deleteDeferred=nightBudgetSpent`). У робочий час накопичене не видаляється ніколи.
+- Журнал транзакцій: за будь-якої моделі відновлення, крім SIMPLE (FULL, BULK_LOGGED, невідома), заповненість журналу
+  читається з `sys.database_files` (`FILEPROPERTY`; право VIEW SERVER STATE не потрібне) ПЕРЕД першим пакетом і після
+  кожного. Не вдалося прочитати — прохід зупиняється (`stopReason=logUnknown`), а не видаляє наосліп; понад
+  `LogPauseThresholdPercent` (60 %) — пауза по `LogPauseSeconds`, після `MaxLogPauses` пауз — `logFull`. Задача журнал
+  не звільняє: при FULL це роблять лише резервні копії журналу (DBA).
+- SIMPLE: `CHECKPOINT` кожні `CheckpointEveryBatches` пакетів — лише якщо в служби є право (db_owner/db_backupoperator);
+  інакше пропуск із попередженням у журналі й `checkpointSkipped=true` (журнал звільняють автоматичні контрольні
+  точки). `RebuildAfter` без права `ALTER` — пропуск з `rebuildSkipped=true`; перебудову виконує DBA.
+- `MaintenanceRun` `superseded-results-sweep`, `DetailsJson`: `mode` (`delete`/`dryRun`/`disabled`/`aborted`),
+  `deleteDeferred`, `statusHistogram`, `runCandidates`, `candidates` (dry-run) / `deleted` (за таблицями й
+  `calc.CalculationRun`), `batches`, `complete`, `stopReason` (`maxBatches`/`windowEnd`/`logFull`/`logUnknown`),
+  `elapsedSeconds`, `recoveryModel`, `runIndexes`, `checkpointSkipped`, `rebuildSkipped`. Журнал Api: прогін прибрано
+  (Information), підсумок проходу (Warning).
+- `runIndexes=false` — у базі немає індексів `*_Run` (не виконано `07-partition-tables.sql` цієї версії): прохід
+  прибирає лише рядки (keyset за партиціями), рядки прогонів лишаються. Виконайте оновлення схеми.
+- Невідомий статус прогону (поза `Current, Running, Superseded, Failed`) зупиняє прохід (`mode=aborted`) — рішення за
+  людиною.
+- `ConsistencyCheckJob` правило `NON_CURRENT_RUN_ROWS` рахує рядки за тією самою умовою і лише після проходу, що доїв
+  усе (`mode=delete`, `complete=true`): поки накопичене дочищується кілька ночей, знахідок немає.
+
+**Перше прибирання наявної бази** — автоматичне, кількома ночами:
+1. повний бекап до оновлення (зміна незворотна); `tools/land/postcheck` — ДО прибирання, якщо потрібні його лічильники
+   за всіма прогонами;
+2. оновлення схеми будує індекси `*_Run` (п. 8.2 — одне читання кожної таблиці; на Standard — офлайн, служби
+   зупинені);
+3. журнал транзакцій: видалення пише в журнал приблизно обсяг видалених рядків (стенд Land — ≈ 42 ГБ за все
+   прибирання; ≈ 6 ГБ на нічний бюджет 5 000 пакетів кроків). FULL: узгодьте з DBA резервні копії журналу на ці ночі
+   (щонайменше щогодини) і місце під журнал — без них прохід зупиниться `logFull` і продовжить наступної ночі, а
+   прибирання розтягнеться; за SIMPLE або частих копій журналу кожна ніч витрачає весь бюджет;
+4. дочищення йде саме, ніч за ніччю, доки `complete=true` (далі `deleted` порожній, `runCandidates` = 0). Щоб
+   прискорити — збільште `MaxBatchesPerRun` (у межах вікна) або розширте `NightWindow`; щоб відкласти — `DeleteEnabled=false`
+   (лише лічить);
+5. за потреби `RebuildAfter=true` (з правом `ALTER`) або перебудова індексів DBA, далі `UPDATE STATISTICS`. Файли не
+   стискати (`SHRINK` не потрібен: місце перевикористовується).
+
+**Оцінка першого прибирання — стенд Land** (`EcrLandMsLegacy3`, 20.11, лише читання): кандидатів —
+531 прогін (504 `Superseded`, 27 `Failed`, з них 23 старіші за актуальний), ≈ 17,8 млн рядків: кроків 10,7 млн
+(≈ 42 ГБ), результатів 5,9 млн, входів 1,1 млн; ≈ 36 тис. пакетів по 500 — **≈ 7–8 ночей** при нічному бюджеті 5 000.
+Темп — синтетичний замір тим самим оператором (`DELETE TOP (500)` за індексом прогону, рядок кроку ≈ 4 КБ як на
+стенді, SIMPLE + `CHECKPOINT` кожні 50 пакетів, холодний кеш, ноутбук стенда під навантаженням інших процесів):
+кроки ≈ 1 170 рядків/с (≈ 0,4 с на пакет), результати (6 індексів) ≈ 2 600 рядків/с, рядок прогону з перевіркою FK
+по індексах — < 1 мс. Нічний бюджет 5 000 пакетів ≈ 35–40 хв на кроках — з запасом у вікні 01:00–05:00. Усе
+накопичене стенда — ≈ 3,5–4 год чистого часу; на сервері замовника (20 ядер, окремий SQL) очікувано швидше, але це не
+заміряно. Стабільний стан після дочищення: швидкий шлях прибирає одразу, нічна задача — нуль або одиниці пакетів.
+
+**Стиснення** (крок DBA, необов'язковий, після п. 5). `07-partition-tables.sql` стискає PAGE лише ПОРОЖНІ партиції
+`calc.CalculationResult/Step/Input` (нова база — цілком); `SPLIT` успадковує стиснення, тож нові періоди пишуться
+стисненими. Непорожні партиції скрипт лише називає в PRINT («непорожні нестиснені партиції calc.*»): їх перебудова
+переписує дані. Після першого прибирання вони в рази менші:
+```sql
+-- що лишилося нестисненим
+SELECT OBJECT_NAME(p.object_id) AS tbl, p.partition_number, SUM(p.rows) AS rows_
+  FROM sys.partitions AS p
+ WHERE p.object_id IN (OBJECT_ID(N'calc.CalculationResult'), OBJECT_ID(N'calc.CalculationStep'), OBJECT_ID(N'calc.CalculationInput'))
+   AND p.index_id IN (0, 1) AND p.data_compression_desc <> N'PAGE'
+ GROUP BY p.object_id, p.partition_number ORDER BY 1, 2;
+-- оцінка вигоди
+EXEC sp_estimate_data_compression_savings N'calc', N'CalculationStep', NULL, <n>, N'PAGE';
+-- по одній партиції; ONLINE = ON — Enterprise/Developer/Azure; Standard/Express — без нього, у вікні
+ALTER INDEX ALL ON calc.CalculationStep REBUILD PARTITION = <n> WITH (DATA_COMPRESSION = PAGE, ONLINE = ON);
+```
+⚠ Вигоду на стенді не заміряно: `sp_estimate_data_compression_savings` читає таблицю з блокуваннями й 20.11 на
+`EcrLandMsLegacy3` 28 хв чекав `LCK_M_S` за перерахунками стенда (скасовано). Запускайте оцінку у вікні без
+перерахунків. `TraceJson` (`nvarchar(max)`) поза рядком (`LOB_DATA`, стенд ≈ 10 ГБ із 46) PAGE-стисненням не
+стискається.
+
+**Вимкнути:** `ECR_Calculations__SupersededPurge__Enabled=false` (і швидкий шлях, і нічна задача) у `EcrApi` і
+`EcrWorker`, перезапуск служб. Лише лічити: `DeleteEnabled=false`.
 
 ⚠ Гард `strictBackdated` (публікація Strict заднім числом) після прибирання бачить лише наявні рядки результатів і архів:
 версія, чиї єдині рядки були у замінених прогонах, більше не блокує — рішення людини (див. `ADR-Q17-READ-MODEL.md`).
@@ -703,7 +839,8 @@ GRANT EXECUTE ON OBJECT::[dbo].[usp_GetAllStreamDataFlattened] TO [ecr_flert_rea
 | служба не стартує: «Transport:Https:CertificateThumbprint: …» | сертифіката HTTPS немає в `LocalMachine\My`, він без закритого ключа або відбиток не 40 hex | п. 11: поставити сертифікат із закритим ключем, повторити `deploy-ecr.ps1` |
 | служба не стартує: «Certificate … cannot be used as an SSL server certificate» | у сертифіката HTTPS розширене використання ключа без Server Authentication | видати сертифікат із EKU Server Authentication |
 | `transport` Degraded | `-AllowHttp` у Production, або сертифікат HTTPS спливає / прострочений | п. 11 |
-| `db` Degraded: менше 2 партицій попереду | не працює Agent-задача (Express) | `EXEC arc.usp_EnsurePartitions @MonthsAhead = 6;` або скрипт `GET /api/v1/health/partitions/script` (заодно продовжує межі аудиту на 12 міс.). Виконує DBA: процедура без `EXECUTE AS`, потрібні права `ALTER` на функцію й схему партиціонування |
+| `db` Degraded: менше 2 партицій попереду | не працює Agent-задача (Express) | `EXEC arc.usp_EnsurePartitions @MonthsAhead = 6;` або скрипт `GET /api/v1/health/partitions/script` (заодно продовжує межі аудиту на 12 міс.). Виконує DBA: процедура без `EXECUTE AS`, потрібні права `ALTER` на функцію й схему партиціонування. Процедура додає межі поточного року, наступного і січня ще наступного; межу, SPLIT якої переніс би понад `@MaxRowsToMove` (типово 5000) рядків, пропускає — прогін `EnsurePartitions` тоді `Degraded` з `refused` (п. 7.5) |
+| `EnsurePartitions` `Degraded` з `refused`, або в `partition-check` `"edgeWarning":true` (`edgeRows`) | є рядки за останньою межею (документ «далекого» року, дозволено до 2100) чи до першої (історичні роки — дозволені, рішення людини 20.11 №6) | п. 7.5: запит, що це за періоди; вибір — видалити помилковий документ або SPLIT у вікні обслуговування. `edgeWarning` статусу не псує й щоночі у зведення не йде |
 | `partition-check` `Failed` щоночі, у помилці — відмова в `EXECUTE` на `usp_EnsureAuditPartitions` | службовому акаунту не видано `EXECUTE` (`deploy-ecr.ps1` `GRANT` не робить) | DBA: `GRANT EXECUTE` (п. 7.4). Поки не видано, не виконуються ні архівація аудиту, ні перевірка запасу партицій |
 | `db` Unhealthy: RCSI | базу відновили або створили без `06-rcsi.sql` | виконати `06-rcsi.sql`. Перезапуск не потрібен: перевірка читає RCSI щоразу, а не з проби старту |
 | служба не стартує: «Недійсна конфігурація — служба не стартує» | значення ключа не того типу чи поза межами (`"60s"` замість `60`, друкарська помилка в `Database:EditionMode`) | виправити названий ключ у `appsettings.Production.json` або в `ECR_…` змінній служби. Той самий текст — у журналі подій (джерело `ECR`) і в лозі |
@@ -1049,12 +1186,18 @@ attempt of this first deployment (skip)» на кроці бази (майсте
 ### 7.3. Архівація аудиту `arc.usp_ArchiveAudit` (✎ 2026-10-01, `D-247`, `D-236`, `НФ-8.4b`)
 
 **Що робить.** Партиції `aud.CellChange`, `aud.StructureChange`, `aud.SecurityEvent`,
-`aud.PublicationEvent`, **повністю** старші за `@OlderThanMonths` (дефолт **24**; NULL або < 1 мовчки стає 1),
-перемикає (`ALTER TABLE … SWITCH PARTITION`) у
+`aud.PublicationEvent`, **повністю** старші за `@OlderThanMonths` (✎ PSS-27: дефолт і **підлога 120**; NULL
+або < 120 мовчки стає 120; `@Today` пізніше за завтрашній день сервера — `THROW 50018`), перемикає (`ALTER TABLE … SWITCH PARTITION`) у
 дзеркала `arc.AuditCellChange`, `arc.AuditStructureChange`, `arc.AuditSecurityEvent`,
 `arc.AuditPublicationEvent` (`12-archive-tables.sql`; та сама `ps_AuditByMonth`, ті самі
 індекси). Рядки не копіюються і не видаляються — це метаданкова операція; `Id` зберігаються.
 Це **не** `arc.CellChange` (columnstore на `DATA_ARCHIVE`): SWITCH у нього неможливий.
+
+Механіку переносу з явною межею виконує внутрішня `arc.usp_ArchiveAuditBefore @Cutoff` — службі вона **не**
+видана (інакше обмеження публічної обходилися б), її кличе лише `arc.usp_ArchiveAudit` і DBA вручну, напр.
+`EXEC arc.usp_ArchiveAuditBefore @Cutoff = '2016-01-01';` (`@OlderThanMonths` — необов'язковий, лише для журналу).
+Межа з `@Today` рахується від меншої з дат `@Today` і сьогодні сервера: день допуску на розбіжність годинників не
+скорочує 120 місяців.
 
 Межа відсічення — «перше число поточного місяця (UTC) мінус `@OlderThanMonths` місяців»;
 переносяться партиції, що **цілком** лежать раніше за неї (`04-partition-maintenance.sql`,
@@ -1068,9 +1211,10 @@ attempt of this first deployment (skip)» на кроці бази (майсте
 
 **Хто й коли запускає.** Нічна задача `partition-check` (`PartitionCheckJob`, щоночі 02:15
 за часом сервера) спершу продовжує межі аудиту (`arc.usp_EnsureAuditPartitions
-@MonthsAhead = 12`, п. 7.4), потім викликає `arc.usp_ArchiveAudit @OlderThanMonths = 24`.
-Поріг — константа `PartitionCheckJob.AuditArchiveOlderThanMonths`, **ключа конфігурації
-немає**; місяць рахується за UTC. Ідемпотентно, у C# DDL немає.
+@MonthsAhead = 12`, п. 7.4), потім викликає `arc.usp_ArchiveAudit @OlderThanMonths = <поріг>`.
+Поріг — налаштування `Retention.AuditMonths` у `sys_ecr.SystemSetting` (✎ PSS-27; типово й щонайменше
+120, читається щоночі без перезапуску — `admin-guide.md` п. 8.1); місяць рахується за UTC.
+Ідемпотентно, у C# DDL немає.
 
 - Збій **архівації** (помилка SQL) не ховає перевірку запасу партицій: прогін
   `partition-check` стає `Degraded` з `"auditArchiveFailed":true` у `DetailsJson`, подробиці —
@@ -1087,7 +1231,7 @@ attempt of this first deployment (skip)» на кроці бази (майсте
 
 ```sql
 DECLARE @p int, @r bigint;
-EXEC arc.usp_ArchiveAudit @OlderThanMonths = 24, @PartitionsSwitched = @p OUTPUT, @RowsSwitched = @r OUTPUT;
+EXEC arc.usp_ArchiveAudit @OlderThanMonths = 120, @PartitionsSwitched = @p OUTPUT, @RowsSwitched = @r OUTPUT;
 SELECT @p AS Partitions, @r AS [Rows];
 ```
 
@@ -1119,8 +1263,8 @@ DECLARE @sql nvarchar(400) = N'ALTER TABLE arc.AuditSecurityEvent SWITCH PARTITI
 EXEC sp_executesql @sql;
 ```
 
-⚠ Нічна задача завжди викликає процедуру з порогом 24 (константа в коді). Тому відновлена
-партиція, старша за 24 місяці, буде знову заархівована найближчої ночі о 02:15. Для аналізу
+⚠ Нічна задача викликає процедуру з порогом `Retention.AuditMonths` (не менше 120). Тому відновлена
+партиція, старша за цей поріг, буде знову заархівована найближчої ночі о 02:15. Для аналізу
 краще не відновлювати, а читати архів: журнал змін комірок (`/admin/audit`, історія комірки)
 читає `arc.AuditCellChange` сам (НФ-8.9.6, рядок з позначкою «Archive»); журнали структури,
 подій безпеки й публікацій та CSV-експорт архів поки не бачать — їх читають прямо:
@@ -1135,8 +1279,8 @@ SELECT * FROM arc.AuditSecurityEvent WHERE ChangedAt >= '2024-03-01' AND Changed
   період з UI не зникає, рядок з архіву має позначку. Гаряче вікно (що архіву не зачіпає)
   читається, як і раніше, лише з `aud.*`. Журнали структури (`aud.StructureChange`), подій
   безпеки (`aud.SecurityEvent`) і публікацій архів **не читають**: заархівований період з них
-  зникає з UI. Дефолт 24 міс. — **припущення**, не вказане в `D-236`; потрібне рішення
-  замовника про глибину «гарячого» аудиту.
+  зникає з UI. ✎ 2026-11-20: глибина «гарячого» аудиту — рішення людини (20.11 №7): щонайменше
+  120 місяців; налаштування `Retention.AuditMonths`, підлогу 120 тримає й сама процедура (PSS-27).
 - Службовому обліковому запису для читання архіву потрібен `SELECT` на `arc.AuditCellChange`
   (членство в `db_datareader` дає його на всі схеми; обмежений акаунт — `GRANT SELECT ON
   OBJECT::arc.AuditCellChange`, DBA замовника, `D-264`). Без нього відмова 229/230 не
@@ -1160,8 +1304,9 @@ SELECT TOP (10) Id, Status, FinishedAt, DetailsJson
 FROM itg.MaintenanceRun WHERE JobCode = 'partition-check' ORDER BY Id DESC;
 ```
 
-Поля `DetailsJson`: `boundariesAhead`, `minimum` (запас `pf_ByPeriodKey`), `auditBoundariesAdded`
-(скільки меж аудиту додано тієї ночі), `auditArchivedPartitions`, `auditArchivedRows`,
+Поля `DetailsJson`: `boundariesAhead`, `minimum` (запас `pf_ByPeriodKey`), `edgeRows.first`/`edgeRows.last`
+(рядки в крайніх партиціях `pf_ByPeriodKey`, PSS-09; ненульові — ще й `"edgeWarning":true`, без зміни статусу), `auditBoundariesAdded` (скільки меж аудиту додано тієї
+ночі), `auditArchiveMonths` (чинна глибина аудиту), `auditArchivedPartitions`, `auditArchivedRows`,
 `auditArchiveFailed`. `Status = 'Failed'` означає, що й межі аудиту не продовжено.
 
 ### 7.4. Межі партицій аудиту `pf_AuditByMonth` (`D-246`)
@@ -1216,9 +1361,72 @@ DECLARE @a int; EXEC arc.usp_EnsureAuditPartitions @MonthsAhead = 12, @Added = @
 **Якщо межі закінчились.** Записи аудиту не губляться: усе після останньої межі лягає в
 крайню праву партицію, і вона росте (висновок із `RANGE RIGHT`, на стенді не відтворено).
 Наслідки: архівація переносить цю партицію лише цілком і лише коли вона вся старша за поріг;
-процедура додає межі від наступного місяця, тож поточний і пропущені місяці лишаються в одній
-партиції; `SPLIT` непорожньої партиції переміщує дані з блокуванням. Що робити: продовжити
+процедура аудиту додає межі від наступного місяця, тож поточний і пропущені місяці лишаються в одній
+партиції; `SPLIT` переміщує рядки `>=` нової межі з блокуванням (для `pf_ByPeriodKey` — п. 7.5). Що робити: продовжити
 межі якнайшвидше, у вікно обслуговування, з бекапом.
+
+### 7.5. Рядки в крайніх партиціях `pf_ByPeriodKey` і `refused` (✎ PSS-09, рев'ю 21.11)
+
+**Що бачимо.** `partition-check` пише в `DetailsJson` `edgeRows.first` / `edgeRows.last` і `"edgeWarning":true`,
+коли в першій (до 202601) чи останній (від останньої межі) партиції є рядки, — це попередження, статус прогону
+не змінюється. `arc.usp_EnsurePartitions` пропускає межу, SPLIT якої переніс би понад `@MaxRowsToMove` (типово
+5000) рядків: прогін `EnsurePartitions` — `Degraded`, `"refused":[…]`, `"maxRowsToMove"`, і `"movedRows"`
+(скільки рядків переїхало в прийнятих SPLIT).
+
+**Скільки коштує SPLIT** (замір рев'ю на копії): переїжджають ЛИШЕ рядки з ключем `>=` нової межі. 200 тис. рядків
+нижче межі — 0,4 с і 2,7 КБ журналу; 200 тис. рядків вище — 38 с і 76 МБ журналу, увесь цей час Sch-M на всіх
+таблицях `ps_ByPeriodKey` (користувачі чекають). Орієнтир: ~5 тис. рядків на секунду Sch-M.
+
+**1. Які періоди в крайніх партиціях** (по таблицях, лише читання):
+
+```sql
+DECLARE @first int = (SELECT MIN(CAST(rv.value AS int)) FROM sys.partition_range_values rv
+                      JOIN sys.partition_functions pf ON pf.function_id = rv.function_id WHERE pf.name = N'pf_ByPeriodKey');
+DECLARE @last  int = (SELECT MAX(CAST(rv.value AS int)) FROM sys.partition_range_values rv
+                      JOIN sys.partition_functions pf ON pf.function_id = rv.function_id WHERE pf.name = N'pf_ByPeriodKey');
+SELECT N'doc.TableInstance' AS tbl, PeriodKey, COUNT_BIG(*) AS rows_ FROM doc.TableInstance
+ WHERE PeriodKey < @first OR PeriodKey >= @last GROUP BY PeriodKey
+UNION ALL
+SELECT N'doc.TableRow', PeriodKey, COUNT_BIG(*) FROM doc.TableRow WHERE PeriodKey < @first OR PeriodKey >= @last GROUP BY PeriodKey
+UNION ALL
+SELECT N'doc.CellValue', PeriodKey, COUNT_BIG(*) FROM doc.CellValue WHERE PeriodKey < @first OR PeriodKey >= @last GROUP BY PeriodKey
+ORDER BY 2, 1;
+-- документи цих періодів:
+SELECT DISTINCT d.Id, d.BusinessKey, p.Code AS Project, ti.PeriodKey
+  FROM doc.TableInstance ti JOIN doc.Document d ON d.Id = ti.DocumentId JOIN doc.Project p ON p.Id = d.ProjectId
+ WHERE ti.PeriodKey < @first OR ti.PeriodKey >= @last;
+```
+
+(Решта таблиць на `ps_ByPeriodKey` — `calc.*`, `ext.RowWindowValue` — мають ті самі ключі; повний перелік —
+`SELECT OBJECT_SCHEMA_NAME(i.object_id) + N'.' + OBJECT_NAME(i.object_id) FROM sys.indexes i JOIN sys.partition_schemes ps
+ON ps.data_space_id = i.data_space_id WHERE ps.name = N'ps_ByPeriodKey' AND i.index_id IN (0, 1);`.)
+
+**2. Вибір.**
+- **Документ помилковий** (рік введено хибно, тестовий проєкт): видалити його штатно (екран документа чи проєкту) —
+  рядки зникають, наступна ніч додає межі без переносу. Це найдешевше.
+- **Документ справжній** (історичний рік чи далекий план): лишити; для правої партиції — додати межі у вікні
+  обслуговування скриптом нижче, для лівої (історія до 202601) — нічого робити не треба, доки рік не архівують
+  (`usp_ArchiveYear` вимагає 12 меж року — тоді ті самі кроки з межами цього року).
+
+**3. SPLIT у вікні обслуговування** (бекап перед тим; від найменшого переносу — межі ВИЩЕ за дані йдуть першими й
+порожні, межа над самими даними — останньою):
+
+```sql
+-- приклад: дані в 203003, бракує меж 203001…203003. Спершу оцінка переносу для кожної межі:
+SELECT k.K, (SELECT COUNT_BIG(*) FROM doc.CellValue WHERE PeriodKey >= k.K
+              AND PeriodKey < ISNULL((SELECT MIN(CAST(rv.value AS int)) FROM sys.partition_range_values rv
+                                      JOIN sys.partition_functions pf ON pf.function_id = rv.function_id
+                                      WHERE pf.name = N'pf_ByPeriodKey' AND CAST(rv.value AS int) > k.K), 2147483647)) AS cell_rows_moved
+  FROM (VALUES (203003), (203002), (203001)) AS k (K);
+-- потім, від найвищої (кожна наступна вже нічого не переносить):
+SET LOCK_TIMEOUT 30000;
+ALTER PARTITION SCHEME ps_ByPeriodKey NEXT USED [DATA_HOT]; ALTER PARTITION FUNCTION pf_ByPeriodKey() SPLIT RANGE (203003);
+ALTER PARTITION SCHEME ps_ByPeriodKey NEXT USED [DATA_HOT]; ALTER PARTITION FUNCTION pf_ByPeriodKey() SPLIT RANGE (203002);
+ALTER PARTITION SCHEME ps_ByPeriodKey NEXT USED [DATA_HOT]; ALTER PARTITION FUNCTION pf_ByPeriodKey() SPLIT RANGE (203001);
+```
+
+Або та сама процедура з вищою стелею у вікні: `EXEC arc.usp_EnsurePartitions @MonthsAhead = 6, @MaxRowsToMove = 1000000;`
+(вона сама йде від найвищої межі). `@MaxRowsToMove = 0` — суворий режим: жодного переносу.
 
 ## 8. Оновлення версії
 
@@ -1685,15 +1893,19 @@ Enterprise; Standard і Express переписують таблицю. Коже�
 | `IX_CalculationResult_DocRun` (R5-Q1-02, `47e92166`, після RC16) | `07-partition-tables.sql` | `(PeriodKey, DocumentId, CalculationRunId)` з INCLUDE (`MethodologyVersionId`, `OutputCode`, `SourceRowKey`, `Value`, `UnitId`, `SubstanceEntryId`), вирівняний по `ps_ByPeriodKey`: за обсягом близький до самої таблиці | **офлайн** (гілки `ONLINE` у скрипті немає) | офлайн |
 | `IX_CalculationResult_DocRun`, ключ CRY01 (✎ 2026-11-12) | `07-partition-tables.sql` | `DROP_EXISTING` у `(PeriodKey, DocumentId, CalculationRunId, Kind, TableInstanceId)`, INCLUDE без `TableInstanceId`: **перебудова** наявного індексу — один раз на кожній базі, оновлюваній з версії до CRY01 (заміняє перебудову D-401) | **офлайн** | офлайн |
 | `IX_CalculationResult_Version` (`f7eda9da`, є в RC16) | `07-partition-tables.sql` | `(MethodologyVersionId, PeriodKey)` з INCLUDE (`CalculationRunId`, `DocumentId`), вирівняний по `ps_ByPeriodKey` | **офлайн** | офлайн |
+| `IX_CalculationResult_Run`, `IX_CalculationStep_Run`, `IX_CalculationInput_Run` (✎ 2026-11-20, `D-560`, PSS-01) | `07-partition-tables.sql` | `(CalculationRunId)` на трьох таблицях, вирівняні по `ps_ByPeriodKey`, PAGE: видалення прогону й перевірка FK при видаленні рядка `calc.CalculationRun` (п. 4.2). Вузькі (~20 байт на рядок), але побудова читає всю таблицю: стенд Land — `calc.CalculationStep` 45,9 ГБ / 11,7 млн рядків | `ONLINE = ON` (гілка за `EngineEdition` 3, 5, 8) | офлайн: запис у таблицю чекає до кінця побудови |
+| PAGE-стиснення порожніх партицій `calc.CalculationResult/Step/Input` (✎ 2026-11-20, `D-560`) | `07-partition-tables.sql` | `ALTER INDEX ALL … REBUILD PARTITION = n WITH (DATA_COMPRESSION = PAGE)` лише для партицій без рядків (метадані, мілісекунди; `LOCK_TIMEOUT` 30 с — зайняту пропускає з PRINT). Непорожні не чіпає — PRINT їх переліку, крок DBA (п. 4.2) | те саме | те саме |
 | `IX_arc_CellValue_Row` (✎ 2026-11-14, R-1 аудиту 2026-11, `D-498`, #898) | `12-archive-tables.sql` | `(PeriodKey, TableRowId, ColumnDefId)` на `arc.CellValue`, файлова група `DATA_ARCHIVE`: seek архівної гілки вʼюх SSRS | **офлайн** | офлайн |
 | `IX_arc_TableRow_Instance` (✎ 2026-11-14, R-1, `D-498`, #898) | `12-archive-tables.sql` | `(PeriodKey, TableInstanceId)` на `arc.TableRow`, `DATA_ARCHIVE` | **офлайн** | офлайн |
 
 На відміну від U1, B18 і `IX_CellChange_LateEdit`, `07-partition-tables.sql` редакції сервера не
-визначає: `CREATE NONCLUSTERED INDEX` іде без `WITH (ONLINE = ON)` і на Enterprise теж. Кожен індекс
+визначає для `IX_CalculationResult_DocRun`/`IX_CalculationResult_Version`: `CREATE NONCLUSTERED INDEX` іде без
+`WITH (ONLINE = ON)` і на Enterprise теж (виняток — три індекси `*_Run` `D-560`, з гілкою `ONLINE`). Кожен індекс
 будується **один раз** — на першому оновленні бази, де його ще немає (`IF NOT EXISTS`):
 `IX_CalculationResult_DocRun` — на кожній базі, оновлюваній з RC16 чи старішої версії;
-`IX_CalculationResult_Version` — лише на базі, старішій за RC16. Результати розрахунку не видаляються
-(ЗБР-1), тож таблиця тримає всю історію прогонів, і тривалість росте з її обсягом. `sqlcmd` кроку 2
+`IX_CalculationResult_Version` — лише на базі, старішій за RC16; індекси `*_Run` — на кожній базі, оновлюваній з
+версії до `D-560`. До `D-560` історія прогонів не видалялася (ЗБР-1), тож таблиці тримають усю історію, і
+тривалість росте з її обсягом; після першого прибирання (п. 4.2) вони в рази менші. `sqlcmd` кроку 2
 запускається без тайм-ауту запиту (`-t` немає): скрипт чекає до кінця побудови, служби весь цей час
 зупинені.
 
@@ -1711,6 +1923,18 @@ Enterprise; Standard і Express переписують таблицю. Коже�
    -Server <сервер> -Database <копія> -Upgrade`, п. 8) — він і дає тривалість.
 
 Вікно закладайте за результатом пробного прогону, а не «хвилини».
+
+**Індекси `*_Run` (`D-560`) на Standard/Express — офлайн, лише при зупинених службах.** `07-partition-tables.sql`
+виконується кроком 2 оновлення, коли `EcrApi` і `EcrWorker` зупинені (п. 8); запускати `07` вручну на живій базі не
+можна: офлайн-побудова тримає спільне блокування таблиці (запис чекає), а `ALTER INDEX … REBUILD PARTITION`
+стиснення порожніх партицій бере Sch-M (у скрипті `LOCK_TIMEOUT` 1 с — зайняту партицію пропускає). Тривалість
+побудови — одне читання кожної таблиці плюс сортування ключів (`SORT_IN_TEMPDB = ON`): на стенді Land — читання
+`calc.CalculationStep` ≈ 46 ГБ (≈ 4–5 хв лише на читання на ноутбуці стенда; три таблиці разом — замір
+`COUNT` по з'єднанню 270 с) і сортування ≈ 11,7 млн ключів по ~20 байт ≈ 0,25 ГБ у `tempdb`. Закладайте в `tempdb`
+не менше ~2× обсягу індексу (`row_count × 30 байт` на найбільшій таблиці) і вікно за пробним прогоном на копії.
+Після першого прибирання (п. 4.2) таблиці в рази менші, тож на базі, яку оновлюють пізніше, побудова коротша. Гілку
+без `ONLINE` перевіряє тест `CalculationRunPurgeStorageTests.Гілка_Standard_будує_індекс_прогону_офлайн`
+(підставлена редакція 2 і 4).
 
 **Індекси `arc.*` з `12-archive-tables.sql` (R-1, ✎ 2026-11-14, B118).** `arc.CellValue` і `arc.TableRow` —
 таблиці з кластерним columnstore-індексом, а на такій таблиці SQL Server не будує новий B-tree індекс з

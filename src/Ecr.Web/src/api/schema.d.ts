@@ -13442,7 +13442,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Канонічний друк літерала константи для редактора таблиць коефіцієнтів. Право `Calculation.View`. */
+        /** Канонічний друк літерала константи для редактора таблиць коефіцієнтів. Право `Calculation.View`; межа 120/хв на користувача (PSS-21). */
         post: {
             parameters: {
                 query?: never;
@@ -13488,6 +13488,17 @@ export interface paths {
                 };
                 /** @description Unprocessable Entity */
                 422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Too Many Requests */
+                429: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -13585,6 +13596,17 @@ export interface paths {
                         "text/plain": components["schemas"]["ProblemDetails"];
                     };
                 };
+                /** @description Too Many Requests */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
             };
         };
         delete?: never;
@@ -13603,9 +13625,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Прогін скрипта на документі «насухо»: що вибрано, що пораховано. Право `Calculation.View` і доступ до
-         *     документа, як для його результатів.
-         * @description Нічого не записує. Текст із діагностиками не виконується — повертаються лише діагностики.
+         * Прогін скрипта на документі «насухо»: що вибрано, що пораховано. Право `Calculation.View`, доступ до документа й `Document.View`; межа 30/хв на користувача (PSS-21).
+         * @description Нічого не записує. Текст із діагностиками не виконується — повертаються лише діагностики. Понад 30 с — 422 scriptPreviewTimeout.
          */
         post: {
             parameters: {
@@ -13672,6 +13693,17 @@ export interface paths {
                         "text/plain": components["schemas"]["ProblemDetails"];
                     };
                 };
+                /** @description Too Many Requests */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
             };
         };
         delete?: never;
@@ -13689,7 +13721,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Перевіряє текст, нічого не зберігаючи. Право `Calculation.View`. */
+        /** Перевіряє текст, нічого не зберігаючи. Право `Calculation.View`; межа 120/хв на користувача (PSS-21). */
         post: {
             parameters: {
                 query?: never;
@@ -13735,6 +13767,17 @@ export interface paths {
                 };
                 /** @description Unprocessable Entity */
                 422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Too Many Requests */
+                429: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -37621,6 +37664,21 @@ export interface components {
         };
         /** @description Статус місячної колонки (D-441): стан аркуша за період місяця колонки. */
         MonthColumnStatusDto: {
+            /**
+             * @description ✎ D-6: поточний користувач може затвердити чи відхилити аркуш за цей місяць (те саме правило, що POST approve).
+             * @default false
+             */
+            canDecide: boolean;
+            /**
+             * @description ✎ D-6: поточний користувач може відкликати подання аркуша за цей місяць (те саме правило, що POST recall).
+             * @default false
+             */
+            canRecall: boolean;
+            /**
+             * @description ✎ D-6: поточний користувач може повернути ЗАТВЕРДЖЕНИЙ аркуш за цей місяць у роботу (те саме правило, що POST reopen).
+             * @default false
+             */
+            canReturn: boolean;
             /** @description Код колонки. */
             columnCode: string;
             /**
@@ -37640,6 +37698,11 @@ export interface components {
              * @description Таблиця.
              */
             tableDefId: number;
+            /**
+             * Format: int32
+             * @description ✎ D-6: поданий місяць — місяць документа-джерела HSE400, ще не затверджений, через який сервер відхилить затвердження цього місяця (sourceMonthNotApproved); null — перешкоди немає.
+             */
+            unapprovedSourcePeriodKey?: null | number;
         };
         /** @description Псевдонім місячного входу у відповіді. */
         MonthInputAliasDto: {
@@ -43479,6 +43542,8 @@ export interface components {
         };
         /** @description Відповідь перегляду на документі. */
         ScriptPreviewDto: {
+            /** @description `true` — вичерпано спільний бюджет кроків перегляду (PSS-21: 20 000 000 на запит); рядки з `#BUDGET` — межа перегляду, а не помилка скрипта, у перерахунку її немає. */
+            budgetExhausted?: boolean;
             /** @description Діагностики тексту (перегляд виконується лише без них). */
             diagnostics: components["schemas"]["ScriptDiagnosticDto"][];
             /** @description Таблиці з рядками й значеннями; порожньо, якщо текст має діагностики. */
@@ -43521,6 +43586,8 @@ export interface components {
             state: string;
             /** @description Значення величин; для `notSelected`/`inactive` — порожньо. */
             values: components["schemas"]["ScriptPreviewValue"][];
+            /** @description `true` — величини рядка урізано стелею відповіді перегляду (PSS-21: 50 000 на запит); `values` неповний. */
+            valuesTruncated?: boolean;
         };
         /** @description Екземпляр таблиці в перегляді. */
         ScriptPreviewTable: {
@@ -43656,17 +43723,42 @@ export interface components {
         SessionSettingsInput: {
             /**
              * Format: int32
+             * @description Мінімальна глибина аудиту, місяців (120–1200); `null` — не змінювати.
+             */
+            auditRetentionMonths?: null | number;
+            /**
+             * Format: int32
              * @description Вихід після стількох хвилин без дій.
              */
             idleTimeoutMinutes: number;
+            /**
+             * Format: int32
+             * @description Строк зберігання технічних журналів, днів (30–36500); `null` — не змінювати.
+             */
+            technicalLogRetentionDays?: null | number;
         };
         /** @description Налаштування сеансу для екрана «Безпека». */
         SessionSettingsView: {
             /**
              * Format: int32
+             * @description Мінімальна глибина аудиту в `aud.*`, місяців (`Retention.AuditMonths`).
+             */
+            auditRetentionMonths: number;
+            /**
+             * Format: int32
+             * @description Значення за замовчуванням (120).
+             */
+            defaultAuditRetentionMonths: number;
+            /**
+             * Format: int32
              * @description Значення за замовчуванням.
              */
             defaultIdleTimeoutMinutes: number;
+            /**
+             * Format: int32
+             * @description Значення за замовчуванням (400).
+             */
+            defaultTechnicalLogRetentionDays: number;
             /**
              * Format: int32
              * @description Вихід після стількох хвилин без дій.
@@ -43676,12 +43768,37 @@ export interface components {
              * Format: int32
              * @description Найбільше допустиме значення.
              */
+            maxAuditRetentionMonths: number;
+            /**
+             * Format: int32
+             * @description Найбільше допустиме значення.
+             */
             maxIdleTimeoutMinutes: number;
+            /**
+             * Format: int32
+             * @description Найбільше допустиме значення.
+             */
+            maxTechnicalLogRetentionDays: number;
+            /**
+             * Format: int32
+             * @description Найменше допустиме значення (120).
+             */
+            minAuditRetentionMonths: number;
             /**
              * Format: int32
              * @description Найменше допустиме значення.
              */
             minIdleTimeoutMinutes: number;
+            /**
+             * Format: int32
+             * @description Найменше допустиме значення.
+             */
+            minTechnicalLogRetentionDays: number;
+            /**
+             * Format: int32
+             * @description Скільки днів зберігаються технічні журнали, зокрема `sec.LoginAttempt` (`Retention.TechnicalLogDays`).
+             */
+            technicalLogRetentionDays: number;
         };
         /** @description Запит на зміну отримання алертів. */
         SetAlertsRequest: {
@@ -44938,9 +45055,19 @@ export interface components {
             state: components["schemas"]["PeriodState"];
             /** @description Аркуш за цей період можна подати зараз (неподаний, проєкт не архівний). */
             submittable: boolean;
+            /**
+             * Format: int32
+             * @description ✎ D-6: місяць документа-джерела HSE400, ще не затверджений, через який сервер відхилить подання (аркуш неподаний) чи затвердження (аркуш поданий) цього періоду (sourceMonthNotApproved); null — перешкоди немає.
+             */
+            unapprovedSourcePeriodKey?: null | number;
         };
         /** @description Цільовий період подання аркуша і статуси місячних колонок (D-441). */
         SubmissionTargetDto: {
+            /**
+             * Format: int32
+             * @description ✎ D-6: аркуш за період запиту поданий (у будь-якому стані періоду, зокрема закритому) — місяць документа-джерела HSE400, ще не затверджений, через який сервер відхилить його затвердження; null — перешкоди немає.
+             */
+            anchorUnapprovedSourcePeriodKey?: null | number;
             /** @description Місячні колонки таблиць `MonthsInColumns` аркуша зі станом свого періоду. */
             monthColumns: components["schemas"]["MonthColumnStatusDto"][];
             /**

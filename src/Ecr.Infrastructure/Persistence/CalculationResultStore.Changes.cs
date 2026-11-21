@@ -53,18 +53,31 @@ public sealed partial class CalculationResultStore
 
         // Та сама вибірка «що зараз актуальне», що й у ReadCurrentAsync і переносі; сам новий прогін ще не актуальний.
         // Актуального немає — порожній масив: кожне число нового прогону тоді «додалося».
-        var current = await CurrentRunIdsAsync(documentId, periodKey, calculationRunId, ct).ConfigureAwait(false);
+        // ⛔ D-560: прогони й числа — двома запитами; перемикання + прибирання між ними дали б порівняння з уже
+        // видаленими числами (хибне «змінено»). Тому актуальні прогони перечитуються після порівняння і, якщо змінились,
+        // порівняння повторюється (до ReadAttempts), як у ReadCurrentCoreAsync.
+        List<string> changed = [];
+        for (var attempt = 1; attempt <= ReadAttempts; attempt++)
+        {
+            var current = await CurrentRunIdsAsync(documentId, periodKey, calculationRunId, ct).ConfigureAwait(false);
 
-        var changed = await db.Database
-            .SqlQueryRaw<string>(
-                ChangedResultsSql,
-                new SqlParameter("@periodKey", periodKey),
-                new SqlParameter("@documentId", documentId),
-                new SqlParameter("@newRun", calculationRunId),
-                new SqlParameter("@current", System.Text.Json.JsonSerializer.Serialize(current)),
-                new SqlParameter("@methodologies", System.Text.Json.JsonSerializer.Serialize(methodologyIds)))
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
+            changed = await db.Database
+                .SqlQueryRaw<string>(
+                    ChangedResultsSql,
+                    new SqlParameter("@periodKey", periodKey),
+                    new SqlParameter("@documentId", documentId),
+                    new SqlParameter("@newRun", calculationRunId),
+                    new SqlParameter("@current", System.Text.Json.JsonSerializer.Serialize(current)),
+                    new SqlParameter("@methodologies", System.Text.Json.JsonSerializer.Serialize(methodologyIds)))
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+
+            var after = await CurrentRunIdsAsync(documentId, periodKey, calculationRunId, ct).ConfigureAwait(false);
+            if (current.Order().SequenceEqual(after.Order()))
+            {
+                break;
+            }
+        }
 
         return [.. changed.Select(ParseChangedScope)];
     }

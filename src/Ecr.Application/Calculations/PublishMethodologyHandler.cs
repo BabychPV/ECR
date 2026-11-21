@@ -38,7 +38,7 @@ public sealed class PublishMethodologyHandler(
     RuleCoverageHandler? ruleCoverage = null,
     IEnumerable<ICalculationModule>? modules = null,
     Scripting.ScriptPublishChecks? scriptChecks = null,
-    IDependencyGraphProvider? dependencyGraph = null) : IFormulaLinkRebuilder
+    IDependencyGraphProvider? dependencyGraph = null) : IFormulaLinkRebuilder, IGoldenSetGate
 {
     /// <summary>Ключ попередження: комбінації значень реальних рядків, яких не зачіпає жодне правило (ФВ-13.9).</summary>
     public const string CoverageGapsWarningKey = "publish.warning.ruleCoverageGaps";
@@ -1535,6 +1535,49 @@ public sealed class PublishMethodologyHandler(
     /// </remarks>
     private static void RejectRedGoldenSet(
         MethodologyVersion version, IReadOnlyList<TestCaseVerdict> verdicts, bool greenTest)
+        => RejectRedGoldenSet(version, verdicts, greenTest, GoldenSetRefusal.Publish);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Той самий прогін (<see cref="JudgeAsync"/>, модуль за рушієм версії) і ті самі вердикти, що в публікації; інші
+    /// лише ключі відмови — текст «публікацію відхилено» тут був би неправдою (PSS-23).
+    /// </remarks>
+    public async Task RequireGreenForEngineSwitchAsync(
+        Methodology methodology, MethodologyVersion version, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(methodology);
+        ArgumentNullException.ThrowIfNull(version);
+
+        if (!methodology.RequiresGoldenSet)
+        {
+            return;
+        }
+
+        var testCases = await methodologies.GetTestCasesAsync(version.Id, ct).ConfigureAwait(false);
+        RequireTestPeriods(testCases);
+
+        var verdicts = await JudgeAsync(methodology, version, testCases, ct).ConfigureAwait(false);
+        RejectRedGoldenSet(version, verdicts, GoldenSet.IsGreen(verdicts, testCases), GoldenSetRefusal.EngineSwitch);
+    }
+
+    /// <summary>Ключі каталогу й початок речення відмови золотого набору — для публікації чи перемикання рушія.</summary>
+    private sealed record GoldenSetRefusal(string Subject, string EmptyKey, string NoExpectationsKey, string DivergedKey)
+    {
+        public static GoldenSetRefusal Publish { get; } = new(
+            "Публікацію версії",
+            "err.ECR-CALC-0422.goldenSetEmpty",
+            "err.ECR-CALC-0422.goldenNoExpectations",
+            "err.ECR-CALC-0422.goldenSetDiverged");
+
+        public static GoldenSetRefusal EngineSwitch { get; } = new(
+            "Перемикання на Script версії",
+            "err.ECR-CALC-0422.switchGoldenSetEmpty",
+            "err.ECR-CALC-0422.switchGoldenNoExpectations",
+            "err.ECR-CALC-0422.switchGoldenSetDiverged");
+    }
+
+    private static void RejectRedGoldenSet(
+        MethodologyVersion version, IReadOnlyList<TestCaseVerdict> verdicts, bool greenTest, GoldenSetRefusal refusal)
     {
         if (greenTest)
         {
@@ -1548,12 +1591,12 @@ public sealed class PublishMethodologyHandler(
         {
             throw new BusinessRuleException(
                 "ECR-CALC-0422",
-                $"Публікацію версії {version.Version} відхилено: золотого набору немає жодного "
+                $"{refusal.Subject} {version.Version} відхилено: золотого набору немає жодного "
                 + "випадку. «Тестів немає, отже все гаразд» зробило б публікацію без перевірки "
                 + "схожою на публікацію з перевіркою (ФВ-9.12).",
                 new Dictionary<string, object?>
                 {
-                    ["messageKey"] = "err.ECR-CALC-0422.goldenSetEmpty",
+                    ["messageKey"] = refusal.EmptyKey,
                     ["version"] = version.Version,
                 });
         }
@@ -1566,10 +1609,10 @@ public sealed class PublishMethodologyHandler(
             var codes = string.Join(", ", verdicts.Select(v => v.Code));
             throw new BusinessRuleException(
                 "ECR-CALC-0422",
-                $"Публікацію версії {version.Version} відхилено: {codes}: {GoldenSet.NoExpectationsReason}.",
+                $"{refusal.Subject} {version.Version} відхилено: {codes}: {GoldenSet.NoExpectationsReason}.",
                 new Dictionary<string, object?>
                 {
-                    ["messageKey"] = "err.ECR-CALC-0422.goldenNoExpectations",
+                    ["messageKey"] = refusal.NoExpectationsKey,
                     ["version"] = version.Version,
                     ["tests"] = codes,
                 });
@@ -1583,11 +1626,11 @@ public sealed class PublishMethodologyHandler(
         // diverged» без жодного імені не давало знайти, що саме виправляти.
         throw new BusinessRuleException(
             "ECR-CALC-0422",
-            $"Публікацію версії {version.Version} відхилено: на золотому наборі розійшлося "
+            $"{refusal.Subject} {version.Version} відхилено: на золотому наборі розійшлося "
             + $"величин — {divergences.Count}. {string.Join("; ", divergences)}.",
             new Dictionary<string, object?>
             {
-                ["messageKey"] = "err.ECR-CALC-0422.goldenSetDiverged",
+                ["messageKey"] = refusal.DivergedKey,
                 ["version"] = version.Version,
                 ["count"] = divergences.Count.ToString(CultureInfo.InvariantCulture),
                 ["tests"] = string.Join(", ", red.Select(v => v.Code)),

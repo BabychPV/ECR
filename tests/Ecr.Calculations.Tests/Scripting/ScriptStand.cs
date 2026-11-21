@@ -79,6 +79,9 @@ internal sealed class ScriptStand
     private readonly ScriptProgramCache _cache = new();
     private readonly List<ColumnResultBinding> _bindings = [];
     private ScriptCalculationModule? _module;
+    private IRowStore? _rows;
+    private IMetadataCache? _metadata;
+    private CalculationInputBuilder? _inputBuilder;
     private int _nextColumnId = 100;
 
     public ScriptStand(string text, NumericMode mode = NumericMode.Strict)
@@ -242,6 +245,7 @@ internal sealed class ScriptStand
         }
 
         var inputBuilder = new CalculationInputBuilder(cells, metadata, rows);
+        (_rows, _metadata, _inputBuilder) = (rows, metadata, inputBuilder);
         var resolver = new MethodologyResolver(_store, cells, rows);
         Selector = new ScriptRowSelector(resolver, metadata);
 
@@ -292,6 +296,35 @@ internal sealed class ScriptStand
             registryLoader: null,
             scriptStore: null,
             limits: Limits);
+    }
+
+    /// <summary>
+    /// Справжній <see cref="ScriptPreviewRunner"/> над тими самими підставними сховищами, що й модуль: версія стенда — чернетка
+    /// скрипта з режимом стенда.
+    /// </summary>
+    /// <param name="previewSteps">Спільний бюджет кроків перегляду; <c>null</c> — типовий.</param>
+    public ScriptPreviewRunner PreviewRunner(int? previewSteps = null)
+    {
+        var module = Module;
+        var methodology = new Methodology(EcrCode.Create(Methodology.Code), Text1(Methodology.Code));
+        SetId(methodology, MethodologyId);
+        var version = new MethodologyVersion(
+            MethodologyId, Methodology.VersionNumber, CalculationLevel.Configuration, 1,
+            new DateTime(2099, 1, 1, 0, 0, 0, DateTimeKind.Utc), MethodologyEngine.Script);
+        version.SetModes(Mode, CalendarMode.Actual, Trace);
+        SetId(version, VersionId);
+        methodology.AddVersion(version);
+
+        var drafts = Substitute.For<IMethodologyDraftStore>();
+        drafts.FindVersionAsync(VersionId, Arg.Any<CancellationToken>()).Returns(version);
+        drafts.FindAsync(MethodologyId, Arg.Any<CancellationToken>()).Returns(methodology);
+
+        return new ScriptPreviewRunner(
+            drafts, [module], Selector, _inputBuilder!, _rows!, _metadata!,
+            new Ecr.Application.Calculations.Scripting.ScriptSourceCompiler(drafts, _store))
+        {
+            PreviewEvaluationSteps = previewSteps ?? ScriptPreviewRunner.MaxPreviewEvaluationSteps,
+        };
     }
 
     public async Task<CalculationInput> InputAsync(string rowKey, StandTable? table = null)

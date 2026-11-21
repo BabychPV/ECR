@@ -32,6 +32,7 @@ internal sealed class ScriptBinder
     private readonly Dictionary<string, ScriptFunction> functions = new(StringComparer.Ordinal);
     private readonly Dictionary<string, CompiledScript> imports = new(StringComparer.Ordinal);
     private readonly List<string> importList = [];
+    private readonly HashSet<string> importSet = new(StringComparer.Ordinal);
     private readonly Dictionary<string, TableRef> tables = new(StringComparer.Ordinal);
     private readonly List<string> paramNames = [];
     private readonly HashSet<string> topLevelNames = new(StringComparer.Ordinal);
@@ -42,6 +43,9 @@ internal sealed class ScriptBinder
     private readonly Dictionary<string, OutputRecord> outputRegistry = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<VisibleInfo> visibles = [];
     private readonly List<string> substances = [];
+
+    /// <summary>Те саме, що <see cref="substances"/>, для перевірки «код уже є» за O(1) (PSS-31: було <c>List.Contains</c>).</summary>
+    private readonly HashSet<string> substanceSet = new(StringComparer.Ordinal);
     private readonly List<RowFieldBuilder> rowFields = [];
     private readonly Dictionary<string, RowFieldBuilder> rowFieldIndex = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> rowTableKeys = new(StringComparer.OrdinalIgnoreCase);
@@ -260,13 +264,18 @@ internal sealed class ScriptBinder
         var readTables = tables.Values.Select(t => t.TableCode).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
         var codes = registryCodes.ToList();
+        var known = new HashSet<string>(codes, StringComparer.Ordinal); // PSS-31: було List.Contains на кожен код бібліотеки
         var needs = needsRegistries;
         foreach (var lib in imports.Values)
         {
             needs |= lib.NeedsRegistries;
-            foreach (var code in lib.RegistryCodes.Where(c => !codes.Contains(c, StringComparer.Ordinal)))
+            foreach (var code in lib.RegistryCodes)
             {
-                codes.Add(code);
+                ScriptWork.Step();
+                if (known.Add(code))
+                {
+                    codes.Add(code);
+                }
             }
         }
 
@@ -363,7 +372,8 @@ internal sealed class ScriptBinder
                     // Тіло функції бачить лише параметри, тож верхніх імен там немає; обхід лишає контракт чесним.
                     var inner = new List<string>();
                     CollectStepReferences(function.Body, inner, visitedFunctions);
-                    found.AddRange(inner.Where(n => !function.Parameters.Contains(n, StringComparer.Ordinal)));
+                    var parameters = new HashSet<string>(function.Parameters, StringComparer.Ordinal); // PSS-31: було List.Contains
+                    found.AddRange(inner.Where(n => !parameters.Contains(n)));
                 }
 
                 if (f.Name == "$agg" && f.Arguments is [LiteralNode { Value: decimal index }]
@@ -392,7 +402,8 @@ internal sealed class ScriptBinder
         foreach (var import in program.Imports)
         {
             RegisterGlobal(import.Name, "import", import.Span);
-            if (importList.Contains(import.Name, StringComparer.Ordinal))
+            ScriptWork.Step();
+            if (importSet.Contains(import.Name)) // PSS-31: було List.Contains на кожен import
             {
                 continue;
             }
@@ -405,6 +416,7 @@ internal sealed class ScriptBinder
                 continue;
             }
 
+            importSet.Add(import.Name);
             importList.Add(import.Name);
             imports[import.Name] = library;
         }
@@ -592,9 +604,11 @@ internal sealed class ScriptBinder
         callGraph.TryAdd(f.Name, new HashSet<string>(StringComparer.Ordinal));
 
         var names = new List<string>();
+        var folded = new HashSet<string>(StringComparer.OrdinalIgnoreCase); // PSS-31: було List.Contains на кожен параметр
         foreach (var p in f.Params)
         {
-            if (names.Contains(p.Name, StringComparer.OrdinalIgnoreCase) || IsVisibleName(p.Name))
+            ScriptWork.Step();
+            if (!folded.Add(p.Name) || IsVisibleName(p.Name))
             {
                 Report(ScriptDiagnosticCodes.DuplicateName, p.Span,
                     $"Parameter '{p.Name}' repeats an existing name.", ("name", p.Name));
@@ -889,37 +903,48 @@ internal sealed class ScriptBinder
         }
 
         var codes = new List<string>();
-        CollectOutputs(then.Statements, codes);
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        CollectOutputs(then.Statements, codes, seen);
         if (@else is not null)
         {
-            CollectOutputs(@else.Statements, codes);
+            CollectOutputs(@else.Statements, codes, seen);
         }
 
         return new IfStatement(cond, then, @else, codes);
     }
 
-    private static void CollectOutputs(IEnumerable<ScriptStatement> statements, List<string> codes)
+    /// <summary>Виходи гілок у порядку появи, без дублів; «вже є» — множиною (PSS-31: було <c>List.Contains</c>).</summary>
+    private static void CollectOutputs(IEnumerable<ScriptStatement> statements, List<string> codes, HashSet<string> seen)
     {
         foreach (var s in statements)
         {
             switch (s)
             {
-                case OutputStatement o when !codes.Contains(o.Code, StringComparer.Ordinal):
-                    codes.Add(o.Code);
+                case OutputStatement o:
+                    AddOutput(o.Code, codes, seen);
                     break;
                 case IfStatement i:
-                    foreach (var c in i.OutputCodes.Where(c => !codes.Contains(c, StringComparer.Ordinal)))
+                    foreach (var c in i.OutputCodes)
                     {
-                        codes.Add(c);
+                        AddOutput(c, codes, seen);
                     }
 
                     break;
                 case ForeachSubstanceStatement f:
-                    CollectOutputs(f.Body.Statements, codes);
+                    CollectOutputs(f.Body.Statements, codes, seen);
                     break;
                 default:
                     break;
             }
+        }
+    }
+
+    private static void AddOutput(string code, List<string> codes, HashSet<string> seen)
+    {
+        ScriptWork.Step();
+        if (seen.Add(code))
+        {
+            codes.Add(code);
         }
     }
 
@@ -936,7 +961,8 @@ internal sealed class ScriptBinder
         foreach (var code in f.Codes)
         {
             codes.Add(code.Code);
-            if (!substances.Contains(code.Code, StringComparer.Ordinal))
+            ScriptWork.Step();
+            if (substanceSet.Add(code.Code))
             {
                 substances.Add(code.Code);
             }

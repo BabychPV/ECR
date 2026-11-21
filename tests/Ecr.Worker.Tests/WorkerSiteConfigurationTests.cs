@@ -83,6 +83,8 @@ public sealed class WorkerSiteConfigurationTests
     [InlineData("Calculations:MaxParallelism", "0")]
     [InlineData("Calculations:MaxParallelism", "-1")]
     [InlineData("Calculations:MaxInputCellsPerBinding", "0")]
+    [InlineData("Calculations:MaxRowEvaluationSteps", "19999")]
+    [InlineData("Calculations:MaxRowEvaluationSteps", "20 млн")]
     [InlineData("Database:EditionMode", "Enterprse")]
     public void Недійсне_значення_ключа_дочірнього_зупиняє_воркер_з_іменем_ключа(string key, string value)
     {
@@ -126,7 +128,14 @@ public sealed class WorkerSiteConfigurationTests
         Assert.NotEmpty(WorkerConfigurationValidation.Integers);
         foreach (var (key, min) in WorkerConfigurationValidation.Integers)
         {
-            Assert.Contains($"(\"{key}\", {min})", api, StringComparison.Ordinal);
+            // ✎ PSS-02: ключ межі дітей розкладу Api перелічує константою (QuartzJobTypeLimiter), не літералом.
+            var viaConstant = key == Ecr.Infrastructure.Jobs.QuartzJobTypeLimiter.RecalcFanOutMaxConcurrencyKey
+                ? $"{nameof(Ecr.Infrastructure.Jobs.QuartzJobTypeLimiter.RecalcFanOutMaxConcurrencyKey)}, {min})"
+                : null;
+            Assert.True(
+                api.Contains($"(\"{key}\", {min})", StringComparison.Ordinal)
+                || (viaConstant is not null && api.Contains(viaConstant, StringComparison.Ordinal)),
+                key);
         }
     }
 

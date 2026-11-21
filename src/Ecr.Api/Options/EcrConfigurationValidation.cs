@@ -71,6 +71,8 @@ public static partial class EcrConfigurationValidation
         (Ecr.Api.Security.TableDiscussionPostRateLimitPolicy.PermitKey, 1),
         (Ecr.Api.Security.DocumentExportRateLimitPolicy.PermitKey, 1),
         ("Security:RateLimit:HealthReadyPermitPerMinute", 1),
+        (Ecr.Api.Security.LoginRateLimiting.AnonymousReadPermitKey, 1), // PSS-29
+        (Ecr.Infrastructure.Security.LoginAttemptRetention.IntervalMinutesKey, 1), // PSS-24
         (Ecr.Api.Security.ImportPreviewRateLimitPolicy.PermitKey, 1),
         (Ecr.Api.Security.ImportPreviewRateLimitPolicy.QueueLimitKey, 0),
         ("Jobs:ShutdownTimeoutSeconds", 1),
@@ -79,6 +81,7 @@ public static partial class EcrConfigurationValidation
         (Ecr.Api.Startup.StaleMapWarmService.IntervalKey, Ecr.Api.Startup.StaleMapWarmService.MinIntervalSeconds),
         (Ecr.Api.Startup.StaleMapWarmService.RingIntervalKey, Ecr.Api.Startup.StaleMapWarmService.MinRingIntervalSeconds),
         (Ecr.Api.Startup.StaleMapWarmService.HotPeriodLimitKey, 1),
+        (Infrastructure.Persistence.StaleMapQueryHintInterceptor.MaxDopKey, 0), // Верхня межа паралелізму запитів карти застарілості (OPTION MAXDOP): діє min(значення, MAXDOP бази чи сервера), вище за налаштування сервера НІКОЛИ не піднімає; 0 — без підказки. Стенду з малою пам'яттю SQL Server — 2.
 
         // AN-190: нуль версій — не «вимкнути прогрів» (для цього Startup:WarmEditPath), а прогрів, що нічого не гріє.
         (Infrastructure.Jobs.EditPathWarmer.MaxVersionsKey, 1),
@@ -116,6 +119,15 @@ public static partial class EcrConfigurationValidation
         ("Calculations:MaxParallelism", 1),
         ("Calculations:MaxInputCellsPerBinding", 1),
 
+        // ── PSS-21 (лейн L7 pss-script-security): бюджет рядка скрипта й межі прогонів/перевірок скрипта ──
+        ("Calculations:MaxRowEvaluationSteps", 20000), // Менше за стелю одного оператора (20 000) обрізало б навіть один законний оператор.
+        (Ecr.Api.Security.ScriptAuthoringRateLimitPolicy.PermitKey, 1),
+        (Ecr.Api.Security.ScriptCheckRateLimitPolicy.PermitKey, 1),
+        (Ecr.Api.Security.ScriptRunGate.ConcurrencyKey, 1),
+        (Ecr.Api.Security.ScriptRunGate.QueueLimitKey, 0),
+        (Ecr.Api.Security.ScriptRunGate.QueueWaitSecondsKey, 1),
+        // ── кінець PSS-21 ──
+
         // ПРД-13: поріг сигналу «перерахунок довший за бюджет»; нуль зробив би сигналом кожну задачу.
         (Ecr.Infrastructure.Jobs.RecalculationBudgetOptions.WarnSecondsKey, 1),
 
@@ -151,6 +163,9 @@ public static partial class EcrConfigurationValidation
     [
         "Auth:RequireHttps",
         "Auth:EnableNegotiate",
+
+        // PSS-24: вимикач прибирання `sec.LoginAttempt`; опечатка не має мовчки лишати прибирання ввімкненим.
+        Ecr.Infrastructure.Security.LoginAttemptRetention.EnabledKey,
 
         // PT-4 (пентест 2026-11): NTLM у Negotiate лише за явним true (типово false).
         Ecr.Api.Auth.AuthenticationSetup.AllowNtlmKey,
@@ -261,6 +276,25 @@ public static partial class EcrConfigurationValidation
             }
         }
 
+        // ⛔ PSS-28: `AllowedHosts` — імена БЕЗ порту. HostFiltering ASP.NET Core порівнює налаштовані записи лише з іменем
+        // вузла (порт із заголовка Host відкидається), тож запис `ecr.example.kz:8443` не збігається з жодним запитом:
+        // усі, крім localhost, отримують 400, а розгортання виглядає зеленим. Службу з таким значенням не запускаємо.
+        if (Value(configuration, AllowedHostsKey) is { } hosts && AllowedHostsProblem(hosts) is { } hostsProblem)
+        {
+            problems.Add(Describe(AllowedHostsKey, hosts, hostsProblem));
+        }
+
+        // PSS-01 (лан L3): нічне вікно прибирання витіснених результатів — `HH:mm-HH:mm`, може переходити через північ.
+        // Недійсне значення задача мовчки замінила б дефолтом 01:00-05:00 (і лише писала б попередження), тож службу з ним не запускаємо.
+        // Той самий розбір, що й у задачі, — `SupersededPurgeOptions.ParseNightWindow`.
+        if (Value(configuration, Ecr.Infrastructure.Persistence.SupersededPurgeOptions.NightWindowKey) is { } nightWindow
+            && Ecr.Infrastructure.Persistence.SupersededPurgeOptions.ParseNightWindow(nightWindow) is null)
+        {
+            problems.Add(Describe(
+                Ecr.Infrastructure.Persistence.SupersededPurgeOptions.NightWindowKey, nightWindow,
+                "очікується вікно HH:mm-HH:mm (початок і кінець різні, може переходити через північ), напр. 01:00-05:00"));
+        }
+
         foreach (var (key, allowed) in Choices)
         {
             if (Value(configuration, key) is { } text
@@ -364,11 +398,23 @@ public static partial class EcrConfigurationValidation
     /// не робить. Адміністратор, що задав колектор, має дізнатися про це з журналу
     /// старту, а не з порожнього дашборда.
     /// </remarks>
-    public static IReadOnlyList<string> Warnings(IConfiguration configuration)
+    /// <param name="isProduction">Середовище Production: лише в ньому попереджає про <c>AllowedHosts = *</c> (PSS-28).</param>
+    public static IReadOnlyList<string> Warnings(IConfiguration configuration, bool isProduction = false)
     {
         ArgumentNullException.ThrowIfNull(configuration);
 
         var warnings = new List<string>();
+
+        // ⚠ PSS-28: `AllowedHosts` порожній або `*` — Kestrel приймає будь-який заголовок Host, а CSRF-перевірка
+        // однакового хоста довіряє X-Forwarded-Host: DNS rebinding дотягується до анонімних ендпоінтів. Значення
+        // `*` лишається типовим (помилкове ім'я замкнуло б користувачів), тож лише попередження, лише в Production.
+        if (isProduction && IsAnyHostAllowed(Value(configuration, AllowedHostsKey)))
+        {
+            warnings.Add(
+                "AllowedHosts = * (будь-який заголовок Host приймається): задайте імена вузла через "
+                + "`deploy-ecr.ps1 -AllowedHosts` або змінну ECR_AllowedHosts, щоб закрити DNS rebinding на "
+                + "анонімні ендпоінти (PSS-28).");
+        }
 
         if (Value(configuration, OtlpEndpointKey) is { } endpoint
             && !Ecr.Api.Observability.TelemetrySetup.IsEnabled(configuration))
@@ -414,7 +460,7 @@ public static partial class EcrConfigurationValidation
 
         var logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Ecr.Startup");
 
-        foreach (var warning in Warnings(app.Configuration))
+        foreach (var warning in Warnings(app.Configuration, app.Environment.IsProduction()))
         {
             LogConfigurationWarning(logger, warning);
         }
@@ -435,6 +481,49 @@ public static partial class EcrConfigurationValidation
         LogConfigurationInvalid(logger, message);
         throw new InvalidOperationException(message);
     }
+
+    /// <summary>Ключ конфігурації ASP.NET Core: перелік дозволених заголовків Host через <c>;</c>.</summary>
+    public const string AllowedHostsKey = "AllowedHosts";
+
+    private static readonly System.Text.RegularExpressions.Regex AllowedHostName = new(
+        @"^(?:(?:\*\.)?[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*|\[[0-9A-Fa-f:.]+\])\z",
+        System.Text.RegularExpressions.RegexOptions.CultureInvariant,
+        TimeSpan.FromSeconds(1));
+
+    /// <summary>
+    /// Причина, з якої <c>AllowedHosts</c> недійсний, або <c>null</c>. Записи — через <c>;</c>: <c>*</c>, ім'я вузла
+    /// (провідний <c>*.</c> допускається) чи IPv6 у дужках; БЕЗ порту й схеми.
+    /// </summary>
+    /// <param name="allowedHosts">Значення ключа.</param>
+    public static string? AllowedHostsProblem(string allowedHosts)
+    {
+        ArgumentNullException.ThrowIfNull(allowedHosts);
+
+        foreach (var entry in allowedHosts.Split(';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (entry == "*" || AllowedHostName.IsMatch(entry))
+            {
+                continue;
+            }
+
+            var hasPort = entry.StartsWith('[') ? entry.Contains("]:", StringComparison.Ordinal)
+                : entry.Contains(':', StringComparison.Ordinal) && !entry.Contains("://", StringComparison.Ordinal);
+
+            return hasPort
+                ? $"запис «{entry}» містить порт: HostFiltering ASP.NET Core порівнює імена БЕЗ порту, тому такий запис не збігається "
+                  + "з жодним запитом і замкне всіх користувачів; вкажіть ім'я без порту (наприклад ecr.example.kz)"
+                : $"запис «{entry}» не ім'я вузла (очікується * або ім'я без схеми, шляху й порту; провідний *. допускається)";
+        }
+
+        return null;
+    }
+
+    /// <summary>Порожній перелік чи елемент <c>*</c> — дозволено будь-який Host.</summary>
+    /// <param name="allowedHosts">Значення <c>AllowedHosts</c>; <c>null</c> — не задано.</param>
+    public static bool IsAnyHostAllowed(string? allowedHosts)
+        => allowedHosts is null
+           || allowedHosts.Split(';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+               .Any(entry => entry == "*");
 
     /// <summary>Значення ключа або <c>null</c>, якщо його не задано чи воно порожнє.</summary>
     private static string? Value(IConfiguration configuration, string key)

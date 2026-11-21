@@ -95,16 +95,17 @@ public interface ICalculationResultStore
         long calculationRunId, string modulesProfileJson, CancellationToken ct);
 
     /// <summary>
-    /// Прибирає результати, кроки й входи прогонів, що перестали бути актуальними (Q-17, ADR «Deleting results of
-    /// superseded runs»). Рядки <c>calc.CalculationRun</c> лишаються.
+    /// Прибирає прогони, що перестали бути актуальними (Q-17; <c>D-560</c>): результати, кроки, входи й сам рядок
+    /// <c>calc.CalculationRun</c> (лишається, коли кроки й входи не прибираються — <c>IncludeTrace=false</c>).
     /// </summary>
     /// <param name="runs">Прогони з <see cref="SwitchCurrentRunAsync"/>.</param>
     /// <param name="ct">Токен скасування.</param>
-    /// <returns>Скільки рядків видалено (0, якщо прибирання вимкнено).</returns>
+    /// <returns>Скільки рядків результатів, кроків і входів видалено (0, якщо прибирання вимкнено).</returns>
     /// <remarks>
     /// ⛔ Викликати ЛИШЕ ПІСЛЯ коміту перемикання: до коміту прогони ще актуальні для читачів. Помилка прибирання
     /// прогін не валить (реалізація пише в журнал і повертає 0): решту доїдає нічна задача
-    /// <c>SupersededResultsSweepJob</c>. Інваріант: результати існують лише для прогонів <c>Current</c>/<c>Running</c>.
+    /// <c>SupersededResultsSweepJob</c>. Інваріант: прогони <c>Current</c>/<c>Running</c> не прибираються ніколи;
+    /// <c>Superseded</c> — одразу, <c>Failed</c> — лише старіший за актуальний того самого ланцюга й старший за добу.
     /// </remarks>
     public Task<int> PurgeSupersededRunsAsync(IReadOnlyList<SupersededRun> runs, CancellationToken ct);
 

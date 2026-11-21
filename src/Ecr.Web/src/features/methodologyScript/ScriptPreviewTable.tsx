@@ -158,6 +158,11 @@ function PreviewRow(props: {
               )}
             </Stack>
           )}
+          {row.valuesTruncated === true && (
+            <Text size="xs" c="dimmed" data-testid="script-preview-row-truncated">
+              {t('methodologyScript.preview.rowTruncated')}
+            </Text>
+          )}
         </Table.Td>
         {columns.map((column) => (
           <Table.Td key={columnKey(column)}>

@@ -54,6 +54,9 @@ public interface IJobQueueDepthSource
 /// </remarks>
 public sealed class DbJobQueueDepthSource(IServiceScopeFactory scopes) : IJobQueueDepthSource
 {
+    /// <summary>Момент «запарковано» (<c>DbJobQueue.ParkedAt</c>).</summary>
+    private static readonly DateTime ParkedAt = new(9999, 12, 31, 0, 0, 0, DateTimeKind.Unspecified);
+
     /// <inheritdoc />
     public async Task<IReadOnlyList<QueueDepthPoint>> ReadAsync(CancellationToken ct)
     {
@@ -62,6 +65,9 @@ public sealed class DbJobQueueDepthSource(IServiceScopeFactory scopes) : IJobQue
 
         var rows = await db.JobProgresses.AsNoTracking()
             .Where(p => p.Lane != null && (p.State == "Queued" || p.State == "Running"))
+
+            // ✎ Огляд L7 (PSS-06): запарковані (їхню роботу робить інша задача) — не глибина черги.
+            .Where(p => !(p.State == "Queued" && p.AvailableAt == ParkedAt))
             .GroupBy(p => new { p.Lane, p.State })
             .Select(g => new { g.Key.Lane, g.Key.State, Count = g.Count() })
             .ToListAsync(ct)

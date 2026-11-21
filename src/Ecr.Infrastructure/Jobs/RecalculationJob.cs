@@ -68,7 +68,9 @@ public sealed partial class RecalculationJob(
     IRecalcCommandTimeout? commandTimeout = null,
     IAuditWriter? audit = null,
     IRecalculationCompletionHook? completionHook = null,
-    IMonthColumnRouter? monthRouter = null) : IRecalculationJob
+    IMonthColumnRouter? monthRouter = null,
+    IJobLeaseContext? lease = null,
+    IJobQueue? queue = null) : IRecalculationJob
 {
     [LoggerMessage(
         Level = LogLevel.Error,
@@ -174,7 +176,29 @@ public sealed partial class RecalculationJob(
         // перерахунку; гілки оркестратора піднімають свої контексти самі (`IRecalcCommandTimeout`).
         commandTimeout?.Apply();
 
+        // ✎ PSS-04 (D-561, рішення людини 20.11): перерахунок документа за кілька періодів у черзі в базі — ЛАНЦЮЖОК кроків
+        // по одному періоду: крок рахує формули й методології свого періоду, робить його актуальним (CompleteAsync),
+        // звільняє лок документа й місце виконавця і продовжується наступним кроком (JobContinuedException → той самий
+        // рядок черги з новим payload). Межа тривалості — на крок; між кроками йдуть інші задачі документа (правка комірки).
+        // Порядок періодів — за зростанням, як і доти ([Period:-1]). Quartz і збірка без черги — як доти, одна задача.
+        var claim = lease?.Current;
+        var chain = request.DocumentId > 0 && request.PeriodKey is null
+                    && claim is not null && queue is { SupportsContinuation: true };
+
         await using var documentLock = await AcquireDocumentLockAsync(request.DocumentId, ct).ConfigureAwait(false);
+
+        // ✎ Перф-аудит 20.11 (B80 N5): «залежні з затвердженими» — надмножина звичайних залежних того самого документа й
+        // періоду. Звичайна, що стала в чергу, поки ця чекала лок (чи була на мить Running у циклі claim → відкладення), —
+        // постановкою не покрита; але лок уже наш і входи ще не читані, тож її робота буде зроблена тут із надлишком.
+        await CancelCoveredDependentsAsync(request, ct).ConfigureAwait(false);
+
+        // ✎ PSS-06 (D-561): той самий принцип для БУДЬ-ЯКОЇ цілі того самого документа й періоду (кнопка, область аркуша,
+        // авто, залежні, прохід читача, дитина розкладу): задачі, що чекають і чию роботу цей прогін робить з надлишком,
+        // паркуються ДО першого читання — і закриваються разом із ним. Названий період відомий уже тут.
+        if (request.DocumentId > 0 && request.PeriodKey is { } namedForCover)
+        {
+            await ParkCoveredAsync(request, namedForCover, ct).ConfigureAwait(false);
+        }
 
         // ⛔ «CalculationRun ховає результати сусідніх документів» (третя
         // хвиля UX-PASS R4): прогін ОДНОГО документа (`request.DocumentId > 0`,
@@ -233,6 +257,17 @@ public sealed partial class RecalculationJob(
 
         // G14: методології без опублікованих версій — привʼязки пропущено, прогін не падає.
         var skippedUnpublished = new SortedSet<int>();
+
+        // ✎ PSS-04: період цього кроку ланцюжка і ті, що лишились після нього (за зростанням).
+        int? stepPeriod = null;
+        IReadOnlyList<int> remaining = [];
+
+        // ✎ PSS-04: прогрес кроку — частина шкали всього ланцюжка (зроблені періоди + цей + решта).
+        var chainProgress = chain ? new ChainProgress(progress, request.ChainDone?.Length ?? 0) : null;
+        if (chainProgress is not null)
+        {
+            progress = chainProgress;
+        }
 
         Domain.Entities.Calculations.CalculationRun NewRun(int? periodKey)
             => new(
@@ -355,6 +390,32 @@ public sealed partial class RecalculationJob(
                 // вираховувала взагалі — саме звідти й узявся `PeriodKey(0)`
                 // нижче (див. коментар біля виклику оркестратора).
                 var periods = await ScopePeriodsAsync(docRequest, refused, ct).ConfigureAwait(false);
+
+                // ✎ PSS-04/06: крок ланцюжка — лише ПЕРШИЙ період решти скоупу. Задачі, що чекають на нього, паркуються
+                // до читання входів; якщо щось запарковано — стан періодів перечитується (рішення «що рахувати»
+                // ухвалено до паркування), і якщо крок після цього інший — запарковане повертається в чергу.
+                if (chain && periods.Count > 0)
+                {
+                    var step = periods[0];
+                    if (await ParkCoveredAsync(request, step, ct).ConfigureAwait(false) > 0)
+                    {
+                        annualOnly.Clear();
+                        refused = await RefusedPeriodsAsync(docRequest, ct, annualOnly).ConfigureAwait(false);
+                        periods = await ScopePeriodsAsync(docRequest, refused, ct).ConfigureAwait(false);
+                        if (periods.Count == 0 || periods[0] != step)
+                        {
+                            await queue!.UnparkAsync(claim!, ct).ConfigureAwait(false);
+                        }
+                    }
+
+                    if (periods.Count > 0)
+                    {
+                        stepPeriod = periods[0];
+                        remaining = [.. periods.Skip(1)];
+                        periods = [periods[0]];
+                        chainProgress!.Total = chainProgress.Done + periods.Count + remaining.Count;
+                    }
+                }
 
                 var cells = await FormulasAsync(docRequest, periods, submittedChanges, ct, annualOnly).ConfigureAwait(false);
 
@@ -560,7 +621,9 @@ public sealed partial class RecalculationJob(
             // прогін без періоду — як і раніше: задача за розкладом мусить
             // лишати слід (профіль пишеться завжди, J-1), а результатів у
             // такого прогону немає, тож «періоду 0» він не наповнить.
-            if (periodRuns.Count == 0)
+            // ✎ PSS-04: крок ланцюжка без прогону (якір B24 — лише формули; решту періодів закрили між кроками) прогону «без
+            // періоду» не лишає — лише ланцюжок, у якому не було жодного періоду взагалі.
+            if (periodRuns.Count == 0 && !(chain && (stepPeriod is not null || (request.ChainDone?.Length ?? 0) > 0)))
             {
                 yearRun = NewRun(periodKey: null);
                 db.CalculationRuns.Add(yearRun);
@@ -611,16 +674,43 @@ public sealed partial class RecalculationJob(
                 }
             }
 
+            // ✎ Огляд M1 (PSS-06): період, який цей прогін СПРАВДІ порахував (і він уже актуальний), — запарковані на нього
+            // закриваються тут і лише тут. Решту запаркованих поверне в чергу кінець задачі: свого результату вони не
+            // отримали, тож хай рахують і звітують самі.
+            if ((chain ? stepPeriod : request.DocumentId > 0 ? request.PeriodKey : null) is { } computed)
+            {
+                await SettleParkedAsync(request.DocumentId, computed, ct).ConfigureAwait(false);
+            }
+
             // ✎ LAND-YEAR L2b: читач (скрипт, колонка Calculated чужого місяця) порахований від результатів періоду-власника,
             // який цей же прогін перераховував: «актуальними» результати стають лише на перемиканні вище, тож читач бачив
             // ПОПЕРЕДНІ числа власника (як і формули з [Period:#k], WW-03). Другий прохід — coalesced-задача періоду-читача
             // після перемикання; вона читає вже нові числа й сама нових не ставить (ForeignOwnerPass).
-            await EnqueueForeignOwnerReadersAsync(request, scopeByDocument, foreignOwnerReads, ct).ConfigureAwait(false);
+            // ✎ PSS-04 / огляд M3: у ланцюжку періоди стають актуальними по одному, тож читач читає вже нові числа РАНІШИХ
+            // власників. Читач ПІЗНІШОГО власника ланцюжка (ще не перерахованого) й читачі поза рештою ланцюжка (MS) отримують
+            // прохід ОДРАЗУ, на цьому кроці: прохід стоїть у FIFO за ланцюжком (крок зберігає своє місце), тож іде після
+            // нього, а скасований чи провалений посеред року ланцюжок не лишає вже актуальних місяців без проходу.
+            if (chain && jobs is not null && !request.ForeignOwnerPass)
+            {
+                foreach (var reader in foreignOwnerReads
+                             .Where(r => r.Owners.Any(remaining.Contains))
+                             .Select(r => r.Period)
+                             .Distinct()
+                             .Order())
+                {
+                    await EnqueueReaderPassAsync(request, request.DocumentId, reader, ct).ConfigureAwait(false);
+                }
+            }
+            else
+            {
+                await EnqueueForeignOwnerReadersAsync(request, scopeByDocument, foreignOwnerReads, ct).ConfigureAwait(false);
+            }
 
             // ✎ MS: прогін лише періоду-власника (кнопка «Перерахувати» місяця) не рахував читачів інших періодів — вони
             // лишилися б зі старими числами власника. Читачів визначають матеріалізовані дані (calc.MethodologyReadTable,
-            // прив'язки, роутер місяців), нової таблиці-індексу немає.
-            await EnqueueOwnerPeriodReadersAsync(request, scopeByDocument, ct).ConfigureAwait(false);
+            // прив'язки, роутер місяців), нової таблиці-індексу немає. У ланцюжку — без читачів із РЕШТИ ланцюжка: їх
+            // порахують пізніші кроки вже з новими числами власника.
+            await EnqueueOwnerPeriodReadersAsync(request, scopeByDocument, ct, chain ? remaining : null).ConfigureAwait(false);
 
             // ✎ UAT-recalc-ux: журнал аркушів — пропущені затверджені й перераховані подані (журнал змін + повідомлення
             // задачі). Після перемикання: записується лише те, що справді стало актуальним.
@@ -797,21 +887,247 @@ public sealed partial class RecalculationJob(
 
         // ПРД-13 (НФ-8.6.4): вимір ПІСЛЯ завершення — лише читає годинник, логіки перерахунку не торкається.
         // Провалена задача сюди не доходить: тривалість до відмови не є тривалістю перерахунку.
-        if (budget is not null)
+        // ✎ PSS-04 / огляд M2: ланцюжок — один вимір після ОСТАННЬОГО кроку: сума часу РОБОТИ кроків (ChainElapsedMs),
+        // без очікувань у черзі між ними — інакше річний розклад давав би хибне «понад бюджет» і Degraded на /health/ready.
+        var chainContinues = chain && remaining.Count > 0;
+        var worked = TimeSpan.FromMilliseconds(request.ChainElapsedMs ?? 0) + (clock.UtcNow - startedAt);
+        if (budget is not null && !chainContinues)
         {
             await budget
-                .ObserveAsync(
-                    projectId, request.DocumentId, fullYear: request.PeriodKey is null, clock.UtcNow - startedAt, progress, ct)
+                .ObserveAsync(projectId, request.DocumentId, fullYear: request.PeriodKey is null, worked, progress, ct)
                 .ConfigureAwait(false);
         }
 
         // B179 L2: після УСПІШНОГО прогону — документи й періоди, які він рахував (провалений сюди не доходить); ланка —
         // з постановки залежного (ланцюжок документів-джерел).
+        // ✎ PSS-04: у ланцюжку — після КОЖНОГО кроку: період уже актуальний, залежні від нього не чекають решти року.
         if (completionHook is not null && scopeByDocument.Count > 0)
         {
             await completionHook.OnSucceededAsync(scopeByDocument, request.SourceHop, ct).ConfigureAwait(false);
         }
+
+        if (chainContinues)
+        {
+            var next = request with
+            {
+                ChainAfter = stepPeriod,
+                ChainDone = [.. ChainScope(request, scopeByDocument).GetValueOrDefault(request.DocumentId) ?? []],
+                ChainElapsedMs = (long)Math.Max(0, worked.TotalMilliseconds),
+            };
+
+            // ✎ PSS-06: задачі документа, що чекають на ПІЗНІШІ періоди ланцюжка, — його ж робота: паркуються до кроку
+            // свого періоду (закриються тоді ж), а не рахуються окремо перед ним, щоб ланцюжок порахував їх удруге.
+            await ParkRemainingAsync(next, remaining, ct).ConfigureAwait(false);
+
+            // ✎ Огляд H2: без відкладення — крок зберігає місце ланцюжка в FIFO; правці комірки документа, що чекає, claim
+            // лейна перерахунку поступається сам (DbJobQueue.EditFirstExclusion).
+            throw new JobContinuedException(JsonSerializer.Serialize(next, PayloadOptions), TimeSpan.Zero, stepPeriod!.Value);
+        }
     }
+
+    /// <summary>
+    /// ✎ PSS-04: періоди, які ланцюжок уже зробив (зі зробленими цим кроком), — у формі <c>scopeByDocument</c>.
+    /// </summary>
+    private static Dictionary<long, int[]> ChainScope(RecalculationRequest request, Dictionary<long, int[]> scopeByDocument)
+    {
+        var done = (request.ChainDone ?? []).Union(scopeByDocument.GetValueOrDefault(request.DocumentId) ?? []).Order().ToArray();
+        return done.Length == 0 ? [] : new Dictionary<long, int[]> { [request.DocumentId] = done };
+    }
+
+    /// <summary>
+    /// ✎ PSS-06 (D-561): чи прогін <paramref name="coverer"/> за період <paramref name="period"/> робить роботу задачі
+    /// <paramref name="candidate"/> з надлишком — тоді та, що чекає, паркується (<see cref="IJobQueue.ParkCoveredAsync"/>).
+    /// </summary>
+    /// <remarks>
+    /// Покрита — задача ОДНОГО періоду того самого документа, обсяг якої не ширший: аркуш (ціла задача покриває будь-який
+    /// аркуш, аркуш — лише той самий), затверджені (перекриття адміністратора покриває звичайну, не навпаки), прохід
+    /// читача (звичайний прогін покриває прохід, прохід — лише прохід: він не ставить нових проходів), ланка джерел
+    /// (покривна з меншою чи тією самою ланкою — її хук не впреться в стелю раніше). Задачі «за рік»/ланцюжки не
+    /// покриваються: їхній обсяг ширший за один період.
+    /// </remarks>
+    internal static bool Covers(RecalculationRequest coverer, int period, RecalculationRequest candidate)
+    {
+        ArgumentNullException.ThrowIfNull(coverer);
+        ArgumentNullException.ThrowIfNull(candidate);
+
+        return candidate.DocumentId == coverer.DocumentId
+               && candidate.DocumentId > 0
+               && candidate.PeriodKey == period
+               && candidate.ChainAfter is null
+               && (coverer.SheetDefId is null || coverer.SheetDefId == candidate.SheetDefId)
+               && (coverer.IncludeApproved || !candidate.IncludeApproved)
+               && (!coverer.ForeignOwnerPass || candidate.ForeignOwnerPass)
+               && coverer.SourceHop <= candidate.SourceHop
+               && SameAttribution(coverer.TriggeredByUserId, candidate.TriggeredByUserId)
+               && SameAttribution(coverer.OverrideUserId, candidate.OverrideUserId);
+    }
+
+    /// <summary>
+    /// ✎ Огляд L6: чия це робота. Задачу, яку поставила людина (чи перекриття адміністратора), покриває лише прогін ТІЄЇ
+    /// САМОЇ людини: журнал аркушів («хто перерахував», «чиє перекриття й причина») і задача, яку людина опитує, мусять
+    /// лишатись правдивими. Системна задача (без автора) покривається будь-яким прогоном.
+    /// </summary>
+    private static bool SameAttribution(int? coverer, int? candidate) => candidate is null || candidate == coverer;
+
+    /// <summary>
+    /// ✎ PSS-06: паркує задачі документа, що чекають на <paramref name="period"/> і чию роботу робить цей прогін.
+    /// </summary>
+    /// <returns>Скільки запарковано (0 — черга не вміє, оренди немає, покритих немає).</returns>
+    /// <remarks>
+    /// ⚠ Оптимізація, а не умова коректності: збій — у журнал, прогін іде далі (щонайбільше подвійна робота).
+    /// </remarks>
+    private async Task<int> ParkCoveredAsync(RecalculationRequest request, int period, CancellationToken ct)
+        => (await ParkAsync(request, [period], ct).ConfigureAwait(false)).Count;
+
+    /// <summary>✎ PSS-06: паркує задачі документа на ПІЗНІШІ періоди ланцюжка (до їхнього кроку).</summary>
+    /// <remarks>
+    /// ⛔ Огляд H2 (§6 п. 2, ФВ-12.2): ручний перерахунок і автоперерахунок (<c>-auto</c>) на пізніший місяць НЕ паркуються —
+    /// вони не чекають годинами, поки ланцюжок дійде до їхнього місяця; їх покриває лише крок їхнього ж періоду, якщо вони
+    /// ще чекають на його старті.
+    /// </remarks>
+    private Task<IReadOnlyList<string>> ParkRemainingAsync(
+        RecalculationRequest next, IReadOnlyList<int> remaining, CancellationToken ct)
+        => ParkAsync(next, remaining, ct, laterPeriods: true);
+
+    private async Task<IReadOnlyList<string>> ParkAsync(
+        RecalculationRequest coverer, IReadOnlyList<int> periods, CancellationToken ct, bool laterPeriods = false)
+    {
+        if (queue is not { SupportsContinuation: true } || lease?.Current is not { } claim || coverer.DocumentId <= 0
+            || periods.Count == 0)
+        {
+            return [];
+        }
+
+        try
+        {
+            var covered = new List<CoveredJob>();
+            foreach (var row in await queue.ListQueuedForDocumentAsync(coverer.DocumentId, ct).ConfigureAwait(false))
+            {
+                if (!string.Equals(row.Lane, JobLanes.Recalc, StringComparison.Ordinal)
+                    || !string.Equals(row.JobCode, JobListKinds.RecalculationJobCode, StringComparison.Ordinal)
+                    || string.Equals(row.JobId, claim.JobId, StringComparison.Ordinal)
+                    || TryParse(row.PayloadJson) is not { PeriodKey: { } candidatePeriod } candidate
+                    || !periods.Contains(candidatePeriod)
+                    || !Covers(coverer, candidatePeriod, candidate)
+                    || (laterPeriods && (candidate.TriggeredByUserId is not null
+                                         || row.TargetKey?.EndsWith(AutoTargetSuffix, StringComparison.Ordinal) == true)))
+                {
+                    continue;
+                }
+
+                covered.Add(new CoveredJob(row.JobId, candidatePeriod));
+            }
+
+            if (covered.Count == 0)
+            {
+                return [];
+            }
+
+            var parked = await queue.ParkCoveredAsync(claim, covered, ct).ConfigureAwait(false);
+            if (parked.Count > 0 && logger is not null && logger.IsEnabled(LogLevel.Information))
+            {
+                var shownPeriods = string.Join(", ", periods);
+                var shownJobs = string.Join(", ", parked);
+                LogParked(logger, coverer.DocumentId, shownPeriods, shownJobs);
+            }
+
+            return parked;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogParkFailed(logger ?? NullLogger<RecalculationJob>.Instance, coverer.DocumentId, ex);
+            return [];
+        }
+    }
+
+    /// <summary>Закінчення цілі автоперерахунку (<see cref="CalculationTrigger.AutoTargetOf"/>).</summary>
+    private const string AutoTargetSuffix = "-auto";
+
+    /// <summary>✎ Огляд M1: закриває запарковані на порахований <paramref name="period"/> (збій — у журнал: їх поверне кінець задачі).</summary>
+    private async Task SettleParkedAsync(long documentId, int period, CancellationToken ct)
+    {
+        if (queue is not { SupportsContinuation: true } || lease?.Current is not { } claim)
+        {
+            return;
+        }
+
+        try
+        {
+            await queue.SettleParkedAsync(claim, period, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogParkFailed(logger ?? NullLogger<RecalculationJob>.Instance, documentId, ex);
+        }
+    }
+
+    private static RecalculationRequest? TryParse(string? payload)
+    {
+        if (string.IsNullOrWhiteSpace(payload))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<RecalculationRequest>(payload, PayloadOptions);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "RecalculationJob: документ {DocumentId}, періоди {Periods}: запарковано задачі {JobIds} — їхню роботу робить "
+                  + "цей прогін (PSS-06); закриються разом із ним.")]
+    private static partial void LogParked(ILogger logger, long documentId, string periods, string jobIds);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "RecalculationJob: документ {DocumentId}: не вдалося запаркувати покриті задачі чи прочитати чергу документа; "
+                  + "перерахунок іде далі (щонайбільше подвійна робота).")]
+    private static partial void LogParkFailed(ILogger logger, long documentId, Exception exception);
+
+    /// <summary>
+    /// ✎ Перф-аудит 20.11 (B80 N5): задача «з затвердженими» після взяття лока документа скасовує звичайну задачу
+    /// залежних того самого документа й періоду, що ЧЕКАЄ (конверт «покрито задачею {jobId}»).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Безпечно саме тут: тригер ставить звичайну ПІСЛЯ коміту зміни, що її викликала, а ця задача ще не прочитала
+    /// жодного входу — отже прочитає й ту зміну. Виконувану звичайну не чіпаємо (лок у нас — виконуваної немає).
+    /// <para>
+    /// ⚠ Оптимізація, а не умова коректності: збій скасування — у журнал, перерахунок іде далі (звичайна виконається
+    /// окремо, щонайбільше подвійна робота). Якщо ж ця задача сама провалиться, скасовану поверне
+    /// <see cref="ApprovedDependentsFallback"/>.
+    /// </para>
+    /// </remarks>
+    private async Task CancelCoveredDependentsAsync(RecalculationRequest request, CancellationToken ct)
+    {
+        if (!request.IncludeApproved || jobs is null || request.DocumentId <= 0 || request.PeriodKey is not { } period)
+        {
+            return;
+        }
+
+        try
+        {
+            await jobs
+                .CancelQueuedAsync<IRecalculationJob>(
+                    CalculationTrigger.DependentsTargetOf(request.DocumentId, new PeriodKey(period)), lease?.Current?.JobId, ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogCancelCoveredFailed(logger ?? NullLogger<RecalculationJob>.Instance, request.DocumentId, period, ex);
+        }
+    }
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "RecalculationJob: документ {DocumentId}, період {PeriodKey}: не вдалося скасувати звичайну задачу залежних, "
+                  + "покриту задачею «з затвердженими»; перерахунок іде далі (щонайбільше подвійна робота).")]
+    private static partial void LogCancelCoveredFailed(ILogger logger, long documentId, int periodKey, Exception exception);
 
     /// <summary>
     /// ✎ LAND-YEAR L2b: ставить другий прохід для періодів-читачів, що читали результати періодів-власників, перерахованих
@@ -845,6 +1161,10 @@ public sealed partial class RecalculationJob(
     }
 
     /// <summary>Ставить coalesced-прохід періоду-читача; сам прохід нових не ставить (<c>ForeignOwnerPass</c>).</summary>
+    /// <remarks>
+    /// ⚠ PSS-07 (D-561): прохід читача — без відкладення каскаду. Ланцюжок (PSS-04) ставить проходи ОДИН раз, після
+    /// останнього кроку; прохід за названий період — один на період-читача й злитий за ціллю.
+    /// </remarks>
     private async Task EnqueueReaderPassAsync(RecalculationRequest request, long documentId, int period, CancellationToken ct)
         => _ = await jobs!
             .EnqueueCoalescedAsync<IRecalculationJob>(
@@ -863,6 +1183,9 @@ public sealed partial class RecalculationJob(
             SheetDefId = null,
             FanOutParentJobId = null,
             ForeignOwnerPass = true,
+            ChainAfter = null,
+            ChainDone = null,
+            ChainElapsedMs = null,
         };
 
     /// <summary>
@@ -872,6 +1195,7 @@ public sealed partial class RecalculationJob(
     /// <param name="request">Завдання; <see cref="RecalculationRequest.ForeignOwnerPass"/> — другий прохід нових не ставить.</param>
     /// <param name="scopeByDocument">Періоди, які прогін рахував, за документами.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="alsoExclude">✎ PSS-04 / огляд M3: періоди-читачі, яких прохід не ставить (решта ланцюжка порахує їх сама).</param>
     /// <remarks>
     /// <para>
     /// Читач періоду Q — методологія-скрипт, що читає (<c>calc.MethodologyReadTable</c>) таблицю документа, у якої колонка
@@ -886,7 +1210,8 @@ public sealed partial class RecalculationJob(
     /// </para>
     /// </remarks>
     private async Task EnqueueOwnerPeriodReadersAsync(
-        RecalculationRequest request, Dictionary<long, int[]> scopeByDocument, CancellationToken ct)
+        RecalculationRequest request, Dictionary<long, int[]> scopeByDocument, CancellationToken ct,
+        IReadOnlyList<int>? alsoExclude = null)
     {
         if (jobs is null || monthRouter is not { Enabled: true } || request.ForeignOwnerPass || scopeByDocument.Count == 0)
         {
@@ -908,6 +1233,12 @@ public sealed partial class RecalculationJob(
 
             foreach (var period in await ReaderPeriodsOfOwnersAsync(routing, scope, ct).ConfigureAwait(false))
             {
+                // ✎ Огляд M3: читача з решти ланцюжка порахує його пізніший крок.
+                if (alsoExclude is not null && alsoExclude.Contains(period))
+                {
+                    continue;
+                }
+
                 var child = ReaderPassRequest(request, documentId, period);
                 var skip = await ReaderPassSkipAsync(child, ct).ConfigureAwait(false);
                 if (skip == RecalculationWriteDenial.None)
@@ -1640,38 +1971,17 @@ public sealed partial class RecalculationJob(
         // без власних результатів у документі, де такі «безприв'язні» є, лишається за старим правилом (рахується).
         var approvedIds = instances.Where(i => skippedSheets.TryGetValue(i.PeriodKeyValue, out var approved)
                                                && approved.Contains(i.SheetDefId)).Select(i => i.Id).ToList();
-        var attributed = new HashSet<long>();
-        var legacyPeriods = new HashSet<int>();
-        if (approvedIds.Count > 0)
-        {
-            // ⛔ Джерело результатів — те саме, що в `CarryOverResultsAsync` (`CurrentRunSelection`: документний прогін
-            // періоду має перевагу над проєктним). Вибір «будь-який прогін зі статусом Current» розходився з переносом:
-            // екземпляр виключався з розрахунку за результатами одного прогону, а переносити брали б з іншого — числа зникали.
-            var currentRuns = await CurrentRunSelection.RunsOfDocumentAsync(db, request.DocumentId, ct).ConfigureAwait(false);
-            foreach (var period in instances.Where(i => approvedIds.Contains(i.Id)).Select(i => i.PeriodKeyValue).Distinct())
-            {
-                var runIds = CurrentRunSelection.Effective(currentRuns, request.DocumentId, period).Select(r => r.Id).ToList();
-                if (runIds.Count == 0)
-                {
-                    continue;
-                }
-
-                var periodResults = db.CalculationResults
-                    .AsNoTracking()
-                    .Where(r => r.DocumentId == request.DocumentId && r.PeriodKey == period
-                                && runIds.Contains(r.CalculationRunId));
-                attributed.UnionWith(await periodResults
-                    .Where(r => r.TableInstanceId != null && approvedIds.Contains(r.TableInstanceId.Value))
-                    .Select(r => r.TableInstanceId!.Value)
-                    .Distinct()
-                    .ToListAsync(ct)
-                    .ConfigureAwait(false));
-                if (await periodResults.AnyAsync(r => r.TableInstanceId == null, ct).ConfigureAwait(false))
-                {
-                    legacyPeriods.Add(period);
-                }
-            }
-        }
+        // ⛔ Джерело результатів — те саме, що в `CarryOverResultsAsync` (`CurrentRunSelection`: документний прогін
+        // періоду має перевагу над проєктним). ✎ D-560: з перечитуванням прогонів (прибирання витіснених одразу).
+        var (attributed, legacyPeriods) = approvedIds.Count == 0
+            ? ([], [])
+            : await CurrentRunSelection.ApprovedAttributionAsync(
+                    db,
+                    request.DocumentId,
+                    [.. instances.Where(i => approvedIds.Contains(i.Id)).Select(i => i.PeriodKeyValue).Distinct()],
+                    approvedIds,
+                    ct)
+                .ConfigureAwait(false);
 
         bool IsApproved(InstanceRow row)
             => skippedSheets.TryGetValue(row.PeriodKeyValue, out var approved) && approved.Contains(row.SheetDefId)
@@ -2827,6 +3137,50 @@ public sealed partial class RecalculationJob(
         return [.. rows.Select(r => (r.DocumentId, r.PeriodKeyValue))];
     }
 
+    /// <summary>
+    /// ✎ PSS-04: прогрес кроку ланцюжка — його 0…100 у частці всього ланцюжка: крок <c>Done + 1</c> із
+    /// <see cref="Total"/> (поки скоуп невідомий — із <c>Done + 1</c>), тож шкала рядка задачі не стрибає назад на кожному кроці.
+    /// </summary>
+    private sealed class ChainProgress(IJobProgress inner, int done) : IJobProgress
+    {
+        /// <summary>Ключ каталогу «період {step} з {total}: {message}» (огляд L2).</summary>
+        public const string StepKey = "jobs.chainStep";
+
+        /// <summary>Скільки періодів ланцюжок уже зробив до цього кроку.</summary>
+        public int Done { get; } = done;
+
+        /// <summary>Скільки періодів у ланцюжку разом.</summary>
+        public int Total { get; set; } = done + 1;
+
+        /// <inheritdoc />
+        /// <remarks>
+        /// ✎ Огляд L2: повідомлення кроку — у конверті «період k з N» (рядок задачі не скидає відсоток на кожному кроці —
+        /// claim кроку ланцюжка лишає <c>StartedAt</c> і <c>Percent</c>). Не вміщається в межу стовпця — як є.
+        /// </remarks>
+        public Task ReportAsync(int percent, string? message, CancellationToken ct)
+        {
+            var total = Math.Max(Total, Done + 1);
+            var wrapped = message;
+            if (message is not null && JobProgressMessageCodec.TryDecode(message, out var decoded))
+            {
+                var step = JobProgressMessageCodec.Encode(new JobProgressMessageEnvelope(
+                    StepKey,
+                    new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["step"] = (Done + 1).ToString(CultureInfo.InvariantCulture),
+                        ["total"] = total.ToString(CultureInfo.InvariantCulture),
+                    },
+                    decoded));
+                if (step.Length <= JobProgressMessageCodec.MaxEncodedLength)
+                {
+                    wrapped = step;
+                }
+            }
+
+            return inner.ReportAsync(((Done * 100) + Math.Clamp(percent, 0, 100)) / total, wrapped, ct);
+        }
+    }
+
     /// <summary>Прогрес однієї фази: шкала зсунута й стиснута, повідомлення назване.</summary>
     /// <param name="inner">Канал прогресу задачі.</param>
     /// <param name="floor">Скільки відсотків уже пройдено до цієї фази.</param>
@@ -2918,6 +3272,14 @@ public sealed partial class RecalculationJob(
 /// </param>
 /// <param name="OverrideUserId">Хто ввімкнув перекриття (для журналу записів аркушів).</param>
 /// <param name="OverrideReason">Причина перекриття (обов'язкова; у журнал записів аркушів).</param>
+/// <param name="ChainAfter">
+/// ✎ PSS-04 (<c>D-561</c>): крок ланцюжка (перерахунок документа за кілька періодів у черзі в базі) — останній уже
+/// зроблений період; цей крок рахує ПЕРШИЙ період скоупу після нього. <c>null</c> — перший крок (чи не ланцюжок).
+/// </param>
+/// <param name="ChainDone">✎ PSS-04: періоди, які ланцюжок уже зробив актуальними (шкала прогресу «місяць k з N»).</param>
+/// <param name="ChainElapsedMs">
+/// ✎ Огляд M2: сума часу РОБОТИ зроблених кроків, мс (без очікувань у черзі між ними) — вимір ПРД-13 після останнього.
+/// </param>
 public sealed record RecalculationRequest(
     int ProjectId,
     long DocumentId,
@@ -2931,10 +3293,18 @@ public sealed record RecalculationRequest(
     int SourceHop = 0,
     bool IncludeApproved = false,
     int? OverrideUserId = null,
-    string? OverrideReason = null)
+    string? OverrideReason = null,
+    int? ChainAfter = null,
+    int[]? ChainDone = null,
+    long? ChainElapsedMs = null)
 {
-    /// <summary>✎ B59: нижня межа ключа періоду скоупу (включно); без року — <see cref="int.MinValue"/>.</summary>
-    internal int FromKey => PeriodKey is null && Year is { } y ? y * 100 : int.MinValue;
+    /// <summary>
+    /// ✎ B59: нижня межа ключа періоду скоупу (включно); без року — <see cref="int.MinValue"/>.
+    /// ✎ PSS-04: крок ланцюжка — лише періоди ПІСЛЯ <see cref="ChainAfter"/>.
+    /// </summary>
+    internal int FromKey => PeriodKey is not null
+        ? int.MinValue
+        : Math.Max(Year is { } y ? y * 100 : int.MinValue, ChainAfter is { } after ? after + 1 : int.MinValue);
 
     /// <summary>✎ B59: верхня межа ключа періоду скоупу (включно); без року — <see cref="int.MaxValue"/>.</summary>
     internal int ToKey => PeriodKey is null && Year is { } y ? (y * 100) + 99 : int.MaxValue;

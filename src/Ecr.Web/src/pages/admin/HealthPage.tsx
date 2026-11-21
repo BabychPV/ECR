@@ -290,16 +290,46 @@ export function HealthPage(): JSX.Element {
             skeleton="table"
             onRetry={() => void db.refetch()}
           >
-            {(dbReport) => (
-              <Box className="ecr-health-kv">
-                <KeyValue
-                  items={Object.entries(details(dbReport) ?? {}).map(([key, value]) => ({
-                  label: fieldLabel(key),
-                    value: fieldValue(value),
-                  }))}
-                />
-              </Box>
-            )}
+            {(dbReport) => {
+              const dbDetails = details(dbReport) ?? {};
+
+              return (
+                <Stack gap="sm">
+                  {/* ✎ PSS-L6b: рядки в крайніх партиціях — довідка (info), а не збій: статус БД від неї не міняється
+                      (runbook §7.5). Поля `edge*` у перелік не потрапляють — їх показує ця примітка. */}
+                  {dbDetails.edgeWarning === true && (
+                    <Banner
+                      tone="info"
+                      testId="health-db-edge-warning"
+                      title={t('health.db.edgeWarning.title')}
+                      text={
+                        <Stack gap="xs">
+                          <Text size="sm">{t('health.db.edgeWarning.text')}</Text>
+                          {typeof dbDetails.edgeRowsFirst === 'number' && typeof dbDetails.edgeRowsLast === 'number' && (
+                            <Text size="sm">
+                              {t('health.db.edgeWarning.rows', {
+                                first: dbDetails.edgeRowsFirst,
+                                last: dbDetails.edgeRowsLast,
+                              })}
+                            </Text>
+                          )}
+                        </Stack>
+                      }
+                    />
+                  )}
+                  <Box className="ecr-health-kv">
+                    <KeyValue
+                      items={Object.entries(dbDetails)
+                        .filter(([key]) => !EdgeFields.has(key))
+                        .map(([key, value]) => ({
+                          label: fieldLabel(key),
+                          value: fieldValue(value),
+                        }))}
+                    />
+                  </Box>
+                </Stack>
+              );
+            }}
           </AsyncBoundary>
         </HealthSection>
 
@@ -586,6 +616,9 @@ const FieldLabelKeys: Record<string, string> = {
   partitionsAhead: 'health.database.partitionsAhead',
   limitations: 'health.database.limitations',
 };
+
+/** ✎ PSS-L6b: поля попередження про крайні партиції — окрема примітка, не рядки переліку. */
+const EdgeFields: ReadonlySet<string> = new Set(['edgeWarning', 'edgeRowsFirst', 'edgeRowsLast', 'edgeWarningError']);
 
 function fieldLabel(key: string): string {
   const translationKey = FieldLabelKeys[key];

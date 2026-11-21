@@ -99,3 +99,57 @@ describe('F13: перегляд — результат не переживає �
     expect(screen.queryByTestId('script-preview')).toBeNull();
   });
 });
+
+describe('PSS-21: межі перегляду пояснено окремо від помилок скрипта', () => {
+  beforeEach(() => {
+    preview.mockReset();
+  });
+
+  it('вичерпаний бюджет перегляду й урізані величини — окремі пояснення; рядок позначено', async () => {
+    preview.mockResolvedValue({
+      ...result,
+      budgetExhausted: true,
+      tables: [
+        previewTable({
+          tableCode: 'T3_00',
+          tableInstanceId: 5,
+          rows: [
+            previewRow({
+              rowKey: 'a',
+              rowNumber: 1,
+              values: [previewValue({ name: 'OUT', text: '1' })],
+              valuesTruncated: true,
+            }),
+            previewRow({
+              rowKey: 'b',
+              rowNumber: 2,
+              issue: 'stepError',
+              values: [previewValue({ name: 'OUT', text: '', error: '#BUDGET' })],
+            }),
+          ],
+        }),
+      ],
+    });
+    await runPreview();
+
+    fireEvent.click(screen.getByRole('button', { name: /preview\.run/ }));
+    expect(await screen.findByTestId('script-preview')).toBeTruthy();
+
+    // Мутація: прибрати блок `budgetExhausted` з панелі — #BUDGET рядка 2 виглядає як помилка скрипта без пояснення.
+    expect(screen.getByTestId('script-preview-budget-exhausted').textContent).toMatch(/preview\.budgetExhausted/);
+    expect(screen.getByTestId('script-preview-values-truncated').textContent).toMatch(/preview\.valuesTruncated/);
+    expect(screen.getAllByTestId('script-preview-row-truncated')).toHaveLength(1);
+  });
+
+  it('без прапорців відповіді пояснень немає', async () => {
+    preview.mockResolvedValue({ ...result, budgetExhausted: false });
+    await runPreview();
+
+    fireEvent.click(screen.getByRole('button', { name: /preview\.run/ }));
+    expect(await screen.findByTestId('script-preview')).toBeTruthy();
+
+    expect(screen.queryByTestId('script-preview-budget-exhausted')).toBeNull();
+    expect(screen.queryByTestId('script-preview-values-truncated')).toBeNull();
+    expect(screen.queryByTestId('script-preview-row-truncated')).toBeNull();
+  });
+});

@@ -19,6 +19,11 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 /// ⛔ МУТАЦІЙНИЙ ДОКАЗ: прибрати `ALTER TABLE … SWITCH` з процедури, або зсунути поріг
 /// («старше N» → усе), — тест червоніє. Власна база: архівація зачіпає ВСІ старі партиції,
 /// а спільна БД колекції містить чужі рядки аудиту зі старими датами.
+/// <para>
+/// ✎ PSS-27: механіку SWITCH на коротких порогах перевіряє ВНУТРІШНЯ <c>arc.usp_ArchiveAuditBefore</c> з явною межею;
+/// публічна <c>arc.usp_ArchiveAudit</c> тримає підлогу 120 міс. і не приймає «сьогодні» з майбутнього —
+/// її доводить <see cref="AuditArchiveHorizonTests"/>.
+/// </para>
 /// </remarks>
 [Collection("SqlServer")]
 public sealed class AuditArchiveSwitchTests
@@ -98,9 +103,8 @@ public sealed class AuditArchiveSwitchTests
                   AND is_disabled = 0
                 """));
 
-            // Поріг 0 стискається до 1: поточний місяць (жовтень) не архівується ніколи,
-            // а серпневий рядок (давніше за 1 міс.) — архівується.
-            var (p3, r3) = await ArchiveAsync(cs, olderThanMonths: 0);
+            // Межа — перше число поточного місяця (поріг 1): жовтень на місці, серпневий рядок — в архіві.
+            var (p3, r3) = await ArchiveAsync(cs, olderThanMonths: 1);
             Assert.Equal((1, 1L), (p3, r3));
             Assert.Equal(1L, await ScalarAsync(cs, "SELECT COUNT(*) FROM arc.AuditCellChange WHERE NewValue = N'mid-aug'"));
             Assert.Equal(1L, await ScalarAsync(cs, "SELECT COUNT(*) FROM aud.CellChange WHERE NewValue = N'fresh-oct'"));
@@ -125,20 +129,21 @@ public sealed class AuditArchiveSwitchTests
             Assert.Equal(1L, await ScalarAsync(cs, "SELECT COUNT(*) FROM aud.SecurityEvent WHERE EventType = N'old-mar'"));
             Assert.Equal(0L, await ScalarAsync(cs, "SELECT COUNT(*) FROM arc.AuditSecurityEvent"));
 
-            // Нічна задача сама викликає архівацію (годинник 2029-01-15, поріг 24 міс. → усе до 2027-01-01):
-            // у журналі прогону partition-check — лічильники, а старі рядки вже в архіві.
+            // Нічна задача сама викликає архівацію — ✎ PSS-27: з глибиною 120 міс. (підлога), тож рядки 2026 року
+            // лишаються в aud.*, а в журналі прогону partition-check — лічильники (нуль) і чинна глибина.
             await using var db = new EcrDbContext(
                 new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(cs).Options);
             var job = new PartitionCheckJob(
                 db, Substitute.For<Ecr.Application.Ports.ISqlCapabilities>(),
-                new TestClock(new DateTime(2029, 1, 15, 0, 0, 0, DateTimeKind.Utc)));
+                new TestClock(DateTime.UtcNow));
             await job.ExecuteAsync(null, Substitute.For<Ecr.Application.Ports.IJobProgress>(), CancellationToken.None);
 
-            Assert.Equal(0L, await ScalarAsync(cs, "SELECT COUNT(*) FROM aud.SecurityEvent WHERE EventType = N'old-mar'"));
-            Assert.Equal(1L, await ScalarAsync(cs, "SELECT COUNT(*) FROM arc.AuditSecurityEvent WHERE EventType = N'old-mar'"));
+            Assert.Equal(1L, await ScalarAsync(cs, "SELECT COUNT(*) FROM aud.SecurityEvent WHERE EventType = N'old-mar'"));
+            Assert.Equal(0L, await ScalarAsync(cs, "SELECT COUNT(*) FROM arc.AuditSecurityEvent WHERE EventType = N'old-mar'"));
             Assert.Equal(1L, await ScalarAsync(cs, """
                 SELECT COUNT(*) FROM itg.MaintenanceRun
-                WHERE JobCode = N'partition-check' AND JSON_VALUE(DetailsJson, '$.auditArchivedPartitions') IS NOT NULL
+                WHERE JobCode = N'partition-check' AND JSON_VALUE(DetailsJson, '$.auditArchivedPartitions') = N'0'
+                  AND JSON_VALUE(DetailsJson, '$.auditArchiveMonths') = N'120'
                 """));
         }
         finally
@@ -159,9 +164,10 @@ public sealed class AuditArchiveSwitchTests
         await using var c = new SqlConnection(cs);
         await c.OpenAsync();
         await using var cmd = c.CreateCommand();
-        cmd.CommandText = "EXEC arc.usp_ArchiveAudit @OlderThanMonths = @m, @Today = @t, @PartitionsSwitched = @p OUTPUT, @RowsSwitched = @r OUTPUT;";
+        cmd.CommandText = "EXEC arc.usp_ArchiveAuditBefore @Cutoff = @c, @OlderThanMonths = @m, @PartitionsSwitched = @p OUTPUT, @RowsSwitched = @r OUTPUT;";
+        cmd.Parameters.Add("@c", System.Data.SqlDbType.DateTime2).Value =
+            new DateTime(Today.Year, Today.Month, 1, 0, 0, 0, DateTimeKind.Utc).AddMonths(-olderThanMonths);
         cmd.Parameters.AddWithValue("@m", olderThanMonths);
-        cmd.Parameters.Add("@t", System.Data.SqlDbType.Date).Value = Today;
         var p = cmd.Parameters.Add("@p", System.Data.SqlDbType.Int);
         p.Direction = System.Data.ParameterDirection.Output;
         var r = cmd.Parameters.Add("@r", System.Data.SqlDbType.BigInt);

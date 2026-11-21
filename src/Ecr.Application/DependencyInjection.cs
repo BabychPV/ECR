@@ -454,6 +454,9 @@ public static class DependencyInjection
         services.AddScoped<Calculations.ListMethodologiesHandler>();
         services.AddScoped<Calculations.PublishMethodologyHandler>();
         services.AddScoped<Calculations.IFormulaLinkRebuilder>(sp => sp.GetRequiredService<Calculations.PublishMethodologyHandler>());
+
+        // PSS-23: ворота золотого набору для перемикання рушія — той самий scoped обробник публікації, явною реєстрацією.
+        services.AddScoped<Calculations.IGoldenSetGate>(sp => sp.GetRequiredService<Calculations.PublishMethodologyHandler>());
         services.AddScoped<Calculations.SimulateMethodologyHandler>();
         services.AddScoped<Calculations.ListMethodologyVersionsHandler>();
         services.AddScoped<Calculations.ListMethodologyPublicationsHandler>();

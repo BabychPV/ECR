@@ -422,6 +422,12 @@ public sealed class RobustnessTests
         ["функція викликається багатьма var"] = limit => R + "function big(a) = a" + Rep(" + a", 400) + ";\n" + Many(limit, i => $"var v{i} = big({i});\n", string.Empty),
         ["багато викликів власних функцій"] = limit => R + "function g(a) = a;\n" + Many(limit, i => $"var v{i} = g({i}) + g(1);\n", string.Empty),
         ["багато агрегатів"] = limit => R + "table G = T2;\n" + Many(limit, i => $"var s{i} = Sum(G.A where G.B == {i});\n", string.Empty),
+        ["багато кодів речовин в одному foreach (PSS-31: було List.Contains)"] = limit =>
+            "rows from T1;\nforeach substance S in (" + string.Join(",", Enumerable.Range(0, limit / 10).Select(i => $"\"c{i}\"")) + ") { var q = 1; }",
+        ["багато output в одній гілці if (PSS-31: було List.Contains)"] = limit =>
+            "rows from T1;\nif (1) {\n" + Many(limit, i => $"output O{i} : t = 1;\n", string.Empty) + "}",
+        ["функція з багатьма параметрами (PSS-31: було List.Contains)"] = limit =>
+            "rows from T1;\nfunction f(" + string.Join(",", Enumerable.Range(0, limit / 8).Select(i => $"p{i}")) + ") = p0;\n",
         ["довгий ланцюг функцій (було квадратично: CheckRecursion)"] = limit => ChainOfFunctions(FunctionCount(limit), ring: false),
         ["кільце функцій (було квадратично: CheckRecursion)"] = limit => ChainOfFunctions(FunctionCount(limit), ring: true),
     };

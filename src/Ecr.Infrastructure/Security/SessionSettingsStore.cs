@@ -28,20 +28,49 @@ public sealed class SessionSettingsStore(EcrDbContext db) : ISessionSettingsStor
 
     /// <inheritdoc />
     public Task WriteIdleTimeoutMinutesAsync(int minutes, int byUserId, DateTime at, CancellationToken ct)
+        => UpsertAsync(
+            SessionSettings.IdleTimeoutKey, minutes, "Sign out after N minutes without activity (D-471)",
+            byUserId, at, ct);
+
+    /// <inheritdoc />
+    public Task<string?> ReadTechnicalLogRetentionDaysAsync(CancellationToken ct)
+        => db.Database
+            .SqlQuery<string?>($"SELECT Value AS [Value] FROM sys_ecr.SystemSetting WHERE [Key] = {SessionSettings.TechnicalLogRetentionKey}")
+            .FirstOrDefaultAsync(ct);
+
+    /// <inheritdoc />
+    public Task WriteTechnicalLogRetentionDaysAsync(int days, int byUserId, DateTime at, CancellationToken ct)
+        => UpsertAsync(
+            SessionSettings.TechnicalLogRetentionKey, days, "Retention of sec.LoginAttempt, days (PSS-24)",
+            byUserId, at, ct);
+
+    /// <inheritdoc />
+    public Task<string?> ReadAuditRetentionMonthsAsync(CancellationToken ct)
+        => db.Database
+            .SqlQuery<string?>($"SELECT Value AS [Value] FROM sys_ecr.SystemSetting WHERE [Key] = {SessionSettings.AuditRetentionKey}")
+            .FirstOrDefaultAsync(ct);
+
+    /// <inheritdoc />
+    public Task WriteAuditRetentionMonthsAsync(int months, int byUserId, DateTime at, CancellationToken ct)
+        => UpsertAsync(
+            SessionSettings.AuditRetentionKey, months, "Minimum audit depth in aud.*, months (PSS-27)",
+            byUserId, at, ct);
+
+    private async Task UpsertAsync(string key, int number, string description, int byUserId, DateTime at, CancellationToken ct)
     {
-        var value = minutes.ToString(CultureInfo.InvariantCulture);
+        var value = number.ToString(CultureInfo.InvariantCulture);
 
         // ⚠ UPDATE, а за відсутності рядка — INSERT, під UPDLOCK/HOLDLOCK: два одночасні збереження
         // не дають порушення первинного ключа.
-        return db.Database.ExecuteSqlInterpolatedAsync(
+        await db.Database.ExecuteSqlInterpolatedAsync(
             $"""
             UPDATE sys_ecr.SystemSetting WITH (UPDLOCK, HOLDLOCK)
                SET Value = {value}, ModifiedAt = {at}, ModifiedByUserId = {byUserId}
-             WHERE [Key] = {SessionSettings.IdleTimeoutKey};
+             WHERE [Key] = {key};
             IF @@ROWCOUNT = 0
                 INSERT INTO sys_ecr.SystemSetting ([Key], Value, Description, ModifiedAt, ModifiedByUserId)
-                VALUES ({SessionSettings.IdleTimeoutKey}, {value}, N'Sign out after N minutes without activity (D-471)', {at}, {byUserId});
+                VALUES ({key}, {value}, {description}, {at}, {byUserId});
             """,
-            ct);
+            ct).ConfigureAwait(false);
     }
 }

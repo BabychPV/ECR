@@ -279,7 +279,17 @@ public sealed class ApprovalState : Entity<long>
     /// помилка в обережний бік.
     /// </remarks>
     public bool IsRecallable(int? firstStepId)
-        => Status == DocumentStatus.Submitted && CurrentStepId == firstStepId;
+        => IsRecallableState(Status, CurrentStepId, firstStepId);
+
+    /// <summary>
+    /// ✎ D-6: те саме правило <see cref="IsRecallable"/> над прочитаними полями стану (без сутності) — для
+    /// підказки «що можна відкликати» по місяцях річного аркуша одним читанням станів.
+    /// </summary>
+    /// <param name="status">Стан аркуша.</param>
+    /// <param name="currentStepId">Поточний крок маршруту.</param>
+    /// <param name="firstStepId">Перший крок чинного маршруту; <c>null</c> — маршруту немає.</param>
+    public static bool IsRecallableState(DocumentStatus status, int? currentStepId, int? firstStepId)
+        => status == DocumentStatus.Submitted && currentStepId == firstStepId;
 
     /// <summary>Відкликання поданого аркуша автором (<c>BE-31</c>): <c>Submitted → Draft</c>.</summary>
     /// <param name="reason">Причина; обов'язкова.</param>

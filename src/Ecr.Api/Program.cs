@@ -238,6 +238,16 @@ builder.Services.Configure<GzipCompressionProviderOptions>(
 // пояснення — в `Security/LoginRateLimiting.cs`, а не тут: межа, розмазана між
 // композицією і конвеєром, розходиться першою ж правкою.
 builder.Services.AddEcrRateLimiting(builder.Configuration);
+builder.Services.AddEcrScriptAuthoringLimits(); // PSS-21: межі прогонів і перевірок скрипта (Security/ScriptAuthoringRateLimitPolicy.cs)
+
+// PSS-24: успішні входи, невдалі спроби й блокування — у незмінний `aud.SecurityEvent`; ім'я без облікового запису
+// маскується (ключований хеш, ключ — під Data Protection). Раніше ці рядки лежали в `AddEcrRateLimiting` (лан L9 уникав
+// спільних гарячих файлів), тепер — тут, у композиції.
+builder.Services.AddSingleton<ILoginNameMasker, DataProtectedLoginNameMasker>();
+builder.Services.AddSingleton<Ecr.Application.Ports.ILoginAuditJournal, LoginAuditJournal>();
+
+// PSS-24: прибирання оперативного `sec.LoginAttempt` за налаштовуваним строком (400 днів за замовчуванням).
+builder.Services.AddHostedService<Ecr.Infrastructure.Security.LoginAttemptRetentionService>();
 
 // ФВ-5.24: відмови в доступі (403) → aud.SecurityEvent. Синглтон: обмежувач флуду
 // тримає стан між запитами. Запис — в окремому scope, поза транзакцією запиту.

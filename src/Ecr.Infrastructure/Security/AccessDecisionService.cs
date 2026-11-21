@@ -3372,6 +3372,303 @@ public sealed class AccessDecisionService(
         return EditRules.CanReopen(profile, context, requiredRoleId, alternativeRoleId);
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// ✎ D-6: пакет для місяців річного аркуша (<c>submission-target</c>). Умови кожного періоду — ті самі поля, що
+    /// <see cref="BuildContextAsync"/> (стан проєкту, ефективний стан періоду з винятком документа, стан аркуша, ознаки
+    /// передач і блокувань рядків), але ДВОМА запитами на всі періоди; код аркуша й надання учасника — раз на документ
+    /// (від періоду не залежать, рівень учасника рахується на період тим самим <see cref="ApplyParticipationAsync"/>);
+    /// крок маршруту — з того самого читання стану аркуша; маршрут — раз на версію шаблону періоду і лише тоді, коли
+    /// рішення без ролі кроку вже «так» (роль кроку лише ДОДАЄ відмову: <see cref="EditRules.CanApprove"/>,
+    /// <see cref="EditRules.CanReopen"/>). Рішення — ті самі <c>EditRules</c>, що поштучно (тест еквівалентності
+    /// <c>SheetPeriodRightsEquivalenceTests</c>). Період без рядка в календарі проєкту — поштучним шляхом.
+    /// </remarks>
+    public async Task<SheetPeriodRights> SheetPeriodRightsAsync(
+        AccessProfile profile,
+        long documentId,
+        int sheetDefId,
+        long? sheetCopyId,
+        IReadOnlyCollection<PeriodKey> approve,
+        IReadOnlyCollection<PeriodKey> submitGrant,
+        IReadOnlyCollection<PeriodKey> reopen,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        ArgumentNullException.ThrowIfNull(approve);
+        ArgumentNullException.ThrowIfNull(submitGrant);
+        ArgumentNullException.ThrowIfNull(reopen);
+
+        var approved = new HashSet<int>();
+        var granted = new HashSet<int>();
+        var reopened = new HashSet<int>();
+        var keys = approve.Concat(submitGrant).Concat(reopen).Select(k => k.Value).Distinct().ToList();
+        if (keys.Count == 0)
+        {
+            return new SheetPeriodRights(approved, granted, reopened);
+        }
+
+        var facts = await PeriodContextsAsync(documentId, sheetDefId, sheetCopyId, keys, ct).ConfigureAwait(false);
+
+        // Код аркуша й надання учасника — від періоду не залежать: раз на документ.
+        var contexts = new Dictionary<int, CellAccessContext>();
+        if (facts.Count > 0)
+        {
+            var first = facts.Values.First().Context;
+            var coded = await WithSheetCodeAsync(profile, documentId, first, ct).ConfigureAwait(false);
+            IReadOnlyList<ParticipationGrant> grants = [];
+            if (profile.HasDocumentParticipations
+                && !profile.IsIntegrationWriter
+                && first.HasEditAssignments
+                && !profile.DeniesProject(first.ProjectId))
+            {
+                var locked = db.Database.CurrentTransaction is not null;
+                grants = (await ParticipationGrantsAsync(profile, [documentId], ct, locked).ConfigureAwait(false))
+                    .TryGetValue(documentId, out var mine) ? mine : [];
+            }
+
+            var sheetCode = coded.SheetCode;
+            if (grants.Count > 0 && sheetCode is null)
+            {
+                sheetCode = SheetCodeOf(await SnapshotAsync(documentId, ct).ConfigureAwait(false), sheetDefId);
+            }
+
+            foreach (var (key, fact) in facts)
+            {
+                var context = coded.SheetCode is null ? fact.Context : fact.Context with { SheetCode = coded.SheetCode };
+                if (grants.Count > 0)
+                {
+                    context = await ApplyParticipationAsync(documentId, context with { SheetCode = sheetCode }, grants, ct)
+                        .ConfigureAwait(false);
+                }
+
+                contexts[key] = context;
+            }
+        }
+
+        // Маршрут — раз на версію шаблону; альтернативна роль — раз на маршрут.
+        var routes = new Dictionary<int, (Domain.Entities.Workflow.ApprovalRoute? Route, int? Alternative)>();
+        async Task<(Domain.Entities.Workflow.ApprovalRoute? Route, int? Alternative)> RouteOfAsync(PeriodFacts fact)
+        {
+            if (!routes.TryGetValue(fact.TemplateVersionId, out var found))
+            {
+                var route = await workflow.FindRouteAsync(fact.Context.ProjectId, fact.TemplateVersionId, ct).ConfigureAwait(false);
+                found = (route, route is null ? null : await AlternativeRoleOfAsync(route, ct).ConfigureAwait(false));
+                routes[fact.TemplateVersionId] = found;
+            }
+
+            return found;
+        }
+
+        // Поточний крок — правило `CurrentApprovalStepCoreAsync` над прочитаним кроком.
+        async Task<(int? RoleId, int? Alternative)> CurrentStepRolesAsync(PeriodFacts fact)
+        {
+            var (route, alternative) = await RouteOfAsync(fact).ConfigureAwait(false);
+            if (route is null || route.Steps.Count == 0 || route.StepAt(fact.CurrentStepId) is not { } current)
+            {
+                return (null, null);
+            }
+
+            return (current.RoleId, alternative);
+        }
+
+        foreach (var key in approve.Select(k => k.Value).Distinct())
+        {
+            if (!facts.TryGetValue(key, out var fact))
+            {
+                if ((await this.CanApproveOfAsync(profile, documentId, sheetDefId, new PeriodKey(key), sheetCopyId, ct).ConfigureAwait(false)).IsAllowed)
+                {
+                    approved.Add(key);
+                }
+
+                continue;
+            }
+
+            var context = contexts[key];
+            if (DenyIfInvisible(profile, context) is not null || !EditRules.CanApprove(profile, context).IsAllowed)
+            {
+                continue;
+            }
+
+            var (roleId, alternative) = await CurrentStepRolesAsync(fact).ConfigureAwait(false);
+            if (EditRules.CanApprove(profile, context, roleId, alternative).IsAllowed)
+            {
+                approved.Add(key);
+            }
+        }
+
+        foreach (var key in submitGrant.Select(k => k.Value).Distinct())
+        {
+            if (!facts.ContainsKey(key))
+            {
+                if (await HasSubmitGrantAsync(profile, documentId, sheetDefId, new PeriodKey(key), sheetCopyId, ct).ConfigureAwait(false))
+                {
+                    granted.Add(key);
+                }
+
+                continue;
+            }
+
+            var context = contexts[key];
+            if (!profile.IsSimulation
+                && EditRules.MeetsSubmit(profile, context.ProjectId, EditRules.Effective(profile, context with { TableDefId = 0, ColumnDefId = 0 })))
+            {
+                granted.Add(key);
+            }
+        }
+
+        foreach (var key in reopen.Select(k => k.Value).Distinct())
+        {
+            if (!facts.TryGetValue(key, out var fact))
+            {
+                if ((await this.CanReopenOfAsync(profile, documentId, sheetDefId, new PeriodKey(key), sheetCopyId, ct).ConfigureAwait(false)).IsAllowed)
+                {
+                    reopened.Add(key);
+                }
+
+                continue;
+            }
+
+            var context = contexts[key];
+            if (DenyIfInvisible(profile, context) is not null || !EditRules.CanReopen(profile, context).IsAllowed)
+            {
+                continue;
+            }
+
+            // ⛔ P2-4 (як `CanReopenCoreAsync`): Submitted — поточний крок, Approved — останній крок маршруту періоду.
+            int? requiredRoleId = null;
+            int? alternativeRoleId = null;
+            if (context.SheetStatus is DocumentStatus.Submitted or DocumentStatus.Approved
+                && EditRules.Effective(profile, context with { TableDefId = 0, ColumnDefId = 0 }) >= GrantLevel.Approve)
+            {
+                if (context.SheetStatus == DocumentStatus.Submitted)
+                {
+                    (requiredRoleId, alternativeRoleId) = await CurrentStepRolesAsync(fact).ConfigureAwait(false);
+                }
+                else
+                {
+                    var (route, alternative) = await RouteOfAsync(fact).ConfigureAwait(false);
+                    if (route is not null && route.Steps.Count > 0)
+                    {
+                        (requiredRoleId, alternativeRoleId) = (route.Steps.OrderBy(s => s.Ordinal).Last().RoleId, alternative);
+                    }
+                }
+            }
+
+            if (EditRules.CanReopen(profile, context, requiredRoleId, alternativeRoleId).IsAllowed)
+            {
+                reopened.Add(key);
+            }
+        }
+
+        return new SheetPeriodRights(approved, granted, reopened);
+    }
+
+    /// <summary>Умови аркуша за період, версія шаблону періоду (маршрут) і поточний крок — для пакета D-6.</summary>
+    private sealed record PeriodFacts(CellAccessContext Context, int TemplateVersionId, int? CurrentStepId);
+
+    /// <summary>
+    /// ✎ D-6: <see cref="BuildContextAsync"/> для КІЛЬКОХ періодів одного аркуша — документ і проєкт одним запитом, періоди
+    /// (з версією шаблону, станом і кроком аркуша, винятком документа, блокуваннями рядків) — другим. Ті самі поля й те
+    /// саме правило ефективного стану; періоду без рядка в календарі в результаті немає (його рішення — поштучне).
+    /// </summary>
+    private async Task<Dictionary<int, PeriodFacts>> PeriodContextsAsync(
+        long documentId, int sheetDefId, long? sheetCopyId, IReadOnlyCollection<int> keys, CancellationToken ct)
+    {
+        var decisionNow = clock.UtcNow;
+        var document = await (
+                from d in db.Documents.AsNoTracking()
+                where d.Id == documentId
+                join p in db.Projects.AsNoTracking() on d.ProjectId equals p.Id
+                select new
+                {
+                    d.ProjectId,
+                    d.TemplateId,
+                    p.Status,
+                    p.IsArchiving,
+                    p.PeriodEnd,
+                    p.YearGraceOffsetDays,
+                    p.TimeZoneId,
+                    HasAssignments = db.EditAssignments.Any(x => x.DocumentId == documentId),
+                })
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false)
+            ?? throw new NotFoundException(
+                "ECR-DOC-0404",
+                $"Документ {documentId} не знайдено.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-DOC-0404.document",
+                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+
+        var projectId = document.ProjectId;
+        var templateId = document.TemplateId;
+        var periodRows = db.Periods.AsNoTracking().Where(x => x.ProjectId == projectId && keys.Contains(x.PeriodKeyValue));
+        var rows = await (templateId is { } own
+                ? periodRows.Select(x => new
+                {
+                    Period = x,
+                    TemplateVersionId = EcrDbContext.TemplateVersionOf(projectId, own, x.PeriodKeyValue),
+                    Sheet = db.ApprovalStates.Where(a => a.DocumentId == documentId && a.SheetDefId == sheetDefId
+                                                         && a.PeriodKey == x.PeriodKeyValue && a.SheetCopyId == sheetCopyId)
+                        .Select(a => new { a.Status, a.CurrentStepId }).FirstOrDefault(),
+                    Reopened = db.DocumentPeriodReopens.Any(r => r.DocumentId == documentId && r.PeriodKeyValue == x.PeriodKeyValue
+                                                                 && r.ClosedAt == null && r.OpenUntil > decisionNow),
+                    RowLocks = db.RowLocks.Any(r => r.DocumentId == documentId && r.PeriodKeyValue == x.PeriodKeyValue
+                                                    && r.ReleasedAt == null && r.LockUntil > decisionNow),
+                })
+                : periodRows.Select(x => new
+                {
+                    Period = x,
+                    TemplateVersionId = EcrDbContext.VersionOf(projectId, x.PeriodKeyValue),
+                    Sheet = db.ApprovalStates.Where(a => a.DocumentId == documentId && a.SheetDefId == sheetDefId
+                                                         && a.PeriodKey == x.PeriodKeyValue && a.SheetCopyId == sheetCopyId)
+                        .Select(a => new { a.Status, a.CurrentStepId }).FirstOrDefault(),
+                    Reopened = db.DocumentPeriodReopens.Any(r => r.DocumentId == documentId && r.PeriodKeyValue == x.PeriodKeyValue
+                                                                 && r.ClosedAt == null && r.OpenUntil > decisionNow),
+                    RowLocks = db.RowLocks.Any(r => r.DocumentId == documentId && r.PeriodKeyValue == x.PeriodKeyValue
+                                                    && r.ReleasedAt == null && r.LockUntil > decisionNow),
+                }))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        Domain.Services.YearGraceWindow? window = document.Status == ProjectStatus.Active
+            ? Domain.Services.YearGraceWindow.For(
+                document.PeriodEnd, document.YearGraceOffsetDays, SiteTimeZone.Create(document.TimeZoneId).ToTimeZoneInfo())
+            : null;
+
+        var result = new Dictionary<int, PeriodFacts>();
+        foreach (var row in rows)
+        {
+            // Те саме правило, що `BuildContextAsync`: ефективний стан лише для активного проєкту, далі — виняток документа.
+            var periodState = window is null ? row.Period.State : PeriodStates.Effective(row.Period, decisionNow, window);
+            periodState = Domain.Services.DocumentPeriodReopenRule.Apply(periodState, row.Reopened);
+
+            var context = new CellAccessContext(
+                projectId,
+                sheetDefId,
+                TableDefId: 0,
+                ColumnDefId: 0,
+                document.Status,
+                document.IsArchiving,
+                periodState,
+                row.Sheet?.Status ?? DocumentStatus.Draft,
+                ColumnIsComputed: false,
+                ColumnIsReadOnly: false,
+                RowIsReadOnly: false)
+            {
+                Period = new PeriodKey(row.Period.PeriodKeyValue),
+                HasEditAssignments = document.HasAssignments,
+                HasRowLocks = row.RowLocks,
+                SheetCopyId = sheetCopyId,
+            };
+
+            result[row.Period.PeriodKeyValue] = new PeriodFacts(context, row.TemplateVersionId, row.Sheet?.CurrentStepId);
+        }
+
+        return result;
+    }
+
     /// <summary>
     /// Роль ОСТАННЬОГО кроку маршруту документа за період і ✎ B155 альтернативна роль (загальний <c>Approver</c> на
     /// маршруті шаблону); обидві <c>null</c> — маршруту немає.

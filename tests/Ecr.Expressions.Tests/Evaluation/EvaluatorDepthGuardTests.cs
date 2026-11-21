@@ -328,7 +328,9 @@ public sealed class EvaluatorDepthGuardTests
 
     private static string Operand(string op) => op switch
     {
-        "&" => "'a'",
+        // ✎ PSS-31: порожній текст — 1 025 ланок по 'a' дали б текст довший за межу конкатенації
+        // (`Evaluator.MaxConcatenatedTextLength`, 1 000) і #VALUE; предмет тесту — ланцюг, а не довжина.
+        "&" => "''",
         "AND" or "OR" => "TRUE",
         _ => "1",
     };
@@ -341,7 +343,7 @@ public sealed class EvaluatorDepthGuardTests
         // Ланцюг лівоасоціативний: 1 − 1 − … − 1 = 1 − (N−1).
         "-" => 2m - terms,
         "*" or "/" => 1m,
-        "&" => new string('a', terms),
+        "&" => string.Empty,
         _ => true,
     };
 

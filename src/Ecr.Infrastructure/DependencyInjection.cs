@@ -80,11 +80,15 @@ public static class DependencyInjection
         services.AddSingleton<StaleCountsEpoch>();
         // B125: сигнал черги — перехоплювач транзакцій: постановка в транзакції будить воркер лише після коміту.
         services.AddSingleton<Jobs.JobQueueSignal>();
+        // Стеля DOP запитів карти застарілості (`-- StaleMap:*`): малий мінімальний грант пам'яті, без черги RESOURCE_SEMAPHORE.
+        services.AddSingleton(_ => new StaleMapQueryHintInterceptor(
+            ReadInt(configuration, StaleMapQueryHintInterceptor.MaxDopKey, StaleMapQueryHintInterceptor.DefaultMaxDop)));
         services.AddDbContext<EcrDbContext>((sp, options) =>
             options.AddInterceptors(
                 sp.GetRequiredService<SecurityStampCacheInvalidator>(),
                 sp.GetRequiredService<StaleCountsEpoch>(),
-                sp.GetRequiredService<Jobs.JobQueueSignal>()).ConfigureEfFailureLogLevels().UseSqlServer(connectionString, sql =>
+                sp.GetRequiredService<Jobs.JobQueueSignal>(),
+                sp.GetRequiredService<StaleMapQueryHintInterceptor>()).ConfigureEfFailureLogLevels().UseSqlServer(connectionString, sql =>
             {
                 sql.MigrationsHistoryTable("__EFMigrationsHistory", "dbo");
                 // ⛔ Саме `Database:`, а не `Sql:` (`S-11`). Префікс у файлі
@@ -361,6 +365,10 @@ public static class DependencyInjection
         // необов'язковому параметрі й мовчки не ставив би перерахунку.
         services.AddScoped<Application.Ports.ICalculationTrigger, Application.Calculations.CalculationTrigger>();
         // HSE301:A4 — кінець
+
+        // B80 N5: провалена чи скасована «залежні з затвердженими» повертає звичайний перерахунок, який покривала
+        // (кличуть JobWorker і DbBackgroundJobScheduler.CancelAsync — лінивим резолвом, без циклу з тригером).
+        services.AddScoped<Jobs.ApprovedDependentsFallback>();
 
         // ⛔ P0: технічний автор задач інтеграції (`svc-integration`). Сам
         // `JobActorScope` реєструє `Program.cs` разом з обгорткою

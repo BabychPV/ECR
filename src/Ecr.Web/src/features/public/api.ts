@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { apiFetch, EcrApiError } from '@/api/client';
+import { withBusyRetry } from '@/api/busyRetry';
 import type { components } from '@/api/schema';
 
 /**
@@ -30,9 +31,14 @@ const SIGN_IN_FALLBACK: PublicBootstrap = {
   localSignInEnabled: true,
 };
 
-/** Один анонімний запит; викликається до будь-якої автентифікації. */
-function fetchPublicBootstrap(): Promise<PublicBootstrap> {
-  return apiFetch<PublicBootstrap>('/api/v1/public/bootstrap');
+/**
+ * Один анонімний запит; викликається до будь-якої автентифікації.
+ *
+ * ⚠ PSS-29: «зайнято» (`429` з `Retry-After`) повторюється сам — інакше екран входу мовчки лишався б на
+ * запасних значеннях (без перемикача мов і версії) до наступного перезавантаження.
+ */
+function fetchPublicBootstrap(shouldContinue: () => boolean): Promise<PublicBootstrap> {
+  return withBusyRetry(() => apiFetch<PublicBootstrap>('/api/v1/public/bootstrap'), { shouldContinue });
 }
 
 /**
@@ -55,7 +61,7 @@ export function usePublicBootstrap(onPasswordChangeRequired?: () => void): Publi
   useEffect(() => {
     let live = true;
 
-    fetchPublicBootstrap()
+    fetchPublicBootstrap(() => live)
       .then((data) => {
         // ⚠ Перевірка форми, а не довіра типу: `apiFetch` типізований
         // дженериком, тобто на рантаймі не перевіряє НІЧОГО. Відповідь іншої

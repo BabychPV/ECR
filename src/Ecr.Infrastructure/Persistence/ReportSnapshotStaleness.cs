@@ -99,6 +99,13 @@ internal static class ReportSnapshotStaleness
     }
 
     /// <summary>Прогони, що старять зріз: ті, що були актуальними (див. remarks класу).</summary>
+    /// <remarks>
+    /// ✎ <c>D-560</c>: рядки <c>Superseded</c>-прогонів прибираються, але застарілість від цього не губиться — прогін
+    /// витісняє лише новіший прогін тієї ж осі (проєкт, період), що завершується ПІЗНІШЕ, тож ланцюг закінчується
+    /// <c>Current</c> із <c>FinishedAt</c> не раніше за прибраний. Виняток — документ видалено разом з його
+    /// актуальним прогоном (<c>DocumentDeletionStore</c>): тоді зріз, що старів лише через нього, перестає вважатися
+    /// застарілим; числа документа, якого вже немає, зріз однаково не може показати правильно (прийнято, D-560).
+    /// </remarks>
     private static IQueryable<CalculationRun> StalingRuns(EcrDbContext db, long? exceptRunId)
         => db.CalculationRuns.Where(r =>
             r.FinishedAt != null

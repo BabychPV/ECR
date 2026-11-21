@@ -1151,9 +1151,10 @@ public sealed class MethodologyStore(EcrDbContext db, int constantCap) : IMethod
 
     /// <inheritdoc />
     /// <remarks>
-    /// ⚠ Сирий SQL, а не LINQ: потрібен і архів <c>arc.CalculationResult</c>, і рядки
-    /// <c>Superseded</c> — запит без фільтрів, той самий предикат, що й у
-    /// <c>MethodologyVersionDeletionStore</c>.
+    /// ⚠ Сирий SQL, а не LINQ: потрібен і архів <c>arc.CalculationResult</c> — запит без фільтрів за статусом
+    /// прогону, той самий предикат, що й у <c>MethodologyVersionDeletionStore</c>. ✎ <c>D-560</c>: рядків витіснених і
+    /// невдалих прогонів у <c>calc.CalculationResult</c> після прибирання немає — гард бачить лише актуальні (і
+    /// працюючі) прогони та архів.
     /// </remarks>
     public async Task<bool> AnyCalculationResultsAsync(
         IReadOnlyCollection<int> methodologyVersionIds, CancellationToken ct)

@@ -63,6 +63,7 @@ public sealed class ScriptModuleLevelAuthoringTests
         _drafts.FindAsync(MethodologyId, Arg.Any<CancellationToken>()).Returns(_methodology);
         var builder = new AccessBuilder { UserId = 9 };
         builder.Permission("Calculation.View");
+        builder.Permission("Document.View"); // PSS-25: перегляд вимагає й права читання документа
         builder.Permission(SaveMethodologyScriptHandler.Permission);
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(builder.Build());
     }

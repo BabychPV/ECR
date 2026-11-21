@@ -561,6 +561,14 @@ public sealed class JobProgressConfiguration : IEntityTypeConfiguration<JobProgr
         builder.HasIndex(x => new { x.Lane, x.State, x.AvailableAt }, "IX_JobProgress_Claim")
                .IncludeProperties(x => new { x.TargetKey, x.LeaseUntil, x.Attempt, x.ReclaimCount })
                .HasFilter("[Lane] IS NOT NULL AND [State] IN ('Queued', 'Running')");
+
+        // ✎ PSS-04/06 (D-561): claim не бере задачу документа, який уже рахує Running лейна з локом документа
+        // (`DbJobQueue.DocumentExclusion`: DocumentId + Running), а покривна читає задачі документа, що чекають
+        // (`ListQueuedForDocumentAsync`: DocumentId + Queued). Лише живі рядки з документом — індекс малий, як черга.
+        // Будує міграція `PSS04JobQueueDocumentIndex` сирим SQL (ONLINE, де він є); модель — той самий індекс.
+        builder.HasIndex(x => new { x.DocumentId, x.State }, "IX_JobProgress_Document_Active")
+               .IncludeProperties(x => x.Lane)
+               .HasFilter("[State] IN ('Queued', 'Running') AND [DocumentId] IS NOT NULL");
     }
 }
 

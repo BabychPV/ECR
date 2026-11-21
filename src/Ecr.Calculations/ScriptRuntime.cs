@@ -81,6 +81,8 @@ public sealed class ScriptRuntime
     private readonly HashSet<string> _wantedNames;
     private readonly List<string> _monthlyPrefixes;
     private long _aliasCells;
+    private MethodologyPhaseReadCache? _phaseReads;
+    private MethodologyResolver? _tables;
 
     internal ScriptRuntime(
         LoadedProgram program,
@@ -103,8 +105,12 @@ public sealed class ScriptRuntime
         UnitIds = unitIds;
         _entries = entries;
 
+        // ✎ PSS-08: ліниво — до першої таблиці-псевдоніма оркестратор уже під'єднав кеш виклику (UsePhaseReads).
         _documentInstances = new Lazy<Task<IReadOnlyList<TableInstanceRef>>>(
-            () => _data.Rows.GetTableInstancesAsync(_documentId, _periodKey, CancellationToken.None));
+            () => _phaseReads is { } reads
+                ? reads.DocumentInstancesAsync(
+                    _documentId, _periodKey, () => _data.Rows.GetTableInstancesAsync(_documentId, _periodKey, CancellationToken.None))
+                : _data.Rows.GetTableInstancesAsync(_documentId, _periodKey, CancellationToken.None));
 
         _wantedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         _monthlyPrefixes = [];
@@ -127,6 +133,22 @@ public sealed class ScriptRuntime
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// PSS-08: екземпляри, рядки й зрізи таблиць читати з кешу фази методологій поточного виклику оркестратора.
+    /// </summary>
+    /// <param name="reads">Кеш виклику (документ × період).</param>
+    /// <param name="tables">Резолвер гілки з тим самим кешем — зріз таблиці-псевдоніма з дефолтами колонок.</param>
+    /// <remarks>
+    /// ⚠ До першого рядка (одразу після <c>PrepareAsync</c>): завантажувачі ліниві й ще нічого не читали. Без виклику
+    /// (перегляд, паритет, золоті тести) рантайм читає сховища сам, як до PSS-08. Результати інших методологій
+    /// (<c>calc.*</c>) кеш не тримає — вони читаються як і раніше (MS §13.9).
+    /// </remarks>
+    internal void UsePhaseReads(MethodologyPhaseReadCache reads, MethodologyResolver tables)
+    {
+        _phaseReads = reads ?? throw new ArgumentNullException(nameof(reads));
+        _tables = tables ?? throw new ArgumentNullException(nameof(tables));
     }
 
     /// <summary>Програма й бібліотеки.</summary>
@@ -204,7 +226,9 @@ public sealed class ScriptRuntime
 
     private async Task<InstanceData> LoadInstanceAsync(long tableInstanceId, CancellationToken ct)
     {
-        var reference = await _data.Rows.ResolveTableInstanceAsync(tableInstanceId, ct).ConfigureAwait(false);
+        var reference = _phaseReads is { } reads
+            ? await reads.InstanceAsync(tableInstanceId, () => _data.Rows.ResolveTableInstanceAsync(tableInstanceId, ct)).ConfigureAwait(false)
+            : await _data.Rows.ResolveTableInstanceAsync(tableInstanceId, ct).ConfigureAwait(false);
         var snapshot = await _data.Metadata.GetAsync(reference.TemplateVersionId, ct).ConfigureAwait(false);
 
         var tableCode = TableCodeOf(snapshot, reference.TableDefId);
@@ -363,9 +387,10 @@ public sealed class ScriptRuntime
         Dictionary<string, Dictionary<string, string?>>? textsByRow = null;
         if (bindings.Any(b => !CalculatedResultMatching.IsCatchAll(b.MatchJson)))
         {
+            // ✎ PSS-08: СИРИЙ зріз (без дефолтів колонок, як і було) — з кешу виклику, якщо він є.
             var instancePeriod = new PeriodKey(reference.PeriodKey);
-            var slice = await _data.Cells.ReadSliceAsync(reference.TableInstanceId, instancePeriod, ct).ConfigureAwait(false);
-            var rowIds = await _data.Rows.GetRowIdsAsync(reference.TableInstanceId, instancePeriod, ct).ConfigureAwait(false);
+            var slice = await SliceAsync(reference.TableInstanceId, instancePeriod, ct).ConfigureAwait(false);
+            var rowIds = await RowIdsAsync(reference.TableInstanceId, instancePeriod, ct).ConfigureAwait(false);
             var byRowId = slice.GroupBy(c => c.Address.TableRowId).ToDictionary(
                 g => g.Key,
                 g => g.ToDictionary(
@@ -489,10 +514,26 @@ public sealed class ScriptRuntime
         foreach (var instance in chosen.OrderBy(i => i.TableInstanceId))
         {
             var data = await InstanceAsync(instance.TableInstanceId, ct).ConfigureAwait(false);
-            var rowIds = await _data.Rows.GetRowIdsAsync(instance.TableInstanceId, _periodKey, ct).ConfigureAwait(false);
+
+            // ✎ PSS-08: екземпляр того самого періоду, що й прогін, — зріз з дефолтами й рядки з кешу виклику: рівно те, що
+            // `BuildAsync` прочитав би сам (зріз за періодом екземпляра, рядки за періодом прогону — тут це той самий
+            // період, і доповнення дефолтами те саме). Інший період — власне читання, як було.
+            TableSliceRead? read = null;
+            IReadOnlyDictionary<string, long> rowIds;
+            if (_tables?.PhaseReads is not null && data.Reference.PeriodKey == _periodKey.Value)
+            {
+                var table = await _tables.ReadTableAsync(instance.TableInstanceId, ct).ConfigureAwait(false);
+                rowIds = table.RowIds;
+                read = new TableSliceRead(instance.TableInstanceId, table.Period, table.Slice, table.RowIds);
+            }
+            else
+            {
+                rowIds = await RowIdsAsync(instance.TableInstanceId, _periodKey, ct).ConfigureAwait(false);
+            }
+
             IReadOnlyList<string> keys = [.. rowIds.OrderBy(r => r.Value).Select(r => r.Key)];
             var inputs = await _data.InputBuilder
-                .BuildAsync(instance.TableInstanceId, keys, _periodKey, _descriptor, ct)
+                .BuildAsync(instance.TableInstanceId, keys, _periodKey, _descriptor, ct, read)
                 .ConfigureAwait(false);
 
             foreach (var input in inputs)
@@ -522,6 +563,16 @@ public sealed class ScriptRuntime
 
         return result;
     }
+
+    private Task<IReadOnlyList<CellRecord>> SliceAsync(long tableInstanceId, PeriodKey period, CancellationToken ct)
+        => _phaseReads is { } reads
+            ? reads.SliceAsync(tableInstanceId, period, () => _data.Cells.ReadSliceAsync(tableInstanceId, period, ct))
+            : _data.Cells.ReadSliceAsync(tableInstanceId, period, ct);
+
+    private Task<IReadOnlyDictionary<string, long>> RowIdsAsync(long tableInstanceId, PeriodKey period, CancellationToken ct)
+        => _phaseReads is { } reads
+            ? reads.RowIdsAsync(tableInstanceId, period, () => _data.Rows.GetRowIdsAsync(tableInstanceId, period, ct))
+            : _data.Rows.GetRowIdsAsync(tableInstanceId, period, ct);
 
     /// <summary>Аргументи рядка за кодом колонки (без регістру); результати інших методологій додаються й перекривають.</summary>
     internal static Dictionary<string, CalculationArgument> ArgumentsOf(

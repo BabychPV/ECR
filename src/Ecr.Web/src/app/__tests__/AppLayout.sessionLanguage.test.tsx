@@ -49,7 +49,13 @@ function stubFetch(
               ]
             : url.includes('/api/v1/jobs')
               ? []
-              : null;
+              : // ✎ D-449 (як у сусідніх AppLayout-тестах): черги кнопки «My tasks» — сторінка з курсором, а не `null`. На
+                // `null` падав `getNextPageParam`, межа помилок маршруту знімала оболонку разом із `usePreferenceSync`,
+                // і тест «мова з налаштувань» залежав від того, чи встигне налаштування до падіння (PSS-29: зсув на
+                // кілька мікрозадач у `loadCatalog` — і не встигав).
+                url.includes('/api/v1/me/approval-queue') || url.includes('/api/v1/me/returned-sheets')
+                ? { items: [], nextCursor: null }
+                : null;
     return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
   });
   vi.stubGlobal('fetch', fetchMock);

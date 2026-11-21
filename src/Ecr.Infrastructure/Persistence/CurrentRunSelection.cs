@@ -47,4 +47,69 @@ internal static class CurrentRunSelection
 
         return current.Where(r => r.DocumentId == documentId || (!hasDedicatedCurrent && r.DocumentId == null));
     }
+
+    /// <summary>Скільки разів повторити читання, якщо множина актуальних прогонів змінилась між запитами.</summary>
+    private const int ReadAttempts = 3;
+
+    /// <summary>
+    /// ✎ D-557 / D-560: які з <paramref name="approvedInstanceIds"/> мають власні результати в актуальних прогонах
+    /// (<c>Attributed</c>) і в яких періодах є «безприв'язні» результати до D-401 (<c>LegacyPeriods</c>).
+    /// </summary>
+    /// <param name="db">Контекст.</param>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periods">Періоди затверджених екземплярів.</param>
+    /// <param name="approvedInstanceIds">Затверджені екземпляри.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ D-560: прогони й рядки — кількома запитами, а витіснений прогін прибирається одразу після перемикання. Без
+    /// перечитування прогонів перемикання між запитами дало б «немає результатів» для екземпляра, що їх має (числа
+    /// затвердженого аркуша перераховувались би замість переносу). Тому актуальні прогони перечитуються ПІСЛЯ
+    /// рядків: змінились — повтор (до <see cref="ReadAttempts"/>), як у <c>ReadCurrentCoreAsync</c>.
+    /// </remarks>
+    public static async Task<(HashSet<long> Attributed, HashSet<int> LegacyPeriods)> ApprovedAttributionAsync(
+        EcrDbContext db, long documentId, IReadOnlyCollection<int> periods, IReadOnlyCollection<long> approvedInstanceIds,
+        CancellationToken ct)
+    {
+        var approved = approvedInstanceIds.ToList();
+        var attributed = new HashSet<long>();
+        var legacyPeriods = new HashSet<int>();
+
+        for (var attempt = 1; attempt <= ReadAttempts; attempt++)
+        {
+            attributed.Clear();
+            legacyPeriods.Clear();
+
+            var currentRuns = await RunsOfDocumentAsync(db, documentId, ct).ConfigureAwait(false);
+            foreach (var period in periods)
+            {
+                var runIds = Effective(currentRuns, documentId, period).Select(r => r.Id).ToList();
+                if (runIds.Count == 0)
+                {
+                    continue;
+                }
+
+                var periodResults = db.CalculationResults
+                    .AsNoTracking()
+                    .Where(r => r.DocumentId == documentId && r.PeriodKey == period && runIds.Contains(r.CalculationRunId));
+                attributed.UnionWith(await periodResults
+                    .Where(r => r.TableInstanceId != null && approved.Contains(r.TableInstanceId.Value))
+                    .Select(r => r.TableInstanceId!.Value)
+                    .Distinct()
+                    .ToListAsync(ct)
+                    .ConfigureAwait(false));
+                if (await periodResults.AnyAsync(r => r.TableInstanceId == null, ct).ConfigureAwait(false))
+                {
+                    legacyPeriods.Add(period);
+                }
+            }
+
+            var after = await RunsOfDocumentAsync(db, documentId, ct).ConfigureAwait(false);
+            if (currentRuns.Select(r => r.Id).Order().SequenceEqual(after.Select(r => r.Id).Order()))
+            {
+                break;
+            }
+        }
+
+        return (attributed, legacyPeriods);
+    }
 }

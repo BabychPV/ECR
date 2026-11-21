@@ -93,6 +93,18 @@ public sealed class SimulationAwareAccessDecisionService(
         => inner.CanApproveManyAsync(profiles, documentId, sheetDefId, periodKey, sheetCopyId, knownStep, ct);
 
     /// <inheritdoc />
+    public Task<SheetPeriodRights> SheetPeriodRightsAsync(
+        AccessProfile profile,
+        long documentId,
+        int sheetDefId,
+        long? sheetCopyId,
+        IReadOnlyCollection<PeriodKey> approve,
+        IReadOnlyCollection<PeriodKey> submitGrant,
+        IReadOnlyCollection<PeriodKey> reopen,
+        CancellationToken ct)
+        => inner.SheetPeriodRightsAsync(profile, documentId, sheetDefId, sheetCopyId, approve, submitGrant, reopen, ct);
+
+    /// <inheritdoc />
     public Task InvalidateProfileAsync(int userId, CancellationToken ct)
         => inner.InvalidateProfileAsync(userId, ct);
 

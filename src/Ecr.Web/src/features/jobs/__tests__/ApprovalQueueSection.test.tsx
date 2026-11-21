@@ -76,7 +76,7 @@ describe('ApprovalQueueSection', () => {
     expect(card.textContent).toContain('AIR-2026-09 · Stationary');
     expect(card.textContent).toContain('Ivan <b>P</b>');
     expect(card.querySelector('b')).toBeNull();
-    expect(card.querySelector('a')?.getAttribute('href')).toBe('/documents/11?periodKey=202609&sheet=Stationary');
+    expect(card.querySelector('a')?.getAttribute('href')).toBe('/documents/11?periodKey=202609&sheet=Stationary&decide=202609');
     expect(screen.queryByTestId('my-tasks-approval-more')).toBeNull();
     expect(calls[0]).toBe('/api/v1/me/approval-queue?limit=50');
   });
@@ -178,7 +178,7 @@ describe('ApprovalQueueSection: місяці одного аркуша - одн�
     expect(children.length).toBe(8);
     expect(document.getElementById(button.getAttribute('aria-controls') ?? '')?.hidden).toBe(true);
     expect([...children].map((el) => el.querySelector('a')?.getAttribute('href'))).toEqual(
-      months.map((m) => `/documents/11?periodKey=${String(m)}&sheet=Stationary`),
+      months.map((m) => `/documents/11?periodKey=${String(m)}&sheet=Stationary&decide=${String(m)}`),
     );
 
     fireEvent.click(button);
@@ -275,5 +275,13 @@ describe('ApprovalQueueSection: позначка «перераховано пі
 describe('approvalQueueHref', () => {
   it('кодує код аркуша', () => {
     expect(approvalQueueHref(item({ sheetCode: 'A B' }))).toBe('/documents/11?periodKey=202609&sheet=A%20B');
+  });
+
+  // ✎ D-6: «Review» несе місяць черги окремо — `?periodKey` річного документа нормалізується до якоря.
+  it('для «Review»: додає decide=<місяць черги>; без опції — адреса як була', () => {
+    expect(approvalQueueHref(item({ periodKey: 202604 }), { decide: true })).toBe(
+      '/documents/11?periodKey=202604&sheet=Stationary&decide=202604',
+    );
+    expect(approvalQueueHref(item({ periodKey: 202604 }))).not.toContain('decide');
   });
 });

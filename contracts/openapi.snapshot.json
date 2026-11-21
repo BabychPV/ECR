@@ -14328,6 +14328,21 @@
       "MonthColumnStatusDto": {
         "description": "Статус місячної колонки (D-441): стан аркуша за період місяця колонки.",
         "properties": {
+          "canDecide": {
+            "default": false,
+            "description": "✎ D-6: поточний користувач може затвердити чи відхилити аркуш за цей місяць (те саме правило, що POST approve).",
+            "type": "boolean"
+          },
+          "canRecall": {
+            "default": false,
+            "description": "✎ D-6: поточний користувач може відкликати подання аркуша за цей місяць (те саме правило, що POST recall).",
+            "type": "boolean"
+          },
+          "canReturn": {
+            "default": false,
+            "description": "✎ D-6: поточний користувач може повернути ЗАТВЕРДЖЕНИЙ аркуш за цей місяць у роботу (те саме правило, що POST reopen).",
+            "type": "boolean"
+          },
           "columnCode": {
             "description": "Код колонки.",
             "type": "string"
@@ -14350,6 +14365,14 @@
             "description": "Таблиця.",
             "format": "int32",
             "type": "integer"
+          },
+          "unapprovedSourcePeriodKey": {
+            "description": "✎ D-6: поданий місяць — місяць документа-джерела HSE400, ще не затверджений, через який сервер відхилить затвердження цього місяця (sourceMonthNotApproved); null — перешкоди немає.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           }
         },
         "required": [
@@ -27230,6 +27253,10 @@
       "ScriptPreviewDto": {
         "description": "Відповідь перегляду на документі.",
         "properties": {
+          "budgetExhausted": {
+            "description": "`true` — вичерпано спільний бюджет кроків перегляду (PSS-21: 20 000 000 на запит); рядки з `#BUDGET` — межа перегляду, а не помилка скрипта, у перерахунку її немає.",
+            "type": "boolean"
+          },
           "diagnostics": {
             "description": "Діагностики тексту (перегляд виконується лише без них).",
             "items": {
@@ -27339,6 +27366,10 @@
               "$ref": "#/components/schemas/ScriptPreviewValue"
             },
             "type": "array"
+          },
+          "valuesTruncated": {
+            "description": "`true` — величини рядка урізано стелею відповіді перегляду (PSS-21: 50 000 на запит); `values` неповний.",
+            "type": "boolean"
           }
         },
         "required": [
@@ -27652,10 +27683,26 @@
       "SessionSettingsInput": {
         "description": "Запит на зміну налаштувань сеансу.",
         "properties": {
+          "auditRetentionMonths": {
+            "description": "Мінімальна глибина аудиту, місяців (120–1200); `null` — не змінювати.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "idleTimeoutMinutes": {
             "description": "Вихід після стількох хвилин без дій.",
             "format": "int32",
             "type": "integer"
+          },
+          "technicalLogRetentionDays": {
+            "description": "Строк зберігання технічних журналів, днів (30–36500); `null` — не змінювати.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           }
         },
         "required": [
@@ -27666,8 +27713,23 @@
       "SessionSettingsView": {
         "description": "Налаштування сеансу для екрана «Безпека».",
         "properties": {
+          "auditRetentionMonths": {
+            "description": "Мінімальна глибина аудиту в `aud.*`, місяців (`Retention.AuditMonths`).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "defaultAuditRetentionMonths": {
+            "description": "Значення за замовчуванням (120).",
+            "format": "int32",
+            "type": "integer"
+          },
           "defaultIdleTimeoutMinutes": {
             "description": "Значення за замовчуванням.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "defaultTechnicalLogRetentionDays": {
+            "description": "Значення за замовчуванням (400).",
             "format": "int32",
             "type": "integer"
           },
@@ -27676,13 +27738,38 @@
             "format": "int32",
             "type": "integer"
           },
+          "maxAuditRetentionMonths": {
+            "description": "Найбільше допустиме значення.",
+            "format": "int32",
+            "type": "integer"
+          },
           "maxIdleTimeoutMinutes": {
             "description": "Найбільше допустиме значення.",
             "format": "int32",
             "type": "integer"
           },
+          "maxTechnicalLogRetentionDays": {
+            "description": "Найбільше допустиме значення.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "minAuditRetentionMonths": {
+            "description": "Найменше допустиме значення (120).",
+            "format": "int32",
+            "type": "integer"
+          },
           "minIdleTimeoutMinutes": {
             "description": "Найменше допустиме значення.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "minTechnicalLogRetentionDays": {
+            "description": "Найменше допустиме значення.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "technicalLogRetentionDays": {
+            "description": "Скільки днів зберігаються технічні журнали, зокрема `sec.LoginAttempt` (`Retention.TechnicalLogDays`).",
             "format": "int32",
             "type": "integer"
           }
@@ -27691,7 +27778,15 @@
           "idleTimeoutMinutes",
           "minIdleTimeoutMinutes",
           "maxIdleTimeoutMinutes",
-          "defaultIdleTimeoutMinutes"
+          "defaultIdleTimeoutMinutes",
+          "technicalLogRetentionDays",
+          "minTechnicalLogRetentionDays",
+          "maxTechnicalLogRetentionDays",
+          "defaultTechnicalLogRetentionDays",
+          "auditRetentionMonths",
+          "minAuditRetentionMonths",
+          "maxAuditRetentionMonths",
+          "defaultAuditRetentionMonths"
         ],
         "type": "object"
       },
@@ -30560,6 +30655,14 @@
           "submittable": {
             "description": "Аркуш за цей період можна подати зараз (неподаний, проєкт не архівний).",
             "type": "boolean"
+          },
+          "unapprovedSourcePeriodKey": {
+            "description": "✎ D-6: місяць документа-джерела HSE400, ще не затверджений, через який сервер відхилить подання (аркуш неподаний) чи затвердження (аркуш поданий) цього періоду (sourceMonthNotApproved); null — перешкоди немає.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           }
         },
         "required": [
@@ -30573,6 +30676,14 @@
       "SubmissionTargetDto": {
         "description": "Цільовий період подання аркуша і статуси місячних колонок (D-441).",
         "properties": {
+          "anchorUnapprovedSourcePeriodKey": {
+            "description": "✎ D-6: аркуш за період запиту поданий (у будь-якому стані періоду, зокрема закритому) — місяць документа-джерела HSE400, ще не затверджений, через який сервер відхилить його затвердження; null — перешкоди немає.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "monthColumns": {
             "description": "Місячні колонки таблиць `MonthsInColumns` аркуша зі станом свого періоду.",
             "items": {
@@ -53868,9 +53979,29 @@
               }
             },
             "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Too Many Requests"
           }
         },
-        "summary": "Канонічний друк літерала константи для редактора таблиць коефіцієнтів. Право `Calculation.View`.",
+        "summary": "Канонічний друк літерала константи для редактора таблиць коефіцієнтів. Право `Calculation.View`; межа 120/хв на користувача (PSS-21).",
         "tags": [
           "MethodologyScript"
         ]
@@ -54004,6 +54135,26 @@
               }
             },
             "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Too Many Requests"
           }
         },
         "summary": "Паритет версії на документі: збережений (тіньовий) скрипт проти рушія формул на всіх таблицях документа за\nперіод, до яких прив'язана методологія. Право `Calculation.Publish` і доступ до документа.",
@@ -54014,7 +54165,7 @@
     },
     "/api/v1/methodologies/{id}/versions/{vid}/script/preview": {
       "post": {
-        "description": "Нічого не записує. Текст із діагностиками не виконується — повертаються лише діагностики.",
+        "description": "Нічого не записує. Текст із діагностиками не виконується — повертаються лише діагностики. Понад 30 с — 422 scriptPreviewTimeout.",
         "parameters": [
           {
             "description": "Методологія.",
@@ -54140,9 +54291,29 @@
               }
             },
             "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Too Many Requests"
           }
         },
-        "summary": "Прогін скрипта на документі «насухо»: що вибрано, що пораховано. Право `Calculation.View` і доступ до\nдокумента, як для його результатів.",
+        "summary": "Прогін скрипта на документі «насухо»: що вибрано, що пораховано. Право `Calculation.View`, доступ до документа й `Document.View`; межа 30/хв на користувача (PSS-21).",
         "tags": [
           "MethodologyScript"
         ]
@@ -54255,9 +54426,29 @@
               }
             },
             "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Too Many Requests"
           }
         },
-        "summary": "Перевіряє текст, нічого не зберігаючи. Право `Calculation.View`.",
+        "summary": "Перевіряє текст, нічого не зберігаючи. Право `Calculation.View`; межа 120/хв на користувача (PSS-21).",
         "tags": [
           "MethodologyScript"
         ]

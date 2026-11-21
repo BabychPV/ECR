@@ -295,9 +295,10 @@ public sealed class AuditStructureChangeEntityIndexTests
         await using var c = new SqlConnection(cs);
         await c.OpenAsync();
         await using var cmd = c.CreateCommand();
-        cmd.CommandText = "EXEC arc.usp_ArchiveAudit @OlderThanMonths = @m, @Today = @t, @PartitionsSwitched = @p OUTPUT, @RowsSwitched = @r OUTPUT;";
+        // ✎ PSS-27: механіка SWITCH — у внутрішній процедурі з явною межею (публічна тримає підлогу 120 міс.).
+        cmd.CommandText = "EXEC arc.usp_ArchiveAuditBefore @Cutoff = @c, @OlderThanMonths = @m, @PartitionsSwitched = @p OUTPUT, @RowsSwitched = @r OUTPUT;";
+        cmd.Parameters.Add("@c", SqlDbType.DateTime2).Value = new DateTime(Today.Year, Today.Month, 1, 0, 0, 0, DateTimeKind.Utc).AddMonths(-olderThanMonths);
         cmd.Parameters.AddWithValue("@m", olderThanMonths);
-        cmd.Parameters.Add("@t", SqlDbType.Date).Value = Today;
         var p = cmd.Parameters.Add("@p", SqlDbType.Int);
         p.Direction = ParameterDirection.Output;
         var r = cmd.Parameters.Add("@r", SqlDbType.BigInt);

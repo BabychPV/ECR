@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState, type JSX } from 'react';
 import { Alert, Badge, Box, Button, Group, Stack, Tabs, Text, Tooltip } from '@mantine/core';
 import { useDebouncedValue } from '@mantine/hooks';
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 import { queryKeys } from '@/api/queryKeys';
 import { scriptKeys } from '@/features/methodologyScript/scriptQueryKeys';
@@ -16,7 +16,6 @@ import {
   methodologyScript,
   methodologyScriptSubstances,
   saveMethodologyScript,
-  validateMethodologyScript,
 } from '@/features/methodologyScript/api';
 import { findConstAt } from '@/features/methodologyScript/constTable';
 import {
@@ -44,6 +43,7 @@ import type {
   ScriptOutlineDto,
 } from '@/features/methodologyScript/types';
 import { useScriptCompletionData } from '@/features/methodologyScript/useScriptCompletionData';
+import { useScriptValidation } from '@/features/methodologyScript/useScriptValidation';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
 import { can, useSession } from '@/shared/session/useSession';
@@ -192,16 +192,13 @@ export function MethodologyScriptPage(): JSX.Element {
 
   // ── Перевірка живого тексту ───────────────────────────────────────────────
   const [debouncedText] = useDebouncedValue(state.text, ValidationDelayMs);
-  const validation = useQuery({
-    queryKey: scriptKeys.validation(versionId, debouncedText),
-    queryFn: ({ signal }) =>
-      validateMethodologyScript(methodologyId, versionId, { text: debouncedText }, signal),
-    enabled: known && loaded && isScript && debouncedText.trim() !== '',
-    placeholderData: keepPreviousData,
-    gcTime: 0,
-    staleTime: Infinity,
-    retry: false,
-  });
+  // PSS-21: `429` перевірки — не тиша, а пауза з повтором (рядок стану нижче).
+  const { validation, pausedSeconds } = useScriptValidation(
+    methodologyId,
+    versionId,
+    debouncedText,
+    known && loaded && isScript && debouncedText.trim() !== '',
+  );
 
   const diagnostics: readonly ScriptDiagnosticDto[] = liveDiagnostics({
     text: state.text,
@@ -210,7 +207,8 @@ export function MethodologyScriptPage(): JSX.Element {
     saved: script.data?.diagnostics,
   });
   const outline: ScriptOutlineDto | null = validation.data?.outline ?? script.data?.outline ?? null;
-  const checking = loaded && (state.text !== debouncedText || validation.isFetching);
+  const checking =
+    loaded && pausedSeconds === null && (state.text !== debouncedText || validation.isFetching);
 
   // ── Підказки ──────────────────────────────────────────────────────────────
   const completionBase = useScriptCompletionData(outline, versionId);
@@ -483,11 +481,13 @@ export function MethodologyScriptPage(): JSX.Element {
             height="calc(100vh - 280px)"
           />
           <Text size="xs" c="dimmed" mt="xs" aria-live="polite" data-testid="script-status">
-            {checking
-              ? t('methodologyScript.checking')
-              : problemCount === 0
-                ? t('methodologyScript.problems.none')
-                : t('methodologyScript.problemCount', { count: problemCount })}
+            {pausedSeconds !== null
+              ? t('methodologyScript.checksPaused', { seconds: pausedSeconds })
+              : checking
+                ? t('methodologyScript.checking')
+                : problemCount === 0
+                  ? t('methodologyScript.problems.none')
+                  : t('methodologyScript.problemCount', { count: problemCount })}
           </Text>
         </Box>
 

@@ -18,9 +18,11 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 /// ⚠ Читача відтворює окрема сесія з <c>TABLOCK, HOLDLOCK</c> у відкритій
 /// транзакції: S на <c>doc.CellValue</c> несумісне з Sch-M так само, як Sch-S
 /// нічного скану. «Сьогодні» — параметр (2035-05-15), тож межа 203506 гарантовано
-/// нова; усе, що процедура додала (і в <c>pf_ByPeriodKey</c>, і в
-/// <c>pf_AuditByMonth</c>), та її рядки журналу прибираються у <c>finally</c>:
-/// інакше <c>PartitionCheckJob*Tests</c> бачили б зайвий запас меж.
+/// нова. ✎ PSS-09: процедура тепер бере весь поточний рік, наступний і січень Y+2
+/// (203501…203701, 25 меж) і НЕ розбиває партицію з рядками — тому база ВЛАСНА
+/// (<see cref="SqlServerFixture.WithOwnDatabase"/>, на кожен тест): у спільній базі колекції
+/// крайня права партиція містить чужі рядки тестів (PeriodKey 2099xx), і межі там законно
+/// пропускалися б. Прибирати додане теж більше не треба — база видаляється.
 /// </para>
 /// <para>
 /// ⚠ Повтор доводиться не таймінгом, а станом: тест чекає, поки сесія процедури
@@ -32,10 +34,21 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 /// (2) прибрати повтор (одразу <c>THROW</c>) — другий тест червоний (1222 замість успіху).
 /// </remarks>
 [Collection("SqlServer")]
-public sealed class PartitionSplitLockTimeoutTests(SqlServerFixture sql)
+public sealed class PartitionSplitLockTimeoutTests : IAsyncLifetime
 {
     private const string Today = "2035-05-15";
     private const int NewKey = 203506;
+
+    /// <summary>Межі, які процедура додає від «сьогодні» 2035-05-15: 203501…203512, 203601…203612, 203701.</summary>
+    private const int AddedFrom2035 = 25;
+
+    private readonly SqlServerFixture sql = SqlServerFixture.WithOwnDatabase("_split");
+
+    /// <inheritdoc />
+    public Task InitializeAsync() => sql.InitializeAsync();
+
+    /// <inheritdoc />
+    public Task DisposeAsync() => sql.DisposeAsync();
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
@@ -116,7 +129,7 @@ public sealed class PartitionSplitLockTimeoutTests(SqlServerFixture sql)
 
             var (status, details) = await LastRunAsync(snapshot.LastRunId);
             Assert.Equal("Succeeded", status);
-            Assert.Contains("\"added\":1", details, StringComparison.Ordinal);
+            Assert.Contains($"\"added\":{AddedFrom2035},", details, StringComparison.Ordinal);
             Assert.DoesNotContain("\"retries\":0", details, StringComparison.Ordinal);
         }
         finally

@@ -110,6 +110,60 @@ public interface IBackgroundJobScheduler
         string targetKey, object? payload, CancellationToken ct, int? createdByUserId = null)
         where TJob : IBackgroundJob;
 
+    /// <summary>
+    /// ✎ PSS-07 (<c>D-561</c>): те саме, що <see cref="EnqueueCoalescedAsync{TJob}(string, object?, CancellationToken, int?)"/>,
+    /// але задача стає доступною не раніше ніж через <paramref name="delay"/> — постановки на ту саму ціль за це вікно
+    /// зливаються в одну (каскад: залежні від зміни документа-джерела чи довідника).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Злиття лишає РАНІШИЙ момент доступності (черга в базі: <c>AvailableAt</c> — MIN), тож вікно не подовжується
+    /// новими постановками: перша постановка каскаду чекає щонайбільше <paramref name="delay"/>. Типова реалізація
+    /// (Quartz у пам'яті) затримки не має — ставить одразу.
+    /// </remarks>
+    /// <typeparam name="TJob">Маркер задачі.</typeparam>
+    /// <param name="targetKey">Ціль.</param>
+    /// <param name="payload">Завдання.</param>
+    /// <param name="delay">Затримка доступності.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <param name="createdByUserId">Хто поставив; <c>null</c> — системна.</param>
+    /// <returns>Ідентифікатор задачі, яка виконає роботу.</returns>
+    public Task<string> EnqueueCoalescedDelayedAsync<TJob>(
+        string targetKey, object? payload, TimeSpan delay, CancellationToken ct, int? createdByUserId = null)
+        where TJob : IBackgroundJob
+        => EnqueueCoalescedAsync<TJob>(targetKey, payload, ct, createdByUserId);
+
+    /// <summary>
+    /// Ідентифікатор задачі, що ЧЕКАЄ (ще не стартувала) на ціль; <c>null</c> — такої немає. Виконувана не рахується.
+    /// </summary>
+    /// <typeparam name="TJob">Маркер задачі.</typeparam>
+    /// <param name="targetKey">Ціль — той самий ключ, що в <see cref="EnqueueCoalescedAsync{TJob}"/>.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Для постановок, що знають: задача ІНШОЇ цілі робить ту саму роботу з надлишком (B80 N5: «залежні з затвердженими»
+    /// покриває «залежні без них» для того самого документа й періоду). Черга, що не підтримує пошуку (Quartz у
+    /// пам'яті), повертає <c>null</c> — постановка йде як завжди.
+    /// <para>
+    /// ⛔ Пошук іде БЕЗ локу (на відміну від злиття постановки, що тримає UPDLOCK/HOLDLOCK на рядку, який чекає, і так не
+    /// пускає його claim до коміту викликача). У НЕЗАКОМІЧЕНІЙ транзакції викликача знайдена задача могла б стартувати й
+    /// прочитати входи ДО коміту його зміни — і зміна лишилася б без перерахунку. Тому реалізація в базі у відкритій
+    /// транзакції (EF чи ambient) повертає <c>null</c>: покриття немає, постановка йде як завжди.
+    /// </para>
+    /// </remarks>
+    public Task<string?> FindQueuedAsync<TJob>(string targetKey, CancellationToken ct) where TJob : IBackgroundJob
+        => Task.FromResult<string?>(null);
+
+    /// <summary>
+    /// Скасовує задачу, що ЧЕКАЄ на ціль, не чіпаючи виконуваної.
+    /// </summary>
+    /// <typeparam name="TJob">Маркер задачі.</typeparam>
+    /// <param name="targetKey">Ціль.</param>
+    /// <param name="coveredByJobId">Задача, що покриває скасовану (у повідомлення скасованої; <c>null</c> — невідомо).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns><c>true</c> — скасовано; <c>false</c> — чекаючої не було (чи черга не підтримує).</returns>
+    public Task<bool> CancelQueuedAsync<TJob>(string targetKey, string? coveredByJobId, CancellationToken ct)
+        where TJob : IBackgroundJob
+        => Task.FromResult(false);
+
     /// <summary>Планує задачу за cron-виразом.</summary>
     /// <remarks>
     /// Ключ періодичної задачі — тип плюс payload; cron у нього НЕ входить, тож

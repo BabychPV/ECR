@@ -83,11 +83,14 @@ public sealed partial class PartitionCheckJob(
         // Збій архівації НЕ має ховати перевірку запасу партицій нижче: він іде в
         // подробиці прогону й опускає статус до Degraded (сам рядок Failed процедура
         // вже записала).
+        // ✎ PSS-27: поріг — налаштування `Retention.AuditMonths` (sys_ecr.SystemSetting, читається щоночі без кешу,
+        // підлога 120 міс. — рішення людини 20.11 №7); ту саму підлогу тримає й процедура.
+        var retention = await RetentionSettings.ReadAsync(db, ct, log).ConfigureAwait(false);
         var (archivedPartitions, archivedRows, archiveError) =
-            await ArchiveAuditAsync(ct).ConfigureAwait(false);
+            await ArchiveAuditAsync(retention.AuditMonths, ct).ConfigureAwait(false);
         var archiveJson = string.Create(
             CultureInfo.InvariantCulture,
-            $",\"auditArchivedPartitions\":{archivedPartitions},\"auditArchivedRows\":{archivedRows}{(archiveError is null ? string.Empty : $",\"auditArchiveFailed\":true,\"auditArchiveErrorNumber\":{archiveError.Number}")}{boundariesJson}");
+            $",\"auditArchiveMonths\":{retention.AuditMonths},\"auditArchivedPartitions\":{archivedPartitions},\"auditArchivedRows\":{archivedRows}{(archiveError is null ? string.Empty : $",\"auditArchiveFailed\":true,\"auditArchiveErrorNumber\":{archiveError.Number}")}{boundariesJson}");
         var auditFailed = archiveError is not null || boundariesError is not null;
 
         // ⛔ Функції партиціонування може не бути — тоді запасу не існує як
@@ -117,6 +120,19 @@ public sealed partial class PartitionCheckJob(
 
         var enough = ahead >= MinimumBoundariesAhead;
 
+        // ✎ PSS-09: рядки в КРАЙНІХ партиціях pf_ByPeriodKey. Ліва (до першої межі, 202601) — документи історичних
+        // років (дозволені: історію не мігруємо, рішення людини 20.11 №6); права (від останньої межі) — «далекий» рік
+        // (дозволено до 2100). ✎ рев'ю M1: це ПОПЕРЕДЖЕННЯ (`edgeWarning` у подробицях, рядок у журналі служби), а не
+        // Degraded: щонічний Degraded без дії, яку можна зробити зараз, лише привчає не читати зведення. Чим це
+        // загрожує — наступний SPLIT переносить рядки >= межі (`usp_EnsurePartitions` @MaxRowsToMove) і архівація року
+        // (THROW 50013); що робити — runbook, рядок «edgeRows/refused».
+        var (firstRows, lastRows) = await EdgeRowsAsync(ct).ConfigureAwait(false);
+        var edgeWarning = firstRows > 0 || lastRows > 0;
+        if (edgeWarning)
+        {
+            LogEdgeRows(log, firstRows, lastRows);
+        }
+
         // ⚠ Достатній запас НЕ породжує шуму: задача, що пише попередження
         // щоночі, привчає його не читати — і справжнє попередження губиться
         // серед звичних.
@@ -124,7 +140,7 @@ public sealed partial class PartitionCheckJob(
             enough && !auditFailed ? "Succeeded" : "Degraded",
             string.Create(
                 CultureInfo.InvariantCulture,
-                $"{{\"boundariesAhead\":{ahead},\"minimum\":{MinimumBoundariesAhead},\"auditBoundariesAdded\":{auditAdded}{archiveJson}}}"),
+                $"{{\"boundariesAhead\":{ahead},\"minimum\":{MinimumBoundariesAhead},\"edgeRows\":{{\"first\":{firstRows},\"last\":{lastRows}}}{(edgeWarning ? ",\"edgeWarning\":true" : string.Empty)},\"auditBoundariesAdded\":{auditAdded}{archiveJson}}}"),
             clock.UtcNow);
 
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -158,18 +174,20 @@ public sealed partial class PartitionCheckJob(
     /// <summary>Запас меж <c>pf_AuditByMonth</c> уперед, місяців.</summary>
     public const int AuditMonthsAhead = 12;
 
-    /// <summary>Скільки місяців аудит лишається «гарячим» в <c>aud.*</c> (D-247; припущення).</summary>
-    public const int AuditArchiveOlderThanMonths = 24;
-
     /// <summary>
     /// Архівує старі партиції аудиту процедурою <c>arc.usp_ArchiveAudit</c> (EXEC, без DDL у C#).
     /// </summary>
+    /// <param name="olderThanMonths">
+    /// Глибина аудиту в <c>aud.*</c>, місяців (<see cref="RetentionSettings.AuditMonthsKey"/>, не менше
+    /// <see cref="RetentionSettings.MinAuditMonths"/>; було — константа 24).
+    /// </param>
+    /// <param name="ct">Скасування.</param>
     /// <remarks>
     /// ⛔ L2-05: причина збою — у журнал служби повністю, у <c>DetailsJson</c> — лише номер
     /// помилки SQL (текст бази туди не йде: він доїжджає в лист і вебхуки, V-03 / L2-13).
     /// </remarks>
     private async Task<(int Partitions, long Rows, Microsoft.Data.SqlClient.SqlException? Error)> ArchiveAuditAsync(
-        CancellationToken ct)
+        int olderThanMonths, CancellationToken ct)
     {
         var partitions = new Microsoft.Data.SqlClient.SqlParameter("@PartitionsSwitched", System.Data.SqlDbType.Int)
         {
@@ -184,7 +202,7 @@ public sealed partial class PartitionCheckJob(
         {
             await ExecLongAsync(
                     "EXEC arc.usp_ArchiveAudit @OlderThanMonths = {0}, @Today = {1}, @PartitionsSwitched = @PartitionsSwitched OUTPUT, @RowsSwitched = @RowsSwitched OUTPUT;",
-                    [AuditArchiveOlderThanMonths, clock.UtcNow.Date, partitions, rows],
+                    [olderThanMonths, clock.UtcNow.Date, partitions, rows],
                     ct)
                 .ConfigureAwait(false);
         }
@@ -250,6 +268,11 @@ public sealed partial class PartitionCheckJob(
         Message = "Продовження меж аудиту (arc.usp_EnsureAuditPartitions) не вдалося, помилка SQL {Number}; перевірка запасу pf_ByPeriodKey виконується далі.")]
     private static partial void LogAuditBoundariesFailed(ILogger logger, int number, Exception ex);
 
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Рядки в крайніх партиціях pf_ByPeriodKey: перша (до 202601) — {FirstRows}, остання — {LastRows}. "
+            + "Наступний SPLIT перенесе рядки >= межі; що робити — runbook, «edgeRows/refused».")]
+    private static partial void LogEdgeRows(ILogger logger, long firstRows, long lastRows);
+
     [LoggerMessage(Level = LogLevel.Error,
         Message = "Архівація аудиту (arc.usp_ArchiveAudit) не вдалася, помилка SQL {Number}.")]
     private static partial void LogAuditArchiveFailed(ILogger logger, int number, Exception ex);
@@ -276,6 +299,37 @@ public sealed partial class PartitionCheckJob(
 
         return found is [> 0];
     }
+
+    /// <summary>
+    /// Рядки в першій і останній партиціях <c>pf_ByPeriodKey</c> — сума по купах і кластерних індексах усіх
+    /// таблиць на <c>ps_ByPeriodKey</c> (метадані <c>sys.partitions</c>, без читання таблиць).
+    /// </summary>
+    private async Task<(long First, long Last)> EdgeRowsAsync(CancellationToken ct)
+    {
+        var rows = await db.Database
+            .SqlQuery<EdgeRow>($"""
+                SELECT CAST(CASE WHEN prt.partition_number = 1 THEN 0 ELSE 1 END AS int) AS Edge,
+                       CAST(SUM(prt.rows) AS bigint) AS [Rows]
+                FROM sys.partitions AS prt
+                JOIN sys.indexes AS ix ON ix.object_id = prt.object_id AND ix.index_id = prt.index_id
+                JOIN sys.partition_schemes AS ps ON ps.data_space_id = ix.data_space_id
+                JOIN sys.partition_functions AS pf ON pf.function_id = ps.function_id
+                WHERE ps.name = N'ps_ByPeriodKey' AND ix.index_id IN (0, 1)
+                  AND (prt.partition_number = 1 OR prt.partition_number = pf.fanout)
+                GROUP BY CASE WHEN prt.partition_number = 1 THEN 0 ELSE 1 END
+                """)
+
+            // Рівно два рядки (ліва й права); порядок і межа — правило 6 (EF 10102).
+            .OrderBy(r => r.Edge)
+            .Take(2)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return (rows.Where(r => r.Edge == 0).Sum(r => r.Rows), rows.Where(r => r.Edge == 1).Sum(r => r.Rows));
+    }
+
+    /// <summary>Рядок вибірки <see cref="EdgeRowsAsync"/>: 0 — перша партиція, 1 — остання.</summary>
+    private sealed record EdgeRow(int Edge, long Rows);
 
     /// <summary>Скільки меж партиціонування лишилося попереду поточного періоду.</summary>
     private async Task<int> BoundariesAheadAsync(int currentKey, CancellationToken ct)

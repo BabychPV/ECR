@@ -441,6 +441,9 @@ public sealed partial class CalculationResultStore(
             .ConfigureAwait(false);
     }
 
+    /// <summary>Стан прогону, що ще рахується (рядок, як у DDL).</summary>
+    private const string RunningStatus = "Running";
+
     /// <summary>Стеля записів журналу застарілості на один прогін.</summary>
     /// <remarks>
     /// Поточний зріз один на «версію × проєкт × період»; тисяча — з великим
@@ -457,6 +460,24 @@ public sealed partial class CalculationResultStore(
             .FirstOrDefaultAsync(r => r.Id == calculationRunId, ct)
             .ConfigureAwait(false)
             ?? throw new InvalidOperationException($"Прогону {calculationRunId} не існує.");
+
+        // ⛔ D-560: статус — З БАЗИ і під UPDLOCK до коміту перемикання. Відстежуваний екземпляр задачі може пам'ятати
+        // `Running`, а `AbandonedWorkSweeper` уже закрив прогін як `Failed` (живий довгий прогін), і прибирання могло
+        // прибрати його рядки. Такий прогін актуальним не стає: відмова, попередній лишається актуальним. Замок рядка
+        // тримає і зустрічне `UPDATE … SET Status = 'Failed'` прибиральника до нашого коміту — перевірка атомарна.
+        var storedStatus = await db.Database
+            .SqlQuery<string>(
+                $"SELECT Status AS Value FROM calc.CalculationRun WITH (UPDLOCK, ROWLOCK) WHERE Id = {calculationRunId}")
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+        // Повторне перемикання вже актуального прогону — ідемпотентне (нічого не повертає з небуття); решта — відмова.
+        if (!string.Equals(storedStatus, RunningStatus, StringComparison.Ordinal)
+            && !string.Equals(storedStatus, CalculationRun.CurrentStatus, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"Прогін {calculationRunId} уже не виконується (стан «{storedStatus ?? "немає"}»): його закрито як покинутий "
+                + "або прибрано. Актуальним він не стане; попередній результат лишається актуальним.");
+        }
 
         // Новий актуальний прогін змінює "застарілість результатів" (кеш лічильників скидається після коміту).
         //
@@ -588,7 +609,8 @@ public sealed partial class CalculationResultStore(
 
         try
         {
-            var purger = new SupersededResultsPurger(db, purge, logger ?? NullLogger<CalculationResultStore>.Instance);
+            var purger = new SupersededResultsPurger(
+                db, purge, clock, logger ?? NullLogger<CalculationResultStore>.Instance);
             return await purger.PurgeRunsAsync(runs, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

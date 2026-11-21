@@ -530,11 +530,12 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
             .ConfigureAwait(false);
 
         // RS: календар подання — оригіналу аркуша або заданої копії (`sheetCopyId`).
+        // ✎ D-6: разом зі станом — автор подання й поточний крок (права по місяцях річного аркуша без читання на місяць).
         var statuses = await db.ApprovalStates
             .AsNoTracking()
             .Where(s => s.DocumentId == documentId && s.SheetDefId == sheetDefId && s.SheetCopyId == sheetCopyId)
-            .Select(s => new { s.PeriodKey, s.Status })
-            .ToDictionaryAsync(s => s.PeriodKey, s => s.Status, ct)
+            .Select(s => new { s.PeriodKey, s.Status, s.SubmittedByUserId, s.CurrentStepId })
+            .ToDictionaryAsync(s => s.PeriodKey, ct)
             .ConfigureAwait(false);
 
         // ⛔ C-6: місяць, відкритий лише для ЦЬОГО документа (08.11 (i)), — Grace і в календарі подання, як у рішенні
@@ -567,8 +568,10 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
                         window is null ? p.State : PeriodStates.Effective(p, utcNow, window),
                         reopened.Contains(p.PeriodKeyValue)),
                     statuses.TryGetValue(p.PeriodKeyValue, out var status)
-                        ? status
-                        : Domain.Enums.DocumentStatus.Draft)),
+                        ? status.Status
+                        : Domain.Enums.DocumentStatus.Draft,
+                    status?.SubmittedByUserId,
+                    status?.CurrentStepId)),
             ]);
     }
 

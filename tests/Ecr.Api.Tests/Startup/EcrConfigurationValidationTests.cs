@@ -191,6 +191,70 @@ public sealed class EcrConfigurationValidationTests(SqlServerFixture sql)
     }
 
     /// <remarks>
+    /// PSS-28: у Production порожній або `*` в `AllowedHosts` — попередження (DNS rebinding на анонімні ендпоінти);
+    /// задані імена, чи не Production — мовчання. Старт не зупиняється. Мутація: прибрати умову `isProduction` —
+    /// червоніє перший рядок; не розпізнавати `*` серед кількох імен — червоніє `a;*`.
+    /// </remarks>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "PSS-28")]
+    [InlineData("*", true)]
+    [InlineData("", true)]
+    [InlineData("a.example;*", true)]
+    [InlineData("ecr.example.kz;localhost", false)]
+    public void AllowedHosts_зірочка_чи_порожньо_у_Production_попереджає(string hosts, bool warns)
+    {
+        var config = Config(("AllowedHosts", hosts));
+
+        var production = EcrConfigurationValidation.Warnings(config, isProduction: true);
+        Assert.Equal(warns, production.Any(w => w.Contains("AllowedHosts", StringComparison.Ordinal)));
+        if (warns)
+        {
+            var text = production.Single(w => w.Contains("AllowedHosts", StringComparison.Ordinal));
+            Assert.Contains("-AllowedHosts", text, StringComparison.Ordinal);
+            Assert.Contains("ECR_AllowedHosts", text, StringComparison.Ordinal);
+        }
+
+        // Не Production (Development, стенди, тести) — без попередження.
+        Assert.DoesNotContain(
+            EcrConfigurationValidation.Warnings(config, isProduction: false),
+            w => w.Contains("AllowedHosts", StringComparison.Ordinal));
+
+        // Старт не зупиняється: це не помилка конфігурації.
+        Assert.Empty(EcrConfigurationValidation.Validate(config));
+    }
+
+    /// <remarks>
+    /// ⛔ H1 (рев'ю PSS-28): HostFiltering порівнює записи <c>AllowedHosts</c> БЕЗ порту, тож запис із портом замикав би
+    /// всіх, крім localhost, а розгортання виглядало б зеленим. Старт із таким значенням (чи з недійсним форматом) —
+    /// зупиняється з назвою ключа. Мутація: знову приймати порт у <c>AllowedHostsProblem</c> — червоніють рядки з портом.
+    /// </remarks>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "PSS-28")]
+    [InlineData("*", false)]
+    [InlineData("ecr.example.kz", false)]
+    [InlineData("ecr.example.kz;ecr;localhost", false)]
+    [InlineData("*.example.kz;localhost", false)]
+    [InlineData("[::1];localhost", false)]
+    [InlineData("ecr.example.kz:8443", true)]
+    [InlineData("ecr.example.kz;localhost:5000", true)]
+    [InlineData("[::1]:8443", true)]
+    [InlineData("https://ecr.example.kz", true)]
+    [InlineData("ecr.example.kz/app", true)]
+    [InlineData("ec r", true)]
+    public void AllowedHosts_із_портом_чи_недійсним_форматом_зупиняє_старт(string hosts, bool rejected)
+    {
+        var problems = EcrConfigurationValidation.Validate(Config(("AllowedHosts", hosts)));
+
+        Assert.Equal(rejected, problems.Any(p => p.Contains("AllowedHosts", StringComparison.Ordinal)));
+        if (rejected)
+        {
+            Assert.Contains("ECR_AllowedHosts", Assert.Single(problems), StringComparison.Ordinal);
+        }
+    }
+
+    /// <remarks>
     /// ⛔ U17: увімкнений експорт без адреси не має тихо слати на localhost:4317
     /// (дефолт бібліотеки) — старт зупиняється з поясненням, що задати.
     /// </remarks>

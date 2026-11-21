@@ -333,6 +333,66 @@ public interface IAccessDecisionService
         AccessProfile profile, long documentId, int sheetDefId, PeriodKey periodKey, long? sheetCopyId, CancellationToken ct);
 
     /// <summary>
+    /// ✎ D-6: рішення ОДНОГО профілю над ОДНИМ аркушем за КІЛЬКА періодів (місяці річного аркуша) — ті самі
+    /// <see cref="SheetCopyAccess.CanApproveOfAsync"/>, <see cref="HasSubmitGrantAsync"/> і
+    /// <see cref="SheetCopyAccess.CanReopenOfAsync"/>, що поштучно, але умови всіх періодів читаються пакетом, а маршрут —
+    /// раз на версію шаблону; кількість звернень до бази від кількості періодів не залежить.
+    /// </summary>
+    /// <param name="profile">Профіль прав.</param>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="sheetDefId">Аркуш.</param>
+    /// <param name="sheetCopyId">Копія аркуша (RS); <c>null</c> — оригінал.</param>
+    /// <param name="approve">Періоди, для яких питається затвердження.</param>
+    /// <param name="submitGrant">Періоди, для яких питається рівень подання (відкликання).</param>
+    /// <param name="reopen">Періоди, для яких питається повернення в роботу.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Ключі періодів, для яких рішення — «так».</returns>
+    /// <remarks>⚠ Типова реалізація (тестові обгортки) — цикл поштучних; справжня служба читає пакетом.</remarks>
+    public async Task<SheetPeriodRights> SheetPeriodRightsAsync(
+        AccessProfile profile,
+        long documentId,
+        int sheetDefId,
+        long? sheetCopyId,
+        IReadOnlyCollection<PeriodKey> approve,
+        IReadOnlyCollection<PeriodKey> submitGrant,
+        IReadOnlyCollection<PeriodKey> reopen,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(approve);
+        ArgumentNullException.ThrowIfNull(submitGrant);
+        ArgumentNullException.ThrowIfNull(reopen);
+
+        var approved = new HashSet<int>();
+        foreach (var key in approve)
+        {
+            if ((await this.CanApproveOfAsync(profile, documentId, sheetDefId, key, sheetCopyId, ct).ConfigureAwait(false)).IsAllowed)
+            {
+                approved.Add(key.Value);
+            }
+        }
+
+        var granted = new HashSet<int>();
+        foreach (var key in submitGrant)
+        {
+            if (await HasSubmitGrantAsync(profile, documentId, sheetDefId, key, sheetCopyId, ct).ConfigureAwait(false))
+            {
+                granted.Add(key.Value);
+            }
+        }
+
+        var reopened = new HashSet<int>();
+        foreach (var key in reopen)
+        {
+            if ((await this.CanReopenOfAsync(profile, documentId, sheetDefId, key, sheetCopyId, ct).ConfigureAwait(false)).IsAllowed)
+            {
+                reopened.Add(key.Value);
+            }
+        }
+
+        return new SheetPeriodRights(approved, granted, reopened);
+    }
+
+    /// <summary>
     /// AN-59: профілі кількох користувачів одним пакетом (стала кількість звернень до бази, а не за користувача). Профіль
     /// той самий, що й <see cref="BuildProfileAsync"/>; вимкнений чи відсутній користувач у результаті відсутній.
     /// </summary>
@@ -551,3 +611,10 @@ public static class SheetCopyAccess
             : gate.EnterCopySubmitAsync(documentId, sheetDefId, periodKey, sheetCopyId.Value, ct);
     }
 }
+
+/// <summary>✎ D-6: «так»-рішення одного профілю над аркушем за кілька періодів (<see cref="IAccessDecisionService.SheetPeriodRightsAsync"/>).</summary>
+/// <param name="Approve">Періоди, які профіль може затвердити чи відхилити.</param>
+/// <param name="SubmitGrant">Періоди, де профіль має рівень подання (відкликання).</param>
+/// <param name="Reopen">Періоди, які профіль може повернути в роботу.</param>
+public sealed record SheetPeriodRights(
+    IReadOnlySet<int> Approve, IReadOnlySet<int> SubmitGrant, IReadOnlySet<int> Reopen);

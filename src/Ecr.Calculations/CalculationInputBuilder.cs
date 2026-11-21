@@ -12,6 +12,12 @@ public sealed class CalculationInputBuilder(
     // ✎ C-5 (рішення PO 11.11): дефолти колонок для незаповнених комірок (власне читання; зріз зіставлення вже доповнено).
     Application.Recalculation.ColumnDefaultValues? defaults = null)
 {
+    /// <summary>
+    /// PSS-08: кеш читань фази методологій поточного виклику оркестратора; <c>null</c> — кожне читання йде в сховище
+    /// (перегляд, паритет, золоті тести). Ставить оркестратор на екземпляр зі scope гілки.
+    /// </summary>
+    internal MethodologyPhaseReadCache? PhaseReads { get; set; }
+
     /// <summary>Будує входи для набору рядків одним пакетом.</summary>
     /// <param name="tableInstanceId">Екземпляр таблиці.</param>
     /// <param name="rowKeys">Рядки, які рахуємо.</param>
@@ -43,7 +49,11 @@ public sealed class CalculationInputBuilder(
             return [];
         }
 
-        var instance = await rows.ResolveTableInstanceAsync(tableInstanceId, ct).ConfigureAwait(false);
+        // ✎ PSS-08: з PhaseReads (прогін оркестратора) екземпляр, зріз і рядки — з кешу виклику, а не на кожну прив'язку.
+        var reads = PhaseReads;
+        var instance = reads is null
+            ? await rows.ResolveTableInstanceAsync(tableInstanceId, ct).ConfigureAwait(false)
+            : await reads.InstanceAsync(tableInstanceId, () => rows.ResolveTableInstanceAsync(tableInstanceId, ct)).ConfigureAwait(false);
         var snapshot = await metadata.GetAsync(instance.TemplateVersionId, ct).ConfigureAwait(false);
         // O3c: період САМОГО екземпляра (не параметр `periodKey`) — той самий
         // зріз, що без ключа, але з ключем партиції замість пошуку по всіх.
@@ -51,10 +61,14 @@ public sealed class CalculationInputBuilder(
         var reusable = read is not null && read.TableInstanceId == tableInstanceId && read.PeriodKey == instancePeriod;
         var slice = reusable
             ? read!.Cells
-            : await cellStore.ReadSliceAsync(tableInstanceId, instancePeriod, ct).ConfigureAwait(false);
+            : reads is null
+                ? await cellStore.ReadSliceAsync(tableInstanceId, instancePeriod, ct).ConfigureAwait(false)
+                : await reads.SliceAsync(tableInstanceId, instancePeriod, () => cellStore.ReadSliceAsync(tableInstanceId, instancePeriod, ct)).ConfigureAwait(false);
         var rowIds = reusable && read!.PeriodKey == periodKey
             ? read.RowIds
-            : await rows.GetRowIdsAsync(tableInstanceId, periodKey, ct).ConfigureAwait(false);
+            : reads is null
+                ? await rows.GetRowIdsAsync(tableInstanceId, periodKey, ct).ConfigureAwait(false)
+                : await reads.RowIdsAsync(tableInstanceId, periodKey, () => rows.GetRowIdsAsync(tableInstanceId, periodKey, ct)).ConfigureAwait(false);
         if (!reusable && defaults is not null)
         {
             // ✎ C-5: аргумент `@Col` незаповненої комірки — дефолт колонки, як у правилі й формулах (02b §6.3).
