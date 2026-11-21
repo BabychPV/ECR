@@ -242,8 +242,9 @@ public sealed class DocumentSheetCopyHandler(
     /// задачу разом із перейменуванням — або обидва, або нічого. Quartz у пам'яті — лише після коміту (до коміту задача
     /// прочитала б стару назву).
     /// <para></para>
-    /// ⚠ Подані й затверджені аркуші задача не перезаписує (<c>RecalculationService.EnterSheetsAsync</c>): назва в їхніх
-    /// зрізах лишається тією, з якою подавали. Нова копія отримує значення, щойно її екземпляри відкрито й перераховано.
+    /// ⚠ Затверджені аркуші задача не перезаписує (<c>RecalculationService.EnterSheetsAsync</c>): назва в їхніх зрізах
+    /// лишається тією, з якою затверджували. Поданий — перезаписує (B79) і ставить позначку «перераховано після подання».
+    /// Нова копія отримує значення, щойно її екземпляри відкрито й перераховано.
     /// </remarks>
     private async Task EnqueueSheetNameRecalculationAsync(
         long documentId, int projectId, int sheetDefId, int userId, bool inTransaction, CancellationToken ct)

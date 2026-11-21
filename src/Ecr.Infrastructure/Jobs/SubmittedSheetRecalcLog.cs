@@ -28,10 +28,13 @@ internal static class SubmittedSheetRecalcLog
     /// <param name="periodKey">Період прогону.</param>
     /// <param name="sheets">Подані аркуші (аркуш × копія), у які записано.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="changedByUserId">Автор запису: 0 — каскад (системна задача); прогін <c>RecalculationJob</c> — хто його поставив.</param>
+    /// <param name="source">Хто записав: <c>cascade</c> — каскад формул; <c>interruptedRun</c> — перерваний повний прогін.</param>
     /// <returns>Скільки записів зроблено.</returns>
     public static async Task<int> WriteAsync(
         EcrDbContext db, IAuditWriter? audit, IClock? clock, long documentId, int periodKey,
-        IReadOnlyCollection<(int SheetDefId, long? CopyId)> sheets, CancellationToken ct)
+        IReadOnlyCollection<(int SheetDefId, long? CopyId)> sheets, CancellationToken ct,
+        int changedByUserId = 0, string source = "cascade")
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(sheets);
@@ -74,10 +77,10 @@ internal static class SubmittedSheetRecalcLog
                     periodKey,
                     state = nameof(Domain.Enums.DocumentStatus.Submitted),
                     reason = "recalculatedAfterSubmission",
-                    source = "cascade",
+                    source,
                 }),
                 ChangeReason: "recalc-after-submission",
-                ChangedByUserId: 0,
+                ChangedByUserId: changedByUserId,
                 CorrelationId: RecalculationSkips.AuditCorrelation(documentId, sheetDefId, periodKey, copyId)));
         }
 

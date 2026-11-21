@@ -87,4 +87,28 @@ public sealed class SubmittedSheetChangesTests
         Assert.True(changes.Contains(DocumentId, Period, SheetDefId + 1, sheetCopyId: 4));
         Assert.False(changes.Contains(DocumentId, Period, SheetDefId + 1, sheetCopyId: null));
     }
+
+    /// <remarks>
+    /// Позначка перерваного прогону (<c>RecalculationJob.FlushSubmittedMarksAsync</c>) пише записи за <c>Items</c>, а
+    /// зміни результатів потрапляють у набір прогону лише злиттям після коміту (<c>UnionWith</c>). Мутації: у <c>Items</c>
+    /// не повертати копію з <c>0</c> у <c>null</c> — оригінал отримав би кореляцію «копії 0»; <c>UnionWith</c> без злиття
+    /// — набір прогону порожній.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "B79")]
+    public void Items_повертає_оригінал_з_null_копією_а_UnionWith_зливає_без_повторів()
+    {
+        var run = new SubmittedSheetChanges();
+        run.Add(DocumentId, Period, SheetDefId, sheetCopyId: 9);
+
+        var committed = new SubmittedSheetChanges();
+        committed.Add(DocumentId, Period, SheetDefId, sheetCopyId: null);
+        committed.Add(DocumentId, Period, SheetDefId, sheetCopyId: 9);
+        run.UnionWith(committed);
+
+        Assert.Equal(
+            new (long, int, int, long?)[] { (DocumentId, Period, SheetDefId, null), (DocumentId, Period, SheetDefId, 9) },
+            run.Items.ToArray());
+    }
 }

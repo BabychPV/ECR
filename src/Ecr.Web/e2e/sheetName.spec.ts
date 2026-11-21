@@ -170,6 +170,12 @@ async function shot(page: Page, name: string): Promise<void> {
 
 test('SHEETNAME: copy marker — подана копія після перерахунку показує «Recalculated after submission»', async ({ page }) => {
   // F13 p218 #788: сервер позначав копію («VESSELS#id»), а сторінка шукала позначку за голим кодом — банер копії мовчав.
+  // ⛔ Падіння 20–21.11 (CI 44831495997, 44894378582): позначка — лише за ЗМІНУ числа поданого аркуша після подання (B79).
+  // Доти тест подавав копію одразу після POST rows і чекав, що SHEETNAME() нового рядка порахує вже «Перерахувати».
+  // Задача формул нового рядка й перерахунок першого відкриття копії йдуть у фоні й часто встигали записати «Vessel 2»
+  // ДО подання — тоді перерахунок після подання нічого не змінював, і позначки законно не було (180 с очікування марно).
+  // Тепер детерміновано: подається вже пораховане «Vessel 2», а після подання перейменування групи змінює SHEETNAME()
+  // поданої копії — перерахунок (його ставить перейменування; «Перерахувати» витісняє його й рахує те саме) змінює число.
   await signIn(page);
   const doc = await arrange(page);
 
@@ -186,6 +192,9 @@ test('SHEETNAME: copy marker — подана копія після перера
     }),
     'рядок копії',
   );
+  await expect
+    .poll(() => sheetValue(page, doc, copyTable?.tableInstanceId ?? 0), { timeout: 180_000, intervals: [1_000, 2_000, 5_000] })
+    .toBe('Vessel 2');
 
   await ok(
     await page.request.post(`/api/v1/documents/${String(doc.documentId)}/submit`, {
@@ -193,6 +202,7 @@ test('SHEETNAME: copy marker — подана копія після перера
     }),
     'подання копії',
   );
+  await rename(page, doc, 'E2E resubmitted');
   await ok(
     await page.request.post(`/api/v1/documents/${String(doc.documentId)}/recalculate`, { data: { periodKey: doc.periodKey } }),
     'ручний перерахунок',
@@ -211,6 +221,9 @@ test('SHEETNAME: copy marker — подана копія після перера
       { timeout: 180_000, intervals: [1_000, 2_000, 5_000] },
     )
     .toBe(true);
+  await expect
+    .poll(() => sheetValue(page, doc, copyTable?.tableInstanceId ?? 0), { timeout: 60_000, intervals: [1_000, 2_000, 5_000] })
+    .toBe('E2E resubmitted 2');
 
   await page.goto(
     `/documents/${String(doc.documentId)}?periodKey=${String(doc.periodKey)}&sheet=${SheetCode}~${String(copy.sheetCopyId)}`,
