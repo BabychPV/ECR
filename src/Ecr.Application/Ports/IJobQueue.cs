@@ -53,6 +53,20 @@ public interface IJobQueue
     public Task<ClaimedJob?> ClaimAsync(
         IReadOnlyCollection<string> lanes, string owner, TimeSpan lease, CancellationToken ct);
 
+    /// <summary>
+    /// ✎ L1b / D2 (<c>D-561</c>): той самий claim, але БЕЗ задач під межею дітей розкладу перерахунку (діти розкладу
+    /// проєкту й системні залежні, поки розклад діє) — для ОСТАННЬОГО вільного місця виконавця.
+    /// </summary>
+    /// <remarks>
+    /// Виконавець з кількома місцями не віддає дітям усі: ручний перерахунок, автоперерахунок і задачі інших лейнів
+    /// (вплив довідника) обганяють дітей за рішенням D-561, а обігнати можна лише маючи вільне місце. Типова реалізація —
+    /// звичайний claim (черги без межі дітей).
+    /// </remarks>
+    /// <returns><c>null</c> — брати нічого.</returns>
+    public Task<ClaimedJob?> ClaimExceptFanOutAsync(
+        IReadOnlyCollection<string> lanes, string owner, TimeSpan lease, CancellationToken ct)
+        => ClaimAsync(lanes, owner, lease, ct);
+
     /// <summary><c>JobId</c> задачі, що ЧЕКАЄ (<c>Queued</c>) на ціль; <c>null</c> — такої немає (виконувана не рахується).</summary>
     /// <param name="targetKey">Ціль <c>{ТипМаркера}~{ціль}</c>.</param>
     /// <param name="ct">Скасування.</param>
@@ -454,4 +468,12 @@ public interface IJobLeaseContext
 {
     /// <summary>Оренда поточної задачі; <c>null</c> — scope виконується не з черги.</summary>
     public JobClaimToken? Current { get; }
+
+    /// <summary>
+    /// ✎ L1b / D5: доручає виконавцю роботу ПІСЛЯ фіксації рядка задачі (Complete/Continue/Fail…) — у тому самому scope,
+    /// коли документ уже вільний і для черги (виключення документа на claim, PSS-04), і для лока перерахунку.
+    /// </summary>
+    /// <param name="work">Робота; токен — зупинка процесу. Збій лише в журнал виконавця.</param>
+    /// <returns><c>false</c> — виконавця, що це вміє, немає (Quartz, HTTP, тести): робота лишається викликачу.</returns>
+    public bool TryRunAfterSettle(Func<CancellationToken, Task> work) => false;
 }

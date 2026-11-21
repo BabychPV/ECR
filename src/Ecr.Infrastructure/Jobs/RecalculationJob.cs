@@ -105,6 +105,61 @@ public sealed partial class RecalculationJob(
                   + "пропущено (B69/B81: архівні дані не перераховуються).")]
     private static partial void LogArchivedProjectSkipped(ILogger logger, int projectId, long documentId);
 
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "RecalculationJob: задачу скасовано, а {Runs} незавершений(і) прогін(и) закрити не вдалося; їх закриє AbandonedWorkSweeper.")]
+    private static partial void LogCloseCancelledFailed(ILogger logger, int runs, Exception exception);
+
+    /// <summary>Ключ каталогу причини: прогін закрито, бо задачу скасовано (L1b / D4).</summary>
+    public const string CancelledRunKey = "jobs.calculationRunCancelled";
+
+    /// <summary>Причина <c>calc.CalculationRun.ErrorMessage</c> прогону скасованої задачі — конверт мовою читача.</summary>
+    public static readonly string CancelledRunReason =
+        JobProgressMessageCodec.Encode(new JobProgressMessageEnvelope(CancelledRunKey));
+
+    /// <summary>
+    /// ✎ L1b / D4: прогони, які задача створила й не завершила, — <c>Failed</c> з причиною «скасовано» одразу на скасуванні.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Без токена задачі (він уже скасований) і лише ті, що ДОСІ <c>Running</c> у БАЗІ (стан у пам'яті міг лишитися від
+    /// відкоченого перемикання, тож умова — лише в UPDATE): завершений прогін періоду вже
+    /// актуальний (чи замінений) і чіпати його не можна; прогін, який паралельно закрив прибиральник, — теж. Збій тут лише в
+    /// журнал: скасування не підміняється новим винятком, а завислі прогони закриє <c>AbandonedWorkSweeper</c>, як доти.
+    /// </remarks>
+    private async Task CloseCancelledRunsAsync(IEnumerable<Domain.Entities.Calculations.CalculationRun?> runsOfJob)
+    {
+        var ids = runsOfJob
+            .OfType<Domain.Entities.Calculations.CalculationRun>()
+            .Where(run => run.Id > 0)
+            .Select(run => run.Id)
+            .ToList();
+        if (ids.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            db.ChangeTracker.Clear();
+            var utcNow = clock.UtcNow;
+            await db.CalculationRuns
+                .Where(r => ids.Contains(r.Id) && r.Status == "Running")
+                .ExecuteUpdateAsync(
+                    s => s
+                        .SetProperty(r => r.Status, "Failed")
+                        .SetProperty(r => r.FinishedAt, utcNow)
+                        .SetProperty(r => r.ErrorMessage, CancelledRunReason),
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+#pragma warning disable CA1031 // Закриття — другорядне: скасування не підміняється збоєм бази.
+        catch (Exception ex)
+#pragma warning restore CA1031
+        {
+            LogCloseCancelledFailed(logger ?? NullLogger<RecalculationJob>.Instance, ids.Count, ex);
+        }
+    }
+
     /// <summary>Стеля прив'язок на прогін: методологій у системі — десятки.</summary>
     private const int MaxBindings = 5_000;
 
@@ -185,6 +240,15 @@ public sealed partial class RecalculationJob(
         var chain = request.DocumentId > 0 && request.PeriodKey is null
                     && claim is not null && queue is { SupportsContinuation: true };
 
+        // ✎ L1b / D5 (стенд Land 21.11): прибирання прогонів, які крок зняв з актуальності (D-560, ~141 тис. рядків на
+        // прогін, DELETE TOP пакетами), ішло ВСЕРЕДИНІ лока документа: +47–111 с (~40 %) на крок, і правка комірки та
+        // ручний перерахунок документа чекали. Тепер перемикання лише складає їх сюди, а прибирає `purgeAfterLock` — він
+        // оголошений РАНІШЕ за лок, тож звільняється ПІСЛЯ нього (зворотний порядок `await using`). У черзі в базі —
+        // ще пізніше: після фіксації рядка задачі воркером (IJobLeaseContext.TryRunAfterSettle), бо до неї документ для
+        // claim зайнятий (Running, PSS-04). Семантика L3 та сама: лише передані прогони, стеля швидкого шляху; нічне вікно —
+        // лише накопиченому.
+        var supersededRuns = new List<SupersededRun>();
+        await using var purgeAfterLock = new PurgeAfterDocumentLock(runs, lease, supersededRuns, logger, ct);
         await using var documentLock = await AcquireDocumentLockAsync(request.DocumentId, ct).ConfigureAwait(false);
 
         // ✎ Перф-аудит 20.11 (B80 N5): «залежні з затвердженими» — надмножина звичайних залежних того самого документа й
@@ -263,7 +327,7 @@ public sealed partial class RecalculationJob(
         IReadOnlyList<int> remaining = [];
 
         // ✎ PSS-04: прогрес кроку — частина шкали всього ланцюжка (зроблені періоди + цей + решта).
-        var chainProgress = chain ? new ChainProgress(progress, request.ChainDone?.Length ?? 0) : null;
+        var chainProgress = chain ? new ChainProgress(progress, request.ChainDone?.Length ?? 0, request.ChainTotal) : null;
         if (chainProgress is not null)
         {
             progress = chainProgress;
@@ -628,7 +692,7 @@ public sealed partial class RecalculationJob(
                 yearRun = NewRun(periodKey: null);
                 db.CalculationRuns.Add(yearRun);
                 await db.SaveChangesAsync(ct).ConfigureAwait(false);
-                await runs.CompleteAsync(yearRun.Id, new ModuleProfile(), ct).ConfigureAwait(false);
+                await runs.CompleteAsync(yearRun.Id, new ModuleProfile(), ct, purgeLater: supersededRuns).ConfigureAwait(false);
             }
 
             // Завершення — прикладний сценарій: профіль і перемикання
@@ -662,7 +726,8 @@ public sealed partial class RecalculationJob(
                                     // ✎ B79: після воріт (стан аркушів уже під блокуванням) і ДО переносу й перемикання —
                                     // поки є з чим порівнювати.
                                     await ResultChangesAsync(run.Id, period, guards, submittedChanges, token).ConfigureAwait(false);
-                                })
+                                },
+                                purgeLater: supersededRuns)
                             .ConfigureAwait(false);
                         break;
                     }
@@ -769,6 +834,15 @@ public sealed partial class RecalculationJob(
                         ct)
                     .ConfigureAwait(false);
             }
+        }
+        catch (Exception) when (ct.IsCancellationRequested)
+        {
+            // ⛔ L1b / D4 (стенд Land 21.11): скасування (POST /jobs/{id}/cancel, межа тривалості, зупинка служби) — за
+            // станом ТОКЕНА, а не типом винятку (драйвер посеред запиту кидає SqlException «Operation cancelled by user»,
+            // див. JobWorker L2-01). Доти прогони кроку лишалися `Running` до AbandonedWorkSweeper (2 год): гілка нижче
+            // OCE не бачила, а SqlException вела в маркування токеном, що вже скасований. Закриваємо тут, без токена.
+            await CloseCancelledRunsAsync(periodRuns.Values.Select(entry => entry.Run).Append(yearRun)).ConfigureAwait(false);
+            throw;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -908,11 +982,15 @@ public sealed partial class RecalculationJob(
 
         if (chainContinues)
         {
+            int[] chainDone = [.. ChainScope(request, scopeByDocument).GetValueOrDefault(request.DocumentId) ?? []];
             var next = request with
             {
                 ChainAfter = stepPeriod,
-                ChainDone = [.. ChainScope(request, scopeByDocument).GetValueOrDefault(request.DocumentId) ?? []],
+                ChainDone = chainDone,
                 ChainElapsedMs = (long)Math.Max(0, worked.TotalMilliseconds),
+
+                // ✎ L1b / D3: шкала наступного кроку — з його першого звіту: зроблені (з цим кроком) + решта скоупу.
+                ChainTotal = chainDone.Length + remaining.Count,
             };
 
             // ✎ PSS-06: задачі документа, що чекають на ПІЗНІШІ періоди ланцюжка, — його ж робота: паркуються до кроку
@@ -1186,6 +1264,7 @@ public sealed partial class RecalculationJob(
             ChainAfter = null,
             ChainDone = null,
             ChainElapsedMs = null,
+            ChainTotal = null,
         };
 
     /// <summary>
@@ -3138,10 +3217,71 @@ public sealed partial class RecalculationJob(
     }
 
     /// <summary>
-    /// ✎ PSS-04: прогрес кроку ланцюжка — його 0…100 у частці всього ланцюжка: крок <c>Done + 1</c> із
-    /// <see cref="Total"/> (поки скоуп невідомий — із <c>Done + 1</c>), тож шкала рядка задачі не стрибає назад на кожному кроці.
+    /// ✎ L1b / D5: прибирання прогонів, які задача зняла з актуальності, — ПІСЛЯ лока документа (оголошується раніше за
+    /// нього, тож <c>await using</c> звільняє його пізніше).
     /// </summary>
-    private sealed class ChainProgress(IJobProgress inner, int done) : IJobProgress
+    /// <remarks>
+    /// Задача воркера черги в базі — доручення воркеру після фіксації рядка (<see cref="IJobLeaseContext.TryRunAfterSettle"/>):
+    /// до неї рядок <c>Running</c>, і claim не бере інших задач документа (PSS-04). Інакше (Quartz, без оренди) — тут же,
+    /// одразу після лока; скасована задача не прибирає (лишає нічному проходу). Не кидає: збій — журнал, як і доти
+    /// (<see cref="RunCalculationHandler.PurgeSupersededAsync"/>), і виняток задачі не підміняється.
+    /// </remarks>
+    private sealed class PurgeAfterDocumentLock(
+        RunCalculationHandler runs,
+        IJobLeaseContext? lease,
+        List<SupersededRun> superseded,
+        ILogger<RecalculationJob>? logger,
+        CancellationToken ct) : IAsyncDisposable
+    {
+        public async ValueTask DisposeAsync()
+        {
+            if (superseded.Count == 0)
+            {
+                return;
+            }
+
+            IReadOnlyList<SupersededRun> handed = [.. superseded];
+            superseded.Clear();
+            if (lease?.TryRunAfterSettle(token => runs.PurgeSupersededAsync(handed, token)) == true)
+            {
+                return;
+            }
+
+            if (ct.IsCancellationRequested)
+            {
+                return;
+            }
+
+            try
+            {
+                await runs.PurgeSupersededAsync(handed, ct).ConfigureAwait(false);
+            }
+#pragma warning disable CA1031 // Прибирання після лока — не робота задачі: збій лише в журнал, решту доїсть нічний прохід.
+            catch (Exception ex)
+#pragma warning restore CA1031
+            {
+                LogPurgeAfterLockFailed(logger ?? NullLogger<RecalculationJob>.Instance, handed.Count, ex);
+            }
+        }
+    }
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "RecalculationJob: прибирання {Runs} прогон(ів), знятих з актуальності, після лока документа не вдалося; "
+                  + "решту доїсть SupersededResultsSweepJob.")]
+    private static partial void LogPurgeAfterLockFailed(ILogger logger, int runs, Exception exception);
+
+    /// <summary>
+    /// ✎ PSS-04: прогрес кроку ланцюжка — його 0…100 у частці всього ланцюжка: крок <c>Done + 1</c> із
+    /// <see cref="Total"/>, тож шкала рядка задачі не стрибає назад на кожному кроці.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ L1b / D3 (стенд Land 21.11): доти <see cref="Total"/> починався з <c>Done + 1</c> і ставав справжнім лише після
+    /// перечитування скоупу — перші ~4 с кожного кроку рядок показував «Період k з k», а відсоток стрибав (42 → 75 → 48).
+    /// Тепер загальна кількість іде з payload кроку (<see cref="RecalculationRequest.ChainTotal"/>, її кладе попередній
+    /// крок); на першому кроці (скоуп ще не прочитано) звіт іде без обгортки «k з N» і без масштабу — це 0 % старту.
+    /// </remarks>
+    private sealed class ChainProgress(IJobProgress inner, int done, int? total) : IJobProgress
     {
         /// <summary>Ключ каталогу «період {step} з {total}: {message}» (огляд L2).</summary>
         public const string StepKey = "jobs.chainStep";
@@ -3149,8 +3289,8 @@ public sealed partial class RecalculationJob(
         /// <summary>Скільки періодів ланцюжок уже зробив до цього кроку.</summary>
         public int Done { get; } = done;
 
-        /// <summary>Скільки періодів у ланцюжку разом.</summary>
-        public int Total { get; set; } = done + 1;
+        /// <summary>Скільки періодів у ланцюжку разом; <c>null</c> — ще невідомо (перший крок до читання скоупу).</summary>
+        public int? Total { get; set; } = total;
 
         /// <inheritdoc />
         /// <remarks>
@@ -3159,7 +3299,14 @@ public sealed partial class RecalculationJob(
         /// </remarks>
         public Task ReportAsync(int percent, string? message, CancellationToken ct)
         {
-            var total = Math.Max(Total, Done + 1);
+            if (Total is not { } known)
+            {
+                // Шкала ще невідома: без «k з N», щоб не показати «k з k»; відсоток — частка вже зробленого (на першому
+                // кроці — як є).
+                return inner.ReportAsync(((Done * 100) + Math.Clamp(percent, 0, 100)) / (Done + 1), message, ct);
+            }
+
+            var total = Math.Max(known, Done + 1);
             var wrapped = message;
             if (message is not null && JobProgressMessageCodec.TryDecode(message, out var decoded))
             {
@@ -3280,6 +3427,10 @@ public sealed partial class RecalculationJob(
 /// <param name="ChainElapsedMs">
 /// ✎ Огляд M2: сума часу РОБОТИ зроблених кроків, мс (без очікувань у черзі між ними) — вимір ПРД-13 після останнього.
 /// </param>
+/// <param name="ChainTotal">
+/// ✎ L1b / D3: скільки періодів у ланцюжку разом (зроблені + цей + решта), як їх побачив попередній крок, — шкала «період k
+/// з N» відома з ПЕРШОГО звіту кроку, а не лише після перечитування скоупу. <c>null</c> — перший крок (чи не ланцюжок).
+/// </param>
 public sealed record RecalculationRequest(
     int ProjectId,
     long DocumentId,
@@ -3296,7 +3447,8 @@ public sealed record RecalculationRequest(
     string? OverrideReason = null,
     int? ChainAfter = null,
     int[]? ChainDone = null,
-    long? ChainElapsedMs = null)
+    long? ChainElapsedMs = null,
+    int? ChainTotal = null)
 {
     /// <summary>
     /// ✎ B59: нижня межа ключа періоду скоупу (включно); без року — <see cref="int.MinValue"/>.

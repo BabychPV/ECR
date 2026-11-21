@@ -15,6 +15,8 @@ namespace Ecr.Infrastructure.Jobs;
 /// </remarks>
 public sealed class JobLeaseContext : IJobLeaseContext
 {
+    private readonly List<Func<CancellationToken, Task>> afterSettle = [];
+
     /// <inheritdoc />
     public JobClaimToken? Current { get; private set; }
 
@@ -37,5 +39,34 @@ public sealed class JobLeaseContext : IJobLeaseContext
         }
 
         Current = claim;
+    }
+
+    /// <inheritdoc />
+    /// <remarks>Лише для задачі воркера (оренду прив'язано): <see cref="JobWorker"/> виконує роботу після фіксації рядка.</remarks>
+    public bool TryRunAfterSettle(Func<CancellationToken, Task> work)
+    {
+        ArgumentNullException.ThrowIfNull(work);
+        if (Current is null)
+        {
+            return false;
+        }
+
+        lock (afterSettle)
+        {
+            afterSettle.Add(work);
+        }
+
+        return true;
+    }
+
+    /// <summary>Забирає доручену роботу (<see cref="TryRunAfterSettle"/>) — один раз.</summary>
+    internal IReadOnlyList<Func<CancellationToken, Task>> TakeAfterSettle()
+    {
+        lock (afterSettle)
+        {
+            var work = afterSettle.ToArray();
+            afterSettle.Clear();
+            return work;
+        }
     }
 }
