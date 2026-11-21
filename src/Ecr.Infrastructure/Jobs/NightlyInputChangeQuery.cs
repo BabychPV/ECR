@@ -12,7 +12,7 @@ namespace Ecr.Infrastructure.Jobs;
 /// <param name="ProjectId">Проєкт документа.</param>
 /// <param name="DocumentId">Документ.</param>
 /// <param name="Since">Межа (UTC): найстарший момент входів актуальних прогонів документа мінус запас.</param>
-/// <param name="TemplateVersionIds">Версії шаблону документа і версія проєкту (записи журналу структури).</param>
+/// <param name="TemplateVersionIds">Версії шаблону документа за його екземплярами (записи журналу структури).</param>
 /// <param name="SourceDocumentIds">Документи-джерела (B179), чиї зміни — вхід документа-споживача; порожньо — не споживач.</param>
 internal sealed record NightlyInputProbe(
     int ProjectId, long DocumentId, DateTime Since, int[] TemplateVersionIds, long[] SourceDocumentIds);
@@ -41,8 +41,9 @@ internal sealed record NightlyInputProbe(
 ///   <item>екземпляри таблиць документа, створені чи змінені після межі (перенос версії шаблону, нова таблиця, новий період);</item>
 ///   <item>дані будь-якого довідника (<c>cfg.RegistryDef.DataChangedAt</c>; зміна лише опису мітки не дає, D-163);</item>
 ///   <item>публікація версії шаблону чи методології, перемикання рушія скрипта (<c>aud.PublicationEvent</c>);</item>
-///   <item>журнал структури (<c>aud.StructureChange</c>) версій документа, версії проєкту і глобальний (<c>TemplateVersionId = 0</c>:
-///   прив'язки методологій, пакети, довідники): формули, колонки, правила, періоди, відкриття. Крім власних записів перерахунку —
+///   <item>журнал структури (<c>aud.StructureChange</c>) версій документа і глобальний (<c>TemplateVersionId = 0</c>: прив'язки
+///   методологій, пакети, довідники): формули, колонки, правила. Записи періодів (під версією проєкту) не потрібні — їх
+///   перехід ловить гілка станів періодів нижче (і B74 не дає читати <c>Project.TemplateVersionId</c>). Крім власних записів перерахунку —
 ///   <c>SheetRecalc</c> (журнал пропущених/перерахованих аркушів) і <c>ReportSnapshot</c> (зріз застарів), — і блокувань рядків
 ///   (<c>RowLock</c>: не вхід розрахунку): інакше нічний прогін сам собі давав би «зміну» щоночі;</item>
 ///   <item>перехід стану періоду проєкту (<c>doc.Period.StateChangedAt</c>, зокрема Reopen) і виняток «місяць відкрито для

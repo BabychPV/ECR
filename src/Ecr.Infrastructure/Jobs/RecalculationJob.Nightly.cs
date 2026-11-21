@@ -125,7 +125,7 @@ public sealed partial class RecalculationJob
         var project = await db.Projects
             .AsNoTracking()
             .Where(p => p.Id == request.ProjectId)
-            .Select(p => new { p.TimeZoneId, p.PeriodStart, p.PeriodEnd, p.TemplateVersionId })
+            .Select(p => new { p.TimeZoneId, p.PeriodStart, p.PeriodEnd })
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 
@@ -145,8 +145,7 @@ public sealed partial class RecalculationJob
             // людини 21.11 «лише поточний рік». Без запитів по документах.
             if (project is not null && project.PeriodStart.Year <= year && project.PeriodEnd.Year >= year)
             {
-                var context = new NightlyContext(
-                    request.ProjectId, project.TemplateVersionId, year, request.NightlySkipUnchanged);
+                var context = new NightlyContext(request.ProjectId, year, request.NightlySkipUnchanged);
 
                 foreach (var documentId in await ProjectDocumentIdsAsync(request.ProjectId, ct).ConfigureAwait(false))
                 {
@@ -327,7 +326,9 @@ public sealed partial class RecalculationJob
             return new NightlyDecision(NightlyVerdict.Recalculate, NightlyReason.Source);
         }
 
-        int[] templateVersionIds = [.. versions.Select(v => v.TemplateVersionId).Append(context.ProjectTemplateVersionId).Distinct()];
+        // ⚠ Версії ДОКУМЕНТА (за екземплярами), не Project.TemplateVersionId (B74, зникає в P6): записи журналу періодів, що
+        // пишуться під версією проєкту, ловить і так гілка станів періодів (doc.Period.StateChangedAt).
+        int[] templateVersionIds = [.. versions.Select(v => v.TemplateVersionId).Distinct()];
         var change = await NightlyInputChangeQuery
             .FirstChangeAsync(
                 db,
@@ -510,10 +511,9 @@ public sealed record NightlyDecision(NightlyVerdict Verdict, NightlyReason Reaso
 
 /// <summary>✎ PSS-15: спільне для всіх документів проєкту за ніч.</summary>
 /// <param name="ProjectId">Проєкт.</param>
-/// <param name="ProjectTemplateVersionId">Версія шаблону проєкту (записи журналу періодів).</param>
 /// <param name="Year">Поточний рік.</param>
 /// <param name="SkipUnchanged">Пропускати незмінні.</param>
-internal sealed record NightlyContext(int ProjectId, int ProjectTemplateVersionId, int Year, bool SkipUnchanged)
+internal sealed record NightlyContext(int ProjectId, int Year, bool SkipUnchanged)
 {
     /// <summary>Зв'язки джерел за шаблоном-споживачем (кеш на ніч).</summary>
     public Dictionary<int, IReadOnlyList<NightlySource>> SourcesByConsumer { get; } = [];
