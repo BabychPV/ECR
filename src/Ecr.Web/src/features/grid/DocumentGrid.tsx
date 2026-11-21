@@ -1669,9 +1669,9 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
 
   // ⛔ PSS-18: модель рядка — з кешу на рядок (`gridRowModels.ts`): правка однієї комірки перебудовує лише свій
   // рядок, а не 30 000 комірок таблиці 500×60 на кожне натискання.
-  const rowsCache = useRef(createGridRowsCache());
+  const [rowsCache] = useState(() => createGridRowsCache());
   const rows = useMemo(
-    () => (data === undefined ? [] : rowsCache.current(data, shownOverrides)),
+    () => (data === undefined ? [] : rowsCache(data, shownOverrides)),
     [data, shownOverrides],
   );
 

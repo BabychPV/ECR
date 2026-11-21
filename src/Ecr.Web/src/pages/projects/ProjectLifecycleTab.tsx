@@ -127,6 +127,9 @@ export function ProjectLifecycleTab({ projectId }: { readonly projectId: number 
   const refresh = async (): Promise<void> => {
     await queryClient.invalidateQueries({ queryKey: projectsQuery.queryKey });
     await queryClient.invalidateQueries({ queryKey: ['periods', projectId] });
+    // ⚠ Сторінка документа бере статус проєкту з `['document', id, …]` (PSS-19a), а staleTime глобальний (30 с):
+    // без цього після архівації документ ще до 30 с без банера, з увімкненими діями.
+    await queryClient.invalidateQueries({ queryKey: ['document'] });
   };
 
   const activate = useMutation({

@@ -26,7 +26,10 @@ import path from 'node:path';
 export default defineConfig({
   plugins: [react()],
   resolve: {
-    alias: { '@': path.resolve(__dirname, './src') },
+    alias: {
+      '@': path.resolve(__dirname, './src'),
+      '@ecr/notifications-container': path.resolve(__dirname, 'node_modules/@mantine/notifications/esm/Notifications.mjs'),
+    },
   },
   test: {
     environment: 'jsdom',
