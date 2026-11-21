@@ -25,7 +25,8 @@ public sealed partial class CalculationResultStore(
     SupersededPurgeOptions? purgeOptions = null,
     ILogger<CalculationResultStore>? logger = null,
     CalculationYearResultsCache? yearCache = null,
-    int? bulkThreshold = null)
+    int? bulkThreshold = null,
+    int? stepBulkThreshold = null)
     : ICalculationResultStore, ICurrentResultFilterReader
 {
     /// <summary>Прибирання рядків неактуальних прогонів: явні налаштування (тести) або з конфігурації (вимкнено за замовчуванням).</summary>
@@ -221,6 +222,14 @@ public sealed partial class CalculationResultStore(
     {
         var nextId = await ReserveStepIdRangeAsync(periodKey, steps.Count, ct).ConfigureAwait(false);
         var results = PendingResults(calculationRunId);
+
+        // ✎ D-565 (PERF-03): у транзакції записувача — ОДИН масовий запис замість EF-пакетів MERGE (стенд Land:
+        // ~715 походів до сервера на прогін). Ті самі рядки, Id, адреса й прив'язка до результату; TraceJson — стиснений.
+        if (UseStepBulk(steps.Count))
+        {
+            await BulkInsertStepsAsync(calculationRunId, periodKey, steps, nextId, results, ct).ConfigureAwait(false);
+            return;
+        }
 
         foreach (var (output, step) in steps)
         {

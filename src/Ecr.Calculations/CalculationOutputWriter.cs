@@ -38,11 +38,18 @@ public sealed class CalculationOutputWriter(ICalculationResultStore store, IUnit
     /// <param name="outputs">Результати рядків.</param>
     /// <param name="traceLevel">Рівень трейсу версії методології.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="recordSteps">
+    /// ✎ D-565 (PERF-03): прапор методології «трасувати проміжні кроки». <c>false</c> — кроки трейсу
+    /// (<c>calc.CalculationStep</c>) не пишуться зовсім, результати й входи — як і раніше. Типово <c>true</c>: рішення
+    /// приймає оркестратор за прапором методології (<c>MethodologyDescriptor.TraceSteps</c>, типово вимкнено), а
+    /// записувач, викликаний напряму, пише те, що йому дали.
+    /// </param>
     public async Task WriteAsync(
         long calculationRunId,
         IReadOnlyList<CalculationOutput> outputs,
         TraceLevel traceLevel,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool recordSteps = true)
     {
         ArgumentNullException.ThrowIfNull(outputs);
 
@@ -51,11 +58,23 @@ public sealed class CalculationOutputWriter(ICalculationResultStore store, IUnit
             return;
         }
 
+        // ⛔ D-565: без прапора кроки відкидаються ТУТ, а не в модулі: модуль рахує й збирає трейс однаково (з кроків
+        // виводяться входи `calc.CalculationInput` і проблема рядка `StepError`), тож числа й входи з прапором і без
+        // нього побітово ті самі — змінюється лише те, що лягає в `calc.CalculationStep`.
+        if (!recordSteps)
+        {
+            outputs = WithoutSteps(outputs);
+        }
+
         var chunks = Chunk(outputs, traceLevel);
 
         // B85: чанк понад BulkWriteThreshold результатів сховище пише SqlBulkCopy - лише в транзакції, тож і
         // один такий чанк іде гілкою транзакції нижче (результати + трейс атомарно, як один SaveChanges).
-        if (chunks.Count == 1 && chunks[0].Sum(o => o.Values.Count) <= ICalculationResultStore.BulkWriteThreshold)
+        // ✎ D-565: кроки трейсу сховище пише масово (`SqlBulkCopy`, а не ~715 EF-команд MERGE на прогін) — теж лише в
+        // транзакції, тож чанк із кроками йде тією самою гілкою.
+        if (chunks.Count == 1
+            && chunks[0].Sum(o => o.Values.Count) <= ICalculationResultStore.BulkWriteThreshold
+            && (traceLevel == TraceLevel.Off || chunks[0].All(o => o.Trace.Count == 0)))
         {
             // Пакетно, одним проходом: SaveChanges у циклі за РЯДКОМ заборонений — бюджет
             // річного перерахунку 10 хвилин (ПРД-13), і коміт на рядок з'їдає його сам собою.
@@ -118,6 +137,10 @@ public sealed class CalculationOutputWriter(ICalculationResultStore store, IUnit
 
         return chunks;
     }
+
+    /// <summary>Ті самі виходи без кроків трейсу (D-565); вихід без кроків лишається тим самим екземпляром.</summary>
+    private static List<CalculationOutput> WithoutSteps(IReadOnlyList<CalculationOutput> outputs)
+        => [.. outputs.Select(o => o.Trace.Count == 0 ? o : o with { Trace = [] })];
 
     private static int RowsOf(CalculationOutput output, TraceLevel traceLevel)
         => output.Values.Count

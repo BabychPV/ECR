@@ -138,7 +138,8 @@ public sealed class CalculationIssueStore(EcrDbContext db, IClock clock) : ICalc
                 orderby t.Id, i.RowNumber
                 select new CalculationIssueRow(
                     i.TableDefId, t.Code, i.SheetCopyId, i.RowNumber, i.RowKey, i.Kind,
-                    m == null ? null : m.Code, i.DetectedAt, i.MethodologyId, i.StepCode, i.ErrorCode, i.AffectedCount))
+                    m == null ? null : m.Code, i.DetectedAt, i.MethodologyId, i.StepCode, i.ErrorCode, i.AffectedCount,
+                    i.CalculationRunId))
             .ToListAsync(ct)
             .ConfigureAwait(false);
 }

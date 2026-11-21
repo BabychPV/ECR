@@ -237,6 +237,121 @@ public sealed class Hse301GoldenTests(Xunit.Abstractions.ITestOutputHelper log)
             Arg.Any<IReadOnlyCollection<int>>(), BusinessDate, asOf, Arg.Any<CancellationToken>());
     }
 
+    // ——— D-565 (PERF-03): прапор методології «трасувати проміжні кроки» ———
+
+    /// <remarks>
+    /// Справжня методологія форми 301 (формули §5.6, знімок довідників) через справжні оркестратор, модуль і записувач —
+    /// прогін із прапором, вимкненим (типово), і з увімкненим. Числа й входи (<c>calc.CalculationInput</c>) — ті самі;
+    /// кроки трейсу доходять до сховища лише з прапором.
+    /// <para>
+    /// ⛔ Мутації (локально): оркестратор не ставить <c>TraceSteps</c> дескриптору — червоний «з прапором кроки є»;
+    /// записувач не відкидає кроки без прапора (<c>recordSteps</c> ігнорується) — червоний «без прапора кроків немає»;
+    /// відкидати разом із кроками й входи — червона рівність входів; читати прапор на кожну прив'язку — червоний
+    /// <c>Received(1)</c>.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Decision", "D-565")]
+    public async Task D565_без_прапора_кроків_немає_а_числа_й_входи_ті_самі()
+    {
+        var off = await RunWithTraceStepsAsync([]);
+        var on = await RunWithTraceStepsAsync([MethodologyId, SecondMethodologyId]);
+
+        Assert.Equal(2, on.Written.Count);
+        Assert.True(on.Traced.Sum(o => o.Trace.Count) > 0, "З прапором модуль на Full мусить дати кроки — інакше тест порожній.");
+        Assert.All(off.Traced, output => Assert.Empty(output.Trace));
+
+        // Числа — побітно ті самі (decimal, усі поля значення).
+        Assert.Equal(ValuesOf(on.Written), ValuesOf(off.Written));
+        AssertRelative(Expected("MU"), Value(off.Written[0], "MU"), 1e-9m);
+
+        // Входи пишуться й без прапора — ті самі.
+        var inputs = InputsOf(on.Traced);
+        Assert.NotEmpty(inputs);
+        Assert.Equal(inputs, InputsOf(off.Traced));
+
+        // Факт прогону (D-565) — у профілі: чиї кроки записано, чиї ні.
+        var offFact = ModuleProfile.ReadTraceSteps(off.Profile.ToJson())!;
+        var onFact = ModuleProfile.ReadTraceSteps(on.Profile.ToJson())!;
+        Assert.Equal([MethodologyId, SecondMethodologyId], offFact.NotRecorded.Order());
+        Assert.Empty(offFact.Recorded);
+        Assert.Equal([MethodologyId, SecondMethodologyId], onFact.Recorded.Order());
+        Assert.Empty(onFact.NotRecorded);
+
+        // Прапор читається ОДИН раз на прогін, а не на прив'язку.
+        await on.Methodologies.Received(1).GetTraceStepMethodologyIdsAsync(
+            Arg.Is<IReadOnlyCollection<int>>(ids => ids.Order().SequenceEqual(new[] { MethodologyId, SecondMethodologyId })),
+            Arg.Any<CancellationToken>());
+    }
+
+    /// <remarks>Прапор — на МЕТОДОЛОГІЇ: увімкнений у 301 не вмикає кроків 302 того самого прогону.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Decision", "D-565")]
+    public async Task D565_прапор_діє_лише_на_свою_методологію()
+    {
+        var run = await RunWithTraceStepsAsync([MethodologyId]);
+
+        var fact = ModuleProfile.ReadTraceSteps(run.Profile.ToJson())!;
+        Assert.True(fact.StepsRecorded(MethodologyId));
+        Assert.False(fact.StepsRecorded(SecondMethodologyId));
+
+        var first = Assert.Single(run.Traced, o => o.Values.Any(v => v.MethodologyVersionId == VersionId));
+        var second = Assert.Single(run.Traced, o => o.Values.Any(v => v.MethodologyVersionId == SecondVersionId));
+        Assert.NotEmpty(first.Trace);
+        Assert.Empty(second.Trace);
+        Assert.NotEmpty(second.Inputs ?? []);
+    }
+
+    private static async Task<(List<CalculationOutput> Written, List<CalculationOutput> Traced, IMethodologyStore Methodologies, ModuleProfile Profile)>
+        RunWithTraceStepsAsync(int[] tracedMethodologies)
+    {
+        var stand = new Stand(TraceLevel.Full);
+        if (tracedMethodologies.Length > 0)
+        {
+            stand.Methodologies
+                .GetTraceStepMethodologyIdsAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
+                .Returns(tracedMethodologies);
+        }
+
+        var written = new List<CalculationOutput>();
+        var traced = new List<CalculationOutput>();
+        using var provider = stand.Services(written, traced);
+
+        var orchestrator = new CalculationOrchestrator(
+            provider.GetRequiredService<MethodologyResolver>(),
+            stand.Periods,
+            provider.GetRequiredService<IServiceScopeFactory>());
+
+        var profile = await orchestrator.RunAsync(
+            calculationRunId: 1,
+            DocumentId,
+            new PeriodKey(Period),
+            [
+                new CalculationBindingRef(TableInstance, MethodologyId),
+                new CalculationBindingRef(SecondTableInstance, SecondMethodologyId),
+            ],
+            NoOpProgress.Instance,
+            new DateTime(2026, 2, 3, 10, 15, 30, DateTimeKind.Utc),
+            CancellationToken.None);
+
+        return (written, traced, stand.Methodologies, profile);
+    }
+
+    private static List<string> ValuesOf(IEnumerable<CalculationOutput> outputs)
+        => [.. outputs
+            .SelectMany(o => o.Values.Select(v =>
+                $"{o.DocumentId}|{o.TableInstanceId}|{o.SourceRowKey}|{v.MethodologyVersionId}|{v.OutputCode}|"
+                + $"{v.SubstanceEntryId}|{v.Kind}|{v.UnitId}|{v.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}"))
+            .Order(StringComparer.Ordinal)];
+
+    private static List<string> InputsOf(IEnumerable<CalculationOutput> outputs)
+        => [.. outputs
+            .SelectMany(o => (o.Inputs ?? []).Select(a =>
+                $"{o.TableInstanceId}|{o.SourceRowKey}|{a.ArgumentCode}|{a.Value}|{a.ValueString}|{a.UnitId}|{a.EntryId}"))
+            .Order(StringComparer.Ordinal)];
+
     // ——— D-161: EntryRef лише в Strict ———
 
     /// <remarks>
@@ -457,14 +572,15 @@ public sealed class Hse301GoldenTests(Xunit.Abstractions.ITestOutputHelper log)
     /// <summary>Стенд модуля: справжній рушій і модуль, підмінені лише сховища.</summary>
     private sealed class Stand
     {
-        public Stand()
+        /// <param name="trace">Рівень трейсу опублікованих версій (типово — як у продуктиві, <c>ErrorsOnly</c>).</param>
+        public Stand(TraceLevel trace = TraceLevel.ErrorsOnly)
         {
             Snapshot = Hse301GoldenTests.Snapshot();
 
             foreach (var (methodologyId, versionId) in new[] { (MethodologyId, VersionId), (SecondMethodologyId, SecondVersionId) })
             {
                 Methodologies.GetPublishedVersionsAsync(methodologyId, Arg.Any<CancellationToken>())
-                             .Returns([PublishedVersion(methodologyId, versionId)]);
+                             .Returns([PublishedVersion(methodologyId, versionId, trace)]);
                 Methodologies.GetRulesAsync(versionId, Arg.Any<CancellationToken>())
                              .Returns([new MethodologyRule(versionId, EcrCode.Create("ALL"), "{}", priority: 10)]);
                 Methodologies.GetFormulasAsync(versionId, Arg.Any<CancellationToken>()).Returns(Formulas(versionId));
@@ -580,9 +696,27 @@ public sealed class Hse301GoldenTests(Xunit.Abstractions.ITestOutputHelper log)
                 ]);
 
         /// <summary>Стенд оркестратора: ті самі сховища в DI, справжні резолвер, збирач і писар.</summary>
-        public ServiceProvider Services(List<CalculationOutput> written)
+        /// <param name="written">Що дійшло до запису результатів.</param>
+        /// <param name="traced">✎ D-565: що дійшло до запису трейсу (кроки й входи); <c>null</c> — не збирати.</param>
+        public ServiceProvider Services(List<CalculationOutput> written, List<CalculationOutput>? traced = null)
         {
             var results = Substitute.For<ICalculationResultStore>();
+            if (traced is not null)
+            {
+                results.WriteTraceAsync(
+                        Arg.Any<long>(),
+                        Arg.Do<IReadOnlyList<CalculationOutput>>(outputs =>
+                        {
+                            lock (traced)
+                            {
+                                traced.AddRange(outputs);
+                            }
+                        }),
+                        Arg.Any<TraceLevel>(),
+                        Arg.Any<CancellationToken>())
+                    .Returns(Task.CompletedTask);
+            }
+
             results.WriteResultsAsync(
                     Arg.Any<long>(),
                     Arg.Do<IReadOnlyList<CalculationOutput>>(outputs =>
@@ -607,7 +741,11 @@ public sealed class Hse301GoldenTests(Xunit.Abstractions.ITestOutputHelper log)
             services.AddSingleton(Loader);
             services.AddSingleton(Bindings);
             services.AddSingleton(Substitute.For<IConstantStore>());
-            services.AddSingleton(Substitute.For<IUnitOfWork>());
+            // ✎ D-565: чанк із кроками трейсу записувач пише в транзакції (масовий запис кроків) — підміна виконує її тіло.
+            var uow = Substitute.For<IUnitOfWork>();
+            uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+               .Returns(call => call.Arg<Func<CancellationToken, Task>>()(call.Arg<CancellationToken>()));
+            services.AddSingleton(uow);
             services.AddSingleton<IFormulaEngine, RealFormulaEngine>();
             services.AddSingleton<CalendarContext>();
             services.AddScoped<ConstantResolver>();
@@ -700,13 +838,13 @@ public sealed class Hse301GoldenTests(Xunit.Abstractions.ITestOutputHelper log)
                 })
                 .ToList();
 
-        private static MethodologyVersion PublishedVersion(int methodologyId, int versionId)
+        private static MethodologyVersion PublishedVersion(int methodologyId, int versionId, TraceLevel trace)
         {
             var utcNow = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
             var version = new MethodologyVersion(
                 methodologyId, "1.0.0.0", CalculationLevel.Configuration, createdByUserId: 1, utcNow);
 
-            version.SetModes(NumericMode.Strict, CalendarMode.Actual, TraceLevel.ErrorsOnly);
+            version.SetModes(NumericMode.Strict, CalendarMode.Actual, trace);
             version.Publish(
                 publishedByUserId: 2,
                 changeReason: "стенд RT-23a",

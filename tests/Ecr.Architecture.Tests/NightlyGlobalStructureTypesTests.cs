@@ -48,6 +48,7 @@ public sealed partial class NightlyGlobalStructureTypesTests
         ["ext.RowWindowMap"] = "прив'язка PI за вікном рядка: значення доходять комірками Integration",
         ["ext.DataSource"] = "з'єднання з джерелом (адреса, транспорт): не дані",
         ["ext.SourceEventLink"] = "видалення рядка синком подій: синк торкається документа — гілка «документ»",
+        ["calc.Methodology"] = "D-565: прапор «трасувати проміжні кроки» (SetTraceSteps) — чи пишуться кроки трейсу; чисел не змінює",
     };
 
     /// <summary>Писачі, що отримують тип параметром: типи — усі <c>const string</c> файлу.</summary>

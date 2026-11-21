@@ -81,6 +81,11 @@ public sealed class CalculationInputRow : Entity<long>
 /// пишемо, а не скільки зберігаємо (ЗБР-3). Політика зберігання — «нічого не
 /// затирається» (ЗБР-1), тому повний трейс кожного кроку кожної методології
 /// кожного періоду перевищив би обсяг самих даних.
+/// <para>
+/// ✎ D-565 (PERF-03): кроки пишуться ЛИШЕ для методології з увімкненим прапором
+/// <see cref="Methodology.TraceSteps"/> (за замовчуванням вимкнено); <c>TraceLevel</c> версії
+/// далі визначає, ЩО саме пишеться, коли прапор увімкнено.
+/// </para>
 /// </remarks>
 public sealed class CalculationStep : Entity<long>
 {
@@ -129,7 +134,25 @@ public sealed class CalculationStep : Entity<long>
     public decimal? Value { get; private set; }
 
     /// <summary>Деталізація: підставлені аргументи, константи, код помилки.</summary>
-    public string? TraceJson { get; private set; }
+    /// <remarks>
+    /// ✎ D-565 (PERF-03): читається ПРОЗОРО з двох колонок. Кроки до D-565 лежать у
+    /// <c>TraceJson nvarchar(max)</c> (<see cref="TraceJsonText"/>) — вона й береться, коли не порожня;
+    /// нові кроки пишуться стисненими в <c>TraceJsonGz</c> (<see cref="TraceJsonGz"/>,
+    /// <see cref="TraceJsonCompression"/>). Читач бачить той самий текст, хоч би де він лежав.
+    /// <para>
+    /// ⚠ Обчислювана властивість — у запиті LINQ не транслюється (і не мусить: фільтру за вмістом
+    /// трейсу в коді немає; SQL-інструменти читають <c>COALESCE(TraceJson, CAST(DECOMPRESS(TraceJsonGz) AS nvarchar(max)))</c>).
+    /// </para>
+    /// </remarks>
+    public string? TraceJson => TraceJsonText ?? TraceJsonCompression.Decompress(TraceJsonGz);
+
+    /// <summary>Нестиснений <c>TraceJson</c> кроків, записаних до D-565 (колонка <c>TraceJson</c>).</summary>
+    public string? TraceJsonText { get; private set; }
+
+    /// <summary>
+    /// Стиснений <c>TraceJson</c> (колонка <c>TraceJsonGz</c>): GZIP над UTF-16LE, як SQL <c>COMPRESS(N'…')</c>.
+    /// </summary>
+    public byte[]? TraceJsonGz { get; private set; }
 
     /// <summary>
     /// Чому значення стало нулем (<c>H-24d-1</c>).
@@ -200,6 +223,10 @@ public sealed class CalculationStep : Entity<long>
     /// <remarks>
     /// Вираз, довший за <see cref="MaxStepExpressionLength"/>, обрізається до
     /// стелі з «…» в кінці — див. <see cref="MaxStepExpressionLength"/>.
+    /// <para>
+    /// ✎ D-565: деталізація пишеться лише СТИСНЕНОЮ (<see cref="TraceJsonGz"/>); текстова колонка
+    /// лишається для кроків до D-565.
+    /// </para>
     /// </remarks>
     public void Describe(
         string? expression,
@@ -208,12 +235,20 @@ public sealed class CalculationStep : Entity<long>
         long? resultId,
         Enums.MaskedZeroReason masked = Enums.MaskedZeroReason.None)
     {
-        Expression = expression is { Length: > MaxStepExpressionLength }
-            ? string.Concat(expression.AsSpan(0, MaxStepExpressionLength - 1), "…")
-            : expression;
+        Expression = TrimExpression(expression);
         Value = value;
-        TraceJson = traceJson;
+        TraceJsonText = null;
+        TraceJsonGz = TraceJsonCompression.Compress(traceJson);
         ResultId = resultId;
         Masked = masked;
     }
+
+    /// <summary>Вираз, обрізаний до <see cref="MaxStepExpressionLength"/> з «…» в кінці.</summary>
+    /// <param name="expression">Вираз як його бачив рушій.</param>
+    /// <returns>Той самий вираз або його початок із «…».</returns>
+    /// <remarks>Спільне для EF-запису (<see cref="Describe"/>) і масового запису кроків (D-565).</remarks>
+    public static string? TrimExpression(string? expression)
+        => expression is { Length: > MaxStepExpressionLength }
+            ? string.Concat(expression.AsSpan(0, MaxStepExpressionLength - 1), "…")
+            : expression;
 }

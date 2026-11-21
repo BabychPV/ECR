@@ -127,6 +127,9 @@ public sealed class ModuleProfile
     private readonly List<StepErrorRow> _stepErrors = [];
     private readonly List<InactiveRowsSummary> _inactive = [];
     private readonly SortedSet<int> _foreignOwnerReads = [];
+    private readonly SortedSet<int> _stepsRecorded = [];
+    private readonly SortedSet<int> _stepsNotRecorded = [];
+    private bool _traceFactKnown;
 
     /// <summary>Записує виконання одного модуля.</summary>
     /// <param name="moduleCode">Код модуля.</param>
@@ -172,6 +175,11 @@ public sealed class ModuleProfile
 
         _evaluatedTables.UnionWith(other._evaluatedTables);
         _foreignOwnerReads.UnionWith(other._foreignOwnerReads);
+        if (other._traceFactKnown)
+        {
+            RecordTraceSteps(other._stepsRecorded, other._stepsNotRecorded);
+        }
+
         RecordSkippedUnpublished(other._skippedUnpublished);
 
         foreach (var stat in other._stats.Values)
@@ -352,6 +360,34 @@ public sealed class ModuleProfile
         _inactive.AddRange(tables);
     }
 
+    /// <summary>
+    /// ✎ D-565 (PERF-03): ФАКТ прогону — методології, чиї кроки трейсу цей прогін записав (прапор «трасувати проміжні
+    /// кроки» був увімкнений у момент прогону) і чиї — ні. Читачі (інструменти, панель проблем) беруть саме його, а не
+    /// поточне значення прапора: прапор, увімкнений ПІСЛЯ прогону, не робить відсутні кроки «нулем помилок».
+    /// </summary>
+    /// <param name="recorded">Методології, чиї кроки записано.</param>
+    /// <param name="notRecorded">Методології, чиї кроки НЕ записано.</param>
+    /// <remarks>
+    /// ⚠ Методологія в обох множинах (кілька проходів прогону з прапором, зміненим між ними) лишається лише в
+    /// «не записано»: обережніша відповідь «оцінити не можна», а не «кроків немає — отже помилок немає».
+    /// </remarks>
+    public void RecordTraceSteps(IEnumerable<int> recorded, IEnumerable<int> notRecorded)
+    {
+        ArgumentNullException.ThrowIfNull(recorded);
+        ArgumentNullException.ThrowIfNull(notRecorded);
+
+        _traceFactKnown = true;
+        _stepsNotRecorded.UnionWith(notRecorded);
+        _stepsRecorded.UnionWith(recorded);
+        _stepsRecorded.ExceptWith(_stepsNotRecorded);
+    }
+
+    /// <summary>✎ D-565: методології прогону, чиї кроки записано.</summary>
+    public IReadOnlyCollection<int> StepsRecorded => _stepsRecorded;
+
+    /// <summary>✎ D-565: методології прогону, чиї кроки НЕ записано (трасування вимкнено).</summary>
+    public IReadOnlyCollection<int> StepsNotRecorded => _stepsNotRecorded;
+
     /// <summary>Аргументи, яких бракувало рядку (AN-164b); <c>null</c> — не записано.</summary>
     /// <param name="row">Рядок.</param>
     public IReadOnlyList<string>? MissingArgumentsOf(RejectedRow row) => _missingArguments.GetValueOrDefault(row);
@@ -444,6 +480,13 @@ public sealed class ModuleProfile
             root["missingInputs"] = missingInputs;
         }
 
+        // ✎ D-565: факт прогону «чиї кроки записано» — ЗАВЖДИ, коли прогін рахував методології (і порожні переліки):
+        // присутність ключа відрізняє прогін після D-565 від старого, у якому кроки писались за TraceLevel версії.
+        if (_traceFactKnown)
+        {
+            root["traceSteps"] = new { recorded = _stepsRecorded.ToList(), notRecorded = _stepsNotRecorded.ToList() };
+        }
+
         return JsonSerializer.Serialize(root);
     }
 
@@ -503,6 +546,44 @@ public sealed class ModuleProfile
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// ✎ D-565: факт прогону «чиї кроки трейсу записано» з <c>ModulesProfileJson</c> (ключ <c>traceSteps</c>).
+    /// </summary>
+    /// <param name="profileJson">Збережений профіль.</param>
+    /// <returns>
+    /// <c>null</c> — факту немає: прогін до D-565 (кроки писались за <c>TraceLevel</c> версії), старий формат профілю
+    /// чи зіпсований JSON.
+    /// </returns>
+    public static TraceStepsFact? ReadTraceSteps(string? profileJson)
+    {
+        if (string.IsNullOrWhiteSpace(profileJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(profileJson);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object
+                || !doc.RootElement.TryGetProperty("traceSteps", out var fact)
+                || fact.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            static HashSet<int> Ids(JsonElement fact, string name)
+                => fact.TryGetProperty(name, out var list) && list.ValueKind == JsonValueKind.Array
+                    ? [.. list.EnumerateArray().Where(e => e.ValueKind == JsonValueKind.Number).Select(e => e.GetInt32())]
+                    : [];
+
+            return new TraceStepsFact(Ids(fact, "recorded"), Ids(fact, "notRecorded"));
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException or FormatException)
+        {
+            return null;
+        }
     }
 
     /// <summary>Читає з <c>ModulesProfileJson</c> рядки без правила ОДНОГО документа (D14).</summary>
@@ -576,6 +657,17 @@ public sealed record UnmatchedSummary(int Count, IReadOnlyList<UnmatchedRow> Row
 /// <param name="Rows">Оброблено рядків.</param>
 /// <param name="Calls">Скільки разів викликано.</param>
 public sealed record ModuleStat(string Code, TimeSpan Elapsed, int Rows, int Calls);
+
+/// <summary>✎ D-565: які методології прогону записали кроки трейсу (факт прогону, не поточний прапор).</summary>
+/// <param name="Recorded">Методології, чиї кроки записано.</param>
+/// <param name="NotRecorded">Методології, чиї кроки не записано (трасування було вимкнено).</param>
+public sealed record TraceStepsFact(IReadOnlySet<int> Recorded, IReadOnlySet<int> NotRecorded)
+{
+    /// <summary>Чи записав прогін кроки методології: <c>false</c> — ні (оцінити кроками не можна), <c>true</c> — так.</summary>
+    /// <param name="methodologyId">Методологія.</param>
+    /// <remarks>Методологія, якої прогін не рахував (перенесена чи не прив'язана), — «не записано»: кроків у неї немає.</remarks>
+    public bool StepsRecorded(int methodologyId) => Recorded.Contains(methodologyId) && !NotRecorded.Contains(methodologyId);
+}
 
 /// <summary>Рядок таблиці, якому не підійшло жодне правило (діагностика «No matching rule»).</summary>
 /// <param name="TableInstanceId">Екземпляр таблиці.</param>
