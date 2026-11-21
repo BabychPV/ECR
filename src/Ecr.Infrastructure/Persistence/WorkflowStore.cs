@@ -353,10 +353,7 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
     {
         ArgumentNullException.ThrowIfNull(route);
 
-        var steps = await db.ApprovalSteps
-            .Where(s => s.ApprovalRouteId == route.Id)
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
+        var steps = await StepsToRemoveAsync(route, ct).ConfigureAwait(false);
 
         db.ApprovalSteps.RemoveRange(steps);
         db.ApprovalRoutes.Remove(route);
@@ -367,16 +364,47 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
     {
         ArgumentNullException.ThrowIfNull(route);
 
-        var steps = await db.ApprovalSteps
-            .Where(s => s.ApprovalRouteId == route.Id)
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
+        var steps = await StepsToRemoveAsync(route, ct).ConfigureAwait(false);
 
         // ⚠ Спершу ПОЗНАЧИТИ видаленими, потім прибрати з колекції. У
         // зворотному порядку EF бачить відвʼязану дитину з обовʼязковим
         // ключем і відмовляється зберігати зміни взагалі.
         db.ApprovalSteps.RemoveRange(steps);
         route.ClearSteps();
+    }
+
+    /// <summary>Кроки маршруту, які треба позначити видаленими: відстежувані (прочитані разом із маршрутом) І поточні в базі.</summary>
+    /// <remarks>
+    /// ⛔ Гонка двох одночасних замін маршруту (CI, server-part api-7: 500 + 200). Маршрут обробник читає з кроками
+    /// (<c>Include</c>), а повторний запит кроків тут під RCSI бачить останній ЗАКОМІЧЕНИЙ стан: якщо між двома
+    /// читаннями інший запит замінив кроки, запит повертає вже ЙОГО кроки, а прочитані раніше лишаються у трекері
+    /// незміненими. Видаляти лише перечитані означало б, що <c>ClearSteps</c> (або видалення маршруту) відвʼязує
+    /// незмінені кроки від обовʼязкового <c>Restrict</c>-звʼязку — EF валить збереження
+    /// <c>InvalidOperationException</c> («association … has been severed»), голий 500.
+    /// Видалення ВСІХ відстежуваних кроків прибирає розірваний звʼязок: <c>DELETE</c> уже видаленого іншим запитом
+    /// кроку зачіпає 0 рядків → <c>DbUpdateConcurrencyException</c> → <c>409 ECR-CELL-0409 concurrentChange</c>
+    /// (<c>UnitOfWork</c>), як і задумано для гонки за наявним маршрутом (B150). Перечитування лишається для
+    /// маршруту, завантаженого без кроків.
+    /// </remarks>
+    private async Task<List<ApprovalStep>> StepsToRemoveAsync(ApprovalRoute route, CancellationToken ct)
+    {
+        // ⚠ Знімок ДО запиту: виправлення навігацій допише перечитані кроки в ту саму колекцію маршруту.
+        var steps = route.Steps.ToList();
+
+        var current = await db.ApprovalSteps
+            .Where(s => s.ApprovalRouteId == route.Id)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        foreach (var step in current)
+        {
+            if (!steps.Contains(step))
+            {
+                steps.Add(step);
+            }
+        }
+
+        return steps;
     }
 
     /// <inheritdoc />
