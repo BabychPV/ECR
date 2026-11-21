@@ -110,6 +110,11 @@ public sealed partial class RecalculationJob(
         Message = "RecalculationJob: задачу скасовано, а {Runs} незавершений(і) прогін(и) закрити не вдалося; їх закриє AbandonedWorkSweeper.")]
     private static partial void LogCloseCancelledFailed(ILogger logger, int runs, Exception exception);
 
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "RecalculationJob: задачу перервано, а позначки «перераховано після подання» ({Sheets} аркуш(ів), документ {DocumentId}) записати не вдалося.")]
+    private static partial void LogFlushMarksFailed(ILogger logger, long documentId, int sheets, Exception exception);
+
     /// <summary>Ключ каталогу причини: прогін закрито, бо задачу скасовано (L1b / D4).</summary>
     public const string CancelledRunKey = "jobs.calculationRunCancelled";
 
@@ -307,6 +312,12 @@ public sealed partial class RecalculationJob(
         // ✎ B79: подані аркуші, у яких прогін справді змінив хоч одне число (комірки формул — зі шляху запису; результати
         // методологій — порівнянням у транзакції перемикання). Лише вони отримують позначку «перераховано після подання».
         var submittedChanges = new SubmittedSheetChanges();
+
+        // ✎ Позначка після подання (e2e «SHEETNAME: copy marker», 21.11): журнал аркушів (SheetLogAsync) уже записав позначки
+        // змінених поданих аркушів. Доти задача, перервана ПІСЛЯ запису формул (витіснення кнопкою «Перерахувати» —
+        // Exclusive, межа тривалості, відкладення, збій), губила позначку назавжди: числа поданого аркуша вже інші, а
+        // наступний прогін змін не бачить і позначки не ставить. Див. FlushSubmittedMarksAsync.
+        var submittedMarksWritten = false;
 
         // D2-03: що перевірити перед перемиканням актуальності кожного періоду — аркуші, які прогін
         // ПЕРЕРАХУВАВ методологіями (за документами), і чи період ще дозволяє запис.
@@ -716,6 +727,10 @@ public sealed partial class RecalculationJob(
                 {
                     try
                     {
+                        // ✎ Позначка після подання: зміни результатів — у набір прогону ЛИШЕ після коміту перемикання. Спроба,
+                        // яку відкочено (повтор транзакції, скасування посеред неї), набору не чіпає: інакше аварійний запис
+                        // позначок (FlushSubmittedMarksAsync) позначив би аркуш, чиї числа так і не змінилися.
+                        var periodResultChanges = new SubmittedSheetChanges();
                         await runs
                             .CompleteAsync(
                                 run.Id, profile, ct, carryOvers.GetValueOrDefault(period),
@@ -725,10 +740,13 @@ public sealed partial class RecalculationJob(
 
                                     // ✎ B79: після воріт (стан аркушів уже під блокуванням) і ДО переносу й перемикання —
                                     // поки є з чим порівнювати.
-                                    await ResultChangesAsync(run.Id, period, guards, submittedChanges, token).ConfigureAwait(false);
+                                    var attemptChanges = new SubmittedSheetChanges();
+                                    await ResultChangesAsync(run.Id, period, guards, attemptChanges, token).ConfigureAwait(false);
+                                    periodResultChanges = attemptChanges;
                                 },
                                 purgeLater: supersededRuns)
                             .ConfigureAwait(false);
+                        submittedChanges.UnionWith(periodResultChanges);
                         break;
                     }
                     catch (ConcurrencyConflictException busy)
@@ -781,6 +799,7 @@ public sealed partial class RecalculationJob(
             // задачі). Після перемикання: записується лише те, що справді стало актуальним.
             // ✎ B79: поданий аркуш — лише якщо прогін змінив у ньому хоч одне число (`submittedChanges`).
             var sheetLog = await SheetLogAsync(request, scopeByDocument, submittedChanges, ct, blockedReaders).ConfigureAwait(false);
+            submittedMarksWritten = true;
 
             // L-4: «No matching rule … row N». Не помилка й не відмова - решта рядків уже
             // пораховано; це слід у повідомленні задачі, щоб рядок без правила не зник мовчки.
@@ -842,6 +861,11 @@ public sealed partial class RecalculationJob(
             // див. JobWorker L2-01). Доти прогони кроку лишалися `Running` до AbandonedWorkSweeper (2 год): гілка нижче
             // OCE не бачила, а SqlException вела в маркування токеном, що вже скасований. Закриваємо тут, без токена.
             await CloseCancelledRunsAsync(periodRuns.Values.Select(entry => entry.Run).Append(yearRun)).ConfigureAwait(false);
+            if (!submittedMarksWritten)
+            {
+                await FlushSubmittedMarksAsync(request, submittedChanges).ConfigureAwait(false);
+            }
+
             throw;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -908,6 +932,13 @@ public sealed partial class RecalculationJob(
                     LogMarkFailedFailed(
                         logger ?? NullLogger<RecalculationJob>.Instance, request.DocumentId, started.Count, markFailure);
                 }
+            }
+
+            // ✎ Позначка після подання: закомічені зміни поданих аркушів — і при відкладенні, і при збої (повтор задачі
+            // змін уже не побачить).
+            if (!submittedMarksWritten)
+            {
+                await FlushSubmittedMarksAsync(request, submittedChanges).ConfigureAwait(false);
             }
 
             // ⛔ Y1-02: «аркуш подається» (фаза формул — `RecalculationService.EnterSheetsAsync`, або
@@ -1561,6 +1592,52 @@ public sealed partial class RecalculationJob(
     {
         var text = "recalc-approved-override: " + (reason ?? string.Empty).Trim();
         return text.Length <= 400 ? text : text[..400];
+    }
+
+    /// <summary>
+    /// Позначка «перераховано після подання» для задачі, перерваної до журналу аркушів (<see cref="SheetLogAsync"/>):
+    /// скасування (витіснення кнопкою «Перерахувати», межа тривалості, зупинка служби), відкладення чи збій.
+    /// </summary>
+    /// <param name="request">Завдання.</param>
+    /// <param name="changes">Закомічені зміни поданих аркушів: комірки формул (шлях запису — після коміту) і результати
+    /// методологій періодів, чиє перемикання вже закомічене.</param>
+    /// <remarks>
+    /// <para>
+    /// ⛔ e2e «SHEETNAME: copy marker» (21.11): кнопка «Перерахувати» (Exclusive) скасовує виконуваний автоперерахунок того
+    /// самого документа й періоду. Фаза формул комітить комірки ОДРАЗУ, а позначку ставив лише журнал аркушів у самому кінці
+    /// задачі. Скасована між ними задача лишала подані числа зміненими без позначки, а прогін, що її витіснив, змін уже не
+    /// бачив (B79: позначка — лише за зміну) — погоджувач не дізнавався, що подане змінилося.
+    /// </para>
+    /// <para>
+    /// Без токена задачі (він уже скасований) і без «пропущених затверджених»: їх журнал аркушів пише лише за прогін, що
+    /// дійшов до кінця. Збій тут лише в журнал — початковий виняток (скасування, відкладення) не підміняється.
+    /// </para>
+    /// </remarks>
+    private async Task FlushSubmittedMarksAsync(RecalculationRequest request, SubmittedSheetChanges changes)
+    {
+        if (changes.Count == 0 || audit is null)
+        {
+            return;
+        }
+
+        try
+        {
+            foreach (var group in changes.Items.GroupBy(c => (c.DocumentId, c.PeriodKey)))
+            {
+                await SubmittedSheetRecalcLog
+                    .WriteAsync(
+                        db, audit, clock, group.Key.DocumentId, group.Key.PeriodKey,
+                        [.. group.Select(c => (c.SheetDefId, c.SheetCopyId))], CancellationToken.None,
+                        changedByUserId: request.TriggeredByUserId ?? 0, source: "interruptedRun")
+                    .ConfigureAwait(false);
+            }
+        }
+#pragma warning disable CA1031 // Позначка — другорядне: скасування/відкладення не підміняється збоєм журналу.
+        catch (Exception ex)
+#pragma warning restore CA1031
+        {
+            LogFlushMarksFailed(logger ?? NullLogger<RecalculationJob>.Instance, request.DocumentId, changes.Count, ex);
+        }
     }
 
     /// <summary>

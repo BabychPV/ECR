@@ -35,6 +35,20 @@ public sealed class SubmittedSheetChanges
     /// <summary>Скільки поданих аркушів (документ × період × аркуш × копія) змінено.</summary>
     public int Count => changed.Count;
 
+    /// <summary>Змінені подані аркуші (копія <c>null</c> — оригінал), за документом, періодом, аркушем і копією.</summary>
+    public IEnumerable<(long DocumentId, int PeriodKey, int SheetDefId, long? SheetCopyId)> Items
+        => changed
+            .OrderBy(c => c.DocumentId).ThenBy(c => c.PeriodKey).ThenBy(c => c.SheetDefId).ThenBy(c => c.CopyKey)
+            .Select(c => (c.DocumentId, c.PeriodKey, c.SheetDefId, c.CopyKey == 0L ? (long?)null : c.CopyKey));
+
+    /// <summary>Додає всі зміни іншого набору (злиття після коміту, див. <c>RecalculationJob</c>).</summary>
+    /// <param name="other">Набір, чиї зміни вже закомічені.</param>
+    public void UnionWith(SubmittedSheetChanges other)
+    {
+        ArgumentNullException.ThrowIfNull(other);
+        changed.UnionWith(other.changed);
+    }
+
     /// <summary>Запам'ятовує, що в поданому аркуші змінилося хоч одне число.</summary>
     /// <param name="documentId">Документ.</param>
     /// <param name="periodKey">Період.</param>

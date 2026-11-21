@@ -375,6 +375,82 @@ public sealed class SheetNameRecalculationTests(SqlServerFixture sql)
         }
     }
 
+    /// <remarks>
+    /// e2e «SHEETNAME: copy marker» (падіння 20–21.11, CI 44831495997 і 44894378582). Кнопка «Перерахувати» ставить задачу
+    /// з витісненням (Exclusive) і скасовує виконуваний автоперерахунок того самого документа й періоду. Фаза формул
+    /// комітить комірки одразу, а позначку «перераховано після подання» ставив лише журнал аркушів у кінці задачі:
+    /// витіснена між ними задача лишала число поданої копії зміненим без позначки, а прогін, що її витіснив, змін уже не
+    /// бачив (B79) — позначка не з'являлась ніколи. Скасування тут — рівно в тому місці: оркестратор методологій після
+    /// формул. Мутація (локально): прибрати виклик <c>FlushSubmittedMarksAsync</c> у гілці скасування
+    /// <c>RecalculationJob.ExecuteAsync</c> — позначки немає, тест червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "F13-p218-788")]
+    public async Task Подана_копія_перерахунок_витіснений_після_запису_формул_лишає_позначку()
+    {
+        var world = await ArrangeAsync();
+        var copy = await world.Run(h => h.AddAsync(world.Doc.DocumentId, world.Doc.SheetDefId, default));
+        var copyRow = await AddCopyInstanceAsync(world.Doc, copy.SheetCopyId);
+        await SubmitCopyAsync(world.Doc, copy.SheetCopyId);
+
+        using var preempt = new CancellationTokenSource();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => world.RunRecalculationJobAsync(
+            new RecalculationRequest(world.Doc.ProjectId, world.Doc.DocumentId, world.Doc.PeriodKey.Value, TriggeredByUserId: UserId),
+            new PreemptingRunner(preempt),
+            preempt.Token));
+
+        // Фаза формул закомітила число поданої копії ДО витіснення — і позначка це каже.
+        Assert.Equal("Vessel 2", await TextAsync(world.Doc, copyRow));
+        Assert.True(await CopyMarkedAsync(world.Doc, copy.SheetCopyId));
+
+        // Прогін, що витіснив, змін уже не бачить і сам позначки не ставить; позначка лишається.
+        await world.RunRecalculationJobAsync(new RecalculationRequest(
+            world.Doc.ProjectId, world.Doc.DocumentId, world.Doc.PeriodKey.Value, TriggeredByUserId: UserId));
+        Assert.True(await CopyMarkedAsync(world.Doc, copy.SheetCopyId));
+    }
+
+    /// <remarks>
+    /// e2e «SHEETNAME: copy marker»: сценарій тесту (копія → рядок → подання → «Перерахувати») покладався на те, що
+    /// SHEETNAME() нового рядка ще НЕ пораховано на мить подання. Задача формул нового рядка й перерахунок першого
+    /// відкриття копії йдуть у фоні й часто встигають раніше за подання — тоді перерахунок після подання нічого не
+    /// змінює, і позначки немає (B79: позначка — лише за зміну числа). Тут цей стан детерміновано: ручний перерахунок без
+    /// змін позначки не ставить, а перейменування групи ПІСЛЯ подання (SHEETNAME поданої копії змінюється) — ставить.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "F13-p218-788")]
+    public async Task Подана_копія_з_уже_порахованою_назвою_перерахунок_без_змін_не_позначає_а_перейменування_після_подання_позначає()
+    {
+        var world = await ArrangeAsync();
+        var copy = await world.Run(h => h.AddAsync(world.Doc.DocumentId, world.Doc.SheetDefId, default));
+        var copyRow = await AddCopyInstanceAsync(world.Doc, copy.SheetCopyId);
+        await world.RecalculateSheetAsync();
+        Assert.Equal("Vessel 2", await TextAsync(world.Doc, copyRow));
+        await SubmitCopyAsync(world.Doc, copy.SheetCopyId);
+
+        var manual = new RecalculationRequest(
+            world.Doc.ProjectId, world.Doc.DocumentId, world.Doc.PeriodKey.Value, TriggeredByUserId: UserId);
+        await world.RunRecalculationJobAsync(manual);
+        Assert.False(await CopyMarkedAsync(world.Doc, copy.SheetCopyId));
+
+        world.Jobs.ClearReceivedCalls();
+        await world.Run(h => h.RenameGroupAsync(
+            world.Doc.DocumentId, world.Doc.SheetDefId, new Dictionary<string, string> { ["en"] = "Contract" }, default));
+        var renamed = Assert.Single(world.Jobs.ReceivedCalls(), c => c.GetMethodInfo().Name == "EnqueueCoalescedAsync")
+            .GetArguments()[1];
+        await world.RunRecalculationJobAsync(renamed);
+
+        Assert.Equal("Contract 2", await TextAsync(world.Doc, copyRow));
+        Assert.True(await CopyMarkedAsync(world.Doc, copy.SheetCopyId));
+
+        // «Перерахувати» після цього нічого не змінює, а позначка лишається.
+        await world.RunRecalculationJobAsync(manual);
+        Assert.True(await CopyMarkedAsync(world.Doc, copy.SheetCopyId));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
@@ -502,6 +578,27 @@ public sealed class SheetNameRecalculationTests(SqlServerFixture sql)
         state.Approve(UserId, Now);
         db.ApprovalStates.Add(state);
         await db.SaveChangesAsync();
+    }
+
+    private async Task SubmitCopyAsync(TestDocument doc, long sheetCopyId)
+    {
+        await using var db = new EcrDbContext(
+            new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).Options);
+        var state = new ApprovalState(doc.DocumentId, doc.SheetDefId, doc.PeriodKey.Value, sheetCopyId);
+        state.Submit(UserId, Now.AddMinutes(-5));
+        db.ApprovalStates.Add(state);
+        await db.SaveChangesAsync();
+    }
+
+    /// <summary>Позначка «перераховано після подання» копії на картці документа (ключ «КОД#sheetCopyId»).</summary>
+    private async Task<bool> CopyMarkedAsync(TestDocument doc, long sheetCopyId)
+    {
+        await using var db = new EcrDbContext(
+            new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).Options);
+        var summary = await new DocumentStore(db).FindAsync(
+            doc.DocumentId, new PeriodKeyFilter(doc.PeriodKey.Value), CancellationToken.None);
+        return Assert.Single(summary!.Sheets!, s => s.Code == SheetCopyNaming.StateKey(doc.SheetCode, sheetCopyId))
+            .RecalculatedAfterSubmission;
     }
 
     private async Task ApproveCopyAsync(TestDocument doc, long sheetCopyId)
@@ -726,7 +823,8 @@ public sealed class SheetNameRecalculationTests(SqlServerFixture sql)
         }
 
         /// <summary>Справжній <c>RecalculationJob</c> над цим документом (методологій немає — оркестратор порожній).</summary>
-        public async Task<List<string>> RunRecalculationJobAsync(object? payload, ICalculationRunner? calculationRunner = null)
+        public async Task<List<string>> RunRecalculationJobAsync(
+            object? payload, ICalculationRunner? calculationRunner = null, CancellationToken ct = default)
         {
             await using var db = builder.CreateContext();
             var clock = new FixedClock();
@@ -747,7 +845,7 @@ public sealed class SheetNameRecalculationTests(SqlServerFixture sql)
 
             var job = new RecalculationJob(
                 db, runner, runs, Service(db), clock, sheetGate: new SheetEditGate(db), audit: new AuditWriter(db));
-            await job.ExecuteAsync(payload, progress, CancellationToken.None);
+            await job.ExecuteAsync(payload, progress, ct);
             return messages;
         }
 
@@ -794,6 +892,22 @@ public sealed class SheetNameRecalculationTests(SqlServerFixture sql)
         {
             Instances.AddRange(bindings.Select(b => b.TableInstanceId));
             return Task.FromResult(new ModuleProfile());
+        }
+    }
+
+    /// <summary>
+    /// Витіснення посеред прогону: фаза формул уже закомітила, і саме тут кнопка «Перерахувати» (Exclusive) скасовує
+    /// задачу — токен задачі скасовано, оркестратор кидає скасування.
+    /// </summary>
+    private sealed class PreemptingRunner(CancellationTokenSource preempt) : ICalculationRunner
+    {
+        public async Task<ModuleProfile> RunAsync(
+            long calculationRunId, long documentId, PeriodKey periodKey,
+            IReadOnlyList<CalculationBindingRef> bindings, IJobProgress progress, CancellationToken ct)
+        {
+            await preempt.CancelAsync();
+            ct.ThrowIfCancellationRequested();
+            return new ModuleProfile();
         }
     }
 
