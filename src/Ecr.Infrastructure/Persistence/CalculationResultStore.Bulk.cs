@@ -29,6 +29,18 @@ namespace Ecr.Infrastructure.Persistence;
 /// </remarks>
 public sealed partial class CalculationResultStore
 {
+    /// <summary>
+    /// ✎ L1b / D1: рядків на один оператор <c>insert bulk</c> (<see cref="SqlBulkCopy.BatchSize"/>) — у тій самій транзакції.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Індекси <c>calc.CalculationResult</c> беруть лише рядкові замки (<c>ALLOW_PAGE_LOCKS = OFF</c>,
+    /// <c>07-partition-tables.sql</c>, міграція <c>L1bCalcRowLocksOnly</c>): сторінкові X-замки на межах діапазонів гілок
+    /// давали взаємні блокування одночасних записів того самого періоду (стенд Land, 1205). Рядковий замок — один на ключ
+    /// кожного індексу, і оператор від 5000 замків на об'єкт пробує ескалацію до X на всю таблицю, що серіалізувало б гілки.
+    /// Пакет нижче порога тримає кожен оператор поза нею; транзакція й атомарність методології — ті самі.
+    /// </remarks>
+    internal const int BulkCopyBatchRows = 2_000;
+
     /// <summary>Id результатів останнього масового запису (рядків немає в трекері) — для прив'язки кроків трейсу.</summary>
     private BulkPendingResults? bulkPending;
 
@@ -97,6 +109,7 @@ public sealed partial class CalculationResultStore
         {
             DestinationTableName = "calc.CalculationResult",
             BulkCopyTimeout = db.Database.GetCommandTimeout() ?? 30,
+            BatchSize = BulkCopyBatchRows,
         };
 
         foreach (var (name, _) in BulkColumns)
