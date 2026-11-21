@@ -2,6 +2,7 @@
 using Ecr.Application.Ports;
 using Ecr.Infrastructure.Jobs;
 using Ecr.TestKit;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 
@@ -85,6 +86,8 @@ public sealed class RecalculationFanOutLimitDbTests(SqlServerFixture sql) : DbJo
         {
             children.Add(await EnqueueRecalcAsync(documentId: 9_200_000 + i, parent: Parent));
         }
+
+        await AssertStrictlyIncreasingAvailableAtAsync(children);
 
         await using var host = CappedHost();
         var running = new List<ClaimedJob>();
@@ -231,10 +234,52 @@ public sealed class RecalculationFanOutLimitDbTests(SqlServerFixture sql) : DbJo
         var payload = parent is null
             ? $"{{\"documentId\":{documentId}{periodJson}}}"
             : $"{{\"documentId\":{documentId},\"fanOutParentJobId\":\"{parent}\"{periodJson}}}";
-        return (await host.Queue.EnqueueAsync(
+        var jobId = (await host.Queue.EnqueueAsync(
                 new JobEnqueueRequest(Code, JobLanes.Recalc, payload, target, user, DocumentId: documentId),
                 CancellationToken.None))
             .JobId;
+        await AwaitNextQueueMillisecondAsync(jobId);
+        return jobId;
+    }
+
+    /// <summary>
+    /// Чекає, доки годинник СУБД на основі claim (<c>CAST(SYSUTCDATETIME() AS datetime2(3))</c>) перейде
+    /// <c>AvailableAt</c> щойно поставленої задачі, — наступна постановка тесту отримує строго пізніший момент.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ FIFO черги — <c>ORDER BY AvailableAt, JobId</c>, а <c>AvailableAt</c> — <c>datetime2(3)</c>: дві постановки в одну
+    /// мілісекунду СУБД рівні за моментом, і між ними порядок — за випадковим <c>JobId</c> (GUID), не за приходом. На
+    /// швидкому CI (Linux, SQL Server у контейнері) постановки підряд потрапляли в одну мілісекунду, і
+    /// <c>Місце_дитини_звільнилось…</c> брав замість <c>children[Cap]</c> дитину з тієї самої мілісекунди з меншим GUID
+    /// (локально: штучна рівність моментів <c>children[Cap]</c> і <c>children[Cap + 1]</c> — червоний 99 зі 200). Для продукту це не
+    /// дефект: діти розкладу ставляться за <c>Document.Id</c> без залежностей між собою, і порядок у межах мілісекунди
+    /// нічого не означає; детермінований (той самий <c>JobId</c>) — тож і «рік углиб» тримається.
+    /// </remarks>
+    private async Task AwaitNextQueueMillisecondAsync(string jobId)
+    {
+        await using var connection = new SqlConnection(Sql.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            DECLARE @at datetime2(3) = (SELECT AvailableAt FROM itg.JobProgress WHERE JobId = @id);
+            WHILE CAST(SYSUTCDATETIME() AS datetime2(3)) <= @at
+                WAITFOR DELAY '00:00:00.001';
+            """;
+        command.Parameters.AddWithValue("@id", jobId);
+        await command.ExecuteNonQueryAsync();
+    }
+
+    /// <summary>Моменти доступності задач у порядку списку — строго зростають (передумова FIFO-тверджень).</summary>
+    private async Task AssertStrictlyIncreasingAvailableAtAsync(List<string> jobIds)
+    {
+        await using var db = Sql.CreateContext();
+        var at = await db.JobProgresses.AsNoTracking()
+            .Where(p => jobIds.Contains(p.JobId))
+            .ToDictionaryAsync(p => p.JobId, p => p.AvailableAt);
+        for (var i = 1; i < jobIds.Count; i++)
+        {
+            Assert.True(at[jobIds[i - 1]] < at[jobIds[i]], $"AvailableAt {jobIds[i - 1]} не раніший за {jobIds[i]}");
+        }
     }
 
     private async Task<int> RunningChildrenAsync()

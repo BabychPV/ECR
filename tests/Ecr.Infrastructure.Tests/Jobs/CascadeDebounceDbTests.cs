@@ -1,6 +1,7 @@
 // tests/Ecr.Infrastructure.Tests/Jobs/CascadeDebounceDbTests.cs
 using Ecr.Application.Calculations;
 using Ecr.Application.Ports;
+using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Workflow;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
@@ -124,21 +125,73 @@ public sealed class CascadeDebounceDbTests(SqlServerFixture sql) : DbJobQueueTes
 
         Assert.Equal(cascade, manual);
         Assert.True(await AvailableInAsync(cascade) <= TimeSpan.Zero);
+
+        // «Одразу» — це claim зараз, а не лише число: бере саме злиту задачу, без очікування вікна.
+        var claimed = await host.Queue.ClaimAsync([JobLanes.Recalc], "test/host", JobQueueLimits.DefaultLease, CancellationToken.None);
+        Assert.Equal(cascade, claimed?.Claim.JobId);
     }
 
-    /// <summary>Скільки ще до доступності задачі за годинником СУБД (від'ємне — уже доступна).</summary>
+    /// <summary>
+    /// Розбіжність годинника застосунку й СУБД (CI: контейнер SQL Server проти раннера) не зсуває доступність: моменти
+    /// черги — лише з <c>SYSUTCDATETIME()</c>, а <see cref="IClock"/> черги й планувальника — тільки для колонок показу.
+    /// </summary>
+    /// <remarks>
+    /// МУТАЦІЯ: <c>@available</c> у <c>DbJobQueue.EnqueueSql</c> від <c>@shown</c> (годинник застосунку) замість
+    /// <c>SYSUTCDATETIME()</c> — червоні обидва випадки: −1 год — відкладений каскад claim бере одразу, +1 год — злита
+    /// ручна постановка не береться.
+    /// </remarks>
+    [Theory]
+    [InlineData(-3600)]
+    [InlineData(3600)]
+    public async Task Зсув_годинника_застосунку_не_зсуває_доступність_каскаду_й_ручної_постановки(int appClockSkewSeconds)
+    {
+        var clock = new SkewedClock(TimeSpan.FromSeconds(appClockSkewSeconds));
+        var db = Sql.CreateContext();
+        await using var host = new Host(db, new DbJobQueue(db, clock));
+        var scheduler = Scheduler(host, clock);
+        var target = Ecr.Application.Documents.RecalculateDocumentHandler.TargetOf(Consumer, Period);
+
+        var cascade = await scheduler.EnqueueCoalescedDelayedAsync<IRecalculationJob>(
+            target, new { DocumentId = Consumer, PeriodKey = Period.Value, RecalculateSubmitted = true },
+            CalculationTrigger.CascadeDebounce, CancellationToken.None);
+        Assert.Null(await host.Queue.ClaimAsync([JobLanes.Recalc], "test/host", JobQueueLimits.DefaultLease, CancellationToken.None));
+
+        var manual = await scheduler.EnqueueCoalescedAsync<IRecalculationJob>(
+            target, new { DocumentId = Consumer, PeriodKey = Period.Value }, CancellationToken.None, createdByUserId: 7);
+        Assert.Equal(cascade, manual);
+
+        var claimed = await host.Queue.ClaimAsync([JobLanes.Recalc], "test/host", JobQueueLimits.DefaultLease, CancellationToken.None);
+        Assert.Equal(cascade, claimed?.Claim.JobId);
+    }
+
+    /// <summary>
+    /// Скільки ще до доступності задачі за годинником СУБД (від'ємне чи нуль — уже доступна) — на тій самій основі, що
+    /// й claim (<c>DbJobQueue.ClaimQueuedSql</c>): «зараз» = <c>CAST(SYSUTCDATETIME() AS datetime2(3))</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Не голий <c>SYSUTCDATETIME()</c>: <c>AvailableAt</c> — <c>datetime2(3)</c>, і запис «зараз» ОКРУГЛЮЄ до 0,5 мс
+    /// угору (<see cref="DbJobQueueSameMillisecondTests"/>). Читання в ту саму мілісекунду, що й постановка (швидкий CI:
+    /// Linux, SQL Server у контейнері), давало <c>DATEDIFF</c> = +1 мс — «ще не доступна», хоча claim її вже бере.
+    /// </remarks>
     private async Task<TimeSpan> AvailableInAsync(string jobId)
     {
         await using var connection = new SqlConnection(Sql.ConnectionString);
         await connection.OpenAsync();
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT DATEDIFF_BIG(millisecond, SYSUTCDATETIME(), AvailableAt) FROM itg.JobProgress WHERE JobId = @id;";
+        command.CommandText =
+            "SELECT DATEDIFF_BIG(millisecond, CAST(SYSUTCDATETIME() AS datetime2(3)), AvailableAt) FROM itg.JobProgress WHERE JobId = @id;";
         command.Parameters.AddWithValue("@id", jobId);
         return TimeSpan.FromMilliseconds((long)(await command.ExecuteScalarAsync())!);
     }
 
-    private static DbBackgroundJobScheduler Scheduler(Host host)
-        => new(host.Queue, new QuartzJobScheduler(null, new JobProgressStore(host.Db), new SystemClock()), new JobQueueSignal());
+    private static DbBackgroundJobScheduler Scheduler(Host host, IClock? clock = null)
+        => new(host.Queue, new QuartzJobScheduler(null, new JobProgressStore(host.Db), clock ?? new SystemClock()), new JobQueueSignal());
+
+    /// <summary>Годинник застосунку, зсунутий відносно годинника СУБД.</summary>
+    private sealed class SkewedClock(TimeSpan offset) : IClock
+    {
+        public DateTime UtcNow => DateTime.UtcNow + offset;
+    }
 
     private static CalculationTrigger Trigger(Host host)
     {
