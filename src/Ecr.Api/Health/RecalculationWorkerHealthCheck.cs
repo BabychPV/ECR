@@ -39,6 +39,7 @@ public sealed class RecalculationWorkerHealthCheck(
     IRecalculationWorkerProbe probe,
     IUiStringCatalog catalog,
     ICurrentUser currentUser,
+    IHostEnvironment environment,
     HealthResultCache? cache = null) : IHealthCheck
 {
     /// <summary>Скільки задача перерахунку може чекати, перш ніж черга вважається застряглою.</summary>
@@ -71,6 +72,20 @@ public sealed class RecalculationWorkerHealthCheck(
             ["queueMode"] = mode.ToString(),
             ["executor"] = executor.ToString(),
         };
+
+        // ⚠ PERF-12: у Production Quartz — лише для малих інсталяцій; жовтий, щоб це було видно не лише в журналі старту
+        // (`EcrConfigurationValidation.QuartzInProductionWarning`). Degraded, не Unhealthy: див. ⛔ вище.
+        if (mode == JobQueueMode.Quartz && environment.IsProduction())
+        {
+            var quartz = await Text(
+                "health.worker.quartzInProduction",
+                "Production runs recalculation inside the application process (Jobs:Queue:Mode = Quartz): it shares CPU "
+                + "with HTTP requests, jobs are lost on restart and the month chain, fan-out cap and claim-time document "
+                + "exclusion do not apply. Use Jobs:Queue:Mode = Database with the EcrWorker service; keep Quartz for "
+                + "development and small installations only.",
+                cancellationToken).ConfigureAwait(false);
+            return HealthCheckResult.Degraded(quartz, data: data);
+        }
 
         // У режимі Quartz Executor нічого не змінює: перерахунок іде в Api.
         if (mode != JobQueueMode.Database || executor != RecalculationExecutor.Worker)

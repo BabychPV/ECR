@@ -118,6 +118,44 @@ public sealed class RecalculationWorkerHealthTests
         Assert.IsType<InvalidOperationException>(result.Exception);
     }
 
+    /// <remarks>
+    /// PERF-12: Production без явного режиму (типово Quartz) і з явним Quartz — жовтий; Development і Production із Database
+    /// — без цієї примітки. Мутації (прогнано): прибрати гілку <c>quartzInProduction</c> → перший кейс зелений;
+    /// прибрати <c>IsProduction()</c> → Development жовтий.
+    /// </remarks>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Finding", "PERF-12")]
+    [InlineData("Production", null, HealthStatus.Degraded)]
+    [InlineData("Production", "Quartz", HealthStatus.Degraded)]
+    [InlineData("Development", "Quartz", HealthStatus.Healthy)]
+    [InlineData("Development", null, HealthStatus.Healthy)]
+    public async Task Quartz_у_Production_жовтий_а_в_розробці_зелений(string environment, string? mode, HealthStatus expected)
+    {
+        var probe = Substitute.For<IRecalculationWorkerProbe>();
+        var result = await Check(Configuration(mode, "InProcess"), probe, environment);
+
+        Assert.Equal(expected, result.Status);
+        if (expected == HealthStatus.Degraded)
+        {
+            Assert.Contains("Jobs:Queue:Mode = Database", result.Description, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Finding", "PERF-12")]
+    public async Task Database_у_Production_без_живого_воркера_жовтий_через_службу()
+    {
+        var probe = Substitute.For<IRecalculationWorkerProbe>();
+        probe.ReadServiceState().Returns(WorkerServiceState.Missing);
+
+        var result = await Check(Configuration("Database", "Worker"), probe, "Production");
+
+        Assert.Equal(HealthStatus.Degraded, result.Status);
+        Assert.Contains("not installed", result.Description, StringComparison.Ordinal);
+    }
+
     private static Task<HealthCheckResult> CheckAsync(
         string? mode, string? executor, WorkerServiceState service, RecalculationQueueState queue)
     {
@@ -127,11 +165,14 @@ public sealed class RecalculationWorkerHealthTests
         return Check(Configuration(mode, executor), probe);
     }
 
-    private static Task<HealthCheckResult> Check(IConfiguration configuration, IRecalculationWorkerProbe probe)
+    private static Task<HealthCheckResult> Check(
+        IConfiguration configuration, IRecalculationWorkerProbe probe, string environmentName = "Development")
     {
         var user = Substitute.For<ICurrentUser>();
         user.Language.Returns("en");
-        return new RecalculationWorkerHealthCheck(configuration, probe, new FakeUiStringCatalog(), user)
+        var host = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
+        host.EnvironmentName.Returns(environmentName);
+        return new RecalculationWorkerHealthCheck(configuration, probe, new FakeUiStringCatalog(), user, host)
             .CheckHealthAsync(Context, CancellationToken.None);
     }
 

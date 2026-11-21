@@ -192,6 +192,57 @@ public sealed class EcrConfigurationValidationTests(SqlServerFixture sql)
             Config(("Telemetry:Enabled", "true"), ("Telemetry:OtlpEndpoint", "http://collector:4317"))));
     }
 
+    /// <summary>
+    /// PERF-12: Quartz у Production — попередження старту (явно чи за типовим значенням); Database і не-Production — без нього.
+    /// Мутації (прогнано): прибрати <c>isProduction</c> з умови → «Development» дає попередження; прибрати блок → Production
+    /// без попередження; змінити типовий режим на Database в <c>ReadMode</c> → кейс «не задано» без попередження.
+    /// </summary>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Finding", "PERF-12")]
+    [InlineData(true, "Quartz", true)]
+    [InlineData(true, null, true)]
+    [InlineData(true, "Database", false)]
+    [InlineData(false, "Quartz", false)]
+    [InlineData(false, null, false)]
+    public void Quartz_у_Production_попереджає_на_старті(bool production, string? mode, bool expectWarning)
+    {
+        var warnings = EcrConfigurationValidation.Warnings(Config(("Jobs:Queue:Mode", mode ?? "")), production)
+            .Where(w => w.Contains("PERF-12", StringComparison.Ordinal))
+            .ToList();
+
+        if (expectWarning)
+        {
+            Assert.Equal(EcrConfigurationValidation.QuartzInProductionWarning, Assert.Single(warnings));
+        }
+        else
+        {
+            Assert.Empty(warnings);
+        }
+    }
+
+    /// <summary>
+    /// PERF-12: Database + Worker без служби (немає / вимкнена) — попередження старту; зі службою чи в іншому режимі — ні.
+    /// Мутація (прогнано): прибрати <c>Disabled</c> зі списку станів → кейс «Disabled» без попередження.
+    /// </summary>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Finding", "PERF-12")]
+    [InlineData("Database", "Worker", Ecr.Api.Health.WorkerServiceState.Missing, true)]
+    [InlineData("Database", "Worker", Ecr.Api.Health.WorkerServiceState.Disabled, true)]
+    [InlineData("Database", "Worker", Ecr.Api.Health.WorkerServiceState.Installed, false)]
+    [InlineData("Database", "Worker", Ecr.Api.Health.WorkerServiceState.Unknown, false)]
+    [InlineData("Quartz", "InProcess", Ecr.Api.Health.WorkerServiceState.Missing, false)]
+    [InlineData("Database", "InProcess", Ecr.Api.Health.WorkerServiceState.Missing, false)]
+    public void Воркер_без_служби_попереджає_на_старті(
+        string mode, string executor, Ecr.Api.Health.WorkerServiceState service, bool expectWarning)
+    {
+        var warning = EcrConfigurationValidation.WorkerServiceWarning(
+            Config(("Jobs:Queue:Mode", mode), ("Jobs:Recalculation:Executor", executor)), service);
+
+        Assert.Equal(expectWarning, warning is not null);
+    }
+
     /// <remarks>
     /// ✎ L1b / D2 (стенд Land 21.11; рішення координатора 21.11): межа дітей розкладу перерахунку проти місць виконавця, що
     /// бере лейн перерахунку. ПОПЕРЕДЖЕННЯ — лише коли резерву останнього місця немає (Quartz — потоки пулу) і межа ≥ місць.
