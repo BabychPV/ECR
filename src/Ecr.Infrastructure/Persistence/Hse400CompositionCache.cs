@@ -17,12 +17,14 @@ namespace Ecr.Infrastructure.Persistence;
 /// входу — інший відбиток, старий запис просто перестає адресуватися.
 /// </para>
 /// <para>
-/// ⚠ Що саме бачить відбиток: кількість і найбільший <c>doc.TableRow.RowVersion</c> обраних рядків (його піднімає КОЖЕН запис
-/// комірок через <c>NormalizedCellStore</c> — інваріант <c>TableRow</c>; версія — монотонний лічильник бази, тож правка чи
-/// вставка завжди дає більший максимум, а видалення міняє кількість); Id актуальних прогонів (нові розрахункові <c>F_&lt;X&gt;</c> =
-/// новий актуальний прогін); набір обраних екземплярів (інший «останній документ року» чи видалений рядок); код/порядок
-/// рядків і місячні колонки; затверджені місяці. Пряма SQL-правка <c>doc.CellValue</c> без піднімання версії рядка
-/// (так не пише жоден шлях застосунку) відбитка не змінює — це ж обмеження в оптимістичного блокування рядка.
+/// ⚠ Що саме бачить відбиток: кількість, найбільший і СУМА <c>doc.TableRow.RowVersion</c> обраних рядків (версію піднімає
+/// кожен запис комірок через <c>NormalizedCellStore</c>; сума — бо версії видаються на початку транзакцій, а комітяться в
+/// іншому порядку: максимум і кількість не бачать коміту «старішої» транзакції, сума бачить); набір обраних екземплярів
+/// (інший «останній документ року» чи видалений рядок); коди таблиць-потоків; код/порядок рядків і місячні колонки; Id
+/// актуальних прогонів (нові розрахункові <c>F_&lt;X&gt;</c> = новий актуальний прогін); затверджені місяці.
+/// ⛔ Шляхи, що пишуть комірки БЕЗ піднімання версії рядка (перерахунок формул документа, прив'язка до дозволів), відбитку
+/// невидимі: тому за наявності формули чи прив'язки на таблицях складу завантажувач кеш не вмикає (див. його remarks).
+/// Пряма SQL-правка <c>doc.CellValue</c> без версії рядка також не видна — як і оптимістичному блокуванню рядка.
 /// </para>
 /// <para>
 /// ⚠ Пам'ять процесу (PERF-17): кожен вузол Api/воркера має свій кеш і однаково коректний — відбиток читається з бази, а не
@@ -86,8 +88,10 @@ public sealed class Hse400CompositionCache
     internal static string Fingerprint(
         bool approvedOnly,
         IEnumerable<(long Id, long DocumentId, int TableDefId, int PeriodKey)> instances,
-        int rowCount,
+        long rowCount,
         byte[] rowStamp,
+        decimal rowSum,
+        IReadOnlyDictionary<int, string> tableCodes,
         IEnumerable<(int TableDefId, string RowKey, int Ordinal)> rowDefs,
         IEnumerable<(int Id, int TableDefId, string Code, int Month)> monthColumns,
         IEnumerable<(long DocumentId, int PeriodKey, long RunId)> currentRuns,
@@ -96,7 +100,8 @@ public sealed class Hse400CompositionCache
         var text = new StringBuilder();
         text.Append(approvedOnly ? "A" : "Y").Append('\n');
         Section(text, "i", instances.OrderBy(x => x.Id), x => F($"{x.Id},{x.DocumentId},{x.TableDefId},{x.PeriodKey}"));
-        text.Append("[r]").Append(CultureInfo.InvariantCulture, $"{rowCount},").Append(Convert.ToHexString(rowStamp)).Append((char)10);
+        text.Append("[r]").Append(CultureInfo.InvariantCulture, $"{rowCount},{rowSum},").Append(Convert.ToHexString(rowStamp)).Append((char)10);
+        Section(text, "t", tableCodes.OrderBy(x => x.Key), x => F($"{x.Key},{x.Value}"));
         Section(text, "d", rowDefs.OrderBy(x => x.TableDefId).ThenBy(x => x.RowKey, StringComparer.Ordinal).ThenBy(x => x.Ordinal),
             x => F($"{x.TableDefId},{x.RowKey},{x.Ordinal}"));
         Section(text, "c", monthColumns.OrderBy(x => x.Id), x => F($"{x.Id},{x.TableDefId},{x.Code},{x.Month}"));
