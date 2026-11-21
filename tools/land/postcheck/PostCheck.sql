@@ -211,7 +211,7 @@ PRINT N'== BB. BRANCH_BOTH у TraceJson / ModulesProfileJson / JobProgress пі�
 DECLARE @since datetime2 = (SELECT since FROM #k1);
 SELECT 'CalculationStep.TraceJson' AS src, COUNT_BIG(*) AS hits
 FROM calc.CalculationStep s WITH (NOLOCK) JOIN calc.CalculationRun run WITH (NOLOCK) ON run.Id = s.CalculationRunId
-WHERE run.StartedAt >= @since AND s.TraceJson LIKE '%BRANCH_BOTH%'
+WHERE run.StartedAt >= @since AND COALESCE(s.TraceJson, CAST(DECOMPRESS(s.TraceJsonGz) AS nvarchar(max))) LIKE '%BRANCH_BOTH%'
 UNION ALL
 SELECT 'CalculationRun.ModulesProfileJson', COUNT_BIG(*) FROM calc.CalculationRun WITH (NOLOCK)
 WHERE StartedAt >= @since AND ModulesProfileJson LIKE '%BRANCH_BOTH%'
@@ -355,7 +355,7 @@ END
 
 -- BRANCH_BOTH
 SELECT @n = (SELECT COUNT_BIG(*) FROM calc.CalculationStep s WITH (NOLOCK) JOIN calc.CalculationRun run WITH (NOLOCK) ON run.Id = s.CalculationRunId
-              WHERE run.StartedAt >= @since AND s.TraceJson LIKE '%BRANCH_BOTH%')
+              WHERE run.StartedAt >= @since AND COALESCE(s.TraceJson, CAST(DECOMPRESS(s.TraceJsonGz) AS nvarchar(max))) LIKE '%BRANCH_BOTH%')
            + (SELECT COUNT_BIG(*) FROM calc.CalculationRun WITH (NOLOCK)
               WHERE StartedAt >= @since AND (ModulesProfileJson LIKE '%BRANCH_BOTH%' OR ErrorMessage LIKE '%BRANCH_BOTH%'))
            + (SELECT COUNT_BIG(*) FROM itg.JobProgress WITH (NOLOCK)
