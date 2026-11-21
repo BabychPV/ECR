@@ -518,6 +518,13 @@ export const router = createBrowserRouter([
             handle: routes.adminMethodologies.handle,
           },
           {
+            // ⚠ Голий `/admin/methodologies/:id` не має власного екрана (список веде одразу на
+            // `…/versions`), але адресу набирають і діляться нею — замість «Page not found»
+            // замінюємо запис історії на екран версій. Відносний `to` — від самого маршруту.
+            path: 'methodologies/:id',
+            element: <Navigate to="versions" replace />,
+          },
+          {
             path: relativePath(routes.adminMethodologyVersions, 'admin'),
             element: guarded(routes.adminMethodologyVersions.handle, <MethodologyVersionsPage />),
             handle: routes.adminMethodologyVersions.handle,

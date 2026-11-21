@@ -12,6 +12,7 @@ import { PageHeader } from '@/shared/ui/PageHeader';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { hasText, t } from '@/shared/i18n';
+import { formatNumber } from '@/shared/format/number';
 import { fetchReadiness, type Readiness } from '@/pages/admin/healthReadiness';
 import './healthPage.css';
 
@@ -323,7 +324,7 @@ export function HealthPage(): JSX.Element {
                         .filter(([key]) => !EdgeFields.has(key))
                         .map(([key, value]) => ({
                           label: fieldLabel(key),
-                          value: fieldValue(value),
+                          value: displayValue(key, value),
                         }))}
                     />
                   </Box>
@@ -615,7 +616,16 @@ const FieldLabelKeys: Record<string, string> = {
   missingFilegroups: 'health.database.missingFilegroups',
   partitionsAhead: 'health.database.partitionsAhead',
   limitations: 'health.database.limitations',
+  // Довідковий показник R2: приблизна кількість рядків `ext.RawDataPoint` і поріг перегляду.
+  rawDataPointRows: 'health.database.rawDataPointRows',
+  rawDataPointWarnRows: 'health.database.rawDataPointWarnRows',
 };
+
+/** Поля-лічильники рядків: показуються з розділювачами груп (`20 000 000`), не сирим числом. */
+const CountFields: ReadonlySet<string> = new Set(['rawDataPointRows', 'rawDataPointWarnRows']);
+
+/** Поля-переліки ПОВНИХ речень: по одному на рядок, а не через кому (кома всередині речення плутає межі). */
+const SentenceListFields: ReadonlySet<string> = new Set(['limitations']);
 
 /** ✎ PSS-L6b: поля попередження про крайні партиції — окрема примітка, не рядки переліку. */
 const EdgeFields: ReadonlySet<string> = new Set(['edgeWarning', 'edgeRowsFirst', 'edgeRowsLast', 'edgeWarningError']);
@@ -682,6 +692,27 @@ function fieldValue(value: unknown): string {
   const text = String(value);
 
   return text.trim().length === 0 ? EmptyValue : text;
+}
+
+/**
+ * Значення поля для клітинки панелі бази: те, що `fieldValue`, але лічильники
+ * форматуються, а перелік речень (`limitations`) — по одному реченню на рядок.
+ * Порожній перелік і далі дає `—` (через `fieldValue`).
+ */
+function displayValue(key: string, value: unknown): ReactNode {
+  if (CountFields.has(key) && typeof value === 'number') return formatNumber(value);
+
+  if (SentenceListFields.has(key) && Array.isArray(value) && value.length > 0) {
+    return (
+      <ul className="ecr-health-sentences" data-health-sentences="">
+        {value.map((sentence, index) => (
+          <li key={`${String(index)}:${String(sentence)}`}>{String(sentence)}</li>
+        ))}
+      </ul>
+    );
+  }
+
+  return fieldValue(value);
 }
 
 /*
