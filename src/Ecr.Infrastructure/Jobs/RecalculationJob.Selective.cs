@@ -210,13 +210,17 @@ public sealed partial class RecalculationJob
                          .MinAsync(p => (int?)p.PeriodKeyValue, ct)
                          .ConfigureAwait(false)
                      ?? keys.Min();
+        var yearWide = await ScriptsReadMonthColumnsAsync(documentId, ct).ConfigureAwait(false);
         var codes = await NightlyInputChangeQuery
             .MonthCellChangesAsync(
                 db, documentId, anchor,
                 [.. open.Select(m => new MonthInputProbe(
                     m, Since(m),
                     current[m].FinishedAt is { } finished ? DateTime.SpecifyKind(finished, DateTimeKind.Utc) : null))],
-                ct)
+                ct,
+                yearWideInputs: yearWide,
+                yearFrom: (year * 100) + 1,
+                yearTo: (year * 100) + 99)
             .ConfigureAwait(false);
         flagged.UnionWith(open.Where(m => codes.GetValueOrDefault(m) != 0));
         open = [.. open.Where(m => !flagged.Contains(m))];
@@ -271,6 +275,163 @@ public sealed partial class RecalculationJob
 
         return flagged;
     }
+
+    /// <summary>Кеш «скрипт читає місячні колонки» за версією методології і її текстом (процес).</summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<(int VersionId, int TextHash), bool> MonthReadCache = new();
+
+    /// <summary>
+    /// ✎ PERF-01: чи хоч одна методологія-скрипт, прив'язана до таблиць документа (і бібліотеки, які вона імпортує), читає
+    /// місячні колонки рядка (<c>row.X[m]</c>, <see cref="Ecr.Scripting.RowFieldInfo.IsMonthly"/>) — індекс будь-який, тож скрипт
+    /// місяця m може читати ВВЕДЕНЕ в іншому місяці, і каскаду формул (гілка «похідні») такого читання не видно. Тоді вхід
+    /// будь-якого місяця року — вхід кожного (консервативно, як D-562 на рівні документа).
+    /// </summary>
+    /// <remarks>
+    /// Усі версії методології (не лише чинна на дату) і текст, що не компілюється, — «читає» (помилитися можна лише в бік
+    /// «рахувати»). Формульні методології місячних колонок рахують лише свій місяць (<c>MonthColumnArgumentsModule</c>, D-545).
+    /// </remarks>
+    private async Task<bool> ScriptsReadMonthColumnsAsync(long documentId, CancellationToken ct)
+    {
+        var tableDefIds = await DocumentInstancesQuery(db, documentId)
+            .Select(i => i.TableDefId)
+            .Distinct()
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        var methodologyIds = await db.CalculationBindings
+            .AsNoTracking()
+            .Where(b => b.IsActive && tableDefIds.Contains(b.TableDefId))
+            .Select(b => b.MethodologyId)
+            .Distinct()
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var seen = new HashSet<int>();
+        var pending = methodologyIds.ToList();
+        for (var depth = 0; pending.Count > 0 && depth < 8; depth++)
+        {
+            var batch = pending.Where(seen.Add).ToList();
+            pending.Clear();
+            if (batch.Count == 0)
+            {
+                break;
+            }
+
+            var versions = await db.MethodologyVersions
+                .AsNoTracking()
+                .Where(v => batch.Contains(v.MethodologyId) && v.Engine == Domain.Enums.MethodologyEngine.Script)
+                .Select(v => new { v.Id, v.ScriptText, v.NumericMode, Library = db.Methodologies.Any(m => m.Id == v.MethodologyId && m.Kind == Domain.Enums.MethodologyKind.Library) })
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+            foreach (var version in versions)
+            {
+                var text = version.ScriptText ?? string.Empty;
+                var reads = MonthReadCache.GetOrAdd((version.Id, string.GetHashCode(text, StringComparison.Ordinal)), _ =>
+                {
+                    var compiled = Ecr.Scripting.ScriptCompiler.Compile(
+                        text, new Ecr.Scripting.ScriptCompileOptions(version.NumericMode, version.Library)).Script;
+                    return compiled is null || ReadsOtherMonths(compiled);
+                });
+                if (reads)
+                {
+                    return true;
+                }
+            }
+
+            var versionIds = versions.Select(v => v.Id).ToList();
+            pending.AddRange(await db.MethodologyImports
+                .AsNoTracking()
+                .Where(i => versionIds.Contains(i.MethodologyVersionId))
+                .Select(i => i.ImportedMethodologyId)
+                .Distinct()
+                .ToListAsync(ct)
+                .ConfigureAwait(false));
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Чи скрипт читає місячну колонку з індексом, ІНШИМ за свій місяць: кожен виклик <c>$month</c>/<c>$cellMonth</c> у
+    /// скомпільованому дереві, чий індекс не дослівно <c>[Period].Sequence</c> (<c>row.X[period.Month]</c>). Змінна з тим самим
+    /// значенням, <c>row.X[3]</c>, <c>row.X[m-1]</c>, цикл — «читає інші» (консервативно).
+    /// </summary>
+    /// <param name="script">Скомпільований скрипт.</param>
+    internal static bool ReadsOtherMonths(Ecr.Scripting.CompiledScript script)
+    {
+        ArgumentNullException.ThrowIfNull(script);
+        if (!script.RowFields.Any(f => f.IsMonthly) && script.ReadTables.Count == 0)
+        {
+            return false;
+        }
+
+        var printed = new System.Text.StringBuilder();
+        var visited = new HashSet<object>(ReferenceEqualityComparer.Instance);
+        void Walk(object? value, int depth)
+        {
+            if (value is null || value is string || depth > 64 || value.GetType().IsPrimitive || value.GetType().IsEnum
+                || !visited.Add(value))
+            {
+                return;
+            }
+
+            if (value is Ecr.Expressions.Ast.AstNode node)
+            {
+                printed.Append(Ecr.Expressions.Ast.AstPrinter.Print(node)).AppendLine();
+                return;
+            }
+
+            if (value is System.Collections.IDictionary dictionary)
+            {
+                foreach (var item in dictionary.Values)
+                {
+                    Walk(item, depth + 1);
+                }
+
+                return;
+            }
+
+            if (value is System.Collections.IEnumerable sequence)
+            {
+                foreach (var item in sequence)
+                {
+                    Walk(item, depth + 1);
+                }
+
+                return;
+            }
+
+            var type = value.GetType();
+            if (type.Namespace?.StartsWith("Ecr.", StringComparison.Ordinal) != true)
+            {
+                return;
+            }
+
+            foreach (var property in type.GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
+            {
+                if (property.GetIndexParameters().Length == 0)
+                {
+                    Walk(property.GetValue(value), depth + 1);
+                }
+            }
+        }
+
+        Walk(script, 0);
+        var text = printed.ToString();
+        var all = MonthCall().Count(text) + CellMonthCall().Count(text);
+        var own = OwnMonthCall().Count(text) + OwnCellMonthCall().Count(text);
+        return all > own;
+    }
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"\$month\(")]
+    private static partial System.Text.RegularExpressions.Regex MonthCall();
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"\$cellMonth\(")]
+    private static partial System.Text.RegularExpressions.Regex CellMonthCall();
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"\$month\('[^']*', \[Period\]\.Sequence, ")]
+    private static partial System.Text.RegularExpressions.Regex OwnMonthCall();
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"\$cellMonth\('[^']*', '[^']*', \[Period\]\.Sequence\)")]
+    private static partial System.Text.RegularExpressions.Regex OwnCellMonthCall();
 
     /// <summary>
     /// Перевірка документних входів D-562 (усі гілки, крім правок комірок) від межі <c>since</c>: версії шаблону документа й

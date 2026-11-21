@@ -224,6 +224,13 @@ internal static class NightlyInputChangeQuery
     /// <param name="documentId">Документ.</param>
     /// <param name="anchor">Якір року (найраніший місяць календаря року): власник не-місячних колонок.</param>
     /// <param name="months">Місяць, межа входів (<c>since</c>, з запасом) і кінець його актуального прогону.</param>
+    /// <param name="yearWideInputs">
+    /// Вхід будь-якого місяця року — вхід КОЖНОГО місяця: скрипт методології документа читає місячні колонки (<c>row.X[m]</c>,
+    /// будь-який місяць), тож місяць m може залежати від введеного в місяці p. Діапазон — ключі року (<paramref name="yearFrom"/>
+    /// … <paramref name="yearTo"/>).
+    /// </param>
+    /// <param name="yearFrom">Найменший ключ року.</param>
+    /// <param name="yearTo">Найбільший ключ року.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Код за місяцем (лише місяці з <paramref name="months"/>).</returns>
     /// <remarks>
@@ -249,7 +256,8 @@ internal static class NightlyInputChangeQuery
     /// <para>⚠ Індекс — <c>IX_CellChange_DocPeriodChanged</c> (документ, період, момент); якір — один період.</para>
     /// </remarks>
     public static async Task<IReadOnlyDictionary<int, int>> MonthCellChangesAsync(
-        EcrDbContext db, long documentId, int anchor, IReadOnlyList<MonthInputProbe> months, CancellationToken ct)
+        EcrDbContext db, long documentId, int anchor, IReadOnlyList<MonthInputProbe> months, CancellationToken ct,
+        bool yearWideInputs = false, int yearFrom = 0, int yearTo = 0)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(months);
@@ -260,10 +268,12 @@ internal static class NightlyInputChangeQuery
             return result;
         }
 
-        // Аргументи: {0} документ, {1} якір, {2..4} походження «не вхід», далі по три на місяць (період, since, кінець).
+        // Аргументи: {0} документ, {1} якір, {2..4} походження «не вхід», {5} увесь рік, {6}/{7} межі року, далі по три на місяць
+        // (період, since, кінець).
         var args = new List<object?>
         {
             documentId, anchor, CellChangeOrigins.Recalculation, CellChangeOrigins.CalcError, CellChangeOrigins.CalcErrorResolved,
+            yearWideInputs ? 1 : 0, yearFrom, yearTo,
         };
         var values = new System.Text.StringBuilder();
         foreach (var month in months)
@@ -289,6 +299,9 @@ internal static class NightlyInputChangeQuery
                                      AND a.Origin NOT IN ({2}, {3}, {4}) AND cd.IsMonthColumn = 0)
                        OR EXISTS (SELECT 1 FROM aud.RowChange AS rc
                                    WHERE rc.DocumentId = {0} AND rc.ChangedAt >= m.Since)
+                       OR ({5} = 1 AND EXISTS (SELECT 1 FROM aud.CellChange AS y
+                                               WHERE y.DocumentId = {0} AND y.PeriodKey BETWEEN {6} AND {7}
+                                                 AND y.ChangedAt >= m.Since AND y.Origin NOT IN ({2}, {3}, {4})))
                        THEN {{MonthInputCode}}
                      WHEN EXISTS (SELECT 1 FROM aud.CellChange AS d
                                    WHERE d.DocumentId = {0} AND d.PeriodKey = m.P AND d.ChangedAt > m.Finished

@@ -160,6 +160,44 @@ public sealed class YearPressSkipsUnchangedMonthsTests(SqlServerFixture sql) : D
         Assert.Equal(monthColumn ? [202601, 202603] : Months, run.Steps);
     }
 
+    /// <summary>
+    /// Скрипт методології документа читає місячну колонку ІНШОГО місяця (<c>row.X[3]</c>, <c>row.X[period.Month - 1]</c>) —
+    /// каскаду формул такого читання не видно, тож вхід будь-якого місяця будить усі місяці (як D-562 на рівні документа).
+    /// Скрипт, що читає лише свій місяць (<c>row.X[period.Month]</c>), — ні.
+    /// </summary>
+    /// <remarks>МУТАЦІЯ: <c>ReadsOtherMonths</c> → <c>false</c> чи без гілки <c>{5} = 1</c> у запиті — червоний.</remarks>
+    [Theory]
+    [InlineData("rows from T1; var a = row.Hours[3]; output O1 : t = a;", true)]
+    [InlineData("rows from T1; var a = row.Hours[period.Month - 1]; output O1 : t = a;", true)]
+    [InlineData("rows from T1; var a = row.Hours[period.Month]; output O1 : t = a;", false)]
+    public async Task Скрипт_що_читає_інший_місяць_будить_усі_місяці(string script, bool yearWide)
+    {
+        var (builder, document) = await ArrangeAsync();
+        await using (var db = builder.CreateContext())
+        {
+            var methodology = new Methodology(
+                EcrCode.Create($"P01S_{Guid.NewGuid().ToString("N")[..8]}"),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "s" }));
+            db.Methodologies.Add(methodology);
+            await db.SaveChangesAsync();
+            db.CalculationBindings.Add(new CalculationBinding(
+                document.TableDefId, document.ColumnDefIds[2], methodology.Id, "tons", "{}"));
+            var version = new MethodologyVersion(
+                methodology.Id, "1.0", CalculationLevel.Configuration, 1, Baseline, MethodologyEngine.Script);
+            version.SetScript(script, [1]);
+            db.MethodologyVersions.Add(version);
+            await db.SaveChangesAsync();
+        }
+
+        Assert.Equal(yearWide, RecalculationJob.ReadsOtherMonths(
+            Ecr.Scripting.ScriptCompiler.Compile(script, new Ecr.Scripting.ScriptCompileOptions(NumericMode.Strict, false)).Script!));
+
+        await CellChangeAsync(document, 202602, MonthColumn(document, 2), CellChangeOrigins.UserEdit, Baseline.AddMinutes(1));
+        var run = await PressAsync(builder, document, screen: 202605, Press);
+
+        Assert.Equal(yearWide ? Months : [202602, 202605], run.Steps);
+    }
+
     /// <summary>Місяць без актуального прогону чи з новішим проваленим прогоном документа — рахується завжди.</summary>
     [Fact]
     public async Task Місяць_без_актуального_чи_з_проваленим_прогоном_рахується()
