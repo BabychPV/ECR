@@ -49,27 +49,56 @@ public sealed partial class RecalculationJob
     /// </summary>
     /// <remarks>
     /// ⛔ Мітки часу ставить застосунок до коміту (правка комірки, довідник), тож транзакція, що комітиться ПІСЛЯ старту
-    /// прогону, має мітку, ранішу за нього, — прогін її не бачив (RCSI). Плюс розбіжність годинників вузлів Api/воркера. П'ять
-    /// хвилин — із запасом на обидва; ціна — щонайбільше один зайвий перерахунок документа (наступної ночі актуальний прогін уже
-    /// пізніший за правку на години).
+    /// прогону, має мітку, ранішу за нього, — прогін її не бачив (RCSI). ✎ Огляд M1: довгі транзакції — імпорт книги,
+    /// матеріалізація збору — ставлять <c>aud.CellChange.ChangedAt</c> на ПОЧАТКУ й комітяться за хвилини, тож запас —
+    /// година (з запасом і на розбіжність годинників вузлів Api/воркера). Ціна — щонайбільше одна зайва ніч для документа,
+    /// який правили в останню годину перед його прогоном: наступної ночі актуальний прогін пізніший за правку на години.
     /// </remarks>
-    public static readonly TimeSpan NightlyInputsSkew = TimeSpan.FromMinutes(5);
+    public static readonly TimeSpan NightlyInputsSkew = TimeSpan.FromMinutes(60);
 
     /// <summary>
     /// Найстарший актуальний прогін, який ще дозволяє пропуск: старший — документ рахується, навіть якщо входи «не змінились».
     /// </summary>
     /// <remarks>
     /// Страховка від входів, яких перелік <see cref="NightlyInputChangeQuery"/> не бачить (збій інкрементної задачі формул після
-    /// прогону області аркуша, правка бази в обхід застосунку, логіка, що залежить від дати): щонайбільше тиждень застарілості, а
-    /// повний нічний перерахунок кожного документа — раз на тиждень замість щоночі.
+    /// прогону області аркуша, правка бази в обхід застосунку, логіка, що залежить від дати): щонайбільше 1–2 тижні
+    /// застарілості, а повний нічний перерахунок кожного документа — раз на 8–14 ночей замість щоночі.
+    /// <para>
+    /// ✎ Огляд M2(c): межа документа — <see cref="NightlyMaxBaselineAgeOf"/> = 7 днів + (<c>Id % 7</c>) днів. Без розкиду
+    /// перша (повна) ніч після оновлення повторювалась би для ВСІХ документів разом кожну восьму ніч.
+    /// </para>
+    /// <para>
+    /// ✎ Огляд M3: вік міряється від <c>StartedAt</c> прогону, а не від <c>COALESCE(InputsAsOfUtc, StartedAt)</c>: прогін, що
+    /// переніс результати затвердженого аркуша (<c>InputsAsOfUtc</c> далеко в минулому), інакше «старів» щоночі. Межа змін
+    /// <c>since</c> — і далі від <c>COALESCE</c> (перенесені числа бачили довідник старого прогону).
+    /// </para>
     /// </remarks>
     public static readonly TimeSpan NightlyMaxBaselineAge = TimeSpan.FromDays(7);
+
+    /// <summary>Межа віку актуального прогону документа: <see cref="NightlyMaxBaselineAge"/> + (<c>Id % 7</c>) днів.</summary>
+    /// <param name="documentId">Документ.</param>
+    public static TimeSpan NightlyMaxBaselineAgeOf(long documentId)
+        => NightlyMaxBaselineAge + TimeSpan.FromDays((int)(Math.Abs(documentId) % 7));
 
     /// <summary>Стеля документів-джерел (B179) у перевірці одного споживача; більше — «невідомо», документ рахується.</summary>
     private const int MaxNightlySourceDocuments = 500;
 
     /// <summary>Стеля версій шаблону документа в перевірці (поза нею — «невідомо», документ рахується).</summary>
     private const int MaxNightlyTemplateVersions = 64;
+
+    /// <summary>
+    /// ✎ Огляд L1: ціль черги документної задачі нічного розкладу — <c>doc{id}-y{year}-nightly</c>.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="year">Рік розкладу.</param>
+    /// <remarks>
+    /// Власна, а не <c>YearTargetOf</c> (<c>doc{id}-year</c>, діти перерахунку проєкту без року — інший обсяг, можливе
+    /// перекриття затверджених) і не <c>YearScopedTargetOf</c> (кнопка «увесь рік» людини): злиття з тією, що чекає, лишає
+    /// payload наявної задачі, тож нічна задача під чужою ціллю отримала б чужий обсяг чи <c>IncludeApproved</c>. Зливаються
+    /// лише нічні задачі того самого документа й року (повторний запуск, поки перша ще в черзі).
+    /// </remarks>
+    public static string NightlyTargetOf(long documentId, int year)
+        => string.Create(CultureInfo.InvariantCulture, $"doc{documentId}-y{year}-nightly");
 
     /// <summary>Поточний рік проєкту: календарний рік <paramref name="utcNow"/> у поясі майданчика проєкту.</summary>
     /// <param name="timeZoneId">Пояс проєкту (IANA, <c>Project.TimeZoneId</c>).</param>
@@ -203,8 +232,7 @@ public sealed partial class RecalculationJob
                     }
 
                     await scheduler
-                        .EnqueueCoalescedAsync<IRecalculationJob>(
-                            Ecr.Application.Documents.RecalculateDocumentHandler.YearTargetOf(documentId), child, ct)
+                        .EnqueueCoalescedAsync<IRecalculationJob>(NightlyTargetOf(documentId, year), child, ct)
                         .ConfigureAwait(false);
                 }
             }
@@ -250,8 +278,9 @@ public sealed partial class RecalculationJob
     /// <see cref="ScopePeriodsAsync"/> року; порожньо — нема чого. (2) У кожного з них, крім закритих якорів річної розкладки
     /// (методологій за ними немає), — актуальний прогін документа (документний або всього проєкту, найбільший <c>Id</c>);
     /// бракує хоч одного — рахуємо. (3) Межа <c>since</c> — найстарший із моментів входів цих прогонів
-    /// (<c>COALESCE(InputsAsOfUtc, StartedAt)</c>, як у карті застарілості) мінус <see cref="NightlyInputsSkew"/>; старший за
-    /// <see cref="NightlyMaxBaselineAge"/> — рахуємо. (4) Будь-яка зміна входу після <c>since</c>
+    /// (<c>COALESCE(InputsAsOfUtc, StartedAt)</c>, як у карті застарілості) мінус <see cref="NightlyInputsSkew"/> (60 хв);
+    /// найстарший <c>StartedAt</c> старший за <see cref="NightlyMaxBaselineAgeOf"/> (7–13 днів) — рахуємо. (4) Будь-яка зміна
+    /// входу після <c>since</c>
     /// (<see cref="NightlyInputChangeQuery"/>, зв'язки джерел) — рахуємо; інакше — пропуск.
     /// </remarks>
     internal async Task<NightlyDecision> NightlyDecisionAsync(
@@ -306,25 +335,27 @@ public sealed partial class RecalculationJob
                         && (r.DocumentId == null || r.DocumentId == documentId))
             .OrderBy(r => r.PeriodKey)
             .ThenByDescending(r => r.Id)
-            .Select(r => new { Period = r.PeriodKey!.Value, Inputs = r.InputsAsOfUtc ?? r.StartedAt })
+            .Select(r => new { Period = r.PeriodKey!.Value, r.StartedAt, Inputs = r.InputsAsOfUtc ?? r.StartedAt })
             .Take(MaxPeriods * 4)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
         // Найбільший Id на період — перший у порядку вище.
-        var baseline = runs.GroupBy(r => r.Period).ToDictionary(g => g.Key, g => g.First().Inputs);
+        var baseline = runs.GroupBy(r => r.Period).ToDictionary(g => g.Key, g => g.First());
         if (measured.Exists(p => !baseline.ContainsKey(p)))
         {
             return new NightlyDecision(NightlyVerdict.Recalculate, NightlyReason.NoBaseline);
         }
 
-        var oldest = DateTime.SpecifyKind(baseline.Values.Min(), DateTimeKind.Utc);
-        if (clock.UtcNow - oldest > NightlyMaxBaselineAge)
+        // ✎ Огляд M3: вік — від старту прогону (перенесення результатів затвердженого аркуша не «старить» його щоночі);
+        // M2(c): межа з розкидом за документом.
+        var oldestStart = DateTime.SpecifyKind(baseline.Values.Min(b => b.StartedAt), DateTimeKind.Utc);
+        if (clock.UtcNow - oldestStart > NightlyMaxBaselineAgeOf(documentId))
         {
             return new NightlyDecision(NightlyVerdict.Recalculate, NightlyReason.BaselineAged);
         }
 
-        var since = oldest - NightlyInputsSkew;
+        var since = DateTime.SpecifyKind(baseline.Values.Min(b => b.Inputs), DateTimeKind.Utc) - NightlyInputsSkew;
 
         // Версії шаблону документа (структура, формули, прив'язки цих версій) і шаблони — для зв'язок джерел.
         var versions = await (

@@ -84,6 +84,9 @@ public sealed class NightlyRecalculationTests(SqlServerFixture sql)
         EditJustBeforeBaseline,
         HeaderEdited,
         SheetCopyDeleted,
+        EditWithinHourBeforeBaseline,
+        SourceBindingChanged,
+        SourceApprovalEvent,
     }
 
     /// <summary>«Тиха» подія для <see cref="Власні_записи_перерахунку_й_нерелевантні_події_не_будять_документ"/>.</summary>
@@ -99,6 +102,8 @@ public sealed class NightlyRecalculationTests(SqlServerFixture sql)
         ReportPublication,
         OtherDocumentEdit,
         EditLongBeforeBaseline,
+        GlobalApprovalRouteChange,
+        GlobalPermitTypeChange,
     }
 
     [Theory]
@@ -195,26 +200,65 @@ public sealed class NightlyRecalculationTests(SqlServerFixture sql)
     [InlineData(InputKind.EditJustBeforeBaseline, "cellEdits")]
     [InlineData(InputKind.HeaderEdited, "document")]
     [InlineData(InputKind.SheetCopyDeleted, "document")]
+    [InlineData(InputKind.EditWithinHourBeforeBaseline, "cellEdits")]
+    [InlineData(InputKind.SourceBindingChanged, "source")]
+    [InlineData(InputKind.SourceApprovalEvent, "source")]
     public async Task Зміна_входу_будить_документ(InputKind kind, string reason)
     {
         var arranged = await ArrangeAsync();
-        TestDocument? source = null;
-        if (kind is InputKind.SourceDocumentEdited or InputKind.SourceDocumentRecalculated)
+        SourceBinding? bound = null;
+        if (kind is InputKind.SourceDocumentEdited or InputKind.SourceDocumentRecalculated
+            or InputKind.SourceBindingChanged or InputKind.SourceApprovalEvent)
         {
-            source = await BindSourceAsync(arranged);
+            bound = await BindSourceAsync(arranged);
         }
 
+        try
+        {
+            await AssertWokenAsync(arranged, kind, reason, bound);
+        }
+        finally
+        {
+            // ✎ Огляд M4: зв'язка — глобальний рядок спільної бази; прибрати разом із довідником.
+            if (bound is not null)
+            {
+                await UnbindAsync(arranged, bound);
+            }
+        }
+    }
+
+    private static async Task AssertWokenAsync(Arranged arranged, InputKind kind, string reason, SourceBinding? bound)
+    {
+        var source = bound?.Source;
         var baseline = ChangeSlot;
         await BaselineAsync(arranged, baseline);
-        var at = kind == InputKind.EditJustBeforeBaseline ? baseline.AddMinutes(-2) : baseline.AddHours(1);
+        var at = kind switch
+        {
+            InputKind.EditJustBeforeBaseline => baseline.AddMinutes(-2),
+
+            // ✎ Огляд M1: довгий імпорт чи матеріалізація ставлять ChangedAt на ПОЧАТКУ транзакції — запас 60 хв.
+            InputKind.EditWithinHourBeforeBaseline => baseline.AddMinutes(-45),
+            _ => baseline.AddHours(1),
+        };
 
         await using (var db = arranged.Builder.CreateContext())
         {
             var d = arranged.Document;
             switch (kind)
             {
+                case InputKind.SourceBindingChanged:
+                    await db.Database.ExecuteSqlAsync(
+                        $"UPDATE cfg.DocumentSourceBinding SET UpdatedAt = {at} WHERE Id = {bound!.BindingId}");
+                    break;
+                case InputKind.SourceApprovalEvent:
+                    db.ApprovalEvents.Add(new ApprovalEvent(
+                        source!.DocumentId, source.SheetDefId, January.Value, DocumentStatus.Submitted, DocumentStatus.Approved,
+                        ApprovalAction.Approve, byUserId: null, at));
+                    await db.SaveChangesAsync();
+                    break;
                 case InputKind.UserEdit:
                 case InputKind.EditJustBeforeBaseline:
+                case InputKind.EditWithinHourBeforeBaseline:
                     await CellChangeAsync(db, d, February, CellChangeOrigins.UserEdit, at);
                     break;
                 case InputKind.ImportEdit:
@@ -307,40 +351,56 @@ public sealed class NightlyRecalculationTests(SqlServerFixture sql)
         var arranged = await ArrangeAsync();
         await BaselineAsync(arranged, baseline);
         var at = baseline.AddHours(1);
+        int? registryId = null;
 
-        await using (var db = arranged.Builder.CreateContext())
+        try
         {
-            switch (kind)
+            await using (var db = arranged.Builder.CreateContext())
             {
-                case "registry":
-                    var tag = Guid.NewGuid().ToString("N")[..10];
-                    var registry = new RegistryDef(EcrCode.Create($"N15R{tag}"), Name("nightly"), isTemporal: false);
-                    registry.MarkDataChanged(at);
-                    db.RegistryDefs.Add(registry);
-                    await db.SaveChangesAsync();
-                    break;
-                case "templatePublication":
-                    await PublicationAsync(db, "TemplateVersion", at);
-                    break;
-                case "methodologyPublication":
-                    await PublicationAsync(db, "calc.MethodologyVersion", at);
-                    break;
-                default:
-                    await StructureChangeAsync(db, 0, "cfg.CalculationBinding", at);
-                    break;
+                switch (kind)
+                {
+                    case "registry":
+                        var tag = Guid.NewGuid().ToString("N")[..10];
+                        var registry = new RegistryDef(EcrCode.Create($"N15R{tag}"), Name("nightly"), isTemporal: false);
+                        registry.MarkDataChanged(at);
+                        db.RegistryDefs.Add(registry);
+                        await db.SaveChangesAsync();
+                        registryId = registry.Id;
+                        break;
+                    case "templatePublication":
+                        await PublicationAsync(db, "TemplateVersion", at);
+                        break;
+                    case "methodologyPublication":
+                        await PublicationAsync(db, "calc.MethodologyVersion", at);
+                        break;
+                    default:
+                        await StructureChangeAsync(db, 0, "cfg.CalculationBinding", at);
+                        break;
+                }
+            }
+
+            var next = await NightlyAsync(arranged, baseline.AddDays(1));
+
+            Assert.Single(next.Children);
+            var expected = kind switch
+            {
+                "registry" => "registry",
+                "bindingChange" => "configuration",
+                _ => "publication",
+            };
+            Assert.Equal(expected, Assert.Single(Reasons(next.Details)).Key);
+        }
+        finally
+        {
+            // ✎ Огляд M4: довідник — глобальний рядок спільної бази, прибирається. Рядки aud.* (публікація, журнал
+            // структури) прибрати не можна — тригери незмінності (THROW 50060); їх ізолює слот годинника (2042/2043 —
+            // пізніше за будь-який годинник інших тестів, раніше за слоти «тихих» тестів цього класу).
+            if (registryId is { } id)
+            {
+                await using var cleanup = arranged.Builder.CreateContext();
+                await cleanup.Database.ExecuteSqlAsync($"DELETE FROM cfg.RegistryDef WHERE Id = {id}");
             }
         }
-
-        var next = await NightlyAsync(arranged, baseline.AddDays(1));
-
-        Assert.Single(next.Children);
-        var expected = kind switch
-        {
-            "registry" => "registry",
-            "bindingChange" => "configuration",
-            _ => "publication",
-        };
-        Assert.Equal(expected, Assert.Single(Reasons(next.Details)).Key);
     }
 
     /// <summary>
@@ -359,6 +419,8 @@ public sealed class NightlyRecalculationTests(SqlServerFixture sql)
     [InlineData(QuietKind.ReportPublication)]
     [InlineData(QuietKind.OtherDocumentEdit)]
     [InlineData(QuietKind.EditLongBeforeBaseline)]
+    [InlineData(QuietKind.GlobalApprovalRouteChange)]
+    [InlineData(QuietKind.GlobalPermitTypeChange)]
     public async Task Власні_записи_перерахунку_й_нерелевантні_події_не_будять_документ(QuietKind kind)
     {
         var arranged = await ArrangeAsync();
@@ -403,9 +465,16 @@ public sealed class NightlyRecalculationTests(SqlServerFixture sql)
                     var other = await arranged.Builder.BuildAsync();
                     await CellChangeAsync(db, other, January, CellChangeOrigins.UserEdit, at);
                     break;
+                case QuietKind.GlobalApprovalRouteChange:
+                    // ✎ Огляд M2(a): глобальний журнал структури поза переліком розрахункових типів.
+                    await StructureChangeAsync(db, 0, "wf.ApprovalRoute", at);
+                    break;
+                case QuietKind.GlobalPermitTypeChange:
+                    await StructureChangeAsync(db, 0, "cfg.PermitTypeDef", at);
+                    break;
                 default:
-                    // Задовго до прогону (поза запасом NightlyInputsSkew): прогін її вже бачив.
-                    await CellChangeAsync(db, d, February, CellChangeOrigins.UserEdit, baseline.AddMinutes(-30));
+                    // Задовго до прогону (поза запасом NightlyInputsSkew = 60 хв): прогін її вже бачив.
+                    await CellChangeAsync(db, d, February, CellChangeOrigins.UserEdit, baseline.AddMinutes(-90));
                     break;
             }
         }
@@ -417,9 +486,11 @@ public sealed class NightlyRecalculationTests(SqlServerFixture sql)
     }
 
     /// <summary>
-    /// Страховка віком: актуальний прогін старший за тиждень — рахуємо навіть без видимих змін. Вимкнений пропуск
-    /// (<c>SkipUnchanged = false</c>) — рахуємо щоночі. Документ без відкритих періодів року — нічого.
+    /// Страховка віком: актуальний прогін старший за межу документа (7 днів + <c>Id % 7</c>, огляд M2(c)) — рахуємо навіть
+    /// без видимих змін; на годину молодший — пропуск. Вимкнений пропуск (<c>SkipUnchanged = false</c>) — рахуємо щоночі.
+    /// Документ без відкритих періодів року — нічого.
     /// </summary>
+    /// <remarks>МУТАЦІЯ: межа без розкиду (лише 7 днів) — для документа з <c>Id % 7 ≠ 0</c> червоний крок «молодший».</remarks>
     [Fact]
     public async Task Вік_прогону_вимкнений_пропуск_і_рік_без_періодів()
     {
@@ -427,7 +498,20 @@ public sealed class NightlyRecalculationTests(SqlServerFixture sql)
         var baseline = QuietSlot.AddDays(20);
         await BaselineAsync(arranged, baseline);
 
-        var aged = await NightlyAsync(arranged, baseline + RecalculationJob.NightlyMaxBaselineAge + TimeSpan.FromHours(1));
+        // Розкид: межі сусідніх документів різні (7…13 днів), повна ніч не повторюється для всіх разом.
+        Assert.Equal(TimeSpan.FromDays(7), RecalculationJob.NightlyMaxBaselineAgeOf(14));
+        Assert.Equal(TimeSpan.FromDays(10), RecalculationJob.NightlyMaxBaselineAgeOf(17));
+        var limit = RecalculationJob.NightlyMaxBaselineAgeOf(arranged.Document.DocumentId);
+        if (arranged.Document.DocumentId % 7 == 0)
+        {
+            // Документ із межею рівно 7 днів не перевіряє розкид; крок «молодший» тоді однаково має бути пропуском.
+            limit = RecalculationJob.NightlyMaxBaselineAge;
+        }
+
+        var younger = await NightlyAsync(arranged, baseline + limit - TimeSpan.FromHours(1));
+        Assert.Empty(younger.Children);
+
+        var aged = await NightlyAsync(arranged, baseline + limit + TimeSpan.FromHours(1));
         Assert.Single(aged.Children);
         Assert.Equal("baselineAged", Assert.Single(Reasons(aged.Details)).Key);
 
@@ -441,6 +525,93 @@ public sealed class NightlyRecalculationTests(SqlServerFixture sql)
         var none = await NightlyAsync(new Arranged(arranged.Builder, old), baseline.AddDays(1));
         Assert.Empty(none.Children);
         Assert.Equal(1, none.Details.GetProperty("noOpenPeriods").GetInt32());
+    }
+
+    /// <summary>
+    /// ✎ Огляд M3: прогін, що переніс результати (<c>InputsAsOfUtc</c> далеко в минулому, як у затвердженого аркуша), не
+    /// «старіє» щоночі — вік від <c>StartedAt</c>; а межа змін — від <c>COALESCE(InputsAsOfUtc, StartedAt)</c>: правка між
+    /// моментом перенесених входів і стартом прогону будить документ.
+    /// </summary>
+    /// <remarks>МУТАЦІЯ: вік від <c>COALESCE</c> — перша ніч «baselineAged», червоний; межа від <c>StartedAt</c> — правка не
+    /// видна, червоний.</remarks>
+    [Fact]
+    public async Task Перенесені_входи_не_старять_прогін_але_межа_змін_від_них()
+    {
+        var arranged = await ArrangeAsync();
+        var baseline = QuietSlot.AddDays(80);
+        await BaselineAsync(arranged, baseline);
+        await using (var db = arranged.Builder.CreateContext())
+        {
+            var carried = baseline.AddDays(-20);
+            await db.Database.ExecuteSqlAsync(
+                $"UPDATE calc.CalculationRun SET InputsAsOfUtc = {carried} WHERE DocumentId = {arranged.Document.DocumentId}");
+        }
+
+        var quiet = await NightlyAsync(arranged, baseline.AddDays(1));
+        Assert.Empty(quiet.Children);
+
+        await using (var db = arranged.Builder.CreateContext())
+        {
+            await CellChangeAsync(db, arranged.Document, February, CellChangeOrigins.UserEdit, baseline.AddDays(-10));
+        }
+
+        var woken = await NightlyAsync(arranged, baseline.AddDays(2));
+        Assert.Single(woken.Children);
+        Assert.Equal("cellEdits", Assert.Single(Reasons(woken.Details)).Key);
+    }
+
+    /// <summary>
+    /// Частковий ланцюжок: після правки встиг перерахуватись лише січень (крок ланцюжка впав на лютому). Межа — від
+    /// НАЙСТАРШОГО актуального прогону (лютий), тож правка й далі будить документ.
+    /// </summary>
+    /// <remarks>МУТАЦІЯ: межа від найновішого прогону — правка «старша» за січень, червоний.</remarks>
+    [Fact]
+    public async Task Частковий_ланцюжок_не_ховає_правку_від_непорахованого_місяця()
+    {
+        var arranged = await ArrangeAsync();
+        var baseline = QuietSlot.AddDays(100);
+        await BaselineAsync(arranged, baseline);
+        await using (var db = arranged.Builder.CreateContext())
+        {
+            await CellChangeAsync(db, arranged.Document, February, CellChangeOrigins.UserEdit, baseline.AddHours(2));
+        }
+
+        // Ніч 1: документ поставлено; ланцюжок порахував лише січень.
+        var first = await NightlyAsync(arranged, baseline.AddDays(1));
+        Assert.Single(first.Children);
+        await RunChildrenAsync(
+            arranged,
+            [new RecalculationRequest(arranged.Document.ProjectId, arranged.Document.DocumentId, January.Value, null)],
+            baseline.AddDays(1));
+
+        // Ніч 2: лютий досі на старому прогоні — правка після нього.
+        var second = await NightlyAsync(arranged, baseline.AddDays(2));
+        Assert.Single(second.Children);
+        Assert.Equal("cellEdits", Assert.Single(Reasons(second.Details)).Key);
+    }
+
+    /// <summary>
+    /// Проєкт, межі якого не зачіпають поточного року (2026 у 2027, пільговий строк), — жодної дитини й жодного рішення про
+    /// документи (рішення людини 21.11 «лише поточний рік»).
+    /// </summary>
+    [Fact]
+    public async Task Проєкт_поза_поточним_роком_нічого_не_ставить()
+    {
+        var arranged = await ArrangeAsync();
+        var decided = 0;
+        var result = await NightlyAsync(
+            arranged, new DateTime(2027, 2, 1, 0, 30, 0, DateTimeKind.Utc), year: null,
+            probe: _ =>
+            {
+                Interlocked.Increment(ref decided);
+                return Task.CompletedTask;
+            });
+
+        Assert.Empty(result.Children);
+        Assert.Equal(0, decided);
+        Assert.Equal(2027, result.Details.GetProperty("year").GetInt32());
+        Assert.Equal(0, result.Details.GetProperty("queued").GetInt32());
+        Assert.Equal(0, result.Details.GetProperty("noOpenPeriods").GetInt32());
     }
 
     /// <summary>
@@ -538,7 +709,7 @@ public sealed class NightlyRecalculationTests(SqlServerFixture sql)
     }
 
     /// <summary>Документ-джерело іншого шаблону й зв'язка, де шаблон документа — споживач (B179).</summary>
-    private async Task<TestDocument> BindSourceAsync(Arranged arranged)
+    private async Task<SourceBinding> BindSourceAsync(Arranged arranged)
     {
         var source = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(periodKey: January.Value);
         await using var db = arranged.Builder.CreateContext();
@@ -551,10 +722,23 @@ public sealed class NightlyRecalculationTests(SqlServerFixture sql)
         binding.AddConsumer(arranged.Document.TemplateId);
         db.DocumentSourceBindings.Add(binding);
         await db.SaveChangesAsync();
-        return source;
+        return new SourceBinding(source, binding.Id, registry.Id);
     }
 
-    private async Task<NightlyResult> BaselineAsync(Arranged arranged, DateTime at)
+    /// <summary>Прибирає зв'язку й її довідник — глобальні рядки спільної бази (огляд M4).</summary>
+    private static async Task UnbindAsync(Arranged arranged, SourceBinding bound)
+    {
+        await using var db = arranged.Builder.CreateContext();
+        await db.Database.ExecuteSqlAsync($"""
+            DELETE FROM cfg.DocumentSourceBindingConsumer WHERE BindingId = {bound.BindingId};
+            DELETE FROM cfg.DocumentSourceBinding WHERE Id = {bound.BindingId};
+            DELETE FROM cfg.RegistryDef WHERE Id = {bound.RegistryId};
+            """);
+    }
+
+    private sealed record SourceBinding(TestDocument Source, int BindingId, int RegistryId);
+
+    private static async Task<NightlyResult> BaselineAsync(Arranged arranged, DateTime at)
     {
         var first = await NightlyAsync(arranged, at);
         Assert.Single(first.Children);
@@ -584,7 +768,8 @@ public sealed class NightlyRecalculationTests(SqlServerFixture sql)
 
         Assert.All(scheduler.Calls, c =>
         {
-            Assert.Equal(RecalculateDocumentHandler.YearTargetOf(c.Request.DocumentId), c.Target);
+            // ✎ Огляд L1: власна ціль нічної задачі — не зливається з дітьми перерахунку проєкту чи кнопкою «увесь рік».
+            Assert.Equal(RecalculationJob.NightlyTargetOf(c.Request.DocumentId, c.Request.Year!.Value), c.Target);
             Assert.Null(c.CreatedBy);
             Assert.Null(c.Request.TriggeredByUserId);
             Assert.Equal(progress.JobId, c.Request.FanOutParentJobId);
