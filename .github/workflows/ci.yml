@@ -155,7 +155,7 @@ jobs:
     if: ${{ !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) && !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) && needs.gate.outputs.skip != 'true' }}
     runs-on: ubuntu-24.04
     # ✎ 2026-10-23 (правило 7 CLAUDE.md 12.10: завислі > 45 хв скасовувати): ліміт від зависань;
-    # api-N ≤ ~13 хв (✎ 2026-10-24, сім частин), core-persistence ~13 хв. Без ключа діє типові 360 хв.
+    # api-N ≈ 20–23 хв (✎ 2026-11-21, вісім частин; ціль ≤ 25 хв), core-persistence ~13 хв. Без ключа діє типові 360 хв.
     timeout-minutes: 40
     strategy:
       fail-fast: false
@@ -192,6 +192,11 @@ jobs:
             only: "-Only 'Складання','Тести API (частина 6)'"
           - part: api-7
             only: "-Only 'Складання','Тести API (частина 7)'"
+          # ✎ 2026-11-21: ВІСІМ частин (CI-борг: api-7 ішла 30–35 хв і впиралась у `timeout-minutes: 40`;
+          # замір трьох повних прогонів — сума тестів ≈ 7290 с, job ≈ 244 с + 1.17 × сума). Склад частин
+          # перебалансовано в `tools/api-test-shards.psd1`: сума на частину ≤ ~930 с → job ≈ 22 хв.
+          - part: api-8
+            only: "-Only 'Складання','Тести API (частина 8)'"
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0

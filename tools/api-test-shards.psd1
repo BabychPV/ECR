@@ -1,4 +1,4 @@
-﻿# Розбиття `Ecr.Api.Tests` на шарди у семи частинах (з 2026-10-24; раніше п'ять частин) для `tools/verify-all.ps1`.
+﻿# Розбиття `Ecr.Api.Tests` на шарди у восьми частинах (з 2026-11-21; раніше сім, п'ять) для `tools/verify-all.ps1`.
 #
 # ⚠ Дані, а не код: скрипт читає цей файл і будує з нього фільтри
 # `dotnet test --filter`. Префікси — початок імені класу ПІСЛЯ
@@ -91,22 +91,40 @@
 # не-Security, Security.F/I і майбутні класи) — частина 7. У кожній частині шард не-Security і шард
 # Security.* окремо (для `-ApiParallel` > 1 локально). `Seconds` — сума МЕДІАН класів шарда з тих шести
 # прогонів (у шарді-залишку — медіани D*, S* не-Security, Security.F/I).
+# ✎ 2026-11-21 (шосте перебалансування, ВІСІМ частин; CI-борг: `server-part (api-7)` ішла 30–35 хв і впиралась
+# у `timeout-minutes: 40`). Замір трьох успішних повних прогонів (44859180507 lane/integ-b2 push,
+# 44715399202 main schedule, 44849638220 lane/integ-b1 push), журнали `server-part (api-1…7)`, рядки
+# «Passed … [N s]», сума за класами. Факт job, хв (мін…макс по трьох): api-1 22.6…29.3, api-2 20.0…29.8,
+# api-3 25.5…26.8, api-4 22.5…24.4, api-5 17.9…23.6, api-6 20.0…30.4, api-7 28.6…34.6 — тобто попереднє
+# «≤ ~13 хв» (24.10) застаріло: набір виріс до ≈ 7290 с суми тривалостей (було ≈ 2590 с), а не «розкид
+# раннерів». Модель за 21 точкою: job ≈ 244 с + 1.17 × сума тривалостей за логом. Ціль — ≤ ~25 хв на
+# нормальному раннері без зниження покриття (кожен клас — рівно в одній частині, сторож
+# `ApiTestShardsTests`): сума на частину ≤ ~930 с → прогноз job ≈ 22 хв (ВІСІМ частин; семи частин при
+# 7290 с — ≥ 1040 с на частину, ≥ 24 хв без запасу). Один лише `DocumentVersionMigrationTests` — 783 с
+# у середньому (714…954), тому його частина (2) недовантажена на ≈ 140 с «запасу на розкид» (787 с).
+# Розкладка — жадібне пакування за СЕРЕДНІМ часом класу з трьох прогонів; великі літерні групи розкрито
+# до двох–трьох літер (`Reg`, `Sc`, `So`, `Me`, `Mo`, `Ai`, `Ro` …) або до `DocumentP`, `DocumentT` …;
+# окремі класи названо повністю. Шарди частин: не-Security і Security.* окремо (для `-ApiParallel` > 1).
+# Залишок (Part 8, `Rest`) — лише неназвані класи: три `S*`, що збігаються з початком `Security.`
+# (≈ 20 с), і всі майбутні; нові класи тут не гасять баланс, а лише повільно його зсувають.
+# Прогноз суми за частинами, с: 937 / 787 / 926 / 926 / 927 / 926 / 926 / 929 (job ≈ 21–22 хв; частина 2 з DVM у найгіршому прогоні 954 с → ≈ 22.5 хв).
 @{
-    Measured = '2026-10-24'
+    Measured = '2026-11-21'
     Shards   = @(
-        @{ Id = 1; Part = 1; Seconds = 362; Prefixes = @('DocumentVersionMigration', 'T', 'I') }
-        @{ Id = 2; Part = 1; Seconds = 2; Prefixes = @('Security.M') }
-        @{ Id = 3; Part = 2; Seconds = 327; Prefixes = @('R', 'U', 'H', 'F') }
-        @{ Id = 4; Part = 2; Seconds = 19; Prefixes = @('Security.N') }
-        @{ Id = 5; Part = 3; Seconds = 276; Prefixes = @('E', 'M', 'J', 'W') }
-        @{ Id = 6; Part = 3; Seconds = 85; Prefixes = @('Security.S') }
-        @{ Id = 7; Part = 4; Seconds = 79; Prefixes = @('A', 'O') }
-        @{ Id = 8; Part = 4; Seconds = 292; Prefixes = @('Security.D', 'Security.C', 'Security.E', 'Security.G') }
-        @{ Id = 9; Part = 5; Seconds = 203; Prefixes = @('C', 'L', 'V', 'G') }
-        @{ Id = 10; Part = 5; Seconds = 169; Prefixes = @('Security.H', 'Security.P', 'Security.T') }
-        @{ Id = 11; Part = 6; Seconds = 287; Prefixes = @('N', 'P', 'B') }
-        @{ Id = 12; Part = 6; Seconds = 111; Prefixes = @('Security.R', 'Security.L', 'Security.A', 'Security.V') }
-        @{ Id = 13; Part = 7; Seconds = 16; Prefixes = @('Security.U') }
-        @{ Id = 14; Part = 7; Seconds = 362; Rest = $true }
+        @{ Id = 1; Part = 1; Seconds = 549; Prefixes = @('E', 'Rep', 'U', 'J', 'DocumentC', 'DuplicateRequestHttpTests', 'ReopenedPeriodExpiryTests') }
+        @{ Id = 2; Part = 1; Seconds = 388; Prefixes = @('Security.H', 'Security.P', 'Security.N', 'Security.U', 'Security.E', 'Security.I') }
+        @{ Id = 3; Part = 2; Seconds = 787; Prefixes = @('DocumentVersionMigrationTests', 'DocumentsControllerTests', 'B') }
+        @{ Id = 4; Part = 3; Seconds = 775; Prefixes = @('P', 'DocumentP', 'De', 'Ret', 'I', 'Rec', 'O', 'MainPathLocalizedErrorTests', 'GenericMessageKeyLocalizationTests', 'RequestNumberCultureTests') }
+        @{ Id = 5; Part = 3; Seconds = 151; Prefixes = @('Security.S', 'Security.T') }
+        @{ Id = 6; Part = 4; Seconds = 926; Prefixes = @('C', 'T', 'Su', 'L', 'F', 'SmtpSettingsHttpTests', 'RuleCoverageTests', 'V', 'RejectedSheetHttpFlowTests', 'DocumentListTemplateVersionTests') }
+        @{ Id = 7; Part = 5; Seconds = 769; Prefixes = @('Reg', 'Sc', 'Sh', 'H', 'DocumentR', 'Ad') }
+        @{ Id = 8; Part = 5; Seconds = 157; Prefixes = @('Security.C', 'Security.A', 'Security.VerifyValidateRateLimitTests') }
+        @{ Id = 9; Part = 6; Seconds = 922; Prefixes = @('Ai', 'So', 'Ro', 'DocumentT', 'Da', 'W', 'DocumentDeleteTests', 'DocumentKeyChangeTests', 'AcceptLanguageTagTests') }
+        @{ Id = 10; Part = 6; Seconds = 3; Prefixes = @('Security.MiddlewareOrderTests', 'Security.ForwardedClientAddressTests') }
+        @{ Id = 11; Part = 7; Seconds = 503; Prefixes = @('N', 'St', 'DocumentH', 'Y', 'Ar') }
+        @{ Id = 12; Part = 7; Seconds = 423; Prefixes = @('Security.D', 'Security.R', 'Security.L', 'Security.W') }
+        @{ Id = 13; Part = 8; Seconds = 897; Prefixes = @('Me', 'Mo', 'Ap', 'Au', 'Sy', 'DocumentS', 'DocumentOwnerFilterApiTests', 'SpaFallbackTests') }
+        @{ Id = 14; Part = 8; Seconds = 12; Prefixes = @('Security.GrantableProjectsApiTests') }
+        @{ Id = 15; Part = 8; Seconds = 20; Rest = $true }
     )
 }
