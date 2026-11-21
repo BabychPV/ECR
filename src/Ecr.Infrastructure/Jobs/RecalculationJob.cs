@@ -211,9 +211,11 @@ public sealed partial class RecalculationJob(
                 .FirstOrDefaultAsync(ct)
                 .ConfigureAwait(false);
 
-        // ✎ PSS-15 (D-562): нічний розклад — лише поточний рік проєкту. Рік визначається тут, у момент виконання (тригер
-        // ставиться на старті і живе через Новий рік), і в дочірні задачі йде вже числом.
-        if (request.Nightly && request.PeriodKey is null && request.Year is null)
+        // ✎ PSS-15 (D-562): роки нічного розкладу визначаються в момент виконання (тригер ставиться на старті і живе через
+        // Новий рік) і в дочірні задачі йдуть уже числом. Розклад проєкту (є планувальник) вибирає їх сам — поточний і
+        // попередній у пільговому строку (NightlyYears); тут — лише шлях без розкладу: поточний рік.
+        if (request.Nightly && request.PeriodKey is null && request.Year is null
+            && !(request.DocumentId <= 0 && jobs is not null))
         {
             request = request with { Year = await NightlyYearOfProjectAsync(projectId, ct).ConfigureAwait(false) };
         }
@@ -3418,7 +3420,8 @@ public sealed partial class RecalculationJob(
 /// <param name="Year">
 /// ✎ LAND-YEAR B59: лише з <paramref name="PeriodKey"/> = <c>null</c> — «увесь рік», звужений до ЦЬОГО календарного року
 /// (кнопка «Перерахувати» документа річної розкладки: усі 12 місяців). <c>null</c> — усі періоди документа. ✎ PSS-15: нічний
-/// розклад (<paramref name="Nightly"/>) — завжди поточний рік проєкту (<c>D-562</c>).
+/// розклад (<paramref name="Nightly"/>) — у дочірній задачі завжди явний рік: поточний рік проєкту чи попередній у його
+/// пільговому строку (<c>Project.YearGraceOffsetDays</c>, <c>D-562</c>).
 /// </param>
 /// <param name="ForeignOwnerPass">
 /// ✎ LAND-YEAR L2b: другий прохід читача результатів іншого періоду (ставить сам прогін після перемикання); нових проходів не ставить.
@@ -3447,13 +3450,14 @@ public sealed partial class RecalculationJob(
 /// з N» відома з ПЕРШОГО звіту кроку, а не лише після перечитування скоупу. <c>null</c> — перший крок (чи не ланцюжок).
 /// </param>
 /// <param name="Nightly">
-/// ✎ PSS-15 (<c>D-562</c>): задача нічного розкладу (<c>NightlyRecalculationScheduling</c>). Рік без явного
-/// <paramref name="Year"/> — поточний рік проєкту в його поясі; розклад проєкту ставить лише документи, які треба рахувати
+/// ✎ PSS-15 (<c>D-562</c>): задача нічного розкладу (<c>NightlyRecalculationScheduling</c>). Розклад проєкту без явного
+/// <paramref name="Year"/> — поточний рік проєкту в його поясі і попередній, поки триває його пільговий строк
+/// (<c>RecalculationJob.NightlyYears</c>), окремою документною задачею на рік; ставить лише документи, які треба рахувати
 /// (<see cref="NightlySkipUnchanged"/>). Дочірні задачі несуть позначку далі (лише для діагностики).
 /// </param>
 /// <param name="NightlySkipUnchanged">
 /// ✎ PSS-15: пропускати документи, входи яких не змінились після актуального прогону (<c>Jobs:NightlyRecalculation:SkipUnchanged</c>,
-/// типово <c>true</c>). <c>false</c> — рахувати всі відкриті періоди поточного року щоночі. Поза нічним розкладом не діє.
+/// типово <c>true</c>). <c>false</c> — рахувати всі відкриті періоди років розкладу щоночі. Поза нічним розкладом не діє.
 /// </param>
 public sealed record RecalculationRequest(
     int ProjectId,

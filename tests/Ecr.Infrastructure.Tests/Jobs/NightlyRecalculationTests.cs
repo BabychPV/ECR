@@ -23,8 +23,9 @@ using Xunit;
 namespace Ecr.Infrastructure.Tests.Jobs;
 
 /// <summary>
-/// ✎ PSS-15 (<c>D-562</c>, рішення людини 21.11): нічний перерахунок — лише поточний рік і лише документи, входи яких
-/// змінились після актуального прогону; кожен вид входу дає перерахунок, власні записи перерахунку — ні.
+/// ✎ PSS-15 (<c>D-562</c>, рішення людини 21.11): нічний перерахунок — поточний рік (і попередній, поки триває його
+/// пільговий строк <c>YearGraceOffsetDays</c>) і лише документи, входи яких змінились після актуального прогону; кожен вид
+/// входу дає перерахунок, власні записи перерахунку — ні.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -147,8 +148,9 @@ public sealed class NightlyRecalculationTests(SqlServerFixture sql)
                 r.ProjectId == arranged.Document.ProjectId && r.PeriodKey == december.Value));
         }
 
-        // Проєкт 2026 у 2027 (пільговий строк) — жодної дитини, усе пояснено в журналі обслуговування.
-        var nextYear = await NightlyAsync(arranged, new DateTime(2027, 2, 1, 0, 30, 0, DateTimeKind.Utc), year: null);
+        // Проєкт 2026 у 2027 ПІСЛЯ пільгового строку (45 днів: останній день — 14.02) — жодної дитини, усе пояснено в
+        // журналі обслуговування. Строк — Минулорічний_проєкт_у_пільговому_строку_*.
+        var nextYear = await NightlyAsync(arranged, new DateTime(2027, 2, 15, 0, 30, 0, DateTimeKind.Utc), year: null);
         Assert.Empty(nextYear.Children);
         Assert.Equal(2027, nextYear.Details.GetProperty("year").GetInt32());
         Assert.Equal(0, nextYear.Details.GetProperty("queued").GetInt32());
@@ -591,8 +593,8 @@ public sealed class NightlyRecalculationTests(SqlServerFixture sql)
     }
 
     /// <summary>
-    /// Проєкт, межі якого не зачіпають поточного року (2026 у 2027, пільговий строк), — жодної дитини й жодного рішення про
-    /// документи (рішення людини 21.11 «лише поточний рік»).
+    /// Проєкт, межі якого не зачіпають поточного року (2026 у 2027) і чий пільговий строк минув (45 днів: останній день —
+    /// 14.02.2027), — жодної дитини й жодного рішення про документи.
     /// </summary>
     [Fact]
     public async Task Проєкт_поза_поточним_роком_нічого_не_ставить()
@@ -600,7 +602,7 @@ public sealed class NightlyRecalculationTests(SqlServerFixture sql)
         var arranged = await ArrangeAsync();
         var decided = 0;
         var result = await NightlyAsync(
-            arranged, new DateTime(2027, 2, 1, 0, 30, 0, DateTimeKind.Utc), year: null,
+            arranged, new DateTime(2027, 2, 15, 0, 30, 0, DateTimeKind.Utc), year: null,
             probe: _ =>
             {
                 Interlocked.Increment(ref decided);
@@ -610,8 +612,136 @@ public sealed class NightlyRecalculationTests(SqlServerFixture sql)
         Assert.Empty(result.Children);
         Assert.Equal(0, decided);
         Assert.Equal(2027, result.Details.GetProperty("year").GetInt32());
+        Assert.Empty(result.Details.GetProperty("years").EnumerateArray());
         Assert.Equal(0, result.Details.GetProperty("queued").GetInt32());
         Assert.Equal(0, result.Details.GetProperty("noOpenPeriods").GetInt32());
+    }
+
+    /// <summary>
+    /// ✎ Уточнення людини 21.11: попередній рік — у обсязі, поки <c>сьогодні ≤ 31.12 + YearGraceOffsetDays</c> (пояс проєкту,
+    /// дата без часу). Asia/Atyrau — UTC+5: 18:59 UTC — ще 23:59 того самого дня на майданчику, 19:00 UTC — уже наступний.
+    /// </summary>
+    /// <remarks>МУТАЦІЯ: <c>NightlyYears</c> без відступу (лише поточний рік) — червоні рядки «у строку».</remarks>
+    [Theory]
+    [InlineData("2027-02-14T18:59:00Z", 45, new[] { 2026, 2027 })]
+    [InlineData("2027-02-14T19:00:00Z", 45, new[] { 2027 })]
+    [InlineData("2027-01-10T18:59:00Z", 10, new[] { 2026, 2027 })]
+    [InlineData("2027-01-10T19:00:00Z", 10, new[] { 2027 })]
+    [InlineData("2026-12-31T18:59:00Z", 0, new[] { 2026 })]
+    [InlineData("2026-12-31T19:00:00Z", 0, new[] { 2027 })]
+    [InlineData("2026-12-31T19:00:00Z", 1, new[] { 2026, 2027 })]
+    [InlineData("2026-06-15T00:00:00Z", 45, new[] { 2026 })]
+    public void Попередній_рік_у_обсязі_до_кінця_пільгового_строку(string utc, int offsetDays, int[] expected)
+    {
+        var at = DateTime.Parse(utc, System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal);
+        Assert.Equal(expected, RecalculationJob.NightlyYears("Asia/Atyrau", at, offsetDays));
+    }
+
+    /// <summary>
+    /// Минулорічний проєкт (2026) у пільговому строку (типово 45 днів): останнього дня строку документ отримує рішення за
+    /// 2026 і документну задачу з <c>Year = 2026</c> під ціллю <c>doc{id}-y2026-nightly</c>; закритий грудень і далі поза
+    /// скоупом; наступного дня — жодного рішення.
+    /// </summary>
+    /// <remarks>МУТАЦІЯ: <c>NightlyYears</c> без відступу — рішень 0, червоний.</remarks>
+    [Fact]
+    public async Task Минулорічний_проєкт_у_пільговому_строку_отримує_рішення_а_закритий_грудень_ні()
+    {
+        var arranged = await ArrangeAsync();
+        var december = new PeriodKey(202612);
+        await arranged.Builder.AddPeriodInstanceAsync(arranged.Document, december);
+        await using (var db = arranged.Builder.CreateContext())
+        {
+            await db.Database.ExecuteSqlAsync(
+                $"UPDATE doc.Period SET State = {(byte)PeriodState.Closed} WHERE ProjectId = {arranged.Document.ProjectId} AND PeriodKey = {december.Value}");
+        }
+
+        // 14.02.2027 23:59 на майданчику — останній день строку.
+        var lastDay = new DateTime(2027, 2, 14, 18, 59, 0, DateTimeKind.Utc);
+        var decided = new ConcurrentBag<int>();
+        var inGrace = await NightlyAsync(arranged, lastDay, year: null, probe: c =>
+        {
+            decided.Add(c.Year!.Value);
+            return Task.CompletedTask;
+        });
+
+        Assert.Equal([2026], decided);
+        var child = Assert.Single(inGrace.Children);
+        Assert.Equal(2026, child.Year);
+        Assert.Equal(2027, inGrace.Details.GetProperty("year").GetInt32());
+        Assert.Equal([2026], inGrace.Details.GetProperty("years").EnumerateArray().Select(y => y.GetInt32()));
+        Assert.Equal(1, inGrace.Details.GetProperty("byYear").GetProperty("2026").GetProperty("queued").GetInt32());
+        Assert.True(JobProgressMessageCodec.TryDecode(inGrace.LastMessage, out var envelope));
+        Assert.Equal("2026", envelope.Params!["year"]);
+
+        // Наступного дня (15.02 00:00 на майданчику) — строк минув.
+        var dayAfter = 0;
+        var after = await NightlyAsync(arranged, lastDay.AddMinutes(1), year: null, probe: _ =>
+        {
+            Interlocked.Increment(ref dayAfter);
+            return Task.CompletedTask;
+        });
+        Assert.Empty(after.Children);
+        Assert.Equal(0, dayAfter);
+
+        // Дитина рахує відкриті місяці 2026; закритий грудень — ні.
+        var runner = await RunChildrenAsync(arranged, inGrace.Children, lastDay);
+        Assert.Equal([January.Value, February.Value], runner.Periods);
+    }
+
+    /// <summary>Власний відступ проєкту (10 днів): 10.01 — у строку, 11.01 — ні.</summary>
+    /// <remarks>МУТАЦІЯ: відступ із типового 45 замість проєктного — 11.01 дає рішення, червоний.</remarks>
+    [Fact]
+    public async Task Власний_пільговий_строк_проєкту_визначає_межу()
+    {
+        var arranged = await ArrangeAsync();
+        await using (var db = arranged.Builder.CreateContext())
+        {
+            await db.Projects
+                .Where(p => p.Id == arranged.Document.ProjectId)
+                .ExecuteUpdateAsync(s => s.SetProperty(p => p.YearGraceOffsetDays, 10));
+        }
+
+        var lastDay = new DateTime(2027, 1, 10, 18, 59, 0, DateTimeKind.Utc);
+        var inGrace = await NightlyAsync(arranged, lastDay, year: null);
+        Assert.Equal(2026, Assert.Single(inGrace.Children).Year);
+
+        var after = await NightlyAsync(arranged, lastDay.AddMinutes(1), year: null);
+        Assert.Empty(after.Children);
+        Assert.Empty(after.Details.GetProperty("years").EnumerateArray());
+    }
+
+    /// <summary>
+    /// Проєкт через межу року (2026–2027) у пільговому строку 2026: рішення на документ І рік — дві документні задачі,
+    /// кожна зі своїм <c>Year</c> і своєю ціллю черги (не зливаються), кожна рахує лише відкриті місяці свого року.
+    /// </summary>
+    /// <remarks>МУТАЦІЯ: <c>NightlyYears</c> без відступу — лише задача 2027, червоний.</remarks>
+    [Fact]
+    public async Task Два_роки_дві_задачі_документа_з_власним_роком_і_ціллю()
+    {
+        var arranged = await ArrangeAsync();
+        var january2027 = new PeriodKey(202701);
+        await arranged.Builder.AddPeriodInstanceAsync(arranged.Document, january2027);
+        await using (var db = arranged.Builder.CreateContext())
+        {
+            await db.Projects
+                .Where(p => p.Id == arranged.Document.ProjectId)
+                .ExecuteUpdateAsync(s => s.SetProperty(p => p.PeriodEnd, new DateOnly(2027, 12, 31)));
+        }
+
+        var at = new DateTime(2027, 2, 1, 0, 30, 0, DateTimeKind.Utc);
+        var scheduler = (await NightlyAsync(arranged, at, year: null)).Calls;
+
+        Assert.Equal([2026, 2027], scheduler.Select(c => c.Request.Year!.Value).Order());
+        Assert.Equal(
+            [RecalculationJob.NightlyTargetOf(arranged.Document.DocumentId, 2026),
+             RecalculationJob.NightlyTargetOf(arranged.Document.DocumentId, 2027)],
+            scheduler.Select(c => c.Target).Order(StringComparer.Ordinal));
+
+        var runner2026 = await RunChildrenAsync(arranged, [.. scheduler.Where(c => c.Request.Year == 2026).Select(c => c.Request)], at);
+        Assert.Equal([January.Value, February.Value], runner2026.Periods);
+        var runner2027 = await RunChildrenAsync(arranged, [.. scheduler.Where(c => c.Request.Year == 2027).Select(c => c.Request)], at);
+        Assert.Equal([january2027.Value], runner2027.Periods);
     }
 
     /// <summary>
@@ -795,7 +925,7 @@ public sealed class NightlyRecalculationTests(SqlServerFixture sql)
         }
 
         Assert.NotNull(details);
-        return new NightlyResult([.. scheduler.Calls.Select(c => c.Request)], details.Value, progress.Last);
+        return new NightlyResult([.. scheduler.Calls.Select(c => c.Request)], details.Value, progress.Last, [.. scheduler.Calls]);
     }
 
     private static async Task<RecordingRunner> RunChildrenAsync(
@@ -849,7 +979,8 @@ public sealed class NightlyRecalculationTests(SqlServerFixture sql)
 
     private sealed record Arranged(TestDocumentBuilder Builder, TestDocument Document);
 
-    private sealed record NightlyResult(IReadOnlyList<RecalculationRequest> Children, JsonElement Details, string? LastMessage);
+    private sealed record NightlyResult(
+        IReadOnlyList<RecalculationRequest> Children, JsonElement Details, string? LastMessage, IReadOnlyList<EnqueueCall> Calls);
 
     /// <summary>Планувальник, що запам'ятовує документні постановки.</summary>
     private sealed class RecordingScheduler

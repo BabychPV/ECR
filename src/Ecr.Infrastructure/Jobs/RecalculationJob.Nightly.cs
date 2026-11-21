@@ -10,8 +10,9 @@ using Microsoft.Extensions.Logging;
 namespace Ecr.Infrastructure.Jobs;
 
 /// <summary>
-/// ✎ PSS-15 (<c>D-562</c>, рішення людини 21.11): нічний перерахунок проєкту — лише ПОТОЧНИЙ рік і лише документи, входи
-/// яких змінилися після їхнього актуального прогону.
+/// ✎ PSS-15 (<c>D-562</c>, рішення людини 21.11): нічний перерахунок проєкту — ПОТОЧНИЙ рік (і попередній, поки триває
+/// його пільговий строк <c>Project.YearGraceOffsetDays</c>, <see cref="NightlyYears"/>) і лише документи, входи яких
+/// змінилися після їхнього актуального прогону.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -22,7 +23,7 @@ namespace Ecr.Infrastructure.Jobs;
 /// </para>
 /// <para>
 /// ⛔ Правило пропуску — консервативне («сумніваєшся — рахуй»), рівнем ДОКУМЕНТА за рік, а не періоду: документ пропускається,
-/// лише коли в КОЖНОГО відкритого періоду поточного року є актуальний прогін і жодного входу не змінено після найстаршого з них
+/// лише коли в КОЖНОГО відкритого періоду року рішення є актуальний прогін і жодного входу не змінено після найстаршого з них
 /// (мінус <see cref="NightlyInputsSkew"/>); інакше документ рахується весь (усі відкриті періоди року за зростанням, як доти).
 /// Рівень документа, бо формули й скрипти читають інші періоди того самого документа (<c>[Period:-1]</c>, <c>[Period:#k]</c>,
 /// якір річної розкладки): правка лютого після прогону березня — вхід березня. Перелік входів —
@@ -104,16 +105,42 @@ public sealed partial class RecalculationJob
     /// <param name="timeZoneId">Пояс проєкту (IANA, <c>Project.TimeZoneId</c>).</param>
     /// <param name="utcNow">Момент запуску (UTC).</param>
     public static int NightlyYear(string timeZoneId, DateTime utcNow)
+        => NightlyToday(timeZoneId, utcNow).Year;
+
+    /// <summary>
+    /// ✎ PSS-15 (рішення людини 21.11, уточнення обсягу): роки нічного розкладу проєкту за зростанням — поточний рік і, поки
+    /// триває річний пільговий строк, попередній.
+    /// </summary>
+    /// <param name="timeZoneId">Пояс проєкту (IANA, <c>Project.TimeZoneId</c>).</param>
+    /// <param name="utcNow">Момент запуску (UTC).</param>
+    /// <param name="yearGraceOffsetDays"><c>Project.YearGraceOffsetDays</c> (з <c>PeriodPolicy</c>, типово 45).</param>
+    /// <remarks>
+    /// Попередній рік — у обсязі, поки <c>сьогодні ≤ 31.12 попереднього року + YearGraceOffsetDays</c> (дати в поясі проєкту,
+    /// без часу): дані року ще правлять, тож і перераховувати їх треба. Той самий відлік, що у вікні року
+    /// (<see cref="Domain.Services.YearGraceWindow"/>: «+45 до 31.12.2026» — останній день 14.02.2027 включно); нуль днів —
+    /// лише поточний рік.
+    /// </remarks>
+    public static IReadOnlyList<int> NightlyYears(string timeZoneId, DateTime utcNow, int yearGraceOffsetDays)
+    {
+        var today = NightlyToday(timeZoneId, utcNow);
+        var previousYearEnd = new DateOnly(today.Year - 1, 12, 31);
+        return today <= previousYearEnd.AddDays(Math.Max(0, yearGraceOffsetDays))
+            ? [today.Year - 1, today.Year]
+            : [today.Year];
+    }
+
+    private static DateOnly NightlyToday(string timeZoneId, DateTime utcNow)
     {
         var utc = utcNow.Kind == DateTimeKind.Utc ? utcNow : DateTime.SpecifyKind(utcNow, DateTimeKind.Utc);
-        return TimeZoneInfo.ConvertTimeFromUtc(utc, SiteTimeZone.Create(timeZoneId).ToTimeZoneInfo()).Year;
+        return DateOnly.FromDateTime(
+            TimeZoneInfo.ConvertTimeFromUtc(utc, SiteTimeZone.Create(timeZoneId).ToTimeZoneInfo()));
     }
 
     [LoggerMessage(
         Level = LogLevel.Information,
-        Message = "Нічний перерахунок проєкту {ProjectId} за {Year} рік: поставлено документів {Queued}, пропущено незмінних "
-                  + "{Skipped}, без відкритих періодів року {NoScope}.")]
-    private static partial void LogNightlyFannedOut(ILogger logger, int projectId, int year, int queued, int skipped, int noScope);
+        Message = "Нічний перерахунок проєкту {ProjectId} за рік(и) {Years}: поставлено документних задач {Queued}, пропущено "
+                  + "незмінних {Skipped}, без відкритих періодів року {NoScope}.")]
+    private static partial void LogNightlyFannedOut(ILogger logger, int projectId, string years, int queued, int skipped, int noScope);
 
     [LoggerMessage(
         Level = LogLevel.Warning,
@@ -140,7 +167,8 @@ public sealed partial class RecalculationJob
     }
 
     /// <summary>
-    /// Нічний розклад проєкту: документні задачі лише поточного року й лише для документів, які треба рахувати.
+    /// Нічний розклад проєкту: документні задачі поточного року (і попереднього в пільговому строку, <see cref="NightlyYears"/>)
+    /// й лише для документів, які треба рахувати; рішення — на документ і рік.
     /// </summary>
     /// <param name="scheduler">Планувальник.</param>
     /// <param name="request">Завдання розкладу (<see cref="RecalculationRequest.Nightly"/>) з визначеним <c>ProjectId</c>.</param>
@@ -165,11 +193,24 @@ public sealed partial class RecalculationJob
         var project = await db.Projects
             .AsNoTracking()
             .Where(p => p.Id == request.ProjectId)
-            .Select(p => new { p.TimeZoneId, p.PeriodStart, p.PeriodEnd })
+            .Select(p => new { p.TimeZoneId, p.PeriodStart, p.PeriodEnd, p.YearGraceOffsetDays })
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 
-        var year = request.Year ?? (project is null ? clock.UtcNow.Year : NightlyYear(project.TimeZoneId, clock.UtcNow));
+        // ✎ PSS-15 (уточнення людини 21.11): поточний рік і попередній, поки триває його пільговий строк
+        // (Project.YearGraceOffsetDays). Явний Year у завданні — лише він (ручний запуск, тести).
+        var current = project is null ? clock.UtcNow.Year : NightlyYear(project.TimeZoneId, clock.UtcNow);
+        IReadOnlyList<int> window = request.Year is { } explicitYear
+            ? [explicitYear]
+            : project is null
+                ? [current]
+                : NightlyYears(project.TimeZoneId, clock.UtcNow, project.YearGraceOffsetDays);
+
+        // Роки, яких межі проєкту не зачіпають (минулорічний проєкт після пільгового строку), — нічого рахувати, без
+        // запитів по документах.
+        List<int> years = project is null
+            ? []
+            : [.. window.Where(y => project.PeriodStart.Year <= y && project.PeriodEnd.Year >= y)];
         var parentId = (progress as IJobIdentity)?.JobId
                        ?? string.Create(CultureInfo.InvariantCulture, $"{nameof(IRecalculationJob)}-nightly-p{request.ProjectId}");
 
@@ -181,68 +222,79 @@ public sealed partial class RecalculationJob
         {
             var outcome = new NightlyOutcome();
 
-            // Проєкт, межі якого не зачіпають поточного року (минулорічний у пільговому строку), — нічого рахувати: рішення
-            // людини 21.11 «лише поточний рік». Без запитів по документах.
-            if (project is not null && project.PeriodStart.Year <= year && project.PeriodEnd.Year >= year)
+            if (years.Count > 0)
             {
-                var context = new NightlyContext(request.ProjectId, year, request.NightlySkipUnchanged);
+                // Контекст (кеш зв'язок джерел) — на рік: документи джерела шукаються в межах року.
+                var contexts = years.ToDictionary(
+                    y => y, y => new NightlyContext(request.ProjectId, y, request.NightlySkipUnchanged));
 
                 foreach (var documentId in await ProjectDocumentIdsAsync(request.ProjectId, ct).ConfigureAwait(false))
                 {
-                    var child = request with
+                    // Рішення — на документ І рік: попередній рік у пільговому строку — окрема документна задача зі своїм
+                    // Year і своєю ціллю черги (doc{id}-y{year}-nightly), тож дві задачі документа не зливаються.
+                    foreach (var year in years)
                     {
-                        DocumentId = documentId,
-                        PeriodKey = null,
-                        Year = year,
-                        FanOutParentJobId = parentId,
-                        TriggeredByUserId = null,
-                        IncludeApproved = false,
-                        OverrideUserId = null,
-                        OverrideReason = null,
-                    };
-
-                    // ✎ Огляд H2: збій рішення про ОДИН документ не зриває розклад решти проєкту — документ рахується
-                    // («сумніваєшся — рахуй»), причина в журналі обслуговування — decisionError.
-                    NightlyDecision decision;
-                    try
-                    {
-                        decision = await NightlyDecisionAsync(child, context, ct).ConfigureAwait(false);
-                    }
-#pragma warning disable CA1031 // Рішення — оптимізація: будь-який збій означає «рахувати», а не «пропустити» чи «впасти».
-                    catch (Exception ex) when (ex is not OperationCanceledException)
-#pragma warning restore CA1031
-                    {
-                        if (logger is not null)
+                        var child = request with
                         {
-                            LogNightlyDecisionFailed(logger, request.ProjectId, documentId, ex);
+                            DocumentId = documentId,
+                            PeriodKey = null,
+                            Year = year,
+                            FanOutParentJobId = parentId,
+                            TriggeredByUserId = null,
+                            IncludeApproved = false,
+                            OverrideUserId = null,
+                            OverrideReason = null,
+                        };
+
+                        // ✎ Огляд H2: збій рішення про ОДИН документ не зриває розклад решти проєкту — документ рахується
+                        // («сумніваєшся — рахуй»), причина в журналі обслуговування — decisionError.
+                        NightlyDecision decision;
+                        try
+                        {
+                            decision = await NightlyDecisionAsync(child, contexts[year], ct).ConfigureAwait(false);
+                        }
+#pragma warning disable CA1031 // Рішення — оптимізація: будь-який збій означає «рахувати», а не «пропустити» чи «впасти».
+                        catch (Exception ex) when (ex is not OperationCanceledException)
+#pragma warning restore CA1031
+                        {
+                            if (logger is not null)
+                            {
+                                LogNightlyDecisionFailed(logger, request.ProjectId, documentId, ex);
+                            }
+
+                            decision = new NightlyDecision(NightlyVerdict.Recalculate, NightlyReason.DecisionError);
                         }
 
-                        decision = new NightlyDecision(NightlyVerdict.Recalculate, NightlyReason.DecisionError);
-                    }
+                        outcome.Count(year, decision);
+                        if (decision.Verdict == NightlyVerdict.Archived && logger is not null)
+                        {
+                            LogArchivedProjectSkipped(logger, request.ProjectId, documentId);
+                        }
 
-                    outcome.Count(decision);
-                    if (decision.Verdict == NightlyVerdict.Archived && logger is not null)
-                    {
-                        LogArchivedProjectSkipped(logger, request.ProjectId, documentId);
-                    }
+                        if (decision.Verdict != NightlyVerdict.Recalculate)
+                        {
+                            continue;
+                        }
 
-                    if (decision.Verdict != NightlyVerdict.Recalculate)
-                    {
-                        continue;
+                        await scheduler
+                            .EnqueueCoalescedAsync<IRecalculationJob>(NightlyTargetOf(documentId, year), child, ct)
+                            .ConfigureAwait(false);
                     }
-
-                    await scheduler
-                        .EnqueueCoalescedAsync<IRecalculationJob>(NightlyTargetOf(documentId, year), child, ct)
-                        .ConfigureAwait(false);
                 }
             }
 
-            run.Complete("Succeeded", outcome.ToJson(request.ProjectId, year, request.NightlySkipUnchanged), clock.UtcNow);
+            run.Complete(
+                "Succeeded",
+                outcome.ToJson(request.ProjectId, current, years, request.NightlySkipUnchanged),
+                clock.UtcNow);
             await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
+            var yearsText = years.Count == 0
+                ? current.ToString(CultureInfo.InvariantCulture)
+                : string.Join(", ", years.Select(y => y.ToString(CultureInfo.InvariantCulture)));
             if (logger is not null)
             {
-                LogNightlyFannedOut(logger, request.ProjectId, year, outcome.Queued, outcome.Skipped, outcome.NoScope);
+                LogNightlyFannedOut(logger, request.ProjectId, yearsText, outcome.Queued, outcome.Skipped, outcome.NoScope);
             }
 
             await progress
@@ -252,7 +304,7 @@ public sealed partial class RecalculationJob
                         NightlyFannedOutKey,
                         new Dictionary<string, string>(StringComparer.Ordinal)
                         {
-                            ["year"] = year.ToString(CultureInfo.InvariantCulture),
+                            ["year"] = yearsText,
                             ["count"] = outcome.Queued.ToString(CultureInfo.InvariantCulture),
                             ["skipped"] = (outcome.Skipped + outcome.NoScope).ToString(CultureInfo.InvariantCulture),
                         })),
@@ -466,6 +518,8 @@ public sealed partial class RecalculationJob
     {
         private readonly SortedDictionary<string, int> reasons = new(StringComparer.Ordinal);
 
+        private readonly SortedDictionary<string, int[]> byYear = new(StringComparer.Ordinal);
+
         public int Queued { get; private set; }
 
         public int Skipped { get; private set; }
@@ -474,8 +528,15 @@ public sealed partial class RecalculationJob
 
         public int Archived { get; private set; }
 
-        public void Count(NightlyDecision decision)
+        public void Count(int year, NightlyDecision decision)
         {
+            var yearKey = year.ToString(CultureInfo.InvariantCulture);
+            if (!byYear.TryGetValue(yearKey, out var counts))
+            {
+                byYear[yearKey] = counts = new int[4];
+            }
+
+            counts[(int)decision.Verdict]++;
             switch (decision.Verdict)
             {
                 case NightlyVerdict.Recalculate:
@@ -495,17 +556,32 @@ public sealed partial class RecalculationJob
             }
         }
 
-        public string ToJson(int projectId, int year, bool skipUnchanged)
+        /// <summary>
+        /// Підсумок: <c>year</c> — поточний рік проєкту, <c>years</c> — роки розкладу (з попереднім у пільговому строку),
+        /// лічильники — документні рішення за всі роки разом, <c>byYear</c> — розбивка за роком.
+        /// </summary>
+        public string ToJson(int projectId, int year, IReadOnlyList<int> years, bool skipUnchanged)
             => JsonSerializer.Serialize(new
             {
                 projectId,
                 year,
+                years,
                 skipUnchanged,
                 queued = Queued,
                 skippedUnchanged = Skipped,
                 noOpenPeriods = NoScope,
                 archived = Archived,
                 reasons,
+                byYear = byYear.ToDictionary(
+                    p => p.Key,
+                    p => new
+                    {
+                        queued = p.Value[(int)NightlyVerdict.Recalculate],
+                        skippedUnchanged = p.Value[(int)NightlyVerdict.Unchanged],
+                        noOpenPeriods = p.Value[(int)NightlyVerdict.NoOpenPeriods],
+                        archived = p.Value[(int)NightlyVerdict.Archived],
+                    },
+                    StringComparer.Ordinal),
             });
     }
 }
@@ -513,13 +589,13 @@ public sealed partial class RecalculationJob
 /// <summary>✎ PSS-15: що нічний розклад вирішив про документ.</summary>
 public enum NightlyVerdict
 {
-    /// <summary>Поставити документну задачу (усі відкриті періоди поточного року).</summary>
+    /// <summary>Поставити документну задачу (усі відкриті періоди року рішення).</summary>
     Recalculate,
 
     /// <summary>Входи не змінились після актуального прогону кожного відкритого періоду — пропуск.</summary>
     Unchanged,
 
-    /// <summary>У поточному році немає відкритого періоду (усе закрито, затверджено, або документ без року).</summary>
+    /// <summary>У році рішення немає відкритого періоду (усе закрито, затверджено, або документ без року).</summary>
     NoOpenPeriods,
 
     /// <summary>Проєкт архівований чи архівується (B69/B81) — архівні дані не перераховуються.</summary>
@@ -585,7 +661,7 @@ public sealed record NightlyDecision(NightlyVerdict Verdict, NightlyReason Reaso
 
 /// <summary>✎ PSS-15: спільне для всіх документів проєкту за ніч.</summary>
 /// <param name="ProjectId">Проєкт.</param>
-/// <param name="Year">Поточний рік.</param>
+/// <param name="Year">Рік рішення (поточний чи попередній у пільговому строку).</param>
 /// <param name="SkipUnchanged">Пропускати незмінні.</param>
 internal sealed record NightlyContext(int ProjectId, int Year, bool SkipUnchanged)
 {
