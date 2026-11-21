@@ -67,7 +67,9 @@ function ScopeInput({ field, options, label, description, value, error, onChange
       value={value === '' ? null : value}
       searchable
       clearable={!field.required}
-      allowDeselect={!field.required}
+      // Picking the value that is already chosen keeps it (Mantine would toggle it off): a prefilled or chosen scope is cleared only
+      // with the clear button, never by choosing the same entry again.
+      allowDeselect={false}
       placeholder={field.required ? undefined : t('permits.air.import.area.none')}
       nothingFoundMessage={t('permits.air.import.scope.nothingFound')}
       disabled={!field.registryFound}
