@@ -284,10 +284,16 @@ public sealed partial class DocumentStaleResultsStoreTests
             if (command.CommandText.Contains("calc.CalculationResult", StringComparison.OrdinalIgnoreCase)
                 || command.CommandText.Contains("aud.CellChange", StringComparison.OrdinalIgnoreCase))
             {
-                // Числа з параметрів колекції документів (`ids.Contains(...)` у StaleResultsMapCache): і поштучних
-                // (@ids1, @ids2...), і одного JSON-параметра. Інші параметри (період, TOP) - не документи.
+                // Числа з параметрів колекції документів: `ids.Contains(...)` (поштучні @ids1, @ids2... чи один JSON-параметр)
+                // або список `FROM (VALUES (@p1), (@p2)) AS d` форми для набору (StaleResultsByIdsQuery). Інші параметри
+                // (період, TOP) - не документи.
+                var listed = System.Text.RegularExpressions.Regex.Matches(command.CommandText, @"FROM \(VALUES ([^)]*\)(?:, \([^)]*\))*)\) AS d")
+                    .SelectMany(m => System.Text.RegularExpressions.Regex.Matches(m.Groups[1].Value, @"@\w+"))
+                    .Select(m => m.Value)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
                 var numbers = command.Parameters.Cast<System.Data.Common.DbParameter>()
-                    .Where(p => p.ParameterName.Contains("ids", StringComparison.OrdinalIgnoreCase))
+                    .Where(p => p.ParameterName.Contains("ids", StringComparison.OrdinalIgnoreCase)
+                                || listed.Contains(p.ParameterName.StartsWith('@') ? p.ParameterName : "@" + p.ParameterName))
                     .SelectMany(p => System.Text.RegularExpressions.Regex.Matches(
                         Convert.ToString(p.Value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty, @"\d{1,18}"))
                     .Select(m => long.Parse(m.Value, System.Globalization.CultureInfo.InvariantCulture))

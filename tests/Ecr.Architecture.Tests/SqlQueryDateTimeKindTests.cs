@@ -44,6 +44,11 @@ public sealed class SqlQueryDateTimeKindTests
             [("src/Ecr.Infrastructure/Persistence/StaleResultsQuery.cs", "StaleAuthorRow")] =
                 "те саме, що StaleDocumentRow: IQueryable компонується в вузький запит накладки; Kind ставить "
                 + "StaleResultsMapCache.LoadAuthorsAsync, де значення матеріалізується (SpecifyKind)",
+            [("src/Ecr.Infrastructure/Persistence/StaleResultsByIdsQuery.cs", "StaleDocumentRow")] =
+                "той самий предикат для набору документів: IQueryable компонується (картка, лікування карти); Kind ставлять "
+                + "DocumentStore.StaleResultsDirectAsync / StaleResultsYearCardAsync і StaleResultsMapCache.HealAllAsync",
+            [("src/Ecr.Infrastructure/Persistence/StaleResultsByIdsQuery.cs", "StaleAuthorRow")] =
+                "те саме для карти авторів: Kind ставить StaleResultsMapCache.HealAuthorsAsync (Utc)",
             [("src/Ecr.Infrastructure/Persistence/DocumentVersionMigrationStore.cs", "DateTime")] =
                 "SYSUTCDATETIME() лише повертається в SQL параметром того самого переносу, у відповідь не йде",
         };

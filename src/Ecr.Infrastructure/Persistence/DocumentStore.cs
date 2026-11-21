@@ -205,7 +205,7 @@ public sealed class DocumentStore(
         sheets = await MarkRecalculatedAfterSubmissionAsync(documentId, period, sheets, ct).ConfigureAwait(false);
         var late = await LateEditsBatchAsync([documentId], period, ct).ConfigureAwait(false);
         var included = await IncludedCodesBatchAsync([documentId], period, ct).ConfigureAwait(false);
-        // ⛔ Картка одного документа - ВУЗЬКИЙ запит по одному id тією самою плоскою формою, а НЕ карта періоду:
+        // ⛔ Картка одного документа - ВУЗЬКИЙ запит по одному id (форма для набору, StaleResultsByIdsQuery), а НЕ карта періоду:
         // після кожного PATCH кеш карти холодний, і повний запит періоду заради одного документа - зайвий.
         // ✎ LAND-YEAR B24: річна розкладка — картка показує рік (перегляд = якір), а результати методологій і правки
         // місячних входів лежать у місяцях-власниках: застарілість — АБО за 12 місяцями, «відколи» — найраніший момент.
@@ -2376,7 +2376,8 @@ public sealed class DocumentStore(
 
     /// <summary>
     /// Те саме, що <see cref="StaleResultsBatchAsync"/>, але вузьким запитом по ids БЕЗ карти й кешу
-    /// (плоска форма <see cref="StaleResultsQuery"/>): картка документа і деградація при переповненні карти.
+    /// (той самий предикат у формі для набору документів, <see cref="StaleResultsByIdsQuery"/>): картка документа і
+    /// деградація при переповненні карти.
     /// </summary>
     private async Task<Dictionary<long, DateTime?>?> StaleResultsDirectAsync(
         IReadOnlyList<long> documentIds, PeriodKeyFilter period, CancellationToken ct)
@@ -2391,20 +2392,26 @@ public sealed class DocumentStore(
             return [];
         }
 
-        var ids = documentIds.ToArray();
+        // ⛔ Форма для НАБОРУ документів (StaleResultsByIdsQuery), а не плоска форма періоду, звужена `IN (…)`: та читала
+        // всю історію результатів документа й довідникову частину всього періоду (Land 21.11: 6-49 с, 503 під перерахунком).
+        var found = new Dictionary<long, DateTime?>();
+        foreach (var ids in StaleResultsByIdsQuery.Chunks(documentIds))
+        {
+            var rows = await StaleResultsByIdsQuery.Documents(db, periodKey, ids)
+                .TagWith(StaleResultsMapCache.DirectTag)
+                .OrderBy(r => r.DocumentId)
+                .Take(ids.Length)
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
 
-        var rows = await StaleResultsQuery.Documents(db, periodKey)
-            .Where(r => ids.Contains(r.DocumentId))
-            .TagWith(StaleResultsMapCache.DirectTag)
-            .OrderBy(r => r.DocumentId)
-            .Take(documentIds.Count)
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
+            // Kind::Unspecified з datetime2 - у JSON без `Z` читався б як локальний час; журнал пише UTC (L3-01).
+            foreach (var r in rows)
+            {
+                found[r.DocumentId] = r.Since is { } since ? DateTime.SpecifyKind(since, DateTimeKind.Utc) : null;
+            }
+        }
 
-        // Kind::Unspecified з datetime2 - у JSON без `Z` читався б як локальний час; журнал пише UTC (L3-01).
-        return rows.ToDictionary(
-            r => r.DocumentId,
-            r => r.Since is { } since ? (DateTime?)DateTime.SpecifyKind(since, DateTimeKind.Utc) : null);
+        return found;
     }
 
     /// <summary>
@@ -2424,7 +2431,7 @@ public sealed class DocumentStore(
         }
 
         var rows = await keys
-            .Select(k => StaleResultsQuery.Documents(db, k).Where(r => r.DocumentId == documentId))
+            .Select(k => StaleResultsByIdsQuery.Documents(db, k, [documentId]))
             .Aggregate(Queryable.Concat)
             .OrderBy(r => r.Since)
             .Take(keys.Length)
