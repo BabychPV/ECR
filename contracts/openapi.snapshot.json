@@ -14075,6 +14075,25 @@
         ],
         "type": "object"
       },
+      "MethodologyTraceStepsDto": {
+        "description": "Прапор методології «трасувати проміжні кроки» (D-565).",
+        "properties": {
+          "methodologyId": {
+            "description": "Методологія.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "traceSteps": {
+            "description": "`true` — прогони методології пишуть кроки трейсу (`calc.CalculationStep`).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "methodologyId",
+          "traceSteps"
+        ],
+        "type": "object"
+      },
       "MethodologyVersionDiffDto": {
         "description": "Різниця двох версій методології — лише читання (`BE-25`, макет `mv-compare`).",
         "properties": {
@@ -27962,6 +27981,19 @@
         },
         "required": [
           "workflowMode"
+        ],
+        "type": "object"
+      },
+      "SetTraceStepsRequest": {
+        "description": "Тіло `PUT /api/v1/methodologies/{id}/trace-steps` (D-565).",
+        "properties": {
+          "enabled": {
+            "description": "`true` — прогони методології пишуть проміжні кроки трейсу.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
         ],
         "type": "object"
       },
@@ -50942,6 +50974,153 @@
           }
         },
         "summary": "Прогін методології <b>без запису</b>. Право `Calculation.View`.",
+        "tags": [
+          "Methodologies"
+        ]
+      }
+    },
+    "/api/v1/methodologies/{id}/trace-steps": {
+      "get": {
+        "description": "⚠ Саме за ним екран пояснення числа відрізняє «кроків не записано, бо трасування вимкнено» від «кроків немає».",
+        "parameters": [
+          {
+            "description": "Методологія.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyTraceStepsDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyTraceStepsDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyTraceStepsDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Прапор «трасувати проміжні кроки» методології (D-565). Право `Calculation.View`.",
+        "tags": [
+          "Methodologies"
+        ]
+      },
+      "put": {
+        "description": "⛔ Прапор живе на контейнері й чисел не змінює (результати й входи пишуться однаково), тому без нової версії й\nпублікації. Перерахунок не запускається: кроки з'являться в наступному прогоні. Зміна — у журнал структурних змін.",
+        "parameters": [
+          {
+            "description": "Методологія.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetTraceStepsRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetTraceStepsRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetTraceStepsRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyTraceStepsDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyTraceStepsDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyTraceStepsDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Вмикає чи вимикає запис проміжних кроків трейсу методології (D-565, PERF-03). Право `Calculation.EditFormula`.",
         "tags": [
           "Methodologies"
         ]

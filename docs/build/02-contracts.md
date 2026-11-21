@@ -5072,6 +5072,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/tests/{code}` | `Calculation.EditFormula` | 7 |
 | `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/modes` | `Calculation.EditFormula` | 7 |
 | `PUT` | `/api/v1/methodologies/{id}/row-activity-filter` | `Calculation.Publish` | 7 |
+| `GET` | `/api/v1/methodologies/{id}/trace-steps` | `Calculation.View` | 7 |
+| `PUT` | `/api/v1/methodologies/{id}/trace-steps` | `Calculation.EditFormula` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/coverage` | `Calculation.View` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/rule-coverage` | `Calculation.View` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/diff` | `Calculation.View` | 7 |

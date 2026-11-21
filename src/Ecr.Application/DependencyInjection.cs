@@ -510,6 +510,8 @@ public static class DependencyInjection
         services.AddScoped<Calculations.SaveMethodologyTestCaseHandler>();
         services.AddScoped<Calculations.SetMethodologyModesHandler>();
         services.AddScoped<Calculations.SetMethodologyRowActivityFilterHandler>();
+        services.AddScoped<Calculations.GetMethodologyTraceStepsHandler>();
+        services.AddScoped<Calculations.SetMethodologyTraceStepsHandler>();
         services.AddScoped<Calculations.ListCalculationBindingsHandler>();
         services.AddScoped<Calculations.SaveCalculationBindingHandler>();
         services.AddScoped<Calculations.DeleteMethodologyVersionHandler>();

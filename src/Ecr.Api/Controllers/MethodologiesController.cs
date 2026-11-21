@@ -47,6 +47,8 @@ public sealed class MethodologiesController(
     SaveMethodologyTestCaseHandler saveTest,
     SetMethodologyModesHandler setModes,
     SetMethodologyRowActivityFilterHandler setRowActivityFilter,
+    GetMethodologyTraceStepsHandler getTraceSteps,
+    SetMethodologyTraceStepsHandler setTraceSteps,
     ListCalculationBindingsHandler listBindings,
     SaveCalculationBindingHandler saveBinding,
     ListMethodologySubstancesHandler listSubstances,
@@ -735,6 +737,41 @@ public sealed class MethodologiesController(
         return Ok(await setRowActivityFilter.HandleAsync(id, request.Filter, ct).ConfigureAwait(false));
     }
 
+    /// <summary>
+    /// Прапор «трасувати проміжні кроки» методології (D-565). Право <c>Calculation.View</c>.
+    /// </summary>
+    /// <param name="id">Методологія.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Саме за ним екран пояснення числа відрізняє «кроків не записано, бо трасування вимкнено» від «кроків немає».
+    /// </remarks>
+    [HttpGet("{id:int}/trace-steps")]
+    [ProducesResponseType<MethodologyTraceStepsDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<MethodologyTraceStepsDto>> TraceSteps(int id, CancellationToken ct)
+        => Ok(await getTraceSteps.HandleAsync(id, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Вмикає чи вимикає запис проміжних кроків трейсу методології (D-565, PERF-03). Право <c>Calculation.EditFormula</c>.
+    /// </summary>
+    /// <param name="id">Методологія.</param>
+    /// <param name="request">Нове значення прапора.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Прапор живе на контейнері й чисел не змінює (результати й входи пишуться однаково), тому без нової версії й
+    /// публікації. Перерахунок не запускається: кроки з'являться в наступному прогоні. Зміна — у журнал структурних змін.
+    /// </remarks>
+    [HttpPut("{id:int}/trace-steps")]
+    [ProducesResponseType<MethodologyTraceStepsDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<MethodologyTraceStepsDto>> SetTraceSteps(
+        int id, [FromBody] SetTraceStepsRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        return Ok(await setTraceSteps.HandleAsync(id, request.Enabled, ct).ConfigureAwait(false));
+    }
+
     /// <summary>Прив'язки методології до колонок. Право <c>Calculation.View</c>.</summary>
     /// <param name="id">Методологія.</param>
     /// <param name="ct">Токен скасування.</param>
@@ -1037,6 +1074,10 @@ public sealed record SetMethodologyModesRequest(
 /// <summary>Запит на фільтр активності рядків методології (D-425).</summary>
 /// <param name="Filter"><c>КОД_ДОВІДНИКА:КОД_ЗАПИСУ</c>, наприклад <c>LAND_GENERIC_EQUIPSTATUS:Running</c>; <c>null</c> — зняти.</param>
 public sealed record SetRowActivityFilterRequest(string? Filter);
+
+/// <summary>Тіло <c>PUT /api/v1/methodologies/{id}/trace-steps</c> (D-565).</summary>
+/// <param name="Enabled"><c>true</c> — прогони методології пишуть проміжні кроки трейсу.</param>
+public sealed record SetTraceStepsRequest(bool Enabled);
 
 /// <summary>Запит на прив'язку виходу методології до колонки документа.</summary>
 /// <param name="MatchJson">
