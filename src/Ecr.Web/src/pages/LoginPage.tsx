@@ -32,8 +32,10 @@ import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { passwordToggleProps } from '@/shared/ui/a11yLabels';
 import { useTranslatedLanguages } from '@/shared/ui/LanguageSwitcher';
 import {
+  catalogFailure,
   isCatalogFailed,
   isCatalogResolved,
+  isCatalogRetrying,
   loadCatalog,
   markLoginChosenLanguage,
   preferredLanguage,
@@ -65,6 +67,37 @@ const CATALOG_LOAD_FAILED = new EcrApiError({
   correlationId: '-',
   detail: 'The interface text catalogue did not load. Check the network connection and reload the page.',
 });
+
+/**
+ * Каталог не завантажився, бо СЕРВЕР ЗАЙНЯТИЙ (`429`/`503` з `Retry-After`) і автоматичні повтори вичерпано
+ * (PSS-29, e2e RC #988).
+ *
+ * ⛔ Не `CATALOG_LOAD_FAILED`: «перевірте мережеве з'єднання» тут — неправда. Мережа справна, сервер прямо
+ * відповів і сказав, коли приходити. Порада, що відправляє людину до мережевого адміністратора, гірша за
+ * відсутність поради.
+ *
+ * ⚠ Літерали англійською — з тієї самої причини, що й `CATALOG_LOAD_FAILED`: каталогу на цьому екрані
+ * за визначенням немає, `t()` дав би `⟦…⟧`. `status: 0` — клієнтська відмова: `ErrorAlert` показує
+ * `detail` як є (`problemText.mayShowDetail`).
+ */
+function catalogBusyError(retryAfterSeconds: number | null): EcrApiError {
+  return new EcrApiError({
+    title: 'The server is busy',
+    status: 0,
+    errorCode: 'ECR-I18N-CATALOG-BUSY',
+    correlationId: '-',
+    detail:
+      retryAfterSeconds !== null && retryAfterSeconds > 0
+        ? `Too many people are opening the application right now. Try again in ${retryAfterSeconds} s.`
+        : 'Too many people are opening the application right now. Try again in a moment.',
+  });
+}
+
+/** Підпис під спінером, поки каталог чекає автоматичного повтору (літерал — та сама причина, що вище). */
+const CATALOG_BUSY_RETRYING = 'The server is busy. Retrying automatically…';
+
+/** Кнопка ручного повтору на екрані «сервер зайнятий» (літерал — та сама причина). */
+const CATALOG_TRY_AGAIN = 'Try again';
 
 /**
  * Аргументи для кнопки-тумблера видимості пароля (`Q-260`).
@@ -167,6 +200,8 @@ export function LoginPage(): JSX.Element {
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const [lost, setLost] = useState<{ userId: number; edits: LostEdits } | null>(null);
+  // PSS-29: ручний повтор завантаження каталогу після «сервер зайнятий».
+  const [catalogReloading, setCatalogReloading] = useState(false);
 
   // Перемальовує сторінку, коли каталог доїхав (інакше видно самі ключі).
   useCatalog();
@@ -240,10 +275,24 @@ export function LoginPage(): JSX.Element {
   // ⛔ Доки каталог не розв'язано, тексту НЕМАЄ. Перший кадр із позначеними
   // ключами (`⟦login.title⟧`) бачив би кожен користувач при кожному відкритті
   // сторінки — а це рівно те, чим була `A7-33`, тільки коротше (`D-138`).
-  if (!isCatalogResolved(preferredLanguage(), 'public')) {
+  //
+  // ⚠ PSS-29: якщо сервер відповів «зайнято» і каталог чекає повтору — так і кажемо під спінером, щоб людина не
+  // тиснула F5 (кожне перезавантаження — ще кілька запитів у ту саму межу).
+  const catalogRetrying = isCatalogRetrying(preferredLanguage(), 'public');
+  if (
+    !isCatalogResolved(preferredLanguage(), 'public') ||
+    (catalogRetrying && isCatalogFailed(preferredLanguage(), 'public'))
+  ) {
     return (
       <Center h="100vh">
-        <Loader size="sm" />
+        <Stack align="center" gap="sm">
+          <Loader size="sm" />
+          {catalogRetrying && (
+            <Text size="sm" c="dimmed" role="status">
+              {CATALOG_BUSY_RETRYING}
+            </Text>
+          )}
+        </Stack>
       </Center>
     );
   }
@@ -253,6 +302,34 @@ export function LoginPage(): JSX.Element {
   // Раніше «розв'язано порожнім через збій» і «розв'язано успішно» нічим не
   // різнилися для цієї перевірки, і форма малювалася в обох випадках.
   if (isCatalogFailed(preferredLanguage(), 'public')) {
+    const failure = catalogFailure(preferredLanguage(), 'public');
+
+    // ⛔ PSS-29: «сервер зайнятий» — не «перевірте мережу». Людині кажуть правду і дають повторити самій,
+    // без перезавантаження сторінки (`ФВ-14.24`: тупикових екранів не буває).
+    if (failure?.busy === true) {
+      return (
+        <Center h="100vh">
+          <Card withBorder w={380} p="lg">
+            <Stack gap="sm">
+              <ErrorAlert error={catalogBusyError(failure.retryAfterSeconds)} />
+              <Group justify="flex-end">
+                <Button
+                  variant="default"
+                  loading={catalogReloading}
+                  onClick={() => {
+                    setCatalogReloading(true);
+                    void loadCatalog(preferredLanguage(), 'public').finally(() => setCatalogReloading(false));
+                  }}
+                >
+                  {CATALOG_TRY_AGAIN}
+                </Button>
+              </Group>
+            </Stack>
+          </Card>
+        </Center>
+      );
+    }
+
     return (
       <Center h="100vh">
         <Card withBorder w={380} p="lg">

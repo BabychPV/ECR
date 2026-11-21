@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { MemoryRouter } from 'react-router-dom';
 import type { JSX } from 'react';
@@ -158,5 +158,88 @@ describe('LoginPage: каталог перекладів не завантажи
 
     await screen.findByRole('alert');
     expect(document.title).not.toContain('⟦');
+  });
+});
+
+/**
+ * Каталог віддав `429` (PSS-29, e2e RC #988): межа частоти анонімних читань клала екран входу всім за однією
+ * адресою, і людина бачила «Check the network connection» — пораду лагодити справну мережу.
+ */
+describe('LoginPage: сервер зайнятий (429 на каталозі)', () => {
+  /** Каталог відповідає голим 429 (як `LoginRateLimiting.RejectBare`) задану кількість разів, далі — успіхом. */
+  function busyCatalog(retryAfter: string, times: number): ReturnType<typeof vi.fn> {
+    let left = times;
+    const calls = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (!url.includes('/ui-strings/')) throw new Error(`Непередбачений запит у тесті: ${url}`);
+
+      if (left > 0) {
+        left -= 1;
+        return new Response(null, { status: 429, headers: { 'Retry-After': retryAfter } });
+      }
+
+      return new Response(
+        JSON.stringify({ languageCode: 'x', revision: 1, strings: { 'login.title': 'Environmental Compliance Reporting' } }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    });
+    vi.stubGlobal('fetch', calls);
+    return calls;
+  }
+
+  /** Скільки разів просили саме каталог (bootstrap іде тим самим `fetch`). */
+  function catalogCalls(calls: ReturnType<typeof vi.fn>): number {
+    return calls.mock.calls.filter(([input]) => String(input).includes('/ui-strings/')).length;
+  }
+
+  it('повтори вичерпано — «сервер зайнятий, спробуйте за N с», без «перевірте мережу» і з кнопкою повтору', async () => {
+    localStorage.setItem('uiLanguage', 'busy-lang');
+    busyCatalog('120', Number.MAX_SAFE_INTEGER);
+
+    render(
+      <Shell>
+        <LoginPage />
+      </Shell>,
+    );
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('The server is busy');
+    expect(alert.textContent).toContain('Try again in 120 s');
+    expect(document.body.textContent).not.toContain('Check the network connection');
+    expect(document.body.textContent).not.toMatch(/⟦[^⟧]*⟧/);
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeDefined();
+  });
+
+  it('429 з коротким Retry-After — «повторюємо» під спінером, потім форма входу сама', async () => {
+    localStorage.setItem('uiLanguage', 'busy-then-ok');
+    const calls = busyCatalog('1', 1);
+
+    render(
+      <Shell>
+        <LoginPage />
+      </Shell>,
+    );
+
+    expect(await screen.findByText('The server is busy. Retrying automatically…')).toBeDefined();
+    expect(await screen.findByText('Environmental Compliance Reporting', {}, { timeout: 4000 })).toBeDefined();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(catalogCalls(calls)).toBe(2);
+  });
+
+  it('кнопка «Try again» повторює завантаження без перезавантаження сторінки', async () => {
+    localStorage.setItem('uiLanguage', 'busy-manual');
+    const calls = busyCatalog('120', 1);
+
+    render(
+      <Shell>
+        <LoginPage />
+      </Shell>,
+    );
+
+    const retry = await screen.findByRole('button', { name: 'Try again' });
+    fireEvent.click(retry);
+
+    expect(await screen.findByText('Environmental Compliance Reporting')).toBeDefined();
+    expect(catalogCalls(calls)).toBe(2);
   });
 });

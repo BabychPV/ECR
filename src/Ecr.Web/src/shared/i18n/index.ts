@@ -1,4 +1,5 @@
 ﻿import { apiFetchIfChanged, setRequestLanguageTag } from '@/api/client';
+import { isBusyRefusal, withBusyRetry } from '@/api/busyRetry';
 import type { UiStringCatalog } from '@/api/types';
 
 /**
@@ -227,6 +228,25 @@ applyRequestLanguage();
 const failed = new Set<string>();
 
 /**
+ * Чому каталог не завантажився (PSS-29): «сервер зайнятий» і «немає зв'язку» — різні поради людині.
+ *
+ * ⛔ Досі будь-яка відмова каталогу (зокрема `429` межі частоти на екрані входу) показувалася як «перевірте
+ * мережеве з'єднання» — неправда, яка посилала людину лагодити справну мережу.
+ */
+export interface CatalogFailure {
+  /** Сервер відповів «зайнято» (`429`, або `503` з `Retry-After`) і після повторів. */
+  readonly busy: boolean;
+  /** Через скільки секунд сервер радив повторити, якщо сказав. */
+  readonly retryAfterSeconds: number | null;
+}
+
+/** Причина відмови за ключем `lang:scope` — поруч із `failed`. */
+const failures = new Map<string, CatalogFailure>();
+
+/** Ключі `lang:scope`, чий запит зараз чекає повтору після «зайнято». */
+const retrying = new Set<string>();
+
+/**
  * Ключ кешу в localStorage.
  *
  * ⚠ Ревізія — ЧИСЛО (`int` на сервері), і в ключі вона рядок лише тому, що
@@ -277,6 +297,21 @@ export function isCatalogResolved(lang: Language, scope: Scope): boolean {
  */
 export function isCatalogFailed(lang: Language, scope: Scope): boolean {
   return failed.has(`${lang}:${scope}`);
+}
+
+/** Чому каталог мови й області не завантажився; `null` — не відмова (`isCatalogFailed` хибне). */
+export function catalogFailure(lang: Language, scope: Scope): CatalogFailure | null {
+  return failures.get(`${lang}:${scope}`) ?? null;
+}
+
+/**
+ * Чи каталог зараз чекає автоматичного повтору, бо сервер відповів «зайнято» (PSS-29).
+ *
+ * ⚠ Для екрана входу: замість німого спінера — «сервер зайнятий, повторюємо…», щоб людина не тиснула F5
+ * (кожне перезавантаження — ще кілька запитів у ту саму межу).
+ */
+export function isCatalogRetrying(lang: Language, scope: Scope): boolean {
+  return retrying.has(`${lang}:${scope}`);
 }
 
 /** Мова, обрана зараз. */
@@ -458,14 +493,30 @@ async function loadCatalogInto(lang: Language, scope: Scope): Promise<void> {
     // ⚠ Умовний запит іде ЛИШЕ коли є що лишити при `304`. Без збереженого
     // каталогу відповідь «не змінилося» означала б порожній інтерфейс — тобто
     // рівно ту помилку, від якої кеш і рятує.
-    const fresh = await apiFetchIfChanged<Catalog>(
-      `/api/v1/ui-strings/${encodeURIComponent(lang)}?scope=${scope}`,
-      cached === null ? null : safeGet(etagKey(lang, scope)),
-    );
+    // ⛔ PSS-29: «зайнято» (`429` з `Retry-After`) повторюється сам, з відступом, який назвав сервер, — а не
+    // перетворюється одразу на «перевірте мережу». Повтор не потрібен, якщо цей виклик уже не останній.
+    const fresh = await withBusyRetry(
+      () =>
+        apiFetchIfChanged<Catalog>(
+          `/api/v1/ui-strings/${encodeURIComponent(lang)}?scope=${scope}`,
+          cached === null ? null : safeGet(etagKey(lang, scope)),
+        ),
+      {
+        shouldContinue: () => isLatestRequest(scope, requestId),
+        onWait: () => {
+          if (retrying.has(cacheKey)) return;
+          retrying.add(cacheKey);
+          bumpCatalog();
+        },
+      },
+    ).finally(() => {
+      retrying.delete(cacheKey);
+    });
 
     // ⚠ Будь-яка відповідь сервера (навіть `304`) означає, що з'єднання є:
     // попередня відмова вже не описує поточний стан.
     failed.delete(cacheKey);
+    failures.delete(cacheKey);
 
     if (fresh === null) {
       // ⛔ `304`: сервер підтвердив, що збережене — чинне. Вміст НЕ
@@ -510,7 +561,7 @@ async function loadCatalogInto(lang: Language, scope: Scope): Promise<void> {
     }
     bumpCatalog();
     return;
-  } catch {
+  } catch (error: unknown) {
     // ⚠ Недоступний каталог не робить застосунок непридатним: показуємо
     // збережений, а якщо його немає — позначаємо відмову (`isCatalogFailed`)
     // і лишаємо каталог розв'язаним порожнім, щоб `t()` не кидав виняток.
@@ -523,6 +574,12 @@ async function loadCatalogInto(lang: Language, scope: Scope): Promise<void> {
     // входу лишалася на спінері назавжди замість показу помилки.
     if (cached === null) {
       failed.add(cacheKey);
+      failures.set(
+        cacheKey,
+        isBusyRefusal(error)
+          ? { busy: true, retryAfterSeconds: error.problem.retryAfterSeconds ?? null }
+          : { busy: false, retryAfterSeconds: null },
+      );
       loaded.set(cacheKey, { languageCode: lang, revision: 0, strings: {} });
       bumpCatalog();
     }
