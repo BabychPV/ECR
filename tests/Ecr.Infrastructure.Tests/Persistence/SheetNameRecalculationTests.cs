@@ -453,6 +453,66 @@ public sealed class SheetNameRecalculationTests(SqlServerFixture sql)
     }
 
     /// <remarks>
+    /// Огляд L-1: гілка збою/відкладення. Перемикання щоразу відмовляє «аркуш подається» (Y1-02) — повтори вичерпано,
+    /// задача відкладається (<see cref="JobDeferredException"/>), а закомічене фазою формул число поданої копії має
+    /// позначку. Мутація (локально): прибрати <c>FlushSubmittedMarksAsync</c> із гілки збою — тест червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "F13-p218-788")]
+    public async Task Подана_копія_відкладений_після_запису_формул_перерахунок_лишає_позначку()
+    {
+        var world = await ArrangeAsync();
+        var copy = await world.Run(h => h.AddAsync(world.Doc.DocumentId, world.Doc.SheetDefId, default));
+        var copyRow = await AddCopyInstanceAsync(world.Doc, copy.SheetCopyId);
+        await SubmitCopyAsync(world.Doc, copy.SheetCopyId);
+
+        var busy = new Ecr.Application.Errors.ConcurrencyConflictException(
+            Ecr.Domain.Errors.ErrorCodes.SheetBusy, "Аркуш подається.",
+            new Dictionary<string, object?> { ["messageKey"] = "err.ECR-DOC-4091.sheetBeingSubmitted" });
+        SwitchFailingStore? store = null;
+        var thrown = await Record.ExceptionAsync(() => world.RunRecalculationJobAsync(
+            new RecalculationRequest(world.Doc.ProjectId, world.Doc.DocumentId, world.Doc.PeriodKey.Value, TriggeredByUserId: UserId),
+            results: inner => store = new SwitchFailingStore(inner, busy)));
+
+        Assert.IsType<JobDeferredException>(thrown);
+        Assert.True(store!.Switches > 1, "перемикання мало повторюватися (Y1-02)");
+        Assert.Equal("Vessel 2", await TextAsync(world.Doc, copyRow));
+        Assert.True(await CopyMarkedAsync(world.Doc, copy.SheetCopyId));
+    }
+
+    /// <remarks>
+    /// Огляд L-1: зміни результатів методологій потрапляють у набір прогону лише після КОМІТУ перемикання. Тут порівняння
+    /// в транзакції перемикання знаходить зміну поданого оригіналу, а саме перемикання падає — транзакція відкочена, числа
+    /// методологій не змінились, і аварійний запис позначок не мусить позначити аркуш. Мутація (локально): передати в
+    /// <c>ResultChangesAsync</c> сам набір прогону (як доти) — позначка з'являється, тест червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "F13-p218-788")]
+    public async Task Відкочене_перемикання_не_додає_змін_результатів_і_позначки_не_ставить()
+    {
+        var world = await ArrangeAsync();
+        var methodologyId = await AddBindingAsync(world.Doc);
+        await world.RecalculateSheetAsync();
+        await SubmitOriginalAsync(world.Doc);
+
+        var failure = new InvalidOperationException("перемикання впало");
+        SwitchFailingStore? store = null;
+        var thrown = await Record.ExceptionAsync(() => world.RunRecalculationJobAsync(
+            new RecalculationRequest(world.Doc.ProjectId, world.Doc.DocumentId, world.Doc.PeriodKey.Value, TriggeredByUserId: UserId),
+            new RecordingRunner(),
+            results: inner => store = new SwitchFailingStore(
+                inner, failure, new ChangedResultScope(methodologyId, world.Doc.TableInstanceId))));
+
+        Assert.Same(failure, thrown);
+        Assert.Equal(1, store!.ChangeQueries);
+        Assert.False(await MarkedAsync(world.Doc, world.Doc.SheetCode));
+    }
+
+    /// <remarks>
     /// e2e «SHEETNAME: copy marker»: сценарій тесту (копія → рядок → подання → «Перерахувати») покладався на те, що
     /// SHEETNAME() нового рядка ще НЕ пораховано на мить подання. Задача формул нового рядка й перерахунок першого
     /// відкриття копії йдуть у фоні й часто встигають раніше за подання — тоді перерахунок після подання нічого не
@@ -585,7 +645,7 @@ public sealed class SheetNameRecalculationTests(SqlServerFixture sql)
         Assert.True(await store.AllSheetsApprovedAsync(world.Doc.ProjectId, world.Doc.PeriodKey.Value, CancellationToken.None));
     }
 
-    private async Task AddBindingAsync(TestDocument doc)
+    private async Task<int> AddBindingAsync(TestDocument doc)
     {
         await using var db = new EcrDbContext(
             new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).Options);
@@ -598,6 +658,7 @@ public sealed class SheetNameRecalculationTests(SqlServerFixture sql)
         db.MethodologyVersions.Add(new Ecr.Domain.Entities.Calculations.MethodologyVersion(
             methodology.Id, "1.0", CalculationLevel.Configuration, 1, Now));
         await db.SaveChangesAsync();
+        return methodology.Id;
     }
 
     private async Task<List<long>> CopyInstanceIdsAsync(TestDocument doc, long sheetCopyId)
@@ -881,13 +942,15 @@ public sealed class SheetNameRecalculationTests(SqlServerFixture sql)
 
         /// <summary>Справжній <c>RecalculationJob</c> над цим документом (методологій немає — оркестратор порожній).</summary>
         public async Task<List<string>> RunRecalculationJobAsync(
-            object? payload, ICalculationRunner? calculationRunner = null, CancellationToken ct = default)
+            object? payload, ICalculationRunner? calculationRunner = null,
+            Func<ICalculationResultStore, ICalculationResultStore>? results = null, CancellationToken ct = default)
         {
             await using var db = builder.CreateContext();
             var clock = new FixedClock();
             var runner = calculationRunner ?? new EmptyRunner();
+            ICalculationResultStore store = new CalculationResultStore(db, clock);
             var runs = new RunCalculationHandler(
-                Substitute.For<IPeriodStore>(), Substitute.For<IWorkflowStore>(), new CalculationResultStore(db, clock),
+                Substitute.For<IPeriodStore>(), Substitute.For<IWorkflowStore>(), results?.Invoke(store) ?? store,
                 Substitute.For<IBackgroundJobScheduler>(), new UnitOfWork(db), Substitute.For<IAccessDecisionService>(),
                 Substitute.For<ICurrentUser>(), clock, Substitute.For<IAuditWriter>());
 
@@ -901,7 +964,11 @@ public sealed class SheetNameRecalculationTests(SqlServerFixture sql)
                 });
 
             var job = new RecalculationJob(
-                db, runner, runs, Service(db), clock, sheetGate: new SheetEditGate(db), audit: new AuditWriter(db));
+                db, runner, runs, Service(db), clock, sheetGate: new SheetEditGate(db), audit: new AuditWriter(db))
+            {
+                // Повтори перемикання «аркуш подається» (Y1-02) — без 5-секундних пауз.
+                CompletionBusyDelay = TimeSpan.Zero,
+            };
             await job.ExecuteAsync(payload, progress, ct);
             return messages;
         }
@@ -971,6 +1038,63 @@ public sealed class SheetNameRecalculationTests(SqlServerFixture sql)
             ct.ThrowIfCancellationRequested();
             return new ModuleProfile();
         }
+    }
+
+    /// <summary>
+    /// Сховище результатів, у якого перемикання актуальності (<c>SwitchCurrentRunAsync</c>) щоразу падає — транзакцію
+    /// перемикання відкочено. <paramref name="change"/> — що повертає порівняння в тій самій транзакції (B79).
+    /// </summary>
+    private sealed class SwitchFailingStore(
+        ICalculationResultStore inner, Exception failure, ChangedResultScope? change = null) : ICalculationResultStore
+    {
+        public int Switches { get; private set; }
+
+        public int ChangeQueries { get; private set; }
+
+        public Task WriteResultsAsync(long calculationRunId, IReadOnlyList<CalculationOutput> outputs, CancellationToken ct)
+            => inner.WriteResultsAsync(calculationRunId, outputs, ct);
+
+        public Task WriteTraceAsync(
+            long calculationRunId, IReadOnlyList<CalculationOutput> outputs, TraceLevel traceLevel, CancellationToken ct)
+            => inner.WriteTraceAsync(calculationRunId, outputs, traceLevel, ct);
+
+        public Task<IReadOnlyList<InvalidatedReportSnapshot>> InvalidateReportSnapshotsAsync(
+            long calculationRunId, CancellationToken ct)
+            => inner.InvalidateReportSnapshotsAsync(calculationRunId, ct);
+
+        public Task<IReadOnlyList<SupersededRun>> SwitchCurrentRunAsync(
+            long calculationRunId, string modulesProfileJson, CancellationToken ct)
+        {
+            Switches++;
+            return Task.FromException<IReadOnlyList<SupersededRun>>(failure);
+        }
+
+        public Task<int> PurgeSupersededRunsAsync(IReadOnlyList<SupersededRun> runs, CancellationToken ct)
+            => inner.PurgeSupersededRunsAsync(runs, ct);
+
+        public Task<int> CarryOverResultsAsync(
+            long calculationRunId, long documentId, IReadOnlyCollection<int> methodologyIds, CancellationToken ct,
+            IReadOnlyCollection<long>? tableInstanceIds = null)
+            => inner.CarryOverResultsAsync(calculationRunId, documentId, methodologyIds, ct, tableInstanceIds);
+
+        public async Task<IReadOnlyList<ChangedResultScope>> ChangedResultsAsync(
+            long calculationRunId, long documentId, IReadOnlyCollection<int> methodologyIds, CancellationToken ct)
+        {
+            ChangeQueries++;
+            return change is null
+                ? await inner.ChangedResultsAsync(calculationRunId, documentId, methodologyIds, ct)
+                : [change];
+        }
+
+        public Task<IReadOnlyList<CalculationResultRow>> ReadCurrentAsync(long documentId, int periodKey, CancellationToken ct)
+            => inner.ReadCurrentAsync(documentId, periodKey, ct);
+
+        public Task<CurrentRunProfile?> ReadCurrentRunProfileAsync(long documentId, int periodKey, CancellationToken ct)
+            => inner.ReadCurrentRunProfileAsync(documentId, periodKey, ct);
+
+        public Task<IReadOnlyList<CalculationResultRow>> ReadRunAsync(
+            long calculationRunId, long documentId, int periodKey, CurrentResultFilter filter, CancellationToken ct)
+            => inner.ReadRunAsync(calculationRunId, documentId, periodKey, filter, ct);
     }
 
     /// <summary>Оркестратор методологій без прив'язок: прогін методологій порожній.</summary>
