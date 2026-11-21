@@ -1787,6 +1787,8 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'health.database.missingFilegroups', N'en', N'Missing filegroups', 1),
     (N'health.database.partitionsAhead',  N'en', N'Partitions ahead', 1),
     (N'health.database.limitations',      N'en', N'Limitations in this mode', 1),
+    (N'health.database.rawDataPointRows',     N'en', N'Raw PI data point rows (approx.)', 1),
+    (N'health.database.rawDataPointWarnRows', N'en', N'Raw data warning threshold (rows)', 1),
     -- Фільтри переліку документів (BE-09b): стан — лише в межах періоду, «мої»
     -- — створені або подані мною. `noMatch*` — порожньо ЧЕРЕЗ фільтри, а не
     -- тому, що документів немає (`documents.empty*`).

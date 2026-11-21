@@ -447,7 +447,8 @@ public sealed partial class EndpointCoverageTests
                 "health.database.edition", "health.database.effectiveMode", "health.database.majorVersion",
                 "health.database.rcsi", "health.database.archiveBatchSize", "health.database.filegroups",
                 "health.database.missingFilegroups", "health.database.partitionsAhead",
-                "health.database.limitations",
+                "health.database.limitations", "health.database.rawDataPointRows",
+                "health.database.rawDataPointWarnRows",
             ],
             "Підпис поля /health/db (FieldLabelKeys)."),
 
