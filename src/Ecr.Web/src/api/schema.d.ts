@@ -11549,6 +11549,108 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/methodologies/{id}/trace-steps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Прапор «трасувати проміжні кроки» методології (D-565). Право `Calculation.View`.
+         * @description ⚠ Саме за ним екран пояснення числа відрізняє «кроків не записано, бо трасування вимкнено» від «кроків немає».
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MethodologyTraceStepsDto"];
+                        "text/json": components["schemas"]["MethodologyTraceStepsDto"];
+                        "text/plain": components["schemas"]["MethodologyTraceStepsDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        /**
+         * Вмикає чи вимикає запис проміжних кроків трейсу методології (D-565, PERF-03). Право `Calculation.EditFormula`.
+         * @description ⛔ Прапор живе на контейнері й чисел не змінює (результати й входи пишуться однаково), тому без нової версії й
+         *     публікації. Перерахунок не запускається: кроки з'являться в наступному прогоні. Зміна — у журнал структурних змін.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SetTraceStepsRequest"];
+                    "application/json": components["schemas"]["SetTraceStepsRequest"];
+                    "text/json": components["schemas"]["SetTraceStepsRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MethodologyTraceStepsDto"];
+                        "text/json": components["schemas"]["MethodologyTraceStepsDto"];
+                        "text/plain": components["schemas"]["MethodologyTraceStepsDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/methodologies/{id}/versions": {
         parameters: {
             query?: never;
@@ -37540,6 +37642,16 @@ export interface components {
              */
             tolerance: string;
         };
+        /** @description Прапор методології «трасувати проміжні кроки» (D-565). */
+        MethodologyTraceStepsDto: {
+            /**
+             * Format: int32
+             * @description Методологія.
+             */
+            methodologyId: number;
+            /** @description `true` — прогони методології пишуть кроки трейсу (`calc.CalculationStep`). */
+            traceSteps: boolean;
+        };
         /** @description Різниця двох версій методології — лише читання (`BE-25`, макет `mv-compare`). */
         MethodologyVersionDiffDto: {
             /**
@@ -43870,6 +43982,11 @@ export interface components {
         SetTemplateWorkflowModeRequest: {
             /** @description З поданням і затвердженням або без них. */
             workflowMode: components["schemas"]["WorkflowMode"];
+        };
+        /** @description Тіло `PUT /api/v1/methodologies/{id}/trace-steps` (D-565). */
+        SetTraceStepsRequest: {
+            /** @description `true` — прогони методології пишуть проміжні кроки трейсу. */
+            enabled: boolean;
         };
         /** @description Запит на зміну рядка каталогу. */
         SetUiStringRequest: {
