@@ -184,19 +184,37 @@ public sealed class Hse400CompositionSnapshotLoader(
         // `ICalculationResultStore.ReadCurrentAsync` (`CurrentRunSelection`). Новий актуальний прогін = інша множина Id.
         var documentPeriods = chosen.Select(i => (i.DocumentId, i.PeriodKeyValue)).Distinct().ToList();
         string? fingerprint = null;
-        if (cache is not null)
+
+        // ⛔ M2 (рев'ю PERF-11): комірки, які пишуть шляхи БЕЗ піднімання версії рядка — перерахунок формул документа
+        // (`TouchedRowIds: []`, D14-07) і прив'язка до дозволів, — відбитком рядків не видно. Тому там, де таблиці складу
+        // мають формулу чи прив'язку до дозволу, кеш НЕ вмикається зовсім (читання, як до PERF-11). На справжній HSE400
+        // їх немає (вхід + розрахункові F_ з прогонів), тож кеш працює; поява формули вимикає його без ручних дій.
+        // Комірковий агрегат замість застороги не взято: на Land він коштує стільки ж, скільки саме читання (0,84 с CPU).
+        var cacheable = cache is not null
+            && !await db.FormulaDefs.AsNoTracking()
+                .AnyAsync(f => chosenTableIds.Contains(f.TableDefId) && !f.IsDeleted, ct).ConfigureAwait(false)
+            && !await db.PermitSheetBindings.AsNoTracking()
+                .AnyAsync(b => chosenTableIds.Contains(b.SheetTableDefId), ct).ConfigureAwait(false);
+        if (cacheable)
         {
-            // Штамп рядків обраних екземплярів: кількість і НАЙБІЛЬШИЙ RowVersion. RowVersion — монотонний лічильник
-            // бази, кожен запис комірок рядка дає йому нове, більше за всі попередні значення (інваріант TableRow), тож
-            // будь-яка правка/вставка піднімає максимум, а видалення міняє кількість. Один прохід по рядках без їх
-            // читання в пам'ять (на Land рядків ~10^5 — їх читає лише промах кешу).
-            var rowQuery = db.TableRows.AsNoTracking()
-                .Where(r => periodKeys.Contains(r.PeriodKeyValue) && instanceIds.Contains(r.TableInstanceId) && !r.IsDeleted);
-            var stamp = await rowQuery.GroupBy(_ => 1)
-                .Select(g => new { Count = g.Count(), Version = g.Max(r => r.RowVersion) })
-                .FirstOrDefaultAsync(ct).ConfigureAwait(false);
-            var rowCount = stamp?.Count ?? 0;
-            var rowStamp = stamp?.Version;
+            // Штамп рядків обраних екземплярів: кількість, найбільший RowVersion І СУМА версій. ⛔ H1 (рев'ю): версію
+            // видає UPDATE на початку транзакції запису, а комітяться транзакції в іншому порядку (RCSI): T1 узяла 100 і
+            // ще не закомітила, T2 узяла 101 і закомітила — кількість і максимум після коміту T1 ті самі. Сума ж
+            // (порядок-незалежна) міняється на кожному закоміченому оновленні рядка (нова версія ≠ стара). Один прохід по
+            // рядках без їх читання в пам'ять; списки — JSON-параметрами (`OPENJSON`, як в інших місцях проєкту).
+            var periodsJson = System.Text.Json.JsonSerializer.Serialize(periodKeys);
+            var instancesJson = System.Text.Json.JsonSerializer.Serialize(instanceIds);
+            var stamp = (await db.Database.SqlQuery<RowStamp>($"""
+                    SELECT COUNT_BIG(*) AS Cnt, MAX(r.RowVersion) AS MaxVersion,
+                           SUM(CAST(CAST(r.RowVersion AS bigint) AS decimal(38, 0))) AS SumVersion
+                    FROM doc.TableRow AS r
+                    WHERE r.IsDeleted = 0
+                      AND r.PeriodKey IN (SELECT CAST([value] AS int) FROM OPENJSON({periodsJson}))
+                      AND r.TableInstanceId IN (SELECT CAST([value] AS bigint) FROM OPENJSON({instancesJson}))
+                    """).ToListAsync(ct).ConfigureAwait(false)).Single();
+            var rowCount = stamp.Cnt;
+            var rowStamp = stamp.MaxVersion;
+            var rowSum = stamp.SumVersion ?? 0m;
 
             var currentRuns = new List<(long DocumentId, int PeriodKey, long RunId)>();
             foreach (var documentId in documentPeriods.Select(d => d.DocumentId).Distinct())
@@ -214,11 +232,13 @@ public sealed class Hse400CompositionSnapshotLoader(
                 chosen.Select(i => (i.Id, i.DocumentId, i.TableDefId, i.PeriodKeyValue)),
                 rowCount,
                 rowStamp ?? [],
+                rowSum,
+                streamByTable,
                 rowDefs.Select(r => (r.TableDefId, r.RowKeyValue, r.Ordinal)),
                 monthColumns.Select(c => (c.Id, c.TableDefId, c.Code, (int)c.Month)),
                 currentRuns,
                 approved?.Select(a => (a.DocumentId, a.TableDefId, a.Year, a.Month)) ?? []);
-            if (cache.TryGet(CacheScope(), fingerprint, out var hit))
+            if (cache!.TryGet(CacheScope(), fingerprint, out var hit))
             {
                 return hit;
             }
@@ -358,6 +378,9 @@ public sealed class Hse400CompositionSnapshotLoader(
 
         return (rows, years);
     }
+
+    /// <summary>Штамп рядків (<c>COUNT</c>, <c>MAX</c> і сума версій) для відбитка кешу.</summary>
+    private sealed record RowStamp(long Cnt, byte[]? MaxVersion, decimal? SumVersion);
 
     /// <summary>Область кешу: сервер + база + шаблон + довідник (інша база чи зв'язка не ділять запису).</summary>
     private string CacheScope()
