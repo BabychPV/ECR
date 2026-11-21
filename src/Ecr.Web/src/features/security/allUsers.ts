@@ -1,4 +1,4 @@
-import { fetchAllPages, type CursorPage } from '@/api/fetchAllPages';
+import type { CursorPage } from '@/api/fetchAllPages';
 import type { UserView } from '@/api/types';
 
 /**
@@ -10,9 +10,11 @@ import type { UserView } from '@/api/types';
  *
  * ⚠ Ключ — під префіксом `['users']`: `invalidateQueries(['users'])` після створення чи зміни користувача освіжає
  * і цей перелік, і сторінки нескінченного переліку `SecurityPage` (`['users', 'list']`) — інша форма, інший ключ.
+ *
+ * ⚠ `fetchAllPages` — ледачим `import()` (рецензія L10, M3): опис тягне `AuditPage` біля межі бюджету `D-132`.
  */
 export const allUsersQuery = {
   queryKey: ['users', 'all'] as const,
-  queryFn: ({ signal }: { signal?: AbortSignal }): Promise<CursorPage<UserView>> =>
-    fetchAllPages<UserView>('/api/v1/users', { signal }),
+  queryFn: async ({ signal }: { signal?: AbortSignal }): Promise<CursorPage<UserView>> =>
+    (await import('@/api/fetchAllPages')).fetchAllPages<UserView>('/api/v1/users', { signal }),
 } as const;

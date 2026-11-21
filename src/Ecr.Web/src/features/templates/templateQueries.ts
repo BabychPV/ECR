@@ -1,4 +1,4 @@
-import { fetchAllPages, type CursorPage } from '@/api/fetchAllPages';
+import type { CursorPage } from '@/api/fetchAllPages';
 import { queryKeys } from '@/api/queryKeys';
 import type { TemplateSummary, TemplateVersionSummary } from '@/api/types';
 
@@ -7,13 +7,17 @@ import type { TemplateSummary, TemplateVersionSummary } from '@/api/types';
  * AN-91 / L8-10). Ключі `queryKeys.templates.list()` / `versionsOf(id)` читали десяток екранів, кожен зі своїм
  * `queryFn` і `?limit=100`: 101-й шаблон чи версія мовчки не існували для вибору, а спільний ключ означав, що
  * хто перший прочитав, той і визначив, що побачать інші. Сторож — `templateQueries.guard.test.ts`.
+ *
+ * ⚠ `fetchAllPages` — ледачим `import()` (рецензія L10, M3): опис запиту статично тягнуть маршрути на межі бюджету
+ * `D-132` (`TemplateVersionPage` — 249,6 КБ при межі 250), а сам прохід сторінками потрібен лише в мить читання,
+ * яке й так асинхронне. Чанк спільний і після першого читання — у кеші браузера.
  */
 
 /** `GET /api/v1/templates` — усі сторінки (`fetchAllPages`), під ключем `queryKeys.templates.list()`. */
 export const templatesListQuery = {
   queryKey: queryKeys.templates.list(),
-  queryFn: ({ signal }: { signal?: AbortSignal }): Promise<CursorPage<TemplateSummary>> =>
-    fetchAllPages<TemplateSummary>('/api/v1/templates', { signal }),
+  queryFn: async ({ signal }: { signal?: AbortSignal }): Promise<CursorPage<TemplateSummary>> =>
+    (await import('@/api/fetchAllPages')).fetchAllPages<TemplateSummary>('/api/v1/templates', { signal }),
 } as const;
 
 /**
@@ -25,7 +29,10 @@ export const templatesListQuery = {
 export function templateVersionsQuery(templateId: number | undefined) {
   return {
     queryKey: queryKeys.templates.versionsOf(templateId),
-    queryFn: ({ signal }: { signal?: AbortSignal }): Promise<CursorPage<TemplateVersionSummary>> =>
-      fetchAllPages<TemplateVersionSummary>(`/api/v1/templates/${String(templateId)}/versions`, { signal }),
+    queryFn: async ({ signal }: { signal?: AbortSignal }): Promise<CursorPage<TemplateVersionSummary>> =>
+      (await import('@/api/fetchAllPages')).fetchAllPages<TemplateVersionSummary>(
+        `/api/v1/templates/${String(templateId)}/versions`,
+        { signal },
+      ),
   } as const;
 }

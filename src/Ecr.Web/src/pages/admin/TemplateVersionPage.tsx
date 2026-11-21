@@ -16,7 +16,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
-import { templateVersionsQuery } from '@/features/templates/templateQueries';
 import type {
   CloneVersionRequest,
   DiagnosticInfo,
@@ -939,8 +938,13 @@ function TemplateVersionEditor(): JSX.Element {
   const templateIdNumber = Number(templateId);
 
   // ⛔ PSS-19c: усі версії шаблону (`templateVersionsQuery`): 101-ша версія інакше не мала б стану на цій сторінці.
+  // ⚠ Опис запиту — ледачим `import()` із делегуванням (рецензія L10, M3): маршрут стоїть на 249,6 КБ при межі
+  // 250 (`D-132`), і навіть окремий крихітний чанк `templateQueries` у статичному графі виводив його за межу. Ключ
+  // той самий, читання — те саме (`templateVersionsQuery`), сторож `templateQueries.guard.test.ts` це перевіряє.
   const versionsList = useQuery({
-    ...templateVersionsQuery(templateIdNumber),
+    queryKey: queryKeys.templates.versionsOf(templateIdNumber),
+    queryFn: async (context) =>
+      (await import('@/features/templates/templateQueries')).templateVersionsQuery(templateIdNumber).queryFn(context),
     enabled: Number.isFinite(templateIdNumber),
   });
 

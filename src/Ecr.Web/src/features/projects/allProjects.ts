@@ -1,4 +1,3 @@
-import { fetchAllPages } from '@/api/fetchAllPages';
 import { queryKeys } from '@/api/queryKeys';
 import type { PagedProjects } from '@/api/types';
 
@@ -15,8 +14,13 @@ import type { PagedProjects } from '@/api/types';
  * (`['projects']`): сусідні екрани, що читають його, отримують той самий об'єкт.
  * `nextCursor` не `null` лише тоді, коли спрацював запобіжник — тобто перелік
  * справді неповний, і викликач може це сказати.
+ *
+ * ⚠ `fetchAllPages` — ледачим `import()` (рецензія L10, M3): цей модуль у вхідному чанку застосунку
+ * (`breadcrumbResolvers`), і статичний імпорт поклав би прохід сторінками на рахунок КОЖНОГО маршруту (`D-132`).
  */
 export async function fetchAllProjects(context: { signal?: AbortSignal } = {}): Promise<PagedProjects> {
+  const { fetchAllPages } = await import('@/api/fetchAllPages');
+
   return fetchAllPages<PagedProjects['items'][number]>('/api/v1/projects', { signal: context.signal });
 }
 

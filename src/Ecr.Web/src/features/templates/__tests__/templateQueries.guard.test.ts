@@ -34,15 +34,32 @@ function codeOf(text: string): string {
   return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`\\])\/\/.*$/gm, '$1');
 }
 
-/** Ключ шаблонів, за яким у тому самому об'єкті йде власний `queryFn`. */
-const KeyWithOwnFetcher = /queryKey:\s*queryKeys\.templates\.(list|versionsOf)\((?:[^()]|\([^()]*\))*\)\s*,\s*queryFn/;
+/**
+ * Ключ шаблонів, за яким у тому самому об'єкті йде `queryFn`; група — тіло `queryFn` до кінця об'єкта (грубо: до
+ * наступної `}` верхнього рівня або 400 символів).
+ */
+const KeyWithFetcher = /queryKey:\s*queryKeys\.templates\.(list|versionsOf)\((?:[^()]|\([^()]*\))*\)\s*,\s*queryFn([\s\S]{0,400})/g;
+
+/**
+ * Делегування спільному опису — дозволене: той самий ключ і те саме читання, лише опис підвантажено ледачим
+ * `import()` (рецензія L10, M3: `TemplateVersionPage` на межі бюджету `D-132`).
+ */
+const Delegation = /\b(templatesListQuery|templateVersionsQuery)\b/;
 
 /** Читання однієї сторінки переліку шаблонів чи версій шаблону. */
 const SinglePageRead = /\/api\/v1\/templates(\?|\/\$\{[^}]+\}\/versions\?)[^'"`]*limit=/;
 
 export function filesWithOwnTemplatesFetcher(files: Record<string, string>): string[] {
   return Object.entries(files)
-    .filter(([file, text]) => !file.endsWith(`${path.sep}templateQueries.ts`) && KeyWithOwnFetcher.test(codeOf(text)))
+    .filter(([file, text]) => {
+      if (file.endsWith(`${path.sep}templateQueries.ts`)) return false;
+
+      for (const match of codeOf(text).matchAll(KeyWithFetcher)) {
+        const body = (match[2] ?? '').split(/\n\s*\}\)/)[0] ?? '';
+        if (!Delegation.test(body)) return true;
+      }
+      return false;
+    })
     .map(([file]) => file);
 }
 
@@ -90,6 +107,13 @@ describe('PSS-19c: ключі переліку шаблонів і версій 
     };
     expect(filesWithOwnTemplatesFetcher(good)).toEqual([]);
     expect(filesWithSinglePageTemplatesRead(good)).toEqual([]);
+
+    // Делегування спільному опису ледачим `import()` — той самий ключ і читання (TemplateVersionPage, M3).
+    const delegating = {
+      [`${Root}${path.sep}pages${path.sep}W.tsx`]:
+        "useQuery({\n  queryKey: queryKeys.templates.versionsOf(id),\n  queryFn: async (context) =>\n    (await import('@/features/templates/templateQueries')).templateVersionsQuery(id).queryFn(context),\n  enabled,\n});",
+    };
+    expect(filesWithOwnTemplatesFetcher(delegating)).toEqual([]);
   });
 
   it('templatesListQuery читає ВСІ сторінки: 101-й шаблон є в кеші', async () => {

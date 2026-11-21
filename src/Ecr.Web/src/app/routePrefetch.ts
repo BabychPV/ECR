@@ -2,7 +2,6 @@ import { lazy } from 'react';
 import type { QueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
-import { templatesListQuery } from '@/features/templates/templateQueries';
 import type { MethodologyDto, RegistryDefDto } from '@/api/types';
 import { routes } from './routes';
 
@@ -238,9 +237,22 @@ const routeChunkLoaders: Partial<Record<string, () => Promise<unknown>>> = {
  * заради якої існує сама фабрика (`queryKeys.ts`, коментар угорі файла).
  * Названо явно в Q-281, не замовчано.
  */
+/**
+ * Прогрів переліку шаблонів — спільним описом запиту (`templatesListQuery`, усі сторінки, PSS-19c), але ЛІНИВО.
+ *
+ * ⛔ Рецензія L10, M3: статичний імпорт `templateQueries` (з `fetchAllPages`) клав їх у вхідний чанк, і кожен
+ * маршрут ріс на ~0,3 КБ gzip — `TemplateVersionPage` ставав 249,9 КБ при межі 250 (`D-132`). Прогрів — за
+ * наміром (наведення), тож `import()` тут нічого не коштує людині, а чанк сторінки шаблонів його однаково має.
+ */
+function prefetchTemplatesList(queryClient: QueryClient): void {
+  void import('@/features/templates/templateQueries').then(({ templatesListQuery }) =>
+    queryClient.prefetchQuery(templatesListQuery),
+  );
+}
+
 const routeDataPrefetchers: Partial<Record<string, (queryClient: QueryClient) => void>> = {
   [routes.adminTemplates.id]: (queryClient) => {
-    void queryClient.prefetchQuery(templatesListQuery);
+    prefetchTemplatesList(queryClient);
   },
   [routes.adminRegistries.id]: (queryClient) => {
     void queryClient.prefetchQuery({
@@ -261,7 +273,7 @@ const routeDataPrefetchers: Partial<Record<string, (queryClient: QueryClient) =>
   // обидва тут дешевше й безпечніше, ніж читати внутрішній стан сторінки
   // (`dialect`) ззовні, аби вгадати, який саме буде активний.
   [routes.adminExpressions.id]: (queryClient) => {
-    void queryClient.prefetchQuery(templatesListQuery);
+    prefetchTemplatesList(queryClient);
     void queryClient.prefetchQuery({
       queryKey: queryKeys.methodologies.list(),
       queryFn: () => apiFetch<MethodologyDto[]>('/api/v1/methodologies'),
