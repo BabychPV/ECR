@@ -5,7 +5,7 @@
 namespace Ecr.Infrastructure.Persistence.Migrations
 {
     /// <summary>
-    /// ✎ D-564 (PERF-03): прапор методології «трасувати проміжні кроки» (<c>calc.Methodology.TraceSteps</c>,
+    /// ✎ D-565 (PERF-03): прапор методології «трасувати проміжні кроки» (<c>calc.Methodology.TraceSteps</c>,
     /// DEFAULT 0 — кроки не пишуться) і стиснений трейс кроку (<c>calc.CalculationStep.TraceJsonGz</c>).
     /// </summary>
     /// <remarks>

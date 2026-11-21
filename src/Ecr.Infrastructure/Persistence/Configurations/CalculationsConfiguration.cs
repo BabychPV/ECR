@@ -30,7 +30,7 @@ public sealed class MethodologyConfiguration : IEntityTypeConfiguration<Methodol
         // D-425: NULL = фільтра активності рядків немає (усі наявні методології).
         builder.Property(x => x.RowActivityFilter).HasColumnName("RowActivityFilter").HasMaxLength(200);
 
-        // ✎ D-564 (PERF-03): «трасувати проміжні кроки», DEFAULT 0 — наявні методології кроків не пишуть.
+        // ✎ D-565 (PERF-03): «трасувати проміжні кроки», DEFAULT 0 — наявні методології кроків не пишуть.
         // ⛔ `ValueGeneratedNever`, як у `IsPerSubstance`: інакше `false` (CLR-замовчування) EF вважав би
         // «незаданим» і на INSERT підставляв би DEFAULT схеми.
         builder.Property(x => x.TraceSteps).HasDefaultValue(false, "DF_Methodology_TraceSteps").ValueGeneratedNever();
@@ -770,8 +770,8 @@ public sealed class CalculationStepConfiguration : IEntityTypeConfiguration<Calc
         builder.Property(x => x.Value).HasColumnType("decimal(34,16)");
         builder.Property(x => x.Masked).HasColumnName("MaskedZero").HasDefaultValue(Domain.Enums.MaskedZeroReason.None);
 
-        // ✎ D-564 (PERF-03): `TraceJson` — обчислюване читання з двох колонок. Нестиснений текст кроків до
-        // D-564 лишається в `TraceJson nvarchar(max)`; нові кроки — GZIP(UTF-16LE) у `TraceJsonGz varbinary(max)`
+        // ✎ D-565 (PERF-03): `TraceJson` — обчислюване читання з двох колонок. Нестиснений текст кроків до
+        // D-565 лишається в `TraceJson nvarchar(max)`; нові кроки — GZIP(UTF-16LE) у `TraceJsonGz varbinary(max)`
         // (формат SQL `COMPRESS(N'…')`). Мішаний формат без перенесення 46 ГБ: старі кроки прибирає D-560.
         builder.Ignore(x => x.TraceJson);
         builder.Property(x => x.TraceJsonText).HasColumnName("TraceJson");

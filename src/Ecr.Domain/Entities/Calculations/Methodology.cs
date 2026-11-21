@@ -118,7 +118,7 @@ public sealed class Methodology : Entity<int>
     }
 
     /// <summary>
-    /// ✎ D-564 (PERF-03): «трасувати проміжні кроки» — чи пишуться кроки трейсу
+    /// ✎ D-565 (PERF-03): «трасувати проміжні кроки» — чи пишуться кроки трейсу
     /// (<c>calc.CalculationStep</c>) прогонами цієї методології. За замовчуванням <c>false</c>.
     /// </summary>
     /// <remarks>
@@ -135,7 +135,7 @@ public sealed class Methodology : Entity<int>
     /// </remarks>
     public bool TraceSteps { get; private set; }
 
-    /// <summary>Вмикає чи вимикає запис кроків трейсу (D-564).</summary>
+    /// <summary>Вмикає чи вимикає запис кроків трейсу (D-565).</summary>
     /// <param name="enabled">Нове значення прапора.</param>
     /// <returns><c>true</c> — значення змінилося (є що журналювати).</returns>
     public bool SetTraceSteps(bool enabled)

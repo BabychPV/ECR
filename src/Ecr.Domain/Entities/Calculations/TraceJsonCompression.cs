@@ -5,7 +5,7 @@ using System.Text;
 namespace Ecr.Domain.Entities.Calculations;
 
 /// <summary>
-/// ✎ D-564 (PERF-03): стиснений <c>TraceJson</c> кроку трейсу — колонка
+/// ✎ D-565 (PERF-03): стиснений <c>TraceJson</c> кроку трейсу — колонка
 /// <c>calc.CalculationStep.TraceJsonGz varbinary(max)</c>.
 /// </summary>
 /// <remarks>
@@ -18,7 +18,7 @@ namespace Ecr.Domain.Entities.Calculations;
 /// не UTF-8) зіпсував би кирилицю виразів, тобто SQL-читач побачив би інший текст,
 /// ніж код.
 /// <para>
-/// ⚠ Старі рядки (до D-564) лежать у <c>TraceJson nvarchar(max)</c> нестиснені й
+/// ⚠ Старі рядки (до D-565) лежать у <c>TraceJson nvarchar(max)</c> нестиснені й
 /// лишаються читабельними: <see cref="CalculationStep.TraceJson"/> бере текстову
 /// колонку, коли вона є, і стиснену — інакше. Великої міграції даних немає:
 /// старі кроки прибирає <c>D-560</c> разом зі своїм прогоном.

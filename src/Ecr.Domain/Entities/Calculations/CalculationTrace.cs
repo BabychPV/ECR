@@ -82,7 +82,7 @@ public sealed class CalculationInputRow : Entity<long>
 /// затирається» (ЗБР-1), тому повний трейс кожного кроку кожної методології
 /// кожного періоду перевищив би обсяг самих даних.
 /// <para>
-/// ✎ D-564 (PERF-03): кроки пишуться ЛИШЕ для методології з увімкненим прапором
+/// ✎ D-565 (PERF-03): кроки пишуться ЛИШЕ для методології з увімкненим прапором
 /// <see cref="Methodology.TraceSteps"/> (за замовчуванням вимкнено); <c>TraceLevel</c> версії
 /// далі визначає, ЩО саме пишеться, коли прапор увімкнено.
 /// </para>
@@ -135,7 +135,7 @@ public sealed class CalculationStep : Entity<long>
 
     /// <summary>Деталізація: підставлені аргументи, константи, код помилки.</summary>
     /// <remarks>
-    /// ✎ D-564 (PERF-03): читається ПРОЗОРО з двох колонок. Кроки до D-564 лежать у
+    /// ✎ D-565 (PERF-03): читається ПРОЗОРО з двох колонок. Кроки до D-565 лежать у
     /// <c>TraceJson nvarchar(max)</c> (<see cref="TraceJsonText"/>) — вона й береться, коли не порожня;
     /// нові кроки пишуться стисненими в <c>TraceJsonGz</c> (<see cref="TraceJsonGz"/>,
     /// <see cref="TraceJsonCompression"/>). Читач бачить той самий текст, хоч би де він лежав.
@@ -146,7 +146,7 @@ public sealed class CalculationStep : Entity<long>
     /// </remarks>
     public string? TraceJson => TraceJsonText ?? TraceJsonCompression.Decompress(TraceJsonGz);
 
-    /// <summary>Нестиснений <c>TraceJson</c> кроків, записаних до D-564 (колонка <c>TraceJson</c>).</summary>
+    /// <summary>Нестиснений <c>TraceJson</c> кроків, записаних до D-565 (колонка <c>TraceJson</c>).</summary>
     public string? TraceJsonText { get; private set; }
 
     /// <summary>
@@ -224,8 +224,8 @@ public sealed class CalculationStep : Entity<long>
     /// Вираз, довший за <see cref="MaxStepExpressionLength"/>, обрізається до
     /// стелі з «…» в кінці — див. <see cref="MaxStepExpressionLength"/>.
     /// <para>
-    /// ✎ D-564: деталізація пишеться лише СТИСНЕНОЮ (<see cref="TraceJsonGz"/>); текстова колонка
-    /// лишається для кроків до D-564.
+    /// ✎ D-565: деталізація пишеться лише СТИСНЕНОЮ (<see cref="TraceJsonGz"/>); текстова колонка
+    /// лишається для кроків до D-565.
     /// </para>
     /// </remarks>
     public void Describe(
@@ -246,7 +246,7 @@ public sealed class CalculationStep : Entity<long>
     /// <summary>Вираз, обрізаний до <see cref="MaxStepExpressionLength"/> з «…» в кінці.</summary>
     /// <param name="expression">Вираз як його бачив рушій.</param>
     /// <returns>Той самий вираз або його початок із «…».</returns>
-    /// <remarks>Спільне для EF-запису (<see cref="Describe"/>) і масового запису кроків (D-564).</remarks>
+    /// <remarks>Спільне для EF-запису (<see cref="Describe"/>) і масового запису кроків (D-565).</remarks>
     public static string? TrimExpression(string? expression)
         => expression is { Length: > MaxStepExpressionLength }
             ? string.Concat(expression.AsSpan(0, MaxStepExpressionLength - 1), "…")
