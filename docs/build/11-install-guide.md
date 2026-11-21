@@ -582,6 +582,11 @@ Developer/Evaluation-подібному стенді, де ліцензія ці
 `HKLM:\SYSTEM\CurrentControlSet\Services\EcrWorker\Environment`, і скрипт
 перевіряє, що вона працює.
 
+✎ 2026-11-21 (PERF-12, `D-563`): **у Production воркер обов'язковий.** Режим «черга в базі + `EcrWorker`» — єдиний
+рекомендований для продуктиву; `Quartz` усередині `EcrApi` лишається для розробки й малих інсталяцій. Якщо Production
+працює на `Quartz` (`-DisableWorker`, SQL Server Express, втрачений `Environment` після оновлення), `EcrApi` пише
+попередження в журнал старту, а перевірка `worker` на `/health/ready` жовтіє. Вибір режиму — runbook п. 10.4.
+
 **Без воркера** — додати до виклику 2.2 (і до КОЖНОГО наступного оновлення,
 розділ 4 — MSI не пам'ятає цей вибір):
 
