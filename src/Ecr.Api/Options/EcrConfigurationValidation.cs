@@ -198,7 +198,11 @@ public static partial class EcrConfigurationValidation
         // RPT-STABLE Part B: перенос версії «з місяця» (типово вимкнено).
         Ecr.Application.Documents.VersionMigration.VersionMigrationOptions.FromMonthEnabledKey,
         Ecr.Api.Startup.StaleMapWarmService.EnabledKey,
-        "Jobs:NightlyRecalculation:Enabled",
+
+        // ✎ PSS-15 (D-562): нічний перерахунок увімкнений за замовчуванням; «flase» інакше мовчки лишав би його ввімкненим
+        // (читач вимикає лише явне false), а «ture» у пропуску незмінних — так само ввімкненим.
+        Ecr.Api.Startup.NightlyRecalculationScheduling.EnabledKey,
+        Ecr.Api.Startup.NightlyRecalculationScheduling.SkipUnchangedKey,
         "Logging:File:Json",
         Ecr.Api.Observability.TelemetrySetup.EnabledKey,
         Ecr.Infrastructure.Jobs.SnapshotRetentionOptions.EnabledKey,

@@ -6,66 +6,69 @@ using Microsoft.EntityFrameworkCore;
 namespace Ecr.Api.Startup;
 
 /// <summary>
-/// Нічний повний перерахунок УСІХ документів УСІХ активних проєктів —
-/// ОПЦІЯ, вимкнена за замовчуванням (директива №09, частина B; Q-331).
+/// Нічний перерахунок документів активних проєктів — <b>увімкнений за замовчуванням</b> (рішення людини 21.11, PSS-15,
+/// <c>D-562</c>): лише поточний рік і лише документи, входи яких змінились після актуального прогону.
 /// </summary>
 /// <remarks>
-/// ⛔ Прогалини 4+5 директиви паритету зі старою системою (Q-327): чинна
-/// нічна перевірка (<see cref="Ecr.Infrastructure.Jobs.ConsistencyCheckJob"/>,
-/// 02:15) лише ЗНАХОДИТЬ розбіжності — жодна нічна задача НІКОЛИ не
-/// перераховувала числа наново, і <see cref="IRecalculationJob"/> не стояв
-/// на жодному розкладі взагалі. Людина підтвердила: гарантія «раз на добу
-/// все перераховується наново» потрібна, але як ОПЦІЯ, не завжди-увімкнений
-/// режим для всіх проєктів одразу.
+/// ⛔ Історія: директива №09 частина B / Q-331 завела його як ОПЦІЮ, вимкнену за замовчуванням, — бо він переписував усі
+/// відкриті періоди всіх років кожного документа кожну ніч (аудит PSS-15). Людина 21.11 вирішила: вмикати, з обмеженням
+/// поточним роком і пропуском незмінних. Обидва обмеження живуть у задачі (<c>RecalculationJob.NightlyFanOutAsync</c>), тут —
+/// лише розклад і прапорці.
 /// <para>
-/// ⛔ Реалізовано на рівні КОНФІГУРАЦІЇ (<c>appsettings.json</c>/змінна
-/// середовища), а не новим стовпцем БД. Наскрізна прив'язка «опція —
-/// per-проєкт» (наприклад, <c>Project.NightlyRecalculationEnabled</c>) —
-/// зміна схеми, а рішення про безпечність міграції — не моє й не виконавця
-/// (`CLAUDE.md`): якщо колись з'ясується, що прапорець мусить бути
-/// per-проєктним, а не глобальним, — це окреме питання людині, а не мовчазна
-/// міграція тут. Глобальний прапорець задовольняє «опція» без торкання схеми.
+/// ⛔ Реалізовано на рівні КОНФІГУРАЦІЇ (<c>appsettings.json</c>/змінна середовища), а не новим стовпцем БД. Наскрізна
+/// прив'язка «опція — per-проєкт» (наприклад, <c>Project.NightlyRecalculationEnabled</c>) — зміна схеми, а рішення про
+/// безпечність міграції — не моє й не виконавця (`CLAUDE.md`).
 /// </para>
 /// <para>
-/// ⛔ Час запуску (<see cref="Cron"/>) — СТАЛА, а НЕ ключ конфігурації, на
-/// відміну від першої редакції цього файлу. Причина —
-/// <c>Ecr.Architecture.Tests.PrincipleTests.
-/// Налаштування_живуть_у_базі_а_не_в_конфігураційних_файлах</c> (ФВ-2.14):
-/// `appsettings.json` не несе нічого, що виглядає як розклад чи політика,
-/// —  саме тому й `NightlyCron`/`HourlyCron` у
-/// <see cref="RecurringScheduleService"/> — константи коду, а не рядки
-/// конфігурації, а розклад збору (`ext.CollectionSchedule.CronExpression`)
-/// живе в БАЗІ, не в файлі. Той самий принцип застосовано тут: увімкнено/
-/// вимкнено — прапорець застосунку (не «дані», якими керує адміністратор без
-/// релізу); КОЛИ саме — та сама група, що й решта нічних задач, і місце їй
-/// поряд із ними, константою.
+/// ⛔ Час запуску (<see cref="Cron"/>) — СТАЛА, а НЕ ключ конфігурації (<c>Ecr.Architecture.Tests.PrincipleTests.
+/// Налаштування_живуть_у_базі_а_не_в_конфігураційних_файлах</c>, ФВ-2.14), як і <c>NightlyCron</c>/<c>HourlyCron</c> у
+/// <see cref="RecurringScheduleService"/>.
 /// </para>
 /// <para>
-/// ⚠ Судження виконавця: типове значення <see cref="EnabledKey"/> —
-/// <c>false</c>. Нічний повний перерахунок усіх документів усіх проєктів —
-/// це суттєве навантаження (директива №09: бюджет річного перерахунку — до
-/// 10 хвилин НА ПРОЄКТ), і типовий стан продової поведінки не повинен
-/// змінюватися без явного рішення того, хто розгортає систему.
+/// ✎ PSS-15: час — 00:30 (місцевий час сервера, як усі тригери Quartz). Обґрунтування (D-562): (1) нічне прибирання замінених
+/// прогонів (<c>SupersededResultsSweepJob</c>, 02:15, працює лише у вікні <c>Calculations:SupersededPurge:NightWindow</c>,
+/// типово 01:00–05:00) видаляє пакетами з <c>calc.*</c> — ті самі таблиці й індекси, у які пише перерахунок; одночасно це
+/// блокування сторінок/рядків і журнал транзакцій удвох. Перерахунок ДО вікна, а прибирання ПІСЛЯ: його замінені прогони
+/// прибирає вже швидкий шлях після лока (L1b/D5), а що не встиг — той самий нічний прохід о 02:15. (2) О 02:15 ще й перевірки
+/// (<c>ConsistencyCheckJob</c>, <c>PartitionCheckJob</c>, <c>OrphanScanJob</c>) — їм краще бачити вже перераховані числа.
+/// (3) Стани періодів на 00:30 уже оновлено тиком <c>PeriodStateJob</c> о 00:22 (кожні 10 хв, хх:02) — межа місяця о
+/// півночі майданчика не лишає «відкритим» щойно закритий місяць. (4) З пропуском незмінних і лише поточним роком робота
+/// ночі — документи, змінені за добу (зазвичай хвилини); повний прохід після публікації методології чи правки довідника — під
+/// стелею дітей розкладу (<c>D-561</c>), до 02:15 з запасом. Колишні 03:30 потрапляли саме в середину вікна прибирання.
 /// </para>
 /// <para>
-/// ⚠ Судження виконавця: час запуску (<see cref="Cron"/>) — 03:30, тобто
-/// ПІСЛЯ <see cref="RecurringScheduleService.NightlyCron"/> (02:15:
-/// <c>PartitionCheckJob</c>/<c>ConsistencyCheckJob</c>/<c>OrphanScanJob</c>/
-/// <c>ReportRetentionJob</c>) — з запасом, щоб нічне вікно перевірок встигло
-/// завершитися до того, як перерахунок почне читати щойно зібрані дані. Це
-/// НЕ гарантія проти довільного адміністраторського розкладу збору джерела
-/// (`ext.CollectionSchedule`, кожне зі своїм cron у БАЗІ) — той факт (коли
-/// саме збирається КОЖНЕ конкретне джерело якогось замовника) виконавцю не
-/// відомий, тож повної гарантії порядку відносно НЬОГО дати не можна.
+/// ⚠ Один тригер НА ПРОЄКТ, активний на момент старту (як доти): проєкт, активований пізніше, потрапить у розклад після
+/// перезапуску <c>EcrApi</c>; проєкт, що вже не охоплює поточного року, задача пропускає сама (рядок журналу).
 /// </para>
 /// </remarks>
 public static class NightlyRecalculationScheduling
 {
-    /// <summary>Прапорець: чи ставити нічний перерахунок на розклад узагалі.</summary>
+    /// <summary>Прапорець: чи ставити нічний перерахунок на розклад узагалі (типово <c>true</c>).</summary>
     public const string EnabledKey = "Jobs:NightlyRecalculation:Enabled";
 
-    /// <summary>03:30 — після нічного вікна `RecurringScheduleService.NightlyCron` (02:15).</summary>
-    public const string Cron = "0 30 3 * * ?";
+    /// <summary>
+    /// Прапорець: пропускати документи, входи яких не змінились після актуального прогону (типово <c>true</c>);
+    /// <c>false</c> — щоночі рахувати всі відкриті періоди поточного року (аварійний важіль, якщо пропуск під підозрою).
+    /// </summary>
+    public const string SkipUnchangedKey = "Jobs:NightlyRecalculation:SkipUnchanged";
+
+    /// <summary>00:30 — до нічного вікна прибирання замінених прогонів (01:00–05:00) і перевірок о 02:15.</summary>
+    public const string Cron = "0 30 0 * * ?";
+
+    /// <summary>Чи увімкнено нічний перерахунок: усе, крім явного <c>false</c>, — так.</summary>
+    /// <param name="configuration">Конфігурація застосунку.</param>
+    /// <remarks>
+    /// ⚠ Ручний розбір, а не <c>IConfiguration.GetValue&lt;bool&gt;</c>: той живе в пакеті <c>Configuration.Binder</c>, а
+    /// <c>Ecr.Api</c> тут тримається самих <c>Configuration.Abstractions</c>. Недійсне значення («ture») зупиняє старт раніше
+    /// (<c>EcrConfigurationValidation.Booleans</c>), тож «не розібралось» тут — лише «не задано».
+    /// </remarks>
+    public static bool IsEnabled(IConfiguration configuration)
+        => Flag(configuration, EnabledKey);
+
+    /// <summary>Чи пропускати незмінні документи: усе, крім явного <c>false</c>, — так.</summary>
+    /// <param name="configuration">Конфігурація застосунку.</param>
+    public static bool SkipsUnchanged(IConfiguration configuration)
+        => Flag(configuration, SkipUnchangedKey);
 
     /// <summary>
     /// Ставить (або НЕ ставить) нічний перерахунок на розклад.
@@ -74,18 +77,16 @@ public static class NightlyRecalculationScheduling
     /// <param name="db">Контекст на базу — читає активні проєкти.</param>
     /// <param name="scheduler">Планувальник фонових задач.</param>
     /// <param name="ct">Токен скасування.</param>
-    /// <returns>Скільки проєктів отримали тригер; 0 — прапорець вимкнений.</returns>
+    /// <returns>Скільки проєктів отримали тригер; 0 — прапорець вимкнений (чи активних проєктів немає).</returns>
     /// <remarks>
-    /// ⚠ Один тригер НА ПРОЄКТ, а не один спільний на всі: `IRecalculationJob`
-    /// приймає рівно один `ProjectId`, і `QuartzJobScheduler.ScheduleAsync`
-    /// уже вміє ставити багато незалежних тригерів того самого типу задачі —
-    /// ключ триґера складається з типу Й ВІДБИТКА payload (той самий патерн,
-    /// що й нічний збір: окремий тригер на кожен `ext.CollectionSchedule`,
-    /// не один спільний на «джерела взагалі»).
+    /// ⚠ Один тригер НА ПРОЄКТ, а не один спільний на всі: <c>IRecalculationJob</c> приймає рівно один <c>ProjectId</c>, і
+    /// <c>QuartzJobScheduler.ScheduleAsync</c> уже вміє ставити багато незалежних тригерів того самого типу задачі — ключ
+    /// триґера складається з типу Й ВІДБИТКА payload.
     ///
-    /// ⚠ `DocumentId` НЕ передається — відсутність у payload читається як
-    /// нуль після розбору JSON, а `RecalculationJob` уже трактує нуль як
-    /// «усі документи проєкту» (Q-151/Q-162). `PeriodKey = null` — увесь рік.
+    /// ⚠ <c>DocumentId</c> НЕ передається — нуль після розбору JSON: розклад проєкту (Q-151/Q-162). <c>PeriodKey = null</c>,
+    /// року в payload теж немає: його визначає задача в момент виконання (тригер живе через Новий рік).
+    /// <c>Nightly = true</c> вмикає обидва обмеження PSS-15; <c>NightlySkipUnchanged</c> — значення
+    /// <see cref="SkipUnchangedKey"/> на момент старту.
     /// </remarks>
     public static async Task<int> ScheduleAsync(
         IConfiguration configuration, EcrDbContext db, IBackgroundJobScheduler scheduler, CancellationToken ct)
@@ -94,16 +95,12 @@ public static class NightlyRecalculationScheduling
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(scheduler);
 
-        // ⚠ Ручний розбір, а не `IConfiguration.GetValue<bool>`: той живе в
-        // пакеті `Configuration.Binder`, а `Ecr.Api` (як і `Ecr.Infrastructure`,
-        // `DependencyInjection.ReadInt`) навмисно тримається самих
-        // `Configuration.Abstractions` — тягнути пакет заради одного прапорця
-        // гірше, ніж рядок розбору.
-        if (!(bool.TryParse(configuration[EnabledKey], out var enabled) && enabled))
+        if (!IsEnabled(configuration))
         {
             return 0;
         }
 
+        var skipUnchanged = SkipsUnchanged(configuration);
         var projectIds = await db.Projects
             .AsNoTracking()
             .Where(p => p.Status == ProjectStatus.Active)
@@ -114,13 +111,30 @@ public static class NightlyRecalculationScheduling
         foreach (var projectId in projectIds)
         {
             await scheduler
-                .ScheduleAsync<IRecalculationJob>(
-                    Cron,
-                    new { ProjectId = projectId, PeriodKey = (int?)null, TriggeredByUserId = (int?)null },
-                    ct)
+                .ScheduleAsync<IRecalculationJob>(Cron, PayloadOf(projectId, skipUnchanged), ct)
                 .ConfigureAwait(false);
         }
 
         return projectIds.Count;
+    }
+
+    /// <summary>Payload тригера проєкту — та сама форма, що розбирає <c>RecalculationJob</c> (<c>RecalculationRequest</c>).</summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="skipUnchanged">Пропускати незмінні документи.</param>
+    public static object PayloadOf(int projectId, bool skipUnchanged)
+        => new
+        {
+            ProjectId = projectId,
+            PeriodKey = (int?)null,
+            TriggeredByUserId = (int?)null,
+            Nightly = true,
+            NightlySkipUnchanged = skipUnchanged,
+        };
+
+    private static bool Flag(IConfiguration configuration, string key)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+
+        return !bool.TryParse(configuration[key], out var value) || value;
     }
 }
