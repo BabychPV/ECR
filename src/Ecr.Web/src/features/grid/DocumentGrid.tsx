@@ -138,6 +138,7 @@ import {
   useFailedSave,
 } from './autosave';
 import { beginInFlight, deferUntilInFlightSettles, inFlightEdit, splitByInFlight } from './inFlightEdits';
+import { saveInParts } from './patchParts';
 import { GridAriaPlugin } from './gridAria';
 import { attachStickyGroupLabels, withHeaderGroups } from './headerGroups';
 import { installTruncationTooltip } from './truncationTooltip';
@@ -772,145 +773,168 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
 
       const endInFlight = beginInFlight(tableInstanceId, periodKey, edits);
 
-      // ⚠ Рядки ЦЬОГО патчу — саме їх обов'язкові-вхідні позначки заміняються
-      // нижче. Позначки інших рядків (з попереднього, ще не повтореного
-      // збереження) лишаються як є: цей виклик про них нічого не знає.
-      const touchedRowKeys = new Set(edits.map((edit) => edit.rowKey));
+      /**
+       * ОДНА частина пакета (PSS-17, `patchParts.ts`): відповідь чи відмова стосується рівно її рядків — так само,
+       * як доти стосувалася рядків єдиного запиту.
+       *
+       * @returns Чи прийняв частину сервер; відмову вже показано тут (банер, маркери, конфлікт).
+       */
+      const savePart = async (part: PendingEdit[]): Promise<boolean> => {
+        // ⚠ Рядки ЦЬОГО патчу — саме їх обов'язкові-вхідні позначки заміняються
+        // нижче. Позначки інших рядків (з попереднього, ще не повтореного
+        // збереження) лишаються як є: цей виклик про них нічого не знає.
+        const touchedRowKeys = new Set(part.map((edit) => edit.rowKey));
 
-      // ⚠ Знімок ТОГО, ЩО ПІШЛО на сервер, — за ним `discardPendingRows`
-      // відрізнить підтверджену правку від тієї, яку оператор зробив у ту саму
-      // комірку, доки patch летів.
-      const sent = new Map(edits.map((edit) => [pendingCellKey(edit), edit]));
+        // ⚠ Знімок ТОГО, ЩО ПІШЛО на сервер, — за ним `discardPendingRows`
+        // відрізнить підтверджену правку від тієї, яку оператор зробив у ту саму
+        // комірку, доки patch летів.
+        const sent = new Map(part.map((edit) => [pendingCellKey(edit), edit]));
+
+        try {
+          const response = await patch(buildRequest(tableInstanceId, periodKey, part));
+
+          // ⛔ Аудит 2026-09-16 §10.2 (High, тиха втрата даних): тут стояло
+          // `setPending(new Map())` — безумовне очищення ВСІХ незбережених
+          // правок, а не лише рядків ЦЬОГО патчу. `save()` кличуть чотири
+          // незалежні, несеріалізовані шляхи (автозбереження, Ctrl+S, вставка,
+          // undo/redo), і ніщо не забороняє двом запитам бути в дорозі
+          // одночасно: повільний патч рядка A, завершившись, викидав правку
+          // рядка C, яку ще НІХТО не надсилав. Той самий resolve інвалідує зріз,
+          // тож значення зникало і з екрана — без помилки, без позначки
+          // «незбережено», без відновлення.
+          //
+          // ⚠ Фільтр — той самий `touchedRowKeys`, за яким уже фільтруються
+          // `requiredInputBlocked`/`requiredInputWarnings` нижче: успіх патчу
+          // стосується РІВНО його рядків і нічиїх більше.
+          //
+          // ⚠ `D14-12`: підтвердження йде у СХОВИЩЕ документа, а не в стан
+          // сітки. `sent` тут обов'язковий — без нього зникла б і правка, яку
+          // оператор зробив у ту саму комірку, доки цей патч був у дорозі.
+          discardPendingRows(tableInstanceId, periodKey, touchedRowKeys, sent);
+          // ⚠ `G1-03`: збереження зрізу дійшло — закриття вкладки знову довіряє маячку.
+          noteSaveSucceeded(tableInstanceId, periodKey);
+
+          // ⚠ Той самий стан, що й `pending`: наступний зріз уже несе справжнє
+          // значення, і локальна підстава більше не потрібна нікому — але так
+          // само лише для рядків цього патчу. Ключ тут — `rowKey:columnCode`
+          // (`cellKey`), тож рядок дістається з ключа, а не зі значення.
+          setOverrides((prev) => discardRows(prev, touchedRowKeys, (key) => rowKeyOfCellKey(key)));
+
+          // Успіх означає, що серед рядків цього патчу немає жодного Block:
+          // інакше сервер відхилив би весь батч (ECR-CALC-0437), а не повернув
+          // 200. Warn — навпаки, приходить САМЕ в успішній відповіді.
+          setRequiredInputBlocked((prev) => prev.filter((c) => !touchedRowKeys.has(c.rowKey)));
+          setRequiredInputWarnings((prev) => [
+            ...prev.filter((c) => !touchedRowKeys.has(c.rowKey)),
+            ...response.validation
+              .filter(
+                (m): m is typeof m & { rowKey: string; columnCode: string } =>
+                  m.ruleCode === 'ECR-CALC-0437' && m.rowKey !== null && m.columnCode !== null,
+              )
+              .map((m) => ({
+                rowKey: m.rowKey,
+                columnCode: m.columnCode,
+                ruleCode: m.ruleCode,
+                message: m.message,
+              })),
+          ]);
+          setPatchNotices((prev) => mergePatchNotices(prev, touchedRowKeys, response.validation));
+
+          // ⚠ Успіх ЦЬОГО патчу знімає банер. Маркери відхилених комірок живуть у
+          // сховищі (`V-01`) і знімаються там же, рівно з тими комірками, які
+          // сервер щойно прийняв (`discardPendingRows` вище): відхилена комірка
+          // того самого рядка, якої в пакеті не було, лишається позначеною.
+          // ⚠ Обчислювані комірки, відділені перед надсиланням (`blocked`), не збережено — їх банер лишається.
+          if (blocked.length === 0) {
+            setSaveError(null);
+            setSaveErrorReasons([]);
+          }
+          // ⚠ AN-123: збереження пройшло — стан «чекає, доки дані звільняться» знято.
+          // ⛔ Y8-04: лише для ЦЬОГО зрізу — повтор іншого зрізу не скасовується.
+          noteBusyRetryResolved(tableInstanceId, periodKey);
+
+          return true;
+        } catch (error) {
+          // ⛔ `V-01`: відхилені правки ТРИМАЮТЬСЯ — лишаються незбереженими, з
+          // маркером і причиною, але наступні пакети автозбереження їх уже не
+          // везуть. Правильні правки, відхилені разом із ними, довозяться окремо.
+          holdRejectedEdits(tableInstanceId, periodKey, error, part);
+
+          if (error instanceof EcrApiError && error.isConflict) {
+            // ⛔ `B-09`: конфлікт має ВИХІД, а не лише перелік — панель
+            // («Keep mine» / «Discard mine») живе, доки його не розв'язали.
+            setOpenConflict({
+              conflicts: error.conflicts as CellConflictDto[],
+              more: moreConflictsOf(error),
+            });
+          }
+
+          if (error instanceof EcrApiError && error.isRequiredInputMissing) {
+            setRequiredInputBlocked((prev) => [
+              ...prev.filter((c) => !touchedRowKeys.has(c.rowKey)),
+              ...error.requiredInputCells,
+            ]);
+
+            // ⚠ `ECR-CALC-0437` уже має власний, повніший `Alert` вище
+            // (`requiredInputBlocked`) — другий банер із тим самим по суті
+            // повідомленням розсіював би увагу, а не додавав інформацію.
+            setSaveError(null);
+            setSaveErrorReasons([]);
+          } else if (error instanceof EcrApiError && error.isTransientBusy) {
+            // ⛔ AN-123 (`R1-03`/`R2-01`): «дані зайняті» — не відмова, а очікування.
+            // Червоного банера немає: правки не утримано, повтор заплановано
+            // (`holdRejectedEdits` → `scheduleBusyRetry`), а людина бачить
+            // нейтральний стан «чекає» (`busyWaiting`) у рядку кнопок.
+            // ⛔ R7-Y8 / Y8-02: якщо повтор НЕ заплановано (`503 databaseBusy` вичерпав
+            // `DatabaseBusyAutoRetries`), це вже відмова — причина в банері, поруч
+            // «Retry save» і позначка (`noteSaveFailed` у `holdRejectedEdits`).
+            if (!isBusyRetryWaiting()) setSaveError(refusalText(error));
+            setSaveErrorReasons([]);
+            setSplitRefusal(null);
+          } else {
+            // ⛔ Q-30x (High): ось сам фікс — реальний, локалізований текст
+            // сервера («Колонка «C1» очікує число.» і подібні) показується як
+            // є, а не губиться в необробленому знеструмленні проміса. Саме
+            // цей рядок і мала на увазі заглушка «NOT SAVED — SEE THE ERROR
+            // ABOVE», яка досі не мала на що вказувати.
+            //
+            // ✎ `ФВ-14.9a`: `refusalText`, а не `error.message` — подробиця без
+            // `messageKey` написана українською, якої в продукті немає; замість
+            // неї — назва проблеми з каталогу. Те саме для не нашої відмови
+            // (мережа, `TypeError`): доти тут стояв `String(error)`.
+            // ✎ Живий прохід 10.11: `403 deniedCells` не перелічує комірок — їх і причину (не технічну назву) називає
+            // `deniedCellReasons`, а загальний текст — без «Reason for the first: CalculatedCell».
+            const denied = deniedCellReasons(error, part, cached);
+            setSaveError(
+              denied.length > 0 ? t('grid.deniedCellsSummary', { count: deniedCountOf(error, denied.length) }) : refusalText(error),
+            );
+            setSaveErrorReasons(denied.length > 0 ? denied : rejectedCellReasons(error));
+            setSplitRefusal(splitRefusalOf(error));
+          }
+
+          // ⚠ Рестрибок НЕ повторюється: жоден викликач (`onPaste`, кнопка
+          // «Зберегти», `applyHistory`, автозбереження) не чекає цей проміс і
+          // не обробляє відмову сам — усі викликають `void save(...)`. Стан
+          // вище вже показує причину користувачеві; повторний `throw` тут
+          // давав ЛИШЕ необроблене знеструмлення проміса в консолі (саме
+          // симптом, який документує Stage 1), без жодного адресата.
+          return false;
+        }
+      };
 
       try {
-        const response = await patch(buildRequest(tableInstanceId, periodKey, edits));
-
-        // ⛔ Аудит 2026-09-16 §10.2 (High, тиха втрата даних): тут стояло
-        // `setPending(new Map())` — безумовне очищення ВСІХ незбережених
-        // правок, а не лише рядків ЦЬОГО патчу. `save()` кличуть чотири
-        // незалежні, несеріалізовані шляхи (автозбереження, Ctrl+S, вставка,
-        // undo/redo), і ніщо не забороняє двом запитам бути в дорозі
-        // одночасно: повільний патч рядка A, завершившись, викидав правку
-        // рядка C, яку ще НІХТО не надсилав. Той самий resolve інвалідує зріз,
-        // тож значення зникало і з екрана — без помилки, без позначки
-        // «незбережено», без відновлення.
-        //
-        // ⚠ Фільтр — той самий `touchedRowKeys`, за яким уже фільтруються
-        // `requiredInputBlocked`/`requiredInputWarnings` нижче: успіх патчу
-        // стосується РІВНО його рядків і нічиїх більше.
-        //
-        // ⚠ `D14-12`: підтвердження йде у СХОВИЩЕ документа, а не в стан
-        // сітки. `sent` тут обов'язковий — без нього зникла б і правка, яку
-        // оператор зробив у ту саму комірку, доки цей патч був у дорозі.
-        discardPendingRows(tableInstanceId, periodKey, touchedRowKeys, sent);
-        // ⚠ `G1-03`: збереження зрізу дійшло — закриття вкладки знову довіряє маячку.
-        noteSaveSucceeded(tableInstanceId, periodKey);
-
-        // ⚠ Той самий стан, що й `pending`: наступний зріз уже несе справжнє
-        // значення, і локальна підстава більше не потрібна нікому — але так
-        // само лише для рядків цього патчу. Ключ тут — `rowKey:columnCode`
-        // (`cellKey`), тож рядок дістається з ключа, а не зі значення.
-        setOverrides((prev) => discardRows(prev, touchedRowKeys, (key) => rowKeyOfCellKey(key)));
-
-        // Успіх означає, що серед рядків цього патчу немає жодного Block:
-        // інакше сервер відхилив би весь батч (ECR-CALC-0437), а не повернув
-        // 200. Warn — навпаки, приходить САМЕ в успішній відповіді.
-        setRequiredInputBlocked((prev) => prev.filter((c) => !touchedRowKeys.has(c.rowKey)));
-        setRequiredInputWarnings((prev) => [
-          ...prev.filter((c) => !touchedRowKeys.has(c.rowKey)),
-          ...response.validation
-            .filter(
-              (m): m is typeof m & { rowKey: string; columnCode: string } =>
-                m.ruleCode === 'ECR-CALC-0437' && m.rowKey !== null && m.columnCode !== null,
-            )
-            .map((m) => ({
-              rowKey: m.rowKey,
-              columnCode: m.columnCode,
-              ruleCode: m.ruleCode,
-              message: m.message,
-            })),
-        ]);
-        setPatchNotices((prev) => mergePatchNotices(prev, touchedRowKeys, response.validation));
-
-        // ⚠ Успіх ЦЬОГО патчу знімає банер. Маркери відхилених комірок живуть у
-        // сховищі (`V-01`) і знімаються там же, рівно з тими комірками, які
-        // сервер щойно прийняв (`discardPendingRows` вище): відхилена комірка
-        // того самого рядка, якої в пакеті не було, лишається позначеною.
-        // ⚠ Обчислювані комірки, відділені перед надсиланням (`blocked`), не збережено — їх банер лишається.
-        if (blocked.length === 0) {
-          setSaveError(null);
-          setSaveErrorReasons([]);
-        }
-        // ⚠ AN-123: збереження пройшло — стан «чекає, доки дані звільняться» знято.
-        // ⛔ Y8-04: лише для ЦЬОГО зрізу — повтор іншого зрізу не скасовується.
-        noteBusyRetryResolved(tableInstanceId, periodKey);
-      } catch (error) {
-        // ⛔ `V-01`: відхилені правки ТРИМАЮТЬСЯ — лишаються незбереженими, з
-        // маркером і причиною, але наступні пакети автозбереження їх уже не
-        // везуть. Правильні правки, відхилені разом із ними, довозяться окремо.
-        holdRejectedEdits(tableInstanceId, periodKey, error, edits);
-
-        if (error instanceof EcrApiError && error.isConflict) {
-          // ⛔ `B-09`: конфлікт має ВИХІД, а не лише перелік — панель
-          // («Keep mine» / «Discard mine») живе, доки його не розв'язали.
-          setOpenConflict({
-            conflicts: error.conflicts as CellConflictDto[],
-            more: moreConflictsOf(error),
-          });
-        }
-
-        if (error instanceof EcrApiError && error.isRequiredInputMissing) {
-          setRequiredInputBlocked((prev) => [
-            ...prev.filter((c) => !touchedRowKeys.has(c.rowKey)),
-            ...error.requiredInputCells,
-          ]);
-
-          // ⚠ `ECR-CALC-0437` уже має власний, повніший `Alert` вище
-          // (`requiredInputBlocked`) — другий банер із тим самим по суті
-          // повідомленням розсіював би увагу, а не додавав інформацію.
-          setSaveError(null);
-          setSaveErrorReasons([]);
-        } else if (error instanceof EcrApiError && error.isTransientBusy) {
-          // ⛔ AN-123 (`R1-03`/`R2-01`): «дані зайняті» — не відмова, а очікування.
-          // Червоного банера немає: правки не утримано, повтор заплановано
-          // (`holdRejectedEdits` → `scheduleBusyRetry`), а людина бачить
-          // нейтральний стан «чекає» (`busyWaiting`) у рядку кнопок.
-          // ⛔ R7-Y8 / Y8-02: якщо повтор НЕ заплановано (`503 databaseBusy` вичерпав
-          // `DatabaseBusyAutoRetries`), це вже відмова — причина в банері, поруч
-          // «Retry save» і позначка (`noteSaveFailed` у `holdRejectedEdits`).
-          if (!isBusyRetryWaiting()) setSaveError(refusalText(error));
-          setSaveErrorReasons([]);
-          setSplitRefusal(null);
-        } else {
-          // ⛔ Q-30x (High): ось сам фікс — реальний, локалізований текст
-          // сервера («Колонка «C1» очікує число.» і подібні) показується як
-          // є, а не губиться в необробленому знеструмленні проміса. Саме
-          // цей рядок і мала на увазі заглушка «NOT SAVED — SEE THE ERROR
-          // ABOVE», яка досі не мала на що вказувати.
-          //
-          // ✎ `ФВ-14.9a`: `refusalText`, а не `error.message` — подробиця без
-          // `messageKey` написана українською, якої в продукті немає; замість
-          // неї — назва проблеми з каталогу. Те саме для не нашої відмови
-          // (мережа, `TypeError`): доти тут стояв `String(error)`.
-          // ✎ Живий прохід 10.11: `403 deniedCells` не перелічує комірок — їх і причину (не технічну назву) називає
-          // `deniedCellReasons`, а загальний текст — без «Reason for the first: CalculatedCell».
-          const denied = deniedCellReasons(error, edits, cached);
-          setSaveError(
-            denied.length > 0 ? t('grid.deniedCellsSummary', { count: deniedCountOf(error, denied.length) }) : refusalText(error),
-          );
-          setSaveErrorReasons(denied.length > 0 ? denied : rejectedCellReasons(error));
-          setSplitRefusal(splitRefusalOf(error));
-        }
-
-        // ⚠ Рестрибок НЕ повторюється: жоден викликач (`onPaste`, кнопка
-        // «Зберегти», `applyHistory`, автозбереження) не чекає цей проміс і
-        // не обробляє відмову сам — усі викликають `void save(...)`. Стан
-        // вище вже показує причину користувачеві; повторний `throw` тут
-        // давав ЛИШЕ необроблене знеструмлення проміса в консолі (саме
-        // симптом, який документує Stage 1), без жодного адресата.
+        // ⛔ PSS-17: пакет понад стелю сервера (50 000 комірок) — послідовними частинами, а не одним `PATCH`,
+        // який сервер відхилив би цілком. Пакет у межах стелі — одна частина, той самий запит, що й доти.
+        // Наступна частина бере версії рядків із кешу, уже піднятого відповіддю попередньої; перша відмова
+        // зупиняє решту (ненадіслане лишається незбереженим у сховищі) — `patchParts.ts`.
+        await saveInParts(edits, savePart, {
+          slice: () => queryClient.getQueryData<TableSliceDto>(queryKeys.slices.one(tableInstanceId, periodKey)),
+          versionOverrides,
+        });
       } finally {
         // ⚠ Знімається ЛИШЕ свій запис (`beginInFlight`), і це будить відкладені
-        // правки рядків цього запиту — тепер версія в кеші вже нова.
+        // правки рядків цього запиту — тепер версія в кеші вже нова. Рядки ВСІХ частин лишаються «у дорозі» до
+        // кінця пакета: правка такого рядка, зроблена між частинами, чекає й іде вже з версією з відповіді.
         endInFlight();
       }
     },

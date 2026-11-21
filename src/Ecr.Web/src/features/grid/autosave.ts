@@ -36,6 +36,7 @@ import type { TableSliceDto } from '@/api/types';
 import { withKnownVersions } from './knownVersions';
 import { computedEditsOf, rejectionMarksOf } from './saveErrors';
 import { beginInFlight, deferUntilInFlightSettles, hasInFlight, splitByInFlight } from './inFlightEdits';
+import { saveInParts } from './patchParts';
 import {
   applyPatchLocally,
   refreshStaleness,
@@ -621,36 +622,48 @@ async function saveOrphanSlice(
   // ⛔ `B-09`: версія рядка — остання відома кешу, а не та, з якою правку
   // зроблено (`withKnownVersions`): інакше правка, що чекала повтору, їхала б
   // зі старою версією й діставала `409` на власних змінах.
-  const request = buildRequest(
-    slice.tableInstanceId,
-    slice.periodKey,
-    withKnownVersions(edits, cachedSlice(queryClient, slice.tableInstanceId, slice.periodKey)),
-  );
+  const versioned = withKnownVersions(edits, cachedSlice(queryClient, slice.tableInstanceId, slice.periodKey));
+  const endInFlight = beginInFlight(slice.tableInstanceId, slice.periodKey, versioned);
 
-  // ⚠ Знімок ТОГО, ЩО ПІШЛО: доки patch летить, у той самий зріз може
-  // прийти нова правка з іншої сітки чи з відновленої черги — і підтверджувати
-  // «усе, що було в рядку» означало б стерти значення, якого сервер не бачив.
-  const sent = new Map(edits.map((edit) => [cellKey(edit), edit]));
-  const endInFlight = beginInFlight(slice.tableInstanceId, slice.periodKey, edits);
+  /** Одна частина пакета (PSS-17): успіх і відмова — рівно її рядків. */
+  const savePart = async (part: PendingEdit[]): Promise<boolean> => {
+    const request = buildRequest(slice.tableInstanceId, slice.periodKey, part);
+
+    // ⚠ Знімок ТОГО, ЩО ПІШЛО: доки patch летить, у той самий зріз може
+    // прийти нова правка з іншої сітки чи з відновленої черги — і підтверджувати
+    // «усе, що було в рядку» означало б стерти значення, якого сервер не бачив.
+    const sent = new Map(part.map((edit) => [cellKey(edit), edit]));
+
+    try {
+      const response = await patchCells(documentId, request);
+
+      applyPatchLocally(queryClient, request, response);
+      refreshStaleness(queryClient, documentId, request.periodKey);
+      discardPendingRows(
+        slice.tableInstanceId,
+        slice.periodKey,
+        part.map((edit) => edit.rowKey),
+        sent,
+      );
+      noteSaveSucceeded(slice.tableInstanceId, slice.periodKey);
+      noteBusyRetryResolved(slice.tableInstanceId, slice.periodKey);
+
+      return true;
+    } catch (error) {
+      holdRejectedEdits(slice.tableInstanceId, slice.periodKey, error, part);
+      // ⚠ AN-123: «дані зайняті» — не тост: повтор уже заплановано, а стан «чекає»
+      // показує індикатор (`useBusyRetryWaiting`).
+      if (!(error instanceof EcrApiError && error.isTransientBusy)) showApiError(error);
+
+      return false;
+    }
+  };
 
   try {
-    const response = await patchCells(documentId, request);
-
-    applyPatchLocally(queryClient, request, response);
-    refreshStaleness(queryClient, documentId, request.periodKey);
-    discardPendingRows(
-      slice.tableInstanceId,
-      slice.periodKey,
-      edits.map((edit) => edit.rowKey),
-      sent,
-    );
-    noteSaveSucceeded(slice.tableInstanceId, slice.periodKey);
-    noteBusyRetryResolved(slice.tableInstanceId, slice.periodKey);
-  } catch (error) {
-    holdRejectedEdits(slice.tableInstanceId, slice.periodKey, error, edits);
-    // ⚠ AN-123: «дані зайняті» — не тост: повтор уже заплановано, а стан «чекає»
-    // показує індикатор (`useBusyRetryWaiting`).
-    if (!(error instanceof EcrApiError && error.isTransientBusy)) showApiError(error);
+    // ⛔ PSS-17: понад стелю сервера — послідовними частинами, той самий поділ, що в сітці (`patchParts.ts`).
+    await saveInParts(versioned, savePart, {
+      slice: () => cachedSlice(queryClient, slice.tableInstanceId, slice.periodKey),
+    });
   } finally {
     endInFlight();
   }
