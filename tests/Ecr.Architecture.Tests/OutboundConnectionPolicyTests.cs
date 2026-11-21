@@ -133,8 +133,8 @@ public sealed class OutboundConnectionPolicyTests
         OwnDb("src/Ecr.Infrastructure/Jobs/SourceEventSyncJob.cs", 1), // F2-04: видалення рядків подій — транзакція контексту, окреме підключення лишилось одне
         OwnDb("src/Ecr.Infrastructure/Persistence/BulkCellLoader.cs", 2,          // DependencyInjection: ConnectionStrings
             ("new SqlBulkCopy", 1)),
-        OwnDb("src/Ecr.Infrastructure/Persistence/CalculationResultStore.Bulk.cs", 0, // B85: з'єднання й транзакція EcrDbContext
-            ("new SqlBulkCopy", 1)),
+        OwnDb("src/Ecr.Infrastructure/Persistence/CalculationResultStore.Bulk.cs", 0, // B85 + D-565 (кроки): з'єднання й транзакція EcrDbContext
+            ("new SqlBulkCopy", 2)),
     ];
 
     [Fact]
