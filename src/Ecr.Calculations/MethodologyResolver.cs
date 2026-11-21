@@ -136,6 +136,26 @@ public sealed class MethodologyResolver(
             NoPublishedVersion: false);
     }
 
+    /// <summary>
+    /// ✎ D-565 (PERF-03): методології прогону з увімкненим прапором «трасувати проміжні кроки».
+    /// </summary>
+    /// <param name="methodologyIds">Методології прогону.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Методології, чиї прогони пишуть <c>calc.CalculationStep</c>; порожньо — жодна.</returns>
+    /// <remarks>Одне звернення на прогін, а не на прив'язку: прапор — властивість контейнера, однакова для всіх його версій.</remarks>
+    public async Task<IReadOnlySet<int>> TraceStepMethodologiesAsync(
+        IReadOnlyCollection<int> methodologyIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(methodologyIds);
+        if (methodologyIds.Count == 0)
+        {
+            return new HashSet<int>();
+        }
+
+        var traced = await store.GetTraceStepMethodologyIdsAsync(methodologyIds, ct).ConfigureAwait(false);
+        return (traced ?? []).ToHashSet();
+    }
+
     private static DomainException NoPublishedVersion(int methodologyId)
         => new(
             "ECR-CALC-0422",

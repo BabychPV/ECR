@@ -128,4 +128,113 @@ public sealed partial class CalculationResultStore
         Level = LogLevel.Debug,
         Message = "B85: прогін {RunId} — {Rows} результатів записано SqlBulkCopy за {ElapsedMs} мс.")]
     private static partial void LogBulkWritten(ILogger logger, long runId, int rows, double elapsedMs);
+
+    /// <summary>
+    /// ✎ D-565 (PERF-03): колонки <c>calc.CalculationStep</c> масового запису; мапінг лише за іменами.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <c>TraceJson</c> (нестиснений текст кроків до D-565) не пишеться — лишається <c>NULL</c>; деталізація йде
+    /// стисненою в <c>TraceJsonGz</c> (<see cref="TraceJsonCompression"/>), і читач бере її прозоро
+    /// (<see cref="CalculationStep.TraceJson"/>).
+    /// </remarks>
+    private static readonly (string Name, Type Type)[] StepBulkColumns =
+    [
+        ("PeriodKey", typeof(int)),
+        ("Id", typeof(long)),
+        ("CalculationRunId", typeof(long)),
+        ("ResultId", typeof(long)),
+        ("StepOrder", typeof(int)),
+        ("StepCode", typeof(string)),
+        ("Expression", typeof(string)),
+        ("Value", typeof(decimal)),
+        ("TraceJsonGz", typeof(byte[])),
+        ("MaskedZero", typeof(byte)),
+        ("DocumentId", typeof(long)),
+        ("SourceRowKey", typeof(string)),
+
+        // ⛔ Фізично int (EF: HasConversion<int?>), як у результату.
+        ("SubstanceEntryId", typeof(int)),
+        ("TableInstanceId", typeof(long)),
+    ];
+
+    /// <summary>Кроки — масово: SQL Server, транзакція записувача й понад <c>stepBulkThreshold</c> кроків (типово — будь-скільки).</summary>
+    private bool UseStepBulk(int count)
+        => count > (stepBulkThreshold ?? 0)
+           && db.Database.IsSqlServer()
+           && db.Database.CurrentTransaction is not null;
+
+    /// <summary>
+    /// ✎ D-565 (PERF-03): кроки трейсу одним <see cref="SqlBulkCopy"/> у транзакції записувача — замість EF-пакетів
+    /// MERGE (~715 походів до сервера на прогін на стенді Land, query 2511 аудиту).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Ті самі рядки, що EF-шлях (<see cref="WriteStepsAsync"/>): ті самі Id з діапазону, адреса кроку, прив'язка до
+    /// результату (<see cref="ResultIdOf"/>), обрізаний вираз (<see cref="CalculationStep.TrimExpression"/>), перевірка
+    /// адреси (рядок/речовина без документа — відмова, як у <see cref="CalculationStep.SetAddress"/>), FK на прогін
+    /// (<c>CheckConstraints</c>). Без <c>TableLock</c> — з тієї самої причини, що й у результатів (паралельні гілки).
+    /// </remarks>
+    private async Task BulkInsertStepsAsync(
+        long calculationRunId,
+        int periodKey,
+        List<(CalculationOutput Output, CalculationTraceStep Step)> steps,
+        long firstId,
+        Dictionary<(long, long?, string?, int, string, long?), long> results,
+        CancellationToken ct)
+    {
+        var started = Stopwatch.GetTimestamp();
+        using var table = new DataTable();
+        foreach (var (name, type) in StepBulkColumns)
+        {
+            table.Columns.Add(name, type);
+        }
+
+        var nextId = firstId;
+        foreach (var (output, step) in steps)
+        {
+            // Ті самі перевірки, що конструктор кроку; адреса — документ виходу (є завжди), рядок і речовина.
+            ArgumentException.ThrowIfNullOrWhiteSpace(step.StepCode);
+            table.Rows.Add(
+                periodKey,
+                nextId++,
+                calculationRunId,
+                (object?)ResultIdOf(results, output, step) ?? DBNull.Value,
+                step.StepOrder,
+                step.StepCode,
+                (object?)CalculationStep.TrimExpression(step.Expression) ?? DBNull.Value,
+                (object?)step.Value ?? DBNull.Value,
+                (object?)TraceJsonCompression.Compress(step.Detail ?? step.TraceJson) ?? DBNull.Value,
+                (byte)step.Masked,
+                output.DocumentId,
+                (object?)output.SourceRowKey ?? DBNull.Value,
+                (object?)(int?)step.SubstanceEntryId ?? DBNull.Value,
+                (object?)output.TableInstanceId ?? DBNull.Value);
+        }
+
+        var connection = (SqlConnection)db.Database.GetDbConnection();
+        var transaction = (SqlTransaction)db.Database.CurrentTransaction!.GetDbTransaction();
+        using var copy = new SqlBulkCopy(connection, SqlBulkCopyOptions.CheckConstraints, transaction)
+        {
+            DestinationTableName = SupersededResultsPurger.StepTable,
+            BulkCopyTimeout = db.Database.GetCommandTimeout() ?? 30,
+            BatchSize = BulkCopyBatchRows,
+        };
+
+        foreach (var (name, _) in StepBulkColumns)
+        {
+            copy.ColumnMappings.Add(name, name);
+        }
+
+        await copy.WriteToServerAsync(table, ct).ConfigureAwait(false);
+
+        var elapsedMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+        LogStepsBulkWritten(logger ?? NullLogger<CalculationResultStore>.Instance, calculationRunId, steps.Count, elapsedMs);
+    }
+
+    /// <remarks>
+    /// ⚠ Без слова «SqlBulkCopy» у тексті: лічильник масових записів РЕЗУЛЬТАТІВ у тестах B85 шукає саме його.
+    /// </remarks>
+    [LoggerMessage(
+        Level = LogLevel.Debug,
+        Message = "D-565: прогін {RunId} — {Rows} кроків трейсу записано масово (bulk copy) за {ElapsedMs} мс.")]
+    private static partial void LogStepsBulkWritten(ILogger logger, long runId, int rows, double elapsedMs);
 }
