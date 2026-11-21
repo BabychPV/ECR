@@ -37,7 +37,7 @@ namespace Ecr.Api.Tests;
 /// <c>CalculationNode.DependsOn</c> у оркестраторі — читач рахується в одній пачці з джерелом і бачить порожнє.
 /// </remarks>
 [Collection("SqlServer")]
-public sealed class ScriptMethodologyRunSqlTests(SqlServerFixture sql)
+public sealed partial class ScriptMethodologyRunSqlTests(SqlServerFixture sql)
 {
     private static readonly DateTime Now = new(2099, 1, 10, 9, 0, 0, DateTimeKind.Utc);
 

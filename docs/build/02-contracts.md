@@ -5096,6 +5096,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/documents/{id}/calculation-results/year/export` | `Document.Export` (PT-6: той самий кошик `document-export`, 429 `tooManyExports`) | 7 |
 | `GET` | `/api/v1/documents/{id}/calculation-run` | `Calculation.View` | 7 |
 | `GET` | `/api/v1/documents/{id}/calculation-issues` | `Document.View` | 7 |
+| `GET` | `/api/v1/documents/{id}/calculation-steps` | `Calculation.View` | 7 |
 | `POST` | `/api/v1/methodologies/{id}/versions/{vid}/publish` | `Calculation.Publish` | 4 |
 | `POST` | `/api/v1/methodologies/{id}/simulate` | `Calculation.View` | 4 |
 | `POST` | `/api/v1/expressions/validate` | `Calculation.View` | 4 |

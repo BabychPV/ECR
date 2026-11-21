@@ -107,8 +107,49 @@ public sealed class GetCalculationIssuesHandlerTests
         Assert.Null(Assert.Single(result.Items, i => i.Kind == "NoMatchingRule" && i.TableCode == "T1").AffectedCount);
     }
 
+    /// <remarks>
+    /// ✎ D-565: StepError каже, чи ПРОГІН проблеми записав кроки її методології — з факту прогону (<c>traceSteps</c> у
+    /// <c>ModulesProfileJson</c>), а не з поточного прапора; прогін до D-565 (факту немає) — «записано» (кроки писались за
+    /// <c>TraceLevel</c>); інші види — без стану. ⛔ Мутації: читати факт навпаки чи віддавати стан і не-StepError — червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Decision", "D-565")]
+    public async Task D565_StepError_несе_факт_прогону_чи_записано_кроки_методології()
+    {
+        var traces = Substitute.For<ICalculationTraceReader>();
+        traces.ReadRunProfilesAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
+              .Returns(new Dictionary<long, string?>
+              {
+                  [100] = """{"modules":[],"traceSteps":{"recorded":[41],"notRecorded":[42]}}""",
+                  [200] = """{"modules":[]}""",
+              });
+        var (handler, _) = Arrange(
+            deny: false,
+            visibleDocument: true,
+            extra: table =>
+            [
+                new CalculationIssueRow(table, "T1", null, 5, "R5", ICalculationIssueStore.StepError, "M41", Detected,
+                    MethodologyId: 41, StepCode: "Y", ErrorCode: "#N/A", AffectedCount: 1, CalculationRunId: 100),
+                new CalculationIssueRow(table, "T1", null, 6, "R6", ICalculationIssueStore.StepError, "M42", Detected,
+                    MethodologyId: 42, StepCode: "Y", ErrorCode: "#N/A", AffectedCount: 1, CalculationRunId: 100),
+                new CalculationIssueRow(table, "T1", null, 7, "R7", ICalculationIssueStore.StepError, "M43", Detected,
+                    MethodologyId: 43, StepCode: "Y", ErrorCode: "#N/A", AffectedCount: 1, CalculationRunId: 200),
+            ],
+            traces: traces);
+
+        var result = await handler.HandleAsync(Document, Period, null, CancellationToken.None);
+
+        Assert.Equal("Recorded", Assert.Single(result.Items, i => i.RowKey == "R5").TraceSteps);
+        var off = Assert.Single(result.Items, i => i.RowKey == "R6");
+        Assert.Equal(("NotRecorded", (int?)42), (off.TraceSteps, off.MethodologyId));
+        Assert.Equal("Recorded", Assert.Single(result.Items, i => i.RowKey == "R7").TraceSteps);
+        Assert.Null(Assert.Single(result.Items, i => i.Kind == "NoMatchingRule" && i.TableCode == "T1").TraceSteps);
+    }
+
     private static (GetCalculationIssuesHandler Handler, ICalculationIssueStore Issues) Arrange(
-        bool deny, bool visibleDocument, long? copyId = null, Func<int, CalculationIssueRow[]>? extra = null)
+        bool deny, bool visibleDocument, long? copyId = null, Func<int, CalculationIssueRow[]>? extra = null,
+        ICalculationTraceReader? traces = null)
     {
         var template = new TemplateBuilder();
         var visibleSheet = template.Sheet("S1");
@@ -144,6 +185,6 @@ public sealed class GetCalculationIssuesHandlerTests
         var user = Substitute.For<ICurrentUser>();
         user.UserId.Returns(9);
 
-        return (new GetCalculationIssuesHandler(issues, access, user), issues);
+        return (new GetCalculationIssuesHandler(issues, access, user, traces: traces), issues);
     }
 }

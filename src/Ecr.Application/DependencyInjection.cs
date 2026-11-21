@@ -525,6 +525,7 @@ public static class DependencyInjection
         services.AddScoped<Documents.CalculationYear.ExportCalculationYearHandler>();
         services.AddScoped<Documents.GetCalculationRunStatusHandler>();
         services.AddScoped<Documents.GetCalculationIssuesHandler>();
+        services.AddScoped<Documents.GetCalculationStepsHandler>();
         services.AddScoped<Calculations.RunCalculationHandler>();
         services.AddScoped<Localization.SetUiStringHandler>();
         services.AddScoped<Localization.GetUiStringCoverageHandler>();

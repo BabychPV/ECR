@@ -238,6 +238,7 @@ public static class DependencyInjection
         // CALC-RESULTS: огляд року читає той самий екземпляр сховища (правило актуального прогону — одне).
         services.AddScoped<ICalculationYearReader>(sp => (CalculationResultStore)sp.GetRequiredService<ICalculationResultStore>());
         services.AddScoped<ICalculationIssueStore, CalculationIssueStore>();
+        services.AddScoped<ICalculationTraceReader, CalculationTraceReader>(); // ✎ D-565: кроки рядка й факт прогону
         services.AddScoped<IFormulaErrorStore, FormulaErrorStore>(); // ✎ C-1: стан помилок формул
         services.AddScoped<ICalculationBindingStore, CalculationBindingStore>();
         services.AddScoped<IOrphanScanner, OrphanScanner>();
