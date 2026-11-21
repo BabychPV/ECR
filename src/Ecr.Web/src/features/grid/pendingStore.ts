@@ -426,7 +426,7 @@ function rebased(edit: PendingEdit, confirmed: PendingEdit | undefined): Pending
  * комірку» — різні наміри при однаковому `value: null` (`R-B4`), і зводити їх
  * до однієї рівності означало б підтвердити не те, що надіслали.
  */
-function wasSent(sent: PendingEdit | undefined, edit: PendingEdit): boolean {
+export function wasSent(sent: PendingEdit | undefined, edit: PendingEdit): boolean {
   if (sent === undefined) return false;
 
   if (sent.isEmpty !== edit.isEmpty) return false;

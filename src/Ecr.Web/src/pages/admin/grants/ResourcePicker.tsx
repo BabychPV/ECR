@@ -3,15 +3,15 @@ import { Group, Select } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch, EcrApiError } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
+import { templatesListQuery, templateVersionsQuery } from '@/features/templates/templateQueries';
 import type {
   GrantableProject,
   RegistryDefDto,
-  TemplatePage,
   TemplateStructureDto,
-  TemplateVersionPage,
 } from '@/api/types';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
+import { truncatedOption } from '@/shared/ui/truncatedOption';
 import type { ResourceKind } from './grantLabels';
 
 /**
@@ -130,16 +130,11 @@ export function ResourcePicker({
     enabled: kind === 'Registry',
   });
 
-  const templates = useQuery({
-    queryKey: queryKeys.templates.list(),
-    queryFn: () => apiFetch<TemplatePage>('/api/v1/templates?limit=100'),
-    enabled: inTemplate,
-  });
+  // ⛔ PSS-19c: усі шаблони й версії, а не перші 100 мовчки (`templateQueries.ts`).
+  const templates = useQuery({ ...templatesListQuery, enabled: inTemplate });
 
   const versions = useQuery({
-    queryKey: queryKeys.templates.versionsOf(path.templateId ?? undefined),
-    queryFn: () =>
-      apiFetch<TemplateVersionPage>(`/api/v1/templates/${String(path.templateId)}/versions?limit=100`),
+    ...templateVersionsQuery(path.templateId ?? undefined),
     enabled: inTemplate && path.templateId !== null,
   });
 
@@ -213,7 +208,7 @@ export function ResourcePicker({
       <Select
         {...common(t('grants.pickerTemplate'), Boolean(templates.error), templates.error)}
         aria-label={aria(t('grants.pickerTemplate'))}
-        data={(templates.data?.items ?? []).map((tp) => ({ value: String(tp.id), label: tp.code }))}
+        data={[...(templates.data?.items ?? []).map((tp) => ({ value: String(tp.id), label: tp.code })), ...truncatedOption(templates.data)]}
         value={path.templateId === null ? null : String(path.templateId)}
         onChange={(value) => pick(-1, null, undefined, { ...EmptyPath, templateId: idOrNull(value) })}
       />
@@ -221,7 +216,7 @@ export function ResourcePicker({
         {...common(t('grants.pickerVersion'), Boolean(versions.error), versions.error)}
         aria-label={aria(t('grants.pickerVersion'))}
         disabled={path.templateId === null}
-        data={(versions.data?.items ?? []).map((v) => ({ value: String(v.id), label: v.version }))}
+        data={[...(versions.data?.items ?? []).map((v) => ({ value: String(v.id), label: v.version })), ...truncatedOption(versions.data)]}
         value={path.versionId === null ? null : String(path.versionId)}
         onChange={(value) =>
           pick(0, null, undefined, { ...EmptyPath, templateId: path.templateId, versionId: idOrNull(value) })

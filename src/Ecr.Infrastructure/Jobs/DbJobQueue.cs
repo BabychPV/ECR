@@ -306,9 +306,10 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
     /// ✎ Огляд H1: payload <c>{0}</c> без полів ланцюжка (PSS-04) — нова постановка на ціль ланцюжка, що чекає між
     /// кроками, починає його з ПЕРШОГО періоду: її зміна могла торкнутися вже зроблених місяців.
     /// </summary>
+    /// <remarks>✎ L1b / D3: і <c>$.chainTotal</c> — шкала «період k з N» починається з першого кроку заново.</remarks>
     internal const string ChainResetTemplate =
-        "JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY({0}, '$.chainAfter', NULL), '$.chainDone', NULL), "
-        + "'$.chainReaders', NULL), '$.chainStartedAt', NULL), '$.chainElapsedMs', NULL)";
+        "JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY({0}, '$.chainAfter', NULL), '$.chainDone', NULL), "
+        + "'$.chainReaders', NULL), '$.chainStartedAt', NULL), '$.chainElapsedMs', NULL), '$.chainTotal', NULL)";
 
     /// <summary>
     /// Злиття в рядок, що чекає (<c>@payload</c> — тіло нової постановки): знято поля ланцюжка (H1) і, якщо нова
@@ -528,8 +529,26 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
     }
 
     /// <inheritdoc />
-    public async Task<ClaimedJob?> ClaimAsync(
+    public Task<ClaimedJob?> ClaimAsync(
         IReadOnlyCollection<string> lanes, string owner, TimeSpan lease, CancellationToken ct)
+        => ClaimCoreAsync(lanes, owner, lease, exceptFanOut: false, ct);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ✎ L1b / D2: у лейні перерахунку — <see cref="FanOutCapFilter"/> з <c>@fanOutRoom = 0</c> (той самий текст, що й межа,
+    /// з <c>@fanOutCap = 0</c>; діє й без межі в збірці), а переклейм простроченої <c>Running</c> не бере дитину розкладу.
+    /// Прохід «спершу ручні» — як завжди.
+    /// </remarks>
+    public Task<ClaimedJob?> ClaimExceptFanOutAsync(
+        IReadOnlyCollection<string> lanes, string owner, TimeSpan lease, CancellationToken ct)
+        => ClaimCoreAsync(lanes, owner, lease, exceptFanOut: true, ct);
+
+    /// <summary>Переклейм без дітей розкладу (<see cref="ClaimExceptFanOutAsync"/>).</summary>
+    internal static readonly string ReclaimExceptFanOutSql = ReclaimSql.Replace(
+        "ORDER BY q.AvailableAt, q.JobId)", "AND q.FanOutParentJobId IS NULL\n    ORDER BY q.AvailableAt, q.JobId)", StringComparison.Ordinal);
+
+    private async Task<ClaimedJob?> ClaimCoreAsync(
+        IReadOnlyCollection<string> lanes, string owner, TimeSpan lease, bool exceptFanOut, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(lanes);
         ArgumentException.ThrowIfNullOrWhiteSpace(owner);
@@ -566,7 +585,7 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
             p.Add("@maxReclaims", SqlDbType.Int).Value = JobQueueLimits.MaxReclaims;
             p.Add("@docLaneA", SqlDbType.VarChar, JobLanes.MaxLength).Value = JobLanes.Recalc;
             p.Add("@docLaneB", SqlDbType.VarChar, JobLanes.MaxLength).Value = JobLanes.Interactive;
-            p.Add("@fanOutCap", SqlDbType.Int).Value = fanOutCap;
+            p.Add("@fanOutCap", SqlDbType.Int).Value = exceptFanOut ? 0 : fanOutCap;
             p.Add("@cascadeLike", SqlDbType.NVarChar, JobProgress.MaxTargetKeyLength).Value = CascadeTargetLike;
             AddShown(p);
         }
@@ -576,7 +595,7 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
             var recalc = string.Equals(lane, JobLanes.Recalc, StringComparison.Ordinal);
             return ClaimQueuedSqlFor(
                 documentExclusive: IsDocumentExclusiveLane(lane),
-                fanOutCap: fanOutCap > 0 && recalc && !manualOnly,
+                fanOutCap: (fanOutCap > 0 || exceptFanOut) && recalc && !manualOnly,
                 priority,
                 recalcLane: recalc,
                 manualOnly: manualOnly);
@@ -598,7 +617,7 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
         try
         {
             // Прострочені Running першими — по всіх лейнах, далі Queued.
-            foreach (var (sql, reclaimed) in new[] { (ReclaimSql, true), (ClaimQueuedSql, false) })
+            foreach (var (sql, reclaimed) in new[] { (exceptFanOut ? ReclaimExceptFanOutSql : ReclaimSql, true), (ClaimQueuedSql, false) })
             {
                 foreach (var lane in ordered)
                 {

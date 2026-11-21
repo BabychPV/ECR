@@ -280,10 +280,15 @@ public sealed class RunCalculationHandler(
     /// хвилини; відмова тут відкочує все, і попередній прогін лишається актуальним.
     /// </para>
     /// <exception cref="JobLeaseLostException">Оренду задачі втрачено; нічого не записано.</exception>
+    /// <param name="purgeLater">
+    /// ✎ L1b / D5: куди скласти прогони, які перемикання зняло з актуальності, ЗАМІСТЬ прибрати їх тут (викликач прибере
+    /// сам — <see cref="PurgeSupersededAsync"/> — коли звільнить документ); <c>null</c> — прибрати одразу після коміту, як доти.
+    /// </param>
     public async Task CompleteAsync(
         long calculationRunId, ModuleProfile profile, CancellationToken ct,
         IReadOnlyCollection<ResultCarryOver>? carryOver = null,
-        Func<CancellationToken, Task>? beforeSwitch = null)
+        Func<CancellationToken, Task>? beforeSwitch = null,
+        ICollection<SupersededRun>? purgeLater = null)
     {
         ArgumentNullException.ThrowIfNull(profile);
 
@@ -300,7 +305,7 @@ public sealed class RunCalculationHandler(
                         .ConfigureAwait(false),
                     ct)
                 .ConfigureAwait(false);
-            await PurgeSupersededAsync(unleased, ct).ConfigureAwait(false);
+            await PurgeOrDeferAsync(unleased, purgeLater, ct).ConfigureAwait(false);
             return;
         }
 
@@ -318,7 +323,22 @@ public sealed class RunCalculationHandler(
                 },
                 ct)
             .ConfigureAwait(false);
-        await PurgeSupersededAsync(superseded, ct).ConfigureAwait(false);
+        await PurgeOrDeferAsync(superseded, purgeLater, ct).ConfigureAwait(false);
+    }
+
+    private async Task PurgeOrDeferAsync(
+        IReadOnlyList<SupersededRun> superseded, ICollection<SupersededRun>? purgeLater, CancellationToken ct)
+    {
+        if (purgeLater is null)
+        {
+            await PurgeSupersededAsync(superseded, ct).ConfigureAwait(false);
+            return;
+        }
+
+        foreach (var run in superseded)
+        {
+            purgeLater.Add(run);
+        }
     }
 
     /// <summary>
@@ -343,8 +363,14 @@ public sealed class RunCalculationHandler(
     /// рядків усередині перемикання тримало б замок рядка задачі й відкотило б саме перемикання при збої. Збій
     /// прибирання прогін НЕ валить: перемикання вже правильне (рядки неактуальних прогонів не читає ніхто), решту
     /// доїсть нічна задача <c>SupersededResultsSweepJob</c>. Скасування проходить нагору.
+    /// <para>
+    /// ✎ L1b / D5: публічний для задачі перерахунку, що відкладає прибирання (<c>purgeLater</c> у <see cref="CompleteAsync"/>)
+    /// за межі лока документа: семантика та сама — лише передані прогони, власна стеля швидкого шляху.
+    /// </para>
     /// </remarks>
-    private async Task PurgeSupersededAsync(IReadOnlyList<SupersededRun> superseded, CancellationToken ct)
+    /// <param name="superseded">Прогони, які перемикання зняло з актуальності.</param>
+    /// <param name="ct">Скасування.</param>
+    public async Task PurgeSupersededAsync(IReadOnlyList<SupersededRun> superseded, CancellationToken ct)
     {
         if (superseded is not { Count: > 0 })
         {

@@ -9,7 +9,8 @@ namespace Ecr.Infrastructure.Persistence;
 
 /// <summary>
 /// Карта «документ → відколи результати застаріли» ОДНОГО періоду (LP-45, етап 2): ті самі дані, що дає
-/// <see cref="StaleResultsQuery"/>, але для ВСЬОГО періоду одним запитом і з коротким кешем. З неї беруть позначку
+/// <see cref="StaleResultsQuery"/>, але для ВСЬОГО періоду одним запитом (формою періоду
+/// <see cref="StaleResultsByIdsQuery.PeriodDocuments"/>, без читання історії результатів) і з коротким кешем. З неї беруть позначку
 /// в рядках ПЕРЕЛІКУ, фільтр <c>resultsStale</c> і лічильники <c>/documents/summary</c>. Картка одного документа
 /// (<c>FindAsync</c>) карти НЕ використовує: її вузький запит по одному id дешевший за повну карту.
 /// </summary>
@@ -385,8 +386,8 @@ internal sealed partial class StaleResultsMapCache(
 
     private async Task<Entry?> HealAllAsync(Entry old, int periodKey, IReadOnlyList<long> ids, long seq)
     {
-        var rows = await StaleResultsQuery.Documents(db, periodKey)
-            .Where(r => ids.Contains(r.DocumentId))
+        // Форма для набору документів: без історії результатів документа й довідникової частини всього періоду.
+        var rows = await StaleResultsByIdsQuery.Documents(db, periodKey, ids)
             .TagWith(DeltaTag)
             .OrderBy(r => r.DocumentId)
             .Take(Math.Max(MaxIncremental, ids.Count) + 1)
@@ -410,8 +411,7 @@ internal sealed partial class StaleResultsMapCache(
 
     private async Task<Entry?> HealAuthorsAsync(Entry old, int periodKey, IReadOnlyList<long> ids, long seq)
     {
-        var rows = await StaleResultsQuery.AuthorDocuments(db, periodKey)
-            .Where(r => ids.Contains(r.DocumentId))
+        var rows = await StaleResultsByIdsQuery.AuthorDocuments(db, periodKey, ids)
             .TagWith(DeltaTag)
             .OrderBy(r => r.UserId)
             .ThenBy(r => r.DocumentId)
@@ -620,14 +620,15 @@ internal sealed partial class StaleResultsMapCache(
             : (await LoadAsync(periodKey, null, ct).ConfigureAwait(false), null);
 
     /// <summary>
-    /// Карти всіх авторів періоду ОДНИМ запитом (D-432); <c>null</c> - пар «автор-документ» понад стелю.
-    /// Еквівалентність поштучним <see cref="StaleResultsQuery.Documents"/> доводить
-    /// <c>StaleResultsAuthorsEquivalenceTests</c>.
+    /// Карти всіх авторів періоду ОДНИМ запитом (D-432); <c>null</c> - пар «автор-документ» понад стелю. Рядки ті самі,
+    /// що <see cref="StaleResultsQuery.AuthorDocuments"/>, форма - як у <see cref="LoadAsync"/> (Land 21.11: 11 тис. → 0,1 тис.
+    /// читань, 0,4 с → 3 мс; у Query Store плоска форма - до 60 с). Еквівалентність поштучним
+    /// <see cref="StaleResultsQuery.Documents"/> доводить <c>StaleResultsAuthorsEquivalenceTests</c>.
     /// </summary>
     private async Task<AuthorMaps?> LoadAuthorsAsync(int periodKey, CancellationToken ct)
     {
         var limit = AuthorPairLimit;
-        var rows = await StaleResultsQuery.AuthorDocuments(db, periodKey)
+        var rows = await StaleResultsByIdsQuery.PeriodAuthorDocuments(db, periodKey)
             .TagWith(AuthorsTag)
             .OrderBy(r => r.UserId)
             .ThenBy(r => r.DocumentId)
@@ -652,15 +653,36 @@ internal sealed partial class StaleResultsMapCache(
                 g => (IReadOnlyDictionary<long, DateTime?>)g.ToDictionary(r => r.DocumentId, r => Utc(r.Since))));
     }
 
-    /// <summary>Карта без кешу: ті самі рядки, що й <see cref="StaleResultsQuery"/>, для всього періоду; <c>null</c> — переповнення.</summary>
+    /// <summary>
+    /// Карта без кешу: ті самі рядки, що <see cref="StaleResultsQuery.Documents"/> для всього періоду (з автором - що
+    /// <c>Documents(db, p, byUserId)</c>: гілка правок цього автора, без довідникової); <c>null</c> — переповнення.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ НЕ плоска форма періоду <see cref="StaleResultsQuery"/>: стенд Land 21.11 - <c>StaleMap:full</c> у середньому 1,8 с,
+    /// до 58 с (Query Store); на теплому кеші 14-29 тис. читань і 0,3-0,6 с - УСЯ історія результатів періоду, тричі. Форма
+    /// періоду <see cref="StaleResultsByIdsQuery.PeriodDocuments"/> - той самий текст, що в картки й лікування карти, з
+    /// документами періоду замість списку id: пари (документ, прогін-кандидат) і пошук по префіксу
+    /// <c>IX_CalculationResult_DocRun</c>; 2,2-2,4 тис. читань і 43-49 мс на тих самих періодах. Сторожі -
+    /// <c>DocumentStaleResultsStoreTests.Повна_карта_…</c> і <c>StaleResultsByIdsQueryShapeTests</c>.
+    /// </remarks>
     private async Task<IReadOnlyDictionary<long, DateTime?>?> LoadAsync(int periodKey, int? byUserId, CancellationToken ct)
     {
-        var rows = await StaleResultsQuery.Documents(db, periodKey, byUserId)
-            .TagWith(FullTag)
-            .OrderBy(r => r.DocumentId)
-            .Take(maxDocuments + 1)
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
+        // Автор: ті самі пари (автор, документ), що Documents(db, p, автор) - D-432; без автора - обидві гілки.
+        var rows = byUserId is { } user
+            ? await StaleResultsByIdsQuery.PeriodAuthorDocuments(db, periodKey)
+                .TagWith(FullTag)
+                .Where(r => r.UserId == user)
+                .OrderBy(r => r.DocumentId)
+                .Take(maxDocuments + 1)
+                .Select(r => new StaleDocumentRow(r.DocumentId, r.Since))
+                .ToListAsync(ct)
+                .ConfigureAwait(false)
+            : await StaleResultsByIdsQuery.PeriodDocuments(db, periodKey)
+                .TagWith(FullTag)
+                .OrderBy(r => r.DocumentId)
+                .Take(maxDocuments + 1)
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
 
         // ⛔ Стеля - від нескінченної вибірки, а не законний обсяг: обрізана карта мовчки віддала б «не застарілі»
         // там, де вони застарілі, тож замість обрізання - сигнал «переповнено», викликач бере прямий запит.

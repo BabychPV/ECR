@@ -21,7 +21,8 @@ export type DocumentLock = 'projectArchived' | 'periodClosed' | 'periodNotOpen' 
 
 /** Що відомо про документ для рішення. `undefined` — ще не прочитано. */
 interface DocumentLockFacts {
-  readonly projectStatus: ProjectStatus | undefined;
+  /** Рядком із картки документа (projectStatus, PSS-19a); null/undefined — невідомо. */
+  readonly projectStatus: ProjectStatus | string | null | undefined;
   readonly periodState: PeriodState | undefined;
   readonly sheetState: string;
 }

@@ -85,6 +85,8 @@ function mockFetch(scenario: Scenario): void {
         return jsonResponse({
           businessKey: 'DOC-0001', createdAt: '2026-01-01T00:00:00Z', id: 1, nameL10n: { values: {} },
           projectId: 1, sheetCount: 1, sheetStates: { GEN: scenario.sheetState },
+          // PSS-19a: стан проєкту — з картки документа, а не з переліку проєктів.
+          projectStatus: scenario.projectStatus ?? null,
         });
       }
 

@@ -109,6 +109,7 @@ function mockFetch(options: { projectStatus: string; periodState: string; sheetS
 
       if (url.includes('/api/v1/documents/1')) {
         return jsonResponse({
+          projectStatus: options.projectStatus,
           businessKey: 'DOC-0001',
           createdAt: '2026-01-01T00:00:00Z',
           id: 1,
@@ -194,6 +195,11 @@ describe('DocumentPage: банер причини і жодної прирече
 
       expect(await screen.findByText('⟦document.lock.projectArchived⟧', {}, { timeout: SlowEnvTimeout })).toBeTruthy();
       expect(screen.queryByRole('button', { name: 'import-stub' })).toBeNull();
+
+      // ⛔ PSS-19a: стан проєкту — з картки документа (`projectStatus`); переліку проєктів сторінка більше не читає
+      // (доти — до 20 сторінок по 500 заради стану одного). Мутація: повернути запит переліку → червоний.
+      const urls = vi.mocked(fetch).mock.calls.map(([input]) => String(input));
+      expect(urls.filter((url) => url.includes('/api/v1/projects?'))).toEqual([]);
     },
     SlowEnvTimeout,
   );

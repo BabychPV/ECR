@@ -98,6 +98,11 @@ describe('AppLayout — навбар прогріває маршрут за на
     // спрацьовує.
     const templatesLink = await screen.findByRole('link', { name: /templates/i });
 
+    // ⚠ Прогрів переліку шаблонів тягне `templateQueries` ЛІНИВИМ `import()` (рецензія L10, M3): його розв'язання —
+    // справжній ввід-вивід, а `advanceTimersByTimeAsync` чекає лише мікрозавдання й фальшиві таймери. Тому модуль
+    // прогрівається ТУТ, до фальшивих таймерів, і `import()` у прогріві резолвиться з кешу за мікрозавдання.
+    await import('@/features/templates/templateQueries');
+
     vi.useFakeTimers();
     const callsBeforeHover = fetchMock.mock.calls.length;
 

@@ -354,24 +354,297 @@ public sealed class RecalculationYearPerPeriodCommitTests(SqlServerFixture sql) 
         }
     }
 
+    /// <summary>
+    /// ✎ L1b / D3 (стенд Land 21.11): шкала ланцюжка відома з ПЕРШОГО звіту кроку — жодного «Період k з k» на старті кроку
+    /// і жодного стрибка відсотка назад (на стенді 42 → 75 → 48: <c>Total</c> починався з <c>Done + 1</c>).
+    /// </summary>
+    /// <remarks>
+    /// МУТАЦІЯ: не класти <c>ChainTotal</c> у payload наступного кроку (чи ігнорувати його в <c>ChainProgress</c>) — червоний:
+    /// перший звіт кроку 2 — «2 з 2», 50 %, далі 33 %.
+    /// </remarks>
+    [Fact]
+    public async Task Шкала_ланцюжка_відома_з_першого_звіту_кроку_і_не_стрибає_назад()
+    {
+        var (builder, document) = await ArrangeAsync();
+        await using var host = NewHost();
+        var scheduler = Scheduler(host);
+        var jobId = await scheduler.EnqueueCoalescedAsync<IRecalculationJob>(
+            RecalculateDocumentHandler.YearTargetOf(document.DocumentId),
+            new { document.DocumentId, PeriodKey = (int?)null }, CancellationToken.None);
+
+        var reports = new List<(int Percent, string? Message)>();
+        var stepReports = new List<int>();
+        for (var k = 1; k <= 3; k++)
+        {
+            var step = (await ClaimAsync(host, JobLanes.Recalc))!;
+            Assert.Equal(jobId, step.Claim.JobId);
+            var before = reports.Count;
+            if (k < 3)
+            {
+                var continued = await Assert.ThrowsAsync<JobContinuedException>(
+                    () => RunStepAsync(builder, scheduler, host.Queue, step, reports: reports));
+                Assert.Equal(3, JsonSerializer.Deserialize<RecalculationRequest>(continued.PayloadJson, Web)!.ChainTotal);
+                Assert.True(await host.Queue.ContinueAsync(
+                    step.Claim, continued.PayloadJson, continued.Delay, continued.SettleThrough, CancellationToken.None));
+            }
+            else
+            {
+                await RunStepAsync(builder, scheduler, host.Queue, step, reports: reports);
+            }
+
+            stepReports.Add(reports.Count - before);
+
+            // Кроки 2 і 3: ПЕРШИЙ же звіт — «період k з 3», відсоток не нижче частки зробленого.
+            if (k > 1)
+            {
+                var (percent, message) = reports[before];
+                Assert.True(JobProgressMessageCodec.TryDecode(message, out var first), message);
+                Assert.Equal(
+                    ("jobs.chainStep", k.ToString(System.Globalization.CultureInfo.InvariantCulture), "3"),
+                    (first.Key, first.Params?["step"], first.Params?["total"]));
+                Assert.Equal((k - 1) * 100 / 3, percent);
+            }
+        }
+
+        Assert.All(stepReports, n => Assert.True(n > 0));
+
+        // Жоден звіт не каже «з N», крім «з 3»; відсоток рядка задачі не спадає.
+        foreach (var (_, message) in reports)
+        {
+            if (JobProgressMessageCodec.TryDecode(message, out var envelope) && envelope.Key == "jobs.chainStep")
+            {
+                Assert.Equal("3", envelope.Params?["total"]);
+            }
+        }
+
+        var percents = reports.Select(r => r.Percent).ToList();
+        Assert.Equal(percents.Order(), percents);
+    }
+
+    /// <summary>
+    /// ✎ L1b / D4 (стенд Land 21.11): скасування задачі посеред кроку закриває його прогін одразу — <c>Failed</c> з причиною
+    /// «задачу скасовано», а не лишає <c>Running</c> до <c>AbandonedWorkSweeper</c> (2 год). Скасування проходить нагору як є.
+    /// </summary>
+    /// <remarks>
+    /// Обидві форми скасування, що бачить задача: <see cref="OperationCanceledException"/> і виняток драйвера посеред запиту
+    /// (не OCE) при скасованому токені. МУТАЦІЯ: прибрати гілку <c>catch … when (ct.IsCancellationRequested)</c> у
+    /// <c>RecalculationJob.ExecuteAsync</c> — червоні обидва випадки (прогін <c>Running</c>).
+    /// </remarks>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Скасування_кроку_закриває_його_прогін_з_причиною(bool driverError)
+    {
+        var (builder, document) = await ArrangeAsync();
+        await using var host = NewHost();
+        var scheduler = Scheduler(host);
+        await scheduler.EnqueueCoalescedAsync<IRecalculationJob>(
+            RecalculateDocumentHandler.YearTargetOf(document.DocumentId),
+            new { document.DocumentId, PeriodKey = (int?)null }, CancellationToken.None);
+        var step = (await ClaimAsync(host, JobLanes.Recalc))!;
+
+        using var cancel = new CancellationTokenSource();
+        var thrown = await Assert.ThrowsAnyAsync<Exception>(() => RunStepAsync(
+            builder, scheduler, host.Queue, step, runner: new CancellingRunner(cancel, driverError), ct: cancel.Token));
+        Assert.Equal(driverError, thrown is InvalidOperationException);
+
+        await using var db = Sql.CreateContext();
+        var runs = await db.CalculationRuns.AsNoTracking().Where(r => r.DocumentId == document.DocumentId).ToListAsync();
+        var run = Assert.Single(runs);
+        Assert.Equal(("Failed", document.PeriodKey.Value), (run.Status, run.PeriodKey!.Value));
+        Assert.NotNull(run.FinishedAt);
+        Assert.True(JobProgressMessageCodec.TryDecode(run.ErrorMessage, out var reason), run.ErrorMessage);
+        Assert.Equal(RecalculationJob.CancelledRunKey, reason.Key);
+    }
+
+    /// <summary>
+    /// ✎ L1b / D5 (стенд Land 21.11): прибирання прогону, який крок зняв з актуальності (D-560), іде ПІСЛЯ лока документа
+    /// (+47–111 с на крок під локом, правки й ручні документа чекали): без оренди воркера — одразу після лока; у черзі в базі
+    /// — після фіксації рядка задачі воркером (до неї документ для claim зайнятий). Прибираються лише передані прогони.
+    /// </summary>
+    /// <remarks>
+    /// Проба — журнал сховища «прогін N прибрано» (пишеться посеред прибирання, після кожного прогону): у цю мить вона пробує
+    /// взяти лок документа з окремого з'єднання без очікування. МУТАЦІЯ: <c>purgeLater: null</c> у <c>CompleteAsync</c>
+    /// задачі (прибирання знову всередині лока) — червоні обидва випадки.
+    /// </remarks>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Прибирання_замінених_прогонів_після_лока_документа(bool queueWorker)
+    {
+        var (builder, document) = await ArrangeAsync();
+        var january = document.PeriodKey;
+        await using var host = NewHost();
+        var scheduler = Scheduler(host);
+        var target = RecalculateDocumentHandler.TargetOf(document.DocumentId, january);
+
+        // Перший прогін січня — актуальний.
+        await scheduler.EnqueueCoalescedAsync<IRecalculationJob>(
+            target, new { document.DocumentId, PeriodKey = january.Value }, CancellationToken.None);
+        var first = (await ClaimAsync(host, JobLanes.Recalc))!;
+        await RunStepAsync(builder, scheduler, host.Queue, first);
+        Assert.True(await host.Queue.CompleteAsync(first.Claim, CancellationToken.None));
+        long replacedRun;
+        await using (var db = Sql.CreateContext())
+        {
+            replacedRun = await db.CalculationRuns.AsNoTracking()
+                .Where(r => r.DocumentId == document.DocumentId && r.Status == CalculationRun.CurrentStatus)
+                .Select(r => r.Id)
+                .SingleAsync();
+        }
+
+        // Другий прогін січня замінює перший — і прибирає його.
+        await scheduler.EnqueueCoalescedAsync<IRecalculationJob>(
+            target, new { document.DocumentId, PeriodKey = january.Value }, CancellationToken.None);
+        var second = (await ClaimAsync(host, JobLanes.Recalc))!;
+        var probe = new DocumentLockProbe(Sql.ConnectionString, document.DocumentId);
+        JobLeaseContext? worker = null;
+        if (queueWorker)
+        {
+            worker = new JobLeaseContext();
+            worker.Bind(second.Claim);
+        }
+
+        await RunStepAsync(
+            builder, scheduler, host.Queue, second, purgeProbe: probe, lease: worker,
+            afterJobInScope: worker is null ? null : async () =>
+            {
+                // Черга в базі: задача прибирання не робила — доручила воркеру; він виконає після фіксації рядка.
+                Assert.Empty(probe.LockFreeAtPurge);
+                Assert.True(await RunExistsAsync(replacedRun));
+                Assert.True(await host.Queue.CompleteAsync(second.Claim, CancellationToken.None));
+                var work = Assert.Single(worker.TakeAfterSettle());
+                await work(CancellationToken.None);
+            });
+
+        Assert.NotEmpty(probe.LockFreeAtPurge);
+        Assert.All(probe.LockFreeAtPurge, Assert.True);
+        Assert.False(await RunExistsAsync(replacedRun));
+    }
+
+    /// <summary>
+    /// ✎ L1b / D5: справжній <see cref="JobWorker"/> виконує доручену задачею роботу (<see cref="IJobLeaseContext.TryRunAfterSettle"/>)
+    /// ПІСЛЯ фіксації її рядка — коли той уже не <c>Running</c> (документ вільний для claim) — і в scope задачі.
+    /// </summary>
+    /// <remarks>МУТАЦІЯ: прибрати виклик <c>RunAfterSettleAsync</c> у <c>JobWorker.ExecuteClaimedAsync</c> — червоний.</remarks>
+    [Fact]
+    public async Task Воркер_виконує_доручене_після_фіксації_рядка_задачі()
+    {
+        var probe = new AfterSettleProbe(Sql);
+        var services = new ServiceCollection();
+        services.AddScoped(_ => Sql.CreateContext());
+        services.AddSingleton<IClock, SystemClock>();
+        services.AddScoped<IJobQueue>(sp => new DbJobQueue(sp.GetRequiredService<EcrDbContext>(), sp.GetRequiredService<IClock>()));
+        services.AddScoped<IJobProgressStore>(sp => new JobProgressStore(sp.GetRequiredService<EcrDbContext>()));
+        services.AddScoped<JobLeaseContext>();
+        services.AddScoped<IJobLeaseContext>(sp => sp.GetRequiredService<JobLeaseContext>());
+        services.AddSingleton<JobQueueSignal>();
+        services.AddSingleton(probe);
+        services.AddScoped<AfterSettleProbeJob>();
+        await using var provider = services.BuildServiceProvider();
+
+        var worker = new JobWorker(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            new JobWorkerOptions
+            {
+                Lanes = [JobLanes.Default],
+                Role = JobProgressStore.CurrentRole,
+                MaxConcurrency = 1,
+                PollInterval = TimeSpan.FromMilliseconds(50),
+            },
+            provider.GetRequiredService<JobQueueSignal>(),
+            NullLogger<JobWorker>.Instance);
+
+        string jobId;
+        await using (var host = NewHost())
+        {
+            jobId = (await host.Queue.EnqueueAsync(
+                new JobEnqueueRequest(typeof(AfterSettleProbeJob).FullName!, JobLanes.Default, "{}"), CancellationToken.None)).JobId;
+        }
+
+        await worker.StartAsync(CancellationToken.None);
+        try
+        {
+            var state = await probe.Seen.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            Assert.Equal((jobId, "Succeeded"), state);
+        }
+        finally
+        {
+            await worker.StopAsync(CancellationToken.None);
+            worker.Dispose();
+        }
+    }
+
+    private async Task<bool> RunExistsAsync(long runId)
+    {
+        await using var db = Sql.CreateContext();
+        return await db.CalculationRuns.AsNoTracking().AnyAsync(r => r.Id == runId);
+    }
+
+    /// <summary>
+    /// Журнал сховища, що на рядку «прогін N прибрано» пробує взяти лок перерахунку документа з окремого з'єднання без
+    /// очікування: <c>true</c> — лок вільний (прибирання поза критичною секцією).
+    /// </summary>
+    private sealed class DocumentLockProbe(string connectionString, long documentId)
+        : Microsoft.Extensions.Logging.ILogger<CalculationResultStore>
+    {
+        public List<bool> LockFreeAtPurge { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state,
+            Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (!formatter(state, exception).Contains("прибрано", StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            using var connection = new Microsoft.Data.SqlClient.SqlConnection(connectionString);
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = """
+                DECLARE @r int;
+                EXEC @r = sys.sp_getapplock @Resource = @res, @LockMode = 'Exclusive', @LockOwner = 'Session', @LockTimeout = 0;
+                IF @r >= 0 EXEC sys.sp_releaseapplock @Resource = @res, @LockOwner = 'Session';
+                SELECT @r;
+                """;
+            command.Parameters.AddWithValue("@res", RecalculationDocumentLock.Resource(documentId));
+            LockFreeAtPurge.Add(Convert.ToInt32(command.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) >= 0);
+        }
+    }
+
     private async Task RunStepAsync(
         TestDocumentBuilder builder, IBackgroundJobScheduler scheduler, IJobQueue queue, ClaimedJob step,
-        RecalculationBudgetMonitor? budget = null, List<string?>? messages = null, (PeriodKey Reader, PeriodKey Owner)? readsOwner = null)
+        RecalculationBudgetMonitor? budget = null, List<string?>? messages = null, (PeriodKey Reader, PeriodKey Owner)? readsOwner = null,
+        List<(int Percent, string? Message)>? reports = null, ICalculationRunner? runner = null,
+        Microsoft.Extensions.Logging.ILogger<CalculationResultStore>? purgeProbe = null, IJobLeaseContext? lease = null,
+        Func<Task>? afterJobInScope = null, CancellationToken ct = default)
     {
         await using var db = builder.CreateContext();
         var clock = new TestClock(Now);
         var job = new RecalculationJob(
             db,
-            new WritingRunner(builder, _methodologyVersionId, _unitId, readsOwner),
-            RunHandler(db, clock),
+            runner ?? new WritingRunner(builder, _methodologyVersionId, _unitId, readsOwner),
+            RunHandler(db, clock, purgeProbe),
             FormulaService(),
             clock,
             jobs: scheduler,
             budget: budget,
-            lease: new FixedLease(step.Claim),
+            lease: lease ?? new FixedLease(step.Claim),
             queue: queue);
 
-        await job.ExecuteAsync(step.PayloadJson, new RecordingProgress(messages), CancellationToken.None);
+        await job.ExecuteAsync(step.PayloadJson, new RecordingProgress(messages, reports), ct);
+
+        // Як JobWorker: робота «після фіксації» — у scope задачі (той самий контекст), після її повернення.
+        if (afterJobInScope is not null)
+        {
+            await afterJobInScope();
+        }
     }
 
     private async Task<string> EnqueueEditAsync(long documentId)
@@ -445,11 +718,15 @@ public sealed class RecalculationYearPerPeriodCommitTests(SqlServerFixture sql) 
         return (builder, document);
     }
 
-    private static RunCalculationHandler RunHandler(EcrDbContext db, TestClock clock)
+    private static RunCalculationHandler RunHandler(
+        EcrDbContext db, TestClock clock, Microsoft.Extensions.Logging.ILogger<CalculationResultStore>? purgeProbe = null)
         => new(
             Substitute.For<IPeriodStore>(),
             Substitute.For<IWorkflowStore>(),
-            new CalculationResultStore(db, clock),
+            purgeProbe is null
+                ? new CalculationResultStore(db, clock)
+                : new CalculationResultStore(
+                    db, clock, purgeOptions: SupersededPurgeOptions.Off with { Enabled = true }, logger: purgeProbe),
             Substitute.For<IBackgroundJobScheduler>(),
             new UnitOfWork(db),
             Substitute.For<Ecr.Application.Security.IAccessDecisionService>(),
@@ -519,18 +796,67 @@ public sealed class RecalculationYearPerPeriodCommitTests(SqlServerFixture sql) 
         }
     }
 
+    /// <summary>Фейк оркестратора: посеред методологій «людина натискає Скасувати» — токен задачі скасовано.</summary>
+    /// <param name="cancel">Токен задачі.</param>
+    /// <param name="driverError">Виняток драйвера посеред запиту (не OCE), як SqlException «Operation cancelled by user».</param>
+    private sealed class CancellingRunner(CancellationTokenSource cancel, bool driverError) : ICalculationRunner
+    {
+        public async Task<ModuleProfile> RunAsync(
+            long calculationRunId, long documentId, PeriodKey periodKey,
+            IReadOnlyList<CalculationBindingRef> bindings, IJobProgress progress, CancellationToken ct)
+        {
+            await cancel.CancelAsync();
+            if (driverError)
+            {
+                throw new InvalidOperationException("Operation cancelled by user.");
+            }
+
+            ct.ThrowIfCancellationRequested();
+            return new ModuleProfile();
+        }
+    }
+
     private sealed class FixedLease(JobClaimToken claim) : IJobLeaseContext
     {
         public JobClaimToken? Current { get; } = claim;
     }
 
-    private sealed class RecordingProgress(List<string?>? messages) : IJobProgress
+    private sealed class RecordingProgress(List<string?>? messages, List<(int Percent, string? Message)>? reports = null)
+        : IJobProgress
     {
         public Task ReportAsync(int percent, string? message, CancellationToken ct)
         {
             messages?.Add(message);
+            reports?.Add((percent, message));
             return Task.CompletedTask;
         }
+    }
+}
+
+/// <summary>Що побачила робота «після фіксації» <see cref="AfterSettleProbeJob"/>: задача і стан її рядка в цю мить.</summary>
+public sealed class AfterSettleProbe(SqlServerFixture sql)
+{
+    /// <summary>(JobId, State) рядка задачі, прочитані роботою після фіксації.</summary>
+    public TaskCompletionSource<(string JobId, string State)> Seen { get; } =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    internal async Task RecordAsync(string jobId)
+    {
+        await using var db = sql.CreateContext();
+        var state = await db.JobProgresses.AsNoTracking().Where(p => p.JobId == jobId).Select(p => p.State).SingleAsync();
+        Seen.TrySetResult((jobId, state));
+    }
+}
+
+/// <summary>Задача, що доручає воркеру роботу після фіксації свого рядка (L1b / D5).</summary>
+public sealed class AfterSettleProbeJob(IJobLeaseContext lease, AfterSettleProbe probe) : IBackgroundJob
+{
+    /// <inheritdoc />
+    public Task ExecuteAsync(object? payload, IJobProgress progress, CancellationToken ct)
+    {
+        var jobId = lease.Current!.JobId;
+        Assert.True(lease.TryRunAfterSettle(_ => probe.RecordAsync(jobId)));
+        return Task.CompletedTask;
     }
 }
 

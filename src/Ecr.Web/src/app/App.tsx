@@ -1,15 +1,22 @@
-﻿import type { JSX } from 'react';
+import { lazy, Suspense, type JSX } from 'react';
 import { MantineProvider } from '@mantine/core';
-import { Notifications } from '@mantine/notifications';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider } from 'react-router-dom';
 import { applyDensity, density } from '@/shared/theme/preferences';
 import { mantineProviderProps } from '@/shared/theme/provider';
+import { loadNotifications } from './lazyNotifications';
 import { createQueryClient } from './queryClient';
 import { router } from './router';
 import { NewVersionBanner } from './staleVersion';
 
 import '@/shared/theme/motion.css';
+
+/*
+ * ✎ Бюджет D-132: контейнер тостів (`<Notifications />` разом із `react-transition-group`) — ледачим чанком. Тости
+ * живуть у сховищі (`notifications.show`, статично), тож показ до появи контейнера не губиться: змонтований контейнер
+ * читає поточний стан сховища. Чанк вантажиться одразу після першого рендера, паралельно з чанком сторінки.
+ */
+const Notifications = lazy(() => loadNotifications(() => import('@ecr/notifications-container')));
 
 /*
  * ⛔ `cell-states.css` тут НЕ імпортується (D-132, бюджет маршруту). Це 23 КБ
@@ -59,7 +66,9 @@ export function App(): JSX.Element {
      */
     <MantineProvider {...mantineProviderProps} defaultColorScheme="auto">
       <QueryClientProvider client={queryClient}>
-        <Notifications position="top-right" />
+        <Suspense fallback={null}>
+          <Notifications position="top-right" />
+        </Suspense>
 
         {/*
          * ⚠ Банер «встановлено нову версію» (`DAT-08`) — ПОЗА

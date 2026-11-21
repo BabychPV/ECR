@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
-import type { TemplatePage, TemplateVersionsForTemplate, TemplateVersionSummary } from '@/api/types';
+import { templatesListQuery } from '@/features/templates/templateQueries';
+import type { TemplateVersionsForTemplate, TemplateVersionSummary } from '@/api/types';
 import { listPermitBindings } from '../api/bindingsApi';
 import {
   buildScanPlan,
@@ -34,7 +35,10 @@ export interface BindingsScan {
   readonly planError: unknown;
   readonly plan: ScanPlan | undefined;
   readonly outcome: ScanOutcome;
-  /** Сервер віддав не всі шаблони (є `nextCursor`): перелік охоплює лише першу сторінку. */
+  /**
+   * Перелік шаблонів неповний (є `nextCursor`): `templatesListQuery` читає всі сторінки й зупиняється лише на
+   * запобіжнику (`fetchAllPages`, 10 000) — тоді скан охоплює прочитане, і екран це каже.
+   */
   readonly templatesTruncated: boolean;
   /** Повторити читання версій, що впали. */
   readonly retryFailed: () => void;
@@ -43,7 +47,7 @@ export interface BindingsScan {
 }
 
 /**
- * Збирає прив'язки з усіх версій першої порції шаблонів.
+ * Збирає прив'язки з усіх версій усіх шаблонів (PSS-19c: раніше — лише перших 100).
  *
  * ⚠ Паралельність обмежена `ScanConcurrency`: пул із фіксованої кількості «робітників» бере наступну версію,
  * щойно попередня відповіла, тож сторінка ніколи не тримає більше ніж 4 запитів у польоті, хоч би скільки було
@@ -53,11 +57,7 @@ export interface BindingsScan {
 export function useBindingsScan(enabled: boolean, limit: number): BindingsScan {
   const client = useQueryClient();
 
-  const templates = useQuery({
-    queryKey: queryKeys.templates.list(),
-    queryFn: () => apiFetch<TemplatePage>('/api/v1/templates?limit=100'),
-    enabled,
-  });
+  const templates = useQuery({ ...templatesListQuery, enabled });
   const templateIds = useMemo(() => (templates.data?.items ?? []).map((template) => template.id), [templates.data]);
   const versions = useQuery({
     queryKey: queryKeys.templates.versionsBatch(templateIds),

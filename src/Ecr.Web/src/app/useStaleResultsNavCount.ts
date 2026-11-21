@@ -1,4 +1,4 @@
-import { useDocumentListSummary } from '@/features/documents/api';
+import { useDocumentListSummary } from '@/features/documents/listSummary';
 import { useUrlNumber } from '@/shared/ui/useUrlState';
 
 /** Політика свіжості бейджа меню (AN-108 / P2-01). */

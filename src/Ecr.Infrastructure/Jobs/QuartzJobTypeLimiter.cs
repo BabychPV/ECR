@@ -137,6 +137,51 @@ public sealed class QuartzJobTypeLimiter(
     }
 
     /// <summary>
+    /// ✎ L1b / D2 (стенд Land 21.11): що сказати на старті про межу дітей розкладу проти місць виконавця перерахунку.
+    /// </summary>
+    /// <param name="fanOutCap">Межа дітей (<see cref="RecalcFanOutMaxConcurrencyKey"/>).</param>
+    /// <param name="slots">Місць виконавця, що бере лейн перерахунку.</param>
+    /// <param name="slotsKey">Ключ/опис місць для тексту.</param>
+    /// <param name="lastSlotReserved">
+    /// Виконавець сам тримає останнє місце не для дітей (<c>JobWorker</c> з кількома місцями, <c>JobWorker.ReservesLastSlot</c>).
+    /// </param>
+    /// <returns>
+    /// <c>Warning</c> — лише коли резерв неможливий (Quartz, пул процесів по одному місцю, одне місце) і межа ≥ місць: діти
+    /// можуть зайняти всі місця, і ручний та авто перерахунок чекатимуть (D-561 каже — обганяють). <c>Information</c> — коли
+    /// межа ≥ місць, але резерв діє: це безпечно, лише межа фактично <c>місця − 1</c> (каже, скільки дітей насправді). Межа
+    /// менша за місця — обидва <c>null</c>.
+    /// </returns>
+    /// <remarks>
+    /// ⛔ Рішення координатора 21.11: не попередження на кожному старті з типовою конфігурацією (InProcess, черга в базі: межа 4,
+    /// місць 4) — постійне попередження вчить адміністратора його ігнорувати, а з резервом останнього місця ця конфігурація
+    /// коректна.
+    /// </remarks>
+    public static (string? Warning, string? Information) FanOutCapacity(
+        int fanOutCap, int slots, string slotsKey, bool lastSlotReserved)
+    {
+        if (fanOutCap < slots)
+        {
+            return (null, null);
+        }
+
+        if (lastSlotReserved && slots > 1)
+        {
+            return (null, string.Format(
+                CultureInfo.InvariantCulture,
+                "{0} = {1}, місць виконавця перерахунку ({2}) = {3}: дітей розкладу на процес виконується не більше {4} — "
+                + "останнє місце виконавець тримає для ручного й автоперерахунку та інших лейнів (D-561).",
+                RecalcFanOutMaxConcurrencyKey, fanOutCap, slotsKey, slots, slots - 1));
+        }
+
+        return (string.Format(
+            CultureInfo.InvariantCulture,
+            "{0} = {1} ≥ місць виконавця перерахунку ({2} = {3}), а резерву місця для не-дітей тут немає: діти розкладу "
+            + "можуть зайняти всі місця, і ручний та автоперерахунок чекатимуть кінця дитини (D-561 каже — обганяють). "
+            + "Знизьте межу до {4} або додайте місць.",
+            RecalcFanOutMaxConcurrencyKey, fanOutCap, slotsKey, slots, Math.Max(1, slots - 1)), null);
+    }
+
+    /// <summary>
     /// Займає місце для задачі типу <paramref name="jobType"/> без черги (задача без ідентифікатора): див.
     /// <see cref="TryEnter(Type, string?)"/>.
     /// </summary>

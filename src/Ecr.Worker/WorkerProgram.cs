@@ -108,6 +108,15 @@ internal static partial class WorkerProgram
             return ExitInvalidConfiguration;
         }
 
+        // ✎ L1b / D2: дочірні процеси — по одному місцю, тож резерву «останнього місця» в процесі немає; місця дає кількість
+        // процесів пулу. Межа дітей розкладу не менша за неї — діти можуть зайняти весь пул (ручні й авто чекатимуть).
+        if (Infrastructure.Jobs.QuartzJobTypeLimiter.FanOutCapacity(
+                Infrastructure.Jobs.QuartzJobTypeLimiter.ReadRecalcFanOutMaxConcurrency(builder.Configuration),
+                options.Count, "Jobs:Workers:Count", lastSlotReserved: false).Warning is { } fanOutWarning)
+        {
+            LogConfigurationWarning(logger, fanOutWarning);
+        }
+
         if (!OperatingSystem.IsWindows())
         {
             LogFatal(logger, JobObject.UnsupportedMessage);
@@ -310,6 +319,9 @@ internal static partial class WorkerProgram
 
     [LoggerMessage(Level = LogLevel.Critical, Message = "{Message}")]
     private static partial void LogFatal(ILogger logger, string message);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Конфігурація: {Warning}")]
+    private static partial void LogConfigurationWarning(ILogger logger, string warning);
 
     /// <summary>Хост наглядача: пул живе, доки живе служба.</summary>
     private sealed class SupervisorService(WorkerSupervisor supervisor) : BackgroundService

@@ -456,3 +456,63 @@ PRINT N'D-560: стиснуто PAGE (таблиць/партицій): ' + CAST
 IF @cPending IS NOT NULL
     PRINT N'D-560: непорожні нестиснені партиції calc.* — крок DBA (runbook §4.2, «Стиснення»): ' + @cPending;
 GO
+
+-- ── L1b / D1 (стенд Land 21.11): на індексах calc.CalculationResult / CalculationStep / CalculationInput — лише РЯДКОВІ замки ──
+--
+-- Гілки різних документів пишуть результати ТОГО САМОГО періоду одночасно (`CalculationResultStore` — `SqlBulkCopy` у
+-- транзакції методології, далі кроки й входи). Ключі гілок не перетинаються (свої Id з `calc.CalculationResultSeq`, свій
+-- документ), спільні лише СТОРІНКИ на межах діапазонів: кінець діапазону Id гілки A і початок гілки B у
+-- `PK_CalculationResult (PeriodKey, Id)`, сусідні документи в `IX_CalculationResult_DocRun`, одна одиниця/версія в
+-- `IX_CalculationResult_UnitId`/`_Version`. Масова вставка бере на такі сторінки X-замок СТОРІНКИ, і дві гілки, що тримають
+-- сторінки різних індексів, чекають одна одну (граф стенду: X на сторінку PK ↔ IX на сторінку DocRun, 32 жертви 1205
+-- і 7 таймаутів за один річний перерахунок; те саме в Quartz). Порядок захоплення індексів усередині одного
+-- `insert bulk` застосунок не керує, тож лікування — гранулярність: з `ALLOW_PAGE_LOCKS = OFF` вставка бере замки
+-- РЯДКІВ (ключів), а ключі гілок не перетинаються — чекати нема на що.
+--
+-- ⚠ Ескалації це не додає: оператор лишається нижче порога 5000 замків на об'єкт — `SqlBulkCopy` іде пакетами
+-- (`CalculationResultStore.BulkCopyBatchRows`), EF пише кроки й входи командами по десятки рядків, прибирання
+-- (`SupersededResultsPurger`) — `DELETE TOP (500)`. `ALTER INDEX … REORGANIZE` на таких індексах недоступний (помилка
+-- 2552) — обслуговування DBA лише `REBUILD` (він опцію зберігає).
+--
+-- ⚠ Тут, наприкінці 07, а не лише в міграції `L1bCalcRowLocksOnly`: `CREATE INDEX … WITH (DROP_EXISTING = ON)` вище
+-- (перенесення на схему партиціонування, CRY01) скидає опцію до типової `ON`. Ідемпотентно: лише індекси, де вона ще
+-- `ON`; `ALTER INDEX … SET` — метадані, усі редакції, SQL Server 2016+. Sch-M на мить — `LOCK_TIMEOUT` 5 с і пропуск
+-- із PRINT (наступний прогін 07 повторить), як у стисненні вище.
+SET LOCK_TIMEOUT 5000;
+
+DECLARE @plTable sysname, @plIndex sysname, @plSql nvarchar(max), @plDone int = 0, @plSkipped int = 0;
+
+DECLARE plCur CURSOR LOCAL FAST_FORWARD FOR
+    SELECT t.name, i.name
+      FROM sys.indexes AS i
+      JOIN sys.tables AS t ON t.object_id = i.object_id
+     WHERE SCHEMA_NAME(t.schema_id) = N'calc'
+       AND t.name IN (N'CalculationResult', N'CalculationStep', N'CalculationInput')
+       AND i.type IN (1, 2)
+       AND i.allow_page_locks = 1
+     ORDER BY t.name, i.index_id;
+OPEN plCur;
+FETCH NEXT FROM plCur INTO @plTable, @plIndex;
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    SET @plSql = N'ALTER INDEX ' + QUOTENAME(@plIndex) + N' ON calc.' + QUOTENAME(@plTable)
+               + N' SET (ALLOW_PAGE_LOCKS = OFF);';
+    BEGIN TRY
+        EXEC sys.sp_executesql @plSql;
+        SET @plDone += 1;
+    END TRY
+    BEGIN CATCH
+        IF ERROR_NUMBER() <> 1222 THROW;
+        SET @plSkipped += 1;
+        PRINT N'  L1b: ' + @plTable + N'.' + @plIndex + N' зайнятий (LOCK_TIMEOUT) — пропущено, повторить наступний прогін 07.';
+    END CATCH;
+    FETCH NEXT FROM plCur INTO @plTable, @plIndex;
+END
+CLOSE plCur;
+DEALLOCATE plCur;
+
+SET LOCK_TIMEOUT -1;
+
+PRINT N'L1b: сторінкові замки вимкнено на індексах calc.Calculation{Result,Step,Input}: ' + CAST(@plDone AS nvarchar(10))
+    + N'; пропущено через блокування: ' + CAST(@plSkipped AS nvarchar(10)) + N'.';
+GO

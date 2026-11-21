@@ -1,9 +1,13 @@
 // tests/Ecr.Infrastructure.Tests/Jobs/RecalculationFanOutLimitDbTests.cs
 using Ecr.Application.Ports;
+using Ecr.Domain.Abstractions;
 using Ecr.Infrastructure.Jobs;
+using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace Ecr.Infrastructure.Tests.Jobs;
@@ -214,6 +218,128 @@ public sealed class RecalculationFanOutLimitDbTests(SqlServerFixture sql) : DbJo
         Assert.Equal("Queued", (await RowAsync(c))!.State);
     }
 
+    /// <summary>
+    /// ✎ L1b / D2: claim останнього вільного місця виконавця (<see cref="IJobQueue.ClaimExceptFanOutAsync"/>) не бере дітей
+    /// розкладу — ні з черги (хоч межа й має місце), ні переклеймом простроченої <c>Running</c>; ручний і авто — бере.
+    /// </summary>
+    /// <remarks>МУТАЦІЯ: <c>ClaimExceptFanOutAsync</c> = звичайний claim — червоний (береться дитина).</remarks>
+    [Fact]
+    public async Task Останнє_місце_виконавця_не_бере_дітей_а_авто_й_ручний_бере()
+    {
+        var child = await EnqueueRecalcAsync(9_650_000, Parent);
+        await EnqueueRecalcAsync(9_650_001, Parent);
+        var auto = await EnqueueRecalcAsync(9_650_010, null, target: Cascade(9_650_010, "-auto"));
+        await using var host = CappedHost();
+
+        // Межа (4) має місце, але це останнє місце виконавця: дітей не бере, авто — бере.
+        Assert.Equal(auto, (await ClaimLastSlotAsync(host, "host/r"))?.Claim.JobId);
+        Assert.Null(await ClaimLastSlotAsync(host, "host/r"));
+
+        // Звичайний claim (не останнє місце) — дитина за FIFO.
+        var running = (await ClaimAsync(host, "host/r"))!;
+        Assert.Equal(child, running.Claim.JobId);
+
+        // Дитина з простроченою орендою — переклейм лише звичайним claim, не останнім місцем.
+        await ExpireLeaseAsync(child);
+        Assert.Null(await ClaimLastSlotAsync(host, "host/r"));
+        Assert.Equal(child, (await ClaimAsync(host, "host/r"))?.Claim.JobId);
+
+        // Ручний — бере й останнє місце.
+        var manual = await EnqueueRecalcAsync(9_650_020, null, user: 7);
+        Assert.Equal(manual, (await ClaimLastSlotAsync(host, "host/r"))?.Claim.JobId);
+    }
+
+    /// <summary>
+    /// ✎ L1b / D2 (стенд Land 21.11: ручний чекав 4 хв 39 с, авто — 71 с): справжній <see cref="JobWorker"/> з чотирма місцями
+    /// і межею дітей 4 — коли дітей у черзі вдосталь, вони займають не більше трьох місць, і ручний перерахунок, поставлений
+    /// після них, береться за одне опитування черги.
+    /// </summary>
+    /// <remarks>
+    /// Задачі тримають місце, доки тест їх не відпустить. Постановка в обхід планувальника (без сигналу), тож воркер бачить
+    /// ручний лише на опитуванні — межа «одне опитування» = <see cref="WorkerPoll"/> плюс claim.
+    /// МУТАЦІЯ: <c>JobWorker.ReservesLastSlot</c> = <c>false</c> — червоний (Running дітей 4, ручний не береться, доки діти
+    /// не закінчаться).
+    /// </remarks>
+    [Fact]
+    public async Task Ручний_береться_за_одне_опитування_коли_діти_розкладу_займають_пул()
+    {
+        var gate = new HeldJobGate();
+        for (var i = 0; i < 8; i++)
+        {
+            await EnqueueHeldAsync(9_660_000 + i, Parent, user: null);
+        }
+
+        var services = new ServiceCollection();
+        services.AddScoped(_ => Sql.CreateContext());
+        services.AddSingleton<IClock, SystemClock>();
+        services.AddScoped<IJobQueue>(sp => new DbJobQueue(
+            sp.GetRequiredService<EcrDbContext>(), sp.GetRequiredService<IClock>(),
+            new QuartzJobTypeLimiter(2, recalcFanOutMaxConcurrency: Cap)));
+        services.AddScoped<IJobProgressStore>(sp => new JobProgressStore(sp.GetRequiredService<EcrDbContext>()));
+        services.AddScoped<JobLeaseContext>();
+        services.AddScoped<IJobLeaseContext>(sp => sp.GetRequiredService<JobLeaseContext>());
+        services.AddSingleton<JobQueueSignal>();
+        services.AddSingleton(gate);
+        services.AddScoped<HeldJob>();
+        await using var provider = services.BuildServiceProvider();
+
+        var worker = new JobWorker(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            new JobWorkerOptions
+            {
+                Lanes = [JobLanes.Recalc],
+                Role = JobProgressStore.CurrentRole,
+                MaxConcurrency = Cap,
+                PollInterval = WorkerPoll,
+            },
+            provider.GetRequiredService<JobQueueSignal>(),
+            NullLogger<JobWorker>.Instance);
+
+        await worker.StartAsync(CancellationToken.None);
+        try
+        {
+            await gate.WaitStartedAsync(Cap - 1, TimeSpan.FromSeconds(30));
+
+            // Ще два опитування: четверту дитину останнє місце не бере.
+            await Task.Delay(WorkerPoll * 2);
+            Assert.Equal(Cap - 1, await RunningChildrenAsync());
+
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            var manual = await EnqueueHeldAsync(9_669_999, parent: null, user: 7);
+            await gate.WaitStartedAsync(Cap, TimeSpan.FromSeconds(15));
+            var waited = clock.Elapsed;
+
+            Assert.Equal("Running", (await RowAsync(manual))!.State);
+            Assert.True(waited < WorkerPoll + TimeSpan.FromSeconds(1), $"ручний чекав {waited} при опитуванні {WorkerPoll}");
+            Assert.Equal(Cap - 1, await RunningChildrenAsync());
+        }
+        finally
+        {
+            gate.ReleaseAll();
+            await worker.StopAsync(CancellationToken.None);
+            worker.Dispose();
+        }
+    }
+
+    private static readonly TimeSpan WorkerPoll = TimeSpan.FromMilliseconds(500);
+
+    private async Task<string> EnqueueHeldAsync(long documentId, string? parent, int? user)
+    {
+        await using var host = NewHost();
+        var payload = parent is null
+            ? $"{{\"documentId\":{documentId}}}"
+            : $"{{\"documentId\":{documentId},\"fanOutParentJobId\":\"{parent}\"}}";
+        var jobId = (await host.Queue.EnqueueAsync(
+                new JobEnqueueRequest(typeof(HeldJob).FullName!, JobLanes.Recalc, payload, null, user, DocumentId: documentId),
+                CancellationToken.None))
+            .JobId;
+        await AwaitNextQueueMillisecondAsync(jobId);
+        return jobId;
+    }
+
+    private static Task<ClaimedJob?> ClaimLastSlotAsync(Host host, string owner)
+        => host.Queue.ClaimExceptFanOutAsync([JobLanes.Recalc], owner, JobQueueLimits.DefaultLease, CancellationToken.None);
+
     private static string Cascade(long documentId, string suffix)
         => $"{nameof(Ecr.Application.Ports.IRecalculationJob)}~doc{documentId}{suffix}";
 
@@ -287,5 +413,41 @@ public sealed class RecalculationFanOutLimitDbTests(SqlServerFixture sql) : DbJo
         await using var db = Sql.CreateContext();
         return await db.JobProgresses.AsNoTracking()
             .CountAsync(p => p.Lane == JobLanes.Recalc && p.State == "Running" && p.FanOutParentJobId != null);
+    }
+}
+
+/// <summary>Ворота <see cref="HeldJob"/>: скільки задач стартувало і коли їх відпустити.</summary>
+public sealed class HeldJobGate
+{
+    private readonly TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private int started;
+
+    internal void Started() => Interlocked.Increment(ref started);
+
+    internal Task Released(CancellationToken ct) => release.Task.WaitAsync(ct);
+
+    /// <summary>Відпускає всі задачі.</summary>
+    public void ReleaseAll() => release.TrySetResult();
+
+    /// <summary>Чекає, доки стартує щонайменше <paramref name="count"/> задач.</summary>
+    public async Task WaitStartedAsync(int count, TimeSpan limit)
+    {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        while (Volatile.Read(ref started) < count)
+        {
+            Assert.True(clock.Elapsed < limit, $"стартувало {Volatile.Read(ref started)} задач із {count} за {limit}");
+            await Task.Delay(20);
+        }
+    }
+}
+
+/// <summary>Задача, що тримає місце виконавця, доки тест не відпустить ворота.</summary>
+public sealed class HeldJob(HeldJobGate gate) : IBackgroundJob
+{
+    /// <inheritdoc />
+    public async Task ExecuteAsync(object? payload, IJobProgress progress, CancellationToken ct)
+    {
+        gate.Started();
+        await gate.Released(ct).ConfigureAwait(false);
     }
 }

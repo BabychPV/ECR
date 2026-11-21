@@ -191,6 +191,58 @@ public sealed class EcrConfigurationValidationTests(SqlServerFixture sql)
     }
 
     /// <remarks>
+    /// ✎ L1b / D2 (стенд Land 21.11; рішення координатора 21.11): межа дітей розкладу перерахунку проти місць виконавця, що
+    /// бере лейн перерахунку. ПОПЕРЕДЖЕННЯ — лише коли резерву останнього місця немає (Quartz — потоки пулу) і межа ≥ місць.
+    /// Черга в базі з InProcess резервує останнє місце сам (JobWorker), тож типова конфігурація (межа 4 = 4 місця) — без
+    /// попередження, лише рядок Information з фактичною кількістю дітей. Executor = Worker — пул попереджає сам (Ecr.Worker).
+    /// Мутації: повернути попередження для зарезервованого випадку — червоні рядки «InProcess 4/6»; прибрати попередження
+    /// Quartz — червоний рядок «Quartz 4 з 4».
+    /// </remarks>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Finding", "L1b-D2")]
+    [InlineData("Database", "InProcess", "4", null, null, "не більше 3")]
+    [InlineData("Database", "InProcess", "6", null, null, "не більше 3")]
+    [InlineData("Database", "InProcess", "3", null, null, null)]
+    [InlineData("Database", "Worker", "40", null, null, null)]
+    [InlineData("Quartz", "InProcess", "4", "4", "Знизьте межу до 3", null)]
+    [InlineData("Quartz", "InProcess", "4", null, null, null)]
+    public void Межа_дітей_розкладу_проти_місць_виконавця_попереджає_лише_без_резерву(
+        string mode, string executor, string cap, string? threads, string? expectedWarning, string? expectedNote)
+    {
+        var config = Config(
+            ("Jobs:Queue:Mode", mode),
+            ("Jobs:Recalculation:Executor", executor),
+            ("Jobs:Recalculation:FanOutMaxConcurrency", cap),
+            ("Jobs:Quartz:ThreadCount", threads ?? ""));
+
+        static List<string> FanOut(IEnumerable<string> lines)
+            => [.. lines.Where(w => w.Contains("Jobs:Recalculation:FanOutMaxConcurrency", StringComparison.Ordinal))];
+
+        var warnings = FanOut(EcrConfigurationValidation.Warnings(config));
+        var notes = FanOut(EcrConfigurationValidation.Notes(config));
+        if (expectedWarning is null)
+        {
+            Assert.Empty(warnings);
+        }
+        else
+        {
+            Assert.Contains(expectedWarning, Assert.Single(warnings), StringComparison.Ordinal);
+        }
+
+        if (expectedNote is null)
+        {
+            Assert.Empty(notes);
+        }
+        else
+        {
+            Assert.Contains(expectedNote, Assert.Single(notes), StringComparison.Ordinal);
+        }
+
+        Assert.Empty(EcrConfigurationValidation.Validate(config));
+    }
+
+    /// <remarks>
     /// PSS-28: у Production порожній або `*` в `AllowedHosts` — попередження (DNS rebinding на анонімні ендпоінти);
     /// задані імена, чи не Production — мовчання. Старт не зупиняється. Мутація: прибрати умову `isProduction` —
     /// червоніє перший рядок; не розпізнавати `*` серед кількох імен — червоніє `a;*`.

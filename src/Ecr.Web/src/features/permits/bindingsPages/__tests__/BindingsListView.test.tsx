@@ -63,7 +63,7 @@ function install(): void {
       const url = String(input);
       run.requests.push(url);
 
-      if (url.includes('/api/v1/templates?limit=100')) {
+      if (url.includes('/api/v1/templates?limit=')) {
         return json({ items: stand.templates, nextCursor: stand.nextCursor, totalCount: stand.templates.length });
       }
       if (url.includes('/api/v1/templates/versions?')) {
