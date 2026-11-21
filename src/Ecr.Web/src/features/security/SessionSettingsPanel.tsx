@@ -41,7 +41,7 @@ export function SessionSettingsPanel({ canManage }: { canManage: boolean }): JSX
       {(view) => (
         // ⚠ `key` — щоб збережене (чи чуже) значення з сервера скидало чернетку поля без ефекту.
         <SessionSettingsForm
-          key={view.idleTimeoutMinutes}
+          key={`${String(view.idleTimeoutMinutes)}:${String(view.technicalLogRetentionDays)}:${String(view.auditRetentionMonths)}`}
           view={view}
           canManage={canManage}
           onSaved={async (saved) => {
@@ -64,17 +64,45 @@ function SessionSettingsForm({
   onSaved: (saved: SessionSettingsView) => Promise<void>;
 }): JSX.Element {
   const [value, setValue] = useState<number | string>(view.idleTimeoutMinutes);
+  // PSS-24: строк зберігання спроб входу — на тому самому екрані, з тими самими правом і збереженням.
+  const [retentionValue, setRetentionValue] = useState<number | string>(view.technicalLogRetentionDays);
+
+  const [auditValue, setAuditValue] = useState<number | string>(view.auditRetentionMonths);
 
   const minutes = typeof value === 'number' ? value : Number.NaN;
-  const valid =
+  const idleValid =
     Number.isInteger(minutes) && minutes >= view.minIdleTimeoutMinutes && minutes <= view.maxIdleTimeoutMinutes;
+  const retentionDays = typeof retentionValue === 'number' ? retentionValue : Number.NaN;
+  const retentionValid =
+    Number.isInteger(retentionDays) &&
+    retentionDays >= view.minTechnicalLogRetentionDays &&
+    retentionDays <= view.maxTechnicalLogRetentionDays;
+  const auditMonths = typeof auditValue === 'number' ? auditValue : Number.NaN;
+  const auditValid =
+    Number.isInteger(auditMonths) &&
+    auditMonths >= view.minAuditRetentionMonths &&
+    auditMonths <= view.maxAuditRetentionMonths;
+  const valid = idleValid && retentionValid && auditValid;
+  const changed =
+    minutes !== view.idleTimeoutMinutes ||
+    retentionDays !== view.technicalLogRetentionDays ||
+    auditMonths !== view.auditRetentionMonths;
 
   const save = useMutation({
     mutationFn: (input: SessionSettingsInput) =>
-      apiFetch<SessionSettingsView>(SessionSettingsPath, { method: 'PUT', body: JSON.stringify(input) }),
+      apiFetch<SessionSettingsView>(SessionSettingsPath, {
+        method: 'PUT',
+        body: JSON.stringify(input),
+      }),
     onSuccess: async (saved) => {
       await onSaved(saved);
-      showDone(t('security.session.saved', { minutes: saved.idleTimeoutMinutes }));
+      // PSS-24: окреме повідомлення про строки зберігання — вони видаляють дані, а не лише міняють поведінку сеансу.
+      const idleChanged = saved.idleTimeoutMinutes !== view.idleTimeoutMinutes;
+      const retentionChanged =
+        saved.technicalLogRetentionDays !== view.technicalLogRetentionDays ||
+        saved.auditRetentionMonths !== view.auditRetentionMonths;
+      if (idleChanged) showDone(t('security.session.saved', { minutes: saved.idleTimeoutMinutes }));
+      if (retentionChanged) showDone(t('security.session.retentionSaved'));
     },
     onError: showApiError,
   });
@@ -86,13 +114,29 @@ function SessionSettingsForm({
     max: view.maxIdleTimeoutMinutes,
     default: view.defaultIdleTimeoutMinutes,
   });
+  const auditHint = t('security.session.auditHint', {
+    min: view.minAuditRetentionMonths,
+    max: view.maxAuditRetentionMonths,
+    default: view.defaultAuditRetentionMonths,
+  });
+  const retentionHint = t('security.session.retentionHint', {
+    min: view.minTechnicalLogRetentionDays,
+    max: view.maxTechnicalLogRetentionDays,
+    default: view.defaultTechnicalLogRetentionDays,
+  });
 
   return (
     <form
       data-testid="session-settings"
       onSubmit={(event) => {
         event.preventDefault();
-        if (valid) save.mutate({ idleTimeoutMinutes: minutes });
+        if (valid) {
+          save.mutate({
+            idleTimeoutMinutes: minutes,
+            technicalLogRetentionDays: retentionDays,
+            auditRetentionMonths: auditMonths,
+          });
+        }
       }}
     >
       <Stack gap="sm" maw={420}>
@@ -108,19 +152,60 @@ function SessionSettingsForm({
           allowNegative={false}
           clampBehavior="none"
           disabled={!canManage}
-          error={value !== '' && !valid ? hint : undefined}
+          error={value !== '' && !idleValid ? hint : undefined}
           suffix={` ${t('security.session.minutesSuffix')}`}
         />
         <Text size="sm" c="dimmed">
           {t('security.session.idleExplain')}
         </Text>
+        {/* PSS-24: строки зберігання — окремий розділ: вони видаляють дані, а не міняють поведінку сеансу. */}
+        <Text fw={600} mt="md" data-testid="retention-heading">
+          {t('security.session.retentionSection')}
+        </Text>
+        <Text size="sm" c="statusWarning" data-testid="retention-warning">
+          {t('security.session.retentionWarning')}
+        </Text>
+        <NumberInput
+          data-testid="technical-log-retention"
+          label={t('security.session.retentionLabel')}
+          description={retentionHint}
+          value={retentionValue}
+          onChange={setRetentionValue}
+          min={view.minTechnicalLogRetentionDays}
+          max={view.maxTechnicalLogRetentionDays}
+          step={30}
+          allowDecimal={false}
+          allowNegative={false}
+          clampBehavior="none"
+          disabled={!canManage}
+          error={retentionValue !== '' && !retentionValid ? retentionHint : undefined}
+          suffix={` ${t('security.session.daysSuffix')}`}
+        />
+        <Text size="sm" c="dimmed">
+          {t('security.session.retentionExplain')}
+        </Text>
+        <NumberInput
+          data-testid="audit-retention"
+          label={t('security.session.auditLabel')}
+          description={auditHint}
+          value={auditValue}
+          onChange={setAuditValue}
+          min={view.minAuditRetentionMonths}
+          max={view.maxAuditRetentionMonths}
+          step={12}
+          allowDecimal={false}
+          allowNegative={false}
+          clampBehavior="none"
+          disabled={!canManage}
+          error={auditValue !== '' && !auditValid ? auditHint : undefined}
+          suffix={` ${t('security.session.monthsSuffix')}`}
+        />
+        <Text size="sm" c="dimmed">
+          {t('security.session.auditExplain')}
+        </Text>
         {canManage && (
           <Group>
-            <Button
-              type="submit"
-              loading={saving}
-              disabled={!valid || minutes === view.idleTimeoutMinutes}
-            >
+            <Button type="submit" loading={saving} disabled={!valid || !changed}>
               {t('security.session.save')}
             </Button>
           </Group>

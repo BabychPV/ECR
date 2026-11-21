@@ -212,6 +212,19 @@
     те, що вже було в Environment ∪ відбиток DP попередньої установки, якщо
     -DataProtectionThumbprint його змінив (майстер такого поля не має).
 
+.PARAMETER AllowedHosts
+    PSS-28: імена вузла, які приймає служба в заголовку `Host` (`AllowedHosts` ASP.NET Core), — ЛИБО рівно `*`
+    (будь-яке ім'я), ЛИБО перелік через `;` (`ecr.example.kz;ecr`): імена вузла БЕЗ схеми, шляху й ПОРТУ, допускається провідний `*.`
+    (`*.example.kz`) і IPv6 у дужках (`[::1]`). ⛔ Порт заборонено: HostFiltering ASP.NET Core порівнює записи з
+    іменем без порту, тож `ecr.example.kz:8443` не збігся б з жодним запитом, і всі, крім localhost, отримали б 400.
+    Пишеться змінною
+    `ECR_AllowedHosts` в Environment служби EcrApi. Закриває DNS rebinding на анонімні ендпоінти: чуже ім'я в `Host`
+    дає `400`. ⛔ Хибне ім'я замикає користувачів (вхід за іншим іменем перестане працювати) — вказуйте всі імена, за
+    якими вузол відкривають, а ім'я з балансувальника — теж. Не `*` — скрипт ДОДАЄ `localhost`, якщо його немає:
+    перевірка кроку 7 (`/health/ready`, `Invoke-PinnedHttpsProbe`) іде з `Host: localhost`. Не задано — змінна не
+    змінюється: MSI-оновлення стирає Environment, але знімок до `msiexec` (R5-U1/U1-05) повертає раніше записане
+    значення. Без значення у Production служба пише при старті попередження `AllowedHosts = *`.
+
 .PARAMETER HttpsThumbprint
     ⛔ D14-08/R-01: ТРАНСПОРТ — рівно один із трьох параметрів (`-HttpsThumbprint`,
     `-BehindHttpsProxy`, `-AllowHttp`); жодного з них — зупинка з поясненням, а не мовчазний HTTP.
@@ -420,6 +433,7 @@ param(
     [System.Security.SecureString] $BootstrapPassword,
     [string] $DataProtectionThumbprint,
     [string] $PreviousDataProtectionCertificateThumbprints,
+    [string] $AllowedHosts,
     [string] $HttpsThumbprint,
     [ValidateRange(0, 65535)] [int] $HttpRedirectPort = 0,
     [switch] $BehindHttpsProxy,
@@ -932,6 +946,45 @@ function Get-AppPortChangeProblem {
     return ("Служба EcrApi зараз слухає $shown, а -AppPort не задано (типове $AppPort): оновлення змінило б " +
         "адресу для всіх користувачів, а крок 7 перевірив би вже новий порт і сказав би «Готово». Нічого не змінено. " +
         "Передайте -AppPort з поточним портом (або з новим — свідомо).")
+}
+
+# Чиста функція (PSS-28): значення -AllowedHosts → Value (нормалізоване) або Problem (текст відмови).
+# `*` — рівно одне (без імен поряд); інакше перелік через `;`: імена вузла без схеми/шляху, з необов'язковим портом,
+# провідний `*.` дозволений, IPv6 — у дужках. Не `*` — додається `localhost` (проби кроку 7 ідуть з `Host: localhost`).
+function Resolve-AllowedHosts {
+    param([AllowNull()] [string] $Value)
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return [pscustomobject]@{ Value = $null; Problem = "-AllowedHosts порожній: вкажіть `*` або імена вузла через `;` (наприклад ecr.example.kz;ecr)." }
+    }
+    $trimmed = $Value.Trim()
+    if ($trimmed -eq '*') { return [pscustomobject]@{ Value = '*'; Problem = $null } }
+
+    $label = '[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?'
+    $pattern = "^(?:(?:\*\.)?$label(?:\.$label)*|\[[0-9A-Fa-f:.]+\])$"
+    $names = [System.Collections.Generic.List[string]]::new()
+    foreach ($raw in ($trimmed -split ';')) {
+        $name = $raw.Trim()
+        if (-not $name) { continue }
+        if ($name -eq '*') {
+            return [pscustomobject]@{ Value = $null; Problem = "-AllowedHosts: `*` не поєднується з іменами — або рівно `*`, або перелік імен." }
+        }
+        if ($name -notmatch $pattern) {
+            $hasPort = if ($name.StartsWith('[')) { $name.Contains(']:') } else { $name.Contains(':') -and -not $name.Contains('://') }
+            $why = if ($hasPort) {
+                "«$name» містить порт: HostFiltering ASP.NET Core порівнює імена БЕЗ порту, тому такий запис не збігається з жодним запитом і замкне всіх користувачів. Вкажіть ім'я без порту (наприклад ecr.example.kz)."
+            } else {
+                "«$name» не ім'я вузла (без схеми, шляху й порту; провідний `*.` допускається)."
+            }
+            return [pscustomobject]@{ Value = $null; Problem = "-AllowedHosts: $why" }
+        }
+        if (-not ($names | Where-Object { $_ -ieq $name })) { $names.Add($name) }
+    }
+    if (-not $names.Count) {
+        return [pscustomobject]@{ Value = $null; Problem = "-AllowedHosts не містить жодного імені: вкажіть `*` або імена вузла через `;`." }
+    }
+    if (-not ($names | Where-Object { $_ -ieq 'localhost' })) { $names.Add('localhost') }
+    return [pscustomobject]@{ Value = ($names -join ';'); Problem = $null }
 }
 
 # Чиста функція: записи знімка, імен яких немає в поточному Environment, — ім'я → значення
@@ -1728,6 +1781,14 @@ $transport = Resolve-TransportConfig -HttpsThumbprint $HttpsThumbprint -BehindHt
     -AllowHttp:$AllowHttp -AppPort $AppPort -HttpRedirectPort $HttpRedirectPort
 if ($transport.Problem) { throw $transport.Problem }
 
+# PSS-28: -AllowedHosts перевіряється ТАКОЖ до схеми й MSI; не задано — нічого не змінюємо.
+$allowedHostsValue = $null
+if ($PSBoundParameters.ContainsKey('AllowedHosts')) {
+    $allowedHostsDecision = Resolve-AllowedHosts -Value $AllowedHosts
+    if ($allowedHostsDecision.Problem) { throw $allowedHostsDecision.Problem }
+    $allowedHostsValue = $allowedHostsDecision.Value
+}
+
 if ($transport.Mode -eq 'Https') {
     $httpsCheck = Get-HttpsCertificateProblem -Thumbprint $HttpsThumbprint -Now (Get-Date) -Provider {
         param($thumbprint)
@@ -2378,6 +2439,13 @@ if ($previousDataProtection -and
     Set-ServiceEnvironmentVariable -ServiceName 'EcrApi' -Name 'ECR_Auth__DataProtection__PreviousCertificateThumbprints' `
         -Value $previousDataProtection
     Write-Host "ECR_Auth__DataProtection__PreviousCertificateThumbprints записано ($previousDataProtection)." -ForegroundColor Green
+}
+
+# PSS-28: перелік дозволених Host. Не секрет. Явний параметр перекриває значення, повернуте зі знімка після MSI.
+if ($allowedHostsValue -and
+    $PSCmdlet.ShouldProcess('HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi\Environment', 'записати ECR_AllowedHosts')) {
+    Set-ServiceEnvironmentVariable -ServiceName 'EcrApi' -Name 'ECR_AllowedHosts' -Value $allowedHostsValue
+    Write-Host "ECR_AllowedHosts записано ($allowedHostsValue)." -ForegroundColor Green
 }
 
 if ($BootstrapPassword) {

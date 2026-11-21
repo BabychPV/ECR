@@ -43723,17 +43723,42 @@ export interface components {
         SessionSettingsInput: {
             /**
              * Format: int32
+             * @description Мінімальна глибина аудиту, місяців (120–1200); `null` — не змінювати.
+             */
+            auditRetentionMonths?: null | number;
+            /**
+             * Format: int32
              * @description Вихід після стількох хвилин без дій.
              */
             idleTimeoutMinutes: number;
+            /**
+             * Format: int32
+             * @description Строк зберігання технічних журналів, днів (30–36500); `null` — не змінювати.
+             */
+            technicalLogRetentionDays?: null | number;
         };
         /** @description Налаштування сеансу для екрана «Безпека». */
         SessionSettingsView: {
             /**
              * Format: int32
+             * @description Мінімальна глибина аудиту в `aud.*`, місяців (`Retention.AuditMonths`).
+             */
+            auditRetentionMonths: number;
+            /**
+             * Format: int32
+             * @description Значення за замовчуванням (120).
+             */
+            defaultAuditRetentionMonths: number;
+            /**
+             * Format: int32
              * @description Значення за замовчуванням.
              */
             defaultIdleTimeoutMinutes: number;
+            /**
+             * Format: int32
+             * @description Значення за замовчуванням (400).
+             */
+            defaultTechnicalLogRetentionDays: number;
             /**
              * Format: int32
              * @description Вихід після стількох хвилин без дій.
@@ -43743,12 +43768,37 @@ export interface components {
              * Format: int32
              * @description Найбільше допустиме значення.
              */
+            maxAuditRetentionMonths: number;
+            /**
+             * Format: int32
+             * @description Найбільше допустиме значення.
+             */
             maxIdleTimeoutMinutes: number;
+            /**
+             * Format: int32
+             * @description Найбільше допустиме значення.
+             */
+            maxTechnicalLogRetentionDays: number;
+            /**
+             * Format: int32
+             * @description Найменше допустиме значення (120).
+             */
+            minAuditRetentionMonths: number;
             /**
              * Format: int32
              * @description Найменше допустиме значення.
              */
             minIdleTimeoutMinutes: number;
+            /**
+             * Format: int32
+             * @description Найменше допустиме значення.
+             */
+            minTechnicalLogRetentionDays: number;
+            /**
+             * Format: int32
+             * @description Скільки днів зберігаються технічні журнали, зокрема `sec.LoginAttempt` (`Retention.TechnicalLogDays`).
+             */
+            technicalLogRetentionDays: number;
         };
         /** @description Запит на зміну отримання алертів. */
         SetAlertsRequest: {

@@ -27683,10 +27683,26 @@
       "SessionSettingsInput": {
         "description": "Запит на зміну налаштувань сеансу.",
         "properties": {
+          "auditRetentionMonths": {
+            "description": "Мінімальна глибина аудиту, місяців (120–1200); `null` — не змінювати.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "idleTimeoutMinutes": {
             "description": "Вихід після стількох хвилин без дій.",
             "format": "int32",
             "type": "integer"
+          },
+          "technicalLogRetentionDays": {
+            "description": "Строк зберігання технічних журналів, днів (30–36500); `null` — не змінювати.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           }
         },
         "required": [
@@ -27697,8 +27713,23 @@
       "SessionSettingsView": {
         "description": "Налаштування сеансу для екрана «Безпека».",
         "properties": {
+          "auditRetentionMonths": {
+            "description": "Мінімальна глибина аудиту в `aud.*`, місяців (`Retention.AuditMonths`).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "defaultAuditRetentionMonths": {
+            "description": "Значення за замовчуванням (120).",
+            "format": "int32",
+            "type": "integer"
+          },
           "defaultIdleTimeoutMinutes": {
             "description": "Значення за замовчуванням.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "defaultTechnicalLogRetentionDays": {
+            "description": "Значення за замовчуванням (400).",
             "format": "int32",
             "type": "integer"
           },
@@ -27707,13 +27738,38 @@
             "format": "int32",
             "type": "integer"
           },
+          "maxAuditRetentionMonths": {
+            "description": "Найбільше допустиме значення.",
+            "format": "int32",
+            "type": "integer"
+          },
           "maxIdleTimeoutMinutes": {
             "description": "Найбільше допустиме значення.",
             "format": "int32",
             "type": "integer"
           },
+          "maxTechnicalLogRetentionDays": {
+            "description": "Найбільше допустиме значення.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "minAuditRetentionMonths": {
+            "description": "Найменше допустиме значення (120).",
+            "format": "int32",
+            "type": "integer"
+          },
           "minIdleTimeoutMinutes": {
             "description": "Найменше допустиме значення.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "minTechnicalLogRetentionDays": {
+            "description": "Найменше допустиме значення.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "technicalLogRetentionDays": {
+            "description": "Скільки днів зберігаються технічні журнали, зокрема `sec.LoginAttempt` (`Retention.TechnicalLogDays`).",
             "format": "int32",
             "type": "integer"
           }
@@ -27722,7 +27778,15 @@
           "idleTimeoutMinutes",
           "minIdleTimeoutMinutes",
           "maxIdleTimeoutMinutes",
-          "defaultIdleTimeoutMinutes"
+          "defaultIdleTimeoutMinutes",
+          "technicalLogRetentionDays",
+          "minTechnicalLogRetentionDays",
+          "maxTechnicalLogRetentionDays",
+          "defaultTechnicalLogRetentionDays",
+          "auditRetentionMonths",
+          "minAuditRetentionMonths",
+          "maxAuditRetentionMonths",
+          "defaultAuditRetentionMonths"
         ],
         "type": "object"
       },

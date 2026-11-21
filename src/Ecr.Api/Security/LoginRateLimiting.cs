@@ -152,6 +152,28 @@ public static class LoginRateLimiting
     /// <summary>Префікс розділу звітів CSP — щоб не збігтися з розділами входу за адресою.</summary>
     private const string CspReportPartitionPrefix = "csp-report:";
 
+    /// <summary>Скільки анонімних читань публічного початкового стану й каталогу рядків з однієї адреси за хвилину (PSS-29).</summary>
+    /// <remarks>
+    /// ⛔ <c>GET /api/v1/public/bootstrap</c> і <c>GET /api/v1/ui-strings/{lang}</c> анонімні (екран входу не має сеансу),
+    /// але ходять у базу (стан початкового налаштування, каталог рядків), а відмови в них немає: цикл <c>curl</c> з
+    /// одного джерела вичерпував пул з'єднань для всіх. Межа така сама, як у звітів CSP (120/хв).
+    ///
+    /// ⚠ Лише АНОНІМНІ запити: автентифікований користувач за корпоративним NAT ділить адресу з усім майданчиком, і
+    /// межа на адресу різала б робочі сеанси. Завантаження екрана входу — кілька викликів (стан + 1–2 каталоги),
+    /// тож 120 покриває зміну в ~30 входів за хвилину; піднімається ключем конфігурації.
+    /// Відмова — голе 429 з <c>Retry-After</c> (без походу в каталог рядків, тобто в базу).
+    /// </remarks>
+    public const int DefaultAnonymousReadPermitPerMinute = 120;
+
+    /// <summary>Префікси анонімних читань, що ходять у базу (PSS-29).</summary>
+    public static readonly string[] AnonymousReadPrefixes = ["/api/v1/public", "/api/v1/ui-strings"];
+
+    /// <summary>Ключ конфігурації: межа анонімних читань за хвилину.</summary>
+    public const string AnonymousReadPermitKey = "Security:RateLimit:AnonymousReadPermitPerMinute";
+
+    /// <summary>Префікс розділу анонімних читань — щоб не збігтися з розділами входу за адресою.</summary>
+    private const string AnonymousReadPartitionPrefix = "anon-read:";
+
     /// <summary>Скільки анонімних проб <c>/health/ready</c> з однієї адреси дозволено за хвилину (P1-03).</summary>
     /// <remarks>
     /// ⛔ P1-03 (AUDIT-2026-10-09b): <c>/health/ready</c> анонімний навмисно (моніторинг,
@@ -256,9 +278,26 @@ public static class LoginRateLimiting
             CspReportPermitKey, DefaultCspReportPermitPerMinute);
         var healthReadyPermit = configuration.GetValue(
             HealthReadyPermitKey, DefaultHealthReadyPermitPerMinute);
+        var anonymousReadPermit = configuration.GetValue(
+            AnonymousReadPermitKey, DefaultAnonymousReadPermitPerMinute);
 
         // S1-01: адреса клієнта за проксі — найправіший недовірений запис X-Forwarded-For.
         var clientAddress = ForwardedClientAddress.FromConfiguration(configuration);
+
+        // PSS-24: журнал входів бере ту саму адресу клієнта, що й межа (див. `AuthController.RemoteIp`).
+        services.AddSingleton(clientAddress);
+
+        // PSS-24: успішні входи, невдалі спроби й блокування — у незмінний `aud.SecurityEvent`; ім'я без облікового запису
+        // маскується (ключований хеш, ключ — під Data Protection).
+        //
+        // ⚠ Реєстрація тут, а не в `Ecr.Infrastructure/DependencyInjection.cs` / `Program.cs`: ці файли — спільні гарячі
+        // (лан L5 та інші), а це єдине місце лану PSS-24, що вже виконується один раз на старті. Інтегратор може
+        // перенести три рядки (журнал, маскувальник, фонове прибирання) у `Program.cs` без зміни поведінки.
+        services.AddSingleton<ILoginNameMasker, DataProtectedLoginNameMasker>();
+        services.AddSingleton<ILoginAuditJournal, LoginAuditJournal>();
+
+        // PSS-24: прибирання оперативного `sec.LoginAttempt` за налаштовуваним строком (400 днів за замовчуванням).
+        services.AddHostedService<Ecr.Infrastructure.Security.LoginAttemptRetentionService>();
 
         // Системна межа проб транспорту — не в глобальному обмежувачі: той рахує і ВІДХИЛЕНІ запити, а квота
         // мусить витрачатися лише прийнятими політикою користувача (див. SmtpTestQuotaMiddleware).
@@ -294,6 +333,12 @@ public static class LoginRateLimiting
                     return PerMinute(ChangePasswordKey(context, clientAddress), changePasswordPermit);
                 }
 
+                if (IsAnonymousRead(context))
+                {
+                    return PerMinute(
+                        AnonymousReadPartitionPrefix + clientAddress.KeyOf(context), anonymousReadPermit);
+                }
+
                 return RateLimitPartition.GetNoLimiter(UnlimitedPartition);
             });
 
@@ -307,7 +352,8 @@ public static class LoginRateLimiting
             // `/health/ready` (P1-03): відмова, що йде в базу, з'їла б економію межі.
             options.OnRejected = static (rejection, ct) =>
             {
-                if (IsCspReport(rejection.HttpContext) || IsHealthReady(rejection.HttpContext))
+                if (IsCspReport(rejection.HttpContext) || IsHealthReady(rejection.HttpContext)
+                    || IsAnonymousRead(rejection.HttpContext))
                 {
                     return RejectBare(rejection);
                 }
@@ -352,6 +398,16 @@ public static class LoginRateLimiting
     private static bool IsCspReport(HttpContext context)
         => context.Request.Path.Equals(
             Controllers.CspReportController.RoutePath, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Чи запит — анонімне читання публічного початкового стану чи каталогу рядків (PSS-29).</summary>
+    /// <remarks>
+    /// ⚠ Обмежувач стоїть ПІСЛЯ автентифікації (див. опис класу): автентифікований запит сюди не потрапляє.
+    /// </remarks>
+    internal static bool IsAnonymousRead(HttpContext context)
+        => (HttpMethods.IsGet(context.Request.Method) || HttpMethods.IsHead(context.Request.Method))
+           && context.User.Identity?.IsAuthenticated != true
+           && AnonymousReadPrefixes.Any(
+               prefix => context.Request.Path.StartsWithSegments(prefix, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>Чи запит — проба готовності (P1-03).</summary>
     private static bool IsHealthReady(HttpContext context)

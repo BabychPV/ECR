@@ -175,6 +175,126 @@ public sealed class IdleSignOutApiTests(SqlServerFixture sql) : IDisposable
         }
     }
 
+    /// <remarks>
+    /// PSS-24: без права <c>Security.ManageUsers</c> ні читання, ні зміна налаштувань (зокрема строків зберігання) не
+    /// проходять — 403, і нічого не записується. Мутація: прибрати <c>PermissionCheck</c> із
+    /// <c>SaveSessionSettingsHandler</c> — червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "PSS-24")]
+    public async Task Без_права_ManageUsers_PUT_зі_строками_зберігання_дає_403_і_нічого_не_пише()
+    {
+        await ArrangeUserAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var client = app.CreateClient();
+        Assert.True((await LoginAsync(client).ConfigureAwait(true)).IsSuccessStatusCode);
+
+        var put = await client.PutAsJsonAsync(Settings, new SessionSettingsInput(30, 36500, 1200)).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Forbidden, put.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync(Settings).ConfigureAwait(true)).StatusCode);
+
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync().ConfigureAwait(true);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM sys_ecr.SystemSetting WHERE [Key] IN (@a, @b) AND Value IN (N'36500', N'1200');";
+        command.Parameters.AddWithValue("@a", SessionSettings.TechnicalLogRetentionKey);
+        command.Parameters.AddWithValue("@b", SessionSettings.AuditRetentionKey);
+        Assert.Equal(0, (int)(await command.ExecuteScalarAsync().ConfigureAwait(true))!);
+    }
+
+    /// <remarks>
+    /// PSS-24: строк зберігання спроб входу змінюється на тому самому екрані й тим самим PUT, що й межа бездіяльності
+    /// (право <c>Security.ManageUsers</c>): 30–36500, поза межами — 422 з ключем і без запису; подія журналу несе нове й
+    /// попереднє значення; прибирання бачить нове значення без перезапуску; старий клієнт (лише idle) строк не чіпає.
+    /// Мутація: прибрати перевірку меж у <c>SaveSessionSettingsHandler</c> — червоніє 422; не писати строк у транзакції — червоніє рядок БД.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "PSS-24")]
+    public async Task Строк_зберігання_спроб_входу_змінюється_на_екрані_з_межами_подією_і_без_перезапуску()
+    {
+        var managerId = await ArrangeUserAsync(withPermission: "Security.ManageUsers").ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var client = app.CreateClient();
+
+        try
+        {
+            Assert.True((await LoginAsync(client).ConfigureAwait(true)).IsSuccessStatusCode);
+
+            var before = (await client.GetFromJsonAsync<SessionSettingsView>(Settings).ConfigureAwait(true))!;
+            Assert.Equal(400, before.TechnicalLogRetentionDays);
+            Assert.Equal(30, before.MinTechnicalLogRetentionDays);
+            Assert.Equal(36500, before.MaxTechnicalLogRetentionDays);
+            Assert.Equal(400, before.DefaultTechnicalLogRetentionDays);
+            Assert.Equal(120, before.AuditRetentionMonths);
+            Assert.Equal(120, before.MinAuditRetentionMonths);
+            Assert.Equal(1200, before.MaxAuditRetentionMonths);
+            Assert.Equal(120, before.DefaultAuditRetentionMonths);
+
+            foreach (var bad in new[] { 29, 0, -1, 36501 })
+            {
+                var refused = await client.PutAsJsonAsync(Settings, new SessionSettingsInput(30, bad)).ConfigureAwait(true);
+                Assert.Equal(HttpStatusCode.UnprocessableEntity, refused.StatusCode);
+                var problem = await refused.Content.ReadFromJsonAsync<JsonElement>().ConfigureAwait(true);
+                Assert.Equal("err.ECR-REQ-0422.technicalLogRetentionOutOfRange", problem.GetProperty("messageKey").GetString());
+            }
+
+            // Глибина аудиту: підлога 120 місяців — менше не приймається (рішення людини 20.11 п. 7).
+            foreach (var badAudit in new[] { 119, 0, -1, 1201 })
+            {
+                var refused = await client.PutAsJsonAsync(Settings, new SessionSettingsInput(30, null, badAudit)).ConfigureAwait(true);
+                Assert.Equal(HttpStatusCode.UnprocessableEntity, refused.StatusCode);
+                var problem = await refused.Content.ReadFromJsonAsync<JsonElement>().ConfigureAwait(true);
+                Assert.Equal("err.ECR-REQ-0422.auditRetentionOutOfRange", problem.GetProperty("messageKey").GetString());
+            }
+
+            var unchanged = (await client.GetFromJsonAsync<SessionSettingsView>(Settings).ConfigureAwait(true))!;
+            Assert.Equal(400, unchanged.TechnicalLogRetentionDays);
+            Assert.Equal(120, unchanged.AuditRetentionMonths);
+
+            var saved = await client.PutAsJsonAsync(Settings, new SessionSettingsInput(30, 120, 240)).ConfigureAwait(true);
+            Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+            var savedView = (await saved.Content.ReadFromJsonAsync<SessionSettingsView>().ConfigureAwait(true))!;
+            Assert.Equal(120, savedView.TechnicalLogRetentionDays);
+            Assert.Equal(240, savedView.AuditRetentionMonths);
+
+            var details = await LatestEventAsync("SessionSettingsUpdated", managerId).ConfigureAwait(true);
+            Assert.Contains("\"technicalLogRetentionDays\":120", details, StringComparison.Ordinal);
+            Assert.Contains("\"previousTechnicalLogRetentionDays\":400", details, StringComparison.Ordinal);
+            Assert.Contains("\"auditRetentionMonths\":240", details, StringComparison.Ordinal);
+            Assert.Contains("\"previousAuditRetentionMonths\":120", details, StringComparison.Ordinal);
+
+            // Прибирання читає те саме значення з бази — без перезапуску й без кешу.
+            await using (var scope = app.Services.CreateAsyncScope())
+            {
+                var purger = ActivatorUtilities.CreateInstance<LoginAttemptPurger>(scope.ServiceProvider);
+                Assert.Equal(120, await purger.ReadRetentionDaysAsync(CancellationToken.None).ConfigureAwait(true));
+            }
+
+            // Старий клієнт шле лише межу бездіяльності: строк зберігання лишається.
+            using var legacy = new StringContent("{\"idleTimeoutMinutes\":30}", System.Text.Encoding.UTF8, "application/json");
+            Assert.Equal(HttpStatusCode.OK, (await client.PutAsync(Settings, legacy).ConfigureAwait(true)).StatusCode);
+            var afterLegacy = (await client.GetFromJsonAsync<SessionSettingsView>(Settings).ConfigureAwait(true))!;
+            Assert.Equal(120, afterLegacy.TechnicalLogRetentionDays);
+            Assert.Equal(240, afterLegacy.AuditRetentionMonths);
+        }
+        finally
+        {
+            await using var connection = new SqlConnection(sql.ConnectionString);
+            await connection.OpenAsync().ConfigureAwait(true);
+            await using var command = connection.CreateCommand();
+            command.CommandText = "DELETE FROM sys_ecr.SystemSetting WHERE [Key] IN (@a, @b, @c);";
+            command.Parameters.AddWithValue("@a", SessionSettings.IdleTimeoutKey);
+            command.Parameters.AddWithValue("@b", SessionSettings.TechnicalLogRetentionKey);
+            command.Parameters.AddWithValue("@c", SessionSettings.AuditRetentionKey);
+            await command.ExecuteNonQueryAsync().ConfigureAwait(true);
+            app.Services.GetRequiredService<IIdleTimeoutPolicy>().Invalidate();
+        }
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]

@@ -127,7 +127,7 @@ Api й воркер на **одному** хості — різні ролі й 
 | `Auth:DataProtection:CertificateThumbprint` | немає | відбиток сертифіката з `LocalMachine\My` для захисту ключів Data Protection (п. 6.2). ⛔ **З 2026-09-29 (S11) у Production обов'язковий**: без нього служба не стартує. Один і той самий сертифікат (із закритим ключем, з правом читання для облікового запису служби) — на всіх вузлах |
 | `Auth:DataProtection:PreviousCertificateThumbprints` | немає | відбитки попередніх сертифікатів Data Protection (масив або список через `;`/`,`), сертифікати мають лишатися в `LocalMachine\My`. Пише `deploy-ecr.ps1 -PreviousDataProtectionCertificateThumbprints`; ненайдений — Warning у журналі. Заміна сертифіката — `https-certificate.md` §9.2–9.3 |
 | `Auth:DataProtection:AllowUnprotectedKeys` | `false` | лише для одноразових стендів (`smoke.ps1`, `e2e-stand.ps1`, `setup-dev-db.ps1`): дозволяє старт у Production без сертифіката. На майданчику не вмикати: старт пише Critical у журнал подій (джерело `ECR`), `db` — Degraded з причиною. `deploy-ecr.ps1` його не ставить ніколи |
-| `Security:RateLimit:LoginPermitPerMinute` | 60 | спроб входу за хвилину з однієї IP-адреси (`/api/v1/login/*`) |
+| `Security:RateLimit:LoginPermitPerMinute` | 60 | спроб входу за хвилину з однієї IP-адреси (`/api/v1/login/*`). ⚠ Адреса — це адреса КЛІЄНТА (`Security:RateLimit:TrustForwardedFor`/`KnownProxies`): за корпоративним NAT або зворотним проксі БЕЗ довіреного `X-Forwarded-For` увесь майданчик ділить одну адресу й одне вікно — для майданчика з N користувачами, що входять разом (початок зміни), підніміть межу до ~N (кожна спроба коштує ≈0,1 с одного ядра, див. `LoginRateLimiting`); та сама адреса йде в журнал входів. Анонімні читання екрана входу мають окрему межу `Security:RateLimit:AnonymousReadPermitPerMinute` (120) |
 | `Security:RateLimit:ChangePasswordPermitPerMinute` | 10 | змін пароля за хвилину на користувача |
 | `Security:RateLimit:TrustForwardedFor` | `false` | брати IP клієнта з `X-Forwarded-For` (вхід, CSP, `/health/ready`). Вмикати лише за зворотним проксі. Ланцюг читається **справа наліво**: IIS ARR і nginx (`$proxy_add_x_forwarded_for`) дописують адресу клієнта праворуч, а все лівіше надіслав сам клієнт, тож клієнт — найправіший запис, що не є адресою довіреного проксі (`KnownProxies`). Запис із портом (`203.0.113.7:51234`, типово для ARR) приймається; запис, що не є IP, — ні (тоді рахується адреса сокета). Без прапорця заголовок ігнорується, і всі за одним проксі/NAT/RDS ділять одне вікно `LoginPermitPerMinute` — для майданчика з N користувачами за однією адресою підніміть межу до N (S1-01) |
 | `Security:RateLimit:KnownProxies` | порожньо | IP-адреси довірених зворотних проксі через кому (`10.0.0.5, 10.0.0.6`). Задано — `X-Forwarded-For` читається лише від цих адрес (запит повз проксі рахується за адресою сокета), а їхні записи в ланцюгу пропускаються. Порожньо — довіряється найправіший запис (один проксі); старт пише попередження, якщо прапорець увімкнено без переліку. Не IP — служба не стартує |
@@ -135,6 +135,8 @@ Api й воркер на **одному** хості — різні ролі й 
 | `Security:RateLimit:ImportPreviewConcurrency` / `ImportPreviewQueueLimit` | 2 / 4 | скільки розборів книги `.xlsx` (перегляд імпорту документа, імпорт лімітів повітря — analyse/preview/apply, дерево НАЕ — analyse/preview/apply, книга таблиці дозволу) — одна спільна межа на процес — розбирається одночасно на процес і скільки чекає в черзі; понад чергу — `429` (`ECR-REQ-0429`, ключ `err.ECR-REQ-0429.importBusy`). Розбір тримає всю книгу в пам'яті (до ~1,5 ГБ на книгу на стелі `XlsxSafetyGate`), тож піднімати першу межу — лише з запасом RAM (P1-04/S1-02). Мінімум — 1 / 0 |
 | `Security:RateLimit:SearchPermit` / `SearchWindowSeconds` | 30 / 10 | обмеження пошуку |
 | `Security:RateLimit:CspReportPermitPerMinute` | 120 | звітів про порушення CSP за хвилину з однієї адреси (`POST /api/v1/csp-report`); понад межу — `429` без тіла |
+| `Security:RateLimit:AnonymousReadPermitPerMinute` | 120 | анонімних читань `GET /api/v1/public/bootstrap` і `GET /api/v1/ui-strings/{lang}` (вони ходять у базу) за хвилину з однієї адреси; понад межу — `429` без тіла з `Retry-After`. Автентифікованих користувачів межа не стосується (PSS-29). Мінімум — 1 |
+| `Security:LoginAttemptRetention:IntervalMinutes` / `Enabled` | 60 / `true` | як часто фонове прибирання `sec.LoginAttempt` читає налаштування й чистить; `Enabled=false` вимикає прибирання (лише для розслідувань). Мінімум — 1 |
 | `Security:RateLimit:RecalculatePermitPerMinute` | 6 | запитів `POST /api/v1/documents/{id}/recalculate` на користувача й документ за хвилину (спільно для власників права `Calculation.Recalculate` і читачів); понад межу — `429` (`ECR-REQ-0429`, `Retry-After`). Лічильник у пам'яті процесу: перезапуск скидає, на кількох вузлах межа діє на кожному окремо. Запити, відхилені `4xx` (`403`/`404`/`422`), межу не витрачають; `5xx` і скасований клієнтом запит — витрачають (робота могла вже статися; ent7 P3-1). Мінімум — 1 |
 | `Security:RateLimit:RecalculateUserPermitPerMinute` | 30 | запитів `POST /api/v1/documents/{id}/recalculate` на КОРИСТУВАЧА (усі документи разом) за хвилину; діє поруч із межею на пару «користувач + документ» (ent7 P3-2). Мінімум — 1 |
 | `Security:RateLimit:SmtpTestPermitPerMinute` / `SmtpTestSystemPermitPerHour` | 5 / 30 | проб поштового транспорту (`POST /api/v1/notifications/smtp/test` і `POST /api/v1/notifications/channels/{id}/test`): на користувача за хвилину і на всю систему за годину; понад межу — `429` (`ECR-REQ-0429`, `Retry-After`). Системна межа списується за проби, ПРИЙНЯТІ межею користувача й перевіркою права `System.ManageNotifications`; запити, відхилені цими двома перевірками (`429`, `403`), її не витрачають, а квота рахує лише проби, що пройшли валідацію й пошук каналу: запити, що завершилися будь-яким статусом `4xx` пізніше (`422`, `404` та ін., зокрема винятком), токен повертають, `5xx` — ні (рев'ю ent6 S6). Межа діє і для проби каналу Teams. Рахуються проби, а не листи: проба каналу шле до 20 адресатів РАЗОМ (явні адреси, потім ролі; D-263, ent6 S3); канал зберігає не більше 50 явних адрес. Квоти живуть у пам'яті кожного процесу: перезапуск скидає, а на кількох вузлах межа діє на кожному окремо. Мінімум для обох — 1 (`notifications-runbook.md` п. 2.5) |
@@ -210,7 +212,7 @@ Api й воркер на **одному** хості — різні ролі й 
 | `Logging:File:RetainedFiles` | 30 | скільки файлів зберігати |
 | `Logging:File:FileSizeLimitMb` | 100 | розмір файлу, після якого починається новий |
 | `Logging:File:Json` | `true` | поруч писати `ecr-yyyyMMdd.json` — рядок JSON на запис (п. 3.2) |
-| `AllowedHosts` | `*` | |
+| `AllowedHosts` | `*` | імена вузла через `;` БЕЗ порту й схеми (`ecr.example.kz;ecr;localhost`), або `*`. ⛔ Запис із портом (`ecr.example.kz:8443`) не збігається з жодним запитом (HostFiltering порівнює без порту) — службу з таким значенням старт не запускає. Чужий `Host` дає `400`. `deploy-ecr.ps1 -AllowedHosts` додає `localhost` (проби `/health/ready`); у Production зі `*` старт пише попередження (PSS-28) |
 
 Ключі з переліку `EcrConfigurationValidation.cs` (зокрема `Schema:StartupMode`,
 `Database:*`, `Auth:SlidingHours`, `Security:*`, `Logging:File:*`,
@@ -258,6 +260,40 @@ ORDER BY [Ts];
 мають іти неспадно, інакше адаптер відмовляє помилкою `ECR-INT-0422`
 (`timestampsOutOfOrder`) замість мовчазного сортування в пам'яті.
 
+### 2.3. Журнал входів і строк зберігання спроб (✎ 2026-11-20, PSS-24)
+
+**Що пишеться.** Кожен вхід лишає слід у незмінному журналі безпеки `aud.SecurityEvent` (екран Audit → Security events):
+
+| Подія | Коли | «Хто» | «Кого стосується» (`TargetUserId`) |
+|---|---|---|---|
+| `LoginSucceeded` | успішний вхід, локальний чи Windows | користувач | користувач |
+| `LoginFailed` | невдала спроба; причина — `reason` у подробицях: `BadPassword`, `UnknownUser`, `NotLocal` (запис не локальний), `Disabled`, `ServiceAccount`, `LockedOut`, `LockedOutCorrectPassword` (пароль правильний, але запис заблокувала паралельна спроба), `SidMismatch` | «Вхід не виконано» (анонімний актор, `-1`): людина не ввійшла, відмову не приписуємо користувачеві, чий пароль вгадують | користувач, якщо обліковий запис є (для `UnknownUser` — порожньо) |
+| `AccountLocked` | ЦЯ спроба вичерпала бюджет і заблокувала запис | «Вхід не виконано» | користувач |
+| `LoginFailedSuppressed` | підсумок пропущених обмежувачем флуду невдалих спроб ключів, що більше не повторилися (`suppressed`, `keys`) | «Вхід не виконано» | — |
+| `LoginAuditOverflow` | таблиця ключів обмежувача переповнена: частину невдалих спроб не записано (`dropped`, `limit`), не частіше за раз на хвилину | «Вхід не виконано» | — |
+
+У подробицях: `userName`, `provider`, `outcome`, `reason`, `ip`, `socketIp` (адреса сокета — лише коли відрізняється від `ip`, тобто за проксі), лічильник `suppressed`; час — «Коли», кореляція — колонка кореляції (той самий `X-Correlation-Id`). Пароля, його довжини чи фрагмента немає. Адреса `ip` — та сама, що рахує межа частоти (`Security:RateLimit:TrustForwardedFor`/`KnownProxies`), а не адреса проксі. Однакові невдалі спроби («ім'я + причина + адреса») пишуться не більше 20 разів за хвилину, решта додається числом `suppressed` до наступного запису (або підсумковою подією, якщо ключ не повернувся). Збій запису журналу ніколи не змінює відповідь входу (Warning у логу).
+
+⛔ **Приватність: невідоме ім'я не зберігається в незмінному журналі.** Люди іноді вводять пароль у поле імені, а `aud.SecurityEvent` не можна ні виправити, ні прибрати (мінімум 120 місяців). Тому для `UnknownUser` (облікового запису немає) замість `userName` пишеться маска: `userNamePrefix` (два перші символи), `userNameLength` і `userNameHash` — перші 32 hex-символи HMAC-SHA256 від імені у верхньому регістрі; той самий ввід дає той самий хеш, тож повторний підбір видно. Ключ HMAC — випадкові 32 байти, захищені Data Protection у `sys_ecr.SystemSetting` (`Security.LoginAuditHmacKey`, спільний для вузлів; рядок не видаляти й не міняти: хеші до заміни стануть непорівнянними). Для наявних облікових записів (`BadPassword`, `Disabled`, …) ім'я пишеться як є. **Сире введене ім'я лишається тільки в оперативній `sec.LoginAttempt`**, яка чиститься за строком нижче. Якщо ключ недоступний — маска без хеша, але ніколи не сире ім'я.
+
+**Скільки живе.** Незмінний слід у `aud.SecurityEvent` (тригер `TR_SecurityEvent_Immutable`) тримається не менше мінімальної глибини аудиту (120 місяців, `arc.usp_ArchiveAudit`). Оперативна таблиця спроб `sec.LoginAttempt` чиститься фоновим прибиранням за строком — **400 днів за замовчуванням, і це налаштування**: його змінює адміністратор з правом `Security.ManageUsers` на екрані **Безпека → Сеанс** (розділ «Сроки хранения данных» (en: Data retention) з попередженням, що скорочення необоротно видаляє старі записи; поле «Срок хранения технических журналов» (en: Technical logs retention), 30–36500 днів; поруч — «Минимальная глубина аудита» (en: Minimum audit depth), 120–1200 місяців, ключ `Retention.AuditMonths`, підлога 120 — рішення людини; саму архівацію аудиту веде `arc.usp_ArchiveAudit`; `PUT /api/v1/security/session-settings`, подія журналу `SessionSettingsUpdated` із новим і попереднім значенням) — без перевидання й без перезапуску, діє на наступному проході прибирання (до `IntervalMinutes` хв). Те саме можна зробити SQL-ом (рядок `sys_ecr.SystemSetting`):
+
+```sql
+-- поточне значення (немає рядка — діє 400)
+SELECT [Key], Value, ModifiedAt FROM sys_ecr.SystemSetting WHERE [Key] = N'Retention.TechnicalLogDays';
+
+-- змінити строк (дні; межі 30–36500: не число або менше 30 — діє типове 400 з попередженням у логу служби, більше 36500 —
+-- 36500 з попередженням); глибина аудиту — так само,
+-- ключ N'Retention.AuditMonths' (місяці, 120–1200; менше 120 — діє 120)
+UPDATE sys_ecr.SystemSetting SET Value = N'200', ModifiedAt = SYSUTCDATETIME()
+ WHERE [Key] = N'Retention.TechnicalLogDays';
+IF @@ROWCOUNT = 0
+    INSERT INTO sys_ecr.SystemSetting ([Key], Value, Description, ModifiedAt)
+    VALUES (N'Retention.TechnicalLogDays', N'200', N'Retention of sec.LoginAttempt, days (PSS-24)', SYSUTCDATETIME());
+```
+
+`UPDATE` рядків `sec.LoginAttempt` заборонений тригером `TR_LoginAttempt_NoUpdate` (`THROW 50060`); `DELETE` дозволений — його робить прибирання за строком. Скорочення строку стирає старіше вже на наступному проході (необоротно для `sec.LoginAttempt`, але не для `aud.SecurityEvent`).
+
 ### Усі ключі конфігурації {#2-ключі-конфігурації}
 
 <!-- generated:config -->
@@ -269,7 +305,7 @@ ORDER BY [Ts];
 | `AirLimits:NaeRegistryCode` | ні | `NAE_TREE` | Значення на старті не перевіряється. |
 | `AirLimits:RegionRegistryCode` | ні | `LAND_REGION` | Значення на старті не перевіряється. |
 | `AirLimits:SubstanceRegistryCode` | ні | `LAND_AIR_SUBSTANCE` | Значення на старті не перевіряється. |
-| `AllowedHosts` | ні | `*` | Значення на старті не перевіряється. |
+| `AllowedHosts` | ні | `*` | Формат перевіряється на старті (див. текст відмови служби). |
 | `Audit:ExportMaxRows` | ні | `100000` | Ціле число, не менше 1. |
 | `Auth:CookieName` | ні | `ecr.auth` | Значення на старті не перевіряється. |
 | `Auth:DataProtection:AllowUnprotectedKeys` | ні | — | `true` або `false`. |
@@ -363,6 +399,9 @@ ORDER BY [Ts];
 | `Security:Csp:Enforce` | ні | `false` | `true` або `false`. |
 | `Security:Csp:ReportOnly` | ні | `true` | `true` або `false`. |
 | `Security:Csp:ReportUri` | ні | `/api/v1/csp-report` | Формат перевіряється на старті (див. текст відмови служби). |
+| `Security:LoginAttemptRetention:Enabled` | ні | `true` | `true` або `false`. |
+| `Security:LoginAttemptRetention:IntervalMinutes` | ні | `60` | Ціле число, не менше 1. PSS-24 |
+| `Security:RateLimit:AnonymousReadPermitPerMinute` | ні | `120` | Ціле число, не менше 1. PSS-29 |
 | `Security:RateLimit:ChangePasswordPermitPerMinute` | ні | — | Ціле число, не менше 1. |
 | `Security:RateLimit:CspReportPermitPerMinute` | ні | `120` | Ціле число, не менше 1. |
 | `Security:RateLimit:DiscussionPostPermitPerMinute` | ні | `20` | Ціле число, не менше 1. |

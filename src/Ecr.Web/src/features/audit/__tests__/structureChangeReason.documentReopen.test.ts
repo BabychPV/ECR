@@ -54,4 +54,11 @@ describe('журнал структури: місяць для одного до
     expect(authorName({ changedByUserId: 0, changedByDisplayName: null })).toContain('audit.systemActor');
     expect(authorName({ changedByUserId: 3, changedByDisplayName: null })).toContain('audit.userGone');
   });
+
+  it('PSS-24: автор -1 (невдалий вхід під невідомим іменем) — «Вхід не виконано», а не «користувач #-1»', () => {
+    const shown = authorName({ changedByUserId: -1, changedByDisplayName: null });
+
+    expect(shown).toContain('audit.anonymousActor');
+    expect(shown).not.toContain('audit.userGone');
+  });
 });
