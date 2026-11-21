@@ -430,7 +430,7 @@ public sealed class DocumentsController(
 
         var periodKey = request.PeriodKey;
         var outcome = await recalculate
-            .RequestAsync(id, PeriodKey.Parse(periodKey), request.SheetDefId, ct)
+            .RequestAsync(id, PeriodKey.Parse(periodKey), request.SheetDefId, request.Full, ct)
             .ConfigureAwait(false);
 
         // ⚠ Конвенція 202 (ApiConventionTests): 202 несе jobId; 200 — лише «рахувати нічого», задачі немає.
@@ -1024,7 +1024,11 @@ public sealed record DocumentPeriodRequest(int PeriodKey);
 /// системою, прогалина 2): вхідні дані читаються як і раніше з усього
 /// документа, звужується лише те, ЩО ЗАПИСУЄТЬСЯ.
 /// </param>
-public sealed record RecalculateDocumentRequest(int PeriodKey, int? SheetDefId = null);
+/// <param name="Full">
+/// ✎ PERF-01 (D-564a): документ річної розкладки — «Повний перерахунок» усіх відкритих місяців року (право
+/// <c>Calculation.Recalculate</c>, інакше 403). <c>false</c> (типово) — лише місяці зі зміненими входами й місяць на екрані.
+/// </param>
+public sealed record RecalculateDocumentRequest(int PeriodKey, int? SheetDefId = null, bool Full = false);
 
 /// <summary>Аркуш × період — адреса операції робочого процесу.</summary>
 /// <param name="SheetDefId">Аркуш.</param>

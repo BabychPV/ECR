@@ -306,31 +306,70 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
     /// ✎ Огляд H1: payload <c>{0}</c> без полів ланцюжка (PSS-04) — нова постановка на ціль ланцюжка, що чекає між
     /// кроками, починає його з ПЕРШОГО періоду: її зміна могла торкнутися вже зроблених місяців.
     /// </summary>
-    /// <remarks>✎ L1b / D3: і <c>$.chainTotal</c> — шкала «період k з N» починається з першого кроку заново.</remarks>
+    /// <remarks>
+    /// ✎ L1b / D3: і <c>$.chainTotal</c> — шкала «період k з N» починається з першого кроку заново. ✎ PERF-01/02: і план
+    /// (<c>$.chainPlan</c>, <c>$.chainSkipped</c>, <c>$.chainRecheck</c>) — перший крок вирішує знову.
+    /// </remarks>
     internal const string ChainResetTemplate =
-        "JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY({0}, '$.chainAfter', NULL), '$.chainDone', NULL), "
-        + "'$.chainReaders', NULL), '$.chainStartedAt', NULL), '$.chainElapsedMs', NULL), '$.chainTotal', NULL)";
+        "JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY("
+        + "{0}, '$.chainAfter', NULL), '$.chainDone', NULL), "
+        + "'$.chainReaders', NULL), '$.chainStartedAt', NULL), '$.chainElapsedMs', NULL), '$.chainTotal', NULL), "
+        + "'$.chainPlan', NULL), '$.chainSkipped', NULL), '$.chainRecheck', NULL)";
 
     /// <summary>
-    /// Злиття в рядок, що чекає (<c>@payload</c> — тіло нової постановки): знято поля ланцюжка (H1) і, якщо нова
-    /// постановка — дитина ІНШОГО розкладу, позначка батька переходить до нового розкладу (його статус її рахує).
-    /// Ставить <c>@existing</c> і <c>@rewrite</c>; <c>{0}</c> — змінна з <c>JobId</c> рядка.
+    /// ✎ PERF-01/02 (<c>D-564a</c>/<c>D-564b</c>): поля натискання з <c>@payload</c> (нова постановка) у <c>@existing</c>
+    /// (рядок, у який вона зливається): місяці на екрані — об'єднанням; «Повний перерахунок» — АБО; позначка батька іншого
+    /// розкладу — нового (як доти). Ставить <c>@rewrite</c>, якщо щось змінилося. Обидва — вже перевірений JSON.
     /// </summary>
-    private const string CoalescePayloadTemplate = """
-            SELECT @existing = Payload FROM itg.JobProgress WHERE JobId = {0};
-            IF (CASE WHEN ISJSON(@existing) = 1 THEN JSON_VALUE(@existing, '$.chainAfter') END) IS NOT NULL
-            BEGIN
-                SET @existing = <<RESET>>;
-                SET @rewrite = 1;
-            END
-            IF ISJSON(@existing) = 1 AND ISJSON(@payload) = 1
-            BEGIN
+    private const string MergePressFieldsSql = """
+                IF JSON_QUERY(@payload, '$.screenPeriods') IS NOT NULL
+                   AND EXISTS (SELECT [value] FROM OPENJSON(@payload, '$.screenPeriods')
+                               EXCEPT SELECT [value] FROM OPENJSON(@existing, '$.screenPeriods'))
+                BEGIN
+                    SET @existing = JSON_MODIFY(@existing, '$.screenPeriods', JSON_QUERY(N'[' + (
+                        SELECT STRING_AGG(u.v, N',') WITHIN GROUP (ORDER BY TRY_CAST(u.v AS int))
+                        FROM (SELECT [value] AS v FROM OPENJSON(@existing, '$.screenPeriods')
+                              UNION SELECT [value] FROM OPENJSON(@payload, '$.screenPeriods')) AS u) + N']'));
+                    SET @rewrite = 1;
+                END
+                IF ISNULL(JSON_VALUE(@payload, '$.forceFull'), N'false') = N'true'
+                   AND ISNULL(JSON_VALUE(@existing, '$.forceFull'), N'false') <> N'true'
+                BEGIN
+                    SET @existing = JSON_MODIFY(@existing, '$.forceFull', CAST(1 AS bit));
+                    SET @rewrite = 1;
+                END
                 IF JSON_VALUE(@payload, '$.fanOutParentJobId') IS NOT NULL
                    AND ISNULL(JSON_VALUE(@existing, '$.fanOutParentJobId'), N'') <> JSON_VALUE(@payload, '$.fanOutParentJobId')
                 BEGIN
                     SET @existing = JSON_MODIFY(@existing, '$.fanOutParentJobId', JSON_VALUE(@payload, '$.fanOutParentJobId'));
                     SET @rewrite = 1;
                 END
+        """;
+
+    /// <summary>
+    /// Злиття в рядок, що чекає (<c>@payload</c> — тіло нової постановки). Ставить <c>@existing</c> і <c>@rewrite</c>;
+    /// <c>{0}</c> — змінна з <c>JobId</c> рядка.
+    /// </summary>
+    /// <remarks>
+    /// ✎ PERF-02 (<c>D-564b</c>, рішення людини 21.11 §6 п. 1; заміщує H1 «з першого періоду»): рядок — ланцюжок між кроками
+    /// (<c>$.chainAfter</c>). Звичайна постановка ланцюжок НЕ скидає: прогрес лишається, а <c>$.chainRecheck</c> велить
+    /// наступному кроку перевірити зроблені й пропущені місяці детектором і дописати лише змінені (їхні входи змінились після
+    /// їхнього кроку). «Повний перерахунок» (<c>$.forceFull</c>) — як доти: поля ланцюжка знято, з першого періоду.
+    /// Далі — поля натискання (<see cref="MergePressFieldsSql"/>).
+    /// </remarks>
+    private const string CoalescePayloadTemplate = """
+            SELECT @existing = Payload FROM itg.JobProgress WHERE JobId = {0};
+            IF (CASE WHEN ISJSON(@existing) = 1 THEN JSON_VALUE(@existing, '$.chainAfter') END) IS NOT NULL
+            BEGIN
+                IF (CASE WHEN ISJSON(@payload) = 1 THEN JSON_VALUE(@payload, '$.forceFull') END) = N'true'
+                    SET @existing = <<RESET>>;
+                ELSE
+                    SET @existing = JSON_MODIFY(@existing, '$.chainRecheck', CAST(1 AS bit));
+                SET @rewrite = 1;
+            END
+            IF ISJSON(@existing) = 1 AND ISJSON(@payload) = 1
+            BEGIN
+        <<MERGE>>
             END
         """;
 
@@ -338,7 +377,33 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
     internal static string CoalescePayloadSql(string jobVar)
         => CoalescePayloadTemplate
             .Replace("{0}", jobVar, StringComparison.Ordinal)
-            .Replace("<<RESET>>", ChainReset("@existing"), StringComparison.Ordinal);
+            .Replace("<<RESET>>", ChainReset("@existing"), StringComparison.Ordinal)
+            .Replace("<<MERGE>>", MergePressFieldsSql, StringComparison.Ordinal);
+
+    /// <summary>
+    /// ✎ PERF-02 (<c>D-564b</c>): ланцюжок поглинає задача позаду на ту саму ціль (<c>@behind</c>, нове натискання) — ВОНА
+    /// продовжує ланцюжок із прогресом <c>{0}</c> (payload наступного кроку чи поточного, якщо крок не дороблено) замість
+    /// почати з першого періоду: <c>$.chainRecheck</c>, автор натискання, поля натискання (<see cref="MergePressFieldsSql"/>).
+    /// «Повний перерахунок» позаду чи ланцюжка немає — як доти (<see cref="CoalescePayloadSql"/>).
+    /// </summary>
+    /// <param name="chainPayload">SQL-змінна з payload ланцюжка.</param>
+    internal static string AbsorbChainSql(string chainPayload) => $$"""
+            SET @payload = (SELECT Payload FROM itg.JobProgress WHERE JobId = @behind);
+            IF ISJSON({{chainPayload}}) = 1 AND ISJSON(@payload) = 1
+               AND (CASE WHEN ISJSON({{chainPayload}}) = 1 THEN JSON_VALUE({{chainPayload}}, '$.chainAfter') END) IS NOT NULL
+               AND ISNULL((CASE WHEN ISJSON(@payload) = 1 THEN JSON_VALUE(@payload, '$.forceFull') END), N'false') <> N'true'
+            BEGIN
+                SET @existing = JSON_MODIFY(JSON_MODIFY({{chainPayload}}, '$.chainRecheck', CAST(1 AS bit)),
+                    '$.triggeredByUserId', TRY_CAST(JSON_VALUE(@payload, '$.triggeredByUserId') AS int));
+                SET @rewrite = 1;
+        {{MergePressFieldsSql}}
+            END
+            ELSE
+            BEGIN
+                SET @payload = NULL;
+        {{CoalescePayloadSql("@behind")}}
+            END
+        """;
 
     /// <summary><see cref="ChainResetTemplate"/> над виразом <paramref name="payloadExpression"/>.</summary>
     internal static string ChainReset(string payloadExpression)
@@ -846,7 +911,10 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
                 {OwnedBy};
                 -- ⛔ Д-1 (O1): свій відлік стелі в задачу позаду НЕ переноситься — у ній
                 -- свіжа правка, і чужий відлік валив би її раніше, ніж та чекала б сама.
-                {CoalescePayloadSql("@behind")}
+                -- ✎ PERF-02: ланцюжок (крок не дороблено) продовжує задача позаду — без свого відліку стелі.
+                DECLARE @chainOwn nvarchar(max) = CASE WHEN ISJSON(@addPayload) = 1 AND LEFT(LTRIM(@addPayload), 1) = NCHAR(123)
+                                                       THEN JSON_MODIFY(@addPayload, @sincePath, NULL) END;
+                {AbsorbChainSql("@chainOwn")}
                 UPDATE itg.JobProgress
                 SET AvailableAt = {RevivedAvailableAt("@available")},
                     [Message] = CASE WHEN AvailableAt = {ParkedAt} THEN NULL ELSE [Message] END,
@@ -946,7 +1014,7 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
                 SET [State] = 'Cancelled', LeaseUntil = NULL, UpdatedAt = @shown,
                     [Message] = REPLACE(@absorbed, N'{AbsorbedMarker}', STRING_ESCAPE(@behind, 'json'))
                 {OwnedBy};
-                {CoalescePayloadSql("@behind")}
+                {AbsorbChainSql("@nextPayload")}
                 UPDATE itg.JobProgress
                 SET AvailableAt = {RevivedAvailableAt("SYSUTCDATETIME()")},
                     [Message] = CASE WHEN AvailableAt = {ParkedAt} THEN NULL ELSE [Message] END,
