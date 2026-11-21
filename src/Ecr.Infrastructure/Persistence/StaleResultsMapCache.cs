@@ -385,8 +385,8 @@ internal sealed partial class StaleResultsMapCache(
 
     private async Task<Entry?> HealAllAsync(Entry old, int periodKey, IReadOnlyList<long> ids, long seq)
     {
-        var rows = await StaleResultsQuery.Documents(db, periodKey)
-            .Where(r => ids.Contains(r.DocumentId))
+        // Форма для набору документів: без історії результатів документа й довідникової частини всього періоду.
+        var rows = await StaleResultsByIdsQuery.Documents(db, periodKey, ids)
             .TagWith(DeltaTag)
             .OrderBy(r => r.DocumentId)
             .Take(Math.Max(MaxIncremental, ids.Count) + 1)
@@ -410,8 +410,7 @@ internal sealed partial class StaleResultsMapCache(
 
     private async Task<Entry?> HealAuthorsAsync(Entry old, int periodKey, IReadOnlyList<long> ids, long seq)
     {
-        var rows = await StaleResultsQuery.AuthorDocuments(db, periodKey)
-            .Where(r => ids.Contains(r.DocumentId))
+        var rows = await StaleResultsByIdsQuery.AuthorDocuments(db, periodKey, ids)
             .TagWith(DeltaTag)
             .OrderBy(r => r.UserId)
             .ThenBy(r => r.DocumentId)
