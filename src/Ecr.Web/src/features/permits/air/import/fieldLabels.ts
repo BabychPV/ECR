@@ -1,7 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
 import { getPermitType } from '@/features/permits/api/typesApi';
 import type { PermitType } from '@/features/permits/api/types';
+import { serverMessage } from '@/features/registries/rc816/serverMessage';
 import { language, t } from '@/shared/i18n';
+import type { ImportIssue } from '../airTypes';
 import { AirType, SourcesTable, SubstancesTable } from './addColumn';
 
 /*
@@ -63,6 +65,20 @@ export function fieldLabel(name: string, columns: ColumnNames = NoColumnNames): 
   if (builtIn !== undefined) return builtIn();
 
   return columns.get(name.toUpperCase()) ?? name;
+}
+
+/**
+ * The text of a finding with the field names in it shown as labels: the server puts the internal field key into `{field}` /
+ * `{other}` (`height`, `FILE_B`), and the user reads «Height, m» everywhere else in the step.
+ */
+export function issueMessage(issue: ImportIssue, columns: ColumnNames = NoColumnNames): string {
+  const args: Record<string, string> = { ...(issue.args ?? {}) };
+  for (const key of ['field', 'other']) {
+    const value = args[key];
+    if (value !== undefined) args[key] = fieldLabel(value, columns);
+  }
+
+  return serverMessage(issue.messageKey, args);
 }
 
 /**

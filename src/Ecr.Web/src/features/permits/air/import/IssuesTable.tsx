@@ -1,10 +1,9 @@
 import { useState, type JSX } from 'react';
 import { Button, Text } from '@mantine/core';
-import { serverMessage } from '@/features/registries/rc816/serverMessage';
 import { formatNumber } from '@/shared/format/number';
 import { t } from '@/shared/i18n';
 import type { ImportIssue } from '../airTypes';
-import { fieldLabel, type ColumnNames } from './fieldLabels';
+import { fieldLabel, issueMessage, type ColumnNames } from './fieldLabels';
 import { sortIssues } from './importModel';
 
 /** Скільки знахідок показано одразу: файл на 2 600 рядків може дати їх тисячі, а DOM — не безкінечний. */
@@ -64,7 +63,7 @@ export function IssuesTable({ issues, dropped = 0, columnNames }: IssuesTablePro
                 <td className="pa-num">{issue.row ?? '—'}</td>
                 <td>{issue.column ?? '—'}</td>
                 <td>{issue.field == null ? '—' : fieldLabel(issue.field, columnNames)}</td>
-                <td>{serverMessage(issue.messageKey, issue.args ?? {})}</td>
+                <td>{issueMessage(issue, columnNames)}</td>
               </tr>
             ))}
           </tbody>
