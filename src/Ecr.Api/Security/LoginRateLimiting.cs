@@ -152,21 +152,41 @@ public static class LoginRateLimiting
     /// <summary>Префікс розділу звітів CSP — щоб не збігтися з розділами входу за адресою.</summary>
     private const string CspReportPartitionPrefix = "csp-report:";
 
-    /// <summary>Скільки анонімних читань публічного початкового стану й каталогу рядків з однієї адреси за хвилину (PSS-29).</summary>
+    /// <summary>
+    /// Скільки анонімних читань під префіксами <see cref="AnonymousReadPrefixes"/>, що НЕ обслуговуються з пам'яті,
+    /// дозволено з однієї адреси за хвилину (PSS-29).
+    /// </summary>
     /// <remarks>
-    /// ⛔ <c>GET /api/v1/public/bootstrap</c> і <c>GET /api/v1/ui-strings/{lang}</c> анонімні (екран входу не має сеансу),
-    /// але ходять у базу (стан початкового налаштування, каталог рядків), а відмови в них немає: цикл <c>curl</c> з
-    /// одного джерела вичерпував пул з'єднань для всіх. Межа така сама, як у звітів CSP (120/хв).
+    /// ⛔ Що обмежується. Канонічні читання екрана входу — <c>GET /api/v1/public/bootstrap</c> і
+    /// <c>GET /api/v1/ui-strings/{lang}</c> з публічною областю (<see cref="IsMemoryServedRead"/>) — межею НЕ
+    /// рахуються: вони обслуговуються з пам'яті процесу (<c>UiStringCatalogStore</c>: ревізія — мемо 5 с, мови —
+    /// 1 хв, зріз — до зміни ревізії, кожне читання з бази — один політ на ключ), тож база бачить сталу кількість
+    /// читань незалежно від частоти запитів і кількості адрес. Межа на адресу там не захищала б нічого, зате
+    /// (так і сталося, e2e RC #988) клала екран входу ВСІМ, хто ділить адресу: екран входу тягне 3–5 таких запитів
+    /// (стан + каталог + зріз кожної мови для перемикача), тобто 120/хв вичерпувалися за ~25 відкриттів — офіс за
+    /// NAT о 9:00 або проксі без довіреного <c>X-Forwarded-For</c> бачили «перевірте мережу».
     ///
-    /// ⚠ Лише АНОНІМНІ запити: автентифікований користувач за корпоративним NAT ділить адресу з усім майданчиком, і
-    /// межа на адресу різала б робочі сеанси. Завантаження екрана входу — кілька викликів (стан + 1–2 каталоги),
-    /// тож 120 покриває зміну в ~30 входів за хвилину; піднімається ключем конфігурації.
-    /// Відмова — голе 429 з <c>Retry-After</c> (без походу в каталог рядків, тобто в базу).
+    /// ⚠ Решта анонімних читань під тими ж префіксами (приватна область без входу, будь-яка інша форма) — під
+    /// межею: законний клієнт їх не шле, а довести для кожної, що вона не йде в базу, дорожче, ніж обмежити.
+    /// Відмова — голе 429 з <c>Retry-After</c>. Закриті <c>[Authorize]</c> маршрути сюди не доходять зовсім:
+    /// <c>UseAuthorization</c> стоїть перед обмежувачем і відповідає 401 сам.
+    ///
+    /// ⚠ Лише АНОНІМНІ запити: автентифікований користувач за корпоративним NAT ділить адресу з усім майданчиком,
+    /// і межа на адресу різала б робочі сеанси.
     /// </remarks>
     public const int DefaultAnonymousReadPermitPerMinute = 120;
 
-    /// <summary>Префікси анонімних читань, що ходять у базу (PSS-29).</summary>
+    /// <summary>Префікси анонімних читань (PSS-29).</summary>
     public static readonly string[] AnonymousReadPrefixes = ["/api/v1/public", "/api/v1/ui-strings"];
+
+    /// <summary>Публічний початковий стан екрана входу — обслуговується з пам'яті (PSS-29).</summary>
+    public const string PublicBootstrapPath = "/api/v1/public/bootstrap";
+
+    /// <summary>Префікс каталогу рядків.</summary>
+    private const string UiStringsPath = "/api/v1/ui-strings";
+
+    /// <summary>Літеральні сегменти маршрутів каталогу, що НЕ є кодом мови (усі закриті входом).</summary>
+    private static readonly string[] UiStringsLiteralSegments = ["coverage", "export.csv", "import"];
 
     /// <summary>Ключ конфігурації: межа анонімних читань за хвилину.</summary>
     public const string AnonymousReadPermitKey = "Security:RateLimit:AnonymousReadPermitPerMinute";
@@ -321,7 +341,8 @@ public static class LoginRateLimiting
                     return PerMinute(ChangePasswordKey(context, clientAddress), changePasswordPermit);
                 }
 
-                if (IsAnonymousRead(context))
+                // PSS-29: канонічні читання екрана входу — з пам'яті, межа їм не потрібна (див. дефолт межі).
+                if (IsAnonymousRead(context) && !IsMemoryServedRead(context))
                 {
                     return PerMinute(
                         AnonymousReadPartitionPrefix + clientAddress.KeyOf(context), anonymousReadPermit);
@@ -396,6 +417,54 @@ public static class LoginRateLimiting
            && context.User.Identity?.IsAuthenticated != true
            && AnonymousReadPrefixes.Any(
                prefix => context.Request.Path.StartsWithSegments(prefix, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// Чи запит — канонічне читання екрана входу, яке обслуговується з пам'яті процесу (PSS-29).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Канонічні рівно ті форми, що їх шле клієнт і що за побудовою не множать записів кешу:
+    /// <list type="bullet">
+    /// <item><c>/api/v1/public/bootstrap</c> — дія без параметрів, будь-який рядок запиту ігнорується;</item>
+    /// <item><c>/api/v1/ui-strings/{lang}</c> з <c>scope</c> відсутнім або <c>public</c> — невідома мова
+    /// обслуговується записом мови за замовчуванням (L1-02), тож вигадані мови нових ключів не дають.</item>
+    /// </list>
+    /// ⚠ Межа між «з пам'яті» і «під межею» — ФОРМА запиту, а не стан кешу в мить запиту: стан кешу
+    /// недетермінований (вікно ревізії щойно сплило), а форма — ні. Холодний ключ однаково коштує базі одне
+    /// читання на ключ, хоч скільки запитів прийде (один політ, <c>UiStringCatalogStore</c>).
+    /// </remarks>
+    /// <param name="context">Запит.</param>
+    public static bool IsMemoryServedRead(HttpContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        var request = context.Request;
+
+        if (request.Path.Equals(PublicBootstrapPath, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (!request.Path.StartsWithSegments(UiStringsPath, StringComparison.OrdinalIgnoreCase, out var rest))
+        {
+            return false;
+        }
+
+        // Рівно один сегмент — код мови: `/en`, але не `/`, `/en/`, `/en/key`.
+        var tail = rest.Value;
+        if (tail is null || tail.Length < 2 || tail.IndexOf('/', 1) >= 0)
+        {
+            return false;
+        }
+
+        if (UiStringsLiteralSegments.Contains(tail[1..], StringComparer.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var scope = request.Query["scope"];
+        return scope.Count == 0
+               || (scope.Count == 1 && string.Equals(scope[0], "public", StringComparison.OrdinalIgnoreCase));
+    }
 
     /// <summary>Чи запит — проба готовності (P1-03).</summary>
     private static bool IsHealthReady(HttpContext context)

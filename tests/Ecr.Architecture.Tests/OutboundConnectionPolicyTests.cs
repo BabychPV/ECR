@@ -121,7 +121,7 @@ public sealed class OutboundConnectionPolicyTests
         OwnDb("src/Ecr.Infrastructure/Startup/SchemaValidator.cs", 1),
         OwnDb("src/Ecr.Infrastructure/Startup/SqlCapabilitiesProbe.cs", 1),       // StartupSequence: db.Database
         OwnDb("src/Ecr.Infrastructure/Jobs/SqlDistributedLock.cs", 1),           // QuartzJobAdapter, RegistrySyncJob: db.Database
-        OwnDb("src/Ecr.Infrastructure/Localization/UiStringCatalogStore.cs", 10),
+        OwnDb("src/Ecr.Infrastructure/Localization/UiStringCatalogStore.cs", 11), // +1 PSS-29: ревізія читається окремо від зрізу (мемо 5 с)
         OwnDb("src/Ecr.Infrastructure/Persistence/ConsistencyIssueReader.cs", 2),
         OwnDb("src/Ecr.Infrastructure/Persistence/AuditReader.cs", 12),        // +1: підсумок журналу (UI-38 C2); +3: підрахунок безпеки/погодження для стелі експорту, журнал погодження
         OwnDb("src/Ecr.Infrastructure/Persistence/AuditReader.Lineage.cs", 1), // B49: значок поза вікном з родоводом колонки (база застосунку)
