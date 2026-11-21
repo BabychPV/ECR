@@ -399,7 +399,7 @@ public sealed class SheetNameRecalculationTests(SqlServerFixture sql)
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => world.RunRecalculationJobAsync(
             new RecalculationRequest(world.Doc.ProjectId, world.Doc.DocumentId, world.Doc.PeriodKey.Value, TriggeredByUserId: UserId),
             new PreemptingRunner(preempt),
-            preempt.Token));
+            ct: preempt.Token));
 
         // Фаза формул закомітила число поданої копії ДО витіснення — і позначка це каже.
         Assert.Equal("Vessel 2", await TextAsync(world.Doc, copyRow));
@@ -409,6 +409,47 @@ public sealed class SheetNameRecalculationTests(SqlServerFixture sql)
         await world.RunRecalculationJobAsync(new RecalculationRequest(
             world.Doc.ProjectId, world.Doc.DocumentId, world.Doc.PeriodKey.Value, TriggeredByUserId: UserId));
         Assert.True(await CopyMarkedAsync(world.Doc, copy.SheetCopyId));
+    }
+
+    /// <remarks>
+    /// Огляд M-1: прогін формул періоду йде по «видах» (оригінал, потім кожна копія), і кожен вид комітить сам. Скасування
+    /// посеред виду №2 (копії) не мусить губити закоміченої зміни виду №1 (поданого оригіналу). Мутація (локально):
+    /// повернути злиття <c>submittedWritten</c> із <c>finally</c> у <c>RecalculationJob.FormulasAsync</c> назад після виклику
+    /// — позначки оригіналу немає, тест червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "F13-p218-788")]
+    public async Task Скасування_посеред_другого_виду_лишає_позначку_закоміченого_першого()
+    {
+        var world = await ArrangeAsync();
+        var copy = await world.Run(h => h.AddAsync(world.Doc.DocumentId, world.Doc.SheetDefId, default));
+        var copyRow = await AddCopyInstanceAsync(world.Doc, copy.SheetCopyId);
+        await SubmitOriginalAsync(world.Doc);
+        await SubmitCopyAsync(world.Doc, copy.SheetCopyId);
+
+        using var preempt = new CancellationTokenSource();
+        var scopes = 0;
+        world.BeforeScope = () =>
+        {
+            if (++scopes == 2)
+            {
+                preempt.Cancel();
+                preempt.Token.ThrowIfCancellationRequested();
+            }
+        };
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => world.RunRecalculationJobAsync(
+            new RecalculationRequest(world.Doc.ProjectId, world.Doc.DocumentId, world.Doc.PeriodKey.Value, TriggeredByUserId: UserId),
+            ct: preempt.Token));
+        world.BeforeScope = null;
+
+        // Вид №1 (оригінал) закомічений, вид №2 (копія) скасовано до запису.
+        Assert.Equal(2, scopes);
+        Assert.Equal("Vessel 1", await TextAsync(world.Doc, world.Doc.RowIds[0]));
+        Assert.Null(await TextAsync(world.Doc, copyRow));
+        Assert.True(await MarkedAsync(world.Doc, world.Doc.SheetCode));
+        Assert.False(await CopyMarkedAsync(world.Doc, copy.SheetCopyId));
     }
 
     /// <remarks>
@@ -590,15 +631,28 @@ public sealed class SheetNameRecalculationTests(SqlServerFixture sql)
         await db.SaveChangesAsync();
     }
 
+    private async Task SubmitOriginalAsync(TestDocument doc)
+    {
+        await using var db = new EcrDbContext(
+            new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).Options);
+        var state = new ApprovalState(doc.DocumentId, doc.SheetDefId, doc.PeriodKey.Value);
+        state.Submit(UserId, Now.AddMinutes(-5));
+        db.ApprovalStates.Add(state);
+        await db.SaveChangesAsync();
+    }
+
     /// <summary>Позначка «перераховано після подання» копії на картці документа (ключ «КОД#sheetCopyId»).</summary>
-    private async Task<bool> CopyMarkedAsync(TestDocument doc, long sheetCopyId)
+    private Task<bool> CopyMarkedAsync(TestDocument doc, long sheetCopyId)
+        => MarkedAsync(doc, SheetCopyNaming.StateKey(doc.SheetCode, sheetCopyId));
+
+    /// <summary>Позначка «перераховано після подання» стану аркуша на картці документа за ключем стану.</summary>
+    private async Task<bool> MarkedAsync(TestDocument doc, string stateKey)
     {
         await using var db = new EcrDbContext(
             new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).Options);
         var summary = await new DocumentStore(db).FindAsync(
             doc.DocumentId, new PeriodKeyFilter(doc.PeriodKey.Value), CancellationToken.None);
-        return Assert.Single(summary!.Sheets!, s => s.Code == SheetCopyNaming.StateKey(doc.SheetCode, sheetCopyId))
-            .RecalculatedAfterSubmission;
+        return Assert.Single(summary!.Sheets!, s => s.Code == stateKey).RecalculatedAfterSubmission;
     }
 
     private async Task ApproveCopyAsync(TestDocument doc, long sheetCopyId)
@@ -771,6 +825,9 @@ public sealed class SheetNameRecalculationTests(SqlServerFixture sql)
 
         public IBackgroundJobScheduler Jobs { get; } = jobs;
 
+        /// <summary>Викликається на початку кожного «виду» прогону формул (оригінал, кожна копія) — до його коміту.</summary>
+        public Action? BeforeScope { get; set; }
+
         /// <summary>Новий контекст і обробник на КОЖЕН виклик — як на кожен HTTP-запит.</summary>
         public async Task<T> Run<T>(Func<DocumentSheetCopyHandler, Task<T>> action)
         {
@@ -871,7 +928,12 @@ public sealed class SheetNameRecalculationTests(SqlServerFixture sql)
 
             var headers = Substitute.For<IDocumentHeaderStore>();
             headers.GetExpressionValuesAsync(Arg.Any<long>(), Arg.Any<CancellationToken>())
-                   .Returns(new Dictionary<string, ExpressionValue>());
+                   .Returns(_ =>
+                   {
+                       // Шапку читає КОЖЕН «вид» прогону (оригінал, копія) на початку — точка втручання тестів.
+                       BeforeScope?.Invoke();
+                       return new Dictionary<string, ExpressionValue>();
+                   });
 
             return new RecalculationService(
                 new NormalizedCellStore(db), new RowStore(db, new BulkCellLoader(db.Database.GetConnectionString()!, 1000), clock),

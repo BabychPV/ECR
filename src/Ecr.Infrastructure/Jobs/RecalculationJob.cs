@@ -1836,20 +1836,28 @@ public sealed partial class RecalculationJob(
             // Річна розкладка: не-місячне число (якір, агрегат року) — поданим МІСЯЦЯМ року, а не періоду прогону.
             var submittedYearWritten = new HashSet<(int PeriodKey, int SheetDefId)>();
 
-            written += await formulas
-                .RecalculateAllAsync(
-                    request.DocumentId, new PeriodKey(period), ct, request.SheetDefId, changed,
-                    writeSubmitted: true,
-                    writeApproved: request.IncludeApproved,
-                    annualPeriods: annualOnly?.GetValueOrDefault(period),
-                    submittedWritten: submittedWritten,
-                    submittedYearWritten: submittedYearWritten)
-                .ConfigureAwait(false);
-
-            submittedChanges.AddRange(request.DocumentId, period, submittedWritten);
-            foreach (var (month, sheetDefId) in submittedYearWritten)
+            // ⛔ Огляд M-1: злиття — у `finally`. Прогін періоду йде по «видах» (оригінал, кожна копія), і кожен комітить
+            // сам; набори наповнюються лише ПІСЛЯ коміту виду. Скасування чи відкладення посеред виду №2 інакше губило б
+            // закомічені зміни виду №1 — і аварійний запис позначок (FlushSubmittedMarksAsync) їх не бачив би.
+            try
             {
-                submittedChanges.Add(request.DocumentId, month, sheetDefId, sheetCopyId: null);
+                written += await formulas
+                    .RecalculateAllAsync(
+                        request.DocumentId, new PeriodKey(period), ct, request.SheetDefId, changed,
+                        writeSubmitted: true,
+                        writeApproved: request.IncludeApproved,
+                        annualPeriods: annualOnly?.GetValueOrDefault(period),
+                        submittedWritten: submittedWritten,
+                        submittedYearWritten: submittedYearWritten)
+                    .ConfigureAwait(false);
+            }
+            finally
+            {
+                submittedChanges.AddRange(request.DocumentId, period, submittedWritten);
+                foreach (var (month, sheetDefId) in submittedYearWritten)
+                {
+                    submittedChanges.Add(request.DocumentId, month, sheetDefId, sheetCopyId: null);
+                }
             }
         }
 
