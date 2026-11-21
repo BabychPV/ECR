@@ -21,7 +21,8 @@ export function NaeSeedRootsButton(): JSX.Element {
   const seed = useMutation({
     mutationFn: seedNaeRoots,
     onSuccess: async (result) => {
-      showDone(t('permits.nae.manual.seeded', { count: result.created.length }));
+      // Both outcomes are said: how many regions appeared, or that every region of the registry is already there.
+      showDone(result.created.length > 0 ? t('permits.nae.manual.seeded', { count: result.created.length }) : t('permits.nae.manual.seededNone'));
       await queryClient.invalidateQueries({ queryKey: queryKeys.registries.all() });
     },
     onError: async (error: unknown) => {
