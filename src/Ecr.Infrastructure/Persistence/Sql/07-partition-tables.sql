@@ -268,16 +268,12 @@ IF OBJECT_ID(N'calc.CalculationResult', N'U') IS NOT NULL
    AND NOT EXISTS (SELECT 1 FROM sys.indexes
                    WHERE object_id = OBJECT_ID(N'calc.CalculationResult') AND name = N'IX_CalculationResult_Run')
 BEGIN
-    IF CAST(SERVERPROPERTY('EngineEdition') AS int) IN (3, 5, 8)
-        CREATE NONCLUSTERED INDEX IX_CalculationResult_Run
-            ON calc.CalculationResult (CalculationRunId)
-            WITH (ONLINE = ON, SORT_IN_TEMPDB = ON, DATA_COMPRESSION = PAGE)
-            ON ps_ByPeriodKey (PeriodKey);
-    ELSE
-        CREATE NONCLUSTERED INDEX IX_CalculationResult_Run
-            ON calc.CalculationResult (CalculationRunId)
-            WITH (SORT_IN_TEMPDB = ON, DATA_COMPRESSION = PAGE)
-            ON ps_ByPeriodKey (PeriodKey);
+    -- ⛔ Динамічним SQL: статичний `ONLINE = ON` навіть у невиконаній гілці Express/Standard відхиляє на компіляції
+    -- пакета (помилка 1712, CI worker/LocalDB 21.11) — опція додається лише там, де вона є.
+    DECLARE @sql nvarchar(max) = N'CREATE NONCLUSTERED INDEX IX_CalculationResult_Run ON calc.CalculationResult (CalculationRunId) WITH ('
+        + CASE WHEN CAST(SERVERPROPERTY('EngineEdition') AS int) IN (3, 5, 8) THEN N'ONLINE = ON, ' ELSE N'' END
+        + N'SORT_IN_TEMPDB = ON, DATA_COMPRESSION = PAGE) ON ps_ByPeriodKey (PeriodKey);';
+    EXEC sys.sp_executesql @sql;
 END
 GO
 
@@ -285,16 +281,12 @@ IF OBJECT_ID(N'calc.CalculationStep', N'U') IS NOT NULL
    AND NOT EXISTS (SELECT 1 FROM sys.indexes
                    WHERE object_id = OBJECT_ID(N'calc.CalculationStep') AND name = N'IX_CalculationStep_Run')
 BEGIN
-    IF CAST(SERVERPROPERTY('EngineEdition') AS int) IN (3, 5, 8)
-        CREATE NONCLUSTERED INDEX IX_CalculationStep_Run
-            ON calc.CalculationStep (CalculationRunId)
-            WITH (ONLINE = ON, SORT_IN_TEMPDB = ON, DATA_COMPRESSION = PAGE)
-            ON ps_ByPeriodKey (PeriodKey);
-    ELSE
-        CREATE NONCLUSTERED INDEX IX_CalculationStep_Run
-            ON calc.CalculationStep (CalculationRunId)
-            WITH (SORT_IN_TEMPDB = ON, DATA_COMPRESSION = PAGE)
-            ON ps_ByPeriodKey (PeriodKey);
+    -- ⛔ Динамічним SQL: статичний `ONLINE = ON` навіть у невиконаній гілці Express/Standard відхиляє на компіляції
+    -- пакета (помилка 1712, CI worker/LocalDB 21.11) — опція додається лише там, де вона є.
+    DECLARE @sql nvarchar(max) = N'CREATE NONCLUSTERED INDEX IX_CalculationStep_Run ON calc.CalculationStep (CalculationRunId) WITH ('
+        + CASE WHEN CAST(SERVERPROPERTY('EngineEdition') AS int) IN (3, 5, 8) THEN N'ONLINE = ON, ' ELSE N'' END
+        + N'SORT_IN_TEMPDB = ON, DATA_COMPRESSION = PAGE) ON ps_ByPeriodKey (PeriodKey);';
+    EXEC sys.sp_executesql @sql;
 END
 GO
 
@@ -302,16 +294,12 @@ IF OBJECT_ID(N'calc.CalculationInput', N'U') IS NOT NULL
    AND NOT EXISTS (SELECT 1 FROM sys.indexes
                    WHERE object_id = OBJECT_ID(N'calc.CalculationInput') AND name = N'IX_CalculationInput_Run')
 BEGIN
-    IF CAST(SERVERPROPERTY('EngineEdition') AS int) IN (3, 5, 8)
-        CREATE NONCLUSTERED INDEX IX_CalculationInput_Run
-            ON calc.CalculationInput (CalculationRunId)
-            WITH (ONLINE = ON, SORT_IN_TEMPDB = ON, DATA_COMPRESSION = PAGE)
-            ON ps_ByPeriodKey (PeriodKey);
-    ELSE
-        CREATE NONCLUSTERED INDEX IX_CalculationInput_Run
-            ON calc.CalculationInput (CalculationRunId)
-            WITH (SORT_IN_TEMPDB = ON, DATA_COMPRESSION = PAGE)
-            ON ps_ByPeriodKey (PeriodKey);
+    -- ⛔ Динамічним SQL: статичний `ONLINE = ON` навіть у невиконаній гілці Express/Standard відхиляє на компіляції
+    -- пакета (помилка 1712, CI worker/LocalDB 21.11) — опція додається лише там, де вона є.
+    DECLARE @sql nvarchar(max) = N'CREATE NONCLUSTERED INDEX IX_CalculationInput_Run ON calc.CalculationInput (CalculationRunId) WITH ('
+        + CASE WHEN CAST(SERVERPROPERTY('EngineEdition') AS int) IN (3, 5, 8) THEN N'ONLINE = ON, ' ELSE N'' END
+        + N'SORT_IN_TEMPDB = ON, DATA_COMPRESSION = PAGE) ON ps_ByPeriodKey (PeriodKey);';
+    EXEC sys.sp_executesql @sql;
 END
 GO
 
