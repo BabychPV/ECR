@@ -55,7 +55,11 @@ public sealed record StaleDocumentRow(long DocumentId, DateTime? Since);
 /// ⚠ Для ВІДОМОГО невеликого набору документів (картка, сторінка при переповненні карти, лікування карти) - НЕ ця форма,
 /// звужена зовнішнім <c>IN (…)</c>, а <see cref="StaleResultsByIdsQuery"/> (той самий предикат, вкладені цикли по префіксу
 /// <c>IX_CalculationResult_DocRun</c>): ця форма для одного документа читала всю історію його результатів і довідникову
-/// частину всього періоду (Land 21.11: 52,8 тис. читань, 4,2 с ЦП; холодна - 6-49 с і 503).
+/// частину всього періоду (Land 21.11: 52,8 тис. читань, 4,2 с ЦП; холодна - 6-49 с і 503). Повна карта періоду
+/// (<c>StaleResultsMapCache</c>: <c>StaleMap:full</c>, <c>StaleMap:authors</c>) - теж <see cref="StaleResultsByIdsQuery"/>,
+/// форма періоду (<see cref="StaleResultsByIdsQuery.PeriodDocuments"/>): ця форма читала історію результатів УСЬОГО періоду
+/// тричі (Land: 14-29 тис. читань, у Query Store до 58 с). Тут лишилось те, що компонується в запит переліку підзапитом <c>IN</c>: фільтр
+/// <c>resultsStale</c> і лічильники при переповненні карти, річна розкладка.
 ///
 /// ⚠ Сирий SQL: <c>aud.*</c> поза моделлю EF. Результат лишається <c>IQueryable</c> — компонується в
 /// підзапит <c>IN</c> до <c>Take</c> (фільтр) або звужується до сторінки (позначка).
@@ -124,6 +128,11 @@ internal static class StaleResultsQuery
     /// <c>Documents(db, period, u)</c> (ті самі ключі й <c>Since</c>); довідникова гілка сюди НЕ входить (її немає й
     /// у карті автора).
     /// </summary>
+    /// <remarks>
+    /// ⚠ Карта авторів у кеші (<c>StaleMap:authors</c>) іде формою періоду
+    /// <see cref="StaleResultsByIdsQuery.PeriodAuthorDocuments"/>; ця форма лишається ЕТАЛОНОМ періоду (тести рівності порівнюють з нею) - для продуктивного
+    /// читання періоду не брати: читає всю історію результатів періоду.
+    /// </remarks>
     /// <param name="db">Контекст.</param>
     /// <param name="periodKey">Період.</param>
     public static IQueryable<StaleAuthorRow> AuthorDocuments(EcrDbContext db, int periodKey)
