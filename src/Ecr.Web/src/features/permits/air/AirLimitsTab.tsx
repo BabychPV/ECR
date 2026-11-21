@@ -209,7 +209,7 @@ function SourcesTable({ sources, context }: { readonly sources: readonly AirSour
                   <th scope="row" className="pa-code">
                     {source.naeCode}
                   </th>
-                  <td className="pa-code" data-testid="air-source-scope">
+                  <td className="pa-code pa-nowrap" data-testid="air-source-scope">
                     {scopeLabel(source, scopeNames)}
                   </td>
                   <td>{cell(source.sourceName)}</td>

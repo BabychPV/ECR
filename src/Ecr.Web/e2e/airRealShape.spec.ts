@@ -569,7 +569,7 @@ test.describe('Air real shape', () => {
         `profile ${code}`,
       );
     }
-    const claimed = 'Column F is already used by "emissionPointName" and cannot also be "test".';
+    const claimed = 'Column F is already used by "Emission point name" and cannot also be "test".';
 
     await signIn(page);
     await toFile(page, realShapeWorkbook(RealShapeSources));
