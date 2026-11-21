@@ -863,8 +863,12 @@ ALTER INDEX ALL ON calc.CalculationStep REBUILD PARTITION = <n> WITH (DATA_COMPR
 calc.CalculationStep WHERE …` — кроки до `D-565` лежать у `TraceJson` (текст), нові — у `TraceJsonGz` (формат `COMPRESS`).
 Великої міграції немає: старі кроки прибирає `D-560` разом зі своїм прогоном.
 
-**Порожні кроки — не збій.** Якщо для прогону немає кроків, спершу перевірте прапор методології
-(`SELECT Code, TraceSteps FROM calc.Methodology`); кроки з'являться після наступного перерахунку документа з прапором.
+**Порожні кроки — не збій.** Чи записав прогін кроки, каже ФАКТ прогону, а не поточний прапор:
+`SELECT JSON_QUERY(ModulesProfileJson, '$.traceSteps') FROM calc.CalculationRun WHERE Id = <прогін>` →
+`{"recorded":[…],"notRecorded":[…]}` (ідентифікатори методологій; ключа немає — прогін до `D-565`). Методологія в
+`notRecorded` — кроків цього прогону немає за задумом; увімкніть прапор і перерахуйте документ. Інструменти
+`tools/land-test-doc` і `tools/land/postcheck` для таких методологій пишуть «not evaluable», а не 0. Користувач бачить те
+саме в панелі «Calculation problems» документа (пояснення або кнопка «show step»).
 
 ### 4.3. Синк складу газу FLERT (`FlertCompositionSyncJob`, `D-476`)
 
