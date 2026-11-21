@@ -283,6 +283,15 @@ function Head({ samples }: { readonly samples: boolean }): JSX.Element {
 }
 
 /**
+ * An optional field the file does not have is folded below the main table — unless nothing could ever find it on its own:
+ * a field with neither header texts nor an explicit column (one the user just added with «Add field») exists only to be
+ * pointed at a column, so it stays in the main table with its picker in sight (e2e airRealShape: folded, the user lost it).
+ */
+export function foldsAway(row: FieldRow): boolean {
+  return row.state === 'notInFile' && (row.matchesByHeader || row.explicit);
+}
+
+/**
  * UX 20.11: the step's main table — one row per field: what the field is, whether it is required (and what one value belongs
  * to), the file column it is read from (with values from the file) and a plain state. A required field that was not found has
  * its column picker right in the row (the one action the user must take); a found one is changed with «Change». Optional fields
@@ -291,8 +300,8 @@ function Head({ samples }: { readonly samples: boolean }): JSX.Element {
 export function FieldsTable(props: FieldsTableProps): JSX.Element {
   const titleId = useId();
   const owners = columnOwners(props.rows, (name) => fieldLabel(name, props.columnNames));
-  const main = props.rows.filter((row) => row.state !== 'notInFile');
-  const absent = props.rows.filter((row) => row.state === 'notInFile');
+  const main = props.rows.filter((row) => !foldsAway(row));
+  const absent = props.rows.filter(foldsAway);
   const samples = props.samples !== null;
   // L1: the row a pick came from gets the focus back once the re-read it started is over (seen busy, then not).
   const [focusAfter, setFocusAfter] = useState<{ readonly name: string; readonly seenBusy: boolean } | null>(null);

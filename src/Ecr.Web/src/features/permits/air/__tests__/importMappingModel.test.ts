@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ImportIssue, ImportSpec } from '../airTypes';
 import { columnOwner, fieldCounts, fieldRows, mappingVerdict, withPickedColumn, type MatchedColumn } from '../import/fieldRows';
-import { fieldWithoutColumn, profileCodeFrom, specPending, transliterate, UnknownRead } from '../import/importModel';
+import { foldsAway } from '../import/FieldsTable';
+import { fieldWithoutColumn, profileCodeFrom, specPending, transliterate, UnknownRead, withNewField } from '../import/importModel';
 import {
   columnNumber,
   itemWatcher,
@@ -101,6 +102,16 @@ describe('fieldRows — what the step shows per field', () => {
 
     expect(rows.find((row) => row.name === 'NaeCode')?.matchesByHeader).toBe(true);
     expect(rows.find((row) => row.name === 'Remark')?.matchesByHeader).toBe(false);
+  });
+
+  it('an absent optional field folds away, but a just-added one (no header texts, no column) stays in the main table', () => {
+    const added = withNewField(spec(), 'Workshop');
+    const rows = fieldRows(added, [mapped('NaeCode', 7, 'G')], []);
+    const folded = rows.filter(foldsAway).map((row) => row.name);
+
+    expect(rows.find((row) => row.name === 'Workshop')?.state).toBe('notInFile');
+    expect(folded).not.toContain('Workshop');
+    expect(folded).toContain('Height');
   });
 });
 

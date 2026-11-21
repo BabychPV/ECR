@@ -265,11 +265,11 @@ test.describe('Air real shape', () => {
     await expect(page.getByTestId('air-field-without-column')).toContainText(`Field "${field}" has no file column`);
     await expect(page.getByRole('button', { name: 'Save as profile…' })).toBeDisabled();
     await page.getByRole('button', { name: 'Re-analyse file' }).click();
-    // ✎ Крок «Відповідність» (ux-permit-import): причина є і в підсумку «поля без стовпця», і в рядку таблиці полів.
+    // ✎ Крок «Відповідність»: додане поле без стовпця лишається в ОСНОВНІЙ таблиці (не згортається до «немає у файлі»),
+    // причина й вибір стовпця — на виду.
     await expect(
-      page.getByTestId('air-fields-absent').getByText(`The column for "${field}" was not found in the file header.`),
+      page.getByTestId('air-fields').getByText(`The column for "${field}" was not found in the file header.`).first(),
     ).toBeVisible({ timeout: 60_000 });
-    await expect(page.getByRole('cell', { name: `The column for "${field}" was not found in the file header.` })).toBeVisible();
     await expect(page.getByText('The request failed')).toHaveCount(0);
     await expect(page.getByRole('button', { name: /Next: preview/ })).toBeEnabled({ timeout: 30_000 });
 
