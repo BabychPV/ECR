@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { apiFetch } from '@/api/client';
-import type { UserPage } from '@/api/types';
+import { allUsersQuery } from '@/features/security/allUsers';
 import { t } from '@/shared/i18n';
 import { isHumanCellChange } from '@/features/audit/api';
 import { can, useSession } from '@/shared/session/useSession';
@@ -61,11 +60,11 @@ export function cellAuthorHint(row: AuthoredRow & { readonly origin: string; rea
 export function useAuthorOptions(
   items: readonly AuthoredRow[] | undefined,
   selected: number | null,
-): { value: string; label: string }[] {
+): { value: string; label: string; disabled?: boolean }[] {
   const session = useSession();
+  // ⛔ PSS-19c: усі користувачі (`allUsersQuery`), а не перші 200 мовчки — 201-й автор не мав імені у фільтрі.
   const users = useQuery({
-    queryKey: ['users', 'audit-authors'],
-    queryFn: () => apiFetch<UserPage>('/api/v1/users?limit=200'),
+    ...allUsersQuery,
     enabled: can(session.data, 'Security.ManageUsers'),
     staleTime: 5 * 60 * 1000,
   });
@@ -101,8 +100,16 @@ export function useAuthorOptions(
       names.set(selected, authorName({ changedByUserId: selected }));
     }
 
-    return [...names.entries()]
-      .sort((a, b) => a[1].localeCompare(b[1]))
-      .map(([id, label]) => ({ value: String(id), label }));
+    return [
+      ...[...names.entries()]
+        .sort((a, b) => a[1].localeCompare(b[1]))
+        .map(([id, label]) => ({ value: String(id), label })),
+      // PSS-19c / L4: користувачів дочитано лише до запобіжника — останнім неактивним пунктом сказано прямо.
+      // ⚠ Те саме, що `truncatedOption` (`@/shared/ui/truncatedOption`), але рядком тут: `AuditPage` — біля межі
+      // бюджету `D-132`, а окремий спільний чанк ради трьох рядків коштував би маршруту ~0,2 КБ (рецензія L10, M3).
+      ...(users.data === undefined || users.data.nextCursor === null
+        ? []
+        : [{ value: '__list-truncated__', label: t('common.shownSoFar', { shown: users.data.items.length }), disabled: true }]),
+    ];
   }, [seen, users.data, selected]);
 }

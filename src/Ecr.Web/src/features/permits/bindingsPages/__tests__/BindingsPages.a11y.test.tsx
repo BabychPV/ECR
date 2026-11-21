@@ -28,7 +28,7 @@ function stand(withBindings: boolean): void {
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.includes('/api/v1/templates?limit=100')) {
+      if (url.includes('/api/v1/templates?limit=')) {
         return json({ items: [template(7, 'GEN07', 'General template')], nextCursor: null, totalCount: 1 });
       }
       if (url.includes('/api/v1/templates/versions?')) {

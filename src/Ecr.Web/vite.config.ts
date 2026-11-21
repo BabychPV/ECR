@@ -1,4 +1,4 @@
-﻿import { defineConfig, type Plugin } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
@@ -119,7 +119,14 @@ const apiUrl = process.env.ECR_API_URL ?? 'http://localhost:5080';
 export default defineConfig({
   plugins: [react(), pruneUnusedMantineCss(), patchMantineTransition()],
   resolve: {
-    alias: { '@': path.resolve(__dirname, './src') },
+    alias: {
+      '@': path.resolve(__dirname, './src'),
+      // ✎ Бюджет D-132: контейнер тостів — ледачим чанком (`App.tsx`). Пакет експортує лише свій `index`, а його вже
+      // статично бере `notifications.show` по всьому застосунку, тож `import('@mantine/notifications')` лишив би
+      // контейнер (з `react-transition-group`) у вхідному чанку. Файл компонента — напряму; оновлення Mantine, що
+      // його перенесе, зламає збірку голосно, а не мовчки.
+      '@ecr/notifications-container': path.resolve(__dirname, 'node_modules/@mantine/notifications/esm/Notifications.mjs'),
+    },
   },
   build: {
     /*

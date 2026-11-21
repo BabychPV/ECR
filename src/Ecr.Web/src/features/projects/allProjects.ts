@@ -1,56 +1,35 @@
-import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type { PagedProjects } from '@/api/types';
-
-/** Розмір сторінки — стеля сервера (`CursorRequest.MaxLimit`). */
-const PageSize = 500;
-
-/**
- * Скільки сторінок іти, перш ніж зупинитися й чесно сказати «є ще».
- *
- * ⚠ Запобіжник від нескінченного циклу на зламаному курсорі, а не бізнес-межа:
- * 20 × 500 = 10 000 проєктів — на порядки більше за будь-який майданчик.
- */
-const MaxPages = 20;
 
 /**
  * УСІ видимі проєкти — для вибору проєкту (`X-07`).
  *
  * ⛔ Екрани просили `?limit=200` і показували те, що прийшло: 201-й проєкт
  * просто не існував для вибору, і ніщо на екрані не казало, що перелік
- * обрізано. Відповідь курсорна, тож тут — прохід сторінками до кінця.
+ * обрізано. Відповідь курсорна, тож тут — прохід сторінками до кінця
+ * (`fetchAllPages`: 500 на сторінку, запобіжник 20 сторінок — PSS-19c зробив
+ * цей прохід спільним для всіх переліків).
  *
  * ⚠ Форма відповіді та сама (`PagedProjects`), і ключ кешу той самий
  * (`['projects']`): сусідні екрани, що читають його, отримують той самий об'єкт.
- * `nextCursor` не `null` лише тоді, коли спрацював запобіжник `MaxPages` —
- * тобто перелік справді неповний, і викликач може це сказати.
+ * `nextCursor` не `null` лише тоді, коли спрацював запобіжник — тобто перелік
+ * справді неповний, і викликач може це сказати.
+ *
+ * ⚠ `fetchAllPages` — ледачим `import()` (рецензія L10, M3): цей модуль у вхідному чанку застосунку
+ * (`breadcrumbResolvers`), і статичний імпорт поклав би прохід сторінками на рахунок КОЖНОГО маршруту (`D-132`).
  */
-export async function fetchAllProjects(): Promise<PagedProjects> {
-  let cursor: string | null = null;
-  const items: PagedProjects['items'] = [];
-  let totalCount: PagedProjects['totalCount'] = null;
+export async function fetchAllProjects(context: { signal?: AbortSignal } = {}): Promise<PagedProjects> {
+  const { fetchAllPages } = await import('@/api/fetchAllPages');
 
-  for (let page = 0; page < MaxPages; page += 1) {
-    const query: string = cursor === null ? '' : `&cursor=${encodeURIComponent(cursor)}`;
-    const next: PagedProjects = await apiFetch<PagedProjects>(`/api/v1/projects?limit=${PageSize}${query}`);
-
-    items.push(...next.items);
-    totalCount = next.totalCount ?? totalCount;
-    cursor = next.nextCursor ?? null;
-
-    if (cursor === null) break;
-  }
-
-  return { items, nextCursor: cursor, totalCount };
+  return fetchAllPages<PagedProjects['items'][number]>('/api/v1/projects', { signal: context.signal });
 }
 
 /**
  * Єдиний опис запиту «усі проєкти» (AN-91 / L8-10): ключ + `queryFn` разом, щоб жоден екран не клав під
  * `['projects']` власну форму (обрізаний `?limit=200` тощо). Вживати як `useQuery({ ...projectsQuery, enabled })`.
  *
- * ⚠ `DocumentPage` лишає ключ `queryKeys.projects.all()` і ледачий `import()` — статичний імпорт цього файлу
- * додав би ~1 КБ gzip до графа маршруту (бюджет D-132); сторож `projectsQueryKey.guard.test.ts` вимагає, щоб
- * `queryFn` там усе одно був `fetchAllProjects`.
+ * ⚠ `DocumentPage` переліку проєктів більше не читає (PSS-19a: стан проєкту — з картки документа); сторож
+ * `projectsQueryKey.guard.test.ts` вимагає, щоб кожен, хто бере ключ `['projects']`, брав і `fetchAllProjects`.
  */
 export const projectsQuery = {
   queryKey: queryKeys.projects.all(),

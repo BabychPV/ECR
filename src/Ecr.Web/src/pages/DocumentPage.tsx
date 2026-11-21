@@ -10,7 +10,6 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { problemText } from '@/shared/ui/problemText';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { apiFetch, EcrApiError } from '@/api/client';
-import { queryKeys } from '@/api/queryKeys';
 import type {
   DocumentPeriodRequest,
   DocumentSummary,
@@ -646,14 +645,6 @@ export function DocumentPage(): JSX.Element {
     [navigate],
   );
 
-  const projects = useQuery({
-    queryKey: queryKeys.projects.all(),
-    // AN-39/L8-10: усі сторінки - проєкт поза першими 200 теж блокує дії в архіві.
-    // ⚠ За `import()`: статичний імпорт додавав файл і ~1 КБ gzip до графа маршруту (бюджет D-132).
-    queryFn: () => import('@/features/projects/allProjects').then((module) => module.fetchAllProjects()),
-    enabled: projectId !== null,
-  });
-
   const calendar = useQuery({
     queryKey: ['periods', projectId],
     queryFn: () => apiFetch<PeriodCalendarDto>(`/api/v1/projects/${String(projectId ?? 0)}/periods`),
@@ -768,7 +759,9 @@ export function DocumentPage(): JSX.Element {
   });
 
   const lock = documentLockOf({
-    projectStatus: projects.data?.items?.find((project) => project.id === projectId)?.status,
+    // ⛔ PSS-19a: стан проєкту — з картки документа (`projectStatus`). Доти сторінка читала ВЕСЬ перелік проєктів (до
+    // 20 сторінок по 500, послідовно) заради стану одного — замка дій в архівованому проєкті.
+    projectStatus: (summary.data ?? baseSummary.data)?.projectStatus,
     periodState: periodReopen.periodState,
     sheetState: state,
   });

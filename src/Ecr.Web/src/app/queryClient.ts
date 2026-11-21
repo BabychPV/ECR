@@ -1,5 +1,5 @@
 import { MutationCache, QueryClient } from '@tanstack/react-query';
-import { applySliceCachePolicy } from '@/features/grid/sliceCache';
+import { applySliceCachePolicy } from '@/features/grid/sliceCachePolicy';
 import { showApiError } from '@/shared/ui/notify';
 
 /**

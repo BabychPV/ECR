@@ -3,13 +3,12 @@ import { Alert, Badge, Group, List, Select, Stack, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
+import { templatesListQuery, templateVersionsQuery } from '@/features/templates/templateQueries';
 import type {
   ExpressionDialect,
   ExpressionValidationDto,
   MethodologyDto,
-  TemplatePage,
   TemplateStructureDto,
-  TemplateVersionPage,
 } from '@/api/types';
 import { ExpressionEditor } from '@/features/expressions/ExpressionEditor';
 import { localizedMessage } from '@/features/expressions/markers';
@@ -20,6 +19,7 @@ import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { statusKey } from '@/shared/ui/StatusBadge';
+import { truncatedOption } from '@/shared/ui/truncatedOption';
 
 /**
  * Редактор виразів (`ФВ-9.15a`, область 10 у `ФВ-14.3`).
@@ -42,11 +42,8 @@ export function ExpressionsPage(): JSX.Element {
   const [expression, setExpression] = useState('');
   const [result, setResult] = useState<ExpressionValidationDto | null>(null);
 
-  const templates = useQuery({
-    queryKey: queryKeys.templates.list(),
-    queryFn: () => apiFetch<TemplatePage>('/api/v1/templates?limit=100'),
-    enabled: dialect === 'Template',
-  });
+  // ⛔ PSS-19c: усі шаблони й усі версії обраного, а не перші 100 мовчки (`templateQueries.ts`).
+  const templates = useQuery({ ...templatesListQuery, enabled: dialect === 'Template' });
 
   const methodologies = useQuery({
     queryKey: queryKeys.methodologies.list(),
@@ -71,16 +68,8 @@ export function ExpressionsPage(): JSX.Element {
   // відповіді був ОБ'ЄКТОМ, не `undefined` — `?? []` не рятував, і виклик
   // `.map` нижче падав `TypeError` на кожному відкритті вкладки «Вираз
   // шаблону» (той самий дефект, що Q-274 в `CreateProjectModal.tsx`).
-  // Взірець — `TemplatesPage.tsx`/`CreateProjectModal.tsx`: `TemplateVersionPage`,
-  // `?limit=100`, `.data?.items`.
-  const versions = useQuery({
-    queryKey: queryKeys.templates.versionsOf(firstTemplateId),
-    queryFn: () =>
-      apiFetch<TemplateVersionPage>(
-        `/api/v1/templates/${String(firstTemplateId)}/versions?limit=100`,
-      ),
-    enabled: firstTemplateId !== undefined,
-  });
+  // Тепер — спільний `templateVersionsQuery` (усі сторінки, PSS-19c), `.data?.items`.
+  const versions = useQuery({ ...templateVersionsQuery(firstTemplateId), enabled: firstTemplateId !== undefined });
 
   // ⛔ Структура обраної версії — джерело підказок після `[` (колонки, рядки,
   // таблиці). Той самий ключ, що й на сторінці версії
@@ -188,7 +177,7 @@ export function ExpressionsPage(): JSX.Element {
             allowDeselect={false}
             disabled={templates.isPending}
             value={selectedTemplateId === undefined ? null : String(selectedTemplateId)}
-            data={templateItems.map((x) => ({ value: String(x.id), label: x.code }))}
+            data={[...templateItems.map((x) => ({ value: String(x.id), label: x.code })), ...truncatedOption(templates.data)]}
             onChange={(value) => {
               setTemplateId(value);
               // Версія належить шаблону: попередня при зміні шаблону недійсна.
@@ -213,10 +202,13 @@ export function ExpressionsPage(): JSX.Element {
              * версія називалася б у переліку шаблонів мовою користувача, а
              * тут — англійським `Published`.
              */
-            data={(versions.data?.items ?? []).map((v) => ({
-              value: String(v.id),
-              label: `${v.version} · ${t(statusKey('version', v.status))}`,
-            }))}
+            data={[
+              ...(versions.data?.items ?? []).map((v) => ({
+                value: String(v.id),
+                label: `${v.version} · ${t(statusKey('version', v.status))}`,
+              })),
+              ...truncatedOption(versions.data),
+            ]}
             onChange={setTemplateVersionId}
           />
         )}

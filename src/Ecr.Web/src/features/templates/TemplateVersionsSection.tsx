@@ -2,12 +2,12 @@ import { useState, type JSX } from 'react';
 import { Anchor, Button, Group, Stack, Text, Title } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { apiFetch } from '@/api/client';
-import { queryKeys } from '@/api/queryKeys';
-import type { TemplateVersionPage, TemplateVersionSummary } from '@/api/types';
+import { templateVersionsQuery } from './templateQueries';
+import type { TemplateVersionSummary } from '@/api/types';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
+import { TruncatedListNote } from '@/shared/ui/TruncatedListNote';
 import { t } from '@/shared/i18n';
 import { NewTemplateVersionModal } from './NewTemplateVersionModal';
 import './templateVersionsTimeline.css';
@@ -25,9 +25,8 @@ function templateVersionHref(templateId: number, versionId: number): string {
  * лише код і число залежних. Єдиний шлях до редактора структури був назад
  * через перелік.
  *
- * ⚠ Запит — ТОЙ САМИЙ, що в `TemplatesPage` (ключ `versionsOf`, адреса,
- * `?limit=100`): перехід із переліку на картку бере версії з кешу, а
- * створення версії звідси оновлює обидва екрани однією інвалідацією.
+ * ⚠ Запит — ТОЙ САМИЙ, що на інших екранах (`templateVersionsQuery`, ключ `versionsOf`, усі сторінки — PSS-19c):
+ * перехід на картку бере версії з кешу, а створення версії звідси оновлює всі екрани однією інвалідацією.
  *
  * ⛔ «New version» — лише з `editable`, і це та сама перевірка
  * `can(session, 'Template.Edit')`, що й у переліку; вирішує її сторінка, а не
@@ -37,15 +36,11 @@ function templateVersionHref(templateId: number, versionId: number): string {
  * шапці, а `L1` дозволяє на екрані рівно одну `filled`.
  */
 /**
- * Версії шаблону (до 100) — один запит на картку: його читають і стрічка версій,
+ * Усі версії шаблону — один запит на картку: його читають і стрічка версій,
  * і шапка картки (бейдж стану, «Continue draft», b4b).
  */
 export function useTemplateVersions(templateId: number) {
-  return useQuery({
-    queryKey: queryKeys.templates.versionsOf(templateId),
-    queryFn: () =>
-      apiFetch<TemplateVersionPage>(`/api/v1/templates/${String(templateId)}/versions?limit=100`),
-  });
+  return useQuery(templateVersionsQuery(templateId));
 }
 
 export function TemplateVersionsSection({
@@ -146,6 +141,8 @@ export function TemplateVersionsSection({
           </ol>
         )}
       </AsyncBoundary>
+      {/* PSS-19c / L4: версії дочитано лише до запобіжника — сказано прямо (новіші — у кінці переліку). */}
+      <TruncatedListNote list={versions.data} />
       <NewTemplateVersionModal
         templateId={creating ? templateId : null}
         cloneFrom={latest}

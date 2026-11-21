@@ -55,6 +55,14 @@ const calcMode = (): string | null => new URLSearchParams(window.location.search
 const calcEnabled = (): boolean => ['1', 'periods', 'other'].includes(calcMode() ?? '');
 const OtherPeriodKey = 202_610;
 
+/**
+ * PSS-18: `?size=500x60` — таблиця бюджету `ФВ-14.29` (500 рядків × 60 колонок) у СПРАВЖНЬОМУ `DocumentGrid`: на ній
+ * міряють, скільки коштує одна правка (модель рядків, `gridRowModels.ts`) під тротлінгом CPU.
+ */
+const wide = (): boolean => new URLSearchParams(window.location.search).get('size') === '500x60';
+const WideExtraColumns = 58;
+const WideRowCount = 500;
+
 function finishedJobStatus(): Record<string, unknown> {
   switch (calcMode()) {
     case 'periods':
@@ -116,13 +124,15 @@ function slice(): Record<string, unknown> {
       // AU-13 N1: зі стилем шапки QTY має одиницю — рядок `.ecr-header-unit` на заливці перевіряє axe.
       column('QTY', 1, 'Decimal', false, headerStyle() === undefined ? null : 't'),
       ...(calcEnabled() ? [column('TOTAL', 2, 'Decimal', true)] : []),
+      ...(wide() ? Array.from({ length: WideExtraColumns }, (_, i) => column(`D${String(i + 1)}`, i + 3, 'Decimal', false)) : []),
     ],
-    rows: Array.from({ length: StandRowCount }, (_, index) => {
+    rows: Array.from({ length: wide() ? WideRowCount : StandRowCount }, (_, index) => {
       const rowKey = `R${index + 1}`;
 
       return {
         cells: {
           CODE: rowKey,
+          ...(wide() ? Object.fromEntries(Array.from({ length: WideExtraColumns }, (_, i) => [`D${String(i + 1)}`, String(index + i / 100)])) : {}),
           ...stored.get(rowKey),
           ...(calcEnabled() && calcTotals.has(rowKey) ? { TOTAL: calcTotals.get(rowKey) } : {}),
         },

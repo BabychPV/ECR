@@ -4,13 +4,13 @@ import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
+import { allUsersQuery } from '@/features/security/allUsers';
 import type {
   RegistryDefDto,
   RegistryDefinitionDto,
   RegistryHistoryEntryDto,
   SaveRegistryDefinitionDto,
   UnitRef,
-  UserPage,
 } from '@/api/types';
 import {
   RegistryFields,
@@ -162,10 +162,9 @@ export function RegistryConstructorPage(): JSX.Element {
    * Перелік користувачів — щоб історія показувала ІМ'Я автора, а не голий
    * `changedByUserId` (сиблінг-виправлення до пропущеного в `AuditPage.tsx`).
    *
-   * ⛔ Той самий ключ і ендпоінт, що й `SecurityPage.tsx`
-   * (`/api/v1/users?limit=200`, право `Security.ManageUsers`): той самий
-   * ключ `['users']` дає їм ділити кеш, коли обидва змонтовані в межах того
-   * самого `QueryClient`.
+   * ⛔ PSS-19c: усі користувачі (`allUsersQuery`, право `Security.ManageUsers`), а не перші 200 мовчки: автор
+   * поза першою сторінкою лишався «нерозв'язаним». Той самий опис запиту, що в журналі й «Моїх групах», —
+   * один запис кешу на всі три екрани.
    *
    * ⛔ НЕ під головним `<AsyncBoundary>` нижче — і не в СВОЄМУ. Головна межа
    * стосується `definition`: без опису довідника сторінки взагалі немає.
@@ -175,12 +174,9 @@ export function RegistryConstructorPage(): JSX.Element {
    * глядач без цього права однаково має бачити ІСТОРІЮ, лише без імен
    * авторів. `RegistryHistory` сама показує голий ідентифікатор і бейдж
    * «нерозв'язано» в рядку, де ім'я не знайшлося (немає права, або
-   * користувача видалено і його немає в першій сторінці переліку).
+   * користувача видалено).
    */
-  const users = useQuery({
-    queryKey: ['users'],
-    queryFn: () => apiFetch<UserPage>('/api/v1/users?limit=200'),
-  });
+  const users = useQuery(allUsersQuery);
 
   const userNames = useMemo(() => {
     const map = new Map<number, string>();

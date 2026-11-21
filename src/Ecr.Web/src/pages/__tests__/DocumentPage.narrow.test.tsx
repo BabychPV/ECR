@@ -103,6 +103,7 @@ function mockFetch(options: { projectStatus: string; periodState: string; sheetS
 
       if (url.includes('/api/v1/documents/1')) {
         return jsonResponse({
+          projectStatus: options.projectStatus,
           businessKey: 'DOC-0001',
           createdAt: '2026-01-01T00:00:00Z',
           id: 1,

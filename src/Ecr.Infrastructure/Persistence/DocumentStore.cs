@@ -139,6 +139,9 @@ public sealed class DocumentStore(
                 // EA-C: стан проєкту для canManageEditAccess — у тому самому запиті (без додаткового роундтрипу).
                 ProjectReadOnly = db.Projects.Where(p => p.Id == d.ProjectId)
                     .Select(p => p.Status == ProjectStatus.Archived || p.IsArchiving).FirstOrDefault(),
+                // ✎ PSS-19a: стан проєкту — у тому самому запиті; сторінка документа більше не читає заради нього
+                // увесь перелік проєктів. (ProjectStatus?) — null, якщо проєкту немає.
+                ProjectStatus = db.Projects.Where(p => p.Id == d.ProjectId).Select(p => (ProjectStatus?)p.Status).FirstOrDefault(),
                 // D-12: картка читає «коли й ким змінено» так само, як перелік (`ListAsync`); раніше ці поля тут
                 // не вибирались, і картка віддавала `null` усім. Звуженому читачеві їх знімає R-7 (`DocumentSheetVisibility.For`).
                 d.ModifiedAt,
@@ -246,7 +249,8 @@ public sealed class DocumentStore(
             PeriodKind: document.ProjectPeriodKind?.ToString(),
             TemplateLayout: templateLayout?.ToString(),
             ReopenedPeriods: reopened,
-            WorkflowMode: workflowMode?.ToString());
+            WorkflowMode: workflowMode?.ToString(),
+            ProjectStatus: document.ProjectStatus?.ToString());
     }
 
     /// <summary>

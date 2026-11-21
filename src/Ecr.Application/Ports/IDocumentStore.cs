@@ -150,6 +150,12 @@ namespace Ecr.Application.Ports;
 /// таблиця, рядки якої він може блокувати; клієнт показує «Заблокувати рядки…» лише за ним (власника документа клієнт
 /// не знає). Лише картка (<c>GET /documents/{id}?periodKey=</c>); <c>null</c> — період не задано або це рядок переліку.
 /// </param>
+/// <param name="ProjectStatus">
+/// ✎ PSS-19a: стан проєкту документа (<c>Draft</c> | <c>Active</c> | <c>Archived</c>) — рядком, як <paramref name="PeriodKind"/>.
+/// Сторінка документа читала заради нього ВЕСЬ перелік проєктів (до 20 сторінок по 500, послідовно), щоб замкнути дії в
+/// архівованому проєкті. Метадані проєкту не секрет — звуження читача не знімає. Лише картка (<c>GET /documents/{id}</c>);
+/// перелік — <c>null</c>; <c>null</c> і тоді, коли проєкту не знайдено.
+/// </param>
 public sealed record DocumentSummary(
     long Id,
     int ProjectId,
@@ -182,7 +188,8 @@ public sealed record DocumentSummary(
     IReadOnlyList<DocumentReopenedPeriod>? ReopenedPeriods = null,
     string? TemplateLayout = null,
     string? WorkflowMode = null,
-    bool? CanLockRows = null);
+    bool? CanLockRows = null,
+    string? ProjectStatus = null);
 
 /// <summary>
 /// ✎ 10.11 (слово людини через координатора): закритий місяць, відкритий для ЦЬОГО документа

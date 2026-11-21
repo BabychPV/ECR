@@ -4,10 +4,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
+import { templatesListQuery } from '@/features/templates/templateQueries';
 import type {
   CreateTemplateRequest,
   TemplateIdResponse,
-  TemplatePage,
   TemplateVersionsForTemplate,
   TemplateVersionSummary,
 } from '@/api/types';
@@ -27,6 +27,7 @@ import { LocalizedInput, hasAnyText, type LocalizedValue } from '@/shared/ui/Loc
 import type { StatItem, StatStripItems } from '@/shared/ui/StatStrip';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
+import { TruncatedListNote } from '@/shared/ui/TruncatedListNote';
 import { TwoLine } from '@/shared/ui/TwoLine';
 import { useUrlParamsSetter, useUrlState } from '@/shared/ui/useUrlState';
 import { showApiError, showDone } from '@/shared/ui/notify';
@@ -55,10 +56,8 @@ export function TemplatesPage(): JSX.Element {
   const [code, setCode] = useState('');
   const [name, setName] = useState<LocalizedValue>({});
 
-  const templates = useQuery({
-    queryKey: queryKeys.templates.list(),
-    queryFn: () => apiFetch<TemplatePage>('/api/v1/templates?limit=100'),
-  });
+  // ⛔ PSS-19c: усі шаблони, а не перші 100 мовчки (`templatesListQuery` — спільний опис ключа й читання).
+  const templates = useQuery(templatesListQuery);
 
   const items = templates.data?.items ?? [];
   const templateIds = items.map((template) => template.id);
@@ -392,6 +391,7 @@ export function TemplatesPage(): JSX.Element {
            * ⚠ `rows` — `undefined`, доки дані не прийшли: `?? []` перетворило б
            * «ще не питали» на «порожньо» (`DataTable` тримає стани сам).
            */
+          <>
           <DataTable<TemplateListRow>
             columns={columns}
             rows={visible}
@@ -411,6 +411,9 @@ export function TemplatesPage(): JSX.Element {
               void versionsBatch.refetch();
             }}
           />
+          {/* PSS-19c / L4: перелік дочитано лише до запобіжника — сказано прямо. */}
+          <TruncatedListNote list={templates.data} />
+          </>
         }
       />
 

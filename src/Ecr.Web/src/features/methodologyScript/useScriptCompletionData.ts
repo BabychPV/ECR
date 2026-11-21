@@ -2,10 +2,10 @@ import { useQueries, useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
+import { templatesListQuery } from '@/features/templates/templateQueries';
 import { methodologyScriptTables } from './api';
 import { scriptKeys } from './scriptQueryKeys';
 import type {
-  TemplatePage,
   TemplateStructureDto,
   TemplateVersionsForTemplate,
 } from '@/api/types';
@@ -53,12 +53,8 @@ export function useScriptCompletionData(
     wantsTables &&
     (liveTablesQuery.isError || (liveTablesQuery.isSuccess && liveTables.length === 0));
 
-  const templates = useQuery({
-    queryKey: queryKeys.templates.list(),
-    queryFn: () => apiFetch<TemplatePage>('/api/v1/templates?limit=100'),
-    enabled: needsFallback,
-    staleTime: StaleMs,
-  });
+  // ⛔ PSS-19c: усі шаблони (`templatesListQuery`): таблиця 101-го шаблону інакше не мала б підказок.
+  const templates = useQuery({ ...templatesListQuery, enabled: needsFallback, staleTime: StaleMs });
 
   const toRead = useMemo(
     () => (needsFallback ? templatesToRead(outline, templates.data?.items ?? []) : []),

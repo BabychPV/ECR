@@ -83,7 +83,9 @@ describe('useRoutePrefetch — обробники наміру (PR nav-arch #5)'
     act(() => {
       vi.advanceTimersByTime(1);
     });
-    expect(spy).toHaveBeenCalledTimes(1);
+    // ⚠ Опис запиту шаблонів підвантажується ледачим `import()` (рецензія L10, M3: бюджет D-132) — прогрів
+    // настає одразу після нього, а не синхронно в тому самому такті.
+    await vi.waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
     expect(spy.mock.calls[0]?.[0]).toMatchObject({ queryKey: queryKeys.templates.list() });
 
     // Той самий виклик прогріває й чанк `TemplatesPage` (fire-and-forget) —

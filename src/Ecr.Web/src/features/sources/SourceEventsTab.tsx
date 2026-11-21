@@ -10,6 +10,7 @@ import { problemText } from '@/shared/ui/problemText';
 import type { DataSource } from '@/features/integration/dataSourceApi';
 import { SourceEntitiesQueryKey } from '@/features/integration/sourceEntityApi';
 import { fetchEventTemplates, fetchSourceEventMaps, type SourceEventMap } from './sourceEventsApi';
+import { TruncatedListNote } from '@/shared/ui/TruncatedListNote';
 import { fetchDocuments, isEventsNotConfigured, SourceEventsKeys } from './sourceEventsData';
 import { SourceEventFrequency } from './SourceEventFrequency';
 import { SourceEventMapsPanel } from './SourceEventMapsPanel';
@@ -85,7 +86,8 @@ export function SourceEventsTab({
     enabled: entity !== undefined,
   });
 
-  const documents = useQuery({ queryKey: SourceEventsKeys.documents, queryFn: fetchDocuments });
+  const documentsPage = useQuery({ queryKey: SourceEventsKeys.documents, queryFn: fetchDocuments });
+  const documents = documentsPage.data?.items;
 
   if (entities.isError) {
     return <ErrorAlert error={entities.error} onRetry={() => void entities.refetch()} />;
@@ -134,9 +136,12 @@ export function SourceEventsTab({
         <ErrorAlert error={templates.error} onRetry={() => void templates.refetch()} />
       )}
 
+      {/* PSS-19c / L4: документи дочитано лише до запобіжника — сказано прямо. */}
+      <TruncatedListNote list={documentsPage.data} />
+
       <SourceEventMapsPanel
         maps={maps}
-        documents={documents.data ?? []}
+        documents={documents ?? []}
         canManage={canManage}
         onCreate={() => setEditing({ mode: 'create' })}
         onEdit={(map) => setEditing({ mode: 'edit', map })}
@@ -146,7 +151,7 @@ export function SourceEventsTab({
       <SourceEventsTable
         sourceEntityId={entity.id}
         maps={maps.data ?? []}
-        documents={documents.data ?? []}
+        documents={documents ?? []}
         canManage={canManage}
         onCreateMap={() => setEditing({ mode: 'create' })}
       />
@@ -155,7 +160,7 @@ export function SourceEventsTab({
         <RowWindowMapsPanel
           sourceEntityId={entity.id}
           entities={own}
-          documents={documents.data ?? []}
+          documents={documents ?? []}
           canManage={canManage}
         />
       </Suspense>
@@ -168,7 +173,7 @@ export function SourceEventsTab({
             sourceEntityId={entity.id}
             template={entity.code}
             map={editing.mode === 'edit' ? editing.map : null}
-            documents={documents.data ?? []}
+            documents={documents ?? []}
             onClose={() => setEditing(null)}
           />
         </Suspense>
