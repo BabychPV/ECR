@@ -354,9 +354,77 @@ public sealed class RecalculationYearPerPeriodCommitTests(SqlServerFixture sql) 
         }
     }
 
+    /// <summary>
+    /// ✎ L1b / D3 (стенд Land 21.11): шкала ланцюжка відома з ПЕРШОГО звіту кроку — жодного «Період k з k» на старті кроку
+    /// і жодного стрибка відсотка назад (на стенді 42 → 75 → 48: <c>Total</c> починався з <c>Done + 1</c>).
+    /// </summary>
+    /// <remarks>
+    /// МУТАЦІЯ: не класти <c>ChainTotal</c> у payload наступного кроку (чи ігнорувати його в <c>ChainProgress</c>) — червоний:
+    /// перший звіт кроку 2 — «2 з 2», 50 %, далі 33 %.
+    /// </remarks>
+    [Fact]
+    public async Task Шкала_ланцюжка_відома_з_першого_звіту_кроку_і_не_стрибає_назад()
+    {
+        var (builder, document) = await ArrangeAsync();
+        await using var host = NewHost();
+        var scheduler = Scheduler(host);
+        var jobId = await scheduler.EnqueueCoalescedAsync<IRecalculationJob>(
+            RecalculateDocumentHandler.YearTargetOf(document.DocumentId),
+            new { document.DocumentId, PeriodKey = (int?)null }, CancellationToken.None);
+
+        var reports = new List<(int Percent, string? Message)>();
+        var stepReports = new List<int>();
+        for (var k = 1; k <= 3; k++)
+        {
+            var step = (await ClaimAsync(host, JobLanes.Recalc))!;
+            Assert.Equal(jobId, step.Claim.JobId);
+            var before = reports.Count;
+            if (k < 3)
+            {
+                var continued = await Assert.ThrowsAsync<JobContinuedException>(
+                    () => RunStepAsync(builder, scheduler, host.Queue, step, reports: reports));
+                Assert.Equal(3, JsonSerializer.Deserialize<RecalculationRequest>(continued.PayloadJson, Web)!.ChainTotal);
+                Assert.True(await host.Queue.ContinueAsync(
+                    step.Claim, continued.PayloadJson, continued.Delay, continued.SettleThrough, CancellationToken.None));
+            }
+            else
+            {
+                await RunStepAsync(builder, scheduler, host.Queue, step, reports: reports);
+            }
+
+            stepReports.Add(reports.Count - before);
+
+            // Кроки 2 і 3: ПЕРШИЙ же звіт — «період k з 3», відсоток не нижче частки зробленого.
+            if (k > 1)
+            {
+                var (percent, message) = reports[before];
+                Assert.True(JobProgressMessageCodec.TryDecode(message, out var first), message);
+                Assert.Equal(
+                    ("jobs.chainStep", k.ToString(System.Globalization.CultureInfo.InvariantCulture), "3"),
+                    (first.Key, first.Params?["step"], first.Params?["total"]));
+                Assert.Equal((k - 1) * 100 / 3, percent);
+            }
+        }
+
+        Assert.All(stepReports, n => Assert.True(n > 0));
+
+        // Жоден звіт не каже «з N», крім «з 3»; відсоток рядка задачі не спадає.
+        foreach (var (_, message) in reports)
+        {
+            if (JobProgressMessageCodec.TryDecode(message, out var envelope) && envelope.Key == "jobs.chainStep")
+            {
+                Assert.Equal("3", envelope.Params?["total"]);
+            }
+        }
+
+        var percents = reports.Select(r => r.Percent).ToList();
+        Assert.Equal(percents.Order(), percents);
+    }
+
     private async Task RunStepAsync(
         TestDocumentBuilder builder, IBackgroundJobScheduler scheduler, IJobQueue queue, ClaimedJob step,
-        RecalculationBudgetMonitor? budget = null, List<string?>? messages = null, (PeriodKey Reader, PeriodKey Owner)? readsOwner = null)
+        RecalculationBudgetMonitor? budget = null, List<string?>? messages = null, (PeriodKey Reader, PeriodKey Owner)? readsOwner = null,
+        List<(int Percent, string? Message)>? reports = null)
     {
         await using var db = builder.CreateContext();
         var clock = new TestClock(Now);
@@ -371,7 +439,7 @@ public sealed class RecalculationYearPerPeriodCommitTests(SqlServerFixture sql) 
             lease: new FixedLease(step.Claim),
             queue: queue);
 
-        await job.ExecuteAsync(step.PayloadJson, new RecordingProgress(messages), CancellationToken.None);
+        await job.ExecuteAsync(step.PayloadJson, new RecordingProgress(messages, reports), CancellationToken.None);
     }
 
     private async Task<string> EnqueueEditAsync(long documentId)
@@ -524,11 +592,13 @@ public sealed class RecalculationYearPerPeriodCommitTests(SqlServerFixture sql) 
         public JobClaimToken? Current { get; } = claim;
     }
 
-    private sealed class RecordingProgress(List<string?>? messages) : IJobProgress
+    private sealed class RecordingProgress(List<string?>? messages, List<(int Percent, string? Message)>? reports = null)
+        : IJobProgress
     {
         public Task ReportAsync(int percent, string? message, CancellationToken ct)
         {
             messages?.Add(message);
+            reports?.Add((percent, message));
             return Task.CompletedTask;
         }
     }

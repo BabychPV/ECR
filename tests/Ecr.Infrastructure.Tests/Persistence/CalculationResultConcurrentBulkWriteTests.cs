@@ -1,4 +1,4 @@
-﻿// tests/Ecr.Infrastructure.Tests/Persistence/CalculationResultConcurrentBulkWriteTests.cs
+// tests/Ecr.Infrastructure.Tests/Persistence/CalculationResultConcurrentBulkWriteTests.cs
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Enums;

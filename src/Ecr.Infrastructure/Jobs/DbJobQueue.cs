@@ -306,9 +306,10 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
     /// ✎ Огляд H1: payload <c>{0}</c> без полів ланцюжка (PSS-04) — нова постановка на ціль ланцюжка, що чекає між
     /// кроками, починає його з ПЕРШОГО періоду: її зміна могла торкнутися вже зроблених місяців.
     /// </summary>
+    /// <remarks>✎ L1b / D3: і <c>$.chainTotal</c> — шкала «період k з N» починається з першого кроку заново.</remarks>
     internal const string ChainResetTemplate =
-        "JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY({0}, '$.chainAfter', NULL), '$.chainDone', NULL), "
-        + "'$.chainReaders', NULL), '$.chainStartedAt', NULL), '$.chainElapsedMs', NULL)";
+        "JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY({0}, '$.chainAfter', NULL), '$.chainDone', NULL), "
+        + "'$.chainReaders', NULL), '$.chainStartedAt', NULL), '$.chainElapsedMs', NULL), '$.chainTotal', NULL)";
 
     /// <summary>
     /// Злиття в рядок, що чекає (<c>@payload</c> — тіло нової постановки): знято поля ланцюжка (H1) і, якщо нова

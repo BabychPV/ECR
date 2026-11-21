@@ -263,7 +263,7 @@ public sealed partial class RecalculationJob(
         IReadOnlyList<int> remaining = [];
 
         // ✎ PSS-04: прогрес кроку — частина шкали всього ланцюжка (зроблені періоди + цей + решта).
-        var chainProgress = chain ? new ChainProgress(progress, request.ChainDone?.Length ?? 0) : null;
+        var chainProgress = chain ? new ChainProgress(progress, request.ChainDone?.Length ?? 0, request.ChainTotal) : null;
         if (chainProgress is not null)
         {
             progress = chainProgress;
@@ -908,11 +908,15 @@ public sealed partial class RecalculationJob(
 
         if (chainContinues)
         {
+            int[] chainDone = [.. ChainScope(request, scopeByDocument).GetValueOrDefault(request.DocumentId) ?? []];
             var next = request with
             {
                 ChainAfter = stepPeriod,
-                ChainDone = [.. ChainScope(request, scopeByDocument).GetValueOrDefault(request.DocumentId) ?? []],
+                ChainDone = chainDone,
                 ChainElapsedMs = (long)Math.Max(0, worked.TotalMilliseconds),
+
+                // ✎ L1b / D3: шкала наступного кроку — з його першого звіту: зроблені (з цим кроком) + решта скоупу.
+                ChainTotal = chainDone.Length + remaining.Count,
             };
 
             // ✎ PSS-06: задачі документа, що чекають на ПІЗНІШІ періоди ланцюжка, — його ж робота: паркуються до кроку
@@ -1186,6 +1190,7 @@ public sealed partial class RecalculationJob(
             ChainAfter = null,
             ChainDone = null,
             ChainElapsedMs = null,
+            ChainTotal = null,
         };
 
     /// <summary>
@@ -3139,9 +3144,15 @@ public sealed partial class RecalculationJob(
 
     /// <summary>
     /// ✎ PSS-04: прогрес кроку ланцюжка — його 0…100 у частці всього ланцюжка: крок <c>Done + 1</c> із
-    /// <see cref="Total"/> (поки скоуп невідомий — із <c>Done + 1</c>), тож шкала рядка задачі не стрибає назад на кожному кроці.
+    /// <see cref="Total"/>, тож шкала рядка задачі не стрибає назад на кожному кроці.
     /// </summary>
-    private sealed class ChainProgress(IJobProgress inner, int done) : IJobProgress
+    /// <remarks>
+    /// ⛔ L1b / D3 (стенд Land 21.11): доти <see cref="Total"/> починався з <c>Done + 1</c> і ставав справжнім лише після
+    /// перечитування скоупу — перші ~4 с кожного кроку рядок показував «Період k з k», а відсоток стрибав (42 → 75 → 48).
+    /// Тепер загальна кількість іде з payload кроку (<see cref="RecalculationRequest.ChainTotal"/>, її кладе попередній
+    /// крок); на першому кроці (скоуп ще не прочитано) звіт іде без обгортки «k з N» і без масштабу — це 0 % старту.
+    /// </remarks>
+    private sealed class ChainProgress(IJobProgress inner, int done, int? total) : IJobProgress
     {
         /// <summary>Ключ каталогу «період {step} з {total}: {message}» (огляд L2).</summary>
         public const string StepKey = "jobs.chainStep";
@@ -3149,8 +3160,8 @@ public sealed partial class RecalculationJob(
         /// <summary>Скільки періодів ланцюжок уже зробив до цього кроку.</summary>
         public int Done { get; } = done;
 
-        /// <summary>Скільки періодів у ланцюжку разом.</summary>
-        public int Total { get; set; } = done + 1;
+        /// <summary>Скільки періодів у ланцюжку разом; <c>null</c> — ще невідомо (перший крок до читання скоупу).</summary>
+        public int? Total { get; set; } = total;
 
         /// <inheritdoc />
         /// <remarks>
@@ -3159,7 +3170,14 @@ public sealed partial class RecalculationJob(
         /// </remarks>
         public Task ReportAsync(int percent, string? message, CancellationToken ct)
         {
-            var total = Math.Max(Total, Done + 1);
+            if (Total is not { } known)
+            {
+                // Шкала ще невідома: без «k з N», щоб не показати «k з k»; відсоток — частка вже зробленого (на першому
+                // кроці — як є).
+                return inner.ReportAsync(((Done * 100) + Math.Clamp(percent, 0, 100)) / (Done + 1), message, ct);
+            }
+
+            var total = Math.Max(known, Done + 1);
             var wrapped = message;
             if (message is not null && JobProgressMessageCodec.TryDecode(message, out var decoded))
             {
@@ -3280,6 +3298,10 @@ public sealed partial class RecalculationJob(
 /// <param name="ChainElapsedMs">
 /// ✎ Огляд M2: сума часу РОБОТИ зроблених кроків, мс (без очікувань у черзі між ними) — вимір ПРД-13 після останнього.
 /// </param>
+/// <param name="ChainTotal">
+/// ✎ L1b / D3: скільки періодів у ланцюжку разом (зроблені + цей + решта), як їх побачив попередній крок, — шкала «період k
+/// з N» відома з ПЕРШОГО звіту кроку, а не лише після перечитування скоупу. <c>null</c> — перший крок (чи не ланцюжок).
+/// </param>
 public sealed record RecalculationRequest(
     int ProjectId,
     long DocumentId,
@@ -3296,7 +3318,8 @@ public sealed record RecalculationRequest(
     string? OverrideReason = null,
     int? ChainAfter = null,
     int[]? ChainDone = null,
-    long? ChainElapsedMs = null)
+    long? ChainElapsedMs = null,
+    int? ChainTotal = null)
 {
     /// <summary>
     /// ✎ B59: нижня межа ключа періоду скоупу (включно); без року — <see cref="int.MinValue"/>.
