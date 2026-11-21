@@ -204,14 +204,14 @@ public sealed class Hse400CompositionSnapshotLoader(
             // рядках без їх читання в пам'ять; списки — JSON-параметрами (`OPENJSON`, як в інших місцях проєкту).
             var periodsJson = System.Text.Json.JsonSerializer.Serialize(periodKeys);
             var instancesJson = System.Text.Json.JsonSerializer.Serialize(instanceIds);
-            var stamp = (await db.Database.SqlQuery<RowStamp>($"""
+            var stamp = await db.Database.SqlQuery<RowStamp>($"""
                     SELECT COUNT_BIG(*) AS Cnt, MAX(r.RowVersion) AS MaxVersion,
                            SUM(CAST(CAST(r.RowVersion AS bigint) AS decimal(38, 0))) AS SumVersion
                     FROM doc.TableRow AS r
                     WHERE r.IsDeleted = 0
                       AND r.PeriodKey IN (SELECT CAST([value] AS int) FROM OPENJSON({periodsJson}))
                       AND r.TableInstanceId IN (SELECT CAST([value] AS bigint) FROM OPENJSON({instancesJson}))
-                    """).ToListAsync(ct).ConfigureAwait(false)).Single();
+                    """).FirstAsync(ct).ConfigureAwait(false);
             var rowCount = stamp.Cnt;
             var rowStamp = stamp.MaxVersion;
             var rowSum = stamp.SumVersion ?? 0m;
