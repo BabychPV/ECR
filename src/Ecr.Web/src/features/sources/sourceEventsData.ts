@@ -1,6 +1,6 @@
 import { apiFetch, EcrApiError } from '@/api/client';
+import { fetchAllPages } from '@/api/fetchAllPages';
 import type {
-  DocumentPage,
   DocumentSummary,
   DocumentTableDto,
   RegistryDefDto,
@@ -37,13 +37,13 @@ export const SourceEventsKeys = {
 };
 
 /**
- * Документи, які користувач бачить (одна сторінка до 500): мапінг подій прив'язується до документа ділянки, а їх
- * у проєкті одиниці-десятки. Більше за сторінку — видно лише перші 500, і це названо в описі гілки.
+ * Документи, які користувач бачить — УСІ сторінки (PSS-19c): мапінг подій прив'язується до документа ділянки, і
+ * прив'язка до документа поза першою сторінкою (500) лишалась без назви й без вибору.
  */
-export async function fetchDocuments(): Promise<DocumentSummary[]> {
-  const page = await apiFetch<DocumentPage>('/api/v1/documents?limit=500');
+export async function fetchDocuments({ signal }: { signal?: AbortSignal } = {}): Promise<DocumentSummary[]> {
+  const all = await fetchAllPages<DocumentSummary>('/api/v1/documents', { signal });
 
-  return page.items;
+  return all.items;
 }
 
 /**

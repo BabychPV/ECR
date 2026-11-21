@@ -2,7 +2,8 @@ import { lazy } from 'react';
 import type { QueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
-import type { MethodologyDto, RegistryDefDto, TemplatePage as TemplatePageDto } from '@/api/types';
+import { templatesListQuery } from '@/features/templates/templateQueries';
+import type { MethodologyDto, RegistryDefDto } from '@/api/types';
 import { routes } from './routes';
 
 /**
@@ -239,10 +240,7 @@ const routeChunkLoaders: Partial<Record<string, () => Promise<unknown>>> = {
  */
 const routeDataPrefetchers: Partial<Record<string, (queryClient: QueryClient) => void>> = {
   [routes.adminTemplates.id]: (queryClient) => {
-    void queryClient.prefetchQuery({
-      queryKey: queryKeys.templates.list(),
-      queryFn: () => apiFetch<TemplatePageDto>('/api/v1/templates?limit=100'),
-    });
+    void queryClient.prefetchQuery(templatesListQuery);
   },
   [routes.adminRegistries.id]: (queryClient) => {
     void queryClient.prefetchQuery({
@@ -263,10 +261,7 @@ const routeDataPrefetchers: Partial<Record<string, (queryClient: QueryClient) =>
   // обидва тут дешевше й безпечніше, ніж читати внутрішній стан сторінки
   // (`dialect`) ззовні, аби вгадати, який саме буде активний.
   [routes.adminExpressions.id]: (queryClient) => {
-    void queryClient.prefetchQuery({
-      queryKey: queryKeys.templates.list(),
-      queryFn: () => apiFetch<TemplatePageDto>('/api/v1/templates?limit=100'),
-    });
+    void queryClient.prefetchQuery(templatesListQuery);
     void queryClient.prefetchQuery({
       queryKey: queryKeys.methodologies.list(),
       queryFn: () => apiFetch<MethodologyDto[]>('/api/v1/methodologies'),

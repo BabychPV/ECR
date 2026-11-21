@@ -3,12 +3,11 @@ import { Group, Select } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch, EcrApiError } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
+import { templatesListQuery, templateVersionsQuery } from '@/features/templates/templateQueries';
 import type {
   GrantableProject,
   RegistryDefDto,
-  TemplatePage,
   TemplateStructureDto,
-  TemplateVersionPage,
 } from '@/api/types';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
@@ -130,16 +129,11 @@ export function ResourcePicker({
     enabled: kind === 'Registry',
   });
 
-  const templates = useQuery({
-    queryKey: queryKeys.templates.list(),
-    queryFn: () => apiFetch<TemplatePage>('/api/v1/templates?limit=100'),
-    enabled: inTemplate,
-  });
+  // ⛔ PSS-19c: усі шаблони й версії, а не перші 100 мовчки (`templateQueries.ts`).
+  const templates = useQuery({ ...templatesListQuery, enabled: inTemplate });
 
   const versions = useQuery({
-    queryKey: queryKeys.templates.versionsOf(path.templateId ?? undefined),
-    queryFn: () =>
-      apiFetch<TemplateVersionPage>(`/api/v1/templates/${String(path.templateId)}/versions?limit=100`),
+    ...templateVersionsQuery(path.templateId ?? undefined),
     enabled: inTemplate && path.templateId !== null,
   });
 

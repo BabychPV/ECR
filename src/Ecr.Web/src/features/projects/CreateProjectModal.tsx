@@ -2,13 +2,11 @@ import { useEffect, useRef, useState, type JSX } from 'react';
 import { Button, Group, Modal, NumberInput, Select, TextInput } from '@mantine/core';
 import { useMutation, useQueries, useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
-import { queryKeys } from '@/api/queryKeys';
+import { templatesListQuery, templateVersionsQuery } from '@/features/templates/templateQueries';
 import type {
   CreateProjectRequest,
   PeriodPolicyDto,
   ProjectIdResponse,
-  TemplatePage,
-  TemplateVersionPage,
 } from '@/api/types';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { LocalizedInput, hasAnyText, type LocalizedValue } from '@/shared/ui/LocalizedInput';
@@ -209,24 +207,18 @@ export function CreateProjectModal({
   // `periodKind === 'Custom'` — для решти вид сам визначає кількість.
   const [customPeriodCount, setCustomPeriodCount] = useState<number | null>(null);
 
-  const templates = useQuery({
-    queryKey: queryKeys.templates.list(),
-    queryFn: () => apiFetch<TemplatePage>('/api/v1/templates?limit=100'),
-    enabled: opened,
-  });
+  // ⛔ PSS-19c: усі шаблони й усі їхні версії, а не перші 100 мовчки (`templateQueries.ts`).
+  const templates = useQuery({ ...templatesListQuery, enabled: opened });
 
   // ⛔ Q-274: `GET /api/v1/templates/{id}/versions` — курсорний ендпоінт
   // (Q-225), відповідь `{items, nextCursor, totalCount}`, а не голий масив.
   // Тут стояв тип `TemplateVersionSummary[]`, тож `.data` при пагінованій
   // відповіді був ОБ'ЄКТОМ, не `undefined` — `?? []` не рятував, і
   // `.filter` нижче падав на кожному відкритті цієї форми (`ECR-WEB-8662`).
-  // `TemplatesPage.tsx` уже читає той самий ендпоінт правильно
-  // (`TemplateVersionPage`, `?limit=100`, `.data?.items`) — той самий взірець.
+  // Тепер — спільний `templateVersionsQuery` (усі сторінки, PSS-19c), `.data?.items`.
   const versionQueries = useQueries({
     queries: (templates.data?.items ?? []).map((template) => ({
-      queryKey: queryKeys.templates.versionsOf(template.id),
-      queryFn: () =>
-        apiFetch<TemplateVersionPage>(`/api/v1/templates/${template.id}/versions?limit=100`),
+      ...templateVersionsQuery(template.id),
       enabled: opened,
     })),
   });

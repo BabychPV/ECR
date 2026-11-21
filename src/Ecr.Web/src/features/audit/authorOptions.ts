@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { apiFetch } from '@/api/client';
-import type { UserPage } from '@/api/types';
+import { allUsersQuery } from '@/features/security/allUsers';
 import { t } from '@/shared/i18n';
 import { isHumanCellChange } from '@/features/audit/api';
 import { can, useSession } from '@/shared/session/useSession';
@@ -63,9 +62,9 @@ export function useAuthorOptions(
   selected: number | null,
 ): { value: string; label: string }[] {
   const session = useSession();
+  // ⛔ PSS-19c: усі користувачі (`allUsersQuery`), а не перші 200 мовчки — 201-й автор не мав імені у фільтрі.
   const users = useQuery({
-    queryKey: ['users', 'audit-authors'],
-    queryFn: () => apiFetch<UserPage>('/api/v1/users?limit=200'),
+    ...allUsersQuery,
     enabled: can(session.data, 'Security.ManageUsers'),
     staleTime: 5 * 60 * 1000,
   });

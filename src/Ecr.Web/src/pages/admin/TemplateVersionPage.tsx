@@ -16,6 +16,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
+import { templateVersionsQuery } from '@/features/templates/templateQueries';
 import type {
   CloneVersionRequest,
   DiagnosticInfo,
@@ -24,7 +25,6 @@ import type {
   PublishVersionRequest,
   TemplateColumnDto,
   TemplateStructureDto,
-  TemplateVersionPage as TemplateVersionPageDto,
   VersionIdResponse,
 } from '@/api/types';
 import { AccessMatrix } from '@/features/templates/AccessMatrix';
@@ -938,10 +938,9 @@ function TemplateVersionEditor(): JSX.Element {
 
   const templateIdNumber = Number(templateId);
 
+  // ⛔ PSS-19c: усі версії шаблону (`templateVersionsQuery`): 101-ша версія інакше не мала б стану на цій сторінці.
   const versionsList = useQuery({
-    queryKey: queryKeys.templates.versionsOf(templateIdNumber),
-    queryFn: () =>
-      apiFetch<TemplateVersionPageDto>(`/api/v1/templates/${templateIdNumber}/versions?limit=100`),
+    ...templateVersionsQuery(templateIdNumber),
     enabled: Number.isFinite(templateIdNumber),
   });
 

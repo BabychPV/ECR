@@ -4,10 +4,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
+import { templatesListQuery } from '@/features/templates/templateQueries';
 import type {
   CreateTemplateRequest,
   TemplateIdResponse,
-  TemplatePage,
   TemplateVersionsForTemplate,
   TemplateVersionSummary,
 } from '@/api/types';
@@ -55,10 +55,8 @@ export function TemplatesPage(): JSX.Element {
   const [code, setCode] = useState('');
   const [name, setName] = useState<LocalizedValue>({});
 
-  const templates = useQuery({
-    queryKey: queryKeys.templates.list(),
-    queryFn: () => apiFetch<TemplatePage>('/api/v1/templates?limit=100'),
-  });
+  // ⛔ PSS-19c: усі шаблони, а не перші 100 мовчки (`templatesListQuery` — спільний опис ключа й читання).
+  const templates = useQuery(templatesListQuery);
 
   const items = templates.data?.items ?? [];
   const templateIds = items.map((template) => template.id);

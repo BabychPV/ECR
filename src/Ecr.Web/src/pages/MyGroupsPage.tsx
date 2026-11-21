@@ -2,8 +2,9 @@ import type { JSX } from 'react';
 import { Divider, Select, Stack, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
-import type { AccessDiagnosticsView, UserPage } from '@/api/types';
+import type { AccessDiagnosticsView } from '@/api/types';
 import { AccessDiagnosticsPanel } from '@/features/security/AccessDiagnosticsPanel';
+import { allUsersQuery } from '@/features/security/allUsers';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
@@ -39,16 +40,9 @@ export function MyGroupsPage(): JSX.Element {
     queryFn: () => apiFetch<AccessDiagnosticsView>('/api/v1/security/my-groups'),
   });
 
-  // ⚠ Ключ несе РОЗМІР сторінки. Екран безпеки бере `['users']` із
-  // `limit=200`, і спільний ключ означав би, що перелік у цьому вибиральнику
-  // мовчки залежить від того, яку сторінку відкрили першою. Префікс той
-  // самий, тож `invalidateQueries(['users'])` після створення користувача
-  // так само освіжає обидва.
-  const users = useQuery({
-    queryKey: ['users', 500],
-    queryFn: () => apiFetch<UserPage>('/api/v1/users?limit=500'),
-    enabled: manages,
-  });
+  // ⛔ PSS-19c: усі користувачі (`allUsersQuery`, спільний ключ і всі сторінки), а не перші 500 мовчки.
+  // Префікс `['users']`, тож `invalidateQueries(['users'])` після створення користувача освіжає й цей перелік.
+  const users = useQuery({ ...allUsersQuery, enabled: manages });
 
   const other = useQuery({
     queryKey: ['user-groups', subject],
