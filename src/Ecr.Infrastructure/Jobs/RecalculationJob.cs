@@ -240,6 +240,15 @@ public sealed partial class RecalculationJob(
         var chain = request.DocumentId > 0 && request.PeriodKey is null
                     && claim is not null && queue is { SupportsContinuation: true };
 
+        // ✎ L1b / D5 (стенд Land 21.11): прибирання прогонів, які крок зняв з актуальності (D-560, ~141 тис. рядків на
+        // прогін, DELETE TOP пакетами), ішло ВСЕРЕДИНІ лока документа: +47–111 с (~40 %) на крок, і правка комірки та
+        // ручний перерахунок документа чекали. Тепер перемикання лише складає їх сюди, а прибирає `purgeAfterLock` — він
+        // оголошений РАНІШЕ за лок, тож звільняється ПІСЛЯ нього (зворотний порядок `await using`). У черзі в базі —
+        // ще пізніше: після фіксації рядка задачі воркером (IJobLeaseContext.TryRunAfterSettle), бо до неї документ для
+        // claim зайнятий (Running, PSS-04). Семантика L3 та сама: лише передані прогони, стеля швидкого шляху; нічне вікно —
+        // лише накопиченому.
+        var supersededRuns = new List<SupersededRun>();
+        await using var purgeAfterLock = new PurgeAfterDocumentLock(runs, lease, supersededRuns, logger, ct);
         await using var documentLock = await AcquireDocumentLockAsync(request.DocumentId, ct).ConfigureAwait(false);
 
         // ✎ Перф-аудит 20.11 (B80 N5): «залежні з затвердженими» — надмножина звичайних залежних того самого документа й
@@ -683,7 +692,7 @@ public sealed partial class RecalculationJob(
                 yearRun = NewRun(periodKey: null);
                 db.CalculationRuns.Add(yearRun);
                 await db.SaveChangesAsync(ct).ConfigureAwait(false);
-                await runs.CompleteAsync(yearRun.Id, new ModuleProfile(), ct).ConfigureAwait(false);
+                await runs.CompleteAsync(yearRun.Id, new ModuleProfile(), ct, purgeLater: supersededRuns).ConfigureAwait(false);
             }
 
             // Завершення — прикладний сценарій: профіль і перемикання
@@ -717,7 +726,8 @@ public sealed partial class RecalculationJob(
                                     // ✎ B79: після воріт (стан аркушів уже під блокуванням) і ДО переносу й перемикання —
                                     // поки є з чим порівнювати.
                                     await ResultChangesAsync(run.Id, period, guards, submittedChanges, token).ConfigureAwait(false);
-                                })
+                                },
+                                purgeLater: supersededRuns)
                             .ConfigureAwait(false);
                         break;
                     }
@@ -3205,6 +3215,61 @@ public sealed partial class RecalculationJob(
 
         return [.. rows.Select(r => (r.DocumentId, r.PeriodKeyValue))];
     }
+
+    /// <summary>
+    /// ✎ L1b / D5: прибирання прогонів, які задача зняла з актуальності, — ПІСЛЯ лока документа (оголошується раніше за
+    /// нього, тож <c>await using</c> звільняє його пізніше).
+    /// </summary>
+    /// <remarks>
+    /// Задача воркера черги в базі — доручення воркеру після фіксації рядка (<see cref="IJobLeaseContext.TryRunAfterSettle"/>):
+    /// до неї рядок <c>Running</c>, і claim не бере інших задач документа (PSS-04). Інакше (Quartz, без оренди) — тут же,
+    /// одразу після лока; скасована задача не прибирає (лишає нічному проходу). Не кидає: збій — журнал, як і доти
+    /// (<see cref="RunCalculationHandler.PurgeSupersededAsync"/>), і виняток задачі не підміняється.
+    /// </remarks>
+    private sealed class PurgeAfterDocumentLock(
+        RunCalculationHandler runs,
+        IJobLeaseContext? lease,
+        List<SupersededRun> superseded,
+        ILogger<RecalculationJob>? logger,
+        CancellationToken ct) : IAsyncDisposable
+    {
+        public async ValueTask DisposeAsync()
+        {
+            if (superseded.Count == 0)
+            {
+                return;
+            }
+
+            IReadOnlyList<SupersededRun> handed = [.. superseded];
+            superseded.Clear();
+            if (lease?.TryRunAfterSettle(token => runs.PurgeSupersededAsync(handed, token)) == true)
+            {
+                return;
+            }
+
+            if (ct.IsCancellationRequested)
+            {
+                return;
+            }
+
+            try
+            {
+                await runs.PurgeSupersededAsync(handed, ct).ConfigureAwait(false);
+            }
+#pragma warning disable CA1031 // Прибирання після лока — не робота задачі: збій лише в журнал, решту доїсть нічний прохід.
+            catch (Exception ex)
+#pragma warning restore CA1031
+            {
+                LogPurgeAfterLockFailed(logger ?? NullLogger<RecalculationJob>.Instance, handed.Count, ex);
+            }
+        }
+    }
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "RecalculationJob: прибирання {Runs} прогон(ів), знятих з актуальності, після лока документа не вдалося; "
+                  + "решту доїсть SupersededResultsSweepJob.")]
+    private static partial void LogPurgeAfterLockFailed(ILogger logger, int runs, Exception exception);
 
     /// <summary>
     /// ✎ PSS-04: прогрес кроку ланцюжка — його 0…100 у частці всього ланцюжка: крок <c>Done + 1</c> із

@@ -539,7 +539,44 @@ public sealed partial class JobWorker(
 
         await using var scope = scopes.CreateAsyncScope();
         var provider = scope.ServiceProvider;
-        provider.GetRequiredService<JobLeaseContext>().Bind(claim);
+        var leaseContext = provider.GetRequiredService<JobLeaseContext>();
+        leaseContext.Bind(claim);
+
+        try
+        {
+            await ExecuteInScopeAsync(job, phases, provider, correlationId, stopping).ConfigureAwait(false);
+        }
+        finally
+        {
+            // ✎ L1b / D5: робота «після фіксації» (прибирання прогонів, що їх замінив крок перерахунку) — коли рядок задачі
+            // уже не Running (документ вільний для claim, PSS-04) і лок документа знято. Місце виконавця тримається до кінця.
+            await RunAfterSettleAsync(claim.JobId, leaseContext, stopping).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>✎ L1b / D5: доручена задачею робота після фіксації її рядка (<see cref="IJobLeaseContext.TryRunAfterSettle"/>).</summary>
+    /// <remarks>Збій — лише журнал: рядок уже зафіксовано, а робота (прибирання) має страховку — нічний прохід.</remarks>
+    private async Task RunAfterSettleAsync(string jobId, JobLeaseContext leaseContext, CancellationToken stopping)
+    {
+        foreach (var work in leaseContext.TakeAfterSettle())
+        {
+            try
+            {
+                await work(stopping).ConfigureAwait(false);
+            }
+#pragma warning disable CA1031 // Робота після фіксації не валить воркер і не змінює долю вже зафіксованої задачі.
+            catch (Exception ex)
+#pragma warning restore CA1031
+            {
+                LogAfterSettleFailed(logger, jobId, ex);
+            }
+        }
+    }
+
+    private async Task ExecuteInScopeAsync(
+        ClaimedJob job, JobPhaseClock phases, IServiceProvider provider, string correlationId, CancellationToken stopping)
+    {
+        var claim = job.Claim;
 
         // ⛔ L2-07: помилка DI (відсутня залежність задачі) — гучний Failed одразу, а не
         // виняток повз виконавця: рядок лишався б Running, тричі переклеймлювався і
@@ -1092,6 +1129,9 @@ public sealed partial class JobWorker(
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Збій виконавця черги на задачі {JobId}.")]
     private static partial void LogWorkerFault(ILogger logger, string jobId, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Робота після фіксації задачі {JobId} не вдалася; задача зафіксована як є.")]
+    private static partial void LogAfterSettleFailed(ILogger logger, string jobId, Exception exception);
 
     [LoggerMessage(
         Level = LogLevel.Error,

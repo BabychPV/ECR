@@ -468,4 +468,12 @@ public interface IJobLeaseContext
 {
     /// <summary>Оренда поточної задачі; <c>null</c> — scope виконується не з черги.</summary>
     public JobClaimToken? Current { get; }
+
+    /// <summary>
+    /// ✎ L1b / D5: доручає виконавцю роботу ПІСЛЯ фіксації рядка задачі (Complete/Continue/Fail…) — у тому самому scope,
+    /// коли документ уже вільний і для черги (виключення документа на claim, PSS-04), і для лока перерахунку.
+    /// </summary>
+    /// <param name="work">Робота; токен — зупинка процесу. Збій лише в журнал виконавця.</param>
+    /// <returns><c>false</c> — виконавця, що це вміє, немає (Quartz, HTTP, тести): робота лишається викликачу.</returns>
+    public bool TryRunAfterSettle(Func<CancellationToken, Task> work) => false;
 }
