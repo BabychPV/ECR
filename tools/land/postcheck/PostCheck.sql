@@ -213,6 +213,12 @@ SELECT 'CalculationStep.TraceJson' AS src, COUNT_BIG(*) AS hits
 FROM calc.CalculationStep s WITH (NOLOCK) JOIN calc.CalculationRun run WITH (NOLOCK) ON run.Id = s.CalculationRunId
 WHERE run.StartedAt >= @since AND COALESCE(s.TraceJson, CAST(DECOMPRESS(s.TraceJsonGz) AS nvarchar(max))) LIKE '%BRANCH_BOTH%'
 UNION ALL
+-- D-565: прогони, що НЕ записали кроки частини методологій (трасування вимкнено), — для них TraceJson перевірити НЕ МОЖНА
+-- (0 вище — «не оцінено», а не «немає»); факт прогону — ModulesProfileJson.traceSteps.notRecorded.
+SELECT 'CalculationStep.TraceJson NOT EVALUABLE (runs without steps)', COUNT_BIG(*) FROM calc.CalculationRun run WITH (NOLOCK)
+WHERE run.StartedAt >= @since AND CASE WHEN ISJSON(run.ModulesProfileJson) = 1
+                THEN (SELECT COUNT(*) FROM OPENJSON(run.ModulesProfileJson, '$.traceSteps.notRecorded')) ELSE 0 END > 0
+UNION ALL
 SELECT 'CalculationRun.ModulesProfileJson', COUNT_BIG(*) FROM calc.CalculationRun WITH (NOLOCK)
 WHERE StartedAt >= @since AND ModulesProfileJson LIKE '%BRANCH_BOTH%'
 UNION ALL
@@ -361,6 +367,11 @@ SELECT @n = (SELECT COUNT_BIG(*) FROM calc.CalculationStep s WITH (NOLOCK) JOIN 
            + (SELECT COUNT_BIG(*) FROM itg.JobProgress WITH (NOLOCK)
               WHERE COALESCE(UpdatedAt, CreatedAt) >= @since AND (Message LIKE '%BRANCH_BOTH%' OR Error LIKE '%BRANCH_BOTH%' OR Payload LIKE '%BRANCH_BOTH%'));
 PRINT 'PC|branch_both_hits|' + CAST(ISNULL(@n,0) AS varchar(20));
+-- D-565: прогони без записаних кроків частини методологій — частину BRANCH_BOTH у TraceJson для них не оцінено.
+SELECT @n = COUNT_BIG(*) FROM calc.CalculationRun run WITH (NOLOCK)
+ WHERE run.StartedAt >= @since AND CASE WHEN ISJSON(run.ModulesProfileJson) = 1
+                THEN (SELECT COUNT(*) FROM OPENJSON(run.ModulesProfileJson, '$.traceSteps.notRecorded')) ELSE 0 END > 0;
+PRINT 'PC|branch_both_trace_not_evaluable|' + CAST(ISNULL(@n,0) AS varchar(20));
 
 -- RowActivityFilter: очікуване значення передає Run-PostCheck.ps1 (rowfilter); NONE = не порівнювати
 IF COL_LENGTH('calc.Methodology', 'RowActivityFilter') IS NULL

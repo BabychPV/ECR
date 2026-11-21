@@ -18,10 +18,13 @@
       * branches   at most one _typeN branch per row, substance and metric (legacy writes one).
       * no value   steps whose only cause is #NULL (unselected branch, absent optional input) are listed (NoValue),
                    not failed; every other error code fails.
-    Trace off (D-565): a methodology with intermediate-step tracing off (calc.Methodology.TraceSteps = 0, the default)
-    stores no calc.CalculationStep rows. For such a methodology "failed steps" is counted from calc.CalculationIssue
-    Kind = StepError on the row instead (B66: one issue per row whose output failed); the FailedSteps column then shows
-    "<n> (StepError)". Turn tracing on in the methodology editor to see the individual failed steps again.
+    Trace off (D-565): what counts is whether THIS run recorded the methodology's steps (per-run fact,
+    ModulesProfileJson $.traceSteps.notRecorded), not the current flag. For a methodology whose steps the run did not
+    record, failed/masked steps are NOT EVALUABLE (the SQL emits 'not evaluable', never 0); the check falls back to
+    calc.CalculationIssue Kind = StepError on the row (B66), which counts OUTPUT failures only - a failed intermediate
+    formula whose error never reached an output, and masked zeros, are not visible this way. The FailedSteps column
+    then shows "n/a (trace off); StepError <n> (outputs only)". Turn "Intermediate-step tracing" on for the
+    methodology and recalculate to evaluate the steps themselves.
     Note: failed steps are stored only for the run that computed the row (TraceLevel ErrorsOnly keeps no other steps,
     and carry-over copies results without steps). After a per-sheet recalculation the Current run computed one
     sheet only, so a row of another sheet shows 0 failed steps whatever happened to it. Then pass -Tables with the
@@ -90,7 +93,10 @@ Write-Host "Document $DocumentId, period $PeriodKey; latest run $($run.Key) stat
 if ($Tables.Count -eq 0) { Write-Host "WARNING: assumes run $($current.Key) is a WHOLE-document recalculation. After a per-sheet recalculation pass -Tables." }
 
 $traceOff = @($facts | Where-Object Section -eq 'TRACEOFF' | ForEach-Object Methodology)
-if ($traceOff.Count -gt 0) { Write-Host "Trace off (D-565) for $($traceOff.Count) methodologies: failed steps counted from StepError issues." }
+if ($traceOff.Count -gt 0) {
+    Write-Host "NOT EVALUABLE (D-565): run $($current.Key) did not record steps of $($traceOff.Count) methodologies ($($traceOff -join ', ')):"
+    Write-Host "  failed/masked steps cannot be checked; failures are taken from StepError issues (output failures only)."
+}
 
 $fail = 0
 $known = New-Object System.Collections.Generic.List[string]
@@ -109,7 +115,7 @@ foreach ($m in $plan) {
     if ($traceOff -contains $m.methodology) {
         # D-565: no steps stored - the run still writes one StepError issue per row with a failed output (B66).
         $failed = @($facts | Where-Object { $_.Section -eq 'ISSUE' -and $_.Value -eq 'StepError' -and $_.Key -eq $rowKey -and $_.Methodology -eq $m.methodology }).Count
-        $failedShown = "$failed (StepError)"
+        $failedShown = "n/a (trace off); StepError $failed (outputs only)"
     }
     $noValue = 0
     foreach ($f in @($facts | Where-Object { $_.Section -eq 'NOVALUE' -and $_.Key -eq $rowKey })) { $noValue += [int]$f.Value }

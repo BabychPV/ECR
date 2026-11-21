@@ -11,9 +11,11 @@
 --   NOSUBST     per-substance template results (OutputCode like '%XXX%') with no SubstanceEntryId: the emission
 --               is attributed to no pollutant (methodology version without a substance list)
 --   BRANCHES    (row, substance, metric) groups with more than one written _typeN branch (double counting)
---   TRACEOFF    methodologies of the Current run with intermediate-step tracing OFF (D-565, calc.Methodology.TraceSteps,
---               the default): their runs store no calc.CalculationStep rows, so FAILEDSTEP/NOVALUE/MASKED are empty for
---               them by construction - the PowerShell wrapper falls back to calc.CalculationIssue StepError (B66).
+--   TRACEOFF    methodologies whose steps THIS run did not record (D-565): the per-run fact in
+--               calc.CalculationRun.ModulesProfileJson ($.traceSteps.notRecorded) - NOT the current
+--               calc.Methodology.TraceSteps (a flag turned on after the run does not make missing steps "0 errors").
+--               For them FAILEDSTEP/NOVALUE/MASKED emit key '*' with value 'not evaluable' instead of counts; the
+--               PowerShell wrapper falls back to calc.CalculationIssue StepError (B66), which counts OUTPUT failures only.
 --   TraceJson of steps written since D-565 is compressed (TraceJsonGz, COMPRESS format); read both formats with
 --   COALESCE(TraceJson, CAST(DECOMPRESS(TraceJsonGz) AS nvarchar(max))).
 SET NOCOUNT ON;
@@ -62,6 +64,20 @@ FROM calc.CalculationStep s
 WHERE s.PeriodKey = @p AND s.CalculationRunId = @run AND s.MaskedZero <> 0
 GROUP BY s.SourceRowKey;
 
+-- D-565: the per-run fact. Runs before D-565 have no $.traceSteps - steps were written per TraceLevel, evaluable as before.
+DECLARE @profile nvarchar(max) = (SELECT r.ModulesProfileJson FROM calc.CalculationRun r WHERE r.Id = @run);
+IF ISJSON(@profile) = 1 AND (CASE WHEN ISJSON(@profile) = 1 THEN JSON_QUERY(@profile, '$.traceSteps') END) IS NOT NULL
+BEGIN
+    SELECT 'TRACEOFF' AS section, '' AS k, m.Code AS methodology, 'steps not recorded by this run' AS v
+    FROM OPENJSON(@profile, '$.traceSteps.notRecorded') j
+    JOIN calc.Methodology m ON m.Id = TRY_CAST(j.value AS int);
+
+    SELECT x.section, '*' AS k, m.Code AS methodology, 'not evaluable' AS v
+    FROM OPENJSON(@profile, '$.traceSteps.notRecorded') j
+    JOIN calc.Methodology m ON m.Id = TRY_CAST(j.value AS int)
+    CROSS JOIN (VALUES ('FAILEDSTEP'), ('NOVALUE'), ('MASKED')) AS x (section);
+END
+
 SELECT 'NOSUBST' AS section, res.SourceRowKey AS k, m.Code AS methodology, CAST(COUNT(*) AS nvarchar(30)) AS v
 FROM calc.CalculationResult res
 JOIN calc.MethodologyVersion mv ON mv.Id = res.MethodologyVersionId
@@ -69,15 +85,6 @@ JOIN calc.Methodology m ON m.Id = mv.MethodologyId
 WHERE res.PeriodKey = @p AND res.CalculationRunId = @run AND res.DocumentId = @doc
   AND res.OutputCode LIKE '%XXX%' AND res.SubstanceEntryId IS NULL
 GROUP BY res.SourceRowKey, m.Code;
-
-IF COL_LENGTH(N'calc.Methodology', N'TraceSteps') IS NOT NULL
-    EXEC sys.sp_executesql N'
-        SELECT DISTINCT ''TRACEOFF'' AS section, '''' AS k, m.Code AS methodology, ''0'' AS v
-        FROM calc.CalculationResult res
-        JOIN calc.MethodologyVersion mv ON mv.Id = res.MethodologyVersionId
-        JOIN calc.Methodology m ON m.Id = mv.MethodologyId
-        WHERE res.PeriodKey = @p AND res.CalculationRunId = @run AND res.DocumentId = @doc AND m.TraceSteps = 0;',
-        N'@doc int, @p int, @run bigint', @doc = @doc, @p = @p, @run = @run;
 
 -- BRANCHES: legacy writes ONE branch (_type1/_type2/...) per row, substance and metric (tons / gsec); more than one
 -- written branch means the emission is counted twice (methodology version without branch gating, D-423/D-435).
