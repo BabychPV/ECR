@@ -4,6 +4,7 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider } from 'react-router-dom';
 import { applyDensity, density } from '@/shared/theme/preferences';
 import { mantineProviderProps } from '@/shared/theme/provider';
+import { loadNotifications } from './lazyNotifications';
 import { createQueryClient } from './queryClient';
 import { router } from './router';
 import { NewVersionBanner } from './staleVersion';
@@ -15,7 +16,7 @@ import '@/shared/theme/motion.css';
  * живуть у сховищі (`notifications.show`, статично), тож показ до появи контейнера не губиться: змонтований контейнер
  * читає поточний стан сховища. Чанк вантажиться одразу після першого рендера, паралельно з чанком сторінки.
  */
-const Notifications = lazy(async () => ({ default: (await import('@ecr/notifications-container')).Notifications }));
+const Notifications = lazy(() => loadNotifications(() => import('@ecr/notifications-container')));
 
 /*
  * ⛔ `cell-states.css` тут НЕ імпортується (D-132, бюджет маршруту). Це 23 КБ

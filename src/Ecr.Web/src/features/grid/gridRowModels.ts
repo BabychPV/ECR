@@ -100,6 +100,14 @@ interface CachedRow {
   readonly columns: TableSliceDto['columns'];
   readonly overrides: ReadonlyMap<string, unknown> | undefined;
   readonly model: GridRow;
+  /** Значення, з якими модель БУЛА побудована, за порядком `columns` (для перевірки, чи RevoGrid не вписав у неї своє). */
+  readonly built: readonly unknown[];
+}
+
+/** Чи модель досі тримає рівно ті значення, з якими її побудовано (RevoGrid пише введене прямо в об'єкт моделі). */
+function modelIntact(hit: CachedRow): boolean {
+  const { model, columns, built } = hit;
+  return columns.every((column, i) => model[column.code] === built[i]);
 }
 
 function sameOverrides(a: ReadonlyMap<string, unknown> | undefined, b: ReadonlyMap<string, unknown> | undefined): boolean {
@@ -128,6 +136,11 @@ function sameOverrides(a: ReadonlyMap<string, unknown> | undefined, b: ReadonlyM
  * змінило (те саме значення), лишає в моделі те саме значення — як і доти, коли пам'ять перебудовувалась лише на зміну
  * `data`/`shownOverrides`.
  *
+ * ⛔ Але введене, що перекриттів НЕ змінило, але текст у моделі змінило (`5,0` замість `5`) або яке не було прийняте
+ * (комірку заблокували між відкриттям редактора й підтвердженням), лишало б у рядку незбережене значення. Тому
+ * влучання в кеш додатково перевіряє, що модель досі тримає значення, з якими будувалась (`built`, ~30 тис. `===`
+ * для 500×60) — інакше рядок будується заново.
+ *
  * ⚠ Кеш живе в замиканні (одне на сітку, `useRef` у `DocumentGrid`) і тримає рядки слабко (`WeakMap`): зріз, що пішов
  * із кешу запитів, звільняє і моделі.
  */
@@ -142,11 +155,16 @@ export function createGridRowsCache(): (slice: TableSliceDto, overrides?: Readon
       const own = byRow.get(row.rowKey);
       const hit = cache.get(row);
       const model =
-        hit !== undefined && hit.columns === slice.columns && sameOverrides(hit.overrides, own)
+        hit !== undefined && hit.columns === slice.columns && sameOverrides(hit.overrides, own) && modelIntact(hit)
           ? hit.model
           : rowModel(row, slice.columns, own);
 
-      next.set(row, { columns: slice.columns, overrides: own, model });
+      next.set(row, {
+        columns: slice.columns,
+        overrides: own,
+        model,
+        built: hit?.model === model ? hit.built : slice.columns.map((column) => model[column.code]),
+      });
       return model;
     });
     cache = next;

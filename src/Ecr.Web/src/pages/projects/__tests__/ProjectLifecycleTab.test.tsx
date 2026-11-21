@@ -93,11 +93,11 @@ function respond(
   return state;
 }
 
-function show(): void {
+function show(client: QueryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })): void {
   render(
     <MantineProvider theme={testTheme}>
       <MemoryRouter initialEntries={['/projects/7/lifecycle']}>
-        <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <QueryClientProvider client={client}>
           <ProjectLifecycleTab projectId={7} />
         </QueryClientProvider>
       </MemoryRouter>
@@ -213,6 +213,30 @@ describe('ProjectLifecycleTab: дії з видимими причинами (c2
       expect(state.posts).toEqual([]);
       await user.click(within(dialog).getByRole('button', { name: '⟦periods.archive⟧' }));
       await waitFor(() => expect(state.posts).toEqual(['/api/v1/projects/7/archive']));
+    },
+    Slow,
+  );
+
+  it(
+    'після архівації кеш документів позначено застарілим — сторінка документа не чекає 30 с (PSS-19a)',
+    async () => {
+      respond('Active', { periods: [period(1, 'Closed'), period(2, 'Closed')] });
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 30_000 } } });
+      client.setQueryData(['document', 5, 202601], { projectStatus: 'Active' });
+      client.setQueryData(['document', 5, 'base'], { projectStatus: 'Active' });
+      const user = userEvent.setup();
+      show(client);
+
+      const archive = await screen.findByRole('button', { name: '⟦projects.lifecycle.archive⟧' });
+      await waitFor(() => expect(archive.hasAttribute('disabled')).toBe(false));
+      await user.click(archive);
+      const dialog = await screen.findByRole('dialog', { name: '⟦periods.archive⟧' });
+      await user.click(within(dialog).getByRole('button', { name: '⟦periods.archive⟧' }));
+
+      await waitFor(() => {
+        expect(client.getQueryState(['document', 5, 202601])?.isInvalidated).toBe(true);
+        expect(client.getQueryState(['document', 5, 'base'])?.isInvalidated).toBe(true);
+      });
     },
     Slow,
   );

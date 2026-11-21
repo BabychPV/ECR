@@ -107,4 +107,24 @@ describe('PSS-18: кеш моделі рядків сітки', () => {
     expect(reverted[3]?.['C1']).toBe(original);
     expect(reverted[4]).toBe(first[4]);
   });
+
+  it('RevoGrid вписав у модель значення, яке не потрапило в перекриття (інший текст / заблокована комірка) — рядок будується заново', () => {
+    const data = slice();
+    const build = createGridRowsCache();
+    const first = build(data, new Map());
+    const stored = first[1]?.['C0'];
+
+    // Те саме число іншим текстом: `captureEdit` дав null, перекриття не з'явилось, а модель уже змінена.
+    (first[1] as Record<string, unknown>)['C0'] = '1,5';
+    // Правка в ІНШОМУ рядку — кеш рядка 1 має влучити, але не віддати незбережене.
+    const second = build(data, new Map([[cellKey('r:2', 'C1'), 'x']]));
+    expect(second[1]).not.toBe(first[1]);
+    expect(second[1]?.['C0']).toBe(stored);
+    expect(second).toEqual(gridRows(data, new Map([[cellKey('r:2', 'C1'), 'x']])));
+
+    // Незайманий рядок лишається тим самим об'єктом (виграш PSS-18).
+    expect(second[4]).toBe(first[4]);
+    // Після перебудови наступний виклик знову влучає в кеш.
+    expect(build(data, new Map([[cellKey('r:2', 'C1'), 'x']]))[1]).toBe(second[1]);
+  });
 });
