@@ -104,6 +104,29 @@ public sealed partial class ApiTestShardsTests
     }
 
     /// <summary>
+    /// Кожна частина з <c>api-test-shards.psd1</c> має рядок матриці <c>server-part</c> у <c>ci.yml</c>
+    /// (<c>part: api-K</c> з кроком <c>Тести API (частина K)</c>), і навпаки — зайвої частини в матриці
+    /// немає. Без цього нова частина в `.psd1` лишилася б у CI непрогнаною (її класи мовчки зникли б
+    /// із прогону), а зайвий рядок матриці дав би порожній фільтр.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Кожна_частина_має_рядок_матриці_server_part_у_ci_yml()
+    {
+        var workflow = File.ReadAllText(Path.Combine(Root(), ".github", "workflows", "ci.yml"));
+        var matrix = Regex.Matches(workflow, @"(?m)^\s*-\s*part:\s*api-(\d+)\s*\r?\n\s*only:\s*""[^""\r\n]*Тести API \(частина (\d+)\)'""")
+            .Select(m => (Part: int.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture),
+                Step: int.Parse(m.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture)))
+            .ToList();
+
+        Assert.All(matrix, m => Assert.Equal(m.Part, m.Step));
+        Assert.Equal(
+            Shards().Select(s => s.Part).Distinct().OrderBy(k => k).ToList(),
+            matrix.Select(m => m.Part).OrderBy(k => k).ToList());
+    }
+
+    /// <summary>
     /// ⛔ Дефект 8521f457c: <c>…текст коментаря.@{</c> — відкривний <c>@{</c> опинився в кінці
     /// коментарного рядка, і <c>Import-PowerShellDataFile</c> бачив порожній файл, а Windows
     /// PowerShell 5.1 без BOM читає кирилицю як ANSI. Регекси інших тестів цього класу такого
