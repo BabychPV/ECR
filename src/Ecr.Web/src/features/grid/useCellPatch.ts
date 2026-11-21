@@ -44,12 +44,44 @@ const SettledJobsLimit = 256;
 const pendingRecalculations = new Map<string, Map<string, number>>();
 let recalculationSeq = 0;
 
+/**
+ * PERF-16: стеля очікуваних задач. Запис знімається лише коли задача завершилась, а слідкувач, що здався
+ * (довга черга, обрив), лишав його назавжди — у вкладці, відкритій днями, мапа росла б із кожною правкою.
+ */
+const PendingJobsPerKeyLimit = 64;
+const PendingKeysLimit = 256;
+
+/**
+ * Позначка «стару задачу вилучено через стелю»: має порядковий номер 0, тобто старіша за будь-яку, тож завершення
+ * наступної задачі бачить «є невраховане старіше» й перечитує зрізи (гірше не буде — лише зайвий перезапит).
+ */
+const OverflowJobId = '#overflow';
+
 /** Запам'ятовує задачу перерахунку, поставлену правкою (AN-108 / P2-02). */
 function registerRecalculation(jobId: string, documentId: number, periodKey: number): void {
   const key = `${documentId}:${periodKey}`;
   const jobs = pendingRecalculations.get(key) ?? new Map<string, number>();
   if (!jobs.has(jobId)) jobs.set(jobId, (recalculationSeq += 1));
+  pruneJobs(jobs);
   pendingRecalculations.set(key, jobs);
+  while (pendingRecalculations.size > PendingKeysLimit) {
+    const oldest = pendingRecalculations.keys().next();
+    if (oldest.done === true || oldest.value === key) break;
+    pendingRecalculations.delete(oldest.value);
+  }
+}
+
+/** Лишає найновіші `PendingJobsPerKeyLimit` задач; про вилучені пам'ятає позначка `OverflowJobId`. */
+function pruneJobs(jobs: Map<string, number>): void {
+  if (jobs.size <= PendingJobsPerKeyLimit) return;
+  const ordered = [...jobs].filter(([id]) => id !== OverflowJobId).sort((a, b) => a[1] - b[1]);
+  for (const [id] of ordered.slice(0, ordered.length - (PendingJobsPerKeyLimit - 1))) jobs.delete(id);
+  jobs.set(OverflowJobId, 0);
+}
+
+/** Тест: скільки задач чекає по ключу `документ:період` (для перевірки стелі). */
+export function pendingRecalculationCount(documentId: number, periodKey: number): number {
+  return pendingRecalculations.get(`${documentId}:${periodKey}`)?.size ?? 0;
 }
 
 /**

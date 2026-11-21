@@ -1,6 +1,15 @@
+import { randomJittered } from '@/shared/polling/pollBackoff';
 import { MutationCache, QueryClient } from '@tanstack/react-query';
 import { applySliceCachePolicy } from '@/features/grid/sliceCachePolicy';
 import { showApiError } from '@/shared/ui/notify';
+
+/** Пауза перед повтором запиту: `Retry-After` сервера або 1 с, 2 с… (не більше 30 с), ±20 %. */
+export function queryRetryDelayMs(failureCount: number, error: unknown, random: () => number = Math.random): number {
+  const advised = (error as { problem?: { retryAfterSeconds?: number } })?.problem?.retryAfterSeconds;
+  const base = advised !== undefined && advised > 0 ? advised * 1000 : 1000 * 2 ** failureCount;
+
+  return randomJittered(Math.min(base, 30_000), 0.2, random);
+}
 
 /**
  * Кеш запитів застосунку і страхувальна сітка під ВСІ зміни (`UI-00`).
@@ -56,6 +65,9 @@ export function createQueryClient(): QueryClient {
           if (status !== undefined && status >= 400 && status < 500) return false;
           return failureCount < 2;
         },
+        // PERF-08: повтор після 5xx — зі зростаючою паузою, розкидом ±20 % і повагою до `Retry-After`: тисяча вкладок,
+        // що отримали 5xx в одну секунду, інакше повторюють удруге в одну секунду, а потім ще раз.
+        retryDelay: queryRetryDelayMs,
       },
     },
   });
