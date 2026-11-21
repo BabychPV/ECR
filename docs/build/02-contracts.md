@@ -3571,6 +3571,25 @@ public interface IRuleCoverageReader
 }
 ```
 
+#### `ICalculationTraceReader`
+
+✎ D-565 (PERF-03): читання записаного трейсу для діагностики проблеми `StepError` — кроки одного рядка в прогоні
+(`calc.CalculationStep` за прогоном, документом, екземпляром таблиці й ключем рядка, з розпакованим `TraceJson`) і профілі
+прогонів (`ModulesProfileJson`, факт `traceSteps`: чиї кроки прогін записав). Споживачі: `GetCalculationIssuesHandler`
+(стан `traceSteps` проблеми), `GetCalculationStepsHandler` (`GET /api/v1/documents/{id}/calculation-steps`).
+
+```csharp
+public interface ICalculationTraceReader
+{
+    public Task<IReadOnlyList<CalculationStepRecord>> ReadRowStepsAsync(
+        long calculationRunId, int periodKey, long documentId, long tableInstanceId, string rowKey, int max,
+        CancellationToken ct);
+
+    public Task<IReadOnlyDictionary<long, string?>> ReadRunProfilesAsync(
+        IReadOnlyCollection<long> calculationRunIds, CancellationToken ct);
+}
+```
+
 #### `IRowActivityFilterSource`
 
 Фільтр активності рядків методології (D-425, «лише Running» для Land): прапорець

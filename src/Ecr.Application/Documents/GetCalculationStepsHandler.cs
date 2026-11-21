@@ -60,7 +60,7 @@ public sealed class GetCalculationStepsHandler(
         var restricted = DocumentSheetVisibility.HasRestrictions(profile);
         if (instance.DocumentId != documentId)
         {
-            throw TableNotFound(tableInstanceId);
+            throw TableNotFound(documentId, tableInstanceId);
         }
 
         if (restricted)
@@ -69,7 +69,7 @@ public sealed class GetCalculationStepsHandler(
             var key = new PeriodKey(periodKey);
             if (!(key.IsValid ? scope.InPeriod(key) : scope).CanReadTable(instance.TableDefId))
             {
-                throw TableNotFound(tableInstanceId);
+                throw TableNotFound(documentId, tableInstanceId);
             }
         }
 
@@ -92,13 +92,14 @@ public sealed class GetCalculationStepsHandler(
             Truncated: steps.Count > MaxSteps);
     }
 
-    private static NotFoundException TableNotFound(long tableInstanceId)
+    private static NotFoundException TableNotFound(long documentId, long tableInstanceId)
         => new(
             "ECR-DOC-0404",
-            $"Таблиці {tableInstanceId} у документі немає.",
+            $"Таблиці {tableInstanceId} у документі {documentId} немає.",
             new Dictionary<string, object?>
             {
                 ["messageKey"] = "err.ECR-DOC-0404.document",
+                ["documentId"] = documentId.ToString(CultureInfo.InvariantCulture),
                 ["tableInstanceId"] = tableInstanceId.ToString(CultureInfo.InvariantCulture),
             });
 }
