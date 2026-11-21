@@ -52,6 +52,7 @@ function impact(overrides: Partial<Impact> = {}): Impact {
   };
 }
 
+const impactUrls: string[] = [];
 const posts: { url: string; body: Record<string, unknown> }[] = [];
 
 /**
@@ -61,9 +62,14 @@ const posts: { url: string; body: Record<string, unknown> }[] = [];
 function show(options: {
   state: 'Submitted' | 'Approved';
   impacts: (Impact | 'fail')[];
+  /** D-5: відповідь залежить від `periodKey` запиту (перекриває `impacts`). */
+  impactFor?: (periodKey: number) => Impact;
+  /** D-5: місячні колонки аркуша (`submission-target.monthColumns`) — як їх повертає сервер для річного шаблону. */
+  monthColumns?: { columnCode: string; monthNumber: number; periodKey: number; sheetStatus: string; tableDefId: number }[];
   refusals?: { status: number; errorCode: string; messageKey: string }[];
 }): void {
   posts.length = 0;
+  impactUrls.length = 0;
   let impactCalls = 0;
   const refusals = [...(options.refusals ?? [])];
   vi.stubGlobal(
@@ -76,11 +82,16 @@ function show(options: {
         return json({ queued: 1, approvedDependents: 1 });
       }
       if (url.includes('/source-impact')) {
+        impactUrls.push(url);
+        if (options.impactFor !== undefined) return json(options.impactFor(Number(new URL(url, 'http://x').searchParams.get('periodKey'))));
         const next = options.impacts[Math.min(impactCalls, options.impacts.length - 1)];
         impactCalls += 1;
         if (next === 'fail') return json({ title: 'boom', status: 500, errorCode: 'ECR-SYS-0500' }, 500);
 
         return json(next);
+      }
+      if (url.includes('/submission-target') && options.monthColumns !== undefined) {
+        return json({ periods: [], monthColumns: options.monthColumns });
       }
       if (url.includes('/approver-edit')) return json({ canApproverEdit: true });
       if (url.includes('/api/v1/me')) return json(Me);
@@ -380,5 +391,93 @@ describe('SheetActions: перша правка аркуша-джерела — 
 
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(screen.queryByTestId('source-impact-confirm')).toBeNull();
+  });
+  // ✎ D-5: річний шаблон — сторінка якірна (202601), зріз правок теж 202601, а місяць кодується колонкою (M05 -> 202605).
+  const Months = ['M01', 'M05', 'M06'].map((columnCode, i) => ({
+    columnCode,
+    monthNumber: [1, 5, 6][i] as number,
+    periodKey: [202601, 202605, 202606][i] as number,
+    sheetStatus: 'Draft',
+    tableDefId: 3,
+  }));
+  const MayCell = { ...EditCell, columnCode: 'M05' };
+
+  it('o) D-5: правка місячної колонки (зріз якірний 202601) питає вплив за МІСЯЦЬ колонки й несе його в перерахунок затверджених', async () => {
+    show({
+      state: 'Draft' as 'Submitted',
+      impacts: [],
+      monthColumns: Months,
+      impactFor: (period) =>
+        period === 202605
+          ? editImpact({ canRecalculateApproved: true, impactHash: 'may-1', sourceMonths: [202605] })
+          : editImpact({ dependentCount: 0, approvedCount: 0, consumers: [] }),
+    });
+    openDocument(1);
+    await waitFor(() => expect((fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.some((c) => String(c[0]).includes('/submission-target'))).toBe(true));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    act(() => putPendingEdit(7, 202601, MayCell));
+
+    await screen.findByTestId('source-impact-confirm');
+    expect(impactUrls).toHaveLength(1);
+    expect(impactUrls[0]).toContain('periodKey=202605');
+    expect(impactUrls[0]).not.toContain('periodKey=202601');
+
+    fireEvent.click(screen.getByTestId('source-impact-approved'));
+    fireEvent.change(screen.getByLabelText(/sourceImpact\.reason\.label/), { target: { value: 'Акт 5' } });
+    fireEvent.click(screen.getByTestId('source-impact-confirm'));
+    act(() => discardPendingEdit(7, 202601, MayCell));
+
+    await waitFor(() => expect(posts).toHaveLength(1));
+    expect(posts[0]?.body).toEqual({ sheetDefId: 42, periodKey: 202605, hash: 'may-1', reason: 'Акт 5' });
+  });
+
+  it('p) D-5: правки січня й травня в одному зрізі — кожен місяць питається один раз; діалог — за першим місяцем із залежними', async () => {
+    show({
+      state: 'Draft' as 'Submitted',
+      impacts: [],
+      monthColumns: Months,
+      impactFor: (period) =>
+        period === 202605 ? editImpact({ impactHash: 'may-1' }) : editImpact({ dependentCount: 0, approvedCount: 0, consumers: [] }),
+    });
+    openDocument(1);
+    await waitFor(() => expect((fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.some((c) => String(c[0]).includes('/submission-target'))).toBe(true));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    act(() => {
+      putPendingEdit(7, 202601, { ...EditCell, columnCode: 'M01' });
+      putPendingEdit(7, 202601, MayCell);
+    });
+
+    await screen.findByTestId('source-impact-confirm');
+    expect(impactUrls.map((u) => /periodKey=(\d+)/.exec(u)?.[1]).sort()).toEqual(['202601', '202605']);
+
+    // Ще одна правка в уже перевіреному місяці нового запиту не дає.
+    act(() => putPendingEdit(7, 202601, { ...MayCell, rowKey: 'R2' }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(impactUrls).toHaveLength(2);
+  });
+
+  it('r) D-5: колонка, якої немає серед місячних, лишається в періоді зрізу (якір)', async () => {
+    show({ state: 'Draft' as 'Submitted', impacts: [editImpact()], monthColumns: Months });
+    openDocument(1);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    act(() => putPendingEdit(7, 202601, { ...EditCell, columnCode: 'INPUT' }));
+
+    await screen.findByTestId('source-impact-confirm');
+    expect(impactUrls).toHaveLength(1);
+    expect(impactUrls[0]).toContain('periodKey=202601');
+  });
+
+  it('q) D-5: звичайний документ — правка в періоді сторінки питає саме його, один запит', async () => {
+    show({ state: 'Draft' as 'Submitted', impacts: [editImpact()] });
+    openDocument(1);
+
+    act(() => putPendingEdit(7, 202601, EditCell));
+
+    await screen.findByTestId('source-impact-confirm');
+    expect(impactUrls).toHaveLength(1);
+    expect(impactUrls[0]).toContain('periodKey=202601');
   });
 });

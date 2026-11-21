@@ -61,7 +61,7 @@ public sealed class TvpBatchWriteTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    public async Task Батч_30000_комірок_іде_ОДНІЄЮ_командою_MERGE()
+    public async Task Батч_30000_комірок_іде_чанками_TVP_MERGE()
     {
         var ct = CancellationToken.None;
         var builder = new TestDocumentBuilder(sql.ConnectionString);
@@ -84,20 +84,27 @@ public sealed class TvpBatchWriteTests(SqlServerFixture sql)
         counter.AssertObserved();
         var seen = counter.Tally.Snapshot();
 
-        Assert.Equal(1, seen["MERGE doc.CellValue"]);
+        // ⛔ PSS-05: TVP-MERGE іде чанками ≤ CellWriteChunkSize (4000) у ТІЙ САМІЙ
+        // транзакції, щоб один батч не тримав великий memory grant. 30 000 / 4000 →
+        // 8 команд, а не 300 (як до WR-02) і не одна.
+        Assert.Equal(ExpectedChunks, seen["MERGE doc.CellValue"]);
 
         // ⚠ Розмір батчу більше не видно в параметрах: їх рівно один
         // (табличний) плюс жодного на комірку. Саме це й знімає межу 2100 —
         // і саме це робить текст запиту сталим.
         var merge = seen.Categories.Single(c => c.Category == "MERGE doc.CellValue");
         Assert.Equal(1, merge.MaxParameters);
-        Assert.Equal(1, merge.InTransaction);
+        Assert.Equal(ExpectedChunks, merge.InTransaction);
     }
+
+    /// <summary>Скільки чанків PSS-05 дає батч <c>Rows × Columns</c>.</summary>
+    private static int ExpectedChunks =>
+        (Rows * Columns + NormalizedCellStore.CellWriteChunkSize - 1) / NormalizedCellStore.CellWriteChunkSize;
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    public async Task Аудит_на_30000_змін_іде_ОДНІЄЮ_командою_INSERT()
+    public async Task Аудит_на_30000_змін_іде_чанками_INSERT()
     {
         var ct = CancellationToken.None;
         var builder = new TestDocumentBuilder(sql.ConnectionString);
@@ -118,10 +125,11 @@ public sealed class TvpBatchWriteTests(SqlServerFixture sql)
         counter.AssertObserved();
         var seen = counter.Tally.Snapshot();
 
-        Assert.Equal(1, seen["INSERT aud.CellChange"]);
+        // ⛔ PSS-05: аудит іде тими самими чанками ≤ CellWriteChunkSize.
+        Assert.Equal(ExpectedChunks, seen["INSERT aud.CellChange"]);
 
-        // Журнал мусить лягти ПОВНІСТЮ — «одна команда» без цієї перевірки
-        // означало б лише «одна команда», а не «одна команда, що все записала».
+        // Журнал мусить лягти ПОВНІСТЮ — «N команд» без цієї перевірки
+        // означало б лише «N команд», а не «N команд, що все записали».
         var written = await ScalarAsync(
             "SELECT COUNT(*) FROM aud.CellChange WHERE DocumentId = @d;", doc.DocumentId, ct);
         Assert.Equal((Rows * Columns) + 1, written);

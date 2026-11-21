@@ -185,6 +185,48 @@ public static partial class UiStringResolver
         };
     }
 
+    /// <summary>Підстановки-ключі періоду (<c>yyyyMM</c>), які в тексті відмови показуються назвою місяця.</summary>
+    private static readonly string[] PeriodKeyParameters = ["sourcePeriodKey"];
+
+    /// <summary>
+    /// Підміняє в підстановках ключ періоду <c>202601</c> людською назвою місяця мовою читача («January 2026»,
+    /// «Январь 2026»): відмова воріт місяця джерела (<c>ECR-SUB-4221</c>) показувала сирий ключ. Назва складається з тих
+    /// самих ключів каталогу, що й клієнтський <c>formatMonthYear</c> (<c>periods.monthOf</c>, <c>periods.month.N</c>);
+    /// значення не <c>yyyyMM</c> або ключів у каталозі немає — без змін (сирий ключ краще за порожнечу).
+    /// </summary>
+    /// <param name="catalog">Каталог мови запиту.</param>
+    /// <param name="parameters">Підстановки.</param>
+    public static IReadOnlyDictionary<string, string> WithLocalizedPeriods(
+        UiStringCatalog catalog, IReadOnlyDictionary<string, string> parameters)
+    {
+        ArgumentNullException.ThrowIfNull(catalog);
+        ArgumentNullException.ThrowIfNull(parameters);
+
+        Dictionary<string, string>? result = null;
+        foreach (var name in PeriodKeyParameters)
+        {
+            if (!parameters.TryGetValue(name, out var raw)
+                || !int.TryParse(raw, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var key)
+                || key / 100 < 1 || key % 100 is < 1 or > 12
+                || !catalog.Strings.TryGetValue("periods.monthOf", out var pattern)
+                || string.IsNullOrWhiteSpace(pattern)
+                || !catalog.Strings.TryGetValue($"periods.month.{key % 100}", out var month)
+                || string.IsNullOrWhiteSpace(month))
+            {
+                continue;
+            }
+
+            result ??= new Dictionary<string, string>(parameters, StringComparer.Ordinal);
+            result[name] = Format(pattern, new Dictionary<string, string>
+            {
+                ["month"] = month,
+                ["year"] = (key / 100).ToString(System.Globalization.CultureInfo.InvariantCulture),
+            });
+        }
+
+        return result ?? parameters;
+    }
+
     /// <summary>
     /// Які підстановки повідомлення — НАЗВИ СТАНІВ (<c>Grace</c>, <c>Published</c>) і з якого словника
     /// <c>status.&lt;родина&gt;.*</c> їх перекладати (T2-09).

@@ -31,7 +31,7 @@ public sealed class ImportAccessTests
     {
         _user.UserId.Returns(9);
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
-            .Returns(new AccessBuilder { UserId = 9 }.Permission("Document.Import").Build());
+            .Returns(new AccessBuilder { UserId = 9 }.Permission("Document.Import").Permission("Document.View").Build());
     }
 
     [Fact]
@@ -81,5 +81,48 @@ public sealed class ImportAccessTests
 
         Assert.Equal("ECR-DOC-0404", denied.ErrorCode);
         await _importer.DidNotReceiveWithAnyArgs().ApplyAsync(0, null!, null, CancellationToken.None);
+    }
+
+    /// <summary>
+    /// PSS-25: роль із <c>Document.Import</c>, але без <c>Document.View</c>, не отримує поточних значень через перегляд
+    /// (<c>OldValue</c>). Мутація: прибрати <c>RequirePermissionAsync(... "Document.View")</c> у <c>PreviewImportHandler</c> → 403 зникає → червоний.
+    /// </summary>
+    [Fact]
+    [Trait("Finding", "PSS-25")]
+    public async Task Без_Document_View_перегляд_імпорту_403_і_імпортер_не_викликається()
+    {
+        ArrangeVisibleWithoutView();
+
+        var denied = await Assert.ThrowsAsync<AccessDeniedException>(
+            () => new PreviewImportHandler(_importer, _access, _user)
+                .HandleAsync(DocumentId, Stream.Null, CancellationToken.None));
+
+        Assert.Equal("ECR-AUTH-0403", denied.ErrorCode);
+        await _importer.DidNotReceiveWithAnyArgs().PreviewAsync(0, null!, CancellationToken.None);
+    }
+
+    /// <summary>PSS-25. Мутація: прибрати перевірку в <c>ApplyImportHandler</c> → застосування доходить до імпортера → червоний.</summary>
+    [Fact]
+    [Trait("Finding", "PSS-25")]
+    public async Task Без_Document_View_застосування_імпорту_403_і_нічого_не_читається()
+    {
+        ArrangeVisibleWithoutView();
+
+        var denied = await Assert.ThrowsAsync<AccessDeniedException>(
+            () => new ApplyImportHandler(_importer, _jobs, _access, _user)
+                .HandleAsync(DocumentId, "token-1", null, CancellationToken.None));
+
+        Assert.Equal("ECR-AUTH-0403", denied.ErrorCode);
+        await _importer.DidNotReceiveWithAnyArgs().CountPendingChangesAsync(0, null!, null, CancellationToken.None);
+        await _importer.DidNotReceiveWithAnyArgs().ApplyAsync(0, null!, null, CancellationToken.None);
+    }
+
+    private void ArrangeVisibleWithoutView()
+    {
+        _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
+            .Returns(new AccessBuilder { UserId = 9 }.Permission("Document.Import").Build());
+        _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), DocumentId, Arg.Any<CancellationToken>())
+            .Returns(EditDecision.Allow());
+        _access.DocumentProjectIdAsync(DocumentId, Arg.Any<CancellationToken>()).Returns((int?)AccessBuilder.ProjectId);
     }
 }

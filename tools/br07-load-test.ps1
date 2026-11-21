@@ -300,7 +300,7 @@ EXEC sys.sp_addextendedproperty @name = N'Ecr_Br07_Temp', @value = 1;
     # ⚠ 14-agent-jobs.sql — єдиний легальний виняток: чіпає msdb, а не базу
     # застосунку, і виконується DBA один раз, а не на кожен замір.
     $onDisk = Get-ChildItem -Path $sql -Filter '*.sql' | Select-Object -ExpandProperty Name
-    $missed = $onDisk | Where-Object { $_ -notin $scripts -and $_ -ne '14-agent-jobs.sql' }
+    $missed = $onDisk | Where-Object { $_ -notin $scripts -and $_ -notin '14-agent-jobs.sql', '16-resource-governor.sql' }
     if ($missed) {
         throw "Скрипти є в дереві, але не виконуються: $($missed -join ', ')"
     }

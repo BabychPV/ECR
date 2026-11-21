@@ -18,6 +18,12 @@ public static class DependencyInjection
     /// <summary>Ім'я рядка підключення. Значення задається змінною <c>ECR_ConnectionStrings__Ecr</c>.</summary>
     private const string ConnectionName = "Ecr";
 
+    /// <summary><c>Application Name</c> процесу Api (PSS-03).</summary>
+    public const string ApiApplicationName = "Ecr.Api";
+
+    /// <summary><c>Application Name</c> дочірнього процесу воркера перерахунку (PSS-03).</summary>
+    public const string WorkerChildApplicationName = "Ecr.Worker.Child";
+
     /// <summary>Додає EF Core, сховища, кеш і безпеку.</summary>
     /// <remarks>
     /// ⚠ Тут реєструється лише те, чиї реалізації **існують**. Порти етапу 5
@@ -27,7 +33,15 @@ public static class DependencyInjection
     /// не можна: у Development контейнер перевіряється при побудові, і
     /// застосунок просто не стартував би.
     /// </remarks>
-    public static IServiceCollection AddEcrInfrastructure(this IServiceCollection services, IConfiguration configuration)
+    /// <param name="services">Колекція сервісів хоста.</param>
+    /// <param name="configuration">Конфігурація хоста.</param>
+    /// <param name="applicationName">
+    /// PSS-03: <c>Application Name</c> з'єднань процесу (<c>sys.dm_exec_sessions.program_name</c>) — за ним DBA
+    /// відрізняє навантаження Api від воркера, а необов'язковий Resource Governor (<c>Sql/16-resource-governor.sql</c>)
+    /// класифікує сеанси. Api — <see cref="ApiApplicationName"/>; воркер передає <see cref="WorkerChildApplicationName"/>.
+    /// </param>
+    public static IServiceCollection AddEcrInfrastructure(
+        this IServiceCollection services, IConfiguration configuration, string applicationName = ApiApplicationName)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configuration);
@@ -55,6 +69,9 @@ public static class DependencyInjection
         connectionString = WithDefaultMaxPoolSize(
             connectionString, Math.Max(1, ReadInt(configuration, "Database:MaxPoolSize", 200)));
 
+        // PSS-03: ім'я застосунку в з'єднанні — до `UseSqlServer`, з тієї ж причини (один рядок = один пул).
+        connectionString = WithDefaultApplicationName(connectionString, applicationName);
+
         // L1-01: збережений новий штамп скидає його кеш (`SecurityStampCacheInvalidator`).
         services.AddSingleton<SecurityStampCacheInvalidator>();
 
@@ -80,10 +97,20 @@ public static class DependencyInjection
                 // Повтори на транзієнтних збоях. ⚠ Транзакцію з таким
                 // налаштуванням треба виконувати цілком усередині
                 // ExecutionStrategy — інакше повтор розірве її посередині.
-                sql.EnableRetryOnFailure(
-                    maxRetryCount: 3,
-                    maxRetryDelay: TimeSpan.FromSeconds(5),
-                    errorNumbersToAdd: null);
+                // PSS-12: у Api тайм-аут команди (-2) і 8645 НЕ повторюються (`ApiSqlRetryingExecutionStrategy`);
+                // воркер лишає стандартну стратегію.
+                if (string.Equals(applicationName, ApiApplicationName, StringComparison.Ordinal))
+                {
+                    sql.ExecutionStrategy(deps => new ApiSqlRetryingExecutionStrategy(
+                        deps, maxRetryCount: 3, maxRetryDelay: TimeSpan.FromSeconds(5)));
+                }
+                else
+                {
+                    sql.EnableRetryOnFailure(
+                        maxRetryCount: 3,
+                        maxRetryDelay: TimeSpan.FromSeconds(5),
+                        errorNumbersToAdd: null);
+                }
             }));
 
         // F-13. Читач архіву, від якого залежать і NormalizedCellStore, і
@@ -710,6 +737,28 @@ public static class DependencyInjection
         }
 
         builder.MaxPoolSize = Math.Max(maxPoolSize, builder.MinPoolSize);
+        return builder.ConnectionString;
+    }
+
+    /// <summary>
+    /// Рядок підключення з <c>Application Name</c> = <paramref name="applicationName"/>, якщо в ньому самому
+    /// імені не задано; задане адміністратором не чіпається (PSS-03).
+    /// </summary>
+    /// <param name="connectionString">Рядок підключення.</param>
+    /// <param name="applicationName">Ім'я за замовчуванням.</param>
+    /// <returns>Рядок підключення.</returns>
+    public static string WithDefaultApplicationName(string connectionString, string applicationName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+        ArgumentException.ThrowIfNullOrWhiteSpace(applicationName);
+
+        var builder = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(connectionString);
+        if (builder.ShouldSerialize("Application Name"))
+        {
+            return connectionString;
+        }
+
+        builder.ApplicationName = applicationName;
         return builder.ConnectionString;
     }
 

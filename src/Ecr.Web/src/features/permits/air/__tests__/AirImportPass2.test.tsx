@@ -116,6 +116,9 @@ function conflict(messageKey: string, code: string): EcrApiError {
 async function saveAs(name: string, code: string): Promise<void> {
   fireEvent.click(await screen.findByRole('button', { name: text('permits.air.import.map.saveProfile') }));
   fireEvent.change(screen.getByLabelText(text('permits.air.import.save.name')), { target: { value: name } });
+  // UX 20.11: the code is generated from the name; its field opens with «Change code».
+  const change = screen.queryByRole('button', { name: text('permits.air.import.save.changeCode') });
+  if (change !== null) fireEvent.click(change);
   fireEvent.change(screen.getByLabelText(text('permits.air.import.save.code')), { target: { value: code } });
   fireEvent.click(button('permits.air.import.save.submit'));
 }

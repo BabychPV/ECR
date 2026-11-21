@@ -62,9 +62,23 @@ public sealed class SqlCapabilitiesProbe : ISqlCapabilities
 
         var enterprise = EffectiveMode == SqlEditionMode.Enterprise;
         SupportsOnlineIndexRebuild = enterprise;
-        SupportsResourceGovernor = enterprise;
+        SupportsResourceGovernor = ResourceGovernorSupported(enterprise, ProductMajorVersion);
         ArchiveBatchSize = enterprise ? EnterpriseArchiveBatch : StandardArchiveBatch;
     }
+
+    /// <summary>Перша мажорна версія SQL Server (2025), де Resource Governor заявлено і в Standard.</summary>
+    internal const int ResourceGovernorInStandardFromMajorVersion = 17;
+
+    /// <summary>
+    /// Чи доступний Resource Governor (PSS-03): Enterprise — так; SQL Server 2025 (17.x) і новіші — також у Standard.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ [НЕ ПЕРЕВІРЕНО на цільовій збірці] Для Standard 2025 спирається на документацію Microsoft, а не на прогін
+    /// у замовника: DBA підтверджує до застосування <c>Sql/16-resource-governor.sql</c>. Впливає лише на текст
+    /// обмежень у <c>/health/db</c>; сам скрипт застосунок не виконує.
+    /// </remarks>
+    internal static bool ResourceGovernorSupported(bool enterprise, int productMajorVersion)
+        => enterprise || productMajorVersion >= ResourceGovernorInStandardFromMajorVersion;
 
     /// <summary>Що недоступне в поточному режимі — для <c>/health/db</c>.</summary>
     /// <remarks>
@@ -81,7 +95,7 @@ public sealed class SqlCapabilitiesProbe : ISqlCapabilities
 
         if (!SupportsResourceGovernor)
         {
-            list.Add("фонові задачі не ізольовані від інтерактивного піку (немає Resource Governor)");
+            list.Add("фонові задачі не ізольовані від інтерактивного піку (Resource Governor недоступний у цій редакції/версії SQL Server)");
         }
 
         if (!IsReadCommittedSnapshotOn)

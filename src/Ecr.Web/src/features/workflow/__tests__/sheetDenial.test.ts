@@ -94,6 +94,22 @@ describe('sheetDenialText: відмова називає аркуш назвою
     }
   });
 
+  it('сервер уже прислав reasonKey дії (deny.approve.NoRight / deny.reopen.NoRight) — текст дії, не правки комірки', () => {
+    const approve = sheetDenialText(
+      denial('err.ECR-ACCS-0403.approveDenied', { reason: 'NoGrant', reasonKey: 'deny.approve.NoRight' }),
+      'Выбросы',
+    );
+    const reopen = sheetDenialText(
+      denial('err.ECR-ACCS-0403.reopenDenied', { reason: 'NoGrant', reasonKey: 'deny.reopen.NoRight' }),
+      'Выбросы',
+    );
+
+    expect(approve).toBe(
+      'Лист «Выбросы» нельзя утвердить или вернуть в работу: нет права утверждать или отклонять листы в этом проекте.',
+    );
+    expect(reopen).toBe('Лист «Выбросы» нельзя вернуть в работу: нет права вернуть этот лист в работу.');
+  });
+
   it('PM-PASS-A-P3 п.7: причина без рядка в каталозі - загальний текст, а не сирий reason', () => {
     const approve = sheetDenialText(
       denial('err.ECR-ACCS-0403.approveDenied', { reason: 'Locked', reasonKey: 'deny.Locked' }),

@@ -63,6 +63,12 @@ internal static class DeployArguments
                 break;
         }
 
+        // ⛔ PSS-28: імена хоста — явно, зокрема `*` (тоді скидається попереднє обмеження); без кроку — не передається.
+        if (!string.IsNullOrWhiteSpace(state.AllowedHosts))
+        {
+            result.Add(new("AllowedHosts", state.AllowedHosts));
+        }
+
         if (state.Mode == WizardMode.FirstDeployment)
         {
             result.Add(new("FirstDeployment", null));

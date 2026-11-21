@@ -525,6 +525,30 @@ public sealed class SubmitApproveTests
         Assert.Equal(9, _sheets[Water].ApprovedByUserId);
     }
 
+    /// <summary>
+    /// UI-тест 20.11: відмова ЗАТВЕРДЖЕННЯ через відсутній грант називала «право редагувати цю комірку».
+    /// Грант-причини → <c>deny.approve.NoRight</c>; інша причина лишає загальний <c>deny.&lt;Reason&gt;</c>.
+    /// ⛔ Мутація: повернути <c>$"deny.{reason}"</c> для всіх — перші два рядки червоніють.
+    /// </summary>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [InlineData(EditDenyReason.NoGrant, "deny.approve.NoRight")]
+    [InlineData(EditDenyReason.InsufficientGrantLevel, "deny.approve.NoRight")]
+    [InlineData(EditDenyReason.BusinessRule, "deny.BusinessRule")]
+    public async Task Відмова_затвердження_через_грант_має_текст_дії_а_не_правки_комірки(EditDenyReason reason, string expectedKey)
+    {
+        _sheets[Water].Submit(userId: 9, Now);
+        _access.CanApproveAsync(Arg.Any<AccessProfile>(), Document, Water, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+               .Returns(EditDecision.Deny(reason));
+
+        var error = await Assert.ThrowsAsync<AccessDeniedException>(
+            () => Approve().HandleAsync(Document, Water, Period, approved: true, reason: null, CancellationToken.None));
+
+        Assert.Equal("err.ECR-ACCS-0403.approveDenied", error.Details!["messageKey"]);
+        Assert.Equal(expectedKey, error.Details["reasonKey"]);
+        Assert.Equal(reason.ToString(), error.Details["reason"]);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait("Decision", "D-440")]
@@ -662,7 +686,8 @@ public sealed class SubmitApproveTests
         var error = await Assert.ThrowsAsync<AccessDeniedException>(
             () => Approve().HandleAsync(Document, Water, Period, approved: true, reason: null, CancellationToken.None));
 
-        Assert.Equal("deny.InsufficientGrantLevel", error.Details!["reasonKey"]);
+        // UI-тест 20.11: грант-причини при затвердженні мають текст дії, а не загальний «рівень доступу».
+        Assert.Equal("deny.approve.NoRight", error.Details!["reasonKey"]);
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
@@ -1621,7 +1646,8 @@ public sealed class SubmitApproveTests
 
         Assert.Equal("ECR-ACCS-0403", denied.ErrorCode);
         // PM-PASS-A-P3 п.7a: ключ каталогу для локалізації `detail`.
-        Assert.Equal("deny.NoGrant", denied.Details!["reasonKey"]);
+        // UI-тест 20.11: грант → текст дії («немає права повернути у роботу»), не «редагувати комірку».
+        Assert.Equal("deny.reopen.NoRight", denied.Details!["reasonKey"]);
 
         // ⚠ Аркуш лишається Submitted — відмова стається ДО будь-якої зміни
         // стану, не після.

@@ -85,6 +85,26 @@ describe('SourceImpactModal', () => {
     expect(sheets.textContent).toContain('SH_DRAFT · ⟦sourceImpact.status.pending⟧');
   });
 
+  it('D-7: частково затверджений період має бейдж «partial», а не «буде перерахований»; повністю затверджений і повністю відкритий — як раніше', async () => {
+    const base = impact().consumers[1]!;
+    const sheet = (id: number, code: string, ok: boolean) => ({ sheetDefId: id, sheetCode: code, approved: !ok, willRecalculate: ok });
+    show(
+      impact({
+        consumers: [
+          { ...base, documentId: 11, sheets: [sheet(1, 'A', false), sheet(2, 'B', true)] },
+          { ...base, documentId: 12, willRecalculate: false, approved: true, sheets: [sheet(3, 'C', false), sheet(4, 'D', false)] },
+          { ...base, documentId: 13, sheets: [sheet(5, 'E', true), sheet(6, 'F', true)] },
+        ],
+      }),
+    );
+
+    await screen.findByRole('dialog');
+    expect(screen.getAllByText('⟦sourceImpact.status.partial⟧')).toHaveLength(1);
+    // Період-рівневі бейджі: 1 partial, 1 approved, 1 pending (бейджі аркушів мають суфікс « · ... » у складі Group, тож шукаємо точний текст).
+    expect(screen.getAllByText('⟦sourceImpact.status.approved⟧')).toHaveLength(1);
+    expect(screen.getAllByText('⟦sourceImpact.status.pending⟧')).toHaveLength(1);
+  });
+
   it('D-1: період з одним аркушем не показує бейджів аркушів (вони лише для кількох)', async () => {
     const base = impact().consumers[1]!;
     show(

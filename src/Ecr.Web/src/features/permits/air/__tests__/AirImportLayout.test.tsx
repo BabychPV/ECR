@@ -259,27 +259,44 @@ describe('MappingStep — where the table is, and «Add as new column»', () => 
     expect(screen.queryByRole('textbox', { name: text('permits.air.import.rows.sheet') })).toBeNull();
   });
 
-  it('«Save as profile…» is one button outside «Advanced», also without edits; the form suggests the code from the name', () => {
+  it('«Save as profile…» is one button outside «Advanced», also without edits; a name is enough — the code is generated', () => {
     const props = mount();
 
     expect(screen.getAllByRole('button', { name: text('permits.air.import.map.saveProfile') })).toHaveLength(1);
     fireEvent.click(screen.getByRole('button', { name: text('permits.air.import.map.saveProfile') }));
     fireEvent.change(screen.getByRole('textbox', { name: text('permits.air.import.save.name') }), { target: { value: 'ERA 3.3 (Atyrau) v2' } });
-    expect(screen.getByRole<HTMLInputElement>('textbox', { name: text('permits.air.import.save.code') }).value).toBe('ERA_3_3_ATYRAU_V2');
+    expect(screen.getByTestId('air-profile-code').textContent).toBe('Will be saved under the code ERA_3_3_ATYRAU_V2');
+    expect(screen.queryByRole('textbox', { name: text('permits.air.import.save.code') })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: text('permits.air.import.save.submit') }));
     expect(props.onSaveProfile).toHaveBeenCalledWith('ERA_3_3_ATYRAU_V2', 'ERA 3.3 (Atyrau) v2');
   });
 
-  it('a Cyrillic name gives no code: the code must be entered, nothing is saved before', () => {
+  it('UX 20.11: a Cyrillic name gives a transliterated code; «Change code» still lets the user set it', () => {
     const props = mount();
 
     fireEvent.click(screen.getByRole('button', { name: text('permits.air.import.map.saveProfile') }));
     fireEvent.change(screen.getByRole('textbox', { name: text('permits.air.import.save.name') }), { target: { value: 'Похожие файлы' } });
+    expect(screen.getByTestId('air-profile-code').textContent).toBe('Will be saved under the code POKHOZHIE_FAYLY');
+    fireEvent.click(screen.getByRole('button', { name: text('permits.air.import.save.changeCode') }));
+    const code = screen.getByRole<HTMLInputElement>('textbox', { name: text('permits.air.import.save.code') });
+    expect(code.value).toBe('POKHOZHIE_FAYLY');
+    expect(document.activeElement).toBe(code);
+    fireEvent.change(code, { target: { value: 'similar' } });
+    fireEvent.click(screen.getByRole('button', { name: text('permits.air.import.save.submit') }));
+    expect(props.onSaveProfile).toHaveBeenCalledWith('SIMILAR', 'Похожие файлы');
+  });
+
+  it('a name that gives no code: the code field opens with the reason, nothing is saved before a code is entered', () => {
+    const props = mount();
+
+    fireEvent.click(screen.getByRole('button', { name: text('permits.air.import.map.saveProfile') }));
+    fireEvent.change(screen.getByRole('textbox', { name: text('permits.air.import.save.name') }), { target: { value: '— !!! —' } });
+    expect(screen.getByTestId('air-profile-code').textContent).toBe(text('permits.air.import.save.codeLater'));
     fireEvent.click(screen.getByRole('button', { name: text('permits.air.import.save.submit') }));
     expect(screen.getByText(text('permits.air.import.save.codeInvalid'))).not.toBeNull();
     expect(props.onSaveProfile).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByRole('textbox', { name: text('permits.air.import.save.code') }), { target: { value: 'similar' } });
+    fireEvent.change(screen.getByRole('textbox', { name: text('permits.air.import.save.code') }), { target: { value: 'signs' } });
     fireEvent.click(screen.getByRole('button', { name: text('permits.air.import.save.submit') }));
-    expect(props.onSaveProfile).toHaveBeenCalledWith('SIMILAR', 'Похожие файлы');
+    expect(props.onSaveProfile).toHaveBeenCalledWith('SIGNS', '— !!! —');
   });
 });

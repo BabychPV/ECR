@@ -73,7 +73,7 @@ internal static class ChildComposition
 
         var hostOwn = services.Where(d => d.ServiceType == typeof(IHostedService)).ToHashSet();
 
-        services.AddEcrInfrastructure(configuration);
+        services.AddEcrInfrastructure(configuration, Ecr.Infrastructure.DependencyInjection.WorkerChildApplicationName);
         services.AddEcrCalculations(configuration.GetSection(CalculationLimits.SectionName).Get<CalculationLimits>());
         services.AddEcrApplication();
         services.AddSingleton<NoRequestCurrentUser>();

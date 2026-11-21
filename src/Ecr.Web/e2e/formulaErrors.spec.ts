@@ -284,7 +284,8 @@ test('C-1 formula errors (помилка формули): value kept, dependents
   const panel = page.getByTestId('document-calc-issues');
   await expect(panel).toBeVisible({ timeout: 60_000 });
   await expect(panel).toHaveAttribute('data-blocking', 'true');
-  await expect(page.getByTestId('document-calc-issues-title')).toContainText('submit is blocked');
+  // ✎ 066c6ec95: заголовок не стверджує «заблоковано» (рішення за сервером) — «submission may be refused».
+  await expect(page.getByTestId('document-calc-issues-title')).toContainText('submission may be refused');
   const cause = page.getByTestId('document-calc-issue');
   await expect(cause).toHaveCount(1);
   await expect(cause).toHaveAttribute('data-kind', 'formula');

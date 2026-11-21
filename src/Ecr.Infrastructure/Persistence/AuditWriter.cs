@@ -170,22 +170,28 @@ public sealed class AuditWriter(EcrDbContext db, StaleCountsEpoch? staleEpoch = 
             EnsureFits(nameof(CellChangeRecord.Reason), change.Reason, ReasonLength);
         }
 
-        await using var command = CreateCommand();
+        // ⛔ PSS-05: чанки ≤ NormalizedCellStore.CellWriteChunkSize в ТІЙ САМІЙ транзакції контексту
+        // (CreateCommand бере її щоразу): журнал комітиться чи відкочується разом з комірками, але жоден
+        // оператор INSERT не тримає тисяч замків, достатніх для ескалації до таблиці.
+        foreach (var chunk in changes.Chunk(NormalizedCellStore.CellWriteChunkSize))
+        {
+            await using var command = CreateCommand();
 
-        var rows = command.Parameters.Add("@changes", SqlDbType.Structured);
-        rows.TypeName = CellChangeTvpTypeName;
-        rows.Value = ToRecords(changes);
+            var rows = command.Parameters.Add("@changes", SqlDbType.Structured);
+            rows.TypeName = CellChangeTvpTypeName;
+            rows.Value = ToRecords(chunk);
 
-        command.CommandText = """
-            INSERT INTO aud.CellChange
-                (ChangedAt, PeriodKey, DocumentId, TableRowId, RowKey, ColumnDefId,
-                 OldValue, NewValue, ChangedByUserId, Origin, IsLateEdit, CorrelationId, IsOutOfWindow, IsOverwrite, Reason)
-            SELECT ChangedAt, PeriodKey, DocumentId, TableRowId, RowKey, ColumnDefId,
-                   OldValue, NewValue, ChangedByUserId, Origin, IsLateEdit, CorrelationId, IsOutOfWindow, IsOverwrite, Reason
-            FROM @changes;
-            """;
+            command.CommandText = """
+                INSERT INTO aud.CellChange
+                    (ChangedAt, PeriodKey, DocumentId, TableRowId, RowKey, ColumnDefId,
+                     OldValue, NewValue, ChangedByUserId, Origin, IsLateEdit, CorrelationId, IsOutOfWindow, IsOverwrite, Reason)
+                SELECT ChangedAt, PeriodKey, DocumentId, TableRowId, RowKey, ColumnDefId,
+                       OldValue, NewValue, ChangedByUserId, Origin, IsLateEdit, CorrelationId, IsOutOfWindow, IsOverwrite, Reason
+                FROM @changes;
+                """;
 
-        await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
 
         // Правка комірки змінює "застарілість результатів": кеш лічильників скидається ПІСЛЯ коміту транзакції
         // (поза транзакцією - одразу), O(1), без звернень до БД.

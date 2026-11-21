@@ -219,6 +219,10 @@ public sealed class PreviewImportHandler(
         // ⛔ B-08: невидимий документ — 404, як неіснуючий (`DocumentVisibility`).
         await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, Permission, ct).ConfigureAwait(false);
 
+        // ⛔ PSS-25 (клас PT-8): перегляд імпорту повертає ПОТОЧНІ значення комірок (`OldValue`), застосування діє над ними;
+        // тож, як і запис комірок, вимагають ще й `Document.View` у проєкті документа, а не лише `Document.Import`.
+        await DocumentVisibility.RequirePermissionAsync(access, profile, documentId, "Document.View", ct).ConfigureAwait(false);
+
         // ⚠ Синхронно, попри розмір файлу: користувач стоїть над результатом і
         // без нього не може зробити наступний крок. Перегляд у фоні означав би
         // опитування задачі заради того, щоб побачити перелік змін.
@@ -299,6 +303,10 @@ public sealed class ApplyImportHandler(
 
         // ⛔ B-08: невидимий документ — 404, як неіснуючий (`DocumentVisibility`).
         await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, Permission, ct).ConfigureAwait(false);
+
+        // ⛔ PSS-25 (клас PT-8): перегляд імпорту повертає ПОТОЧНІ значення комірок (`OldValue`), застосування діє над ними;
+        // тож, як і запис комірок, вимагають ще й `Document.View` у проєкті документа, а не лише `Document.Import`.
+        await DocumentVisibility.RequirePermissionAsync(access, profile, documentId, "Document.View", ct).ConfigureAwait(false);
 
         // ⛔ R1-05: межа - ДО читання плану й постановки в чергу (див. `MaxOverwriteRows`).
         if (overwriteRows is { Count: > MaxOverwriteRows })

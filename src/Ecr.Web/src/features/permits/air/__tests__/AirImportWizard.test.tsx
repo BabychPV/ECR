@@ -176,7 +176,7 @@ describe('крок 2: відповідність', () => {
     );
     const mapped = screen.getByRole('region', { name: text('permits.air.import.map.mappedAria') });
     expect(within(mapped).getByText('AA')).toBeTruthy();
-    expect(screen.getByText('Unmapped columns: 1')).toBeTruthy();
+    expect(screen.getByText('File columns not imported: 1')).toBeTruthy();
   });
 
   it('редагування: шаблон змінено -> «Next: preview» вимкнено, доки файл не розібрано заново; аналіз шле spec', async () => {
@@ -211,7 +211,9 @@ describe('крок 2: відповідність', () => {
     expect(screen.queryByLabelText(text('permits.air.import.save.name'))).toBeNull();
     fireEvent.click(await screen.findByRole('button', { name: text('permits.air.import.map.saveProfile') }));
     fireEvent.change(screen.getByLabelText(text('permits.air.import.save.name')), { target: { value: 'My profile' } });
-    expect(screen.getByLabelText<HTMLInputElement>(text('permits.air.import.save.code')).value).toBe('MY_PROFILE');
+    // UX 20.11: a name only — the code is generated and shown, its field stays closed.
+    expect(screen.getByTestId('air-profile-code').textContent).toBe('Will be saved under the code MY_PROFILE');
+    expect(screen.queryByLabelText(text('permits.air.import.save.code'))).toBeNull();
     fireEvent.click(button('permits.air.import.save.submit'));
     await waitFor(() => expect(api.saveImportProfile).toHaveBeenCalledTimes(1));
     const [code, body] = api.saveImportProfile.mock.calls[0]!;
@@ -292,7 +294,7 @@ describe('крок 2: відповідність', () => {
     expect(screen.queryByRole('textbox', { name: new RegExp(`^${text('permits.air.import.rows.sheet')}`) })).toBeNull();
   });
 
-  it('«Matched columns» і знахідки — людськими назвами: вбудовані поля з каталогу, додане — назвою колонки типу, невідоме — як є', async () => {
+  it('таблиця полів і знахідки — людськими назвами: вбудовані поля з каталогу, додане — назвою колонки типу, невідоме — як є; порядок — як колонки у файлі', async () => {
     airType = airPermitType([['FILE_B', 'Workshop']]);
     api.analyseAirImport.mockResolvedValue(
       analysis({
@@ -314,18 +316,28 @@ describe('крок 2: відповідність', () => {
     );
     await toMapping();
     const mapped = screen.getByRole('region', { name: text('permits.air.import.map.mappedAria') });
+    // UX 20.11: rows go left to right as the columns of the file (B, C, G, I, AA); the level (parent/child) stays visible in
+    // plain words under «Needed» (review 20.11: no capability weakened), edited under «Advanced».
+    await waitFor(() => expect(within(mapped).getAllByRole('rowheader')[0]!.textContent).toBe('Workshop'));
     const heads = within(mapped)
       .getAllByRole('rowheader')
       .map((cell) => cell.textContent);
-    expect(heads.slice(0, 3)).toEqual([
+    expect(heads).toEqual([
+      'Workshop',
+      'Remark',
       text('permits.air.import.field.naeCode'),
       text('permits.air.sources.hours'),
       text('permits.air.substances.ty'),
     ]);
-    await waitFor(() => expect(within(mapped).getAllByRole('rowheader')[3]!.textContent).toBe('Workshop'));
-    expect(within(mapped).getAllByRole('rowheader')[4]!.textContent).toBe('Remark');
     expect(mapped.textContent).not.toMatch(/naeCode|tonsPerYear|FILE_B/);
-    expect(within(mapped).getAllByText(text('permits.air.import.map.level.parent')).length).toBe(3);
+    const rows = within(mapped).getAllByRole('row').slice(1);
+    expect(rows.map((row) => row.querySelector('.pi-level')?.textContent)).toEqual([
+      text('permits.air.import.fields.perSource'),
+      text('permits.air.import.fields.perRow'),
+      text('permits.air.import.fields.perSource'),
+      text('permits.air.import.fields.perSource'),
+      text('permits.air.import.fields.perRow'),
+    ]);
     const issues = screen.getByRole('region', { name: text('permits.air.import.issues.aria') });
     expect(within(issues).getByText(text('permits.air.import.field.naeCode'))).toBeTruthy();
   });

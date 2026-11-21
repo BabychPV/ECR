@@ -9,14 +9,41 @@ public sealed class ClosedXmlImportGrid : IImportGrid
     private readonly IXLWorksheet _sheet;
     private readonly Dictionary<(int Row, int Column), ImportMerge> _merges = [];
 
-    /// <summary>Wraps a worksheet.</summary>
+    /// <summary>Most cells one merged range may cover (a real group header spans a few dozen).</summary>
+    public const int MaxMergeCells = 10_000;
+
+    /// <summary>Most cells all merged ranges together may cover (they are indexed one by one).</summary>
+    public const int MaxMergedCellsTotal = 1_000_000;
+
+    /// <summary>
+    /// Wraps a worksheet.
+    /// </summary>
+    /// <exception cref="Ecr.Application.Errors.BusinessRuleException">
+    /// <c>ECR-IMP-0422</c>: a few-KB file can declare a full-sheet merge or a cell in <c>XFD1048576</c>; PSS-22 refuses it here,
+    /// before any per-cell work, instead of expanding 1.7e10 cells.
+    /// </exception>
     public ClosedXmlImportGrid(IXLWorksheet sheet)
     {
         ArgumentNullException.ThrowIfNull(sheet);
 
         _sheet = sheet;
+
+        // ⛔ PSS-22: merges are measured as rectangles FIRST; only a small total is ever expanded into the index.
+        long mergedTotal = 0;
+        foreach (var range in sheet.MergedRanges)
+        {
+            var cells = ((long)range.RangeAddress.LastAddress.RowNumber - range.RangeAddress.FirstAddress.RowNumber + 1)
+                        * (range.RangeAddress.LastAddress.ColumnNumber - range.RangeAddress.FirstAddress.ColumnNumber + 1);
+            mergedTotal += cells;
+            if (cells > MaxMergeCells || mergedTotal > MaxMergedCellsTotal)
+            {
+                throw XlsxSafetyGate.Rejection("a merged range is too large");
+            }
+        }
+
         RowCount = sheet.LastRowUsed()?.RowNumber() ?? 0;
         ColumnCount = sheet.LastColumnUsed()?.ColumnNumber() ?? 0;
+        EnsureWithinLimits();
 
         foreach (var range in sheet.MergedRanges)
         {
@@ -29,6 +56,7 @@ public sealed class ClosedXmlImportGrid : IImportGrid
             // Merged areas can reach past the used range (a header merged over empty columns): index only what we can ask for.
             RowCount = Math.Max(RowCount, merge.FirstRow);
             ColumnCount = Math.Max(ColumnCount, merge.FirstColumn);
+            EnsureWithinLimits();
 
             for (var r = merge.FirstRow; r <= merge.LastRow; r++)
             {
@@ -41,10 +69,28 @@ public sealed class ClosedXmlImportGrid : IImportGrid
     }
 
     /// <inheritdoc />
-    public int RowCount { get; }
+    public int RowCount { get; private set; }
 
     /// <inheritdoc />
-    public int ColumnCount { get; }
+    public int ColumnCount { get; private set; }
+
+    private void EnsureWithinLimits()
+    {
+        if (RowCount > RegistryImportParser.MaxRows)
+        {
+            throw XlsxSafetyGate.Rejection($"more than {RegistryImportParser.MaxRows} rows");
+        }
+
+        if (ColumnCount > RegistryImportParser.MaxColumns)
+        {
+            throw XlsxSafetyGate.Rejection($"more than {RegistryImportParser.MaxColumns} columns");
+        }
+
+        if ((long)RowCount * ColumnCount > RegistryImportParser.MaxScanCells)
+        {
+            throw XlsxSafetyGate.Rejection("the used area is too large");
+        }
+    }
 
     /// <inheritdoc />
     /// <remarks>
