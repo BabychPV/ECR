@@ -37,6 +37,59 @@ public sealed class QuartzJobTypeLimiterTests : IAsyncLifetime
         }
     }
 
+    /// <summary>
+    /// ✎ PERF-05 (D-564c), режим Quartz: глобальна стеля — на всі перерахунки методологій (ручні й діти розкладу разом);
+    /// дитина займає місце і в стелі, і в межі дітей; перерахунок формул і Excel стеля не чіпає.
+    /// </summary>
+    /// <remarks>МУТАЦІЯ: у <c>TryEnter</c> не брати <c>heavy</c> — третій перерахунок проходить, червоний.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "PERF-05")]
+    public void Глобальна_стеля_тримає_всі_перерахунки_методологій()
+    {
+        var limiter = new QuartzJobTypeLimiter(1, recalcFanOutMaxConcurrency: 4, recalcMaxConcurrent: 3);
+
+        // Стеля 3: людина + дві дитини розкладу (системна робота — не більше 3 − 1 = 2).
+        using var manual = limiter.TryEnter(typeof(RecalculationJob), "m1", recalcFanOutChild: false, manualPress: true);
+        using var child = limiter.TryEnter(typeof(RecalculationJob), "c1", recalcFanOutChild: true, manualPress: false);
+        Assert.NotNull(manual);
+        Assert.NotNull(child);
+        Assert.Equal((2, 1), (limiter.RecalcRunning, limiter.RecalcFanOutRunning));
+
+        Assert.Null(limiter.TryEnter(typeof(RecalculationJob), "c2", recalcFanOutChild: true, manualPress: false));
+        Assert.Equal(1, limiter.RecalcFanOutRunning);
+
+        using var second = limiter.TryEnter(typeof(RecalculationJob), "m2", recalcFanOutChild: false, manualPress: true);
+        Assert.NotNull(second);
+        Assert.Null(limiter.TryEnter(typeof(RecalculationJob), "m3", recalcFanOutChild: false, manualPress: true));
+
+        using (var formulas = limiter.TryEnter(typeof(FormulaRecalculationJob)))
+        {
+            Assert.NotNull(formulas);
+        }
+
+        child!.Dispose();
+        Assert.Equal((2, 0), (limiter.RecalcRunning, limiter.RecalcFanOutRunning));
+        using var next = limiter.TryEnter(typeof(RecalculationJob), "m3", recalcFanOutChild: false, manualPress: true);
+        Assert.NotNull(next);
+    }
+
+    [Theory]
+    [InlineData(null, QuartzJobTypeLimiter.DefaultRecalcMaxConcurrent)]
+    [InlineData("3", 3)]
+    [InlineData("0", QuartzJobTypeLimiter.DefaultRecalcMaxConcurrent)]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "PERF-05")]
+    public void Глобальна_стеля_з_конфігурації(string? value, int expected)
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { [QuartzJobTypeLimiter.RecalcMaxConcurrentKey] = value })
+            .Build();
+        Assert.Equal(expected, QuartzJobTypeLimiter.ReadRecalcMaxConcurrent(configuration));
+        Assert.NotNull(QuartzJobTypeLimiter.GlobalCapNote(4, 4));
+        Assert.Null(QuartzJobTypeLimiter.GlobalCapNote(4, 5));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Finding", "AN-116")]

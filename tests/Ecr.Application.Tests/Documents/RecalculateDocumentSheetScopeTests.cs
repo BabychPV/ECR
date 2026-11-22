@@ -321,11 +321,16 @@ public sealed class RecalculateDocumentSheetScopeTests
         int? submittedSheet, int? hiddenSheet, PeriodState periodState = PeriodState.Open, int? alsoSubmittedSheet = null,
         bool approved = false, long? copyOfSheet3 = null, bool copyApproved = false,
         ITemplateLayoutRegistry? layouts = null, Action<IPeriodStore>? configurePeriods = null,
-        IProjectVersionTimeline? timeline = null, bool projectArchived = false)
+        IProjectVersionTimeline? timeline = null, bool projectArchived = false, bool mayRecalculate = false)
     {
         var builder = new AccessBuilder { UserId = 9 }
             .Permission(RecalculateDocumentHandler.Permission)
             .Grant(ResourceKind.Project, AccessBuilder.ProjectId, GrantLevel.Read);
+        if (mayRecalculate)
+        {
+            builder.Permission(RecalculateDocumentHandler.PreemptPermission);
+        }
+
         if (hiddenSheet is { } hidden)
         {
             builder.Deny(ResourceKind.Sheet, hidden);
@@ -523,6 +528,54 @@ public sealed class RecalculateDocumentSheetScopeTests
         Assert.NotEqual(year, RecalculateDocumentHandler.YearScopedTargetOf(Document, 2099, 1));
     }
 
+    /// <summary>
+    /// ✎ PERF-01 (D-564a, рішення людини 21.11 §6 п. 1): кнопка року річного документа — «лише змінені місяці + місяць на
+    /// екрані» (рішення ухвалює перший крок ланцюжка); і в власника <c>Calculation.Recalculate</c> натискання НЕ витісняє
+    /// ланцюжок, що йде (PERF-02, D-564b), — зливається.
+    /// </summary>
+    /// <remarks>МУТАЦІЯ: <c>SkipUnchanged = true</c> → <c>false</c> чи <c>preempt = mayPreempt</c> — червоний.</remarks>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "PERF-01")]
+    public async Task PERF01_кнопка_року_рахує_лише_змінені_й_місяць_на_екрані_без_витіснення(bool mayRecalculate)
+    {
+        var fixture = ArrangeYear(yearLayout: true, PeriodState.Open, PeriodState.Open, PeriodState.Open, mayRecalculate: mayRecalculate);
+
+        await fixture.Handler.RequestAsync(Document, new PeriodKey(Period), sheetDefId: null, full: false, CancellationToken.None);
+
+        var (_, payload) = SingleEnqueued(fixture);
+        Assert.Equal((true, false), (Property(payload, "SkipUnchanged"), Property(payload, "ForceFull")));
+        Assert.Equal([Period], (int[])Property(payload, "ScreenPeriods")!);
+        await fixture.Jobs.DidNotReceiveWithAnyArgs().EnqueueExclusiveAsync<IRecalculationJob>(default!, default, default);
+    }
+
+    /// <summary>
+    /// ✎ PERF-01: «Повний перерахунок» — лише з <c>Calculation.Recalculate</c> (межа на сервері): без права — 403 і нічого в
+    /// черзі; з правом — <c>ForceFull</c> і витіснення ланцюжка, що йде (явний перезапуск року).
+    /// </summary>
+    /// <remarks>МУТАЦІЯ: прибрати перевірку <c>full &amp;&amp; !mayPreempt</c> — червоний.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "PERF-01")]
+    public async Task PERF01_повний_перерахунок_лише_з_правом_Calculation_Recalculate()
+    {
+        var denied = ArrangeYear(yearLayout: true, PeriodState.Open, PeriodState.Open, PeriodState.Open);
+        var error = await Assert.ThrowsAsync<AccessDeniedException>(
+            () => denied.Handler.RequestAsync(Document, new PeriodKey(Period), sheetDefId: null, full: true, CancellationToken.None));
+        Assert.Equal("ECR-AUTH-0403", error.ErrorCode);
+        Assert.Equal(RecalculateDocumentHandler.PreemptPermission, error.Details?["permission"]);
+        Assert.DoesNotContain(denied.Jobs.ReceivedCalls(), c => c.GetMethodInfo().Name.StartsWith("Enqueue", StringComparison.Ordinal));
+
+        var allowed = ArrangeYear(yearLayout: true, PeriodState.Open, PeriodState.Open, PeriodState.Open, mayRecalculate: true);
+        await allowed.Handler.RequestAsync(Document, new PeriodKey(Period), sheetDefId: null, full: true, CancellationToken.None);
+        var (_, payload) = SingleEnqueued(allowed);
+        Assert.Equal((false, true), (Property(payload, "SkipUnchanged"), Property(payload, "ForceFull")));
+        await allowed.Jobs.Received(1).EnqueueExclusiveAsync<IRecalculationJob>(
+            Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>());
+    }
+
     private static (string Target, object Payload) SingleEnqueued(Fixture fixture)
     {
         var call = Assert.Single(fixture.Jobs.ReceivedCalls(), c =>
@@ -540,7 +593,8 @@ public sealed class RecalculateDocumentSheetScopeTests
     /// ще й відкритий 202609 (тоді якір — він).
     /// </summary>
     private static Fixture ArrangeYear(
-        bool yearLayout, PeriodState anchor, PeriodState november, PeriodState december, bool earlier = false)
+        bool yearLayout, PeriodState anchor, PeriodState november, PeriodState december, bool earlier = false,
+        bool mayRecalculate = false)
     {
         var layouts = Substitute.For<ITemplateLayoutRegistry>();
         layouts.HasAny.Returns(true);
@@ -551,6 +605,7 @@ public sealed class RecalculateDocumentSheetScopeTests
 
         return Arrange(
             submittedSheet: null, hiddenSheet: null, periodState: anchor, layouts: layouts, timeline: timeline,
+            mayRecalculate: mayRecalculate,
             configurePeriods: periods =>
             {
                 var calendar = new List<PeriodStateRef>();

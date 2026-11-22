@@ -46,6 +46,14 @@ public static class CellChangeOrigins
     public const string Recalculation = "Recalculation";
 
     /// <summary>
+    /// ✎ PERF-01 (<c>D-564a</c>, повторний огляд L-a): <c>aud.CellChange.CorrelationId</c> записів перерахунку, зробленого
+    /// ПОДАННЯМ аркуша (<c>RecalculateSheetForSubmitAsync</c>/<c>…UnderSubmitLockAsync</c>): він тримає лок аркуша × періоду, а не
+    /// лок документа, тож порівняння «записано після прогону» за <c>Id</c> для нього не строге — планувальник кнопки року ловить
+    /// такі записи ще й за часом.
+    /// </summary>
+    public const string SubmitRecalculationCorrelation = "submit-recalc";
+
+    /// <summary>
     /// Імпорт книги Excel (<c>ExcelImporter</c>): значення, які людина ввела в
     /// книгу й свідомо застосувала.
     /// </summary>

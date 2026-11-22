@@ -11,6 +11,7 @@ import { badgeStateOf } from '@/features/workflow/jobFollow';
 import { RecalcFailedDocuments } from '@/features/recalc/RecalcFailedDocuments';
 import { isProjectRecalculation, isRecalcActive, progressOf, recalcProgressText } from '@/features/recalc/recalcProgress';
 import { JobAttempt, JobDocumentLink, JobFailure, JobResultLink, JobRetry } from './JobFacts';
+import { queueText } from './queueEta';
 import { isActiveJob, isShownInMyTasks, myTaskMessage } from './myTasks';
 import { MyTasksSection } from './MyTasksSection';
 
@@ -206,6 +207,7 @@ function MyTaskRow({ job, onNavigate }: { readonly job: JobSummary; readonly onN
    */
   const queuedAt = job.createdAt ?? job.startedAt;
   const message = myTaskMessage(job);
+  const queueLine = job.state === 'Queued' ? queueText(job) : null;
 
   return (
     <Card withBorder padding="sm" data-my-task="" data-job-id={job.jobId}>
@@ -226,7 +228,7 @@ function MyTaskRow({ job, onNavigate }: { readonly job: JobSummary; readonly onN
         {/* ⛔ Текст уже перекладено сервером мовою читача — показується як є.
             `t()` над ним дав би `⟦…⟧` замість повідомлення. Виняток —
             ідентифікатор файлу експорту (F-27, `myTaskMessage`). */}
-        {message !== null && <Text size="sm">{message}</Text>}
+        {queueLine !== null ? <Text size="sm">{queueLine}</Text> : message !== null && <Text size="sm">{message}</Text>}
 
         <JobFailure
           state={job.state}

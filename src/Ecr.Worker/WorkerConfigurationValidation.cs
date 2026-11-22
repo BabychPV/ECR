@@ -34,6 +34,9 @@ internal static class WorkerConfigurationValidation
 
         // ✎ PSS-02 (D-561): межу дітей розкладу перерахунку в режимі черги в базі тримає claim ДОЧІРНЬОГО процесу.
         ("Jobs:Recalculation:FanOutMaxConcurrency", 1),
+
+        // ✎ PERF-05 (D-564c): глобальна стеля важких перерахунків — її теж тримає claim дочірнього процесу.
+        ("Jobs:Recalculation:MaxConcurrent", 1),
     ];
 
     /// <summary>Ключі з переліком допустимих значень (без урахування регістру).</summary>

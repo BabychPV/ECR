@@ -129,9 +129,12 @@ public sealed class WorkerSiteConfigurationTests
         foreach (var (key, min) in WorkerConfigurationValidation.Integers)
         {
             // ✎ PSS-02: ключ межі дітей розкладу Api перелічує константою (QuartzJobTypeLimiter), не літералом.
+            // ✎ PERF-05 (D-564c): і глобальна стеля важких перерахунків.
             var viaConstant = key == Ecr.Infrastructure.Jobs.QuartzJobTypeLimiter.RecalcFanOutMaxConcurrencyKey
                 ? $"{nameof(Ecr.Infrastructure.Jobs.QuartzJobTypeLimiter.RecalcFanOutMaxConcurrencyKey)}, {min})"
-                : null;
+                : key == Ecr.Infrastructure.Jobs.QuartzJobTypeLimiter.RecalcMaxConcurrentKey
+                    ? $"{nameof(Ecr.Infrastructure.Jobs.QuartzJobTypeLimiter.RecalcMaxConcurrentKey)}, {min})"
+                    : null;
             Assert.True(
                 api.Contains($"(\"{key}\", {min})", StringComparison.Ordinal)
                 || (viaConstant is not null && api.Contains(viaConstant, StringComparison.Ordinal)),

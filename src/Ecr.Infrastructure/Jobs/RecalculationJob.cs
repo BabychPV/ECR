@@ -353,6 +353,10 @@ public sealed partial class RecalculationJob(
         int? stepPeriod = null;
         IReadOnlyList<int> remaining = [];
 
+        // ✎ PERF-01/02: відкриті періоди скоупу ланцюжка і рішення плану (одне на виконання кроку).
+        IReadOnlyList<int> openPeriods = [];
+        ChainPlanDecision? chainDecision = null;
+
         // ✎ PSS-04: прогрес кроку — частина шкали всього ланцюжка (зроблені періоди + цей + решта).
         var chainProgress = chain ? new ChainProgress(progress, request.ChainDone?.Length ?? 0, request.ChainTotal) : null;
         if (chainProgress is not null)
@@ -482,6 +486,16 @@ public sealed partial class RecalculationJob(
                 // нижче (див. коментар біля виклику оркестратора).
                 var periods = await ScopePeriodsAsync(docRequest, refused, ct).ConfigureAwait(false);
 
+                // ✎ PERF-01/02 (D-564a/D-564b): план ланцюжка — які з відкритих періодів рахувати. Перший крок кнопки річного
+                // документа вирішує «лише змінені + місяць на екрані»; злите натискання (ChainRecheck) дописує змінені
+                // зроблені й пропущені місяці; далі — решта плану. Повний ланцюжок (нічний, розклад, «Повний») — усі.
+                if (chain && periods.Count > 0)
+                {
+                    openPeriods = periods;
+                    chainDecision ??= await PlanChainAsync(docRequest, periods, annualOnly, ct).ConfigureAwait(false);
+                    periods = Planned(periods, chainDecision);
+                }
+
                 // ✎ PSS-04/06: крок ланцюжка — лише ПЕРШИЙ період решти скоупу. Задачі, що чекають на нього, паркуються
                 // до читання входів; якщо щось запарковано — стан періодів перечитується (рішення «що рахувати»
                 // ухвалено до паркування), і якщо крок після цього інший — запарковане повертається в чергу.
@@ -493,6 +507,8 @@ public sealed partial class RecalculationJob(
                         annualOnly.Clear();
                         refused = await RefusedPeriodsAsync(docRequest, ct, annualOnly).ConfigureAwait(false);
                         periods = await ScopePeriodsAsync(docRequest, refused, ct).ConfigureAwait(false);
+                        openPeriods = periods;
+                        periods = Planned(periods, chainDecision!);
                         if (periods.Count == 0 || periods[0] != step)
                         {
                             await queue!.UnparkAsync(claim!, ct).ConfigureAwait(false);
@@ -508,7 +524,19 @@ public sealed partial class RecalculationJob(
                     }
                 }
 
-                var cells = await FormulasAsync(docRequest, periods, submittedChanges, ct, annualOnly).ConfigureAwait(false);
+                var stepChanged = chain ? new Dictionary<int, HashSet<(int TableDefId, int ColumnDefId)>>() : null;
+                var cells = await FormulasAsync(docRequest, periods, submittedChanges, ct, annualOnly, stepChanged)
+                    .ConfigureAwait(false);
+
+                // ✎ PERF-01 (D-564a, огляд H1): план вужчий за рік — пізніші місяці, що читають обчислені числа цього кроку
+                // (формули з [Period:-k]/[Period:#k], місячні розрахункові колонки), дописуються в план (CrossReadsAsync).
+                if (chain && stepPeriod is { } extendFrom && stepChanged is not null
+                    && openPeriods.Any(p => p > extendFrom && !remaining.Contains(p)))
+                {
+                    remaining = await ExtendWithLaterReadersAsync(docRequest, extendFrom, openPeriods, remaining, ct)
+                        .ConfigureAwait(false);
+                    chainProgress!.Total = chainProgress.Done + 1 + remaining.Count;
+                }
 
                 // ✎ LAND-YEAR B24: методології закритого якоря не рахуються (результати — місяця, а він закритий).
                 IReadOnlyList<int> methodologyScope = annualOnly.Count == 0
@@ -714,7 +742,9 @@ public sealed partial class RecalculationJob(
             // такого прогону немає, тож «періоду 0» він не наповнить.
             // ✎ PSS-04: крок ланцюжка без прогону (якір B24 — лише формули; решту періодів закрили між кроками) прогону «без
             // періоду» не лишає — лише ланцюжок, у якому не було жодного періоду взагалі.
-            if (periodRuns.Count == 0 && !(chain && (stepPeriod is not null || (request.ChainDone?.Length ?? 0) > 0)))
+            // ✎ PERF-01: і ланцюжок, план якого пропустив усі місяці як незмінні, — без прогону «без періоду».
+            if (periodRuns.Count == 0
+                && !(chain && (stepPeriod is not null || (request.ChainDone?.Length ?? 0) > 0 || chainDecision is { Skipped.Count: > 0 })))
             {
                 yearRun = NewRun(periodKey: null);
                 db.CalculationRuns.Add(yearRun);
@@ -770,6 +800,21 @@ public sealed partial class RecalculationJob(
                     {
                         await Task.Delay(CompletionBusyDelay, ct).ConfigureAwait(false);
                     }
+                }
+            }
+
+            // ✎ PERF-01 (D-564a, огляд H2): межа журналу комірок у мить завершення — ще під локом документа. Кожен запис комірки
+            // документа ПІСЛЯ цього прогону (каскад формул з іншого місяця бере той самий лок) отримає більший Id: планувальник
+            // кнопки року порівнює Id, а не годинники Api і воркера. Збій тут лишає NULL — місяць буде порахований (безпечно).
+            if (request.DocumentId > 0)
+            {
+                foreach (var (_, (run, _)) in periodRuns)
+                {
+                    await db.Database
+                        .ExecuteSqlAsync(
+                            $"UPDATE calc.CalculationRun SET CellChangeWatermark = CAST(IDENT_CURRENT('aud.CellChange') AS bigint) WHERE Id = {run.Id}",
+                            ct)
+                        .ConfigureAwait(false);
                 }
             }
 
@@ -854,20 +899,33 @@ public sealed partial class RecalculationJob(
 
             // ✎ UAT-recalc-ux: підсумок журналу аркушів — ОСТАННІМ повідомленням задачі (сторінка задач показує його);
             // поіменний перелік — у журналі змін (`SheetRecalc`).
-            if (sheetLog.Skipped + sheetLog.RecalculatedSubmitted > 0)
+            JobProgressMessageEnvelope? sheetLogEnvelope = sheetLog.Skipped + sheetLog.RecalculatedSubmitted > 0
+                ? new JobProgressMessageEnvelope(
+                    "jobs.recalcSheetLog",
+                    new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["skipped"] = sheetLog.Skipped.ToString(CultureInfo.InvariantCulture),
+                        ["recalculatedSubmitted"] = sheetLog.RecalculatedSubmitted.ToString(CultureInfo.InvariantCulture),
+                    })
+                : null;
+
+            // ✎ PERF-01 (D-564a): останній крок ланцюжка, план якого пропустив незмінні місяці, — підсумок «пропущено незмінні»
+            // (з підсумком журналу аркушів усередині): людина бачить, ЩО не перераховано і чому.
+            if (chain && remaining.Count == 0 && chainDecision is { Skipped.Count: > 0 } decided)
             {
+                if (logger is not null && logger.IsEnabled(LogLevel.Information))
+                {
+                    var skippedText = string.Join(',', decided.Skipped);
+                    LogSkippedUnchanged(logger, request.DocumentId, skippedText);
+                }
+
                 await progress
-                    .ReportAsync(
-                        100,
-                        JobProgressMessageCodec.Encode(new JobProgressMessageEnvelope(
-                            "jobs.recalcSheetLog",
-                            new Dictionary<string, string>(StringComparer.Ordinal)
-                            {
-                                ["skipped"] = sheetLog.Skipped.ToString(CultureInfo.InvariantCulture),
-                                ["recalculatedSubmitted"] = sheetLog.RecalculatedSubmitted.ToString(CultureInfo.InvariantCulture),
-                            })),
-                        ct)
+                    .ReportAsync(100, JobProgressMessageCodec.Encode(SkippedUnchangedEnvelope(decided.Skipped, sheetLogEnvelope)), ct)
                     .ConfigureAwait(false);
+            }
+            else if (sheetLogEnvelope is not null)
+            {
+                await progress.ReportAsync(100, JobProgressMessageCodec.Encode(sheetLogEnvelope), ct).ConfigureAwait(false);
             }
         }
         catch (Exception) when (ct.IsCancellationRequested)
@@ -1037,7 +1095,13 @@ public sealed partial class RecalculationJob(
                 ChainElapsedMs = (long)Math.Max(0, worked.TotalMilliseconds),
 
                 // ✎ L1b / D3: шкала наступного кроку — з його першого звіту: зроблені (з цим кроком) + решта скоупу.
+                // ✎ PERF-02: місяць, дописаний на повтор, рахується ще раз (крок, а не місяць) — N лише росте.
                 ChainTotal = chainDone.Length + remaining.Count,
+
+                // ✎ PERF-01/02: решта плану, пропущені незмінні, перевірку злиття виконано.
+                ChainPlan = [.. remaining],
+                ChainSkipped = chainDecision is { Skipped.Count: > 0 } skippedSoFar ? [.. skippedSoFar.Skipped] : null,
+                ChainRecheck = false,
             };
 
             // ✎ PSS-06: задачі документа, що чекають на ПІЗНІШІ періоди ланцюжка, — його ж робота: паркуються до кроку
@@ -1055,7 +1119,9 @@ public sealed partial class RecalculationJob(
     /// </summary>
     private static Dictionary<long, int[]> ChainScope(RecalculationRequest request, Dictionary<long, int[]> scopeByDocument)
     {
-        var done = (request.ChainDone ?? []).Union(scopeByDocument.GetValueOrDefault(request.DocumentId) ?? []).Order().ToArray();
+        // ✎ PERF-02 (D-564b): зроблений місяць, дописаний злиттям на повтор, лишається в переліку двічі — це лічильник КРОКІВ
+        // шкали «період k з N» (k не стрибає назад); множиною «зроблені» переліку користуються через Distinct.
+        var done = (request.ChainDone ?? []).Concat(scopeByDocument.GetValueOrDefault(request.DocumentId) ?? []).Order().ToArray();
         return done.Length == 0 ? [] : new Dictionary<long, int[]> { [request.DocumentId] = done };
     }
 
@@ -1312,6 +1378,12 @@ public sealed partial class RecalculationJob(
             ChainDone = null,
             ChainElapsedMs = null,
             ChainTotal = null,
+            SkipUnchanged = false,
+            ForceFull = false,
+            ScreenPeriods = null,
+            ChainPlan = null,
+            ChainSkipped = null,
+            ChainRecheck = false,
         };
 
     /// <summary>
@@ -1841,12 +1913,14 @@ public sealed partial class RecalculationJob(
     /// <param name="submittedChanges">✎ B79: куди скласти подані аркуші, де записано змінену комірку формули.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <param name="annualOnly">✎ LAND-YEAR B24: закриті якорі річної розкладки → місяці їхнього року (лише не-місячні цілі).</param>
+    /// <param name="changedOut">✎ PERF-01: куди скласти змінені колонки за періодом (дописування читачів у план ланцюжка).</param>
     private async Task<int> FormulasAsync(
         RecalculationRequest request, IReadOnlyList<int> periods, SubmittedSheetChanges submittedChanges,
-        CancellationToken ct, IReadOnlyDictionary<int, IReadOnlyList<int>>? annualOnly = null)
+        CancellationToken ct, IReadOnlyDictionary<int, IReadOnlyList<int>>? annualOnly = null,
+        Dictionary<int, HashSet<(int TableDefId, int ColumnDefId)>>? changedOut = null)
     {
         var written = 0;
-        var changedByPeriod = new Dictionary<int, HashSet<(int TableDefId, int ColumnDefId)>>();
+        var changedByPeriod = changedOut ?? new Dictionary<int, HashSet<(int TableDefId, int ColumnDefId)>>();
 
         foreach (var period in periods)
         {
@@ -3204,6 +3278,32 @@ public sealed partial class RecalculationJob(
     }
 
     /// <summary>
+    /// ✎ PERF-05 (огляд M3): чи задача — перерахунок, який натиснула людина (є автор, не дитина розкладу, не прохід читача),
+    /// — той самий поділ, що прохід «спершу ручні» черги в базі (<c>DbJobQueue.ManualFilter</c>).
+    /// </summary>
+    /// <param name="jobType">Тип задачі.</param>
+    /// <param name="payload">Тіло задачі (JSON).</param>
+    internal static bool IsManualPress(Type jobType, string? payload)
+    {
+        ArgumentNullException.ThrowIfNull(jobType);
+
+        if (!typeof(IRecalculationJob).IsAssignableFrom(jobType) || string.IsNullOrWhiteSpace(payload))
+        {
+            return false;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<RecalculationRequest>(payload, PayloadOptions) is
+                { TriggeredByUserId: not null, FanOutParentJobId: null or "", ForeignOwnerPass: false };
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Чи задача — ДИТИНА розкладу перерахунку проєкту (<see cref="FanOutAsync"/>): документна задача з позначкою
     /// батька. Лише такі стають під межу <see cref="QuartzJobTypeLimiter.RecalcFanOutMaxConcurrency"/> (F1, WW-02).
     /// </summary>
@@ -3552,6 +3652,25 @@ public sealed partial class RecalculationJob(
 /// ✎ PSS-15: пропускати документи, входи яких не змінились після актуального прогону (<c>Jobs:NightlyRecalculation:SkipUnchanged</c>,
 /// типово <c>true</c>). <c>false</c> — рахувати всі відкриті періоди років розкладу щоночі. Поза нічним розкладом не діє.
 /// </param>
+/// <param name="SkipUnchanged">
+/// ✎ PERF-01 (<c>D-564a</c>): кнопка «Перерахувати» документа річної розкладки — лише місяці, чиї входи змінились після їхнього
+/// актуального прогону (+ місяць на екрані, без актуального/з проваленим прогоном). Діє лише в ланцюжку черги в базі; Quartz —
+/// увесь рік, як доти.
+/// </param>
+/// <param name="ForceFull">
+/// ✎ PERF-01: «Повний перерахунок» (право <c>Calculation.Recalculate</c>, перевіряє обробник) — усі відкриті місяці, а злиття в
+/// ланцюжок, що йде, починає його з першого місяця (як H1 до <c>D-564b</c>).
+/// </param>
+/// <param name="ScreenPeriods">✎ PERF-01: місяці на екрані натискань (злиття постановок — об'єднання): рахуються завжди.</param>
+/// <param name="ChainPlan">
+/// ✎ PERF-01/02: періоди, які ланцюжок ще має порахувати (з цим кроком), за зростанням; <c>null</c> — перший крок (рішення
+/// ще не ухвалено) чи старий payload (усі відкриті після <see cref="ChainAfter"/>).
+/// </param>
+/// <param name="ChainSkipped">✎ PERF-01: місяці, пропущені як незмінні (підсумок задачі <c>jobs.recalcSkippedUnchanged</c>).</param>
+/// <param name="ChainRecheck">
+/// ✎ PERF-02 (<c>D-564b</c>): у ланцюжок злилося нове натискання — наступний крок перевіряє зроблені й пропущені місяці
+/// детектором і дописує змінені (а не починає з першого місяця).
+/// </param>
 public sealed record RecalculationRequest(
     int ProjectId,
     long DocumentId,
@@ -3571,15 +3690,27 @@ public sealed record RecalculationRequest(
     long? ChainElapsedMs = null,
     int? ChainTotal = null,
     bool Nightly = false,
-    bool NightlySkipUnchanged = false)
+    bool NightlySkipUnchanged = false,
+    bool SkipUnchanged = false,
+    bool ForceFull = false,
+    int[]? ScreenPeriods = null,
+    int[]? ChainPlan = null,
+    int[]? ChainSkipped = null,
+    bool ChainRecheck = false)
 {
     /// <summary>
     /// ✎ B59: нижня межа ключа періоду скоупу (включно); без року — <see cref="int.MinValue"/>.
     /// ✎ PSS-04: крок ланцюжка — лише періоди ПІСЛЯ <see cref="ChainAfter"/>.
     /// </summary>
+    /// <remarks>
+    /// ✎ PERF-01/02 (<c>D-564a</c>/<c>D-564b</c>): ланцюжок із планом (<see cref="ChainPlan"/>) чи з перевіркою злиття
+    /// (<see cref="ChainRecheck"/>) бачить усі відкриті періоди року — план може дописати й уже зроблений місяць.
+    /// </remarks>
     internal int FromKey => PeriodKey is not null
         ? int.MinValue
-        : Math.Max(Year is { } y ? y * 100 : int.MinValue, ChainAfter is { } after ? after + 1 : int.MinValue);
+        : Math.Max(
+            Year is { } y ? y * 100 : int.MinValue,
+            ChainAfter is { } after && ChainPlan is null && !ChainRecheck ? after + 1 : int.MinValue);
 
     /// <summary>✎ B59: верхня межа ключа періоду скоупу (включно); без року — <see cref="int.MaxValue"/>.</summary>
     internal int ToKey => PeriodKey is null && Year is { } y ? (y * 100) + 99 : int.MaxValue;

@@ -403,6 +403,8 @@ public static class JobListKinds
 /// <param name="FanOut">
 /// Підсумок дочірніх задач перерахунку проєкту (як <see cref="JobStatus.FanOut"/>); <c>null</c> — інша задача.
 /// </param>
+/// <param name="QueuePosition">✎ PERF-10: місце в черзі перерахунку (як <see cref="JobStatus.QueuePosition"/>).</param>
+/// <param name="EstimatedStartAt">✎ PERF-10: орієнтовний старт (як <see cref="JobStatus.EstimatedStartAt"/>).</param>
 public sealed record JobSummary(
     string JobId,
     string JobCode,
@@ -424,7 +426,9 @@ public sealed record JobSummary(
     int? ProjectId = null,
     string? ProjectCode = null,
     string? FanOutParentJobId = null,
-    FanOutStatus? FanOut = null);
+    FanOutStatus? FanOut = null,
+    int? QueuePosition = null,
+    DateTime? EstimatedStartAt = null);
 
 /// <summary>Лічильники черги фонових задач.</summary>
 /// <param name="Running">Скільки задач зараз виконується (усі, без вікна).</param>
@@ -497,6 +501,13 @@ public interface IJobProgress
 /// і яка межа; клієнт показує «Підтвердити видалення». <c>null</c> — інша задача, не завершена чи без блокування
 /// (<c>SourceEventSyncOutcome</c>). Заповнює <c>GetJobStatusHandler</c>.
 /// </param>
+/// <param name="QueuePosition">
+/// ✎ PERF-10 (D-564c): <c>Queued</c> задача лейна перерахунку (черга в базі) — скільки задач буде взято раніше, плюс один;
+/// <c>null</c> — інший стан, лейн чи режим Quartz. Заповнює <c>GetJobStatusHandler</c> (<see cref="IJobQueuePosition"/>).
+/// </param>
+/// <param name="EstimatedStartAt">
+/// ✎ PERF-10: ОРІЄНТОВНИЙ старт (UTC) — медіана кроку за добу × кроки попереду ÷ місця; <c>null</c> — оцінити нема з чого.
+/// </param>
 public sealed record JobStatus(
     string JobId,
     string State,
@@ -515,7 +526,9 @@ public sealed record JobStatus(
     string? EffectiveState = null,
     int? WrittenCount = null,
     IReadOnlyList<int>? WrittenPeriods = null,
-    Integration.SourceEvents.SourceEventRemovalBlock? EventRemovalBlocked = null);
+    Integration.SourceEvents.SourceEventRemovalBlock? EventRemovalBlocked = null,
+    int? QueuePosition = null,
+    DateTime? EstimatedStartAt = null);
 
 /// <summary>Ідентифікатор поточної задачі; його несе канал прогресу воркера.</summary>
 /// <remarks>Потрібен задачі, що розкладає роботу на дочірні, щоб позначити їх своїм <c>JobId</c>.</remarks>

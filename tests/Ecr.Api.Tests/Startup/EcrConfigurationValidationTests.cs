@@ -251,6 +251,31 @@ public sealed class EcrConfigurationValidationTests(SqlServerFixture sql)
     /// Мутації: повернути попередження для зарезервованого випадку — червоні рядки «InProcess 4/6»; прибрати попередження
     /// Quartz — червоний рядок «Quartz 4 з 4».
     /// </remarks>
+    /// <summary>
+    /// ✎ PERF-05/04 (<c>D-564c</c>/<c>D-564d</c>): глобальна стеля важких перерахунків і місця воркера Api — цілі від 1 (нуль чи
+    /// нечисло зупиняє старт); межа дітей не менша за стелю — рядок Information «дітей не більше стеля − 1».
+    /// </summary>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Finding", "PERF-05")]
+    [InlineData("Jobs:Recalculation:MaxConcurrent")]
+    [InlineData("Jobs:Api:MaxConcurrency")]
+    [InlineData("Jobs:Interactive:ReservedConcurrency")]
+    public void Стеля_перерахунків_і_місця_Api_від_одного(string key)
+    {
+        Assert.Contains(EcrConfigurationValidation.Validate(Config((key, "0"))), p => p.Contains(key, StringComparison.Ordinal));
+        Assert.Contains(EcrConfigurationValidation.Validate(Config((key, "abc"))), p => p.Contains(key, StringComparison.Ordinal));
+        Assert.DoesNotContain(EcrConfigurationValidation.Validate(Config((key, "3"))), p => p.Contains(key, StringComparison.Ordinal));
+
+        var note = Assert.Single(
+            EcrConfigurationValidation.Notes(Config(("Jobs:Recalculation:FanOutMaxConcurrency", "6"), ("Jobs:Recalculation:MaxConcurrent", "5"))),
+            n => n.Contains("Jobs:Recalculation:MaxConcurrent", StringComparison.Ordinal));
+        Assert.Contains("не більше 4", note, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            EcrConfigurationValidation.Notes(Config(("Jobs:Recalculation:FanOutMaxConcurrency", "4"))),
+            n => n.Contains("Jobs:Recalculation:MaxConcurrent", StringComparison.Ordinal));
+    }
+
     [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait("Finding", "L1b-D2")]
@@ -269,8 +294,10 @@ public sealed class EcrConfigurationValidationTests(SqlServerFixture sql)
             ("Jobs:Recalculation:FanOutMaxConcurrency", cap),
             ("Jobs:Quartz:ThreadCount", threads ?? ""));
 
+        // ✎ PERF-05: рядок глобальної стелі (теж називає межу дітей) перевіряє окремий тест нижче.
         static List<string> FanOut(IEnumerable<string> lines)
-            => [.. lines.Where(w => w.Contains("Jobs:Recalculation:FanOutMaxConcurrency", StringComparison.Ordinal))];
+            => [.. lines.Where(w => w.Contains("Jobs:Recalculation:FanOutMaxConcurrency", StringComparison.Ordinal)
+                                    && !w.Contains("Jobs:Recalculation:MaxConcurrent", StringComparison.Ordinal))];
 
         var warnings = FanOut(EcrConfigurationValidation.Warnings(config));
         var notes = FanOut(EcrConfigurationValidation.Notes(config));

@@ -411,7 +411,9 @@ IF @@ROWCOUNT = 0
 | `Integration:AfTimeZoneId` | ні | — | Формат перевіряється на старті (див. текст відмови служби). |
 | `Integration:CatalogTimeoutSeconds` | ні | `10` | Ціле число, не менше 1. |
 | `Integration:RawDataExportMaxRows` | ні | `100000` | Ціле число, не менше 1. D-463: нуль — кожен експорт «Даних з PI» відмовою, а не «без стелі». |
+| `Jobs:Api:MaxConcurrency` | ні | — | Ціле число, не менше 1. |
 | `Jobs:Excel:MaxConcurrency` | ні | `2` | Ціле число, не менше 1. |
+| `Jobs:Interactive:ReservedConcurrency` | ні | — | Ціле число, не менше 1. |
 | `Jobs:NightlyRecalculation:Enabled` | ні | `true` | `true` або `false`. |
 | `Jobs:NightlyRecalculation:SkipUnchanged` | ні | `true` | `true` або `false`. |
 | `Jobs:Quartz:ThreadCount` | ні | `16` | Ціле число, не менше 1. |
@@ -419,6 +421,7 @@ IF @@ROWCOUNT = 0
 | `Jobs:QueueDepth:RefreshSeconds` | ні | `15` | Ціле число, не менше 5. |
 | `Jobs:Recalculation:Executor` | ні | `InProcess` | Одне з: InProcess, Worker. |
 | `Jobs:Recalculation:FanOutMaxConcurrency` | ні | — | Ціле число, не менше 1. |
+| `Jobs:Recalculation:MaxConcurrent` | ні | — | Ціле число, не менше 1. |
 | `Jobs:Recalculation:MaxDeferralMinutes` | ні | `30` | Ціле число, не менше 1. |
 | `Jobs:ShutdownTimeoutSeconds` | ні | `120` | Ціле число, не менше 1. |
 | `Localization:ImportMaxBytes` | ні | `1048576` | Ціле число, не менше 1. |
@@ -964,6 +967,57 @@ GRANT EXECUTE ON OBJECT::[dbo].[usp_GetAllStreamDataFlattened] TO [ecr_flert_rea
 на ньому дасть проблему, а не нульові викиди. Пари дублів `CO`/`Carbon_Monoxide`, `H2`/`Hydrogen`, `O2`/`Oxygen` — береться
 коротка назва; обидві заповнені різними значеннями — зауваження `aliasConflict`. Мітки FLERT — UTC; вікно дії версії
 кейсу — вікно складу (`GasComposition_ValidFrom/To`).
+### 4.4. Черга перерахунку: стеля важких перерахунків, черга людей, місця воркера Api (✎ 2026-11-21, `D-564`)
+
+**Що змінилось для оператора.**
+
+- **Кнопка «Перерахувати» річного документа** рахує лише місяці зі зміненими входами й місяць на екрані (`D-564a`);
+  у підсумку задачі — «Unchanged months kept their current results: …». Усі відкриті місяці — пункт **«Full
+  recalculation»**, лише з правом `Calculation.Recalculate`. Нове натискання, поки рік рахується, не повертає ланцюжок на
+  січень: решта йде далі, дописуються лише змінені вже пораховані місяці (`D-564b`).
+- **Одна стеля важких перерахунків** `Jobs:Recalculation:MaxConcurrent` (типово **5**): скільки задач лейна `recalc`
+  (ручні, авто, каскад, діти розкладу, кроки ланцюжків) виконується одночасно на ВЕСЬ пул процесів. Останнє місце — лише
+  перерахунку, який натиснула людина; системна робота займає не більше «стеля − 1». Межа дітей розкладу
+  `Jobs:Recalculation:FanOutMaxConcurrency` (4) лишається всередині стелі.
+- **Черга людей:** серед ручних задач першою береться задача людини, у якої найменше задач виконується чи чекає попереду;
+  системні задачі — у звичайному порядку. `GET /api/v1/jobs/{id}` і «Мої задачі» показують `queuePosition` і
+  `estimatedStartAt` — **оцінку** (медіана кроку за останню добу), не обіцянку.
+
+**Оновлення (міграція `PERF564FairQueueAndRunWatermark`).** Додає індекс `itg.JobProgress (Lane, State, CreatedByUserId)`
+лише для живих рядків черги (ONLINE там, де редакція дозволяє; секунди) і nullable-стовпець
+`calc.CalculationRun.CellChangeWatermark` (лише метадані). Прогони до оновлення межі журналу не мають — перше натискання
+«Recalculate» на кожному річному документі після оновлення рахує всі відкриті місяці (одноразово, безпечно).
+⚠ **Вікно оновлення.** `ALTER TABLE calc.CalculationRun ADD …` бере блокування схеми (Sch-M) на `calc.CalculationRun` — його
+чекають і тримають УСІ читання прогонів: оновлюйте зі **зупиненими воркерами** (`EcrWorker` зупинено, черга без `Running`,
+Api в обслуговуванні), інакше міграція чекатиме кінця кроку перерахунку, а нові запити — міграцію. На **Standard/Express**
+індекс `IX_JobProgress_User_Active` будується офлайн: на час сканування `itg.JobProgress` (історія 30 днів; фільтр — лише
+живі рядки, тож секунди–хвилини) записи в чергу блокуються; на Enterprise/Developer — ONLINE.
+
+**Розмір стелі.** Рекомендація — `max(2, ядра SQL ÷ 4)`: 20 ядер → 5, 12 ядер → 3. Важких сеансів SQL ≈ стеля ×
+`Calculations:MaxParallelism` (воркер — 4). Разом зі стелею налаштуйте на SQL Server **MAXDOP 4** і **cost threshold for
+parallelism 50** (інструкція встановлення): за MAXDOP 0 на 20 ядрах навіть 5 перерахунків можуть вичерпати потоки
+(`THREADPOOL`). Ключ задається там, де береться лейн перерахунку: у режимі `Worker` — змінна служби `EcrWorker`
+`ECR_Jobs__Recalculation__MaxConcurrent` (дочірні процеси), при `InProcess` — конфігурація Api. Значення < 1 чи нечисло
+зупиняє старт (Api й воркер). Якщо `FanOutMaxConcurrency` ≥ стелі, на старті — рядок Information: дітей фактично не
+більше «стеля − 1».
+
+Як перевірити, що стеля діє (кожні 15 с під навантаженням):
+
+```sql
+SELECT [State], COUNT(*) FROM itg.JobProgress WITH (INDEX(IX_JobProgress_Claim))
+WHERE Lane = 'recalc' AND [State] IN ('Queued', 'Running') GROUP BY [State];  -- Running ≤ MaxConcurrent
+```
+
+**Інтерактивні місця воркера Api (`D-564d`, PERF-04).** Перерахунок формул після правки комірки (лейн `interactive`) іде
+у воркері кожного вузла Api: `Jobs:Interactive:ReservedConcurrency` власних місць (типово **1**) плюс спільні
+`Jobs:Api:MaxConcurrency` (типово **4**, спільні з лейном `default`, а при `InProcess` — і з перерахунком). Задача формул
+триває ≈ 1 с (стенд), тож вузол із типовими значеннями тримає вимогу ФВ-12.2 (< 10 с від правки до перерахунку) приблизно
+до **75 редакторів, що друкують одночасно**. Більше редакторів на вузол — додайте місць
+(`ECR_Jobs__Interactive__ReservedConcurrency`, напр. 4: тоді ≈ 15 × (4 + 4) ≈ 120) за умови, що CPU сервера застосунку
+і SQL не вичерпано (перевірте `dotnet-counters`, Query Store), або додайте вузол Api (масштабування горизонтальне:
+кожен вузол бере чергу сам). Перевірка — розподіл `CreatedAt → StartedAt` задач формул в `itg.JobProgress`, p95 < 10 с.
+За замовчуванням поведінка не змінилась.
+
 ## 5. Типові збої
 
 | Симптом | Причина | Дія |

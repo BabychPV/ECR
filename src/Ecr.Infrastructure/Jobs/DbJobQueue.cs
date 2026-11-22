@@ -196,7 +196,7 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
     internal const string FanOutCapPrologue = """
         SET XACT_ABORT ON;
         BEGIN TRANSACTION;
-        DECLARE @fanOutRoom bit = 0, @capLock int = -1, @scheduleActive bit = 0;
+        DECLARE @fanOutRoom bit = 0, @capLock int = -1, @scheduleActive bit = 0, @heavyRoom bit = 1;
         EXEC @capLock = sys.sp_getapplock @Resource = N'ecr:jobqueue:recalc-fanout-cap', @LockMode = 'Exclusive',
             @LockOwner = 'Transaction', @LockTimeout = 5000;
         IF EXISTS (SELECT 1 FROM itg.JobProgress AS s
@@ -208,6 +208,74 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
                  WHERE c.Lane = @lane AND c.Lane IS NOT NULL AND c.[State] = 'Running'
                    AND (c.FanOutParentJobId IS NOT NULL OR (@scheduleActive = 1 AND ISNULL(c.TargetKey, N'') LIKE @cascadeLike))) < @fanOutCap
             SET @fanOutRoom = 1;
+        IF @heavyLimit > 0
+           AND (@capLock < 0
+                OR (SELECT COUNT(*) FROM itg.JobProgress AS hv WITH (INDEX(IX_JobProgress_Claim))
+                    WHERE hv.Lane = @lane AND hv.Lane IS NOT NULL AND hv.[State] = 'Running') >= @heavyLimit)
+            SET @heavyRoom = 0;
+        """;
+
+    /// <summary>
+    /// ✎ PERF-05 (<c>D-564c</c>, рішення людини 21.11 §6 п. 3): умова кандидата під ГЛОБАЛЬНОЮ стелею важких перерахунків
+    /// (<see cref="QuartzJobTypeLimiter.RecalcMaxConcurrentKey"/>): усі <c>Running</c> лейна (ручні, авто, каскад, діти, кроки
+    /// ланцюжків, проходи читачів) рахуються під тим самим applock, що межа дітей (<see cref="FanOutCapPrologue"/>), тож межа
+    /// строга на весь пул процесів. <c>@heavyLimit</c> — стеля для проходу «спершу ручні» і «стеля − 1» для решти: останнє
+    /// місце — людині (D-561 (з) на рівні пулу). Межа дітей — окрема межа над тими самими рядками, подвійного рахунку немає.
+    /// </summary>
+    internal const string HeavyCapFilter = """
+              AND @heavyRoom = 1
+        """;
+
+    /// <summary>
+    /// ✎ PERF-10 (<c>D-564c</c>): «черга людей» у проході «спершу ручні» — скільки задач ТІЄЇ САМОЇ людини вже виконується в
+    /// лейні чи стоїть у черзі ручних попереду цієї (<c>q</c>). Прохід бере найменший ранг, далі FIFO: людина з десятьма
+    /// натисканнями не займає всю чергу — інша людина з одним стає другою, а не одинадцятою. Системні задачі (FIFO-прохід) — на
+    /// своєму місці. Ланцюжок рахується одним рядком (крок — той самий рядок).
+    /// </summary>
+    /// <remarks>
+    /// ✎ Огляд M2: лише пошуком індексу <c>IX_JobProgress_User_Active</c> (Lane, State, CreatedByUserId) INCLUDE (AvailableAt,
+    /// FanOutParentJobId), без читання Payload (прохід читача з автором людини рахується в її ранг — оцінка, не межа), і НЕ в
+    /// claim під UPDLOCK і applock стелі: вибір робить окремий запит <see cref="FairPickSql"/> на знімку RCSI, claim бере вже
+    /// названий рядок.
+    /// </remarks>
+    internal const string FairRankSql = """
+        (SELECT COUNT(*) FROM itg.JobProgress AS fr WITH (INDEX(IX_JobProgress_User_Active))
+          WHERE fr.Lane = @lane AND fr.Lane IS NOT NULL AND fr.[State] IN ('Queued', 'Running') AND fr.CreatedByUserId = q.CreatedByUserId
+            AND (fr.[State] = 'Running'
+                 OR (fr.[State] = 'Queued' AND fr.AvailableAt <> CAST(N'9999-12-31T00:00:00' AS datetime2(3))
+                     AND fr.FanOutParentJobId IS NULL
+                     AND (fr.AvailableAt < q.AvailableAt OR (fr.AvailableAt = q.AvailableAt AND fr.JobId < q.JobId)))))
+        """;
+
+    /// <summary>Скільки найраніших ручних задач КОЖНОЇ людини розглядає «черга людей» (<see cref="FairPickSql"/>).</summary>
+    internal const int FairPerUser = 5;
+
+    /// <summary>Стеля кандидатів «черги людей» (людей × <see cref="FairPerUser"/>).</summary>
+    internal const int FairWindow = 500;
+
+    /// <summary>Скільки кандидатів за рангом пробує claim, перш ніж узяти ручні FIFO (<see cref="FairPickSql"/>).</summary>
+    internal const int FairCandidates = 5;
+
+    /// <summary>
+    /// ✎ PERF-10 / огляд M2, повторний огляд L-b: кандидати «черги людей» — до <see cref="FairPerUser"/> найраніших доступних
+    /// ручних задач КОЖНОЇ людини (людина з тисячею натискань не витісняє інших з вікна), не більше <see cref="FairWindow"/>,
+    /// і з них <see cref="FairCandidates"/> найкращих за рангом людини (<see cref="FairRankSql"/>), далі FIFO. Без блокувань
+    /// (RCSI): claim пробує кандидатів по черзі як названий рядок (<c>@preferred</c>) зі всіма своїми умовами (документ
+    /// зайнятий, узяли раніше — наступний кандидат); жоден — звичайний прохід ручних (FIFO).
+    /// </summary>
+    internal static readonly string FairPickSql = $$"""
+        /* ecr:jobqueue-fair-pick */
+        SELECT TOP ({{FairCandidates}}) q.JobId
+          FROM (SELECT TOP ({{FairWindow}}) w.JobId, w.AvailableAt, w.CreatedByUserId
+                  FROM (SELECT q.JobId, q.AvailableAt, q.CreatedByUserId,
+                               ROW_NUMBER() OVER (PARTITION BY q.CreatedByUserId ORDER BY q.AvailableAt, q.JobId) AS UserRow
+                          FROM itg.JobProgress AS q WITH (INDEX(IX_JobProgress_User_Active))
+                         WHERE q.Lane = @lane AND q.Lane IS NOT NULL AND q.[State] = 'Queued' AND q.CreatedByUserId IS NOT NULL
+                           AND q.AvailableAt <= CAST(SYSUTCDATETIME() AS datetime2(3))
+                           {{ManualFilter.Trim()}}) AS w
+                 WHERE w.UserRow <= {{FairPerUser}}
+                 ORDER BY w.UserRow, w.AvailableAt, w.JobId) AS q
+         ORDER BY {{FairRankSql.Trim()}}, q.AvailableAt, q.JobId;
         """;
 
     /// <summary>Умова кандидата під межею дітей розкладу (<see cref="FanOutCapPrologue"/>).</summary>
@@ -225,14 +293,19 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
     /// <param name="priority">Прохід лише пріоритетного коду.</param>
     /// <param name="recalcLane">Лейн перерахунку: поступитися правці комірки документа (<see cref="EditFirstExclusion"/>).</param>
     /// <param name="manualOnly">Прохід «спершу ручні» (<see cref="ManualFilter"/>).</param>
+    /// <param name="heavyCap">✎ PERF-05: глобальна стеля важких перерахунків діє (<see cref="HeavyCapFilter"/>).</param>
+    /// <param name="preferred">✎ PERF-10: лише рядок <c>@preferred</c> — кандидат «черги людей» (<see cref="FairPickSql"/>).</param>
     internal static string ClaimQueuedSqlFor(
-        bool documentExclusive, bool fanOutCap, bool priority, bool recalcLane = false, bool manualOnly = false)
+        bool documentExclusive, bool fanOutCap, bool priority, bool recalcLane = false, bool manualOnly = false,
+        bool heavyCap = false, bool preferred = false)
     {
         var sql = priority ? ClaimPriorityQueuedSql : ClaimQueuedSql;
         var extra = (documentExclusive ? DocumentExclusion : string.Empty)
                     + (recalcLane ? EditFirstExclusion : string.Empty)
                     + (manualOnly ? ManualFilter : string.Empty)
-                    + (fanOutCap ? FanOutCapFilter : string.Empty);
+                    + (fanOutCap ? FanOutCapFilter : string.Empty)
+                    + (heavyCap ? HeavyCapFilter : string.Empty)
+                    + (preferred ? "\n              AND q.JobId = @preferred\n" : string.Empty);
         if (extra.Length > 0)
         {
             // ⛔ Якір — ORDER BY кандидата; не знайшовся (текст claim змінили) — гучна відмова, а не тихий claim без умов.
@@ -249,7 +322,7 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
             }
         }
 
-        return fanOutCap ? FanOutCapPrologue + "\n" + sql + "\nCOMMIT TRANSACTION;" : sql;
+        return fanOutCap || heavyCap ? FanOutCapPrologue + "\n" + sql + "\nCOMMIT TRANSACTION;" : sql;
     }
 
     /// <summary>
@@ -306,31 +379,73 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
     /// ✎ Огляд H1: payload <c>{0}</c> без полів ланцюжка (PSS-04) — нова постановка на ціль ланцюжка, що чекає між
     /// кроками, починає його з ПЕРШОГО періоду: її зміна могла торкнутися вже зроблених місяців.
     /// </summary>
-    /// <remarks>✎ L1b / D3: і <c>$.chainTotal</c> — шкала «період k з N» починається з першого кроку заново.</remarks>
+    /// <remarks>
+    /// ✎ L1b / D3: і <c>$.chainTotal</c> — шкала «період k з N» починається з першого кроку заново. ✎ PERF-01/02: і план
+    /// (<c>$.chainPlan</c>, <c>$.chainSkipped</c>, <c>$.chainRecheck</c>) — перший крок вирішує знову.
+    /// </remarks>
     internal const string ChainResetTemplate =
-        "JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY({0}, '$.chainAfter', NULL), '$.chainDone', NULL), "
-        + "'$.chainReaders', NULL), '$.chainStartedAt', NULL), '$.chainElapsedMs', NULL), '$.chainTotal', NULL)";
+        "JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY("
+        + "{0}, '$.chainAfter', NULL), '$.chainDone', NULL), "
+        + "'$.chainReaders', NULL), '$.chainStartedAt', NULL), '$.chainElapsedMs', NULL), '$.chainTotal', NULL), "
+        + "'$.chainPlan', NULL), '$.chainSkipped', NULL), '$.chainRecheck', NULL)";
 
     /// <summary>
-    /// Злиття в рядок, що чекає (<c>@payload</c> — тіло нової постановки): знято поля ланцюжка (H1) і, якщо нова
-    /// постановка — дитина ІНШОГО розкладу, позначка батька переходить до нового розкладу (його статус її рахує).
-    /// Ставить <c>@existing</c> і <c>@rewrite</c>; <c>{0}</c> — змінна з <c>JobId</c> рядка.
+    /// ✎ PERF-01/02 (<c>D-564a</c>/<c>D-564b</c>): поля натискання з <c>@payload</c> (нова постановка) у <c>@existing</c>
+    /// (рядок, у який вона зливається): місяці на екрані — об'єднанням; «Повний перерахунок» — АБО; позначка батька іншого
+    /// розкладу — нового (як доти). Ставить <c>@rewrite</c>, якщо щось змінилося. Обидва — вже перевірений JSON.
     /// </summary>
-    private const string CoalescePayloadTemplate = """
-            SELECT @existing = Payload FROM itg.JobProgress WHERE JobId = {0};
-            IF (CASE WHEN ISJSON(@existing) = 1 THEN JSON_VALUE(@existing, '$.chainAfter') END) IS NOT NULL
-            BEGIN
-                SET @existing = <<RESET>>;
-                SET @rewrite = 1;
-            END
-            IF ISJSON(@existing) = 1 AND ISJSON(@payload) = 1
-            BEGIN
+    private const string MergePressFieldsSql = """
+                IF JSON_QUERY(@payload, '$.screenPeriods') IS NOT NULL
+                   AND EXISTS (SELECT [value] FROM OPENJSON(@payload, '$.screenPeriods')
+                               EXCEPT SELECT [value] FROM OPENJSON(@existing, '$.screenPeriods'))
+                BEGIN
+                    -- SQL Server 2016: без STRING_AGG — склейка FOR XML PATH (значення — числа ключів періодів).
+                    SET @existing = JSON_MODIFY(@existing, '$.screenPeriods', JSON_QUERY(N'[' + STUFF((
+                        SELECT N',' + u.v
+                        FROM (SELECT [value] AS v FROM OPENJSON(@existing, '$.screenPeriods')
+                              UNION SELECT [value] FROM OPENJSON(@payload, '$.screenPeriods')) AS u
+                        ORDER BY TRY_CAST(u.v AS int)
+                        FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 1, N'') + N']'));
+                    SET @rewrite = 1;
+                END
+                IF ISNULL(JSON_VALUE(@payload, '$.forceFull'), N'false') = N'true'
+                   AND ISNULL(JSON_VALUE(@existing, '$.forceFull'), N'false') <> N'true'
+                BEGIN
+                    SET @existing = JSON_MODIFY(@existing, '$.forceFull', CAST(1 AS bit));
+                    SET @rewrite = 1;
+                END
                 IF JSON_VALUE(@payload, '$.fanOutParentJobId') IS NOT NULL
                    AND ISNULL(JSON_VALUE(@existing, '$.fanOutParentJobId'), N'') <> JSON_VALUE(@payload, '$.fanOutParentJobId')
                 BEGIN
                     SET @existing = JSON_MODIFY(@existing, '$.fanOutParentJobId', JSON_VALUE(@payload, '$.fanOutParentJobId'));
                     SET @rewrite = 1;
                 END
+        """;
+
+    /// <summary>
+    /// Злиття в рядок, що чекає (<c>@payload</c> — тіло нової постановки). Ставить <c>@existing</c> і <c>@rewrite</c>;
+    /// <c>{0}</c> — змінна з <c>JobId</c> рядка.
+    /// </summary>
+    /// <remarks>
+    /// ✎ PERF-02 (<c>D-564b</c>, рішення людини 21.11 §6 п. 1; заміщує H1 «з першого періоду»): рядок — ланцюжок між кроками
+    /// (<c>$.chainAfter</c>). Звичайна постановка ланцюжок НЕ скидає: прогрес лишається, а <c>$.chainRecheck</c> велить
+    /// наступному кроку перевірити зроблені й пропущені місяці детектором і дописати лише змінені (їхні входи змінились після
+    /// їхнього кроку). «Повний перерахунок» (<c>$.forceFull</c>) — як доти: поля ланцюжка знято, з першого періоду.
+    /// Далі — поля натискання (<see cref="MergePressFieldsSql"/>).
+    /// </remarks>
+    private const string CoalescePayloadTemplate = """
+            SELECT @existing = Payload FROM itg.JobProgress WHERE JobId = {0};
+            IF (CASE WHEN ISJSON(@existing) = 1 THEN JSON_VALUE(@existing, '$.chainAfter') END) IS NOT NULL
+            BEGIN
+                IF (CASE WHEN ISJSON(@payload) = 1 THEN JSON_VALUE(@payload, '$.forceFull') END) = N'true'
+                    SET @existing = <<RESET>>;
+                ELSE
+                    SET @existing = JSON_MODIFY(@existing, '$.chainRecheck', CAST(1 AS bit));
+                SET @rewrite = 1;
+            END
+            IF ISJSON(@existing) = 1 AND ISJSON(@payload) = 1
+            BEGIN
+        <<MERGE>>
             END
         """;
 
@@ -338,7 +453,33 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
     internal static string CoalescePayloadSql(string jobVar)
         => CoalescePayloadTemplate
             .Replace("{0}", jobVar, StringComparison.Ordinal)
-            .Replace("<<RESET>>", ChainReset("@existing"), StringComparison.Ordinal);
+            .Replace("<<RESET>>", ChainReset("@existing"), StringComparison.Ordinal)
+            .Replace("<<MERGE>>", MergePressFieldsSql, StringComparison.Ordinal);
+
+    /// <summary>
+    /// ✎ PERF-02 (<c>D-564b</c>): ланцюжок поглинає задача позаду на ту саму ціль (<c>@behind</c>, нове натискання) — ВОНА
+    /// продовжує ланцюжок із прогресом <c>{0}</c> (payload наступного кроку чи поточного, якщо крок не дороблено) замість
+    /// почати з першого періоду: <c>$.chainRecheck</c>, автор натискання, поля натискання (<see cref="MergePressFieldsSql"/>).
+    /// «Повний перерахунок» позаду чи ланцюжка немає — як доти (<see cref="CoalescePayloadSql"/>).
+    /// </summary>
+    /// <param name="chainPayload">SQL-змінна з payload ланцюжка.</param>
+    internal static string AbsorbChainSql(string chainPayload) => $$"""
+            SET @payload = (SELECT Payload FROM itg.JobProgress WHERE JobId = @behind);
+            IF ISJSON({{chainPayload}}) = 1 AND ISJSON(@payload) = 1
+               AND (CASE WHEN ISJSON({{chainPayload}}) = 1 THEN JSON_VALUE({{chainPayload}}, '$.chainAfter') END) IS NOT NULL
+               AND ISNULL((CASE WHEN ISJSON(@payload) = 1 THEN JSON_VALUE(@payload, '$.forceFull') END), N'false') <> N'true'
+            BEGIN
+                SET @existing = JSON_MODIFY(JSON_MODIFY({{chainPayload}}, '$.chainRecheck', CAST(1 AS bit)),
+                    '$.triggeredByUserId', TRY_CAST(JSON_VALUE(@payload, '$.triggeredByUserId') AS int));
+                SET @rewrite = 1;
+        {{MergePressFieldsSql}}
+            END
+            ELSE
+            BEGIN
+                SET @payload = NULL;
+        {{CoalescePayloadSql("@behind")}}
+            END
+        """;
 
     /// <summary><see cref="ChainResetTemplate"/> над виразом <paramref name="payloadExpression"/>.</summary>
     internal static string ChainReset(string payloadExpression)
@@ -576,6 +717,10 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
         // PSS-02: межа дітей розкладу — лише лейн перерахунку й лише коли її задано (DI; ручна збірка — без межі).
         var fanOutCap = limits?.RecalcFanOutMaxConcurrency ?? 0;
 
+        // ✎ PERF-05: глобальна стеля важких перерахунків — ручному проходу вся, решті — без останнього місця (якщо стеля ≥ 2).
+        var heavyCap = limits?.RecalcMaxConcurrent ?? 0;
+        var heavySystem = heavyCap >= 2 ? heavyCap - 1 : heavyCap;
+
         void Bind(SqlParameterCollection p, string lane)
         {
             p.Add("@lane", SqlDbType.VarChar, JobLanes.MaxLength).Value = lane;
@@ -590,7 +735,7 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
             AddShown(p);
         }
 
-        string QueuedSqlOf(string lane, bool priority, bool manualOnly = false)
+        string QueuedSqlOf(string lane, bool priority, bool manualOnly = false, bool preferred = false)
         {
             var recalc = string.Equals(lane, JobLanes.Recalc, StringComparison.Ordinal);
             return ClaimQueuedSqlFor(
@@ -598,7 +743,9 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
                 fanOutCap: (fanOutCap > 0 || exceptFanOut) && recalc && !manualOnly,
                 priority,
                 recalcLane: recalc,
-                manualOnly: manualOnly);
+                manualOnly: manualOnly,
+                heavyCap: heavyCap > 0 && recalc,
+                preferred: preferred);
         }
 
         async Task<ClaimedJob?> Read(SqlDataReader r, bool reclaimed)
@@ -646,9 +793,48 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
                     // вона не стоїть у FIFO за дітьми річного розкладу й кроками ланцюжків.
                     if (!reclaimed && string.Equals(lane, JobLanes.Recalc, StringComparison.Ordinal))
                     {
-                        var manual = await RunAsync(
-                                QueuedSqlOf(lane, priority: false, manualOnly: true), p => Bind(p, lane), r => Read(r, false), ct)
+                        // ✎ PERF-10 / огляд M2: «черга людей» — вибір окремим запитом без блокувань, claim — названого рядка;
+                        // не вийшло (узяли, документ зайнятий) — звичайний прохід ручних FIFO.
+                        var picks = await RunAsync(
+                                FairPickSql,
+                                p => p.Add("@lane", SqlDbType.VarChar, JobLanes.MaxLength).Value = lane,
+                                async r =>
+                                {
+                                    var ids = new List<string>();
+                                    while (await r.ReadAsync(ct).ConfigureAwait(false))
+                                    {
+                                        ids.Add(r.GetString(0));
+                                    }
+
+                                    return ids;
+                                },
+                                ct)
                             .ConfigureAwait(false);
+                        ClaimedJob? manual = null;
+
+                        // Кандидати за рангом (null — останнім: звичайний FIFO ручних).
+                        foreach (var preferred in picks.Cast<string?>().Append(null))
+                        {
+                            manual = await RunAsync(
+                                    QueuedSqlOf(lane, priority: false, manualOnly: true, preferred: preferred is not null),
+                                    p =>
+                                    {
+                                        Bind(p, lane);
+                                        p.Add("@heavyLimit", SqlDbType.Int).Value = heavyCap;
+                                        if (preferred is not null)
+                                        {
+                                            p.Add("@preferred", SqlDbType.NVarChar, 100).Value = preferred;
+                                        }
+                                    },
+                                    r => Read(r, false),
+                                    ct)
+                                .ConfigureAwait(false);
+                            if (manual is not null)
+                            {
+                                break;
+                            }
+                        }
+
                         if (manual is not null)
                         {
                             return manual;
@@ -656,7 +842,14 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
                     }
 
                     var job = await RunAsync(
-                            reclaimed ? sql : QueuedSqlOf(lane, priority: false), p => Bind(p, lane), r => Read(r, reclaimed), ct)
+                            reclaimed ? sql : QueuedSqlOf(lane, priority: false),
+                            p =>
+                            {
+                                Bind(p, lane);
+                                p.Add("@heavyLimit", SqlDbType.Int).Value = heavySystem;
+                            },
+                            r => Read(r, reclaimed),
+                            ct)
                         .ConfigureAwait(false);
 
                     if (job is not null)
@@ -846,7 +1039,10 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
                 {OwnedBy};
                 -- ⛔ Д-1 (O1): свій відлік стелі в задачу позаду НЕ переноситься — у ній
                 -- свіжа правка, і чужий відлік валив би її раніше, ніж та чекала б сама.
-                {CoalescePayloadSql("@behind")}
+                -- ✎ PERF-02: ланцюжок (крок не дороблено) продовжує задача позаду — без свого відліку стелі.
+                DECLARE @chainOwn nvarchar(max) = CASE WHEN ISJSON(@addPayload) = 1 AND LEFT(LTRIM(@addPayload), 1) = NCHAR(123)
+                                                       THEN JSON_MODIFY(@addPayload, @sincePath, NULL) END;
+                {AbsorbChainSql("@chainOwn")}
                 UPDATE itg.JobProgress
                 SET AvailableAt = {RevivedAvailableAt("@available")},
                     [Message] = CASE WHEN AvailableAt = {ParkedAt} THEN NULL ELSE [Message] END,
@@ -946,7 +1142,7 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
                 SET [State] = 'Cancelled', LeaseUntil = NULL, UpdatedAt = @shown,
                     [Message] = REPLACE(@absorbed, N'{AbsorbedMarker}', STRING_ESCAPE(@behind, 'json'))
                 {OwnedBy};
-                {CoalescePayloadSql("@behind")}
+                {AbsorbChainSql("@nextPayload")}
                 UPDATE itg.JobProgress
                 SET AvailableAt = {RevivedAvailableAt("SYSUTCDATETIME()")},
                     [Message] = CASE WHEN AvailableAt = {ParkedAt} THEN NULL ELSE [Message] END,

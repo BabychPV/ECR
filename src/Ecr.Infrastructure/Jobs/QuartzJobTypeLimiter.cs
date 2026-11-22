@@ -8,7 +8,8 @@ namespace Ecr.Infrastructure.Jobs;
 /// Межа одночасних задач за типом у режимі Quartz (AN-116, P1-06): експорт і імпорт Excel
 /// (<see cref="JobLaneMap.IsExcel"/>) — не більше <see cref="ExcelMaxConcurrency"/> на процес;
 /// дочірні документні задачі розкладу перерахунку проєкту (<see cref="RecalculationJob.IsFanOutChild"/>) — не більше
-/// <see cref="RecalcFanOutMaxConcurrency"/> (F1, WW-02).
+/// <see cref="RecalcFanOutMaxConcurrency"/> (F1, WW-02); ✎ PERF-05 (<c>D-564c</c>): усі перерахунки методологій — не більше
+/// <see cref="RecalcMaxConcurrent"/>, останнє місце — натисканню людини (<see cref="RecalculationJob.IsManualPress"/>).
 /// </summary>
 /// <remarks>
 /// ⛔ Чому не <c>WithPriority</c> і не <c>[DisallowConcurrentExecution]</c>. Пріоритет триґера в
@@ -43,11 +44,34 @@ namespace Ecr.Infrastructure.Jobs;
 /// <param name="excelMaxConcurrency">Межа задач Excel (<see cref="JobLaneMap.ExcelMaxConcurrencyKey"/>); менше за 1 — 1.</param>
 /// <param name="time">Годинник для спливу очікувачів; <c>null</c> — системний (лише тести підміняють).</param>
 /// <param name="recalcFanOutMaxConcurrency">Межа дітей розкладу перерахунку (<see cref="RecalcFanOutMaxConcurrencyKey"/>); менше за 1 — 1.</param>
+/// <param name="recalcMaxConcurrent">
+/// ✎ PERF-05 (D-564c): глобальна стеля важких перерахунків (<see cref="RecalcMaxConcurrentKey"/>); 0 — без стелі (лише ручна
+/// збірка в тестах; конфігурація дає щонайменше 1).
+/// </param>
 public sealed class QuartzJobTypeLimiter(
     int excelMaxConcurrency,
     TimeProvider? time = null,
-    int recalcFanOutMaxConcurrency = QuartzJobTypeLimiter.DefaultRecalcFanOutMaxConcurrency)
+    int recalcFanOutMaxConcurrency = QuartzJobTypeLimiter.DefaultRecalcFanOutMaxConcurrency,
+    int recalcMaxConcurrent = 0)
 {
+    /// <summary>
+    /// ✎ PERF-05/10 (аудит PERF1000 21.11, рішення людини §6 п. 3; <c>D-564c</c>): ОДНА стеля на всі важкі перерахунки —
+    /// задачі лейна <c>recalc</c> (ручні, авто, каскадні, діти розкладу, проходи читачів), що ВИКОНУЮТЬСЯ одночасно на весь пул
+    /// процесів (у черзі в базі — лічильник у базі під тим самим applock, що межа дітей; у Quartz — у процесі).
+    /// </summary>
+    /// <remarks>
+    /// Межа дітей розкладу (<see cref="RecalcFanOutMaxConcurrencyKey"/>) лишається ВКЛАДЕНОЮ: дитина займає одне місце і в
+    /// глобальній стелі, і в межі дітей (подвійного рахунку немає — це дві межі над одним рядком). Останнє місце глобальної
+    /// стелі (якщо вона ≥ 2) — лише для ручного перерахунку (задача людини): системна робота (авто, каскад, діти, кроки
+    /// ланцюжків) бере не більше «стеля − 1», тож людина чекає щонайбільше одного кроку, а не всієї системної хвилі (D-561 (з)).
+    /// Рекомендоване значення — max(2, ядра SQL ÷ 4) (5 на 20 ядрах); разом із MAXDOP 4 (інструкція встановлення) —
+    /// ≈ стеля × <c>Calculations:MaxParallelism</c> важких сеансів SQL.
+    /// </remarks>
+    public const string RecalcMaxConcurrentKey = "Jobs:Recalculation:MaxConcurrent";
+
+    /// <summary>Глобальна стеля, коли ключ не задано: 5 — max(2, 20 ядер SQL ÷ 4) профілю замовника (аудит PERF1000 §2.4).</summary>
+    public const int DefaultRecalcMaxConcurrent = 5;
+
     /// <summary>Ключ кількості потоків пулу Quartz.</summary>
     public const string ThreadCountKey = "Jobs:Quartz:ThreadCount";
 
@@ -82,6 +106,13 @@ public sealed class QuartzJobTypeLimiter(
     private readonly TimeProvider clock = time ?? TimeProvider.System;
     private readonly Gate excel = new(excelMaxConcurrency);
     private readonly Gate fanOut = new(recalcFanOutMaxConcurrency);
+    private readonly Gate? heavy = recalcMaxConcurrent > 0 ? new Gate(recalcMaxConcurrent) : null;
+
+    /// <summary>✎ PERF-05: глобальна стеля важких перерахунків; 0 — без стелі (ручна збірка).</summary>
+    public int RecalcMaxConcurrent => heavy?.Max ?? 0;
+
+    /// <summary>✎ PERF-05: скільки важких перерахунків виконується зараз (режим Quartz).</summary>
+    public int RecalcRunning => heavy?.Running ?? 0;
 
     /// <summary>Межа одночасних задач Excel.</summary>
     public int ExcelMaxConcurrency => excel.Max;
@@ -135,6 +166,34 @@ public sealed class QuartzJobTypeLimiter(
             ? value
             : DefaultRecalcFanOutMaxConcurrency;
     }
+
+    /// <summary>✎ PERF-05: глобальна стеля з конфігурації; не задано чи недійсне — <see cref="DefaultRecalcMaxConcurrent"/>.</summary>
+    /// <remarks>Недійсне значення старт зупиняє раніше (<c>EcrConfigurationValidation.Integers</c>, <c>WorkerConfigurationValidation</c>).</remarks>
+    public static int ReadRecalcMaxConcurrent(IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+
+        return int.TryParse(
+                   configuration[RecalcMaxConcurrentKey], NumberStyles.Integer, CultureInfo.InvariantCulture, out var value)
+               && value >= 1
+            ? value
+            : DefaultRecalcMaxConcurrent;
+    }
+
+    /// <summary>
+    /// ✎ PERF-05: що сказати на старті про межу дітей розкладу проти глобальної стелі. Межа дітей не менша за стелю — дітей
+    /// фактично не більше «стеля − 1» (останнє місце — ручному): Information, не попередження.
+    /// </summary>
+    /// <param name="fanOutCap">Межа дітей.</param>
+    /// <param name="globalCap">Глобальна стеля.</param>
+    public static string? GlobalCapNote(int fanOutCap, int globalCap)
+        => globalCap >= 1 && fanOutCap >= globalCap
+            ? string.Format(
+                CultureInfo.InvariantCulture,
+                "{0} = {1} ≥ {2} = {3}: дітей розкладу одночасно не більше {4} — глобальна стеля важких перерахунків тримає останнє "
+                + "місце для ручного перерахунку (D-564c).",
+                RecalcFanOutMaxConcurrencyKey, fanOutCap, RecalcMaxConcurrentKey, globalCap, Math.Max(1, globalCap - 1))
+            : null;
 
     /// <summary>
     /// ✎ L1b / D2 (стенд Land 21.11): що сказати на старті про межу дітей розкладу проти місць виконавця перерахунку.
@@ -213,6 +272,19 @@ public sealed class QuartzJobTypeLimiter(
     /// </param>
     /// <returns>Оренда місця або <c>null</c> — слід відкласти.</returns>
     public IDisposable? TryEnter(Type jobType, string? jobId, bool recalcFanOutChild)
+        => TryEnter(jobType, jobId, recalcFanOutChild, manualPress: false);
+
+    /// <summary>
+    /// ✎ PERF-05 (огляд M3): те саме, що <see cref="TryEnter(Type, string?, bool)"/>; задача, яку НЕ натиснула людина
+    /// (<paramref name="manualPress"/> = <c>false</c>: авто, каскад, діти розкладу, проходи читачів), бере місце глобальної
+    /// стелі лише поки зайнято менше за «стеля − 1» — останнє місце в процесі лишається людині, як у черзі в базі.
+    /// </summary>
+    /// <param name="jobType">Тип реалізації задачі.</param>
+    /// <param name="jobId">Ідентифікатор задачі.</param>
+    /// <param name="recalcFanOutChild">Дитина розкладу перерахунку проєкту.</param>
+    /// <param name="manualPress">Перерахунок, який натиснула людина (<see cref="RecalculationJob.IsManualPress"/>).</param>
+    /// <returns>Оренда місця або <c>null</c> — слід відкласти.</returns>
+    public IDisposable? TryEnter(Type jobType, string? jobId, bool recalcFanOutChild, bool manualPress)
     {
         ArgumentNullException.ThrowIfNull(jobType);
 
@@ -221,9 +293,30 @@ public sealed class QuartzJobTypeLimiter(
             return excel.TryEnter(jobId, clock, WaiterExpiry);
         }
 
-        return recalcFanOutChild
-            ? fanOut.TryEnter(jobId, clock, WaiterExpiry)
-            : new Slot(null);
+        // ✎ PERF-05 (D-564c): кожен перерахунок методологій — під глобальною стелею; дитина розкладу — ще й під своєю межею.
+        var heavyApplies = heavy is not null && JobLaneMap.Of(jobType) == Application.Ports.JobLanes.Recalc;
+        var heavySlot = heavyApplies
+            ? heavy!.TryEnter(
+                jobId, clock, WaiterExpiry, manualPress || heavy.Max < 2 ? heavy.Max : heavy.Max - 1, jumpQueue: manualPress)
+            : null;
+        if (heavyApplies && heavySlot is null)
+        {
+            return null;
+        }
+
+        if (!recalcFanOutChild)
+        {
+            return heavySlot ?? new Slot(null);
+        }
+
+        var child = fanOut.TryEnter(jobId, clock, WaiterExpiry);
+        if (child is null)
+        {
+            heavySlot?.Dispose();
+            return null;
+        }
+
+        return heavySlot is null ? child : new Pair(heavySlot, child);
     }
 
     /// <summary>Знімає задачу з черги чекаючих (скасована чи видалена); <c>false</c> - її там не було.</summary>
@@ -233,6 +326,7 @@ public sealed class QuartzJobTypeLimiter(
         ArgumentNullException.ThrowIfNull(jobId);
 
         var removed = excel.Forget(jobId);
+        removed = (heavy?.Forget(jobId) ?? false) || removed;
         return fanOut.Forget(jobId) || removed;
     }
 
@@ -258,18 +352,19 @@ public sealed class QuartzJobTypeLimiter(
             }
         }
 
-        public Slot? TryEnter(string? jobId, TimeProvider clock, TimeSpan expiry)
+        public Slot? TryEnter(string? jobId, TimeProvider clock, TimeSpan expiry, int? limit = null, bool jumpQueue = false)
         {
             lock (sync)
             {
                 DropExpired(clock, expiry);
 
-                var free = Max - Volatile.Read(ref running);
+                var free = (limit ?? Max) - Volatile.Read(ref running);
                 var node = jobId is null ? null : Find(jobId);
 
                 // Позиція в черзі: скільки чекаючих СТОЇТЬ ПЕРЕД задачею (новоприбула - усі наявні).
+                // ✎ PERF-05 (огляд M3): натискання людини не стоїть за системними задачами, що чекають (як прохід «спершу ручні»).
                 var ahead = 0;
-                for (var current = waiters.First; current is not null && current != node; current = current.Next)
+                for (var current = waiters.First; !jumpQueue && current is not null && current != node; current = current.Next)
                 {
                     ahead++;
                 }
@@ -355,6 +450,16 @@ public sealed class QuartzJobTypeLimiter(
     }
 
     /// <summary>Оренда місця; звільнення ідемпотентне.</summary>
+    /// <summary>Два місця разом (глобальна стеля і межа дітей).</summary>
+    private sealed class Pair(IDisposable first, IDisposable second) : IDisposable
+    {
+        public void Dispose()
+        {
+            second.Dispose();
+            first.Dispose();
+        }
+    }
+
     private sealed class Slot(Gate? owner) : IDisposable
     {
         private int released;

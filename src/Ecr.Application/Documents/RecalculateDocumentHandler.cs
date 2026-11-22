@@ -101,8 +101,25 @@ public sealed class RecalculateDocumentHandler(
     /// області чи всі аркуші складу): не помилка, а відповідь із переліком.
     /// </returns>
     /// <exception cref="Errors.BusinessRuleException"><c>ECR-CALC-4221</c> <c>periodClosed</c> — період закритий.</exception>
-    public async Task<Calculations.RecalculationRequestOutcome> RequestAsync(
+    public Task<Calculations.RecalculationRequestOutcome> RequestAsync(
         long documentId, PeriodKey periodKey, int? sheetDefId, CancellationToken ct)
+        => RequestAsync(documentId, periodKey, sheetDefId, full: false, ct);
+
+    /// <summary>
+    /// UAT-recalc-ux + ✎ PERF-01 (<c>D-564a</c>): те саме з вибором обсягу для документа річної розкладки.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період (місяць на екрані).</param>
+    /// <param name="sheetDefId">Аркуш; <c>null</c> — увесь документ.</param>
+    /// <param name="full">
+    /// «Повний перерахунок»: усі відкриті місяці року, а не лише змінені. Лише власнику <c>Calculation.Recalculate</c> у
+    /// проєкті документа (<see cref="PreemptPermission"/>) — інакше 403; поза річною розкладкою натискання й так рахує один період.
+    /// </param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Задача і пропущені аркуші (див. перевантаження без <paramref name="full"/>).</returns>
+    /// <exception cref="Errors.AccessDeniedException"><c>ECR-AUTH-0403</c> — «Повний» без <c>Calculation.Recalculate</c>.</exception>
+    public async Task<Calculations.RecalculationRequestOutcome> RequestAsync(
+        long documentId, PeriodKey periodKey, int? sheetDefId, bool full, CancellationToken ct)
     {
         var profile = await Security.PermissionCheck
             .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
@@ -326,6 +343,9 @@ public sealed class RecalculateDocumentHandler(
         // лише цілі, якими той володіє (якір — не-місячне + C_M01), і решта C_Mm лишалась би застарілою. Гейт стану на
         // шляху запису — той самий (`RecalculationJob.RefusedPeriodsAsync`: закриті місяці вилучаються, закритий якір —
         // лише не-місячне, B24). Поза річною розкладкою — названий період, як доти.
+        // ✎ PERF-01 (D-564a, рішення людини 21.11 §6 п. 1; змінює B59): «увесь рік» кнопки — лише місяці, чиї входи змінились після
+        // їхнього актуального прогону, і ЗАВЖДИ місяць на екрані (`SkipUnchanged`, `ScreenPeriods`; рішення ухвалює перший крок
+        // ланцюжка, `RecalculationJob.PlanChainAsync`). «Повний перерахунок» (`ForceFull`) — усі відкриті місяці, як доти.
         var year = await YearLayoutYearAsync(documentId, periodKey, ct).ConfigureAwait(false);
         object payload = year is { } scopeYear
             ? new
@@ -335,6 +355,9 @@ public sealed class RecalculateDocumentHandler(
                 Year = scopeYear,
                 TriggeredByUserId = currentUser.UserId,
                 SheetDefId = sheetDefId,
+                SkipUnchanged = !full,
+                ForceFull = full,
+                ScreenPeriods = new[] { periodKey.Value },
             }
             : new
             {
@@ -351,7 +374,23 @@ public sealed class RecalculateDocumentHandler(
             ? Security.PermissionCheck.IsGrantedIn(profile, PreemptPermission, pid)
             : Security.PermissionCheck.IsGranted(profile, PreemptPermission);
 
-        var jobId = mayPreempt
+        // ⛔ PERF-01: «Повний перерахунок» — та сама межа, що витіснення: Calculation.Recalculate у проєкті документа. Клієнт
+        // показує опцію лише з цим правом, але межа — тут.
+        if (full && !mayPreempt)
+        {
+            throw new Errors.AccessDeniedException(
+                "ECR-AUTH-0403", $"Повний перерахунок потребує права {PreemptPermission}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-AUTH-0403.permission",
+                    ["permission"] = PreemptPermission,
+                });
+        }
+
+        // ✎ PERF-02 (D-564b): натискання на рік річного документа НЕ витісняє ланцюжок, що виконується (крок дорахує, а злиття
+        // дасть ланцюжку перевірити зроблені місяці); витісняє лише «Повний перерахунок» — явний перезапуск року.
+        var preempt = mayPreempt && (year is null || full);
+        var jobId = preempt
             ? await jobs
                 .EnqueueExclusiveAsync<IRecalculationJob>(target, payload, ct, currentUser.UserId)
                 .ConfigureAwait(false)

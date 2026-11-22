@@ -175,12 +175,13 @@ public sealed class RecalculationYearPerPeriodCommitTests(SqlServerFixture sql) 
     }
 
     /// <summary>
-    /// ✎ Огляд H1: нова постановка на ціль ланцюжка, що чекає між кроками, зливається в нього — і він починає знову з
-    /// ПЕРШОГО періоду (зміна могла торкнутися вже зроблених місяців), а позначка батька — нового розкладу.
+    /// ✎ PERF-02 (D-564b, рішення людини 21.11; заміщує огляд H1 «з першого періоду»): нова постановка на ціль ланцюжка, що
+    /// чекає між кроками, зливається в нього БЕЗ скидання — прогрес лишається, наступний крок перевіряє зроблені місяці
+    /// (<c>chainRecheck</c>) і, якщо нічого не змінилося, рахує далі; позначка батька — нового розкладу.
     /// </summary>
-    /// <remarks>МУТАЦІЯ: без скидання полів ланцюжка в <c>CoalescePayloadSql</c> — крок 2 рахує лютий, тест червоний.</remarks>
+    /// <remarks>МУТАЦІЯ: повернути скидання полів ланцюжка в <c>CoalescePayloadSql</c> — крок 2 рахує січень, тест червоний.</remarks>
     [Fact]
-    public async Task Нова_постановка_на_ціль_ланцюжка_між_кроками_починає_його_з_першого_періоду()
+    public async Task Нова_постановка_на_ціль_ланцюжка_між_кроками_не_скидає_його()
     {
         var (builder, document) = await ArrangeAsync();
         var january = document.PeriodKey;
@@ -193,6 +194,7 @@ public sealed class RecalculationYearPerPeriodCommitTests(SqlServerFixture sql) 
 
         var step = (await ClaimAsync(host, JobLanes.Recalc))!;
         var continued = await Assert.ThrowsAsync<JobContinuedException>(() => RunStepAsync(builder, scheduler, host.Queue, step));
+        Assert.Equal(january.Value, continued.SettleThrough);
         Assert.True(await host.Queue.ContinueAsync(
             step.Claim, continued.PayloadJson, continued.Delay, continued.SettleThrough, CancellationToken.None));
         Assert.Contains("\"chainAfter\"", (await RowAsync(jobId))!.Payload, StringComparison.Ordinal);
@@ -203,13 +205,14 @@ public sealed class RecalculationYearPerPeriodCommitTests(SqlServerFixture sql) 
         Assert.Equal(jobId, again);
 
         var row = await RowAsync(jobId);
-        Assert.DoesNotContain("chainAfter", row!.Payload, StringComparison.Ordinal);
+        var merged = JsonSerializer.Deserialize<RecalculationRequest>(row!.Payload!, Web)!;
+        Assert.Equal((january.Value, true), (merged.ChainAfter, merged.ChainRecheck));
         Assert.Equal("parent-new", row.FanOutParentJobId);
 
-        // Наступний крок — знову січень.
-        step = (await ClaimAsync(host, JobLanes.Recalc))!;
-        continued = await Assert.ThrowsAsync<JobContinuedException>(() => RunStepAsync(builder, scheduler, host.Queue, step));
-        Assert.Equal(january.Value, continued.SettleThrough);
+        Assert.Equal([january.Value], merged.ChainDone!);
+
+        // Що саме дописує перевірка (лише змінені зроблені місяці) — YearPressSkipsUnchangedMonthsTests: тут годинник задач —
+        // 2026, і глобальні входи D-562, що їх у спільній базі пишуть інші тести справжнім часом, будили б січень.
     }
 
     /// <summary>

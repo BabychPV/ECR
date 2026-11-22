@@ -2799,6 +2799,19 @@ public interface ISystemHealthStore
 }
 ```
 
+#### `IJobQueuePosition`
+
+✎ PERF-10 (`D-564c`): місце задачі в черзі лейна `recalc` (порядок claim: спершу ручні — «черга людей», далі FIFO) і
+ОРІЄНТОВНИЙ старт (медіана кроку за добу × хвилі над глобальною стелею `Jobs:Recalculation:MaxConcurrent`). Лише черга в
+базі (`DbJobQueuePosition`); у Quartz не реєструється — `JobStatus.QueuePosition`/`EstimatedStartAt` порожні.
+
+```csharp
+public interface IJobQueuePosition
+{
+    public Task<JobQueuePosition?> GetAsync(string jobId, CancellationToken ct);
+}
+```
+
 #### `IJobQueue`
 
 Черга фонових задач у базі (`MI-02`, `D-208`): рядки `itg.JobProgress` з

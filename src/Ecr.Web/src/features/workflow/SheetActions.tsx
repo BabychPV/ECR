@@ -41,6 +41,7 @@ import {
   type SubmissionTarget,
 } from './api';
 import { jobRefetchInterval, outcomeOf } from './jobFollow';
+import { queueText } from '@/features/jobs/queueEta';
 import { useSettledAction } from '@/features/grid/settleEdits';
 import { isRecalculateKey, isTypingOrDialogTarget } from '@/features/grid/shortcutKey';
 import { useNarrowScreen } from '@/shared/narrowScreen';
@@ -329,6 +330,20 @@ export function SheetActions(props: SheetActionsProps): JSX.Element {
         <RecalculateButton recalculate={recalculate} />
       )}
 
+      {recalculate?.runFull != null && (
+        <Hint label={t('workflow.recalculateFullHint')}>
+          <Button variant="default" loading={recalculate.loading} onClick={recalculate.runFull}>
+            {t('workflow.recalculateFull')}
+          </Button>
+        </Hint>
+      )}
+
+      {recalculate?.queueText != null && (
+        <Text size="xs" c="dimmed" role="status" data-recalc-queue="">
+          {recalculate.queueText}
+        </Text>
+      )}
+
       {submit !== null && (
         // ✎ D-441: поки ціль — підставна відповідь попереднього аркуша/періоду, кнопка недоступна з поясненням.
         // ⚠ `Hint` завжди (лише `disabled`): умовна обгортка перемонтовувала б кнопку і губила фокус.
@@ -544,7 +559,16 @@ export interface RunnableSheetAction {
  */
 export interface SheetActionsModel {
   /** `blockedReason` - чому перерахунок зараз неможливий (поданий сусідній аркуш); `null` - можна. */
-  readonly recalculate: (RunnableSheetAction & { readonly running: boolean; readonly blockedReason: string | null }) | null;
+  readonly recalculate:
+    | (RunnableSheetAction & {
+        readonly running: boolean;
+        readonly blockedReason: string | null;
+        /** «Full recalculation» (`full: true`): лише з правом `Calculation.Recalculate` і для річного документа; інакше `null`. */
+        readonly runFull: (() => void) | null;
+        /** «Queued: position N …» — лише коли сервер віддав позицію в черзі; інакше `null`. */
+        readonly queueText: string | null;
+      })
+    | null;
   /**
    * ✎ D-441: `periodKey` — період, який подасть кнопка; `options` — неподані відкриті періоди для вибору.
    * ✎ D-441 «миготіння скелета»: `checking` — аркуш чи період щойно змінився, а на руках лише відповідь
@@ -1010,7 +1034,7 @@ export function useSheetActions({
   const recalcJobId = recalc?.jobId ?? null;
 
   const recalculate = useMutation({
-    mutationFn: (at: ActionTarget) =>
+    mutationFn: ({ full, ...at }: ActionTarget & { readonly full?: boolean }) =>
       // ⛔ Q-331: `sheetDefId` тепер справді звужує перерахунок до ЦЬОГО
       // аркуша (директива паритету зі старою системою, прогалина 2) — до
       // цього пакета кнопка передавала лише `periodKey`, і сервер
@@ -1021,6 +1045,7 @@ export function useSheetActions({
         body: JSON.stringify({
           periodKey: at.periodKey,
           sheetDefId: at.sheetDefId,
+          full: full === true,
         } satisfies RecalculateDocumentRequest),
       }),
     onSuccess: (outcome, at) => {
@@ -1669,6 +1694,11 @@ export function useSheetActions({
           loading: recalculateLoading || recalcRunning || settled.settling,
           running: recalcRunning,
           blockedReason: recalcBlockedReason,
+          runFull:
+            yearLayout && can(me, 'Calculation.Recalculate') && recalcBlockedReason === null
+              ? () => void settled.run(() => recalculate.mutateAsync({ ...here, full: true }))
+              : null,
+          queueText: recalcIsHere && outcome === 'running' && recalcJob.data?.state === 'Queued' ? queueText(recalcJob.data) : null,
           // AN-28/L8-01: спершу зберегти набране; відмова збереження - дії немає.
           run: () =>
             recalcBlockedReason !== null ? showWarning(recalcBlockedReason) : settled.run(() => recalculate.mutateAsync(here)),

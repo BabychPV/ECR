@@ -575,6 +575,9 @@ public sealed class CalculationRunConfiguration : IEntityTypeConfiguration<Calcu
         // N2-03 (AN-80): момент входів чисел, коли прогін переніс результати старішого прогону; NULL — старт.
         builder.Property(x => x.InputsAsOfUtc).HasColumnType("datetime2(3)");
 
+        // ✎ PERF-01 (D-564a, огляд H2): межа журналу комірок у мить завершення прогону (без годинників).
+        builder.Property(x => x.CellChangeWatermark);
+
         // ⛔ Унікальний ФІЛЬТРОВАНИЙ індекс — той самий прийом, що вже тримає
         // «поточний зріз» у `UX_ReportSnapshot_Current`. Доти інваріант
         // «актуальний прогін на область — щонайбільше один» не тримало НІЩО:
