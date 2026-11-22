@@ -66,6 +66,9 @@ public sealed partial class RecalculationJob
         Message = "RecalculationJob: документ {DocumentId}: ланцюжок завершено; незмінні місяці лишили актуальний прогін: {Skipped}.")]
     private static partial void LogSkippedUnchanged(ILogger logger, long documentId, string skipped);
 
+    /// <summary>Лише тести: періоди-читачі результатів власника (гілка 5) замість роутера місяців.</summary>
+    internal Func<int, Task<IReadOnlyList<int>>>? OwnerReadersProbe { get; init; }
+
     /// <summary>Рішення плану ланцюжка.</summary>
     /// <param name="Plan">Періоди до розрахунку (з цим кроком), за зростанням.</param>
     /// <param name="Skipped">Відкриті місяці, пропущені як незмінні.</param>
@@ -113,7 +116,8 @@ public sealed partial class RecalculationJob
             var done = (request.ChainDone ?? []).ToHashSet();
             var candidates = open.Where(p => !rest.Contains(p)).ToList();
             var forced = (request.ScreenPeriods ?? []).Where(p => !done.Contains(p)).ToList();
-            var flagged = await ChangedMonthsAsync(request, candidates, open, forced, annualOnly, ct).ConfigureAwait(false);
+            var flagged = await ChangedMonthsAsync(request, candidates, open, forced, annualOnly, ct, alsoRecomputed: rest)
+                .ConfigureAwait(false);
             appended = [.. candidates.Where(flagged.Contains)];
             decision = new ChainPlanDecision(
                 [.. rest.Union(appended).Order()],
@@ -140,9 +144,39 @@ public sealed partial class RecalculationJob
     /// <param name="forced">Місяці, що рахуються завжди (місяць на екрані).</param>
     /// <param name="annualOnly">Закриті якорі — лише формули (дешево): рахуються завжди.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="alsoRecomputed">Місяці, які цей ланцюжок порахує й так (решта плану): їхні пізніші читачі — теж у план.</param>
     internal async Task<HashSet<int>> ChangedMonthsAsync(
         RecalculationRequest request, IReadOnlyList<int> candidates, IReadOnlyList<int> yearOpen, IEnumerable<int> forced,
-        IReadOnlyDictionary<int, IReadOnlyList<int>> annualOnly, CancellationToken ct)
+        IReadOnlyDictionary<int, IReadOnlyList<int>> annualOnly, CancellationToken ct,
+        IReadOnlyCollection<int>? alsoRecomputed = null)
+    {
+        var reads = await CrossReadsAsync(request.DocumentId, ct).ConfigureAwait(false);
+        var flagged = await ChangedMonthsCoreAsync(request, candidates, yearOpen, forced, annualOnly, reads, ct)
+            .ConfigureAwait(false);
+
+        // ✎ Огляд H1: місяць, що рахується зараз (чи вже є в плані), міняє числа, які читають ПІЗНІШІ місяці (формули з
+        // [Period:-k], [Period:#k], місячна розрахункова колонка іншого місяця) — і вони в план, транзитивно.
+        var sources = flagged.Concat(alsoRecomputed ?? []).ToHashSet();
+        for (var grew = true; grew;)
+        {
+            grew = false;
+            foreach (var reader in candidates.Where(q => !flagged.Contains(q)).ToList())
+            {
+                if (sources.Any(owner => reads(owner, reader)))
+                {
+                    flagged.Add(reader);
+                    sources.Add(reader);
+                    grew = true;
+                }
+            }
+        }
+
+        return flagged;
+    }
+
+    private async Task<HashSet<int>> ChangedMonthsCoreAsync(
+        RecalculationRequest request, IReadOnlyList<int> candidates, IReadOnlyList<int> yearOpen, IEnumerable<int> forced,
+        IReadOnlyDictionary<int, IReadOnlyList<int>> annualOnly, Func<int, int, bool> reads, CancellationToken ct)
     {
         var forcedSet = forced.ToHashSet();
         var flagged = candidates.Where(p => forcedSet.Contains(p) || annualOnly.ContainsKey(p)).ToHashSet();
@@ -176,6 +210,8 @@ public sealed partial class RecalculationJob
                 r.StartedAt,
                 r.FinishedAt,
                 Inputs = r.InputsAsOfUtc ?? r.StartedAt,
+                r.DocumentId,
+                r.CellChangeWatermark,
             })
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -185,9 +221,13 @@ public sealed partial class RecalculationJob
             .GroupBy(r => r.Period)
             .ToDictionary(g => g.Key, g => g.MaxBy(r => r.Id)!);
 
+        // ✎ Огляд H2: актуальний прогін усього ПРОЄКТУ (DocumentId IS NULL) чи прогін без межі журналу (до D-564) — межі
+        // «записано після прогону» без годинників немає: місяць рахується.
         foreach (var month in measured)
         {
             if (!current.TryGetValue(month, out var run)
+                || run.DocumentId is null
+                || run.CellChangeWatermark is null
                 || runs.Exists(r => r.Period == month && r.Status == "Failed" && r.Id > run.Id))
             {
                 flagged.Add(month);
@@ -215,14 +255,27 @@ public sealed partial class RecalculationJob
             .MonthCellChangesAsync(
                 db, documentId, anchor,
                 [.. open.Select(m => new MonthInputProbe(
-                    m, Since(m),
-                    current[m].FinishedAt is { } finished ? DateTime.SpecifyKind(finished, DateTimeKind.Utc) : null))],
+                    m, Since(m), current[m].CellChangeWatermark!.Value,
+                    DateTime.SpecifyKind(current[m].FinishedAt ?? current[m].StartedAt, DateTimeKind.Utc)))],
                 ct,
                 yearWideInputs: yearWide,
                 yearFrom: (year * 100) + 1,
                 yearTo: (year * 100) + 99)
             .ConfigureAwait(false);
         flagged.UnionWith(open.Where(m => codes.GetValueOrDefault(m) != 0));
+        open = [.. open.Where(m => !flagged.Contains(m))];
+        if (open.Count == 0)
+        {
+            return flagged;
+        }
+
+        // ✎ Огляд H1 (стан, а не пам'ять ланцюжка): місяць q читає обчислені числа ранішого місяця p, а прогін p НОВІШИЙ за
+        // прогін q (порядок Id — без годинників) — q рахувався зі старих чисел p: ланцюжок, що мав дописати q, скасували чи він
+        // упав, або p порахував системний прогін одного періоду (авто, залежні B179). Без цього правила q не прокинувся б ніколи.
+        flagged.UnionWith(open.Where(q => yearOpen.Any(p => p < q
+                                                             && current.TryGetValue(p, out var owner)
+                                                             && owner.Id > current[q].Id
+                                                             && reads(p, q))));
         open = [.. open.Where(m => !flagged.Contains(m))];
         if (open.Count == 0)
         {
@@ -253,20 +306,28 @@ public sealed partial class RecalculationJob
             return flagged;
         }
 
-        // (5) Читач результатів місяця-власника з новішим прогоном (прохід читача загубився).
-        if (monthRouter is { Enabled: true }
+        // (5) Читач результатів місяця-власника (скрипт, колонка Calculated з чужим власником) з новішим прогоном власника —
+        // прохід читача загубився. Порядок прогонів — за Id (без годинників).
+        Func<int, Task<IReadOnlyList<int>>>? readersOf = OwnerReadersProbe;
+        if (readersOf is null
+            && monthRouter is { Enabled: true }
             && await monthRouter.GetDocumentAsync(documentId, ct).ConfigureAwait(false) is { } routing
             && monthRouter.RoutesComputedVersion(routing.TemplateVersionId))
         {
+            readersOf = owner => ReaderPeriodsOfOwnersAsync(routing, [owner], ct);
+        }
+
+        if (readersOf is not null)
+        {
             foreach (var owner in yearOpen.Where(current.ContainsKey))
             {
-                if (!open.Exists(m => current[m].StartedAt < current[owner].StartedAt && m != owner))
+                if (!open.Exists(m => m != owner && current[m].Id < current[owner].Id))
                 {
                     continue;
                 }
 
-                var readers = await ReaderPeriodsOfOwnersAsync(routing, [owner], ct).ConfigureAwait(false);
-                foreach (var reader in readers.Where(r => open.Contains(r) && current[r].StartedAt < current[owner].StartedAt))
+                foreach (var reader in (await readersOf(owner).ConfigureAwait(false))
+                             .Where(r => open.Contains(r) && current[r].Id < current[owner].Id))
                 {
                     flagged.Add(reader);
                 }
@@ -306,8 +367,14 @@ public sealed partial class RecalculationJob
 
         var seen = new HashSet<int>();
         var pending = methodologyIds.ToList();
-        for (var depth = 0; pending.Count > 0 && depth < 8; depth++)
+        for (var depth = 0; pending.Count > 0; depth++)
         {
+            // ✎ Огляд L1: імпорти глибше за 8 рівнів не розібрано — невідомо, отже «читає» (рахувати).
+            if (depth >= 8)
+            {
+                return true;
+            }
+
             var batch = pending.Where(seen.Add).ToList();
             pending.Clear();
             if (batch.Count == 0)
@@ -365,11 +432,20 @@ public sealed partial class RecalculationJob
 
         var printed = new System.Text.StringBuilder();
         var visited = new HashSet<object>(ReferenceEqualityComparer.Instance);
+        var unknown = false;
         void Walk(object? value, int depth)
         {
-            if (value is null || value is string || depth > 64 || value.GetType().IsPrimitive || value.GetType().IsEnum
+            if (value is null || value is string || value.GetType().IsPrimitive || value.GetType().IsEnum
+                || value is decimal or DateTime or DateOnly or TimeSpan or Guid
                 || !visited.Add(value))
             {
+                return;
+            }
+
+            // ✎ Огляд L1: дерево глибше за стелю — не розібране до кінця, отже «читає».
+            if (depth > 64)
+            {
+                unknown = true;
                 return;
             }
 
@@ -402,6 +478,8 @@ public sealed partial class RecalculationJob
             var type = value.GetType();
             if (type.Namespace?.StartsWith("Ecr.", StringComparison.Ordinal) != true)
             {
+                // ✎ Огляд L1: невідомий тип значення може ховати вираз — «читає» (рахувати), а не пропуск.
+                unknown = true;
                 return;
             }
 
@@ -415,6 +493,11 @@ public sealed partial class RecalculationJob
         }
 
         Walk(script, 0);
+        if (unknown)
+        {
+            return true;
+        }
+
         var text = printed.ToString();
         var all = MonthCall().Count(text) + CellMonthCall().Count(text);
         var own = OwnMonthCall().Count(text) + OwnCellMonthCall().Count(text);
@@ -479,52 +562,112 @@ public sealed partial class RecalculationJob
     }
 
     /// <summary>
-    /// Пізніші за <paramref name="step"/> відкриті місяці, чиї формули читають змінене кроком (змінені комірки формул і, з
-    /// запасом, усі колонки <c>Calculated</c> таблиць кроку — результати методологій кроку), дописуються в решту плану.
+    /// Пізніші за <paramref name="step"/> відкриті місяці, що читають обчислені числа кроку (<see cref="CrossReadsAsync"/>), —
+    /// у решту плану (те саме правило, що вирішує план, тож наступне натискання їх не «знайде» вдруге).
     /// </summary>
     /// <remarks>
     /// Лише ПІЗНІШІ: план іде за зростанням, тож дописане рахується після кроку з уже новими числами; читачі РАНІШЕ за крок
-    /// (<c>[Period:#k]</c>, k пізніше) — задача формул, як і в повному ланцюжку (<c>EnqueueReadersAsync</c>). Без
-    /// <see cref="CrossPeriodFanOut"/> (ручна збірка) — без доповнення.
+    /// (<c>[Period:#k]</c>, k пізніше) — задача формул, як і в повному ланцюжку (<c>EnqueueReadersAsync</c>).
     /// </remarks>
     private async Task<IReadOnlyList<int>> ExtendWithLaterReadersAsync(
-        RecalculationRequest request, int step, IReadOnlyCollection<(int TableDefId, int ColumnDefId)> changed,
-        IReadOnlyList<int> open, IReadOnlyList<int> remaining, CancellationToken ct)
+        RecalculationRequest request, int step, IReadOnlyList<int> open, IReadOnlyList<int> remaining, CancellationToken ct)
     {
-        if (fanOut is null)
+        var reads = await CrossReadsAsync(request.DocumentId, ct).ConfigureAwait(false);
+        var later = open.Where(q => q > step && !remaining.Contains(q) && reads(step, q)).ToList();
+        return later.Count == 0 ? remaining : [.. remaining.Concat(later).Distinct().Order()];
+    }
+
+    /// <summary>Залежності формул документа, що читають ОБЧИСЛЕНІ числа іншого місяця (кеш на виконання задачі).</summary>
+    private Func<int, int, bool>? _crossReads;
+
+    /// <summary>
+    /// ✎ Огляд H1: чи місяць <c>reader</c> читає обчислені числа ранішого місяця <c>owner</c> (обидва — ключі одного року) — за
+    /// залежностями формул версій шаблону документа (<c>cfg.FormulaDependency</c>), без годинника й без пам'яті ланцюжка.
+    /// </summary>
+    /// <remarks>
+    /// <para>Читання (лише читач ПІЗНІШИЙ за власника — план іде за зростанням):</para>
+    /// <list type="bullet">
+    ///   <item>зсув <c>[Period:-k]</c> (будь-який вид, крім абсолютного): читач = власник + k;</item>
+    ///   <item>абсолютний <c>[Period:#m]</c>: власник — місяць m, читач — будь-який пізніший;</item>
+    ///   <item>місячна колонка <c>Formula</c>/<c>Calculated</c> (<c>IsMonthColumn</c>) без зсуву: власник — місяць колонки (Q-17),
+    ///   читач — будь-який пізніший;</item>
+    ///   <item>залежність без колонки (таблиця, діапазон) на таблицю, що має обчислювані місячні колонки, — будь-який місяць.</item>
+    /// </list>
+    /// <para>
+    /// Лише колонки <c>Formula</c>/<c>Calculated</c> (зміну ВВЕДЕНОГО ловлять гілки входів і «похідних»). Залежність без колонки
+    /// — консервативно «обчислена». Помилитися можна лише в бік «рахувати».
+    /// </para>
+    /// </remarks>
+    private async Task<Func<int, int, bool>> CrossReadsAsync(long documentId, CancellationToken ct)
+    {
+        if (_crossReads is not null)
         {
-            return remaining;
+            return _crossReads;
         }
 
-        var tableDefIds = await DocumentInstancesQuery(db, request.DocumentId)
-            .Where(i => i.PeriodKeyValue == step)
-            .Select(i => i.TableDefId)
+        var versionIds = await (
+                from i in DocumentInstancesQuery(db, documentId)
+                join t in db.TableDefs.AsNoTracking() on i.TableDefId equals t.Id
+                join sh in db.SheetDefs.AsNoTracking() on t.SheetDefId equals sh.Id
+                select sh.TemplateVersionId)
             .Distinct()
             .ToListAsync(ct)
             .ConfigureAwait(false);
-        var calculated = await db.ColumnDefs
-            .AsNoTracking()
-            .Where(c => !c.IsDeleted && c.DataType == Domain.Enums.CellDataType.Calculated && tableDefIds.Contains(c.TableDefId))
-            .Select(c => new { c.TableDefId, c.Id })
+
+        const Domain.Enums.CellDataType formula = Domain.Enums.CellDataType.Formula;
+        const Domain.Enums.CellDataType calculated = Domain.Enums.CellDataType.Calculated;
+        var deps = await (
+                from d in db.FormulaDependencies.AsNoTracking()
+                join f in db.FormulaDefs.AsNoTracking() on d.FormulaDefId equals f.Id
+                join t in db.TableDefs.AsNoTracking() on f.TableDefId equals t.Id
+                join sh in db.SheetDefs.AsNoTracking() on t.SheetDefId equals sh.Id
+                where versionIds.Contains(sh.TemplateVersionId) && !f.IsDeleted
+                join c in db.ColumnDefs.AsNoTracking() on d.ColumnDefId equals (int?)c.Id into cs
+                from c in cs.DefaultIfEmpty()
+                select new
+                {
+                    Kind = d.DependsOnKind,
+                    Offset = d.PeriodOffset,
+                    Column = (int?)c.Id,
+                    Computed = c == null || c.DataType == formula || c.DataType == calculated,
+                    MonthColumn = c != null && c.IsMonthColumn,
+                    Month = c == null ? null : c.MonthNumber,
+                    TableHasComputedMonths = d.TableDefId != null
+                        && db.ColumnDefs.Any(x => x.TableDefId == d.TableDefId && !x.IsDeleted && x.IsMonthColumn
+                                                  && (x.DataType == formula || x.DataType == calculated)),
+                })
+            .Where(x => x.Computed && ((x.Offset != null && x.Offset != 0) || x.MonthColumn || (x.Column == null && x.TableHasComputedMonths)))
+            .Distinct()
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        var all = changed.Union(calculated.Select(c => (c.TableDefId, c.Id))).ToList();
-        if (all.Count == 0)
+        // Понад стелю — перелік неповний: кожен пізніший місяць читає кожен раніший (консервативно).
+        if (deps.Count > MaxCrossReads)
         {
-            return remaining;
+            return _crossReads = static (owner, reader) => reader > owner;
         }
 
-        var readers = await fanOut
-            .FindReadersAsync(request.DocumentId, new PeriodKey(step), all, onlyEarlierReaders: false, hops: 1, ct)
-            .ConfigureAwait(false);
-        var later = readers
-            .Select(r => r.Reader.Value)
-            .Where(r => r > step && open.Contains(r) && !remaining.Contains(r))
-            .ToList();
+        return _crossReads = (owner, reader) =>
+        {
+            if (reader <= owner || reader / 100 != owner / 100)
+            {
+                return reader > owner;
+            }
 
-        return later.Count == 0 ? remaining : [.. remaining.Concat(later).Distinct().Order()];
+            var (o, r) = (owner % 100, reader % 100);
+            return deps.Exists(x =>
+                (x.Kind == AbsoluteDependencyKind && x.Offset == o)
+                || (x.Kind != AbsoluteDependencyKind && x.Offset is < 0 and var back && r + back == o)
+                || ((x.Offset ?? 0) == 0 && x.MonthColumn && x.Month == o)
+                || ((x.Offset ?? 0) == 0 && x.Column == null && x.TableHasComputedMonths));
+        };
     }
+
+    /// <summary>Вид залежності «абсолютний період» (<c>[Period:#k]</c>), як у <c>CrossPeriodReaders</c>.</summary>
+    private const byte AbsoluteDependencyKind = 5;
+
+    /// <summary>Стеля переліку міжперіодних залежностей; понад неї — «кожен пізніший читає кожен раніший».</summary>
+    private const int MaxCrossReads = 5000;
 
     /// <summary>Підсумок «пропущено незмінні місяці» (з підсумком журналу аркушів, якщо він є).</summary>
     internal static JobProgressMessageEnvelope SkippedUnchangedEnvelope(

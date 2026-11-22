@@ -199,6 +199,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
 
+                    b.Property<long?>("CellChangeWatermark")
+                        .HasColumnType("bigint");
+
                     b.Property<long?>("DocumentId")
                         .HasColumnType("bigint");
 
@@ -5972,6 +5975,11 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.HasIndex(new[] { "State", "UpdatedAt" }, "IX_JobProgress_State_UpdatedAt");
 
                     SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex(new[] { "State", "UpdatedAt" }, "IX_JobProgress_State_UpdatedAt"), new[] { "Message" });
+
+                    b.HasIndex(new[] { "Lane", "State", "CreatedByUserId" }, "IX_JobProgress_User_Active")
+                        .HasFilter("[Lane] IS NOT NULL AND [State] IN ('Queued', 'Running')");
+
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex(new[] { "Lane", "State", "CreatedByUserId" }, "IX_JobProgress_User_Active"), new[] { "AvailableAt", "FanOutParentJobId" });
 
                     b.HasIndex(new[] { "TargetKey" }, "UX_JobProgress_Target_Queued")
                         .IsUnique()

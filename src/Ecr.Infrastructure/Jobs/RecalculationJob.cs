@@ -528,13 +528,12 @@ public sealed partial class RecalculationJob(
                 var cells = await FormulasAsync(docRequest, periods, submittedChanges, ct, annualOnly, stepChanged)
                     .ConfigureAwait(false);
 
-                // ✎ PERF-01 (D-564a): план вужчий за рік — пізніші місяці, що читають змінене цим кроком (формули з
-                // [Period:-1]/[Period:#k], колонки Calculated), дописуються в план: інакше читач лишився б зі старими числами.
+                // ✎ PERF-01 (D-564a, огляд H1): план вужчий за рік — пізніші місяці, що читають обчислені числа цього кроку
+                // (формули з [Period:-k]/[Period:#k], місячні розрахункові колонки), дописуються в план (CrossReadsAsync).
                 if (chain && stepPeriod is { } extendFrom && stepChanged is not null
                     && openPeriods.Any(p => p > extendFrom && !remaining.Contains(p)))
                 {
-                    remaining = await ExtendWithLaterReadersAsync(
-                            docRequest, extendFrom, stepChanged.GetValueOrDefault(extendFrom) ?? [], openPeriods, remaining, ct)
+                    remaining = await ExtendWithLaterReadersAsync(docRequest, extendFrom, openPeriods, remaining, ct)
                         .ConfigureAwait(false);
                     chainProgress!.Total = chainProgress.Done + 1 + remaining.Count;
                 }
@@ -801,6 +800,21 @@ public sealed partial class RecalculationJob(
                     {
                         await Task.Delay(CompletionBusyDelay, ct).ConfigureAwait(false);
                     }
+                }
+            }
+
+            // ✎ PERF-01 (D-564a, огляд H2): межа журналу комірок у мить завершення — ще під локом документа. Кожен запис комірки
+            // документа ПІСЛЯ цього прогону (каскад формул з іншого місяця бере той самий лок) отримає більший Id: планувальник
+            // кнопки року порівнює Id, а не годинники Api і воркера. Збій тут лишає NULL — місяць буде порахований (безпечно).
+            if (request.DocumentId > 0)
+            {
+                foreach (var (_, (run, _)) in periodRuns)
+                {
+                    await db.Database
+                        .ExecuteSqlAsync(
+                            $"UPDATE calc.CalculationRun SET CellChangeWatermark = CAST(IDENT_CURRENT('aud.CellChange') AS bigint) WHERE Id = {run.Id}",
+                            ct)
+                        .ConfigureAwait(false);
                 }
             }
 
@@ -3261,6 +3275,32 @@ public sealed partial class RecalculationJob(
         return JsonSerializer.Deserialize<RecalculationRequest>(json, PayloadOptions)
                ?? throw new InvalidOperationException(
                    "Завдання перерахунку не розбирається: невідома форма payload.");
+    }
+
+    /// <summary>
+    /// ✎ PERF-05 (огляд M3): чи задача — перерахунок, який натиснула людина (є автор, не дитина розкладу, не прохід читача),
+    /// — той самий поділ, що прохід «спершу ручні» черги в базі (<c>DbJobQueue.ManualFilter</c>).
+    /// </summary>
+    /// <param name="jobType">Тип задачі.</param>
+    /// <param name="payload">Тіло задачі (JSON).</param>
+    internal static bool IsManualPress(Type jobType, string? payload)
+    {
+        ArgumentNullException.ThrowIfNull(jobType);
+
+        if (!typeof(IRecalculationJob).IsAssignableFrom(jobType) || string.IsNullOrWhiteSpace(payload))
+        {
+            return false;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<RecalculationRequest>(payload, PayloadOptions) is
+                { TriggeredByUserId: not null, FanOutParentJobId: null or "", ForeignOwnerPass: false };
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 
     /// <summary>

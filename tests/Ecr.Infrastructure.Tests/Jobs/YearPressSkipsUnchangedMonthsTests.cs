@@ -62,6 +62,9 @@ public sealed class YearPressSkipsUnchangedMonthsTests(SqlServerFixture sql) : D
 
     private int _methodologyVersionId;
 
+    /// <summary>Гілка 5: читачі результатів власника (замість роутера місяців); <c>null</c> — без гілки.</summary>
+    private Func<int, Task<IReadOnlyList<int>>>? _ownerReaders;
+
     private int _unitId;
 
     [Fact]
@@ -87,9 +90,8 @@ public sealed class YearPressSkipsUnchangedMonthsTests(SqlServerFixture sql) : D
     {
         var (builder, document) = await ArrangeAsync();
 
-        // Правка задовго до базового прогону і власні записи перерахунку до його кінця — не зміни.
+        // Правка задовго до базового прогону — не зміна.
         await CellChangeAsync(document, 202603, MonthColumn(document, 3), CellChangeOrigins.UserEdit, Baseline.AddHours(-2));
-        await CellChangeAsync(document, 202604, MonthColumn(document, 4), CellChangeOrigins.Recalculation, Baseline);
 
         var run = await PressAsync(builder, document, screen: 202602, Press);
 
@@ -350,6 +352,218 @@ public sealed class YearPressSkipsUnchangedMonthsTests(SqlServerFixture sql) : D
         Assert.Equal([202601, 202602, 202601], steps);
     }
 
+    /// <summary>
+    /// ✎ Огляд H2: «записано після прогону» — за <c>aud.CellChange.Id</c> проти межі прогону (<c>CellChangeWatermark</c>), а не
+    /// за годинниками (Api пише <c>ChangedAt</c>, воркер — <c>FinishedAt</c>). Каскад, записаний ПІСЛЯ прогону годинником, що
+    /// відстає на секунду, будить місяць; запис ДО прогону годинником, що поспішає на хвилину, — ні.
+    /// </summary>
+    /// <remarks>МУТАЦІЯ: повернути <c>ChangedAt &gt; Finished</c> замість <c>Id &gt; Watermark</c> — червоні обидва рядки.</remarks>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Похідні_після_прогону_за_межею_журналу_а_не_за_годинником(bool afterRun)
+    {
+        var (builder, document) = await ArrangeAsync(beforeBaseline: afterRun
+            ? null
+            : d => CellChangeAsync(d, 202604, d.ColumnDefIds[2], CellChangeOrigins.Recalculation, Baseline.AddMinutes(1)));
+        if (afterRun)
+        {
+            await CellChangeAsync(document, 202604, document.ColumnDefIds[2], CellChangeOrigins.Recalculation, Baseline.AddSeconds(-1));
+        }
+
+        var run = await PressAsync(builder, document, screen: 202602, Press);
+
+        Assert.Equal(afterRun ? [202602, 202604] : [202602], run.Steps);
+    }
+
+    /// <summary>
+    /// ✎ Огляд H2: актуальний прогін усього ПРОЄКТУ (без документа) чи прогін без межі журналу (до D-564) — межі «після прогону»
+    /// немає, місяць рахується.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Прогін_проєкту_чи_без_межі_журналу_рахується(bool projectRun)
+    {
+        var (builder, document) = await ArrangeAsync();
+        await using (var db = Sql.CreateContext())
+        {
+            if (projectRun)
+            {
+                await db.Database.ExecuteSqlAsync($"""
+                    INSERT INTO calc.CalculationRun (ProjectId, PeriodKey, DocumentId, Status, StartedAt, FinishedAt)
+                    VALUES ({document.ProjectId}, 202606, NULL, N'Current', {Baseline.AddMinutes(5)}, {Baseline.AddMinutes(6)});
+                    """);
+            }
+            else
+            {
+                await db.Database.ExecuteSqlAsync($"""
+                    UPDATE calc.CalculationRun SET CellChangeWatermark = NULL
+                    WHERE DocumentId = {document.DocumentId} AND PeriodKey = 202606 AND Status = N'Current';
+                    """);
+            }
+        }
+
+        var run = await PressAsync(builder, document, screen: 202602, Press);
+
+        Assert.Equal([202602, 202606], run.Steps);
+    }
+
+    /// <summary>
+    /// ✎ Огляд H1: пізніший місяць, що читає обчислені числа ранішого (<c>[Period:#3]</c> на колонку <c>Calculated</c>), іде в
+    /// план разом із ним — і прокидається СТАНОМ, коли ланцюжок, що мав його порахувати, скасували після кроку березня, чи
+    /// березень порахував системний прогін одного періоду (авто, залежні B179): прогін березня новіший (Id) за прогін читача.
+    /// </summary>
+    /// <remarks>
+    /// МУТАЦІЯ: прибрати правило «власник новіший за читача» в <c>ChangedMonthsCoreAsync</c> — червоні рядки «скасовано» й
+    /// «прогін періоду»; прибрати замикання в <c>ChangedMonthsAsync</c> — червоний рядок «правка».
+    /// </remarks>
+    [Theory]
+    [InlineData("edit")]
+    [InlineData("cancelled")]
+    [InlineData("periodRun")]
+    public async Task Читач_обчислених_чисел_ранішого_місяця_не_губиться(string scenario)
+    {
+        var (builder, document) = await ArrangeAsync();
+        await CrossReadAsync(document, kind: 5, offset: 3);
+
+        if (scenario == "edit")
+        {
+            await CellChangeAsync(document, 202603, MonthColumn(document, 3), CellChangeOrigins.UserEdit, Baseline.AddMinutes(1));
+            Assert.Equal([202601, 202603, 202604, 202605, 202606], (await PressAsync(builder, document, screen: 202601, Press)).Steps);
+            return;
+        }
+
+        await using (var host = NewHost())
+        {
+            var scheduler = Scheduler(host);
+            var steps = new List<int>();
+            if (scenario == "cancelled")
+            {
+                // Натискання на березні: план {3,4,5,6}; крок березня — і ланцюжок скасовано (людина, межа, збій).
+                var jobId = await scheduler.EnqueueCoalescedAsync<IRecalculationJob>(
+                    RecalculateDocumentHandler.YearScopedTargetOf(document.DocumentId, Year, null),
+                    PressPayload(document, 202603, full: false), CancellationToken.None, Presser);
+                await StepAsync(builder, host, Press, steps, null);
+                Assert.Equal([202603], steps);
+                await ExecAsync("UPDATE itg.JobProgress SET [State] = 'Cancelled' WHERE JobId = @id;", jobId);
+            }
+            else
+            {
+                // Автоперерахунок березня (один період, не ланцюжок).
+                await scheduler.EnqueueCoalescedAsync<IRecalculationJob>(
+                    CalculationTrigger.AutoTargetOf(document.DocumentId, new PeriodKey(202603)),
+                    new { document.DocumentId, PeriodKey = 202603, RecalculateSubmitted = true }, CancellationToken.None);
+                await StepAsync(builder, host, Press, steps, null);
+                Assert.Equal([202603], steps);
+            }
+        }
+
+        var next = await PressAsync(builder, document, screen: 202601, Press.AddHours(1));
+
+        Assert.Equal([202601, 202604, 202605, 202606], next.Steps);
+    }
+
+    /// <summary>
+    /// ✎ Огляд M4: документні входи D-562 будять місяці, чия межа входів не пізніша за зміну, — двійковий пошук за межами
+    /// (базові прогони місяців — о різних годинах). Журнал структури версії документа і дані довідника (глобальний рядок —
+    /// прибирається).
+    /// </summary>
+    /// <remarks>МУТАЦІЯ: <c>lo = mid + 1</c> → <c>hi = mid</c> в обох гілках (пошук «ніхто») — червоний.</remarks>
+    [Theory]
+    [InlineData("structure")]
+    [InlineData("registry")]
+    public async Task Документний_вхід_будить_лише_місяці_з_ранішою_межею(string kind)
+    {
+        var (builder, document) = await ArrangeAsync(staggered: true);
+
+        // Межі: місяць k — Baseline + (k − 1) год − 60 хв. Зміна о Baseline + 1,5 год будить січень–березень.
+        var at = Baseline.AddHours(1.5);
+        int? registryId = null;
+        try
+        {
+            await using (var db = builder.CreateContext())
+            {
+                if (kind == "structure")
+                {
+                    await db.Database.ExecuteSqlAsync($"""
+                        INSERT INTO aud.StructureChange (ChangedAt, TemplateVersionId, EntityType, EntityId, ChangeClass, Operation,
+                                                         ChangedByUserId)
+                        VALUES ({at}, {document.TemplateVersionId}, N'cfg.FormulaDef', 1, 0, N'Update', 1)
+                        """);
+                }
+                else
+                {
+                    var registry = new RegistryDef(
+                        EcrCode.Create($"P01R{Guid.NewGuid().ToString("N")[..10]}"),
+                        new LocalizedText(new Dictionary<string, string> { ["en"] = "perf01" }), isTemporal: false);
+                    registry.MarkDataChanged(at);
+                    db.RegistryDefs.Add(registry);
+                    await db.SaveChangesAsync();
+                    registryId = registry.Id;
+                }
+            }
+
+            var run = await PressAsync(builder, document, screen: 202606, Baseline.AddHours(8));
+
+            Assert.Equal([202601, 202602, 202603, 202606], run.Steps);
+        }
+        finally
+        {
+            if (registryId is { } id)
+            {
+                await using var cleanup = builder.CreateContext();
+                await cleanup.Database.ExecuteSqlAsync($"DELETE FROM cfg.RegistryDef WHERE Id = {id}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// ✎ Огляд M4, гілка (5): читач РЕЗУЛЬТАТІВ місяця-власника (скрипт, колонка <c>Calculated</c> з чужим власником), чий
+    /// власник має новіший прогін (прохід читача загубився), — рахується. Порядок — за Id прогонів.
+    /// </summary>
+    /// <remarks>МУТАЦІЯ: прибрати гілку (5) — червоний.</remarks>
+    [Fact]
+    public async Task Читач_результатів_з_новішим_власником_рахується()
+    {
+        var (builder, document) = await ArrangeAsync();
+        _ownerReaders = owner => Task.FromResult<IReadOnlyList<int>>(owner == 202603 ? [202605] : []);
+
+        await using (var host = NewHost())
+        {
+            await Scheduler(host).EnqueueCoalescedAsync<IRecalculationJob>(
+                CalculationTrigger.AutoTargetOf(document.DocumentId, new PeriodKey(202603)),
+                new { document.DocumentId, PeriodKey = 202603, RecalculateSubmitted = true }, CancellationToken.None);
+            var steps = new List<int>();
+            await StepAsync(builder, host, Press, steps, null);
+        }
+
+        var run = await PressAsync(builder, document, screen: 202601, Press.AddHours(1));
+
+        Assert.Equal([202601, 202605], run.Steps);
+    }
+
+    /// <summary>Залежність формули таблиці документа на колонку <c>Calculated</c> іншого місяця.</summary>
+    private async Task CrossReadAsync(TestDocument document, byte kind, short offset)
+    {
+        await using var db = Sql.CreateContext();
+        var column = new ColumnDef(
+            document.TableDefId, EcrCode.Create($"CALC_{Guid.NewGuid().ToString("N")[..8]}"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "calc" }), 90, CellDataType.Calculated);
+        var target = new ColumnDef(
+            document.TableDefId, EcrCode.Create($"FRM_{Guid.NewGuid().ToString("N")[..8]}"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "formula" }), 91, CellDataType.Formula);
+        db.ColumnDefs.AddRange(column, target);
+        await db.SaveChangesAsync();
+        var formula = new FormulaDef(document.TableDefId, FormulaScope.Column, "1", ExpressionDialect.Template);
+        formula.AssignColumn(target.Id);
+        db.FormulaDefs.Add(formula);
+        await db.SaveChangesAsync();
+        db.FormulaDependencies.Add(FormulaDependency.ForFormula(
+            formula.Id, kind, document.TableDefId, null, column.Id, null, offset, 0));
+        await db.SaveChangesAsync();
+    }
+
     private static object PressPayload(TestDocument document, int screen, bool full, int user = Presser)
         => new
         {
@@ -452,7 +666,10 @@ public sealed class YearPressSkipsUnchangedMonthsTests(SqlServerFixture sql) : D
             clock,
             jobs: scheduler,
             lease: lease,
-            queue: queue);
+            queue: queue)
+        {
+            OwnerReadersProbe = _ownerReaders,
+        };
     }
 
     private static Task<ClaimedJob?> ClaimAsync(Host host)
@@ -514,13 +731,21 @@ public sealed class YearPressSkipsUnchangedMonthsTests(SqlServerFixture sql) : D
     /// Документ із шістьма місяцями (січень — будівник, з місячними колонками M1..M6), прив'язка методології і БАЗОВИЙ
     /// повний ланцюжок року о <see cref="Baseline"/>: кожен місяць має актуальний прогін.
     /// </summary>
-    private async Task<(TestDocumentBuilder Builder, TestDocument Document)> ArrangeAsync()
+    /// <param name="beforeBaseline">Що зробити ДО базового прогону (записи журналу з меншим Id за межу прогону).</param>
+    /// <param name="staggered">Базовий прогін місяця k — о <see cref="Baseline"/> + (k − 1) год (різні межі входів).</param>
+    private async Task<(TestDocumentBuilder Builder, TestDocument Document)> ArrangeAsync(
+        Func<TestDocument, Task>? beforeBaseline = null, bool staggered = false)
     {
         var builder = new TestDocumentBuilder(Sql.ConnectionString);
         var document = await builder.BuildAsync(monthColumns: 6);
         foreach (var month in Months.Skip(1))
         {
             await builder.AddPeriodInstanceAsync(document, new PeriodKey(month));
+        }
+
+        if (beforeBaseline is not null)
+        {
+            await beforeBaseline(document);
         }
 
         await using (var db = builder.CreateContext())
@@ -547,7 +772,7 @@ public sealed class YearPressSkipsUnchangedMonthsTests(SqlServerFixture sql) : D
                 RecalculateDocumentHandler.YearScopedTargetOf(document.DocumentId, Year, null),
                 PressPayload(document, 202601, full: true), CancellationToken.None, Presser);
             var steps = new List<int>();
-            while (await StepAsync(builder, host, Baseline, steps, null))
+            while (await StepAsync(builder, host, staggered ? Baseline.AddHours(steps.Count) : Baseline, steps, null))
             {
             }
 

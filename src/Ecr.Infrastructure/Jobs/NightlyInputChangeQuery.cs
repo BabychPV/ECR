@@ -199,7 +199,7 @@ internal static class NightlyInputChangeQuery
                                                  AND sc2.Origin NOT IN ({recalc}, {calcError}, {calcResolved}))
                                    OR EXISTS (SELECT 1 FROM calc.CalculationRun AS sr
                                                WHERE sr.ProjectId = sd.ProjectId AND sr.DocumentId = sd.Id
-                                                 AND sr.Status = N'Current' AND sr.StartedAt >= {since})
+                                                 AND sr.Status = N'Current' AND COALESCE(sr.FinishedAt, sr.StartedAt) >= {since})
                                    OR EXISTS (SELECT 1 FROM wf.ApprovalEvent AS se
                                                WHERE se.DocumentId = sd.Id AND se.At >= {since}))
                     THEN 8
@@ -246,7 +246,7 @@ internal static class NightlyInputChangeQuery
     /// </list>
     /// </para>
     /// <para>
-    /// Похідні (<c>ChangedAt &gt; FinishedAt</c> актуального прогону, СТРОГО, без запасу): комірка періоду <c>m</c> чи не-місячна
+    /// Похідні (✎ огляд H2: <c>aud.CellChange.Id &gt; CellChangeWatermark</c> актуального прогону — без годинників; <c>ChangedAt</c> — лише межа діапазону): комірка періоду <c>m</c> чи не-місячна
     /// комірка якоря, записана перерахунком ПІСЛЯ прогону <c>m</c>. Власний прогін <c>m</c> пише свої комірки між стартом і кінцем
     /// під локом документа; усе пізніше — каскад формул іншого місяця (<c>[Period:-1]</c>, <c>[Period:#k]</c>, читання введеної
     /// місячної колонки з усіх періодів року, Q-17; річні підсумки якоря), і методології <c>m</c> рахувалися зі старих чисел.
@@ -281,9 +281,10 @@ internal static class NightlyInputChangeQuery
             var at = args.Count;
             args.Add(month.PeriodKey);
             args.Add(Utc(month.Since));
-            args.Add(Utc(month.FinishedAt ?? DateTime.MaxValue));
+            args.Add(Utc(month.FinishedAt));
+            args.Add(month.Watermark);
             values.Append(values.Length == 0 ? "(" : ", (")
-                .Append(System.Globalization.CultureInfo.InvariantCulture, $"{{{at}}}, {{{at + 1}}}, {{{at + 2}}})");
+                .Append(System.Globalization.CultureInfo.InvariantCulture, $"{{{at}}}, {{{at + 1}}}, {{{at + 2}}}, {{{at + 3}}})");
         }
 
         var sql = $$"""
@@ -304,16 +305,16 @@ internal static class NightlyInputChangeQuery
                                                  AND y.ChangedAt >= m.Since AND y.Origin NOT IN ({2}, {3}, {4})))
                        THEN {{MonthInputCode}}
                      WHEN EXISTS (SELECT 1 FROM aud.CellChange AS d
-                                   WHERE d.DocumentId = {0} AND d.PeriodKey = m.P AND d.ChangedAt > m.Finished
+                                   WHERE d.DocumentId = {0} AND d.PeriodKey = m.P AND d.Id > m.Watermark AND d.ChangedAt >= DATEADD(hour, -6, m.Finished)
                                      AND d.Origin IN ({2}, {3}, {4}))
                        OR EXISTS (SELECT 1 FROM aud.CellChange AS ad
                                     JOIN cfg.ColumnDef AS acd ON acd.Id = ad.ColumnDefId
-                                   WHERE ad.DocumentId = {0} AND ad.PeriodKey = {1} AND m.P <> {1} AND ad.ChangedAt > m.Finished
+                                   WHERE ad.DocumentId = {0} AND ad.PeriodKey = {1} AND m.P <> {1} AND ad.Id > m.Watermark AND ad.ChangedAt >= DATEADD(hour, -6, m.Finished)
                                      AND ad.Origin IN ({2}, {3}, {4}) AND acd.IsMonthColumn = 0)
                        THEN {{MonthDerivedCode}}
                      ELSE 0
                    END AS Code
-              FROM (VALUES {{values}}) AS m (P, Since, Finished)
+              FROM (VALUES {{values}}) AS m (P, Since, Finished, Watermark)
             """;
 
         // Рядків рівно стільки, скільки місяців у VALUES (≤ 12 на рік) — межа в самому запиті.
@@ -348,5 +349,9 @@ internal sealed record MonthChangeRow(int PeriodKey, int Code);
 /// <summary>✎ PERF-01: місяць для <see cref="NightlyInputChangeQuery.MonthCellChangesAsync"/>.</summary>
 /// <param name="PeriodKey">Місяць.</param>
 /// <param name="Since">Межа входів: <c>COALESCE(InputsAsOfUtc, StartedAt)</c> актуального прогону мінус запас (D-562).</param>
-/// <param name="FinishedAt">Кінець актуального прогону; <c>null</c> — без гілки «похідні».</param>
-internal sealed record MonthInputProbe(int PeriodKey, DateTime Since, DateTime? FinishedAt);
+/// <param name="Watermark">
+/// ✎ Огляд H2: <c>CalculationRun.CellChangeWatermark</c> актуального прогону — «записано після прогону» = <c>aud.CellChange.Id</c>
+/// більший (без годинників Api і воркера).
+/// </param>
+/// <param name="FinishedAt">Кінець прогону — лише межа діапазону пошуку (мінус 6 год на розбіжність годинників), не рішення.</param>
+internal sealed record MonthInputProbe(int PeriodKey, DateTime Since, long Watermark, DateTime FinishedAt);

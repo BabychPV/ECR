@@ -569,6 +569,13 @@ public sealed class JobProgressConfiguration : IEntityTypeConfiguration<JobProgr
         builder.HasIndex(x => new { x.DocumentId, x.State }, "IX_JobProgress_Document_Active")
                .IncludeProperties(x => x.Lane)
                .HasFilter("[State] IN ('Queued', 'Running') AND [DocumentId] IS NOT NULL");
+
+        // ✎ PERF-10 (D-564c, огляд M2): «черга людей» — скільки задач людини в лейні виконується чи стоїть попереду
+        // (`DbJobQueue.FairRankSql`) — пошуком за (Lane, State, CreatedByUserId), без читання Payload. Будує міграція
+        // `PERF564FairQueueAndRunWatermark` сирим SQL (ONLINE, де він є); модель — той самий індекс.
+        builder.HasIndex(x => new { x.Lane, x.State, x.CreatedByUserId }, "IX_JobProgress_User_Active")
+               .IncludeProperties(x => new { x.AvailableAt, x.FanOutParentJobId })
+               .HasFilter("[Lane] IS NOT NULL AND [State] IN ('Queued', 'Running')");
     }
 }
 

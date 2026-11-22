@@ -107,6 +107,15 @@ public sealed class CalculationRun : Entity<long>
     /// </remarks>
     public DateTime? InputsAsOfUtc { get; private set; }
 
+    /// <summary>
+    /// ✎ PERF-01 (<c>D-564a</c>, огляд H2): <c>IDENT_CURRENT('aud.CellChange')</c> у мить завершення прогону документа, ще під
+    /// локом документа: кожен запис комірки документа, зроблений ПІСЛЯ прогону (каскад формул з іншого місяця бере той самий
+    /// лок), має більший <c>Id</c>. Порівняння без годинників (Api і воркер — різні хости). <c>null</c> — прогін до
+    /// <c>D-564</c> чи не документний: планувальник кнопки року рахує такий місяць.
+    /// </summary>
+    /// <remarks>Ставить лише <c>RecalculationJob</c> сирим SQL після перемикання актуальності.</remarks>
+    public long? CellChangeWatermark { get; private set; }
+
     /// <summary>Знижує <see cref="InputsAsOfUtc"/> до моменту, на який пораховано перенесені результати.</summary>
     /// <param name="moment">Момент входів перенесених результатів (UTC): <c>COALESCE(InputsAsOfUtc, StartedAt)</c> прогону-джерела.</param>
     /// <remarks>
