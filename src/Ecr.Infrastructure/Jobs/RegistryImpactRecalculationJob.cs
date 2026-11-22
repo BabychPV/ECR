@@ -91,7 +91,36 @@ public sealed partial class RegistryImpactRecalculationJob(
         var failed = 0;
         var failedDocuments = new SortedSet<long>();
         var errors = new List<Exception>();
-        foreach (var (documentId, periodKey) in targets)
+
+        // ✎ PERF-06 (D-566, рішення людини 22.11): каскад від правки документа-джерела — ОДНА задача на документ-споживач і рік
+        // з періодами, які читають змінений місяць (обсяг ребра графа вище); правки за вікно каскаду зливаються об'єднанням
+        // періодів, ланцюжок, що вже йде, дописує нові. Перекриття адміністратора (затверджені) — поперіодно, як доти.
+        var cascade = request.IsSourceDocumentChange && !request.IncludeApproved && trigger.CoalescesCascadePeriods;
+        if (cascade)
+        {
+            foreach (var group in targets.GroupBy(t => (t.DocumentId, Year: t.PeriodKey / 100)).OrderBy(g => g.Key))
+            {
+                try
+                {
+                    var enqueued = await trigger
+                        .RequestSourceCascadeAsync(group.Key.DocumentId, group.Key.Year, [.. group.Select(t => t.PeriodKey)], request.Hop + 1, ct)
+                        .ConfigureAwait(false);
+                    if (enqueued.JobId is not null)
+                    {
+                        queued += enqueued.Periods.Count;
+                    }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    LogCascadeFailed(_logger, group.Key.DocumentId, group.Key.Year, ex);
+                    failed += group.Count();
+                    failedDocuments.Add(group.Key.DocumentId);
+                    errors.Add(ex);
+                }
+            }
+        }
+
+        foreach (var (documentId, periodKey) in targets.Where(_ => !cascade))
         {
             // ⛔ Збій одного документа (гонитва, тимчасова помилка БД) не перериває решту набору:
             // решту все одно ставимо, а про збої — гучно в кінці. Скасування не ковтаємо.
@@ -218,6 +247,11 @@ public sealed partial class RegistryImpactRecalculationJob(
         Level = LogLevel.Error,
         Message = "Перерахунок зачеплених довідником: не вдалось поставити документ {DocumentId}, період {PeriodKey}.")]
     private static partial void LogRequestFailed(ILogger logger, long documentId, int periodKey, Exception exception);
+
+    [LoggerMessage(
+        Level = LogLevel.Error,
+        Message = "PERF-06: каскад від правки джерела — не вдалось поставити документ-споживач {DocumentId} за рік {Year}.")]
+    private static partial void LogCascadeFailed(ILogger logger, long documentId, int year, Exception exception);
 
     [LoggerMessage(
         Level = LogLevel.Error,

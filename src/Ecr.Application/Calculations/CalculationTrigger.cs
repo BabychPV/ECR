@@ -161,6 +161,110 @@ public sealed class CalculationTrigger(
         return jobId;
     }
 
+    /// <inheritdoc />
+    /// <remarks>✎ PERF-06 (<c>D-566</c>): лише коли черга об'єднує періоди каскаду при злитті (черга в базі).</remarks>
+    public bool CoalescesCascadePeriods => jobs.MergesCascadePeriods;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para>
+    /// ✎ PERF-06 (<c>D-566</c>): ціль <see cref="SourceCascadeTargetOf"/> (<c>doc{id}-y{рік}-dependents</c>) — системні залежні під
+    /// стелею важких перерахунків і межею розкладу (<c>DbJobQueue.CascadeTargetLike</c>), без автора; відкладення — те саме вікно
+    /// <see cref="CascadeDebounce"/>, що й поперіодних залежних (PSS-07, межа людини 15 с), від ПЕРШОЇ постановки (не
+    /// подовжується). Злиття в задачу, що чекає, — об'єднання <c>cascadePeriods</c>; у ланцюжок, що вже йде (між кроками чи
+    /// позаду кроку), — <c>cascadeAppend</c>: наступний крок дописує ці періоди й тоді, коли вони вже зроблені.
+    /// </para>
+    /// <para>
+    /// Періоди, у які писати не можна (закритий, <c>Scheduled</c>, архів, затверджено все), і ті, що вже чекають у задачі «з
+    /// затвердженими» (надмножина роботи, B80 N5), відкидаються ТУТ — як у поперіодній постановці. ✎ Огляд F2: другі — не
+    /// зовсім: вони йдуть затравками (<c>cascadeSeeds</c>) пізніших читачів, яких задача названого періоду не будить. Черга
+    /// без об'єднання (<see cref="CoalescesCascadePeriods"/> = <c>false</c>) — поперіодно, як до D-566.
+    /// </para>
+    /// <para>
+    /// ✎ Огляд F4: ланка джерел <paramref name="sourceHop"/> при злитті в задачу, що чекає чи йде, — МЕНША з двох
+    /// (<c>DbJobQueue.MergePressFieldsSql</c>), а не перша.
+    /// </para>
+    /// </remarks>
+    public async Task<SourceCascadeEnqueued> RequestSourceCascadeAsync(
+        long documentId, int year, IReadOnlyCollection<int> periodKeys, int sourceHop, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(periodKeys);
+        if (!CoalescesCascadePeriods)
+        {
+            string? last = null;
+            var each = new List<int>();
+            foreach (var period in periodKeys.Distinct().Order())
+            {
+                if (await RequestDependentsAsync(documentId, new PeriodKey(period), sourceHop, ct).ConfigureAwait(false) is { } id)
+                {
+                    last = id;
+                    each.Add(period);
+                }
+            }
+
+            return new SourceCascadeEnqueued(last, each);
+        }
+
+        var periods = new List<int>();
+        var seeds = new List<int>();
+        foreach (var period in periodKeys.Where(p => p / 100 == year).Distinct().Order())
+        {
+            var key = new PeriodKey(period);
+            if (!await WritableAsync(documentId, key, ct).ConfigureAwait(false))
+            {
+                continue;
+            }
+
+            // ✎ Огляд F2: період уже чекає в задачі «з затвердженими» — його рахує вона, але вона (названий період) будить
+            // лише РАНІШИХ читачів; пізніші місяці, що читають його обчислені числа ([Period:-1]), будить ця задача —
+            // період іде затравкою (cascadeSeeds), а не періодом до розрахунку.
+            if (await jobs.FindQueuedAsync<IRecalculationJob>(DependentsApprovedTargetOf(documentId, key), ct).ConfigureAwait(false)
+                    is { Length: > 0 })
+            {
+                seeds.Add(period);
+                continue;
+            }
+
+            periods.Add(period);
+        }
+
+        if (periods.Count == 0 && seeds.Count == 0)
+        {
+            return new SourceCascadeEnqueued(null, []);
+        }
+
+        var payload = new
+        {
+            DocumentId = documentId,
+            PeriodKey = (int?)null,
+            Year = year,
+            TriggeredByUserId = (int?)null,
+            SheetDefId = (int?)null,
+            RecalculateSubmitted = true,
+            SourceHop = sourceHop,
+            CascadePeriods = periods.ToArray(),
+            CascadeSeeds = seeds.Count > 0 ? seeds.ToArray() : null,
+        };
+
+        var jobId = await jobs
+            .EnqueueCoalescedDelayedAsync<IRecalculationJob>(
+                SourceCascadeTargetOf(documentId, year), payload, CascadeDebounce, ct, createdByUserId: null)
+            .ConfigureAwait(false);
+        return new SourceCascadeEnqueued(jobId, periods);
+    }
+
+    /// <summary>
+    /// ✎ PERF-06 (<c>D-566</c>): ціль каскаду від правки документа-джерела — одна на документ-споживач і рік; закінчення
+    /// <c>-dependents</c> — системні залежні під стелею (<c>DbJobQueue.CascadeTargetLike</c>).
+    /// </summary>
+    /// <param name="documentId">Документ-споживач.</param>
+    /// <param name="year">Рік.</param>
+    /// <returns><c>doc{id}-y{рік}-dependents</c>.</returns>
+    public static string SourceCascadeTargetOf(long documentId, int year)
+        => string.Create(
+            System.Globalization.CultureInfo.InvariantCulture,
+            $"{RecalculateDocumentHandler.YearScopedTargetOf(documentId, year, null)}-dependents");
+
     /// <summary>
     /// ✎ PSS-07 (<c>D-561</c>): відкладення каскадного перерахунку (залежні від зміни документа-джерела чи довідника) — вікно, за яке постановки
     /// на ту саму ціль зливаються в одну.

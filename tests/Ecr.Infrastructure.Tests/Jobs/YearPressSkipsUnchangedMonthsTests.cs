@@ -46,7 +46,7 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 [Trait(TestCategories.Stage, TestCategories.Stage5)]
 [Trait(TestCategories.Category, TestCategories.Integration)]
 [Trait("Finding", "PERF-01")]
-public sealed class YearPressSkipsUnchangedMonthsTests(SqlServerFixture sql) : DbJobQueueTestsBase(sql)
+public sealed partial class YearPressSkipsUnchangedMonthsTests(SqlServerFixture sql) : DbJobQueueTestsBase(sql)
 {
     private const int Year = 2026;
 
@@ -743,7 +743,7 @@ public sealed class YearPressSkipsUnchangedMonthsTests(SqlServerFixture sql) : D
         var clock = new TestClock(at);
         return new RecalculationJob(
             db,
-            new WritingRunner(builder, _methodologyVersionId, _unitId, at),
+            new WritingRunner(builder, _methodologyVersionId, _unitId, at, _failPeriod),
             RunHandler(db, clock),
             FormulaService(),
             clock,
@@ -909,7 +909,8 @@ public sealed class YearPressSkipsUnchangedMonthsTests(SqlServerFixture sql) : D
     private sealed record PressRun(string JobId, List<int> Steps, (string Key, string? Count, string? Months)? Outcome);
 
     /// <summary>Фейк оркестратора: пише вихід через справжнє сховище.</summary>
-    private sealed class WritingRunner(TestDocumentBuilder builder, int methodologyVersionId, int unitId, DateTime at)
+    private sealed class WritingRunner(
+        TestDocumentBuilder builder, int methodologyVersionId, int unitId, DateTime at, int? failPeriod = null)
         : ICalculationRunner
     {
         public async Task<ModuleProfile> RunAsync(
@@ -919,6 +920,12 @@ public sealed class YearPressSkipsUnchangedMonthsTests(SqlServerFixture sql) : D
             if (bindings.Count == 0)
             {
                 return new ModuleProfile();
+            }
+
+            // F1 (PERF-06): детермінований збій методології місяця — без ретраю (JobRetryPolicy.IsWorthRetrying).
+            if (periodKey.Value == failPeriod)
+            {
+                throw new InsufficientExecutionStackException("test: methodology of the failing month");
             }
 
             await using var db = builder.CreateContext();

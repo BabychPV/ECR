@@ -180,10 +180,47 @@ public sealed class UnitConcurrencyTests(SqlServerFixture sql)
     }
 
     /// <summary>
+    /// ⛔ B186 — причина 1-хв таймауту в CI. Версія одиниці — Base64, а <c>NormalizeETag</c> зрізав <c>W/</c> і з
+    /// ГОЛОГО <c>If-Match</c>: для вмісту, чия версія починається з <c>W/</c> (1 з 4096; у гонці вище вміст випадковий
+    /// через <c>_tag</c>), перший учасник отримував <c>409 unitChanged</c> ще до паузи, а старий тест чекав паузу всі
+    /// 60 с. Тут такий вміст підбирається навмисно: до виправлення — <c>409</c> на кожну зміну такої одиниці.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Голий_If_Match_з_версією_що_починається_з_W_slash_не_дає_409()
+    {
+        var (unitId, _) = await ArrangeAsync();
+
+        await using (var db = sql.CreateContext())
+        {
+            var unit = await db.Units.SingleAsync(u => u.Id == unitId);
+            for (var i = 0; !UnitVersion.Of(unit).StartsWith("W/", StringComparison.Ordinal); i++)
+            {
+                Assert.True(i < 1_000_000, "не знайдено вмісту з версією «W/…»");
+                unit.Update(new LocalizedText(Text("u")), new LocalizedText(Text($"Weak {i}")), 2m, 0m);
+            }
+
+            await db.SaveChangesAsync();
+        }
+
+        var version = await VersionAsync(unitId);
+        Assert.StartsWith("W/", version, StringComparison.Ordinal);
+
+        await using var updateDb = sql.CreateContext();
+        var outcome = await Outcome(() => Update(updateDb, new UnitOfWork(updateDb)).HandleAsync(
+            unitId, Text("u"), Text("Strong"), 2m, 0m, version, CancellationToken.None));
+
+        Assert.Null(outcome);
+        await using var read = sql.CreateContext();
+        Assert.Equal("Strong", (await read.Units.AsNoTracking().SingleAsync(u => u.Id == unitId)).NameL10n.Values["en"]);
+    }
+
+    /// <summary>
     /// Чекає, доки учасник гонки дійде до паузи, АЛЕ не довше, ніж він живий.
     /// </summary>
     /// <remarks>
-    /// ⛔ B186 (гіпотеза, ще не доведено 20/20). Раніше тут було <c>reached.Task.WaitAsync(Ceiling)</c>: якщо учасник
+    /// ⛔ B186 (діагностика; причину знайдено — див. тест про голий <c>If-Match</c> з <c>W/</c>). Раніше тут було <c>reached.Task.WaitAsync(Ceiling)</c>: якщо учасник
     /// падав ДО паузи (взаємоблокування SQL, обрив з'єднання, будь-який виняток поза <c>EcrException</c>/<c>DbUpdateException</c>,
     /// що <see cref="Outcome"/> не ковтає), <c>reached</c> не спрацьовував ніколи, а справжня причина лишалася в
     /// незчитаній задачі — тест висів рівно <see cref="Ceiling"/> (1 хв у CI) і падав голим <c>TimeoutException</c>.

@@ -91,6 +91,17 @@ public sealed partial class RecalculationJob
         IReadOnlyList<int> appended = [];
         if (request.ChainAfter is null)
         {
+            if (request.CascadePeriods is { } cascade && !request.ForceFull)
+            {
+                // ✎ PERF-06 (D-566): каскад від правки джерела — лише періоди, що читають змінені місяці джерела, і їхні
+                // пізніші читачі; решта відкритих місяців не пропускається «як незмінна» (підсумку пропуску немає).
+                var touched = await CascadeMonthsAsync(request, open, cascade, annualOnly, [], request.CascadeSeeds ?? [], ct)
+                    .ConfigureAwait(false);
+                decision = new ChainPlanDecision([.. open.Where(touched.Contains)], []);
+                LogPlan(request, decision, appended);
+                return decision;
+            }
+
             if (!request.SkipUnchanged || request.ForceFull)
             {
                 return new ChainPlanDecision(open, []);
@@ -106,24 +117,47 @@ public sealed partial class RecalculationJob
                 ? [.. open.Where(planned.Contains)]
                 : [.. open.Where(p => p > request.ChainAfter)];
             IReadOnlyList<int> skipped = [.. (request.ChainSkipped ?? []).Where(open.Contains)];
-            if (!request.ChainRecheck)
+            // ✎ Огляд F2: злита правка, усі періоди якої покриті «з затвердженими», дає порожній, але не відсутній
+            // cascadeAppend — її затравки однаково будять пізніших читачів.
+            var cascadeAppend = request.CascadeAppend ?? [];
+            if (!request.ChainRecheck && request.CascadeAppend is null)
             {
                 return new ChainPlanDecision(rest, skipped);
             }
 
-            // ✎ PERF-02: злите натискання — зроблені й пропущені місяці тим самим правилом; місяць на екрані — завжди, якщо його
-            // ще не зроблено (зроблений і незмінний повтору не потребує: його прогін уже бачив входи натискання).
-            var done = (request.ChainDone ?? []).ToHashSet();
             var candidates = open.Where(p => !rest.Contains(p)).ToList();
-            var forced = (request.ScreenPeriods ?? []).Where(p => !done.Contains(p)).ToList();
-            var flagged = await ChangedMonthsAsync(request, candidates, open, forced, annualOnly, ct, alsoRecomputed: rest)
-                .ConfigureAwait(false);
-            appended = [.. candidates.Where(flagged.Contains)];
+            if (!request.ChainRecheck)
+            {
+                // ✎ PERF-06 (D-566): у ланцюжок каскаду злилася нова правка джерела — її періоди дописуються ЗАВЖДИ (і вже
+                // зроблені: їхній крок читав старе джерело) разом із пізнішими читачами, без детектора й без повернення на
+                // перший місяць. Детектор тут хибив би в бік «увесь рік»: гілка джерел B179 у ньому — рівня документа.
+                var touched = await CascadeMonthsAsync(request, candidates, cascadeAppend, annualOnly, rest, request.CascadeSeeds ?? [], ct)
+                    .ConfigureAwait(false);
+                appended = [.. candidates.Where(touched.Contains)];
+            }
+            else
+            {
+                // ✎ PERF-02: злите натискання — зроблені й пропущені місяці тим самим правилом; місяць на екрані — завжди, якщо
+                // його ще не зроблено (зроблений і незмінний повтору не потребує: його прогін уже бачив входи натискання).
+                // ✎ PERF-06: періоди каскаду, що злилися поруч, — завжди (і зроблені).
+                var done = (request.ChainDone ?? []).ToHashSet();
+                var forced = (request.ScreenPeriods ?? []).Where(p => !done.Contains(p)).Concat(cascadeAppend).ToList();
+                var flagged = await ChangedMonthsAsync(request, candidates, open, forced, annualOnly, ct, alsoRecomputed: rest)
+                    .ConfigureAwait(false);
+                appended = [.. candidates.Where(flagged.Contains)];
+            }
+
             decision = new ChainPlanDecision(
                 [.. rest.Union(appended).Order()],
                 [.. skipped.Where(p => !appended.Contains(p))]);
         }
 
+        LogPlan(request, decision, appended);
+        return decision;
+    }
+
+    private void LogPlan(RecalculationRequest request, ChainPlanDecision decision, IReadOnlyList<int> appended)
+    {
         if (logger is not null && logger.IsEnabled(LogLevel.Information))
         {
             var planText = string.Join(',', decision.Plan);
@@ -131,8 +165,54 @@ public sealed partial class RecalculationJob
             var appendedText = string.Join(',', appended);
             LogChainPlan(logger, request.DocumentId, planText, skippedText, appendedText);
         }
+    }
 
-        return decision;
+    /// <summary>
+    /// ✎ PERF-06 (<c>D-566</c>): які з <paramref name="candidates"/> рахує каскад від правки документа-джерела — періоди каскаду
+    /// <paramref name="cascade"/> (їх уже звузило відображення «місяць джерела → періоди споживача»,
+    /// <c>RegistryImpactRecalculationJob</c>), закриті якорі річної розкладки (лише формули, дешево — як у D-564a) і,
+    /// транзитивно, пізніші місяці, що читають ОБЧИСЛЕНІ числа будь-якого з них чи місяців <paramref name="alsoRecomputed"/>
+    /// (<see cref="CrossReadsAsync"/>, те саме правило, що в плані кнопки): ворота подання міжмісячної застарілості не бачать.
+    /// </summary>
+    /// <param name="request">Завдання документа.</param>
+    /// <param name="candidates">Місяці, про які вирішуємо (відкриті, поза рештою плану).</param>
+    /// <param name="cascade">Періоди каскаду.</param>
+    /// <param name="annualOnly">Закриті якорі (лише не-місячні цілі).</param>
+    /// <param name="alsoRecomputed">Місяці, які ланцюжок порахує й так (решта плану).</param>
+    /// <param name="seeds">
+    /// ✎ Огляд F2: затравки (<see cref="RecalculationRequest.CascadeSeeds"/>) — їх рахує задача «з затвердженими», а пізніших
+    /// читачів їхніх чисел — ця задача; самі затравки не рахуються (хіба що вони ж читають місяць, який рахує ця).
+    /// </param>
+    /// <param name="ct">Токен скасування.</param>
+    internal async Task<HashSet<int>> CascadeMonthsAsync(
+        RecalculationRequest request, IReadOnlyList<int> candidates, IReadOnlyCollection<int> cascade,
+        IReadOnlyDictionary<int, IReadOnlyList<int>> annualOnly, IReadOnlyCollection<int> alsoRecomputed,
+        IReadOnlyCollection<int> seeds, CancellationToken ct)
+    {
+        var touched = candidates.Where(p => cascade.Contains(p)).ToHashSet();
+        if (touched.Count == 0 && !alsoRecomputed.Any(cascade.Contains) && seeds.Count == 0)
+        {
+            return touched;
+        }
+
+        touched.UnionWith(candidates.Where(annualOnly.ContainsKey));
+        var reads = await CrossReadsAsync(request.DocumentId, ct).ConfigureAwait(false);
+        var sources = touched.Concat(alsoRecomputed).Concat(seeds).ToHashSet();
+        for (var grew = true; grew;)
+        {
+            grew = false;
+            foreach (var reader in candidates.Where(q => !touched.Contains(q)).ToList())
+            {
+                if (sources.Any(owner => reads(owner, reader)))
+                {
+                    touched.Add(reader);
+                    sources.Add(reader);
+                    grew = true;
+                }
+            }
+        }
+
+        return touched;
     }
 
     /// <summary>

@@ -235,7 +235,9 @@ Known limitations (не цього циклу): (а) заборона, дода�
 хеші перехешовуються при вході.
 
 Обмеження частоти: вхід (`/api/v1/login/*`) — `Security:RateLimit:LoginPermitPerMinute`
-(дефолт 60 на IP-адресу); зміна пароля — `Security:RateLimit:ChangePasswordPermitPerMinute`
+(дефолт 60 на IP-адресу, лише `login/local`); вхід Windows (`/api/v1/login/windows`) —
+окремо, `Security:RateLimit:WindowsLoginPermitPerMinute` (дефолт 600 на IP-адресу: PBKDF2 немає,
+тож 1000 користувачів з однієї адреси за NAT/RDS входять за ~2 хв; `operations-runbook.md` §2.1b); зміна пароля — `Security:RateLimit:ChangePasswordPermitPerMinute`
 (дефолт 10 на користувача).
 
 ### 2.5. Групи AD
