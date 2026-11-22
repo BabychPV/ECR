@@ -1450,8 +1450,8 @@ public sealed partial class RecalculationJob(
     /// </para>
     /// <para>
     /// ✎ F7 (огляд PERF-06): і колонки <c>Formula</c> — їх переписує прогін власника й каскад (D-566), а скрипт іншого місяця
-    /// через псевдонім таблиці (<c>Src.F[m]</c>) доти лишався зі старим числом. Читач власної таблиці (<c>row.F[m]</c>) — ні:
-    /// його в метаданих немає (відкрите питання).
+    /// через псевдонім таблиці (<c>Src.F[m]</c>) доти лишався зі старим числом. ✎ D-568: і читач власної таблиці
+    /// (<c>row.F[m]</c>) — за полями, які скрипт читає (<c>calc.MethodologyReadField</c>, записані при публікації).
     /// </para>
     /// <para>
     /// ⛔ Затверджені аркуші читача не перераховуються (D-328, D-493): прохід Q їх пропускає й лишає позначку
@@ -1520,6 +1520,181 @@ public sealed partial class RecalculationJob(
     }
 
     /// <summary>
+    /// ✎ D-568: що читає з ВЛАСНОЇ таблиці методологія-скрипт (усі її опубліковані/застарілі версії й бібліотеки, які вони
+    /// імпортують), — з <c>calc.MethodologyReadField</c>.
+    /// </summary>
+    /// <param name="All">Читає будь-що: версія без запису (до D-568, дозапис не дійшов) чи скрипт, що не скомпілювався.</param>
+    /// <param name="Fields">Поле → «місячне читається за інший місяць».</param>
+    internal sealed record ScriptFieldReads(bool All, IReadOnlyDictionary<string, bool> Fields)
+    {
+        /// <summary>Чи читає скрипт місяця-читача число колонки <paramref name="column"/>, чий власник — інший період.</summary>
+        /// <param name="column">Колонка з чужим власником.</param>
+        /// <param name="monthAliases">Псевдоніми місяця колонки (<c>cfg.MonthInputAlias</c>), якщо є.</param>
+        public bool ReadsForeign(Domain.Entities.Configuration.ColumnDef column, IReadOnlyList<string>? monthAliases)
+        {
+            if (All)
+            {
+                return true;
+            }
+
+            // Не-місячна колонка річної розкладки (власник — якір): будь-яке читання поля з іншого місяця.
+            if (!column.IsMonthColumn || column.MonthNumber is not { } month)
+            {
+                return Fields.ContainsKey(column.Code);
+            }
+
+            // Місячна `X_Mmm` (чи псевдонім місяця): лише читання за ІНШИЙ місяць — свій місяць колонки читача не чужий.
+            var suffix = "_M" + month.ToString("00", CultureInfo.InvariantCulture);
+            var names = (monthAliases ?? []).ToList();
+            if (column.Code.EndsWith(suffix, StringComparison.OrdinalIgnoreCase) && column.Code.Length > suffix.Length)
+            {
+                names.Add(column.Code[..^suffix.Length]);
+            }
+
+            return names.Exists(n => Fields.TryGetValue(n, out var otherMonths) && otherMonths);
+        }
+    }
+
+    /// <summary>Глибина імпортів бібліотек при зборі полів читання (як у <c>ScriptsReadMonthColumnsAsync</c>).</summary>
+    private const int MaxReadFieldImportDepth = 8;
+
+    /// <summary>
+    /// ✎ D-568: поля власної таблиці, які читають методології-скрипти <paramref name="methodologyIds"/>; методології без
+    /// опублікованої версії-скрипта (формульні) — не в словнику.
+    /// </summary>
+    internal async Task<Dictionary<int, ScriptFieldReads>> ScriptFieldReadsAsync(
+        IReadOnlyCollection<int> methodologyIds, CancellationToken ct)
+    {
+        var result = new Dictionary<int, ScriptFieldReads>();
+        var versionsOf = new Dictionary<int, List<int>>();
+        var importsOf = new Dictionary<int, List<int>>();
+        var pending = methodologyIds.Distinct().ToList();
+        for (var depth = 0; pending.Count > 0; depth++)
+        {
+            var batch = pending.Where(id => !versionsOf.ContainsKey(id)).ToList();
+            pending.Clear();
+            if (batch.Count == 0)
+            {
+                break;
+            }
+
+            var versions = await db.MethodologyVersions
+                .AsNoTracking()
+                .Where(v => batch.Contains(v.MethodologyId)
+                            && v.Engine == Domain.Enums.MethodologyEngine.Script
+                            && (v.Status == Domain.Enums.TemplateVersionStatus.Published
+                                || v.Status == Domain.Enums.TemplateVersionStatus.Deprecated))
+                .Select(v => new { v.Id, v.MethodologyId })
+                .OrderBy(v => v.Id)
+                .Take(MaxBindings)
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+            foreach (var id in batch)
+            {
+                versionsOf[id] = [.. versions.Where(v => v.MethodologyId == id).Select(v => v.Id)];
+            }
+
+            if (versions.Count == 0)
+            {
+                continue;
+            }
+
+            var versionIds = versions.Select(v => v.Id).ToList();
+            var imports = await db.MethodologyImports
+                .AsNoTracking()
+                .Where(i => versionIds.Contains(i.MethodologyVersionId))
+                .Select(i => new { i.MethodologyVersionId, i.ImportedMethodologyId })
+                .OrderBy(i => i.MethodologyVersionId)
+                .ThenBy(i => i.ImportedMethodologyId)
+                .Take(MaxBindings)
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+            foreach (var version in versions)
+            {
+                importsOf[version.Id] = [.. imports.Where(i => i.MethodologyVersionId == version.Id).Select(i => i.ImportedMethodologyId)];
+            }
+
+            // Імпорти глибше за стелю не розібрано — «читає будь-що» (позначка нижче через відсутній запис).
+            if (depth < MaxReadFieldImportDepth)
+            {
+                pending.AddRange(imports.Select(i => i.ImportedMethodologyId));
+            }
+        }
+
+        var allVersionIds = versionsOf.Values.SelectMany(v => v).Distinct().ToList();
+        if (allVersionIds.Count == 0)
+        {
+            return result;
+        }
+
+        var rows = await db.MethodologyReadFields
+            .AsNoTracking()
+            .Where(f => allVersionIds.Contains(f.MethodologyVersionId))
+            .Select(f => new { f.MethodologyVersionId, f.FieldCode, f.OtherMonths })
+            .OrderBy(f => f.MethodologyVersionId)
+            .ThenBy(f => f.FieldCode)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        var byVersion = rows.GroupBy(r => r.MethodologyVersionId).ToDictionary(g => g.Key, g => g.ToList());
+
+        foreach (var methodologyId in methodologyIds.Distinct())
+        {
+            if (versionsOf.GetValueOrDefault(methodologyId) is not { Count: > 0 })
+            {
+                continue;
+            }
+
+            var all = false;
+            var fields = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+            var seen = new HashSet<int>();
+            var queue = new Queue<int>([methodologyId]);
+            while (queue.Count > 0 && !all)
+            {
+                var current = queue.Dequeue();
+                if (!seen.Add(current))
+                {
+                    continue;
+                }
+
+                // Методологія, чиї версії не зібрано (імпорт за стелею глибини), — невідомо, отже «будь-що».
+                if (!versionsOf.TryGetValue(current, out var versions))
+                {
+                    all = true;
+                    break;
+                }
+
+                foreach (var versionId in versions)
+                {
+                    if (!byVersion.TryGetValue(versionId, out var read))
+                    {
+                        all = true;
+                        break;
+                    }
+
+                    foreach (var field in read.Where(r => r.FieldCode.Length > 0))
+                    {
+                        if (field.FieldCode == Domain.Entities.Calculations.MethodologyReadField.AllFields)
+                        {
+                            all = true;
+                        }
+
+                        fields[field.FieldCode] = fields.GetValueOrDefault(field.FieldCode) || field.OtherMonths;
+                    }
+
+                    foreach (var imported in importsOf.GetValueOrDefault(versionId) ?? [])
+                    {
+                        queue.Enqueue(imported);
+                    }
+                }
+            }
+
+            result[methodologyId] = new ScriptFieldReads(all, fields);
+        }
+
+        return result;
+    }
+
+    /// <summary>
     /// Колонка, число якої період-читач бере в періоду-власника і яку переписує прогін власника: <c>Calculated</c> (результат
     /// методології) і ✎ F7 <c>Formula</c> (формула шаблону, яку переписує й каскад формул).
     /// </summary>
@@ -1571,9 +1746,36 @@ public sealed partial class RecalculationJob(
             .Take(MaxBindings)
             .ToListAsync(ct)
             .ConfigureAwait(false);
-        if (bound.Count == 0 || (readers.Count == 0 && edges.Count == 0))
+
+        // ✎ D-568: поля власної таблиці, які читають прив'язані скрипти (calc.MethodologyReadField, записані при публікації).
+        var fieldReads = bound.Count == 0
+            ? new Dictionary<int, ScriptFieldReads>()
+            : await ScriptFieldReadsAsync([.. bound.Select(b => b.MethodologyId).Distinct()], ct).ConfigureAwait(false);
+        if (bound.Count == 0 || (readers.Count == 0 && edges.Count == 0 && fieldReads.Count == 0))
         {
             return [];
+        }
+
+        var aliasesByColumn = new Dictionary<int, List<string>>();
+        if (fieldReads.Count > 0)
+        {
+            foreach (var alias in await db.MonthInputAliases
+                         .AsNoTracking()
+                         .Where(a => tableIds.Contains(a.TableDefId))
+                         .Select(a => new { a.ColumnDefId, a.Alias })
+                         .OrderBy(a => a.ColumnDefId)
+                         .ThenBy(a => a.Alias)
+                         .Take(MaxBindings)
+                         .ToListAsync(ct)
+                         .ConfigureAwait(false))
+            {
+                if (!aliasesByColumn.TryGetValue(alias.ColumnDefId, out var names))
+                {
+                    aliasesByColumn[alias.ColumnDefId] = names = [];
+                }
+
+                names.Add(alias.Alias);
+            }
         }
 
         var candidates = new List<int>();
@@ -1631,17 +1833,18 @@ public sealed partial class RecalculationJob(
                     .Select(f => f.Column.Id)
                     .ToHashSet();
 
-                // Читач через псевдонім таблиці (calc.MethodologyReadTable; ✎ F7 — і для колонок Formula) або читач власної
-                // таблиці (ребро на методологію-джерело колонки Calculated). ⚠ F7: читач ВЛАСНОЇ таблиці, що читає місячну
-                // колонку Formula (`rows from T; row.F[m]`), у метаданих публікації не записаний (ребра на джерело в формули
-                // немає) — тут не знаходиться; точне правило потребує переліку прочитаних колонок у метаданих (рішення людини).
+                // Читач через псевдонім таблиці (calc.MethodologyReadTable; ✎ F7 — і для колонок Formula), читач власної
+                // таблиці за ребром на методологію-джерело колонки Calculated (MS) або ✎ D-568 — прив'язаний скрипт, що читає
+                // саме це поле: не-місячне (власник — якір) будь-як, місячне — за ІНШИЙ місяць (calc.MethodologyReadField).
                 var sources = bound
                     .Where(b => b.TableDefId == table.Id && foreign.Contains(b.ColumnDefId))
                     .Select(b => b.MethodologyId)
                     .ToHashSet();
                 var ownReader = bound
                     .Where(b => b.TableDefId == table.Id)
-                    .Any(b => edges.Any(e => e.FromMethodologyId == b.MethodologyId && sources.Contains(e.ToMethodologyId)));
+                    .Any(b => edges.Any(e => e.FromMethodologyId == b.MethodologyId && sources.Contains(e.ToMethodologyId))
+                              || (fieldReads.TryGetValue(b.MethodologyId, out var reads)
+                                  && owned.Exists(f => reads.ReadsForeign(f.Column, aliasesByColumn.GetValueOrDefault(f.Column.Id)))));
                 if (ownReader || readCodes.Contains(table.Code))
                 {
                     result.Add(inPeriod.Key);

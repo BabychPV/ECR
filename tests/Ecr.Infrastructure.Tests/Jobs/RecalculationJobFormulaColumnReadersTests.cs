@@ -25,8 +25,13 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 /// </summary>
 /// <remarks>
 /// Справжні SQL, <see cref="MonthColumnRouter"/> і <see cref="RecalculationJob"/>; оркестратор — фейк. Читач — з метаданих
-/// публікації (<c>calc.MethodologyReadTable</c>, псевдонім таблиці), текст скрипту не розбирається. ⚠ Читач ВЛАСНОЇ таблиці
-/// (<c>rows from T; row.F[m]</c>) у метаданих не записаний — відкрите питання, тут не покрито.
+/// публікації: псевдонім таблиці (<c>calc.MethodologyReadTable</c>) і ✎ D-568 поля власної таблиці
+/// (<c>calc.MethodologyReadField</c>) — тести <c>D568_*</c>: читач іншого місяця, сторож ціни (лише свій місяць — без
+/// проходів), версія до D-568 (читач усього) і дозапис старту.
+/// <para>
+/// МУТАЦІЯ D-568 (локально): у <c>ScriptFieldReads.ReadsForeign</c> не перевіряти ознаку «інший місяць» — червоний
+/// <c>D568_скрипт_що_читає_лише_свій_місяць…</c> і <c>D568_версія_до_запису…</c> (після дозапису).
+/// </para>
 /// <para>
 /// Шляхи через змінену функцію (<c>ReaderPeriodsOfOwnersAsync</c>): прогін названого періоду (кнопка місяця, залежні,
 /// «з затвердженими», нічні діти) — тести 1–2; каскад від правки джерела (PERF-06; без ланцюжка й крок ланцюжка — та сама
@@ -119,12 +124,68 @@ public sealed class RecalculationJobFormulaColumnReadersTests(SqlServerFixture s
         Assert.Equal(withReader ? [Period(1), Period(3)] : [], flagged.Order());
     }
 
+    [Fact]
+    public async Task D568_скрипт_власної_таблиці_що_читає_інший_місяць_отримує_прохід()
+    {
+        var world = await ArrangeAsync(Reader.OwnOtherMonths);
+        var scheduler = Substitute.For<IBackgroundJobScheduler>();
+
+        await RunAsync(world, scheduler, new Runner(), Request(world, Period(2)));
+
+        await AssertPassesAsync(world, scheduler, 1, 3);
+    }
+
+    [Fact]
+    public async Task D568_скрипт_що_читає_лише_свій_місяць_проходів_не_додає()
+    {
+        // Сторож ціни: прив'язаний скрипт, що читає row.F[period.Month], — не читач чужих місяців.
+        var world = await ArrangeAsync(Reader.OwnOwnMonth);
+        var scheduler = Substitute.For<IBackgroundJobScheduler>();
+
+        await RunAsync(world, scheduler, new Runner(), Request(world, Period(2)));
+
+        await scheduler.DidNotReceiveWithAnyArgs().EnqueueCoalescedAsync<IRecalculationJob>(default!, default, default, default);
+    }
+
+    [Fact]
+    public async Task D568_версія_до_запису_читач_усього_а_після_дозапису_старту_за_полями()
+    {
+        // Опублікована до D-568 версія без рядків calc.MethodologyReadField — консервативно читач (прохід є).
+        var world = await ArrangeAsync(Reader.OwnLegacy);
+        var before = Substitute.For<IBackgroundJobScheduler>();
+        await RunAsync(world, before, new Runner(), Request(world, Period(2)));
+        await AssertPassesAsync(world, before, 1, 3);
+
+        // Дозапис старту компілює скрипт (читає лише свій місяць) і записує поля; повторний прохід версію не чіпає.
+        await using (var db = world.Builder.CreateContext())
+        {
+            Assert.Equal(1, await new MethodologyReadFieldsBackfill(db) { OnlyVersions = [world.VersionId] }.RunAsync(CancellationToken.None));
+            var rows = await db.MethodologyReadFields.AsNoTracking()
+                .Where(f => f.MethodologyVersionId == world.VersionId)
+                .Select(f => new { f.FieldCode, f.OtherMonths })
+                .ToListAsync();
+            Assert.Equal(2, rows.Count);
+            Assert.Contains(rows, r => r.FieldCode == MethodologyReadField.RecordedMarker);
+            Assert.Contains(rows, r => string.Equals(r.FieldCode, world.Field, StringComparison.OrdinalIgnoreCase) && !r.OtherMonths);
+
+            Assert.Equal(0, await new MethodologyReadFieldsBackfill(db) { OnlyVersions = [world.VersionId] }.RunAsync(CancellationToken.None));
+            Assert.Equal(2, await db.MethodologyReadFields.CountAsync(f => f.MethodologyVersionId == world.VersionId));
+        }
+
+        var after = Substitute.For<IBackgroundJobScheduler>();
+        await RunAsync(world, after, new Runner(), Request(world, Period(2)));
+        await after.DidNotReceiveWithAnyArgs().EnqueueCoalescedAsync<IRecalculationJob>(default!, default, default, default);
+    }
+
     // ───── стенд ─────
 
     private enum Reader
     {
         Alias,
         BoundFormulas,
+        OwnOtherMonths,
+        OwnOwnMonth,
+        OwnLegacy,
     }
 
     private static async Task AssertPassesAsync(World world, IBackgroundJobScheduler scheduler, params int[] months)
@@ -197,9 +258,16 @@ public sealed class RecalculationJobFormulaColumnReadersTests(SqlServerFixture s
             period.AdvanceTo(PeriodState.Open, Now);
         }
 
+        // Місячні колонки — `F…_Mmm` (поле скрипта `row.F…[m]`, D-568), тип Formula.
+        var field = "F" + Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
         var monthColumns = doc.MonthColumnDefIds.ToList();
         await db.ColumnDefs.Where(c => monthColumns.Contains(c.Id))
             .ExecuteUpdateAsync(s => s.SetProperty(c => c.DataType, CellDataType.Formula));
+        foreach (var column in await db.ColumnDefs.AsNoTracking().Where(c => monthColumns.Contains(c.Id)).ToListAsync())
+        {
+            var code = $"{field}_M{column.MonthNumber!.Value:00}";
+            await db.ColumnDefs.Where(c => c.Id == column.Id).ExecuteUpdateAsync(s => s.SetProperty(c => c.Code, code));
+        }
         var output = doc.ColumnDefIds.First(id => !monthColumns.Contains(id));
         await db.ColumnDefs.Where(c => c.Id == output)
             .ExecuteUpdateAsync(s => s.SetProperty(c => c.DataType, CellDataType.Calculated));
@@ -213,6 +281,11 @@ public sealed class RecalculationJobFormulaColumnReadersTests(SqlServerFixture s
         var version = new MethodologyVersion(
             methodology.Id, "1.0", CalculationLevel.Configuration, 1, Now,
             reader == Reader.BoundFormulas ? MethodologyEngine.Formulas : MethodologyEngine.Script);
+        if (reader != Reader.BoundFormulas)
+        {
+            version.SetScript($"rows from T1; var a = row.{field}[period.Month]; output Z : t = a;", [1]);
+        }
+
         version.Publish(2, "test", new DateOnly(Year, 1, 1), testsPassed: true, Now);
         db.MethodologyVersions.Add(version);
         await db.SaveChangesAsync();
@@ -222,10 +295,21 @@ public sealed class RecalculationJobFormulaColumnReadersTests(SqlServerFixture s
             db.MethodologyReadTables.Add(new MethodologyReadTable(version.Id, table.Code));
         }
 
+        // ✎ D-568: перелік полів записано (як при публікації) — крім версії «до D-568».
+        if (reader is Reader.Alias or Reader.OwnOtherMonths or Reader.OwnOwnMonth)
+        {
+            db.MethodologyReadFields.Add(new MethodologyReadField(version.Id, MethodologyReadField.RecordedMarker, otherMonths: false));
+        }
+
+        if (reader is Reader.OwnOtherMonths or Reader.OwnOwnMonth)
+        {
+            db.MethodologyReadFields.Add(new MethodologyReadField(version.Id, field, otherMonths: reader == Reader.OwnOtherMonths));
+        }
+
         db.CalculationBindings.Add(new CalculationBinding(doc.TableDefId, output, methodology.Id, "Z", "{}"));
         await db.SaveChangesAsync();
 
-        return new World(builder, doc);
+        return new World(builder, doc, version.Id, field);
     }
 
     private static RunCalculationHandler RunHandler(EcrDbContext db, TestClock clock)
@@ -272,7 +356,7 @@ public sealed class RecalculationJobFormulaColumnReadersTests(SqlServerFixture s
 
     private static LocalizedText Name(string value) => new(new Dictionary<string, string> { ["en"] = value });
 
-    private sealed record World(TestDocumentBuilder Builder, TestDocument Doc);
+    private sealed record World(TestDocumentBuilder Builder, TestDocument Doc, int VersionId, string Field);
 
     /// <summary>Фейк оркестратора: нічого не рахує, лише записує періоди.</summary>
     private sealed class Runner : ICalculationRunner

@@ -111,6 +111,9 @@ public sealed class ScriptMaterializer(
 
         var (added, bound) = await BindOutputsAsync(methodologyId, script, environment, ct).ConfigureAwait(false);
         await methodologies.ReplaceDependenciesAsync(methodologyId, dependencies, ct).ConfigureAwait(false);
+
+        // ✎ D-568: поля власної таблиці, які читає скрипт (прохід читача — RecalculationJob.ReaderPeriodsOfOwnersAsync).
+        await methodologies.ReplaceScriptReadFieldsAsync(versionId, ScriptReadFields.Of(script), ct).ConfigureAwait(false);
         await ReplaceRegistryUsesAsync(versionId, script, ct).ConfigureAwait(false);
 
         return new ScriptMaterialization(added, bound, dependencies);
@@ -204,6 +207,9 @@ public sealed class ScriptMaterializer(
             .ToList();
         await methodologies.ReplaceDependenciesAsync(methodologyId, dependencies, ct).ConfigureAwait(false);
         await ReplaceRegistryUsesAsync(versionId, script, ct).ConfigureAwait(false);
+
+        // ✎ D-568: поля власної таблиці, які читає скрипт.
+        await methodologies.ReplaceScriptReadFieldsAsync(versionId, ScriptReadFields.Of(script), ct).ConfigureAwait(false);
     }
 
     private static string OutputKey(string code, int unitId, bool perSubstance)

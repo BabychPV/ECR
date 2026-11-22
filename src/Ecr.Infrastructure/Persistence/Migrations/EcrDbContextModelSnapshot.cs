@@ -736,6 +736,34 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.ToTable("MethodologyOutput", "calc");
                 });
 
+            modelBuilder.Entity("Ecr.Domain.Entities.Calculations.MethodologyReadField", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("FieldCode")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<int>("MethodologyVersionId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("OtherMonths")
+                        .HasColumnType("bit");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MethodologyVersionId", "FieldCode")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_MethodologyReadField");
+
+                    b.ToTable("MethodologyReadField", "calc");
+                });
+
             modelBuilder.Entity("Ecr.Domain.Entities.Calculations.MethodologyReadTable", b =>
                 {
                     b.Property<int>("Id")
@@ -7521,6 +7549,16 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("FK_MO_Unit");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Calculations.MethodologyReadField", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Calculations.MethodologyVersion", null)
+                        .WithMany()
+                        .HasForeignKey("MethodologyVersionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_MRF_Version");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Calculations.MethodologyReadTable", b =>
