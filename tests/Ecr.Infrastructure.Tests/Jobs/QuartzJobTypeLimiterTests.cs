@@ -47,17 +47,21 @@ public sealed class QuartzJobTypeLimiterTests : IAsyncLifetime
     [Trait("Finding", "PERF-05")]
     public void Глобальна_стеля_тримає_всі_перерахунки_методологій()
     {
-        var limiter = new QuartzJobTypeLimiter(1, recalcFanOutMaxConcurrency: 4, recalcMaxConcurrent: 2);
+        var limiter = new QuartzJobTypeLimiter(1, recalcFanOutMaxConcurrency: 4, recalcMaxConcurrent: 3);
 
-        using var manual = limiter.TryEnter(typeof(RecalculationJob), "m1", recalcFanOutChild: false);
-        using var child = limiter.TryEnter(typeof(RecalculationJob), "c1", recalcFanOutChild: true);
+        // Стеля 3: людина + дві дитини розкладу (системна робота — не більше 3 − 1 = 2).
+        using var manual = limiter.TryEnter(typeof(RecalculationJob), "m1", recalcFanOutChild: false, manualPress: true);
+        using var child = limiter.TryEnter(typeof(RecalculationJob), "c1", recalcFanOutChild: true, manualPress: false);
         Assert.NotNull(manual);
         Assert.NotNull(child);
         Assert.Equal((2, 1), (limiter.RecalcRunning, limiter.RecalcFanOutRunning));
 
-        Assert.Null(limiter.TryEnter(typeof(RecalculationJob), "m2", recalcFanOutChild: false));
-        Assert.Null(limiter.TryEnter(typeof(RecalculationJob), "c2", recalcFanOutChild: true));
+        Assert.Null(limiter.TryEnter(typeof(RecalculationJob), "c2", recalcFanOutChild: true, manualPress: false));
         Assert.Equal(1, limiter.RecalcFanOutRunning);
+
+        using var second = limiter.TryEnter(typeof(RecalculationJob), "m2", recalcFanOutChild: false, manualPress: true);
+        Assert.NotNull(second);
+        Assert.Null(limiter.TryEnter(typeof(RecalculationJob), "m3", recalcFanOutChild: false, manualPress: true));
 
         using (var formulas = limiter.TryEnter(typeof(FormulaRecalculationJob)))
         {
@@ -65,8 +69,8 @@ public sealed class QuartzJobTypeLimiterTests : IAsyncLifetime
         }
 
         child!.Dispose();
-        Assert.Equal((1, 0), (limiter.RecalcRunning, limiter.RecalcFanOutRunning));
-        using var next = limiter.TryEnter(typeof(RecalculationJob), "m2", recalcFanOutChild: false);
+        Assert.Equal((2, 0), (limiter.RecalcRunning, limiter.RecalcFanOutRunning));
+        using var next = limiter.TryEnter(typeof(RecalculationJob), "m3", recalcFanOutChild: false, manualPress: true);
         Assert.NotNull(next);
     }
 

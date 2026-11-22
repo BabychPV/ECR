@@ -232,14 +232,39 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
     /// натисканнями не займає всю чергу — інша людина з одним стає другою, а не одинадцятою. Системні задачі (FIFO-прохід) — на
     /// своєму місці. Ланцюжок рахується одним рядком (крок — той самий рядок).
     /// </summary>
+    /// <remarks>
+    /// ✎ Огляд M2: лише пошуком індексу <c>IX_JobProgress_User_Active</c> (Lane, State, CreatedByUserId) INCLUDE (AvailableAt,
+    /// FanOutParentJobId), без читання Payload (прохід читача з автором людини рахується в її ранг — оцінка, не межа), і НЕ в
+    /// claim під UPDLOCK і applock стелі: вибір робить окремий запит <see cref="FairPickSql"/> на знімку RCSI, claim бере вже
+    /// названий рядок.
+    /// </remarks>
     internal const string FairRankSql = """
-        (SELECT COUNT(*) FROM itg.JobProgress AS fr
+        (SELECT COUNT(*) FROM itg.JobProgress AS fr WITH (INDEX(IX_JobProgress_User_Active))
           WHERE fr.Lane = @lane AND fr.Lane IS NOT NULL AND fr.[State] IN ('Queued', 'Running') AND fr.CreatedByUserId = q.CreatedByUserId
             AND (fr.[State] = 'Running'
                  OR (fr.[State] = 'Queued' AND fr.AvailableAt <> CAST(N'9999-12-31T00:00:00' AS datetime2(3))
                      AND fr.FanOutParentJobId IS NULL
-                     AND ISNULL(CASE WHEN ISJSON(fr.Payload) = 1 THEN JSON_VALUE(fr.Payload, '$.foreignOwnerPass') END, N'false') <> N'true'
                      AND (fr.AvailableAt < q.AvailableAt OR (fr.AvailableAt = q.AvailableAt AND fr.JobId < q.JobId)))))
+        """;
+
+    /// <summary>Скільки найраніших ручних задач розглядає «черга людей» (<see cref="FairPickSql"/>).</summary>
+    internal const int FairWindow = 200;
+
+    /// <summary>
+    /// ✎ PERF-10 / огляд M2: кандидат «черги людей» — з перших <see cref="FairWindow"/> доступних ручних задач лейна (за FIFO
+    /// індексом claim) найменший ранг людини (<see cref="FairRankSql"/>), далі FIFO. Без блокувань (RCSI): claim бере названий
+    /// рядок (<c>@preferred</c>) зі всіма своїми умовами; узяли раніше чи документ зайнятий — звичайний прохід ручних (FIFO).
+    /// </summary>
+    internal static readonly string FairPickSql = $$"""
+        /* ecr:jobqueue-fair-pick */
+        SELECT TOP (1) q.JobId
+          FROM (SELECT TOP ({{FairWindow}}) q.JobId, q.AvailableAt, q.CreatedByUserId
+                  FROM itg.JobProgress AS q WITH (INDEX(IX_JobProgress_Claim))
+                 WHERE q.Lane = @lane AND q.Lane IS NOT NULL AND q.[State] = 'Queued'
+                   AND q.AvailableAt <= CAST(SYSUTCDATETIME() AS datetime2(3))
+                   {{ManualFilter.Trim()}}
+                 ORDER BY q.AvailableAt, q.JobId) AS q
+         ORDER BY {{FairRankSql.Trim()}}, q.AvailableAt, q.JobId;
         """;
 
     /// <summary>Умова кандидата під межею дітей розкладу (<see cref="FanOutCapPrologue"/>).</summary>
@@ -258,17 +283,18 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
     /// <param name="recalcLane">Лейн перерахунку: поступитися правці комірки документа (<see cref="EditFirstExclusion"/>).</param>
     /// <param name="manualOnly">Прохід «спершу ручні» (<see cref="ManualFilter"/>).</param>
     /// <param name="heavyCap">✎ PERF-05: глобальна стеля важких перерахунків діє (<see cref="HeavyCapFilter"/>).</param>
-    /// <param name="fair">✎ PERF-10: порядок «черга людей» (<see cref="FairRankSql"/>) — прохід «спершу ручні».</param>
+    /// <param name="preferred">✎ PERF-10: лише рядок <c>@preferred</c> — кандидат «черги людей» (<see cref="FairPickSql"/>).</param>
     internal static string ClaimQueuedSqlFor(
         bool documentExclusive, bool fanOutCap, bool priority, bool recalcLane = false, bool manualOnly = false,
-        bool heavyCap = false, bool fair = false)
+        bool heavyCap = false, bool preferred = false)
     {
         var sql = priority ? ClaimPriorityQueuedSql : ClaimQueuedSql;
         var extra = (documentExclusive ? DocumentExclusion : string.Empty)
                     + (recalcLane ? EditFirstExclusion : string.Empty)
                     + (manualOnly ? ManualFilter : string.Empty)
                     + (fanOutCap ? FanOutCapFilter : string.Empty)
-                    + (heavyCap ? HeavyCapFilter : string.Empty);
+                    + (heavyCap ? HeavyCapFilter : string.Empty)
+                    + (preferred ? "\n              AND q.JobId = @preferred\n" : string.Empty);
         if (extra.Length > 0)
         {
             // ⛔ Якір — ORDER BY кандидата; не знайшовся (текст claim змінили) — гучна відмова, а не тихий claim без умов.
@@ -283,12 +309,6 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
             {
                 throw new InvalidOperationException("Claim черги: якір ORDER BY повторився.");
             }
-        }
-
-        if (fair)
-        {
-            const string Order = "ORDER BY q.AvailableAt, q.JobId)";
-            sql = sql.Replace(Order, "ORDER BY " + FairRankSql.Trim() + ", q.AvailableAt, q.JobId)", StringComparison.Ordinal);
         }
 
         return fanOutCap || heavyCap ? FanOutCapPrologue + "\n" + sql + "\nCOMMIT TRANSACTION;" : sql;
@@ -704,7 +724,7 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
             AddShown(p);
         }
 
-        string QueuedSqlOf(string lane, bool priority, bool manualOnly = false)
+        string QueuedSqlOf(string lane, bool priority, bool manualOnly = false, bool preferred = false)
         {
             var recalc = string.Equals(lane, JobLanes.Recalc, StringComparison.Ordinal);
             return ClaimQueuedSqlFor(
@@ -714,7 +734,7 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
                 recalcLane: recalc,
                 manualOnly: manualOnly,
                 heavyCap: heavyCap > 0 && recalc,
-                fair: manualOnly && recalc);
+                preferred: preferred);
         }
 
         async Task<ClaimedJob?> Read(SqlDataReader r, bool reclaimed)
@@ -762,16 +782,37 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
                     // вона не стоїть у FIFO за дітьми річного розкладу й кроками ланцюжків.
                     if (!reclaimed && string.Equals(lane, JobLanes.Recalc, StringComparison.Ordinal))
                     {
-                        var manual = await RunAsync(
-                                QueuedSqlOf(lane, priority: false, manualOnly: true),
-                                p =>
-                                {
-                                    Bind(p, lane);
-                                    p.Add("@heavyLimit", SqlDbType.Int).Value = heavyCap;
-                                },
-                                r => Read(r, false),
+                        // ✎ PERF-10 / огляд M2: «черга людей» — вибір окремим запитом без блокувань, claim — названого рядка;
+                        // не вийшло (узяли, документ зайнятий) — звичайний прохід ручних FIFO.
+                        var pick = await RunAsync(
+                                FairPickSql,
+                                p => p.Add("@lane", SqlDbType.VarChar, JobLanes.MaxLength).Value = lane,
+                                async r => await r.ReadAsync(ct).ConfigureAwait(false) ? r.GetString(0) : null,
                                 ct)
                             .ConfigureAwait(false);
+                        ClaimedJob? manual = null;
+                        foreach (var preferred in pick is null ? [false] : new[] { true, false })
+                        {
+                            manual = await RunAsync(
+                                    QueuedSqlOf(lane, priority: false, manualOnly: true, preferred: preferred),
+                                    p =>
+                                    {
+                                        Bind(p, lane);
+                                        p.Add("@heavyLimit", SqlDbType.Int).Value = heavyCap;
+                                        if (preferred)
+                                        {
+                                            p.Add("@preferred", SqlDbType.NVarChar, 100).Value = pick!;
+                                        }
+                                    },
+                                    r => Read(r, false),
+                                    ct)
+                                .ConfigureAwait(false);
+                            if (manual is not null)
+                            {
+                                break;
+                            }
+                        }
+
                         if (manual is not null)
                         {
                             return manual;

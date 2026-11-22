@@ -137,16 +137,58 @@ public sealed class RecalcLaneGlobalCapDbTests(SqlServerFixture sql) : DbJobQueu
         Assert.Equal(5, positions[system1]!.Position);
         Assert.Equal(6, positions[system2]!.Position);
 
-        // Стеля 2, нічого не виконується: перші два — одразу; 3-4 — після одного кроку (60 с); 5-6 — двох.
+        // Стеля 2, нічого не виконується: ручні — 2 місця (перші два одразу, 3-4 — після одного кроку 60 с); системна задача —
+        // «стеля − 1» = 1 місце (огляд L3), кроків попереду 5 — п'ять хвиль по 60 с.
         var now = DateTime.UtcNow;
         Assert.InRange((positions[b1]!.EstimatedStartAt!.Value - now).TotalSeconds, -5, 5);
         Assert.InRange((positions[a3]!.EstimatedStartAt!.Value - now).TotalSeconds, 55, 65);
-        Assert.InRange((positions[system2]!.EstimatedStartAt!.Value - now).TotalSeconds, 115, 125);
+        Assert.InRange((positions[system2]!.EstimatedStartAt!.Value - now).TotalSeconds, 295, 305);
 
-        // Задача, що виконується, місця не має.
+        // Задача, що виконується, місця не має (кеш відповіді — 5 с; скинуто).
         await using var host = NewHost(cap: 2);
         var running = await host.Queue.ClaimAsync([JobLanes.Recalc], "test/pos", JobQueueLimits.DefaultLease, CancellationToken.None);
+        DbJobQueuePosition.ResetMedianCache();
         Assert.Null(await reader.GetAsync(running!.Claim.JobId, CancellationToken.None));
+
+        // Огляд L3: ланцюжок попереду рахується рештою своїх кроків. a1 виконується; попереду system1 — a2 (ланцюжок 4 кроки, 1
+        // зроблено: 3), a3 і b1 (по 1) = 5 кроків; місце системної — одне (стеля − 1), одне виконується: 6 хвиль по 60 с.
+        await ExecAsync(
+            "UPDATE itg.JobProgress SET Payload = N'{\"chainTotal\":4,\"chainDone\":[202601]}' WHERE JobId = @id;", a2);
+        DbJobQueuePosition.ResetMedianCache();
+        var chainAware = await reader.GetAsync(system1, CancellationToken.None);
+        Assert.Equal(4, chainAware!.Position);
+        Assert.InRange((chainAware.EstimatedStartAt!.Value - now).TotalSeconds, 355, 425);
+    }
+
+    /// <summary>
+    /// ✎ Огляд M2: «черга людей» не тримає claim — вибір окремим запитом без блокувань, claim — названого рядка. Тисяча ручних
+    /// задач п'ятдесяти людей у черзі: кожен claim — далеко в межах тайм-ауту applock стелі (5 с), лейн не зупиняється.
+    /// </summary>
+    [Fact]
+    public async Task Claim_з_тисячею_ручних_у_черзі_далеко_в_межах_applock()
+    {
+        await using (var db = Sql.CreateContext())
+        {
+            await db.Database.ExecuteSqlRawAsync("""
+                INSERT INTO itg.JobProgress (JobId, JobCode, [State], [Percent], StartedAt, UpdatedAt, HeartbeatAt, CreatedAt,
+                                             CreatedByUserId, Lane, Payload, AvailableAt, ReclaimCount)
+                SELECT TOP (1000) CONCAT(N'Ecr.Test.HeavyRecalcJob-bulk-', n.i), N'Ecr.Test.HeavyRecalcJob', 'Queued', 0,
+                       SYSUTCDATETIME(), SYSUTCDATETIME(), SYSUTCDATETIME(), SYSUTCDATETIME(),
+                       1000 + n.i % 50, 'recalc', N'{{"triggeredByUserId":1}}', DATEADD(millisecond, -n.i, SYSUTCDATETIME()), 0
+                  FROM (SELECT ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS i FROM sys.all_objects) AS n
+                """);
+        }
+
+        var slowest = TimeSpan.Zero;
+        for (var i = 0; i < 5; i++)
+        {
+            await using var host = CapHost(50);
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            Assert.NotNull(await host.Queue.ClaimAsync([JobLanes.Recalc], $"test/bulk{i}", JobQueueLimits.DefaultLease, CancellationToken.None));
+            slowest = watch.Elapsed > slowest ? watch.Elapsed : slowest;
+        }
+
+        Assert.True(slowest < TimeSpan.FromSeconds(1), $"claim {slowest.TotalMilliseconds:F0} мс");
     }
 
     [Theory]

@@ -85,7 +85,10 @@ public sealed partial class QuartzJobAdapter(
         // не більше `Jobs:Recalculation:FanOutMaxConcurrency` одночасно; ручний перерахунок документа й
         // інкрементний після PATCH під неї не потрапляють.
         var fanOutChild = limiter is not null && RecalculationJob.IsFanOutChild(job.GetType(), payload);
-        using var typeSlot = limiter?.TryEnter(job.GetType(), jobId, fanOutChild);
+
+        // ✎ PERF-05 (D-564c, огляд M3): глобальна стеля перерахунків, останнє місце — натисканню людини.
+        var manualPress = limiter is not null && RecalculationJob.IsManualPress(job.GetType(), payload);
+        using var typeSlot = limiter?.TryEnter(job.GetType(), jobId, fanOutChild, manualPress);
         if (limiter is not null && typeSlot is null)
         {
             LogJobTypeLimitReached(

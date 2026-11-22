@@ -8,7 +8,8 @@ namespace Ecr.Infrastructure.Jobs;
 /// Межа одночасних задач за типом у режимі Quartz (AN-116, P1-06): експорт і імпорт Excel
 /// (<see cref="JobLaneMap.IsExcel"/>) — не більше <see cref="ExcelMaxConcurrency"/> на процес;
 /// дочірні документні задачі розкладу перерахунку проєкту (<see cref="RecalculationJob.IsFanOutChild"/>) — не більше
-/// <see cref="RecalcFanOutMaxConcurrency"/> (F1, WW-02).
+/// <see cref="RecalcFanOutMaxConcurrency"/> (F1, WW-02); ✎ PERF-05 (<c>D-564c</c>): усі перерахунки методологій — не більше
+/// <see cref="RecalcMaxConcurrent"/>, останнє місце — натисканню людини (<see cref="RecalculationJob.IsManualPress"/>).
 /// </summary>
 /// <remarks>
 /// ⛔ Чому не <c>WithPriority</c> і не <c>[DisallowConcurrentExecution]</c>. Пріоритет триґера в
@@ -271,6 +272,19 @@ public sealed class QuartzJobTypeLimiter(
     /// </param>
     /// <returns>Оренда місця або <c>null</c> — слід відкласти.</returns>
     public IDisposable? TryEnter(Type jobType, string? jobId, bool recalcFanOutChild)
+        => TryEnter(jobType, jobId, recalcFanOutChild, manualPress: false);
+
+    /// <summary>
+    /// ✎ PERF-05 (огляд M3): те саме, що <see cref="TryEnter(Type, string?, bool)"/>; задача, яку НЕ натиснула людина
+    /// (<paramref name="manualPress"/> = <c>false</c>: авто, каскад, діти розкладу, проходи читачів), бере місце глобальної
+    /// стелі лише поки зайнято менше за «стеля − 1» — останнє місце в процесі лишається людині, як у черзі в базі.
+    /// </summary>
+    /// <param name="jobType">Тип реалізації задачі.</param>
+    /// <param name="jobId">Ідентифікатор задачі.</param>
+    /// <param name="recalcFanOutChild">Дитина розкладу перерахунку проєкту.</param>
+    /// <param name="manualPress">Перерахунок, який натиснула людина (<see cref="RecalculationJob.IsManualPress"/>).</param>
+    /// <returns>Оренда місця або <c>null</c> — слід відкласти.</returns>
+    public IDisposable? TryEnter(Type jobType, string? jobId, bool recalcFanOutChild, bool manualPress)
     {
         ArgumentNullException.ThrowIfNull(jobType);
 
@@ -280,10 +294,12 @@ public sealed class QuartzJobTypeLimiter(
         }
 
         // ✎ PERF-05 (D-564c): кожен перерахунок методологій — під глобальною стелею; дитина розкладу — ще й під своєю межею.
-        var heavySlot = heavy is not null && JobLaneMap.Of(jobType) == Application.Ports.JobLanes.Recalc
-            ? heavy.TryEnter(jobId, clock, WaiterExpiry)
+        var heavyApplies = heavy is not null && JobLaneMap.Of(jobType) == Application.Ports.JobLanes.Recalc;
+        var heavySlot = heavyApplies
+            ? heavy!.TryEnter(
+                jobId, clock, WaiterExpiry, manualPress || heavy.Max < 2 ? heavy.Max : heavy.Max - 1, jumpQueue: manualPress)
             : null;
-        if (heavy is not null && heavySlot is null && JobLaneMap.Of(jobType) == Application.Ports.JobLanes.Recalc)
+        if (heavyApplies && heavySlot is null)
         {
             return null;
         }
@@ -336,18 +352,19 @@ public sealed class QuartzJobTypeLimiter(
             }
         }
 
-        public Slot? TryEnter(string? jobId, TimeProvider clock, TimeSpan expiry)
+        public Slot? TryEnter(string? jobId, TimeProvider clock, TimeSpan expiry, int? limit = null, bool jumpQueue = false)
         {
             lock (sync)
             {
                 DropExpired(clock, expiry);
 
-                var free = Max - Volatile.Read(ref running);
+                var free = (limit ?? Max) - Volatile.Read(ref running);
                 var node = jobId is null ? null : Find(jobId);
 
                 // Позиція в черзі: скільки чекаючих СТОЇТЬ ПЕРЕД задачею (новоприбула - усі наявні).
+                // ✎ PERF-05 (огляд M3): натискання людини не стоїть за системними задачами, що чекають (як прохід «спершу ручні»).
                 var ahead = 0;
-                for (var current = waiters.First; current is not null && current != node; current = current.Next)
+                for (var current = waiters.First; !jumpQueue && current is not null && current != node; current = current.Next)
                 {
                     ahead++;
                 }
