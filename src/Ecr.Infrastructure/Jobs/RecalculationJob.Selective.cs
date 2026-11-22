@@ -591,7 +591,9 @@ public sealed partial class RecalculationJob
     ///   <item>абсолютний <c>[Period:#m]</c>: власник — місяць m, читач — будь-який пізніший;</item>
     ///   <item>місячна колонка <c>Formula</c>/<c>Calculated</c> (<c>IsMonthColumn</c>) без зсуву: власник — місяць колонки (Q-17),
     ///   читач — будь-який пізніший;</item>
-    ///   <item>залежність без колонки (таблиця, діапазон) на таблицю, що має обчислювані місячні колонки, — будь-який місяць.</item>
+    ///   <item>залежність без колонки (таблиця, діапазон) на таблицю, що має обчислювані місячні колонки, — будь-який місяць;</item>
+    ///   <item>✎ повторний огляд M-a: не-місячна колонка <c>Formula</c>/<c>Calculated</c> таблиці з місячними колонками (річне
+    ///   значення, власник — якір року) без зсуву: власник — якір, читач — будь-який пізніший місяць.</item>
     /// </list>
     /// <para>
     /// Лише колонки <c>Formula</c>/<c>Calculated</c> (зміну ВВЕДЕНОГО ловлять гілки входів і «похідних»). Залежність без колонки
@@ -612,9 +614,24 @@ public sealed partial class RecalculationJob
                 select sh.TemplateVersionId)
             .Distinct()
             .OrderBy(id => id)
-            .Take(MaxNightlyTemplateVersions + 1)
+            .Take(CrossReadVersionLimit + 1)
             .ToListAsync(ct)
             .ConfigureAwait(false);
+
+        // ✎ Повторний огляд M-b: версій понад стелю — перелік залежностей неповний: кожен пізніший місяць читає кожен раніший.
+        if (versionIds.Count > CrossReadVersionLimit)
+        {
+            return _crossReads = static (owner, reader) => reader > owner;
+        }
+
+        // ✎ Повторний огляд M-a: якір року (найраніший місяць календаря року проєкту) — власник не-місячних колонок
+        // маршрутизованих таблиць (річні значення, Q-17/D-474).
+        var projectId = await db.Documents.AsNoTracking().Where(d => d.Id == documentId).Select(d => d.ProjectId)
+            .FirstAsync(ct).ConfigureAwait(false);
+        var anchors = (await db.Periods.AsNoTracking().Where(p => p.ProjectId == projectId).Select(p => p.PeriodKeyValue)
+                .ToListAsync(ct).ConfigureAwait(false))
+            .GroupBy(k => k / 100)
+            .ToDictionary(g => g.Key, g => g.Min());
 
         const Domain.Enums.CellDataType formula = Domain.Enums.CellDataType.Formula;
         const Domain.Enums.CellDataType calculated = Domain.Enums.CellDataType.Calculated;
@@ -637,8 +654,11 @@ public sealed partial class RecalculationJob
                     TableHasComputedMonths = d.TableDefId != null
                         && db.ColumnDefs.Any(x => x.TableDefId == d.TableDefId && !x.IsDeleted && x.IsMonthColumn
                                                   && (x.DataType == formula || x.DataType == calculated)),
+                    AnnualOfRoutedTable = c != null && !c.IsMonthColumn
+                        && db.ColumnDefs.Any(x => x.TableDefId == c.TableDefId && !x.IsDeleted && x.IsMonthColumn),
                 })
-            .Where(x => x.Computed && ((x.Offset != null && x.Offset != 0) || x.MonthColumn || (x.Column == null && x.TableHasComputedMonths)))
+            .Where(x => x.Computed && ((x.Offset != null && x.Offset != 0) || x.MonthColumn || x.AnnualOfRoutedTable
+                                       || (x.Column == null && x.TableHasComputedMonths)))
             .Distinct()
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -657,8 +677,10 @@ public sealed partial class RecalculationJob
             }
 
             var (o, r) = (owner % 100, reader % 100);
+            var isAnchor = !anchors.TryGetValue(owner / 100, out var anchor) || anchor == owner;
             return deps.Exists(x =>
                 (x.Kind == AbsoluteDependencyKind && x.Offset == o)
+                || ((x.Offset ?? 0) == 0 && x.AnnualOfRoutedTable && isAnchor)
                 || (x.Kind != AbsoluteDependencyKind && x.Offset is < 0 and var back && r + back == o)
                 || ((x.Offset ?? 0) == 0 && x.MonthColumn && x.Month == o)
                 || ((x.Offset ?? 0) == 0 && x.Column == null && x.TableHasComputedMonths));
@@ -667,6 +689,12 @@ public sealed partial class RecalculationJob
 
     /// <summary>Вид залежності «абсолютний період» (<c>[Period:#k]</c>), як у <c>CrossPeriodReaders</c>.</summary>
     private const byte AbsoluteDependencyKind = 5;
+
+    /// <summary>
+    /// Стеля версій шаблону документа для переліку залежностей (типово — як у нічному рішенні); понад неї — «кожен пізніший
+    /// читає кожен раніший». Тести знижують її.
+    /// </summary>
+    internal int CrossReadVersionLimit { get; init; } = MaxNightlyTemplateVersions;
 
     /// <summary>Стеля переліку міжперіодних залежностей; понад неї — «кожен пізніший читає кожен раніший».</summary>
     private const int MaxCrossReads = 5000;

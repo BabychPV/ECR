@@ -65,6 +65,9 @@ public sealed class YearPressSkipsUnchangedMonthsTests(SqlServerFixture sql) : D
     /// <summary>Гілка 5: читачі результатів власника (замість роутера місяців); <c>null</c> — без гілки.</summary>
     private Func<int, Task<IReadOnlyList<int>>>? _ownerReaders;
 
+    /// <summary>Стеля версій для переліку залежностей (повторний огляд M-b); <c>null</c> — типова (64).</summary>
+    private int? _versionLimit;
+
     private int _unitId;
 
     [Fact]
@@ -559,6 +562,70 @@ public sealed class YearPressSkipsUnchangedMonthsTests(SqlServerFixture sql) : D
         Assert.Equal([202601, 202605], run.Steps);
     }
 
+    /// <summary>
+    /// ✎ Повторний огляд M-a: формула читає НЕ-місячну розрахункову колонку маршрутизованої таблиці (річне значення, власник —
+    /// якір) — зміна лише січня (якоря) будить і всі пізніші місяці; зміна березня — лише березень.
+    /// </summary>
+    /// <remarks>МУТАЦІЯ: прибрати правило «річне значення — власник якір» у <c>CrossReadsAsync</c> — червоний рядок «січень».</remarks>
+    [Theory]
+    [InlineData(1, new[] { 202601, 202602, 202603, 202604, 202605, 202606 })]
+    [InlineData(3, new[] { 202603 })]
+    public async Task Річне_значення_якоря_будить_пізніші_місяці(int editedMonth, int[] expected)
+    {
+        var (builder, document) = await ArrangeAsync();
+        await CrossReadAsync(document, kind: 0, offset: 0);
+        await CellChangeAsync(
+            document, 202600 + editedMonth, MonthColumn(document, editedMonth), CellChangeOrigins.UserEdit, Baseline.AddMinutes(1));
+
+        var run = await PressAsync(builder, document, screen: 202600 + editedMonth, Press);
+
+        Assert.Equal(expected, run.Steps);
+    }
+
+    /// <summary>
+    /// ✎ Повторний огляд M-b: версій шаблону документа понад стелю — перелік залежностей неповний: кожен пізніший місяць
+    /// читає кожен раніший (рахувати).
+    /// </summary>
+    /// <remarks>МУТАЦІЯ: прибрати перевірку <c>versionIds.Count &gt; CrossReadVersionLimit</c> — червоний.</remarks>
+    [Fact]
+    public async Task Версій_понад_стелю_кожен_пізніший_місяць_читач()
+    {
+        var (builder, document) = await ArrangeAsync();
+        _versionLimit = 0;
+
+        var run = await PressAsync(builder, document, screen: 202603, Press);
+
+        Assert.Equal([202603, 202604, 202605, 202606], run.Steps);
+    }
+
+    /// <summary>
+    /// ✎ Повторний огляд L-a: перерахунок ПОДАННЯ тримає лок аркуша, а не документа — його незакомічений запис може мати Id не
+    /// більший за межу журналу прогону, що завершився паралельно. Такі записи (позначка <c>submit-recalc</c>) будять місяць і за
+    /// часом (останні 60 хв до кінця прогону); той самий запис без позначки — ні (Id менший за межу).
+    /// </summary>
+    /// <remarks>МУТАЦІЯ: прибрати гілку позначки подання в <c>MonthCellChangesAsync</c> — червоний рядок «з позначкою».</remarks>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Запис_перерахунку_подання_будить_місяць_за_часом(bool submitMarker)
+    {
+        var (builder, document) = await ArrangeAsync(beforeBaseline: async d =>
+        {
+            await using var db = Sql.CreateContext();
+            var correlation = submitMarker ? CellChangeOrigins.SubmitRecalculationCorrelation : null;
+            await db.Database.ExecuteSqlAsync($"""
+                INSERT INTO aud.CellChange (ChangedAt, PeriodKey, DocumentId, TableRowId, RowKey, ColumnDefId, OldValue, NewValue,
+                                            ChangedByUserId, Origin, CorrelationId)
+                VALUES ({Baseline.AddMinutes(-5)}, 202604, {d.DocumentId}, {d.RowIds[0]}, N'R1', {d.ColumnDefIds[2]}, N'1', N'2', 1,
+                        {CellChangeOrigins.Recalculation}, {correlation})
+                """);
+        });
+
+        var run = await PressAsync(builder, document, screen: 202602, Press);
+
+        Assert.Equal(submitMarker ? [202602, 202604] : [202602], run.Steps);
+    }
+
     /// <summary>Залежність формули таблиці документа на колонку <c>Calculated</c> іншого місяця.</summary>
     private async Task CrossReadAsync(TestDocument document, byte kind, short offset)
     {
@@ -685,6 +752,7 @@ public sealed class YearPressSkipsUnchangedMonthsTests(SqlServerFixture sql) : D
             queue: queue)
         {
             OwnerReadersProbe = _ownerReaders,
+            CrossReadVersionLimit = _versionLimit ?? 64,
         };
     }
 
