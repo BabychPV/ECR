@@ -83,6 +83,32 @@ public static class LoginRateLimiting
     /// </remarks>
     public const int DefaultLoginPermitPerMinute = 60;
 
+    /// <summary>Скільки входів Windows (<c>login/windows</c>) дозволено з однієї адреси за хвилину (PERF-07).</summary>
+    /// <remarks>
+    /// ⛔ Було: <c>login/windows</c> ділив з <c>login/local</c> одне вікно <see cref="DefaultLoginPermitPerMinute"/>
+    /// (60/хв на адресу). За NAT, проксі без довіреного <c>X-Forwarded-For</c> або RDS/Citrix усі користувачі
+    /// майданчика мають одну адресу: 1000 людей о 9:00 впускалися ≥ 17 хв, решта діставала 429 (аудит PERF1000).
+    ///
+    /// ⚠ Чому для Windows межа вища. Межа входу існує через PBKDF2 (≈0,1 с ядра на спробу, <see cref="DefaultLoginPermitPerMinute"/>).
+    /// Вхід Windows PBKDF2 не виконує зовсім: запит уже пройшов Negotiate (Kerberos), у базі — один пошук
+    /// користувача, а пароля, який можна вгадувати, немає. Тож це не вектор підбору пароля; межа лишається лише
+    /// запобіжником від шторму запитів з одного джерела.
+    ///
+    /// ⚠ 600/хв: 1000 користувачів з однієї адреси входять за ~1,7 хв. Відхилені Negotiate-запити (401-виклик) теж
+    /// рахуються, і це нормально: виклик — дешевий. Розділ окремий від <c>login/local</c>: шторм Windows-входів не
+    /// з'їдає вікно локального входу (і навпаки), а межа <c>login/local</c> (60/хв) лишається незмінною.
+    /// </remarks>
+    public const int DefaultWindowsLoginPermitPerMinute = 600;
+
+    /// <summary>Ключ конфігурації: межа входів Windows за хвилину з однієї адреси (PERF-07).</summary>
+    public const string WindowsLoginPermitKey = "Security:RateLimit:WindowsLoginPermitPerMinute";
+
+    /// <summary>Шлях входу Windows (Negotiate).</summary>
+    public const string WindowsLoginPath = "/api/v1/login/windows";
+
+    /// <summary>Префікс розділу входів Windows — щоб не збігтися з розділом <c>login/local</c> тієї самої адреси.</summary>
+    private const string WindowsLoginPartitionPrefix = "login-windows:";
+
     /// <summary>Префікс шляхів входу; друге, що обмежує глобальний обмежувач, — <see cref="ChangePasswordPath"/>.</summary>
     /// <remarks>
     /// ⚠ Обидва входи, не лише локальний. <c>login/windows</c> вимагає
@@ -292,6 +318,8 @@ public static class LoginRateLimiting
         ArgumentNullException.ThrowIfNull(configuration);
 
         var permitPerMinute = configuration.GetValue(PermitKey, DefaultLoginPermitPerMinute);
+        var windowsPermitPerMinute = configuration.GetValue(
+            WindowsLoginPermitKey, DefaultWindowsLoginPermitPerMinute);
         var changePasswordPermit = configuration.GetValue(
             ChangePasswordPermitKey, DefaultChangePasswordPermitPerMinute);
         var cspReportPermit = configuration.GetValue(
@@ -319,6 +347,14 @@ public static class LoginRateLimiting
 
             options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
             {
+                // PERF-07: вхід Windows — окремий розділ і вища межа (без PBKDF2, не вектор підбору пароля).
+                if (context.Request.Path.Equals(WindowsLoginPath, StringComparison.OrdinalIgnoreCase)
+                    || context.Request.Path.Equals(WindowsLoginPath + "/", StringComparison.OrdinalIgnoreCase))
+                {
+                    return PerMinute(
+                        WindowsLoginPartitionPrefix + clientAddress.KeyOf(context), windowsPermitPerMinute);
+                }
+
                 if (context.Request.Path.StartsWithSegments(LoginPathPrefix, StringComparison.OrdinalIgnoreCase))
                 {
                     return PerMinute(clientAddress.KeyOf(context), permitPerMinute);
