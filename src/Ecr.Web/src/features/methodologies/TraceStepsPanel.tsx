@@ -63,6 +63,7 @@ export function MethodologyTraceStepsPanel({
         skeleton="table"
         onRetry={() => void traceSteps.refetch()}
       >
+        {/* ⚠ Порожня відповідь (null) — як «вимкнено», а не TypeError: без цього межа помилок повторювала рендер нескінченно. */}
         {(state) => (
           <Stack gap="sm">
             <Text size="sm" c="dimmed">
@@ -71,7 +72,7 @@ export function MethodologyTraceStepsPanel({
 
             <Switch
               label={t('methodologies.traceSteps.label')}
-              checked={state.traceSteps}
+              checked={state?.traceSteps === true}
               disabled={!editable || save.isPending}
               onChange={(event) => {
                 if (save.isPending) return;
@@ -79,7 +80,7 @@ export function MethodologyTraceStepsPanel({
               }}
             />
 
-            {!state.traceSteps && (
+            {state?.traceSteps !== true && (
               <Alert color="statusInfo" data-testid="trace-steps-off-note">
                 {t('methodologies.traceSteps.offNote')}
               </Alert>
