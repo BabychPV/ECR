@@ -121,8 +121,11 @@ public sealed class SourceDocumentChangeHookTests(SqlServerFixture sql) : DbJobQ
 
         var recalculations = await RecalculationRowsAsync(consumer);
         var only = Assert.Single(recalculations);
+        // ✎ PERF-06 (D-566): каскад правки джерела — ОДНА задача на споживача й рік (doc{id}-y{рік}-dependents) лише з місяцем зміни.
         Assert.Equal(
-            $"{nameof(IRecalculationJob)}~{SourceDependencyWorld.DependentsTarget(consumer, Month)}", only.TargetKey);
+            $"{nameof(IRecalculationJob)}~{CalculationTrigger.SourceCascadeTargetOf(consumer.DocumentId, SourceDependencyWorld.Year)}",
+            only.TargetKey);
+        Assert.Contains($"\"cascadePeriods\":[{SourceDependencyWorld.Period(Month)}]", only.Payload, StringComparison.Ordinal);
         Assert.Contains("\"sourceHop\":1", only.Payload, StringComparison.Ordinal);
     }
 
@@ -310,7 +313,10 @@ public sealed class SourceDocumentChangeHookTests(SqlServerFixture sql) : DbJobQ
         var parent = Assert.Single(await ParentRowsAsync(bindingId));
         await RunParentAsync(parent.Payload!);
         var only = Assert.Single(await RecalculationRowsAsync(consumer));
-        Assert.Equal($"{nameof(IRecalculationJob)}~{SourceDependencyWorld.DependentsTarget(consumer, Month)}", only.TargetKey);
+        Assert.Equal(
+            $"{nameof(IRecalculationJob)}~{CalculationTrigger.SourceCascadeTargetOf(consumer.DocumentId, SourceDependencyWorld.Year)}",
+            only.TargetKey);
+        Assert.Contains($"\"cascadePeriods\":[{SourceDependencyWorld.Period(Month)}]", only.Payload, StringComparison.Ordinal);
 
         // Без петлі: успіх перерахунку джерела власного перерахунку джерела більше не ставить.
         Assert.Single(await RecalculationRowsAsync(source));

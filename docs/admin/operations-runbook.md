@@ -1008,6 +1008,20 @@ SELECT [State], COUNT(*) FROM itg.JobProgress WITH (INDEX(IX_JobProgress_Claim))
 WHERE Lane = 'recalc' AND [State] IN ('Queued', 'Running') GROUP BY [State];  -- Running ≤ MaxConcurrent
 ```
 
+**Каскад від правки документа-джерела (✎ 2026-11-22, `D-566`, PERF-06).** Правка HSE400 (зв'язки B179) після власного
+перерахунку джерела ставить у кожного документа-споживача ОДНУ задачу на рік — ціль `IRecalculationJob~doc{id}-y{рік}-dependents`,
+payload `cascadePeriods` — лише з місяцями, що читають змінений місяць джерела (обсяг ребра графа: «місяць» — той самий
+місяць; «рік»/«усе»/немісячне джерело — увесь рік), і пізнішими місяцями, що читають їхні обчислені числа. Правки за 10 с
+від першої зливаються в неї (об'єднання місяців); якщо ланцюжок споживача вже йде, нові місяці дописуються (`cascadeAppend`),
+без повернення на січень. Задача системна — під стелею `MaxConcurrent` (не більше «стеля − 1»). Quartz у пам'яті — поперіодно,
+як доти (`doc{id}-p{період}-dependents`). Скільки каскаду в черзі зараз:
+
+```sql
+SELECT [State], COUNT(*) AS Jobs FROM itg.JobProgress WITH (INDEX(IX_JobProgress_Claim))
+WHERE Lane = 'recalc' AND [State] IN ('Queued', 'Running') AND TargetKey LIKE N'%-dependents'
+GROUP BY [State];  -- ≤ документів-споживачів × років, а не × місяців
+```
+
 **Інтерактивні місця воркера Api (`D-564d`, PERF-04).** Перерахунок формул після правки комірки (лейн `interactive`) іде
 у воркері кожного вузла Api: `Jobs:Interactive:ReservedConcurrency` власних місць (типово **1**) плюс спільні
 `Jobs:Api:MaxConcurrency` (типово **4**, спільні з лейном `default`, а при `InProcess` — і з перерахунком). Задача формул

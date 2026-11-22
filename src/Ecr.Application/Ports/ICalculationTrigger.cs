@@ -97,7 +97,51 @@ public interface ICalculationTrigger
     public Task<string?> RequestDependentsAsync(
         long documentId, PeriodKey periodKey, int sourceHop, ApprovedRecalculationOverride? approvedOverride, CancellationToken ct)
         => RequestDependentsAsync(documentId, periodKey, sourceHop, ct);
+
+    /// <summary>
+    /// ✎ PERF-06 (<c>D-566</c>): чи тригер ставить каскад від правки документа-джерела ОДНІЄЮ задачею на документ-споживач і
+    /// рік з об'єднанням періодів (<see cref="RequestSourceCascadeAsync"/>); <c>false</c> — поперіодно
+    /// (<see cref="RequestDependentsAsync(long, PeriodKey, int, CancellationToken)"/>), як до D-566.
+    /// </summary>
+    /// <remarks>Типово <c>false</c> (фейки тестів); справжній тригер — за чергою (<see cref="IBackgroundJobScheduler.MergesCascadePeriods"/>).</remarks>
+    public bool CoalescesCascadePeriods => false;
+
+    /// <summary>
+    /// ✎ PERF-06 (<c>D-566</c>, рішення людини 22.11): каскад від правки документа-джерела B179 — ОДНА задача на документ-споживач
+    /// і рік, що рахує лише <paramref name="periodKeys"/> (періоди, які читають змінені місяці джерела) і пізніші місяці, що
+    /// читають їхні обчислені числа. Постановки за вікно каскаду (<c>CalculationTrigger.CascadeDebounce</c>) зливаються з
+    /// ОБ'ЄДНАННЯМ періодів; ланцюжок, що вже йде, дописує нові періоди, не повертаючись на перший місяць.
+    /// </summary>
+    /// <param name="documentId">Документ-споживач.</param>
+    /// <param name="year">Календарний рік періодів.</param>
+    /// <param name="periodKeys">Періоди споживача (ключі <c>yyyyMM</c> року <paramref name="year"/>).</param>
+    /// <param name="sourceHop">Ланка ланцюжка джерел (≥ 1).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Задача і періоди, які вона рахуватиме; без задачі — жоден період не дозволяє запису.</returns>
+    /// <remarks>Типова реалізація — поперіодно (фейки тестів).</remarks>
+    public async Task<SourceCascadeEnqueued> RequestSourceCascadeAsync(
+        long documentId, int year, IReadOnlyCollection<int> periodKeys, int sourceHop, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(periodKeys);
+        string? last = null;
+        var queued = new List<int>();
+        foreach (var period in periodKeys.Distinct().Order())
+        {
+            if (await RequestDependentsAsync(documentId, new PeriodKey(period), sourceHop, ct).ConfigureAwait(false) is { } jobId)
+            {
+                last = jobId;
+                queued.Add(period);
+            }
+        }
+
+        return new SourceCascadeEnqueued(last, queued);
+    }
 }
+
+/// <summary>✎ PERF-06 (<c>D-566</c>): результат постановки каскаду від правки документа-джерела.</summary>
+/// <param name="JobId">Задача; <c>null</c> — не поставлено (жоден період не дозволяє запису).</param>
+/// <param name="Periods">Періоди, які задача рахуватиме (дозволені до запису, без покритих «з затвердженими»).</param>
+public sealed record SourceCascadeEnqueued(string? JobId, IReadOnlyList<int> Periods);
 
 /// <summary>
 /// B80 N5 (D-554): явне перекриття «перерахувати також затверджені залежні» — лише адміністратор з правом

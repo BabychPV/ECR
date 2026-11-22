@@ -495,6 +495,12 @@ public sealed partial class RecalculationJob(
                     chainDecision ??= await PlanChainAsync(docRequest, periods, annualOnly, ct).ConfigureAwait(false);
                     periods = Planned(periods, chainDecision);
                 }
+                else if (!chain && periods.Count > 0 && request.CascadePeriods is not null && !request.ForceFull)
+                {
+                    // ✎ PERF-06 (D-566): каскад без ланцюжка (немає оренди черги в базі) — той самий план: періоди каскаду й
+                    // пізніші читачі їхніх обчислених чисел, за зростанням однією задачею.
+                    periods = Planned(periods, await PlanChainAsync(docRequest, periods, annualOnly, ct).ConfigureAwait(false));
+                }
 
                 // ✎ PSS-04/06: крок ланцюжка — лише ПЕРШИЙ період решти скоупу. Задачі, що чекають на нього, паркуються
                 // до читання входів; якщо щось запарковано — стан періодів перечитується (рішення «що рахувати»
@@ -1061,6 +1067,21 @@ public sealed partial class RecalculationJob(
                     RecalculationDocumentLock.Resource(request.DocumentId));
             }
 
+            // ✎ PERF-06 (D-566, огляд F1): крок ланцюжка каскаду впав — решта плану (з дописаними злиттям місяцями й пізнішими
+            // читачами) їде з винятком; якщо провал остаточний (без ретраю), виконавець ставить її новою задачею каскаду на ту
+            // саму ціль, а рядок цієї — Failed з місяцем провалу (JobFailureFollowUp). Повтор кроку (транзієнтний збій) іде з
+            // payload як є. Сам місяць провалу — у новій задачі немає: його прогін Failed (видно в журналі прогонів), а
+            // детерміновану помилку повтор не виправить.
+            if (chain && request.CascadePeriods is not null && stepPeriod is { } failedStep)
+            {
+                int[] rest = [.. remaining.Concat(request.CascadeAppend ?? []).Where(p => p != failedStep).Distinct().Order()];
+                if (rest.Length > 0)
+                {
+                    JobFailureFollowUp.Attach(
+                        ex, JsonSerializer.Serialize(CascadeFollowUpRequest(request, rest), PayloadOptions), failedStep, rest);
+                }
+            }
+
             throw;
         }
 
@@ -1102,6 +1123,10 @@ public sealed partial class RecalculationJob(
                 ChainPlan = [.. remaining],
                 ChainSkipped = chainDecision is { Skipped.Count: > 0 } skippedSoFar ? [.. skippedSoFar.Skipped] : null,
                 ChainRecheck = false,
+
+                // ✎ PERF-06 (D-566): злиті періоди каскаду й затравки вже в плані (решті) — наступний крок їх не дописує вдруге.
+                CascadeAppend = null,
+                CascadeSeeds = null,
             };
 
             // ✎ PSS-06: задачі документа, що чекають на ПІЗНІШІ періоди ланцюжка, — його ж робота: паркуються до кроку
@@ -1384,6 +1409,28 @@ public sealed partial class RecalculationJob(
             ChainPlan = null,
             ChainSkipped = null,
             ChainRecheck = false,
+            CascadePeriods = null,
+            CascadeAppend = null,
+            CascadeSeeds = null,
+        };
+
+    /// <summary>
+    /// ✎ PERF-06 (огляд F1): нова задача каскаду (не ланцюжок) на періоди <paramref name="periods"/> — решта роботи ланцюжка,
+    /// крок якого остаточно впав.
+    /// </summary>
+    private static RecalculationRequest CascadeFollowUpRequest(RecalculationRequest request, int[] periods)
+        => request with
+        {
+            ChainAfter = null,
+            ChainDone = null,
+            ChainElapsedMs = null,
+            ChainTotal = null,
+            ChainPlan = null,
+            ChainSkipped = null,
+            ChainRecheck = false,
+            CascadePeriods = periods,
+            CascadeAppend = null,
+            CascadeSeeds = null,
         };
 
     /// <summary>
@@ -3671,6 +3718,21 @@ public sealed partial class RecalculationJob(
 /// ✎ PERF-02 (<c>D-564b</c>): у ланцюжок злилося нове натискання — наступний крок перевіряє зроблені й пропущені місяці
 /// детектором і дописує змінені (а не починає з першого місяця).
 /// </param>
+/// <param name="CascadePeriods">
+/// ✎ PERF-06 (<c>D-566</c>, рішення людини 22.11): каскад від правки документа-джерела B179 — ЛИШЕ ці періоди року
+/// споживача (ті, що читають змінені місяці джерела) і пізніші місяці, що читають їхні обчислені числа; постановки за вікно
+/// каскаду зливаються об'єднанням (<c>CalculationTrigger.RequestSourceCascadeAsync</c>). <c>null</c> — не каскад.
+/// </param>
+/// <param name="CascadeAppend">
+/// ✎ PERF-06 (<c>D-566</c>): періоди каскаду, що злилися в ланцюжок, який уже йде (між кроками чи позаду кроку), — наступний
+/// крок дописує їх у план ЗАВЖДИ, і вже зроблені теж (джерело змінилося після їхнього кроку), без детектора й без повернення
+/// на перший місяць.
+/// </param>
+/// <param name="CascadeSeeds">
+/// ✎ PERF-06 (<c>D-566</c>, огляд F2): місяці каскаду, які САМІ не рахуються (їх уже покриває задача «з затвердженими»
+/// <c>-dependents-approved</c> — надмножина роботи), але пізніші місяці, що читають їхні обчислені числа, — так: задача
+/// названого періоду будить лише ранніших читачів. Злиття — об'єднанням.
+/// </param>
 public sealed record RecalculationRequest(
     int ProjectId,
     long DocumentId,
@@ -3696,7 +3758,10 @@ public sealed record RecalculationRequest(
     int[]? ScreenPeriods = null,
     int[]? ChainPlan = null,
     int[]? ChainSkipped = null,
-    bool ChainRecheck = false)
+    bool ChainRecheck = false,
+    int[]? CascadePeriods = null,
+    int[]? CascadeAppend = null,
+    int[]? CascadeSeeds = null)
 {
     /// <summary>
     /// ✎ B59: нижня межа ключа періоду скоупу (включно); без року — <see cref="int.MinValue"/>.
@@ -3705,12 +3770,14 @@ public sealed record RecalculationRequest(
     /// <remarks>
     /// ✎ PERF-01/02 (<c>D-564a</c>/<c>D-564b</c>): ланцюжок із планом (<see cref="ChainPlan"/>) чи з перевіркою злиття
     /// (<see cref="ChainRecheck"/>) бачить усі відкриті періоди року — план може дописати й уже зроблений місяць.
+    /// ✎ PERF-06 (<c>D-566</c>, огляд F3): так само ланцюжок зі злитими періодами каскаду (<see cref="CascadeAppend"/>, і
+    /// старий payload без плану) — дописаний місяць може бути не пізнішим за <see cref="ChainAfter"/>.
     /// </remarks>
     internal int FromKey => PeriodKey is not null
         ? int.MinValue
         : Math.Max(
             Year is { } y ? y * 100 : int.MinValue,
-            ChainAfter is { } after && ChainPlan is null && !ChainRecheck ? after + 1 : int.MinValue);
+            ChainAfter is { } after && ChainPlan is null && !ChainRecheck && CascadeAppend is null ? after + 1 : int.MinValue);
 
     /// <summary>✎ B59: верхня межа ключа періоду скоупу (включно); без року — <see cref="int.MaxValue"/>.</summary>
     internal int ToKey => PeriodKey is null && Year is { } y ? (y * 100) + 99 : int.MaxValue;

@@ -21,6 +21,17 @@ public interface IBackgroundJobScheduler
     /// </remarks>
     public bool EnlistsInCallerTransaction => false;
 
+    /// <summary>
+    /// ✎ PERF-06 (<c>D-566</c>): чи злиття постановок перерахунку на ту саму ціль ОБ'ЄДНУЄ періоди каскаду (payload
+    /// <c>cascadePeriods</c>) і дописує їх у ланцюжок, що вже йде (<c>cascadeAppend</c>).
+    /// </summary>
+    /// <remarks>
+    /// <c>true</c> — черга в базі (<c>DbJobQueue</c>): одна задача каскаду на документ-споживач і рік. <c>false</c> (типово;
+    /// Quartz у пам'яті) — злиття лишає payload ПЕРШОЇ постановки, і місяці наступних правок губилися б: каскад іде
+    /// поперіодними цілями, як до D-566.
+    /// </remarks>
+    public bool MergesCascadePeriods => false;
+
     /// <summary>Ставить задачу в чергу негайно.</summary>
     /// <param name="payload">Завдання.</param>
     /// <param name="ct">Токен скасування.</param>
