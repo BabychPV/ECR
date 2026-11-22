@@ -24,7 +24,7 @@ import type {
   ReportDefinition,
   ReportSnapshotSummary,
 } from '@/api/types';
-import { outcomeOf, pollInterval } from '@/features/workflow/jobFollow';
+import { jobRefetchInterval, outcomeOf } from '@/features/workflow/jobFollow';
 import { humanizeJobId } from '@/features/workflow/jobLabel';
 import { LazyReportDefinitionsModal } from '@/features/reports/LazyReportDefinitionsModal';
 import { snapshotExportUrl } from '@/features/reports/api';
@@ -245,7 +245,7 @@ export function SnapshotsPage(): JSX.Element {
     queryKey: ['job', jobId],
     queryFn: () => apiFetch<JobStatus>(`/api/v1/jobs/${encodeURIComponent(jobId ?? '')}`),
     enabled: jobId !== null,
-    refetchInterval: (query) => pollInterval(query.state.data?.state),
+    refetchInterval: (query) => jobRefetchInterval(query),
     retry: false,
   });
 

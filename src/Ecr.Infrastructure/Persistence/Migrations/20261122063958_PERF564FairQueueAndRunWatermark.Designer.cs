@@ -303,8 +303,13 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.Property<long?>("TableInstanceId")
                         .HasColumnType("bigint");
 
-                    b.Property<string>("TraceJson")
-                        .HasColumnType("nvarchar(max)");
+                    b.Property<byte[]>("TraceJsonGz")
+                        .HasColumnType("varbinary(max)")
+                        .HasColumnName("TraceJsonGz");
+
+                    b.Property<string>("TraceJsonText")
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("TraceJson");
 
                     b.Property<decimal?>("Value")
                         .HasPrecision(34, 16)
@@ -440,6 +445,10 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)")
                         .HasColumnName("RowActivityFilter");
+
+                    b.Property<bool>("TraceSteps")
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false, "DF_Methodology_TraceSteps");
 
                     b.HasKey("Id");
 

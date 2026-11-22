@@ -1,4 +1,5 @@
 // src/Ecr.Application/Documents/GetCalculationIssuesHandler.cs
+using Ecr.Application.Calculations;
 using Ecr.Application.Calculations.Dto;
 using Ecr.Application.Common;
 using Ecr.Application.Ports;
@@ -36,7 +37,10 @@ public sealed class GetCalculationIssuesHandler(
     IMonthColumnRouter? monthRouter = null,
 
     // ✎ B80 N4: проблеми документа-джерела (зв'язка ApprovedOnly); `null` (старі тести) — поля немає.
-    ISourceIssueReader? sourceIssues = null)
+    ISourceIssueReader? sourceIssues = null,
+
+    // ✎ D-565: факт прогону «чиї кроки записано» для StepError; `null` (старі тести) — поля немає.
+    ICalculationTraceReader? traces = null)
 {
     private readonly CalculationIssueHints? hints =
         rowStore is null || cellStore is null || metadata is null || periods is null || methodologies is null
@@ -198,6 +202,8 @@ public sealed class GetCalculationIssuesHandler(
             : await hints.BuildAsync(documentId, key, sheetCopyId, unmatched, readable.CanReadColumn, ct)
                 .ConfigureAwait(false);
 
+        var traceFacts = await TraceFactsAsync(visible, ct).ConfigureAwait(false);
+
         var rejected = visible.Where(r => HasRuleReason(r.Kind)).ToList();
         var why = reasons is null || rejected.Count == 0 || !key.IsValid
             ? new Dictionary<(int, string, int?), CalculationRejectionReason>()
@@ -230,7 +236,9 @@ public sealed class GetCalculationIssuesHandler(
                         monthNumber,
                         r.StepCode,
                         r.ErrorCode,
-                        r.AffectedCount);
+                        r.AffectedCount,
+                        r.MethodologyId,
+                        TraceStateOf(r, traceFacts));
                 }),
             ],
             built.Tables.Count == 0 ? null : built.Tables,
@@ -340,6 +348,45 @@ public sealed class GetCalculationIssuesHandler(
         return formulaErrors is null || refs.Count == 0
             ? new Dictionary<(int ColumnDefId, long EntryId), LocalizedText>()
             : await formulaErrors.LookupNamesAsync(refs, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// ✎ D-565: факт «чиї кроки записано» прогонів, що дали проблеми <c>StepError</c>, — одним запитом.
+    /// </summary>
+    private async Task<IReadOnlyDictionary<long, TraceStepsFact?>> TraceFactsAsync(
+        IReadOnlyList<CalculationIssueRow> rows, CancellationToken ct)
+    {
+        var runIds = rows
+            .Where(r => r.Kind == ICalculationIssueStore.StepError && r.CalculationRunId is not null)
+            .Select(r => r.CalculationRunId!.Value)
+            .Distinct()
+            .ToList();
+        if (traces is null || runIds.Count == 0)
+        {
+            return new Dictionary<long, TraceStepsFact?>();
+        }
+
+        var profiles = await traces.ReadRunProfilesAsync(runIds, ct).ConfigureAwait(false);
+        return profiles.ToDictionary(p => p.Key, p => ModuleProfile.ReadTraceSteps(p.Value));
+    }
+
+    /// <summary>
+    /// ✎ D-565: чи записав прогін проблеми кроки її методології. Прогін до D-565 (факту немає) писав кроки за
+    /// <c>TraceLevel</c> версії — «записано»; прогону вже немає чи методологія невідома — <c>null</c> (не вгадуємо).
+    /// </summary>
+    private static string? TraceStateOf(CalculationIssueRow row, IReadOnlyDictionary<long, TraceStepsFact?> facts)
+    {
+        if (row.Kind != ICalculationIssueStore.StepError
+            || row.CalculationRunId is not { } runId
+            || row.MethodologyId is not { } methodologyId
+            || !facts.TryGetValue(runId, out var fact))
+        {
+            return null;
+        }
+
+        return fact is null || fact.StepsRecorded(methodologyId)
+            ? CalculationIssueDto.TraceStepsRecorded
+            : CalculationIssueDto.TraceStepsNotRecorded;
     }
 
     /// <summary>

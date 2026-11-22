@@ -384,7 +384,20 @@ public sealed record MethodologyDescriptor(
     NumericMode NumericMode,
     CalendarMode CalendarMode,
     TraceLevel TraceLevel,
-    MethodologyEngine Engine = MethodologyEngine.Formulas);
+    MethodologyEngine Engine = MethodologyEngine.Formulas)
+{
+    /// <summary>
+    /// ✎ D-565 (PERF-03): прапор методології «трасувати проміжні кроки» (<c>Methodology.TraceSteps</c>).
+    /// <c>false</c> (типово) — прогін не пише <c>calc.CalculationStep</c>; результати й входи пишуться як і раніше.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ На обчислення не впливає: модуль рахує й збирає трейс у пам'яті за <see cref="TraceLevel"/> однаково
+    /// (з кроків виводяться входи <c>calc.CalculationInput</c> і проблема рядка <c>StepError</c>), а відкидає кроки
+    /// лише запис (<c>CalculationOutputWriter</c>). Тому числа з прапором і без нього побітово ті самі.
+    /// Ставить оркестратор одним читанням на прогін (<c>MethodologyResolver.TraceStepMethodologiesAsync</c>).
+    /// </remarks>
+    public bool TraceSteps { get; init; }
+}
 
 /// <summary>
 /// Вхід розрахунку — <b>один рядок документа</b> з усіма аргументами.

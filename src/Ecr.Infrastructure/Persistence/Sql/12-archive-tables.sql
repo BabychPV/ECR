@@ -257,6 +257,12 @@ IF COL_LENGTH(N'arc.CalculationStep', N'TableInstanceId') IS NULL
     ALTER TABLE arc.CalculationStep ADD TableInstanceId bigint NULL;
 GO
 
+-- D-565 (PERF-03): стиснений трейс кроку — GZIP(UTF-16LE), формат `COMPRESS(N'…')`; читати
+-- `COALESCE(TraceJson, CAST(DECOMPRESS(TraceJsonGz) AS nvarchar(max)))`.
+IF COL_LENGTH(N'arc.CalculationStep', N'TraceJsonGz') IS NULL
+    ALTER TABLE arc.CalculationStep ADD TraceJsonGz varbinary(max) NULL;
+GO
+
 -- D4 аудиту: позначка осиротілого рядка (`doc.TableRow.IsOrphaned`). Без неї
 -- архівування+відновлення скидало прапорець у 0, і осиротілі рядки переставали
 -- блокувати подання (ECR-SUB-4221). Копіюють `usp_ArchiveYear`/`usp_RestoreYear`.

@@ -91,6 +91,10 @@ $c = Read-Host 'ecr.auth' -AsSecureString
 Вердикт `Verify-LandTestDocument.ps1`: для кожної методології — результатів ≥ 1, `CategoryRuleRejected` = 0,
 `NoMatchingRule` на рядках `LTD-*` = 0, останній прогін не `Failed`, невдалих кроків (`CalculationStep.Value IS NULL`)
 на її рядку = 0, крім KNOWN. Код 0 — прийнято, 1 — ні, 2 — немає документа / Current-прогону.
+✎ D-565: кроки трейсу пишуться лише для методологій з увімкненим «трасувати проміжні кроки» (типово вимкнено). Для
+методології без прапора (секція `TRACEOFF`) невдалі кроки рахуються з проблем рядка `StepError` (B66), колонка
+`FailedSteps` показує `<n> (StepError)`; щоб побачити самі кроки, увімкніть прапор у редакторі методології й
+перерахуйте. Стиснений `TraceJsonGz` скрипт читає через `COALESCE(TraceJson, CAST(DECOMPRESS(TraceJsonGz) AS nvarchar(max)))`.
 KNOWN — `knownConstantGap = yes` у `land-test-doc.methodologies.csv`; причину пише `knownReason` (типово «missing
 constants»).
 

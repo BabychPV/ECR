@@ -1,10 +1,13 @@
-﻿/**
+﻿import { QueuedPollSteps, jittered, stepOf, streakOf } from '@/shared/polling/pollBackoff';
+
+/**
  * Як часто питати стан фонової задачі.
  *
  * ⚠ Те саме число, що й у `ExportButton.tsx`: обидві задачі однакової
  * природи — фонові, з прогресом, за яким стежить той самий екран.
  */
 export const PollMs = 1500;
+
 
 /**
  * Що показати оператору, коли стеження закінчилося.
@@ -103,4 +106,32 @@ export function outcomeOf(
  */
 export function badgeStateOf(status: { readonly state: string; readonly effectiveState?: string | null }): string {
   return status.effectiveState ?? status.state;
+}
+
+/** The part of a TanStack query the job pollers read (keeps this module free of the library). */
+interface JobPollQuery {
+  readonly state: {
+    readonly data: { readonly state?: string; readonly effectiveState?: string | null } | undefined;
+    readonly dataUpdatedAt: number;
+  };
+}
+
+/**
+ * `refetchInterval` for a job status query (PERF-08).
+ *
+ * - `Running` (or a fanned-out parent): `runningMs` (default 1.5 s, +-20 %) - progress stays live;
+ * - `Queued`: back-off 2 -> 4 -> 8 -> 15 s (+-20 %) while the answer stays `Queued`; the first `Running` answer
+ *   returns to the fast rate at once (the streak resets), and a job queued again later starts the schedule over;
+ * - terminal / no answer: `false`, as `pollInterval`.
+ *
+ * ⚠ A hidden tab does not poll at all (`refetchIntervalInBackground` is off by default) and asks once on return.
+ */
+export function jobRefetchInterval(query: JobPollQuery, runningMs: number = PollMs): number | false {
+  const { data, dataUpdatedAt } = query.state;
+  if (pollInterval(data?.state, data?.effectiveState) === false) return false;
+
+  const streak = streakOf(query, dataUpdatedAt, data?.state === 'Queued' ? 'queued' : null);
+  if (streak === 0) return jittered(runningMs, dataUpdatedAt);
+
+  return jittered(stepOf(QueuedPollSteps, streak), dataUpdatedAt);
 }

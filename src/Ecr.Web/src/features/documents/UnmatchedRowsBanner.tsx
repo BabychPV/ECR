@@ -4,6 +4,7 @@ import type { DocumentTableDto } from '@/api/types';
 import { formatDateTime } from '@/shared/format/datetime';
 import { language, t } from '@/shared/i18n';
 import type { UnmatchedRows } from './useUnmatchedRows';
+import { StepTraceModal, type StepTraceTarget } from './StepTraceModal';
 import {
   groupRowCount,
   groupUnmatchedRows,
@@ -64,6 +65,17 @@ interface UnmatchedRowsBannerProps {
   readonly narrow?: boolean;
   /** ✎ B78: вміст у «Технічних деталях» панелі проблем розрахунку — без власного банера й згортання. */
   readonly embedded?: boolean;
+  /**
+   * ✎ D-565: документ і період — щоб рядок StepError, для якого прогін записав кроки, відкривав крок, що впав
+   * (`GET …/calculation-steps`). Без них кнопки немає (лише перехід до рядка, як доти).
+   */
+  readonly documentId?: number | undefined;
+  readonly periodKey?: number | undefined;
+}
+
+/** ✎ D-565: період прогону рядка — для річної розкладки місяць рядка, інакше період сторінки. */
+function rowPeriodKey(periodKey: number, monthNumber: number | null): number {
+  return monthNumber === null ? periodKey : Math.floor(periodKey / 100) * 100 + monthNumber;
 }
 
 /**
@@ -87,6 +99,8 @@ export function UnmatchedRowsBanner({
   onOpenRow,
   narrow = false,
   embedded = false,
+  documentId,
+  periodKey,
 }: UnmatchedRowsBannerProps): JSX.Element | null {
   const groups = useMemo(
     () => groupUnmatchedRows(rows.issues, tables, rows.hints),
@@ -95,6 +109,7 @@ export function UnmatchedRowsBanner({
   const storageKey = unmatchedCollapsedKey(userId);
   const [collapsed, setCollapsed] = useState(() => readCollapsed(storageKey));
   const [allGroups, setAllGroups] = useState(false);
+  const [stepTarget, setStepTarget] = useState<StepTraceTarget | null>(null);
 
   if (groups.length === 0) return null;
 
@@ -155,6 +170,26 @@ export function UnmatchedRowsBanner({
                 </Text>
               )}
               {group.hint !== null && <AllowedValues hint={group.hint} />}
+              {/* ✎ D-565: кроків цього прогону немає — сказати чому й хто може ввімкнути трасування (з переходом). */}
+              {group.stepError && group.traceOff.length > 0 && (
+                <Text size="sm" data-testid="document-step-error-trace-off">
+                  {t('document.stepErrorRows.traceOff', {
+                    methodologies: group.traceOff.map((m) => m.code ?? String(m.methodologyId)).join(', '),
+                  })}{' '}
+                  {group.traceOff.map((m, index) => (
+                    <Fragment key={m.methodologyId}>
+                      {index > 0 && ' · '}
+                      <Anchor
+                        href={`/admin/methodologies/${String(m.methodologyId)}/versions`}
+                        size="sm"
+                        data-testid="document-step-error-trace-link"
+                      >
+                        {t('document.stepErrorRows.traceOffLink', { methodology: m.code ?? String(m.methodologyId) })}
+                      </Anchor>
+                    </Fragment>
+                  ))}
+                </Text>
+              )}
               {/* B66: підсумок неактивних — лише кількість, без поштучних посилань (виключення за задумом). */}
               {!group.inactive && (
                 <Group gap="xs" wrap="wrap">
@@ -198,6 +233,30 @@ export function UnmatchedRowsBanner({
                       >
                         {label}
                       </Anchor>
+                      {/* ✎ D-565: прогін записав кроки — відкрити крок, що впав, і його входи. */}
+                      {row.stepError?.trace === 'Recorded' && documentId !== undefined && periodKey !== undefined && (
+                        <Anchor
+                          component="button"
+                          type="button"
+                          size="xs"
+                          data-testid="document-step-error-show-step"
+                          data-row-key={row.rowKey}
+                          aria-label={`${table} · ${label} · ${t('document.stepErrorRows.showStep')}`}
+                          onClick={() =>
+                            setStepTarget({
+                              documentId,
+                              periodKey: rowPeriodKey(periodKey, row.stepError?.monthNumber ?? null),
+                              tableInstanceId,
+                              rowKey: row.rowKey,
+                              label,
+                              stepCode: row.stepError?.step ?? null,
+                              methodologyId: row.stepError?.methodologyId ?? null,
+                            })
+                          }
+                        >
+                          ({t('document.stepErrorRows.showStep')})
+                        </Anchor>
+                      )}
                       </Fragment>
                     );
                   })}
@@ -223,6 +282,8 @@ export function UnmatchedRowsBanner({
           {t('document.unmatchedRows.showAllTables', { count: String(groups.length) })}
         </Button>
       )}
+      {/* ⚠ Лише відкритий: запит кроків (і провайдер запитів) потрібні тільки після кліку. */}
+      {stepTarget !== null && <StepTraceModal target={stepTarget} onClose={() => setStepTarget(null)} />}
     </>
   );
 

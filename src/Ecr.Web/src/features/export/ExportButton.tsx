@@ -5,7 +5,7 @@ import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { apiEnqueue, apiFetch } from '@/api/client';
 import type { ExportRequest, JobStatus } from '@/api/types';
-import { outcomeOf, pollInterval } from '@/features/workflow/jobFollow';
+import { jobRefetchInterval, outcomeOf } from '@/features/workflow/jobFollow';
 import { notificationCloseButtonProps, showApiError } from '@/shared/ui/notify';
 import { errorCodeText } from '@/shared/ui/problemText';
 import { t } from '@/shared/i18n';
@@ -137,7 +137,7 @@ export function ExportButton({
     queryKey: ['job', jobId],
     queryFn: () => apiFetch<JobStatus>(`/api/v1/jobs/${encodeURIComponent(jobId ?? '')}`),
     enabled: jobId !== null,
-    refetchInterval: (query) => pollInterval(query.state.data?.state),
+    refetchInterval: (query) => jobRefetchInterval(query),
     retry: false,
   });
 

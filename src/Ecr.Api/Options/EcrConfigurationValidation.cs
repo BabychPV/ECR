@@ -402,6 +402,40 @@ public static partial class EcrConfigurationValidation
         return problems;
     }
 
+    /// <summary>
+    /// PERF-12: текст попередження про Quartz у Production (журнал старту; перевірка <c>worker</c> на /health/ready
+    /// повторює суть локалізованим рядком <c>health.worker.quartzInProduction</c>).
+    /// </summary>
+    public const string QuartzInProductionWarning =
+        "Production працює з Jobs:Queue:Mode = Quartz: перерахунки та інші задачі виконуються всередині процесу Api разом із "
+        + "HTTP-запитами, діляться 16 потоками, губляться при перезапуску, а ланцюжок місяців, межа розгалуження й виключення "
+        + "документів при захопленні задачі не діють (PERF-12). Для продакшену задайте Jobs:Queue:Mode = Database і "
+        + "Jobs:Recalculation:Executor = Worker та встановіть службу EcrWorker (`deploy-ecr.ps1` робить це типово; runbook §10); "
+        + "Quartz лишайте лише для розробки й малих інсталяцій.";
+
+    /// <summary>
+    /// PERF-12: попередження старту, коли перерахунок віддано пулу <c>EcrWorker</c> (<c>Database</c> + <c>Worker</c>), а служби
+    /// на сервері немає чи її вимкнено; <c>null</c> — усе гаразд або режим інший.
+    /// </summary>
+    /// <param name="configuration">Зведена конфігурація.</param>
+    /// <param name="service">Стан служби за реєстром.</param>
+    public static string? WorkerServiceWarning(IConfiguration configuration, Ecr.Api.Health.WorkerServiceState service)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+
+        if (Infrastructure.Jobs.DbBackgroundJobScheduler.ReadMode(configuration) != Infrastructure.Jobs.JobQueueMode.Database
+            || Infrastructure.Jobs.JobLaneMap.ReadExecutor(configuration) != Infrastructure.Jobs.RecalculationExecutor.Worker
+            || service is not (Ecr.Api.Health.WorkerServiceState.Missing or Ecr.Api.Health.WorkerServiceState.Disabled))
+        {
+            return null;
+        }
+
+        return $"Перерахунок віддано службі EcrWorker (Jobs:Queue:Mode = Database, Jobs:Recalculation:Executor = Worker), але служба "
+            + (service == Ecr.Api.Health.WorkerServiceState.Missing ? "не встановлена" : "вимкнена")
+            + " на цьому сервері: задачі перерахунку стоятимуть у черзі без виконавця (PERF-12). Встановіть/увімкніть EcrWorker "
+            + "(runbook п. 10, 10.2) або перемкніть Api на Quartz/InProcess (п. 10.1).";
+    }
+
     /// <summary>Попередження, які старт не зупиняють.</summary>
     /// <param name="configuration">Зведена конфігурація застосунку.</param>
     /// <remarks>
@@ -425,6 +459,15 @@ public static partial class EcrConfigurationValidation
                 "AllowedHosts = * (будь-який заголовок Host приймається): задайте імена вузла через "
                 + "`deploy-ecr.ps1 -AllowedHosts` або змінну ECR_AllowedHosts, щоб закрити DNS rebinding на "
                 + "анонімні ендпоінти (PSS-28).");
+        }
+
+        // ⚠ PERF-12 (AUDIT-PERF1000-2026-11-21, рішення людини п. 4): у Production типовий режим — черга в базі + служба
+        // EcrWorker (deploy-ecr.ps1 / MSI пишуть Database + Worker самі). Quartz у процесі Api — лише для розробки й малих
+        // інсталяцій: немає ланцюжка місяців, межі розгалуження й виключення документів при захопленні, 16 потоків ділять усі
+        // задачі, а задачі губляться при перезапуску. Те саме — жовта примітка перевірки `worker` на /health/ready.
+        if (isProduction && Infrastructure.Jobs.DbBackgroundJobScheduler.ReadMode(configuration) == Infrastructure.Jobs.JobQueueMode.Quartz)
+        {
+            warnings.Add(QuartzInProductionWarning);
         }
 
         if (Value(configuration, OtlpEndpointKey) is { } endpoint
@@ -530,6 +573,15 @@ public static partial class EcrConfigurationValidation
         foreach (var note in Notes(app.Configuration))
         {
             LogConfigurationNote(logger, note);
+        }
+
+        // ⚠ PERF-12: Database + Worker без служби на старті — задачі перерахунку стали б у чергу без виконавця; кажемо одразу,
+        // не чекаючи першої проби /health/ready.
+        using var scope = app.Services.CreateScope();
+        var probe = scope.ServiceProvider.GetService<Ecr.Api.Health.IRecalculationWorkerProbe>();
+        if (probe is not null && WorkerServiceWarning(app.Configuration, probe.ReadServiceState()) is { } workerWarning)
+        {
+            LogConfigurationWarning(logger, workerWarning);
         }
 
         var problems = Validate(app.Configuration);

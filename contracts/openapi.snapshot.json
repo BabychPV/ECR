@@ -1963,6 +1963,14 @@
               "string"
             ]
           },
+          "methodologyId": {
+            "description": "✎ D-565: методологія проблеми — для переходу до її прапора трасування; `null` — невідома.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "monthNumber": {
             "description": "✎ LAND-YEAR L6: місяць (1..12) періоду прогону, якому належить проблема, — лише документ річної розкладки\n(`YearWithMonthColumns`): рядок річного аркуша один, а прогони методологій — по місяцях. `null` — інша\nрозкладка.",
             "format": "int32",
@@ -2005,6 +2013,13 @@
           "tableCode": {
             "description": "Код таблиці шаблону.",
             "type": "string"
+          },
+          "traceSteps": {
+            "description": "✎ D-565: лише для `StepError` — чи записав ПРОГІН, що дав проблему, кроки цієї методології\n(string CalculationIssueDto.TraceStepsRecorded — показати крок, що впав, і його входи; string CalculationIssueDto.TraceStepsNotRecorded — трасування\nбуло вимкнено, кроків немає); `null` — не `StepError` або факт невідомий.",
+            "type": [
+              "null",
+              "string"
+            ]
           }
         },
         "required": [
@@ -2289,6 +2304,173 @@
           "runId",
           "finishedAt",
           "unmatchedRows"
+        ],
+        "type": "object"
+      },
+      "CalculationStepDto": {
+        "description": "✎ D-565: один крок рядка.",
+        "properties": {
+          "error": {
+            "description": "Код помилки кроку (`#VALUE`…); `null` — крок порахувався.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "expression": {
+            "description": "Вираз.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "failed": {
+            "description": "Крок упав: помилка, що не є «немає значення» (`#NULL`).",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "Ідентифікатор кроку.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "inputs": {
+            "description": "Входи кроку, як їх бачила формула.",
+            "items": {
+              "$ref": "#/components/schemas/CalculationStepInputDto"
+            },
+            "type": "array"
+          },
+          "masked": {
+            "description": "Причина маскування в нуль; `null` — не маскувалось.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "stepCode": {
+            "description": "Код кроку (формула чи вихід).",
+            "type": "string"
+          },
+          "stepOrder": {
+            "description": "Порядок.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "substanceEntryId": {
+            "description": "Речовина кроку.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "value": {
+            "description": "Значення текстом (інваріантна культура); `null` — числа немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "stepOrder",
+          "stepCode",
+          "expression",
+          "value",
+          "error",
+          "failed",
+          "masked",
+          "substanceEntryId",
+          "inputs"
+        ],
+        "type": "object"
+      },
+      "CalculationStepInputDto": {
+        "description": "✎ D-565: вхід кроку.",
+        "properties": {
+          "code": {
+            "description": "Код аргументу, константи чи формули; для періоду — властивість.",
+            "type": "string"
+          },
+          "kind": {
+            "description": "Вид: `arg`, `const`, `formula`, `period`.",
+            "type": "string"
+          },
+          "unit": {
+            "description": "Код одиниці.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "value": {
+            "description": "Значення текстом; `null` — порожньо або приховано від читача.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "code",
+          "value",
+          "unit"
+        ],
+        "type": "object"
+      },
+      "CalculationStepsDto": {
+        "description": "✎ D-565: кроки рядка в актуальному прогоні.",
+        "properties": {
+          "notRecordedMethodologyIds": {
+            "description": "Методології, чиї кроки прогін НЕ записав (трасування вимкнено); `null` — як вище.",
+            "items": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "recordedMethodologyIds": {
+            "description": "Методології, чиї кроки прогін записав; `null` — прогін до D-565 (факту немає).",
+            "items": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "runId": {
+            "description": "Актуальний прогін; `null` — документ за період ще не рахували.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "steps": {
+            "description": "Кроки рядка за порядком.",
+            "items": {
+              "$ref": "#/components/schemas/CalculationStepDto"
+            },
+            "type": "array"
+          },
+          "truncated": {
+            "description": "Кроків більше за стелю — показано перші.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "runId",
+          "recordedMethodologyIds",
+          "notRecordedMethodologyIds",
+          "steps",
+          "truncated"
         ],
         "type": "object"
       },
@@ -14104,6 +14286,25 @@
           "inputJson",
           "expectedJson",
           "tolerance"
+        ],
+        "type": "object"
+      },
+      "MethodologyTraceStepsDto": {
+        "description": "Прапор методології «трасувати проміжні кроки» (D-565).",
+        "properties": {
+          "methodologyId": {
+            "description": "Методологія.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "traceSteps": {
+            "description": "`true` — прогони методології пишуть кроки трейсу (`calc.CalculationStep`).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "methodologyId",
+          "traceSteps"
         ],
         "type": "object"
       },
@@ -27999,6 +28200,19 @@
         },
         "required": [
           "workflowMode"
+        ],
+        "type": "object"
+      },
+      "SetTraceStepsRequest": {
+        "description": "Тіло `PUT /api/v1/methodologies/{id}/trace-steps` (D-565).",
+        "properties": {
+          "enabled": {
+            "description": "`true` — прогони методології пишуть проміжні кроки трейсу.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
         ],
         "type": "object"
       },
@@ -45098,6 +45312,92 @@
         ]
       }
     },
+    "/api/v1/documents/{id}/calculation-steps": {
+      "get": {
+        "description": "⚠ Кроків може не бути, бо прогін їх не записав (трасування методології вимкнено): факт прогону — у відповіді\n(`notRecordedMethodologyIds`), а не порожнеча. Невидимий документ чи схована таблиця — 404.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "periodKey",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tableInstanceId",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "rowKey",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalculationStepsDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalculationStepsDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalculationStepsDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "✎ D-565 (PERF-03): кроки розрахунку одного рядка в актуальному прогоні — «який крок упав і з якими входами» для\nпроблеми `StepError`. Право `Calculation.View`.",
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
     "/api/v1/documents/{id}/compare": {
       "get": {
         "parameters": [
@@ -50979,6 +51279,153 @@
           }
         },
         "summary": "Прогін методології <b>без запису</b>. Право `Calculation.View`.",
+        "tags": [
+          "Methodologies"
+        ]
+      }
+    },
+    "/api/v1/methodologies/{id}/trace-steps": {
+      "get": {
+        "description": "⚠ Саме за ним екран пояснення числа відрізняє «кроків не записано, бо трасування вимкнено» від «кроків немає».",
+        "parameters": [
+          {
+            "description": "Методологія.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyTraceStepsDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyTraceStepsDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyTraceStepsDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Прапор «трасувати проміжні кроки» методології (D-565). Право `Calculation.View`.",
+        "tags": [
+          "Methodologies"
+        ]
+      },
+      "put": {
+        "description": "⛔ Прапор живе на контейнері й чисел не змінює (результати й входи пишуться однаково), тому без нової версії й\nпублікації. Перерахунок не запускається: кроки з'являться в наступному прогоні. Зміна — у журнал структурних змін.",
+        "parameters": [
+          {
+            "description": "Методологія.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetTraceStepsRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetTraceStepsRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetTraceStepsRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyTraceStepsDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyTraceStepsDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyTraceStepsDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Вмикає чи вимикає запис проміжних кроків трейсу методології (D-565, PERF-03). Право `Calculation.EditFormula`.",
         "tags": [
           "Methodologies"
         ]

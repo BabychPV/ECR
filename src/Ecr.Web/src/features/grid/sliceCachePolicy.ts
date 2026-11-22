@@ -24,6 +24,10 @@ export function applySliceCachePolicy(client: QueryClient): void {
   client.setQueryDefaults(queryKeys.slices.all(), {
     staleTime: SliceStaleTime,
     refetchOnWindowFocus: false,
+    // ⛔ PERF-16: те саме для відновлення мережі. Миготіння VPN повернуло б за замовчуванням (`true`) перезапит КОЖНОГО
+    // змонтованого зрізу (до 91) у ВСІХ, кого це зачепило, одночасно. Свіжість після обриву дає опитування `changes`
+    // (банер «Updated by …», 30 с) та кнопка «Refresh».
+    refetchOnReconnect: false,
     // ⛔ Perf: `replaceEqualDeep` (structural sharing, query-core 5.62.9) робить `keys.includes(key)` на кожен ключ
     // плоскої мапи, тобто O(n²): `cellPermissions` ~77 тис. ключів на аркуші Land — 7–25 с заморозки головного
     // потоку на КОЖЕН перезапит зрізу (і ~150 мс на кожен `setQueryData` у `onMutate`). Зріз і так замінюється

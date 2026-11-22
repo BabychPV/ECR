@@ -40,7 +40,7 @@ import {
   type RecallSheetRequest,
   type SubmissionTarget,
 } from './api';
-import { outcomeOf, pollInterval } from './jobFollow';
+import { jobRefetchInterval, outcomeOf } from './jobFollow';
 import { queueText } from '@/features/jobs/queueEta';
 import { useSettledAction } from '@/features/grid/settleEdits';
 import { isRecalculateKey, isTypingOrDialogTarget } from '@/features/grid/shortcutKey';
@@ -1155,7 +1155,8 @@ export function useSheetActions({
 
     // ⚠ Правило опитування — у чистому модулі `jobFollow.ts`: саме його не
     // було, і саме його треба перевіряти окремо від компонента.
-    refetchInterval: (query) => pollInterval(query.state.data?.state, query.state.data?.effectiveState),
+    // PERF-08: «Queued» back-off 2→4→8→15 с, «Running» ~1.5 с, ±20 %.
+    refetchInterval: (query) => jobRefetchInterval(query),
 
     // ⚠ `retry: false` і мовчазна зупинка на відмові: `GET /jobs/{id}` вимагає
     // окремого права (`System.ViewHealth`, `Q-156`), і оператор без нього має

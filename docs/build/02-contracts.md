@@ -3584,6 +3584,25 @@ public interface IRuleCoverageReader
 }
 ```
 
+#### `ICalculationTraceReader`
+
+✎ D-565 (PERF-03): читання записаного трейсу для діагностики проблеми `StepError` — кроки одного рядка в прогоні
+(`calc.CalculationStep` за прогоном, документом, екземпляром таблиці й ключем рядка, з розпакованим `TraceJson`) і профілі
+прогонів (`ModulesProfileJson`, факт `traceSteps`: чиї кроки прогін записав). Споживачі: `GetCalculationIssuesHandler`
+(стан `traceSteps` проблеми), `GetCalculationStepsHandler` (`GET /api/v1/documents/{id}/calculation-steps`).
+
+```csharp
+public interface ICalculationTraceReader
+{
+    public Task<IReadOnlyList<CalculationStepRecord>> ReadRowStepsAsync(
+        long calculationRunId, int periodKey, long documentId, long tableInstanceId, string rowKey, int max,
+        CancellationToken ct);
+
+    public Task<IReadOnlyDictionary<long, string?>> ReadRunProfilesAsync(
+        IReadOnlyCollection<long> calculationRunIds, CancellationToken ct);
+}
+```
+
 #### `IRowActivityFilterSource`
 
 Фільтр активності рядків методології (D-425, «лише Running» для Land): прапорець
@@ -5085,6 +5104,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/tests/{code}` | `Calculation.EditFormula` | 7 |
 | `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/modes` | `Calculation.EditFormula` | 7 |
 | `PUT` | `/api/v1/methodologies/{id}/row-activity-filter` | `Calculation.Publish` | 7 |
+| `GET` | `/api/v1/methodologies/{id}/trace-steps` | `Calculation.View` | 7 |
+| `PUT` | `/api/v1/methodologies/{id}/trace-steps` | `Calculation.EditFormula` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/coverage` | `Calculation.View` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/rule-coverage` | `Calculation.View` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/diff` | `Calculation.View` | 7 |
@@ -5107,6 +5128,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/documents/{id}/calculation-results/year/export` | `Document.Export` (PT-6: той самий кошик `document-export`, 429 `tooManyExports`) | 7 |
 | `GET` | `/api/v1/documents/{id}/calculation-run` | `Calculation.View` | 7 |
 | `GET` | `/api/v1/documents/{id}/calculation-issues` | `Document.View` | 7 |
+| `GET` | `/api/v1/documents/{id}/calculation-steps` | `Calculation.View` | 7 |
 | `POST` | `/api/v1/methodologies/{id}/versions/{vid}/publish` | `Calculation.Publish` | 4 |
 | `POST` | `/api/v1/methodologies/{id}/simulate` | `Calculation.View` | 4 |
 | `POST` | `/api/v1/expressions/validate` | `Calculation.View` | 4 |

@@ -352,6 +352,12 @@ export type SaveMethodologyTestCaseRequest = Schemas['SaveMethodologyTestCaseReq
 /** Зміна режимів обчислення версії-чернетки. */
 export type SetMethodologyModesRequest = Schemas['SetMethodologyModesRequest'];
 
+/** Прапор методології «трасувати проміжні кроки» (`D-565`). */
+export type MethodologyTraceStepsDto = Schemas['MethodologyTraceStepsDto'];
+
+/** Зміна прапора «трасувати проміжні кроки» (`D-565`). */
+export type SetTraceStepsRequest = Schemas['SetTraceStepsRequest'];
+
 /** Прив'язка виходу методології до колонки документа (`D-69`). */
 export type CalculationBindingDto = Schemas['CalculationBindingDto'];
 

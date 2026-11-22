@@ -17,6 +17,7 @@ import type {
   MethodologyRuleDto,
   MethodologySummaryDto,
   MethodologyTestCaseDto,
+  MethodologyTraceStepsDto,
   PublishMethodologyRequest,
   SaveCalculationBindingRequest,
   SaveMethodologyCategoryRuleRequest,
@@ -27,6 +28,7 @@ import type {
   SaveMethodologyRuleRequest,
   SaveMethodologyTestCaseRequest,
   SetMethodologyModesRequest,
+  SetTraceStepsRequest,
 } from '@/api/types';
 import { formulaBody, type FormulaDraft } from './draft';
 
@@ -461,6 +463,26 @@ export function saveMethodologyModes(
 ): Promise<MethodologyDraftVersionDto> {
   return apiFetch<MethodologyDraftVersionDto>(
     `/api/v1/methodologies/${String(methodologyId)}/versions/${String(versionId)}/modes`,
+    { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+  );
+}
+
+/**
+ * Прапор методології «трасувати проміжні кроки» (`D-565`, PERF-03).
+ *
+ * ⚠ Живе на МЕТОДОЛОГІЇ, а не на версії: чисел не змінює, тож вмикається без чернетки й публікації.
+ */
+export function methodologyTraceSteps(methodologyId: number): Promise<MethodologyTraceStepsDto> {
+  return apiFetch<MethodologyTraceStepsDto>(`/api/v1/methodologies/${String(methodologyId)}/trace-steps`);
+}
+
+/** Вмикає чи вимикає запис проміжних кроків методології (`D-565`). */
+export function saveMethodologyTraceSteps(
+  methodologyId: number,
+  body: SetTraceStepsRequest,
+): Promise<MethodologyTraceStepsDto> {
+  return apiFetch<MethodologyTraceStepsDto>(
+    `/api/v1/methodologies/${String(methodologyId)}/trace-steps`,
     { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
   );
 }

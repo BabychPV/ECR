@@ -269,6 +269,12 @@ public sealed record CalculationIssueColumnDto(string Code, LocalizedText NameL1
 /// ✎ B66: <c>StepError</c> — скільки різних виходів рядка без результату; <c>RowInactive</c> — скільки рядків таблиці відсіяно
 /// фільтром активності; інакше <c>null</c>.
 /// </param>
+/// <param name="MethodologyId">✎ D-565: методологія проблеми — для переходу до її прапора трасування; <c>null</c> — невідома.</param>
+/// <param name="TraceSteps">
+/// ✎ D-565: лише для <c>StepError</c> — чи записав ПРОГІН, що дав проблему, кроки цієї методології
+/// (<see cref="TraceStepsRecorded"/> — показати крок, що впав, і його входи; <see cref="TraceStepsNotRecorded"/> — трасування
+/// було вимкнено, кроків немає); <c>null</c> — не <c>StepError</c> або факт невідомий.
+/// </param>
 public sealed record CalculationIssueDto(
     string TableCode,
     long? SheetCopyId,
@@ -283,4 +289,13 @@ public sealed record CalculationIssueDto(
     int? MonthNumber = null,
     string? StepCode = null,
     string? ErrorCode = null,
-    int? AffectedCount = null);
+    int? AffectedCount = null,
+    int? MethodologyId = null,
+    string? TraceSteps = null)
+{
+    /// <summary>✎ D-565: прогін записав кроки методології.</summary>
+    public const string TraceStepsRecorded = "Recorded";
+
+    /// <summary>✎ D-565: прогін кроків методології не записав (трасування вимкнено).</summary>
+    public const string TraceStepsNotRecorded = "NotRecorded";
+}

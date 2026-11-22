@@ -97,6 +97,60 @@ public sealed class CalculationOutputWriterChunkingTests
         Assert.Equal(0, uow.TransactionsCommitted);
     }
 
+    /// <remarks>
+    /// ✎ D-565 (PERF-03): без прапора методології «трасувати проміжні кроки» до сховища не доходить ЖОДЕН крок, а
+    /// значення й входи — ті самі, що з прапором. ⛔ Мутація: ігнорувати <c>recordSteps</c> — червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Decision", "D-565")]
+    public async Task D565_без_прапора_кроки_не_доходять_до_сховища_а_значення_й_входи_доходять()
+    {
+        var outputs = Outputs(count: 4, valuesEach: 2, traceEach: 3, inputsEach: 2);
+
+        var (off, offStore, _) = Arrange(maxRows: 5_000);
+        await off.WriteAsync(1, outputs, TraceLevel.Full, CancellationToken.None, recordSteps: false);
+
+        var (on, onStore, _) = Arrange(maxRows: 5_000);
+        await on.WriteAsync(1, outputs, TraceLevel.Full, CancellationToken.None, recordSteps: true);
+
+        Assert.Equal(12, onStore.TraceChunks.SelectMany(c => c).Sum(o => o.Trace.Count));
+        Assert.Equal(0, offStore.TraceChunks.SelectMany(c => c).Sum(o => o.Trace.Count));
+
+        // Значення й входи — ті самі екземпляри даних, порядок той самий.
+        Assert.Equal(
+            onStore.ResultChunks.SelectMany(c => c).SelectMany(o => o.Values),
+            offStore.ResultChunks.SelectMany(c => c).SelectMany(o => o.Values));
+        Assert.Equal(
+            onStore.TraceChunks.SelectMany(c => c).SelectMany(o => o.Inputs ?? []),
+            offStore.TraceChunks.SelectMany(c => c).SelectMany(o => o.Inputs ?? []));
+        Assert.Equal(8, offStore.TraceChunks.SelectMany(c => c).Sum(o => o.Inputs?.Count ?? 0));
+    }
+
+    /// <remarks>
+    /// ✎ D-565: кроки сховище пише масово (<c>SqlBulkCopy</c>) лише в транзакції записувача, тож навіть малий чанк із
+    /// кроками йде в транзакції; чанк без кроків (прапор вимкнено) — як і раніше, один <c>SaveChanges</c> без неї.
+    /// ⛔ Мутація: прибрати умову «є кроки» з вибору гілки — червоний (0 транзакцій, кроки пішли б EF-шляхом).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Decision", "D-565")]
+    public async Task D565_малий_чанк_із_кроками_йде_в_транзакції_без_кроків_ні()
+    {
+        var outputs = Outputs(count: 3, valuesEach: 1, traceEach: 2);
+
+        var (traced, _, tracedUow) = Arrange(maxRows: 5_000);
+        await traced.WriteAsync(1, outputs, TraceLevel.Full, CancellationToken.None);
+
+        var (silent, _, silentUow) = Arrange(maxRows: 5_000);
+        await silent.WriteAsync(1, outputs, TraceLevel.Full, CancellationToken.None, recordSteps: false);
+
+        Assert.Equal(1, tracedUow.TransactionsCommitted);
+        Assert.Equal(0, tracedUow.SavesOutsideTransaction);
+        Assert.Equal(0, silentUow.TransactionsCommitted);
+        Assert.Equal(1, silentUow.SavesOutsideTransaction);
+    }
+
     private static (CalculationOutputWriter Writer, RecordingStore Store, RecordingUnitOfWork Uow) Arrange(int maxRows)
     {
         var store = new RecordingStore();
@@ -105,14 +159,16 @@ public sealed class CalculationOutputWriterChunkingTests
         return (new CalculationOutputWriter(store.Substitute, uow) { MaxRowsPerSave = maxRows }, store, uow);
     }
 
-    private static List<CalculationOutput> Outputs(int count, int valuesEach, int traceEach = 0)
+    private static List<CalculationOutput> Outputs(int count, int valuesEach, int traceEach = 0, int inputsEach = 0)
         => [.. Enumerable.Range(1, count).Select(i => new CalculationOutput(
             DocumentId: 7,
             SourceRowKey: $"R{i:000}",
             Values: [.. Enumerable.Range(1, valuesEach)
                 .Select(v => new CalculationOutputValue(1, null, $"OUT{v}", i * 10m + v, UnitId: 1))],
             Trace: [.. Enumerable.Range(1, traceEach)
-                .Select(s => new CalculationTraceStep(s, $"S{s}", "1+1", 2m, null))]))];
+                .Select(s => new CalculationTraceStep(s, $"S{s}", "1+1", 2m, null))],
+            Inputs: [.. Enumerable.Range(1, inputsEach)
+                .Select(a => new CalculationArgument($"A{a}", i * 100m + a, null, UnitId: 1))]))];
 
     private sealed class RecordingStore
     {
@@ -129,11 +185,23 @@ public sealed class CalculationOutputWriterChunkingTests
                         ? Task.FromException(new InvalidOperationException("збій запису"))
                         : Task.CompletedTask;
                 });
+            Substitute
+                .WriteTraceAsync(
+                    Arg.Any<long>(), Arg.Any<IReadOnlyList<CalculationOutput>>(), Arg.Any<TraceLevel>(),
+                    Arg.Any<CancellationToken>())
+                .Returns(call =>
+                {
+                    TraceChunks.Add([.. call.ArgAt<IReadOnlyList<CalculationOutput>>(1)]);
+                    return Task.CompletedTask;
+                });
         }
 
         public ICalculationResultStore Substitute { get; }
 
         public List<List<CalculationOutput>> ResultChunks { get; } = [];
+
+        /// <summary>✎ D-565: що дійшло до запису трейсу (кроки й входи), по чанках.</summary>
+        public List<List<CalculationOutput>> TraceChunks { get; } = [];
 
         /// <summary>Номер чанка (з 1), на якому запис падає; 0 — не падає.</summary>
         public int FailOnChunk { get; set; }
