@@ -902,6 +902,11 @@ GRANT EXECUTE ON OBJECT::[dbo].[usp_GetAllStreamDataFlattened] TO [ecr_flert_rea
   системні задачі — у звичайному порядку. `GET /api/v1/jobs/{id}` і «Мої задачі» показують `queuePosition` і
   `estimatedStartAt` — **оцінку** (медіана кроку за останню добу), не обіцянку.
 
+**Оновлення (міграція `PERF564FairQueueAndRunWatermark`).** Додає індекс `itg.JobProgress (Lane, State, CreatedByUserId)`
+лише для живих рядків черги (ONLINE там, де редакція дозволяє; секунди) і nullable-стовпець
+`calc.CalculationRun.CellChangeWatermark` (лише метадані). Прогони до оновлення межі журналу не мають — перше натискання
+«Recalculate» на кожному річному документі після оновлення рахує всі відкриті місяці (одноразово, безпечно).
+
 **Розмір стелі.** Рекомендація — `max(2, ядра SQL ÷ 4)`: 20 ядер → 5, 12 ядер → 3. Важких сеансів SQL ≈ стеля ×
 `Calculations:MaxParallelism` (воркер — 4). Разом зі стелею налаштуйте на SQL Server **MAXDOP 4** і **cost threshold for
 parallelism 50** (інструкція встановлення): за MAXDOP 0 на 20 ядрах навіть 5 перерахунків можуть вичерпати потоки
