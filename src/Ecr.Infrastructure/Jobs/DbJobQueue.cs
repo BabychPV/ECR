@@ -247,23 +247,34 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
                      AND (fr.AvailableAt < q.AvailableAt OR (fr.AvailableAt = q.AvailableAt AND fr.JobId < q.JobId)))))
         """;
 
-    /// <summary>Скільки найраніших ручних задач розглядає «черга людей» (<see cref="FairPickSql"/>).</summary>
-    internal const int FairWindow = 200;
+    /// <summary>Скільки найраніших ручних задач КОЖНОЇ людини розглядає «черга людей» (<see cref="FairPickSql"/>).</summary>
+    internal const int FairPerUser = 5;
+
+    /// <summary>Стеля кандидатів «черги людей» (людей × <see cref="FairPerUser"/>).</summary>
+    internal const int FairWindow = 500;
+
+    /// <summary>Скільки кандидатів за рангом пробує claim, перш ніж узяти ручні FIFO (<see cref="FairPickSql"/>).</summary>
+    internal const int FairCandidates = 5;
 
     /// <summary>
-    /// ✎ PERF-10 / огляд M2: кандидат «черги людей» — з перших <see cref="FairWindow"/> доступних ручних задач лейна (за FIFO
-    /// індексом claim) найменший ранг людини (<see cref="FairRankSql"/>), далі FIFO. Без блокувань (RCSI): claim бере названий
-    /// рядок (<c>@preferred</c>) зі всіма своїми умовами; узяли раніше чи документ зайнятий — звичайний прохід ручних (FIFO).
+    /// ✎ PERF-10 / огляд M2, повторний огляд L-b: кандидати «черги людей» — до <see cref="FairPerUser"/> найраніших доступних
+    /// ручних задач КОЖНОЇ людини (людина з тисячею натискань не витісняє інших з вікна), не більше <see cref="FairWindow"/>,
+    /// і з них <see cref="FairCandidates"/> найкращих за рангом людини (<see cref="FairRankSql"/>), далі FIFO. Без блокувань
+    /// (RCSI): claim пробує кандидатів по черзі як названий рядок (<c>@preferred</c>) зі всіма своїми умовами (документ
+    /// зайнятий, узяли раніше — наступний кандидат); жоден — звичайний прохід ручних (FIFO).
     /// </summary>
     internal static readonly string FairPickSql = $$"""
         /* ecr:jobqueue-fair-pick */
-        SELECT TOP (1) q.JobId
-          FROM (SELECT TOP ({{FairWindow}}) q.JobId, q.AvailableAt, q.CreatedByUserId
-                  FROM itg.JobProgress AS q WITH (INDEX(IX_JobProgress_Claim))
-                 WHERE q.Lane = @lane AND q.Lane IS NOT NULL AND q.[State] = 'Queued'
-                   AND q.AvailableAt <= CAST(SYSUTCDATETIME() AS datetime2(3))
-                   {{ManualFilter.Trim()}}
-                 ORDER BY q.AvailableAt, q.JobId) AS q
+        SELECT TOP ({{FairCandidates}}) q.JobId
+          FROM (SELECT TOP ({{FairWindow}}) w.JobId, w.AvailableAt, w.CreatedByUserId
+                  FROM (SELECT q.JobId, q.AvailableAt, q.CreatedByUserId,
+                               ROW_NUMBER() OVER (PARTITION BY q.CreatedByUserId ORDER BY q.AvailableAt, q.JobId) AS UserRow
+                          FROM itg.JobProgress AS q WITH (INDEX(IX_JobProgress_User_Active))
+                         WHERE q.Lane = @lane AND q.Lane IS NOT NULL AND q.[State] = 'Queued' AND q.CreatedByUserId IS NOT NULL
+                           AND q.AvailableAt <= CAST(SYSUTCDATETIME() AS datetime2(3))
+                           {{ManualFilter.Trim()}}) AS w
+                 WHERE w.UserRow <= {{FairPerUser}}
+                 ORDER BY w.UserRow, w.AvailableAt, w.JobId) AS q
          ORDER BY {{FairRankSql.Trim()}}, q.AvailableAt, q.JobId;
         """;
 
@@ -784,24 +795,35 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
                     {
                         // ✎ PERF-10 / огляд M2: «черга людей» — вибір окремим запитом без блокувань, claim — названого рядка;
                         // не вийшло (узяли, документ зайнятий) — звичайний прохід ручних FIFO.
-                        var pick = await RunAsync(
+                        var picks = await RunAsync(
                                 FairPickSql,
                                 p => p.Add("@lane", SqlDbType.VarChar, JobLanes.MaxLength).Value = lane,
-                                async r => await r.ReadAsync(ct).ConfigureAwait(false) ? r.GetString(0) : null,
+                                async r =>
+                                {
+                                    var ids = new List<string>();
+                                    while (await r.ReadAsync(ct).ConfigureAwait(false))
+                                    {
+                                        ids.Add(r.GetString(0));
+                                    }
+
+                                    return ids;
+                                },
                                 ct)
                             .ConfigureAwait(false);
                         ClaimedJob? manual = null;
-                        foreach (var preferred in pick is null ? [false] : new[] { true, false })
+
+                        // Кандидати за рангом (null — останнім: звичайний FIFO ручних).
+                        foreach (var preferred in picks.Cast<string?>().Append(null))
                         {
                             manual = await RunAsync(
-                                    QueuedSqlOf(lane, priority: false, manualOnly: true, preferred: preferred),
+                                    QueuedSqlOf(lane, priority: false, manualOnly: true, preferred: preferred is not null),
                                     p =>
                                     {
                                         Bind(p, lane);
                                         p.Add("@heavyLimit", SqlDbType.Int).Value = heavyCap;
-                                        if (preferred)
+                                        if (preferred is not null)
                                         {
-                                            p.Add("@preferred", SqlDbType.NVarChar, 100).Value = pick!;
+                                            p.Add("@preferred", SqlDbType.NVarChar, 100).Value = preferred;
                                         }
                                     },
                                     r => Read(r, false),
