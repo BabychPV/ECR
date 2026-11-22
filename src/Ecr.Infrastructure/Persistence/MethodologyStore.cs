@@ -450,7 +450,7 @@ public sealed class MethodologyStore(EcrDbContext db, int constantCap) : IMethod
         var existing = await db.MethodologyReadFields
             .Where(f => f.MethodologyVersionId == versionId)
             .OrderBy(f => f.Id)
-            .Take(MaxChildren)
+            .Take(MaxChildren + 1)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
@@ -460,6 +460,27 @@ public sealed class MethodologyStore(EcrDbContext db, int constantCap) : IMethod
             .Select(g => (Code: g.Key, OtherMonths: g.Any(f => f.OtherMonths)))
             .Prepend((Code: MethodologyReadField.RecordedMarker, OtherMonths: false))
             .ToList();
+
+        // ✎ Огляд b9, п. 4: рядків понад стелю — частковий перелік дав би вставку поля, що вже лежить за стелею
+        // (UQ_MethodologyReadField). Тоді — видалення всього переліку версії одним оператором і вставка заново.
+        if (existing.Count > MaxChildren)
+        {
+            foreach (var row in existing)
+            {
+                db.Entry(row).State = EntityState.Detached;
+            }
+
+            await db.MethodologyReadFields
+                .Where(f => f.MethodologyVersionId == versionId)
+                .ExecuteDeleteAsync(ct)
+                .ConfigureAwait(false);
+            foreach (var (code, otherMonths) in wanted)
+            {
+                db.MethodologyReadFields.Add(new MethodologyReadField(versionId, code, otherMonths));
+            }
+
+            return;
+        }
 
         db.MethodologyReadFields.RemoveRange(existing.Where(e => !wanted.Exists(
             w => string.Equals(w.Code, e.FieldCode, StringComparison.OrdinalIgnoreCase) && w.OtherMonths == e.OtherMonths)));
