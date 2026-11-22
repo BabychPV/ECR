@@ -536,6 +536,14 @@ public sealed class MethodologyDraftStore(EcrDbContext db) : IMethodologyDraftSt
             db.MethodologyReadTables.Add(new MethodologyReadTable(targetVersionId, source.TableCode));
         }
 
+        // ✎ D-568: поля власної таблиці, які читає скрипт, — з тієї ж причини (прохід читача шукає за рядками).
+        foreach (var source in await ChildrenAsync(
+                     db.MethodologyReadFields.Where(f => f.MethodologyVersionId == sourceVersionId), ct)
+                     .ConfigureAwait(false))
+        {
+            db.MethodologyReadFields.Add(new MethodologyReadField(targetVersionId, source.FieldCode, source.OtherMonths));
+        }
+
         foreach (var source in await ChildrenAsync(
                      db.MethodologyTestCases.Where(t => t.MethodologyVersionId == sourceVersionId), ct)
                      .ConfigureAwait(false))

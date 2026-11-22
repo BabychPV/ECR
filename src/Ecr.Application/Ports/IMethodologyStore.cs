@@ -165,6 +165,17 @@ public interface IMethodologyStore
     public Task ReplaceScriptReadTablesAsync(int versionId, IReadOnlyList<string> tableCodes, CancellationToken ct);
 
     /// <summary>
+    /// ✎ D-568: повністю замінює перелік полів ВЛАСНОЇ таблиці, які читає скрипт версії (<c>calc.MethodologyReadField</c>),
+    /// разом зі службовим рядком «перелік записано».
+    /// </summary>
+    /// <param name="versionId">Версія методології.</param>
+    /// <param name="fields">Поля (<see cref="Calculations.Scripting.ScriptReadFields.Of"/>); дублікати без регістру зливаються.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Задача заміни; збереження робить <c>IUnitOfWork</c> — у транзакції матеріалізації.</returns>
+    public Task ReplaceScriptReadFieldsAsync(
+        int versionId, IReadOnlyList<Calculations.Scripting.ScriptReadField> fields, CancellationToken ct);
+
+    /// <summary>
     /// Повністю замінює виходи версії-скрипта (<c>calc.MethodologyOutput</c>) — рядок на кожен <c>output</c> (MS, план 5.1).
     /// </summary>
     /// <param name="versionId">Версія методології.</param>

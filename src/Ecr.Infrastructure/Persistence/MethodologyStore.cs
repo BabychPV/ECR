@@ -438,6 +438,40 @@ public sealed class MethodologyStore(EcrDbContext db, int constantCap) : IMethod
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Службовий рядок <see cref="MethodologyReadField.RecordedMarker"/> пишеться завжди: версія, що не читає жодного поля,
+    /// відрізняється від версії без запису (її прохід читача вважає читачем усього).
+    /// </remarks>
+    public async Task ReplaceScriptReadFieldsAsync(
+        int versionId, IReadOnlyList<Ecr.Application.Calculations.Scripting.ScriptReadField> fields, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(fields);
+
+        var existing = await db.MethodologyReadFields
+            .Where(f => f.MethodologyVersionId == versionId)
+            .OrderBy(f => f.Id)
+            .Take(MaxChildren)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var wanted = fields
+            .Where(f => !string.IsNullOrWhiteSpace(f.FieldCode))
+            .GroupBy(f => f.FieldCode.Trim(), StringComparer.OrdinalIgnoreCase)
+            .Select(g => (Code: g.Key, OtherMonths: g.Any(f => f.OtherMonths)))
+            .Prepend((Code: MethodologyReadField.RecordedMarker, OtherMonths: false))
+            .ToList();
+
+        db.MethodologyReadFields.RemoveRange(existing.Where(e => !wanted.Exists(
+            w => string.Equals(w.Code, e.FieldCode, StringComparison.OrdinalIgnoreCase) && w.OtherMonths == e.OtherMonths)));
+
+        foreach (var (code, otherMonths) in wanted.Where(w => !existing.Exists(
+                     e => string.Equals(e.FieldCode, w.Code, StringComparison.OrdinalIgnoreCase) && e.OtherMonths == w.OtherMonths)))
+        {
+            db.MethodologyReadFields.Add(new MethodologyReadField(versionId, code, otherMonths));
+        }
+    }
+
+    /// <inheritdoc />
     public async Task ReplaceScriptOutputsAsync(
         int versionId, IReadOnlyList<ScriptOutputRow> rows, CancellationToken ct)
     {

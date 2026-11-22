@@ -460,6 +460,26 @@ public sealed class MethodologyReadTableConfiguration : IEntityTypeConfiguration
     }
 }
 
+/// <summary>Конфігурація <see cref="MethodologyReadField"/> — поля власної таблиці, які читає скрипт версії (D-568).</summary>
+public sealed class MethodologyReadFieldConfiguration : IEntityTypeConfiguration<MethodologyReadField>
+{
+    /// <inheritdoc />
+    public void Configure(EntityTypeBuilder<MethodologyReadField> builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        builder.ToTable("MethodologyReadField", "calc");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.FieldCode).HasMaxLength(MethodologyReadField.MaxFieldCodeLength).IsRequired();
+
+        builder.HasIndex(x => new { x.MethodologyVersionId, x.FieldCode })
+               .IsUnique().HasDatabaseName("UQ_MethodologyReadField");
+
+        builder.HasOne<MethodologyVersion>().WithMany().HasForeignKey(x => x.MethodologyVersionId)
+               .HasConstraintName("FK_MRF_Version");
+    }
+}
+
 /// <summary>Конфігурація <see cref="MethodologyRule"/> — прив'язки правилами (ФВ-13.3).</summary>
 public sealed class MethodologyRuleConfiguration : IEntityTypeConfiguration<MethodologyRule>
 {

@@ -129,6 +129,28 @@ public static partial class StartupSequence
 
         Lap(logger, lap, "4c аргументи методологій");
 
+        // 4d) ✎ D-568: поля власної таблиці, які читають скрипти, опубліковані до D-568 (calc.MethodologyReadField).
+        //     Ідемпотентно, лише версії без запису. ⚠ Відмова — попередження: версію без запису прохід читача вважає
+        //     читачем усього (зайвий перерахунок, не пропущений).
+        try
+        {
+            await new MethodologyReadFieldsBackfill(db, logger).RunAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (System.Data.Common.DbException ex)
+        {
+            LogReadFieldsBackfillFailed(logger, ex.Message);
+        }
+        catch (Microsoft.EntityFrameworkCore.DbUpdateException ex)
+        {
+            LogReadFieldsBackfillFailed(logger, ex.Message);
+        }
+        catch (Microsoft.EntityFrameworkCore.Storage.RetryLimitExceededException ex)
+        {
+            LogReadFieldsBackfillFailed(logger, ex.Message);
+        }
+
+        Lap(logger, lap, "4d поля читання скриптів");
+
         // 4b) ✎ P-4b P3: вʼюхи rpt.v_* — тепер ПІСЛЯ кроку 5 (покинуті задачі), див. нижче.
 
         // 4a) Bootstrap-адміністратор. ⛔ Крок був ОГОЛОШЕНИЙ (обробник є,
@@ -390,6 +412,11 @@ public static partial class StartupSequence
         Message = "Старт: похідні аргументи методологій не вирівняно: {Error}. Старі списки ArgumentsCsv рахують як і раніше; "
             + "крок повториться на наступному старті.")]
     private static partial void LogArgumentsBackfillFailed(ILogger logger, string error);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Старт: поля читання скриптів (D-568) не дозаписано: {Error}. Версії без запису прохід читача вважає читачами "
+            + "всього; крок повториться на наступному старті.")]
+    private static partial void LogReadFieldsBackfillFailed(ILogger logger, string error);
 
     [LoggerMessage(Level = LogLevel.Warning,
         Message = "Старт: вʼюхи rpt.v_* не згенеровано: {Error}. SSRS не бачить нових версій шаблонів, "
