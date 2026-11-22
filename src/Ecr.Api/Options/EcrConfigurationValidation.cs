@@ -56,6 +56,7 @@ public static partial class EcrConfigurationValidation
         (Infrastructure.Security.IdleTimeoutPolicy.MinimumMinutesKey, 1),
         (Startup.HttpsTransport.PortKey, 0),
         ("Security:RateLimit:LoginPermitPerMinute", 1),
+        (Ecr.Api.Security.LoginRateLimiting.WindowsLoginPermitKey, 1), // PERF-07
 
         // U1-09: читається `GetValue<int>` на старті, але в переліку його не було — нуль дав би межу «жодного запиту».
         ("Security:RateLimit:ChangePasswordPermitPerMinute", 1),
