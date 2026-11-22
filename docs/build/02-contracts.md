@@ -6730,6 +6730,15 @@ public sealed record RowDto(
   самий вибір, що в завантажувачі); місяць джерела, яким володіє період аркуша (річний якір — кожен із 12), не має
   `Approved` на оригіналі аркуша. За `any`, без зв'язки, без документа-джерела року — як доти (один запит зв'язки).
   Відхилення, відкликання і повернення в роботу не блокуються.
+- ✎ F5 (рішення людини «Заборонити, поки йде перерахунок») — порт `ISourceCascadePendingGate` (без нових ендпоінтів,
+  полів і кодів): `POST /documents/{id}/submit` і `POST /documents/{id}/approve` (`approved: true`, будь-який крок
+  маршруту) відмовляють 422 `ECR-SUB-4221` з `messageKey` **`err.ECR-SUB-4221.sourceCascadePending`** (деталь
+  `periodKey`), поки період документа чекає каскаду від зміни документа-джерела (`D-566`): жива (`Queued`/`Running`)
+  задача `doc{id}-y{рік}-dependents` з періодом у `cascadePeriods`/`cascadeAppend`/`chainPlan` (до ухвалення плану — і
+  кожен пізніший період за найменший неспланований: план допише читачів), або `doc{id}-p{період}-dependents`. Крок, що
+  завершився, знімає свій період із плану — відмова зникає. Без живої задачі каскаду документа — як доти (один запит
+  за `IX_JobProgress_Document_Active`). «З затвердженими» (`-dependents-approved`), відхилення, відкликання і
+  повернення в роботу не блокуються.
 - ✎ B80 N4 (R3.2) — `GET /documents/{id}/calculation-issues` (і `?year=true`): нове необов'язкове поле
   **`sourceIssues`** (`SourceIssueDto[] | null`, лише додаванням) у `CalculationIssuesDto`. Запис: `kind`, `monthNumber`
   (місяць споживача 1–12), `sourcePeriodKey` (`yyyyMM`), `sourceDocumentId`, `sourceProjectCode`, `sourceDocumentKey`,

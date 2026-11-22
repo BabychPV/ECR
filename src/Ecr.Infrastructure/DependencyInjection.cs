@@ -506,6 +506,7 @@ public static class DependencyInjection
         services.AddScoped<ISourceApprovalChangeTrigger, Jobs.SourceApprovalChangeTrigger>(); // B80 N2a → B179 L2: Approve/Reopen/видалення джерела за ApprovedOnly
         services.AddScoped<ISourceMonthApprovalGate>(sp => DocumentSourceMonthGate.Create(sp)); // B80 N2b: Submit/Approve споживача — лише з затвердженим місяцем джерела
         services.AddScoped<ISourceIssueReader>(sp => DocumentSourceMonthGate.Create(sp)); // B80 N4: проблеми джерела в панелі проблем розрахунку
+        services.AddScoped<ISourceCascadePendingGate, Jobs.SourceCascadePendingGate>(); // F5: Submit/Approve споживача — не поки місяць чекає каскаду джерела
         services.AddScoped<ISourceImpactAssessor, SourceImpactAssessor>(); // B80 N5 (D-554): вплив Approve/Reopen джерела на залежні + підтвердження
         services.AddScoped<IFormulaRecalculationJob, Jobs.FormulaRecalculationJob>();
         // WW-03: постановка перерахунку в періоди-читачі (міжперіодні посилання).

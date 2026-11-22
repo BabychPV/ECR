@@ -91,7 +91,11 @@ public sealed class SubmitSheetHandler(
 
     // ✎ B80 (N2b, A3): споживач зв'язки ApprovedOnly не подається, поки місяць джерела не затверджено. `null` (тестові
     // фабрики) — перевірки немає.
-    ISourceMonthApprovalGate? sourceMonthGate = null)
+    ISourceMonthApprovalGate? sourceMonthGate = null,
+
+    // ✎ F5: місяць споживача, що ще чекає каскаду від зміни джерела (HSE400, D-566), не подається. `null` (тестові
+    // фабрики) — перевірки немає.
+    ISourceCascadePendingGate? cascadeGate = null)
 {
     /// <summary>✎ C-5: дефолти колонок версії для незаповнених комірок (02b §6.3), як у «Перевірити».</summary>
     private readonly Recalculation.ColumnDefaultValues columnDefaults = new(metadata, registries);
@@ -308,6 +312,12 @@ public sealed class SubmitSheetHandler(
         // без документа-джерела року — нічого (один запит зв'язки).
         await SourceMonthApprovalCheck
             .EnsureApprovedAsync(sourceMonthGate, documentId, periodKey, "Подання", ct)
+            .ConfigureAwait(false);
+
+        // ✎ F5 (рішення людини «Заборонити, поки йде перерахунок»): місяць ще чекає каскаду від зміни джерела — подання
+        // закріпило б числа до перерахунку. Один індексований запит черги; без живої задачі каскаду — нічого.
+        await SourceCascadePendingCheck
+            .EnsureNotPendingAsync(cascadeGate, documentId, periodKey, "Подання", ct)
             .ConfigureAwait(false);
 
         // ⚠ Рядки з IsOrphaned блокують подання (ФВ-8.13). До Етапу 4 прапорець
