@@ -906,6 +906,11 @@ GRANT EXECUTE ON OBJECT::[dbo].[usp_GetAllStreamDataFlattened] TO [ecr_flert_rea
 лише для живих рядків черги (ONLINE там, де редакція дозволяє; секунди) і nullable-стовпець
 `calc.CalculationRun.CellChangeWatermark` (лише метадані). Прогони до оновлення межі журналу не мають — перше натискання
 «Recalculate» на кожному річному документі після оновлення рахує всі відкриті місяці (одноразово, безпечно).
+⚠ **Вікно оновлення.** `ALTER TABLE calc.CalculationRun ADD …` бере блокування схеми (Sch-M) на `calc.CalculationRun` — його
+чекають і тримають УСІ читання прогонів: оновлюйте зі **зупиненими воркерами** (`EcrWorker` зупинено, черга без `Running`,
+Api в обслуговуванні), інакше міграція чекатиме кінця кроку перерахунку, а нові запити — міграцію. На **Standard/Express**
+індекс `IX_JobProgress_User_Active` будується офлайн: на час сканування `itg.JobProgress` (історія 30 днів; фільтр — лише
+живі рядки, тож секунди–хвилини) записи в чергу блокуються; на Enterprise/Developer — ONLINE.
 
 **Розмір стелі.** Рекомендація — `max(2, ядра SQL ÷ 4)`: 20 ядер → 5, 12 ядер → 3. Важких сеансів SQL ≈ стеля ×
 `Calculations:MaxParallelism` (воркер — 4). Разом зі стелею налаштуйте на SQL Server **MAXDOP 4** і **cost threshold for
