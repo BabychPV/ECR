@@ -67,6 +67,10 @@ public sealed class DbBackgroundJobScheduler(
     /// <remarks>⚠ Постановка — сирий SQL у поточній транзакції <c>EcrDbContext</c> scope.</remarks>
     public bool EnlistsInCallerTransaction => true;
 
+    /// <inheritdoc />
+    /// <remarks>✎ PERF-06 (<c>D-566</c>): <c>DbJobQueue.MergePressFieldsSql</c> / <c>DbJobQueue.CascadeAppend</c>.</remarks>
+    public bool MergesCascadePeriods => true;
+
     /// <summary>Режим із конфігурації; не задано — <see cref="JobQueueMode.Quartz"/>.</summary>
     public static JobQueueMode ReadMode(IConfiguration configuration)
     {

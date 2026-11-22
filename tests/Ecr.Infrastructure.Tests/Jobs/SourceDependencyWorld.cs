@@ -47,7 +47,11 @@ internal sealed class SourceDependencyWorld(SqlServerFixture sql)
     /// <summary>Документ (свій шаблон) з екземплярами за місяці <paramref name="months"/>; періоди відкриті.</summary>
     /// <param name="months">Місяці (перший — період будівника).</param>
     /// <param name="registryCode">Довідник, який читає формула колонки 2 (за <c>[Period].Year, [Period].Sequence</c>); <c>null</c> — без формули.</param>
-    public async Task<TestDocument> DocumentAsync(int[] months, string? registryCode = null)
+    /// <param name="keys">
+    /// ✎ PERF-06: ключі <c>REGFIND</c> після коду довідника (типово <c>[Period].Year, [Period].Sequence</c> — обсяг «місяць»);
+    /// напр. <c>[Period].Year</c> — «рік», <c>[Period].Year, 5</c> — літеральний місяць 5.
+    /// </param>
+    public async Task<TestDocument> DocumentAsync(int[] months, string? registryCode = null, string keys = "[Period].Year, [Period].Sequence")
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var document = await builder.BuildAsync(periodKey: Period(months[0]));
@@ -67,7 +71,7 @@ internal sealed class SourceDependencyWorld(SqlServerFixture sql)
         {
             var formula = new FormulaDef(
                 document.TableDefId, FormulaScope.Column,
-                $"REGFIELD(REGFIND('{registryCode}', [Period].Year, [Period].Sequence, 'S', 'I'), 'VALUE')",
+                $"REGFIELD(REGFIND('{registryCode}', {keys}, 'S', 'I'), 'VALUE')",
                 ExpressionDialect.Template);
             formula.AssignColumn(document.ColumnDefIds[1]);
             db.FormulaDefs.Add(formula);

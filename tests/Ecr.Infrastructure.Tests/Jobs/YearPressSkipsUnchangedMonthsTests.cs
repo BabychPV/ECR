@@ -46,7 +46,7 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 [Trait(TestCategories.Stage, TestCategories.Stage5)]
 [Trait(TestCategories.Category, TestCategories.Integration)]
 [Trait("Finding", "PERF-01")]
-public sealed class YearPressSkipsUnchangedMonthsTests(SqlServerFixture sql) : DbJobQueueTestsBase(sql)
+public sealed partial class YearPressSkipsUnchangedMonthsTests(SqlServerFixture sql) : DbJobQueueTestsBase(sql)
 {
     private const int Year = 2026;
 

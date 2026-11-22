@@ -381,13 +381,14 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
     /// </summary>
     /// <remarks>
     /// ✎ L1b / D3: і <c>$.chainTotal</c> — шкала «період k з N» починається з першого кроку заново. ✎ PERF-01/02: і план
-    /// (<c>$.chainPlan</c>, <c>$.chainSkipped</c>, <c>$.chainRecheck</c>) — перший крок вирішує знову.
+    /// (<c>$.chainPlan</c>, <c>$.chainSkipped</c>, <c>$.chainRecheck</c>) — перший крок вирішує знову. ✎ PERF-06 (<c>D-566</c>):
+    /// і <c>$.cascadeAppend</c> — його періоди вже в <c>$.cascadePeriods</c> (об'єднання), з якого перший крок планує знову.
     /// </remarks>
     internal const string ChainResetTemplate =
-        "JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY("
+        "JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY(JSON_MODIFY("
         + "{0}, '$.chainAfter', NULL), '$.chainDone', NULL), "
         + "'$.chainReaders', NULL), '$.chainStartedAt', NULL), '$.chainElapsedMs', NULL), '$.chainTotal', NULL), "
-        + "'$.chainPlan', NULL), '$.chainSkipped', NULL), '$.chainRecheck', NULL)";
+        + "'$.chainPlan', NULL), '$.chainSkipped', NULL), '$.chainRecheck', NULL), '$.cascadeAppend', NULL)";
 
     /// <summary>
     /// ✎ PERF-01/02 (<c>D-564a</c>/<c>D-564b</c>): поля натискання з <c>@payload</c> (нова постановка) у <c>@existing</c>
@@ -404,6 +405,19 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
                         SELECT N',' + u.v
                         FROM (SELECT [value] AS v FROM OPENJSON(@existing, '$.screenPeriods')
                               UNION SELECT [value] FROM OPENJSON(@payload, '$.screenPeriods')) AS u
+                        ORDER BY TRY_CAST(u.v AS int)
+                        FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 1, N'') + N']'));
+                    SET @rewrite = 1;
+                END
+                IF JSON_QUERY(@payload, '$.cascadePeriods') IS NOT NULL
+                   AND EXISTS (SELECT [value] FROM OPENJSON(@payload, '$.cascadePeriods')
+                               EXCEPT SELECT [value] FROM OPENJSON(@existing, '$.cascadePeriods'))
+                BEGIN
+                    -- ✎ PERF-06 (D-566): періоди каскаду правок джерела за вікно — об'єднанням (жоден не губиться).
+                    SET @existing = JSON_MODIFY(@existing, '$.cascadePeriods', JSON_QUERY(N'[' + STUFF((
+                        SELECT N',' + u.v
+                        FROM (SELECT [value] AS v FROM OPENJSON(@existing, '$.cascadePeriods')
+                              UNION SELECT [value] FROM OPENJSON(@payload, '$.cascadePeriods')) AS u
                         ORDER BY TRY_CAST(u.v AS int)
                         FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 1, N'') + N']'));
                     SET @rewrite = 1;
@@ -439,6 +453,8 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
             BEGIN
                 IF (CASE WHEN ISJSON(@payload) = 1 THEN JSON_VALUE(@payload, '$.forceFull') END) = N'true'
                     SET @existing = <<RESET>>;
+                ELSE IF (CASE WHEN ISJSON(@payload) = 1 THEN JSON_QUERY(@payload, '$.cascadePeriods') END) IS NOT NULL
+                    SET @existing = <<APPEND>>;
                 ELSE
                     SET @existing = JSON_MODIFY(@existing, '$.chainRecheck', CAST(1 AS bit));
                 SET @rewrite = 1;
@@ -454,7 +470,25 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
         => CoalescePayloadTemplate
             .Replace("{0}", jobVar, StringComparison.Ordinal)
             .Replace("<<RESET>>", ChainReset("@existing"), StringComparison.Ordinal)
+            .Replace("<<APPEND>>", CascadeAppend("@existing"), StringComparison.Ordinal)
             .Replace("<<MERGE>>", MergePressFieldsSql, StringComparison.Ordinal);
+
+    /// <summary>
+    /// ✎ PERF-06 (<c>D-566</c>): вираз — payload ланцюжка <paramref name="chainPayload"/>, у якого <c>$.cascadeAppend</c>
+    /// доповнено періодами каскаду нової постановки (<c>@payload</c>, <c>$.cascadePeriods</c>) об'єднанням. Наступний крок
+    /// дописує їх у план завжди (і вже зроблені — їхній крок читав старе джерело), без <c>$.chainRecheck</c>: детектор
+    /// кнопки за гілкою джерел B179 (рівень документа) будив би весь рік. Прогрес ланцюжка лишається (<c>D-564b</c>).
+    /// </summary>
+    /// <param name="chainPayload">SQL-вираз із payload ланцюжка (перевірений JSON).</param>
+    internal static string CascadeAppend(string chainPayload)
+        => $"""
+            JSON_MODIFY({chainPayload}, '$.cascadeAppend', JSON_QUERY(N'[' + STUFF((
+                        SELECT N',' + u.v
+                        FROM (SELECT [value] AS v FROM OPENJSON({chainPayload}, '$.cascadeAppend')
+                              UNION SELECT [value] FROM OPENJSON(@payload, '$.cascadePeriods')) AS u
+                        ORDER BY TRY_CAST(u.v AS int)
+                        FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 1, N'') + N']'))
+            """;
 
     /// <summary>
     /// ✎ PERF-02 (<c>D-564b</c>): ланцюжок поглинає задача позаду на ту саму ціль (<c>@behind</c>, нове натискання) — ВОНА
@@ -469,14 +503,22 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
                AND (CASE WHEN ISJSON({{chainPayload}}) = 1 THEN JSON_VALUE({{chainPayload}}, '$.chainAfter') END) IS NOT NULL
                AND ISNULL((CASE WHEN ISJSON(@payload) = 1 THEN JSON_VALUE(@payload, '$.forceFull') END), N'false') <> N'true'
             BEGIN
-                SET @existing = JSON_MODIFY(JSON_MODIFY({{chainPayload}}, '$.chainRecheck', CAST(1 AS bit)),
-                    '$.triggeredByUserId', TRY_CAST(JSON_VALUE(@payload, '$.triggeredByUserId') AS int));
+                IF JSON_QUERY(@payload, '$.cascadePeriods') IS NOT NULL
+                    -- ✎ PERF-06 (D-566): позаду — каскад правки джерела: ланцюжок дописує його періоди, без детектора.
+                    SET @existing = {{CascadeAppend(chainPayload)}};
+                ELSE
+                    SET @existing = JSON_MODIFY(JSON_MODIFY({{chainPayload}}, '$.chainRecheck', CAST(1 AS bit)),
+                        '$.triggeredByUserId', TRY_CAST(JSON_VALUE(@payload, '$.triggeredByUserId') AS int));
                 SET @rewrite = 1;
         {{MergePressFieldsSql}}
             END
             ELSE
             BEGIN
-                SET @payload = NULL;
+                -- ✎ PERF-06 (D-566): поглинута задача каскаду, що ще не стала ланцюжком (перший крок відкладено чи повторюється),
+                -- передає свої періоди тій, що позаду: інакше її місяці загубилися б разом із нею.
+                SET @payload = CASE WHEN ISJSON({{chainPayload}}) = 1
+                                    THEN CASE WHEN JSON_QUERY({{chainPayload}}, '$.cascadePeriods') IS NOT NULL THEN {{chainPayload}} END
+                               END;
         {{CoalescePayloadSql("@behind")}}
             END
         """;
