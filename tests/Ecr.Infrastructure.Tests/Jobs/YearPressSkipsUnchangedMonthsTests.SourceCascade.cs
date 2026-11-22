@@ -19,7 +19,8 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 /// Той самий стенд, що в тестах кнопки (справжні черга, ланцюжок кроків, сховище, перемикання актуальності; оркестратор — фейк).
 /// <para>
 /// МУТАЦІЇ (локально, не комітяться): (1) <c>CascadeMonthsAsync</c> без транзитивних читачів — червоний рядок <c>true</c>
-/// <c>Каскад_рахує_лише_свої_місяці…</c>; (2) <c>PlanChainAsync</c> без гілки каскаду (усі відкриті) — червоні обидва його рядки;
+/// <c>Каскад_без_ланцюжка…</c> (у ланцюжку тих самих читачів дописує ще й крок — <c>ExtendWithLaterReadersAsync</c>, друга
+/// лінія; її разом із (1) ловить рядок <c>true</c> <c>Каскад_рахує_лише_свої_місяці…</c>); (2) <c>PlanChainAsync</c> без гілки каскаду (усі відкриті) — червоні обидва його рядки;
 /// (3) <c>CoalescePayloadTemplate</c>: каскад у ланцюжок → <c>$.chainRecheck</c> (як натискання) — червоний
 /// <c>Нова_правка_джерела_між_кроками…</c>; (4) <c>AbsorbChainSql</c>: каскад позаду → <c>$.chainRecheck</c> — червоний
 /// <c>Правка_джерела_під_час_кроку…</c>; (5) <c>AbsorbChainSql</c> ELSE: <c>SET @payload = NULL</c> (як доти) — червоний
@@ -51,6 +52,16 @@ public sealed partial class YearPressSkipsUnchangedMonthsTests
             CancellationToken.None);
         var steps = new List<int>();
         var messages = new List<string?>();
+        await StepAsync(builder, host, Press, steps, null, messages);
+
+        // Читачі березня — у плані вже з першого кроку (шкала «з N» чесна з початку), а не лише коли крок їх допише.
+        if (crossRead)
+        {
+            var planned = JsonSerializer.Deserialize<RecalculationRequest>((await RowAsync(jobId))!.Payload!, Web)!;
+            Assert.Equal(expected.Skip(1), planned.ChainPlan!);
+            Assert.Equal(expected.Length, planned.ChainTotal);
+        }
+
         while (await StepAsync(builder, host, Press, steps, null, messages))
         {
         }
@@ -167,11 +178,21 @@ public sealed partial class YearPressSkipsUnchangedMonthsTests
         Assert.Equal([202603, 202605], steps);
     }
 
-    /// <summary>Без ланцюжка (немає оренди черги в базі) — той самий план однією задачею: лише березень.</summary>
-    [Fact]
-    public async Task Каскад_без_ланцюжка_рахує_лише_свої_місяці()
+    /// <summary>
+    /// Без ланцюжка (немає оренди черги в базі) — той самий план однією задачею: лише березень, а з читачем його обчислених
+    /// чисел (<c>[Period:#3]</c>) — і пізніші місяці (крок, що дописав би їх, тут не діє).
+    /// </summary>
+    [Theory]
+    [InlineData(false, new[] { 202603 })]
+    [InlineData(true, new[] { 202603, 202604, 202605, 202606 })]
+    public async Task Каскад_без_ланцюжка_рахує_лише_свої_місяці(bool crossRead, int[] expected)
     {
         var (builder, document) = await ArrangeAsync();
+        if (crossRead)
+        {
+            await CrossReadAsync(document, kind: 5, offset: 3);
+        }
+
         await using var db = builder.CreateContext();
         var before = await MaxRunIdAsync();
 
@@ -179,7 +200,7 @@ public sealed partial class YearPressSkipsUnchangedMonthsTests
         await job.ExecuteAsync(
             JsonSerializer.Serialize(CascadePayload(document, 202603), Web), new Progress(null), CancellationToken.None);
 
-        Assert.Equal([202603], await NewRunPeriodsAsync(document.DocumentId, before));
+        Assert.Equal(expected, await NewRunPeriodsAsync(document.DocumentId, before));
     }
 
     /// <summary>Payload каскаду — той самий, що ставить <see cref="CalculationTrigger.RequestSourceCascadeAsync"/>.</summary>
