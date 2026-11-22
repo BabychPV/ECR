@@ -29,6 +29,16 @@ public sealed class RecalcLaneGlobalCapDbTests(SqlServerFixture sql) : DbJobQueu
 
     private const string Empty = "{}";
 
+    /// <summary>
+    /// ✎ CI 22.11 (lane/integ-b7): <c>AvailableAt</c> — <c>datetime2(3)</c> від <c>SYSUTCDATETIME()</c>, тож дві постановки в одну
+    /// мілісекунду рівні, і порядок між ними вирішує <c>JobId</c> (GUID) — детерміновано, але не в порядку постановки. Тести класу,
+    /// що перевіряють порядок, ставлять задачам явний строго зростаючий час (крок 10 мс, хвилину тому — пізніше за масові
+    /// задачі «вікна», −1000…−400 с); рівний час перевіряє окремий тест.
+    /// </summary>
+    private readonly DateTime _queuedFrom = DateTime.UtcNow.AddMinutes(-1);
+
+    private int _enqueued;
+
     /// <summary>Стеля 3, десять одночасних claim-ів на окремих з'єднаннях: виконується не більше трьох — і ніколи більше.</summary>
     [Fact]
     public async Task Стеля_тримається_під_десятьма_одночасними_claim()
@@ -100,6 +110,51 @@ public sealed class RecalcLaneGlobalCapDbTests(SqlServerFixture sql) : DbJobQueu
         // A1 (найраніша, ранг 0), далі B (ранг 0) — раніше за A2 (ранг 1: одна задача A вже виконується).
         Assert.Equal([a[0], b], order.Take(2));
         Assert.Equal(a.Skip(1), order.Skip(2));
+    }
+
+    /// <summary>
+    /// ✎ CI 22.11: усі задачі поставлено в ту саму мілісекунду (рівний <c>AvailableAt</c>). Гарантія та сама — людина з одним
+    /// натисканням серед перших двох, а не одинадцята; рівність вирішує унікальний <c>JobId</c> однаково в claim, у виборі
+    /// «черги людей» і в місці в черзі: порядок claim = порядок місць, задачі A — за <c>JobId</c>.
+    /// </summary>
+    [Fact]
+    public async Task Рівний_час_постановки_порядок_за_JobId_людина_серед_перших_двох()
+    {
+        var a = new List<string>();
+        for (var i = 0; i < 10; i++)
+        {
+            a.Add(await EnqueueRecalcAsync(user: 1));
+        }
+
+        var b = await EnqueueRecalcAsync(user: 2);
+        await using (var db = Sql.CreateContext())
+        {
+            await db.Database.ExecuteSqlAsync(
+                $"UPDATE itg.JobProgress SET AvailableAt = {_queuedFrom} WHERE Lane = {JobLanes.Recalc} AND [State] = 'Queued'");
+        }
+
+        var positions = new Dictionary<string, int>();
+        await using (var db = Sql.CreateContext())
+        {
+            var reader = new DbJobQueuePosition(db, new SystemClock(), new QuartzJobTypeLimiter(2, recalcMaxConcurrent: 50));
+            foreach (var id in a.Append(b))
+            {
+                positions[id] = (await reader.GetAsync(id, CancellationToken.None))!.Position;
+            }
+        }
+
+        var order = new List<string>();
+        await using var host = NewHost(cap: 50);
+        for (var i = 0; i < 11; i++)
+        {
+            order.Add((await host.Queue.ClaimAsync([JobLanes.Recalc], "test/tie", JobQueueLimits.DefaultLease, CancellationToken.None))!.Claim.JobId);
+        }
+
+        var byJobId = a.Order(StringComparer.Ordinal).ToList();
+        Assert.Equal(new[] { byJobId[0], b }.Order(StringComparer.Ordinal), order.Take(2).Order(StringComparer.Ordinal));
+        Assert.Equal(byJobId.Skip(1), order.Skip(2));
+        Assert.Equal(Enumerable.Range(1, 11), positions.Values.Order());
+        Assert.Equal(positions.OrderBy(p => p.Value).Select(p => p.Key), order);
     }
 
     /// <summary>
@@ -286,10 +341,15 @@ public sealed class RecalcLaneGlobalCapDbTests(SqlServerFixture sql) : DbJobQueu
     private async Task<string> EnqueueRecalcAsync(int? user, long? document = null)
     {
         await using var host = CapHost(100);
-        return (await host.Queue.EnqueueAsync(
+        var id = (await host.Queue.EnqueueAsync(
                 new JobEnqueueRequest(RecalcCode, JobLanes.Recalc, "{}", CreatedByUserId: user, DocumentId: document),
                 CancellationToken.None))
             .JobId;
+
+        // Порядок постановки = порядок AvailableAt (див. _queuedFrom): без рівного часу в одну мілісекунду.
+        var at = _queuedFrom.AddMilliseconds(10 * ++_enqueued);
+        await host.Db.Database.ExecuteSqlAsync($"UPDATE itg.JobProgress SET AvailableAt = {at} WHERE JobId = {id}");
+        return id;
     }
 
     private async Task<int> RunningAsync()
