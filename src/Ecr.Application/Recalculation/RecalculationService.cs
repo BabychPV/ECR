@@ -1418,7 +1418,8 @@ public sealed class RecalculationService(
             if (batch.Count > 0)
             {
                 await WriteBatchAsync(
-                    instance.DocumentId, batch, rowKeyByRowIdByInstance, RecordIsLate, now, token, overridesActive)
+                    instance.DocumentId, batch, rowKeyByRowIdByInstance, RecordIsLate, now, token, overridesActive,
+                    SubmitCorrelationOf(heldSheet))
                     .ConfigureAwait(false);
             }
 
@@ -1442,7 +1443,8 @@ public sealed class RecalculationService(
                         : writable.Contains(sheetKey);
                 }
 
-                await ApplyFormulaErrorsAsync(errorDelta, instance.DocumentId, stored, ErrorWritable, now, token)
+                await ApplyFormulaErrorsAsync(
+                        errorDelta, instance.DocumentId, stored, ErrorWritable, now, token, SubmitCorrelationOf(heldSheet))
                     .ConfigureAwait(false);
             }
 
@@ -1504,9 +1506,18 @@ public sealed class RecalculationService(
     /// ✎ C-1 (D-475): пише різницю стану помилок формул і події журналу <c>CalcError</c>/<c>CalcErrorResolved</c> —
     /// лише для екземплярів аркушів, у які прогін пише. Значення комірки подія не змінює (<c>OldValue = NewValue</c>).
     /// </summary>
+    /// <summary>
+    /// ✎ PERF-01 (<c>D-564a</c>, повторний огляд L-a): прогін подання (тримає лок аркуша × періоду, НЕ лок документа) позначає
+    /// свої записи журналу <see cref="Documents.CellChangeOrigins.SubmitRecalculationCorrelation"/>: незакомічений запис такого
+    /// прогону може отримати <c>Id</c> не більший за межу журналу кроку перерахунку іншого місяця, що саме завершився, —
+    /// планувальник кнопки року ловить такі записи ще й за часом (запас 60 хв), а не лише за <c>Id</c>.
+    /// </summary>
+    private static string? SubmitCorrelationOf((int SheetDefId, long? CopyId)? heldSheet)
+        => heldSheet is null ? null : Documents.CellChangeOrigins.SubmitRecalculationCorrelation;
+
     private async Task ApplyFormulaErrorsAsync(
         FormulaErrorDelta delta, long documentId, Dictionary<CellKey, CellValueData> stored,
-        Func<FormulaErrorRow, bool> writable, DateTime now, CancellationToken ct)
+        Func<FormulaErrorRow, bool> writable, DateTime now, CancellationToken ct, string? correlationId = null)
     {
         await formulaErrors!.ApplyAsync(
                 [.. delta.Upserts.Where(writable)],
@@ -1530,7 +1541,7 @@ public sealed class RecalculationService(
                         now, e.Row.Address, documentId, e.Row.RowKey,
                         OldValue: current, NewValue: current, SystemUserId,
                         Origin: e.Resolved ? Documents.CellChangeOrigins.CalcErrorResolved : Documents.CellChangeOrigins.CalcError,
-                        IsLateEdit: false, CorrelationId: null,
+                        IsLateEdit: false, CorrelationId: correlationId,
                         Reason: FormulaErrorAuditReason.Of(e.Row, e.Resolved));
                 })],
                 ct)
@@ -1550,6 +1561,7 @@ public sealed class RecalculationService(
     /// </param>
     /// <param name="now">Мить зміни для аудиту.</param>
     /// <param name="lockOverrides">✎ D-461: блокувати й перечитати позначки ручних значень перед записом (лише коли вони можливі).</param>
+    /// <param name="correlationId">✎ PERF-01 (L-a): позначка записів перерахунку подання (<see cref="SubmitCorrelationOf"/>); <c>null</c> — інший прогін.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <remarks>
     /// ⚠ Виконується ВСЕРЕДИНІ транзакції запису, під спільними блокуваннями
@@ -1570,7 +1582,8 @@ public sealed class RecalculationService(
         Func<long, CellRecord, bool> isLateEdit,
         DateTime now,
         CancellationToken ct,
-        bool lockOverrides = false)
+        bool lockOverrides = false,
+        string? correlationId = null)
     {
         // ⚠ Старі значення читаються ДО запису — після `ApplyBatchAsync` їх уже
         // немає ніде, а саме вони й становлять половину запису аудиту
@@ -1657,7 +1670,7 @@ public sealed class RecalculationService(
                     SystemUserId,
                     Origin: "Recalculation",
                     isLateEdit(item.Target, r),
-                    CorrelationId: null));
+                    CorrelationId: correlationId));
             })],
             ct).ConfigureAwait(false);
     }

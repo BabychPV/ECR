@@ -273,7 +273,7 @@ internal static class NightlyInputChangeQuery
         var args = new List<object?>
         {
             documentId, anchor, CellChangeOrigins.Recalculation, CellChangeOrigins.CalcError, CellChangeOrigins.CalcErrorResolved,
-            yearWideInputs ? 1 : 0, yearFrom, yearTo,
+            yearWideInputs ? 1 : 0, yearFrom, yearTo, CellChangeOrigins.SubmitRecalculationCorrelation,
         };
         var values = new System.Text.StringBuilder();
         foreach (var month in months)
@@ -283,8 +283,11 @@ internal static class NightlyInputChangeQuery
             args.Add(Utc(month.Since));
             args.Add(Utc(month.FinishedAt));
             args.Add(month.Watermark);
+            args.Add(Utc(month.FinishedAt) - SubmitRecalculationMargin);
             values.Append(values.Length == 0 ? "(" : ", (")
-                .Append(System.Globalization.CultureInfo.InvariantCulture, $"{{{at}}}, {{{at + 1}}}, {{{at + 2}}}, {{{at + 3}}})");
+                .Append(
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    $"{{{at}}}, {{{at + 1}}}, {{{at + 2}}}, {{{at + 3}}}, {{{at + 4}}})");
         }
 
         var sql = $$"""
@@ -311,10 +314,13 @@ internal static class NightlyInputChangeQuery
                                     JOIN cfg.ColumnDef AS acd ON acd.Id = ad.ColumnDefId
                                    WHERE ad.DocumentId = {0} AND ad.PeriodKey = {1} AND m.P <> {1} AND ad.Id > m.Watermark AND ad.ChangedAt >= DATEADD(hour, -6, m.Finished)
                                      AND ad.Origin IN ({2}, {3}, {4}) AND acd.IsMonthColumn = 0)
+                       OR EXISTS (SELECT 1 FROM aud.CellChange AS sm
+                                   WHERE sm.DocumentId = {0} AND (sm.PeriodKey = m.P OR (sm.PeriodKey = {1} AND m.P <> {1}))
+                                     AND sm.ChangedAt >= m.SubmitSince AND sm.CorrelationId = {8})
                        THEN {{MonthDerivedCode}}
                      ELSE 0
                    END AS Code
-              FROM (VALUES {{values}}) AS m (P, Since, Finished, Watermark)
+              FROM (VALUES {{values}}) AS m (P, Since, Finished, Watermark, SubmitSince)
             """;
 
         // Рядків рівно стільки, скільки місяців у VALUES (≤ 12 на рік) — межа в самому запиті.
@@ -329,6 +335,13 @@ internal static class NightlyInputChangeQuery
 
         return result;
     }
+
+    /// <summary>
+    /// ✎ Повторний огляд L-a: записи перерахунку ПОДАННЯ (<see cref="CellChangeOrigins.SubmitRecalculationCorrelation"/>) — без лока
+    /// документа, тож їхній <c>Id</c> може бути не більший за межу журналу прогону, що завершився паралельно: вони будять місяць і
+    /// за часом — від кінця прогону мінус цей запас (той самий, що межа входів D-562).
+    /// </summary>
+    internal static readonly TimeSpan SubmitRecalculationMargin = TimeSpan.FromMinutes(60);
 
     /// <summary>Код <see cref="MonthCellChangesAsync"/>: змінився вхід місяця.</summary>
     public const int MonthInputCode = 1;
