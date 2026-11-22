@@ -1044,6 +1044,8 @@ WHERE Lane = 'recalc' AND [State] IN ('Queued', 'Running') AND TargetKey LIKE N'
 GROUP BY [State];  -- ≤ документів-споживачів × років, а не × місяців
 ```
 
+Провалений крок каскаду адміністратор бачить у журналі фонових задач `/admin/jobs` (чи `itg.JobProgress`, `State = 'Failed'`, ціль `…-dependents`): помилка рядка «Step for period N failed; periods … continue in job <id>» називає місяць провалу й нову задачу, у якій ідуть решта місяців (її стан — за тим `JobId`); «could not be queued again» — решту не поставлено, натисніть «Перерахувати» споживача.
+
 **Інтерактивні місця воркера Api (`D-564d`, PERF-04).** Перерахунок формул після правки комірки (лейн `interactive`) іде
 у воркері кожного вузла Api: `Jobs:Interactive:ReservedConcurrency` власних місць (типово **1**) плюс спільні
 `Jobs:Api:MaxConcurrency` (типово **4**, спільні з лейном `default`, а при `InProcess` — і з перерахунком). Задача формул
