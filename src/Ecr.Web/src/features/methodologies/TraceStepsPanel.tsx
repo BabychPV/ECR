@@ -50,7 +50,8 @@ export function MethodologyTraceStepsPanel({
       actions={
         enabled !== undefined && (
           // ⚠ Стан видно й у згорнутій секції: «вимкнено» — найчастіша відповідь на «чому немає кроків».
-          <Badge variant="light" color={enabled ? 'statusInfo' : 'gray'} data-testid="trace-steps-state">
+          // ⚠ «Вимкнено» — outline, а не light: сірий light на фоні заголовка секції не проходив axe color-contrast (e2e).
+          <Badge variant={enabled ? 'light' : 'outline'} color={enabled ? 'statusInfo' : 'gray'} data-testid="trace-steps-state">
             {t(enabled ? 'methodologies.traceSteps.on' : 'methodologies.traceSteps.off')}
           </Badge>
         )
