@@ -1449,6 +1449,11 @@ public sealed partial class RecalculationJob(
     /// нічого, окрім одного читання роутера.
     /// </para>
     /// <para>
+    /// ✎ F7 (огляд PERF-06): і колонки <c>Formula</c> — їх переписує прогін власника й каскад (D-566), а скрипт іншого місяця
+    /// через псевдонім таблиці (<c>Src.F[m]</c>) доти лишався зі старим числом. Читач власної таблиці (<c>row.F[m]</c>) — ні:
+    /// його в метаданих немає (відкрите питання).
+    /// </para>
+    /// <para>
     /// ⛔ Затверджені аркуші читача не перераховуються (D-328, D-493): прохід Q їх пропускає й лишає позначку
     /// «пропущено» (<see cref="SheetLogAsync"/>). Період, де затверджено ВСЕ (чи закритий, чи проєкт архівний), прохід не
     /// ставить — як розклад проєкту; позначку в разі «затверджено все» пишемо тут же, бо проходу, що її писав би, не буде.
@@ -1514,7 +1519,17 @@ public sealed partial class RecalculationJob(
         }
     }
 
-    /// <summary>Періоди року (поза <paramref name="scope"/>), де є читач колонки <c>Calculated</c> з власником у <paramref name="scope"/>.</summary>
+    /// <summary>
+    /// Колонка, число якої період-читач бере в періоду-власника і яку переписує прогін власника: <c>Calculated</c> (результат
+    /// методології) і ✎ F7 <c>Formula</c> (формула шаблону, яку переписує й каскад формул).
+    /// </summary>
+    private static bool OwnerReadColumn(Domain.Enums.CellDataType type)
+        => type is Domain.Enums.CellDataType.Calculated or Domain.Enums.CellDataType.Formula;
+
+    /// <summary>
+    /// Періоди року (поза <paramref name="scope"/>), де є читач колонки <c>Calculated</c> чи ✎ F7 <c>Formula</c> з власником у
+    /// <paramref name="scope"/>.
+    /// </summary>
     private async Task<IReadOnlyList<int>> ReaderPeriodsOfOwnersAsync(
         MonthRoutingDocument routing, int[] scope, CancellationToken ct)
     {
@@ -1527,8 +1542,7 @@ public sealed partial class RecalculationJob(
                 .Take(MaxBindings)
                 .ToListAsync(ct)
                 .ConfigureAwait(false))
-            .Where(t => monthRouter!.AppliesToTable(t)
-                        && t.Columns.Any(c => !c.IsDeleted && c.DataType == Domain.Enums.CellDataType.Calculated))
+            .Where(t => monthRouter!.AppliesToTable(t) && t.Columns.Any(c => !c.IsDeleted && OwnerReadColumn(c.DataType)))
             .ToList();
         if (tables.Count == 0)
         {
@@ -1602,19 +1616,25 @@ public sealed partial class RecalculationJob(
 
             foreach (var table in tables.Where(t => tableDefIds.Contains(t.Id)))
             {
-                var foreign = (await monthRouter!
+                var owned = (await monthRouter!
                         .ForeignColumnsAsync(routing, table, new PeriodKey(inPeriod.Key), ct)
                         .ConfigureAwait(false))
-                    .Where(f => f.Column.DataType == Domain.Enums.CellDataType.Calculated
-                                && scope.Contains(f.OwnerPeriod.Value))
-                    .Select(f => f.Column.Id)
-                    .ToHashSet();
-                if (foreign.Count == 0)
+                    .Where(f => OwnerReadColumn(f.Column.DataType) && scope.Contains(f.OwnerPeriod.Value))
+                    .ToList();
+                if (owned.Count == 0)
                 {
                     continue;
                 }
 
-                // Читач через псевдонім таблиці (calc.MethodologyReadTable) або читач власної таблиці (ребро на джерело колонки).
+                var foreign = owned
+                    .Where(f => f.Column.DataType == Domain.Enums.CellDataType.Calculated)
+                    .Select(f => f.Column.Id)
+                    .ToHashSet();
+
+                // Читач через псевдонім таблиці (calc.MethodologyReadTable; ✎ F7 — і для колонок Formula) або читач власної
+                // таблиці (ребро на методологію-джерело колонки Calculated). ⚠ F7: читач ВЛАСНОЇ таблиці, що читає місячну
+                // колонку Formula (`rows from T; row.F[m]`), у метаданих публікації не записаний (ребра на джерело в формули
+                // немає) — тут не знаходиться; точне правило потребує переліку прочитаних колонок у метаданих (рішення людини).
                 var sources = bound
                     .Where(b => b.TableDefId == table.Id && foreign.Contains(b.ColumnDefId))
                     .Select(b => b.MethodologyId)
