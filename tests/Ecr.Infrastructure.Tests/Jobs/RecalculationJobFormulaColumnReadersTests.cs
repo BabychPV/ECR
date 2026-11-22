@@ -177,6 +177,109 @@ public sealed class RecalculationJobFormulaColumnReadersTests(SqlServerFixture s
         await after.DidNotReceiveWithAnyArgs().EnqueueCoalescedAsync<IRecalculationJob>(default!, default, default, default);
     }
 
+    [Fact]
+    public async Task D568_дозапис_старту_при_гонці_не_лишає_рядків_у_спільному_контексті_і_не_кидає()
+    {
+        // Огляд b9, п. 2: другий екземпляр устиг дозаписати ту саму версію між читанням і збереженням (UQ_MethodologyReadField).
+        var world = await ArrangeAsync(Reader.OwnLegacy);
+        await using var db = world.Builder.CreateContext();
+        var backfill = new MethodologyReadFieldsBackfill(db)
+        {
+            OnlyVersions = [world.VersionId],
+            BeforeSaveProbe = async ct =>
+            {
+                await using var rival = world.Builder.CreateContext();
+                rival.MethodologyReadFields.Add(new MethodologyReadField(world.VersionId, MethodologyReadField.RecordedMarker, otherMonths: false));
+                await rival.SaveChangesAsync(ct);
+            },
+        };
+
+        Assert.Equal(0, await backfill.RunAsync(CancellationToken.None));
+
+        // Спільний контекст старту чистий: наступний SaveChanges (наступний крок старту) не повторює вставок і не падає.
+        Assert.DoesNotContain(db.ChangeTracker.Entries<MethodologyReadField>(), e => e.State == EntityState.Added);
+        Assert.Equal(0, await db.SaveChangesAsync());
+        Assert.Equal(1, await db.MethodologyReadFields.CountAsync(f => f.MethodologyVersionId == world.VersionId));
+    }
+
+    [Fact]
+    public async Task D568_дозапис_старту_збій_компіляції_версії_дає_читача_всього_решта_версій_дозаписується()
+    {
+        // Огляд b9, п. 2: виняток компіляції чи рефлексії (не «не скомпілювалось») — лише ця версія «читає будь-що».
+        var broken = await ArrangeAsync(Reader.OwnLegacy);
+        var healthy = await ArrangeAsync(Reader.OwnLegacy);
+        await using var db = broken.Builder.CreateContext();
+
+        var written = await new MethodologyReadFieldsBackfill(db)
+        {
+            OnlyVersions = [broken.VersionId, healthy.VersionId],
+            BeforeCompileProbe = id =>
+            {
+                if (id == broken.VersionId)
+                {
+                    throw new InvalidOperationException("reflection");
+                }
+            },
+        }.RunAsync(CancellationToken.None);
+
+        Assert.Equal(2, written);
+        var rows = await db.MethodologyReadFields.AsNoTracking()
+            .Where(f => f.MethodologyVersionId == broken.VersionId || f.MethodologyVersionId == healthy.VersionId)
+            .Select(f => new { f.MethodologyVersionId, f.FieldCode })
+            .ToListAsync();
+        Assert.Contains(rows, r => r.MethodologyVersionId == broken.VersionId && r.FieldCode == MethodologyReadField.AllFields);
+        Assert.DoesNotContain(rows, r => r.MethodologyVersionId == healthy.VersionId && r.FieldCode == MethodologyReadField.AllFields);
+        Assert.Contains(rows, r => r.MethodologyVersionId == healthy.VersionId
+                                   && string.Equals(r.FieldCode, healthy.Field, StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task D568_стеля_версій_досягнута_кожна_методологія_читає_будь_що()
+    {
+        // Огляд b9, п. 3: дві методології-скрипти, кожна читає лише свій місяць. Стеля 1 обрізала б версії другої — вона
+        // виглядала б формульною (не читачем). Парно — без стелі обидві за полями (All = false).
+        var first = await ArrangeAsync(Reader.OwnOwnMonth);
+        var second = await ArrangeAsync(Reader.OwnOwnMonth);
+        int[] ids = [first.MethodologyId, second.MethodologyId];
+
+        await using var db = first.Builder.CreateContext();
+        var uncapped = await Job(db, Substitute.For<IBackgroundJobScheduler>(), new Runner(), Now)
+            .ScriptFieldReadsAsync(ids, CancellationToken.None);
+        Assert.All(ids, id => Assert.False(uncapped[id].All));
+
+        var capped = await Job(db, Substitute.For<IBackgroundJobScheduler>(), new Runner(), Now, readFieldsCap: 1)
+            .ScriptFieldReadsAsync(ids, CancellationToken.None);
+        Assert.All(ids, id => Assert.True(capped.TryGetValue(id, out var reads) && reads.All));
+    }
+
+    [Fact]
+    public async Task D568_стеля_імпортів_досягнута_методологія_читає_будь_що()
+    {
+        // Огляд b9, п. 3: версія імпортує три бібліотеки (без опублікованих версій); стеля 2 обрізала б імпорти.
+        var world = await ArrangeAsync(Reader.OwnOwnMonth);
+        await using (var arrange = world.Builder.CreateContext())
+        {
+            for (var i = 0; i < 3; i++)
+            {
+                var library = new Methodology(EcrCode.Create("F7L_" + Guid.NewGuid().ToString("N")[..6].ToUpperInvariant()), Name("lib"));
+                arrange.Methodologies.Add(library);
+                await arrange.SaveChangesAsync();
+                arrange.MethodologyImports.Add(new MethodologyImport(world.VersionId, library.Id, world.MethodologyId));
+            }
+
+            await arrange.SaveChangesAsync();
+        }
+
+        await using var db = world.Builder.CreateContext();
+        var uncapped = await Job(db, Substitute.For<IBackgroundJobScheduler>(), new Runner(), Now)
+            .ScriptFieldReadsAsync([world.MethodologyId], CancellationToken.None);
+        Assert.False(uncapped[world.MethodologyId].All);
+
+        var capped = await Job(db, Substitute.For<IBackgroundJobScheduler>(), new Runner(), Now, readFieldsCap: 2)
+            .ScriptFieldReadsAsync([world.MethodologyId], CancellationToken.None);
+        Assert.True(capped[world.MethodologyId].All);
+    }
+
     // ───── стенд ─────
 
     private enum Reader
@@ -215,7 +318,8 @@ public sealed class RecalculationJobFormulaColumnReadersTests(SqlServerFixture s
         await Job(db, scheduler, runner, at ?? Now).ExecuteAsync(request, new NoOpProgress(), CancellationToken.None);
     }
 
-    private static RecalculationJob Job(EcrDbContext db, IBackgroundJobScheduler scheduler, Runner runner, DateTime at)
+    private static RecalculationJob Job(
+        EcrDbContext db, IBackgroundJobScheduler scheduler, Runner runner, DateTime at, int? readFieldsCap = null)
     {
         var clock = new TestClock(at);
         var registry = Substitute.For<ITemplateLayoutRegistry>();
@@ -234,6 +338,7 @@ public sealed class RecalculationJobFormulaColumnReadersTests(SqlServerFixture s
             monthRouter: new MonthColumnRouter(db, Substitute.For<IConfiguration>(), registry))
         {
             CompletionBusyDelay = TimeSpan.Zero,
+            ReadFieldsCap = readFieldsCap ?? 5_000, // типова стеля (MaxBindings)
         };
     }
 
@@ -309,7 +414,7 @@ public sealed class RecalculationJobFormulaColumnReadersTests(SqlServerFixture s
         db.CalculationBindings.Add(new CalculationBinding(doc.TableDefId, output, methodology.Id, "Z", "{}"));
         await db.SaveChangesAsync();
 
-        return new World(builder, doc, version.Id, field);
+        return new World(builder, doc, version.Id, field, methodology.Id);
     }
 
     private static RunCalculationHandler RunHandler(EcrDbContext db, TestClock clock)
@@ -356,7 +461,7 @@ public sealed class RecalculationJobFormulaColumnReadersTests(SqlServerFixture s
 
     private static LocalizedText Name(string value) => new(new Dictionary<string, string> { ["en"] = value });
 
-    private sealed record World(TestDocumentBuilder Builder, TestDocument Doc, int VersionId, string Field);
+    private sealed record World(TestDocumentBuilder Builder, TestDocument Doc, int VersionId, string Field, int MethodologyId);
 
     /// <summary>Фейк оркестратора: нічого не рахує, лише записує періоди.</summary>
     private sealed class Runner : ICalculationRunner

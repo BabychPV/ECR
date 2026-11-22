@@ -33,10 +33,44 @@ public sealed partial class MethodologyReadFieldsBackfill(EcrDbContext db, ILogg
     /// <summary>Лише тести: обмежити дозапис цими версіями (спільна тестова база).</summary>
     internal IReadOnlyCollection<int>? OnlyVersions { get; init; }
 
-    /// <summary>Виконує дозапис.</summary>
+    /// <summary>Лише тести: викликається перед компіляцією кожної версії (кинути — збій компіляції чи рефлексії).</summary>
+    internal Action<int>? BeforeCompileProbe { get; init; }
+
+    /// <summary>Лише тести: викликається перед збереженням (вставити ті самі рядки — гонка двох екземплярів).</summary>
+    internal Func<CancellationToken, Task>? BeforeSaveProbe { get; init; }
+
+    /// <summary>Виконує дозапис. Не кидає (крім скасування): збій — попередження в журнал, старт іде далі.</summary>
     /// <param name="ct">Токен скасування.</param>
-    /// <returns>Скільки версій дозаписано.</returns>
+    /// <returns>Скільки версій дозаписано (0 — і при збої).</returns>
+    /// <remarks>
+    /// ⛔ Огляд b9, п. 2: контекст — спільний scoped контекст старту. Збій збереження (гонка двох екземплярів на
+    /// <c>UQ_MethodologyReadField</c>, обрив з'єднання) лишав додані рядки відстежуваними — наступний <c>SaveChanges</c> старту
+    /// повторив би їх і впав. Тож при збої додані цим дозаписом рядки знімаються з відстеження. Версія без запису лишається
+    /// «читачем усього» (безпечний бік) і дозапишеться наступним стартом.
+    /// </remarks>
     public async Task<int> RunAsync(CancellationToken ct)
+    {
+        try
+        {
+            return await RunCoreAsync(ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            foreach (var entry in db.ChangeTracker.Entries<MethodologyReadField>().Where(e => e.State == EntityState.Added).ToList())
+            {
+                entry.State = EntityState.Detached;
+            }
+
+            if (logger is not null)
+            {
+                LogFailed(logger, ex.GetType().Name, ex.Message);
+            }
+
+            return 0;
+        }
+    }
+
+    private async Task<int> RunCoreAsync(CancellationToken ct)
     {
         var query = db.MethodologyVersions.AsNoTracking();
         if (OnlyVersions is { } only)
@@ -67,22 +101,40 @@ public sealed partial class MethodologyReadFieldsBackfill(EcrDbContext db, ILogg
         var unknown = 0;
         foreach (var version in versions)
         {
-            var compiled = Ecr.Scripting.ScriptCompiler
-                .Compile(version.ScriptText ?? string.Empty, new Ecr.Scripting.ScriptCompileOptions(version.NumericMode, version.Library))
-                .Script;
+            // ✎ Огляд b9, п. 2: збій компіляції чи обходу дерева (виняток, не лише «не скомпілювалось») — та сама відповідь
+            // «читає будь-що» для ЦІЄЇ версії, решта дозаписується як завжди.
+            IReadOnlyList<ScriptReadField>? fields;
+            try
+            {
+                BeforeCompileProbe?.Invoke(version.Id);
+                var compiled = Ecr.Scripting.ScriptCompiler
+                    .Compile(version.ScriptText ?? string.Empty, new Ecr.Scripting.ScriptCompileOptions(version.NumericMode, version.Library))
+                    .Script;
+                fields = compiled is null ? null : ScriptReadFields.Of(compiled);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                fields = null;
+            }
+
             db.MethodologyReadFields.Add(new MethodologyReadField(version.Id, MethodologyReadField.RecordedMarker, otherMonths: false));
-            if (compiled is null)
+            if (fields is null)
             {
                 unknown++;
                 db.MethodologyReadFields.Add(new MethodologyReadField(version.Id, MethodologyReadField.AllFields, otherMonths: true));
                 continue;
             }
 
-            foreach (var field in ScriptReadFields.Of(compiled)
+            foreach (var field in fields
                          .Where(f => f.FieldCode.Length is > 0 and <= MethodologyReadField.MaxFieldCodeLength))
             {
                 db.MethodologyReadFields.Add(new MethodologyReadField(version.Id, field.FieldCode, field.OtherMonths));
             }
+        }
+
+        if (BeforeSaveProbe is not null)
+        {
+            await BeforeSaveProbe(ct).ConfigureAwait(false);
         }
 
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -97,4 +149,8 @@ public sealed partial class MethodologyReadFieldsBackfill(EcrDbContext db, ILogg
     [LoggerMessage(Level = LogLevel.Warning,
         Message = "D-568: дозаписано поля читання скриптів для {Versions} опублікованих версій; не скомпілювались (читачі всього) {Unknown}.")]
     private static partial void LogBackfilled(ILogger logger, int versions, int unknown);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "D-568: дозапис полів читання скриптів не вдався ({Kind}: {Error}) — версії без запису лишаються читачами всього, наступний старт повторить.")]
+    private static partial void LogFailed(ILogger logger, string kind, string error);
 }

@@ -184,6 +184,10 @@ public sealed partial class RecalculationJob(
     /// <remarks>⚠ <c>init</c> — лише заради тестів: секунди очікування там не потрібні.</remarks>
     internal TimeSpan CompletionBusyDelay { get; init; } = TimeSpan.FromSeconds(5);
 
+    /// <summary>✎ D-568 (огляд b9, п. 3): стеля версій/імпортів у <see cref="ScriptFieldReadsAsync"/>.</summary>
+    /// <remarks>⚠ <c>init</c> — лише заради тестів (стеля 5 000 у тесті недосяжна).</remarks>
+    internal int ReadFieldsCap { get; init; } = MaxBindings;
+
     /// <summary>Налаштування розбору завдання; спільні на всі виклики.</summary>
     /// <remarks>
     /// Один екземпляр на клас, а не на виклик: <c>JsonSerializerOptions</c>
@@ -1569,6 +1573,11 @@ public sealed partial class RecalculationJob(
         var versionsOf = new Dictionary<int, List<int>>();
         var importsOf = new Dictionary<int, List<int>>();
         var pending = methodologyIds.Distinct().ToList();
+
+        // ✎ Огляд b9, п. 3: стеля версій чи імпортів обрізала б перелік ДОВІЛЬНО — методологія без зібраних версій виглядала б
+        // формульною (не читачем). Стеля досягнута — кожна методологія «читає будь-що» (зайвий прохід, не пропущений).
+        var cap = ReadFieldsCap;
+        var capped = false;
         for (var depth = 0; pending.Count > 0; depth++)
         {
             var batch = pending.Where(id => !versionsOf.ContainsKey(id)).ToList();
@@ -1586,9 +1595,15 @@ public sealed partial class RecalculationJob(
                                 || v.Status == Domain.Enums.TemplateVersionStatus.Deprecated))
                 .Select(v => new { v.Id, v.MethodologyId })
                 .OrderBy(v => v.Id)
-                .Take(MaxBindings)
+                .Take(cap + 1)
                 .ToListAsync(ct)
                 .ConfigureAwait(false);
+            if (versions.Count > cap)
+            {
+                capped = true;
+                break;
+            }
+
             foreach (var id in batch)
             {
                 versionsOf[id] = [.. versions.Where(v => v.MethodologyId == id).Select(v => v.Id)];
@@ -1606,9 +1621,15 @@ public sealed partial class RecalculationJob(
                 .Select(i => new { i.MethodologyVersionId, i.ImportedMethodologyId })
                 .OrderBy(i => i.MethodologyVersionId)
                 .ThenBy(i => i.ImportedMethodologyId)
-                .Take(MaxBindings)
+                .Take(cap + 1)
                 .ToListAsync(ct)
                 .ConfigureAwait(false);
+            if (imports.Count > cap)
+            {
+                capped = true;
+                break;
+            }
+
             foreach (var version in versions)
             {
                 importsOf[version.Id] = [.. imports.Where(i => i.MethodologyVersionId == version.Id).Select(i => i.ImportedMethodologyId)];
@@ -1619,6 +1640,16 @@ public sealed partial class RecalculationJob(
             {
                 pending.AddRange(imports.Select(i => i.ImportedMethodologyId));
             }
+        }
+
+        if (capped)
+        {
+            foreach (var methodologyId in methodologyIds.Distinct())
+            {
+                result[methodologyId] = new ScriptFieldReads(true, new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase));
+            }
+
+            return result;
         }
 
         var allVersionIds = versionsOf.Values.SelectMany(v => v).Distinct().ToList();

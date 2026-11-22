@@ -131,23 +131,9 @@ public static partial class StartupSequence
 
         // 4d) ✎ D-568: поля власної таблиці, які читають скрипти, опубліковані до D-568 (calc.MethodologyReadField).
         //     Ідемпотентно, лише версії без запису. ⚠ Відмова — попередження: версію без запису прохід читача вважає
-        //     читачем усього (зайвий перерахунок, не пропущений).
-        try
-        {
-            await new MethodologyReadFieldsBackfill(db, logger).RunAsync(CancellationToken.None).ConfigureAwait(false);
-        }
-        catch (System.Data.Common.DbException ex)
-        {
-            LogReadFieldsBackfillFailed(logger, ex.Message);
-        }
-        catch (Microsoft.EntityFrameworkCore.DbUpdateException ex)
-        {
-            LogReadFieldsBackfillFailed(logger, ex.Message);
-        }
-        catch (Microsoft.EntityFrameworkCore.Storage.RetryLimitExceededException ex)
-        {
-            LogReadFieldsBackfillFailed(logger, ex.Message);
-        }
+        //     читачем усього (зайвий перерахунок, не пропущений). ✎ Огляд b9, п. 2: дозапис сам не кидає (будь-який збій —
+        //     у журнал) і при збої знімає додані рядки з відстеження спільного контексту старту — наступні кроки їх не повторять.
+        await new MethodologyReadFieldsBackfill(db, logger).RunAsync(CancellationToken.None).ConfigureAwait(false);
 
         Lap(logger, lap, "4d поля читання скриптів");
 
@@ -412,11 +398,6 @@ public static partial class StartupSequence
         Message = "Старт: похідні аргументи методологій не вирівняно: {Error}. Старі списки ArgumentsCsv рахують як і раніше; "
             + "крок повториться на наступному старті.")]
     private static partial void LogArgumentsBackfillFailed(ILogger logger, string error);
-
-    [LoggerMessage(Level = LogLevel.Warning,
-        Message = "Старт: поля читання скриптів (D-568) не дозаписано: {Error}. Версії без запису прохід читача вважає читачами "
-            + "всього; крок повториться на наступному старті.")]
-    private static partial void LogReadFieldsBackfillFailed(ILogger logger, string error);
 
     [LoggerMessage(Level = LogLevel.Warning,
         Message = "Старт: вʼюхи rpt.v_* не згенеровано: {Error}. SSRS не бачить нових версій шаблонів, "
