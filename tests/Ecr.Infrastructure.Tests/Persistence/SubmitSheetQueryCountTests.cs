@@ -79,7 +79,7 @@ public sealed class SubmitSheetQueryCountTests(SqlServerFixture sql)
     /// </para>
     /// <para>
     /// ✎ F5: ворота «місяць чекає каскаду джерела» (<see cref="Ecr.Infrastructure.Jobs.SourceCascadePendingGate"/>) — справжні, рівно ОДИН
-    /// запит черги за <c>IX_JobProgress_Document_Active</c> на подання документа без живої задачі каскаду. Свідомі +1:
+    /// запит черги (і розширений ланками джерел, коли в графі є ребра) на подання документа без живої задачі каскаду. Свідомі +1:
     /// 16 → 17, 17 → 18.
     /// </para>
     /// </remarks>
@@ -122,7 +122,8 @@ public sealed class SubmitSheetQueryCountTests(SqlServerFixture sql)
             + $"— 3 таблиці —\n{smallDetail}\n— 12 таблиць —\n{largeDetail}");
 
         // ✎ F5: ворота каскаду — рівно один запит черги, хоч би скільки таблиць.
-        Assert.Equal(1, CountOf(largeDetail, "IX_JobProgress_Document_Active"));
+        Assert.Equal(1, CountOf(largeDetail, "ecr:f5-cascade-gate"));
+        Assert.Contains("ecr:f5-cascade-gate */ DECLARE @t", largeDetail, StringComparison.Ordinal); // розширений шлях
 
         var ceiling = bindLastTable ? MaxCommandsBound : MaxCommandsUnbound;
         Assert.True(
@@ -402,7 +403,25 @@ public sealed class SubmitSheetQueryCountTests(SqlServerFixture sql)
             new TemplateVersionStore(db),
             new RegistryStore(db),
             new AuditWriter(db),
-            cascadeGate: new Ecr.Infrastructure.Jobs.SourceCascadePendingGate(db));
+            cascadeGate: NonConsumerCascadeGate(db));
+    }
+
+    /// <summary>
+    /// ✎ F5 (п. 1 огляду): у графі Є ребро «джерело → споживач», але не для шаблону цього документа — ворота йдуть
+    /// розширеним запитом (ланки джерел) і однаково роблять рівно ОДНЕ звернення: стелі не зростають.
+    /// </summary>
+    private static Ecr.Infrastructure.Jobs.SourceCascadePendingGate NonConsumerCascadeGate(EcrDbContext db)
+    {
+        var graph = Substitute.For<IDependencyGraphProvider>();
+        graph.GetAsync(Arg.Any<CancellationToken>()).Returns(new Ecr.Application.DocumentDependencies.DependencyGraphSnapshot(
+            "f5", [], [],
+            [new Ecr.Application.DocumentDependencies.TemplateDependency(
+                -1, -2, -3, -4, new Ecr.Expressions.Binding.PeriodScope(Ecr.Expressions.Binding.PeriodScopeKind.Year, 0), true, false)],
+            [], [], []));
+        return new Ecr.Infrastructure.Jobs.SourceCascadePendingGate(db, gateCache: null, graph)
+        {
+            AutoBindingsProbe = _ => Task.FromResult<IReadOnlyCollection<int>>([-3]),
+        };
     }
 
     private static int CountOf(string text, string fragment)
