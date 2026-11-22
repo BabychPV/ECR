@@ -215,6 +215,14 @@ public sealed class RecalcLaneGlobalCapDbTests(SqlServerFixture sql) : DbJobQueu
     /// <summary>
     /// Місце в черзі — порядок claim (ручні — «черга людей», далі системні FIFO) — і орієнтовний старт за медіаною кроку.
     /// </summary>
+    /// <remarks>
+    /// ✎ 22.11 (b8): одноразовий червоний «Expected 3, Actual 4» на <c>a2</c> у повному прогоні Jobs — на гілках
+    /// <c>lane/perf-cascade</c>/<c>-fix</c> (0f365316a, 4320d6723), відгалужених ДО da4f249d7, де задачі ставились без явного
+    /// <c>AvailableAt</c>: a2 і a3 в одну мілісекунду (<c>datetime2(3)</c>), нічию вирішує <c>JobId</c> (GUID) — за a3 &lt; a2
+    /// ранг a3 = 1, a2 = 2, і a2 — четвертий. Порядок продукту повний і правильний; явний зростаючий час
+    /// <see cref="EnqueueRecalcAsync"/> (da4f249d7) нічию прибрав. Мутація «a3 у мілісекунду a2» — червоний з тим самим
+    /// повідомленням (6/8; зелені — коли GUID a3 &gt; a2).
+    /// </remarks>
     [Fact]
     public async Task Місце_в_черзі_й_орієнтовний_старт()
     {
