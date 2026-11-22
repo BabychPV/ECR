@@ -5,6 +5,7 @@ import type { MethodologyTraceStepsDto } from '@/api/types';
 import { queryKeys } from '@/api/queryKeys';
 import { t } from '@/shared/i18n';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { badgeLook } from '@/shared/ui/StatusBadge';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { methodologyTraceSteps, saveMethodologyTraceSteps } from './api';
 import { MethodologySection } from './MethodologySection';
@@ -41,6 +42,7 @@ export function MethodologyTraceStepsPanel({
   });
 
   const enabled = traceSteps.data?.traceSteps;
+  const look = badgeLook(enabled === true ? 'info' : 'neutral');
 
   return (
     <MethodologySection
@@ -50,8 +52,14 @@ export function MethodologyTraceStepsPanel({
       actions={
         enabled !== undefined && (
           // ⚠ Стан видно й у згорнутій секції: «вимкнено» — найчастіша відповідь на «чому немає кроків».
-          // ⚠ «Вимкнено» — outline, а не light: сірий light на фоні заголовка секції не проходив axe color-contrast (e2e).
-          <Badge variant={enabled ? 'light' : 'outline'} color={enabled ? 'statusInfo' : 'gray'} data-testid="trace-steps-state">
+          <Badge
+            variant="outline"
+            // ⚠ Тони StatusBadge (`badgeLook`): сірий Mantine (light/outline) на тлі заголовка секції не проходив axe color-contrast.
+            c={look.text}
+            bg={look.bg}
+            bd={`1px solid ${look.border}`}
+            data-testid="trace-steps-state"
+          >
             {t(enabled ? 'methodologies.traceSteps.on' : 'methodologies.traceSteps.off')}
           </Badge>
         )
