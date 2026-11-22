@@ -129,6 +129,11 @@ public sealed class DecimalOverflowRunSurvivesTests
         store.GetOutputsAsync(VersionId, Arg.Any<CancellationToken>())
              .Returns([new MethodologyOutput(VersionId, EcrCode.Create("Total"), unitId: 1)]);
 
+        // ✎ D-565: кроки трейсу пишуться лише за прапором методології (типово вимкнено). Тест захищає саме
+        // «помилка-значення у трейсі, а не #NULL», тож прапор тут увімкнено, як у Hse301GoldenTests.
+        store.GetTraceStepMethodologyIdsAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
+             .Returns([MethodologyId]);
+
         var periods = Substitute.For<IPeriodStore>();
         periods.FindPeriodBoundsAsync(DocumentId, Period, Arg.Any<CancellationToken>())
                .Returns(new PeriodBounds(new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31)));
@@ -179,7 +184,11 @@ public sealed class DecimalOverflowRunSurvivesTests
         services.AddSingleton(results);
         services.AddSingleton(Substitute.For<IConstantStore>());
         services.AddSingleton(Substitute.For<ICalculationBindingStore>());
-        services.AddSingleton(Substitute.For<IUnitOfWork>());
+        // ✎ D-565: чанк із кроками трейсу записувач пише в транзакції — підміна виконує її тіло (як у Hse301GoldenTests).
+        var uow = Substitute.For<IUnitOfWork>();
+        uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+           .Returns(call => call.Arg<Func<CancellationToken, Task>>()(call.Arg<CancellationToken>()));
+        services.AddSingleton(uow);
         services.AddSingleton<IFormulaEngine, RealFormulaEngine>();
         services.AddSingleton<CalendarContext>();
         services.AddScoped<ConstantResolver>();

@@ -305,6 +305,12 @@ if ($KV['tableinstanceid_column'] -eq 'absent') {
     V 'TII' 'нові результати: NULL = 0 (PASS), частково (INFO), усі NULL або немає нових (FAIL)' $v "new=$tn null=$tnull not_null=$($tn - $tnull)"
 }
 V 'BRANCH_BOTH' 'BRANCH_BOTH у TraceJson/ModulesProfileJson/JobProgress після since = 0' $(Pv (Eq (N 'branch_both_hits') 0)) "hits=$($KV['branch_both_hits'])"
+# D-565: прогони, що не записали кроків частини методологій (трасування вимкнено) — TraceJson для них не оцінено: INFO
+# «NOT EVALUABLE», а не мовчазний PASS (0 збігів у кроках, яких немає, нічого не доводить).
+$bbNe = N 'branch_both_trace_not_evaluable'
+if ($null -ne $bbNe -and $bbNe -gt 0) {
+    V 'BRANCH_BOTH_TRACE' 'BRANCH_BOTH у кроках (TraceJson): NOT EVALUABLE для прогонів без записаних кроків (D-565)' 'INFO' "runs_without_steps=$bbNe — увімкніть «Intermediate-step tracing» і перерахуйте, щоб перевірити кроки"
+}
 # Тексти модулів у кодуванні ANSI (sqlcmd без -f i:65001): лікується перезастосуванням файлу з Sql/ через -f i:65001.
 V 'UTF8' 'тексти процедур/тригерів/функцій/вʼюх без кирилиці, прочитаної як ANSI (Ð/Ñ) = 0' $(Pv (Eq (N 'mojibake_modules') 0)) "modules=$($KV['mojibake_modules']) names=$($KV['mojibake_module_names'])"
 # RowActivityFilter

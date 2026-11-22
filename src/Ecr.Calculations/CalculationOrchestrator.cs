@@ -148,6 +148,30 @@ public sealed class CalculationOrchestrator(
 
         profile.RecordSkippedUnpublished(skippedUnpublished);
 
+        // ✎ D-565 (PERF-03): прапор «трасувати проміжні кроки» — одним читанням на прогін. Без прапора (типово)
+        // запис відкидає кроки трейсу; обчислення, результати й входи від прапора не залежать.
+        if (resolved.Count > 0)
+        {
+            var traced = await resolver
+                .TraceStepMethodologiesAsync([.. resolved.Select(r => r.Descriptor.MethodologyId).Distinct()], ct)
+                .ConfigureAwait(false);
+            if (traced.Count > 0)
+            {
+                for (var i = 0; i < resolved.Count; i++)
+                {
+                    if (traced.Contains(resolved[i].Descriptor.MethodologyId))
+                    {
+                        resolved[i] = resolved[i] with { Descriptor = resolved[i].Descriptor with { TraceSteps = true } };
+                    }
+                }
+            }
+
+            // ⛔ Факт ПРОГОНУ, а не поточний прапор: інструменти й панель проблем читають, чи ЦЕЙ прогін записав кроки
+            // методології (прапор, увімкнений пізніше, не робить відсутні кроки «нулем помилок»).
+            var methodologies = resolved.Select(r => r.Descriptor.MethodologyId).Distinct().ToList();
+            profile.RecordTraceSteps(methodologies.Where(traced.Contains), methodologies.Where(id => !traced.Contains(id)));
+        }
+
         // 2. Пакети незалежних методологій. ⛔ Порожні залежності — не
         //    «поки немає в схемі» (`calc.MethodologyDependency` є), а інваріант:
         //    одна методологія може читати іншу лише через `!Code` в імпорт.
@@ -673,7 +697,7 @@ public sealed class CalculationOrchestrator(
         stopwatch.Stop();
 
         await scopedOutputWriter
-            .WriteAsync(calculationRunId, outputs, binding.Descriptor.TraceLevel, ct)
+            .WriteAsync(calculationRunId, outputs, binding.Descriptor.TraceLevel, ct, recordSteps: binding.Descriptor.TraceSteps)
             .ConfigureAwait(false);
 
         // Відхилені правилом категорії рядки в обсяг не входять (L2-6).

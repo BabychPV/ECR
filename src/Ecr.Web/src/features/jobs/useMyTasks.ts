@@ -2,6 +2,7 @@ import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { JobSummary } from '@/api/types';
 import { myTasksUrl } from './api';
+import { jittered, stepOf, streakOf } from '@/shared/polling/pollBackoff';
 import { pollingJobCount } from './myTasks';
 
 /*
@@ -38,6 +39,36 @@ export function myTasksPollMs(jobs: readonly JobSummary[] | undefined): number {
 }
 
 /**
+ * PERF-08: поки серед власних задач щось активне, але відповідь НЕ міняється (задача стоїть у черзі або крок
+ * довгий) — шапка рідшає: 3 → 5 → 8 → 12 → 15 с. Щойно щось змінилось (новий рядок, стан, відсоток,
+ * повідомлення) — знову 3 с, тож прогрес лишається живим.
+ */
+export const MyTasksBackoffSteps: readonly number[] = [MyTasksActivePollMs, 5_000, 8_000, 12_000, 15_000];
+
+/** Підпис активних рядків: рівність двох підписів — «нічого не змінилось між двома відповідями». */
+function activeSignature(jobs: readonly JobSummary[] | undefined): string | null {
+  const active = (jobs ?? []).filter((job) => pollingJobCount([job]) > 0);
+
+  return active.length === 0 ? null : JSON.stringify(active);
+}
+
+/**
+ * `refetchInterval` шухляди: темп `myTasksPollMs` + відкладання на незмінній відповіді + розкид ±20 %.
+ *
+ * ⚠ Розкид потрібен і в простої (30 с): інакше тисяча вкладок, відкритих о 09:00, б'є на сервер в один момент.
+ */
+export function myTasksRefetchInterval(query: {
+  readonly state: { readonly data: readonly JobSummary[] | undefined; readonly dataUpdatedAt: number };
+}): number {
+  const { data, dataUpdatedAt } = query.state;
+  const signature = activeSignature(data);
+  const streak = streakOf(query, dataUpdatedAt, signature);
+  if (signature === null) return jittered(myTasksPollMs(data), dataUpdatedAt);
+
+  return jittered(stepOf(MyTasksBackoffSteps, streak), dataUpdatedAt);
+}
+
+/**
  * Власні фонові задачі для шухляди «My tasks» у шапці (`UI-07`, `BE-08`).
  *
  * ⛔ `mine=true` — НЕ клієнтський фільтр. Сервер бере власника з сеансу
@@ -55,6 +86,6 @@ export function useMyTasks(): UseQueryResult<JobSummary[]> {
   return useQuery({
     queryKey: ['jobs', 'my-tasks'],
     queryFn: () => apiFetch<JobSummary[]>(myTasksUrl()),
-    refetchInterval: (query) => myTasksPollMs(query.state.data),
+    refetchInterval: (query) => myTasksRefetchInterval(query),
   });
 }

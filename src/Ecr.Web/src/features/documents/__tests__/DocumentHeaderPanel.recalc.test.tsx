@@ -192,8 +192,10 @@ describe('B35 W-2: шапка стежить за перерахунком, як
     await waitFor(() => expect(stale(client, slices.feb)).toBe(true));
     // Перезапит (намір `invalidateSlicesForPeriods`) — лише зрізи періодів задач; період без задачі (закритий /
     // запланований) лише позначається застарілим без запиту, як і решта зрізів (`refetchType: 'none'`).
-    expect(refetched(client, invalidate, slices.jan)).toBe(true);
-    expect(refetched(client, invalidate, slices.feb)).toBe(true);
+    // PERF-09: дві задачі завершились майже разом — друга інвалідація чекає першу й іде ОДНИМ об'єднаним проходом,
+    // тож її запит з'являється трохи пізніше за позначку «застарілий».
+    await waitFor(() => expect(refetched(client, invalidate, slices.jan)).toBe(true));
+    await waitFor(() => expect(refetched(client, invalidate, slices.feb)).toBe(true));
     expect(refetched(client, invalidate, slices.mar)).toBe(false);
     await waitFor(() => expect(recalcStatus()).toBe('succeeded'));
   });

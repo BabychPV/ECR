@@ -18,6 +18,13 @@
       * branches   at most one _typeN branch per row, substance and metric (legacy writes one).
       * no value   steps whose only cause is #NULL (unselected branch, absent optional input) are listed (NoValue),
                    not failed; every other error code fails.
+    Trace off (D-565): what counts is whether THIS run recorded the methodology's steps (per-run fact,
+    ModulesProfileJson $.traceSteps.notRecorded), not the current flag. For a methodology whose steps the run did not
+    record, failed/masked steps are NOT EVALUABLE (the SQL emits 'not evaluable', never 0); the check falls back to
+    calc.CalculationIssue Kind = StepError on the row (B66), which counts OUTPUT failures only - a failed intermediate
+    formula whose error never reached an output, and masked zeros, are not visible this way. The FailedSteps column
+    then shows "n/a (trace off); StepError <n> (outputs only)". Turn "Intermediate-step tracing" on for the
+    methodology and recalculate to evaluate the steps themselves.
     Note: failed steps are stored only for the run that computed the row (TraceLevel ErrorsOnly keeps no other steps,
     and carry-over copies results without steps). After a per-sheet recalculation the Current run computed one
     sheet only, so a row of another sheet shows 0 failed steps whatever happened to it. Then pass -Tables with the
@@ -71,7 +78,7 @@ if ($DocumentId -le 0) {
 
 $lines = @(& sqlcmd -S $Server -E -d $Database -b -f 65001 -W -h -1 -s "`t" -v DocumentId=$DocumentId PeriodKey=$PeriodKey -i $sqlFile)
 if ($LASTEXITCODE -ne 0) { throw "sqlcmd failed ($LASTEXITCODE): $($lines -join ' ')" }
-$facts = @($lines | Where-Object { $_ -match "^(RUN|CURRENT|RESULT|ISSUE|FAILEDSTEP|NOVALUE|MASKED|NOSUBST|BRANCHES)`t" } | ForEach-Object {
+$facts = @($lines | Where-Object { $_ -match "^(RUN|CURRENT|RESULT|ISSUE|FAILEDSTEP|NOVALUE|MASKED|NOSUBST|BRANCHES|TRACEOFF)`t" } | ForEach-Object {
         $a = $_.Split("`t")
         [pscustomobject]@{ Section = $a[0]; Key = $a[1]; Methodology = $(if ($a.Count -gt 2) { $a[2] } else { '' }); Value = $(if ($a.Count -gt 3) { $a[3] } else { '' }) }
     })
@@ -84,6 +91,12 @@ if ($null -eq $run -or $null -eq $current -or [string]::IsNullOrWhiteSpace($curr
 }
 Write-Host "Document $DocumentId, period $PeriodKey; latest run $($run.Key) status $($run.Methodology); Current run $($current.Key)."
 if ($Tables.Count -eq 0) { Write-Host "WARNING: assumes run $($current.Key) is a WHOLE-document recalculation. After a per-sheet recalculation pass -Tables." }
+
+$traceOff = @($facts | Where-Object Section -eq 'TRACEOFF' | ForEach-Object Methodology)
+if ($traceOff.Count -gt 0) {
+    Write-Host "NOT EVALUABLE (D-565): run $($current.Key) did not record steps of $($traceOff.Count) methodologies ($($traceOff -join ', ')):"
+    Write-Host "  failed/masked steps cannot be checked; failures are taken from StepError issues (output failures only)."
+}
 
 $fail = 0
 $known = New-Object System.Collections.Generic.List[string]
@@ -98,6 +111,12 @@ foreach ($m in $plan) {
     $missingInputs = @($facts | Where-Object { $_.Section -eq 'ISSUE' -and $_.Value -eq 'MissingInputs' -and $_.Key -eq $rowKey }).Count
     $failed = 0
     foreach ($f in @($facts | Where-Object { $_.Section -eq 'FAILEDSTEP' -and $_.Key -eq $rowKey })) { $failed += [int]$f.Value }
+    $failedShown = $failed
+    if ($traceOff -contains $m.methodology) {
+        # D-565: no steps stored - the run still writes one StepError issue per row with a failed output (B66).
+        $failed = @($facts | Where-Object { $_.Section -eq 'ISSUE' -and $_.Value -eq 'StepError' -and $_.Key -eq $rowKey -and $_.Methodology -eq $m.methodology }).Count
+        $failedShown = "n/a (trace off); StepError $failed (outputs only)"
+    }
     $noValue = 0
     foreach ($f in @($facts | Where-Object { $_.Section -eq 'NOVALUE' -and $_.Key -eq $rowKey })) { $noValue += [int]$f.Value }
     if ($Tables.Count -gt 0 -and $Tables -notcontains $m.table) {
@@ -122,7 +141,7 @@ foreach ($m in $plan) {
     if ($branches -gt 0) { $why += "several branches per substance $branches" }
     if ($why.Count -gt 0) { $verdict = 'FAIL'; $fail++ }
     elseif ($failed -gt 0) { $verdict = 'KNOWN'; $known.Add("$($m.methodology) ($rowKey): $failed failed step(s) - $reason") }
-    $report.Add([pscustomobject]@{ Methodology = $m.methodology; Row = $rowKey; Table = $m.table; Results = $results; Expected = $m.expectedResults; Rejected = $rejected; Unmatched = $unmatched; FailedSteps = $failed; NoValue = $noValue; Verdict = $verdict; Why = ($why -join '; ') })
+    $report.Add([pscustomobject]@{ Methodology = $m.methodology; Row = $rowKey; Table = $m.table; Results = $results; Expected = $m.expectedResults; Rejected = $rejected; Unmatched = $unmatched; FailedSteps = $failedShown; NoValue = $noValue; Verdict = $verdict; Why = ($why -join '; ') })
 }
 $otherUnmatched = @($facts | Where-Object { $_.Section -eq 'ISSUE' -and $_.Value -eq 'NoMatchingRule' -and $_.Key -like 'LTD-*' -and ($plan | ForEach-Object { 'LTD-' + $_.row }) -notcontains $_.Key })
 $report | Format-Table -AutoSize | Out-String -Width 220 | Write-Host

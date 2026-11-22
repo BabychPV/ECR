@@ -23,6 +23,14 @@ namespace Ecr.Infrastructure.Persistence;
 ///
 /// ⚠ Якщо за рік є кілька документів шаблону, береться документ із найбільшим ідентифікатором (останній створений).
 ///
+/// ✎ PERF-11 (аудит 21.11): склад документів (читання комірок усіх періодів + результати актуальних прогонів) не
+/// перечитується кожним прогоном doc×місяць Land. <c>cache</c> (один на процес; <c>null</c> — без кешу) тримає
+/// останній підрахований склад під ВІДБИТКОМ УСЬОГО, від чого він залежить (<see cref="Hse400CompositionCache"/>): обрані
+/// екземпляри, версії їхніх рядків (<c>doc.TableRow.RowVersion</c> піднімає кожен запис комірки), опис рядків і колонок,
+/// актуальні прогони документів (звідси розрахункові <c>F_&lt;X&gt;</c>) і затверджені місяці. Відбиток рахується на КОЖНОМУ
+/// виклику дешевими запитами (без читання комірок), тож правка джерела дає інший відбиток і склад читається наново —
+/// застарілого значення кеш не віддає за побудовою.
+///
 /// ✎ B80 (N1), P-0118-31/33: вирішує лише біт зв'язки <c>cfg.DocumentSourceBinding.ReadFromDocument</c> (немає
 /// зв'язки — вимкнено); ключ <see cref="RetiredKey"/> виведено. Параметр <c>enabled</c> — лише для тестів (у DI — <c>null</c>). Стан-ворота зв'язки
 /// <see cref="DocumentSourceState.ApprovedOnly"/> лишає з документа лише затверджені місяці (A2, варіант (a): місяць
@@ -35,7 +43,8 @@ public sealed class Hse400CompositionSnapshotLoader(
     ICalculationResultStore results,
     bool? enabled,
     string registryCode = Hse400CompositionMapping.RegistryCode,
-    string templateCode = Hse400CompositionMapping.TemplateCode) : IRegistrySnapshotLoader
+    string templateCode = Hse400CompositionMapping.TemplateCode,
+    Hse400CompositionCache? cache = null) : IRegistrySnapshotLoader
 {
     /// <summary>
     /// ✎ P-0118-31/33 («один вимикач»): ВИВЕДЕНИЙ ключ. Застосунок його НЕ читає — читання складу з документа вирішує
@@ -80,7 +89,10 @@ public sealed class Hse400CompositionSnapshotLoader(
         return Hse400CompositionMapping.Overlay(loaded, registryCode, rows, years);
     }
 
-    private async Task<(IReadOnlyList<Hse400CompositionRow> Rows, IReadOnlyCollection<int> Years)> ReadDocumentsAsync(
+    /// <summary>Склад із документів HSE400 (через кеш, якщо він заданий).</summary>
+    /// <param name="approvedOnly">Стан-ворота зв'язки: лише затверджені місяці.</param>
+    /// <param name="ct">Скасування.</param>
+    internal async Task<(IReadOnlyList<Hse400CompositionRow> Rows, IReadOnlyCollection<int> Years)> ReadDocumentsAsync(
         bool approvedOnly, CancellationToken ct)
     {
         var allTables = await (
@@ -160,6 +172,78 @@ public sealed class Hse400CompositionSnapshotLoader(
                 g => g.GroupBy(r => r.RowKeyValue, StringComparer.OrdinalIgnoreCase)
                     .ToDictionary(x => x.Key, x => x.Min(r => r.Ordinal), StringComparer.OrdinalIgnoreCase));
 
+        // B80 A2: за ApprovedOnly — один запит станів погодження обраних документів; місяць без затвердження
+        // (ніколи або після Reopen) не дає ні вводу, ні F_, ні нульового паритету. За Any запиту немає.
+        // ✎ PERF-11: рахується ДО читання комірок — затверджені місяці входять у відбиток кешу.
+        var approved = approvedOnly
+            ? await DocumentSourceGate.ApprovedMonthsAsync(
+                db, [.. chosen.Select(i => i.DocumentId)], chosenTableIds, ct).ConfigureAwait(false)
+            : null;
+
+        // ✎ PERF-11: актуальні прогони обраних документів — звідси розрахункові F_<X>; той самий вибір, що в
+        // `ICalculationResultStore.ReadCurrentAsync` (`CurrentRunSelection`). Новий актуальний прогін = інша множина Id.
+        var documentPeriods = chosen.Select(i => (i.DocumentId, i.PeriodKeyValue)).Distinct().ToList();
+        string? fingerprint = null;
+
+        // ⛔ M2 (рев'ю PERF-11): комірки, які пишуть шляхи БЕЗ піднімання версії рядка — перерахунок формул документа
+        // (`TouchedRowIds: []`, D14-07) і прив'язка до дозволів, — відбитком рядків не видно. Тому там, де таблиці складу
+        // мають формулу чи прив'язку до дозволу, кеш НЕ вмикається зовсім (читання, як до PERF-11). На справжній HSE400
+        // їх немає (вхід + розрахункові F_ з прогонів), тож кеш працює; поява формули вимикає його без ручних дій.
+        // Комірковий агрегат замість застороги не взято: на Land він коштує стільки ж, скільки саме читання (0,84 с CPU).
+        var cacheable = cache is not null
+            && !await db.FormulaDefs.AsNoTracking()
+                .AnyAsync(f => chosenTableIds.Contains(f.TableDefId) && !f.IsDeleted, ct).ConfigureAwait(false)
+            && !await db.PermitSheetBindings.AsNoTracking()
+                .AnyAsync(b => chosenTableIds.Contains(b.SheetTableDefId), ct).ConfigureAwait(false);
+        if (cacheable)
+        {
+            // Штамп рядків обраних екземплярів: кількість, найбільший RowVersion І СУМА версій. ⛔ H1 (рев'ю): версію
+            // видає UPDATE на початку транзакції запису, а комітяться транзакції в іншому порядку (RCSI): T1 узяла 100 і
+            // ще не закомітила, T2 узяла 101 і закомітила — кількість і максимум після коміту T1 ті самі. Сума ж
+            // (порядок-незалежна) міняється на кожному закоміченому оновленні рядка (нова версія ≠ стара). Один прохід по
+            // рядках без їх читання в пам'ять; списки — JSON-параметрами (`OPENJSON`, як в інших місцях проєкту).
+            var periodsJson = System.Text.Json.JsonSerializer.Serialize(periodKeys);
+            var instancesJson = System.Text.Json.JsonSerializer.Serialize(instanceIds);
+            var stamp = await db.Database.SqlQuery<RowStamp>($"""
+                    SELECT COUNT_BIG(*) AS Cnt, MAX(r.RowVersion) AS MaxVersion,
+                           SUM(CAST(CAST(r.RowVersion AS bigint) AS decimal(38, 0))) AS SumVersion
+                    FROM doc.TableRow AS r
+                    WHERE r.IsDeleted = 0
+                      AND r.PeriodKey IN (SELECT CAST([value] AS int) FROM OPENJSON({periodsJson}))
+                      AND r.TableInstanceId IN (SELECT CAST([value] AS bigint) FROM OPENJSON({instancesJson}))
+                    """).FirstAsync(ct).ConfigureAwait(false);
+            var rowCount = stamp.Cnt;
+            var rowStamp = stamp.MaxVersion;
+            var rowSum = stamp.SumVersion ?? 0m;
+
+            var currentRuns = new List<(long DocumentId, int PeriodKey, long RunId)>();
+            foreach (var documentId in documentPeriods.Select(d => d.DocumentId).Distinct())
+            {
+                var runs = await CurrentRunSelection.RunsOfDocumentAsync(db, documentId, ct).ConfigureAwait(false);
+                foreach (var period in documentPeriods.Where(d => d.DocumentId == documentId).Select(d => d.PeriodKeyValue))
+                {
+                    currentRuns.AddRange(
+                        CurrentRunSelection.Effective(runs, documentId, period).Select(r => (documentId, period, r.Id)));
+                }
+            }
+
+            fingerprint = Hse400CompositionCache.Fingerprint(
+                approvedOnly,
+                chosen.Select(i => (i.Id, i.DocumentId, i.TableDefId, i.PeriodKeyValue)),
+                rowCount,
+                rowStamp ?? [],
+                rowSum,
+                streamByTable,
+                rowDefs.Select(r => (r.TableDefId, r.RowKeyValue, r.Ordinal)),
+                monthColumns.Select(c => (c.Id, c.TableDefId, c.Code, (int)c.Month)),
+                currentRuns,
+                approved?.Select(a => (a.DocumentId, a.TableDefId, a.Year, a.Month)) ?? []);
+            if (cache!.TryGet(CacheScope(), fingerprint, out var hit))
+            {
+                return hit;
+            }
+        }
+
         var tableRows = await db.TableRows.AsNoTracking()
             .Where(r => periodKeys.Contains(r.PeriodKeyValue) && instanceIds.Contains(r.TableInstanceId) && !r.IsDeleted)
             .Select(r => new { r.Id, r.TableInstanceId, r.RowKeyValue })
@@ -177,13 +261,6 @@ public sealed class Hse400CompositionSnapshotLoader(
 
         var instanceById = chosen.ToDictionary(i => i.Id);
         var found = new List<(int Year, int TableDefId, int Ordinal, Hse400DocumentCell Cell)>();
-
-        // B80 A2: за ApprovedOnly — один запит станів погодження обраних документів; місяць без затвердження
-        // (ніколи або після Reopen) не дає ні вводу, ні F_, ні нульового паритету. За Any запиту немає.
-        var approved = approvedOnly
-            ? await DocumentSourceGate.ApprovedMonthsAsync(
-                db, [.. chosen.Select(i => i.DocumentId)], chosenTableIds, ct).ConfigureAwait(false)
-            : null;
 
         bool Passes(long documentId, int tableDefId, int year, int month)
             => approved is null || approved.Contains((documentId, tableDefId, year, month));
@@ -218,7 +295,7 @@ public sealed class Hse400CompositionSnapshotLoader(
         }
 
         // Розрахункові рядки F_<X>: числа актуального прогону, колонка місяця — у коді виходу.
-        foreach (var document in chosen.Select(i => (i.DocumentId, i.PeriodKeyValue)).Distinct())
+        foreach (var document in documentPeriods)
         {
             var current = await results.ReadCurrentAsync(document.DocumentId, document.PeriodKeyValue, ct)
                 .ConfigureAwait(false);
@@ -293,6 +370,22 @@ public sealed class Hse400CompositionSnapshotLoader(
                 raw));
         }
 
-        return (rows, documentByYear.Keys.ToList());
+        IReadOnlyCollection<int> years = [.. documentByYear.Keys];
+        if (cache is not null && fingerprint is not null)
+        {
+            cache.Set(CacheScope(), fingerprint, (rows, years));
+        }
+
+        return (rows, years);
+    }
+
+    /// <summary>Штамп рядків (<c>COUNT</c>, <c>MAX</c> і сума версій) для відбитка кешу.</summary>
+    private sealed record RowStamp(long Cnt, byte[]? MaxVersion, decimal? SumVersion);
+
+    /// <summary>Область кешу: сервер + база + шаблон + довідник (інша база чи зв'язка не ділять запису).</summary>
+    private string CacheScope()
+    {
+        var connection = db.Database.GetDbConnection();
+        return $"{connection.DataSource}|{connection.Database}|{templateCode}|{registryCode}";
     }
 }

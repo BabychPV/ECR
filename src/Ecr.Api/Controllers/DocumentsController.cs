@@ -38,6 +38,7 @@ public sealed class DocumentsController(
     Application.Documents.CalculationYear.ExportCalculationYearHandler exportCalculationYear,
     GetCalculationRunStatusHandler calculationRunStatus,
     GetCalculationIssuesHandler calculationIssues,
+    GetCalculationStepsHandler calculationSteps,
     ExportDocumentHandler export,
     DownloadExportHandler downloadExport,
     PreviewImportHandler previewImport,
@@ -874,6 +875,22 @@ public sealed class DocumentsController(
         long id, [FromQuery] int periodKey, [FromQuery] long? sheetCopyId, CancellationToken ct,
         [FromQuery] bool year = false)
         => Ok(await calculationIssues.HandleAsync(id, periodKey, sheetCopyId, ct, year).ConfigureAwait(false));
+
+    /// <summary>
+    /// ✎ D-565 (PERF-03): кроки розрахунку одного рядка в актуальному прогоні — «який крок упав і з якими входами» для
+    /// проблеми <c>StepError</c>. Право <c>Calculation.View</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Кроків може не бути, бо прогін їх не записав (трасування методології вимкнено): факт прогону — у відповіді
+    /// (<c>notRecordedMethodologyIds</c>), а не порожнеча. Невидимий документ чи схована таблиця — 404.
+    /// </remarks>
+    [HttpGet("{id:long}/calculation-steps")]
+    [ProducesResponseType<CalculationStepsDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> CalculationSteps(
+        long id, [FromQuery] int periodKey, [FromQuery] long tableInstanceId, [FromQuery] string rowKey,
+        CancellationToken ct)
+        => Ok(await calculationSteps.HandleAsync(id, periodKey, tableInstanceId, rowKey, ct).ConfigureAwait(false));
 
     /// <summary>Експорт у <c>.xlsx</c>. Право <c>Document.Export</c>.</summary>
     [HttpPost("{id:long}/export")]

@@ -4,6 +4,7 @@ import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type { JobSummary } from '@/api/types';
 import { markSlicesStale } from '@/features/grid/sliceCache';
+import { UnchangedPollSteps, unchangedBackoffMs } from '@/shared/polling/pollBackoff';
 import { isProjectRecalculation, isRecalcActive, progressOf, type RecalcProgress } from './recalcProgress';
 
 /** Опитування, поки перерахунок іде. */
@@ -112,8 +113,13 @@ export function useProjectRecalcProgress(projectId: number | null, enabled = tru
     queryKey: projectRecalcKey(projectId),
     queryFn: () => apiFetch<JobSummary[]>(projectRecalcUrl(projectId)),
     enabled,
-    refetchInterval: (q) =>
-      rowsOf(q.state.data).filter(isProjectRecalculation).map(progressOf).some(isRecalcActive) ? RecalcPollMs : false,
+    refetchInterval: (q) => {
+      const active = rowsOf(q.state.data).filter(isProjectRecalculation).map(progressOf).filter(isRecalcActive);
+      if (active.length === 0) return false;
+
+      // PERF-08: RecalcPollMs (3 s) while the counters move; unchanged counters back off to ~15 s (+-20 %).
+      return unchangedBackoffMs(q, q.state.dataUpdatedAt, JSON.stringify(active), [RecalcPollMs, ...UnchangedPollSteps.slice(1)]);
+    },
     // ⚠ Без права на перелік (чужа сесія, анонім) банера просто немає — не червоне.
     retry: false,
   });

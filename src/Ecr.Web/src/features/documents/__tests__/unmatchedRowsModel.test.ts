@@ -112,7 +112,10 @@ describe('groupUnmatchedRows', () => {
     const groups = groupUnmatchedRows(issues, tables);
 
     const step = groups.find((g) => g.stepError)!;
-    expect(step.rows.map((r) => [r.rowKey, r.stepError])).toEqual([['R4', { step: 'Total', error: '#VALUE', failedSteps: 3 }]]);
+    expect(step.rows.map((r) => [r.rowKey, r.stepError])).toEqual([
+      ['R4', { step: 'Total', error: '#VALUE', failedSteps: 3, trace: null, methodologyId: null, monthNumber: null }],
+    ]);
+    expect(step.traceOff).toEqual([]);
     expect(step.hint).toBeNull();
     const inactive = groups.find((g) => g.inactive)!;
     expect(inactive.rows).toEqual([]);

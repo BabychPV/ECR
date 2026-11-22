@@ -421,6 +421,16 @@ public interface IMethodologyStore
     /// <returns><c>true</c>, якщо хоч для однієї з версій є результат.</returns>
     public Task<bool> AnyCalculationResultsAsync(
         IReadOnlyCollection<int> methodologyVersionIds, CancellationToken ct);
+
+    /// <summary>
+    /// ✎ D-565 (PERF-03): які з названих методологій мають увімкнений прапор «трасувати проміжні кроки»
+    /// (<c>calc.Methodology.TraceSteps</c>) — одним зверненням на прогін.
+    /// </summary>
+    /// <param name="methodologyIds">Методології прогону.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Ідентифікатори методологій із прапором; порожньо — жодна кроків не пише.</returns>
+    public Task<IReadOnlyList<int>> GetTraceStepMethodologyIdsAsync(
+        IReadOnlyCollection<int> methodologyIds, CancellationToken ct);
 }
 
 /// <summary>

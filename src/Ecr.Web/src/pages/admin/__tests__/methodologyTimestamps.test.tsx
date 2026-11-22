@@ -153,6 +153,7 @@ describe('MethodologyVersionsPage: дата набуття чинності ве
     async () => {
       respond([
         ['/api/v1/methodologies/1/versions', [PublishedDraftVersion, DraftVersion]],
+        ['/api/v1/methodologies/1/trace-steps', { traceSteps: false }],
         ['/api/v1/units', []],
       ]);
       show(
@@ -188,6 +189,7 @@ describe('MethodologyVersionsPage: дата набуття чинності ве
     async () => {
       respond([
         ['/api/v1/methodologies/1/versions', [DraftVersion]],
+        ['/api/v1/methodologies/1/trace-steps', { traceSteps: false }],
         ['/api/v1/units', []],
       ]);
       show(

@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { queryKeys } from '@/api/queryKeys';
 import { RecalculationPollMs, followRecalculation, useRecalculationStatus } from '../useCellPatch';
+import { JitterFraction } from '@/shared/polling/pollBackoff';
 import { formatTime } from '@/shared/format';
 
 /**
@@ -144,13 +145,15 @@ describe('стеження за перерахунком після запису
 
     await vi.waitFor(() => expect(jobCalls()).toHaveLength(1));
 
-    // ⚠ Трохи МЕНШЕ за інтервал: якби опитування йшло з кроком `jobFollow.PollMs`
-    // (1.5 с), другий запит уже стався б — і саме цим тест розрізняє два
-    // інтервали, а не просто «щось опитується».
-    await vi.advanceTimersByTimeAsync(RecalculationPollMs - 100);
+    // ⚠ PERF-08: інтервал розкидано ±20 % (1,6–2,4 с, розкид залежить від випадкової солі сторінки), тож межі —
+    // найнижча й найвища точки розкиду, а не рівно 2 с. Нижня межа все ще вища за `jobFollow.PollMs` (1.5 с):
+    // якби опитування йшло з його кроком, другий запит стався б ще до неї — тест розрізняє два інтервали.
+    const lowest = RecalculationPollMs * (1 - JitterFraction);
+    const highest = RecalculationPollMs * (1 + JitterFraction);
+    await vi.advanceTimersByTimeAsync(lowest - 100);
     expect(jobCalls()).toHaveLength(1);
 
-    await vi.advanceTimersByTimeAsync(200);
+    await vi.advanceTimersByTimeAsync(highest - lowest + 200);
     await vi.waitFor(() => expect(jobCalls()).toHaveLength(2));
 
     client.clear();

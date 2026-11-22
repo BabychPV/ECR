@@ -187,7 +187,9 @@ public sealed class AbandonedWorkSweeper(EcrDbContext db, IJobProgressStore prog
         var calculation = await CloseCalculationRunsAsync(utcNow, live, ct).ConfigureAwait(false);
 
         var purged = purge
-            ? await PurgeAsync(utcNow - IJobProgressStore.RetainFinishedFor, ct).ConfigureAwait(false)
+            ? await PurgeAsync(
+                utcNow - IJobProgressStore.RetainFinishedFor, utcNow - IJobProgressStore.RetainRoutineSucceededFor, ct)
+                .ConfigureAwait(false)
             : 0;
 
         var logs = purge
@@ -287,9 +289,10 @@ public sealed class AbandonedWorkSweeper(EcrDbContext db, IJobProgressStore prog
     /// Ретенція пакетами, доки є кандидати, у межах <see cref="PurgeTimeBudget"/> (J1-05).
     /// </summary>
     /// <param name="olderThan">Межа віку завершених рядків.</param>
+    /// <param name="routineOlderThan">Межа віку успішної рутини (PERF-15).</param>
     /// <param name="ct">Скасування.</param>
     /// <returns>Скільки рядків видалено.</returns>
-    private async Task<int> PurgeAsync(DateTime olderThan, CancellationToken ct)
+    private async Task<int> PurgeAsync(DateTime olderThan, DateTime routineOlderThan, CancellationToken ct)
     {
         var started = System.Diagnostics.Stopwatch.GetTimestamp();
         var purged = 0;
@@ -298,6 +301,15 @@ public sealed class AbandonedWorkSweeper(EcrDbContext db, IJobProgressStore prog
         do
         {
             batch = await progress.PurgeFinishedAsync(olderThan, PurgeBatch, ct).ConfigureAwait(false);
+            purged += batch;
+        }
+        while (batch >= PurgeBatch && System.Diagnostics.Stopwatch.GetElapsedTime(started) < PurgeTimeBudget);
+
+        // ✎ PERF-15: успішна рутина (перерахунок формул) — за добу, а не за 30 діб; див. `PurgeRoutineSucceededAsync`.
+        do
+        {
+            batch = await progress
+                .PurgeRoutineSucceededAsync(routineOlderThan, PurgeBatch, ct).ConfigureAwait(false);
             purged += batch;
         }
         while (batch >= PurgeBatch && System.Diagnostics.Stopwatch.GetElapsedTime(started) < PurgeTimeBudget);

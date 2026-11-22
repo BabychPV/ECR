@@ -245,6 +245,24 @@ public interface IJobProgressStore
     public Task<int> PurgeFinishedAsync(DateTime olderThan, int batch, CancellationToken ct);
 
     /// <summary>
+    /// Видаляє РУТИННІ успішні задачі (перерахунок формул після правки комірки), старші за <paramref name="olderThan"/>.
+    /// </summary>
+    /// <param name="olderThan">Межа: рутина, закрита <c>Succeeded</c> до цього моменту, видаляється.</param>
+    /// <param name="batch">Скільки рядків за один виклик.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <returns>Скільки видалено.</returns>
+    /// <remarks>
+    /// ✎ PERF-15 (аудит 21.11): стрічка «Мої задачі» ховає рутину ПЕРЕД <c>Take(limit)</c>, тож кожен опит проходить по
+    /// індексу автора всі її рядки, що лежать між свіжими (редактор накопичує їх тисячами за 30 діб ретенції).
+    /// Успішна рутина нікому не потрібна після доби; провали й скасування лишаються на загальні
+    /// <see cref="RetainFinishedFor"/>.
+    /// </remarks>
+    public Task<int> PurgeRoutineSucceededAsync(DateTime olderThan, int batch, CancellationToken ct);
+
+    /// <summary>Скільки тримати успішні рутинні задачі (PERF-15): добу — довше їх ніхто не дивиться.</summary>
+    public static readonly TimeSpan RetainRoutineSucceededFor = TimeSpan.FromHours(24);
+
+    /// <summary>
     /// Скільки тримати завершені записи прогресу (аудит P2).
     /// </summary>
     /// <remarks>

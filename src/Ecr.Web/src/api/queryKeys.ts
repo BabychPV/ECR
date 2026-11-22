@@ -186,6 +186,9 @@ const methodologies = {
   /** Прив'язки методології до колонок документів (`D-69`) — не версії. */
   bindings: (methodologyId: number) => ['methodologies', 'bindings', methodologyId] as const,
 
+  /** Прапор «трасувати проміжні кроки» методології (`D-565`) — не версії. */
+  traceSteps: (methodologyId: number) => ['methodologies', 'traceSteps', methodologyId] as const,
+
   /**
    * Матриця покриття «рядки реальних даних × правила» версії (`ФВ-13.4`,
    * `ФВ-13.9`, `RuleCoveragePanel.tsx`).

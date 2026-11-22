@@ -20,6 +20,8 @@ import type { UnmatchedRows } from './useUnmatchedRows';
 interface CalculationIssuesPanelProps {
   /** Користувач сесії (пам'ять згортання вкладених переліків). */
   readonly userId?: number | undefined;
+  /** ✎ D-565: документ — щоб рядок StepError відкривав записаний крок, що впав. */
+  readonly documentId?: number | undefined;
   readonly periodKey: number;
   readonly rows: UnmatchedRows;
   /** Усі таблиці документа за період: назви, екземпляр для переходу. */
@@ -144,6 +146,7 @@ function causeDetail(cause: IssueCause): string {
  */
 export function CalculationIssuesPanel({
   userId,
+  documentId,
   periodKey,
   rows,
   tables,
@@ -345,6 +348,8 @@ export function CalculationIssuesPanel({
               tables={tables}
               onOpenRow={onOpenCell}
               narrow={narrow}
+              documentId={documentId}
+              periodKey={periodKey}
             />
           )}
         </Stack>

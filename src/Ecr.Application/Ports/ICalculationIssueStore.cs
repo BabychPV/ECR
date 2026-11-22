@@ -114,6 +114,7 @@ public sealed record CalculationIssueInput(
 /// <param name="StepCode">B66: перший невдалий крок (StepError).</param>
 /// <param name="ErrorCode">B66: код помилки кроку (StepError).</param>
 /// <param name="AffectedCount">B66: невдалих кроків рядка (StepError) або відсіяних рядків таблиці (RowInactive).</param>
+/// <param name="CalculationRunId">✎ D-565: прогін, що записав проблему — за ним читається факт «чиї кроки записано».</param>
 public sealed record CalculationIssueRow(
     int TableDefId,
     string TableCode,
@@ -126,4 +127,5 @@ public sealed record CalculationIssueRow(
     int? MethodologyId = null,
     string? StepCode = null,
     string? ErrorCode = null,
-    int? AffectedCount = null);
+    int? AffectedCount = null,
+    long? CalculationRunId = null);

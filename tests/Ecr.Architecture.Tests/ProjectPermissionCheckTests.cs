@@ -145,6 +145,7 @@ public sealed class ProjectPermissionCheckTests
                 "Ecr.Api.Controllers.MethodologyScriptController::Validate",
                 "Ecr.Application.Calculations.CompareMethodologyVersionsHandler::HandleAsync",
                 "Ecr.Application.Calculations.ConstantUsageHandler::HandleAsync",
+                "Ecr.Application.Calculations.GetMethodologyTraceStepsHandler::HandleAsync",
                 "Ecr.Application.Calculations.GetMethodologyCategoryRuleHandler::HandleAsync",
                 "Ecr.Application.Calculations.ListCalculationBindingsHandler::HandleAsync",
                 "Ecr.Application.Calculations.ListMethodologiesHandler::HandleAsync",

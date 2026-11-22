@@ -136,7 +136,8 @@ describe('DocumentsPage: перегляд року зі смугою 12 міся
 
       expect(listRequests().some((u) => u.searchParams.get('year') === '2026')).toBe(true);
       expect(listRequests().every((u) => !u.searchParams.has('periodKey'))).toBe(true);
-      expect(requested.some((url) => /\/projects\/1\/periods/.test(url))).toBe(true);
+      // ⚠ Календар проєкту запитується окремо від переліку, тож під навантаженням запит може піти вже після смуги.
+      await waitFor(() => expect(requested.some((url) => /\/projects\/1\/periods/.test(url))).toBe(true));
       expect(new URLSearchParams(search).has('periodKey')).toBe(false);
 
       const note = document.querySelector('[data-note="documents-year"]');

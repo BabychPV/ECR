@@ -108,6 +108,16 @@ const MethodologyPublicationsPanel = lazy(async () => {
   return { default: loaded.MethodologyPublicationsPanel };
 });
 
+/**
+ * Прапор «трасувати проміжні кроки» (`D-565`) — власний чанк, як журнал публікацій: нова функціональність, жодних
+ * спільних станів чи чернеток панелей змісту.
+ */
+const MethodologyTraceStepsPanel = lazy(async () => {
+  const loaded = await import('@/features/methodologies/TraceStepsPanel');
+
+  return { default: loaded.MethodologyTraceStepsPanel };
+});
+
 const MethodologyRuleCoveragePanel = lazy(async () => {
   const loaded = await import('@/features/methodologies/RuleCoveragePanel');
 
@@ -488,6 +498,14 @@ export function MethodologyVersionsPage(): JSX.Element {
           </Table>
         )}
       </AsyncBoundary>
+
+      {/* ⚠ D-565: прапор належить МЕТОДОЛОГІЇ, не версії (і версії-скрипта теж) — тому поза панелями змісту
+          версії й без умови на обрану версію. */}
+      {known && (
+        <Suspense fallback={null}>
+          <MethodologyTraceStepsPanel methodologyId={methodologyId} editable={mayEdit} />
+        </Suspense>
+      )}
 
       {selected !== undefined && scriptSelected && (
         <Alert color="statusInfo" data-testid="script-version-note">

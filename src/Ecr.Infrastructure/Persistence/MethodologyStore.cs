@@ -1182,6 +1182,25 @@ public sealed class MethodologyStore(EcrDbContext db, int constantCap) : IMethod
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<int>> GetTraceStepMethodologyIdsAsync(
+        IReadOnlyCollection<int> methodologyIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(methodologyIds);
+        if (methodologyIds.Count == 0)
+        {
+            return [];
+        }
+
+        var ids = methodologyIds.Distinct().ToList();
+        return await db.Methodologies
+            .AsNoTracking()
+            .Where(m => m.TraceSteps && ids.Contains(m.Id))
+            .Select(m => m.Id)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
     /// <remarks>
     /// ⚠ Версії ЗАВАНТАЖУЮТЬСЯ разом із методологією і відстежуються: агрегат
     /// потрібен, щоб перевірити перетин вікон і опублікувати версію в одній

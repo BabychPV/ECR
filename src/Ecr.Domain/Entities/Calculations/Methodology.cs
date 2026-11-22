@@ -117,6 +117,38 @@ public sealed class Methodology : Entity<int>
         RowActivityFilter = spec.Value;
     }
 
+    /// <summary>
+    /// ✎ D-565 (PERF-03): «трасувати проміжні кроки» — чи пишуться кроки трейсу
+    /// (<c>calc.CalculationStep</c>) прогонами цієї методології. За замовчуванням <c>false</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Властивість КОНТЕЙНЕРА, а не версії — як <see cref="RowActivityFilter"/>, <see cref="Group"/> і
+    /// <see cref="Kind"/>: прапор не змінює жодного числа (результати й входи пишуться однаково), не входить у
+    /// <c>ContentHash</c> і вмикається одразу для наступних прогонів — без чернетки, золотого набору й
+    /// публікації другою людиною (D-40). Саме так його й використовують: увімкнути, коли треба подивитися
+    /// проміжні розрахунки, і вимкнути після. <c>TraceLevel</c> версії лишається — він визначає, ЩО пишеться,
+    /// коли прапор увімкнено.
+    /// <para>
+    /// Вимкнено — прогін не пише жодного рядка <c>calc.CalculationStep</c>: на стенді Land це 83 % журналу
+    /// транзакцій перерахунку (≈ 49 МБ трейсу на прогін і стільки ж на його прибирання, аудит PERF-03).
+    /// </para>
+    /// </remarks>
+    public bool TraceSteps { get; private set; }
+
+    /// <summary>Вмикає чи вимикає запис кроків трейсу (D-565).</summary>
+    /// <param name="enabled">Нове значення прапора.</param>
+    /// <returns><c>true</c> — значення змінилося (є що журналювати).</returns>
+    public bool SetTraceSteps(bool enabled)
+    {
+        if (TraceSteps == enabled)
+        {
+            return false;
+        }
+
+        TraceSteps = enabled;
+        return true;
+    }
+
     /// <summary>Оголошує природу методології.</summary>
     /// <param name="kind">Обирається правилом, зашита в модуль або бібліотека.</param>
     public void SetKind(MethodologyKind kind) => Kind = kind;
