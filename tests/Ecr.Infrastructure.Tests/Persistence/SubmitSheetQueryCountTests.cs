@@ -77,10 +77,15 @@ public sealed class SubmitSheetQueryCountTests(SqlServerFixture sql)
     /// правка шапки). Свідомі +2, не дрейф: без прив'язки 14 → 16, з
     /// прив'язкою 15 → 17 (стелі 15/16 мали по одному запасу).
     /// </para>
+    /// <para>
+    /// ✎ F5: ворота «місяць чекає каскаду джерела» (<see cref="Ecr.Infrastructure.Jobs.SourceCascadePendingGate"/>) — справжні, рівно ОДИН
+    /// запит черги (і розширений ланками джерел, коли в графі є ребра) на подання документа без живої задачі каскаду. Свідомі +1:
+    /// 16 → 17, 17 → 18.
+    /// </para>
     /// </remarks>
-    private const int MaxCommandsUnbound = 16;
+    private const int MaxCommandsUnbound = 17;
 
-    private const int MaxCommandsBound = 17;
+    private const int MaxCommandsBound = 18;
 
     private static readonly AsyncLocal<StrongBox<bool>?> Measuring = new();
 
@@ -115,6 +120,10 @@ public sealed class SubmitSheetQueryCountTests(SqlServerFixture sql)
             $"Подання: 3 таблиці — {smallCount} звернень, 12 таблиць — {largeCount}. "
             + "Кількість звернень росте з кількістю таблиць (N+1 під винятковим блокуванням аркуша).\n"
             + $"— 3 таблиці —\n{smallDetail}\n— 12 таблиць —\n{largeDetail}");
+
+        // ✎ F5: ворота каскаду — рівно один запит черги, хоч би скільки таблиць.
+        Assert.Equal(1, CountOf(largeDetail, "ecr:f5-cascade-gate"));
+        Assert.Contains("ecr:f5-cascade-gate */ DECLARE @t", largeDetail, StringComparison.Ordinal); // розширений шлях
 
         var ceiling = bindLastTable ? MaxCommandsBound : MaxCommandsUnbound;
         Assert.True(
@@ -393,7 +402,37 @@ public sealed class SubmitSheetQueryCountTests(SqlServerFixture sql)
             methodologies,
             new TemplateVersionStore(db),
             new RegistryStore(db),
-            new AuditWriter(db));
+            new AuditWriter(db),
+            cascadeGate: NonConsumerCascadeGate(db));
+    }
+
+    /// <summary>
+    /// ✎ F5 (п. 1 огляду): у графі Є ребро «джерело → споживач», але не для шаблону цього документа — ворота йдуть
+    /// розширеним запитом (ланки джерел) і однаково роблять рівно ОДНЕ звернення: стелі не зростають.
+    /// </summary>
+    private static Ecr.Infrastructure.Jobs.SourceCascadePendingGate NonConsumerCascadeGate(EcrDbContext db)
+    {
+        var graph = Substitute.For<IDependencyGraphProvider>();
+        graph.GetAsync(Arg.Any<CancellationToken>()).Returns(new Ecr.Application.DocumentDependencies.DependencyGraphSnapshot(
+            "f5", [], [],
+            [new Ecr.Application.DocumentDependencies.TemplateDependency(
+                -1, -2, -3, -4, new Ecr.Expressions.Binding.PeriodScope(Ecr.Expressions.Binding.PeriodScopeKind.Year, 0), true, false)],
+            [], [], []));
+        return new Ecr.Infrastructure.Jobs.SourceCascadePendingGate(db, gateCache: null, graph)
+        {
+            AutoBindingsProbe = _ => Task.FromResult<IReadOnlyCollection<int>>([-3]),
+        };
+    }
+
+    private static int CountOf(string text, string fragment)
+    {
+        var count = 0;
+        for (var at = text.IndexOf(fragment, StringComparison.Ordinal); at >= 0; at = text.IndexOf(fragment, at + 1, StringComparison.Ordinal))
+        {
+            count++;
+        }
+
+        return count;
     }
 
     /// <summary>Перерахунок аркуша на реальних сховищах (формул у знімку немає).</summary>
