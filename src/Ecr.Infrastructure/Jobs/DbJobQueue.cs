@@ -393,7 +393,8 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
     /// <summary>
     /// ✎ PERF-01/02 (<c>D-564a</c>/<c>D-564b</c>): поля натискання з <c>@payload</c> (нова постановка) у <c>@existing</c>
     /// (рядок, у який вона зливається): місяці на екрані — об'єднанням; «Повний перерахунок» — АБО; позначка батька іншого
-    /// розкладу — нового (як доти). Ставить <c>@rewrite</c>, якщо щось змінилося. Обидва — вже перевірений JSON.
+    /// розкладу — нового (як доти). ✎ PERF-06: періоди й затравки каскаду — об'єднанням, ланка джерел — менша (огляд F4).
+    /// Ставить <c>@rewrite</c>, якщо щось змінилося. Обидва — вже перевірений JSON.
     /// </summary>
     private const string MergePressFieldsSql = """
                 IF JSON_QUERY(@payload, '$.screenPeriods') IS NOT NULL
@@ -420,6 +421,27 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
                               UNION SELECT [value] FROM OPENJSON(@payload, '$.cascadePeriods')) AS u
                         ORDER BY TRY_CAST(u.v AS int)
                         FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 1, N'') + N']'));
+                    SET @rewrite = 1;
+                END
+                IF JSON_QUERY(@payload, '$.cascadeSeeds') IS NOT NULL
+                   AND EXISTS (SELECT [value] FROM OPENJSON(@payload, '$.cascadeSeeds')
+                               EXCEPT SELECT [value] FROM OPENJSON(@existing, '$.cascadeSeeds'))
+                BEGIN
+                    -- ✎ PERF-06 (D-566, огляд F2): місяці-затравки пізніших читачів — так само об'єднанням.
+                    SET @existing = JSON_MODIFY(@existing, '$.cascadeSeeds', JSON_QUERY(N'[' + STUFF((
+                        SELECT N',' + u.v
+                        FROM (SELECT [value] AS v FROM OPENJSON(@existing, '$.cascadeSeeds')
+                              UNION SELECT [value] FROM OPENJSON(@payload, '$.cascadeSeeds')) AS u
+                        ORDER BY TRY_CAST(u.v AS int)
+                        FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 1, N'') + N']'));
+                    SET @rewrite = 1;
+                END
+                IF TRY_CAST(JSON_VALUE(@payload, '$.sourceHop') AS int)
+                   < ISNULL(TRY_CAST(JSON_VALUE(@existing, '$.sourceHop') AS int), 0)
+                BEGIN
+                    -- ✎ PERF-06 (огляд F4): ланка джерел злитої задачі — МЕНША з двох: задача ланки 7, що поглинула правку
+                    -- ланки 1, інакше впиралась би в стелю ланцюжка джерел (MaxHops) на 6 ланок раніше. Немає — ланка 0.
+                    SET @existing = JSON_MODIFY(@existing, '$.sourceHop', TRY_CAST(JSON_VALUE(@payload, '$.sourceHop') AS int));
                     SET @rewrite = 1;
                 END
                 IF ISNULL(JSON_VALUE(@payload, '$.forceFull'), N'false') = N'true'
@@ -478,16 +500,19 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
     /// доповнено періодами каскаду нової постановки (<c>@payload</c>, <c>$.cascadePeriods</c>) об'єднанням. Наступний крок
     /// дописує їх у план завжди (і вже зроблені — їхній крок читав старе джерело), без <c>$.chainRecheck</c>: детектор
     /// кнопки за гілкою джерел B179 (рівень документа) будив би весь рік. Прогрес ланцюжка лишається (<c>D-564b</c>).
+    /// ✎ Огляд F2: правка, усі періоди якої покриті задачею «з затвердженими» (<c>cascadePeriods = []</c>, лише затравки
+    /// <c>$.cascadeSeeds</c>), дає ПОРОЖНІЙ <c>$.cascadeAppend</c>, а не його відсутність — крок однаково дописує пізніших
+    /// читачів затравок (їх зливає <see cref="MergePressFieldsSql"/>).
     /// </summary>
     /// <param name="chainPayload">SQL-вираз із payload ланцюжка (перевірений JSON).</param>
     internal static string CascadeAppend(string chainPayload)
         => $"""
-            JSON_MODIFY({chainPayload}, '$.cascadeAppend', JSON_QUERY(N'[' + STUFF((
+            JSON_MODIFY({chainPayload}, '$.cascadeAppend', JSON_QUERY(N'[' + ISNULL(STUFF((
                         SELECT N',' + u.v
                         FROM (SELECT [value] AS v FROM OPENJSON({chainPayload}, '$.cascadeAppend')
                               UNION SELECT [value] FROM OPENJSON(@payload, '$.cascadePeriods')) AS u
                         ORDER BY TRY_CAST(u.v AS int)
-                        FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 1, N'') + N']'))
+                        FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 1, N''), N'') + N']'))
             """;
 
     /// <summary>

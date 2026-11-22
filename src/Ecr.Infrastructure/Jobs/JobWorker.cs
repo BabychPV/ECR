@@ -828,10 +828,55 @@ public sealed partial class JobWorker(
 
         LogJobFailed(logger, claim.JobId, job.JobCode, failure);
         Observability.InfrastructureMetrics.RecordJobFailed(job.JobCode, "error");
+        var reason = JobRetryPolicy.FailureText(failure, correlationId);
+
+        // ✎ PERF-06 (D-566, огляд F1): решта роботи задачі (місяці ланцюжка каскаду після кроку, що впав) — новою задачею на
+        // ту саму ціль ДО Failed (як перепостановка після стелі відкладень): збій між двома записами дав би щонайбільше зайвий
+        // перерахунок, а не загублені місяці. Помилка рядка називає місяць провалу й нову задачу.
+        if (JobFailureFollowUp.TryGet(failure, out var followUp))
+        {
+            reason = JobProgressMessageCodec.Shorten(
+                JobFailureFollowUp.Reason(followUp, await RequeueFollowUpAsync(job, followUp).ConfigureAwait(false), reason),
+                IJobProgressStore.MaxErrorLength);
+        }
+
         await SettleAsync(claim.JobId, q => q.FailAsync(
-                claim, JobRetryPolicy.FailureText(failure, correlationId), JobRetryPolicy.ErrorCodeOf(failure),
-                CancellationToken.None))
+                claim, reason, JobRetryPolicy.ErrorCodeOf(failure), CancellationToken.None))
             .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// ✎ PERF-06 (огляд F1): робота, яку остаточно провалена задача передала (<see cref="JobFailureFollowUp"/>), — нова задача
+    /// на ту саму ціль злиттям (позаду вже чекає — об'єднання періодів каскаду).
+    /// </summary>
+    /// <returns>Нова задача; <c>null</c> — без цілі чи постановка впала (у журнал).</returns>
+    private async Task<string?> RequeueFollowUpAsync(ClaimedJob job, JobFailureFollowUp.FollowUp followUp)
+    {
+        if (string.IsNullOrWhiteSpace(job.TargetKey))
+        {
+            return null;
+        }
+
+        try
+        {
+            await using var scope = scopes.CreateAsyncScope();
+            var queued = await scope.ServiceProvider.GetRequiredService<IJobQueue>()
+                .EnqueueAsync(
+                    new JobEnqueueRequest(
+                        job.JobCode, job.Lane, followUp.PayloadJson, job.TargetKey, job.CreatedByUserId, job.CorrelationId,
+                        job.DocumentId),
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+            LogFollowUpQueued(logger, job.Claim.JobId, followUp.FailedPeriod, queued.JobId);
+            return queued.JobId;
+        }
+#pragma warning disable CA1031 // Перепостановка — страховка; провал задачі записується в будь-якому разі.
+        catch (Exception ex)
+#pragma warning restore CA1031
+        {
+            LogFollowUpFailed(logger, job.Claim.JobId, ex);
+            return null;
+        }
     }
 
     /// <summary>
@@ -1149,6 +1194,12 @@ public sealed partial class JobWorker(
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Не вдалося перепоставити комірки задачі {JobId}, що вичерпала стелю відкладень.")]
     private static partial void LogDeferralRequeueFailed(ILogger logger, string jobId, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "PERF-06: крок періоду {Period} задачі {JobId} провалився; решту її роботи передано задачі {FollowUpJobId}.")]
+    private static partial void LogFollowUpQueued(ILogger logger, string jobId, int period, string followUpJobId);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "PERF-06: не вдалося поставити решту роботи проваленої задачі {JobId}.")]
+    private static partial void LogFollowUpFailed(ILogger logger, string jobId, Exception exception);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Оренду задачі {JobId} втрачено: її виконує інший виконавець; результат цього виконання не записано.")]
     private static partial void LogLeaseLost(ILogger logger, string jobId);

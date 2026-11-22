@@ -238,6 +238,28 @@ public sealed class SourceCascadeMonthsTests(SqlServerFixture sql) : DbJobQueueT
         Assert.All(rows.Values, r => Assert.Equal([Period(3), Period(5)], r.Periods));
     }
 
+    /// <summary>
+    /// F4 (огляд PERF-06): правка з меншою ланкою джерел, що злилася в задачу каскаду, бере МЕНШУ ланку — інакше задача ланки 7,
+    /// що поглинула правку ланки 1, впиралась би в стелю ланцюжка (<c>MaxHops</c>) на 6 ланок раніше.
+    /// </summary>
+    [Theory]
+    [InlineData(7, 1, 1)]
+    [InlineData(1, 7, 1)]
+    [InlineData(3, 3, 3)]
+    public async Task Злиття_правок_каскаду_бере_меншу_ланку(int firstHop, int secondHop, int expected)
+    {
+        const long document = 9_600_700;
+        await using var host = NewHost();
+        var trigger = Trigger(host);
+        var first = await trigger.RequestSourceCascadeAsync(document, 2099, [Period(3)], firstHop, CancellationToken.None);
+        var second = await trigger.RequestSourceCascadeAsync(document, 2099, [Period(5)], secondHop, CancellationToken.None);
+
+        Assert.Equal(first.JobId, second.JobId);
+        var row = Assert.Single(await CascadeRowsAsync()).Value;
+        Assert.Equal([Period(3), Period(5)], row.Periods);
+        Assert.Equal(expected, row.SourceHop);
+    }
+
     /// <summary>Черга без об'єднання періодів (Quartz у пам'яті) — каскад поперіодно, як до D-566 (жоден місяць не губиться).</summary>
     [Fact]
     public async Task Черга_без_обєднання_ставить_поперіодно()

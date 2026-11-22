@@ -176,8 +176,13 @@ public sealed class CalculationTrigger(
     /// </para>
     /// <para>
     /// Періоди, у які писати не можна (закритий, <c>Scheduled</c>, архів, затверджено все), і ті, що вже чекають у задачі «з
-    /// затвердженими» (надмножина роботи, B80 N5), відкидаються ТУТ — як у поперіодній постановці. Черга без об'єднання
-    /// (<see cref="CoalescesCascadePeriods"/> = <c>false</c>) — поперіодно, як до D-566.
+    /// затвердженими» (надмножина роботи, B80 N5), відкидаються ТУТ — як у поперіодній постановці. ✎ Огляд F2: другі — не
+    /// зовсім: вони йдуть затравками (<c>cascadeSeeds</c>) пізніших читачів, яких задача названого періоду не будить. Черга
+    /// без об'єднання (<see cref="CoalescesCascadePeriods"/> = <c>false</c>) — поперіодно, як до D-566.
+    /// </para>
+    /// <para>
+    /// ✎ Огляд F4: ланка джерел <paramref name="sourceHop"/> при злитті в задачу, що чекає чи йде, — МЕНША з двох
+    /// (<c>DbJobQueue.MergePressFieldsSql</c>), а не перша.
     /// </para>
     /// </remarks>
     public async Task<SourceCascadeEnqueued> RequestSourceCascadeAsync(
@@ -201,20 +206,29 @@ public sealed class CalculationTrigger(
         }
 
         var periods = new List<int>();
+        var seeds = new List<int>();
         foreach (var period in periodKeys.Where(p => p / 100 == year).Distinct().Order())
         {
             var key = new PeriodKey(period);
-            if (!await WritableAsync(documentId, key, ct).ConfigureAwait(false)
-                || await jobs.FindQueuedAsync<IRecalculationJob>(DependentsApprovedTargetOf(documentId, key), ct).ConfigureAwait(false)
+            if (!await WritableAsync(documentId, key, ct).ConfigureAwait(false))
+            {
+                continue;
+            }
+
+            // ✎ Огляд F2: період уже чекає в задачі «з затвердженими» — його рахує вона, але вона (названий період) будить
+            // лише РАНІШИХ читачів; пізніші місяці, що читають його обчислені числа ([Period:-1]), будить ця задача —
+            // період іде затравкою (cascadeSeeds), а не періодом до розрахунку.
+            if (await jobs.FindQueuedAsync<IRecalculationJob>(DependentsApprovedTargetOf(documentId, key), ct).ConfigureAwait(false)
                     is { Length: > 0 })
             {
+                seeds.Add(period);
                 continue;
             }
 
             periods.Add(period);
         }
 
-        if (periods.Count == 0)
+        if (periods.Count == 0 && seeds.Count == 0)
         {
             return new SourceCascadeEnqueued(null, []);
         }
@@ -229,6 +243,7 @@ public sealed class CalculationTrigger(
             RecalculateSubmitted = true,
             SourceHop = sourceHop,
             CascadePeriods = periods.ToArray(),
+            CascadeSeeds = seeds.Count > 0 ? seeds.ToArray() : null,
         };
 
         var jobId = await jobs
