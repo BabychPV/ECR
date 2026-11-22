@@ -1,6 +1,7 @@
 // tests/Ecr.Infrastructure.Tests/Jobs/SourceCascadePendingGateTests.cs
 using System.Globalization;
 using Ecr.Application.Calculations;
+using Ecr.Application.Ports;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Jobs;
 using Ecr.Infrastructure.Persistence;
@@ -102,10 +103,10 @@ public sealed class SourceCascadePendingGateTests(SqlServerFixture sql)
     {
         var doc = NextDocument();
         await InsertAsync(
-            doc, CalculationTrigger.DependentsTargetOf(doc, new PeriodKey(202604)), "Queued",
+            doc, Key(CalculationTrigger.DependentsTargetOf(doc, new PeriodKey(202604))), "Queued",
             $$"""{"projectId":0,"documentId":{{doc}},"periodKey":202604}""");
         await InsertAsync(
-            doc, CalculationTrigger.DependentsApprovedTargetOf(doc, new PeriodKey(202608)), "Queued",
+            doc, Key(CalculationTrigger.DependentsApprovedTargetOf(doc, new PeriodKey(202608))), "Queued",
             $$"""{"projectId":0,"documentId":{{doc}},"periodKey":202608,"includeApproved":true}""");
 
         Assert.True(await PendingAsync(doc, 202604));
@@ -131,7 +132,10 @@ public sealed class SourceCascadePendingGateTests(SqlServerFixture sql)
 
     private static long NextDocument() => Interlocked.Increment(ref _doc);
 
-    private static string Target(long doc) => CalculationTrigger.SourceCascadeTargetOf(doc, Year);
+    private static string Target(long doc) => Key(CalculationTrigger.SourceCascadeTargetOf(doc, Year));
+
+    /// <summary>Ціль так, як її пише черга в базі (`IRecalculationJob~…`, огляд b9).</summary>
+    private static string Key(string target) => DbBackgroundJobScheduler.TargetKeyOf<IRecalculationJob>(target);
 
     private static string Payload(
         long doc, int[] cascade, int? chainAfter = null, int[]? chainPlan = null, int[]? append = null)

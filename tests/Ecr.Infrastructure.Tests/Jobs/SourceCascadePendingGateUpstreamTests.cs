@@ -39,7 +39,7 @@ public sealed class SourceCascadePendingGateUpstreamTests(SqlServerFixture sql)
         // Без ланок — нічого не чекає.
         Assert.False(await PendingAsync(w, w.Consumer));
 
-        var target = RegistryImpactRecalculationTarget.ForSourceChange(w.BindingId, w.Year, 3);
+        var target = Impact(RegistryImpactRecalculationTarget.ForSourceChange(w.BindingId, w.Year, 3));
         await InsertAsync(target, "Queued", documentId: null, payload: "{}");
         try
         {
@@ -60,8 +60,8 @@ public sealed class SourceCascadePendingGateUpstreamTests(SqlServerFixture sql)
         }
 
         // «З затвердженими» переписує й затверджені — не тримає; інший рік — не тримає.
-        var approved = RegistryImpactRecalculationTarget.ForSourceChange(w.BindingId, w.Year, null, includeApproved: true);
-        var otherYear = RegistryImpactRecalculationTarget.ForSourceChange(w.BindingId, w.Year + 1, null);
+        var approved = Impact(RegistryImpactRecalculationTarget.ForSourceChange(w.BindingId, w.Year, null, includeApproved: true));
+        var otherYear = Impact(RegistryImpactRecalculationTarget.ForSourceChange(w.BindingId, w.Year + 1, null));
         await InsertAsync(approved, "Queued", documentId: null, payload: "{}");
         await InsertAsync(otherYear, "Queued", documentId: null, payload: "{}");
         try
@@ -81,7 +81,7 @@ public sealed class SourceCascadePendingGateUpstreamTests(SqlServerFixture sql)
     public async Task Власний_перерахунок_і_задача_формул_джерела_тримають_споживача_лише_за_зв_язки_що_ставить_каскад()
     {
         var w = await ArrangeAsync();
-        var auto = $"doc{w.Source.DocumentId.ToString(CultureInfo.InvariantCulture)}-p{w.Source.PeriodKey.Value.ToString(CultureInfo.InvariantCulture)}-auto";
+        var auto = DbBackgroundJobScheduler.TargetKeyOf<IRecalculationJob>($"doc{w.Source.DocumentId.ToString(CultureInfo.InvariantCulture)}-p{w.Source.PeriodKey.Value.ToString(CultureInfo.InvariantCulture)}-auto");
         var payload = $$"""{"projectId":0,"documentId":{{w.Source.DocumentId}},"periodKey":{{w.Source.PeriodKey.Value}}}""";
         await InsertAsync(auto, "Running", w.Source.DocumentId, payload);
         try
@@ -97,7 +97,7 @@ public sealed class SourceCascadePendingGateUpstreamTests(SqlServerFixture sql)
             await SetStateAsync(auto, "Succeeded");
         }
 
-        var formula = $"doc{w.Source.DocumentId.ToString(CultureInfo.InvariantCulture)}-formula-u{Random.Shared.Next(1_000_000, 9_000_000)}";
+        var formula = DbBackgroundJobScheduler.TargetKeyOf<IFormulaRecalculationJob>($"doc{w.Source.DocumentId.ToString(CultureInfo.InvariantCulture)}-formula-u{Random.Shared.Next(1_000_000, 9_000_000)}");
         await InsertAsync(formula, "Queued", w.Source.DocumentId, payload);
         try
         {
@@ -116,7 +116,7 @@ public sealed class SourceCascadePendingGateUpstreamTests(SqlServerFixture sql)
     public async Task Без_ребер_у_графі_ворота_як_доти()
     {
         var w = await ArrangeAsync();
-        var target = RegistryImpactRecalculationTarget.ForSourceChange(w.BindingId, w.Year, null);
+        var target = Impact(RegistryImpactRecalculationTarget.ForSourceChange(w.BindingId, w.Year, null));
         await InsertAsync(target, "Queued", documentId: null, payload: "{}");
         try
         {
@@ -158,6 +158,9 @@ public sealed class SourceCascadePendingGateUpstreamTests(SqlServerFixture sql)
     }
 
     // ───────────────────────────── допоміжне ─────────────────────────────
+
+    /// <summary>Ціль задачі впливу так, як її пише черга в базі (`IRegistryImpactRecalculationJob~…`, огляд b9).</summary>
+    private static string Impact(string target) => DbBackgroundJobScheduler.TargetKeyOf<IRegistryImpactRecalculationJob>(target);
 
     private sealed record World(TestDocument Consumer, TestDocument Other, TestDocument Source, int BindingId, int ConsumerTemplateId, int SourceTemplateId, int Year);
 

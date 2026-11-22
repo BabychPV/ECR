@@ -456,6 +456,16 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
                     SET @existing = JSON_MODIFY(@existing, '$.fanOutParentJobId', JSON_VALUE(@payload, '$.fanOutParentJobId'));
                     SET @rewrite = 1;
                 END
+                IF (ISNULL(JSON_VALUE(@payload, '$.foreignOwnerPass'), N'false') = N'true'
+                    OR ISNULL(JSON_VALUE(@payload, '$.readerPassMerged'), N'false') = N'true')
+                   AND ISNULL(JSON_VALUE(@existing, '$.foreignOwnerPass'), N'false') <> N'true'
+                   AND ISNULL(JSON_VALUE(@existing, '$.readerPassMerged'), N'false') <> N'true'
+                BEGIN
+                    -- ✎ F5 (огляд b9, п. 1): прохід читача злився в натискання — ворота подання (SourceCascadePendingGate)
+                    -- тримають місяць, поки задача жива. Поведінки прогону позначка не змінює.
+                    SET @existing = JSON_MODIFY(@existing, '$.readerPassMerged', CAST(1 AS bit));
+                    SET @rewrite = 1;
+                END
         """;
 
     /// <summary>
@@ -541,8 +551,13 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock, QuartzJobTypeLimit
             BEGIN
                 -- ✎ PERF-06 (D-566): поглинута задача каскаду, що ще не стала ланцюжком (перший крок відкладено чи повторюється),
                 -- передає свої періоди тій, що позаду: інакше її місяці загубилися б разом із нею.
+                -- ✎ F5 (огляд b9, п. 1): так само поглинутий прохід читача (чи натискання з ним) — позначку `readerPassMerged`
+                -- отримує задача позаду, інакше ворота подання відпустили б місяць, якого прохід ще не перерахував.
                 SET @payload = CASE WHEN ISJSON({{chainPayload}}) = 1
-                                    THEN CASE WHEN JSON_QUERY({{chainPayload}}, '$.cascadePeriods') IS NOT NULL THEN {{chainPayload}} END
+                                    THEN CASE WHEN JSON_QUERY({{chainPayload}}, '$.cascadePeriods') IS NOT NULL
+                                                   OR ISNULL(JSON_VALUE({{chainPayload}}, '$.foreignOwnerPass'), N'false') = N'true'
+                                                   OR ISNULL(JSON_VALUE({{chainPayload}}, '$.readerPassMerged'), N'false') = N'true'
+                                              THEN {{chainPayload}} END
                                END;
         {{CoalescePayloadSql("@behind")}}
             END

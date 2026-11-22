@@ -49,7 +49,9 @@ public sealed class SubmitApproveCascadePendingHttpTests(SqlServerFixture sql)
         using var approver = await SignInAsync(app, s.ApproverName).ConfigureAwait(true);
 
         var jobId = $"f5-{Guid.NewGuid():N}";
-        var target = CalculationTrigger.SourceCascadeTargetOf(s.Document.DocumentId, s.PeriodKey / 100);
+        // ✎ Огляд b9: ціль так, як її пише черга в базі (`{тип задачі}~{ціль}`, DbBackgroundJobScheduler.TargetKeyOf).
+        var target = $"{nameof(Ecr.Application.Ports.IRecalculationJob)}~"
+                     + CalculationTrigger.SourceCascadeTargetOf(s.Document.DocumentId, s.PeriodKey / 100);
         var p = s.PeriodKey.ToString(CultureInfo.InvariantCulture);
         var docId = s.Document.DocumentId.ToString(CultureInfo.InvariantCulture);
 

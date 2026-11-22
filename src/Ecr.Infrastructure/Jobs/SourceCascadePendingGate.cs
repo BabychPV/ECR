@@ -28,6 +28,12 @@ namespace Ecr.Infrastructure.Jobs;
 /// Чи період ще в плані задачі року — <see cref="Pends"/>.
 /// </para>
 /// <para>
+/// ✎ F5 (огляд b9, п. 1): і живий прохід читача періоду (ціль <c>doc{id}-p{період}</c>, <see cref="IsReaderPass"/>) — крок
+/// каскаду й прогін власника ставлять місяцям, що читають його числа (<c>row.X[m]</c>, не-місячна колонка якоря), окремі
+/// задачі поза <c>chainPlan</c>: без цього після останнього кроку ланцюжка місяць-читач подавався б зі старим числом.
+/// Той самий запит (третя ціль у тому ж пошуку за індексом документа).
+/// </para>
+/// <para>
 /// ✎ F5 (огляд координатора, п. 1): і вікно ДО постановки каскаду. Місяць споживача чекає й тоді, коли жива задача
 /// ланцюжка, що до каскаду ПРИВЕДЕ: задача формул (<c>doc{id}-formula…</c>) чи власний перерахунок (<c>doc{id}-p{період}-auto</c>)
 /// документа-джерела зв'язки (стан <c>Any</c>, біт <c>RecalculateDependents</c> і читання з документа —
@@ -64,22 +70,32 @@ public sealed class SourceCascadePendingGate(
                CAST(NULL AS int) AS SourceTemplateId, CAST(NULL AS int) AS SourcePeriodKind
           FROM itg.JobProgress AS q WITH (INDEX(IX_JobProgress_Document_Active))
          WHERE q.DocumentId = @doc AND q.DocumentId IS NOT NULL AND q.[State] IN ('Queued', 'Running')
-           AND q.TargetKey IN (@yearTarget, @periodTarget)
+           AND q.TargetKey IN (@yearTarget, @periodTarget, @readerTarget)
         """;
 
+    // ⛔ Огляд b9: ціль у черзі в базі — `{тип задачі}~{ціль}` (DbBackgroundJobScheduler.TargetKeyOf). Доти ворота порівнювали
+    // голі цілі (`doc…`, `source-change-b…`) і в Production не бачили жодної задачі — лише рядки, вставлені тестами руками.
+    private static readonly string AutoLike = DbBackgroundJobScheduler.TargetKeyOf<IRecalculationJob>("doc") + "%-auto";
+    private static readonly string FormulaLike = DbBackgroundJobScheduler.TargetKeyOf<IFormulaRecalculationJob>("doc") + "%-formula%";
+    private static readonly string SourceChangeLike =
+        DbBackgroundJobScheduler.TargetKeyOf<IRegistryImpactRecalculationJob>("source-change-b") + "%";
+
     // Ланки джерел — лише живі рядки (фільтровані індекси цілі); документні — з шаблоном і періодичністю документа-джерела.
-    private const string UpstreamSql = """
+    private static readonly string UpstreamSql = """
         SELECT N'U', q.TargetKey, q.[State], CAST(k.Pk AS nvarchar(20)),
                @t, CAST(@kind AS int), COALESCE(sd.TemplateId, sv.TemplateId), CAST(sp.PeriodKind AS int)
           FROM itg.JobProgress AS q WITH (INDEX({0}))
-          CROSS APPLY (SELECT CASE WHEN q.TargetKey LIKE N'doc%' AND ISJSON(q.Payload) = 1
+          CROSS APPLY (SELECT CASE WHEN (q.TargetKey LIKE N'{auto}' OR q.TargetKey LIKE N'{formula}') AND ISJSON(q.Payload) = 1
                                    THEN TRY_CAST(JSON_VALUE(q.Payload, '$.periodKey') AS int) END AS Pk) AS k
-          LEFT JOIN doc.Document AS sd ON q.TargetKey LIKE N'doc%' AND sd.Id = q.DocumentId
+          LEFT JOIN doc.Document AS sd ON (q.TargetKey LIKE N'{auto}' OR q.TargetKey LIKE N'{formula}') AND sd.Id = q.DocumentId
           LEFT JOIN doc.Project AS sp ON sp.Id = sd.ProjectId
           LEFT JOIN cfg.TemplateVersion AS sv ON sv.Id = CASE WHEN sd.TemplateId IS NULL THEN doc.fn_VersionOf(sd.ProjectId, k.Pk) ELSE doc.fn_TemplateVersionOf(sd.ProjectId, sd.TemplateId, k.Pk) END
          WHERE q.[State] = '{1}' AND q.TargetKey IS NOT NULL AND @t IS NOT NULL
-           AND (q.TargetKey LIKE N'source-change-b%' OR q.TargetKey LIKE N'doc%-auto' OR q.TargetKey LIKE N'doc%-formula%')
-        """;
+           AND (q.TargetKey LIKE N'{source}' OR q.TargetKey LIKE N'{auto}' OR q.TargetKey LIKE N'{formula}')
+        """
+        .Replace("{auto}", AutoLike, StringComparison.Ordinal)
+        .Replace("{formula}", FormulaLike, StringComparison.Ordinal)
+        .Replace("{source}", SourceChangeLike, StringComparison.Ordinal);
 
     private static readonly string ExtendedSql =
         """
@@ -100,8 +116,9 @@ public sealed class SourceCascadePendingGate(
     /// <inheritdoc />
     public async Task<bool> IsPendingAsync(long documentId, int periodKey, CancellationToken ct)
     {
-        var yearTarget = CalculationTrigger.SourceCascadeTargetOf(documentId, periodKey / 100);
-        var periodTarget = CalculationTrigger.DependentsTargetOf(documentId, new PeriodKey(periodKey));
+        var yearTarget = QueueKey(CalculationTrigger.SourceCascadeTargetOf(documentId, periodKey / 100));
+        var periodTarget = QueueKey(CalculationTrigger.DependentsTargetOf(documentId, new PeriodKey(periodKey)));
+        var readerTarget = QueueKey(Ecr.Application.Documents.RecalculateDocumentHandler.TargetOf(documentId, new PeriodKey(periodKey)));
 
         // Ребра «джерело → споживач» графа (будь-який стан зв'язки) і зв'язки, чиї документні ланки ведуть до каскаду.
         var upstream = await UpstreamAsync(ct).ConfigureAwait(false);
@@ -112,11 +129,16 @@ public sealed class SourceCascadePendingGate(
                 new SqlParameter("@doc", documentId),
                 new SqlParameter("@period", periodKey),
                 new SqlParameter("@yearTarget", yearTarget),
-                new SqlParameter("@periodTarget", periodTarget))
+                new SqlParameter("@periodTarget", periodTarget),
+                new SqlParameter("@readerTarget", readerTarget))
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        if (rows.Exists(r => r.Kind == "C" && (r.TargetKey == periodTarget || Pends(r.State == "Running", r.Payload, periodKey))))
+        if (rows.Exists(r => r.Kind == "C"
+                             && (r.TargetKey == periodTarget
+                                 || (r.TargetKey == readerTarget
+                                     ? IsReaderPass(r.Payload)
+                                     : Pends(r.State == "Running", r.Payload, periodKey)))))
         {
             return true;
         }
@@ -129,6 +151,13 @@ public sealed class SourceCascadePendingGate(
         var consumerKind = (PeriodKind)(self.ConsumerPeriodKind ?? 0);
         return rows.Exists(r => r.Kind == "U" && UpstreamPends(upstream, r, consumer, consumerKind, periodKey));
     }
+
+    /// <summary>Ціль задачі перерахунку так, як її пише черга в базі (<c>IRecalculationJob~{ціль}</c>).</summary>
+    private static string QueueKey(string target) => DbBackgroundJobScheduler.TargetKeyOf<IRecalculationJob>(target);
+
+    /// <summary>Ціль без префікса типу задачі (<c>{тип}~</c>).</summary>
+    private static string BareTarget(string queueKey)
+        => queueKey.IndexOf('~', StringComparison.Ordinal) is var at and >= 0 ? queueKey[(at + 1)..] : queueKey;
 
     /// <summary>Ланки джерел для рішення; <c>null</c> — у графі жодного ребра «джерело → споживач» (запит як доти).</summary>
     private async Task<Upstream?> UpstreamAsync(CancellationToken ct)
@@ -163,7 +192,7 @@ public sealed class SourceCascadePendingGate(
             return false;
         }
 
-        if (SourceChangeKey.TryParse(row.TargetKey, out var bindingId, out var year, out var month, out var approved))
+        if (SourceChangeKey.TryParse(BareTarget(row.TargetKey), out var bindingId, out var year, out var month, out var approved))
         {
             // «З затвердженими» перераховує й затверджені аркуші — затвердження не закріпить старих чисел.
             return !approved
@@ -310,6 +339,41 @@ public sealed class SourceCascadePendingGate(
 
         return request.ChainPlan is null && periodKey > after;
     }
+
+    /// <summary>
+    /// ✎ F5 (огляд b9, п. 1): чи задача цілі <c>doc{id}-p{період}</c> — прохід читача (<c>foreignOwnerPass</c>, його ставить
+    /// крок каскаду й прогін власника ПОЗА планом ланцюжка — <c>EnqueueOwnerPeriodReadersAsync</c>) чи натискання, у яке
+    /// прохід злився (<c>readerPassMerged</c>, <see cref="DbJobQueue"/>). Звичайне натискання «Перерахувати» місяця не
+    /// блокує; payload, що не читається, — теж (каскад такої форми не ставить).
+    /// </summary>
+    /// <param name="payload">Тіло задачі.</param>
+    internal static bool IsReaderPass(string? payload)
+    {
+        if (string.IsNullOrEmpty(payload))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var json = JsonDocument.Parse(payload);
+            return json.RootElement.ValueKind == JsonValueKind.Object
+                   && (Flag(json.RootElement, "foreignOwnerPass") || Flag(json.RootElement, ReaderPassMergedField));
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+
+        static bool Flag(JsonElement root, string name)
+            => root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.True;
+    }
+
+    /// <summary>
+    /// Позначка payload натискання, у яке злився прохід читача (<see cref="DbJobQueue"/>, злиття постановок і поглинання
+    /// при поверненні в чергу): воріт вона тримає місяць, поки задача жива.
+    /// </summary>
+    internal const string ReaderPassMergedField = "readerPassMerged";
 
     private static int Floor(params int[]?[] sets)
         => sets.SelectMany(s => s ?? []).DefaultIfEmpty(int.MaxValue).Min();
