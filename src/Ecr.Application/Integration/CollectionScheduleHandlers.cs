@@ -336,6 +336,13 @@ public sealed class ListCollectionSchedulesHandler(
     /// ⚠ HTTP вимагає ETag у лапках (<c>"…"</c>), а частина клієнтів шле голе
     /// значення. Приймаються обидві форми: відмовити через лапки означало б
     /// віддати 422 за правильно виконану вимогу.
+    ///
+    /// ⛔ B186: слабка позначка — лише <c>W/"…"</c> (RFC 9110 §8.8.3: <c>weak = %s"W/"</c> перед
+    /// <c>opaque-tag</c> у лапках). Раніше <c>W/</c> зрізався й з ГОЛОГО значення, а версії тут —
+    /// Base64 (<c>UnitVersion</c>, <c>rowVersion</c>), де <c>W</c> і <c>/</c> — звичайні символи: версія
+    /// виду <c>W/x…</c> (1 з 4096 вмістів одиниці) втрачала два перші символи й ніколи не збігалася —
+    /// кожна зміна такої одиниці голим <c>If-Match</c> отримувала <c>409 unitChanged</c> назавжди.
+    /// Так і падав <c>UnitConcurrencyTests</c> у CI: перший учасник гонки отримував 409 ще до паузи.
     /// </remarks>
     internal static string? NormalizeETag(string? header)
     {
@@ -346,7 +353,7 @@ public sealed class ListCollectionSchedulesHandler(
 
         var text = header.Trim();
 
-        if (text.StartsWith("W/", StringComparison.Ordinal))
+        if (text.StartsWith("W/\"", StringComparison.Ordinal))
         {
             text = text[2..];
         }
