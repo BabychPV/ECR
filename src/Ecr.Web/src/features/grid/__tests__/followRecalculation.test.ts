@@ -153,7 +153,9 @@ describe('AN-108 / P2-03: слідкувач не опитує даремно', 
     const invalidate = vi.spyOn(client, 'invalidateQueries');
 
     followRecalculation(client, 'gone#1', 23, 202609);
-    await vi.advanceTimersByTimeAsync(RecalculationPollMs * 61);
+    // PERF-08: пауза між опитуваннями розкидана ±20 %, тож 60 спроб займають до 60 * 1,2 * RecalculationPollMs;
+    // беремо запас (75 пауз), лишаючись далеко під загальною стелею FollowMaxMs.
+    await vi.advanceTimersByTimeAsync(RecalculationPollMs * 75);
 
     expect(isFollowedJob('gone#1')).toBe(false);
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['job', 'gone#1'], exact: true });
