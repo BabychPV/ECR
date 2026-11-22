@@ -416,7 +416,8 @@ public sealed class YearPressSkipsUnchangedMonthsTests(SqlServerFixture sql) : D
     /// </summary>
     /// <remarks>
     /// МУТАЦІЯ: прибрати правило «власник новіший за читача» в <c>ChangedMonthsCoreAsync</c> — червоні рядки «скасовано» й
-    /// «прогін періоду»; прибрати замикання в <c>ChangedMonthsAsync</c> — червоний рядок «правка».
+    /// «прогін періоду»; прибрати замикання в <c>ChangedMonthsAsync</c> — червоний рядок «правка» (план першого кроку — лише
+    /// {3}: читачів дописав би лише крок березня).
     /// </remarks>
     [Theory]
     [InlineData("edit")]
@@ -430,7 +431,22 @@ public sealed class YearPressSkipsUnchangedMonthsTests(SqlServerFixture sql) : D
         if (scenario == "edit")
         {
             await CellChangeAsync(document, 202603, MonthColumn(document, 3), CellChangeOrigins.UserEdit, Baseline.AddMinutes(1));
-            Assert.Equal([202601, 202603, 202604, 202605, 202606], (await PressAsync(builder, document, screen: 202601, Press)).Steps);
+            await using var press = NewHost();
+            var jobId = await Scheduler(press).EnqueueCoalescedAsync<IRecalculationJob>(
+                RecalculateDocumentHandler.YearScopedTargetOf(document.DocumentId, Year, null),
+                PressPayload(document, 202601, full: false), CancellationToken.None, Presser);
+            var done = new List<int>();
+            await StepAsync(builder, press, Press, done, null);
+
+            // Читачі березня — у плані вже з першого кроку (шкала «з 5» чесна з початку), а не лише коли ланцюжок дійде до березня.
+            var planned = JsonSerializer.Deserialize<RecalculationRequest>((await RowAsync(jobId))!.Payload!, Web)!;
+            Assert.Equal([202603, 202604, 202605, 202606], planned.ChainPlan!);
+            Assert.Equal(5, planned.ChainTotal);
+            while (await StepAsync(builder, press, Press, done, null))
+            {
+            }
+
+            Assert.Equal([202601, 202603, 202604, 202605, 202606], done);
             return;
         }
 

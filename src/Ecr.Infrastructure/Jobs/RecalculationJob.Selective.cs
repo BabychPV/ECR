@@ -611,6 +611,8 @@ public sealed partial class RecalculationJob
                 join sh in db.SheetDefs.AsNoTracking() on t.SheetDefId equals sh.Id
                 select sh.TemplateVersionId)
             .Distinct()
+            .OrderBy(id => id)
+            .Take(MaxNightlyTemplateVersions + 1)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
