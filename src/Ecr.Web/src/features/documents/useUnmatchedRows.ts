@@ -8,7 +8,8 @@ import type {
   FormulaErrorIssue,
   SourceIssue,
 } from '@/features/calculationIssues/api';
-import { useCalculationIssues } from '@/features/calculationIssues/useCalculationIssues';
+import type { CalculationIssues } from '@/features/calculationIssues/api';
+import { useCalculationIssues, useYearCalculationIssues } from '@/features/calculationIssues/useCalculationIssues';
 import { calculationResultsKey } from '@/features/methodologies/calculationResultsKey';
 
 /** Рядки документа без правила розрахунку і час прогону, що їх знайшов. */
@@ -99,4 +100,91 @@ export function useUnmatchedRows(
     // ✎ B80 N4: проблеми джерела — рівня документа-місяця, тож лише з запиту оригіналу (копія дала б ті самі).
     sourceIssues: originals.data?.sourceIssues ?? NoSourceIssues,
   };
+}
+
+/** ✎ W15z M4: проблеми розрахунку одного місяця документа «рік». */
+export interface MonthUnmatchedRows {
+  /** Місяць `yyyyMM`. */
+  readonly periodKey: number;
+  readonly rows: UnmatchedRows;
+}
+
+/** Чи є в місяці що показати на панелі. */
+export function hasCalculationIssues(rows: UnmatchedRows): boolean {
+  return rows.formulaErrors.length > 0 || rows.issues.length > 0 || (rows.sourceIssues?.length ?? 0) > 0;
+}
+
+/**
+ * ✎ W15z M4: розкласти відповідь `year=true` (кожен рядок — з `monthNumber` місяця прогону) по місяцях року якоря; лише
+ * місяці з проблемами, за зростанням. Рядок без `monthNumber` (не мав би бути в «рік») — до якоря. Час прогону відомий
+ * лише якорю (`calculation-run` якоря) — інші місяці без нього, щоб не показувати чужий час.
+ */
+export function splitIssuesByMonth(
+  anchorPeriodKey: number,
+  originals: CalculationIssues | undefined,
+  copy: CalculationIssues | undefined,
+  activeCopyId: number | null,
+  anchorFinishedAt: string | null,
+): MonthUnmatchedRows[] {
+  const year = Math.floor(anchorPeriodKey / 100);
+  const monthOf = (monthNumber: number | null | undefined): number =>
+    monthNumber === null || monthNumber === undefined ? anchorPeriodKey : year * 100 + monthNumber;
+  const own = <T extends { readonly sheetCopyId?: number | null }>(list: readonly T[] | null | undefined, copyList: readonly T[] | null | undefined): T[] => [
+    ...(list ?? []).filter((item) => (item.sheetCopyId ?? null) === null),
+    ...(activeCopyId === null ? [] : (copyList ?? []).filter((item) => item.sheetCopyId === activeCopyId)),
+  ];
+
+  const months = new Map<number, { issues: CalculationIssue[]; formulaErrors: FormulaErrorIssue[]; sourceIssues: SourceIssue[] }>();
+  const bucket = (periodKey: number) => {
+    let found = months.get(periodKey);
+    if (found === undefined) {
+      found = { issues: [], formulaErrors: [], sourceIssues: [] };
+      months.set(periodKey, found);
+    }
+    return found;
+  };
+  for (const issue of own(originals?.items, copy?.items)) bucket(monthOf(issue.monthNumber)).issues.push(issue);
+  for (const error of own(originals?.formulaErrors, copy?.formulaErrors)) bucket(monthOf(error.monthNumber)).formulaErrors.push(error);
+  // ✎ B80 N4: проблеми джерела — рівня документа-місяця, лише з запиту оригіналу.
+  for (const source of originals?.sourceIssues ?? []) bucket(monthOf(source.monthNumber)).sourceIssues.push(source);
+
+  const hints = own(originals?.tables, copy?.tables);
+
+  return [...months.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([periodKey, month]) => ({
+      periodKey,
+      rows: {
+        issues: month.issues,
+        hints,
+        finishedAt: periodKey === anchorPeriodKey ? anchorFinishedAt : null,
+        formulaErrors: month.formulaErrors,
+        formulaErrorTotal: month.formulaErrors.length,
+        sourceIssues: month.sourceIssues,
+      },
+    }))
+    .filter((month) => hasCalculationIssues(month.rows));
+}
+
+/**
+ * ✎ W15z M4 (P-1122-4: «так познач щоб користувач бачив це»): документ «рік» відкривається на ЯКОРІ року (L7a), а
+ * проблеми розрахунку (F5-R «джерело змінилось після затвердження», StepError, помилки формул) живуть у місяці прогону.
+ * Доти сторінка читала лише якір — причина жовтня не показувалась ніде. Тепер — один запит `year=true` (сервер L6) і
+ * перелік місяців із проблемами. `enabled = false` (інша розкладка, адреса ще не на якорі) — запиту немає, перелік
+ * порожній.
+ */
+export function useYearUnmatchedRows(
+  documentId: number,
+  anchorPeriodKey: number,
+  activeCopyId: number | null,
+  enabled: boolean,
+  anchorFinishedAt: string | null,
+): readonly MonthUnmatchedRows[] {
+  const originals = useYearCalculationIssues(documentId, anchorPeriodKey, null, enabled);
+  const copy = useYearCalculationIssues(documentId, anchorPeriodKey, activeCopyId, enabled);
+
+  return useMemo(
+    () => (enabled ? splitIssuesByMonth(anchorPeriodKey, originals.data, copy.data, activeCopyId, anchorFinishedAt) : []),
+    [enabled, anchorPeriodKey, originals.data, copy.data, activeCopyId, anchorFinishedAt],
+  );
 }

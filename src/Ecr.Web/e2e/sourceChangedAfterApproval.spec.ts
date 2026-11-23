@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type APIRequestContext, type APIResponse, type Page } from '@playwright/test';
 
 /**
  * ✎ F5-R (D-570, рішення людини P-1122-4: «так познач щоб користувач бачив це»): на справжньому стенді й у справжньому
@@ -71,7 +71,131 @@ test.describe('Джерело змінено після затвердження
     await expect(cause.getByTestId('document-calc-issue-source-hint')).not.toContainText('document.calcIssues');
     await expect(page.getByTestId('document-calc-issues')).toHaveAttribute('data-blocking', 'false');
   });
+
+  /**
+   * ✎ W15z M4: документ «рік» (`YearWithMonthColumns`, як Land doc 96) відкривається на ЯКОРІ року, а F5-R живе в
+   * місяці (жовтень). Доти сторінка читала `calculation-issues` лише якоря — причини жовтня не було видно ніде. Тепер
+   * панель жовтня (`data-period`) з причиною й джерелом — з відповіді `year=true` (підміна — лише її: без `year=true`
+   * панелі жовтня не буде, тест червоний).
+   */
+  test('документ «рік»: на якорі видно панель жовтня з причиною «джерело змінено» і джерелом', async ({ page }) => {
+    const request = page.request;
+    await signIn(page, Operator.user, Operator.password);
+    const arranged = await arrangeYearDocument(request);
+
+    let yearRead = false;
+    await page.route(/\/api\/v1\/documents\/\d+\/calculation-issues/, async (route) => {
+      const response = await route.fetch();
+      const body = (await response.json()) as Record<string, unknown>;
+      if (route.request().url().includes('year=true')) {
+        yearRead = true;
+        body['sourceIssues'] = [
+          {
+            kind: 'SourceChangedAfterApproval',
+            monthNumber: 10,
+            sourcePeriodKey: arranged.october,
+            sourceDocumentId: arranged.documentId,
+            sourceProjectCode: 'HSE',
+            sourceDocumentKey: 'HSE400-E2E',
+            sourceApprovedAt: '2026-04-01T08:00:00Z',
+            approvedAt: '2026-04-02T08:00:00Z',
+            sourceChangedAt: null,
+          },
+        ];
+      }
+      await route.fulfill({ response, json: body });
+    });
+
+    await page.goto(`/documents/${String(arranged.documentId)}?periodKey=${String(arranged.october)}`);
+    await expect(page).toHaveURL(new RegExp(`periodKey=${String(arranged.anchor)}`), { timeout: 90_000 });
+
+    const panel = page.locator(`[data-testid="document-calc-issues"][data-period="${String(arranged.october)}"]`);
+    await expect(panel, 'панелі проблем жовтня на якорі року немає').toBeVisible({ timeout: 60_000 });
+    expect(yearRead, 'сторінка «рік» не читала проблеми року (year=true)').toBe(true);
+    await expect(panel.getByTestId('document-calc-issues-title')).toContainText(/October|Жовт|Октябр|Қазан/i);
+    const cause = panel.getByTestId('document-calc-issue').first();
+    await expect(cause).toHaveAttribute('data-kind', 'sourceChanged');
+    await expect(cause.getByTestId('document-calc-issue-detail')).toHaveText('HSE · HSE400-E2E');
+    await expect(cause.getByTestId('document-calc-issue-source-hint')).not.toContainText('document.calcIssues');
+    await expect(cause.getByTestId('document-calc-issue-open-source')).toBeVisible();
+  });
 });
+
+interface YearDocument {
+  readonly documentId: number;
+  readonly anchor: number;
+  readonly october: number;
+}
+
+/** Документ «рік» на одноразовій базі стенда: шаблон `YearWithMonthColumns` (аркуш S1, 12 місячних колонок), проєкт року. */
+async function arrangeYearDocument(request: APIRequestContext): Promise<YearDocument> {
+  const ok = async <T,>(response: APIResponse, what: string): Promise<T> => {
+    const body = await response.text();
+    expect(response.status(), `${what}: ${String(response.status())} ${body.slice(0, 1000)}`).toBeLessThan(300);
+    return (body.length > 0 ? JSON.parse(body) : {}) as T;
+  };
+  const stamp = String(Date.now());
+  const year = new Date().getUTCFullYear() - 1;
+
+  const template = await ok<{ templateId: number }>(
+    await request.post('/api/v1/templates', { data: { code: `E2EF5R${stamp}`, nameL10n: { en: `E2E F5-R year ${stamp}` } } }),
+    'шаблон',
+  );
+  const version = await ok<{ versionId: number }>(
+    await request.post(`/api/v1/templates/${String(template.templateId)}/versions`, { data: { versionNumber: '1.0.0.0', cloneFromVersionId: null } }),
+    'версія',
+  );
+  const base = `/api/v1/template-versions/${String(version.versionId)}`;
+  await ok(await request.put(`${base}/layout`, { data: { layout: 'YearWithMonthColumns' } }), 'розкладка «рік»');
+  await ok(
+    await request.put(`${base}/sheets/S1`, { data: { nameL10n: { en: 'Year sheet' }, ordinal: 1, isMandatory: true, isVisible: true, sheetGroup: null } }),
+    'аркуш',
+  );
+  const table = await ok<{ id: number }>(
+    await request.put(`${base}/sheets/S1/tables/T1`, {
+      data: { nameL10n: { en: 'Year table' }, ordinal: 0, layoutKind: 'MonthsInColumns', rowMode: 'Dynamic', maxDynamicRows: 20 },
+    }),
+    'таблиця',
+  );
+  const column = (ordinal: number, header: string, dataType: 'String' | 'Decimal', month: number | null): Record<string, unknown> => ({
+    headerL10n: { en: header }, ordinal, dataType, isRequired: false, isReadOnly: false, isHidden: false,
+    precision: dataType === 'Decimal' ? 18 : null, scale: dataType === 'Decimal' ? 2 : null, defaultValue: null,
+    displayFormat: null, lookupFilter: null, lookupRegistryDefId: null, styleId: null, unitId: null,
+    ...(month === null ? {} : { isMonthColumn: true, monthNumber: month }),
+  });
+  await ok(await request.put(`${base}/tables/${String(table.id)}/columns/NAME`, { data: column(0, 'Name', 'String', null) }), 'стовпець NAME');
+  for (let m = 1; m <= 12; m += 1) {
+    const code = `M${String(m).padStart(2, '0')}`;
+    await ok(await request.put(`${base}/tables/${String(table.id)}/columns/${code}`, { data: column(m, `Month ${code}`, 'Decimal', m) }), `стовпець ${code}`);
+  }
+  await ok(await request.post(`${base}/publish`, { data: { reason: 'e2e: F5-R документа «рік» (W15z M4)' } }), 'публікація');
+
+  const policy = await ok<{ id: number }>(
+    await request.post('/api/v1/projects/period-policies', {
+      data: { code: `E2EF5R${stamp}`, openOffsetDays: 0, graceOffsetDays: 3000, hardCloseOffsetDays: 3600, yearGraceOffsetDays: 3600 },
+    }),
+    'політика періодів',
+  );
+  const project = await ok<{ projectId: number }>(
+    await request.post('/api/v1/projects', {
+      data: {
+        code: `E2EF5RPrj${stamp}`, nameL10n: { en: `E2E F5-R year ${stamp}` }, periodKind: 'Monthly', timeZoneId: 'UTC',
+        templateVersionId: version.versionId, periodPolicyId: policy.id, year,
+      },
+    }),
+    'проєкт',
+  );
+  await ok(await request.post(`/api/v1/projects/${String(project.projectId)}/activate`), 'активація');
+  const structure = await ok<{ sheets: { id: number }[] }>(await request.get(`${base}/structure`), 'структура');
+  const document = await ok<{ documentId: number }>(
+    await request.post('/api/v1/documents', {
+      data: { projectId: project.projectId, sheetDefIds: structure.sheets.map((s) => s.id), templateVersionId: version.versionId },
+    }),
+    'документ',
+  );
+
+  return { documentId: document.documentId, anchor: year * 100 + 1, october: year * 100 + 10 };
+}
 
 async function signIn(page: Page, user: string, password: string): Promise<void> {
   await page.goto('/login');
