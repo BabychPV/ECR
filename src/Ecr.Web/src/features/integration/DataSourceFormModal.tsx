@@ -105,7 +105,7 @@ const ReadsCatalog: Readonly<Record<Transport, boolean>> = { PiSqlClient: false,
  */
 function ClearUnused({ onClear }: { readonly onClear: () => void }): JSX.Element {
   return (
-    <Button variant="subtle" size="compact-xs" mr="xs" onClick={onClear} data-clear-unused="">
+    <Button variant="subtle" size="xs" mr="xs" onClick={onClear} data-clear-unused="">
       {t('sources.clearUnusedField')}
     </Button>
   );
