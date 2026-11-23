@@ -84,6 +84,49 @@ public sealed class SourceYearlyMonthsTests(SqlServerFixture sql) : DbJobQueueTe
         Assert.Null(SourceMonthsOf(JsonSerializer.Serialize(payload, JsonSerializerOptions.Web)));
     }
 
+    /// <summary>
+    /// Черга без об'єднання (Quartz, live InProcess): місяці правки однаково не їдуть, тож хук не звертається до бази по колонки —
+    /// правка з колонками коштує стільки ж звернень, скільки без них (PERF-06b не додає роботи Quartz).
+    /// </summary>
+    /// <remarks>Мутація: у хуку виводити місяці правки й тоді, коли тригер не зливає періоди, — червоний (+1 звернення).</remarks>
+    [Fact]
+    public async Task Черга_без_обєднання_правка_з_колонками_не_дорожча_за_правку_без_них()
+    {
+        var world = new SourceDependencyWorld(Sql);
+        var (registryId, _) = await world.RegistryAsync();
+        var source = await YearlySourceAsync();
+        await world.BindingAsync(source.TemplateId, registryId);
+
+        async Task<long> RoundTripsAsync(IReadOnlySet<int>? columns)
+        {
+            await using var db = Sql.CreateContext();
+            await db.Database.OpenConnectionAsync();
+            var connection = (Microsoft.Data.SqlClient.SqlConnection)db.Database.GetDbConnection();
+            var jobs = Substitute.For<IBackgroundJobScheduler>();
+            jobs.MergesCascadePeriods.Returns(false);
+            jobs.EnqueueCoalescedAsync<IRecalculationJob>(
+                    Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
+                .Returns("auto");
+            var hook = new SourceDocumentChangeHook(db, jobs, Trigger(db, jobs));
+            var edit = new ChangedPeriodsDictionary
+            {
+                [source.DocumentId] = [YearKey],
+                ChangedColumns = columns is null ? null : new Dictionary<int, IReadOnlySet<int>> { [YearKey] = columns },
+            };
+
+            await hook.OnCellsEditedAsync(edit, CancellationToken.None); // прогрів (план запитів)
+            connection.StatisticsEnabled = true;
+            connection.ResetStatistics();
+            await hook.OnCellsEditedAsync(edit, CancellationToken.None);
+            return (long)connection.RetrieveStatistics()["ServerRoundtrips"]!;
+        }
+
+        var without = await RoundTripsAsync(null);
+        var with = await RoundTripsAsync(new HashSet<int> { source.MonthColumnDefIds[2], source.MonthColumnDefIds[4] });
+
+        Assert.Equal(without, with);
+    }
+
     /// <summary>Злиття в черзі: обидві з місяцями — об'єднання; хоч одна без — місяці знято.</summary>
     [Fact]
     public async Task Злиття_в_черзі_обєднує_місяці_а_постановка_без_місяців_їх_знімає()
