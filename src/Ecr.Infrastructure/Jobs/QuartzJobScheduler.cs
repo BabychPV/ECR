@@ -183,6 +183,15 @@ public sealed partial class QuartzJobScheduler(
             .UsingJobData(JobCodeKey, typeof(TJob).FullName ?? typeof(TJob).Name)
             .UsingJobData(CorrelationKey, correlationId);
 
+        // ✎ M11 (W15z): перерахунки документа стартують у порядку постановки (QuartzDocumentFifo, JQ-FIFO).
+        var jobCode = typeof(TJob).FullName ?? typeof(TJob).Name;
+        if (QuartzDocumentFifo.AppliesTo(jobCode) && DocumentIdOf(json) is { } fifoDocument && fifoDocument > 0)
+        {
+            builder = builder
+                .UsingJobData(QuartzDocumentFifo.DocumentKey, fifoDocument)
+                .UsingJobData(QuartzDocumentFifo.SequenceKey, QuartzDocumentFifo.NextSequence());
+        }
+
         // ⚠ Мітка постановки (`ФВ-12.2`). У базі момент постановки Є —
         // `QueueAsync` нижче створює рядок зі станом `Queued`, — але він НЕ
         // ПЕРЕЖИВАЄ старту: `JobProgress.Begin` перезаписує `UpdatedAt`, а
