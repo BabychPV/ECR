@@ -12,7 +12,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Ecr.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(EcrDbContext))]
-    [Migration("20261123091010_B179L7DropSourceBindingConsumer")]
+    [Migration("20261123210000_B179L7DropSourceBindingConsumer")]
     partial class B179L7DropSourceBindingConsumer
     {
         /// <inheritdoc />
@@ -26,6 +26,8 @@ namespace Ecr.Infrastructure.Persistence.Migrations
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
 
             modelBuilder.HasSequence("CalculationResultSeq", "calc");
+
+            modelBuilder.HasSequence("JobProgressEnqueueSeq", "itg");
 
             modelBuilder.HasSequence("RegistryEntryCodeSeq", "dic");
 
@@ -737,6 +739,34 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("UQ_MethodologyOutput");
 
                     b.ToTable("MethodologyOutput", "calc");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Calculations.MethodologyReadField", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("FieldCode")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<int>("MethodologyVersionId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("OtherMonths")
+                        .HasColumnType("bit");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MethodologyVersionId", "FieldCode")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_MethodologyReadField");
+
+                    b.ToTable("MethodologyReadField", "calc");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Calculations.MethodologyReadTable", b =>
@@ -5876,6 +5906,11 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.Property<long?>("DocumentId")
                         .HasColumnType("bigint");
 
+                    b.Property<long?>("EnqueueSeq")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValueSql("NEXT VALUE FOR itg.JobProgressEnqueueSeq");
+
                     b.Property<string>("Error")
                         .HasMaxLength(2000)
                         .HasColumnType("nvarchar(2000)")
@@ -5948,10 +5983,10 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.HasIndex("State", "HeartbeatAt")
                         .HasDatabaseName("IX_JobProgress_Stale");
 
-                    b.HasIndex(new[] { "Lane", "State", "AvailableAt" }, "IX_JobProgress_Claim")
+                    b.HasIndex(new[] { "Lane", "State", "AvailableAt", "EnqueueSeq" }, "IX_JobProgress_Claim")
                         .HasFilter("[Lane] IS NOT NULL AND [State] IN ('Queued', 'Running')");
 
-                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex(new[] { "Lane", "State", "AvailableAt" }, "IX_JobProgress_Claim"), new[] { "TargetKey", "LeaseUntil", "Attempt", "ReclaimCount" });
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex(new[] { "Lane", "State", "AvailableAt", "EnqueueSeq" }, "IX_JobProgress_Claim"), new[] { "TargetKey", "LeaseUntil", "Attempt", "ReclaimCount" });
 
                     b.HasIndex(new[] { "CreatedByUserId", "UpdatedAt" }, "IX_JobProgress_CreatedBy_UpdatedAt")
                         .IsDescending(false, true);
@@ -5974,7 +6009,7 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.HasIndex(new[] { "Lane", "State", "CreatedByUserId" }, "IX_JobProgress_User_Active")
                         .HasFilter("[Lane] IS NOT NULL AND [State] IN ('Queued', 'Running')");
 
-                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex(new[] { "Lane", "State", "CreatedByUserId" }, "IX_JobProgress_User_Active"), new[] { "AvailableAt", "FanOutParentJobId" });
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex(new[] { "Lane", "State", "CreatedByUserId" }, "IX_JobProgress_User_Active"), new[] { "AvailableAt", "FanOutParentJobId", "EnqueueSeq" });
 
                     b.HasIndex(new[] { "TargetKey" }, "UX_JobProgress_Target_Queued")
                         .IsUnique()
@@ -7507,6 +7542,16 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("FK_MO_Unit");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Calculations.MethodologyReadField", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Calculations.MethodologyVersion", null)
+                        .WithMany()
+                        .HasForeignKey("MethodologyVersionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_MRF_Version");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Calculations.MethodologyReadTable", b =>
