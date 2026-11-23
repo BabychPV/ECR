@@ -161,13 +161,16 @@ public sealed class SourceCascadePerfTests(SqlServerFixture sql, ITestOutputHelp
 
         Assert.Equal(Consumers * periodsPerConsumer, keys.Count);
         Assert.Equal(Math.Min(DrainLimit, Consumers * periodsPerConsumer), steps);
-        // Quartz (поперіодно, як до D-566; лише розробка й малі інсталяції, D-563): 4 звернення на період споживача.
-        Assert.All(parentCommands, c => Assert.True(c <= QuartzParentCeiling(edge), $"parent round trips {c} > {QuartzParentCeiling(edge)}"));
+        // Quartz (поперіодно, як до D-566; live — InProcess): постановка пакетна, як у черзі в базі.
+        Assert.All(parentCommands, c => Assert.True(c <= QuartzParentCeiling, $"parent round trips {c} > {QuartzParentCeiling}"));
         Assert.True(drainCommands <= steps * 36, $"drain round trips {drainCommands} > {steps * 36}");
     }
 
-    /// <summary>Стеля звернень батьківської задачі Quartz на одну правку (виміряне 812 / 9612 + запас).</summary>
-    private static int QuartzParentCeiling(string edge) => edge == "month" ? 1_000 : 12_000;
+    /// <summary>
+    /// Стеля звернень батьківської задачі Quartz на одну правку: ✎ PERF-06b — пакетна постановка й на Quartz (live InProcess),
+    /// незалежно від ребра (до пакетування за «рік» було 9612).
+    /// </summary>
+    private const int QuartzParentCeiling = 1_000;
 
     private Func<Host, IBackgroundJobScheduler> DbScheduler => host => Scheduler(host);
 

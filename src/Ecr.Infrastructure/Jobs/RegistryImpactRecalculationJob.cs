@@ -95,7 +95,9 @@ public sealed partial class RegistryImpactRecalculationJob(
         // ✎ PERF-06 (D-566, рішення людини 22.11): каскад від правки документа-джерела — ОДНА задача на документ-споживач і рік
         // з періодами, які читають змінений місяць (обсяг ребра графа вище); правки за вікно каскаду зливаються об'єднанням
         // періодів, ланцюжок, що вже йде, дописує нові. Перекриття адміністратора (затверджені) — поперіодно, як доти.
-        var cascade = request.IsSourceDocumentChange && !request.IncludeApproved && trigger.CoalescesCascadePeriods;
+        // ✎ PERF-06b (D-572): і на черзі без об'єднання (Quartz, live InProcess) — через ту саму постановку на документ і рік:
+        // вона ставить поперіодно (payload першої, як до D-566), але читання документа — пакетом на всі його періоди.
+        var cascade = request.IsSourceDocumentChange && !request.IncludeApproved;
         if (cascade)
         {
             foreach (var group in targets.GroupBy(t => (t.DocumentId, Year: t.PeriodKey / 100)).OrderBy(g => g.Key))
