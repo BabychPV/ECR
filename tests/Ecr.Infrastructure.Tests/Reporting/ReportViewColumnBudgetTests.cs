@@ -44,9 +44,8 @@ public sealed class ReportViewColumnBudgetTests(SqlServerFixture sql, ITestOutpu
         await using var db = GeneratorContext(SetupTimeoutSeconds);
         foreach (var tableId in _wideTables)
         {
-            // Порціями по 200: тригер cfg.ColumnDef звіряє inserted/deleted без індексу - одне UPDATE на 2200 рядків ішло > 120 с.
             await db.Database.ExecuteSqlInterpolatedAsync(
-                $"WHILE 1 = 1 BEGIN UPDATE TOP (200) cfg.ColumnDef SET IsDeleted = 1, DeletedAt = SYSUTCDATETIME() WHERE TableDefId = {tableId} AND IsDeleted = 0; IF @@ROWCOUNT = 0 BREAK; END");
+                $"UPDATE cfg.ColumnDef SET IsDeleted = 1, DeletedAt = SYSUTCDATETIME() WHERE TableDefId = {tableId} AND IsDeleted = 0");
         }
     }
 
@@ -62,7 +61,7 @@ public sealed class ReportViewColumnBudgetTests(SqlServerFixture sql, ITestOutpu
     /// </remarks>
     private const int WideGenerationTimeoutSeconds = 30;
 
-    /// <summary>Стеля підготовки й прибирання (тисячі рядків cfg.ColumnDef із тригерами) - не предмет тесту, секунди.</summary>
+    /// <summary>Стеля підготовки й прибирання (тисячі рядків cfg.ColumnDef через EF) - не предмет тесту, секунди.</summary>
     private const int SetupTimeoutSeconds = 120;
 
     /// <summary>Стеля команди тесту лінійності (до 2200 колонок, удвічі більше за 1035): 3x стелі широкої таблиці.</summary>
@@ -289,6 +288,7 @@ public sealed class ReportViewColumnBudgetTests(SqlServerFixture sql, ITestOutpu
         // більший: запас 2 с поверх 3x (23.11 під 100 % CPU інших сесій: 480 мс проти 1904 мс).
         Assert.True(v2 < 3 * v1 + TimeSpan.FromSeconds(2), $"версійна: 800 колонок {v2.TotalMilliseconds:F0} мс проти 400 - {v1.TotalMilliseconds:F0} мс (> 3x + 2 с)");
         Assert.NotEmpty(await ColumnsAsync(version2.WideView));          // версійна вʼюха на 800 колонок створена
+        Assert.NotEmpty(await ColumnsAsync(version2.WideView + "_m"));   // ✎ D-573: і «місяць - рядок» поряд (входить у вимір v1/v2)
     }
 
     private async Task<TimeSpan> MinTimeAsync(Func<ReportViewGenerator, Task> run)

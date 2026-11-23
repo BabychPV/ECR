@@ -862,7 +862,7 @@ public sealed partial class ReportViewStableRenameScopeTests(ITestOutputHelper o
         await using (var connection = await OpenAsync())
         await using (var command = connection.CreateCommand())
         {
-            command.CommandText = "SELECT OBJECT_DEFINITION(v.object_id) FROM sys.views AS v WHERE v.schema_id = SCHEMA_ID(N'rpt') AND v.name LIKE @p";
+            command.CommandText = "SELECT OBJECT_DEFINITION(v.object_id) FROM sys.views AS v WHERE v.schema_id = SCHEMA_ID(N'rpt') AND v.name LIKE @p AND v.name NOT LIKE N'%[_]m'";
             command.Parameters.AddWithValue("@p", $"v[_]{code}[_]%");
             await using var reader = await command.ExecuteReaderAsync();
             while (await reader.ReadAsync())
