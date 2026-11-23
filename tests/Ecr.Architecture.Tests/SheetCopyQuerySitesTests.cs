@@ -54,6 +54,8 @@ public sealed partial class SheetCopyQuerySitesTests
         // ── лише оригінал (Q5: інтеграція, збір, події джерел, дозволи) ──
         ["src/Ecr.Infrastructure/Integration/IntegrationCellPatcher.cs"] = "запис у екземпляр копії відхиляється",
         ["src/Ecr.Infrastructure/Jobs/MaterializationScheduler.cs"] = "OriginalOnly",
+        ["src/Ecr.Infrastructure/Jobs/PeriodStateJob.cs"] =
+            "P-1123-18: лише факт ЗАТВЕРДЖЕНОГО стану в періоді — оригінал чи будь-яка копія однаково знімає період із прибирання",
         ["src/Ecr.Infrastructure/Jobs/OpenedPeriodRecalculation.cs"] =
             "D-575: лише DISTINCT DocumentId екземплярів відкритого періоду — перерахунок документа сам рахує оригінал і кожну копію",
         ["src/Ecr.Infrastructure/Persistence/TemplateVersionDiscardStore.cs"] =
