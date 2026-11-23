@@ -346,7 +346,7 @@ public sealed class PublishViewsInBackgroundTests(SqlServerFixture sql, ITestOut
         await using var connection = new SqlConnection(sql.ConnectionString);
         await connection.OpenAsync();
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT name FROM sys.views WHERE schema_id = SCHEMA_ID(N'rpt') AND name LIKE @p";
+        command.CommandText = "SELECT name FROM sys.views WHERE schema_id = SCHEMA_ID(N'rpt') AND name LIKE @p AND name NOT LIKE N'%[_]m'";
         command.Parameters.AddWithValue("@p", $"v[_]{templateCode}[_]%[_]v[0-9]%");
         await using var reader = await command.ExecuteReaderAsync();
         while (await reader.ReadAsync())
