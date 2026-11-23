@@ -133,10 +133,19 @@ public sealed class CalculationTrigger(
     /// (затверджені якраз і перераховуються); стан періоду й архів перевіряються як завжди. Ціль черги — своя
     /// (<see cref="DependentsApprovedTargetOf"/>): задача з перекриттям не зливається з задачею без нього і навпаки.
     /// </remarks>
-    public async Task<string?> RequestDependentsAsync(
+    public Task<string?> RequestDependentsAsync(
         long documentId, PeriodKey periodKey, int sourceHop, ApprovedRecalculationOverride? approvedOverride, CancellationToken ct)
+        => RequestDependentsCoreAsync(documentId, periodKey, sourceHop, approvedOverride, document: null, ct);
+
+    /// <summary>
+    /// Тіло <see cref="RequestDependentsAsync(long, PeriodKey, int, ApprovedRecalculationOverride?, CancellationToken)"/>; ✎ PERF-06b
+    /// (<c>D-572</c>): <paramref name="document"/> — пакетні читання документа на кілька періодів (каскад на черзі без об'єднання).
+    /// </summary>
+    private async Task<string?> RequestDependentsCoreAsync(
+        long documentId, PeriodKey periodKey, int sourceHop, ApprovedRecalculationOverride? approvedOverride,
+        DocumentWritability? document, CancellationToken ct)
     {
-        if (!await WritableAsync(documentId, periodKey, ct, ignoreAllApproved: approvedOverride is not null).ConfigureAwait(false))
+        if (!await WritableAsync(documentId, periodKey, ct, ignoreAllApproved: approvedOverride is not null, document: document).ConfigureAwait(false))
         {
             return null;
         }
@@ -152,8 +161,11 @@ public sealed class CalculationTrigger(
         // RegistryImpactRecalculationJob) транзакції не відкриває — це запобіжник на майбутнє, а не робочий шлях.
         // ✎ Задача з перекриттям, що вже СТАРТУВАЛА (лок документа взято), сама скасовує звичайну, яка встигла стати в
         // чергу, поки вона чекала лок (`RecalculationJob`): входи вона читає вже після того.
+        var approvedTarget = DependentsApprovedTargetOf(documentId, periodKey);
         if (approvedOverride is null
-            && await jobs.FindQueuedAsync<IRecalculationJob>(DependentsApprovedTargetOf(documentId, periodKey), ct).ConfigureAwait(false)
+            && (document?.Covered is { } covered
+                ? covered.GetValueOrDefault(approvedTarget)
+                : await jobs.FindQueuedAsync<IRecalculationJob>(approvedTarget, ct).ConfigureAwait(false))
                 is { Length: > 0 } coveringJobId)
         {
             return coveringJobId;
@@ -211,11 +223,14 @@ public sealed class CalculationTrigger(
         ArgumentNullException.ThrowIfNull(periodKeys);
         if (!CoalescesCascadePeriods)
         {
+            // ✎ PERF-06b (D-572): і поперіодно (Quartz, live InProcess) — читання документа пакетом на всі його періоди.
             string? last = null;
             var each = new List<int>();
-            foreach (var period in periodKeys.Distinct().Order())
+            var perPeriod = periodKeys.Distinct().Order().ToList();
+            var prefetched = await PrefetchAsync(documentId, perPeriod, ct).ConfigureAwait(false);
+            foreach (var period in perPeriod)
             {
-                if (await RequestDependentsAsync(documentId, new PeriodKey(period), sourceHop, ct).ConfigureAwait(false) is { } id)
+                if (await RequestDependentsCoreAsync(documentId, new PeriodKey(period), sourceHop, null, prefetched, ct).ConfigureAwait(false) is { } id)
                 {
                     last = id;
                     each.Add(period);
