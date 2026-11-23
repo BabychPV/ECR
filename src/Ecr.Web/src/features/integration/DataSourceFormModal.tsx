@@ -18,6 +18,78 @@ import { DataSourcesQueryKey } from './dataSourcesKey';
 /** Транспорти, які знає сервер (`ExternalTransport`). */
 const Transports: readonly SaveDataSourceBody['transport'][] = ['PiWebApi', 'PiSqlClient', 'Sql'];
 
+type Transport = SaveDataSourceBody['transport'];
+
+/**
+ * Підказки полів за транспортом: що саме вводити. Ключі — літерали (а не склеєні), щоб сторож ключів
+ * каталогу їх бачив. Зміст звірено з сервером: `DataSourceHandlers.ValidateAsync`, `DataSourceEndpointPolicy`,
+ * `SqlDataSource` (рядок SqlClient, `Catalog` перекриває `Initial Catalog`), `PiWebApiDataSource`
+ * (`assetdatabases/{Catalog}/elements`), `PiSqlClientDataSource` (рядок ODBC; `Catalog` не читає),
+ * `EndpointFailover` (запасна адреса — лише PiWebApi і PiSqlClient).
+ */
+/** Літерали в умовному виразі, а не склеєний ключ: сторож ключів каталогу бачить кожен. */
+function transportHint(transport: Transport): string {
+  return t(
+    transport === 'PiSqlClient'
+      ? 'sources.transportHint.PiSqlClient'
+      : transport === 'PiWebApi'
+        ? 'sources.transportHint.PiWebApi'
+        : 'sources.transportHint.Sql',
+  );
+}
+
+function endpointHint(transport: Transport): string {
+  return t(
+    transport === 'PiSqlClient'
+      ? 'sources.endpointHint.PiSqlClient'
+      : transport === 'PiWebApi'
+        ? 'sources.endpointHint.PiWebApi'
+        : 'sources.endpointHint.Sql',
+  );
+}
+
+function secondaryEndpointHint(transport: Transport): string {
+  return t(
+    transport === 'PiSqlClient'
+      ? 'sources.secondaryEndpointHint.PiSqlClient'
+      : transport === 'PiWebApi'
+        ? 'sources.secondaryEndpointHint.PiWebApi'
+        : 'sources.secondaryEndpointHint.Sql',
+  );
+}
+
+function catalogHint(transport: Transport): string {
+  return t(
+    transport === 'PiSqlClient'
+      ? 'sources.catalogHint.PiSqlClient'
+      : transport === 'PiWebApi'
+        ? 'sources.catalogHint.PiWebApi'
+        : 'sources.catalogHint.Sql',
+  );
+}
+/**
+ * Приклади-заповнювачі — технічні значення, не переклад, тому не в каталозі. Лише нейтральні хости
+ * (`*.example.local`), без імен користувачів і паролів; для рядків з'єднання — лише вбудована
+ * автентифікація Windows. `undefined` — прикладу немає (поле для транспорту не використовується).
+ */
+const EndpointExample: Readonly<Record<Transport, string>> = {
+  PiSqlClient: 'Driver={PI SQL Client};AF Server=pi.example.local;AF Database=ECR;Integrated Security=SSPI',
+  PiWebApi: 'https://pi.example.local/piwebapi',
+  Sql: 'Server=sql01.example.local;Database=Reports;Integrated Security=true',
+};
+
+const SecondaryExample: Readonly<Record<Transport, string | undefined>> = {
+  PiSqlClient: 'Driver={PI SQL Client};AF Server=pi02.example.local;AF Database=ECR;Integrated Security=SSPI',
+  PiWebApi: 'https://pi02.example.local/piwebapi',
+  Sql: undefined,
+};
+
+const CatalogExample: Readonly<Record<Transport, string | undefined>> = {
+  PiSqlClient: undefined,
+  PiWebApi: 'ECR',
+  Sql: 'Reports',
+};
+
 type FailedField =
   | 'code'
   | 'endpoint'
@@ -293,7 +365,8 @@ function DataSourceForm({
         onChange={(event) => set('code', event.currentTarget.value)}
         // ⚠ Код не змінюється: на нього спираються сутності збору.
         disabled={source !== null}
-        description={source === null ? undefined : t('sources.codeFixed')}
+        description={source === null ? t('sources.codeHint') : t('sources.codeFixed')}
+        placeholder={source === null ? 'PI_MAIN' : undefined}
         error={onField?.field === 'code' ? onField.text : undefined}
         required={source === null}
         ff="monospace"
@@ -303,6 +376,8 @@ function DataSourceForm({
 
       <TextInput
         label={t('sources.name')}
+        description={t('sources.nameHint')}
+        placeholder={t('sources.namePlaceholder')}
         value={draft.name}
         onChange={(event) => set('name', event.currentTarget.value)}
         required
@@ -310,6 +385,7 @@ function DataSourceForm({
 
       <Select
         label={t('sources.transport')}
+        description={transportHint(draft.transport)}
         data={Transports.map((value) => ({ value, label: value }))}
         value={draft.transport}
         onChange={(value) => {
@@ -320,6 +396,8 @@ function DataSourceForm({
 
       <TextInput
         label={t('sources.endpoint')}
+        description={endpointHint(draft.transport)}
+        placeholder={EndpointExample[draft.transport]}
         value={draft.endpoint}
         onChange={(event) => set('endpoint', event.currentTarget.value)}
         error={onField?.field === 'endpoint' ? onField.text : undefined}
@@ -332,6 +410,8 @@ function DataSourceForm({
 
       <TextInput
         label={t('sources.secondaryEndpoint')}
+        description={secondaryEndpointHint(draft.transport)}
+        placeholder={SecondaryExample[draft.transport]}
         value={draft.secondaryEndpoint}
         onChange={(event) => set('secondaryEndpoint', event.currentTarget.value)}
         error={onField?.field === 'secondaryEndpoint' ? onField.text : undefined}
@@ -373,6 +453,8 @@ function DataSourceForm({
 
       <TextInput
         label={t('sources.catalog')}
+        description={catalogHint(draft.transport)}
+        placeholder={CatalogExample[draft.transport]}
         value={draft.catalog}
         onChange={(event) => set('catalog', event.currentTarget.value)}
         ff="monospace"
@@ -382,6 +464,8 @@ function DataSourceForm({
 
       <NumberInput
         label={t('sources.maxParallel')}
+        description={t('sources.maxParallelHint')}
+        placeholder="4"
         value={draft.maxParallel ?? ''}
         onChange={(value) => set('maxParallel', typeof value === 'number' ? value : null)}
         min={1}
