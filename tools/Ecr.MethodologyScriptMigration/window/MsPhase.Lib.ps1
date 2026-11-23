@@ -260,3 +260,24 @@ function Get-MsBranchCoverage {
     $unc = @(@($rules | Where-Object { $_.rows -eq 0 } | ForEach-Object { "rule $($_.rule)" }) + @($conds | Where-Object { -not $_.covered } | ForEach-Object { "condition $($_.condition)" }))
     return [pscustomobject]@{ Rules = $rules; Conditions = $conds; Uncovered = $unc }
 }
+
+function Merge-MsGoldenPlan {
+    <#
+    .SYNOPSIS
+        Золоті версії шляху API (без -CopyAsUser): пропозиції ECR/синтетичні + позичені правила, ОДИН запис на версію.
+        Повертає записи @{ VersionId = [int]; P = <пропозиція або $null>; R = @(<правила>) } у порядку першої появи.
+    #>
+    param([object[]]$Proposals = @(), [object[]]$Borrowed = @())
+    # ⛔ Ключ — РЯДОК: [ordered]@{} (OrderedDictionary) з ключем [int] бере ПОЗИЦІЙНИЙ індексатор — запис кидає
+    #   «out of the range … index», читання мовчки дає $null (репетиція b11 8e58d19b8, шлях API).
+    $byVid = [ordered]@{}
+    foreach ($x in @($Proposals)) { $byVid["$([int]$x.versionId)"] = @{ VersionId = [int]$x.versionId; P = $x; R = @() } }
+    foreach ($x in @($Borrowed)) {
+        if (@($x.rules).Count -gt 0) {
+            $k = "$([int]$x.versionId)"
+            if (-not $byVid.Contains($k)) { $byVid[$k] = @{ VersionId = [int]$x.versionId; P = $null; R = @() } }
+            $byVid[$k].R = @($x.rules)
+        }
+    }
+    return @($byVid.Values)
+}
