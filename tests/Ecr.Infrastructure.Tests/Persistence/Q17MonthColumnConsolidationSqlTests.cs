@@ -780,11 +780,29 @@ public sealed class Q17MonthColumnConsolidationSqlTests(SqlServerFixture sql)
             psi.ArgumentList.Add(a);
         }
 
-        using var process = Process.Start(psi)!;
-        var stdout = process.StandardOutput.ReadToEndAsync();
-        var stderr = process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
-        return (process.ExitCode, await stdout + await stderr);
+        // Linux: власний кеш PowerShell на запуск - спільний ~/.cache/powershell/StartupProfileData-NonInteractive,
+        // переписаний паралельними pwsh, валить SIGSEGV (139) кожен наступний pwsh у job (✎ 2026-11-23).
+        var cache = OperatingSystem.IsWindows() ? null : Directory.CreateTempSubdirectory("ecr-pwsh-cache-").FullName;
+        if (cache is not null)
+        {
+            psi.Environment["XDG_CACHE_HOME"] = cache;
+        }
+
+        try
+        {
+            using var process = Process.Start(psi)!;
+            var stdout = process.StandardOutput.ReadToEndAsync();
+            var stderr = process.StandardError.ReadToEndAsync();
+            await process.WaitForExitAsync();
+            return (process.ExitCode, await stdout + await stderr);
+        }
+        finally
+        {
+            if (cache is not null)
+            {
+                Directory.Delete(cache, recursive: true);
+            }
+        }
     }
 
     private static LocalizedText Name(string value) => new(new Dictionary<string, string> { ["en"] = value });

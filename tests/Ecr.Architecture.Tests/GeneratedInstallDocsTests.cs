@@ -64,7 +64,9 @@ public sealed class GeneratedInstallDocsTests
     private static (int ExitCode, string Output) RunPowerShell(string root, string script)
     {
         Win32Exception? last = null;
-        foreach (var shell in new[] { "pwsh", "powershell" })
+        // Linux: через обгортку DeployScriptHarness - власний кеш PowerShell на запуск (причина 139, ✎ 2026-11-23).
+        var shells = OperatingSystem.IsLinux() ? new[] { DeployScriptHarness.FindPowerShell() } : new[] { "pwsh", "powershell" };
+        foreach (var shell in shells)
         {
             var info = new ProcessStartInfo(shell)
             {
