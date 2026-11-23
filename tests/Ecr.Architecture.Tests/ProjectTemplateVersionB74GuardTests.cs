@@ -76,8 +76,9 @@ public sealed partial class ProjectTemplateVersionB74GuardTests
         ["src/Ecr.Infrastructure/Persistence/ProjectStore.cs"] = 1,                    // P2: картка видалення проєкту
         ["src/Ecr.Infrastructure/Persistence/TemplateVersionDiscardStore.cs"] = 1,     // P2: «чи вживається версія»
         ["src/Ecr.Infrastructure/Persistence/DocumentVersionMigrationStore.cs"] = 3,   // P3 (D-576): PairSql (основний шаблон / резерв пари), FinishSql (резерв старої версії основного + UPDATE лише основного)
-        // P2/P5: ремонт сегментів за версією проєкту (11); P6: ремонт подвійного запису B74:project-templates (3).
-        ["src/Ecr.Infrastructure/Persistence/Sql/seed/99-epilogue.sql"] = 14,
+        // P2/P5: ремонт сегментів — запасна версія проєкту, коли пари немає (9; ✎ B74 P3: порівняння вже з версією пари);
+        // P6: ремонт подвійного запису B74:project-templates (3).
+        ["src/Ecr.Infrastructure/Persistence/Sql/seed/99-epilogue.sql"] = 12,
     };
 
     [Fact]

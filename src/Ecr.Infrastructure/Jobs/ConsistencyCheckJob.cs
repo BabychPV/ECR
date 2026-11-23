@@ -620,7 +620,11 @@ public sealed class ConsistencyCheckJob(
         var liveVersions = db.Projects
             .AsNoTracking()
             .Where(p => p.Status != ProjectStatus.Archived)
-            .Select(p => p.TemplateVersionId);
+            .Select(p => p.TemplateVersionId)
+            // ✎ B74 P3 (D-576): і чинні версії ПРИЄДНАНИХ шаблонів живих проєктів (doc.ProjectTemplate).
+            .Concat(db.ProjectTemplates.AsNoTracking()
+                .Where(pt => db.Projects.Any(p => p.Id == pt.ProjectId && p.Status != ProjectStatus.Archived))
+                .Select(pt => pt.CurrentTemplateVersionId));
 
         var query =
             from column in db.ColumnDefs.AsNoTracking()

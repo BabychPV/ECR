@@ -169,6 +169,24 @@ public sealed class ResourceNameResolver(EcrDbContext db) : IResourceNameResolve
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
+        // ✎ B74 P3 (D-576): і аркуші ПРИЄДНАНИХ шаблонів проєкту (doc.ProjectTemplate) — їм теж видають гранти.
+        var listed = await projects
+            .OrderBy(p => p.Code)
+            .Take(MaxProjects)
+            .Select(p => p.Id)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        var attached = await db.ProjectTemplates.AsNoTracking()
+            .Where(pt => listed.Contains(pt.ProjectId))
+            .Join(
+                db.SheetDefs.AsNoTracking().Where(s => !s.IsDeleted),
+                pt => pt.CurrentTemplateVersionId,
+                s => s.TemplateVersionId,
+                (pt, s) => new { pt.ProjectId, s.Code, s.NameL10n, s.Ordinal })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        rows.AddRange(attached.Where(a => !rows.Exists(r => r.ProjectId == a.ProjectId && r.Code == a.Code)));
+
         return rows
             .OrderBy(r => r.ProjectId)
             .ThenBy(r => r.Ordinal)

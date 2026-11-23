@@ -1,4 +1,4 @@
-﻿using Ecr.Application.Errors;
+using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Recalculation;
 using Ecr.Application.Security;
@@ -937,7 +937,8 @@ public sealed class AccessDecisionService(
         var scope = await db.Documents
             .AsNoTracking()
             .Where(d => d.Id == documentId)
-            .Join(db.Projects, d => d.ProjectId, p => p.Id, (d, p) => new { d.ProjectId, p.TemplateVersionId })
+            // ✎ B74 P3 (D-576): версія ПАРИ проєкт × шаблон документа; без пари — версія проєкту, як доти.
+            .Join(db.Projects, d => d.ProjectId, p => p.Id, (d, p) => new { d.ProjectId, TemplateVersionId = db.ProjectTemplates.Where(pt => pt.ProjectId == d.ProjectId && pt.TemplateId == d.TemplateId).Select(pt => (int?)pt.CurrentTemplateVersionId).FirstOrDefault() ?? p.TemplateVersionId })
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 
@@ -1031,11 +1032,14 @@ public sealed class AccessDecisionService(
         var scope = await db.Documents
             .AsNoTracking()
             .Where(d => d.Id == documentId)
+            // ✎ B74 P3 (D-576): версія ПАРИ проєкт × шаблон документа і шкала лише цього шаблону; без пари — як доти.
             .Join(db.Projects, d => d.ProjectId, p => p.Id, (d, p) => new
             {
                 d.ProjectId,
-                p.TemplateVersionId,
-                Multi = db.ProjectTemplateVersions.Any(t => t.ProjectId == p.Id && t.TemplateVersionId != p.TemplateVersionId),
+                TemplateVersionId = db.ProjectTemplates.Where(pt => pt.ProjectId == d.ProjectId && pt.TemplateId == d.TemplateId).Select(pt => (int?)pt.CurrentTemplateVersionId).FirstOrDefault() ?? p.TemplateVersionId,
+                Multi = db.ProjectTemplateVersions.Any(t => t.ProjectId == p.Id
+                    && (d.TemplateId == null || t.TemplateId == d.TemplateId)
+                    && t.TemplateVersionId != (db.ProjectTemplates.Where(pt => pt.ProjectId == d.ProjectId && pt.TemplateId == d.TemplateId).Select(pt => (int?)pt.CurrentTemplateVersionId).FirstOrDefault() ?? p.TemplateVersionId)),
             })
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false)
@@ -1077,6 +1081,8 @@ public sealed class AccessDecisionService(
         var others = await db.ProjectTemplateVersions
             .AsNoTracking()
             .Where(t => t.ProjectId == projectId && t.TemplateVersionId != currentVersionId)
+            // ✎ B74 P3 (D-576): лише шкала шаблону цієї версії — версії інших шаблонів проєкту до знімка документа не належать.
+            .Where(t => t.TemplateId == db.TemplateVersions.Where(v => v.Id == currentVersionId).Select(v => v.TemplateId).FirstOrDefault())
             .Select(t => t.TemplateVersionId)
             .Distinct()
             .OrderBy(v => v)
@@ -1120,7 +1126,16 @@ public sealed class AccessDecisionService(
         var rows = await db.Documents
             .AsNoTracking()
             .Where(d => ids.Contains(d.Id))
-            .Join(db.Projects, d => d.ProjectId, p => p.Id, (d, p) => new { d.Id, d.ProjectId, p.TemplateVersionId, Multi = db.ProjectTemplateVersions.Any(t => t.ProjectId == p.Id && t.TemplateVersionId != p.TemplateVersionId) })
+            // ✎ B74 P3 (D-576): версія ПАРИ проєкт × шаблон документа і шкала лише цього шаблону; без пари — як доти.
+            .Join(db.Projects, d => d.ProjectId, p => p.Id, (d, p) => new
+            {
+                d.Id,
+                d.ProjectId,
+                TemplateVersionId = db.ProjectTemplates.Where(pt => pt.ProjectId == d.ProjectId && pt.TemplateId == d.TemplateId).Select(pt => (int?)pt.CurrentTemplateVersionId).FirstOrDefault() ?? p.TemplateVersionId,
+                Multi = db.ProjectTemplateVersions.Any(t => t.ProjectId == p.Id
+                    && (d.TemplateId == null || t.TemplateId == d.TemplateId)
+                    && t.TemplateVersionId != (db.ProjectTemplates.Where(pt => pt.ProjectId == d.ProjectId && pt.TemplateId == d.TemplateId).Select(pt => (int?)pt.CurrentTemplateVersionId).FirstOrDefault() ?? p.TemplateVersionId)),
+            })
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
@@ -4131,11 +4146,14 @@ public sealed class AccessDecisionService(
         var scope = await db.Documents
             .AsNoTracking()
             .Where(d => d.Id == documentId)
+            // ✎ B74 P3 (D-576): версія ПАРИ проєкт × шаблон документа і шкала лише цього шаблону; без пари — як доти.
             .Join(db.Projects, d => d.ProjectId, p => p.Id, (d, p) => new
             {
                 d.ProjectId,
-                p.TemplateVersionId,
-                Multi = db.ProjectTemplateVersions.Any(t => t.ProjectId == p.Id && t.TemplateVersionId != p.TemplateVersionId),
+                TemplateVersionId = db.ProjectTemplates.Where(pt => pt.ProjectId == d.ProjectId && pt.TemplateId == d.TemplateId).Select(pt => (int?)pt.CurrentTemplateVersionId).FirstOrDefault() ?? p.TemplateVersionId,
+                Multi = db.ProjectTemplateVersions.Any(t => t.ProjectId == p.Id
+                    && (d.TemplateId == null || t.TemplateId == d.TemplateId)
+                    && t.TemplateVersionId != (db.ProjectTemplates.Where(pt => pt.ProjectId == d.ProjectId && pt.TemplateId == d.TemplateId).Select(pt => (int?)pt.CurrentTemplateVersionId).FirstOrDefault() ?? p.TemplateVersionId)),
             })
             .FirstAsync(ct)
             .ConfigureAwait(false);

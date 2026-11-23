@@ -35,6 +35,10 @@ public sealed class MetadataWarmup(EcrDbContext db, IMetadataCache cache)
             // на старті. Стану `Closed` на рівні проєкту більше немає (`D-123`).
             .Where(p => p.Status != Domain.Enums.ProjectStatus.Archived)
             .Select(p => p.TemplateVersionId)
+            // ✎ B74 P3 (D-576): і чинні версії ПРИЄДНАНИХ шаблонів (doc.ProjectTemplate) — документи другого шаблону.
+            .Concat(db.ProjectTemplates.AsNoTracking()
+                .Where(pt => db.Projects.Any(p => p.Id == pt.ProjectId && p.Status != Domain.Enums.ProjectStatus.Archived))
+                .Select(pt => pt.CurrentTemplateVersionId))
             .Distinct()
             // Порядок ПІСЛЯ `Distinct` (інакше SQL його стирає): на стелі
             // прогріваються найновіші версії — на них найімовірніше чекає

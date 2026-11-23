@@ -40,11 +40,20 @@ public sealed class EffectiveAccessStore(EcrDbContext db) : IEffectiveAccessStor
             return null;
         }
 
+        // ✎ B74 P3 (D-576): ресурс належить проєкту, якщо він у версії будь-якого шаблону проєкту (основного або
+        // приєднаного, doc.ProjectTemplate) — аркуші другого шаблону теж мають ланцюг доступу.
+        var versionIds = await db.ProjectTemplates.AsNoTracking()
+            .Where(pt => pt.ProjectId == projectId)
+            .Select(pt => pt.CurrentTemplateVersionId)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        versionIds.Add(versionId);
+
         switch (kind)
         {
             case ResourceKind.Sheet:
                 var sheet = await db.SheetDefs.AsNoTracking()
-                    .Where(s => s.Id == resourceId && s.TemplateVersionId == versionId)
+                    .Where(s => s.Id == resourceId && versionIds.Contains(s.TemplateVersionId))
                     .Select(s => new { s.Id, s.Code })
                     .FirstOrDefaultAsync(ct)
                     .ConfigureAwait(false);
@@ -53,7 +62,7 @@ public sealed class EffectiveAccessStore(EcrDbContext db) : IEffectiveAccessStor
             case ResourceKind.Table:
                 var table = await (from t in db.TableDefs.AsNoTracking()
                                    join s in db.SheetDefs.AsNoTracking() on t.SheetDefId equals s.Id
-                                   where t.Id == resourceId && s.TemplateVersionId == versionId
+                                   where t.Id == resourceId && versionIds.Contains(s.TemplateVersionId)
                                    select new { SheetId = s.Id, s.Code, TableId = t.Id })
                     .FirstOrDefaultAsync(ct)
                     .ConfigureAwait(false);
@@ -63,7 +72,7 @@ public sealed class EffectiveAccessStore(EcrDbContext db) : IEffectiveAccessStor
                 var column = await (from c in db.ColumnDefs.AsNoTracking()
                                     join t in db.TableDefs.AsNoTracking() on c.TableDefId equals t.Id
                                     join s in db.SheetDefs.AsNoTracking() on t.SheetDefId equals s.Id
-                                    where c.Id == resourceId && s.TemplateVersionId == versionId
+                                    where c.Id == resourceId && versionIds.Contains(s.TemplateVersionId)
                                     select new { SheetId = s.Id, s.Code, TableId = t.Id, ColumnId = c.Id })
                     .FirstOrDefaultAsync(ct)
                     .ConfigureAwait(false);

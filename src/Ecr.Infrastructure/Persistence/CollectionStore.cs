@@ -741,7 +741,16 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
             join p in db.Projects.AsNoTracking() on s.TemplateVersionId equals p.TemplateVersionId
             select p.Id;
 
-        return await byInstances.Union(byTemplate).OrderBy(id => id).ToListAsync(ct).ConfigureAwait(false);
+        // ✎ B74 P3 (D-576): і проєкти, куди шаблон колонки ПРИЄДНАНО (doc.ProjectTemplate), а не лише основний.
+        var byAttachedTemplate =
+            from c in db.ColumnDefs.AsNoTracking()
+            where c.Id == columnDefId
+            join td in db.TableDefs.AsNoTracking() on c.TableDefId equals td.Id
+            join s in db.SheetDefs.AsNoTracking() on td.SheetDefId equals s.Id
+            join pt in db.ProjectTemplates.AsNoTracking() on s.TemplateVersionId equals pt.CurrentTemplateVersionId
+            select pt.ProjectId;
+
+        return await byInstances.Union(byTemplate).Union(byAttachedTemplate).OrderBy(id => id).ToListAsync(ct).ConfigureAwait(false);
     }
 
     /// <inheritdoc />

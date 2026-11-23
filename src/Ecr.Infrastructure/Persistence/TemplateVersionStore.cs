@@ -127,7 +127,8 @@ public sealed partial class TemplateVersionStore(EcrDbContext db, IMetadataCache
              .Join(db.Projects.AsNoTracking(),
                    d => d.ProjectId,
                    p => p.Id,
-                   (d, p) => p.TemplateVersionId)
+                   // ✎ B74 P3 (D-576): версія ПАРИ проєкт × шаблон документа; без пари — версія проєкту, як доти.
+                   (d, p) => db.ProjectTemplates.Where(pt => pt.ProjectId == d.ProjectId && pt.TemplateId == d.TemplateId).Select(pt => (int?)pt.CurrentTemplateVersionId).FirstOrDefault() ?? p.TemplateVersionId)
              .AnyAsync(id => id == templateVersionId, ct);
 
     /// <inheritdoc />
@@ -149,7 +150,8 @@ public sealed partial class TemplateVersionStore(EcrDbContext db, IMetadataCache
              .Join(db.Projects.AsNoTracking(),
                    d => d.ProjectId,
                    p => p.Id,
-                   (d, p) => p.TemplateVersionId)
+                   // ✎ B74 P3 (D-576): версія ПАРИ проєкт × шаблон документа; без пари — версія проєкту, як доти.
+                   (d, p) => db.ProjectTemplates.Where(pt => pt.ProjectId == d.ProjectId && pt.TemplateId == d.TemplateId).Select(pt => (int?)pt.CurrentTemplateVersionId).FirstOrDefault() ?? p.TemplateVersionId)
              .CountAsync(id => id == templateVersionId, ct);
 
     /// <inheritdoc />
@@ -1134,7 +1136,8 @@ public sealed partial class TemplateVersionStore(EcrDbContext db, IMetadataCache
                     db.Projects.AsNoTracking(),
                     d => d.ProjectId,
                     p => p.Id,
-                    (d, p) => new { p.Id, p.TemplateVersionId })
+                    // ✎ B74 P3 (D-576): версія ПАРИ проєкт × шаблон документа; без пари — версія проєкту, як доти.
+                    (d, p) => new { p.Id, TemplateVersionId = db.ProjectTemplates.Where(pt => pt.ProjectId == d.ProjectId && pt.TemplateId == d.TemplateId).Select(pt => (int?)pt.CurrentTemplateVersionId).FirstOrDefault() ?? p.TemplateVersionId })
                 .Where(x => visible.Contains(x.Id) && versionIds.Contains(x.TemplateVersionId))
                 .GroupBy(x => x.TemplateVersionId)
                 .Select(g => new { VersionId = g.Key, Count = g.Count() })
@@ -1246,7 +1249,9 @@ public sealed partial class TemplateVersionStore(EcrDbContext db, IMetadataCache
         // заархівував би нічого й ніколи.
         var projects = await db.Projects
             .AsNoTracking()
-            .CountAsync(p => versionIds.Contains(p.TemplateVersionId), ct)
+            // ✎ B74 P3 (D-576): і проєкти, куди шаблон ПРИЄДНАНО (doc.ProjectTemplate), не лише основний.
+            .CountAsync(p => versionIds.Contains(p.TemplateVersionId)
+                             || db.ProjectTemplates.Any(pt => pt.ProjectId == p.Id && versionIds.Contains(pt.CurrentTemplateVersionId)), ct)
             .ConfigureAwait(false);
 
         // Документ прив'язаний до ПРОЄКТУ, а версію шаблону тримає проєкт —
@@ -1256,7 +1261,8 @@ public sealed partial class TemplateVersionStore(EcrDbContext db, IMetadataCache
             .Join(db.Projects.AsNoTracking(),
                   d => d.ProjectId,
                   p => p.Id,
-                  (d, p) => p.TemplateVersionId)
+                  // ✎ B74 P3 (D-576): версія ПАРИ проєкт × шаблон документа; без пари — версія проєкту, як доти.
+                  (d, p) => db.ProjectTemplates.Where(pt => pt.ProjectId == d.ProjectId && pt.TemplateId == d.TemplateId).Select(pt => (int?)pt.CurrentTemplateVersionId).FirstOrDefault() ?? p.TemplateVersionId)
             .CountAsync(versionId => versionIds.Contains(versionId), ct)
             .ConfigureAwait(false);
 

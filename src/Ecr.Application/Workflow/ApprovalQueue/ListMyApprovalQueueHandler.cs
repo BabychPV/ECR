@@ -97,6 +97,7 @@ public sealed class ListMyApprovalQueueHandler(
         var participatedIds = participations.Keys.ToList();
 
         var snapshots = new Dictionary<int, TemplateVersionSnapshot>();
+        var pairVersions = new Dictionary<(int ProjectId, int TemplateId, int PeriodKey), int?>();   // B74 P3
         var scopes = new Dictionary<(int ProjectId, int VersionId), DocumentReadScope>();
         var resolved = new Dictionary<(int ProjectId, int VersionId), ApprovalRoute?>();
 
@@ -133,6 +134,18 @@ public sealed class ListMyApprovalQueueHandler(
                 var versionId = timeline is null || !project.MultiVersion
                     ? project.TemplateVersionId
                     : await timeline.VersionOfAsync(project.ProjectId, row.PeriodKey, ct).ConfigureAwait(false);
+
+                // ✎ B74 P3 (D-576): документ ІНШОГО (не основного) шаблону проєкту — версія його пари за період; маршрут
+                // і знімок — саме цієї версії (B155: маршрут області проєкт × шаблон). Пари немає — як доти.
+                if (row.DocumentTemplateId is { } documentTemplate
+                    && project.PrimaryTemplateId is { } primaryTemplate
+                    && documentTemplate != primaryTemplate
+                    && await ApprovalQueuePairVersions.ResolveAsync(
+                            store, pairVersions, project.ProjectId, documentTemplate, row.PeriodKey, ct)
+                        .ConfigureAwait(false) is { } pairVersion)
+                {
+                    versionId = pairVersion;
+                }
                 if (!snapshots.TryGetValue(versionId, out var snapshot))
                 {
                     snapshot = await metadata.GetAsync(versionId, ct).ConfigureAwait(false);

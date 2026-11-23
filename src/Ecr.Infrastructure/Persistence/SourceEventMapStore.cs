@@ -28,7 +28,13 @@ public sealed class SourceEventMapStore(EcrDbContext db) : ISourceEventMapStore
         => await (from d in db.Documents.AsNoTracking()
                   join p in db.Projects.AsNoTracking() on d.ProjectId equals p.Id
                   where d.Id == documentId
-                  select new EventMapDocumentInfo(d.ProjectId, p.TemplateVersionId))
+                  // ✎ B74 P3 (D-576): версія ПАРИ проєкт × шаблон документа; без пари — версія проєкту, як доти.
+                  select new EventMapDocumentInfo(
+                      d.ProjectId,
+                      db.ProjectTemplates
+                          .Where(pt => pt.ProjectId == d.ProjectId && pt.TemplateId == d.TemplateId)
+                          .Select(pt => (int?)pt.CurrentTemplateVersionId)
+                          .FirstOrDefault() ?? p.TemplateVersionId))
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 
