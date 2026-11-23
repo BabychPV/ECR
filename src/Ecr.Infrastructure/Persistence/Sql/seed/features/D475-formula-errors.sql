@@ -168,3 +168,16 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
 OPTION (RECOMPILE);
 GO
 -- D475:formula-errors ── кінець секції ──
+-- D475:titleBlocked-text ── W15y-T1 (066c6ec95): заголовок панелі не стверджує, що подання заблоковано ──
+-- Змінені тексти наявних ключів: нові бази беруть нове значення з порцій D475:formula-errors вище; епілог оновлює наявні
+-- бази, лише поки там стоїть САМЕ старе значення (правку адміністратора з /admin/ui-strings не затирає).
+INSERT INTO #UiChanged ([Key], Lang, OldVal, NewVal)
+SELECT v.[Key], v.Lang, v.OldVal, v.NewVal
+  FROM (VALUES
+    (N'document.calcIssues.titleBlocked', N'en', N'Calculation for {period} is not finished · submit is blocked', N'Calculation for {period} is not finished · submission may be refused'),
+    (N'document.calcIssues.titleBlocked', N'ru', N'Расчёт за {period} не завершён · подача заблокирована', N'Расчёт за {period} не завершён · в подаче может быть отказано'),
+    (N'document.calcIssues.titleBlocked', N'kz', N'{period} есебі аяқталмады · тапсыру бұғатталған', N'{period} есебі аяқталмады · тапсырудан бас тартылуы мүмкін')
+       ) AS v ([Key], Lang, OldVal, NewVal)
+OPTION (RECOMPILE);
+GO
+-- D475:titleBlocked-text ── кінець секції ──

@@ -20,9 +20,12 @@ public sealed class CalcIssuesTitleWordingTests
     public void Заголовок_панелі_не_стверджує_що_подання_заблоковано(string lang, string forbidden)
     {
         var path = Path.Combine(SolutionRoot(), "src", "Ecr.Infrastructure", "Persistence", "Sql", "seed", "features", "D475-formula-errors.sql");
+        // ✎ W15y-T1: рядок каталогу — три рядкові поля (ключ, мова, текст); рядок «Змінені тексти» (#UiChanged) — чотири
+        // (ключ, мова, старе, нове), і старе там навмисно «заблоковано».
         var line = File.ReadAllLines(path)
             .Single(l => l.Contains("document.calcIssues.titleBlocked", StringComparison.Ordinal)
-                         && l.Contains($"N'{lang}'", StringComparison.Ordinal));
+                         && l.Contains($"N'{lang}'", StringComparison.Ordinal)
+                         && l.Split("N'").Length - 1 == 3);
 
         Assert.DoesNotContain(forbidden, line, StringComparison.Ordinal);
         Assert.Contains("{period}", line, StringComparison.Ordinal);
