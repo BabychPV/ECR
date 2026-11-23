@@ -216,6 +216,10 @@ public static partial class VersionMigrationPlanner
     /// колонка без відповідника за кодом шукає місячні цілі (<see cref="VersionMigrationPlan.MonthColumns"/>).
     /// <c>false</c> — як раніше (лише 1:1).
     /// </param>
+    /// <param name="unitRelabels">
+    /// ✎ P-1123-4: розв'язані заяви перепідписання одиниць (шлях колонки вихідної версії → одиниці); <c>null</c> — немає:
+    /// будь-яка зміна одиниці колонки зі значеннями — Guarded.
+    /// </param>
     public static VersionMigrationPlan Plan(
         TemplateVersionSnapshot source,
         TemplateVersionSnapshot target,
@@ -223,7 +227,8 @@ public static partial class VersionMigrationPlanner
         IReadOnlyDictionary<int, long> headerValues,
         IReadOnlyList<VersionMigrationTableRename>? renames = null,
         VersionMigrationLookupInput? lookup = null,
-        bool monthColumns = false)
+        bool monthColumns = false,
+        IReadOnlyDictionary<string, VersionMigrationResolvedRelabel>? unitRelabels = null)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(target);
@@ -338,7 +343,7 @@ public static partial class VersionMigrationPlanner
                 var columnsBefore = columns.Count;
                 PresentationDiff(items, tablePath, "Name", table.NameL10n, otherTable.NameL10n);
                 CompareTableShape(items, tablePath, table, otherTable, valuesByColumn);
-                CompareColumns(items, columns, conflicts, tablePath, table, otherTable, valuesByColumn, columnRenames, month);
+                CompareColumns(items, columns, conflicts, tablePath, table, otherTable, valuesByColumn, columnRenames, month, unitRelabels);
                 CompareRows(items, rows, newRows, tablePath, table, otherTable, valuesByRow);
                 CompareFormulas(formulaChanges, tablePath, table, otherTable, columns, rows);
                 CompareCellFormulas(items, overwrites, sheet.Code.ToString(), table.Code.ToString(), tablePath, table, otherTable, valuesByCell);
@@ -583,7 +588,8 @@ public static partial class VersionMigrationPlanner
     private static void CompareColumns(
         List<VersionMigrationItem> items, List<VersionMigrationColumn> map, List<string> conflicts, string tablePath,
         TableDef from, TableDef to, IReadOnlyDictionary<int, long> valuesByColumn,
-        IReadOnlyList<VersionMigrationColumnRename>? columnRenames, MonthOutcome? month)
+        IReadOnlyList<VersionMigrationColumnRename>? columnRenames, MonthOutcome? month,
+        IReadOnlyDictionary<string, VersionMigrationResolvedRelabel>? unitRelabels = null)
     {
         var targetColumns = Live(to.Columns).ToDictionary(c => c.Code, StringComparer.Ordinal);
         var sourceColumnCodes = Live(from.Columns).Select(c => c.Code).ToHashSet(StringComparer.Ordinal);
@@ -633,7 +639,20 @@ public static partial class VersionMigrationPlanner
 
             Guarded(items, path, values, nameof(ColumnDef.DataType), column.DataType, other.DataType);
             NumericFormat(items, path, values, column, other);
-            Guarded(items, path, values, nameof(ColumnDef.UnitId), column.UnitId, other.UnitId);
+            // ✎ P-1123-4: заявлене перепідписання одиниці (безрозмірна → підтверджена, без перерахунку) — Safe, лише коли обидві
+            // одиниці збігаються із заявою; будь-яка інша зміна одиниці колонки зі значеннями — Guarded, як і раніше.
+            if (column.UnitId != other.UnitId
+                && unitRelabels is not null && unitRelabels.TryGetValue(path, out var relabel)
+                && column.UnitId == relabel.FromUnitId && other.UnitId == relabel.ToUnitId)
+            {
+                items.Add(new(path, VersionMigrationResolvedRelabel.Kind, ChangeClass.Safe, values, nameof(ColumnDef.UnitId),
+                    relabel.FromUnitCode, relabel.ToUnitCode));
+            }
+            else
+            {
+                Guarded(items, path, values, nameof(ColumnDef.UnitId), column.UnitId, other.UnitId);
+            }
+
             Guarded(items, path, values, nameof(ColumnDef.LookupRegistryDefId), column.LookupRegistryDefId, other.LookupRegistryDefId);
 
             // ⛔ V-6: місце колонки в році визначає період-власник введеного значення (MonthColumnRouter.OwnerOf,

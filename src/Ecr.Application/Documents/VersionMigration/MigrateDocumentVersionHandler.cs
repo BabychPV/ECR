@@ -313,7 +313,11 @@ public sealed class MigrateDocumentVersionHandler(
 
     // ✎ V-5: нові аліаси колонок (cfg.ColumnRename) діють у стабільних вʼюхах SSRS лише після генерації — її ставить
     // фонова задача ReportViewsTask; стан картки `reportviews` («оновлюються», збій постановки). `null` - картки немає.
-    IReportViewStatus? reportViewStatus = null)
+    IReportViewStatus? reportViewStatus = null,
+
+    // ✎ P-1123-4: каталог одиниць - лише для заяв перепідписання одиниць у мапі переносу. `null` (прямий конструктор у
+    // тестах) - заява відхиляється (migrateRenameMapInvalid), без неї нічого не змінюється.
+    IUnitCatalog? units = null)
 {
     private readonly bool _fromMonthEnabled = migrationOptions?.FromMonthEnabled ?? false;
 
@@ -1192,6 +1196,12 @@ public sealed class MigrateDocumentVersionHandler(
                             mappingsRemapped = result.MappingsRemapped,
                             renames = plan.Items.Count(i => i.Kind == "Renamed"),
 
+                            // ✎ P-1123-4: заявлені перепідписання одиниць (без перерахунку): шлях колонки, було → стало, скільки
+                            // значень лишилось як є. ⛔ Без значень — лише адреса в шаблоні й коди одиниць.
+                            unitRelabels = plan.Items.Where(i => i.Kind == VersionMigrationResolvedRelabel.Kind)
+                                .Select(i => new { path = i.Path, from = i.OldValue, to = i.NewValue, values = i.Values })
+                                .ToList(),
+
                             // LP-32: подані/затверджені пари «аркуш × період», перенесені без змін; «зачеплених» при
                             // застосуванні немає (вони були б відмовою), поле лишається для єдиної форми запису.
                             lockedSheetsCarried = result.LockedSheetsCarried,
@@ -1599,8 +1609,9 @@ public sealed class MigrateDocumentVersionHandler(
                              && target.Layout == TemplateLayout.YearWithMonthColumns
                              && (await periods.FindProjectAsync(projectId, ct).ConfigureAwait(false))?.PeriodKind == PeriodKind.Monthly;
 
+        var relabels = await VersionMigrationUnitRelabels.ResolveAsync(renames, from, units, ct).ConfigureAwait(false);
         var plan = VersionMigrationPlanner.Plan(
-            from, to, scope.Cells, scope.HeaderValues, renames, lookup.Input, monthColumns: yearTransition);
+            from, to, scope.Cells, scope.HeaderValues, renames, lookup.Input, monthColumns: yearTransition, unitRelabels: relabels);
         plan = plan with { FromPeriodKey = range.FromPeriodKey, ColumnRenames = RenamePairs(plan, from, to) };
 
         // ✎ LAND-YEAR L3 (B-static): річний перегляд читає немісячний ввід із ЯКОРЯ року, а «копія на місяць» могла тримати

@@ -47273,6 +47273,19 @@ export interface components {
             sheetCode?: null | string;
             /** @description Код таблиці в цільовій версії; рівний FromTableCode — лише перейменування колонок. */
             toTableCode: string;
+            /** @description ✎ P-1123-4: заявлені перепідписання одиниць колонок цієї таблиці (без перерахунку); `null` — немає. */
+            unitRelabels?: null | components["schemas"]["VersionMigrationUnitRelabel"][];
+        };
+        /** @description ✎ P-1123-4: заявлене ПЕРЕПІДПИСАННЯ одиниці колонки без перерахунку значень («було безрозмірне → стало підтверджена
+         *     одиниця»): числа вже в цій одиниці, змінюється лише підпис. Без заяви зміна одиниці колонки зі значеннями лишається
+         *     `guardedWithData`. */
+        VersionMigrationUnitRelabel: {
+            /** @description Код колонки у вихідній версії (у таблиці запису мапи). */
+            columnCode: string;
+            /** @description Одиниця у вихідній версії — лише безрозмірна (розмірність `Dimensionless`). */
+            fromUnitCode: string;
+            /** @description Одиниця в цільовій версії. */
+            toUnitCode: string;
         };
         /** @description Попередження переносу (не відмова): зміст для діалогу — ключ повідомлення і, за потреби, період. */
         VersionMigrationWarning: {
