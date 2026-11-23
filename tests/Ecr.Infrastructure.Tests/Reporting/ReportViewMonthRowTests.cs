@@ -33,6 +33,7 @@ public sealed class ReportViewMonthRowTests(SqlServerFixture sql)
     private sealed record Built(TestDocument Doc, string VersionView, string StableView);
 
     [Fact]
+    [Trait("Requirement", "ФВ-10.13")]
     public async Task Month_row_view_equals_the_wide_view_cell_for_cell_for_version_and_stable_views()
     {
         var b = await BuildAsync();
@@ -91,6 +92,7 @@ public sealed class ReportViewMonthRowTests(SqlServerFixture sql)
     }
 
     [Fact]
+    [Trait("Requirement", "ФВ-10.13")]
     public async Task Startup_adds_a_missing_month_row_view_without_touching_the_wide_view_and_then_skips()
     {
         var b = await BuildAsync();
