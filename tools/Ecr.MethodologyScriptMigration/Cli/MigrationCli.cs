@@ -57,6 +57,8 @@ public static class MigrationCli
           Ecr.MethodologyScriptMigration shadow  --connection <рядок> --in <тека> [--i-know-this-is-a-copy]
           Ecr.MethodologyScriptMigration pack    --connection <рядок> --in <тека> --out <package.json>
           Ecr.MethodologyScriptMigration parity  --connection <рядок> --out <report.json> [--methodology <код>] [--document <id>] [--allow-unproven] [--eligible-out <ids.json>]
+          Ecr.MethodologyScriptMigration parity-cases --connection <рядок> --in <cases.json> --out <report.json> [--eligible-out <f>] [--golden-out <f>]
+          Ecr.MethodologyScriptMigration golden-versions --connection <рядок копії> --in <golden-proposals.json> --as-user <id> [--out <f>]
           Ecr.MethodologyScriptMigration apply   --connection <рядок> --in <package.json> --as-user <id> [--dry-run] [--out <result.json>]
           Ecr.MethodologyScriptMigration switch  --connection <рядок> --in <eligible.json> --engine Script|Formulas --reason <текст> --as-user <id>
 
@@ -94,6 +96,21 @@ public static class MigrationCli
         }
 
         var command = args[0];
+        if (command is "parity-cases" or "golden-versions")
+        {
+            try
+            {
+                return command == "parity-cases"
+                    ? await ReferenceParityCommand.RunAsync(args, output, error, ct).ConfigureAwait(false)
+                    : await GoldenVersionsCommand.RunAsync(args, output, error, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is SqlException or InvalidOperationException or IOException or JsonException)
+            {
+                await error.WriteLineAsync($"Помилка середовища: {ex.Message}").ConfigureAwait(false);
+                return UsageOrEnvironment;
+            }
+        }
+
         if (command is "apply" or "switch")
         {
             try
