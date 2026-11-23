@@ -224,7 +224,10 @@ public sealed class PublishMethodologyHandler(
         ArgumentNullException.ThrowIfNull(methodology);
         ArgumentNullException.ThrowIfNull(version);
 
-        await ApplyEvaluationOrderAsync(methodology, version, version.EffectiveFrom ?? new DateOnly(2000, 1, 1), ct)
+        // ✎ D-571: перебудова для відкату (Script → Formulas) повертає стан, а не публікує: звірка аргументів із колонками
+        // прив'язаних таблиць (0438) залежить від шаблону, який змінюється ПІСЛЯ публікації методології, і на live блокувала
+        // повернення до формул, якими версія рахує досі (C05_01 V2). Решта перевірок — над незмінним вмістом версії.
+        await ApplyEvaluationOrderAsync(methodology, version, version.EffectiveFrom ?? new DateOnly(2000, 1, 1), ct, rebuildOnly: true)
             .ConfigureAwait(false);
     }
 
@@ -311,7 +314,8 @@ public sealed class PublishMethodologyHandler(
         Methodology methodology,
         MethodologyVersion version,
         DateOnly effectiveFrom,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool rebuildOnly = false)
     {
         var methodologyVersionId = version.Id;
         var formulas = await methodologies.GetFormulasAsync(methodologyVersionId, ct).ConfigureAwait(false);
@@ -452,7 +456,7 @@ public sealed class PublishMethodologyHandler(
         // (GCV_<простір>_<таблиця>_<RowKey>), а не з колонок прив'язаної таблиці: звірка з колонками для нього
         // хибна і після першої прив'язки блокувала б публікацію кожної наступної версії (AN-175, 11.11).
         ParsedFormula[] ruleFormulas = categoryRule.Rule is { } rule ? [rule] : [];
-        if (version.Level != CalculationLevel.Module)
+        if (version.Level != CalculationLevel.Module && !rebuildOnly)
         {
             await CheckArgumentColumnsAsync(
                     methodology.Id, [.. parsed, .. LibraryFormulas(libraries)], ruleFormulas, warnings, strings, ct)
@@ -1766,7 +1770,7 @@ public sealed class PublishMethodologyHandler(
             return module;
         }
 
-        return modules?.FirstOrDefault(m => m.CanHandle(descriptor))
+        return GoldenSetModule.ForScript(modules, descriptor)
                ?? throw new BusinessRuleException(
                    "ECR-CALC-0422",
                    $"Версія {descriptor.VersionNumber}: серед модулів розрахунку немає того, що рахує скрипти.",
@@ -1934,4 +1938,25 @@ public sealed record MethodologyResultDelta(
         => $"{TestCode}.{OutputCode}: "
            + $"{Before?.ToString(CultureInfo.InvariantCulture) ?? "—"} → "
            + After.ToString(CultureInfo.InvariantCulture);
+}
+
+/// <summary>
+/// ✎ D-571: модуль, яким золотий набір (публікація, перемикання рушія PSS-23) рахує версію-СКРИПТ. Золотий випадок — плаский
+/// вхід версії (аргументи формул), і формульна версія будь-якого рівня рахується на ньому самим
+/// <c>GenericCalculationModule</c>, без обгортки місячних колонок. Скрипт — так само: модулем скрипта рівня
+/// <c>Configuration</c>, а не <c>MonthColumnArgumentsModule</c> (той чекає місячних колонок документа, тож на золотому
+/// вході HSE400 давав «виходу не було» на кожен вихід, і перемикання Module-версії на Script не проходило ніколи — репетиція
+/// фази W15z на копії live).
+/// </summary>
+public static class GoldenSetModule
+{
+    /// <summary>Модуль скрипта для золотого набору; <c>null</c> — серед модулів його немає.</summary>
+    /// <param name="modules">Зареєстровані модулі.</param>
+    /// <param name="descriptor">Дескриптор версії (<c>Engine = Script</c>, будь-який рівень).</param>
+    public static ICalculationModule? ForScript(IEnumerable<ICalculationModule>? modules, MethodologyDescriptor descriptor)
+    {
+        ArgumentNullException.ThrowIfNull(descriptor);
+        var flat = descriptor with { Level = CalculationLevel.Configuration };
+        return modules?.FirstOrDefault(m => m.CanHandle(flat));
+    }
 }

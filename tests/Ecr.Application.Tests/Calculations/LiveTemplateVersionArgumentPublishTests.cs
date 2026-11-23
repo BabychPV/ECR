@@ -220,6 +220,28 @@ public sealed class LiveTemplateVersionArgumentPublishTests
         _store.FindByVersionAsync(VersionId, Arg.Any<CancellationToken>()).Returns(methodology);
     }
 
+    /// <summary>
+    /// ✎ D-571 (репетиція W15z на копії live): відкат версії зі Script на Formulas перебудовує ребра формул
+    /// (<see cref="IFormulaLinkRebuilder"/>), і раніше ця перебудова ганяла звірку колонок прив'язаних таблиць (0438). Шаблон
+    /// змінюється після публікації методології, тож на live C05_01 V2 відкат відмовляв «немає колонок для аргументів», і
+    /// повернутися до формул, якими версія рахує ДОСІ, було неможливо. Відкат повертає стан, а не публікує: 0438 не блокує.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public async Task D571_перебудова_ребер_для_відкату_не_блокується_аргументом_без_колонки()
+    {
+        LiveIs(LiveTable);
+        Formulas("@X * @Ghost");
+        _store.ResolveImportsAsync(VersionId, Arg.Any<DateOnly>(), Arg.Any<CancellationToken>())
+              .Returns(new List<MethodologyLibrary>());
+        var methodology = (await _store.FindByVersionAsync(VersionId, CancellationToken.None))!;
+
+        var error = await Record.ExceptionAsync(() => new PublishMethodologyHandler(
+                _module, _store, _formulas, _bindings, Units(), _uow, _audit, _access, _user, _clock)
+            .RebuildAsync(methodology, _version, CancellationToken.None));
+
+        Assert.Null(error);
+    }
     private void LiveIs(params int[] live)
         => _bindings.ListLiveTableDefIdsAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
             .Returns(live);
