@@ -110,6 +110,72 @@ public sealed class SubmitApproveCascadePendingHttpTests(SqlServerFixture sql)
         await SetJobAsync(jobId, "Succeeded", queued).ConfigureAwait(true);
     }
 
+    /// <summary>
+    /// ✎ D-567 (4), b10 — рівно репетиція W15z (`f5-natural-w15z.ps1`, live — Quartz/InProcess): каскад від правки джерела ставить
+    /// СПРАВЖНІЙ тригер у СПРАВЖНІЙ Quartz хоста (<c>RequestSourceCascadeAsync</c>, як хук джерела); рядок дзеркала — без
+    /// TargetKey, Lane і payload, <c>JobId = IRecalculationJob~doc{id}-p{період}-dependents~{guid}</c>. Поки він живий, подання
+    /// — 422 <c>sourceCascadePending</c> (на b9 було 204); скасовано — 204. Планувальник у режимі очікування, щоб задача
+    /// лишалась тією, що чекає (як у вікні до старту на живому стенді), — без вставки рядків руками.
+    /// </summary>
+    /// <remarks>Мутація: ціль воріт лише з TargetKey (без JobId рядка Quartz) — червоний крок «422».</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "F5")]
+    [Trait("Decision", "D-567")]
+    public async Task Подання_під_час_каскаду_в_Quartz_хоста_відмовляє_422()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var author = await SignInAsync(app, s.AuthorName).ConfigureAwait(true);
+
+        var scheduler = await Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions
+            .GetRequiredService<Quartz.ISchedulerFactory>(app.Services).GetScheduler().ConfigureAwait(true);
+        await scheduler.Standby().ConfigureAwait(true);
+        try
+        {
+            string jobId;
+            await using (var scope = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.CreateAsyncScope(app.Services))
+            {
+                var trigger = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions
+                    .GetRequiredService<Ecr.Application.Ports.ICalculationTrigger>(scope.ServiceProvider);
+                Assert.False(trigger.CoalescesCascadePeriods);
+                var enqueued = await trigger.RequestSourceCascadeAsync(
+                    s.Document.DocumentId, s.PeriodKey / 100, [s.PeriodKey], 1, CancellationToken.None).ConfigureAwait(true);
+                jobId = enqueued.JobId!;
+            }
+
+            Assert.StartsWith(
+                $"IRecalculationJob~{CalculationTrigger.DependentsTargetOf(s.Document.DocumentId, new PeriodKey(s.PeriodKey))}~",
+                jobId,
+                StringComparison.Ordinal);
+            await using (var db = s.Builder.CreateContext())
+            {
+                var row = await db.JobProgresses.AsNoTracking().SingleAsync(p => p.JobId == jobId).ConfigureAwait(true);
+                Assert.Equal(("Queued", (string?)null, (string?)null, (string?)null), (row.State, row.TargetKey, row.Lane, row.Payload));
+            }
+
+            var refused = await ExpectAsync(app, HttpStatusCode.UnprocessableEntity, WorkflowAsync(author, s, "submit")).ConfigureAwait(true);
+            AssertCascadeRefusal(refused);
+            Assert.Null(await StatusAsync(s).ConfigureAwait(true));
+
+            await using (var scope = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.CreateAsyncScope(app.Services))
+            {
+                await Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions
+                    .GetRequiredService<Ecr.Application.Ports.IBackgroundJobScheduler>(scope.ServiceProvider)
+                    .CancelAsync(jobId, CancellationToken.None).ConfigureAwait(true);
+            }
+
+            await ExpectAsync(app, HttpStatusCode.NoContent, WorkflowAsync(author, s, "submit")).ConfigureAwait(true);
+            Assert.Equal(DocumentStatus.Submitted, await StatusAsync(s).ConfigureAwait(true));
+        }
+        finally
+        {
+            await scheduler.Start().ConfigureAwait(true);
+        }
+    }
+
     private static void AssertCascadeRefusal(string body)
     {
         Assert.Contains("ECR-SUB-4221", body, StringComparison.Ordinal);

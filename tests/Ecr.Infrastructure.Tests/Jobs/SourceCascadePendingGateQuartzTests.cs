@@ -62,6 +62,44 @@ public sealed class SourceCascadePendingGateQuartzTests(SqlServerFixture sql)
         Assert.False(await PendingAsync(w, w.Consumer));
     }
 
+    /// <summary>
+    /// Той самий шлях, що репетиція W15z (`f5-natural-w15z.ps1`): правка джерела → хук → <c>RequestSourceCascadeAsync</c>; у
+    /// Quartz черга періодів не об'єднує, тож рядок дзеркала — <c>IRecalculationJob~doc{id}-p{період}-dependents~{guid}</c>
+    /// без TargetKey. Місяць чекає і поки задача чекає (Queued), і поки виконується (Running — ті самі виклики
+    /// <see cref="JobProgressStore"/>, що робить <c>QuartzJobAdapter</c>); завершена — ні.
+    /// </summary>
+    [Fact]
+    public async Task Каскад_від_правки_джерела_у_Quartz_тримає_місяць_у_Queued_і_Running()
+    {
+        var w = await ArrangeAsync();
+        await using var q = await QuartzAsync();
+        var trigger = Trigger(q.Jobs);
+        Assert.False(trigger.CoalescesCascadePeriods);
+
+        var enqueued = await trigger.RequestSourceCascadeAsync(
+            w.Consumer.DocumentId, w.Year, [w.Consumer.PeriodKey.Value], 1, CancellationToken.None);
+        var jobId = enqueued.JobId!;
+        Assert.Equal([w.Consumer.PeriodKey.Value], enqueued.Periods);
+        Assert.StartsWith(
+            $"{nameof(IRecalculationJob)}~doc{w.Consumer.DocumentId.ToString(CultureInfo.InvariantCulture)}-p{w.Consumer.PeriodKey.Value.ToString(CultureInfo.InvariantCulture)}-dependents~",
+            jobId,
+            StringComparison.Ordinal);
+        Assert.Equal(("Queued", (string?)null, (string?)null), await RowAsync(jobId));
+        Assert.True(await PendingAsync(w, w.Consumer));
+
+        await using (var db = Context())
+        {
+            var store = new JobProgressStore(db);
+            await store.StartAsync(jobId, JobListKinds.RecalculationJobCode, new DateTime(2026, 11, 23, 12, 0, 0, DateTimeKind.Utc), CancellationToken.None);
+            Assert.Equal("Running", (await RowAsync(jobId)).State);
+            Assert.True(await PendingAsync(w, w.Consumer));
+
+            await store.FinishAsync(jobId, "Succeeded", null, new DateTime(2026, 11, 23, 12, 0, 0, DateTimeKind.Utc), CancellationToken.None);
+        }
+
+        Assert.False(await PendingAsync(w, w.Consumer));
+    }
+
     [Fact]
     public async Task Власний_перерахунок_джерела_у_Quartz_тримає_споживача_а_не_споживача_ні()
     {
