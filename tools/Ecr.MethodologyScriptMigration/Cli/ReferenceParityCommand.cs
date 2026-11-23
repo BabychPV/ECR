@@ -34,6 +34,7 @@ public static class ReferenceParityCommand
     {
         ArgumentNullException.ThrowIfNull(args);
         string? connection = null, input = null, outPath = null, eligibleOut = null, goldenOut = null;
+        var goldenAll = false;
         for (var i = 1; i < args.Length; i++)
         {
             switch (args[i])
@@ -43,6 +44,7 @@ public static class ReferenceParityCommand
                 case "--out" when i + 1 < args.Length: outPath = args[++i]; break;
                 case "--eligible-out" when i + 1 < args.Length: eligibleOut = args[++i]; break;
                 case "--golden-out" when i + 1 < args.Length: goldenOut = args[++i]; break;
+                case "--golden-all": goldenAll = true; break;
                 default:
                     await error.WriteLineAsync($"Невідомий або неповний параметр: {args[i]}").ConfigureAwait(false);
                     return MigrationCli.UsageOrEnvironment;
@@ -87,24 +89,39 @@ public static class ReferenceParityCommand
                 .Where(v => v.Id == version.VersionId)
                 .Select(v => new { v.Engine, v.ScriptText })
                 .SingleOrDefaultAsync(ct).ConfigureAwait(false);
-            if (stored is null || stored.Engine != MethodologyEngine.Formulas || string.IsNullOrWhiteSpace(stored.ScriptText))
+            if (stored is null || stored.Engine != MethodologyEngine.Formulas)
             {
                 results.Add(new ReferenceVersionResult(version.MethodologyCode, version.VersionId, version.Version, 0, 0, 0, null,
-                    stored is null ? "version not found" : stored.Engine != MethodologyEngine.Formulas ? "already Script" : "no shadow text"));
+                    stored is null ? "version not found" : "already Script"));
                 continue;
             }
 
             var rows = version.Cases
                 .Select(c => (c.Key, (IReadOnlyList<CalculationArgument>)[.. c.Arguments.Select(a => new CalculationArgument(a.ArgumentCode, a.Value, a.ValueString, null, a.EntryId))]))
                 .ToList();
-            var (report, oldRows) = await comparer
-                .CompareInputsAsync(version.VersionId, stored.ScriptText, cases.DocumentId, new PeriodKey(cases.PeriodKey), rows, ct)
-                .ConfigureAwait(false);
-            mismatches.AddRange(report.Mismatches);
-            var hash = Convert.ToHexStringLower(ScriptCompiler.Hash(stored.ScriptText));
-            results.Add(new ReferenceVersionResult(
-                version.MethodologyCode, version.VersionId, version.Version, rows.Count, report.ValuesCompared, report.Mismatches.Count, hash,
-                report.Mismatches.Count > 0 ? "mismatches" : report.ValuesCompared == 0 ? "no values compared" : null));
+            IReadOnlyDictionary<string, ParityRowOutcome> oldRows;
+            if (string.IsNullOrWhiteSpace(stored.ScriptText))
+            {
+                // ✎ P-1123-6: версію без тіньового тексту (C11_15: правил немає, конвертер відмовляє) паритет не доводить, але
+                // очікування золотого набору для НОВОЇ версії (з правилом) — це вихід старого рушія, і його можна порахувати.
+                oldRows = await comparer
+                    .ExecuteOldInputsAsync(version.VersionId, cases.DocumentId, new PeriodKey(cases.PeriodKey), rows, ct)
+                    .ConfigureAwait(false);
+                results.Add(new ReferenceVersionResult(version.MethodologyCode, version.VersionId, version.Version, rows.Count, 0, 0, null,
+                    "no shadow text (old engine only: golden expectations)"));
+            }
+            else
+            {
+                var (report, compared) = await comparer
+                    .CompareInputsAsync(version.VersionId, stored.ScriptText, cases.DocumentId, new PeriodKey(cases.PeriodKey), rows, ct)
+                    .ConfigureAwait(false);
+                oldRows = compared;
+                mismatches.AddRange(report.Mismatches);
+                var hash = Convert.ToHexStringLower(ScriptCompiler.Hash(stored.ScriptText));
+                results.Add(new ReferenceVersionResult(
+                    version.MethodologyCode, version.VersionId, version.Version, rows.Count, report.ValuesCompared, report.Mismatches.Count, hash,
+                    report.Mismatches.Count > 0 ? "mismatches" : report.ValuesCompared == 0 ? "no values compared" : null));
+            }
 
             var best = version.Cases
                 .Select(c => (Case: c, Row: oldRows.GetValueOrDefault(c.Key)))
@@ -120,8 +137,18 @@ public static class ReferenceParityCommand
                     expected.TryAdd(key, value.Value);
                 }
 
+                // ✎ P-1123-6: --golden-all — КОЖЕН рядок, де старий шлях дав виходи, стає випадком золотого набору (синтетичні еталони
+                // з покриттям гілок); без прапорця — один найповніший рядок (еталон ECR).
+                var all = !goldenAll
+                    ? null
+                    : version.Cases
+                        .Select(c => (Case: c, Row: oldRows.GetValueOrDefault(c.Key)))
+                        .Where(x => x.Row is { Rejected: false, Error: null } row && row.Values.Any(v => v.Kind == CalculationResultKind.Output))
+                        .Take(MaxGoldenCases)
+                        .Select(x => new GoldenCase(x.Case.Key, x.Case.Arguments, ExpectedOf(x.Row!)))
+                        .ToList();
                 golden.Add(new GoldenProposal(version.MethodologyCode, version.VersionId, version.Version, best.Case.Key, best.Case.Table,
-                    cases.DocumentId, cases.PeriodKey, best.Case.Arguments, expected));
+                    cases.DocumentId, cases.PeriodKey, best.Case.Arguments, expected, all));
             }
         }
 
@@ -166,6 +193,24 @@ public static class ReferenceParityCommand
         return proven.Count > 0 ? MigrationCli.Ok : MigrationCli.Failures;
     }
 
+    /// <summary>Скільки випадків золотого набору щонайбільше дає --golden-all на версію.</summary>
+    public const int MaxGoldenCases = 40;
+
+    private static SortedDictionary<string, decimal> ExpectedOf(ParityRowOutcome row)
+    {
+        var expected = new SortedDictionary<string, decimal>(StringComparer.Ordinal);
+        foreach (var value in row.Values.Where(v => v.Kind == CalculationResultKind.Output))
+        {
+            var key = value.SubstanceEntryId is { } s ? value.OutputCode + "@" + s.ToString(CultureInfo.InvariantCulture) : value.OutputCode;
+            expected.TryAdd(key, value.Value);
+        }
+
+        return expected;
+    }
+
+    /// <summary>Випадок золотого набору з рядка-еталона.</summary>
+    public sealed record GoldenCase(string Key, IReadOnlyList<ReferenceArgument> Arguments, IReadOnlyDictionary<string, decimal> Expected);
+
     /// <summary>Підсумок версії на еталоні.</summary>
     public sealed record ReferenceVersionResult(
         string MethodologyCode, int VersionId, string Version, int Rows, int ValuesCompared, int MismatchCount, string? ScriptHash, string? Reason);
@@ -173,7 +218,7 @@ public static class ReferenceParityCommand
     /// <summary>Пропозиція золотого випадку з рядка-еталона.</summary>
     public sealed record GoldenProposal(
         string MethodologyCode, int VersionId, string Version, string CaseKey, string Table, long DocumentId, int PeriodKey,
-        IReadOnlyList<ReferenceArgument> Arguments, IReadOnlyDictionary<string, decimal> Expected);
+        IReadOnlyList<ReferenceArgument> Arguments, IReadOnlyDictionary<string, decimal> Expected, IReadOnlyList<GoldenCase>? Cases = null);
 
     /// <summary>Файл cases.json.</summary>
     public sealed record ReferenceCases(string ReferenceDatabase, long DocumentId, int PeriodKey, IReadOnlyList<ReferenceVersion> Versions);

@@ -66,6 +66,8 @@ function Get-MsSwitchPlan {
         Доведені на даних live: @{ <versionId> = <scriptHash> }.
     .PARAMETER Reference
         Доведені на еталонних даних ECR: @{ <versionId> = <scriptHash> }.
+    .PARAMETER Synthetic
+        Доведені на синтетичних еталонах з покриттям гілок (P-1123-6, версії без даних live і ECR): @{ <versionId> = <scriptHash> }.
     .PARAMETER Mismatched
         Версії з розбіжністю (будь-яким доказом) — НІКОЛИ не перемикаються (фаза вже зупинена раніше; тут — запобіжник).
     .DESCRIPTION
@@ -77,10 +79,11 @@ function Get-MsSwitchPlan {
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Candidates,
         [hashtable]$Live = @{},
         [hashtable]$Reference = @{},
+        [hashtable]$Synthetic = @{},
         [int[]]$Mismatched = @()
     )
 
-    $groups = [ordered]@{ live = New-Object System.Collections.Generic.List[int]; reference = New-Object System.Collections.Generic.List[int]; golden = New-Object System.Collections.Generic.List[int] }
+    $groups = [ordered]@{ live = New-Object System.Collections.Generic.List[int]; reference = New-Object System.Collections.Generic.List[int]; synthetic = New-Object System.Collections.Generic.List[int]; golden = New-Object System.Collections.Generic.List[int] }
     $stay = New-Object System.Collections.Generic.List[object]
     $already = New-Object System.Collections.Generic.List[int]
     foreach ($c in $Candidates) {
@@ -95,12 +98,13 @@ function Get-MsSwitchPlan {
         elseif ([string]$c.GoldenExpectations -ne 'ok') { $why = 'no golden set (PSS-23)' }
         elseif ($Live.ContainsKey($id) -and [string]$Live[$id] -eq [string]$c.DbHash) { $groups.live.Add($id) }
         elseif ($Reference.ContainsKey($id) -and [string]$Reference[$id] -eq [string]$c.DbHash) { $groups.reference.Add($id) }
-        elseif ($Live.ContainsKey($id) -or $Reference.ContainsKey($id)) { $why = 'script changed after parity (hash differs)' }
+        elseif ($Synthetic.ContainsKey($id) -and [string]$Synthetic[$id] -eq [string]$c.DbHash) { $groups.synthetic.Add($id) }
+        elseif ($Live.ContainsKey($id) -or $Reference.ContainsKey($id) -or $Synthetic.ContainsKey($id)) { $why = 'script changed after parity (hash differs)' }
         else { $groups.golden.Add($id) }
         if ($why) { $stay.Add([pscustomobject]@{ VersionId = $id; Code = [string]$c.Code; Version = [string]$c.Version; Reason = $why }) }
     }
     return [pscustomobject]@{
-        Live = @($groups.live.ToArray()); Reference = @($groups.reference.ToArray()); Golden = @($groups.golden.ToArray())
+        Live = @($groups.live.ToArray()); Reference = @($groups.reference.ToArray()); Synthetic = @($groups.synthetic.ToArray()); Golden = @($groups.golden.ToArray())
         Already = @($already.ToArray()); Stay = @($stay.ToArray())
     }
 }
@@ -129,4 +133,130 @@ function Test-MsLegacyRule {
     if ($Rule.Conditions.Count -eq 0) { return $false }
     foreach ($k in $Rule.Conditions.Keys) { if (-not $Row.ContainsKey($k) -or [string]$Row[$k] -ne [string]$Rule.Conditions[$k]) { return $false } }
     return $true
+}
+
+function Get-MsBranchConditions {
+    <#
+    .SYNOPSIS
+        ✎ P-1123-6: атомарні умови гілок у виразах методології: `@X op число` (=, <>, <, <=, >, >=), `@X = 'текст'` / `<>`,
+        `in(@X, 'a', 'b', ...)`. Повтори зводяться. Умови над CURRENT_SUBSTANCE() не повертаються — їх покриває цикл речовин.
+    #>
+    param([Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Expressions)
+    $seen = @{}; $out = New-Object System.Collections.Generic.List[object]
+    foreach ($e in $Expressions) {
+        foreach ($m in [regex]::Matches($e, '@([A-Za-z_][A-Za-z0-9_]*)\s*(>=|<=|<>|=|>|<)\s*(-?\d+(?:\.\d+)?)(?![\d.])')) {
+            $text = "@$($m.Groups[1].Value) $($m.Groups[2].Value) $($m.Groups[3].Value)"
+            if ($seen.ContainsKey($text)) { continue }; $seen[$text] = 1
+            $out.Add([pscustomobject]@{ Text = $text; Arg = $m.Groups[1].Value; Kind = 'num'; Op = $m.Groups[2].Value; Values = @([decimal]::Parse($m.Groups[3].Value, [Globalization.CultureInfo]::InvariantCulture)) })
+        }
+        foreach ($m in [regex]::Matches($e, "@([A-Za-z_][A-Za-z0-9_]*)\s*(<>|=)\s*'([^']*)'")) {
+            $text = "@$($m.Groups[1].Value) $($m.Groups[2].Value) '$($m.Groups[3].Value)'"
+            if ($seen.ContainsKey($text)) { continue }; $seen[$text] = 1
+            $out.Add([pscustomobject]@{ Text = $text; Arg = $m.Groups[1].Value; Kind = 'str'; Op = $m.Groups[2].Value; Values = @($m.Groups[3].Value) })
+        }
+        foreach ($m in [regex]::Matches($e, "in\(\s*@([A-Za-z_][A-Za-z0-9_]*)\s*,\s*((?:'[^']*'\s*,?\s*)+)\)")) {
+            $items = @([regex]::Matches($m.Groups[2].Value, "'([^']*)'") | ForEach-Object { $_.Groups[1].Value })
+            $text = "in(@$($m.Groups[1].Value), $(@($items | ForEach-Object { "'$_'" }) -join ', '))"
+            if ($seen.ContainsKey($text)) { continue }; $seen[$text] = 1
+            $out.Add([pscustomobject]@{ Text = $text; Arg = $m.Groups[1].Value; Kind = 'in'; Op = 'in'; Values = $items })
+        }
+    }
+    return @($out.ToArray())
+}
+
+function Test-MsBranchCondition {
+    <#
+    .SYNOPSIS
+        Значення умови на рядку: $true / $false / 'null' (аргументу немає).
+    #>
+    param([Parameter(Mandatory)]$Condition, [Parameter(Mandatory)]$Args)
+    $a = $Args[$Condition.Arg]
+    if ($null -eq $a) { return 'null' }
+    if ($Condition.Kind -eq 'num') {
+        if (-not $a.ContainsKey('value') -or $null -eq $a.value) { return 'null' }
+        $x = [decimal]$a.value; $y = [decimal]$Condition.Values[0]
+        switch ($Condition.Op) { '=' { return $x -eq $y } '<>' { return $x -ne $y } '<' { return $x -lt $y } '<=' { return $x -le $y } '>' { return $x -gt $y } '>=' { return $x -ge $y } }
+    }
+    $s = if ($a.ContainsKey('valueString')) { [string]$a.valueString } else { $null }
+    if ($null -eq $s) { return 'null' }
+    if ($Condition.Kind -eq 'in') { return ($Condition.Values -contains $s) }
+    if ($Condition.Op -eq '=') { return $s -eq [string]$Condition.Values[0] } else { return $s -ne [string]$Condition.Values[0] }
+}
+
+function New-MsSyntheticRows {
+    <#
+    .SYNOPSIS
+        Синтетичні рядки: по рядку на правило (колонки правила = його значення) і варіації ОДНОГО аргументу від бази першого правила:
+        для числових умов — літерал, ±1, 0 і null; для текстових / in — кожне значення списку й значення поза ним; для кожного
+        числового аргументу — 0 і null.
+        База: число 12.5 (місяць CalculationMonth — 6), текстовий аргумент з умов — перше значення умови.
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Arguments,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Conditions,
+        [Parameter(Mandatory)][object[]]$RuleArgs,
+        [int]$MaxRows = 80
+    )
+    $textArgs = @{}; foreach ($c in $Conditions) { if ($c.Kind -ne 'num' -and -not $textArgs.ContainsKey($c.Arg)) { $textArgs[$c.Arg] = [string]$c.Values[0] } }
+    function New-Base($rule) {
+        $b = [ordered]@{}
+        foreach ($a in ($Arguments | Sort-Object)) {
+            if ($textArgs.ContainsKey($a)) { $b[$a] = @{ valueString = $textArgs[$a] } }
+            elseif ($a -eq 'CalculationMonth') { $b[$a] = @{ value = [decimal]6 } }
+            else { $b[$a] = @{ value = [decimal]12.5 } }
+        }
+        foreach ($k in $rule.Args.Keys) { $b[$k] = $rule.Args[$k] }
+        return $b
+    }
+    $rows = New-Object System.Collections.Generic.List[object]; $sig = @{}
+    function Add-Row([string]$key, $args0, $rule) {
+        $s = (@($args0.Keys | Sort-Object | ForEach-Object { $v = $args0[$_]; if ($null -eq $v) { "$_=null" } else { "$_=" + (@($v.Keys | Sort-Object | ForEach-Object { "${_}:$($v[$_])" }) -join ',') } }) -join '|')
+        if ($sig.ContainsKey($s) -or $rows.Count -ge $MaxRows) { return }
+        $sig[$s] = 1
+        $rows.Add([pscustomobject]@{ Key = $key; Args = $args0; Rule = $rule })
+    }
+    $i = 0
+    foreach ($r in $RuleArgs) { $i++; Add-Row ('SYN_R{0:00}' -f $i) (New-Base $r) $r.Code }
+    $first = $RuleArgs[0]; $n = 0
+    foreach ($c in $Conditions) {
+        $vals = New-Object System.Collections.Generic.List[object]
+        if ($c.Kind -eq 'num') {
+            $l = [decimal]$c.Values[0]
+            foreach ($v in @($l, ($l - 1), ($l + 1), [decimal]0)) { $vals.Add(@{ value = $v }) }
+            $vals.Add($null)
+        } else {
+            foreach ($v in $c.Values) { $vals.Add(@{ valueString = [string]$v }) }
+            $vals.Add(@{ valueString = 'ZZZ-OUT' }); $vals.Add($null)
+        }
+        foreach ($v in $vals) {
+            $b = New-Base $first
+            $b[$c.Arg] = $v
+            # Псевдонім NAE: колонка правила й аргумент мають однакове значення.
+            if ($c.Arg -eq 'Land_NAE' -and $b.Contains('IDCodeNAEProject')) { $b['IDCodeNAEProject'] = $v }
+            $n++; Add-Row ('SYN_V{0:00}' -f $n) $b $null
+        }
+    }
+    # Нуль і null КОЖНОГО числового аргументу (ділення на нуль, відсутній вхід), не лише тих, що в умовах.
+    foreach ($a in ($Arguments | Sort-Object)) {
+        if ($textArgs.ContainsKey($a) -or $first.Args.Contains($a)) { continue }
+        foreach ($v in @(@{ value = [decimal]0 }, $null)) { $b = New-Base $first; $b[$a] = $v; $n++; Add-Row ('SYN_V{0:00}' -f $n) $b $null }
+    }
+    return @($rows.ToArray())
+}
+
+function Get-MsBranchCoverage {
+    <#
+    .SYNOPSIS
+        Покриття: правило — скільки рядків побудовано під нього; умова — скільки рядків, де вона істинна / хибна / null.
+        Непокрите: правило без рядка; умова без істинного або без хибного рядка.
+    #>
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Conditions, [Parameter(Mandatory)][object[]]$Rows, [Parameter(Mandatory)][string[]]$RuleCodes)
+    $rules = @($RuleCodes | ForEach-Object { $c = $_; [ordered]@{ rule = $c; rows = @($Rows | Where-Object { $_.Rule -eq $c }).Count } })
+    $conds = @($Conditions | ForEach-Object {
+            $c = $_; $t = 0; $f = 0; $n = 0
+            foreach ($r in $Rows) { $v = Test-MsBranchCondition -Condition $c -Args $r.Args; if ($v -is [string]) { $n++ } elseif ($v) { $t++ } else { $f++ } }
+            [ordered]@{ condition = $c.Text; true = $t; false = $f; null = $n; covered = ($t -gt 0 -and $f -gt 0) }
+        })
+    $unc = @(@($rules | Where-Object { $_.rows -eq 0 } | ForEach-Object { "rule $($_.rule)" }) + @($conds | Where-Object { -not $_.covered } | ForEach-Object { "condition $($_.condition)" }))
+    return [pscustomobject]@{ Rules = $rules; Conditions = $conds; Uncovered = $unc }
 }

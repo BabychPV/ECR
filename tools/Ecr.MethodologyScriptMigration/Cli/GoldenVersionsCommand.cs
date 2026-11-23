@@ -135,20 +135,12 @@ public static partial class GoldenVersionsCommand
                 .Select(v => v.Version).ToListAsync(ct).ConfigureAwait(false);
             var number = NextVersionNumber(numbers);
             var effective = (current.EffectiveFrom ?? new DateOnly(2024, 1, 1)).AddDays(1);
-            var inputJson = !hasProposal ? null : JsonSerializer.Serialize(new
-            {
-                documentId = proposal.GetProperty("documentId").GetInt64(),
-                periodKey = new { value = proposal.GetProperty("periodKey").GetInt32() },
-                arguments = proposal.GetProperty("arguments").EnumerateArray().Select(a => new
-                {
-                    argumentCode = a.GetProperty("argumentCode").GetString(),
-                    value = a.TryGetProperty("value", out var v) && v.ValueKind == JsonValueKind.Number ? v.GetDecimal() : (decimal?)null,
-                    valueString = a.TryGetProperty("valueString", out var s) && s.ValueKind == JsonValueKind.String ? s.GetString() : null,
-                    unitId = (int?)null,
-                    entryId = a.TryGetProperty("entryId", out var e) && e.ValueKind == JsonValueKind.Number ? e.GetInt64() : (long?)null,
-                }),
-            });
+            var inputJson = !hasProposal ? null : InputJsonOf(proposal, proposal.GetProperty("arguments"));
             var expectedJson = hasProposal ? proposal.GetProperty("expected").GetRawText() : null;
+            // ✎ P-1123-6: синтетичні еталони — усі рядки з виходами (--golden-all): перший замінює порожні випадки, решта — нові.
+            var extraCases = hasProposal && proposal.TryGetProperty("cases", out var cs) && cs.ValueKind == JsonValueKind.Array
+                ? cs.EnumerateArray().Skip(1).Select(c => (Code: c.GetProperty("key").GetString()!, Input: InputJsonOf(proposal, c.GetProperty("arguments")), Expected: c.GetProperty("expected").GetRawText())).ToList()
+                : [];
             int? draftId = null;
             try
             {
@@ -159,6 +151,12 @@ public static partial class GoldenVersionsCommand
                 {
                     await scope.ServiceProvider.GetRequiredService<SaveMethodologyTestCaseHandler>()
                         .HandleAsync(draft.Id, testCode, inputJson!, expectedJson!, 0.000000001m, ct).ConfigureAwait(false);
+                }
+
+                foreach (var (caseCode, caseInput, caseExpected) in extraCases)
+                {
+                    await scope.ServiceProvider.GetRequiredService<SaveMethodologyTestCaseHandler>()
+                        .HandleAsync(draft.Id, caseCode, caseInput, caseExpected, 0.000000001m, ct).ConfigureAwait(false);
                 }
 
                 foreach (var (ruleCode, matchJson, priority) in extraRules)
@@ -173,7 +171,7 @@ public static partial class GoldenVersionsCommand
                 await scope.ServiceProvider.GetRequiredService<PublishMethodologyHandler>()
                     .HandleAsync(draft.Id, why, effective, ct)
                     .ConfigureAwait(false);
-                created.Add(new { methodologyCode = code, fromVersionId = currentId, versionId = draft.Id, version = number, effectiveFrom = effective, tests = empty, rules = extraRules.Count });
+                created.Add(new { methodologyCode = code, fromVersionId = currentId, versionId = draft.Id, version = number, effectiveFrom = effective, tests = empty, extraTests = extraCases.Count, rules = extraRules.Count });
                 await output.WriteLineAsync($"  {code}: {current.Version} -> {number} (з {effective:yyyy-MM-dd}), випадків з еталоном {empty.Count}, позичених правил {extraRules.Count}").ConfigureAwait(false);
             }
             catch (EcrException ex)
@@ -199,6 +197,21 @@ public static partial class GoldenVersionsCommand
         await output.WriteLineAsync($"golden-versions: створено й опубліковано {created.Count}, невдало {failed}").ConfigureAwait(false);
         return failed > 0 ? MigrationCli.Failures : MigrationCli.Ok;
     }
+
+    private static string InputJsonOf(JsonElement proposal, JsonElement arguments)
+        => JsonSerializer.Serialize(new
+        {
+            documentId = proposal.GetProperty("documentId").GetInt64(),
+            periodKey = new { value = proposal.GetProperty("periodKey").GetInt32() },
+            arguments = arguments.EnumerateArray().Select(a => new
+            {
+                argumentCode = a.GetProperty("argumentCode").GetString(),
+                value = a.TryGetProperty("value", out var v) && v.ValueKind == JsonValueKind.Number ? v.GetDecimal() : (decimal?)null,
+                valueString = a.TryGetProperty("valueString", out var s) && s.ValueKind == JsonValueKind.String ? s.GetString() : null,
+                unitId = (int?)null,
+                entryId = a.TryGetProperty("entryId", out var e) && e.ValueKind == JsonValueKind.Number ? e.GetInt64() : (long?)null,
+            }),
+        });
 
     /// <summary>Документ золотого входу (<c>documentId</c>); 0 — немає або не читається.</summary>
     /// <param name="inputJson">Вхід випадку.</param>

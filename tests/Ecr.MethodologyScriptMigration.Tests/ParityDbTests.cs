@@ -298,6 +298,38 @@ public sealed class ParityDbTests(SqlServerFixture sql)
         Assert.False(File.Exists(eligible), "a mismatch must leave no switch list");
     }
 
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task D571_parity_cases_без_тіньового_тексту_рахує_очікування_старим_рушієм_і_нічого_не_доводить()
+    {
+        // P-1123-6 (C11_15): у чинної версії немає правил -> тіньового тексту немає; очікування нової версії все одно — вихід
+        // старого рушія на синтетичних рядках, а перелік перемикання цю версію не містить.
+        var scene = await ArrangeAsync(209912);
+        var directory = Path.Combine(Path.GetTempPath(), "ecr-ms-syn-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var cases = Path.Combine(directory, "cases.json");
+        var golden = Path.Combine(directory, "golden.json");
+        var eligible = Path.Combine(directory, "eligible.json");
+        var periodKey = scene.PeriodKey.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var docId = scene.DocumentId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var versionId = scene.MainVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        await File.WriteAllTextAsync(cases, $$"""
+            {"referenceDatabase":"synthetic","documentId":{{docId}},"periodKey":{{periodKey}},"versions":[{"versionId":{{versionId}},"methodologyCode":"{{scene.MainCode}}","version":"V1","cases":[
+              {"key":"SYN_R01","table":"SYN","arguments":[{"argumentCode":"{{scene.ZoneCode}}","valueString":"North"},{"argumentCode":"{{scene.QtyCode}}","value":10}]},
+              {"key":"SYN_V01","table":"SYN","arguments":[{"argumentCode":"{{scene.ZoneCode}}","valueString":"South"},{"argumentCode":"{{scene.QtyCode}}","value":4}]}]}]}
+            """);
+
+        var run = await CliAsync("parity-cases", "--connection", sql.ConnectionString, "--in", cases, "--out", Path.Combine(directory, "report.json"),
+            "--eligible-out", eligible, "--golden-out", golden, "--golden-all");
+
+        Assert.Equal(MigrationCli.Failures, run.Code); // нічого не доведено
+        Assert.Contains("no shadow text (old engine only", run.Output, StringComparison.Ordinal);
+        Assert.False(File.Exists(eligible));
+        var json = await File.ReadAllTextAsync(golden);
+        Assert.Contains("\"key\": \"SYN_V01\"", json, StringComparison.Ordinal); // --golden-all: кожен рядок із виходами
+        Assert.Contains("Emission@", json, StringComparison.Ordinal);
+    }
+
     // ───── стенд ─────
 
     private async Task<ParityRunReport> RunAsync(Scene scene)

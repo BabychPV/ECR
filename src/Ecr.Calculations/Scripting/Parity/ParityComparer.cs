@@ -203,6 +203,37 @@ public sealed class ParityComparer(
     }
 
     /// <summary>
+    /// ✎ P-1123-6: лише СТАРИЙ шлях версії рівня <c>Configuration</c> на готових входах (очікування золотого набору для нової версії,
+    /// коли чинна тіньового тексту не має). Нічого не пише.
+    /// </summary>
+    /// <param name="methodologyVersionId">Версія (рушій <c>Formulas</c>).</param>
+    /// <param name="documentId">Документ контексту.</param>
+    /// <param name="periodKey">Період контексту.</param>
+    /// <param name="rows">Ключ рядка й аргументи.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task<IReadOnlyDictionary<string, ParityRowOutcome>> ExecuteOldInputsAsync(
+        int methodologyVersionId,
+        long documentId,
+        PeriodKey periodKey,
+        IReadOnlyList<(string Key, IReadOnlyList<CalculationArgument> Arguments)> rows,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+        var methodology = await methodologies.FindByVersionAsync(methodologyVersionId, ct).ConfigureAwait(false)
+            ?? throw new ArgumentException($"Версії {methodologyVersionId} немає.", nameof(methodologyVersionId));
+        var version = methodology.Versions.Single(v => v.Id == methodologyVersionId);
+        var descriptor = new MethodologyDescriptor(
+            methodology.Id, version.Id, methodology.Code, version.Version, version.Level, version.NumericMode,
+            version.CalendarMode, version.TraceLevel, MethodologyEngine.Formulas);
+        var module = modules.FirstOrDefault(m => m.CanHandle(descriptor))
+            ?? throw new InvalidOperationException($"Немає модуля для старого шляху версії {methodology.Code} {version.Version}.");
+        var context = await module.PrepareAsync(descriptor, documentId, periodKey, new RegistrySnapshotCache(registryAsOfUtc: null), ct)
+            .ConfigureAwait(false);
+        var byRow = rows.ToDictionary(r => r.Key, r => new CalculationInput(descriptor, documentId, 0, periodKey, r.Key, r.Arguments), StringComparer.Ordinal);
+        return await ExecuteRowsAsync([.. rows.Select(r => r.Key)], byRow, module, context, false, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Виконує модуль на відібраних рядках і зводить кожен у <see cref="ParityRowOutcome"/>: значення, відсутні аргументи,
     /// наявність <c>StepError</c>; відхилення рядка правилом категорії — <see cref="ParityRowOutcome.Rejected"/>; будь-який
     /// інший <see cref="DomainException"/> — <see cref="ParityRowOutcome.Error"/> з кодом і ключем, а не мовчазний пропуск.

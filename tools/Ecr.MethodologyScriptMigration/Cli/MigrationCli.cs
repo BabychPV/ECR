@@ -57,7 +57,7 @@ public static class MigrationCli
           Ecr.MethodologyScriptMigration shadow  --connection <рядок> --in <тека> [--i-know-this-is-a-copy]
           Ecr.MethodologyScriptMigration pack    --connection <рядок> --in <тека> --out <package.json>
           Ecr.MethodologyScriptMigration parity  --connection <рядок> --out <report.json> [--methodology <код>] [--document <id>] [--allow-unproven] [--eligible-out <ids.json>]
-          Ecr.MethodologyScriptMigration parity-cases --connection <рядок> --in <cases.json> --out <report.json> [--eligible-out <f>] [--golden-out <f>]
+          Ecr.MethodologyScriptMigration parity-cases --connection <рядок> --in <cases.json> --out <report.json> [--eligible-out <f>] [--golden-out <f>] [--golden-all]
           Ecr.MethodologyScriptMigration golden-versions --connection <рядок копії> --in <golden-proposals.json> --as-user <id> [--out <f>]
           Ecr.MethodologyScriptMigration apply   --connection <рядок> --in <package.json> --as-user <id> [--dry-run] [--out <result.json>]
           Ecr.MethodologyScriptMigration switch  --connection <рядок> --in <eligible.json> --engine Script|Formulas --reason <текст> --as-user <id>
