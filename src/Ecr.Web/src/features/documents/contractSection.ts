@@ -25,13 +25,15 @@ export const ContractOrder = [
   // File Number — це BusinessKey документа, а не поле шапки: показується read-only.
   { key: 'fileNumber', names: ['filenumber', 'businesskey'] },
   { key: 'permitNumber', names: ['permitnumber', 'permit'] },
+  // ✎ B74 P4 (D-576): шаблон документа (код) — службовий рядок, як File Number і Version.
+  { key: 'template', names: ['template', 'templatecode'] },
   { key: 'version', names: ['version'] },
 ] as const;
 
 export type ContractKey = (typeof ContractOrder)[number]['key'];
 
 /** Поля, які користувач не редагує: File Number (BusinessKey) і Version. */
-const ReadOnlyKeys: ReadonlySet<ContractKey> = new Set<ContractKey>(['fileNumber', 'version']);
+const ReadOnlyKeys: ReadonlySet<ContractKey> = new Set<ContractKey>(['fileNumber', 'template', 'version']);
 
 const normalize = (text: string): string => text.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
 
