@@ -50,7 +50,10 @@ namespace Ecr.Infrastructure.Jobs;
 /// у рішенні, звернень стільки ж.
 /// </para>
 /// <para>
-/// ⚠ Черга Quartz у пам'яті рядків черги з payload не має — там ворота мовчать (Production — черга в базі, <c>D-563</c>).
+/// ✎ b10 (D-567 (4)): Quartz у пам'яті (<c>D-563</c> дозволяє його малим інсталяціям; live — Quartz/InProcess) пише
+/// дзеркало прогресу без цілі й payload, але з <c>DocumentId</c> і <c>JobId = {тип}~{ціль}~{guid}</c> — ціль береться з
+/// <c>JobId</c>, і ворота бачать ті самі задачі, що в черзі в базі. Без payload жива задача Quartz на ціль місяця чекає
+/// завжди (прохід читача від натискання не відрізнити), задача формул джерела — увесь рік.
 /// ⚠ Затвердження джерела за <c>ApprovedOnly</c> ставить задачу впливу ПІСЛЯ свого коміту (<c>SourceApprovalChangeTrigger</c>)
 /// — між комітом і постановкою (мілісекунди) ворота її не бачать.
 /// </para>
@@ -63,14 +66,27 @@ public sealed class SourceCascadePendingGate(
 {
     private static readonly JsonSerializerOptions PayloadOptions = new(JsonSerializerDefaults.Web);
 
+    // ✎ D-567 (4), b10: дзеркало Quartz у пам'яті (D-563, малі інсталяції; live — Quartz/InProcess) — рядок прогресу без
+    // TargetKey, Lane і Payload, а JobId = `{тип}~{ціль}~{guid N}` (QuartzJobScheduler.TargetPrefixOf). Ціль такого рядка —
+    // JobId без хвоста `~{guid}`: та сама форма, що TargetKey черги в базі. Рядок черги в базі — як доти (TargetKey).
+    private const string EffectiveTarget = """
+          CROSS APPLY (SELECT COALESCE(q.TargetKey,
+                              CASE WHEN q.Lane IS NULL AND LEN(q.JobId) > 34 AND SUBSTRING(q.JobId, LEN(q.JobId) - 32, 1) = N'~'
+                                   THEN LEFT(q.JobId, LEN(q.JobId) - 33) END) AS Tk) AS e
+        """;
+
+    // `Q` — рядок Quartz: payload немає, тож він чекає завжди (і прохід читача, і натискання «Перерахувати» місяця —
+    // різниці без payload не видно; сумнів — у бік «чекати», D-567 (3)).
     private const string CascadeSql = """
         /* ecr:f5-cascade-gate */
-        SELECT N'C' AS Kind, q.TargetKey AS TargetKey, q.[State] AS State, q.Payload AS Payload,
+        SELECT CASE WHEN q.TargetKey IS NULL THEN N'Q' ELSE N'C' END AS Kind, e.Tk AS TargetKey, q.[State] AS State,
+               q.Payload AS Payload,
                CAST(NULL AS int) AS ConsumerTemplateId, CAST(NULL AS int) AS ConsumerPeriodKind,
                CAST(NULL AS int) AS SourceTemplateId, CAST(NULL AS int) AS SourcePeriodKind
           FROM itg.JobProgress AS q WITH (INDEX(IX_JobProgress_Document_Active))
+        """ + "\n" + EffectiveTarget + "\n" + """
          WHERE q.DocumentId = @doc AND q.DocumentId IS NOT NULL AND q.[State] IN ('Queued', 'Running')
-           AND q.TargetKey IN (@yearTarget, @periodTarget, @readerTarget)
+           AND e.Tk IN (@yearTarget, @periodTarget, @readerTarget)
         """;
 
     // ⛔ Огляд b9: ціль у черзі в базі — `{тип задачі}~{ціль}` (DbBackgroundJobScheduler.TargetKeyOf). Доти ворота порівнювали
@@ -81,21 +97,32 @@ public sealed class SourceCascadePendingGate(
         DbBackgroundJobScheduler.TargetKeyOf<IRegistryImpactRecalculationJob>("source-change-b") + "%";
 
     // Ланки джерел — лише живі рядки (фільтровані індекси цілі); документні — з шаблоном і періодичністю документа-джерела.
+    // ✎ D-567 (4), b10: `{2}` — відбір рядків: черга в базі (TargetKey, фільтровані індекси цілі) чи дзеркало Quartz
+    // (TargetKey/Lane NULL, ціль — з JobId, `EffectiveTarget`). Період документної ланки — з payload; у Quartz payload
+    // немає: `-auto` несе період у цілі (`doc{id}-p{yyyyMM}-auto`), задача формул — невідомий (увесь рік, як доти), а шаблон
+    // документа-джерела тоді — за періодом споживача (той самий рік).
     private static readonly string UpstreamSql = """
-        SELECT N'U', q.TargetKey, q.[State], CAST(k.Pk AS nvarchar(20)),
+        SELECT N'U', e.Tk, q.[State], CAST(k.Pk AS nvarchar(20)),
                @t, CAST(@kind AS int), COALESCE(sd.TemplateId, sv.TemplateId), CAST(sp.PeriodKind AS int)
           FROM itg.JobProgress AS q WITH (INDEX({0}))
-          CROSS APPLY (SELECT CASE WHEN (q.TargetKey LIKE N'{auto}' OR q.TargetKey LIKE N'{formula}') AND ISJSON(q.Payload) = 1
-                                   THEN TRY_CAST(JSON_VALUE(q.Payload, '$.periodKey') AS int) END AS Pk) AS k
-          LEFT JOIN doc.Document AS sd ON (q.TargetKey LIKE N'{auto}' OR q.TargetKey LIKE N'{formula}') AND sd.Id = q.DocumentId
+        {effective}
+          CROSS APPLY (SELECT CASE WHEN (e.Tk LIKE N'{auto}' OR e.Tk LIKE N'{formula}') AND ISJSON(q.Payload) = 1
+                                   THEN TRY_CAST(JSON_VALUE(q.Payload, '$.periodKey') AS int)
+                                   WHEN e.Tk LIKE N'{auto}' AND q.Payload IS NULL AND CHARINDEX(N'-p', e.Tk) > 0
+                                   THEN TRY_CAST(SUBSTRING(e.Tk, CHARINDEX(N'-p', e.Tk) + 2, 6) AS int) END AS Pk) AS k
+          LEFT JOIN doc.Document AS sd ON (e.Tk LIKE N'{auto}' OR e.Tk LIKE N'{formula}') AND sd.Id = q.DocumentId
           LEFT JOIN doc.Project AS sp ON sp.Id = sd.ProjectId
-          LEFT JOIN cfg.TemplateVersion AS sv ON sv.Id = CASE WHEN sd.TemplateId IS NULL THEN doc.fn_VersionOf(sd.ProjectId, k.Pk) ELSE doc.fn_TemplateVersionOf(sd.ProjectId, sd.TemplateId, k.Pk) END
-         WHERE q.[State] = '{1}' AND q.TargetKey IS NOT NULL AND @t IS NOT NULL
-           AND (q.TargetKey LIKE N'{source}' OR q.TargetKey LIKE N'{auto}' OR q.TargetKey LIKE N'{formula}')
+          LEFT JOIN cfg.TemplateVersion AS sv ON sv.Id = CASE WHEN sd.TemplateId IS NULL THEN doc.fn_VersionOf(sd.ProjectId, COALESCE(k.Pk, @period)) ELSE doc.fn_TemplateVersionOf(sd.ProjectId, sd.TemplateId, COALESCE(k.Pk, @period)) END
+         WHERE {2} AND @t IS NOT NULL
+           AND (e.Tk LIKE N'{source}' OR e.Tk LIKE N'{auto}' OR e.Tk LIKE N'{formula}')
         """
+        .Replace("{effective}", EffectiveTarget, StringComparison.Ordinal)
         .Replace("{auto}", AutoLike, StringComparison.Ordinal)
         .Replace("{formula}", FormulaLike, StringComparison.Ordinal)
         .Replace("{source}", SourceChangeLike, StringComparison.Ordinal);
+
+    private static string UpstreamPart(string index, string where)
+        => UpstreamSql.Replace("{0}", index, StringComparison.Ordinal).Replace("{2}", where, StringComparison.Ordinal);
 
     private static readonly string ExtendedSql =
         """
@@ -108,9 +135,14 @@ public sealed class SourceCascadePendingGate(
          WHERE d.Id = @doc;
         """
         + "\n" + CascadeSql + "\nUNION ALL\n"
-        + UpstreamSql.Replace("{0}", "UX_JobProgress_Target_Queued", StringComparison.Ordinal).Replace("{1}", "Queued", StringComparison.Ordinal)
+        + UpstreamPart("UX_JobProgress_Target_Queued", "q.[State] = 'Queued' AND q.TargetKey IS NOT NULL")
         + "\nUNION ALL\n"
-        + UpstreamSql.Replace("{0}", "UX_JobProgress_Target_Running", StringComparison.Ordinal).Replace("{1}", "Running", StringComparison.Ordinal)
+        + UpstreamPart("UX_JobProgress_Target_Running", "q.[State] = 'Running' AND q.TargetKey IS NOT NULL")
+        + "\nUNION ALL\n"
+        // Дзеркало Quartz: живі рядки без цілі й лейна — пошук за (State, UpdatedAt), живих рядків одиниці.
+        + UpstreamPart(
+            "IX_JobProgress_State_UpdatedAt",
+            "q.[State] IN ('Queued', 'Running') AND q.TargetKey IS NULL AND q.Lane IS NULL AND e.Tk IS NOT NULL")
         + "\nUNION ALL\nSELECT N'T', NULL, NULL, NULL, @t, CAST(@kind AS int), NULL, NULL;";
 
     /// <inheritdoc />
@@ -133,6 +165,12 @@ public sealed class SourceCascadePendingGate(
                 new SqlParameter("@readerTarget", readerTarget))
             .ToListAsync(ct)
             .ConfigureAwait(false);
+
+        // ✎ D-567 (4), b10: жива задача Quartz на ціль каскаду чи проходу місяця — чекає (payload немає, D-567 (3)).
+        if (rows.Exists(r => r.Kind == "Q"))
+        {
+            return true;
+        }
 
         if (rows.Exists(r => r.Kind == "C"
                              && (r.TargetKey == periodTarget
