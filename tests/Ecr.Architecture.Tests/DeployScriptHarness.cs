@@ -97,7 +97,14 @@ internal static class DeployScriptHarness
     // LandStaleValuesTests поспіль із порожнім виводом, lane/integ-rpt-stable 40977687661 - код 139. Обгортка:
     // (1) не більше двох pwsh одночасно на всі класи (xUnit ганяє класи паралельно);
     // (2) TERM=dumb і вимкнена телеметрія - жодної взаємодії з терміналом/мережею на старті;
-    // (3) ОДИН повтор запуску ЛИШЕ за коду 139, причина - у stderr. Інші коди й провали перевірок не повторюються.
+    // (3) ОДИН повтор запуску ЛИШЕ за коду 139 (пауза 1 с), причина - у stderr. Інші коди й провали перевірок не повторюються.
+    // ✎ 2026-11-23, ПРИЧИНА 139: кожен pwsh на старті читає, а на виході ПЕРЕПИСУЄ спільний файл профілю
+    // multicore JIT `~/.cache/powershell/StartupProfileData-NonInteractive` (ProfileOptimization) і поряд
+    // ModuleAnalysisCache. Паралельні pwsh (два слоти + інші тестові хости) зрідка лишають його битим, і з цієї
+    // миті КОЖЕН новий pwsh у job гине SIGSEGV у нативному читачі профілю - повтор теж 139, падають сотні тестів
+    // (45136077424 core: усі запуски після 08:23:47 до кінця job; 2026-10-22 39584163913 - навіть наступний крок
+    // workflow). (4) Тому кожен запуск отримує ВЛАСНИЙ XDG_CACHE_HOME у своєму тимчасовому каталозі: спільного
+    // файлу, який можна зіпсувати чи прочитати битим, більше немає. Повтор (3) - лише страховка.
     private const string LauncherScript = """
         #!/bin/sh
         # Тести інколи звужують PATH: утиліти обгортки (mktemp, cat, rm, flock) шукаємо й у системних каталогах.
@@ -120,12 +127,15 @@ internal static class DeployScriptHarness
         attempt=1
         note=""
         while :; do
+          # Власний кеш PowerShell (профіль JIT, ModuleAnalysisCache) на кожну спробу - див. (4) вище.
+          mkdir -p "$d/cache$attempt"
           # pwsh бачить ЛИШЕ початковий PATH: тести навмисно звужують його (напр. "git недоступний").
-          PATH="$ORIG_PATH" "$ECR_REAL_PWSH" -NoLogo "$@" >"$d/out" 2>"$d/err"
+          PATH="$ORIG_PATH" XDG_CACHE_HOME="$d/cache$attempt" "$ECR_REAL_PWSH" -NoLogo "$@" >"$d/out" 2>"$d/err"
           code=$?
           if [ "$code" -eq 139 ] && [ "$attempt" -lt 2 ]; then
             note="ecr-pwsh-launcher: pwsh exit 139 (SIGSEGV on start), launch retried once"
             attempt=2
+            sleep 1
             continue
           fi
           break
