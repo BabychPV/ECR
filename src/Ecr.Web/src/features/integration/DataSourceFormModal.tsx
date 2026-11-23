@@ -90,10 +90,32 @@ const CatalogExample: Readonly<Record<Transport, string | undefined>> = {
   Sql: 'Reports',
 };
 
+/**
+ * Чи читає транспорт поле. ⛔ Sql не має запасної адреси (`EndpointFailover` — лише PiWebApi і PiSqlClient),
+ * PiSqlClient не читає каталогу (база — `AF Database` у рядку з'єднання); сервер відмовляє в значенні
+ * такого поля `dataSourceFieldNotRead`. Тому порожнє поле для такого транспорту приховане, а вже введене чи
+ * збережене значення показується лише для читання з поясненням і кнопкою «Очистити» — мовчки не зникає.
+ */
+const ReadsSecondary: Readonly<Record<Transport, boolean>> = { PiSqlClient: true, PiWebApi: true, Sql: false };
+const ReadsCatalog: Readonly<Record<Transport, boolean>> = { PiSqlClient: false, PiWebApi: true, Sql: true };
+
+/**
+ * Кнопка очищення поля, якого транспорт не читає. ⚠ Таке поле в формі щонайбільше одне (Sql читає каталог,
+ * PiSqlClient — запасну адресу), тож назва кнопки однозначна й без імені поля.
+ */
+function ClearUnused({ onClear }: { readonly onClear: () => void }): JSX.Element {
+  return (
+    <Button variant="subtle" size="compact-xs" mr="xs" onClick={onClear} data-clear-unused="">
+      {t('sources.clearUnusedField')}
+    </Button>
+  );
+}
+
 type FailedField =
   | 'code'
   | 'endpoint'
   | 'secondaryEndpoint'
+  | 'catalog'
   | 'secretConfirmation'
   | 'confirmEndpointChange';
 
@@ -121,6 +143,9 @@ const FieldOfKey: Readonly<Record<string, FailedField>> = {
   'err.ECR-REQ-0422.dataSourceEndpointSqlScheme': 'endpoint',
   'err.ECR-REQ-0422.dataSourceEndpointSqlLinkLocal': 'endpoint',
   'err.ECR-REQ-0422.dataSourceEndpointSqlForbiddenOption': 'endpoint',
+  'err.ECR-REQ-0422.dataSourceEndpointNotConnectionString': 'endpoint',
+  // Поле, якого транспорт не читає: сервер називає його в `field` (`secondaryEndpoint` | `catalog`).
+  'err.ECR-REQ-0422.dataSourceFieldNotRead': 'secondaryEndpoint',
   'err.ECR-REQ-0422.dataSourceCodeTaken': 'code',
   'err.ECR-REQ-0422.dataSourceSecretReentryRequired': 'secretConfirmation',
   'err.ECR-REQ-0422.dataSourceEndpointChangeUnconfirmed': 'confirmEndpointChange',
@@ -142,7 +167,11 @@ export function fieldFailureOf(error: unknown): FieldFailure | null {
   if (byKey === undefined) return null;
 
   const named = error.problem.extensions2?.['field'];
-  const field = byKey === 'endpoint' && named === 'secondaryEndpoint' ? named : byKey;
+  const field =
+    (byKey === 'endpoint' && named === 'secondaryEndpoint') ||
+    (key === 'err.ECR-REQ-0422.dataSourceFieldNotRead' && named === 'catalog')
+      ? named
+      : byKey;
 
   const code = error.problem.extensions2?.['code'];
 
@@ -408,17 +437,28 @@ function DataSourceForm({
         data-field="endpoint"
       />
 
-      <TextInput
-        label={t('sources.secondaryEndpoint')}
-        description={secondaryEndpointHint(draft.transport)}
-        placeholder={SecondaryExample[draft.transport]}
-        value={draft.secondaryEndpoint}
-        onChange={(event) => set('secondaryEndpoint', event.currentTarget.value)}
-        error={onField?.field === 'secondaryEndpoint' ? onField.text : undefined}
-        ff="monospace"
-        autoComplete="off"
-        spellCheck={false}
-      />
+      {(ReadsSecondary[draft.transport] || draft.secondaryEndpoint.length > 0) && (
+        <TextInput
+          label={t('sources.secondaryEndpoint')}
+          description={secondaryEndpointHint(draft.transport)}
+          placeholder={SecondaryExample[draft.transport]}
+          value={draft.secondaryEndpoint}
+          onChange={(event) => set('secondaryEndpoint', event.currentTarget.value)}
+          // Транспорт поля не читає, а значення є: лише для читання й очищення (сервер його не збереже).
+          readOnly={!ReadsSecondary[draft.transport]}
+          rightSectionWidth={ReadsSecondary[draft.transport] ? undefined : 'auto'}
+          rightSection={
+            ReadsSecondary[draft.transport] ? undefined : (
+              <ClearUnused onClear={() => set('secondaryEndpoint', '')} />
+            )
+          }
+          error={onField?.field === 'secondaryEndpoint' ? onField.text : undefined}
+          ff="monospace"
+          autoComplete="off"
+          spellCheck={false}
+          data-field="secondaryEndpoint"
+        />
+      )}
 
       {/* ⛔ S3: секрет середовища йде лише на адресу, яку підтвердив той, хто
           його знає. Значення не зберігається ні тут, ні на сервері. */}
@@ -451,16 +491,27 @@ function DataSourceForm({
         />
       )}
 
-      <TextInput
-        label={t('sources.catalog')}
-        description={catalogHint(draft.transport)}
-        placeholder={CatalogExample[draft.transport]}
-        value={draft.catalog}
-        onChange={(event) => set('catalog', event.currentTarget.value)}
-        ff="monospace"
-        autoComplete="off"
-        spellCheck={false}
-      />
+      {(ReadsCatalog[draft.transport] || draft.catalog.length > 0) && (
+        <TextInput
+          label={t('sources.catalog')}
+          description={catalogHint(draft.transport)}
+          placeholder={CatalogExample[draft.transport]}
+          value={draft.catalog}
+          onChange={(event) => set('catalog', event.currentTarget.value)}
+          readOnly={!ReadsCatalog[draft.transport]}
+          rightSectionWidth={ReadsCatalog[draft.transport] ? undefined : 'auto'}
+          rightSection={
+            ReadsCatalog[draft.transport] ? undefined : (
+              <ClearUnused onClear={() => set('catalog', '')} />
+            )
+          }
+          error={onField?.field === 'catalog' ? onField.text : undefined}
+          ff="monospace"
+          autoComplete="off"
+          spellCheck={false}
+          data-field="catalog"
+        />
+      )}
 
       <NumberInput
         label={t('sources.maxParallel')}
