@@ -361,4 +361,31 @@ public sealed class LandHse400BridgesModelTests
 
         Assert.True(pairs >= 56, $"Входів HSE400 має бути ≥ 56, зараз {pairs}.");
     }
+
+    /// <summary>
+    /// ✎ P-1123-4 (людина 23.11): одиниці аргументів ECW_C05_05 стоять на колонках шаблону (T3_00), а не в тексті скрипта
+    /// (land-script-units.json): густина кг/Sm3, нижча теплота МДж/Sm3; решта мостів складу лишається безрозмірною.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void C05_05_густина_й_теплота_на_T3_00_мають_одиниці_кг_на_Sm3_і_МДж_на_Sm3()
+    {
+        using var model = Load("land-template.model.json");
+        var map = model.RootElement.GetProperty("units").GetProperty("map");
+        var t3 = Columns(Tables(model)["T3_00"]);
+
+        string UnitCode(string column) => map.GetProperty(t3[column].GetProperty("unit").GetString()!).GetString()!;
+
+        Assert.Equal("kg_per_Sm3", UnitCode("Density"));
+        Assert.Equal("MJ_per_Sm3", UnitCode("FuelLowerHeating"));
+        Assert.Equal("one", UnitCode("H2Smass"));
+        Assert.Equal("one", UnitCode("MercaptanSulphurContent"));
+        Assert.Equal("one", UnitCode("Land_EF_KNO2"));
+
+        // обидві одиниці - у базовому сіді (Build-LandTemplate бере Id за кодом із GET /units; немає коду - одиниця губиться)
+        var prelude = File.ReadAllText(Path.Combine(
+            SourceTree.Root, "src", "Ecr.Infrastructure", "Persistence", "Sql", "seed", "00-prelude.sql"));
+        Assert.Contains("'kg_per_Sm3'", prelude, StringComparison.Ordinal);
+        Assert.Contains("'MJ_per_Sm3'", prelude, StringComparison.Ordinal);
+    }
 }

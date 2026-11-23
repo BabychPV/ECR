@@ -167,6 +167,10 @@ UNIT_MAP['one'] = 'one'
 # вже є в базовому сіді (09-seed.sql: mg_per_m3 - MassConcentration, pct_vol - безрозмірна), нових одиниць не додаємо.
 UNIT_MAP['mg/m3'] = 'mg_per_m3'
 UNIT_MAP['%vol'] = 'pct_vol'
+# ✎ P-1123-4 (людина 23.11): одиниці аргументів C05_05 на колонках шаблону, а не в тексті скрипта (land-script-units.json):
+# густина газу кг/Sm3, нижча теплота згоряння МДж/Sm3. Обидві одиниці - у базовому сіді (seed/00-prelude.sql).
+UNIT_MAP['kg/Sm3'] = 'kg_per_Sm3'
+UNIT_MAP['MJ/Sm3'] = 'MJ_per_Sm3'
 
 # ---------- довідники ----------
 registries = {}
@@ -399,8 +403,8 @@ for _m, _d in sorted(_ro_all.items()):
 TEXT_ARGS = {'T3_00': ['Land_OverhauledEngines', 'Land_Rotation'], 'T5_09': ['Land_TypePetrStation'], 'T5_27': ['Land_TypeBurnFuel']}
 EXTRA = {
     'T3_00': {'CalculationMonth': ('Formula', '[Period].Sequence', 'one', 'Calculation month'),
-              'Density': ('Decimal', None, 'one', 'Gas density (HSE400; manual input here)'),
-              'FuelLowerHeating': ('Decimal', None, 'one', 'Lower heating value (HSE400; manual input here)'),
+              'Density': ('Decimal', None, 'kg/Sm3', 'Gas density (HSE400; manual input here)'),
+              'FuelLowerHeating': ('Decimal', None, 'MJ/Sm3', 'Lower heating value (HSE400; manual input here)'),
               'H2Smass': ('Decimal', None, 'one', 'H2S mass (HSE400; manual input here)'),
               'MercaptanSulphurContent': ('Decimal', None, 'one', 'Mercaptan sulphur content (HSE400; manual input here)')},
     'T5_08': {'DaysInCalcMonth': ('Formula', '[Period].Days', 'one', 'Days in calculation month'),

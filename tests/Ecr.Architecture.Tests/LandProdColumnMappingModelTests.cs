@@ -213,8 +213,9 @@ public sealed class LandProdColumnMappingModelTests
         // + 44 мости аргументів для таблиць 6, 9-11 (LP-10, argumentBridges)
         // + 44 мости складу газу HSE400 (LP-10, argumentBridges.hse400: 37 Density20, Vddg ... на REGFIND/REGFIELD
         //   + 7 мостів потоку Land_TypeFuelOrStream для C11_10, STREAM_ARGUMENT_ALIASES)
-        // + 179 мостів за атрибутами AF-таблиць (LP-10, af_attr_bridges.py: 170 за атрибутами AF + 9 календарних днів;
-        //   з них 2 - OperatingTime T9a_16/T9a_30 за EXCEL_HEADER_OVERRIDES)
+        // + 180 мостів за атрибутами AF-таблиць (LP-10, af_attr_bridges.py: 171 за атрибутами AF + 9 календарних днів;
+        //   з них 2 - OperatingTime T9a_16/T9a_30 за EXCEL_HEADER_OVERRIDES; ✎ P-1123-4: +1 - C11_10 на T9_07
+        //   Land_Measure_SubstanceConsumption = SubstanceConsumptionSm3, RENAMES)
         // + 12 мостів похідних аргументів зі словників C# (LP-10, nae_group_bridges.py: Land_Power 1, Category1 6,
         //   Land_MassFraction_0<код> 5)
         // + 12 колонок GTU-мостів (2026-10-13: T10_03 і T11_03 по 6 = Land_GTU_MonthNo + 5 Land_Measure_Component_*)
@@ -222,7 +223,7 @@ public sealed class LandProdColumnMappingModelTests
         //   на T9a_17/T9a_27, LandArgumentSuffixModelTests)
         // + 3 B26 (P-0118-24/25, gen_ecr_model.py DECIDED_*): колонка статусу D-425 Land_Status T7b_00 (рішення людини, не
         //   прод-розрив, тому не newColumns) + 2 мости Concentration/Volume
-        const int resultColumns = 571 + 44 + 44 + 179 + 12 + 12 + 16 + 3;
+        const int resultColumns = 571 + 44 + 44 + 180 + 12 + 12 + 16 + 3;
         Assert.Equal(55, model.RootElement.GetProperty("stats").GetProperty("columns").GetInt32() - 5147 - resultColumns);
     }
 

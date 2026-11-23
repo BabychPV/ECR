@@ -178,7 +178,7 @@ public sealed class LandArgumentSuffixModelTests
 
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
-    public void Конфлікти_класу_K_закриті_а_T9_07_SubstanceConsumption_лишається_необовязковим_для_C11_10()
+    public void Конфлікти_класу_K_закриті_а_T9_07_SubstanceConsumption_для_C11_10_має_міст_зі_Sm3()
     {
         using var model = Load("land-template.model.json");
         var bridges = model.RootElement.GetProperty("argumentBridges");
@@ -206,12 +206,14 @@ public sealed class LandArgumentSuffixModelTests
             }
         }
 
-        // 9_07: звичайної колонки немає, C11_10 - у переліку необов'язкових (маркер ? у чернетці).
-        Assert.False(tables["T9_07"].ContainsKey("Land_Measure_SubstanceConsumption"));
-        Assert.Contains(
-            "T9_07",
-            bridges.GetProperty("optionalArguments").GetProperty("methodologies").GetProperty("ECW_C11_10")
-                .GetProperty("tables").GetProperty("Land_Measure_SubstanceConsumption").EnumerateArray()
-                .Select(t => t.GetString()));
+        // ✎ P-1123-4 (людина 23.11): 9_07 - звичайний міст C11_10 із SubstanceConsumptionSm3 (як стара система), тож 9_07
+        // НЕ в переліку необов'язкових; суфіксований міст C11_11_02 лишається своїм (те саме джерело). Решта (9a_27, 9a_28) - як була.
+        Assert.True(tables["T9_07"].ContainsKey("Land_Measure_SubstanceConsumption"));
+        Assert.True(tables["T9_07"].ContainsKey("Land_Measure_SubstanceConsumption__ECW_C11_11_02"));
+        var optional = bridges.GetProperty("optionalArguments").GetProperty("methodologies").GetProperty("ECW_C11_10")
+            .GetProperty("tables").GetProperty("Land_Measure_SubstanceConsumption").EnumerateArray()
+            .Select(t => t.GetString()).ToList();
+        Assert.DoesNotContain("T9_07", optional);
+        Assert.Equal(["T9a_27", "T9a_28"], optional);
     }
 }

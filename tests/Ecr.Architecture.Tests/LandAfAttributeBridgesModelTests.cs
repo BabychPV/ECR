@@ -238,8 +238,10 @@ public sealed class LandAfAttributeBridgesModelTests
         // власну колонку із суфіксом, конфлікту немає (LandArgumentSuffixModelTests); звичайна колонка - з атрибута OperatingTime
         Assert.Null(Unresolved(model, "T9a_27", "Land_Measure_OperatingTime"));
         Assert.Null(Unresolved(model, "T9a_17", "Land_Measure_OperatingTime"));
-        // C11_11_02 на 9_07 - суфіксований міст; у C11_10 джерела SubstanceConsumption на 9_07 немає (клас O, optionalArguments)
-        Assert.StartsWith("[AF-немає]", Unresolved(model, "T9_07", "Land_Measure_SubstanceConsumption"), StringComparison.Ordinal);
+        // C11_11_02 на 9_07 - суфіксований міст; ✎ P-1123-4 (людина 23.11): C11_10 на 9_07 бере SubstanceConsumption з
+        // SubstanceConsumptionSm3, як стара система (RENAMES), - звичайний міст, не unresolved
+        Assert.Null(Unresolved(model, "T9_07", "Land_Measure_SubstanceConsumption"));
+        Assert.Contains("SubstanceConsumption20Dgr1atm_M01", Expression(model, "T9_07", "Land_Measure_SubstanceConsumption"), StringComparison.Ordinal);
         // AF-таблиця 9_02 не має OperatingTime: старий код не передає аргумент
         Assert.StartsWith("[AF-немає]", Unresolved(model, "T9_02", "Land_Measure_OperatingTime"), StringComparison.Ordinal);
         // компоненти GTU беруться з іншого рядка таблиці: з 2026-10-13 це предикатні мости (LandGtuBridgesModelTests)
@@ -251,7 +253,7 @@ public sealed class LandAfAttributeBridgesModelTests
         Assert.Contains("LAND_NAE_GROUP", Expression(model, "T9a_17", "Land_Power"), StringComparison.Ordinal);
         // вхід, названий в unresolved, не має колонки-мосту
         var tables = Tables(model);
-        Assert.DoesNotContain("Land_Measure_SubstanceConsumption", Columns(tables["T9_07"]).Keys);
+        Assert.DoesNotContain("Land_Measure_OperatingTime", Columns(tables["T9_02"]).Keys);
         Assert.Contains("Land_Measure_Component_301", Columns(tables["T10_03"]).Keys);
     }
 
