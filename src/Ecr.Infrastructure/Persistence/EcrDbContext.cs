@@ -212,6 +212,9 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
 
     /// <summary>Коди таблиць, які читає скрипт версії (MS01).</summary>
     public DbSet<MethodologyReadTable> MethodologyReadTables => Set<MethodologyReadTable>();
+
+    /// <summary>✎ D-568: поля власної таблиці, які читає скрипт версії.</summary>
+    public DbSet<MethodologyReadField> MethodologyReadFields => Set<MethodologyReadField>();
     public DbSet<MethodologyRule> MethodologyRules => Set<MethodologyRule>();
 
     /// <summary>Правило категорії константи версії — вираз «рядок → ключ категорії» (L-2, <c>calc.CategoryRule</c>).</summary>

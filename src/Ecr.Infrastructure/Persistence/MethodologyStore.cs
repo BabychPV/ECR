@@ -438,6 +438,61 @@ public sealed class MethodologyStore(EcrDbContext db, int constantCap) : IMethod
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Службовий рядок <see cref="MethodologyReadField.RecordedMarker"/> пишеться завжди: версія, що не читає жодного поля,
+    /// відрізняється від версії без запису (її прохід читача вважає читачем усього).
+    /// </remarks>
+    public async Task ReplaceScriptReadFieldsAsync(
+        int versionId, IReadOnlyList<Ecr.Application.Calculations.Scripting.ScriptReadField> fields, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(fields);
+
+        var existing = await db.MethodologyReadFields
+            .Where(f => f.MethodologyVersionId == versionId)
+            .OrderBy(f => f.Id)
+            .Take(MaxChildren + 1)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var wanted = fields
+            .Where(f => !string.IsNullOrWhiteSpace(f.FieldCode))
+            .GroupBy(f => f.FieldCode.Trim(), StringComparer.OrdinalIgnoreCase)
+            .Select(g => (Code: g.Key, OtherMonths: g.Any(f => f.OtherMonths)))
+            .Prepend((Code: MethodologyReadField.RecordedMarker, OtherMonths: false))
+            .ToList();
+
+        // ✎ Огляд b9, п. 4: рядків понад стелю — частковий перелік дав би вставку поля, що вже лежить за стелею
+        // (UQ_MethodologyReadField). Тоді — видалення всього переліку версії одним оператором і вставка заново.
+        if (existing.Count > MaxChildren)
+        {
+            foreach (var row in existing)
+            {
+                db.Entry(row).State = EntityState.Detached;
+            }
+
+            await db.MethodologyReadFields
+                .Where(f => f.MethodologyVersionId == versionId)
+                .ExecuteDeleteAsync(ct)
+                .ConfigureAwait(false);
+            foreach (var (code, otherMonths) in wanted)
+            {
+                db.MethodologyReadFields.Add(new MethodologyReadField(versionId, code, otherMonths));
+            }
+
+            return;
+        }
+
+        db.MethodologyReadFields.RemoveRange(existing.Where(e => !wanted.Exists(
+            w => string.Equals(w.Code, e.FieldCode, StringComparison.OrdinalIgnoreCase) && w.OtherMonths == e.OtherMonths)));
+
+        foreach (var (code, otherMonths) in wanted.Where(w => !existing.Exists(
+                     e => string.Equals(e.FieldCode, w.Code, StringComparison.OrdinalIgnoreCase) && e.OtherMonths == w.OtherMonths)))
+        {
+            db.MethodologyReadFields.Add(new MethodologyReadField(versionId, code, otherMonths));
+        }
+    }
+
+    /// <inheritdoc />
     public async Task ReplaceScriptOutputsAsync(
         int versionId, IReadOnlyList<ScriptOutputRow> rows, CancellationToken ct)
     {

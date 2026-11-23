@@ -38,7 +38,10 @@ public sealed class ApproveSheetHandler(
     ISourceMonthApprovalGate? sourceMonthGate = null,
     // ✎ B80 (N5, D-554): остаточне затвердження аркуша-джерела, що зачепить затверджені залежні місяці, — за політикою
     // зв'язки (підтвердження впливу / причина / відмова); `null` — тестові фабрики обробника.
-    ISourceImpactAssessor? sourceImpact = null)
+    ISourceImpactAssessor? sourceImpact = null,
+    // ✎ F5: місяць споживача, що ще чекає каскаду від зміни джерела (HSE400, D-566), не затверджується (на жодному кроці
+    // маршруту); `null` — тестові фабрики обробника.
+    ISourceCascadePendingGate? cascadeGate = null)
 {
     /// <summary>Затверджує або відхиляє аркуш.</summary>
     /// <param name="documentId">Документ.</param>
@@ -312,6 +315,12 @@ public sealed class ApproveSheetHandler(
             // (approved = false) не блокується. Під блокуванням аркуша, до зрізу й зміни стану; за Any — нічого.
             await SourceMonthApprovalCheck
                 .EnsureApprovedAsync(sourceMonthGate, documentId, periodKey, "Затвердження", ct)
+                .ConfigureAwait(false);
+
+            // ✎ F5: місяць ще чекає каскаду від зміни джерела — затверджений аркуш каскад не переписує, тож підпис закріпив
+            // би застарілі числа. Будь-який крок маршруту; відхилення не блокується.
+            await SourceCascadePendingCheck
+                .EnsureNotPendingAsync(cascadeGate, documentId, periodKey, "Затвердження", ct)
                 .ConfigureAwait(false);
 
             // ⛔ Проміжний крок НЕ робить аркуш затвердженим (`ФВ-5.17`).
