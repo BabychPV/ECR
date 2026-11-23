@@ -1087,11 +1087,11 @@ public sealed class PublishMethodologyHandler(
 
     /// <summary>Проганяє тест і перекладає «періоду немає» на мову тесту (B-13).</summary>
     private async Task<CalculationOutput> RunTestAsync(
-        MethodologyTestCase testCase, MethodologyDescriptor descriptor, CancellationToken ct)
+        MethodologyTestCase testCase, MethodologyDescriptor descriptor, CancellationToken ct, bool flatScript = false)
     {
         try
         {
-            return await ModuleFor(descriptor)
+            return await ModuleFor(descriptor, flatScript)
                 .ExecuteAsync(WithDescriptor(testCase.Input, descriptor), ct)
                 .ConfigureAwait(false);
         }
@@ -1560,7 +1560,9 @@ public sealed class PublishMethodologyHandler(
         var testCases = await methodologies.GetTestCasesAsync(version.Id, ct).ConfigureAwait(false);
         RequireTestPeriods(testCases);
 
-        var verdicts = await JudgeAsync(methodology, version, testCases, ct).ConfigureAwait(false);
+        // ✎ D-571: золотий набір версії, що МІГРУЄ з формул, складено для формульного шляху (плаский вхід, вихід формули) — тож
+        // на Script його рахує модуль скрипта на пласкому вході (GoldenSetModule.ForScript), як формули рахує Generic.
+        var verdicts = await JudgeAsync(methodology, version, testCases, ct, flatScript: true).ConfigureAwait(false);
         RejectRedGoldenSet(version, verdicts, GoldenSet.IsGreen(verdicts, testCases), GoldenSetRefusal.EngineSwitch);
     }
 
@@ -1647,7 +1649,8 @@ public sealed class PublishMethodologyHandler(
         Methodology methodology,
         MethodologyVersion version,
         IReadOnlyList<MethodologyTestCase> testCases,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool flatScript = false)
     {
         // ⛔ Порівняння тут БІЛЬШЕ НЕ ЖИВЕ. Воно винесене в `GoldenSet`, бо
         // тими самими очікуваннями має міряти і прогін без запису
@@ -1658,7 +1661,7 @@ public sealed class PublishMethodologyHandler(
 
         foreach (var testCase in testCases)
         {
-            var output = await RunTestAsync(testCase, Descriptor(methodology, version), ct)
+            var output = await RunTestAsync(testCase, Descriptor(methodology, version), ct, flatScript)
                 .ConfigureAwait(false);
 
             verdicts.Add(GoldenSet.Judge(testCase, output));
@@ -1763,14 +1766,16 @@ public sealed class PublishMethodologyHandler(
     /// Модуль, що рахує версію: для скрипта — перший із зареєстрованих, що <c>CanHandle</c> її дескриптор;
     /// для формул — той самий єдиний модуль, що й до MS.
     /// </summary>
-    private ICalculationModule ModuleFor(MethodologyDescriptor descriptor)
+    private ICalculationModule ModuleFor(MethodologyDescriptor descriptor, bool flatScript = false)
     {
         if (descriptor.Engine != MethodologyEngine.Script)
         {
             return module;
         }
 
-        return GoldenSetModule.ForScript(modules, descriptor)
+        // Публікація версії-скрипта (редактор): золотий набір рівня Module складено в місячних колонках — модуль за CanHandle
+        // (обгортка місячних колонок), як і раніше. Перемикання рушія мігрованої версії — пласкі входи формул (D-571).
+        return (flatScript ? GoldenSetModule.ForScript(modules, descriptor) : modules?.FirstOrDefault(m => m.CanHandle(descriptor)))
                ?? throw new BusinessRuleException(
                    "ECR-CALC-0422",
                    $"Версія {descriptor.VersionNumber}: серед модулів розрахунку немає того, що рахує скрипти.",
@@ -1941,7 +1946,8 @@ public sealed record MethodologyResultDelta(
 }
 
 /// <summary>
-/// ✎ D-571: модуль, яким золотий набір (публікація, перемикання рушія PSS-23) рахує версію-СКРИПТ. Золотий випадок — плаский
+/// ✎ D-571: модуль, яким золотий набір ПЕРЕМИКАННЯ РУШІЯ (PSS-23) рахує мігровану версію-скрипт (публікація скрипта з редактора
+/// для рівня Module лишається на обгортці місячних колонок — її золотий набір складено в місячних колонках). Золотий випадок — плаский
 /// вхід версії (аргументи формул), і формульна версія будь-якого рівня рахується на ньому самим
 /// <c>GenericCalculationModule</c>, без обгортки місячних колонок. Скрипт — так само: модулем скрипта рівня
 /// <c>Configuration</c>, а не <c>MonthColumnArgumentsModule</c> (той чекає місячних колонок документа, тож на золотому
