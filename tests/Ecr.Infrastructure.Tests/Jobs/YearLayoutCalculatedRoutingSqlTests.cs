@@ -40,7 +40,7 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 /// </para>
 /// </remarks>
 [Collection("SqlServer")]
-public sealed class YearLayoutCalculatedRoutingSqlTests(SqlServerFixture sql)
+public sealed partial class YearLayoutCalculatedRoutingSqlTests(SqlServerFixture sql)
 {
     private static readonly DateTime Now = new(2026, 11, 12, 12, 0, 0, DateTimeKind.Utc);
     private const int Year = 2026;

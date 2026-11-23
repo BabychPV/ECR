@@ -3295,12 +3295,15 @@ public sealed partial class RecalculationJob(
             }
 
             // Розкладка версії ПЕРІОДУ-якоря (шкала версій проєкту, doc.fn_VersionOf), а не «чинної» версії проєкту.
-            var layout = await db.TemplateVersions
-                .AsNoTracking()
-                // ✎ B74 P3 (D-576): шкала шаблону ДОКУМЕНТА (пара проєкт × шаблон); без шаблону — основний, як доти.
-                .Where(v => v.Id == (document.TemplateId == null
-                    ? EcrDbContext.VersionOf(document.ProjectId, anchor)
-                    : EcrDbContext.TemplateVersionOf(document.ProjectId, document.TemplateId.Value, anchor)))
+            // ✎ B74 P3 (D-576): шкала шаблону ДОКУМЕНТА (пара проєкт × шаблон); без шаблону — основний, як доти. Гілка — у
+            // C#, а не тернарником у виразі: захоплене `TemplateId.Value` EF обчислював би й для документа без шаблону.
+            var projectOfDocument = document.ProjectId;
+            var anchorVersions = document.TemplateId is { } documentTemplate
+                ? db.TemplateVersions.AsNoTracking()
+                    .Where(v => v.Id == EcrDbContext.TemplateVersionOf(projectOfDocument, documentTemplate, anchor))
+                : db.TemplateVersions.AsNoTracking()
+                    .Where(v => v.Id == EcrDbContext.VersionOf(projectOfDocument, anchor));
+            var layout = await anchorVersions
                 .Select(v => (Domain.Enums.TemplateLayout?)v.Layout)
                 .FirstOrDefaultAsync(ct)
                 .ConfigureAwait(false);
