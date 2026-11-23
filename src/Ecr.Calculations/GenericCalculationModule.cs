@@ -666,7 +666,7 @@ public sealed class GenericCalculationModule(
         {
             // AN-164: рядок без жодного значення — назвати аргументи, яких бракує (інакше тихий нуль).
             MissingArguments = values.Count == 0 && outputs.Count > 0
-                ? MissingArgumentsOf(ordered, binding.Libraries, arguments, optionalArguments)
+                ? MissingArgumentsOf(ordered, binding.Libraries, arguments, optionalArguments, input.Arguments)
                 : null,
 
             // B66: вихід без результату через помилку — проблема рядка StepError (раніше лише трейс, а на Off — ніде).
@@ -687,8 +687,13 @@ public sealed class GenericCalculationModule(
         IReadOnlyList<MethodologyFormula> formulas,
         CalculationLibraries? libraries,
         Dictionary<string, ExpressionValue> arguments,
-        IReadOnlySet<string> optionalArguments)
+        IReadOnlySet<string> optionalArguments,
+        IReadOnlyList<CalculationArgument> raw)
     {
+        // ✎ D-571: заповнена Lookup-комірка (лише id запису) у Legacy для формули — null (D-161), але вона НЕ відсутня: за нею
+        // правило й відібрало рядок, і скрипт її відсутньою не називає (розбіжність паритету C07_07_01 на копії live).
+        var filledLookups = raw.Where(a => a.EntryId is not null).Select(a => a.ArgumentCode)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var missing = new List<string>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var formula in formulas.Concat(libraries?.Versions.SelectMany(v => v.Formulas) ?? []))
@@ -706,6 +711,7 @@ public sealed class GenericCalculationModule(
                 // не заповнювати, а скрипт (`row.X?`) мовчав - 504 розбіжності діагностики C11_10 у колі 3.
                 if (reference.Kind == TraceInputKind.Argument
                     && !optionalArguments.Contains(reference.Code)
+                    && !filledLookups.Contains(reference.Code)
                     && seen.Add(reference.Code)
                     && (!arguments.TryGetValue(reference.Code, out var value) || value.IsNull
                         || value.ErrorCode == Expressions.ExpressionErrors.ArgumentNotFound

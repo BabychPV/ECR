@@ -214,6 +214,9 @@ internal sealed class RuleStand
     private IRegistrySnapshotLoader? _registryLoader;
     private int _period = 202601;
 
+    /// <summary>Числовий режим версії стенда (D-571: діагностика відсутніх аргументів у <c>Legacy</c>).</summary>
+    public NumericMode Mode { get; init; } = NumericMode.Strict;
+
     public RuleStand(string? rule)
     {
         _store.GetCategoryRuleAsync(VersionId, Arg.Any<CancellationToken>()).Returns(rule);
@@ -374,7 +377,7 @@ internal sealed class RuleStand
             Code: "L2_CATEGORY",
             VersionNumber: "1.0.0.0",
             Level: CalculationLevel.Configuration,
-            NumericMode: NumericMode.Strict,
+            NumericMode: Mode,
             CalendarMode: CalendarMode.Actual,
             TraceLevel: TraceLevel.Full);
 
