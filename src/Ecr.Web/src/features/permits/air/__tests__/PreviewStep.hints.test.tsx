@@ -62,7 +62,7 @@ const unchanged = (): AirPreview =>
     missing: [],
     issues: [],
     replace: { confirmationRequired: false, thisOwner: { ownerKey: '5', label: 'P', parents: 3, children: 6 }, otherOwners: [] },
-    diff: { newParents: 0, changedParents: 0, unchangedParents: 3, removedParents: 0, skippedParents: 0, children: 6 },
+    diff: { newParents: 0, changedParents: 0, unchangedParents: 3, removedParents: 0, skippedParents: 0, children: 6, newChildren: 0, changedChildren: 0, removedChildren: 0 },
   });
 
 describe('PreviewStep — missing codes and an empty NAE tree', () => {

@@ -48,7 +48,8 @@ public sealed class RegistryImportServiceTests
         var preview = await Service(target, AllNae(), AllSubstances()).PreviewAsync(File(), Era, Request(), default);
 
         Assert.True(preview.CanApply);
-        Assert.Equal(new ImportDiffCounts(3, 0, 0, 0, 0, 4), preview.Diff);
+        // ✎ D-569: the four substance rows of the three new sources are new rows too (NewChildren).
+        Assert.Equal(new ImportDiffCounts(3, 0, 0, 0, 0, 4, NewChildren: 4), preview.Diff);
         Assert.Equal(0, preview.Replace.ThisOwner.Parents);
         Assert.False(preview.Replace.ConfirmationRequired);
         Assert.Empty(preview.Missing);
