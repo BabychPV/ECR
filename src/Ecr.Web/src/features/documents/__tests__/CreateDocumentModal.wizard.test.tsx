@@ -72,6 +72,16 @@ function mockServer(options: { sheets: typeof twoSheets; refuse?: boolean }): vo
         });
       }
 
+      // ✎ B74 P4: шаблони проєкту — один (основний), майстер обирає його сам.
+      if (url.includes('/api/v1/projects/1/templates')) {
+        return jsonResponse([
+          {
+            projectTemplateId: 1, templateId: 4, templateCode: 'GEN-UPSTREAM', templateNameL10n: { values: {} },
+            currentTemplateVersionId: 5, version: '2.3.0', layout: 'PerMonthCopies', isPrimary: true, documentCount: 0,
+          },
+        ]);
+      }
+
       if (url.includes('/projects/1/periods')) {
         return jsonResponse({
           projectId: 1, currentPeriodMode: 'Auto', periodKind: 'Monthly',
@@ -115,7 +125,11 @@ async function toSheetsStep(): Promise<void> {
   fireEvent.click(await screen.findByLabelText(/documents\.project/, { selector: 'input' }));
   fireEvent.click(await screen.findByRole('option', { name: 'P07131100' }));
   await waitFor(() => expect(next().disabled).toBe(false));
-  // ✎ Period clarity (п. e): кроку Period немає — одразу Sheets.
+  // ✎ B74 P4: крок Template — єдиний шаблон проєкту обраний сам.
+  fireEvent.click(next());
+  await screen.findByText('⟦documents.createTemplateStep⟧');
+  await waitFor(() => expect(next().disabled).toBe(false));
+  // ✎ Period clarity (п. e): кроку Period немає — далі Sheets.
   fireEvent.click(next());
   await screen.findByText('⟦documents.createSheetsHint⟧');
   expect(screen.queryByLabelText('⟦documents.period⟧')).toBeNull();
@@ -154,7 +168,7 @@ describe('UI-31: майстер створення документа', () => {
     expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes('/periods'))).toBe(false);
   });
 
-  it('Next вимкнений, доки не обрано проєкт; версію шаблону видно на першому кроці', async () => {
+  it('Next вимкнений, доки не обрано проєкт; версію шаблону видно в кроці Template', async () => {
     mockServer({ sheets: twoSheets });
     show();
 
@@ -163,6 +177,8 @@ describe('UI-31: майстер створення документа', () => {
 
     fireEvent.click(screen.getByLabelText(/documents\.project/, { selector: 'input' }));
     fireEvent.click(await screen.findByRole('option', { name: 'P07131100' }));
+    await waitFor(() => expect(next().disabled).toBe(false));
+    fireEvent.click(next());
     await screen.findByText('GEN-UPSTREAM · v2.3.0');
     await waitFor(() => expect(next().disabled).toBe(false));
   });

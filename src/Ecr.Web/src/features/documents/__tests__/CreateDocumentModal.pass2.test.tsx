@@ -51,6 +51,16 @@ function mockServer(options: { existing: { id: number; businessKey: string }[] }
         });
       }
 
+      // ✎ B74 P4: єдиний шаблон проєкту — майстер обирає його сам.
+      if (url.includes('/api/v1/projects/1/templates')) {
+        return jsonResponse([
+          {
+            projectTemplateId: 1, templateId: 4, templateCode: 'GEN-UPSTREAM', templateNameL10n: { values: {} },
+            currentTemplateVersionId: 5, version: '2.3.0', layout: 'PerMonthCopies', isPrimary: true, documentCount: 0,
+          },
+        ]);
+      }
+
       if (url.includes('/api/v1/projects')) {
         return jsonResponse({ items: [{ id: 1, code: 'P07131100', status: 'Active' }], nextCursor: null, totalCount: 1 });
       }
@@ -137,6 +147,9 @@ describe('Pass2 п. 4: у проєкту вже є документ — попе
     expect(screen.getByRole('button', { name: '⟦documents.createExistsShowAll⟧' })).toBeTruthy();
     expect(next().disabled).toBe(false);
 
+    fireEvent.click(next()); // → Template (✎ B74 P4)
+    await screen.findByText('⟦documents.createTemplateStep⟧');
+    await waitFor(() => expect(next().disabled).toBe(false));
     fireEvent.click(next()); // → Sheets
     await screen.findByText('⟦documents.createSheetsHint⟧');
     fireEvent.click(next()); // → Review

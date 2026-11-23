@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 /**
  * UI-31: «New document» — майстер (`KIT.md` §6.9, макет `screens-work.js` `openCreate`):
- * Project → Period → Sheets → Review. Прогін у браузері на стенді: справжній лінивий чанк,
+ * Project → Template → Sheets → Review (✎ Period clarity: без Period; ✎ B74 P4: крок Template). Прогін у браузері на стенді: справжній лінивий чанк,
  * справжні `document-template`/`periods`, повернення фокуса на кнопку-відкривач.
  *
  * ⚠ Документ НЕ створюється: прогін доходить до кроку Review і закривається — стенд
@@ -40,7 +40,17 @@ test.describe('Майстер створення документа', () => {
     await dialog.getByRole('textbox').first().click();
     // ⚠ Не `getByRole('option').first()`: на сторінці є нативний `<select>` фільтра
     // стану, і перший `option` — його «All states», а не проєкт.
-    await page.getByRole('listbox', { name: /Project|Проект/i }).getByRole('option').filter({ hasNotText: /E2E[ -]?(groups|bottom)|E2E(Groups|Bottom)Prj/i }).first().click();
+    await page.getByRole('listbox', { name: /Project|Проект/i }).getByRole('option').filter({ hasNotText: /E2E[ -]?(groups|bottom)|E2E(Groups|Bottom|B74)Prj/i }).first().click();
+    await expect(next, 'проєкт не обрався').toBeEnabled({ timeout: 15_000 });
+
+    // ✎ B74 P4: крок Template — шаблони обраного проєкту; єдиний обраний сам, із кількох — перший.
+    await next.click(); // → Template
+    const templateField = dialog.getByRole('textbox', { name: /^Template/ });
+    await expect(templateField, 'немає кроку Template').toBeVisible({ timeout: 15_000 });
+    if ((await templateField.inputValue()) === '') {
+      await templateField.click();
+      await page.getByRole('listbox', { name: /Template/ }).getByRole('option').first().click();
+    }
     await expect(next, 'склад нового документа не приїхав').toBeEnabled({ timeout: 15_000 });
 
     await next.click(); // → Sheets (✎ Period clarity: кроку Period немає)
