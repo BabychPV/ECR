@@ -120,4 +120,37 @@ public sealed partial class DocumentVersionMigrationTests
             .Content.ReadAsStringAsync().ConfigureAwait(true)).RootElement;
         Assert.True(dry.GetProperty("canApply").GetBoolean(), dry.ToString());
     }
+
+    /// <summary>
+    /// ✎ P-1123-4 (вода T7b_00): вихід методології (Calculated) у цільовій версії рахує ФОРМУЛА ТАБЛИЦІ, а прив'язку свідомо знято -
+    /// це не «прив'язка без відповідника» (колонка не лишається порожньою). Мутаційний доказ: прибрати
+    /// <c>formulaTargets</c> у <c>DocumentVersionMigrationStore.CountUnmappedBindingsAsync</c> - червоний.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "D-13")]
+    public async Task Прив_язка_замінена_формулою_таблиці_в_цільовій_версії_не_є_bindingsNotMapped()
+    {
+        var s = await ArrangeAsync(Target.OnlyLabels, publishTarget: false).ConfigureAwait(true);
+        await AddBindingAsync(s.Doc.TableDefId, s.Doc.ColumnDefIds[1]).ConfigureAwait(true);
+        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            var c2 = s.TargetColumns["C2"];
+            await db.Database.ExecuteSqlRawAsync(
+                "UPDATE cfg.ColumnDef SET DataType = 8 WHERE Id = {2}; " +   // джерело - вихід методології (Calculated)
+                "UPDATE cfg.ColumnDef SET DataType = 6, IsReadOnly = 1 WHERE Id = {0}; " +
+                "INSERT INTO cfg.FormulaDef (TableDefId, ColumnDefId, Scope, Dialect, Expression) VALUES ({1}, {0}, 0, 0, N'1+1'); " +
+                "UPDATE v SET Status = 1, PublishedAt = SYSUTCDATETIME(), PublishedByUserId = 1 FROM cfg.TemplateVersion v " +
+                "JOIN cfg.SheetDef sd ON sd.TemplateVersionId = v.Id JOIN cfg.TableDef td ON td.SheetDefId = sd.Id WHERE td.Id = {1};",
+                [c2, s.TargetTableDefId, s.Doc.ColumnDefIds[1]]).ConfigureAwait(true);
+        }
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var dry = JsonDocument.Parse(await (await PostAsync(client, s, "Safe", dryRun: true).ConfigureAwait(true))
+            .Content.ReadAsStringAsync().ConfigureAwait(true)).RootElement;
+        Assert.DoesNotContain("bindingsNotMapped", dry.GetProperty("refusals").EnumerateArray().Select(r => r.GetString()));
+    }
 }
