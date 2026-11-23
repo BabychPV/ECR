@@ -267,12 +267,11 @@ switch ($Stage) {
         }
         $gp = Get-Content -LiteralPath $proposals -Raw -Encoding UTF8 | ConvertFrom-Json
         $created = New-Object System.Collections.Generic.List[object]
-        $byVid = [ordered]@{}
-        foreach ($x in $gp.versions) { $byVid[[int]$x.versionId] = @{ P = $x; R = @() } }
+        # ✎ Репетиція b11: зведення за версією — Merge-MsGoldenPlan (MsPhase.Lib.ps1, рядкові ключі; тест MsPhaseLibTests).
         $bp = Join-Path $Work 'borrowed-rules.json'
-        if (Test-Path -LiteralPath $bp) { foreach ($x in (Read-Json 'borrowed-rules.json').versions) { if (@($x.rules).Count -gt 0) { if (-not $byVid.Contains([int]$x.versionId)) { $byVid[[int]$x.versionId] = @{ P = $null; R = @() } }; $byVid[[int]$x.versionId].R = @($x.rules) } } }
-        foreach ($vid in @($byVid.Keys)) {
-            $pr = $byVid[$vid].P; $extraRules = @($byVid[$vid].R)
+        $borrowedVersions = if (Test-Path -LiteralPath $bp) { @((Read-Json 'borrowed-rules.json').versions) } else { @() }
+        foreach ($entry in @(Merge-MsGoldenPlan -Proposals @($gp.versions) -Borrowed $borrowedVersions)) {
+            $vid = [int]$entry.VersionId; $pr = $entry.P; $extraRules = @($entry.R)
             # Випадок без очікувань АБО з документом, якого в базі немає (ворота: «тест не має періоду») — замінюється рядком ECR.
             $empty = @(Invoke-Sql "SELECT t.Code FROM calc.TestCase t WHERE t.MethodologyVersionId = $vid AND (t.ExpectedJson IS NULL OR REPLACE(REPLACE(REPLACE(t.ExpectedJson, ' ', ''), CHAR(10), ''), CHAR(13), '') = '{}' OR NOT EXISTS (SELECT 1 FROM doc.Document d WHERE d.Id = TRY_CAST(JSON_VALUE(t.InputJson, '$.documentId') AS bigint)))")
             if ($empty.Count -eq 0 -and $extraRules.Count -eq 0) { continue }

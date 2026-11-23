@@ -209,6 +209,30 @@ public sealed class MsPhaseLibTests
         Assert.Contains("OPBOUND=True", output, StringComparison.Ordinal);
     }
 
+    /// <remarks>
+    /// Репетиція b11 (8e58d19b8): <c>-Stage GoldenVersions</c> шляхом API (без <c>-CopyAsUser</c>, як на живому вікні) падав
+    /// «Specified argument was out of the range … index»: <c>[ordered]@{}</c> з ключем <c>[int]</c> бере ПОЗИЦІЙНИЙ індексатор
+    /// (запис кидає, читання мовчки дає <c>$null</c>). Ідентифікатори версій навмисно великі й не з нуля — як у живій базі.
+    /// Мутація: повернути ключ <c>[int]</c> у <c>Merge-MsGoldenPlan</c> — червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Золотий_план_шляху_API_зводить_пропозиції_й_позичені_правила_за_версією()
+    {
+        var (exit, output) = RunPowerShell("""
+            $prop = '[{"versionId":141,"code":"A"},{"versionId":7,"code":"B"}]' | ConvertFrom-Json
+            $bor = '[{"versionId":141,"rules":[{"code":"R1"}]},{"versionId":512,"rules":[{"code":"R2"},{"code":"R3"}]},{"versionId":9,"rules":[]}]' | ConvertFrom-Json
+            $plan = @(Merge-MsGoldenPlan -Proposals $prop -Borrowed $bor)
+            foreach ($e in $plan) { 'E ' + $e.VersionId + ' P=' + $(if ($null -eq $e.P) { '-' } else { $e.P.code }) + ' R=' + @($e.R).Count }
+            """);
+
+        Assert.True(exit == 0, output);
+        Assert.Contains("E 141 P=A R=1", output, StringComparison.Ordinal);
+        Assert.Contains("E 7 P=B R=0", output, StringComparison.Ordinal);
+        Assert.Contains("E 512 P=- R=2", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("E 9 ", output, StringComparison.Ordinal);
+    }
+
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
     public void Покриття_називає_умову_без_хибного_рядка()
