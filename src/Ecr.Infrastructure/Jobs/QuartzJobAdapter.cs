@@ -68,6 +68,22 @@ public sealed partial class QuartzJobAdapter(
         var progress = provider.GetService<IJobProgressStore>();
         var clock = provider.GetRequiredService<IClock>();
 
+        // ✎ M11 (W15z, JQ-FIFO у Quartz): раніше поставлений перерахунок того самого документа ще чекає чи виконується —
+        // ця задача стає за ним (відкладення без відліку стелі, як очікування місця нижче), а не обганяє його, коли лок
+        // документа звільнився в мить її триґера. Натискання людини не стоїть за системними (прохід «спершу ручні»).
+        if (QuartzDocumentFifo.AppliesTo(typeName)
+            && !RecalculationJob.IsManualPress(job.GetType(), payload)
+            && await QuartzDocumentFifo.EarlierPendingAsync(context.Scheduler, context.JobDetail, context.CancellationToken)
+                .ConfigureAwait(false) is { } ahead)
+        {
+            var fifoDelay = provider.GetService<QuartzDocumentFifoSettings>()?.RetryDelay ?? QuartzDocumentFifo.DefaultRetryDelay;
+            LogDocumentFifoWait(logger, jobId, ahead, fifoDelay);
+            await ScheduleDeferredAsync(context, CorrelationOf(context), clock, fifoDelay, DeferredSince(context))
+                .ConfigureAwait(false);
+            QuartzPayloadMerges.Reopen(jobId);
+            return;
+        }
+
         // ⛔ AN-116 (P1-06): межа за ТИПОМ — експорт/імпорт Excel не більше `Jobs:Excel:MaxConcurrency`
         // одночасно. Понад межу задача не чекає на потоці пулу (тримала б його, як лок у I2), а отримує
         // одноразовий триґер через відступ — і рядок лишається Queued. Перевірка ДО виміру затримки старту:
@@ -688,6 +704,9 @@ public sealed partial class QuartzJobAdapter(
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Задача {JobId} ({TypeName}) чекає: уже виконується {Limit} задач цього типу; повтор через {Delay}.")]
     private static partial void LogJobTypeLimitReached(ILogger logger, string jobId, string typeName, int limit, TimeSpan delay);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Задача {JobId} чекає: раніше поставлений перерахунок того самого документа {AheadJobId} ще не завершено; повтор через {Delay}.")]
+    private static partial void LogDocumentFifoWait(ILogger logger, string jobId, string aheadJobId, TimeSpan delay);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Задача {TypeName} ({JobId}) не зареєстрована.")]
     private static partial void LogUnknownJob(ILogger logger, string typeName, string jobId);
