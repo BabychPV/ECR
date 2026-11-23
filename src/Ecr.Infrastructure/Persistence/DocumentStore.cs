@@ -74,25 +74,42 @@ public sealed class DocumentStore(
     /// RPT-STABLE Part B: рідка карта «період → версія» для проєктів зі шкалою з кількох сегментів: лише періоди, версія яких
     /// відрізняється від чинної. Проєкт з одним сегментом (або без шкали) у результат не потрапляє.
     /// </summary>
-    private async Task<Dictionary<int, IReadOnlyDictionary<string, string>>> VersionByPeriodAsync(
-        IReadOnlyCollection<int> projectIds, CancellationToken ct)
+    /// <remarks>
+    /// ✎ B74 P3 (D-576): шкала — ПАРИ проєкт × шаблон документа (ключ результату — пара): у проєкті з кількома шаблонами
+    /// рядки іншого шаблону не змішуються з цим, а «чинна» — версія пари (<c>doc.ProjectTemplate</c>); документ без
+    /// шаблону (<c>NULL</c>) — основний шаблон, як доти.
+    /// </remarks>
+    private async Task<Dictionary<(int ProjectId, int? TemplateId), IReadOnlyDictionary<string, string>>> VersionByPeriodAsync(
+        IReadOnlyCollection<(int ProjectId, int? TemplateId)> keys, CancellationToken ct)
     {
-        var result = new Dictionary<int, IReadOnlyDictionary<string, string>>();
-        var ids = projectIds.Distinct().ToList();
+        var result = new Dictionary<(int ProjectId, int? TemplateId), IReadOnlyDictionary<string, string>>();
+        var ids = keys.Select(k => k.ProjectId).Distinct().ToList();
         var entries = await db.ProjectTemplateVersions
             .AsNoTracking()
             .Where(t => ids.Contains(t.ProjectId))
-            .Select(t => new { t.ProjectId, t.FromPeriodKey, t.TemplateVersionId })
+            .Select(t => new { t.ProjectId, t.TemplateId, t.FromPeriodKey, t.TemplateVersionId })
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        foreach (var group in entries.GroupBy(e => e.ProjectId).Where(g => g.Count() > 1))
+        foreach (var key in keys.Distinct())
         {
+            var group = entries
+                .Where(e => e.ProjectId == key.ProjectId && (key.TemplateId == null || e.TemplateId == key.TemplateId))
+                .ToList();
+            if (group.Count <= 1)
+            {
+                continue;
+            }
+
             var line = group.OrderBy(e => e.FromPeriodKey).Select(e => new TimelineEntry(e.FromPeriodKey, e.TemplateVersionId)).ToList();
-            var current = await db.Projects.AsNoTracking()
-                .Where(p => p.Id == group.Key).Select(p => p.TemplateVersionId).FirstAsync(ct).ConfigureAwait(false);
+            var current = await db.ProjectTemplates.AsNoTracking()
+                              .Where(pt => pt.ProjectId == key.ProjectId && pt.TemplateId == key.TemplateId)
+                              .Select(pt => (int?)pt.CurrentTemplateVersionId)
+                              .FirstOrDefaultAsync(ct).ConfigureAwait(false)
+                          ?? await db.Projects.AsNoTracking()
+                              .Where(p => p.Id == key.ProjectId).Select(p => p.TemplateVersionId).FirstAsync(ct).ConfigureAwait(false);
             var periodKeys = await db.Periods.AsNoTracking()
-                .Where(p => p.ProjectId == group.Key).OrderBy(p => p.PeriodKeyValue).Select(p => p.PeriodKeyValue)
+                .Where(p => p.ProjectId == key.ProjectId).OrderBy(p => p.PeriodKeyValue).Select(p => p.PeriodKeyValue)
                 .ToListAsync(ct).ConfigureAwait(false);
             var differing = periodKeys
                 .Select(k => (Key: k, Version: ProjectVersionTimeline.VersionOf(line, k, current)))
@@ -106,7 +123,7 @@ public sealed class DocumentStore(
             var versionIds = differing.Select(x => x.Version).Distinct().ToList();
             var labels = await db.TemplateVersions.AsNoTracking()
                 .Where(v => versionIds.Contains(v.Id)).ToDictionaryAsync(v => v.Id, v => v.Version, ct).ConfigureAwait(false);
-            result[group.Key] = differing.ToDictionary(
+            result[key] = differing.ToDictionary(
                 x => x.Key.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 x => labels.GetValueOrDefault(x.Version, x.Version.ToString(System.Globalization.CultureInfo.InvariantCulture)),
                 StringComparer.Ordinal);
@@ -145,18 +162,34 @@ public sealed class DocumentStore(
                 // D-12: картка читає «коли й ким змінено» так само, як перелік (`ListAsync`); раніше ці поля тут
                 // не вибирались, і картка віддавала `null` усім. Звуженому читачеві їх знімає R-7 (`DocumentSheetVisibility.For`).
                 d.ModifiedAt,
-                // RC15: версія шаблону проєкту - у тому самому запиті (без додаткового роундтрипу).
-                TemplateVersion = db.Projects.Where(p => p.Id == d.ProjectId)
-                    .Join(db.TemplateVersions, p => p.TemplateVersionId, v => v.Id, (p, v) => v.Version)
+                // RC15: версія шаблону - у тому самому запиті (без додаткового роундтрипу).
+                // ✎ B74 P3 (D-576): чинна версія ШАБЛОНУ ДОКУМЕНТА (пара doc.ProjectTemplate); без пари — версія проєкту, як доти.
+                TemplateVersion = db.TemplateVersions
+                    .Where(v => v.Id == (db.ProjectTemplates
+                                             .Where(pt => pt.ProjectId == d.ProjectId && pt.TemplateId == d.TemplateId)
+                                             .Select(pt => (int?)pt.CurrentTemplateVersionId).FirstOrDefault()
+                                         ?? db.Projects.Where(p => p.Id == d.ProjectId).Select(p => p.TemplateVersionId).FirstOrDefault()))
+                    .Select(v => v.Version)
                     .FirstOrDefault(),
                 // D-474: розкладка тієї самої версії - у тому самому запиті; ✎ B75: разом із режимом погодження (одне читання).
-                VersionFacts = db.Projects.Where(p => p.Id == d.ProjectId)
-                    .Join(db.TemplateVersions, p => p.TemplateVersionId, v => v.Id,
-                        (p, v) => new { Layout = (TemplateLayout?)v.Layout, Mode = (WorkflowMode?)v.WorkflowMode })
+                VersionFacts = db.TemplateVersions
+                    .Where(v => v.Id == (db.ProjectTemplates
+                                             .Where(pt => pt.ProjectId == d.ProjectId && pt.TemplateId == d.TemplateId)
+                                             .Select(pt => (int?)pt.CurrentTemplateVersionId).FirstOrDefault()
+                                         ?? db.Projects.Where(p => p.Id == d.ProjectId).Select(p => p.TemplateVersionId).FirstOrDefault()))
+                    .Select(v => new { Layout = (TemplateLayout?)v.Layout, Mode = (WorkflowMode?)v.WorkflowMode })
                     .FirstOrDefault(),
                 // ✎ RPT-STABLE Part B: ознака «кілька версій за періодами» - у тому самому запиті (без зайвого звернення).
+                // ✎ B74 P3: лише рядки шкали шаблону документа.
                 Multi = db.ProjectTemplateVersions.Any(t => t.ProjectId == d.ProjectId
-                    && t.TemplateVersionId != db.Projects.Where(p => p.Id == d.ProjectId).Select(p => p.TemplateVersionId).FirstOrDefault()),
+                    && (d.TemplateId == null || t.TemplateId == d.TemplateId)
+                    && t.TemplateVersionId != (db.ProjectTemplates
+                                                   .Where(pt => pt.ProjectId == d.ProjectId && pt.TemplateId == d.TemplateId)
+                                                   .Select(pt => (int?)pt.CurrentTemplateVersionId).FirstOrDefault()
+                                               ?? db.Projects.Where(p => p.Id == d.ProjectId).Select(p => p.TemplateVersionId).FirstOrDefault())),
+                // ✎ B74 P3 (D-576): шаблон документа — колонка «Template» переліку й картка.
+                TemplateCode = db.Templates.Where(t => t.Id == d.TemplateId).Select(t => t.Code).FirstOrDefault(),
+                d.TemplateId,
                 // AN-63: періодичність проєкту - підзапит у тому самому запиті (без додаткового роундтрипу); (PeriodKind?) - null, якщо проєкту немає.
                 ProjectPeriodKind = db.Projects.Where(p => p.Id == d.ProjectId).Select(p => (PeriodKind?)p.PeriodKind).FirstOrDefault(),
                 ModifiedBy = db.Users.Where(u => u.Id == d.ModifiedByUserId).Select(u => u.DisplayName).FirstOrDefault(),
@@ -242,7 +275,8 @@ public sealed class DocumentStore(
             ResultsStaleSince: stale?.GetValueOrDefault(documentId),
             TemplateVersion: document.TemplateVersion,
             TemplateVersionByPeriod: document.Multi
-                ? (await VersionByPeriodAsync([document.ProjectId], ct).ConfigureAwait(false)).GetValueOrDefault(document.ProjectId)
+                ? (await VersionByPeriodAsync([(document.ProjectId, document.TemplateId)], ct).ConfigureAwait(false))
+                    .GetValueOrDefault((document.ProjectId, document.TemplateId))
                 : null,
             OwnerUserId: document.CreatedByUserId,
             ProjectIsReadOnly: document.ProjectReadOnly,
@@ -250,7 +284,8 @@ public sealed class DocumentStore(
             TemplateLayout: templateLayout?.ToString(),
             ReopenedPeriods: reopened,
             WorkflowMode: workflowMode?.ToString(),
-            ProjectStatus: document.ProjectStatus?.ToString());
+            ProjectStatus: document.ProjectStatus?.ToString(),
+            TemplateCode: document.TemplateCode);
     }
 
     /// <summary>
@@ -577,19 +612,36 @@ public sealed class DocumentStore(
                 // ✎ D-450: ідентифікатор власника поруч з іменем, тим самим розкриттям (звуженому читачеві `For` знімає обидва).
                 d.CreatedByUserId,
                 // ✎ RPT-STABLE: типова версія шаблону — скалярний підзапит у тому самому запиті сторінки (запитів не додається).
-                db.Projects.Where(p => p.Id == d.ProjectId)
-                    .Join(db.TemplateVersions, p => p.TemplateVersionId, v => v.Id, (p, v) => v.Version)
+                // ✎ B74 P3 (D-576): чинна версія шаблону ДОКУМЕНТА (пара); без пари — версія проєкту, як доти.
+                db.TemplateVersions
+                    .Where(v => v.Id == (db.ProjectTemplates
+                                             .Where(pt => pt.ProjectId == d.ProjectId && pt.TemplateId == d.TemplateId)
+                                             .Select(pt => (int?)pt.CurrentTemplateVersionId).FirstOrDefault()
+                                         ?? db.Projects.Where(p => p.Id == d.ProjectId).Select(p => p.TemplateVersionId).FirstOrDefault()))
+                    .Select(v => v.Version)
                     .FirstOrDefault(),
                 // D-474: розкладка тієї самої версії — скалярний підзапит у тому самому запиті сторінки.
-                db.Projects.Where(p => p.Id == d.ProjectId)
-                    .Join(db.TemplateVersions, p => p.TemplateVersionId, v => v.Id, (p, v) => (TemplateLayout?)v.Layout)
+                db.TemplateVersions
+                    .Where(v => v.Id == (db.ProjectTemplates
+                                             .Where(pt => pt.ProjectId == d.ProjectId && pt.TemplateId == d.TemplateId)
+                                             .Select(pt => (int?)pt.CurrentTemplateVersionId).FirstOrDefault()
+                                         ?? db.Projects.Where(p => p.Id == d.ProjectId).Select(p => p.TemplateVersionId).FirstOrDefault()))
+                    .Select(v => (TemplateLayout?)v.Layout)
                     .FirstOrDefault(),
                 // ✎ RPT-STABLE Part B: ознака «у проєкті кілька версій за періодами» - у тому самому запиті сторінки.
+                // ✎ B74 P3: лише рядки шкали шаблону документа.
                 db.ProjectTemplateVersions.Any(t => t.ProjectId == d.ProjectId
-                    && t.TemplateVersionId != db.Projects.Where(p => p.Id == d.ProjectId).Select(p => p.TemplateVersionId).FirstOrDefault()),
+                    && (d.TemplateId == null || t.TemplateId == d.TemplateId)
+                    && t.TemplateVersionId != (db.ProjectTemplates
+                                                   .Where(pt => pt.ProjectId == d.ProjectId && pt.TemplateId == d.TemplateId)
+                                                   .Select(pt => (int?)pt.CurrentTemplateVersionId).FirstOrDefault()
+                                               ?? db.Projects.Where(p => p.Id == d.ProjectId).Select(p => p.TemplateVersionId).FirstOrDefault())),
                 // ✎ B147 (B75): документ «без погодження» за період — той самий ключ, що у фільтра стану; у тому самому запиті.
                 // (За рік ключі — періодів року; ознака рядка тоді не використовується: стан несе кожна клітинка.)
-                noneKeys.Any(n => n.ProjectId == d.ProjectId && n.TemplateId == d.TemplateId)));
+                noneKeys.Any(n => n.ProjectId == d.ProjectId && n.TemplateId == d.TemplateId),
+                // ✎ B74 P3 (D-576): шаблон документа — колонка «Template» переліку.
+                d.TemplateId,
+                db.Templates.Where(t => t.Id == d.TemplateId).Select(t => t.Code).FirstOrDefault()));
 
         var hasMore = rows.Count > page.Limit;
         var page1 = rows.Take(page.Limit).ToList();
@@ -626,7 +678,7 @@ public sealed class DocumentStore(
             ? await ReopenedPeriodsBatchAsync([.. page1.Select(d => d.Id)], filter, ct).ConfigureAwait(false)
             : null;
 
-        var multiProjects = page1.Where(d => d.MultiVersion).Select(d => d.ProjectId).ToList();
+        var multiProjects = page1.Where(d => d.MultiVersion).Select(d => (d.ProjectId, d.TemplateId)).ToList();
         var versionByPeriod = multiProjects.Count == 0
             ? []
             : await VersionByPeriodAsync(multiProjects, ct).ConfigureAwait(false);
@@ -658,7 +710,8 @@ public sealed class DocumentStore(
                 OwnerUserId: d.OwnerUserId,
                 TemplateVersion: d.TemplateVersion,
                 TemplateLayout: d.Layout?.ToString(),
-                TemplateVersionByPeriod: versionByPeriod.GetValueOrDefault(d.ProjectId),
+                TemplateVersionByPeriod: versionByPeriod.GetValueOrDefault((d.ProjectId, d.TemplateId)),
+                TemplateCode: d.TemplateCode,
                 PeriodStates: periodStates is null ? null : periodStates.GetValueOrDefault(d.Id) ?? [],
                 ReopenedPeriods: reopenedByDocument is null ? null : reopenedByDocument.GetValueOrDefault(d.Id) ?? [],
                 // ✎ B147: режим погодження версії документа за період рядка; без періоду — `null` (рік — у `PeriodStates`).
@@ -1204,9 +1257,27 @@ public sealed class DocumentStore(
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
+        var released = await ReleasedKeysAsync(projectId, ct).ConfigureAwait(false);
+
+        var highest = 0;
+
+        foreach (var key in live.Concat(released))
+        {
+            if (NumberOf(key, prefix) is { } number && number > highest)
+            {
+                highest = number;
+            }
+        }
+
+        return highest;
+    }
+
+    /// <summary>Ключі, які проєкт видавав і звільнив (видалення, зміна ключа) — з журналу безпеки (`R-17`).</summary>
+    private async Task<List<string>> ReleasedKeysAsync(int projectId, CancellationToken ct)
+    {
         var project = projectId.ToString(CultureInfo.InvariantCulture);
 
-        var released = await db.Database
+        return await db.Database
             .SqlQuery<string>($"""
                 SELECT JSON_VALUE(e.DetailsJson, '$.businessKey') AS [Value]
                   FROM aud.SecurityEvent AS e
@@ -1220,18 +1291,89 @@ public sealed class DocumentStore(
                 """)
             .ToListAsync(ct)
             .ConfigureAwait(false);
+    }
 
-        var highest = 0;
+    /// <inheritdoc />
+    /// <remarks>
+    /// ✎ B74 P3 (D-576): ті самі гарантії, що й <see cref="NextBusinessKeyAsync"/>, на пару проєкт × шаблон — номер від
+    /// найбільшого виданого з цим префіксом (живі ключі + звільнені з журналу, `R-17`), розкид на повторі (`DAT-09`).
+    /// Префікс несе і код шаблону, і проєкт, тож ключі різних шаблонів одного проєкту не перетинаються під
+    /// <c>UQ_Document (ProjectId, BusinessKey)</c>.
+    /// </remarks>
+    public async Task<string> NextTemplateBusinessKeyAsync(int projectId, string templateCode, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(templateCode);
 
+        var prefix = TemplateKeyPrefix(templateCode, projectId);
+
+        var live = await db.Documents
+            .AsNoTracking()
+            .Where(d => d.ProjectId == projectId && d.BusinessKey.StartsWith(prefix))
+            .Select(d => d.BusinessKey)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var released = await ReleasedKeysAsync(projectId, ct).ConfigureAwait(false);
+
+        var used = 0;
         foreach (var key in live.Concat(released))
         {
-            if (NumberOf(key, prefix) is { } number && number > highest)
+            if (NumberAfter(key, prefix) is { } number && number > used)
             {
-                highest = number;
+                used = number;
             }
         }
 
-        return highest;
+        var retry = _keyRequests++;
+        var spread = retry == 0
+            ? 0
+            : System.Random.Shared.Next(1, Math.Min(MaxKeySpread, KeySpreadStep << (retry - 1)) + 1);
+
+        for (var attempt = used + 1 + spread; attempt < used + spread + MaxKeyAttempts; attempt++)
+        {
+            var candidate = string.Create(CultureInfo.InvariantCulture, $"{prefix}{attempt:D4}");
+
+            if (!await db.Documents
+                    .AnyAsync(d => d.ProjectId == projectId && d.BusinessKey == candidate, ct)
+                    .ConfigureAwait(false))
+            {
+                return candidate;
+            }
+        }
+
+        throw new Application.Errors.BusinessRuleException(
+            "ECR-DOC-0409", "Не вдалося підібрати вільний бізнес-ключ документа.",
+            new Dictionary<string, object?> { ["messageKey"] = "err.ECR-DOC-0409.businessKeyExhausted" });
+    }
+
+    /// <summary>✎ B74 P3: префікс ключа документа шаблону — <c>{код шаблону}-P{проєкт}-</c>.</summary>
+    public static string TemplateKeyPrefix(string templateCode, int projectId)
+        => string.Create(CultureInfo.InvariantCulture, $"{templateCode}-P{projectId}-");
+
+    /// <summary>
+    /// ✎ B74 P3: номер із ключа <c>{префікс}{номер}</c> — після префікса лише цифри; інакше <c>null</c> (ключ, заданий
+    /// людиною, чи ключ іншого шаблону/проєкту).
+    /// </summary>
+    public static int? NumberAfter(string? businessKey, string prefix)
+    {
+        if (businessKey is null || businessKey.Length == prefix.Length
+            || !businessKey.StartsWith(prefix, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        for (var i = prefix.Length; i < businessKey.Length; i++)
+        {
+            if (!char.IsAsciiDigit(businessKey[i]))
+            {
+                return null;
+            }
+        }
+
+        return int.TryParse(
+            businessKey.AsSpan(prefix.Length), NumberStyles.None, CultureInfo.InvariantCulture, out var number)
+            ? number
+            : null;
     }
 
     /// <summary>
@@ -1424,11 +1566,17 @@ public sealed class DocumentStore(
     {
         // Один запит через увесь ланцюг: документ → проєкт. Версія живе на
         // проєкті — той самий ланцюг, що в `RowStore.ResolveTableInstanceAsync`.
+        // ✎ B74 P3 (D-576): документ шаблону проєкту — чинна версія ЙОГО пари (doc.ProjectTemplate); документ без
+        // шаблону чи без пари (фікстури до ремонту 99-epilogue) — версія проєкту, як доти.
         var found = await (
             from document in db.Documents.AsNoTracking()
             where document.Id == documentId
             join project in db.Projects.AsNoTracking() on document.ProjectId equals project.Id
-            select (int?)project.TemplateVersionId)
+            select db.ProjectTemplates
+                       .Where(pt => pt.ProjectId == document.ProjectId && pt.TemplateId == document.TemplateId)
+                       .Select(pt => (int?)pt.CurrentTemplateVersionId)
+                       .FirstOrDefault()
+                   ?? (int?)project.TemplateVersionId)
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 
@@ -2474,7 +2622,8 @@ public sealed class DocumentStore(
         long Id, int ProjectId, string BusinessKey, DateTime CreatedAt, int SheetCount,
         Domain.ValueObjects.LocalizedText? NameL10n, DateTime ModifiedAt, string? ModifiedByDisplayName,
         string? OwnerDisplayName, string? ApproverDisplayName, PeriodKind? ProjectPeriodKind, int OwnerUserId,
-        string? TemplateVersion, TemplateLayout? Layout, bool MultiVersion = false, bool WorkflowNone = false);
+        string? TemplateVersion, TemplateLayout? Layout, bool MultiVersion = false, bool WorkflowNone = false,
+        int? TemplateId = null, string? TemplateCode = null);
 
     /// <summary>Стеля кількості правил складу в одній версії.</summary>
     private const int MaxRules = 500;

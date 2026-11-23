@@ -476,7 +476,10 @@ public sealed class CreateProjectHandler(
     IClock clock,
 
     // D-474 (4): розкладка версії шаблону. `null` (прямий конструктор у тестах) — перевірки розкладки немає.
-    IRepository<Domain.Entities.Configuration.TemplateVersion, int>? templateVersions = null)
+    IRepository<Domain.Entities.Configuration.TemplateVersion, int>? templateVersions = null,
+
+    // ✎ B74 P3 (D-576): шаблон кожної додаткової версії (архівований шаблон не приєднується). `null` — без перевірки.
+    ITemplateVersionStore? templateStore = null)
 {
     /// <summary>Право керування проєктами.</summary>
     public const string Permission = "Project.Manage";
@@ -494,6 +497,11 @@ public sealed class CreateProjectHandler(
     /// ігнорується для решти періодичностей.
     /// </param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="additionalTemplateVersionIds">
+    /// ✎ B74 P3 (D-576): версії ІНШИХ шаблонів, які проєкт отримує з першого дня (проєкт «рік · об'єкт» з кількома
+    /// шаблонами); основний шаблон — <paramref name="templateVersionId"/>. Два однакові шаблони —
+    /// <c>422 ECR-TMPL-0422 duplicateTemplate</c>.
+    /// </param>
     /// <exception cref="DomainException">
     /// <c>ECR-CFG-4221</c> — пояс порожній, невідомий або не є ідентифікатором IANA;
     /// <c>ECR-PRD-4224</c> — <paramref name="customPeriodCount"/> поза межами
@@ -508,7 +516,8 @@ public sealed class CreateProjectHandler(
         int templateVersionId,
         int periodPolicyId,
         CancellationToken ct,
-        int? customPeriodCount = null)
+        int? customPeriodCount = null,
+        IReadOnlyList<int>? additionalTemplateVersionIds = null)
     {
         ArgumentNullException.ThrowIfNull(name);
 
@@ -599,6 +608,11 @@ public sealed class CreateProjectHandler(
             }
         }
 
+        // ✎ B74 P3 (D-576): додаткові шаблони — ті самі правила, що й приєднання до наявного проєкту (D-474 для річного,
+        // архівований шаблон не береться), і кожен шаблон — один раз (UQ_ProjectTemplate).
+        var additional = await AdditionalTemplatesAsync(
+            version, templateVersionId, additionalTemplateVersionIds, periodKind, ct).ConfigureAwait(false);
+
         // ⛔ T6/#36: перевіряється ТУТ, а не відкладається до першого
         // `GET …/periods`. `PeriodCalendar.CountFor` кидає `ECR-PRD-4224`, якщо
         // кількість поза 1..12 або не ділить рік нарівно — а для решти
@@ -653,6 +667,11 @@ public sealed class CreateProjectHandler(
                     project.AttachTemplate(version.TemplateId, templateVersionId);
                 }
 
+                foreach (var extra in additional)
+                {
+                    project.AttachTemplate(extra.TemplateId, extra.Id);
+                }
+
                 await periods.AddProjectAsync(project, token).ConfigureAwait(false);
                 await uow.SaveChangesAsync(token).ConfigureAwait(false);
                 return project.Id;
@@ -690,6 +709,69 @@ public sealed class CreateProjectHandler(
     /// хв) або новому вході — так само, як будь-яка інша зміна грантів, що
     /// не супроводжується ротацією штампа.
     /// </remarks>
+    private async Task<IReadOnlyList<Domain.Entities.Configuration.TemplateVersion>> AdditionalTemplatesAsync(
+        Domain.Entities.Configuration.TemplateVersion? primary, int primaryVersionId, IReadOnlyList<int>? versionIds,
+        PeriodKind periodKind, CancellationToken ct)
+    {
+        var ids = (versionIds ?? []).Where(id => id != primaryVersionId).Distinct().ToList();
+        if (ids.Count == 0)
+        {
+            return [];
+        }
+
+        if (templateVersions is null || primary is null)
+        {
+            throw new InvalidOperationException("Кілька шаблонів при створенні проєкту потребують сховища версій шаблонів.");
+        }
+
+        var seen = new HashSet<int> { primary.TemplateId };
+        var result = new List<Domain.Entities.Configuration.TemplateVersion>(ids.Count);
+        foreach (var id in ids)
+        {
+            var extra = await templateVersions.FindAsync(id, ct).ConfigureAwait(false)
+                        ?? throw new NotFoundException(
+                            ErrorCodes.TemplateNotFound, $"Версії шаблону {id} не існує.",
+                            new Dictionary<string, object?>
+                            {
+                                ["messageKey"] = "err.ECR-TMPL-0404.templateVersion",
+                                ["versionId"] = id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            });
+
+            if (!seen.Add(extra.TemplateId))
+            {
+                throw new BusinessRuleException(
+                    ErrorCodes.TemplateInvalid, $"Шаблон версії {id} уже обрано для цього проєкту.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-TMPL-0422.duplicateTemplate",
+                        ["versionId"] = id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    });
+            }
+
+            if (periodKind == PeriodKind.Yearly && extra.Layout == TemplateLayout.PerMonthCopies)
+            {
+                throw new BusinessRuleException(
+                    ErrorCodes.TemplateInvalid,
+                    "Річний проєкт потребує версії шаблону з розкладкою «рік, місяці в колонках».",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-TMPL-0422.yearlyProjectNeedsYearLayout",
+                        ["versionId"] = id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    });
+            }
+
+            if (templateStore is not null
+                && await templateStore.FindTemplateOfVersionAsync(id, ct).ConfigureAwait(false) is { } template)
+            {
+                template.EnsureOfferedForNewDocuments();
+            }
+
+            result.Add(extra);
+        }
+
+        return result;
+    }
+
     private Task<int> CreateOwnedAsync(
         AccessProfile profile, Func<CancellationToken, Task<int>> createProject, CancellationToken ct)
         => ProjectOwnershipGrant.CreateOwnedAsync(

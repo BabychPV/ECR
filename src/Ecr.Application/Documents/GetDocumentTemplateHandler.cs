@@ -61,14 +61,27 @@ public sealed class GetDocumentTemplateHandler(
     IMetadataCache metadata,
     IDocumentStore documents,
     IAccessDecisionService access,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+
+    // ✎ B74 P3 (D-576): шаблони проєкту. `null` (прямий конструктор у тестах) — лише основний шаблон, як доти.
+    IProjectTemplateStore? projectTemplates = null)
 {
-    /// <summary>Повертає версію шаблону проєкту та її аркуші.</summary>
+    /// <summary>Повертає версію основного шаблону проєкту та її аркуші.</summary>
     /// <param name="projectId">Проєкт.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<DocumentTemplateDto> HandleAsync(int projectId, CancellationToken ct)
+        => HandleAsync(projectId, templateId: null, ct);
+
+    /// <summary>Повертає чинну версію шаблону проєкту та її аркуші.</summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="templateId">
+    /// ✎ B74 P3 (D-576): шаблон проєкту (крок «Template» майстра); <c>null</c> — основний шаблон проєкту. Шаблон поза
+    /// проєктом — <c>422 ECR-DOC-0422 templateNotInProject</c>.
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
     /// <exception cref="NotFoundException">Проєкту немає або він невидимий.</exception>
     /// <exception cref="AccessDeniedException">Немає <c>Document.Create</c> чи гранта <c>Write</c>.</exception>
-    public async Task<DocumentTemplateDto> HandleAsync(int projectId, CancellationToken ct)
+    public async Task<DocumentTemplateDto> HandleAsync(int projectId, int? templateId, CancellationToken ct)
     {
         var profile = await PermissionCheck
             .RequireInAnyProjectAsync(access, currentUser, CreateDocumentHandler.Permission, ct)
@@ -103,7 +116,12 @@ public sealed class GetDocumentTemplateHandler(
         // ⛔ ФВ-6.14: право — у ЦЬОМУ проєкті.
         PermissionCheck.RequireIn(profile, CreateDocumentHandler.Permission, projectId);
 
-        var templateVersionId = project.TemplateVersionId;
+        var templateVersionId = templateId is { } chosen
+            ? (projectTemplates is null
+                ? null
+                : await projectTemplates.FindAsync(projectId, chosen, ct).ConfigureAwait(false))?.CurrentTemplateVersionId
+              ?? throw CreateDocumentHandler.TemplateNotInProject(projectId, chosen)
+            : project.TemplateVersionId;
 
         var version = await versions.FindAsync(templateVersionId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(

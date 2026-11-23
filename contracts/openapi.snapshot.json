@@ -1793,6 +1793,20 @@
         ],
         "type": "object"
       },
+      "AttachProjectTemplateRequest": {
+        "description": "B74 P3 (D-576): приєднання шаблону до проєкту.",
+        "properties": {
+          "templateVersionId": {
+            "description": "Версія шаблону — з нею шаблон стає в проєкт (за нею заводяться нові документи).",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "templateVersionId"
+        ],
+        "type": "object"
+      },
       "AuditSort": {
         "description": "Порядок сторінок журналів аудиту (вкладки Cell changes / Structure changes / Security events / Workflow events).",
         "enum": [
@@ -5765,6 +5779,14 @@
             },
             "type": "array"
           },
+          "templateId": {
+            "description": "✎ B74 P3 (D-576): шаблон проєкту, за яким заводиться документ; `null` — основний шаблон. Версія — чинна версія\nцього шаблону в проєкті; шаблон поза проєктом — `422 err.ECR-DOC-0422.templateNotInProject`.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "templateVersionId": {
             "description": "Необов'язкове. ⛔ `V-11`: документ заводиться на версії шаблону ПРОЄКТУ;\nполе, якщо задане, мусить із нею збігатися (інакше `422`\n`err.ECR-DOC-0422.versionNotProject`). Клієнту його надсилати не треба:\nсклад аркушів для діалогу дає `GET /projects/{id}/document-template`.",
             "format": "int32",
@@ -6218,6 +6240,17 @@
             "type": [
               "null",
               "integer"
+            ]
+          },
+          "templateVersionIds": {
+            "description": "✎ B74 P3 (D-576): версії кількох шаблонів проєкту «рік · об'єкт»; перша (або `TemplateVersionId`) — основний\nшаблон, решта приєднуються тим самим комітом. Кожен шаблон — один раз (`422 ECR-TMPL-0422 duplicateTemplate`).",
+            "items": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": [
+              "null",
+              "array"
             ]
           },
           "timeZoneId": {
@@ -8350,6 +8383,13 @@
             "default": false,
             "description": "`true` — список обрізано (понад 20 імен або понад 100 кандидатів): справжніх погоджувачів може бути більше.",
             "type": "boolean"
+          },
+          "templateCode": {
+            "description": "✎ B74 P3 (D-576): код шаблону документа (`Document.TemplateId`) — колонка «Template» переліку й картка; у\nпроєкті «рік · об'єкт» документи різних шаблонів. `null` — документ без шаблону (до ремонту 99-epilogue).\nМетадані шаблону не секрет — звуження читача не знімає.",
+            "type": [
+              "null",
+              "string"
+            ]
           },
           "templateLayout": {
             "description": "D-474: розкладка типової версії шаблону проєкту (`PerMonthCopies` | `YearWithMonthColumns`) — рядком, як\nPeriodKind (nullable-enum ламає типи клієнта). `null` — проєкту або версії немає. За\n`YearWithMonthColumns` клієнт не показує вибір місяця: документ має одне подання на рік.",
@@ -20198,6 +20238,63 @@
           "periodKind",
           "currentPeriodId",
           "periodCount"
+        ],
+        "type": "object"
+      },
+      "ProjectTemplateDto": {
+        "description": "B74 P3 (D-576): шаблон проєкту для вкладки «Templates» і кроку «Template» майстра документа.",
+        "properties": {
+          "currentTemplateVersionId": {
+            "description": "Чинна версія шаблону в проєкті.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "documentCount": {
+            "description": "Документів цього шаблону в проєкті; &gt; 0 — від'єднання відмовить.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "isPrimary": {
+            "description": "Основний шаблон проєкту: не від'єднується до P6.",
+            "type": "boolean"
+          },
+          "layout": {
+            "description": "Розкладка чинної версії.",
+            "type": "string"
+          },
+          "projectTemplateId": {
+            "description": "Рядок `doc.ProjectTemplate`.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "templateCode": {
+            "description": "Код шаблону (префікс бізнес-ключа в багатошаблонному проєкті).",
+            "type": "string"
+          },
+          "templateId": {
+            "description": "Шаблон.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "templateNameL10n": {
+            "$ref": "#/components/schemas/LocalizedText",
+            "description": "Назва шаблону."
+          },
+          "version": {
+            "description": "Позначення чинної версії.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectTemplateId",
+          "templateId",
+          "templateCode",
+          "templateNameL10n",
+          "currentTemplateVersionId",
+          "version",
+          "layout",
+          "isPrimary",
+          "documentCount"
         ],
         "type": "object"
       },
@@ -61227,6 +61324,14 @@
               "pattern": "^-?(?:0|[1-9]\\d*)$",
               "type": "integer"
             }
+          },
+          {
+            "in": "query",
+            "name": "templateId",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -61847,6 +61952,319 @@
           }
         },
         "summary": "Часова шкала версій шаблону проєкту (RPT-STABLE Part B): з якого періоду яка версія діє. Право\n`Document.View` і видимий проєкт.",
+        "tags": [
+          "Projects"
+        ]
+      }
+    },
+    "/api/v1/projects/{id}/templates": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Проєкт.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProjectTemplateDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProjectTemplateDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProjectTemplateDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "B74 P3 (D-576): шаблони проєкту — основний і приєднані, з чинною версією кожного. Право `Document.View` у\nпроєкті; невидимий проєкт — `404`, як неіснуючий (S17).",
+        "tags": [
+          "Projects"
+        ]
+      },
+      "post": {
+        "description": "`409 ECR-PRD-0409`: `templateAlreadyAttached`, `projectArchivedTemplates`; `409 ECR-TMPL-0409` —\nархівований шаблон; `422 ECR-TMPL-0422 yearlyProjectNeedsYearLayout` — річний проєкт і версія «копія на\nмісяць».",
+        "parameters": [
+          {
+            "description": "Проєкт.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttachProjectTemplateRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttachProjectTemplateRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttachProjectTemplateRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectTemplateDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectTemplateDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectTemplateDto"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "B74 P3 (D-576): приєднує шаблон до проєкту з обраною версією. Право `Project.Manage` у проєкті й грант\n`Manage`.",
+        "tags": [
+          "Projects"
+        ]
+      }
+    },
+    "/api/v1/projects/{id}/templates/{templateId}": {
+      "delete": {
+        "description": "`404 ECR-TMPL-0404 templateNotInProject`; `409 ECR-PRD-0409`: `templateHasDocuments` (кількість у\n`documentCount`), `primaryTemplate`, `templateHasRoute`, `projectArchivedTemplates`.",
+        "parameters": [
+          {
+            "description": "Проєкт.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Шаблон.",
+            "in": "path",
+            "name": "templateId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "B74 P3 (D-576): від'єднує шаблон від проєкту. Право — як приєднання.",
         "tags": [
           "Projects"
         ]

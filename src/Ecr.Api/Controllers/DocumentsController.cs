@@ -176,7 +176,7 @@ public sealed class DocumentsController(
         ArgumentNullException.ThrowIfNull(request);
 
         var documentId = await create
-            .HandleAsync(request.ProjectId, request.TemplateVersionId, request.SheetDefIds, request.Name, ct)
+            .HandleAsync(request.ProjectId, request.TemplateId, request.TemplateVersionId, request.SheetDefIds, request.Name, ct)
             .ConfigureAwait(false);
 
         return Created($"/api/v1/documents/{documentId}", new Contracts.DocumentIdResponse(documentId));
@@ -1023,11 +1023,16 @@ public sealed class DocumentsController(
 /// Опційне і суто презентаційне: <c>BusinessKey</c> лишається технічним
 /// ключем незалежно від нього (директива "людське ім'я документа").
 /// </param>
+/// <param name="TemplateId">
+/// ✎ B74 P3 (D-576): шаблон проєкту, за яким заводиться документ; <c>null</c> — основний шаблон. Версія — чинна версія
+/// цього шаблону в проєкті; шаблон поза проєктом — <c>422 err.ECR-DOC-0422.templateNotInProject</c>.
+/// </param>
 public sealed record CreateDocumentRequest(
     int ProjectId,
     IReadOnlyList<int> SheetDefIds,
     IReadOnlyDictionary<string, string>? Name = null,
-    int? TemplateVersionId = null);
+    int? TemplateVersionId = null,
+    int? TemplateId = null);
 
 /// <summary>Дія над документом у межах одного періоду.</summary>
 /// <param name="PeriodKey">Період; <c>Рік*100 + Номер</c> (R-A6).</param>
