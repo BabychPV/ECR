@@ -420,13 +420,15 @@ public sealed class DocumentStore(
                 : WorkflowNoneScope.Empty;
         var noneKeys = noneScope.Keys(db);
 
-        IQueryable<Document> Build(long after, int[]? onlyProjects)
+        IQueryable<Document> Build(long after, long[]? onlySlices)
         {
             var documents = VisibleDocuments(projectId, after, filter, allowedProjects);
 
-            if (onlyProjects is not null)
+            // ✎ B74 P3 (D-576): група версії — зрізи «проєкт × шаблон документа» (SliceKey), а не цілі проєкти: у проєкті
+            // з кількома шаблонами документи різних шаблонів мають різні версії.
+            if (onlySlices is not null)
             {
-                documents = documents.Where(d => onlyProjects.Contains(d.ProjectId));
+                documents = documents.Where(d => onlySlices.Contains((long)d.ProjectId * SliceFactor + (d.TemplateId ?? 0)));
             }
 
             // ✎ g2 (макет 08.11, людина: «Year 2024 — No documents for 2024»): перелік за РІК — лише документи
@@ -568,13 +570,13 @@ public sealed class DocumentStore(
             for (var g = groupIndex; g < plan.Groups.Count && rows.Count < page.Limit + 1; g++)
             {
                 var fromId = g == groupIndex ? after : 0;
-                rows.AddRange(await ProjectRows(Build(fromId, plan.Groups[g].ProjectIds).OrderBy(d => d.Id).Take(page.Limit + 1 - rows.Count))
+                rows.AddRange(await ProjectRows(Build(fromId, plan.Groups[g].Slices).OrderBy(d => d.Id).Take(page.Limit + 1 - rows.Count))
                     .ToListAsync(ct).ConfigureAwait(false));
             }
         }
         else
         {
-            var documents = Build(Cursor.Decode(page.Cursor), versionPlan?.WantedProjects);
+            var documents = Build(Cursor.Decode(page.Cursor), versionPlan?.WantedSlices);
             rows = await ProjectRows(documents.OrderBy(d => d.Id).Take(page.Limit + 1)).ToListAsync(ct).ConfigureAwait(false);        }
 
         IQueryable<DocumentRow> ProjectRows(IQueryable<Document> documents)
@@ -723,7 +725,7 @@ public sealed class DocumentStore(
         var next = !hasMore
             ? null
             : versionPlan is { Sorted: true } sortedPlan
-                ? sortedPlan.Encode(items[^1].ProjectId, items[^1].Id)
+                ? sortedPlan.Encode(SliceKey(page1[^1].ProjectId, page1[^1].TemplateId), items[^1].Id)
                 : Cursor.Encode(items[^1].Id);
         return new PagedResult<DocumentSummary>(items, next, TotalCount: null);
     }
@@ -737,8 +739,8 @@ public sealed class DocumentStore(
     {
         var projects = await ProjectVersionLabelsAsync(period, onlyProjects: null, ct).ConfigureAwait(false);
 
-        var byVersion = new Dictionary<string, List<int>>(StringComparer.Ordinal);
-        var unversioned = new List<int>();
+        var byVersion = new Dictionary<string, List<long>>(StringComparer.Ordinal);
+        var unversioned = new List<long>();
         foreach (var project in projects)
         {
             if (project.Value is { } version)
@@ -773,8 +775,17 @@ public sealed class DocumentStore(
 
         return new VersionPlan(
             filter.VersionSort is not null, descending, ordered,
-            [.. ordered.SelectMany(g => g.ProjectIds)]);
+            [.. ordered.SelectMany(g => g.Slices)]);
     }
+
+    /// <summary>
+    /// ✎ B74 P3 (D-576): ключ зрізу «проєкт × шаблон документа» (<c>NULL</c>-шаблон — 0: документ основного шаблону до
+    /// ремонту 99-epilogue) — одне число, щоб фільтр групи лягав у SQL як <c>IN (...)</c>.
+    /// </summary>
+    internal static long SliceKey(int projectId, int? templateId) => (long)projectId * SliceFactor + (templateId ?? 0);
+
+    /// <summary>Множник ключа зрізу: більший за будь-який <c>cfg.Template.Id</c> (int).</summary>
+    private const long SliceFactor = 4_294_967_296L;
 
     /// <summary>
     /// Версія шаблону кожного проєкту ДЛЯ ПЕРІОДУ (<c>null</c> — без версії). Єдине місце, що дає версію переліку:
@@ -783,22 +794,34 @@ public sealed class DocumentStore(
     /// <param name="period">Період; без нього — чинна версія проєкту.</param>
     /// <param name="onlyProjects">Лише ці проєкти; <c>null</c> — усі проєкти, що мають документи.</param>
     /// <param name="ct">Токен скасування.</param>
-    private async Task<Dictionary<int, string?>> ProjectVersionLabelsAsync(
+    /// <remarks>
+    /// ✎ B74 P3 (D-576): ключ результату — зріз «проєкт × шаблон документа» (<see cref="SliceKey"/>), версія — шкали ЦЬОГО
+    /// шаблону (<c>doc.fn_TemplateVersionOf</c>); документ без шаблону — основний шаблон (<c>doc.fn_VersionOf</c>), як доти.
+    /// </remarks>
+    private async Task<Dictionary<long, string?>> ProjectVersionLabelsAsync(
         PeriodKeyFilter period, int[]? onlyProjects, CancellationToken ct)
     {
         // ⛔ Версію за період дає ЛИШЕ `doc.fn_VersionOf` (`ProjectTemplateVersionReadGuardTests`): без періоду - за
         // найпізніший можливий період (YYYY12 далекого року), тобто чинна версія проєкту. Проєкти без документів у групи
         // не потрапляють (їм нічого сортувати).
         var key = period.Value ?? MaxPeriodKey;
-        var candidates = db.Projects.AsNoTracking().Where(p => db.Documents.Any(d => d.ProjectId == p.Id));
+        var candidates = db.Documents.AsNoTracking().Select(d => new { d.ProjectId, d.TemplateId }).Distinct();
         if (onlyProjects is not null)
         {
-            candidates = candidates.Where(p => onlyProjects.Contains(p.Id));
+            candidates = candidates.Where(p => onlyProjects.Contains(p.ProjectId));
         }
 
-        var projects = await candidates
-            .Select(p => new { p.Id, VersionId = EcrDbContext.VersionOf(p.Id, key) })
+        var slices = await candidates
+            .Select(s => new
+            {
+                s.ProjectId,
+                s.TemplateId,
+                VersionId = s.TemplateId == null
+                    ? EcrDbContext.VersionOf(s.ProjectId, key)
+                    : EcrDbContext.TemplateVersionOf(s.ProjectId, s.TemplateId.Value, key),
+            })
             .ToListAsync(ct).ConfigureAwait(false);
+        var projects = slices.Select(s => new { Id = SliceKey(s.ProjectId, s.TemplateId), s.VersionId }).ToList();
         var versionIds = projects.Select(p => p.VersionId).Distinct().ToArray();
         var labels = await db.TemplateVersions.AsNoTracking()
             .Where(v => versionIds.Contains(v.Id))
@@ -821,9 +844,10 @@ public sealed class DocumentStore(
         ArgumentNullException.ThrowIfNull(visibleProjectIds);
 
         // Видимість — тим самим базовим запитом, що й перелік: версії, які є лише в невидимих документах, не називаються.
+        // ✎ B74 P3 (D-576): лічильник — на зріз «проєкт × шаблон документа», версія — шаблону документа.
         var perProject = await VisibleDocuments(projectId, 0, filter, visibleProjectIds.ToArray())
-            .GroupBy(d => d.ProjectId)
-            .Select(g => new { ProjectId = g.Key, Count = g.Count() })
+            .GroupBy(d => new { d.ProjectId, d.TemplateId })
+            .Select(g => new { g.Key.ProjectId, g.Key.TemplateId, Count = g.Count() })
             .OrderBy(g => g.ProjectId)
             .Take(MaxVersionProjects)
             .ToListAsync(ct).ConfigureAwait(false);
@@ -838,7 +862,7 @@ public sealed class DocumentStore(
         var without = 0;
         foreach (var project in perProject)
         {
-            if (labels.TryGetValue(project.ProjectId, out var version) && version is not null)
+            if (labels.TryGetValue(SliceKey(project.ProjectId, project.TemplateId), out var version) && version is not null)
             {
                 byVersion[version] = byVersion.GetValueOrDefault(version) + project.Count;
             }
@@ -867,15 +891,15 @@ public sealed class DocumentStore(
     private const int MaxPeriodKey = 999912;
 
     /// <summary>Група проєктів з однією версією (<c>null</c> — без версії).</summary>
-    private sealed record VersionGroup(string? Label, int[] ProjectIds);
+    private sealed record VersionGroup(string? Label, long[] Slices);
 
     /// <summary>План переліку за версією: групи у порядку сортування і курсор «група + Id».</summary>
-    private sealed record VersionPlan(bool Sorted, bool Descending, List<VersionGroup> Groups, int[] WantedProjects)
+    private sealed record VersionPlan(bool Sorted, bool Descending, List<VersionGroup> Groups, long[] WantedSlices)
     {
         /// <summary>Курсор: <c>V{id}|{версія}</c> або <c>N{id}</c> (група без версії); непрозорий для клієнта.</summary>
-        public string Encode(int projectId, long id)
+        public string Encode(long slice, long id)
         {
-            var group = Groups.FirstOrDefault(g => g.ProjectIds.Contains(projectId));
+            var group = Groups.FirstOrDefault(g => g.Slices.Contains(slice));
             var number = id.ToString(CultureInfo.InvariantCulture);
             var text = group?.Label is { } version ? string.Concat("V", number, "|", version) : string.Concat("N", number);
             return Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(text));
