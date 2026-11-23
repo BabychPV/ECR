@@ -382,4 +382,50 @@ describe('RowLockControl (B139)', () => {
     expect(sent[0]?.method).toBe('DELETE');
     expect(sent[0]?.url).toMatch(/\/row-locks\/5$/);
   });
+
+  describe('діалог: чому «Заблокувати» вимкнена', () => {
+    async function openDialog(): Promise<{ save: HTMLButtonElement; from: HTMLInputElement; to: HTMLInputElement; dialog: HTMLElement }> {
+      show(['Document.RowLock']);
+      act(() => publishFocus(TableInstanceId, PeriodKey, { rowIndex: 0, columnCode: 'A' } as never));
+      const button = await screen.findByRole('button', { name: LockButton });
+      await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+      fireEvent.click(button);
+      const dialog = await screen.findByRole('dialog');
+      const save = (await screen.findByRole('button', { name: /rowLock\.lockVerb/ })) as HTMLButtonElement;
+      const [from, to] = Array.from(dialog.querySelectorAll('input')).filter((input) => input.type !== 'hidden');
+      if (from === undefined || to === undefined) throw new Error('полів дат немає');
+
+      return { save, from, to, dialog };
+    }
+
+    it('порожня «По» — спокійна підказка (не помилка), після вибору дати зникає', async () => {
+      const { save, from, to, dialog } = await openDialog();
+
+      const hint = dialog.querySelector('[data-row-lock-hint="required"]');
+      expect(hint?.textContent).toContain('rowLock.toRequired');
+      expect(dialog.querySelector('[role="alert"]')).toBeNull();
+      expect(save.disabled).toBe(true);
+
+      fireEvent.change(from, { target: { value: '2026-11-10' } });
+      fireEvent.blur(from);
+      fireEvent.change(to, { target: { value: '2026-11-20' } });
+      fireEvent.blur(to);
+
+      await waitFor(() => expect(save.disabled).toBe(false));
+      expect(dialog.querySelector('[data-row-lock-hint="required"]')).toBeNull();
+      expect(dialog.querySelector('[data-row-lock-hint="inclusive"]')?.textContent).toContain('rowLock.toHint');
+    });
+
+    it('кінець раніше за початок — помилка, як і раніше', async () => {
+      const { save, from, to, dialog } = await openDialog();
+
+      fireEvent.change(from, { target: { value: '2026-11-10' } });
+      fireEvent.blur(from);
+      fireEvent.change(to, { target: { value: '2026-11-09' } });
+      fireEvent.blur(to);
+
+      await waitFor(() => expect(dialog.querySelector('[data-row-lock-error]')?.textContent).toContain('rowLock.errorRange'));
+      expect(save.disabled).toBe(true);
+    });
+  });
 });

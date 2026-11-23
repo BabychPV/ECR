@@ -179,6 +179,10 @@ test.describe('rowLock: блокування рядків документа н�
       const save = dialog.locator('[data-row-lock-save]');
       await expect(save, '«Lock» доступна без дати «по»').toBeDisabled();
       const until = dialog.getByRole('textbox', { name: /^To/ });
+      // ✎ Підказка, чому «Lock» вимкнена, і «From»/«To» на одній висоті.
+      await expect(dialog.locator('[data-row-lock-hint="required"]'), 'немає підказки про дату «по»').toBeVisible();
+      const fromTop = (await dialog.getByRole('textbox', { name: /^From/ }).boundingBox())?.y;
+      expect((await until.boundingBox())?.y, '«To» не на одній висоті з «From»').toBe(fromTop);
       await until.fill(dayFromNow(7));
       await until.press('Tab');
       await expect(save).toBeEnabled({ timeout: 15_000 });

@@ -62,7 +62,9 @@ SELECT v.[Key], v.Lang, v.Val
     (N'rowLock.release', N'ru', N'Снять'),
     (N'rowLock.release', N'kz', N'Алу'),
     (N'rowLock.releaseRow', N'ru', N'Снять блокировку: {row}'),
-    (N'rowLock.releaseRow', N'kz', N'Бұғатты алу: {row}')
+    (N'rowLock.releaseRow', N'kz', N'Бұғатты алу: {row}'),
+    (N'rowLock.toRequired', N'ru', N'Выберите дату окончания, чтобы заблокировать строки. Дата включительно.'),
+    (N'rowLock.toRequired', N'kz', N'Жолдарды бұғаттау үшін аяқталу күнін таңдаңыз. Күн қоса есептеледі.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -101,7 +103,8 @@ SELECT v.[Key], v.Lang, v.Val, v.Scope
     (N'rowLock.range', N'en', N'{from} – {to}', 1),
     (N'rowLock.notStarted', N'en', N'not started yet', 1),
     (N'rowLock.release', N'en', N'Release', 1),
-    (N'rowLock.releaseRow', N'en', N'Release the lock: {row}', 1)
+    (N'rowLock.releaseRow', N'en', N'Release the lock: {row}', 1),
+    (N'rowLock.toRequired', N'en', N'Choose the end date to lock the rows. The date is inclusive.', 1)
        ) AS v ([Key], Lang, Val, Scope)
 OPTION (RECOMPILE);
 GO
