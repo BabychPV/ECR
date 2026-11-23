@@ -132,6 +132,45 @@ public sealed class YearLayoutCalculatedRoutingSqlTests(SqlServerFixture sql)
         Assert.Equal(9 * Input, ValueOf(slice, world.Doc.RowIds[0], world.Total));
     }
 
+    /// <summary>
+    /// ✎ D-575: річна розкладка (12 місяців у колонках одного рядка), грудень ще не відкрито — прогін грудня не рахує
+    /// CM12 і не чіпає її збережене значення, а решта місяців і не-місячний підсумок якоря рахуються як доти.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Мутація (локально, не комітити): прибрати гілку <c>AwaitingOpen</c> у <c>RecalculationService.RunAsync</c> —
+    /// CM12 перераховується (−12 → 120), червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-575")]
+    public async Task D575_річна_розкладка_не_відкритий_грудень_не_рахується_а_решта_місяців_і_підсумок_рахуються()
+    {
+        var world = await ArrangeAsync();
+        await SeedInputsAsync(world);
+        await SetCellAsync(world, 12, world.CalcMonth[12], -12m, calculated: true);
+
+        await using (var db = world.Builder.CreateContext())
+        {
+            var router = new MonthColumnRouter(db, Flag(false), YearRegistry(world));
+            var store = new MonthRoutedCellStore(new NormalizedCellStore(db), router, world.Metadata, db);
+            var service = Formulas(db, world, store, router, awaitingOpenMonth: 12);
+
+            for (var m = 12; m >= 1; m--)
+            {
+                await service.RecalculateAllAsync(world.Doc.DocumentId, Key(m), CancellationToken.None);
+            }
+        }
+
+        for (var m = 1; m <= 11; m++)
+        {
+            Assert.Equal(m * Input, await PhysicalAsync(world, m, world.CalcMonth[m]));
+        }
+
+        Assert.Equal(-12m, await PhysicalAsync(world, 12, world.CalcMonth[12]));
+        Assert.Equal(9 * Input, await PhysicalAsync(world, Anchor, world.Total));
+    }
+
     // ── fan-out: змінена CM9 у періоді 9 перераховує підсумок якоря ──────
 
     [Fact]
@@ -482,7 +521,7 @@ public sealed class YearLayoutCalculatedRoutingSqlTests(SqlServerFixture sql)
     }
 
     private static RecalculationService Formulas(
-        EcrDbContext db, World world, ICellStore store, IMonthColumnRouter router)
+        EcrDbContext db, World world, ICellStore store, IMonthColumnRouter router, int? awaitingOpenMonth = null)
     {
         var bulk = new BulkCellLoader(db.Database.GetConnectionString()!, 1000);
         var clock = new TestClock(Now);
@@ -495,18 +534,29 @@ public sealed class YearLayoutCalculatedRoutingSqlTests(SqlServerFixture sql)
             .Returns(new Dictionary<string, ExpressionValue>());
 
         return new RecalculationService(
-            store, new RowStore(db, bulk, clock), Periods(world), world.Metadata,
+            store, new RowStore(db, bulk, clock), Periods(world, awaitingOpenMonth), world.Metadata,
             Versions(world), new RealFormulaEngine(), units, Substitute.For<IRegistryStore>(), headers,
             new AuditWriter(db), clock, new UnitOfWork(db), new SheetEditGate(db), monthRouter: router);
     }
 
-    private static IPeriodStore Periods(World world)
+    private static IPeriodStore Periods(World world, int? awaitingOpenMonth = null)
     {
         var periods = Substitute.For<IPeriodStore>();
         periods.FindPeriodBoundsAsync(world.Doc.DocumentId, Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(new PeriodBounds(new DateOnly(Year, 1, 1), new DateOnly(Year, 1, 31)));
         periods.FindPeriodStateAsync(world.Doc.DocumentId, Arg.Any<int>(), Arg.Any<CancellationToken>())
-            .Returns((PeriodState?)PeriodState.Open);
+            .Returns(call => (PeriodState?)(call.ArgAt<int>(1) == Period(awaitingOpenMonth ?? 0)
+                ? PeriodState.Scheduled
+                : PeriodState.Open));
+        if (awaitingOpenMonth is { } awaiting)
+        {
+            // ✎ D-575: місяць активного проєкту ще не відкрито — решта Open.
+            periods.FindEvaluationStateAsync(world.Doc.DocumentId, Arg.Any<int>(), Arg.Any<CancellationToken>())
+                .Returns(call => call.ArgAt<int>(1) == Period(awaiting)
+                    ? new PeriodEvaluationState(PeriodState.Scheduled, AwaitingOpen: true)
+                    : new PeriodEvaluationState(PeriodState.Open, AwaitingOpen: false));
+        }
+
         return periods;
     }
 

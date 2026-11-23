@@ -173,7 +173,28 @@ public interface IPeriodStore
     /// <param name="documentId">Документ.</param>
     /// <param name="ct">Токен скасування.</param>
     public Task<bool> IsDocumentProjectArchivedOrArchivingAsync(long documentId, CancellationToken ct);
+
+    /// <summary>
+    /// ✎ D-575: ефективний стан періоду документа (як <see cref="FindPeriodStateAsync"/>) разом з ознакою «період ще не
+    /// відкрито» — формули такого періоду не обчислюються (<c>RecalculationService</c>).
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns><c>null</c> — періоду немає в календарі проєкту.</returns>
+    /// <remarks>
+    /// ⚠ Один запит — той самий, що <see cref="FindPeriodStateAsync"/>: перерахунок бере звідси і стан для
+    /// <c>IsLateEdit</c>, тож кількість звернень прогону не зростає. ⚠ «Не відкрито» — лише в АКТИВНОМУ проєкті:
+    /// у чернетці всі періоди <c>Scheduled</c> за побудовою (життєвий цикл періодів ще не йде), і формули там
+    /// рахуються, як і доти.
+    /// </remarks>
+    public Task<PeriodEvaluationState?> FindEvaluationStateAsync(long documentId, int periodKey, CancellationToken ct);
 }
+
+/// <summary>✎ D-575: стан періоду для перерахунку формул.</summary>
+/// <param name="State">Ефективний стан (з винятком документа), як <see cref="IPeriodStore.FindPeriodStateAsync"/>.</param>
+/// <param name="AwaitingOpen">Період активного проєкту ще не відкрито (<c>Scheduled</c>): формули не обчислюються.</param>
+public sealed record PeriodEvaluationState(Ecr.Domain.Enums.PeriodState State, bool AwaitingOpen);
 
 /// <summary>Стан одного періоду.</summary>
 /// <param name="PeriodKey">Ключ періоду (R-A6).</param>

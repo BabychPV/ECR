@@ -40,7 +40,8 @@ public sealed partial class PeriodStateJob(
     IAuditWriter? audit = null,
     IBackgroundJobScheduler? jobs = null,
     Notifications.NotificationDispatcher? notifications = null,
-    IUiStringCatalog? catalog = null) : IBackgroundJob
+    IUiStringCatalog? catalog = null,
+    IOpenedPeriodRecalculation? openedRecalculation = null) : IBackgroundJob
 {
     /// <summary>Ціль витісняючої постановки пошуку осиротілих після системного Reopen.</summary>
     /// <remarks>
@@ -385,6 +386,8 @@ public sealed partial class PeriodStateJob(
         // проєкті, трималося б до кінця прогону по всіх.
         var toMaterialize = new List<int>();
         var opened = new List<Period>();
+        var leftScheduled = new List<int>();
+        var stillScheduled = new List<int>();
         var graceStarted = new List<Period>();
         var skipped = new List<SkippedPeriodTransition>();
         var reopened = 0;
@@ -396,6 +399,8 @@ public sealed partial class PeriodStateJob(
             // збираються заново, а не дописуються.
             toMaterialize.Clear();
             opened.Clear();
+            leftScheduled.Clear();
+            stillScheduled.Clear();
             graceStarted.Clear();
             skipped.Clear();
             reopened = 0;
@@ -450,6 +455,13 @@ public sealed partial class PeriodStateJob(
                 if (before == PeriodState.Scheduled && period.State == PeriodState.Open)
                 {
                     opened.Add(period);
+                }
+
+                // ✎ D-575: період вийшов зі Scheduled у стан, де пишуть (Open/Grace), — його формули досі не
+                // обчислювались; перерахунок ставиться після коміту.
+                if (PeriodOpenedRecalculationTrigger.Requires(before, period.State))
+                {
+                    leftScheduled.Add(period.PeriodKeyValue);
                 }
 
                 // ⚠ Лише `Open → Grace` самого плану (не системний Reopen `Closed → Grace` нижче).
@@ -516,6 +528,9 @@ public sealed partial class PeriodStateJob(
                     calculator.SelectCurrentPeriod(periods)?.Id, utcNow);
             }
 
+            // ✎ D-575: періоди, що лишились не відкритими після переходів цього прогону (для зняття застарілих помилок).
+            stillScheduled.AddRange(periods.Where(p => p.State == PeriodState.Scheduled).Select(p => p.PeriodKeyValue));
+
             await db.SaveChangesAsync(innerCt).ConfigureAwait(false);
 
             // ⛔ L2-06 (аудит 2026-10-03): черга в базі — постановка ВСЕРЕДИНІ
@@ -543,6 +558,14 @@ public sealed partial class PeriodStateJob(
             await EnqueueMaterializationAfterCommitAsync(project, toMaterialize, ct).ConfigureAwait(false);
         }
 
+        // ✎ D-575: відкритий період — перерахунок його документів (формули там досі не обчислювались); після коміту.
+        if (openedRecalculation is not null && leftScheduled.Count > 0)
+        {
+            await openedRecalculation.RequestAsync(project.Id, leftScheduled, ct).ConfigureAwait(false);
+        }
+
+        await DropAwaitingOpenErrorsAsync(project, stillScheduled, ct).ConfigureAwait(false);
+
         await NotifyAsync(
             project, opened, NotificationEventKind.PeriodOpened, "period-opened",
             "notifications.periodOpened.subject", "notifications.periodOpened.body", ct)
@@ -553,6 +576,44 @@ public sealed partial class PeriodStateJob(
             .ConfigureAwait(false);
 
         return skipped;
+    }
+
+    /// <summary>
+    /// ✎ D-575: знімає збережені помилки формул (<c>calc.FormulaError</c>) періодів проєкту, що лишаються не відкритими
+    /// (<c>Scheduled</c>), — значення комірок не чіпаються, подій журналу немає.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Перерахунок знімає такі помилки сам, коли дійде до періоду (<c>RecalculationService</c>), але нічний розклад і
+    /// автоперерахунки в не відкритий період не ходять (<c>CalculationTrigger.WritableAsync</c>), тож помилки прогону до
+    /// D-575 (28 × #N/A грудня Land на репетиції W15z) жили б у переліку проблем до відкриття місяця. Тут — щогодини, одним
+    /// DELETE на проєкт і лише коли такі періоди є; після коміту переходів, тож щойно відкритий період не зачіпається.
+    /// Збій лише в журнал: прогін станів уже закомічено, наступний прогін повторить.
+    /// </remarks>
+    private async Task DropAwaitingOpenErrorsAsync(Project project, List<int> periodKeys, CancellationToken ct)
+    {
+        if (periodKeys.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            var keys = periodKeys.Distinct().ToList();
+            var dropped = await db.FormulaErrors
+                .Where(e => keys.Contains(e.PeriodKey)
+                            && db.Documents.Any(d => d.Id == e.DocumentId && d.ProjectId == project.Id))
+                .ExecuteDeleteAsync(ct)
+                .ConfigureAwait(false);
+
+            if (dropped > 0)
+            {
+                LogAwaitingOpenErrorsDropped(_logger, project.Code, project.Id, dropped);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogAwaitingOpenErrorsDropFailed(_logger, project.Code, project.Id, ex);
+        }
     }
 
     /// <summary>
@@ -834,6 +895,17 @@ public sealed partial class PeriodStateJob(
         Level = LogLevel.Warning,
         Message = "PeriodStateJob: проєкт {ProjectCode} ({ProjectId}) — сповіщення «період відкрито» не розіслано; стани періодів уже збережено.")]
     private static partial void LogOpenedNotificationFailed(ILogger logger, string projectCode, int projectId, Exception exception);
+
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "PeriodStateJob: проєкт {ProjectCode} ({ProjectId}) — знято {Count} застарілих помилок формул не відкритих періодів (D-575).")]
+    private static partial void LogAwaitingOpenErrorsDropped(ILogger logger, string projectCode, int projectId, int count);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "PeriodStateJob: проєкт {ProjectCode} ({ProjectId}) — застарілі помилки формул не відкритих періодів (D-575) "
+            + "не знято; стани вже збережено, наступний прогін повторить.")]
+    private static partial void LogAwaitingOpenErrorsDropFailed(ILogger logger, string projectCode, int projectId, Exception exception);
 
     [LoggerMessage(
         Level = LogLevel.Warning,

@@ -66,6 +66,37 @@ public sealed class CrossPeriodFanOutTests(SqlServerFixture sql)
         Assert.Equal(1, cell.GetProperty("Hops").GetInt32());
     }
 
+    /// <remarks>
+    /// ✎ D-575: читач у НЕ ВІДКРИТОМУ періоді активного проєкту не будиться — його формули не обчислюються (прогін
+    /// повернув би 0); той самий Scheduled у чернетці (D-575 не діє) — ставиться, як доти.
+    /// ⛔ Мутація (локально, не комітити): прибрати гілку <c>AwaitingOpen</c> у <c>CrossPeriodFanOut</c> — червоніє.
+    /// </remarks>
+    [Theory]
+    [InlineData(true, 0)]
+    [InlineData(false, 1)]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-575")]
+    public async Task Читач_у_не_відкритому_періоді_не_будиться(bool awaitingOpen, int expected)
+    {
+        var (document, builder) = await ArrangeAsync();
+        Arrange(document, Dep(5, 1));
+        _periods.FindPeriodStateAsync(document.DocumentId, 202602, Arg.Any<CancellationToken>())
+            .Returns(PeriodState.Scheduled);
+        _periods.FindEvaluationStateAsync(document.DocumentId, 202602, Arg.Any<CancellationToken>())
+            .Returns(new PeriodEvaluationState(PeriodState.Scheduled, awaitingOpen));
+
+        await using var db = builder.CreateContext();
+        var fanOut = new CrossPeriodFanOut(_rows, _versions, _periods, _jobs, db);
+
+        var count = await fanOut.EnqueueReadersAsync(
+            document.DocumentId, new PeriodKey(202601), [(document.TableDefId, ColumnDefId)],
+            onlyEarlierReaders: false, hops: 1, CancellationToken.None);
+
+        Assert.Equal(expected, count);
+        Assert.Equal(expected, _enqueued.Count);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]

@@ -180,6 +180,15 @@ public sealed class PeriodStore(EcrDbContext db, Ecr.Domain.Abstractions.IClock?
     /// <inheritdoc />
     public async Task<Ecr.Domain.Enums.PeriodState?> FindPeriodStateAsync(
         long documentId, int periodKey, CancellationToken ct)
+        => (await FindEvaluationStateAsync(documentId, periodKey, ct).ConfigureAwait(false))?.State;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ✎ D-575: той самий запит, що й був у <see cref="FindPeriodStateAsync"/> (тепер він читає звідси) — правило
+    /// ефективного стану одне.
+    /// </remarks>
+    public async Task<PeriodEvaluationState?> FindEvaluationStateAsync(
+        long documentId, int periodKey, CancellationToken ct)
     {
         // Той самий ланцюг документ → проєкт → період, що й у меж: `PeriodKey`
         // не унікальний глобально, і без проєкту питання «який стан у 202601»
@@ -225,7 +234,8 @@ public sealed class PeriodStore(EcrDbContext db, Ecr.Domain.Abstractions.IClock?
 
         // ⚠ Лише для АКТИВНОГО проєкту — як у `AccessDecisionService`, `WorkflowStore`
         // і в самій задачі станів (`A7-25`): періоди чернетки за датами не просуваються.
-        var effective = clock is null || row.Status != Ecr.Domain.Enums.ProjectStatus.Active
+        var active = row.Status == Ecr.Domain.Enums.ProjectStatus.Active;
+        var effective = clock is null || !active
             ? period.State
             : PeriodStates.Effective(
                 period,
@@ -236,7 +246,10 @@ public sealed class PeriodStore(EcrDbContext db, Ecr.Domain.Abstractions.IClock?
                     Ecr.Domain.ValueObjects.SiteTimeZone.Create(row.TimeZoneId).ToTimeZoneInfo()));
 
         // Закритий місяць, відкритий лише для цього документа, — Grace для нього (пізня правка, автоперерахунок).
-        return Ecr.Domain.Services.DocumentPeriodReopenRule.Apply(effective, row.DocumentReopened);
+        var state = Ecr.Domain.Services.DocumentPeriodReopenRule.Apply(effective, row.DocumentReopened);
+
+        // ✎ D-575: «ще не відкрито» — лише в активному проєкті (у чернетці Scheduled — усі періоди за побудовою).
+        return new PeriodEvaluationState(state, active && state == Ecr.Domain.Enums.PeriodState.Scheduled);
     }
 
     /// <inheritdoc />
