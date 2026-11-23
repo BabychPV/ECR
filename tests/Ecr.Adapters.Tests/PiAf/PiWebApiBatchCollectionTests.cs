@@ -250,7 +250,15 @@ public sealed class PiWebApiBatchCollectionTests
             IReadOnlyList<EntityFieldMap> maps = paths.Select((p, i) => EntityFieldMap.ToColumn(SourceEntityId, p, columnDefId: 100 + i)).ToList();
 
             Store.FindSourceEntityAsync(SourceEntityId, Arg.Any<CancellationToken>()).Returns(entity);
-            Store.FindDataSourceAsync(Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(FakePiWebApiServer.Source());
+            // Стеля одночасних читань — поле джерела (ext.DataSource.MaxParallel), а не параметр збирача.
+            var dataSource = FakePiWebApiServer.Source();
+
+            if (maxParallelReads is { } parallel)
+            {
+                dataSource.Configure(null, null, parallel);
+            }
+
+            Store.FindDataSourceAsync(Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(dataSource);
             Store.GetFieldMapsAsync(Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(maps);
             Store.GetCoverageAsync(Arg.Any<int>(), Arg.Any<DateTime>(), Arg.Any<CancellationToken>())
                 .Returns(call => Holes(call.ArgAt<DateTime>(1), gaps));
@@ -287,8 +295,7 @@ public sealed class PiWebApiBatchCollectionTests
                 [adapter],
                 new SourceUnitConverter(new UnitConverter(), catalog),
                 new CatchUpPlanner(Store, new TestClock(Now)),
-                Store,
-                maxParallelReads: maxParallelReads);
+                Store);
         }
 
         public FakePiWebApiServer Server { get; }

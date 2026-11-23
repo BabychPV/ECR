@@ -35,7 +35,6 @@ public sealed partial class CollectionRunner(
     TimeSpan? maxRunDuration = null,
     ILogger<CollectionRunner>? logger = null,
     int? maxPagesPerRead = null,
-    int? maxParallelReads = null,
     CollectionRunnerOptions? options = null) : ICollectionRunner
 {
     /// <summary>Нарізка на шматки й видалення зниклих точок (D-462); <c>null</c> — обидва вимкнені.</summary>
@@ -218,7 +217,7 @@ public sealed partial class CollectionRunner(
 
         // P7: адаптер, що читає атрибути пакетом, отримує один запит на
         // інтервал замість одного на атрибут, а наступні інтервали читаються
-        // наперед (не більше ParallelReads одночасно). Адаптер без цієї
+        // наперед (не більше MaxParallel джерела одночасно). Адаптер без цієї
         // здатності (PiSqlClient) читається, як і раніше, послідовно.
         var batch = adapter as IBatchCollectionSource;
 
@@ -446,7 +445,7 @@ public sealed partial class CollectionRunner(
                 ? null
                 : new ReadAhead(
                     work.Count,
-                    ParallelReads,
+                    ParallelReadsOf(dataSource),
                     (index, token) =>
                     {
                         List<PathCursor> cursors =

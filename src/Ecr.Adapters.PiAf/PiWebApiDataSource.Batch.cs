@@ -102,7 +102,7 @@ public sealed partial class PiWebApiDataSource
     /// атрибутів однакова) ідуть одним <c>streamsets/recorded</c> на пакет;
     /// хвости понад стелю мають кожен свій курсор і тому здебільшого йдуть
     /// пакетом з одного. Пакети одного виклику — послідовно: паралелізм
-    /// задає збирач (<c>CollectionRunner.DefaultMaxParallelReads</c>),
+    /// задає збирач (<c>ext.DataSource.MaxParallel</c>, <c>CollectionRunner.ParallelReadsOf</c>),
     /// і другий рівень тут його б помножив.
     /// <para>
     /// ⚠ Чи <c>maxCount</c> у <c>streamsets/recorded</c> — стеля на кожен
