@@ -6,9 +6,9 @@ namespace Ecr.Architecture.Tests;
 /// Обгортка запуску pwsh (<see cref="DeployScriptHarness.FindPowerShell"/>) дає кожному запуску ВЛАСНИЙ кеш PowerShell.
 /// </summary>
 /// <remarks>
-/// ⛔ Причина 139 (✎ 2026-11-23): спільний <c>~/.cache/powershell/StartupProfileData-NonInteractive</c>, який паралельні
-/// pwsh переписують на виході; битий файл валить SIGSEGV кожен наступний pwsh у job. Тест тримає саме ізоляцію:
-/// два запуски - два різні каталоги кешу в тимчасовій теці, жоден не дорівнює спільному.
+/// ✎ 2026-11-23, збій 139: з якоїсь миті кожен новий pwsh у job гине SIGSEGV, тобто зламано спільний тривкий стан;
+/// єдиний такий стан самого pwsh - <c>~/.cache/powershell</c> (профіль JIT, який кожен pwsh переписує на виході).
+/// Тест тримає ізоляцію: два запуски - два різні каталоги кешу в тимчасовій теці, жоден не дорівнює спільному.
 /// </remarks>
 public sealed class PwshLauncherCacheIsolationTests
 {
