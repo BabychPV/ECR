@@ -113,6 +113,10 @@ param(
     # Етап Template: типово - свіжий клон останньої опублікованої версії (наявна чернетка не чіпається); -ReuseDraft -
     # явна згода продовжити в наявній чернетці (стара поведінка).
     [switch]$ReuseDraft,
+    # P-1123-4: одиниці моделі на НАЯВНИХ Formula/Calculated колонках клону. Типово ВИМКНЕНО: зміна UnitId колонки зі значеннями -
+    # guardedWithData у переносі документа (режим Safe відмовляє навіть з acceptGuardedOverwrite; репетиція 23.11: 8 значень
+    # Density/FuelLowerHeating doc 96). Вмикати лише за рішенням про перенос (див. W15z-window-plan §6).
+    [switch]$SyncFormulaUnits,
     [securestring]$BootstrapPassword,
     [string]$GoldenDir,
     [ValidateSet('LegacyRules', 'LegacyBindings', 'LegacyPublish', 'Accounts', 'Units', 'Registries', 'Contract', 'Template', 'Project', 'Documents', 'Methodologies', 'RowFilter', 'T7bStatus', 'SubstanceApplicability', 'ParityBranch', 'OptionalArguments', 'ArgumentSuffix', 'LookupCompare', 'NaeType', 'BranchGate', 'RequiredInputs', 'YearMonths', 'Data', 'MassFraction', 'LandParity', 'CompositionMass', 'All')]
@@ -748,7 +752,7 @@ function Fill-StructureSql([int]$vid) {
         # D-474: наявні таблиці й колонки чернетки-клону підтягуються до моделі там, де модель тепер інша, а `$have` нижче їх
         # пропускає: (i) прив'язка місяця (лише додається, не знімається), (ii) LayoutKind, (iii) видимість МІСЯЧНИХ колонок,
         # (iv) DefaultValue. Лише чернетка (Status=0) і лише при розбіжності: повтор - 0 змін.
-        $d474 = @{ month = 0; layout = 0; unhide = 0; default = 0 }
+        $d474 = @{ month = 0; layout = 0; unhide = 0; default = 0; unit = 0 }; $unitSet = @()
         $draftGuard = 'JOIN cfg.TableDef t ON t.Id=c.TableDefId JOIN cfg.SheetDef s ON s.Id=t.SheetDefId JOIN cfg.TemplateVersion v ON v.Id=s.TemplateVersionId WHERE c.Id=@i AND v.Id=@v AND v.Status=0'
         foreach ($sh in @($Mdl.sheets)) {
             foreach ($tb in @($sh.tables)) {
@@ -766,10 +770,19 @@ function Fill-StructureSql([int]$vid) {
                     if ($c.default) {
                         $d474.default += [int](Sql-Exec $cn ("UPDATE c SET DefaultValue=@d FROM cfg.ColumnDef c $draftGuard AND (c.DefaultValue IS NULL OR c.DefaultValue<>@d)") @{ d = [string]$c.default; i = $hiD.id; v = $vid })
                     }
+                    # P-1123-4: одиниця з моделі на наявній колонці клону - лише Formula/Calculated (значень, введених людиною, немає,
+                    # тож одиниця нічого не перетлумачує; введену колонку так не чіпаємо). Модель без одиниці - не знімаємо.
+                    $uD = UnitId $c.unit
+                    if ($SyncFormulaUnits -and $null -ne $uD -and [string]$c.dataType -in 'Formula', 'Calculated') {
+                        $nU = [int](Sql-Exec $cn ("UPDATE c SET UnitId=@u FROM cfg.ColumnDef c $draftGuard AND c.DataType IN (6,8) AND (c.UnitId IS NULL OR c.UnitId<>@u)") @{ u = [int]$uD; i = $hiD.id; v = $vid })
+                        if ($nU -gt 0) { $d474.unit += $nU; $unitSet += "$($tb.code).$($c.code)=$($c.unit)" }
+                    }
                 }
             }
         }
         Log ("  D-474 (чернетка-клон): прив'язок місяця {0}, LayoutKind {1}, відкрито місячних колонок {2}, DefaultValue {3}" -f $d474.month, $d474.layout, $d474.unhide, $d474.default)
+        Log ("  одиниці формульних колонок за моделлю (чернетка-клон): {0}{1}" -f $d474.unit, $(if ($SyncFormulaUnits) { '' } else { ' (вимкнено; -SyncFormulaUnits)' }))
+        foreach ($k in @($unitSet | Select-Object -First 30)) { Log "    одиниця: $k" }
         $dt = New-Object System.Data.DataTable
         foreach ($n in 'TableDefId:int', 'Code:string', 'HeaderL10n:string', 'Ordinal:int', 'DataType:byte', 'Precision:byte', 'Scale:byte', 'IsReadOnly:bool', 'IsRequired:bool',
             'IsHidden:bool', 'IsMonthColumn:bool', 'MonthNumber:byte', 'DefaultValue:string', 'LookupRegistryDefId:int', 'UnitId:int', 'IsBusinessKey:bool', 'IsScopeField:bool', 'IsIndexed:bool', 'IsDeleted:bool') {
