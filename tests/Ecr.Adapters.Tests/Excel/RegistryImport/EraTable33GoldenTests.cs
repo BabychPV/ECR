@@ -163,7 +163,7 @@ public sealed class EraTable33GoldenTests
         }
 
         Assert.True(preview.CanApply);
-        Assert.Equal(new ImportDiffCounts(373, 0, 0, 0, 0, 2624), preview.Diff);
+        Assert.Equal(new ImportDiffCounts(373, 0, 0, 0, 0, 2624, NewChildren: 2624), preview.Diff); // ✎ D-569: new sources bring new substance rows
         Assert.Empty(target.Applied);
 
         ImportCommitResult committed;

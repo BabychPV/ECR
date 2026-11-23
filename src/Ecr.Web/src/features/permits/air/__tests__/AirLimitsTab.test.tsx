@@ -64,6 +64,23 @@ describe('вкладка «Air limits»', () => {
     expect(getAirLimits).toHaveBeenCalledWith(5);
   });
 
+  it('D-569: «Current table: file, date, user» — the last applied table; without a record no line', async () => {
+    getAirLimits.mockResolvedValue(
+      card({ currentTable: { fileName: '7) Параметры_2024_final_Test.xlsx', importedAt: '2026-11-23T04:50:59Z', importedBy: 'land-owner', sources: 1, substances: 1 } }),
+    );
+    render(mount(true));
+    const line = await screen.findByTestId('air-current-table');
+    expect(line.textContent).toContain('7) Параметры_2024_final_Test.xlsx');
+    expect(line.textContent).toContain('land-owner');
+    expect(line.textContent).toMatch(/2026/);
+    cleanup();
+
+    getAirLimits.mockResolvedValue(card());
+    render(mount(true));
+    await screen.findByText('Source 1085');
+    expect(screen.queryByTestId('air-current-table')).toBeNull();
+  });
+
   it('«Region / area» показує назву запису з довідника й код в дужках; без scope-fields - лише код', async () => {
     const base = card().sources[0]!;
     getAirLimits.mockResolvedValue(card({ sources: [{ ...base, area: '-', regionEntryCode: 'REG_001', regionEntryId: 11, areaEntryCode: null, areaEntryId: null }] }));

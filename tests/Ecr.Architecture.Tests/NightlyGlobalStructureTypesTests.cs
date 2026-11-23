@@ -39,6 +39,7 @@ public sealed partial class NightlyGlobalStructureTypesTests
         ["ReportVersion"] = "версія звіту: читає результати, не вхід розрахунку",
         ["cfg.PermitTypeDef"] = "тип дозволу: значення доходять у комірки записом Permit — гілка правок комірок",
         ["cfg.PermitGroup"] = "група дозволів: те саме — значення доходять комірками Permit",
+        ["permit.AirImportTable"] = "D-569: «поточна таблиця» дозволу (файл, специфікація, видалені ключі) — довідка картки; самі рядки пише cfg.RegistryDef/dic.RegistryEntry того ж імпорту",
         ["cfg.RegistryDefinitionDraft"] = "чернетка опису довідника: до публікації (cfg.RegistryDef) не діє",
         ["PeriodPolicy"] = "політика періодів проєкту: переходи станів ловить гілка doc.Period.StateChangedAt",
         ["ext.SourceEntity"] = "сутність/політика збору: дані доходять комірками Integration — гілка правок",

@@ -153,8 +153,10 @@ export function preview(patch: Partial<AirPreview['preview']> = {}): AirPreview 
           { ownerKey: '9', label: 'KZ79UKR00003155', parents: 3, children: 24 },
         ],
       },
-      diff: { newParents: 2, changedParents: 10, unchangedParents: 361, removedParents: 0, skippedParents: 0, children: 2624 },
+      diff: { newParents: 2, changedParents: 10, unchangedParents: 361, removedParents: 0, skippedParents: 0, children: 2624, newChildren: 0, changedChildren: 0, removedChildren: 0 },
       stats: { parents: 373, children: 2624, distinctChildKeys: 55, groupRows: 27, skippedRows: 5 },
+      rows: [],
+      rowsDropped: 0,
       ...patch,
     },
   };
@@ -171,7 +173,7 @@ export function result(): AirImportResult {
     createdNae: 2,
     replacedOwn: 371,
     replacedOthers: [{ ownerKey: '7', label: 'KZ46VCZ14622410', parents: 12, children: 96 }],
-    diff: { newParents: 2, changedParents: 10, unchangedParents: 361, removedParents: 0, skippedParents: 0, children: 2624 },
+    diff: { newParents: 2, changedParents: 10, unchangedParents: 361, removedParents: 0, skippedParents: 0, children: 2624, newChildren: 0, changedChildren: 0, removedChildren: 0 },
     fingerprint: 'fp-1-abcdefghijkl',
     fileSha256: 'abc',
   };
