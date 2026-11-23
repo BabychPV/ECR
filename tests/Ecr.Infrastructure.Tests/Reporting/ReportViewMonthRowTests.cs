@@ -21,20 +21,44 @@ namespace Ecr.Infrastructure.Tests.Reporting;
 /// <remarks>
 /// Мутації (локально, у <c>rpt.usp_GenerateMonthView</c>): (1) <c>c.Mo = k.Mo</c> → <c>c.Mo = k.Mo % 12 + 1</c> (місяць зсунуто) -
 /// перший тест червоний; (2) немісячна колонка в усіх рядках (<c>WHEN o.Kind = 'A' AND k.Mo = 0</c> → <c>WHEN o.Kind = 'A'</c>) -
-/// перший тест червоний; (3) прибрати перевірку _m з умови пропуску AN-155d - другий тест червоний (старт без _m пропускає).
+/// перший тест червоний; (3) прибрати перевірку _m з умови пропуску AN-155d - <see cref="ReportViewMonthRowStartupTests"/> червоний.
 /// </remarks>
 [Collection("SqlServer")]
-public sealed class ReportViewMonthRowTests(SqlServerFixture sql)
+public sealed class ReportViewMonthRowTests(SqlServerFixture sql) : ReportViewMonthRowCases(sql)
 {
+    [Fact]
+    [Trait("Requirement", "ФВ-10.13")]
+    public Task Month_row_view_equals_the_wide_view_cell_for_cell_for_version_and_stable_views() => MonthRowEqualsWideAsync();
+}
+
+/// <summary>
+/// D-573, старт (AN-155d): відсутня <c>_m</c> додається без DDL широкої, повтор - без DDL. ВЛАСНА база: прогін «усі шаблони»
+/// у спільній базі колекції кидає 50409 на навмисно «зіткнених» шаблонах інших тестів (<see cref="ReportViewGeneratorTests"/>:
+/// <c>Q_X/S/T</c> і <c>Q/X_S/T</c>) - CI 23.11, run 45177336935, server-part (як <see cref="ReportViewStartupSkipTests"/>).
+/// </summary>
+[Trait(TestCategories.Category, TestCategories.Integration)]
+public sealed class ReportViewMonthRowStartupTests() : ReportViewMonthRowCases(SqlServerFixture.WithOwnDatabase("_viewmrow")), IAsyncLifetime
+{
+    public Task InitializeAsync() => Sql.InitializeAsync();
+
+    public Task DisposeAsync() => Sql.DisposeAsync();
+
+    [Fact]
+    [Trait("Requirement", "ФВ-10.13")]
+    public Task Startup_adds_a_missing_month_row_view_without_touching_the_wide_view_and_then_skips() => StartupAddsMonthViewAsync();
+}
+
+/// <summary>Спільні кроки тестів D-573 (база - <see cref="Sql"/>).</summary>
+public abstract class ReportViewMonthRowCases(SqlServerFixture sql)
+{
+    protected SqlServerFixture Sql => sql;
     private static readonly string[] Families = ["QTY", "LBL", "FX", "FX_Text"];
 
     private static readonly int[] AllMonths = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 
     private sealed record Built(TestDocument Doc, string VersionView, string StableView);
 
-    [Fact]
-    [Trait("Requirement", "ФВ-10.13")]
-    public async Task Month_row_view_equals_the_wide_view_cell_for_cell_for_version_and_stable_views()
+    protected async Task MonthRowEqualsWideAsync()
     {
         var b = await BuildAsync();
 
@@ -91,9 +115,7 @@ public sealed class ReportViewMonthRowTests(SqlServerFixture sql)
         }
     }
 
-    [Fact]
-    [Trait("Requirement", "ФВ-10.13")]
-    public async Task Startup_adds_a_missing_month_row_view_without_touching_the_wide_view_and_then_skips()
+    protected async Task StartupAddsMonthViewAsync()
     {
         var b = await BuildAsync();
         await using (var db = sql.CreateContext())
