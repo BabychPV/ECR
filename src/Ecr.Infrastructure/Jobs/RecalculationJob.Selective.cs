@@ -814,7 +814,7 @@ public sealed partial class RecalculationJob
             return woken;
         }
 
-        var snapshot = graph is null ? null : await graph.GetAsync(ct).ConfigureAwait(false);
+        var snapshot = dependencyGraph is null ? null : await dependencyGraph.GetAsync(ct).ConfigureAwait(false);
         var consumerKind = await db.Projects.AsNoTracking().Where(p => p.Id == projectId).Select(p => p.PeriodKind)
             .FirstAsync(ct).ConfigureAwait(false);
 

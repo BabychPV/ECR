@@ -31,7 +31,7 @@ public sealed class DocumentSourceBindingStore(EcrDbContext db, IDependencyGraph
             .ToListAsync(ct).ConfigureAwait(false);
 
         // ✎ B179 L6: споживачі беруться з графа залежностей (формули шаблонів і методології, що читають довідник),
-        // а не з ручного cfg.DocumentSourceBindingConsumer (його ніхто не читає; таблицю знімає L7).
+        // а не з ручного cfg.DocumentSourceBindingConsumer (✎ L7, D-574: таблицю знято, рядки — в aud.SecurityEvent).
         var snapshot = await graph.GetAsync(ct).ConfigureAwait(false);
         var templateCodes = snapshot.Nodes
             .Where(n => n.Ref.Kind == Ecr.Application.DocumentDependencies.DependencyNodeKind.Template)

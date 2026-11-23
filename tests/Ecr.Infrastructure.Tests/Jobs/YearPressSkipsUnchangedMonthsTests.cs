@@ -753,7 +753,7 @@ public sealed partial class YearPressSkipsUnchangedMonthsTests(SqlServerFixture 
             jobs: scheduler,
             lease: lease,
             queue: queue,
-            graph: _withGraph ? SourceDependencyWorld.Graph(db) : null)
+            dependencyGraph: _withGraph ? SourceDependencyWorld.Graph(db) : null)
         {
             OwnerReadersProbe = _ownerReaders,
             CrossReadVersionLimit = _versionLimit ?? 64,

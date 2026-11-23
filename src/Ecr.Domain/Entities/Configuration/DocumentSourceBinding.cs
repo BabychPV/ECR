@@ -48,6 +48,10 @@ public enum DocumentSourcePolicy : byte
 /// ⛔ Перемикання <see cref="SourceState"/> — лише явна дія адміністратора (ендпоінт із перевіркою «проєкт джерела
 /// місячний»); сід рядок, що вже є, не змінює.
 /// </para>
+/// <para>
+/// ✎ B179 L7 (D-574): споживачів зв'язки називає лише граф залежностей документів (<c>IDependencyGraphProvider</c>);
+/// ручний перелік споживачів знято разом із таблицею (рядки збережено в <c>aud.SecurityEvent</c>).
+/// </para>
 /// </remarks>
 public sealed class DocumentSourceBinding : Entity<int>
 {
@@ -56,8 +60,6 @@ public sealed class DocumentSourceBinding : Entity<int>
 
     /// <summary>Найдовший код — як <c>nvarchar(64)</c> у схемі.</summary>
     public const int CodeMaxLength = 64;
-
-    private readonly List<DocumentSourceBindingConsumer> _consumers = [];
 
     private DocumentSourceBinding() { }
 
@@ -113,9 +115,6 @@ public sealed class DocumentSourceBinding : Entity<int>
 
     /// <summary>Хто змінив стан-ворота востаннє.</summary>
     public int? UpdatedByUserId { get; private set; }
-
-    /// <summary>Шаблони-споживачі.</summary>
-    public IReadOnlyList<DocumentSourceBindingConsumer> Consumers => _consumers;
 
     /// <summary>Перемикає стан-ворота.</summary>
     /// <param name="state">Новий стан.</param>
@@ -184,29 +183,4 @@ public sealed class DocumentSourceBinding : Entity<int>
 
         return changed;
     }
-
-    /// <summary>Додає шаблон-споживач (для тестів; у базі — сід).</summary>
-    /// <param name="templateId">Шаблон.</param>
-    public void AddConsumer(int templateId)
-    {
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(templateId);
-        if (_consumers.TrueForAll(c => c.TemplateId != templateId))
-        {
-            _consumers.Add(new DocumentSourceBindingConsumer(templateId));
-        }
-    }
-}
-
-/// <summary>Шаблон-споживач зв'язки (<c>cfg.DocumentSourceBindingConsumer</c>); ключ — (зв'язка, шаблон).</summary>
-public sealed class DocumentSourceBindingConsumer
-{
-    private DocumentSourceBindingConsumer() { }
-
-    internal DocumentSourceBindingConsumer(int templateId) => TemplateId = templateId;
-
-    /// <summary>Зв'язка.</summary>
-    public int BindingId { get; private set; }
-
-    /// <summary>Шаблон-споживач.</summary>
-    public int TemplateId { get; private set; }
 }
