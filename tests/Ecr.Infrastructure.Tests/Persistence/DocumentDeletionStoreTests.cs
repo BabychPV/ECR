@@ -269,7 +269,11 @@ public sealed class DocumentDeletionStoreTests(SqlServerFixture sql)
     /// ✎ PSS-15 (огляд L-new-1, D-562): документ-джерело B179 перед видаленням торкається документів-споживачів
     /// (<c>ModifiedAt</c>) — вхід їхнього нічного перерахунку; сторонній документ і видалення не-джерела нічого не чіпають.
     /// </summary>
-    /// <remarks>МУТАЦІЯ: прибрати UPDATE у <c>TouchSourceConsumersAsync</c> — дата споживача лишається старою, червоний.</remarks>
+    /// <remarks>
+    /// МУТАЦІЯ: прибрати UPDATE у <c>TouchSourceConsumersAsync</c> — дата споживача лишається старою, червоний.
+    /// ✎ B179 L7 (D-574): споживача називає граф (формула шаблону читає довідник зв'язки), ручного переліку немає;
+    /// мутація «споживачі з порожнього списку замість графа» — споживача не торкнуто, червоний.
+    /// </remarks>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage6)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
@@ -278,7 +282,7 @@ public sealed class DocumentDeletionStoreTests(SqlServerFixture sql)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var source = await builder.BuildAsync(columnCount: 1, rowCount: 1);
-        var consumer = await builder.BuildAsync(columnCount: 1, rowCount: 1);
+        var consumer = await builder.BuildAsync(columnCount: 2, rowCount: 1);
         var stranger = await builder.BuildAsync(columnCount: 1, rowCount: 1);
         var old = new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
@@ -287,13 +291,14 @@ public sealed class DocumentDeletionStoreTests(SqlServerFixture sql)
         await using (var seed = builder.CreateContext())
         {
             var tag = Guid.NewGuid().ToString("N")[..10];
-            var registry = new RegistryDef(EcrCode.Create($"N15D{tag}"), Name("source"), isTemporal: false);
+            var code = $"N15D{tag}";
+            var registry = new RegistryDef(EcrCode.Create(code), Name("source"), isTemporal: false);
             seed.RegistryDefs.Add(registry);
             await seed.SaveChangesAsync();
             var binding = new DocumentSourceBinding($"N15D_{tag}", source.TemplateId, registry.Id);
-            binding.AddConsumer(consumer.TemplateId);
             seed.DocumentSourceBindings.Add(binding);
             await seed.SaveChangesAsync();
+            await DependencyGraphTestKit.MakeConsumerAsync(seed, consumer, code);
             (bindingId, registryId) = (binding.Id, registry.Id);
             await seed.Database.ExecuteSqlAsync(
                 $"UPDATE doc.Document SET ModifiedAt = {old} WHERE Id IN ({consumer.DocumentId}, {stranger.DocumentId})");
@@ -303,7 +308,7 @@ public sealed class DocumentDeletionStoreTests(SqlServerFixture sql)
         {
             await using (var db = builder.CreateContext())
             {
-                var store = new DocumentDeletionStore(db);
+                var store = new DocumentDeletionStore(db, DependencyGraphTestKit.Provider(db));
                 Assert.Equal(0, await store.TouchSourceConsumersAsync(stranger.DocumentId, 1, At, CancellationToken.None));
                 Assert.Equal(1, await store.TouchSourceConsumersAsync(source.DocumentId, 1, At, CancellationToken.None));
             }
@@ -319,7 +324,6 @@ public sealed class DocumentDeletionStoreTests(SqlServerFixture sql)
         {
             await using var cleanup = builder.CreateContext();
             await cleanup.Database.ExecuteSqlAsync($"""
-                DELETE FROM cfg.DocumentSourceBindingConsumer WHERE BindingId = {bindingId};
                 DELETE FROM cfg.DocumentSourceBinding WHERE Id = {bindingId};
                 DELETE FROM cfg.RegistryDef WHERE Id = {registryId};
                 """);

@@ -838,20 +838,24 @@ public sealed class NightlyRecalculationTests(SqlServerFixture sql)
         return new Arranged(builder, document);
     }
 
-    /// <summary>Документ-джерело іншого шаблону й зв'язка, де шаблон документа — споживач (B179).</summary>
+    /// <summary>
+    /// Документ-джерело іншого шаблону й зв'язка, де шаблон документа — споживач (B179). ✎ L7 (D-574): споживача називає
+    /// граф — формула шаблону документа читає довідник зв'язки (ручного переліку споживачів немає).
+    /// </summary>
     private async Task<SourceBinding> BindSourceAsync(Arranged arranged)
     {
         var source = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(periodKey: January.Value);
         await using var db = arranged.Builder.CreateContext();
         var tag = Guid.NewGuid().ToString("N")[..10];
-        var registry = new RegistryDef(EcrCode.Create($"N15S{tag}"), Name("source"), isTemporal: false);
+        var code = $"N15S{tag}";
+        var registry = new RegistryDef(EcrCode.Create(code), Name("source"), isTemporal: false);
         db.RegistryDefs.Add(registry);
         await db.SaveChangesAsync();
 
         var binding = new DocumentSourceBinding($"N15_{tag}", source.TemplateId, registry.Id);
-        binding.AddConsumer(arranged.Document.TemplateId);
         db.DocumentSourceBindings.Add(binding);
         await db.SaveChangesAsync();
+        await DependencyGraphTestKit.MakeConsumerAsync(db, arranged.Document, code);
         return new SourceBinding(source, binding.Id, registry.Id);
     }
 
@@ -860,7 +864,6 @@ public sealed class NightlyRecalculationTests(SqlServerFixture sql)
     {
         await using var db = arranged.Builder.CreateContext();
         await db.Database.ExecuteSqlAsync($"""
-            DELETE FROM cfg.DocumentSourceBindingConsumer WHERE BindingId = {bound.BindingId};
             DELETE FROM cfg.DocumentSourceBinding WHERE Id = {bound.BindingId};
             DELETE FROM cfg.RegistryDef WHERE Id = {bound.RegistryId};
             """);
@@ -1046,7 +1049,9 @@ internal static class NightlyJobParts
         Func<RecalculationRequest, Task>? probe = null)
     {
         var clock = new TestClock(at);
-        return new RecalculationJob(db, runner, RunHandler(db, clock), FormulaService(), clock, jobs)
+        return new RecalculationJob(
+            db, runner, RunHandler(db, clock), FormulaService(), clock, jobs,
+            dependencyGraph: DependencyGraphTestKit.Provider(db))
         {
             NightlyDecisionProbe = probe,
         };
