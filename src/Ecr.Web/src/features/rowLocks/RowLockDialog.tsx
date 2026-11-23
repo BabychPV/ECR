@@ -82,13 +82,13 @@ export default function RowLockDialog({ documentId, periodKey, table, rows, onCl
 
         <Group grow align="flex-start">
           <DateOnlyInput label={t('rowLock.fromLabel')} value={fromDate} onChange={setFromDate} clearable={false} autoFocus />
-          <DateOnlyInput
-            label={t('rowLock.toLabel')}
-            description={t('rowLock.toHint')}
-            value={toDate}
-            onChange={setToDate}
-          />
+          <DateOnlyInput label={t('rowLock.toLabel')} value={toDate} onChange={setToDate} />
         </Group>
+
+        {/* Пояснення під рядом, а не `description` одного поля: інакше «По» нижче за «З». Порожня «По» — спокійна підказка, не помилка. */}
+        <Text size="xs" c="dimmed" data-row-lock-hint={toDate === '' ? 'required' : 'inclusive'}>
+          {toDate === '' ? t('rowLock.toRequired') : t('rowLock.toHint')}
+        </Text>
 
         <Textarea
           label={t('rowLock.noteLabel')}
