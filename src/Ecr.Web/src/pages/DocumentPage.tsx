@@ -38,7 +38,12 @@ import { permitRowWarningsOf, publishRowFindings } from '@/features/grid/rowAtte
 import type { HeldEdit } from '@/features/grid/pendingStore';
 import { editsDeferToServer, isEditable } from '@/features/workflow/sheetEditability';
 import { useApproverEditAvailability } from '@/features/workflow/api';
-import { useUnmatchedRows } from '@/features/documents/useUnmatchedRows';
+import {
+  hasCalculationIssues,
+  useUnmatchedRows,
+  useYearUnmatchedRows,
+  type MonthUnmatchedRows,
+} from '@/features/documents/useUnmatchedRows';
 import { can, useSession } from '@/shared/session/useSession';
 import { localized } from '@/shared/i18n/localized';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -630,11 +635,12 @@ export function DocumentPage(): JSX.Element {
 
   // ✎ B78 F13 P3-2: «Відкрити HSE400» — документ року в проєкті з шаблоном HSE400 (спершу цей проєкт); немає — `false`
   // (панель так і каже), відмова API — виняток (панель показує помилку). За `import()` — бюджет маршруту D-132.
-  const openHse400 = useCallback(async (): Promise<boolean> => {
+  // ✎ W15z M4: `target` — місяць панелі (документ «рік» має панель на кожен місяць); без нього — період сторінки.
+  const openHse400 = useCallback(async (target: number = periodKey): Promise<boolean> => {
     const { findHse400Document } = await import('@/features/documents/findHse400Document');
-    const found = await findHse400Document(projectId, Math.trunc(periodKey / 100), documentId, periodKey);
+    const found = await findHse400Document(projectId, Math.trunc(target / 100), documentId, target);
     if (found === null) return false;
-    void navigate(`/documents/${String(found)}?periodKey=${String(periodKey)}`);
+    void navigate(`/documents/${String(found)}?periodKey=${String(target)}`);
 
     return true;
   }, [documentId, navigate, periodKey, projectId]);
@@ -858,6 +864,20 @@ export function DocumentPage(): JSX.Element {
     active?.sheetCopyId ?? null,
     can(session.data, 'Calculation.View'),
   );
+  // ✎ W15z M4 (P-1122-4): документ «рік» — проблеми ВСІХ місяців року (F5-R, StepError, помилки формул), панель на
+  // кожен місяць із проблемами; запит лише на якорі (до переходу на якір — нічого). Копія на місяць — одна панель, як було.
+  const yearIssueMonths = useYearUnmatchedRows(
+    documentId,
+    periodKey,
+    active?.sheetCopyId ?? null,
+    yearLayout && yearAnchor === periodKey,
+    unmatchedRows.finishedAt,
+  );
+  const issuePanels: readonly MonthUnmatchedRows[] = yearLayout
+    ? yearIssueMonths
+    : hasCalculationIssues(unmatchedRows)
+      ? [{ periodKey, rows: unmatchedRows }]
+      : [];
 
   const refetchBoth = (): void => {
     void summary.refetch();
@@ -1040,23 +1060,22 @@ export function DocumentPage(): JSX.Element {
       )}
 
       {/* ✎ B78: помилки формул (C-1, блокують подання) і рядки поза розрахунком — одна панель, рядок на причину. */}
-      {(unmatchedRows.formulaErrors.length > 0 ||
-        unmatchedRows.issues.length > 0 ||
-        (unmatchedRows.sourceIssues?.length ?? 0) > 0) && (
-        <Suspense fallback={null}>
+      {/* ✎ W15z M4: «рік» — панель на кожен місяць із проблемами (заголовок називає місяць). */}
+      {issuePanels.map((month) => (
+        <Suspense key={month.periodKey} fallback={null}>
           <CalculationIssuesPanel
             userId={session.data?.userId}
             documentId={can(session.data, 'Calculation.View') ? documentId : undefined}
-            periodKey={periodKey}
-            rows={unmatchedRows}
+            periodKey={month.periodKey}
+            rows={month.rows}
             tables={tables.data ?? []}
             onOpenCell={openUnmatchedRow}
-            onOpenHse400={openHse400}
+            onOpenHse400={() => openHse400(month.periodKey)}
             onOpenSource={openSource}
             narrow={narrow}
           />
         </Suspense>
-      )}
+      ))}
 
       {projectId !== null && (
         <Suspense fallback={null}>

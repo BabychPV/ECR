@@ -169,7 +169,8 @@ export function CalculationIssuesPanel({
   const blocking = rows.formulaErrors.length > 0 || causes.some((cause) => cause.kind === 'sourceNotApproved');
   const truncated = formulaErrorsTruncated(rows);
   const period = formatPeriodKey(periodKey);
-  const detailsId = 'document-calc-issues-details';
+  // ✎ W15z M4: документ «рік» малює панель на КОЖЕН місяць із проблемами — id деталей власний на період (без дублікатів).
+  const detailsId = `document-calc-issues-details-${String(periodKey)}`;
 
   const show = (target: IssueTarget | null): void => {
     setDetails(true);
@@ -193,6 +194,7 @@ export function CalculationIssuesPanel({
       py="xs"
       data-testid="document-calc-issues"
       data-blocking={blocking ? 'true' : 'false'}
+      data-period={periodKey}
     >
       <Group justify="space-between" wrap="wrap" gap="xs" align="baseline">
         {/* ⚠ `role="status"` — на тексті заголовка: Mantine `Alert` власну `role` не приймає (завжди `alert`). */}
