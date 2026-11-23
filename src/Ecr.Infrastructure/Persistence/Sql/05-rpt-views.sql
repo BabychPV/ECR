@@ -503,6 +503,14 @@ BEGIN
     DECLARE @rc bit, @rcCol bit, @rcSlots nvarchar(max), @owner nvarchar(200), @orvIds nvarchar(max), @orvSlots nvarchar(max),
             @orvPack nvarchar(max), @orvExprs nvarchar(max), @orvStub nvarchar(max), @orvStubRv nvarchar(max), @orvText nvarchar(max), @orvOn bit;
     SET @owner = N'p.PeriodKind = 0 AND ti.SheetCopyId IS NULL';
+    -- ✎ PERF (B-rpt 23.11): фрагменти тексту колонки - рядком на колонку (Seq = @n), склеюються ОДИН раз після циклу (FOR XML PATH,
+    -- D-101): дописування до nvarchar(max) у циклі копіювало весь рядок щоразу (квадратично). Порядок і байти тексту ті самі.
+    DECLARE @acc TABLE (Seq int NOT NULL PRIMARY KEY, Sel nvarchar(max) NOT NULL, SelText nvarchar(max) NOT NULL, SelRv nvarchar(max) NOT NULL,
+                        SelTextRv nvarchar(max) NOT NULL, Joins nvarchar(max) NOT NULL, PlainAgg nvarchar(max) NOT NULL, PlainAggS nvarchar(max) NOT NULL,
+                        ScAggS nvarchar(max) NOT NULL, FamAgg nvarchar(max) NOT NULL, RvIds nvarchar(max) NOT NULL, RvAgg nvarchar(max) NOT NULL,
+                        RvPack nvarchar(max) NOT NULL, RvExprs nvarchar(max) NOT NULL, OrvIds nvarchar(max) NOT NULL, OrvSlots nvarchar(max) NOT NULL,
+                        OrvPack nvarchar(max) NOT NULL, OrvExprs nvarchar(max) NOT NULL, OrvStub nvarchar(max) NOT NULL, OrvStubRv nvarchar(max) NOT NULL,
+                        RcSlots nvarchar(max) NOT NULL);
 
     DECLARE cur_views CURSOR LOCAL FAST_FORWARD FOR
         SELECT TableDefId, SheetDefId, Header, ViewName FROM @tables ORDER BY TableDefId;
@@ -517,6 +525,7 @@ BEGIN
                @rvPack = N'', @rvChoose = N'', @rvExprs = N'', @plainAgg = N'', @plainCnt = 0,
                @plainAggS = N'', @scAggS = N'', @vnLit = N'N''' + REPLACE(@view, N'''', N'''''') + N'''';
         DELETE FROM @slot;
+        DELETE FROM @acc;
         SET @layout = (SELECT LayoutKind FROM cfg.TableDef WHERE Id = @id);
         -- D-474: маршрутизація місяців ДЛЯ ЦІЄЇ ВЕРСІЇ - прапор (усі версії) або розкладка версії YearWithMonthColumns (1).
         -- Прапор ON або Layout = 0 - текст вʼюхи рівно той самий, що до D-474.
@@ -559,6 +568,10 @@ BEGIN
             SELECT @colCode = Code, @colType = DataType, @isMonth = IsMonthColumn, @monthNo = MonthNumber
               FROM cfg.ColumnDef WHERE Id = @colId;
             SET @n = @n + 1;
+            -- ✎ PERF: фрагменти ЦІЄЇ колонки (рядок @acc наприкінці ітерації); значення таблиці склеюються після циклу.
+            SELECT @select = N'', @selectText = N'', @selectRv = N'', @selectTextRv = N'', @joins = N'', @plainAgg = N'', @plainAggS = N'',
+                   @scAggS = N'', @famAgg = N'', @rvIds = N'', @rvAgg = N'', @rvPack = N'', @rvExprs = N'', @orvIds = N'', @orvSlots = N'',
+                   @orvPack = N'', @orvExprs = N'', @orvStub = N'', @orvStubRv = N'', @rcSlots = N'';
             SET @alias = N'c' + CAST(@n AS nvarchar(10));
             SET @valueCol = @alias + N'.'
                 + CASE @colType
@@ -762,8 +775,33 @@ LEFT JOIN doc.CellValue AS ' + @alias + N' ON ' + @alias + N'.PeriodKey = r.Peri
                                 + QUOTENAME(@colCode + N'_Text');
             SET @selectRv = @selectRv + N',
        ' + @valueColRv + N' AS ' + QUOTENAME(@colCode);
+            INSERT INTO @acc (Seq, Sel, SelText, SelRv, SelTextRv, Joins, PlainAgg, PlainAggS, ScAggS, FamAgg, RvIds, RvAgg, RvPack, RvExprs,
+                              OrvIds, OrvSlots, OrvPack, OrvExprs, OrvStub, OrvStubRv, RcSlots)
+            VALUES (@n, @select, @selectText, @selectRv, @selectTextRv, @joins, @plainAgg, @plainAggS, @scAggS, @famAgg, @rvIds, @rvAgg,
+                    @rvPack, @rvExprs, @orvIds, @orvSlots, @orvPack, @orvExprs, @orvStub, @orvStubRv, @rcSlots);
             SET @colId = (SELECT MIN(Id) FROM cfg.ColumnDef WHERE TableDefId = @id AND IsDeleted = 0 AND Id > @colId);
         END
+        -- ✎ PERF: склеювання фрагментів колонок - один прохід на кожен текст (за Seq). Порожня таблиця - N'' (як ініціалізація вище).
+        SELECT @select = COALESCE((SELECT a.Sel AS [text()] FROM @acc AS a ORDER BY a.Seq FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), N''),
+               @selectText = COALESCE((SELECT a.SelText AS [text()] FROM @acc AS a ORDER BY a.Seq FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), N''),
+               @selectRv = COALESCE((SELECT a.SelRv AS [text()] FROM @acc AS a ORDER BY a.Seq FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), N''),
+               @selectTextRv = COALESCE((SELECT a.SelTextRv AS [text()] FROM @acc AS a ORDER BY a.Seq FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), N''),
+               @joins = COALESCE((SELECT a.Joins AS [text()] FROM @acc AS a ORDER BY a.Seq FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), N''),
+               @plainAgg = COALESCE((SELECT a.PlainAgg AS [text()] FROM @acc AS a ORDER BY a.Seq FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), N''),
+               @plainAggS = COALESCE((SELECT a.PlainAggS AS [text()] FROM @acc AS a ORDER BY a.Seq FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), N''),
+               @scAggS = COALESCE((SELECT a.ScAggS AS [text()] FROM @acc AS a ORDER BY a.Seq FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), N''),
+               @famAgg = COALESCE((SELECT a.FamAgg AS [text()] FROM @acc AS a ORDER BY a.Seq FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), N''),
+               @rvIds = COALESCE((SELECT a.RvIds AS [text()] FROM @acc AS a ORDER BY a.Seq FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), N''),
+               @rvAgg = COALESCE((SELECT a.RvAgg AS [text()] FROM @acc AS a ORDER BY a.Seq FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), N''),
+               @rvPack = COALESCE((SELECT a.RvPack AS [text()] FROM @acc AS a ORDER BY a.Seq FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), N''),
+               @rvExprs = COALESCE((SELECT a.RvExprs AS [text()] FROM @acc AS a ORDER BY a.Seq FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), N''),
+               @orvIds = COALESCE((SELECT a.OrvIds AS [text()] FROM @acc AS a ORDER BY a.Seq FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), N''),
+               @orvSlots = COALESCE((SELECT a.OrvSlots AS [text()] FROM @acc AS a ORDER BY a.Seq FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), N''),
+               @orvPack = COALESCE((SELECT a.OrvPack AS [text()] FROM @acc AS a ORDER BY a.Seq FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), N''),
+               @orvExprs = COALESCE((SELECT a.OrvExprs AS [text()] FROM @acc AS a ORDER BY a.Seq FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), N''),
+               @orvStub = COALESCE((SELECT a.OrvStub AS [text()] FROM @acc AS a ORDER BY a.Seq FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), N''),
+               @orvStubRv = COALESCE((SELECT a.OrvStubRv AS [text()] FROM @acc AS a ORDER BY a.Seq FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), N''),
+               @rcSlots = COALESCE((SELECT a.RcSlots AS [text()] FROM @acc AS a ORDER BY a.Seq FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), N'');
         SET @select = @select + @selectText;
         SET @selectRv = @selectRv + @selectTextRv;   -- AN-147: супутники й у варіанті з rv (Calculated числом методології)
 
@@ -1666,13 +1704,29 @@ BEGIN
     -- Columns of one group: one row per ColumnDef (all versions), then one row per code.
     -- D-474: Routed - версія колонки маршрутизується (Mo у мапі слотів - лише для Id маршрутизованих версій).
     DECLARE @ci TABLE (ColId int NOT NULL PRIMARY KEY, Code nvarchar(64) NOT NULL, DataType tinyint NOT NULL, Fam tinyint NOT NULL,
-                       IsMonth bit NOT NULL, MonthNo tinyint NULL, Ord bigint NOT NULL, Routed bit NOT NULL, Rc bit NOT NULL);
+                       IsMonth bit NOT NULL, MonthNo tinyint NULL, Ord bigint NOT NULL, Routed bit NOT NULL, Rc bit NOT NULL,
+                       INDEX IX_ci_Code (Code));
     -- ✎ L5 (як у rpt.usp_GenerateTemplateViews): @rcCol - колонка маршрутизована обчислювана (Mo - лише в Id версій з Rc = 1);
     -- @rcSlots - їхні слоти (поза sc); @rcTids / @owner - рядки, що читають власника: місячний проєкт, оригінал аркуша і (група
     -- змішана) таблиця версії з Layout = 1; @orv* - числа прогонів власників (L5b).
     DECLARE @rcCol bit, @rcSlots nvarchar(max), @rcTids nvarchar(max), @owner nvarchar(max), @orvIds nvarchar(max), @orvSlots nvarchar(max),
             @orvPack nvarchar(max), @orvExprs nvarchar(max), @orvStub nvarchar(max), @orvText nvarchar(max);
-    DECLARE @cols TABLE (Seq int IDENTITY(1, 1) PRIMARY KEY, Code nvarchar(64) NOT NULL, FirstOrd bigint NOT NULL);
+    -- ✎ PERF (B-rpt 23.11): ознаки коду (тип / місяць / Rc ОСТАННЬОЇ версії, конфлікт родин, зайнятість імен <Код>_Text і
+    -- <Код>_Id) і Id коду з аліасами (@cidAll) рахуються НАБОРОМ до циклу: запити до змінних-таблиць на кожну колонку
+    -- сканували їх цілком (оцінка 1 рядок) - 2215 колонок давали 12 с.
+    DECLARE @cols TABLE (Seq int IDENTITY(1, 1) PRIMARY KEY, Code nvarchar(64) NOT NULL, FirstOrd bigint NOT NULL,
+                         LastType tinyint NULL, LastIsMonth bit NULL, LastMonthNo tinyint NULL, LastRc bit NULL, Conflict bit NULL,
+                         TextTaken bit NULL, IdTaken bit NULL);
+    DECLARE @cidAll TABLE (Seq int NOT NULL, Scope int NOT NULL, ColId int NOT NULL, PRIMARY KEY (Seq, Scope, ColId));
+    -- ✎ PERF (B-rpt 23.11): фрагменти тексту колонки - рядком на колонку (Seq), склеюються ОДИН раз після циклу (FOR XML PATH,
+    -- D-101). Дописування до nvarchar(max) у циклі копіює весь рядок щоразу: 1036 колонок - 16,6 с, 2000 - хвилини (квадратично+).
+    -- Порядок і байти тексту ті самі: фрагменти йдуть за Seq, як і раніше йшли дописування.
+    DECLARE @acc TABLE (Seq int NOT NULL PRIMARY KEY, Sel nvarchar(max) NOT NULL, SelText nvarchar(max) NOT NULL, SelRv nvarchar(max) NOT NULL,
+                        SelTextRv nvarchar(max) NOT NULL, PlainAgg nvarchar(max) NOT NULL, PlainAggS nvarchar(max) NOT NULL,
+                        ScAggS nvarchar(max) NOT NULL, FamAgg nvarchar(max) NOT NULL, RvIds nvarchar(max) NOT NULL, RvAgg nvarchar(max) NOT NULL,
+                        RvPack nvarchar(max) NOT NULL, RvExprs nvarchar(max) NOT NULL, OrvIds nvarchar(max) NOT NULL, OrvSlots nvarchar(max) NOT NULL,
+                        OrvPack nvarchar(max) NOT NULL, OrvExprs nvarchar(max) NOT NULL, OrvStub nvarchar(max) NOT NULL, RcSlots nvarchar(max) NOT NULL,
+                        ConflictCodes nvarchar(max) NOT NULL);
     -- RPT-STABLE Part B: code aliases of one group from the persisted rename map (cfg.ColumnRename): a renamed column is
     -- exposed under BOTH names, each reading the data of every id of the whole alias class (transitive closure).
     DECLARE @alias TABLE (Scope int NOT NULL, Code nvarchar(64) NOT NULL, Other nvarchar(64) NOT NULL, PRIMARY KEY (Scope, Code, Other));
@@ -1691,6 +1745,7 @@ BEGIN
         SET @anyExtra = 0;
         DELETE FROM @ci;
         DELETE FROM @cols;
+        DELETE FROM @acc;
         DELETE FROM @gx;
         DELETE FROM @gxs;
         INSERT INTO @gxs (Scope, TableDefId)
@@ -1750,6 +1805,20 @@ BEGIN
           FROM cfg.ColumnDef AS cd JOIN @gt AS x ON x.TableDefId = cd.TableDefId
          WHERE x.TableDefId IN (SELECT TableDefId FROM @gx) AND cd.IsDeleted = 0;
         INSERT INTO @cols (Code, FirstOrd) SELECT Code, MIN(Ord) FROM @ci GROUP BY Code ORDER BY MIN(Ord);
+        -- ✎ PERF: ознаки коду набором (як раніше в циклі: тип / місяць / Rc - ОСТАННЯ версія коду, Ord унікальний; конфлікт -
+        -- більше однієї родини зберігання; зайнятість імен <Код>_Text / <Код>_Id - є такий код у групі). RECOMPILE - реальна
+        -- кількість рядків змінних-таблиць (хеш-зʼєднання замість вкладених циклів).
+        UPDATE c SET LastType = l.DataType, LastIsMonth = l.IsMonth, LastMonthNo = l.MonthNo, LastRc = l.Rc, Conflict = l.Conflict
+          FROM @cols AS c
+          JOIN (SELECT Code, DataType, IsMonth, MonthNo, Rc,
+                       ROW_NUMBER() OVER (PARTITION BY Code ORDER BY Ord DESC) AS Rn,
+                       CASE WHEN MIN(Fam) OVER (PARTITION BY Code) <> MAX(Fam) OVER (PARTITION BY Code) THEN 1 ELSE 0 END AS Conflict
+                  FROM @ci) AS l ON l.Code = c.Code AND l.Rn = 1
+        OPTION (RECOMPILE);
+        UPDATE c SET TextTaken = CASE WHEN EXISTS (SELECT 1 FROM @cols AS x WHERE x.Code = c.Code + N'_Text') THEN 1 ELSE 0 END,
+                     IdTaken = CASE WHEN EXISTS (SELECT 1 FROM @cols AS x WHERE x.Code = c.Code + N'_Id') THEN 1 ELSE 0 END
+          FROM @cols AS c
+        OPTION (RECOMPILE);
 
         DELETE FROM @alias;
         INSERT INTO @alias (Scope, Code, Other)
@@ -1770,27 +1839,35 @@ BEGIN
         -- the other groups are generated.
         -- B170 (human 18.11 ~00:35Z, quiz «У всіх річних», D-547): a MONTH Calculated/Formula column whose latest version is the
         -- year layout (Rc = 1, Layout = 1) NEVER gets a _Text companion; non-month companions stay, monthly layouts unchanged.
-        WITH lt AS (SELECT Code, DataType, IsMonth, Rc, ROW_NUMBER() OVER (PARTITION BY Code ORDER BY Ord DESC) AS rn FROM @ci)
-        SELECT @limText = COALESCE(SUM(CASE WHEN lt.DataType IN (6, 8) AND NOT (lt.IsMonth = 1 AND lt.Rc = 1) AND tx.Seq IS NULL
-                                            THEN 1 ELSE 0 END), 0)
-          FROM lt LEFT JOIN @cols AS tx ON tx.Code = lt.Code + N'_Text'
-         WHERE lt.rn = 1;
+        -- ✎ PERF: ознаки останньої версії коду й зайнятість імені <Код>_Text - з @cols (раніше той самий підрахунок по @ci).
+        SELECT @limText = COUNT(*) FROM @cols WHERE LastType IN (6, 8) AND NOT (LastIsMonth = 1 AND LastRc = 1) AND TextTaken = 0;
+
+        -- ✎ PERF: Id коду з аліасами по скоупах - набором для всіх кодів (раніше три вставки в @cid на кожну колонку):
+        -- скоуп 0 - Id самого коду і його аліасів скоупу 0; скоуп s - Id аліасів скоупу s, яких немає в скоупі 0.
+        DELETE FROM @cidAll;
+        INSERT INTO @cidAll (Seq, Scope, ColId)
+        SELECT c.Seq, 0, i.ColId FROM @cols AS c JOIN @ci AS i ON i.Code = c.Code
+        UNION
+        SELECT c.Seq, 0, i.ColId FROM @cols AS c JOIN @alias AS a ON a.Scope = 0 AND a.Code = c.Code JOIN @ci AS i ON i.Code = a.Other
+        OPTION (RECOMPILE);
+        INSERT INTO @cidAll (Seq, Scope, ColId)
+        SELECT DISTINCT c.Seq, a.Scope, i.ColId FROM @cols AS c JOIN @alias AS a ON a.Scope > 0 AND a.Code = c.Code JOIN @ci AS i ON i.Code = a.Other
+         WHERE NOT EXISTS (SELECT 1 FROM @cidAll AS z WHERE z.Seq = c.Seq AND z.Scope = 0 AND z.ColId = i.ColId)
+        OPTION (RECOMPILE);
 
         SET @seq = (SELECT MIN(Seq) FROM @cols);
         WHILE @seq IS NOT NULL
         BEGIN
-            SET @colCode = (SELECT Code FROM @cols WHERE Seq = @seq);
+            -- Type / month placement come from the LATEST version that has the code (@cols, набором вище).
+            SELECT @colCode = Code, @colType = LastType, @isMonth = LastIsMonth, @monthNo = LastMonthNo, @lastRc = LastRc, @conflict = Conflict
+              FROM @cols WHERE Seq = @seq;
             SET @n = @n + 1;
-            -- Type / month placement come from the LATEST version that has the code.
-            SELECT TOP (1) @colType = DataType, @isMonth = IsMonth, @monthNo = MonthNo, @lastRc = Rc
-              FROM @ci WHERE Code = @colCode ORDER BY Ord DESC;
-            SET @conflict = CASE WHEN (SELECT COUNT(DISTINCT Fam) FROM @ci WHERE Code = @colCode) > 1 THEN 1 ELSE 0 END;
+            -- ✎ PERF: фрагменти ЦІЄЇ колонки (рядок @acc наприкінці ітерації); групові значення склеюються після циклу.
+            SELECT @select = N'', @selectText = N'', @selectRv = N'', @selectTextRv = N'', @plainAgg = N'', @plainAggS = N'', @scAggS = N'',
+                   @famAgg = N'', @rvIds = N'', @rvAgg = N'', @rvPack = N'', @rvExprs = N'', @orvIds = N'', @orvSlots = N'', @orvPack = N'',
+                   @orvExprs = N'', @orvStub = N'', @rcSlots = N'', @conflictCodes = N'';
             DELETE FROM @cid;
-            INSERT INTO @cid (Scope, ColId)
-            SELECT 0, ColId FROM @ci WHERE Code = @colCode OR Code IN (SELECT Other FROM @alias WHERE Scope = 0 AND Code = @colCode);
-            INSERT INTO @cid (Scope, ColId)
-            SELECT DISTINCT a.Scope, c.ColId FROM @alias AS a JOIN @ci AS c ON c.Code = a.Other
-             WHERE a.Scope > 0 AND a.Code = @colCode AND NOT EXISTS (SELECT 1 FROM @cid AS z WHERE z.Scope = 0 AND z.ColId = c.ColId);
+            INSERT INTO @cid (Scope, ColId) SELECT Scope, ColId FROM @cidAll WHERE Seq = @seq;
             SET @ids = STUFF((SELECT N',' + CAST(ColId AS nvarchar(10)) FROM @cid WHERE Scope = 0 ORDER BY ColId
                               FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 1, N'');
             SET @allIds = STUFF((SELECT N',' + CAST(k.ColId AS nvarchar(10)) FROM (SELECT DISTINCT ColId FROM @cid) AS k ORDER BY k.ColId
@@ -1833,7 +1910,7 @@ BEGIN
             IF @conflict = 1
             BEGIN
                 -- Type conflict across versions: every value as text, one aggregate per storage family.
-                SET @conflictCodes = @conflictCodes + CASE WHEN @conflictCodes = N'' THEN N'' ELSE N', ' END + @colCode;
+                SET @conflictCodes = N', ' + @colCode;   -- ✎ PERF: роздільник перед кожним; перший знімає STUFF після циклу
                 SET @agg = STUFF((SELECT N', MAX(CASE WHEN x.ColumnDefId IN (' + f.Ids + N') THEN '
                                     + CASE f.Fam WHEN 0 THEN N'x.ValueString'
                                                  WHEN 3 THEN N'CASE WHEN x.ValueBool = 1 THEN N''1'' WHEN x.ValueBool = 0 THEN N''0'' END'
@@ -1949,7 +2026,8 @@ BEGIN
 
             SET @select = @select + N',
        ' + @valueCol + N' AS ' + QUOTENAME(@colCode);
-            SET @hasText = CASE WHEN @colType IN (6, 8) AND NOT (@isMonth = 1 AND @lastRc = 1) AND NOT EXISTS (SELECT 1 FROM @cols WHERE Code = @colCode + N'_Text') THEN 1 ELSE 0 END;
+            SET @hasText = CASE WHEN @colType IN (6, 8) AND NOT (@isMonth = 1 AND @lastRc = 1)
+                                     AND (SELECT TextTaken FROM @cols WHERE Seq = @seq) = 0 THEN 1 ELSE 0 END;
             IF @hasText = 1
             BEGIN
                 SET @selectText = @selectText + N',
@@ -1965,7 +2043,7 @@ BEGIN
             -- permit id, NAE id, substance id). <Code> itself is unchanged (the same id), so existing reports keep working and the
             -- join key keeps its name if <Code> ever becomes the readable value. Skipped when the template already has a <Code>_Id
             -- column or the column is a type-conflict nvarchar column (@colType was reset to 0 above).
-            SET @hasId = CASE WHEN @colType = 5 AND NOT EXISTS (SELECT 1 FROM @cols WHERE Code = @colCode + N'_Id') THEN 1 ELSE 0 END;
+            SET @hasId = CASE WHEN @colType = 5 AND (SELECT IdTaken FROM @cols WHERE Seq = @seq) = 0 THEN 1 ELSE 0 END;
             IF @hasId = 1
             BEGIN
                 SET @selectText = @selectText + N',
@@ -1974,8 +2052,32 @@ BEGIN
        ' + @valueColRv + N' AS ' + QUOTENAME(@colCode + N'_Id');
                 SET @extra = @extra + 1;
             END
-            SET @seq = (SELECT MIN(Seq) FROM @cols WHERE Seq > @seq);
+            INSERT INTO @acc (Seq, Sel, SelText, SelRv, SelTextRv, PlainAgg, PlainAggS, ScAggS, FamAgg, RvIds, RvAgg, RvPack, RvExprs,
+                              OrvIds, OrvSlots, OrvPack, OrvExprs, OrvStub, RcSlots, ConflictCodes)
+            VALUES (@seq, @select, @selectText, @selectRv, @selectTextRv, @plainAgg, @plainAggS, @scAggS, @famAgg, @rvIds, @rvAgg, @rvPack,
+                    @rvExprs, @orvIds, @orvSlots, @orvPack, @orvExprs, @orvStub, @rcSlots, @conflictCodes);
+            SET @seq = (SELECT TOP (1) Seq FROM @cols WHERE Seq > @seq ORDER BY Seq);   -- ✎ PERF: TOP (1) - пошук першого, не діапазон до кінця
         END
+        -- ✎ PERF: склеювання фрагментів колонок - один прохід на кожен текст (за Seq). Порожня група - N'' (як ініціалізація вище).
+        SELECT @select = COALESCE((SELECT a.Sel AS [text()] FROM @acc AS a ORDER BY a.Seq FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), N''),
+               @selectText = COALESCE((SELECT a.SelText AS [text()] FROM @acc AS a ORDER BY a.Seq FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), N''),
+               @selectRv = COALESCE((SELECT a.SelRv AS [text()] FROM @acc AS a ORDER BY a.Seq FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), N''),
+               @selectTextRv = COALESCE((SELECT a.SelTextRv AS [text()] FROM @acc AS a ORDER BY a.Seq FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), N''),
+               @plainAgg = COALESCE((SELECT a.PlainAgg AS [text()] FROM @acc AS a ORDER BY a.Seq FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), N''),
+               @plainAggS = COALESCE((SELECT a.PlainAggS AS [text()] FROM @acc AS a ORDER BY a.Seq FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), N''),
+               @scAggS = COALESCE((SELECT a.ScAggS AS [text()] FROM @acc AS a ORDER BY a.Seq FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), N''),
+               @famAgg = COALESCE((SELECT a.FamAgg AS [text()] FROM @acc AS a ORDER BY a.Seq FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), N''),
+               @rvIds = COALESCE((SELECT a.RvIds AS [text()] FROM @acc AS a ORDER BY a.Seq FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), N''),
+               @rvAgg = COALESCE((SELECT a.RvAgg AS [text()] FROM @acc AS a ORDER BY a.Seq FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), N''),
+               @rvPack = COALESCE((SELECT a.RvPack AS [text()] FROM @acc AS a ORDER BY a.Seq FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), N''),
+               @rvExprs = COALESCE((SELECT a.RvExprs AS [text()] FROM @acc AS a ORDER BY a.Seq FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), N''),
+               @orvIds = COALESCE((SELECT a.OrvIds AS [text()] FROM @acc AS a ORDER BY a.Seq FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), N''),
+               @orvSlots = COALESCE((SELECT a.OrvSlots AS [text()] FROM @acc AS a ORDER BY a.Seq FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), N''),
+               @orvPack = COALESCE((SELECT a.OrvPack AS [text()] FROM @acc AS a ORDER BY a.Seq FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), N''),
+               @orvExprs = COALESCE((SELECT a.OrvExprs AS [text()] FROM @acc AS a ORDER BY a.Seq FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), N''),
+               @orvStub = COALESCE((SELECT a.OrvStub AS [text()] FROM @acc AS a ORDER BY a.Seq FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), N''),
+               @rcSlots = COALESCE((SELECT a.RcSlots AS [text()] FROM @acc AS a ORDER BY a.Seq FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), N''),
+               @conflictCodes = COALESCE(STUFF((SELECT a.ConflictCodes AS [text()] FROM @acc AS a ORDER BY a.Seq FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 2, N''), N'');
         SET @select = @select + @selectText;
         SET @selectRv = @selectRv + @selectTextRv;
 
