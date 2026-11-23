@@ -73,6 +73,7 @@ public sealed class ParityRunner(
     {
         var mismatches = new List<ParityMismatch>();
         var unproven = new List<string>();
+        var perVersion = new List<ParityVersionResult>();
         var compared = 0;
         var rows = 0;
         var values = 0;
@@ -82,6 +83,9 @@ public sealed class ParityRunner(
         {
             var resolved = new Dictionary<DateOnly, int?>();
             var comparedForVersion = 0;
+            var rowsForVersion = 0;
+            var valuesForVersion = 0;
+            var mismatchesForVersion = 0;
             var instances = await targets.ListInstancesAsync(version.MethodologyId, documentId, ct).ConfigureAwait(false);
             foreach (var instance in instances)
             {
@@ -115,19 +119,28 @@ public sealed class ParityRunner(
                 comparedForVersion++;
                 rows += report.RowsCompared;
                 values += report.ValuesCompared;
+                rowsForVersion += report.RowsCompared;
+                valuesForVersion += report.ValuesCompared;
+                mismatchesForVersion += report.Mismatches.Count;
                 mismatches.AddRange(report.Mismatches);
             }
 
-            if (comparedForVersion == 0 && !version.IsLibrary)
+            var result = new ParityVersionResult(
+                version.MethodologyCode, version.VersionId, version.Version, comparedForVersion, rowsForVersion,
+                valuesForVersion, mismatchesForVersion, version.IsLibrary,
+                Convert.ToHexStringLower(Ecr.Scripting.ScriptCompiler.Hash(version.ScriptText)));
+            perVersion.Add(result);
+
+            // ✎ D-571: версія без жодного порівняного ЗНАЧЕННЯ (екземпляри є, але правила не відібрали рядків) — теж не
+            // доведена; розбіжності називає перелік розбіжностей, тут лише «нічого не доведено».
+            if (result is { IsProven: false, IsLibrary: false, MismatchCount: 0 })
             {
-                unproven.Add(
-                    $"{version.MethodologyCode} {version.Version}: no table instance was compared "
-                    + "(no active binding with data, or the version is not the effective one on any document period)");
+                unproven.Add($"{version.MethodologyCode} {version.Version}: {result.UnprovenReason}");
             }
         }
 
         unproven.AddRange(await targets.ListUncoveredVersionsAsync(methodologyCode, ct).ConfigureAwait(false));
 
-        return new ParityRunReport(compared, rows, values, mismatches, unproven);
+        return new ParityRunReport(compared, rows, values, mismatches, unproven, perVersion);
     }
 }

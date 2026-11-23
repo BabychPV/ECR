@@ -153,15 +153,26 @@ public sealed record ParityReport(IReadOnlyList<ParityMismatch> Mismatches, int 
 /// що паритет не покриває зовсім (без тіньового тексту, без дати чинності). Кожен запис — «код версія:
 /// причина». Бібліотеки сюди не потрапляють: їх доводять імпортери.
 /// </param>
+/// <param name="PerVersion">✎ D-571: підсумок за кожною затіненою версією (ворота перемикання — за версією).</param>
 public sealed record ParityRunReport(
     int Targets,
     int RowsCompared,
     int ValuesCompared,
     IReadOnlyList<ParityMismatch> Mismatches,
-    IReadOnlyList<string>? Unproven = null)
+    IReadOnlyList<string>? Unproven = null,
+    IReadOnlyList<ParityVersionResult>? PerVersion = null)
 {
     /// <summary>Версії, яких прогін не довів; ніколи не <c>null</c>.</summary>
     public IReadOnlyList<string> UnprovenVersions => Unproven ?? [];
+
+    /// <summary>Підсумок за кожною затіненою версією; ніколи не <c>null</c>.</summary>
+    public IReadOnlyList<ParityVersionResult> Versions => PerVersion ?? [];
+
+    /// <summary>
+    /// ✎ D-571: версії, які ДОВЕДЕНО й які можна перемикати на <c>Script</c>: хоч одне порівняне значення й жодної
+    /// розбіжності. Бібліотеки сюди не входять (їх доводять імпортери, перемикаються разом з ними).
+    /// </summary>
+    public IReadOnlyList<ParityVersionResult> Eligible => [.. Versions.Where(v => v.IsProven)];
 
     /// <summary>
     /// Розбіжностей немає. ⚠ Порожній прогін (<see cref="Targets"/> = 0) теж «без розбіжностей», але нічого не доводить:
@@ -171,4 +182,44 @@ public sealed record ParityRunReport(
 
     /// <summary>Розбіжностей немає І щось справді порівняно (хоч одне значення).</summary>
     public bool IsProven => Mismatches.Count == 0 && Targets > 0 && ValuesCompared > 0;
+}
+
+/// <summary>Підсумок паритету однієї затіненої версії (✎ D-571: ворота перемикання — за версією, не за прогоном).</summary>
+/// <param name="MethodologyCode">Код методології.</param>
+/// <param name="VersionId">Версія.</param>
+/// <param name="Version">Номер версії.</param>
+/// <param name="Targets">Скільки екземплярів таблиць порівняно для цієї версії.</param>
+/// <param name="RowsCompared">Скільки рядків.</param>
+/// <param name="ValuesCompared">Скільки значень.</param>
+/// <param name="MismatchCount">Скільки розбіжностей.</param>
+/// <param name="IsLibrary">Бібліотека: доводиться імпортерами, сама в перелік перемикання не потрапляє.</param>
+/// <param name="ScriptHash">
+/// SHA-256 (hex, нижній регістр) ТОГО тексту, що порівнювався: вікно перемикає лише версію, чий <c>ScriptHash</c> у базі досі такий
+/// самий (доведено саме цей текст).
+/// </param>
+public sealed record ParityVersionResult(
+    string MethodologyCode,
+    int VersionId,
+    string Version,
+    int Targets,
+    int RowsCompared,
+    int ValuesCompared,
+    int MismatchCount,
+    bool IsLibrary = false,
+    string? ScriptHash = null)
+{
+    /// <summary>
+    /// Доведено: порівняно хоч одне значення і розбіжностей немає. ⛔ Екземпляр без жодного відібраного рядка (правила
+    /// нічого не вибрали) — не доказ: «0 розбіжностей із 0 значень» нічого не каже про числа скрипта.
+    /// </summary>
+    public bool IsProven => !IsLibrary && MismatchCount == 0 && Targets > 0 && ValuesCompared > 0;
+
+    /// <summary>Причина, з якої версію не доведено; <c>null</c> — доведено.</summary>
+    public string? UnprovenReason => IsProven || IsLibrary
+        ? null
+        : MismatchCount > 0
+            ? "mismatches"
+            : Targets == 0
+                ? "no table instance was compared (no active binding with data, or the version is not the effective one on any document period)"
+                : "no values compared (the rows of every compared table instance were not selected by the version)";
 }

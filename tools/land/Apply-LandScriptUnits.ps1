@@ -11,13 +11,16 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'LandScriptUnits.Lib.ps1')
 $unitsFile = if ($Table) { $Table } else { Join-Path $PSScriptRoot 'land-script-units.json' }
 $cfg = Get-Content -LiteralPath $unitsFile -Raw -Encoding UTF8 | ConvertFrom-Json
+# ✎ D-571: розділи методології необов'язкові (C11_10 має лише argumentSources); під Set-StrictMode фази вікна звернення до
+# відсутньої властивості зупиняло б скрипт, тож властивості читаються через PSObject.Properties.
+function Get-Section($obj, [string]$name) { $p = $obj.PSObject.Properties[$name]; if ($p) { $p.Value } else { $null } }
 foreach ($m in $cfg.methodologies.PSObject.Properties) {
     $sub = Join-Path $Dir $m.Name
     if (-not (Test-Path -LiteralPath $sub)) { continue }
     foreach ($f in Get-ChildItem -LiteralPath $sub -Filter '*.ecrs') {
-        $args1 = @{}; if ($m.Value.arguments) { foreach ($p in $m.Value.arguments.PSObject.Properties) { $args1[$p.Name] = [string]$p.Value.unit } }
-        $consts = @{}; if ($m.Value.constants) { foreach ($p in $m.Value.constants.PSObject.Properties) { $consts[$p.Name] = [string]$p.Value.unit } }
-        $srcs = @{}; if ($m.Value.argumentSources) { foreach ($p in $m.Value.argumentSources.PSObject.Properties) { $srcs[$p.Name] = [string]$p.Value.alternative } }
+        $args1 = @{}; $sec = Get-Section $m.Value 'arguments'; if ($sec) { foreach ($p in $sec.PSObject.Properties) { $args1[$p.Name] = [string]$p.Value.unit } }
+        $consts = @{}; $sec = Get-Section $m.Value 'constants'; if ($sec) { foreach ($p in $sec.PSObject.Properties) { $consts[$p.Name] = [string]$p.Value.unit } }
+        $srcs = @{}; $sec = Get-Section $m.Value 'argumentSources'; if ($sec) { foreach ($p in $sec.PSObject.Properties) { $srcs[$p.Name] = [string]$p.Value.alternative } }
         $text = [IO.File]::ReadAllText($f.FullName, [Text.Encoding]::UTF8)
         $new = $text
         # спершу джерела аргументів (переписують row.X), далі одиниці

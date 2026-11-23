@@ -96,4 +96,34 @@ public sealed class CliTests
     [InlineData(null, false)]
     public void Безпечні_слова_в_імені_бази(string? name, bool expected)
         => Assert.Equal(expected, MigrationCli.LooksSafe(name));
+
+    [Theory]
+    [InlineData("apply")]
+    [InlineData("switch")]
+    public async Task D571_apply_і_switch_інструмента_відмовляють_на_базі_що_не_схожа_на_копію(string command)
+    {
+        var file = Path.GetTempFileName();
+        try
+        {
+            var run = command == "apply"
+                ? await RunAsync("apply", "--connection", ConnectionToNowhere, "--in", file, "--as-user", "1")
+                : await RunAsync("switch", "--connection", ConnectionToNowhere, "--in", file, "--engine", "Script", "--reason", "r", "--as-user", "1");
+
+            Assert.Equal(MigrationCli.UsageOrEnvironment, run.Code);
+            Assert.Contains("не схоже на копію", run.Error, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(file);
+        }
+    }
+
+    [Theory]
+    [InlineData("EcrLandMs", true)]
+    [InlineData("EcrLandUiCopy", true)]
+    [InlineData("EcrLandUi", false)]
+    [InlineData("ECR", false)]
+    [InlineData("EcrLegacyProd", false)]
+    public void D571_ім_я_копії_для_apply_switch(string database, bool copy)
+        => Assert.Equal(copy, CopyHandlerCommands.LooksLikeCopy(database));
 }
