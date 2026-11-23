@@ -243,18 +243,20 @@ WITH c AS (
     FROM   doc.PermitSegment AS g
     JOIN   doc.Document AS d          ON d.Id = g.DocumentId
     JOIN   doc.Project AS pr          ON pr.Id = d.ProjectId
+    -- ✎ B74 P3 (D-576): версія ПАРИ проєкт × шаблон документа; без пари — версія проєкту, як доти.
+    LEFT JOIN doc.ProjectTemplate AS pt ON pt.ProjectId = d.ProjectId AND pt.TemplateId = d.TemplateId
     JOIN   cfg.TableDef AS ot         ON ot.Id = g.TableDefId
     JOIN   cfg.SheetDef AS os         ON os.Id = ot.SheetDefId
     JOIN   cfg.ColumnDef AS oc        ON oc.Id = g.ColumnDefId AND oc.TableDefId = ot.Id
     JOIN   cfg.TemplateVersion AS ov  ON ov.Id = os.TemplateVersionId
-    JOIN   cfg.TemplateVersion AS pv  ON pv.Id = pr.TemplateVersionId AND pv.TemplateId = ov.TemplateId
+    JOIN   cfg.TemplateVersion AS pv  ON pv.Id = COALESCE(pt.CurrentTemplateVersionId, pr.TemplateVersionId) AND pv.TemplateId = ov.TemplateId
     JOIN   cfg.SheetDef AS ns         ON ns.TemplateVersionId = pv.Id AND ns.IsDeleted = 0
                                      AND ns.Code = os.Code COLLATE Latin1_General_100_BIN2
     JOIN   cfg.TableDef AS nt         ON nt.SheetDefId = ns.Id AND nt.IsDeleted = 0
                                      AND nt.Code = ot.Code COLLATE Latin1_General_100_BIN2
     JOIN   cfg.ColumnDef AS nc        ON nc.TableDefId = nt.Id AND nc.IsDeleted = 0
                                      AND nc.Code = oc.Code COLLATE Latin1_General_100_BIN2
-    WHERE  os.TemplateVersionId <> pr.TemplateVersionId
+    WHERE  os.TemplateVersionId <> pv.Id
       AND  ISNULL(CASE WHEN ISJSON(pr.ExternalSettingsJson) = 1
                        THEN JSON_VALUE(pr.ExternalSettingsJson, '$.migratingTo') END, N'') = N''
 )
@@ -276,12 +278,14 @@ WITH c AS (
     FROM   doc.PermitSegment AS g
     JOIN   doc.Document AS d          ON d.Id = g.DocumentId
     JOIN   doc.Project AS pr          ON pr.Id = d.ProjectId
+    -- ✎ B74 P3 (D-576): версія ПАРИ проєкт × шаблон документа; без пари — версія проєкту, як доти.
+    LEFT JOIN doc.ProjectTemplate AS pt ON pt.ProjectId = d.ProjectId AND pt.TemplateId = d.TemplateId
     JOIN   cfg.HeaderFieldDef AS oh   ON oh.Id = g.HeaderFieldDefId
     JOIN   cfg.TemplateVersion AS ov  ON ov.Id = oh.TemplateVersionId
-    JOIN   cfg.TemplateVersion AS pv  ON pv.Id = pr.TemplateVersionId AND pv.TemplateId = ov.TemplateId
+    JOIN   cfg.TemplateVersion AS pv  ON pv.Id = COALESCE(pt.CurrentTemplateVersionId, pr.TemplateVersionId) AND pv.TemplateId = ov.TemplateId
     JOIN   cfg.HeaderFieldDef AS nh   ON nh.TemplateVersionId = pv.Id AND nh.IsDeleted = 0
                                      AND nh.Code = oh.Code COLLATE Latin1_General_100_BIN2
-    WHERE  oh.TemplateVersionId <> pr.TemplateVersionId
+    WHERE  oh.TemplateVersionId <> pv.Id
       AND  ISNULL(CASE WHEN ISJSON(pr.ExternalSettingsJson) = 1
                        THEN JSON_VALUE(pr.ExternalSettingsJson, '$.migratingTo') END, N'') = N''
 )
@@ -302,15 +306,18 @@ WITH c AS (
     FROM   doc.CellPermitPart AS p
     JOIN   doc.Document AS d          ON d.Id = p.DocumentId
     JOIN   doc.Project AS pr          ON pr.Id = d.ProjectId
+    -- ✎ B74 P3 (D-576): шкала й версія ПАРИ проєкт × шаблон документа.
+    LEFT JOIN doc.ProjectTemplate AS pt ON pt.ProjectId = d.ProjectId AND pt.TemplateId = d.TemplateId
     OUTER APPLY (SELECT TOP (1) v.TemplateVersionId
                  FROM   doc.ProjectTemplateVersion AS v
                  WHERE  v.ProjectId = pr.Id AND v.FromPeriodKey <= p.PeriodKey
+                   AND  (d.TemplateId IS NULL OR v.TemplateId = d.TemplateId)
                  ORDER  BY v.FromPeriodKey DESC) AS ev
     JOIN   cfg.TableDef AS ot         ON ot.Id = p.TableDefId
     JOIN   cfg.SheetDef AS os         ON os.Id = ot.SheetDefId
     JOIN   cfg.ColumnDef AS oc        ON oc.Id = p.ColumnDefId AND oc.TableDefId = ot.Id
     JOIN   cfg.TemplateVersion AS ov  ON ov.Id = os.TemplateVersionId
-    JOIN   cfg.TemplateVersion AS pv  ON pv.Id = COALESCE(ev.TemplateVersionId, pr.TemplateVersionId)
+    JOIN   cfg.TemplateVersion AS pv  ON pv.Id = COALESCE(ev.TemplateVersionId, pt.CurrentTemplateVersionId, pr.TemplateVersionId)
                                      AND pv.TemplateId = ov.TemplateId
     JOIN   cfg.SheetDef AS ns         ON ns.TemplateVersionId = pv.Id AND ns.IsDeleted = 0
                                      AND ns.Code = os.Code COLLATE Latin1_General_100_BIN2
@@ -351,39 +358,43 @@ DECLARE @stale TABLE (EntityType nvarchar(64) NOT NULL, EntityId bigint NOT NULL
 INSERT @stale (EntityType, EntityId, PeriodKey, DocumentId, DetailsJson)
 SELECT N'doc.PermitSegment', g.Id, NULL, g.DocumentId,
        CONCAT(N'{"documentId":', g.DocumentId, N',"tableDefId":', g.TableDefId, N',"columnDefId":', g.ColumnDefId,
-              N',"projectVersionId":', pr.TemplateVersionId, N',"rowVersionId":', s.TemplateVersionId, N'}')
+              N',"projectVersionId":', COALESCE(pt.CurrentTemplateVersionId, pr.TemplateVersionId), N',"rowVersionId":', s.TemplateVersionId, N'}')
 FROM   doc.PermitSegment AS g
 JOIN   doc.Document AS d   ON d.Id = g.DocumentId
 JOIN   doc.Project AS pr   ON pr.Id = d.ProjectId
+LEFT JOIN doc.ProjectTemplate AS pt ON pt.ProjectId = d.ProjectId AND pt.TemplateId = d.TemplateId   -- ✎ B74 P3: версія пари
 JOIN   cfg.TableDef AS t   ON t.Id = g.TableDefId
 JOIN   cfg.SheetDef AS s   ON s.Id = t.SheetDefId
-WHERE  s.TemplateVersionId <> pr.TemplateVersionId;
+WHERE  s.TemplateVersionId <> COALESCE(pt.CurrentTemplateVersionId, pr.TemplateVersionId);
 
 INSERT @stale (EntityType, EntityId, PeriodKey, DocumentId, DetailsJson)
 SELECT N'doc.PermitSegment', g.Id, NULL, g.DocumentId,
        CONCAT(N'{"documentId":', g.DocumentId, N',"headerFieldDefId":', g.HeaderFieldDefId,
-              N',"projectVersionId":', pr.TemplateVersionId, N',"rowVersionId":', h.TemplateVersionId, N'}')
+              N',"projectVersionId":', COALESCE(pt.CurrentTemplateVersionId, pr.TemplateVersionId), N',"rowVersionId":', h.TemplateVersionId, N'}')
 FROM   doc.PermitSegment AS g
 JOIN   doc.Document AS d        ON d.Id = g.DocumentId
 JOIN   doc.Project AS pr        ON pr.Id = d.ProjectId
+LEFT JOIN doc.ProjectTemplate AS pt ON pt.ProjectId = d.ProjectId AND pt.TemplateId = d.TemplateId   -- ✎ B74 P3: версія пари
 JOIN   cfg.HeaderFieldDef AS h  ON h.Id = g.HeaderFieldDefId
-WHERE  h.TemplateVersionId <> pr.TemplateVersionId;
+WHERE  h.TemplateVersionId <> COALESCE(pt.CurrentTemplateVersionId, pr.TemplateVersionId);
 
 INSERT @stale (EntityType, EntityId, PeriodKey, DocumentId, DetailsJson)
 SELECT N'doc.CellPermitPart', p.Id, p.PeriodKey, p.DocumentId,
        CONCAT(N'{"documentId":', p.DocumentId, N',"periodKey":', p.PeriodKey, N',"tableDefId":', p.TableDefId,
               N',"columnDefId":', p.ColumnDefId, N',"partNo":', p.PartNo,
-              N',"periodVersionId":', COALESCE(ev.TemplateVersionId, pr.TemplateVersionId), N',"rowVersionId":', s.TemplateVersionId, N'}')
+              N',"periodVersionId":', COALESCE(ev.TemplateVersionId, pt.CurrentTemplateVersionId, pr.TemplateVersionId), N',"rowVersionId":', s.TemplateVersionId, N'}')
 FROM   doc.CellPermitPart AS p
 JOIN   doc.Document AS d   ON d.Id = p.DocumentId
 JOIN   doc.Project AS pr   ON pr.Id = d.ProjectId
+LEFT JOIN doc.ProjectTemplate AS pt ON pt.ProjectId = d.ProjectId AND pt.TemplateId = d.TemplateId   -- ✎ B74 P3: версія пари
 JOIN   cfg.TableDef AS t   ON t.Id = p.TableDefId
 JOIN   cfg.SheetDef AS s   ON s.Id = t.SheetDefId
 OUTER APPLY (SELECT TOP (1) v.TemplateVersionId
              FROM   doc.ProjectTemplateVersion AS v
              WHERE  v.ProjectId = pr.Id AND v.FromPeriodKey <= p.PeriodKey
+               AND  (d.TemplateId IS NULL OR v.TemplateId = d.TemplateId)
              ORDER  BY v.FromPeriodKey DESC) AS ev
-WHERE  s.TemplateVersionId <> COALESCE(ev.TemplateVersionId, pr.TemplateVersionId)
+WHERE  s.TemplateVersionId <> COALESCE(ev.TemplateVersionId, pt.CurrentTemplateVersionId, pr.TemplateVersionId)
   AND  NOT EXISTS (SELECT 1 FROM doc.TableInstance AS i
                    WHERE  i.PeriodKey = p.PeriodKey AND i.DocumentId = p.DocumentId AND i.TableDefId = p.TableDefId
                      AND  (i.SheetCopyId = p.SheetCopyId OR (i.SheetCopyId IS NULL AND p.SheetCopyId IS NULL)));

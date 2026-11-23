@@ -3190,7 +3190,7 @@ public sealed partial class RecalculationJob(
                 from d in db.Documents.AsNoTracking()
                 where d.Id == request.DocumentId
                 join p in db.Projects.AsNoTracking() on d.ProjectId equals p.Id
-                select new { ProjectId = p.Id, p.PeriodKind })
+                select new { ProjectId = p.Id, p.PeriodKind, d.TemplateId })
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
         if (document is null || document.PeriodKind != Domain.Enums.PeriodKind.Monthly)
@@ -3212,7 +3212,10 @@ public sealed partial class RecalculationJob(
             // Розкладка версії ПЕРІОДУ-якоря (шкала версій проєкту, doc.fn_VersionOf), а не «чинної» версії проєкту.
             var layout = await db.TemplateVersions
                 .AsNoTracking()
-                .Where(v => v.Id == EcrDbContext.VersionOf(document.ProjectId, anchor))
+                // ✎ B74 P3 (D-576): шкала шаблону ДОКУМЕНТА (пара проєкт × шаблон); без шаблону — основний, як доти.
+                .Where(v => v.Id == (document.TemplateId == null
+                    ? EcrDbContext.VersionOf(document.ProjectId, anchor)
+                    : EcrDbContext.TemplateVersionOf(document.ProjectId, document.TemplateId.Value, anchor)))
                 .Select(v => (Domain.Enums.TemplateLayout?)v.Layout)
                 .FirstOrDefaultAsync(ct)
                 .ConfigureAwait(false);
