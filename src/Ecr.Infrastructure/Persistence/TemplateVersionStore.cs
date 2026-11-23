@@ -845,6 +845,9 @@ public sealed partial class TemplateVersionStore(EcrDbContext db, IMetadataCache
         await CloneConditionalFormatsAsync(clone.Id, clonedFrom, ct).ConfigureAwait(false);
         await CloneSheetGroupRulesAsync(clone.Id, clonedFrom, ct).ConfigureAwait(false);
         SetClonedFrom(clone, clonedFrom);
+
+        // W15z: перев'язки графа (групи, стилі, каскади, батьки) — set-based, а не UPDATE на кожен рядок з тригером.
+        await TemplateCloneBulkRelink.ApplyAsync(db, ct).ConfigureAwait(false);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
