@@ -780,8 +780,8 @@ public sealed class Q17MonthColumnConsolidationSqlTests(SqlServerFixture sql)
             psi.ArgumentList.Add(a);
         }
 
-        // Linux: власний кеш PowerShell на запуск - спільний ~/.cache/powershell/StartupProfileData-NonInteractive,
-        // переписаний паралельними pwsh, валить SIGSEGV (139) кожен наступний pwsh у job (✎ 2026-11-23).
+        // Linux: власний кеш PowerShell на запуск - без спільного ~/.cache/powershell, який кожен pwsh переписує
+        // на виході (збій 139, ✎ 2026-11-23, DeployScriptHarness (4)).
         var cache = OperatingSystem.IsWindows() ? null : Directory.CreateTempSubdirectory("ecr-pwsh-cache-").FullName;
         if (cache is not null)
         {
