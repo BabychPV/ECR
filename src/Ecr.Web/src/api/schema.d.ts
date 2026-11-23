@@ -18251,7 +18251,9 @@ export interface paths {
          */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    templateId?: number;
+                };
                 header?: never;
                 path: {
                     id: number;
@@ -18713,6 +18715,217 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{id}/templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** B74 P3 (D-576): шаблони проєкту — основний і приєднані, з чинною версією кожного. Право `Document.View` у
+         *     проєкті; невидимий проєкт — `404`, як неіснуючий (S17). */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Проєкт. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProjectTemplateDto"][];
+                        "text/json": components["schemas"]["ProjectTemplateDto"][];
+                        "text/plain": components["schemas"]["ProjectTemplateDto"][];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * B74 P3 (D-576): приєднує шаблон до проєкту з обраною версією. Право `Project.Manage` у проєкті й грант
+         *     `Manage`.
+         * @description `409 ECR-PRD-0409`: `templateAlreadyAttached`, `projectArchivedTemplates`; `409 ECR-TMPL-0409` —
+         *     архівований шаблон; `422 ECR-TMPL-0422 yearlyProjectNeedsYearLayout` — річний проєкт і версія «копія на
+         *     місяць».
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Проєкт. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["AttachProjectTemplateRequest"];
+                    "application/json": components["schemas"]["AttachProjectTemplateRequest"];
+                    "text/json": components["schemas"]["AttachProjectTemplateRequest"];
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProjectTemplateDto"];
+                        "text/json": components["schemas"]["ProjectTemplateDto"];
+                        "text/plain": components["schemas"]["ProjectTemplateDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{id}/templates/{templateId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * B74 P3 (D-576): від'єднує шаблон від проєкту. Право — як приєднання.
+         * @description `404 ECR-TMPL-0404 templateNotInProject`; `409 ECR-PRD-0409`: `templateHasDocuments` (кількість у
+         *     `documentCount`), `primaryTemplate`, `templateHasRoute`, `projectArchivedTemplates`.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Проєкт. */
+                    id: number;
+                    /** @description Шаблон. */
+                    templateId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
         options?: never;
         head?: never;
         patch?: never;
@@ -31843,6 +32056,14 @@ export interface components {
              */
             validTo?: null | string;
         };
+        /** @description B74 P3 (D-576): приєднання шаблону до проєкту. */
+        AttachProjectTemplateRequest: {
+            /**
+             * Format: int32
+             * @description Версія шаблону — з нею шаблон стає в проєкт (за нею заводяться нові документи).
+             */
+            templateVersionId: number;
+        };
         /**
          * @description Порядок сторінок журналів аудиту (вкладки Cell changes / Structure changes / Security events / Workflow events).
          * @enum {unknown}
@@ -33679,6 +33900,12 @@ export interface components {
             sheetDefIds: number[];
             /**
              * Format: int32
+             * @description ✎ B74 P3 (D-576): шаблон проєкту, за яким заводиться документ; `null` — основний шаблон. Версія — чинна версія
+             *     цього шаблону в проєкті; шаблон поза проєктом — `422 err.ECR-DOC-0422.templateNotInProject`.
+             */
+            templateId?: null | number;
+            /**
+             * Format: int32
              * @description Необов'язкове. ⛔ `V-11`: документ заводиться на версії шаблону ПРОЄКТУ;
              *     поле, якщо задане, мусить із нею збігатися (інакше `422`
              *     `err.ECR-DOC-0422.versionNotProject`). Клієнту його надсилати не треба:
@@ -33879,6 +34106,9 @@ export interface components {
              * @description Версія шаблону, за якою заповнюються документи.
              */
             templateVersionId?: null | number;
+            /** @description ✎ B74 P3 (D-576): версії кількох шаблонів проєкту «рік · об'єкт»; перша (або `TemplateVersionId`) — основний
+             *     шаблон, решта приєднуються тим самим комітом. Кожен шаблон — один раз (`422 ECR-TMPL-0422 duplicateTemplate`). */
+            templateVersionIds?: null | number[];
             /** @description Пояс майданчика — ідентифікатор IANA (`Asia/Atyrau`). Обов'язковий; після
              *     відкриття періоду не змінюється. Windows-ідентифікатор або зсув —
              *     `ECR-CFG-4221`. */
@@ -34933,6 +35163,10 @@ export interface components {
              * @default false
              */
             stepApproverNamesTruncated: boolean;
+            /** @description ✎ B74 P3 (D-576): код шаблону документа (`Document.TemplateId`) — колонка «Template» переліку й картка; у
+             *     проєкті «рік · об'єкт» документи різних шаблонів. `null` — документ без шаблону (до ремонту 99-epilogue).
+             *     Метадані шаблону не секрет — звуження читача не знімає. */
+            templateCode?: null | string;
             /** @description D-474: розкладка типової версії шаблону проєкту (`PerMonthCopies` | `YearWithMonthColumns`) — рядком, як
              *     PeriodKind (nullable-enum ламає типи клієнта). `null` — проєкту або версії немає. За
              *     `YearWithMonthColumns` клієнт не показує вибір місяця: документ має одне подання на рік. */
@@ -40449,6 +40683,39 @@ export interface components {
             status: components["schemas"]["ProjectStatus"];
             /** @description Пояс майданчика — ідентифікатор IANA (`Asia/Atyrau`). */
             timeZoneId: string;
+        };
+        /** @description B74 P3 (D-576): шаблон проєкту для вкладки «Templates» і кроку «Template» майстра документа. */
+        ProjectTemplateDto: {
+            /**
+             * Format: int32
+             * @description Чинна версія шаблону в проєкті.
+             */
+            currentTemplateVersionId: number;
+            /**
+             * Format: int32
+             * @description Документів цього шаблону в проєкті; &gt; 0 — від'єднання відмовить.
+             */
+            documentCount: number;
+            /** @description Основний шаблон проєкту: не від'єднується до P6. */
+            isPrimary: boolean;
+            /** @description Розкладка чинної версії. */
+            layout: string;
+            /**
+             * Format: int32
+             * @description Рядок `doc.ProjectTemplate`.
+             */
+            projectTemplateId: number;
+            /** @description Код шаблону (префікс бізнес-ключа в багатошаблонному проєкті). */
+            templateCode: string;
+            /**
+             * Format: int32
+             * @description Шаблон.
+             */
+            templateId: number;
+            /** @description Назва шаблону. */
+            templateNameL10n: components["schemas"]["LocalizedText"];
+            /** @description Позначення чинної версії. */
+            version: string;
         };
         /** @description ✎ B155 (C-5): шаблон проєкту і маршрут, що для нього діє в цьому проєкті. */
         ProjectTemplateRouteDto: {

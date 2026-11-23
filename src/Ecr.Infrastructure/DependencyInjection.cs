@@ -175,6 +175,7 @@ public static class DependencyInjection
         services.AddScoped<IAuditReader, AuditReader>();
         services.AddScoped<IConsistencyIssueReader, ConsistencyIssueReader>();
         services.AddScoped<IDocumentStore, DocumentStore>();
+        services.AddScoped<IProjectTemplateStore, ProjectTemplateStore>();   // B74 P3 (D-576)
         services.AddScoped<IDocumentDeletionStore, DocumentDeletionStore>();
         services.AddScoped<IDocumentSheetCopyStore, DocumentSheetCopyStore>();
         services.AddScoped<IDocumentKeyStore, DocumentKeyStore>();

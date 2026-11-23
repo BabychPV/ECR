@@ -967,6 +967,28 @@ public interface IProjectVersionTimeline
 ```
 
 ```csharp
+// src/Ecr.Application/Ports/IProjectTemplateStore.cs (✎ B74 P3, D-576)
+
+namespace Ecr.Application.Ports;
+
+/// <summary>
+/// Шаблони проєкту (<c>doc.ProjectTemplate</c>): перелік із чинною версією й кількістю документів, блок рядка проєкту
+/// (той самий, що в створенні документа й переносі версії), приєднання й від'єднання (разом зі шкалою пари).
+/// Основний шаблон — шаблон <c>doc.fn_VersionOf(проєкт, 0)</c> до P6.
+/// </summary>
+public interface IProjectTemplateStore
+{
+    Task<IReadOnlyList<ProjectTemplateRow>> ListAsync(int projectId, CancellationToken ct);
+    Task<ProjectTemplateRow?> FindAsync(int projectId, int templateId, CancellationToken ct);
+    Task<ProjectTemplateLockFacts?> LockProjectAsync(int projectId, CancellationToken ct);
+    Task<int> CountDocumentsAsync(int projectId, int templateId, bool isPrimary, CancellationToken ct);
+    Task<bool> HasOwnRouteAsync(int projectId, int templateId, CancellationToken ct);
+    Task<int> CountAsync(int projectId, CancellationToken ct);
+    void Attach(int projectId, int templateId, int currentTemplateVersionId);
+    Task DetachAsync(int projectId, int templateId, CancellationToken ct);
+}```
+
+```csharp
 // src/Ecr.Application/Ports/IColumnRenameMap.cs (RPT-STABLE Part B)
 
 namespace Ecr.Application.Ports;
@@ -4970,6 +4992,9 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PUT` | `/api/v1/projects/{id}/timezone` | `Project.Manage` | 8 |
 | `GET` | `/api/v1/projects/{id}/periods` | `Document.View` | 3 |
 | `GET` | `/api/v1/projects/{id}/template-versions` | `Document.View` | 3 |
+| `GET` | `/api/v1/projects/{id}/templates` | `Document.View` (✎ B74 P3, D-576: шаблони проєкту — основний і приєднані, чинна версія, кількість документів; невидимий проєкт — 404) | 8 |
+| `POST` | `/api/v1/projects/{id}/templates` | `Project.Manage` + грант Manage (✎ D-576: `{templateVersionId}` → 201; 409 `ECR-PRD-0409` templateAlreadyAttached / projectArchivedTemplates; 422 yearlyProjectNeedsYearLayout) | 8 |
+| `DELETE` | `/api/v1/projects/{id}/templates/{templateId}` | `Project.Manage` + грант Manage (✎ D-576: 204; 409 `ECR-PRD-0409` templateHasDocuments / primaryTemplate / templateHasRoute; 404 `ECR-TMPL-0404` templateNotInProject) | 8 |
 | `POST` | `/api/v1/projects/{id}/recalculate` | `Calculation.Recalculate` | 3 |
 | `POST` | `/api/v1/periods/{id}/reopen` | `Period.Reopen` | 3 |
 | `GET` | `/api/v1/documents` | `Document.View` | 1 |

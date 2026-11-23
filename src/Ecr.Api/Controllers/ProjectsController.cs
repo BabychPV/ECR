@@ -30,8 +30,71 @@ public sealed class ProjectsController(
     Ecr.Application.Workflow.GetApprovalRouteHandler getRoute,
     Ecr.Application.Workflow.ReplaceApprovalRouteHandler replaceRoute,
     Ecr.Application.Documents.GetDocumentTemplateHandler documentTemplate,
-    Ecr.Application.Projects.GetProjectTemplateTimelineHandler templateTimeline) : ControllerBase
+    Ecr.Application.Projects.GetProjectTemplateTimelineHandler templateTimeline,
+    ListProjectTemplatesHandler listTemplates,
+    AttachProjectTemplateHandler attachTemplate,
+    DetachProjectTemplateHandler detachTemplate) : ControllerBase
 {
+    /// <summary>
+    /// B74 P3 (D-576): шаблони проєкту — основний і приєднані, з чинною версією кожного. Право <c>Document.View</c> у
+    /// проєкті; невидимий проєкт — <c>404</c>, як неіснуючий (S17).
+    /// </summary>
+    /// <param name="id">Проєкт.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpGet("{id:int}/templates")]
+    [ProducesResponseType<IReadOnlyList<ProjectTemplateDto>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<IReadOnlyList<ProjectTemplateDto>>> Templates(int id, CancellationToken ct)
+        => Ok(await listTemplates.HandleAsync(id, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// B74 P3 (D-576): приєднує шаблон до проєкту з обраною версією. Право <c>Project.Manage</c> у проєкті й грант
+    /// <c>Manage</c>.
+    /// </summary>
+    /// <remarks>
+    /// <c>409 ECR-PRD-0409</c>: <c>templateAlreadyAttached</c>, <c>projectArchivedTemplates</c>; <c>409 ECR-TMPL-0409</c> —
+    /// архівований шаблон; <c>422 ECR-TMPL-0422 yearlyProjectNeedsYearLayout</c> — річний проєкт і версія «копія на
+    /// місяць».
+    /// </remarks>
+    /// <param name="id">Проєкт.</param>
+    /// <param name="request">Версія шаблону.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpPost("{id:int}/templates")]
+    [ProducesResponseType<ProjectTemplateDto>(StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> AttachTemplate(
+        int id, [FromBody] AttachProjectTemplateRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var attached = await attachTemplate.HandleAsync(id, request.TemplateVersionId, ct).ConfigureAwait(false);
+        return Created($"/api/v1/projects/{id}/templates/{attached.TemplateId}", attached);
+    }
+
+    /// <summary>
+    /// B74 P3 (D-576): від'єднує шаблон від проєкту. Право — як приєднання.
+    /// </summary>
+    /// <remarks>
+    /// <c>404 ECR-TMPL-0404 templateNotInProject</c>; <c>409 ECR-PRD-0409</c>: <c>templateHasDocuments</c> (кількість у
+    /// <c>documentCount</c>), <c>primaryTemplate</c>, <c>templateHasRoute</c>, <c>projectArchivedTemplates</c>.
+    /// </remarks>
+    /// <param name="id">Проєкт.</param>
+    /// <param name="templateId">Шаблон.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpDelete("{id:int}/templates/{templateId:int}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> DetachTemplate(int id, int templateId, CancellationToken ct)
+    {
+        await detachTemplate.HandleAsync(id, templateId, ct).ConfigureAwait(false);
+        return NoContent();
+    }
+
     /// <summary>
     /// Часова шкала версій шаблону проєкту (RPT-STABLE Part B): з якого періоду яка версія діє. Право
     /// <c>Document.View</c> і видимий проєкт.
@@ -142,8 +205,9 @@ public sealed class ProjectsController(
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<Ecr.Application.Documents.DocumentTemplateDto>> DocumentTemplate(
-        int id, CancellationToken ct)
-        => await documentTemplate.HandleAsync(id, ct).ConfigureAwait(false);
+        int id, [FromQuery] int? templateId, CancellationToken ct)
+        // ✎ B74 P3 (D-576): `templateId` — шаблон проєкту для кроку «Template» майстра; без нього — основний шаблон.
+        => await documentTemplate.HandleAsync(id, templateId, ct).ConfigureAwait(false);
 
     /// <summary>
     /// Маршрут погодження проєкту. Право <c>Project.Manage</c>.
@@ -217,10 +281,12 @@ public sealed class ProjectsController(
                 // береться лише через IClock (архітектурне правило), інакше
                 // тест на «зараз» залежав би від годинника машини.
                 request.Year,
-                request.TemplateVersionId ?? 0,
+                // ✎ B74 P3 (D-576): основний шаблон — `templateVersionId`, інакше перша з `templateVersionIds`.
+                request.TemplateVersionId ?? (request.TemplateVersionIds is { Count: > 0 } ids ? ids[0] : 0),
                 request.PeriodPolicyId ?? 0,
                 ct,
-                request.CustomPeriodCount)
+                request.CustomPeriodCount,
+                request.TemplateVersionIds)
             .ConfigureAwait(false);
 
         return Created($"/api/v1/projects/{projectId}", new Contracts.ProjectIdResponse(projectId));
@@ -470,6 +536,10 @@ public sealed class ProjectsController(
 /// періодичностей ігнорується. Має ділити рік нарівно (1..12), інакше
 /// <c>ECR-PRD-4224</c>.
 /// </param>
+/// <param name="TemplateVersionIds">
+/// ✎ B74 P3 (D-576): версії кількох шаблонів проєкту «рік · об'єкт»; перша (або <c>TemplateVersionId</c>) — основний
+/// шаблон, решта приєднуються тим самим комітом. Кожен шаблон — один раз (<c>422 ECR-TMPL-0422 duplicateTemplate</c>).
+/// </param>
 /// <remarks>
 /// ⚠ Чотири останні поля додані понад форму <c>05h</c>: без версії шаблону
 /// проєкт не має структури, без політики — меж періодів, без року календар
@@ -485,7 +555,12 @@ public sealed record CreateProjectRequest(
     int? Year = null,
     int? TemplateVersionId = null,
     int? PeriodPolicyId = null,
-    int? CustomPeriodCount = null);
+    int? CustomPeriodCount = null,
+    IReadOnlyList<int>? TemplateVersionIds = null);
+
+/// <summary>B74 P3 (D-576): приєднання шаблону до проєкту.</summary>
+/// <param name="TemplateVersionId">Версія шаблону — з нею шаблон стає в проєкт (за нею заводяться нові документи).</param>
+public sealed record AttachProjectTemplateRequest(int TemplateVersionId);
 
 /// <summary>Запит на заміну маршруту погодження.</summary>
 /// <param name="RoleIds">
